@@ -2,18 +2,17 @@
 title: NEO NL Document Assistant
 description: Search nuclear safety documents via MCP and generate responses with citations
 author: NEO NL Team
-version: 0.6.0
-requirements: aiohttp
+version: 0.8.0
 """
 
 from pydantic import BaseModel, Field
 from typing import AsyncGenerator
 import json
 import logging
-import os
-import aiohttp
 
-# Import MCP client from Open WebUI
+from starlette.responses import StreamingResponse
+from open_webui.utils.chat import generate_chat_completion
+from open_webui.models.users import Users
 from open_webui.utils.mcp.client import MCPClient
 
 log = logging.getLogger(__name__)
@@ -43,18 +42,10 @@ class Pipe:
             description="URL of the genai-utils MCP server"
         )
 
-        # LLM Configuration
-        LLM_API_BASE_URL: str = Field(
-            default="https://router.huggingface.co/v1",
-            description="Base URL for the LLM API (OpenAI-compatible)"
-        )
-        LLM_API_KEY: str = Field(
-            default="",
-            description="API key for the LLM provider"
-        )
+        # LLM Configuration - uses Open WebUI's configured models
         LLM_MODEL: str = Field(
-            default="openai/gpt-oss-120b",
-            description="Model ID to use for generation"
+            default="",
+            description="Model ID from Open WebUI (leave empty to use default model)"
         )
 
         # Search Configuration
@@ -65,16 +56,6 @@ class Pipe:
         MAX_CONTEXT_CHUNKS: int = Field(
             default=5,
             description="Maximum number of context chunks to include"
-        )
-
-        # Generation Configuration
-        TEMPERATURE: float = Field(
-            default=0.7,
-            description="Temperature for LLM generation"
-        )
-        MAX_TOKENS: int = Field(
-            default=2048,
-            description="Maximum tokens in response"
         )
 
     def __init__(self):
@@ -148,82 +129,88 @@ class Pipe:
             return "Geen relevante documenten gevonden."
         return context_text
 
-    def _get_llm_config(self) -> tuple[str, str, str]:
-        """Get LLM configuration from valves or environment variables."""
-        # API key: valve > OPENAI_API_KEY env > empty
-        api_key = self.valves.LLM_API_KEY or os.getenv("OPENAI_API_KEY", "")
-
-        # Base URL: valve > OPENAI_API_BASE_URL env > default
-        base_url = self.valves.LLM_API_BASE_URL
-        if base_url == "https://router.huggingface.co/v1":  # default value
-            base_url = os.getenv("OPENAI_API_BASE_URL", base_url)
-
-        # Model: always use valve (user can configure)
-        model = self.valves.LLM_MODEL
-
-        return api_key, base_url, model
-
-    async def _stream_llm_response(
+    async def _call_llm(
         self,
         messages: list[dict],
+        __user__: dict,
+        __request__,
     ) -> AsyncGenerator[str, None]:
-        """Stream response from LLM API."""
+        """Call LLM using Open WebUI's internal routing."""
 
-        api_key, base_url, model = self._get_llm_config()
-
-        # Check if API key is configured
-        if not api_key:
-            yield "Error: No API key found. Set LLM_API_KEY in Valves or OPENAI_API_KEY environment variable."
+        if not __request__:
+            yield "Error: Request context not available. Cannot call LLM."
             return
 
-        headers = {
-            "Content-Type": "application/json",
-            "Authorization": f"Bearer {api_key}",
-        }
+        if not __user__:
+            yield "Error: User context not available. Cannot call LLM."
+            return
 
+        # Get user object for the API call
+        user = Users.get_user_by_id(__user__.get("id"))
+        if not user:
+            yield "Error: User not found."
+            return
+
+        # Determine which model to use
+        model_id = self.valves.LLM_MODEL
+        if not model_id:
+            # Use the first available non-pipe model from Open WebUI
+            models = __request__.app.state.MODELS
+            if models:
+                # Filter out pipe models to avoid calling ourselves
+                for mid, model in models.items():
+                    if not model.get("pipe"):
+                        model_id = mid
+                        break
+                if not model_id:
+                    yield "Error: No non-pipe models configured in Open WebUI."
+                    return
+            else:
+                yield "Error: No models configured in Open WebUI."
+                return
+
+        # Build the request payload
         payload = {
-            "model": model,
+            "model": model_id,
             "messages": messages,
             "stream": True,
-            "temperature": self.valves.TEMPERATURE,
-            "max_tokens": self.valves.MAX_TOKENS,
         }
 
-        url = f"{base_url}/chat/completions"
-        log.info(f"Calling LLM API: {url} with model {model}")
+        log.info(f"[NEO NL Pipe] Calling LLM via Open WebUI: model={model_id}")
 
-        timeout = aiohttp.ClientTimeout(total=120)  # 2 minute timeout
-        async with aiohttp.ClientSession(timeout=timeout) as session:
-            async with session.post(url, headers=headers, json=payload) as response:
-                if response.status != 200:
-                    error_text = await response.text()
-                    # Check if HTML response (likely auth redirect)
-                    if "<html" in error_text.lower():
-                        yield f"Error: LLM API returned {response.status}. Check that LLM_API_BASE_URL ({base_url}) and API key are correct."
-                    else:
-                        yield f"Error from LLM API ({response.status}): {error_text[:500]}"
-                    return
+        try:
+            response = await generate_chat_completion(
+                request=__request__,
+                form_data=payload,
+                user=user,
+                bypass_filter=True,  # Skip access control for internal calls
+            )
 
-                # Stream SSE response line by line
-                async for line_bytes in response.content:
-                    line = line_bytes.decode("utf-8").strip()
+            # Handle streaming response
+            if isinstance(response, StreamingResponse):
+                async for chunk in response.body_iterator:
+                    # Parse SSE format: "data: {...}\n\n"
+                    chunk_str = chunk.decode("utf-8") if isinstance(chunk, bytes) else chunk
+                    for line in chunk_str.split("\n"):
+                        line = line.strip()
+                        if line.startswith("data: ") and line != "data: [DONE]":
+                            try:
+                                data = json.loads(line[6:])
+                                content = data.get("choices", [{}])[0].get("delta", {}).get("content", "")
+                                if content:
+                                    yield content
+                            except json.JSONDecodeError:
+                                continue
+            elif isinstance(response, dict):
+                # Non-streaming response
+                content = response.get("choices", [{}])[0].get("message", {}).get("content", "")
+                yield content
+            else:
+                yield str(response)
 
-                    if not line or not line.startswith("data: "):
-                        continue
-
-                    data_str = line[6:]  # Remove "data: " prefix
-
-                    if data_str == "[DONE]":
-                        break
-
-                    try:
-                        data = json.loads(data_str)
-                        delta = data.get("choices", [{}])[0].get("delta", {})
-                        content = delta.get("content", "")
-                        if content:
-                            yield content
-                    except json.JSONDecodeError:
-                        continue
+        except Exception as e:
+            log.error(f"[NEO NL Pipe] LLM call failed: {e}")
+            yield f"Error calling LLM: {str(e)}"
 
     async def _emit_sources(self, sources: list[dict], __event_emitter__) -> None:
         """Emit source events for Open WebUI citation display."""
@@ -273,6 +260,7 @@ class Pipe:
         body: dict,
         __user__: dict = None,
         __task__: str = None,
+        __request__=None,  # Required for generate_chat_completion
         __event_emitter__=None,
     ) -> AsyncGenerator[str, None]:
         """Main pipe execution."""
@@ -289,13 +277,8 @@ class Pipe:
         # These don't need document retrieval - just pass through to LLM
         if __task__ and __task__ in self.SYSTEM_TASKS:
             log.info(f"[NEO NL Pipe] System task '{__task__}', skipping RAG")
-            api_key, base_url, model = self._get_llm_config()
-            if not api_key:
-                yield ""
-                return
-
             llm_messages = [{"role": "user", "content": user_message}]
-            async for chunk in self._stream_llm_response(llm_messages):
+            async for chunk in self._call_llm(llm_messages, __user__, __request__):
                 yield chunk
             return
 
@@ -337,7 +320,7 @@ class Pipe:
         ]
 
         # Stream LLM response
-        async for chunk in self._stream_llm_response(llm_messages):
+        async for chunk in self._call_llm(llm_messages, __user__, __request__):
             yield chunk
 
         # Emit status: done
