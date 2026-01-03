@@ -228,15 +228,20 @@ class Pipe:
             metadata = source.get("metadata", {})
             url = metadata.get("url", "")
 
+            # Extract chunk content if available (added by MCP server)
+            chunk_content = source.get("chunk_content", "")
+
             # Build source event in Open WebUI format
+            # IMPORTANT: metadata.source must NOT be a URL, otherwise Citations.svelte
+            # will override the display name with the URL (lines 101-103)
             source_data = {
                 "source": {
                     "id": file_id,
                     "name": file_name,
                     "url": url if url else None,
                 },
-                "document": [file_name],  # Document content preview
-                "metadata": [{"source": url or file_id, "name": file_name}],
+                "document": [chunk_content] if chunk_content else [file_name],
+                "metadata": [{"source": file_id, "name": file_name}],  # Use file_id, not URL
                 "distances": [1 - relevance] if relevance else [],  # Convert relevance to distance
             }
 
