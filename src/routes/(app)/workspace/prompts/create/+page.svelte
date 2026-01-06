@@ -2,6 +2,7 @@
 	import { toast } from 'svelte-sonner';
 	import { goto } from '$app/navigation';
 	import { prompts } from '$lib/stores';
+	import { isFeatureEnabled } from '$lib/utils/features';
 	import { onMount, tick, getContext } from 'svelte';
 
 	const i18n = getContext('i18n');
@@ -33,6 +34,10 @@
 	};
 
 	onMount(async () => {
+		if (!isFeatureEnabled('prompts')) {
+			goto('/');
+			return;
+		}
 		window.addEventListener('message', async (event) => {
 			console.log(event);
 			if (

@@ -53,28 +53,51 @@
 		citations?: boolean;
 		status_updates?: boolean;
 	} = {};
+
+	// New prop: capabilities allowed by admin config (null = no restrictions)
+	export let allowedCapabilities: Record<string, boolean> | null = null;
+
+	// New prop: whether this is a preset/workspace model that requires a base model
+	export let requiresBaseModel: boolean = false;
+
+	// New prop: whether a base model has been selected
+	export let hasBaseModel: boolean = true;
+
+	// Filter capabilities to only show allowed ones
+	$: visibleCapabilities = Object.keys(capabilityLabels).filter((key) => {
+		if (allowedCapabilities === null) return true; // No restrictions
+		// Show if admin hasn't explicitly disabled it (undefined or true)
+		return allowedCapabilities[key] !== false;
+	});
 </script>
 
 <div>
 	<div class="flex w-full justify-between mb-1">
 		<div class=" self-center text-xs font-medium text-gray-500">{$i18n.t('Capabilities')}</div>
 	</div>
-	<div class="flex items-center mt-2 flex-wrap">
-		{#each Object.keys(capabilityLabels) as capability}
-			<div class=" flex items-center gap-2 mr-3">
-				<Checkbox
-					state={capabilities[capability] ? 'checked' : 'unchecked'}
-					on:change={(e) => {
-						capabilities[capability] = e.detail === 'checked';
-					}}
-				/>
 
-				<div class=" py-0.5 text-sm capitalize">
-					<Tooltip content={marked.parse(capabilityLabels[capability].description)}>
-						{$i18n.t(capabilityLabels[capability].label)}
-					</Tooltip>
+	{#if requiresBaseModel && !hasBaseModel}
+		<div class="text-sm text-gray-500 dark:text-gray-400 mt-2">
+			{$i18n.t('Select a base model first to configure capabilities')}
+		</div>
+	{:else}
+		<div class="flex items-center mt-2 flex-wrap">
+			{#each visibleCapabilities as capability}
+				<div class=" flex items-center gap-2 mr-3">
+					<Checkbox
+						state={capabilities[capability] ? 'checked' : 'unchecked'}
+						on:change={(e) => {
+							capabilities[capability] = e.detail === 'checked';
+						}}
+					/>
+
+					<div class=" py-0.5 text-sm capitalize">
+						<Tooltip content={marked.parse(capabilityLabels[capability].description)}>
+							{$i18n.t(capabilityLabels[capability].label)}
+						</Tooltip>
+					</div>
 				</div>
-			</div>
-		{/each}
-	</div>
+			{/each}
+		</div>
+	{/if}
 </div>

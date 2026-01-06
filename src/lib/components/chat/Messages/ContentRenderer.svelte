@@ -13,6 +13,7 @@
 		showEmbeds,
 		showOverview
 	} from '$lib/stores';
+	import { isFeatureEnabled } from '$lib/utils/features';
 	import FloatingButtons from '../ContentRenderer/FloatingButtons.svelte';
 	import { createMessagesList } from '$lib/utils';
 
@@ -180,6 +181,7 @@
 			const { lang, text: code } = token;
 
 			if (
+				isFeatureEnabled('artifacts') &&
 				($settings?.detectArtifacts ?? true) &&
 				(['html', 'svg'].includes(lang) || (lang === 'xml' && code.includes('svg'))) &&
 				!$mobile &&

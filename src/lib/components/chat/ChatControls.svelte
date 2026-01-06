@@ -12,6 +12,7 @@
 		showArtifacts,
 		showEmbeds
 	} from '$lib/stores';
+	import { isFeatureEnabled } from '$lib/utils/features';
 
 	import Controls from './Controls/Controls.svelte';
 	import CallOverlay from './MessageInput/CallOverlay.svelte';
@@ -182,9 +183,9 @@
 					</div>
 				{:else if $showEmbeds}
 					<Embeds />
-				{:else if $showArtifacts}
+				{:else if $showArtifacts && isFeatureEnabled('artifacts')}
 					<Artifacts {history} />
-				{:else if $showOverview}
+				{:else if $showOverview && isFeatureEnabled('chat_overview')}
 					{#await import('./Overview.svelte') then { default: Overview }}
 						<Overview
 							{history}
@@ -272,9 +273,9 @@
 						</div>
 					{:else if $showEmbeds}
 						<Embeds overlay={dragged} />
-					{:else if $showArtifacts}
+					{:else if $showArtifacts && isFeatureEnabled('artifacts')}
 						<Artifacts {history} overlay={dragged} />
-					{:else if $showOverview}
+					{:else if $showOverview && isFeatureEnabled('chat_overview')}
 						{#await import('./Overview.svelte') then { default: Overview }}
 							<Overview
 								{history}

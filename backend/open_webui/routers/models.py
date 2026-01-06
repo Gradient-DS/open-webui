@@ -29,6 +29,7 @@ from fastapi.responses import FileResponse, StreamingResponse
 
 from open_webui.utils.auth import get_admin_user, get_verified_user
 from open_webui.utils.access_control import has_access, has_permission
+from open_webui.utils.features import require_feature
 from open_webui.config import BYPASS_ADMIN_ACCESS_CONTROL, STATIC_DIR
 
 log = logging.getLogger(__name__)
@@ -38,6 +39,42 @@ router = APIRouter()
 
 def is_valid_model_id(model_id: str) -> bool:
     return model_id and len(model_id) <= 256
+
+
+def validate_capabilities_against_base_model(form_data: ModelForm) -> None:
+    """
+    Ensure workspace model capabilities are a subset of base model capabilities.
+
+    Only validates if form_data.base_model_id is set (workspace model).
+    Admin configs (base_model_id=None) are not restricted.
+    """
+    if not form_data.base_model_id:
+        return  # Admin config, no restrictions
+
+    base_model = Models.get_model_by_id(form_data.base_model_id)
+    if not base_model:
+        return  # Base model not found, will fail elsewhere
+
+    base_capabilities = {}
+    if base_model.meta and isinstance(base_model.meta, dict):
+        base_capabilities = base_model.meta.get("capabilities", {})
+    elif base_model.meta and hasattr(base_model.meta, "capabilities"):
+        base_capabilities = base_model.meta.capabilities or {}
+
+    requested_capabilities = {}
+    if form_data.meta and form_data.meta.capabilities:
+        requested_capabilities = form_data.meta.capabilities
+
+    if not requested_capabilities:
+        return
+
+    # Check each requested capability
+    for key, value in requested_capabilities.items():
+        if isinstance(value, bool) and value and base_capabilities.get(key) is False:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Capability '{key}' is disabled by administrator for this base model",
+            )
 
 
 ###########################
@@ -132,6 +169,7 @@ async def create_new_model(
     request: Request,
     form_data: ModelForm,
     user=Depends(get_verified_user),
+    _=Depends(require_feature("models")),
 ):
     if user.role != "admin" and not has_permission(
         user.id, "workspace.models", request.app.state.config.USER_PERMISSIONS
@@ -154,15 +192,17 @@ async def create_new_model(
             detail=ERROR_MESSAGES.MODEL_ID_TOO_LONG,
         )
 
+    # Validate capabilities against base model (for workspace models)
+    validate_capabilities_against_base_model(form_data)
+
+    model = Models.insert_new_model(form_data, user.id)
+    if model:
+        return model
     else:
-        model = Models.insert_new_model(form_data, user.id)
-        if model:
-            return model
-        else:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail=ERROR_MESSAGES.DEFAULT(),
-            )
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=ERROR_MESSAGES.DEFAULT(),
+        )
 
 
 ############################
@@ -171,7 +211,11 @@ async def create_new_model(
 
 
 @router.get("/export", response_model=list[ModelModel])
-async def export_models(request: Request, user=Depends(get_verified_user)):
+async def export_models(
+    request: Request,
+    user=Depends(get_verified_user),
+    _=Depends(require_feature("models")),
+):
     if user.role != "admin" and not has_permission(
         user.id, "workspace.models_export", request.app.state.config.USER_PERMISSIONS
     ):
@@ -200,6 +244,7 @@ async def import_models(
     request: Request,
     user=Depends(get_verified_user),
     form_data: ModelsImportForm = (...),
+    _=Depends(require_feature("models")),
 ):
     if user.role != "admin" and not has_permission(
         user.id, "workspace.models_import", request.app.state.config.USER_PERMISSIONS
@@ -329,7 +374,11 @@ async def get_model_profile_image(id: str, user=Depends(get_verified_user)):
 
 
 @router.post("/model/toggle", response_model=Optional[ModelResponse])
-async def toggle_model_by_id(id: str, user=Depends(get_verified_user)):
+async def toggle_model_by_id(
+    id: str,
+    user=Depends(get_verified_user),
+    _=Depends(require_feature("models")),
+):
     model = Models.get_model_by_id(id)
     if model:
         if (
@@ -367,6 +416,7 @@ async def toggle_model_by_id(id: str, user=Depends(get_verified_user)):
 async def update_model_by_id(
     form_data: ModelForm,
     user=Depends(get_verified_user),
+    _=Depends(require_feature("models")),
 ):
     model = Models.get_model_by_id(form_data.id)
     if not model:
@@ -385,6 +435,9 @@ async def update_model_by_id(
             detail=ERROR_MESSAGES.ACCESS_PROHIBITED,
         )
 
+    # Validate capabilities against base model (for workspace models)
+    validate_capabilities_against_base_model(form_data)
+
     model = Models.update_model_by_id(form_data.id, ModelForm(**form_data.model_dump()))
     return model
 
@@ -395,7 +448,11 @@ async def update_model_by_id(
 
 
 @router.post("/model/delete", response_model=bool)
-async def delete_model_by_id(form_data: ModelIdForm, user=Depends(get_verified_user)):
+async def delete_model_by_id(
+    form_data: ModelIdForm,
+    user=Depends(get_verified_user),
+    _=Depends(require_feature("models")),
+):
     model = Models.get_model_by_id(form_data.id)
     if not model:
         raise HTTPException(

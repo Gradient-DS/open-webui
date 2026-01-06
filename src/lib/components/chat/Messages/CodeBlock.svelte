@@ -3,6 +3,7 @@
 	import { toast } from 'svelte-sonner';
 	import { getContext, onMount, tick, onDestroy } from 'svelte';
 	import { config } from '$lib/stores';
+	import { isFeatureEnabled } from '$lib/utils/features';
 
 	import PyodideWorker from '$lib/workers/pyodide.worker?worker';
 	import { executeCode } from '$lib/apis/utils';
@@ -500,7 +501,7 @@
 						on:click={copyCode}>{copied ? $i18n.t('Copied') : $i18n.t('Copy')}</button
 					>
 
-					{#if preview && ['html', 'svg'].includes(lang)}
+					{#if preview && ['html', 'svg'].includes(lang) && isFeatureEnabled('artifacts')}
 						<button
 							class="flex gap-1 items-center run-code-button bg-none border-none transition rounded-md px-1.5 py-0.5 bg-white dark:bg-black"
 							on:click={previewCode}

@@ -1,0 +1,68 @@
+# Open WebUI Production Demo Configuration for voorbeeld.soev.ai
+# Usage: docker compose -f docker-compose.demo.yaml up -d
+# Access at: https://voorbeeld.soev.ai
+#
+# Prerequisites:
+# 1. DNS A record for voorbeeld.soev.ai pointing to server IP
+# 2. Ports 80 and 443 open on firewall
+# 3. Copy .env.demo.example to .env.demo and configure
+
+services:
+  caddy:
+    image: caddy:2-alpine
+    container_name: demo-caddy
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./Caddyfile.demo:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      open-webui:
+        condition: service_healthy
+    restart: unless-stopped
+
+  open-webui:
+    image: ghcr.io/gradient-ds/open-webui:${WEBUI_DOCKER_TAG:-main}
+    container_name: demo-webui
+    volumes:
+      - demo-data:/app/backend/data
+    expose:
+      - "8080"
+    env_file:
+      - .env.demo
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: demo-postgres
+    environment:
+      POSTGRES_USER: ${DATABASE_USER:-openwebui}
+      POSTGRES_PASSWORD: ${DATABASE_PASSWORD}
+      POSTGRES_DB: ${DATABASE_NAME:-openwebui}
+    volumes:
+      - demo-postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DATABASE_USER:-openwebui} -d ${DATABASE_NAME:-openwebui}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    restart: unless-stopped
+
+volumes:
+  caddy-data: {}
+  caddy-config: {}
+  demo-data: {}
+  demo-postgres: {}

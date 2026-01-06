@@ -26,6 +26,7 @@ from open_webui.utils.tools import get_tool_specs
 from open_webui.utils.auth import get_admin_user, get_verified_user
 from open_webui.utils.access_control import has_access, has_permission
 from open_webui.utils.tools import get_tool_servers
+from open_webui.utils.features import require_feature
 
 from open_webui.config import CACHE_DIR, BYPASS_ADMIN_ACCESS_CONTROL
 from open_webui.constants import ERROR_MESSAGES
@@ -245,7 +246,11 @@ async def load_tool_from_url(
 
 
 @router.get("/export", response_model=list[ToolModel])
-async def export_tools(request: Request, user=Depends(get_verified_user)):
+async def export_tools(
+    request: Request,
+    user=Depends(get_verified_user),
+    _=Depends(require_feature("tools")),
+):
     if user.role != "admin" and not has_permission(
         user.id, "workspace.tools_export", request.app.state.config.USER_PERMISSIONS
     ):
@@ -270,6 +275,7 @@ async def create_new_tools(
     request: Request,
     form_data: ToolForm,
     user=Depends(get_verified_user),
+    _=Depends(require_feature("tools")),
 ):
     if user.role != "admin" and not (
         has_permission(
@@ -364,6 +370,7 @@ async def update_tools_by_id(
     id: str,
     form_data: ToolForm,
     user=Depends(get_verified_user),
+    _=Depends(require_feature("tools")),
 ):
     tools = Tools.get_tool_by_id(id)
     if not tools:
@@ -423,7 +430,10 @@ async def update_tools_by_id(
 
 @router.delete("/id/{id}/delete", response_model=bool)
 async def delete_tools_by_id(
-    request: Request, id: str, user=Depends(get_verified_user)
+    request: Request,
+    id: str,
+    user=Depends(get_verified_user),
+    _=Depends(require_feature("tools")),
 ):
     tools = Tools.get_tool_by_id(id)
     if not tools:
@@ -510,7 +520,11 @@ async def get_tools_valves_spec_by_id(
 
 @router.post("/id/{id}/valves/update", response_model=Optional[dict])
 async def update_tools_valves_by_id(
-    request: Request, id: str, form_data: dict, user=Depends(get_verified_user)
+    request: Request,
+    id: str,
+    form_data: dict,
+    user=Depends(get_verified_user),
+    _=Depends(require_feature("tools")),
 ):
     tools = Tools.get_tool_by_id(id)
     if not tools:

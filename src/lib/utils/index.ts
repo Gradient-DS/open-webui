@@ -1622,7 +1622,7 @@ export const renderVegaVisualization = async (spec: string, i18n?: any) => {
 export const getCodeBlockContents = (content: string): object => {
 	const codeBlockContents = content.match(/```[\s\S]*?```/g);
 
-	let codeBlocks = [];
+	const codeBlocks = [];
 
 	let htmlContent = '';
 	let cssContent = '';

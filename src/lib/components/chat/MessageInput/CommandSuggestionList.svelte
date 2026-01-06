@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { knowledge, prompts } from '$lib/stores';
+	import { isFeatureEnabled } from '$lib/utils/features';
 
 	import { getPrompts } from '$lib/apis/prompts';
 	import { getKnowledgeBases } from '$lib/apis/knowledge';
@@ -27,7 +28,9 @@
 		loading = true;
 		await Promise.all([
 			(async () => {
-				prompts.set(await getPrompts(localStorage.token));
+				if (isFeatureEnabled('prompts')) {
+					prompts.set(await getPrompts(localStorage.token));
+				}
 			})()
 		]);
 		loading = false;
@@ -81,7 +84,7 @@
 >
 	<div class="overflow-y-auto scrollbar-thin max-h-60">
 		{#if !loading}
-			{#if char === '/'}
+			{#if char === '/' && isFeatureEnabled('prompts')}
 				<Prompts
 					bind:this={suggestionElement}
 					{query}
@@ -95,7 +98,7 @@
 						}
 					}}
 				/>
-			{:else if char === '#'}
+			{:else if char === '#' && isFeatureEnabled('knowledge')}
 				<Knowledge
 					bind:this={suggestionElement}
 					{query}

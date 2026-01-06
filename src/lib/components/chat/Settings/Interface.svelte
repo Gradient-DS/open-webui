@@ -5,6 +5,7 @@
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
 	import { updateUserInfo } from '$lib/apis/users';
 	import { getUserPosition } from '$lib/utils';
+	import { isFeatureEnabled } from '$lib/utils/features';
 	import { setTextScale } from '$lib/utils/text-scale';
 
 	import Minus from '$lib/components/icons/Minus.svelte';
@@ -542,7 +543,7 @@
 				</div>
 			</div>
 
-			{#if $user?.role === 'admin'}
+			{#if $user?.role === 'admin' && isFeatureEnabled('changelog')}
 				<div>
 					<div class=" py-0.5 flex w-full justify-between">
 						<div id="toast-notifications-label" class=" self-center text-xs">
@@ -1177,66 +1178,69 @@
 				</div>
 			</div>
 
-			<div class=" my-2 text-sm font-medium">{$i18n.t('Artifacts')}</div>
+			{#if isFeatureEnabled('artifacts')}
+				<div class=" my-2 text-sm font-medium">{$i18n.t('Artifacts')}</div>
 
-			<div>
-				<div class=" py-0.5 flex w-full justify-between">
-					<div id="detect-artifacts-label" class=" self-center text-xs">
-						{$i18n.t('Detect Artifacts Automatically')}
-					</div>
+				<div>
+					<div class=" py-0.5 flex w-full justify-between">
+						<div id="detect-artifacts-label" class=" self-center text-xs">
+							{$i18n.t('Detect Artifacts Automatically')}
+						</div>
 
-					<div class="flex items-center gap-2 p-1">
-						<Switch
-							ariaLabelledbyId="detect-artifacts-label"
-							tooltip={true}
-							bind:state={detectArtifacts}
-							on:change={() => {
-								saveSettings({ detectArtifacts });
-							}}
-						/>
-					</div>
-				</div>
-			</div>
-
-			<div>
-				<div class=" py-0.5 flex w-full justify-between">
-					<div id="iframe-sandbox-allow-same-origin-label" class=" self-center text-xs">
-						{$i18n.t('iframe Sandbox Allow Same Origin')}
-					</div>
-
-					<div class="flex items-center gap-2 p-1">
-						<Switch
-							ariaLabelledbyId="iframe-sandbox-allow-same-origin-label"
-							tooltip={true}
-							bind:state={iframeSandboxAllowSameOrigin}
-							on:change={() => {
-								saveSettings({ iframeSandboxAllowSameOrigin });
-							}}
-						/>
+						<div class="flex items-center gap-2 p-1">
+							<Switch
+								ariaLabelledbyId="detect-artifacts-label"
+								tooltip={true}
+								bind:state={detectArtifacts}
+								on:change={() => {
+									saveSettings({ detectArtifacts });
+								}}
+							/>
+						</div>
 					</div>
 				</div>
-			</div>
 
-			<div>
-				<div class=" py-0.5 flex w-full justify-between">
-					<div id="iframe-sandbox-allow-forms-label" class=" self-center text-xs">
-						{$i18n.t('iframe Sandbox Allow Forms')}
-					</div>
+				<div>
+					<div class=" py-0.5 flex w-full justify-between">
+						<div id="iframe-sandbox-allow-same-origin-label" class=" self-center text-xs">
+							{$i18n.t('iframe Sandbox Allow Same Origin')}
+						</div>
 
-					<div class="flex items-center gap-2 p-1">
-						<Switch
-							ariaLabelledbyId="iframe-sandbox-allow-forms-label"
-							tooltip={true}
-							bind:state={iframeSandboxAllowForms}
-							on:change={() => {
-								saveSettings({ iframeSandboxAllowForms });
-							}}
-						/>
+						<div class="flex items-center gap-2 p-1">
+							<Switch
+								ariaLabelledbyId="iframe-sandbox-allow-same-origin-label"
+								tooltip={true}
+								bind:state={iframeSandboxAllowSameOrigin}
+								on:change={() => {
+									saveSettings({ iframeSandboxAllowSameOrigin });
+								}}
+							/>
+						</div>
 					</div>
 				</div>
-			</div>
 
-			<div class=" my-2 text-sm font-medium">{$i18n.t('Voice')}</div>
+				<div>
+					<div class=" py-0.5 flex w-full justify-between">
+						<div id="iframe-sandbox-allow-forms-label" class=" self-center text-xs">
+							{$i18n.t('iframe Sandbox Allow Forms')}
+						</div>
+
+						<div class="flex items-center gap-2 p-1">
+							<Switch
+								ariaLabelledbyId="iframe-sandbox-allow-forms-label"
+								tooltip={true}
+								bind:state={iframeSandboxAllowForms}
+								on:change={() => {
+									saveSettings({ iframeSandboxAllowForms });
+								}}
+							/>
+						</div>
+					</div>
+				</div>
+			{/if}
+
+			{#if isFeatureEnabled('voice')}
+				<div class=" my-2 text-sm font-medium">{$i18n.t('Voice')}</div>
 
 			<div>
 				<div class=" py-0.5 flex w-full justify-between">
@@ -1275,6 +1279,7 @@
 					</div>
 				</div>
 			</div>
+			{/if}
 
 			<div class=" my-2 text-sm font-medium">{$i18n.t('File')}</div>
 

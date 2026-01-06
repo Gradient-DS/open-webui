@@ -49,6 +49,7 @@
 		getUserTimezone,
 		getWeekday
 	} from '$lib/utils';
+	import { isFeatureEnabled } from '$lib/utils/features';
 	import { uploadFile } from '$lib/apis/files';
 	import { generateAutoCompletion } from '$lib/apis';
 	import { deleteFileById } from '$lib/apis/files';
@@ -376,7 +377,11 @@
 
 	let command = '';
 	export let showCommands = false;
-	$: showCommands = ['/', '#', '@'].includes(command?.charAt(0)) || '\\#' === command?.slice(0, 2);
+	$: showCommands =
+		(command?.charAt(0) === '@') ||
+		(command?.charAt(0) === '/' && isFeatureEnabled('prompts')) ||
+		(command?.charAt(0) === '#' && isFeatureEnabled('knowledge')) ||
+		('\\#' === command?.slice(0, 2) && isFeatureEnabled('knowledge'));
 	let suggestions = null;
 
 	let showTools = false;
@@ -854,6 +859,7 @@
 								...files,
 								{
 									...data,
+									url: data.id,
 									status: 'processed'
 								}
 							];
@@ -863,76 +869,86 @@
 					}
 				})
 			},
-			{
-				char: '/',
-				render: getSuggestionRenderer(CommandSuggestionList, {
-					i18n,
-					onSelect: (e) => {
-						const { type, data } = e;
+			...(isFeatureEnabled('prompts')
+				? [
+						{
+							char: '/',
+							render: getSuggestionRenderer(CommandSuggestionList, {
+								i18n,
+								onSelect: (e) => {
+									const { type, data } = e;
 
-						if (type === 'model') {
-							atSelectedModel = data;
-						}
+									if (type === 'model') {
+										atSelectedModel = data;
+									}
 
-						document.getElementById('chat-input')?.focus();
-					},
+									document.getElementById('chat-input')?.focus();
+								},
 
-					insertTextHandler: insertTextAtCursor,
-					onUpload: (e) => {
-						const { type, data } = e;
+								insertTextHandler: insertTextAtCursor,
+								onUpload: (e) => {
+									const { type, data } = e;
 
-						if (type === 'file') {
-							if (files.find((f) => f.id === data.id)) {
-								return;
-							}
-							files = [
-								...files,
-								{
-									...data,
-									status: 'processed'
+									if (type === 'file') {
+										if (files.find((f) => f.id === data.id)) {
+											return;
+										}
+										files = [
+											...files,
+											{
+												...data,
+												url: data.id,
+												status: 'processed'
+											}
+										];
+									} else {
+										onUpload(e);
+									}
 								}
-							];
-						} else {
-							onUpload(e);
+							})
 						}
-					}
-				})
-			},
-			{
-				char: '#',
-				render: getSuggestionRenderer(CommandSuggestionList, {
-					i18n,
-					onSelect: (e) => {
-						const { type, data } = e;
+					]
+				: []),
+			...(isFeatureEnabled('knowledge')
+				? [
+						{
+							char: '#',
+							render: getSuggestionRenderer(CommandSuggestionList, {
+								i18n,
+								onSelect: (e) => {
+									const { type, data } = e;
 
-						if (type === 'model') {
-							atSelectedModel = data;
-						}
+									if (type === 'model') {
+										atSelectedModel = data;
+									}
 
-						document.getElementById('chat-input')?.focus();
-					},
+									document.getElementById('chat-input')?.focus();
+								},
 
-					insertTextHandler: insertTextAtCursor,
-					onUpload: (e) => {
-						const { type, data } = e;
+								insertTextHandler: insertTextAtCursor,
+								onUpload: (e) => {
+									const { type, data } = e;
 
-						if (type === 'file') {
-							if (files.find((f) => f.id === data.id)) {
-								return;
-							}
-							files = [
-								...files,
-								{
-									...data,
-									status: 'processed'
+									if (type === 'file') {
+										if (files.find((f) => f.id === data.id)) {
+											return;
+										}
+										files = [
+											...files,
+											{
+												...data,
+												url: data.id,
+												status: 'processed'
+											}
+										];
+									} else {
+										onUpload(e);
+									}
 								}
-							];
-						} else {
-							onUpload(e);
+							})
 						}
-					}
-				})
-			}
+					]
+				: [])
 		];
 		loaded = true;
 
@@ -1728,7 +1744,7 @@
 											</Tooltip>
 										{/if}
 
-										{#if (!history?.currentId || history.messages[history.currentId]?.done == true) && ($_user?.role === 'admin' || ($_user?.permissions?.chat?.stt ?? true))}
+										{#if isFeatureEnabled('voice') && (!history?.currentId || history.messages[history.currentId]?.done == true) && ($_user?.role === 'admin' || ($_user?.permissions?.chat?.stt ?? true))}
 											<!-- {$i18n.t('Record voice')} -->
 											<Tooltip content={$i18n.t('Dictate')}>
 												<button
@@ -1778,7 +1794,7 @@
 											</Tooltip>
 										{/if}
 
-										{#if prompt === '' && files.length === 0 && ($_user?.role === 'admin' || ($_user?.permissions?.chat?.call ?? true))}
+										{#if isFeatureEnabled('voice') && prompt === '' && files.length === 0 && ($_user?.role === 'admin' || ($_user?.permissions?.chat?.call ?? true))}
 											<div class=" flex items-center">
 												<!-- {$i18n.t('Call')} -->
 												<Tooltip content={$i18n.t('Voice mode')}>

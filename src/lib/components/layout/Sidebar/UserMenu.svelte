@@ -10,6 +10,7 @@
 	import { getSessionUser, userSignOut } from '$lib/apis/auths';
 
 	import { showSettings, mobile, showSidebar, showShortcuts, user, config } from '$lib/stores';
+	import { isFeatureEnabled } from '$lib/utils/features';
 
 	import { WEBUI_API_BASE_URL } from '$lib/constants';
 
@@ -242,7 +243,7 @@
 				<div class=" self-center truncate">{$i18n.t('Archived Chats')}</div>
 			</DropdownMenu.Item>
 
-			{#if role === 'admin'}
+			{#if role === 'admin' && isFeatureEnabled('playground')}
 				<DropdownMenu.Item
 					as="a"
 					href="/playground"
@@ -260,6 +261,8 @@
 					</div>
 					<div class=" self-center truncate">{$i18n.t('Playground')}</div>
 				</DropdownMenu.Item>
+			{/if}
+			{#if role === 'admin'}
 				<DropdownMenu.Item
 					as="a"
 					href="/admin"

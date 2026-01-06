@@ -55,6 +55,7 @@ from open_webui.utils.access_control import has_access
 
 from open_webui.config import (
     UPLOAD_DIR,
+    MODEL_WHITELIST,
 )
 from open_webui.env import (
     ENV,
@@ -422,9 +423,14 @@ async def get_all_models(request: Request, user: UserModel = None):
 
 
 async def get_filtered_models(models, user):
+    # Apply global model whitelist filter first (if configured)
+    model_data = models.get("models", [])
+    if MODEL_WHITELIST:
+        model_data = [m for m in model_data if m.get("model") in MODEL_WHITELIST]
+
     # Filter models based on user access control
     filtered_models = []
-    for model in models.get("models", []):
+    for model in model_data:
         model_info = Models.get_model_by_id(model["model"])
         if model_info:
             if user.id == model_info.user_id or has_access(

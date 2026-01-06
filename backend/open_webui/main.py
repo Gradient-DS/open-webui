@@ -417,6 +417,24 @@ from open_webui.config import (
     ENABLE_ADMIN_CHAT_ACCESS,
     BYPASS_ADMIN_ACCESS_CONTROL,
     ENABLE_ADMIN_EXPORT,
+    # Feature Flags (SaaS Tier Control)
+    FEATURE_CHAT_CONTROLS,
+    FEATURE_CAPTURE,
+    FEATURE_ARTIFACTS,
+    FEATURE_PLAYGROUND,
+    FEATURE_CHAT_OVERVIEW,
+    FEATURE_NOTES_AI_CONTROLS,
+    FEATURE_VOICE,
+    FEATURE_CHANGELOG,
+    FEATURE_SYSTEM_PROMPT,
+    FEATURE_MODELS,
+    FEATURE_KNOWLEDGE,
+    FEATURE_PROMPTS,
+    FEATURE_TOOLS,
+    FEATURE_ADMIN_EVALUATIONS,
+    FEATURE_ADMIN_FUNCTIONS,
+    FEATURE_ADMIN_SETTINGS,
+    FEATURE_ADMIN_SETTINGS_TABS,
     # Tasks
     TASK_MODEL,
     TASK_MODEL_EXTERNAL,
@@ -437,6 +455,8 @@ from open_webui.config import (
     AUTOCOMPLETE_GENERATION_INPUT_MAX_LENGTH,
     AppConfig,
     reset_config,
+    # soev.ai branding
+    SOEV_LOGIN_FOOTER,
 )
 from open_webui.env import (
     ENABLE_CUSTOM_MODEL_FALLBACK,
@@ -1914,6 +1934,24 @@ async def get_app_config(request: Request):
                     "enable_user_webhooks": app.state.config.ENABLE_USER_WEBHOOKS,
                     "enable_admin_export": ENABLE_ADMIN_EXPORT,
                     "enable_admin_chat_access": ENABLE_ADMIN_CHAT_ACCESS,
+                    # Feature Flags (SaaS Tier Control)
+                    "feature_chat_controls": FEATURE_CHAT_CONTROLS,
+                    "feature_capture": FEATURE_CAPTURE,
+                    "feature_artifacts": FEATURE_ARTIFACTS,
+                    "feature_playground": FEATURE_PLAYGROUND,
+                    "feature_chat_overview": FEATURE_CHAT_OVERVIEW,
+                    "feature_notes_ai_controls": FEATURE_NOTES_AI_CONTROLS,
+                    "feature_voice": FEATURE_VOICE,
+                    "feature_changelog": FEATURE_CHANGELOG,
+                    "feature_system_prompt": FEATURE_SYSTEM_PROMPT,
+                    "feature_models": FEATURE_MODELS,
+                    "feature_knowledge": FEATURE_KNOWLEDGE,
+                    "feature_prompts": FEATURE_PROMPTS,
+                    "feature_tools": FEATURE_TOOLS,
+                    "feature_admin_evaluations": FEATURE_ADMIN_EVALUATIONS,
+                    "feature_admin_functions": FEATURE_ADMIN_FUNCTIONS,
+                    "feature_admin_settings": FEATURE_ADMIN_SETTINGS,
+                    "feature_admin_settings_tabs": FEATURE_ADMIN_SETTINGS_TABS,
                     "enable_google_drive_integration": app.state.config.ENABLE_GOOGLE_DRIVE_INTEGRATION,
                     "enable_onedrive_integration": app.state.config.ENABLE_ONEDRIVE_INTEGRATION,
                     **(
@@ -2007,6 +2045,7 @@ async def get_app_config(request: Request):
                     if app.state.LICENSE_METADATA
                     else {}
                 ),
+                "soev_login_footer": SOEV_LOGIN_FOOTER.value,
             }
         ),
     }

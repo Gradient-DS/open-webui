@@ -35,6 +35,7 @@ from pydantic import BaseModel
 
 from open_webui.utils.misc import strict_match_mime_type
 from open_webui.utils.auth import get_admin_user, get_verified_user
+from open_webui.utils.features import require_feature
 from open_webui.utils.headers import include_user_info_headers
 from open_webui.config import (
     WHISPER_MODEL_AUTO_UPDATE,
@@ -190,7 +191,7 @@ class AudioConfigUpdateForm(BaseModel):
 
 
 @router.get("/config")
-async def get_audio_config(request: Request, user=Depends(get_admin_user)):
+async def get_audio_config(request: Request, user=Depends(get_admin_user), _=Depends(require_feature("voice"))):
     return {
         "tts": {
             "OPENAI_API_BASE_URL": request.app.state.config.TTS_OPENAI_API_BASE_URL,
@@ -227,7 +228,7 @@ async def get_audio_config(request: Request, user=Depends(get_admin_user)):
 
 @router.post("/config/update")
 async def update_audio_config(
-    request: Request, form_data: AudioConfigUpdateForm, user=Depends(get_admin_user)
+    request: Request, form_data: AudioConfigUpdateForm, user=Depends(get_admin_user), _=Depends(require_feature("voice"))
 ):
     request.app.state.config.TTS_OPENAI_API_BASE_URL = form_data.tts.OPENAI_API_BASE_URL
     request.app.state.config.TTS_OPENAI_API_KEY = form_data.tts.OPENAI_API_KEY
@@ -327,7 +328,7 @@ def load_speech_pipeline(request):
 
 
 @router.post("/speech")
-async def speech(request: Request, user=Depends(get_verified_user)):
+async def speech(request: Request, user=Depends(get_verified_user), _=Depends(require_feature("voice"))):
     body = await request.body()
     name = hashlib.sha256(
         body
@@ -1149,6 +1150,7 @@ def transcription(
     file: UploadFile = File(...),
     language: Optional[str] = Form(None),
     user=Depends(get_verified_user),
+    _=Depends(require_feature("voice")),
 ):
     log.info(f"file.content_type: {file.content_type}")
     stt_supported_content_types = getattr(
@@ -1246,7 +1248,7 @@ def get_available_models(request: Request) -> list[dict]:
 
 
 @router.get("/models")
-async def get_models(request: Request, user=Depends(get_verified_user)):
+async def get_models(request: Request, user=Depends(get_verified_user), _=Depends(require_feature("voice"))):
     return {"models": get_available_models(request)}
 
 
@@ -1352,7 +1354,7 @@ def get_elevenlabs_voices(api_key: str) -> dict:
 
 
 @router.get("/voices")
-async def get_voices(request: Request, user=Depends(get_verified_user)):
+async def get_voices(request: Request, user=Depends(get_verified_user), _=Depends(require_feature("voice"))):
     return {
         "voices": [
             {"id": k, "name": v} for k, v in get_available_voices(request).items()

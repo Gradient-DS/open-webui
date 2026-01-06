@@ -276,6 +276,24 @@ type Config = {
 		enable_autocomplete_generation: boolean;
 		enable_direct_connections: boolean;
 		enable_version_update_check: boolean;
+		// Feature Flags (SaaS Tier Control)
+		feature_chat_controls?: boolean;
+		feature_capture?: boolean;
+		feature_artifacts?: boolean;
+		feature_playground?: boolean;
+		feature_chat_overview?: boolean;
+		feature_notes_ai_controls?: boolean;
+		feature_voice?: boolean;
+		feature_changelog?: boolean;
+		feature_system_prompt?: boolean;
+		feature_models?: boolean;
+		feature_knowledge?: boolean;
+		feature_prompts?: boolean;
+		feature_tools?: boolean;
+		feature_admin_evaluations?: boolean;
+		feature_admin_functions?: boolean;
+		feature_admin_settings?: boolean;
+		feature_admin_settings_tabs?: string[];
 	};
 	oauth: {
 		providers: {

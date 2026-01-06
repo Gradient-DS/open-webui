@@ -36,6 +36,7 @@
 		removeDetails,
 		removeAllDetails
 	} from '$lib/utils';
+	import { isFeatureEnabled } from '$lib/utils/features';
 	import { WEBUI_API_BASE_URL, WEBUI_BASE_URL } from '$lib/constants';
 
 	import Name from './Name.svelte';
@@ -1004,7 +1005,7 @@
 									</button>
 								</Tooltip>
 
-								{#if $user?.role === 'admin' || ($user?.permissions?.chat?.tts ?? true)}
+								{#if isFeatureEnabled('voice') && ($user?.role === 'admin' || ($user?.permissions?.chat?.tts ?? true))}
 									<Tooltip content={$i18n.t('Read Aloud')} placement="bottom">
 										<button
 											aria-label={$i18n.t('Read Aloud')}

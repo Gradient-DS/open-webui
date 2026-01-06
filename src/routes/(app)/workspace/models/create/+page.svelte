@@ -3,9 +3,16 @@
 	import { toast } from 'svelte-sonner';
 	import { goto } from '$app/navigation';
 	import { config, models, settings } from '$lib/stores';
+	import { isFeatureEnabled } from '$lib/utils/features';
 	import { WEBUI_BASE_URL } from '$lib/constants';
 
 	import { onMount, tick, getContext } from 'svelte';
+
+	onMount(() => {
+		if (!isFeatureEnabled('models')) {
+			goto('/');
+		}
+	});
 	import { createNewModel, getModelById } from '$lib/apis/models';
 	import { getModels } from '$lib/apis';
 

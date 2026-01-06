@@ -25,6 +25,7 @@ from open_webui.storage.provider import Storage
 from open_webui.constants import ERROR_MESSAGES
 from open_webui.utils.auth import get_verified_user
 from open_webui.utils.access_control import has_access, has_permission
+from open_webui.utils.features import require_feature
 
 
 from open_webui.config import BYPASS_ADMIN_ACCESS_CONTROL
@@ -157,7 +158,10 @@ async def search_knowledge_files(
 
 @router.post("/create", response_model=Optional[KnowledgeResponse])
 async def create_new_knowledge(
-    request: Request, form_data: KnowledgeForm, user=Depends(get_verified_user)
+    request: Request,
+    form_data: KnowledgeForm,
+    user=Depends(get_verified_user),
+    _=Depends(require_feature("knowledge")),
 ):
     if user.role != "admin" and not has_permission(
         user.id, "workspace.knowledge", request.app.state.config.USER_PERMISSIONS
@@ -299,6 +303,7 @@ async def update_knowledge_by_id(
     id: str,
     form_data: KnowledgeForm,
     user=Depends(get_verified_user),
+    _=Depends(require_feature("knowledge")),
 ):
     knowledge = Knowledges.get_knowledge_by_id(id=id)
     if not knowledge:
@@ -410,6 +415,7 @@ def add_file_to_knowledge_by_id(
     id: str,
     form_data: KnowledgeFileIdForm,
     user=Depends(get_verified_user),
+    _=Depends(require_feature("knowledge")),
 ):
     knowledge = Knowledges.get_knowledge_by_id(id=id)
     if not knowledge:
@@ -477,6 +483,7 @@ def update_file_from_knowledge_by_id(
     id: str,
     form_data: KnowledgeFileIdForm,
     user=Depends(get_verified_user),
+    _=Depends(require_feature("knowledge")),
 ):
     knowledge = Knowledges.get_knowledge_by_id(id=id)
     if not knowledge:
@@ -544,6 +551,7 @@ def remove_file_from_knowledge_by_id(
     form_data: KnowledgeFileIdForm,
     delete_file: bool = Query(True),
     user=Depends(get_verified_user),
+    _=Depends(require_feature("knowledge")),
 ):
     knowledge = Knowledges.get_knowledge_by_id(id=id)
     if not knowledge:
@@ -619,7 +627,11 @@ def remove_file_from_knowledge_by_id(
 
 
 @router.delete("/{id}/delete", response_model=bool)
-async def delete_knowledge_by_id(id: str, user=Depends(get_verified_user)):
+async def delete_knowledge_by_id(
+    id: str,
+    user=Depends(get_verified_user),
+    _=Depends(require_feature("knowledge")),
+):
     knowledge = Knowledges.get_knowledge_by_id(id=id)
     if not knowledge:
         raise HTTPException(
@@ -682,7 +694,11 @@ async def delete_knowledge_by_id(id: str, user=Depends(get_verified_user)):
 
 
 @router.post("/{id}/reset", response_model=Optional[KnowledgeResponse])
-async def reset_knowledge_by_id(id: str, user=Depends(get_verified_user)):
+async def reset_knowledge_by_id(
+    id: str,
+    user=Depends(get_verified_user),
+    _=Depends(require_feature("knowledge")),
+):
     knowledge = Knowledges.get_knowledge_by_id(id=id)
     if not knowledge:
         raise HTTPException(
@@ -721,6 +737,7 @@ async def add_files_to_knowledge_batch(
     id: str,
     form_data: list[KnowledgeFileIdForm],
     user=Depends(get_verified_user),
+    _=Depends(require_feature("knowledge")),
 ):
     """
     Add multiple files to a knowledge base

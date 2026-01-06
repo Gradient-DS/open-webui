@@ -5,6 +5,7 @@
 	const dispatch = createEventDispatcher();
 
 	import { config, models, settings, theme, user } from '$lib/stores';
+	import { isFeatureEnabled } from '$lib/utils/features';
 
 	const i18n = getContext('i18n');
 
@@ -276,42 +277,44 @@
 			</div>
 		</div>
 
-		{#if $user?.role === 'admin' || (($user?.permissions.chat?.controls ?? true) && ($user?.permissions.chat?.system_prompt ?? true))}
-			<hr class="border-gray-100/30 dark:border-gray-850/30 my-3" />
+		{#if isFeatureEnabled('system_prompt')}
+			{#if $user?.role === 'admin' || (($user?.permissions.chat?.controls ?? true) && ($user?.permissions.chat?.system_prompt ?? true))}
+				<hr class="border-gray-100/30 dark:border-gray-850/30 my-3" />
 
-			<div>
-				<div class=" my-2.5 text-sm font-medium">{$i18n.t('System Prompt')}</div>
-				<Textarea
-					bind:value={system}
-					className={'w-full text-sm outline-hidden resize-vertical' +
-						($settings.highContrastMode
-							? ' p-2.5 border-2 border-gray-300 dark:border-gray-700 rounded-lg bg-transparent text-gray-900 dark:text-gray-100 focus:ring-1 focus:ring-blue-500 focus:border-blue-500 overflow-y-hidden'
-							: '  dark:text-gray-300 ')}
-					rows="4"
-					placeholder={$i18n.t('Enter system prompt here')}
-				/>
-			</div>
-		{/if}
-
-		{#if $user?.role === 'admin' || (($user?.permissions.chat?.controls ?? true) && ($user?.permissions.chat?.params ?? true))}
-			<div class="mt-2 space-y-3 pr-1.5">
-				<div class="flex justify-between items-center text-sm">
-					<div class="  font-medium">{$i18n.t('Advanced Parameters')}</div>
-					<button
-						class=" text-xs font-medium {($settings?.highContrastMode ?? false)
-							? 'text-gray-800 dark:text-gray-100'
-							: 'text-gray-400 dark:text-gray-500'}"
-						type="button"
-						on:click={() => {
-							showAdvanced = !showAdvanced;
-						}}>{showAdvanced ? $i18n.t('Hide') : $i18n.t('Show')}</button
-					>
+				<div>
+					<div class=" my-2.5 text-sm font-medium">{$i18n.t('System Prompt')}</div>
+					<Textarea
+						bind:value={system}
+						className={'w-full text-sm outline-hidden resize-vertical' +
+							($settings.highContrastMode
+								? ' p-2.5 border-2 border-gray-300 dark:border-gray-700 rounded-lg bg-transparent text-gray-900 dark:text-gray-100 focus:ring-1 focus:ring-blue-500 focus:border-blue-500 overflow-y-hidden'
+								: '  dark:text-gray-300 ')}
+						rows="4"
+						placeholder={$i18n.t('Enter system prompt here')}
+					/>
 				</div>
+			{/if}
 
-				{#if showAdvanced}
-					<AdvancedParams admin={$user?.role === 'admin'} bind:params />
-				{/if}
-			</div>
+			{#if $user?.role === 'admin' || (($user?.permissions.chat?.controls ?? true) && ($user?.permissions.chat?.params ?? true))}
+				<div class="mt-2 space-y-3 pr-1.5">
+					<div class="flex justify-between items-center text-sm">
+						<div class="  font-medium">{$i18n.t('Advanced Parameters')}</div>
+						<button
+							class=" text-xs font-medium {($settings?.highContrastMode ?? false)
+								? 'text-gray-800 dark:text-gray-100'
+								: 'text-gray-400 dark:text-gray-500'}"
+							type="button"
+							on:click={() => {
+								showAdvanced = !showAdvanced;
+							}}>{showAdvanced ? $i18n.t('Hide') : $i18n.t('Show')}</button
+						>
+					</div>
+
+					{#if showAdvanced}
+						<AdvancedParams admin={$user?.role === 'admin'} bind:params />
+					{/if}
+				</div>
+			{/if}
 		{/if}
 	</div>
 

@@ -11,6 +11,7 @@
 		WEBUI_BASE_URL
 	} from '$lib/constants';
 	import { WEBUI_NAME, config, user, models, settings } from '$lib/stores';
+	import { isFeatureEnabled } from '$lib/utils/features';
 
 	import { chatCompletion } from '$lib/apis/openai';
 
@@ -194,7 +195,7 @@
 	};
 
 	onMount(async () => {
-		if ($user?.role !== 'admin') {
+		if ($user?.role !== 'admin' || !isFeatureEnabled('playground')) {
 			await goto('/');
 		}
 

@@ -13,6 +13,7 @@
 	} from '$lib/stores';
 	import { page } from '$app/stores';
 	import { goto } from '$app/navigation';
+	import { isFeatureEnabled } from '$lib/utils/features';
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
 	import Sidebar from '$lib/components/icons/Sidebar.svelte';
 
@@ -21,6 +22,25 @@
 	let loaded = false;
 
 	onMount(async () => {
+		// Feature flag checks apply to ALL users including admins
+		if ($page.url.pathname.includes('/models') && !isFeatureEnabled('models')) {
+			goto('/');
+			return;
+		}
+		if ($page.url.pathname.includes('/knowledge') && !isFeatureEnabled('knowledge')) {
+			goto('/');
+			return;
+		}
+		if ($page.url.pathname.includes('/prompts') && !isFeatureEnabled('prompts')) {
+			goto('/');
+			return;
+		}
+		if ($page.url.pathname.includes('/tools') && !isFeatureEnabled('tools')) {
+			goto('/');
+			return;
+		}
+
+		// Permission checks for non-admin users
 		if ($user?.role !== 'admin') {
 			if ($page.url.pathname.includes('/models') && !$user?.permissions?.workspace?.models) {
 				goto('/');
@@ -82,7 +102,7 @@
 					<div
 						class="flex gap-1 scrollbar-none overflow-x-auto w-fit text-center text-sm font-medium rounded-full bg-transparent py-1 touch-auto pointer-events-auto"
 					>
-						{#if $user?.role === 'admin' || $user?.permissions?.workspace?.models}
+						{#if isFeatureEnabled('models') && ($user?.role === 'admin' || $user?.permissions?.workspace?.models)}
 							<a
 								class="min-w-fit p-1.5 {$page.url.pathname.includes('/workspace/models')
 									? ''
@@ -91,7 +111,7 @@
 							>
 						{/if}
 
-						{#if $user?.role === 'admin' || $user?.permissions?.workspace?.knowledge}
+						{#if isFeatureEnabled('knowledge') && ($user?.role === 'admin' || $user?.permissions?.workspace?.knowledge)}
 							<a
 								class="min-w-fit p-1.5 {$page.url.pathname.includes('/workspace/knowledge')
 									? ''
@@ -102,7 +122,7 @@
 							</a>
 						{/if}
 
-						{#if $user?.role === 'admin' || $user?.permissions?.workspace?.prompts}
+						{#if isFeatureEnabled('prompts') && ($user?.role === 'admin' || $user?.permissions?.workspace?.prompts)}
 							<a
 								class="min-w-fit p-1.5 {$page.url.pathname.includes('/workspace/prompts')
 									? ''
@@ -111,7 +131,7 @@
 							>
 						{/if}
 
-						{#if $user?.role === 'admin' || $user?.permissions?.workspace?.tools}
+						{#if isFeatureEnabled('tools') && ($user?.role === 'admin' || $user?.permissions?.workspace?.tools)}
 							<a
 								class="min-w-fit p-1.5 {$page.url.pathname.includes('/workspace/tools')
 									? ''

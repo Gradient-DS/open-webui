@@ -7,6 +7,7 @@
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
 
 	import Sidebar from '$lib/components/icons/Sidebar.svelte';
+	import { isFeatureEnabled } from '$lib/utils/features';
 
 	const i18n = getContext('i18n');
 
@@ -15,7 +16,24 @@
 	onMount(async () => {
 		if ($user?.role !== 'admin') {
 			await goto('/');
+			return;
 		}
+
+		// Redirect if trying to access disabled feature
+		const pathname = $page.url.pathname;
+		if (pathname.includes('/admin/evaluations') && !isFeatureEnabled('admin_evaluations')) {
+			await goto('/');
+			return;
+		}
+		if (pathname.includes('/admin/functions') && !isFeatureEnabled('admin_functions')) {
+			await goto('/');
+			return;
+		}
+		if (pathname.includes('/admin/settings') && !isFeatureEnabled('admin_settings')) {
+			await goto('/');
+			return;
+		}
+
 		loaded = true;
 	});
 </script>
@@ -73,26 +91,32 @@
 							href="/admin/analytics">{$i18n.t('Analytics')}</a
 						> -->
 
-						<a
-							class="min-w-fit p-1.5 {$page.url.pathname.includes('/admin/evaluations')
-								? ''
-								: 'text-gray-300 dark:text-gray-600 hover:text-gray-700 dark:hover:text-white'} transition"
-							href="/admin/evaluations">{$i18n.t('Evaluations')}</a
-						>
+						{#if isFeatureEnabled('admin_evaluations')}
+							<a
+								class="min-w-fit p-1.5 {$page.url.pathname.includes('/admin/evaluations')
+									? ''
+									: 'text-gray-300 dark:text-gray-600 hover:text-gray-700 dark:hover:text-white'} transition"
+								href="/admin/evaluations">{$i18n.t('Evaluations')}</a
+							>
+						{/if}
 
-						<a
-							class="min-w-fit p-1.5 {$page.url.pathname.includes('/admin/functions')
-								? ''
-								: 'text-gray-300 dark:text-gray-600 hover:text-gray-700 dark:hover:text-white'} transition"
-							href="/admin/functions">{$i18n.t('Functions')}</a
-						>
+						{#if isFeatureEnabled('admin_functions')}
+							<a
+								class="min-w-fit p-1.5 {$page.url.pathname.includes('/admin/functions')
+									? ''
+									: 'text-gray-300 dark:text-gray-600 hover:text-gray-700 dark:hover:text-white'} transition"
+								href="/admin/functions">{$i18n.t('Functions')}</a
+							>
+						{/if}
 
-						<a
-							class="min-w-fit p-1.5 {$page.url.pathname.includes('/admin/settings')
-								? ''
-								: 'text-gray-300 dark:text-gray-600 hover:text-gray-700 dark:hover:text-white'} transition"
-							href="/admin/settings">{$i18n.t('Settings')}</a
-						>
+						{#if isFeatureEnabled('admin_settings')}
+							<a
+								class="min-w-fit p-1.5 {$page.url.pathname.includes('/admin/settings')
+									? ''
+									: 'text-gray-300 dark:text-gray-600 hover:text-gray-700 dark:hover:text-white'} transition"
+								href="/admin/settings">{$i18n.t('Settings')}</a
+							>
+						{/if}
 					</div>
 				</div>
 			</div>

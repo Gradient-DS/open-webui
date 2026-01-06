@@ -26,6 +26,7 @@ from open_webui.utils.access_control import has_access
 from open_webui.config import (
     BYPASS_ADMIN_ACCESS_CONTROL,
     DEFAULT_ARENA_MODEL,
+    MODEL_WHITELIST,
 )
 
 from open_webui.env import BYPASS_MODEL_ACCESS_CONTROL, GLOBAL_LOG_LEVEL
@@ -361,6 +362,10 @@ def check_model_access(user, model):
 
 
 def get_filtered_models(models, user):
+    # Apply global model whitelist filter first (if configured)
+    if MODEL_WHITELIST:
+        models = [m for m in models if m.get("id") in MODEL_WHITELIST]
+
     # Filter out models that the user does not have access to
     if (
         user.role == "user"
