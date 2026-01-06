@@ -161,6 +161,13 @@ all = [
     "azure-search-documents==11.6.0",
 ]
 
+soev = [
+    "pytest-asyncio>=1.0.0",
+    "weaviate-client==4.19.0",
+    "psycopg2-binary==2.9.11",
+    "python-dotenv>=1.0.0",
+]
+
 [project.scripts]
 open-webui = "open_webui:app"
 

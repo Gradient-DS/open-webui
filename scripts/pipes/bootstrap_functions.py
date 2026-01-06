@@ -8,7 +8,10 @@ This script:
 3. Syncs all pipe functions from the pipes directory
 
 Usage:
-    # Load credentials from .env.neo file (recommended for local dev)
+    # Auto-load from .env in repo root (default behavior)
+    python bootstrap_functions.py
+
+    # Load credentials from specific .env file
     python bootstrap_functions.py --env-file ../../.env.neo
 
     # Using environment variables (recommended for K8s)
@@ -24,6 +27,9 @@ Usage:
 
     # Or with command line args
     python bootstrap_functions.py --url http://localhost:8080 --email admin@example.com --password secret
+
+Dependencies:
+    pip install python-dotenv requests
 """
 
 import os
@@ -34,32 +40,7 @@ import requests
 from pathlib import Path
 from typing import Optional
 
-
-def load_env_file(env_path: Path) -> dict:
-    """Load environment variables from a .env file."""
-    env_vars = {}
-    if not env_path.exists():
-        print(f"Warning: env file not found: {env_path}")
-        return env_vars
-
-    with open(env_path) as f:
-        for line in f:
-            line = line.strip()
-            # Skip comments and empty lines
-            if not line or line.startswith("#"):
-                continue
-            # Handle KEY=value format
-            if "=" in line:
-                key, _, value = line.partition("=")
-                key = key.strip()
-                value = value.strip()
-                # Remove surrounding quotes if present
-                if (value.startswith('"') and value.endswith('"')) or \
-                   (value.startswith("'") and value.endswith("'")):
-                    value = value[1:-1]
-                env_vars[key] = value
-
-    return env_vars
+from dotenv import load_dotenv, dotenv_values
 
 
 def wait_for_service(url: str, timeout: int = 120) -> bool:
@@ -219,21 +200,35 @@ def main():
 
     args = parser.parse_args()
 
-    # Load env file if specified
-    env_vars = {}
+    # Load env file - priority: --env-file arg > .env in repo root > system env
     if args.env_file:
         env_path = Path(args.env_file)
         if not env_path.is_absolute():
             env_path = Path(__file__).parent / env_path
-        env_vars = load_env_file(env_path)
-        print(f"Loaded {len(env_vars)} variables from {env_path}")
+        if env_path.exists():
+            load_dotenv(env_path, override=True)
+            env_vars = dotenv_values(env_path)
+            print(f"Loaded {len(env_vars)} variables from {env_path}")
+        else:
+            print(f"Warning: env file not found: {env_path}")
+    else:
+        # Auto-discover .env from repo root (searches upward from script location)
+        script_dir = Path(__file__).parent
+        # Try to find .env in repo root (2 levels up from scripts/pipes/)
+        repo_root = script_dir.parent.parent
+        root_env = repo_root / ".env"
+        if root_env.exists():
+            load_dotenv(root_env, override=True)
+            env_vars = dotenv_values(root_env)
+            print(f"Auto-loaded {len(env_vars)} variables from {root_env}")
+        else:
+            # Fall back to python-dotenv's auto-discovery
+            load_dotenv()
 
-    # Priority: CLI args > env file > environment variables > defaults
+    # Priority: CLI args > environment variables (now includes loaded .env) > defaults
     def get_config(key: str, cli_value: str = None, default: str = None) -> str:
         if cli_value:
             return cli_value
-        if key in env_vars:
-            return env_vars[key]
         return os.getenv(key, default)
 
     # URL can come from OPENWEBUI_URL or be constructed from OPEN_WEBUI_PORT
