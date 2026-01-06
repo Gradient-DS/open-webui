@@ -1,0 +1,73 @@
+# Self-hosted Web Search Stack for Open WebUI
+# Includes: SearXNG (search), Playwright (web scraping with JS), and Infinity (reranker)
+#
+# Usage:
+#   docker compose -f docker-compose.websearch.yaml up -d
+#
+# Configure Open WebUI with the environment variables shown below
+
+services:
+  # ============================================================
+  # SEARXNG - Meta Search Engine
+  # ============================================================
+  searxng:
+    image: searxng/searxng:latest
+    container_name: searxng
+    ports:
+      - "8084:8080"
+    volumes:
+      - ./searxng:/etc/searxng:rw
+    environment:
+      - SEARXNG_BASE_URL=http://searxng:8080/
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - SETGID
+      - SETUID
+    restart: unless-stopped
+    networks:
+      - websearch-net
+
+  # ============================================================
+  # PLAYWRIGHT - Web Scraping with JS Rendering
+  # Renders JavaScript for accurate page content extraction
+  # ============================================================
+  playwright:
+    image: mcr.microsoft.com/playwright:v1.57.0-noble
+    container_name: playwright
+    ports:
+      - "3002:3000"
+    command: npx -y playwright@1.57.0 run-server --port 3000 --host 0.0.0.0
+    restart: unless-stopped
+    networks:
+      - websearch-net
+
+  # ============================================================
+  # RERANKER - Infinity for Reranking
+  # High-throughput embedding and reranking server
+  # https://github.com/michaelfeil/infinity
+  # ============================================================
+  reranker:
+    image: michaelf34/infinity:latest-cpu
+    platform: linux/amd64  # ARM Mac: runs via Rosetta emulation
+    container_name: reranker
+    ports:
+      - "8086:8086"
+    volumes:
+      - reranker-data:/app/.cache
+    command: >
+      v2
+      --model-id cross-encoder/ms-marco-MiniLM-L-6-v2
+      --engine torch
+      --port 8086
+    restart: unless-stopped
+    networks:
+      - websearch-net
+
+networks:
+  websearch-net:
+    driver: bridge
+
+volumes:
+  reranker-data:

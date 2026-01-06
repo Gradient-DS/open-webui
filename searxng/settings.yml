@@ -1,0 +1,131 @@
+# SearXNG configuration for Open WebUI Web Search
+# See https://docs.searxng.org/admin/settings.html for all options
+
+use_default_settings: true
+
+general:
+  debug: false
+  instance_name: "SearXNG - Open WebUI"
+  privacypolicy_url: false
+  donation_url: false
+  contact_url: false
+  enable_metrics: false
+
+search:
+  safe_search: 0
+  autocomplete: ""
+  default_lang: "auto"
+  max_page: 0
+  formats:
+    - html
+    - json
+
+server:
+  # Public URL (adjust if using reverse proxy)
+  base_url: false
+  port: 8080
+  bind_address: "0.0.0.0"
+  secret_key: "s3cr3t_k3y_f0r_s34rxng_d3v_0nly_ch4ng3_1n_pr0d"
+  limiter: false
+  image_proxy: false
+  http_protocol_version: "1.0"
+  method: "POST"
+
+ui:
+  static_use_hash: true
+  default_locale: ""
+  query_in_title: false
+  infinite_scroll: false
+  center_alignment: false
+  results_on_new_tab: false
+  theme_args:
+    simple_style: auto
+
+outgoing:
+  request_timeout: 3.0
+  max_request_timeout: 10.0
+  useragent_suffix: ""
+  pool_connections: 100
+  pool_maxsize: 20
+  enable_http2: true
+
+# Plugins configuration
+plugins:
+  searx.plugins.hostnames.SXNGPlugin:
+    active: true
+
+# Hostname filtering - removes Chinese domains from results
+hostnames:
+  remove:
+    - '.*\.cn$'
+    - '.*\.中国$'
+    - '.*\.公司$'
+    - '.*\.网络$'
+    - '(.*\.)?baidu\.com$'
+    - '(.*\.)?zhihu\.com$'
+    - '(.*\.)?baidu\.cn$'
+    - '(.*\.)?qq\.com$'
+    - '(.*\.)?sogou\.com$'
+    - '(.*\.)?sohu\.com$'
+    - '(.*\.)?163\.com$'
+
+# Engine configurations
+engines:
+  # Google (primary)
+  - name: google
+    engine: google
+    shortcut: g
+    disabled: false
+
+  # DuckDuckGo (backup)
+  - name: duckduckgo
+    engine: duckduckgo
+    shortcut: ddg
+    disabled: false
+
+  # Bing
+  - name: bing
+    engine: bing
+    shortcut: bi
+    disabled: false
+
+  # Wikipedia
+  - name: wikipedia
+    engine: wikipedia
+    shortcut: wp
+    disabled: false
+
+  # Brave Search
+  - name: brave
+    engine: brave
+    shortcut: br
+    disabled: false
+
+  # Disable Chinese search engines
+  - name: baidu
+    disabled: true
+
+  - name: sogou
+    disabled: true
+
+  - name: quark
+    disabled: true
+
+  - name: 360search
+    disabled: true
+
+  - name: chinaso news
+    disabled: true
+
+  # Disable slow/unreliable engines
+  - name: qwant
+    engine: qwant
+    shortcut: qw
+    disabled: true
+
+  - name: yahoo
+    engine: yahoo
+    disabled: true
+
+  - name: ask
+    disabled: true
