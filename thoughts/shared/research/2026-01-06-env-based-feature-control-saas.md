@@ -173,36 +173,284 @@ This approach means IT wouldn't have access to `/admin` routes though.
 | `src/routes/(app)/workspace/+layout.svelte` | 23-43 | Workspace route guard |
 | `src/routes/(app)/admin/+layout.svelte` | 15-19 | Admin route guard |
 
-## Recommendations for SaaS Implementation
+## Recommended Implementation: Tier-Based Feature Flags with Wrapper Approach
 
-### Option 1: Add Tier-Based Feature Flags (Recommended)
+### Implementation Scope
 
-Add new env vars that control feature visibility for ALL roles:
+| Category | Files | LOC Changes | Merge Risk |
+|----------|-------|-------------|------------|
+| Backend Config | 1 | ~20 | Low |
+| Backend API | 1 | ~10 | Low |
+| Frontend Types | 1 | ~10 | Low |
+| Frontend Utility | 1 (new) | ~30 | None |
+| Frontend Components | 4-6 | ~20 | Low |
+| Route Guards | 2 | ~10 | Low |
+| **Total** | **~11 files** | **~100 LOC** | **Low** |
+
+### Wrapper Approach (Recommended)
+
+Create a centralized tier utility that encapsulates all tier checks. This provides:
+- Single point of change for tier logic
+- Easier rebasing when upstream updates
+- Cleaner component code
+- Testability
+
+#### 1. Backend Config (`backend/open_webui/config.py`)
+
+Add at end of feature flags section (~line 1600):
 
 ```python
-# New vars in config.py
+####################################
+# Tier Feature Flags
+####################################
+
 TIER_ENABLE_WORKSPACE = os.environ.get("TIER_ENABLE_WORKSPACE", "True").lower() == "true"
 TIER_ENABLE_ADMIN_PANEL = os.environ.get("TIER_ENABLE_ADMIN_PANEL", "True").lower() == "true"
+TIER_ENABLE_PLAYGROUND = os.environ.get("TIER_ENABLE_PLAYGROUND", "True").lower() == "true"
+TIER_ENABLE_CHANNELS = os.environ.get("TIER_ENABLE_CHANNELS", "True").lower() == "true"
+TIER_ENABLE_KNOWLEDGE = os.environ.get("TIER_ENABLE_KNOWLEDGE", "True").lower() == "true"
 ```
 
-Then modify frontend checks:
+#### 2. Backend API (`backend/open_webui/main.py`)
+
+Add to `/api/config` response (~line 1925):
+
+```python
+"tier": {
+    "enable_workspace": TIER_ENABLE_WORKSPACE,
+    "enable_admin_panel": TIER_ENABLE_ADMIN_PANEL,
+    "enable_playground": TIER_ENABLE_PLAYGROUND,
+    "enable_channels": TIER_ENABLE_CHANNELS,
+    "enable_knowledge": TIER_ENABLE_KNOWLEDGE,
+},
+```
+
+#### 3. Frontend Types (`src/lib/stores/index.ts`)
+
+Extend `Config` type:
+
+```typescript
+tier?: {
+    enable_workspace: boolean;
+    enable_admin_panel: boolean;
+    enable_playground: boolean;
+    enable_channels: boolean;
+    enable_knowledge: boolean;
+};
+```
+
+#### 4. Frontend Tier Utility (NEW: `src/lib/utils/tier.ts`)
+
+```typescript
+import { get } from 'svelte/store';
+import { config, user } from '$lib/stores';
+
+export type TierFeature =
+    | 'workspace'
+    | 'admin_panel'
+    | 'playground'
+    | 'channels'
+    | 'knowledge';
+
+/**
+ * Check if a tier feature is enabled globally.
+ * This check applies to ALL users including admins.
+ */
+export function isTierEnabled(feature: TierFeature): boolean {
+    const $config = get(config);
+    const key = `enable_${feature}` as keyof typeof $config.tier;
+    return $config?.tier?.[key] ?? true; // Default to enabled if not set
+}
+
+/**
+ * Check if user has access to a feature considering both tier AND permissions.
+ * Admins get access if tier is enabled, regular users need tier + permission.
+ */
+export function hasFeatureAccess(
+    feature: TierFeature,
+    permissionKey?: string
+): boolean {
+    const $user = get(user);
+
+    // First check: tier must be enabled
+    if (!isTierEnabled(feature)) {
+        return false;
+    }
+
+    // Second check: admin always has access if tier enabled
+    if ($user?.role === 'admin') {
+        return true;
+    }
+
+    // Third check: regular users need specific permission
+    if (permissionKey) {
+        const keys = permissionKey.split('.');
+        let perms: any = $user?.permissions;
+        for (const key of keys) {
+            perms = perms?.[key];
+        }
+        return Boolean(perms);
+    }
+
+    return false;
+}
+
+/**
+ * Reactive store-based check for use in Svelte components.
+ * Usage: $: canAccessWorkspace = $tierAccess('workspace', 'workspace.models')
+ */
+export function createTierAccessStore(feature: TierFeature, permissionKey?: string) {
+    return {
+        subscribe(fn: (value: boolean) => void) {
+            // Re-evaluate when config or user changes
+            const unsubConfig = config.subscribe(() => fn(hasFeatureAccess(feature, permissionKey)));
+            const unsubUser = user.subscribe(() => fn(hasFeatureAccess(feature, permissionKey)));
+            return () => { unsubConfig(); unsubUser(); };
+        }
+    };
+}
+```
+
+#### 5. Component Updates
+
+**Sidebar.svelte (line 752)** - Before:
 ```svelte
-{#if $config?.tier?.enable_workspace && ($user?.role === 'admin' || $user?.permissions?.workspace?.models)}
+{#if $user?.role === 'admin' || $user?.permissions?.workspace?.models || ...}
 ```
 
-### Option 2: Role Remapping
+**After:**
+```svelte
+<script>
+import { isTierEnabled, hasFeatureAccess } from '$lib/utils/tier';
+</script>
+
+{#if isTierEnabled('workspace') && ($user?.role === 'admin' || $user?.permissions?.workspace?.models || ...)}
+```
+
+**UserMenu.svelte (line 245)** - Before:
+```svelte
+{#if role === 'admin'}
+```
+
+**After:**
+```svelte
+{#if role === 'admin' && isTierEnabled('admin_panel')}
+```
+
+#### 6. Route Guards
+
+**workspace/+layout.svelte:**
+```svelte
+<script>
+import { isTierEnabled } from '$lib/utils/tier';
+
+onMount(async () => {
+    // Tier check first - applies to everyone
+    if (!isTierEnabled('workspace')) {
+        await goto('/');
+        return;
+    }
+
+    // Then existing permission checks for non-admins
+    if ($user?.role !== 'admin') {
+        // ... existing permission checks
+    }
+});
+</script>
+```
+
+**admin/+layout.svelte:**
+```svelte
+<script>
+import { isTierEnabled } from '$lib/utils/tier';
+
+onMount(async () => {
+    if ($user?.role !== 'admin' || !isTierEnabled('admin_panel')) {
+        await goto('/');
+        return;
+    }
+});
+</script>
+```
+
+### Example .env Configurations Per Tier
+
+```bash
+# ============================================
+# Tier 1: Basic Chat Only
+# ============================================
+TIER_ENABLE_WORKSPACE=False
+TIER_ENABLE_ADMIN_PANEL=False
+TIER_ENABLE_PLAYGROUND=False
+TIER_ENABLE_CHANNELS=False
+TIER_ENABLE_KNOWLEDGE=False
+
+# ============================================
+# Tier 2: Standard (Team collaboration)
+# ============================================
+TIER_ENABLE_WORKSPACE=False
+TIER_ENABLE_ADMIN_PANEL=True
+TIER_ENABLE_PLAYGROUND=False
+TIER_ENABLE_CHANNELS=True
+TIER_ENABLE_KNOWLEDGE=False
+
+# ============================================
+# Tier 3: Professional (Custom models)
+# ============================================
+TIER_ENABLE_WORKSPACE=True
+TIER_ENABLE_ADMIN_PANEL=True
+TIER_ENABLE_PLAYGROUND=True
+TIER_ENABLE_CHANNELS=True
+TIER_ENABLE_KNOWLEDGE=False
+
+# ============================================
+# Tier 4: Enterprise (Full features)
+# ============================================
+TIER_ENABLE_WORKSPACE=True
+TIER_ENABLE_ADMIN_PANEL=True
+TIER_ENABLE_PLAYGROUND=True
+TIER_ENABLE_CHANNELS=True
+TIER_ENABLE_KNOWLEDGE=True
+```
+
+### Merge Conflict Mitigation
+
+| Strategy | Benefit |
+|----------|---------|
+| New utility file (`tier.ts`) | No conflicts - it's a new file |
+| Additive config changes | Low conflict risk - adding to end of sections |
+| Minimal component changes | Only 1-2 line additions per component |
+| Wrapper function pattern | If upstream changes permission checks, wrapper logic adapts |
+
+### Files Changed Summary
+
+| File | Change Type | Risk |
+|------|-------------|------|
+| `backend/open_webui/config.py` | Add ~10 lines at end | Low |
+| `backend/open_webui/main.py` | Add ~8 lines to config response | Low |
+| `src/lib/stores/index.ts` | Add ~8 lines to Config type | Low |
+| `src/lib/utils/tier.ts` | **New file** (~50 lines) | None |
+| `src/lib/components/layout/Sidebar.svelte` | Add 1 import + 2 condition changes | Low |
+| `src/lib/components/layout/Sidebar/UserMenu.svelte` | Add 1 import + 2 condition changes | Low |
+| `src/routes/(app)/workspace/+layout.svelte` | Add 1 import + 4 line check | Low |
+| `src/routes/(app)/admin/+layout.svelte` | Add 1 import + 1 condition change | Low |
+
+## Alternative Options (Not Recommended)
+
+### Option A: Role Remapping
 
 Don't give IT users `admin` role. Instead:
 - Create a `tenant_admin` or `manager` concept via groups
 - Give them elevated permissions via group assignment
 - Keep actual `admin` role for your platform operations
 
-### Option 3: Multi-Tenant Architecture
+**Downside:** IT wouldn't have access to `/admin` routes.
 
-Deploy separate instances per tenant with different env configurations. Each tenant gets their own:
-- Database
-- Environment variables
-- Feature set
+### Option B: Multi-Tenant Architecture
+
+Deploy separate instances per tenant with different env configurations.
+
+**Downside:** Higher infrastructure cost and complexity.
 
 ## Open Questions
 
