@@ -859,6 +859,7 @@
 								...files,
 								{
 									...data,
+									url: data.id,
 									status: 'processed'
 								}
 							];
@@ -896,6 +897,7 @@
 											...files,
 											{
 												...data,
+												url: data.id,
 												status: 'processed'
 											}
 										];
@@ -935,6 +937,7 @@
 											...files,
 											{
 												...data,
+												url: data.id,
 												status: 'processed'
 											}
 										];
