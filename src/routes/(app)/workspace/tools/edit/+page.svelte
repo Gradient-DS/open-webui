@@ -6,6 +6,7 @@
 	import ToolkitEditor from '$lib/components/workspace/Tools/ToolkitEditor.svelte';
 	import { WEBUI_VERSION } from '$lib/constants';
 	import { tools } from '$lib/stores';
+	import { isFeatureEnabled } from '$lib/utils/features';
 	import { compareVersion, extractFrontmatter } from '$lib/utils';
 	import { onMount, getContext } from 'svelte';
 	import { toast } from 'svelte-sonner';
@@ -52,6 +53,10 @@
 	};
 
 	onMount(async () => {
+		if (!isFeatureEnabled('tools')) {
+			goto('/');
+			return;
+		}
 		console.log('mounted');
 		const id = $page.url.searchParams.get('id');
 

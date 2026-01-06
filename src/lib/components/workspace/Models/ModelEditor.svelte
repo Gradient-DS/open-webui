@@ -4,6 +4,7 @@
 	import { onMount, getContext, tick } from 'svelte';
 	import { models, tools, functions, user } from '$lib/stores';
 	import { WEBUI_BASE_URL } from '$lib/constants';
+	import { isFeatureEnabled } from '$lib/utils/features';
 
 	import { getTools } from '$lib/apis/tools';
 	import { getFunctions } from '$lib/apis/functions';
@@ -712,17 +713,21 @@
 						{/if}
 					</div>
 
-					<hr class=" border-gray-100/30 dark:border-gray-850/30 my-2" />
+					{#if isFeatureEnabled('knowledge')}
+						<hr class=" border-gray-100/30 dark:border-gray-850/30 my-2" />
 
-					<div class="my-2">
-						<Knowledge bind:selectedItems={knowledge} />
-					</div>
+						<div class="my-2">
+							<Knowledge bind:selectedItems={knowledge} />
+						</div>
+					{/if}
 
-					<hr class=" border-gray-100/30 dark:border-gray-850/30 my-2" />
+					{#if isFeatureEnabled('tools')}
+						<hr class=" border-gray-100/30 dark:border-gray-850/30 my-2" />
 
-					<div class="my-2">
-						<ToolsSelector bind:selectedToolIds={toolIds} tools={$tools ?? []} />
-					</div>
+						<div class="my-2">
+							<ToolsSelector bind:selectedToolIds={toolIds} tools={$tools ?? []} />
+						</div>
+					{/if}
 
 					{#if ($functions ?? []).filter((func) => func.type === 'filter').length > 0 || ($functions ?? []).filter((func) => func.type === 'action').length > 0}
 						<hr class=" border-gray-100/30 dark:border-gray-850/30 my-2" />

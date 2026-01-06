@@ -1609,6 +1609,27 @@ FEATURE_NOTES_AI_CONTROLS = os.environ.get("FEATURE_NOTES_AI_CONTROLS", "True").
 FEATURE_VOICE = os.environ.get("FEATURE_VOICE", "True").lower() == "true"
 FEATURE_CHANGELOG = os.environ.get("FEATURE_CHANGELOG", "True").lower() == "true"
 FEATURE_SYSTEM_PROMPT = os.environ.get("FEATURE_SYSTEM_PROMPT", "True").lower() == "true"
+FEATURE_MODELS = os.environ.get("FEATURE_MODELS", "True").lower() == "true"
+FEATURE_KNOWLEDGE = os.environ.get("FEATURE_KNOWLEDGE", "True").lower() == "true"
+FEATURE_PROMPTS = os.environ.get("FEATURE_PROMPTS", "True").lower() == "true"
+FEATURE_TOOLS = os.environ.get("FEATURE_TOOLS", "True").lower() == "true"
+
+# Admin Panel Tab Feature Flags
+FEATURE_ADMIN_EVALUATIONS = os.environ.get("FEATURE_ADMIN_EVALUATIONS", "True").lower() == "true"
+FEATURE_ADMIN_FUNCTIONS = os.environ.get("FEATURE_ADMIN_FUNCTIONS", "True").lower() == "true"
+FEATURE_ADMIN_SETTINGS = os.environ.get("FEATURE_ADMIN_SETTINGS", "True").lower() == "true"
+FEATURE_ADMIN_SETTINGS_TABS = [
+    tab.strip()
+    for tab in os.environ.get("FEATURE_ADMIN_SETTINGS_TABS", "").split(",")
+    if tab.strip()
+]
+
+# Model Whitelist (empty = show all models)
+MODEL_WHITELIST = [
+    model.strip()
+    for model in os.environ.get("MODEL_WHITELIST", "").split(",")
+    if model.strip()
+]
 
 ENABLE_COMMUNITY_SHARING = PersistentConfig(
     "ENABLE_COMMUNITY_SHARING",

@@ -377,7 +377,11 @@
 
 	let command = '';
 	export let showCommands = false;
-	$: showCommands = ['/', '#', '@'].includes(command?.charAt(0)) || '\\#' === command?.slice(0, 2);
+	$: showCommands =
+		(command?.charAt(0) === '@') ||
+		(command?.charAt(0) === '/' && isFeatureEnabled('prompts')) ||
+		(command?.charAt(0) === '#' && isFeatureEnabled('knowledge')) ||
+		('\\#' === command?.slice(0, 2) && isFeatureEnabled('knowledge'));
 	let suggestions = null;
 
 	let showTools = false;
@@ -864,76 +868,84 @@
 					}
 				})
 			},
-			{
-				char: '/',
-				render: getSuggestionRenderer(CommandSuggestionList, {
-					i18n,
-					onSelect: (e) => {
-						const { type, data } = e;
+			...(isFeatureEnabled('prompts')
+				? [
+						{
+							char: '/',
+							render: getSuggestionRenderer(CommandSuggestionList, {
+								i18n,
+								onSelect: (e) => {
+									const { type, data } = e;
 
-						if (type === 'model') {
-							atSelectedModel = data;
-						}
+									if (type === 'model') {
+										atSelectedModel = data;
+									}
 
-						document.getElementById('chat-input')?.focus();
-					},
+									document.getElementById('chat-input')?.focus();
+								},
 
-					insertTextHandler: insertTextAtCursor,
-					onUpload: (e) => {
-						const { type, data } = e;
+								insertTextHandler: insertTextAtCursor,
+								onUpload: (e) => {
+									const { type, data } = e;
 
-						if (type === 'file') {
-							if (files.find((f) => f.id === data.id)) {
-								return;
-							}
-							files = [
-								...files,
-								{
-									...data,
-									status: 'processed'
+									if (type === 'file') {
+										if (files.find((f) => f.id === data.id)) {
+											return;
+										}
+										files = [
+											...files,
+											{
+												...data,
+												status: 'processed'
+											}
+										];
+									} else {
+										onUpload(e);
+									}
 								}
-							];
-						} else {
-							onUpload(e);
+							})
 						}
-					}
-				})
-			},
-			{
-				char: '#',
-				render: getSuggestionRenderer(CommandSuggestionList, {
-					i18n,
-					onSelect: (e) => {
-						const { type, data } = e;
+					]
+				: []),
+			...(isFeatureEnabled('knowledge')
+				? [
+						{
+							char: '#',
+							render: getSuggestionRenderer(CommandSuggestionList, {
+								i18n,
+								onSelect: (e) => {
+									const { type, data } = e;
 
-						if (type === 'model') {
-							atSelectedModel = data;
-						}
+									if (type === 'model') {
+										atSelectedModel = data;
+									}
 
-						document.getElementById('chat-input')?.focus();
-					},
+									document.getElementById('chat-input')?.focus();
+								},
 
-					insertTextHandler: insertTextAtCursor,
-					onUpload: (e) => {
-						const { type, data } = e;
+								insertTextHandler: insertTextAtCursor,
+								onUpload: (e) => {
+									const { type, data } = e;
 
-						if (type === 'file') {
-							if (files.find((f) => f.id === data.id)) {
-								return;
-							}
-							files = [
-								...files,
-								{
-									...data,
-									status: 'processed'
+									if (type === 'file') {
+										if (files.find((f) => f.id === data.id)) {
+											return;
+										}
+										files = [
+											...files,
+											{
+												...data,
+												status: 'processed'
+											}
+										];
+									} else {
+										onUpload(e);
+									}
 								}
-							];
-						} else {
-							onUpload(e);
+							})
 						}
-					}
-				})
-			}
+					]
+				: [])
 		];
 		loaded = true;
 

@@ -10,7 +10,14 @@ export type Feature =
 	| 'notes_ai_controls'
 	| 'voice'
 	| 'changelog'
-	| 'system_prompt';
+	| 'system_prompt'
+	| 'models'
+	| 'knowledge'
+	| 'prompts'
+	| 'tools'
+	| 'admin_evaluations'
+	| 'admin_functions'
+	| 'admin_settings';
 
 /**
  * Check if a feature is enabled globally.
@@ -72,4 +79,75 @@ export function hasFeatureAccess(
 		}
 	}
 	return Boolean(perms ?? true); // Default to true if permission not set
+}
+
+/**
+ * All valid admin settings tab IDs
+ */
+export const ADMIN_SETTINGS_TABS = [
+	'general',
+	'connections',
+	'models',
+	'evaluations',
+	'tools',
+	'documents',
+	'web',
+	'code-execution',
+	'interface',
+	'audio',
+	'images',
+	'pipelines',
+	'db'
+] as const;
+
+export type AdminSettingsTab = (typeof ADMIN_SETTINGS_TABS)[number];
+
+/**
+ * Check if admin settings section is enabled globally.
+ */
+export function isAdminSettingsEnabled(): boolean {
+	const $config = get(config);
+	return $config?.features?.feature_admin_settings ?? true;
+}
+
+/**
+ * Check if a specific admin settings tab is enabled.
+ * For the audio tab, also requires FEATURE_VOICE to be true.
+ *
+ * @param tab - The tab ID to check
+ * @returns true if the tab should be visible
+ */
+export function isAdminSettingsTabEnabled(tab: AdminSettingsTab): boolean {
+	// First check if admin settings is enabled at all
+	if (!isAdminSettingsEnabled()) {
+		return false;
+	}
+
+	const $config = get(config);
+	const allowedTabs = $config?.features?.feature_admin_settings_tabs ?? [];
+
+	// If no tabs specified, all tabs are allowed
+	const tabAllowed = allowedTabs.length === 0 || allowedTabs.includes(tab);
+
+	// Audio tab has additional requirement: FEATURE_VOICE must be true
+	if (tab === 'audio') {
+		return tabAllowed && isFeatureEnabled('voice');
+	}
+
+	return tabAllowed;
+}
+
+/**
+ * Get the first available admin settings tab.
+ * Used for redirecting when accessing a disabled tab.
+ *
+ * @returns The first enabled tab ID, or null if none available
+ */
+export function getFirstAvailableAdminSettingsTab(): AdminSettingsTab | null {
+	for (const tab of ADMIN_SETTINGS_TABS) {
+		if (isAdminSettingsTabEnabled(tab)) {
+			return tab;
+		}
+	}
+	return null;
 }

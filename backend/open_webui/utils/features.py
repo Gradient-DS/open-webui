@@ -18,6 +18,13 @@ from open_webui.config import (
     FEATURE_VOICE,
     FEATURE_CHANGELOG,
     FEATURE_SYSTEM_PROMPT,
+    FEATURE_MODELS,
+    FEATURE_KNOWLEDGE,
+    FEATURE_PROMPTS,
+    FEATURE_TOOLS,
+    FEATURE_ADMIN_EVALUATIONS,
+    FEATURE_ADMIN_FUNCTIONS,
+    FEATURE_ADMIN_SETTINGS,
 )
 
 Feature = Literal[
@@ -30,6 +37,13 @@ Feature = Literal[
     "voice",
     "changelog",
     "system_prompt",
+    "models",
+    "knowledge",
+    "prompts",
+    "tools",
+    "admin_evaluations",
+    "admin_functions",
+    "admin_settings",
 ]
 
 FEATURE_FLAGS: dict[Feature, bool] = {
@@ -42,6 +56,13 @@ FEATURE_FLAGS: dict[Feature, bool] = {
     "voice": FEATURE_VOICE,
     "changelog": FEATURE_CHANGELOG,
     "system_prompt": FEATURE_SYSTEM_PROMPT,
+    "models": FEATURE_MODELS,
+    "knowledge": FEATURE_KNOWLEDGE,
+    "prompts": FEATURE_PROMPTS,
+    "tools": FEATURE_TOOLS,
+    "admin_evaluations": FEATURE_ADMIN_EVALUATIONS,
+    "admin_functions": FEATURE_ADMIN_FUNCTIONS,
+    "admin_settings": FEATURE_ADMIN_SETTINGS,
 }
 
 

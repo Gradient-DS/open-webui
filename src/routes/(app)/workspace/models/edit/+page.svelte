@@ -7,6 +7,7 @@
 
 	import { page } from '$app/stores';
 	import { config, models, settings } from '$lib/stores';
+	import { isFeatureEnabled } from '$lib/utils/features';
 
 	import { getModelById, updateModelById } from '$lib/apis/models';
 
@@ -16,6 +17,10 @@
 	let model = null;
 
 	onMount(async () => {
+		if (!isFeatureEnabled('models')) {
+			goto('/');
+			return;
+		}
 		const _id = $page.url.searchParams.get('id');
 		if (_id) {
 			model = await getModelById(localStorage.token, _id).catch((e) => {

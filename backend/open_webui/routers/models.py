@@ -29,6 +29,7 @@ from fastapi.responses import FileResponse, StreamingResponse
 
 from open_webui.utils.auth import get_admin_user, get_verified_user
 from open_webui.utils.access_control import has_access, has_permission
+from open_webui.utils.features import require_feature
 from open_webui.config import BYPASS_ADMIN_ACCESS_CONTROL, STATIC_DIR
 
 log = logging.getLogger(__name__)
@@ -168,6 +169,7 @@ async def create_new_model(
     request: Request,
     form_data: ModelForm,
     user=Depends(get_verified_user),
+    _=Depends(require_feature("models")),
 ):
     if user.role != "admin" and not has_permission(
         user.id, "workspace.models", request.app.state.config.USER_PERMISSIONS
@@ -209,7 +211,11 @@ async def create_new_model(
 
 
 @router.get("/export", response_model=list[ModelModel])
-async def export_models(request: Request, user=Depends(get_verified_user)):
+async def export_models(
+    request: Request,
+    user=Depends(get_verified_user),
+    _=Depends(require_feature("models")),
+):
     if user.role != "admin" and not has_permission(
         user.id, "workspace.models_export", request.app.state.config.USER_PERMISSIONS
     ):
@@ -238,6 +244,7 @@ async def import_models(
     request: Request,
     user=Depends(get_verified_user),
     form_data: ModelsImportForm = (...),
+    _=Depends(require_feature("models")),
 ):
     if user.role != "admin" and not has_permission(
         user.id, "workspace.models_import", request.app.state.config.USER_PERMISSIONS
@@ -367,7 +374,11 @@ async def get_model_profile_image(id: str, user=Depends(get_verified_user)):
 
 
 @router.post("/model/toggle", response_model=Optional[ModelResponse])
-async def toggle_model_by_id(id: str, user=Depends(get_verified_user)):
+async def toggle_model_by_id(
+    id: str,
+    user=Depends(get_verified_user),
+    _=Depends(require_feature("models")),
+):
     model = Models.get_model_by_id(id)
     if model:
         if (
@@ -405,6 +416,7 @@ async def toggle_model_by_id(id: str, user=Depends(get_verified_user)):
 async def update_model_by_id(
     form_data: ModelForm,
     user=Depends(get_verified_user),
+    _=Depends(require_feature("models")),
 ):
     model = Models.get_model_by_id(form_data.id)
     if not model:
@@ -436,7 +448,11 @@ async def update_model_by_id(
 
 
 @router.post("/model/delete", response_model=bool)
-async def delete_model_by_id(form_data: ModelIdForm, user=Depends(get_verified_user)):
+async def delete_model_by_id(
+    form_data: ModelIdForm,
+    user=Depends(get_verified_user),
+    _=Depends(require_feature("models")),
+):
     model = Models.get_model_by_id(form_data.id)
     if not model:
         raise HTTPException(

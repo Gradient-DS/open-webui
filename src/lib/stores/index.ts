@@ -286,6 +286,14 @@ type Config = {
 		feature_voice?: boolean;
 		feature_changelog?: boolean;
 		feature_system_prompt?: boolean;
+		feature_models?: boolean;
+		feature_knowledge?: boolean;
+		feature_prompts?: boolean;
+		feature_tools?: boolean;
+		feature_admin_evaluations?: boolean;
+		feature_admin_functions?: boolean;
+		feature_admin_settings?: boolean;
+		feature_admin_settings_tabs?: string[];
 	};
 	oauth: {
 		providers: {

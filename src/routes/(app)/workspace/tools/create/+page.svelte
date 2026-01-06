@@ -4,6 +4,7 @@
 	import ToolkitEditor from '$lib/components/workspace/Tools/ToolkitEditor.svelte';
 	import { WEBUI_VERSION } from '$lib/constants';
 	import { tools } from '$lib/stores';
+	import { isFeatureEnabled } from '$lib/utils/features';
 	import { compareVersion, extractFrontmatter } from '$lib/utils';
 	import { onMount, getContext } from 'svelte';
 	import { toast } from 'svelte-sonner';
@@ -52,6 +53,10 @@
 	};
 
 	onMount(() => {
+		if (!isFeatureEnabled('tools')) {
+			goto('/');
+			return;
+		}
 		window.addEventListener('message', async (event) => {
 			if (
 				!['https://openwebui.com', 'https://www.openwebui.com', 'http://localhost:9999'].includes(

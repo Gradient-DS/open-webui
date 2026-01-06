@@ -23,6 +23,7 @@ from starlette.background import BackgroundTask
 from open_webui.models.models import Models
 from open_webui.config import (
     CACHE_DIR,
+    MODEL_WHITELIST,
 )
 from open_webui.env import (
     MODELS_CACHE_TTL,
@@ -454,9 +455,14 @@ async def get_all_models_responses(request: Request, user: UserModel) -> list:
 
 
 async def get_filtered_models(models, user):
+    # Apply global model whitelist filter first (if configured)
+    model_data = models.get("data", [])
+    if MODEL_WHITELIST:
+        model_data = [m for m in model_data if m.get("id") in MODEL_WHITELIST]
+
     # Filter models based on user access control
     filtered_models = []
-    for model in models.get("data", []):
+    for model in model_data:
         model_info = Models.get_model_by_id(model["id"])
         if model_info:
             if user.id == model_info.user_id or has_access(

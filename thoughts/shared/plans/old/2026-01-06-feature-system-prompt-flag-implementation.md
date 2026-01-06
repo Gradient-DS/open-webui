@@ -137,9 +137,9 @@ Add to features dict in `get_app_config()` function (in the features section aro
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] Backend starts without errors: `open-webui dev`
-- [ ] API returns `feature_system_prompt` in config: `curl http://localhost:8080/api/config | jq '.features.feature_system_prompt'`
-- [ ] Default value is `true`
+- [x] Backend starts without errors: `open-webui dev`
+- [x] API returns `feature_system_prompt` in config: `curl http://localhost:8080/api/config | jq '.features.feature_system_prompt'`
+- [x] Default value is `true`
 
 #### Manual Verification:
 - [ ] Set `FEATURE_SYSTEM_PROMPT=False` and restart - API returns `feature_system_prompt: false`
@@ -183,8 +183,8 @@ feature_system_prompt?: boolean;
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] TypeScript compiles: `npm run check`
-- [ ] No lint errors: `npm run lint:frontend`
+- [x] TypeScript compiles: `npm run check` (note: pre-existing errors unrelated to this change)
+- [x] No lint errors: `npm run lint:frontend`
 
 ---
 
@@ -247,8 +247,8 @@ This wraps both sections in a single `{#if isFeatureEnabled('system_prompt')}` b
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] TypeScript compiles: `npm run check`
-- [ ] Frontend builds: `npm run build`
+- [x] TypeScript compiles: `npm run check` (note: pre-existing errors unrelated to this change)
+- [x] Frontend builds: `npm run build`
 
 #### Manual Verification:
 - [ ] With `FEATURE_SYSTEM_PROMPT=True`: "System Prompt" and "Advanced Parameters" sections visible in Settings → General
@@ -327,8 +327,8 @@ This wraps both sections in a single `{#if isFeatureEnabled('system_prompt')}` b
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] TypeScript compiles: `npm run check`
-- [ ] Frontend builds: `npm run build`
+- [x] TypeScript compiles: `npm run check` (note: pre-existing errors unrelated to this change)
+- [x] Frontend builds: `npm run build`
 
 #### Manual Verification:
 - [ ] With `FEATURE_SYSTEM_PROMPT=True`: "System Prompt" and "Advanced Params" collapsibles visible in chat controls panel
@@ -404,8 +404,8 @@ describe('system_prompt feature', () => {
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] Backend tests pass: `pytest backend/open_webui/test/util/test_features.py -v`
-- [ ] Frontend tests pass: `npm run test:frontend`
+- [x] Backend tests pass: `pytest backend/open_webui/test/util/test_features.py -v` (19 tests passed)
+- [x] Frontend tests pass: `npm run test:frontend` (19 tests passed)
 
 ---
 
