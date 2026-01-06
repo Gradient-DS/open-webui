@@ -2507,7 +2507,7 @@
 								</div>
 							</div>
 
-							<div class=" pb-2 z-10">
+							<div class=" pb-1 z-10">
 								<MessageInput
 									bind:this={messageInput}
 									{history}
@@ -2543,12 +2543,7 @@
 									}}
 								/>
 
-								<div
-									class="absolute bottom-1 text-xs text-gray-500 text-center line-clamp-1 right-0 left-0"
-								>
-									<!-- {$i18n.t('LLMs can make mistakes. Verify important information.')} -->
 								</div>
-							</div>
 						{:else}
 							<div class="flex items-center h-full">
 								<Placeholder
@@ -2585,6 +2580,19 @@
 								/>
 							</div>
 						{/if}
+
+						<!-- Footer -->
+						<div class="text-center text-xs text-gray-400 dark:text-gray-500 py-1">
+							<a
+								href="https://soev.ai"
+								target="_blank"
+								class="hover:text-gray-600 dark:hover:text-gray-400"
+							>
+								{$i18n.t('Powered by soev.ai')}
+							</a>
+							<span class="mx-1">·</span>
+							<span>{$i18n.t('LLMs can make mistakes. Verify important information.')}</span>
+						</div>
 					</div>
 				</Pane>
 

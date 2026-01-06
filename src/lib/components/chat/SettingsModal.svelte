@@ -5,6 +5,7 @@
 	import { updateUserSettings } from '$lib/apis/users';
 	import { getModels as _getModels } from '$lib/apis';
 	import { goto } from '$app/navigation';
+	import { isFeatureEnabled } from '$lib/utils/features';
 
 	import Modal from '../common/Modal.svelte';
 	import Account from './Settings/Account.svelte';
@@ -485,6 +486,10 @@
 					$user?.role === 'admin' ||
 					($user?.role === 'user' && $user?.permissions?.features?.direct_tool_servers)
 				);
+			}
+
+			if (tab.id === 'audio') {
+				return isFeatureEnabled('voice');
 			}
 
 			return true;

@@ -1,0 +1,22 @@
+# Caddyfile for voorbeeld.soev.ai
+# Automatic HTTPS via Let's Encrypt
+
+voorbeeld.soev.ai {
+	# Reverse proxy to Open WebUI
+	reverse_proxy open-webui:8080 {
+		# WebSocket support - Caddy handles X-Forwarded-* headers automatically
+		header_up Host {host}
+		header_up X-Real-IP {remote_host}
+	}
+
+	# Enable compression
+	encode gzip zstd
+
+	# Logging
+	log {
+		output file /data/access.log {
+			roll_size 10mb
+			roll_keep 5
+		}
+	}
+}

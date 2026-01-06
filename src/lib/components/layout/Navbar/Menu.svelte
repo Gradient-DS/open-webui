@@ -22,6 +22,7 @@
 		showEmbeds,
 		artifactContents
 	} from '$lib/stores';
+	import { isFeatureEnabled } from '$lib/utils/features';
 	import { flyAndScale } from '$lib/utils/transitions';
 	import { getChatById } from '$lib/apis/chats';
 
@@ -313,7 +314,7 @@
 				<div class="flex items-center">{$i18n.t('Settings')}</div>
 			</DropdownMenu.Item> -->
 
-			{#if $mobile && ($user?.role === 'admin' || ($user?.permissions.chat?.controls ?? true))}
+			{#if $mobile && isFeatureEnabled('chat_controls') && ($user?.role === 'admin' || ($user?.permissions.chat?.controls ?? true))}
 				<DropdownMenu.Item
 					class="flex gap-2 items-center px-3 py-1.5 text-sm cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-xl select-none w-full"
 					id="chat-controls-button"
@@ -329,21 +330,23 @@
 				</DropdownMenu.Item>
 			{/if}
 
-			<DropdownMenu.Item
-				class="flex gap-2 items-center px-3 py-1.5 text-sm cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-xl select-none w-full"
-				id="chat-overview-button"
-				on:click={async () => {
-					await showControls.set(true);
-					await showOverview.set(true);
-					await showArtifacts.set(false);
-					await showEmbeds.set(false);
-				}}
-			>
-				<Map className=" size-4" strokeWidth="1.5" />
-				<div class="flex items-center">{$i18n.t('Overview')}</div>
-			</DropdownMenu.Item>
+			{#if isFeatureEnabled('chat_overview')}
+				<DropdownMenu.Item
+					class="flex gap-2 items-center px-3 py-1.5 text-sm cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-xl select-none w-full"
+					id="chat-overview-button"
+					on:click={async () => {
+						await showControls.set(true);
+						await showOverview.set(true);
+						await showArtifacts.set(false);
+						await showEmbeds.set(false);
+					}}
+				>
+					<Map className=" size-4" strokeWidth="1.5" />
+					<div class="flex items-center">{$i18n.t('Overview')}</div>
+				</DropdownMenu.Item>
+			{/if}
 
-			{#if ($artifactContents ?? []).length > 0}
+			{#if isFeatureEnabled('artifacts') && ($artifactContents ?? []).length > 0}
 				<DropdownMenu.Item
 					class="flex gap-2 items-center px-3 py-1.5 text-sm cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-xl select-none w-full"
 					id="chat-overview-button"
@@ -359,7 +362,9 @@
 				</DropdownMenu.Item>
 			{/if}
 
-			<hr class="border-gray-50/30 dark:border-gray-800/30 my-1" />
+			{#if ($mobile && isFeatureEnabled('chat_controls') && ($user?.role === 'admin' || ($user?.permissions.chat?.controls ?? true))) || isFeatureEnabled('chat_overview') || (isFeatureEnabled('artifacts') && ($artifactContents ?? []).length > 0)}
+				<hr class="border-gray-50/30 dark:border-gray-800/30 my-1" />
+			{/if}
 
 			{#if !$temporaryChatEnabled && ($user?.role === 'admin' || ($user.permissions?.chat?.share ?? true))}
 				<DropdownMenu.Item

@@ -1596,6 +1596,20 @@ ENABLE_ADMIN_CHAT_ACCESS = (
     os.environ.get("ENABLE_ADMIN_CHAT_ACCESS", "True").lower() == "true"
 )
 
+####################################
+# Feature Flags (SaaS Tier Control)
+####################################
+
+FEATURE_CHAT_CONTROLS = os.environ.get("FEATURE_CHAT_CONTROLS", "True").lower() == "true"
+FEATURE_CAPTURE = os.environ.get("FEATURE_CAPTURE", "True").lower() == "true"
+FEATURE_ARTIFACTS = os.environ.get("FEATURE_ARTIFACTS", "True").lower() == "true"
+FEATURE_PLAYGROUND = os.environ.get("FEATURE_PLAYGROUND", "True").lower() == "true"
+FEATURE_CHAT_OVERVIEW = os.environ.get("FEATURE_CHAT_OVERVIEW", "True").lower() == "true"
+FEATURE_NOTES_AI_CONTROLS = os.environ.get("FEATURE_NOTES_AI_CONTROLS", "True").lower() == "true"
+FEATURE_VOICE = os.environ.get("FEATURE_VOICE", "True").lower() == "true"
+FEATURE_CHANGELOG = os.environ.get("FEATURE_CHANGELOG", "True").lower() == "true"
+FEATURE_SYSTEM_PROMPT = os.environ.get("FEATURE_SYSTEM_PROMPT", "True").lower() == "true"
+
 ENABLE_COMMUNITY_SHARING = PersistentConfig(
     "ENABLE_COMMUNITY_SHARING",
     "ui.enable_community_sharing",
@@ -1682,6 +1696,13 @@ except Exception as e:
     banners = []
 
 WEBUI_BANNERS = PersistentConfig("WEBUI_BANNERS", "ui.banners", banners)
+
+# soev.ai branding
+SOEV_LOGIN_FOOTER = PersistentConfig(
+    "SOEV_LOGIN_FOOTER",
+    "ui.soev_login_footer",
+    os.environ.get("SOEV_LOGIN_FOOTER", "Powered by [soev.ai](https://soev.ai)"),
+)
 
 
 SHOW_ADMIN_DETAILS = PersistentConfig(

@@ -563,6 +563,16 @@
 								</div>
 							</div>
 						{/if}
+						<!-- soev.ai footer -->
+						<div class="max-w-3xl mx-auto">
+							<a
+								href="https://soev.ai"
+								target="_blank"
+								class="mt-2 text-[0.7rem] text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300"
+							>
+								{$i18n.t('Powered by soev.ai')}
+							</a>
+						</div>
 					</div>
 				{/if}
 			</div>

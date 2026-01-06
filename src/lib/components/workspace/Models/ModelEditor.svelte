@@ -99,8 +99,32 @@
 		code_interpreter: true,
 		citations: true,
 		status_updates: true,
-		usage: undefined
+		usage: false
 	};
+
+	// Derive allowed capabilities from selected base model (for workspace models/presets)
+	$: selectedBaseModel = preset && info.base_model_id
+		? $models.find((m) => m.id === info.base_model_id)
+		: null;
+
+	// Get capabilities restrictions from base model's admin config
+	// The base model in $models should have the admin config merged in (from getModels API)
+	$: allowedCapabilities = (() => {
+		if (!selectedBaseModel) return null;
+		// Look for capabilities in the model's info.meta (admin config is merged here)
+		const adminCapabilities = selectedBaseModel?.info?.meta?.capabilities;
+		return adminCapabilities ?? null;
+	})();
+
+	// Auto-correct: disable capabilities that are no longer allowed when base model changes
+	$: if (allowedCapabilities && preset) {
+		Object.keys(capabilities).forEach((key) => {
+			if (capabilities[key] && allowedCapabilities[key] === false) {
+				capabilities[key] = false;
+			}
+		});
+	}
+
 	let defaultFeatureIds = [];
 
 	let actionIds = [];
@@ -741,14 +765,21 @@
 					<hr class=" border-gray-100/30 dark:border-gray-850/30 my-2" />
 
 					<div class="my-2">
-						<Capabilities bind:capabilities />
+						<Capabilities
+							bind:capabilities
+							{allowedCapabilities}
+							requiresBaseModel={preset}
+							hasBaseModel={!!info.base_model_id}
+						/>
 					</div>
 
-					{#if Object.keys(capabilities).filter((key) => capabilities[key]).length > 0}
+					{#if (!preset || info.base_model_id) && Object.keys(capabilities).filter((key) => capabilities[key]).length > 0}
 						{@const availableFeatures = Object.entries(capabilities)
 							.filter(
 								([key, value]) =>
-									value && ['web_search', 'code_interpreter', 'image_generation'].includes(key)
+									value &&
+									['web_search', 'code_interpreter', 'image_generation'].includes(key) &&
+									(allowedCapabilities === null || allowedCapabilities[key] !== false)
 							)
 							.map(([key, value]) => key)}
 

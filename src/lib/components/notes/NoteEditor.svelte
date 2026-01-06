@@ -23,6 +23,7 @@
 	import { PaneGroup, Pane, PaneResizer } from 'paneforge';
 
 	import { compressImage, copyToClipboard, splitStream, convertHeicToJpeg } from '$lib/utils';
+	import { isFeatureEnabled } from '$lib/utils/features';
 	import { WEBUI_API_BASE_URL, WEBUI_BASE_URL } from '$lib/constants';
 	import { getFileById, uploadFile } from '$lib/apis/files';
 	import { chatCompletion, generateOpenAIChatCompletion } from '$lib/apis/openai';
@@ -89,6 +90,9 @@
 	import Cog6 from '../icons/Cog6.svelte';
 	import AiMenu from './AIMenu.svelte';
 	import AdjustmentsHorizontalOutline from '../icons/AdjustmentsHorizontalOutline.svelte';
+
+	// Reactive feature flag check - must use $config directly for reactivity
+	$: notesAiControlsEnabled = $config?.features?.feature_notes_ai_controls ?? true;
 
 	export let id: null | string = null;
 
@@ -403,11 +407,13 @@ ${content}
 
 		files = [...files, fileItem];
 
-		// open the settings panel if it is not open
-		selectedPanel = 'settings';
+		// open the settings panel if it is not open (only if feature is enabled)
+		if (notesAiControlsEnabled) {
+			selectedPanel = 'settings';
 
-		if (!showPanel) {
-			showPanel = true;
+			if (!showPanel) {
+				showPanel = true;
+			}
 		}
 
 		try {
@@ -987,41 +993,43 @@ Provide the enhanced notes in markdown format. Use markdown syntax for headings,
 										</div>
 									{/if}
 
-									<Tooltip placement="top" content={$i18n.t('Chat')} className="cursor-pointer">
-										<button
-											class="p-1.5 bg-transparent hover:bg-white/5 transition rounded-lg"
-											on:click={() => {
-												if (showPanel && selectedPanel === 'chat') {
-													showPanel = false;
-												} else {
-													if (!showPanel) {
-														showPanel = true;
+									{#if notesAiControlsEnabled}
+										<Tooltip placement="top" content={$i18n.t('Chat')} className="cursor-pointer">
+											<button
+												class="p-1.5 bg-transparent hover:bg-white/5 transition rounded-lg"
+												on:click={() => {
+													if (showPanel && selectedPanel === 'chat') {
+														showPanel = false;
+													} else {
+														if (!showPanel) {
+															showPanel = true;
+														}
+														selectedPanel = 'chat';
 													}
-													selectedPanel = 'chat';
-												}
-											}}
-										>
-											<ChatBubbleOval />
-										</button>
-									</Tooltip>
+												}}
+											>
+												<ChatBubbleOval />
+											</button>
+										</Tooltip>
 
-									<Tooltip placement="top" content={$i18n.t('Controls')} className="cursor-pointer">
-										<button
-											class="p-1.5 bg-transparent hover:bg-white/5 transition rounded-lg"
-											on:click={() => {
-												if (showPanel && selectedPanel === 'settings') {
-													showPanel = false;
-												} else {
-													if (!showPanel) {
-														showPanel = true;
+										<Tooltip placement="top" content={$i18n.t('Controls')} className="cursor-pointer">
+											<button
+												class="p-1.5 bg-transparent hover:bg-white/5 transition rounded-lg"
+												on:click={() => {
+													if (showPanel && selectedPanel === 'settings') {
+														showPanel = false;
+													} else {
+														if (!showPanel) {
+															showPanel = true;
+														}
+														selectedPanel = 'settings';
 													}
-													selectedPanel = 'settings';
-												}
-											}}
-										>
-											<AdjustmentsHorizontalOutline />
-										</button>
-									</Tooltip>
+												}}
+											>
+												<AdjustmentsHorizontalOutline />
+											</button>
+										</Tooltip>
+									{/if}
 								{/if}
 
 								<NoteMenu
@@ -1275,129 +1283,135 @@ Provide the enhanced notes in markdown format. Use markdown syntax for headings,
 						/>
 					</div>
 				{:else}
-					<div
-						class="cursor-pointer flex gap-0.5 rounded-full border border-gray-50 dark:border-gray-850/30 dark:bg-gray-850 transition shadow-xl"
-					>
-						<Tooltip content={$i18n.t('AI')} placement="top">
-							{#if editing}
-								<button
-									class="p-2 flex justify-center items-center hover:bg-gray-50 dark:hover:bg-gray-800 rounded-full transition shrink-0"
-									on:click={() => {
-										stopResponseHandler();
-									}}
-									type="button"
-								>
-									<Spinner className="size-5" />
-								</button>
-							{:else}
-								<AiMenu
-									onEdit={() => {
-										enhanceNoteHandler();
-									}}
-									onChat={() => {
-										showPanel = true;
-										selectedPanel = 'chat';
-									}}
-								>
-									<div
-										class="cursor-pointer p-2.5 flex rounded-full border border-gray-50 bg-white dark:border-none dark:bg-gray-850 hover:bg-gray-50 dark:hover:bg-gray-800 transition shadow-xl"
+					{#if notesAiControlsEnabled}
+						<div
+							class="cursor-pointer flex gap-0.5 rounded-full border border-gray-50 dark:border-gray-850/30 dark:bg-gray-850 transition shadow-xl"
+						>
+							<Tooltip content={$i18n.t('AI')} placement="top">
+								{#if editing}
+									<button
+										class="p-2 flex justify-center items-center hover:bg-gray-50 dark:hover:bg-gray-800 rounded-full transition shrink-0"
+										on:click={() => {
+											stopResponseHandler();
+										}}
+										type="button"
 									>
-										<SparklesSolid />
-									</div>
-								</AiMenu>
-							{/if}
-						</Tooltip>
-					</div>
-					<RecordMenu
-						onRecord={async () => {
-							displayMediaRecord = false;
+										<Spinner className="size-5" />
+									</button>
+								{:else}
+									<AiMenu
+										onEdit={() => {
+											enhanceNoteHandler();
+										}}
+										onChat={() => {
+											showPanel = true;
+											selectedPanel = 'chat';
+										}}
+									>
+										<div
+											class="cursor-pointer p-2.5 flex rounded-full border border-gray-50 bg-white dark:border-none dark:bg-gray-850 hover:bg-gray-50 dark:hover:bg-gray-800 transition shadow-xl"
+										>
+											<SparklesSolid />
+										</div>
+									</AiMenu>
+								{/if}
+							</Tooltip>
+						</div>
+					{/if}
+					{#if isFeatureEnabled('voice')}
+						<RecordMenu
+							onRecord={async () => {
+								displayMediaRecord = false;
 
-							try {
-								let stream = await navigator.mediaDevices
-									.getUserMedia({ audio: true })
-									.catch(function (err) {
-										toast.error(
-											$i18n.t(`Permission denied when accessing microphone: {{error}}`, {
-												error: err
-											})
-										);
-										return null;
-									});
+								try {
+									let stream = await navigator.mediaDevices
+										.getUserMedia({ audio: true })
+										.catch(function (err) {
+											toast.error(
+												$i18n.t(`Permission denied when accessing microphone: {{error}}`, {
+													error: err
+												})
+											);
+											return null;
+										});
 
-								if (stream) {
-									recording = true;
-									const tracks = stream.getTracks();
-									tracks.forEach((track) => track.stop());
+									if (stream) {
+										recording = true;
+										const tracks = stream.getTracks();
+										tracks.forEach((track) => track.stop());
+									}
+									stream = null;
+								} catch {
+									toast.error($i18n.t('Permission denied when accessing microphone'));
 								}
-								stream = null;
-							} catch {
-								toast.error($i18n.t('Permission denied when accessing microphone'));
-							}
-						}}
-						onCaptureAudio={async () => {
-							displayMediaRecord = true;
+							}}
+							onCaptureAudio={async () => {
+								displayMediaRecord = true;
 
-							recording = true;
-						}}
-						onUpload={async () => {
-							const input = document.createElement('input');
-							input.type = 'file';
-							input.accept = 'audio/*';
-							input.multiple = false;
-							input.click();
+								recording = true;
+							}}
+							onUpload={async () => {
+								const input = document.createElement('input');
+								input.type = 'file';
+								input.accept = 'audio/*';
+								input.multiple = false;
+								input.click();
 
-							input.onchange = async (e) => {
-								const files = e.target.files;
+								input.onchange = async (e) => {
+									const files = e.target.files;
 
-								if (files && files.length > 0) {
-									await uploadFileHandler(files[0]);
-								}
-							};
-						}}
-					>
-						<Tooltip content={$i18n.t('Record')} placement="top">
-							<div
-								class="cursor-pointer p-2.5 flex rounded-full border border-gray-50 bg-white dark:border-none dark:bg-gray-850 hover:bg-gray-50 dark:hover:bg-gray-800 transition shadow-xl"
-							>
-								<MicSolid className="size-4.5" />
-							</div>
-						</Tooltip>
-					</RecordMenu>
+									if (files && files.length > 0) {
+										await uploadFileHandler(files[0]);
+									}
+								};
+							}}
+						>
+							<Tooltip content={$i18n.t('Record')} placement="top">
+								<div
+									class="cursor-pointer p-2.5 flex rounded-full border border-gray-50 bg-white dark:border-none dark:bg-gray-850 hover:bg-gray-50 dark:hover:bg-gray-800 transition shadow-xl"
+								>
+									<MicSolid className="size-4.5" />
+								</div>
+							</Tooltip>
+						</RecordMenu>
+					{/if}
 				{/if}
 			</div>
 		</div>
 	</Pane>
-	<NotePanel bind:show={showPanel}>
-		{#if selectedPanel === 'chat'}
-			<Chat
-				bind:show={showPanel}
-				bind:selectedModelId
-				bind:messages
-				bind:note
-				bind:editing
-				bind:streaming
-				bind:stopResponseFlag
-				{editor}
-				{inputElement}
-				{selectedContent}
-				{files}
-				onInsert={insertHandler}
-				onStop={stopResponseHandler}
-				{onEdited}
-				insertNoteHandler={() => {
-					insertNoteVersion(note);
-				}}
-				scrollToBottomHandler={scrollToBottom}
-			/>
-		{:else if selectedPanel === 'settings'}
-			<Controls
-				bind:show={showPanel}
-				bind:selectedModelId
-				bind:files
-				onUpdate={() => {
-					changeDebounceHandler();
-				}}
-			/>
-		{/if}
-	</NotePanel>
+	{#if notesAiControlsEnabled}
+		<NotePanel bind:show={showPanel}>
+			{#if selectedPanel === 'chat'}
+				<Chat
+					bind:show={showPanel}
+					bind:selectedModelId
+					bind:messages
+					bind:note
+					bind:editing
+					bind:streaming
+					bind:stopResponseFlag
+					{editor}
+					{inputElement}
+					{selectedContent}
+					{files}
+					onInsert={insertHandler}
+					onStop={stopResponseHandler}
+					{onEdited}
+					insertNoteHandler={() => {
+						insertNoteVersion(note);
+					}}
+					scrollToBottomHandler={scrollToBottom}
+				/>
+			{:else if selectedPanel === 'settings'}
+				<Controls
+					bind:show={showPanel}
+					bind:selectedModelId
+					bind:files
+					onUpdate={() => {
+						changeDebounceHandler();
+					}}
+				/>
+			{/if}
+		</NotePanel>
+	{/if}
 </PaneGroup>

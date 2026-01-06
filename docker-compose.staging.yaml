@@ -1,0 +1,47 @@
+# Open WebUI Staging Configuration
+# Usage: docker compose -f docker-compose.staging.yaml up -d
+# Access at: http://localhost:3000
+
+services:
+  open-webui:
+    image: ghcr.io/gradient-ds/open-webui:${WEBUI_DOCKER_TAG:-main}
+    container_name: staging-webui
+    volumes:
+      - staging-data:/app/backend/data
+    ports:
+      - "${OPEN_WEBUI_PORT:-3000}:8080"
+    env_file:
+      - .env.staging
+    depends_on:
+      postgres:
+        condition: service_healthy
+    extra_hosts:
+      - host.docker.internal:host-gateway
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: staging-postgres
+    environment:
+      POSTGRES_USER: ${DATABASE_USER:-openwebui}
+      POSTGRES_PASSWORD: ${DATABASE_PASSWORD:-staging_password}
+      POSTGRES_DB: ${DATABASE_NAME:-openwebui}
+    volumes:
+      - staging-postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DATABASE_USER:-openwebui} -d ${DATABASE_NAME:-openwebui}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    restart: unless-stopped
+
+volumes:
+  staging-data: {}
+  staging-postgres: {}

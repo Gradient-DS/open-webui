@@ -147,17 +147,6 @@ Runtime:
   4. Backend routes check has_permission() for non-admins
 ```
 
-### Group-Based Permissions Alternative
-
-Users can be assigned to groups with custom permissions (`backend/open_webui/models/groups.py`). Groups use a "most permissive wins" merge strategy.
-
-For a pseudo-admin tier, you could:
-1. Keep IT users as role="user"
-2. Create a "Tier 1 Admin" group with elevated permissions (but no workspace)
-3. Create a "Tier 2 Admin" group with workspace access
-
-This approach means IT wouldn't have access to `/admin` routes though.
-
 ## Code References
 
 | File | Lines | Description |

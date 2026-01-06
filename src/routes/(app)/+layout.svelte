@@ -16,6 +16,7 @@
 
 	import { WEBUI_VERSION } from '$lib/constants';
 	import { compareVersion } from '$lib/utils';
+	import { isFeatureEnabled } from '$lib/utils/features';
 
 	import {
 		config,
@@ -258,7 +259,7 @@
 		};
 		setupKeyboardShortcuts();
 
-		if ($user?.role === 'admin' && ($settings?.showChangelog ?? true)) {
+		if (isFeatureEnabled('changelog') && $user?.role === 'admin' && ($settings?.showChangelog ?? true)) {
 			showChangelog.set($settings?.version !== $config.version);
 		}
 
@@ -273,7 +274,7 @@
 		}
 
 		// Check for version updates
-		if ($user?.role === 'admin' && $config?.features?.enable_version_update_check) {
+		if (isFeatureEnabled('changelog') && $user?.role === 'admin' && $config?.features?.enable_version_update_check) {
 			// Check if the user has dismissed the update toast in the last 24 hours
 			if (localStorage.dismissedUpdateToast) {
 				const dismissedUpdateToast = new Date(Number(localStorage.dismissedUpdateToast));
@@ -304,7 +305,7 @@
 <SettingsModal bind:show={$showSettings} />
 <ChangelogModal bind:show={$showChangelog} />
 
-{#if version && compareVersion(version.latest, version.current) && ($settings?.showUpdateToast ?? true)}
+{#if isFeatureEnabled('changelog') && version && compareVersion(version.latest, version.current) && ($settings?.showUpdateToast ?? true)}
 	<div class=" absolute bottom-8 right-8 z-50" in:fade={{ duration: 100 }}>
 		<UpdateInfoToast
 			{version}

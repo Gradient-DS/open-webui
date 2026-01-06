@@ -40,6 +40,42 @@ def is_valid_model_id(model_id: str) -> bool:
     return model_id and len(model_id) <= 256
 
 
+def validate_capabilities_against_base_model(form_data: ModelForm) -> None:
+    """
+    Ensure workspace model capabilities are a subset of base model capabilities.
+
+    Only validates if form_data.base_model_id is set (workspace model).
+    Admin configs (base_model_id=None) are not restricted.
+    """
+    if not form_data.base_model_id:
+        return  # Admin config, no restrictions
+
+    base_model = Models.get_model_by_id(form_data.base_model_id)
+    if not base_model:
+        return  # Base model not found, will fail elsewhere
+
+    base_capabilities = {}
+    if base_model.meta and isinstance(base_model.meta, dict):
+        base_capabilities = base_model.meta.get("capabilities", {})
+    elif base_model.meta and hasattr(base_model.meta, "capabilities"):
+        base_capabilities = base_model.meta.capabilities or {}
+
+    requested_capabilities = {}
+    if form_data.meta and form_data.meta.capabilities:
+        requested_capabilities = form_data.meta.capabilities
+
+    if not requested_capabilities:
+        return
+
+    # Check each requested capability
+    for key, value in requested_capabilities.items():
+        if isinstance(value, bool) and value and base_capabilities.get(key) is False:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Capability '{key}' is disabled by administrator for this base model",
+            )
+
+
 ###########################
 # GetModels
 ###########################
@@ -154,15 +190,17 @@ async def create_new_model(
             detail=ERROR_MESSAGES.MODEL_ID_TOO_LONG,
         )
 
+    # Validate capabilities against base model (for workspace models)
+    validate_capabilities_against_base_model(form_data)
+
+    model = Models.insert_new_model(form_data, user.id)
+    if model:
+        return model
     else:
-        model = Models.insert_new_model(form_data, user.id)
-        if model:
-            return model
-        else:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail=ERROR_MESSAGES.DEFAULT(),
-            )
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=ERROR_MESSAGES.DEFAULT(),
+        )
 
 
 ############################
@@ -384,6 +422,9 @@ async def update_model_by_id(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=ERROR_MESSAGES.ACCESS_PROHIBITED,
         )
+
+    # Validate capabilities against base model (for workspace models)
+    validate_capabilities_against_base_model(form_data)
 
     model = Models.update_model_by_id(form_data.id, ModelForm(**form_data.model_dump()))
     return model

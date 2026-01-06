@@ -5,7 +5,6 @@
 - Artifacts should be togglable as a tier feature
 - Playground as a feature flag
 
-
 ## Workspace
 - Model, Kennis, Prompts, Tools als tier flags
 - Model creation we need .env selection on the capabilities and features options, including the tools section. Use enable where possible. Build the option to inherit capabilities from the base model, as configured by the admin.

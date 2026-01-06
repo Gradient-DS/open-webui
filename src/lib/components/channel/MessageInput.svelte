@@ -20,6 +20,7 @@
 		getWeekday,
 		extractCurlyBraceWords
 	} from '$lib/utils';
+	import { isFeatureEnabled } from '$lib/utils/features';
 
 	import { getSessionUser } from '$lib/apis/auths';
 
@@ -975,7 +976,7 @@
 								</div>
 
 								<div class="self-end flex space-x-1 mr-1">
-									{#if content === ''}
+									{#if isFeatureEnabled('voice') && content === ''}
 										<Tooltip content={$i18n.t('Record voice')}>
 											<button
 												id="voice-input-button"
