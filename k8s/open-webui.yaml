@@ -318,6 +318,7 @@ spec:
       containers:
       - name: open-webui
         image: ghcr.io/gradient-ds/open-webui:main
+        imagePullPolicy: Always
         ports:
         - containerPort: 8080
 

@@ -4,24 +4,24 @@ export function citationExtension() {
 		level: 'inline' as const,
 
 		start(src: string) {
-			// Trigger on any [number] or 【number】 (Japanese fullwidth brackets)
-			return src.search(/(?:\[(\d[\d,\s]*)\]|【(\d[\d,\s]*)】)/);
+			// Trigger on any [number] or 【number】 or 【number†metadata】 (Japanese fullwidth brackets)
+			return src.search(/(?:\[(\d[\d,\s]*)\]|【(\d[\d,\s]*)(?:†[^】]*)?】)/);
 		},
 
 		tokenizer(src: string) {
 			// Avoid matching footnotes
 			if (/^\[\^/.test(src)) return;
 
-			// Match ONE OR MORE adjacent [1] or [1,2] or 【1】 or 【1,2】 blocks
-			// Example matched: "[1][2,3][4]" or "【1】【2,3】【4】" or mixed
-			const rule = /^(?:\[(?:\d[\d,\s]*)\]|【(?:\d[\d,\s]*)】)+/;
+			// Match ONE OR MORE adjacent [1] or [1,2] or 【1】 or 【1,2】 or 【3†L1-L4】 blocks
+			// Example matched: "[1][2,3][4]" or "【1】【2,3】【4】" or "【3†L1-L4】" or mixed
+			const rule = /^(?:\[(?:\d[\d,\s]*)\]|【(?:\d[\d,\s]*)(?:†[^】]*)?】)+/;
 			const match = rule.exec(src);
 			if (!match) return;
 
 			const raw = match[0];
 
-			// Extract ALL bracket groups inside the big match (both [] and 【】)
-			const groupRegex = /(?:\[([\d,\s]+)\]|【([\d,\s]+)】)/g;
+			// Extract ALL bracket groups inside the big match (both [] and 【】, including 【n†...】)
+			const groupRegex = /(?:\[([\d,\s]+)\]|【([\d,\s]+)(?:†[^】]*)?】)/g;
 			const ids: number[] = [];
 			let m: RegExpExecArray | null;
 
