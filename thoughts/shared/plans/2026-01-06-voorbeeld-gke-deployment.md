@@ -55,6 +55,11 @@ Prepare the GCP project with required APIs and tools.
 - Google Cloud SDK (`gcloud`) installed
 - `kubectl` installed
 - `helm` installed (v3+)
+- `gke-gcloud-auth-plugin` installed (required for kubectl auth):
+  ```bash
+  gcloud components install gke-gcloud-auth-plugin
+  # Ensure PATH includes: /opt/homebrew/share/google-cloud-sdk/bin (macOS)
+  ```
 
 ### Steps
 
@@ -78,7 +83,12 @@ gcloud services enable compute.googleapis.com
 gcloud services enable dns.googleapis.com
 ```
 
-#### 1.3 Verify configuration
+#### 1.3 Enable OS Login (required by org policy)
+```bash
+gcloud compute project-info add-metadata --project=soev-ai-001 --metadata=enable-oslogin=TRUE
+```
+
+#### 1.4 Verify configuration
 ```bash
 # Should show your project and region
 gcloud config list
@@ -104,30 +114,40 @@ gcloud services list --enabled --filter="name:compute.googleapis.com"
 ## Phase 2: Create GKE Cluster
 
 ### Overview
-Create a minimal GKE Standard cluster with one node.
+Create a minimal GKE Standard cluster with one node and dual-stack (IPv4+IPv6) support.
 
 ### Steps
 
-#### 2.1 Create the cluster
+#### 2.1 Create custom VPC for dual-stack
 ```bash
-gcloud container clusters create voorbeeld-cluster \
+gcloud compute networks create demo-vpc --subnet-mode=custom
+```
+
+#### 2.2 Create the cluster
+```bash
+gcloud container clusters create demo-cluster \
   --zone=europe-west4-a \
   --num-nodes=1 \
   --machine-type=e2-standard-2 \
   --disk-size=50GB \
   --enable-ip-alias \
+  --enable-dataplane-v2 \
+  --stack-type=ipv4-ipv6 \
+  --ipv6-access-type=external \
+  --network=demo-vpc \
+  --create-subnetwork name=demo-subnet \
   --no-enable-autoscaling \
   --release-channel=regular
 ```
 
-Note: Using zonal cluster (single zone) to qualify for free tier management fee.
+Note: Using zonal cluster (single zone) to qualify for free tier management fee. Dual-stack requires Dataplane V2 and a custom VPC.
 
-#### 2.2 Get cluster credentials
+#### 2.3 Get cluster credentials
 ```bash
-gcloud container clusters get-credentials voorbeeld-cluster --zone=europe-west4-a
+gcloud container clusters get-credentials demo-cluster --zone=europe-west4-a
 ```
 
-#### 2.3 Verify cluster access
+#### 2.4 Verify cluster access
 ```bash
 kubectl get nodes
 kubectl cluster-info
@@ -145,7 +165,7 @@ kubectl cluster-info
 ```
 
 #### Manual Verification:
-- [ ] GKE Console shows cluster "voorbeeld-cluster" as healthy
+- [ ] GKE Console shows cluster "demo-cluster" as healthy
 - [ ] Node shows status "Ready" with correct machine type
 - [ ] `kubectl get nodes` returns without authentication errors
 
@@ -162,11 +182,11 @@ Reserve a static IP and install ingress-nginx for routing external traffic.
 
 #### 3.1 Reserve a static external IP
 ```bash
-gcloud compute addresses create voorbeeld-ip \
+gcloud compute addresses create demo-ip \
   --region=europe-west4
 
 # Get the IP address (note this down for DNS)
-gcloud compute addresses describe voorbeeld-ip --region=europe-west4 --format="get(address)"
+gcloud compute addresses describe demo-ip --region=europe-west4 --format="get(address)"
 ```
 
 #### 3.2 Add Helm repositories
@@ -176,17 +196,21 @@ helm repo add jetstack https://charts.jetstack.io
 helm repo update
 ```
 
-#### 3.3 Install ingress-nginx
+#### 3.3 Install ingress-nginx with dual-stack
 ```bash
-# Get the static IP into a variable
-STATIC_IP=$(gcloud compute addresses describe voorbeeld-ip --region=europe-west4 --format="get(address)")
+# Get the static IPv4 into a variable
+STATIC_IP=$(gcloud compute addresses describe demo-ip --region=europe-west4 --format="get(address)")
 
 helm install ingress-nginx ingress-nginx/ingress-nginx \
   --namespace ingress-nginx \
   --create-namespace \
   --set controller.service.loadBalancerIP=$STATIC_IP \
-  --set controller.service.externalTrafficPolicy=Local
+  --set controller.service.externalTrafficPolicy=Local \
+  --set controller.service.ipFamilyPolicy=PreferDualStack \
+  --set controller.service.ipFamilies="{IPv4,IPv6}"
 ```
+
+Note: The IPv6 address will be automatically assigned from the subnet's external IPv6 prefix.
 
 #### 3.4 Wait for ingress controller to be ready
 ```bash
@@ -200,22 +224,24 @@ kubectl wait --namespace ingress-nginx \
 
 #### Automated Verification:
 ```bash
-# Should show the static IP
-gcloud compute addresses describe voorbeeld-ip --region=europe-west4 --format="get(address)"
+# Should show the static IPv4
+gcloud compute addresses describe demo-ip --region=europe-west4 --format="get(address)"
 
 # Should show ingress-nginx pods running
 kubectl get pods -n ingress-nginx
 
-# Should show LoadBalancer with EXTERNAL-IP matching static IP
+# Should show LoadBalancer with both IPv4 and IPv6 EXTERNAL-IPs
 kubectl get svc -n ingress-nginx
+kubectl get svc -n ingress-nginx ingress-nginx-controller -o jsonpath='{.status.loadBalancer.ingress}'
 ```
 
 #### Manual Verification:
-- [ ] Static IP is reserved (note down: `____.____.____.____`)
+- [ ] Static IPv4 is reserved (note down: `____.____.____.____`)
+- [ ] IPv6 is assigned (note down: `____:____:____:____:____:____:____:____`)
 - [ ] ingress-nginx-controller pod is Running
-- [ ] LoadBalancer service shows correct EXTERNAL-IP
+- [ ] LoadBalancer service shows both IPv4 and IPv6 EXTERNAL-IPs
 
-**⏸️ CHECKPOINT: Note down the static IP for DNS configuration in Phase 8.**
+**⏸️ CHECKPOINT: Note down both IPs for DNS configuration in Phase 10 (A record for IPv4, AAAA record for IPv6).**
 
 ---
 
@@ -854,9 +880,9 @@ kubectl exec -n open-webui deployment/open-webui -- wget -q -O- http://localhost
 ```
 
 #### Manual Verification:
-- [ ] Open WebUI pod is Running
-- [ ] Health endpoint returns OK
-- [ ] No error logs in `kubectl logs`
+- [x] Open WebUI pod is Running
+- [x] Health endpoint returns OK (returns `{"status":true}`)
+- [x] No error logs in `kubectl logs`
 
 **⏸️ CHECKPOINT: Confirm Open WebUI is healthy before proceeding.**
 
@@ -931,8 +957,8 @@ kubectl get certificate -n open-webui
 ```
 
 #### Manual Verification:
-- [ ] Ingress shows the static IP as ADDRESS
-- [ ] Certificate resource exists (status will be Pending until DNS works)
+- [x] Ingress shows the static IP as ADDRESS (34.34.42.221 + IPv6)
+- [x] Certificate resource exists (Ready=True, DNS was pre-configured)
 
 **⏸️ CHECKPOINT: Note the ingress IP matches your static IP before DNS configuration.**
 
@@ -941,31 +967,41 @@ kubectl get certificate -n open-webui
 ## Phase 10: Configure DNS
 
 ### Overview
-Point `voorbeeld.soev.ai` to the GKE static IP in Strato.
+Point `voorbeeld.soev.ai` to the GKE static IPs (IPv4 + IPv6) in Strato.
 
 ### Steps
 
-#### 10.1 Get your static IP
+#### 10.1 Get your static IPs
 ```bash
-gcloud compute addresses describe voorbeeld-ip --region=europe-west4 --format="get(address)"
+# IPv4
+gcloud compute addresses describe demo-ip --region=europe-west4 --format="get(address)"
+
+# IPv6 (from LoadBalancer)
+kubectl get svc -n ingress-nginx ingress-nginx-controller -o jsonpath='{.status.loadBalancer.ingress[1].ip}'
 ```
 
 #### 10.2 Configure DNS in Strato
 
 1. Log in to Strato admin panel
 2. Navigate to DNS settings for `soev.ai`
-3. Create an **A record**:
+3. Create an **A record** (IPv4):
    - **Name**: `voorbeeld`
    - **Type**: `A`
-   - **Value**: `<your-static-ip>`
+   - **Value**: `<your-ipv4-address>`
    - **TTL**: `300` (5 minutes, for faster propagation during testing)
+4. Create an **AAAA record** (IPv6):
+   - **Name**: `voorbeeld`
+   - **Type**: `AAAA`
+   - **Value**: `<your-ipv6-address>`
+   - **TTL**: `300`
 
 #### 10.3 Verify DNS propagation
 ```bash
 # May take 5-30 minutes for DNS to propagate
-nslookup voorbeeld.soev.ai
-# or
-dig voorbeeld.soev.ai +short
+# Check IPv4
+dig voorbeeld.soev.ai A +short
+# Check IPv6
+dig voorbeeld.soev.ai AAAA +short
 ```
 
 #### 10.4 Wait for TLS certificate
@@ -982,17 +1018,19 @@ kubectl describe certificate open-webui-tls -n open-webui
 
 #### Automated Verification:
 ```bash
-# Should resolve to your static IP
-dig voorbeeld.soev.ai +short
+# Should resolve to your static IPs
+dig voorbeeld.soev.ai A +short
+dig voorbeeld.soev.ai AAAA +short
 
 # Should show Ready=True
 kubectl get certificate -n open-webui
 ```
 
 #### Manual Verification:
-- [ ] `nslookup voorbeeld.soev.ai` returns the correct IP
-- [ ] Certificate shows `Ready: True`
-- [ ] `https://voorbeeld.soev.ai` loads without certificate errors
+- [x] `dig voorbeeld.soev.ai A +short` returns the correct IPv4 (34.34.42.221)
+- [x] `dig voorbeeld.soev.ai AAAA +short` returns the correct IPv6 (2600:1900:4060:116d:8000::)
+- [x] Certificate shows `Ready: True`
+- [ ] `https://voorbeeld.soev.ai` loads without certificate errors (via IPv4 and IPv6)
 
 **⏸️ CHECKPOINT: Confirm DNS and TLS are working before final verification.**
 
@@ -1121,12 +1159,15 @@ To remove the entire deployment:
 kubectl delete namespace open-webui
 
 # Delete cluster
-gcloud container clusters delete voorbeeld-cluster --zone=europe-west4-a
+gcloud container clusters delete demo-cluster --zone=europe-west4-a
 
 # Delete static IP
-gcloud compute addresses delete voorbeeld-ip --region=europe-west4
+gcloud compute addresses delete demo-ip --region=europe-west4
 
-# Remove DNS record in Strato
+# Delete custom VPC (will also delete subnet)
+gcloud compute networks delete demo-vpc --quiet
+
+# Remove DNS records in Strato (A and AAAA)
 ```
 
 ---
@@ -1139,6 +1180,7 @@ gcloud compute addresses delete voorbeeld-ip --region=europe-west4
 - [ ] Multi-replica deployment with Redis
 - [ ] Add network policies for security
 - [ ] Configure pod security standards
+- [ ] Add RabbitMQ + KEDA for event-driven autoscaling (scale workers based on queue depth, scale-to-zero)
 
 ---
 

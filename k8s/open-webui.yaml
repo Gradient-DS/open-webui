@@ -1,0 +1,125 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: open-webui-config
+  namespace: open-webui
+data:
+  ENV: "prod"
+  WEBUI_AUTH: "True"
+  # Database
+  DATABASE_URL: "postgresql://openwebui:$(DATABASE_PASSWORD)@postgres:5432/openwebui"
+  # Web Search
+  ENABLE_RAG_WEB_SEARCH: "True"
+  RAG_WEB_SEARCH_ENGINE: "searxng"
+  SEARXNG_QUERY_URL: "http://searxng:8080/search?q=<query>"
+  RAG_WEB_SEARCH_RESULT_COUNT: "5"
+  # Web Loader (Playwright for JS rendering)
+  RAG_WEB_LOADER_URL_BLACKLIST: ""
+  # Features
+  ENABLE_SIGNUP: "True"
+  DEFAULT_USER_ROLE: "user"
+  # OpenAI-compatible endpoint (configure your actual endpoint)
+  OPENAI_API_BASE_URL: "https://api.openai.com/v1"
+  # Disable Ollama since we're using OpenAI-compatible API
+  ENABLE_OLLAMA_API: "False"
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: open-webui-pvc
+  namespace: open-webui
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: standard-rwo
+  resources:
+    requests:
+      storage: 10Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: open-webui
+  namespace: open-webui
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: open-webui
+  template:
+    metadata:
+      labels:
+        app: open-webui
+    spec:
+      containers:
+      - name: open-webui
+        image: ghcr.io/gradient-ds/open-webui:main
+        ports:
+        - containerPort: 8080
+        envFrom:
+        - configMapRef:
+            name: open-webui-config
+        env:
+        - name: WEBUI_SECRET_KEY
+          valueFrom:
+            secretKeyRef:
+              name: open-webui-secrets
+              key: WEBUI_SECRET_KEY
+        - name: DATABASE_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: open-webui-secrets
+              key: DATABASE_PASSWORD
+        - name: DATABASE_URL
+          value: "postgresql://openwebui:$(DATABASE_PASSWORD)@postgres:5432/openwebui"
+        - name: OPENAI_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: open-webui-secrets
+              key: OPENAI_API_KEY
+        volumeMounts:
+        - name: data
+          mountPath: /app/backend/data
+        resources:
+          requests:
+            memory: "512Mi"
+            cpu: "200m"
+          limits:
+            memory: "2Gi"
+            cpu: "1000m"
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8080
+          initialDelaySeconds: 60
+          periodSeconds: 30
+          timeoutSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8080
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 5
+        startupProbe:
+          httpGet:
+            path: /health
+            port: 8080
+          failureThreshold: 30
+          periodSeconds: 10
+      volumes:
+      - name: data
+        persistentVolumeClaim:
+          claimName: open-webui-pvc
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: open-webui
+  namespace: open-webui
+spec:
+  selector:
+    app: open-webui
+  ports:
+  - port: 8080
+    targetPort: 8080
