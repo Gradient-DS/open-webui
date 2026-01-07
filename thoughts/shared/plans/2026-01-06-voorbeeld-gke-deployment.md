@@ -749,7 +749,7 @@ spec:
     spec:
       containers:
       - name: open-webui
-        image: ghcr.io/open-webui/open-webui:main
+        image: ghcr.io/gradient-ds/open-webui:main
         ports:
         - containerPort: 8080
         envFrom:

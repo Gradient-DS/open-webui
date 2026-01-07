@@ -43,7 +43,7 @@ Open WebUI can be deployed on GKE with the requested stack. The codebase already
 
 | Service | Image | Purpose | Persistence |
 |---------|-------|---------|-------------|
-| `open-webui` | `ghcr.io/open-webui/open-webui:main` | Main application | `/app/backend/data` |
+| `open-webui` | `ghcr.io/gradient-ds/open-webui:main` | Main application | `/app/backend/data` |
 | `postgres` | `postgres:16-alpine` | Database | `/var/lib/postgresql/data` |
 | `searxng` | `searxng/searxng:latest` | Web search | `/etc/searxng` (config) |
 | `playwright` | `mcr.microsoft.com/playwright:v1.57.0-noble` | JS rendering for web loader | None (stateless) |
@@ -635,7 +635,7 @@ spec:
     spec:
       containers:
       - name: open-webui
-        image: ghcr.io/open-webui/open-webui:main
+        image: ghcr.io/gradient-ds/open-webui:main
         ports:
         - containerPort: 8080
         envFrom:
