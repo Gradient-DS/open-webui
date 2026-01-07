@@ -1,0 +1,36 @@
+{
+  "timestamp": "2026-01-07T19:16:02.006542",
+  "base_url": "http://localhost:8080",
+  "iterations": 1,
+  "total_queries": 3,
+  "successful": 3,
+  "failed": 0,
+  "avg_time_ms": 6841.24830533013,
+  "median_time_ms": 6584.040207992075,
+  "min_time_ms": 5453.609083007905,
+  "max_time_ms": 8486.095624990412,
+  "std_dev_ms": 1532.5177522066272,
+  "results": [
+    {
+      "query": "latest news about artificial intelligence",
+      "duration_ms": 8486.095624990412,
+      "status_code": 200,
+      "loaded_count": 5,
+      "error": null
+    },
+    {
+      "query": "python asyncio tutorial",
+      "duration_ms": 6584.040207992075,
+      "status_code": 200,
+      "loaded_count": 5,
+      "error": null
+    },
+    {
+      "query": "best restaurants in amsterdam",
+      "duration_ms": 5453.609083007905,
+      "status_code": 200,
+      "loaded_count": 5,
+      "error": null
+    }
+  ]
+}
