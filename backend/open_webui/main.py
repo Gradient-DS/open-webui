@@ -457,6 +457,8 @@ from open_webui.config import (
     reset_config,
     # soev.ai branding
     SOEV_LOGIN_FOOTER,
+    # Model Whitelist
+    MODEL_WHITELIST,
 )
 from open_webui.env import (
     ENABLE_CUSTOM_MODEL_FALLBACK,
@@ -1509,6 +1511,9 @@ async def get_models(
 @app.get("/api/models/base")
 async def get_base_models(request: Request, user=Depends(get_admin_user)):
     models = await get_all_base_models(request, user=user)
+    # Apply global model whitelist filter (if configured)
+    if MODEL_WHITELIST:
+        models = [m for m in models if m.get("id") in MODEL_WHITELIST]
     return {"data": models}
 
 
