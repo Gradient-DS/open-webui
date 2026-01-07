@@ -16,16 +16,17 @@ spec:
       containers:
       - name: playwright
         image: mcr.microsoft.com/playwright:v1.57.0-noble
+        imagePullPolicy: Always
         command: ["npx", "-y", "playwright@1.57.0", "run-server", "--port", "3000", "--host", "0.0.0.0"]
         ports:
         - containerPort: 3000
         resources:
           requests:
-            memory: "4Gi"
-            cpu: "500m"
-          limits:
             memory: "8Gi"
-            cpu: "2000m"
+            cpu: "1000m"
+          limits:
+            memory: "12Gi"
+            cpu: "3000m"
 ---
 apiVersion: v1
 kind: Service
