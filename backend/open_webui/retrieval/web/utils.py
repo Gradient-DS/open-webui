@@ -485,34 +485,6 @@ class SafePlaywrightURLLoader(PlaywrightURLLoader, RateLimitMixin, URLProcessing
         self.trust_env = trust_env
         self.playwright_timeout = playwright_timeout
 
-    async def _setup_resource_blocking(self, page) -> None:
-        """Block non-essential resources to speed up page loading.
-
-        Blocks images, media, fonts, and stylesheets since we only need text content.
-        Uses fulfill() instead of abort() to avoid HTTP/2 protocol errors.
-        """
-        blocked_types = {"image", "media", "font", "stylesheet"}
-
-        async def handle_route(route):
-            if route.request.resource_type in blocked_types:
-                await route.fulfill(body="", status=200)
-            else:
-                await route.continue_()
-
-        await page.route("**/*", handle_route)
-
-    def _setup_resource_blocking_sync(self, page) -> None:
-        """Sync version of resource blocking setup."""
-        blocked_types = {"image", "media", "font", "stylesheet"}
-
-        def handle_route(route):
-            if route.request.resource_type in blocked_types:
-                route.fulfill(body="", status=200)
-            else:
-                route.continue_()
-
-        page.route("**/*", handle_route)
-
     async def _fetch_single_url(
         self,
         browser,
@@ -528,7 +500,6 @@ class SafePlaywrightURLLoader(PlaywrightURLLoader, RateLimitMixin, URLProcessing
             try:
                 await self._safe_process_url(url)
                 page = await browser.new_page()
-                await self._setup_resource_blocking(page)
                 response = await page.goto(url, timeout=self.playwright_timeout)
                 if response is None:
                     raise ValueError(f"page.goto() returned None for url {url}")
@@ -557,7 +528,6 @@ class SafePlaywrightURLLoader(PlaywrightURLLoader, RateLimitMixin, URLProcessing
                 try:
                     self._safe_process_url_sync(url)
                     page = browser.new_page()
-                    self._setup_resource_blocking_sync(page)
                     response = page.goto(url, timeout=self.playwright_timeout)
                     if response is None:
                         raise ValueError(f"page.goto() returned None for url {url}")

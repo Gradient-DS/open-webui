@@ -1,6 +1,7 @@
 import weaviate
 import re
 import uuid
+from datetime import datetime
 from typing import Any, Dict, List, Optional, Union
 
 from open_webui.retrieval.vector.main import (
@@ -18,30 +19,16 @@ from open_webui.config import (
 )
 
 
-def _convert_uuids_to_strings(obj: Any) -> Any:
-    """
-    Recursively convert UUID objects to strings in nested data structures.
-
-    This function handles:
-    - UUID objects -> string
-    - Dictionaries with UUID values
-    - Lists/Tuples with UUID values
-    - Nested combinations of the above
-
-    Args:
-        obj: Any object that might contain UUIDs
-
-    Returns:
-        The same object structure with UUIDs converted to strings
-    """
+def _make_json_serializable(obj: Any) -> Any:
+    """Recursively convert non-JSON-serializable objects (UUID, datetime) to strings."""
     if isinstance(obj, uuid.UUID):
         return str(obj)
+    elif isinstance(obj, datetime):
+        return obj.isoformat()
     elif isinstance(obj, dict):
-        return {key: _convert_uuids_to_strings(value) for key, value in obj.items()}
+        return {key: _make_json_serializable(value) for key, value in obj.items()}
     elif isinstance(obj, (list, tuple)):
-        return type(obj)(_convert_uuids_to_strings(item) for item in obj)
-    elif isinstance(obj, (str, int, float, bool, type(None))):
-        return obj
+        return type(obj)(_make_json_serializable(item) for item in obj)
     else:
         return obj
 
@@ -125,7 +112,7 @@ class WeaviateClient(VectorDBBase):
 
                 properties = {"text": item["text"]}
                 if item["metadata"]:
-                    clean_metadata = _convert_uuids_to_strings(
+                    clean_metadata = _make_json_serializable(
                         process_metadata(item["metadata"])
                     )
                     clean_metadata.pop("text", None)
@@ -148,7 +135,7 @@ class WeaviateClient(VectorDBBase):
 
                 properties = {"text": item["text"]}
                 if item["metadata"]:
-                    clean_metadata = _convert_uuids_to_strings(
+                    clean_metadata = _make_json_serializable(
                         process_metadata(item["metadata"])
                     )
                     clean_metadata.pop("text", None)
@@ -190,7 +177,7 @@ class WeaviateClient(VectorDBBase):
                 for obj in response.objects:
                     properties = dict(obj.properties) if obj.properties else {}
                     documents.append(properties.pop("text", ""))
-                    metadatas.append(_convert_uuids_to_strings(properties))
+                    metadatas.append(_make_json_serializable(properties))
 
                 # Weaviate has cosine distance, 2 (worst) -> 0 (best). Re-ordering to 0 -> 1
                 raw_distances = [
@@ -257,7 +244,7 @@ class WeaviateClient(VectorDBBase):
             for obj in response.objects:
                 properties = dict(obj.properties) if obj.properties else {}
                 documents.append(properties.pop("text", ""))
-                metadatas.append(_convert_uuids_to_strings(properties))
+                metadatas.append(_make_json_serializable(properties))
 
             return GetResult(
                 **{
@@ -282,7 +269,7 @@ class WeaviateClient(VectorDBBase):
                 ids.append(str(item.uuid))
                 properties = dict(item.properties) if item.properties else {}
                 documents.append(properties.pop("text", ""))
-                metadatas.append(_convert_uuids_to_strings(properties))
+                metadatas.append(_make_json_serializable(properties))
 
             if not ids:
                 return None
