@@ -2582,15 +2582,20 @@
 						{/if}
 
 						<!-- Footer -->
-						<div class="text-center text-xs text-gray-400 dark:text-gray-500 py-1">
+						<div class="flex items-center justify-center gap-1 text-xs text-gray-400 dark:text-gray-500 py-1">
 							<a
 								href="https://soev.ai"
 								target="_blank"
-								class="hover:text-gray-600 dark:hover:text-gray-400"
+								class="inline-flex items-center gap-1 hover:text-gray-600 dark:hover:text-gray-400"
 							>
+								<img
+									src="{WEBUI_BASE_URL}/static/gradient-logo.png"
+									alt="Gradient"
+									class="size-6"
+								/>
 								{$i18n.t('Powered by soev.ai')}
 							</a>
-							<span class="mx-1">·</span>
+							<span>·</span>
 							<span>{$i18n.t('LLMs can make mistakes. Verify important information.')}</span>
 						</div>
 					</div>

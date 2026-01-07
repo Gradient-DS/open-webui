@@ -568,8 +568,13 @@
 							<a
 								href="https://soev.ai"
 								target="_blank"
-								class="mt-2 text-[0.7rem] text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300"
+								class="mt-2 flex items-center justify-center gap-1.5 text-[0.7rem] text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300"
 							>
+								<img
+									src="{WEBUI_BASE_URL}/static/gradient-logo.png"
+									alt="Gradient"
+									class="size-6"
+								/>
 								{$i18n.t('Powered by soev.ai')}
 							</a>
 						</div>
