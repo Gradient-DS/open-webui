@@ -98,6 +98,7 @@ from open_webui.routers import (
 from open_webui.routers.retrieval import (
     get_embedding_function,
     get_reranking_function,
+    check_external_pipeline_health,
     get_ef,
     get_rf,
 )
@@ -230,6 +231,9 @@ from open_webui.config import (
     RAG_EXTERNAL_RERANKER_TIMEOUT,
     RAG_RERANKING_MODEL_AUTO_UPDATE,
     RAG_RERANKING_MODEL_TRUST_REMOTE_CODE,
+    EXTERNAL_PIPELINE_URL,
+    EXTERNAL_PIPELINE_API_KEY,
+    EXTERNAL_PIPELINE_TIMEOUT,
     RAG_EMBEDDING_ENGINE,
     RAG_EMBEDDING_BATCH_SIZE,
     ENABLE_ASYNC_EMBEDDING,
@@ -603,6 +607,27 @@ async def lifespan(app: FastAPI):
 
     asyncio.create_task(periodic_usage_pool_cleanup())
 
+    # Check external pipeline health on startup
+    external_pipeline_url = getattr(app.state.config, "EXTERNAL_PIPELINE_URL", None)
+    if external_pipeline_url and external_pipeline_url.strip() != "":
+        external_pipeline_api_key = getattr(app.state.config, "EXTERNAL_PIPELINE_API_KEY", None)
+        log.info(f"Checking external pipeline health at: {external_pipeline_url}")
+        is_healthy = check_external_pipeline_health(
+            external_pipeline_url=external_pipeline_url,
+            external_pipeline_api_key=external_pipeline_api_key,
+            timeout=5,
+        )
+        if is_healthy:
+            log.info("✓ External pipeline is healthy and ready")
+        else:
+            log.warning(
+                f"⚠ External pipeline at {external_pipeline_url} is not accessible or unhealthy. "
+                f"File processing will fall back to internal pipeline. "
+                f"Ensure the pipeline is running and accessible."
+            )
+    else:
+        log.info("External pipeline is disabled (EXTERNAL_PIPELINE_URL not set or empty). Using internal pipeline only.")
+
     if app.state.config.ENABLE_BASE_MODELS_CACHE:
         await get_all_models(
             Request(
@@ -901,6 +926,12 @@ app.state.config.RAG_RERANKING_MODEL = RAG_RERANKING_MODEL
 app.state.config.RAG_EXTERNAL_RERANKER_URL = RAG_EXTERNAL_RERANKER_URL
 app.state.config.RAG_EXTERNAL_RERANKER_API_KEY = RAG_EXTERNAL_RERANKER_API_KEY
 app.state.config.RAG_EXTERNAL_RERANKER_TIMEOUT = RAG_EXTERNAL_RERANKER_TIMEOUT
+
+# Add these three lines:
+app.state.config.EXTERNAL_PIPELINE_URL = EXTERNAL_PIPELINE_URL
+app.state.config.EXTERNAL_PIPELINE_API_KEY = EXTERNAL_PIPELINE_API_KEY
+app.state.config.EXTERNAL_PIPELINE_TIMEOUT = EXTERNAL_PIPELINE_TIMEOUT
+
 
 app.state.config.RAG_TEMPLATE = RAG_TEMPLATE
 
