@@ -1895,21 +1895,34 @@ def process_file(
                             )
                             
                             # Extract chunks from pipeline result
-                            # New API response structure:
+                            # API response structure:
                             # {
                             #   "success": bool,
                             #   "chunk_count": int,
-                            #   "chunks": [{"id": str, "text": str, "metadata": dict}],
-                            #   ...
+                            #   "chunks": [
+                            #     {
+                            #       "chunk_id": str,
+                            #       "content": str,
+                            #       "embedding_text": str,
+                            #       "metadata": dict,
+                            #       "trace": dict,
+                            #       ...
+                            #     }
+                            #   ]
                             # }
                             chunks = pipeline_result.get("chunks", [])
                             if not chunks:
                                 raise ValueError("External pipeline returned no chunks")
                             
-                            # Combine text from all chunks for file content
-                            text_content = " ".join([chunk.get("text", "") for chunk in chunks])
+                            log.info(f"Received {len(chunks)} chunks from external pipeline")
                             
-                            # Update file content
+                            # Combine text from all chunks for file content
+                            text_content = " ".join([
+                                chunk.get("embedding_text", chunk.get("content", "")) 
+                                for chunk in chunks
+                            ])
+                            
+                            # Update file content and hash
                             Files.update_file_data_by_id(
                                 file.id,
                                 {"content": text_content},
@@ -1917,114 +1930,38 @@ def process_file(
                             hash = calculate_sha256_string(text_content)
                             Files.update_file_hash_by_id(file.id, hash)
                             
-                            # Prepare file metadata
-                            file_metadata = {
-                                "file_id": file.id,
-                                "name": file.filename,
-                                "created_by": file.user_id,
-                                "source": file.filename,
-                                "hash": hash,
-                                **file.meta,
-                            }
-                            
-                            # Generate embeddings for chunks returned from external pipeline
-                            # Extract text from chunks
-                            chunk_texts = [chunk.get("text", "") for chunk in chunks]
-                            
-                            # Get embedding function
-                            embedding_function = get_embedding_function(
-                                request.app.state.config.RAG_EMBEDDING_ENGINE,
-                                request.app.state.config.RAG_EMBEDDING_MODEL,
-                                request.app.state.ef,
-                                (
-                                    request.app.state.config.RAG_OPENAI_API_BASE_URL
-                                    if request.app.state.config.RAG_EMBEDDING_ENGINE == "openai"
-                                    else (
-                                        request.app.state.config.RAG_OLLAMA_BASE_URL
-                                        if request.app.state.config.RAG_EMBEDDING_ENGINE == "ollama"
-                                        else request.app.state.config.RAG_AZURE_OPENAI_BASE_URL
-                                    )
-                                ),
-                                (
-                                    request.app.state.config.RAG_OPENAI_API_KEY
-                                    if request.app.state.config.RAG_EMBEDDING_ENGINE == "openai"
-                                    else (
-                                        request.app.state.config.RAG_OLLAMA_API_KEY
-                                        if request.app.state.config.RAG_EMBEDDING_ENGINE == "ollama"
-                                        else request.app.state.config.RAG_AZURE_OPENAI_API_KEY
-                                    )
-                                ),
-                                request.app.state.config.RAG_EMBEDDING_BATCH_SIZE,
-                                azure_api_version=(
-                                    request.app.state.config.RAG_AZURE_OPENAI_API_VERSION
-                                    if request.app.state.config.RAG_EMBEDDING_ENGINE == "azure_openai"
-                                    else None
-                                ),
-                                enable_async=request.app.state.config.ENABLE_ASYNC_EMBEDDING,
-                            )
-                            
-                            # Generate embeddings
-                            log.info(f"Generating embeddings for {len(chunk_texts)} chunks from external pipeline")
-                            embeddings = asyncio.run(
-                                embedding_function(
-                                    list(map(lambda x: x.replace("\n", " "), chunk_texts)),
-                                    prefix=RAG_EMBEDDING_CONTENT_PREFIX,
-                                    user=user,
+                            # Convert external chunks to Document objects
+                            # This allows reuse of save_docs_to_vector_db() which handles:
+                            # - Embedding generation
+                            # - Deduplication
+                            # - Vector DB insertion
+                            docs = [
+                                Document(
+                                    page_content=chunk.get("embedding_text", chunk.get("content", "")),
+                                    metadata={
+                                        **chunk.get("metadata", {}),
+                                        "name": file.filename,
+                                        "created_by": file.user_id,
+                                        "file_id": file.id,
+                                        "source": file.filename,
+                                        "chunk_id": chunk.get("chunk_id"),
+                                    },
                                 )
-                            )
-                            log.info(f"Generated {len(embeddings)} embeddings")
+                                for chunk in chunks
+                            ]
                             
-                            # Prepare items with embeddings
-                            items = []
-                            for idx, chunk in enumerate(chunks):
-                                # Merge chunk metadata from external pipeline with file metadata
-                                # Chunk metadata from external pipeline includes processing info (trace, etc.)
-                                chunk_metadata = chunk.get("metadata", {})
-                                metadata = {**file_metadata, **chunk_metadata}
-                                
-                                # Add embedding config to metadata
-                                metadata["embedding_config"] = {
-                                    "engine": request.app.state.config.RAG_EMBEDDING_ENGINE,
-                                    "model": request.app.state.config.RAG_EMBEDDING_MODEL,
-                                }
-                                
-                                items.append({
-                                    "id": chunk.get("id", str(uuid.uuid4())),
-                                    "text": chunk.get("text", ""),
-                                    "vector": embeddings[idx],
-                                    "metadata": metadata,
-                                })
-                            
-                            # Check for duplicates
-                            if file_metadata and "hash" in file_metadata:
-                                result = VECTOR_DB_CLIENT.query(
-                                    collection_name=collection_name,
-                                    filter={"hash": file_metadata["hash"]},
-                                )
-                                
-                                if result is not None:
-                                    existing_doc_ids = result.ids[0]
-                                    if existing_doc_ids:
-                                        log.info(f"Document with hash {file_metadata['hash']} already exists")
-                                        raise ValueError(ERROR_MESSAGES.DUPLICATE_CONTENT)
-                            
-                            # Check collection and insert
-                            if VECTOR_DB_CLIENT.has_collection(collection_name=collection_name):
-                                log.info(f"collection {collection_name} already exists")
-                                if form_data.collection_name:
-                                    # For knowledge bases, add to existing collection
-                                    pass
-                            
-                            # Insert into Weaviate
-                            log.info(f"Adding {len(items)} items to collection {collection_name}")
-                            VECTOR_DB_CLIENT.insert(
+                            # Use existing function to handle embedding, dedup, and insert
+                            result = save_docs_to_vector_db(
+                                request,
+                                docs=docs,
                                 collection_name=collection_name,
-                                items=items,
+                                metadata={"file_id": file.id, "name": file.filename, "hash": hash},
+                                split=False,  # External pipeline already chunked
+                                add=(True if form_data.collection_name else False),
+                                user=user,
                             )
                             
-                            result = True
-                            
-                            log.info(f"added {len(chunks)} chunks to collection {collection_name} via external pipeline")
+                            log.info(f"Saved {len(chunks)} chunks to collection {collection_name} via external pipeline")
                             
                             if result:
                                 Files.update_file_metadata_by_id(
