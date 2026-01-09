@@ -7,6 +7,7 @@ import asyncio
 
 import re
 import uuid
+import requests
 from datetime import datetime
 from pathlib import Path
 from typing import Iterator, List, Optional, Sequence, Union
@@ -42,6 +43,12 @@ from open_webui.storage.provider import Storage
 
 
 from open_webui.retrieval.vector.factory import VECTOR_DB_CLIENT
+
+# External pipeline integration
+from open_webui.routers.external_retrieval import (
+    check_external_pipeline_health,
+    process_file_with_external_pipeline,
+)
 
 # Document loaders
 from open_webui.retrieval.loaders.main import Loader
@@ -1266,6 +1273,82 @@ async def update_rag_config(
 ####################################
 
 
+def save_embeddings_to_vector_db(
+    collection_name: str,
+    chunks: List[dict],
+    file_metadata: Optional[dict] = None,
+    overwrite: bool = False,
+    add: bool = False,
+) -> bool:
+    """
+    Save pre-computed embeddings directly to vector database.
+    Bypasses parsing, chunking, and embedding generation.
+    
+    Args:
+        collection_name: Name of the collection to store in
+        chunks: List of chunks with structure:
+            {
+                "text": str,
+                "embedding": List[float],
+                "metadata": dict (optional)
+            }
+        file_metadata: Optional file-level metadata to merge with chunk metadata
+        overwrite: If True, delete existing collection before inserting
+        add: If True, add to existing collection (default: False)
+    
+    Returns:
+        bool: True if successful
+    """
+    try:
+        if not chunks:
+            raise ValueError("No chunks provided")
+        
+        # Check if collection exists
+        if VECTOR_DB_CLIENT.has_collection(collection_name=collection_name):
+            log.info(f"collection {collection_name} already exists")
+            
+            if overwrite:
+                VECTOR_DB_CLIENT.delete_collection(collection_name=collection_name)
+                log.info(f"deleting existing collection {collection_name}")
+            elif add is False:
+                log.info(
+                    f"collection {collection_name} already exists, overwrite is False and add is False"
+                )
+                return True
+        
+        # Prepare items for insertion
+        items = []
+        for chunk in chunks:
+            # Validate chunk structure
+            if "text" not in chunk or "embedding" not in chunk:
+                raise ValueError("Chunk must contain 'text' and 'embedding' fields")
+            
+            # Merge metadata
+            metadata = chunk.get("metadata", {})
+            if file_metadata:
+                metadata = {**metadata, **file_metadata}
+            
+            items.append({
+                "id": chunk.get("id", str(uuid.uuid4())),
+                "text": chunk["text"],
+                "vector": chunk["embedding"],
+                "metadata": metadata,
+            })
+        
+        log.info(f"adding {len(items)} items to collection {collection_name}")
+        VECTOR_DB_CLIENT.insert(
+            collection_name=collection_name,
+            items=items,
+        )
+        
+        log.info(f"added {len(items)} items to collection {collection_name}")
+        return True
+        
+    except Exception as e:
+        log.exception(e)
+        raise e
+
+
 def save_docs_to_vector_db(
     request: Request,
     docs,
@@ -1565,6 +1648,7 @@ def process_file(
                 file_path = file.path
                 if file_path:
                     file_path = Storage.get_file(file_path)
+                    
                     loader = Loader(
                         engine=request.app.state.config.CONTENT_EXTRACTION_ENGINE,
                         user=user,
@@ -1597,9 +1681,53 @@ def process_file(
                         MINERU_API_TIMEOUT=request.app.state.config.MINERU_API_TIMEOUT,
                         MINERU_PARAMS=request.app.state.config.MINERU_PARAMS,
                     )
-                    docs = loader.load(
-                        file.filename, file.meta.get("content_type"), file_path
+                    
+                    # Try external pipeline first by default
+                    external_pipeline_url = getattr(
+                        request.app.state.config, "EXTERNAL_PIPELINE_URL", None
                     )
+                    
+                    # Check if external pipeline is enabled (not empty string)
+                    use_external_pipeline = external_pipeline_url and external_pipeline_url.strip() != ""
+                    
+                    if use_external_pipeline:
+                        # Try external pipeline first (default behavior)
+                        log.info(f"Attempting to use external pipeline for file: {file.filename}")
+                        
+                        try:
+                            # Process file with external pipeline
+                            # All logic is in external_retrieval.py for maintainability
+                            return process_file_with_external_pipeline(
+                                request=request,
+                                file=file,
+                                file_path=file_path,
+                                collection_name=collection_name,
+                                form_data=form_data,
+                                loader_instance=loader,
+                                save_docs_to_vector_db_func=save_docs_to_vector_db,
+                                user=user,
+                            )
+                        except Exception as e:
+                            # External pipeline failed - fall back to internal pipeline with warning
+                            log.warning(
+                                f"External pipeline failed for file {file.filename}: {e}. "
+                                f"Falling back to internal pipeline."
+                            )
+                            log.warning(
+                                f"To disable external pipeline, set EXTERNAL_PIPELINE_URL to empty string. "
+                                f"To fix external pipeline, ensure it's running at {external_pipeline_url} and accessible."
+                            )
+                            # Continue to internal pipeline fallback below
+                            use_external_pipeline = False
+                    
+                    # Use internal pipeline if external is disabled or failed
+                    if not use_external_pipeline:
+                        log.info(f"Using internal pipeline for file: {file.filename}")
+                        # Internal pipeline: parsing, chunking, embedding
+                        # Reuse the loader created above
+                        docs = loader.load(
+                            file.filename, file.meta.get("content_type"), file_path
+                        )
 
                     docs = [
                         Document(

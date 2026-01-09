@@ -2850,6 +2850,27 @@ RAG_EXTERNAL_RERANKER_TIMEOUT = PersistentConfig(
     os.environ.get("RAG_EXTERNAL_RERANKER_TIMEOUT", ""),
 )
 
+# External Pipeline Configuration
+# Default: http://localhost:6006 (external pipeline is default)
+# Set to empty string to disable external pipeline and use internal processing
+EXTERNAL_PIPELINE_URL = PersistentConfig(
+    "EXTERNAL_PIPELINE_URL",        
+    "rag.external_pipeline_url",
+    os.environ.get("EXTERNAL_PIPELINE_URL", "http://localhost:6006"),
+)
+
+EXTERNAL_PIPELINE_API_KEY = PersistentConfig(
+    "EXTERNAL_PIPELINE_API_KEY",
+    "rag.external_pipeline_api_key",
+    os.environ.get("EXTERNAL_PIPELINE_API_KEY", ""),
+)
+
+EXTERNAL_PIPELINE_TIMEOUT = PersistentConfig(
+    "EXTERNAL_PIPELINE_TIMEOUT",
+    "rag.external_pipeline_timeout",
+    int(os.environ.get("EXTERNAL_PIPELINE_TIMEOUT", "120")),
+)
+
 
 RAG_TEXT_SPLITTER = PersistentConfig(
     "RAG_TEXT_SPLITTER",
