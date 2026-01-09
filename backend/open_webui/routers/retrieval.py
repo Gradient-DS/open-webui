@@ -1273,10 +1273,6 @@ async def update_rag_config(
 ####################################
 
 
-# External pipeline helper functions moved to external_retrieval.py
-# See: backend/open_webui/routers/external_retrieval.py
-
-
 def save_embeddings_to_vector_db(
     collection_name: str,
     chunks: List[dict],
@@ -1653,7 +1649,6 @@ def process_file(
                 if file_path:
                     file_path = Storage.get_file(file_path)
                     
-                    # Create loader once - will be reused for both external and internal pipelines
                     loader = Loader(
                         engine=request.app.state.config.CONTENT_EXTRACTION_ENGINE,
                         user=user,
@@ -1687,7 +1682,7 @@ def process_file(
                         MINERU_PARAMS=request.app.state.config.MINERU_PARAMS,
                     )
                     
-                    # External pipeline is now the default - try it first
+                    # Try external pipeline first by default
                     external_pipeline_url = getattr(
                         request.app.state.config, "EXTERNAL_PIPELINE_URL", None
                     )

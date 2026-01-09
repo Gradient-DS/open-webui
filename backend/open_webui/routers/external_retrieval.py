@@ -279,8 +279,9 @@ def process_file_with_external_pipeline(
     log.info(f"Received {len(chunks)} chunks from external pipeline")
     
     # Combine text from all chunks for file content
+    # External pipeline maps the appropriate field to "text"
     text_content = " ".join([
-        chunk.get("embedding_text", chunk.get("content", "")) 
+        chunk.get("text", "")
         for chunk in chunks
     ])
     
@@ -299,7 +300,7 @@ def process_file_with_external_pipeline(
     # - Vector DB insertion
     docs = [
         Document(
-            page_content=chunk.get("embedding_text", chunk.get("content", "")),
+            page_content=chunk.get("text", ""),
             metadata={
                 **chunk.get("metadata", {}),
                 "name": file.filename,
