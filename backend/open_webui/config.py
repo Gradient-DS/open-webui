@@ -2856,7 +2856,7 @@ RAG_EXTERNAL_RERANKER_TIMEOUT = PersistentConfig(
 EXTERNAL_PIPELINE_URL = PersistentConfig(
     "EXTERNAL_PIPELINE_URL",        
     "rag.external_pipeline_url",
-    os.environ.get("EXTERNAL_PIPELINE_URL", "http://localhost:6006"),
+    os.environ.get("EXTERNAL_PIPELINE_URL", ""),
 )
 
 EXTERNAL_PIPELINE_API_KEY = PersistentConfig(
