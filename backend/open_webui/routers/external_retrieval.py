@@ -62,21 +62,20 @@ def call_external_pipeline(
     loader_instance=None,
 ) -> dict:
     """
-    Load document text and call external pipeline to process it into chunks.
+    Load document text and call external pipeline to chunk it.
     
     This function:
-    1. Loads the document using Open WebUI's internal loader to extract text
-    2. Sends the extracted text (UTF-8 encoded bytes) + metadata to external pipeline
+    1. Loads the document using Open WebUI's loader (which may use external parsing via
+       EXTERNAL_DOCUMENT_LOADER_URL if configured)
+    2. Sends the extracted text to the /chunk endpoint for chunking
     3. Receives processed chunks back from the external pipeline
     
-    The external pipeline is expected to handle:
-    - Metadata generation
-    - Document parsing/formatting
+    The external pipeline's /chunk endpoint handles:
     - Text chunking
     - Chunk formatting for embedding
     
     Open WebUI handles:
-    - Document loading/text extraction
+    - Document loading/text extraction (via loader, potentially using external parser)
     - Embedding generation (after receiving chunks)
     - Vector database storage
     
@@ -96,29 +95,26 @@ def call_external_pipeline(
                 "filename": str,
                 "chunk_count": int,
                 "chunks": List[{
-                    "chunk_id": str,
-                    "content": str,
-                    "embedding_text": str,
+                    "id": str,
+                    "text": str,
                     "metadata": dict,
-                    "trace": dict,
-                    ...
                 }],
                 "errors": List[dict],
                 "processing_time": float
             }
     """
     try:
-        headers = {}
+        headers = {"Content-Type": "application/json"}
         if external_pipeline_api_key:
             headers["Authorization"] = f"Bearer {external_pipeline_api_key}"
             headers["X-API-Key"] = external_pipeline_api_key
         
-        # Construct full URL with /process-document endpoint
+        # Construct full URL with /chunk endpoint
         base_url = external_pipeline_url.rstrip("/")
-        endpoint_url = f"{base_url}/process-document"
+        endpoint_url = f"{base_url}/chunk"
         
         # Determine file type from content_type or filename
-        filetype = "PDF"  # Default
+        filetype = "TXT"  # Default - text is already parsed
         if content_type:
             if "pdf" in content_type.lower():
                 filetype = "PDF"
@@ -132,44 +128,46 @@ def call_external_pipeline(
                 filetype = "TXT"
         
         # Load document using Open WebUI's loader to extract text
-        log.info(f"Loading document locally: {filename} (type: {filetype})")
+        # If EXTERNAL_DOCUMENT_LOADER_URL is configured, this will use the external parser
+        log.info(f"Loading document: {filename} (type: {filetype})")
         
         if loader_instance is None:
-            # Create loader instance - this should not happen if passed from process_file
             log.warning("No loader instance provided, external pipeline may not work correctly")
             raise Exception("Loader instance required for external pipeline")
         
         # Load document and extract text
         # The loader returns a list of Document objects with page_content
+        # If using ExternalDocumentLoader, the text is already parsed by the external API
         docs = loader_instance.load(filename, content_type, file_path)
         
         if not docs:
             raise Exception("Loader returned no documents")
         
-        # Combine all document page_content into single text with page markers
-        # The loader already adds page markers like "--- Page N ---"
+        # Combine all document page_content into single text
         text_content = "\n".join([doc.page_content for doc in docs])
-        text_bytes = text_content.encode('utf-8')
+        
+        # Get total pages from metadata if available
+        total_pages = 1
+        if docs and hasattr(docs[0], 'metadata'):
+            total_pages = docs[0].metadata.get('total_pages', len(docs))
         
         log.info(
-            f"Loaded document locally: {len(text_bytes)} bytes extracted from {len(docs)} pages/sections"
+            f"Loaded document: {len(text_content)} chars from {len(docs)} pages/sections"
         )
         
-        # Prepare form data
-        files = {
-            "file": (filename, text_bytes, "text/plain; charset=utf-8")
-        }
-        data = {
+        # Prepare JSON payload for /chunk endpoint
+        payload = {
+            "text": text_content,
             "filename": filename,
             "filetype": filetype,
             "title": filename,
+            "total_pages": total_pages,
         }
         
-        log.info(f"Calling external pipeline: {endpoint_url} with pre-loaded text")
+        log.info(f"Calling external pipeline: {endpoint_url} for chunking")
         response = requests.post(
             endpoint_url,
-            files=files,
-            data=data,
+            json=payload,
             headers=headers,
             timeout=timeout,
         )
@@ -177,7 +175,7 @@ def call_external_pipeline(
         
         result = response.json()
         chunks_count = len(result.get("chunks", []))
-        log.info(f"External pipeline returned {chunks_count} processed chunks")
+        log.info(f"External pipeline returned {chunks_count} chunks")
         return result
             
     except requests.exceptions.Timeout as e:
@@ -207,10 +205,15 @@ def process_file_with_external_pipeline(
     Process a file using the external pipeline.
     
     This is the main entry point for external pipeline processing. It:
-    1. Calls the external pipeline to get processed chunks
+    1. Calls the external pipeline to get processed chunks (via /chunk endpoint)
     2. Converts chunks to Document objects
     3. Uses save_docs_to_vector_db to handle embedding and storage
     4. Updates file metadata and status
+    
+    The flow is:
+    1. loader_instance.load() extracts text (may use external parser if configured)
+    2. Text is sent to /chunk endpoint for chunking
+    3. Chunks are embedded and stored in vector DB
     
     Args:
         request: FastAPI request object (contains app.state.config)
@@ -242,10 +245,10 @@ def process_file_with_external_pipeline(
     log.info(f"Processing file with external pipeline: {file.filename}")
     
     # Call external pipeline with loader instance
-    # The external pipeline will:
-    # 1. Use the loader to extract text from the document
-    # 2. Send the extracted text to the external API
-    # 3. Receive processed chunks back
+    # The flow is:
+    # 1. loader_instance.load() - extracts text (uses external parser if EXTERNAL_DOCUMENT_LOADER_URL is set)
+    # 2. Sends text to /chunk endpoint for chunking
+    # 3. Returns chunks ready for embedding
     pipeline_result = call_external_pipeline(
         file_path=file_path,
         filename=file.filename,
@@ -257,18 +260,15 @@ def process_file_with_external_pipeline(
     )
     
     # Extract chunks from pipeline result
-    # API response structure:
+    # /chunk endpoint response structure:
     # {
     #   "success": bool,
     #   "chunk_count": int,
     #   "chunks": [
     #     {
-    #       "chunk_id": str,
-    #       "content": str,
-    #       "embedding_text": str,
+    #       "id": str,
+    #       "text": str,
     #       "metadata": dict,
-    #       "trace": dict,
-    #       ...
     #     }
     #   ]
     # }
@@ -279,7 +279,6 @@ def process_file_with_external_pipeline(
     log.info(f"Received {len(chunks)} chunks from external pipeline")
     
     # Combine text from all chunks for file content
-    # External pipeline maps the appropriate field to "text"
     text_content = " ".join([
         chunk.get("text", "")
         for chunk in chunks
@@ -307,7 +306,7 @@ def process_file_with_external_pipeline(
                 "created_by": file.user_id,
                 "file_id": file.id,
                 "source": file.filename,
-                "chunk_id": chunk.get("chunk_id"),
+                "chunk_id": chunk.get("id"),  # Use "id" from /chunk response
             },
         )
         for chunk in chunks
