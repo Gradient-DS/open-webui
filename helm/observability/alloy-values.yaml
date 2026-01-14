@@ -1,0 +1,139 @@
+# Central Alloy instance for observability namespace
+# Receives OTLP from applications and forwards to Mimir/Loki/Tempo
+
+alloy:
+  configMap:
+    create: true
+    content: |
+      // ======================
+      // OTLP Receiver (from apps)
+      // ======================
+      otelcol.receiver.otlp "default" {
+        grpc {
+          endpoint = "0.0.0.0:4317"
+        }
+        http {
+          endpoint = "0.0.0.0:4318"
+        }
+        output {
+          metrics = [otelcol.processor.batch.default.input]
+          logs    = [otelcol.processor.batch.default.input]
+          traces  = [otelcol.processor.batch.default.input]
+        }
+      }
+
+      // ======================
+      // Batch Processor
+      // ======================
+      otelcol.processor.batch "default" {
+        output {
+          metrics = [otelcol.exporter.otlphttp.mimir.input]
+          logs    = [otelcol.exporter.loki.default.input]
+          traces  = [otelcol.exporter.otlp.tempo.input]
+        }
+      }
+
+      // ======================
+      // Export Metrics to Mimir via OTLP HTTP
+      // ======================
+      otelcol.exporter.otlphttp "mimir" {
+        client {
+          endpoint = "http://mimir-nginx.observability.svc:80/otlp"
+          headers = {
+            "X-Scope-OrgID" = "soev",
+          }
+          tls {
+            insecure = true
+          }
+        }
+      }
+
+      // ======================
+      // Export Logs to Loki (multi-tenant)
+      // ======================
+      otelcol.exporter.loki "default" {
+        forward_to = [loki.write.default.receiver]
+      }
+
+      loki.write "default" {
+        endpoint {
+          url = "http://loki.observability.svc:3100/loki/api/v1/push"
+          headers = {
+            "X-Scope-OrgID" = "soev",
+          }
+        }
+      }
+
+      // ======================
+      // Export Traces to Tempo (multi-tenant)
+      // ======================
+      otelcol.exporter.otlp "tempo" {
+        client {
+          endpoint = "tempo.observability.svc:4317"
+          headers = {
+            "X-Scope-OrgID" = "soev",
+          }
+          tls {
+            insecure = true
+          }
+        }
+      }
+
+      // ======================
+      // Kubernetes Pod Log Collection
+      // ======================
+      discovery.kubernetes "pods" {
+        role = "pod"
+        namespaces {
+          names = ["open-webui", "observability"]
+        }
+      }
+
+      discovery.relabel "pods" {
+        targets = discovery.kubernetes.pods.targets
+        rule {
+          source_labels = ["__meta_kubernetes_namespace"]
+          target_label  = "namespace"
+        }
+        rule {
+          source_labels = ["__meta_kubernetes_pod_name"]
+          target_label  = "pod"
+        }
+        rule {
+          source_labels = ["__meta_kubernetes_pod_container_name"]
+          target_label  = "container"
+        }
+      }
+
+      loki.source.kubernetes "pods" {
+        targets    = discovery.relabel.pods.output
+        forward_to = [loki.write.default.receiver]
+      }
+
+  # Alloy service configuration
+  extraPorts:
+    - name: otlp-grpc
+      port: 4317
+      targetPort: 4317
+      protocol: TCP
+    - name: otlp-http
+      port: 4318
+      targetPort: 4318
+      protocol: TCP
+
+  # Resource limits
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
+# Enable RBAC for Kubernetes discovery
+rbac:
+  create: true
+
+# Service account
+serviceAccount:
+  create: true

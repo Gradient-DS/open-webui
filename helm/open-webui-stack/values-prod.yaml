@@ -23,7 +23,7 @@ openWebui:
     adminName: "Lex"
 
     # CORS - update to match your domain
-    corsAllowOrigin: "https://voorbeeld.soev.ai"
+    corsAllowOrigin: "https://demo.soev.ai"
 
     # LLM Provider model filtering (per-connection, doesn't affect workspace agents)
     # This replaces MODEL_WHITELIST which blocked workspace agents
@@ -32,6 +32,19 @@ openWebui:
         enable: true
         model_ids:
           - "openai/gpt-oss-120b"
+
+    # OpenTelemetry Configuration - sends telemetry to observability stack
+    telemetry:
+      otel:
+        enabled: true
+        traces: true
+        metrics: true
+        logs: true
+        endpoint: "http://alloy.observability.svc:4317"
+        serviceName: "open-webui-prod"
+        insecure: true
+        resourceAttributes: "deployment.environment=production,k8s.cluster.name=demo-cluster"
+        tenantId: "soev"  # For enterprise deployments, use "enterprise-{customer}"
 
 # -----------------------------------------------------------------------------
 # Ingress - nginx with cert-manager
@@ -47,14 +60,14 @@ ingress:
     nginx.ingress.kubernetes.io/proxy-http-version: "1.1"
     nginx.ingress.kubernetes.io/proxy-buffering: "off"
   hosts:
-    - host: voorbeeld.soev.ai
+    - host: demo.soev.ai
       paths:
         - path: /
           pathType: Prefix
   tls:
     - secretName: open-webui-tls
       hosts:
-        - voorbeeld.soev.ai
+        - demo.soev.ai
 
 # -----------------------------------------------------------------------------
 # Crawl4AI - Increase resources for better scraping performance
@@ -69,7 +82,20 @@ crawl4ai:
       cpu: "4000m"
 
 # -----------------------------------------------------------------------------
-# Secrets - MUST be provided via --set or values-secrets.yaml
+# External Secrets Operator - Fetch secrets from GCP Secret Manager
+# -----------------------------------------------------------------------------
+externalSecrets:
+  enabled: true
+  gcpProject: "soev-ai-001"
+  refreshInterval: "1h"
+  # Using SA key since Workload Identity is not enabled on cluster
+  gcpCredentialsSecret:
+    name: gcp-secret-manager-credentials
+    key: secret-access-credentials
+    namespace: external-secrets
+
+# -----------------------------------------------------------------------------
+# Secrets - Only used when externalSecrets.enabled=false
 # -----------------------------------------------------------------------------
 # secrets:
 #   webuiSecretKey: ""      # Generate: openssl rand -hex 32

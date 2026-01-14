@@ -1,0 +1,95 @@
+# Admin Grafana instance - can see ALL tenants
+# For per-tenant Grafana, deploy separate instances with tenant-specific headers
+
+# Admin credentials (store in GCP Secret Manager for production)
+adminUser: admin
+adminPassword: admin  # CHANGE THIS - or use ESO
+
+# Persistence
+persistence:
+  enabled: true
+  size: 5Gi
+
+# Data sources with multi-tenant support
+# Admin Grafana uses httpHeaderName1 to query specific tenants
+datasources:
+  datasources.yaml:
+    apiVersion: 1
+    datasources:
+      # Mimir - Metrics (default tenant: soev)
+      - name: Mimir
+        type: prometheus
+        url: http://mimir-nginx.observability.svc:80/prometheus
+        access: proxy
+        isDefault: true
+        jsonData:
+          httpMethod: POST
+          httpHeaderName1: "X-Scope-OrgID"
+        secureJsonData:
+          httpHeaderValue1: "soev"
+
+      # Mimir - All Tenants (for admin view)
+      - name: Mimir (All Tenants)
+        type: prometheus
+        url: http://mimir-nginx.observability.svc:80/prometheus
+        access: proxy
+        jsonData:
+          httpMethod: POST
+          httpHeaderName1: "X-Scope-OrgID"
+        secureJsonData:
+          httpHeaderValue1: "soev|enterprise-.*"
+
+      # Loki - Logs (default tenant: soev)
+      - name: Loki
+        type: loki
+        url: http://loki.observability.svc:3100
+        access: proxy
+        uid: loki
+        jsonData:
+          httpHeaderName1: "X-Scope-OrgID"
+          derivedFields:
+            - datasourceUid: tempo
+              matcherRegex: '"trace_id":"([a-f0-9]+)"'
+              name: TraceID
+              url: '$${__value.raw}'
+        secureJsonData:
+          httpHeaderValue1: "soev"
+
+      # Tempo - Traces (default tenant: soev)
+      - name: Tempo
+        type: tempo
+        url: http://tempo.observability.svc:3200
+        access: proxy
+        uid: tempo
+        jsonData:
+          httpHeaderName1: "X-Scope-OrgID"
+          tracesToLogsV2:
+            datasourceUid: loki
+            filterByTraceID: true
+          serviceMap:
+            datasourceUid: mimir
+        secureJsonData:
+          httpHeaderValue1: "soev"
+
+# Resources
+resources:
+  requests:
+    cpu: 100m
+    memory: 256Mi
+  limits:
+    cpu: 500m
+    memory: 512Mi
+
+# Ingress - Admin Grafana at grafana.soev.ai
+ingress:
+  enabled: true
+  ingressClassName: nginx
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+  hosts:
+    - grafana.soev.ai
+  tls:
+    - secretName: grafana-tls
+      hosts:
+        - grafana.soev.ai

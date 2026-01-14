@@ -242,6 +242,22 @@ openWebui:
     doNotTrack: "true"
     anonymizedTelemetry: "false"
 
+    # OpenTelemetry Configuration
+    telemetry:
+      otel:
+        enabled: false
+        traces: true
+        metrics: true
+        logs: true
+        endpoint: "http://alloy.observability.svc:4317"
+        serviceName: "open-webui"
+        insecure: true
+        sampler: "parentbased_always_on"
+        protocol: "grpc"  # grpc or http
+        resourceAttributes: ""  # key1=val1,key2=val2
+        # Multi-tenant configuration
+        tenantId: "soev"  # X-Scope-OrgID for observability backends
+
     # Custom Prompts
     queryGenerationPromptTemplate: |
       ### Task:
@@ -511,6 +527,20 @@ serviceAccount:
   create: true
   name: ""
   annotations: {}
+
+# -----------------------------------------------------------------------------
+# External Secrets Operator
+# -----------------------------------------------------------------------------
+# When enabled, secrets are fetched from GCP Secret Manager instead of inline Helm values
+externalSecrets:
+  enabled: false
+  gcpProject: ""
+  refreshInterval: "1h"
+  # Optional: GCP credentials secret for non-Workload Identity clusters
+  # gcpCredentialsSecret:
+  #   name: gcp-secret-manager-credentials
+  #   key: secret-access-credentials
+  #   namespace: external-secrets
 
 # -----------------------------------------------------------------------------
 # Migration (LibreChat to Open WebUI)

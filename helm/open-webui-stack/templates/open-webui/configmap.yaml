@@ -181,4 +181,20 @@ data:
   {{- if .Values.openWebui.config.queryGenerationPromptTemplate }}
   QUERY_GENERATION_PROMPT_TEMPLATE: {{ .Values.openWebui.config.queryGenerationPromptTemplate | quote }}
   {{- end }}
+
+  # OpenTelemetry Configuration
+  {{- if .Values.openWebui.config.telemetry.otel.enabled }}
+  ENABLE_OTEL: "true"
+  ENABLE_OTEL_TRACES: {{ .Values.openWebui.config.telemetry.otel.traces | quote }}
+  ENABLE_OTEL_METRICS: {{ .Values.openWebui.config.telemetry.otel.metrics | quote }}
+  ENABLE_OTEL_LOGS: {{ .Values.openWebui.config.telemetry.otel.logs | quote }}
+  OTEL_EXPORTER_OTLP_ENDPOINT: {{ .Values.openWebui.config.telemetry.otel.endpoint | quote }}
+  OTEL_SERVICE_NAME: {{ .Values.openWebui.config.telemetry.otel.serviceName | quote }}
+  OTEL_EXPORTER_OTLP_INSECURE: {{ .Values.openWebui.config.telemetry.otel.insecure | quote }}
+  OTEL_TRACES_SAMPLER: {{ .Values.openWebui.config.telemetry.otel.sampler | quote }}
+  OTEL_OTLP_SPAN_EXPORTER: {{ .Values.openWebui.config.telemetry.otel.protocol | quote }}
+  {{- if .Values.openWebui.config.telemetry.otel.resourceAttributes }}
+  OTEL_RESOURCE_ATTRIBUTES: {{ .Values.openWebui.config.telemetry.otel.resourceAttributes | quote }}
+  {{- end }}
+  {{- end }}
 {{- end }}

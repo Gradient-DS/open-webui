@@ -1,0 +1,48 @@
+---
+apiVersion: image.toolkit.fluxcd.io/v1beta2
+kind: ImageRepository
+metadata:
+  name: open-webui
+  namespace: flux-system
+spec:
+  image: ghcr.io/gradient-ds/open-webui
+  interval: 1m
+  secretRef:
+    name: ghcr-credentials
+---
+apiVersion: image.toolkit.fluxcd.io/v1beta2
+kind: ImagePolicy
+metadata:
+  name: open-webui
+  namespace: flux-system
+spec:
+  imageRepositoryRef:
+    name: open-webui
+  policy:
+    semver:
+      range: ">=0.0.1"
+---
+apiVersion: image.toolkit.fluxcd.io/v1beta1
+kind: ImageUpdateAutomation
+metadata:
+  name: open-webui
+  namespace: flux-system
+spec:
+  interval: 30m
+  sourceRef:
+    kind: GitRepository
+    name: open-webui
+  git:
+    checkout:
+      ref:
+        branch: main
+    commit:
+      author:
+        email: fluxcdbot@gradient-ds.com
+        name: FluxCD Bot
+      messageTemplate: 'chore: update open-webui image to {{.NewTag}}'
+    push:
+      branch: main
+  update:
+    path: ./helm/flux/base/open-webui
+    strategy: Setters
