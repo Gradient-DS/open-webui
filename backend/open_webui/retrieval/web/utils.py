@@ -13,7 +13,6 @@ from typing import (
     List,
     Optional,
     Sequence,
-    Tuple,
     Union,
     Literal,
 )
@@ -485,34 +484,6 @@ class SafePlaywrightURLLoader(PlaywrightURLLoader, RateLimitMixin, URLProcessing
         self.trust_env = trust_env
         self.playwright_timeout = playwright_timeout
 
-    async def _fetch_single_url(
-        self,
-        browser,
-        url: str,
-        semaphore: asyncio.Semaphore,
-    ) -> Tuple[Optional[Document], Optional[Exception]]:
-        """Fetch a single URL with semaphore-controlled concurrency.
-
-        Returns a tuple of (Document, None) on success or (None, Exception) on failure.
-        """
-        async with semaphore:
-            page = None
-            try:
-                await self._safe_process_url(url)
-                page = await browser.new_page()
-                response = await page.goto(url, timeout=self.playwright_timeout)
-                if response is None:
-                    raise ValueError(f"page.goto() returned None for url {url}")
-
-                text = await self.evaluator.evaluate_async(page, browser, response)
-                metadata = {"source": url}
-                return Document(page_content=text, metadata=metadata), None
-            except Exception as e:
-                return None, e
-            finally:
-                if page:
-                    await page.close()
-
     def lazy_load(self) -> Iterator[Document]:
         """Safely load URLs synchronously with support for remote browser."""
         from playwright.sync_api import sync_playwright
@@ -534,7 +505,6 @@ class SafePlaywrightURLLoader(PlaywrightURLLoader, RateLimitMixin, URLProcessing
 
                     text = self.evaluator.evaluate(page, browser, response)
                     metadata = {"source": url}
-                    page.close()
                     yield Document(page_content=text, metadata=metadata)
                 except Exception as e:
                     if self.continue_on_failure:
@@ -544,18 +514,8 @@ class SafePlaywrightURLLoader(PlaywrightURLLoader, RateLimitMixin, URLProcessing
             browser.close()
 
     async def alazy_load(self) -> AsyncIterator[Document]:
-        """Safely load URLs asynchronously with parallel fetching.
-
-        Uses asyncio.gather for concurrent URL fetching with semaphore-based
-        concurrency control. Resource blocking is applied for faster page loads.
-        """
+        """Safely load URLs asynchronously with support for remote browser."""
         from playwright.async_api import async_playwright
-
-        # Default to 5 concurrent requests if not using rate limiting
-        max_concurrent = 5
-        if self.requests_per_second and self.requests_per_second > 0:
-            # If rate limiting is set, use it as concurrency limit
-            max_concurrent = max(1, int(self.requests_per_second))
 
         async with async_playwright() as p:
             # Use remote browser if ws_endpoint is provided, otherwise use local browser
@@ -566,27 +526,23 @@ class SafePlaywrightURLLoader(PlaywrightURLLoader, RateLimitMixin, URLProcessing
                     headless=self.headless, proxy=self.proxy
                 )
 
-            try:
-                semaphore = asyncio.Semaphore(max_concurrent)
+            for url in self.urls:
+                try:
+                    await self._safe_process_url(url)
+                    page = await browser.new_page()
+                    response = await page.goto(url, timeout=self.playwright_timeout)
+                    if response is None:
+                        raise ValueError(f"page.goto() returned None for url {url}")
 
-                # Fetch all URLs in parallel
-                tasks = [
-                    self._fetch_single_url(browser, url, semaphore)
-                    for url in self.urls
-                ]
-                results = await asyncio.gather(*tasks)
-
-                # Yield successful results, handle failures
-                for url, (doc, error) in zip(self.urls, results):
-                    if error is not None:
-                        if self.continue_on_failure:
-                            log.exception(f"Error loading {url}: {error}")
-                            continue
-                        raise error
-                    if doc is not None:
-                        yield doc
-            finally:
-                await browser.close()
+                    text = await self.evaluator.evaluate_async(page, browser, response)
+                    metadata = {"source": url}
+                    yield Document(page_content=text, metadata=metadata)
+                except Exception as e:
+                    if self.continue_on_failure:
+                        log.exception(f"Error loading {url}: {e}")
+                        continue
+                    raise e
+            await browser.close()
 
 
 class SafeWebBaseLoader(WebBaseLoader):
