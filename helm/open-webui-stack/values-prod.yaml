@@ -49,6 +49,18 @@ ingress:
         - voorbeeld.soev.ai
 
 # -----------------------------------------------------------------------------
+# Crawl4AI - Increase resources for better scraping performance
+# -----------------------------------------------------------------------------
+crawl4ai:
+  resources:
+    requests:
+      memory: "8Gi"
+      cpu: "2000m"
+    limits:
+      memory: "32Gi"
+      cpu: "8000m"
+
+# -----------------------------------------------------------------------------
 # Secrets - MUST be provided via --set or values-secrets.yaml
 # -----------------------------------------------------------------------------
 # secrets:
