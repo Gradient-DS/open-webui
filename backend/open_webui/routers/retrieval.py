@@ -1556,211 +1556,6 @@ def save_docs_to_vector_db(
         raise e
 
 
-async def save_docs_to_vector_db_async(
-    request: Request,
-    docs,
-    collection_name,
-    metadata: Optional[dict] = None,
-    overwrite: bool = False,
-    split: bool = True,
-    add: bool = False,
-    user=None,
-) -> bool:
-    """
-    Async version of save_docs_to_vector_db that properly awaits the embedding function.
-
-    Use this from async endpoints instead of run_in_threadpool(save_docs_to_vector_db, ...).
-    This avoids creating nested event loops with asyncio.run().
-    """
-    def _get_docs_info(docs: list[Document]) -> str:
-        docs_info = set()
-        for doc in docs:
-            metadata = getattr(doc, "metadata", {})
-            doc_name = metadata.get("name", "")
-            if not doc_name:
-                doc_name = metadata.get("title", "")
-            if not doc_name:
-                doc_name = metadata.get("source", "")
-            if doc_name:
-                docs_info.add(doc_name)
-        return ", ".join(docs_info)
-
-    log.debug(
-        f"save_docs_to_vector_db_async: document {_get_docs_info(docs)} {collection_name}"
-    )
-
-    # Check if entries with the same hash (metadata.hash) already exist
-    if metadata and "hash" in metadata:
-        result = VECTOR_DB_CLIENT.query(
-            collection_name=collection_name,
-            filter={"hash": metadata["hash"]},
-        )
-
-        if result is not None:
-            existing_doc_ids = result.ids[0]
-            if existing_doc_ids:
-                log.info(f"Document with hash {metadata['hash']} already exists")
-                raise ValueError(ERROR_MESSAGES.DUPLICATE_CONTENT)
-
-    if split:
-        if request.app.state.config.TEXT_SPLITTER in ["", "character"]:
-            text_splitter = RecursiveCharacterTextSplitter(
-                chunk_size=request.app.state.config.CHUNK_SIZE,
-                chunk_overlap=request.app.state.config.CHUNK_OVERLAP,
-                add_start_index=True,
-            )
-            docs = text_splitter.split_documents(docs)
-        elif request.app.state.config.TEXT_SPLITTER == "token":
-            log.info(
-                f"Using token text splitter: {request.app.state.config.TIKTOKEN_ENCODING_NAME}"
-            )
-
-            tiktoken.get_encoding(str(request.app.state.config.TIKTOKEN_ENCODING_NAME))
-            text_splitter = TokenTextSplitter(
-                encoding_name=str(request.app.state.config.TIKTOKEN_ENCODING_NAME),
-                chunk_size=request.app.state.config.CHUNK_SIZE,
-                chunk_overlap=request.app.state.config.CHUNK_OVERLAP,
-                add_start_index=True,
-            )
-            docs = text_splitter.split_documents(docs)
-        elif request.app.state.config.TEXT_SPLITTER == "markdown_header":
-            log.info("Using markdown header text splitter")
-
-            headers_to_split_on = [
-                ("#", "Header 1"),
-                ("##", "Header 2"),
-                ("###", "Header 3"),
-                ("####", "Header 4"),
-                ("#####", "Header 5"),
-                ("######", "Header 6"),
-            ]
-
-            markdown_splitter = MarkdownHeaderTextSplitter(
-                headers_to_split_on=headers_to_split_on,
-                strip_headers=False,
-            )
-
-            md_split_docs = []
-            for doc in docs:
-                md_header_splits = markdown_splitter.split_text(doc.page_content)
-                text_splitter = RecursiveCharacterTextSplitter(
-                    chunk_size=request.app.state.config.CHUNK_SIZE,
-                    chunk_overlap=request.app.state.config.CHUNK_OVERLAP,
-                    add_start_index=True,
-                )
-                md_header_splits = text_splitter.split_documents(md_header_splits)
-
-                for split_chunk in md_header_splits:
-                    headings_list = []
-                    for _, header_meta_key_name in headers_to_split_on:
-                        if header_meta_key_name in split_chunk.metadata:
-                            headings_list.append(
-                                split_chunk.metadata[header_meta_key_name]
-                            )
-
-                    md_split_docs.append(
-                        Document(
-                            page_content=split_chunk.page_content,
-                            metadata={**doc.metadata, "headings": headings_list},
-                        )
-                    )
-
-            docs = md_split_docs
-        else:
-            raise ValueError(ERROR_MESSAGES.DEFAULT("Invalid text splitter"))
-
-    if len(docs) == 0:
-        raise ValueError(ERROR_MESSAGES.EMPTY_CONTENT)
-
-    texts = [sanitize_text_for_db(doc.page_content) for doc in docs]
-    metadatas = [
-        {
-            **doc.metadata,
-            **(metadata if metadata else {}),
-            "embedding_config": {
-                "engine": request.app.state.config.RAG_EMBEDDING_ENGINE,
-                "model": request.app.state.config.RAG_EMBEDDING_MODEL,
-            },
-        }
-        for doc in docs
-    ]
-
-    try:
-        if VECTOR_DB_CLIENT.has_collection(collection_name=collection_name):
-            log.info(f"collection {collection_name} already exists")
-
-            if overwrite:
-                VECTOR_DB_CLIENT.delete_collection(collection_name=collection_name)
-                log.info(f"deleting existing collection {collection_name}")
-            elif add is False:
-                log.info(
-                    f"collection {collection_name} already exists, overwrite is False and add is False"
-                )
-                return True
-
-        log.info(f"generating embeddings for {collection_name}")
-        embedding_function = get_embedding_function(
-            request.app.state.config.RAG_EMBEDDING_ENGINE,
-            request.app.state.config.RAG_EMBEDDING_MODEL,
-            request.app.state.ef,
-            (
-                request.app.state.config.RAG_OPENAI_API_BASE_URL
-                if request.app.state.config.RAG_EMBEDDING_ENGINE == "openai"
-                else (
-                    request.app.state.config.RAG_OLLAMA_BASE_URL
-                    if request.app.state.config.RAG_EMBEDDING_ENGINE == "ollama"
-                    else request.app.state.config.RAG_AZURE_OPENAI_BASE_URL
-                )
-            ),
-            (
-                request.app.state.config.RAG_OPENAI_API_KEY
-                if request.app.state.config.RAG_EMBEDDING_ENGINE == "openai"
-                else (
-                    request.app.state.config.RAG_OLLAMA_API_KEY
-                    if request.app.state.config.RAG_EMBEDDING_ENGINE == "ollama"
-                    else request.app.state.config.RAG_AZURE_OPENAI_API_KEY
-                )
-            ),
-            request.app.state.config.RAG_EMBEDDING_BATCH_SIZE,
-            azure_api_version=(
-                request.app.state.config.RAG_AZURE_OPENAI_API_VERSION
-                if request.app.state.config.RAG_EMBEDDING_ENGINE == "azure_openai"
-                else None
-            ),
-            enable_async=request.app.state.config.ENABLE_ASYNC_EMBEDDING,
-        )
-
-        # Properly await the async embedding function
-        embeddings = await embedding_function(
-            list(map(lambda x: x.replace("\n", " "), texts)),
-            prefix=RAG_EMBEDDING_CONTENT_PREFIX,
-            user=user,
-        )
-        log.info(f"embeddings generated {len(embeddings)} for {len(texts)} items")
-
-        items = [
-            {
-                "id": str(uuid.uuid4()),
-                "text": text,
-                "vector": embeddings[idx],
-                "metadata": metadatas[idx],
-            }
-            for idx, text in enumerate(texts)
-        ]
-
-        log.info(f"adding to collection {collection_name}")
-        VECTOR_DB_CLIENT.insert(
-            collection_name=collection_name,
-            items=items,
-        )
-
-        log.info(f"added {len(items)} items to collection {collection_name}")
-        return True
-    except Exception as e:
-        log.exception(e)
-        raise e
-
-
 class ProcessFileForm(BaseModel):
     file_id: str
     content: Optional[str] = None
@@ -2067,8 +1862,8 @@ async def process_text(
     text_content = form_data.content
     log.debug(f"text_content: {text_content}")
 
-    result = await save_docs_to_vector_db_async(
-        request, docs, collection_name, user=user
+    result = await run_in_threadpool(
+        save_docs_to_vector_db, request, docs, collection_name, user=user
     )
     if result:
         return {
@@ -2103,7 +1898,8 @@ async def process_web(
                 collection_name = calculate_sha256_string(form_data.url)[:63]
 
             if not request.app.state.config.BYPASS_WEB_SEARCH_EMBEDDING_AND_RETRIEVAL:
-                await save_docs_to_vector_db_async(
+                await run_in_threadpool(
+                    save_docs_to_vector_db,
                     request,
                     docs,
                     collection_name,
@@ -2565,7 +2361,8 @@ async def process_web_search(
             )
 
             try:
-                await save_docs_to_vector_db_async(
+                await run_in_threadpool(
+                    save_docs_to_vector_db,
                     request,
                     docs,
                     collection_name,
@@ -2573,11 +2370,7 @@ async def process_web_search(
                     user=user,
                 )
             except Exception as e:
-                log.exception(f"Error saving web search docs to vector DB: {e}")
-                raise HTTPException(
-                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                    detail=ERROR_MESSAGES.DEFAULT(f"Failed to save web search results: {e}"),
-                )
+                log.debug(f"error saving docs: {e}")
 
             return {
                 "status": True,
@@ -2882,7 +2675,8 @@ async def process_files_batch(
     # Save all documents in one batch
     if all_docs:
         try:
-            await save_docs_to_vector_db_async(
+            await run_in_threadpool(
+                save_docs_to_vector_db,
                 request,
                 all_docs,
                 collection_name,
