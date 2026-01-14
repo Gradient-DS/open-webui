@@ -8,6 +8,7 @@ Usage:
     Set environment variables:
     - EXTERNAL_AGENTS_REPO: Git URL or local path to agents repo
     - EXTERNAL_AGENTS_PACKAGE: Python package name (e.g., 'genai_utils.agents')
+      Note: Agents are expected at {package}.pipes.{agent_name}
     - EXTERNAL_AGENTS_LIST: Comma-separated list of agent module names to load
     - EXTERNAL_AGENTS_AUTO_UPDATE: If 'true', git pull latest on startup (default: false)
 
@@ -16,6 +17,7 @@ Example .env:
     EXTERNAL_AGENTS_PACKAGE=genai_utils.agents
     EXTERNAL_AGENTS_LIST=neo_nl_agent,neo_nl_assistant,neo_nl_multiagent
     EXTERNAL_AGENTS_AUTO_UPDATE=false
+    # Agents will be imported from: agents.pipes.{agent_name}
 """
 
 import os
@@ -146,13 +148,15 @@ def create_wrapper_content(
     
     Args:
         package_path: Python package path (e.g., 'genai_utils.agents')
+                      Agents are expected at {package_path}.pipes.{agent_module}
         agent_module: Module name (e.g., 'neo_nl_agent')
         agent_metadata: Optional metadata dict with title, description, etc.
         
     Returns:
         Python code string for the wrapper function
     """
-    full_import_path = f"{package_path}.{agent_module}"
+    # Append the new path structure: agents.pipes
+    full_import_path = f"{package_path}.pipes.{agent_module}"
     
     # Use metadata if provided, otherwise use defaults
     title = agent_metadata.get("title", agent_module.replace("_", " ").title()) if agent_metadata else agent_module.replace("_", " ").title()
@@ -206,7 +210,8 @@ def extract_agent_metadata(package_path: str, agent_module: str) -> Optional[Dic
         Dict with metadata, or None if extraction fails
     """
     try:
-        full_import_path = f"{package_path}.{agent_module}"
+        # Append the new path structure: agents.pipes
+        full_import_path = f"{package_path}.pipes.{agent_module}"
         module = importlib.import_module(full_import_path)
         
         # Try to get metadata from module docstring
