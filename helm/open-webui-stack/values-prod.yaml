@@ -23,7 +23,7 @@ openWebui:
     adminName: "Lex"
 
     # CORS - update to match your domain
-    corsAllowOrigin: "https://voorbeeld.soev.ai"
+    corsAllowOrigin: "https://demo.soev.ai"
 
     # LLM Provider model filtering (per-connection, doesn't affect workspace agents)
     # This replaces MODEL_WHITELIST which blocked workspace agents
@@ -60,14 +60,14 @@ ingress:
     nginx.ingress.kubernetes.io/proxy-http-version: "1.1"
     nginx.ingress.kubernetes.io/proxy-buffering: "off"
   hosts:
-    - host: voorbeeld.soev.ai
+    - host: demo.soev.ai
       paths:
         - path: /
           pathType: Prefix
   tls:
     - secretName: open-webui-tls
       hosts:
-        - voorbeeld.soev.ai
+        - demo.soev.ai
 
 # -----------------------------------------------------------------------------
 # Crawl4AI - Increase resources for better scraping performance
