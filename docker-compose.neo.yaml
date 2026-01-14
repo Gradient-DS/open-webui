@@ -6,6 +6,9 @@
 services:
   open-webui:
     image: ghcr.io/gradient-ds/open-webui:${WEBUI_DOCKER_TAG:-main}
+    build:
+      context: .
+      dockerfile: Dockerfile
     container_name: neo-nl-webui
     volumes:
       - neo-nl-data:/app/backend/data

@@ -470,21 +470,30 @@ async def query_collection_with_hybrid_search(
     # Fetch collection data once per collection sequentially
     # Avoid fetching the same data multiple times later
     collection_results = {}
+    missing_collections = []
     for collection_name in collection_names:
         try:
             log.debug(
                 f"query_collection_with_hybrid_search:VECTOR_DB_CLIENT.get:collection {collection_name}"
             )
-            collection_results[collection_name] = VECTOR_DB_CLIENT.get(
-                collection_name=collection_name
-            )
+            result = VECTOR_DB_CLIENT.get(collection_name=collection_name)
+            collection_results[collection_name] = result
+            if result is None:
+                missing_collections.append(collection_name)
+                log.warning(
+                    f"Collection '{collection_name}' does not exist in vector database - may be from old chat history"
+                )
         except Exception as e:
             log.exception(f"Failed to fetch collection {collection_name}: {e}")
             collection_results[collection_name] = None
+            missing_collections.append(collection_name)
 
+    valid_collections = len(collection_names) - len(missing_collections)
     log.info(
-        f"Starting hybrid search for {len(queries)} queries in {len(collection_names)} collections..."
+        f"Starting hybrid search for {len(queries)} queries in {valid_collections}/{len(collection_names)} collections..."
     )
+    if missing_collections:
+        log.warning(f"Skipping {len(missing_collections)} missing collections: {missing_collections}")
 
     async def process_query(collection_name, query):
         try:
