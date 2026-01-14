@@ -33,7 +33,9 @@ data:
   # LLM Providers
   ENABLE_OLLAMA_API: {{ .Values.openWebui.config.enableOllamaApi | quote }}
   OPENAI_API_BASE_URL: {{ .Values.openWebui.config.openaiApiBaseUrl | quote }}
-  MODEL_WHITELIST: {{ .Values.openWebui.config.modelWhitelist | quote }}
+  {{- if .Values.openWebui.config.openaiApiConfigs }}
+  OPENAI_API_CONFIGS: {{ .Values.openWebui.config.openaiApiConfigs | toJson | quote }}
+  {{- end }}
 
   # Vector Database (Weaviate)
   VECTOR_DB: {{ .Values.openWebui.config.vectorDb | quote }}

@@ -104,7 +104,6 @@ openWebui:
     # LLM Providers
     enableOllamaApi: "false"
     openaiApiBaseUrl: "https://router.huggingface.co/v1"
-    modelWhitelist: "openai/gpt-oss-120b,"
 
     # Vector Database (Weaviate)
     vectorDb: "weaviate"
@@ -146,7 +145,7 @@ openWebui:
     webLoaderEngine: "external"
 
     # Feature Flags
-    featureChatControls: "False"
+    featureChatControls: "false"
     featureCapture: "False"
     featureArtifacts: "False"
     featurePlayground: "False"
@@ -226,10 +225,10 @@ openWebui:
     userPermissionsFeaturesApiKeys: "false"
 
     # Admin
-    enableAdminExport: "true"
+    enableAdminExport: "false"
     enableAdminChatAccess: "false"
-    enableAdminWorkspaceContentAccess: "true"
-    bypassAdminAccessControl: "true"
+    enableAdminWorkspaceContentAccess: "false"  # Disable admin seeing all prompts/models
+    bypassAdminAccessControl: "false"  # Admin must follow access control
     showAdminDetails: "false"
     enableEvaluationArenaModels: "false"
     enableApiKeys: "false"

@@ -8,6 +8,7 @@ metadata:
   annotations:
     # Allow helm to delete and recreate the job on upgrade
     "helm.sh/hook": pre-upgrade
+    "helm.sh/hook-weight": "0"
     "helm.sh/hook-delete-policy": before-hook-creation
 spec:
   ttlSecondsAfterFinished: {{ .Values.migration.ttlSecondsAfterFinished }}
@@ -73,11 +74,21 @@ spec:
             {{- if .Values.migration.preferImportPassword }}
             - --prefer-import-password
             {{- end }}
+          envFrom:
+            - configMapRef:
+                name: {{ include "open-webui-stack.openWebui.fullname" . }}-config
           env:
+            - name: PYTHONPATH
+              value: "/app/backend"
             - name: BACKUP_DIR
               value: "/backup/{{ .Values.migration.backupDir }}"
             - name: DATA_DIR
               value: "/app/backend/data"
+            - name: WEBUI_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "open-webui-stack.fullname" . }}-secrets
+                  key: webui-secret-key
             - name: DATABASE_PASSWORD
               valueFrom:
                 secretKeyRef:
