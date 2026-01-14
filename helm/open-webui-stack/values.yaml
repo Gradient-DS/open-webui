@@ -514,6 +514,54 @@ serviceAccount:
   annotations: {}
 
 # -----------------------------------------------------------------------------
+# Migration (LibreChat to Open WebUI)
+# -----------------------------------------------------------------------------
+# One-time migration job to import data from LibreChat backup
+migration:
+  # Enable to run migration job
+  # Set to true and upgrade the release to run migration
+  enabled: false
+
+  # Name of the extracted backup directory (inside /backup mount)
+  # Example: "librechat-backup-20260114-120000"
+  backupDir: "librechat-backup"
+
+  # Run in dry-run mode (preview only, no changes)
+  # Recommended: Set to true first to verify backup contents
+  dryRun: true
+
+  # Update passwords for existing users with same email
+  preferImportPassword: false
+
+  # Default model for agents that can't be mapped
+  # Set to a model available in your Open WebUI instance
+  defaultModel: "openai/gpt-oss-120b"
+
+  # PVC containing extracted backup data (mounted at /backup)
+  # If not set, uses emptyDir (you'll need to copy data via kubectl cp)
+  backupPvc: ""
+
+  # PVC containing backup.tar.gz archive (mounted at /backup-archive)
+  # initContainer will extract it to /backup
+  backupArchivePvc: ""
+
+  # Size limit for backup emptyDir (when not using PVC)
+  backupSizeLimit: "10Gi"
+
+  # Job settings
+  ttlSecondsAfterFinished: 86400  # Keep job for 24h after completion
+  backoffLimit: 0  # Don't retry on failure
+
+  # Resources for migration job
+  resources:
+    requests:
+      memory: "512Mi"
+      cpu: "200m"
+    limits:
+      memory: "2Gi"
+      cpu: "1000m"
+
+# -----------------------------------------------------------------------------
 # Pod settings
 # -----------------------------------------------------------------------------
 nodeSelector: {}
