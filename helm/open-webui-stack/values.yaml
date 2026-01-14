@@ -1,0 +1,521 @@
+# =============================================================================
+# Open WebUI Stack - Unified Helm Values
+# =============================================================================
+# This chart deploys:
+# - Open WebUI (main application)
+# - PostgreSQL (application database)
+# - Weaviate (vector database)
+# - Gradient Gateway (search + document processing facade)
+# - SearXNG (meta search engine)
+# - Crawl4AI (web content extraction)
+# - Reranker (semantic reranking)
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# Global settings
+# -----------------------------------------------------------------------------
+global:
+  # Image pull secrets for private registries
+  imagePullSecrets: []
+  # Storage class for all PVCs (leave empty for default)
+  storageClass: ""
+
+# -----------------------------------------------------------------------------
+# Open WebUI
+# -----------------------------------------------------------------------------
+openWebui:
+  enabled: true
+
+  image:
+    repository: ghcr.io/gradient-ds/open-webui
+    tag: main
+    pullPolicy: Always
+
+  replicaCount: 1
+
+  # Service configuration
+  service:
+    type: ClusterIP
+    port: 8080
+
+  # Resource limits
+  resources:
+    requests:
+      memory: "512Mi"
+      cpu: "200m"
+    limits:
+      memory: "2Gi"
+      cpu: "1000m"
+
+  # Persistent storage for data
+  persistence:
+    enabled: true
+    size: 10Gi
+    accessMode: ReadWriteOnce
+    # storageClass: ""  # Uses global.storageClass if not set
+
+  # Health checks
+  livenessProbe:
+    enabled: true
+    initialDelaySeconds: 60
+    periodSeconds: 30
+    timeoutSeconds: 10
+
+  readinessProbe:
+    enabled: true
+    initialDelaySeconds: 30
+    periodSeconds: 10
+    timeoutSeconds: 5
+
+  startupProbe:
+    enabled: true
+    failureThreshold: 30
+    periodSeconds: 10
+
+  # -----------------------------------------------------------------------------
+  # Open WebUI Configuration
+  # -----------------------------------------------------------------------------
+  config:
+    # Deployment
+    env: "prod"
+    enablePersistentConfig: "false"
+    resetConfigOnStart: "true"
+    webuiName: "soev.ai"
+    corsAllowOrigin: "*"
+
+    # Admin bootstrap
+    adminEmail: ""
+    adminName: ""
+    # adminPassword is set via secrets
+
+    # Locale
+    defaultLocale: "nl-NL"
+
+    # Authentication
+    webuiAuth: "true"
+    enableSignup: "false"
+    enableLoginForm: "true"
+    enableInitialAdminSignup: "true"
+    defaultUserRole: "user"
+    enableOauthSignup: "false"
+    enablePasswordAuth: "true"
+    jwtExpiresIn: "4w"
+
+    # LLM Providers
+    enableOllamaApi: "false"
+    openaiApiBaseUrl: "https://router.huggingface.co/v1"
+    modelWhitelist: "openai/gpt-oss-120b,"
+
+    # Vector Database (Weaviate)
+    vectorDb: "weaviate"
+    weaviateHttpHost: "weaviate"  # Will be templated to full service name
+    weaviateHttpPort: "8080"
+    weaviateGrpcPort: "50051"
+
+    # Database (PostgreSQL)
+    databaseType: "postgresql"
+    databaseUser: "openwebui"
+    databaseHost: "postgres"  # Will be templated to full service name
+    databasePort: "5432"
+    databaseName: "openwebui"
+
+    # RAG Embeddings
+    ragEmbeddingEngine: "openai"
+    ragEmbeddingModel: "text-embedding-3-small"
+    ragEmbeddingBatchSize: "100"
+    ragTopK: "15"
+    ragTopKReranker: "10"
+    ragRelevanceThreshold: "0.0"
+    chunkSize: "2000"
+    chunkOverlap: "200"
+    ragHybridBm25Weight: "0.5"
+    enableRagHybridSearch: "true"
+    ragAllowedFileExtensions: "pdf,txt,md,docx,csv,json"
+
+    # Content Extraction & Reranking
+    contentExtractionEngine: "external"
+    ragRerankingEngine: "external"
+    # URLs are templated to use service names
+
+    # Web Search
+    enableWebSearch: "true"
+    webSearchEngine: "searxng"
+    searxngLanguage: "nl"
+    webSearchResultCount: "5"
+    enableWebLoaderSslVerification: "true"
+    webLoaderEngine: "external"
+
+    # Feature Flags
+    featureChatControls: "False"
+    featureCapture: "False"
+    featureArtifacts: "False"
+    featurePlayground: "False"
+    featureChatOverview: "False"
+    featureNotesAiControls: "False"
+    featureVoice: "False"
+    featureChangelog: "False"
+    featureSystemPrompt: "False"
+    featureModels: "True"
+    featureKnowledge: "True"
+    featurePrompts: "True"
+    featureTools: "False"
+    featureAdminEvaluations: "False"
+    featureAdminFunctions: "False"
+    featureAdminSettings: "True"
+    featureAdminSettingsTabs: "models,tools,interface,db"
+
+    # Notes
+    enableNotes: "true"
+    userPermissionsFeaturesNotes: "true"
+
+    # Knowledge Base
+    userPermissionsWorkspaceKnowledgeAccess: "true"
+
+    # Code Execution (disabled)
+    enableCodeInterpreter: "false"
+    enableCodeExecution: "false"
+    userPermissionsFeaturesCodeInterpreter: "false"
+
+    # MCP/Tool Servers (disabled)
+    enableDirectConnections: "false"
+    userPermissionsFeaturesDirectToolServers: "false"
+
+    # TTS/STT (disabled)
+    userPermissionsChatTts: "false"
+    userPermissionsChatStt: "false"
+    userPermissionsChatCall: "false"
+
+    # Workspace
+    userPermissionsWorkspaceModelsAccess: "true"
+    userPermissionsWorkspacePromptsAccess: "true"
+    userPermissionsWorkspaceToolsAccess: "false"
+
+    # UI Features
+    enableFolders: "true"
+    userPermissionsFeaturesFolders: "true"
+    enableChannels: "false"
+    userPermissionsFeaturesChannels: "false"
+    enableCommunitySharing: "false"
+    enableMessageRating: "true"
+    enableUserWebhooks: "false"
+    enableAutocompleteGeneration: "false"
+    enableFollowUpGeneration: "true"
+    enableTitleGeneration: "true"
+    enableTagsGeneration: "true"
+    enableSearchQueryGeneration: "true"
+    enableRetrievalQueryGeneration: "true"
+
+    # Chat Permissions
+    userPermissionsChatControls: "false"
+    userPermissionsChatValves: "false"
+    userPermissionsChatSystemPrompt: "true"
+    userPermissionsChatParams: "false"
+    userPermissionsChatFileUpload: "true"
+    userPermissionsChatDelete: "true"
+    userPermissionsChatDeleteMessage: "true"
+    userPermissionsChatEdit: "true"
+    userPermissionsChatShare: "true"
+    userPermissionsChatExport: "true"
+    userPermissionsChatContinueResponse: "true"
+    userPermissionsChatRegenerateResponse: "true"
+    userPermissionsChatRateResponse: "true"
+    userPermissionsChatMultipleModels: "true"
+    userPermissionsChatTemporary: "true"
+    userPermissionsFeaturesWebSearch: "true"
+    userPermissionsFeaturesImageGeneration: "false"
+    userPermissionsFeaturesApiKeys: "false"
+
+    # Admin
+    enableAdminExport: "true"
+    enableAdminChatAccess: "false"
+    enableAdminWorkspaceContentAccess: "true"
+    bypassAdminAccessControl: "true"
+    showAdminDetails: "false"
+    enableEvaluationArenaModels: "false"
+    enableApiKeys: "false"
+    enableImageGeneration: "false"
+    enableGoogleDriveIntegration: "false"
+    enableOnedriveIntegration: "false"
+    bypassModelAccessControl: "true"
+
+    # Telemetry (disabled)
+    scarfNoAnalytics: "true"
+    doNotTrack: "true"
+    anonymizedTelemetry: "false"
+
+    # Custom Prompts
+    queryGenerationPromptTemplate: |
+      ### Task:
+      Analyze the chat history to determine the necessity of generating search queries, in the given language. By default, **prioritize generating 1-3 broad and relevant search queries** unless it is absolutely certain that no additional information is required. The aim is to retrieve comprehensive, updated, and valuable information even with minimal uncertainty. If no search is unequivocally needed, return an empty list.
+
+      ### Guidelines:
+      - Respond **EXCLUSIVELY** with a JSON object. Any form of extra commentary, explanation, or additional text is strictly prohibited.
+      - When generating search queries, respond in the format: { "queries": ["query1", "query2"] }, ensuring each query is distinct, concise, and relevant to the topic.
+      - If and only if it is entirely certain that no useful results can be retrieved by a search, return: { "queries": [] }.
+      - Err on the side of suggesting search queries if there is **any chance** they might provide useful or updated information.
+      - Be concise and focused on composing high-quality search queries, avoiding unnecessary elaboration, commentary, or assumptions.
+      - Generate queries in the EXACT SAME language as the user's most recent message. If the user writes in Dutch, queries MUST be in Dutch. If in English, queries MUST be in English.
+      - Today's date is: {{CURRENT_DATE}}.
+      - Always prioritize providing actionable and broad queries that maximize informational coverage.
+
+      ### Output:
+      Strictly return in JSON format:
+      {
+        "queries": ["query1", "query2"]
+      }
+
+      ### Chat History:
+      <chat_history>
+      {{MESSAGES:END:6}}
+      </chat_history>
+
+# -----------------------------------------------------------------------------
+# PostgreSQL
+# -----------------------------------------------------------------------------
+postgres:
+  enabled: true
+
+  image:
+    repository: postgres
+    tag: "16-alpine"
+    pullPolicy: IfNotPresent
+
+  # Resource limits
+  resources:
+    requests:
+      memory: "256Mi"
+      cpu: "100m"
+    limits:
+      memory: "1Gi"
+      cpu: "500m"
+
+  # Persistent storage
+  persistence:
+    enabled: true
+    size: 10Gi
+    accessMode: ReadWriteOnce
+
+  # Database configuration
+  database: openwebui
+  user: openwebui
+  # password is set via secrets
+
+# -----------------------------------------------------------------------------
+# Weaviate (Vector Database)
+# -----------------------------------------------------------------------------
+weaviate:
+  enabled: true
+
+  image:
+    repository: semitechnologies/weaviate
+    tag: "1.28.4"
+    pullPolicy: IfNotPresent
+
+  # Resource limits
+  resources:
+    requests:
+      memory: "512Mi"
+      cpu: "200m"
+    limits:
+      memory: "4Gi"
+      cpu: "1000m"
+
+  # Persistent storage
+  persistence:
+    enabled: true
+    size: 20Gi
+    accessMode: ReadWriteOnce
+
+  # Weaviate configuration
+  config:
+    queryDefaults:
+      limit: 25
+    authentication:
+      anonymous_access:
+        enabled: true
+    persistence:
+      dataPath: "/var/lib/weaviate"
+    defaultVectorizerModule: "none"
+    enableModules: ""
+    clusterHostname: "node1"
+
+# -----------------------------------------------------------------------------
+# Gradient Gateway
+# -----------------------------------------------------------------------------
+gateway:
+  enabled: true
+
+  image:
+    repository: ghcr.io/gradient-ds/gradient-gateway
+    tag: latest
+    pullPolicy: Always
+
+  replicaCount: 1
+
+  service:
+    type: ClusterIP
+    port: 8000
+
+  resources:
+    requests:
+      memory: "256Mi"
+      cpu: "100m"
+    limits:
+      memory: "1Gi"
+      cpu: "500m"
+
+  # Gateway configuration
+  config:
+    logLevel: "INFO"
+    # URLs are templated to use service names
+
+# -----------------------------------------------------------------------------
+# SearXNG (Meta Search Engine)
+# -----------------------------------------------------------------------------
+searxng:
+  enabled: true
+
+  image:
+    repository: searxng/searxng
+    tag: latest
+    pullPolicy: Always
+
+  replicaCount: 1
+
+  service:
+    type: ClusterIP
+    port: 8080
+
+  resources:
+    requests:
+      memory: "128Mi"
+      cpu: "50m"
+    limits:
+      memory: "512Mi"
+      cpu: "300m"
+
+  # SearXNG configuration
+  config:
+    instanceName: "Open WebUI Search"
+    safeSearch: 0
+    secretKey: ""  # Set via secrets or auto-generate
+    engines:
+      google: true
+      duckduckgo: true
+      wikipedia: true
+      bing: true
+
+# -----------------------------------------------------------------------------
+# Crawl4AI (Web Content Extraction)
+# -----------------------------------------------------------------------------
+crawl4ai:
+  enabled: true
+
+  image:
+    repository: unclecode/crawl4ai
+    tag: latest
+    pullPolicy: Always
+
+  replicaCount: 1
+
+  service:
+    type: ClusterIP
+    port: 11235
+
+  resources:
+    requests:
+      memory: "1Gi"
+      cpu: "200m"
+    limits:
+      memory: "4Gi"
+      cpu: "1000m"
+
+  # Crawl4AI configuration
+  config:
+    apiToken: ""  # Set via secrets if needed
+
+# -----------------------------------------------------------------------------
+# Reranker (Semantic Reranking)
+# -----------------------------------------------------------------------------
+reranker:
+  enabled: true
+
+  image:
+    repository: ghcr.io/gradient-ds/reranker
+    tag: latest
+    pullPolicy: Always
+
+  replicaCount: 1
+
+  service:
+    type: ClusterIP
+    port: 8000
+
+  resources:
+    requests:
+      memory: "1Gi"
+      cpu: "200m"
+    limits:
+      memory: "2Gi"
+      cpu: "1000m"
+
+  # Reranker configuration
+  config:
+    model: "cross-encoder/ms-marco-MiniLM-L6-v2"
+
+# -----------------------------------------------------------------------------
+# Ingress
+# -----------------------------------------------------------------------------
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+    # kubernetes.io/ingress.class: nginx
+    # cert-manager.io/cluster-issuer: letsencrypt-prod
+  hosts:
+    - host: openwebui.example.com
+      paths:
+        - path: /
+          pathType: Prefix
+  tls: []
+    # - secretName: openwebui-tls
+    #   hosts:
+    #     - openwebui.example.com
+
+# -----------------------------------------------------------------------------
+# Secrets
+# -----------------------------------------------------------------------------
+# These values should be overridden in a separate values file or via --set
+secrets:
+  # Open WebUI secrets
+  webuiSecretKey: ""  # Generate with: openssl rand -hex 32
+  adminPassword: ""
+  openaiApiKey: ""
+  ragOpenaiApiKey: ""
+
+  # PostgreSQL
+  postgresPassword: ""
+
+  # SearXNG
+  searxngSecretKey: ""
+
+  # Gateway
+  gatewayApiKey: ""
+
+  # Crawl4AI
+  crawl4aiApiToken: ""
+
+# -----------------------------------------------------------------------------
+# Service Account
+# -----------------------------------------------------------------------------
+serviceAccount:
+  create: true
+  name: ""
+  annotations: {}
+
+# -----------------------------------------------------------------------------
+# Pod settings
+# -----------------------------------------------------------------------------
+nodeSelector: {}
+tolerations: []
+affinity: {}
