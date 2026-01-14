@@ -10,6 +10,8 @@
 # -----------------------------------------------------------------------------
 global:
   storageClass: "standard-rwo"
+  imagePullSecrets:
+    - ghcr-secret
 
 # -----------------------------------------------------------------------------
 # Open WebUI Configuration Overrides
