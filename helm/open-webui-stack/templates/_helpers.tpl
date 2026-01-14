@@ -163,6 +163,20 @@ app.kubernetes.io/component: reranker
 app.kubernetes.io/component: reranker
 {{- end }}
 
+{{- define "open-webui-stack.migration.fullname" -}}
+{{- printf "%s-migration" (include "open-webui-stack.fullname" .) | trunc 63 | trimSuffix "-" }}
+{{- end }}
+
+{{- define "open-webui-stack.migration.labels" -}}
+{{ include "open-webui-stack.labels" . }}
+app.kubernetes.io/component: migration
+{{- end }}
+
+{{- define "open-webui-stack.migration.selectorLabels" -}}
+{{ include "open-webui-stack.selectorLabels" . }}
+app.kubernetes.io/component: migration
+{{- end }}
+
 {{/*
 Image pull secrets
 */}}

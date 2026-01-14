@@ -1,0 +1,130 @@
+{{- if .Values.migration.enabled }}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "open-webui-stack.migration.fullname" . }}
+  labels:
+    {{- include "open-webui-stack.migration.labels" . | nindent 4 }}
+  annotations:
+    # Allow helm to delete and recreate the job on upgrade
+    "helm.sh/hook": pre-upgrade
+    "helm.sh/hook-delete-policy": before-hook-creation
+spec:
+  ttlSecondsAfterFinished: {{ .Values.migration.ttlSecondsAfterFinished }}
+  backoffLimit: {{ .Values.migration.backoffLimit }}
+  template:
+    metadata:
+      labels:
+        {{- include "open-webui-stack.migration.selectorLabels" . | nindent 8 }}
+    spec:
+      restartPolicy: Never
+      {{- include "open-webui-stack.imagePullSecrets" . | nindent 6 }}
+      serviceAccountName: {{ include "open-webui-stack.serviceAccountName" . }}
+      initContainers:
+        # Extract backup archive if provided as base64 or from URL
+        - name: prepare-backup
+          image: busybox:latest
+          command:
+            - /bin/sh
+            - -c
+            - |
+              set -e
+              echo "=== Preparing backup data ==="
+
+              # Check if backup already exists (mounted PVC)
+              if [ -d "/backup/{{ .Values.migration.backupDir }}" ]; then
+                echo "Backup directory already exists at /backup/{{ .Values.migration.backupDir }}"
+                ls -la "/backup/{{ .Values.migration.backupDir }}/"
+                exit 0
+              fi
+
+              # Check for archive in /backup-archive
+              if [ -f "/backup-archive/backup.tar.gz" ]; then
+                echo "Extracting backup archive..."
+                cd /backup
+                tar -xzf /backup-archive/backup.tar.gz
+                echo "Extraction complete. Contents:"
+                ls -la /backup/
+                exit 0
+              fi
+
+              echo "ERROR: No backup data found!"
+              echo "Please either:"
+              echo "  1. Mount a PVC with extracted backup to /backup"
+              echo "  2. Mount a PVC with backup.tar.gz to /backup-archive"
+              exit 1
+          volumeMounts:
+            - name: backup
+              mountPath: /backup
+            {{- if .Values.migration.backupArchivePvc }}
+            - name: backup-archive
+              mountPath: /backup-archive
+            {{- end }}
+      containers:
+        - name: migration
+          image: "{{ .Values.openWebui.image.repository }}:{{ .Values.openWebui.image.tag }}"
+          imagePullPolicy: {{ .Values.openWebui.image.pullPolicy }}
+          command:
+            - python
+            - /scripts/restore-to-openwebui.py
+            {{- if .Values.migration.dryRun }}
+            - --dry-run
+            {{- end }}
+            {{- if .Values.migration.preferImportPassword }}
+            - --prefer-import-password
+            {{- end }}
+          env:
+            - name: BACKUP_DIR
+              value: "/backup/{{ .Values.migration.backupDir }}"
+            - name: DATA_DIR
+              value: "/app/backend/data"
+            - name: DATABASE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "open-webui-stack.fullname" . }}-secrets
+                  key: postgres-password
+            - name: DATABASE_URL
+              value: "postgresql://{{ .Values.postgres.user }}:$(DATABASE_PASSWORD)@{{ include "open-webui-stack.postgres.fullname" . }}:5432/{{ .Values.postgres.database }}"
+            {{- if .Values.migration.defaultModel }}
+            - name: MIGRATION_DEFAULT_MODEL
+              value: "{{ .Values.migration.defaultModel }}"
+            {{- end }}
+          volumeMounts:
+            - name: data
+              mountPath: /app/backend/data
+            - name: backup
+              mountPath: /backup
+            - name: script
+              mountPath: /scripts
+          resources:
+            {{- toYaml .Values.migration.resources | nindent 12 }}
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: {{ include "open-webui-stack.openWebui.fullname" . }}-pvc
+        - name: backup
+          {{- if .Values.migration.backupPvc }}
+          persistentVolumeClaim:
+            claimName: {{ .Values.migration.backupPvc }}
+          {{- else }}
+          emptyDir:
+            sizeLimit: {{ .Values.migration.backupSizeLimit }}
+          {{- end }}
+        {{- if .Values.migration.backupArchivePvc }}
+        - name: backup-archive
+          persistentVolumeClaim:
+            claimName: {{ .Values.migration.backupArchivePvc }}
+        {{- end }}
+        - name: script
+          configMap:
+            name: {{ include "open-webui-stack.migration.fullname" . }}-script
+            defaultMode: 0755
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+{{- end }}

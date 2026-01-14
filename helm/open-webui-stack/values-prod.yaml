@@ -1,0 +1,58 @@
+# =============================================================================
+# Production Values for Open WebUI Stack on GKE
+# =============================================================================
+# Cluster: demo-cluster (europe-west4-a)
+# Project: soev-ai-001
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# Global settings
+# -----------------------------------------------------------------------------
+global:
+  storageClass: "standard-rwo"
+
+# -----------------------------------------------------------------------------
+# Open WebUI Configuration Overrides
+# -----------------------------------------------------------------------------
+openWebui:
+  config:
+    # Admin bootstrap
+    adminEmail: "lex@gradient-ds.com"
+    adminName: "Lex"
+
+    # CORS - update to match your domain
+    corsAllowOrigin: "https://voorbeeld.soev.ai"
+
+# -----------------------------------------------------------------------------
+# Ingress - nginx with cert-manager
+# -----------------------------------------------------------------------------
+ingress:
+  enabled: true
+  className: nginx
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+    nginx.ingress.kubernetes.io/proxy-body-size: "100m"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "600"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "600"
+    nginx.ingress.kubernetes.io/proxy-http-version: "1.1"
+    nginx.ingress.kubernetes.io/proxy-buffering: "off"
+  hosts:
+    - host: voorbeeld.soev.ai
+      paths:
+        - path: /
+          pathType: Prefix
+  tls:
+    - secretName: open-webui-tls
+      hosts:
+        - voorbeeld.soev.ai
+
+# -----------------------------------------------------------------------------
+# Secrets - MUST be provided via --set or values-secrets.yaml
+# -----------------------------------------------------------------------------
+# secrets:
+#   webuiSecretKey: ""      # Generate: openssl rand -hex 32
+#   adminPassword: ""       # Your admin password
+#   openaiApiKey: ""        # HuggingFace or OpenAI key
+#   ragOpenaiApiKey: ""     # OpenAI key for embeddings
+#   postgresPassword: ""    # Generate: openssl rand -hex 32
+#   searxngSecretKey: ""    # Generate: openssl rand -hex 16
