@@ -1,0 +1,182 @@
+{{- if .Values.openWebui.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "open-webui-stack.openWebui.fullname" . }}-config
+  labels:
+    {{- include "open-webui-stack.openWebui.labels" . | nindent 4 }}
+data:
+  # Deployment
+  ENV: {{ .Values.openWebui.config.env | quote }}
+  ENABLE_PERSISTENT_CONFIG: {{ .Values.openWebui.config.enablePersistentConfig | quote }}
+  RESET_CONFIG_ON_START: {{ .Values.openWebui.config.resetConfigOnStart | quote }}
+  WEBUI_NAME: {{ .Values.openWebui.config.webuiName | quote }}
+  CORS_ALLOW_ORIGIN: {{ .Values.openWebui.config.corsAllowOrigin | quote }}
+
+  # Admin
+  OPENWEBUI_ADMIN_EMAIL: {{ .Values.openWebui.config.adminEmail | quote }}
+  OPENWEBUI_ADMIN_NAME: {{ .Values.openWebui.config.adminName | quote }}
+
+  # Locale
+  DEFAULT_LOCALE: {{ .Values.openWebui.config.defaultLocale | quote }}
+
+  # Authentication
+  WEBUI_AUTH: {{ .Values.openWebui.config.webuiAuth | quote }}
+  ENABLE_SIGNUP: {{ .Values.openWebui.config.enableSignup | quote }}
+  ENABLE_LOGIN_FORM: {{ .Values.openWebui.config.enableLoginForm | quote }}
+  ENABLE_INITIAL_ADMIN_SIGNUP: {{ .Values.openWebui.config.enableInitialAdminSignup | quote }}
+  DEFAULT_USER_ROLE: {{ .Values.openWebui.config.defaultUserRole | quote }}
+  ENABLE_OAUTH_SIGNUP: {{ .Values.openWebui.config.enableOauthSignup | quote }}
+  ENABLE_PASSWORD_AUTH: {{ .Values.openWebui.config.enablePasswordAuth | quote }}
+  JWT_EXPIRES_IN: {{ .Values.openWebui.config.jwtExpiresIn | quote }}
+
+  # LLM Providers
+  ENABLE_OLLAMA_API: {{ .Values.openWebui.config.enableOllamaApi | quote }}
+  OPENAI_API_BASE_URL: {{ .Values.openWebui.config.openaiApiBaseUrl | quote }}
+  MODEL_WHITELIST: {{ .Values.openWebui.config.modelWhitelist | quote }}
+
+  # Vector Database (Weaviate)
+  VECTOR_DB: {{ .Values.openWebui.config.vectorDb | quote }}
+  WEAVIATE_HTTP_HOST: {{ include "open-webui-stack.weaviate.fullname" . }}
+  WEAVIATE_HTTP_PORT: {{ .Values.openWebui.config.weaviateHttpPort | quote }}
+  WEAVIATE_GRPC_PORT: {{ .Values.openWebui.config.weaviateGrpcPort | quote }}
+
+  # Database (PostgreSQL)
+  DATABASE_TYPE: {{ .Values.openWebui.config.databaseType | quote }}
+  DATABASE_USER: {{ .Values.openWebui.config.databaseUser | quote }}
+  DATABASE_HOST: {{ include "open-webui-stack.postgres.fullname" . }}
+  DATABASE_PORT: {{ .Values.openWebui.config.databasePort | quote }}
+  DATABASE_NAME: {{ .Values.openWebui.config.databaseName | quote }}
+
+  # RAG Embeddings
+  RAG_EMBEDDING_ENGINE: {{ .Values.openWebui.config.ragEmbeddingEngine | quote }}
+  RAG_EMBEDDING_MODEL: {{ .Values.openWebui.config.ragEmbeddingModel | quote }}
+  RAG_EMBEDDING_BATCH_SIZE: {{ .Values.openWebui.config.ragEmbeddingBatchSize | quote }}
+  RAG_TOP_K: {{ .Values.openWebui.config.ragTopK | quote }}
+  RAG_TOP_K_RERANKER: {{ .Values.openWebui.config.ragTopKReranker | quote }}
+  RAG_RELEVANCE_THRESHOLD: {{ .Values.openWebui.config.ragRelevanceThreshold | quote }}
+  CHUNK_SIZE: {{ .Values.openWebui.config.chunkSize | quote }}
+  CHUNK_OVERLAP: {{ .Values.openWebui.config.chunkOverlap | quote }}
+  RAG_HYBRID_BM25_WEIGHT: {{ .Values.openWebui.config.ragHybridBm25Weight | quote }}
+  ENABLE_RAG_HYBRID_SEARCH: {{ .Values.openWebui.config.enableRagHybridSearch | quote }}
+  RAG_ALLOWED_FILE_EXTENSIONS: {{ .Values.openWebui.config.ragAllowedFileExtensions | quote }}
+
+  # Content Extraction & Reranking (via Gateway)
+  CONTENT_EXTRACTION_ENGINE: {{ .Values.openWebui.config.contentExtractionEngine | quote }}
+  RAG_RERANKING_ENGINE: {{ .Values.openWebui.config.ragRerankingEngine | quote }}
+  RAG_EXTERNAL_RERANKER_URL: "http://{{ include "open-webui-stack.reranker.fullname" . }}:{{ .Values.reranker.service.port }}/v1/rerank"
+  EXTERNAL_DOCUMENT_LOADER_URL: "http://{{ include "open-webui-stack.gateway.fullname" . }}:{{ .Values.gateway.service.port }}"
+
+  # Web Search (via Gateway)
+  ENABLE_WEB_SEARCH: {{ .Values.openWebui.config.enableWebSearch | quote }}
+  WEB_SEARCH_ENGINE: {{ .Values.openWebui.config.webSearchEngine | quote }}
+  SEARXNG_LANGUAGE: {{ .Values.openWebui.config.searxngLanguage | quote }}
+  WEB_SEARCH_RESULT_COUNT: {{ .Values.openWebui.config.webSearchResultCount | quote }}
+  ENABLE_WEB_LOADER_SSL_VERIFICATION: {{ .Values.openWebui.config.enableWebLoaderSslVerification | quote }}
+  WEB_LOADER_ENGINE: {{ .Values.openWebui.config.webLoaderEngine | quote }}
+  SEARXNG_QUERY_URL: "http://{{ include "open-webui-stack.gateway.fullname" . }}:{{ .Values.gateway.service.port }}/search"
+  EXTERNAL_WEB_LOADER_URL: "http://{{ include "open-webui-stack.gateway.fullname" . }}:{{ .Values.gateway.service.port }}/extract"
+
+  # Feature Flags
+  FEATURE_CHAT_CONTROLS: {{ .Values.openWebui.config.featureChatControls | quote }}
+  FEATURE_CAPTURE: {{ .Values.openWebui.config.featureCapture | quote }}
+  FEATURE_ARTIFACTS: {{ .Values.openWebui.config.featureArtifacts | quote }}
+  FEATURE_PLAYGROUND: {{ .Values.openWebui.config.featurePlayground | quote }}
+  FEATURE_CHAT_OVERVIEW: {{ .Values.openWebui.config.featureChatOverview | quote }}
+  FEATURE_NOTES_AI_CONTROLS: {{ .Values.openWebui.config.featureNotesAiControls | quote }}
+  FEATURE_VOICE: {{ .Values.openWebui.config.featureVoice | quote }}
+  FEATURE_CHANGELOG: {{ .Values.openWebui.config.featureChangelog | quote }}
+  FEATURE_SYSTEM_PROMPT: {{ .Values.openWebui.config.featureSystemPrompt | quote }}
+  FEATURE_MODELS: {{ .Values.openWebui.config.featureModels | quote }}
+  FEATURE_KNOWLEDGE: {{ .Values.openWebui.config.featureKnowledge | quote }}
+  FEATURE_PROMPTS: {{ .Values.openWebui.config.featurePrompts | quote }}
+  FEATURE_TOOLS: {{ .Values.openWebui.config.featureTools | quote }}
+  FEATURE_ADMIN_EVALUATIONS: {{ .Values.openWebui.config.featureAdminEvaluations | quote }}
+  FEATURE_ADMIN_FUNCTIONS: {{ .Values.openWebui.config.featureAdminFunctions | quote }}
+  FEATURE_ADMIN_SETTINGS: {{ .Values.openWebui.config.featureAdminSettings | quote }}
+  FEATURE_ADMIN_SETTINGS_TABS: {{ .Values.openWebui.config.featureAdminSettingsTabs | quote }}
+
+  # Notes
+  ENABLE_NOTES: {{ .Values.openWebui.config.enableNotes | quote }}
+  USER_PERMISSIONS_FEATURES_NOTES: {{ .Values.openWebui.config.userPermissionsFeaturesNotes | quote }}
+
+  # Knowledge
+  USER_PERMISSIONS_WORKSPACE_KNOWLEDGE_ACCESS: {{ .Values.openWebui.config.userPermissionsWorkspaceKnowledgeAccess | quote }}
+
+  # Code Execution
+  ENABLE_CODE_INTERPRETER: {{ .Values.openWebui.config.enableCodeInterpreter | quote }}
+  ENABLE_CODE_EXECUTION: {{ .Values.openWebui.config.enableCodeExecution | quote }}
+  USER_PERMISSIONS_FEATURES_CODE_INTERPRETER: {{ .Values.openWebui.config.userPermissionsFeaturesCodeInterpreter | quote }}
+
+  # MCP
+  ENABLE_DIRECT_CONNECTIONS: {{ .Values.openWebui.config.enableDirectConnections | quote }}
+  USER_PERMISSIONS_FEATURES_DIRECT_TOOL_SERVERS: {{ .Values.openWebui.config.userPermissionsFeaturesDirectToolServers | quote }}
+
+  # Audio
+  USER_PERMISSIONS_CHAT_TTS: {{ .Values.openWebui.config.userPermissionsChatTts | quote }}
+  USER_PERMISSIONS_CHAT_STT: {{ .Values.openWebui.config.userPermissionsChatStt | quote }}
+  USER_PERMISSIONS_CHAT_CALL: {{ .Values.openWebui.config.userPermissionsChatCall | quote }}
+
+  # Workspace
+  USER_PERMISSIONS_WORKSPACE_MODELS_ACCESS: {{ .Values.openWebui.config.userPermissionsWorkspaceModelsAccess | quote }}
+  USER_PERMISSIONS_WORKSPACE_PROMPTS_ACCESS: {{ .Values.openWebui.config.userPermissionsWorkspacePromptsAccess | quote }}
+  USER_PERMISSIONS_WORKSPACE_TOOLS_ACCESS: {{ .Values.openWebui.config.userPermissionsWorkspaceToolsAccess | quote }}
+
+  # UI
+  ENABLE_FOLDERS: {{ .Values.openWebui.config.enableFolders | quote }}
+  USER_PERMISSIONS_FEATURES_FOLDERS: {{ .Values.openWebui.config.userPermissionsFeaturesFolders | quote }}
+  ENABLE_CHANNELS: {{ .Values.openWebui.config.enableChannels | quote }}
+  USER_PERMISSIONS_FEATURES_CHANNELS: {{ .Values.openWebui.config.userPermissionsFeaturesChannels | quote }}
+  ENABLE_COMMUNITY_SHARING: {{ .Values.openWebui.config.enableCommunitySharing | quote }}
+  ENABLE_MESSAGE_RATING: {{ .Values.openWebui.config.enableMessageRating | quote }}
+  ENABLE_USER_WEBHOOKS: {{ .Values.openWebui.config.enableUserWebhooks | quote }}
+  ENABLE_AUTOCOMPLETE_GENERATION: {{ .Values.openWebui.config.enableAutocompleteGeneration | quote }}
+  ENABLE_FOLLOW_UP_GENERATION: {{ .Values.openWebui.config.enableFollowUpGeneration | quote }}
+  ENABLE_TITLE_GENERATION: {{ .Values.openWebui.config.enableTitleGeneration | quote }}
+  ENABLE_TAGS_GENERATION: {{ .Values.openWebui.config.enableTagsGeneration | quote }}
+  ENABLE_SEARCH_QUERY_GENERATION: {{ .Values.openWebui.config.enableSearchQueryGeneration | quote }}
+  ENABLE_RETRIEVAL_QUERY_GENERATION: {{ .Values.openWebui.config.enableRetrievalQueryGeneration | quote }}
+
+  # Chat Permissions
+  USER_PERMISSIONS_CHAT_CONTROLS: {{ .Values.openWebui.config.userPermissionsChatControls | quote }}
+  USER_PERMISSIONS_CHAT_VALVES: {{ .Values.openWebui.config.userPermissionsChatValves | quote }}
+  USER_PERMISSIONS_CHAT_SYSTEM_PROMPT: {{ .Values.openWebui.config.userPermissionsChatSystemPrompt | quote }}
+  USER_PERMISSIONS_CHAT_PARAMS: {{ .Values.openWebui.config.userPermissionsChatParams | quote }}
+  USER_PERMISSIONS_CHAT_FILE_UPLOAD: {{ .Values.openWebui.config.userPermissionsChatFileUpload | quote }}
+  USER_PERMISSIONS_CHAT_DELETE: {{ .Values.openWebui.config.userPermissionsChatDelete | quote }}
+  USER_PERMISSIONS_CHAT_DELETE_MESSAGE: {{ .Values.openWebui.config.userPermissionsChatDeleteMessage | quote }}
+  USER_PERMISSIONS_CHAT_EDIT: {{ .Values.openWebui.config.userPermissionsChatEdit | quote }}
+  USER_PERMISSIONS_CHAT_SHARE: {{ .Values.openWebui.config.userPermissionsChatShare | quote }}
+  USER_PERMISSIONS_CHAT_EXPORT: {{ .Values.openWebui.config.userPermissionsChatExport | quote }}
+  USER_PERMISSIONS_CHAT_CONTINUE_RESPONSE: {{ .Values.openWebui.config.userPermissionsChatContinueResponse | quote }}
+  USER_PERMISSIONS_CHAT_REGENERATE_RESPONSE: {{ .Values.openWebui.config.userPermissionsChatRegenerateResponse | quote }}
+  USER_PERMISSIONS_CHAT_RATE_RESPONSE: {{ .Values.openWebui.config.userPermissionsChatRateResponse | quote }}
+  USER_PERMISSIONS_CHAT_MULTIPLE_MODELS: {{ .Values.openWebui.config.userPermissionsChatMultipleModels | quote }}
+  USER_PERMISSIONS_CHAT_TEMPORARY: {{ .Values.openWebui.config.userPermissionsChatTemporary | quote }}
+  USER_PERMISSIONS_FEATURES_WEB_SEARCH: {{ .Values.openWebui.config.userPermissionsFeaturesWebSearch | quote }}
+  USER_PERMISSIONS_FEATURES_IMAGE_GENERATION: {{ .Values.openWebui.config.userPermissionsFeaturesImageGeneration | quote }}
+  USER_PERMISSIONS_FEATURES_API_KEYS: {{ .Values.openWebui.config.userPermissionsFeaturesApiKeys | quote }}
+
+  # Admin
+  ENABLE_ADMIN_EXPORT: {{ .Values.openWebui.config.enableAdminExport | quote }}
+  ENABLE_ADMIN_CHAT_ACCESS: {{ .Values.openWebui.config.enableAdminChatAccess | quote }}
+  ENABLE_ADMIN_WORKSPACE_CONTENT_ACCESS: {{ .Values.openWebui.config.enableAdminWorkspaceContentAccess | quote }}
+  BYPASS_ADMIN_ACCESS_CONTROL: {{ .Values.openWebui.config.bypassAdminAccessControl | quote }}
+  SHOW_ADMIN_DETAILS: {{ .Values.openWebui.config.showAdminDetails | quote }}
+  ENABLE_EVALUATION_ARENA_MODELS: {{ .Values.openWebui.config.enableEvaluationArenaModels | quote }}
+  ENABLE_API_KEYS: {{ .Values.openWebui.config.enableApiKeys | quote }}
+  ENABLE_IMAGE_GENERATION: {{ .Values.openWebui.config.enableImageGeneration | quote }}
+  ENABLE_GOOGLE_DRIVE_INTEGRATION: {{ .Values.openWebui.config.enableGoogleDriveIntegration | quote }}
+  ENABLE_ONEDRIVE_INTEGRATION: {{ .Values.openWebui.config.enableOnedriveIntegration | quote }}
+  BYPASS_MODEL_ACCESS_CONTROL: {{ .Values.openWebui.config.bypassModelAccessControl | quote }}
+
+  # Telemetry
+  SCARF_NO_ANALYTICS: {{ .Values.openWebui.config.scarfNoAnalytics | quote }}
+  DO_NOT_TRACK: {{ .Values.openWebui.config.doNotTrack | quote }}
+  ANONYMIZED_TELEMETRY: {{ .Values.openWebui.config.anonymizedTelemetry | quote }}
+
+  # Custom Prompts
+  {{- if .Values.openWebui.config.queryGenerationPromptTemplate }}
+  QUERY_GENERATION_PROMPT_TEMPLATE: {{ .Values.openWebui.config.queryGenerationPromptTemplate | quote }}
+  {{- end }}
+{{- end }}

@@ -1,0 +1,46 @@
+{{- if .Values.searxng.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "open-webui-stack.searxng.fullname" . }}-config
+  labels:
+    {{- include "open-webui-stack.searxng.labels" . | nindent 4 }}
+data:
+  settings.yml: |
+    use_default_settings: true
+    general:
+      instance_name: {{ .Values.searxng.config.instanceName | quote }}
+    search:
+      safe_search: {{ .Values.searxng.config.safeSearch }}
+      autocomplete: ""
+      formats:
+        - html
+        - json
+    server:
+      secret_key: "${SEARXNG_SECRET_KEY}"
+      limiter: false
+      public_instance: false
+    ui:
+      static_use_hash: true
+    engines:
+      {{- if .Values.searxng.config.engines.google }}
+      - name: google
+        engine: google
+        disabled: false
+      {{- end }}
+      {{- if .Values.searxng.config.engines.duckduckgo }}
+      - name: duckduckgo
+        engine: duckduckgo
+        disabled: false
+      {{- end }}
+      {{- if .Values.searxng.config.engines.wikipedia }}
+      - name: wikipedia
+        engine: wikipedia
+        disabled: false
+      {{- end }}
+      {{- if .Values.searxng.config.engines.bing }}
+      - name: bing
+        engine: bing
+        disabled: false
+      {{- end }}
+{{- end }}

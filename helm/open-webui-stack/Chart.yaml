@@ -1,0 +1,22 @@
+apiVersion: v2
+name: open-webui-stack
+description: Open WebUI with Gradient services (Gateway, Reranker, SearXNG, Crawl4AI, Weaviate)
+type: application
+version: 0.1.0
+appVersion: "main"
+
+keywords:
+  - open-webui
+  - ai
+  - llm
+  - rag
+  - chat
+
+maintainers:
+  - name: Gradient DS
+    email: lex@gradient-ds.com
+
+home: https://github.com/gradient-ds/soev
+sources:
+  - https://github.com/open-webui/open-webui
+  - https://github.com/gradient-ds/genai-utils
