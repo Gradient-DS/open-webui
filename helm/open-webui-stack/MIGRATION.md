@@ -99,25 +99,22 @@ kubectl logs -f job/<release-name>-migration
 After verifying the dry-run output:
 
 ```bash
-# Delete the dry-run job first
-kubectl delete job <release-name>-migration
-
-# Update values for actual migration
-cat > migration-values.yaml << EOF
-migration:
-  enabled: true
-  dryRun: false
-  backupDir: "librechat-backup-YYYYMMDD-HHMMSS"
-  backupPvc: "librechat-backup-pvc"
-  defaultModel: "gpt-4o"
-EOF
-
-# Run migration
-helm upgrade <release-name> ./open-webui-stack -f migration-values.yaml
+# IMPORTANT: Include ALL your values files when running helm upgrade
+# The migration uses --set flags, but you MUST also include your base values files
+helm upgrade <release-name> ./open-webui-stack \
+  -f ./open-webui-stack/values-prod.yaml \
+  -f ./open-webui-stack/values-secrets.yaml \
+  --set migration.enabled=true \
+  --set migration.dryRun=false \
+  --set migration.backupDir="librechat-backup-YYYYMMDD-HHMMSS" \
+  --set migration.backupPvc="librechat-backup-pvc" \
+  --timeout 10m
 
 # Watch logs
 kubectl logs -f job/<release-name>-migration
 ```
+
+> **⚠️ Important**: Always include your `-f values-prod.yaml -f values-secrets.yaml` files. Using only `--set` flags or `--reuse-values` may not work correctly with the migration job.
 
 ### Step 6: Verify and Cleanup
 
@@ -148,6 +145,68 @@ kubectl delete pvc librechat-backup-pvc
 | `migration.backupArchivePvc` | `""` | PVC with backup.tar.gz (auto-extracted) |
 | `migration.preferImportPassword` | `false` | Update passwords for existing users |
 | `migration.defaultModel` | `"gpt-4o"` | Fallback model for unmapped agents |
+
+## Re-running the Migration
+
+If you need to re-run the migration (e.g., after fixing bugs in the migration script), you must clear the previously migrated data first.
+
+### Step 1: Clear Migrated Data (Keep Admin Users)
+
+Connect to the PostgreSQL pod and run the cleanup SQL:
+
+```bash
+# Find the postgres pod
+kubectl get pods -n <namespace> | grep postgres
+
+# Execute cleanup SQL (keeps admin users and their data)
+kubectl exec -n <namespace> <postgres-pod-name> -- psql -U openwebui -d openwebui -c "
+  DELETE FROM chat_file;
+  DELETE FROM chat WHERE user_id IN (SELECT id FROM \"user\" WHERE role <> 'admin');
+  DELETE FROM prompt;
+  DELETE FROM model WHERE id LIKE 'agent-%';
+  DELETE FROM file WHERE user_id IN (SELECT id FROM \"user\" WHERE role <> 'admin');
+"
+```
+
+This preserves:
+- Admin users and their auth records
+- Admin users' chats, files, and settings
+- Manually created models (not prefixed with `agent-`)
+
+### Step 2: Handle Stuck Helm Operations
+
+If the migration job fails, helm may be stuck in a pending state:
+
+```bash
+# Check helm history for stuck operations
+helm history <release-name> -n <namespace> | tail -5
+
+# If you see "pending-upgrade", rollback to the last successful revision
+helm rollback <release-name> <revision-number> -n <namespace>
+```
+
+### Step 3: Re-run the Migration
+
+```bash
+# After rollback and data cleanup, run migration again
+helm upgrade <release-name> ./open-webui-stack \
+  -f ./open-webui-stack/values-prod.yaml \
+  -f ./open-webui-stack/values-secrets.yaml \
+  --set migration.enabled=true \
+  --set migration.dryRun=false \
+  --set migration.backupDir="librechat-backup-YYYYMMDD-HHMMSS" \
+  --set migration.backupPvc="librechat-backup-pvc" \
+  --timeout 10m
+```
+
+### Updating the Migration Script
+
+If you need to modify the migration script:
+
+1. Edit the script at `scripts/restore-to-openwebui.py`
+2. Copy it to the helm chart: `cp scripts/restore-to-openwebui.py helm/open-webui-stack/scripts/`
+3. Clear migrated data (see above)
+4. Re-run the migration
 
 ## Troubleshooting
 

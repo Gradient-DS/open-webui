@@ -1073,10 +1073,20 @@ OPENAI_API_BASE_URLS = PersistentConfig(
     "OPENAI_API_BASE_URLS", "openai.api_base_urls", OPENAI_API_BASE_URLS
 )
 
+# Read OPENAI_API_CONFIGS from environment variable (JSON format)
+# Example: OPENAI_API_CONFIGS='{"0": {"enable": true, "model_ids": ["gpt-4"]}}'
+OPENAI_API_CONFIGS_DEFAULT = {}
+try:
+    OPENAI_API_CONFIGS_DEFAULT = json.loads(
+        os.environ.get("OPENAI_API_CONFIGS", "{}")
+    )
+except json.JSONDecodeError:
+    pass
+
 OPENAI_API_CONFIGS = PersistentConfig(
     "OPENAI_API_CONFIGS",
     "openai.api_configs",
-    {},
+    OPENAI_API_CONFIGS_DEFAULT,
 )
 
 # Get the actual OpenAI API key based on the base URL

@@ -25,6 +25,14 @@ openWebui:
     # CORS - update to match your domain
     corsAllowOrigin: "https://voorbeeld.soev.ai"
 
+    # LLM Provider model filtering (per-connection, doesn't affect workspace agents)
+    # This replaces MODEL_WHITELIST which blocked workspace agents
+    openaiApiConfigs:
+      "0":
+        enable: true
+        model_ids:
+          - "openai/gpt-oss-120b"
+
 # -----------------------------------------------------------------------------
 # Ingress - nginx with cert-manager
 # -----------------------------------------------------------------------------
@@ -54,11 +62,11 @@ ingress:
 crawl4ai:
   resources:
     requests:
-      memory: "8Gi"
-      cpu: "2000m"
+      memory: "4Gi"
+      cpu: "1000m"
     limits:
-      memory: "32Gi"
-      cpu: "8000m"
+      memory: "16Gi"
+      cpu: "4000m"
 
 # -----------------------------------------------------------------------------
 # Secrets - MUST be provided via --set or values-secrets.yaml
