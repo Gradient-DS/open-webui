@@ -609,6 +609,13 @@ async def lifespan(app: FastAPI):
     log.info("Installing external dependencies of functions and tools...")
     install_tool_and_function_dependencies()
 
+    # Load external agents if configured
+    try:
+        from open_webui.utils.external_agents import load_external_agents_at_startup
+        load_external_agents_at_startup()
+    except Exception as e:
+        log.warning(f"External agents loading skipped or failed: {e}")
+
     app.state.redis = get_redis_connection(
         redis_url=REDIS_URL,
         redis_sentinels=get_sentinels_from_env(
