@@ -69,9 +69,9 @@ def install_external_package(
     if os.path.exists(repo_url):
         log.info(f"Using local external agents repo: {repo_url}")
         try:
-            # Install in editable mode with better error reporting
+            # Install with better error reporting
             result = subprocess.run(
-                [sys.executable, "-m", "pip", "install", "-e", repo_url],
+                [sys.executable, "-m", "pip", "install", repo_url],
                 capture_output=True,
                 text=True,
                 timeout=60
@@ -113,10 +113,10 @@ def install_external_package(
                 stderr=subprocess.PIPE
             )
         
-        # Install in editable mode with better error reporting
-        log.info(f"Installing external agents package in editable mode...")
+        # Install with better error reporting
+        log.info(f"Installing external agents package...")
         result = subprocess.run(
-            [sys.executable, "-m", "pip", "install", "-e", str(repo_path)],
+            [sys.executable, "-m", "pip", "install", str(repo_path)],
             capture_output=True,
             text=True,
             timeout=60
