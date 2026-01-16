@@ -119,7 +119,7 @@ def install_external_package(
             [sys.executable, "-m", "pip", "install", "-e", str(repo_path)],
             capture_output=True,
             text=True,
-            timeout=60
+            timeout=300
         )
         if result.returncode != 0:
             log.error(f"Failed to install package from git repo")
