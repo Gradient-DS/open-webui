@@ -1618,7 +1618,7 @@
 	"The Weight of BM25 Hybrid Search. 0 more semantic, 1 more lexical. Default 0.5": "",
 	"The width in pixels to compress images to. Leave empty for no compression.": "",
 	"Theme": "Thema",
-	"Thinking...": "Aan het denken...",
+	"Thinking...": "Bekijk denkstappen",
 	"This action cannot be undone. Do you wish to continue?": "Deze actie kan niet ongedaan worden gemaakt. Wilt u doorgaan?",
 	"This channel was created on {{createdAt}}. This is the very beginning of the {{channelName}} channel.": "Dit kanaal is aangemaakt op {{createdAt}}. Dit is het begin van het kanaal {{channelName}}.",
 	"This chat won't appear in history and your messages will not be saved.": "",
