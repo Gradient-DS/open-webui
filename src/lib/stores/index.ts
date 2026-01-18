@@ -294,6 +294,7 @@ type Config = {
 		feature_admin_functions?: boolean;
 		feature_admin_settings?: boolean;
 		feature_admin_settings_tabs?: string[];
+		feature_chat_controls_sections?: string[];
 	};
 	oauth: {
 		providers: {

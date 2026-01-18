@@ -172,6 +172,17 @@ class GraphClient:
         url = f"{GRAPH_BASE_URL}/drives/{drive_id}/items/{item_id}"
         return await self._get_json(url)
 
+    async def get_item(
+        self, drive_id: str, item_id: str
+    ) -> Optional[Dict[str, Any]]:
+        """Get metadata for a single item, returning None if not found."""
+        url = f"{GRAPH_BASE_URL}/drives/{drive_id}/items/{item_id}"
+        response = await self._request_with_retry("GET", url)
+        if response.status_code == 404:
+            return None
+        response.raise_for_status()
+        return response.json()
+
     async def get_folder_permissions(
         self,
         drive_id: str,

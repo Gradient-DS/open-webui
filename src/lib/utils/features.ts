@@ -103,6 +103,13 @@ export const ADMIN_SETTINGS_TABS = [
 export type AdminSettingsTab = (typeof ADMIN_SETTINGS_TABS)[number];
 
 /**
+ * All valid chat control section IDs
+ */
+export const CHAT_CONTROL_SECTIONS = ['files', 'valves', 'system_prompt', 'params'] as const;
+
+export type ChatControlSection = (typeof CHAT_CONTROL_SECTIONS)[number];
+
+/**
  * Check if admin settings section is enabled globally.
  */
 export function isAdminSettingsEnabled(): boolean {
@@ -150,4 +157,24 @@ export function getFirstAvailableAdminSettingsTab(): AdminSettingsTab | null {
 		}
 	}
 	return null;
+}
+
+/**
+ * Check if a specific chat control section is enabled.
+ * Requires FEATURE_CHAT_CONTROLS to be true first.
+ *
+ * @param section - The section ID to check
+ * @returns true if the section should be visible
+ */
+export function isChatControlSectionEnabled(section: ChatControlSection): boolean {
+	// First check if chat controls is enabled at all
+	if (!isFeatureEnabled('chat_controls')) {
+		return false;
+	}
+
+	const $config = get(config);
+	const allowedSections = $config?.features?.feature_chat_controls_sections ?? [];
+
+	// If no sections specified, all sections are allowed
+	return allowedSections.length === 0 || allowedSections.includes(section);
 }

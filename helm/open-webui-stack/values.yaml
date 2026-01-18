@@ -162,6 +162,7 @@ openWebui:
     featureAdminFunctions: "False"
     featureAdminSettings: "True"
     featureAdminSettingsTabs: "models,tools,interface,db"
+    featureChatControlsSections: ""  # Whitelist: files,valves,system_prompt,params (empty=all)
 
     # Notes
     enableNotes: "true"
@@ -235,7 +236,11 @@ openWebui:
     enableImageGeneration: "false"
     enableGoogleDriveIntegration: "false"
     enableOnedriveIntegration: "false"
-    bypassModelAccessControl: "true"
+    enableOnedriveSync: "false"
+    onedriveSyncIntervalMinutes: "60"
+    onedriveMaxFilesPerSync: "500"
+    onedriveMaxFileSizeMb: "100"
+    bypassModelAccessControl: "false"
 
     # Telemetry (disabled)
     scarfNoAnalytics: "true"

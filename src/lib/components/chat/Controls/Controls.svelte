@@ -10,12 +10,21 @@
 	import Collapsible from '$lib/components/common/Collapsible.svelte';
 
 	import { user, settings } from '$lib/stores';
-	import { isFeatureEnabled } from '$lib/utils/features';
+	import { isFeatureEnabled, isChatControlSectionEnabled } from '$lib/utils/features';
 	export let models = [];
 	export let chatFiles = [];
 	export let params = {};
 
 	let showValves = false;
+
+	// Collect knowledge items from all selected models
+	$: modelKnowledge = models.reduce((acc, model) => {
+		const knowledge = model?.info?.meta?.knowledge ?? [];
+		if (knowledge.length > 0) {
+			return [...acc, { modelName: model.name, items: knowledge }];
+		}
+		return acc;
+	}, []);
 </script>
 
 <div class=" dark:text-white">
@@ -33,38 +42,69 @@
 
 	{#if isFeatureEnabled('chat_controls') && ($user?.role === 'admin' || ($user?.permissions.chat?.controls ?? true))}
 		<div class=" dark:text-gray-200 text-sm font-primary py-0.5 px-0.5">
-			{#if chatFiles.length > 0}
+			{#if isChatControlSectionEnabled('files')}
 				<Collapsible title={$i18n.t('Files')} open={true} buttonClassName="w-full">
 					<div class="flex flex-col gap-1 mt-1.5" slot="content">
-						{#each chatFiles as file, fileIdx}
-							<FileItem
-								className="w-full"
-								item={file}
-								edit={true}
-								url={file?.url ? file.url : null}
-								name={file.name}
-								type={file.type}
-								size={file?.size}
-								dismissible={true}
-								small={true}
-								on:dismiss={() => {
-									// Remove the file from the chatFiles array
+						{#if chatFiles.length > 0}
+							{#each chatFiles as file, fileIdx}
+								<FileItem
+									className="w-full"
+									item={file}
+									edit={true}
+									url={file?.url ? file.url : null}
+									name={file.name}
+									type={file.type}
+									size={file?.size}
+									dismissible={true}
+									small={true}
+									on:dismiss={() => {
+										// Remove the file from the chatFiles array
 
-									chatFiles.splice(fileIdx, 1);
-									chatFiles = chatFiles;
-								}}
-								on:click={() => {
-									console.log(file);
-								}}
-							/>
-						{/each}
+										chatFiles.splice(fileIdx, 1);
+										chatFiles = chatFiles;
+									}}
+									on:click={() => {
+										console.log(file);
+									}}
+								/>
+							{/each}
+						{/if}
+
+						{#if modelKnowledge.length > 0}
+							{#each modelKnowledge as { modelName, items }}
+								<div class="mt-2">
+									<div class="text-xs text-gray-500 dark:text-gray-400 mb-1">
+										{$i18n.t('From model')}: {modelName}
+									</div>
+									{#each items as item}
+										<FileItem
+											className="w-full"
+											item={item}
+											edit={false}
+											url={item?.url ? item.url : null}
+											name={item.name}
+											type={item?.type ?? 'collection'}
+											size={item?.size}
+											dismissible={false}
+											small={true}
+										/>
+									{/each}
+								</div>
+							{/each}
+						{/if}
+
+						{#if chatFiles.length === 0 && modelKnowledge.length === 0}
+							<div class="text-xs text-gray-500 dark:text-gray-400 py-2">
+								{$i18n.t('Files will appear here when attached to the chat.')}
+							</div>
+						{/if}
 					</div>
 				</Collapsible>
 
 				<hr class="my-2 border-gray-50 dark:border-gray-700/10" />
 			{/if}
 
-			{#if $user?.role === 'admin' || ($user?.permissions.chat?.valves ?? true)}
+			{#if isChatControlSectionEnabled('valves') && ($user?.role === 'admin' || ($user?.permissions.chat?.valves ?? true))}
 				<Collapsible bind:open={showValves} title={$i18n.t('Valves')} buttonClassName="w-full">
 					<div class="text-sm" slot="content">
 						<Valves show={showValves} />
@@ -74,7 +114,7 @@
 				<hr class="my-2 border-gray-50 dark:border-gray-700/10" />
 			{/if}
 
-			{#if isFeatureEnabled('system_prompt')}
+			{#if isChatControlSectionEnabled('system_prompt') && isFeatureEnabled('system_prompt')}
 				{#if $user?.role === 'admin' || ($user?.permissions.chat?.system_prompt ?? true)}
 					<Collapsible title={$i18n.t('System Prompt')} open={true} buttonClassName="w-full">
 						<div class="" slot="content">
@@ -91,16 +131,16 @@
 
 					<hr class="my-2 border-gray-50 dark:border-gray-700/10" />
 				{/if}
+			{/if}
 
-				{#if $user?.role === 'admin' || ($user?.permissions.chat?.params ?? true)}
-					<Collapsible title={$i18n.t('Advanced Params')} open={true} buttonClassName="w-full">
-						<div class="text-sm mt-1.5" slot="content">
-							<div>
-								<AdvancedParams admin={$user?.role === 'admin'} custom={true} bind:params />
-							</div>
+			{#if isChatControlSectionEnabled('params') && ($user?.role === 'admin' || ($user?.permissions.chat?.params ?? true))}
+				<Collapsible title={$i18n.t('Advanced Params')} open={true} buttonClassName="w-full">
+					<div class="text-sm mt-1.5" slot="content">
+						<div>
+							<AdvancedParams admin={$user?.role === 'admin'} custom={true} bind:params />
 						</div>
-					</Collapsible>
-				{/if}
+					</div>
+				</Collapsible>
 			{/if}
 		</div>
 	{/if}

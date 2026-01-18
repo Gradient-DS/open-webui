@@ -1,10 +1,7 @@
 """OneDrive sync services."""
 
 from open_webui.services.onedrive.graph_client import GraphClient
-from open_webui.services.onedrive.sync_worker import (
-    OneDriveSyncWorker,
-    sync_folder_to_knowledge,
-)
+from open_webui.services.onedrive.sync_worker import OneDriveSyncWorker
 from open_webui.services.onedrive.sync_events import emit_sync_progress
 from open_webui.services.onedrive.scheduler import (
     start_scheduler,
@@ -15,7 +12,6 @@ from open_webui.services.onedrive.scheduler import (
 __all__ = [
     "GraphClient",
     "OneDriveSyncWorker",
-    "sync_folder_to_knowledge",
     "emit_sync_progress",
     "start_scheduler",
     "stop_scheduler",

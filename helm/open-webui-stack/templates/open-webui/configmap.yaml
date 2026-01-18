@@ -97,6 +97,7 @@ data:
   FEATURE_ADMIN_FUNCTIONS: {{ .Values.openWebui.config.featureAdminFunctions | quote }}
   FEATURE_ADMIN_SETTINGS: {{ .Values.openWebui.config.featureAdminSettings | quote }}
   FEATURE_ADMIN_SETTINGS_TABS: {{ .Values.openWebui.config.featureAdminSettingsTabs | quote }}
+  FEATURE_CHAT_CONTROLS_SECTIONS: {{ .Values.openWebui.config.featureChatControlsSections | quote }}
 
   # Notes
   ENABLE_NOTES: {{ .Values.openWebui.config.enableNotes | quote }}
@@ -170,6 +171,10 @@ data:
   ENABLE_IMAGE_GENERATION: {{ .Values.openWebui.config.enableImageGeneration | quote }}
   ENABLE_GOOGLE_DRIVE_INTEGRATION: {{ .Values.openWebui.config.enableGoogleDriveIntegration | quote }}
   ENABLE_ONEDRIVE_INTEGRATION: {{ .Values.openWebui.config.enableOnedriveIntegration | quote }}
+  ENABLE_ONEDRIVE_SYNC: {{ .Values.openWebui.config.enableOnedriveSync | quote }}
+  ONEDRIVE_SYNC_INTERVAL_MINUTES: {{ .Values.openWebui.config.onedriveSyncIntervalMinutes | quote }}
+  ONEDRIVE_MAX_FILES_PER_SYNC: {{ .Values.openWebui.config.onedriveMaxFilesPerSync | quote }}
+  ONEDRIVE_MAX_FILE_SIZE_MB: {{ .Values.openWebui.config.onedriveMaxFileSizeMb | quote }}
   BYPASS_MODEL_ACCESS_CONTROL: {{ .Values.openWebui.config.bypassModelAccessControl | quote }}
 
   # Telemetry

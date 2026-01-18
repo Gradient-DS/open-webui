@@ -2,7 +2,11 @@
 	import Fuse from 'fuse.js';
 	import { toast } from 'svelte-sonner';
 	import { v4 as uuidv4 } from 'uuid';
+	import dayjs from 'dayjs';
+	import relativeTime from 'dayjs/plugin/relativeTime';
 	import { PaneGroup, Pane, PaneResizer } from 'paneforge';
+
+	dayjs.extend(relativeTime);
 
 	import { onMount, getContext, onDestroy, tick } from 'svelte';
 	const i18n = getContext('i18n');
@@ -35,8 +39,8 @@
 		searchKnowledgeFilesById
 	} from '$lib/apis/knowledge';
 	import { processWeb, processYoutubeVideo } from '$lib/apis/retrieval';
-	import { startOneDriveSync, getSyncStatus, type SyncStatusResponse } from '$lib/apis/onedrive';
-	import { openOneDriveFolderPicker, getGraphApiToken } from '$lib/utils/onedrive-file-picker';
+	import { startOneDriveSyncItems, getSyncStatus, cancelSync, type SyncStatusResponse, type SyncItem, type FailedFile, type SyncErrorType } from '$lib/apis/onedrive';
+	import { openOneDriveItemPicker, getGraphApiToken } from '$lib/utils/onedrive-file-picker';
 
 	import { blobToFile, isYoutubeUrl } from '$lib/utils';
 
@@ -51,6 +55,8 @@
 	import Drawer from '$lib/components/common/Drawer.svelte';
 	import ChevronLeft from '$lib/components/icons/ChevronLeft.svelte';
 	import LockClosed from '$lib/components/icons/LockClosed.svelte';
+	import OneDrive from '$lib/components/icons/OneDrive.svelte';
+	import Tooltip from '$lib/components/common/Tooltip.svelte';
 	import AccessControlModal from '../common/AccessControlModal.svelte';
 	import Search from '$lib/components/icons/Search.svelte';
 	import FilesOverlay from '$lib/components/chat/MessageInput/FilesOverlay.svelte';
@@ -67,6 +73,7 @@
 	let showAddTextContentModal = false;
 
 	let showSyncConfirmModal = false;
+	let showCancelSyncConfirmModal = false;
 	let showAccessControlModal = false;
 
 	let minSize = 0;
@@ -523,9 +530,9 @@
 		try {
 			isSyncingOneDrive = true;
 
-			// Open folder picker (uses business/SharePoint accounts)
-			const folder = await openOneDriveFolderPicker('organizations');
-			if (!folder) {
+			// Open item picker (files and folders, uses business/SharePoint accounts)
+			const items = await openOneDriveItemPicker('organizations');
+			if (!items || items.length === 0) {
 				isSyncingOneDrive = false;
 				return;
 			}
@@ -534,12 +541,19 @@
 			// The picker uses SharePoint-scoped tokens, but the backend needs Graph API tokens
 			const accessToken = await getGraphApiToken('organizations');
 
-			// Start sync
-			await startOneDriveSync(localStorage.token, {
+			// Convert to API format
+			const syncItems: SyncItem[] = items.map(item => ({
+				type: item.type,
+				drive_id: item.driveId,
+				item_id: item.id,
+				item_path: item.path,
+				name: item.name
+			}));
+
+			// Start sync with new endpoint
+			await startOneDriveSyncItems(localStorage.token, {
 				knowledge_id: knowledge.id,
-				drive_id: folder.driveId,
-				folder_id: folder.id,
-				folder_path: folder.path,
+				items: syncItems,
 				access_token: accessToken,
 				user_token: localStorage.token
 			});
@@ -556,21 +570,110 @@
 		}
 	};
 
+	const oneDriveResyncHandler = async () => {
+		const sources = knowledge?.meta?.onedrive_sync?.sources;
+		if (!sources?.length) return;
+
+		try {
+			isSyncingOneDrive = true;
+
+			// Get fresh access token for Graph API
+			const accessToken = await getGraphApiToken('organizations');
+
+			// Build items from sources
+			const syncItems: SyncItem[] = sources.map((source: any) => ({
+				type: source.type,
+				drive_id: source.drive_id,
+				item_id: source.item_id,
+				item_path: source.item_path,
+				name: source.name
+			}));
+
+			await startOneDriveSyncItems(localStorage.token, {
+				knowledge_id: knowledge.id,
+				items: syncItems,
+				access_token: accessToken,
+				user_token: localStorage.token
+			});
+
+			toast.success($i18n.t('OneDrive sync started'));
+			pollOneDriveSyncStatus();
+		} catch (error) {
+			console.error('OneDrive resync error:', error);
+			toast.error($i18n.t('Failed to start sync: ' + (error instanceof Error ? error.message : String(error))));
+			isSyncingOneDrive = false;
+		}
+	};
+
 	const pollOneDriveSyncStatus = async () => {
 		try {
 			oneDriveSyncStatus = await getSyncStatus(localStorage.token, knowledge.id);
 
 			if (oneDriveSyncStatus.status === 'syncing') {
 				setTimeout(pollOneDriveSyncStatus, 2000);
-			} else if (oneDriveSyncStatus.status === 'completed') {
-				toast.success($i18n.t('OneDrive sync completed'));
+			} else if (oneDriveSyncStatus.status === 'completed' || oneDriveSyncStatus.status === 'completed_with_errors') {
+				// Toast is handled by Socket.IO handler, just refresh
+				isSyncingOneDrive = false;
 				await init();
 			} else if (oneDriveSyncStatus.status === 'failed') {
-				toast.error($i18n.t('OneDrive sync failed: {{error}}', { error: oneDriveSyncStatus.error }));
+				// Only show error if Socket.IO didn't already handle it
+				if (isSyncingOneDrive) {
+					toast.error($i18n.t('OneDrive sync failed: {{error}}', { error: oneDriveSyncStatus.error }));
+					isSyncingOneDrive = false;
+				}
+			} else if (oneDriveSyncStatus.status === 'cancelled') {
+				isSyncingOneDrive = false;
+				await init();
 			}
 		} catch (error) {
 			console.error('Failed to get sync status:', error);
 		}
+	};
+
+	const cancelOneDriveSyncHandler = async () => {
+		try {
+			await cancelSync(localStorage.token, knowledge.id);
+			toast.info($i18n.t('Cancelling OneDrive sync...'));
+		} catch (error) {
+			console.error('Failed to cancel sync:', error);
+			toast.error($i18n.t('Failed to cancel sync: ' + (error instanceof Error ? error.message : String(error))));
+		}
+	};
+
+	// Helper to get user-friendly error type message
+	const getErrorTypeMessage = (errorType: SyncErrorType): string => {
+		switch (errorType) {
+			case 'timeout':
+				return $i18n.t('Processing timeout');
+			case 'empty_content':
+				return $i18n.t('Empty file');
+			case 'processing_error':
+				return $i18n.t('Processing error');
+			case 'download_error':
+				return $i18n.t('Download failed');
+			default:
+				return $i18n.t('Error');
+		}
+	};
+
+	// Format failed files for display in toast
+	const formatFailedFilesMessage = (failedFiles: FailedFile[]): string => {
+		if (!failedFiles || failedFiles.length === 0) return '';
+
+		// Show up to 3 failed files
+		const maxToShow = 3;
+		const filesToShow = failedFiles.slice(0, maxToShow);
+		const remaining = failedFiles.length - maxToShow;
+
+		const lines = filesToShow.map(
+			(f) => `- ${f.filename}: ${getErrorTypeMessage(f.error_type)}`
+		);
+
+		if (remaining > 0) {
+			lines.push($i18n.t('and {{COUNT}} more', { COUNT: remaining }));
+		}
+
+		return '\n' + lines.join('\n');
 	};
 
 	// Socket.IO handler for real-time sync progress updates
@@ -581,6 +684,10 @@
 		total: number;
 		filename: string;
 		error?: string;
+		files_processed?: number;
+		files_failed?: number;
+		deleted_count?: number;
+		failed_files?: FailedFile[];
 	}) => {
 		// Only process events for the current knowledge base
 		if (data.knowledge_id !== knowledge?.id) {
@@ -590,20 +697,52 @@
 		// Update sync status
 		oneDriveSyncStatus = {
 			knowledge_id: data.knowledge_id,
-			status: data.status as 'idle' | 'syncing' | 'completed' | 'failed',
+			status: data.status as 'idle' | 'syncing' | 'completed' | 'completed_with_errors' | 'failed',
 			progress_current: data.current,
 			progress_total: data.total,
-			error: data.error
+			error: data.error,
+			failed_files: data.failed_files
 		};
 
 		// Handle completion states
 		if (data.status === 'completed' || data.status === 'completed_with_errors') {
-			toast.success($i18n.t('OneDrive sync completed'));
+			const count = data.files_processed ?? 0;
+			if (count > 0) {
+				if (data.files_failed && data.files_failed > 0) {
+					const failedDetails = data.failed_files
+						? formatFailedFilesMessage(data.failed_files)
+						: '';
+					toast.warning(
+						$i18n.t('Synced {{count}} files from OneDrive ({{failed}} failed)', {
+							count,
+							failed: data.files_failed
+						}) + failedDetails
+					);
+				} else {
+					toast.success($i18n.t('Synced {{count}} files from OneDrive', { count }));
+				}
+			} else {
+				toast.success($i18n.t('OneDrive sync completed - no changes'));
+			}
 			isSyncingOneDrive = false;
+			// Refresh knowledge metadata to update last_sync_at timestamp
+			const res = await getKnowledgeById(localStorage.token, id);
+			if (res) {
+				knowledge = res;
+			}
 			await init(); // Refresh file list
 		} else if (data.status === 'failed') {
 			toast.error($i18n.t('OneDrive sync failed: {{error}}', { error: data.error || 'Unknown error' }));
 			isSyncingOneDrive = false;
+		} else if (data.status === 'cancelled') {
+			toast.info($i18n.t('OneDrive sync cancelled'));
+			isSyncingOneDrive = false;
+			// Refresh knowledge metadata to update last_sync_at timestamp
+			const res = await getKnowledgeById(localStorage.token, id);
+			if (res) {
+				knowledge = res;
+			}
+			await init(); // Refresh file list
 		}
 	};
 
@@ -872,6 +1011,16 @@
 	}}
 />
 
+<SyncConfirmDialog
+	bind:show={showCancelSyncConfirmModal}
+	title={$i18n.t('Cancel OneDrive Sync')}
+	message={$i18n.t('Are you sure you want to cancel the ongoing sync? Files already synced will be kept.')}
+	confirmLabel={$i18n.t('Cancel Sync')}
+	on:confirm={() => {
+		cancelOneDriveSyncHandler();
+	}}
+/>
+
 <AttachWebpageModal
 	bind:show={showAddWebpageModal}
 	onSubmit={async (e) => {
@@ -940,18 +1089,46 @@
 							/>
 
 							<div class="shrink-0 mr-2.5 flex items-center gap-2">
+								{#if knowledge?.meta?.onedrive_sync?.sources?.length && !isSyncingOneDrive && knowledge?.user_id === $user?.id}
+									<Tooltip content={knowledge?.meta?.onedrive_sync?.last_sync_at
+										? $i18n.t('Last synced: {{date}}', { date: dayjs(knowledge.meta.onedrive_sync.last_sync_at * 1000).fromNow() })
+										: $i18n.t('Sync OneDrive files')}>
+										<button
+											class="p-1 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 transition"
+											on:click={oneDriveResyncHandler}
+										>
+											<OneDrive className="size-4" />
+										</button>
+									</Tooltip>
+								{/if}
 								{#if oneDriveSyncStatus?.status === 'syncing' || isSyncingOneDrive}
-									<div class="text-xs text-blue-500 flex items-center gap-1">
-										<Spinner className="size-3" />
-										{#if oneDriveSyncStatus?.progress_total}
-											{$i18n.t('Syncing: {{current}}/{{total}}', {
-												current: oneDriveSyncStatus.progress_current || 0,
-												total: oneDriveSyncStatus.progress_total
-											})}
-										{:else}
-											{$i18n.t('Starting sync...')}
-										{/if}
-									</div>
+									<Tooltip content={$i18n.t('Click to cancel sync')}>
+										<button
+											class="text-xs text-blue-500 flex items-center gap-1 hover:text-red-500 transition-colors cursor-pointer"
+											on:click={() => {
+												showCancelSyncConfirmModal = true;
+											}}
+										>
+											<div class="relative">
+												<Spinner className="size-3" />
+												<svg
+													class="absolute -top-0.5 -right-0.5 size-2 text-red-500 opacity-0 hover:opacity-100"
+													viewBox="0 0 24 24"
+													fill="currentColor"
+												>
+													<rect x="4" y="4" width="16" height="16" rx="2" />
+												</svg>
+											</div>
+											{#if oneDriveSyncStatus?.progress_total}
+												{$i18n.t('Syncing: {{current}}/{{total}}', {
+													current: oneDriveSyncStatus.progress_current || 0,
+													total: oneDriveSyncStatus.progress_total
+												})}
+											{:else}
+												{$i18n.t('Starting sync...')}
+											{/if}
+										</button>
+									</Tooltip>
 								{/if}
 								{#if fileItemsTotal}
 									<div class="text-xs text-gray-500">

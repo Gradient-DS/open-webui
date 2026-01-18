@@ -1634,6 +1634,14 @@ FEATURE_ADMIN_SETTINGS_TABS = [
     if tab.strip()
 ]
 
+# Chat Controls Section Whitelist (empty = all sections enabled)
+# Valid sections: files, valves, system_prompt, params
+FEATURE_CHAT_CONTROLS_SECTIONS = [
+    section.strip()
+    for section in os.environ.get("FEATURE_CHAT_CONTROLS_SECTIONS", "").split(",")
+    if section.strip()
+]
+
 # Model Whitelist (empty = show all models)
 MODEL_WHITELIST = [
     model.strip()
