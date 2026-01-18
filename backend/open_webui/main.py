@@ -93,6 +93,7 @@ from open_webui.routers import (
     users,
     utils,
     scim,
+    onedrive_sync,
 )
 
 from open_webui.routers.retrieval import (
@@ -338,6 +339,10 @@ from open_webui.config import (
     ONEDRIVE_SHAREPOINT_TENANT_ID,
     ENABLE_ONEDRIVE_PERSONAL,
     ENABLE_ONEDRIVE_BUSINESS,
+    ENABLE_ONEDRIVE_SYNC,
+    ONEDRIVE_SYNC_INTERVAL_MINUTES,
+    ONEDRIVE_MAX_FILES_PER_SYNC,
+    ONEDRIVE_MAX_FILE_SIZE_MB,
     ENABLE_RAG_HYBRID_SEARCH,
     ENABLE_RAG_HYBRID_SEARCH_ENRICHED_TEXTS,
     ENABLE_RAG_LOCAL_WEB_FETCH,
@@ -439,6 +444,7 @@ from open_webui.config import (
     FEATURE_ADMIN_FUNCTIONS,
     FEATURE_ADMIN_SETTINGS,
     FEATURE_ADMIN_SETTINGS_TABS,
+    FEATURE_CHAT_CONTROLS_SECTIONS,
     # Tasks
     TASK_MODEL,
     TASK_MODEL_EXTERNAL,
@@ -991,6 +997,7 @@ app.state.config.BYPASS_WEB_SEARCH_WEB_LOADER = BYPASS_WEB_SEARCH_WEB_LOADER
 
 app.state.config.ENABLE_GOOGLE_DRIVE_INTEGRATION = ENABLE_GOOGLE_DRIVE_INTEGRATION
 app.state.config.ENABLE_ONEDRIVE_INTEGRATION = ENABLE_ONEDRIVE_INTEGRATION
+app.state.config.ENABLE_ONEDRIVE_SYNC = ENABLE_ONEDRIVE_SYNC
 
 app.state.config.OLLAMA_CLOUD_WEB_SEARCH_API_KEY = OLLAMA_CLOUD_WEB_SEARCH_API_KEY
 app.state.config.SEARXNG_QUERY_URL = SEARXNG_QUERY_URL
@@ -1465,6 +1472,12 @@ app.include_router(utils.router, prefix="/api/v1/utils", tags=["utils"])
 # SCIM 2.0 API for identity management
 if ENABLE_SCIM:
     app.include_router(scim.router, prefix="/api/v1/scim/v2", tags=["scim"])
+
+# OneDrive Sync API for collection synchronization
+if app.state.config.ENABLE_ONEDRIVE_SYNC:
+    app.include_router(
+        onedrive_sync.router, prefix="/api/v1/onedrive", tags=["onedrive"]
+    )
 
 
 try:
@@ -1988,12 +2001,14 @@ async def get_app_config(request: Request):
                     "feature_admin_functions": FEATURE_ADMIN_FUNCTIONS,
                     "feature_admin_settings": FEATURE_ADMIN_SETTINGS,
                     "feature_admin_settings_tabs": FEATURE_ADMIN_SETTINGS_TABS,
+                    "feature_chat_controls_sections": FEATURE_CHAT_CONTROLS_SECTIONS,
                     "enable_google_drive_integration": app.state.config.ENABLE_GOOGLE_DRIVE_INTEGRATION,
                     "enable_onedrive_integration": app.state.config.ENABLE_ONEDRIVE_INTEGRATION,
                     **(
                         {
                             "enable_onedrive_personal": ENABLE_ONEDRIVE_PERSONAL,
                             "enable_onedrive_business": ENABLE_ONEDRIVE_BUSINESS,
+                            "enable_onedrive_sync": app.state.config.ENABLE_ONEDRIVE_SYNC,
                         }
                         if app.state.config.ENABLE_ONEDRIVE_INTEGRATION
                         else {}
