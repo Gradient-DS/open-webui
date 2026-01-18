@@ -7,6 +7,9 @@ This script:
 2. Authenticates to get API token
 3. Syncs all pipe functions from the pipes directory
 
+Note: External agents are now automatically registered during backend startup!
+      This script is mainly for local pipes in scripts/pipes/ directory.
+
 Usage:
     # Auto-load from .env in repo root (default behavior)
     python bootstrap_functions.py
@@ -101,7 +104,7 @@ def get_api_token(url: str, email: str, password: str) -> Optional[str]:
         return None
 
 
-def load_pipe_files(pipes_dir: Path) -> list[dict]:
+def load_pipe_files(pipes_dir: Path, include_external: bool = True) -> list[dict]:
     """Load all pipe files from directory."""
     functions = []
 
@@ -132,6 +135,34 @@ def load_pipe_files(pipes_dir: Path) -> list[dict]:
             "content": content,
             "meta": {"description": description}
         })
+
+    # Also load external agent wrappers if they exist
+    if include_external:
+        import tempfile
+        external_dir = Path(tempfile.gettempdir()) / "openwebui_external_agents"
+        if external_dir.exists():
+            print(f"Loading external agent wrappers from {external_dir}...")
+            for pipe_file in external_dir.glob("*.py"):
+                content = pipe_file.read_text()
+                name = pipe_file.stem.replace("_", " ").title()
+                description = ""
+
+                if '"""' in content:
+                    docstring = content.split('"""')[1]
+                    for line in docstring.strip().split("\n"):
+                        line = line.strip()
+                        if line.startswith("title:"):
+                            name = line.replace("title:", "").strip()
+                        elif line.startswith("description:"):
+                            description = line.replace("description:", "").strip()
+
+                functions.append({
+                    "id": pipe_file.stem.lower(),
+                    "name": name,
+                    "content": content,
+                    "meta": {"description": description}
+                })
+                print(f"  Found external agent: {name}")
 
     return functions
 
@@ -197,6 +228,7 @@ def main():
     parser.add_argument("--pipes-dir", default=str(Path(__file__).parent))
     parser.add_argument("--wait", action="store_true", help="Wait for service to be ready")
     parser.add_argument("--timeout", type=int, default=120, help="Wait timeout in seconds")
+    parser.add_argument("--no-external", action="store_true", help="Skip loading external agent wrappers (deprecated - external agents auto-register)")
 
     args = parser.parse_args()
 
@@ -268,10 +300,12 @@ def main():
 
     # Load and sync functions
     pipes_dir = Path(args.pipes_dir)
-    functions = load_pipe_files(pipes_dir)
+    functions = load_pipe_files(pipes_dir, include_external=not args.no_external)
 
     if not functions:
         print(f"No pipe files found in {pipes_dir}")
+        print("\nNote: External agents are automatically registered during backend startup.")
+        print("      This script is mainly for local pipes in scripts/pipes/ directory.")
         sys.exit(0)
 
     print(f"\nFound {len(functions)} function(s) to sync:")
@@ -281,6 +315,8 @@ def main():
 
     if sync_functions(url, token, functions):
         print("\nAll functions synced successfully!")
+        print("\nNote: External agents are automatically registered during backend startup,")
+        print("      so you don't need to run this script for external agents anymore!")
     else:
         print("\nSome functions failed to sync")
         sys.exit(1)
