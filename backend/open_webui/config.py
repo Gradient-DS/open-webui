@@ -2489,6 +2489,22 @@ ONEDRIVE_SHAREPOINT_TENANT_ID = PersistentConfig(
     os.environ.get("ONEDRIVE_SHAREPOINT_TENANT_ID", ""),
 )
 
+# OneDrive Sync Configuration
+ENABLE_ONEDRIVE_SYNC = PersistentConfig(
+    "ENABLE_ONEDRIVE_SYNC",
+    "onedrive.enable_sync",
+    os.getenv("ENABLE_ONEDRIVE_SYNC", "False").lower() == "true",
+)
+
+ONEDRIVE_SYNC_INTERVAL_MINUTES = PersistentConfig(
+    "ONEDRIVE_SYNC_INTERVAL_MINUTES",
+    "onedrive.sync_interval_minutes",
+    int(os.getenv("ONEDRIVE_SYNC_INTERVAL_MINUTES", "60")),
+)
+
+ONEDRIVE_MAX_FILES_PER_SYNC = int(os.getenv("ONEDRIVE_MAX_FILES_PER_SYNC", "500"))
+ONEDRIVE_MAX_FILE_SIZE_MB = int(os.getenv("ONEDRIVE_MAX_FILE_SIZE_MB", "100"))
+
 # RAG Content Extraction
 CONTENT_EXTRACTION_ENGINE = PersistentConfig(
     "CONTENT_EXTRACTION_ENGINE",

@@ -248,6 +248,18 @@ class FilesTable:
             except Exception:
                 return None
 
+    def update_file_path_by_id(self, id: str, path: str) -> Optional[FileModel]:
+        with get_db() as db:
+            try:
+                file = db.query(File).filter_by(id=id).first()
+                file.path = path
+                file.updated_at = int(time.time())
+                db.commit()
+
+                return FileModel.model_validate(file)
+            except Exception:
+                return None
+
     def update_file_data_by_id(self, id: str, data: dict) -> Optional[FileModel]:
         with get_db() as db:
             try:

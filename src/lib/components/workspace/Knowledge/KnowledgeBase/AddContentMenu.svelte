@@ -11,12 +11,14 @@
 	import FolderOpen from '$lib/components/icons/FolderOpen.svelte';
 	import ArrowPath from '$lib/components/icons/ArrowPath.svelte';
 	import GlobeAlt from '$lib/components/icons/GlobeAlt.svelte';
+	import CloudArrowUp from '$lib/components/icons/CloudArrowUp.svelte';
 
 	const i18n = getContext('i18n');
 
 	export let onClose: Function = () => {};
 
 	export let onSync: Function = () => {};
+	export let onOneDriveSync: Function | null = null;
 	export let onUpload: Function = (data) => {};
 
 	let show = false;
@@ -96,6 +98,18 @@
 					<div class="flex items-center">{$i18n.t('Sync directory')}</div>
 				</DropdownMenu.Item>
 			</Tooltip>
+
+			{#if onOneDriveSync}
+				<DropdownMenu.Item
+					class="flex gap-2 items-center px-3 py-1.5 text-sm  cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800  rounded-xl"
+					on:click={() => {
+						onOneDriveSync();
+					}}
+				>
+					<CloudArrowUp strokeWidth="2" />
+					<div class="flex items-center">{$i18n.t('Sync from OneDrive')}</div>
+				</DropdownMenu.Item>
+			{/if}
 
 			<DropdownMenu.Item
 				class="flex gap-2 items-center px-3 py-1.5 text-sm  cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800  rounded-xl"
