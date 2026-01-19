@@ -1,0 +1,113 @@
+# Open WebUI Application VM Deployment
+# Deploy this on VM 1: Application server with Open WebUI + databases
+#
+# Usage:
+#   docker compose -f docker-compose.app-vm.yaml up -d
+#
+# Prerequisites:
+#   1. Copy .env.app-vm.example to .env.app-vm and configure
+#   2. Create nginx config at ./nginx/nginx.conf
+#   3. Set WEB_SEARCH_VM_IP to the IP of the web search VM
+#
+# Network ports exposed:
+#   - 80/443: Nginx (HTTP/HTTPS)
+#   - 8080 (internal): Open WebUI API
+
+services:
+  # ============================================================
+  # OPEN WEBUI - Main Application
+  # ============================================================
+  open-webui:
+    image: ghcr.io/gradient-ds/open-webui:${WEBUI_DOCKER_TAG:-main}
+    container_name: openwebui-app
+    volumes:
+      - app-data:/app/backend/data
+      - /srv/openwebui/uploads:/app/backend/data/uploads
+    env_file:
+      - .env.app-vm
+    depends_on:
+      postgres:
+        condition: service_healthy
+    extra_hosts:
+      - host.docker.internal:host-gateway
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    networks:
+      - app-network
+
+  # ============================================================
+  # POSTGRESQL - Primary Database
+  # ============================================================
+  postgres:
+    image: postgres:16-alpine
+    container_name: openwebui-postgres
+    environment:
+      POSTGRES_USER: ${DATABASE_USER:-openwebui}
+      POSTGRES_PASSWORD: ${DATABASE_PASSWORD:-changeme}
+      POSTGRES_DB: ${DATABASE_NAME:-openwebui}
+    volumes:
+      - /srv/openwebui/postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DATABASE_USER:-openwebui} -d ${DATABASE_NAME:-openwebui}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    restart: unless-stopped
+    networks:
+      - app-network
+
+  # ============================================================
+  # NGINX - Reverse Proxy with SSL
+  # ============================================================
+  nginx:
+    image: nginx:1.27-alpine
+    container_name: openwebui-nginx
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      - /srv/openwebui/certbot/www:/var/www/certbot:ro
+      - /srv/openwebui/certbot/conf:/etc/letsencrypt:ro
+    depends_on:
+      - open-webui
+    restart: unless-stopped
+    networks:
+      - app-network
+
+  # ============================================================
+  # CERTBOT - SSL Certificate Management
+  # ============================================================
+  certbot:
+    image: certbot/certbot:latest
+    container_name: openwebui-certbot
+    volumes:
+      - /srv/openwebui/certbot/conf:/etc/letsencrypt
+      - /srv/openwebui/certbot/www:/var/www/certbot
+      - /srv/openwebui/certbot/log:/var/log/letsencrypt
+    entrypoint: >-
+      /bin/sh -c '
+        trap exit TERM;
+        while :; do
+          certbot renew --quiet || true;
+          sleep 12h;
+        done'
+    depends_on:
+      - nginx
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+
+networks:
+  app-network:
+    driver: bridge
+
+volumes:
+  app-data: {}

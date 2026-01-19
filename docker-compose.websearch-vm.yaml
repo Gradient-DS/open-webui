@@ -1,0 +1,107 @@
+# Open WebUI Web Search VM Deployment
+# Deploy this on VM 2: Web search services (SearXNG, Playwright, Reranker)
+#
+# Usage:
+#   docker compose -f docker-compose.websearch-vm.yaml up -d
+#
+# Prerequisites:
+#   1. Create SearXNG config at ./searxng/settings.yml
+#   2. Ensure firewall allows traffic from Application VM
+#
+# Network ports exposed:
+#   - 8080: SearXNG (search engine)
+#   - 3000: Playwright (web scraping)
+#   - 8086: Reranker (optional, for result reranking)
+#
+# Configure the Application VM with these environment variables:
+#   WEB_SEARCH_ENGINE=searxng
+#   SEARXNG_QUERY_URL=http://<this-vm-ip>:8080/search
+#   WEB_LOADER_ENGINE=playwright
+#   PLAYWRIGHT_WS_URL=ws://<this-vm-ip>:3000
+#   RAG_EXTERNAL_RERANKER_URL=http://<this-vm-ip>:8086/rerank  (optional)
+
+services:
+  # ============================================================
+  # SEARXNG - Meta Search Engine
+  # Self-hosted privacy-respecting search aggregator
+  # ============================================================
+  searxng:
+    image: searxng/searxng:latest
+    container_name: websearch-searxng
+    ports:
+      - "0.0.0.0:8080:8080"
+    volumes:
+      - ./searxng:/etc/searxng:rw
+    environment:
+      - SEARXNG_BASE_URL=${SEARXNG_BASE_URL:-http://localhost:8080/}
+      - SEARXNG_SECRET=${SEARXNG_SECRET:-changeme-production-secret}
+      - SEARXNG_LIMITER=false
+      - SEARXNG_IMAGE_PROXY=false
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - SETGID
+      - SETUID
+    restart: unless-stopped
+    networks:
+      - websearch-network
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+          cpus: '1.0'
+
+  # ============================================================
+  # PLAYWRIGHT - Web Scraping with JavaScript Rendering
+  # Renders JavaScript for accurate page content extraction
+  # ============================================================
+  playwright:
+    image: mcr.microsoft.com/playwright:v1.57.0-noble
+    container_name: websearch-playwright
+    ports:
+      - "0.0.0.0:3000:3000"
+    command: npx -y playwright@1.57.0 run-server --port 3000 --host 0.0.0.0
+    shm_size: 2gb
+    restart: unless-stopped
+    networks:
+      - websearch-network
+    deploy:
+      resources:
+        limits:
+          memory: 4G
+          cpus: '4.0'
+
+  # ============================================================
+  # RERANKER - Infinity for Semantic Reranking
+  # High-throughput embedding and reranking server
+  # https://github.com/michaelfeil/infinity
+  # ============================================================
+  reranker:
+    image: michaelf34/infinity:latest-cpu
+    platform: linux/amd64
+    container_name: websearch-reranker
+    ports:
+      - "0.0.0.0:8086:8086"
+    volumes:
+      - reranker-cache:/app/.cache
+    command: >
+      v2
+      --model-id cross-encoder/ms-marco-MiniLM-L-6-v2
+      --engine torch
+      --port 8086
+    restart: unless-stopped
+    networks:
+      - websearch-network
+    deploy:
+      resources:
+        limits:
+          memory: 4G
+          cpus: '2.0'
+
+networks:
+  websearch-network:
+    driver: bridge
+
+volumes:
+  reranker-cache: {}
