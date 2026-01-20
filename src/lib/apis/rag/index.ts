@@ -11,7 +11,8 @@ const RAG_API_BASE_URL = import.meta.env.PUBLIC_RAG_API_BASE_URL || 'http://loca
 const RAG_API_KEY = import.meta.env.PUBLIC_RAG_API_KEY || 'your-dev-api-key-here';
 
 export interface RagDocument {
-	title: string;
+	id: string; // Document ID for filtering
+	title: string; // Document title for display
 	contentsubtype?: string;
 }
 

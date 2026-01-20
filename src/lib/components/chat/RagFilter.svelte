@@ -13,7 +13,7 @@
 	let collections: RagCollection[] = [];
 	let expandedCollections: Set<string> = new Set(); // Which collections are expanded
 	let expandedSubtypes: Set<string> = new Set(); // Which document subtypes are expanded (format: "collectionKey:subtype")
-	let selectedDocuments: Set<string> = new Set(); // Selected document titles
+	let selectedDocuments: Set<string> = new Set(); // Selected document IDs
 	
 	// Database info
 	let databaseName = '';
@@ -43,12 +43,19 @@
 	};
 	
 	/**
+	 * Get document ID (with fallback for safety)
+	 */
+	const getDocumentId = (doc: RagDocument): string => {
+		return doc.id || doc.title; // Fallback to title if ID missing
+	};
+	
+	/**
 	 * Select all documents across all collections
 	 */
 	const selectAllDocumentsDefault = () => {
 		collections.forEach(collection => {
 			collection.documents.forEach(doc => {
-				selectedDocuments.add(doc.title);
+				selectedDocuments.add(getDocumentId(doc));
 			});
 		});
 		selectedDocuments = selectedDocuments; // Trigger reactivity
@@ -109,35 +116,125 @@
 	/**
 	 * Toggle document selection
 	 */
-	const toggleDocument = (title: string) => {
-		if (selectedDocuments.has(title)) {
-			selectedDocuments.delete(title);
+	const toggleDocument = (docId: string) => {
+		if (selectedDocuments.has(docId)) {
+			selectedDocuments.delete(docId);
 		} else {
-			selectedDocuments.add(title);
+			selectedDocuments.add(docId);
 		}
 		selectedDocuments = selectedDocuments; // Trigger reactivity
 		emitFilterChange();
 	};
 	
 	/**
-	 * Select all documents in a collection
+	 * Get checkbox state for a collection (checked/unchecked/indeterminate)
 	 */
-	const selectAllDocuments = (collection: RagCollection) => {
-		collection.documents.forEach(doc => {
-			selectedDocuments.add(doc.title);
-		});
-		selectedDocuments = selectedDocuments;
+	const getCollectionCheckboxState = (collection: RagCollection): 'checked' | 'unchecked' => {
+		if (collection.documents.length === 0) return 'unchecked';
+		
+		const selectedCount = collection.documents.filter(doc => 
+			selectedDocuments.has(getDocumentId(doc))
+		).length;
+		
+		if (selectedCount === 0) return 'unchecked';
+		if (selectedCount === collection.documents.length) return 'checked';
+		return 'unchecked'; // Partial selection - we'll use indeterminate prop
+	};
+	
+	/**
+	 * Check if collection has partial selection (some but not all selected)
+	 */
+	const isCollectionIndeterminate = (collection: RagCollection): boolean => {
+		if (collection.documents.length === 0) return false;
+		
+		const selectedCount = collection.documents.filter(doc => 
+			selectedDocuments.has(getDocumentId(doc))
+		).length;
+		
+		return selectedCount > 0 && selectedCount < collection.documents.length;
+	};
+	
+	/**
+	 * Toggle collection selection (select all or deselect all)
+	 */
+	const toggleCollection = (collection: RagCollection, event?: Event) => {
+		if (event) {
+			event.stopPropagation(); // Prevent expanding/collapsing
+		}
+		
+		const allSelected = collection.documents.every(doc => 
+			selectedDocuments.has(getDocumentId(doc))
+		);
+		
+		if (allSelected) {
+			// Deselect all
+			collection.documents.forEach(doc => {
+				selectedDocuments.delete(getDocumentId(doc));
+			});
+		} else {
+			// Select all
+			collection.documents.forEach(doc => {
+				selectedDocuments.add(getDocumentId(doc));
+			});
+		}
+		
+		selectedDocuments = selectedDocuments; // Trigger reactivity
 		emitFilterChange();
 	};
 	
 	/**
-	 * Deselect all documents in a collection
+	 * Get checkbox state for a subtype (checked/unchecked)
 	 */
-	const deselectAllDocuments = (collection: RagCollection) => {
-		collection.documents.forEach(doc => {
-			selectedDocuments.delete(doc.title);
-		});
-		selectedDocuments = selectedDocuments;
+	const getSubtypeCheckboxState = (documents: RagDocument[]): 'checked' | 'unchecked' => {
+		if (documents.length === 0) return 'unchecked';
+		
+		const selectedCount = documents.filter(doc => 
+			selectedDocuments.has(getDocumentId(doc))
+		).length;
+		
+		if (selectedCount === 0) return 'unchecked';
+		if (selectedCount === documents.length) return 'checked';
+		return 'unchecked'; // Partial selection - we'll use indeterminate prop
+	};
+	
+	/**
+	 * Check if subtype has partial selection (some but not all selected)
+	 */
+	const isSubtypeIndeterminate = (documents: RagDocument[]): boolean => {
+		if (documents.length === 0) return false;
+		
+		const selectedCount = documents.filter(doc => 
+			selectedDocuments.has(getDocumentId(doc))
+		).length;
+		
+		return selectedCount > 0 && selectedCount < documents.length;
+	};
+	
+	/**
+	 * Toggle subtype selection (select all or deselect all)
+	 */
+	const toggleSubtype = (documents: RagDocument[], event?: Event) => {
+		if (event) {
+			event.stopPropagation(); // Prevent expanding/collapsing
+		}
+		
+		const allSelected = documents.every(doc => 
+			selectedDocuments.has(getDocumentId(doc))
+		);
+		
+		if (allSelected) {
+			// Deselect all
+			documents.forEach(doc => {
+				selectedDocuments.delete(getDocumentId(doc));
+			});
+		} else {
+			// Select all
+			documents.forEach(doc => {
+				selectedDocuments.add(getDocumentId(doc));
+			});
+		}
+		
+		selectedDocuments = selectedDocuments; // Trigger reactivity
 		emitFilterChange();
 	};
 	
@@ -146,7 +243,7 @@
 	 */
 	const selectAllDocumentsInSubtype = (documents: RagDocument[]) => {
 		documents.forEach(doc => {
-			selectedDocuments.add(doc.title);
+			selectedDocuments.add(getDocumentId(doc));
 		});
 		selectedDocuments = selectedDocuments;
 		emitFilterChange();
@@ -157,17 +254,24 @@
 	 */
 	const deselectAllDocumentsInSubtype = (documents: RagDocument[]) => {
 		documents.forEach(doc => {
-			selectedDocuments.delete(doc.title);
+			selectedDocuments.delete(getDocumentId(doc));
 		});
 		selectedDocuments = selectedDocuments;
 		emitFilterChange();
 	};
 	
 	/**
-	 * Clear all filters
+	 * Clear all filters (select all documents)
 	 */
 	const clearFilters = () => {
 		selectedDocuments = new Set();
+		// Select all documents
+		collections.forEach(collection => {
+			collection.documents.forEach(doc => {
+				selectedDocuments.add(getDocumentId(doc));
+			});
+		});
+		selectedDocuments = selectedDocuments; // Trigger reactivity
 		expandedCollections = new Set();
 		expandedSubtypes = new Set();
 		emitFilterChange();
@@ -177,26 +281,34 @@
 	 * Emit filter change event to parent component
 	 */
 	const emitFilterChange = () => {
-		// Get collections that have selected documents
-		const collectionsWithSelectedDocs = new Set<string>();
-		collections.forEach(collection => {
-			const hasSelectedDoc = collection.documents.some(doc => 
-				selectedDocuments.has(doc.title)
-			);
-			if (hasSelectedDoc) {
-				collectionsWithSelectedDocs.add(collection.collection_key);
-			}
-		});
+		const collectionsFilter: Record<string, { doc_ids: string[]; doc_titles: string[] }> = {};
 		
-		// If no documents selected, include all collections
-		const activeCollections = selectedDocuments.size > 0
-			? Array.from(collectionsWithSelectedDocs)
-			: collections.map(c => c.collection_key);
+		if (selectedDocuments.size > 0) {
+			// Collect all selected documents grouped by collection
+			for (const collection of collections) {
+				const collectionDocIds: string[] = [];
+				const collectionDocTitles: string[] = [];
+				
+				for (const doc of collection.documents) {
+					const docId = getDocumentId(doc);
+					if (selectedDocuments.has(docId)) {
+						collectionDocIds.push(docId);
+						collectionDocTitles.push(doc.title || '');
+					}
+				}
+				
+				// Only add collection if it has selected documents
+				if (collectionDocIds.length > 0) {
+					collectionsFilter[collection.collection_key] = {
+						doc_ids: collectionDocIds,
+						doc_titles: collectionDocTitles
+					};
+				}
+			}
+		}
 		
 		dispatch('filterChange', {
-			mode: selectedDocuments.size > 0 ? 'documents' : 'collections',
-			collections: activeCollections,
-			documents: Array.from(selectedDocuments)
+			collections: collectionsFilter
 		});
 	};
 	
@@ -244,37 +356,62 @@
 			<div class="space-y-2">
 				{#each collections as collection}
 					<div class="border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden">
-						<!-- Collection Header (Accordion Toggle) -->
-						<button
-							on:click={() => toggleExpanded(collection.collection_key)}
-							class="w-full flex items-center justify-between px-3 py-2.5 bg-gray-50 dark:bg-gray-800/50 hover:bg-gray-100 dark:hover:bg-gray-800 transition"
-						>
-							<div class="flex-1 text-left">
-								<div class="text-sm font-medium text-gray-800 dark:text-gray-100">
-									{collection.collection_key}
-								</div>
-								<div class="text-xs text-gray-500 dark:text-gray-400">
-									{collection.document_count} document{collection.document_count !== 1 ? 'en' : ''}
-								</div>
+						<!-- Collection Header -->
+						<div class="flex items-center gap-2 px-3 py-2.5 bg-gray-50 dark:bg-gray-800/50">
+							<!-- Collection Checkbox -->
+							<div
+								on:click|stopPropagation
+								class="cursor-pointer"
+								role="button"
+								tabindex="0"
+								on:keydown={(e) => {
+									if (e.key === 'Enter' || e.key === ' ') {
+										e.preventDefault();
+										e.stopPropagation();
+										toggleCollection(collection, e);
+									}
+								}}
+								aria-label="Toggle collection selection"
+							>
+								<Checkbox
+									state={getCollectionCheckboxState(collection)}
+									indeterminate={isCollectionIndeterminate(collection)}
+									on:change={() => toggleCollection(collection)}
+								/>
 							</div>
 							
-							<!-- Expand/Collapse Icon -->
-							{#if collection.documents.length > 0}
-								<svg
-									class="w-5 h-5 text-gray-400 transition-transform {expandedCollections.has(collection.collection_key) ? 'rotate-180' : ''}"
-									fill="none"
-									stroke="currentColor"
-									viewBox="0 0 24 24"
-								>
-									<path
-										stroke-linecap="round"
-										stroke-linejoin="round"
-										stroke-width="2"
-										d="M19 9l-7 7-7-7"
-									/>
-								</svg>
-							{/if}
-						</button>
+							<!-- Collection Info and Expand Button -->
+							<button
+								on:click={() => toggleExpanded(collection.collection_key)}
+								class="flex-1 flex items-center justify-between text-left"
+							>
+								<div class="flex-1">
+									<div class="text-sm font-medium text-gray-800 dark:text-gray-100">
+										{collection.collection_key}
+									</div>
+									<div class="text-xs text-gray-500 dark:text-gray-400">
+										{collection.document_count} document{collection.document_count !== 1 ? 'en' : ''}
+									</div>
+								</div>
+								
+								<!-- Expand/Collapse Icon -->
+								{#if collection.documents.length > 0}
+									<svg
+										class="w-5 h-5 text-gray-400 transition-transform {expandedCollections.has(collection.collection_key) ? 'rotate-180' : ''}"
+										fill="none"
+										stroke="currentColor"
+										viewBox="0 0 24 24"
+									>
+										<path
+											stroke-linecap="round"
+											stroke-linejoin="round"
+											stroke-width="2"
+											d="M19 9l-7 7-7-7"
+										/>
+									</svg>
+								{/if}
+							</button>
+						</div>
 						
 						<!-- Document Subtypes List (Collapsible) -->
 						{#if expandedCollections.has(collection.collection_key)}
@@ -283,59 +420,65 @@
 									{@const groupedDocs = groupDocumentsBySubtype(collection.documents)}
 									{@const subtypes = Array.from(groupedDocs.entries())}
 									
-									<!-- Collection-level Bulk Actions -->
-									<div class="px-3 py-2 border-b border-gray-100 dark:border-gray-800">
-										<div class="flex gap-2">
-											<button
-												on:click={() => selectAllDocuments(collection)}
-												class="text-xs text-blue-600 hover:text-blue-700 dark:text-blue-400"
-											>
-												Select All
-											</button>
-											<span class="text-gray-300 dark:text-gray-600">|</span>
-											<button
-												on:click={() => deselectAllDocuments(collection)}
-												class="text-xs text-blue-600 hover:text-blue-700 dark:text-blue-400"
-											>
-												Deselect All
-											</button>
-										</div>
-									</div>
-									
 									<!-- Document Subtypes -->
 									<div class="space-y-1">
 										{#each subtypes as [subtype, documents]}
 											{@const subtypeKey = getSubtypeKey(collection.collection_key, subtype)}
 											<div class="border-b border-gray-100 dark:border-gray-800 last:border-b-0">
-												<!-- Subtype Header (Accordion Toggle) -->
-												<button
-													on:click={() => toggleSubtypeExpanded(collection.collection_key, subtype)}
-													class="w-full flex items-center justify-between px-4 py-2 bg-gray-50/50 dark:bg-gray-800/30 hover:bg-gray-100 dark:hover:bg-gray-800/50 transition"
-												>
-													<div class="flex-1 text-left">
-														<div class="text-xs font-medium text-gray-700 dark:text-gray-300">
-															{subtype}
-														</div>
-														<div class="text-xs text-gray-500 dark:text-gray-400">
-															{documents.length} document{documents.length !== 1 ? 'en' : ''}
-														</div>
+												<!-- Subtype Header -->
+												<div class="flex items-center gap-2 px-4 py-2 bg-gray-50/50 dark:bg-gray-800/30">
+													<!-- Subtype Checkbox -->
+													<div
+														on:click|stopPropagation
+														class="cursor-pointer"
+														role="button"
+														tabindex="0"
+														on:keydown={(e) => {
+															if (e.key === 'Enter' || e.key === ' ') {
+																e.preventDefault();
+																e.stopPropagation();
+																toggleSubtype(documents, e);
+															}
+														}}
+														aria-label="Toggle subtype selection"
+													>
+														<Checkbox
+															state={getSubtypeCheckboxState(documents)}
+															indeterminate={isSubtypeIndeterminate(documents)}
+															on:change={() => toggleSubtype(documents)}
+														/>
 													</div>
 													
-													<!-- Expand/Collapse Icon -->
-													<svg
-														class="w-4 h-4 text-gray-400 transition-transform {expandedSubtypes.has(subtypeKey) ? 'rotate-180' : ''}"
-														fill="none"
-														stroke="currentColor"
-														viewBox="0 0 24 24"
+													<!-- Subtype Info and Expand Button -->
+													<button
+														on:click={() => toggleSubtypeExpanded(collection.collection_key, subtype)}
+														class="flex-1 flex items-center justify-between text-left"
 													>
-														<path
-															stroke-linecap="round"
-															stroke-linejoin="round"
-															stroke-width="2"
-															d="M19 9l-7 7-7-7"
-														/>
-													</svg>
-												</button>
+														<div class="flex-1">
+															<div class="text-xs font-medium text-gray-700 dark:text-gray-300">
+																{subtype}
+															</div>
+															<div class="text-xs text-gray-500 dark:text-gray-400">
+																{documents.length} document{documents.length !== 1 ? 'en' : ''}
+															</div>
+														</div>
+														
+														<!-- Expand/Collapse Icon -->
+														<svg
+															class="w-4 h-4 text-gray-400 transition-transform {expandedSubtypes.has(subtypeKey) ? 'rotate-180' : ''}"
+															fill="none"
+															stroke="currentColor"
+															viewBox="0 0 24 24"
+														>
+															<path
+																stroke-linecap="round"
+																stroke-linejoin="round"
+																stroke-width="2"
+																d="M19 9l-7 7-7-7"
+															/>
+														</svg>
+													</button>
+												</div>
 												
 												<!-- Documents List (Collapsible) -->
 												{#if expandedSubtypes.has(subtypeKey)}
@@ -360,13 +503,14 @@
 														<!-- Document List -->
 														<div class="space-y-1 max-h-64 overflow-y-auto">
 															{#each documents as doc}
+																{@const docId = getDocumentId(doc)}
 																<div class="flex items-start gap-2 py-1.5 px-1 rounded hover:bg-gray-50 dark:hover:bg-gray-800/50">
 																	<Checkbox
-																		state={selectedDocuments.has(doc.title) ? 'checked' : 'unchecked'}
-																		on:change={() => toggleDocument(doc.title)}
+																		state={selectedDocuments.has(docId) ? 'checked' : 'unchecked'}
+																		on:change={() => toggleDocument(docId)}
 																	/>
 																	<button
-																		on:click={() => toggleDocument(doc.title)}
+																		on:click={() => toggleDocument(docId)}
 																		class="flex-1 text-left text-xs text-gray-700 dark:text-gray-300 leading-relaxed"
 																		title={doc.title}
 																	>

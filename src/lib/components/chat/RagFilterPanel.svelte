@@ -11,11 +11,11 @@
 	import XMark from '../icons/XMark.svelte';
 	
 	const handleFilterChange = (event: CustomEvent) => {
-		const { mode, collections, documents } = event.detail;
-		updateRagFilter({ mode, collections, documents });
+		const { collections } = event.detail;
+		updateRagFilter({ collections });
 		
 		// Log for debugging
-		console.log('[RAG Filter]', { mode, collections, documents });
+		console.log('[RAG Filter]', { collections });
 	};
 </script>
 

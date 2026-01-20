@@ -1,15 +1,16 @@
 import { writable } from 'svelte/store';
 
+export interface CollectionFilter {
+	doc_ids: string[];    // Document IDs
+	doc_titles: string[]; // Document titles
+}
+
 export interface RagFilterState {
-	mode: 'collections' | 'documents';
-	collections: string[]; // Collection keys
-	documents: string[];  // Document titles
+	collections: Record<string, CollectionFilter>; // Map of collection key -> filter data
 }
 
 const defaultState: RagFilterState = {
-	mode: 'collections',
-	collections: [],
-	documents: []
+	collections: {}
 };
 
 // Store for RAG filter state
