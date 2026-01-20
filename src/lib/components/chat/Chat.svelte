@@ -97,6 +97,7 @@
 	import Tooltip from '../common/Tooltip.svelte';
 	import Sidebar from '../icons/Sidebar.svelte';
 	import Image from '../common/Image.svelte';
+	import RagFilterPanel from './RagFilterPanel.svelte';
 
 	export let chatIdProp = '';
 
@@ -2632,6 +2633,9 @@
 		</div>
 	{/if}
 </div>
+
+<!-- RAG Filter Panel -->
+<RagFilterPanel />
 
 <style>
 	::-webkit-scrollbar {
