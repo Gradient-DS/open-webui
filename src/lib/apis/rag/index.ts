@@ -56,7 +56,24 @@ export const getCollectionsAndDocuments = async (): Promise<RagDiscoveryResponse
 			return res.json();
 		})
 		.then((json) => {
-			return json as RagDiscoveryResponse;
+			// Normalize API responses that use `doc_id` instead of `id`
+			// so the UI components can rely on `RagDocument.id` being present.
+			const data = json as any;
+
+			if (data?.collections && Array.isArray(data.collections)) {
+				data.collections = data.collections.map((collection: any) => {
+					const documents = Array.isArray(collection?.documents) ? collection.documents : [];
+					return {
+						...collection,
+						documents: documents.map((doc: any) => ({
+							...doc,
+							id: doc?.id ?? doc?.doc_id ?? doc?.original_doc_id ?? doc?.title
+						}))
+					};
+				});
+			}
+
+			return data as RagDiscoveryResponse;
 		})
 		.catch((err) => {
 			error = err.detail || err.message || 'Failed to fetch collections and documents';

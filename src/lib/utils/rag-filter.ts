@@ -17,7 +17,7 @@ import { ragFilterState, type RagFilterState } from '$lib/stores/rag-filter';
  * @returns Formatted filter object or undefined
  */
 export function getRagFilterForRequest(): Record<string, {
-	doc_ids: string[];
+	doc_ids: (string | number)[];
 	doc_titles: string[];
 }> | undefined {
 	const filterState = get(ragFilterState);

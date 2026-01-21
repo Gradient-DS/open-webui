@@ -1,7 +1,7 @@
 import { writable } from 'svelte/store';
 
 export interface CollectionFilter {
-	doc_ids: string[];    // Document IDs
+	doc_ids: (string | number)[];    // Document IDs (can be string or number)
 	doc_titles: string[]; // Document titles
 }
 

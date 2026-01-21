@@ -43,19 +43,27 @@
 	};
 	
 	/**
-	 * Get document ID (with fallback for safety)
+	 * Get document ID for Set matching
+	 * Returns empty string if no ID (documents without IDs are excluded from filtering)
 	 */
 	const getDocumentId = (doc: RagDocument): string => {
-		return doc.id || doc.title; // Fallback to title if ID missing
+		if (doc.id !== undefined && doc.id !== null && doc.id !== '') {
+			return String(doc.id); // Convert to string for Set matching
+		}
+		return ''; // No fallback - documents without IDs are excluded
 	};
 	
 	/**
-	 * Select all documents across all collections
+	 * Select all documents across all collections (only documents with IDs)
 	 */
 	const selectAllDocumentsDefault = () => {
 		collections.forEach(collection => {
 			collection.documents.forEach(doc => {
-				selectedDocuments.add(getDocumentId(doc));
+				const docId = getDocumentId(doc);
+				// Only add documents that have valid IDs
+				if (docId) {
+					selectedDocuments.add(docId);
+				}
 			});
 		});
 		selectedDocuments = selectedDocuments; // Trigger reactivity
@@ -128,53 +136,80 @@
 	
 	/**
 	 * Get checkbox state for a collection (checked/unchecked/indeterminate)
+	 * Only counts documents with valid IDs
 	 */
 	const getCollectionCheckboxState = (collection: RagCollection): 'checked' | 'unchecked' => {
-		if (collection.documents.length === 0) return 'unchecked';
+		// Filter to only documents with IDs
+		const documentsWithIds = collection.documents.filter(doc => {
+			const docId = getDocumentId(doc);
+			return docId !== '';
+		});
 		
-		const selectedCount = collection.documents.filter(doc => 
+		if (documentsWithIds.length === 0) return 'unchecked';
+		
+		const selectedCount = documentsWithIds.filter(doc => 
 			selectedDocuments.has(getDocumentId(doc))
 		).length;
 		
 		if (selectedCount === 0) return 'unchecked';
-		if (selectedCount === collection.documents.length) return 'checked';
+		if (selectedCount === documentsWithIds.length) return 'checked';
 		return 'unchecked'; // Partial selection - we'll use indeterminate prop
 	};
 	
 	/**
 	 * Check if collection has partial selection (some but not all selected)
+	 * Only counts documents with valid IDs
 	 */
 	const isCollectionIndeterminate = (collection: RagCollection): boolean => {
-		if (collection.documents.length === 0) return false;
+		// Filter to only documents with IDs
+		const documentsWithIds = collection.documents.filter(doc => {
+			const docId = getDocumentId(doc);
+			return docId !== '';
+		});
 		
-		const selectedCount = collection.documents.filter(doc => 
+		if (documentsWithIds.length === 0) return false;
+		
+		const selectedCount = documentsWithIds.filter(doc => 
 			selectedDocuments.has(getDocumentId(doc))
 		).length;
 		
-		return selectedCount > 0 && selectedCount < collection.documents.length;
+		return selectedCount > 0 && selectedCount < documentsWithIds.length;
 	};
 	
 	/**
 	 * Toggle collection selection (select all or deselect all)
+	 * Only operates on documents with valid IDs
 	 */
 	const toggleCollection = (collection: RagCollection, event?: Event) => {
 		if (event) {
 			event.stopPropagation(); // Prevent expanding/collapsing
 		}
 		
-		const allSelected = collection.documents.every(doc => 
+		// Filter to only documents with IDs
+		const documentsWithIds = collection.documents.filter(doc => {
+			const docId = getDocumentId(doc);
+			return docId !== '';
+		});
+		
+		const allSelected = documentsWithIds.length > 0 && documentsWithIds.every(doc => 
 			selectedDocuments.has(getDocumentId(doc))
 		);
 		
 		if (allSelected) {
 			// Deselect all
 			collection.documents.forEach(doc => {
-				selectedDocuments.delete(getDocumentId(doc));
+				const docId = getDocumentId(doc);
+				if (docId) {
+					selectedDocuments.delete(docId);
+				}
 			});
 		} else {
-			// Select all
+			// Select all (only documents with IDs)
 			collection.documents.forEach(doc => {
-				selectedDocuments.add(getDocumentId(doc));
+				const docId = getDocumentId(doc);
+				if (docId) {
+					selectedDocuments.add(docId);
+				}
 			});
 		}
 		
@@ -184,30 +219,44 @@
 	
 	/**
 	 * Get checkbox state for a subtype (checked/unchecked)
+	 * Only counts documents with valid IDs
 	 */
 	const getSubtypeCheckboxState = (documents: RagDocument[]): 'checked' | 'unchecked' => {
-		if (documents.length === 0) return 'unchecked';
+		// Filter to only documents with IDs
+		const documentsWithIds = documents.filter(doc => {
+			const docId = getDocumentId(doc);
+			return docId !== '';
+		});
 		
-		const selectedCount = documents.filter(doc => 
+		if (documentsWithIds.length === 0) return 'unchecked';
+		
+		const selectedCount = documentsWithIds.filter(doc => 
 			selectedDocuments.has(getDocumentId(doc))
 		).length;
 		
 		if (selectedCount === 0) return 'unchecked';
-		if (selectedCount === documents.length) return 'checked';
+		if (selectedCount === documentsWithIds.length) return 'checked';
 		return 'unchecked'; // Partial selection - we'll use indeterminate prop
 	};
 	
 	/**
 	 * Check if subtype has partial selection (some but not all selected)
+	 * Only counts documents with valid IDs
 	 */
 	const isSubtypeIndeterminate = (documents: RagDocument[]): boolean => {
-		if (documents.length === 0) return false;
+		// Filter to only documents with IDs
+		const documentsWithIds = documents.filter(doc => {
+			const docId = getDocumentId(doc);
+			return docId !== '';
+		});
 		
-		const selectedCount = documents.filter(doc => 
+		if (documentsWithIds.length === 0) return false;
+		
+		const selectedCount = documentsWithIds.filter(doc => 
 			selectedDocuments.has(getDocumentId(doc))
 		).length;
 		
-		return selectedCount > 0 && selectedCount < documents.length;
+		return selectedCount > 0 && selectedCount < documentsWithIds.length;
 	};
 	
 	/**
@@ -225,12 +274,18 @@
 		if (allSelected) {
 			// Deselect all
 			documents.forEach(doc => {
-				selectedDocuments.delete(getDocumentId(doc));
+				const docId = getDocumentId(doc);
+				if (docId) {
+					selectedDocuments.delete(docId);
+				}
 			});
 		} else {
-			// Select all
+			// Select all (only documents with IDs)
 			documents.forEach(doc => {
-				selectedDocuments.add(getDocumentId(doc));
+				const docId = getDocumentId(doc);
+				if (docId) {
+					selectedDocuments.add(docId);
+				}
 			});
 		}
 		
@@ -239,11 +294,14 @@
 	};
 	
 	/**
-	 * Select all documents in a subtype
+	 * Select all documents in a subtype (only documents with IDs)
 	 */
 	const selectAllDocumentsInSubtype = (documents: RagDocument[]) => {
 		documents.forEach(doc => {
-			selectedDocuments.add(getDocumentId(doc));
+			const docId = getDocumentId(doc);
+			if (docId) {
+				selectedDocuments.add(docId);
+			}
 		});
 		selectedDocuments = selectedDocuments;
 		emitFilterChange();
@@ -254,21 +312,27 @@
 	 */
 	const deselectAllDocumentsInSubtype = (documents: RagDocument[]) => {
 		documents.forEach(doc => {
-			selectedDocuments.delete(getDocumentId(doc));
+			const docId = getDocumentId(doc);
+			if (docId) {
+				selectedDocuments.delete(docId);
+			}
 		});
 		selectedDocuments = selectedDocuments;
 		emitFilterChange();
 	};
 	
 	/**
-	 * Clear all filters (select all documents)
+	 * Clear all filters (select all documents with IDs)
 	 */
 	const clearFilters = () => {
 		selectedDocuments = new Set();
-		// Select all documents
+		// Select all documents (only those with IDs)
 		collections.forEach(collection => {
 			collection.documents.forEach(doc => {
-				selectedDocuments.add(getDocumentId(doc));
+				const docId = getDocumentId(doc);
+				if (docId) {
+					selectedDocuments.add(docId);
+				}
 			});
 		});
 		selectedDocuments = selectedDocuments; // Trigger reactivity
@@ -281,18 +345,33 @@
 	 * Emit filter change event to parent component
 	 */
 	const emitFilterChange = () => {
-		const collectionsFilter: Record<string, { doc_ids: string[]; doc_titles: string[] }> = {};
+		const collectionsFilter: Record<string, { doc_ids: (string | number)[]; doc_titles: string[] }> = {};
 		
 		if (selectedDocuments.size > 0) {
 			// Collect all selected documents grouped by collection
 			for (const collection of collections) {
-				const collectionDocIds: string[] = [];
+				const collectionDocIds: (string | number)[] = [];
 				const collectionDocTitles: string[] = [];
 				
 				for (const doc of collection.documents) {
-					const docId = getDocumentId(doc);
+					// Skip documents without IDs - they cannot be filtered
+					if (doc.id === undefined || doc.id === null || doc.id === '') {
+						continue;
+					}
+					
+					const docId = getDocumentId(doc); // Used for matching against selectedDocuments Set
 					if (selectedDocuments.has(docId)) {
-						collectionDocIds.push(docId);
+						// Preserve the original type - if it's a number, keep it as number
+						const stableId: string | number = typeof doc.id === 'number' 
+							? doc.id 
+							: (typeof doc.id === 'string' ? doc.id.trim() : String(doc.id));
+						
+						// Only add if ID is valid after processing
+						if (typeof stableId === 'string' && stableId.length === 0) {
+							continue; // Skip empty string IDs
+						}
+						
+						collectionDocIds.push(stableId);
 						collectionDocTitles.push(doc.title || '');
 					}
 				}
@@ -307,6 +386,7 @@
 			}
 		}
 		
+		console.log('[RAG Filter] emitFilterChange collectionsFilter', collectionsFilter);
 		dispatch('filterChange', {
 			collections: collectionsFilter
 		});
