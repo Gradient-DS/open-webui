@@ -1,0 +1,21 @@
+{{- if .Values.weaviate.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "open-webui-tenant.weaviate.fullname" . }}
+  labels:
+    {{- include "open-webui-tenant.weaviate.labels" . | nindent 4 }}
+spec:
+  type: ClusterIP
+  ports:
+    - port: 8080
+      targetPort: http
+      protocol: TCP
+      name: http
+    - port: 50051
+      targetPort: grpc
+      protocol: TCP
+      name: grpc
+  selector:
+    {{- include "open-webui-tenant.weaviate.selectorLabels" . | nindent 4 }}
+{{- end }}

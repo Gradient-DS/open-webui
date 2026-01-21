@@ -1,0 +1,474 @@
+# =============================================================================
+# Open WebUI Tenant - Helm Values
+# =============================================================================
+# This chart deploys per-tenant:
+# - Open WebUI (main application)
+# - PostgreSQL (application database)
+# - Weaviate (vector database)
+#
+# Shared services (Gateway, SearXNG, Crawl4AI, Reranker) are deployed
+# separately via the gradient-gateway chart.
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# Tenant Identification
+# -----------------------------------------------------------------------------
+tenant:
+  name: ""           # Required: e.g., "demo", "client-a"
+  domain: ""         # Required: e.g., "demo.soev.ai"
+
+# -----------------------------------------------------------------------------
+# Shared Services Configuration (deployed separately)
+# -----------------------------------------------------------------------------
+sharedServices:
+  namespace: shared-services
+  gateway:
+    host: gradient-gateway
+    port: 8000
+  reranker:
+    host: reranker
+    port: 8000
+
+# -----------------------------------------------------------------------------
+# Observability Configuration
+# -----------------------------------------------------------------------------
+observability:
+  namespace: observability
+  searxng:
+    host: searxng
+    port: 8080
+
+# -----------------------------------------------------------------------------
+# Global Settings
+# -----------------------------------------------------------------------------
+global:
+  # Image pull secrets for private registries
+  imagePullSecrets: []
+  # Storage class for all PVCs (leave empty for default)
+  storageClass: ""
+
+# -----------------------------------------------------------------------------
+# Open WebUI
+# -----------------------------------------------------------------------------
+openWebui:
+  enabled: true
+
+  image:
+    repository: ghcr.io/gradient-ds/open-webui
+    tag: main
+    pullPolicy: Always
+
+  replicaCount: 1
+
+  # Service configuration
+  service:
+    type: ClusterIP
+    port: 8080
+
+  # Resource limits
+  resources:
+    requests:
+      memory: "512Mi"
+      cpu: "200m"
+    limits:
+      memory: "2Gi"
+      cpu: "1000m"
+
+  # Persistent storage for data
+  persistence:
+    enabled: true
+    size: 10Gi
+    accessMode: ReadWriteOnce
+    # existingClaim: ""  # Use existing PVC (for migrations)
+
+  # Health checks
+  livenessProbe:
+    enabled: true
+    initialDelaySeconds: 60
+    periodSeconds: 30
+    timeoutSeconds: 10
+
+  readinessProbe:
+    enabled: true
+    initialDelaySeconds: 30
+    periodSeconds: 10
+    timeoutSeconds: 5
+
+  startupProbe:
+    enabled: true
+    failureThreshold: 30
+    periodSeconds: 10
+
+  # ---------------------------------------------------------------------------
+  # Open WebUI Configuration
+  # ---------------------------------------------------------------------------
+  config:
+    # Deployment
+    env: "prod"
+    enablePersistentConfig: "false"
+    resetConfigOnStart: "true"
+    webuiName: "soev.ai"
+    corsAllowOrigin: "*"
+
+    # Admin bootstrap
+    adminEmail: ""
+    adminName: ""
+    # adminPassword is set via secrets
+
+    # Locale
+    defaultLocale: "nl-NL"
+
+    # Authentication
+    webuiAuth: "true"
+    enableSignup: "false"
+    enableLoginForm: "true"
+    enableInitialAdminSignup: "true"
+    defaultUserRole: "user"
+    enableOauthSignup: "false"
+    oauthMergeAccountsByEmail: "true"
+    enablePasswordAuth: "true"
+    jwtExpiresIn: "4w"
+
+    # Microsoft OAuth / EntraID SSO
+    # These can be left empty to disable Microsoft SSO
+    microsoftClientId: ""
+    # microsoftClientSecret is set via secrets
+    microsoftClientTenantId: ""
+    microsoftRedirectUri: ""
+    microsoftOauthScope: "openid email profile"
+    openidProviderUrl: ""
+
+    # LLM Providers
+    enableOllamaApi: "false"
+    openaiApiBaseUrl: "https://router.huggingface.co/v1"
+
+    # Vector Database (Weaviate) - uses local Weaviate in tenant namespace
+    vectorDb: "weaviate"
+    weaviateHttpPort: "8080"
+    weaviateGrpcPort: "50051"
+
+    # Database (PostgreSQL) - uses local PostgreSQL in tenant namespace
+    databaseType: "postgresql"
+    databaseUser: "openwebui"
+    databasePort: "5432"
+    databaseName: "openwebui"
+
+    # RAG Embeddings
+    ragEmbeddingEngine: "openai"
+    ragEmbeddingModel: "text-embedding-3-small"
+    ragEmbeddingBatchSize: "100"
+    ragTopK: "15"
+    ragTopKReranker: "10"
+    ragRelevanceThreshold: "0.0"
+    chunkSize: "2000"
+    chunkOverlap: "200"
+    ragHybridBm25Weight: "0.5"
+    enableRagHybridSearch: "true"
+    ragAllowedFileExtensions: "pdf,txt,md,docx,csv,json,xlsx"
+
+    # Content Extraction & Reranking (via shared services)
+    contentExtractionEngine: "external"
+    ragRerankingEngine: "external"
+    # externalDocumentLoaderApiKey is set via secrets
+    # ragExternalRerankerApiKey is set via secrets
+    # URLs are templated to use shared service names
+
+    # Web Search (via shared Gateway)
+    enableWebSearch: "true"
+    webSearchEngine: "searxng"
+    searxngLanguage: "nl"
+    webSearchResultCount: "5"
+    enableWebLoaderSslVerification: "true"
+    webLoaderEngine: "external"
+
+    # Feature Flags
+    featureChatControls: "true"
+    featureChatControlsSections: "files"  # Whitelist: files,valves,system_prompt,params (empty=all)
+    featureCapture: "False"
+    featureArtifacts: "False"
+    featurePlayground: "False"
+    featureChatOverview: "False"
+    featureNotesAiControls: "False"
+    featureVoice: "False"
+    featureChangelog: "False"
+    featureSystemPrompt: "False"
+    featureModels: "True"
+    featureKnowledge: "True"
+    featurePrompts: "True"
+    featureTools: "False"
+    featureAdminEvaluations: "True"
+    featureAdminFunctions: "False"
+    featureAdminSettings: "True"
+    featureAdminSettingsTabs: "models,tools,interface,db"
+
+    # Notes
+    enableNotes: "true"
+    userPermissionsFeaturesNotes: "true"
+
+    # Knowledge Base
+    userPermissionsWorkspaceKnowledgeAccess: "true"
+
+    # Code Execution (disabled)
+    enableCodeInterpreter: "false"
+    enableCodeExecution: "false"
+    userPermissionsFeaturesCodeInterpreter: "false"
+
+    # MCP/Tool Servers (disabled)
+    enableDirectConnections: "false"
+    userPermissionsFeaturesDirectToolServers: "false"
+
+    # TTS/STT (disabled)
+    userPermissionsChatTts: "false"
+    userPermissionsChatStt: "false"
+    userPermissionsChatCall: "false"
+
+    # Workspace
+    userPermissionsWorkspaceModelsAccess: "true"
+    userPermissionsWorkspacePromptsAccess: "true"
+    userPermissionsWorkspaceToolsAccess: "false"
+
+    # UI Features
+    enableFolders: "true"
+    userPermissionsFeaturesFolders: "true"
+    enableChannels: "false"
+    userPermissionsFeaturesChannels: "false"
+    enableCommunitySharing: "false"
+    enableMessageRating: "true"
+    enableUserWebhooks: "false"
+    enableAutocompleteGeneration: "false"
+    enableFollowUpGeneration: "true"
+    enableTitleGeneration: "true"
+    enableTagsGeneration: "true"
+    enableSearchQueryGeneration: "true"
+    enableRetrievalQueryGeneration: "true"
+
+    # Chat Permissions
+    userPermissionsChatControls: "false"
+    userPermissionsChatValves: "false"
+    userPermissionsChatSystemPrompt: "true"
+    userPermissionsChatParams: "false"
+    userPermissionsChatFileUpload: "true"
+    userPermissionsChatDelete: "true"
+    userPermissionsChatDeleteMessage: "true"
+    userPermissionsChatEdit: "true"
+    userPermissionsChatShare: "true"
+    userPermissionsChatExport: "true"
+    userPermissionsChatContinueResponse: "true"
+    userPermissionsChatRegenerateResponse: "true"
+    userPermissionsChatRateResponse: "true"
+    userPermissionsChatMultipleModels: "true"
+    userPermissionsChatTemporary: "true"
+    userPermissionsFeaturesWebSearch: "true"
+    userPermissionsFeaturesImageGeneration: "false"
+    userPermissionsFeaturesApiKeys: "false"
+
+    # Admin
+    enableAdminExport: "false"
+    enableAdminChatAccess: "false"
+    enableAdminWorkspaceContentAccess: "false"  # Disable admin seeing all prompts/models
+    bypassAdminAccessControl: "false"  # Admin must follow access control
+    showAdminDetails: "false"
+    enableEvaluationArenaModels: "false"
+    enableApiKeys: "false"
+    enableImageGeneration: "false"
+    enableGoogleDriveIntegration: "false"
+
+    # OneDrive Integration
+    enableOnedriveIntegration: "false"
+    enableOnedrivePersonal: "false"
+    enableOnedriveBusiness: "true"
+    onedriveClientIdBusiness: ""  # Azure AD App Client ID
+    onedriveSharepointUrl: ""     # e.g., "https://yourorg.sharepoint.com"
+    onedriveSharepointTenantId: ""  # Azure AD Tenant ID
+
+    # OneDrive Sync (for Knowledge Bases)
+    enableOnedriveSync: "true"
+    onedriveSyncIntervalMinutes: "15"
+    onedriveMaxFilesPerSync: "250"
+    onedriveMaxFileSizeMb: "10"
+
+    bypassModelAccessControl: "false"
+
+    # Telemetry (disabled)
+    scarfNoAnalytics: "true"
+    doNotTrack: "true"
+    anonymizedTelemetry: "false"
+
+    # OpenTelemetry Configuration
+    telemetry:
+      otel:
+        enabled: false
+        traces: true
+        metrics: true
+        logs: true
+        endpoint: "http://alloy.observability.svc:4317"
+        serviceName: "open-webui"
+        insecure: true
+        sampler: "parentbased_always_on"
+        protocol: "grpc"  # grpc or http
+        resourceAttributes: ""  # key1=val1,key2=val2
+        # Multi-tenant configuration
+        tenantId: "soev"  # X-Scope-OrgID for observability backends
+
+    # Custom Prompts
+    queryGenerationPromptTemplate: |
+      ### Task:
+      Analyze the chat history to determine the necessity of generating search queries, in the given language. By default, **prioritize generating 1-3 broad and relevant search queries** unless it is absolutely certain that no additional information is required. The aim is to retrieve comprehensive, updated, and valuable information even with minimal uncertainty. If no search is unequivocally needed, return an empty list.
+
+      ### Guidelines:
+      - Respond **EXCLUSIVELY** with a JSON object. Any form of extra commentary, explanation, or additional text is strictly prohibited.
+      - When generating search queries, respond in the format: { "queries": ["query1", "query2"] }, ensuring each query is distinct, concise, and relevant to the topic.
+      - If and only if it is entirely certain that no useful results can be retrieved by a search, return: { "queries": [] }.
+      - Err on the side of suggesting search queries if there is **any chance** they might provide useful or updated information.
+      - Be concise and focused on composing high-quality search queries, avoiding unnecessary elaboration, commentary, or assumptions.
+      - Generate queries in the EXACT SAME language as the user's most recent message. If the user writes in Dutch, queries MUST be in Dutch. If in English, queries MUST be in English.
+      - Today's date is: {{CURRENT_DATE}}.
+      - Always prioritize providing actionable and broad queries that maximize informational coverage.
+
+      ### Output:
+      Strictly return in JSON format:
+      {
+        "queries": ["query1", "query2"]
+      }
+
+      ### Chat History:
+      <chat_history>
+      {{MESSAGES:END:6}}
+      </chat_history>
+
+# -----------------------------------------------------------------------------
+# PostgreSQL
+# -----------------------------------------------------------------------------
+postgres:
+  enabled: true
+
+  image:
+    repository: postgres
+    tag: "16-alpine"
+    pullPolicy: IfNotPresent
+
+  # Resource limits
+  resources:
+    requests:
+      memory: "256Mi"
+      cpu: "100m"
+    limits:
+      memory: "1Gi"
+      cpu: "500m"
+
+  # Persistent storage
+  persistence:
+    enabled: true
+    size: 10Gi
+    accessMode: ReadWriteOnce
+
+  # Database configuration
+  database: openwebui
+  user: openwebui
+  # password is set via secrets
+
+# -----------------------------------------------------------------------------
+# Weaviate (Vector Database)
+# -----------------------------------------------------------------------------
+weaviate:
+  enabled: true
+
+  image:
+    repository: semitechnologies/weaviate
+    tag: "1.28.4"
+    pullPolicy: IfNotPresent
+
+  # Resource limits
+  resources:
+    requests:
+      memory: "512Mi"
+      cpu: "200m"
+    limits:
+      memory: "4Gi"
+      cpu: "1000m"
+
+  # Persistent storage
+  persistence:
+    enabled: true
+    size: 20Gi
+    accessMode: ReadWriteOnce
+
+  # Weaviate configuration
+  config:
+    queryDefaults:
+      limit: 25
+    authentication:
+      anonymous_access:
+        enabled: true
+    persistence:
+      dataPath: "/var/lib/weaviate"
+    defaultVectorizerModule: "none"
+    enableModules: ""
+    clusterHostname: "node1"
+
+# -----------------------------------------------------------------------------
+# Ingress
+# -----------------------------------------------------------------------------
+ingress:
+  enabled: true
+  className: nginx
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+  tls:
+    enabled: true
+
+# -----------------------------------------------------------------------------
+# Secrets
+# -----------------------------------------------------------------------------
+# These values should be overridden in a separate values file or via --set
+secrets:
+  # Open WebUI secrets
+  webuiSecretKey: ""  # Generate with: openssl rand -hex 32
+  adminPassword: ""
+  openaiApiKey: ""
+  ragOpenaiApiKey: ""
+
+  # Microsoft OAuth (leave empty to disable)
+  microsoftClientSecret: ""
+
+  # External Services API Keys (optional)
+  externalDocumentLoaderApiKey: ""
+  ragExternalRerankerApiKey: ""
+
+  # PostgreSQL
+  postgresPassword: ""
+
+# -----------------------------------------------------------------------------
+# Service Account
+# -----------------------------------------------------------------------------
+serviceAccount:
+  create: true
+  name: ""
+  annotations: {}
+
+# -----------------------------------------------------------------------------
+# External Secrets Operator
+# -----------------------------------------------------------------------------
+# When enabled, secrets are fetched from GCP Secret Manager instead of inline Helm values
+externalSecrets:
+  enabled: false
+  gcpProject: ""
+  refreshInterval: "1h"
+  # Optional: GCP credentials secret for non-Workload Identity clusters
+  gcpCredentialsSecret:
+    name: gcp-secret-manager-credentials
+    key: secret-access-credentials
+    namespace: external-secrets
+
+# -----------------------------------------------------------------------------
+# Network Policy
+# -----------------------------------------------------------------------------
+networkPolicy:
+  enabled: true
+
+# -----------------------------------------------------------------------------
+# Pod Settings
+# -----------------------------------------------------------------------------
+nodeSelector: {}
+tolerations: []
+affinity: {}

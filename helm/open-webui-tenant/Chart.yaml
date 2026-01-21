@@ -1,0 +1,22 @@
+apiVersion: v2
+name: open-webui-tenant
+description: Open WebUI tenant deployment with PostgreSQL and Weaviate
+type: application
+version: 1.0.0
+appVersion: "main"
+
+keywords:
+  - open-webui
+  - ai
+  - llm
+  - rag
+  - chat
+  - tenant
+
+maintainers:
+  - name: Gradient DS
+    email: lex@gradient-ds.com
+
+home: https://github.com/gradient-ds/soev
+sources:
+  - https://github.com/open-webui/open-webui
