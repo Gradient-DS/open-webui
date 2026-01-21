@@ -595,6 +595,28 @@ def remove_file_from_knowledge_by_id(
         log.debug(e)
         pass
 
+    # Clear OneDrive delta_links if an OneDrive file is removed
+    # This forces a full re-sync to re-add files if they're synced again
+    if form_data.file_id.startswith("onedrive-"):
+        try:
+            meta = knowledge.meta or {}
+            sync_info = meta.get("onedrive_sync", {})
+            sources = sync_info.get("sources", [])
+            if sources:
+                # Clear delta_link from all sources to force full re-sync
+                for source in sources:
+                    if "delta_link" in source:
+                        del source["delta_link"]
+                sync_info["sources"] = sources
+                meta["onedrive_sync"] = sync_info
+                Knowledges.update_knowledge_meta_by_id(id, meta)
+                log.info(
+                    f"Cleared OneDrive delta_links for knowledge {id} "
+                    f"after removing file {form_data.file_id}"
+                )
+        except Exception as e:
+            log.warning(f"Failed to clear OneDrive delta_links: {e}")
+
     if delete_file:
         try:
             # Remove the file's collection from vector database

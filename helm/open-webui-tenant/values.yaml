@@ -166,6 +166,9 @@ openWebui:
     enableRagHybridSearch: "true"
     ragAllowedFileExtensions: "pdf,txt,md,docx,csv,json,xlsx"
 
+    # File Processing
+    fileProcessingMaxConcurrent: "10"  # Max concurrent file processing tasks
+
     # Content Extraction & Reranking (via shared services)
     contentExtractionEngine: "external"
     ragRerankingEngine: "external"
