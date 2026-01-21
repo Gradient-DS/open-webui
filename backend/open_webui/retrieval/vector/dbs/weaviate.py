@@ -89,12 +89,42 @@ class WeaviateClient(VectorDBBase):
             self.client.collections.delete(sane_collection_name)
 
     def _create_collection(self, collection_name: str) -> None:
+        # Explicitly define all expected properties as TEXT to prevent Weaviate auto-schema
+        # from inferring incorrect types (e.g., UUID for file_id, DATE for moddate).
+        # This fixes conflicts when mixing file sources (OneDrive, PDF uploads, etc.)
         self.client.collections.create(
             name=collection_name,
             vector_config=weaviate.classes.config.Configure.Vectors.self_provided(),
             properties=[
                 weaviate.classes.config.Property(
                     name="text", data_type=weaviate.classes.config.DataType.TEXT
+                ),
+                # Core file metadata - always present
+                weaviate.classes.config.Property(
+                    name="file_id", data_type=weaviate.classes.config.DataType.TEXT
+                ),
+                weaviate.classes.config.Property(
+                    name="name", data_type=weaviate.classes.config.DataType.TEXT
+                ),
+                weaviate.classes.config.Property(
+                    name="source", data_type=weaviate.classes.config.DataType.TEXT
+                ),
+                weaviate.classes.config.Property(
+                    name="created_by", data_type=weaviate.classes.config.DataType.TEXT
+                ),
+                # PDF metadata - dates come in non-RFC3339 format
+                weaviate.classes.config.Property(
+                    name="moddate", data_type=weaviate.classes.config.DataType.TEXT
+                ),
+                weaviate.classes.config.Property(
+                    name="creationdate", data_type=weaviate.classes.config.DataType.TEXT
+                ),
+                # OneDrive metadata
+                weaviate.classes.config.Property(
+                    name="onedrive_item_id", data_type=weaviate.classes.config.DataType.TEXT
+                ),
+                weaviate.classes.config.Property(
+                    name="onedrive_drive_id", data_type=weaviate.classes.config.DataType.TEXT
                 ),
             ],
         )
