@@ -81,6 +81,9 @@ data:
   ENABLE_RAG_HYBRID_SEARCH: {{ .Values.openWebui.config.enableRagHybridSearch | quote }}
   RAG_ALLOWED_FILE_EXTENSIONS: {{ .Values.openWebui.config.ragAllowedFileExtensions | quote }}
 
+  # File Processing
+  FILE_PROCESSING_MAX_CONCURRENT: {{ .Values.openWebui.config.fileProcessingMaxConcurrent | quote }}
+
   # Content Extraction & Reranking (via shared services)
   CONTENT_EXTRACTION_ENGINE: {{ .Values.openWebui.config.contentExtractionEngine | quote }}
   RAG_RERANKING_ENGINE: {{ .Values.openWebui.config.ragRerankingEngine | quote }}
