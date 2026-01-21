@@ -42,7 +42,20 @@ export const uploadFile = async (
 		throw error;
 	}
 
-	if (res) {
+	// Return immediately - status updates come via Socket.IO
+	return res;
+};
+
+// Keep the blocking version for cases that need it
+export const uploadFileAndWait = async (
+	token: string,
+	file: File,
+	metadata?: object | null,
+	process?: boolean | null
+) => {
+	const res = await uploadFile(token, file, metadata, process);
+
+	if (res && process !== false) {
 		const status = await getFileProcessStatus(token, res.id);
 
 		if (status && status.ok) {
@@ -85,10 +98,6 @@ export const uploadFile = async (
 				}
 			}
 		}
-	}
-
-	if (error) {
-		throw error;
 	}
 
 	return res;
