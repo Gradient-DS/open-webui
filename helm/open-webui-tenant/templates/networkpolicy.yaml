@@ -1,0 +1,66 @@
+{{- if .Values.networkPolicy.enabled }}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "open-webui-tenant.fullname" . }}-isolation
+  labels:
+    {{- include "open-webui-tenant.labels" . | nindent 4 }}
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    # Allow from ingress controller
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: ingress-nginx
+    # Allow from observability namespace (for metrics scraping by Alloy/Prometheus)
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Values.observability.namespace | default "observability" }}
+      ports:
+        - protocol: TCP
+          port: 9090   # Prometheus metrics
+        - protocol: TCP
+          port: 8080   # Common metrics port
+    # Allow internal communication within namespace
+    - from:
+        - podSelector: {}
+  egress:
+    # Allow to shared services namespace
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Values.sharedServices.namespace }}
+    {{- if .Values.openWebui.config.telemetry.otel.enabled }}
+    # Allow to observability namespace for OTEL
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Values.observability.namespace | default "observability" }}
+    {{- end }}
+    # Allow internal communication within namespace
+    - to:
+        - podSelector: {}
+    # Allow DNS
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+    # Allow external (for LLM APIs, embedding APIs, etc.)
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except:
+              - 10.0.0.0/8
+              - 172.16.0.0/12
+              - 192.168.0.0/16
+{{- end }}
