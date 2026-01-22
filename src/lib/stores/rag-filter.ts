@@ -1,12 +1,32 @@
 import { writable } from 'svelte/store';
 
+/**
+ * Subtype filter - either fully selected or with specific documents
+ * - true: all documents in this subtype are selected
+ * - object: specific documents are selected
+ */
+export type SubtypeFilter = true | {
+	doc_ids: (string | number)[];
+	doc_titles: string[];
+};
+
+/**
+ * Collection filter with hierarchical efficiency:
+ * - { all: true } or {}: all documents in collection selected
+ * - { subtypes: { "SubtypeA": true } }: all docs in SubtypeA selected
+ * - { subtypes: { "SubtypeA": { doc_ids: [...] } } }: specific docs selected
+ */
 export interface CollectionFilter {
-	doc_ids: (string | number)[];    // Document IDs (can be string or number)
-	doc_titles: string[]; // Document titles
+	// If true, all documents in collection are selected
+	all?: boolean;
+
+	// Subtypes filter - only present if not all selected
+	// Key is subtype name, value indicates selection level
+	subtypes?: Record<string, SubtypeFilter>;
 }
 
 export interface RagFilterState {
-	collections: Record<string, CollectionFilter>; // Map of collection key -> filter data
+	collections: Record<string, CollectionFilter>;
 }
 
 const defaultState: RagFilterState = {
