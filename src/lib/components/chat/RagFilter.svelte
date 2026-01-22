@@ -343,49 +343,93 @@
 	
 	/**
 	 * Emit filter change event to parent component
+	 * Uses hierarchical structure for efficiency:
+	 * - Collection level: { all: true } if all docs selected
+	 * - Subtype level: subtypes[name] = true if all docs in subtype selected
+	 * - Document level: subtypes[name] = { doc_ids, doc_titles } for specific docs
 	 */
 	const emitFilterChange = () => {
-		const collectionsFilter: Record<string, { doc_ids: (string | number)[]; doc_titles: string[] }> = {};
-		
+		const collectionsFilter: Record<string, import('$lib/stores/rag-filter').CollectionFilter> = {};
+
 		if (selectedDocuments.size > 0) {
-			// Collect all selected documents grouped by collection
 			for (const collection of collections) {
-				const collectionDocIds: (string | number)[] = [];
-				const collectionDocTitles: string[] = [];
-				
-				for (const doc of collection.documents) {
-					// Skip documents without IDs - they cannot be filtered
-					if (doc.id === undefined || doc.id === null || doc.id === '') {
+				// Get all valid documents (with IDs)
+				const validDocs = collection.documents.filter(doc => {
+					const docId = getDocumentId(doc);
+					return docId !== '';
+				});
+
+				if (validDocs.length === 0) continue;
+
+				// Check if ALL documents in collection are selected
+				const allDocsSelected = validDocs.every(doc =>
+					selectedDocuments.has(getDocumentId(doc))
+				);
+
+				if (allDocsSelected) {
+					// Entire collection selected
+					collectionsFilter[collection.collection_key] = { all: true };
+					continue;
+				}
+
+				// Check at subtype level
+				const groupedDocs = groupDocumentsBySubtype(validDocs);
+				const subtypesFilter: Record<string, import('$lib/stores/rag-filter').SubtypeFilter> = {};
+				let hasAnySelection = false;
+
+				for (const [subtype, docs] of groupedDocs.entries()) {
+					const validSubtypeDocs = docs.filter(doc => getDocumentId(doc) !== '');
+					if (validSubtypeDocs.length === 0) continue;
+
+					const selectedInSubtype = validSubtypeDocs.filter(doc =>
+						selectedDocuments.has(getDocumentId(doc))
+					);
+
+					if (selectedInSubtype.length === 0) {
+						// No docs selected in this subtype, skip
 						continue;
 					}
-					
-					const docId = getDocumentId(doc); // Used for matching against selectedDocuments Set
-					if (selectedDocuments.has(docId)) {
-						// Preserve the original type - if it's a number, keep it as number
-						const stableId: string | number = typeof doc.id === 'number' 
-							? doc.id 
-							: (typeof doc.id === 'string' ? doc.id.trim() : String(doc.id));
-						
-						// Only add if ID is valid after processing
-						if (typeof stableId === 'string' && stableId.length === 0) {
-							continue; // Skip empty string IDs
+
+					hasAnySelection = true;
+
+					if (selectedInSubtype.length === validSubtypeDocs.length) {
+						// All docs in subtype selected
+						subtypesFilter[subtype] = true;
+					} else {
+						// Specific docs selected
+						const docIds: (string | number)[] = [];
+						const docTitles: string[] = [];
+
+						for (const doc of selectedInSubtype) {
+							const stableId: string | number = typeof doc.id === 'number'
+								? doc.id
+								: (typeof doc.id === 'string' ? doc.id.trim() : String(doc.id));
+
+							if (typeof stableId === 'string' && stableId.length === 0) {
+								continue;
+							}
+
+							docIds.push(stableId);
+							docTitles.push(doc.title || '');
 						}
-						
-						collectionDocIds.push(stableId);
-						collectionDocTitles.push(doc.title || '');
+
+						if (docIds.length > 0) {
+							subtypesFilter[subtype] = {
+								doc_ids: docIds,
+								doc_titles: docTitles
+							};
+						}
 					}
 				}
-				
-				// Only add collection if it has selected documents
-				if (collectionDocIds.length > 0) {
+
+				if (hasAnySelection) {
 					collectionsFilter[collection.collection_key] = {
-						doc_ids: collectionDocIds,
-						doc_titles: collectionDocTitles
+						subtypes: subtypesFilter
 					};
 				}
 			}
 		}
-		
+
 		console.log('[RAG Filter] emitFilterChange collectionsFilter', collectionsFilter);
 		dispatch('filterChange', {
 			collections: collectionsFilter
