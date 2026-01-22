@@ -1,25 +1,26 @@
 <script lang="ts">
 	/**
 	 * RAG Filter Panel - Floating/Sidebar panel for RAG collection/document filtering
-	 * 
+	 *
 	 * This component provides a collapsible panel that shows collection and document
 	 * filters for RAG queries. It can be toggled via the navbar button.
 	 */
 	import { showRagFilter, ragFilterState, updateRagFilter } from '$lib/stores/rag-filter';
+	import { config } from '$lib/stores';
 	import { slide } from 'svelte/transition';
 	import RagFilter from './RagFilter.svelte';
 	import XMark from '../icons/XMark.svelte';
-	
+
 	const handleFilterChange = (event: CustomEvent) => {
 		const { collections } = event.detail;
 		updateRagFilter({ collections });
-		
+
 		// Log for debugging
 		console.log('[RAG Filter]', { collections });
 	};
 </script>
 
-{#if $showRagFilter}
+{#if ($config?.features?.enable_rag_filter_ui ?? true) && $showRagFilter}
 	<div
 		class="fixed right-0 top-0 h-screen w-80 bg-white dark:bg-gray-900 border-l border-gray-200 dark:border-gray-700 shadow-xl z-40"
 		transition:slide={{ duration: 200, axis: 'x' }}

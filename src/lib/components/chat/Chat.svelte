@@ -2388,7 +2388,7 @@
 <div
 	class="h-screen max-h-[100dvh] transition-all duration-200 ease-in-out {$showSidebar
 		? 'md:max-w-[calc(100%-var(--sidebar-width))]'
-		: ''} {$showRagFilter ? 'pr-80' : ''} w-full max-w-full flex flex-col"
+		: ''} {($config?.features?.enable_rag_filter_ui ?? true) && $showRagFilter ? 'pr-80' : ''} w-full max-w-full flex flex-col"
 	id="chat-container"
 >
 	{#if !loading}
