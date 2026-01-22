@@ -230,6 +230,13 @@ openWebui:
     userPermissionsWorkspacePromptsAccess: "true"
     userPermissionsWorkspaceToolsAccess: "false"
 
+    # Workspace Public Sharing (allow users to share with all tenant users)
+    userPermissionsWorkspaceModelsAllowPublicSharing: "false"
+    userPermissionsWorkspaceKnowledgeAllowPublicSharing: "false"
+    userPermissionsWorkspacePromptsAllowPublicSharing: "false"
+    userPermissionsWorkspaceToolsAllowPublicSharing: "false"
+    userPermissionsNotesAllowPublicSharing: "false"
+
     # UI Features
     enableFolders: "true"
     userPermissionsFeaturesFolders: "true"
