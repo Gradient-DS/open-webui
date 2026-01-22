@@ -146,6 +146,13 @@ data:
   USER_PERMISSIONS_WORKSPACE_PROMPTS_ACCESS: {{ .Values.openWebui.config.userPermissionsWorkspacePromptsAccess | quote }}
   USER_PERMISSIONS_WORKSPACE_TOOLS_ACCESS: {{ .Values.openWebui.config.userPermissionsWorkspaceToolsAccess | quote }}
 
+  # Workspace Public Sharing (allow users to share with all tenant users)
+  USER_PERMISSIONS_WORKSPACE_MODELS_ALLOW_PUBLIC_SHARING: {{ .Values.openWebui.config.userPermissionsWorkspaceModelsAllowPublicSharing | quote }}
+  USER_PERMISSIONS_WORKSPACE_KNOWLEDGE_ALLOW_PUBLIC_SHARING: {{ .Values.openWebui.config.userPermissionsWorkspaceKnowledgeAllowPublicSharing | quote }}
+  USER_PERMISSIONS_WORKSPACE_PROMPTS_ALLOW_PUBLIC_SHARING: {{ .Values.openWebui.config.userPermissionsWorkspacePromptsAllowPublicSharing | quote }}
+  USER_PERMISSIONS_WORKSPACE_TOOLS_ALLOW_PUBLIC_SHARING: {{ .Values.openWebui.config.userPermissionsWorkspaceToolsAllowPublicSharing | quote }}
+  USER_PERMISSIONS_NOTES_ALLOW_PUBLIC_SHARING: {{ .Values.openWebui.config.userPermissionsNotesAllowPublicSharing | quote }}
+
   # UI
   ENABLE_FOLDERS: {{ .Values.openWebui.config.enableFolders | quote }}
   USER_PERMISSIONS_FEATURES_FOLDERS: {{ .Values.openWebui.config.userPermissionsFeaturesFolders | quote }}
