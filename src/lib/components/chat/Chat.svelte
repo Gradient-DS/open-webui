@@ -45,6 +45,8 @@
 		showEmbeds
 	} from '$lib/stores';
 
+	import { showRagFilter } from '$lib/stores/rag-filter';
+
 	import {
 		convertMessagesToHistory,
 		copyToClipboard,
@@ -2384,9 +2386,9 @@
 />
 
 <div
-	class="h-screen max-h-[100dvh] transition-width duration-200 ease-in-out {$showSidebar
+	class="h-screen max-h-[100dvh] transition-all duration-200 ease-in-out {$showSidebar
 		? '  md:max-w-[calc(100%-var(--sidebar-width))]'
-		: ' '} w-full max-w-full flex flex-col"
+		: ' '} {$showRagFilter ? 'mr-80' : ''} w-full max-w-full flex flex-col"
 	id="chat-container"
 >
 	{#if !loading}
