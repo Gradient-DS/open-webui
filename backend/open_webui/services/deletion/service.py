@@ -145,11 +145,12 @@ class DeletionService:
             report.errors.extend(file_report.errors)
 
         # 3. Clean up orphaned tags (same logic as router)
+        # Tags are deleted if this was the only chat using them
         if chat.meta and chat.meta.get("tags"):
             for tag_name in chat.meta.get("tags", []):
                 try:
-                    tag = Tags.get_tag_by_name_and_user_id(tag_name, user_id)
-                    if tag and tag.meta and tag.meta.get("count", 0) <= 1:
+                    # Use actual count query, not meta.count which may be stale
+                    if Chats.count_chats_by_tag_name_and_user_id(tag_name, user_id) == 1:
                         Tags.delete_tag_by_name_and_user_id(tag_name, user_id)
                         report.add_db("tag")
                 except Exception as e:
