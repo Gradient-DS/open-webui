@@ -16,6 +16,7 @@ from open_webui.models.chats import (
 )
 from open_webui.models.tags import TagModel, Tags
 from open_webui.models.folders import Folders
+from open_webui.services.deletion import DeletionService
 
 from open_webui.config import ENABLE_ADMIN_CHAT_ACCESS, ENABLE_ADMIN_EXPORT
 from open_webui.constants import ERROR_MESSAGES
@@ -383,7 +384,7 @@ async def get_user_pinned_chats(user=Depends(get_verified_user)):
 async def get_user_chats(user=Depends(get_verified_user)):
     return [
         ChatResponse(**chat.model_dump())
-        for chat in Chats.get_chats_by_user_id(user.id)
+        for chat in Chats.get_chats_by_user_id(user.id).items
     ]
 
 
@@ -693,14 +694,19 @@ async def send_chat_message_event_by_id(
 @router.delete("/{id}", response_model=bool)
 async def delete_chat_by_id(request: Request, id: str, user=Depends(get_verified_user)):
     if user.role == "admin":
+        # Admin can delete any chat
         chat = Chats.get_chat_by_id(id)
-        for tag in chat.meta.get("tags", []):
-            if Chats.count_chats_by_tag_name_and_user_id(tag, user.id) == 1:
-                Tags.delete_tag_by_name_and_user_id(tag, user.id)
+        if not chat:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=ERROR_MESSAGES.NOT_FOUND,
+            )
 
-        result = Chats.delete_chat_by_id(id)
+        report = DeletionService.delete_chat(id, user.id)
+        if report.has_errors:
+            log.warning(f"Chat deletion had errors: {report.errors}")
 
-        return result
+        return report.db_records.get("chat", 0) > 0
     else:
         if not has_permission(
             user.id, "chat.delete", request.app.state.config.USER_PERMISSIONS
@@ -710,13 +716,19 @@ async def delete_chat_by_id(request: Request, id: str, user=Depends(get_verified
                 detail=ERROR_MESSAGES.ACCESS_PROHIBITED,
             )
 
-        chat = Chats.get_chat_by_id(id)
-        for tag in chat.meta.get("tags", []):
-            if Chats.count_chats_by_tag_name_and_user_id(tag, user.id) == 1:
-                Tags.delete_tag_by_name_and_user_id(tag, user.id)
+        # Verify user owns the chat
+        chat = Chats.get_chat_by_id_and_user_id(id, user.id)
+        if not chat:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=ERROR_MESSAGES.NOT_FOUND,
+            )
 
-        result = Chats.delete_chat_by_id_and_user_id(id, user.id)
-        return result
+        report = DeletionService.delete_chat(id, user.id)
+        if report.has_errors:
+            log.warning(f"Chat deletion had errors: {report.errors}")
+
+        return report.db_records.get("chat", 0) > 0
 
 
 ############################

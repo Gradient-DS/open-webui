@@ -12,6 +12,7 @@ from pydantic import BaseModel, ConfigDict
 from open_webui.models.auths import Auths
 from open_webui.models.oauth_sessions import OAuthSessions
 
+from open_webui.services.deletion import DeletionService
 from open_webui.models.groups import Groups
 from open_webui.models.chats import Chats
 from open_webui.models.users import (
@@ -594,9 +595,11 @@ async def delete_user_by_id(user_id: str, user=Depends(get_admin_user)):
         )
 
     if user.id != user_id:
-        result = Auths.delete_auth_by_id(user_id)
+        report = DeletionService.delete_user(user_id)
+        if report.has_errors:
+            log.warning(f"User deletion had errors: {report.errors}")
 
-        if result:
+        if report.total_db_records > 0:
             return True
 
         raise HTTPException(

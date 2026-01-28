@@ -2276,6 +2276,8 @@ WEAVIATE_HTTP_HOST = os.environ.get("WEAVIATE_HTTP_HOST", "")
 WEAVIATE_HTTP_PORT = int(os.environ.get("WEAVIATE_HTTP_PORT", "8080"))
 WEAVIATE_GRPC_PORT = int(os.environ.get("WEAVIATE_GRPC_PORT", "50051"))
 WEAVIATE_API_KEY = os.environ.get("WEAVIATE_API_KEY")
+# TTL for web search collections in minutes (0 = disabled, default 24 hours = 1440 minutes)
+WEAVIATE_WEB_SEARCH_TTL_MINUTES = int(os.environ.get("WEAVIATE_WEB_SEARCH_TTL_MINUTES", "1440"))
 
 # OpenSearch
 OPENSEARCH_URI = os.environ.get("OPENSEARCH_URI", "https://localhost:9200")

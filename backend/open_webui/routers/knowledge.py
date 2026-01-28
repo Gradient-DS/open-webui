@@ -30,6 +30,7 @@ from open_webui.utils.features import require_feature
 
 from open_webui.config import BYPASS_ADMIN_ACCESS_CONTROL
 from open_webui.models.models import Models, ModelForm
+from open_webui.services.deletion import DeletionService
 
 
 log = logging.getLogger(__name__)
@@ -673,41 +674,13 @@ async def delete_knowledge_by_id(
 
     log.info(f"Deleting knowledge base: {id} (name: {knowledge.name})")
 
-    # Get all models
-    models = Models.get_all_models()
-    log.info(f"Found {len(models)} models to check for knowledge base {id}")
+    # Use DeletionService for complete cascade deletion
+    # Note: delete_files=False to preserve existing behavior (files remain)
+    report = DeletionService.delete_knowledge(id, delete_files=False)
+    if report.has_errors:
+        log.warning(f"Knowledge deletion had errors: {report.errors}")
 
-    # Update models that reference this knowledge base
-    for model in models:
-        if model.meta and hasattr(model.meta, "knowledge"):
-            knowledge_list = model.meta.knowledge or []
-            # Filter out the deleted knowledge base
-            updated_knowledge = [k for k in knowledge_list if k.get("id") != id]
-
-            # If the knowledge list changed, update the model
-            if len(updated_knowledge) != len(knowledge_list):
-                log.info(f"Updating model {model.id} to remove knowledge base {id}")
-                model.meta.knowledge = updated_knowledge
-                # Create a ModelForm for the update
-                model_form = ModelForm(
-                    id=model.id,
-                    name=model.name,
-                    base_model_id=model.base_model_id,
-                    meta=model.meta,
-                    params=model.params,
-                    access_control=model.access_control,
-                    is_active=model.is_active,
-                )
-                Models.update_model_by_id(model.id, model_form)
-
-    # Clean up vector DB
-    try:
-        VECTOR_DB_CLIENT.delete_collection(collection_name=id)
-    except Exception as e:
-        log.debug(e)
-        pass
-    result = Knowledges.delete_knowledge_by_id(id=id)
-    return result
+    return report.db_records.get("knowledge", 0) > 0
 
 
 ############################

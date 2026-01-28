@@ -28,6 +28,7 @@ from fastapi.responses import FileResponse, StreamingResponse
 
 from open_webui.constants import ERROR_MESSAGES
 from open_webui.retrieval.vector.factory import VECTOR_DB_CLIENT
+from open_webui.services.deletion import DeletionService
 
 from open_webui.models.channels import Channels
 from open_webui.models.users import Users
@@ -864,19 +865,11 @@ async def delete_file_by_id(id: str, user=Depends(get_verified_user)):
         or user.role == "admin"
         or has_access_to_file(id, "write", user)
     ):
+        report = DeletionService.delete_file(id)
+        if report.has_errors:
+            log.warning(f"File deletion had errors: {report.errors}")
 
-        result = Files.delete_file_by_id(id)
-        if result:
-            try:
-                Storage.delete_file(file.path)
-                VECTOR_DB_CLIENT.delete(collection_name=f"file-{id}")
-            except Exception as e:
-                log.exception(e)
-                log.error("Error deleting files")
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=ERROR_MESSAGES.DEFAULT("Error deleting files"),
-                )
+        if report.db_records.get("file", 0) > 0:
             return {"message": "File deleted successfully"}
         else:
             raise HTTPException(

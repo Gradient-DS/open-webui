@@ -11,11 +11,13 @@ from open_webui.retrieval.vector.main import (
     GetResult,
 )
 from open_webui.retrieval.vector.utils import process_metadata
+from datetime import timedelta
 from open_webui.config import (
     WEAVIATE_HTTP_HOST,
     WEAVIATE_HTTP_PORT,
     WEAVIATE_GRPC_PORT,
     WEAVIATE_API_KEY,
+    WEAVIATE_WEB_SEARCH_TTL_MINUTES,
 )
 
 
@@ -88,14 +90,16 @@ class WeaviateClient(VectorDBBase):
         if self.client.collections.exists(sane_collection_name):
             self.client.collections.delete(sane_collection_name)
 
-    def _create_collection(self, collection_name: str) -> None:
+    def _create_collection(self, collection_name: str, ttl_minutes: int = 0) -> None:
         # Explicitly define all expected properties as TEXT to prevent Weaviate auto-schema
         # from inferring incorrect types (e.g., UUID for file_id, DATE for moddate).
         # This fixes conflicts when mixing file sources (OneDrive, PDF uploads, etc.)
-        self.client.collections.create(
-            name=collection_name,
-            vector_config=weaviate.classes.config.Configure.Vectors.self_provided(),
-            properties=[
+
+        # Build collection config
+        config_kwargs = {
+            "name": collection_name,
+            "vector_config": weaviate.classes.config.Configure.Vectors.self_provided(),
+            "properties": [
                 weaviate.classes.config.Property(
                     name="text", data_type=weaviate.classes.config.DataType.TEXT
                 ),
@@ -127,12 +131,29 @@ class WeaviateClient(VectorDBBase):
                     name="onedrive_drive_id", data_type=weaviate.classes.config.DataType.TEXT
                 ),
             ],
-        )
+        }
+
+        # Add TTL configuration if specified (requires Weaviate 1.35+)
+        if ttl_minutes > 0:
+            try:
+                config_kwargs["object_ttl_config"] = weaviate.classes.config.Configure.ObjectTTL.delete_by_creation_time(
+                    time_to_live=timedelta(minutes=ttl_minutes),
+                    filter_expired_objects=True,
+                )
+            except AttributeError:
+                # Weaviate client version doesn't support TTL - skip silently
+                pass
+
+        self.client.collections.create(**config_kwargs)
 
     def insert(self, collection_name: str, items: List[VectorItem]) -> None:
         sane_collection_name = self._sanitize_collection_name(collection_name)
         if not self.client.collections.exists(sane_collection_name):
-            self._create_collection(sane_collection_name)
+            # Apply TTL for web search collections
+            ttl_minutes = 0
+            if sane_collection_name.startswith("Web_search_") and WEAVIATE_WEB_SEARCH_TTL_MINUTES > 0:
+                ttl_minutes = WEAVIATE_WEB_SEARCH_TTL_MINUTES
+            self._create_collection(sane_collection_name, ttl_minutes=ttl_minutes)
 
         collection = self.client.collections.get(sane_collection_name)
 

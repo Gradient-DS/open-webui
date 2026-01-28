@@ -1328,6 +1328,17 @@ class ChatTable:
                 ChatFileModel.model_validate(chat_file) for chat_file in all_chat_files
             ]
 
+    def get_files_by_chat_id(self, chat_id: str) -> list[ChatFileModel]:
+        """Get all chat_file records for a given chat_id."""
+        with get_db() as db:
+            chat_files = (
+                db.query(ChatFile)
+                .filter_by(chat_id=chat_id)
+                .order_by(ChatFile.created_at.asc())
+                .all()
+            )
+            return [ChatFileModel.model_validate(cf) for cf in chat_files]
+
     def delete_chat_file(self, chat_id: str, file_id: str) -> bool:
         try:
             with get_db() as db:
