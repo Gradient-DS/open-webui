@@ -1227,6 +1227,9 @@
 				changeDebounceHandler();
 			}}
 			accessRoles={['read', 'write']}
+			knowledgeId={knowledge.id}
+			knowledgeName={knowledge.name}
+			strictSourcePermissions={$config?.features?.strict_source_permissions ?? true}
 		/>
 		<div class="w-full px-2">
 			<div class=" flex w-full">

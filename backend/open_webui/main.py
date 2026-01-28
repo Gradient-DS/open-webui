@@ -88,6 +88,7 @@ from open_webui.routers import (
     memories,
     models,
     knowledge,
+    knowledge_permissions,
     prompts,
     evaluations,
     tools,
@@ -341,6 +342,7 @@ from open_webui.config import (
     ENABLE_ONEDRIVE_PERSONAL,
     ENABLE_ONEDRIVE_BUSINESS,
     ENABLE_ONEDRIVE_SYNC,
+    STRICT_SOURCE_PERMISSIONS,
     ONEDRIVE_SYNC_INTERVAL_MINUTES,
     ONEDRIVE_MAX_FILES_PER_SYNC,
     ONEDRIVE_MAX_FILE_SIZE_MB,
@@ -1039,6 +1041,7 @@ app.state.config.BYPASS_WEB_SEARCH_WEB_LOADER = BYPASS_WEB_SEARCH_WEB_LOADER
 app.state.config.ENABLE_GOOGLE_DRIVE_INTEGRATION = ENABLE_GOOGLE_DRIVE_INTEGRATION
 app.state.config.ENABLE_ONEDRIVE_INTEGRATION = ENABLE_ONEDRIVE_INTEGRATION
 app.state.config.ENABLE_ONEDRIVE_SYNC = ENABLE_ONEDRIVE_SYNC
+app.state.config.STRICT_SOURCE_PERMISSIONS = STRICT_SOURCE_PERMISSIONS
 
 app.state.config.OLLAMA_CLOUD_WEB_SEARCH_API_KEY = OLLAMA_CLOUD_WEB_SEARCH_API_KEY
 app.state.config.SEARXNG_QUERY_URL = SEARXNG_QUERY_URL
@@ -1498,6 +1501,7 @@ app.include_router(notes.router, prefix="/api/v1/notes", tags=["notes"])
 
 app.include_router(models.router, prefix="/api/v1/models", tags=["models"])
 app.include_router(knowledge.router, prefix="/api/v1/knowledge", tags=["knowledge"])
+app.include_router(knowledge_permissions.router, prefix="/api/v1/knowledge", tags=["knowledge"])
 app.include_router(prompts.router, prefix="/api/v1/prompts", tags=["prompts"])
 app.include_router(tools.router, prefix="/api/v1/tools", tags=["tools"])
 
@@ -1520,6 +1524,13 @@ if app.state.config.ENABLE_ONEDRIVE_SYNC:
     app.include_router(
         onedrive_sync.router, prefix="/api/v1/onedrive", tags=["onedrive"]
     )
+
+# Register permission providers for source access validation
+from open_webui.services.permissions.registry import PermissionProviderRegistry
+from open_webui.services.permissions.providers.onedrive import OneDrivePermissionProvider
+
+PermissionProviderRegistry.register(OneDrivePermissionProvider())
+log.info("Registered OneDrive permission provider")
 
 
 try:

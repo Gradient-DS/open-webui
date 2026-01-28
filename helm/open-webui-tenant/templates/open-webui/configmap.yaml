@@ -220,6 +220,9 @@ data:
   ONEDRIVE_MAX_FILES_PER_SYNC: {{ .Values.openWebui.config.onedriveMaxFilesPerSync | quote }}
   ONEDRIVE_MAX_FILE_SIZE_MB: {{ .Values.openWebui.config.onedriveMaxFileSizeMb | quote }}
 
+  # Source Permissions
+  STRICT_SOURCE_PERMISSIONS: {{ .Values.openWebui.config.strictSourcePermissions | default "true" | quote }}
+
   BYPASS_MODEL_ACCESS_CONTROL: {{ .Values.openWebui.config.bypassModelAccessControl | quote }}
 
   # Audit Logging

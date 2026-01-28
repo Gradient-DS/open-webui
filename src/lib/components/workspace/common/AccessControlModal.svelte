@@ -4,6 +4,7 @@
 
 	import Modal from '$lib/components/common/Modal.svelte';
 	import AccessControl from './AccessControl.svelte';
+	import SourceAwareAccessControl from './SourceAwareAccessControl.svelte';
 	import XMark from '$lib/components/icons/XMark.svelte';
 
 	export let show = false;
@@ -14,6 +15,11 @@
 	export let sharePublic = true;
 
 	export let onChange = () => {};
+
+	// Source permission props (optional - enables source-aware validation)
+	export let knowledgeId = null;
+	export let knowledgeName = '';
+	export let strictSourcePermissions = true;
 </script>
 
 <Modal size="sm" bind:show>
@@ -33,7 +39,20 @@
 		</div>
 
 		<div class="w-full px-5 pb-4 dark:text-white">
-			<AccessControl bind:accessControl {onChange} {accessRoles} {share} {sharePublic} />
+			{#if knowledgeId}
+				<SourceAwareAccessControl
+					bind:accessControl
+					{onChange}
+					{accessRoles}
+					{share}
+					{sharePublic}
+					{knowledgeId}
+					{knowledgeName}
+					{strictSourcePermissions}
+				/>
+			{:else}
+				<AccessControl bind:accessControl {onChange} {accessRoles} {share} {sharePublic} />
+			{/if}
 		</div>
 	</div>
 </Modal>

@@ -28,9 +28,10 @@ from open_webui.utils.access_control import has_access, has_permission
 from open_webui.utils.features import require_feature
 
 
-from open_webui.config import BYPASS_ADMIN_ACCESS_CONTROL
+from open_webui.config import BYPASS_ADMIN_ACCESS_CONTROL, STRICT_SOURCE_PERMISSIONS
 from open_webui.models.models import Models, ModelForm
 from open_webui.services.deletion import DeletionService
+from open_webui.services.permissions.enforcement import check_knowledge_access
 
 
 log = logging.getLogger(__name__)
@@ -269,23 +270,41 @@ class KnowledgeFilesResponse(KnowledgeResponse):
 
 
 @router.get("/{id}", response_model=Optional[KnowledgeFilesResponse])
-async def get_knowledge_by_id(id: str, user=Depends(get_verified_user)):
+async def get_knowledge_by_id(id: str, request: Request, user=Depends(get_verified_user)):
     knowledge = Knowledges.get_knowledge_by_id(id=id)
 
     if knowledge:
-        if (
-            user.role == "admin"
-            or knowledge.user_id == user.id
-            or has_access(user.id, "read", knowledge.access_control)
-        ):
-
+        # Admin always has access
+        if user.role == "admin":
             return KnowledgeFilesResponse(
                 **knowledge.model_dump(),
-                write_access=(
-                    user.id == knowledge.user_id
-                    or has_access(user.id, "write", knowledge.access_control)
-                ),
+                write_access=True,
             )
+
+        # Check both KB access and source permissions
+        strict_mode = getattr(
+            request.app.state.config, "STRICT_SOURCE_PERMISSIONS", True
+        )
+        access_result = await check_knowledge_access(user.id, id, strict_mode)
+
+        if not access_result.allowed:
+            if access_result.denial and access_result.denial.reason == "source_access_revoked":
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail=access_result.denial.message,
+                )
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=ERROR_MESSAGES.ACCESS_PROHIBITED,
+            )
+
+        return KnowledgeFilesResponse(
+            **knowledge.model_dump(),
+            write_access=(
+                user.id == knowledge.user_id
+                or has_access(user.id, "write", knowledge.access_control)
+            ),
+        )
     else:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,

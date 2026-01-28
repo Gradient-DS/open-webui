@@ -365,6 +365,13 @@
 					} else {
 						message.statusHistory = [data];
 					}
+
+					// Show warning toast for inaccessible model knowledge bases
+					if (data?.action === 'model_knowledge_warning' && data?.warnings?.length > 0) {
+						toast.warning(
+							$i18n.t('Some knowledge bases attached to this model are not accessible to you.')
+						);
+					}
 				} else if (type === 'chat:completion') {
 					chatCompletionEventHandler(data, message, event.chat_id);
 				} else if (type === 'chat:tasks:cancel') {

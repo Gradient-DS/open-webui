@@ -69,6 +69,7 @@ from open_webui.models.users import UserModel
 from open_webui.models.functions import Functions
 from open_webui.models.models import Models
 
+from open_webui.services.permissions.enforcement import get_accessible_model_knowledge
 from open_webui.retrieval.utils import get_sources_from_items
 
 
@@ -1251,8 +1252,40 @@ async def process_chat_payload(request, form_data, user, metadata, model):
             }
         )
 
+        # Check source permissions for model knowledge bases
+        model_id = model.get("id", "")
+        strict_mode = getattr(request.app.state.config, "STRICT_SOURCE_PERMISSIONS", True)
+
+        accessible_kb_ids, inaccessible_warnings = await get_accessible_model_knowledge(
+            model_id, user.id, strict_mode
+        )
+
+        # Emit warning for inaccessible knowledge bases
+        if inaccessible_warnings:
+            await event_emitter(
+                {
+                    "type": "status",
+                    "data": {
+                        "action": "model_knowledge_warning",
+                        "description": "Some knowledge bases are not accessible",
+                        "warnings": inaccessible_warnings,
+                        "done": True,
+                    },
+                }
+            )
+
+        # Filter to only include accessible knowledge
+        accessible_kb_ids_set = set(accessible_kb_ids)
+
         knowledge_files = []
         for item in model_knowledge:
+            # Get the KB id from the item
+            kb_id = item.get("id") or item.get("collection_name")
+
+            # Skip inaccessible knowledge bases (unless no filtering needed)
+            if accessible_kb_ids_set and kb_id and kb_id not in accessible_kb_ids_set:
+                continue
+
             if item.get("collection_name"):
                 knowledge_files.append(
                     {

@@ -1616,6 +1616,16 @@ ENABLE_USER_ARCHIVAL = PersistentConfig(
     os.environ.get("ENABLE_USER_ARCHIVAL", "True").lower() == "true",
 )
 
+####################################
+# Source Permission Settings
+####################################
+
+STRICT_SOURCE_PERMISSIONS = PersistentConfig(
+    "STRICT_SOURCE_PERMISSIONS",
+    "permissions.strict_source_permissions",
+    os.environ.get("STRICT_SOURCE_PERMISSIONS", "true").lower() == "true",
+)
+
 DEFAULT_ARCHIVE_RETENTION_DAYS = PersistentConfig(
     "DEFAULT_ARCHIVE_RETENTION_DAYS",
     "admin.default_archive_retention_days",

@@ -1,0 +1,191 @@
+<script lang="ts">
+	import { getContext, createEventDispatcher } from 'svelte';
+	import Modal from '$lib/components/common/Modal.svelte';
+	import XMark from '$lib/components/icons/XMark.svelte';
+	import type { ShareValidationResult, SharingRecommendation } from '$lib/apis/knowledge/permissions';
+
+	const i18n = getContext('i18n');
+	const dispatch = createEventDispatcher();
+
+	export let show = false;
+	export let validationResult: ShareValidationResult | null = null;
+	export let strictMode = true;
+	export let targetName = '';
+
+	$: canShareCount = validationResult?.can_share_to_users?.length ?? 0;
+	$: cannotShareCount = validationResult?.cannot_share_to_users?.length ?? 0;
+	$: totalCount = canShareCount + cannotShareCount;
+
+	function handleConfirm() {
+		dispatch('confirm', { shareToAll: !strictMode });
+	}
+
+	function handleCancel() {
+		dispatch('cancel');
+		show = false;
+	}
+</script>
+
+<Modal size="md" bind:show>
+	<div>
+		<div class="flex justify-between dark:text-gray-100 px-5 pt-3 pb-1">
+			<div class="flex items-center gap-3">
+				<div class="p-2 bg-yellow-100 dark:bg-yellow-900/30 rounded-full">
+					<svg
+						xmlns="http://www.w3.org/2000/svg"
+						fill="none"
+						viewBox="0 0 24 24"
+						stroke-width="1.5"
+						stroke="currentColor"
+						class="w-5 h-5 text-yellow-600 dark:text-yellow-400"
+					>
+						<path
+							stroke-linecap="round"
+							stroke-linejoin="round"
+							d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z"
+						/>
+					</svg>
+				</div>
+				<div>
+					<div class="text-lg font-medium self-center font-primary">
+						{$i18n.t('Confirm Sharing')}
+					</div>
+					<div class="text-sm text-gray-500">
+						{$i18n.t('Sharing "{{name}}"', { name: targetName })}
+					</div>
+				</div>
+			</div>
+			<button class="self-center" on:click={handleCancel}>
+				<XMark className={'size-5'} />
+			</button>
+		</div>
+
+		<div class="w-full px-5 pb-4 dark:text-white">
+			{#if validationResult}
+				<!-- Users with full access -->
+				{#if canShareCount > 0}
+					<div class="mb-4 p-3 bg-green-50 dark:bg-green-900/20 rounded-lg">
+						<div class="flex items-center gap-2 text-green-800 dark:text-green-200">
+							<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+								<path
+									stroke-linecap="round"
+									stroke-linejoin="round"
+									stroke-width="2"
+									d="M5 13l4 4L19 7"
+								/>
+							</svg>
+							<span class="font-medium">
+								{$i18n.t('{{count}} users with full source access', { count: canShareCount })}
+							</span>
+						</div>
+						<p class="text-sm text-green-700 dark:text-green-300 mt-1">
+							{$i18n.t('Have permissions for all source documents')}
+						</p>
+					</div>
+				{/if}
+
+				<!-- Users without access -->
+				{#if cannotShareCount > 0}
+					<div class="mb-4 p-3 bg-yellow-50 dark:bg-yellow-900/20 rounded-lg">
+						<div class="flex items-center gap-2 text-yellow-800 dark:text-yellow-200">
+							<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+								<path
+									stroke-linecap="round"
+									stroke-linejoin="round"
+									stroke-width="2"
+									d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
+								/>
+							</svg>
+							<span class="font-medium">
+								{#if strictMode}
+									{$i18n.t('{{count}} users will NOT receive access', { count: cannotShareCount })}
+								{:else}
+									{$i18n.t('{{count}} users missing source access', { count: cannotShareCount })}
+								{/if}
+							</span>
+						</div>
+
+						<div class="mt-3 space-y-2 max-h-48 overflow-y-auto">
+							{#each (validationResult.recommendations || []).slice(0, 5) as rec}
+								<div class="flex items-center justify-between text-sm py-1">
+									<div>
+										<span class="font-medium">{rec.user_email}</span>
+										<span class="text-gray-500 ml-2">
+											{$i18n.t('Missing: {{count}} {{source}} files', {
+												count: rec.inaccessible_count,
+												source: rec.source_type
+											})}
+										</span>
+									</div>
+									{#if rec.grant_access_url}
+										<a
+											href={rec.grant_access_url}
+											target="_blank"
+											rel="noopener noreferrer"
+											class="text-blue-600 hover:underline text-xs"
+										>
+											{$i18n.t('Grant access')} ↗
+										</a>
+									{/if}
+								</div>
+							{/each}
+							{#if (validationResult.recommendations || []).length > 5}
+								<div class="text-sm text-gray-500">
+									{$i18n.t('And {{count}} more...', {
+										count: (validationResult.recommendations || []).length - 5
+									})}
+								</div>
+							{/if}
+						</div>
+					</div>
+				{/if}
+
+				<!-- Summary -->
+				<div class="mb-6 p-3 bg-gray-50 dark:bg-gray-800 rounded-lg text-sm">
+					{#if strictMode}
+						<p>
+							{$i18n.t('Sharing to {{count}} users with source access.', { count: canShareCount })}
+						</p>
+						{#if cannotShareCount > 0}
+							<p class="text-gray-500 mt-1">
+								{$i18n.t('{{count}} users excluded - you can reshare once they have access.', {
+									count: cannotShareCount
+								})}
+							</p>
+						{/if}
+					{:else}
+						<p class="text-yellow-700 dark:text-yellow-300">
+							{$i18n.t(
+								"Warning: {{count}} users don't have access to all source documents. They will see limited content.",
+								{ count: cannotShareCount }
+							)}
+						</p>
+					{/if}
+					<p class="text-gray-500 mt-2">
+						{$i18n.t('Note: Users will lose access if their source permissions are revoked.')}
+					</p>
+				</div>
+			{/if}
+
+			<!-- Actions -->
+			<div class="flex justify-end gap-3">
+				<button
+					class="px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg"
+					on:click={handleCancel}
+				>
+					{$i18n.t('Cancel')}
+				</button>
+				<button
+					class="px-4 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-lg"
+					on:click={handleConfirm}
+				>
+					{#if strictMode && cannotShareCount > 0}
+						{$i18n.t('Share to {{count}} users', { count: canShareCount })}
+					{:else}
+						{$i18n.t('Share to all {{count}} users', { count: totalCount })}
+					{/if}
+				</button>
+			</div>
+		</div>
+	</div>
+</Modal>

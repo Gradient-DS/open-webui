@@ -101,6 +101,7 @@ class OneDriveSyncWorker:
         self.user_token = user_token  # Open WebUI JWT for internal API calls
         self.event_emitter = event_emitter
         self._client: Optional[GraphClient] = None
+        self._permitted_emails: set = set()  # Cached permitted emails from OneDrive
 
     def _check_cancelled(self) -> bool:
         """Check if sync has been cancelled by user."""
@@ -110,6 +111,26 @@ class OneDriveSyncWorker:
             sync_info = meta.get("onedrive_sync", {})
             return sync_info.get("status") == "cancelled"
         return False
+
+    async def _validate_kb_access_level(self) -> Optional[Dict[str, Any]]:
+        """
+        Check if KB access level is compatible with OneDrive permissions.
+
+        Returns conflict info if KB is public or shared too broadly.
+        """
+        knowledge = Knowledges.get_knowledge_by_id(self.knowledge_id)
+        if not knowledge:
+            return None
+
+        # If KB is public, that's a conflict for restricted source files
+        if knowledge.access_control is None:
+            return {
+                "has_conflict": True,
+                "kb_is_public": True,
+                "message": "Knowledge base is public but OneDrive files have restricted access",
+            }
+
+        return None
 
     async def _update_sync_status(
         self,
@@ -341,6 +362,20 @@ class OneDriveSyncWorker:
 
             log.info(f"Found {len(permitted_emails)} permitted emails from OneDrive")
 
+            # Store permitted emails for later use in file metadata
+            self._permitted_emails = permitted_emails
+
+            # Store permitted emails in knowledge meta for permission provider access
+            knowledge = Knowledges.get_knowledge_by_id(self.knowledge_id)
+            if knowledge:
+                meta = knowledge.meta or {}
+                if "onedrive_sync" not in meta:
+                    meta["onedrive_sync"] = {}
+                meta["onedrive_sync"]["permitted_emails"] = list(permitted_emails)
+                meta["onedrive_sync"]["permission_sync_at"] = int(time.time())
+                Knowledges.update_knowledge_meta_by_id(self.knowledge_id, meta)
+                log.info(f"Stored {len(permitted_emails)} permitted emails in knowledge meta")
+
             # Find matching Open WebUI users
             permitted_user_ids = []
             for email in permitted_emails:
@@ -404,6 +439,27 @@ class OneDriveSyncWorker:
 
         try:
             await self._update_sync_status("syncing", 0, 0)
+
+            # Check if KB access level is compatible with OneDrive permissions
+            conflict = await self._validate_kb_access_level()
+            if conflict and conflict.get("has_conflict"):
+                # Emit conflict event for frontend to handle
+                from open_webui.services.onedrive.sync_events import emit_sync_progress
+
+                await emit_sync_progress(
+                    user_id=self.user_id,
+                    knowledge_id=self.knowledge_id,
+                    status="access_conflict",
+                    current=0,
+                    total=0,
+                    filename="",
+                    error=conflict.get("message"),
+                )
+                log.warning(
+                    f"KB access conflict detected for {self.knowledge_id}: "
+                    f"{conflict.get('message')}"
+                )
+                # Continue with sync - frontend will show warning but allow proceeding
 
             # Sync OneDrive folder permissions to Knowledge access_control
             await self._sync_permissions()
@@ -718,21 +774,26 @@ class OneDriveSyncWorker:
 
         try:
             # Create or update file record
+            # Include permitted_emails for permission provider access validation
+            file_meta = {
+                "name": name,
+                "content_type": self._get_content_type(name),
+                "size": len(content),
+                "source": "onedrive",
+                "onedrive_item_id": item_id,
+                "onedrive_drive_id": drive_id,
+                "knowledge_id": self.knowledge_id,
+                "permitted_emails": list(self._permitted_emails),
+                "last_synced_at": int(time.time()),
+            }
+
             if existing:
                 # Update existing file with FileUpdateForm
                 Files.update_file_by_id(
                     file_id,
                     FileUpdateForm(
                         hash=content_hash,
-                        meta={
-                            "name": name,
-                            "content_type": self._get_content_type(name),
-                            "size": len(content),
-                            "source": "onedrive",
-                            "onedrive_item_id": item_id,
-                            "onedrive_drive_id": drive_id,
-                            "last_synced_at": int(time.time()),
-                        },
+                        meta=file_meta,
                     ),
                 )
                 # Update path separately (FileUpdateForm doesn't include path)
@@ -746,15 +807,7 @@ class OneDriveSyncWorker:
                     path=file_path,
                     hash=content_hash,
                     data={},
-                    meta={
-                        "name": name,
-                        "content_type": self._get_content_type(name),
-                        "size": len(content),
-                        "source": "onedrive",
-                        "onedrive_item_id": item_id,
-                        "onedrive_drive_id": drive_id,
-                        "last_synced_at": int(time.time()),
-                    },
+                    meta=file_meta,
                 )
                 Files.insert_new_file(self.user_id, file_form)
                 log.info(f"Created new file record: {file_id}")
