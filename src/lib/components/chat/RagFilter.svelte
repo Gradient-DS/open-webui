@@ -14,9 +14,29 @@
 	let expandedCollections: Set<string> = new Set(); // Which collections are expanded
 	let expandedSubtypes: Set<string> = new Set(); // Which document subtypes are expanded (format: "collectionKey:subtype")
 	let selectedDocuments: Set<string> = new Set(); // Selected document IDs
-	
+	let searchQuery = ''; // Search query for filtering documents
+
 	// Database info
 	let databaseName = '';
+
+	/**
+	 * Filter collections based on search query
+	 * Returns collections with only matching documents
+	 */
+	$: filteredCollections = searchQuery.trim() === ''
+		? collections
+		: collections.map(collection => {
+			const query = searchQuery.toLowerCase().trim();
+			const filteredDocs = collection.documents.filter(doc =>
+				doc.title?.toLowerCase().includes(query) ||
+				doc.contentsubtype?.toLowerCase().includes(query)
+			);
+			return {
+				...collection,
+				documents: filteredDocs,
+				document_count: filteredDocs.length
+			};
+		}).filter(collection => collection.documents.length > 0);
 	
 	/**
 	 * Group documents by subtype within a collection
@@ -322,22 +342,28 @@
 	};
 	
 	/**
-	 * Clear all filters (select all documents with IDs)
+	 * Select all documents across all collections (only documents with IDs)
 	 */
-	const clearFilters = () => {
-		selectedDocuments = new Set();
-		// Select all documents (only those with IDs)
+	const selectAll = () => {
+		// Create a fresh Set to ensure reactivity
+		const newSelection = new Set<string>();
 		collections.forEach(collection => {
 			collection.documents.forEach(doc => {
 				const docId = getDocumentId(doc);
 				if (docId) {
-					selectedDocuments.add(docId);
+					newSelection.add(docId);
 				}
 			});
 		});
-		selectedDocuments = selectedDocuments; // Trigger reactivity
-		expandedCollections = new Set();
-		expandedSubtypes = new Set();
+		selectedDocuments = newSelection;
+		emitFilterChange();
+	};
+
+	/**
+	 * Deselect all documents
+	 */
+	const deselectAll = () => {
+		selectedDocuments = new Set<string>();
 		emitFilterChange();
 	};
 	
@@ -450,21 +476,78 @@
 	{/if}
 
 	<div class="px-4 py-4 dark:border-gray-700">
-		<div class="flex items-center justify-between mb-2">
+		<div class="flex items-center gap-2 mb-2">
 			<button
-				on:click={clearFilters}
+				on:click={selectAll}
 				class="text-xs px-3 py-1.5 rounded-md
 				       border border-gray-300 dark:border-gray-600
 				       text-gray-700 dark:text-gray-200
 				       hover:bg-gray-100 dark:hover:bg-gray-700
 				       transition"
-				title="Clear all filters"
+				title="Selecteer alle documenten"
 			>
-				Verwijder alle filters
+				Alles selecteren
+			</button>
+			<button
+				on:click={deselectAll}
+				class="text-xs px-3 py-1.5 rounded-md
+				       border border-gray-300 dark:border-gray-600
+				       text-gray-700 dark:text-gray-200
+				       hover:bg-gray-100 dark:hover:bg-gray-700
+				       transition"
+				title="Deselecteer alle documenten"
+			>
+				Alles deselecteren
 			</button>
 		</div>
+
+		<!-- Search Bar -->
+		<div class="relative">
+			<input
+				type="text"
+				bind:value={searchQuery}
+				placeholder="Zoek documenten..."
+				class="w-full text-sm px-3 py-2 pl-9
+				       border border-gray-300 dark:border-gray-600
+				       rounded-lg
+				       bg-white dark:bg-gray-800
+				       text-gray-900 dark:text-gray-100
+				       placeholder-gray-400 dark:placeholder-gray-500
+				       focus:outline-none focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-400
+				       focus:border-transparent
+				       transition"
+			/>
+			<!-- Search Icon -->
+			<svg
+				class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 dark:text-gray-500"
+				fill="none"
+				stroke="currentColor"
+				viewBox="0 0 24 24"
+			>
+				<path
+					stroke-linecap="round"
+					stroke-linejoin="round"
+					stroke-width="2"
+					d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"
+				/>
+			</svg>
+			<!-- Clear Button -->
+			{#if searchQuery}
+				<button
+					on:click={() => searchQuery = ''}
+					class="absolute right-2 top-1/2 -translate-y-1/2 p-1
+					       text-gray-400 hover:text-gray-600 dark:hover:text-gray-300
+					       transition"
+					title="Wis zoekopdracht"
+				>
+					<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+						<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+					</svg>
+				</button>
+			{/if}
+		</div>
 	</div>
-	
+
 	<!-- Content - Accordion Style -->
 	<div class="flex-1 overflow-y-auto px-4 py-1">
 		{#if loading}
@@ -475,10 +558,15 @@
 			<div class="text-center text-sm text-gray-500 dark:text-gray-400 py-8">
 				No collections available
 			</div>
+		{:else if filteredCollections.length === 0}
+			<div class="text-center text-sm text-gray-500 dark:text-gray-400 py-8">
+				Geen documenten gevonden voor "{searchQuery}"
+			</div>
 		{:else}
-			<!-- Accordion Items -->
+			<!-- Accordion Items - key forces re-render when selection changes -->
+			{#key selectedDocuments.size}
 			<div class="space-y-2">
-				{#each collections as collection}
+				{#each filteredCollections as collection}
 					<div class="border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden">
 						<!-- Collection Header -->
 						<div class="flex items-center gap-2 px-3 py-2.5 bg-gray-50 dark:bg-gray-800/50">
@@ -665,9 +753,10 @@
 					</div>
 				{/each}
 			</div>
+			{/key}
 		{/if}
 	</div>
-	
+
 	<!-- Footer with active filter summary -->
 	<div class="px-4 py-3 border-t border-gray-200 dark:border-gray-700 text-xs text-gray-600 dark:text-gray-400">
 		{#if selectedDocuments.size > 0}
