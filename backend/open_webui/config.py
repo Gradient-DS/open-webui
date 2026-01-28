@@ -2734,6 +2734,12 @@ ENABLE_RAG_HYBRID_SEARCH_ENRICHED_TEXTS = PersistentConfig(
     == "true",
 )
 
+ENABLE_RAG_FILTER_UI = PersistentConfig(
+    "ENABLE_RAG_FILTER_UI",
+    "rag.enable_filter_ui",
+    os.environ.get("ENABLE_RAG_FILTER_UI", "False").lower() == "true",
+)
+
 RAG_FULL_CONTEXT = PersistentConfig(
     "RAG_FULL_CONTEXT",
     "rag.full_context",
