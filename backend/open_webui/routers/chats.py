@@ -702,7 +702,8 @@ async def delete_chat_by_id(request: Request, id: str, user=Depends(get_verified
                 detail=ERROR_MESSAGES.NOT_FOUND,
             )
 
-        report = DeletionService.delete_chat(id, user.id)
+        # Use chat owner's user_id for tag cleanup, not admin's
+        report = DeletionService.delete_chat(id, chat.user_id)
         if report.has_errors:
             log.warning(f"Chat deletion had errors: {report.errors}")
 

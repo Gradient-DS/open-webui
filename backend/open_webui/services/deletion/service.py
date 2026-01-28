@@ -1,8 +1,8 @@
 from dataclasses import dataclass, field
-from typing import Dict, List
+from typing import Dict, List, Set, Optional
 import logging
 
-from open_webui.models.files import Files, FileModel
+from open_webui.models.files import Files
 from open_webui.models.knowledge import Knowledges
 from open_webui.storage.provider import Storage
 from open_webui.retrieval.vector.factory import VECTOR_DB_CLIENT
@@ -45,15 +45,26 @@ class DeletionService:
     """
 
     @staticmethod
-    def delete_file(file_id: str) -> DeletionReport:
+    def delete_file(
+        file_id: str, deleted_file_ids: Optional[Set[str]] = None
+    ) -> DeletionReport:
         """
         Delete a file from all layers:
         1. Remove vectors from all knowledge base collections containing this file
         2. Delete the file-{id} vector collection
         3. Delete physical file from storage
         4. Delete file record from database
+
+        Args:
+            file_id: The file ID to delete
+            deleted_file_ids: Optional set to track already-deleted files (prevents
+                              duplicate deletion attempts during cascade operations)
         """
         report = DeletionReport()
+
+        # Skip if already deleted in this cascade operation
+        if deleted_file_ids is not None and file_id in deleted_file_ids:
+            return report
 
         # Get file first - we need the path and hash
         file = Files.get_file_by_id(file_id)
@@ -103,6 +114,9 @@ class DeletionService:
             result = Files.delete_file_by_id(file_id)
             if result:
                 report.add_db("file")
+                # Track successful deletion to prevent duplicate attempts
+                if deleted_file_ids is not None:
+                    deleted_file_ids.add(file_id)
             else:
                 report.add_error(f"Failed to delete file {file_id} from database")
         except Exception as e:
@@ -169,7 +183,11 @@ class DeletionService:
         return report
 
     @staticmethod
-    def delete_knowledge(knowledge_id: str, delete_files: bool = False) -> DeletionReport:
+    def delete_knowledge(
+        knowledge_id: str,
+        delete_files: bool = False,
+        deleted_file_ids: Optional[Set[str]] = None,
+    ) -> DeletionReport:
         """
         Delete a knowledge base and optionally its files.
 
@@ -177,6 +195,11 @@ class DeletionService:
         2. If delete_files: delete each associated file (calls delete_file)
         3. Update models that reference this knowledge base
         4. Delete knowledge record (knowledge_file junction cascades via FK)
+
+        Args:
+            knowledge_id: The knowledge base ID to delete
+            delete_files: Whether to also delete associated files
+            deleted_file_ids: Optional set to track already-deleted files
         """
         from open_webui.models.models import Models
 
@@ -199,7 +222,7 @@ class DeletionService:
         if delete_files:
             knowledge_files = Knowledges.get_files_by_id(knowledge_id)
             for file in knowledge_files:
-                file_report = DeletionService.delete_file(file.id)
+                file_report = DeletionService.delete_file(file.id, deleted_file_ids)
                 # Merge reports
                 for table, count in file_report.db_records.items():
                     report.add_db(table, count)
@@ -310,6 +333,10 @@ class DeletionService:
 
         report = DeletionReport()
 
+        # Track deleted files to prevent duplicate deletion attempts
+        # (a file can be in multiple KBs, or a KB file might also be standalone)
+        deleted_file_ids: Set[str] = set()
+
         # Verify user exists
         user = Users.get_user_by_id(user_id)
         if not user:
@@ -327,7 +354,9 @@ class DeletionService:
         try:
             knowledge_bases = Knowledges.get_knowledge_items_by_user_id(user_id)
             for kb in knowledge_bases:
-                kb_report = DeletionService.delete_knowledge(kb.id, delete_files=True)
+                kb_report = DeletionService.delete_knowledge(
+                    kb.id, delete_files=True, deleted_file_ids=deleted_file_ids
+                )
                 report.vector_collections += kb_report.vector_collections
                 report.vector_documents += kb_report.vector_documents
                 report.storage_files += kb_report.storage_files
@@ -337,11 +366,11 @@ class DeletionService:
         except Exception as e:
             report.add_error(f"Failed to get/delete knowledge bases: {e}")
 
-        # 3. Delete standalone files (not in knowledge bases)
+        # 3. Delete standalone files (files not already deleted via knowledge bases)
         try:
             files = Files.get_files_by_user_id(user_id)
             for file in files:
-                file_report = DeletionService.delete_file(file.id)
+                file_report = DeletionService.delete_file(file.id, deleted_file_ids)
                 report.vector_collections += file_report.vector_collections
                 report.vector_documents += file_report.vector_documents
                 report.storage_files += file_report.storage_files
