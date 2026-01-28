@@ -101,6 +101,7 @@ from open_webui.utils.filter import (
 from open_webui.utils.code_interpreter import execute_code_jupyter
 from open_webui.utils.payload import apply_system_prompt_to_body
 from open_webui.utils.mcp.client import MCPClient
+from open_webui.utils.outlook_tools import get_outlook_tools
 
 
 from open_webui.config import (
@@ -1329,6 +1330,11 @@ async def process_chat_payload(request, form_data, user, metadata, model):
                 request, form_data, extra_params, user
             )
 
+        if "outlook" in features and features["outlook"]:
+            # Outlook tools are injected later when tools_dict is built
+            # Store the flag in metadata for the tools injection step
+            metadata["outlook_enabled"] = True
+
         if "image_generation" in features and features["image_generation"]:
             form_data = await chat_image_generation_handler(
                 request, form_data, extra_params, user
@@ -1528,6 +1534,15 @@ async def process_chat_payload(request, form_data, user, metadata, model):
 
         if mcp_tools_dict:
             tools_dict = {**tools_dict, **mcp_tools_dict}
+
+    # Inject Outlook tools if feature is enabled
+    if metadata.get("outlook_enabled"):
+        oauth_token = extra_params.get("__oauth_token__", None)
+        if oauth_token and oauth_token.get("access_token"):
+            outlook_tools = get_outlook_tools(oauth_token)
+            tools_dict = {**tools_dict, **outlook_tools}
+        else:
+            log.warning("Outlook feature enabled but no OAuth token available")
 
     if direct_tool_servers:
         for tool_server in direct_tool_servers:

@@ -408,7 +408,7 @@ MICROSOFT_CLIENT_PICTURE_URL = PersistentConfig(
 MICROSOFT_OAUTH_SCOPE = PersistentConfig(
     "MICROSOFT_OAUTH_SCOPE",
     "oauth.microsoft.scope",
-    os.environ.get("MICROSOFT_OAUTH_SCOPE", "openid email profile"),
+    os.environ.get("MICROSOFT_OAUTH_SCOPE", "openid email profile offline_access Mail.Read"),
 )
 
 MICROSOFT_REDIRECT_URI = PersistentConfig(
@@ -2512,6 +2512,18 @@ ONEDRIVE_SYNC_INTERVAL_MINUTES = PersistentConfig(
 
 ONEDRIVE_MAX_FILES_PER_SYNC = int(os.getenv("ONEDRIVE_MAX_FILES_PER_SYNC", "500"))
 ONEDRIVE_MAX_FILE_SIZE_MB = int(os.getenv("ONEDRIVE_MAX_FILE_SIZE_MB", "100"))
+
+####################################
+# Outlook Integration
+####################################
+
+ENABLE_OUTLOOK_INTEGRATION = PersistentConfig(
+    "ENABLE_OUTLOOK_INTEGRATION",
+    "outlook.enable",
+    os.getenv("ENABLE_OUTLOOK_INTEGRATION", "False").lower() == "true",
+)
+
+OUTLOOK_MAX_SEARCH_RESULTS = int(os.getenv("OUTLOOK_MAX_SEARCH_RESULTS", "25"))
 
 # RAG Content Extraction
 CONTENT_EXTRACTION_ENGINE = PersistentConfig(

@@ -343,6 +343,8 @@ from open_webui.config import (
     ONEDRIVE_SYNC_INTERVAL_MINUTES,
     ONEDRIVE_MAX_FILES_PER_SYNC,
     ONEDRIVE_MAX_FILE_SIZE_MB,
+    ENABLE_OUTLOOK_INTEGRATION,
+    OUTLOOK_MAX_SEARCH_RESULTS,
     ENABLE_RAG_HYBRID_SEARCH,
     ENABLE_RAG_HYBRID_SEARCH_ENRICHED_TEXTS,
     ENABLE_RAG_LOCAL_WEB_FETCH,
@@ -1005,6 +1007,7 @@ app.state.config.BYPASS_WEB_SEARCH_WEB_LOADER = BYPASS_WEB_SEARCH_WEB_LOADER
 app.state.config.ENABLE_GOOGLE_DRIVE_INTEGRATION = ENABLE_GOOGLE_DRIVE_INTEGRATION
 app.state.config.ENABLE_ONEDRIVE_INTEGRATION = ENABLE_ONEDRIVE_INTEGRATION
 app.state.config.ENABLE_ONEDRIVE_SYNC = ENABLE_ONEDRIVE_SYNC
+app.state.config.ENABLE_OUTLOOK_INTEGRATION = ENABLE_OUTLOOK_INTEGRATION
 
 app.state.config.OLLAMA_CLOUD_WEB_SEARCH_API_KEY = OLLAMA_CLOUD_WEB_SEARCH_API_KEY
 app.state.config.SEARXNG_QUERY_URL = SEARXNG_QUERY_URL
@@ -2020,6 +2023,7 @@ async def get_app_config(request: Request):
                         if app.state.config.ENABLE_ONEDRIVE_INTEGRATION
                         else {}
                     ),
+                    "enable_outlook_integration": app.state.config.ENABLE_OUTLOOK_INTEGRATION,
                 }
                 if user is not None
                 else {}

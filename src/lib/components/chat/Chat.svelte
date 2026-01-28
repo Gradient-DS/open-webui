@@ -138,6 +138,7 @@
 	let imageGenerationEnabled = false;
 	let webSearchEnabled = false;
 	let codeInterpreterEnabled = false;
+	let outlookEnabled = false;
 
 	let showCommands = false;
 
@@ -175,6 +176,7 @@
 		selectedFilterIds = [];
 		webSearchEnabled = false;
 		imageGenerationEnabled = false;
+		outlookEnabled = false;
 
 		const storageChatInput = sessionStorage.getItem(
 			`chat-input${chatIdProp ? `-${chatIdProp}` : ''}`
@@ -199,6 +201,7 @@
 						webSearchEnabled = input.webSearchEnabled;
 						imageGenerationEnabled = input.imageGenerationEnabled;
 						codeInterpreterEnabled = input.codeInterpreterEnabled;
+						outlookEnabled = input.outlookEnabled;
 					}
 				} catch (e) {}
 			} else {
@@ -259,6 +262,7 @@
 		webSearchEnabled = false;
 		imageGenerationEnabled = false;
 		codeInterpreterEnabled = false;
+		outlookEnabled = false;
 
 		if (selectedModelIds.filter((id) => id).length > 0) {
 			setDefaults();
@@ -581,6 +585,7 @@
 			webSearchEnabled = false;
 			imageGenerationEnabled = false;
 			codeInterpreterEnabled = false;
+			outlookEnabled = false;
 
 			try {
 				const input = JSON.parse(storageChatInput);
@@ -593,6 +598,7 @@
 					webSearchEnabled = input.webSearchEnabled;
 					imageGenerationEnabled = input.imageGenerationEnabled;
 					codeInterpreterEnabled = input.codeInterpreterEnabled;
+					outlookEnabled = input.outlookEnabled;
 				}
 			} catch (e) {}
 		}
@@ -1791,6 +1797,11 @@
 					$config?.features?.enable_web_search &&
 					($user?.role === 'admin' || $user?.permissions?.features?.web_search)
 						? webSearchEnabled
+						: false,
+				outlook:
+					$config?.features?.enable_outlook_integration &&
+					($user?.role === 'admin' || $user?.permissions?.features?.outlook)
+						? outlookEnabled
 						: false
 			};
 
@@ -2521,6 +2532,7 @@
 									bind:imageGenerationEnabled
 									bind:codeInterpreterEnabled
 									bind:webSearchEnabled
+									bind:outlookEnabled
 									bind:atSelectedModel
 									bind:showCommands
 									toolServers={$toolServers}

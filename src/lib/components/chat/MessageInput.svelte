@@ -122,6 +122,7 @@
 	export let imageGenerationEnabled = false;
 	export let webSearchEnabled = false;
 	export let codeInterpreterEnabled = false;
+	export let outlookEnabled = false;
 
 	let inputContent = null;
 
@@ -154,7 +155,8 @@
 		selectedFilterIds,
 		imageGenerationEnabled,
 		webSearchEnabled,
-		codeInterpreterEnabled
+		codeInterpreterEnabled,
+		outlookEnabled
 	});
 
 	const inputVariableHandler = async (text: string): Promise<string> => {
@@ -463,6 +465,11 @@
 			$models.find((m) => m.id === model)?.info?.meta?.capabilities?.code_interpreter ?? true
 	);
 
+	let outlookCapableModels = [];
+	$: outlookCapableModels = (atSelectedModel?.id ? [atSelectedModel.id] : selectedModels).filter(
+		(model) => $models.find((m) => m.id === model)?.info?.meta?.capabilities?.outlook ?? true
+	);
+
 	let toggleFilters = [];
 	$: toggleFilters = (atSelectedModel?.id ? [atSelectedModel.id] : selectedModels)
 		.map((id) => ($models.find((model) => model.id === id) || {})?.filters ?? [])
@@ -491,6 +498,13 @@
 			codeInterpreterCapableModels.length &&
 		$config?.features?.enable_code_interpreter &&
 		($_user.role === 'admin' || $_user?.permissions?.features?.code_interpreter);
+
+	let showOutlookButton = false;
+	$: showOutlookButton =
+		(atSelectedModel?.id ? [atSelectedModel.id] : selectedModels).length ===
+			outlookCapableModels.length &&
+		$config?.features?.enable_outlook_integration &&
+		($_user.role === 'admin' || $_user?.permissions?.features?.outlook);
 
 	const scrollToBottom = () => {
 		const element = document.getElementById('messages-container');
@@ -1438,6 +1452,7 @@
 															webSearchEnabled = false;
 															imageGenerationEnabled = false;
 															codeInterpreterEnabled = false;
+															outlookEnabled = false;
 														}
 													}}
 													on:paste={async (e) => {
@@ -1547,7 +1562,7 @@
 										</div>
 									</InputMenu>
 
-									{#if showWebSearchButton || showImageGenerationButton || showCodeInterpreterButton || showToolsButton || (toggleFilters && toggleFilters.length > 0)}
+									{#if showWebSearchButton || showImageGenerationButton || showCodeInterpreterButton || showOutlookButton || showToolsButton || (toggleFilters && toggleFilters.length > 0)}
 										<div
 											class="flex self-center w-[1px] h-4 mx-1 bg-gray-200/50 dark:bg-gray-800/50"
 										/>
@@ -1558,11 +1573,13 @@
 											{showWebSearchButton}
 											{showImageGenerationButton}
 											{showCodeInterpreterButton}
+											{showOutlookButton}
 											bind:selectedToolIds
 											bind:selectedFilterIds
 											bind:webSearchEnabled
 											bind:imageGenerationEnabled
 											bind:codeInterpreterEnabled
+											bind:outlookEnabled
 											closeOnOutsideClick={integrationsMenuCloseOnOutsideClick}
 											onShowValves={(e) => {
 												const { type, id } = e;
@@ -1721,6 +1738,44 @@
 														: 'focus:outline-hidden rounded-full'}"
 												>
 													<Terminal className="size-3.5" strokeWidth="2" />
+
+													<div class="hidden group-hover:block">
+														<XMark className="size-4" strokeWidth="1.75" />
+													</div>
+												</button>
+											</Tooltip>
+										{/if}
+
+										{#if outlookEnabled}
+											<Tooltip content={$i18n.t('Outlook')} placement="top">
+												<button
+													aria-label={outlookEnabled
+														? $i18n.t('Disable Outlook')
+														: $i18n.t('Enable Outlook')}
+													aria-pressed={outlookEnabled}
+													on:click|preventDefault={() =>
+														(outlookEnabled = !outlookEnabled)}
+													type="button"
+													class=" group p-[7px] flex gap-1.5 items-center text-sm transition-colors duration-300 max-w-full overflow-hidden {outlookEnabled
+														? ' text-blue-500 dark:text-blue-300 bg-blue-50 hover:bg-blue-100 dark:bg-blue-400/10 dark:hover:bg-blue-700/10 border border-blue-200/40 dark:border-blue-500/20'
+														: 'bg-transparent text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 '} {($settings?.highContrastMode ??
+													false)
+														? 'm-1'
+														: 'focus:outline-hidden rounded-full'}"
+												>
+													<svg
+														xmlns="http://www.w3.org/2000/svg"
+														viewBox="0 0 24 24"
+														fill="none"
+														stroke="currentColor"
+														stroke-width="2"
+														stroke-linecap="round"
+														stroke-linejoin="round"
+														class="size-3.5"
+													>
+														<rect width="20" height="16" x="2" y="4" rx="2" />
+														<path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7" />
+													</svg>
 
 													<div class="hidden group-hover:block">
 														<XMark className="size-4" strokeWidth="1.75" />

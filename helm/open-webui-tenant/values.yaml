@@ -297,6 +297,11 @@ openWebui:
     onedriveMaxFilesPerSync: "250"
     onedriveMaxFileSizeMb: "10"
 
+    # Outlook Integration
+    enableOutlookIntegration: "false"
+    outlookMaxSearchResults: "25"
+    # Note: Uses existing microsoftOAuthScope - ensure it includes Mail.Read
+
     bypassModelAccessControl: "false"
 
     # Telemetry (disabled)

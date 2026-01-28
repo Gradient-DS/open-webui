@@ -219,6 +219,14 @@ data:
   ONEDRIVE_MAX_FILES_PER_SYNC: {{ .Values.openWebui.config.onedriveMaxFilesPerSync | quote }}
   ONEDRIVE_MAX_FILE_SIZE_MB: {{ .Values.openWebui.config.onedriveMaxFileSizeMb | quote }}
 
+  # Outlook Integration
+  {{- if .Values.openWebui.config.enableOutlookIntegration }}
+  ENABLE_OUTLOOK_INTEGRATION: {{ .Values.openWebui.config.enableOutlookIntegration | quote }}
+  {{- end }}
+  {{- if .Values.openWebui.config.outlookMaxSearchResults }}
+  OUTLOOK_MAX_SEARCH_RESULTS: {{ .Values.openWebui.config.outlookMaxSearchResults | quote }}
+  {{- end }}
+
   BYPASS_MODEL_ACCESS_CONTROL: {{ .Values.openWebui.config.bypassModelAccessControl | quote }}
 
   # Telemetry
