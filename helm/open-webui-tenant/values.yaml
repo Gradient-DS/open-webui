@@ -305,6 +305,12 @@ openWebui:
     # METADATA logs who/what/when without PII from request/response bodies
     auditLogLevel: "METADATA"
 
+    # User Archival
+    enableUserArchival: "true"
+    defaultArchiveRetentionDays: "1095"  # 3 years (ISO 27001 compliance)
+    enableAutoArchiveOnSelfDelete: "false"
+    autoArchiveRetentionDays: "365"  # 1 year for self-deletions
+
     # Telemetry (disabled)
     scarfNoAnalytics: "true"
     doNotTrack: "true"
@@ -391,7 +397,7 @@ weaviate:
 
   image:
     repository: semitechnologies/weaviate
-    tag: "1.34.8"
+    tag: "1.35.0"
     pullPolicy: IfNotPresent
 
   # Resource limits

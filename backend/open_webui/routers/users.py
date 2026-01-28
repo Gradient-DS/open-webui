@@ -4,7 +4,7 @@ import base64
 import io
 
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import Response, StreamingResponse, FileResponse
 from pydantic import BaseModel, ConfigDict
 
@@ -578,7 +578,21 @@ async def update_user_by_id(
 
 
 @router.delete("/{user_id}", response_model=bool)
-async def delete_user_by_id(user_id: str, user=Depends(get_admin_user)):
+async def delete_user_by_id(
+    request: Request,
+    user_id: str,
+    archive_before_delete: bool = Query(False),
+    archive_reason: Optional[str] = Query(None),
+    archive_retention_days: Optional[int] = Query(None),
+    user=Depends(get_admin_user),
+):
+    """
+    Delete a user and optionally archive their data first.
+
+    - archive_before_delete: If true, creates archive before deletion
+    - archive_reason: Required if archive_before_delete is true
+    - archive_retention_days: Custom retention period (uses default if not specified)
+    """
     # Prevent deletion of the primary admin user
     try:
         first_user = Users.get_first_user()
@@ -595,6 +609,25 @@ async def delete_user_by_id(user_id: str, user=Depends(get_admin_user)):
         )
 
     if user.id != user_id:
+        # Archive if requested
+        if archive_before_delete:
+            from open_webui.services.archival import ArchiveService
+
+            if not archive_reason:
+                archive_reason = "Admin deletion"
+
+            if request.app.state.config.ENABLE_USER_ARCHIVAL:
+                retention = archive_retention_days or request.app.state.config.DEFAULT_ARCHIVE_RETENTION_DAYS
+                archive_result = ArchiveService.create_archive(
+                    user_id=user_id,
+                    archived_by=user.id,
+                    reason=archive_reason,
+                    retention_days=retention,
+                )
+                if not archive_result.success:
+                    log.warning(f"Failed to archive user before deletion: {archive_result.errors}")
+
+        # Proceed with deletion
         report = DeletionService.delete_user(user_id)
         if report.has_errors:
             log.warning(f"User deletion had errors: {report.errors}")

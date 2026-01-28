@@ -225,6 +225,12 @@ data:
   # Audit Logging
   AUDIT_LOG_LEVEL: {{ .Values.openWebui.config.auditLogLevel | quote }}
 
+  # User Archival
+  ENABLE_USER_ARCHIVAL: {{ .Values.openWebui.config.enableUserArchival | quote }}
+  DEFAULT_ARCHIVE_RETENTION_DAYS: {{ .Values.openWebui.config.defaultArchiveRetentionDays | quote }}
+  ENABLE_AUTO_ARCHIVE_ON_SELF_DELETE: {{ .Values.openWebui.config.enableAutoArchiveOnSelfDelete | quote }}
+  AUTO_ARCHIVE_RETENTION_DAYS: {{ .Values.openWebui.config.autoArchiveRetentionDays | quote }}
+
   # Telemetry
   SCARF_NO_ANALYTICS: {{ .Values.openWebui.config.scarfNoAnalytics | quote }}
   DO_NOT_TRACK: {{ .Values.openWebui.config.doNotTrack | quote }}

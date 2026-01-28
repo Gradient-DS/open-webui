@@ -68,6 +68,7 @@ from open_webui.socket.main import (
     get_models_in_use,
 )
 from open_webui.routers import (
+    archives,
     audio,
     images,
     ollama,
@@ -426,6 +427,11 @@ from open_webui.config import (
     ENABLE_ADMIN_CHAT_ACCESS,
     BYPASS_ADMIN_ACCESS_CONTROL,
     ENABLE_ADMIN_EXPORT,
+    # User Archival
+    ENABLE_USER_ARCHIVAL,
+    DEFAULT_ARCHIVE_RETENTION_DAYS,
+    ENABLE_AUTO_ARCHIVE_ON_SELF_DELETE,
+    AUTO_ARCHIVE_RETENTION_DAYS,
     # Feature Flags (SaaS Tier Control)
     FEATURE_CHAT_CONTROLS,
     FEATURE_CAPTURE,
@@ -599,6 +605,22 @@ https://github.com/open-webui/open-webui
 )
 
 
+async def periodic_archive_cleanup():
+    """Periodic task to delete expired archives (runs daily)"""
+    from open_webui.services.archival import ArchiveService
+
+    while True:
+        try:
+            # Wait 24 hours before first run and between runs
+            await asyncio.sleep(24 * 60 * 60)
+
+            stats = ArchiveService.cleanup_expired_archives()
+            if stats["deleted"] > 0:
+                log.info(f"Archive cleanup: deleted {stats['deleted']} expired archives")
+        except Exception as e:
+            log.error(f"Error in archive cleanup: {e}")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     app.state.instance_id = INSTANCE_ID
@@ -641,6 +663,7 @@ async def lifespan(app: FastAPI):
         limiter.total_tokens = THREAD_POOL_SIZE
 
     asyncio.create_task(periodic_usage_pool_cleanup())
+    asyncio.create_task(periodic_archive_cleanup())
 
     # Check external pipeline health on startup
     external_pipeline_url = getattr(app.state.config, "EXTERNAL_PIPELINE_URL", None)
@@ -839,6 +862,17 @@ app.state.config.ENABLE_NOTES = ENABLE_NOTES
 app.state.config.ENABLE_COMMUNITY_SHARING = ENABLE_COMMUNITY_SHARING
 app.state.config.ENABLE_MESSAGE_RATING = ENABLE_MESSAGE_RATING
 app.state.config.ENABLE_USER_WEBHOOKS = ENABLE_USER_WEBHOOKS
+
+########################################
+#
+# USER ARCHIVAL
+#
+########################################
+
+app.state.config.ENABLE_USER_ARCHIVAL = ENABLE_USER_ARCHIVAL
+app.state.config.DEFAULT_ARCHIVE_RETENTION_DAYS = DEFAULT_ARCHIVE_RETENTION_DAYS
+app.state.config.ENABLE_AUTO_ARCHIVE_ON_SELF_DELETE = ENABLE_AUTO_ARCHIVE_ON_SELF_DELETE
+app.state.config.AUTO_ARCHIVE_RETENTION_DAYS = AUTO_ARCHIVE_RETENTION_DAYS
 
 app.state.config.ENABLE_EVALUATION_ARENA_MODELS = ENABLE_EVALUATION_ARENA_MODELS
 app.state.config.EVALUATION_ARENA_MODELS = EVALUATION_ARENA_MODELS
@@ -1454,6 +1488,7 @@ app.include_router(configs.router, prefix="/api/v1/configs", tags=["configs"])
 
 app.include_router(auths.router, prefix="/api/v1/auths", tags=["auths"])
 app.include_router(users.router, prefix="/api/v1/users", tags=["users"])
+app.include_router(archives.router, prefix="/api/v1/archives", tags=["archives"])
 
 
 app.include_router(channels.router, prefix="/api/v1/channels", tags=["channels"])
@@ -2033,6 +2068,9 @@ async def get_app_config(request: Request):
                 "user_count": user_count,
                 "code": {
                     "engine": app.state.config.CODE_EXECUTION_ENGINE,
+                },
+                "database": {
+                    "type": engine.name,
                 },
                 "audio": {
                     "tts": {

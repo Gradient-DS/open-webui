@@ -1607,6 +1607,35 @@ ENABLE_ADMIN_CHAT_ACCESS = (
 )
 
 ####################################
+# User Archival
+####################################
+
+ENABLE_USER_ARCHIVAL = PersistentConfig(
+    "ENABLE_USER_ARCHIVAL",
+    "admin.enable_user_archival",
+    os.environ.get("ENABLE_USER_ARCHIVAL", "True").lower() == "true",
+)
+
+DEFAULT_ARCHIVE_RETENTION_DAYS = PersistentConfig(
+    "DEFAULT_ARCHIVE_RETENTION_DAYS",
+    "admin.default_archive_retention_days",
+    int(os.environ.get("DEFAULT_ARCHIVE_RETENTION_DAYS", "1095")),  # 3 years default (ISO 27001)
+)
+
+# Auto-archive when users delete their own accounts
+ENABLE_AUTO_ARCHIVE_ON_SELF_DELETE = PersistentConfig(
+    "ENABLE_AUTO_ARCHIVE_ON_SELF_DELETE",
+    "admin.enable_auto_archive_on_self_delete",
+    os.environ.get("ENABLE_AUTO_ARCHIVE_ON_SELF_DELETE", "False").lower() == "true",
+)
+
+AUTO_ARCHIVE_RETENTION_DAYS = PersistentConfig(
+    "AUTO_ARCHIVE_RETENTION_DAYS",
+    "admin.auto_archive_retention_days",
+    int(os.environ.get("AUTO_ARCHIVE_RETENTION_DAYS", "365")),  # 1 year default for self-delete
+)
+
+####################################
 # Feature Flags (SaaS Tier Control)
 ####################################
 
