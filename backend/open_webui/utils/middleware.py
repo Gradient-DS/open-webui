@@ -1282,8 +1282,8 @@ async def process_chat_payload(request, form_data, user, metadata, model):
             # Get the KB id from the item
             kb_id = item.get("id") or item.get("collection_name")
 
-            # Skip inaccessible knowledge bases (unless no filtering needed)
-            if accessible_kb_ids_set and kb_id and kb_id not in accessible_kb_ids_set:
+            # Skip inaccessible knowledge bases
+            if kb_id and kb_id not in accessible_kb_ids_set:
                 continue
 
             if item.get("collection_name"):

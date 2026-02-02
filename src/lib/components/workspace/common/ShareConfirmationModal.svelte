@@ -11,6 +11,7 @@
 	export let validationResult: ShareValidationResult | null = null;
 	export let strictMode = true;
 	export let targetName = '';
+	export let isGoingPublic = false;
 
 	$: canShareCount = validationResult?.can_share_to_users?.length ?? 0;
 	$: cannotShareCount = validationResult?.cannot_share_to_users?.length ?? 0;
@@ -48,10 +49,18 @@
 				</div>
 				<div>
 					<div class="text-lg font-medium self-center font-primary">
-						{$i18n.t('Confirm Sharing')}
+						{#if isGoingPublic}
+							{$i18n.t('Cannot Make Public')}
+						{:else}
+							{$i18n.t('Confirm Sharing')}
+						{/if}
 					</div>
 					<div class="text-sm text-gray-500">
-						{$i18n.t('Sharing "{{name}}"', { name: targetName })}
+						{#if isGoingPublic}
+							{$i18n.t('"{{name}}"', { name: targetName })}
+						{:else}
+							{$i18n.t('Sharing "{{name}}"', { name: targetName })}
+						{/if}
 					</div>
 				</div>
 			</div>
@@ -61,7 +70,53 @@
 		</div>
 
 		<div class="w-full px-5 pb-4 dark:text-white">
-			{#if validationResult}
+			{#if isGoingPublic}
+				<!-- Making Public Warning -->
+				<div class="mb-4 p-3 bg-red-50 dark:bg-red-900/20 rounded-lg">
+					<div class="flex items-center gap-2 text-red-800 dark:text-red-200">
+						<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+							<path
+								stroke-linecap="round"
+								stroke-linejoin="round"
+								stroke-width="2"
+								d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
+							/>
+						</svg>
+						<span class="font-medium">
+							{$i18n.t('Contains source-restricted files')}
+						</span>
+					</div>
+					<p class="text-sm text-red-700 dark:text-red-300 mt-2">
+						{#if strictMode}
+							{$i18n.t(
+								'This knowledge base contains files from external sources (e.g. OneDrive) with restricted access. Making it public is not allowed because users without source access would be unable to view the documents.'
+							)}
+						{:else}
+							{$i18n.t(
+								'This knowledge base contains files from external sources (e.g. OneDrive) with restricted access. Users without source access will see the knowledge base but will be unable to view the documents.'
+							)}
+						{/if}
+					</p>
+				</div>
+
+				<!-- Actions for making public -->
+				<div class="flex justify-end gap-3">
+					<button
+						class="px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg"
+						on:click={handleCancel}
+					>
+						{$i18n.t('Keep Private')}
+					</button>
+					{#if !strictMode}
+						<button
+							class="px-4 py-2 text-sm font-medium text-white bg-yellow-600 hover:bg-yellow-700 rounded-lg"
+							on:click={handleConfirm}
+						>
+							{$i18n.t('Make Public Anyway')}
+						</button>
+					{/if}
+				</div>
+			{:else if validationResult}
 				<!-- Users with full access -->
 				{#if canShareCount > 0}
 					<div class="mb-4 p-3 bg-green-50 dark:bg-green-900/20 rounded-lg">
@@ -165,27 +220,27 @@
 						{$i18n.t('Note: Users will lose access if their source permissions are revoked.')}
 					</p>
 				</div>
-			{/if}
 
-			<!-- Actions -->
-			<div class="flex justify-end gap-3">
-				<button
-					class="px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg"
-					on:click={handleCancel}
-				>
-					{$i18n.t('Cancel')}
-				</button>
-				<button
-					class="px-4 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-lg"
-					on:click={handleConfirm}
-				>
-					{#if strictMode && cannotShareCount > 0}
-						{$i18n.t('Share to {{count}} users', { count: canShareCount })}
-					{:else}
-						{$i18n.t('Share to all {{count}} users', { count: totalCount })}
-					{/if}
-				</button>
-			</div>
+				<!-- Actions -->
+				<div class="flex justify-end gap-3">
+					<button
+						class="px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg"
+						on:click={handleCancel}
+					>
+						{$i18n.t('Cancel')}
+					</button>
+					<button
+						class="px-4 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-lg"
+						on:click={handleConfirm}
+					>
+						{#if strictMode && cannotShareCount > 0}
+							{$i18n.t('Share to {{count}} users', { count: canShareCount })}
+						{:else}
+							{$i18n.t('Share to all {{count}} users', { count: totalCount })}
+						{/if}
+					</button>
+				</div>
+			{/if}
 		</div>
 	</div>
 </Modal>

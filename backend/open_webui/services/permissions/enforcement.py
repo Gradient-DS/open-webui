@@ -77,7 +77,8 @@ async def check_knowledge_access(
         )
 
     # Get files and check source permissions
-    file_ids = knowledge.data.get("file_ids", []) if knowledge.data else []
+    files = Knowledges.get_files_by_id(knowledge_id)
+    file_ids = [f.id for f in files]
     if not file_ids:
         return KnowledgeAccessResult(allowed=True, accessible_file_ids=[])
 

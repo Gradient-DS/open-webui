@@ -22,6 +22,7 @@ from open_webui.config import (
     ONEDRIVE_MAX_FILES_PER_SYNC,
     ONEDRIVE_MAX_FILE_SIZE_MB,
     FILE_PROCESSING_MAX_CONCURRENT,
+    STRICT_SOURCE_PERMISSIONS,
 )
 
 log = logging.getLogger(__name__)
@@ -443,23 +444,46 @@ class OneDriveSyncWorker:
             # Check if KB access level is compatible with OneDrive permissions
             conflict = await self._validate_kb_access_level()
             if conflict and conflict.get("has_conflict"):
-                # Emit conflict event for frontend to handle
-                from open_webui.services.onedrive.sync_events import emit_sync_progress
+                strict_mode = STRICT_SOURCE_PERMISSIONS.value
+                if strict_mode:
+                    # Abort sync — cannot add OneDrive files to a public KB
+                    error_msg = (
+                        "Cannot sync OneDrive files to a public knowledge base. "
+                        "Make the knowledge base private first, then share it with "
+                        "users who have source access."
+                    )
+                    await self._update_sync_status(
+                        "failed",
+                        error=error_msg,
+                    )
+                    log.warning(
+                        f"KB access conflict — aborting sync for {self.knowledge_id}: "
+                        f"{error_msg}"
+                    )
+                    return {
+                        "files_processed": 0,
+                        "files_failed": 0,
+                        "failed_files": [],
+                        "deleted_count": 0,
+                        "error": error_msg,
+                    }
+                else:
+                    # Lenient mode — warn but proceed
+                    from open_webui.services.onedrive.sync_events import emit_sync_progress
 
-                await emit_sync_progress(
-                    user_id=self.user_id,
-                    knowledge_id=self.knowledge_id,
-                    status="access_conflict",
-                    current=0,
-                    total=0,
-                    filename="",
-                    error=conflict.get("message"),
-                )
-                log.warning(
-                    f"KB access conflict detected for {self.knowledge_id}: "
-                    f"{conflict.get('message')}"
-                )
-                # Continue with sync - frontend will show warning but allow proceeding
+                    await emit_sync_progress(
+                        user_id=self.user_id,
+                        knowledge_id=self.knowledge_id,
+                        status="access_conflict",
+                        current=0,
+                        total=0,
+                        filename="",
+                        error=conflict.get("message"),
+                    )
+                    log.warning(
+                        f"KB access conflict detected for {self.knowledge_id}: "
+                        f"{conflict.get('message')}"
+                    )
 
             # Sync OneDrive folder permissions to Knowledge access_control
             await self._sync_permissions()

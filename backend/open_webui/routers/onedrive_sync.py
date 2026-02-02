@@ -8,6 +8,7 @@ import logging
 from open_webui.utils.auth import get_verified_user
 from open_webui.models.users import UserModel
 from open_webui.models.knowledge import Knowledges
+from open_webui.config import STRICT_SOURCE_PERMISSIONS
 
 
 log = logging.getLogger(__name__)
@@ -68,6 +69,15 @@ async def sync_items(
         raise HTTPException(status_code=404, detail="Knowledge base not found")
     if knowledge.user_id != user.id:
         raise HTTPException(status_code=403, detail="Not authorized")
+
+    # Block syncing OneDrive files to a public KB in strict mode
+    if knowledge.access_control is None and STRICT_SOURCE_PERMISSIONS.value:
+        raise HTTPException(
+            status_code=409,
+            detail="Cannot sync OneDrive files to a public knowledge base. "
+            "Make the knowledge base private first, then share it with "
+            "users who have source access.",
+        )
 
     # Get existing sources or initialize empty list
     meta = knowledge.meta or {}

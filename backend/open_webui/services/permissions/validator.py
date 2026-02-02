@@ -210,18 +210,7 @@ class SharingValidator:
 
     def _get_knowledge_files(self, knowledge_id: str) -> List[FileModel]:
         """Get all files associated with a knowledge base."""
-        knowledge = Knowledges.get_knowledge_by_id(knowledge_id)
-        if not knowledge or not knowledge.data:
-            return []
-
-        file_ids = knowledge.data.get("file_ids", [])
-        files = []
-        for file_id in file_ids:
-            file = Files.get_file_by_id(file_id)
-            if file:
-                files.append(file)
-
-        return files
+        return Knowledges.get_files_by_id(knowledge_id)
 
     async def validate_file_addition(
         self,

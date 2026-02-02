@@ -466,6 +466,20 @@ def add_file_to_knowledge_by_id(
             detail=ERROR_MESSAGES.FILE_NOT_PROCESSED,
         )
 
+    # Block adding source-restricted files to public KBs in strict mode
+    file_source = (file.meta or {}).get("source", "local")
+    if file_source != "local" and knowledge.access_control is None:
+        strict_mode = getattr(
+            request.app.state.config, "STRICT_SOURCE_PERMISSIONS", True
+        )
+        if strict_mode:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=f"Cannot add {file_source} files to a public knowledge base. "
+                "Make the knowledge base private first, then share it with "
+                "users who have source access.",
+            )
+
     # Add content to the vector database
     try:
         process_file(
@@ -784,6 +798,25 @@ async def add_files_to_knowledge_batch(
                 detail=f"File {form.file_id} not found",
             )
         files.append(file)
+
+    # Block adding source-restricted files to public KBs in strict mode
+    if knowledge.access_control is None:
+        source_restricted_files = [
+            f for f in files
+            if (f.meta or {}).get("source", "local") != "local"
+        ]
+        if source_restricted_files:
+            strict_mode = getattr(
+                request.app.state.config, "STRICT_SOURCE_PERMISSIONS", True
+            )
+            if strict_mode:
+                source_type = (source_restricted_files[0].meta or {}).get("source", "external")
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail=f"Cannot add {source_type} files to a public knowledge base. "
+                    "Make the knowledge base private first, then share it with "
+                    "users who have source access.",
+                )
 
     # Process files
     try:

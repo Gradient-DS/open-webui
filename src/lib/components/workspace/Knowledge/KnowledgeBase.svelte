@@ -58,6 +58,8 @@
 	import OneDrive from '$lib/components/icons/OneDrive.svelte';
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
 	import AccessControlModal from '../common/AccessControlModal.svelte';
+	import FileAdditionConflictModal from '../common/FileAdditionConflictModal.svelte';
+	import type { FileAdditionConflict } from '$lib/apis/knowledge/permissions';
 	import Search from '$lib/components/icons/Search.svelte';
 	import FilesOverlay from '$lib/components/chat/MessageInput/FilesOverlay.svelte';
 	import DropdownOptions from '$lib/components/common/DropdownOptions.svelte';
@@ -75,6 +77,9 @@
 	let showSyncConfirmModal = false;
 	let showCancelSyncConfirmModal = false;
 	let showAccessControlModal = false;
+	let showFileConflictModal = false;
+	let fileConflict: FileAdditionConflict | null = null;
+	let fileConflictPendingFileId: string | null = null;
 
 	let minSize = 0;
 	type Knowledge = {
@@ -564,7 +569,12 @@
 			pollOneDriveSyncStatus();
 		} catch (error) {
 			console.error('OneDrive sync error:', error);
-			toast.error($i18n.t('Failed to sync from OneDrive: ' + (error instanceof Error ? error.message : String(error))));
+			const errorMsg = error instanceof Error ? error.message : String(error);
+			// Translate known error messages
+			const translatedMsg = errorMsg.includes('Cannot sync OneDrive files to a public knowledge base')
+				? $i18n.t('Cannot sync OneDrive files to a public knowledge base. Make the knowledge base private first, then share it with users who have source access.')
+				: errorMsg;
+			toast.error($i18n.t('Failed to sync from OneDrive') + ': ' + translatedMsg);
 		} finally {
 			isSyncingOneDrive = false;
 		}
@@ -872,7 +882,12 @@
 			}
 			await init(); // Refresh file list
 		} else if (data.status === 'failed') {
-			toast.error($i18n.t('OneDrive sync failed: {{error}}', { error: data.error || 'Unknown error' }));
+			const error = data.error || 'Unknown error';
+			// Translate known error messages
+			const translatedError = error.includes('Cannot sync OneDrive files to a public knowledge base')
+				? $i18n.t('Cannot sync OneDrive files to a public knowledge base. Make the knowledge base private first, then share it with users who have source access.')
+				: error;
+			toast.error($i18n.t('OneDrive sync failed') + ': ' + translatedError);
 			isSyncingOneDrive = false;
 		} else if (data.status === 'cancelled') {
 			toast.info($i18n.t('OneDrive sync cancelled'));
@@ -888,7 +903,26 @@
 
 	const addFileHandler = async (fileId) => {
 		const res = await addFileToKnowledgeById(localStorage.token, id, fileId).catch((e) => {
-			toast.error(`${e}`);
+			const errorStr = `${e}`;
+			// Detect source access conflict (409 from backend)
+			if (errorStr.includes('Cannot add') && errorStr.includes('public knowledge base')) {
+				// Extract source type from error message (e.g. "Cannot add onedrive files...")
+				const sourceMatch = errorStr.match(/Cannot add (\w+) files/);
+				const sourceType = sourceMatch ? sourceMatch[1] : 'external';
+
+				fileConflict = {
+					has_conflict: true,
+					kb_is_public: true,
+					users_without_access: [],
+					user_details: [],
+					source_type: sourceType,
+					grant_access_url: null
+				};
+				fileConflictPendingFileId = fileId;
+				showFileConflictModal = true;
+				return null;
+			}
+			toast.error(errorStr);
 			return null;
 		});
 
@@ -898,10 +932,50 @@
 			if (res.knowledge) {
 				knowledge = res.knowledge;
 			}
-		} else {
+		} else if (!showFileConflictModal) {
+			// Only show generic error if not showing conflict modal
 			toast.error($i18n.t('Failed to add file.'));
 			fileItems = fileItems.filter((file) => file.id !== fileId);
 		}
+	};
+
+	const handleFileConflictMakePrivate = async () => {
+		// Make the KB private (owner-only) and retry the file addition
+		knowledge.access_control = { read: { group_ids: [], user_ids: [] }, write: { group_ids: [], user_ids: [] } };
+
+		const res = await updateKnowledgeById(localStorage.token, id, {
+			...knowledge,
+			name: knowledge.name,
+			description: knowledge.description,
+			access_control: knowledge.access_control
+		}).catch((e) => {
+			toast.error(`${e}`);
+			return null;
+		});
+
+		if (res) {
+			knowledge = res;
+			toast.success($i18n.t('Knowledge base made private.'));
+
+			// Retry the file addition
+			if (fileConflictPendingFileId) {
+				await addFileHandler(fileConflictPendingFileId);
+			}
+		}
+
+		showFileConflictModal = false;
+		fileConflict = null;
+		fileConflictPendingFileId = null;
+	};
+
+	const handleFileConflictCancel = () => {
+		// Remove the pending file from the list
+		if (fileConflictPendingFileId) {
+			fileItems = (fileItems || []).filter((file) => file.id !== fileConflictPendingFileId);
+		}
+		showFileConflictModal = false;
+		fileConflict = null;
+		fileConflictPendingFileId = null;
 	};
 
 	const deleteFileHandler = async (fileId) => {
@@ -1191,6 +1265,14 @@
 		const file = createFileFromText(e.detail.name, e.detail.content);
 		uploadFileHandler(file);
 	}}
+/>
+
+<FileAdditionConflictModal
+	bind:show={showFileConflictModal}
+	conflict={fileConflict}
+	strictMode={$config?.features?.strict_source_permissions ?? true}
+	on:makePrivate={handleFileConflictMakePrivate}
+	on:cancel={handleFileConflictCancel}
 />
 
 <input

@@ -1080,6 +1080,16 @@ async def get_sources_from_items(
                 or knowledge_base.user_id == user.id
                 or has_access(user.id, "read", knowledge_base.access_control)
             ):
+                # Check source-level permissions (OneDrive, etc.)
+                try:
+                    from open_webui.services.permissions.enforcement import check_knowledge_access
+                    strict_mode = getattr(request.app.state.config, "STRICT_SOURCE_PERMISSIONS", True)
+                    access_result = await check_knowledge_access(user.id, item.get("id"), strict_mode)
+                    if not access_result.allowed:
+                        log.info(f"Source permission denied for user {user.id} on KB {item.get('id')}")
+                        continue
+                except Exception as e:
+                    log.warning(f"Source permission check failed for KB {item.get('id')}: {e}")
                 if (
                     item.get("context") == "full"
                     or request.app.state.config.BYPASS_EMBEDDING_AND_RETRIEVAL
