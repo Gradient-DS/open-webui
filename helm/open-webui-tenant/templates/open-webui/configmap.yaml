@@ -154,6 +154,10 @@ data:
   USER_PERMISSIONS_NOTES_ALLOW_PUBLIC_SHARING: {{ .Values.openWebui.config.userPermissionsNotesAllowPublicSharing | quote }}
 
   # UI
+  {{- if .Values.openWebui.config.greetingTemplate }}
+  GREETING_TEMPLATE: {{ .Values.openWebui.config.greetingTemplate | quote }}
+  {{- end }}
+  DEFAULT_PROMPT_SUGGESTIONS: {{ .Values.openWebui.config.defaultPromptSuggestions | quote }}
   ENABLE_FOLDERS: {{ .Values.openWebui.config.enableFolders | quote }}
   USER_PERMISSIONS_FEATURES_FOLDERS: {{ .Values.openWebui.config.userPermissionsFeaturesFolders | quote }}
   ENABLE_CHANNELS: {{ .Values.openWebui.config.enableChannels | quote }}

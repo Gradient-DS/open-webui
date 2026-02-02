@@ -1172,14 +1172,15 @@ DEFAULT_PINNED_MODELS = PersistentConfig(
     os.environ.get("DEFAULT_PINNED_MODELS", None),
 )
 
+_default_prompt_suggestions_env = os.environ.get("DEFAULT_PROMPT_SUGGESTIONS")
 try:
     default_prompt_suggestions = json.loads(
-        os.environ.get("DEFAULT_PROMPT_SUGGESTIONS", "[]")
+        _default_prompt_suggestions_env if _default_prompt_suggestions_env is not None else "[]"
     )
 except Exception as e:
     log.exception(f"Error loading DEFAULT_PROMPT_SUGGESTIONS: {e}")
     default_prompt_suggestions = []
-if default_prompt_suggestions == []:
+if default_prompt_suggestions == [] and _default_prompt_suggestions_env is None:
     default_prompt_suggestions = [
         {
             "title": ["Help me study", "vocabulary for a college entrance exam"],
@@ -1251,6 +1252,12 @@ RESPONSE_WATERMARK = PersistentConfig(
     "RESPONSE_WATERMARK",
     "ui.watermark",
     os.environ.get("RESPONSE_WATERMARK", ""),
+)
+
+GREETING_TEMPLATE = PersistentConfig(
+    "GREETING_TEMPLATE",
+    "ui.greeting_template",
+    os.environ.get("GREETING_TEMPLATE", ""),
 )
 
 

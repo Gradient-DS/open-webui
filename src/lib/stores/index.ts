@@ -304,6 +304,7 @@ type Config = {
 	ui?: {
 		pending_user_overlay_title?: string;
 		pending_user_overlay_description?: string;
+		greeting_template?: string;
 	};
 };
 
