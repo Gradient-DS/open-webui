@@ -13,10 +13,6 @@ data:
   WEBUI_NAME: {{ .Values.openWebui.config.webuiName | quote }}
   CORS_ALLOW_ORIGIN: {{ .Values.openWebui.config.corsAllowOrigin | quote }}
 
-  # Admin
-  OPENWEBUI_ADMIN_EMAIL: {{ .Values.openWebui.config.adminEmail | quote }}
-  OPENWEBUI_ADMIN_NAME: {{ .Values.openWebui.config.adminName | quote }}
-
   # Locale
   DEFAULT_LOCALE: {{ .Values.openWebui.config.defaultLocale | quote }}
 

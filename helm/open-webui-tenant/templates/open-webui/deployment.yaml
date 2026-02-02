@@ -45,11 +45,6 @@ spec:
                   key: postgres-password
             - name: DATABASE_URL
               value: "postgresql://{{ .Values.postgres.user }}:$(DATABASE_PASSWORD)@{{ include "open-webui-tenant.postgres.fullname" . }}:5432/{{ .Values.postgres.database }}"
-            - name: OPENWEBUI_ADMIN_PASSWORD
-              valueFrom:
-                secretKeyRef:
-                  name: {{ include "open-webui-tenant.fullname" . }}-secrets
-                  key: admin-password
             - name: OPENAI_API_KEY
               valueFrom:
                 secretKeyRef:
