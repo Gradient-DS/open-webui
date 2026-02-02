@@ -534,3 +534,30 @@ async def get_banners(
     user=Depends(get_verified_user),
 ):
     return request.app.state.config.BANNERS
+
+
+############################
+# GreetingTemplate
+############################
+
+
+class SetGreetingTemplateForm(BaseModel):
+    template: str
+
+
+@router.post("/greeting_template")
+async def set_greeting_template(
+    request: Request,
+    form_data: SetGreetingTemplateForm,
+    user=Depends(get_admin_user),
+):
+    request.app.state.config.GREETING_TEMPLATE = form_data.template
+    return {"template": request.app.state.config.GREETING_TEMPLATE}
+
+
+@router.get("/greeting_template")
+async def get_greeting_template(
+    request: Request,
+    user=Depends(get_verified_user),
+):
+    return {"template": request.app.state.config.GREETING_TEMPLATE}

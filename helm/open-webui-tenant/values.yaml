@@ -238,6 +238,8 @@ openWebui:
     userPermissionsNotesAllowPublicSharing: "false"
 
     # UI Features
+    greetingTemplate: ""
+    defaultPromptSuggestions: "[]"
     enableFolders: "true"
     userPermissionsFeaturesFolders: "true"
     enableChannels: "false"
