@@ -110,11 +110,6 @@ openWebui:
     webuiName: "soev.ai"
     corsAllowOrigin: "*"
 
-    # Admin bootstrap
-    adminEmail: ""
-    adminName: ""
-    # adminPassword is set via secrets
-
     # Locale
     defaultLocale: "nl-NL"
 
@@ -436,7 +431,6 @@ ingress:
 secrets:
   # Open WebUI secrets
   webuiSecretKey: ""  # Generate with: openssl rand -hex 32
-  adminPassword: ""
   openaiApiKey: ""
   ragOpenaiApiKey: ""
 
