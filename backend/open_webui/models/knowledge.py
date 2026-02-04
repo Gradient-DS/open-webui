@@ -350,6 +350,15 @@ class KnowledgeTable:
             )
         ]
 
+    def get_knowledge_items_by_user_id(self, user_id: str) -> list[KnowledgeModel]:
+        """Get all knowledge bases owned by a user (for deletion)."""
+        try:
+            with get_db() as db:
+                knowledges = db.query(Knowledge).filter_by(user_id=user_id).all()
+                return [KnowledgeModel.model_validate(k) for k in knowledges]
+        except Exception:
+            return []
+
     def get_knowledge_by_id(self, id: str) -> Optional[KnowledgeModel]:
         try:
             with get_db() as db:
@@ -384,6 +393,19 @@ class KnowledgeTable:
                 )
                 return [
                     KnowledgeModel.model_validate(knowledge) for knowledge in knowledges
+                ]
+        except Exception:
+            return []
+
+    def get_knowledge_files_by_file_id(self, file_id: str) -> list[KnowledgeFileModel]:
+        """Get all knowledge_file records for a given file_id."""
+        try:
+            with get_db() as db:
+                knowledge_files = (
+                    db.query(KnowledgeFile).filter_by(file_id=file_id).all()
+                )
+                return [
+                    KnowledgeFileModel.model_validate(kf) for kf in knowledge_files
                 ]
         except Exception:
             return []

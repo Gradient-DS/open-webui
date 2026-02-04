@@ -53,6 +53,7 @@ data:
   WEAVIATE_HTTP_HOST: {{ include "open-webui-tenant.weaviate.fullname" . }}
   WEAVIATE_HTTP_PORT: {{ .Values.openWebui.config.weaviateHttpPort | quote }}
   WEAVIATE_GRPC_PORT: {{ .Values.openWebui.config.weaviateGrpcPort | quote }}
+  WEAVIATE_WEB_SEARCH_TTL_MINUTES: {{ .Values.openWebui.config.weaviateWebSearchTtlMinutes | quote }}
 
   # Database (PostgreSQL) - local to tenant namespace
   DATABASE_TYPE: {{ .Values.openWebui.config.databaseType | quote }}
@@ -220,6 +221,15 @@ data:
   ONEDRIVE_MAX_FILE_SIZE_MB: {{ .Values.openWebui.config.onedriveMaxFileSizeMb | quote }}
 
   BYPASS_MODEL_ACCESS_CONTROL: {{ .Values.openWebui.config.bypassModelAccessControl | quote }}
+
+  # Audit Logging
+  AUDIT_LOG_LEVEL: {{ .Values.openWebui.config.auditLogLevel | quote }}
+
+  # User Archival
+  ENABLE_USER_ARCHIVAL: {{ .Values.openWebui.config.enableUserArchival | quote }}
+  DEFAULT_ARCHIVE_RETENTION_DAYS: {{ .Values.openWebui.config.defaultArchiveRetentionDays | quote }}
+  ENABLE_AUTO_ARCHIVE_ON_SELF_DELETE: {{ .Values.openWebui.config.enableAutoArchiveOnSelfDelete | quote }}
+  AUTO_ARCHIVE_RETENTION_DAYS: {{ .Values.openWebui.config.autoArchiveRetentionDays | quote }}
 
   # Telemetry
   SCARF_NO_ANALYTICS: {{ .Values.openWebui.config.scarfNoAnalytics | quote }}

@@ -141,6 +141,7 @@ openWebui:
     vectorDb: "weaviate"
     weaviateHttpPort: "8080"
     weaviateGrpcPort: "50051"
+    weaviateWebSearchTtlMinutes: "1440"  # TTL for web search vector collections (24 hours)
 
     # Database (PostgreSQL) - uses local PostgreSQL in tenant namespace
     databaseType: "postgresql"
@@ -296,6 +297,17 @@ openWebui:
 
     bypassModelAccessControl: "false"
 
+    # Audit Logging
+    # Levels: NONE, METADATA, REQUEST, REQUEST_RESPONSE
+    # METADATA logs who/what/when without PII from request/response bodies
+    auditLogLevel: "METADATA"
+
+    # User Archival
+    enableUserArchival: "true"
+    defaultArchiveRetentionDays: "1095"  # 3 years (ISO 27001 compliance)
+    enableAutoArchiveOnSelfDelete: "false"
+    autoArchiveRetentionDays: "365"  # 1 year for self-deletions
+
     # Telemetry (disabled)
     scarfNoAnalytics: "true"
     doNotTrack: "true"
@@ -382,7 +394,7 @@ weaviate:
 
   image:
     repository: semitechnologies/weaviate
-    tag: "1.28.4"
+    tag: "1.35.0"
     pullPolicy: IfNotPresent
 
   # Resource limits

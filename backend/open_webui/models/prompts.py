@@ -163,5 +163,15 @@ class PromptsTable:
         except Exception:
             return False
 
+    def delete_prompts_by_user_id(self, user_id: str) -> bool:
+        """Delete all prompts for a user."""
+        try:
+            with get_db() as db:
+                db.query(Prompt).filter_by(user_id=user_id).delete()
+                db.commit()
+                return True
+        except Exception:
+            return False
+
 
 Prompts = PromptsTable()
