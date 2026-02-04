@@ -111,15 +111,17 @@
 	let fileItems = null;
 	let fileItemsTotal = null;
 
-	const reset = () => {
-		currentPage = 1;
-	};
+	let _skipReactiveRefresh = false;
 
 	const init = async () => {
-		reset();
+		_skipReactiveRefresh = true;
+		currentPage = 1;
+		_skipReactiveRefresh = false;
 		await getItemsPage();
 	};
 
+	// Single reactive block: when filter/sort params change, reset page and fetch.
+	// When only currentPage changes (pagination), just fetch.
 	$: if (
 		knowledgeId !== null &&
 		query !== undefined &&
@@ -128,23 +130,25 @@
 		direction !== undefined &&
 		currentPage !== undefined
 	) {
-		getItemsPage();
+		if (!_skipReactiveRefresh) {
+			getItemsPage();
+		}
 	}
 
+	// Reset to page 1 when filter/sort params change (but NOT on currentPage change)
 	$: if (
 		query !== undefined &&
 		viewOption !== undefined &&
 		sortKey !== undefined &&
 		direction !== undefined
 	) {
-		reset();
+		// This will trigger the above reactive via currentPage change,
+		// which is the desired single fetch. No separate fetch needed here.
+		currentPage = 1;
 	}
 
 	const getItemsPage = async () => {
 		if (knowledgeId === null) return;
-
-		fileItems = null;
-		fileItemsTotal = null;
 
 		if (sortKey === null) {
 			direction = null;
@@ -534,6 +538,7 @@
 	const oneDriveSyncHandler = async () => {
 		try {
 			isSyncingOneDrive = true;
+			_syncRefreshDone = false;
 
 			// Open item picker (files and folders, uses business/SharePoint accounts)
 			const items = await openOneDriveItemPicker('organizations');
@@ -555,12 +560,13 @@
 				name: item.name
 			}));
 
-			// Start sync with new endpoint
+			// Start sync with new endpoint (clear exclusions since user is re-adding from picker)
 			await startOneDriveSyncItems(localStorage.token, {
 				knowledge_id: knowledge.id,
 				items: syncItems,
 				access_token: accessToken,
-				user_token: localStorage.token
+				user_token: localStorage.token,
+				clear_exclusions: true
 			});
 
 			toast.success($i18n.t('OneDrive sync started'));
@@ -586,6 +592,7 @@
 
 		try {
 			isSyncingOneDrive = true;
+			_syncRefreshDone = false;
 
 			// Get fresh access token for Graph API
 			const accessToken = await getGraphApiToken('organizations');
@@ -622,9 +629,16 @@
 			if (oneDriveSyncStatus.status === 'syncing') {
 				setTimeout(pollOneDriveSyncStatus, 2000);
 			} else if (oneDriveSyncStatus.status === 'completed' || oneDriveSyncStatus.status === 'completed_with_errors') {
-				// Toast is handled by Socket.IO handler, just refresh
 				isSyncingOneDrive = false;
-				await init();
+				// Only refresh if Socket.IO handler hasn't already done it
+				if (!_syncRefreshDone) {
+					const res = await getKnowledgeById(localStorage.token, id);
+					if (res) {
+						knowledge = res;
+					}
+					await init();
+				}
+				_syncRefreshDone = false;
 			} else if (oneDriveSyncStatus.status === 'failed') {
 				// Only show error if Socket.IO didn't already handle it
 				if (isSyncingOneDrive) {
@@ -633,7 +647,14 @@
 				}
 			} else if (oneDriveSyncStatus.status === 'cancelled') {
 				isSyncingOneDrive = false;
-				await init();
+				if (!_syncRefreshDone) {
+					const res = await getKnowledgeById(localStorage.token, id);
+					if (res) {
+						knowledge = res;
+					}
+					await init();
+				}
+				_syncRefreshDone = false;
 			}
 		} catch (error) {
 			console.error('Failed to get sync status:', error);
@@ -875,12 +896,13 @@
 				toast.success($i18n.t('OneDrive sync completed - no changes'));
 			}
 			isSyncingOneDrive = false;
+			_syncRefreshDone = true;
 			// Refresh knowledge metadata to update last_sync_at timestamp
 			const res = await getKnowledgeById(localStorage.token, id);
 			if (res) {
 				knowledge = res;
 			}
-			await init(); // Refresh file list
+			await init();
 		} else if (data.status === 'failed') {
 			const error = data.error || 'Unknown error';
 			// Translate known error messages
@@ -892,12 +914,12 @@
 		} else if (data.status === 'cancelled') {
 			toast.info($i18n.t('OneDrive sync cancelled'));
 			isSyncingOneDrive = false;
-			// Refresh knowledge metadata to update last_sync_at timestamp
+			_syncRefreshDone = true;
 			const res = await getKnowledgeById(localStorage.token, id);
 			if (res) {
 				knowledge = res;
 			}
-			await init(); // Refresh file list
+			await init();
 		}
 	};
 
@@ -979,20 +1001,31 @@
 	};
 
 	const deleteFileHandler = async (fileId) => {
-		try {
-			console.log('Starting file deletion process for:', fileId);
+		// Optimistically remove from the list immediately
+		const previousItems = fileItems;
+		const previousTotal = fileItemsTotal;
+		fileItems = (fileItems ?? []).filter((file) => file.id !== fileId);
+		fileItemsTotal = Math.max(0, (fileItemsTotal ?? 1) - 1);
 
-			// Remove from knowledge base only
+		try {
 			const res = await removeFileFromKnowledgeById(localStorage.token, id, fileId);
-			console.log('Knowledge base updated:', res);
 
 			if (res) {
+				knowledge = res;
 				toast.success($i18n.t('File removed successfully.'));
-				await init();
+				// Background refresh to sync with server state (no spinner due to Phase 1)
+				await getItemsPage();
+			} else {
+				// Revert on failure
+				fileItems = previousItems;
+				fileItemsTotal = previousTotal;
 			}
 		} catch (e) {
 			console.error('Error in deleteFileHandler:', e);
 			toast.error(`${e}`);
+			// Revert on error
+			fileItems = previousItems;
+			fileItemsTotal = previousTotal;
 		}
 	};
 
@@ -1002,6 +1035,7 @@
 	let dragged = false;
 	let isSaving = false;
 	let isSyncingOneDrive = false;
+	let _syncRefreshDone = false;
 	let oneDriveSyncStatus: SyncStatusResponse | null = null;
 
 	const updateFileContentHandler = async () => {
@@ -1029,7 +1063,8 @@
 				selectedFile = null;
 				selectedFileContent = '';
 
-				await init();
+				// Background refresh instead of init() - no page reset needed
+				await getItemsPage();
 			}
 		} finally {
 			isSaving = false;
@@ -1455,6 +1490,8 @@
 								onSync={() => {
 									showSyncConfirmModal = true;
 								}}
+								hideSyncDirectory={!!($config?.features?.enable_onedrive_integration &&
+								$config?.features?.enable_onedrive_sync)}
 								onOneDriveSync={$config?.features?.enable_onedrive_integration &&
 								$config?.features?.enable_onedrive_sync
 									? oneDriveSyncHandler

@@ -41,6 +41,7 @@ export interface SyncItemsRequest {
 	items: SyncItem[];
 	access_token: string;
 	user_token: string;
+	clear_exclusions?: boolean;
 }
 
 export async function startOneDriveSync(

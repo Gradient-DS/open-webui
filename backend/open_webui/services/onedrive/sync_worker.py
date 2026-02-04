@@ -3,11 +3,9 @@
 import asyncio
 import io
 import logging
-import tempfile
 import os
 import time
 import hashlib
-import uuid
 from dataclasses import dataclass, asdict
 from enum import Enum
 from typing import Optional, Callable, Awaitable, Dict, Any, List
@@ -113,6 +111,15 @@ class OneDriveSyncWorker:
             return sync_info.get("status") == "cancelled"
         return False
 
+    def _get_excluded_item_ids(self) -> set:
+        """Get OneDrive item IDs that the user has explicitly removed from the KB."""
+        knowledge = Knowledges.get_knowledge_by_id(self.knowledge_id)
+        if not knowledge:
+            return set()
+        meta = knowledge.meta or {}
+        sync_info = meta.get("onedrive_sync", {})
+        return set(sync_info.get("excluded_item_ids", []))
+
     async def _validate_kb_access_level(self) -> Optional[Dict[str, Any]]:
         """
         Check if KB access level is compatible with OneDrive permissions.
@@ -150,6 +157,11 @@ class OneDriveSyncWorker:
         if knowledge:
             meta = knowledge.meta or {}
             sync_info = meta.get("onedrive_sync", {})
+
+            # Don't overwrite cancelled status with progress updates
+            if sync_info.get("status") == "cancelled" and status == "syncing":
+                return
+
             sync_info["status"] = status
             sync_info["progress_current"] = current
             sync_info["progress_total"] = total
@@ -280,8 +292,21 @@ class OneDriveSyncWorker:
             stored_hash = source.get("content_hash")
 
             if current_hash and current_hash == stored_hash:
-                log.info(f"File unchanged (hash match): {source['name']}")
-                return None
+                # Verify the file was actually processed and added to the KB.
+                # A previous sync may have saved the hash but failed during
+                # retrieval processing, leaving an orphan record.
+                file_id = f"onedrive-{source['item_id']}"
+                kb_links = Knowledges.get_knowledge_files_by_file_id(file_id)
+                in_kb = any(
+                    kf.knowledge_id == self.knowledge_id for kf in kb_links
+                )
+                if in_kb:
+                    log.info(f"File unchanged (hash match): {source['name']}")
+                    return None
+                else:
+                    log.info(
+                        f"File hash matches but not in KB, re-queuing: {source['name']}"
+                    )
 
             if not current_hash:
                 log.warning(f"No hash available from OneDrive for: {source['name']}")
@@ -512,6 +537,22 @@ class OneDriveSyncWorker:
                     if file_info:
                         all_files_to_process.append(file_info)
 
+            # Filter out files that the user has explicitly removed from the KB
+            excluded_item_ids = self._get_excluded_item_ids()
+            if excluded_item_ids:
+                before_count = len(all_files_to_process)
+                all_files_to_process = [
+                    f
+                    for f in all_files_to_process
+                    if f["item"].get("id") not in excluded_item_ids
+                ]
+                excluded_count = before_count - len(all_files_to_process)
+                if excluded_count > 0:
+                    log.info(
+                        f"Excluded {excluded_count} previously removed files "
+                        f"from sync for knowledge {self.knowledge_id}"
+                    )
+
             # Apply file limit
             max_files = ONEDRIVE_MAX_FILES_PER_SYNC
             if len(all_files_to_process) > max_files:
@@ -537,9 +578,8 @@ class OneDriveSyncWorker:
             ) -> Optional[FailedFile]:
                 nonlocal processed_count, failed_count, cancelled
 
-                # Check for cancellation
-                if self._check_cancelled():
-                    cancelled = True
+                # Fast-path: another coroutine already detected cancellation
+                if cancelled:
                     return FailedFile(
                         filename=file_info.get("name", "unknown"),
                         error_type=SyncErrorType.PROCESSING_ERROR.value,
@@ -547,6 +587,15 @@ class OneDriveSyncWorker:
                     )
 
                 async with semaphore:
+                    # Re-check cancellation AFTER acquiring semaphore
+                    if cancelled or self._check_cancelled():
+                        cancelled = True
+                        return FailedFile(
+                            filename=file_info.get("name", "unknown"),
+                            error_type=SyncErrorType.PROCESSING_ERROR.value,
+                            error_message="Sync cancelled by user",
+                        )
+
                     try:
                         result = await self._process_file_info(file_info)
 
@@ -621,6 +670,10 @@ class OneDriveSyncWorker:
             # Check if cancelled during processing
             if cancelled:
                 log.info(f"Sync cancelled by user for knowledge {self.knowledge_id}")
+
+                # Save sources to preserve delta links for next sync
+                await self._save_sources()
+
                 await self._update_sync_status(
                     "cancelled",
                     total_processed + total_failed,
@@ -772,8 +825,20 @@ class OneDriveSyncWorker:
         existing = Files.get_file_by_id(file_id)
 
         if existing and existing.hash == content_hash:
-            log.info(f"File unchanged (same hash), skipping: {name}")
-            return None  # Success - no change needed
+            # Check if the file was actually processed and added to the KB.
+            # A previous sync may have created the DB record but failed during
+            # retrieval processing (e.g. wrong API URL), leaving an orphan record.
+            kb_links = Knowledges.get_knowledge_files_by_file_id(file_id)
+            in_kb = any(
+                kf.knowledge_id == self.knowledge_id for kf in kb_links
+            )
+            if in_kb:
+                log.info(f"File unchanged (same hash), skipping: {name}")
+                return None  # Success - no change needed
+            else:
+                log.info(
+                    f"File record exists but not in KB, re-processing: {name}"
+                )
 
         # Save to storage
         temp_filename = f"{file_id}_{name}"
@@ -892,10 +957,11 @@ class OneDriveSyncWorker:
         """
         import httpx
 
-        # Get the base URL from config or use default
-        from open_webui.config import WEBUI_URL
-
-        base_url = WEBUI_URL.value if WEBUI_URL.value else "http://localhost:8080"
+        # Use the backend's own port for internal API calls.
+        # WEBUI_URL is browser-facing and may point to the frontend dev server,
+        # so we construct the internal URL from the PORT env var instead.
+        port = os.environ.get("PORT", "8080")
+        base_url = f"http://localhost:{port}"
 
         # Use 60-second timeout per document to prevent hanging
         try:

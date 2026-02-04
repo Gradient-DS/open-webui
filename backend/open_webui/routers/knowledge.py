@@ -629,27 +629,71 @@ def remove_file_from_knowledge_by_id(
         log.debug(e)
         pass
 
-    # Clear OneDrive delta_links if an OneDrive file is removed
-    # This forces a full re-sync to re-add files if they're synced again
+    # Update OneDrive sync metadata when a OneDrive file is removed
     if form_data.file_id.startswith("onedrive-"):
         try:
+            # Extract the OneDrive item_id from the file_id
+            onedrive_item_id = form_data.file_id.removeprefix("onedrive-")
+
+            # Check if any OneDrive files remain in this knowledge base
+            remaining_files = Knowledges.get_files_by_id(id)
+            remaining_onedrive_files = [
+                f
+                for f in remaining_files
+                if f.id.startswith("onedrive-")
+                or (f.meta and f.meta.get("source") == "onedrive")
+            ]
+
             meta = knowledge.meta or {}
-            sync_info = meta.get("onedrive_sync", {})
-            sources = sync_info.get("sources", [])
-            if sources:
-                # Clear delta_link from all sources to force full re-sync
-                for source in sources:
-                    if "delta_link" in source:
-                        del source["delta_link"]
-                sync_info["sources"] = sources
+
+            if not remaining_onedrive_files:
+                # No OneDrive files left - clear sync metadata entirely
+                if "onedrive_sync" in meta:
+                    del meta["onedrive_sync"]
+                    Knowledges.update_knowledge_meta_by_id(id, meta)
+                    log.info(
+                        f"Cleared OneDrive sync metadata for knowledge {id} "
+                        f"- no OneDrive files remain"
+                    )
+            else:
+                # Still have OneDrive files - update sources and exclusions
+                sync_info = meta.get("onedrive_sync", {})
+                sources = sync_info.get("sources", [])
+
+                # Check if the removed file was an individual file source
+                matching_source = next(
+                    (
+                        s
+                        for s in sources
+                        if s.get("type") == "file"
+                        and s.get("item_id") == onedrive_item_id
+                    ),
+                    None,
+                )
+
+                if matching_source:
+                    # Remove the individual file source entirely
+                    sources = [s for s in sources if s is not matching_source]
+                    sync_info["sources"] = sources
+                    log.info(
+                        f"Removed individual file source {onedrive_item_id} "
+                        f"from knowledge {id}"
+                    )
+                else:
+                    # File came from a folder source - add to exclusion list
+                    # so the sync worker won't re-add it on next sync
+                    excluded = set(sync_info.get("excluded_item_ids", []))
+                    excluded.add(onedrive_item_id)
+                    sync_info["excluded_item_ids"] = list(excluded)
+                    log.info(
+                        f"Added {onedrive_item_id} to excluded_item_ids "
+                        f"for knowledge {id}"
+                    )
+
                 meta["onedrive_sync"] = sync_info
                 Knowledges.update_knowledge_meta_by_id(id, meta)
-                log.info(
-                    f"Cleared OneDrive delta_links for knowledge {id} "
-                    f"after removing file {form_data.file_id}"
-                )
         except Exception as e:
-            log.warning(f"Failed to clear OneDrive delta_links: {e}")
+            log.warning(f"Failed to update OneDrive sync metadata: {e}")
 
     if delete_file:
         try:
@@ -665,10 +709,13 @@ def remove_file_from_knowledge_by_id(
         # Delete file from database
         Files.delete_file_by_id(form_data.file_id)
 
+    # Re-fetch knowledge to get updated metadata (e.g. cleared onedrive_sync)
+    knowledge = Knowledges.get_knowledge_by_id(id=id)
     if knowledge:
         return KnowledgeFilesResponse(
             **knowledge.model_dump(),
             files=Knowledges.get_file_metadatas_by_id(knowledge.id),
+            write_access=True,  # User already passed write access check above
         )
     else:
         raise HTTPException(
@@ -749,6 +796,12 @@ async def reset_knowledge_by_id(
     except Exception as e:
         log.debug(e)
         pass
+
+    # Clear OneDrive sync metadata since all files are being removed
+    if knowledge.meta and "onedrive_sync" in knowledge.meta:
+        meta = knowledge.meta.copy()
+        del meta["onedrive_sync"]
+        Knowledges.update_knowledge_meta_by_id(id, meta)
 
     knowledge = Knowledges.reset_knowledge_by_id(id=id)
     return knowledge

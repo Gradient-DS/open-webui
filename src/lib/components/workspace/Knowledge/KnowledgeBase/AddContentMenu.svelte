@@ -19,6 +19,7 @@
 
 	export let onSync: Function = () => {};
 	export let onOneDriveSync: Function | null = null;
+	export let hideSyncDirectory: boolean = false;
 	export let onUpload: Function = (data) => {};
 
 	let show = false;
@@ -82,6 +83,7 @@
 				<div class="flex items-center">{$i18n.t('Upload directory')}</div>
 			</DropdownMenu.Item>
 
+			{#if !hideSyncDirectory}
 			<Tooltip
 				content={$i18n.t(
 					'This option will delete all existing files in the collection and replace them with newly uploaded files.'
@@ -98,6 +100,7 @@
 					<div class="flex items-center">{$i18n.t('Sync directory')}</div>
 				</DropdownMenu.Item>
 			</Tooltip>
+		{/if}
 
 			{#if onOneDriveSync}
 				<DropdownMenu.Item

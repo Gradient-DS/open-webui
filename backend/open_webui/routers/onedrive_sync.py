@@ -32,6 +32,7 @@ class SyncItemsRequest(BaseModel):
     items: List[SyncItem]
     access_token: str
     user_token: str
+    clear_exclusions: bool = False  # True when user re-adds from picker
 
 
 class FailedFileInfo(BaseModel):
@@ -82,6 +83,14 @@ async def sync_items(
     # Get existing sources or initialize empty list
     meta = knowledge.meta or {}
     existing_sync = meta.get("onedrive_sync", {})
+
+    # Reject if a sync is already in progress
+    if existing_sync.get("status") == "syncing":
+        raise HTTPException(
+            status_code=409,
+            detail="A sync is already in progress. Cancel it first or wait for it to complete.",
+        )
+
     existing_sources = existing_sync.get("sources", [])
 
     # Add new items (skip duplicates by item_id)
@@ -100,12 +109,24 @@ async def sync_items(
 
     all_sources = existing_sources + new_sources
 
-    # Update metadata
-    meta["onedrive_sync"] = {
+    if request.clear_exclusions:
+        # User re-added from picker: clear delta_links and content hashes
+        # to force a full re-scan so previously excluded files are re-discovered
+        for source in all_sources:
+            source.pop("delta_link", None)
+            source.pop("content_hash", None)
+
+    # Update metadata (preserve excluded_item_ids unless explicitly clearing)
+    updated_sync = {
         "sources": all_sources,
         "status": "syncing",
         "last_sync_at": existing_sync.get("last_sync_at"),
     }
+    if not request.clear_exclusions:
+        excluded = existing_sync.get("excluded_item_ids", [])
+        if excluded:
+            updated_sync["excluded_item_ids"] = excluded
+    meta["onedrive_sync"] = updated_sync
     Knowledges.update_knowledge_meta_by_id(request.knowledge_id, meta)
 
     # Queue background sync
