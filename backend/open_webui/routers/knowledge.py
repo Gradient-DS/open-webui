@@ -53,12 +53,19 @@ class KnowledgeAccessListResponse(BaseModel):
 
 
 @router.get("/", response_model=KnowledgeAccessListResponse)
-async def get_knowledge_bases(page: Optional[int] = 1, user=Depends(get_verified_user)):
+async def get_knowledge_bases(
+    page: Optional[int] = 1,
+    type: Optional[str] = None,
+    user=Depends(get_verified_user),
+):
     page = max(page, 1)
     limit = PAGE_ITEM_COUNT
     skip = (page - 1) * limit
 
     filter = {}
+    if type:
+        filter["type"] = type
+
     if not user.role == "admin" or not BYPASS_ADMIN_ACCESS_CONTROL:
         groups = Groups.get_groups_by_member_id(user.id)
         if groups:
@@ -89,6 +96,7 @@ async def get_knowledge_bases(page: Optional[int] = 1, user=Depends(get_verified
 async def search_knowledge_bases(
     query: Optional[str] = None,
     view_option: Optional[str] = None,
+    type: Optional[str] = None,
     page: Optional[int] = 1,
     user=Depends(get_verified_user),
 ):
@@ -101,6 +109,8 @@ async def search_knowledge_bases(
         filter["query"] = query
     if view_option:
         filter["view_option"] = view_option
+    if type:
+        filter["type"] = type
 
     if not user.role == "admin" or not BYPASS_ADMIN_ACCESS_CONTROL:
         groups = Groups.get_groups_by_member_id(user.id)
@@ -170,6 +180,21 @@ async def create_new_knowledge(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail=ERROR_MESSAGES.UNAUTHORIZED,
         )
+
+    # Set type, default to "local"
+    if form_data.type is None:
+        form_data.type = "local"
+
+    # Validate type value
+    if form_data.type not in ("local", "onedrive"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid knowledge base type. Must be 'local' or 'onedrive'.",
+        )
+
+    # External KBs are always private
+    if form_data.type != "local":
+        form_data.access_control = {}
 
     # Check if user can share publicly
     if (
@@ -322,6 +347,13 @@ async def update_knowledge_by_id(
             detail=ERROR_MESSAGES.ACCESS_PROHIBITED,
         )
 
+    # Prevent changing type after creation
+    form_data.type = None  # Strip type from update form
+
+    # Prevent access_control changes on non-local KBs
+    if knowledge.type != "local":
+        form_data.access_control = knowledge.access_control
+
     # Check if user can share publicly
     if (
         user.role != "admin"
@@ -433,6 +465,15 @@ def add_file_to_knowledge_by_id(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=ERROR_MESSAGES.ACCESS_PROHIBITED,
         )
+
+    # Check file count limit for non-local KBs
+    if knowledge.type != "local":
+        current_files = Knowledges.get_files_by_id(id)
+        if current_files and len(current_files) >= 250:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="This knowledge base has reached the 250-file limit.",
+            )
 
     file = Files.get_file_by_id(form_data.file_id)
     if not file:
@@ -560,6 +601,11 @@ def remove_file_from_knowledge_by_id(
             detail=ERROR_MESSAGES.NOT_FOUND,
         )
 
+    # For external-source KBs, never delete the underlying file
+    # (other users may reference it via their own KBs)
+    if knowledge.type != "local":
+        delete_file = False
+
     if (
         knowledge.user_id != user.id
         and not has_access(user.id, "write", knowledge.access_control)
@@ -630,6 +676,21 @@ def remove_file_from_knowledge_by_id(
 
         # Delete file from database
         Files.delete_file_by_id(form_data.file_id)
+
+    # For non-local KBs: check if this was the last reference to the file
+    if not delete_file and knowledge.type != "local":
+        remaining_refs = Knowledges.get_knowledge_files_by_file_id(form_data.file_id)
+        if not remaining_refs:
+            log.info(f"Cleaning up orphaned external file {form_data.file_id}")
+            try:
+                file_collection = f"file-{form_data.file_id}"
+                if VECTOR_DB_CLIENT.has_collection(collection_name=file_collection):
+                    VECTOR_DB_CLIENT.delete_collection(
+                        collection_name=file_collection
+                    )
+            except Exception as e:
+                log.debug(f"Error deleting orphaned file collection: {e}")
+            Files.delete_file_by_id(form_data.file_id)
 
     if knowledge:
         return KnowledgeFilesResponse(
@@ -780,6 +841,19 @@ async def add_files_to_knowledge_batch(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=ERROR_MESSAGES.ACCESS_PROHIBITED,
         )
+
+    # Check file count limit for non-local KBs
+    if knowledge.type != "local":
+        current_files = Knowledges.get_files_by_id(id)
+        current_count = len(current_files) if current_files else 0
+        if current_count + len(form_data) > 250:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=(
+                    f"Adding {len(form_data)} files would exceed the 250-file limit "
+                    f"({current_count} files currently)."
+                ),
+            )
 
     # Get files content
     log.info(f"files/batch/add - {len(form_data)} files")

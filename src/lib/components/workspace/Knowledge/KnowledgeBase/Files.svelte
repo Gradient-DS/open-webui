@@ -71,10 +71,10 @@
 				</div>
 
 				<div class="flex items-center gap-2 shrink-0">
-					{#if file?.updated_at}
-						<Tooltip content={dayjs(file.updated_at * 1000).format('LLLL')}>
+					{#if file?.added_at || file?.updated_at}
+						<Tooltip content={dayjs((file.added_at ?? file.updated_at) * 1000).format('LLLL')}>
 							<div>
-								{dayjs(file.updated_at * 1000).fromNow()}
+								{dayjs((file.added_at ?? file.updated_at) * 1000).fromNow()}
 							</div>
 						</Tooltip>
 					{/if}

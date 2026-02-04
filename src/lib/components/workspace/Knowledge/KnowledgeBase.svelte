@@ -33,7 +33,6 @@
 		addFileToKnowledgeById,
 		getKnowledgeById,
 		removeFileFromKnowledgeById,
-		resetKnowledgeById,
 		updateFileFromKnowledgeById,
 		updateKnowledgeById,
 		searchKnowledgeFilesById
@@ -50,6 +49,7 @@
 
 	import AddContentMenu from './KnowledgeBase/AddContentMenu.svelte';
 	import AddTextContentModal from './KnowledgeBase/AddTextContentModal.svelte';
+	import Badge from '$lib/components/common/Badge.svelte';
 
 	import SyncConfirmDialog from '../../common/ConfirmDialog.svelte';
 	import Drawer from '$lib/components/common/Drawer.svelte';
@@ -72,7 +72,6 @@
 	let showAddWebpageModal = false;
 	let showAddTextContentModal = false;
 
-	let showSyncConfirmModal = false;
 	let showCancelSyncConfirmModal = false;
 	let showAccessControlModal = false;
 
@@ -507,25 +506,6 @@
 		}
 	};
 
-	// Helper function to maintain file paths within zip
-	const syncDirectoryHandler = async () => {
-		if (fileItems.length > 0) {
-			const res = await resetKnowledgeById(localStorage.token, id).catch((e) => {
-				toast.error(`${e}`);
-			});
-
-			if (res) {
-				fileItems = [];
-				toast.success($i18n.t('Knowledge reset successfully.'));
-
-				// Upload directory
-				uploadDirectoryHandler();
-			}
-		} else {
-			uploadDirectoryHandler();
-		}
-	};
-
 	const oneDriveSyncHandler = async () => {
 		try {
 			isSyncingOneDrive = true;
@@ -610,6 +590,13 @@
 			oneDriveSyncStatus = await getSyncStatus(localStorage.token, knowledge.id);
 
 			if (oneDriveSyncStatus.status === 'syncing') {
+				setTimeout(pollOneDriveSyncStatus, 2000);
+			} else if (oneDriveSyncStatus.status === 'file_limit_exceeded') {
+				toast.error(oneDriveSyncStatus.error || $i18n.t('File limit exceeded'));
+				isSyncingOneDrive = false;
+				await init();
+			} else if (oneDriveSyncStatus.status === 'access_revoked') {
+				// access_revoked is a transient status during sync, keep polling
 				setTimeout(pollOneDriveSyncStatus, 2000);
 			} else if (oneDriveSyncStatus.status === 'completed' || oneDriveSyncStatus.status === 'completed_with_errors') {
 				// Toast is handled by Socket.IO handler, just refresh
@@ -843,6 +830,19 @@
 			error: data.error,
 			failed_files: data.failed_files
 		};
+
+		// Handle access revoked
+		if (data.status === 'access_revoked') {
+			toast.warning(data.error || $i18n.t('Access to a OneDrive source has been revoked'));
+		}
+
+		// Handle file limit exceeded
+		if (data.status === 'file_limit_exceeded') {
+			toast.error(data.error || $i18n.t('File limit exceeded'));
+			isSyncingOneDrive = false;
+			await init();
+			return;
+		}
 
 		// Handle completion states
 		if (data.status === 'completed' || data.status === 'completed_with_errors') {
@@ -1110,6 +1110,16 @@
 		if (res) {
 			knowledge = res;
 			knowledgeId = knowledge?.id;
+
+			// Auto-start OneDrive sync if directed from creation flow
+			if ($page.url.searchParams.get('start_onedrive_sync') === 'true' && knowledge) {
+				const url = new URL(window.location.href);
+				url.searchParams.delete('start_onedrive_sync');
+				history.replaceState({}, '', url.toString());
+
+				await tick();
+				oneDriveSyncHandler();
+			}
 		} else {
 			goto('/workspace/knowledge');
 		}
@@ -1158,15 +1168,6 @@
 </script>
 
 <FilesOverlay show={dragged} />
-<SyncConfirmDialog
-	bind:show={showSyncConfirmModal}
-	message={$i18n.t(
-		'This will reset the knowledge base and sync all files. Do you wish to continue?'
-	)}
-	on:confirm={() => {
-		syncDirectoryHandler();
-	}}
-/>
 
 <SyncConfirmDialog
 	bind:show={showCancelSyncConfirmModal}
@@ -1218,18 +1219,30 @@
 
 <div class="flex flex-col w-full h-full min-h-full" id="collection-container">
 	{#if id && knowledge}
-		<AccessControlModal
-			bind:show={showAccessControlModal}
-			bind:accessControl={knowledge.access_control}
-			share={$user?.permissions?.sharing?.knowledge || $user?.role === 'admin'}
-			sharePublic={$user?.permissions?.sharing?.public_knowledge || $user?.role === 'admin'}
-			onChange={() => {
-				changeDebounceHandler();
-			}}
-			accessRoles={['read', 'write']}
-		/>
+		{#if knowledge?.type === 'local' || !knowledge?.type}
+			<AccessControlModal
+				bind:show={showAccessControlModal}
+				bind:accessControl={knowledge.access_control}
+				share={$user?.permissions?.sharing?.knowledge || $user?.role === 'admin'}
+				sharePublic={$user?.permissions?.sharing?.public_knowledge || $user?.role === 'admin'}
+				onChange={() => {
+					changeDebounceHandler();
+				}}
+				accessRoles={['read', 'write']}
+			/>
+		{/if}
 		<div class="w-full px-2">
 			<div class=" flex w-full">
+				<div class="shrink-0 self-start mt-1.5 mr-1">
+					<button
+						class="p-1 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 transition"
+						on:click={() => {
+							goto('/workspace/knowledge');
+						}}
+					>
+						<ChevronLeft className="size-4" strokeWidth="2.5" />
+					</button>
+				</div>
 				<div class="flex-1">
 					<div class="flex items-center justify-between w-full">
 						<div class="w-full flex justify-between items-center">
@@ -1245,6 +1258,11 @@
 							/>
 
 							<div class="shrink-0 mr-2.5 flex items-center gap-2">
+								{#if knowledge?.type === 'onedrive'}
+									<Badge type="info" content={$i18n.t('OneDrive')} />
+								{:else}
+									<Badge type="muted" content={$i18n.t('Local')} />
+								{/if}
 								{#if knowledge?.meta?.onedrive_sync?.sources?.length && !isSyncingOneDrive && knowledge?.user_id === $user?.id}
 									<Tooltip content={knowledge?.meta?.onedrive_sync?.last_sync_at
 										? $i18n.t('Last synced: {{date}}', { date: dayjs(knowledge.meta.onedrive_sync.last_sync_at * 1000).fromNow() })
@@ -1288,16 +1306,19 @@
 								{/if}
 								{#if fileItemsTotal}
 									<div class="text-xs text-gray-500">
-										<!-- {$i18n.t('{{COUNT}} files')} -->
-										{$i18n.t('{{COUNT}} files', {
-											COUNT: fileItemsTotal
-										})}
+										{#if knowledge?.type !== 'local' && knowledge?.type}
+											{fileItemsTotal} / 250 {$i18n.t('files')}
+										{:else}
+											{$i18n.t('{{COUNT}} files', {
+												COUNT: fileItemsTotal
+											})}
+										{/if}
 									</div>
 								{/if}
 							</div>
 						</div>
 
-						{#if knowledge?.write_access}
+						{#if knowledge?.write_access && (knowledge?.type === 'local' || !knowledge?.type)}
 							<div class="self-center shrink-0">
 								<button
 									class="bg-gray-50 hover:bg-gray-100 text-black dark:bg-gray-850 dark:hover:bg-gray-800 dark:text-white transition px-2 py-1 rounded-full flex gap-1 items-center"
@@ -1312,6 +1333,11 @@
 										{$i18n.t('Access')}
 									</div>
 								</button>
+							</div>
+						{:else if knowledge?.write_access}
+							<div class="text-xs shrink-0 text-gray-500 flex items-center gap-1">
+								<LockClosed strokeWidth="2.5" className="size-3" />
+								{$i18n.t('Private')}
 							</div>
 						{:else}
 							<div class="text-xs shrink-0 text-gray-500">
@@ -1355,26 +1381,45 @@
 
 					{#if knowledge?.write_access}
 						<div>
-							<AddContentMenu
-								onUpload={(data) => {
-									if (data.type === 'directory') {
-										uploadDirectoryHandler();
-									} else if (data.type === 'web') {
-										showAddWebpageModal = true;
-									} else if (data.type === 'text') {
-										showAddTextContentModal = true;
-									} else {
-										document.getElementById('files-input').click();
-									}
-								}}
-								onSync={() => {
-									showSyncConfirmModal = true;
-								}}
-								onOneDriveSync={$config?.features?.enable_onedrive_integration &&
-								$config?.features?.enable_onedrive_sync
-									? oneDriveSyncHandler
-									: null}
-							/>
+							{#if knowledge?.type === 'onedrive'}
+								<Tooltip content={$i18n.t('Sync from OneDrive')}>
+									<button
+										class="p-1.5 rounded-xl hover:bg-gray-100 dark:bg-gray-850 dark:hover:bg-gray-800 transition font-medium text-sm flex items-center space-x-1"
+										on:click={() => {
+											oneDriveSyncHandler();
+										}}
+									>
+										<svg
+											xmlns="http://www.w3.org/2000/svg"
+											viewBox="0 0 16 16"
+											fill="currentColor"
+											class="w-4 h-4"
+										>
+											<path
+												d="M8.75 3.75a.75.75 0 0 0-1.5 0v3.5h-3.5a.75.75 0 0 0 0 1.5h3.5v3.5a.75.75 0 0 0 1.5 0v-3.5h3.5a.75.75 0 0 0 0-1.5h-3.5v-3.5Z"
+											/>
+										</svg>
+									</button>
+								</Tooltip>
+							{:else}
+								<AddContentMenu
+									onUpload={(data) => {
+										if (data.type === 'directory') {
+											uploadDirectoryHandler();
+										} else if (data.type === 'web') {
+											showAddWebpageModal = true;
+										} else if (data.type === 'text') {
+											showAddTextContentModal = true;
+										} else {
+											document.getElementById('files-input').click();
+										}
+									}}
+									onOneDriveSync={$config?.features?.enable_onedrive_integration &&
+									$config?.features?.enable_onedrive_sync
+										? oneDriveSyncHandler
+										: null}
+								/>
+							{/if}
 						</div>
 					{/if}
 				</div>

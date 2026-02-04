@@ -44,6 +44,7 @@ class Knowledge(Base):
 
     id = Column(Text, unique=True, primary_key=True)
     user_id = Column(Text)
+    type = Column(Text, nullable=False, server_default="local")
 
     name = Column(Text)
     description = Column(Text)
@@ -75,6 +76,7 @@ class KnowledgeModel(BaseModel):
 
     id: str
     user_id: str
+    type: str = "local"
 
     name: str
     description: str
@@ -138,11 +140,13 @@ class KnowledgeUserResponse(KnowledgeUserModel):
 class KnowledgeForm(BaseModel):
     name: str
     description: str
+    type: Optional[str] = None
     access_control: Optional[dict] = None
 
 
 class FileUserResponse(FileModelResponse):
     user: Optional[UserResponse] = None
+    added_at: Optional[int] = None
 
 
 class KnowledgeListResponse(BaseModel):
@@ -231,6 +235,10 @@ class KnowledgeTable:
                         query = query.filter(Knowledge.user_id == user_id)
                     elif view_option == "shared":
                         query = query.filter(Knowledge.user_id != user_id)
+
+                    type_filter = filter.get("type")
+                    if type_filter:
+                        query = query.filter(Knowledge.type == type_filter)
 
                     query = has_permission(db, Knowledge, query, filter)
 
@@ -421,7 +429,7 @@ class KnowledgeTable:
         try:
             with get_db() as db:
                 query = (
-                    db.query(File, User)
+                    db.query(File, User, KnowledgeFile.created_at)
                     .join(KnowledgeFile, File.id == KnowledgeFile.file_id)
                     .outerjoin(User, User.id == KnowledgeFile.user_id)
                     .filter(KnowledgeFile.knowledge_id == knowledge_id)
@@ -473,7 +481,7 @@ class KnowledgeTable:
                 items = query.all()
 
                 files = []
-                for file, user in items:
+                for file, user, added_at in items:
                     files.append(
                         FileUserResponse(
                             **FileModel.model_validate(file).model_dump(),
@@ -484,6 +492,7 @@ class KnowledgeTable:
                                 if user
                                 else None
                             ),
+                            added_at=added_at,
                         )
                     )
 
@@ -576,15 +585,22 @@ class KnowledgeTable:
     ) -> Optional[KnowledgeModel]:
         try:
             with get_db() as db:
-                knowledge = self.get_knowledge_by_id(id=id)
-                db.query(Knowledge).filter_by(id=id).update(
-                    {
-                        **form_data.model_dump(),
-                        "updated_at": int(time.time()),
-                    }
-                )
+                knowledge = db.query(Knowledge).filter_by(id=id).first()
+                if not knowledge:
+                    return None
+
+                update_data = {
+                    k: v
+                    for k, v in form_data.model_dump().items()
+                    if v is not None
+                    or k == "access_control"  # access_control can be None (public)
+                }
+                update_data["updated_at"] = int(time.time())
+
+                db.query(Knowledge).filter_by(id=id).update(update_data)
                 db.commit()
-                return self.get_knowledge_by_id(id=id)
+                db.refresh(knowledge)
+                return KnowledgeModel.model_validate(knowledge)
         except Exception as e:
             log.exception(e)
             return None

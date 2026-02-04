@@ -23,6 +23,7 @@ from open_webui.config import (
     ONEDRIVE_MAX_FILE_SIZE_MB,
     FILE_PROCESSING_MAX_CONCURRENT,
 )
+from open_webui.retrieval.vector.factory import VECTOR_DB_CLIENT
 
 log = logging.getLogger(__name__)
 
@@ -394,6 +395,92 @@ class OneDriveSyncWorker:
             log.warning(f"Failed to sync permissions: {e}")
             # Don't fail the entire sync if permission mapping fails
 
+    async def _verify_source_access(self, source: Dict[str, Any]) -> bool:
+        """Verify the user can still access a OneDrive source.
+
+        Returns True if access is valid, False if revoked.
+        """
+        drive_id = source.get("drive_id")
+        item_id = source.get("item_id")
+        source_type = source.get("type", "folder")
+
+        try:
+            item = await self._client.get_item(drive_id, item_id)
+            if item is None:
+                return False
+            return True
+        except Exception as e:
+            error_str = str(e).lower()
+            if (
+                "404" in error_str
+                or "403" in error_str
+                or "not found" in error_str
+                or "access denied" in error_str
+            ):
+                log.warning(
+                    f"User {self.user_id} lost access to {source_type} "
+                    f"{drive_id}/{item_id}: {e}"
+                )
+                return False
+            # For other errors (network, timeout), assume access is still valid
+            # to avoid accidentally removing files
+            log.warning(
+                f"Error verifying access to {source_type} {drive_id}/{item_id}: {e}"
+            )
+            return True
+
+    async def _handle_revoked_source(self, source: Dict[str, Any]) -> int:
+        """Remove all files associated with a revoked source from this KB.
+
+        Returns the number of files removed.
+        """
+        source_name = source.get("name", "unknown")
+        source_drive_id = source.get("drive_id")
+        removed_count = 0
+
+        files = Knowledges.get_files_by_id(self.knowledge_id)
+        if not files:
+            return 0
+
+        for file in files:
+            if not file.id.startswith("onedrive-"):
+                continue
+
+            file_meta = file.meta or {}
+            file_drive_id = file_meta.get("onedrive_drive_id")
+
+            if file_drive_id and source_drive_id and file_drive_id == source_drive_id:
+                # Remove KnowledgeFile association
+                Knowledges.remove_file_from_knowledge_by_id(
+                    self.knowledge_id, file.id
+                )
+                # Remove vectors from KB collection
+                try:
+                    VECTOR_DB_CLIENT.delete(
+                        collection_name=self.knowledge_id,
+                        filter={"file_id": file.id},
+                    )
+                except Exception as e:
+                    log.warning(f"Failed to remove vectors for {file.id}: {e}")
+
+                # Check for orphans
+                remaining = Knowledges.get_knowledge_files_by_file_id(file.id)
+                if not remaining:
+                    try:
+                        VECTOR_DB_CLIENT.delete_collection(f"file-{file.id}")
+                    except Exception:
+                        pass
+                    Files.delete_file_by_id(file.id)
+
+                removed_count += 1
+
+        log.info(
+            f"Removed {removed_count} files from KB {self.knowledge_id} "
+            f"due to revoked access to source '{source_name}'"
+        )
+
+        return removed_count
+
     async def sync(self) -> Dict[str, Any]:
         """Execute sync operation for all sources.
 
@@ -407,6 +494,34 @@ class OneDriveSyncWorker:
 
             # Sync OneDrive folder permissions to Knowledge access_control
             await self._sync_permissions()
+
+            # Verify access to each source before syncing
+            verified_sources = []
+            revoked_sources = []
+
+            for source in self.sources:
+                has_access = await self._verify_source_access(source)
+                if has_access:
+                    verified_sources.append(source)
+                else:
+                    revoked_sources.append(source)
+
+            # Handle revoked sources
+            total_revoked_files = 0
+            for source in revoked_sources:
+                removed = await self._handle_revoked_source(source)
+                total_revoked_files += removed
+
+                await self._update_sync_status(
+                    "access_revoked",
+                    error=(
+                        f"Access to '{source.get('name', 'unknown')}' has been revoked. "
+                        f"{removed} file(s) removed."
+                    ),
+                )
+
+            # Update sources list to only include verified sources
+            self.sources = verified_sources
 
             # Aggregate counters
             total_processed = 0
@@ -432,14 +547,44 @@ class OneDriveSyncWorker:
                     if file_info:
                         all_files_to_process.append(file_info)
 
-            # Apply file limit
-            max_files = ONEDRIVE_MAX_FILES_PER_SYNC
-            if len(all_files_to_process) > max_files:
+            # Apply file count limit for external KBs (250 cap)
+            max_files = min(ONEDRIVE_MAX_FILES_PER_SYNC, 250)
+            current_files = Knowledges.get_files_by_id(self.knowledge_id) or []
+            current_file_count = len(current_files)
+            available_slots = max(0, max_files - current_file_count)
+
+            if len(all_files_to_process) > available_slots:
                 log.warning(
-                    f"Limiting sync to {max_files} files "
-                    f"(found {len(all_files_to_process)})"
+                    f"File limit exceeded: {current_file_count} existing + "
+                    f"{len(all_files_to_process)} new > {max_files} limit"
                 )
-                all_files_to_process = all_files_to_process[:max_files]
+                if available_slots == 0:
+                    await self._update_sync_status(
+                        "file_limit_exceeded",
+                        error=(
+                            f"This knowledge base has reached the {max_files}-file limit. "
+                            f"Remove files or select fewer items to sync."
+                        ),
+                    )
+                    await self._save_sources()
+                    return {
+                        "files_processed": 0,
+                        "files_failed": 0,
+                        "total_found": len(all_files_to_process),
+                        "deleted_count": total_deleted,
+                        "failed_files": [],
+                        "file_limit_exceeded": True,
+                    }
+                else:
+                    total_found = len(all_files_to_process)
+                    all_files_to_process = all_files_to_process[:available_slots]
+                    await self._update_sync_status(
+                        "syncing",
+                        error=(
+                            f"Only syncing {available_slots} of {total_found} "
+                            f"files due to {max_files}-file limit."
+                        ),
+                    )
 
             total_files = len(all_files_to_process)
             log.info(f"Total files to process: {total_files}")
@@ -622,21 +767,46 @@ class OneDriveSyncWorker:
                 await self._client.close()
 
     async def _handle_deleted_item(self, item: Dict[str, Any]):
-        """Handle a deleted item from delta query."""
+        """Handle a deleted item from delta query.
+
+        Only removes the KB association for this KB. The underlying File record
+        and vector collection are preserved if other KBs still reference the file.
+        """
         item_id = item.get("id")
         if not item_id:
             return
 
         file_id = f"onedrive-{item_id}"
 
-        # Check if file exists in our system
         existing = Files.get_file_by_id(file_id)
         if existing:
-            log.info(f"Removing deleted OneDrive file: {file_id}")
-            # Remove from knowledge base
+            log.info(f"Removing deleted OneDrive file from KB: {file_id}")
+
+            # Remove association from this KB only
             Knowledges.remove_file_from_knowledge_by_id(self.knowledge_id, file_id)
-            # Delete file record
-            Files.delete_file_by_id(file_id)
+
+            # Remove vectors from this KB's collection
+            try:
+                VECTOR_DB_CLIENT.delete(
+                    collection_name=self.knowledge_id,
+                    filter={"file_id": file_id},
+                )
+            except Exception as e:
+                log.warning(f"Failed to remove vectors for {file_id} from KB: {e}")
+
+            # Only delete the file if no other KBs reference it
+            remaining_refs = Knowledges.get_knowledge_files_by_file_id(file_id)
+            if not remaining_refs:
+                log.info(f"No remaining references to {file_id}, cleaning up")
+                try:
+                    VECTOR_DB_CLIENT.delete_collection(f"file-{file_id}")
+                except Exception as e:
+                    log.warning(f"Failed to delete collection for {file_id}: {e}")
+                Files.delete_file_by_id(file_id)
+            else:
+                log.info(
+                    f"File {file_id} still referenced by {len(remaining_refs)} KB(s), preserving"
+                )
 
     async def _process_file_info(self, file_info: Dict[str, Any]) -> Optional[FailedFile]:
         """Download and process a single file from file_info structure.
@@ -692,8 +862,34 @@ class OneDriveSyncWorker:
         existing = Files.get_file_by_id(file_id)
 
         if existing and existing.hash == content_hash:
-            log.info(f"File unchanged (same hash), skipping: {name}")
-            return None  # Success - no change needed
+            log.info(f"File {file_id} unchanged (hash match), ensuring KB association")
+            # Create KnowledgeFile association if not exists
+            Knowledges.add_file_to_knowledge_by_id(
+                self.knowledge_id, file_id, self.user_id
+            )
+            # Copy vectors from per-file collection to KB collection
+            result = await self._ensure_vectors_in_kb(file_id)
+            if result:
+                return result  # FailedFile
+
+            # Emit file added event for progressive UI updates
+            file_record = Files.get_file_by_id(file_id)
+            if file_record:
+                from open_webui.services.onedrive.sync_events import emit_file_added
+
+                await emit_file_added(
+                    user_id=self.user_id,
+                    knowledge_id=self.knowledge_id,
+                    file_data={
+                        "id": file_record.id,
+                        "filename": file_record.filename,
+                        "meta": file_record.meta,
+                        "created_at": file_record.created_at,
+                        "updated_at": file_record.updated_at,
+                    },
+                )
+
+            return None  # Success - no re-processing needed
 
         # Save to storage
         temp_filename = f"{file_id}_{name}"
@@ -772,6 +968,54 @@ class OneDriveSyncWorker:
             )
             log.info(f"Added file to knowledge base: {file_id}")
 
+            # Propagate updated vectors to other KBs that reference this file
+            # (best-effort: if propagation fails, the other KB gets updated on its next sync)
+            try:
+                knowledge_files = Knowledges.get_knowledge_files_by_file_id(file_id)
+                for kf in knowledge_files:
+                    if kf.knowledge_id != self.knowledge_id:
+                        log.info(
+                            f"Propagating updated vectors for {file_id} to KB {kf.knowledge_id}"
+                        )
+                        try:
+                            VECTOR_DB_CLIENT.delete(
+                                collection_name=kf.knowledge_id,
+                                filter={"file_id": file_id},
+                            )
+                        except Exception as e:
+                            log.warning(
+                                f"Failed to remove old vectors from KB {kf.knowledge_id}: {e}"
+                            )
+                        # Copy new vectors
+                        import httpx
+
+                        from open_webui.config import WEBUI_URL
+
+                        base_url = (
+                            WEBUI_URL.value
+                            if WEBUI_URL.value
+                            else "http://localhost:8080"
+                        )
+                        try:
+                            async with httpx.AsyncClient(timeout=60.0) as client:
+                                await client.post(
+                                    f"{base_url}/api/v1/retrieval/process/file",
+                                    headers={
+                                        "Authorization": f"Bearer {self.user_token}",
+                                        "Content-Type": "application/json",
+                                    },
+                                    json={
+                                        "file_id": file_id,
+                                        "collection_name": kf.knowledge_id,
+                                    },
+                                )
+                        except Exception as e:
+                            log.warning(
+                                f"Failed to propagate vectors to KB {kf.knowledge_id}: {e}"
+                            )
+            except Exception as e:
+                log.warning(f"Failed to propagate vector updates for {file_id}: {e}")
+
             # Emit file added event for progressive UI updates
             file_record = Files.get_file_by_id(file_id)
             if file_record:
@@ -797,6 +1041,61 @@ class OneDriveSyncWorker:
                 filename=name,
                 error_type=SyncErrorType.PROCESSING_ERROR.value,
                 error_message=str(e)[:100],
+            )
+
+    async def _ensure_vectors_in_kb(self, file_id: str) -> Optional[FailedFile]:
+        """Copy vectors from the per-file collection into this KB's collection.
+
+        Used for cross-user dedup: when a file already exists and doesn't need
+        re-processing, we still need to copy its vectors into the current KB.
+        """
+        import httpx
+
+        from open_webui.config import WEBUI_URL
+
+        base_url = WEBUI_URL.value if WEBUI_URL.value else "http://localhost:8080"
+
+        try:
+            async with httpx.AsyncClient(timeout=60.0) as client:
+                response = await client.post(
+                    f"{base_url}/api/v1/retrieval/process/file",
+                    headers={
+                        "Authorization": f"Bearer {self.user_token}",
+                        "Content-Type": "application/json",
+                    },
+                    json={
+                        "file_id": file_id,
+                        "collection_name": self.knowledge_id,
+                    },
+                )
+                if response.status_code == 200:
+                    return None
+                elif response.status_code == 400:
+                    detail = response.json().get("detail", "")
+                    if "Duplicate content" in detail:
+                        return None  # Already in KB
+                    return FailedFile(
+                        filename=file_id,
+                        error_type=SyncErrorType.PROCESSING_ERROR.value,
+                        error_message=f"Failed to copy vectors to KB: {detail}",
+                    )
+                else:
+                    return FailedFile(
+                        filename=file_id,
+                        error_type=SyncErrorType.PROCESSING_ERROR.value,
+                        error_message=f"HTTP {response.status_code}",
+                    )
+        except Exception as e:
+            if "timeout" in str(type(e).__name__).lower():
+                return FailedFile(
+                    filename=file_id,
+                    error_type=SyncErrorType.TIMEOUT.value,
+                    error_message="Timeout copying vectors to KB",
+                )
+            return FailedFile(
+                filename=file_id,
+                error_type=SyncErrorType.PROCESSING_ERROR.value,
+                error_message=f"Error copying vectors: {str(e)[:80]}",
             )
 
     async def _process_file_via_api(self, file_id: str, filename: str) -> Optional[FailedFile]:
