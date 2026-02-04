@@ -632,6 +632,31 @@ class KnowledgeTable:
         except Exception:
             return False
 
+    def get_source_restricted_knowledge_by_group_id(
+        self, group_id: str
+    ) -> list[KnowledgeModel]:
+        """Find source-restricted KBs that have this group in their access_control."""
+        with get_db() as db:
+            all_kbs = (
+                db.query(Knowledge)
+                .filter(Knowledge.access_control.isnot(None))
+                .all()
+            )
+            result = []
+            for kb in all_kbs:
+                ac = kb.access_control
+                if not ac:
+                    continue
+                read_groups = ac.get("read", {}).get("group_ids", [])
+                write_groups = ac.get("write", {}).get("group_ids", [])
+                if group_id not in read_groups and group_id not in write_groups:
+                    continue
+                # Check if KB has source-restricted files
+                meta = kb.meta or {}
+                if "onedrive_sync" in meta:
+                    result.append(KnowledgeModel.model_validate(kb))
+            return result
+
     def delete_all_knowledge(self) -> bool:
         with get_db() as db:
             try:

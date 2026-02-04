@@ -2,13 +2,14 @@
 	import { getContext, createEventDispatcher } from 'svelte';
 	import Modal from '$lib/components/common/Modal.svelte';
 	import XMark from '$lib/components/icons/XMark.svelte';
-	import type { ShareValidationResult, SharingRecommendation } from '$lib/apis/knowledge/permissions';
+	import type { ShareValidationResult, SharingRecommendation, GroupConflict } from '$lib/apis/knowledge/permissions';
 
 	const i18n = getContext('i18n');
 	const dispatch = createEventDispatcher();
 
 	export let show = false;
 	export let validationResult: ShareValidationResult | null = null;
+	export let groupConflicts: GroupConflict[] = [];
 	export let strictMode = true;
 	export let targetName = '';
 	export let isGoingPublic = false;
@@ -16,6 +17,7 @@
 	$: canShareCount = validationResult?.can_share_to_users?.length ?? 0;
 	$: cannotShareCount = validationResult?.cannot_share_to_users?.length ?? 0;
 	$: totalCount = canShareCount + cannotShareCount;
+	$: hasGroupConflicts = groupConflicts.length > 0;
 
 	function handleConfirm() {
 		dispatch('confirm', { shareToAll: !strictMode });
@@ -51,6 +53,8 @@
 					<div class="text-lg font-medium self-center font-primary">
 						{#if isGoingPublic}
 							{$i18n.t('Cannot Make Public')}
+						{:else if hasGroupConflicts}
+							{$i18n.t('Cannot Share to Group')}
 						{:else}
 							{$i18n.t('Confirm Sharing')}
 						{/if}
@@ -115,6 +119,57 @@
 							{$i18n.t('Make Public Anyway')}
 						</button>
 					{/if}
+				</div>
+			{:else if hasGroupConflicts}
+				<!-- Group Conflicts — hard block, clean layout -->
+				<div class="mb-4 space-y-3">
+					{#each groupConflicts as conflict}
+						<div class="border border-red-200 dark:border-red-800/50 rounded-lg p-3">
+							<div class="flex items-center gap-2 mb-2">
+								<span class="font-medium text-sm">{conflict.group_name}</span>
+								<span class="text-xs text-gray-500 uppercase">{conflict.role}</span>
+							</div>
+							<div class="space-y-1.5">
+								{#each conflict.members_without_access as member}
+									<div class="flex items-center justify-between text-sm">
+										<div>
+											<span class="text-gray-700 dark:text-gray-300">{member.user_email}</span>
+											<span class="text-gray-500 ml-2">
+												{$i18n.t('Missing: {{count}} {{source}} files', {
+													count: member.inaccessible_count,
+													source: member.source_type
+												})}
+											</span>
+										</div>
+										{#if member.grant_access_url}
+											<a
+												href={member.grant_access_url}
+												target="_blank"
+												rel="noopener noreferrer"
+												class="text-blue-600 hover:underline text-xs shrink-0"
+											>
+												{$i18n.t('Grant access')} ↗
+											</a>
+										{/if}
+									</div>
+								{/each}
+							</div>
+						</div>
+					{/each}
+				</div>
+
+				<div class="mb-4 text-sm text-gray-500 dark:text-gray-400">
+					{$i18n.t('Remove these groups from sharing, or grant OneDrive access to all their members before sharing.')}
+				</div>
+
+				<!-- Only "Go back" button for group conflicts -->
+				<div class="flex justify-end">
+					<button
+						class="px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg"
+						on:click={handleCancel}
+					>
+						{$i18n.t('Go Back')}
+					</button>
 				</div>
 			{:else if validationResult}
 				<!-- Users with full access -->

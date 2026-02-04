@@ -174,9 +174,9 @@ class OneDrivePermissionProvider(PermissionProvider):
 
         # Expand group members
         for group_id in kb_group_ids:
-            group = Groups.get_group_by_id(group_id)
-            if group:
-                kb_user_ids.update(group.user_ids)
+            member_ids = Groups.get_group_user_ids_by_id(group_id)
+            if member_ids:
+                kb_user_ids.update(member_ids)
 
         # Also include owner
         kb_user_ids.add(knowledge.user_id)

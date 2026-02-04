@@ -21,6 +21,13 @@
 	export let setGroups = () => {};
 
 	let showEdit = false;
+	let prevShowEdit = false;
+
+	$: if (!showEdit && prevShowEdit) {
+		// Modal just closed — refresh group list to update member counts
+		setGroups();
+	}
+	$: prevShowEdit = showEdit;
 
 	const updateHandler = async (_group) => {
 		const res = await updateGroupById(localStorage.token, group.id, _group).catch((error) => {

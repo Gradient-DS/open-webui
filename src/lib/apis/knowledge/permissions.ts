@@ -16,6 +16,13 @@ export interface SharingRecommendation {
 	grant_access_url: string | null;
 }
 
+export interface GroupConflict {
+	group_id: string;
+	group_name: string;
+	role: string;
+	members_without_access: SharingRecommendation[];
+}
+
 export interface ShareValidationResult {
 	can_share: boolean;
 	can_share_to_users: string[];
@@ -23,6 +30,7 @@ export interface ShareValidationResult {
 	blocking_resources: Record<string, string[]>;
 	recommendations: SharingRecommendation[];
 	source_restricted: boolean;
+	group_conflicts: GroupConflict[];
 }
 
 export interface UserAccessStatus {
@@ -44,13 +52,15 @@ export interface FileAdditionConflict {
 	user_details: SharingRecommendation[];
 	source_type: string;
 	grant_access_url: string | null;
+	group_conflicts: GroupConflict[];
 }
 
 export const validateKnowledgeShare = async (
 	token: string,
 	knowledgeId: string,
 	userIds: string[],
-	groupIds: string[]
+	groupIds: string[],
+	writeGroupIds: string[] = []
 ): Promise<ShareValidationResult | null> => {
 	let error = null;
 
@@ -63,7 +73,8 @@ export const validateKnowledgeShare = async (
 		},
 		body: JSON.stringify({
 			user_ids: userIds,
-			group_ids: groupIds
+			group_ids: groupIds,
+			write_group_ids: writeGroupIds
 		})
 	})
 		.then(async (res) => {

@@ -32,6 +32,15 @@ class SharingRecommendation(BaseModel):
     grant_access_url: Optional[str] = None
 
 
+class GroupConflict(BaseModel):
+    """A group that cannot receive KB access due to source permissions."""
+
+    group_id: str
+    group_name: str
+    role: str  # "read" or "write"
+    members_without_access: List[SharingRecommendation]
+
+
 class FileAdditionConflict(BaseModel):
     """Conflict when adding restricted files to shared KB."""
 
@@ -41,6 +50,7 @@ class FileAdditionConflict(BaseModel):
     user_details: List[SharingRecommendation] = []  # Details for UI
     source_type: str = ""
     grant_access_url: Optional[str] = None
+    group_conflicts: List[GroupConflict] = []  # Groups with unauthorized members
 
 
 class SharingValidationResult(BaseModel):
@@ -52,6 +62,7 @@ class SharingValidationResult(BaseModel):
     blocking_resources: Dict[str, List[str]] = {}  # user_id -> inaccessible resource IDs
     recommendations: List[SharingRecommendation] = []  # How to grant access
     source_restricted: bool = False  # True if KB has source-restricted files
+    group_conflicts: List[GroupConflict] = []  # Groups with unauthorized members
 
 
 class SharingValidator:
@@ -62,6 +73,7 @@ class SharingValidator:
         knowledge_id: str,
         target_user_ids: List[str],
         target_group_ids: List[str] = [],
+        write_group_ids: List[str] = [],
     ) -> SharingValidationResult:
         """
         Validate that all target users have access to source documents.
@@ -69,7 +81,8 @@ class SharingValidator:
         Args:
             knowledge_id: Knowledge base ID
             target_user_ids: User IDs to share with
-            target_group_ids: Group IDs to share with
+            target_group_ids: Group IDs to share with (read)
+            write_group_ids: Group IDs with write access to validate
 
         Returns:
             SharingValidationResult with detailed access information
@@ -93,10 +106,11 @@ class SharingValidator:
 
         # Expand groups to user IDs
         all_user_ids = set(target_user_ids)
-        for group_id in target_group_ids:
-            group = Groups.get_group_by_id(group_id)
-            if group:
-                all_user_ids.update(group.user_ids)
+        all_group_ids = list(set(target_group_ids) | set(write_group_ids))
+        for group_id in all_group_ids:
+            member_ids = Groups.get_group_user_ids_by_id(group_id)
+            if member_ids:
+                all_user_ids.update(member_ids)
 
         # Group files by source
         files_by_source: Dict[str, List[str]] = {}
@@ -156,13 +170,50 @@ class SharingValidator:
                                 )
                             )
 
+        # Detect group-level conflicts: if any member of a group lacks access,
+        # the entire group is blocked
+        group_conflicts: List[GroupConflict] = []
+
+        for role, gids in [("read", target_group_ids), ("write", write_group_ids)]:
+            for group_id in gids:
+                group = Groups.get_group_by_id(group_id)
+                if not group:
+                    continue
+
+                member_ids = Groups.get_group_user_ids_by_id(group_id)
+                if not member_ids:
+                    continue
+
+                unauthorized_members = []
+                for member_id in member_ids:
+                    if member_id in cannot_share_to:
+                        rec = next(
+                            (r for r in recommendations if r.user_id == member_id),
+                            None,
+                        )
+                        if rec:
+                            unauthorized_members.append(rec)
+
+                if unauthorized_members:
+                    group_conflicts.append(
+                        GroupConflict(
+                            group_id=group_id,
+                            group_name=group.name,
+                            role=role,
+                            members_without_access=unauthorized_members,
+                        )
+                    )
+
+        has_group_conflicts = len(group_conflicts) > 0
+
         return SharingValidationResult(
-            can_share=len(cannot_share_to) == 0,
+            can_share=len(cannot_share_to) == 0 and not has_group_conflicts,
             can_share_to_users=list(can_share_to),
             cannot_share_to_users=list(cannot_share_to),
             blocking_resources=blocking_resources,
             recommendations=recommendations,
             source_restricted=True,
+            group_conflicts=group_conflicts,
         )
 
     async def get_users_with_source_access(
@@ -302,6 +353,44 @@ class SharingValidator:
                     )
                 )
 
+        # Detect group-level conflicts: attribute unauthorized users
+        # back to their source groups
+        group_conflicts: List[GroupConflict] = []
+        if users_without_source_access and knowledge.access_control:
+            ac = knowledge.access_control
+            for role_key in ["read", "write"]:
+                for group_id in ac.get(role_key, {}).get("group_ids", []):
+                    group = Groups.get_group_by_id(group_id)
+                    if not group:
+                        continue
+
+                    member_ids = Groups.get_group_user_ids_by_id(group_id)
+                    unauthorized_members = []
+                    for member_id in member_ids or []:
+                        if member_id in users_without_source_access:
+                            user = Users.get_user_by_id(member_id)
+                            if user:
+                                unauthorized_members.append(
+                                    SharingRecommendation(
+                                        user_id=member_id,
+                                        user_name=user.name,
+                                        user_email=user.email,
+                                        source_type=source_type,
+                                        inaccessible_count=len(file_ids),
+                                        grant_access_url=grant_url,
+                                    )
+                                )
+
+                    if unauthorized_members:
+                        group_conflicts.append(
+                            GroupConflict(
+                                group_id=group_id,
+                                group_name=group.name,
+                                role=role_key,
+                                members_without_access=unauthorized_members,
+                            )
+                        )
+
         return FileAdditionConflict(
             has_conflict=True,
             kb_is_public=False,
@@ -309,6 +398,7 @@ class SharingValidator:
             user_details=user_details,
             source_type=source_type,
             grant_access_url=grant_url,
+            group_conflicts=group_conflicts,
         )
 
     def _get_kb_users(self, knowledge) -> set:
@@ -328,13 +418,13 @@ class SharingValidator:
 
         # Group members
         for group_id in ac.get("read", {}).get("group_ids", []):
-            group = Groups.get_group_by_id(group_id)
-            if group:
-                user_ids.update(group.user_ids)
+            member_ids = Groups.get_group_user_ids_by_id(group_id)
+            if member_ids:
+                user_ids.update(member_ids)
         for group_id in ac.get("write", {}).get("group_ids", []):
-            group = Groups.get_group_by_id(group_id)
-            if group:
-                user_ids.update(group.user_ids)
+            member_ids = Groups.get_group_user_ids_by_id(group_id)
+            if member_ids:
+                user_ids.update(member_ids)
 
         # Always include owner
         user_ids.add(knowledge.user_id)

@@ -938,7 +938,8 @@
 					users_without_access: [],
 					user_details: [],
 					source_type: sourceType,
-					grant_access_url: null
+					grant_access_url: null,
+					group_conflicts: []
 				};
 				fileConflictPendingFileId = fileId;
 				showFileConflictModal = true;

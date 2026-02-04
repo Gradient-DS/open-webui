@@ -1,4 +1,4 @@
----
+\---
 date: 2026-02-04T15:00:00+01:00
 researcher: Claude
 git_commit: c8a5a93e8636629452ea0a57448ddb707f9bacb9

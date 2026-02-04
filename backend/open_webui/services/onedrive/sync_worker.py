@@ -124,7 +124,8 @@ class OneDriveSyncWorker:
         """
         Check if KB access level is compatible with OneDrive permissions.
 
-        Returns conflict info if KB is public or shared too broadly.
+        Returns conflict info if KB is public or shared with groups
+        containing members who lack OneDrive access.
         """
         knowledge = Knowledges.get_knowledge_by_id(self.knowledge_id)
         if not knowledge:
@@ -138,7 +139,134 @@ class OneDriveSyncWorker:
                 "message": "Knowledge base is public but OneDrive files have restricted access",
             }
 
+        # Check for groups with unauthorized members
+        ac = knowledge.access_control
+        read_groups = ac.get("read", {}).get("group_ids", [])
+        write_groups = ac.get("write", {}).get("group_ids", [])
+
+        if not read_groups and not write_groups:
+            return None
+
+        # Determine permitted emails:
+        # - If KB already has permitted_emails from a previous sync, use those
+        # - Otherwise, use the sync owner's email as baseline
+        meta = knowledge.meta or {}
+        sync_info = meta.get("onedrive_sync", {})
+        existing_permitted = sync_info.get("permitted_emails", [])
+
+        if existing_permitted:
+            permitted_set = {e.lower() for e in existing_permitted}
+        else:
+            # First sync or individual files only — owner is the only
+            # known permitted user
+            owner = Users.get_user_by_id(self.user_id)
+            if owner and owner.email:
+                permitted_set = {owner.email.lower()}
+            else:
+                permitted_set = set()
+
+        # Validate all groups against permitted emails
+        from open_webui.models.groups import Groups
+
+        all_group_ids = list(set(read_groups + write_groups))
+        conflicting_groups = []
+
+        for group_id in all_group_ids:
+            group = Groups.get_group_by_id(group_id)
+            if not group:
+                continue
+
+            member_ids = Groups.get_group_user_ids_by_id(group_id)
+            if not member_ids:
+                continue
+
+            for member_id in member_ids:
+                user = Users.get_user_by_id(member_id)
+                if user and user.email:
+                    if user.email.lower() not in permitted_set:
+                        conflicting_groups.append({
+                            "group_id": group_id,
+                            "group_name": group.name,
+                            "user_name": user.name,
+                            "user_email": user.email,
+                        })
+                        break
+                else:
+                    conflicting_groups.append({
+                        "group_id": group_id,
+                        "group_name": group.name,
+                        "user_name": user.name if user else "Unknown",
+                        "user_email": "no email",
+                    })
+                    break
+
+        if conflicting_groups:
+            group_details = [
+                f"'{g['group_name']}' (member {g['user_name']} <{g['user_email']}>)"
+                for g in conflicting_groups
+            ]
+            return {
+                "has_conflict": True,
+                "kb_is_public": False,
+                "has_group_conflicts": True,
+                "conflicting_groups": conflicting_groups,
+                "message": (
+                    f"Cannot sync OneDrive files: "
+                    f"{', '.join(group_details)} "
+                    f"lack OneDrive access. Remove these groups from sharing "
+                    f"or grant OneDrive access to their members first."
+                ),
+            }
+
         return None
+
+    def _validate_groups_for_source_access(
+        self, group_ids: list[str], permitted_emails: set[str]
+    ) -> list[str]:
+        """Validate groups against permitted emails, returning only compliant groups.
+
+        A group is compliant if ALL its members have emails in permitted_emails.
+        Groups with any unauthorized member are removed.
+        """
+        from open_webui.models.groups import Groups
+
+        validated = []
+        for group_id in group_ids:
+            group = Groups.get_group_by_id(group_id)
+            if not group:
+                log.info(f"Group {group_id} no longer exists, removing from KB access")
+                continue
+
+            member_ids = Groups.get_group_user_ids_by_id(group_id)
+            if not member_ids:
+                # Empty group is safe to keep
+                validated.append(group_id)
+                continue
+
+            group_valid = True
+            for member_id in member_ids:
+                user = Users.get_user_by_id(member_id)
+                if user and user.email:
+                    if user.email.lower() not in permitted_emails:
+                        log.info(
+                            f"Removing group '{group.name}' ({group_id}) from KB "
+                            f"{self.knowledge_id}: member {user.email} lacks OneDrive access"
+                        )
+                        group_valid = False
+                        break
+                else:
+                    # User without email can't be validated — remove group
+                    log.info(
+                        f"Removing group '{group.name}' ({group_id}) from KB "
+                        f"{self.knowledge_id}: member {member_id} has no email"
+                    )
+                    group_valid = False
+                    break
+
+            if group_valid:
+                validated.append(group_id)
+
+        return validated
 
     async def _update_sync_status(
         self,
@@ -354,7 +482,30 @@ class OneDriveSyncWorker:
             (s for s in self.sources if s.get("type") == "folder"), None
         )
         if not folder_source:
-            log.info("No folder sources, skipping permission sync")
+            # Individual file sync — set owner as baseline permitted email
+            # so that Phase 4 list filtering and group validation work
+            owner = Users.get_user_by_id(self.user_id)
+            if owner and owner.email:
+                permitted_emails = {owner.email.lower()}
+                self._permitted_emails = permitted_emails
+
+                knowledge = Knowledges.get_knowledge_by_id(self.knowledge_id)
+                if knowledge:
+                    meta = knowledge.meta or {}
+                    if "onedrive_sync" not in meta:
+                        meta["onedrive_sync"] = {}
+                    meta["onedrive_sync"]["permitted_emails"] = list(permitted_emails)
+                    meta["onedrive_sync"]["permission_sync_at"] = int(time.time())
+                    Knowledges.update_knowledge_meta_by_id(self.knowledge_id, meta)
+                    log.info(
+                        f"Set owner-only permitted email for individual file sync: "
+                        f"{owner.email}"
+                    )
+            else:
+                log.info(
+                    "No folder sources and owner has no email, "
+                    "skipping permission sync"
+                )
             return
 
         try:
@@ -388,6 +539,12 @@ class OneDriveSyncWorker:
 
             log.info(f"Found {len(permitted_emails)} permitted emails from OneDrive")
 
+            # Ensure owner's email is in permitted_emails — OneDrive's sharing
+            # permissions don't list the folder owner explicitly, so we add them
+            owner = Users.get_user_by_id(self.user_id)
+            if owner and owner.email:
+                permitted_emails.add(owner.email.lower())
+
             # Store permitted emails for later use in file metadata
             self._permitted_emails = permitted_emails
 
@@ -401,6 +558,23 @@ class OneDriveSyncWorker:
                 meta["onedrive_sync"]["permission_sync_at"] = int(time.time())
                 Knowledges.update_knowledge_meta_by_id(self.knowledge_id, meta)
                 log.info(f"Stored {len(permitted_emails)} permitted emails in knowledge meta")
+
+            # Update existing file metadata with current permitted_emails
+            # This ensures files from previous syncs have up-to-date permissions
+            existing_files = Knowledges.get_files_by_id(self.knowledge_id)
+            updated_file_count = 0
+            for file in existing_files:
+                if file.meta and file.meta.get("source") == "onedrive":
+                    old_emails = set(file.meta.get("permitted_emails", []))
+                    if old_emails != permitted_emails:
+                        file.meta["permitted_emails"] = list(permitted_emails)
+                        Files.update_file_metadata_by_id(file.id, file.meta)
+                        updated_file_count += 1
+            if updated_file_count > 0:
+                log.info(
+                    f"Updated permitted_emails on {updated_file_count} existing "
+                    f"OneDrive files in KB {self.knowledge_id}"
+                )
 
             # Find matching Open WebUI users
             permitted_user_ids = []
@@ -420,15 +594,44 @@ class OneDriveSyncWorker:
                 if knowledge:
                     from open_webui.models.knowledge import KnowledgeForm
 
-                    # Create access control structure
+                    # Preserve existing group_ids, validating each against new permissions
+                    existing_ac = knowledge.access_control or {}
+                    existing_read_groups = existing_ac.get("read", {}).get("group_ids", [])
+                    existing_write_groups = existing_ac.get("write", {}).get("group_ids", [])
+
+                    permitted_emails_lower = {e.lower() for e in permitted_emails}
+
+                    validated_read_groups = self._validate_groups_for_source_access(
+                        existing_read_groups, permitted_emails_lower
+                    )
+                    validated_write_groups = self._validate_groups_for_source_access(
+                        existing_write_groups, permitted_emails_lower
+                    )
+
+                    # Log removed groups
+                    removed_read = set(existing_read_groups) - set(validated_read_groups)
+                    removed_write = set(existing_write_groups) - set(validated_write_groups)
+                    if removed_read or removed_write:
+                        from open_webui.models.groups import Groups as GroupsModel
+
+                        removed_names = []
+                        for gid in removed_read | removed_write:
+                            g = GroupsModel.get_group_by_id(gid)
+                            if g:
+                                removed_names.append(g.name)
+                        log.warning(
+                            f"Sync removed {len(removed_read | removed_write)} group(s) from KB "
+                            f"{self.knowledge_id} due to permission changes: {removed_names}"
+                        )
+
                     access_control = {
                         "read": {
                             "user_ids": permitted_user_ids,
-                            "group_ids": [],
+                            "group_ids": validated_read_groups,
                         },
                         "write": {
                             "user_ids": [self.user_id],  # Only owner can write
-                            "group_ids": [],
+                            "group_ids": validated_write_groups,
                         },
                     }
 
@@ -443,7 +646,9 @@ class OneDriveSyncWorker:
 
                     log.info(
                         f"Updated access_control for {self.knowledge_id}: "
-                        f"{len(permitted_user_ids)} users with read access"
+                        f"{len(permitted_user_ids)} users with read access, "
+                        f"{len(validated_read_groups)} read groups, "
+                        f"{len(validated_write_groups)} write groups"
                     )
             else:
                 log.info(
@@ -471,12 +676,8 @@ class OneDriveSyncWorker:
             if conflict and conflict.get("has_conflict"):
                 strict_mode = STRICT_SOURCE_PERMISSIONS.value
                 if strict_mode:
-                    # Abort sync — cannot add OneDrive files to a public KB
-                    error_msg = (
-                        "Cannot sync OneDrive files to a public knowledge base. "
-                        "Make the knowledge base private first, then share it with "
-                        "users who have source access."
-                    )
+                    # Abort sync — use the specific conflict message
+                    error_msg = conflict.get("message", "Access conflict detected")
                     await self._update_sync_status(
                         "failed",
                         error=error_msg,

@@ -2,7 +2,7 @@
 	import { getContext, createEventDispatcher } from 'svelte';
 	import Modal from '$lib/components/common/Modal.svelte';
 	import XMark from '$lib/components/icons/XMark.svelte';
-	import type { FileAdditionConflict, SharingRecommendation } from '$lib/apis/knowledge/permissions';
+	import type { FileAdditionConflict, SharingRecommendation, GroupConflict } from '$lib/apis/knowledge/permissions';
 
 	const i18n = getContext('i18n');
 	const dispatch = createEventDispatcher();
@@ -12,6 +12,7 @@
 	export let strictMode = true;
 
 	$: usersWithoutAccessCount = conflict?.users_without_access?.length ?? 0;
+	$: hasGroupConflicts = (conflict?.group_conflicts?.length ?? 0) > 0;
 
 	function handleMakePrivate() {
 		dispatch('makePrivate');
@@ -127,6 +128,64 @@
 					</div>
 				{/if}
 
+				<!-- Group-level conflicts -->
+				{#if hasGroupConflicts}
+					<div class="mb-4 p-3 bg-red-50 dark:bg-red-900/20 rounded-lg">
+						<div class="flex items-center gap-2 text-red-800 dark:text-red-200 mb-2">
+							<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+								<path
+									stroke-linecap="round"
+									stroke-linejoin="round"
+									stroke-width="2"
+									d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636"
+								/>
+							</svg>
+							<span class="font-medium">
+								{$i18n.t('Groups with members lacking source access')}
+							</span>
+						</div>
+
+						<div class="mt-2 space-y-3 max-h-60 overflow-y-auto">
+							{#each conflict?.group_conflicts ?? [] as gc}
+								<div class="border border-red-200 dark:border-red-800 rounded-lg p-2">
+									<div class="flex items-center gap-2 mb-1">
+										<span class="font-medium text-sm">{gc.group_name}</span>
+										<span class="text-xs px-1.5 py-0.5 bg-gray-100 dark:bg-gray-700 rounded">
+											{gc.role}
+										</span>
+									</div>
+									<div class="space-y-1">
+										{#each gc.members_without_access as member}
+											<div class="flex items-center justify-between text-sm pl-2">
+												<div>
+													<span>{member.user_name}</span>
+													<span class="text-gray-500 ml-2">{member.user_email}</span>
+												</div>
+												{#if member.grant_access_url}
+													<a
+														href={member.grant_access_url}
+														target="_blank"
+														rel="noopener noreferrer"
+														class="text-blue-600 hover:underline text-xs"
+													>
+														{$i18n.t('Grant access')} ↗
+													</a>
+												{/if}
+											</div>
+										{/each}
+									</div>
+								</div>
+							{/each}
+						</div>
+
+						<p class="text-sm text-red-700 dark:text-red-300 mt-3">
+							{$i18n.t(
+								'Remove these groups from sharing, or grant source access to all their members before adding these files.'
+							)}
+						</p>
+					</div>
+				{/if}
+
 				<!-- Grant access link for public KB -->
 				{#if conflict.kb_is_public && conflict.grant_access_url}
 					<div class="mb-4 p-3 bg-blue-50 dark:bg-blue-900/20 rounded-lg">
@@ -157,22 +216,26 @@
 						class="px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg"
 						on:click={handleCancel}
 					>
-						{$i18n.t('Cancel')}
+						{hasGroupConflicts ? $i18n.t('Go Back') : $i18n.t('Cancel')}
 					</button>
-					{#if !strictMode && !conflict.kb_is_public}
-						<button
-							class="px-4 py-2 text-sm font-medium text-yellow-700 dark:text-yellow-300 bg-yellow-100 dark:bg-yellow-900/30 hover:bg-yellow-200 dark:hover:bg-yellow-900/50 rounded-lg"
-							on:click={handleContinue}
-						>
-							{$i18n.t('Continue Anyway')}
-						</button>
+					{#if !hasGroupConflicts}
+						{#if !strictMode && !conflict.kb_is_public}
+							<button
+								class="px-4 py-2 text-sm font-medium text-yellow-700 dark:text-yellow-300 bg-yellow-100 dark:bg-yellow-900/30 hover:bg-yellow-200 dark:hover:bg-yellow-900/50 rounded-lg"
+								on:click={handleContinue}
+							>
+								{$i18n.t('Continue Anyway')}
+							</button>
+						{/if}
+						{#if conflict.kb_is_public}
+							<button
+								class="px-4 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-lg"
+								on:click={handleMakePrivate}
+							>
+								{$i18n.t('Make Private')}
+							</button>
+						{/if}
 					{/if}
-					<button
-						class="px-4 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-lg"
-						on:click={handleMakePrivate}
-					>
-						{$i18n.t('Make Private')}
-					</button>
 				</div>
 			{/if}
 		</div>

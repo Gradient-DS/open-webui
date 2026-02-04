@@ -18,6 +18,7 @@ from open_webui.constants import ERROR_MESSAGES
 from open_webui.services.permissions.validator import (
     SharingValidator,
     SharingRecommendation,
+    GroupConflict,
 )
 from open_webui.services.permissions.provider import UserAccessStatus
 
@@ -36,6 +37,7 @@ class ShareValidationRequest(BaseModel):
 
     user_ids: List[str] = []
     group_ids: List[str] = []
+    write_group_ids: List[str] = []
 
 
 class ShareValidationResponse(BaseModel):
@@ -47,6 +49,7 @@ class ShareValidationResponse(BaseModel):
     blocking_resources: dict
     recommendations: List[SharingRecommendation]
     source_restricted: bool
+    group_conflicts: List[GroupConflict] = []
 
 
 class UsersReadyForAccessResponse(BaseModel):
@@ -70,6 +73,7 @@ class FileAdditionConflictResponse(BaseModel):
     user_details: List[SharingRecommendation]
     source_type: str
     grant_access_url: Optional[str]
+    group_conflicts: List[GroupConflict] = []
 
 
 ####################################
@@ -109,7 +113,7 @@ async def validate_knowledge_share(
 
     validator = SharingValidator()
     result = await validator.validate_knowledge_share(
-        id, form_data.user_ids, form_data.group_ids
+        id, form_data.user_ids, form_data.group_ids, form_data.write_group_ids
     )
 
     return ShareValidationResponse(**result.model_dump())

@@ -11,6 +11,7 @@ from open_webui.models.groups import (
     GroupResponse,
     UserIdsForm,
 )
+from open_webui.models.knowledge import Knowledges
 
 from open_webui.config import CACHE_DIR
 from open_webui.constants import ERROR_MESSAGES
@@ -176,6 +177,92 @@ async def add_user_to_group(
         if form_data.user_ids:
             form_data.user_ids = Users.get_valid_user_ids(form_data.user_ids)
 
+        # Check if this group has access to source-restricted KBs
+        source_restricted_kbs = (
+            Knowledges.get_source_restricted_knowledge_by_group_id(id)
+        )
+
+        if source_restricted_kbs and form_data.user_ids:
+            # Group conflicts by KB for richer UI presentation
+            kb_conflicts = {}  # kb_id -> conflict info
+
+            def _build_onedrive_sources(sync_meta: dict) -> list[dict]:
+                """Extract source names and OneDrive URLs from sync metadata."""
+                sources = sync_meta.get("sources", [])
+                result = []
+                for s in sources:
+                    name = s.get("name")
+                    if not name:
+                        continue
+                    item_id = s.get("item_id")
+                    url = (
+                        f"https://onedrive.live.com/?id={item_id}"
+                        if item_id
+                        else None
+                    )
+                    result.append({"name": name, "url": url})
+                return result
+
+            for uid in form_data.user_ids:
+                target_user = Users.get_user_by_id(uid)
+                if not target_user or not target_user.email:
+                    # Users without email can't be validated against any KB
+                    for kb in source_restricted_kbs:
+                        if kb.id not in kb_conflicts:
+                            meta = kb.meta or {}
+                            onedrive_sync = meta.get("onedrive_sync", {})
+                            kb_conflicts[kb.id] = {
+                                "knowledge_id": kb.id,
+                                "knowledge_name": kb.name,
+                                "onedrive_sources": _build_onedrive_sources(
+                                    onedrive_sync
+                                ),
+                                "users_without_access": [],
+                            }
+                        kb_conflicts[kb.id]["users_without_access"].append(
+                            {
+                                "user_id": uid,
+                                "user_name": (
+                                    target_user.name if target_user else "Unknown"
+                                ),
+                                "user_email": "",
+                            }
+                        )
+                    continue
+
+                user_email = target_user.email.lower()
+                for kb in source_restricted_kbs:
+                    meta = kb.meta or {}
+                    onedrive_sync = meta.get("onedrive_sync", {})
+                    permitted_emails = onedrive_sync.get("permitted_emails", [])
+                    permitted_lower = {e.lower() for e in permitted_emails}
+                    if user_email not in permitted_lower:
+                        if kb.id not in kb_conflicts:
+                            kb_conflicts[kb.id] = {
+                                "knowledge_id": kb.id,
+                                "knowledge_name": kb.name,
+                                "onedrive_sources": _build_onedrive_sources(
+                                    onedrive_sync
+                                ),
+                                "users_without_access": [],
+                            }
+                        kb_conflicts[kb.id]["users_without_access"].append(
+                            {
+                                "user_id": uid,
+                                "user_name": target_user.name,
+                                "user_email": target_user.email,
+                            }
+                        )
+
+            if kb_conflicts:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail={
+                        "message": "Cannot add user(s) to group: source permission conflicts",
+                        "kb_conflicts": list(kb_conflicts.values()),
+                    },
+                )
+
         group = Groups.add_users_to_group(id, form_data.user_ids)
         if group:
             return GroupResponse(
@@ -187,6 +274,8 @@ async def add_user_to_group(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=ERROR_MESSAGES.DEFAULT("Error adding users to group"),
             )
+    except HTTPException:
+        raise
     except Exception as e:
         log.exception(f"Error adding users to group {id}: {e}")
         raise HTTPException(

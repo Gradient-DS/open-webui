@@ -29,7 +29,7 @@
 	let validationResult: ShareValidationResult | null = null;
 	let showConfirmModal = false;
 	let pendingAccessControl: any = null;
-	let previousAccessControl: any = null;
+	let lastConfirmedAccessControl: any = null;
 	let validating = false;
 	let isGoingPublic = false;
 
@@ -44,6 +44,7 @@
 	async function validateAndShare(newAccessControl: any) {
 		if (!knowledgeId) {
 			onChange(newAccessControl);
+			lastConfirmedAccessControl = JSON.parse(JSON.stringify(newAccessControl));
 			return;
 		}
 
@@ -55,17 +56,17 @@
 
 		if (isPrivate) {
 			onChange(newAccessControl);
+			lastConfirmedAccessControl = JSON.parse(JSON.stringify(newAccessControl));
 			return;
 		}
 
-		// Save current state so we can revert on cancel
-		previousAccessControl = accessControl;
 		isGoingPublic = newAccessControl === null;
 
 		validating = true;
 		try {
 			const userIds = newAccessControl?.read?.user_ids ?? [];
 			const groupIds = newAccessControl?.read?.group_ids ?? [];
+			const writeGroupIds = newAccessControl?.write?.group_ids ?? [];
 
 			// Always validate: for "make public" we check if KB has source-restricted files,
 			// for sharing to users/groups we check if they have source access
@@ -73,7 +74,8 @@
 				localStorage.token,
 				knowledgeId,
 				userIds,
-				groupIds
+				groupIds,
+				writeGroupIds
 			);
 
 			if (isGoingPublic && validationResult?.source_restricted) {
@@ -83,18 +85,20 @@
 			} else if (
 				!isGoingPublic &&
 				validationResult?.source_restricted &&
-				!validationResult?.can_share
+				((validationResult?.group_conflicts?.length ?? 0) > 0 || !validationResult?.can_share)
 			) {
-				// Sharing to users who lack source access
+				// Groups with unauthorized members or individual users who lack access
 				pendingAccessControl = newAccessControl;
 				showConfirmModal = true;
 			} else {
 				onChange(newAccessControl);
+				lastConfirmedAccessControl = JSON.parse(JSON.stringify(newAccessControl));
 			}
 		} catch (err) {
 			console.error('Validation failed:', err);
 			// If validation fails, proceed without blocking
 			onChange(newAccessControl);
+			lastConfirmedAccessControl = JSON.parse(JSON.stringify(newAccessControl));
 		} finally {
 			validating = false;
 		}
@@ -103,13 +107,20 @@
 	function handleConfirmShare(event: CustomEvent) {
 		const { shareToAll } = event.detail;
 
+		// Never confirm if group conflicts exist (hard block)
+		if ((validationResult?.group_conflicts?.length ?? 0) > 0) {
+			handleCancelShare();
+			return;
+		}
+
+		let confirmedAc: any;
 		if (isGoingPublic) {
 			// "Make public" was confirmed (lenient mode only)
-			onChange(pendingAccessControl);
+			confirmedAc = pendingAccessControl;
 		} else if (strictSourcePermissions && validationResult && !shareToAll) {
 			// Filter out users who don't have source access
 			const allowedUserIds = new Set(validationResult.can_share_to_users);
-			const filteredAccessControl = {
+			confirmedAc = {
 				...pendingAccessControl,
 				read: {
 					...pendingAccessControl.read,
@@ -118,11 +129,12 @@
 					)
 				}
 			};
-			onChange(filteredAccessControl);
 		} else {
-			onChange(pendingAccessControl);
+			confirmedAc = pendingAccessControl;
 		}
 
+		onChange(confirmedAc);
+		lastConfirmedAccessControl = JSON.parse(JSON.stringify(confirmedAc));
 		showConfirmModal = false;
 		pendingAccessControl = null;
 		validationResult = null;
@@ -130,14 +142,14 @@
 	}
 
 	function handleCancelShare() {
-		// Revert accessControl to the value before the user changed it
-		// (the two-way bind in AccessControl already set it to the new value)
-		if (previousAccessControl !== undefined) {
-			accessControl = previousAccessControl;
+		// Revert accessControl to the last confirmed value.
+		// We can't use the value saved at validation time because
+		// bind:accessControl already updated it before onChange fired.
+		if (lastConfirmedAccessControl !== null) {
+			accessControl = JSON.parse(JSON.stringify(lastConfirmedAccessControl));
 		}
 		showConfirmModal = false;
 		pendingAccessControl = null;
-		previousAccessControl = null;
 		validationResult = null;
 		isGoingPublic = false;
 	}
@@ -164,6 +176,7 @@
 			}
 		};
 		onChange(newAccessControl);
+		lastConfirmedAccessControl = JSON.parse(JSON.stringify(newAccessControl));
 		usersReadyForAccess = usersReadyForAccess.filter((u) => u.user_id !== userId);
 	}
 
@@ -181,6 +194,7 @@
 	}
 
 	onMount(async () => {
+		lastConfirmedAccessControl = JSON.parse(JSON.stringify(accessControl));
 		await Promise.all([checkSourceRestrictions(), loadUsersReadyForAccess()]);
 	});
 </script>
@@ -258,6 +272,7 @@
 <ShareConfirmationModal
 	bind:show={showConfirmModal}
 	{validationResult}
+	groupConflicts={validationResult?.group_conflicts ?? []}
 	strictMode={strictSourcePermissions}
 	targetName={knowledgeName}
 	{isGoingPublic}

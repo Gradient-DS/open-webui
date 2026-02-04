@@ -22,12 +22,14 @@
 	import ChevronDown from '$lib/components/icons/ChevronDown.svelte';
 	import ChevronUp from '$lib/components/icons/ChevronUp.svelte';
 	import Spinner from '$lib/components/common/Spinner.svelte';
+	import GroupMemberConflictModal from './GroupMemberConflictModal.svelte';
 
 	export let groupId: string;
 	export let userCount = 0;
 
 	let users = null;
 	let total = null;
+	let refreshKey = 0;
 
 	let query = '';
 	let orderBy = 'created_at'; // default sort key
@@ -57,26 +59,48 @@
 			if (res) {
 				users = res.users;
 				total = res.total;
+				refreshKey++;
 			}
 		} catch (err) {
 			console.error(err);
 		}
 	};
 
+	let showConflictModal = false;
+	let conflictData: {
+		kbConflicts: any[];
+		userName: string;
+		userId: string;
+	} = { kbConflicts: [], userName: '', userId: '' };
+
 	const toggleMember = async (userId, state) => {
-		if (state === 'checked') {
-			await addUserToGroup(localStorage.token, groupId, [userId]).catch((error) => {
-				toast.error(`${error}`);
-				return null;
-			});
-		} else {
-			await removeUserFromGroup(localStorage.token, groupId, [userId]).catch((error) => {
-				toast.error(`${error}`);
-				return null;
-			});
+		let res;
+		try {
+			if (state === 'checked') {
+				res = await addUserToGroup(localStorage.token, groupId, [userId]);
+			} else {
+				res = await removeUserFromGroup(localStorage.token, groupId, [userId]);
+			}
+		} catch (err) {
+			if (err?.kb_conflicts) {
+				const user = users?.find((u) => u.id === userId);
+				conflictData = {
+					kbConflicts: err.kb_conflicts,
+					userName: user?.name ?? 'Unknown',
+					userId
+				};
+				showConflictModal = true;
+			} else {
+				toast.error(`${err?.message ?? err}`);
+			}
+			await getUserList();
+			return;
 		}
 
-		getUserList();
+		if (res?.member_count !== undefined) {
+			userCount = res.member_count;
+		}
+		await getUserList();
 	};
 
 	$: if (page !== null && query !== null && orderBy !== null && direction !== null) {
@@ -211,7 +235,7 @@
 						</tr>
 					</thead>
 					<tbody class="">
-						{#each users as user, userIdx (user?.id ?? userIdx)}
+						{#each users as user, userIdx (`${user?.id ?? userIdx}-${refreshKey}`)}
 							<tr class="bg-white dark:bg-gray-900 dark:border-gray-850 text-xs">
 								<td class=" px-3 py-1 w-8">
 									<div class="flex w-full justify-center">
@@ -268,3 +292,17 @@
 		{/if}
 	{/if}
 </div>
+
+<GroupMemberConflictModal
+	bind:show={showConflictModal}
+	kbConflicts={conflictData.kbConflicts}
+	{groupId}
+	userName={conflictData.userName}
+	on:resolved={async () => {
+		// All conflicts resolved — retry adding the user
+		await toggleMember(conflictData.userId, 'checked');
+	}}
+	on:cancel={() => {
+		showConflictModal = false;
+	}}
+/>
