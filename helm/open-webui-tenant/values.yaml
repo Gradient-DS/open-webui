@@ -473,6 +473,15 @@ networkPolicy:
   enabled: true
 
 # -----------------------------------------------------------------------------
+# Cilium Network Policy
+# -----------------------------------------------------------------------------
+# Required on clusters using Cilium Gateway API (e.g., previder-prod).
+# Creates a CiliumNetworkPolicy with fromEntities: ingress to allow
+# traffic from the Cilium L7 proxy (Envoy) to reach tenant pods.
+ciliumNetworkPolicy:
+  enabled: false
+
+# -----------------------------------------------------------------------------
 # Pod Settings
 # -----------------------------------------------------------------------------
 nodeSelector: {}
