@@ -63,6 +63,7 @@
 	import Sidebar from '../icons/Sidebar.svelte';
 	import PinnedModelList from './Sidebar/PinnedModelList.svelte';
 	import Note from '../icons/Note.svelte';
+	import BookOpen from '../icons/BookOpen.svelte';
 	import { slide } from 'svelte/transition';
 	import HotkeyHint from '../common/HotkeyHint.svelte';
 	import { key } from 'vega';
@@ -750,9 +751,33 @@
 					</div>
 				{/if}
 
-				{#if (isFeatureEnabled('models') || isFeatureEnabled('knowledge') || isFeatureEnabled('prompts') || isFeatureEnabled('tools')) && ($user?.role === 'admin' || $user?.permissions?.workspace?.models || $user?.permissions?.workspace?.knowledge || $user?.permissions?.workspace?.prompts || $user?.permissions?.workspace?.tools)}
+				{#if isFeatureEnabled('knowledge') && ($user?.role === 'admin' || $user?.permissions?.workspace?.knowledge)}
 					<div class="">
-						<Tooltip content={$i18n.t('Workspace')} placement="right">
+						<Tooltip content={$i18n.t('Knowledge')} placement="right">
+							<a
+								class=" cursor-pointer flex rounded-xl hover:bg-gray-100 dark:hover:bg-gray-850 transition group"
+								href="/workspace/knowledge"
+								on:click={async (e) => {
+									e.stopImmediatePropagation();
+									e.preventDefault();
+
+									goto('/workspace/knowledge');
+									itemClickHandler();
+								}}
+								draggable="false"
+								aria-label={$i18n.t('Knowledge')}
+							>
+								<div class=" self-center flex items-center justify-center size-9">
+									<BookOpen className="size-4.5" strokeWidth="2" />
+								</div>
+							</a>
+						</Tooltip>
+					</div>
+				{/if}
+
+				{#if (isFeatureEnabled('models') || isFeatureEnabled('prompts') || isFeatureEnabled('tools')) && ($user?.role === 'admin' || $user?.permissions?.workspace?.models || $user?.permissions?.workspace?.prompts || $user?.permissions?.workspace?.tools)}
+					<div class="">
+						<Tooltip content={$i18n.t('Agents & prompts')} placement="right">
 							<a
 								class=" cursor-pointer flex rounded-xl hover:bg-gray-100 dark:hover:bg-gray-850 transition group"
 								href="/workspace"
@@ -763,7 +788,7 @@
 									goto('/workspace');
 									itemClickHandler();
 								}}
-								aria-label={$i18n.t('Workspace')}
+								aria-label={$i18n.t('Agents & prompts')}
 								draggable="false"
 							>
 								<div class=" self-center flex items-center justify-center size-9">
@@ -982,7 +1007,28 @@
 						</div>
 					{/if}
 
-					{#if (isFeatureEnabled('models') || isFeatureEnabled('knowledge') || isFeatureEnabled('prompts') || isFeatureEnabled('tools')) && ($user?.role === 'admin' || $user?.permissions?.workspace?.models || $user?.permissions?.workspace?.knowledge || $user?.permissions?.workspace?.prompts || $user?.permissions?.workspace?.tools)}
+					{#if isFeatureEnabled('knowledge') && ($user?.role === 'admin' || $user?.permissions?.workspace?.knowledge)}
+						<div class="px-[0.4375rem] flex justify-center text-gray-800 dark:text-gray-200">
+							<a
+								id="sidebar-knowledge-button"
+								class="grow flex items-center space-x-3 rounded-2xl px-2.5 py-2 hover:bg-gray-100 dark:hover:bg-gray-900 transition"
+								href="/workspace/knowledge"
+								on:click={itemClickHandler}
+								draggable="false"
+								aria-label={$i18n.t('Knowledge')}
+							>
+								<div class="self-center">
+									<BookOpen className="size-4.5" strokeWidth="2" />
+								</div>
+
+								<div class="flex self-center translate-y-[0.5px]">
+									<div class=" self-center text-sm font-primary">{$i18n.t('Knowledge')}</div>
+								</div>
+							</a>
+						</div>
+					{/if}
+
+					{#if (isFeatureEnabled('models') || isFeatureEnabled('prompts') || isFeatureEnabled('tools')) && ($user?.role === 'admin' || $user?.permissions?.workspace?.models || $user?.permissions?.workspace?.prompts || $user?.permissions?.workspace?.tools)}
 						<div class="px-[0.4375rem] flex justify-center text-gray-800 dark:text-gray-200">
 							<a
 								id="sidebar-workspace-button"
@@ -990,7 +1036,7 @@
 								href="/workspace"
 								on:click={itemClickHandler}
 								draggable="false"
-								aria-label={$i18n.t('Workspace')}
+								aria-label={$i18n.t('Agents & prompts')}
 							>
 								<div class="self-center">
 									<svg
@@ -1010,7 +1056,7 @@
 								</div>
 
 								<div class="flex self-center translate-y-[0.5px]">
-									<div class=" self-center text-sm font-primary">{$i18n.t('Workspace')}</div>
+									<div class=" self-center text-sm font-primary">{$i18n.t('Agents & prompts')}</div>
 								</div>
 							</a>
 						</div>
@@ -1022,7 +1068,7 @@
 						id="sidebar-models"
 						bind:open={showPinnedModels}
 						className="px-2 mt-0.5"
-						name={$i18n.t('Models')}
+						name={$i18n.t('Models & agents')}
 						chevron={false}
 						dragAndDrop={false}
 					>
