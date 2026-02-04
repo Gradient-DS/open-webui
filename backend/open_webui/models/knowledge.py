@@ -344,6 +344,17 @@ class KnowledgeTable:
         user_group_ids = {group.id for group in Groups.get_groups_by_member_id(user_id)}
         return has_access(user_id, permission, knowledge.access_control, user_group_ids)
 
+    def get_knowledge_bases_by_type(self, type: str) -> list[KnowledgeModel]:
+        """Get all knowledge bases of a specific type (no pagination limit)."""
+        with get_db() as db:
+            return [
+                KnowledgeModel.model_validate(kb)
+                for kb in db.query(Knowledge)
+                .filter_by(type=type)
+                .order_by(Knowledge.updated_at.desc())
+                .all()
+            ]
+
     def get_knowledge_bases_by_user_id(
         self, user_id: str, permission: str = "write"
     ) -> list[KnowledgeUserModel]:

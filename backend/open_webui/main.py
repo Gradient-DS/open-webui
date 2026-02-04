@@ -336,6 +336,7 @@ from open_webui.config import (
     ENABLE_ONEDRIVE_INTEGRATION,
     ONEDRIVE_CLIENT_ID_PERSONAL,
     ONEDRIVE_CLIENT_ID_BUSINESS,
+    MICROSOFT_CLIENT_SECRET,
     ONEDRIVE_SHAREPOINT_URL,
     ONEDRIVE_SHAREPOINT_TENANT_ID,
     ENABLE_ONEDRIVE_PERSONAL,
@@ -666,6 +667,10 @@ async def lifespan(app: FastAPI):
     asyncio.create_task(periodic_usage_pool_cleanup())
     asyncio.create_task(periodic_archive_cleanup())
 
+    # Start OneDrive background sync scheduler
+    from open_webui.services.onedrive.scheduler import start_scheduler as start_onedrive_scheduler
+    start_onedrive_scheduler(app)
+
     # Check external pipeline health on startup
     external_pipeline_url = getattr(app.state.config, "EXTERNAL_PIPELINE_URL", None)
     if external_pipeline_url and external_pipeline_url.strip() != "":
@@ -709,6 +714,10 @@ async def lifespan(app: FastAPI):
         )
 
     yield
+
+    # Stop OneDrive background sync scheduler
+    from open_webui.services.onedrive.scheduler import stop_scheduler as stop_onedrive_scheduler
+    stop_onedrive_scheduler()
 
     if hasattr(app.state, "redis_task_command_listener"):
         app.state.redis_task_command_listener.cancel()
@@ -2103,6 +2112,7 @@ async def get_app_config(request: Request):
                     "client_id_business": ONEDRIVE_CLIENT_ID_BUSINESS,
                     "sharepoint_url": ONEDRIVE_SHAREPOINT_URL.value,
                     "sharepoint_tenant_id": ONEDRIVE_SHAREPOINT_TENANT_ID.value,
+                    "has_client_secret": bool(MICROSOFT_CLIENT_SECRET.value),
                 },
                 "ui": {
                     "pending_user_overlay_title": app.state.config.PENDING_USER_OVERLAY_TITLE,
@@ -2420,6 +2430,15 @@ async def oauth_login(provider: str, request: Request):
 @app.get("/oauth/{provider}/login/callback")
 @app.get("/oauth/{provider}/callback")  # Legacy endpoint
 async def oauth_login_callback(provider: str, request: Request, response: Response):
+    # Check if this is a OneDrive background sync auth callback
+    if provider == "microsoft":
+        state = request.query_params.get("state")
+        if state:
+            from open_webui.services.onedrive.auth import _pending_flows
+            if state in _pending_flows:
+                from open_webui.routers.onedrive_sync import handle_onedrive_auth_callback
+                return await handle_onedrive_auth_callback(request)
+
     return await oauth_manager.handle_callback(request, provider, response)
 
 

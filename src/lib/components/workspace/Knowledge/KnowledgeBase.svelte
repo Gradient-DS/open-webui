@@ -38,8 +38,9 @@
 		searchKnowledgeFilesById
 	} from '$lib/apis/knowledge';
 	import { processWeb, processYoutubeVideo } from '$lib/apis/retrieval';
-	import { startOneDriveSyncItems, getSyncStatus, cancelSync, type SyncStatusResponse, type SyncItem, type FailedFile, type SyncErrorType } from '$lib/apis/onedrive';
+	import { startOneDriveSyncItems, getSyncStatus, cancelSync, getTokenStatus, type SyncStatusResponse, type SyncItem, type FailedFile, type SyncErrorType } from '$lib/apis/onedrive';
 	import { openOneDriveItemPicker, getGraphApiToken } from '$lib/utils/onedrive-file-picker';
+	import { WEBUI_API_BASE_URL } from '$lib/constants';
 
 	import { blobToFile, isYoutubeUrl } from '$lib/utils';
 
@@ -918,6 +919,43 @@
 		}
 	};
 
+	const authorizeBackgroundSync = async () => {
+		const authUrl = `${WEBUI_API_BASE_URL}/onedrive/auth/initiate?knowledge_id=${knowledge.id}`;
+
+		// Open popup
+		const popup = window.open(
+			authUrl,
+			'onedrive_auth',
+			'width=600,height=700,scrollbars=yes'
+		);
+
+		// Listen for postMessage from callback
+		const handleMessage = (event: MessageEvent) => {
+			if (event.origin !== window.location.origin) return;
+			if (event.data?.type !== 'onedrive_auth_callback') return;
+
+			window.removeEventListener('message', handleMessage);
+
+			if (event.data.success) {
+				backgroundSyncAuthorized = true;
+				backgroundSyncNeedsReauth = false;
+				toast.success($i18n.t('Background sync authorized'));
+			} else {
+				toast.error($i18n.t('Authorization failed: {{error}}', { error: event.data.error }));
+			}
+		};
+
+		window.addEventListener('message', handleMessage);
+
+		// Cleanup if popup is closed without completing
+		const checkClosed = setInterval(() => {
+			if (popup?.closed) {
+				clearInterval(checkClosed);
+				window.removeEventListener('message', handleMessage);
+			}
+		}, 500);
+	};
+
 	const addFileHandler = async (fileId) => {
 		const res = await addFileToKnowledgeById(localStorage.token, id, fileId).catch((e) => {
 			toast.error(`${e}`);
@@ -968,6 +1006,8 @@
 	let isSaving = false;
 	let isSyncingOneDrive = false;
 	let oneDriveSyncStatus: SyncStatusResponse | null = null;
+	let backgroundSyncAuthorized = false;
+	let backgroundSyncNeedsReauth = false;
 
 	const updateFileContentHandler = async () => {
 		if (isSaving) {
@@ -1149,6 +1189,17 @@
 		if (res) {
 			knowledge = res;
 			knowledgeId = knowledge?.id;
+
+			// Check background sync token status for OneDrive KBs
+			if (knowledge?.type === 'onedrive' && knowledge?.meta?.onedrive_sync?.sources?.length) {
+				try {
+					const status = await getTokenStatus(localStorage.token, knowledge.id);
+					backgroundSyncAuthorized = status.has_token && !status.is_expired;
+					backgroundSyncNeedsReauth = status.needs_reauth ?? false;
+				} catch {
+					// Silently fail — token status is informational
+				}
+			}
 
 			// Auto-start OneDrive sync if directed from creation flow
 			if ($page.url.searchParams.get('start_onedrive_sync') === 'true' && knowledge) {
@@ -1342,6 +1393,36 @@
 											{/if}
 										</button>
 									</Tooltip>
+								{/if}
+								{#if knowledge?.type === 'onedrive' && $config?.onedrive?.has_client_secret}
+									{#if backgroundSyncNeedsReauth}
+										<button
+											class="text-xs text-red-500 hover:text-red-600 flex items-center gap-1"
+											on:click={authorizeBackgroundSync}
+										>
+											<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" class="size-3.5">
+												<path fill-rule="evenodd" d="M6.701 2.25c.577-1 2.02-1 2.598 0l5.196 9a1.5 1.5 0 0 1-1.299 2.25H2.804a1.5 1.5 0 0 1-1.3-2.25l5.197-9ZM8 4a.75.75 0 0 1 .75.75v3a.75.75 0 0 1-1.5 0v-3A.75.75 0 0 1 8 4Zm0 8a1 1 0 1 0 0-2 1 1 0 0 0 0 2Z" clip-rule="evenodd" />
+											</svg>
+											{$i18n.t('Re-authorize background sync')}
+										</button>
+									{:else if backgroundSyncAuthorized}
+										<span class="text-xs text-green-600 flex items-center gap-1">
+											<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" class="size-3.5">
+												<path fill-rule="evenodd" d="M12.416 3.376a.75.75 0 0 1 .208 1.04l-5 7.5a.75.75 0 0 1-1.154.114l-3-3a.75.75 0 0 1 1.06-1.06l2.353 2.353 4.493-6.74a.75.75 0 0 1 1.04-.207Z" clip-rule="evenodd" />
+											</svg>
+											{$i18n.t('Background sync enabled')}
+										</span>
+									{:else if knowledge?.meta?.onedrive_sync?.sources?.length}
+										<button
+											class="text-xs text-blue-500 hover:text-blue-600 flex items-center gap-1"
+											on:click={authorizeBackgroundSync}
+										>
+											<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" class="size-3.5">
+												<path fill-rule="evenodd" d="M8 1a3.5 3.5 0 0 0-3.5 3.5V7A1.5 1.5 0 0 0 3 8.5v5A1.5 1.5 0 0 0 4.5 15h7a1.5 1.5 0 0 0 1.5-1.5v-5A1.5 1.5 0 0 0 11.5 7V4.5A3.5 3.5 0 0 0 8 1Zm2 6V4.5a2 2 0 1 0-4 0V7h4Z" clip-rule="evenodd" />
+											</svg>
+											{$i18n.t('Enable background sync')}
+										</button>
+									{/if}
 								{/if}
 								{#if fileItemsTotal}
 									<div class="text-xs text-gray-500">

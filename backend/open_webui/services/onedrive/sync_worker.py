@@ -1,6 +1,7 @@
 """OneDrive sync worker - Downloads and processes files from OneDrive folders."""
 
 import asyncio
+import httpx
 import io
 import logging
 import tempfile
@@ -94,6 +95,7 @@ class OneDriveSyncWorker:
         user_id: str,
         app,
         event_emitter: Optional[Callable[[Dict[str, Any]], Awaitable[None]]] = None,
+        token_provider: Optional[Callable[[], Awaitable[Optional[str]]]] = None,
     ):
         self.knowledge_id = knowledge_id
         self.sources = sources
@@ -101,6 +103,7 @@ class OneDriveSyncWorker:
         self.user_id = user_id
         self.app = app
         self.event_emitter = event_emitter
+        self._token_provider = token_provider
         self._client: Optional[GraphClient] = None
 
     def _make_request(self):
@@ -239,9 +242,19 @@ class OneDriveSyncWorker:
         """Collect files from a folder using delta query."""
         delta_link = source.get("delta_link")
 
-        items, new_delta_link = await self._client.get_drive_delta(
-            source["drive_id"], source["item_id"], delta_link
-        )
+        try:
+            items, new_delta_link = await self._client.get_drive_delta(
+                source["drive_id"], source["item_id"], delta_link
+            )
+        except httpx.HTTPStatusError as e:
+            if e.response.status_code == 410:
+                log.info("Delta token expired for source %s, performing full sync", source["name"])
+                source["delta_link"] = None
+                items, new_delta_link = await self._client.get_drive_delta(
+                    source["drive_id"], source["item_id"], None
+                )
+            else:
+                raise
 
         # Update source with new delta link
         source["delta_link"] = new_delta_link
@@ -527,7 +540,7 @@ class OneDriveSyncWorker:
         Returns:
             Dict with sync results (files_processed, files_failed, failed_files, etc.)
         """
-        self._client = GraphClient(self.access_token)
+        self._client = GraphClient(self.access_token, token_provider=self._token_provider)
 
         try:
             await self._update_sync_status("syncing", 0, 0)

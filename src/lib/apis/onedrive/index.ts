@@ -138,3 +138,44 @@ export async function getSyncedCollections(
 
 	return res.json();
 }
+
+// ──────────────────────────────────────────────────────────────────────
+// Background Sync OAuth API
+// ──────────────────────────────────────────────────────────────────────
+
+export interface TokenStatusResponse {
+	has_token: boolean;
+	is_expired?: boolean;
+	needs_reauth?: boolean;
+	token_stored_at?: number;
+}
+
+export async function getTokenStatus(
+	token: string,
+	knowledgeId: string
+): Promise<TokenStatusResponse> {
+	const res = await fetch(`${WEBUI_API_BASE_URL}/onedrive/auth/token-status/${knowledgeId}`, {
+		method: 'GET',
+		headers: {
+			'Content-Type': 'application/json',
+			Authorization: `Bearer ${token}`
+		}
+	});
+	if (!res.ok) throw new Error(await res.text());
+	return res.json();
+}
+
+export async function revokeToken(
+	token: string,
+	knowledgeId: string
+): Promise<{ revoked: boolean }> {
+	const res = await fetch(`${WEBUI_API_BASE_URL}/onedrive/auth/revoke/${knowledgeId}`, {
+		method: 'POST',
+		headers: {
+			'Content-Type': 'application/json',
+			Authorization: `Bearer ${token}`
+		}
+	});
+	if (!res.ok) throw new Error(await res.text());
+	return res.json();
+}
