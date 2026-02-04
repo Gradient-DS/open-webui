@@ -1,6 +1,7 @@
 """OneDrive Sync Router - Endpoints for OneDrive folder sync to Knowledge bases."""
 
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
+from starlette.requests import Request
 from pydantic import BaseModel
 from typing import Optional, List, Literal
 import logging
@@ -30,7 +31,6 @@ class SyncItemsRequest(BaseModel):
     knowledge_id: str
     items: List[SyncItem]
     access_token: str
-    user_token: str
 
 
 class FailedFileInfo(BaseModel):
@@ -57,6 +57,7 @@ class SyncStatusResponse(BaseModel):
 @router.post("/sync/items")
 async def sync_items(
     request: SyncItemsRequest,
+    fastapi_request: Request,
     background_tasks: BackgroundTasks,
     user: UserModel = Depends(get_verified_user),
 ):
@@ -72,6 +73,12 @@ async def sync_items(
     # Get existing sources or initialize empty list
     meta = knowledge.meta or {}
     existing_sync = meta.get("onedrive_sync", {})
+    # Prevent duplicate syncs
+    if existing_sync.get("status") == "syncing":
+        raise HTTPException(
+            status_code=409,
+            detail="A sync is already in progress. Cancel it first or wait for it to complete.",
+        )
     existing_sources = existing_sync.get("sources", [])
 
     # Add new items (skip duplicates by item_id)
@@ -105,7 +112,7 @@ async def sync_items(
         sources=all_sources,
         access_token=request.access_token,
         user_id=user.id,
-        user_token=request.user_token,
+        app=fastapi_request.app,
     )
 
     return {"message": "Sync started", "knowledge_id": request.knowledge_id}
@@ -116,7 +123,7 @@ async def sync_items_to_knowledge(
     sources: List[dict],
     access_token: str,
     user_id: str,
-    user_token: str,
+    app,
 ):
     """Background task to sync multiple OneDrive items."""
     from open_webui.services.onedrive.sync_worker import OneDriveSyncWorker
@@ -126,7 +133,7 @@ async def sync_items_to_knowledge(
         sources=sources,
         access_token=access_token,
         user_id=user_id,
-        user_token=user_token,
+        app=app,
     )
     await worker.sync()
 

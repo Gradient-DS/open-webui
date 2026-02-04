@@ -2087,6 +2087,7 @@ async def get_app_config(request: Request):
                 "file": {
                     "max_size": app.state.config.FILE_MAX_SIZE,
                     "max_count": app.state.config.FILE_MAX_COUNT,
+                    "allowed_extensions": app.state.config.ALLOWED_FILE_EXTENSIONS,
                     "image_compression": {
                         "width": app.state.config.FILE_IMAGE_COMPRESSION_WIDTH,
                         "height": app.state.config.FILE_IMAGE_COMPRESSION_HEIGHT,

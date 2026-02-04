@@ -92,16 +92,41 @@ class OneDriveSyncWorker:
         sources: List[Dict[str, Any]],
         access_token: str,
         user_id: str,
-        user_token: str,
+        app,
         event_emitter: Optional[Callable[[Dict[str, Any]], Awaitable[None]]] = None,
     ):
         self.knowledge_id = knowledge_id
         self.sources = sources
         self.access_token = access_token  # OneDrive Graph API token
         self.user_id = user_id
-        self.user_token = user_token  # Open WebUI JWT for internal API calls
+        self.app = app
         self.event_emitter = event_emitter
         self._client: Optional[GraphClient] = None
+
+    def _make_request(self):
+        """Construct a minimal Request for calling retrieval functions directly.
+
+        Same pattern as main.py:690-709 (lifespan mock request).
+        process_file only accesses request.app.state.config and request.app.state.ef.
+        """
+        from starlette.requests import Request
+        from starlette.datastructures import Headers
+
+        return Request({
+            "type": "http",
+            "method": "POST",
+            "path": "/internal/onedrive-sync",
+            "query_string": b"",
+            "headers": Headers({}).raw,
+            "app": self.app,
+        })
+
+    def _get_user(self):
+        """Fetch the user object for process_file access control."""
+        user = Users.get_user_by_id(self.user_id)
+        if not user:
+            raise RuntimeError(f"User {self.user_id} not found")
+        return user
 
     def _check_cancelled(self) -> bool:
         """Check if sync has been cancelled by user."""
@@ -129,6 +154,9 @@ class OneDriveSyncWorker:
         if knowledge:
             meta = knowledge.meta or {}
             sync_info = meta.get("onedrive_sync", {})
+            # Don't overwrite cancelled status with progress updates
+            if sync_info.get("status") == "cancelled" and status == "syncing":
+                return
             sync_info["status"] = status
             sync_info["progress_current"] = current
             sync_info["progress_total"] = total
@@ -259,14 +287,26 @@ class OneDriveSyncWorker:
             stored_hash = source.get("content_hash")
 
             if current_hash and current_hash == stored_hash:
-                log.info(f"File unchanged (hash match): {source['name']}")
-                return None
+                # Hash matches on OneDrive side, but verify the file was
+                # actually processed successfully. If the file record was
+                # deleted (orphan cleanup) or processing failed, re-sync it.
+                file_id = f"onedrive-{source['item_id']}"
+                existing = Files.get_file_by_id(file_id)
+                if existing and (existing.data or {}).get("status") == "completed":
+                    log.info(f"File unchanged (hash match): {source['name']}")
+                    return None
+                else:
+                    reason = "missing" if not existing else "not processed"
+                    log.info(
+                        f"File {source['name']} hash matches but record {reason}, "
+                        f"re-syncing"
+                    )
 
             if not current_hash:
                 log.warning(f"No hash available from OneDrive for: {source['name']}")
             elif not stored_hash:
                 log.info(f"First sync for file (no stored hash): {source['name']}")
-            else:
+            elif current_hash != stored_hash:
                 log.info(f"File changed (hash mismatch): {source['name']}")
 
             # Store new hash for later save
@@ -586,13 +626,26 @@ class OneDriveSyncWorker:
                         ),
                     )
 
-            total_files = len(all_files_to_process)
-            log.info(f"Total files to process: {total_files}")
+            # Count existing OneDrive files that aren't being re-processed,
+            # so the progress counter reflects the full KB file count.
+            processing_item_ids = {f["item"]["id"] for f in all_files_to_process}
+            already_synced = sum(
+                1
+                for f in current_files
+                if f.id.startswith("onedrive-")
+                and f.id.removeprefix("onedrive-") not in processing_item_ids
+            )
+
+            total_files = len(all_files_to_process) + already_synced
+            log.info(
+                f"Total files to process: {len(all_files_to_process)} "
+                f"({already_synced} already synced, {total_files} total)"
+            )
 
             # Process all files in parallel with controlled concurrency
             max_concurrent = FILE_PROCESSING_MAX_CONCURRENT.value
             semaphore = asyncio.Semaphore(max_concurrent)
-            processed_count = 0
+            processed_count = already_synced
             failed_count = 0
             results_lock = asyncio.Lock()
             cancelled = False
@@ -612,6 +665,15 @@ class OneDriveSyncWorker:
                     )
 
                 async with semaphore:
+                    # Re-check cancellation after waiting for semaphore slot
+                    if cancelled or self._check_cancelled():
+                        cancelled = True
+                        return FailedFile(
+                            filename=file_info.get("name", "unknown"),
+                            error_type=SyncErrorType.PROCESSING_ERROR.value,
+                            error_message="Sync cancelled by user",
+                        )
+
                     try:
                         result = await self._process_file_info(file_info)
 
@@ -870,26 +932,32 @@ class OneDriveSyncWorker:
             # Copy vectors from per-file collection to KB collection
             result = await self._ensure_vectors_in_kb(file_id)
             if result:
-                return result  # FailedFile
-
-            # Emit file added event for progressive UI updates
-            file_record = Files.get_file_by_id(file_id)
-            if file_record:
-                from open_webui.services.onedrive.sync_events import emit_file_added
-
-                await emit_file_added(
-                    user_id=self.user_id,
-                    knowledge_id=self.knowledge_id,
-                    file_data={
-                        "id": file_record.id,
-                        "filename": file_record.filename,
-                        "meta": file_record.meta,
-                        "created_at": file_record.created_at,
-                        "updated_at": file_record.updated_at,
-                    },
+                # Vectors missing or corrupt (e.g. Weaviate collections were deleted).
+                # Fall through to re-upload + re-process the file from scratch
+                # instead of returning the error permanently.
+                log.warning(
+                    f"File {file_id} vectors missing despite hash match, "
+                    f"will re-process from scratch: {result.error_message}"
                 )
+            else:
+                # Emit file added event for progressive UI updates
+                file_record = Files.get_file_by_id(file_id)
+                if file_record:
+                    from open_webui.services.onedrive.sync_events import emit_file_added
 
-            return None  # Success - no re-processing needed
+                    await emit_file_added(
+                        user_id=self.user_id,
+                        knowledge_id=self.knowledge_id,
+                        file_data={
+                            "id": file_record.id,
+                            "filename": file_record.filename,
+                            "meta": file_record.meta,
+                            "created_at": file_record.created_at,
+                            "updated_at": file_record.updated_at,
+                        },
+                    )
+
+                return None  # Success - no re-processing needed
 
         # Save to storage
         temp_filename = f"{file_id}_{name}"
@@ -986,29 +1054,18 @@ class OneDriveSyncWorker:
                             log.warning(
                                 f"Failed to remove old vectors from KB {kf.knowledge_id}: {e}"
                             )
-                        # Copy new vectors
-                        import httpx
-
-                        from open_webui.config import WEBUI_URL
-
-                        base_url = (
-                            WEBUI_URL.value
-                            if WEBUI_URL.value
-                            else "http://localhost:8080"
-                        )
+                        # Copy new vectors via direct function call
                         try:
-                            async with httpx.AsyncClient(timeout=60.0) as client:
-                                await client.post(
-                                    f"{base_url}/api/v1/retrieval/process/file",
-                                    headers={
-                                        "Authorization": f"Bearer {self.user_token}",
-                                        "Content-Type": "application/json",
-                                    },
-                                    json={
-                                        "file_id": file_id,
-                                        "collection_name": kf.knowledge_id,
-                                    },
-                                )
+                            from open_webui.routers.retrieval import process_file, ProcessFileForm
+                            await asyncio.to_thread(
+                                process_file,
+                                self._make_request(),
+                                ProcessFileForm(
+                                    file_id=file_id,
+                                    collection_name=kf.knowledge_id,
+                                ),
+                                user=self._get_user(),
+                            )
                         except Exception as e:
                             log.warning(
                                 f"Failed to propagate vectors to KB {kf.knowledge_id}: {e}"
@@ -1049,183 +1106,116 @@ class OneDriveSyncWorker:
         Used for cross-user dedup: when a file already exists and doesn't need
         re-processing, we still need to copy its vectors into the current KB.
         """
-        import httpx
-
-        from open_webui.config import WEBUI_URL
-
-        base_url = WEBUI_URL.value if WEBUI_URL.value else "http://localhost:8080"
-
         try:
-            async with httpx.AsyncClient(timeout=60.0) as client:
-                response = await client.post(
-                    f"{base_url}/api/v1/retrieval/process/file",
-                    headers={
-                        "Authorization": f"Bearer {self.user_token}",
-                        "Content-Type": "application/json",
-                    },
-                    json={
-                        "file_id": file_id,
-                        "collection_name": self.knowledge_id,
-                    },
-                )
-                if response.status_code == 200:
-                    return None
-                elif response.status_code == 400:
-                    detail = response.json().get("detail", "")
-                    if "Duplicate content" in detail:
-                        return None  # Already in KB
-                    return FailedFile(
-                        filename=file_id,
-                        error_type=SyncErrorType.PROCESSING_ERROR.value,
-                        error_message=f"Failed to copy vectors to KB: {detail}",
-                    )
-                else:
-                    return FailedFile(
-                        filename=file_id,
-                        error_type=SyncErrorType.PROCESSING_ERROR.value,
-                        error_message=f"HTTP {response.status_code}",
-                    )
-        except Exception as e:
-            if "timeout" in str(type(e).__name__).lower():
-                return FailedFile(
-                    filename=file_id,
-                    error_type=SyncErrorType.TIMEOUT.value,
-                    error_message="Timeout copying vectors to KB",
-                )
+            from open_webui.routers.retrieval import process_file, ProcessFileForm
+            from fastapi import HTTPException
+
+            process_file(
+                self._make_request(),
+                ProcessFileForm(
+                    file_id=file_id,
+                    collection_name=self.knowledge_id,
+                ),
+                user=self._get_user(),
+            )
+            return None  # Success
+        except HTTPException as e:
+            detail = str(e.detail) if e.detail else ""
+            if e.status_code == 400 and "Duplicate content" in detail:
+                return None  # Already in KB, treat as success
             return FailedFile(
                 filename=file_id,
                 error_type=SyncErrorType.PROCESSING_ERROR.value,
-                error_message=f"Error copying vectors: {str(e)[:80]}",
+                error_message=f"Failed to copy vectors to KB: {detail}"[:100],
+            )
+        except Exception as e:
+            return FailedFile(
+                filename=file_id,
+                error_type=SyncErrorType.PROCESSING_ERROR.value,
+                error_message=f"Error copying vectors: {str(e)}"[:80],
             )
 
     async def _process_file_via_api(self, file_id: str, filename: str) -> Optional[FailedFile]:
-        """Process file by calling the internal retrieval API.
+        """Process file by calling the retrieval processing function directly.
 
         Two-step process:
         1. First call WITHOUT collection_name to extract and process file content
         2. Second call WITH collection_name to add the processed content to knowledge base
 
-        This is needed because when collection_name is provided, the retrieval API
+        This is needed because when collection_name is provided, the retrieval function
         assumes the file has already been processed and tries to use existing vectors
         or file.data.content, which are empty for newly downloaded OneDrive files.
 
         Returns:
             None on success, FailedFile on error
         """
-        import httpx
+        from open_webui.routers.retrieval import process_file, ProcessFileForm
+        from fastapi import HTTPException
 
-        # Get the base URL from config or use default
-        from open_webui.config import WEBUI_URL
+        request = self._make_request()
+        user = self._get_user()
 
-        base_url = WEBUI_URL.value if WEBUI_URL.value else "http://localhost:8080"
-
-        # Use 60-second timeout per document to prevent hanging
         try:
-            async with httpx.AsyncClient(timeout=60.0) as client:
-                # Step 1: Process file content (extract text, create embeddings in file-{id} collection)
-                response = await client.post(
-                    f"{base_url}/api/v1/retrieval/process/file",
-                    headers={
-                        "Authorization": f"Bearer {self.user_token}",
-                        "Content-Type": "application/json",
-                    },
-                    json={
-                        "file_id": file_id,
-                        # Don't pass collection_name here - this triggers actual file processing
-                    },
+            # Step 1: Process file content (extract text, create embeddings in file-{id} collection)
+            # Must run in a thread because process_file -> save_docs_to_vector_db uses
+            # asyncio.run() internally, which fails if called from a running event loop.
+            try:
+                await asyncio.to_thread(
+                    process_file,
+                    request,
+                    ProcessFileForm(file_id=file_id),
+                    user=user,
                 )
-
-                # Handle duplicate content gracefully - if embeddings already exist, proceed to step 2
-                if response.status_code == 400:
-                    error_data = response.json()
-                    detail = error_data.get("detail", "")
-                    if "Duplicate content" in detail:
-                        log.debug(
-                            f"File {file_id} already has embeddings, skipping to knowledge base addition"
-                        )
-                    elif "No content extracted" in detail or "empty" in detail.lower():
-                        log.debug(f"File {file_id} has no extractable content")
-                        return FailedFile(
-                            filename=filename,
-                            error_type=SyncErrorType.EMPTY_CONTENT.value,
-                            error_message="File has no extractable content",
-                        )
-                    else:
-                        log.debug(
-                            f"Failed to process file content {file_id}: "
-                            f"{response.status_code} - {response.text}"
-                        )
-                        return FailedFile(
-                            filename=filename,
-                            error_type=SyncErrorType.PROCESSING_ERROR.value,
-                            error_message=detail[:100] if detail else "Processing failed",
-                        )
-                elif response.status_code != 200:
+                log.info(f"Successfully extracted content from file {file_id}")
+            except HTTPException as e:
+                detail = str(e.detail) if e.detail else ""
+                if e.status_code == 400 and "Duplicate content" in detail:
                     log.debug(
-                        f"Failed to process file content {file_id}: "
-                        f"{response.status_code} - {response.text}"
+                        f"File {file_id} already has embeddings, skipping to knowledge base addition"
                     )
+                elif e.status_code == 400 and ("No content extracted" in detail or "empty" in detail.lower()):
+                    log.debug(f"File {file_id} has no extractable content")
+                    return FailedFile(
+                        filename=filename,
+                        error_type=SyncErrorType.EMPTY_CONTENT.value,
+                        error_message="File has no extractable content",
+                    )
+                else:
+                    log.debug(f"Failed to process file content {file_id}: {e.status_code} - {detail}")
                     return FailedFile(
                         filename=filename,
                         error_type=SyncErrorType.PROCESSING_ERROR.value,
-                        error_message=f"HTTP {response.status_code}",
+                        error_message=detail[:100] if detail else "Processing failed",
                     )
-                else:
-                    log.info(f"Successfully extracted content from file {file_id}")
 
-                # Step 2: Add processed content to knowledge base collection
-                response = await client.post(
-                    f"{base_url}/api/v1/retrieval/process/file",
-                    headers={
-                        "Authorization": f"Bearer {self.user_token}",
-                        "Content-Type": "application/json",
-                    },
-                    json={
-                        "file_id": file_id,
-                        "collection_name": self.knowledge_id,
-                    },
+            # Step 2: Add processed content to knowledge base collection
+            try:
+                await asyncio.to_thread(
+                    process_file,
+                    request,
+                    ProcessFileForm(
+                        file_id=file_id,
+                        collection_name=self.knowledge_id,
+                    ),
+                    user=user,
                 )
-
-                # Handle duplicate content in knowledge base gracefully as well
-                if response.status_code == 400:
-                    error_data = response.json()
-                    detail = error_data.get("detail", "")
-                    if "Duplicate content" in detail:
-                        log.debug(
-                            f"File {file_id} already exists in knowledge base {self.knowledge_id}"
-                        )
-                        return None  # Success - file is already in the knowledge base
-                    else:
-                        log.debug(
-                            f"Failed to add file {file_id} to knowledge base: "
-                            f"{response.status_code} - {response.text}"
-                        )
-                        return FailedFile(
-                            filename=filename,
-                            error_type=SyncErrorType.PROCESSING_ERROR.value,
-                            error_message=detail[:100] if detail else "Failed to add to knowledge base",
-                        )
-                elif response.status_code != 200:
+                log.info(f"Successfully added file {file_id} to knowledge base {self.knowledge_id}")
+            except HTTPException as e:
+                detail = str(e.detail) if e.detail else ""
+                if e.status_code == 400 and "Duplicate content" in detail:
                     log.debug(
-                        f"Failed to add file {file_id} to knowledge base: "
-                        f"{response.status_code} - {response.text}"
+                        f"File {file_id} already exists in knowledge base {self.knowledge_id}"
                     )
+                    return None  # Success - file is already in the knowledge base
+                else:
+                    log.debug(f"Failed to add file {file_id} to knowledge base: {e.status_code} - {detail}")
                     return FailedFile(
                         filename=filename,
                         error_type=SyncErrorType.PROCESSING_ERROR.value,
-                        error_message=f"HTTP {response.status_code}",
+                        error_message=detail[:100] if detail else "Failed to add to knowledge base",
                     )
-                else:
-                    log.info(f"Successfully added file {file_id} to knowledge base {self.knowledge_id}")
 
             return None  # Success
-        except httpx.TimeoutException:
-            log.warning(f"Timeout processing file {file_id} ({filename})")
-            return FailedFile(
-                filename=filename,
-                error_type=SyncErrorType.TIMEOUT.value,
-                error_message="Processing timed out after 60 seconds",
-            )
         except Exception as e:
             log.warning(f"Error processing file {file_id} ({filename}): {e}")
             return FailedFile(
