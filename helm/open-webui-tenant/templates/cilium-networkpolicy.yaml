@@ -1,0 +1,13 @@
+{{- if .Values.ciliumNetworkPolicy.enabled }}
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: allow-gateway-ingress
+  labels:
+    {{- include "open-webui-tenant.labels" . | nindent 4 }}
+spec:
+  endpointSelector: {}
+  ingress:
+    - fromEntities:
+        - ingress
+{{- end }}
