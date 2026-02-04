@@ -734,6 +734,11 @@ async def delete_knowledge_by_id(
 
     log.info(f"Deleting knowledge base: {id} (name: {knowledge.name})")
 
+    # Collect file IDs before deletion (junction rows will be cascade-deleted)
+    kb_files = Knowledges.get_files_by_id(id)
+    kb_file_ids = [f.id for f in kb_files]
+    log.info(f"Knowledge base {id} has {len(kb_file_ids)} associated files")
+
     # Get all models
     models = Models.get_all_models()
     log.info(f"Found {len(models)} models to check for knowledge base {id}")
@@ -761,13 +766,31 @@ async def delete_knowledge_by_id(
                 )
                 Models.update_model_by_id(model.id, model_form)
 
-    # Clean up vector DB
+    # Clean up KB-level vector collection
     try:
         VECTOR_DB_CLIENT.delete_collection(collection_name=id)
     except Exception as e:
         log.debug(e)
         pass
+
+    # Delete the knowledge row (cascade-deletes KnowledgeFile junction rows)
     result = Knowledges.delete_knowledge_by_id(id=id)
+
+    # Clean up orphaned files (no longer referenced by any KB)
+    for file_id in kb_file_ids:
+        remaining_refs = Knowledges.get_knowledge_files_by_file_id(file_id)
+        if not remaining_refs:
+            log.info(f"Cleaning up orphaned file {file_id}")
+            try:
+                file_collection = f"file-{file_id}"
+                if VECTOR_DB_CLIENT.has_collection(collection_name=file_collection):
+                    VECTOR_DB_CLIENT.delete_collection(
+                        collection_name=file_collection
+                    )
+            except Exception as e:
+                log.debug(f"Error deleting orphaned file collection: {e}")
+            Files.delete_file_by_id(file_id)
+
     return result
 
 
