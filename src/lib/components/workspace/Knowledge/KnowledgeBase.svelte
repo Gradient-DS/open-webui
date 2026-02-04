@@ -105,12 +105,16 @@
 	let fileItems = null;
 	let fileItemsTotal = null;
 
+	let _skipReactiveRefresh = false;
+
 	const reset = () => {
 		currentPage = 1;
 	};
 
 	const init = async () => {
+		_skipReactiveRefresh = true;
 		reset();
+		_skipReactiveRefresh = false;
 		await getItemsPage();
 	};
 
@@ -122,7 +126,9 @@
 		direction !== undefined &&
 		currentPage !== undefined
 	) {
-		getItemsPage();
+		if (!_skipReactiveRefresh) {
+			getItemsPage();
+		}
 	}
 
 	$: if (
@@ -136,9 +142,6 @@
 
 	const getItemsPage = async () => {
 		if (knowledgeId === null) return;
-
-		fileItems = null;
-		fileItemsTotal = null;
 
 		if (sortKey === null) {
 			direction = null;
@@ -290,6 +293,21 @@
 				})
 			);
 			return;
+		}
+
+		// Reject files with disallowed extensions when allowed_extensions is configured
+		const allowedExtensions = $config?.file?.allowed_extensions ?? [];
+		if (allowedExtensions.length > 0) {
+			const fileExtension = file.name.split('.').pop()?.toLowerCase() ?? '';
+			if (!allowedExtensions.includes(fileExtension)) {
+				toast.error(
+					$i18n.t('Unsupported file type: .{{extension}}. Allowed types: {{types}}', {
+						extension: fileExtension,
+						types: allowedExtensions.join(', ')
+					})
+				);
+				return null;
+			}
 		}
 
 		fileItems = [fileItem, ...(fileItems ?? [])];
@@ -531,6 +549,7 @@
 			}));
 
 			// Start sync with new endpoint
+			_syncRefreshDone = false;
 			await startOneDriveSyncItems(localStorage.token, {
 				knowledge_id: knowledge.id,
 				items: syncItems,
@@ -569,6 +588,7 @@
 				name: source.name
 			}));
 
+			_syncRefreshDone = false;
 			await startOneDriveSyncItems(localStorage.token, {
 				knowledge_id: knowledge.id,
 				items: syncItems,
@@ -594,14 +614,20 @@
 			} else if (oneDriveSyncStatus.status === 'file_limit_exceeded') {
 				toast.error(oneDriveSyncStatus.error || $i18n.t('File limit exceeded'));
 				isSyncingOneDrive = false;
-				await init();
+				if (!_syncRefreshDone) {
+					_syncRefreshDone = true;
+					await init();
+				}
 			} else if (oneDriveSyncStatus.status === 'access_revoked') {
 				// access_revoked is a transient status during sync, keep polling
 				setTimeout(pollOneDriveSyncStatus, 2000);
 			} else if (oneDriveSyncStatus.status === 'completed' || oneDriveSyncStatus.status === 'completed_with_errors') {
 				// Toast is handled by Socket.IO handler, just refresh
 				isSyncingOneDrive = false;
-				await init();
+				if (!_syncRefreshDone) {
+					_syncRefreshDone = true;
+					await init();
+				}
 			} else if (oneDriveSyncStatus.status === 'failed') {
 				// Only show error if Socket.IO didn't already handle it
 				if (isSyncingOneDrive) {
@@ -610,7 +636,10 @@
 				}
 			} else if (oneDriveSyncStatus.status === 'cancelled') {
 				isSyncingOneDrive = false;
-				await init();
+				if (!_syncRefreshDone) {
+					_syncRefreshDone = true;
+					await init();
+				}
 			}
 		} catch (error) {
 			console.error('Failed to get sync status:', error);
@@ -840,6 +869,7 @@
 		if (data.status === 'file_limit_exceeded') {
 			toast.error(data.error || $i18n.t('File limit exceeded'));
 			isSyncingOneDrive = false;
+			_syncRefreshDone = true;
 			await init();
 			return;
 		}
@@ -865,6 +895,7 @@
 				toast.success($i18n.t('OneDrive sync completed - no changes'));
 			}
 			isSyncingOneDrive = false;
+			_syncRefreshDone = true;
 			// Refresh knowledge metadata to update last_sync_at timestamp
 			const res = await getKnowledgeById(localStorage.token, id);
 			if (res) {
@@ -877,6 +908,7 @@
 		} else if (data.status === 'cancelled') {
 			toast.info($i18n.t('OneDrive sync cancelled'));
 			isSyncingOneDrive = false;
+			_syncRefreshDone = true;
 			// Refresh knowledge metadata to update last_sync_at timestamp
 			const res = await getKnowledgeById(localStorage.token, id);
 			if (res) {
@@ -905,22 +937,29 @@
 	};
 
 	const deleteFileHandler = async (fileId) => {
+		const previousItems = fileItems;
+		const previousTotal = fileItemsTotal;
+		fileItems = (fileItems ?? []).filter((file) => file.id !== fileId);
+		fileItemsTotal = Math.max(0, (fileItemsTotal ?? 1) - 1);
+
 		try {
-			console.log('Starting file deletion process for:', fileId);
-
-			// Remove from knowledge base only
 			const res = await removeFileFromKnowledgeById(localStorage.token, id, fileId);
-			console.log('Knowledge base updated:', res);
-
 			if (res) {
 				toast.success($i18n.t('File removed successfully.'));
-				await init();
+				await getItemsPage();
+			} else {
+				fileItems = previousItems;
+				fileItemsTotal = previousTotal;
 			}
 		} catch (e) {
 			console.error('Error in deleteFileHandler:', e);
+			fileItems = previousItems;
+			fileItemsTotal = previousTotal;
 			toast.error(`${e}`);
 		}
 	};
+
+	let _syncRefreshDone = false;
 
 	let debounceTimeout = null;
 	let mediaQuery;
@@ -955,7 +994,7 @@
 				selectedFile = null;
 				selectedFileContent = '';
 
-				await init();
+				await getItemsPage();
 			}
 		} finally {
 			isSaving = false;
@@ -1414,10 +1453,6 @@
 											document.getElementById('files-input').click();
 										}
 									}}
-									onOneDriveSync={$config?.features?.enable_onedrive_integration &&
-									$config?.features?.enable_onedrive_sync
-										? oneDriveSyncHandler
-										: null}
 								/>
 							{/if}
 						</div>

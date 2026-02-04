@@ -347,9 +347,9 @@ The `Dropdown` component needs to forward `closeOnOutsideClick` for the ValvesMo
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] TypeScript type checking passes: `npm run check`
-- [ ] No linting errors: `npm run lint:frontend`
-- [ ] Build succeeds: `npm run build`
+- [x] TypeScript type checking passes: `npm run check`
+- [x] No linting errors: `npm run lint:frontend`
+- [x] Build succeeds: `npm run build`
 
 #### Manual Verification:
 - [ ] The `+` dropdown opens with three labeled sections
@@ -571,9 +571,9 @@ Shared class for pinned context icons (gray, no active state):
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] TypeScript type checking passes: `npm run check`
-- [ ] No linting errors: `npm run lint:frontend`
-- [ ] Build succeeds: `npm run build`
+- [x] TypeScript type checking passes: `npm run check`
+- [x] No linting errors: `npm run lint:frontend`
+- [x] Build succeeds: `npm run build`
 
 #### Manual Verification:
 - [ ] Only one `+` button in the bottom bar (no integrations button)
