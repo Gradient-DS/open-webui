@@ -2603,7 +2603,7 @@
 								{$i18n.t('Powered by soev.ai')}
 							</a>
 							<span>·</span>
-							<span>{$i18n.t('LLMs can make mistakes. Verify important information.')}</span>
+							<span>{$i18n.t('AI can make mistakes. Verify important information.')}</span>
 						</div>
 					</div>
 				</Pane>

@@ -110,11 +110,6 @@ openWebui:
     webuiName: "soev.ai"
     corsAllowOrigin: "*"
 
-    # Admin bootstrap
-    adminEmail: ""
-    adminName: ""
-    # adminPassword is set via secrets
-
     # Locale
     defaultLocale: "nl-NL"
 
@@ -239,6 +234,8 @@ openWebui:
     userPermissionsNotesAllowPublicSharing: "false"
 
     # UI Features
+    greetingTemplate: ""
+    defaultPromptSuggestions: "[]"
     enableFolders: "true"
     userPermissionsFeaturesFolders: "true"
     enableChannels: "false"
@@ -449,7 +446,6 @@ ingress:
 secrets:
   # Open WebUI secrets
   webuiSecretKey: ""  # Generate with: openssl rand -hex 32
-  adminPassword: ""
   openaiApiKey: ""
   ragOpenaiApiKey: ""
 
@@ -490,6 +486,15 @@ externalSecrets:
 # -----------------------------------------------------------------------------
 networkPolicy:
   enabled: true
+
+# -----------------------------------------------------------------------------
+# Cilium Network Policy
+# -----------------------------------------------------------------------------
+# Required on clusters using Cilium Gateway API (e.g., previder-prod).
+# Creates a CiliumNetworkPolicy with fromEntities: ingress to allow
+# traffic from the Cilium L7 proxy (Envoy) to reach tenant pods.
+ciliumNetworkPolicy:
+  enabled: false
 
 # -----------------------------------------------------------------------------
 # Pod Settings
