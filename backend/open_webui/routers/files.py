@@ -2,11 +2,14 @@ import logging
 import os
 import uuid
 import json
+import time
 from fnmatch import fnmatch
 from pathlib import Path
-from typing import Optional
+from typing import Optional, List, Tuple
 from urllib.parse import quote
 import asyncio
+
+from starlette.concurrency import run_in_threadpool
 
 from fastapi import (
     BackgroundTasks,
@@ -48,6 +51,7 @@ from open_webui.storage.provider import Storage
 from open_webui.utils.auth import get_admin_user, get_verified_user
 from open_webui.utils.access_control import has_access
 from open_webui.utils.misc import strict_match_mime_type
+from open_webui.services.files.events import emit_file_status
 from pydantic import BaseModel
 
 log = logging.getLogger(__name__)
@@ -141,15 +145,128 @@ def process_uploaded_file(request, file, file_path, file_item, file_metadata, us
             )
             process_file(request, ProcessFileForm(file_id=file_item.id), user=user)
 
+        # Emit success event via Socket.IO
+        file_data = Files.get_file_by_id(file_item.id)
+        collection_name = (
+            file_data.meta.get("collection_name") if file_data and file_data.meta else None
+        )
+
+        try:
+            # Create new event loop for async emit from background thread
+            asyncio.run(
+                emit_file_status(
+                    user_id=user.id,
+                    file_id=file_item.id,
+                    status="completed",
+                    collection_name=collection_name,
+                )
+            )
+            log.info(f"Emitted file:status completed for {file_item.id}")
+        except Exception as emit_error:
+            log.warning(f"Failed to emit file status: {emit_error}")
+
     except Exception as e:
         log.error(f"Error processing file: {file_item.id}")
+        error_msg = str(e.detail) if hasattr(e, "detail") else str(e)
         Files.update_file_data_by_id(
             file_item.id,
             {
                 "status": "failed",
-                "error": str(e.detail) if hasattr(e, "detail") else str(e),
+                "error": error_msg,
             },
         )
+
+        # Emit failure event via Socket.IO
+        try:
+            # Create new event loop for async emit from background thread
+            asyncio.run(
+                emit_file_status(
+                    user_id=user.id,
+                    file_id=file_item.id,
+                    status="failed",
+                    error=error_msg,
+                )
+            )
+            log.info(f"Emitted file:status failed for {file_item.id}")
+        except Exception as emit_error:
+            log.warning(f"Failed to emit file status: {emit_error}")
+
+
+async def process_files_parallel(
+    request,
+    file_items: List[Tuple],  # List of (file, file_path, file_item, file_metadata, user)
+    max_concurrent: int = 5,
+) -> List[dict]:
+    """
+    Process multiple files in parallel with controlled concurrency.
+
+    Uses the Mistral pattern: asyncio.Semaphore + asyncio.gather with return_exceptions=True
+
+    Args:
+        request: FastAPI request object
+        file_items: List of tuples containing (file, file_path, file_item, file_metadata, user)
+        max_concurrent: Maximum number of concurrent processing tasks (default 5)
+
+    Returns:
+        List of results with status for each file
+    """
+    if not file_items:
+        return []
+
+    log.info(
+        f"Starting parallel processing of {len(file_items)} files with max {max_concurrent} concurrent"
+    )
+    start_time = time.time()
+
+    semaphore = asyncio.Semaphore(max_concurrent)
+
+    async def process_with_semaphore(item_tuple: Tuple) -> dict:
+        file, file_path, file_item, file_metadata, user = item_tuple
+        async with semaphore:
+            try:
+                # Run sync process_uploaded_file in thread pool
+                await run_in_threadpool(
+                    process_uploaded_file,
+                    request,
+                    file,
+                    file_path,
+                    file_item,
+                    file_metadata,
+                    user,
+                )
+                return {"file_id": file_item.id, "status": "completed"}
+            except Exception as e:
+                error_msg = str(e.detail) if hasattr(e, "detail") else str(e)
+                log.error(f"Error processing file {file_item.id}: {error_msg}")
+                return {"file_id": file_item.id, "status": "failed", "error": error_msg}
+
+    # Process all files with controlled concurrency
+    tasks = [process_with_semaphore(item) for item in file_items]
+    results = await asyncio.gather(*tasks, return_exceptions=True)
+
+    # Handle any unexpected exceptions
+    processed_results = []
+    for i, result in enumerate(results):
+        if isinstance(result, Exception):
+            file_item = file_items[i][2]  # file_item is 3rd element in tuple
+            log.error(f"Unexpected error for file {file_item.id}: {result}")
+            processed_results.append(
+                {"file_id": file_item.id, "status": "failed", "error": str(result)}
+            )
+        else:
+            processed_results.append(result)
+
+    # Log statistics
+    total_time = time.time() - start_time
+    success_count = sum(1 for r in processed_results if r["status"] == "completed")
+    failure_count = len(processed_results) - success_count
+
+    log.info(
+        f"Parallel processing completed in {total_time:.2f}s: "
+        f"{success_count} succeeded, {failure_count} failed"
+    )
+
+    return processed_results
 
 
 @router.post("/", response_model=FileModelResponse)
@@ -525,10 +642,13 @@ async def update_file_data_content_by_id(
         or has_access_to_file(id, "write", user)
     ):
         try:
-            process_file(
+            # Run process_file in thread pool to avoid asyncio.run() conflict
+            # process_file uses asyncio.run() internally for embeddings
+            await run_in_threadpool(
+                process_file,
                 request,
                 ProcessFileForm(file_id=id, content=form_data.content),
-                user=user,
+                user,
             )
             file = Files.get_file_by_id(id=id)
         except Exception as e:

@@ -2786,6 +2786,12 @@ FILE_IMAGE_COMPRESSION_HEIGHT = PersistentConfig(
     ),
 )
 
+FILE_PROCESSING_MAX_CONCURRENT = PersistentConfig(
+    "FILE_PROCESSING_MAX_CONCURRENT",
+    "file.processing_max_concurrent",
+    int(os.environ.get("FILE_PROCESSING_MAX_CONCURRENT", "5")),
+)
+
 
 RAG_ALLOWED_FILE_EXTENSIONS = PersistentConfig(
     "RAG_ALLOWED_FILE_EXTENSIONS",

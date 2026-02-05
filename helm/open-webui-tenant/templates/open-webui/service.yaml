@@ -1,0 +1,17 @@
+{{- if .Values.openWebui.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "open-webui-tenant.openWebui.fullname" . }}
+  labels:
+    {{- include "open-webui-tenant.openWebui.labels" . | nindent 4 }}
+spec:
+  type: {{ .Values.openWebui.service.type }}
+  ports:
+    - port: {{ .Values.openWebui.service.port }}
+      targetPort: http
+      protocol: TCP
+      name: http
+  selector:
+    {{- include "open-webui-tenant.openWebui.selectorLabels" . | nindent 4 }}
+{{- end }}

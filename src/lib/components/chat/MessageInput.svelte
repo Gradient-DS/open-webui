@@ -31,7 +31,8 @@
 		user as _user,
 		showControls,
 		TTSWorker,
-		temporaryChatEnabled
+		temporaryChatEnabled,
+		socket
 	} from '$lib/stores';
 
 	import {
@@ -539,6 +540,26 @@
 		}
 	};
 
+	const handleFileStatus = (data: {
+		file_id: string;
+		status: string;
+		error?: string;
+		collection_name?: string;
+	}) => {
+		const idx = files.findIndex((f) => f.id === data.file_id);
+		if (idx >= 0) {
+			if (data.status === 'completed') {
+				files[idx].status = 'uploaded';
+				files[idx].collection_name = data.collection_name || files[idx].collection_name;
+			} else if (data.status === 'failed') {
+				files[idx].status = 'error';
+				files[idx].error = data.error || 'Processing failed';
+				toast.error(`File processing failed: ${data.error || 'Unknown error'}`);
+			}
+			files = files; // Trigger reactivity
+		}
+	};
+
 	const uploadFileHandler = async (file, process = true, itemData = {}) => {
 		if ($_user?.role !== 'admin' && !($_user?.permissions?.chat?.file_upload ?? true)) {
 			toast.error($i18n.t('You do not have permission to upload files.'));
@@ -589,7 +610,7 @@
 				const uploadedFile = await uploadFile(localStorage.token, file, metadata, process);
 
 				if (uploadedFile) {
-					console.log('File upload completed:', {
+					console.log('File upload started processing:', {
 						id: uploadedFile.id,
 						name: fileItem.name,
 						collection: uploadedFile?.meta?.collection_name
@@ -600,7 +621,8 @@
 						toast.warning(uploadedFile.error);
 					}
 
-					fileItem.status = 'uploaded';
+					// Update with server-assigned ID, keep status as 'uploading'
+					// Socket.IO 'file:status' event will update to 'uploaded' when processing completes
 					fileItem.file = uploadedFile;
 					fileItem.id = uploadedFile.id;
 					fileItem.collection_name =
@@ -974,6 +996,9 @@
 		dropzoneElement?.addEventListener('dragleave', onDragLeave);
 
 		await tools.set(await getTools(localStorage.token));
+
+		// Listen for file processing status events via Socket.IO
+		$socket?.on('file:status', handleFileStatus);
 	});
 
 	onDestroy(() => {
@@ -991,6 +1016,9 @@
 			dropzoneElement?.removeEventListener('drop', onDrop);
 			dropzoneElement?.removeEventListener('dragleave', onDragLeave);
 		}
+
+		// Clean up file status listener
+		$socket?.off('file:status', handleFileStatus);
 	});
 </script>
 

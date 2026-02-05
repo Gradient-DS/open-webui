@@ -312,7 +312,7 @@
 			});
 
 			if (uploadedFile) {
-				console.log(uploadedFile);
+				console.log('File upload started, waiting for processing:', uploadedFile);
 				fileItems = fileItems.map((item) => {
 					if (item.itemId === fileItem.itemId) {
 						item.id = uploadedFile.id;
@@ -324,9 +324,9 @@
 					console.warn('File upload warning:', uploadedFile.error);
 					toast.warning(uploadedFile.error);
 					fileItems = fileItems.filter((file) => file.id !== uploadedFile.id);
-				} else {
-					await addFileHandler(uploadedFile.id);
 				}
+				// Don't call addFileHandler here - Socket.IO 'file:status' event will trigger it
+				// when processing completes
 			} else {
 				toast.error($i18n.t('Failed to upload file.'));
 			}
@@ -676,6 +676,146 @@
 		return '\n' + lines.join('\n');
 	};
 
+	// Batched success toast for file uploads - tracks completed files until all uploads finish
+	let successfulFileCount = 0;
+
+	const showBatchedSuccessToast = () => {
+		if (successfulFileCount > 0) {
+			const count = successfulFileCount;
+			successfulFileCount = 0;
+			toast.success(
+				count === 1
+					? $i18n.t('File added successfully.')
+					: $i18n.t('{{count}} files successfully added.', { count })
+			);
+		}
+	};
+
+	// Socket.IO handler for file processing status updates
+	const handleFileStatus = async (data: {
+		file_id: string;
+		status: string;
+		error?: string;
+		collection_name?: string;
+	}) => {
+		if (!fileItems) return;
+
+		const idx = fileItems.findIndex((f) => f.id === data.file_id);
+		if (idx >= 0) {
+			if (data.status === 'completed') {
+				fileItems[idx].status = 'uploaded';
+				// Now that file is processed, add it to the knowledge base
+				await addFileHandler(data.file_id);
+				successfulFileCount++;
+			} else if (data.status === 'failed') {
+				fileItems[idx].status = 'error';
+				fileItems[idx].error = data.error || 'Processing failed';
+				toast.error(`File processing failed: ${data.error || 'Unknown error'}`);
+				// Remove failed file from the list
+				fileItems = fileItems.filter((file) => file.id !== data.file_id);
+			}
+			fileItems = fileItems; // Trigger reactivity
+
+			// Check if all files are done (no more 'uploading' status)
+			const stillUploading = fileItems.some((f) => f.status === 'uploading');
+			if (!stillUploading) {
+				showBatchedSuccessToast();
+			}
+		}
+	};
+
+	// Socket.IO handler for OneDrive file processing started (shows file with loading state)
+	const handleOneDriveFileProcessing = (data: {
+		knowledge_id: string;
+		file: {
+			item_id: string;
+			name: string;
+			size?: number;
+		};
+	}) => {
+		// Only process events for the current knowledge base
+		if (data.knowledge_id !== knowledge?.id) {
+			return;
+		}
+
+		// Use onedrive-{item_id} as the file ID (matches backend pattern)
+		const fileId = `onedrive-${data.file.item_id}`;
+
+		// Check if file is already in the list
+		if (fileItems?.some((f) => f.id === fileId || f.itemId === fileId)) {
+			return;
+		}
+
+		// Add the file to the list with 'uploading' status
+		const newFileItem = {
+			type: 'file',
+			file: null,
+			id: fileId,
+			url: '',
+			name: data.file.name,
+			size: data.file.size || 0,
+			status: 'uploading',
+			error: '',
+			itemId: fileId
+		};
+
+		// Add to beginning of list
+		fileItems = [newFileItem, ...(fileItems ?? [])];
+		fileItemsTotal = (fileItemsTotal ?? 0) + 1;
+
+		console.log('OneDrive file processing started:', data.file.name);
+	};
+
+	// Socket.IO handler for OneDrive file added events (updates status to uploaded)
+	const handleOneDriveFileAdded = (data: {
+		knowledge_id: string;
+		file: {
+			id: string;
+			filename: string;
+			meta?: {
+				name?: string;
+				content_type?: string;
+				size?: number;
+				source?: string;
+			};
+			created_at?: number;
+			updated_at?: number;
+		};
+	}) => {
+		// Only process events for the current knowledge base
+		if (data.knowledge_id !== knowledge?.id) {
+			return;
+		}
+
+		// Find existing file item and update status
+		const idx = fileItems?.findIndex((f) => f.id === data.file.id);
+		if (idx !== undefined && idx >= 0 && fileItems) {
+			// Update existing item to 'uploaded' status
+			fileItems[idx].status = 'uploaded';
+			fileItems[idx].file = data.file;
+			fileItems[idx].name = data.file.filename;
+			fileItems[idx].size = data.file.meta?.size || fileItems[idx].size;
+			fileItems = fileItems; // Trigger reactivity
+			console.log('OneDrive file completed:', data.file.filename);
+		} else {
+			// File not in list yet (edge case), add it
+			const newFileItem = {
+				type: 'file',
+				file: data.file,
+				id: data.file.id,
+				url: '',
+				name: data.file.filename,
+				size: data.file.meta?.size || 0,
+				status: 'uploaded',
+				error: '',
+				itemId: data.file.id
+			};
+			fileItems = [newFileItem, ...(fileItems ?? [])];
+			fileItemsTotal = (fileItemsTotal ?? 0) + 1;
+			console.log('OneDrive file added:', data.file.filename);
+		}
+	};
+
 	// Socket.IO handler for real-time sync progress updates
 	const handleOneDriveSyncProgress = async (data: {
 		knowledge_id: string;
@@ -753,8 +893,11 @@
 		});
 
 		if (res) {
-			toast.success($i18n.t('File added successfully.'));
-			init();
+			// Success toast is batched in handleFileStatus
+			// Just update the knowledge object if needed
+			if (res.knowledge) {
+				knowledge = res.knowledge;
+			}
 		} else {
 			toast.error($i18n.t('Failed to add file.'));
 			fileItems = fileItems.filter((file) => file.id !== fileId);
@@ -978,6 +1121,13 @@
 
 		// Listen for OneDrive sync progress events via Socket.IO
 		$socket?.on('onedrive:sync:progress', handleOneDriveSyncProgress);
+
+		// Listen for OneDrive file processing/added events for progressive UI updates
+		$socket?.on('onedrive:file:processing', handleOneDriveFileProcessing);
+		$socket?.on('onedrive:file:added', handleOneDriveFileAdded);
+
+		// Listen for file processing status events via Socket.IO
+		$socket?.on('file:status', handleFileStatus);
 	});
 
 	onDestroy(() => {
@@ -989,6 +1139,13 @@
 
 		// Clean up OneDrive sync progress listener
 		$socket?.off('onedrive:sync:progress', handleOneDriveSyncProgress);
+
+		// Clean up OneDrive file processing/added listeners
+		$socket?.off('onedrive:file:processing', handleOneDriveFileProcessing);
+		$socket?.off('onedrive:file:added', handleOneDriveFileAdded);
+
+		// Clean up file status listener
+		$socket?.off('file:status', handleFileStatus);
 	});
 
 	const decodeString = (str: string) => {
@@ -1044,9 +1201,8 @@
 	hidden
 	on:change={async () => {
 		if (inputFiles && inputFiles.length > 0) {
-			for (const file of inputFiles) {
-				await uploadFileHandler(file);
-			}
+			// Fire all uploads in parallel
+			await Promise.all(Array.from(inputFiles).map((file) => uploadFileHandler(file)));
 
 			inputFiles = null;
 			const fileInputElement = document.getElementById('files-input');

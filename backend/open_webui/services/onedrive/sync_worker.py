@@ -21,6 +21,7 @@ from open_webui.storage.provider import Storage
 from open_webui.config import (
     ONEDRIVE_MAX_FILES_PER_SYNC,
     ONEDRIVE_MAX_FILE_SIZE_MB,
+    FILE_PROCESSING_MAX_CONCURRENT,
 )
 
 log = logging.getLogger(__name__)
@@ -443,42 +444,122 @@ class OneDriveSyncWorker:
             total_files = len(all_files_to_process)
             log.info(f"Total files to process: {total_files}")
 
-            # Process all files
-            for i, file_info in enumerate(all_files_to_process):
-                # Check for cancellation before processing each file
-                if self._check_cancelled():
-                    log.info(f"Sync cancelled by user for knowledge {self.knowledge_id}")
-                    await self._update_sync_status(
-                        "cancelled",
-                        i,
-                        total_files,
-                        "",
-                        "Sync cancelled by user",
-                        total_processed,
-                        total_failed,
-                        total_deleted,
-                        failed_files,
-                    )
-                    return {
-                        "files_processed": total_processed,
-                        "files_failed": total_failed,
-                        "total_found": total_files,
-                        "deleted_count": total_deleted,
-                        "cancelled": True,
-                        "failed_files": [asdict(f) for f in failed_files],
-                    }
+            # Process all files in parallel with controlled concurrency
+            max_concurrent = FILE_PROCESSING_MAX_CONCURRENT.value
+            semaphore = asyncio.Semaphore(max_concurrent)
+            processed_count = 0
+            failed_count = 0
+            results_lock = asyncio.Lock()
+            cancelled = False
 
-                await self._update_sync_status(
-                    "syncing", i + 1, total_files, file_info["name"]
-                )
-                result = await self._process_file_info(file_info)
-                if result is None:
-                    # Success
-                    total_processed += 1
-                else:
-                    # Failed - result is a FailedFile
+            async def process_with_semaphore(
+                file_info: Dict[str, Any], index: int
+            ) -> Optional[FailedFile]:
+                nonlocal processed_count, failed_count, cancelled
+
+                # Check for cancellation
+                if self._check_cancelled():
+                    cancelled = True
+                    return FailedFile(
+                        filename=file_info.get("name", "unknown"),
+                        error_type=SyncErrorType.PROCESSING_ERROR.value,
+                        error_message="Sync cancelled by user",
+                    )
+
+                async with semaphore:
+                    try:
+                        result = await self._process_file_info(file_info)
+
+                        # Update counters with lock for thread safety
+                        async with results_lock:
+                            if result is None:
+                                processed_count += 1
+                            else:
+                                failed_count += 1
+
+                            # Emit progress update
+                            await self._update_sync_status(
+                                "syncing",
+                                processed_count + failed_count,
+                                total_files,
+                                file_info.get("name", ""),
+                                files_processed=processed_count,
+                                files_failed=failed_count,
+                            )
+
+                        return result
+                    except Exception as e:
+                        log.error(f"Error processing file {file_info.get('name')}: {e}")
+                        async with results_lock:
+                            failed_count += 1
+                        return FailedFile(
+                            filename=file_info.get("name", "unknown"),
+                            error_type=SyncErrorType.PROCESSING_ERROR.value,
+                            error_message=str(e)[:100],
+                        )
+
+            log.info(
+                f"Starting parallel processing of {total_files} files "
+                f"with max {max_concurrent} concurrent"
+            )
+            start_time = time.time()
+
+            # Create tasks for all files
+            tasks = [
+                process_with_semaphore(file_info, i)
+                for i, file_info in enumerate(all_files_to_process)
+            ]
+
+            # Execute all tasks in parallel
+            results = await asyncio.gather(*tasks, return_exceptions=True)
+
+            # Process results
+            for result in results:
+                if isinstance(result, Exception):
+                    log.error(f"Unexpected error during file processing: {result}")
                     total_failed += 1
+                    failed_files.append(
+                        FailedFile(
+                            filename="unknown",
+                            error_type=SyncErrorType.PROCESSING_ERROR.value,
+                            error_message=str(result)[:100],
+                        )
+                    )
+                elif result is not None:
+                    # result is a FailedFile
                     failed_files.append(result)
+
+            total_processed = processed_count
+            total_failed = failed_count
+
+            processing_time = time.time() - start_time
+            log.info(
+                f"Parallel processing completed in {processing_time:.2f}s: "
+                f"{total_processed} succeeded, {total_failed} failed"
+            )
+
+            # Check if cancelled during processing
+            if cancelled:
+                log.info(f"Sync cancelled by user for knowledge {self.knowledge_id}")
+                await self._update_sync_status(
+                    "cancelled",
+                    total_processed + total_failed,
+                    total_files,
+                    "",
+                    "Sync cancelled by user",
+                    total_processed,
+                    total_failed,
+                    total_deleted,
+                    failed_files,
+                )
+                return {
+                    "files_processed": total_processed,
+                    "files_failed": total_failed,
+                    "total_found": total_files,
+                    "deleted_count": total_deleted,
+                    "cancelled": True,
+                    "failed_files": [asdict(f) for f in failed_files],
+                }
 
             # Save updated sources with delta links / hashes
             await self._save_sources()
@@ -569,6 +650,19 @@ class OneDriveSyncWorker:
         name = item["name"]
 
         log.info(f"Processing file: {name} (id: {item_id})")
+
+        # Emit processing started event for progressive UI updates
+        from open_webui.services.onedrive.sync_events import emit_file_processing
+
+        await emit_file_processing(
+            user_id=self.user_id,
+            knowledge_id=self.knowledge_id,
+            file_info={
+                "item_id": item_id,
+                "name": name,
+                "size": item.get("size", 0),
+            },
+        )
 
         # Download file content
         try:
@@ -677,6 +771,24 @@ class OneDriveSyncWorker:
                 self.user_id,
             )
             log.info(f"Added file to knowledge base: {file_id}")
+
+            # Emit file added event for progressive UI updates
+            file_record = Files.get_file_by_id(file_id)
+            if file_record:
+                from open_webui.services.onedrive.sync_events import emit_file_added
+
+                await emit_file_added(
+                    user_id=self.user_id,
+                    knowledge_id=self.knowledge_id,
+                    file_data={
+                        "id": file_record.id,
+                        "filename": file_record.filename,
+                        "meta": file_record.meta,
+                        "created_at": file_record.created_at,
+                        "updated_at": file_record.updated_at,
+                    },
+                )
+
             return None  # Success
 
         except Exception as e:
