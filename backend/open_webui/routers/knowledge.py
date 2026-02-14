@@ -21,6 +21,7 @@ from open_webui.routers.retrieval import (
     BatchProcessFilesForm,
 )
 from open_webui.storage.provider import Storage
+from open_webui.services.deletion import DeletionService
 
 from open_webui.constants import ERROR_MESSAGES
 from open_webui.utils.auth import get_verified_user
@@ -664,33 +665,18 @@ def remove_file_from_knowledge_by_id(
             log.warning(f"Failed to clear OneDrive delta_links: {e}")
 
     if delete_file:
-        try:
-            # Remove the file's collection from vector database
-            file_collection = f"file-{form_data.file_id}"
-            if VECTOR_DB_CLIENT.has_collection(collection_name=file_collection):
-                VECTOR_DB_CLIENT.delete_collection(collection_name=file_collection)
-        except Exception as e:
-            log.debug("This was most likely caused by bypassing embedding processing")
-            log.debug(e)
-            pass
-
-        # Delete file from database
-        Files.delete_file_by_id(form_data.file_id)
+        file_report = DeletionService.delete_file(form_data.file_id)
+        if file_report.has_errors:
+            log.warning(f"Errors deleting file {form_data.file_id}: {file_report.errors}")
 
     # For non-local KBs: check if this was the last reference to the file
     if not delete_file and knowledge.type != "local":
         remaining_refs = Knowledges.get_knowledge_files_by_file_id(form_data.file_id)
         if not remaining_refs:
             log.info(f"Cleaning up orphaned external file {form_data.file_id}")
-            try:
-                file_collection = f"file-{form_data.file_id}"
-                if VECTOR_DB_CLIENT.has_collection(collection_name=file_collection):
-                    VECTOR_DB_CLIENT.delete_collection(
-                        collection_name=file_collection
-                    )
-            except Exception as e:
-                log.debug(f"Error deleting orphaned file collection: {e}")
-            Files.delete_file_by_id(form_data.file_id)
+            file_report = DeletionService.delete_file(form_data.file_id)
+            if file_report.has_errors:
+                log.warning(f"Errors deleting orphaned file {form_data.file_id}: {file_report.errors}")
 
     if knowledge:
         return KnowledgeFilesResponse(
@@ -781,15 +767,9 @@ async def delete_knowledge_by_id(
         remaining_refs = Knowledges.get_knowledge_files_by_file_id(file_id)
         if not remaining_refs:
             log.info(f"Cleaning up orphaned file {file_id}")
-            try:
-                file_collection = f"file-{file_id}"
-                if VECTOR_DB_CLIENT.has_collection(collection_name=file_collection):
-                    VECTOR_DB_CLIENT.delete_collection(
-                        collection_name=file_collection
-                    )
-            except Exception as e:
-                log.debug(f"Error deleting orphaned file collection: {e}")
-            Files.delete_file_by_id(file_id)
+            file_report = DeletionService.delete_file(file_id)
+            if file_report.has_errors:
+                log.warning(f"Errors deleting orphaned file {file_id}: {file_report.errors}")
 
     return result
 

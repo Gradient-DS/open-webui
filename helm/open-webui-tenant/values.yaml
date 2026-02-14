@@ -312,6 +312,16 @@ openWebui:
     enableAutoArchiveOnSelfDelete: "false"
     autoArchiveRetentionDays: "365"  # 1 year for self-deletions
 
+    # Storage Provider
+    # Set to "s3" to use S3-compatible object storage for file uploads
+    # Leave empty for default local storage (PVC)
+    storageProvider: ""
+    s3BucketName: ""
+    s3RegionName: ""
+    s3EndpointUrl: ""             # For S3-compatible storage (e.g., https://object.previder.nl)
+    s3KeyPrefix: ""               # Optional prefix for all keys
+    s3EnableTagging: "false"
+
     # Telemetry (disabled)
     scarfNoAnalytics: "true"
     doNotTrack: "true"
@@ -456,6 +466,10 @@ secrets:
   # External Services API Keys (optional)
   externalDocumentLoaderApiKey: ""
   ragExternalRerankerApiKey: ""
+
+  # S3 Storage (only if storageProvider is "s3")
+  s3AccessKeyId: ""
+  s3SecretAccessKey: ""
 
   # PostgreSQL
   postgresPassword: ""

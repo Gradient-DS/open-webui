@@ -231,6 +231,26 @@ data:
   ENABLE_AUTO_ARCHIVE_ON_SELF_DELETE: {{ .Values.openWebui.config.enableAutoArchiveOnSelfDelete | quote }}
   AUTO_ARCHIVE_RETENTION_DAYS: {{ .Values.openWebui.config.autoArchiveRetentionDays | quote }}
 
+  # Storage Provider (S3)
+  {{- if .Values.openWebui.config.storageProvider }}
+  STORAGE_PROVIDER: {{ .Values.openWebui.config.storageProvider | quote }}
+  {{- end }}
+  {{- if .Values.openWebui.config.s3BucketName }}
+  S3_BUCKET_NAME: {{ .Values.openWebui.config.s3BucketName | quote }}
+  {{- end }}
+  {{- if .Values.openWebui.config.s3RegionName }}
+  S3_REGION_NAME: {{ .Values.openWebui.config.s3RegionName | quote }}
+  {{- end }}
+  {{- if .Values.openWebui.config.s3EndpointUrl }}
+  S3_ENDPOINT_URL: {{ .Values.openWebui.config.s3EndpointUrl | quote }}
+  {{- end }}
+  {{- if .Values.openWebui.config.s3KeyPrefix }}
+  S3_KEY_PREFIX: {{ .Values.openWebui.config.s3KeyPrefix | quote }}
+  {{- end }}
+  {{- if .Values.openWebui.config.s3EnableTagging }}
+  S3_ENABLE_TAGGING: {{ .Values.openWebui.config.s3EnableTagging | quote }}
+  {{- end }}
+
   # Telemetry
   SCARF_NO_ANALYTICS: {{ .Values.openWebui.config.scarfNoAnalytics | quote }}
   DO_NOT_TRACK: {{ .Values.openWebui.config.doNotTrack | quote }}
