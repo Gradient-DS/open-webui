@@ -69,9 +69,6 @@
 				<Folder className="size-3" strokeWidth="2" />
 			</div>
 			<span class="line-clamp-1 text-xs font-medium">{node.name}</span>
-			<span class="text-xs text-gray-400 shrink-0">
-				&middot; {$i18n.t('{{count}} files in folder', { count: totalFiles })}
-			</span>
 		</button>
 	</div>
 

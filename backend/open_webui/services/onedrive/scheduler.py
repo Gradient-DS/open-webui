@@ -88,7 +88,7 @@ async def _execute_due_syncs():
     provider = get_sync_provider("onedrive")
 
     for kb in kbs:
-        if not _is_sync_due(kb, now, interval_seconds):
+        if not _is_sync_due(kb, now, interval_seconds, provider):
             continue
 
         log.info("Starting scheduled sync for KB %s (%s)", kb.id, kb.name)
@@ -121,7 +121,7 @@ async def _execute_due_syncs():
             _update_sync_status(kb.id, "failed", error="Unexpected scheduler error")
 
 
-def _is_sync_due(kb: KnowledgeModel, now: float, interval_seconds: float) -> bool:
+def _is_sync_due(kb: KnowledgeModel, now: float, interval_seconds: float, sync_provider=None) -> bool:
     """Check if a knowledge base is due for scheduled sync."""
     meta = kb.meta or {}
     sync_info = meta.get("onedrive_sync", {})
@@ -130,8 +130,8 @@ def _is_sync_due(kb: KnowledgeModel, now: float, interval_seconds: float) -> boo
     if not sync_info.get("sources"):
         return False
 
-    # Skip if no stored token
-    if not sync_info.get("has_stored_token"):
+    # Skip if no stored token (per-user DB lookup)
+    if sync_provider and not sync_provider.get_token_manager().has_stored_token(kb.user_id, kb.id):
         return False
 
     # Skip if needs re-authorization

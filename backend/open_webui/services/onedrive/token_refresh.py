@@ -37,7 +37,7 @@ async def get_valid_access_token(
     If the stored token is expired or near-expiry, automatically refreshes it.
     Returns None if no token exists or refresh fails (token revoked).
     """
-    provider = f"onedrive:{knowledge_id}"
+    provider = "onedrive"
     session = OAuthSessions.get_session_by_provider_and_user_id(provider, user_id)
     if not session:
         return None
@@ -56,7 +56,7 @@ async def get_valid_access_token(
     if new_token_data is None:
         # Refresh failed — token likely revoked
         log.warning("Token refresh failed for user %s, KB %s — marking as needs_reauth", user_id, knowledge_id)
-        _mark_needs_reauth(knowledge_id)
+        _mark_needs_reauth(user_id)
         return None
 
     # Update stored token
@@ -122,17 +122,17 @@ async def _refresh_token(token_data: dict) -> Optional[dict]:
     return new_token_data
 
 
-def _mark_needs_reauth(knowledge_id: str):
-    """Mark a knowledge base as needing re-authorization."""
+def _mark_needs_reauth(user_id: str):
+    """Mark ALL OneDrive knowledge bases for a user as needing re-authorization."""
     from open_webui.models.knowledge import Knowledges
 
-    knowledge = Knowledges.get_knowledge_by_id(id=knowledge_id)
-    if not knowledge:
-        return
-
-    meta = knowledge.meta or {}
-    sync_info = meta.get("onedrive_sync", {})
-    sync_info["needs_reauth"] = True
-    sync_info["has_stored_token"] = False
-    meta["onedrive_sync"] = sync_info
-    Knowledges.update_knowledge_meta_by_id(knowledge_id, meta)
+    kbs = Knowledges.get_knowledge_bases_by_type("onedrive")
+    for kb in kbs:
+        if kb.user_id != user_id:
+            continue
+        meta = kb.meta or {}
+        sync_info = meta.get("onedrive_sync", {})
+        sync_info["needs_reauth"] = True
+        sync_info["has_stored_token"] = False
+        meta["onedrive_sync"] = sync_info
+        Knowledges.update_knowledge_meta_by_id(kb.id, meta)

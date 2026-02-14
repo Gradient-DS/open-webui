@@ -1248,7 +1248,7 @@
 			knowledgeId = knowledge?.id;
 
 			// Check background sync token status for OneDrive KBs
-			if (knowledge?.type === 'onedrive' && knowledge?.meta?.onedrive_sync?.sources?.length) {
+			if (knowledge?.type === 'onedrive') {
 				try {
 					const status = await getTokenStatus(localStorage.token, knowledge.id);
 					backgroundSyncAuthorized = status.has_token && !status.is_expired;

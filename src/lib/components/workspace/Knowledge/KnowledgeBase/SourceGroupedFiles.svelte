@@ -146,7 +146,7 @@
 					</div>
 					<span class="line-clamp-1 font-medium">{source.name}</span>
 					<span class="text-xs text-gray-400 shrink-0">
-						{$i18n.t('{{count}} files in folder', { count: totalFileCount })}
+						&middot; {$i18n.t('{{count}} files in folder', { count: totalFileCount })}
 					</span>
 				</button>
 

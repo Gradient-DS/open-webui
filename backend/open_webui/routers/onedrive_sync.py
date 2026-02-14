@@ -437,17 +437,19 @@ async def handle_onedrive_auth_callback(request: Request):
     )
 
     if result["success"]:
-        # Update knowledge meta to reflect stored token
-        knowledge_id = result["knowledge_id"]
-        knowledge = Knowledges.get_knowledge_by_id(id=knowledge_id)
-        if knowledge:
-            meta = knowledge.meta or {}
+        # Update ALL OneDrive KBs for this user to reflect stored token
+        user_id = flow["user_id"]
+        all_onedrive_kbs = Knowledges.get_knowledge_bases_by_type("onedrive")
+        for kb in all_onedrive_kbs:
+            if kb.user_id != user_id:
+                continue
+            meta = kb.meta or {}
             sync_info = meta.get("onedrive_sync", {})
             sync_info["has_stored_token"] = True
             sync_info["token_stored_at"] = int(time.time())
             sync_info["needs_reauth"] = False
             meta["onedrive_sync"] = sync_info
-            Knowledges.update_knowledge_meta_by_id(knowledge_id, meta)
+            Knowledges.update_knowledge_meta_by_id(kb.id, meta)
 
     return _auth_callback_html(
         success=result["success"],
@@ -489,7 +491,7 @@ async def get_token_status(
     if not knowledge or knowledge.user_id != user.id:
         raise HTTPException(404, "Knowledge base not found")
 
-    token_data = get_stored_token(user.id, knowledge_id)
+    token_data = get_stored_token(user.id)
     if not token_data:
         return {"has_token": False}
 
@@ -519,15 +521,19 @@ async def revoke_token(
     if not knowledge or knowledge.user_id != user.id:
         raise HTTPException(404, "Knowledge base not found")
 
-    deleted = delete_stored_token(user.id, knowledge_id)
+    deleted = delete_stored_token(user.id)
 
-    # Update meta
-    meta = knowledge.meta or {}
-    sync_info = meta.get("onedrive_sync", {})
-    sync_info["has_stored_token"] = False
-    sync_info.pop("token_stored_at", None)
-    sync_info["needs_reauth"] = False
-    meta["onedrive_sync"] = sync_info
-    Knowledges.update_knowledge_meta_by_id(knowledge_id, meta)
+    # Clear has_stored_token on ALL OneDrive KBs for this user
+    all_onedrive_kbs = Knowledges.get_knowledge_bases_by_type("onedrive")
+    for kb in all_onedrive_kbs:
+        if kb.user_id != user.id:
+            continue
+        meta = kb.meta or {}
+        sync_info = meta.get("onedrive_sync", {})
+        sync_info["has_stored_token"] = False
+        sync_info.pop("token_stored_at", None)
+        sync_info["needs_reauth"] = False
+        meta["onedrive_sync"] = sync_info
+        Knowledges.update_knowledge_meta_by_id(kb.id, meta)
 
     return {"revoked": deleted}

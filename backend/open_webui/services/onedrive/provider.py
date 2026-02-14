@@ -30,10 +30,10 @@ class OneDriveTokenManager(TokenManager):
         return await _get_valid_access_token(user_id, knowledge_id)
 
     def has_stored_token(self, user_id: str, knowledge_id: str) -> bool:
-        return get_stored_token(user_id, knowledge_id) is not None
+        return get_stored_token(user_id) is not None
 
     def delete_token(self, user_id: str, knowledge_id: str) -> bool:
-        return delete_stored_token(user_id, knowledge_id)
+        return delete_stored_token(user_id)
 
 
 class OneDriveSyncProvider(SyncProvider):
