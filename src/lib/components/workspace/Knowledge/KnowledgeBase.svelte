@@ -38,7 +38,7 @@
 		searchKnowledgeFilesById
 	} from '$lib/apis/knowledge';
 	import { processWeb, processYoutubeVideo } from '$lib/apis/retrieval';
-	import { startOneDriveSyncItems, getSyncStatus, cancelSync, getTokenStatus, type SyncStatusResponse, type SyncItem, type FailedFile, type SyncErrorType } from '$lib/apis/onedrive';
+	import { startOneDriveSyncItems, getSyncStatus, cancelSync, getTokenStatus, removeSource, type SyncStatusResponse, type SyncItem, type FailedFile, type SyncErrorType } from '$lib/apis/onedrive';
 	import { openOneDriveItemPicker, getGraphApiToken } from '$lib/utils/onedrive-file-picker';
 	import { WEBUI_API_BASE_URL } from '$lib/constants';
 
@@ -46,6 +46,7 @@
 
 	import Spinner from '$lib/components/common/Spinner.svelte';
 	import Files from './KnowledgeBase/Files.svelte';
+	import SourceGroupedFiles from './KnowledgeBase/SourceGroupedFiles.svelte';
 	import AddFilesPlaceholder from '$lib/components/AddFilesPlaceholder.svelte';
 
 	import AddContentMenu from './KnowledgeBase/AddContentMenu.svelte';
@@ -148,6 +149,7 @@
 			direction = null;
 		}
 
+		const isOneDrive = knowledge?.type === 'onedrive';
 		const res = await searchKnowledgeFilesById(
 			localStorage.token,
 			knowledge.id,
@@ -155,7 +157,8 @@
 			viewOption,
 			sortKey,
 			direction,
-			currentPage
+			currentPage,
+			isOneDrive ? 250 : null
 		).catch(() => {
 			return null;
 		});
@@ -558,6 +561,12 @@
 				user_token: localStorage.token
 			});
 
+			// Refresh knowledge to get updated sources (saved by backend before sync starts)
+			const updatedKnowledge = await getKnowledgeById(localStorage.token, id);
+			if (updatedKnowledge) {
+				knowledge = updatedKnowledge;
+			}
+
 			toast.success($i18n.t('OneDrive sync started'));
 
 			// Poll for status
@@ -748,6 +757,8 @@
 			item_id: string;
 			name: string;
 			size?: number;
+			source_item_id?: string;
+			relative_path?: string;
 		};
 	}) => {
 		// Only process events for the current knowledge base
@@ -773,7 +784,12 @@
 			size: data.file.size || 0,
 			status: 'uploading',
 			error: '',
-			itemId: fileId
+			itemId: fileId,
+			meta: {
+				source_item_id: data.file.source_item_id,
+				source: 'onedrive',
+				relative_path: data.file.relative_path
+			}
 		};
 
 		// Add to beginning of list
@@ -794,6 +810,8 @@
 				content_type?: string;
 				size?: number;
 				source?: string;
+				source_item_id?: string;
+				relative_path?: string;
 			};
 			created_at?: number;
 			updated_at?: number;
@@ -812,6 +830,7 @@
 			fileItems[idx].file = data.file;
 			fileItems[idx].name = data.file.filename;
 			fileItems[idx].size = data.file.meta?.size || fileItems[idx].size;
+			fileItems[idx].meta = data.file.meta;
 			fileItems = fileItems; // Trigger reactivity
 			console.log('OneDrive file completed:', data.file.filename);
 		} else {
@@ -825,7 +844,8 @@
 				size: data.file.meta?.size || 0,
 				status: 'uploaded',
 				error: '',
-				itemId: data.file.id
+				itemId: data.file.id,
+				meta: data.file.meta
 			};
 			fileItems = [newFileItem, ...(fileItems ?? [])];
 			fileItemsTotal = (fileItemsTotal ?? 0) + 1;
@@ -929,11 +949,13 @@
 			'width=600,height=700,scrollbars=yes'
 		);
 
+		let messageReceived = false;
+
 		// Listen for postMessage from callback
 		const handleMessage = (event: MessageEvent) => {
-			if (event.origin !== window.location.origin) return;
 			if (event.data?.type !== 'onedrive_auth_callback') return;
 
+			messageReceived = true;
 			window.removeEventListener('message', handleMessage);
 
 			if (event.data.success) {
@@ -947,11 +969,25 @@
 
 		window.addEventListener('message', handleMessage);
 
-		// Cleanup if popup is closed without completing
-		const checkClosed = setInterval(() => {
+		// When popup closes, check token status as fallback (postMessage may fail due to origin mismatch)
+		const checkClosed = setInterval(async () => {
 			if (popup?.closed) {
 				clearInterval(checkClosed);
 				window.removeEventListener('message', handleMessage);
+
+				if (!messageReceived) {
+					try {
+						const status = await getTokenStatus(localStorage.token, knowledge.id);
+						if (status.has_token && !status.is_expired) {
+							backgroundSyncAuthorized = true;
+							backgroundSyncNeedsReauth = false;
+							toast.success($i18n.t('Background sync authorized'));
+						}
+					} catch (e) {
+						console.warn('Failed to check background sync token status:', e);
+						toast.error($i18n.t('Failed to check background sync status'));
+					}
+				}
 			}
 		}, 500);
 	};
@@ -971,6 +1007,27 @@
 		} else {
 			toast.error($i18n.t('Failed to add file.'));
 			fileItems = fileItems.filter((file) => file.id !== fileId);
+		}
+	};
+
+	const removeSourceHandler = async (itemId: string, sourceName: string) => {
+		try {
+			const result = await removeSource(localStorage.token, knowledge.id, itemId);
+			toast.success($i18n.t('Source "{{name}}" removed. {{count}} file(s) cleaned up.', {
+				name: result.source_name,
+				count: result.files_removed
+			}));
+			// Refresh knowledge metadata and file list
+			const res = await getKnowledgeById(localStorage.token, id);
+			if (res) {
+				knowledge = res;
+			}
+			await init();
+		} catch (e) {
+			console.error('Error removing source:', e);
+			toast.error($i18n.t('Failed to remove source: {{error}}', {
+				error: e instanceof Error ? e.message : String(e)
+			}));
 		}
 	};
 
@@ -1196,8 +1253,9 @@
 					const status = await getTokenStatus(localStorage.token, knowledge.id);
 					backgroundSyncAuthorized = status.has_token && !status.is_expired;
 					backgroundSyncNeedsReauth = status.needs_reauth ?? false;
-				} catch {
-					// Silently fail — token status is informational
+				} catch (e) {
+					console.warn('Failed to check background sync token status:', e);
+					toast.error($i18n.t('Failed to check background sync status'));
 				}
 			}
 
@@ -1604,32 +1662,63 @@
 							<div class="w-full h-full flex flex-col min-h-full">
 								{#if fileItems.length > 0}
 									<div class=" flex overflow-y-auto h-full w-full scrollbar-hidden text-xs">
-										<Files
-											files={fileItems}
-											{knowledge}
-											{selectedFileId}
-											onClick={(fileId) => {
-												selectedFileId = fileId;
+										{#if knowledge?.type === 'onedrive' && knowledge?.meta?.onedrive_sync?.sources?.length}
+											<SourceGroupedFiles
+												sources={knowledge.meta.onedrive_sync.sources}
+												files={fileItems}
+												{knowledge}
+												{selectedFileId}
+												onClick={(fileId) => {
+													selectedFileId = fileId;
 
-												if (fileItems) {
-													const file = fileItems.find((file) => file.id === selectedFileId);
-													if (file) {
-														fileSelectHandler(file);
-													} else {
-														selectedFile = null;
+													if (fileItems) {
+														const file = fileItems.find((file) => file.id === selectedFileId);
+														if (file) {
+															fileSelectHandler(file);
+														} else {
+															selectedFile = null;
+														}
 													}
-												}
-											}}
-											onDelete={(fileId) => {
-												selectedFileId = null;
-												selectedFile = null;
+												}}
+												onRemoveSource={(itemId, sourceName) => {
+													selectedFileId = null;
+													selectedFile = null;
+													removeSourceHandler(itemId, sourceName);
+												}}
+												onDelete={(fileId) => {
+													selectedFileId = null;
+													selectedFile = null;
+													deleteFileHandler(fileId);
+												}}
+											/>
+										{:else}
+											<Files
+												files={fileItems}
+												{knowledge}
+												{selectedFileId}
+												onClick={(fileId) => {
+													selectedFileId = fileId;
 
-												deleteFileHandler(fileId);
-											}}
-										/>
+													if (fileItems) {
+														const file = fileItems.find((file) => file.id === selectedFileId);
+														if (file) {
+															fileSelectHandler(file);
+														} else {
+															selectedFile = null;
+														}
+													}
+												}}
+												onDelete={(fileId) => {
+													selectedFileId = null;
+													selectedFile = null;
+
+													deleteFileHandler(fileId);
+												}}
+											/>
+										{/if}
 									</div>
 
-									{#if fileItemsTotal > 30}
+									{#if knowledge?.type !== 'onedrive' && fileItemsTotal > 30}
 										<Pagination bind:page={currentPage} count={fileItemsTotal} perPage={30} />
 									{/if}
 								{:else}

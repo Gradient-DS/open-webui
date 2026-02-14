@@ -38,6 +38,12 @@ class SyncItemsRequest(BaseModel):
     access_token: str
 
 
+class RemoveSourceRequest(BaseModel):
+    """Request to remove a source from a KB's sync configuration."""
+
+    item_id: str
+
+
 class FailedFileInfo(BaseModel):
     """Information about a file that failed to sync."""
 
@@ -217,6 +223,127 @@ async def cancel_sync(
     log.info(f"Sync cancelled for knowledge base {knowledge_id}")
 
     return {"message": "Sync cancelled", "knowledge_id": knowledge_id}
+
+
+def _remove_files_for_source(
+    knowledge_id: str,
+    source_item_id: str,
+    source_drive_id: str,
+) -> int:
+    """Remove all files associated with a specific source from a KB.
+
+    Matches files by source_item_id (preferred) or falls back to drive_id
+    for legacy files that don't have source_item_id.
+    """
+    from open_webui.retrieval.vector.factory import VECTOR_DB_CLIENT
+    from open_webui.models.files import Files
+
+    files = Knowledges.get_files_by_id(knowledge_id)
+    if not files:
+        return 0
+
+    removed_count = 0
+    for file in files:
+        if not file.id.startswith("onedrive-"):
+            continue
+
+        file_meta = file.meta or {}
+        file_source_item_id = file_meta.get("source_item_id")
+
+        # Match by source_item_id if available, otherwise fall back to drive_id
+        if file_source_item_id:
+            if file_source_item_id != source_item_id:
+                continue
+        else:
+            # Legacy file without source_item_id: match by drive_id
+            if file_meta.get("onedrive_drive_id") != source_drive_id:
+                continue
+
+        # Remove KnowledgeFile association
+        Knowledges.remove_file_from_knowledge_by_id(knowledge_id, file.id)
+
+        # Remove vectors from KB collection
+        try:
+            VECTOR_DB_CLIENT.delete(
+                collection_name=knowledge_id,
+                filter={"file_id": file.id},
+            )
+        except Exception as e:
+            log.warning(f"Failed to remove vectors for {file.id}: {e}")
+
+        # Check for orphans (no other KB references this file)
+        remaining = Knowledges.get_knowledge_files_by_file_id(file.id)
+        if not remaining:
+            try:
+                VECTOR_DB_CLIENT.delete_collection(f"file-{file.id}")
+            except Exception:
+                pass
+            Files.delete_file_by_id(file.id)
+
+        removed_count += 1
+
+    return removed_count
+
+
+@router.post("/sync/{knowledge_id}/sources/remove")
+async def remove_source(
+    knowledge_id: str,
+    request: RemoveSourceRequest,
+    user: UserModel = Depends(get_verified_user),
+):
+    """Remove a source (folder/file) from a KB's OneDrive sync configuration."""
+    knowledge = Knowledges.get_knowledge_by_id(knowledge_id)
+    if not knowledge:
+        raise HTTPException(status_code=404, detail="Knowledge base not found")
+    if knowledge.user_id != user.id:
+        raise HTTPException(status_code=403, detail="Not authorized")
+
+    meta = knowledge.meta or {}
+    sync_info = meta.get("onedrive_sync", {})
+
+    # Don't allow source removal while syncing
+    if sync_info.get("status") == "syncing":
+        raise HTTPException(
+            status_code=409,
+            detail="Cannot remove source while sync is in progress.",
+        )
+
+    sources = sync_info.get("sources", [])
+
+    # Find the source to remove
+    source_to_remove = None
+    remaining_sources = []
+    for source in sources:
+        if source["item_id"] == request.item_id:
+            source_to_remove = source
+        else:
+            remaining_sources.append(source)
+
+    if not source_to_remove:
+        raise HTTPException(status_code=404, detail="Source not found")
+
+    # Remove associated files
+    removed_count = _remove_files_for_source(
+        knowledge_id=knowledge_id,
+        source_item_id=request.item_id,
+        source_drive_id=source_to_remove.get("drive_id"),
+    )
+
+    # Update sources
+    sync_info["sources"] = remaining_sources
+    meta["onedrive_sync"] = sync_info
+    Knowledges.update_knowledge_meta_by_id(knowledge_id, meta)
+
+    log.info(
+        f"Removed source '{source_to_remove.get('name')}' from KB {knowledge_id}, "
+        f"{removed_count} files cleaned up"
+    )
+
+    return {
+        "message": "Source removed",
+        "source_name": source_to_remove.get("name"),
+        "files_removed": removed_count,
+    }
 
 
 @router.get("/synced-collections")

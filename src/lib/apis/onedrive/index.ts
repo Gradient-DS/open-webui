@@ -165,6 +165,28 @@ export async function getTokenStatus(
 	return res.json();
 }
 
+export async function removeSource(
+	token: string,
+	knowledgeId: string,
+	itemId: string
+): Promise<{ message: string; source_name: string; files_removed: number }> {
+	const res = await fetch(`${WEBUI_API_BASE_URL}/onedrive/sync/${knowledgeId}/sources/remove`, {
+		method: 'POST',
+		headers: {
+			'Content-Type': 'application/json',
+			Authorization: `Bearer ${token}`
+		},
+		body: JSON.stringify({ item_id: itemId })
+	});
+
+	if (!res.ok) {
+		const error = await res.json();
+		throw new Error(error.detail || 'Failed to remove source');
+	}
+
+	return res.json();
+}
+
 export async function revokeToken(
 	token: string,
 	knowledgeId: string

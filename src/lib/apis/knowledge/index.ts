@@ -203,7 +203,8 @@ export const searchKnowledgeFilesById = async (
 	viewOption?: string | null = null,
 	orderBy?: string | null = null,
 	direction?: string | null = null,
-	page: number = 1
+	page: number = 1,
+	limit?: number | null = null
 ) => {
 	let error = null;
 
@@ -213,6 +214,7 @@ export const searchKnowledgeFilesById = async (
 	if (orderBy) searchParams.append('order_by', orderBy);
 	if (direction) searchParams.append('direction', direction);
 	searchParams.append('page', page.toString());
+	if (limit) searchParams.append('limit', limit.toString());
 
 	const res = await fetch(
 		`${WEBUI_API_BASE_URL}/knowledge/${id}/files?${searchParams.toString()}`,

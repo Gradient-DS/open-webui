@@ -65,6 +65,10 @@ SUPPORTED_EXTENSIONS = {
     ".csv",
 }
 
+# Version tracking for folder_map schema. Bump this to force a full
+# re-enumeration of all folder sources on next sync (clears delta_link).
+FOLDER_MAP_VERSION = 1
+
 # MIME types for supported extensions
 CONTENT_TYPES = {
     ".pdf": "application/pdf",
@@ -244,6 +248,16 @@ class OneDriveSyncWorker:
         """Collect files from a folder using delta query."""
         delta_link = source.get("delta_link")
 
+        # Force full re-enumeration if folder_map is outdated or missing
+        stored_version = source.get("folder_map_version", 0)
+        if stored_version < FOLDER_MAP_VERSION:
+            log.info(
+                "Folder map version %d < %d for source %s, forcing full sync",
+                stored_version, FOLDER_MAP_VERSION, source.get("name"),
+            )
+            delta_link = None
+            source["folder_map"] = {}  # Clear stale map
+
         try:
             items, new_delta_link = await self._client.get_drive_delta(
                 source["drive_id"], source["item_id"], delta_link
@@ -261,7 +275,43 @@ class OneDriveSyncWorker:
         # Update source with new delta link
         source["delta_link"] = new_delta_link
 
-        # Separate files and deleted items
+        # Build folder ID → relative path map.
+        # Load persisted map from previous syncs (incremental deltas may omit
+        # unchanged folders, so we need the historical mapping).
+        folder_map: Dict[str, str] = source.get("folder_map", {})
+        # The source folder itself is always the root (empty relative path)
+        folder_map[source["item_id"]] = ""
+
+        # First pass: update folder_map with any folder items from delta.
+        # Delta items may arrive in any order, so we loop until no new folders
+        # can be resolved (handles nested folders whose parent appears later).
+        changed = True
+        folder_items = [
+            item for item in items
+            if "folder" in item and "@removed" not in item
+        ]
+        while changed:
+            changed = False
+            for item in folder_items:
+                parent_id = item.get("parentReference", {}).get("id", "")
+                if parent_id not in folder_map:
+                    continue
+                parent_path = folder_map[parent_id]
+                new_path = f"{parent_path}/{item['name']}" if parent_path else item["name"]
+                if folder_map.get(item["id"]) != new_path:
+                    folder_map[item["id"]] = new_path
+                    changed = True
+
+        # Handle deleted folders
+        for item in items:
+            if "folder" in item and "@removed" in item:
+                folder_map.pop(item.get("id", ""), None)
+
+        # Persist updated folder_map and version back to source
+        source["folder_map"] = folder_map
+        source["folder_map_version"] = FOLDER_MAP_VERSION
+
+        # Second pass: separate files and deleted items, compute relative paths
         files_to_process = []
         deleted_count = 0
 
@@ -270,12 +320,21 @@ class OneDriveSyncWorker:
                 await self._handle_deleted_item(item)
                 deleted_count += 1
             elif self._is_supported_file(item):
+                parent_id = item.get("parentReference", {}).get("id", "")
+                parent_path = folder_map.get(parent_id, "")
+                item_name = item.get("name", "unknown")
+                relative_path = (
+                    f"{parent_path}/{item_name}" if parent_path else item_name
+                )
+
                 files_to_process.append(
                     {
                         "item": item,
                         "drive_id": source["drive_id"],
                         "source_type": "folder",
-                        "name": item.get("name", "unknown"),
+                        "source_item_id": source["item_id"],
+                        "name": item_name,
+                        "relative_path": relative_path,
                     }
                 )
 
@@ -331,6 +390,7 @@ class OneDriveSyncWorker:
                 "item": item,
                 "drive_id": source["drive_id"],
                 "source_type": "file",
+                "source_item_id": source["item_id"],
                 "name": item.get("name", source["name"]),
             }
 
@@ -503,31 +563,41 @@ class OneDriveSyncWorker:
 
             file_meta = file.meta or {}
             file_drive_id = file_meta.get("onedrive_drive_id")
+            file_source_item_id = file_meta.get("source_item_id")
+            source_item_id = source.get("item_id")
 
-            if file_drive_id and source_drive_id and file_drive_id == source_drive_id:
-                # Remove KnowledgeFile association
-                Knowledges.remove_file_from_knowledge_by_id(
-                    self.knowledge_id, file.id
+            # Precise match by source_item_id if available
+            if file_source_item_id:
+                if file_source_item_id != source_item_id:
+                    continue
+            else:
+                # Legacy fallback: match by drive_id (may over-match for same-drive sources)
+                if not (file_drive_id and source_drive_id and file_drive_id == source_drive_id):
+                    continue
+
+            # Matched — proceed with removal
+            Knowledges.remove_file_from_knowledge_by_id(
+                self.knowledge_id, file.id
+            )
+            # Remove vectors from KB collection
+            try:
+                VECTOR_DB_CLIENT.delete(
+                    collection_name=self.knowledge_id,
+                    filter={"file_id": file.id},
                 )
-                # Remove vectors from KB collection
+            except Exception as e:
+                log.warning(f"Failed to remove vectors for {file.id}: {e}")
+
+            # Check for orphans
+            remaining = Knowledges.get_knowledge_files_by_file_id(file.id)
+            if not remaining:
                 try:
-                    VECTOR_DB_CLIENT.delete(
-                        collection_name=self.knowledge_id,
-                        filter={"file_id": file.id},
-                    )
-                except Exception as e:
-                    log.warning(f"Failed to remove vectors for {file.id}: {e}")
+                    VECTOR_DB_CLIENT.delete_collection(f"file-{file.id}")
+                except Exception:
+                    pass
+                Files.delete_file_by_id(file.id)
 
-                # Check for orphans
-                remaining = Knowledges.get_knowledge_files_by_file_id(file.id)
-                if not remaining:
-                    try:
-                        VECTOR_DB_CLIENT.delete_collection(f"file-{file.id}")
-                    except Exception:
-                        pass
-                    Files.delete_file_by_id(file.id)
-
-                removed_count += 1
+            removed_count += 1
 
         log.info(
             f"Removed {removed_count} files from KB {self.knowledge_id} "
@@ -895,8 +965,10 @@ class OneDriveSyncWorker:
         drive_id = file_info["drive_id"]
         item_id = item["id"]
         name = item["name"]
+        source_item_id = file_info.get("source_item_id")
+        relative_path = file_info.get("relative_path", name)
 
-        log.info(f"Processing file: {name} (id: {item_id})")
+        log.info(f"Processing file: {name} (id: {item_id}, relative_path: {relative_path})")
 
         # Emit processing started event for progressive UI updates
         from open_webui.services.onedrive.sync_events import emit_file_processing
@@ -908,6 +980,8 @@ class OneDriveSyncWorker:
                 "item_id": item_id,
                 "name": name,
                 "size": item.get("size", 0),
+                "source_item_id": source_item_id,
+                "relative_path": file_info.get("relative_path"),
             },
         )
 
@@ -940,6 +1014,17 @@ class OneDriveSyncWorker:
 
         if existing and existing.hash == content_hash:
             log.info(f"File {file_id} unchanged (hash match), ensuring KB association")
+
+            # Update meta with relative_path if missing or changed (migration for pre-existing files)
+            new_relative_path = file_info.get("relative_path")
+            existing_meta = existing.meta or {}
+            if new_relative_path and existing_meta.get("relative_path") != new_relative_path:
+                existing_meta["relative_path"] = new_relative_path
+                Files.update_file_by_id(
+                    file_id, FileUpdateForm(meta=existing_meta)
+                )
+                log.info(f"Updated {file_id} meta with relative_path: {new_relative_path}")
+
             # Create KnowledgeFile association if not exists
             Knowledges.add_file_to_knowledge_by_id(
                 self.knowledge_id, file_id, self.user_id
@@ -1010,6 +1095,8 @@ class OneDriveSyncWorker:
                             "source": "onedrive",
                             "onedrive_item_id": item_id,
                             "onedrive_drive_id": drive_id,
+                            "source_item_id": source_item_id,
+                            "relative_path": file_info.get("relative_path"),
                             "last_synced_at": int(time.time()),
                         },
                     ),
@@ -1032,6 +1119,8 @@ class OneDriveSyncWorker:
                         "source": "onedrive",
                         "onedrive_item_id": item_id,
                         "onedrive_drive_id": drive_id,
+                        "source_item_id": source_item_id,
+                        "relative_path": file_info.get("relative_path"),
                         "last_synced_at": int(time.time()),
                     },
                 )

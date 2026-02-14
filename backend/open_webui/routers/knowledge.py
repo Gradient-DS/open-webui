@@ -12,7 +12,7 @@ from open_webui.models.knowledge import (
     KnowledgeResponse,
     KnowledgeUserResponse,
 )
-from open_webui.models.files import Files, FileModel, FileMetadataResponse
+from open_webui.models.files import Files, FileModel, FileMetadataResponse, FileUpdateForm
 from open_webui.retrieval.vector.factory import VECTOR_DB_CLIENT
 from open_webui.routers.retrieval import (
     process_file,
@@ -393,6 +393,7 @@ async def get_knowledge_files_by_id(
     order_by: Optional[str] = None,
     direction: Optional[str] = None,
     page: Optional[int] = 1,
+    limit: Optional[int] = 30,
     user=Depends(get_verified_user),
 ):
 
@@ -415,7 +416,7 @@ async def get_knowledge_files_by_id(
 
     page = max(page, 1)
 
-    limit = 30
+    limit = min(max(limit, 1), 250)
     skip = (page - 1) * limit
 
     filter = {}
@@ -642,27 +643,84 @@ def remove_file_from_knowledge_by_id(
         log.debug(e)
         pass
 
-    # Clear OneDrive delta_links if an OneDrive file is removed
-    # This forces a full re-sync to re-add files if they're synced again
+    # When an OneDrive file from a folder source is removed, convert the
+    # folder source into individual file sources for the remaining files.
+    # This prevents the deleted file from being re-synced on the next cycle.
     if form_data.file_id.startswith("onedrive-"):
         try:
+            file_meta = file.meta or {}
+            source_item_id = file_meta.get("source_item_id")
             meta = knowledge.meta or {}
             sync_info = meta.get("onedrive_sync", {})
             sources = sync_info.get("sources", [])
-            if sources:
-                # Clear delta_link from all sources to force full re-sync
-                for source in sources:
-                    if "delta_link" in source:
-                        del source["delta_link"]
-                sync_info["sources"] = sources
-                meta["onedrive_sync"] = sync_info
-                Knowledges.update_knowledge_meta_by_id(id, meta)
-                log.info(
-                    f"Cleared OneDrive delta_links for knowledge {id} "
-                    f"after removing file {form_data.file_id}"
+
+            if source_item_id and sources:
+                # Find the folder source this file belonged to
+                folder_source = next(
+                    (s for s in sources
+                     if s.get("item_id") == source_item_id
+                     and s.get("type") == "folder"),
+                    None,
                 )
+
+                if folder_source:
+                    # Get remaining OneDrive files from the same folder source
+                    remaining_kb_files = Knowledges.get_files_by_id(id)
+                    individual_sources = []
+                    for kb_file in (remaining_kb_files or []):
+                        if not kb_file.id.startswith("onedrive-"):
+                            continue
+                        kb_file_meta = kb_file.meta or {}
+                        if kb_file_meta.get("source_item_id") != source_item_id:
+                            continue
+                        # Skip the file being deleted
+                        if kb_file.id == form_data.file_id:
+                            continue
+                        individual_sources.append({
+                            "type": "file",
+                            "drive_id": kb_file_meta.get("onedrive_drive_id", folder_source.get("drive_id", "")),
+                            "item_id": kb_file_meta.get("onedrive_item_id", kb_file.id.removeprefix("onedrive-")),
+                            "item_path": "",
+                            "name": kb_file_meta.get("name", kb_file.filename),
+                        })
+
+                    # Replace the folder source with individual file sources
+                    new_sources = [
+                        s for s in sources
+                        if s.get("item_id") != source_item_id
+                    ] + individual_sources
+
+                    sync_info["sources"] = new_sources
+                    meta["onedrive_sync"] = sync_info
+                    Knowledges.update_knowledge_meta_by_id(id, meta)
+
+                    # Update remaining files' source_item_id to point to their
+                    # own item_id (now an individual source, not the folder)
+                    for kb_file in (remaining_kb_files or []):
+                        if not kb_file.id.startswith("onedrive-"):
+                            continue
+                        kb_file_meta = kb_file.meta or {}
+                        if kb_file_meta.get("source_item_id") != source_item_id:
+                            continue
+                        if kb_file.id == form_data.file_id:
+                            continue
+                        new_source_id = kb_file_meta.get(
+                            "onedrive_item_id",
+                            kb_file.id.removeprefix("onedrive-"),
+                        )
+                        kb_file_meta["source_item_id"] = new_source_id
+                        Files.update_file_by_id(
+                            kb_file.id,
+                            FileUpdateForm(meta=kb_file_meta),
+                        )
+
+                    log.info(
+                        f"Converted folder source '{folder_source.get('name')}' to "
+                        f"{len(individual_sources)} individual file sources "
+                        f"after removing {form_data.file_id} from knowledge {id}"
+                    )
         except Exception as e:
-            log.warning(f"Failed to clear OneDrive delta_links: {e}")
+            log.warning(f"Failed to update OneDrive sources: {e}")
 
     if delete_file:
         file_report = DeletionService.delete_file(form_data.file_id)

@@ -128,8 +128,8 @@ meta={
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] Backend starts without errors: `open-webui dev`
-- [ ] No new lint errors in changed files: `npm run lint:backend`
+- [x] Backend starts without errors: `open-webui dev`
+- [x] No new lint errors in changed files: `npm run lint:backend`
 
 #### Manual Verification:
 - [ ] Sync a OneDrive folder, verify file records have `source_item_id` in their meta (check via API or DB)
@@ -316,8 +316,8 @@ else:
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] Backend starts without errors: `open-webui dev`
-- [ ] No new lint errors: `npm run lint:backend`
+- [x] Backend starts without errors: `open-webui dev`
+- [x] No new lint errors: `npm run lint:backend`
 
 #### Manual Verification:
 - [ ] Add two folders from the same drive to a KB, sync
@@ -462,8 +462,8 @@ Note: Check the exact props of the `SyncConfirmDialog` (which is imported as `Co
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] Frontend builds: `npm run build`
-- [ ] No new lint errors in changed files: `npm run lint:frontend`
+- [x] Frontend builds: `npm run build`
+- [x] No new lint errors in changed files: `npm run lint:frontend`
 
 #### Manual Verification:
 - [ ] Open an OneDrive KB with synced sources -- source chips appear below the description
@@ -520,8 +520,8 @@ Hide the delete button for OneDrive-sourced files in the file list. Show a toolt
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] Frontend builds: `npm run build`
-- [ ] No new lint errors: `npm run lint:frontend`
+- [x] Frontend builds: `npm run build`
+- [x] No new lint errors: `npm run lint:frontend`
 
 #### Manual Verification:
 - [ ] OneDrive KB: delete buttons are replaced with lock icons for OneDrive-sourced files
