@@ -161,6 +161,8 @@ class OneDriveSyncWorker:
             if sync_info.get("status") == "cancelled" and status == "syncing":
                 return
             sync_info["status"] = status
+            if status == "syncing" and not sync_info.get("sync_started_at"):
+                sync_info["sync_started_at"] = int(time.time())
             sync_info["progress_current"] = current
             sync_info["progress_total"] = total
             if error:

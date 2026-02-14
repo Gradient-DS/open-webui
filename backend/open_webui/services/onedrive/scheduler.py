@@ -138,10 +138,20 @@ def _is_sync_due(kb: KnowledgeModel, now: float, interval_seconds: float) -> boo
     if sync_info.get("needs_reauth"):
         return False
 
-    # Skip if currently syncing
+    # Skip if currently syncing (with staleness recovery)
     status = sync_info.get("status", "idle")
     if status == "syncing":
-        return False
+        sync_started = sync_info.get("sync_started_at")
+        stale_threshold = 30 * 60  # 30 minutes
+        is_stale = not sync_started or (now - sync_started) > stale_threshold
+        if is_stale:
+            log.warning(
+                "Stale sync detected for KB %s (started_at=%s), allowing re-sync",
+                kb.id,
+                sync_started,
+            )
+        else:
+            return False
 
     # Check if enough time has passed since last sync
     last_sync = sync_info.get("last_sync_at", 0)
@@ -157,6 +167,8 @@ def _update_sync_status(knowledge_id: str, status: str, error: str = None):
     meta = knowledge.meta or {}
     sync_info = meta.get("onedrive_sync", {})
     sync_info["status"] = status
+    if status == "syncing":
+        sync_info["sync_started_at"] = int(time.time())
     if error:
         sync_info["error"] = error
     meta["onedrive_sync"] = sync_info

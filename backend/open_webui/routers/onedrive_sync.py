@@ -78,12 +78,22 @@ async def sync_items(
     # Get existing sources or initialize empty list
     meta = knowledge.meta or {}
     existing_sync = meta.get("onedrive_sync", {})
-    # Prevent duplicate syncs
+    # Prevent duplicate syncs (with staleness recovery)
     if existing_sync.get("status") == "syncing":
-        raise HTTPException(
-            status_code=409,
-            detail="A sync is already in progress. Cancel it first or wait for it to complete.",
-        )
+        sync_started = existing_sync.get("sync_started_at")
+        stale_threshold = 30 * 60  # 30 minutes
+        is_stale = not sync_started or (time.time() - sync_started) > stale_threshold
+        if is_stale:
+            log.warning(
+                "Stale sync detected for KB %s (started_at=%s), allowing new sync",
+                request.knowledge_id,
+                sync_started,
+            )
+        else:
+            raise HTTPException(
+                status_code=409,
+                detail="A sync is already in progress. Cancel it first or wait for it to complete.",
+            )
     existing_sources = existing_sync.get("sources", [])
 
     # Add new items (skip duplicates by item_id)
@@ -104,8 +114,10 @@ async def sync_items(
 
     # Update metadata
     meta["onedrive_sync"] = {
+        **existing_sync,
         "sources": all_sources,
         "status": "syncing",
+        "sync_started_at": int(time.time()),
         "last_sync_at": existing_sync.get("last_sync_at"),
     }
     Knowledges.update_knowledge_meta_by_id(request.knowledge_id, meta)
