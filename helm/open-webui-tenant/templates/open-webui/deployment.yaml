@@ -7,6 +7,10 @@ metadata:
     {{- include "open-webui-tenant.openWebui.labels" . | nindent 4 }}
 spec:
   replicas: {{ .Values.openWebui.replicaCount }}
+  {{- with .Values.openWebui.strategy }}
+  strategy:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
   selector:
     matchLabels:
       {{- include "open-webui-tenant.openWebui.selectorLabels" . | nindent 6 }}

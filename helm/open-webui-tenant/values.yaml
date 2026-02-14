@@ -60,6 +60,10 @@ openWebui:
 
   replicaCount: 1
 
+  # Deployment strategy - Recreate required for RWO persistent volumes
+  strategy:
+    type: Recreate
+
   # Service configuration
   service:
     type: ClusterIP
