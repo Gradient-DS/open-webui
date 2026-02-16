@@ -70,6 +70,14 @@ spec:
                   name: {{ include "open-webui-tenant.fullname" . }}-secrets
                   key: microsoft-client-secret
             {{- end }}
+            # Email Graph API secret (only if configured)
+            {{- if .Values.secrets.emailGraphClientSecret }}
+            - name: EMAIL_GRAPH_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "open-webui-tenant.fullname" . }}-secrets
+                  key: email-graph-client-secret
+            {{- end }}
             # External Services API Keys (only if configured)
             {{- if .Values.secrets.externalDocumentLoaderApiKey }}
             - name: EXTERNAL_DOCUMENT_LOADER_API_KEY

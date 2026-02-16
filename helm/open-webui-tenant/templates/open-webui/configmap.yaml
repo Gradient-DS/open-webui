@@ -11,6 +11,7 @@ data:
   ENABLE_PERSISTENT_CONFIG: {{ .Values.openWebui.config.enablePersistentConfig | quote }}
   RESET_CONFIG_ON_START: {{ .Values.openWebui.config.resetConfigOnStart | quote }}
   WEBUI_NAME: {{ .Values.openWebui.config.webuiName | quote }}
+  CLIENT_NAME: {{ .Values.tenant.clientName | quote }}
   CORS_ALLOW_ORIGIN: {{ .Values.openWebui.config.corsAllowOrigin | quote }}
 
   # Locale
@@ -219,6 +220,18 @@ data:
   ONEDRIVE_SYNC_INTERVAL_MINUTES: {{ .Values.openWebui.config.onedriveSyncIntervalMinutes | quote }}
   ONEDRIVE_MAX_FILES_PER_SYNC: {{ .Values.openWebui.config.onedriveMaxFilesPerSync | quote }}
   ONEDRIVE_MAX_FILE_SIZE_MB: {{ .Values.openWebui.config.onedriveMaxFileSizeMb | quote }}
+
+  # Email Invites (Microsoft Graph API)
+  ENABLE_EMAIL_INVITES: {{ .Values.openWebui.config.enableEmailInvites | quote }}
+  {{- if .Values.openWebui.config.emailGraphTenantId }}
+  EMAIL_GRAPH_TENANT_ID: {{ .Values.openWebui.config.emailGraphTenantId | quote }}
+  {{- end }}
+  {{- if .Values.openWebui.config.emailGraphClientId }}
+  EMAIL_GRAPH_CLIENT_ID: {{ .Values.openWebui.config.emailGraphClientId | quote }}
+  {{- end }}
+  EMAIL_FROM_ADDRESS: {{ .Values.openWebui.config.emailFromAddress | quote }}
+  EMAIL_FROM_NAME: {{ .Values.openWebui.config.emailFromName | quote }}
+  INVITE_EXPIRY_HOURS: {{ .Values.openWebui.config.inviteExpiryHours | quote }}
 
   BYPASS_MODEL_ACCESS_CONTROL: {{ .Values.openWebui.config.bypassModelAccessControl | quote }}
 

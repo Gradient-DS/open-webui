@@ -95,6 +95,7 @@ from open_webui.routers import (
     utils,
     scim,
     onedrive_sync,
+    invites,
 )
 
 from open_webui.routers.retrieval import (
@@ -345,6 +346,13 @@ from open_webui.config import (
     ONEDRIVE_SYNC_INTERVAL_MINUTES,
     ONEDRIVE_MAX_FILES_PER_SYNC,
     ONEDRIVE_MAX_FILE_SIZE_MB,
+    ENABLE_EMAIL_INVITES,
+    EMAIL_GRAPH_TENANT_ID,
+    EMAIL_GRAPH_CLIENT_ID,
+    EMAIL_GRAPH_CLIENT_SECRET,
+    EMAIL_FROM_ADDRESS,
+    EMAIL_FROM_NAME,
+    INVITE_EXPIRY_HOURS,
     ENABLE_RAG_HYBRID_SEARCH,
     ENABLE_RAG_HYBRID_SEARCH_ENRICHED_TEXTS,
     ENABLE_RAG_LOCAL_WEB_FETCH,
@@ -516,6 +524,7 @@ from open_webui.env import (
     AIOHTTP_CLIENT_SESSION_SSL,
     ENABLE_STAR_SESSIONS_MIDDLEWARE,
     ENABLE_PUBLIC_ACTIVE_USERS_COUNT,
+    CLIENT_NAME,
 )
 
 
@@ -1051,6 +1060,14 @@ app.state.config.ENABLE_GOOGLE_DRIVE_INTEGRATION = ENABLE_GOOGLE_DRIVE_INTEGRATI
 app.state.config.ENABLE_ONEDRIVE_INTEGRATION = ENABLE_ONEDRIVE_INTEGRATION
 app.state.config.ENABLE_ONEDRIVE_SYNC = ENABLE_ONEDRIVE_SYNC
 
+app.state.config.ENABLE_EMAIL_INVITES = ENABLE_EMAIL_INVITES
+app.state.config.EMAIL_GRAPH_TENANT_ID = EMAIL_GRAPH_TENANT_ID
+app.state.config.EMAIL_GRAPH_CLIENT_ID = EMAIL_GRAPH_CLIENT_ID
+app.state.config.EMAIL_GRAPH_CLIENT_SECRET = EMAIL_GRAPH_CLIENT_SECRET
+app.state.config.EMAIL_FROM_ADDRESS = EMAIL_FROM_ADDRESS
+app.state.config.EMAIL_FROM_NAME = EMAIL_FROM_NAME
+app.state.config.INVITE_EXPIRY_HOURS = INVITE_EXPIRY_HOURS
+
 app.state.config.OLLAMA_CLOUD_WEB_SEARCH_API_KEY = OLLAMA_CLOUD_WEB_SEARCH_API_KEY
 app.state.config.SEARXNG_QUERY_URL = SEARXNG_QUERY_URL
 app.state.config.SEARXNG_LANGUAGE = SEARXNG_LANGUAGE
@@ -1532,6 +1549,9 @@ if app.state.config.ENABLE_ONEDRIVE_SYNC:
         onedrive_sync.router, prefix="/api/v1/onedrive", tags=["onedrive"]
     )
 
+# Invites API (always mounted - Copy Link works without Graph API)
+app.include_router(invites.router, prefix="/api/v1/invites", tags=["invites"])
+
 
 try:
     audit_level = AuditLevel(AUDIT_LOG_LEVEL)
@@ -2003,6 +2023,7 @@ async def get_app_config(request: Request):
         "name": app.state.WEBUI_NAME,
         "version": VERSION,
         "default_locale": str(DEFAULT_LOCALE),
+        "client_name": CLIENT_NAME,
         "oauth": {
             "providers": {
                 name: config.get("name", name)
@@ -2066,6 +2087,7 @@ async def get_app_config(request: Request):
                         if app.state.config.ENABLE_ONEDRIVE_INTEGRATION
                         else {}
                     ),
+                    "enable_email_invites": app.state.config.ENABLE_EMAIL_INVITES,
                 }
                 if user is not None
                 else {}

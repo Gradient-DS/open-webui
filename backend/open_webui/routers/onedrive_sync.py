@@ -411,6 +411,8 @@ async def handle_onedrive_auth_callback(request: Request):
     error_description = request.query_params.get("error_description")
 
     if error:
+        # Consume the pending flow to prevent state reuse
+        _pending_flows.pop(state, None)
         return _auth_callback_html(
             success=False,
             error=error_description or error,
@@ -469,10 +471,14 @@ def _auth_callback_html(success: bool, error: str = None, knowledge_id: str = No
     if knowledge_id:
         data["knowledge_id"] = knowledge_id
 
+    # Escape '</' to prevent script tag injection (</script> in JSON string
+    # would prematurely close the <script> element, enabling XSS)
+    safe_json = json.dumps(data).replace("</", "<\\/")
+
     html = f"""<!DOCTYPE html>
 <html><body><script>
     if (window.opener) {{
-        window.opener.postMessage({json.dumps(data)}, window.location.origin);
+        window.opener.postMessage({safe_json}, window.location.origin);
     }}
     window.close();
 </script></body></html>"""

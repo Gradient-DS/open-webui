@@ -97,7 +97,8 @@ export const ADMIN_SETTINGS_TABS = [
 	'audio',
 	'images',
 	'pipelines',
-	'db'
+	'db',
+	'email'
 ] as const;
 
 export type AdminSettingsTab = (typeof ADMIN_SETTINGS_TABS)[number];

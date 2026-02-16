@@ -561,3 +561,69 @@ async def get_greeting_template(
     user=Depends(get_verified_user),
 ):
     return {"template": request.app.state.config.GREETING_TEMPLATE}
+
+
+############################
+# EmailConfig
+############################
+
+
+class EmailConfigForm(BaseModel):
+    ENABLE_EMAIL_INVITES: bool
+    EMAIL_GRAPH_TENANT_ID: str
+    EMAIL_GRAPH_CLIENT_ID: str
+    EMAIL_GRAPH_CLIENT_SECRET: str
+    EMAIL_FROM_ADDRESS: str
+    EMAIL_FROM_NAME: str
+    INVITE_EXPIRY_HOURS: int
+
+
+@router.get("/email", response_model=EmailConfigForm)
+async def get_email_config(request: Request, user=Depends(get_admin_user)):
+    return EmailConfigForm(
+        ENABLE_EMAIL_INVITES=request.app.state.config.ENABLE_EMAIL_INVITES,
+        EMAIL_GRAPH_TENANT_ID=request.app.state.config.EMAIL_GRAPH_TENANT_ID,
+        EMAIL_GRAPH_CLIENT_ID=request.app.state.config.EMAIL_GRAPH_CLIENT_ID,
+        EMAIL_GRAPH_CLIENT_SECRET=request.app.state.config.EMAIL_GRAPH_CLIENT_SECRET,
+        EMAIL_FROM_ADDRESS=request.app.state.config.EMAIL_FROM_ADDRESS,
+        EMAIL_FROM_NAME=request.app.state.config.EMAIL_FROM_NAME,
+        INVITE_EXPIRY_HOURS=request.app.state.config.INVITE_EXPIRY_HOURS,
+    )
+
+
+@router.post("/email", response_model=EmailConfigForm)
+async def set_email_config(
+    request: Request,
+    form_data: EmailConfigForm,
+    user=Depends(get_admin_user),
+):
+    request.app.state.config.ENABLE_EMAIL_INVITES = form_data.ENABLE_EMAIL_INVITES
+    request.app.state.config.EMAIL_GRAPH_TENANT_ID = form_data.EMAIL_GRAPH_TENANT_ID
+    request.app.state.config.EMAIL_GRAPH_CLIENT_ID = form_data.EMAIL_GRAPH_CLIENT_ID
+    request.app.state.config.EMAIL_GRAPH_CLIENT_SECRET = (
+        form_data.EMAIL_GRAPH_CLIENT_SECRET
+    )
+    request.app.state.config.EMAIL_FROM_ADDRESS = form_data.EMAIL_FROM_ADDRESS
+    request.app.state.config.EMAIL_FROM_NAME = form_data.EMAIL_FROM_NAME
+    request.app.state.config.INVITE_EXPIRY_HOURS = form_data.INVITE_EXPIRY_HOURS
+    return form_data
+
+
+@router.post("/email/test")
+async def test_email_config(request: Request, user=Depends(get_admin_user)):
+    """Send a test email to the admin's own address."""
+    if not request.app.state.config.ENABLE_EMAIL_INVITES:
+        raise HTTPException(400, detail="Email invites are not enabled")
+
+    try:
+        from open_webui.services.email.graph_mail_client import send_mail
+
+        await send_mail(
+            app=request.app,
+            to_address=user.email,
+            subject=f"Test email from {request.app.state.config.EMAIL_FROM_NAME}",
+            html_body="<p>This is a test email. Your email configuration is working correctly.</p>",
+        )
+        return {"status": "ok", "message": f"Test email sent to {user.email}"}
+    except Exception as e:
+        raise HTTPException(500, detail=f"Failed to send test email: {str(e)}")

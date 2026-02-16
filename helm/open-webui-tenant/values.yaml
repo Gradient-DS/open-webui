@@ -16,6 +16,7 @@
 tenant:
   name: ""           # Required: e.g., "demo", "client-a"
   domain: ""         # Required: e.g., "demo.soev.ai"
+  clientName: ""     # Display name for the client/org, e.g., "Gradient", "Kwink"
 
 # -----------------------------------------------------------------------------
 # Shared Services Configuration (deployed separately)
@@ -202,7 +203,7 @@ openWebui:
     featureAdminEvaluations: "True"
     featureAdminFunctions: "False"
     featureAdminSettings: "True"
-    featureAdminSettingsTabs: "models,tools,interface,db"
+    featureAdminSettingsTabs: "models,tools,interface,db,email"
 
     # Notes
     enableNotes: "true"
@@ -298,6 +299,15 @@ openWebui:
     onedriveSyncIntervalMinutes: "15"
     onedriveMaxFilesPerSync: "250"
     onedriveMaxFileSizeMb: "10"
+
+    # Email Invites (Microsoft Graph API)
+    enableEmailInvites: "false"
+    emailGraphTenantId: ""       # Azure AD Tenant ID for email app
+    emailGraphClientId: ""       # Azure AD App Client ID for email
+    # emailGraphClientSecret is set via secrets
+    emailFromAddress: "no-reply@soev.ai"
+    emailFromName: "Soev"
+    inviteExpiryHours: "168"     # 7 days
 
     bypassModelAccessControl: "false"
 
@@ -462,6 +472,9 @@ secrets:
 
   # Microsoft OAuth (leave empty to disable)
   microsoftClientSecret: ""
+
+  # Email Graph API (leave empty to disable email invites)
+  emailGraphClientSecret: ""
 
   # External Services API Keys (optional)
   externalDocumentLoaderApiKey: ""
