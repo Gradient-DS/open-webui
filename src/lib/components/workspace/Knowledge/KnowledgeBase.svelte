@@ -51,6 +51,7 @@
 
 	import AddContentMenu from './KnowledgeBase/AddContentMenu.svelte';
 	import AddTextContentModal from './KnowledgeBase/AddTextContentModal.svelte';
+	import EmptyStateCards from './KnowledgeBase/EmptyStateCards.svelte';
 	import Badge from '$lib/components/common/Badge.svelte';
 
 	import SyncConfirmDialog from '../../common/ConfirmDialog.svelte';
@@ -1722,11 +1723,30 @@
 										<Pagination bind:page={currentPage} count={fileItemsTotal} perPage={30} />
 									{/if}
 								{:else}
-									<div class="my-3 flex flex-col justify-center text-center text-gray-500 text-xs">
-										<div>
-											{$i18n.t('No content found')}
+									{#if knowledge?.write_access && !query && !viewOption}
+										<EmptyStateCards
+											knowledgeType={knowledge?.type || 'local'}
+											onAction={(type) => {
+												if (type === 'onedrive') {
+													oneDriveSyncHandler();
+												} else if (type === 'directory') {
+													uploadDirectoryHandler();
+												} else if (type === 'web') {
+													showAddWebpageModal = true;
+												} else if (type === 'text') {
+													showAddTextContentModal = true;
+												} else {
+													document.getElementById('files-input')?.click();
+												}
+											}}
+										/>
+									{:else}
+										<div class="my-3 flex flex-col justify-center text-center text-gray-500 text-xs">
+											<div>
+												{$i18n.t('No content found')}
+											</div>
 										</div>
-									</div>
+									{/if}
 								{/if}
 							</div>
 						</div>
