@@ -61,22 +61,20 @@
 
 	$: gridCols =
 		options.length <= 1
-			? 'grid-cols-1 max-w-sm mx-auto'
+			? 'grid-cols-1'
 			: options.length === 2 || options.length === 4
 				? 'grid-cols-2'
-				: options.length === 3
-					? 'grid-cols-3'
-					: 'grid-cols-3';
+				: 'grid-cols-3';
 </script>
 
-<div class="flex flex-col items-center justify-center w-full h-full py-8 px-4">
-	<div class="text-center mb-6">
+<div class="flex flex-col w-full flex-1 py-4">
+	<div class="text-center mb-4">
 		<div class="text-sm font-medium text-gray-500 dark:text-gray-400">
 			{$i18n.t('Get started by adding content')}
 		</div>
 	</div>
 
-	<div class="grid {gridCols} gap-4 w-full max-w-2xl">
+	<div class="grid {gridCols} gap-4 w-full flex-1 auto-rows-fr">
 		{#each options as option}
 			<button
 				class="flex flex-col items-center justify-center gap-3 p-8

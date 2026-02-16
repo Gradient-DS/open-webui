@@ -1542,9 +1542,9 @@
 		</div>
 
 		<div
-			class="mt-2 mb-2.5 py-2 -mx-0 bg-white dark:bg-gray-900 rounded-3xl border border-gray-100/30 dark:border-gray-850/30 flex-1"
+			class="mt-2 mb-2.5 py-2 -mx-0 bg-white dark:bg-gray-900 rounded-3xl border border-gray-100/30 dark:border-gray-850/30 flex-1 flex flex-col overflow-hidden"
 		>
-			<div class="px-3.5 flex flex-1 items-center w-full space-x-2 py-0.5 pb-2">
+			<div class="px-3.5 flex shrink-0 items-center w-full space-x-2 py-0.5 pb-2">
 				<div class="flex flex-1 items-center">
 					<div class=" self-center ml-1 mr-3">
 						<Search className="size-3.5" />
