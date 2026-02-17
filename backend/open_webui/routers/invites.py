@@ -125,6 +125,8 @@ async def create_invite(
 
             locale = str(DEFAULT_LOCALE) or "en"
             expiry_hours = request.app.state.config.INVITE_EXPIRY_HOURS
+            custom_subject = str(request.app.state.config.EMAIL_INVITE_SUBJECT or "")
+            custom_heading = str(request.app.state.config.EMAIL_INVITE_HEADING or "")
 
             html_body = render_invite_email(
                 invite_url=invite_url,
@@ -132,11 +134,16 @@ async def create_invite(
                 locale=locale,
                 expiry_hours=expiry_hours,
                 client_name=CLIENT_NAME,
+                custom_heading=custom_heading,
             )
             await send_mail(
                 app=request.app,
                 to_address=email,
-                subject=render_invite_subject(locale=locale, client_name=CLIENT_NAME),
+                subject=render_invite_subject(
+                    locale=locale,
+                    client_name=CLIENT_NAME,
+                    custom_subject=custom_subject,
+                ),
                 html_body=html_body,
             )
             email_sent = True
@@ -378,6 +385,8 @@ async def resend_invite(
             )
 
             locale = str(DEFAULT_LOCALE) or "en"
+            custom_subject = str(request.app.state.config.EMAIL_INVITE_SUBJECT or "")
+            custom_heading = str(request.app.state.config.EMAIL_INVITE_HEADING or "")
 
             html_body = render_invite_email(
                 invite_url=invite_url,
@@ -385,11 +394,16 @@ async def resend_invite(
                 locale=locale,
                 expiry_hours=expiry_hours,
                 client_name=CLIENT_NAME,
+                custom_heading=custom_heading,
             )
             await send_mail(
                 app=request.app,
                 to_address=updated_invite.email,
-                subject=render_invite_subject(locale=locale, client_name=CLIENT_NAME),
+                subject=render_invite_subject(
+                    locale=locale,
+                    client_name=CLIENT_NAME,
+                    custom_subject=custom_subject,
+                ),
                 html_body=html_body,
             )
             email_sent = True

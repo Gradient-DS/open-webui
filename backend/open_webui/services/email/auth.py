@@ -2,6 +2,12 @@ import time
 
 import httpx
 
+from open_webui.config import (
+    EMAIL_GRAPH_TENANT_ID,
+    EMAIL_GRAPH_CLIENT_ID,
+    EMAIL_GRAPH_CLIENT_SECRET,
+)
+
 _token_cache: dict = {"access_token": None, "expires_at": 0}
 
 
@@ -10,9 +16,9 @@ async def get_mail_access_token(app) -> str:
     if _token_cache["access_token"] and time.time() < _token_cache["expires_at"] - 300:
         return _token_cache["access_token"]
 
-    tenant_id = app.state.config.EMAIL_GRAPH_TENANT_ID
-    client_id = app.state.config.EMAIL_GRAPH_CLIENT_ID
-    client_secret = app.state.config.EMAIL_GRAPH_CLIENT_SECRET
+    tenant_id = EMAIL_GRAPH_TENANT_ID
+    client_id = EMAIL_GRAPH_CLIENT_ID
+    client_secret = EMAIL_GRAPH_CLIENT_SECRET
 
     if not all([tenant_id, client_id, client_secret]):
         raise ValueError("Email Graph API credentials not configured")

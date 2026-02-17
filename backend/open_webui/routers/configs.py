@@ -564,15 +564,44 @@ async def get_greeting_template(
 
 
 ############################
+# InviteContent
+############################
+
+
+class InviteContentForm(BaseModel):
+    subject: str = ""
+    heading: str = ""
+
+
+@router.get("/invite_content")
+async def get_invite_content(request: Request, user=Depends(get_admin_user)):
+    return {
+        "subject": request.app.state.config.EMAIL_INVITE_SUBJECT,
+        "heading": request.app.state.config.EMAIL_INVITE_HEADING,
+    }
+
+
+@router.post("/invite_content")
+async def set_invite_content(
+    request: Request,
+    form_data: InviteContentForm,
+    user=Depends(get_admin_user),
+):
+    request.app.state.config.EMAIL_INVITE_SUBJECT = form_data.subject
+    request.app.state.config.EMAIL_INVITE_HEADING = form_data.heading
+    return {
+        "subject": request.app.state.config.EMAIL_INVITE_SUBJECT,
+        "heading": request.app.state.config.EMAIL_INVITE_HEADING,
+    }
+
+
+############################
 # EmailConfig
 ############################
 
 
 class EmailConfigForm(BaseModel):
     ENABLE_EMAIL_INVITES: bool
-    EMAIL_GRAPH_TENANT_ID: str
-    EMAIL_GRAPH_CLIENT_ID: str
-    EMAIL_GRAPH_CLIENT_SECRET: str
     EMAIL_FROM_ADDRESS: str
     EMAIL_FROM_NAME: str
     INVITE_EXPIRY_HOURS: int
@@ -582,9 +611,6 @@ class EmailConfigForm(BaseModel):
 async def get_email_config(request: Request, user=Depends(get_admin_user)):
     return EmailConfigForm(
         ENABLE_EMAIL_INVITES=request.app.state.config.ENABLE_EMAIL_INVITES,
-        EMAIL_GRAPH_TENANT_ID=request.app.state.config.EMAIL_GRAPH_TENANT_ID,
-        EMAIL_GRAPH_CLIENT_ID=request.app.state.config.EMAIL_GRAPH_CLIENT_ID,
-        EMAIL_GRAPH_CLIENT_SECRET=request.app.state.config.EMAIL_GRAPH_CLIENT_SECRET,
         EMAIL_FROM_ADDRESS=request.app.state.config.EMAIL_FROM_ADDRESS,
         EMAIL_FROM_NAME=request.app.state.config.EMAIL_FROM_NAME,
         INVITE_EXPIRY_HOURS=request.app.state.config.INVITE_EXPIRY_HOURS,
@@ -598,11 +624,6 @@ async def set_email_config(
     user=Depends(get_admin_user),
 ):
     request.app.state.config.ENABLE_EMAIL_INVITES = form_data.ENABLE_EMAIL_INVITES
-    request.app.state.config.EMAIL_GRAPH_TENANT_ID = form_data.EMAIL_GRAPH_TENANT_ID
-    request.app.state.config.EMAIL_GRAPH_CLIENT_ID = form_data.EMAIL_GRAPH_CLIENT_ID
-    request.app.state.config.EMAIL_GRAPH_CLIENT_SECRET = (
-        form_data.EMAIL_GRAPH_CLIENT_SECRET
-    )
     request.app.state.config.EMAIL_FROM_ADDRESS = form_data.EMAIL_FROM_ADDRESS
     request.app.state.config.EMAIL_FROM_NAME = form_data.EMAIL_FROM_NAME
     request.app.state.config.INVITE_EXPIRY_HOURS = form_data.INVITE_EXPIRY_HOURS

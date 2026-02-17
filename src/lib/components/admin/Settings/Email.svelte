@@ -2,9 +2,8 @@
 	import { onMount, getContext } from 'svelte';
 	import { toast } from 'svelte-sonner';
 
-	import { getEmailConfig, setEmailConfig, testEmailConfig } from '$lib/apis/configs';
+	import { getEmailConfig, setEmailConfig, testEmailConfig, getInviteContent, setInviteContent } from '$lib/apis/configs';
 	import Switch from '$lib/components/common/Switch.svelte';
-	import SensitiveInput from '$lib/components/common/SensitiveInput.svelte';
 	import Spinner from '$lib/components/common/Spinner.svelte';
 
 	const i18n = getContext('i18n');
@@ -16,25 +15,26 @@
 	let testing = false;
 
 	let ENABLE_EMAIL_INVITES = false;
-	let EMAIL_GRAPH_TENANT_ID = '';
-	let EMAIL_GRAPH_CLIENT_ID = '';
-	let EMAIL_GRAPH_CLIENT_SECRET = '';
 	let EMAIL_FROM_ADDRESS = '';
 	let EMAIL_FROM_NAME = '';
 	let INVITE_EXPIRY_HOURS = 168;
+
+	let inviteSubject = '';
+	let inviteHeading = '';
 
 	onMount(async () => {
 		try {
 			const config = await getEmailConfig(localStorage.token);
 			if (config) {
 				ENABLE_EMAIL_INVITES = config.ENABLE_EMAIL_INVITES;
-				EMAIL_GRAPH_TENANT_ID = config.EMAIL_GRAPH_TENANT_ID;
-				EMAIL_GRAPH_CLIENT_ID = config.EMAIL_GRAPH_CLIENT_ID;
-				EMAIL_GRAPH_CLIENT_SECRET = config.EMAIL_GRAPH_CLIENT_SECRET;
 				EMAIL_FROM_ADDRESS = config.EMAIL_FROM_ADDRESS;
 				EMAIL_FROM_NAME = config.EMAIL_FROM_NAME;
 				INVITE_EXPIRY_HOURS = config.INVITE_EXPIRY_HOURS;
 			}
+
+			const inviteContent = await getInviteContent(localStorage.token);
+			inviteSubject = inviteContent?.subject ?? '';
+			inviteHeading = inviteContent?.heading ?? '';
 		} catch (err) {
 			toast.error(`${err}`);
 		}
@@ -46,13 +46,11 @@
 		try {
 			await setEmailConfig(localStorage.token, {
 				ENABLE_EMAIL_INVITES,
-				EMAIL_GRAPH_TENANT_ID,
-				EMAIL_GRAPH_CLIENT_ID,
-				EMAIL_GRAPH_CLIENT_SECRET,
 				EMAIL_FROM_ADDRESS,
 				EMAIL_FROM_NAME,
 				INVITE_EXPIRY_HOURS
 			});
+			await setInviteContent(localStorage.token, inviteSubject, inviteHeading);
 			saveHandler();
 		} catch (err) {
 			toast.error(`${err}`);
@@ -92,44 +90,8 @@
 				</div>
 
 				{#if ENABLE_EMAIL_INVITES}
-					<!-- Graph API Section -->
-					<div class="space-y-3 pt-2">
-						<div class="text-xs font-medium text-gray-500 uppercase tracking-wide">
-							{$i18n.t('Microsoft Graph API')}
-						</div>
-
-						<div>
-							<div class="mb-1 text-xs text-gray-500">{$i18n.t('Tenant ID')}</div>
-							<input
-								class="w-full text-sm bg-transparent outline-hidden"
-								type="text"
-								bind:value={EMAIL_GRAPH_TENANT_ID}
-								placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
-							/>
-						</div>
-
-						<div>
-							<div class="mb-1 text-xs text-gray-500">{$i18n.t('Client ID')}</div>
-							<input
-								class="w-full text-sm bg-transparent outline-hidden"
-								type="text"
-								bind:value={EMAIL_GRAPH_CLIENT_ID}
-								placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
-							/>
-						</div>
-
-						<div>
-							<div class="mb-1 text-xs text-gray-500">{$i18n.t('Client Secret')}</div>
-							<SensitiveInput
-								bind:value={EMAIL_GRAPH_CLIENT_SECRET}
-								placeholder={$i18n.t('Client Secret')}
-							/>
-						</div>
-
-					</div>
-
 					<!-- Sender Section -->
-					<div class="space-y-3 pt-4">
+					<div class="space-y-3 pt-2">
 						<div class="text-xs font-medium text-gray-500 uppercase tracking-wide">
 							{$i18n.t('Sender')}
 						</div>
@@ -171,7 +133,28 @@
 								max="8760"
 							/>
 						</div>
+
+						<div>
+							<div class="mb-1 text-xs text-gray-500">{$i18n.t('Invite Subject')}</div>
+							<input
+								class="w-full text-sm bg-transparent outline-hidden"
+								type="text"
+								bind:value={inviteSubject}
+								placeholder={$i18n.t('Leave empty to use the default')}
+							/>
+						</div>
+
+						<div>
+							<div class="mb-1 text-xs text-gray-500">{$i18n.t('Invite Heading')}</div>
+							<input
+								class="w-full text-sm bg-transparent outline-hidden"
+								type="text"
+								bind:value={inviteHeading}
+								placeholder={$i18n.t('Leave empty to use the default')}
+							/>
+						</div>
 					</div>
+
 				{/if}
 			</div>
 		{/if}

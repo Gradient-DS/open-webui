@@ -1,3 +1,5 @@
+import re
+
 import httpx
 
 from open_webui.services.email.auth import get_mail_access_token
@@ -43,8 +45,9 @@ async def send_mail(
 
 
 APP_NAME = "soev.ai"
-# Zero-width joiner between "soev." and "ai" prevents email clients from auto-linking
-APP_NAME_HTML = "soev.\u200dai"
+# Word Joiner (U+2060) before the dot breaks domain pattern detection in email clients.
+# Unlike ZWJ, HTML comments, or <a> without href, this survives Gmail/Outlook sanitization.
+APP_NAME_HTML = "soev&#x2060;.ai"
 
 _STRINGS = {
     "en": {
@@ -73,10 +76,20 @@ def _get_strings(locale: str) -> dict:
     return _STRINGS.get(lang, _STRINGS["en"])
 
 
+def _prevent_email_autolink(text: str) -> str:
+    """Insert Word Joiner (U+2060) before dots in domain-like patterns (e.g. soev.ai)
+    to prevent email clients from auto-linking them. The invisible character breaks
+    pattern detection in Gmail and Outlook without affecting visual rendering."""
+    return re.sub(r"(?<=\w)\.(?=[a-zA-Z]{2,}\b)", "&#x2060;.", text)
+
+
 def render_invite_subject(
     locale: str = "en",
     client_name: str = "",
+    custom_subject: str = "",
 ) -> str:
+    if custom_subject:
+        return custom_subject
     strings = _get_strings(locale)
     if client_name:
         return strings["subject_with_client"].format(client_name=client_name)
@@ -89,12 +102,16 @@ def render_invite_email(
     locale: str = "en",
     expiry_hours: int = 168,
     client_name: str = "",
+    custom_heading: str = "",
 ) -> str:
     strings = _get_strings(locale)
     expiry_days = max(1, expiry_hours // 24)
 
-    if client_name:
+    if custom_heading:
+        heading = _prevent_email_autolink(custom_heading)
+    elif client_name:
         heading = strings["heading_with_client"].format(client_name=client_name)
+        heading = _prevent_email_autolink(heading)
     else:
         heading = strings["heading"]
     body = strings["body"].format(invited_by_name=invited_by_name)
@@ -102,6 +119,20 @@ def render_invite_email(
     footer = strings["footer"].format(expiry_days=expiry_days)
 
     return f"""\
+<!DOCTYPE html>
+<html>
+<head>
+<meta name="format-detection" content="telephone=no, date=no, address=no, email=no, url=no">
+<style type="text/css">
+u + #body a {{
+    color: inherit !important;
+    text-decoration: none !important;
+    font-size: inherit !important;
+    font-weight: inherit !important;
+}}
+</style>
+</head>
+<body id="body">
 <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
             max-width: 560px; margin: 0 auto; padding: 40px 20px;">
     <h2 style="color: #1a1a1a; margin-bottom: 8px;">
@@ -119,4 +150,6 @@ def render_invite_email(
     <p style="color: #9a9a9a; font-size: 13px; margin-top: 32px;">
         {footer}
     </p>
-</div>"""
+</div>
+</body>
+</html>"""

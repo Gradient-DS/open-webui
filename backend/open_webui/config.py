@@ -2562,23 +2562,9 @@ ENABLE_EMAIL_INVITES = PersistentConfig(
     os.environ.get("ENABLE_EMAIL_INVITES", "False").lower() == "true",
 )
 
-EMAIL_GRAPH_TENANT_ID = PersistentConfig(
-    "EMAIL_GRAPH_TENANT_ID",
-    "email.graph_tenant_id",
-    os.environ.get("EMAIL_GRAPH_TENANT_ID", ""),
-)
-
-EMAIL_GRAPH_CLIENT_ID = PersistentConfig(
-    "EMAIL_GRAPH_CLIENT_ID",
-    "email.graph_client_id",
-    os.environ.get("EMAIL_GRAPH_CLIENT_ID", ""),
-)
-
-EMAIL_GRAPH_CLIENT_SECRET = PersistentConfig(
-    "EMAIL_GRAPH_CLIENT_SECRET",
-    "email.graph_client_secret",
-    os.environ.get("EMAIL_GRAPH_CLIENT_SECRET", ""),
-)
+EMAIL_GRAPH_TENANT_ID = os.environ.get("EMAIL_GRAPH_TENANT_ID", "")
+EMAIL_GRAPH_CLIENT_ID = os.environ.get("EMAIL_GRAPH_CLIENT_ID", "")
+EMAIL_GRAPH_CLIENT_SECRET = os.environ.get("EMAIL_GRAPH_CLIENT_SECRET", "")
 
 EMAIL_FROM_ADDRESS = PersistentConfig(
     "EMAIL_FROM_ADDRESS",
@@ -2596,6 +2582,18 @@ INVITE_EXPIRY_HOURS = PersistentConfig(
     "INVITE_EXPIRY_HOURS",
     "email.invite_expiry_hours",
     int(os.environ.get("INVITE_EXPIRY_HOURS", "168")),
+)
+
+EMAIL_INVITE_SUBJECT = PersistentConfig(
+    "EMAIL_INVITE_SUBJECT",
+    "email.invite_subject",
+    os.environ.get("EMAIL_INVITE_SUBJECT", ""),
+)
+
+EMAIL_INVITE_HEADING = PersistentConfig(
+    "EMAIL_INVITE_HEADING",
+    "email.invite_heading",
+    os.environ.get("EMAIL_INVITE_HEADING", ""),
 )
 
 # RAG Content Extraction
