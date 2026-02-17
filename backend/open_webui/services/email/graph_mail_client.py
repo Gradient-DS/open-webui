@@ -145,7 +145,7 @@ u + #body a {{
        style="display: inline-block; background: #0f172a; color: #ffffff;
               padding: 12px 24px; border-radius: 8px; text-decoration: none;
               font-weight: 500; margin: 24px 0;">
-        {button}
+        <span style="color: #ffffff;">{button}</span>
     </a>
     <p style="color: #9a9a9a; font-size: 13px; margin-top: 32px;">
         {footer}

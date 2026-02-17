@@ -5,7 +5,8 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel
 from typing import Optional
 
-from open_webui.models.auths import Auths, SigninResponse
+from open_webui.models.auths import Auths
+from open_webui.routers.auths import SessionUserResponse
 from open_webui.models.invites import AcceptInviteForm, InviteForm, InviteModel, Invites
 from open_webui.models.users import Users
 
@@ -17,6 +18,7 @@ from open_webui.utils.auth import (
 )
 from open_webui.utils.misc import validate_email_format
 from open_webui.utils.groups import apply_default_group_assignment
+from open_webui.utils.access_control import get_permissions
 from open_webui.env import CLIENT_NAME
 from open_webui.config import DEFAULT_LOCALE
 
@@ -216,7 +218,7 @@ async def validate_invite(token: str):
 ############################
 
 
-@router.post("/{token}/accept", response_model=SigninResponse)
+@router.post("/{token}/accept", response_model=SessionUserResponse)
 async def accept_invite(
     request: Request,
     token: str,
@@ -286,6 +288,10 @@ async def accept_invite(
         # Create session token
         session_token = create_token(data={"id": new_user.id})
 
+        user_permissions = get_permissions(
+            new_user.id, request.app.state.config.USER_PERMISSIONS
+        )
+
         return {
             "token": session_token,
             "token_type": "Bearer",
@@ -294,6 +300,7 @@ async def accept_invite(
             "name": new_user.name,
             "role": new_user.role,
             "profile_image_url": new_user.profile_image_url,
+            "permissions": user_permissions,
         }
 
     except HTTPException:
