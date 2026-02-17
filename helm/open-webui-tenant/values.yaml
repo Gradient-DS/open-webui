@@ -308,6 +308,8 @@ openWebui:
     emailFromAddress: "no-reply@soev.ai"
     emailFromName: "Soev"
     inviteExpiryHours: "168"     # 7 days
+    emailInviteSubject: ""       # Custom email subject (empty = default)
+    emailInviteHeading: ""       # Custom email + invite page heading (empty = default)
 
     bypassModelAccessControl: "false"
 

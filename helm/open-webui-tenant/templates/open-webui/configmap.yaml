@@ -232,6 +232,12 @@ data:
   EMAIL_FROM_ADDRESS: {{ .Values.openWebui.config.emailFromAddress | quote }}
   EMAIL_FROM_NAME: {{ .Values.openWebui.config.emailFromName | quote }}
   INVITE_EXPIRY_HOURS: {{ .Values.openWebui.config.inviteExpiryHours | quote }}
+  {{- if .Values.openWebui.config.emailInviteSubject }}
+  EMAIL_INVITE_SUBJECT: {{ .Values.openWebui.config.emailInviteSubject | quote }}
+  {{- end }}
+  {{- if .Values.openWebui.config.emailInviteHeading }}
+  EMAIL_INVITE_HEADING: {{ .Values.openWebui.config.emailInviteHeading | quote }}
+  {{- end }}
 
   BYPASS_MODEL_ACCESS_CONTROL: {{ .Values.openWebui.config.bypassModelAccessControl | quote }}
 

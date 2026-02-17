@@ -2022,6 +2022,7 @@ async def get_app_config(request: Request):
         "version": VERSION,
         "default_locale": str(DEFAULT_LOCALE),
         "client_name": CLIENT_NAME,
+        "invite_heading": str(app.state.config.EMAIL_INVITE_HEADING or ""),
         "oauth": {
             "providers": {
                 name: config.get("name", name)

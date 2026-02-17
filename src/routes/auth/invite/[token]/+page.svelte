@@ -118,7 +118,9 @@
 						>
 							<div class="mb-1">
 								<div class="text-2xl font-medium">
-									{#if $config?.client_name}
+									{#if $config?.invite_heading}
+										{$config.invite_heading}
+									{:else if $config?.client_name}
 										{$i18n.t("You've been invited to the soev.ai environment of {{clientName}}", { clientName: $config.client_name })}
 									{:else}
 										{$i18n.t("You've been invited to join")}
