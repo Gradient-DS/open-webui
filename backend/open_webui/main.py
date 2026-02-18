@@ -509,6 +509,7 @@ from open_webui.env import (
     AIOHTTP_CLIENT_SESSION_SSL,
     ENABLE_STAR_SESSIONS_MIDDLEWARE,
     ENABLE_PUBLIC_ACTIVE_USERS_COUNT,
+    AGENT_API_ENABLED,  # [Gradient] Agent API bypass flag
 )
 
 
@@ -525,6 +526,7 @@ from open_webui.utils.chat import (
 )
 from open_webui.utils.embeddings import generate_embeddings
 from open_webui.utils.middleware import process_chat_payload, process_chat_response
+from open_webui.utils.agent import call_agent_api  # [Gradient] Agent API client
 from open_webui.utils.access_control import has_access
 
 from open_webui.utils.auth import (
@@ -1757,7 +1759,17 @@ async def chat_completion(
                 request, form_data, user, metadata, model
             )
 
-            response = await chat_completion_handler(request, form_data, user)
+            # [Gradient] When the agent API is enabled, route to the external
+            # agent service instead of the built-in LLM dispatch. The agent
+            # handles its own retrieval, web search, and tool orchestration.
+            # It returns a standard OpenAI SSE stream so process_chat_response
+            # handles streaming, DB persistence, and WebSocket transport unchanged.
+            if AGENT_API_ENABLED:
+                response = await call_agent_api(
+                    request, form_data, metadata, metadata.get("features", {})
+                )
+            else:
+                response = await chat_completion_handler(request, form_data, user)
             if metadata.get("chat_id") and metadata.get("message_id"):
                 try:
                     if not metadata["chat_id"].startswith("local:"):

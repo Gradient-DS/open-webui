@@ -118,6 +118,7 @@ from open_webui.env import (
     BYPASS_MODEL_ACCESS_CONTROL,
     ENABLE_REALTIME_CHAT_SAVE,
     ENABLE_QUERIES_CACHE,
+    AGENT_API_ENABLED,  # [Gradient] Agent API bypass flag
 )
 from open_webui.constants import TASKS
 
@@ -1306,6 +1307,12 @@ async def process_chat_payload(request, form_data, user, metadata, model):
         raise Exception(f"{e}")
 
     features = form_data.pop("features", None)
+
+    # [Gradient] Capture raw knowledge base references before they are
+    # flattened into file items. The agent API needs these to know which
+    # KBs are configured on the model (id, name, type, collection_names).
+    raw_knowledge = model.get("info", {}).get("meta", {}).get("knowledge", None)
+
     if features:
         if "voice" in features and features["voice"]:
             if request.app.state.config.VOICE_MODE_PROMPT_TEMPLATE != None:
@@ -1325,9 +1332,12 @@ async def process_chat_payload(request, form_data, user, metadata, model):
             )
 
         if "web_search" in features and features["web_search"]:
-            form_data = await chat_web_search_handler(
-                request, form_data, extra_params, user
-            )
+            # [Gradient] Skip built-in web search when agent API is enabled.
+            # The agent service handles its own web search and retrieval.
+            if not AGENT_API_ENABLED:
+                form_data = await chat_web_search_handler(
+                    request, form_data, extra_params, user
+                )
 
         if "image_generation" in features and features["image_generation"]:
             form_data = await chat_image_generation_handler(
@@ -1377,6 +1387,15 @@ async def process_chat_payload(request, form_data, user, metadata, model):
         "files": files,
     }
     form_data["metadata"] = metadata
+
+    # [Gradient] When the agent API is enabled, skip tool resolution, tool
+    # calling, RAG file processing, and context injection. The agent service
+    # owns all retrieval and orchestration. We preserve the collected metadata
+    # (files, tool_ids, features, knowledge) so the agent receives everything
+    # it needs to make its own decisions.
+    if AGENT_API_ENABLED:
+        metadata["knowledge"] = raw_knowledge
+        return form_data, metadata, events
 
     # Server side tools
     tool_ids = metadata.get("tool_ids", None)

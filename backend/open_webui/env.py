@@ -717,6 +717,17 @@ AIOHTTP_CLIENT_SESSION_TOOL_SERVER_SSL = (
 
 
 ####################################
+# AGENT API
+# [Gradient] External agent service that replaces built-in web search, RAG,
+# and LLM orchestration. When enabled, the middleware skips these steps and
+# routes chat completions to the agent API instead.
+####################################
+
+AGENT_API_ENABLED = os.environ.get("AGENT_API_ENABLED", "False").lower() == "true"
+AGENT_API_BASE_URL = os.environ.get("AGENT_API_BASE_URL", "").strip().rstrip("/")
+
+
+####################################
 # SENTENCE TRANSFORMERS
 ####################################
 
