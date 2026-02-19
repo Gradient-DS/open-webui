@@ -679,6 +679,10 @@ async def lifespan(app: FastAPI):
     from open_webui.services.onedrive.scheduler import start_scheduler as start_onedrive_scheduler
     start_onedrive_scheduler(app)
 
+    # Start deletion cleanup worker
+    from open_webui.services.deletion.cleanup_worker import start_cleanup_worker
+    start_cleanup_worker()
+
     # Check external pipeline health on startup
     external_pipeline_url = getattr(app.state.config, "EXTERNAL_PIPELINE_URL", None)
     if external_pipeline_url and external_pipeline_url.strip() != "":
@@ -722,6 +726,10 @@ async def lifespan(app: FastAPI):
         )
 
     yield
+
+    # Stop deletion cleanup worker
+    from open_webui.services.deletion.cleanup_worker import stop_cleanup_worker
+    stop_cleanup_worker()
 
     # Stop OneDrive background sync scheduler
     from open_webui.services.onedrive.scheduler import stop_scheduler as stop_onedrive_scheduler

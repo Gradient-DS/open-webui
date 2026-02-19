@@ -16,6 +16,7 @@
 
 	let mergedDocuments = [];
 	let selectedTab = 'preview';
+	let previewAvailable = true;
 
 	function calculatePercentage(distance: number) {
 		if (typeof distance !== 'number') return null;
@@ -72,6 +73,22 @@
 	$: previewUrl = fileId
 		? `${WEBUI_API_BASE_URL}/files/${fileId}/content${isPDF && minPage ? `#page=${minPage}` : ''}`
 		: '';
+
+	// Check if file is still available when modal opens
+	$: if (show && fileId) {
+		previewAvailable = true;
+		fetch(`${WEBUI_API_BASE_URL}/files/${fileId}/content`, { method: 'HEAD' })
+			.then((res) => {
+				if (!res.ok) {
+					previewAvailable = false;
+					selectedTab = 'content';
+				}
+			})
+			.catch(() => {
+				previewAvailable = false;
+				selectedTab = 'content';
+			});
+	}
 
 	const decodeString = (str: string) => {
 		try {
@@ -139,8 +156,8 @@
 		</div>
 
 		<div class="flex flex-col w-full px-5 pb-5">
-			<!-- Tab switcher: only shown for previewable file types -->
-			{#if isPreviewable}
+			<!-- Tab switcher: only shown for previewable file types with available files -->
+			{#if isPreviewable && previewAvailable}
 				<div class="flex gap-1 mb-3">
 					<button
 						class="px-3 py-1 text-xs font-medium rounded-lg transition {selectedTab === 'preview'
@@ -162,7 +179,7 @@
 			{/if}
 
 			<!-- Preview tab -->
-			{#if isPreviewable && selectedTab === 'preview'}
+			{#if isPreviewable && previewAvailable && selectedTab === 'preview'}
 				{#if isPDF}
 					<iframe
 						title={fileName}

@@ -575,7 +575,6 @@
 		} catch (error) {
 			console.error('OneDrive sync error:', error);
 			toast.error($i18n.t('Failed to sync from OneDrive: ' + (error instanceof Error ? error.message : String(error))));
-		} finally {
 			isSyncingOneDrive = false;
 		}
 	};
@@ -647,6 +646,7 @@
 				}
 			} else if (oneDriveSyncStatus.status === 'cancelled') {
 				isSyncingOneDrive = false;
+				isCancellingSync = false;
 				if (!_syncRefreshDone) {
 					_syncRefreshDone = true;
 					await init();
@@ -659,11 +659,13 @@
 
 	const cancelOneDriveSyncHandler = async () => {
 		try {
+			isCancellingSync = true;
 			await cancelSync(localStorage.token, knowledge.id);
 			toast.info($i18n.t('Cancelling OneDrive sync...'));
 		} catch (error) {
 			console.error('Failed to cancel sync:', error);
 			toast.error($i18n.t('Failed to cancel sync: ' + (error instanceof Error ? error.message : String(error))));
+			isCancellingSync = false;
 		}
 	};
 
@@ -767,6 +769,11 @@
 			return;
 		}
 
+		// Ignore new file events when cancellation is in progress
+		if (isCancellingSync) {
+			return;
+		}
+
 		// Use onedrive-{item_id} as the file ID (matches backend pattern)
 		const fileId = `onedrive-${data.file.item_id}`;
 
@@ -820,6 +827,11 @@
 	}) => {
 		// Only process events for the current knowledge base
 		if (data.knowledge_id !== knowledge?.id) {
+			return;
+		}
+
+		// Ignore new file events when cancellation is in progress
+		if (isCancellingSync) {
 			return;
 		}
 
@@ -899,20 +911,28 @@
 		// Handle completion states
 		if (data.status === 'completed' || data.status === 'completed_with_errors') {
 			const count = data.files_processed ?? 0;
-			if (count > 0) {
-				if (data.files_failed && data.files_failed > 0) {
-					const failedDetails = data.failed_files
-						? formatFailedFilesMessage(data.failed_files)
-						: '';
-					toast.warning(
-						$i18n.t('Synced {{count}} files from OneDrive ({{failed}} failed)', {
-							count,
-							failed: data.files_failed
-						}) + failedDetails
-					);
-				} else {
-					toast.success($i18n.t('Synced {{count}} files from OneDrive', { count }));
-				}
+			const failed = data.files_failed ?? 0;
+			if (count > 0 && failed > 0) {
+				const failedDetails = data.failed_files
+					? formatFailedFilesMessage(data.failed_files)
+					: '';
+				toast.warning(
+					$i18n.t('Synced {{count}} files from OneDrive ({{failed}} failed)', {
+						count,
+						failed
+					}) + failedDetails
+				);
+			} else if (count > 0) {
+				toast.success($i18n.t('Synced {{count}} files from OneDrive', { count }));
+			} else if (failed > 0) {
+				const failedDetails = data.failed_files
+					? formatFailedFilesMessage(data.failed_files)
+					: '';
+				toast.error(
+					$i18n.t('OneDrive sync failed: all {{failed}} files failed to process', {
+						failed
+					}) + failedDetails
+				);
 			} else {
 				toast.success($i18n.t('OneDrive sync completed - no changes'));
 			}
@@ -930,6 +950,7 @@
 		} else if (data.status === 'cancelled') {
 			toast.info($i18n.t('OneDrive sync cancelled'));
 			isSyncingOneDrive = false;
+			isCancellingSync = false;
 			_syncRefreshDone = true;
 			// Refresh knowledge metadata to update last_sync_at timestamp
 			const res = await getKnowledgeById(localStorage.token, id);
@@ -1063,9 +1084,12 @@
 	let dragged = false;
 	let isSaving = false;
 	let isSyncingOneDrive = false;
+	let isCancellingSync = false;
 	let oneDriveSyncStatus: SyncStatusResponse | null = null;
 	let backgroundSyncAuthorized = false;
 	let backgroundSyncNeedsReauth = false;
+
+	$: isSyncBusy = isSyncingOneDrive || isCancellingSync;
 
 	const updateFileContentHandler = async () => {
 		if (isSaving) {
@@ -1412,47 +1436,6 @@
 								{:else}
 									<Badge type="muted" content={$i18n.t('Local')} />
 								{/if}
-								{#if knowledge?.meta?.onedrive_sync?.sources?.length && !isSyncingOneDrive && knowledge?.user_id === $user?.id}
-									<Tooltip content={knowledge?.meta?.onedrive_sync?.last_sync_at
-										? $i18n.t('Last synced: {{date}}', { date: dayjs(knowledge.meta.onedrive_sync.last_sync_at * 1000).fromNow() })
-										: $i18n.t('Sync OneDrive files')}>
-										<button
-											class="p-1 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 transition"
-											on:click={oneDriveResyncHandler}
-										>
-											<OneDrive className="size-4" />
-										</button>
-									</Tooltip>
-								{/if}
-								{#if oneDriveSyncStatus?.status === 'syncing' || isSyncingOneDrive}
-									<Tooltip content={$i18n.t('Click to cancel sync')}>
-										<button
-											class="text-xs text-blue-500 flex items-center gap-1 hover:text-red-500 transition-colors cursor-pointer"
-											on:click={() => {
-												showCancelSyncConfirmModal = true;
-											}}
-										>
-											<div class="relative">
-												<Spinner className="size-3" />
-												<svg
-													class="absolute -top-0.5 -right-0.5 size-2 text-red-500 opacity-0 hover:opacity-100"
-													viewBox="0 0 24 24"
-													fill="currentColor"
-												>
-													<rect x="4" y="4" width="16" height="16" rx="2" />
-												</svg>
-											</div>
-											{#if oneDriveSyncStatus?.progress_total}
-												{$i18n.t('Syncing: {{current}}/{{total}}', {
-													current: oneDriveSyncStatus.progress_current || 0,
-													total: oneDriveSyncStatus.progress_total
-												})}
-											{:else}
-												{$i18n.t('Starting sync...')}
-											{/if}
-										</button>
-									</Tooltip>
-								{/if}
 								{#if knowledge?.type === 'onedrive' && $config?.onedrive?.has_client_secret}
 									{#if backgroundSyncNeedsReauth}
 										<button
@@ -1483,16 +1466,62 @@
 										</button>
 									{/if}
 								{/if}
-								{#if fileItemsTotal}
-									<div class="text-xs text-gray-500">
-										{#if knowledge?.type !== 'local' && knowledge?.type}
-											{fileItemsTotal} / 250 {$i18n.t('files')}
-										{:else}
+								{#if isCancellingSync}
+									<Tooltip content={$i18n.t('Click to cancel sync')}>
+										<button
+											class="p-1 rounded-lg text-gray-400 cursor-not-allowed"
+											disabled
+										>
+											<Spinner className="size-3.5" />
+										</button>
+									</Tooltip>
+								{:else if isSyncingOneDrive}
+									<Tooltip content={$i18n.t('Click to cancel sync')}>
+										<button
+											class="p-1 rounded-lg hover:bg-red-100 dark:hover:bg-red-900/30 text-blue-500 hover:text-red-500 transition"
+											on:click={() => { showCancelSyncConfirmModal = true; }}
+										>
+											<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" class="size-4">
+												<path d="M4.5 2A2.5 2.5 0 0 0 2 4.5v7A2.5 2.5 0 0 0 4.5 14h7a2.5 2.5 0 0 0 2.5-2.5v-7A2.5 2.5 0 0 0 11.5 2h-7Z" />
+											</svg>
+										</button>
+									</Tooltip>
+								{:else if knowledge?.meta?.onedrive_sync?.sources?.length && knowledge?.user_id === $user?.id}
+									<Tooltip content={knowledge?.meta?.onedrive_sync?.last_sync_at
+										? $i18n.t('Last synced: {{date}}', { date: dayjs(knowledge.meta.onedrive_sync.last_sync_at * 1000).fromNow() })
+										: $i18n.t('Sync OneDrive files')}>
+										<button
+											class="p-1 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 transition"
+											on:click={oneDriveResyncHandler}
+										>
+											<OneDrive className="size-4" />
+										</button>
+									</Tooltip>
+								{/if}
+								{#if isSyncBusy && oneDriveSyncStatus?.progress_total}
+									<Tooltip content={$i18n.t('Sync progress')}>
+										<div class="text-xs text-blue-500 font-medium">
+											{fileItemsTotal ?? 0} / {oneDriveSyncStatus.progress_total}
+										</div>
+									</Tooltip>
+								{:else if isSyncBusy}
+									<div class="text-xs text-blue-500 font-medium flex items-center gap-1">
+										<Spinner className="size-3" />
+									</div>
+								{:else if fileItemsTotal}
+									{#if knowledge?.type !== 'local' && knowledge?.type}
+										<Tooltip content={$i18n.t('Maximum 250 files per external knowledge base')}>
+											<div class="text-xs text-gray-500">
+												{fileItemsTotal} / 250 {$i18n.t('files')}
+											</div>
+										</Tooltip>
+									{:else}
+										<div class="text-xs text-gray-500">
 											{$i18n.t('{{COUNT}} files', {
 												COUNT: fileItemsTotal
 											})}
-										{/if}
-									</div>
+										</div>
+									{/if}
 								{/if}
 							</div>
 						</div>
@@ -1563,7 +1592,8 @@
 							{#if knowledge?.type === 'onedrive'}
 								<Tooltip content={$i18n.t('Sync from OneDrive')}>
 									<button
-										class="p-1.5 rounded-xl hover:bg-gray-100 dark:bg-gray-850 dark:hover:bg-gray-800 transition font-medium text-sm flex items-center space-x-1"
+										class="p-1.5 rounded-xl hover:bg-gray-100 dark:bg-gray-850 dark:hover:bg-gray-800 transition font-medium text-sm flex items-center space-x-1 disabled:opacity-40 disabled:cursor-not-allowed"
+										disabled={isSyncBusy}
 										on:click={() => {
 											oneDriveSyncHandler();
 										}}
@@ -1723,7 +1753,14 @@
 										<Pagination bind:page={currentPage} count={fileItemsTotal} perPage={30} />
 									{/if}
 								{:else}
-									{#if knowledge?.write_access && !query && !viewOption}
+									{#if isSyncBusy}
+										<div class="my-auto flex flex-col items-center justify-center text-center gap-3 py-8">
+											<Spinner className="size-5" />
+											<div class="text-xs text-gray-500">
+												{$i18n.t('Starting sync...')}
+											</div>
+										</div>
+									{:else if knowledge?.write_access && !query && !viewOption}
 										<EmptyStateCards
 											knowledgeType={knowledge?.type || 'local'}
 											onAction={(type) => {

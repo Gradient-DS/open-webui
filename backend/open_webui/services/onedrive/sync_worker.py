@@ -25,6 +25,7 @@ from open_webui.config import (
     FILE_PROCESSING_MAX_CONCURRENT,
 )
 from open_webui.retrieval.vector.factory import VECTOR_DB_CLIENT
+from open_webui.services.deletion import DeletionService
 
 log = logging.getLogger(__name__)
 
@@ -588,14 +589,10 @@ class OneDriveSyncWorker:
             except Exception as e:
                 log.warning(f"Failed to remove vectors for {file.id}: {e}")
 
-            # Check for orphans
+            # Check for orphans — use DeletionService for full cleanup (vectors + storage + DB)
             remaining = Knowledges.get_knowledge_files_by_file_id(file.id)
             if not remaining:
-                try:
-                    VECTOR_DB_CLIENT.delete_collection(f"file-{file.id}")
-                except Exception:
-                    pass
-                Files.delete_file_by_id(file.id)
+                await asyncio.to_thread(DeletionService.delete_file, file.id)
 
             removed_count += 1
 
@@ -833,6 +830,15 @@ class OneDriveSyncWorker:
             # Check if cancelled during processing
             if cancelled:
                 log.info(f"Sync cancelled by user for knowledge {self.knowledge_id}")
+
+                # Clear delta state so next sync does full re-enumeration
+                # instead of only fetching changes since last successful sync
+                for source in self.sources:
+                    source.pop("delta_link", None)
+                    source.pop("folder_map", None)
+                    source.pop("folder_map_version", None)
+                await self._save_sources()
+
                 await self._update_sync_status(
                     "cancelled",
                     total_processed + total_failed,
@@ -945,11 +951,7 @@ class OneDriveSyncWorker:
             remaining_refs = Knowledges.get_knowledge_files_by_file_id(file_id)
             if not remaining_refs:
                 log.info(f"No remaining references to {file_id}, cleaning up")
-                try:
-                    VECTOR_DB_CLIENT.delete_collection(f"file-{file_id}")
-                except Exception as e:
-                    log.warning(f"Failed to delete collection for {file_id}: {e}")
-                Files.delete_file_by_id(file_id)
+                await asyncio.to_thread(DeletionService.delete_file, file_id)
             else:
                 log.info(
                     f"File {file_id} still referenced by {len(remaining_refs)} KB(s), preserving"
@@ -969,6 +971,15 @@ class OneDriveSyncWorker:
         relative_path = file_info.get("relative_path", name)
 
         log.info(f"Processing file: {name} (id: {item_id}, relative_path: {relative_path})")
+
+        # Check cancellation before emitting any UI events
+        if self._check_cancelled():
+            log.info(f"Sync cancelled, skipping file {name}")
+            return FailedFile(
+                filename=name,
+                error_type=SyncErrorType.PROCESSING_ERROR.value,
+                error_message="Sync cancelled by user",
+            )
 
         # Emit processing started event for progressive UI updates
         from open_webui.services.onedrive.sync_events import emit_file_processing
@@ -1032,6 +1043,13 @@ class OneDriveSyncWorker:
             # Copy vectors from per-file collection to KB collection
             result = await self._ensure_vectors_in_kb(file_id)
             if result:
+                if result.error_type == SyncErrorType.EMPTY_CONTENT.value:
+                    # File genuinely has no extractable text (e.g. image-only PDF).
+                    # Re-processing won't help, so skip silently.
+                    log.info(
+                        f"File {file_id} has no extractable content, skipping vectorisation"
+                    )
+                    return None
                 # Vectors missing or corrupt (e.g. Weaviate collections were deleted).
                 # Fall through to re-upload + re-process the file from scratch
                 # instead of returning the error permanently.
@@ -1131,6 +1149,16 @@ class OneDriveSyncWorker:
             failed = await self._process_file_via_api(file_id, name)
             if failed:
                 return failed
+
+            # Check cancellation before adding to KB (file/vectors are safe to leave;
+            # they'll be reused on next sync or cleaned up by orphan detection)
+            if self._check_cancelled():
+                log.info(f"Sync cancelled, skipping KB association for {file_id}")
+                return FailedFile(
+                    filename=name,
+                    error_type=SyncErrorType.PROCESSING_ERROR.value,
+                    error_message="Sync cancelled by user",
+                )
 
             # Add to knowledge base (if not already added)
             Knowledges.add_file_to_knowledge_by_id(
@@ -1232,6 +1260,19 @@ class OneDriveSyncWorker:
                 error_type=SyncErrorType.PROCESSING_ERROR.value,
                 error_message=f"Failed to copy vectors to KB: {detail}"[:100],
             )
+        except ValueError as e:
+            error_msg = str(e).lower()
+            if "empty" in error_msg or "no content" in error_msg:
+                return FailedFile(
+                    filename=file_id,
+                    error_type=SyncErrorType.EMPTY_CONTENT.value,
+                    error_message="File has no extractable content",
+                )
+            return FailedFile(
+                filename=file_id,
+                error_type=SyncErrorType.PROCESSING_ERROR.value,
+                error_message=f"Error copying vectors: {str(e)}"[:80],
+            )
         except Exception as e:
             return FailedFile(
                 filename=file_id,
@@ -1271,6 +1312,12 @@ class OneDriveSyncWorker:
                     user=user,
                 )
                 log.info(f"Successfully extracted content from file {file_id}")
+            except ValueError as e:
+                error_msg = str(e).lower()
+                if "empty" in error_msg or "no content" in error_msg:
+                    log.debug(f"File {file_id} has no extractable content")
+                    return None  # Skip silently - file is stored but can't be vectorised
+                raise  # Re-raise other ValueErrors
             except HTTPException as e:
                 detail = str(e.detail) if e.detail else ""
                 if e.status_code == 400 and "Duplicate content" in detail:
@@ -1279,11 +1326,7 @@ class OneDriveSyncWorker:
                     )
                 elif e.status_code == 400 and ("No content extracted" in detail or "empty" in detail.lower()):
                     log.debug(f"File {file_id} has no extractable content")
-                    return FailedFile(
-                        filename=filename,
-                        error_type=SyncErrorType.EMPTY_CONTENT.value,
-                        error_message="File has no extractable content",
-                    )
+                    return None  # Skip silently - file is stored but can't be vectorised
                 else:
                     log.debug(f"Failed to process file content {file_id}: {e.status_code} - {detail}")
                     return FailedFile(

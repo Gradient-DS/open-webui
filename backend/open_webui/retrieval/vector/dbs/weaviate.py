@@ -85,8 +85,10 @@ class WeaviateClient(VectorDBBase):
 
     def delete_collection(self, collection_name: str) -> None:
         sane_collection_name = self._sanitize_collection_name(collection_name)
-        if self.client.collections.exists(sane_collection_name):
+        try:
             self.client.collections.delete(sane_collection_name)
+        except Exception:
+            pass  # Collection may not exist, that's fine
 
     def _create_collection(self, collection_name: str) -> None:
         # Explicitly define all expected properties as TEXT to prevent Weaviate auto-schema

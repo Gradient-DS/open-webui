@@ -102,6 +102,16 @@ async def sync_items(
             )
     existing_sources = existing_sync.get("sources", [])
 
+    # After cancellation, force full re-enumeration by clearing delta state.
+    # Without this, the worker reuses delta_link from the last *successful* sync,
+    # which may not include files that were discovered-but-not-processed during
+    # the cancelled run.
+    if existing_sync.get("status") == "cancelled":
+        for source in existing_sources:
+            source.pop("delta_link", None)
+            source.pop("folder_map", None)
+            source.pop("folder_map_version", None)
+
     # Add new items (skip duplicates by item_id)
     existing_ids = {s["item_id"] for s in existing_sources}
     new_sources = [

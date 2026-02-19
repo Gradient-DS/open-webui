@@ -16,7 +16,6 @@ from open_webui.models.chats import (
 )
 from open_webui.models.tags import TagModel, Tags
 from open_webui.models.folders import Folders
-from open_webui.services.deletion import DeletionService
 
 from open_webui.config import ENABLE_ADMIN_CHAT_ACCESS, ENABLE_ADMIN_EXPORT
 from open_webui.constants import ERROR_MESSAGES
@@ -199,8 +198,10 @@ def get_session_user_chat_usage_stats(
 
 
 @router.delete("/", response_model=bool)
-async def delete_all_user_chats(request: Request, user=Depends(get_verified_user)):
-
+async def delete_all_user_chats(
+    request: Request,
+    user=Depends(get_verified_user),
+):
     if user.role == "user" and not has_permission(
         user.id, "chat.delete", request.app.state.config.USER_PERMISSIONS
     ):
@@ -209,8 +210,8 @@ async def delete_all_user_chats(request: Request, user=Depends(get_verified_user
             detail=ERROR_MESSAGES.ACCESS_PROHIBITED,
         )
 
-    result = Chats.delete_chats_by_user_id(user.id)
-    return result
+    count = Chats.soft_delete_by_user_id(user.id)
+    return count > 0
 
 
 ############################
@@ -694,20 +695,13 @@ async def send_chat_message_event_by_id(
 @router.delete("/{id}", response_model=bool)
 async def delete_chat_by_id(request: Request, id: str, user=Depends(get_verified_user)):
     if user.role == "admin":
-        # Admin can delete any chat
         chat = Chats.get_chat_by_id(id)
         if not chat:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=ERROR_MESSAGES.NOT_FOUND,
             )
-
-        # Use chat owner's user_id for tag cleanup, not admin's
-        report = DeletionService.delete_chat(id, chat.user_id)
-        if report.has_errors:
-            log.warning(f"Chat deletion had errors: {report.errors}")
-
-        return report.db_records.get("chat", 0) > 0
+        return Chats.soft_delete_by_id(id)
     else:
         if not has_permission(
             user.id, "chat.delete", request.app.state.config.USER_PERMISSIONS
@@ -716,20 +710,13 @@ async def delete_chat_by_id(request: Request, id: str, user=Depends(get_verified
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail=ERROR_MESSAGES.ACCESS_PROHIBITED,
             )
-
-        # Verify user owns the chat
         chat = Chats.get_chat_by_id_and_user_id(id, user.id)
         if not chat:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=ERROR_MESSAGES.NOT_FOUND,
             )
-
-        report = DeletionService.delete_chat(id, user.id)
-        if report.has_errors:
-            log.warning(f"Chat deletion had errors: {report.errors}")
-
-        return report.db_records.get("chat", 0) > 0
+        return Chats.soft_delete_by_id(id)
 
 
 ############################

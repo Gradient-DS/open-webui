@@ -1,5 +1,6 @@
 from dataclasses import dataclass, field
 from typing import Dict, List, Set, Optional
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import logging
 
 from open_webui.models.files import Files
@@ -8,6 +9,11 @@ from open_webui.storage.provider import Storage
 from open_webui.retrieval.vector.factory import VECTOR_DB_CLIENT
 
 log = logging.getLogger(__name__)
+
+# Shared pool for vector DB cleanup operations.
+# Bounded to 10 workers total across ALL concurrent deletions to avoid
+# overwhelming Weaviate when multiple users delete KBs simultaneously.
+_vector_cleanup_pool = ThreadPoolExecutor(max_workers=10, thread_name_prefix="vec-cleanup")
 
 
 @dataclass
@@ -125,6 +131,97 @@ class DeletionService:
         return report
 
     @staticmethod
+    def delete_orphaned_files_batch(
+        file_ids: list[str], force: bool = False
+    ) -> DeletionReport:
+        """
+        Batch-delete files that are no longer referenced by any KB.
+
+        1. Find which file_ids still have KB references (1 SQL query)
+        2. Load orphaned file records (1 SQL query)
+        3. Delete per-file vector collections (N calls)
+        4. Batch-delete from storage (1 call per 1000 files)
+        5. Batch-delete DB records (1 SQL query)
+
+        Args:
+            file_ids: List of file IDs to check and potentially delete.
+            force: If True, skip the KB reference check and delete all files.
+                   Use when deleting an entire user (all their KBs are already gone).
+        """
+        report = DeletionReport()
+        if not file_ids:
+            return report
+
+        # 1. Find orphaned files (single query instead of N queries)
+        if force:
+            orphaned_ids = file_ids
+        else:
+            from open_webui.models.chats import Chats
+
+            kb_referenced = Knowledges.get_referenced_file_ids(file_ids)
+            chat_referenced = Chats.get_referenced_file_ids(file_ids)
+            referenced_ids = kb_referenced | chat_referenced
+            orphaned_ids = [fid for fid in file_ids if fid not in referenced_ids]
+
+        if not orphaned_ids:
+            return report
+
+        log.info(
+            f"Batch cleanup: {len(orphaned_ids)} orphaned files "
+            f"out of {len(file_ids)} total"
+        )
+
+        # 2. Load file records for orphaned files (single query).
+        #    We need paths BEFORE deleting DB records so we can find storage files.
+        orphaned_files = Files.get_files_by_ids(orphaned_ids)
+        file_paths = [f.path for f in orphaned_files if f.path]
+
+        # Deletion order: derived data first, source-of-truth (DB) last.
+        # This ensures retryability: if we crash mid-deletion, the DB
+        # records still exist so a cleanup worker can find what's left.
+
+        # 3. Delete per-file vector collections (derived, slowest step)
+        def _delete_collection(file_id: str) -> tuple[str, Optional[str]]:
+            try:
+                VECTOR_DB_CLIENT.delete_collection(
+                    collection_name=f"file-{file_id}"
+                )
+                return file_id, None
+            except Exception as e:
+                return file_id, str(e)
+
+        futures = {
+            _vector_cleanup_pool.submit(_delete_collection, fid): fid
+            for fid in orphaned_ids
+        }
+        for future in as_completed(futures):
+            fid, error = future.result()
+            if error:
+                report.add_error(
+                    f"Failed to delete vector collection file-{fid}: {error}"
+                )
+            else:
+                report.vector_collections += 1
+
+        # 4. Delete from storage (raw files)
+        if file_paths:
+            try:
+                deleted = Storage.delete_files(file_paths)
+                report.storage_files += deleted
+            except Exception as e:
+                report.add_error(f"Storage batch delete failed: {e}")
+
+        # 5. Delete DB records last (source of truth for retry)
+        if orphaned_ids:
+            try:
+                Files.delete_files_by_ids(orphaned_ids)
+                report.add_db("file", len(orphaned_ids))
+            except Exception as e:
+                report.add_error(f"DB batch delete failed: {e}")
+
+        return report
+
+    @staticmethod
     def delete_chat(chat_id: str, user_id: str) -> DeletionReport:
         """
         Delete a chat and all associated files/vectors.
@@ -138,8 +235,8 @@ class DeletionService:
 
         report = DeletionReport()
 
-        # Get chat to check it exists and get metadata
-        chat = Chats.get_chat_by_id(chat_id)
+        # Get chat to check it exists and get metadata (includes soft-deleted)
+        chat = Chats.get_chat_by_id_unfiltered(chat_id)
         if not chat:
             report.add_error(f"Chat {chat_id} not found")
             return report
@@ -205,7 +302,7 @@ class DeletionService:
 
         report = DeletionReport()
 
-        knowledge = Knowledges.get_knowledge_by_id(knowledge_id)
+        knowledge = Knowledges.get_knowledge_by_id_unfiltered(knowledge_id)
         if not knowledge:
             report.add_error(f"Knowledge {knowledge_id} not found")
             return report
@@ -305,15 +402,18 @@ class DeletionService:
     @staticmethod
     def delete_user(user_id: str) -> DeletionReport:
         """
-        Delete a user and ALL associated data across all layers.
+        Delete a user and ALL associated data.
 
-        Order of deletion (vectors/storage before DB):
-        1. Delete user memories (vectors + DB)
-        2. Delete user's knowledge bases (vectors + optionally files)
-        3. Delete user's standalone files (vectors + storage + DB)
-        4. Delete user's chats (cascades to chat_files via FK)
-        5. Delete remaining DB records (tables with user_id)
-        6. Delete auth and user records
+        Fast path (synchronous):
+        1. Delete memories (single vector collection + DB)
+        2. Soft-delete all user's knowledge bases (instant)
+        3. Soft-delete all user's chats (instant)
+        4. Delete simple DB tables (tags, folders, prompts, etc.)
+        5. Delete auth and user records
+
+        The cleanup worker handles the expensive parts:
+        - KB vector collections, model reference updates, file cleanup
+        - Chat file cleanup (vectors, storage, DB)
         """
         from open_webui.models.auths import Auths
         from open_webui.models.users import Users
@@ -333,61 +433,34 @@ class DeletionService:
 
         report = DeletionReport()
 
-        # Track deleted files to prevent duplicate deletion attempts
-        # (a file can be in multiple KBs, or a KB file might also be standalone)
-        deleted_file_ids: Set[str] = set()
-
         # Verify user exists
         user = Users.get_user_by_id(user_id)
         if not user:
             report.add_error(f"User {user_id} not found")
             return report
 
-        # 1. Delete memories (vectors + DB)
+        # 1. Delete memories (vectors + DB) — fast, single collection
         memory_report = DeletionService.delete_memories(user_id)
         report.vector_collections += memory_report.vector_collections
         for table, count in memory_report.db_records.items():
             report.add_db(table, count)
         report.errors.extend(memory_report.errors)
 
-        # 2. Delete knowledge bases (this deletes KB vectors, optionally files)
+        # 2. Soft-delete all knowledge bases (instant — cleanup worker handles the rest)
         try:
-            knowledge_bases = Knowledges.get_knowledge_items_by_user_id(user_id)
-            for kb in knowledge_bases:
-                kb_report = DeletionService.delete_knowledge(
-                    kb.id, delete_files=True, deleted_file_ids=deleted_file_ids
-                )
-                report.vector_collections += kb_report.vector_collections
-                report.vector_documents += kb_report.vector_documents
-                report.storage_files += kb_report.storage_files
-                for table, count in kb_report.db_records.items():
-                    report.add_db(table, count)
-                report.errors.extend(kb_report.errors)
+            kb_count = Knowledges.soft_delete_by_user_id(user_id)
+            report.add_db("knowledge_soft_deleted", kb_count)
         except Exception as e:
-            report.add_error(f"Failed to get/delete knowledge bases: {e}")
+            report.add_error(f"Failed to soft-delete knowledge bases: {e}")
 
-        # 3. Delete standalone files (files not already deleted via knowledge bases)
+        # 3. Soft-delete all chats (instant — cleanup worker handles the rest)
         try:
-            files = Files.get_files_by_user_id(user_id)
-            for file in files:
-                file_report = DeletionService.delete_file(file.id, deleted_file_ids)
-                report.vector_collections += file_report.vector_collections
-                report.vector_documents += file_report.vector_documents
-                report.storage_files += file_report.storage_files
-                for table, count in file_report.db_records.items():
-                    report.add_db(table, count)
-                report.errors.extend(file_report.errors)
+            chat_count = Chats.soft_delete_by_user_id(user_id)
+            report.add_db("chat_soft_deleted", chat_count)
         except Exception as e:
-            report.add_error(f"Failed to get/delete files: {e}")
+            report.add_error(f"Failed to soft-delete chats: {e}")
 
-        # 4. Delete chats (FK cascades chat_files)
-        try:
-            Chats.delete_chats_by_user_id(user_id)
-            report.add_db("chat")
-        except Exception as e:
-            report.add_error(f"Failed to delete chats: {e}")
-
-        # 5. Delete remaining tables with user_id
+        # 4. Delete remaining tables with user_id
         # Order matters: delete dependents before parents
 
         # Messages and reactions (channel content)
@@ -495,7 +568,7 @@ class DeletionService:
         except Exception as e:
             report.add_error(f"Failed to delete API keys: {e}")
 
-        # 6. Finally delete auth and user records
+        # 5. Finally delete auth and user records
         try:
             Auths.delete_auth_by_id(user_id)
             report.add_db("auth")

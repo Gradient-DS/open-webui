@@ -30,7 +30,6 @@ from open_webui.utils.features import require_feature
 
 
 from open_webui.config import BYPASS_ADMIN_ACCESS_CONTROL
-from open_webui.models.models import Models, ModelForm
 
 
 log = logging.getLogger(__name__)
@@ -776,59 +775,8 @@ async def delete_knowledge_by_id(
             detail=ERROR_MESSAGES.ACCESS_PROHIBITED,
         )
 
-    log.info(f"Deleting knowledge base: {id} (name: {knowledge.name})")
-
-    # Collect file IDs before deletion (junction rows will be cascade-deleted)
-    kb_files = Knowledges.get_files_by_id(id)
-    kb_file_ids = [f.id for f in kb_files]
-    log.info(f"Knowledge base {id} has {len(kb_file_ids)} associated files")
-
-    # Get all models
-    models = Models.get_all_models()
-    log.info(f"Found {len(models)} models to check for knowledge base {id}")
-
-    # Update models that reference this knowledge base
-    for model in models:
-        if model.meta and hasattr(model.meta, "knowledge"):
-            knowledge_list = model.meta.knowledge or []
-            # Filter out the deleted knowledge base
-            updated_knowledge = [k for k in knowledge_list if k.get("id") != id]
-
-            # If the knowledge list changed, update the model
-            if len(updated_knowledge) != len(knowledge_list):
-                log.info(f"Updating model {model.id} to remove knowledge base {id}")
-                model.meta.knowledge = updated_knowledge
-                # Create a ModelForm for the update
-                model_form = ModelForm(
-                    id=model.id,
-                    name=model.name,
-                    base_model_id=model.base_model_id,
-                    meta=model.meta,
-                    params=model.params,
-                    access_control=model.access_control,
-                    is_active=model.is_active,
-                )
-                Models.update_model_by_id(model.id, model_form)
-
-    # Clean up KB-level vector collection
-    try:
-        VECTOR_DB_CLIENT.delete_collection(collection_name=id)
-    except Exception as e:
-        log.debug(e)
-        pass
-
-    # Delete the knowledge row (cascade-deletes KnowledgeFile junction rows)
-    result = Knowledges.delete_knowledge_by_id(id=id)
-
-    # Clean up orphaned files (no longer referenced by any KB)
-    for file_id in kb_file_ids:
-        remaining_refs = Knowledges.get_knowledge_files_by_file_id(file_id)
-        if not remaining_refs:
-            log.info(f"Cleaning up orphaned file {file_id}")
-            file_report = DeletionService.delete_file(file_id)
-            if file_report.has_errors:
-                log.warning(f"Errors deleting orphaned file {file_id}: {file_report.errors}")
-
+    log.info(f"Soft-deleting knowledge base: {id} (name: {knowledge.name})")
+    result = Knowledges.soft_delete_by_id(id)
     return result
 
 
