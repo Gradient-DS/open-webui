@@ -725,6 +725,7 @@ AIOHTTP_CLIENT_SESSION_TOOL_SERVER_SSL = (
 
 AGENT_API_ENABLED = os.environ.get("AGENT_API_ENABLED", "False").lower() == "true"
 AGENT_API_BASE_URL = os.environ.get("AGENT_API_BASE_URL", "").strip().rstrip("/")
+AGENT_API_AGENT = os.environ.get("AGENT_API_AGENT", "").strip()
 
 
 ####################################

@@ -40,7 +40,7 @@ import aiohttp
 from starlette.background import BackgroundTask
 from starlette.responses import StreamingResponse
 
-from open_webui.env import AGENT_API_BASE_URL
+from open_webui.env import AGENT_API_BASE_URL, AGENT_API_AGENT
 from open_webui.socket.main import get_event_emitter
 
 log = logging.getLogger(__name__)
@@ -55,6 +55,7 @@ log = logging.getLogger(__name__)
 class AgentPayload:
     """Request schema for the agent API's chat completions endpoint."""
 
+    agent: str
     model: str
     messages: list[dict[str, Any]]
     stream: bool = True
@@ -78,6 +79,7 @@ class AgentPayload:
 
 def build_agent_payload(
     *,
+    agent: str,
     model: str,
     messages: list[dict[str, Any]],
     stream: bool = True,
@@ -97,6 +99,7 @@ def build_agent_payload(
     values so the agent only sees fields that are actually set.
     """
     payload = AgentPayload(
+        agent=agent,
         model=model,
         messages=messages,
         stream=stream,
@@ -218,6 +221,7 @@ async def call_agent_api(
             model_params[key] = form_data[key]
 
     payload = build_agent_payload(
+        agent=AGENT_API_AGENT,
         model=form_data.get("model", ""),
         messages=form_data.get("messages", []),
         stream=stream,
