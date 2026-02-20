@@ -455,10 +455,27 @@ export const getUserActiveStatusById = async (token: string, userId: string) => 
 	return res;
 };
 
-export const deleteUserById = async (token: string, userId: string) => {
+export const deleteUserById = async (
+	token: string,
+	userId: string,
+	options: { archiveBeforeDelete?: boolean; archiveReason?: string; archiveRetentionDays?: number } = {}
+) => {
 	let error = null;
 
-	const res = await fetch(`${WEBUI_API_BASE_URL}/users/${userId}`, {
+	const params = new URLSearchParams();
+	if (options.archiveBeforeDelete) {
+		params.set('archive_before_delete', 'true');
+	}
+	if (options.archiveReason) {
+		params.set('archive_reason', options.archiveReason);
+	}
+	if (options.archiveRetentionDays) {
+		params.set('archive_retention_days', options.archiveRetentionDays.toString());
+	}
+	const queryString = params.toString();
+	const url = `${WEBUI_API_BASE_URL}/users/${userId}${queryString ? `?${queryString}` : ''}`;
+
+	const res = await fetch(url, {
 		method: 'DELETE',
 		headers: {
 			'Content-Type': 'application/json',

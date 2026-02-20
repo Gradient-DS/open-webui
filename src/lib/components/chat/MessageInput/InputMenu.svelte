@@ -1,34 +1,51 @@
 <script lang="ts">
 	import { DropdownMenu } from 'bits-ui';
-	import { getContext, onMount, tick } from 'svelte';
+	import { getContext, tick } from 'svelte';
 	import { fly } from 'svelte/transition';
 	import { flyAndScale } from '$lib/utils/transitions';
 
-	import { config, user, tools as _tools, mobile, knowledge, chats } from '$lib/stores';
+	import {
+		config,
+		user,
+		tools as _tools,
+		mobile,
+		knowledge,
+		chats,
+		settings,
+		toolServers
+	} from '$lib/stores';
 	import { isFeatureEnabled } from '$lib/utils/features';
-	import { getKnowledgeBases } from '$lib/apis/knowledge';
 
-	import { createPicker } from '$lib/utils/google-drive-picker';
+	import { updateUserSettings } from '$lib/apis/users';
+	import { getTools } from '$lib/apis/tools';
+	import { getOAuthClientAuthorizationUrl } from '$lib/apis/configs';
 
 	import Dropdown from '$lib/components/common/Dropdown.svelte';
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
-	import DocumentArrowUp from '$lib/components/icons/DocumentArrowUp.svelte';
+	import Spinner from '$lib/components/common/Spinner.svelte';
+	import Switch from '$lib/components/common/Switch.svelte';
+
 	import Camera from '$lib/components/icons/Camera.svelte';
-	import Note from '$lib/components/icons/Note.svelte';
 	import Clip from '$lib/components/icons/Clip.svelte';
-	import ChatBubbleOval from '$lib/components/icons/ChatBubbleOval.svelte';
-	import Refresh from '$lib/components/icons/Refresh.svelte';
-	import Agile from '$lib/components/icons/Agile.svelte';
 	import ClockRotateRight from '$lib/components/icons/ClockRotateRight.svelte';
 	import Database from '$lib/components/icons/Database.svelte';
 	import ChevronRight from '$lib/components/icons/ChevronRight.svelte';
 	import ChevronLeft from '$lib/components/icons/ChevronLeft.svelte';
 	import PageEdit from '$lib/components/icons/PageEdit.svelte';
+	import Link from '$lib/components/icons/Link.svelte';
+	import GlobeAlt from '$lib/components/icons/GlobeAlt.svelte';
+	import Pin from '$lib/components/icons/Pin.svelte';
+	import PinSlash from '$lib/components/icons/PinSlash.svelte';
+	import Photo from '$lib/components/icons/Photo.svelte';
+	import Terminal from '$lib/components/icons/Terminal.svelte';
+	import Wrench from '$lib/components/icons/Wrench.svelte';
+	import Sparkles from '$lib/components/icons/Sparkles.svelte';
+	import Knobs from '$lib/components/icons/Knobs.svelte';
+
 	import Chats from './InputMenu/Chats.svelte';
 	import Notes from './InputMenu/Notes.svelte';
 	import Knowledge from './InputMenu/Knowledge.svelte';
 	import AttachWebpageModal from './AttachWebpageModal.svelte';
-	import GlobeAlt from '$lib/components/icons/GlobeAlt.svelte';
 
 	const i18n = getContext('i18n');
 
@@ -47,6 +64,30 @@
 	export let onUpload: Function;
 	export let onClose: Function;
 
+	// Capability toggle states (two-way binding from parent)
+	export let selectedToolIds: string[] = [];
+	export let selectedFilterIds: string[] = [];
+	export let webSearchEnabled = false;
+	export let imageGenerationEnabled = false;
+	export let codeInterpreterEnabled = false;
+
+	// Visibility flags
+	export let showToolsButton = false;
+	export let showWebSearchButton = false;
+	export let showImageGenerationButton = false;
+	export let showCodeInterpreterButton = false;
+	export let toggleFilters: {
+		id: string;
+		name: string;
+		description?: string;
+		icon?: string;
+		has_user_valves?: boolean;
+	}[] = [];
+
+	// Valve handling
+	export let onShowValves: Function = (e) => {};
+	export let closeOnOutsideClick = true;
+
 	let show = false;
 	let tab = '';
 
@@ -60,6 +101,60 @@
 	$: if (!fileUploadEnabled && files.length > 0) {
 		files = [];
 	}
+
+	// Tools state
+	let tools = null;
+
+	$: if (show) {
+		initTools();
+	}
+
+	const initTools = async () => {
+		if ($_tools === null) {
+			await _tools.set(await getTools(localStorage.token));
+		}
+
+		if ($_tools) {
+			tools = $_tools.reduce((a, tool, i, arr) => {
+				a[tool.id] = {
+					name: tool.name,
+					description: tool.meta.description,
+					enabled: selectedToolIds.includes(tool.id),
+					...tool
+				};
+				return a;
+			}, {});
+		}
+
+		if ($toolServers) {
+			for (const serverIdx in $toolServers) {
+				const server = $toolServers[serverIdx];
+				if (server.info) {
+					tools[`direct_server:${serverIdx}`] = {
+						name: server?.info?.title ?? server.url,
+						description: server.info.description ?? '',
+						enabled: selectedToolIds.includes(`direct_server:${serverIdx}`)
+					};
+				}
+			}
+		}
+
+		selectedToolIds = selectedToolIds.filter((id) => Object.keys(tools).includes(id));
+	};
+
+	// Pin handler
+	const pinItemHandler = async (itemId) => {
+		let pinnedItems = $settings?.pinnedInputItems ?? [];
+		if (pinnedItems.includes(itemId)) {
+			pinnedItems = pinnedItems.filter((id) => id !== itemId);
+		} else {
+			pinnedItems = [...new Set([...pinnedItems, itemId])];
+		}
+		settings.set({ ...$settings, pinnedInputItems: pinnedItems });
+		await updateUserSettings(localStorage.token, { ui: $settings });
+	};
+
+	$: pinnedInputItems = $settings?.pinnedInputItems ?? [];
 
 	const detectMobile = () => {
 		const userAgent = navigator.userAgent || navigator.vendor || window.opera;
@@ -88,6 +183,16 @@
 
 		show = false;
 	};
+
+	// Expose openTab for external use (pinned items in bottom bar)
+	export const openTab = (tabName) => {
+		tab = tabName;
+		show = true;
+	};
+
+	export const openWebpageModal = () => {
+		showAttachWebpageModal = true;
+	};
 </script>
 
 <AttachWebpageModal
@@ -109,6 +214,7 @@
 
 <Dropdown
 	bind:show
+	{closeOnOutsideClick}
 	on:change={(e) => {
 		if (e.detail === false) {
 			onClose();
@@ -121,7 +227,7 @@
 
 	<div slot="content">
 		<DropdownMenu.Content
-			class="w-full max-w-70 rounded-2xl px-1 py-1  border border-gray-100  dark:border-gray-800 z-50 bg-white dark:bg-gray-850 dark:text-white shadow-lg max-h-72 overflow-y-auto overflow-x-hidden scrollbar-thin transition"
+			class="w-full max-w-84 rounded-2xl px-1 py-1 border border-gray-100 dark:border-gray-800 z-50 bg-white dark:bg-gray-850 dark:text-white shadow-lg max-h-96 overflow-y-auto overflow-x-hidden scrollbar-thin transition"
 			sideOffset={4}
 			alignOffset={-6}
 			side="bottom"
@@ -130,6 +236,14 @@
 		>
 			{#if tab === ''}
 				<div in:fly={{ x: -20, duration: 150 }}>
+					<!-- ═══ ATTACH CONTEXT ═══ -->
+					<div
+						class="text-xs font-medium text-gray-400 dark:text-gray-500 uppercase tracking-wide px-3 py-1.5"
+					>
+						{$i18n.t('Attach context')}
+					</div>
+
+					<!-- Upload Files -->
 					<Tooltip
 						content={fileUploadCapableModels.length !== selectedModels.length
 							? $i18n.t('Model(s) do not support file upload')
@@ -149,11 +263,23 @@
 							}}
 						>
 							<Clip />
-
-							<div class="line-clamp-1">{$i18n.t('Upload Files')}</div>
+							<div class="flex-1 line-clamp-1">{$i18n.t('Files')}</div>
+							<Tooltip content={pinnedInputItems.includes('upload_files') ? $i18n.t('Unpin') : $i18n.t('Pin')}>
+								<button
+									class="p-1 rounded-md hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+									on:click|stopPropagation={() => pinItemHandler('upload_files')}
+								>
+									{#if pinnedInputItems.includes('upload_files')}
+										<PinSlash className="size-3.5" />
+									{:else}
+										<Pin className="size-3.5" />
+									{/if}
+								</button>
+							</Tooltip>
 						</DropdownMenu.Item>
 					</Tooltip>
 
+					<!-- Capture -->
 					{#if isFeatureEnabled('capture')}
 						<Tooltip
 							content={fileUploadCapableModels.length !== selectedModels.length
@@ -164,7 +290,7 @@
 							className="w-full"
 						>
 							<DropdownMenu.Item
-								class="flex gap-2 items-center px-3 py-1.5 text-sm  cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800/50  rounded-xl {!fileUploadEnabled
+								class="flex gap-2 items-center px-3 py-1.5 text-sm cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800/50 rounded-xl {!fileUploadEnabled
 									? 'opacity-50'
 									: ''}"
 								on:click={() => {
@@ -173,7 +299,6 @@
 											screenCaptureHandler();
 										} else {
 											const cameraInputElement = document.getElementById('camera-input');
-
 											if (cameraInputElement) {
 												cameraInputElement.click();
 											}
@@ -182,11 +307,24 @@
 								}}
 							>
 								<Camera />
-								<div class=" line-clamp-1">{$i18n.t('Capture')}</div>
+								<div class="flex-1 line-clamp-1">{$i18n.t('Capture')}</div>
+								<Tooltip content={pinnedInputItems.includes('capture') ? $i18n.t('Unpin') : $i18n.t('Pin')}>
+									<button
+										class="p-1 rounded-md hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+										on:click|stopPropagation={() => pinItemHandler('capture')}
+									>
+										{#if pinnedInputItems.includes('capture')}
+											<PinSlash className="size-3.5" />
+										{:else}
+											<Pin className="size-3.5" />
+										{/if}
+									</button>
+								</Tooltip>
 							</DropdownMenu.Item>
 						</Tooltip>
 					{/if}
 
+					<!-- Attach Webpage (Link icon) -->
 					<Tooltip
 						content={fileUploadCapableModels.length !== selectedModels.length
 							? $i18n.t('Model(s) do not support file upload')
@@ -205,11 +343,24 @@
 								}
 							}}
 						>
-							<GlobeAlt />
-							<div class="line-clamp-1">{$i18n.t('Attach Webpage')}</div>
+							<Link />
+							<div class="flex-1 line-clamp-1">{$i18n.t('Webpage URL')}</div>
+							<Tooltip content={pinnedInputItems.includes('attach_webpage') ? $i18n.t('Unpin') : $i18n.t('Pin')}>
+								<button
+									class="p-1 rounded-md hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+									on:click|stopPropagation={() => pinItemHandler('attach_webpage')}
+								>
+									{#if pinnedInputItems.includes('attach_webpage')}
+										<PinSlash className="size-3.5" />
+									{:else}
+										<Pin className="size-3.5" />
+									{/if}
+								</button>
+							</Tooltip>
 						</DropdownMenu.Item>
 					</Tooltip>
 
+					<!-- Attach Notes -->
 					{#if $config?.features?.enable_notes ?? false}
 						<Tooltip
 							content={fileUploadCapableModels.length !== selectedModels.length
@@ -228,84 +379,29 @@
 								}}
 							>
 								<PageEdit />
-
-								<div class="flex items-center w-full justify-between">
-									<div class=" line-clamp-1">
-										{$i18n.t('Attach Notes')}
-									</div>
-
+								<div class="flex-1 flex items-center justify-between">
+									<div class="line-clamp-1">{$i18n.t('Attach Notes')}</div>
 									<div class="text-gray-500">
 										<ChevronRight />
 									</div>
 								</div>
+								<Tooltip content={pinnedInputItems.includes('attach_notes') ? $i18n.t('Unpin') : $i18n.t('Pin')}>
+									<button
+										class="p-1 rounded-md hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+										on:click|stopPropagation={() => pinItemHandler('attach_notes')}
+									>
+										{#if pinnedInputItems.includes('attach_notes')}
+											<PinSlash className="size-3.5" />
+										{:else}
+											<Pin className="size-3.5" />
+										{/if}
+									</button>
+								</Tooltip>
 							</button>
 						</Tooltip>
 					{/if}
 
-					{#if isFeatureEnabled('knowledge')}
-						<Tooltip
-							content={fileUploadCapableModels.length !== selectedModels.length
-								? $i18n.t('Model(s) do not support file upload')
-								: !fileUploadEnabled
-									? $i18n.t('You do not have permission to upload files.')
-									: ''}
-							className="w-full"
-						>
-							<button
-								class="flex gap-2 w-full items-center px-3 py-1.5 text-sm cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800/50 rounded-xl {!fileUploadEnabled
-									? 'opacity-50'
-									: ''}"
-								on:click={() => {
-									tab = 'knowledge';
-								}}
-							>
-								<Database />
-
-								<div class="flex items-center w-full justify-between">
-									<div class=" line-clamp-1">
-										{$i18n.t('Attach Knowledge')}
-									</div>
-
-									<div class="text-gray-500">
-										<ChevronRight />
-									</div>
-								</div>
-							</button>
-						</Tooltip>
-					{/if}
-
-					{#if ($chats ?? []).length > 0}
-						<Tooltip
-							content={fileUploadCapableModels.length !== selectedModels.length
-								? $i18n.t('Model(s) do not support file upload')
-								: !fileUploadEnabled
-									? $i18n.t('You do not have permission to upload files.')
-									: ''}
-							className="w-full"
-						>
-							<button
-								class="flex gap-2 w-full items-center px-3 py-1.5 text-sm cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800/50 rounded-xl {!fileUploadEnabled
-									? 'opacity-50'
-									: ''}"
-								on:click={() => {
-									tab = 'chats';
-								}}
-							>
-								<ClockRotateRight />
-
-								<div class="flex items-center w-full justify-between">
-									<div class=" line-clamp-1">
-										{$i18n.t('Reference Chats')}
-									</div>
-
-									<div class="text-gray-500">
-										<ChevronRight />
-									</div>
-								</div>
-							</button>
-						</Tooltip>
-					{/if}
-
+					<!-- Google Drive -->
 					{#if fileUploadEnabled}
 						{#if $config?.features?.enable_google_drive_integration}
 							<DropdownMenu.Item
@@ -340,17 +436,28 @@
 										fill="#ffba00"
 									/>
 								</svg>
-								<div class="line-clamp-1">{$i18n.t('Google Drive')}</div>
+								<div class="flex-1 line-clamp-1">{$i18n.t('Google Drive')}</div>
+								<Tooltip content={pinnedInputItems.includes('google_drive') ? $i18n.t('Unpin') : $i18n.t('Pin')}>
+									<button
+										class="p-1 rounded-md hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+										on:click|stopPropagation={() => pinItemHandler('google_drive')}
+									>
+										{#if pinnedInputItems.includes('google_drive')}
+											<PinSlash className="size-3.5" />
+										{:else}
+											<Pin className="size-3.5" />
+										{/if}
+									</button>
+								</Tooltip>
 							</DropdownMenu.Item>
 						{/if}
 
-						{#if $config?.features?.enable_onedrive_integration && ($config?.features?.enable_onedrive_personal || $config?.features?.enable_onedrive_business)}
-							<button
-								class="flex gap-2 w-full items-center px-3 py-1.5 text-sm cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800/50 rounded-xl {!fileUploadEnabled
-									? 'opacity-50'
-									: ''}"
+						<!-- Microsoft OneDrive (simplified — work only) -->
+						{#if $config?.features?.enable_onedrive_integration && $config?.features?.enable_onedrive_business}
+							<DropdownMenu.Item
+								class="flex gap-2 items-center px-3 py-1.5 text-sm cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800/50 rounded-xl"
 								on:click={() => {
-									tab = 'microsoft_onedrive';
+									uploadOneDriveHandler('organizations');
 								}}
 							>
 								<svg
@@ -438,17 +545,390 @@
 										</linearGradient>
 									</defs>
 								</svg>
+								<div class="flex-1 line-clamp-1">{$i18n.t('OneDrive Files')}</div>
+								<Tooltip content={pinnedInputItems.includes('onedrive') ? $i18n.t('Unpin') : $i18n.t('Pin')}>
+									<button
+										class="p-1 rounded-md hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+										on:click|stopPropagation={() => pinItemHandler('onedrive')}
+									>
+										{#if pinnedInputItems.includes('onedrive')}
+											<PinSlash className="size-3.5" />
+										{:else}
+											<Pin className="size-3.5" />
+										{/if}
+									</button>
+								</Tooltip>
+							</DropdownMenu.Item>
+						{/if}
+					{/if}
 
-								<div class="flex items-center w-full justify-between">
-									<div class=" line-clamp-1">
-										{$i18n.t('Microsoft OneDrive')}
-									</div>
+					<!-- ═══ ATTACH DATABASE ═══ -->
+					{#if isFeatureEnabled('knowledge')}
+						<div class="my-1 border-t border-gray-100 dark:border-gray-800" />
+						<div
+							class="text-xs font-medium text-gray-400 dark:text-gray-500 uppercase tracking-wide px-3 py-1.5"
+						>
+							{$i18n.t('Attach databases')}
+						</div>
 
+						<Tooltip
+							content={fileUploadCapableModels.length !== selectedModels.length
+								? $i18n.t('Model(s) do not support file upload')
+								: !fileUploadEnabled
+									? $i18n.t('You do not have permission to upload files.')
+									: ''}
+							className="w-full"
+						>
+							<button
+								class="flex gap-2 w-full items-center px-3 py-1.5 text-sm cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800/50 rounded-xl {!fileUploadEnabled
+									? 'opacity-50'
+									: ''}"
+								on:click={() => {
+									tab = 'knowledge';
+								}}
+							>
+								<Database />
+								<div class="flex-1 flex items-center justify-between">
+									<div class="line-clamp-1">{$i18n.t('Knowledge database')}</div>
 									<div class="text-gray-500">
 										<ChevronRight />
 									</div>
 								</div>
+								<Tooltip content={pinnedInputItems.includes('knowledge') ? $i18n.t('Unpin') : $i18n.t('Pin')}>
+									<button
+										class="p-1 rounded-md hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+										on:click|stopPropagation={() => pinItemHandler('knowledge')}
+									>
+										{#if pinnedInputItems.includes('knowledge')}
+											<PinSlash className="size-3.5" />
+										{:else}
+											<Pin className="size-3.5" />
+										{/if}
+									</button>
+								</Tooltip>
 							</button>
+						</Tooltip>
+
+						<!-- Reference Chats -->
+						{#if ($chats ?? []).length > 0}
+							<Tooltip
+								content={fileUploadCapableModels.length !== selectedModels.length
+									? $i18n.t('Model(s) do not support file upload')
+									: !fileUploadEnabled
+										? $i18n.t('You do not have permission to upload files.')
+										: ''}
+								className="w-full"
+							>
+								<button
+									class="flex gap-2 w-full items-center px-3 py-1.5 text-sm cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800/50 rounded-xl {!fileUploadEnabled
+										? 'opacity-50'
+										: ''}"
+									on:click={() => {
+										tab = 'chats';
+									}}
+								>
+									<ClockRotateRight />
+									<div class="flex-1 flex items-center justify-between">
+										<div class="line-clamp-1">{$i18n.t('Reference chats')}</div>
+										<div class="text-gray-500">
+											<ChevronRight />
+										</div>
+									</div>
+									<Tooltip content={pinnedInputItems.includes('reference_chats') ? $i18n.t('Unpin') : $i18n.t('Pin')}>
+										<button
+											class="p-1 rounded-md hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+											on:click|stopPropagation={() => pinItemHandler('reference_chats')}
+										>
+											{#if pinnedInputItems.includes('reference_chats')}
+												<PinSlash className="size-3.5" />
+											{:else}
+												<Pin className="size-3.5" />
+											{/if}
+										</button>
+									</Tooltip>
+								</button>
+							</Tooltip>
+						{/if}
+					{/if}
+
+					<!-- ═══ ATTACH CAPABILITY ═══ -->
+					{#if showWebSearchButton || showImageGenerationButton || showCodeInterpreterButton || showToolsButton || (toggleFilters && toggleFilters.length > 0)}
+						<div class="my-1 border-t border-gray-100 dark:border-gray-800" />
+						<div
+							class="text-xs font-medium text-gray-400 dark:text-gray-500 uppercase tracking-wide px-3 py-1.5"
+						>
+							{$i18n.t('Attach tools')}
+						</div>
+
+						<!-- Tools -->
+						{#if isFeatureEnabled('tools')}
+							{#if tools}
+								{#if Object.keys(tools).length > 0}
+									<button
+										class="flex w-full justify-between gap-2 items-center px-3 py-1.5 text-sm cursor-pointer rounded-xl hover:bg-gray-50 dark:hover:bg-gray-800/50"
+										on:click={() => {
+											tab = 'tools';
+										}}
+									>
+										<Wrench />
+										<div class="flex-1 flex items-center justify-between">
+											<div class="line-clamp-1">
+												{$i18n.t('Tools')}
+												<span class="ml-0.5 text-gray-500"
+													>{Object.keys(tools).length}</span
+												>
+											</div>
+											<div class="text-gray-500">
+												<ChevronRight />
+											</div>
+										</div>
+										<Tooltip content={pinnedInputItems.includes('tools') ? $i18n.t('Unpin') : $i18n.t('Pin')}>
+											<button
+												class="p-1 rounded-md hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+												on:click|stopPropagation={() => pinItemHandler('tools')}
+											>
+												{#if pinnedInputItems.includes('tools')}
+													<PinSlash className="size-3.5" />
+												{:else}
+													<Pin className="size-3.5" />
+												{/if}
+											</button>
+										</Tooltip>
+									</button>
+								{/if}
+							{:else}
+								<div class="py-4">
+									<Spinner />
+								</div>
+							{/if}
+						{/if}
+
+						<!-- Filters -->
+						{#if toggleFilters && toggleFilters.length > 0}
+							{#each toggleFilters.sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' })) as filter, filterIdx (filter.id)}
+								<Tooltip content={filter?.description} placement="top-start">
+									<button
+										class="flex w-full justify-between gap-2 items-center px-3 py-1.5 text-sm cursor-pointer rounded-xl hover:bg-gray-50 dark:hover:bg-gray-800/50"
+										on:click={() => {
+											if (selectedFilterIds.includes(filter.id)) {
+												selectedFilterIds = selectedFilterIds.filter(
+													(id) => id !== filter.id
+												);
+											} else {
+												selectedFilterIds = [...selectedFilterIds, filter.id];
+											}
+										}}
+									>
+										<div class="flex-1 truncate">
+											<div class="flex flex-1 gap-2 items-center">
+												<div class="shrink-0">
+													{#if filter?.icon}
+														<div class="size-4 items-center flex justify-center">
+															<img
+																src={filter.icon}
+																class="size-3.5 {filter.icon.includes('svg')
+																	? 'dark:invert-[80%]'
+																	: ''}"
+																style="fill: currentColor;"
+																alt={filter.name}
+															/>
+														</div>
+													{:else}
+														<Sparkles className="size-4" strokeWidth="1.75" />
+													{/if}
+												</div>
+												<div class="truncate">{filter?.name}</div>
+											</div>
+										</div>
+
+										{#if filter?.has_user_valves}
+											<div class="shrink-0">
+												<Tooltip content={$i18n.t('Valves')}>
+													<button
+														class="self-center w-fit text-sm text-gray-600 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300 transition rounded-full"
+														type="button"
+														on:click={(e) => {
+															e.stopPropagation();
+															e.preventDefault();
+															onShowValves({
+																type: 'function',
+																id: filter.id
+															});
+														}}
+													>
+														<Knobs />
+													</button>
+												</Tooltip>
+											</div>
+										{/if}
+
+										<Tooltip content={pinnedInputItems.includes(`filter:${filter.id}`) ? $i18n.t('Unpin') : $i18n.t('Pin')}>
+											<button
+												class="p-1 rounded-md hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+												on:click|stopPropagation={() =>
+													pinItemHandler(`filter:${filter.id}`)}
+											>
+												{#if pinnedInputItems.includes(`filter:${filter.id}`)}
+													<PinSlash className="size-3.5" />
+												{:else}
+													<Pin className="size-3.5" />
+												{/if}
+											</button>
+										</Tooltip>
+
+										<div class="shrink-0">
+											<Switch
+												state={selectedFilterIds.includes(filter.id)}
+												on:change={async (e) => {
+													const state = e.detail;
+													await tick();
+												}}
+											/>
+										</div>
+									</button>
+								</Tooltip>
+							{/each}
+						{/if}
+
+						<!-- Web Search -->
+						{#if showWebSearchButton}
+							<Tooltip content={$i18n.t('Search the internet')} placement="top-start">
+								<button
+									class="flex w-full justify-between gap-2 items-center px-3 py-1.5 text-sm cursor-pointer rounded-xl hover:bg-gray-50 dark:hover:bg-gray-800/50"
+									on:click={() => {
+										webSearchEnabled = !webSearchEnabled;
+									}}
+								>
+									<div class="flex-1 truncate">
+										<div class="flex flex-1 gap-2 items-center">
+											<div class="shrink-0">
+												<GlobeAlt />
+											</div>
+											<div class="truncate">{$i18n.t('Search the web')}</div>
+										</div>
+									</div>
+
+									<Tooltip content={pinnedInputItems.includes('web_search') ? $i18n.t('Unpin') : $i18n.t('Pin')}>
+										<button
+											class="p-1 rounded-md hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+											on:click|stopPropagation={() => pinItemHandler('web_search')}
+										>
+											{#if pinnedInputItems.includes('web_search')}
+												<PinSlash className="size-3.5" />
+											{:else}
+												<Pin className="size-3.5" />
+											{/if}
+										</button>
+									</Tooltip>
+
+									<div class="shrink-0">
+										<Switch
+											state={webSearchEnabled}
+											on:change={async (e) => {
+												const state = e.detail;
+												await tick();
+											}}
+										/>
+									</div>
+								</button>
+							</Tooltip>
+						{/if}
+
+						<!-- Image Generation -->
+						{#if showImageGenerationButton}
+							<Tooltip content={$i18n.t('Generate an image')} placement="top-start">
+								<button
+									class="flex w-full justify-between gap-2 items-center px-3 py-1.5 text-sm cursor-pointer rounded-xl hover:bg-gray-50 dark:hover:bg-gray-800/50"
+									on:click={() => {
+										imageGenerationEnabled = !imageGenerationEnabled;
+									}}
+								>
+									<div class="flex-1 truncate">
+										<div class="flex flex-1 gap-2 items-center">
+											<div class="shrink-0">
+												<Photo className="size-4" strokeWidth="1.5" />
+											</div>
+											<div class="truncate">{$i18n.t('Image')}</div>
+										</div>
+									</div>
+
+									<Tooltip content={pinnedInputItems.includes('image_generation') ? $i18n.t('Unpin') : $i18n.t('Pin')}>
+										<button
+											class="p-1 rounded-md hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+											on:click|stopPropagation={() =>
+												pinItemHandler('image_generation')}
+										>
+											{#if pinnedInputItems.includes('image_generation')}
+												<PinSlash className="size-3.5" />
+											{:else}
+												<Pin className="size-3.5" />
+											{/if}
+										</button>
+									</Tooltip>
+
+									<div class="shrink-0">
+										<Switch
+											state={imageGenerationEnabled}
+											on:change={async (e) => {
+												const state = e.detail;
+												await tick();
+											}}
+										/>
+									</div>
+								</button>
+							</Tooltip>
+						{/if}
+
+						<!-- Code Interpreter -->
+						{#if showCodeInterpreterButton}
+							<Tooltip
+								content={$i18n.t('Execute code for analysis')}
+								placement="top-start"
+							>
+								<button
+									class="flex w-full justify-between gap-2 items-center px-3 py-1.5 text-sm cursor-pointer rounded-xl hover:bg-gray-50 dark:hover:bg-gray-800/50"
+									aria-pressed={codeInterpreterEnabled}
+									aria-label={codeInterpreterEnabled
+										? $i18n.t('Disable Code Interpreter')
+										: $i18n.t('Enable Code Interpreter')}
+									on:click={() => {
+										codeInterpreterEnabled = !codeInterpreterEnabled;
+									}}
+								>
+									<div class="flex-1 truncate">
+										<div class="flex flex-1 gap-2 items-center">
+											<div class="shrink-0">
+												<Terminal className="size-3.5" strokeWidth="1.75" />
+											</div>
+											<div class="truncate">{$i18n.t('Code Interpreter')}</div>
+										</div>
+									</div>
+
+									<Tooltip content={pinnedInputItems.includes('code_interpreter') ? $i18n.t('Unpin') : $i18n.t('Pin')}>
+										<button
+											class="p-1 rounded-md hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+											on:click|stopPropagation={() =>
+												pinItemHandler('code_interpreter')}
+										>
+											{#if pinnedInputItems.includes('code_interpreter')}
+												<PinSlash className="size-3.5" />
+											{:else}
+												<Pin className="size-3.5" />
+											{/if}
+										</button>
+									</Tooltip>
+
+									<div class="shrink-0">
+										<Switch
+											state={codeInterpreterEnabled}
+											on:change={async (e) => {
+												const state = e.detail;
+												await tick();
+											}}
+										/>
+									</div>
+								</button>
+							</Tooltip>
 						{/if}
 					{/if}
 				</div>
@@ -509,7 +989,7 @@
 
 					<Chats {onSelect} />
 				</div>
-			{:else if tab === 'microsoft_onedrive'}
+			{:else if tab === 'tools' && tools && isFeatureEnabled('tools')}
 				<div in:fly={{ x: 20, duration: 150 }}>
 					<button
 						class="flex w-full justify-between gap-2 items-center px-3 py-1.5 text-sm cursor-pointer rounded-xl hover:bg-gray-50 dark:hover:bg-gray-800/50"
@@ -521,39 +1001,85 @@
 
 						<div class="flex items-center w-full justify-between">
 							<div>
-								{$i18n.t('Microsoft OneDrive')}
+								{$i18n.t('Tools')}
+								<span class="ml-0.5 text-gray-500">{Object.keys(tools).length}</span>
 							</div>
 						</div>
 					</button>
 
-					{#if $config?.features?.enable_onedrive_personal}
-						<DropdownMenu.Item
-							class="flex gap-2 items-center px-3 py-1.5 text-sm cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800/50 rounded-xl text-left"
-							on:click={() => {
-								uploadOneDriveHandler('personal');
-							}}
-						>
-							<div class="flex flex-col">
-								<div class="line-clamp-1">{$i18n.t('Microsoft OneDrive (personal)')}</div>
-							</div>
-						</DropdownMenu.Item>
-					{/if}
+					{#each Object.keys(tools) as toolId}
+						<button
+							class="relative flex w-full justify-between gap-2 items-center px-3 py-1.5 text-sm cursor-pointer rounded-xl hover:bg-gray-50 dark:hover:bg-gray-800/50"
+							on:click={async (e) => {
+								if (!(tools[toolId]?.authenticated ?? true)) {
+									e.preventDefault();
 
-					{#if $config?.features?.enable_onedrive_business}
-						<DropdownMenu.Item
-							class="flex gap-2 items-center px-3 py-1.5 text-sm cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800/50 rounded-xl text-left"
-							on:click={() => {
-								uploadOneDriveHandler('organizations');
+									let parts = toolId.split(':');
+									let serverId = parts?.at(-1) ?? toolId;
+
+									const authUrl = getOAuthClientAuthorizationUrl(serverId, 'mcp');
+									window.open(authUrl, '_self', 'noopener');
+								} else {
+									tools[toolId].enabled = !tools[toolId].enabled;
+
+									const state = tools[toolId].enabled;
+									await tick();
+
+									if (state) {
+										selectedToolIds = [...selectedToolIds, toolId];
+									} else {
+										selectedToolIds = selectedToolIds.filter((id) => id !== toolId);
+									}
+								}
 							}}
 						>
-							<div class="flex flex-col">
-								<div class="line-clamp-1">
-									{$i18n.t('Microsoft OneDrive (work/school)')}
+							{#if !(tools[toolId]?.authenticated ?? true)}
+								<div
+									class="absolute inset-0 opacity-50 rounded-xl cursor-pointer z-10"
+								/>
+							{/if}
+							<div class="flex-1 truncate">
+								<div class="flex flex-1 gap-2 items-center">
+									<Tooltip content={tools[toolId]?.name ?? ''} placement="top">
+										<div class="shrink-0">
+											<Wrench />
+										</div>
+									</Tooltip>
+									<Tooltip
+										content={tools[toolId]?.description ?? ''}
+										placement="top-start"
+									>
+										<div class="truncate">{tools[toolId].name}</div>
+									</Tooltip>
 								</div>
-								<div class="text-xs text-gray-500">{$i18n.t('Includes SharePoint')}</div>
 							</div>
-						</DropdownMenu.Item>
-					{/if}
+
+							{#if tools[toolId]?.has_user_valves}
+								<div class="shrink-0">
+									<Tooltip content={$i18n.t('Valves')}>
+										<button
+											class="self-center w-fit text-sm text-gray-600 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300 transition rounded-full"
+											type="button"
+											on:click={(e) => {
+												e.stopPropagation();
+												e.preventDefault();
+												onShowValves({
+													type: 'tool',
+													id: toolId
+												});
+											}}
+										>
+											<Knobs />
+										</button>
+									</Tooltip>
+								</div>
+							{/if}
+
+							<div class="shrink-0">
+								<Switch state={tools[toolId].enabled} />
+							</div>
+						</button>
+					{/each}
 				</div>
 			{/if}
 		</DropdownMenu.Content>

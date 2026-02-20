@@ -462,5 +462,15 @@ class ModelsTable:
             log.exception(f"Error syncing models for user {user_id}: {e}")
             return []
 
+    def delete_models_by_user_id(self, user_id: str) -> bool:
+        """Delete all models for a user."""
+        try:
+            with get_db() as db:
+                db.query(Model).filter_by(user_id=user_id).delete()
+                db.commit()
+                return True
+        except Exception:
+            return False
+
 
 Models = ModelsTable()

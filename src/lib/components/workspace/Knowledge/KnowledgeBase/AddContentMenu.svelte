@@ -9,7 +9,6 @@
 	import ArrowUpCircle from '$lib/components/icons/ArrowUpCircle.svelte';
 	import BarsArrowUp from '$lib/components/icons/BarsArrowUp.svelte';
 	import FolderOpen from '$lib/components/icons/FolderOpen.svelte';
-	import ArrowPath from '$lib/components/icons/ArrowPath.svelte';
 	import GlobeAlt from '$lib/components/icons/GlobeAlt.svelte';
 	import CloudArrowUp from '$lib/components/icons/CloudArrowUp.svelte';
 
@@ -17,7 +16,6 @@
 
 	export let onClose: Function = () => {};
 
-	export let onSync: Function = () => {};
 	export let onOneDriveSync: Function | null = null;
 	export let onUpload: Function = (data) => {};
 
@@ -81,23 +79,6 @@
 				<FolderOpen strokeWidth="2" />
 				<div class="flex items-center">{$i18n.t('Upload directory')}</div>
 			</DropdownMenu.Item>
-
-			<Tooltip
-				content={$i18n.t(
-					'This option will delete all existing files in the collection and replace them with newly uploaded files.'
-				)}
-				className="w-full"
-			>
-				<DropdownMenu.Item
-					class="flex gap-2 items-center px-3 py-1.5 text-sm  cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800  rounded-xl"
-					on:click={() => {
-						onSync();
-					}}
-				>
-					<ArrowPath strokeWidth="2" />
-					<div class="flex items-center">{$i18n.t('Sync directory')}</div>
-				</DropdownMenu.Item>
-			</Tooltip>
 
 			{#if onOneDriveSync}
 				<DropdownMenu.Item

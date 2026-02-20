@@ -31,8 +31,6 @@
 	import Cog6 from '$lib/components/icons/Cog6.svelte';
 	import ConfigureModelsModal from './Models/ConfigureModelsModal.svelte';
 	import Wrench from '$lib/components/icons/Wrench.svelte';
-	import Download from '$lib/components/icons/Download.svelte';
-	import ManageModelsModal from './Models/ManageModelsModal.svelte';
 	import ModelMenu from '$lib/components/admin/Settings/Models/ModelMenu.svelte';
 	import EllipsisHorizontal from '$lib/components/icons/EllipsisHorizontal.svelte';
 	import EyeSlash from '$lib/components/icons/EyeSlash.svelte';
@@ -55,7 +53,6 @@
 	let selectedModelId = null;
 
 	let showConfigModal = false;
-	let showManageModal = false;
 
 	$: if (models) {
 		filteredModels = models
@@ -255,8 +252,6 @@
 </script>
 
 <ConfigureModelsModal bind:show={showConfigModal} initHandler={init} />
-<ManageModelsModal bind:show={showManageModal} />
-
 {#if models !== null}
 	{#if selectedModelId === null}
 		<div class="flex flex-col gap-1 mt-1.5 mb-2">
@@ -269,18 +264,6 @@
 				</div>
 
 				<div class="flex items-center gap-1.5">
-					<Tooltip content={$i18n.t('Manage Models')}>
-						<button
-							class=" p-1 rounded-full flex gap-1 items-center"
-							type="button"
-							on:click={() => {
-								showManageModal = true;
-							}}
-						>
-							<Download />
-						</button>
-					</Tooltip>
-
 					<Tooltip content={$i18n.t('Settings')}>
 						<button
 							class=" p-1 rounded-full flex gap-1 items-center"

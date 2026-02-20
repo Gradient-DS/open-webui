@@ -14,7 +14,7 @@
 	import type { Banner } from '$lib/types';
 
 	import { getBaseModels } from '$lib/apis/models';
-	import { getBanners, setBanners } from '$lib/apis/configs';
+	import { getBanners, setBanners, getGreetingTemplate, setGreetingTemplate } from '$lib/apis/configs';
 
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
 	import Switch from '$lib/components/common/Switch.svelte';
@@ -48,6 +48,7 @@
 
 	let promptSuggestions = [];
 	let banners: Banner[] = [];
+	let greetingTemplate = '';
 
 	const updateInterfaceHandler = async () => {
 		taskConfig = await updateTaskConfig(localStorage.token, taskConfig);
@@ -55,6 +56,7 @@
 		promptSuggestions = promptSuggestions.filter((p) => p.content !== '');
 		promptSuggestions = await setDefaultPromptSuggestions(localStorage.token, promptSuggestions);
 		await updateBanners();
+		await setGreetingTemplate(localStorage.token, greetingTemplate);
 
 		await config.set(await getBackendConfig());
 	};
@@ -72,6 +74,7 @@
 		taskConfig = await getTaskConfig(localStorage.token);
 		promptSuggestions = $config?.default_prompt_suggestions ?? [];
 		banners = await getBanners(localStorage.token);
+		greetingTemplate = await getGreetingTemplate(localStorage.token);
 
 		workspaceModels = await getBaseModels(localStorage.token);
 		baseModels = await getModels(localStorage.token, null, false);
@@ -465,6 +468,26 @@
 
 					<Banners bind:banners />
 				</div>
+
+				<div class="mb-2.5">
+					<div class="flex w-full justify-between mb-1">
+						<div class="self-center text-xs font-medium">
+							{$i18n.t('Greeting Template')}
+						</div>
+					</div>
+					<Tooltip
+						content={$i18n.t("Use {{name}} for the user's display name. Leave empty to use the default greeting.")}
+						placement="top-start"
+					>
+						<input
+							class="w-full rounded-lg py-2 px-4 text-sm bg-gray-50 dark:text-gray-300 dark:bg-gray-850 outline-hidden"
+							type="text"
+							placeholder={$i18n.t('e.g. Welcome to Acme Corp, {{name}}')}
+							bind:value={greetingTemplate}
+						/>
+					</Tooltip>
+				</div>
+
 
 				{#if $user?.role === 'admin'}
 					<PromptSuggestions bind:promptSuggestions />

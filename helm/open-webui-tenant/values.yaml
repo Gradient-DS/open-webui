@@ -16,6 +16,7 @@
 tenant:
   name: ""           # Required: e.g., "demo", "client-a"
   domain: ""         # Required: e.g., "demo.soev.ai"
+  clientName: ""     # Display name for the client/org, e.g., "Gradient", "Kwink"
 
 # -----------------------------------------------------------------------------
 # Shared Services Configuration (deployed separately)
@@ -55,10 +56,14 @@ openWebui:
 
   image:
     repository: ghcr.io/gradient-ds/open-webui
-    tag: main
+    tag: main  # Override per environment: dev, test, main, or pinned version (e.g., v1.0.0)
     pullPolicy: Always
 
   replicaCount: 1
+
+  # Deployment strategy - Recreate required for RWO persistent volumes
+  strategy:
+    type: Recreate
 
   # Service configuration
   service:
@@ -110,11 +115,6 @@ openWebui:
     webuiName: "soev.ai"
     corsAllowOrigin: "*"
 
-    # Admin bootstrap
-    adminEmail: ""
-    adminName: ""
-    # adminPassword is set via secrets
-
     # Locale
     defaultLocale: "nl-NL"
 
@@ -146,6 +146,7 @@ openWebui:
     vectorDb: "weaviate"
     weaviateHttpPort: "8080"
     weaviateGrpcPort: "50051"
+    weaviateWebSearchTtlMinutes: "1440"  # TTL for web search vector collections (24 hours)
 
     # Database (PostgreSQL) - uses local PostgreSQL in tenant namespace
     databaseType: "postgresql"
@@ -202,7 +203,7 @@ openWebui:
     featureAdminEvaluations: "True"
     featureAdminFunctions: "False"
     featureAdminSettings: "True"
-    featureAdminSettingsTabs: "models,tools,interface,db"
+    featureAdminSettingsTabs: "models,tools,interface,db,email"
 
     # Notes
     enableNotes: "true"
@@ -238,6 +239,8 @@ openWebui:
     userPermissionsNotesAllowPublicSharing: "false"
 
     # UI Features
+    greetingTemplate: ""
+    defaultPromptSuggestions: "[]"
     enableFolders: "true"
     userPermissionsFeaturesFolders: "true"
     enableChannels: "false"
@@ -297,7 +300,39 @@ openWebui:
     onedriveMaxFilesPerSync: "250"
     onedriveMaxFileSizeMb: "10"
 
+    # Email Invites (Microsoft Graph API)
+    enableEmailInvites: "false"
+    emailGraphTenantId: ""       # Azure AD Tenant ID for email app
+    emailGraphClientId: ""       # Azure AD App Client ID for email
+    # emailGraphClientSecret is set via secrets
+    emailFromAddress: "no-reply@soev.ai"
+    emailFromName: "Soev"
+    inviteExpiryHours: "168"     # 7 days
+    emailInviteSubject: ""       # Custom email subject (empty = default)
+    emailInviteHeading: ""       # Custom email + invite page heading (empty = default)
+
     bypassModelAccessControl: "false"
+
+    # Audit Logging
+    # Levels: NONE, METADATA, REQUEST, REQUEST_RESPONSE
+    # METADATA logs who/what/when without PII from request/response bodies
+    auditLogLevel: "METADATA"
+
+    # User Archival
+    enableUserArchival: "true"
+    defaultArchiveRetentionDays: "1095"  # 3 years (ISO 27001 compliance)
+    enableAutoArchiveOnSelfDelete: "false"
+    autoArchiveRetentionDays: "365"  # 1 year for self-deletions
+
+    # Storage Provider
+    # Set to "s3" to use S3-compatible object storage for file uploads
+    # Leave empty for default local storage (PVC)
+    storageProvider: ""
+    s3BucketName: ""
+    s3RegionName: ""
+    s3EndpointUrl: ""             # For S3-compatible storage (e.g., https://object.previder.nl)
+    s3KeyPrefix: ""               # Optional prefix for all keys
+    s3EnableTagging: "false"
 
     # Telemetry (disabled)
     scarfNoAnalytics: "true"
@@ -385,7 +420,7 @@ weaviate:
 
   image:
     repository: semitechnologies/weaviate
-    tag: "1.28.4"
+    tag: "1.35.0"
     pullPolicy: IfNotPresent
 
   # Resource limits
@@ -434,16 +469,22 @@ ingress:
 secrets:
   # Open WebUI secrets
   webuiSecretKey: ""  # Generate with: openssl rand -hex 32
-  adminPassword: ""
   openaiApiKey: ""
   ragOpenaiApiKey: ""
 
   # Microsoft OAuth (leave empty to disable)
   microsoftClientSecret: ""
 
+  # Email Graph API (leave empty to disable email invites)
+  emailGraphClientSecret: ""
+
   # External Services API Keys (optional)
   externalDocumentLoaderApiKey: ""
   ragExternalRerankerApiKey: ""
+
+  # S3 Storage (only if storageProvider is "s3")
+  s3AccessKeyId: ""
+  s3SecretAccessKey: ""
 
   # PostgreSQL
   postgresPassword: ""
@@ -475,6 +516,15 @@ externalSecrets:
 # -----------------------------------------------------------------------------
 networkPolicy:
   enabled: true
+
+# -----------------------------------------------------------------------------
+# Cilium Network Policy
+# -----------------------------------------------------------------------------
+# Required on clusters using Cilium Gateway API (e.g., previder-prod).
+# Creates a CiliumNetworkPolicy with fromEntities: ingress to allow
+# traffic from the Cilium L7 proxy (Envoy) to reach tenant pods.
+ciliumNetworkPolicy:
+  enabled: false
 
 # -----------------------------------------------------------------------------
 # Pod Settings

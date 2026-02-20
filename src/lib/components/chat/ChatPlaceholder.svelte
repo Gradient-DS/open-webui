@@ -81,7 +81,9 @@
 		>
 			<div>
 				<div class=" capitalize line-clamp-1" in:fade={{ duration: 200 }}>
-					{#if models[selectedModelIdx]?.name}
+					{#if $config?.ui?.greeting_template}
+						{$config.ui.greeting_template.replace('{{name}}', $user?.name ?? '')}
+					{:else if models[selectedModelIdx]?.name}
 						{models[selectedModelIdx]?.name}
 					{:else}
 						{$i18n.t('Hello, {{name}}', { name: $user?.name })}

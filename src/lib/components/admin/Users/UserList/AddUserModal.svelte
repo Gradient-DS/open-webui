@@ -5,12 +5,14 @@
 	import { addUser } from '$lib/apis/auths';
 
 	import { WEBUI_BASE_URL } from '$lib/constants';
+	import { config } from '$lib/stores';
 
 	import Spinner from '$lib/components/common/Spinner.svelte';
 	import Modal from '$lib/components/common/Modal.svelte';
 	import { generateInitialsImage } from '$lib/utils';
 	import XMark from '$lib/components/icons/XMark.svelte';
 	import SensitiveInput from '$lib/components/common/SensitiveInput.svelte';
+	import InviteUserForm from './InviteUserForm.svelte';
 
 	const i18n = getContext('i18n');
 	const dispatch = createEventDispatcher();
@@ -20,6 +22,7 @@
 	let loading = false;
 	let tab = '';
 	let inputFiles;
+	let inviteFormRef: InviteUserForm;
 
 	let _user = {
 		name: '',
@@ -35,6 +38,7 @@
 			password: '',
 			role: 'user'
 		};
+		inviteFormRef?.reset();
 	}
 
 	const submitHandler = async () => {
@@ -143,6 +147,16 @@
 
 		<div class="flex flex-col md:flex-row w-full px-4 pb-3 md:space-x-4 dark:text-gray-200">
 			<div class=" flex flex-col w-full sm:flex-row sm:justify-center sm:space-x-6">
+				{#if $config?.features?.enable_email_invites}
+					<div class="flex flex-col w-full">
+						<InviteUserForm
+							bind:this={inviteFormRef}
+							bind:loading
+							on:save={() => dispatch('save')}
+							on:close={() => (show = false)}
+						/>
+					</div>
+				{:else}
 				<form
 					class="flex flex-col w-full"
 					on:submit|preventDefault={() => {
@@ -296,6 +310,7 @@
 						</button>
 					</div>
 				</form>
+				{/if}
 			</div>
 		</div>
 	</div>

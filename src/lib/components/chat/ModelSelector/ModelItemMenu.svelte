@@ -6,8 +6,8 @@
 
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
 	import Link from '$lib/components/icons/Link.svelte';
-	import Eye from '$lib/components/icons/Eye.svelte';
-	import EyeSlash from '$lib/components/icons/EyeSlash.svelte';
+	import Pin from '$lib/components/icons/Pin.svelte';
+	import PinSlash from '$lib/components/icons/PinSlash.svelte';
 	import { settings } from '$lib/stores';
 
 	const i18n = getContext('i18n');
@@ -63,16 +63,16 @@
 			}}
 		>
 			{#if ($settings?.pinnedModels ?? []).includes(model?.id)}
-				<EyeSlash />
+				<PinSlash />
 			{:else}
-				<Eye />
+				<Pin />
 			{/if}
 
 			<div class="flex items-center">
 				{#if ($settings?.pinnedModels ?? []).includes(model?.id)}
-					{$i18n.t('Hide from Sidebar')}
+					{$i18n.t('Unpin from Sidebar')}
 				{:else}
-					{$i18n.t('Keep in Sidebar')}
+					{$i18n.t('Pin to Sidebar')}
 				{/if}
 			</div>
 		</DropdownMenu.Item>
