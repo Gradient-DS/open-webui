@@ -172,8 +172,8 @@
 						type="button"
 						on:click={() => {
 							onSelect({
-								type: 'collection',
-								...item
+								...item,
+								type: 'collection'
 							});
 						}}
 						on:mousemove={() => {

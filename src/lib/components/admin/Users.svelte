@@ -8,6 +8,10 @@
 
 	import UserList from './Users/UserList.svelte';
 	import Groups from './Users/Groups.svelte';
+	import InvitesList from './Users/InvitesList.svelte';
+	import AddUserModal from './Users/UserList/AddUserModal.svelte';
+
+	import { config } from '$lib/stores';
 
 	const i18n = getContext('i18n');
 
@@ -15,7 +19,7 @@
 	$: {
 		const pathParts = $page.url.pathname.split('/');
 		const tabFromPath = pathParts[pathParts.length - 1];
-		selectedTab = ['overview', 'groups'].includes(tabFromPath) ? tabFromPath : 'overview';
+		selectedTab = ['overview', 'groups', 'invites'].includes(tabFromPath) ? tabFromPath : 'overview';
 	}
 
 	$: if (selectedTab) {
@@ -31,6 +35,8 @@
 	};
 
 	let loaded = false;
+	let showAddUserModal = false;
+	let invitesListRef;
 
 	onMount(async () => {
 		if ($user?.role !== 'admin') {
@@ -109,6 +115,36 @@
 			</div>
 			<div class=" self-center">{$i18n.t('Groups')}</div>
 		</button>
+
+		{#if $config?.features?.enable_email_invites}
+		<button
+			id="invites"
+			class="px-0.5 py-1 min-w-fit rounded-lg lg:flex-none flex text-right transition {selectedTab ===
+			'invites'
+				? ''
+				: ' text-gray-300 dark:text-gray-600 hover:text-gray-700 dark:hover:text-white'}"
+			on:click={() => {
+				goto('/admin/users/invites');
+			}}
+		>
+			<div class=" self-center mr-2">
+				<svg
+					xmlns="http://www.w3.org/2000/svg"
+					viewBox="0 0 16 16"
+					fill="currentColor"
+					class="size-4"
+				>
+					<path
+						d="M2.5 3A1.5 1.5 0 0 0 1 4.5v.793c.026.009.051.02.076.032L7.674 8.51c.206.1.446.1.652 0l6.598-3.185A.755.755 0 0 1 15 5.293V4.5A1.5 1.5 0 0 0 13.5 3h-11Z"
+					/>
+					<path
+						d="M15 6.954 8.978 9.86a2.25 2.25 0 0 1-1.956 0L1 6.954V11.5A1.5 1.5 0 0 0 2.5 13h11a1.5 1.5 0 0 0 1.5-1.5V6.954Z"
+					/>
+				</svg>
+			</div>
+			<div class=" self-center">{$i18n.t('Pending Invites')}</div>
+		</button>
+		{/if}
 	</div>
 
 	<div class="flex-1 mt-1 lg:mt-0 px-[16px] lg:pr-[16px] lg:pl-0 overflow-y-scroll">
@@ -116,6 +152,22 @@
 			<UserList />
 		{:else if selectedTab === 'groups'}
 			<Groups />
+		{:else if selectedTab === 'invites'}
+			<InvitesList
+				bind:this={invitesListRef}
+				on:invite={() => {
+					showAddUserModal = true;
+				}}
+			/>
 		{/if}
 	</div>
 </div>
+
+<AddUserModal
+	bind:show={showAddUserModal}
+	on:save={() => {
+		if (invitesListRef) {
+			invitesListRef.loadInvites();
+		}
+	}}
+/>

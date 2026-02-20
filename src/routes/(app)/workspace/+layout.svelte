@@ -65,7 +65,7 @@
 
 <svelte:head>
 	<title>
-		{$i18n.t('Workspace')} • {$WEBUI_NAME}
+		{$i18n.t('Agents & prompts')} • {$WEBUI_NAME}
 	</title>
 </svelte:head>
 
@@ -75,6 +75,7 @@
 			? 'md:max-w-[calc(100%-var(--sidebar-width))]'
 			: ''} max-w-full"
 	>
+		{#if !$page.url.pathname.includes('/workspace/knowledge')}
 		<nav class="   px-2.5 pt-1.5 backdrop-blur-xl drag-region">
 			<div class=" flex items-center gap-1">
 				{#if $mobile}
@@ -107,20 +108,10 @@
 								class="min-w-fit p-1.5 {$page.url.pathname.includes('/workspace/models')
 									? ''
 									: 'text-gray-300 dark:text-gray-600 hover:text-gray-700 dark:hover:text-white'} transition"
-								href="/workspace/models">{$i18n.t('Models')}</a
+								href="/workspace/models">{$i18n.t('Agents')}</a
 							>
 						{/if}
 
-						{#if isFeatureEnabled('knowledge') && ($user?.role === 'admin' || $user?.permissions?.workspace?.knowledge)}
-							<a
-								class="min-w-fit p-1.5 {$page.url.pathname.includes('/workspace/knowledge')
-									? ''
-									: 'text-gray-300 dark:text-gray-600 hover:text-gray-700 dark:hover:text-white'} transition"
-								href="/workspace/knowledge"
-							>
-								{$i18n.t('Knowledge')}
-							</a>
-						{/if}
 
 						{#if isFeatureEnabled('prompts') && ($user?.role === 'admin' || $user?.permissions?.workspace?.prompts)}
 							<a
@@ -147,9 +138,10 @@
 				<!-- <div class="flex items-center text-xl font-medium">{$i18n.t('Workspace')}</div> -->
 			</div>
 		</nav>
+		{/if}
 
 		<div
-			class="  pb-1 px-3 md:px-[18px] flex-1 max-h-full overflow-y-auto"
+			class="  pb-1 px-3 md:px-[18px] flex-1 max-h-full overflow-y-auto {$page.url.pathname.includes('/workspace/knowledge') ? 'pt-4' : ''}"
 			id="workspace-container"
 		>
 			<slot />

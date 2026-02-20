@@ -68,6 +68,7 @@ from open_webui.socket.main import (
     get_models_in_use,
 )
 from open_webui.routers import (
+    archives,
     audio,
     images,
     ollama,
@@ -94,6 +95,7 @@ from open_webui.routers import (
     utils,
     scim,
     onedrive_sync,
+    invites,
 )
 
 from open_webui.routers.retrieval import (
@@ -335,6 +337,7 @@ from open_webui.config import (
     ENABLE_ONEDRIVE_INTEGRATION,
     ONEDRIVE_CLIENT_ID_PERSONAL,
     ONEDRIVE_CLIENT_ID_BUSINESS,
+    MICROSOFT_CLIENT_SECRET,
     ONEDRIVE_SHAREPOINT_URL,
     ONEDRIVE_SHAREPOINT_TENANT_ID,
     ENABLE_ONEDRIVE_PERSONAL,
@@ -343,6 +346,12 @@ from open_webui.config import (
     ONEDRIVE_SYNC_INTERVAL_MINUTES,
     ONEDRIVE_MAX_FILES_PER_SYNC,
     ONEDRIVE_MAX_FILE_SIZE_MB,
+    ENABLE_EMAIL_INVITES,
+    EMAIL_FROM_ADDRESS,
+    EMAIL_FROM_NAME,
+    INVITE_EXPIRY_HOURS,
+    EMAIL_INVITE_SUBJECT,
+    EMAIL_INVITE_HEADING,
     ENABLE_RAG_HYBRID_SEARCH,
     ENABLE_RAG_HYBRID_SEARCH_ENRICHED_TEXTS,
     ENABLE_RAG_LOCAL_WEB_FETCH,
@@ -427,6 +436,11 @@ from open_webui.config import (
     ENABLE_ADMIN_CHAT_ACCESS,
     BYPASS_ADMIN_ACCESS_CONTROL,
     ENABLE_ADMIN_EXPORT,
+    # User Archival
+    ENABLE_USER_ARCHIVAL,
+    DEFAULT_ARCHIVE_RETENTION_DAYS,
+    ENABLE_AUTO_ARCHIVE_ON_SELF_DELETE,
+    AUTO_ARCHIVE_RETENTION_DAYS,
     # Feature Flags (SaaS Tier Control)
     FEATURE_CHAT_CONTROLS,
     FEATURE_CAPTURE,
@@ -509,6 +523,7 @@ from open_webui.env import (
     AIOHTTP_CLIENT_SESSION_SSL,
     ENABLE_STAR_SESSIONS_MIDDLEWARE,
     ENABLE_PUBLIC_ACTIVE_USERS_COUNT,
+    CLIENT_NAME,
 )
 
 
@@ -600,6 +615,22 @@ https://github.com/open-webui/open-webui
 )
 
 
+async def periodic_archive_cleanup():
+    """Periodic task to delete expired archives (runs daily)"""
+    from open_webui.services.archival import ArchiveService
+
+    while True:
+        try:
+            # Wait 24 hours before first run and between runs
+            await asyncio.sleep(24 * 60 * 60)
+
+            stats = ArchiveService.cleanup_expired_archives()
+            if stats["deleted"] > 0:
+                log.info(f"Archive cleanup: deleted {stats['deleted']} expired archives")
+        except Exception as e:
+            log.error(f"Error in archive cleanup: {e}")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     app.state.instance_id = INSTANCE_ID
@@ -642,6 +673,15 @@ async def lifespan(app: FastAPI):
         limiter.total_tokens = THREAD_POOL_SIZE
 
     asyncio.create_task(periodic_usage_pool_cleanup())
+    asyncio.create_task(periodic_archive_cleanup())
+
+    # Start OneDrive background sync scheduler
+    from open_webui.services.onedrive.scheduler import start_scheduler as start_onedrive_scheduler
+    start_onedrive_scheduler(app)
+
+    # Start deletion cleanup worker
+    from open_webui.services.deletion.cleanup_worker import start_cleanup_worker
+    start_cleanup_worker()
 
     # Check external pipeline health on startup
     external_pipeline_url = getattr(app.state.config, "EXTERNAL_PIPELINE_URL", None)
@@ -686,6 +726,14 @@ async def lifespan(app: FastAPI):
         )
 
     yield
+
+    # Stop deletion cleanup worker
+    from open_webui.services.deletion.cleanup_worker import stop_cleanup_worker
+    stop_cleanup_worker()
+
+    # Stop OneDrive background sync scheduler
+    from open_webui.services.onedrive.scheduler import stop_scheduler as stop_onedrive_scheduler
+    stop_onedrive_scheduler()
 
     if hasattr(app.state, "redis_task_command_listener"):
         app.state.redis_task_command_listener.cancel()
@@ -841,6 +889,17 @@ app.state.config.ENABLE_NOTES = ENABLE_NOTES
 app.state.config.ENABLE_COMMUNITY_SHARING = ENABLE_COMMUNITY_SHARING
 app.state.config.ENABLE_MESSAGE_RATING = ENABLE_MESSAGE_RATING
 app.state.config.ENABLE_USER_WEBHOOKS = ENABLE_USER_WEBHOOKS
+
+########################################
+#
+# USER ARCHIVAL
+#
+########################################
+
+app.state.config.ENABLE_USER_ARCHIVAL = ENABLE_USER_ARCHIVAL
+app.state.config.DEFAULT_ARCHIVE_RETENTION_DAYS = DEFAULT_ARCHIVE_RETENTION_DAYS
+app.state.config.ENABLE_AUTO_ARCHIVE_ON_SELF_DELETE = ENABLE_AUTO_ARCHIVE_ON_SELF_DELETE
+app.state.config.AUTO_ARCHIVE_RETENTION_DAYS = AUTO_ARCHIVE_RETENTION_DAYS
 
 app.state.config.ENABLE_EVALUATION_ARENA_MODELS = ENABLE_EVALUATION_ARENA_MODELS
 app.state.config.EVALUATION_ARENA_MODELS = EVALUATION_ARENA_MODELS
@@ -1007,6 +1066,13 @@ app.state.config.BYPASS_WEB_SEARCH_WEB_LOADER = BYPASS_WEB_SEARCH_WEB_LOADER
 app.state.config.ENABLE_GOOGLE_DRIVE_INTEGRATION = ENABLE_GOOGLE_DRIVE_INTEGRATION
 app.state.config.ENABLE_ONEDRIVE_INTEGRATION = ENABLE_ONEDRIVE_INTEGRATION
 app.state.config.ENABLE_ONEDRIVE_SYNC = ENABLE_ONEDRIVE_SYNC
+
+app.state.config.ENABLE_EMAIL_INVITES = ENABLE_EMAIL_INVITES
+app.state.config.EMAIL_FROM_ADDRESS = EMAIL_FROM_ADDRESS
+app.state.config.EMAIL_FROM_NAME = EMAIL_FROM_NAME
+app.state.config.INVITE_EXPIRY_HOURS = INVITE_EXPIRY_HOURS
+app.state.config.EMAIL_INVITE_SUBJECT = EMAIL_INVITE_SUBJECT
+app.state.config.EMAIL_INVITE_HEADING = EMAIL_INVITE_HEADING
 
 app.state.config.OLLAMA_CLOUD_WEB_SEARCH_API_KEY = OLLAMA_CLOUD_WEB_SEARCH_API_KEY
 app.state.config.SEARXNG_QUERY_URL = SEARXNG_QUERY_URL
@@ -1456,6 +1522,7 @@ app.include_router(configs.router, prefix="/api/v1/configs", tags=["configs"])
 
 app.include_router(auths.router, prefix="/api/v1/auths", tags=["auths"])
 app.include_router(users.router, prefix="/api/v1/users", tags=["users"])
+app.include_router(archives.router, prefix="/api/v1/archives", tags=["archives"])
 
 
 app.include_router(channels.router, prefix="/api/v1/channels", tags=["channels"])
@@ -1487,6 +1554,9 @@ if app.state.config.ENABLE_ONEDRIVE_SYNC:
     app.include_router(
         onedrive_sync.router, prefix="/api/v1/onedrive", tags=["onedrive"]
     )
+
+# Invites API (always mounted - Copy Link works without Graph API)
+app.include_router(invites.router, prefix="/api/v1/invites", tags=["invites"])
 
 
 try:
@@ -1959,6 +2029,8 @@ async def get_app_config(request: Request):
         "name": app.state.WEBUI_NAME,
         "version": VERSION,
         "default_locale": str(DEFAULT_LOCALE),
+        "client_name": CLIENT_NAME,
+        "invite_heading": str(app.state.config.EMAIL_INVITE_HEADING or ""),
         "oauth": {
             "providers": {
                 name: config.get("name", name)
@@ -2022,6 +2094,7 @@ async def get_app_config(request: Request):
                         if app.state.config.ENABLE_ONEDRIVE_INTEGRATION
                         else {}
                     ),
+                    "enable_email_invites": app.state.config.ENABLE_EMAIL_INVITES,
                 }
                 if user is not None
                 else {}
@@ -2036,6 +2109,9 @@ async def get_app_config(request: Request):
                 "code": {
                     "engine": app.state.config.CODE_EXECUTION_ENGINE,
                 },
+                "database": {
+                    "type": engine.name,
+                },
                 "audio": {
                     "tts": {
                         "engine": app.state.config.TTS_ENGINE,
@@ -2049,6 +2125,7 @@ async def get_app_config(request: Request):
                 "file": {
                     "max_size": app.state.config.FILE_MAX_SIZE,
                     "max_count": app.state.config.FILE_MAX_COUNT,
+                    "allowed_extensions": app.state.config.ALLOWED_FILE_EXTENSIONS,
                     "image_compression": {
                         "width": app.state.config.FILE_IMAGE_COMPRESSION_WIDTH,
                         "height": app.state.config.FILE_IMAGE_COMPRESSION_HEIGHT,
@@ -2064,6 +2141,7 @@ async def get_app_config(request: Request):
                     "client_id_business": ONEDRIVE_CLIENT_ID_BUSINESS,
                     "sharepoint_url": ONEDRIVE_SHAREPOINT_URL.value,
                     "sharepoint_tenant_id": ONEDRIVE_SHAREPOINT_TENANT_ID.value,
+                    "has_client_secret": bool(MICROSOFT_CLIENT_SECRET.value),
                 },
                 "ui": {
                     "pending_user_overlay_title": app.state.config.PENDING_USER_OVERLAY_TITLE,
@@ -2381,6 +2459,15 @@ async def oauth_login(provider: str, request: Request):
 @app.get("/oauth/{provider}/login/callback")
 @app.get("/oauth/{provider}/callback")  # Legacy endpoint
 async def oauth_login_callback(provider: str, request: Request, response: Response):
+    # Check if this is a OneDrive background sync auth callback
+    if provider == "microsoft":
+        state = request.query_params.get("state")
+        if state:
+            from open_webui.services.onedrive.auth import _pending_flows
+            if state in _pending_flows:
+                from open_webui.routers.onedrive_sync import handle_onedrive_auth_callback
+                return await handle_onedrive_auth_callback(request)
+
     return await oauth_manager.handle_callback(request, provider, response)
 
 

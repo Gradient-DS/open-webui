@@ -1614,6 +1614,35 @@ ENABLE_ADMIN_CHAT_ACCESS = (
 )
 
 ####################################
+# User Archival
+####################################
+
+ENABLE_USER_ARCHIVAL = PersistentConfig(
+    "ENABLE_USER_ARCHIVAL",
+    "admin.enable_user_archival",
+    os.environ.get("ENABLE_USER_ARCHIVAL", "True").lower() == "true",
+)
+
+DEFAULT_ARCHIVE_RETENTION_DAYS = PersistentConfig(
+    "DEFAULT_ARCHIVE_RETENTION_DAYS",
+    "admin.default_archive_retention_days",
+    int(os.environ.get("DEFAULT_ARCHIVE_RETENTION_DAYS", "1095")),  # 3 years default (ISO 27001)
+)
+
+# Auto-archive when users delete their own accounts
+ENABLE_AUTO_ARCHIVE_ON_SELF_DELETE = PersistentConfig(
+    "ENABLE_AUTO_ARCHIVE_ON_SELF_DELETE",
+    "admin.enable_auto_archive_on_self_delete",
+    os.environ.get("ENABLE_AUTO_ARCHIVE_ON_SELF_DELETE", "False").lower() == "true",
+)
+
+AUTO_ARCHIVE_RETENTION_DAYS = PersistentConfig(
+    "AUTO_ARCHIVE_RETENTION_DAYS",
+    "admin.auto_archive_retention_days",
+    int(os.environ.get("AUTO_ARCHIVE_RETENTION_DAYS", "365")),  # 1 year default for self-delete
+)
+
+####################################
 # Feature Flags (SaaS Tier Control)
 ####################################
 
@@ -2283,6 +2312,8 @@ WEAVIATE_HTTP_HOST = os.environ.get("WEAVIATE_HTTP_HOST", "")
 WEAVIATE_HTTP_PORT = int(os.environ.get("WEAVIATE_HTTP_PORT", "8080"))
 WEAVIATE_GRPC_PORT = int(os.environ.get("WEAVIATE_GRPC_PORT", "50051"))
 WEAVIATE_API_KEY = os.environ.get("WEAVIATE_API_KEY")
+# TTL for web search collections in minutes (0 = disabled, default 24 hours = 1440 minutes)
+WEAVIATE_WEB_SEARCH_TTL_MINUTES = int(os.environ.get("WEAVIATE_WEB_SEARCH_TTL_MINUTES", "1440"))
 
 # OpenSearch
 OPENSEARCH_URI = os.environ.get("OPENSEARCH_URI", "https://localhost:9200")
@@ -2492,6 +2523,7 @@ ONEDRIVE_CLIENT_ID_BUSINESS = os.environ.get(
     "ONEDRIVE_CLIENT_ID_BUSINESS", ONEDRIVE_CLIENT_ID
 )
 
+
 ONEDRIVE_SHAREPOINT_URL = PersistentConfig(
     "ONEDRIVE_SHAREPOINT_URL",
     "onedrive.sharepoint_url",
@@ -2519,6 +2551,50 @@ ONEDRIVE_SYNC_INTERVAL_MINUTES = PersistentConfig(
 
 ONEDRIVE_MAX_FILES_PER_SYNC = int(os.getenv("ONEDRIVE_MAX_FILES_PER_SYNC", "500"))
 ONEDRIVE_MAX_FILE_SIZE_MB = int(os.getenv("ONEDRIVE_MAX_FILE_SIZE_MB", "100"))
+
+####################################
+# Email Service (Microsoft Graph API)
+####################################
+
+ENABLE_EMAIL_INVITES = PersistentConfig(
+    "ENABLE_EMAIL_INVITES",
+    "email.enable_invites",
+    os.environ.get("ENABLE_EMAIL_INVITES", "False").lower() == "true",
+)
+
+EMAIL_GRAPH_TENANT_ID = os.environ.get("EMAIL_GRAPH_TENANT_ID", "")
+EMAIL_GRAPH_CLIENT_ID = os.environ.get("EMAIL_GRAPH_CLIENT_ID", "")
+EMAIL_GRAPH_CLIENT_SECRET = os.environ.get("EMAIL_GRAPH_CLIENT_SECRET", "")
+
+EMAIL_FROM_ADDRESS = PersistentConfig(
+    "EMAIL_FROM_ADDRESS",
+    "email.from_address",
+    os.environ.get("EMAIL_FROM_ADDRESS", "no-reply@soev.ai"),
+)
+
+EMAIL_FROM_NAME = PersistentConfig(
+    "EMAIL_FROM_NAME",
+    "email.from_name",
+    os.environ.get("EMAIL_FROM_NAME", "Soev"),
+)
+
+INVITE_EXPIRY_HOURS = PersistentConfig(
+    "INVITE_EXPIRY_HOURS",
+    "email.invite_expiry_hours",
+    int(os.environ.get("INVITE_EXPIRY_HOURS", "168")),
+)
+
+EMAIL_INVITE_SUBJECT = PersistentConfig(
+    "EMAIL_INVITE_SUBJECT",
+    "email.invite_subject",
+    os.environ.get("EMAIL_INVITE_SUBJECT", ""),
+)
+
+EMAIL_INVITE_HEADING = PersistentConfig(
+    "EMAIL_INVITE_HEADING",
+    "email.invite_heading",
+    os.environ.get("EMAIL_INVITE_HEADING", ""),
+)
 
 # RAG Content Extraction
 CONTENT_EXTRACTION_ENGINE = PersistentConfig(

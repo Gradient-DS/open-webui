@@ -11,6 +11,7 @@ data:
   ENABLE_PERSISTENT_CONFIG: {{ .Values.openWebui.config.enablePersistentConfig | quote }}
   RESET_CONFIG_ON_START: {{ .Values.openWebui.config.resetConfigOnStart | quote }}
   WEBUI_NAME: {{ .Values.openWebui.config.webuiName | quote }}
+  CLIENT_NAME: {{ .Values.tenant.clientName | quote }}
   CORS_ALLOW_ORIGIN: {{ .Values.openWebui.config.corsAllowOrigin | quote }}
 
   # Locale
@@ -53,6 +54,7 @@ data:
   WEAVIATE_HTTP_HOST: {{ include "open-webui-tenant.weaviate.fullname" . }}
   WEAVIATE_HTTP_PORT: {{ .Values.openWebui.config.weaviateHttpPort | quote }}
   WEAVIATE_GRPC_PORT: {{ .Values.openWebui.config.weaviateGrpcPort | quote }}
+  WEAVIATE_WEB_SEARCH_TTL_MINUTES: {{ .Values.openWebui.config.weaviateWebSearchTtlMinutes | quote }}
 
   # Database (PostgreSQL) - local to tenant namespace
   DATABASE_TYPE: {{ .Values.openWebui.config.databaseType | quote }}
@@ -219,7 +221,54 @@ data:
   ONEDRIVE_MAX_FILES_PER_SYNC: {{ .Values.openWebui.config.onedriveMaxFilesPerSync | quote }}
   ONEDRIVE_MAX_FILE_SIZE_MB: {{ .Values.openWebui.config.onedriveMaxFileSizeMb | quote }}
 
+  # Email Invites (Microsoft Graph API)
+  ENABLE_EMAIL_INVITES: {{ .Values.openWebui.config.enableEmailInvites | quote }}
+  {{- if .Values.openWebui.config.emailGraphTenantId }}
+  EMAIL_GRAPH_TENANT_ID: {{ .Values.openWebui.config.emailGraphTenantId | quote }}
+  {{- end }}
+  {{- if .Values.openWebui.config.emailGraphClientId }}
+  EMAIL_GRAPH_CLIENT_ID: {{ .Values.openWebui.config.emailGraphClientId | quote }}
+  {{- end }}
+  EMAIL_FROM_ADDRESS: {{ .Values.openWebui.config.emailFromAddress | quote }}
+  EMAIL_FROM_NAME: {{ .Values.openWebui.config.emailFromName | quote }}
+  INVITE_EXPIRY_HOURS: {{ .Values.openWebui.config.inviteExpiryHours | quote }}
+  {{- if .Values.openWebui.config.emailInviteSubject }}
+  EMAIL_INVITE_SUBJECT: {{ .Values.openWebui.config.emailInviteSubject | quote }}
+  {{- end }}
+  {{- if .Values.openWebui.config.emailInviteHeading }}
+  EMAIL_INVITE_HEADING: {{ .Values.openWebui.config.emailInviteHeading | quote }}
+  {{- end }}
+
   BYPASS_MODEL_ACCESS_CONTROL: {{ .Values.openWebui.config.bypassModelAccessControl | quote }}
+
+  # Audit Logging
+  AUDIT_LOG_LEVEL: {{ .Values.openWebui.config.auditLogLevel | quote }}
+
+  # User Archival
+  ENABLE_USER_ARCHIVAL: {{ .Values.openWebui.config.enableUserArchival | quote }}
+  DEFAULT_ARCHIVE_RETENTION_DAYS: {{ .Values.openWebui.config.defaultArchiveRetentionDays | quote }}
+  ENABLE_AUTO_ARCHIVE_ON_SELF_DELETE: {{ .Values.openWebui.config.enableAutoArchiveOnSelfDelete | quote }}
+  AUTO_ARCHIVE_RETENTION_DAYS: {{ .Values.openWebui.config.autoArchiveRetentionDays | quote }}
+
+  # Storage Provider (S3)
+  {{- if .Values.openWebui.config.storageProvider }}
+  STORAGE_PROVIDER: {{ .Values.openWebui.config.storageProvider | quote }}
+  {{- end }}
+  {{- if .Values.openWebui.config.s3BucketName }}
+  S3_BUCKET_NAME: {{ .Values.openWebui.config.s3BucketName | quote }}
+  {{- end }}
+  {{- if .Values.openWebui.config.s3RegionName }}
+  S3_REGION_NAME: {{ .Values.openWebui.config.s3RegionName | quote }}
+  {{- end }}
+  {{- if .Values.openWebui.config.s3EndpointUrl }}
+  S3_ENDPOINT_URL: {{ .Values.openWebui.config.s3EndpointUrl | quote }}
+  {{- end }}
+  {{- if .Values.openWebui.config.s3KeyPrefix }}
+  S3_KEY_PREFIX: {{ .Values.openWebui.config.s3KeyPrefix | quote }}
+  {{- end }}
+  {{- if .Values.openWebui.config.s3EnableTagging }}
+  S3_ENABLE_TAGGING: {{ .Values.openWebui.config.s3EnableTagging | quote }}
+  {{- end }}
 
   # Telemetry
   SCARF_NO_ANALYTICS: {{ .Values.openWebui.config.scarfNoAnalytics | quote }}

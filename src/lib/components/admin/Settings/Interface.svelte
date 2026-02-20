@@ -488,6 +488,7 @@
 					</Tooltip>
 				</div>
 
+
 				{#if $user?.role === 'admin'}
 					<PromptSuggestions bind:promptSuggestions />
 

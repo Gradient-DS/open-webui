@@ -4,22 +4,28 @@
 	dayjs.extend(relativeTime);
 
 	import { toast } from 'svelte-sonner';
-	import { onMount, getContext, tick } from 'svelte';
+	import { onMount, onDestroy, getContext, tick } from 'svelte';
 	const i18n = getContext('i18n');
 
-	import { WEBUI_NAME, knowledge, user } from '$lib/stores';
+	import { WEBUI_NAME, knowledge, user, config, socket } from '$lib/stores';
 	import { deleteKnowledgeById, searchKnowledgeBases } from '$lib/apis/knowledge';
 
 	import { goto } from '$app/navigation';
 	import { capitalizeFirstLetter } from '$lib/utils';
+
+	import { DropdownMenu } from 'bits-ui';
+	import { flyAndScale } from '$lib/utils/transitions';
 
 	import DeleteConfirmDialog from '../common/ConfirmDialog.svelte';
 	import ItemMenu from './Knowledge/ItemMenu.svelte';
 	import Badge from '../common/Badge.svelte';
 	import Search from '../icons/Search.svelte';
 	import Plus from '../icons/Plus.svelte';
+	import Database from '../icons/Database.svelte';
+	import OneDrive from '../icons/OneDrive.svelte';
 	import Spinner from '../common/Spinner.svelte';
 	import Tooltip from '../common/Tooltip.svelte';
+	import Dropdown from '../common/Dropdown.svelte';
 	import XMark from '../icons/XMark.svelte';
 	import ViewSelector from './common/ViewSelector.svelte';
 	import Loader from '../common/Loader.svelte';
@@ -104,9 +110,36 @@
 		}
 	};
 
+	const handleSyncProgress = (data) => {
+		const { knowledge_id, status } = data;
+		if (items) {
+			items = items.map((item) => {
+				if (item.id === knowledge_id) {
+					return {
+						...item,
+						meta: {
+							...item.meta,
+							onedrive_sync: {
+								...(item.meta?.onedrive_sync ?? {}),
+								status
+							}
+						}
+					};
+				}
+				return item;
+			});
+		}
+	};
+
 	onMount(async () => {
 		viewOption = localStorage?.workspaceViewOption || '';
 		loaded = true;
+
+		$socket?.on('onedrive:sync:progress', handleSyncProgress);
+	});
+
+	onDestroy(() => {
+		$socket?.off('onedrive:sync:progress', handleSyncProgress);
 	});
 </script>
 
@@ -137,14 +170,46 @@
 			</div>
 
 			<div class="flex w-full justify-end gap-1.5">
-				<a
-					class=" px-2 py-1.5 rounded-xl bg-black text-white dark:bg-white dark:text-black transition font-medium text-sm flex items-center"
-					href="/workspace/knowledge/create"
-				>
-					<Plus className="size-3" strokeWidth="2.5" />
+				<Dropdown align="end">
+					<button
+						class="px-2 py-1.5 rounded-xl bg-black text-white dark:bg-white dark:text-black transition font-medium text-sm flex items-center"
+					>
+						<Plus className="size-3" strokeWidth="2.5" />
+						<div class="hidden md:block md:ml-1 text-xs">{$i18n.t('New Knowledge')}</div>
+					</button>
 
-					<div class=" hidden md:block md:ml-1 text-xs">{$i18n.t('New Knowledge')}</div>
-				</a>
+					<div slot="content">
+						<DropdownMenu.Content
+							class="w-full max-w-[220px] rounded-2xl px-1 py-1 border border-gray-100 dark:border-gray-800 z-50 bg-white dark:bg-gray-850 dark:text-white shadow-lg transition"
+							sideOffset={4}
+							side="bottom"
+							align="end"
+							transition={flyAndScale}
+						>
+							<DropdownMenu.Item
+								class="flex gap-2 items-center px-3 py-1.5 text-sm cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-xl"
+								on:click={() => {
+									goto('/workspace/knowledge/create?type=local');
+								}}
+							>
+								<Database className="size-4" strokeWidth="2" />
+								<div class="flex items-center">{$i18n.t('Local Knowledge Base')}</div>
+							</DropdownMenu.Item>
+
+							{#if $config?.features?.enable_onedrive_integration}
+								<DropdownMenu.Item
+									class="flex gap-2 items-center px-3 py-1.5 text-sm cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-xl"
+									on:click={() => {
+										goto('/workspace/knowledge/create?type=onedrive');
+									}}
+								>
+									<OneDrive className="size-4" />
+									<div class="flex items-center">{$i18n.t('From OneDrive')}</div>
+								</DropdownMenu.Item>
+							{/if}
+						</DropdownMenu.Content>
+					</div>
+				</Dropdown>
 			</div>
 		</div>
 	</div>
@@ -224,8 +289,17 @@
 								<div class=" self-center flex-1 justify-between">
 									<div class="flex items-center justify-between -my-1 h-8">
 										<div class=" flex gap-2 items-center justify-between w-full">
-											<div>
-												<Badge type="success" content={$i18n.t('Collection')} />
+											<div class="flex items-center gap-1.5">
+												{#if item?.type === 'onedrive'}
+													<Badge type="info" content={$i18n.t('OneDrive')} />
+													{#if item.meta?.onedrive_sync?.status === 'syncing'}
+														<Tooltip content={$i18n.t('Syncing...')}>
+															<Spinner className="size-3" />
+														</Tooltip>
+													{/if}
+												{:else}
+													<Badge type="muted" content={$i18n.t('Local')} />
+												{/if}
 											</div>
 
 											{#if !item?.write_access}
