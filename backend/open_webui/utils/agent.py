@@ -286,25 +286,38 @@ def _build_streaming_response(
     event_emitter = get_event_emitter(metadata)
 
     async def body_generator():
+        # [Gradient] Accumulate source events so they can be yielded as a
+        # single {"sources": [...]} data line after [DONE]. This matches how
+        # process_chat_response expects sources — via the events list emitted
+        # as chat:completion data, not via Socket.IO type:"source" events.
+        sources = []
+
         try:
             async for sse_event in stream_agent_response(AGENT_API_BASE_URL, payload):
                 if sse_event.event_type == "done":
-                    yield "data: [DONE]\n\n"
                     break
 
-                if sse_event.event_type in ("status", "source"):
-                    # [Gradient] Route custom events to Socket.IO so the UI
-                    # shows status spinners and source citations in real time.
+                if sse_event.event_type == "status":
+                    # [Gradient] Route status events to Socket.IO so the UI
+                    # shows status spinners in real time.
                     if event_emitter:
                         try:
                             await event_emitter(
                                 {
-                                    "type": sse_event.event_type,
+                                    "type": "status",
                                     "data": sse_event.data,
                                 }
                             )
                         except Exception as e:
-                            log.warning(f"Error emitting {sse_event.event_type} event: {e}")
+                            log.warning(f"Error emitting status event: {e}")
+                    continue
+
+                if sse_event.event_type == "source":
+                    # [Gradient] Collect sources to emit after the stream
+                    # completes. The agent sends each source with the full
+                    # structure {source, document, metadata, distances} that
+                    # the frontend expects directly.
+                    sources.append(sse_event.data)
                     continue
 
                 # Standard OpenAI chunk — pass through as SSE data line
@@ -325,7 +338,21 @@ def _build_streaming_response(
                 ]
             }
             yield f"data: {json.dumps(error_chunk)}\n\n"
-            yield "data: [DONE]\n\n"
+
+        # [Gradient] Emit accumulated sources as a chat:completion event so
+        # the frontend renders citation chips. This must happen before [DONE].
+        if sources and event_emitter:
+            try:
+                await event_emitter(
+                    {
+                        "type": "chat:completion",
+                        "data": {"sources": sources},
+                    }
+                )
+            except Exception as e:
+                log.warning(f"Error emitting sources: {e}")
+
+        yield "data: [DONE]\n\n"
 
     return StreamingResponse(
         body_generator(),

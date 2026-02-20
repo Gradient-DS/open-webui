@@ -1240,7 +1240,10 @@ async def process_chat_payload(request, form_data, user, metadata, model):
     user_message = get_last_user_message(form_data["messages"])
     model_knowledge = model.get("info", {}).get("meta", {}).get("knowledge", False)
 
-    if model_knowledge:
+    # [Gradient] Skip knowledge flattening and spinner when agent API is
+    # enabled. The agent receives raw KB references via metadata["knowledge"]
+    # and handles its own retrieval and status emissions.
+    if model_knowledge and not AGENT_API_ENABLED:
         await event_emitter(
             {
                 "type": "status",
