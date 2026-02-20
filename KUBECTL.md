@@ -13,6 +13,8 @@ kubectl cluster-info
 kubectl get nodes
 ```
 
+
+
 ## Namespace: open-webui
 
 All commands below assume namespace `open-webui`. Add `-n open-webui` to each command or set default:
