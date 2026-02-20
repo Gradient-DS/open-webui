@@ -1,3 +1,4 @@
+import logging
 import weaviate
 import re
 import uuid
@@ -11,12 +12,16 @@ from open_webui.retrieval.vector.main import (
     GetResult,
 )
 from open_webui.retrieval.vector.utils import process_metadata
+from weaviate.exceptions import UnexpectedStatusCodeError
 from open_webui.config import (
     WEAVIATE_HTTP_HOST,
     WEAVIATE_HTTP_PORT,
     WEAVIATE_GRPC_PORT,
     WEAVIATE_API_KEY,
 )
+
+
+log = logging.getLogger(__name__)
 
 
 def _make_json_serializable(obj: Any) -> Any:
@@ -131,10 +136,20 @@ class WeaviateClient(VectorDBBase):
             ],
         )
 
+    def _ensure_collection(self, sane_collection_name: str) -> None:
+        """Create collection if it doesn't exist, handling concurrent creation races."""
+        if not self.client.collections.exists(sane_collection_name):
+            try:
+                self._create_collection(sane_collection_name)
+            except UnexpectedStatusCodeError as e:
+                if "already exists" in str(e):
+                    log.debug("Collection %s created by another thread", sane_collection_name)
+                else:
+                    raise
+
     def insert(self, collection_name: str, items: List[VectorItem]) -> None:
         sane_collection_name = self._sanitize_collection_name(collection_name)
-        if not self.client.collections.exists(sane_collection_name):
-            self._create_collection(sane_collection_name)
+        self._ensure_collection(sane_collection_name)
 
         collection = self.client.collections.get(sane_collection_name)
 
@@ -156,8 +171,7 @@ class WeaviateClient(VectorDBBase):
 
     def upsert(self, collection_name: str, items: List[VectorItem]) -> None:
         sane_collection_name = self._sanitize_collection_name(collection_name)
-        if not self.client.collections.exists(sane_collection_name):
-            self._create_collection(sane_collection_name)
+        self._ensure_collection(sane_collection_name)
 
         collection = self.client.collections.get(sane_collection_name)
 

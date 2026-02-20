@@ -1284,6 +1284,13 @@
 				}
 			}
 
+			// Resume sync UI if a sync is already in progress
+			if (knowledge?.meta?.onedrive_sync?.status === 'syncing') {
+				isSyncingOneDrive = true;
+				_syncRefreshDone = false;
+				pollOneDriveSyncStatus();
+			}
+
 			// Auto-start OneDrive sync if directed from creation flow
 			if ($page.url.searchParams.get('start_onedrive_sync') === 'true' && knowledge) {
 				const url = new URL(window.location.href);
@@ -1699,6 +1706,7 @@
 												files={fileItems}
 												{knowledge}
 												{selectedFileId}
+												isSyncing={isSyncingOneDrive}
 												onClick={(fileId) => {
 													selectedFileId = fileId;
 

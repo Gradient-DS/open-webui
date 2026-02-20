@@ -29,6 +29,8 @@
 	export let knowledge: any = null;
 	export let selectedFileId: string | null = null;
 
+	export let isSyncing: boolean = false;
+
 	export let onClick: (fileId: string) => void = () => {};
 	export let onRemoveSource: (itemId: string, sourceName: string) => void = () => {};
 	export let onDelete: (fileId: string) => void = () => {};
@@ -145,6 +147,10 @@
 						<Folder className="size-3.5" strokeWidth="2" />
 					</div>
 					<span class="line-clamp-1 font-medium">{source.name}</span>
+					{#if isSyncing}
+						<span class="text-xs text-gray-400 shrink-0">&middot;</span>
+						<Spinner className="size-3" />
+					{/if}
 					<span class="text-xs text-gray-400 shrink-0">
 						&middot; {$i18n.t('{{count}} files in folder', { count: totalFileCount })}
 					</span>

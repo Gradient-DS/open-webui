@@ -4,10 +4,10 @@
 	dayjs.extend(relativeTime);
 
 	import { toast } from 'svelte-sonner';
-	import { onMount, getContext, tick } from 'svelte';
+	import { onMount, onDestroy, getContext, tick } from 'svelte';
 	const i18n = getContext('i18n');
 
-	import { WEBUI_NAME, knowledge, user, config } from '$lib/stores';
+	import { WEBUI_NAME, knowledge, user, config, socket } from '$lib/stores';
 	import { deleteKnowledgeById, searchKnowledgeBases } from '$lib/apis/knowledge';
 
 	import { goto } from '$app/navigation';
@@ -110,9 +110,36 @@
 		}
 	};
 
+	const handleSyncProgress = (data) => {
+		const { knowledge_id, status } = data;
+		if (items) {
+			items = items.map((item) => {
+				if (item.id === knowledge_id) {
+					return {
+						...item,
+						meta: {
+							...item.meta,
+							onedrive_sync: {
+								...(item.meta?.onedrive_sync ?? {}),
+								status
+							}
+						}
+					};
+				}
+				return item;
+			});
+		}
+	};
+
 	onMount(async () => {
 		viewOption = localStorage?.workspaceViewOption || '';
 		loaded = true;
+
+		$socket?.on('onedrive:sync:progress', handleSyncProgress);
+	});
+
+	onDestroy(() => {
+		$socket?.off('onedrive:sync:progress', handleSyncProgress);
 	});
 </script>
 
@@ -262,9 +289,14 @@
 								<div class=" self-center flex-1 justify-between">
 									<div class="flex items-center justify-between -my-1 h-8">
 										<div class=" flex gap-2 items-center justify-between w-full">
-											<div>
+											<div class="flex items-center gap-1.5">
 												{#if item?.type === 'onedrive'}
 													<Badge type="info" content={$i18n.t('OneDrive')} />
+													{#if item.meta?.onedrive_sync?.status === 'syncing'}
+														<Tooltip content={$i18n.t('Syncing...')}>
+															<Spinner className="size-3" />
+														</Tooltip>
+													{/if}
 												{:else}
 													<Badge type="muted" content={$i18n.t('Local')} />
 												{/if}

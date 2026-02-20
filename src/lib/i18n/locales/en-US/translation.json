@@ -1697,6 +1697,7 @@
 	"Synced {{count}} files from OneDrive ({{failed}} failed)_other": "",
 	"Synced from OneDrive": "",
 	"Synced from OneDrive: {{date}}": "",
+	"Syncing...": "",
 	"System": "",
 	"System Instructions": "",
 	"System Prompt": "",
