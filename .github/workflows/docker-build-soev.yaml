@@ -4,6 +4,10 @@ on:
   push:
     branches:
       - main
+      - dev
+      - test
+    tags:
+      - 'v*'
   workflow_dispatch:
 
 env:
@@ -61,6 +65,7 @@ jobs:
           tags: |
             type=ref,event=branch
             type=sha,prefix=git-
+            type=semver,pattern={{version}},prefix=v
             type=raw,enable=${{ github.ref == 'refs/heads/main' }},value=latest
           flavor: |
             latest=false
@@ -144,6 +149,7 @@ jobs:
           tags: |
             type=ref,event=branch
             type=sha,prefix=git-
+            type=semver,pattern={{version}},prefix=v
             type=raw,enable=${{ github.ref == 'refs/heads/main' }},value=latest
           flavor: |
             latest=false
