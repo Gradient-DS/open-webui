@@ -354,6 +354,7 @@ from open_webui.config import (
     EMAIL_INVITE_HEADING,
     ENABLE_RAG_HYBRID_SEARCH,
     ENABLE_RAG_HYBRID_SEARCH_ENRICHED_TEXTS,
+    ENABLE_RAG_FILTER_UI,
     ENABLE_RAG_LOCAL_WEB_FETCH,
     ENABLE_WEB_LOADER_SSL_VERIFICATION,
     ENABLE_GOOGLE_DRIVE_INTEGRATION,
@@ -973,6 +974,7 @@ app.state.config.ENABLE_RAG_HYBRID_SEARCH = ENABLE_RAG_HYBRID_SEARCH
 app.state.config.ENABLE_RAG_HYBRID_SEARCH_ENRICHED_TEXTS = (
     ENABLE_RAG_HYBRID_SEARCH_ENRICHED_TEXTS
 )
+app.state.config.ENABLE_RAG_FILTER_UI = ENABLE_RAG_FILTER_UI
 app.state.config.ENABLE_WEB_LOADER_SSL_VERIFICATION = ENABLE_WEB_LOADER_SSL_VERIFICATION
 
 app.state.config.CONTENT_EXTRACTION_ENGINE = CONTENT_EXTRACTION_ENGINE
@@ -1760,6 +1762,7 @@ async def chat_completion(
             "filter_ids": form_data.pop("filter_ids", []),
             "tool_ids": form_data.get("tool_ids", None),
             "tool_servers": form_data.pop("tool_servers", None),
+            "rag_filter": form_data.pop("rag_filter", None),
             "files": form_data.get("files", None),
             "features": form_data.get("features", {}),
             "variables": form_data.get("variables", {}),
@@ -2055,6 +2058,7 @@ async def get_app_config(request: Request):
                     "enable_channels": app.state.config.ENABLE_CHANNELS,
                     "enable_notes": app.state.config.ENABLE_NOTES,
                     "enable_web_search": app.state.config.ENABLE_WEB_SEARCH,
+                    "enable_rag_filter_ui": app.state.config.ENABLE_RAG_FILTER_UI,
                     "enable_code_execution": app.state.config.ENABLE_CODE_EXECUTION,
                     "enable_code_interpreter": app.state.config.ENABLE_CODE_INTERPRETER,
                     "enable_image_generation": app.state.config.ENABLE_IMAGE_GENERATION,

@@ -45,6 +45,8 @@
 		showEmbeds
 	} from '$lib/stores';
 
+	import { showRagFilter } from '$lib/stores/rag-filter';
+
 	import {
 		convertMessagesToHistory,
 		copyToClipboard,
@@ -84,6 +86,7 @@
 	import { createOpenAITextStream } from '$lib/apis/streaming';
 	import { getFunctions } from '$lib/apis/functions';
 	import { updateFolderById } from '$lib/apis/folders';
+	import { getRagFilterForRequest } from '$lib/utils/rag-filter';
 
 	import Banner from '../common/Banner.svelte';
 	import MessageInput from '$lib/components/chat/MessageInput.svelte';
@@ -97,6 +100,7 @@
 	import Tooltip from '../common/Tooltip.svelte';
 	import Sidebar from '../icons/Sidebar.svelte';
 	import Image from '../common/Image.svelte';
+	import RagFilterPanel from './RagFilterPanel.svelte';
 
 	export let chatIdProp = '';
 
@@ -1945,6 +1949,7 @@
 
 				filter_ids: selectedFilterIds.length > 0 ? selectedFilterIds : undefined,
 				tool_ids: toolIds.length > 0 ? toolIds : undefined,
+				rag_filter: getRagFilterForRequest(),
 				tool_servers: ($toolServers ?? []).filter(
 					(server, idx) => toolServerIds.includes(idx) || toolServerIds.includes(server?.id)
 				),
@@ -2381,9 +2386,9 @@
 />
 
 <div
-	class="h-screen max-h-[100dvh] transition-width duration-200 ease-in-out {$showSidebar
-		? '  md:max-w-[calc(100%-var(--sidebar-width))]'
-		: ' '} w-full max-w-full flex flex-col"
+	class="h-screen max-h-[100dvh] transition-all duration-200 ease-in-out {$showSidebar
+		? 'md:max-w-[calc(100%-var(--sidebar-width))]'
+		: ''} {($config?.features?.enable_rag_filter_ui ?? true) && $showRagFilter ? 'pr-80' : ''} w-full max-w-full flex flex-col"
 	id="chat-container"
 >
 	{#if !loading}
@@ -2632,6 +2637,9 @@
 		</div>
 	{/if}
 </div>
+
+<!-- RAG Filter Panel -->
+<RagFilterPanel />
 
 <style>
 	::-webkit-scrollbar {
