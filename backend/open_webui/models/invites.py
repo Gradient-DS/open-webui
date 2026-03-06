@@ -42,7 +42,7 @@ class InviteForm(BaseModel):
     name: str
     email: str
     role: Optional[str] = "user"
-    send_email: Optional[bool] = True
+    send_email: Optional[bool] = None
 
 
 class AcceptInviteForm(BaseModel):
