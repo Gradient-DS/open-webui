@@ -117,7 +117,12 @@ async def create_invite(
     invite_url = f"{base_url}/auth/invite/{invite.token}"
 
     email_sent = False
-    if form_data.send_email and request.app.state.config.ENABLE_EMAIL_INVITES:
+    # None = use backend default (send if enabled), False = explicitly skip
+    should_send = (
+        form_data.send_email is not False
+        and request.app.state.config.ENABLE_EMAIL_INVITES
+    )
+    if should_send:
         try:
             from open_webui.services.email.graph_mail_client import (
                 render_invite_email,

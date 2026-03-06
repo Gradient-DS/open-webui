@@ -448,7 +448,8 @@ weaviate:
     persistence:
       dataPath: "/var/lib/weaviate"
     defaultVectorizerModule: "none"
-    enableModules: ""
+    enableModules: "backup-filesystem"
+    backupFilesystemPath: "/var/lib/weaviate/backups"
     clusterHostname: "node1"
 
 # -----------------------------------------------------------------------------
