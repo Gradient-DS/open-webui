@@ -32,7 +32,8 @@
 		showControls,
 		TTSWorker,
 		temporaryChatEnabled,
-		socket
+		socket,
+		chats
 	} from '$lib/stores';
 
 	import {
@@ -441,6 +442,19 @@
 	$: fileUploadCapableModels = (atSelectedModel?.id ? [atSelectedModel.id] : selectedModels).filter(
 		(model) => $models.find((m) => m.id === model)?.info?.meta?.capabilities?.file_upload ?? true
 	);
+
+	// Whether file upload is enabled for the current user and selected models
+	$: fileUploadEnabled =
+		fileUploadCapableModels.length === selectedModels.length &&
+		($_user?.role === 'admin' || $_user?.permissions?.chat?.file_upload);
+
+	// Auto-hide the "+" input menu when no items would be available
+	$: showInputMenu =
+		isFeatureEnabled('input_menu') &&
+		(fileUploadEnabled ||
+			($config?.features?.enable_notes ?? false) ||
+			isFeatureEnabled('knowledge') ||
+			($chats ?? []).length > 0);
 
 	let webSearchCapableModels = [];
 	$: webSearchCapableModels = (atSelectedModel?.id ? [atSelectedModel.id] : selectedModels).filter(
@@ -1485,67 +1499,69 @@
 
 							<div class=" flex justify-between mt-0.5 mb-2.5 mx-0.5 max-w-full" dir="ltr">
 								<div class="ml-1 self-end flex items-center flex-1 max-w-[80%]">
-									<InputMenu
-										bind:files
-										selectedModels={atSelectedModel ? [atSelectedModel.id] : selectedModels}
-										{fileUploadCapableModels}
-										{screenCaptureHandler}
-										{inputFilesHandler}
-										uploadFilesHandler={() => {
-											filesInputElement.click();
-										}}
-										uploadGoogleDriveHandler={async () => {
-											try {
-												const fileData = await createPicker();
-												if (fileData) {
-													const file = new File([fileData.blob], fileData.name, {
-														type: fileData.blob.type
-													});
-													await uploadFileHandler(file);
-												} else {
-													console.log('No file was selected from Google Drive');
-												}
-											} catch (error) {
-												console.error('Google Drive Error:', error);
-												toast.error(
-													$i18n.t('Error accessing Google Drive: {{error}}', {
-														error: error.message
-													})
-												);
-											}
-										}}
-										uploadOneDriveHandler={async (authorityType) => {
-											try {
-												const filesData = await pickAndDownloadFilesModal(authorityType);
-												if (filesData.length > 0) {
-													for (const fileData of filesData) {
+									{#if showInputMenu}
+										<InputMenu
+											bind:files
+											selectedModels={atSelectedModel ? [atSelectedModel.id] : selectedModels}
+											{fileUploadCapableModels}
+											{screenCaptureHandler}
+											{inputFilesHandler}
+											uploadFilesHandler={() => {
+												filesInputElement.click();
+											}}
+											uploadGoogleDriveHandler={async () => {
+												try {
+													const fileData = await createPicker();
+													if (fileData) {
 														const file = new File([fileData.blob], fileData.name, {
-															type: fileData.blob.type || 'application/octet-stream'
+															type: fileData.blob.type
 														});
 														await uploadFileHandler(file);
+													} else {
+														console.log('No file was selected from Google Drive');
 													}
-												} else {
-													console.log('No files were selected from OneDrive');
+												} catch (error) {
+													console.error('Google Drive Error:', error);
+													toast.error(
+														$i18n.t('Error accessing Google Drive: {{error}}', {
+															error: error.message
+														})
+													);
 												}
-											} catch (error) {
-												console.error('OneDrive Error:', error);
-											}
-										}}
-										{onUpload}
-										onClose={async () => {
-											await tick();
+											}}
+											uploadOneDriveHandler={async (authorityType) => {
+												try {
+													const filesData = await pickAndDownloadFilesModal(authorityType);
+													if (filesData.length > 0) {
+														for (const fileData of filesData) {
+															const file = new File([fileData.blob], fileData.name, {
+																type: fileData.blob.type || 'application/octet-stream'
+															});
+															await uploadFileHandler(file);
+														}
+													} else {
+														console.log('No files were selected from OneDrive');
+													}
+												} catch (error) {
+													console.error('OneDrive Error:', error);
+												}
+											}}
+											{onUpload}
+											onClose={async () => {
+												await tick();
 
-											const chatInput = document.getElementById('chat-input');
-											chatInput?.focus();
-										}}
-									>
-										<div
-											id="input-menu-button"
-											class="bg-transparent hover:bg-gray-100 text-gray-700 dark:text-white dark:hover:bg-gray-800 rounded-full size-8 flex justify-center items-center outline-hidden focus:outline-hidden"
+												const chatInput = document.getElementById('chat-input');
+												chatInput?.focus();
+											}}
 										>
-											<PlusAlt className="size-5.5" />
-										</div>
-									</InputMenu>
+											<div
+												id="input-menu-button"
+												class="bg-transparent hover:bg-gray-100 text-gray-700 dark:text-white dark:hover:bg-gray-800 rounded-full size-8 flex justify-center items-center outline-hidden focus:outline-hidden"
+											>
+												<PlusAlt className="size-5.5" />
+											</div>
+										</InputMenu>
+									{/if}
 
 									{#if showWebSearchButton || showImageGenerationButton || showCodeInterpreterButton || showToolsButton || (toggleFilters && toggleFilters.length > 0)}
 										<div

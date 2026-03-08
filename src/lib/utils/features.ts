@@ -17,7 +17,9 @@ export type Feature =
 	| 'tools'
 	| 'admin_evaluations'
 	| 'admin_functions'
-	| 'admin_settings';
+	| 'admin_settings'
+	| 'input_menu'
+	| 'temporary_chat';
 
 /**
  * Check if a feature is enabled globally.

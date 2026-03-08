@@ -446,6 +446,8 @@ from open_webui.config import (
     FEATURE_ADMIN_SETTINGS,
     FEATURE_ADMIN_SETTINGS_TABS,
     FEATURE_CHAT_CONTROLS_SECTIONS,
+    FEATURE_INPUT_MENU,
+    FEATURE_TEMPORARY_CHAT,
     # Tasks
     TASK_MODEL,
     TASK_MODEL_EXTERNAL,
@@ -2023,6 +2025,8 @@ async def get_app_config(request: Request):
                     "feature_admin_settings": FEATURE_ADMIN_SETTINGS,
                     "feature_admin_settings_tabs": FEATURE_ADMIN_SETTINGS_TABS,
                     "feature_chat_controls_sections": FEATURE_CHAT_CONTROLS_SECTIONS,
+                    "feature_input_menu": FEATURE_INPUT_MENU,
+                    "feature_temporary_chat": FEATURE_TEMPORARY_CHAT,
                     "enable_google_drive_integration": app.state.config.ENABLE_GOOGLE_DRIVE_INTEGRATION,
                     "enable_onedrive_integration": app.state.config.ENABLE_ONEDRIVE_INTEGRATION,
                     **(

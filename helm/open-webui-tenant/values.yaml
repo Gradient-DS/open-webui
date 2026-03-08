@@ -198,6 +198,8 @@ openWebui:
     featureAdminFunctions: "False"
     featureAdminSettings: "True"
     featureAdminSettingsTabs: "models,tools,interface,db"
+    featureInputMenu: "True"
+    featureTemporaryChat: "True"
 
     # Notes
     enableNotes: "true"
@@ -295,6 +297,11 @@ openWebui:
     onedriveMaxFileSizeMb: "10"
 
     bypassModelAccessControl: "false"
+
+    # Agent API (routes chat completions to external agent service)
+    agentApiEnabled: "false"
+    agentApiBaseUrl: ""
+    agentApiAgent: ""
 
     # Telemetry (disabled)
     scarfNoAnalytics: "true"
