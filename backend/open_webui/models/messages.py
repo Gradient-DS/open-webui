@@ -471,5 +471,18 @@ class MessageTable:
             db.commit()
             return True
 
+    def delete_messages_by_user_id(self, user_id: str) -> bool:
+        """Delete all messages and reactions for a user."""
+        try:
+            with get_db() as db:
+                # Delete reactions first
+                db.query(MessageReaction).filter_by(user_id=user_id).delete()
+                # Delete messages
+                db.query(Message).filter_by(user_id=user_id).delete()
+                db.commit()
+                return True
+        except Exception:
+            return False
+
 
 Messages = MessageTable()

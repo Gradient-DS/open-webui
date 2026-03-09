@@ -6,7 +6,7 @@
 services:
 
   weaviate:
-    image: semitechnologies/weaviate:1.28.4
+    image: semitechnologies/weaviate:1.35.0
     container_name: neo-nl-weaviate
     environment:
       # Weaviate core settings
@@ -16,6 +16,9 @@ services:
       # No vectorizer - Open WebUI provides embeddings externally
       DEFAULT_VECTORIZER_MODULE: none
       CLUSTER_HOSTNAME: node1
+      # TTL cleanup schedule (cron format or @every duration)
+      # Runs every 5 minutes to clean up expired objects
+      OBJECTS_TTL_DELETE_SCHEDULE: "@every 5m"
       # Logging
       LOG_LEVEL: info
     volumes:

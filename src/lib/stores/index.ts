@@ -154,6 +154,7 @@ type OllamaModelDetails = {
 
 type Settings = {
 	pinnedModels?: never[];
+	pinnedInputItems?: string[];
 	toolServers?: never[];
 	detectArtifacts?: boolean;
 	showUpdateToast?: boolean;
@@ -258,6 +259,7 @@ type Config = {
 	name: string;
 	version: string;
 	default_locale: string;
+	invite_heading?: string;
 	default_models: string;
 	default_prompt_suggestions: PromptSuggestion[];
 	features: {

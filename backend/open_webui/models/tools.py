@@ -268,5 +268,15 @@ class ToolsTable:
         except Exception:
             return False
 
+    def delete_tools_by_user_id(self, user_id: str) -> bool:
+        """Delete all tools for a user."""
+        try:
+            with get_db() as db:
+                db.query(Tool).filter_by(user_id=user_id).delete()
+                db.commit()
+                return True
+        except Exception:
+            return False
+
 
 Tools = ToolsTable()

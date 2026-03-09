@@ -33,23 +33,26 @@
 		addFileToKnowledgeById,
 		getKnowledgeById,
 		removeFileFromKnowledgeById,
-		resetKnowledgeById,
 		updateFileFromKnowledgeById,
 		updateKnowledgeById,
 		searchKnowledgeFilesById
 	} from '$lib/apis/knowledge';
 	import { processWeb, processYoutubeVideo } from '$lib/apis/retrieval';
-	import { startOneDriveSyncItems, getSyncStatus, cancelSync, type SyncStatusResponse, type SyncItem, type FailedFile, type SyncErrorType } from '$lib/apis/onedrive';
+	import { startOneDriveSyncItems, getSyncStatus, cancelSync, getTokenStatus, removeSource, type SyncStatusResponse, type SyncItem, type FailedFile, type SyncErrorType } from '$lib/apis/onedrive';
 	import { openOneDriveItemPicker, getGraphApiToken } from '$lib/utils/onedrive-file-picker';
+	import { WEBUI_API_BASE_URL } from '$lib/constants';
 
 	import { blobToFile, isYoutubeUrl } from '$lib/utils';
 
 	import Spinner from '$lib/components/common/Spinner.svelte';
 	import Files from './KnowledgeBase/Files.svelte';
+	import SourceGroupedFiles from './KnowledgeBase/SourceGroupedFiles.svelte';
 	import AddFilesPlaceholder from '$lib/components/AddFilesPlaceholder.svelte';
 
 	import AddContentMenu from './KnowledgeBase/AddContentMenu.svelte';
 	import AddTextContentModal from './KnowledgeBase/AddTextContentModal.svelte';
+	import EmptyStateCards from './KnowledgeBase/EmptyStateCards.svelte';
+	import Badge from '$lib/components/common/Badge.svelte';
 
 	import SyncConfirmDialog from '../../common/ConfirmDialog.svelte';
 	import Drawer from '$lib/components/common/Drawer.svelte';
@@ -72,7 +75,6 @@
 	let showAddWebpageModal = false;
 	let showAddTextContentModal = false;
 
-	let showSyncConfirmModal = false;
 	let showCancelSyncConfirmModal = false;
 	let showAccessControlModal = false;
 
@@ -106,12 +108,16 @@
 	let fileItems = null;
 	let fileItemsTotal = null;
 
+	let _skipReactiveRefresh = false;
+
 	const reset = () => {
 		currentPage = 1;
 	};
 
 	const init = async () => {
+		_skipReactiveRefresh = true;
 		reset();
+		_skipReactiveRefresh = false;
 		await getItemsPage();
 	};
 
@@ -123,7 +129,9 @@
 		direction !== undefined &&
 		currentPage !== undefined
 	) {
-		getItemsPage();
+		if (!_skipReactiveRefresh) {
+			getItemsPage();
+		}
 	}
 
 	$: if (
@@ -138,13 +146,11 @@
 	const getItemsPage = async () => {
 		if (knowledgeId === null) return;
 
-		fileItems = null;
-		fileItemsTotal = null;
-
 		if (sortKey === null) {
 			direction = null;
 		}
 
+		const isOneDrive = knowledge?.type === 'onedrive';
 		const res = await searchKnowledgeFilesById(
 			localStorage.token,
 			knowledge.id,
@@ -152,7 +158,8 @@
 			viewOption,
 			sortKey,
 			direction,
-			currentPage
+			currentPage,
+			isOneDrive ? 250 : null
 		).catch(() => {
 			return null;
 		});
@@ -291,6 +298,21 @@
 				})
 			);
 			return;
+		}
+
+		// Reject files with disallowed extensions when allowed_extensions is configured
+		const allowedExtensions = $config?.file?.allowed_extensions ?? [];
+		if (allowedExtensions.length > 0) {
+			const fileExtension = file.name.split('.').pop()?.toLowerCase() ?? '';
+			if (!allowedExtensions.includes(fileExtension)) {
+				toast.error(
+					$i18n.t('Unsupported file type: .{{extension}}. Allowed types: {{types}}', {
+						extension: fileExtension,
+						types: allowedExtensions.join(', ')
+					})
+				);
+				return null;
+			}
 		}
 
 		fileItems = [fileItem, ...(fileItems ?? [])];
@@ -507,25 +529,6 @@
 		}
 	};
 
-	// Helper function to maintain file paths within zip
-	const syncDirectoryHandler = async () => {
-		if (fileItems.length > 0) {
-			const res = await resetKnowledgeById(localStorage.token, id).catch((e) => {
-				toast.error(`${e}`);
-			});
-
-			if (res) {
-				fileItems = [];
-				toast.success($i18n.t('Knowledge reset successfully.'));
-
-				// Upload directory
-				uploadDirectoryHandler();
-			}
-		} else {
-			uploadDirectoryHandler();
-		}
-	};
-
 	const oneDriveSyncHandler = async () => {
 		try {
 			isSyncingOneDrive = true;
@@ -551,12 +554,19 @@
 			}));
 
 			// Start sync with new endpoint
+			_syncRefreshDone = false;
 			await startOneDriveSyncItems(localStorage.token, {
 				knowledge_id: knowledge.id,
 				items: syncItems,
 				access_token: accessToken,
 				user_token: localStorage.token
 			});
+
+			// Refresh knowledge to get updated sources (saved by backend before sync starts)
+			const updatedKnowledge = await getKnowledgeById(localStorage.token, id);
+			if (updatedKnowledge) {
+				knowledge = updatedKnowledge;
+			}
 
 			toast.success($i18n.t('OneDrive sync started'));
 
@@ -565,7 +575,6 @@
 		} catch (error) {
 			console.error('OneDrive sync error:', error);
 			toast.error($i18n.t('Failed to sync from OneDrive: ' + (error instanceof Error ? error.message : String(error))));
-		} finally {
 			isSyncingOneDrive = false;
 		}
 	};
@@ -589,6 +598,7 @@
 				name: source.name
 			}));
 
+			_syncRefreshDone = false;
 			await startOneDriveSyncItems(localStorage.token, {
 				knowledge_id: knowledge.id,
 				items: syncItems,
@@ -611,10 +621,23 @@
 
 			if (oneDriveSyncStatus.status === 'syncing') {
 				setTimeout(pollOneDriveSyncStatus, 2000);
+			} else if (oneDriveSyncStatus.status === 'file_limit_exceeded') {
+				toast.error(oneDriveSyncStatus.error || $i18n.t('File limit exceeded'));
+				isSyncingOneDrive = false;
+				if (!_syncRefreshDone) {
+					_syncRefreshDone = true;
+					await init();
+				}
+			} else if (oneDriveSyncStatus.status === 'access_revoked') {
+				// access_revoked is a transient status during sync, keep polling
+				setTimeout(pollOneDriveSyncStatus, 2000);
 			} else if (oneDriveSyncStatus.status === 'completed' || oneDriveSyncStatus.status === 'completed_with_errors') {
 				// Toast is handled by Socket.IO handler, just refresh
 				isSyncingOneDrive = false;
-				await init();
+				if (!_syncRefreshDone) {
+					_syncRefreshDone = true;
+					await init();
+				}
 			} else if (oneDriveSyncStatus.status === 'failed') {
 				// Only show error if Socket.IO didn't already handle it
 				if (isSyncingOneDrive) {
@@ -623,7 +646,11 @@
 				}
 			} else if (oneDriveSyncStatus.status === 'cancelled') {
 				isSyncingOneDrive = false;
-				await init();
+				isCancellingSync = false;
+				if (!_syncRefreshDone) {
+					_syncRefreshDone = true;
+					await init();
+				}
 			}
 		} catch (error) {
 			console.error('Failed to get sync status:', error);
@@ -632,11 +659,13 @@
 
 	const cancelOneDriveSyncHandler = async () => {
 		try {
+			isCancellingSync = true;
 			await cancelSync(localStorage.token, knowledge.id);
 			toast.info($i18n.t('Cancelling OneDrive sync...'));
 		} catch (error) {
 			console.error('Failed to cancel sync:', error);
 			toast.error($i18n.t('Failed to cancel sync: ' + (error instanceof Error ? error.message : String(error))));
+			isCancellingSync = false;
 		}
 	};
 
@@ -731,10 +760,17 @@
 			item_id: string;
 			name: string;
 			size?: number;
+			source_item_id?: string;
+			relative_path?: string;
 		};
 	}) => {
 		// Only process events for the current knowledge base
 		if (data.knowledge_id !== knowledge?.id) {
+			return;
+		}
+
+		// Ignore new file events when cancellation is in progress
+		if (isCancellingSync) {
 			return;
 		}
 
@@ -756,7 +792,12 @@
 			size: data.file.size || 0,
 			status: 'uploading',
 			error: '',
-			itemId: fileId
+			itemId: fileId,
+			meta: {
+				source_item_id: data.file.source_item_id,
+				source: 'onedrive',
+				relative_path: data.file.relative_path
+			}
 		};
 
 		// Add to beginning of list
@@ -777,6 +818,8 @@
 				content_type?: string;
 				size?: number;
 				source?: string;
+				source_item_id?: string;
+				relative_path?: string;
 			};
 			created_at?: number;
 			updated_at?: number;
@@ -784,6 +827,11 @@
 	}) => {
 		// Only process events for the current knowledge base
 		if (data.knowledge_id !== knowledge?.id) {
+			return;
+		}
+
+		// Ignore new file events when cancellation is in progress
+		if (isCancellingSync) {
 			return;
 		}
 
@@ -795,6 +843,7 @@
 			fileItems[idx].file = data.file;
 			fileItems[idx].name = data.file.filename;
 			fileItems[idx].size = data.file.meta?.size || fileItems[idx].size;
+			fileItems[idx].meta = data.file.meta;
 			fileItems = fileItems; // Trigger reactivity
 			console.log('OneDrive file completed:', data.file.filename);
 		} else {
@@ -808,7 +857,8 @@
 				size: data.file.meta?.size || 0,
 				status: 'uploaded',
 				error: '',
-				itemId: data.file.id
+				itemId: data.file.id,
+				meta: data.file.meta
 			};
 			fileItems = [newFileItem, ...(fileItems ?? [])];
 			fileItemsTotal = (fileItemsTotal ?? 0) + 1;
@@ -844,27 +894,50 @@
 			failed_files: data.failed_files
 		};
 
+		// Handle access revoked
+		if (data.status === 'access_revoked') {
+			toast.warning(data.error || $i18n.t('Access to a OneDrive source has been revoked'));
+		}
+
+		// Handle file limit exceeded
+		if (data.status === 'file_limit_exceeded') {
+			toast.error(data.error || $i18n.t('File limit exceeded'));
+			isSyncingOneDrive = false;
+			_syncRefreshDone = true;
+			await init();
+			return;
+		}
+
 		// Handle completion states
 		if (data.status === 'completed' || data.status === 'completed_with_errors') {
 			const count = data.files_processed ?? 0;
-			if (count > 0) {
-				if (data.files_failed && data.files_failed > 0) {
-					const failedDetails = data.failed_files
-						? formatFailedFilesMessage(data.failed_files)
-						: '';
-					toast.warning(
-						$i18n.t('Synced {{count}} files from OneDrive ({{failed}} failed)', {
-							count,
-							failed: data.files_failed
-						}) + failedDetails
-					);
-				} else {
-					toast.success($i18n.t('Synced {{count}} files from OneDrive', { count }));
-				}
+			const failed = data.files_failed ?? 0;
+			if (count > 0 && failed > 0) {
+				const failedDetails = data.failed_files
+					? formatFailedFilesMessage(data.failed_files)
+					: '';
+				toast.warning(
+					$i18n.t('Synced {{count}} files from OneDrive ({{failed}} failed)', {
+						count,
+						failed
+					}) + failedDetails
+				);
+			} else if (count > 0) {
+				toast.success($i18n.t('Synced {{count}} files from OneDrive', { count }));
+			} else if (failed > 0) {
+				const failedDetails = data.failed_files
+					? formatFailedFilesMessage(data.failed_files)
+					: '';
+				toast.error(
+					$i18n.t('OneDrive sync failed: all {{failed}} files failed to process', {
+						failed
+					}) + failedDetails
+				);
 			} else {
 				toast.success($i18n.t('OneDrive sync completed - no changes'));
 			}
 			isSyncingOneDrive = false;
+			_syncRefreshDone = true;
 			// Refresh knowledge metadata to update last_sync_at timestamp
 			const res = await getKnowledgeById(localStorage.token, id);
 			if (res) {
@@ -877,6 +950,8 @@
 		} else if (data.status === 'cancelled') {
 			toast.info($i18n.t('OneDrive sync cancelled'));
 			isSyncingOneDrive = false;
+			isCancellingSync = false;
+			_syncRefreshDone = true;
 			// Refresh knowledge metadata to update last_sync_at timestamp
 			const res = await getKnowledgeById(localStorage.token, id);
 			if (res) {
@@ -884,6 +959,59 @@
 			}
 			await init(); // Refresh file list
 		}
+	};
+
+	const authorizeBackgroundSync = async () => {
+		const authUrl = `${WEBUI_API_BASE_URL}/onedrive/auth/initiate?knowledge_id=${knowledge.id}`;
+
+		// Open popup
+		const popup = window.open(
+			authUrl,
+			'onedrive_auth',
+			'width=600,height=700,scrollbars=yes'
+		);
+
+		let messageReceived = false;
+
+		// Listen for postMessage from callback
+		const handleMessage = (event: MessageEvent) => {
+			if (event.data?.type !== 'onedrive_auth_callback') return;
+
+			messageReceived = true;
+			window.removeEventListener('message', handleMessage);
+
+			if (event.data.success) {
+				backgroundSyncAuthorized = true;
+				backgroundSyncNeedsReauth = false;
+				toast.success($i18n.t('Background sync authorized'));
+			} else {
+				toast.error($i18n.t('Authorization failed: {{error}}', { error: event.data.error }));
+			}
+		};
+
+		window.addEventListener('message', handleMessage);
+
+		// When popup closes, check token status as fallback (postMessage may fail due to origin mismatch)
+		const checkClosed = setInterval(async () => {
+			if (popup?.closed) {
+				clearInterval(checkClosed);
+				window.removeEventListener('message', handleMessage);
+
+				if (!messageReceived) {
+					try {
+						const status = await getTokenStatus(localStorage.token, knowledge.id);
+						if (status.has_token && !status.is_expired) {
+							backgroundSyncAuthorized = true;
+							backgroundSyncNeedsReauth = false;
+							toast.success($i18n.t('Background sync authorized'));
+						}
+					} catch (e) {
+						console.warn('Failed to check background sync token status:', e);
+						toast.error($i18n.t('Failed to check background sync status'));
+					}
+				}
+			}
+		}, 500);
 	};
 
 	const addFileHandler = async (fileId) => {
@@ -904,23 +1032,51 @@
 		}
 	};
 
-	const deleteFileHandler = async (fileId) => {
+	const removeSourceHandler = async (itemId: string, sourceName: string) => {
 		try {
-			console.log('Starting file deletion process for:', fileId);
+			const result = await removeSource(localStorage.token, knowledge.id, itemId);
+			toast.success($i18n.t('Source "{{name}}" removed. {{count}} file(s) cleaned up.', {
+				name: result.source_name,
+				count: result.files_removed
+			}));
+			// Refresh knowledge metadata and file list
+			const res = await getKnowledgeById(localStorage.token, id);
+			if (res) {
+				knowledge = res;
+			}
+			await init();
+		} catch (e) {
+			console.error('Error removing source:', e);
+			toast.error($i18n.t('Failed to remove source: {{error}}', {
+				error: e instanceof Error ? e.message : String(e)
+			}));
+		}
+	};
 
-			// Remove from knowledge base only
+	const deleteFileHandler = async (fileId) => {
+		const previousItems = fileItems;
+		const previousTotal = fileItemsTotal;
+		fileItems = (fileItems ?? []).filter((file) => file.id !== fileId);
+		fileItemsTotal = Math.max(0, (fileItemsTotal ?? 1) - 1);
+
+		try {
 			const res = await removeFileFromKnowledgeById(localStorage.token, id, fileId);
-			console.log('Knowledge base updated:', res);
-
 			if (res) {
 				toast.success($i18n.t('File removed successfully.'));
-				await init();
+				await getItemsPage();
+			} else {
+				fileItems = previousItems;
+				fileItemsTotal = previousTotal;
 			}
 		} catch (e) {
 			console.error('Error in deleteFileHandler:', e);
+			fileItems = previousItems;
+			fileItemsTotal = previousTotal;
 			toast.error(`${e}`);
 		}
 	};
+
+	let _syncRefreshDone = false;
 
 	let debounceTimeout = null;
 	let mediaQuery;
@@ -928,7 +1084,12 @@
 	let dragged = false;
 	let isSaving = false;
 	let isSyncingOneDrive = false;
+	let isCancellingSync = false;
 	let oneDriveSyncStatus: SyncStatusResponse | null = null;
+	let backgroundSyncAuthorized = false;
+	let backgroundSyncNeedsReauth = false;
+
+	$: isSyncBusy = isSyncingOneDrive || isCancellingSync;
 
 	const updateFileContentHandler = async () => {
 		if (isSaving) {
@@ -955,7 +1116,7 @@
 				selectedFile = null;
 				selectedFileContent = '';
 
-				await init();
+				await getItemsPage();
 			}
 		} finally {
 			isSaving = false;
@@ -1110,6 +1271,35 @@
 		if (res) {
 			knowledge = res;
 			knowledgeId = knowledge?.id;
+
+			// Check background sync token status for OneDrive KBs
+			if (knowledge?.type === 'onedrive') {
+				try {
+					const status = await getTokenStatus(localStorage.token, knowledge.id);
+					backgroundSyncAuthorized = status.has_token && !status.is_expired;
+					backgroundSyncNeedsReauth = status.needs_reauth ?? false;
+				} catch (e) {
+					console.warn('Failed to check background sync token status:', e);
+					toast.error($i18n.t('Failed to check background sync status'));
+				}
+			}
+
+			// Resume sync UI if a sync is already in progress
+			if (knowledge?.meta?.onedrive_sync?.status === 'syncing') {
+				isSyncingOneDrive = true;
+				_syncRefreshDone = false;
+				pollOneDriveSyncStatus();
+			}
+
+			// Auto-start OneDrive sync if directed from creation flow
+			if ($page.url.searchParams.get('start_onedrive_sync') === 'true' && knowledge) {
+				const url = new URL(window.location.href);
+				url.searchParams.delete('start_onedrive_sync');
+				history.replaceState({}, '', url.toString());
+
+				await tick();
+				oneDriveSyncHandler();
+			}
 		} else {
 			goto('/workspace/knowledge');
 		}
@@ -1158,15 +1348,6 @@
 </script>
 
 <FilesOverlay show={dragged} />
-<SyncConfirmDialog
-	bind:show={showSyncConfirmModal}
-	message={$i18n.t(
-		'This will reset the knowledge base and sync all files. Do you wish to continue?'
-	)}
-	on:confirm={() => {
-		syncDirectoryHandler();
-	}}
-/>
 
 <SyncConfirmDialog
 	bind:show={showCancelSyncConfirmModal}
@@ -1218,18 +1399,30 @@
 
 <div class="flex flex-col w-full h-full min-h-full" id="collection-container">
 	{#if id && knowledge}
-		<AccessControlModal
-			bind:show={showAccessControlModal}
-			bind:accessControl={knowledge.access_control}
-			share={$user?.permissions?.sharing?.knowledge || $user?.role === 'admin'}
-			sharePublic={$user?.permissions?.sharing?.public_knowledge || $user?.role === 'admin'}
-			onChange={() => {
-				changeDebounceHandler();
-			}}
-			accessRoles={['read', 'write']}
-		/>
+		{#if knowledge?.type === 'local' || !knowledge?.type}
+			<AccessControlModal
+				bind:show={showAccessControlModal}
+				bind:accessControl={knowledge.access_control}
+				share={$user?.permissions?.sharing?.knowledge || $user?.role === 'admin'}
+				sharePublic={$user?.permissions?.sharing?.public_knowledge || $user?.role === 'admin'}
+				onChange={() => {
+					changeDebounceHandler();
+				}}
+				accessRoles={['read', 'write']}
+			/>
+		{/if}
 		<div class="w-full px-2">
 			<div class=" flex w-full">
+				<div class="shrink-0 self-start mt-1.5 mr-1">
+					<button
+						class="p-1 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 transition"
+						on:click={() => {
+							goto('/workspace/knowledge');
+						}}
+					>
+						<ChevronLeft className="size-4" strokeWidth="2.5" />
+					</button>
+				</div>
 				<div class="flex-1">
 					<div class="flex items-center justify-between w-full">
 						<div class="w-full flex justify-between items-center">
@@ -1245,7 +1438,62 @@
 							/>
 
 							<div class="shrink-0 mr-2.5 flex items-center gap-2">
-								{#if knowledge?.meta?.onedrive_sync?.sources?.length && !isSyncingOneDrive && knowledge?.user_id === $user?.id}
+								{#if knowledge?.type === 'onedrive'}
+									<Badge type="info" content={$i18n.t('OneDrive')} />
+								{:else}
+									<Badge type="muted" content={$i18n.t('Local')} />
+								{/if}
+								{#if knowledge?.type === 'onedrive' && $config?.onedrive?.has_client_secret}
+									{#if backgroundSyncNeedsReauth}
+										<button
+											class="text-xs text-red-500 hover:text-red-600 flex items-center gap-1"
+											on:click={authorizeBackgroundSync}
+										>
+											<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" class="size-3.5">
+												<path fill-rule="evenodd" d="M6.701 2.25c.577-1 2.02-1 2.598 0l5.196 9a1.5 1.5 0 0 1-1.299 2.25H2.804a1.5 1.5 0 0 1-1.3-2.25l5.197-9ZM8 4a.75.75 0 0 1 .75.75v3a.75.75 0 0 1-1.5 0v-3A.75.75 0 0 1 8 4Zm0 8a1 1 0 1 0 0-2 1 1 0 0 0 0 2Z" clip-rule="evenodd" />
+											</svg>
+											{$i18n.t('Re-authorize background sync')}
+										</button>
+									{:else if backgroundSyncAuthorized}
+										<span class="text-xs text-green-600 flex items-center gap-1">
+											<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" class="size-3.5">
+												<path fill-rule="evenodd" d="M12.416 3.376a.75.75 0 0 1 .208 1.04l-5 7.5a.75.75 0 0 1-1.154.114l-3-3a.75.75 0 0 1 1.06-1.06l2.353 2.353 4.493-6.74a.75.75 0 0 1 1.04-.207Z" clip-rule="evenodd" />
+											</svg>
+											{$i18n.t('Background sync enabled')}
+										</span>
+									{:else if knowledge?.meta?.onedrive_sync?.sources?.length}
+										<button
+											class="text-xs text-blue-500 hover:text-blue-600 flex items-center gap-1"
+											on:click={authorizeBackgroundSync}
+										>
+											<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" class="size-3.5">
+												<path fill-rule="evenodd" d="M8 1a3.5 3.5 0 0 0-3.5 3.5V7A1.5 1.5 0 0 0 3 8.5v5A1.5 1.5 0 0 0 4.5 15h7a1.5 1.5 0 0 0 1.5-1.5v-5A1.5 1.5 0 0 0 11.5 7V4.5A3.5 3.5 0 0 0 8 1Zm2 6V4.5a2 2 0 1 0-4 0V7h4Z" clip-rule="evenodd" />
+											</svg>
+											{$i18n.t('Enable background sync')}
+										</button>
+									{/if}
+								{/if}
+								{#if isCancellingSync}
+									<Tooltip content={$i18n.t('Click to cancel sync')}>
+										<button
+											class="p-1 rounded-lg text-gray-400 cursor-not-allowed"
+											disabled
+										>
+											<Spinner className="size-3.5" />
+										</button>
+									</Tooltip>
+								{:else if isSyncingOneDrive}
+									<Tooltip content={$i18n.t('Click to cancel sync')}>
+										<button
+											class="p-1 rounded-lg hover:bg-red-100 dark:hover:bg-red-900/30 text-blue-500 hover:text-red-500 transition"
+											on:click={() => { showCancelSyncConfirmModal = true; }}
+										>
+											<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" class="size-4">
+												<path d="M4.5 2A2.5 2.5 0 0 0 2 4.5v7A2.5 2.5 0 0 0 4.5 14h7a2.5 2.5 0 0 0 2.5-2.5v-7A2.5 2.5 0 0 0 11.5 2h-7Z" />
+											</svg>
+										</button>
+									</Tooltip>
+								{:else if knowledge?.meta?.onedrive_sync?.sources?.length && knowledge?.user_id === $user?.id}
 									<Tooltip content={knowledge?.meta?.onedrive_sync?.last_sync_at
 										? $i18n.t('Last synced: {{date}}', { date: dayjs(knowledge.meta.onedrive_sync.last_sync_at * 1000).fromNow() })
 										: $i18n.t('Sync OneDrive files')}>
@@ -1257,47 +1505,35 @@
 										</button>
 									</Tooltip>
 								{/if}
-								{#if oneDriveSyncStatus?.status === 'syncing' || isSyncingOneDrive}
-									<Tooltip content={$i18n.t('Click to cancel sync')}>
-										<button
-											class="text-xs text-blue-500 flex items-center gap-1 hover:text-red-500 transition-colors cursor-pointer"
-											on:click={() => {
-												showCancelSyncConfirmModal = true;
-											}}
-										>
-											<div class="relative">
-												<Spinner className="size-3" />
-												<svg
-													class="absolute -top-0.5 -right-0.5 size-2 text-red-500 opacity-0 hover:opacity-100"
-													viewBox="0 0 24 24"
-													fill="currentColor"
-												>
-													<rect x="4" y="4" width="16" height="16" rx="2" />
-												</svg>
-											</div>
-											{#if oneDriveSyncStatus?.progress_total}
-												{$i18n.t('Syncing: {{current}}/{{total}}', {
-													current: oneDriveSyncStatus.progress_current || 0,
-													total: oneDriveSyncStatus.progress_total
-												})}
-											{:else}
-												{$i18n.t('Starting sync...')}
-											{/if}
-										</button>
+								{#if isSyncBusy && oneDriveSyncStatus?.progress_total}
+									<Tooltip content={$i18n.t('Sync progress')}>
+										<div class="text-xs text-blue-500 font-medium">
+											{fileItemsTotal ?? 0} / {oneDriveSyncStatus.progress_total}
+										</div>
 									</Tooltip>
-								{/if}
-								{#if fileItemsTotal}
-									<div class="text-xs text-gray-500">
-										<!-- {$i18n.t('{{COUNT}} files')} -->
-										{$i18n.t('{{COUNT}} files', {
-											COUNT: fileItemsTotal
-										})}
+								{:else if isSyncBusy}
+									<div class="text-xs text-blue-500 font-medium flex items-center gap-1">
+										<Spinner className="size-3" />
 									</div>
+								{:else if fileItemsTotal}
+									{#if knowledge?.type !== 'local' && knowledge?.type}
+										<Tooltip content={$i18n.t('Maximum 250 files per external knowledge base')}>
+											<div class="text-xs text-gray-500">
+												{fileItemsTotal} / 250 {$i18n.t('files')}
+											</div>
+										</Tooltip>
+									{:else}
+										<div class="text-xs text-gray-500">
+											{$i18n.t('{{COUNT}} files', {
+												COUNT: fileItemsTotal
+											})}
+										</div>
+									{/if}
 								{/if}
 							</div>
 						</div>
 
-						{#if knowledge?.write_access}
+						{#if knowledge?.write_access && (knowledge?.type === 'local' || !knowledge?.type)}
 							<div class="self-center shrink-0">
 								<button
 									class="bg-gray-50 hover:bg-gray-100 text-black dark:bg-gray-850 dark:hover:bg-gray-800 dark:text-white transition px-2 py-1 rounded-full flex gap-1 items-center"
@@ -1312,6 +1548,11 @@
 										{$i18n.t('Access')}
 									</div>
 								</button>
+							</div>
+						{:else if knowledge?.write_access}
+							<div class="text-xs shrink-0 text-gray-500 flex items-center gap-1">
+								<LockClosed strokeWidth="2.5" className="size-3" />
+								{$i18n.t('Private')}
 							</div>
 						{:else}
 							<div class="text-xs shrink-0 text-gray-500">
@@ -1337,9 +1578,9 @@
 		</div>
 
 		<div
-			class="mt-2 mb-2.5 py-2 -mx-0 bg-white dark:bg-gray-900 rounded-3xl border border-gray-100/30 dark:border-gray-850/30 flex-1"
+			class="mt-2 mb-2.5 py-2 -mx-0 bg-white dark:bg-gray-900 rounded-3xl border border-gray-100/30 dark:border-gray-850/30 flex-1 flex flex-col overflow-hidden"
 		>
-			<div class="px-3.5 flex flex-1 items-center w-full space-x-2 py-0.5 pb-2">
+			<div class="px-3.5 flex shrink-0 items-center w-full space-x-2 py-0.5 pb-2">
 				<div class="flex flex-1 items-center">
 					<div class=" self-center ml-1 mr-3">
 						<Search className="size-3.5" />
@@ -1355,26 +1596,42 @@
 
 					{#if knowledge?.write_access}
 						<div>
-							<AddContentMenu
-								onUpload={(data) => {
-									if (data.type === 'directory') {
-										uploadDirectoryHandler();
-									} else if (data.type === 'web') {
-										showAddWebpageModal = true;
-									} else if (data.type === 'text') {
-										showAddTextContentModal = true;
-									} else {
-										document.getElementById('files-input').click();
-									}
-								}}
-								onSync={() => {
-									showSyncConfirmModal = true;
-								}}
-								onOneDriveSync={$config?.features?.enable_onedrive_integration &&
-								$config?.features?.enable_onedrive_sync
-									? oneDriveSyncHandler
-									: null}
-							/>
+							{#if knowledge?.type === 'onedrive'}
+								<Tooltip content={$i18n.t('Sync from OneDrive')}>
+									<button
+										class="p-1.5 rounded-xl hover:bg-gray-100 dark:bg-gray-850 dark:hover:bg-gray-800 transition font-medium text-sm flex items-center space-x-1 disabled:opacity-40 disabled:cursor-not-allowed"
+										disabled={isSyncBusy}
+										on:click={() => {
+											oneDriveSyncHandler();
+										}}
+									>
+										<svg
+											xmlns="http://www.w3.org/2000/svg"
+											viewBox="0 0 16 16"
+											fill="currentColor"
+											class="w-4 h-4"
+										>
+											<path
+												d="M8.75 3.75a.75.75 0 0 0-1.5 0v3.5h-3.5a.75.75 0 0 0 0 1.5h3.5v3.5a.75.75 0 0 0 1.5 0v-3.5h3.5a.75.75 0 0 0 0-1.5h-3.5v-3.5Z"
+											/>
+										</svg>
+									</button>
+								</Tooltip>
+							{:else}
+								<AddContentMenu
+									onUpload={(data) => {
+										if (data.type === 'directory') {
+											uploadDirectoryHandler();
+										} else if (data.type === 'web') {
+											showAddWebpageModal = true;
+										} else if (data.type === 'text') {
+											showAddTextContentModal = true;
+										} else {
+											document.getElementById('files-input').click();
+										}
+									}}
+								/>
+							{/if}
 						</div>
 					{/if}
 				</div>
@@ -1443,40 +1700,98 @@
 							<div class="w-full h-full flex flex-col min-h-full">
 								{#if fileItems.length > 0}
 									<div class=" flex overflow-y-auto h-full w-full scrollbar-hidden text-xs">
-										<Files
-											files={fileItems}
-											{knowledge}
-											{selectedFileId}
-											onClick={(fileId) => {
-												selectedFileId = fileId;
+										{#if knowledge?.type === 'onedrive' && knowledge?.meta?.onedrive_sync?.sources?.length}
+											<SourceGroupedFiles
+												sources={knowledge.meta.onedrive_sync.sources}
+												files={fileItems}
+												{knowledge}
+												{selectedFileId}
+												isSyncing={isSyncingOneDrive}
+												onClick={(fileId) => {
+													selectedFileId = fileId;
 
-												if (fileItems) {
-													const file = fileItems.find((file) => file.id === selectedFileId);
-													if (file) {
-														fileSelectHandler(file);
-													} else {
-														selectedFile = null;
+													if (fileItems) {
+														const file = fileItems.find((file) => file.id === selectedFileId);
+														if (file) {
+															fileSelectHandler(file);
+														} else {
+															selectedFile = null;
+														}
 													}
-												}
-											}}
-											onDelete={(fileId) => {
-												selectedFileId = null;
-												selectedFile = null;
+												}}
+												onRemoveSource={(itemId, sourceName) => {
+													selectedFileId = null;
+													selectedFile = null;
+													removeSourceHandler(itemId, sourceName);
+												}}
+												onDelete={(fileId) => {
+													selectedFileId = null;
+													selectedFile = null;
+													deleteFileHandler(fileId);
+												}}
+											/>
+										{:else}
+											<Files
+												files={fileItems}
+												{knowledge}
+												{selectedFileId}
+												onClick={(fileId) => {
+													selectedFileId = fileId;
 
-												deleteFileHandler(fileId);
-											}}
-										/>
+													if (fileItems) {
+														const file = fileItems.find((file) => file.id === selectedFileId);
+														if (file) {
+															fileSelectHandler(file);
+														} else {
+															selectedFile = null;
+														}
+													}
+												}}
+												onDelete={(fileId) => {
+													selectedFileId = null;
+													selectedFile = null;
+
+													deleteFileHandler(fileId);
+												}}
+											/>
+										{/if}
 									</div>
 
-									{#if fileItemsTotal > 30}
+									{#if knowledge?.type !== 'onedrive' && fileItemsTotal > 30}
 										<Pagination bind:page={currentPage} count={fileItemsTotal} perPage={30} />
 									{/if}
 								{:else}
-									<div class="my-3 flex flex-col justify-center text-center text-gray-500 text-xs">
-										<div>
-											{$i18n.t('No content found')}
+									{#if isSyncBusy}
+										<div class="my-auto flex flex-col items-center justify-center text-center gap-3 py-8">
+											<Spinner className="size-5" />
+											<div class="text-xs text-gray-500">
+												{$i18n.t('Starting sync...')}
+											</div>
 										</div>
-									</div>
+									{:else if knowledge?.write_access && !query && !viewOption}
+										<EmptyStateCards
+											knowledgeType={knowledge?.type || 'local'}
+											onAction={(type) => {
+												if (type === 'onedrive') {
+													oneDriveSyncHandler();
+												} else if (type === 'directory') {
+													uploadDirectoryHandler();
+												} else if (type === 'web') {
+													showAddWebpageModal = true;
+												} else if (type === 'text') {
+													showAddTextContentModal = true;
+												} else {
+													document.getElementById('files-input')?.click();
+												}
+											}}
+										/>
+									{:else}
+										<div class="my-3 flex flex-col justify-center text-center text-gray-500 text-xs">
+											<div>
+												{$i18n.t('No content found')}
+											</div>
+										</div>
+									{/if}
 								{/if}
 							</div>
 						</div>

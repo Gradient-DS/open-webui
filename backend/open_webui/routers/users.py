@@ -4,14 +4,16 @@ import base64
 import io
 
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import Response, StreamingResponse, FileResponse
+from starlette.concurrency import run_in_threadpool
 from pydantic import BaseModel, ConfigDict
 
 
 from open_webui.models.auths import Auths
 from open_webui.models.oauth_sessions import OAuthSessions
 
+from open_webui.services.deletion import DeletionService
 from open_webui.models.groups import Groups
 from open_webui.models.chats import Chats
 from open_webui.models.users import (
@@ -577,7 +579,21 @@ async def update_user_by_id(
 
 
 @router.delete("/{user_id}", response_model=bool)
-async def delete_user_by_id(user_id: str, user=Depends(get_admin_user)):
+async def delete_user_by_id(
+    request: Request,
+    user_id: str,
+    archive_before_delete: bool = Query(False),
+    archive_reason: Optional[str] = Query(None),
+    archive_retention_days: Optional[int] = Query(None),
+    user=Depends(get_admin_user),
+):
+    """
+    Delete a user and optionally archive their data first.
+
+    - archive_before_delete: If true, creates archive before deletion
+    - archive_reason: Required if archive_before_delete is true
+    - archive_retention_days: Custom retention period (uses default if not specified)
+    """
     # Prevent deletion of the primary admin user
     try:
         first_user = Users.get_first_user()
@@ -594,9 +610,30 @@ async def delete_user_by_id(user_id: str, user=Depends(get_admin_user)):
         )
 
     if user.id != user_id:
-        result = Auths.delete_auth_by_id(user_id)
+        # Archive if requested
+        if archive_before_delete:
+            from open_webui.services.archival import ArchiveService
 
-        if result:
+            if not archive_reason:
+                archive_reason = "Admin deletion"
+
+            if request.app.state.config.ENABLE_USER_ARCHIVAL:
+                retention = archive_retention_days or request.app.state.config.DEFAULT_ARCHIVE_RETENTION_DAYS
+                archive_result = ArchiveService.create_archive(
+                    user_id=user_id,
+                    archived_by=user.id,
+                    reason=archive_reason,
+                    retention_days=retention,
+                )
+                if not archive_result.success:
+                    log.warning(f"Failed to archive user before deletion: {archive_result.errors}")
+
+        # Proceed with deletion (run in thread pool to avoid blocking the event loop)
+        report = await run_in_threadpool(DeletionService.delete_user, user_id)
+        if report.has_errors:
+            log.warning(f"User deletion had errors: {report.errors}")
+
+        if report.total_db_records > 0:
             return True
 
         raise HTTPException(

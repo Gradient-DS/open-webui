@@ -390,5 +390,15 @@ class NoteTable:
             db.commit()
             return True
 
+    def delete_notes_by_user_id(self, user_id: str) -> bool:
+        """Delete all notes for a user."""
+        try:
+            with get_db() as db:
+                db.query(Note).filter_by(user_id=user_id).delete()
+                db.commit()
+                return True
+        except Exception:
+            return False
+
 
 Notes = NoteTable()

@@ -2,6 +2,7 @@
 	import { toast } from 'svelte-sonner';
 
 	import { goto } from '$app/navigation';
+	import { page } from '$app/stores';
 	import { getContext } from 'svelte';
 	const i18n = getContext('i18n');
 
@@ -12,6 +13,8 @@
 	import Spinner from '$lib/components/common/Spinner.svelte';
 
 	let loading = false;
+
+	let type = $page.url.searchParams.get('type') || 'local';
 
 	let name = '';
 	let description = '';
@@ -32,14 +35,19 @@
 			localStorage.token,
 			name,
 			description,
-			accessControl
+			type === 'local' ? accessControl : {},
+			type
 		).catch((e) => {
 			toast.error(`${e}`);
 		});
 
 		if (res) {
 			toast.success($i18n.t('Knowledge created successfully.'));
-			goto(`/workspace/knowledge/${res.id}`);
+			if (type === 'onedrive') {
+				goto(`/workspace/knowledge/${res.id}?start_onedrive_sync=true`);
+			} else {
+				goto(`/workspace/knowledge/${res.id}`);
+			}
 		}
 
 		loading = false;
@@ -112,14 +120,16 @@
 			</div>
 		</div>
 
-		<div class="mt-2">
-			<AccessControl
-				bind:accessControl
-				accessRoles={['read', 'write']}
-				share={$user?.permissions?.sharing?.knowledge || $user?.role === 'admin'}
-				sharePublic={$user?.permissions?.sharing?.public_knowledge || $user?.role === 'admin'}
-			/>
-		</div>
+		{#if type === 'local'}
+			<div class="mt-2">
+				<AccessControl
+					bind:accessControl
+					accessRoles={['read', 'write']}
+					share={$user?.permissions?.sharing?.knowledge || $user?.role === 'admin'}
+					sharePublic={$user?.permissions?.sharing?.public_knowledge || $user?.role === 'admin'}
+				/>
+			</div>
+		{/if}
 
 		<div class="flex justify-end mt-2">
 			<div>

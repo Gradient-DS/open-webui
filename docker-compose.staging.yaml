@@ -4,7 +4,7 @@
 
 services:
   open-webui:
-    image: ghcr.io/gradient-ds/open-webui:${WEBUI_DOCKER_TAG:-main}
+    image: ghcr.io/gradient-ds/open-webui:${WEBUI_DOCKER_TAG:-dev}
     container_name: staging-webui
     volumes:
       - staging-data:/app/backend/data

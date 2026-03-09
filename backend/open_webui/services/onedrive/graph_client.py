@@ -3,7 +3,7 @@
 import httpx
 import asyncio
 import logging
-from typing import Optional, Dict, Any, List, Tuple
+from typing import Optional, Callable, Awaitable, Dict, Any, List, Tuple
 
 log = logging.getLogger(__name__)
 
@@ -13,8 +13,13 @@ GRAPH_BASE_URL = "https://graph.microsoft.com/v1.0"
 class GraphClient:
     """Async client for Microsoft Graph API with retry logic."""
 
-    def __init__(self, access_token: str):
+    def __init__(
+        self,
+        access_token: str,
+        token_provider: Optional[Callable[[], Awaitable[Optional[str]]]] = None,
+    ):
         self._access_token = access_token
+        self._token_provider = token_provider
         self._client: Optional[httpx.AsyncClient] = None
 
     async def _get_client(self) -> httpx.AsyncClient:
@@ -38,42 +43,65 @@ class GraphClient:
         """Make authenticated request with retry logic.
 
         Handles:
+        - 401: Token refresh via token_provider callback (once)
+        - 410: Delta token expired (returned to caller for handling)
         - 429: Respects Retry-After header
         - 5xx: Exponential backoff
         """
         client = await self._get_client()
+        last_exception = None
+        token_refreshed = False
 
         for attempt in range(max_retries):
             try:
-                headers = {"Authorization": f"Bearer {self._access_token}"}
                 response = await client.request(
                     method,
                     url,
-                    headers=headers,
                     params=params,
+                    headers={"Authorization": f"Bearer {self._access_token}"},
                     follow_redirects=follow_redirects,
                 )
 
+                if response.status_code == 401 and not token_refreshed and self._token_provider:
+                    # Token expired — try refresh once
+                    log.info("Received 401, attempting token refresh")
+                    try:
+                        new_token = await self._token_provider()
+                        if new_token:
+                            self._access_token = new_token
+                            token_refreshed = True
+                            continue  # Retry with new token
+                    except Exception as e:
+                        log.warning("Token refresh failed: %s", e)
+                    return response  # Return 401 if refresh failed or already tried
+
+                if response.status_code == 410:
+                    # Delta token expired — caller should reset delta link and retry
+                    log.info("Received 410 Gone — delta token expired")
+                    return response  # Let caller handle by clearing delta_link
+
                 if response.status_code == 429:
                     retry_after = int(response.headers.get("Retry-After", "60"))
-                    log.warning(f"Rate limited, waiting {retry_after} seconds")
+                    log.warning("Rate limited, waiting %d seconds", retry_after)
                     await asyncio.sleep(retry_after)
                     continue
 
                 if response.status_code >= 500:
                     wait_time = 2**attempt
-                    log.warning(f"Server error {response.status_code}, waiting {wait_time}s")
+                    log.warning("Server error %d, retrying in %d seconds", response.status_code, wait_time)
                     await asyncio.sleep(wait_time)
                     continue
 
                 return response
 
             except httpx.HTTPStatusError as e:
-                if attempt == max_retries - 1:
+                last_exception = e
+                if attempt < max_retries - 1:
+                    await asyncio.sleep(2**attempt)
+                else:
                     raise
-                log.warning(f"HTTP error on attempt {attempt + 1}: {e}")
 
-        raise RuntimeError(f"Failed after {max_retries} retries")
+        raise RuntimeError(f"Failed after {max_retries} retries: {last_exception}")
 
     async def _get_json(
         self,

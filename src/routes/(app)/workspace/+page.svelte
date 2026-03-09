@@ -12,11 +12,6 @@
 		) {
 			goto('/workspace/models');
 		} else if (
-			isFeatureEnabled('knowledge') &&
-			($user?.role === 'admin' || $user?.permissions?.workspace?.knowledge)
-		) {
-			goto('/workspace/knowledge');
-		} else if (
 			isFeatureEnabled('prompts') &&
 			($user?.role === 'admin' || $user?.permissions?.workspace?.prompts)
 		) {

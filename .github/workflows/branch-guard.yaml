@@ -1,0 +1,30 @@
+name: Branch promotion guard
+
+on:
+  pull_request:
+    branches:
+      - main
+      - test
+
+jobs:
+  check-source-branch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Validate PR source branch
+        run: |
+          TARGET="${{ github.base_ref }}"
+          SOURCE="${{ github.head_ref }}"
+
+          echo "PR: ${SOURCE} → ${TARGET}"
+
+          if [ "$TARGET" = "main" ] && [ "$SOURCE" != "test" ]; then
+            echo "::error::PRs to main must come from the test branch, got '${SOURCE}'"
+            exit 1
+          fi
+
+          if [ "$TARGET" = "test" ] && [ "$SOURCE" != "dev" ]; then
+            echo "::error::PRs to test must come from the dev branch, got '${SOURCE}'"
+            exit 1
+          fi
+
+          echo "✓ Valid promotion: ${SOURCE} → ${TARGET}"

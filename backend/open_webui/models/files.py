@@ -293,6 +293,20 @@ class FilesTable:
             except Exception:
                 return False
 
+    def delete_files_by_ids(self, ids: list[str]) -> bool:
+        """Batch delete files by a list of IDs."""
+        if not ids:
+            return True
+        with get_db() as db:
+            try:
+                db.query(File).filter(File.id.in_(ids)).delete(
+                    synchronize_session=False
+                )
+                db.commit()
+                return True
+            except Exception:
+                return False
+
     def delete_all_files(self) -> bool:
         with get_db() as db:
             try:

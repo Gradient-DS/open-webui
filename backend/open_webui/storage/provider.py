@@ -57,6 +57,18 @@ class StorageProvider(ABC):
     def delete_file(self, file_path: str) -> None:
         pass
 
+    def delete_files(self, file_paths: list[str]) -> int:
+        """Batch delete files. Returns count of successfully deleted files.
+        Default implementation calls delete_file in a loop."""
+        deleted = 0
+        for path in file_paths:
+            try:
+                self.delete_file(path)
+                deleted += 1
+            except Exception as e:
+                log.warning(f"Failed to delete {path}: {e}")
+        return deleted
+
 
 class LocalStorageProvider(StorageProvider):
     @staticmethod
@@ -194,6 +206,39 @@ class S3StorageProvider(StorageProvider):
         # Always delete from local storage
         LocalStorageProvider.delete_file(file_path)
 
+    def delete_files(self, file_paths: list[str]) -> int:
+        """Batch delete files from S3 using delete_objects (up to 1000 keys per call)."""
+        deleted = 0
+        s3_keys = []
+        for path in file_paths:
+            try:
+                s3_keys.append({"Key": self._extract_s3_key(path)})
+            except Exception:
+                continue
+
+        for i in range(0, len(s3_keys), 1000):
+            batch = s3_keys[i : i + 1000]
+            try:
+                resp = self.s3_client.delete_objects(
+                    Bucket=self.bucket_name,
+                    Delete={"Objects": batch, "Quiet": True},
+                )
+                deleted += len(batch) - len(resp.get("Errors", []))
+                for err in resp.get("Errors", []):
+                    log.warning(
+                        f"S3 batch delete error for {err['Key']}: {err['Message']}"
+                    )
+            except ClientError as e:
+                log.warning(f"S3 batch delete failed: {e}")
+
+        # Always clean up local copies
+        for path in file_paths:
+            try:
+                LocalStorageProvider.delete_file(path)
+            except Exception:
+                pass
+        return deleted
+
     def delete_all_files(self) -> None:
         """Handles deletion of all files from S3 storage."""
         try:
@@ -272,6 +317,32 @@ class GCSStorageProvider(StorageProvider):
         # Always delete from local storage
         LocalStorageProvider.delete_file(file_path)
 
+    def delete_files(self, file_paths: list[str]) -> int:
+        """Batch delete files from GCS using delete_blobs (up to 100 per batch)."""
+        deleted = 0
+        blob_names = []
+        for path in file_paths:
+            try:
+                blob_names.append(path.removeprefix("gs://").split("/")[1])
+            except Exception:
+                continue
+
+        for i in range(0, len(blob_names), 100):
+            batch = [self.bucket.blob(name) for name in blob_names[i : i + 100]]
+            try:
+                self.bucket.delete_blobs(batch, on_error=lambda blob: None)
+                deleted += len(batch)
+            except Exception as e:
+                log.warning(f"GCS batch delete failed: {e}")
+
+        # Always clean up local copies
+        for path in file_paths:
+            try:
+                LocalStorageProvider.delete_file(path)
+            except Exception:
+                pass
+        return deleted
+
     def delete_all_files(self) -> None:
         """Handles deletion of all files from GCS storage."""
         try:
@@ -343,6 +414,27 @@ class AzureStorageProvider(StorageProvider):
 
         # Always delete from local storage
         LocalStorageProvider.delete_file(file_path)
+
+    def delete_files(self, file_paths: list[str]) -> int:
+        """Batch delete files from Azure Blob Storage (up to 256 per batch)."""
+        deleted = 0
+        blob_names = [path.split("/")[-1] for path in file_paths]
+
+        for i in range(0, len(blob_names), 256):
+            batch = blob_names[i : i + 256]
+            try:
+                self.container_client.delete_blobs(*batch)
+                deleted += len(batch)
+            except Exception as e:
+                log.warning(f"Azure batch delete failed: {e}")
+
+        # Always clean up local copies
+        for path in file_paths:
+            try:
+                LocalStorageProvider.delete_file(path)
+            except Exception:
+                pass
+        return deleted
 
     def delete_all_files(self) -> None:
         """Handles deletion of all files from Azure Blob Storage."""

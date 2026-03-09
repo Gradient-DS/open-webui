@@ -903,5 +903,25 @@ class ChannelTable:
             db.commit()
             return True
 
+    def delete_channels_by_user_id(self, user_id: str) -> bool:
+        """Delete all channels owned by a user."""
+        try:
+            with get_db() as db:
+                db.query(Channel).filter_by(user_id=user_id).delete()
+                db.commit()
+                return True
+        except Exception:
+            return False
+
+    def delete_member_by_user_id(self, user_id: str) -> bool:
+        """Delete all channel memberships for a user."""
+        try:
+            with get_db() as db:
+                db.query(ChannelMember).filter_by(user_id=user_id).delete()
+                db.commit()
+                return True
+        except Exception:
+            return False
+
 
 Channels = ChannelTable()

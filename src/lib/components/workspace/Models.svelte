@@ -12,6 +12,7 @@
 	const i18n = getContext('i18n');
 
 	import { WEBUI_NAME, config, mobile, models as _models, settings, user } from '$lib/stores';
+	import { updateUserSettings } from '$lib/apis/users';
 	import { WEBUI_API_BASE_URL, WEBUI_BASE_URL } from '$lib/constants';
 	import {
 		createNewModel,
@@ -40,6 +41,8 @@
 	import XMark from '../icons/XMark.svelte';
 	import EyeSlash from '../icons/EyeSlash.svelte';
 	import Eye from '../icons/Eye.svelte';
+	import Pin from '../icons/Pin.svelte';
+	import PinSlash from '../icons/PinSlash.svelte';
 	import ViewSelector from './common/ViewSelector.svelte';
 	import TagSelector from './common/TagSelector.svelte';
 	import Pagination from '../common/Pagination.svelte';
@@ -190,6 +193,19 @@
 		);
 	};
 
+	const pinModelHandler = async (modelId) => {
+		let pinnedModels = $settings?.pinnedModels ?? [];
+
+		if (pinnedModels.includes(modelId)) {
+			pinnedModels = pinnedModels.filter((id) => id !== modelId);
+		} else {
+			pinnedModels = [...new Set([...pinnedModels, modelId])];
+		}
+
+		settings.set({ ...$settings, pinnedModels: pinnedModels });
+		await updateUserSettings(localStorage.token, { ui: $settings });
+	};
+
 	const copyLinkHandler = async (model) => {
 		const baseUrl = window.location.origin;
 		const res = await copyToClipboard(`${baseUrl}/?model=${encodeURIComponent(model.id)}`);
@@ -254,7 +270,7 @@
 
 <svelte:head>
 	<title>
-		{$i18n.t('Models')} • {$WEBUI_NAME}
+		{$i18n.t('Agents')} • {$WEBUI_NAME}
 	</title>
 </svelte:head>
 
@@ -328,7 +344,7 @@
 		<div class="flex justify-between items-center">
 			<div class="flex items-center md:self-center text-xl font-medium px-0.5 gap-2 shrink-0">
 				<div>
-					{$i18n.t('Models')}
+					{$i18n.t('Agents')}
 				</div>
 
 				<div class="text-lg font-medium text-gray-500 dark:text-gray-500">
@@ -492,6 +508,26 @@
 														<div class="flex justify-between items-center w-full">
 															<div class=""></div>
 															<div class="flex flex-row gap-0.5 items-center">
+																<Tooltip
+																	content={($settings?.pinnedModels ?? []).includes(model.id)
+																		? $i18n.t('Unpin from Sidebar')
+																		: $i18n.t('Pin to Sidebar')}
+																>
+																	<button
+																		class="self-center w-fit text-sm p-1.5 dark:text-white hover:bg-black/5 dark:hover:bg-white/5 rounded-xl"
+																		type="button"
+																		on:click={(e) => {
+																			e.stopPropagation();
+																			pinModelHandler(model.id);
+																		}}
+																	>
+																		{#if ($settings?.pinnedModels ?? []).includes(model.id)}
+																			<PinSlash className="size-4" />
+																		{:else}
+																			<Pin className="size-4" />
+																		{/if}
+																	</button>
+																</Tooltip>
 																{#if shiftKey}
 																	<Tooltip
 																		content={model?.meta?.hidden

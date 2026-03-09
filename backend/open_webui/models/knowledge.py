@@ -44,6 +44,7 @@ class Knowledge(Base):
 
     id = Column(Text, unique=True, primary_key=True)
     user_id = Column(Text)
+    type = Column(Text, nullable=False, server_default="local")
 
     name = Column(Text)
     description = Column(Text)
@@ -68,6 +69,7 @@ class Knowledge(Base):
 
     created_at = Column(BigInteger)
     updated_at = Column(BigInteger)
+    deleted_at = Column(BigInteger, nullable=True, index=True)
 
 
 class KnowledgeModel(BaseModel):
@@ -75,6 +77,7 @@ class KnowledgeModel(BaseModel):
 
     id: str
     user_id: str
+    type: str = "local"
 
     name: str
     description: str
@@ -85,6 +88,7 @@ class KnowledgeModel(BaseModel):
 
     created_at: int  # timestamp in epoch
     updated_at: int  # timestamp in epoch
+    deleted_at: Optional[int] = None
 
 
 class KnowledgeFile(Base):
@@ -138,11 +142,13 @@ class KnowledgeUserResponse(KnowledgeUserModel):
 class KnowledgeForm(BaseModel):
     name: str
     description: str
+    type: Optional[str] = None
     access_control: Optional[dict] = None
 
 
 class FileUserResponse(FileModelResponse):
     user: Optional[UserResponse] = None
+    added_at: Optional[int] = None
 
 
 class KnowledgeListResponse(BaseModel):
@@ -187,7 +193,10 @@ class KnowledgeTable:
     ) -> list[KnowledgeUserModel]:
         with get_db() as db:
             all_knowledge = (
-                db.query(Knowledge).order_by(Knowledge.updated_at.desc()).all()
+                db.query(Knowledge)
+                .filter(Knowledge.deleted_at.is_(None))
+                .order_by(Knowledge.updated_at.desc())
+                .all()
             )
             user_ids = list(set(knowledge.user_id for knowledge in all_knowledge))
 
@@ -214,7 +223,7 @@ class KnowledgeTable:
             with get_db() as db:
                 query = db.query(Knowledge, User).outerjoin(
                     User, User.id == Knowledge.user_id
-                )
+                ).filter(Knowledge.deleted_at.is_(None))
 
                 if filter:
                     query_key = filter.get("query")
@@ -231,6 +240,10 @@ class KnowledgeTable:
                         query = query.filter(Knowledge.user_id == user_id)
                     elif view_option == "shared":
                         query = query.filter(Knowledge.user_id != user_id)
+
+                    type_filter = filter.get("type")
+                    if type_filter:
+                        query = query.filter(Knowledge.type == type_filter)
 
                     query = has_permission(db, Knowledge, query, filter)
 
@@ -281,6 +294,7 @@ class KnowledgeTable:
                     .join(KnowledgeFile, File.id == KnowledgeFile.file_id)
                     .join(Knowledge, KnowledgeFile.knowledge_id == Knowledge.id)
                     .outerjoin(User, User.id == KnowledgeFile.user_id)
+                    .filter(Knowledge.deleted_at.is_(None))
                 )
 
                 # Apply access-control directly to the joined query
@@ -336,6 +350,18 @@ class KnowledgeTable:
         user_group_ids = {group.id for group in Groups.get_groups_by_member_id(user_id)}
         return has_access(user_id, permission, knowledge.access_control, user_group_ids)
 
+    def get_knowledge_bases_by_type(self, type: str) -> list[KnowledgeModel]:
+        """Get all knowledge bases of a specific type (no pagination limit)."""
+        with get_db() as db:
+            return [
+                KnowledgeModel.model_validate(kb)
+                for kb in db.query(Knowledge)
+                .filter_by(type=type)
+                .filter(Knowledge.deleted_at.is_(None))
+                .order_by(Knowledge.updated_at.desc())
+                .all()
+            ]
+
     def get_knowledge_bases_by_user_id(
         self, user_id: str, permission: str = "write"
     ) -> list[KnowledgeUserModel]:
@@ -350,10 +376,29 @@ class KnowledgeTable:
             )
         ]
 
+    def get_knowledge_items_by_user_id(self, user_id: str) -> list[KnowledgeModel]:
+        """Get all knowledge bases owned by a user (for deletion)."""
+        try:
+            with get_db() as db:
+                knowledges = (
+                    db.query(Knowledge)
+                    .filter_by(user_id=user_id)
+                    .filter(Knowledge.deleted_at.is_(None))
+                    .all()
+                )
+                return [KnowledgeModel.model_validate(k) for k in knowledges]
+        except Exception:
+            return []
+
     def get_knowledge_by_id(self, id: str) -> Optional[KnowledgeModel]:
         try:
             with get_db() as db:
-                knowledge = db.query(Knowledge).filter_by(id=id).first()
+                knowledge = (
+                    db.query(Knowledge)
+                    .filter_by(id=id)
+                    .filter(Knowledge.deleted_at.is_(None))
+                    .first()
+                )
                 return KnowledgeModel.model_validate(knowledge) if knowledge else None
         except Exception:
             return None
@@ -380,6 +425,7 @@ class KnowledgeTable:
                     db.query(Knowledge)
                     .join(KnowledgeFile, Knowledge.id == KnowledgeFile.knowledge_id)
                     .filter(KnowledgeFile.file_id == file_id)
+                    .filter(Knowledge.deleted_at.is_(None))
                     .all()
                 )
                 return [
@@ -387,6 +433,32 @@ class KnowledgeTable:
                 ]
         except Exception:
             return []
+
+    def get_knowledge_files_by_file_id(self, file_id: str) -> list[KnowledgeFileModel]:
+        """Get all knowledge_file records for a given file_id."""
+        try:
+            with get_db() as db:
+                knowledge_files = (
+                    db.query(KnowledgeFile).filter_by(file_id=file_id).all()
+                )
+                return [
+                    KnowledgeFileModel.model_validate(kf) for kf in knowledge_files
+                ]
+        except Exception:
+            return []
+
+    def get_referenced_file_ids(self, file_ids: list[str]) -> set[str]:
+        """Return the subset of file_ids that still have knowledge_file references."""
+        if not file_ids:
+            return set()
+        with get_db() as db:
+            rows = (
+                db.query(KnowledgeFile.file_id)
+                .filter(KnowledgeFile.file_id.in_(file_ids))
+                .distinct()
+                .all()
+            )
+            return {row[0] for row in rows}
 
     def search_files_by_id(
         self,
@@ -399,7 +471,7 @@ class KnowledgeTable:
         try:
             with get_db() as db:
                 query = (
-                    db.query(File, User)
+                    db.query(File, User, KnowledgeFile.created_at)
                     .join(KnowledgeFile, File.id == KnowledgeFile.file_id)
                     .outerjoin(User, User.id == KnowledgeFile.user_id)
                     .filter(KnowledgeFile.knowledge_id == knowledge_id)
@@ -451,7 +523,7 @@ class KnowledgeTable:
                 items = query.all()
 
                 files = []
-                for file, user in items:
+                for file, user, added_at in items:
                     files.append(
                         FileUserResponse(
                             **FileModel.model_validate(file).model_dump(),
@@ -462,6 +534,7 @@ class KnowledgeTable:
                                 if user
                                 else None
                             ),
+                            added_at=added_at,
                         )
                     )
 
@@ -554,15 +627,22 @@ class KnowledgeTable:
     ) -> Optional[KnowledgeModel]:
         try:
             with get_db() as db:
-                knowledge = self.get_knowledge_by_id(id=id)
-                db.query(Knowledge).filter_by(id=id).update(
-                    {
-                        **form_data.model_dump(),
-                        "updated_at": int(time.time()),
-                    }
-                )
+                knowledge = db.query(Knowledge).filter_by(id=id).first()
+                if not knowledge:
+                    return None
+
+                update_data = {
+                    k: v
+                    for k, v in form_data.model_dump().items()
+                    if v is not None
+                    or k == "access_control"  # access_control can be None (public)
+                }
+                update_data["updated_at"] = int(time.time())
+
+                db.query(Knowledge).filter_by(id=id).update(update_data)
                 db.commit()
-                return self.get_knowledge_by_id(id=id)
+                db.refresh(knowledge)
+                return KnowledgeModel.model_validate(knowledge)
         except Exception as e:
             log.exception(e)
             return None
@@ -619,6 +699,52 @@ class KnowledgeTable:
                 return True
             except Exception:
                 return False
+
+
+    def get_pending_deletions(self, limit: int = 50) -> list[KnowledgeModel]:
+        """Get knowledge bases marked for deletion (for cleanup worker)."""
+        with get_db() as db:
+            return [
+                KnowledgeModel.model_validate(kb)
+                for kb in db.query(Knowledge)
+                .filter(Knowledge.deleted_at.isnot(None))
+                .order_by(Knowledge.deleted_at.asc())
+                .limit(limit)
+                .all()
+            ]
+
+    def soft_delete_by_id(self, id: str) -> bool:
+        """Mark a knowledge base as deleted (soft-delete)."""
+        with get_db() as db:
+            result = (
+                db.query(Knowledge)
+                .filter_by(id=id)
+                .filter(Knowledge.deleted_at.is_(None))
+                .update({"deleted_at": int(time.time())})
+            )
+            db.commit()
+            return result > 0
+
+    def soft_delete_by_user_id(self, user_id: str) -> int:
+        """Soft-delete all knowledge bases for a user. Returns count."""
+        with get_db() as db:
+            result = (
+                db.query(Knowledge)
+                .filter_by(user_id=user_id)
+                .filter(Knowledge.deleted_at.is_(None))
+                .update({"deleted_at": int(time.time())})
+            )
+            db.commit()
+            return result
+
+    def get_knowledge_by_id_unfiltered(self, id: str) -> Optional[KnowledgeModel]:
+        """Get a knowledge base by ID, including soft-deleted ones. For internal/cleanup use only."""
+        try:
+            with get_db() as db:
+                knowledge = db.query(Knowledge).filter_by(id=id).first()
+                return KnowledgeModel.model_validate(knowledge) if knowledge else None
+        except Exception:
+            return None
 
 
 Knowledges = KnowledgeTable()

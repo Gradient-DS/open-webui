@@ -389,5 +389,15 @@ class FunctionsTable:
             except Exception:
                 return False
 
+    def delete_functions_by_user_id(self, user_id: str) -> bool:
+        """Delete all functions for a user."""
+        try:
+            with get_db() as db:
+                db.query(Function).filter_by(user_id=user_id).delete()
+                db.commit()
+                return True
+        except Exception:
+            return False
+
 
 Functions = FunctionsTable()

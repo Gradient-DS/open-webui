@@ -15,6 +15,8 @@
 	export let showRelevance = true;
 
 	let mergedDocuments = [];
+	let selectedTab = 'preview';
+	let previewAvailable = true;
 
 	function calculatePercentage(distance: number) {
 		if (typeof distance !== 'number') return null;
@@ -47,6 +49,45 @@
 				(a, b) => (b.distance ?? Infinity) - (a.distance ?? Infinity)
 			);
 		}
+		selectedTab = 'preview';
+	}
+
+	// File type detection from first document's metadata
+	$: fileName = mergedDocuments?.[0]?.metadata?.name ?? citation?.source?.name ?? '';
+	$: fileId = mergedDocuments?.[0]?.metadata?.file_id;
+
+	$: isPDF = fileName?.toLowerCase().endsWith('.pdf');
+	$: isImage = /\.(png|jpe?g|gif|webp|svg|bmp)$/i.test(fileName);
+	$: isAudio = /\.(mp3|wav|ogg|m4a|webm)$/i.test(fileName);
+	$: isPreviewable = fileId && (isPDF || isImage || isAudio);
+
+	// Compute minimum page number across all chunks for PDF navigation
+	$: minPage = (() => {
+		const pages = (mergedDocuments ?? [])
+			.filter((d) => Number.isInteger(d?.metadata?.page))
+			.map((d) => d.metadata.page);
+		return pages.length > 0 ? Math.min(...pages) + 1 : undefined;
+	})();
+
+	// Preview URL for iframe/img/audio
+	$: previewUrl = fileId
+		? `${WEBUI_API_BASE_URL}/files/${fileId}/content${isPDF && minPage ? `#page=${minPage}` : ''}`
+		: '';
+
+	// Check if file is still available when modal opens
+	$: if (show && fileId) {
+		previewAvailable = true;
+		fetch(`${WEBUI_API_BASE_URL}/files/${fileId}/content`, { method: 'HEAD' })
+			.then((res) => {
+				if (!res.ok) {
+					previewAvailable = false;
+					selectedTab = 'content';
+				}
+			})
+			.catch(() => {
+				previewAvailable = false;
+				selectedTab = 'content';
+			});
 	}
 
 	const decodeString = (str: string) => {
@@ -74,7 +115,7 @@
 							tippyOptions={{ duration: [500, 0] }}
 						>
 							<a
-								class="hover:text-gray-500 dark:hover:text-gray-100 underline grow line-clamp-1"
+								class="hover:text-gray-500 dark:hover:text-gray-100 underline grow line-clamp-1 flex items-center gap-1"
 								href={document?.metadata?.file_id
 									? `${WEBUI_API_BASE_URL}/files/${document?.metadata?.file_id}/content${document?.metadata?.page !== undefined ? `#page=${document.metadata.page + 1}` : ''}`
 									: document.source?.url?.includes('http')
@@ -82,7 +123,19 @@
 										: `#`}
 								target="_blank"
 							>
-								{decodeString(citation?.source?.name)}
+								<span class="line-clamp-1">{decodeString(citation?.source?.name)}</span>
+								<svg
+									xmlns="http://www.w3.org/2000/svg"
+									viewBox="0 0 16 16"
+									fill="currentColor"
+									class="size-3.5 shrink-0"
+								>
+									<path
+										fill-rule="evenodd"
+										d="M4.22 11.78a.75.75 0 0 1 0-1.06L9.44 5.5H5.75a.75.75 0 0 1 0-1.5h5.5a.75.75 0 0 1 .75.75v5.5a.75.75 0 0 1-1.5 0V6.56l-5.22 5.22a.75.75 0 0 1-1.06 0Z"
+										clip-rule="evenodd"
+									/>
+								</svg>
 							</a>
 						</Tooltip>
 					{:else}
@@ -102,80 +155,129 @@
 			</button>
 		</div>
 
-		<div class="flex flex-col md:flex-row w-full px-5 pb-5 md:space-x-4">
-			<div
-				class="flex flex-col w-full dark:text-gray-200 overflow-y-scroll max-h-[22rem] scrollbar-thin gap-1"
-			>
-				{#each mergedDocuments as document, documentIdx}
-					<div class="flex flex-col w-full gap-2">
-						{#if document.metadata?.parameters}
-							<div>
-								<div class="text-sm font-medium dark:text-gray-300 mb-1">
-									{$i18n.t('Parameters')}
-								</div>
+		<div class="flex flex-col w-full px-5 pb-5">
+			<!-- Tab switcher: only shown for previewable file types with available files -->
+			{#if isPreviewable && previewAvailable}
+				<div class="flex gap-1 mb-3">
+					<button
+						class="px-3 py-1 text-xs font-medium rounded-lg transition {selectedTab === 'preview'
+							? 'bg-gray-100 dark:bg-gray-800 text-gray-900 dark:text-gray-100'
+							: 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300'}"
+						on:click={() => (selectedTab = 'preview')}
+					>
+						{$i18n.t('Preview')}
+					</button>
+					<button
+						class="px-3 py-1 text-xs font-medium rounded-lg transition {selectedTab === 'content'
+							? 'bg-gray-100 dark:bg-gray-800 text-gray-900 dark:text-gray-100'
+							: 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300'}"
+						on:click={() => (selectedTab = 'content')}
+					>
+						{$i18n.t('Content')}
+					</button>
+				</div>
+			{/if}
 
-								<Textarea readonly value={JSON.stringify(document.metadata.parameters, null, 2)}
-								></Textarea>
-							</div>
-						{/if}
-
-						<div>
-							<div
-								class=" text-sm font-medium dark:text-gray-300 flex items-center gap-2 w-fit mb-1"
-							>
-								{$i18n.t('Content')}
-
-								{#if showRelevance && document.distance !== undefined}
-									<Tooltip
-										className="w-fit"
-										content={$i18n.t('Relevance')}
-										placement="top-start"
-										tippyOptions={{ duration: [500, 0] }}
-									>
-										<div class="text-sm my-1 dark:text-gray-400 flex items-center gap-2 w-fit">
-											{#if showPercentage}
-												{@const percentage = calculatePercentage(document.distance)}
-
-												{#if typeof percentage === 'number'}
-													<span
-														class={`px-1 rounded-sm font-medium ${getRelevanceColor(percentage)}`}
-													>
-														{percentage.toFixed(2)}%
-													</span>
-												{/if}
-											{:else if typeof document?.distance === 'number'}
-												<span class="text-gray-500 dark:text-gray-500">
-													({(document?.distance ?? 0).toFixed(4)})
-												</span>
-											{/if}
+			<!-- Preview tab -->
+			{#if isPreviewable && previewAvailable && selectedTab === 'preview'}
+				{#if isPDF}
+					<iframe
+						title={fileName}
+						src={previewUrl}
+						class="w-full h-[70vh] border-0 rounded-lg"
+					/>
+				{:else if isImage}
+					<img
+						src={previewUrl}
+						alt={fileName}
+						class="max-w-full max-h-[70vh] rounded-lg object-contain mx-auto"
+					/>
+				{:else if isAudio}
+					<audio
+						src={previewUrl}
+						class="w-full rounded-lg"
+						controls
+						playsinline
+					/>
+				{/if}
+			{:else}
+				<!-- Content tab (existing parsed text view) -->
+				<div class="flex flex-col md:flex-row w-full md:space-x-4">
+					<div
+						class="flex flex-col w-full dark:text-gray-200 overflow-y-scroll max-h-[22rem] scrollbar-thin gap-1"
+					>
+						{#each mergedDocuments as document, documentIdx}
+							<div class="flex flex-col w-full gap-2">
+								{#if document.metadata?.parameters}
+									<div>
+										<div class="text-sm font-medium dark:text-gray-300 mb-1">
+											{$i18n.t('Parameters')}
 										</div>
-									</Tooltip>
+
+										<Textarea readonly value={JSON.stringify(document.metadata.parameters, null, 2)}
+										></Textarea>
+									</div>
 								{/if}
 
-								{#if Number.isInteger(document?.metadata?.page)}
-									<span class="text-sm text-gray-500 dark:text-gray-400">
-										({$i18n.t('page')}
-										{document.metadata.page + 1})
-									</span>
-								{/if}
+								<div>
+									<div
+										class=" text-sm font-medium dark:text-gray-300 flex items-center gap-2 w-fit mb-1"
+									>
+										{$i18n.t('Content')}
+
+										{#if showRelevance && document.distance !== undefined}
+											<Tooltip
+												className="w-fit"
+												content={$i18n.t('Relevance')}
+												placement="top-start"
+												tippyOptions={{ duration: [500, 0] }}
+											>
+												<div class="text-sm my-1 dark:text-gray-400 flex items-center gap-2 w-fit">
+													{#if showPercentage}
+														{@const percentage = calculatePercentage(document.distance)}
+
+														{#if typeof percentage === 'number'}
+															<span
+																class={`px-1 rounded-sm font-medium ${getRelevanceColor(percentage)}`}
+															>
+																{percentage.toFixed(2)}%
+															</span>
+														{/if}
+													{:else if typeof document?.distance === 'number'}
+														<span class="text-gray-500 dark:text-gray-500">
+															({(document?.distance ?? 0).toFixed(4)})
+														</span>
+													{/if}
+												</div>
+											</Tooltip>
+										{/if}
+
+										{#if Number.isInteger(document?.metadata?.page)}
+											<span class="text-sm text-gray-500 dark:text-gray-400">
+												({$i18n.t('page')}
+												{document.metadata.page + 1})
+											</span>
+										{/if}
+									</div>
+
+									{#if document.metadata?.html}
+										<iframe
+											class="w-full border-0 h-auto rounded-none"
+											sandbox="allow-scripts allow-forms allow-same-origin"
+											srcdoc={document.document}
+											title={$i18n.t('Content')}
+										></iframe>
+									{:else}
+										<pre class="text-sm dark:text-gray-400 whitespace-pre-line">{document.document
+												.trim()
+												.replace(/\n\n+/g, '\n\n')}</pre>
+									{/if}
+								</div>
 							</div>
-
-							{#if document.metadata?.html}
-								<iframe
-									class="w-full border-0 h-auto rounded-none"
-									sandbox="allow-scripts allow-forms allow-same-origin"
-									srcdoc={document.document}
-									title={$i18n.t('Content')}
-								></iframe>
-							{:else}
-								<pre class="text-sm dark:text-gray-400 whitespace-pre-line">{document.document
-										.trim()
-										.replace(/\n\n+/g, '\n\n')}</pre>
-							{/if}
-						</div>
+						{/each}
 					</div>
-				{/each}
-			</div>
+				</div>
+			{/if}
 		</div>
 	</div>
 </Modal>

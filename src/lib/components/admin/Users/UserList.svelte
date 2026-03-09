@@ -13,6 +13,7 @@
 	import { toast } from 'svelte-sonner';
 
 	import { updateUserRole, getUsers, deleteUserById } from '$lib/apis/users';
+	import { getArchiveConfig } from '$lib/apis/archives';
 
 	import Pagination from '$lib/components/common/Pagination.svelte';
 	import ChatBubbles from '$lib/components/icons/ChatBubbles.svelte';
@@ -54,11 +55,37 @@
 	let showUserChatsModal = false;
 	let showEditUserModal = false;
 
+	// Archive on delete options
+	let archiveBeforeDelete = true;
+	let archiveReason = '';
+	let archiveRetentionDays = 1095;
+	let archiveConfig = null;
+
+	const loadArchiveConfig = async () => {
+		try {
+			archiveConfig = await getArchiveConfig(localStorage.token);
+			if (archiveConfig) {
+				archiveRetentionDays = archiveConfig.default_archive_retention_days;
+			}
+		} catch (error) {
+			console.log('Archive config not available:', error);
+		}
+	};
+
 	const deleteUserHandler = async (id) => {
-		const res = await deleteUserById(localStorage.token, id).catch((error) => {
+		const res = await deleteUserById(localStorage.token, id, {
+			archiveBeforeDelete: archiveBeforeDelete,
+			archiveReason: archiveReason || 'User deleted by admin',
+			archiveRetentionDays: archiveRetentionDays
+		}).catch((error) => {
 			toast.error(`${error}`);
 			return null;
 		});
+
+		// Reset archive options
+		archiveBeforeDelete = true;
+		archiveReason = '';
+		archiveRetentionDays = archiveConfig?.default_archive_retention_days ?? 1095;
 
 		// if the user is deleted and the current page has only one user, go back to the previous page
 		if (users.length === 1 && page > 1) {
@@ -100,14 +127,82 @@
 	$: if (query !== null && page !== null && orderBy !== null && direction !== null) {
 		getUserList();
 	}
+
+	onMount(() => {
+		loadArchiveConfig();
+	});
 </script>
 
-<ConfirmDialog
-	bind:show={showDeleteConfirmDialog}
-	on:confirm={() => {
-		deleteUserHandler(selectedUser.id);
-	}}
-/>
+<!-- Delete User Dialog with Archive Option -->
+{#if showDeleteConfirmDialog && selectedUser}
+	<div class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+		<div class="bg-white dark:bg-gray-900 rounded-lg p-5 max-w-md w-full mx-4 shadow-xl">
+			<h3 class="text-lg font-medium mb-3">{$i18n.t('Delete User')}</h3>
+
+			<p class="text-sm text-gray-600 dark:text-gray-400 mb-4">
+				{$i18n.t('Are you sure you want to delete')} <strong>{selectedUser.name}</strong> ({selectedUser.email})?
+			</p>
+
+			{#if archiveConfig?.enable_user_archival}
+				<div class="mb-4 p-3 bg-gray-50 dark:bg-gray-850 rounded-lg space-y-3">
+					<label class="flex items-center gap-2 cursor-pointer">
+						<input
+							type="checkbox"
+							bind:checked={archiveBeforeDelete}
+							class="rounded"
+						/>
+						<span class="text-sm">{$i18n.t('Archive user data before deletion')}</span>
+					</label>
+
+					{#if archiveBeforeDelete}
+						<div>
+							<label class="block text-xs text-gray-500 mb-1">{$i18n.t('Archive Reason')}</label>
+							<input
+								type="text"
+								bind:value={archiveReason}
+								placeholder={$i18n.t('User deleted by admin')}
+								class="w-full rounded py-1.5 px-2 text-sm bg-white dark:bg-gray-800 dark:text-gray-300 border border-gray-200 dark:border-gray-700"
+							/>
+						</div>
+						<div>
+							<label class="block text-xs text-gray-500 mb-1">{$i18n.t('Retention Period (days)')}</label>
+							<input
+								type="number"
+								bind:value={archiveRetentionDays}
+								min="1"
+								class="w-full rounded py-1.5 px-2 text-sm bg-white dark:bg-gray-800 dark:text-gray-300 border border-gray-200 dark:border-gray-700"
+							/>
+						</div>
+					{/if}
+				</div>
+			{/if}
+
+			<div class="flex gap-2 justify-end">
+				<button
+					type="button"
+					class="px-4 py-2 text-sm bg-gray-200 dark:bg-gray-700 rounded-lg hover:bg-gray-300 dark:hover:bg-gray-600"
+					on:click={() => {
+						showDeleteConfirmDialog = false;
+						archiveBeforeDelete = true;
+						archiveReason = '';
+					}}
+				>
+					{$i18n.t('Cancel')}
+				</button>
+				<button
+					type="button"
+					class="px-4 py-2 text-sm bg-red-500 text-white rounded-lg hover:bg-red-600"
+					on:click={() => {
+						deleteUserHandler(selectedUser.id);
+						showDeleteConfirmDialog = false;
+					}}
+				>
+					{$i18n.t('Delete')}
+				</button>
+			</div>
+		</div>
+	</div>
+{/if}
 
 <AddUserModal
 	bind:show={showAddUserModal}

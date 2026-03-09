@@ -6,7 +6,6 @@ from open_webui.services.onedrive.sync_events import emit_sync_progress
 from open_webui.services.onedrive.scheduler import (
     start_scheduler,
     stop_scheduler,
-    trigger_manual_sync_check,
 )
 
 __all__ = [
@@ -15,5 +14,4 @@ __all__ = [
     "emit_sync_progress",
     "start_scheduler",
     "stop_scheduler",
-    "trigger_manual_sync_check",
 ]
