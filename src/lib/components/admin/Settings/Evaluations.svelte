@@ -191,10 +191,12 @@
 
 				{#if evaluationConfig.ENABLE_FEEDBACK_LAYER2}
 					<div class="ml-2 mb-3">
+						<!-- Positive Tags -->
+						<div class="text-xs font-medium mb-1">{$i18n.t('Positive Tags')}</div>
 						<div class="text-xs text-gray-500 mb-2">
-							{$i18n.t('Leave empty to use default tags. Add custom tags below:')}
+							{$i18n.t('Tags shown after thumbs up. Leave empty to use defaults.')}
 						</div>
-						{#each evaluationConfig.FEEDBACK_LAYER2_TAGS ?? [] as tag, index}
+						{#each evaluationConfig.FEEDBACK_LAYER2_POSITIVE_TAGS ?? [] as tag, index}
 							<div class="flex items-center gap-2 mb-1.5">
 								<input
 									class="flex-1 text-sm px-2.5 py-1 bg-transparent border border-gray-100/30 dark:border-gray-850/30 rounded-lg outline-hidden"
@@ -208,7 +210,7 @@
 									type="button"
 									class="p-1 text-gray-400 hover:text-red-500 transition"
 									on:click={() => {
-										evaluationConfig.FEEDBACK_LAYER2_TAGS = evaluationConfig.FEEDBACK_LAYER2_TAGS.filter((_, i) => i !== index);
+										evaluationConfig.FEEDBACK_LAYER2_POSITIVE_TAGS = evaluationConfig.FEEDBACK_LAYER2_POSITIVE_TAGS.filter((_, i) => i !== index);
 									}}
 								>
 									<svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
@@ -221,9 +223,49 @@
 							type="button"
 							class="text-xs text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 flex items-center gap-1 mt-1"
 							on:click={() => {
-								if (!evaluationConfig.FEEDBACK_LAYER2_TAGS) evaluationConfig.FEEDBACK_LAYER2_TAGS = [];
+								if (!evaluationConfig.FEEDBACK_LAYER2_POSITIVE_TAGS) evaluationConfig.FEEDBACK_LAYER2_POSITIVE_TAGS = [];
 								const key = `tag_${Date.now()}`;
-								evaluationConfig.FEEDBACK_LAYER2_TAGS = [...evaluationConfig.FEEDBACK_LAYER2_TAGS, { key, label: '' }];
+								evaluationConfig.FEEDBACK_LAYER2_POSITIVE_TAGS = [...evaluationConfig.FEEDBACK_LAYER2_POSITIVE_TAGS, { key, label: '' }];
+							}}
+						>
+							<Plus className="size-3" /> {$i18n.t('Add tag')}
+						</button>
+
+						<!-- Negative Tags -->
+						<div class="text-xs font-medium mb-1 mt-3">{$i18n.t('Negative Tags')}</div>
+						<div class="text-xs text-gray-500 mb-2">
+							{$i18n.t('Tags shown after thumbs down. Leave empty to use defaults.')}
+						</div>
+						{#each evaluationConfig.FEEDBACK_LAYER2_NEGATIVE_TAGS ?? [] as tag, index}
+							<div class="flex items-center gap-2 mb-1.5">
+								<input
+									class="flex-1 text-sm px-2.5 py-1 bg-transparent border border-gray-100/30 dark:border-gray-850/30 rounded-lg outline-hidden"
+									bind:value={tag.label}
+									on:input={() => {
+										tag.key = tag.label.toLowerCase().replace(/\s+/g, '_').replace(/[^a-z0-9_]/g, '');
+									}}
+									placeholder={$i18n.t('Tag label')}
+								/>
+								<button
+									type="button"
+									class="p-1 text-gray-400 hover:text-red-500 transition"
+									on:click={() => {
+										evaluationConfig.FEEDBACK_LAYER2_NEGATIVE_TAGS = evaluationConfig.FEEDBACK_LAYER2_NEGATIVE_TAGS.filter((_, i) => i !== index);
+									}}
+								>
+									<svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+										<path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
+									</svg>
+								</button>
+							</div>
+						{/each}
+						<button
+							type="button"
+							class="text-xs text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 flex items-center gap-1 mt-1"
+							on:click={() => {
+								if (!evaluationConfig.FEEDBACK_LAYER2_NEGATIVE_TAGS) evaluationConfig.FEEDBACK_LAYER2_NEGATIVE_TAGS = [];
+								const key = `tag_${Date.now()}`;
+								evaluationConfig.FEEDBACK_LAYER2_NEGATIVE_TAGS = [...evaluationConfig.FEEDBACK_LAYER2_NEGATIVE_TAGS, { key, label: '' }];
 							}}
 						>
 							<Plus className="size-3" /> {$i18n.t('Add tag')}
@@ -284,10 +326,16 @@
 								max="10"
 							/>
 						</div>
-						<div class="text-xs text-gray-500 mb-1">{$i18n.t('Custom prompt text (optional)')}</div>
+						<div class="text-xs text-gray-500 mb-1">{$i18n.t('Header text (optional)')}</div>
+						<input
+							class="w-full text-sm px-2.5 py-1.5 bg-transparent border border-gray-100/30 dark:border-gray-850/30 rounded-lg outline-hidden mb-2"
+							bind:value={evaluationConfig.CONVERSATION_FEEDBACK_HEADER}
+							placeholder={$i18n.t('How was this conversation?')}
+						/>
+						<div class="text-xs text-gray-500 mb-1">{$i18n.t('Placeholder text (optional)')}</div>
 						<input
 							class="w-full text-sm px-2.5 py-1.5 bg-transparent border border-gray-100/30 dark:border-gray-850/30 rounded-lg outline-hidden"
-							bind:value={evaluationConfig.CONVERSATION_FEEDBACK_PROMPT}
+							bind:value={evaluationConfig.CONVERSATION_FEEDBACK_PLACEHOLDER}
 							placeholder={$i18n.t('Any thoughts on the overall conversation?')}
 						/>
 					</div>

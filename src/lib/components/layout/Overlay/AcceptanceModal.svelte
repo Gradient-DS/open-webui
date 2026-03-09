@@ -33,45 +33,43 @@
 {#if show}
 	<div class="fixed w-full h-full flex z-999">
 		<div
-			class="absolute w-full h-full backdrop-blur-lg bg-white/10 dark:bg-gray-900/50 flex justify-center"
+			class="absolute w-full h-full backdrop-blur-lg bg-white/10 dark:bg-gray-900/50 flex justify-center items-center p-4"
 		>
-			<div class="m-auto pb-10 flex flex-col justify-center">
-				<div class="max-w-md">
-					<div
-						class="text-center dark:text-white text-2xl font-medium z-50"
-						style="white-space: pre-wrap;"
-					>
-						{#if ($config?.ui?.acceptance_modal_title ?? '').trim() !== ''}
-							{$config.ui.acceptance_modal_title}
-						{:else}
-							{$i18n.t('Terms of Use')}
-						{/if}
-					</div>
+			<div class="flex flex-col max-w-2xl w-full max-h-[90vh]">
+				<div
+					class="text-center dark:text-white text-2xl font-medium z-50 shrink-0"
+					style="white-space: pre-wrap;"
+				>
+					{#if ($config?.ui?.acceptance_modal_title ?? '').trim() !== ''}
+						{$config.ui.acceptance_modal_title}
+					{:else}
+						{$i18n.t('Terms of Use')}
+					{/if}
+				</div>
 
-					<div
-						class="mt-4 text-center text-sm dark:text-gray-200 w-full prose dark:prose-invert prose-sm"
-					>
-						{#if ($config?.ui?.acceptance_modal_content ?? '').trim() !== ''}
-							{@html DOMPurify.sanitize(
-								marked.parse($config?.ui?.acceptance_modal_content ?? '')
-							)}
-						{:else}
-							{$i18n.t('Please accept the terms of use to continue.')}
-						{/if}
-					</div>
+				<div
+					class="mt-4 text-center text-sm dark:text-gray-200 w-full prose dark:prose-invert prose-sm overflow-y-auto min-h-0"
+				>
+					{#if ($config?.ui?.acceptance_modal_content ?? '').trim() !== ''}
+						{@html DOMPurify.sanitize(
+							marked.parse($config?.ui?.acceptance_modal_content ?? '')
+						)}
+					{:else}
+						{$i18n.t('Please accept the terms of use to continue.')}
+					{/if}
+				</div>
 
-					<div class="mt-6 mx-auto relative group w-fit">
-						<button
-							class="relative z-20 flex px-5 py-2 rounded-full bg-black dark:bg-white text-white dark:text-black hover:bg-gray-900 dark:hover:bg-gray-100 transition font-medium text-sm"
-							on:click={acceptHandler}
-						>
-							{#if ($config?.ui?.acceptance_modal_button_text ?? '').trim() !== ''}
-								{$config.ui.acceptance_modal_button_text}
-							{:else}
-								{$i18n.t('I Accept')}
-							{/if}
-						</button>
-					</div>
+				<div class="mt-6 mx-auto relative group w-fit shrink-0">
+					<button
+						class="relative z-20 flex px-5 py-2 rounded-full bg-black dark:bg-white text-white dark:text-black hover:bg-gray-900 dark:hover:bg-gray-100 transition font-medium text-sm"
+						on:click={acceptHandler}
+					>
+						{#if ($config?.ui?.acceptance_modal_button_text ?? '').trim() !== ''}
+							{$config.ui.acceptance_modal_button_text}
+						{:else}
+							{$i18n.t('I Accept')}
+						{/if}
+					</button>
 				</div>
 			</div>
 		</div>

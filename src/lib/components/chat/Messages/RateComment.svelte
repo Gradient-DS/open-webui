@@ -67,24 +67,28 @@
 	$: layer3Prompt = $config?.features?.feedback_layer3_prompt || '';
 
 	$: {
-		const configTags = $config?.features?.feedback_layer2_tags ?? [];
-		if (configTags.length > 0) {
-			// Use admin-configured tags (same for both thumbs up/down)
-			reasons = configTags.map((t: { key: string; label: string }) => t.key);
-			reasonLabels = configTags.reduce(
-				(acc: Record<string, string>, t: { key: string; label: string }) => {
-					acc[t.key] = t.label;
-					return acc;
-				},
-				{}
-			);
-		} else {
-			// Fallback to hardcoded defaults
-			reasonLabels = REASON_LABELS;
-			if (message?.annotation?.rating === 1) {
+		const positiveTags = $config?.features?.feedback_layer2_positive_tags ?? [];
+		const negativeTags = $config?.features?.feedback_layer2_negative_tags ?? [];
+
+		if (message?.annotation?.rating === 1) {
+			if (positiveTags.length > 0) {
+				reasons = positiveTags.map((t: { key: string; label: string }) => t.key);
+				reasonLabels = Object.fromEntries(
+					positiveTags.map((t: { key: string; label: string }) => [t.key, t.label])
+				);
+			} else {
 				reasons = DEFAULT_LIKE_REASONS;
-			} else if (message?.annotation?.rating === -1) {
+				reasonLabels = REASON_LABELS;
+			}
+		} else if (message?.annotation?.rating === -1) {
+			if (negativeTags.length > 0) {
+				reasons = negativeTags.map((t: { key: string; label: string }) => t.key);
+				reasonLabels = Object.fromEntries(
+					negativeTags.map((t: { key: string; label: string }) => [t.key, t.label])
+				);
+			} else {
 				reasons = DEFAULT_DISLIKE_REASONS;
+				reasonLabels = REASON_LABELS;
 			}
 		}
 	}
