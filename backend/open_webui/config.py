@@ -1247,6 +1247,30 @@ PENDING_USER_OVERLAY_CONTENT = PersistentConfig(
     os.environ.get("PENDING_USER_OVERLAY_CONTENT", ""),
 )
 
+ENABLE_ACCEPTANCE_MODAL = PersistentConfig(
+    "ENABLE_ACCEPTANCE_MODAL",
+    "ui.enable_acceptance_modal",
+    os.environ.get("ENABLE_ACCEPTANCE_MODAL", "False").lower() == "true",
+)
+
+ACCEPTANCE_MODAL_TITLE = PersistentConfig(
+    "ACCEPTANCE_MODAL_TITLE",
+    "ui.acceptance_modal_title",
+    os.environ.get("ACCEPTANCE_MODAL_TITLE", ""),
+)
+
+ACCEPTANCE_MODAL_CONTENT = PersistentConfig(
+    "ACCEPTANCE_MODAL_CONTENT",
+    "ui.acceptance_modal_content",
+    os.environ.get("ACCEPTANCE_MODAL_CONTENT", ""),
+)
+
+ACCEPTANCE_MODAL_BUTTON_TEXT = PersistentConfig(
+    "ACCEPTANCE_MODAL_BUTTON_TEXT",
+    "ui.acceptance_modal_button_text",
+    os.environ.get("ACCEPTANCE_MODAL_BUTTON_TEXT", ""),
+)
+
 
 RESPONSE_WATERMARK = PersistentConfig(
     "RESPONSE_WATERMARK",

@@ -387,6 +387,10 @@ from open_webui.config import (
     DEFAULT_GROUP_ID,
     PENDING_USER_OVERLAY_CONTENT,
     PENDING_USER_OVERLAY_TITLE,
+    ENABLE_ACCEPTANCE_MODAL,
+    ACCEPTANCE_MODAL_TITLE,
+    ACCEPTANCE_MODAL_CONTENT,
+    ACCEPTANCE_MODAL_BUTTON_TEXT,
     DEFAULT_PROMPT_SUGGESTIONS,
     DEFAULT_MODELS,
     DEFAULT_PINNED_MODELS,
@@ -838,6 +842,11 @@ app.state.config.DEFAULT_GROUP_ID = DEFAULT_GROUP_ID
 
 app.state.config.PENDING_USER_OVERLAY_CONTENT = PENDING_USER_OVERLAY_CONTENT
 app.state.config.PENDING_USER_OVERLAY_TITLE = PENDING_USER_OVERLAY_TITLE
+
+app.state.config.ENABLE_ACCEPTANCE_MODAL = ENABLE_ACCEPTANCE_MODAL
+app.state.config.ACCEPTANCE_MODAL_TITLE = ACCEPTANCE_MODAL_TITLE
+app.state.config.ACCEPTANCE_MODAL_CONTENT = ACCEPTANCE_MODAL_CONTENT
+app.state.config.ACCEPTANCE_MODAL_BUTTON_TEXT = ACCEPTANCE_MODAL_BUTTON_TEXT
 
 app.state.config.RESPONSE_WATERMARK = RESPONSE_WATERMARK
 app.state.config.GREETING_TEMPLATE = GREETING_TEMPLATE
@@ -2111,6 +2120,10 @@ async def get_app_config(request: Request):
                     "pending_user_overlay_content": app.state.config.PENDING_USER_OVERLAY_CONTENT,
                     "response_watermark": app.state.config.RESPONSE_WATERMARK,
                     "greeting_template": app.state.config.GREETING_TEMPLATE,
+                    "enable_acceptance_modal": app.state.config.ENABLE_ACCEPTANCE_MODAL,
+                    "acceptance_modal_title": app.state.config.ACCEPTANCE_MODAL_TITLE,
+                    "acceptance_modal_content": app.state.config.ACCEPTANCE_MODAL_CONTENT,
+                    "acceptance_modal_button_text": app.state.config.ACCEPTANCE_MODAL_BUTTON_TEXT,
                 },
                 "license_metadata": app.state.LICENSE_METADATA,
                 **(
