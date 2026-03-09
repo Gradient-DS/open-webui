@@ -1581,6 +1581,58 @@ EVALUATION_ARENA_MODELS = PersistentConfig(
     [],
 )
 
+####################################
+# Feedback Configuration
+####################################
+
+ENABLE_FEEDBACK_LAYER2 = PersistentConfig(
+    "ENABLE_FEEDBACK_LAYER2",
+    "evaluation.feedback.layer2.enable",
+    os.environ.get("ENABLE_FEEDBACK_LAYER2", "True").lower() == "true",
+)
+
+FEEDBACK_LAYER2_TAGS = PersistentConfig(
+    "FEEDBACK_LAYER2_TAGS",
+    "evaluation.feedback.layer2.tags",
+    [],
+)
+
+ENABLE_FEEDBACK_LAYER3 = PersistentConfig(
+    "ENABLE_FEEDBACK_LAYER3",
+    "evaluation.feedback.layer3.enable",
+    os.environ.get("ENABLE_FEEDBACK_LAYER3", "True").lower() == "true",
+)
+
+FEEDBACK_LAYER3_PROMPT = PersistentConfig(
+    "FEEDBACK_LAYER3_PROMPT",
+    "evaluation.feedback.layer3.prompt",
+    "",
+)
+
+ENABLE_FEEDBACK_CATEGORY_TAGS = PersistentConfig(
+    "ENABLE_FEEDBACK_CATEGORY_TAGS",
+    "evaluation.feedback.category_tags.enable",
+    os.environ.get("ENABLE_FEEDBACK_CATEGORY_TAGS", "True").lower() == "true",
+)
+
+ENABLE_CONVERSATION_FEEDBACK = PersistentConfig(
+    "ENABLE_CONVERSATION_FEEDBACK",
+    "evaluation.feedback.conversation.enable",
+    os.environ.get("ENABLE_CONVERSATION_FEEDBACK", "False").lower() == "true",
+)
+
+CONVERSATION_FEEDBACK_SCALE_MAX = PersistentConfig(
+    "CONVERSATION_FEEDBACK_SCALE_MAX",
+    "evaluation.feedback.conversation.scale_max",
+    int(os.environ.get("CONVERSATION_FEEDBACK_SCALE_MAX", "5")),
+)
+
+CONVERSATION_FEEDBACK_PROMPT = PersistentConfig(
+    "CONVERSATION_FEEDBACK_PROMPT",
+    "evaluation.feedback.conversation.prompt",
+    "",
+)
+
 DEFAULT_ARENA_MODEL = {
     "id": "arena-model",
     "name": "Arena Model",

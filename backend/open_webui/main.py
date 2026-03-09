@@ -373,6 +373,14 @@ from open_webui.config import (
     ENABLE_MESSAGE_RATING,
     ENABLE_USER_WEBHOOKS,
     ENABLE_EVALUATION_ARENA_MODELS,
+    ENABLE_FEEDBACK_LAYER2,
+    FEEDBACK_LAYER2_TAGS,
+    ENABLE_FEEDBACK_LAYER3,
+    FEEDBACK_LAYER3_PROMPT,
+    ENABLE_FEEDBACK_CATEGORY_TAGS,
+    ENABLE_CONVERSATION_FEEDBACK,
+    CONVERSATION_FEEDBACK_SCALE_MAX,
+    CONVERSATION_FEEDBACK_PROMPT,
     BYPASS_ADMIN_ACCESS_CONTROL,
     USER_PERMISSIONS,
     DEFAULT_USER_ROLE,
@@ -848,6 +856,15 @@ app.state.config.ENABLE_USER_WEBHOOKS = ENABLE_USER_WEBHOOKS
 
 app.state.config.ENABLE_EVALUATION_ARENA_MODELS = ENABLE_EVALUATION_ARENA_MODELS
 app.state.config.EVALUATION_ARENA_MODELS = EVALUATION_ARENA_MODELS
+
+app.state.config.ENABLE_FEEDBACK_LAYER2 = ENABLE_FEEDBACK_LAYER2
+app.state.config.FEEDBACK_LAYER2_TAGS = FEEDBACK_LAYER2_TAGS
+app.state.config.ENABLE_FEEDBACK_LAYER3 = ENABLE_FEEDBACK_LAYER3
+app.state.config.FEEDBACK_LAYER3_PROMPT = FEEDBACK_LAYER3_PROMPT
+app.state.config.ENABLE_FEEDBACK_CATEGORY_TAGS = ENABLE_FEEDBACK_CATEGORY_TAGS
+app.state.config.ENABLE_CONVERSATION_FEEDBACK = ENABLE_CONVERSATION_FEEDBACK
+app.state.config.CONVERSATION_FEEDBACK_SCALE_MAX = CONVERSATION_FEEDBACK_SCALE_MAX
+app.state.config.CONVERSATION_FEEDBACK_PROMPT = CONVERSATION_FEEDBACK_PROMPT
 
 app.state.config.OAUTH_USERNAME_CLAIM = OAUTH_USERNAME_CLAIM
 app.state.config.OAUTH_PICTURE_CLAIM = OAUTH_PICTURE_CLAIM
@@ -2003,6 +2020,14 @@ async def get_app_config(request: Request):
                     "enable_autocomplete_generation": app.state.config.ENABLE_AUTOCOMPLETE_GENERATION,
                     "enable_community_sharing": app.state.config.ENABLE_COMMUNITY_SHARING,
                     "enable_message_rating": app.state.config.ENABLE_MESSAGE_RATING,
+                    "enable_feedback_layer2": app.state.config.ENABLE_FEEDBACK_LAYER2,
+                    "feedback_layer2_tags": app.state.config.FEEDBACK_LAYER2_TAGS,
+                    "enable_feedback_layer3": app.state.config.ENABLE_FEEDBACK_LAYER3,
+                    "feedback_layer3_prompt": app.state.config.FEEDBACK_LAYER3_PROMPT,
+                    "enable_feedback_category_tags": app.state.config.ENABLE_FEEDBACK_CATEGORY_TAGS,
+                    "enable_conversation_feedback": app.state.config.ENABLE_CONVERSATION_FEEDBACK,
+                    "conversation_feedback_scale_max": app.state.config.CONVERSATION_FEEDBACK_SCALE_MAX,
+                    "conversation_feedback_prompt": app.state.config.CONVERSATION_FEEDBACK_PROMPT,
                     "enable_user_webhooks": app.state.config.ENABLE_USER_WEBHOOKS,
                     "enable_admin_export": ENABLE_ADMIN_EXPORT,
                     "enable_admin_chat_access": ENABLE_ADMIN_CHAT_ACCESS,

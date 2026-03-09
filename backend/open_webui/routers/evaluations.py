@@ -29,6 +29,15 @@ async def get_config(request: Request, user=Depends(get_admin_user)):
     return {
         "ENABLE_EVALUATION_ARENA_MODELS": request.app.state.config.ENABLE_EVALUATION_ARENA_MODELS,
         "EVALUATION_ARENA_MODELS": request.app.state.config.EVALUATION_ARENA_MODELS,
+        "ENABLE_MESSAGE_RATING": request.app.state.config.ENABLE_MESSAGE_RATING,
+        "ENABLE_FEEDBACK_LAYER2": request.app.state.config.ENABLE_FEEDBACK_LAYER2,
+        "FEEDBACK_LAYER2_TAGS": request.app.state.config.FEEDBACK_LAYER2_TAGS,
+        "ENABLE_FEEDBACK_LAYER3": request.app.state.config.ENABLE_FEEDBACK_LAYER3,
+        "FEEDBACK_LAYER3_PROMPT": request.app.state.config.FEEDBACK_LAYER3_PROMPT,
+        "ENABLE_FEEDBACK_CATEGORY_TAGS": request.app.state.config.ENABLE_FEEDBACK_CATEGORY_TAGS,
+        "ENABLE_CONVERSATION_FEEDBACK": request.app.state.config.ENABLE_CONVERSATION_FEEDBACK,
+        "CONVERSATION_FEEDBACK_SCALE_MAX": request.app.state.config.CONVERSATION_FEEDBACK_SCALE_MAX,
+        "CONVERSATION_FEEDBACK_PROMPT": request.app.state.config.CONVERSATION_FEEDBACK_PROMPT,
     }
 
 
@@ -40,6 +49,15 @@ async def get_config(request: Request, user=Depends(get_admin_user)):
 class UpdateConfigForm(BaseModel):
     ENABLE_EVALUATION_ARENA_MODELS: Optional[bool] = None
     EVALUATION_ARENA_MODELS: Optional[list[dict]] = None
+    ENABLE_MESSAGE_RATING: Optional[bool] = None
+    ENABLE_FEEDBACK_LAYER2: Optional[bool] = None
+    FEEDBACK_LAYER2_TAGS: Optional[list[dict]] = None
+    ENABLE_FEEDBACK_LAYER3: Optional[bool] = None
+    FEEDBACK_LAYER3_PROMPT: Optional[str] = None
+    ENABLE_FEEDBACK_CATEGORY_TAGS: Optional[bool] = None
+    ENABLE_CONVERSATION_FEEDBACK: Optional[bool] = None
+    CONVERSATION_FEEDBACK_SCALE_MAX: Optional[int] = None
+    CONVERSATION_FEEDBACK_PROMPT: Optional[str] = None
 
 
 @router.post("/config")
@@ -53,9 +71,36 @@ async def update_config(
         config.ENABLE_EVALUATION_ARENA_MODELS = form_data.ENABLE_EVALUATION_ARENA_MODELS
     if form_data.EVALUATION_ARENA_MODELS is not None:
         config.EVALUATION_ARENA_MODELS = form_data.EVALUATION_ARENA_MODELS
+    if form_data.ENABLE_MESSAGE_RATING is not None:
+        config.ENABLE_MESSAGE_RATING = form_data.ENABLE_MESSAGE_RATING
+    if form_data.ENABLE_FEEDBACK_LAYER2 is not None:
+        config.ENABLE_FEEDBACK_LAYER2 = form_data.ENABLE_FEEDBACK_LAYER2
+    if form_data.FEEDBACK_LAYER2_TAGS is not None:
+        config.FEEDBACK_LAYER2_TAGS = form_data.FEEDBACK_LAYER2_TAGS
+    if form_data.ENABLE_FEEDBACK_LAYER3 is not None:
+        config.ENABLE_FEEDBACK_LAYER3 = form_data.ENABLE_FEEDBACK_LAYER3
+    if form_data.FEEDBACK_LAYER3_PROMPT is not None:
+        config.FEEDBACK_LAYER3_PROMPT = form_data.FEEDBACK_LAYER3_PROMPT
+    if form_data.ENABLE_FEEDBACK_CATEGORY_TAGS is not None:
+        config.ENABLE_FEEDBACK_CATEGORY_TAGS = form_data.ENABLE_FEEDBACK_CATEGORY_TAGS
+    if form_data.ENABLE_CONVERSATION_FEEDBACK is not None:
+        config.ENABLE_CONVERSATION_FEEDBACK = form_data.ENABLE_CONVERSATION_FEEDBACK
+    if form_data.CONVERSATION_FEEDBACK_SCALE_MAX is not None:
+        config.CONVERSATION_FEEDBACK_SCALE_MAX = form_data.CONVERSATION_FEEDBACK_SCALE_MAX
+    if form_data.CONVERSATION_FEEDBACK_PROMPT is not None:
+        config.CONVERSATION_FEEDBACK_PROMPT = form_data.CONVERSATION_FEEDBACK_PROMPT
     return {
         "ENABLE_EVALUATION_ARENA_MODELS": config.ENABLE_EVALUATION_ARENA_MODELS,
         "EVALUATION_ARENA_MODELS": config.EVALUATION_ARENA_MODELS,
+        "ENABLE_MESSAGE_RATING": config.ENABLE_MESSAGE_RATING,
+        "ENABLE_FEEDBACK_LAYER2": config.ENABLE_FEEDBACK_LAYER2,
+        "FEEDBACK_LAYER2_TAGS": config.FEEDBACK_LAYER2_TAGS,
+        "ENABLE_FEEDBACK_LAYER3": config.ENABLE_FEEDBACK_LAYER3,
+        "FEEDBACK_LAYER3_PROMPT": config.FEEDBACK_LAYER3_PROMPT,
+        "ENABLE_FEEDBACK_CATEGORY_TAGS": config.ENABLE_FEEDBACK_CATEGORY_TAGS,
+        "ENABLE_CONVERSATION_FEEDBACK": config.ENABLE_CONVERSATION_FEEDBACK,
+        "CONVERSATION_FEEDBACK_SCALE_MAX": config.CONVERSATION_FEEDBACK_SCALE_MAX,
+        "CONVERSATION_FEEDBACK_PROMPT": config.CONVERSATION_FEEDBACK_PROMPT,
     }
 
 
@@ -118,6 +163,14 @@ async def get_feedbacks(
 
     result = Feedbacks.get_feedback_items(filter=filter, skip=skip, limit=limit)
     return result
+
+
+@router.get("/feedback/conversation/{chat_id}")
+async def get_conversation_feedback(chat_id: str, user=Depends(get_verified_user)):
+    feedback = Feedbacks.get_conversation_feedback_by_chat_id_and_user_id(
+        chat_id=chat_id, user_id=user.id
+    )
+    return feedback
 
 
 @router.post("/feedback", response_model=FeedbackModel)

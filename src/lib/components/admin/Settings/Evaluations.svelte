@@ -165,6 +165,134 @@
 					</div>
 				{/if}
 			</div>
+
+			<!-- Feedback Configuration Section -->
+			<div class="mb-3">
+				<div class="mt-0.5 mb-2.5 text-base font-medium">{$i18n.t('Feedback')}</div>
+				<hr class="border-gray-100/30 dark:border-gray-850/30 my-2" />
+
+				<!-- Layer 1: Thumbs Up/Down -->
+				<div class="mb-2.5 flex w-full justify-between">
+					<div class="flex flex-col">
+						<div class="text-xs font-medium">{$i18n.t('Message Rating (Thumbs Up/Down)')}</div>
+						<div class="text-xs text-gray-500">{$i18n.t('Allow users to rate individual responses')}</div>
+					</div>
+					<Switch bind:state={evaluationConfig.ENABLE_MESSAGE_RATING} />
+				</div>
+
+				<!-- Layer 2: Issue Tags -->
+				<div class="mb-2.5 flex w-full justify-between">
+					<div class="flex flex-col">
+						<div class="text-xs font-medium">{$i18n.t('Feedback Tags')}</div>
+						<div class="text-xs text-gray-500">{$i18n.t('Custom tags shown after rating a response')}</div>
+					</div>
+					<Switch bind:state={evaluationConfig.ENABLE_FEEDBACK_LAYER2} />
+				</div>
+
+				{#if evaluationConfig.ENABLE_FEEDBACK_LAYER2}
+					<div class="ml-2 mb-3">
+						<div class="text-xs text-gray-500 mb-2">
+							{$i18n.t('Leave empty to use default tags. Add custom tags below:')}
+						</div>
+						{#each evaluationConfig.FEEDBACK_LAYER2_TAGS ?? [] as tag, index}
+							<div class="flex items-center gap-2 mb-1.5">
+								<input
+									class="flex-1 text-sm px-2.5 py-1 bg-transparent border border-gray-100/30 dark:border-gray-850/30 rounded-lg outline-hidden"
+									bind:value={tag.label}
+									on:input={() => {
+										tag.key = tag.label.toLowerCase().replace(/\s+/g, '_').replace(/[^a-z0-9_]/g, '');
+									}}
+									placeholder={$i18n.t('Tag label')}
+								/>
+								<button
+									type="button"
+									class="p-1 text-gray-400 hover:text-red-500 transition"
+									on:click={() => {
+										evaluationConfig.FEEDBACK_LAYER2_TAGS = evaluationConfig.FEEDBACK_LAYER2_TAGS.filter((_, i) => i !== index);
+									}}
+								>
+									<svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+										<path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
+									</svg>
+								</button>
+							</div>
+						{/each}
+						<button
+							type="button"
+							class="text-xs text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 flex items-center gap-1 mt-1"
+							on:click={() => {
+								if (!evaluationConfig.FEEDBACK_LAYER2_TAGS) evaluationConfig.FEEDBACK_LAYER2_TAGS = [];
+								const key = `tag_${Date.now()}`;
+								evaluationConfig.FEEDBACK_LAYER2_TAGS = [...evaluationConfig.FEEDBACK_LAYER2_TAGS, { key, label: '' }];
+							}}
+						>
+							<Plus className="size-3" /> {$i18n.t('Add tag')}
+						</button>
+					</div>
+				{/if}
+
+				<!-- Layer 3: Free Text -->
+				<div class="mb-2.5 flex w-full justify-between">
+					<div class="flex flex-col">
+						<div class="text-xs font-medium">{$i18n.t('Free Text Comment')}</div>
+						<div class="text-xs text-gray-500">{$i18n.t('Allow users to leave a text comment on responses')}</div>
+					</div>
+					<Switch bind:state={evaluationConfig.ENABLE_FEEDBACK_LAYER3} />
+				</div>
+
+				{#if evaluationConfig.ENABLE_FEEDBACK_LAYER3}
+					<div class="ml-2 mb-3">
+						<div class="text-xs text-gray-500 mb-1">{$i18n.t('Custom prompt text (optional)')}</div>
+						<input
+							class="w-full text-sm px-2.5 py-1.5 bg-transparent border border-gray-100/30 dark:border-gray-850/30 rounded-lg outline-hidden"
+							bind:value={evaluationConfig.FEEDBACK_LAYER3_PROMPT}
+							placeholder={$i18n.t('Feel free to add specific details')}
+						/>
+					</div>
+				{/if}
+
+				<!-- Category Tags -->
+				<div class="mb-2.5 flex w-full justify-between">
+					<div class="flex flex-col">
+						<div class="text-xs font-medium">{$i18n.t('Category Tags')}</div>
+						<div class="text-xs text-gray-500">{$i18n.t('Allow users to add free-form category tags to feedback')}</div>
+					</div>
+					<Switch bind:state={evaluationConfig.ENABLE_FEEDBACK_CATEGORY_TAGS} />
+				</div>
+
+				<hr class="border-gray-100/30 dark:border-gray-850/30 my-2" />
+
+				<!-- Conversation-Level Feedback -->
+				<div class="mb-2.5 flex w-full justify-between">
+					<div class="flex flex-col">
+						<div class="text-xs font-medium">{$i18n.t('Conversation Feedback')}</div>
+						<div class="text-xs text-gray-500">{$i18n.t('Show a feedback strip above the input after 2+ messages')}</div>
+					</div>
+					<Switch bind:state={evaluationConfig.ENABLE_CONVERSATION_FEEDBACK} />
+				</div>
+
+				{#if evaluationConfig.ENABLE_CONVERSATION_FEEDBACK}
+					<div class="ml-2 mb-3">
+						<div class="flex items-center gap-2 mb-2">
+							<div class="text-xs text-gray-500">{$i18n.t('Scale')}</div>
+							<span class="text-xs">1 –</span>
+							<input
+								type="number"
+								class="w-16 text-sm px-2 py-1 bg-transparent border border-gray-100/30 dark:border-gray-850/30 rounded-lg outline-hidden"
+								bind:value={evaluationConfig.CONVERSATION_FEEDBACK_SCALE_MAX}
+								min="2"
+								max="10"
+							/>
+						</div>
+						<div class="text-xs text-gray-500 mb-1">{$i18n.t('Custom prompt text (optional)')}</div>
+						<input
+							class="w-full text-sm px-2.5 py-1.5 bg-transparent border border-gray-100/30 dark:border-gray-850/30 rounded-lg outline-hidden"
+							bind:value={evaluationConfig.CONVERSATION_FEEDBACK_PROMPT}
+							placeholder={$i18n.t('Any thoughts on the overall conversation?')}
+						/>
+					</div>
+				{/if}
+			</div>
 		{:else}
 			<div class="flex h-full justify-center">
 				<div class="my-auto">

@@ -303,6 +303,21 @@ class FeedbackTable:
             db.commit()
             return FeedbackModel.model_validate(feedback)
 
+    def get_conversation_feedback_by_chat_id_and_user_id(
+        self, chat_id: str, user_id: str
+    ) -> Optional[FeedbackModel]:
+        with get_db() as db:
+            feedback = (
+                db.query(Feedback)
+                .filter_by(user_id=user_id)
+                .filter(Feedback.meta["scope"].as_string() == "conversation")
+                .filter(Feedback.meta["chat_id"].as_string() == chat_id)
+                .first()
+            )
+            if feedback:
+                return FeedbackModel.model_validate(feedback)
+            return None
+
     def delete_feedback_by_id(self, id: str) -> bool:
         with get_db() as db:
             feedback = db.query(Feedback).filter_by(id=id).first()

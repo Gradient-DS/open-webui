@@ -88,6 +88,7 @@
 	import Banner from '../common/Banner.svelte';
 	import MessageInput from '$lib/components/chat/MessageInput.svelte';
 	import Messages from '$lib/components/chat/Messages.svelte';
+	import ConversationFeedback from '$lib/components/chat/ConversationFeedback.svelte';
 	import Navbar from '$lib/components/chat/Navbar.svelte';
 	import ChatControls from './ChatControls.svelte';
 	import EventConfirmDialog from '../common/ConfirmDialog.svelte';
@@ -2506,6 +2507,11 @@
 									/>
 								</div>
 							</div>
+
+							<ConversationFeedback
+								chatId={$chatId}
+								assistantMessageCount={createMessagesList(history, history.currentId).filter((m) => m.role === 'assistant').length}
+							/>
 
 							<div class=" pb-1 z-10">
 								<MessageInput
