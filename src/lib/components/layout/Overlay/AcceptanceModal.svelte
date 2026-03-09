@@ -35,9 +35,9 @@
 		<div
 			class="absolute w-full h-full backdrop-blur-lg bg-white/10 dark:bg-gray-900/50 flex justify-center items-center p-4"
 		>
-			<div class="flex flex-col max-w-2xl w-full max-h-[90vh]">
+			<div class="flex flex-col max-w-4xl w-full max-h-[90vh]">
 				<div
-					class="text-center dark:text-white text-2xl font-medium z-50 shrink-0"
+					class="text-center dark:text-white text-2xl font-medium shrink-0"
 					style="white-space: pre-wrap;"
 				>
 					{#if ($config?.ui?.acceptance_modal_title ?? '').trim() !== ''}
@@ -48,7 +48,7 @@
 				</div>
 
 				<div
-					class="mt-4 text-center text-sm dark:text-gray-200 w-full prose dark:prose-invert prose-sm overflow-y-auto min-h-0"
+					class="mt-4 text-center text-sm dark:text-gray-200 w-full prose prose-lg dark:prose-invert overflow-y-auto min-h-0 mx-auto max-w-3xl"
 				>
 					{#if ($config?.ui?.acceptance_modal_content ?? '').trim() !== ''}
 						{@html DOMPurify.sanitize(
