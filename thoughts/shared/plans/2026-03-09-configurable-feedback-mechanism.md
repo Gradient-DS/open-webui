@@ -594,17 +594,17 @@ on:input={() => {
 - [ ] `npm run check` doesn't introduce new errors beyond pre-existing
 
 #### Manual Verification:
-- [ ] Admin Settings > Evaluations shows the new "Feedback" section
-- [ ] All toggles work and persist after saving
-- [ ] Custom tags can be added, edited, and deleted
-- [ ] Tag labels are free-form text (Dutch, English, anything)
-- [ ] Scale max for conversation feedback can be changed (2-10)
-- [ ] Custom prompts are saved and reflected in the chat UI
-- [ ] Toggling Layer 1 off hides thumbs buttons in chat
-- [ ] Toggling Layer 2 off hides reason tags in RateComment
-- [ ] Toggling Layer 3 off hides the comment textarea
-- [ ] Toggling Conversation Feedback on shows the strip in chat
-- [ ] All settings persist across page refreshes
+- [x] Admin Settings > Evaluations shows the new "Feedback" section
+- [x] All toggles work and persist after saving
+- [x] Custom tags can be added, edited, and deleted
+- [x] Tag labels are free-form text (Dutch, English, anything)
+- [x] Scale max for conversation feedback can be changed (2-10)
+- [x] Custom prompts are saved and reflected in the chat UI
+- [x] Toggling Layer 1 off hides thumbs buttons in chat
+- [x] Toggling Layer 2 off hides reason tags in RateComment
+- [x] Toggling Layer 3 off hides the comment textarea
+- [x] Toggling Conversation Feedback on shows the strip in chat
+- [x] All settings persist across page refreshes
 
 **Implementation Note**: After completing this phase and all verification passes, the feature is complete.
 
