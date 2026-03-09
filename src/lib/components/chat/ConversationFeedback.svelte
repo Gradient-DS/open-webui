@@ -21,8 +21,11 @@
 	let submitted = false;
 
 	$: scaleMax = $config?.features?.conversation_feedback_scale_max ?? 5;
-	$: prompt =
-		$config?.features?.conversation_feedback_prompt ||
+	$: header =
+		$config?.features?.conversation_feedback_header ||
+		$i18n.t('How was this conversation?');
+	$: placeholder =
+		$config?.features?.conversation_feedback_placeholder ||
 		$i18n.t('Any thoughts on the overall conversation?');
 	$: enabled = ($config?.features?.enable_conversation_feedback ?? false) && assistantMessageCount >= 2;
 
@@ -99,7 +102,7 @@
 				<span class="whitespace-nowrap"
 					>{submitted
 						? $i18n.t('Feedback submitted')
-						: $i18n.t('How was this conversation?')}</span
+						: header}</span
 				>
 				<div
 					class="flex-1 h-px bg-gray-200 dark:bg-gray-700 group-hover:bg-gray-300 dark:group-hover:bg-gray-600 transition"
@@ -114,7 +117,7 @@
 				transition:slide={{ duration: 200 }}
 			>
 				<div class="flex justify-between items-center mb-2">
-					<div class="text-sm font-medium">{$i18n.t('How was this conversation?')}</div>
+					<div class="text-sm font-medium">{header}</div>
 					<button
 						class="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
 						on:click={() => {
@@ -156,7 +159,7 @@
 				<textarea
 					bind:value={comment}
 					class="w-full text-sm px-1 py-2 bg-transparent outline-hidden resize-none rounded-xl"
-					placeholder={prompt}
+					placeholder={placeholder}
 					rows="2"
 				/>
 

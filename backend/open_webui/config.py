@@ -1615,9 +1615,15 @@ ENABLE_FEEDBACK_LAYER2 = PersistentConfig(
     os.environ.get("ENABLE_FEEDBACK_LAYER2", "True").lower() == "true",
 )
 
-FEEDBACK_LAYER2_TAGS = PersistentConfig(
-    "FEEDBACK_LAYER2_TAGS",
-    "evaluation.feedback.layer2.tags",
+FEEDBACK_LAYER2_POSITIVE_TAGS = PersistentConfig(
+    "FEEDBACK_LAYER2_POSITIVE_TAGS",
+    "evaluation.feedback.layer2.positive_tags",
+    [],
+)
+
+FEEDBACK_LAYER2_NEGATIVE_TAGS = PersistentConfig(
+    "FEEDBACK_LAYER2_NEGATIVE_TAGS",
+    "evaluation.feedback.layer2.negative_tags",
     [],
 )
 
@@ -1651,9 +1657,15 @@ CONVERSATION_FEEDBACK_SCALE_MAX = PersistentConfig(
     int(os.environ.get("CONVERSATION_FEEDBACK_SCALE_MAX", "5")),
 )
 
-CONVERSATION_FEEDBACK_PROMPT = PersistentConfig(
-    "CONVERSATION_FEEDBACK_PROMPT",
-    "evaluation.feedback.conversation.prompt",
+CONVERSATION_FEEDBACK_HEADER = PersistentConfig(
+    "CONVERSATION_FEEDBACK_HEADER",
+    "evaluation.feedback.conversation.header",
+    "",
+)
+
+CONVERSATION_FEEDBACK_PLACEHOLDER = PersistentConfig(
+    "CONVERSATION_FEEDBACK_PLACEHOLDER",
+    "evaluation.feedback.conversation.placeholder",
     "",
 )
 
