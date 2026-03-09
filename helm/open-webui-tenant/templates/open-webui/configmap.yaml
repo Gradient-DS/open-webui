@@ -117,6 +117,8 @@ data:
   FEATURE_ADMIN_SETTINGS: {{ .Values.openWebui.config.featureAdminSettings | quote }}
   FEATURE_ADMIN_SETTINGS_TABS: {{ .Values.openWebui.config.featureAdminSettingsTabs | quote }}
   FEATURE_CHAT_CONTROLS_SECTIONS: {{ .Values.openWebui.config.featureChatControlsSections | quote }}
+  FEATURE_INPUT_MENU: {{ .Values.openWebui.config.featureInputMenu | quote }}
+  FEATURE_TEMPORARY_CHAT: {{ .Values.openWebui.config.featureTemporaryChat | quote }}
 
   # Notes
   ENABLE_NOTES: {{ .Values.openWebui.config.enableNotes | quote }}
@@ -294,5 +296,12 @@ data:
   {{- if .Values.openWebui.config.telemetry.otel.resourceAttributes }}
   OTEL_RESOURCE_ATTRIBUTES: {{ .Values.openWebui.config.telemetry.otel.resourceAttributes | quote }}
   {{- end }}
+  {{- end }}
+
+  # Agent API
+  {{- if eq .Values.openWebui.config.agentApiEnabled "true" }}
+  AGENT_API_ENABLED: "true"
+  AGENT_API_BASE_URL: {{ .Values.openWebui.config.agentApiBaseUrl | quote }}
+  AGENT_API_AGENT: {{ .Values.openWebui.config.agentApiAgent | quote }}
   {{- end }}
 {{- end }}

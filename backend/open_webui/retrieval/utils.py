@@ -290,7 +290,8 @@ async def query_doc_with_hybrid_search(
         # retrieve only min(k, k_reranker) items, sort and cut by distance if k < k_reranker
         if k < k_reranker:
             sorted_items = sorted(
-                zip(distances, metadatas, documents), key=lambda x: x[0], reverse=True
+#! FIX: upstream OpenWebUI bug (c877b59cb) - zip order was (distances, metadatas, documents) but unpack order is (distances, documents, metadatas)
+                zip(distances, documents, metadatas), key=lambda x: x[0], reverse=True
             )
             sorted_items = sorted_items[:k]
 

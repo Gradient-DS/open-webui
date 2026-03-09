@@ -383,12 +383,24 @@ from open_webui.config import (
     ENABLE_MESSAGE_RATING,
     ENABLE_USER_WEBHOOKS,
     ENABLE_EVALUATION_ARENA_MODELS,
+    ENABLE_FEEDBACK_LAYER2,
+    FEEDBACK_LAYER2_TAGS,
+    ENABLE_FEEDBACK_LAYER3,
+    FEEDBACK_LAYER3_PROMPT,
+    ENABLE_FEEDBACK_CATEGORY_TAGS,
+    ENABLE_CONVERSATION_FEEDBACK,
+    CONVERSATION_FEEDBACK_SCALE_MAX,
+    CONVERSATION_FEEDBACK_PROMPT,
     BYPASS_ADMIN_ACCESS_CONTROL,
     USER_PERMISSIONS,
     DEFAULT_USER_ROLE,
     DEFAULT_GROUP_ID,
     PENDING_USER_OVERLAY_CONTENT,
     PENDING_USER_OVERLAY_TITLE,
+    ENABLE_ACCEPTANCE_MODAL,
+    ACCEPTANCE_MODAL_TITLE,
+    ACCEPTANCE_MODAL_CONTENT,
+    ACCEPTANCE_MODAL_BUTTON_TEXT,
     DEFAULT_PROMPT_SUGGESTIONS,
     DEFAULT_MODELS,
     DEFAULT_PINNED_MODELS,
@@ -461,6 +473,8 @@ from open_webui.config import (
     FEATURE_ADMIN_SETTINGS,
     FEATURE_ADMIN_SETTINGS_TABS,
     FEATURE_CHAT_CONTROLS_SECTIONS,
+    FEATURE_INPUT_MENU,
+    FEATURE_TEMPORARY_CHAT,
     # Tasks
     TASK_MODEL,
     TASK_MODEL_EXTERNAL,
@@ -524,6 +538,7 @@ from open_webui.env import (
     AIOHTTP_CLIENT_SESSION_SSL,
     ENABLE_STAR_SESSIONS_MIDDLEWARE,
     ENABLE_PUBLIC_ACTIVE_USERS_COUNT,
+    AGENT_API_ENABLED,  # [Gradient] Agent API bypass flag
     CLIENT_NAME,
 )
 
@@ -541,6 +556,7 @@ from open_webui.utils.chat import (
 )
 from open_webui.utils.embeddings import generate_embeddings
 from open_webui.utils.middleware import process_chat_payload, process_chat_response
+from open_webui.utils.agent import call_agent_api  # [Gradient] Agent API client
 from open_webui.utils.access_control import has_access
 
 from open_webui.utils.auth import (
@@ -876,6 +892,11 @@ app.state.config.DEFAULT_GROUP_ID = DEFAULT_GROUP_ID
 app.state.config.PENDING_USER_OVERLAY_CONTENT = PENDING_USER_OVERLAY_CONTENT
 app.state.config.PENDING_USER_OVERLAY_TITLE = PENDING_USER_OVERLAY_TITLE
 
+app.state.config.ENABLE_ACCEPTANCE_MODAL = ENABLE_ACCEPTANCE_MODAL
+app.state.config.ACCEPTANCE_MODAL_TITLE = ACCEPTANCE_MODAL_TITLE
+app.state.config.ACCEPTANCE_MODAL_CONTENT = ACCEPTANCE_MODAL_CONTENT
+app.state.config.ACCEPTANCE_MODAL_BUTTON_TEXT = ACCEPTANCE_MODAL_BUTTON_TEXT
+
 app.state.config.RESPONSE_WATERMARK = RESPONSE_WATERMARK
 app.state.config.GREETING_TEMPLATE = GREETING_TEMPLATE
 
@@ -904,6 +925,15 @@ app.state.config.AUTO_ARCHIVE_RETENTION_DAYS = AUTO_ARCHIVE_RETENTION_DAYS
 
 app.state.config.ENABLE_EVALUATION_ARENA_MODELS = ENABLE_EVALUATION_ARENA_MODELS
 app.state.config.EVALUATION_ARENA_MODELS = EVALUATION_ARENA_MODELS
+
+app.state.config.ENABLE_FEEDBACK_LAYER2 = ENABLE_FEEDBACK_LAYER2
+app.state.config.FEEDBACK_LAYER2_TAGS = FEEDBACK_LAYER2_TAGS
+app.state.config.ENABLE_FEEDBACK_LAYER3 = ENABLE_FEEDBACK_LAYER3
+app.state.config.FEEDBACK_LAYER3_PROMPT = FEEDBACK_LAYER3_PROMPT
+app.state.config.ENABLE_FEEDBACK_CATEGORY_TAGS = ENABLE_FEEDBACK_CATEGORY_TAGS
+app.state.config.ENABLE_CONVERSATION_FEEDBACK = ENABLE_CONVERSATION_FEEDBACK
+app.state.config.CONVERSATION_FEEDBACK_SCALE_MAX = CONVERSATION_FEEDBACK_SCALE_MAX
+app.state.config.CONVERSATION_FEEDBACK_PROMPT = CONVERSATION_FEEDBACK_PROMPT
 
 app.state.config.OAUTH_USERNAME_CLAIM = OAUTH_USERNAME_CLAIM
 app.state.config.OAUTH_PICTURE_CLAIM = OAUTH_PICTURE_CLAIM
@@ -1830,7 +1860,17 @@ async def chat_completion(
                 request, form_data, user, metadata, model
             )
 
-            response = await chat_completion_handler(request, form_data, user)
+            # [Gradient] When the agent API is enabled, route to the external
+            # agent service instead of the built-in LLM dispatch. The agent
+            # handles its own retrieval, web search, and tool orchestration.
+            # It returns a standard OpenAI SSE stream so process_chat_response
+            # handles streaming, DB persistence, and WebSocket transport unchanged.
+            if AGENT_API_ENABLED:
+                response = await call_agent_api(
+                    request, form_data, metadata, metadata.get("features", {})
+                )
+            else:
+                response = await chat_completion_handler(request, form_data, user)
             if metadata.get("chat_id") and metadata.get("message_id"):
                 try:
                     if not metadata["chat_id"].startswith("local:"):
@@ -2065,6 +2105,14 @@ async def get_app_config(request: Request):
                     "enable_autocomplete_generation": app.state.config.ENABLE_AUTOCOMPLETE_GENERATION,
                     "enable_community_sharing": app.state.config.ENABLE_COMMUNITY_SHARING,
                     "enable_message_rating": app.state.config.ENABLE_MESSAGE_RATING,
+                    "enable_feedback_layer2": app.state.config.ENABLE_FEEDBACK_LAYER2,
+                    "feedback_layer2_tags": app.state.config.FEEDBACK_LAYER2_TAGS,
+                    "enable_feedback_layer3": app.state.config.ENABLE_FEEDBACK_LAYER3,
+                    "feedback_layer3_prompt": app.state.config.FEEDBACK_LAYER3_PROMPT,
+                    "enable_feedback_category_tags": app.state.config.ENABLE_FEEDBACK_CATEGORY_TAGS,
+                    "enable_conversation_feedback": app.state.config.ENABLE_CONVERSATION_FEEDBACK,
+                    "conversation_feedback_scale_max": app.state.config.CONVERSATION_FEEDBACK_SCALE_MAX,
+                    "conversation_feedback_prompt": app.state.config.CONVERSATION_FEEDBACK_PROMPT,
                     "enable_user_webhooks": app.state.config.ENABLE_USER_WEBHOOKS,
                     "enable_admin_export": ENABLE_ADMIN_EXPORT,
                     "enable_admin_chat_access": ENABLE_ADMIN_CHAT_ACCESS,
@@ -2087,6 +2135,8 @@ async def get_app_config(request: Request):
                     "feature_admin_settings": FEATURE_ADMIN_SETTINGS,
                     "feature_admin_settings_tabs": FEATURE_ADMIN_SETTINGS_TABS,
                     "feature_chat_controls_sections": FEATURE_CHAT_CONTROLS_SECTIONS,
+                    "feature_input_menu": FEATURE_INPUT_MENU,
+                    "feature_temporary_chat": FEATURE_TEMPORARY_CHAT,
                     "enable_google_drive_integration": app.state.config.ENABLE_GOOGLE_DRIVE_INTEGRATION,
                     "enable_onedrive_integration": app.state.config.ENABLE_ONEDRIVE_INTEGRATION,
                     **(
@@ -2152,6 +2202,10 @@ async def get_app_config(request: Request):
                     "pending_user_overlay_content": app.state.config.PENDING_USER_OVERLAY_CONTENT,
                     "response_watermark": app.state.config.RESPONSE_WATERMARK,
                     "greeting_template": app.state.config.GREETING_TEMPLATE,
+                    "enable_acceptance_modal": app.state.config.ENABLE_ACCEPTANCE_MODAL,
+                    "acceptance_modal_title": app.state.config.ACCEPTANCE_MODAL_TITLE,
+                    "acceptance_modal_content": app.state.config.ACCEPTANCE_MODAL_CONTENT,
+                    "acceptance_modal_button_text": app.state.config.ACCEPTANCE_MODAL_BUTTON_TEXT,
                 },
                 "license_metadata": app.state.LICENSE_METADATA,
                 **(

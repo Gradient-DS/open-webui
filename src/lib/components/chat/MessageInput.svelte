@@ -450,6 +450,19 @@
 		(model) => $models.find((m) => m.id === model)?.info?.meta?.capabilities?.file_upload ?? true
 	);
 
+	// Whether file upload is enabled for the current user and selected models
+	$: fileUploadEnabled =
+		fileUploadCapableModels.length === selectedModels.length &&
+		($_user?.role === 'admin' || $_user?.permissions?.chat?.file_upload);
+
+	// Auto-hide the "+" input menu when no items would be available
+	$: showInputMenu =
+		isFeatureEnabled('input_menu') &&
+		(fileUploadEnabled ||
+			($config?.features?.enable_notes ?? false) ||
+			isFeatureEnabled('knowledge') ||
+			($chats ?? []).length > 0);
+
 	let webSearchCapableModels = [];
 	$: webSearchCapableModels = (atSelectedModel?.id ? [atSelectedModel.id] : selectedModels).filter(
 		(model) => $models.find((m) => m.id === model)?.info?.meta?.capabilities?.web_search ?? true
@@ -1539,68 +1552,36 @@
 
 							<div class=" flex justify-between mt-0.5 mb-2.5 mx-0.5 max-w-full" dir="ltr">
 								<div class="ml-1 self-end flex items-center flex-1 max-w-[80%]">
-									<InputMenu
-										bind:this={inputMenuRef}
-										bind:files
-										selectedModels={atSelectedModel ? [atSelectedModel.id] : selectedModels}
-										{fileUploadCapableModels}
-										{screenCaptureHandler}
-										{inputFilesHandler}
-										uploadFilesHandler={() => {
-											filesInputElement.click();
-										}}
-										uploadGoogleDriveHandler={googleDriveHandler}
-										uploadOneDriveHandler={oneDriveHandler}
-										{onUpload}
-										onClose={async () => {
-											await tick();
-
-											const chatInput = document.getElementById('chat-input');
-											chatInput?.focus();
-										}}
-										bind:selectedToolIds
-										bind:selectedFilterIds
-										bind:webSearchEnabled
-										bind:imageGenerationEnabled
-										bind:codeInterpreterEnabled
-										{toggleFilters}
-										{showToolsButton}
-										{showWebSearchButton}
-										{showImageGenerationButton}
-										{showCodeInterpreterButton}
-										closeOnOutsideClick={integrationsMenuCloseOnOutsideClick}
-										onShowValves={(e) => {
-											const { type, id } = e;
-											selectedValvesType = type;
-											selectedValvesItemId = id;
-											showValvesModal = true;
-											integrationsMenuCloseOnOutsideClick = false;
-										}}
-									>
-										<div
-											id="input-menu-button"
-											class="bg-transparent hover:bg-gray-100 text-gray-700 dark:text-white dark:hover:bg-gray-800 rounded-full size-8 flex justify-center items-center outline-hidden focus:outline-hidden"
-										>
-											<PlusAlt className="size-5.5" />
-										</div>
-									</InputMenu>
-
-									{#if showWebSearchButton || showImageGenerationButton || showCodeInterpreterButton || showToolsButton || (toggleFilters && toggleFilters.length > 0)}
-										<div
-											class="flex self-center w-[1px] h-4 mx-1 bg-gray-200/50 dark:bg-gray-800/50"
-										/>
-
-										<IntegrationsMenu
+									{#if showInputMenu}
+										<InputMenu
+											bind:this={inputMenuRef}
+											bind:files
 											selectedModels={atSelectedModel ? [atSelectedModel.id] : selectedModels}
-											{toggleFilters}
-											{showWebSearchButton}
-											{showImageGenerationButton}
-											{showCodeInterpreterButton}
+											{fileUploadCapableModels}
+											{screenCaptureHandler}
+											{inputFilesHandler}
+											uploadFilesHandler={() => {
+												filesInputElement.click();
+											}}
+											uploadGoogleDriveHandler={googleDriveHandler}
+											uploadOneDriveHandler={oneDriveHandler}
+											{onUpload}
+											onClose={async () => {
+												await tick();
+
+												const chatInput = document.getElementById('chat-input');
+												chatInput?.focus();
+											}}
 											bind:selectedToolIds
 											bind:selectedFilterIds
 											bind:webSearchEnabled
 											bind:imageGenerationEnabled
 											bind:codeInterpreterEnabled
+											{toggleFilters}
+											{showToolsButton}
+											{showWebSearchButton}
+											{showImageGenerationButton}
+											{showCodeInterpreterButton}
 											closeOnOutsideClick={integrationsMenuCloseOnOutsideClick}
 											onShowValves={(e) => {
 												const { type, id } = e;
@@ -1609,20 +1590,14 @@
 												showValvesModal = true;
 												integrationsMenuCloseOnOutsideClick = false;
 											}}
-											onClose={async () => {
-												await tick();
-
-												const chatInput = document.getElementById('chat-input');
-												chatInput?.focus();
-											}}
 										>
 											<div
-												id="integration-menu-button"
+												id="input-menu-button"
 												class="bg-transparent hover:bg-gray-100 text-gray-700 dark:text-white dark:hover:bg-gray-800 rounded-full size-8 flex justify-center items-center outline-hidden focus:outline-hidden"
 											>
-												<Component className="size-4.5" strokeWidth="1.5" />
+												<PlusAlt className="size-5.5" />
 											</div>
-										</IntegrationsMenu>
+										</InputMenu>
 									{/if}
 
 									<!-- RAG Filter Toggle Button -->

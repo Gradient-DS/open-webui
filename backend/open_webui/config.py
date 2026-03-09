@@ -1247,6 +1247,30 @@ PENDING_USER_OVERLAY_CONTENT = PersistentConfig(
     os.environ.get("PENDING_USER_OVERLAY_CONTENT", ""),
 )
 
+ENABLE_ACCEPTANCE_MODAL = PersistentConfig(
+    "ENABLE_ACCEPTANCE_MODAL",
+    "ui.enable_acceptance_modal",
+    os.environ.get("ENABLE_ACCEPTANCE_MODAL", "False").lower() == "true",
+)
+
+ACCEPTANCE_MODAL_TITLE = PersistentConfig(
+    "ACCEPTANCE_MODAL_TITLE",
+    "ui.acceptance_modal_title",
+    os.environ.get("ACCEPTANCE_MODAL_TITLE", ""),
+)
+
+ACCEPTANCE_MODAL_CONTENT = PersistentConfig(
+    "ACCEPTANCE_MODAL_CONTENT",
+    "ui.acceptance_modal_content",
+    os.environ.get("ACCEPTANCE_MODAL_CONTENT", ""),
+)
+
+ACCEPTANCE_MODAL_BUTTON_TEXT = PersistentConfig(
+    "ACCEPTANCE_MODAL_BUTTON_TEXT",
+    "ui.acceptance_modal_button_text",
+    os.environ.get("ACCEPTANCE_MODAL_BUTTON_TEXT", ""),
+)
+
 
 RESPONSE_WATERMARK = PersistentConfig(
     "RESPONSE_WATERMARK",
@@ -1581,6 +1605,58 @@ EVALUATION_ARENA_MODELS = PersistentConfig(
     [],
 )
 
+####################################
+# Feedback Configuration
+####################################
+
+ENABLE_FEEDBACK_LAYER2 = PersistentConfig(
+    "ENABLE_FEEDBACK_LAYER2",
+    "evaluation.feedback.layer2.enable",
+    os.environ.get("ENABLE_FEEDBACK_LAYER2", "True").lower() == "true",
+)
+
+FEEDBACK_LAYER2_TAGS = PersistentConfig(
+    "FEEDBACK_LAYER2_TAGS",
+    "evaluation.feedback.layer2.tags",
+    [],
+)
+
+ENABLE_FEEDBACK_LAYER3 = PersistentConfig(
+    "ENABLE_FEEDBACK_LAYER3",
+    "evaluation.feedback.layer3.enable",
+    os.environ.get("ENABLE_FEEDBACK_LAYER3", "True").lower() == "true",
+)
+
+FEEDBACK_LAYER3_PROMPT = PersistentConfig(
+    "FEEDBACK_LAYER3_PROMPT",
+    "evaluation.feedback.layer3.prompt",
+    "",
+)
+
+ENABLE_FEEDBACK_CATEGORY_TAGS = PersistentConfig(
+    "ENABLE_FEEDBACK_CATEGORY_TAGS",
+    "evaluation.feedback.category_tags.enable",
+    os.environ.get("ENABLE_FEEDBACK_CATEGORY_TAGS", "True").lower() == "true",
+)
+
+ENABLE_CONVERSATION_FEEDBACK = PersistentConfig(
+    "ENABLE_CONVERSATION_FEEDBACK",
+    "evaluation.feedback.conversation.enable",
+    os.environ.get("ENABLE_CONVERSATION_FEEDBACK", "False").lower() == "true",
+)
+
+CONVERSATION_FEEDBACK_SCALE_MAX = PersistentConfig(
+    "CONVERSATION_FEEDBACK_SCALE_MAX",
+    "evaluation.feedback.conversation.scale_max",
+    int(os.environ.get("CONVERSATION_FEEDBACK_SCALE_MAX", "5")),
+)
+
+CONVERSATION_FEEDBACK_PROMPT = PersistentConfig(
+    "CONVERSATION_FEEDBACK_PROMPT",
+    "evaluation.feedback.conversation.prompt",
+    "",
+)
+
 DEFAULT_ARENA_MODEL = {
     "id": "arena-model",
     "name": "Arena Model",
@@ -1659,6 +1735,8 @@ FEATURE_MODELS = os.environ.get("FEATURE_MODELS", "True").lower() == "true"
 FEATURE_KNOWLEDGE = os.environ.get("FEATURE_KNOWLEDGE", "True").lower() == "true"
 FEATURE_PROMPTS = os.environ.get("FEATURE_PROMPTS", "True").lower() == "true"
 FEATURE_TOOLS = os.environ.get("FEATURE_TOOLS", "True").lower() == "true"
+FEATURE_INPUT_MENU = os.environ.get("FEATURE_INPUT_MENU", "True").lower() == "true"
+FEATURE_TEMPORARY_CHAT = os.environ.get("FEATURE_TEMPORARY_CHAT", "True").lower() == "true"
 
 # Admin Panel Tab Feature Flags
 FEATURE_ADMIN_EVALUATIONS = os.environ.get("FEATURE_ADMIN_EVALUATIONS", "True").lower() == "true"

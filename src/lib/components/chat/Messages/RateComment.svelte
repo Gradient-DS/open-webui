@@ -13,7 +13,7 @@
 	export let message;
 	export let show = false;
 
-	let LIKE_REASONS = [
+	const DEFAULT_LIKE_REASONS = [
 		'accurate_information',
 		'followed_instructions_perfectly',
 		'showcased_creativity',
@@ -22,7 +22,7 @@
 		'thorough_explanation',
 		'other'
 	];
-	let DISLIKE_REASONS = [
+	const DEFAULT_DISLIKE_REASONS = [
 		'dont_like_the_style',
 		'too_verbose',
 		'not_helpful',
@@ -33,19 +33,60 @@
 		'other'
 	];
 
+	// Reason label map for config-driven tags
+	const REASON_LABELS: Record<string, string> = {
+		accurate_information: 'Accurate information',
+		followed_instructions_perfectly: 'Followed instructions perfectly',
+		showcased_creativity: 'Showcased creativity',
+		positive_attitude: 'Positive attitude',
+		attention_to_detail: 'Attention to detail',
+		thorough_explanation: 'Thorough explanation',
+		dont_like_the_style: "Don't like the style",
+		too_verbose: 'Too verbose',
+		not_helpful: 'Not helpful',
+		not_factually_correct: 'Not factually correct',
+		didnt_fully_follow_instructions: "Didn't fully follow instructions",
+		refused_when_it_shouldnt_have: "Refused when it shouldn't have",
+		being_lazy: 'Being lazy',
+		other: 'Other'
+	};
+
 	let tags = [];
 
 	let reasons = [];
+	let reasonLabels: Record<string, string> = {};
 	let selectedReason = null;
 	let comment = '';
 
 	let detailedRating = null;
 	let selectedModel = null;
 
-	$: if (message?.annotation?.rating === 1) {
-		reasons = LIKE_REASONS;
-	} else if (message?.annotation?.rating === -1) {
-		reasons = DISLIKE_REASONS;
+	$: categoryTagsEnabled = $config?.features?.enable_feedback_category_tags ?? true;
+	$: layer2Enabled = $config?.features?.enable_feedback_layer2 ?? true;
+	$: layer3Enabled = $config?.features?.enable_feedback_layer3 ?? true;
+	$: layer3Prompt = $config?.features?.feedback_layer3_prompt || '';
+
+	$: {
+		const configTags = $config?.features?.feedback_layer2_tags ?? [];
+		if (configTags.length > 0) {
+			// Use admin-configured tags (same for both thumbs up/down)
+			reasons = configTags.map((t: { key: string; label: string }) => t.key);
+			reasonLabels = configTags.reduce(
+				(acc: Record<string, string>, t: { key: string; label: string }) => {
+					acc[t.key] = t.label;
+					return acc;
+				},
+				{}
+			);
+		} else {
+			// Fallback to hardcoded defaults
+			reasonLabels = REASON_LABELS;
+			if (message?.annotation?.rating === 1) {
+				reasons = DEFAULT_LIKE_REASONS;
+			} else if (message?.annotation?.rating === -1) {
+				reasons = DEFAULT_DISLIKE_REASONS;
+			}
+		}
 	}
 
 	$: if (message) {
@@ -160,84 +201,62 @@
 		</div>
 	</div>
 
-	<div>
-		{#if reasons.length > 0}
-			<div class="text-sm mt-1.5 font-medium">{$i18n.t('Why?')}</div>
+	{#if layer2Enabled}
+		<div>
+			{#if reasons.length > 0}
+				<div class="text-sm mt-1.5 font-medium">{$i18n.t('Why?')}</div>
 
-			<div class="flex flex-wrap gap-1.5 text-sm mt-1.5">
-				{#each reasons as reason}
-					<button
-						class="px-3 py-0.5 border border-gray-100/30 dark:border-gray-850/30 hover:bg-gray-50 dark:hover:bg-gray-850 {selectedReason ===
-						reason
-							? 'bg-gray-100 dark:bg-gray-800'
-							: ''} transition rounded-xl"
-						on:click={() => {
-							selectedReason = reason;
-						}}
-					>
-						{#if reason === 'accurate_information'}
-							{$i18n.t('Accurate information')}
-						{:else if reason === 'followed_instructions_perfectly'}
-							{$i18n.t('Followed instructions perfectly')}
-						{:else if reason === 'showcased_creativity'}
-							{$i18n.t('Showcased creativity')}
-						{:else if reason === 'positive_attitude'}
-							{$i18n.t('Positive attitude')}
-						{:else if reason === 'attention_to_detail'}
-							{$i18n.t('Attention to detail')}
-						{:else if reason === 'thorough_explanation'}
-							{$i18n.t('Thorough explanation')}
-						{:else if reason === 'dont_like_the_style'}
-							{$i18n.t("Don't like the style")}
-						{:else if reason === 'too_verbose'}
-							{$i18n.t('Too verbose')}
-						{:else if reason === 'not_helpful'}
-							{$i18n.t('Not helpful')}
-						{:else if reason === 'not_factually_correct'}
-							{$i18n.t('Not factually correct')}
-						{:else if reason === 'didnt_fully_follow_instructions'}
-							{$i18n.t("Didn't fully follow instructions")}
-						{:else if reason === 'refused_when_it_shouldnt_have'}
-							{$i18n.t("Refused when it shouldn't have")}
-						{:else if reason === 'being_lazy'}
-							{$i18n.t('Being lazy')}
-						{:else if reason === 'other'}
-							{$i18n.t('Other')}
-						{:else}
-							{reason}
-						{/if}
-					</button>
-				{/each}
-			</div>
-		{/if}
-	</div>
+				<div class="flex flex-wrap gap-1.5 text-sm mt-1.5">
+					{#each reasons as reason}
+						<button
+							class="px-3 py-0.5 border border-gray-100/30 dark:border-gray-850/30 hover:bg-gray-50 dark:hover:bg-gray-850 {selectedReason ===
+							reason
+								? 'bg-gray-100 dark:bg-gray-800'
+								: ''} transition rounded-xl"
+							on:click={() => {
+								selectedReason = reason;
+							}}
+						>
+							{reasonLabels[reason] ? $i18n.t(reasonLabels[reason]) : reason}
+						</button>
+					{/each}
+				</div>
+			{/if}
+		</div>
+	{/if}
 
-	<div class="mt-2">
-		<textarea
-			bind:value={comment}
-			class="w-full text-sm px-1 py-2 bg-transparent outline-hidden resize-none rounded-xl"
-			placeholder={$i18n.t('Feel free to add specific details')}
-			rows="3"
-		/>
-	</div>
-
-	<div class="mt-2 gap-1.5 flex justify-between">
-		<div class="flex items-end group">
-			<Tags
-				{tags}
-				suggestionTags={$_tags ?? []}
-				on:delete={(e) => {
-					tags = tags.filter(
-						(tag) =>
-							tag.name.replaceAll(' ', '_').toLowerCase() !==
-							e.detail.replaceAll(' ', '_').toLowerCase()
-					);
-				}}
-				on:add={(e) => {
-					tags = [...tags, { name: e.detail }];
-				}}
+	{#if layer3Enabled}
+		<div class="mt-2">
+			<textarea
+				bind:value={comment}
+				class="w-full text-sm px-1 py-2 bg-transparent outline-hidden resize-none rounded-xl"
+				placeholder={layer3Prompt || $i18n.t('Feel free to add specific details')}
+				rows="3"
 			/>
 		</div>
+	{/if}
+
+	<div class="mt-2 gap-1.5 flex justify-between">
+		{#if categoryTagsEnabled}
+			<div class="flex items-end group">
+				<Tags
+					{tags}
+					suggestionTags={$_tags ?? []}
+					on:delete={(e) => {
+						tags = tags.filter(
+							(tag) =>
+								tag.name.replaceAll(' ', '_').toLowerCase() !==
+								e.detail.replaceAll(' ', '_').toLowerCase()
+						);
+					}}
+					on:add={(e) => {
+						tags = [...tags, { name: e.detail }];
+					}}
+				/>
+			</div>
+		{:else}
+			<div></div>
+		{/if}
 
 		<button
 			class="px-3.5 py-1.5 text-sm font-medium bg-black hover:bg-gray-900 text-white dark:bg-white dark:text-black dark:hover:bg-gray-100 transition rounded-full"

@@ -203,7 +203,9 @@ openWebui:
     featureAdminEvaluations: "True"
     featureAdminFunctions: "False"
     featureAdminSettings: "True"
-    featureAdminSettingsTabs: "models,tools,interface,db,email"
+    featureAdminSettingsTabs: "models,tools,interface,db,email,acceptance"
+    featureInputMenu: "True"
+    featureTemporaryChat: "True"
 
     # Notes
     enableNotes: "true"
@@ -312,6 +314,11 @@ openWebui:
     emailInviteHeading: ""       # Custom email + invite page heading (empty = default)
 
     bypassModelAccessControl: "false"
+
+    # Agent API (routes chat completions to external agent service)
+    agentApiEnabled: "false"
+    agentApiBaseUrl: ""
+    agentApiAgent: ""
 
     # Audit Logging
     # Levels: NONE, METADATA, REQUEST, REQUEST_RESPONSE

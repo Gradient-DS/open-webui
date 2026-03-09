@@ -42,6 +42,7 @@
 	import SettingsModal from '$lib/components/chat/SettingsModal.svelte';
 	import ChangelogModal from '$lib/components/ChangelogModal.svelte';
 	import AccountPending from '$lib/components/layout/Overlay/AccountPending.svelte';
+	import AcceptanceModal from '$lib/components/layout/Overlay/AcceptanceModal.svelte';
 	import UpdateInfoToast from '$lib/components/layout/UpdateInfoToast.svelte';
 	import Spinner from '$lib/components/common/Spinner.svelte';
 	import { Shortcut, shortcuts } from '$lib/shortcuts';
@@ -53,6 +54,25 @@
 	let localDBChats = [];
 
 	let version;
+	let showAcceptanceModal = false;
+
+	const checkAcceptanceModal = async () => {
+		if (!$config?.ui?.enable_acceptance_modal) return;
+
+		const title = $config?.ui?.acceptance_modal_title ?? '';
+		const content = $config?.ui?.acceptance_modal_content ?? '';
+		const text = `${title}:${content}`;
+		const encoder = new TextEncoder();
+		const data = encoder.encode(text);
+		const hashBuffer = await crypto.subtle.digest('SHA-256', data);
+		const hashArray = Array.from(new Uint8Array(hashBuffer));
+		const currentHash = hashArray.map((b) => b.toString(16).padStart(2, '0')).join('');
+
+		const userHash = $settings?.acceptance_hash ?? '';
+		if (currentHash !== userHash) {
+			showAcceptanceModal = true;
+		}
+	};
 
 	const clearChatInputStorage = () => {
 		const chatInputKeys = Object.keys(localStorage).filter((key) => key.startsWith('chat-input'));
@@ -287,6 +307,7 @@
 				checkForVersionUpdates();
 			}
 		}
+		await checkAcceptanceModal();
 		await tick();
 
 		loaded = true;
@@ -324,6 +345,8 @@
 		>
 			{#if !['user', 'admin'].includes($user?.role)}
 				<AccountPending />
+			{:else if showAcceptanceModal}
+				<AcceptanceModal bind:show={showAcceptanceModal} />
 			{:else}
 				{#if localDBChats.length > 0}
 					<div class="fixed w-full h-full flex z-50">
