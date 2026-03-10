@@ -11,7 +11,7 @@
 	import { onMount, getContext, onDestroy, tick } from 'svelte';
 	const i18n = getContext('i18n');
 
-	import { goto, replaceState } from '$app/navigation';
+	import { goto } from '$app/navigation';
 	import { page } from '$app/stores';
 	import {
 		mobile,
@@ -1295,7 +1295,7 @@
 			if ($page.url.searchParams.get('start_onedrive_sync') === 'true' && knowledge) {
 				const url = new URL(window.location.href);
 				url.searchParams.delete('start_onedrive_sync');
-				replaceState(url.toString(), {});
+				history.replaceState({}, '', url.toString());
 
 				await tick();
 				oneDriveSyncHandler();
