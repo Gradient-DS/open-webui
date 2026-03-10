@@ -243,6 +243,7 @@ openWebui:
     # UI Features
     greetingTemplate: ""
     defaultPromptSuggestions: "[]"
+    defaultModels: ""              # Comma-separated model IDs for new users (e.g., "model-a,model-b")
     enableFolders: "true"
     userPermissionsFeaturesFolders: "true"
     enableChannels: "false"
