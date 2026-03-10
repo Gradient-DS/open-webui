@@ -19,7 +19,7 @@
 
 	import { slide } from 'svelte/transition';
 	import { page } from '$app/stores';
-	import { goto } from '$app/navigation';
+	import { goto, replaceState } from '$app/navigation';
 
 	import ShareChatModal from '../chat/ShareChatModal.svelte';
 	import ModelSelector from '../chat/ModelSelector.svelte';
@@ -138,9 +138,9 @@
 
 										// add 'temporary-chat=true' to the URL
 										if ($temporaryChatEnabled) {
-											window.history.replaceState(null, '', '?temporary-chat=true');
+											replaceState('?temporary-chat=true', {});
 										} else {
-											window.history.replaceState(null, '', location.pathname);
+											replaceState(location.pathname, {});
 										}
 									}}
 								>
