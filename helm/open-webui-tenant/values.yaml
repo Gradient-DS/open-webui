@@ -249,6 +249,7 @@ openWebui:
     enableChannels: "false"
     userPermissionsFeaturesChannels: "false"
     enableCommunitySharing: "false"
+    enableCitationRelevance: "true"
     enableMessageRating: "true"
     enableUserWebhooks: "false"
     enableAutocompleteGeneration: "false"

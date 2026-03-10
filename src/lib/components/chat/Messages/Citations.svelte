@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { getContext } from 'svelte';
-	import { embed, showControls, showEmbeds } from '$lib/stores';
+	import { config, embed, showControls, showEmbeds } from '$lib/stores';
 
 	import CitationModal from './Citations/CitationModal.svelte';
 
@@ -15,6 +15,8 @@
 	let citations = [];
 	let showPercentage = false;
 	let showRelevance = true;
+
+	$: citationRelevanceEnabled = $config?.features?.enable_citation_relevance ?? true;
 
 	let citationModal = null;
 
@@ -139,8 +141,8 @@
 <CitationModal
 	bind:show={showCitationModal}
 	citation={selectedCitation}
-	{showPercentage}
-	{showRelevance}
+	showPercentage={citationRelevanceEnabled && showPercentage}
+	showRelevance={citationRelevanceEnabled && showRelevance}
 />
 
 {#if citations.length > 0}

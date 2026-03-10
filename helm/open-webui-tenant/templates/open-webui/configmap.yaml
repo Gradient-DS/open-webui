@@ -166,6 +166,7 @@ data:
   ENABLE_CHANNELS: {{ .Values.openWebui.config.enableChannels | quote }}
   USER_PERMISSIONS_FEATURES_CHANNELS: {{ .Values.openWebui.config.userPermissionsFeaturesChannels | quote }}
   ENABLE_COMMUNITY_SHARING: {{ .Values.openWebui.config.enableCommunitySharing | quote }}
+  ENABLE_CITATION_RELEVANCE: {{ .Values.openWebui.config.enableCitationRelevance | quote }}
   ENABLE_MESSAGE_RATING: {{ .Values.openWebui.config.enableMessageRating | quote }}
   ENABLE_USER_WEBHOOKS: {{ .Values.openWebui.config.enableUserWebhooks | quote }}
   ENABLE_AUTOCOMPLETE_GENERATION: {{ .Values.openWebui.config.enableAutocompleteGeneration | quote }}

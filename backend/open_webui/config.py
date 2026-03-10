@@ -1781,6 +1781,12 @@ ENABLE_COMMUNITY_SHARING = PersistentConfig(
     os.environ.get("ENABLE_COMMUNITY_SHARING", "True").lower() == "true",
 )
 
+ENABLE_CITATION_RELEVANCE = PersistentConfig(
+    "ENABLE_CITATION_RELEVANCE",
+    "ui.enable_citation_relevance",
+    os.environ.get("ENABLE_CITATION_RELEVANCE", "True").lower() == "true",
+)
+
 ENABLE_MESSAGE_RATING = PersistentConfig(
     "ENABLE_MESSAGE_RATING",
     "ui.enable_message_rating",

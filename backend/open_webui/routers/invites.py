@@ -1,7 +1,8 @@
+import datetime
 import logging
 import time
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from pydantic import BaseModel
 from typing import Optional
 
@@ -16,10 +17,14 @@ from open_webui.utils.auth import (
     get_password_hash,
     validate_password,
 )
-from open_webui.utils.misc import validate_email_format
+from open_webui.utils.misc import parse_duration, validate_email_format
 from open_webui.utils.groups import apply_default_group_assignment
 from open_webui.utils.access_control import get_permissions
-from open_webui.env import CLIENT_NAME
+from open_webui.env import (
+    CLIENT_NAME,
+    WEBUI_AUTH_COOKIE_SAME_SITE,
+    WEBUI_AUTH_COOKIE_SECURE,
+)
 from open_webui.config import DEFAULT_LOCALE
 
 log = logging.getLogger(__name__)
@@ -226,6 +231,7 @@ async def validate_invite(token: str):
 @router.post("/{token}/accept", response_model=SessionUserResponse)
 async def accept_invite(
     request: Request,
+    response: Response,
     token: str,
     form_data: AcceptInviteForm,
 ):
@@ -291,7 +297,31 @@ async def accept_invite(
         Invites.accept_invite(token)
 
         # Create session token
-        session_token = create_token(data={"id": new_user.id})
+        expires_delta = parse_duration(request.app.state.config.JWT_EXPIRES_IN)
+        expires_at = None
+        if expires_delta:
+            expires_at = int(time.time()) + int(expires_delta.total_seconds())
+
+        session_token = create_token(
+            data={"id": new_user.id},
+            expires_delta=expires_delta,
+        )
+
+        # Set the cookie token
+        response.set_cookie(
+            key="token",
+            value=session_token,
+            expires=(
+                datetime.datetime.fromtimestamp(
+                    expires_at, datetime.timezone.utc
+                )
+                if expires_at
+                else None
+            ),
+            httponly=True,
+            samesite=WEBUI_AUTH_COOKIE_SAME_SITE,
+            secure=WEBUI_AUTH_COOKIE_SECURE,
+        )
 
         user_permissions = get_permissions(
             new_user.id, request.app.state.config.USER_PERMISSIONS

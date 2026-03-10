@@ -901,7 +901,6 @@
 
 			if (!$user?.permissions?.chat?.temporary) {
 				await temporaryChatEnabled.set(false);
-				return;
 			}
 		}
 
