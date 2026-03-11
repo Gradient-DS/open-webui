@@ -158,6 +158,7 @@ async def get_feedbacks(
     order_by: Optional[str] = None,
     direction: Optional[str] = None,
     page: Optional[int] = 1,
+    scope: Optional[str] = None,
     user=Depends(get_admin_user),
 ):
     limit = PAGE_ITEM_COUNT
@@ -170,6 +171,8 @@ async def get_feedbacks(
         filter["order_by"] = order_by
     if direction:
         filter["direction"] = direction
+    if scope:
+        filter["scope"] = scope
 
     result = Feedbacks.get_feedback_items(filter=filter, skip=skip, limit=limit)
     return result

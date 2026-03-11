@@ -176,6 +176,21 @@ class FeedbackTable:
         with get_db() as db:
             query = db.query(Feedback, User).join(User, Feedback.user_id == User.id)
 
+            scope = filter.get("scope") if filter else None
+            if scope == "conversation":
+                query = query.filter(
+                    Feedback.meta["scope"].as_string() == "conversation"
+                )
+            elif scope == "message":
+                from sqlalchemy import or_
+
+                query = query.filter(
+                    or_(
+                        Feedback.meta["scope"].as_string() != "conversation",
+                        Feedback.meta["scope"] == None,
+                    )
+                )
+
             if filter:
                 order_by = filter.get("order_by")
                 direction = filter.get("direction")
