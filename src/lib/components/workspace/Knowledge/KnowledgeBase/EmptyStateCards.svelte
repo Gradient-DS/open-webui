@@ -7,6 +7,7 @@
 	import GlobeAlt from '$lib/components/icons/GlobeAlt.svelte';
 	import BarsArrowUp from '$lib/components/icons/BarsArrowUp.svelte';
 	import OneDrive from '$lib/components/icons/OneDrive.svelte';
+	import GoogleDrive from '$lib/components/icons/GoogleDrive.svelte';
 
 	export let knowledgeType: string = 'local';
 	export let onAction: (type: string) => void = () => {};
@@ -27,6 +28,16 @@
 					type: 'onedrive',
 					label: 'Sync from OneDrive',
 					icon: OneDrive,
+					description: 'Select files and folders to sync'
+				}
+			];
+		}
+		if (type === 'google_drive') {
+			return [
+				{
+					type: 'google_drive',
+					label: 'Sync from Google Drive',
+					icon: GoogleDrive,
 					description: 'Select files and folders to sync'
 				}
 			];

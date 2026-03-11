@@ -45,6 +45,8 @@
 			toast.success($i18n.t('Knowledge created successfully.'));
 			if (type === 'onedrive') {
 				goto(`/workspace/knowledge/${res.id}?start_onedrive_sync=true`);
+			} else if (type === 'google_drive') {
+				goto(`/workspace/knowledge/${res.id}?start_google_drive_sync=true`);
 			} else {
 				goto(`/workspace/knowledge/${res.id}`);
 			}

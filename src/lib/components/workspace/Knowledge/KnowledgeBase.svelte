@@ -40,6 +40,17 @@
 	import { processWeb, processYoutubeVideo } from '$lib/apis/retrieval';
 	import { startOneDriveSyncItems, getSyncStatus, cancelSync, getTokenStatus, removeSource, type SyncStatusResponse, type SyncItem, type FailedFile, type SyncErrorType } from '$lib/apis/onedrive';
 	import { openOneDriveItemPicker, getGraphApiToken } from '$lib/utils/onedrive-file-picker';
+	import {
+		startGoogleDriveSyncItems,
+		getSyncStatus as getGoogleDriveSyncStatus,
+		cancelSync as cancelGoogleDriveSync,
+		getTokenStatus as getGoogleDriveTokenStatus,
+		removeSource as removeGoogleDriveSource,
+		type SyncStatusResponse as GoogleDriveSyncStatusResponse,
+		type SyncItem as GoogleDriveSyncItem,
+		type FailedFile as GoogleDriveFailedFile,
+	} from '$lib/apis/googledrive';
+	import { createKnowledgePicker, clearGoogleDriveToken, getAuthToken as getGoogleDriveAuthToken, initialize as initializeGoogleDrive } from '$lib/utils/google-drive-picker';
 	import { WEBUI_API_BASE_URL } from '$lib/constants';
 
 	import { blobToFile, isYoutubeUrl } from '$lib/utils';
@@ -59,6 +70,7 @@
 	import ChevronLeft from '$lib/components/icons/ChevronLeft.svelte';
 	import LockClosed from '$lib/components/icons/LockClosed.svelte';
 	import OneDrive from '$lib/components/icons/OneDrive.svelte';
+	import GoogleDrive from '$lib/components/icons/GoogleDrive.svelte';
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
 	import AccessControlModal from '../common/AccessControlModal.svelte';
 	import Search from '$lib/components/icons/Search.svelte';
@@ -150,7 +162,7 @@
 			direction = null;
 		}
 
-		const isOneDrive = knowledge?.type === 'onedrive';
+		const isExternalSync = knowledge?.type === 'onedrive' || knowledge?.type === 'google_drive';
 		const res = await searchKnowledgeFilesById(
 			localStorage.token,
 			knowledge.id,
@@ -159,7 +171,7 @@
 			sortKey,
 			direction,
 			currentPage,
-			isOneDrive ? 250 : null
+			isExternalSync ? 250 : null
 		).catch(() => {
 			return null;
 		});
@@ -961,6 +973,130 @@
 		}
 	};
 
+
+	const googleDriveSyncHandler = async () => {
+		try {
+			isSyncingGoogleDrive = true;
+
+			const result = await createKnowledgePicker();
+			if (!result) {
+				isSyncingGoogleDrive = false;
+				return;
+			}
+
+			const syncItems: GoogleDriveSyncItem[] = result.items.map(item => ({
+				type: item.type,
+				item_id: item.id,
+				item_path: item.path,
+				name: item.name
+			}));
+
+			_gdSyncRefreshDone = false;
+			await startGoogleDriveSyncItems(localStorage.token, {
+				knowledge_id: knowledge.id,
+				items: syncItems,
+				access_token: result.accessToken
+			});
+
+			const updatedKnowledge = await getKnowledgeById(localStorage.token, id);
+			if (updatedKnowledge) {
+				knowledge = updatedKnowledge;
+			}
+
+			toast.success($i18n.t('Google Drive sync started'));
+			pollGoogleDriveSyncStatus();
+		} catch (error) {
+			console.error('Google Drive sync error:', error);
+			toast.error($i18n.t('Failed to sync from Google Drive: ' + (error instanceof Error ? error.message : String(error))));
+			isSyncingGoogleDrive = false;
+		}
+	};
+
+	const googleDriveResyncHandler = async () => {
+		const sources = knowledge?.meta?.google_drive_sync?.sources;
+		if (!sources?.length) return;
+
+		try {
+			isSyncingGoogleDrive = true;
+
+			clearGoogleDriveToken();
+			await initializeGoogleDrive();
+			const accessToken = await getGoogleDriveAuthToken() as string;
+
+			const syncItems: GoogleDriveSyncItem[] = sources.map((source: any) => ({
+				type: source.type,
+				item_id: source.item_id,
+				item_path: source.item_path,
+				name: source.name
+			}));
+
+			_gdSyncRefreshDone = false;
+			await startGoogleDriveSyncItems(localStorage.token, {
+				knowledge_id: knowledge.id,
+				items: syncItems,
+				access_token: accessToken
+			});
+
+			toast.success($i18n.t('Google Drive sync started'));
+			pollGoogleDriveSyncStatus();
+		} catch (error) {
+			console.error('Google Drive resync error:', error);
+			toast.error($i18n.t('Failed to start sync: ' + (error instanceof Error ? error.message : String(error))));
+			isSyncingGoogleDrive = false;
+		}
+	};
+
+	const pollGoogleDriveSyncStatus = async () => {
+		try {
+			googleDriveSyncStatus = await getGoogleDriveSyncStatus(localStorage.token, knowledge.id);
+
+			if (googleDriveSyncStatus.status === 'syncing') {
+				setTimeout(pollGoogleDriveSyncStatus, 2000);
+			} else if (googleDriveSyncStatus.status === 'file_limit_exceeded') {
+				toast.error(googleDriveSyncStatus.error || $i18n.t('File limit exceeded'));
+				isSyncingGoogleDrive = false;
+				if (!_gdSyncRefreshDone) {
+					_gdSyncRefreshDone = true;
+					await init();
+				}
+			} else if (googleDriveSyncStatus.status === 'access_revoked') {
+				setTimeout(pollGoogleDriveSyncStatus, 2000);
+			} else if (googleDriveSyncStatus.status === 'completed' || googleDriveSyncStatus.status === 'completed_with_errors') {
+				isSyncingGoogleDrive = false;
+				if (!_gdSyncRefreshDone) {
+					_gdSyncRefreshDone = true;
+					await init();
+				}
+			} else if (googleDriveSyncStatus.status === 'failed') {
+				if (isSyncingGoogleDrive) {
+					toast.error($i18n.t('Google Drive sync failed: {{error}}', { error: googleDriveSyncStatus.error }));
+					isSyncingGoogleDrive = false;
+				}
+			} else if (googleDriveSyncStatus.status === 'cancelled') {
+				isSyncingGoogleDrive = false;
+				isCancellingGoogleDriveSync = false;
+				if (!_gdSyncRefreshDone) {
+					_gdSyncRefreshDone = true;
+					await init();
+				}
+			}
+		} catch (error) {
+			console.error('Failed to get Google Drive sync status:', error);
+		}
+	};
+
+	const cancelGoogleDriveSyncHandler = async () => {
+		try {
+			isCancellingGoogleDriveSync = true;
+			await cancelGoogleDriveSync(localStorage.token, knowledge.id);
+			toast.info($i18n.t('Cancelling Google Drive sync...'));
+		} catch (error) {
+			console.error('Failed to cancel Google Drive sync:', error);
+			toast.error($i18n.t('Failed to cancel sync: ' + (error instanceof Error ? error.message : String(error))));
+			isCancellingGoogleDriveSync = false;
+		}
+	};
+
 	const authorizeBackgroundSync = async () => {
 		const authUrl = `${WEBUI_API_BASE_URL}/onedrive/auth/initiate?knowledge_id=${knowledge.id}`;
 
@@ -1012,6 +1148,224 @@
 				}
 			}
 		}, 500);
+	};
+
+
+	// Socket.IO handler for Google Drive file processing started
+	const handleGoogleDriveFileProcessing = (data: {
+		knowledge_id: string;
+		file: {
+			item_id: string;
+			name: string;
+			size?: number;
+			source_item_id?: string;
+			relative_path?: string;
+		};
+	}) => {
+		if (data.knowledge_id !== knowledge?.id) return;
+		if (isCancellingGoogleDriveSync) return;
+
+		const fileId = `googledrive-${data.file.item_id}`;
+		if (fileItems?.some((f) => f.id === fileId || f.itemId === fileId)) return;
+
+		const newFileItem = {
+			type: 'file',
+			file: null,
+			id: fileId,
+			url: '',
+			name: data.file.name,
+			size: data.file.size || 0,
+			status: 'uploading',
+			error: '',
+			itemId: fileId,
+			meta: {
+				source_item_id: data.file.source_item_id,
+				source: 'google_drive',
+				relative_path: data.file.relative_path
+			}
+		};
+
+		fileItems = [newFileItem, ...(fileItems ?? [])];
+		fileItemsTotal = (fileItemsTotal ?? 0) + 1;
+		console.log('Google Drive file processing started:', data.file.name);
+	};
+
+	// Socket.IO handler for Google Drive file added events
+	const handleGoogleDriveFileAdded = (data: {
+		knowledge_id: string;
+		file: {
+			id: string;
+			filename: string;
+			meta?: {
+				name?: string;
+				content_type?: string;
+				size?: number;
+				source?: string;
+				source_item_id?: string;
+				relative_path?: string;
+			};
+			created_at?: number;
+			updated_at?: number;
+		};
+	}) => {
+		if (data.knowledge_id !== knowledge?.id) return;
+		if (isCancellingGoogleDriveSync) return;
+
+		const idx = fileItems?.findIndex((f) => f.id === data.file.id);
+		if (idx !== undefined && idx >= 0 && fileItems) {
+			fileItems[idx].status = 'uploaded';
+			fileItems[idx].file = data.file;
+			fileItems[idx].name = data.file.filename;
+			fileItems[idx].size = data.file.meta?.size || fileItems[idx].size;
+			fileItems[idx].meta = data.file.meta;
+			fileItems = fileItems;
+			console.log('Google Drive file completed:', data.file.filename);
+		} else {
+			const newFileItem = {
+				type: 'file',
+				file: data.file,
+				id: data.file.id,
+				url: '',
+				name: data.file.filename,
+				size: data.file.meta?.size || 0,
+				status: 'uploaded',
+				error: '',
+				itemId: data.file.id,
+				meta: data.file.meta
+			};
+			fileItems = [newFileItem, ...(fileItems ?? [])];
+			fileItemsTotal = (fileItemsTotal ?? 0) + 1;
+			console.log('Google Drive file added:', data.file.filename);
+		}
+	};
+
+	// Socket.IO handler for Google Drive sync progress updates
+	const handleGoogleDriveSyncProgress = async (data: {
+		knowledge_id: string;
+		status: string;
+		current: number;
+		total: number;
+		filename: string;
+		error?: string;
+		files_processed?: number;
+		files_failed?: number;
+		deleted_count?: number;
+		failed_files?: GoogleDriveFailedFile[];
+	}) => {
+		if (data.knowledge_id !== knowledge?.id) return;
+
+		googleDriveSyncStatus = {
+			knowledge_id: data.knowledge_id,
+			status: data.status as any,
+			progress_current: data.current,
+			progress_total: data.total,
+			error: data.error,
+			failed_files: data.failed_files
+		};
+
+		if (data.status === 'access_revoked') {
+			toast.warning(data.error || $i18n.t('Access to a Google Drive source has been revoked'));
+		}
+
+		if (data.status === 'file_limit_exceeded') {
+			toast.error(data.error || $i18n.t('File limit exceeded'));
+			isSyncingGoogleDrive = false;
+			_gdSyncRefreshDone = true;
+			await init();
+			return;
+		}
+
+		if (data.status === 'completed' || data.status === 'completed_with_errors') {
+			const count = data.files_processed ?? 0;
+			const failed = data.files_failed ?? 0;
+			if (count > 0 && failed > 0) {
+				const failedDetails = data.failed_files ? formatFailedFilesMessage(data.failed_files) : '';
+				toast.warning($i18n.t('Synced {{count}} files from Google Drive ({{failed}} failed)', { count, failed }) + failedDetails);
+			} else if (count > 0) {
+				toast.success($i18n.t('Synced {{count}} files from Google Drive', { count }));
+			} else if (failed > 0) {
+				const failedDetails = data.failed_files ? formatFailedFilesMessage(data.failed_files) : '';
+				toast.error($i18n.t('Google Drive sync failed: all {{failed}} files failed to process', { failed }) + failedDetails);
+			} else {
+				toast.success($i18n.t('Google Drive sync completed - no changes'));
+			}
+			isSyncingGoogleDrive = false;
+			_gdSyncRefreshDone = true;
+			const res = await getKnowledgeById(localStorage.token, id);
+			if (res) knowledge = res;
+			await init();
+		} else if (data.status === 'failed') {
+			toast.error($i18n.t('Google Drive sync failed: {{error}}', { error: data.error || 'Unknown error' }));
+			isSyncingGoogleDrive = false;
+		} else if (data.status === 'cancelled') {
+			toast.info($i18n.t('Google Drive sync cancelled'));
+			isSyncingGoogleDrive = false;
+			isCancellingGoogleDriveSync = false;
+			_gdSyncRefreshDone = true;
+			const res = await getKnowledgeById(localStorage.token, id);
+			if (res) knowledge = res;
+			await init();
+		}
+	};
+
+	const authorizeGoogleDriveBackgroundSync = async () => {
+		const authUrl = `${WEBUI_API_BASE_URL}/google-drive/auth/initiate?knowledge_id=${knowledge.id}`;
+
+		const popup = window.open(authUrl, 'google_drive_auth', 'width=600,height=700,scrollbars=yes');
+		let messageReceived = false;
+
+		const handleMessage = (event: MessageEvent) => {
+			if (event.data?.type !== 'google_drive_auth_callback') return;
+			messageReceived = true;
+			window.removeEventListener('message', handleMessage);
+			if (event.data.success) {
+				backgroundSyncGDAuthorized = true;
+				backgroundSyncGDNeedsReauth = false;
+				toast.success($i18n.t('Background sync authorized'));
+			} else {
+				toast.error($i18n.t('Authorization failed: {{error}}', { error: event.data.error }));
+			}
+		};
+
+		window.addEventListener('message', handleMessage);
+
+		const checkClosed = setInterval(async () => {
+			if (popup?.closed) {
+				clearInterval(checkClosed);
+				window.removeEventListener('message', handleMessage);
+				if (!messageReceived) {
+					try {
+						const status = await getGoogleDriveTokenStatus(localStorage.token, knowledge.id);
+						if (status.has_token && !status.is_expired) {
+							backgroundSyncGDAuthorized = true;
+							backgroundSyncGDNeedsReauth = false;
+							toast.success($i18n.t('Background sync authorized'));
+						}
+					} catch (e) {
+						console.warn('Failed to check Google Drive background sync token status:', e);
+						toast.error($i18n.t('Failed to check background sync status'));
+					}
+				}
+			}
+		}, 500);
+	};
+
+	const removeGoogleDriveSourceHandler = async (itemId: string, sourceName: string) => {
+		try {
+			const result = await removeGoogleDriveSource(localStorage.token, knowledge.id, itemId);
+			toast.success($i18n.t('Source "{{name}}" removed. {{count}} file(s) cleaned up.', {
+				name: result.source_name,
+				count: result.files_removed
+			}));
+			const res = await getKnowledgeById(localStorage.token, id);
+			if (res) knowledge = res;
+			await init();
+		} catch (e) {
+			console.error('Error removing Google Drive source:', e);
+			toast.error($i18n.t('Failed to remove source: {{error}}', {
+				error: e instanceof Error ? e.message : String(e)
+			}));
+		}
 	};
 
 	const addFileHandler = async (fileId) => {
@@ -1089,7 +1443,14 @@
 	let backgroundSyncAuthorized = false;
 	let backgroundSyncNeedsReauth = false;
 
-	$: isSyncBusy = isSyncingOneDrive || isCancellingSync;
+	let isSyncingGoogleDrive = false;
+	let isCancellingGoogleDriveSync = false;
+	let googleDriveSyncStatus: GoogleDriveSyncStatusResponse | null = null;
+	let backgroundSyncGDAuthorized = false;
+	let backgroundSyncGDNeedsReauth = false;
+	let _gdSyncRefreshDone = false;
+
+	$: isSyncBusy = isSyncingOneDrive || isCancellingSync || isSyncingGoogleDrive || isCancellingGoogleDriveSync;
 
 	const updateFileContentHandler = async () => {
 		if (isSaving) {
@@ -1284,11 +1645,28 @@
 				}
 			}
 
+			// Check background sync token status for Google Drive KBs
+			if (knowledge?.type === 'google_drive') {
+				try {
+					const status = await getGoogleDriveTokenStatus(localStorage.token, knowledge.id);
+					backgroundSyncGDAuthorized = status.has_token && !status.is_expired;
+					backgroundSyncGDNeedsReauth = status.needs_reauth ?? false;
+				} catch (e) {
+					console.warn('Failed to check Google Drive background sync token status:', e);
+				}
+			}
+
 			// Resume sync UI if a sync is already in progress
 			if (knowledge?.meta?.onedrive_sync?.status === 'syncing') {
 				isSyncingOneDrive = true;
 				_syncRefreshDone = false;
 				pollOneDriveSyncStatus();
+			}
+
+			if (knowledge?.meta?.google_drive_sync?.status === 'syncing') {
+				isSyncingGoogleDrive = true;
+				_gdSyncRefreshDone = false;
+				pollGoogleDriveSyncStatus();
 			}
 
 			// Auto-start OneDrive sync if directed from creation flow
@@ -1299,6 +1677,16 @@
 
 				await tick();
 				oneDriveSyncHandler();
+			}
+
+			// Auto-start Google Drive sync if directed from creation flow
+			if ($page.url.searchParams.get('start_google_drive_sync') === 'true' && knowledge) {
+				const url = new URL(window.location.href);
+				url.searchParams.delete('start_google_drive_sync');
+				history.replaceState({}, '', url.toString());
+
+				await tick();
+				googleDriveSyncHandler();
 			}
 		} else {
 			goto('/workspace/knowledge');
@@ -1315,6 +1703,11 @@
 		// Listen for OneDrive file processing/added events for progressive UI updates
 		$socket?.on('onedrive:file:processing', handleOneDriveFileProcessing);
 		$socket?.on('onedrive:file:added', handleOneDriveFileAdded);
+
+		// Listen for Google Drive sync events via Socket.IO
+		$socket?.on('googledrive:sync:progress', handleGoogleDriveSyncProgress);
+		$socket?.on('googledrive:file:processing', handleGoogleDriveFileProcessing);
+		$socket?.on('googledrive:file:added', handleGoogleDriveFileAdded);
 
 		// Listen for file processing status events via Socket.IO
 		$socket?.on('file:status', handleFileStatus);
@@ -1334,6 +1727,11 @@
 		$socket?.off('onedrive:file:processing', handleOneDriveFileProcessing);
 		$socket?.off('onedrive:file:added', handleOneDriveFileAdded);
 
+		// Clean up Google Drive sync listeners
+		$socket?.off('googledrive:sync:progress', handleGoogleDriveSyncProgress);
+		$socket?.off('googledrive:file:processing', handleGoogleDriveFileProcessing);
+		$socket?.off('googledrive:file:added', handleGoogleDriveFileAdded);
+
 		// Clean up file status listener
 		$socket?.off('file:status', handleFileStatus);
 	});
@@ -1351,11 +1749,15 @@
 
 <SyncConfirmDialog
 	bind:show={showCancelSyncConfirmModal}
-	title={$i18n.t('Cancel OneDrive Sync')}
+	title={$i18n.t(isSyncingGoogleDrive ? 'Cancel Google Drive Sync' : 'Cancel OneDrive Sync')}
 	message={$i18n.t('Are you sure you want to cancel the ongoing sync? Files already synced will be kept.')}
 	confirmLabel={$i18n.t('Cancel Sync')}
 	on:confirm={() => {
-		cancelOneDriveSyncHandler();
+		if (isSyncingGoogleDrive) {
+			cancelGoogleDriveSyncHandler();
+		} else {
+			cancelOneDriveSyncHandler();
+		}
 	}}
 />
 
@@ -1440,6 +1842,8 @@
 							<div class="shrink-0 mr-2.5 flex items-center gap-2">
 								{#if knowledge?.type === 'onedrive'}
 									<Badge type="info" content={$i18n.t('OneDrive')} />
+								{:else if knowledge?.type === 'google_drive'}
+									<Badge type="info" content={$i18n.t('Google Drive')} />
 								{:else}
 									<Badge type="muted" content={$i18n.t('Local')} />
 								{/if}
@@ -1473,13 +1877,65 @@
 										</button>
 									{/if}
 								{/if}
-								{#if isCancellingSync}
+								{#if knowledge?.type === 'google_drive' && $config?.google_drive?.has_client_secret}
+									{#if backgroundSyncGDNeedsReauth}
+										<button
+											class="text-xs text-red-500 hover:text-red-600 flex items-center gap-1"
+											on:click={authorizeGoogleDriveBackgroundSync}
+										>
+											<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" class="size-3.5">
+												<path fill-rule="evenodd" d="M6.701 2.25c.577-1 2.02-1 2.598 0l5.196 9a1.5 1.5 0 0 1-1.299 2.25H2.804a1.5 1.5 0 0 1-1.3-2.25l5.197-9ZM8 4a.75.75 0 0 1 .75.75v3a.75.75 0 0 1-1.5 0v-3A.75.75 0 0 1 8 4Zm0 8a1 1 0 1 0 0-2 1 1 0 0 0 0 2Z" clip-rule="evenodd" />
+											</svg>
+											{$i18n.t('Re-authorize background sync')}
+										</button>
+									{:else if backgroundSyncGDAuthorized}
+										<span class="text-xs text-green-600 flex items-center gap-1">
+											<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" class="size-3.5">
+												<path fill-rule="evenodd" d="M12.416 3.376a.75.75 0 0 1 .208 1.04l-5 7.5a.75.75 0 0 1-1.154.114l-3-3a.75.75 0 0 1 1.06-1.06l2.353 2.353 4.493-6.74a.75.75 0 0 1 1.04-.207Z" clip-rule="evenodd" />
+											</svg>
+											{$i18n.t('Background sync enabled')}
+										</span>
+									{:else if knowledge?.meta?.google_drive_sync?.sources?.length}
+										<button
+											class="text-xs text-blue-500 hover:text-blue-600 flex items-center gap-1"
+											on:click={authorizeGoogleDriveBackgroundSync}
+										>
+											<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" class="size-3.5">
+												<path fill-rule="evenodd" d="M8 1a3.5 3.5 0 0 0-3.5 3.5V7A1.5 1.5 0 0 0 3 8.5v5A1.5 1.5 0 0 0 4.5 15h7a1.5 1.5 0 0 0 1.5-1.5v-5A1.5 1.5 0 0 0 11.5 7V4.5A3.5 3.5 0 0 0 8 1Zm2 6V4.5a2 2 0 1 0-4 0V7h4Z" clip-rule="evenodd" />
+											</svg>
+											{$i18n.t('Enable background sync')}
+										</button>
+									{/if}
+								{/if}
+								{#if isCancellingSync || isCancellingGoogleDriveSync}
 									<Tooltip content={$i18n.t('Click to cancel sync')}>
 										<button
 											class="p-1 rounded-lg text-gray-400 cursor-not-allowed"
 											disabled
 										>
 											<Spinner className="size-3.5" />
+										</button>
+									</Tooltip>
+								{:else if isSyncingGoogleDrive}
+									<Tooltip content={$i18n.t('Click to cancel sync')}>
+										<button
+											class="p-1 rounded-lg hover:bg-red-100 dark:hover:bg-red-900/30 text-blue-500 hover:text-red-500 transition"
+											on:click={() => { showCancelSyncConfirmModal = true; }}
+										>
+											<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" class="size-4">
+												<path d="M4.5 2A2.5 2.5 0 0 0 2 4.5v7A2.5 2.5 0 0 0 4.5 14h7a2.5 2.5 0 0 0 2.5-2.5v-7A2.5 2.5 0 0 0 11.5 2h-7Z" />
+											</svg>
+										</button>
+									</Tooltip>
+								{:else if knowledge?.meta?.google_drive_sync?.sources?.length && knowledge?.user_id === $user?.id}
+									<Tooltip content={knowledge?.meta?.google_drive_sync?.last_sync_at
+										? $i18n.t('Last synced: {{date}}', { date: dayjs(knowledge.meta.google_drive_sync.last_sync_at * 1000).fromNow() })
+										: $i18n.t('Sync Google Drive files')}>
+										<button
+											class="p-1 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 transition"
+											on:click={googleDriveResyncHandler}
+										>
+											<GoogleDrive className="size-4" />
 										</button>
 									</Tooltip>
 								{:else if isSyncingOneDrive}
@@ -1505,10 +1961,10 @@
 										</button>
 									</Tooltip>
 								{/if}
-								{#if isSyncBusy && oneDriveSyncStatus?.progress_total}
+								{#if isSyncBusy && (oneDriveSyncStatus?.progress_total || googleDriveSyncStatus?.progress_total)}
 									<Tooltip content={$i18n.t('Sync progress')}>
 										<div class="text-xs text-blue-500 font-medium">
-											{fileItemsTotal ?? 0} / {oneDriveSyncStatus.progress_total}
+											{fileItemsTotal ?? 0} / {oneDriveSyncStatus?.progress_total || googleDriveSyncStatus?.progress_total}
 										</div>
 									</Tooltip>
 								{:else if isSyncBusy}
@@ -1603,6 +2059,27 @@
 										disabled={isSyncBusy}
 										on:click={() => {
 											oneDriveSyncHandler();
+										}}
+									>
+										<svg
+											xmlns="http://www.w3.org/2000/svg"
+											viewBox="0 0 16 16"
+											fill="currentColor"
+											class="w-4 h-4"
+										>
+											<path
+												d="M8.75 3.75a.75.75 0 0 0-1.5 0v3.5h-3.5a.75.75 0 0 0 0 1.5h3.5v3.5a.75.75 0 0 0 1.5 0v-3.5h3.5a.75.75 0 0 0 0-1.5h-3.5v-3.5Z"
+											/>
+										</svg>
+									</button>
+								</Tooltip>
+							{:else if knowledge?.type === 'google_drive'}
+								<Tooltip content={$i18n.t('Sync from Google Drive')}>
+									<button
+										class="p-1.5 rounded-xl hover:bg-gray-100 dark:bg-gray-850 dark:hover:bg-gray-800 transition font-medium text-sm flex items-center space-x-1 disabled:opacity-40 disabled:cursor-not-allowed"
+										disabled={isSyncBusy}
+										on:click={() => {
+											googleDriveSyncHandler();
 										}}
 									>
 										<svg
@@ -1730,6 +2207,35 @@
 													deleteFileHandler(fileId);
 												}}
 											/>
+									{:else if knowledge?.type === 'google_drive' && knowledge?.meta?.google_drive_sync?.sources?.length}
+										<SourceGroupedFiles
+											sources={knowledge.meta.google_drive_sync.sources}
+											files={fileItems}
+											{knowledge}
+											{selectedFileId}
+											isSyncing={isSyncingGoogleDrive}
+											onClick={(fileId) => {
+												selectedFileId = fileId;
+												if (fileItems) {
+													const file = fileItems.find((file) => file.id === selectedFileId);
+													if (file) {
+														fileSelectHandler(file);
+													} else {
+														selectedFile = null;
+													}
+												}
+											}}
+											onRemoveSource={(itemId, sourceName) => {
+												selectedFileId = null;
+												selectedFile = null;
+												removeGoogleDriveSourceHandler(itemId, sourceName);
+											}}
+											onDelete={(fileId) => {
+												selectedFileId = null;
+												selectedFile = null;
+												deleteFileHandler(fileId);
+											}}
+										/>
 										{:else}
 											<Files
 												files={fileItems}
@@ -1757,7 +2263,7 @@
 										{/if}
 									</div>
 
-									{#if knowledge?.type !== 'onedrive' && fileItemsTotal > 30}
+									{#if knowledge?.type !== 'onedrive' && knowledge?.type !== 'google_drive' && fileItemsTotal > 30}
 										<Pagination bind:page={currentPage} count={fileItemsTotal} perPage={30} />
 									{/if}
 								{:else}
@@ -1774,6 +2280,8 @@
 											onAction={(type) => {
 												if (type === 'onedrive') {
 													oneDriveSyncHandler();
+										} else if (type === 'google_drive') {
+											googleDriveSyncHandler();
 												} else if (type === 'directory') {
 													uploadDirectoryHandler();
 												} else if (type === 'web') {

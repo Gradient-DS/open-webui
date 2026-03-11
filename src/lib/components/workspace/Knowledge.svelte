@@ -23,6 +23,7 @@
 	import Plus from '../icons/Plus.svelte';
 	import Database from '../icons/Database.svelte';
 	import OneDrive from '../icons/OneDrive.svelte';
+	import GoogleDrive from '../icons/GoogleDrive.svelte';
 	import Spinner from '../common/Spinner.svelte';
 	import Tooltip from '../common/Tooltip.svelte';
 	import Dropdown from '../common/Dropdown.svelte';
@@ -131,15 +132,38 @@
 		}
 	};
 
+	const handleGoogleDriveSyncProgress = (data) => {
+		const { knowledge_id, status } = data;
+		if (items) {
+			items = items.map((item) => {
+				if (item.id === knowledge_id) {
+					return {
+						...item,
+						meta: {
+							...item.meta,
+							google_drive_sync: {
+								...(item.meta?.google_drive_sync ?? {}),
+								status
+							}
+						}
+					};
+				}
+				return item;
+			});
+		}
+	};
+
 	onMount(async () => {
 		viewOption = localStorage?.workspaceViewOption || '';
 		loaded = true;
 
 		$socket?.on('onedrive:sync:progress', handleSyncProgress);
+		$socket?.on('googledrive:sync:progress', handleGoogleDriveSyncProgress);
 	});
 
 	onDestroy(() => {
 		$socket?.off('onedrive:sync:progress', handleSyncProgress);
+		$socket?.off('googledrive:sync:progress', handleGoogleDriveSyncProgress);
 	});
 </script>
 
@@ -205,6 +229,18 @@
 								>
 									<OneDrive className="size-4" />
 									<div class="flex items-center">{$i18n.t('From OneDrive')}</div>
+								</DropdownMenu.Item>
+							{/if}
+
+							{#if $config?.features?.enable_google_drive_integration && $config?.features?.enable_google_drive_sync}
+								<DropdownMenu.Item
+									class="flex gap-2 items-center px-3 py-1.5 text-sm cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-xl"
+									on:click={() => {
+										goto('/workspace/knowledge/create?type=google_drive');
+									}}
+								>
+									<GoogleDrive className="size-4" />
+									<div class="flex items-center">{$i18n.t('From Google Drive')}</div>
 								</DropdownMenu.Item>
 							{/if}
 						</DropdownMenu.Content>
@@ -293,6 +329,13 @@
 												{#if item?.type === 'onedrive'}
 													<Badge type="info" content={$i18n.t('OneDrive')} />
 													{#if item.meta?.onedrive_sync?.status === 'syncing'}
+														<Tooltip content={$i18n.t('Syncing...')}>
+															<Spinner className="size-3" />
+														</Tooltip>
+													{/if}
+												{:else if item?.type === 'google_drive'}
+													<Badge type="info" content={$i18n.t('Google Drive')} />
+													{#if item.meta?.google_drive_sync?.status === 'syncing'}
 														<Tooltip content={$i18n.t('Syncing...')}>
 															<Spinner className="size-3" />
 														</Tooltip>
