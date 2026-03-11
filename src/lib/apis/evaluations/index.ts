@@ -93,13 +93,14 @@ export const getAllFeedbacks = async (token: string = '') => {
 	return res;
 };
 
-export const getFeedbackItems = async (token: string = '', orderBy, direction, page) => {
+export const getFeedbackItems = async (token: string = '', orderBy, direction, page, scope?: string) => {
 	let error = null;
 
 	const searchParams = new URLSearchParams();
 	if (orderBy) searchParams.append('order_by', orderBy);
 	if (direction) searchParams.append('direction', direction);
 	if (page) searchParams.append('page', page.toString());
+	if (scope) searchParams.append('scope', scope);
 
 	const res = await fetch(
 		`${WEBUI_API_BASE_URL}/evaluations/feedbacks/list?${searchParams.toString()}`,
