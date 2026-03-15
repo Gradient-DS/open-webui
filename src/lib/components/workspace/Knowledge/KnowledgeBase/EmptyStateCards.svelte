@@ -9,6 +9,7 @@
 	import OneDrive from '$lib/components/icons/OneDrive.svelte';
 
 	export let knowledgeType: string = 'local';
+	export let integrationProviders: Record<string, any> = {};
 	export let onAction: (type: string) => void = () => {};
 
 	type UploadOption = {
@@ -28,6 +29,17 @@
 					label: 'Sync from OneDrive',
 					icon: OneDrive,
 					description: 'Select files and folders to sync'
+				}
+			];
+		}
+		if (integrationProviders?.[type]) {
+			const providerName = integrationProviders[type].name || type;
+			return [
+				{
+					type: 'integration',
+					label: `Ingested via ${providerName} API`,
+					icon: BarsArrowUp,
+					description: 'Documents are pushed to this knowledge base via the integration API'
 				}
 			];
 		}

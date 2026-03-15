@@ -71,6 +71,7 @@ from open_webui.routers import (
     archives,
     audio,
     images,
+    integrations,
     ollama,
     openai,
     retrieval,
@@ -352,6 +353,8 @@ from open_webui.config import (
     INVITE_EXPIRY_HOURS,
     EMAIL_INVITE_SUBJECT,
     EMAIL_INVITE_HEADING,
+    # Integrations
+    INTEGRATION_PROVIDERS,
     ENABLE_RAG_HYBRID_SEARCH,
     ENABLE_RAG_HYBRID_SEARCH_ENRICHED_TEXTS,
     ENABLE_RAG_FILTER_UI,
@@ -1112,6 +1115,8 @@ app.state.config.INVITE_EXPIRY_HOURS = INVITE_EXPIRY_HOURS
 app.state.config.EMAIL_INVITE_SUBJECT = EMAIL_INVITE_SUBJECT
 app.state.config.EMAIL_INVITE_HEADING = EMAIL_INVITE_HEADING
 
+app.state.config.INTEGRATION_PROVIDERS = INTEGRATION_PROVIDERS
+
 app.state.config.OLLAMA_CLOUD_WEB_SEARCH_API_KEY = OLLAMA_CLOUD_WEB_SEARCH_API_KEY
 app.state.config.SEARXNG_QUERY_URL = SEARXNG_QUERY_URL
 app.state.config.SEARXNG_LANGUAGE = SEARXNG_LANGUAGE
@@ -1570,6 +1575,9 @@ app.include_router(notes.router, prefix="/api/v1/notes", tags=["notes"])
 
 app.include_router(models.router, prefix="/api/v1/models", tags=["models"])
 app.include_router(knowledge.router, prefix="/api/v1/knowledge", tags=["knowledge"])
+app.include_router(
+    integrations.router, prefix="/api/v1/integrations", tags=["integrations"]
+)
 app.include_router(prompts.router, prefix="/api/v1/prompts", tags=["prompts"])
 app.include_router(tools.router, prefix="/api/v1/tools", tags=["tools"])
 
@@ -2162,6 +2170,14 @@ async def get_app_config(request: Request):
                 if user is not None
                 else {}
             ),
+        },
+        "integration_providers": {
+            slug: {
+                "name": p["name"],
+                "badge_type": p.get("badge_type", "info"),
+                "max_files_per_kb": p.get("max_files_per_kb", 250),
+            }
+            for slug, p in (app.state.config.INTEGRATION_PROVIDERS or {}).items()
         },
         **(
             {

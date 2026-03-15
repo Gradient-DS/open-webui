@@ -26,6 +26,7 @@
 	import Tools from './Settings/Tools.svelte';
 	import Acceptance from './Settings/Acceptance.svelte';
 	import Email from './Settings/Email.svelte';
+	import Integrations from './Settings/Integrations.svelte';
 
 	const i18n = getContext('i18n');
 
@@ -519,6 +520,33 @@
 				<div class=" self-center">{$i18n.t('Acceptance')}</div>
 			</button>
 		{/if}
+
+		{#if isAdminSettingsTabEnabled('integrations')}
+			<button
+				id="integrations"
+				class="px-0.5 py-1 min-w-fit rounded-lg flex-1 md:flex-none flex text-left transition {selectedTab ===
+				'integrations'
+					? ''
+					: ' text-gray-300 dark:text-gray-600 hover:text-gray-700 dark:hover:text-white'}"
+				on:click={() => {
+					goto('/admin/settings/integrations');
+				}}
+			>
+				<div class=" self-center mr-2">
+					<svg
+						xmlns="http://www.w3.org/2000/svg"
+						viewBox="0 0 16 16"
+						fill="currentColor"
+						class="w-4 h-4"
+					>
+						<path
+							d="M2 2a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v1h2V2a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2a2 2 0 0 1-2 2h-1v2h1a2 2 0 0 1 2 2v2a2 2 0 0 1-2 2h-2a2 2 0 0 1-2-2v-1H8v1a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2v-2a2 2 0 0 1 2-2h1V6H4a2 2 0 0 1-2-2V2Zm2-.5a.5.5 0 0 0-.5.5v2a.5.5 0 0 0 .5.5h2a.5.5 0 0 0 .5-.5V2a.5.5 0 0 0-.5-.5H4Zm8 0a.5.5 0 0 0-.5.5v2a.5.5 0 0 0 .5.5h2a.5.5 0 0 0 .5-.5V2a.5.5 0 0 0-.5-.5h-2ZM6.5 6v4H5a.5.5 0 0 0-.5.5v2a.5.5 0 0 0 .5.5h2a.5.5 0 0 0 .5-.5V10h1v2.5a.5.5 0 0 0 .5.5h2a.5.5 0 0 0 .5-.5v-2a.5.5 0 0 0-.5-.5h-1.5V6H11a.5.5 0 0 0 .5-.5v-2A.5.5 0 0 0 11 3h-1v2.5a.5.5 0 0 1-.5.5H6.5Z"
+						/>
+					</svg>
+				</div>
+				<div class=" self-center">{$i18n.t('Integrations')}</div>
+			</button>
+		{/if}
 	</div>
 
 	<div
@@ -613,6 +641,15 @@
 			/>
 		{:else if selectedTab === 'email'}
 			<Email
+				saveHandler={async () => {
+					toast.success($i18n.t('Settings saved successfully!'));
+
+					await tick();
+					await config.set(await getBackendConfig());
+				}}
+			/>
+		{:else if selectedTab === 'integrations'}
+			<Integrations
 				saveHandler={async () => {
 					toast.success($i18n.t('Settings saved successfully!'));
 

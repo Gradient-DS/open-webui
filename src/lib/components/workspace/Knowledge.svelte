@@ -39,6 +39,7 @@
 	let page = 1;
 	let query = '';
 	let viewOption = '';
+	let typeFilter = '';
 
 	let items = null;
 	let total = null;
@@ -46,7 +47,7 @@
 	let allItemsLoaded = false;
 	let itemsLoading = false;
 
-	$: if (loaded && query !== undefined && viewOption !== undefined) {
+	$: if (loaded && query !== undefined && viewOption !== undefined && typeFilter !== undefined) {
 		init();
 	}
 
@@ -71,7 +72,7 @@
 
 	const getItemsPage = async () => {
 		itemsLoading = true;
-		const res = await searchKnowledgeBases(localStorage.token, query, viewOption, page).catch(
+		const res = await searchKnowledgeBases(localStorage.token, query, viewOption, page, typeFilter || null).catch(
 			() => {
 				return [];
 			}
@@ -263,6 +264,22 @@
 						await tick();
 					}}
 				/>
+
+				{#if Object.keys($config?.integration_providers ?? {}).length > 0}
+					<select
+						class="text-xs bg-transparent outline-hidden border border-gray-200 dark:border-gray-700 rounded-lg px-2 py-1 ml-1"
+						bind:value={typeFilter}
+					>
+						<option value="">{$i18n.t('All Types')}</option>
+						<option value="local">{$i18n.t('Local')}</option>
+						{#if $config?.features?.enable_onedrive_integration}
+							<option value="onedrive">{$i18n.t('OneDrive')}</option>
+						{/if}
+						{#each Object.entries($config?.integration_providers ?? {}) as [slug, provider]}
+							<option value={slug}>{provider.name}</option>
+						{/each}
+					</select>
+				{/if}
 			</div>
 		</div>
 
@@ -297,6 +314,11 @@
 															<Spinner className="size-3" />
 														</Tooltip>
 													{/if}
+												{:else if $config?.integration_providers?.[item?.type]}
+													<Badge
+														type={$config.integration_providers[item.type].badge_type}
+														content={$config.integration_providers[item.type].name}
+													/>
 												{:else}
 													<Badge type="muted" content={$i18n.t('Local')} />
 												{/if}

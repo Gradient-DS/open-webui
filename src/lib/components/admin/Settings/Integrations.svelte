@@ -1,0 +1,506 @@
+<script lang="ts">
+	import { onMount, getContext } from 'svelte';
+	import { toast } from 'svelte-sonner';
+
+	import { getIntegrationsConfig, setIntegrationsConfig } from '$lib/apis/configs';
+	import { searchUsers } from '$lib/apis/users';
+	import Spinner from '$lib/components/common/Spinner.svelte';
+	import Badge from '$lib/components/common/Badge.svelte';
+
+	const i18n = getContext('i18n');
+
+	export let saveHandler: Function;
+
+	let loading = true;
+	let saving = false;
+
+	// Provider registry: slug -> config
+	let providers: Record<string, any> = {};
+
+	// Edit/add state
+	let editingSlug: string | null = null;
+	let showForm = false;
+	let form = {
+		slug: '',
+		name: '',
+		description: '',
+		badge_type: 'info',
+		data_type: 'documents',
+		data_type_description: '',
+		max_files_per_kb: 250,
+		max_documents_per_request: 50,
+		service_account_id: ''
+	};
+
+	// User search for service account
+	let userSearchQuery = '';
+	let userSearchResults: any[] = [];
+	let selectedUser: any = null;
+	let showUserSearch = false;
+
+	// Confirm delete
+	let deleteConfirmSlug: string | null = null;
+
+	// API example toggle
+	let showApiExample: string | null = null;
+
+	onMount(async () => {
+		try {
+			const config = await getIntegrationsConfig(localStorage.token);
+			if (config) {
+				providers = config.providers || {};
+			}
+		} catch (err) {
+			toast.error(`${err}`);
+		}
+		loading = false;
+	});
+
+	const handleSave = async () => {
+		saving = true;
+		try {
+			await setIntegrationsConfig(localStorage.token, { providers });
+			saveHandler();
+		} catch (err) {
+			toast.error(`${err}`);
+		}
+		saving = false;
+	};
+
+	function resetForm() {
+		form = {
+			slug: '',
+			name: '',
+			description: '',
+			badge_type: 'info',
+			data_type: 'documents',
+			data_type_description: '',
+			max_files_per_kb: 250,
+			max_documents_per_request: 50,
+			service_account_id: ''
+		};
+		selectedUser = null;
+		userSearchQuery = '';
+		userSearchResults = [];
+		showUserSearch = false;
+	}
+
+	function startAdd() {
+		editingSlug = null;
+		resetForm();
+		showForm = true;
+	}
+
+	function startEdit(slug: string) {
+		editingSlug = slug;
+		const p = providers[slug];
+		form = {
+			slug,
+			name: p.name || '',
+			description: p.description || '',
+			badge_type: p.badge_type || 'info',
+			data_type: p.data_type || 'documents',
+			data_type_description: p.data_type_description || '',
+			max_files_per_kb: p.max_files_per_kb || 250,
+			max_documents_per_request: p.max_documents_per_request || 50,
+			service_account_id: p.service_account_id || ''
+		};
+		selectedUser = null;
+		showForm = true;
+	}
+
+	function generateSlug(name: string): string {
+		return name
+			.toLowerCase()
+			.replace(/[^a-z0-9]+/g, '-')
+			.replace(/^-|-$/g, '');
+	}
+
+	function applyForm() {
+		const slug = editingSlug || form.slug || generateSlug(form.name);
+		if (!slug) {
+			toast.error('Slug is required');
+			return;
+		}
+		if (!form.name) {
+			toast.error('Name is required');
+			return;
+		}
+		if (!editingSlug && providers[slug]) {
+			toast.error(`Provider with slug "${slug}" already exists`);
+			return;
+		}
+
+		const { slug: _slug, ...config } = form;
+		providers[slug] = config;
+
+		// If editing and slug changed, remove old
+		if (editingSlug && editingSlug !== slug) {
+			delete providers[editingSlug];
+		}
+
+		providers = providers; // trigger reactivity
+		showForm = false;
+		editingSlug = null;
+	}
+
+	function removeProvider(slug: string) {
+		delete providers[slug];
+		providers = providers;
+		deleteConfirmSlug = null;
+	}
+
+	async function handleUserSearch() {
+		if (userSearchQuery.length < 1) {
+			userSearchResults = [];
+			return;
+		}
+		try {
+			const res = await searchUsers(localStorage.token, userSearchQuery);
+			userSearchResults = res?.items || res || [];
+		} catch {
+			userSearchResults = [];
+		}
+	}
+
+	function selectUser(user: any) {
+		form.service_account_id = user.id;
+		selectedUser = user;
+		showUserSearch = false;
+		userSearchQuery = '';
+		userSearchResults = [];
+	}
+</script>
+
+<form
+	class="flex flex-col h-full justify-between text-sm"
+	on:submit|preventDefault={handleSave}
+>
+	<div class="overflow-y-scroll pr-1.5 max-h-[28rem]">
+		{#if loading}
+			<div class="flex justify-center py-8">
+				<Spinner />
+			</div>
+		{:else}
+			<div class="space-y-3">
+				<div class="flex justify-between items-center">
+					<div class="font-medium">{$i18n.t('Integration Providers')}</div>
+					<button
+						class="px-3 py-1 text-xs font-medium border border-gray-200 dark:border-gray-700 hover:bg-gray-100 dark:hover:bg-gray-800 transition rounded-full"
+						type="button"
+						on:click={startAdd}
+					>
+						+ {$i18n.t('Add Provider')}
+					</button>
+				</div>
+
+				<!-- Provider List -->
+				{#if Object.keys(providers).length === 0 && !showForm}
+					<div class="text-center text-gray-400 py-8">
+						{$i18n.t('No integration providers configured')}
+					</div>
+				{/if}
+
+				{#each Object.entries(providers) as [slug, provider]}
+					<div
+						class="flex items-center justify-between p-3 border border-gray-200 dark:border-gray-700 rounded-lg"
+					>
+						<div class="flex items-center gap-3">
+							<Badge type={provider.badge_type || 'info'} content={provider.name} />
+							<div class="text-xs text-gray-500">{slug}</div>
+							{#if provider.service_account_id}
+								<div class="text-xs text-green-600 dark:text-green-400">
+									{$i18n.t('Service account bound')}
+								</div>
+							{:else}
+								<div class="text-xs text-yellow-600 dark:text-yellow-400">
+									{$i18n.t('No service account')}
+								</div>
+							{/if}
+						</div>
+						<div class="flex items-center gap-2">
+							<button
+								class="text-xs text-gray-500 hover:text-gray-700 dark:hover:text-gray-300"
+								type="button"
+								on:click={() => {
+									showApiExample = showApiExample === slug ? null : slug;
+								}}
+							>
+								API
+							</button>
+							<button
+								class="text-xs text-gray-500 hover:text-gray-700 dark:hover:text-gray-300"
+								type="button"
+								on:click={() => startEdit(slug)}
+							>
+								{$i18n.t('Edit')}
+							</button>
+							{#if deleteConfirmSlug === slug}
+								<button
+									class="text-xs text-red-600 font-medium"
+									type="button"
+									on:click={() => removeProvider(slug)}
+								>
+									{$i18n.t('Confirm')}
+								</button>
+								<button
+									class="text-xs text-gray-500"
+									type="button"
+									on:click={() => (deleteConfirmSlug = null)}
+								>
+									{$i18n.t('Cancel')}
+								</button>
+							{:else}
+								<button
+									class="text-xs text-red-500 hover:text-red-700"
+									type="button"
+									on:click={() => (deleteConfirmSlug = slug)}
+								>
+									{$i18n.t('Remove')}
+								</button>
+							{/if}
+						</div>
+					</div>
+
+					<!-- API Example -->
+					{#if showApiExample === slug}
+						<div
+							class="p-3 bg-gray-50 dark:bg-gray-800 rounded-lg text-xs font-mono overflow-x-auto"
+						>
+							<div class="text-gray-500 mb-2">{$i18n.t('Example: Ingest documents')}</div>
+							<pre class="whitespace-pre-wrap">curl -X POST {window.location.origin}/api/v1/integrations/ingest \
+  -H "Authorization: Bearer sk-YOUR-API-KEY" \
+  -H "Content-Type: application/json" \
+  -d '{JSON.stringify(
+								{
+									collection: {
+										source_id: 'my-collection-123',
+										name: 'My Collection',
+										description: 'Example collection'
+									},
+									documents: [
+										{
+											source_id: 'doc-1',
+											filename: 'example.pdf',
+											text: 'Document content here...',
+											title: 'Example Document',
+											source_url: 'https://example.com/doc-1'
+										}
+									]
+								},
+								null,
+								2
+							)}'</pre>
+						</div>
+					{/if}
+				{/each}
+
+				<!-- Add/Edit Form -->
+				{#if showForm}
+					<div class="p-4 border border-gray-200 dark:border-gray-700 rounded-lg space-y-3">
+						<div class="font-medium text-xs text-gray-500 uppercase tracking-wide">
+							{editingSlug ? $i18n.t('Edit Provider') : $i18n.t('Add Provider')}
+						</div>
+
+						<div class="grid grid-cols-2 gap-3">
+							<div>
+								<div class="mb-1 text-xs text-gray-500">{$i18n.t('Name')}</div>
+								<input
+									class="w-full text-sm bg-transparent outline-hidden border border-gray-200 dark:border-gray-700 rounded px-2 py-1"
+									type="text"
+									bind:value={form.name}
+									placeholder="Octobox"
+									on:input={() => {
+										if (!editingSlug) {
+											form.slug = generateSlug(form.name);
+										}
+									}}
+								/>
+							</div>
+							<div>
+								<div class="mb-1 text-xs text-gray-500">{$i18n.t('Slug')}</div>
+								<input
+									class="w-full text-sm bg-transparent outline-hidden border border-gray-200 dark:border-gray-700 rounded px-2 py-1"
+									type="text"
+									bind:value={form.slug}
+									placeholder="octobox"
+									disabled={!!editingSlug}
+								/>
+							</div>
+						</div>
+
+						<div>
+							<div class="mb-1 text-xs text-gray-500">{$i18n.t('Description')}</div>
+							<input
+								class="w-full text-sm bg-transparent outline-hidden border border-gray-200 dark:border-gray-700 rounded px-2 py-1"
+								type="text"
+								bind:value={form.description}
+								placeholder="Document pipeline integration"
+							/>
+						</div>
+
+						<div class="grid grid-cols-2 gap-3">
+							<div>
+								<div class="mb-1 text-xs text-gray-500">{$i18n.t('Badge Type')}</div>
+								<select
+									class="w-full text-sm bg-transparent outline-hidden border border-gray-200 dark:border-gray-700 rounded px-2 py-1"
+									bind:value={form.badge_type}
+								>
+									<option value="info">Info (Blue)</option>
+									<option value="success">Success (Green)</option>
+									<option value="warning">Warning (Yellow)</option>
+									<option value="error">Error (Red)</option>
+									<option value="muted">Muted (Gray)</option>
+								</select>
+							</div>
+							<div>
+								<div class="mb-1 text-xs text-gray-500">{$i18n.t('Badge Preview')}</div>
+								<div class="pt-1">
+									<Badge type={form.badge_type} content={form.name || 'Preview'} />
+								</div>
+							</div>
+						</div>
+
+						<div>
+							<div class="mb-1 text-xs text-gray-500">{$i18n.t('Data Type Description')}</div>
+							<textarea
+								class="w-full text-sm bg-transparent outline-hidden border border-gray-200 dark:border-gray-700 rounded px-2 py-1"
+								rows="2"
+								bind:value={form.data_type_description}
+								placeholder="Full documents (PDF, DOCX, etc.) with extracted text."
+							/>
+						</div>
+
+						<div class="grid grid-cols-2 gap-3">
+							<div>
+								<div class="mb-1 text-xs text-gray-500">
+									{$i18n.t('Max Files Per Knowledge Base')}
+								</div>
+								<input
+									class="w-full text-sm bg-transparent outline-hidden border border-gray-200 dark:border-gray-700 rounded px-2 py-1"
+									type="number"
+									bind:value={form.max_files_per_kb}
+									min="1"
+									max="10000"
+								/>
+							</div>
+							<div>
+								<div class="mb-1 text-xs text-gray-500">
+									{$i18n.t('Max Documents Per Request')}
+								</div>
+								<input
+									class="w-full text-sm bg-transparent outline-hidden border border-gray-200 dark:border-gray-700 rounded px-2 py-1"
+									type="number"
+									bind:value={form.max_documents_per_request}
+									min="1"
+									max="1000"
+								/>
+							</div>
+						</div>
+
+						<!-- Service Account -->
+						<div>
+							<div class="mb-1 text-xs text-gray-500">{$i18n.t('Service Account')}</div>
+							{#if form.service_account_id && !showUserSearch}
+								<div class="flex items-center gap-2">
+									<div
+										class="flex-1 text-sm bg-transparent border border-gray-200 dark:border-gray-700 rounded px-2 py-1"
+									>
+										{#if selectedUser}
+											{selectedUser.name} ({selectedUser.email})
+										{:else}
+											ID: {form.service_account_id}
+										{/if}
+									</div>
+									<button
+										class="text-xs text-gray-500 hover:text-gray-700"
+										type="button"
+										on:click={() => {
+											showUserSearch = true;
+										}}
+									>
+										{$i18n.t('Change')}
+									</button>
+									<button
+										class="text-xs text-red-500 hover:text-red-700"
+										type="button"
+										on:click={() => {
+											form.service_account_id = '';
+											selectedUser = null;
+										}}
+									>
+										{$i18n.t('Remove')}
+									</button>
+								</div>
+							{:else}
+								<div class="relative">
+									<input
+										class="w-full text-sm bg-transparent outline-hidden border border-gray-200 dark:border-gray-700 rounded px-2 py-1"
+										type="text"
+										bind:value={userSearchQuery}
+										placeholder={$i18n.t('Search users...')}
+										on:input={handleUserSearch}
+										on:focus={() => {
+											showUserSearch = true;
+										}}
+									/>
+									{#if showUserSearch && userSearchResults.length > 0}
+										<div
+											class="absolute z-10 w-full mt-1 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg max-h-40 overflow-y-auto"
+										>
+											{#each userSearchResults as user}
+												<button
+													class="w-full text-left px-3 py-2 text-sm hover:bg-gray-100 dark:hover:bg-gray-700 flex items-center gap-2"
+													type="button"
+													on:click={() => selectUser(user)}
+												>
+													<div class="font-medium">{user.name}</div>
+													<div class="text-xs text-gray-500">{user.email}</div>
+												</button>
+											{/each}
+										</div>
+									{/if}
+								</div>
+							{/if}
+						</div>
+
+						<div class="flex justify-end gap-2 pt-2">
+							<button
+								class="px-3 py-1 text-xs font-medium border border-gray-200 dark:border-gray-700 hover:bg-gray-100 dark:hover:bg-gray-800 transition rounded-full"
+								type="button"
+								on:click={() => {
+									showForm = false;
+									editingSlug = null;
+								}}
+							>
+								{$i18n.t('Cancel')}
+							</button>
+							<button
+								class="px-3 py-1 text-xs font-medium bg-black hover:bg-gray-900 text-white dark:bg-white dark:text-black dark:hover:bg-gray-100 transition rounded-full"
+								type="button"
+								on:click={applyForm}
+							>
+								{editingSlug ? $i18n.t('Update') : $i18n.t('Add')}
+							</button>
+						</div>
+					</div>
+				{/if}
+			</div>
+		{/if}
+	</div>
+
+	<div class="flex justify-end pt-3 text-sm font-medium">
+		<button
+			class="px-3.5 py-1.5 text-sm font-medium bg-black hover:bg-gray-900 text-white dark:bg-white dark:text-black dark:hover:bg-gray-100 transition rounded-full flex items-center gap-1.5 {saving
+				? 'cursor-not-allowed'
+				: ''}"
+			type="submit"
+			disabled={saving}
+		>
+			{$i18n.t('Save')}
+			{#if saving}
+				<Spinner className="size-3" />
+			{/if}
+		</button>
+	</div>
+</form>

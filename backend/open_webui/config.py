@@ -3096,6 +3096,16 @@ EXTERNAL_PIPELINE_TIMEOUT = PersistentConfig(
     int(os.environ.get("EXTERNAL_PIPELINE_TIMEOUT", "120")),
 )
 
+####################################
+# Integration Providers
+####################################
+
+INTEGRATION_PROVIDERS = PersistentConfig(
+    "INTEGRATION_PROVIDERS",
+    "integrations.providers",
+    {},
+)
+
 
 RAG_TEXT_SPLITTER = PersistentConfig(
     "RAG_TEXT_SPLITTER",

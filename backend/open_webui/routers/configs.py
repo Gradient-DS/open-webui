@@ -9,6 +9,7 @@ from typing import Optional
 from open_webui.utils.auth import get_admin_user, get_verified_user
 from open_webui.config import get_config, save_config
 from open_webui.config import BannerModel
+from open_webui.models.users import Users
 
 from open_webui.utils.tools import (
     get_tool_server_data,
@@ -648,3 +649,69 @@ async def test_email_config(request: Request, user=Depends(get_admin_user)):
         return {"status": "ok", "message": f"Test email sent to {user.email}"}
     except Exception as e:
         raise HTTPException(500, detail=f"Failed to send test email: {str(e)}")
+
+
+############################
+# Integrations Config
+############################
+
+
+class IntegrationsConfigForm(BaseModel):
+    providers: dict
+
+
+def _bind_service_account(user_id: str, provider_slug: str):
+    """Set user.info.integration_provider on the service account."""
+    user = Users.get_user_by_id(user_id)
+    if not user:
+        return
+    info = dict(user.info) if user.info else {}
+    info["integration_provider"] = provider_slug
+    Users.update_user_by_id(user_id, {"info": info})
+
+
+def _unbind_service_account(user_id: str):
+    """Clear user.info.integration_provider."""
+    user = Users.get_user_by_id(user_id)
+    if not user:
+        return
+    info = dict(user.info) if user.info else {}
+    info.pop("integration_provider", None)
+    Users.update_user_by_id(user_id, {"info": info})
+
+
+@router.get("/integrations")
+async def get_integrations_config(request: Request, user=Depends(get_admin_user)):
+    return {
+        "providers": request.app.state.config.INTEGRATION_PROVIDERS,
+    }
+
+
+@router.post("/integrations")
+async def set_integrations_config(
+    request: Request,
+    form_data: IntegrationsConfigForm,
+    user=Depends(get_admin_user),
+):
+    old_providers = request.app.state.config.INTEGRATION_PROVIDERS or {}
+
+    # Unbind service accounts that were removed or changed
+    for slug, old_provider in old_providers.items():
+        old_sa = old_provider.get("service_account_id")
+        if not old_sa:
+            continue
+        new_provider = form_data.providers.get(slug)
+        new_sa = new_provider.get("service_account_id") if new_provider else None
+        if old_sa != new_sa:
+            _unbind_service_account(old_sa)
+
+    # Save new config
+    request.app.state.config.INTEGRATION_PROVIDERS = form_data.providers
+
+    # Bind new service accounts
+    for slug, provider in form_data.providers.items():
+        sa_id = provider.get("service_account_id")
+        if sa_id:
+            _bind_service_account(sa_id, slug)
+
+    return {"providers": request.app.state.config.INTEGRATION_PROVIDERS}
