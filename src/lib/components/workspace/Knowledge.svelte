@@ -28,6 +28,7 @@
 	import Dropdown from '../common/Dropdown.svelte';
 	import XMark from '../icons/XMark.svelte';
 	import ViewSelector from './common/ViewSelector.svelte';
+	import TypeSelector from './common/TypeSelector.svelte';
 	import Loader from '../common/Loader.svelte';
 
 	let loaded = false;
@@ -266,19 +267,12 @@
 				/>
 
 				{#if Object.keys($config?.integration_providers ?? {}).length > 0}
-					<select
-						class="text-xs bg-transparent outline-hidden border border-gray-200 dark:border-gray-700 rounded-lg px-2 py-1 ml-1"
+					<TypeSelector
 						bind:value={typeFilter}
-					>
-						<option value="">{$i18n.t('All Types')}</option>
-						<option value="local">{$i18n.t('Local')}</option>
-						{#if $config?.features?.enable_onedrive_integration}
-							<option value="onedrive">{$i18n.t('OneDrive')}</option>
-						{/if}
-						{#each Object.entries($config?.integration_providers ?? {}) as [slug, provider]}
-							<option value={slug}>{provider.name}</option>
-						{/each}
-					</select>
+						onChange={async () => {
+							await tick();
+						}}
+					/>
 				{/if}
 			</div>
 		</div>

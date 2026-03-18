@@ -141,6 +141,8 @@ openWebui:
     # LLM Providers
     enableOllamaApi: "false"
     openaiApiBaseUrl: "https://router.huggingface.co/v1"
+    # Forward user identity headers to upstream LLM API (required for LiteLLM per-user tracking)
+    enableForwardUserInfoHeaders: "false"
 
     # Vector Database (Weaviate) - uses local Weaviate in tenant namespace
     vectorDb: "weaviate"

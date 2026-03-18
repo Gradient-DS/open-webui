@@ -1182,6 +1182,11 @@
 			return;
 		}
 
+		if ($config?.integration_providers?.[knowledge?.type]) {
+			toast.error($i18n.t('Files for this knowledge base are managed via the integration API.'));
+			return;
+		}
+
 		const handleUploadingFileFolder = (items) => {
 			for (const item of items) {
 				if (item.isFile) {
