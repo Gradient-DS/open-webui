@@ -53,33 +53,29 @@
 	let allItemsLoaded = false;
 	let itemsLoading = false;
 
-	$: if (query !== undefined) {
-		clearTimeout(searchDebounceTimer);
-		searchDebounceTimer = setTimeout(() => {
+	let queryDebounceActive = false;
+	let fetchId = 0;
+
+	$: if (loaded) {
+		// Track all dependencies explicitly
+		void viewOption, typeFilter, query;
+
+		if (queryDebounceActive) {
+			// User is typing — debounce
+			clearTimeout(searchDebounceTimer);
+			searchDebounceTimer = setTimeout(() => {
+				init();
+			}, 300);
+		} else {
+			// Filter/view change or initial load — fetch immediately
 			init();
-		}, 300);
+		}
 	}
 
 	onDestroy(() => {
 		clearTimeout(searchDebounceTimer);
 		$socket?.off('onedrive:sync:progress', handleSyncProgress);
 	});
-
-	$: if (viewOption !== undefined) {
-		init();
-	}
-
-	$: if (typeFilter !== undefined) {
-		init();
-	}
-
-	const reset = () => {
-		page = 1;
-		items = null;
-		total = null;
-		allItemsLoaded = false;
-		itemsLoading = false;
-	};
 
 	const loadMoreItems = async () => {
 		if (allItemsLoaded) return;
@@ -90,11 +86,14 @@
 	const init = async () => {
 		if (!loaded) return;
 
-		reset();
-		await getItemsPage();
+		page = 1;
+		allItemsLoaded = false;
+		// Don't null items — keep showing stale data during re-fetch
+		await getItemsPage(true);
 	};
 
-	const getItemsPage = async () => {
+	const getItemsPage = async (replace = false) => {
+		const currentFetchId = ++fetchId;
 		itemsLoading = true;
 		const res = await searchKnowledgeBases(localStorage.token, query, viewOption, page, typeFilter || null).catch(
 			() => {
@@ -102,8 +101,9 @@
 			}
 		);
 
+		if (currentFetchId !== fetchId) return; // Stale response, discard
+
 		if (res) {
-			console.log(res);
 			total = res.total;
 			const pageItems = res.items;
 
@@ -113,14 +113,15 @@
 				allItemsLoaded = false;
 			}
 
-			if (items) {
-				items = [...items, ...pageItems];
-			} else {
+			if (replace || items === null) {
 				items = pageItems;
+			} else {
+				items = [...items, ...pageItems];
 			}
 		}
 
 		itemsLoading = false;
+		queryDebounceActive = false;
 		return res;
 	};
 
@@ -177,9 +178,11 @@
 
 	onMount(async () => {
 		viewOption = localStorage?.workspaceViewOption || '';
-		loaded = true;
 
 		$socket?.on('onedrive:sync:progress', handleSyncProgress);
+
+		await tick();
+		loaded = true;
 	});
 </script>
 
@@ -267,6 +270,9 @@
 					bind:value={query}
 					aria-label={$i18n.t('Search Knowledge')}
 					placeholder={$i18n.t('Search Knowledge')}
+					on:input={() => {
+						queryDebounceActive = true;
+					}}
 				/>
 				{#if query}
 					<div class="self-center pl-1.5 translate-y-[0.5px] rounded-l-xl bg-transparent">

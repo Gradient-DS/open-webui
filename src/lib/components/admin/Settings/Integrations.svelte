@@ -10,6 +10,7 @@
 	import { models, settings, user, terminalServers } from '$lib/stores';
 	import { getTerminalServers } from '$lib/apis/terminal';
 	import { WEBUI_API_BASE_URL } from '$lib/constants';
+	import { isFeatureEnabled } from '$lib/utils/features';
 
 	import Switch from '$lib/components/common/Switch.svelte';
 	import Spinner from '$lib/components/common/Spinner.svelte';
@@ -106,17 +107,26 @@
 	};
 
 	onMount(async () => {
-		const res = await getToolServerConnections(localStorage.token);
-		servers = res.TOOL_SERVER_CONNECTIONS;
-
-		// Load terminal server connections
-		try {
-			const terminalRes = await getTerminalServerConnections(localStorage.token);
-			if (terminalRes?.TERMINAL_SERVER_CONNECTIONS) {
-				terminalConnections = terminalRes.TERMINAL_SERVER_CONNECTIONS;
+		if (isFeatureEnabled('tool_servers')) {
+			try {
+				const res = await getToolServerConnections(localStorage.token);
+				servers = res.TOOL_SERVER_CONNECTIONS;
+			} catch {
+				servers = [];
 			}
-		} catch {
-			// Not configured yet
+		} else {
+			servers = [];
+		}
+
+		if (isFeatureEnabled('terminal_servers')) {
+			try {
+				const terminalRes = await getTerminalServerConnections(localStorage.token);
+				if (terminalRes?.TERMINAL_SERVER_CONNECTIONS) {
+					terminalConnections = terminalRes.TERMINAL_SERVER_CONNECTIONS;
+				}
+			} catch {
+				// Not configured yet
+			}
 		}
 	});
 </script>
@@ -167,8 +177,8 @@
 				<div class="mb-3">
 					<div class=" mt-0.5 mb-2.5 text-base font-medium">{$i18n.t('General')}</div>
 
+					{#if isFeatureEnabled('tool_servers')}
 					<hr class=" border-gray-100/30 dark:border-gray-850/30 my-2" />
-
 					<div class="mb-2.5 flex flex-col w-full justify-between">
 						<div class="flex justify-between items-center mb-0.5">
 							<div class="font-medium">{$i18n.t('Manage Tool Servers')}</div>
@@ -215,7 +225,9 @@
 					</div>
 
 					<hr class=" border-gray-100/30 dark:border-gray-850/30 my-4" />
+					{/if}
 
+					{#if isFeatureEnabled('terminal_servers')}
 					<div class="mb-2.5 flex flex-col w-full">
 						<div class="flex justify-between items-center mb-1">
 							<div class="flex items-center gap-2">
@@ -317,9 +329,12 @@
 							</div>
 						</div>
 					</div>
+					{/if}
 				</div>
 
+				{#if isFeatureEnabled('tool_servers') || isFeatureEnabled('terminal_servers')}
 				<hr class=" border-gray-100/30 dark:border-gray-850/30 my-4" />
+				{/if}
 
 				<IntegrationProviders saveHandler={() => {
 					toast.success($i18n.t('Integration providers saved'));

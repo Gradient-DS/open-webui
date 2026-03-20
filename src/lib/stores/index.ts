@@ -313,6 +313,8 @@ type Config = {
 		feature_admin_settings?: boolean;
 		feature_admin_settings_tabs?: string[];
 		feature_chat_controls_sections?: string[];
+		feature_tool_servers?: boolean;
+		feature_terminal_servers?: boolean;
 	};
 	oauth: {
 		providers: {

@@ -264,7 +264,7 @@
 
 <svelte:head>
 	<title>
-		{$i18n.t('Models')} • {$WEBUI_NAME}
+		{$i18n.t('Agents')} • {$WEBUI_NAME}
 	</title>
 </svelte:head>
 
@@ -338,7 +338,7 @@
 		<div class="flex justify-between items-center">
 			<div class="flex items-center md:self-center text-xl font-medium px-0.5 gap-2 shrink-0">
 				<div>
-					{$i18n.t('Models')}
+					{$i18n.t('Agents')}
 				</div>
 
 				<div class="text-lg font-medium text-gray-500 dark:text-gray-500">
@@ -378,7 +378,7 @@
 				>
 					<Plus className="size-3" strokeWidth="2.5" />
 
-					<div class=" hidden md:block md:ml-1 text-xs">{$i18n.t('New Model')}</div>
+					<div class=" hidden md:block md:ml-1 text-xs">{$i18n.t('New Agent')}</div>
 				</a>
 			</div>
 		</div>
@@ -395,8 +395,8 @@
 				<input
 					class=" w-full text-sm py-1 rounded-r-xl outline-hidden bg-transparent"
 					bind:value={query}
-					aria-label={$i18n.t('Search Models')}
-					placeholder={$i18n.t('Search Models')}
+					aria-label={$i18n.t('Search Agents')}
+					placeholder={$i18n.t('Search Agents')}
 					maxlength="500"
 					on:input={() => {
 						clearTimeout(searchDebounceTimer);

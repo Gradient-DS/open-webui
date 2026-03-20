@@ -8,6 +8,7 @@ from typing import Optional
 
 from open_webui.env import AIOHTTP_CLIENT_TIMEOUT
 from open_webui.utils.auth import get_admin_user, get_verified_user
+from open_webui.utils.features import require_feature
 from open_webui.config import get_config, save_config
 from open_webui.config import BannerModel
 from open_webui.models.users import Users
@@ -157,7 +158,7 @@ class ToolServersConfigForm(BaseModel):
 
 
 @router.get("/tool_servers", response_model=ToolServersConfigForm)
-async def get_tool_servers_config(request: Request, user=Depends(get_admin_user)):
+async def get_tool_servers_config(request: Request, user=Depends(get_admin_user), _=Depends(require_feature("tool_servers"))):
     return {
         "TOOL_SERVER_CONNECTIONS": request.app.state.config.TOOL_SERVER_CONNECTIONS,
     }
@@ -168,6 +169,7 @@ async def set_tool_servers_config(
     request: Request,
     form_data: ToolServersConfigForm,
     user=Depends(get_admin_user),
+    _=Depends(require_feature("tool_servers")),
 ):
     for connection in request.app.state.config.TOOL_SERVER_CONNECTIONS:
         server_type = connection.get("type", "openapi")
@@ -238,7 +240,7 @@ class TerminalServersConfigForm(BaseModel):
 
 
 @router.get("/terminal_servers")
-async def get_terminal_servers_config(request: Request, user=Depends(get_admin_user)):
+async def get_terminal_servers_config(request: Request, user=Depends(get_admin_user), _=Depends(require_feature("terminal_servers"))):
     return {
         "TERMINAL_SERVER_CONNECTIONS": request.app.state.config.TERMINAL_SERVER_CONNECTIONS,
     }
@@ -249,6 +251,7 @@ async def set_terminal_servers_config(
     request: Request,
     form_data: TerminalServersConfigForm,
     user=Depends(get_admin_user),
+    _=Depends(require_feature("terminal_servers")),
 ):
     request.app.state.config.TERMINAL_SERVER_CONNECTIONS = [
         connection.model_dump() for connection in form_data.TERMINAL_SERVER_CONNECTIONS
@@ -263,7 +266,7 @@ async def set_terminal_servers_config(
 
 @router.post("/tool_servers/verify")
 async def verify_tool_servers_config(
-    request: Request, form_data: ToolServerConnection, user=Depends(get_admin_user)
+    request: Request, form_data: ToolServerConnection, user=Depends(get_admin_user), _=Depends(require_feature("tool_servers")),
 ):
     """
     Verify the connection to the tool server.

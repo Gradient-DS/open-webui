@@ -1914,6 +1914,8 @@ FEATURE_TOOLS = os.environ.get("FEATURE_TOOLS", "True").lower() == "true"
 FEATURE_SKILLS = os.environ.get("FEATURE_SKILLS", "False").lower() == "true"
 FEATURE_INPUT_MENU = os.environ.get("FEATURE_INPUT_MENU", "True").lower() == "true"
 FEATURE_TEMPORARY_CHAT = os.environ.get("FEATURE_TEMPORARY_CHAT", "True").lower() == "true"
+FEATURE_TOOL_SERVERS = os.environ.get("FEATURE_TOOL_SERVERS", "True").lower() == "true"
+FEATURE_TERMINAL_SERVERS = os.environ.get("FEATURE_TERMINAL_SERVERS", "True").lower() == "true"
 
 # Admin Panel Tab Feature Flags
 FEATURE_ADMIN_EVALUATIONS = os.environ.get("FEATURE_ADMIN_EVALUATIONS", "True").lower() == "true"

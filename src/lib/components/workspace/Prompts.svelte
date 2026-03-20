@@ -59,23 +59,27 @@
 
 	let page = 1;
 
-	// Debounce only query changes
-	$: if (query !== undefined) {
-		loading = true;
-		clearTimeout(searchDebounceTimer);
-		searchDebounceTimer = setTimeout(() => {
-			getPromptList();
-		}, 300);
-	}
+	let queryDebounceActive = false;
+	let fetchId = 0;
 
-	// Immediate response to page/filter changes
-	$: if (page && selectedTag !== undefined && viewOption !== undefined) {
-		getPromptList();
+	$: if (loaded) {
+		// Track all dependencies
+		void page, selectedTag, viewOption, query;
+
+		if (queryDebounceActive) {
+			clearTimeout(searchDebounceTimer);
+			searchDebounceTimer = setTimeout(() => {
+				getPromptList();
+			}, 300);
+		} else {
+			getPromptList();
+		}
 	}
 
 	const getPromptList = async () => {
 		if (!loaded) return;
 
+		const currentFetchId = ++fetchId;
 		loading = true;
 		try {
 			const res = await getPromptItems(
@@ -91,6 +95,8 @@
 				return null;
 			});
 
+			if (currentFetchId !== fetchId) return; // Stale response, discard
+
 			if (res) {
 				prompts = res.items;
 				total = res.total;
@@ -104,7 +110,10 @@
 		} catch (err) {
 			console.error(err);
 		} finally {
-			loading = false;
+			if (currentFetchId === fetchId) {
+				loading = false;
+				queryDebounceActive = false;
+			}
 		}
 	};
 
@@ -174,6 +183,8 @@
 
 	onMount(async () => {
 		viewOption = localStorage?.workspaceViewOption || '';
+
+		await tick();
 		loaded = true;
 
 		const onKeyDown = (event) => {
@@ -333,6 +344,9 @@
 					bind:value={query}
 					aria-label={$i18n.t('Search Prompts')}
 					placeholder={$i18n.t('Search Prompts')}
+					on:input={() => {
+						queryDebounceActive = true;
+					}}
 				/>
 
 				{#if query}
