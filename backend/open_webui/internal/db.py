@@ -14,11 +14,13 @@ from open_webui.env import (
     DATABASE_POOL_SIZE,
     DATABASE_POOL_TIMEOUT,
     DATABASE_ENABLE_SQLITE_WAL,
+    DATABASE_ENABLE_SESSION_SHARING,
+    ENABLE_DB_MIGRATIONS,
 )
 from peewee_migrate import Router
 from sqlalchemy import Dialect, create_engine, MetaData, event, types
 from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import scoped_session, sessionmaker
+from sqlalchemy.orm import scoped_session, sessionmaker, Session
 from sqlalchemy.pool import QueuePool, NullPool
 from sqlalchemy.sql.type_api import _T
 from typing_extensions import Self
@@ -75,7 +77,8 @@ def handle_peewee_migration(DATABASE_URL):
         assert db.is_closed(), "Database connection is still open."
 
 
-handle_peewee_migration(DATABASE_URL)
+if ENABLE_DB_MIGRATIONS:
+    handle_peewee_migration(DATABASE_URL)
 
 
 SQLALCHEMY_DATABASE_URL = DATABASE_URL
@@ -99,11 +102,30 @@ if SQLALCHEMY_DATABASE_URL.startswith("sqlite+sqlcipher://"):
         conn.execute(f"PRAGMA key = '{database_password}'")
         return conn
 
-    engine = create_engine(
-        "sqlite://",  # Dummy URL since we're using creator
-        creator=create_sqlcipher_connection,
-        echo=False,
-    )
+    # The dummy "sqlite://" URL would cause SQLAlchemy to auto-select
+    # SingletonThreadPool, which non-deterministically closes in-use
+    # connections when thread count exceeds pool_size, leading to segfaults
+    # in the native sqlcipher3 C library. Use NullPool by default for safety,
+    # or QueuePool if DATABASE_POOL_SIZE is explicitly configured.
+    if isinstance(DATABASE_POOL_SIZE, int) and DATABASE_POOL_SIZE > 0:
+        engine = create_engine(
+            "sqlite://",
+            creator=create_sqlcipher_connection,
+            pool_size=DATABASE_POOL_SIZE,
+            max_overflow=DATABASE_POOL_MAX_OVERFLOW,
+            pool_timeout=DATABASE_POOL_TIMEOUT,
+            pool_recycle=DATABASE_POOL_RECYCLE,
+            pool_pre_ping=True,
+            poolclass=QueuePool,
+            echo=False,
+        )
+    else:
+        engine = create_engine(
+            "sqlite://",
+            creator=create_sqlcipher_connection,
+            poolclass=NullPool,
+            echo=False,
+        )
 
     log.info("Connected to encrypted SQLite database using SQLCipher")
 
@@ -146,7 +168,7 @@ SessionLocal = sessionmaker(
 )
 metadata_obj = MetaData(schema=DATABASE_SCHEMA)
 Base = declarative_base(metadata=metadata_obj)
-Session = scoped_session(SessionLocal)
+ScopedSession = scoped_session(SessionLocal)
 
 
 def get_session():
@@ -158,3 +180,12 @@ def get_session():
 
 
 get_db = contextmanager(get_session)
+
+
+@contextmanager
+def get_db_context(db: Optional[Session] = None):
+    if isinstance(db, Session) and DATABASE_ENABLE_SESSION_SHARING:
+        yield db
+    else:
+        with get_db() as session:
+            yield session

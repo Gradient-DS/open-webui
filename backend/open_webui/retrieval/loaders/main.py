@@ -30,7 +30,7 @@ from open_webui.retrieval.loaders.datalab_marker import DatalabMarkerLoader
 from open_webui.retrieval.loaders.mineru import MinerULoader
 
 
-from open_webui.env import GLOBAL_LOG_LEVEL
+from open_webui.env import GLOBAL_LOG_LEVEL, REQUESTS_VERIFY
 
 logging.basicConfig(stream=sys.stdout, level=GLOBAL_LOG_LEVEL)
 log = logging.getLogger(__name__)
@@ -86,6 +86,9 @@ known_source_ext = [
     "hs",
     "lhs",
     "json",
+    "yaml",
+    "yml",
+    "toml",
 ]
 
 
@@ -114,7 +117,7 @@ class TikaLoader:
             endpoint += "/"
         endpoint += "tika/text"
 
-        r = requests.put(endpoint, data=data, headers=headers)
+        r = requests.put(endpoint, data=data, headers=headers, verify=REQUESTS_VERIFY)
 
         if r.ok:
             raw_metadata = r.json()
@@ -143,7 +146,7 @@ class DoclingLoader:
         with open(self.file_path, "rb") as f:
             headers = {}
             if self.api_key:
-                headers["X-Api-Key"] = f"Bearer {self.api_key}"
+                headers["X-Api-Key"] = f"{self.api_key}"
 
             r = requests.post(
                 f"{self.url}/v1/convert/file",
@@ -361,7 +364,9 @@ class Loader:
         else:
             if file_ext == "pdf":
                 loader = PyPDFLoader(
-                    file_path, extract_images=self.kwargs.get("PDF_EXTRACT_IMAGES")
+                    file_path,
+                    extract_images=self.kwargs.get("PDF_EXTRACT_IMAGES"),
+                    mode=self.kwargs.get("PDF_LOADER_MODE", "page"),
                 )
             elif file_ext == "csv":
                 loader = CSVLoader(file_path, autodetect_encoding=True)

@@ -1,806 +1,360 @@
 <script lang="ts">
-	import { onMount, getContext } from 'svelte';
 	import { toast } from 'svelte-sonner';
+	import { createEventDispatcher, onMount, getContext, tick } from 'svelte';
+	import { v4 as uuidv4 } from 'uuid';
+	import { getModels as _getModels } from '$lib/apis';
 
-	import { getIntegrationsConfig, setIntegrationsConfig } from '$lib/apis/configs';
-	import { searchUsers } from '$lib/apis/users';
-	import Spinner from '$lib/components/common/Spinner.svelte';
-	import Badge from '$lib/components/common/Badge.svelte';
-
+	const dispatch = createEventDispatcher();
 	const i18n = getContext('i18n');
 
-	export let saveHandler: Function;
+	import { models, settings, user, terminalServers } from '$lib/stores';
+	import { getTerminalServers } from '$lib/apis/terminal';
+	import { WEBUI_API_BASE_URL } from '$lib/constants';
+	import { isFeatureEnabled } from '$lib/utils/features';
 
-	let loading = true;
-	let saving = false;
+	import Switch from '$lib/components/common/Switch.svelte';
+	import Spinner from '$lib/components/common/Spinner.svelte';
+	import Tooltip from '$lib/components/common/Tooltip.svelte';
+	import Plus from '$lib/components/icons/Plus.svelte';
+	import Cog6 from '$lib/components/icons/Cog6.svelte';
+	import Cloud from '$lib/components/icons/Cloud.svelte';
+	import Connection from '$lib/components/chat/Settings/Tools/Connection.svelte';
+	import SensitiveInput from '$lib/components/common/SensitiveInput.svelte';
 
-	// Provider registry: slug -> config
-	let providers: Record<string, any> = {};
+	import AddToolServerModal from '$lib/components/AddToolServerModal.svelte';
+	import AddTerminalServerModal from '$lib/components/AddTerminalServerModal.svelte';
+	import ConfirmDialog from '$lib/components/common/ConfirmDialog.svelte';
 
-	// Edit/add state
-	let editingSlug: string | null = null;
-	let showForm = false;
-	let form = {
-		slug: '',
-		name: '',
-		description: '',
-		badge_type: 'info',
-		max_files_per_kb: 250,
-		max_documents_per_request: 50,
-		service_account_id: '',
-		custom_metadata_fields: [] as { key: string; label: string; required: boolean }[]
+	import {
+		getToolServerConnections,
+		setToolServerConnections,
+		getTerminalServerConnections,
+		setTerminalServerConnections
+	} from '$lib/apis/configs';
+
+	import IntegrationProviders from './IntegrationProviders.svelte';
+
+	export let saveSettings: Function;
+
+	let servers = null;
+	let showConnectionModal = false;
+
+	// Terminal server admin connections
+	let terminalConnections = [];
+	let showAddTerminalModal = false;
+	let editTerminalIdx: number | null = null;
+	let showDeleteTerminalConfirm = false;
+	let deleteTerminalIdx: number | null = null;
+
+	const addConnectionHandler = async (server) => {
+		servers = [...servers, server];
+		await updateHandler();
 	};
 
-	// User search for service account
-	let userSearchQuery = '';
-	let userSearchResults: any[] = [];
-	let selectedUser: any = null;
-	let showUserSearch = false;
+	const updateHandler = async () => {
+		const res = await setToolServerConnections(localStorage.token, {
+			TOOL_SERVER_CONNECTIONS: servers
+		}).catch((err) => {
+			toast.error($i18n.t('Failed to save connections'));
+			return null;
+		});
 
-	// Confirm delete
-	let deleteConfirmSlug: string | null = null;
+		if (res) {
+			toast.success($i18n.t('Connections saved successfully'));
+		}
+	};
 
-	// Expanded provider panel: 'api' | 'edit' | null per slug
-	let expandedPanel: Record<string, 'api' | 'edit'> = {};
+	const saveTerminalServers = async () => {
+		const res = await setTerminalServerConnections(localStorage.token, {
+			TERMINAL_SERVER_CONNECTIONS: terminalConnections
+		}).catch((err) => {
+			toast.error($i18n.t('Failed to save terminal servers'));
+			return null;
+		});
+
+		if (res) {
+			toast.success($i18n.t('Terminal servers saved'));
+
+			// Refresh the terminalServers store so changes are reflected immediately
+			// Preserve user direct terminals, refresh system terminals from backend
+			const existingDirectTerminals = ($terminalServers ?? []).filter((t) => !t.id);
+			const systemTerminals = await getTerminalServers(localStorage.token);
+			const systemEntries = systemTerminals.map((t) => ({
+				id: t.id,
+				url: `${WEBUI_API_BASE_URL}/terminals/${t.id}`,
+				name: t.name,
+				key: localStorage.token
+			}));
+			terminalServers.set([...existingDirectTerminals, ...systemEntries]);
+		}
+	};
+
+	const addTerminalConnection = (server) => {
+		terminalConnections = [...terminalConnections, { ...server, id: server.id ?? uuidv4() }];
+		saveTerminalServers();
+	};
+
+	const updateTerminalConnection = (idx: number, updated) => {
+		terminalConnections = terminalConnections.map((c, i) =>
+			i === idx ? { ...c, ...updated, id: updated.id ?? c.id } : c
+		);
+		saveTerminalServers();
+	};
+
+	const removeTerminalConnection = (idx: number) => {
+		terminalConnections = terminalConnections.filter((_, i) => i !== idx);
+		saveTerminalServers();
+	};
 
 	onMount(async () => {
-		try {
-			const config = await getIntegrationsConfig(localStorage.token);
-			if (config) {
-				providers = config.providers || {};
+		if (isFeatureEnabled('tool_servers')) {
+			try {
+				const res = await getToolServerConnections(localStorage.token);
+				servers = res.TOOL_SERVER_CONNECTIONS;
+			} catch {
+				servers = [];
 			}
-		} catch (err) {
-			toast.error(`${err}`);
-		}
-		loading = false;
-	});
-
-	const handleSave = async () => {
-		saving = true;
-		try {
-			await setIntegrationsConfig(localStorage.token, { providers });
-			saveHandler();
-		} catch (err) {
-			toast.error(`${err}`);
-		}
-		saving = false;
-	};
-
-	function resetForm() {
-		form = {
-			slug: '',
-			name: '',
-			description: '',
-			badge_type: 'info',
-			max_files_per_kb: 250,
-			max_documents_per_request: 50,
-			service_account_id: '',
-			custom_metadata_fields: []
-		};
-		selectedUser = null;
-		userSearchQuery = '';
-		userSearchResults = [];
-		showUserSearch = false;
-	}
-
-	function startAdd() {
-		editingSlug = null;
-		resetForm();
-		showForm = true;
-	}
-
-	function startEdit(slug: string) {
-		// Toggle: if already showing edit for this slug, close it
-		if (expandedPanel[slug] === 'edit') {
-			delete expandedPanel[slug];
-			expandedPanel = expandedPanel;
-			showForm = false;
-			editingSlug = null;
-			return;
-		}
-
-		editingSlug = slug;
-		const p = providers[slug];
-		form = {
-			slug,
-			name: p.name || '',
-			description: p.description || '',
-			badge_type: p.badge_type || 'info',
-			max_files_per_kb: p.max_files_per_kb || 250,
-			max_documents_per_request: p.max_documents_per_request || 50,
-			service_account_id: p.service_account_id || '',
-			custom_metadata_fields: p.custom_metadata_fields || []
-		};
-		selectedUser = null;
-		expandedPanel[slug] = 'edit';
-		expandedPanel = expandedPanel;
-		showForm = true;
-	}
-
-	function toggleApiExample(slug: string) {
-		if (expandedPanel[slug] === 'api') {
-			delete expandedPanel[slug];
-			expandedPanel = expandedPanel;
 		} else {
-			// Close edit if open for this slug
-			if (expandedPanel[slug] === 'edit') {
-				showForm = false;
-				editingSlug = null;
+			servers = [];
+		}
+
+		if (isFeatureEnabled('terminal_servers')) {
+			try {
+				const terminalRes = await getTerminalServerConnections(localStorage.token);
+				if (terminalRes?.TERMINAL_SERVER_CONNECTIONS) {
+					terminalConnections = terminalRes.TERMINAL_SERVER_CONNECTIONS;
+				}
+			} catch {
+				// Not configured yet
 			}
-			expandedPanel[slug] = 'api';
-			expandedPanel = expandedPanel;
 		}
-	}
-
-	function generateSlug(name: string): string {
-		return name
-			.toLowerCase()
-			.replace(/[^a-z0-9]+/g, '-')
-			.replace(/^-|-$/g, '');
-	}
-
-	async function applyForm() {
-		const slug = editingSlug || form.slug || generateSlug(form.name);
-		if (!slug) {
-			toast.error('Slug is required');
-			return;
-		}
-		if (!form.name) {
-			toast.error('Name is required');
-			return;
-		}
-		if (!editingSlug && providers[slug]) {
-			toast.error(`Provider with slug "${slug}" already exists`);
-			return;
-		}
-
-		const { slug: _slug, ...config } = form;
-		providers[slug] = config;
-
-		// If editing and slug changed, remove old
-		if (editingSlug && editingSlug !== slug) {
-			delete providers[editingSlug];
-		}
-
-		providers = providers;
-		showForm = false;
-		delete expandedPanel[editingSlug || slug];
-		expandedPanel = expandedPanel;
-		editingSlug = null;
-
-		// Auto-save to backend
-		await handleSave();
-	}
-
-	async function removeProvider(slug: string) {
-		delete providers[slug];
-		delete expandedPanel[slug];
-		providers = providers;
-		expandedPanel = expandedPanel;
-		deleteConfirmSlug = null;
-
-		// Auto-save to backend
-		await handleSave();
-	}
-
-	async function handleUserSearch() {
-		if (userSearchQuery.length < 1) {
-			userSearchResults = [];
-			return;
-		}
-		try {
-			const res = await searchUsers(localStorage.token, userSearchQuery);
-			userSearchResults = res?.users || [];
-		} catch {
-			userSearchResults = [];
-		}
-	}
-
-	function selectUser(user: any) {
-		form.service_account_id = user.id;
-		selectedUser = user;
-		showUserSearch = false;
-		userSearchQuery = '';
-		userSearchResults = [];
-	}
+	});
 </script>
 
-<div class="flex flex-col h-full text-sm">
-	<div class="space-y-3 overflow-y-scroll scrollbar-hidden h-full pr-1.5">
-		{#if loading}
-			<div class="flex justify-center py-8">
-				<Spinner />
-			</div>
-		{:else}
-			<div class="space-y-3">
-				<div class="flex justify-between items-center">
-					<div class="font-medium">{$i18n.t('Integration Providers')}</div>
-					<button
-						class="px-3 py-1 text-xs font-medium border border-gray-200 dark:border-gray-700 hover:bg-gray-100 dark:hover:bg-gray-800 transition rounded-full"
-						type="button"
-						on:click={startAdd}
-					>
-						+ {$i18n.t('Add Provider')}
-					</button>
-				</div>
+<AddToolServerModal bind:show={showConnectionModal} onSubmit={addConnectionHandler} />
 
-				<!-- Provider List -->
-				{#if Object.keys(providers).length === 0 && !showForm}
-					<div class="text-center text-gray-400 py-8">
-						{$i18n.t('No integration providers configured')}
-					</div>
-				{/if}
+<AddTerminalServerModal
+	admin
+	bind:show={showAddTerminalModal}
+	edit={editTerminalIdx !== null}
+	connection={editTerminalIdx !== null ? terminalConnections[editTerminalIdx] : null}
+	onSubmit={(c) => {
+		if (editTerminalIdx !== null) {
+			updateTerminalConnection(editTerminalIdx, c);
+			editTerminalIdx = null;
+		} else {
+			addTerminalConnection(c);
+		}
+	}}
+	onDelete={() => {
+		if (editTerminalIdx !== null) {
+			deleteTerminalIdx = editTerminalIdx;
+			showDeleteTerminalConfirm = true;
+			editTerminalIdx = null;
+		}
+	}}
+/>
 
-				{#each Object.entries(providers) as [slug, provider]}
-					<div class="border border-gray-200 dark:border-gray-700 rounded-lg">
-						<!-- Provider header row -->
-						<div class="flex items-center justify-between p-3">
-							<div class="flex items-center gap-3">
-								<Badge type={provider.badge_type || 'info'} content={provider.name} />
-								<div class="text-xs text-gray-500">{slug}</div>
+<ConfirmDialog
+	bind:show={showDeleteTerminalConfirm}
+	on:confirm={() => {
+		if (deleteTerminalIdx !== null) {
+			removeTerminalConnection(deleteTerminalIdx);
+			deleteTerminalIdx = null;
+		}
+	}}
+/>
 
-								{#if provider.service_account_id}
-									<div class="text-xs text-green-600 dark:text-green-400">
-										{$i18n.t('Service account bound')}
-									</div>
-								{:else}
-									<div class="text-xs text-yellow-600 dark:text-yellow-400">
-										{$i18n.t('No service account')}
-									</div>
-								{/if}
-							</div>
-							<div class="flex items-center gap-1">
+<form
+	class="flex flex-col h-full justify-between text-sm"
+	on:submit|preventDefault={() => {
+		updateHandler();
+	}}
+>
+	<div class=" overflow-y-scroll scrollbar-hidden h-full">
+		{#if servers !== null}
+			<div class="">
+				<div class="mb-3">
+					<div class=" mt-0.5 mb-2.5 text-base font-medium">{$i18n.t('General')}</div>
+
+					{#if isFeatureEnabled('tool_servers')}
+					<hr class=" border-gray-100/30 dark:border-gray-850/30 my-2" />
+					<div class="mb-2.5 flex flex-col w-full justify-between">
+						<div class="flex justify-between items-center mb-0.5">
+							<div class="font-medium">{$i18n.t('Manage Tool Servers')}</div>
+
+							<Tooltip content={$i18n.t(`Add Connection`)}>
 								<button
-									class="px-2 py-0.5 text-xs rounded {expandedPanel[slug] === 'api'
-										? 'bg-gray-200 dark:bg-gray-700 text-gray-800 dark:text-gray-200'
-										: 'text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'}"
-									type="button"
-									on:click={() => toggleApiExample(slug)}
-								>
-									API
-								</button>
-								<button
-									class="px-2 py-0.5 text-xs rounded {expandedPanel[slug] === 'edit'
-										? 'bg-gray-200 dark:bg-gray-700 text-gray-800 dark:text-gray-200'
-										: 'text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'}"
-									type="button"
-									on:click={() => startEdit(slug)}
-								>
-									{$i18n.t('Edit')}
-								</button>
-								{#if deleteConfirmSlug === slug}
-									<button
-										class="px-2 py-0.5 text-xs text-red-600 font-medium"
-										type="button"
-										on:click={() => removeProvider(slug)}
-									>
-										{$i18n.t('Confirm')}
-									</button>
-									<button
-										class="px-2 py-0.5 text-xs text-gray-500"
-										type="button"
-										on:click={() => (deleteConfirmSlug = null)}
-									>
-										{$i18n.t('Cancel')}
-									</button>
-								{:else}
-									<button
-										class="px-2 py-0.5 text-xs text-red-500 hover:text-red-700"
-										type="button"
-										on:click={() => (deleteConfirmSlug = slug)}
-									>
-										{$i18n.t('Remove')}
-									</button>
-								{/if}
-							</div>
-						</div>
-
-						<!-- Expanded panel: API example -->
-						{#if expandedPanel[slug] === 'api'}
-							{@const exampleData = JSON.stringify({ collection: { source_id: 'my-collection-123', name: 'My Collection', data_type: 'parsed_text', access_control: null }, documents: [{ source_id: 'doc-1', filename: 'example.txt', text: 'Document content here...', title: 'Example Document' }] }, null, 2)}
-							<div
-								class="px-3 pb-3 pt-0"
-							>
-								<div
-									class="p-3 bg-gray-50 dark:bg-gray-800 rounded-lg text-xs font-mono overflow-x-auto"
-								>
-									<div class="text-gray-500 mb-2">{$i18n.t('Example: Ingest documents')}</div>
-									<pre class="whitespace-pre-wrap">curl -X POST {window.location.origin}/api/v1/integrations/ingest \
-  -H "Authorization: Bearer sk-YOUR-API-KEY" \
-  -F 'data={exampleData}'</pre>
-									<div class="text-gray-400 mt-2 text-[10px]">
-										data_type: "parsed_text" | "chunked_text" | "full_documents"
-									</div>
-									<div class="text-gray-400 mt-1 text-[10px]">
-										access_control: null = public, {'{}'} = private, {'{"read": {"group_ids": [...]}}'} = custom
-									</div>
-								</div>
-							</div>
-						{/if}
-
-						<!-- Expanded panel: Edit form (inline) -->
-						{#if expandedPanel[slug] === 'edit' && editingSlug === slug}
-							<div class="px-3 pb-3 pt-0">
-								<div class="p-4 bg-gray-50 dark:bg-gray-800 rounded-lg space-y-3">
-									<div class="font-medium text-xs text-gray-500 uppercase tracking-wide">
-										{$i18n.t('Edit Provider')}
-									</div>
-
-									<div class="grid grid-cols-2 gap-3">
-										<div>
-											<div class="mb-1 text-xs text-gray-500">{$i18n.t('Name')}</div>
-											<input
-												class="w-full text-sm bg-transparent outline-hidden border border-gray-200 dark:border-gray-700 rounded px-2 py-1"
-												type="text"
-												bind:value={form.name}
-												placeholder={$i18n.t('Integration')}
-											/>
-										</div>
-										<div>
-											<div class="mb-1 text-xs text-gray-500">{$i18n.t('Slug')}</div>
-											<input
-												class="w-full text-sm bg-transparent outline-hidden border border-gray-200 dark:border-gray-700 rounded px-2 py-1 opacity-50"
-												type="text"
-												bind:value={form.slug}
-												placeholder={$i18n.t('integration')}
-												disabled
-											/>
-										</div>
-									</div>
-
-									<div>
-										<div class="mb-1 text-xs text-gray-500">{$i18n.t('Description')}</div>
-										<input
-											class="w-full text-sm bg-transparent outline-hidden border border-gray-200 dark:border-gray-700 rounded px-2 py-1"
-											type="text"
-											bind:value={form.description}
-											placeholder={$i18n.t('Document pipeline integration')}
-										/>
-									</div>
-
-									<div class="grid grid-cols-2 gap-3">
-										<div>
-											<div class="mb-1 text-xs text-gray-500">{$i18n.t('Badge Type')}</div>
-											<select
-												class="w-full text-sm bg-transparent outline-hidden border border-gray-200 dark:border-gray-700 rounded px-2 py-1"
-												bind:value={form.badge_type}
-											>
-												<option value="info">Info (Blue)</option>
-												<option value="success">Success (Green)</option>
-												<option value="warning">Warning (Yellow)</option>
-												<option value="error">Error (Red)</option>
-												<option value="muted">Muted (Gray)</option>
-											</select>
-										</div>
-										<div>
-											<div class="mb-1 text-xs text-gray-500">{$i18n.t('Badge Preview')}</div>
-											<div class="pt-1">
-												<Badge type={form.badge_type} content={form.name || 'Preview'} />
-											</div>
-										</div>
-									</div>
-
-									<div class="grid grid-cols-2 gap-3">
-										<div>
-											<div class="mb-1 text-xs text-gray-500">
-												{$i18n.t('Max Files Per Knowledge Base')}
-											</div>
-											<input
-												class="w-full text-sm bg-transparent outline-hidden border border-gray-200 dark:border-gray-700 rounded px-2 py-1"
-												type="number"
-												bind:value={form.max_files_per_kb}
-												min="1"
-												max="10000"
-											/>
-										</div>
-										<div>
-											<div class="mb-1 text-xs text-gray-500">
-												{$i18n.t('Max Documents Per Request')}
-											</div>
-											<input
-												class="w-full text-sm bg-transparent outline-hidden border border-gray-200 dark:border-gray-700 rounded px-2 py-1"
-												type="number"
-												bind:value={form.max_documents_per_request}
-												min="1"
-												max="1000"
-											/>
-										</div>
-									</div>
-
-									<!-- Custom Metadata Fields -->
-									<div>
-										<div class="flex items-center justify-between mb-1">
-											<div class="text-xs text-gray-500">
-												{$i18n.t('Custom Metadata Fields')}
-											</div>
-											<button
-												class="text-xs text-gray-500 hover:text-gray-700 dark:hover:text-gray-300"
-												type="button"
-												on:click={() => {
-													form.custom_metadata_fields = [
-														...form.custom_metadata_fields,
-														{ key: '', label: '', required: false }
-													];
-												}}
-											>
-												+ {$i18n.t('Add Field')}
-											</button>
-										</div>
-										{#if form.custom_metadata_fields.length === 0}
-											<div class="text-xs text-gray-400 py-1">
-												{$i18n.t(
-													'No custom metadata fields. Documents will use the default schema.'
-												)}
-											</div>
-										{/if}
-										{#each form.custom_metadata_fields as field, i}
-											<div class="flex items-center gap-2 mb-1.5">
-												<input
-													class="flex-1 text-sm bg-transparent outline-hidden border border-gray-200 dark:border-gray-700 rounded px-2 py-1"
-													type="text"
-													bind:value={field.key}
-													placeholder="field_key"
-												/>
-												<input
-													class="flex-1 text-sm bg-transparent outline-hidden border border-gray-200 dark:border-gray-700 rounded px-2 py-1"
-													type="text"
-													bind:value={field.label}
-													placeholder="Display Label"
-												/>
-												<label
-													class="flex items-center gap-1 text-xs text-gray-500 whitespace-nowrap"
-												>
-													<input type="checkbox" bind:checked={field.required} />
-													{$i18n.t('Required')}
-												</label>
-												<button
-													class="text-xs text-red-500 hover:text-red-700"
-													type="button"
-													on:click={() => {
-														form.custom_metadata_fields =
-															form.custom_metadata_fields.filter((_, idx) => idx !== i);
-													}}
-												>
-													&times;
-												</button>
-											</div>
-										{/each}
-									</div>
-
-									<!-- Service Account -->
-									<div>
-										<div class="mb-1 text-xs text-gray-500">
-											{$i18n.t('Service Account')}
-										</div>
-										{#if form.service_account_id && !showUserSearch}
-											<div class="flex items-center gap-2">
-												<div
-													class="flex-1 text-sm bg-transparent border border-gray-200 dark:border-gray-700 rounded px-2 py-1"
-												>
-													{#if selectedUser}
-														{selectedUser.name} ({selectedUser.email})
-													{:else}
-														ID: {form.service_account_id}
-													{/if}
-												</div>
-												<button
-													class="text-xs text-gray-500 hover:text-gray-700"
-													type="button"
-													on:click={() => {
-														showUserSearch = true;
-													}}
-												>
-													{$i18n.t('Change')}
-												</button>
-												<button
-													class="text-xs text-red-500 hover:text-red-700"
-													type="button"
-													on:click={() => {
-														form.service_account_id = '';
-														selectedUser = null;
-													}}
-												>
-													{$i18n.t('Remove')}
-												</button>
-											</div>
-										{:else}
-											<div class="relative">
-												<input
-													class="w-full text-sm bg-transparent outline-hidden border border-gray-200 dark:border-gray-700 rounded px-2 py-1"
-													type="text"
-													bind:value={userSearchQuery}
-													placeholder={$i18n.t('Search users...')}
-													on:input={handleUserSearch}
-													on:focus={() => {
-														showUserSearch = true;
-													}}
-												/>
-												{#if showUserSearch && userSearchResults.length > 0}
-													<div
-														class="absolute z-10 w-full mt-1 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg max-h-40 overflow-y-auto"
-													>
-														{#each userSearchResults as user}
-															<button
-																class="w-full text-left px-3 py-2 text-sm hover:bg-gray-100 dark:hover:bg-gray-700 flex items-center gap-2"
-																type="button"
-																on:click={() => selectUser(user)}
-															>
-																<div class="font-medium">{user.name}</div>
-																<div class="text-xs text-gray-500">{user.email}</div>
-															</button>
-														{/each}
-													</div>
-												{/if}
-											</div>
-										{/if}
-									</div>
-
-									<div class="flex justify-end gap-2 pt-2">
-										<button
-											class="px-3 py-1 text-xs font-medium border border-gray-200 dark:border-gray-700 hover:bg-gray-100 dark:hover:bg-gray-800 transition rounded-full"
-											type="button"
-											on:click={() => {
-												delete expandedPanel[slug];
-												expandedPanel = expandedPanel;
-												showForm = false;
-												editingSlug = null;
-											}}
-										>
-											{$i18n.t('Cancel')}
-										</button>
-										<button
-											class="px-3 py-1 text-xs font-medium bg-black hover:bg-gray-900 text-white dark:bg-white dark:text-black dark:hover:bg-gray-100 transition rounded-full"
-											type="button"
-											on:click={applyForm}
-										>
-											{$i18n.t('Update')}
-										</button>
-									</div>
-								</div>
-							</div>
-						{/if}
-					</div>
-				{/each}
-
-				<!-- Add New Provider Form (standalone, not inside a provider card) -->
-				{#if showForm && !editingSlug}
-					<div class="p-4 border border-gray-200 dark:border-gray-700 rounded-lg space-y-3">
-						<div class="font-medium text-xs text-gray-500 uppercase tracking-wide">
-							{$i18n.t('Add Provider')}
-						</div>
-
-						<div class="grid grid-cols-2 gap-3">
-							<div>
-								<div class="mb-1 text-xs text-gray-500">{$i18n.t('Name')}</div>
-								<input
-									class="w-full text-sm bg-transparent outline-hidden border border-gray-200 dark:border-gray-700 rounded px-2 py-1"
-									type="text"
-									bind:value={form.name}
-									placeholder={$i18n.t('Integration')}
-									on:input={() => {
-										form.slug = generateSlug(form.name);
-									}}
-								/>
-							</div>
-							<div>
-								<div class="mb-1 text-xs text-gray-500">{$i18n.t('Slug')}</div>
-								<input
-									class="w-full text-sm bg-transparent outline-hidden border border-gray-200 dark:border-gray-700 rounded px-2 py-1"
-									type="text"
-									bind:value={form.slug}
-									placeholder={$i18n.t('integration')}
-								/>
-							</div>
-						</div>
-
-						<div>
-							<div class="mb-1 text-xs text-gray-500">{$i18n.t('Description')}</div>
-							<input
-								class="w-full text-sm bg-transparent outline-hidden border border-gray-200 dark:border-gray-700 rounded px-2 py-1"
-								type="text"
-								bind:value={form.description}
-								placeholder={$i18n.t('Document pipeline integration')}
-							/>
-						</div>
-
-						<div class="grid grid-cols-2 gap-3">
-							<div>
-								<div class="mb-1 text-xs text-gray-500">{$i18n.t('Badge Type')}</div>
-								<select
-									class="w-full text-sm bg-transparent outline-hidden border border-gray-200 dark:border-gray-700 rounded px-2 py-1"
-									bind:value={form.badge_type}
-								>
-									<option value="info">Info (Blue)</option>
-									<option value="success">Success (Green)</option>
-									<option value="warning">Warning (Yellow)</option>
-									<option value="error">Error (Red)</option>
-									<option value="muted">Muted (Gray)</option>
-								</select>
-							</div>
-							<div>
-								<div class="mb-1 text-xs text-gray-500">{$i18n.t('Badge Preview')}</div>
-								<div class="pt-1">
-									<Badge type={form.badge_type} content={form.name || 'Preview'} />
-								</div>
-							</div>
-						</div>
-
-						<div class="grid grid-cols-2 gap-3">
-							<div>
-								<div class="mb-1 text-xs text-gray-500">
-									{$i18n.t('Max Files Per Knowledge Base')}
-								</div>
-								<input
-									class="w-full text-sm bg-transparent outline-hidden border border-gray-200 dark:border-gray-700 rounded px-2 py-1"
-									type="number"
-									bind:value={form.max_files_per_kb}
-									min="1"
-									max="10000"
-								/>
-							</div>
-							<div>
-								<div class="mb-1 text-xs text-gray-500">
-									{$i18n.t('Max Documents Per Request')}
-								</div>
-								<input
-									class="w-full text-sm bg-transparent outline-hidden border border-gray-200 dark:border-gray-700 rounded px-2 py-1"
-									type="number"
-									bind:value={form.max_documents_per_request}
-									min="1"
-									max="1000"
-								/>
-							</div>
-						</div>
-
-						<!-- Custom Metadata Fields -->
-						<div>
-							<div class="flex items-center justify-between mb-1">
-								<div class="text-xs text-gray-500">
-									{$i18n.t('Custom Metadata Fields')}
-								</div>
-								<button
-									class="text-xs text-gray-500 hover:text-gray-700 dark:hover:text-gray-300"
-									type="button"
+									class="px-1"
 									on:click={() => {
-										form.custom_metadata_fields = [
-											...form.custom_metadata_fields,
-											{ key: '', label: '', required: false }
-										];
+										showConnectionModal = true;
 									}}
+									type="button"
 								>
-									+ {$i18n.t('Add Field')}
+									<Plus />
 								</button>
+							</Tooltip>
+						</div>
+
+						<div class="flex flex-col gap-1">
+							{#each servers as server, idx}
+								<Connection
+									bind:connection={server}
+									onSubmit={() => {
+										updateHandler();
+									}}
+									onDelete={() => {
+										servers = servers.filter((_, i) => i !== idx);
+										updateHandler();
+									}}
+								/>
+							{/each}
+						</div>
+
+						{#if servers.length === 0}
+							<div class="text-xs text-gray-400 dark:text-gray-500">
+								{$i18n.t('No tool server connections configured.')}
 							</div>
-							{#if form.custom_metadata_fields.length === 0}
-								<div class="text-xs text-gray-400 py-1">
-									{$i18n.t(
-										'No custom metadata fields. Documents will use the default schema.'
-									)}
-								</div>
-							{/if}
-							{#each form.custom_metadata_fields as field, i}
-								<div class="flex items-center gap-2 mb-1.5">
-									<input
-										class="flex-1 text-sm bg-transparent outline-hidden border border-gray-200 dark:border-gray-700 rounded px-2 py-1"
-										type="text"
-										bind:value={field.key}
-										placeholder="field_key"
-									/>
-									<input
-										class="flex-1 text-sm bg-transparent outline-hidden border border-gray-200 dark:border-gray-700 rounded px-2 py-1"
-										type="text"
-										bind:value={field.label}
-										placeholder="Display Label"
-									/>
-									<label
-										class="flex items-center gap-1 text-xs text-gray-500 whitespace-nowrap"
-									>
-										<input type="checkbox" bind:checked={field.required} />
-										{$i18n.t('Required')}
-									</label>
-									<button
-										class="text-xs text-red-500 hover:text-red-700"
-										type="button"
-										on:click={() => {
-											form.custom_metadata_fields =
-												form.custom_metadata_fields.filter((_, idx) => idx !== i);
-										}}
-									>
-										&times;
-									</button>
+						{/if}
+
+						<div class="my-1.5">
+							<div class="text-xs text-gray-500">
+								{$i18n.t('Connect to your own OpenAPI compatible external tool servers.')}
+							</div>
+						</div>
+					</div>
+
+					<hr class=" border-gray-100/30 dark:border-gray-850/30 my-4" />
+					{/if}
+
+					{#if isFeatureEnabled('terminal_servers')}
+					<div class="mb-2.5 flex flex-col w-full">
+						<div class="flex justify-between items-center mb-1">
+							<div class="flex items-center gap-2">
+								<div class="font-medium">{$i18n.t('Open Terminal')}</div>
+								<span
+									class="text-[0.65rem] font-medium uppercase px-1.5 py-0.5 rounded-full bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400"
+									>{$i18n.t('Experimental')}</span
+								>
+							</div>
+
+							<Tooltip content={$i18n.t('Add Connection')}>
+								<button
+									class="px-1"
+									on:click={() => {
+										editTerminalIdx = null;
+										showAddTerminalModal = true;
+									}}
+									type="button"
+								>
+									<Plus />
+								</button>
+							</Tooltip>
+						</div>
+
+						<div class="flex flex-col gap-1.5">
+							{#each terminalConnections as connection, idx}
+								<div class="flex w-full gap-2 items-center">
+									<Tooltip className="w-full relative" content={''} placement="top-start">
+										<div class="flex w-full">
+											<div
+												class="flex-1 relative flex gap-1.5 items-center {connection?.enabled ===
+												false
+													? 'opacity-50'
+													: ''}"
+											>
+												<Tooltip content={$i18n.t('Terminal')}>
+													<Cloud className="size-4" strokeWidth="1.5" />
+												</Tooltip>
+
+												<div class="outline-hidden w-full bg-transparent text-sm">
+													{connection.name || connection.url || $i18n.t('New Terminal')}
+												</div>
+											</div>
+										</div>
+									</Tooltip>
+
+									<div class="flex gap-1 items-center">
+										<Tooltip content={$i18n.t('Configure')}>
+											<button
+												class="self-center p-1 bg-transparent hover:bg-gray-100 dark:hover:bg-gray-850 rounded-lg transition"
+												on:click={() => {
+													editTerminalIdx = idx;
+													showAddTerminalModal = true;
+												}}
+												type="button"
+											>
+												<Cog6 />
+											</button>
+										</Tooltip>
+
+										<Tooltip
+											content={connection?.enabled !== false
+												? $i18n.t('Enabled')
+												: $i18n.t('Disabled')}
+										>
+											<Switch
+												state={connection?.enabled !== false}
+												on:change={() => {
+													terminalConnections = terminalConnections.map((c, i) =>
+														i === idx ? { ...c, enabled: !(c?.enabled !== false) } : c
+													);
+													saveTerminalServers();
+												}}
+											/>
+										</Tooltip>
+									</div>
 								</div>
 							{/each}
 						</div>
 
-						<!-- Service Account -->
-						<div>
-							<div class="mb-1 text-xs text-gray-500">{$i18n.t('Service Account')}</div>
-							{#if form.service_account_id && !showUserSearch}
-								<div class="flex items-center gap-2">
-									<div
-										class="flex-1 text-sm bg-transparent border border-gray-200 dark:border-gray-700 rounded px-2 py-1"
-									>
-										{#if selectedUser}
-											{selectedUser.name} ({selectedUser.email})
-										{:else}
-											ID: {form.service_account_id}
-										{/if}
-									</div>
-									<button
-										class="text-xs text-gray-500 hover:text-gray-700"
-										type="button"
-										on:click={() => {
-											showUserSearch = true;
-										}}
-									>
-										{$i18n.t('Change')}
-									</button>
-									<button
-										class="text-xs text-red-500 hover:text-red-700"
-										type="button"
-										on:click={() => {
-											form.service_account_id = '';
-											selectedUser = null;
-										}}
-									>
-										{$i18n.t('Remove')}
-									</button>
-								</div>
-							{:else}
-								<div class="relative">
-									<input
-										class="w-full text-sm bg-transparent outline-hidden border border-gray-200 dark:border-gray-700 rounded px-2 py-1"
-										type="text"
-										bind:value={userSearchQuery}
-										placeholder={$i18n.t('Search users...')}
-										on:input={handleUserSearch}
-										on:focus={() => {
-											showUserSearch = true;
-										}}
-									/>
-									{#if showUserSearch && userSearchResults.length > 0}
-										<div
-											class="absolute z-10 w-full mt-1 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg max-h-40 overflow-y-auto"
-										>
-											{#each userSearchResults as user}
-												<button
-													class="w-full text-left px-3 py-2 text-sm hover:bg-gray-100 dark:hover:bg-gray-700 flex items-center gap-2"
-													type="button"
-													on:click={() => selectUser(user)}
-												>
-													<div class="font-medium">{user.name}</div>
-													<div class="text-xs text-gray-500">{user.email}</div>
-												</button>
-											{/each}
-										</div>
-									{/if}
-								</div>
-							{/if}
-						</div>
+						{#if terminalConnections.length === 0}
+							<div class="text-xs text-gray-400 dark:text-gray-500">
+								{$i18n.t('No terminal connections configured.')}
+							</div>
+						{/if}
 
-						<div class="flex justify-end gap-2 pt-2">
-							<button
-								class="px-3 py-1 text-xs font-medium border border-gray-200 dark:border-gray-700 hover:bg-gray-100 dark:hover:bg-gray-800 transition rounded-full"
-								type="button"
-								on:click={() => {
-									showForm = false;
-								}}
-							>
-								{$i18n.t('Cancel')}
-							</button>
-							<button
-								class="px-3 py-1 text-xs font-medium bg-black hover:bg-gray-900 text-white dark:bg-white dark:text-black dark:hover:bg-gray-100 transition rounded-full"
-								type="button"
-								on:click={applyForm}
-							>
-								{$i18n.t('Add')}
-							</button>
+						<div class="mt-1.5">
+							<div class="text-xs text-gray-500">
+								{$i18n.t(
+									'Connect to Open Terminal instances. All users will have access to file browsing and terminal tools through these servers.'
+								)}
+							</div>
+							<div class="text-xs text-gray-600 dark:text-gray-300 mt-1">
+								<a
+									class="underline"
+									href="https://github.com/open-webui/open-terminal"
+									target="_blank">{$i18n.t('Learn more about Open Terminal')} ↗</a
+								>
+							</div>
 						</div>
 					</div>
+					{/if}
+				</div>
+
+				{#if isFeatureEnabled('tool_servers') || isFeatureEnabled('terminal_servers')}
+				<hr class=" border-gray-100/30 dark:border-gray-850/30 my-4" />
 				{/if}
+
+				<IntegrationProviders saveHandler={() => {
+					toast.success($i18n.t('Integration providers saved'));
+				}} />
+			</div>
+		{:else}
+			<div class="flex h-full justify-center">
+				<div class="my-auto">
+					<Spinner className="size-6" />
+				</div>
 			</div>
 		{/if}
 	</div>
 
-
-</div>
+	<div class="flex justify-end pt-3 text-sm font-medium">
+		<button
+			class="px-3.5 py-1.5 text-sm font-medium bg-black hover:bg-gray-900 text-white dark:bg-white dark:text-black dark:hover:bg-gray-100 transition rounded-full"
+			type="submit"
+		>
+			{$i18n.t('Save')}
+		</button>
+	</div>
+</form>

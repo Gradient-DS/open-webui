@@ -16,9 +16,18 @@ branch_labels = None
 depends_on = None
 
 
+def _column_exists(table_name: str, column_name: str) -> bool:
+    conn = op.get_bind()
+    inspector = sa.inspect(conn)
+    columns = [c["name"] for c in inspector.get_columns(table_name)]
+    return column_name in columns
+
+
 def upgrade():
     existing_tables = get_existing_tables()
     if "knowledge" in existing_tables:
+        if _column_exists("knowledge", "type"):
+            return
         op.add_column(
             "knowledge",
             sa.Column("type", sa.Text(), nullable=False, server_default="local"),

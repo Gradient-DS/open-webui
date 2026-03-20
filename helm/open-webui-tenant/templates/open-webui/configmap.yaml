@@ -120,6 +120,8 @@ data:
   FEATURE_CHAT_CONTROLS_SECTIONS: {{ .Values.openWebui.config.featureChatControlsSections | quote }}
   FEATURE_INPUT_MENU: {{ .Values.openWebui.config.featureInputMenu | quote }}
   FEATURE_TEMPORARY_CHAT: {{ .Values.openWebui.config.featureTemporaryChat | quote }}
+  FEATURE_TOOL_SERVERS: {{ .Values.openWebui.config.featureToolServers | quote }}
+  FEATURE_TERMINAL_SERVERS: {{ .Values.openWebui.config.featureTerminalServers | quote }}
 
   # Notes
   ENABLE_NOTES: {{ .Values.openWebui.config.enableNotes | quote }}

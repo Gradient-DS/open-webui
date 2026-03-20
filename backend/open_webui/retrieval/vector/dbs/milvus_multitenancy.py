@@ -1,3 +1,7 @@
+"""
+NOTE: This vector database integration is community-supported and maintained on a best-effort basis.
+"""
+
 import logging
 from typing import Optional, Tuple, List, Dict, Any
 
@@ -157,7 +161,11 @@ class MilvusClient(VectorDBBase):
         collection.insert(entities)
 
     def search(
-        self, collection_name: str, vectors: List[List[float]], limit: int
+        self,
+        collection_name: str,
+        vectors: List[List[float]],
+        filter: Optional[Dict] = None,
+        limit: int = 10,
     ) -> Optional[SearchResult]:
         if not vectors:
             return None

@@ -113,6 +113,10 @@
 
 		languages = await getLanguages();
 
+		if (!$config?.features?.enable_easter_eggs) {
+			languages = languages.filter((l) => l.code !== 'dg-DG');
+		}
+
 		notificationEnabled = $settings.notificationEnabled ?? false;
 		system = $settings.system ?? '';
 
@@ -200,7 +204,7 @@
 				<div class=" self-center text-xs font-medium">{$i18n.t('Theme')}</div>
 				<div class="flex items-center relative">
 					<select
-						class="dark:bg-gray-900 w-fit pr-8 rounded-sm py-2 px-2 text-xs bg-transparent text-right {$settings.highContrastMode
+						class="w-fit pr-8 rounded-sm py-2 px-2 text-xs bg-transparent text-right {$settings.highContrastMode
 							? ''
 							: 'outline-hidden'}"
 						bind:value={selectedTheme}
@@ -211,9 +215,9 @@
 						<option value="dark">🌑 {$i18n.t('Dark')}</option>
 						<option value="oled-dark">🌃 {$i18n.t('OLED Dark')}</option>
 						<option value="light">☀️ {$i18n.t('Light')}</option>
-						<option value="her">🌷 Her</option>
-						<!-- <option value="rose-pine dark">🪻 {$i18n.t('Rosé Pine')}</option>
-						<option value="rose-pine-dawn light">🌷 {$i18n.t('Rosé Pine Dawn')}</option> -->
+						{#if $config?.features?.enable_easter_eggs}
+							<option value="her">🌷 Her</option>
+						{/if}
 					</select>
 				</div>
 			</div>
@@ -222,7 +226,7 @@
 				<div class=" self-center text-xs font-medium">{$i18n.t('Language')}</div>
 				<div class="flex items-center relative">
 					<select
-						class="dark:bg-gray-900 w-fit pr-8 rounded-sm py-2 px-2 text-xs bg-transparent text-right {$settings.highContrastMode
+						class="w-fit pr-8 rounded-sm py-2 px-2 text-xs bg-transparent text-right {$settings.highContrastMode
 							? ''
 							: 'outline-hidden'}"
 						bind:value={lang}
@@ -266,6 +270,8 @@
 							toggleNotification();
 						}}
 						type="button"
+						role="switch"
+						aria-checked={notificationEnabled}
 					>
 						{#if notificationEnabled === true}
 							<span class="ml-2 self-center">{$i18n.t('On')}</span>
@@ -278,43 +284,44 @@
 		</div>
 
 		{#if isFeatureEnabled('system_prompt')}
-			{#if $user?.role === 'admin' || (($user?.permissions.chat?.controls ?? true) && ($user?.permissions.chat?.system_prompt ?? true))}
-				<hr class="border-gray-100/30 dark:border-gray-850/30 my-3" />
+		{#if $user?.role === 'admin' || (($user?.permissions.chat?.controls ?? true) && ($user?.permissions.chat?.system_prompt ?? true))}
+			<hr class="border-gray-100/30 dark:border-gray-850/30 my-3" />
 
-				<div>
-					<div class=" my-2.5 text-sm font-medium">{$i18n.t('System Prompt')}</div>
-					<Textarea
-						bind:value={system}
-						className={'w-full text-sm outline-hidden resize-vertical' +
-							($settings.highContrastMode
-								? ' p-2.5 border-2 border-gray-300 dark:border-gray-700 rounded-lg bg-transparent text-gray-900 dark:text-gray-100 focus:ring-1 focus:ring-blue-500 focus:border-blue-500 overflow-y-hidden'
-								: '  dark:text-gray-300 ')}
-						rows="4"
-						placeholder={$i18n.t('Enter system prompt here')}
-					/>
+			<div>
+				<div class=" my-2.5 text-sm font-medium">{$i18n.t('System Prompt')}</div>
+				<Textarea
+					bind:value={system}
+					className={'w-full text-sm outline-hidden resize-vertical' +
+						($settings.highContrastMode
+							? ' p-2.5 border-2 border-gray-300 dark:border-gray-700 rounded-lg bg-transparent text-gray-900 dark:text-gray-100 focus:ring-1 focus:ring-blue-500 focus:border-blue-500 overflow-y-hidden'
+							: '  dark:text-gray-300 ')}
+					rows="4"
+					placeholder={$i18n.t('Enter system prompt here')}
+				/>
+			</div>
+		{/if}
+		{/if}
+
+		{#if $user?.role === 'admin' || (($user?.permissions.chat?.controls ?? true) && ($user?.permissions.chat?.params ?? true))}
+			<div class="mt-2 space-y-3 pr-1.5">
+				<div class="flex justify-between items-center text-sm">
+					<div class="  font-medium">{$i18n.t('Advanced Parameters')}</div>
+					<button
+						class=" text-xs font-medium {($settings?.highContrastMode ?? false)
+							? 'text-gray-800 dark:text-gray-100'
+							: 'text-gray-400 dark:text-gray-500'}"
+						type="button"
+						aria-expanded={showAdvanced}
+						on:click={() => {
+							showAdvanced = !showAdvanced;
+						}}>{showAdvanced ? $i18n.t('Hide') : $i18n.t('Show')}</button
+					>
 				</div>
-			{/if}
 
-			{#if $user?.role === 'admin' || (($user?.permissions.chat?.controls ?? true) && ($user?.permissions.chat?.params ?? true))}
-				<div class="mt-2 space-y-3 pr-1.5">
-					<div class="flex justify-between items-center text-sm">
-						<div class="  font-medium">{$i18n.t('Advanced Parameters')}</div>
-						<button
-							class=" text-xs font-medium {($settings?.highContrastMode ?? false)
-								? 'text-gray-800 dark:text-gray-100'
-								: 'text-gray-400 dark:text-gray-500'}"
-							type="button"
-							on:click={() => {
-								showAdvanced = !showAdvanced;
-							}}>{showAdvanced ? $i18n.t('Hide') : $i18n.t('Show')}</button
-						>
-					</div>
-
-					{#if showAdvanced}
-						<AdvancedParams admin={$user?.role === 'admin'} bind:params />
-					{/if}
-				</div>
-			{/if}
+				{#if showAdvanced}
+					<AdvancedParams admin={$user?.role === 'admin'} bind:params />
+				{/if}
+			</div>
 		{/if}
 	</div>
 

@@ -208,6 +208,8 @@ openWebui:
     featureAdminSettingsTabs: "models,tools,interface,db,email,acceptance"
     featureInputMenu: "True"
     featureTemporaryChat: "True"
+    featureToolServers: "False"
+    featureTerminalServers: "False"
 
     # Notes
     enableNotes: "true"

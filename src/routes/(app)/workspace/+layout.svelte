@@ -40,6 +40,11 @@
 			return;
 		}
 
+		if ($page.url.pathname.includes('/skills') && !isFeatureEnabled('skills')) {
+			goto('/');
+			return;
+		}
+
 		// Permission checks for non-admin users
 		if ($user?.role !== 'admin') {
 			if ($page.url.pathname.includes('/models') && !$user?.permissions?.workspace?.models) {
@@ -55,6 +60,8 @@
 			) {
 				goto('/');
 			} else if ($page.url.pathname.includes('/tools') && !$user?.permissions?.workspace?.tools) {
+				goto('/');
+			} else if ($page.url.pathname.includes('/skills') && !$user?.permissions?.workspace?.skills) {
 				goto('/');
 			}
 		}
@@ -130,6 +137,17 @@
 								href="/workspace/tools"
 							>
 								{$i18n.t('Tools')}
+							</a>
+						{/if}
+
+						{#if isFeatureEnabled('skills') && ($user?.role === 'admin' || $user?.permissions?.workspace?.skills)}
+							<a
+								class="min-w-fit p-1.5 {$page.url.pathname.includes('/workspace/skills')
+									? ''
+									: 'text-gray-300 dark:text-gray-600 hover:text-gray-700 dark:hover:text-white'} transition"
+								href="/workspace/skills"
+							>
+								{$i18n.t('Skills')}
 							</a>
 						{/if}
 					</div>

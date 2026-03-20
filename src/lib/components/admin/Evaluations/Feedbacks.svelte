@@ -227,7 +227,7 @@
 	<div class="scrollbar-hidden relative whitespace-nowrap overflow-x-auto max-w-full">
 		{#if (msgItems ?? []).length === 0}
 			<div class="text-center text-xs text-gray-500 dark:text-gray-400 py-1">
-				{$i18n.t('No feedbacks found')}
+				{$i18n.t('No feedback found')}
 			</div>
 		{:else}
 			<table
@@ -354,9 +354,13 @@
 								<div class="flex flex-col items-start gap-0.5 h-full">
 									<div class="flex flex-col h-full">
 										{#if feedback.data?.sibling_model_ids}
-											<div class="font-medium text-gray-600 dark:text-gray-400 flex-1">
-												{feedback.data?.model_id}
-											</div>
+											<Tooltip content={feedback.data?.model_id} placement="top-start">
+												<div
+													class="font-medium text-gray-600 dark:text-gray-400 flex-1 line-clamp-1"
+												>
+													{feedback.data?.model_id}
+												</div>
+											</Tooltip>
 
 											<Tooltip content={feedback.data.sibling_model_ids.join(', ')}>
 												<div class=" text-[0.65rem] text-gray-600 dark:text-gray-400 line-clamp-1">
@@ -371,11 +375,13 @@
 												</div>
 											</Tooltip>
 										{:else}
-											<div
-												class=" text-sm font-medium text-gray-600 dark:text-gray-400 flex-1 py-1.5"
-											>
-												{feedback.data?.model_id}
-											</div>
+											<Tooltip content={feedback.data?.model_id} placement="top-start">
+												<div
+													class="text-sm font-medium text-gray-600 dark:text-gray-400 flex-1 py-1.5 line-clamp-1"
+												>
+													{feedback.data?.model_id}
+												</div>
+											</Tooltip>
 										{/if}
 									</div>
 								</div>
@@ -471,7 +477,7 @@
 		<div class="scrollbar-hidden relative whitespace-nowrap overflow-x-auto max-w-full">
 			{#if (convItems ?? []).length === 0}
 				<div class="text-center text-xs text-gray-500 dark:text-gray-400 py-1">
-					{$i18n.t('No feedbacks found')}
+					{$i18n.t('No feedback found')}
 				</div>
 			{:else}
 				<table

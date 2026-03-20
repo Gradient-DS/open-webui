@@ -1,20 +1,20 @@
 <script lang="ts">
 	import { toast } from 'svelte-sonner';
 	import { goto } from '$app/navigation';
-	import { prompts } from '$lib/stores';
-	import { isFeatureEnabled } from '$lib/utils/features';
 	import { onMount, tick, getContext } from 'svelte';
+	import { isFeatureEnabled } from '$lib/utils/features';
 
 	const i18n = getContext('i18n');
 
-	import { createNewPrompt, getPrompts } from '$lib/apis/prompts';
+	import { createNewPrompt } from '$lib/apis/prompts';
 	import PromptEditor from '$lib/components/workspace/Prompts/PromptEditor.svelte';
 
 	let prompt: {
-		title: string;
+		name: string;
 		command: string;
 		content: string;
-		access_control: any | null;
+		tags: string[];
+		access_grants: any[];
 	} | null = null;
 
 	let clone = false;
@@ -27,8 +27,6 @@
 
 		if (res) {
 			toast.success($i18n.t('Prompt created successfully'));
-
-			await prompts.set(await getPrompts(localStorage.token));
 			await goto('/workspace/prompts');
 		}
 	};
@@ -38,6 +36,7 @@
 			goto('/');
 			return;
 		}
+
 		window.addEventListener('message', async (event) => {
 			console.log(event);
 			if (
@@ -51,10 +50,11 @@
 
 			clone = true;
 			prompt = {
-				title: _prompt.title,
+				name: _prompt.name || _prompt.title || 'Prompt',
 				command: _prompt.command,
 				content: _prompt.content,
-				access_control: _prompt.access_control !== undefined ? _prompt.access_control : {}
+				tags: _prompt.tags || [],
+				access_grants: _prompt.access_grants !== undefined ? _prompt.access_grants : []
 			};
 		});
 
@@ -70,10 +70,11 @@
 
 			clone = true;
 			prompt = {
-				title: _prompt.title,
+				name: _prompt.name || _prompt.title || 'Prompt',
 				command: _prompt.command,
 				content: _prompt.content,
-				access_control: _prompt.access_control !== undefined ? _prompt.access_control : {}
+				tags: _prompt.tags || [],
+				access_grants: _prompt.access_grants !== undefined ? _prompt.access_grants : []
 			};
 		}
 	});
