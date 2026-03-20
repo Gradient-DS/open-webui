@@ -1182,6 +1182,11 @@
 			return;
 		}
 
+		if ($config?.integration_providers?.[knowledge?.type]) {
+			toast.error($i18n.t('Files for this knowledge base are managed via the integration API.'));
+			return;
+		}
+
 		const handleUploadingFileFolder = (items) => {
 			for (const item of items) {
 				if (item.isFile) {
@@ -1440,6 +1445,11 @@
 							<div class="shrink-0 mr-2.5 flex items-center gap-2">
 								{#if knowledge?.type === 'onedrive'}
 									<Badge type="info" content={$i18n.t('OneDrive')} />
+								{:else if $config?.integration_providers?.[knowledge?.type]}
+									<Badge
+										type={$config.integration_providers[knowledge.type].badge_type}
+										content={$config.integration_providers[knowledge.type].name}
+									/>
 								{:else}
 									<Badge type="muted" content={$i18n.t('Local')} />
 								{/if}
@@ -1517,9 +1527,10 @@
 									</div>
 								{:else if fileItemsTotal}
 									{#if knowledge?.type !== 'local' && knowledge?.type}
-										<Tooltip content={$i18n.t('Maximum 250 files per external knowledge base')}>
+										{@const maxFiles = $config?.integration_providers?.[knowledge?.type]?.max_files_per_kb || 250}
+										<Tooltip content={$i18n.t('Maximum {{count}} files per knowledge base', { count: maxFiles })}>
 											<div class="text-xs text-gray-500">
-												{fileItemsTotal} / 250 {$i18n.t('files')}
+												{fileItemsTotal} / {maxFiles} {$i18n.t('files')}
 											</div>
 										</Tooltip>
 									{:else}
@@ -1533,7 +1544,7 @@
 							</div>
 						</div>
 
-						{#if knowledge?.write_access && (knowledge?.type === 'local' || !knowledge?.type)}
+						{#if knowledge?.write_access && (knowledge?.type === 'local' || !knowledge?.type || $config?.integration_providers?.[knowledge?.type])}
 							<div class="self-center shrink-0">
 								<button
 									class="bg-gray-50 hover:bg-gray-100 text-black dark:bg-gray-850 dark:hover:bg-gray-800 dark:text-white transition px-2 py-1 rounded-full flex gap-1 items-center"
@@ -1617,6 +1628,8 @@
 										</svg>
 									</button>
 								</Tooltip>
+							{:else if $config?.integration_providers?.[knowledge?.type]}
+								<!-- No add button for push providers -- files come via API -->
 							{:else}
 								<AddContentMenu
 									onUpload={(data) => {
@@ -1771,8 +1784,11 @@
 									{:else if knowledge?.write_access && !query && !viewOption}
 										<EmptyStateCards
 											knowledgeType={knowledge?.type || 'local'}
+											integrationProviders={$config?.integration_providers}
 											onAction={(type) => {
-												if (type === 'onedrive') {
+												if (type === 'integration') {
+													// No-op: files are managed via API
+												} else if (type === 'onedrive') {
 													oneDriveSyncHandler();
 												} else if (type === 'directory') {
 													uploadDirectoryHandler();

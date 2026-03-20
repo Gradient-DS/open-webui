@@ -45,6 +45,7 @@ data:
   # LLM Providers
   ENABLE_OLLAMA_API: {{ .Values.openWebui.config.enableOllamaApi | quote }}
   OPENAI_API_BASE_URL: {{ .Values.openWebui.config.openaiApiBaseUrl | quote }}
+  ENABLE_FORWARD_USER_INFO_HEADERS: {{ .Values.openWebui.config.enableForwardUserInfoHeaders | quote }}
   {{- if .Values.openWebui.config.openaiApiConfigs }}
   OPENAI_API_CONFIGS: {{ .Values.openWebui.config.openaiApiConfigs | toJson | quote }}
   {{- end }}

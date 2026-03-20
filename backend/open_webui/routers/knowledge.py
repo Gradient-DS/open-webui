@@ -186,10 +186,13 @@ async def create_new_knowledge(
         form_data.type = "local"
 
     # Validate type value
-    if form_data.type not in ("local", "onedrive"):
+    allowed_kb_types = {"local", "onedrive"} | set(
+        (request.app.state.config.INTEGRATION_PROVIDERS or {}).keys()
+    )
+    if form_data.type not in allowed_kb_types:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid knowledge base type. Must be 'local' or 'onedrive'.",
+            detail=f"Invalid knowledge base type. Must be one of: {', '.join(sorted(allowed_kb_types))}.",
         )
 
     # External KBs are always private

@@ -28,6 +28,7 @@
 	import Dropdown from '../common/Dropdown.svelte';
 	import XMark from '../icons/XMark.svelte';
 	import ViewSelector from './common/ViewSelector.svelte';
+	import TypeSelector from './common/TypeSelector.svelte';
 	import Loader from '../common/Loader.svelte';
 
 	let loaded = false;
@@ -39,6 +40,7 @@
 	let page = 1;
 	let query = '';
 	let viewOption = '';
+	let typeFilter = '';
 
 	let items = null;
 	let total = null;
@@ -46,7 +48,7 @@
 	let allItemsLoaded = false;
 	let itemsLoading = false;
 
-	$: if (loaded && query !== undefined && viewOption !== undefined) {
+	$: if (loaded && query !== undefined && viewOption !== undefined && typeFilter !== undefined) {
 		init();
 	}
 
@@ -71,7 +73,7 @@
 
 	const getItemsPage = async () => {
 		itemsLoading = true;
-		const res = await searchKnowledgeBases(localStorage.token, query, viewOption, page).catch(
+		const res = await searchKnowledgeBases(localStorage.token, query, viewOption, page, typeFilter || null).catch(
 			() => {
 				return [];
 			}
@@ -263,6 +265,15 @@
 						await tick();
 					}}
 				/>
+
+				{#if Object.keys($config?.integration_providers ?? {}).length > 0}
+					<TypeSelector
+						bind:value={typeFilter}
+						onChange={async () => {
+							await tick();
+						}}
+					/>
+				{/if}
 			</div>
 		</div>
 
@@ -297,6 +308,11 @@
 															<Spinner className="size-3" />
 														</Tooltip>
 													{/if}
+												{:else if $config?.integration_providers?.[item?.type]}
+													<Badge
+														type={$config.integration_providers[item.type].badge_type}
+														content={$config.integration_providers[item.type].name}
+													/>
 												{:else}
 													<Badge type="muted" content={$i18n.t('Local')} />
 												{/if}

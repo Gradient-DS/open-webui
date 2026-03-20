@@ -78,7 +78,8 @@ export const searchKnowledgeBases = async (
 	token: string = '',
 	query: string | null = null,
 	viewOption: string | null = null,
-	page: number | null = null
+	page: number | null = null,
+	type: string | null = null
 ) => {
 	let error = null;
 
@@ -86,6 +87,7 @@ export const searchKnowledgeBases = async (
 	if (query) searchParams.append('query', query);
 	if (viewOption) searchParams.append('view_option', viewOption);
 	if (page) searchParams.append('page', page.toString());
+	if (type) searchParams.append('type', type);
 
 	const res = await fetch(`${WEBUI_API_BASE_URL}/knowledge/search?${searchParams.toString()}`, {
 		method: 'GET',
