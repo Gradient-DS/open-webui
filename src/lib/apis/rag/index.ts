@@ -7,8 +7,11 @@
 
 // External API base URL - configured via environment variable
 // This should point to your Flask API (e.g., http://localhost:3535)
-const RAG_API_BASE_URL = import.meta.env.PUBLIC_RAG_API_BASE_URL || 'http://localhost:3535';
-const RAG_API_KEY = import.meta.env.PUBLIC_RAG_API_KEY || 'your-dev-api-key-here';
+// Uses dynamic public env to avoid crashing when vars are not defined.
+import { env } from '$env/dynamic/public';
+
+const RAG_API_BASE_URL = env.PUBLIC_RAG_API_BASE_URL || 'http://localhost:3535';
+const RAG_API_KEY = env.PUBLIC_RAG_API_KEY || 'your-dev-api-key-here';
 
 export interface RagDocument {
 	id: string; // Document ID for filtering

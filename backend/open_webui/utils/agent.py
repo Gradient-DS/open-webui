@@ -67,6 +67,7 @@ class AgentPayload:
     files: Optional[list[dict[str, Any]]] = None
     knowledge: Optional[list[dict[str, Any]]] = None
     tool_ids: Optional[list[str]] = None
+    rag_filter: Optional[dict[str, Any]] = None
     # Model params forwarded directly
     temperature: Optional[float] = None
     top_p: Optional[float] = None
@@ -91,6 +92,7 @@ def build_agent_payload(
     files: Optional[list[dict[str, Any]]] = None,
     knowledge: Optional[list[dict[str, Any]]] = None,
     tool_ids: Optional[list[str]] = None,
+    rag_filter: Optional[dict[str, Any]] = None,
     **model_params,
 ) -> dict[str, Any]:
     """Build a JSON-serialisable payload for the agent API.
@@ -111,6 +113,7 @@ def build_agent_payload(
         files=files,
         knowledge=knowledge,
         tool_ids=tool_ids,
+        rag_filter=rag_filter,
         **{k: v for k, v in model_params.items() if v is not None},
     )
     return {k: v for k, v in asdict(payload).items() if v is not None}
@@ -233,6 +236,7 @@ async def call_agent_api(
         files=metadata.get("files"),
         knowledge=metadata.get("knowledge"),
         tool_ids=metadata.get("tool_ids"),
+        rag_filter=metadata.get("rag_filter"),
         **model_params,
     )
 
