@@ -4,10 +4,9 @@ from typing import Optional, List, Tuple
 from urllib.parse import quote
 
 
-from open_webui.env import ENABLE_FORWARD_USER_INFO_HEADERS
+from open_webui.env import ENABLE_FORWARD_USER_INFO_HEADERS, REQUESTS_VERIFY
 from open_webui.retrieval.models.base_reranker import BaseReranker
 from open_webui.utils.headers import include_user_info_headers
-
 
 log = logging.getLogger(__name__)
 
@@ -55,6 +54,7 @@ class ExternalReranker(BaseReranker):
                 headers=headers,
                 json=payload,
                 timeout=self.timeout,
+                verify=REQUESTS_VERIFY,
             )
 
             r.raise_for_status()

@@ -41,11 +41,14 @@
 
 {#if sourceIds}
 	{#if (token?.ids ?? []).length == 1}
-		<Source id={token.ids[0] - 1} title={sourceIds[token.ids[0] - 1]} {onClick} />
+		{@const id = token.ids[0]}
+		{@const identifier = token.citationIdentifiers ? token.citationIdentifiers[0] : id - 1}
+		<Source id={identifier} title={sourceIds[id - 1]} {onClick} />
 	{:else}
 		<LinkPreview.Root openDelay={0} bind:open={openPreview}>
 			<LinkPreview.Trigger>
 				<button
+					aria-label={`${getDisplayTitle(formattedTitle(decodeString(sourceIds[token.ids[0] - 1])))} +${(token?.ids ?? []).length - 1} more sources`}
 					class="text-[10px] w-fit translate-y-[2px] px-2 py-0.5 dark:bg-white/5 dark:text-white/80 dark:hover:text-white bg-gray-50 text-black/80 hover:text-black transition rounded-xl"
 					on:click={() => {
 						openPreview = !openPreview;
@@ -65,9 +68,11 @@
 				el={containerElement}
 			>
 				<div class="bg-gray-50 dark:bg-gray-850 rounded-xl p-1 cursor-pointer">
-					{#each token.ids as sourceId}
+					{#each token.citationIdentifiers ?? token.ids as identifier}
+						{@const id =
+							typeof identifier === 'string' ? parseInt(identifier.split('#')[0]) : identifier}
 						<div class="">
-							<Source id={sourceId - 1} title={sourceIds[sourceId - 1]} {onClick} />
+							<Source id={identifier} title={sourceIds[id - 1]} {onClick} />
 						</div>
 					{/each}
 				</div>

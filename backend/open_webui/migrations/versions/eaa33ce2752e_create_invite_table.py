@@ -14,7 +14,15 @@ branch_labels = None
 depends_on = None
 
 
+def _table_exists(table_name: str) -> bool:
+    conn = op.get_bind()
+    inspector = sa.inspect(conn)
+    return table_name in inspector.get_table_names()
+
+
 def upgrade():
+    if _table_exists("invite"):
+        return
     op.create_table(
         "invite",
         sa.Column("id", sa.String(), nullable=False, primary_key=True),

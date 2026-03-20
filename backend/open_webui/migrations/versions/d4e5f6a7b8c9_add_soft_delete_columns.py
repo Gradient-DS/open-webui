@@ -14,14 +14,23 @@ branch_labels = None
 depends_on = None
 
 
+def _column_exists(table_name: str, column_name: str) -> bool:
+    conn = op.get_bind()
+    inspector = sa.inspect(conn)
+    columns = [c["name"] for c in inspector.get_columns(table_name)]
+    return column_name in columns
+
+
 def upgrade():
     # Knowledge table
-    op.add_column("knowledge", sa.Column("deleted_at", sa.BigInteger(), nullable=True))
-    op.create_index("ix_knowledge_deleted_at", "knowledge", ["deleted_at"])
+    if not _column_exists("knowledge", "deleted_at"):
+        op.add_column("knowledge", sa.Column("deleted_at", sa.BigInteger(), nullable=True))
+        op.create_index("ix_knowledge_deleted_at", "knowledge", ["deleted_at"])
 
     # Chat table
-    op.add_column("chat", sa.Column("deleted_at", sa.BigInteger(), nullable=True))
-    op.create_index("ix_chat_deleted_at", "chat", ["deleted_at"])
+    if not _column_exists("chat", "deleted_at"):
+        op.add_column("chat", sa.Column("deleted_at", sa.BigInteger(), nullable=True))
+        op.create_index("ix_chat_deleted_at", "chat", ["deleted_at"])
 
 
 def downgrade():

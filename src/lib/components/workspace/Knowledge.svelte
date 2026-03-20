@@ -4,11 +4,15 @@
 	dayjs.extend(relativeTime);
 
 	import { toast } from 'svelte-sonner';
-	import { onMount, onDestroy, getContext, tick } from 'svelte';
+	import { onMount, getContext, tick, onDestroy } from 'svelte';
 	const i18n = getContext('i18n');
 
 	import { WEBUI_NAME, knowledge, user, config, socket } from '$lib/stores';
-	import { deleteKnowledgeById, searchKnowledgeBases } from '$lib/apis/knowledge';
+	import {
+		deleteKnowledgeById,
+		searchKnowledgeBases,
+		exportKnowledgeById
+	} from '$lib/apis/knowledge';
 
 	import { goto } from '$app/navigation';
 	import { capitalizeFirstLetter } from '$lib/utils';
@@ -39,6 +43,7 @@
 
 	let page = 1;
 	let query = '';
+	let searchDebounceTimer: ReturnType<typeof setTimeout>;
 	let viewOption = '';
 	let typeFilter = '';
 
@@ -48,7 +53,23 @@
 	let allItemsLoaded = false;
 	let itemsLoading = false;
 
-	$: if (loaded && query !== undefined && viewOption !== undefined && typeFilter !== undefined) {
+	$: if (query !== undefined) {
+		clearTimeout(searchDebounceTimer);
+		searchDebounceTimer = setTimeout(() => {
+			init();
+		}, 300);
+	}
+
+	onDestroy(() => {
+		clearTimeout(searchDebounceTimer);
+		$socket?.off('onedrive:sync:progress', handleSyncProgress);
+	});
+
+	$: if (viewOption !== undefined) {
+		init();
+	}
+
+	$: if (typeFilter !== undefined) {
 		init();
 	}
 
@@ -67,6 +88,8 @@
 	};
 
 	const init = async () => {
+		if (!loaded) return;
+
 		reset();
 		await getItemsPage();
 	};
@@ -112,6 +135,25 @@
 		}
 	};
 
+	const exportHandler = async (item) => {
+		try {
+			const blob = await exportKnowledgeById(localStorage.token, item.id);
+			if (blob) {
+				const url = URL.createObjectURL(blob);
+				const a = document.createElement('a');
+				a.href = url;
+				a.download = `${item.name}.zip`;
+				document.body.appendChild(a);
+				a.click();
+				document.body.removeChild(a);
+				URL.revokeObjectURL(url);
+				toast.success($i18n.t('Knowledge exported successfully'));
+			}
+		} catch (e) {
+			toast.error(`${e}`);
+		}
+	};
+
 	const handleSyncProgress = (data) => {
 		const { knowledge_id, status } = data;
 		if (items) {
@@ -138,10 +180,6 @@
 		loaded = true;
 
 		$socket?.on('onedrive:sync:progress', handleSyncProgress);
-	});
-
-	onDestroy(() => {
-		$socket?.off('onedrive:sync:progress', handleSyncProgress);
 	});
 </script>
 
@@ -227,12 +265,14 @@
 				<input
 					class=" w-full text-sm py-1 rounded-r-xl outline-hidden bg-transparent"
 					bind:value={query}
+					aria-label={$i18n.t('Search Knowledge')}
 					placeholder={$i18n.t('Search Knowledge')}
 				/>
 				{#if query}
 					<div class="self-center pl-1.5 translate-y-[0.5px] rounded-l-xl bg-transparent">
 						<button
 							class="p-0.5 rounded-full hover:bg-gray-100 dark:hover:bg-gray-900 transition"
+							aria-label={$i18n.t('Clear search')}
 							on:click={() => {
 								query = '';
 							}}
@@ -329,6 +369,11 @@
 											<div class="flex items-center gap-2">
 												<div class=" flex self-center">
 													<ItemMenu
+														onExport={$user.role === 'admin'
+															? () => {
+																	exportHandler(item);
+																}
+															: null}
 														on:delete={() => {
 															selectedItem = item;
 															showDeleteConfirm = true;

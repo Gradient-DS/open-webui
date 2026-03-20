@@ -14,36 +14,48 @@
 	export let models = [];
 	export let chatFiles = [];
 	export let params = {};
+	export let embed = false;
 
-	let showValves = false;
+	// Persist collapsible section open/close state
+	const getOpen = (key: string, fallback = true): boolean => {
+		const v = localStorage.getItem(`chatControls.${key}`);
+		return v !== null ? v === 'true' : fallback;
+	};
+	const setOpen = (key: string) => (open: boolean) => {
+		localStorage.setItem(`chatControls.${key}`, String(open));
+	};
 
-	// Collect knowledge items from all selected models
-	$: modelKnowledge = models.reduce((acc, model) => {
-		const knowledge = model?.info?.meta?.knowledge ?? [];
-		if (knowledge.length > 0) {
-			return [...acc, { modelName: model.name, items: knowledge }];
-		}
-		return acc;
-	}, []);
+	let showFiles = getOpen('files');
+	let showValves = getOpen('valves', false);
+	let showSystemPrompt = getOpen('systemPrompt');
+	let showAdvancedParams = getOpen('advancedParams');
 </script>
 
 <div class=" dark:text-white">
-	<div class=" flex items-center justify-between dark:text-gray-100 mb-2">
-		<div class=" text-lg font-medium self-center font-primary">{$i18n.t('Chat Controls')}</div>
-		<button
-			class="self-center"
-			on:click={() => {
-				dispatch('close');
-			}}
-		>
-			<XMark className="size-3.5" />
-		</button>
-	</div>
+	{#if !embed}
+		<div class=" flex items-center justify-between dark:text-gray-100 mb-2">
+			<div class=" text-md self-center font-primary">{$i18n.t('Controls')}</div>
+			<button
+				class="self-center"
+				aria-label={$i18n.t('Close chat controls')}
+				on:click={() => {
+					dispatch('close');
+				}}
+			>
+				<XMark className="size-3.5" />
+			</button>
+		</div>
+	{/if}
 
 	{#if isFeatureEnabled('chat_controls') && ($user?.role === 'admin' || ($user?.permissions.chat?.controls ?? true))}
-		<div class=" dark:text-gray-200 text-sm font-primary py-0.5 px-0.5">
+		<div class=" dark:text-gray-200 text-sm py-0.5 px-0.5">
 			{#if isChatControlSectionEnabled('files')}
-				<Collapsible title={$i18n.t('Files')} open={true} buttonClassName="w-full">
+				<Collapsible
+					title={$i18n.t('Files')}
+					bind:open={showFiles}
+					onChange={setOpen('files')}
+					buttonClassName="w-full"
+				>
 					<div class="flex flex-col gap-1 mt-1.5" slot="content">
 						{#if chatFiles.length > 0}
 							{#each chatFiles as file, fileIdx}
@@ -68,33 +80,8 @@
 									}}
 								/>
 							{/each}
-						{/if}
-
-						{#if modelKnowledge.length > 0}
-							{#each modelKnowledge as { modelName, items }}
-								<div class="mt-2">
-									<div class="text-xs text-gray-500 dark:text-gray-400 mb-1">
-										{$i18n.t('From model')}: {modelName}
-									</div>
-									{#each items as item}
-										<FileItem
-											className="w-full"
-											item={item}
-											edit={false}
-											url={item?.url ? item.url : null}
-											name={item.name}
-											type={item?.type ?? 'collection'}
-											size={item?.size}
-											dismissible={false}
-											small={true}
-										/>
-									{/each}
-								</div>
-							{/each}
-						{/if}
-
-						{#if chatFiles.length === 0 && modelKnowledge.length === 0}
-							<div class="text-xs text-gray-500 dark:text-gray-400 py-2">
+						{:else}
+							<div class="text-xs text-gray-500 dark:text-gray-400">
 								{$i18n.t('Files will appear here when attached to the chat.')}
 							</div>
 						{/if}
@@ -105,7 +92,12 @@
 			{/if}
 
 			{#if isChatControlSectionEnabled('valves') && ($user?.role === 'admin' || ($user?.permissions.chat?.valves ?? true))}
-				<Collapsible bind:open={showValves} title={$i18n.t('Valves')} buttonClassName="w-full">
+				<Collapsible
+					bind:open={showValves}
+					onChange={setOpen('valves')}
+					title={$i18n.t('Valves')}
+					buttonClassName="w-full"
+				>
 					<div class="text-sm" slot="content">
 						<Valves show={showValves} />
 					</div>
@@ -114,27 +106,35 @@
 				<hr class="my-2 border-gray-50 dark:border-gray-700/10" />
 			{/if}
 
-			{#if isChatControlSectionEnabled('system_prompt') && isFeatureEnabled('system_prompt')}
-				{#if $user?.role === 'admin' || ($user?.permissions.chat?.system_prompt ?? true)}
-					<Collapsible title={$i18n.t('System Prompt')} open={true} buttonClassName="w-full">
-						<div class="" slot="content">
-							<textarea
-								bind:value={params.system}
-								class="w-full text-xs outline-hidden resize-vertical {$settings.highContrastMode
-									? 'border-2 border-gray-300 dark:border-gray-700 rounded-lg bg-gray-50 dark:bg-gray-800 p-2.5'
-									: 'py-1.5 bg-transparent'}"
-								rows="4"
-								placeholder={$i18n.t('Enter system prompt')}
-							/>
-						</div>
-					</Collapsible>
+			{#if isChatControlSectionEnabled('system_prompt') && isFeatureEnabled('system_prompt') && ($user?.role === 'admin' || ($user?.permissions.chat?.system_prompt ?? true))}
+				<Collapsible
+					title={$i18n.t('System Prompt')}
+					bind:open={showSystemPrompt}
+					onChange={setOpen('systemPrompt')}
+					buttonClassName="w-full"
+				>
+					<div class="" slot="content">
+						<textarea
+							bind:value={params.system}
+							class="w-full text-xs outline-hidden resize-vertical {$settings.highContrastMode
+								? 'border-2 border-gray-300 dark:border-gray-700 rounded-lg bg-gray-50 dark:bg-gray-800 p-2.5'
+								: 'py-1.5 bg-transparent'}"
+							rows="4"
+							placeholder={$i18n.t('Enter system prompt')}
+						/>
+					</div>
+				</Collapsible>
 
-					<hr class="my-2 border-gray-50 dark:border-gray-700/10" />
-				{/if}
+				<hr class="my-2 border-gray-50 dark:border-gray-700/10" />
 			{/if}
 
 			{#if isChatControlSectionEnabled('params') && ($user?.role === 'admin' || ($user?.permissions.chat?.params ?? true))}
-				<Collapsible title={$i18n.t('Advanced Params')} open={true} buttonClassName="w-full">
+				<Collapsible
+					title={$i18n.t('Advanced Params')}
+					bind:open={showAdvancedParams}
+					onChange={setOpen('advancedParams')}
+					buttonClassName="w-full"
+				>
 					<div class="text-sm mt-1.5" slot="content">
 						<div>
 							<AdvancedParams admin={$user?.role === 'admin'} custom={true} bind:params />
