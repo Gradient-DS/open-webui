@@ -1,6 +1,6 @@
 """add soft delete columns
 
-Revision ID: a1b2c3d4e5f6
+Revision ID: d4e5f6a7b8c9
 Revises: eaa33ce2752e
 Create Date: 2026-02-19
 """
@@ -8,7 +8,7 @@ Create Date: 2026-02-19
 from alembic import op
 import sqlalchemy as sa
 
-revision = "a1b2c3d4e5f6"
+revision = "d4e5f6a7b8c9"
 down_revision = "eaa33ce2752e"
 branch_labels = None
 depends_on = None
