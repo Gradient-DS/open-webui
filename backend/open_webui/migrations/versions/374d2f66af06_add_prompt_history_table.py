@@ -35,7 +35,11 @@ def upgrade() -> None:
         sa.column("access_control", sa.JSON()),
     )
 
-    # Check if table exists/read data
+    # Check if table exists/read data.
+    # Use a savepoint so a failed SELECT doesn't abort the PostgreSQL transaction.
+    # On PostgreSQL, a bare try/except leaves the connection in "InFailedSqlTransaction"
+    # state, causing all subsequent SQL in the same transaction to fail silently.
+    savepoint = conn.begin_nested()
     try:
         existing_prompts = conn.execute(
             sa.select(
@@ -47,8 +51,9 @@ def upgrade() -> None:
                 old_prompt_table.c.access_control,
             )
         ).fetchall()
+        savepoint.commit()
     except Exception:
-        # Fallback if table doesn't exist (new install)
+        savepoint.rollback()
         existing_prompts = []
 
     # Step 2: Create new prompt table with 'id' as PRIMARY KEY

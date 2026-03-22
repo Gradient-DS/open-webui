@@ -31,18 +31,18 @@ def upgrade() -> None:
         unique_columns = {tuple(u["column_names"]) for u in unique_constraints}
 
         with op.batch_alter_table("user") as batch_op:
-            # If primary key is wrong, drop it
-            if pk_columns and pk_columns != ["id"]:
-                batch_op.drop_constraint(
-                    inspector.get_pk_constraint("user")["name"], type_="primary"
-                )
-
             # Add unique constraint if missing
             if ("id",) not in unique_columns:
                 batch_op.create_unique_constraint("uq_user_id", ["id"])
 
-            # Re-create correct primary key
-            batch_op.create_primary_key("pk_user_id", ["id"])
+            # Fix primary key only if it's wrong or missing
+            if pk_columns != ["id"]:
+                if pk_columns:
+                    batch_op.drop_constraint(
+                        inspector.get_pk_constraint("user")["name"],
+                        type_="primary",
+                    )
+                batch_op.create_primary_key("pk_user_id", ["id"])
 
     # Create oauth_session table
     op.create_table(
