@@ -46,6 +46,32 @@ def _make_json_serializable(obj: Any) -> Any:
         return obj
 
 
+def _sanitize_property_name(name: str) -> str:
+    """Sanitize property name to be a valid Weaviate/GraphQL identifier.
+
+    Weaviate property names must match /[_A-Za-z][_0-9A-Za-z]{0,230}/.
+    PDF metadata can contain hyphens (e.g. 'pdfsettings-inchmargins') which
+    cause silent batch insert failures.
+    """
+    sanitized = re.sub(r"[^a-zA-Z0-9_]", "_", name)
+    sanitized = sanitized.strip("_")
+    if not sanitized:
+        return None
+    if not sanitized[0].isalpha() and sanitized[0] != "_":
+        sanitized = "_" + sanitized
+    return sanitized
+
+
+def _sanitize_metadata_keys(metadata: dict) -> dict:
+    """Sanitize all metadata keys to be valid Weaviate property names."""
+    result = {}
+    for key, value in metadata.items():
+        sanitized_key = _sanitize_property_name(key)
+        if sanitized_key:
+            result[sanitized_key] = value
+    return result
+
+
 class WeaviateClient(VectorDBBase):
     def __init__(self):
         self.url = WEAVIATE_HTTP_HOST
@@ -171,8 +197,10 @@ class WeaviateClient(VectorDBBase):
 
                 properties = {"text": item["text"]}
                 if item["metadata"]:
-                    clean_metadata = _make_json_serializable(
-                        process_metadata(item["metadata"])
+                    clean_metadata = _sanitize_metadata_keys(
+                        _make_json_serializable(
+                            process_metadata(item["metadata"])
+                        )
                     )
                     clean_metadata.pop("text", None)
                     properties.update(clean_metadata)
@@ -193,8 +221,10 @@ class WeaviateClient(VectorDBBase):
 
                 properties = {"text": item["text"]}
                 if item["metadata"]:
-                    clean_metadata = _make_json_serializable(
-                        process_metadata(item["metadata"])
+                    clean_metadata = _sanitize_metadata_keys(
+                        _make_json_serializable(
+                            process_metadata(item["metadata"])
+                        )
                     )
                     clean_metadata.pop("text", None)
                     properties.update(clean_metadata)

@@ -210,6 +210,14 @@ data:
   ENABLE_EVALUATION_ARENA_MODELS: {{ .Values.openWebui.config.enableEvaluationArenaModels | quote }}
   ENABLE_API_KEYS: {{ .Values.openWebui.config.enableApiKeys | quote }}
   ENABLE_IMAGE_GENERATION: {{ .Values.openWebui.config.enableImageGeneration | quote }}
+  IMAGE_GENERATION_ENGINE: {{ .Values.openWebui.config.imageGenerationEngine | quote }}
+  {{- if .Values.openWebui.config.imageGenerationModel }}
+  IMAGE_GENERATION_MODEL: {{ .Values.openWebui.config.imageGenerationModel | quote }}
+  {{- end }}
+  {{- if .Values.openWebui.config.imagesOpenaiApiBaseUrl }}
+  IMAGES_OPENAI_API_BASE_URL: {{ .Values.openWebui.config.imagesOpenaiApiBaseUrl | quote }}
+  {{- end }}
+  IMAGE_SIZE: {{ .Values.openWebui.config.imageSize | quote }}
   ENABLE_GOOGLE_DRIVE_INTEGRATION: {{ .Values.openWebui.config.enableGoogleDriveIntegration | quote }}
 
   # OneDrive Integration
