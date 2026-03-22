@@ -293,6 +293,10 @@ openWebui:
     enableEvaluationArenaModels: "false"
     enableApiKeys: "false"
     enableImageGeneration: "false"
+    imageGenerationEngine: "openai"
+    imageGenerationModel: ""
+    imagesOpenaiApiBaseUrl: ""
+    imageSize: "1024x1024"
     enableGoogleDriveIntegration: "false"
 
     # OneDrive Integration
