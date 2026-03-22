@@ -54,6 +54,7 @@ data:
   VECTOR_DB: {{ .Values.openWebui.config.vectorDb | quote }}
   WEAVIATE_HTTP_HOST: {{ include "open-webui-tenant.weaviate.fullname" . }}
   WEAVIATE_HTTP_PORT: {{ .Values.openWebui.config.weaviateHttpPort | quote }}
+  WEAVIATE_GRPC_HOST: {{ include "open-webui-tenant.weaviate.fullname" . }}
   WEAVIATE_GRPC_PORT: {{ .Values.openWebui.config.weaviateGrpcPort | quote }}
   WEAVIATE_WEB_SEARCH_TTL_MINUTES: {{ .Values.openWebui.config.weaviateWebSearchTtlMinutes | quote }}
 
