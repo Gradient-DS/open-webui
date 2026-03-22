@@ -67,6 +67,7 @@ jobs:
             type=sha,prefix=git-
             type=semver,pattern={{version}},prefix=v
             type=raw,enable=${{ github.ref == 'refs/heads/main' }},value=latest
+            type=raw,value=${{ github.ref_name }}-{{sha}}-${{ github.run_number }}
           flavor: |
             latest=false
 
@@ -151,6 +152,7 @@ jobs:
             type=sha,prefix=git-
             type=semver,pattern={{version}},prefix=v
             type=raw,enable=${{ github.ref == 'refs/heads/main' }},value=latest
+            type=raw,value=${{ github.ref_name }}-{{sha}}-${{ github.run_number }}
           flavor: |
             latest=false
 
@@ -163,3 +165,43 @@ jobs:
       - name: Inspect image
         run: |
           docker buildx imagetools inspect ${{ env.FULL_IMAGE_NAME }}:${{ steps.meta.outputs.version }}
+
+  publish-helm-chart:
+    runs-on: ubuntu-latest
+    needs: [merge-slim-images]
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Set up Helm
+        uses: azure/setup-helm@v4
+        with:
+          version: v3.16.0
+
+      - name: Login to GHCR
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | helm registry login ghcr.io -u ${{ github.actor }} --password-stdin
+
+      - name: Compute chart version
+        id: version
+        run: |
+          BASE=$(grep '^version:' helm/open-webui-tenant/Chart.yaml | awk '{print $2}')
+          MAJOR_MINOR=$(echo "$BASE" | cut -d. -f1-2)
+          VERSION="${MAJOR_MINOR}.${{ github.run_number }}"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+
+      - name: Update appVersion in Chart.yaml
+        run: |
+          SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-7)
+          sed -i "s/^appVersion:.*/appVersion: \"${SHORT_SHA}\"/" helm/open-webui-tenant/Chart.yaml
+
+      - name: Lint chart
+        run: helm lint helm/open-webui-tenant
+
+      - name: Package chart
+        run: helm package helm/open-webui-tenant --version ${{ steps.version.outputs.version }}
+
+      - name: Push chart to GHCR
+        run: helm push open-webui-tenant-${{ steps.version.outputs.version }}.tgz oci://ghcr.io/gradient-ds/charts
