@@ -143,6 +143,7 @@ openWebui:
     openaiApiBaseUrl: "https://router.huggingface.co/v1"
     # Forward user identity headers to upstream LLM API (required for LiteLLM per-user tracking)
     enableForwardUserInfoHeaders: "false"
+    forwardUserInfoHeaderUserId: "X-OpenWebUI-User-Id"  # Header name for user UUID forwarding
 
     # Vector Database (Weaviate) - uses local Weaviate in tenant namespace
     vectorDb: "weaviate"
@@ -346,6 +347,9 @@ openWebui:
     s3EndpointUrl: ""             # For S3-compatible storage (e.g., https://object.previder.nl)
     s3KeyPrefix: ""               # Optional prefix for all keys
     s3EnableTagging: "false"
+
+    # Easter Eggs (disabled)
+    enableEasterEggs: "false"
 
     # Telemetry (disabled)
     scarfNoAnalytics: "true"

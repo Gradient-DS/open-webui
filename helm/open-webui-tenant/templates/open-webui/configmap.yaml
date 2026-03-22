@@ -46,6 +46,7 @@ data:
   ENABLE_OLLAMA_API: {{ .Values.openWebui.config.enableOllamaApi | quote }}
   OPENAI_API_BASE_URL: {{ .Values.openWebui.config.openaiApiBaseUrl | quote }}
   ENABLE_FORWARD_USER_INFO_HEADERS: {{ .Values.openWebui.config.enableForwardUserInfoHeaders | quote }}
+  FORWARD_USER_INFO_HEADER_USER_ID: {{ .Values.openWebui.config.forwardUserInfoHeaderUserId | quote }}
   {{- if .Values.openWebui.config.openaiApiConfigs }}
   OPENAI_API_CONFIGS: {{ .Values.openWebui.config.openaiApiConfigs | toJson | quote }}
   {{- end }}
@@ -284,6 +285,9 @@ data:
   SCARF_NO_ANALYTICS: {{ .Values.openWebui.config.scarfNoAnalytics | quote }}
   DO_NOT_TRACK: {{ .Values.openWebui.config.doNotTrack | quote }}
   ANONYMIZED_TELEMETRY: {{ .Values.openWebui.config.anonymizedTelemetry | quote }}
+
+  # Easter Eggs
+  ENABLE_EASTER_EGGS: {{ .Values.openWebui.config.enableEasterEggs | quote }}
 
   # Custom Prompts
   {{- if .Values.openWebui.config.queryGenerationPromptTemplate }}
