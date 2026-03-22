@@ -15,9 +15,12 @@ export type Feature =
 	| 'knowledge'
 	| 'prompts'
 	| 'tools'
+	| 'skills'
 	| 'admin_evaluations'
 	| 'admin_functions'
-	| 'admin_settings';
+	| 'admin_settings'
+	| 'input_menu'
+	| 'temporary_chat';
 
 /**
  * Check if a feature is enabled globally.
@@ -89,7 +92,7 @@ export const ADMIN_SETTINGS_TABS = [
 	'connections',
 	'models',
 	'evaluations',
-	'tools',
+	'integrations',
 	'documents',
 	'web',
 	'code-execution',
@@ -97,8 +100,9 @@ export const ADMIN_SETTINGS_TABS = [
 	'audio',
 	'images',
 	'pipelines',
+	'email',
 	'db',
-	'email'
+	'acceptance'
 ] as const;
 
 export type AdminSettingsTab = (typeof ADMIN_SETTINGS_TABS)[number];

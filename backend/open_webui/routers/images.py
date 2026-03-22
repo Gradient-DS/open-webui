@@ -14,14 +14,22 @@ import requests
 from fastapi import APIRouter, Depends, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse
 
-from open_webui.config import CACHE_DIR
+from open_webui.config import (
+    CACHE_DIR,
+    IMAGE_AUTO_SIZE_MODELS_REGEX_PATTERN,
+    IMAGE_URL_RESPONSE_MODELS_REGEX_PATTERN,
+)
 from open_webui.constants import ERROR_MESSAGES
+from open_webui.retrieval.web.utils import validate_url
 from open_webui.env import ENABLE_FORWARD_USER_INFO_HEADERS
 
 from open_webui.models.chats import Chats
 from open_webui.routers.files import upload_file_handler, get_file_content_by_id
 from open_webui.utils.auth import get_admin_user, get_verified_user
+from open_webui.utils.access_control import has_permission
 from open_webui.utils.headers import include_user_info_headers
+from open_webui.internal.db import get_session
+from sqlalchemy.orm import Session
 from open_webui.utils.images.comfyui import (
     ComfyUICreateImageForm,
     ComfyUIEditImageForm,
@@ -195,14 +203,13 @@ async def update_config(
 
     request.app.state.config.IMAGE_GENERATION_ENGINE = form_data.IMAGE_GENERATION_ENGINE
     set_image_model(request, form_data.IMAGE_GENERATION_MODEL)
-    if (
-        form_data.IMAGE_SIZE == "auto"
-        and not form_data.IMAGE_GENERATION_MODEL.startswith("gpt-image")
+    if form_data.IMAGE_SIZE == "auto" and not re.match(
+        IMAGE_AUTO_SIZE_MODELS_REGEX_PATTERN, form_data.IMAGE_GENERATION_MODEL
     ):
         raise HTTPException(
             status_code=400,
             detail=ERROR_MESSAGES.INCORRECT_FORMAT(
-                "  (auto is only allowed with gpt-image models)."
+                f"  (auto is only allowed with models matching {IMAGE_AUTO_SIZE_MODELS_REGEX_PATTERN})."
             ),
         )
 
@@ -461,6 +468,7 @@ class CreateImageForm(BaseModel):
     prompt: str
     size: Optional[str] = None
     n: int = 1
+    steps: Optional[int] = None
     negative_prompt: Optional[str] = None
 
 
@@ -496,7 +504,7 @@ def get_image_data(data: str, headers=None):
         return None, None
 
 
-def upload_image(request, image_data, content_type, metadata, user):
+def upload_image(request, image_data, content_type, metadata, user, db=None):
     image_format = mimetypes.guess_extension(content_type)
     file = UploadFile(
         file=io.BytesIO(image_data),
@@ -524,6 +532,7 @@ def upload_image(request, image_data, content_type, metadata, user):
                 message_id=message_id,
                 file_ids=[file_item.id],
                 user_id=user.id,
+                db=db,
             )
 
     url = request.app.url_path_for("get_file_content_by_id", id=file_item.id)
@@ -534,6 +543,20 @@ def upload_image(request, image_data, content_type, metadata, user):
 async def generate_images(
     request: Request, form_data: CreateImageForm, user=Depends(get_verified_user)
 ):
+    if not request.app.state.config.ENABLE_IMAGE_GENERATION:
+        raise HTTPException(
+            status_code=403,
+            detail=ERROR_MESSAGES.ACCESS_PROHIBITED,
+        )
+
+    if user.role != "admin" and not has_permission(
+        user.id, "features.image_generation", request.app.state.config.USER_PERMISSIONS
+    ):
+        raise HTTPException(
+            status_code=403,
+            detail=ERROR_MESSAGES.ACCESS_PROHIBITED,
+        )
+
     return await image_generations(request, form_data, user=user)
 
 
@@ -590,8 +613,9 @@ async def image_generations(
                 ),
                 **(
                     {}
-                    if request.app.state.config.IMAGE_GENERATION_MODEL.startswith(
-                        "gpt-image"
+                    if re.match(
+                        IMAGE_URL_RESPONSE_MODELS_REGEX_PATTERN,
+                        request.app.state.config.IMAGE_GENERATION_MODEL,
                     )
                     else {"response_format": "b64_json"}
                 ),
@@ -617,7 +641,10 @@ async def image_generations(
 
             for image in res["data"]:
                 if image_url := image.get("url", None):
-                    image_data, content_type = get_image_data(image_url, headers)
+                    image_data, content_type = get_image_data(
+                        image_url,
+                        {k: v for k, v in headers.items() if k != "Content-Type"},
+                    )
                 else:
                     image_data, content_type = get_image_data(image["b64_json"])
 
@@ -703,8 +730,15 @@ async def image_generations(
                 "n": form_data.n,
             }
 
-            if request.app.state.config.IMAGE_STEPS is not None:
-                data["steps"] = request.app.state.config.IMAGE_STEPS
+            if (
+                request.app.state.config.IMAGE_STEPS is not None
+                or form_data.steps is not None
+            ):
+                data["steps"] = (
+                    form_data.steps
+                    if form_data.steps is not None
+                    else request.app.state.config.IMAGE_STEPS
+                )
 
             if form_data.negative_prompt is not None:
                 data["negative_prompt"] = form_data.negative_prompt
@@ -762,8 +796,15 @@ async def image_generations(
                 "height": height,
             }
 
-            if request.app.state.config.IMAGE_STEPS is not None:
-                data["steps"] = request.app.state.config.IMAGE_STEPS
+            if (
+                request.app.state.config.IMAGE_STEPS is not None
+                or form_data.steps is not None
+            ):
+                data["steps"] = (
+                    form_data.steps
+                    if form_data.steps is not None
+                    else request.app.state.config.IMAGE_STEPS
+                )
 
             if form_data.negative_prompt is not None:
                 data["negative_prompt"] = form_data.negative_prompt
@@ -811,6 +852,7 @@ class EditImageForm(BaseModel):
     size: Optional[str] = None
     n: Optional[int] = None
     negative_prompt: Optional[str] = None
+    background: Optional[str] = None
 
 
 @router.post("/edit")
@@ -844,17 +886,26 @@ async def image_edits(
     try:
 
         async def load_url_image(data):
+            if data.startswith("data:"):
+                return data
+
             if data.startswith("http://") or data.startswith("https://"):
+                # Validate URL to prevent SSRF attacks against local/private networks
+                validate_url(data)
                 r = await asyncio.to_thread(requests.get, data)
                 r.raise_for_status()
 
                 image_data = base64.b64encode(r.content).decode("utf-8")
                 return f"data:{r.headers['content-type']};base64,{image_data}"
 
-            elif data.startswith("/api/v1/files"):
-                file_id = data.split("/api/v1/files/")[1].split("/content")[0]
-                file_response = await get_file_content_by_id(file_id, user)
+            else:
+                file_id = None
+                if data.startswith("/api/v1/files"):
+                    file_id = data.split("/api/v1/files/")[1].split("/content")[0]
+                else:
+                    file_id = data
 
+                file_response = await get_file_content_by_id(file_id, user)
                 if isinstance(file_response, FileResponse):
                     file_path = file_response.path
 
@@ -864,14 +915,16 @@ async def image_edits(
                         mime_type, _ = mimetypes.guess_type(file_path)
 
                     return f"data:{mime_type};base64,{image_data}"
-
             return data
 
         # Load image(s) from URL(s) if necessary
         if isinstance(form_data.image, str):
             form_data.image = await load_url_image(form_data.image)
         elif isinstance(form_data.image, list):
-            form_data.image = [await load_url_image(img) for img in form_data.image]
+            # Load all images in parallel for better performance
+            form_data.image = list(
+                await asyncio.gather(*[load_url_image(img) for img in form_data.image])
+            )
     except Exception as e:
         raise HTTPException(status_code=400, detail=ERROR_MESSAGES.DEFAULT(e))
 
@@ -905,8 +958,14 @@ async def image_edits(
                 **({"n": form_data.n} if form_data.n else {}),
                 **({"size": size} if size else {}),
                 **(
+                    {"background": form_data.background} if form_data.background else {}
+                ),
+                **(
                     {}
-                    if request.app.state.config.IMAGE_EDIT_MODEL.startswith("gpt-image")
+                    if re.match(
+                        IMAGE_URL_RESPONSE_MODELS_REGEX_PATTERN,
+                        request.app.state.config.IMAGE_EDIT_MODEL,
+                    )
                     else {"response_format": "b64_json"}
                 ),
             }
@@ -937,7 +996,10 @@ async def image_edits(
             images = []
             for image in res["data"]:
                 if image_url := image.get("url", None):
-                    image_data, content_type = get_image_data(image_url, headers)
+                    image_data, content_type = get_image_data(
+                        image_url,
+                        {k: v for k, v in headers.items() if k != "Content-Type"},
+                    )
                 else:
                     image_data, content_type = get_image_data(image["b64_json"])
 

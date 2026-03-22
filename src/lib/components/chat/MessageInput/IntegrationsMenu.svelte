@@ -4,11 +4,19 @@
 	import { fly } from 'svelte/transition';
 	import { flyAndScale } from '$lib/utils/transitions';
 
-	import { config, user, tools as _tools, mobile, settings, toolServers } from '$lib/stores';
-	import { isFeatureEnabled } from '$lib/utils/features';
+	import {
+		config,
+		user,
+		tools as _tools,
+		mobile,
+		settings,
+		toolServers,
+		terminalServers
+	} from '$lib/stores';
 
 	import { getOAuthClientAuthorizationUrl } from '$lib/apis/configs';
 	import { getTools } from '$lib/apis/tools';
+	import { isFeatureEnabled } from '$lib/utils/features';
 
 	import Knobs from '$lib/components/icons/Knobs.svelte';
 	import Dropdown from '$lib/components/common/Dropdown.svelte';
@@ -116,36 +124,36 @@
 			{#if tab === ''}
 				<div in:fly={{ x: -20, duration: 150 }}>
 					{#if isFeatureEnabled('tools')}
-						{#if tools}
-							{#if Object.keys(tools).length > 0}
-								<button
-									class="flex w-full justify-between gap-2 items-center px-3 py-1.5 text-sm cursor-pointer rounded-xl hover:bg-gray-50 dark:hover:bg-gray-800/50"
-									on:click={() => {
-										tab = 'tools';
-									}}
-								>
-									<Wrench />
+					{#if tools}
+						{#if Object.keys(tools).length > 0}
+							<button
+								class="flex w-full justify-between gap-2 items-center px-3 py-1.5 text-sm cursor-pointer rounded-xl hover:bg-gray-50 dark:hover:bg-gray-800/50"
+								on:click={() => {
+									tab = 'tools';
+								}}
+							>
+								<Wrench />
 
-									<div class="flex items-center w-full justify-between">
-										<div class=" line-clamp-1">
-											{$i18n.t('Tools')}
-											<span class="ml-0.5 text-gray-500">{Object.keys(tools).length}</span>
-										</div>
-
-										<div class="text-gray-500">
-											<ChevronRight />
-										</div>
+								<div class="flex items-center w-full justify-between">
+									<div class=" line-clamp-1">
+										{$i18n.t('Tools')}
+										<span class="ml-0.5 text-gray-500">{Object.keys(tools).length}</span>
 									</div>
-								</button>
-							{/if}
-						{:else}
-							<div class="py-4">
-								<Spinner />
-							</div>
+
+									<div class="text-gray-500">
+										<ChevronRight />
+									</div>
+								</div>
+							</button>
 						{/if}
+					{:else}
+						<div class="py-4">
+							<Spinner />
+						</div>
+					{/if}
 					{/if}
 
-					{#if toggleFilters && toggleFilters.length > 0}
+					{#if isFeatureEnabled('tools') && toggleFilters && toggleFilters.length > 0}
 						{#each toggleFilters.sort( (a, b) => a.name.localeCompare( b.name, undefined, { sensitivity: 'base' } ) ) as filter, filterIdx (filter.id)}
 							<Tooltip content={filter?.description} placement="top-start">
 								<button
@@ -165,7 +173,7 @@
 													<div class="size-4 items-center flex justify-center">
 														<img
 															src={filter.icon}
-															class="size-3.5 {filter.icon.includes('svg')
+															class="size-3.5 {filter.icon.includes('data:image/svg')
 																? 'dark:invert-[80%]'
 																: ''}"
 															style="fill: currentColor;"
@@ -181,7 +189,7 @@
 										</div>
 									</div>
 
-									{#if filter?.has_user_valves}
+									{#if filter?.has_user_valves && ($user?.role === 'admin' || ($user?.permissions?.chat?.valves ?? true))}
 										<div class=" shrink-0">
 											<Tooltip content={$i18n.t('Valves')}>
 												<button
@@ -374,7 +382,7 @@
 								</div>
 							</div>
 
-							{#if tools[toolId]?.has_user_valves}
+							{#if tools[toolId]?.has_user_valves && ($user?.role === 'admin' || ($user?.permissions?.chat?.valves ?? true))}
 								<div class=" shrink-0">
 									<Tooltip content={$i18n.t('Valves')}>
 										<button

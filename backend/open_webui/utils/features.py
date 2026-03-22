@@ -22,9 +22,12 @@ from open_webui.config import (
     FEATURE_KNOWLEDGE,
     FEATURE_PROMPTS,
     FEATURE_TOOLS,
+    FEATURE_SKILLS,
     FEATURE_ADMIN_EVALUATIONS,
     FEATURE_ADMIN_FUNCTIONS,
     FEATURE_ADMIN_SETTINGS,
+    FEATURE_TOOL_SERVERS,
+    FEATURE_TERMINAL_SERVERS,
 )
 
 Feature = Literal[
@@ -41,9 +44,12 @@ Feature = Literal[
     "knowledge",
     "prompts",
     "tools",
+    "skills",
     "admin_evaluations",
     "admin_functions",
     "admin_settings",
+    "tool_servers",
+    "terminal_servers",
 ]
 
 FEATURE_FLAGS: dict[Feature, bool] = {
@@ -60,9 +66,12 @@ FEATURE_FLAGS: dict[Feature, bool] = {
     "knowledge": FEATURE_KNOWLEDGE,
     "prompts": FEATURE_PROMPTS,
     "tools": FEATURE_TOOLS,
+    "skills": FEATURE_SKILLS,
     "admin_evaluations": FEATURE_ADMIN_EVALUATIONS,
     "admin_functions": FEATURE_ADMIN_FUNCTIONS,
     "admin_settings": FEATURE_ADMIN_SETTINGS,
+    "tool_servers": FEATURE_TOOL_SERVERS,
+    "terminal_servers": FEATURE_TERMINAL_SERVERS,
 }
 
 

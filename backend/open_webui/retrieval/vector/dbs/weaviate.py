@@ -1,3 +1,7 @@
+"""
+NOTE: This vector database integration is community-supported and maintained on a best-effort basis.
+"""
+
 import logging
 import weaviate
 import re
@@ -15,9 +19,13 @@ from open_webui.retrieval.vector.utils import process_metadata
 from weaviate.exceptions import UnexpectedStatusCodeError
 from open_webui.config import (
     WEAVIATE_HTTP_HOST,
+    WEAVIATE_GRPC_HOST,
     WEAVIATE_HTTP_PORT,
     WEAVIATE_GRPC_PORT,
     WEAVIATE_API_KEY,
+    WEAVIATE_HTTP_SECURE,
+    WEAVIATE_GRPC_SECURE,
+    WEAVIATE_SKIP_INIT_CHECKS,
 )
 
 
@@ -38,15 +46,45 @@ def _make_json_serializable(obj: Any) -> Any:
         return obj
 
 
+def _sanitize_property_name(name: str) -> str:
+    """Sanitize property name to be a valid Weaviate/GraphQL identifier.
+
+    Weaviate property names must match /[_A-Za-z][_0-9A-Za-z]{0,230}/.
+    PDF metadata can contain hyphens (e.g. 'pdfsettings-inchmargins') which
+    cause silent batch insert failures.
+    """
+    sanitized = re.sub(r"[^a-zA-Z0-9_]", "_", name)
+    sanitized = sanitized.strip("_")
+    if not sanitized:
+        return None
+    if not sanitized[0].isalpha() and sanitized[0] != "_":
+        sanitized = "_" + sanitized
+    return sanitized
+
+
+def _sanitize_metadata_keys(metadata: dict) -> dict:
+    """Sanitize all metadata keys to be valid Weaviate property names."""
+    result = {}
+    for key, value in metadata.items():
+        sanitized_key = _sanitize_property_name(key)
+        if sanitized_key:
+            result[sanitized_key] = value
+    return result
+
+
 class WeaviateClient(VectorDBBase):
     def __init__(self):
         self.url = WEAVIATE_HTTP_HOST
         try:
             # Build connection parameters
             connection_params = {
-                "host": WEAVIATE_HTTP_HOST,
-                "port": WEAVIATE_HTTP_PORT,
+                "http_host": WEAVIATE_HTTP_HOST,
+                "http_port": WEAVIATE_HTTP_PORT,
+                "http_secure": WEAVIATE_HTTP_SECURE,
+                "grpc_host": WEAVIATE_GRPC_HOST,
                 "grpc_port": WEAVIATE_GRPC_PORT,
+                "grpc_secure": WEAVIATE_GRPC_SECURE,
+                "skip_init_checks": WEAVIATE_SKIP_INIT_CHECKS,
             }
 
             # Only add auth_credentials if WEAVIATE_API_KEY exists and is not empty
@@ -55,7 +93,7 @@ class WeaviateClient(VectorDBBase):
                     weaviate.classes.init.Auth.api_key(WEAVIATE_API_KEY)
                 )
 
-            self.client = weaviate.connect_to_local(**connection_params)
+            self.client = weaviate.connect_to_custom(**connection_params)
             self.client.connect()
         except Exception as e:
             raise ConnectionError(f"Failed to connect to Weaviate: {e}") from e
@@ -159,8 +197,10 @@ class WeaviateClient(VectorDBBase):
 
                 properties = {"text": item["text"]}
                 if item["metadata"]:
-                    clean_metadata = _make_json_serializable(
-                        process_metadata(item["metadata"])
+                    clean_metadata = _sanitize_metadata_keys(
+                        _make_json_serializable(
+                            process_metadata(item["metadata"])
+                        )
                     )
                     clean_metadata.pop("text", None)
                     properties.update(clean_metadata)
@@ -181,8 +221,10 @@ class WeaviateClient(VectorDBBase):
 
                 properties = {"text": item["text"]}
                 if item["metadata"]:
-                    clean_metadata = _make_json_serializable(
-                        process_metadata(item["metadata"])
+                    clean_metadata = _sanitize_metadata_keys(
+                        _make_json_serializable(
+                            process_metadata(item["metadata"])
+                        )
                     )
                     clean_metadata.pop("text", None)
                     properties.update(clean_metadata)
@@ -192,7 +234,11 @@ class WeaviateClient(VectorDBBase):
                 )
 
     def search(
-        self, collection_name: str, vectors: List[List[Union[float, int]]], limit: int
+        self,
+        collection_name: str,
+        vectors: List[List[Union[float, int]]],
+        filter: Optional[dict] = None,
+        limit: int = 10,
     ) -> Optional[SearchResult]:
         sane_collection_name = self._sanitize_collection_name(collection_name)
         if not self.client.collections.exists(sane_collection_name):

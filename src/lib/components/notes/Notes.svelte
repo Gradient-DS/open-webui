@@ -30,8 +30,14 @@
 	$: loadLocale($i18n.languages);
 
 	import { goto } from '$app/navigation';
-	import { WEBUI_NAME, config, prompts as _prompts, user } from '$lib/stores';
-	import { createNewNote, deleteNoteById, getNoteList, searchNotes } from '$lib/apis/notes';
+	import { WEBUI_NAME, config, user } from '$lib/stores';
+	import {
+		createNewNote,
+		deleteNoteById,
+		getNoteById,
+		getNoteList,
+		searchNotes
+	} from '$lib/apis/notes';
 	import { capitalizeFirstLetter, copyToClipboard, getTimeRange } from '$lib/utils';
 	import { downloadPdf, createNoteHandler } from './utils';
 
@@ -60,6 +66,7 @@
 	let total = null;
 
 	let query = '';
+	let searchDebounceTimer: ReturnType<typeof setTimeout>;
 
 	let sortKey = null;
 	let displayOption = null;
@@ -72,15 +79,23 @@
 	let allItemsLoaded = false;
 
 	const downloadHandler = async (type) => {
+		// Fetch the full note since the list response may not contain full content
+		const note = await getNoteById(localStorage.token, selectedNote.id).catch((error) => {
+			toast.error(`${error}`);
+			return null;
+		});
+
+		if (!note) return;
+
 		if (type === 'txt') {
-			const blob = new Blob([selectedNote.data.content.md], { type: 'text/plain' });
-			saveAs(blob, `${selectedNote.title}.txt`);
+			const blob = new Blob([note.data.content.md], { type: 'text/plain' });
+			saveAs(blob, `${note.title}.txt`);
 		} else if (type === 'md') {
-			const blob = new Blob([selectedNote.data.content.md], { type: 'text/markdown' });
-			saveAs(blob, `${selectedNote.title}.md`);
+			const blob = new Blob([note.data.content.md], { type: 'text/markdown' });
+			saveAs(blob, `${note.title}.md`);
 		} else if (type === 'pdf') {
 			try {
-				await downloadPdf(selectedNote);
+				await downloadPdf(note);
 			} catch (error) {
 				toast.error(`${error}`);
 			}
@@ -128,7 +143,7 @@
 						}
 					},
 					meta: null,
-					access_control: {}
+					access_grants: []
 				}).catch((error) => {
 					toast.error(`${error}`);
 					return null;
@@ -163,13 +178,16 @@
 		await getItemsPage();
 	};
 
-	$: if (
-		loaded &&
-		query !== undefined &&
-		sortKey !== undefined &&
-		permission !== undefined &&
-		viewOption !== undefined
-	) {
+	$: if (query !== undefined) {
+		clearTimeout(searchDebounceTimer);
+		searchDebounceTimer = setTimeout(() => {
+			if (loaded) {
+				init();
+			}
+		}, 300);
+	}
+
+	$: if (loaded && sortKey !== undefined && permission !== undefined && viewOption !== undefined) {
 		init();
 	}
 
@@ -215,22 +233,27 @@
 
 	const groupNotes = (res) => {
 		if (!Array.isArray(res)) {
-			return {}; // or throw new Error("Notes response is not an array")
+			return []; // Return empty array for invalid input
 		}
 
-		// Build the grouped object
+		// Build the grouped object while tracking order
 		const grouped: Record<string, any[]> = {};
+		const orderedKeys: string[] = [];
+
 		for (const note of res) {
 			const timeRange = getTimeRange(note.updated_at / 1000000000);
 			if (!grouped[timeRange]) {
 				grouped[timeRange] = [];
+				orderedKeys.push(timeRange);
 			}
 			grouped[timeRange].push({
 				...note,
 				timeRange
 			});
 		}
-		return grouped;
+
+		// Return as array of [timeRange, notes] to preserve insertion order
+		return orderedKeys.map((key) => [key, grouped[key]] as [string, any[]]);
 	};
 
 	let dragged = false;
@@ -265,7 +288,7 @@
 		dragged = false;
 	};
 
-	onMount(async () => {
+	onMount(() => {
 		viewOption = localStorage?.noteViewOption ?? null;
 		displayOption = localStorage?.noteDisplayOption ?? null;
 
@@ -275,17 +298,16 @@
 		dropzoneElement?.addEventListener('dragover', onDragOver);
 		dropzoneElement?.addEventListener('drop', onDrop);
 		dropzoneElement?.addEventListener('dragleave', onDragLeave);
-	});
 
-	onDestroy(() => {
-		console.log('destroy');
-		const dropzoneElement = document.getElementById('notes-container');
+		return () => {
+			clearTimeout(searchDebounceTimer);
 
-		if (dropzoneElement) {
-			dropzoneElement?.removeEventListener('dragover', onDragOver);
-			dropzoneElement?.removeEventListener('drop', onDrop);
-			dropzoneElement?.removeEventListener('dragleave', onDragLeave);
-		}
+			if (dropzoneElement) {
+				dropzoneElement?.removeEventListener('dragover', onDragOver);
+				dropzoneElement?.removeEventListener('drop', onDrop);
+				dropzoneElement?.removeEventListener('dragleave', onDragLeave);
+			}
+		};
 	});
 </script>
 
@@ -437,11 +459,11 @@
 
 			{#if items !== null && total !== null}
 				{#if (items ?? []).length > 0}
-					{@const notes = groupNotes(items)}
+					{@const groupedNotes = groupNotes(items)}
 
 					<div class="@container h-full py-2.5 px-2.5">
 						<div class="">
-							{#each Object.keys(notes) as timeRange, idx}
+							{#each groupedNotes as [timeRange, notesList], idx}
 								<div
 									class="w-full text-xs text-gray-500 dark:text-gray-500 font-medium px-2.5 pb-2.5"
 								>
@@ -450,11 +472,9 @@
 
 								{#if displayOption === null}
 									<div
-										class="{Object.keys(notes).length - 1 !== idx
-											? 'mb-3'
-											: ''} gap-1.5 flex flex-col"
+										class="{groupedNotes.length - 1 !== idx ? 'mb-3' : ''} gap-1.5 flex flex-col"
 									>
-										{#each notes[timeRange] as note, idx (note.id)}
+										{#each notesList as note, idx (note.id)}
 											<div
 												class=" flex cursor-pointer w-full px-3.5 py-1.5 border border-gray-50 dark:border-gray-850/30 bg-transparent dark:hover:bg-gray-850 hover:bg-white rounded-2xl transition"
 											>
@@ -536,11 +556,11 @@
 									</div>
 								{:else if displayOption === 'grid'}
 									<div
-										class="{Object.keys(notes).length - 1 !== idx
+										class="{groupedNotes.length - 1 !== idx
 											? 'mb-5'
 											: ''} gap-2.5 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5"
 									>
-										{#each notes[timeRange] as note, idx (note.id)}
+										{#each notesList as note, idx (note.id)}
 											<div
 												class=" flex space-x-4 cursor-pointer w-full px-4.5 py-4 border border-gray-50 dark:border-gray-850/30 bg-transparent dark:hover:bg-gray-850 hover:bg-white rounded-2xl transition"
 											>

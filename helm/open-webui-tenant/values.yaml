@@ -141,6 +141,9 @@ openWebui:
     # LLM Providers
     enableOllamaApi: "false"
     openaiApiBaseUrl: "https://router.huggingface.co/v1"
+    # Forward user identity headers to upstream LLM API (required for LiteLLM per-user tracking)
+    enableForwardUserInfoHeaders: "false"
+    forwardUserInfoHeaderUserId: "X-OpenWebUI-User-Id"  # Header name for user UUID forwarding
 
     # Vector Database (Weaviate) - uses local Weaviate in tenant namespace
     vectorDb: "weaviate"
@@ -203,7 +206,11 @@ openWebui:
     featureAdminEvaluations: "True"
     featureAdminFunctions: "False"
     featureAdminSettings: "True"
-    featureAdminSettingsTabs: "models,tools,interface,db,email"
+    featureAdminSettingsTabs: "models,tools,interface,db,email,acceptance"
+    featureInputMenu: "True"
+    featureTemporaryChat: "True"
+    featureToolServers: "False"
+    featureTerminalServers: "False"
 
     # Notes
     enableNotes: "true"
@@ -241,11 +248,13 @@ openWebui:
     # UI Features
     greetingTemplate: ""
     defaultPromptSuggestions: "[]"
+    defaultModels: ""              # Comma-separated model IDs for new users (e.g., "model-a,model-b")
     enableFolders: "true"
     userPermissionsFeaturesFolders: "true"
     enableChannels: "false"
     userPermissionsFeaturesChannels: "false"
     enableCommunitySharing: "false"
+    enableCitationRelevance: "true"
     enableMessageRating: "true"
     enableUserWebhooks: "false"
     enableAutocompleteGeneration: "false"
@@ -284,6 +293,10 @@ openWebui:
     enableEvaluationArenaModels: "false"
     enableApiKeys: "false"
     enableImageGeneration: "false"
+    imageGenerationEngine: "openai"
+    imageGenerationModel: ""
+    imagesOpenaiApiBaseUrl: ""
+    imageSize: "1024x1024"
     enableGoogleDriveIntegration: "false"
 
     # OneDrive Integration
@@ -313,6 +326,11 @@ openWebui:
 
     bypassModelAccessControl: "false"
 
+    # Agent API (routes chat completions to external agent service)
+    agentApiEnabled: "false"
+    agentApiBaseUrl: ""
+    agentApiAgent: ""
+
     # Audit Logging
     # Levels: NONE, METADATA, REQUEST, REQUEST_RESPONSE
     # METADATA logs who/what/when without PII from request/response bodies
@@ -333,6 +351,9 @@ openWebui:
     s3EndpointUrl: ""             # For S3-compatible storage (e.g., https://object.previder.nl)
     s3KeyPrefix: ""               # Optional prefix for all keys
     s3EnableTagging: "false"
+
+    # Easter Eggs (disabled)
+    enableEasterEggs: "false"
 
     # Telemetry (disabled)
     scarfNoAnalytics: "true"
@@ -448,7 +469,8 @@ weaviate:
     persistence:
       dataPath: "/var/lib/weaviate"
     defaultVectorizerModule: "none"
-    enableModules: ""
+    enableModules: "backup-filesystem"
+    backupFilesystemPath: "/var/lib/weaviate/backups"
     clusterHostname: "node1"
 
 # -----------------------------------------------------------------------------

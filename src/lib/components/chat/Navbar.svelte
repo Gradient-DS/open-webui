@@ -108,7 +108,7 @@
 				{/if}
 
 				<div
-					class="flex-1 overflow-hidden max-w-full py-0.5
+					class="flex-1 overflow-hidden max-w-full mt-0.5 py-0.5
 			{$showSidebar ? 'ml-1' : ''}
 			"
 				>
@@ -120,7 +120,7 @@
 				<div class="self-start flex flex-none items-center text-gray-600 dark:text-gray-400">
 					<!-- <div class="md:hidden flex self-center w-[1px] h-5 mx-2 bg-gray-300 dark:bg-stone-700" /> -->
 
-					{#if $user?.role === 'user' ? ($user?.permissions?.chat?.temporary ?? true) && !($user?.permissions?.chat?.temporary_enforced ?? false) : true}
+					{#if isFeatureEnabled('temporary_chat') && ($user?.role === 'user' ? ($user?.permissions?.chat?.temporary ?? true) && !($user?.permissions?.chat?.temporary_enforced ?? false) : true)}
 						{#if !chat?.id}
 							<Tooltip content={$i18n.t(`Temporary Chat`)}>
 								<button
@@ -134,7 +134,9 @@
 											await temporaryChatEnabled.set(!$temporaryChatEnabled);
 										}
 
-										await goto('/');
+										if ($page.url.pathname !== '/') {
+											await goto('/');
+										}
 
 										// add 'temporary-chat=true' to the URL
 										if ($temporaryChatEnabled) {

@@ -66,15 +66,14 @@
 		id="users-tabs-container"
 		class="mx-[16px] lg:mx-0 lg:px-[16px] flex flex-row overflow-x-auto gap-2.5 max-w-full lg:gap-1 lg:flex-col lg:flex-none lg:w-50 dark:text-gray-200 text-sm font-medium text-left scrollbar-none"
 	>
-		<button
+		<a
 			id="overview"
-			class="px-0.5 py-1 min-w-fit rounded-lg lg:flex-none flex text-right transition {selectedTab ===
+			href="/admin/users/overview"
+			draggable="false"
+			class="px-0.5 py-1 min-w-fit rounded-lg lg:flex-none flex text-right transition select-none {selectedTab ===
 			'overview'
 				? ''
 				: ' text-gray-300 dark:text-gray-600 hover:text-gray-700 dark:hover:text-white'}"
-			on:click={() => {
-				goto('/admin/users/overview');
-			}}
 		>
 			<div class=" self-center mr-2">
 				<svg
@@ -89,17 +88,16 @@
 				</svg>
 			</div>
 			<div class=" self-center">{$i18n.t('Overview')}</div>
-		</button>
+		</a>
 
-		<button
+		<a
 			id="groups"
-			class="px-0.5 py-1 min-w-fit rounded-lg lg:flex-none flex text-right transition {selectedTab ===
+			href="/admin/users/groups"
+			draggable="false"
+			class="px-0.5 py-1 min-w-fit rounded-lg lg:flex-none flex text-right transition select-none {selectedTab ===
 			'groups'
 				? ''
 				: ' text-gray-300 dark:text-gray-600 hover:text-gray-700 dark:hover:text-white'}"
-			on:click={() => {
-				goto('/admin/users/groups');
-			}}
 		>
 			<div class=" self-center mr-2">
 				<svg
@@ -114,18 +112,17 @@
 				</svg>
 			</div>
 			<div class=" self-center">{$i18n.t('Groups')}</div>
-		</button>
+		</a>
 
 		{#if $config?.features?.enable_email_invites}
-		<button
+		<a
 			id="invites"
-			class="px-0.5 py-1 min-w-fit rounded-lg lg:flex-none flex text-right transition {selectedTab ===
+			href="/admin/users/invites"
+			draggable="false"
+			class="px-0.5 py-1 min-w-fit rounded-lg lg:flex-none flex text-right transition select-none {selectedTab ===
 			'invites'
 				? ''
 				: ' text-gray-300 dark:text-gray-600 hover:text-gray-700 dark:hover:text-white'}"
-			on:click={() => {
-				goto('/admin/users/invites');
-			}}
 		>
 			<div class=" self-center mr-2">
 				<svg
@@ -143,7 +140,7 @@
 				</svg>
 			</div>
 			<div class=" self-center">{$i18n.t('Pending Invites')}</div>
-		</button>
+		</a>
 		{/if}
 	</div>
 
