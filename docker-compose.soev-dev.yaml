@@ -7,7 +7,7 @@ services:
 
   weaviate:
     image: semitechnologies/weaviate:1.35.0
-    container_name: neo-nl-weaviate
+    container_name: open-webui-weaviate
     environment:
       # Weaviate core settings
       QUERY_DEFAULTS_LIMIT: 25

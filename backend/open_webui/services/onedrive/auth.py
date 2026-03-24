@@ -34,7 +34,11 @@ _GRAPH_SCOPE = "https://graph.microsoft.com/Files.Read.All offline_access"
 def _cleanup_expired_flows():
     """Remove expired pending flows."""
     now = time.time()
-    expired = [k for k, v in _pending_flows.items() if now - v["created_at"] > _FLOW_TTL_SECONDS]
+    expired = [
+        k
+        for k, v in _pending_flows.items()
+        if now - v["created_at"] > _FLOW_TTL_SECONDS
+    ]
     for k in expired:
         del _pending_flows[k]
 
@@ -124,7 +128,8 @@ async def exchange_code_for_tokens(
     if flow["user_id"] != user_id:
         log.warning(
             "OAuth callback user mismatch: expected %s, got %s",
-            flow["user_id"], user_id,
+            flow["user_id"],
+            user_id,
         )
         return {"success": False, "error": "User mismatch"}
 
@@ -151,9 +156,20 @@ async def exchange_code_for_tokens(
             response.raise_for_status()
             token_data = response.json()
     except httpx.HTTPStatusError as e:
-        error_body = e.response.json() if e.response.headers.get("content-type", "").startswith("application/json") else {}
-        log.error("Token exchange failed: %s %s", e.response.status_code, error_body.get("error_description", ""))
-        return {"success": False, "error": error_body.get("error_description", "Token exchange failed")}
+        error_body = (
+            e.response.json()
+            if e.response.headers.get("content-type", "").startswith("application/json")
+            else {}
+        )
+        log.error(
+            "Token exchange failed: %s %s",
+            e.response.status_code,
+            error_body.get("error_description", ""),
+        )
+        return {
+            "success": False,
+            "error": error_body.get("error_description", "Token exchange failed"),
+        }
     except Exception as e:
         log.error("Token exchange error: %s", e)
         return {"success": False, "error": "Token exchange failed"}
@@ -234,7 +250,8 @@ def _migrate_legacy_sessions(user_id: str):
     freshest = max(legacy, key=lambda s: s.token.get("issued_at", 0))
     log.info(
         "Migrating legacy OneDrive token for user %s (from %s)",
-        user_id, freshest.provider,
+        user_id,
+        freshest.provider,
     )
 
     new_session = OAuthSessions.create_session(

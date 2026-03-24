@@ -241,9 +241,11 @@ class KnowledgeTable:
     ) -> KnowledgeListResponse:
         try:
             with get_db_context(db) as db:
-                query = db.query(Knowledge, User).outerjoin(
-                    User, User.id == Knowledge.user_id
-                ).filter(Knowledge.deleted_at.is_(None))
+                query = (
+                    db.query(Knowledge, User)
+                    .outerjoin(User, User.id == Knowledge.user_id)
+                    .filter(Knowledge.deleted_at.is_(None))
+                )
 
                 if filter:
                     query_key = filter.get("query")
@@ -528,9 +530,7 @@ class KnowledgeTable:
                 knowledge_files = (
                     db.query(KnowledgeFile).filter_by(file_id=file_id).all()
                 )
-                return [
-                    KnowledgeFileModel.model_validate(kf) for kf in knowledge_files
-                ]
+                return [KnowledgeFileModel.model_validate(kf) for kf in knowledge_files]
         except Exception:
             return []
 
@@ -565,8 +565,8 @@ class KnowledgeTable:
                     .filter(KnowledgeFile.knowledge_id == knowledge_id)
                 )
 
-                # Default sort: updated_at descending
-                primary_sort = File.updated_at.desc()
+                # Default sort: filename ascending (alphabetical)
+                primary_sort = File.filename.asc()
 
                 if filter:
                     query_key = filter.get("query")
@@ -748,7 +748,9 @@ class KnowledgeTable:
                 knowledge = self.get_knowledge_by_id(id=id, db=db)
                 db.query(Knowledge).filter_by(id=id).update(
                     {
-                        **form_data.model_dump(exclude={"access_grants"}),
+                        **form_data.model_dump(
+                            exclude={"access_grants"}, exclude_none=True
+                        ),
                         "updated_at": int(time.time()),
                     }
                 )
@@ -818,7 +820,6 @@ class KnowledgeTable:
                 return True
             except Exception:
                 return False
-
 
     def get_pending_deletions(self, limit: int = 50) -> list[KnowledgeModel]:
         """Get knowledge bases marked for deletion (for cleanup worker)."""

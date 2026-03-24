@@ -314,8 +314,14 @@ type Config = {
 		feature_admin_settings?: boolean;
 		feature_admin_settings_tabs?: string[];
 		feature_chat_controls_sections?: string[];
+		feature_skills?: boolean;
+		feature_builtin_tools?: boolean;
 		feature_tool_servers?: boolean;
 		feature_terminal_servers?: boolean;
+		enable_channels?: boolean;
+		enable_notes?: boolean;
+		enable_code_interpreter?: boolean;
+		enable_code_execution?: boolean;
 	};
 	oauth: {
 		providers: {

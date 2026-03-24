@@ -506,6 +506,7 @@ from open_webui.config import (
     FEATURE_SKILLS,
     FEATURE_TOOL_SERVERS,
     FEATURE_TERMINAL_SERVERS,
+    FEATURE_BUILTIN_TOOLS,
     FEATURE_ADMIN_EVALUATIONS,
     FEATURE_ADMIN_FUNCTIONS,
     FEATURE_ADMIN_SETTINGS,
@@ -691,7 +692,9 @@ async def periodic_archive_cleanup():
 
             stats = ArchiveService.cleanup_expired_archives()
             if stats["deleted"] > 0:
-                log.info(f"Archive cleanup: deleted {stats['deleted']} expired archives")
+                log.info(
+                    f"Archive cleanup: deleted {stats['deleted']} expired archives"
+                )
         except Exception as e:
             log.error(f"Error in archive cleanup: {e}")
 
@@ -725,6 +728,7 @@ async def lifespan(app: FastAPI):
     # Load external agents if configured
     try:
         from open_webui.utils.external_agents import load_external_agents_at_startup
+
         load_external_agents_at_startup()
     except Exception as e:
         log.warning(f"External agents loading skipped or failed: {e}")
@@ -752,7 +756,10 @@ async def lifespan(app: FastAPI):
     asyncio.create_task(periodic_archive_cleanup())
 
     # Start OneDrive background sync scheduler
-    from open_webui.services.onedrive.scheduler import start_scheduler as start_onedrive_scheduler
+    from open_webui.services.onedrive.scheduler import (
+        start_scheduler as start_onedrive_scheduler,
+    )
+
     start_onedrive_scheduler(app)
 
     # Start Google Drive background sync scheduler
@@ -761,12 +768,15 @@ async def lifespan(app: FastAPI):
 
     # Start deletion cleanup worker
     from open_webui.services.deletion.cleanup_worker import start_cleanup_worker
+
     start_cleanup_worker()
 
     # Check external pipeline health on startup
     external_pipeline_url = getattr(app.state.config, "EXTERNAL_PIPELINE_URL", None)
     if external_pipeline_url and external_pipeline_url.strip() != "":
-        external_pipeline_api_key = getattr(app.state.config, "EXTERNAL_PIPELINE_API_KEY", None)
+        external_pipeline_api_key = getattr(
+            app.state.config, "EXTERNAL_PIPELINE_API_KEY", None
+        )
         log.info(f"Checking external pipeline health at: {external_pipeline_url}")
         is_healthy = check_external_pipeline_health(
             external_pipeline_url=external_pipeline_url,
@@ -782,7 +792,9 @@ async def lifespan(app: FastAPI):
                 f"Ensure the pipeline is running and accessible."
             )
     else:
-        log.info("External pipeline is disabled (EXTERNAL_PIPELINE_URL not set or empty). Using internal pipeline only.")
+        log.info(
+            "External pipeline is disabled (EXTERNAL_PIPELINE_URL not set or empty). Using internal pipeline only."
+        )
 
     if app.state.config.ENABLE_BASE_MODELS_CACHE:
         try:
@@ -841,10 +853,14 @@ async def lifespan(app: FastAPI):
 
     # Stop deletion cleanup worker
     from open_webui.services.deletion.cleanup_worker import stop_cleanup_worker
+
     stop_cleanup_worker()
 
     # Stop OneDrive background sync scheduler
-    from open_webui.services.onedrive.scheduler import stop_scheduler as stop_onedrive_scheduler
+    from open_webui.services.onedrive.scheduler import (
+        stop_scheduler as stop_onedrive_scheduler,
+    )
+
     stop_onedrive_scheduler()
 
     # Stop Google Drive background sync scheduler
@@ -2435,6 +2451,7 @@ async def get_app_config(request: Request):
                     "feature_temporary_chat": FEATURE_TEMPORARY_CHAT,
                     "feature_tool_servers": FEATURE_TOOL_SERVERS,
                     "feature_terminal_servers": FEATURE_TERMINAL_SERVERS,
+                    "feature_builtin_tools": FEATURE_BUILTIN_TOOLS,
                     "enable_google_drive_integration": app.state.config.ENABLE_GOOGLE_DRIVE_INTEGRATION,
                     **(
                         {
@@ -2843,8 +2860,12 @@ async def oauth_login_callback(
         state = request.query_params.get("state")
         if state:
             from open_webui.services.onedrive.auth import _pending_flows
+
             if state in _pending_flows:
-                from open_webui.routers.onedrive_sync import handle_onedrive_auth_callback
+                from open_webui.routers.onedrive_sync import (
+                    handle_onedrive_auth_callback,
+                )
+
                 return await handle_onedrive_auth_callback(request)
 
     # Check if this is a Google Drive background sync auth callback

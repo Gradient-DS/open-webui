@@ -7,6 +7,7 @@
 
 	import { models, config as _config } from '$lib/stores';
 	import { DEFAULT_CAPABILITIES } from '$lib/constants';
+	import { getDefaultCapabilities } from '$lib/utils/capabilities';
 	import { deleteAllModels } from '$lib/apis/models';
 	import { getModelsConfig, setModelsConfig, setDefaultPromptSuggestions } from '$lib/apis/configs';
 	import { getBackendConfig } from '$lib/apis';
@@ -99,11 +100,11 @@
 
 		const savedMeta = config?.DEFAULT_MODEL_METADATA;
 		if (savedMeta && Object.keys(savedMeta).length > 0) {
-			defaultCapabilities = savedMeta.capabilities ?? { ...DEFAULT_CAPABILITIES };
+			defaultCapabilities = savedMeta.capabilities ?? getDefaultCapabilities();
 			defaultFeatureIds = savedMeta.defaultFeatureIds ?? [];
 			builtinTools = savedMeta.builtinTools ?? {};
 		} else {
-			defaultCapabilities = { ...DEFAULT_CAPABILITIES };
+			defaultCapabilities = getDefaultCapabilities();
 			defaultFeatureIds = [];
 			builtinTools = {};
 		}

@@ -1,10 +1,19 @@
 <script lang="ts">
 	import { getContext } from 'svelte';
+	import { config } from '$lib/stores';
 	import Checkbox from '$lib/components/common/Checkbox.svelte';
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
 	import { marked } from 'marked';
 
 	const i18n = getContext('i18n');
+
+	// Map capability keys to config feature flags
+	const capabilityConfigGuards: Record<string, string> = {
+		web_search: 'enable_web_search',
+		image_generation: 'enable_image_generation',
+		code_interpreter: 'enable_code_interpreter',
+		builtin_tools: 'feature_builtin_tools'
+	};
 
 	const capabilityLabels = {
 		vision: {
@@ -66,9 +75,15 @@
 		builtin_tools?: boolean;
 	} = {};
 
-	// Hide file_context when file_upload is disabled
+	// Hide capabilities when:
+	// - file_context: file_upload is disabled
+	// - feature-gated capabilities: global config flag is off
 	$: visibleCapabilities = Object.keys(capabilityLabels).filter((cap) => {
 		if (cap === 'file_context' && !capabilities.file_upload) {
+			return false;
+		}
+		const configKey = capabilityConfigGuards[cap];
+		if (configKey && !$config?.features?.[configKey]) {
 			return false;
 		}
 		return true;

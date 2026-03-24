@@ -17,7 +17,12 @@ from open_webui.models.knowledge import (
     KnowledgeResponse,
     KnowledgeUserResponse,
 )
-from open_webui.models.files import Files, FileModel, FileMetadataResponse, FileUpdateForm
+from open_webui.models.files import (
+    Files,
+    FileModel,
+    FileMetadataResponse,
+    FileUpdateForm,
+)
 from open_webui.retrieval.vector.factory import VECTOR_DB_CLIENT
 from open_webui.routers.retrieval import (
     process_file,
@@ -512,7 +517,9 @@ async def update_knowledge_by_id(
 
     # Prevent access_grants changes on non-local KBs
     if knowledge.type != "local":
-        form_data.access_grants = knowledge.access_grants if hasattr(knowledge, 'access_grants') else []
+        form_data.access_grants = (
+            knowledge.access_grants if hasattr(knowledge, "access_grants") else []
+        )
 
     form_data.access_grants = filter_allowed_access_grants(
         request.app.state.config.USER_PERMISSIONS,
@@ -580,6 +587,13 @@ async def update_knowledge_access_by_id(
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=ERROR_MESSAGES.ACCESS_PROHIBITED,
+        )
+
+    # Non-local knowledge bases (e.g. OneDrive) are always private
+    if knowledge.type != "local":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Access grants cannot be modified for non-local knowledge bases.",
         )
 
     form_data.access_grants = filter_allowed_access_grants(
@@ -722,13 +736,17 @@ def add_file_to_knowledge_by_id(
         )
 
     # Add content to the vector database
+    warning = None
     try:
-        process_file(
+        result = process_file(
             request,
             ProcessFileForm(file_id=form_data.file_id, collection_name=id),
             user=user,
             db=db,
         )
+
+        if isinstance(result, dict) and result.get("warning"):
+            warning = result["warning"]
 
         # Add file to knowledge base
         Knowledges.add_file_to_knowledge_by_id(
@@ -742,10 +760,13 @@ def add_file_to_knowledge_by_id(
         )
 
     if knowledge:
-        return KnowledgeFilesResponse(
+        response_data = KnowledgeFilesResponse(
             **knowledge.model_dump(),
             files=Knowledges.get_file_metadatas_by_id(knowledge.id, db=db),
-        )
+        ).model_dump()
+        if warning:
+            response_data["warning"] = warning
+        return response_data
     else:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -919,9 +940,12 @@ def remove_file_from_knowledge_by_id(
             if source_item_id and sources:
                 # Find the folder source this file belonged to
                 folder_source = next(
-                    (s for s in sources
-                     if s.get("item_id") == source_item_id
-                     and s.get("type") == "folder"),
+                    (
+                        s
+                        for s in sources
+                        if s.get("item_id") == source_item_id
+                        and s.get("type") == "folder"
+                    ),
                     None,
                 )
 
@@ -929,7 +953,7 @@ def remove_file_from_knowledge_by_id(
                     # Get remaining OneDrive files from the same folder source
                     remaining_kb_files = Knowledges.get_files_by_id(id, db=db)
                     individual_sources = []
-                    for kb_file in (remaining_kb_files or []):
+                    for kb_file in remaining_kb_files or []:
                         if not kb_file.id.startswith("onedrive-"):
                             continue
                         kb_file_meta = kb_file.meta or {}
@@ -938,18 +962,25 @@ def remove_file_from_knowledge_by_id(
                         # Skip the file being deleted
                         if kb_file.id == form_data.file_id:
                             continue
-                        individual_sources.append({
-                            "type": "file",
-                            "drive_id": kb_file_meta.get("onedrive_drive_id", folder_source.get("drive_id", "")),
-                            "item_id": kb_file_meta.get("onedrive_item_id", kb_file.id.removeprefix("onedrive-")),
-                            "item_path": "",
-                            "name": kb_file_meta.get("name", kb_file.filename),
-                        })
+                        individual_sources.append(
+                            {
+                                "type": "file",
+                                "drive_id": kb_file_meta.get(
+                                    "onedrive_drive_id",
+                                    folder_source.get("drive_id", ""),
+                                ),
+                                "item_id": kb_file_meta.get(
+                                    "onedrive_item_id",
+                                    kb_file.id.removeprefix("onedrive-"),
+                                ),
+                                "item_path": "",
+                                "name": kb_file_meta.get("name", kb_file.filename),
+                            }
+                        )
 
                     # Replace the folder source with individual file sources
                     new_sources = [
-                        s for s in sources
-                        if s.get("item_id") != source_item_id
+                        s for s in sources if s.get("item_id") != source_item_id
                     ] + individual_sources
 
                     sync_info["sources"] = new_sources
@@ -958,7 +989,7 @@ def remove_file_from_knowledge_by_id(
 
                     # Update remaining files' source_item_id to point to their
                     # own item_id (now an individual source, not the folder)
-                    for kb_file in (remaining_kb_files or []):
+                    for kb_file in remaining_kb_files or []:
                         if not kb_file.id.startswith("onedrive-"):
                             continue
                         kb_file_meta = kb_file.meta or {}
@@ -987,7 +1018,9 @@ def remove_file_from_knowledge_by_id(
     if delete_file:
         file_report = DeletionService.delete_file(form_data.file_id)
         if file_report.has_errors:
-            log.warning(f"Errors deleting file {form_data.file_id}: {file_report.errors}")
+            log.warning(
+                f"Errors deleting file {form_data.file_id}: {file_report.errors}"
+            )
 
     # For non-local KBs: check if this was the last reference to the file
     if not delete_file and knowledge.type != "local":
@@ -996,7 +1029,9 @@ def remove_file_from_knowledge_by_id(
             log.info(f"Cleaning up orphaned external file {form_data.file_id}")
             file_report = DeletionService.delete_file(form_data.file_id)
             if file_report.has_errors:
-                log.warning(f"Errors deleting orphaned file {form_data.file_id}: {file_report.errors}")
+                log.warning(
+                    f"Errors deleting orphaned file {form_data.file_id}: {file_report.errors}"
+                )
 
     if knowledge:
         return KnowledgeFilesResponse(
@@ -1017,7 +1052,10 @@ def remove_file_from_knowledge_by_id(
 
 @router.delete("/{id}/delete", response_model=bool)
 async def delete_knowledge_by_id(
-    id: str, user=Depends(get_verified_user), _=Depends(require_feature("knowledge")), db: Session = Depends(get_session)
+    id: str,
+    user=Depends(get_verified_user),
+    _=Depends(require_feature("knowledge")),
+    db: Session = Depends(get_session),
 ):
     knowledge = Knowledges.get_knowledge_by_id(id=id, db=db)
     if not knowledge:
@@ -1058,7 +1096,10 @@ async def delete_knowledge_by_id(
 
 @router.post("/{id}/reset", response_model=Optional[KnowledgeResponse])
 async def reset_knowledge_by_id(
-    id: str, user=Depends(get_verified_user), _=Depends(require_feature("knowledge")), db: Session = Depends(get_session)
+    id: str,
+    user=Depends(get_verified_user),
+    _=Depends(require_feature("knowledge")),
+    db: Session = Depends(get_session),
 ):
     knowledge = Knowledges.get_knowledge_by_id(id=id, db=db)
     if not knowledge:

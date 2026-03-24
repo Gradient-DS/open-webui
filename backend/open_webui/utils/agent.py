@@ -159,9 +159,7 @@ async def stream_agent_response(
         if response.status >= 400:
             body = await response.text()
             await session.close()
-            raise Exception(
-                f"Agent API returned {response.status}: {body}"
-            )
+            raise Exception(f"Agent API returned {response.status}: {body}")
 
         current_event_type = "data"
 
@@ -172,11 +170,11 @@ async def stream_agent_response(
                 continue
 
             if line.startswith("event:"):
-                current_event_type = line[len("event:"):].strip()
+                current_event_type = line[len("event:") :].strip()
                 continue
 
             if line.startswith("data:"):
-                data_str = line[len("data:"):].strip()
+                data_str = line[len("data:") :].strip()
 
                 if data_str == "[DONE]":
                     yield SSEEvent(event_type="done", data="[DONE]")
@@ -218,8 +216,15 @@ async def call_agent_api(
 
     # Extract model params that should be forwarded
     model_params = {}
-    for key in ("temperature", "top_p", "max_tokens", "frequency_penalty",
-                "presence_penalty", "seed", "stop"):
+    for key in (
+        "temperature",
+        "top_p",
+        "max_tokens",
+        "frequency_penalty",
+        "presence_penalty",
+        "seed",
+        "stop",
+    ):
         if key in form_data:
             model_params[key] = form_data[key]
 
@@ -240,8 +245,10 @@ async def call_agent_api(
         **model_params,
     )
 
-    log.debug(f"Agent API payload: model={payload.get('model')}, "
-              f"stream={stream}, features={features}")
+    log.debug(
+        f"Agent API payload: model={payload.get('model')}, "
+        f"stream={stream}, features={features}"
+    )
 
     if not stream:
         return await _call_agent_api_non_streaming(payload)
@@ -267,9 +274,7 @@ async def _call_agent_api_non_streaming(
 
         if response.status >= 400:
             body = await response.text()
-            raise Exception(
-                f"Agent API returned {response.status}: {body}"
-            )
+            raise Exception(f"Agent API returned {response.status}: {body}")
 
         return await response.json()
     finally:

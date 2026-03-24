@@ -24,7 +24,9 @@ def _column_exists(table_name: str, column_name: str) -> bool:
 def upgrade():
     # Knowledge table
     if not _column_exists("knowledge", "deleted_at"):
-        op.add_column("knowledge", sa.Column("deleted_at", sa.BigInteger(), nullable=True))
+        op.add_column(
+            "knowledge", sa.Column("deleted_at", sa.BigInteger(), nullable=True)
+        )
         op.create_index("ix_knowledge_deleted_at", "knowledge", ["deleted_at"])
 
     # Chat table

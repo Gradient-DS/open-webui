@@ -708,7 +708,10 @@ async def delete_user_by_id(
                 archive_reason = "Admin deletion"
 
             if request.app.state.config.ENABLE_USER_ARCHIVAL:
-                retention = archive_retention_days or request.app.state.config.DEFAULT_ARCHIVE_RETENTION_DAYS
+                retention = (
+                    archive_retention_days
+                    or request.app.state.config.DEFAULT_ARCHIVE_RETENTION_DAYS
+                )
                 archive_result = ArchiveService.create_archive(
                     user_id=user_id,
                     archived_by=user.id,
@@ -716,7 +719,9 @@ async def delete_user_by_id(
                     retention_days=retention,
                 )
                 if not archive_result.success:
-                    log.warning(f"Failed to archive user before deletion: {archive_result.errors}")
+                    log.warning(
+                        f"Failed to archive user before deletion: {archive_result.errors}"
+                    )
 
         # Proceed with deletion (run in thread pool to avoid blocking the event loop)
         report = await run_in_threadpool(DeletionService.delete_user, user_id)

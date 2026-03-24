@@ -1,10 +1,22 @@
 <script lang="ts">
 	import { getContext } from 'svelte';
+	import { config } from '$lib/stores';
 	import Checkbox from '$lib/components/common/Checkbox.svelte';
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
 	import { marked } from 'marked';
 
 	const i18n = getContext('i18n');
+
+	// Map tool keys to config feature flags
+	const toolConfigGuards: Record<string, string> = {
+		memory: 'enable_memories',
+		notes: 'enable_notes',
+		channels: 'enable_channels',
+		knowledge: 'feature_knowledge',
+		web_search: 'enable_web_search',
+		image_generation: 'enable_image_generation',
+		code_interpreter: 'enable_code_interpreter'
+	};
 
 	const toolLabels = {
 		time: {
@@ -49,6 +61,15 @@
 
 	export let builtinTools: Record<string, boolean> = {};
 
+	// Filter to only tools whose global feature is enabled
+	$: visibleTools = allTools.filter((tool) => {
+		const configKey = toolConfigGuards[tool];
+		if (configKey && !$config?.features?.[configKey]) {
+			return false;
+		}
+		return true;
+	});
+
 	// Initialize missing keys to true (default enabled)
 	$: {
 		for (const tool of allTools) {
@@ -64,7 +85,7 @@
 		<div class="self-center text-xs font-medium text-gray-500">{$i18n.t('Builtin Tools')}</div>
 	</div>
 	<div class="flex items-center mt-2 flex-wrap">
-		{#each allTools as tool}
+		{#each visibleTools as tool}
 			<div class="flex items-center gap-2 mr-3">
 				<Checkbox
 					state={builtinTools[tool] !== false ? 'checked' : 'unchecked'}

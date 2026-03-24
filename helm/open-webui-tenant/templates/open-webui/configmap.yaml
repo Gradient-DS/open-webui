@@ -115,6 +115,8 @@ data:
   FEATURE_KNOWLEDGE: {{ .Values.openWebui.config.featureKnowledge | quote }}
   FEATURE_PROMPTS: {{ .Values.openWebui.config.featurePrompts | quote }}
   FEATURE_TOOLS: {{ .Values.openWebui.config.featureTools | quote }}
+  FEATURE_SKILLS: {{ .Values.openWebui.config.featureSkills | quote }}
+  FEATURE_BUILTIN_TOOLS: {{ .Values.openWebui.config.featureBuiltinTools | quote }}
   FEATURE_ADMIN_EVALUATIONS: {{ .Values.openWebui.config.featureAdminEvaluations | quote }}
   FEATURE_ADMIN_FUNCTIONS: {{ .Values.openWebui.config.featureAdminFunctions | quote }}
   FEATURE_ADMIN_SETTINGS: {{ .Values.openWebui.config.featureAdminSettings | quote }}
@@ -124,6 +126,9 @@ data:
   FEATURE_TEMPORARY_CHAT: {{ .Values.openWebui.config.featureTemporaryChat | quote }}
   FEATURE_TOOL_SERVERS: {{ .Values.openWebui.config.featureToolServers | quote }}
   FEATURE_TERMINAL_SERVERS: {{ .Values.openWebui.config.featureTerminalServers | quote }}
+
+  # Memories
+  ENABLE_MEMORIES: {{ .Values.openWebui.config.enableMemories | quote }}
 
   # Notes
   ENABLE_NOTES: {{ .Values.openWebui.config.enableNotes | quote }}
@@ -151,12 +156,24 @@ data:
   USER_PERMISSIONS_WORKSPACE_PROMPTS_ACCESS: {{ .Values.openWebui.config.userPermissionsWorkspacePromptsAccess | quote }}
   USER_PERMISSIONS_WORKSPACE_TOOLS_ACCESS: {{ .Values.openWebui.config.userPermissionsWorkspaceToolsAccess | quote }}
 
+  # Workspace Sharing (allow users to share with specific groups/individuals)
+  USER_PERMISSIONS_WORKSPACE_MODELS_ALLOW_SHARING: {{ .Values.openWebui.config.userPermissionsWorkspaceModelsAllowSharing | quote }}
+  USER_PERMISSIONS_WORKSPACE_KNOWLEDGE_ALLOW_SHARING: {{ .Values.openWebui.config.userPermissionsWorkspaceKnowledgeAllowSharing | quote }}
+  USER_PERMISSIONS_WORKSPACE_PROMPTS_ALLOW_SHARING: {{ .Values.openWebui.config.userPermissionsWorkspacePromptsAllowSharing | quote }}
+  USER_PERMISSIONS_WORKSPACE_TOOLS_ALLOW_SHARING: {{ .Values.openWebui.config.userPermissionsWorkspaceToolsAllowSharing | quote }}
+  USER_PERMISSIONS_WORKSPACE_SKILLS_ALLOW_SHARING: {{ .Values.openWebui.config.userPermissionsWorkspaceSkillsAllowSharing | quote }}
+  USER_PERMISSIONS_NOTES_ALLOW_SHARING: {{ .Values.openWebui.config.userPermissionsNotesAllowSharing | quote }}
+
   # Workspace Public Sharing (allow users to share with all tenant users)
   USER_PERMISSIONS_WORKSPACE_MODELS_ALLOW_PUBLIC_SHARING: {{ .Values.openWebui.config.userPermissionsWorkspaceModelsAllowPublicSharing | quote }}
   USER_PERMISSIONS_WORKSPACE_KNOWLEDGE_ALLOW_PUBLIC_SHARING: {{ .Values.openWebui.config.userPermissionsWorkspaceKnowledgeAllowPublicSharing | quote }}
   USER_PERMISSIONS_WORKSPACE_PROMPTS_ALLOW_PUBLIC_SHARING: {{ .Values.openWebui.config.userPermissionsWorkspacePromptsAllowPublicSharing | quote }}
   USER_PERMISSIONS_WORKSPACE_TOOLS_ALLOW_PUBLIC_SHARING: {{ .Values.openWebui.config.userPermissionsWorkspaceToolsAllowPublicSharing | quote }}
+  USER_PERMISSIONS_WORKSPACE_SKILLS_ALLOW_PUBLIC_SHARING: {{ .Values.openWebui.config.userPermissionsWorkspaceSkillsAllowPublicSharing | quote }}
   USER_PERMISSIONS_NOTES_ALLOW_PUBLIC_SHARING: {{ .Values.openWebui.config.userPermissionsNotesAllowPublicSharing | quote }}
+
+  # Access Grants
+  USER_PERMISSIONS_ACCESS_GRANTS_ALLOW_USERS: {{ .Values.openWebui.config.userPermissionsAccessGrantsAllowUsers | quote }}
 
   # UI
   {{- if .Values.openWebui.config.greetingTemplate }}

@@ -1422,12 +1422,14 @@ def save_embeddings_to_vector_db(
             if file_metadata:
                 metadata = {**metadata, **file_metadata}
 
-            items.append({
-                "id": chunk.get("id", str(uuid.uuid4())),
-                "text": chunk["text"],
-                "vector": chunk["embedding"],
-                "metadata": metadata,
-            })
+            items.append(
+                {
+                    "id": chunk.get("id", str(uuid.uuid4())),
+                    "text": chunk["text"],
+                    "vector": chunk["embedding"],
+                    "metadata": metadata,
+                }
+            )
 
         log.info(f"adding {len(items)} items to collection {collection_name}")
         VECTOR_DB_CLIENT.insert(
@@ -1562,16 +1564,25 @@ def save_docs_to_vector_db(
         if result is not None and result.ids and len(result.ids) > 0:
             existing_doc_ids = result.ids[0]
             if existing_doc_ids:
-                # Check if the existing document belongs to the same file
-                # If same file_id, this is a re-add/reindex - allow it
-                # If different file_id, this is a duplicate - block it
                 existing_file_id = None
                 if result.metadatas and result.metadatas[0]:
                     existing_file_id = result.metadatas[0][0].get("file_id")
 
-                if existing_file_id != metadata.get("file_id"):
-                    log.info(f"Document with hash {metadata['hash']} already exists")
-                    raise ValueError(ERROR_MESSAGES.DUPLICATE_CONTENT)
+                if existing_file_id == metadata.get("file_id"):
+                    # Same file re-added/reindexed - allow it
+                    pass
+                else:
+                    # Different file with same content hash - remove old entries
+                    # and re-add with the new file's metadata (supports re-uploads
+                    # of the same document under a different file ID).
+                    log.info(
+                        f"Replacing existing document with hash {metadata['hash']} "
+                        f"(old file_id={existing_file_id}, new file_id={metadata.get('file_id')})"
+                    )
+                    VECTOR_DB_CLIENT.delete(
+                        collection_name=collection_name,
+                        filter={"hash": metadata["hash"]},
+                    )
 
     if split:
         if request.app.state.config.ENABLE_MARKDOWN_HEADER_TEXT_SPLITTER:
@@ -1631,7 +1642,10 @@ def save_docs_to_vector_db(
             raise ValueError(ERROR_MESSAGES.DEFAULT("Invalid text splitter"))
 
     if len(docs) == 0:
-        raise ValueError(ERROR_MESSAGES.EMPTY_CONTENT)
+        log.warning(
+            f"No text content could be extracted for collection {collection_name}"
+        )
+        return True
 
     texts = [sanitize_text_for_db(doc.page_content) for doc in docs]
     metadatas = [
@@ -1806,20 +1820,83 @@ def process_file(
                         for idx, id in enumerate(result.ids[0])
                     ]
                 else:
-                    docs = [
-                        Document(
-                            page_content=file.data.get("content", ""),
-                            metadata={
-                                **file.meta,
-                                "name": file.filename,
-                                "created_by": file.user_id,
-                                "file_id": file.id,
-                                "source": file.filename,
-                            },
-                        )
-                    ]
+                    existing_content = file.data.get("content", "")
+                    if existing_content:
+                        docs = [
+                            Document(
+                                page_content=existing_content,
+                                metadata={
+                                    **file.meta,
+                                    "name": file.filename,
+                                    "created_by": file.user_id,
+                                    "file_id": file.id,
+                                    "source": file.filename,
+                                },
+                            )
+                        ]
+                    else:
+                        # File hasn't been processed yet (e.g. background processing
+                        # hasn't completed). Load and extract content directly.
+                        file_path = file.path
+                        if file_path:
+                            file_path = Storage.get_file(file_path)
+                            loader = Loader(
+                                engine=request.app.state.config.CONTENT_EXTRACTION_ENGINE,
+                                user=user,
+                                DATALAB_MARKER_API_KEY=request.app.state.config.DATALAB_MARKER_API_KEY,
+                                DATALAB_MARKER_API_BASE_URL=request.app.state.config.DATALAB_MARKER_API_BASE_URL,
+                                DATALAB_MARKER_ADDITIONAL_CONFIG=request.app.state.config.DATALAB_MARKER_ADDITIONAL_CONFIG,
+                                DATALAB_MARKER_SKIP_CACHE=request.app.state.config.DATALAB_MARKER_SKIP_CACHE,
+                                DATALAB_MARKER_FORCE_OCR=request.app.state.config.DATALAB_MARKER_FORCE_OCR,
+                                DATALAB_MARKER_PAGINATE=request.app.state.config.DATALAB_MARKER_PAGINATE,
+                                DATALAB_MARKER_STRIP_EXISTING_OCR=request.app.state.config.DATALAB_MARKER_STRIP_EXISTING_OCR,
+                                DATALAB_MARKER_DISABLE_IMAGE_EXTRACTION=request.app.state.config.DATALAB_MARKER_DISABLE_IMAGE_EXTRACTION,
+                                DATALAB_MARKER_FORMAT_LINES=request.app.state.config.DATALAB_MARKER_FORMAT_LINES,
+                                DATALAB_MARKER_USE_LLM=request.app.state.config.DATALAB_MARKER_USE_LLM,
+                                DATALAB_MARKER_OUTPUT_FORMAT=request.app.state.config.DATALAB_MARKER_OUTPUT_FORMAT,
+                                EXTERNAL_DOCUMENT_LOADER_URL=request.app.state.config.EXTERNAL_DOCUMENT_LOADER_URL,
+                                EXTERNAL_DOCUMENT_LOADER_API_KEY=request.app.state.config.EXTERNAL_DOCUMENT_LOADER_API_KEY,
+                                TIKA_SERVER_URL=request.app.state.config.TIKA_SERVER_URL,
+                                DOCLING_SERVER_URL=request.app.state.config.DOCLING_SERVER_URL,
+                                DOCLING_API_KEY=request.app.state.config.DOCLING_API_KEY,
+                                DOCLING_PARAMS=request.app.state.config.DOCLING_PARAMS,
+                                PDF_EXTRACT_IMAGES=request.app.state.config.PDF_EXTRACT_IMAGES,
+                                PDF_LOADER_MODE=request.app.state.config.PDF_LOADER_MODE,
+                                DOCUMENT_INTELLIGENCE_ENDPOINT=request.app.state.config.DOCUMENT_INTELLIGENCE_ENDPOINT,
+                                DOCUMENT_INTELLIGENCE_KEY=request.app.state.config.DOCUMENT_INTELLIGENCE_KEY,
+                                DOCUMENT_INTELLIGENCE_MODEL=request.app.state.config.DOCUMENT_INTELLIGENCE_MODEL,
+                                MISTRAL_OCR_API_BASE_URL=request.app.state.config.MISTRAL_OCR_API_BASE_URL,
+                                MISTRAL_OCR_API_KEY=request.app.state.config.MISTRAL_OCR_API_KEY,
+                                MINERU_API_MODE=request.app.state.config.MINERU_API_MODE,
+                                MINERU_API_URL=request.app.state.config.MINERU_API_URL,
+                                MINERU_API_KEY=request.app.state.config.MINERU_API_KEY,
+                                MINERU_API_TIMEOUT=request.app.state.config.MINERU_API_TIMEOUT,
+                                MINERU_PARAMS=request.app.state.config.MINERU_PARAMS,
+                            )
+                            docs = loader.load(
+                                file.filename, file.meta.get("content_type"), file_path
+                            )
+                            docs = [
+                                Document(
+                                    page_content=doc.page_content,
+                                    metadata={
+                                        **filter_metadata(doc.metadata),
+                                        "name": file.filename,
+                                        "created_by": file.user_id,
+                                        "file_id": file.id,
+                                        "source": file.filename,
+                                    },
+                                )
+                                for doc in docs
+                            ]
+                        else:
+                            raise ValueError(ERROR_MESSAGES.EMPTY_CONTENT)
 
-                text_content = file.data.get("content", "")
+                text_content = (
+                    " ".join([doc.page_content for doc in docs])
+                    if docs
+                    else file.data.get("content", "")
+                )
             else:
                 # Process the file and save the content
                 # Usage: /files/
@@ -1866,11 +1943,15 @@ def process_file(
                     )
 
                     # Check if external pipeline is enabled (not empty string)
-                    use_external_pipeline = external_pipeline_url and external_pipeline_url.strip() != ""
+                    use_external_pipeline = (
+                        external_pipeline_url and external_pipeline_url.strip() != ""
+                    )
 
                     if use_external_pipeline:
                         # Try external pipeline first (default behavior)
-                        log.info(f"Attempting to use external pipeline for file: {file.filename}")
+                        log.info(
+                            f"Attempting to use external pipeline for file: {file.filename}"
+                        )
 
                         try:
                             # Process file with external pipeline
@@ -1960,6 +2041,35 @@ def process_file(
 
                     # External embedding API takes time (5-60s+).
                     # Subsequent updates use fresh sessions via get_db().
+                    if not text_content.strip():
+                        # File has no extractable text (e.g. image-only PDF).
+                        # Still add it to the KB for bookkeeping, but skip embedding.
+                        log.warning(
+                            f"No text content extracted from {file.filename}, "
+                            f"skipping embedding but adding to knowledge base"
+                        )
+                        with get_db() as session:
+                            Files.update_file_metadata_by_id(
+                                file.id,
+                                {"collection_name": collection_name},
+                                db=session,
+                            )
+                            Files.update_file_data_by_id(
+                                file.id,
+                                {"status": "completed"},
+                                db=session,
+                            )
+                            Files.update_file_hash_by_id(file.id, hash, db=session)
+
+                        return {
+                            "status": True,
+                            "collection_name": collection_name,
+                            "filename": file.filename,
+                            "content": text_content,
+                            "warning": "No text content could be extracted from this file. "
+                            "It has been added but will not be searchable.",
+                        }
+
                     result = save_docs_to_vector_db(
                         request,
                         docs=docs,

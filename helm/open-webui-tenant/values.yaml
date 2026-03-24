@@ -203,6 +203,8 @@ openWebui:
     featureKnowledge: "True"
     featurePrompts: "True"
     featureTools: "False"
+    featureSkills: "False"
+    featureBuiltinTools: "False"
     featureAdminEvaluations: "True"
     featureAdminFunctions: "False"
     featureAdminSettings: "True"
@@ -211,6 +213,9 @@ openWebui:
     featureTemporaryChat: "True"
     featureToolServers: "False"
     featureTerminalServers: "False"
+
+    # Memories
+    enableMemories: "true"
 
     # Notes
     enableNotes: "true"
@@ -238,12 +243,24 @@ openWebui:
     userPermissionsWorkspacePromptsAccess: "true"
     userPermissionsWorkspaceToolsAccess: "false"
 
+    # Workspace Sharing (allow users to share with specific groups/individuals)
+    userPermissionsWorkspaceModelsAllowSharing: "false"
+    userPermissionsWorkspaceKnowledgeAllowSharing: "false"
+    userPermissionsWorkspacePromptsAllowSharing: "false"
+    userPermissionsWorkspaceToolsAllowSharing: "false"
+    userPermissionsWorkspaceSkillsAllowSharing: "false"
+    userPermissionsNotesAllowSharing: "false"
+
     # Workspace Public Sharing (allow users to share with all tenant users)
     userPermissionsWorkspaceModelsAllowPublicSharing: "false"
     userPermissionsWorkspaceKnowledgeAllowPublicSharing: "false"
     userPermissionsWorkspacePromptsAllowPublicSharing: "false"
     userPermissionsWorkspaceToolsAllowPublicSharing: "false"
+    userPermissionsWorkspaceSkillsAllowPublicSharing: "false"
     userPermissionsNotesAllowPublicSharing: "false"
+
+    # Access Grants (allow sharing to individual users, not just groups)
+    userPermissionsAccessGrantsAllowUsers: "true"
 
     # UI Features
     greetingTemplate: ""
