@@ -172,7 +172,7 @@ async def export_db_json(user=Depends(get_admin_user)):
                         # Handle non-JSON-serializable types
                         if isinstance(value, bytes):
                             value = value.hex()
-                        elif hasattr(value, 'isoformat'):
+                        elif hasattr(value, "isoformat"):
                             value = value.isoformat()
                         row_dict[col] = value
                     rows.append(row_dict)
@@ -188,7 +188,7 @@ async def export_db_json(user=Depends(get_admin_user)):
                 }
 
     # Create JSON file in memory
-    json_bytes = json.dumps(export_data, indent=2, default=str).encode('utf-8')
+    json_bytes = json.dumps(export_data, indent=2, default=str).encode("utf-8")
     buffer = BytesIO(json_bytes)
 
     filename = f"openwebui-export-{int(time.time())}.json"
@@ -198,5 +198,5 @@ async def export_db_json(user=Depends(get_admin_user)):
         media_type="application/json",
         headers={
             "Content-Disposition": f"attachment; filename={filename}",
-        }
+        },
     )

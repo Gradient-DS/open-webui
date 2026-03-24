@@ -78,6 +78,7 @@ class TestVoiceFeature:
         # This tests the actual FEATURE_FLAGS value loaded from config
         # Default is True per the config.py definition
         from open_webui.config import FEATURE_VOICE
+
         assert FEATURE_VOICE is True or isinstance(FEATURE_VOICE, bool)
 
     def test_voice_can_be_disabled(self):
@@ -105,17 +106,13 @@ class TestChangelogFeature:
 
     def test_changelog_enabled_by_default(self):
         """Changelog feature should be enabled by default."""
-        with patch.dict(
-            "open_webui.utils.features.FEATURE_FLAGS",
-            {"changelog": True}
-        ):
+        with patch.dict("open_webui.utils.features.FEATURE_FLAGS", {"changelog": True}):
             assert is_feature_enabled("changelog") is True
 
     def test_changelog_can_be_disabled(self):
         """Changelog feature should be disableable."""
         with patch.dict(
-            "open_webui.utils.features.FEATURE_FLAGS",
-            {"changelog": False}
+            "open_webui.utils.features.FEATURE_FLAGS", {"changelog": False}
         ):
             assert is_feature_enabled("changelog") is False
 
@@ -141,16 +138,14 @@ class TestSystemPromptFeature:
     def test_system_prompt_enabled_by_default(self):
         """System prompt feature should be enabled by default."""
         with patch.dict(
-            "open_webui.utils.features.FEATURE_FLAGS",
-            {"system_prompt": True}
+            "open_webui.utils.features.FEATURE_FLAGS", {"system_prompt": True}
         ):
             assert is_feature_enabled("system_prompt") is True
 
     def test_system_prompt_can_be_disabled(self):
         """System prompt feature should be disableable."""
         with patch.dict(
-            "open_webui.utils.features.FEATURE_FLAGS",
-            {"system_prompt": False}
+            "open_webui.utils.features.FEATURE_FLAGS", {"system_prompt": False}
         ):
             assert is_feature_enabled("system_prompt") is False
 
@@ -176,16 +171,14 @@ class TestAdminEvaluationsFeature:
     def test_admin_evaluations_enabled_by_default(self):
         """Admin evaluations feature should be enabled by default."""
         with patch.dict(
-            "open_webui.utils.features.FEATURE_FLAGS",
-            {"admin_evaluations": True}
+            "open_webui.utils.features.FEATURE_FLAGS", {"admin_evaluations": True}
         ):
             assert is_feature_enabled("admin_evaluations") is True
 
     def test_admin_evaluations_can_be_disabled(self):
         """Admin evaluations feature should be disableable."""
         with patch.dict(
-            "open_webui.utils.features.FEATURE_FLAGS",
-            {"admin_evaluations": False}
+            "open_webui.utils.features.FEATURE_FLAGS", {"admin_evaluations": False}
         ):
             assert is_feature_enabled("admin_evaluations") is False
 
@@ -211,16 +204,14 @@ class TestAdminFunctionsFeature:
     def test_admin_functions_enabled_by_default(self):
         """Admin functions feature should be enabled by default."""
         with patch.dict(
-            "open_webui.utils.features.FEATURE_FLAGS",
-            {"admin_functions": True}
+            "open_webui.utils.features.FEATURE_FLAGS", {"admin_functions": True}
         ):
             assert is_feature_enabled("admin_functions") is True
 
     def test_admin_functions_can_be_disabled(self):
         """Admin functions feature should be disableable."""
         with patch.dict(
-            "open_webui.utils.features.FEATURE_FLAGS",
-            {"admin_functions": False}
+            "open_webui.utils.features.FEATURE_FLAGS", {"admin_functions": False}
         ):
             assert is_feature_enabled("admin_functions") is False
 
@@ -246,16 +237,14 @@ class TestAdminSettingsFeature:
     def test_admin_settings_enabled_by_default(self):
         """Admin settings feature should be enabled by default."""
         with patch.dict(
-            "open_webui.utils.features.FEATURE_FLAGS",
-            {"admin_settings": True}
+            "open_webui.utils.features.FEATURE_FLAGS", {"admin_settings": True}
         ):
             assert is_feature_enabled("admin_settings") is True
 
     def test_admin_settings_can_be_disabled(self):
         """Admin settings feature should be disableable."""
         with patch.dict(
-            "open_webui.utils.features.FEATURE_FLAGS",
-            {"admin_settings": False}
+            "open_webui.utils.features.FEATURE_FLAGS", {"admin_settings": False}
         ):
             assert is_feature_enabled("admin_settings") is False
 
@@ -281,7 +270,9 @@ class TestAllFeatureFlags:
     def test_all_features_have_boolean_values(self):
         """Test that all registered features have boolean values."""
         for feature, value in FEATURE_FLAGS.items():
-            assert isinstance(value, bool), f"Feature {feature} has non-boolean value: {value}"
+            assert isinstance(
+                value, bool
+            ), f"Feature {feature} has non-boolean value: {value}"
 
     def test_expected_features_are_registered(self):
         """Test that expected features are registered."""
@@ -304,4 +295,6 @@ class TestAllFeatureFlags:
             "admin_settings",
         ]
         for feature in expected_features:
-            assert feature in FEATURE_FLAGS, f"Feature {feature} not found in FEATURE_FLAGS"
+            assert (
+                feature in FEATURE_FLAGS
+            ), f"Feature {feature} not found in FEATURE_FLAGS"

@@ -120,14 +120,16 @@ class OneDriveSyncWorker:
         from starlette.requests import Request
         from starlette.datastructures import Headers
 
-        return Request({
-            "type": "http",
-            "method": "POST",
-            "path": "/internal/onedrive-sync",
-            "query_string": b"",
-            "headers": Headers({}).raw,
-            "app": self.app,
-        })
+        return Request(
+            {
+                "type": "http",
+                "method": "POST",
+                "path": "/internal/onedrive-sync",
+                "query_string": b"",
+                "headers": Headers({}).raw,
+                "app": self.app,
+            }
+        )
 
     def _get_user(self):
         """Fetch the user object for process_file access control."""
@@ -176,9 +178,7 @@ class OneDriveSyncWorker:
             Knowledges.update_knowledge_meta_by_id(self.knowledge_id, meta)
 
         # Convert failed_files to dicts for serialization
-        failed_files_dicts = (
-            [asdict(f) for f in failed_files] if failed_files else None
-        )
+        failed_files_dicts = [asdict(f) for f in failed_files] if failed_files else None
 
         # Emit Socket.IO event for real-time progress updates
         from open_webui.services.onedrive.sync_events import emit_sync_progress
@@ -254,7 +254,9 @@ class OneDriveSyncWorker:
         if stored_version < FOLDER_MAP_VERSION:
             log.info(
                 "Folder map version %d < %d for source %s, forcing full sync",
-                stored_version, FOLDER_MAP_VERSION, source.get("name"),
+                stored_version,
+                FOLDER_MAP_VERSION,
+                source.get("name"),
             )
             delta_link = None
             source["folder_map"] = {}  # Clear stale map
@@ -265,7 +267,10 @@ class OneDriveSyncWorker:
             )
         except httpx.HTTPStatusError as e:
             if e.response.status_code == 410:
-                log.info("Delta token expired for source %s, performing full sync", source["name"])
+                log.info(
+                    "Delta token expired for source %s, performing full sync",
+                    source["name"],
+                )
                 source["delta_link"] = None
                 items, new_delta_link = await self._client.get_drive_delta(
                     source["drive_id"], source["item_id"], None
@@ -288,8 +293,7 @@ class OneDriveSyncWorker:
         # can be resolved (handles nested folders whose parent appears later).
         changed = True
         folder_items = [
-            item for item in items
-            if "folder" in item and "@removed" not in item
+            item for item in items if "folder" in item and "@removed" not in item
         ]
         while changed:
             changed = False
@@ -298,7 +302,9 @@ class OneDriveSyncWorker:
                 if parent_id not in folder_map:
                     continue
                 parent_path = folder_map[parent_id]
-                new_path = f"{parent_path}/{item['name']}" if parent_path else item["name"]
+                new_path = (
+                    f"{parent_path}/{item['name']}" if parent_path else item["name"]
+                )
                 if folder_map.get(item["id"]) != new_path:
                     folder_map[item["id"]] = new_path
                     changed = True
@@ -464,7 +470,9 @@ class OneDriveSyncWorker:
                 user = Users.get_user_by_email(email)
                 if user:
                     permitted_user_ids.append(user.id)
-                    log.debug(f"Mapped OneDrive permission for {email} to user {user.id}")
+                    log.debug(
+                        f"Mapped OneDrive permission for {email} to user {user.id}"
+                    )
 
             # Update knowledge access_control
             if permitted_user_ids:
@@ -573,13 +581,15 @@ class OneDriveSyncWorker:
                     continue
             else:
                 # Legacy fallback: match by drive_id (may over-match for same-drive sources)
-                if not (file_drive_id and source_drive_id and file_drive_id == source_drive_id):
+                if not (
+                    file_drive_id
+                    and source_drive_id
+                    and file_drive_id == source_drive_id
+                ):
                     continue
 
             # Matched — proceed with removal
-            Knowledges.remove_file_from_knowledge_by_id(
-                self.knowledge_id, file.id
-            )
+            Knowledges.remove_file_from_knowledge_by_id(self.knowledge_id, file.id)
             # Remove vectors from KB collection
             try:
                 VECTOR_DB_CLIENT.delete(
@@ -609,7 +619,9 @@ class OneDriveSyncWorker:
         Returns:
             Dict with sync results (files_processed, files_failed, failed_files, etc.)
         """
-        self._client = GraphClient(self.access_token, token_provider=self._token_provider)
+        self._client = GraphClient(
+            self.access_token, token_provider=self._token_provider
+        )
 
         try:
             await self._update_sync_status("syncing", 0, 0)
@@ -957,7 +969,9 @@ class OneDriveSyncWorker:
                     f"File {file_id} still referenced by {len(remaining_refs)} KB(s), preserving"
                 )
 
-    async def _process_file_info(self, file_info: Dict[str, Any]) -> Optional[FailedFile]:
+    async def _process_file_info(
+        self, file_info: Dict[str, Any]
+    ) -> Optional[FailedFile]:
         """Download and process a single file from file_info structure.
 
         Returns:
@@ -970,7 +984,9 @@ class OneDriveSyncWorker:
         source_item_id = file_info.get("source_item_id")
         relative_path = file_info.get("relative_path", name)
 
-        log.info(f"Processing file: {name} (id: {item_id}, relative_path: {relative_path})")
+        log.info(
+            f"Processing file: {name} (id: {item_id}, relative_path: {relative_path})"
+        )
 
         # Check cancellation before emitting any UI events
         if self._check_cancelled():
@@ -1029,12 +1045,15 @@ class OneDriveSyncWorker:
             # Update meta with relative_path if missing or changed (migration for pre-existing files)
             new_relative_path = file_info.get("relative_path")
             existing_meta = existing.meta or {}
-            if new_relative_path and existing_meta.get("relative_path") != new_relative_path:
+            if (
+                new_relative_path
+                and existing_meta.get("relative_path") != new_relative_path
+            ):
                 existing_meta["relative_path"] = new_relative_path
-                Files.update_file_by_id(
-                    file_id, FileUpdateForm(meta=existing_meta)
+                Files.update_file_by_id(file_id, FileUpdateForm(meta=existing_meta))
+                log.info(
+                    f"Updated {file_id} meta with relative_path: {new_relative_path}"
                 )
-                log.info(f"Updated {file_id} meta with relative_path: {new_relative_path}")
 
             # Create KnowledgeFile association if not exists
             Knowledges.add_file_to_knowledge_by_id(
@@ -1188,7 +1207,11 @@ class OneDriveSyncWorker:
                             )
                         # Copy new vectors via direct function call
                         try:
-                            from open_webui.routers.retrieval import process_file, ProcessFileForm
+                            from open_webui.routers.retrieval import (
+                                process_file,
+                                ProcessFileForm,
+                            )
+
                             await asyncio.to_thread(
                                 process_file,
                                 self._make_request(),
@@ -1280,7 +1303,9 @@ class OneDriveSyncWorker:
                 error_message=f"Error copying vectors: {str(e)}"[:80],
             )
 
-    async def _process_file_via_api(self, file_id: str, filename: str) -> Optional[FailedFile]:
+    async def _process_file_via_api(
+        self, file_id: str, filename: str
+    ) -> Optional[FailedFile]:
         """Process file by calling the retrieval processing function directly.
 
         Two-step process:
@@ -1316,7 +1341,9 @@ class OneDriveSyncWorker:
                 error_msg = str(e).lower()
                 if "empty" in error_msg or "no content" in error_msg:
                     log.debug(f"File {file_id} has no extractable content")
-                    return None  # Skip silently - file is stored but can't be vectorised
+                    return (
+                        None  # Skip silently - file is stored but can't be vectorised
+                    )
                 raise  # Re-raise other ValueErrors
             except HTTPException as e:
                 detail = str(e.detail) if e.detail else ""
@@ -1324,11 +1351,17 @@ class OneDriveSyncWorker:
                     log.debug(
                         f"File {file_id} already has embeddings, skipping to knowledge base addition"
                     )
-                elif e.status_code == 400 and ("No content extracted" in detail or "empty" in detail.lower()):
+                elif e.status_code == 400 and (
+                    "No content extracted" in detail or "empty" in detail.lower()
+                ):
                     log.debug(f"File {file_id} has no extractable content")
-                    return None  # Skip silently - file is stored but can't be vectorised
+                    return (
+                        None  # Skip silently - file is stored but can't be vectorised
+                    )
                 else:
-                    log.debug(f"Failed to process file content {file_id}: {e.status_code} - {detail}")
+                    log.debug(
+                        f"Failed to process file content {file_id}: {e.status_code} - {detail}"
+                    )
                     return FailedFile(
                         filename=filename,
                         error_type=SyncErrorType.PROCESSING_ERROR.value,
@@ -1346,7 +1379,9 @@ class OneDriveSyncWorker:
                     ),
                     user=user,
                 )
-                log.info(f"Successfully added file {file_id} to knowledge base {self.knowledge_id}")
+                log.info(
+                    f"Successfully added file {file_id} to knowledge base {self.knowledge_id}"
+                )
             except HTTPException as e:
                 detail = str(e.detail) if e.detail else ""
                 if e.status_code == 400 and "Duplicate content" in detail:
@@ -1355,11 +1390,17 @@ class OneDriveSyncWorker:
                     )
                     return None  # Success - file is already in the knowledge base
                 else:
-                    log.debug(f"Failed to add file {file_id} to knowledge base: {e.status_code} - {detail}")
+                    log.debug(
+                        f"Failed to add file {file_id} to knowledge base: {e.status_code} - {detail}"
+                    )
                     return FailedFile(
                         filename=filename,
                         error_type=SyncErrorType.PROCESSING_ERROR.value,
-                        error_message=detail[:100] if detail else "Failed to add to knowledge base",
+                        error_message=(
+                            detail[:100]
+                            if detail
+                            else "Failed to add to knowledge base"
+                        ),
                     )
 
             return None  # Success

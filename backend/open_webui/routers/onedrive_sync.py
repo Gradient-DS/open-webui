@@ -15,7 +15,6 @@ from open_webui.models.users import UserModel
 from open_webui.models.knowledge import Knowledges
 from open_webui.config import MICROSOFT_CLIENT_SECRET
 
-
 log = logging.getLogger(__name__)
 router = APIRouter()
 
@@ -413,7 +412,10 @@ async def handle_onedrive_auth_callback(request: Request):
     when the state matches a pending OneDrive auth flow.
     Returns HTML that posts result to the opener window and closes.
     """
-    from open_webui.services.onedrive.auth import exchange_code_for_tokens, _pending_flows
+    from open_webui.services.onedrive.auth import (
+        exchange_code_for_tokens,
+        _pending_flows,
+    )
 
     code = request.query_params.get("code")
     state = request.query_params.get("state")

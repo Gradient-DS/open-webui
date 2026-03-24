@@ -92,6 +92,7 @@ class OneDriveSyncProvider(SyncProvider):
                 return await self._token_manager.get_valid_access_token(
                     user_id, knowledge_id
                 )
+
             token_provider = _refresh
 
         worker = OneDriveSyncWorker(

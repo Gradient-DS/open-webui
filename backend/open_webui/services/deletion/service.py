@@ -13,7 +13,9 @@ log = logging.getLogger(__name__)
 # Shared pool for vector DB cleanup operations.
 # Bounded to 10 workers total across ALL concurrent deletions to avoid
 # overwhelming Weaviate when multiple users delete KBs simultaneously.
-_vector_cleanup_pool = ThreadPoolExecutor(max_workers=10, thread_name_prefix="vec-cleanup")
+_vector_cleanup_pool = ThreadPoolExecutor(
+    max_workers=10, thread_name_prefix="vec-cleanup"
+)
 
 
 @dataclass
@@ -183,9 +185,7 @@ class DeletionService:
         # 3. Delete per-file vector collections (derived, slowest step)
         def _delete_collection(file_id: str) -> tuple[str, Optional[str]]:
             try:
-                VECTOR_DB_CLIENT.delete_collection(
-                    collection_name=f"file-{file_id}"
-                )
+                VECTOR_DB_CLIENT.delete_collection(collection_name=f"file-{file_id}")
                 return file_id, None
             except Exception as e:
                 return file_id, str(e)
@@ -261,7 +261,10 @@ class DeletionService:
             for tag_name in chat.meta.get("tags", []):
                 try:
                     # Use actual count query, not meta.count which may be stale
-                    if Chats.count_chats_by_tag_name_and_user_id(tag_name, user_id) == 1:
+                    if (
+                        Chats.count_chats_by_tag_name_and_user_id(tag_name, user_id)
+                        == 1
+                    ):
                         Tags.delete_tag_by_name_and_user_id(tag_name, user_id)
                         report.add_db("tag")
                 except Exception as e:
@@ -337,7 +340,9 @@ class DeletionService:
                 if model.meta and hasattr(model.meta, "knowledge"):
                     knowledge_list = model.meta.knowledge or []
                     # Knowledge items are objects with 'id' field
-                    updated_knowledge = [k for k in knowledge_list if k.get("id") != knowledge_id]
+                    updated_knowledge = [
+                        k for k in knowledge_list if k.get("id") != knowledge_id
+                    ]
 
                     if len(updated_knowledge) != len(knowledge_list):
                         model.meta.knowledge = updated_knowledge
@@ -352,7 +357,9 @@ class DeletionService:
                             is_active=model.is_active,
                         )
                         Models.update_model_by_id(model.id, model_form)
-                        log.info(f"Removed knowledge {knowledge_id} from model {model.id}")
+                        log.info(
+                            f"Removed knowledge {knowledge_id} from model {model.id}"
+                        )
         except Exception as e:
             report.add_error(f"Failed to update models referencing knowledge: {e}")
 

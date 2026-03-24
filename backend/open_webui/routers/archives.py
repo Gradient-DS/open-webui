@@ -87,11 +87,17 @@ async def update_archive_config(
     if form_data.enable_user_archival is not None:
         request.app.state.config.ENABLE_USER_ARCHIVAL = form_data.enable_user_archival
     if form_data.default_archive_retention_days is not None:
-        request.app.state.config.DEFAULT_ARCHIVE_RETENTION_DAYS = form_data.default_archive_retention_days
+        request.app.state.config.DEFAULT_ARCHIVE_RETENTION_DAYS = (
+            form_data.default_archive_retention_days
+        )
     if form_data.enable_auto_archive_on_self_delete is not None:
-        request.app.state.config.ENABLE_AUTO_ARCHIVE_ON_SELF_DELETE = form_data.enable_auto_archive_on_self_delete
+        request.app.state.config.ENABLE_AUTO_ARCHIVE_ON_SELF_DELETE = (
+            form_data.enable_auto_archive_on_self_delete
+        )
     if form_data.auto_archive_retention_days is not None:
-        request.app.state.config.AUTO_ARCHIVE_RETENTION_DAYS = form_data.auto_archive_retention_days
+        request.app.state.config.AUTO_ARCHIVE_RETENTION_DAYS = (
+            form_data.auto_archive_retention_days
+        )
 
     return ArchiveConfigResponse(
         enable_user_archival=request.app.state.config.ENABLE_USER_ARCHIVAL,

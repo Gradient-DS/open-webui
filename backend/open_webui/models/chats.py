@@ -1747,9 +1747,7 @@ class ChatTable:
                 .all()
             ]
 
-    def soft_delete_by_id(
-        self, id: str, db: Optional[Session] = None
-    ) -> bool:
+    def soft_delete_by_id(self, id: str, db: Optional[Session] = None) -> bool:
         """Mark a chat as deleted (soft-delete)."""
         with get_db_context(db) as db:
             result = (
@@ -1761,9 +1759,7 @@ class ChatTable:
             db.commit()
             return result > 0
 
-    def soft_delete_by_user_id(
-        self, user_id: str, db: Optional[Session] = None
-    ) -> int:
+    def soft_delete_by_user_id(self, user_id: str, db: Optional[Session] = None) -> int:
         """Soft-delete all chats for a user. Returns count of affected rows."""
         with get_db_context(db) as db:
             result = (

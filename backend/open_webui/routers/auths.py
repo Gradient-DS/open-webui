@@ -1116,8 +1116,12 @@ async def update_admin_config(
 
     request.app.state.config.ENABLE_ACCEPTANCE_MODAL = form_data.ENABLE_ACCEPTANCE_MODAL
     request.app.state.config.ACCEPTANCE_MODAL_TITLE = form_data.ACCEPTANCE_MODAL_TITLE
-    request.app.state.config.ACCEPTANCE_MODAL_CONTENT = form_data.ACCEPTANCE_MODAL_CONTENT
-    request.app.state.config.ACCEPTANCE_MODAL_BUTTON_TEXT = form_data.ACCEPTANCE_MODAL_BUTTON_TEXT
+    request.app.state.config.ACCEPTANCE_MODAL_CONTENT = (
+        form_data.ACCEPTANCE_MODAL_CONTENT
+    )
+    request.app.state.config.ACCEPTANCE_MODAL_BUTTON_TEXT = (
+        form_data.ACCEPTANCE_MODAL_BUTTON_TEXT
+    )
 
     return {
         "SHOW_ADMIN_DETAILS": request.app.state.config.SHOW_ADMIN_DETAILS,

@@ -55,7 +55,11 @@ async def get_valid_access_token(
 
     if new_token_data is None:
         # Refresh failed — token likely revoked
-        log.warning("Token refresh failed for user %s, KB %s — marking as needs_reauth", user_id, knowledge_id)
+        log.warning(
+            "Token refresh failed for user %s, KB %s — marking as needs_reauth",
+            user_id,
+            knowledge_id,
+        )
         _mark_needs_reauth(user_id)
         return None
 
@@ -116,7 +120,9 @@ async def _refresh_token(token_data: dict) -> Optional[dict]:
 
     # Calculate expires_at
     if "expires_in" in new_token_data:
-        new_token_data["expires_at"] = int(time.time()) + int(new_token_data["expires_in"])
+        new_token_data["expires_at"] = int(time.time()) + int(
+            new_token_data["expires_in"]
+        )
     new_token_data["issued_at"] = int(time.time())
 
     return new_token_data
