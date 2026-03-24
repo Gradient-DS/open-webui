@@ -254,10 +254,6 @@ class OneDriveSyncWorker(BaseSyncWorker):
         """Download file content from OneDrive."""
         drive_id = file_info["drive_id"]
         item_id = file_info["item"]["id"]
-        # Stash drive_id so _get_provider_file_meta can include it in metadata.
-        # The base class calls _download_file_content before _get_provider_file_meta
-        # within the same _process_file_info invocation.
-        self._current_drive_id = drive_id
         return await self._client.download_file(drive_id, item_id)
 
     def _get_provider_storage_headers(self, item_id: str) -> dict:
@@ -274,16 +270,16 @@ class OneDriveSyncWorker(BaseSyncWorker):
         name: str,
         content_type: str,
         size: int,
+        file_info: Optional[Dict[str, Any]] = None,
     ) -> dict:
-        # drive_id is stashed on self._current_drive_id by _download_file_content,
-        # which the base class always calls before this method.
+        drive_id = file_info.get("drive_id", "") if file_info else ""
         return {
             "name": name,
             "content_type": content_type,
             "size": size,
             "source": "onedrive",
             "onedrive_item_id": item_id,
-            "onedrive_drive_id": self._current_drive_id,
+            "onedrive_drive_id": drive_id,
             "source_item_id": source_item_id,
             "relative_path": relative_path,
             "last_synced_at": int(time.time()),
@@ -399,21 +395,21 @@ class OneDriveSyncWorker(BaseSyncWorker):
             if item is None:
                 return False
             return True
-        except Exception as e:
-            error_str = str(e).lower()
-            if (
-                "404" in error_str
-                or "403" in error_str
-                or "not found" in error_str
-                or "access denied" in error_str
-            ):
+        except httpx.HTTPStatusError as e:
+            if e.response.status_code in (403, 404):
                 log.warning(
                     f"User {self.user_id} lost access to {source_type} "
-                    f"{drive_id}/{item_id}: {e}"
+                    f"{drive_id}/{item_id}: {e.response.status_code}"
                 )
                 return False
-            # For other errors (network, timeout), assume access is still valid
+            # For other errors (5xx, etc.), assume access is still valid
             # to avoid accidentally removing files
+            log.warning(
+                f"Error verifying access to {source_type} {drive_id}/{item_id}: {e}"
+            )
+            return True
+        except Exception as e:
+            # For network errors, timeouts, etc., assume access is still valid
             log.warning(
                 f"Error verifying access to {source_type} {drive_id}/{item_id}: {e}"
             )

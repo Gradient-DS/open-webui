@@ -3,7 +3,7 @@
 import asyncio
 import logging
 import time
-from typing import Optional, Callable, Awaitable, Dict, Any, List
+from typing import Optional, Dict, Any, List
 from pathlib import Path
 
 from open_webui.services.google_drive.drive_client import (
@@ -194,6 +194,7 @@ class GoogleDriveSyncWorker(BaseSyncWorker):
         name: str,
         content_type: str,
         size: int,
+        file_info: Optional[Dict[str, Any]] = None,
     ) -> dict:
         return {
             "name": name,
@@ -279,6 +280,8 @@ class GoogleDriveSyncWorker(BaseSyncWorker):
 
     async def _verify_source_access(self, source: Dict[str, Any]) -> bool:
         """Verify the user can still access a Google Drive source."""
+        import httpx
+
         item_id = source.get("item_id")
         source_type = source.get("type", "folder")
 
@@ -287,18 +290,18 @@ class GoogleDriveSyncWorker(BaseSyncWorker):
             if item is None:
                 return False
             return True
-        except Exception as e:
-            error_str = str(e).lower()
-            if (
-                "404" in error_str
-                or "403" in error_str
-                or "not found" in error_str
-            ):
+        except httpx.HTTPStatusError as e:
+            if e.response.status_code in (403, 404):
                 log.warning(
                     f"User {self.user_id} lost access to {source_type} "
-                    f"{item_id}: {e}"
+                    f"{item_id}: {e.response.status_code}"
                 )
                 return False
+            log.warning(
+                f"Error verifying access to {source_type} {item_id}: {e}"
+            )
+            return True
+        except Exception as e:
             log.warning(
                 f"Error verifying access to {source_type} {item_id}: {e}"
             )

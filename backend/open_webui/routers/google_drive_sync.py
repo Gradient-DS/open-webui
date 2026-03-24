@@ -208,7 +208,8 @@ async def handle_google_drive_auth_callback(request: Request):
     """
     from open_webui.services.google_drive.auth import (
         exchange_code_for_tokens,
-        _pending_flows,
+        get_pending_flow,
+        remove_pending_flow,
     )
 
     code = request.query_params.get("code")
@@ -217,7 +218,8 @@ async def handle_google_drive_auth_callback(request: Request):
     error_description = request.query_params.get("error_description")
 
     if error:
-        _pending_flows.pop(state, None)
+        if state:
+            remove_pending_flow(state)
         return auth_callback_html(
             callback_type="google_drive_auth_callback",
             success=False,
@@ -231,7 +233,7 @@ async def handle_google_drive_auth_callback(request: Request):
             error="Missing authorization code or state",
         )
 
-    flow = _pending_flows.get(state)
+    flow = get_pending_flow(state)
     if not flow:
         return auth_callback_html(
             callback_type="google_drive_auth_callback",

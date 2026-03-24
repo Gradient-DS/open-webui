@@ -196,7 +196,6 @@ def handle_remove_source(
     item_id: str,
     user: UserModel,
     remove_files_fn: Callable,
-    source_to_remove_ref: dict = None,
 ) -> dict:
     """Shared logic for POST /sync/{knowledge_id}/sources/remove.
 
@@ -318,62 +317,6 @@ def handle_revoke_token(
         Knowledges.update_knowledge_meta_by_id(kb.id, meta)
 
     return {"revoked": deleted}
-
-
-def handle_auth_callback(
-    request,
-    provider_type: str,
-    meta_key: str,
-    callback_type: str,
-    pending_flows: dict,
-    exchange_code_fn: Callable,
-) -> HTMLResponse:
-    """Shared OAuth callback logic.
-
-    Args:
-        callback_type: e.g. "google_drive_auth_callback" or "onedrive_auth_callback"
-    """
-    import asyncio
-
-    code = request.query_params.get("code")
-    state = request.query_params.get("state")
-    error = request.query_params.get("error")
-    error_description = request.query_params.get("error_description")
-
-    if error:
-        pending_flows.pop(state, None)
-        return auth_callback_html(
-            callback_type=callback_type,
-            success=False,
-            error=error_description or error,
-        )
-
-    if not code or not state:
-        return auth_callback_html(
-            callback_type=callback_type,
-            success=False,
-            error="Missing authorization code or state",
-        )
-
-    flow = pending_flows.get(state)
-    if not flow:
-        return auth_callback_html(
-            callback_type=callback_type,
-            success=False,
-            error="Invalid or expired authorization flow",
-        )
-
-    # exchange_code_fn is async, caller must await
-    # This function is itself called from an async context
-    return _AuthCallbackContinuation(
-        code=code,
-        state=state,
-        flow=flow,
-        provider_type=provider_type,
-        meta_key=meta_key,
-        callback_type=callback_type,
-        exchange_code_fn=exchange_code_fn,
-    )
 
 
 async def complete_auth_callback(

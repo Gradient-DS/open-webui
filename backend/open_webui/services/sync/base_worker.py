@@ -135,8 +135,14 @@ class BaseSyncWorker(ABC):
         name: str,
         content_type: str,
         size: int,
+        file_info: Optional[Dict[str, Any]] = None,
     ) -> dict:
-        """Return provider-specific metadata for the file record."""
+        """Return provider-specific metadata for the file record.
+
+        Args:
+            file_info: The full file_info dict from collection, available for
+                       provider-specific fields (e.g. OneDrive's drive_id).
+        """
         ...
 
     @abstractmethod
@@ -585,6 +591,7 @@ class BaseSyncWorker(ABC):
                 name=name,
                 content_type=content_type,
                 size=len(content),
+                file_info=file_info,
             )
 
             if existing:

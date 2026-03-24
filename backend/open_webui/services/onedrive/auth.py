@@ -39,6 +39,17 @@ def _cleanup_expired_flows():
         del _pending_flows[k]
 
 
+def get_pending_flow(state: str) -> Optional[Dict[str, Any]]:
+    """Get a pending flow by state parameter, or None if not found/expired."""
+    _cleanup_expired_flows()
+    return _pending_flows.get(state)
+
+
+def remove_pending_flow(state: str) -> None:
+    """Remove a pending flow by state parameter."""
+    _pending_flows.pop(state, None)
+
+
 def _generate_pkce() -> tuple[str, str]:
     """Generate PKCE code_verifier and code_challenge (S256)."""
     code_verifier = secrets.token_urlsafe(64)[:128]
