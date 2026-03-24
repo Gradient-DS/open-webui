@@ -45,7 +45,7 @@ jobs:
         run: pip install black
 
       - name: Check backend formatting
-        run: black --check backend/ --exclude ".venv/|/venv/"
+        run: black --check --fast backend/ --exclude ".venv/|/venv/"
 
   backend-tests:
     name: Backend Unit Tests
@@ -61,6 +61,9 @@ jobs:
 
       - name: Set up uv
         uses: astral-sh/setup-uv@v6
+
+      - name: Install system dependencies
+        run: sudo apt-get update && sudo apt-get install -y libmariadb-dev
 
       - name: Install dependencies
         run: |
