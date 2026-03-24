@@ -28,6 +28,7 @@ from open_webui.config import (
     FEATURE_ADMIN_SETTINGS,
     FEATURE_TOOL_SERVERS,
     FEATURE_TERMINAL_SERVERS,
+    FEATURE_BUILTIN_TOOLS,
 )
 
 Feature = Literal[
@@ -50,6 +51,7 @@ Feature = Literal[
     "admin_settings",
     "tool_servers",
     "terminal_servers",
+    "builtin_tools",
 ]
 
 FEATURE_FLAGS: dict[Feature, bool] = {
@@ -72,6 +74,7 @@ FEATURE_FLAGS: dict[Feature, bool] = {
     "admin_settings": FEATURE_ADMIN_SETTINGS,
     "tool_servers": FEATURE_TOOL_SERVERS,
     "terminal_servers": FEATURE_TERMINAL_SERVERS,
+    "builtin_tools": FEATURE_BUILTIN_TOOLS,
 }
 
 

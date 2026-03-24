@@ -589,6 +589,13 @@ async def update_knowledge_access_by_id(
             detail=ERROR_MESSAGES.ACCESS_PROHIBITED,
         )
 
+    # Non-local knowledge bases (e.g. OneDrive) are always private
+    if knowledge.type != "local":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Access grants cannot be modified for non-local knowledge bases.",
+        )
+
     form_data.access_grants = filter_allowed_access_grants(
         request.app.state.config.USER_PERMISSIONS,
         user.id,
@@ -729,13 +736,17 @@ def add_file_to_knowledge_by_id(
         )
 
     # Add content to the vector database
+    warning = None
     try:
-        process_file(
+        result = process_file(
             request,
             ProcessFileForm(file_id=form_data.file_id, collection_name=id),
             user=user,
             db=db,
         )
+
+        if isinstance(result, dict) and result.get("warning"):
+            warning = result["warning"]
 
         # Add file to knowledge base
         Knowledges.add_file_to_knowledge_by_id(
@@ -749,10 +760,13 @@ def add_file_to_knowledge_by_id(
         )
 
     if knowledge:
-        return KnowledgeFilesResponse(
+        response_data = KnowledgeFilesResponse(
             **knowledge.model_dump(),
             files=Knowledges.get_file_metadatas_by_id(knowledge.id, db=db),
-        )
+        ).model_dump()
+        if warning:
+            response_data["warning"] = warning
+        return response_data
     else:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,

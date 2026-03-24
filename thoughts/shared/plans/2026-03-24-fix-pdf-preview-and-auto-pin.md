@@ -171,7 +171,7 @@ $: if (show && fileId) {
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] `npm run build` completes successfully
+- [x] `npm run build` completes successfully
 - [ ] `npm run check` shows no new errors (existing ~8000 errors are pre-existing)
 
 #### Manual Verification:
@@ -220,7 +220,7 @@ This mirrors the existing `pinModelHandler` pattern from `Models.svelte:214-225`
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] `npm run build` completes successfully
+- [x] `npm run build` completes successfully
 
 #### Manual Verification:
 - [ ] Create a new agent → it appears in the sidebar "Models & agents" section

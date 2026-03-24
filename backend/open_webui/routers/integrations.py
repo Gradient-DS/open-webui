@@ -508,7 +508,7 @@ def ingest_documents(
             KnowledgeForm(
                 name=knowledge.name,
                 description=knowledge.description,
-                access_control=collection.access_control,
+                type=knowledge.type,
             ),
         )
 
