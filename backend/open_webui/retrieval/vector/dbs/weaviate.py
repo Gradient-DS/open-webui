@@ -28,7 +28,6 @@ from open_webui.config import (
     WEAVIATE_SKIP_INIT_CHECKS,
 )
 
-
 log = logging.getLogger(__name__)
 
 

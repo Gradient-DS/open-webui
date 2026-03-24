@@ -389,8 +389,7 @@ async def execute_code(
         if CODE_INTERPRETER_BLOCKED_MODULES:
             import textwrap
 
-            blocking_code = textwrap.dedent(
-                f"""
+            blocking_code = textwrap.dedent(f"""
                 import builtins
 
                 BLOCKED_MODULES = {CODE_INTERPRETER_BLOCKED_MODULES}
@@ -406,8 +405,7 @@ async def execute_code(
                     return _real_import(name, globals, locals, fromlist, level)
 
                 builtins.__import__ = restricted_import
-                """
-            )
+                """)
             code = blocking_code + "\n" + code
 
         engine = getattr(

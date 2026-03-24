@@ -15,7 +15,6 @@ from open_webui.models.users import UserModel
 from open_webui.models.knowledge import Knowledges
 from open_webui.config import MICROSOFT_CLIENT_SECRET
 
-
 log = logging.getLogger(__name__)
 router = APIRouter()
 
