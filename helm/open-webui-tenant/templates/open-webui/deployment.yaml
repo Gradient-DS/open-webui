@@ -75,6 +75,13 @@ spec:
                   name: {{ include "open-webui-tenant.fullname" . }}-secrets
                   key: google-client-secret
             {{- end }}
+            {{- if .Values.secrets.googleDriveApiKey }}
+            - name: GOOGLE_DRIVE_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "open-webui-tenant.fullname" . }}-secrets
+                  key: google-drive-api-key
+            {{- end }}
             # Microsoft OAuth (only if configured)
             {{- if .Values.secrets.microsoftClientSecret }}
             - name: MICROSOFT_CLIENT_SECRET
