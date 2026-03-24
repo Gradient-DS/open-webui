@@ -763,7 +763,10 @@ async def lifespan(app: FastAPI):
     start_onedrive_scheduler(app)
 
     # Start Google Drive background sync scheduler
-    from open_webui.services.google_drive.scheduler import start_scheduler as start_google_drive_scheduler
+    from open_webui.services.google_drive.scheduler import (
+        start_scheduler as start_google_drive_scheduler,
+    )
+
     start_google_drive_scheduler(app)
 
     # Start deletion cleanup worker
@@ -864,7 +867,10 @@ async def lifespan(app: FastAPI):
     stop_onedrive_scheduler()
 
     # Stop Google Drive background sync scheduler
-    from open_webui.services.google_drive.scheduler import stop_scheduler as stop_google_drive_scheduler
+    from open_webui.services.google_drive.scheduler import (
+        stop_scheduler as stop_google_drive_scheduler,
+    )
+
     stop_google_drive_scheduler()
 
     if hasattr(app.state, "redis_task_command_listener"):
@@ -2872,9 +2878,15 @@ async def oauth_login_callback(
     if provider == "google":
         state = request.query_params.get("state")
         if state:
-            from open_webui.services.google_drive.auth import _pending_flows as _google_drive_pending_flows
+            from open_webui.services.google_drive.auth import (
+                _pending_flows as _google_drive_pending_flows,
+            )
+
             if state in _google_drive_pending_flows:
-                from open_webui.routers.google_drive_sync import handle_google_drive_auth_callback
+                from open_webui.routers.google_drive_sync import (
+                    handle_google_drive_auth_callback,
+                )
+
                 return await handle_google_drive_auth_callback(request)
 
     return await oauth_manager.handle_callback(request, provider, response, db=db)
