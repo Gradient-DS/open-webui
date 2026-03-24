@@ -1,10 +1,17 @@
+import { WEBUI_BASE_URL } from '$lib/constants';
+
 // Google Drive Picker API configuration
 let API_KEY = '';
 let CLIENT_ID = '';
 
 // Function to fetch credentials from backend config
 async function getCredentials() {
-	const response = await fetch('/api/config');
+	const response = await fetch(`${WEBUI_BASE_URL}/api/config`, {
+		headers: {
+			'Content-Type': 'application/json'
+		},
+		credentials: 'include'
+	});
 	if (!response.ok) {
 		throw new Error('Failed to fetch Google Drive credentials');
 	}
@@ -95,13 +102,94 @@ export const getAuthToken = async () => {
 	return oauthToken;
 };
 
-const initialize = async () => {
+export const clearGoogleDriveToken = () => {
+	oauthToken = null;
+};
+
+export const initialize = async () => {
 	if (!initialized) {
 		await getCredentials();
 		validateCredentials();
 		await Promise.all([loadGoogleDriveApi(), loadGoogleAuthApi()]);
 		initialized = true;
 	}
+};
+
+export interface KnowledgePickerItem {
+	type: 'file' | 'folder';
+	id: string;
+	name: string;
+	path: string;
+	mimeType: string;
+}
+
+export interface KnowledgePickerResult {
+	items: KnowledgePickerItem[];
+	accessToken: string;
+}
+
+export const createKnowledgePicker = (): Promise<KnowledgePickerResult | null> => {
+	return new Promise(async (resolve, reject) => {
+		try {
+			await initialize();
+			const token = await getAuthToken();
+			if (!token) {
+				throw new Error('Unable to get OAuth token');
+			}
+
+			const SUPPORTED_MIME_TYPES = [
+				'application/pdf',
+				'text/plain',
+				'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+				'application/vnd.google-apps.document',
+				'application/vnd.google-apps.spreadsheet',
+				'application/vnd.google-apps.presentation',
+				'application/vnd.google-apps.folder'
+			].join(',');
+
+			// Files view (documents + folders visible)
+			const filesView = new google.picker.DocsView()
+				.setIncludeFolders(true)
+				.setSelectFolderEnabled(false)
+				.setMimeTypes(SUPPORTED_MIME_TYPES);
+
+			// Dedicated folder selection view
+			const folderView = new google.picker.DocsView()
+				.setIncludeFolders(true)
+				.setSelectFolderEnabled(true)
+				.setMimeTypes('application/vnd.google-apps.folder');
+
+			const picker = new google.picker.PickerBuilder()
+				.enableFeature(google.picker.Feature.MULTISELECT_ENABLED)
+				.addView(filesView)
+				.addView(folderView)
+				.setOAuthToken(token)
+				.setDeveloperKey(API_KEY)
+				.setCallback((data: any) => {
+					if (data[google.picker.Response.ACTION] === google.picker.Action.PICKED) {
+						const docs = data[google.picker.Response.DOCUMENTS];
+						const items: KnowledgePickerItem[] = docs.map((doc: any) => {
+							const mimeType = doc[google.picker.Document.MIME_TYPE];
+							return {
+								type: mimeType === 'application/vnd.google-apps.folder' ? 'folder' : 'file',
+								id: doc[google.picker.Document.ID],
+								name: doc[google.picker.Document.NAME],
+								path: doc[google.picker.Document.URL] || '',
+								mimeType
+							};
+						});
+						resolve({ items, accessToken: token as string });
+					} else if (data[google.picker.Response.ACTION] === google.picker.Action.CANCEL) {
+						resolve(null);
+					}
+				})
+				.build();
+			picker.setVisible(true);
+		} catch (error) {
+			console.error('Google Drive Knowledge Picker error:', error);
+			reject(error);
+		}
+	});
 };
 
 export const createPicker = () => {

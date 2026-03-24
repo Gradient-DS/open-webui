@@ -312,9 +312,7 @@ async def accept_invite(
             key="token",
             value=session_token,
             expires=(
-                datetime.datetime.fromtimestamp(
-                    expires_at, datetime.timezone.utc
-                )
+                datetime.datetime.fromtimestamp(expires_at, datetime.timezone.utc)
                 if expires_at
                 else None
             ),

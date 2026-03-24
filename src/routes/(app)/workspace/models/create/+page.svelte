@@ -14,6 +14,7 @@
 	});
 	import { createNewModel, getModelById } from '$lib/apis/models';
 	import { getModels } from '$lib/apis';
+	import { updateUserSettings } from '$lib/apis/users';
 
 	import ModelEditor from '$lib/components/workspace/Models/ModelEditor.svelte';
 
@@ -59,6 +60,15 @@
 						$config?.features?.enable_direct_connections && ($settings?.directConnections ?? null)
 					)
 				);
+
+				// Auto-pin the newly created agent for the creator
+				const pinnedModels = $settings?.pinnedModels ?? [];
+				if (!pinnedModels.includes(modelInfo.id)) {
+					const updatedPinned = [...new Set([...pinnedModels, modelInfo.id])];
+					settings.set({ ...$settings, pinnedModels: updatedPinned });
+					await updateUserSettings(localStorage.token, { ui: $settings });
+				}
+
 				toast.success($i18n.t('Model created successfully!'));
 				await goto('/workspace/models');
 			}

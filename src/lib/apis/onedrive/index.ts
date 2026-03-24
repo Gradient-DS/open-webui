@@ -1,5 +1,13 @@
-import { WEBUI_API_BASE_URL } from '$lib/constants';
+import { createSyncApi } from '$lib/apis/sync';
 
+export type {
+	SyncStatusResponse,
+	FailedFile,
+	TokenStatusResponse,
+	SyncErrorType
+} from '$lib/apis/sync';
+
+// Provider-specific types (OneDrive includes drive_id)
 export interface SyncFolderRequest {
 	knowledge_id: string;
 	drive_id: string;
@@ -7,25 +15,6 @@ export interface SyncFolderRequest {
 	folder_path: string;
 	access_token: string;
 	user_token: string;
-}
-
-export type SyncErrorType = 'timeout' | 'empty_content' | 'processing_error' | 'download_error';
-
-export interface FailedFile {
-	filename: string;
-	error_type: SyncErrorType;
-	error_message: string;
-}
-
-export interface SyncStatusResponse {
-	knowledge_id: string;
-	status: 'idle' | 'syncing' | 'completed' | 'completed_with_errors' | 'failed' | 'cancelled';
-	progress_current?: number;
-	progress_total?: number;
-	last_sync_at?: number;
-	error?: string;
-	source_count?: number;
-	failed_files?: FailedFile[];
 }
 
 export interface SyncItem {
@@ -43,10 +32,24 @@ export interface SyncItemsRequest {
 	user_token: string;
 }
 
+// Create API instance with OneDrive base path
+const api = createSyncApi('onedrive');
+
+// Re-export with original function names for backward compatibility
+export const startOneDriveSyncItems = api.startSyncItems;
+export const getSyncStatus = api.getSyncStatus;
+export const cancelSync = api.cancelSync;
+export const getSyncedCollections = api.getSyncedCollections;
+export const getTokenStatus = api.getTokenStatus;
+export const removeSource = api.removeSource;
+export const revokeToken = api.revokeToken;
+
+// Legacy single-folder sync (OneDrive-specific, kept for backward compatibility)
 export async function startOneDriveSync(
 	token: string,
 	request: SyncFolderRequest
 ): Promise<{ message: string; knowledge_id: string }> {
+	const { WEBUI_API_BASE_URL } = await import('$lib/constants');
 	const res = await fetch(`${WEBUI_API_BASE_URL}/onedrive/sync`, {
 		method: 'POST',
 		headers: {
@@ -61,143 +64,5 @@ export async function startOneDriveSync(
 		throw new Error(error.detail || 'Failed to start sync');
 	}
 
-	return res.json();
-}
-
-export async function startOneDriveSyncItems(
-	token: string,
-	request: SyncItemsRequest
-): Promise<{ message: string; knowledge_id: string }> {
-	const res = await fetch(`${WEBUI_API_BASE_URL}/onedrive/sync/items`, {
-		method: 'POST',
-		headers: {
-			'Content-Type': 'application/json',
-			Authorization: `Bearer ${token}`
-		},
-		body: JSON.stringify(request)
-	});
-
-	if (!res.ok) {
-		const error = await res.json();
-		throw new Error(error.detail || 'Failed to start OneDrive sync');
-	}
-
-	return res.json();
-}
-
-export async function getSyncStatus(
-	token: string,
-	knowledgeId: string
-): Promise<SyncStatusResponse> {
-	const res = await fetch(`${WEBUI_API_BASE_URL}/onedrive/sync/${knowledgeId}`, {
-		headers: {
-			Authorization: `Bearer ${token}`
-		}
-	});
-
-	if (!res.ok) {
-		const error = await res.json();
-		throw new Error(error.detail || 'Failed to get sync status');
-	}
-
-	return res.json();
-}
-
-export async function cancelSync(
-	token: string,
-	knowledgeId: string
-): Promise<{ message: string; knowledge_id: string }> {
-	const res = await fetch(`${WEBUI_API_BASE_URL}/onedrive/sync/${knowledgeId}/cancel`, {
-		method: 'POST',
-		headers: {
-			Authorization: `Bearer ${token}`
-		}
-	});
-
-	if (!res.ok) {
-		const error = await res.json();
-		throw new Error(error.detail || 'Failed to cancel sync');
-	}
-
-	return res.json();
-}
-
-export async function getSyncedCollections(
-	token: string
-): Promise<Array<{ id: string; name: string; sync_info: Record<string, unknown> }>> {
-	const res = await fetch(`${WEBUI_API_BASE_URL}/onedrive/synced-collections`, {
-		headers: {
-			Authorization: `Bearer ${token}`
-		}
-	});
-
-	if (!res.ok) {
-		const error = await res.json();
-		throw new Error(error.detail || 'Failed to get synced collections');
-	}
-
-	return res.json();
-}
-
-// ──────────────────────────────────────────────────────────────────────
-// Background Sync OAuth API
-// ──────────────────────────────────────────────────────────────────────
-
-export interface TokenStatusResponse {
-	has_token: boolean;
-	is_expired?: boolean;
-	needs_reauth?: boolean;
-	token_stored_at?: number;
-}
-
-export async function getTokenStatus(
-	token: string,
-	knowledgeId: string
-): Promise<TokenStatusResponse> {
-	const res = await fetch(`${WEBUI_API_BASE_URL}/onedrive/auth/token-status/${knowledgeId}`, {
-		method: 'GET',
-		headers: {
-			'Content-Type': 'application/json',
-			Authorization: `Bearer ${token}`
-		}
-	});
-	if (!res.ok) throw new Error(await res.text());
-	return res.json();
-}
-
-export async function removeSource(
-	token: string,
-	knowledgeId: string,
-	itemId: string
-): Promise<{ message: string; source_name: string; files_removed: number }> {
-	const res = await fetch(`${WEBUI_API_BASE_URL}/onedrive/sync/${knowledgeId}/sources/remove`, {
-		method: 'POST',
-		headers: {
-			'Content-Type': 'application/json',
-			Authorization: `Bearer ${token}`
-		},
-		body: JSON.stringify({ item_id: itemId })
-	});
-
-	if (!res.ok) {
-		const error = await res.json();
-		throw new Error(error.detail || 'Failed to remove source');
-	}
-
-	return res.json();
-}
-
-export async function revokeToken(
-	token: string,
-	knowledgeId: string
-): Promise<{ revoked: boolean }> {
-	const res = await fetch(`${WEBUI_API_BASE_URL}/onedrive/auth/revoke/${knowledgeId}`, {
-		method: 'POST',
-		headers: {
-			'Content-Type': 'application/json',
-			Authorization: `Bearer ${token}`
-		}
-	});
-	if (!res.ok) throw new Error(await res.text());
 	return res.json();
 }

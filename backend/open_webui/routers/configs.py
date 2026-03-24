@@ -158,7 +158,11 @@ class ToolServersConfigForm(BaseModel):
 
 
 @router.get("/tool_servers", response_model=ToolServersConfigForm)
-async def get_tool_servers_config(request: Request, user=Depends(get_admin_user), _=Depends(require_feature("tool_servers"))):
+async def get_tool_servers_config(
+    request: Request,
+    user=Depends(get_admin_user),
+    _=Depends(require_feature("tool_servers")),
+):
     return {
         "TOOL_SERVER_CONNECTIONS": request.app.state.config.TOOL_SERVER_CONNECTIONS,
     }
@@ -240,7 +244,11 @@ class TerminalServersConfigForm(BaseModel):
 
 
 @router.get("/terminal_servers")
-async def get_terminal_servers_config(request: Request, user=Depends(get_admin_user), _=Depends(require_feature("terminal_servers"))):
+async def get_terminal_servers_config(
+    request: Request,
+    user=Depends(get_admin_user),
+    _=Depends(require_feature("terminal_servers")),
+):
     return {
         "TERMINAL_SERVER_CONNECTIONS": request.app.state.config.TERMINAL_SERVER_CONNECTIONS,
     }
@@ -266,7 +274,10 @@ async def set_terminal_servers_config(
 
 @router.post("/tool_servers/verify")
 async def verify_tool_servers_config(
-    request: Request, form_data: ToolServerConnection, user=Depends(get_admin_user), _=Depends(require_feature("tool_servers")),
+    request: Request,
+    form_data: ToolServerConnection,
+    user=Depends(get_admin_user),
+    _=Depends(require_feature("tool_servers")),
 ):
     """
     Verify the connection to the tool server.

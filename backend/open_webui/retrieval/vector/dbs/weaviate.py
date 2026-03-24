@@ -28,7 +28,6 @@ from open_webui.config import (
     WEAVIATE_SKIP_INIT_CHECKS,
 )
 
-
 log = logging.getLogger(__name__)
 
 
@@ -166,10 +165,12 @@ class WeaviateClient(VectorDBBase):
                 ),
                 # OneDrive metadata
                 weaviate.classes.config.Property(
-                    name="onedrive_item_id", data_type=weaviate.classes.config.DataType.TEXT
+                    name="onedrive_item_id",
+                    data_type=weaviate.classes.config.DataType.TEXT,
                 ),
                 weaviate.classes.config.Property(
-                    name="onedrive_drive_id", data_type=weaviate.classes.config.DataType.TEXT
+                    name="onedrive_drive_id",
+                    data_type=weaviate.classes.config.DataType.TEXT,
                 ),
             ],
         )
@@ -181,7 +182,9 @@ class WeaviateClient(VectorDBBase):
                 self._create_collection(sane_collection_name)
             except UnexpectedStatusCodeError as e:
                 if "already exists" in str(e):
-                    log.debug("Collection %s created by another thread", sane_collection_name)
+                    log.debug(
+                        "Collection %s created by another thread", sane_collection_name
+                    )
                 else:
                     raise
 
@@ -198,9 +201,7 @@ class WeaviateClient(VectorDBBase):
                 properties = {"text": item["text"]}
                 if item["metadata"]:
                     clean_metadata = _sanitize_metadata_keys(
-                        _make_json_serializable(
-                            process_metadata(item["metadata"])
-                        )
+                        _make_json_serializable(process_metadata(item["metadata"]))
                     )
                     clean_metadata.pop("text", None)
                     properties.update(clean_metadata)
@@ -222,9 +223,7 @@ class WeaviateClient(VectorDBBase):
                 properties = {"text": item["text"]}
                 if item["metadata"]:
                     clean_metadata = _sanitize_metadata_keys(
-                        _make_json_serializable(
-                            process_metadata(item["metadata"])
-                        )
+                        _make_json_serializable(process_metadata(item["metadata"]))
                     )
                     clean_metadata.pop("text", None)
                     properties.update(clean_metadata)

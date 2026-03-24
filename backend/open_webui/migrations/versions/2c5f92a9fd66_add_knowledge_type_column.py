@@ -38,26 +38,18 @@ def upgrade():
         dialect = conn.dialect.name
 
         if dialect == "sqlite":
-            conn.execute(
-                sa.text(
-                    """
+            conn.execute(sa.text("""
                     UPDATE knowledge
                     SET type = 'onedrive'
                     WHERE json_extract(meta, '$.onedrive_sync') IS NOT NULL
-                    """
-                )
-            )
+                    """))
         else:
             # PostgreSQL
-            conn.execute(
-                sa.text(
-                    """
+            conn.execute(sa.text("""
                     UPDATE knowledge
                     SET type = 'onedrive'
                     WHERE meta::jsonb ? 'onedrive_sync'
-                    """
-                )
-            )
+                    """))
 
 
 def downgrade():

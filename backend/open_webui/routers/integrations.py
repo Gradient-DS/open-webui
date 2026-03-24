@@ -182,7 +182,9 @@ def _delete_old_vectors(knowledge_id: str, file_id: str):
             filter={"file_id": file_id},
         )
     except Exception:
-        log.warning(f"Failed to delete old vectors for {file_id}, proceeding with insert")
+        log.warning(
+            f"Failed to delete old vectors for {file_id}, proceeding with insert"
+        )
 
 
 def _get_loader_kwargs(request: Request) -> dict:
@@ -220,7 +222,9 @@ def _get_loader_kwargs(request: Request) -> dict:
     }
 
 
-def _build_base_metadata(doc: IngestDocumentBase, file_id: str, provider: str, user_id: str) -> dict:
+def _build_base_metadata(
+    doc: IngestDocumentBase, file_id: str, provider: str, user_id: str
+) -> dict:
     """Build common metadata dict for LangChain Documents."""
     return {
         "name": doc.title or doc.filename,
@@ -270,7 +274,11 @@ def _process_parsed_text_document(
             request=request,
             docs=[lc_doc],
             collection_name=knowledge_id,
-            metadata={"file_id": file_id, "name": doc.title or doc.filename, "hash": text_hash},
+            metadata={
+                "file_id": file_id,
+                "name": doc.title or doc.filename,
+                "hash": text_hash,
+            },
             add=True,
             split=True,
         )
@@ -278,7 +286,12 @@ def _process_parsed_text_document(
     except Exception as e:
         log.exception(f"Failed to store document {doc.source_id} in vector DB")
         Files.update_file_data_by_id(file_id, {"status": "error", "error": str(e)})
-        return {"source_id": doc.source_id, "file_id": file_id, "status": "error", "error": str(e)}
+        return {
+            "source_id": doc.source_id,
+            "file_id": file_id,
+            "status": "error",
+            "error": str(e),
+        }
 
     return {"source_id": doc.source_id, "file_id": file_id, "status": status}
 
@@ -311,8 +324,7 @@ def _process_chunked_text_document(
     base_metadata = _build_base_metadata(doc, file_id, provider, user_id)
 
     lc_docs = [
-        Document(page_content=chunk, metadata=base_metadata)
-        for chunk in doc.chunks
+        Document(page_content=chunk, metadata=base_metadata) for chunk in doc.chunks
     ]
 
     try:
@@ -320,7 +332,11 @@ def _process_chunked_text_document(
             request=request,
             docs=lc_docs,
             collection_name=knowledge_id,
-            metadata={"file_id": file_id, "name": doc.title or doc.filename, "hash": text_hash},
+            metadata={
+                "file_id": file_id,
+                "name": doc.title or doc.filename,
+                "hash": text_hash,
+            },
             add=True,
             split=False,
         )
@@ -328,7 +344,12 @@ def _process_chunked_text_document(
     except Exception as e:
         log.exception(f"Failed to store chunked document {doc.source_id} in vector DB")
         Files.update_file_data_by_id(file_id, {"status": "error", "error": str(e)})
-        return {"source_id": doc.source_id, "file_id": file_id, "status": "error", "error": str(e)}
+        return {
+            "source_id": doc.source_id,
+            "file_id": file_id,
+            "status": "error",
+            "error": str(e),
+        }
 
     return {"source_id": doc.source_id, "file_id": file_id, "status": status}
 
@@ -353,7 +374,12 @@ def _process_full_document(
         )
     except Exception as e:
         log.exception(f"Failed to upload file {doc.filename}")
-        return {"source_id": doc.source_id, "file_id": file_id, "status": "error", "error": str(e)}
+        return {
+            "source_id": doc.source_id,
+            "file_id": file_id,
+            "status": "error",
+            "error": str(e),
+        }
 
     # Extract text using Loader
     try:
@@ -367,7 +393,12 @@ def _process_full_document(
         extracted_text = "\n\n".join(d.page_content for d in extracted_docs)
     except Exception as e:
         log.exception(f"Failed to extract text from {doc.filename}")
-        return {"source_id": doc.source_id, "file_id": file_id, "status": "error", "error": str(e)}
+        return {
+            "source_id": doc.source_id,
+            "file_id": file_id,
+            "status": "error",
+            "error": str(e),
+        }
 
     status = _create_or_update_file_record(
         file_id=file_id,
@@ -394,7 +425,11 @@ def _process_full_document(
             request=request,
             docs=extracted_docs,
             collection_name=knowledge_id,
-            metadata={"file_id": file_id, "name": doc.title or doc.filename, "hash": text_hash},
+            metadata={
+                "file_id": file_id,
+                "name": doc.title or doc.filename,
+                "hash": text_hash,
+            },
             add=True,
             split=True,
         )
@@ -402,7 +437,12 @@ def _process_full_document(
     except Exception as e:
         log.exception(f"Failed to store full document {doc.source_id} in vector DB")
         Files.update_file_data_by_id(file_id, {"status": "error", "error": str(e)})
-        return {"source_id": doc.source_id, "file_id": file_id, "status": "error", "error": str(e)}
+        return {
+            "source_id": doc.source_id,
+            "file_id": file_id,
+            "status": "error",
+            "error": str(e),
+        }
 
     return {"source_id": doc.source_id, "file_id": file_id, "status": status}
 
@@ -433,10 +473,17 @@ def ingest_documents(
         )
 
     # Validate data_type
-    collection = IngestCollection(**form_data.collection) if isinstance(form_data.collection, dict) else form_data.collection
+    collection = (
+        IngestCollection(**form_data.collection)
+        if isinstance(form_data.collection, dict)
+        else form_data.collection
+    )
     data_type = collection.data_type
     if data_type not in VALID_DATA_TYPES:
-        raise HTTPException(400, f"Invalid data_type '{data_type}'. Must be one of: {', '.join(sorted(VALID_DATA_TYPES))}")
+        raise HTTPException(
+            400,
+            f"Invalid data_type '{data_type}'. Must be one of: {', '.join(sorted(VALID_DATA_TYPES))}",
+        )
 
     # Find or create KB
     knowledge = _find_kb_by_source_id(provider, collection.source_id)
@@ -446,7 +493,9 @@ def ingest_documents(
         )
     else:
         # Validate data_type consistency with existing KB
-        existing_data_type = (knowledge.meta or {}).get("integration", {}).get("data_type")
+        existing_data_type = (
+            (knowledge.meta or {}).get("integration", {}).get("data_type")
+        )
         if existing_data_type and existing_data_type != data_type:
             raise HTTPException(
                 400,
@@ -459,7 +508,7 @@ def ingest_documents(
             KnowledgeForm(
                 name=knowledge.name,
                 description=knowledge.description,
-                access_control=collection.access_control,
+                type=knowledge.type,
             ),
         )
 
@@ -467,7 +516,9 @@ def ingest_documents(
     max_files = provider_config.get("max_files_per_kb", 250)
     current_files = Knowledges.get_files_by_id(knowledge.id)
     existing_ids = {f.id for f in current_files} if current_files else set()
-    new_doc_ids = {f"{provider}-{doc.get('source_id', '')}" for doc in form_data.documents}
+    new_doc_ids = {
+        f"{provider}-{doc.get('source_id', '')}" for doc in form_data.documents
+    }
     net_new = len(new_doc_ids - existing_ids)
     if len(existing_ids) + net_new > max_files:
         raise HTTPException(
@@ -483,7 +534,10 @@ def ingest_documents(
             try:
                 doc = ParsedTextDocument(**raw_doc)
             except Exception as e:
-                raise HTTPException(400, f"Document '{raw_doc.get('source_id', '?')}' invalid for parsed_text: {e}")
+                raise HTTPException(
+                    400,
+                    f"Document '{raw_doc.get('source_id', '?')}' invalid for parsed_text: {e}",
+                )
             result = _process_parsed_text_document(
                 request=request,
                 knowledge_id=knowledge.id,
@@ -498,7 +552,10 @@ def ingest_documents(
             try:
                 doc = ChunkedTextDocument(**raw_doc)
             except Exception as e:
-                raise HTTPException(400, f"Document '{raw_doc.get('source_id', '?')}' invalid for chunked_text: {e}")
+                raise HTTPException(
+                    400,
+                    f"Document '{raw_doc.get('source_id', '?')}' invalid for chunked_text: {e}",
+                )
             result = _process_chunked_text_document(
                 request=request,
                 knowledge_id=knowledge.id,
@@ -519,7 +576,10 @@ def ingest_documents(
             try:
                 doc = FullDocument(**raw_doc)
             except Exception as e:
-                raise HTTPException(400, f"Document '{raw_doc.get('source_id', '?')}' invalid for full_documents: {e}")
+                raise HTTPException(
+                    400,
+                    f"Document '{raw_doc.get('source_id', '?')}' invalid for full_documents: {e}",
+                )
 
             upload = file_lookup.get(doc.filename)
             if not upload:

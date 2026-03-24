@@ -282,6 +282,7 @@ type Config = {
 		enable_login_form: boolean;
 		enable_web_search?: boolean;
 		enable_google_drive_integration: boolean;
+		enable_google_drive_sync?: boolean;
 		enable_onedrive_integration: boolean;
 		enable_image_generation: boolean;
 		enable_admin_export: boolean;
@@ -313,8 +314,14 @@ type Config = {
 		feature_admin_settings?: boolean;
 		feature_admin_settings_tabs?: string[];
 		feature_chat_controls_sections?: string[];
+		feature_skills?: boolean;
+		feature_builtin_tools?: boolean;
 		feature_tool_servers?: boolean;
 		feature_terminal_servers?: boolean;
+		enable_channels?: boolean;
+		enable_notes?: boolean;
+		enable_code_interpreter?: boolean;
+		enable_code_execution?: boolean;
 	};
 	oauth: {
 		providers: {
