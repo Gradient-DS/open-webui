@@ -565,8 +565,8 @@ class KnowledgeTable:
                     .filter(KnowledgeFile.knowledge_id == knowledge_id)
                 )
 
-                # Default sort: updated_at descending
-                primary_sort = File.updated_at.desc()
+                # Default sort: filename ascending (alphabetical)
+                primary_sort = File.filename.asc()
 
                 if filter:
                     query_key = filter.get("query")
@@ -748,7 +748,7 @@ class KnowledgeTable:
                 knowledge = self.get_knowledge_by_id(id=id, db=db)
                 db.query(Knowledge).filter_by(id=id).update(
                     {
-                        **form_data.model_dump(exclude={"access_grants"}),
+                        **form_data.model_dump(exclude={"access_grants"}, exclude_none=True),
                         "updated_at": int(time.time()),
                     }
                 )

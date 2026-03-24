@@ -25,6 +25,7 @@ from open_webui.config import (
     FILE_PROCESSING_MAX_CONCURRENT,
 )
 from open_webui.retrieval.vector.factory import VECTOR_DB_CLIENT
+from open_webui.internal.db import get_db
 from open_webui.services.deletion import DeletionService
 
 log = logging.getLogger(__name__)
@@ -484,24 +485,27 @@ class OneDriveSyncWorker:
                 if knowledge:
                     from open_webui.models.knowledge import KnowledgeForm
 
-                    # Create access control structure
-                    access_control = {
-                        "read": {
-                            "user_ids": permitted_user_ids,
-                            "group_ids": [],
-                        },
-                        "write": {
-                            "user_ids": [self.user_id],  # Only owner can write
-                            "group_ids": [],
-                        },
-                    }
+                    # Build access_grants list (new upstream format)
+                    access_grants = []
+                    for user_id in permitted_user_ids:
+                        access_grants.append({
+                            "principal_type": "user",
+                            "principal_id": user_id,
+                            "permission": "read",
+                        })
+                    access_grants.append({
+                        "principal_type": "user",
+                        "principal_id": self.user_id,
+                        "permission": "write",
+                    })
 
                     Knowledges.update_knowledge_by_id(
                         self.knowledge_id,
                         KnowledgeForm(
                             name=knowledge.name,
                             description=knowledge.description,
-                            access_control=access_control,
+                            type=knowledge.type,
+                            access_grants=access_grants,
                         ),
                     )
 
@@ -1208,18 +1212,25 @@ class OneDriveSyncWorker:
                         # Copy new vectors via direct function call
                         try:
                             from open_webui.routers.retrieval import (
-                                process_file,
+                                process_file as _process_file,
                                 ProcessFileForm,
                             )
 
+                            def _call_propagate(form_data):
+                                with get_db() as db:
+                                    return _process_file(
+                                        self._make_request(),
+                                        form_data,
+                                        user=self._get_user(),
+                                        db=db,
+                                    )
+
                             await asyncio.to_thread(
-                                process_file,
-                                self._make_request(),
+                                _call_propagate,
                                 ProcessFileForm(
                                     file_id=file_id,
                                     collection_name=kf.knowledge_id,
                                 ),
-                                user=self._get_user(),
                             )
                         except Exception as e:
                             log.warning(
@@ -1265,14 +1276,16 @@ class OneDriveSyncWorker:
             from open_webui.routers.retrieval import process_file, ProcessFileForm
             from fastapi import HTTPException
 
-            process_file(
-                self._make_request(),
-                ProcessFileForm(
-                    file_id=file_id,
-                    collection_name=self.knowledge_id,
-                ),
-                user=self._get_user(),
-            )
+            with get_db() as db:
+                process_file(
+                    self._make_request(),
+                    ProcessFileForm(
+                        file_id=file_id,
+                        collection_name=self.knowledge_id,
+                    ),
+                    user=self._get_user(),
+                    db=db,
+                )
             return None  # Success
         except HTTPException as e:
             detail = str(e.detail) if e.detail else ""
@@ -1325,16 +1338,19 @@ class OneDriveSyncWorker:
         request = self._make_request()
         user = self._get_user()
 
+        def _call_process_file(form_data):
+            """Wrapper that provides a fresh DB session for direct process_file calls."""
+            with get_db() as db:
+                return process_file(request, form_data, user=user, db=db)
+
         try:
             # Step 1: Process file content (extract text, create embeddings in file-{id} collection)
             # Must run in a thread because process_file -> save_docs_to_vector_db uses
             # asyncio.run() internally, which fails if called from a running event loop.
             try:
                 await asyncio.to_thread(
-                    process_file,
-                    request,
+                    _call_process_file,
                     ProcessFileForm(file_id=file_id),
-                    user=user,
                 )
                 log.info(f"Successfully extracted content from file {file_id}")
             except ValueError as e:
@@ -1371,13 +1387,11 @@ class OneDriveSyncWorker:
             # Step 2: Add processed content to knowledge base collection
             try:
                 await asyncio.to_thread(
-                    process_file,
-                    request,
+                    _call_process_file,
                     ProcessFileForm(
                         file_id=file_id,
                         collection_name=self.knowledge_id,
                     ),
-                    user=user,
                 )
                 log.info(
                     f"Successfully added file {file_id} to knowledge base {self.knowledge_id}"

@@ -340,9 +340,9 @@
 					console.warn('File upload warning:', uploadedFile.error);
 					toast.warning(uploadedFile.error);
 					fileItems = fileItems.filter((file) => file.id !== uploadedFile.id);
-				} else {
-					await addFileHandler(uploadedFile.id);
 				}
+				// Don't call addFileHandler here — Socket.IO 'file:status' event
+				// will trigger it when background processing completes
 			} else {
 				toast.error($i18n.t('Failed to upload file.'));
 			}
@@ -982,7 +982,67 @@
 
 	// ===== End OneDrive sync handlers =====
 
-	const addFileHandler = async (fileId) => {
+	let successfulFileCount = 0;
+	let fileStatusQueue: Promise<void> = Promise.resolve();
+
+	const showBatchedSuccessToast = () => {
+		if (successfulFileCount > 0) {
+			const count = successfulFileCount;
+			successfulFileCount = 0;
+			toast.success(
+				count === 1
+					? $i18n.t('File added successfully.')
+					: $i18n.t('{{count}} files added successfully.', { count: count.toString() })
+			);
+			init();
+		}
+	};
+
+	// Serialize socket events via a queue to prevent concurrent state mutations
+	const handleFileStatus = (data: {
+		file_id: string;
+		status: string;
+		error?: string;
+		collection_name?: string;
+	}) => {
+		fileStatusQueue = fileStatusQueue.then(() => _processFileStatus(data));
+	};
+
+	const _processFileStatus = async (data: {
+		file_id: string;
+		status: string;
+		error?: string;
+		collection_name?: string;
+	}) => {
+		if (!fileItems) return;
+
+		const idx = fileItems.findIndex((f) => f.id === data.file_id);
+		if (idx < 0) return;
+
+		if (data.status === 'completed') {
+			fileItems[idx].status = 'uploaded';
+			await addFileHandler(data.file_id, { batch: true });
+			successfulFileCount++;
+		} else if (data.status === 'failed') {
+			fileItems[idx].status = 'error';
+			fileItems[idx].error = data.error || 'Processing failed';
+			toast.error(
+				$i18n.t('File processing failed: {{error}}', {
+					error: data.error || 'Unknown error'
+				})
+			);
+			fileItems = fileItems.filter((file) => file.id !== data.file_id);
+		}
+
+		fileItems = fileItems;
+
+		const stillUploading = fileItems.some((f) => f.status === 'uploading');
+		if (!stillUploading) {
+			showBatchedSuccessToast();
+		}
+	};
+
+	const addFileHandler = async (fileId, { batch = false } = {}) => {
 		const res = await addFileToKnowledgeById(localStorage.token, id, fileId).catch((e) => {
 			toast.error(`${e}`);
 			return null;
@@ -991,10 +1051,15 @@
 		if (res) {
 			if (res.warning) {
 				toast.warning(res.warning);
+			}
+			if (batch) {
+				// Success toast + init() deferred to showBatchedSuccessToast
 			} else {
 				toast.success($i18n.t('File added successfully.'));
+				if (res.knowledge) {
+					knowledge = res.knowledge;
+				}
 			}
-			init();
 		} else {
 			toast.error($i18n.t('Failed to add file.'));
 			fileItems = fileItems.filter((file) => file.id !== fileId);
@@ -1174,9 +1239,7 @@
 						}
 					);
 				} else {
-					toast.info($i18n.t('Uploading file...'));
 					uploadFileHandler(item.getAsFile());
-					toast.success($i18n.t('File uploaded!'));
 				}
 			}
 		};
@@ -1289,6 +1352,8 @@
 		// Listen for OneDrive file processing/added events for progressive UI updates
 		$socket?.on('onedrive:file:processing', handleOneDriveFileProcessing);
 		$socket?.on('onedrive:file:added', handleOneDriveFileAdded);
+
+		$socket?.on('file:status', handleFileStatus);
 	});
 
 	onDestroy(() => {
@@ -1305,6 +1370,8 @@
 		// Clean up OneDrive file processing/added listeners
 		$socket?.off('onedrive:file:processing', handleOneDriveFileProcessing);
 		$socket?.off('onedrive:file:added', handleOneDriveFileAdded);
+
+		$socket?.off('file:status', handleFileStatus);
 	});
 
 	const decodeString = (str: string) => {
@@ -1360,9 +1427,10 @@
 	hidden
 	on:change={async () => {
 		if (inputFiles && inputFiles.length > 0) {
-			for (const file of inputFiles) {
-				await uploadFileHandler(file);
-			}
+			const sortedFiles = Array.from(inputFiles).sort((a, b) =>
+				b.name.localeCompare(a.name)
+			);
+			await Promise.all(sortedFiles.map((file) => uploadFileHandler(file)));
 
 			inputFiles = null;
 			const fileInputElement = document.getElementById('files-input');
