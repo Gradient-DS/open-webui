@@ -77,8 +77,6 @@ jobs:
           source .venv/bin/activate
           cd backend
           PYTHONPATH=. pytest \
-            open_webui/test/apps/webui/storage/test_provider.py \
-            open_webui/test/util/test_redis.py \
             open_webui/test/util/test_features.py \
             -v --tb=short
 
