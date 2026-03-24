@@ -203,14 +203,14 @@
 
 		$socket?.on('onedrive:sync:progress', handleSyncProgress);
 		$socket?.on('googledrive:sync:progress', handleGoogleDriveSyncProgress);
+
+		await tick();
+		loaded = true;
 	});
 
 	onDestroy(() => {
 		$socket?.off('onedrive:sync:progress', handleSyncProgress);
 		$socket?.off('googledrive:sync:progress', handleGoogleDriveSyncProgress);
-
-		await tick();
-		loaded = true;
 	});
 </script>
 
