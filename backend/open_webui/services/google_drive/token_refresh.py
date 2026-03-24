@@ -91,7 +91,9 @@ async def _refresh_token(token_data: dict) -> Optional[dict]:
 
     # Calculate expires_at
     if "expires_in" in new_token_data:
-        new_token_data["expires_at"] = int(time.time()) + int(new_token_data["expires_in"])
+        new_token_data["expires_at"] = int(time.time()) + int(
+            new_token_data["expires_in"]
+        )
     new_token_data["issued_at"] = int(time.time())
 
     return new_token_data

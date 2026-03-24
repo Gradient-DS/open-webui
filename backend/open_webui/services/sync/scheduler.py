@@ -114,9 +114,7 @@ class SyncScheduler:
                             kb.id,
                             result["error"],
                         )
-                        self._update_sync_status(
-                            kb.id, "failed", error=result["error"]
-                        )
+                        self._update_sync_status(kb.id, "failed", error=result["error"])
                 else:
                     log.info(
                         "Scheduled sync completed for KB %s: %d files processed",
@@ -125,9 +123,7 @@ class SyncScheduler:
                     )
 
             except Exception:
-                log.exception(
-                    "Unexpected error during scheduled sync of KB %s", kb.id
-                )
+                log.exception("Unexpected error during scheduled sync of KB %s", kb.id)
                 self._update_sync_status(
                     kb.id, "failed", error="Unexpected scheduler error"
                 )
@@ -176,9 +172,7 @@ class SyncScheduler:
         last_sync = sync_info.get("last_sync_at", 0)
         return (now - last_sync) >= interval_seconds
 
-    def _update_sync_status(
-        self, knowledge_id: str, status: str, error: str = None
-    ):
+    def _update_sync_status(self, knowledge_id: str, status: str, error: str = None):
         """Update the sync status in knowledge meta."""
         knowledge = Knowledges.get_knowledge_by_id(id=knowledge_id)
         if not knowledge:

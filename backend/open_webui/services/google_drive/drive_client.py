@@ -80,7 +80,11 @@ class GoogleDriveClient:
                     follow_redirects=follow_redirects,
                 )
 
-                if response.status_code == 401 and not token_refreshed and self._token_provider:
+                if (
+                    response.status_code == 401
+                    and not token_refreshed
+                    and self._token_provider
+                ):
                     log.info("Received 401, attempting token refresh")
                     try:
                         new_token = await self._token_provider()
@@ -100,7 +104,11 @@ class GoogleDriveClient:
 
                 if response.status_code >= 500:
                     wait_time = 2**attempt
-                    log.warning("Server error %d, retrying in %d seconds", response.status_code, wait_time)
+                    log.warning(
+                        "Server error %d, retrying in %d seconds",
+                        response.status_code,
+                        wait_time,
+                    )
                     await asyncio.sleep(wait_time)
                     continue
 
@@ -169,7 +177,9 @@ class GoogleDriveClient:
             items = await self.list_folder_children(current_folder_id)
 
             for item in items:
-                item_path = f"{parent_path}/{item['name']}" if parent_path else item["name"]
+                item_path = (
+                    f"{parent_path}/{item['name']}" if parent_path else item["name"]
+                )
                 item["_relative_path"] = item_path
 
                 if item.get("mimeType") == "application/vnd.google-apps.folder":

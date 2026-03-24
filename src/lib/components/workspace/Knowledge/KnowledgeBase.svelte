@@ -1507,6 +1507,8 @@
 			);
 		}
 
+		// Listen for file processing status events via Socket.IO
+		$socket?.on('file:status', handleFileStatus);
 	});
 
 	onDestroy(() => {
@@ -1521,6 +1523,9 @@
 		for (const { event, handler } of socketHandlers) {
 			$socket?.off(event, handler);
 		}
+
+		// Clean up file status listener
+		$socket?.off('file:status', handleFileStatus);
 
 	});
 

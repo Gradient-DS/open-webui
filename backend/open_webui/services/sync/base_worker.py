@@ -193,14 +193,16 @@ class BaseSyncWorker(ABC):
         from starlette.requests import Request
         from starlette.datastructures import Headers
 
-        return Request({
-            "type": "http",
-            "method": "POST",
-            "path": self.internal_request_path,
-            "query_string": b"",
-            "headers": Headers({}).raw,
-            "app": self.app,
-        })
+        return Request(
+            {
+                "type": "http",
+                "method": "POST",
+                "path": self.internal_request_path,
+                "query_string": b"",
+                "headers": Headers({}).raw,
+                "app": self.app,
+            }
+        )
 
     def _get_user(self):
         """Fetch the user object for process_file access control."""
@@ -249,9 +251,7 @@ class BaseSyncWorker(ABC):
             Knowledges.update_knowledge_meta_by_id(self.knowledge_id, meta)
 
         # Convert failed_files to dicts for serialization
-        failed_files_dicts = (
-            [asdict(f) for f in failed_files] if failed_files else None
-        )
+        failed_files_dicts = [asdict(f) for f in failed_files] if failed_files else None
 
         await emit_sync_progress(
             self.event_prefix,
@@ -382,7 +382,9 @@ class BaseSyncWorker(ABC):
                 error_message=f"Error copying vectors: {str(e)}"[:80],
             )
 
-    async def _process_file_via_api(self, file_id: str, filename: str) -> Optional[FailedFile]:
+    async def _process_file_via_api(
+        self, file_id: str, filename: str
+    ) -> Optional[FailedFile]:
         """Process file by calling the retrieval processing function directly."""
         from open_webui.routers.retrieval import process_file, ProcessFileForm
         from fastapi import HTTPException
@@ -415,11 +417,15 @@ class BaseSyncWorker(ABC):
                     log.debug(
                         f"File {file_id} already has embeddings, skipping to knowledge base addition"
                     )
-                elif e.status_code == 400 and ("No content extracted" in detail or "empty" in detail.lower()):
+                elif e.status_code == 400 and (
+                    "No content extracted" in detail or "empty" in detail.lower()
+                ):
                     log.debug(f"File {file_id} has no extractable content")
                     return None
                 else:
-                    log.debug(f"Failed to process file content {file_id}: {e.status_code} - {detail}")
+                    log.debug(
+                        f"Failed to process file content {file_id}: {e.status_code} - {detail}"
+                    )
                     return FailedFile(
                         filename=filename,
                         error_type=SyncErrorType.PROCESSING_ERROR.value,
@@ -435,7 +441,9 @@ class BaseSyncWorker(ABC):
                         collection_name=self.knowledge_id,
                     ),
                 )
-                log.info(f"Successfully added file {file_id} to knowledge base {self.knowledge_id}")
+                log.info(
+                    f"Successfully added file {file_id} to knowledge base {self.knowledge_id}"
+                )
             except HTTPException as e:
                 detail = str(e.detail) if e.detail else ""
                 if e.status_code == 400 and "Duplicate content" in detail:
@@ -444,11 +452,17 @@ class BaseSyncWorker(ABC):
                     )
                     return None
                 else:
-                    log.debug(f"Failed to add file {file_id} to knowledge base: {e.status_code} - {detail}")
+                    log.debug(
+                        f"Failed to add file {file_id} to knowledge base: {e.status_code} - {detail}"
+                    )
                     return FailedFile(
                         filename=filename,
                         error_type=SyncErrorType.PROCESSING_ERROR.value,
-                        error_message=detail[:100] if detail else "Failed to add to knowledge base",
+                        error_message=(
+                            detail[:100]
+                            if detail
+                            else "Failed to add to knowledge base"
+                        ),
                     )
 
             return None
@@ -460,7 +474,9 @@ class BaseSyncWorker(ABC):
                 error_message=str(e)[:100],
             )
 
-    async def _process_file_info(self, file_info: Dict[str, Any]) -> Optional[FailedFile]:
+    async def _process_file_info(
+        self, file_info: Dict[str, Any]
+    ) -> Optional[FailedFile]:
         """Download and process a single file.
 
         Returns:
@@ -472,7 +488,9 @@ class BaseSyncWorker(ABC):
         source_item_id = file_info.get("source_item_id")
         relative_path = file_info.get("relative_path", name)
 
-        log.info(f"Processing file: {name} (id: {item_id}, relative_path: {relative_path})")
+        log.info(
+            f"Processing file: {name} (id: {item_id}, relative_path: {relative_path})"
+        )
 
         if self._check_cancelled():
             log.info(f"Sync cancelled, skipping file {name}")
@@ -525,12 +543,15 @@ class BaseSyncWorker(ABC):
 
             new_relative_path = file_info.get("relative_path")
             existing_meta = existing.meta or {}
-            if new_relative_path and existing_meta.get("relative_path") != new_relative_path:
+            if (
+                new_relative_path
+                and existing_meta.get("relative_path") != new_relative_path
+            ):
                 existing_meta["relative_path"] = new_relative_path
-                Files.update_file_by_id(
-                    file_id, FileUpdateForm(meta=existing_meta)
+                Files.update_file_by_id(file_id, FileUpdateForm(meta=existing_meta))
+                log.info(
+                    f"Updated {file_id} meta with relative_path: {new_relative_path}"
                 )
-                log.info(f"Updated {file_id} meta with relative_path: {new_relative_path}")
 
             Knowledges.add_file_to_knowledge_by_id(
                 self.knowledge_id, file_id, self.user_id
@@ -658,7 +679,10 @@ class BaseSyncWorker(ABC):
                                 f"Failed to remove old vectors from KB {kf.knowledge_id}: {e}"
                             )
                         try:
-                            from open_webui.routers.retrieval import process_file, ProcessFileForm
+                            from open_webui.routers.retrieval import (
+                                process_file,
+                                ProcessFileForm,
+                            )
 
                             def _call_propagate(form_data):
                                 with get_db() as db:

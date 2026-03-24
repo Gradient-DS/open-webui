@@ -228,14 +228,18 @@ class GoogleDriveSyncWorker(BaseSyncWorker):
                 if email:
                     permitted_emails.add(email.lower())
 
-            log.info(f"Found {len(permitted_emails)} permitted emails from Google Drive")
+            log.info(
+                f"Found {len(permitted_emails)} permitted emails from Google Drive"
+            )
 
             permitted_user_ids = []
             for email in permitted_emails:
                 user = Users.get_user_by_email(email)
                 if user:
                     permitted_user_ids.append(user.id)
-                    log.debug(f"Mapped Google Drive permission for {email} to user {user.id}")
+                    log.debug(
+                        f"Mapped Google Drive permission for {email} to user {user.id}"
+                    )
 
             if permitted_user_ids:
                 if self.user_id not in permitted_user_ids:
@@ -305,14 +309,10 @@ class GoogleDriveSyncWorker(BaseSyncWorker):
                     f"{item_id}: {e.response.status_code}"
                 )
                 return False
-            log.warning(
-                f"Error verifying access to {source_type} {item_id}: {e}"
-            )
+            log.warning(f"Error verifying access to {source_type} {item_id}: {e}")
             return True
         except Exception as e:
-            log.warning(
-                f"Error verifying access to {source_type} {item_id}: {e}"
-            )
+            log.warning(f"Error verifying access to {source_type} {item_id}: {e}")
             return True
 
     async def _handle_revoked_source(self, source: Dict[str, Any]) -> int:
@@ -335,9 +335,7 @@ class GoogleDriveSyncWorker(BaseSyncWorker):
             if file_source_item_id and file_source_item_id != source_item_id:
                 continue
 
-            Knowledges.remove_file_from_knowledge_by_id(
-                self.knowledge_id, file.id
-            )
+            Knowledges.remove_file_from_knowledge_by_id(self.knowledge_id, file.id)
             try:
                 VECTOR_DB_CLIENT.delete(
                     collection_name=self.knowledge_id,
@@ -440,7 +438,8 @@ class GoogleDriveSyncWorker(BaseSyncWorker):
         except Exception as e:
             log.warning(
                 "Changes API failed for source %s: %s, falling back to full sync",
-                source.get("name"), e,
+                source.get("name"),
+                e,
             )
             source["page_token"] = None
             source["folder_map"] = {}

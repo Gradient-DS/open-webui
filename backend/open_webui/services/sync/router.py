@@ -255,9 +255,7 @@ def handle_list_synced_collections(
     for kb in all_knowledge:
         meta = kb.meta or {}
         if meta_key in meta:
-            synced.append(
-                {"id": kb.id, "name": kb.name, "sync_info": meta[meta_key]}
-            )
+            synced.append({"id": kb.id, "name": kb.name, "sync_info": meta[meta_key]})
     return synced
 
 
