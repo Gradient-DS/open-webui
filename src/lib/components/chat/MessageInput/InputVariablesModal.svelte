@@ -22,25 +22,27 @@
 
 	const submitHandler = async () => {
 		// Normalize Windows CRLF (\r\n) to LF (\n) for all string values
-		for (const key of Object.keys(variableValues)) {
-			if (typeof variableValues[key] === 'string') {
-				variableValues[key] = variableValues[key].replace(/\r\n/g, '\n');
+		const normalized = { ...variableValues };
+		for (const key of Object.keys(normalized)) {
+			if (typeof normalized[key] === 'string') {
+				normalized[key] = normalized[key].replace(/\r\n/g, '\n');
 			}
 		}
-		onSave(variableValues);
+		onSave(normalized);
 		show = false;
 	};
 
 	const init = async () => {
 		loading = true;
-		variableValues = {};
+		const newValues = {};
 		for (const variable of Object.keys(variables)) {
 			if (variables[variable]?.default !== undefined) {
-				variableValues[variable] = variables[variable].default;
+				newValues[variable] = variables[variable].default;
 			} else {
-				variableValues[variable] = '';
+				newValues[variable] = '';
 			}
 		}
+		variableValues = newValues;
 		loading = false;
 
 		await tick();

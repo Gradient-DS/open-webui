@@ -589,6 +589,13 @@ async def update_knowledge_access_by_id(
             detail=ERROR_MESSAGES.ACCESS_PROHIBITED,
         )
 
+    # Non-local knowledge bases (e.g. OneDrive) are always private
+    if knowledge.type != "local":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Access grants cannot be modified for non-local knowledge bases.",
+        )
+
     form_data.access_grants = filter_allowed_access_grants(
         request.app.state.config.USER_PERMISSIONS,
         user.id,
