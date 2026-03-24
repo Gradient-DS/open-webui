@@ -151,12 +151,24 @@ data:
   USER_PERMISSIONS_WORKSPACE_PROMPTS_ACCESS: {{ .Values.openWebui.config.userPermissionsWorkspacePromptsAccess | quote }}
   USER_PERMISSIONS_WORKSPACE_TOOLS_ACCESS: {{ .Values.openWebui.config.userPermissionsWorkspaceToolsAccess | quote }}
 
+  # Workspace Sharing (allow users to share with specific groups/individuals)
+  USER_PERMISSIONS_WORKSPACE_MODELS_ALLOW_SHARING: {{ .Values.openWebui.config.userPermissionsWorkspaceModelsAllowSharing | quote }}
+  USER_PERMISSIONS_WORKSPACE_KNOWLEDGE_ALLOW_SHARING: {{ .Values.openWebui.config.userPermissionsWorkspaceKnowledgeAllowSharing | quote }}
+  USER_PERMISSIONS_WORKSPACE_PROMPTS_ALLOW_SHARING: {{ .Values.openWebui.config.userPermissionsWorkspacePromptsAllowSharing | quote }}
+  USER_PERMISSIONS_WORKSPACE_TOOLS_ALLOW_SHARING: {{ .Values.openWebui.config.userPermissionsWorkspaceToolsAllowSharing | quote }}
+  USER_PERMISSIONS_WORKSPACE_SKILLS_ALLOW_SHARING: {{ .Values.openWebui.config.userPermissionsWorkspaceSkillsAllowSharing | quote }}
+  USER_PERMISSIONS_NOTES_ALLOW_SHARING: {{ .Values.openWebui.config.userPermissionsNotesAllowSharing | quote }}
+
   # Workspace Public Sharing (allow users to share with all tenant users)
   USER_PERMISSIONS_WORKSPACE_MODELS_ALLOW_PUBLIC_SHARING: {{ .Values.openWebui.config.userPermissionsWorkspaceModelsAllowPublicSharing | quote }}
   USER_PERMISSIONS_WORKSPACE_KNOWLEDGE_ALLOW_PUBLIC_SHARING: {{ .Values.openWebui.config.userPermissionsWorkspaceKnowledgeAllowPublicSharing | quote }}
   USER_PERMISSIONS_WORKSPACE_PROMPTS_ALLOW_PUBLIC_SHARING: {{ .Values.openWebui.config.userPermissionsWorkspacePromptsAllowPublicSharing | quote }}
   USER_PERMISSIONS_WORKSPACE_TOOLS_ALLOW_PUBLIC_SHARING: {{ .Values.openWebui.config.userPermissionsWorkspaceToolsAllowPublicSharing | quote }}
+  USER_PERMISSIONS_WORKSPACE_SKILLS_ALLOW_PUBLIC_SHARING: {{ .Values.openWebui.config.userPermissionsWorkspaceSkillsAllowPublicSharing | quote }}
   USER_PERMISSIONS_NOTES_ALLOW_PUBLIC_SHARING: {{ .Values.openWebui.config.userPermissionsNotesAllowPublicSharing | quote }}
+
+  # Access Grants
+  USER_PERMISSIONS_ACCESS_GRANTS_ALLOW_USERS: {{ .Values.openWebui.config.userPermissionsAccessGrantsAllowUsers | quote }}
 
   # UI
   {{- if .Values.openWebui.config.greetingTemplate }}
