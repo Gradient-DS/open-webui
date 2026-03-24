@@ -115,6 +115,10 @@
 	let fileItems = null;
 	let fileItemsTotal = null;
 
+	let loaded = false;
+	let queryDebounceActive = false;
+	let fetchId = 0;
+
 	const reset = () => {
 		currentPage = 1;
 	};
@@ -124,40 +128,29 @@
 		await getItemsPage();
 	};
 
-	// Debounce only query changes
-	$: if (query !== undefined) {
-		clearTimeout(searchDebounceTimer);
+	// Consolidated reactive block — mirrors Knowledge.svelte list view pattern
+	$: if (loaded && knowledgeId !== null) {
+		// Track all dependencies explicitly
+		void query, viewOption, sortKey, direction, currentPage;
 
-		searchDebounceTimer = setTimeout(() => {
+		if (queryDebounceActive) {
+			// User is typing — debounce
+			clearTimeout(searchDebounceTimer);
+			searchDebounceTimer = setTimeout(() => {
+				reset();
+				getItemsPage();
+			}, 300);
+		} else {
+			// Filter/view/pagination change or initial load — fetch immediately
 			getItemsPage();
-		}, 300);
-	}
-
-	// Immediate response to filter/pagination changes
-	$: if (
-		knowledgeId !== null &&
-		viewOption !== undefined &&
-		sortKey !== undefined &&
-		direction !== undefined &&
-		currentPage !== undefined
-	) {
-		getItemsPage();
-	}
-
-	$: if (
-		query !== undefined &&
-		viewOption !== undefined &&
-		sortKey !== undefined &&
-		direction !== undefined
-	) {
-		reset();
+		}
 	}
 
 	const getItemsPage = async () => {
 		if (knowledgeId === null) return;
 
-		fileItems = null;
-		fileItemsTotal = null;
+		// Don't null items — keep showing stale data during re-fetch
+		const currentFetchId = ++fetchId;
 
 		if (sortKey === null) {
 			direction = null;
@@ -177,10 +170,13 @@
 			return null;
 		});
 
+		if (currentFetchId !== fetchId) return; // Stale response, discard
+
 		if (res) {
 			fileItems = res.items;
 			fileItemsTotal = res.total;
 		}
+		queryDebounceActive = false;
 		return res;
 	};
 
@@ -993,7 +989,11 @@
 		});
 
 		if (res) {
-			toast.success($i18n.t('File added successfully.'));
+			if (res.warning) {
+				toast.warning(res.warning);
+			} else {
+				toast.success($i18n.t('File added successfully.'));
+			}
 			init();
 		} else {
 			toast.error($i18n.t('Failed to add file.'));
@@ -1276,6 +1276,8 @@
 			goto('/workspace/knowledge');
 		}
 
+		loaded = true;
+
 		const dropZone = document.querySelector('body');
 		dropZone?.addEventListener('dragover', onDragOver);
 		dropZone?.addEventListener('drop', onDrop);
@@ -1375,7 +1377,7 @@
 />
 
 <div class="flex flex-col w-full h-full min-h-full" id="collection-container">
-	{#if id && knowledge}
+	{#if id && knowledge && fileItems !== null}
 		{#if knowledge?.type === 'local' || !knowledge?.type}
 			<AccessControlModal
 				bind:show={showAccessControlModal}
@@ -1582,6 +1584,9 @@
 						bind:value={query}
 						aria-label={$i18n.t('Search Collection')}
 						placeholder={$i18n.t('Search Collection')}
+						on:input={() => {
+							queryDebounceActive = true;
+						}}
 						on:focus={() => {
 							selectedFileId = null;
 						}}
@@ -1859,10 +1864,6 @@
 							</div>
 						</Drawer>
 					{/if}
-				</div>
-			{:else}
-				<div class="my-10">
-					<Spinner className="size-4" />
 				</div>
 			{/if}
 		</div>

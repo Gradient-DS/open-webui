@@ -211,9 +211,9 @@ onDestroy(() => {
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] TypeScript check passes: `npm run check` (may have pre-existing errors — verify no new errors)
-- [ ] Build succeeds: `npm run build`
-- [ ] Frontend lint passes: `npm run lint:frontend`
+- [x] TypeScript check passes: `npm run check` (may have pre-existing errors — verify no new errors)
+- [x] Build succeeds: `npm run build`
+- [x] Frontend lint passes: `npm run lint:frontend`
 
 #### Manual Verification:
 - [ ] Open a local KB → file list appears once, no spinner flash

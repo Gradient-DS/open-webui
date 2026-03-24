@@ -43,6 +43,7 @@ from open_webui.models.access_grants import AccessGrants
 
 from open_webui.routers.retrieval import ProcessFileForm, process_file
 from open_webui.routers.audio import transcribe
+from open_webui.services.files.events import emit_file_status
 
 from open_webui.storage.provider import Storage
 
