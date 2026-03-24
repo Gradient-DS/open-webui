@@ -15,8 +15,6 @@
 	import { capitalizeFirstLetter, formatFileSize } from '$lib/utils';
 
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
-	import OneDrive from '$lib/components/icons/OneDrive.svelte';
-	import GoogleDrive from '$lib/components/icons/GoogleDrive.svelte';
 	import DocumentPage from '$lib/components/icons/DocumentPage.svelte';
 	import Folder from '$lib/components/icons/Folder.svelte';
 	import XMark from '$lib/components/icons/XMark.svelte';
@@ -272,35 +270,6 @@
 							{/if}
 						</div>
 
-						{#if file?.meta?.source === 'onedrive'}
-							<Tooltip
-								content={file?.meta?.last_synced_at
-									? $i18n.t('Synced from OneDrive: {{date}}', {
-											date: dayjs(file.meta.last_synced_at * 1000).format(
-												'LLLL'
-											)
-										})
-									: $i18n.t('Synced from OneDrive')}
-							>
-								<div class="flex items-center shrink-0 text-xs text-gray-400">
-									<OneDrive className="size-3.5" />
-								</div>
-							</Tooltip>
-						{:else if file?.meta?.source === 'google_drive'}
-							<Tooltip
-								content={file?.meta?.last_synced_at
-									? $i18n.t('Synced from Google Drive: {{date}}', {
-											date: dayjs(file.meta.last_synced_at * 1000).format(
-												'LLLL'
-											)
-										})
-									: $i18n.t('Synced from Google Drive')}
-							>
-								<div class="flex items-center shrink-0 text-xs text-gray-400">
-									<GoogleDrive className="size-3.5" />
-								</div>
-							</Tooltip>
-						{/if}
 					</div>
 				</div>
 

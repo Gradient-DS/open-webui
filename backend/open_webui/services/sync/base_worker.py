@@ -11,6 +11,7 @@ from dataclasses import asdict
 from typing import Optional, Callable, Awaitable, Dict, Any, List
 from pathlib import Path
 
+from open_webui.internal.db import get_db
 from open_webui.models.knowledge import Knowledges
 from open_webui.models.files import Files, FileForm, FileUpdateForm
 from open_webui.models.users import Users
@@ -341,14 +342,16 @@ class BaseSyncWorker(ABC):
             from open_webui.routers.retrieval import process_file, ProcessFileForm
             from fastapi import HTTPException
 
-            process_file(
-                self._make_request(),
-                ProcessFileForm(
-                    file_id=file_id,
-                    collection_name=self.knowledge_id,
-                ),
-                user=self._get_user(),
-            )
+            with get_db() as db:
+                process_file(
+                    self._make_request(),
+                    ProcessFileForm(
+                        file_id=file_id,
+                        collection_name=self.knowledge_id,
+                    ),
+                    user=self._get_user(),
+                    db=db,
+                )
             return None
         except HTTPException as e:
             detail = str(e.detail) if e.detail else ""
@@ -387,14 +390,17 @@ class BaseSyncWorker(ABC):
         request = self._make_request()
         user = self._get_user()
 
+        def _call_process_file(form_data):
+            """Wrapper that provides a fresh DB session for direct process_file calls."""
+            with get_db() as db:
+                return process_file(request, form_data, user=user, db=db)
+
         try:
             # Step 1: Process file content
             try:
                 await asyncio.to_thread(
-                    process_file,
-                    request,
+                    _call_process_file,
                     ProcessFileForm(file_id=file_id),
-                    user=user,
                 )
                 log.info(f"Successfully extracted content from file {file_id}")
             except ValueError as e:
@@ -423,13 +429,11 @@ class BaseSyncWorker(ABC):
             # Step 2: Add processed content to knowledge base collection
             try:
                 await asyncio.to_thread(
-                    process_file,
-                    request,
+                    _call_process_file,
                     ProcessFileForm(
                         file_id=file_id,
                         collection_name=self.knowledge_id,
                     ),
-                    user=user,
                 )
                 log.info(f"Successfully added file {file_id} to knowledge base {self.knowledge_id}")
             except HTTPException as e:
@@ -655,14 +659,22 @@ class BaseSyncWorker(ABC):
                             )
                         try:
                             from open_webui.routers.retrieval import process_file, ProcessFileForm
+
+                            def _call_propagate(form_data):
+                                with get_db() as db:
+                                    return process_file(
+                                        self._make_request(),
+                                        form_data,
+                                        user=self._get_user(),
+                                        db=db,
+                                    )
+
                             await asyncio.to_thread(
-                                process_file,
-                                self._make_request(),
+                                _call_propagate,
                                 ProcessFileForm(
                                     file_id=file_id,
                                     collection_name=kf.knowledge_id,
                                 ),
-                                user=self._get_user(),
                             )
                         except Exception as e:
                             log.warning(

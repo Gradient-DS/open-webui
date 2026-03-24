@@ -192,6 +192,7 @@ async def initiate_auth(
     knowledge = get_knowledge_or_raise(knowledge_id, user)
 
     redirect_uri = str(request.base_url).rstrip("/") + "/oauth/google/callback"
+    log.info("OAuth initiate: base_url=%s, redirect_uri=%s", request.base_url, redirect_uri)
 
     auth_url = get_authorization_url(
         user_id=user.id,
