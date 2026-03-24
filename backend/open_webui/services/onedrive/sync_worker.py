@@ -488,16 +488,20 @@ class OneDriveSyncWorker:
                     # Build access_grants list (new upstream format)
                     access_grants = []
                     for user_id in permitted_user_ids:
-                        access_grants.append({
+                        access_grants.append(
+                            {
+                                "principal_type": "user",
+                                "principal_id": user_id,
+                                "permission": "read",
+                            }
+                        )
+                    access_grants.append(
+                        {
                             "principal_type": "user",
-                            "principal_id": user_id,
-                            "permission": "read",
-                        })
-                    access_grants.append({
-                        "principal_type": "user",
-                        "principal_id": self.user_id,
-                        "permission": "write",
-                    })
+                            "principal_id": self.user_id,
+                            "permission": "write",
+                        }
+                    )
 
                     Knowledges.update_knowledge_by_id(
                         self.knowledge_id,

@@ -748,7 +748,9 @@ class KnowledgeTable:
                 knowledge = self.get_knowledge_by_id(id=id, db=db)
                 db.query(Knowledge).filter_by(id=id).update(
                     {
-                        **form_data.model_dump(exclude={"access_grants"}, exclude_none=True),
+                        **form_data.model_dump(
+                            exclude={"access_grants"}, exclude_none=True
+                        ),
                         "updated_at": int(time.time()),
                     }
                 )

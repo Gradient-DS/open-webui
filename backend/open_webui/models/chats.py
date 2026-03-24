@@ -459,7 +459,12 @@ class ChatTable:
 
     def get_chat_title_by_id(self, id: str) -> Optional[str]:
         with get_db_context() as db:
-            result = db.query(Chat.title).filter_by(id=id).filter(Chat.deleted_at.is_(None)).first()
+            result = (
+                db.query(Chat.title)
+                .filter_by(id=id)
+                .filter(Chat.deleted_at.is_(None))
+                .first()
+            )
             if result is None:
                 return None
             return result[0] or "New Chat"
@@ -842,7 +847,11 @@ class ChatTable:
         db: Optional[Session] = None,
     ) -> list[ChatModel]:
         with get_db_context(db) as db:
-            query = db.query(Chat).filter_by(user_id=user_id).filter(Chat.deleted_at.is_(None))
+            query = (
+                db.query(Chat)
+                .filter_by(user_id=user_id)
+                .filter(Chat.deleted_at.is_(None))
+            )
             if not include_archived:
                 query = query.filter_by(archived=False)
 
@@ -883,7 +892,11 @@ class ChatTable:
         db: Optional[Session] = None,
     ) -> list[ChatTitleIdResponse]:
         with get_db_context(db) as db:
-            query = db.query(Chat).filter_by(user_id=user_id).filter(Chat.deleted_at.is_(None))
+            query = (
+                db.query(Chat)
+                .filter_by(user_id=user_id)
+                .filter(Chat.deleted_at.is_(None))
+            )
 
             if not include_folders:
                 query = query.filter_by(folder_id=None)
@@ -965,7 +978,12 @@ class ChatTable:
             with get_db_context(db) as db:
                 # it is possible that the shared link was deleted. hence,
                 # we check if the chat is still shared by checking if a chat with the share_id exists
-                chat = db.query(Chat).filter_by(share_id=id).filter(Chat.deleted_at.is_(None)).first()
+                chat = (
+                    db.query(Chat)
+                    .filter_by(share_id=id)
+                    .filter(Chat.deleted_at.is_(None))
+                    .first()
+                )
 
                 if chat:
                     return self.get_chat_by_id(id, db=db)
@@ -979,7 +997,12 @@ class ChatTable:
     ) -> Optional[ChatModel]:
         try:
             with get_db_context(db) as db:
-                chat = db.query(Chat).filter_by(id=id, user_id=user_id).filter(Chat.deleted_at.is_(None)).first()
+                chat = (
+                    db.query(Chat)
+                    .filter_by(id=id, user_id=user_id)
+                    .filter(Chat.deleted_at.is_(None))
+                    .first()
+                )
                 return ChatModel.model_validate(chat)
         except Exception:
             return None
@@ -994,7 +1017,13 @@ class ChatTable:
         try:
             with get_db_context(db) as db:
                 return db.query(
-                    exists().where(and_(Chat.id == id, Chat.user_id == user_id, Chat.deleted_at.is_(None)))
+                    exists().where(
+                        and_(
+                            Chat.id == id,
+                            Chat.user_id == user_id,
+                            Chat.deleted_at.is_(None),
+                        )
+                    )
                 ).scalar()
         except Exception:
             return False
@@ -1009,7 +1038,10 @@ class ChatTable:
         try:
             with get_db_context(db) as db:
                 result = (
-                    db.query(Chat.folder_id).filter_by(id=id, user_id=user_id).filter(Chat.deleted_at.is_(None)).first()
+                    db.query(Chat.folder_id)
+                    .filter_by(id=id, user_id=user_id)
+                    .filter(Chat.deleted_at.is_(None))
+                    .first()
                 )
                 return result[0] if result else None
         except Exception:
@@ -1020,8 +1052,7 @@ class ChatTable:
     ) -> list[ChatModel]:
         with get_db_context(db) as db:
             all_chats = (
-                db.query(Chat)
-                .filter(Chat.deleted_at.is_(None))
+                db.query(Chat).filter(Chat.deleted_at.is_(None))
                 # .limit(limit).offset(skip)
                 .order_by(Chat.updated_at.desc())
             )
@@ -1036,7 +1067,11 @@ class ChatTable:
         db: Optional[Session] = None,
     ) -> ChatListResponse:
         with get_db_context(db) as db:
-            query = db.query(Chat).filter_by(user_id=user_id).filter(Chat.deleted_at.is_(None))
+            query = (
+                db.query(Chat)
+                .filter_by(user_id=user_id)
+                .filter(Chat.deleted_at.is_(None))
+            )
 
             if filter:
                 if filter.get("updated_at"):
@@ -1182,7 +1217,11 @@ class ChatTable:
         search_text = " ".join(search_text_words)
 
         with get_db_context(db) as db:
-            query = db.query(Chat).filter(Chat.user_id == user_id).filter(Chat.deleted_at.is_(None))
+            query = (
+                db.query(Chat)
+                .filter(Chat.user_id == user_id)
+                .filter(Chat.deleted_at.is_(None))
+            )
 
             if is_archived is not None:
                 query = query.filter(Chat.archived == is_archived)
@@ -1318,7 +1357,11 @@ class ChatTable:
         db: Optional[Session] = None,
     ) -> list[ChatModel]:
         with get_db_context(db) as db:
-            query = db.query(Chat).filter_by(folder_id=folder_id, user_id=user_id).filter(Chat.deleted_at.is_(None))
+            query = (
+                db.query(Chat)
+                .filter_by(folder_id=folder_id, user_id=user_id)
+                .filter(Chat.deleted_at.is_(None))
+            )
             query = query.filter(or_(Chat.pinned == False, Chat.pinned == None))
             query = query.filter_by(archived=False)
 
@@ -1336,9 +1379,11 @@ class ChatTable:
         self, folder_ids: list[str], user_id: str, db: Optional[Session] = None
     ) -> list[ChatModel]:
         with get_db_context(db) as db:
-            query = db.query(Chat).filter(
-                Chat.folder_id.in_(folder_ids), Chat.user_id == user_id
-            ).filter(Chat.deleted_at.is_(None))
+            query = (
+                db.query(Chat)
+                .filter(Chat.folder_id.in_(folder_ids), Chat.user_id == user_id)
+                .filter(Chat.deleted_at.is_(None))
+            )
             query = query.filter(or_(Chat.pinned == False, Chat.pinned == None))
             query = query.filter_by(archived=False)
 
@@ -1379,7 +1424,11 @@ class ChatTable:
         db: Optional[Session] = None,
     ) -> list[ChatModel]:
         with get_db_context(db) as db:
-            query = db.query(Chat).filter_by(user_id=user_id).filter(Chat.deleted_at.is_(None))
+            query = (
+                db.query(Chat)
+                .filter_by(user_id=user_id)
+                .filter(Chat.deleted_at.is_(None))
+            )
             tag_id = tag_name.replace(" ", "_").lower()
 
             log.info(f"DB dialect name: {db.bind.dialect.name}")
@@ -1429,7 +1478,11 @@ class ChatTable:
         self, tag_name: str, user_id: str, db: Optional[Session] = None
     ) -> int:
         with get_db_context(db) as db:
-            query = db.query(Chat).filter_by(user_id=user_id, archived=False).filter(Chat.deleted_at.is_(None))
+            query = (
+                db.query(Chat)
+                .filter_by(user_id=user_id, archived=False)
+                .filter(Chat.deleted_at.is_(None))
+            )
             tag_id = tag_name.replace(" ", "_").lower()
 
             if db.bind.dialect.name == "sqlite":
@@ -1480,7 +1533,11 @@ class ChatTable:
         self, folder_id: str, user_id: str, db: Optional[Session] = None
     ) -> int:
         with get_db_context(db) as db:
-            query = db.query(Chat).filter_by(user_id=user_id).filter(Chat.deleted_at.is_(None))
+            query = (
+                db.query(Chat)
+                .filter_by(user_id=user_id)
+                .filter(Chat.deleted_at.is_(None))
+            )
 
             query = query.filter_by(folder_id=folder_id)
             count = query.count()

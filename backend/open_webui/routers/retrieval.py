@@ -1642,7 +1642,9 @@ def save_docs_to_vector_db(
             raise ValueError(ERROR_MESSAGES.DEFAULT("Invalid text splitter"))
 
     if len(docs) == 0:
-        log.warning(f"No text content could be extracted for collection {collection_name}")
+        log.warning(
+            f"No text content could be extracted for collection {collection_name}"
+        )
         return True
 
     texts = [sanitize_text_for_db(doc.page_content) for doc in docs]
@@ -1890,7 +1892,11 @@ def process_file(
                         else:
                             raise ValueError(ERROR_MESSAGES.EMPTY_CONTENT)
 
-                text_content = " ".join([doc.page_content for doc in docs]) if docs else file.data.get("content", "")
+                text_content = (
+                    " ".join([doc.page_content for doc in docs])
+                    if docs
+                    else file.data.get("content", "")
+                )
             else:
                 # Process the file and save the content
                 # Usage: /files/
