@@ -85,6 +85,7 @@ def get_sync_provider(provider_type: str) -> SyncProvider:
     """
     if provider_type == "onedrive":
         from open_webui.services.onedrive.provider import OneDriveSyncProvider
+
         return OneDriveSyncProvider()
     # elif provider_type == "google_drive":
     #     from open_webui.services.google_drive.provider import GoogleDriveSyncProvider
@@ -97,6 +98,7 @@ def get_token_manager(provider_type: str) -> TokenManager:
     """Factory function for token managers."""
     if provider_type == "onedrive":
         from open_webui.services.onedrive.provider import OneDriveTokenManager
+
         return OneDriveTokenManager()
     else:
         raise ValueError(f"Unsupported token manager: {provider_type}")

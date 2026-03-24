@@ -62,7 +62,11 @@ class GraphClient:
                     follow_redirects=follow_redirects,
                 )
 
-                if response.status_code == 401 and not token_refreshed and self._token_provider:
+                if (
+                    response.status_code == 401
+                    and not token_refreshed
+                    and self._token_provider
+                ):
                     # Token expired — try refresh once
                     log.info("Received 401, attempting token refresh")
                     try:
@@ -88,7 +92,11 @@ class GraphClient:
 
                 if response.status_code >= 500:
                     wait_time = 2**attempt
-                    log.warning("Server error %d, retrying in %d seconds", response.status_code, wait_time)
+                    log.warning(
+                        "Server error %d, retrying in %d seconds",
+                        response.status_code,
+                        wait_time,
+                    )
                     await asyncio.sleep(wait_time)
                     continue
 
@@ -144,7 +152,9 @@ class GraphClient:
             items = await self.list_folder_items(drive_id, current_folder_id)
 
             for item in items:
-                item_path = f"{parent_path}/{item['name']}" if parent_path else item["name"]
+                item_path = (
+                    f"{parent_path}/{item['name']}" if parent_path else item["name"]
+                )
                 item["_relative_path"] = item_path
 
                 if "folder" in item:
@@ -189,9 +199,7 @@ class GraphClient:
     async def download_file(self, drive_id: str, item_id: str) -> bytes:
         """Download file content."""
         url = f"{GRAPH_BASE_URL}/drives/{drive_id}/items/{item_id}/content"
-        response = await self._request_with_retry(
-            "GET", url, follow_redirects=True
-        )
+        response = await self._request_with_retry("GET", url, follow_redirects=True)
         response.raise_for_status()
         return response.content
 
@@ -200,9 +208,7 @@ class GraphClient:
         url = f"{GRAPH_BASE_URL}/drives/{drive_id}/items/{item_id}"
         return await self._get_json(url)
 
-    async def get_item(
-        self, drive_id: str, item_id: str
-    ) -> Optional[Dict[str, Any]]:
+    async def get_item(self, drive_id: str, item_id: str) -> Optional[Dict[str, Any]]:
         """Get metadata for a single item, returning None if not found."""
         url = f"{GRAPH_BASE_URL}/drives/{drive_id}/items/{item_id}"
         response = await self._request_with_retry("GET", url)

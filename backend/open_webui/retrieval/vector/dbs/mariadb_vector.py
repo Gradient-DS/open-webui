@@ -166,7 +166,8 @@ class MariaDBVectorClient(VectorDBBase):
             with conn.cursor() as cur:
                 try:
                     dist = self.distance_strategy
-                    cur.execute(f"""
+                    cur.execute(
+                        f"""
                         CREATE TABLE IF NOT EXISTS document_chunk (
                             -- MariaDB Vector requires the table PRIMARY KEY used with a VECTOR INDEX to be <= 256 bytes.
                             -- VARCHAR has internal length/metadata overhead, so VARCHAR(255) can exceed the 256-byte limit.
@@ -181,7 +182,8 @@ class MariaDBVectorClient(VectorDBBase):
                             VECTOR INDEX (embedding) M={self.index_m} DISTANCE={dist},
                             INDEX idx_document_chunk_collection_name (collection_name)
                         ) ENGINE=InnoDB;
-                        """)
+                        """
+                    )
                     conn.commit()
                 except Exception as e:
                     conn.rollback()

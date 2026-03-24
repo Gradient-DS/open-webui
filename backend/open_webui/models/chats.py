@@ -1216,23 +1216,29 @@ class ChatTable:
 
                 # Check if there are any tags to filter, it should have all the tags
                 if "none" in tag_ids:
-                    query = query.filter(text("""
+                    query = query.filter(
+                        text(
+                            """
                             NOT EXISTS (
                                 SELECT 1
                                 FROM json_each(Chat.meta, '$.tags') AS tag
                             )
-                            """))
+                            """
+                        )
+                    )
                 elif tag_ids:
                     query = query.filter(
                         and_(
                             *[
-                                text(f"""
+                                text(
+                                    f"""
                                     EXISTS (
                                         SELECT 1
                                         FROM json_each(Chat.meta, '$.tags') AS tag
                                         WHERE tag.value = :tag_id_{tag_idx}
                                     )
-                                    """).params(**{f"tag_id_{tag_idx}": tag_id})
+                                    """
+                                ).params(**{f"tag_id_{tag_idx}": tag_id})
                                 for tag_idx, tag_id in enumerate(tag_ids)
                             ]
                         )
@@ -1268,23 +1274,29 @@ class ChatTable:
 
                 # Check if there are any tags to filter, it should have all the tags
                 if "none" in tag_ids:
-                    query = query.filter(text("""
+                    query = query.filter(
+                        text(
+                            """
                             NOT EXISTS (
                                 SELECT 1
                                 FROM json_array_elements_text(Chat.meta->'tags') AS tag
                             )
-                            """))
+                            """
+                        )
+                    )
                 elif tag_ids:
                     query = query.filter(
                         and_(
                             *[
-                                text(f"""
+                                text(
+                                    f"""
                                     EXISTS (
                                         SELECT 1
                                         FROM json_array_elements_text(Chat.meta->'tags') AS tag
                                         WHERE tag = :tag_id_{tag_idx}
                                     )
-                                    """).params(**{f"tag_id_{tag_idx}": tag_id})
+                                    """
+                                ).params(**{f"tag_id_{tag_idx}": tag_id})
                                 for tag_idx, tag_id in enumerate(tag_ids)
                             ]
                         )
@@ -1747,9 +1759,7 @@ class ChatTable:
                 .all()
             ]
 
-    def soft_delete_by_id(
-        self, id: str, db: Optional[Session] = None
-    ) -> bool:
+    def soft_delete_by_id(self, id: str, db: Optional[Session] = None) -> bool:
         """Mark a chat as deleted (soft-delete)."""
         with get_db_context(db) as db:
             result = (
@@ -1761,9 +1771,7 @@ class ChatTable:
             db.commit()
             return result > 0
 
-    def soft_delete_by_user_id(
-        self, user_id: str, db: Optional[Session] = None
-    ) -> int:
+    def soft_delete_by_user_id(self, user_id: str, db: Optional[Session] = None) -> int:
         """Soft-delete all chats for a user. Returns count of affected rows."""
         with get_db_context(db) as db:
             result = (

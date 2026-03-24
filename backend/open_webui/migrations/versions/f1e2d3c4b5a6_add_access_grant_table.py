@@ -115,10 +115,12 @@ def upgrade() -> None:
                 if key not in inserted:
                     try:
                         conn.execute(
-                            sa.text("""
+                            sa.text(
+                                """
                                 INSERT INTO access_grant (id, resource_type, resource_id, principal_type, principal_id, permission, created_at)
                                 VALUES (:id, :resource_type, :resource_id, :principal_type, :principal_id, :permission, :created_at)
-                            """),
+                            """
+                            ),
                             {
                                 "id": str(uuid.uuid4()),
                                 "resource_type": resource_type,
@@ -175,10 +177,12 @@ def upgrade() -> None:
                         continue
                     try:
                         conn.execute(
-                            sa.text("""
+                            sa.text(
+                                """
                                 INSERT INTO access_grant (id, resource_type, resource_id, principal_type, principal_id, permission, created_at)
                                 VALUES (:id, :resource_type, :resource_id, :principal_type, :principal_id, :permission, :created_at)
-                            """),
+                            """
+                            ),
                             {
                                 "id": str(uuid.uuid4()),
                                 "resource_type": resource_type,
@@ -199,10 +203,12 @@ def upgrade() -> None:
                         continue
                     try:
                         conn.execute(
-                            sa.text("""
+                            sa.text(
+                                """
                                 INSERT INTO access_grant (id, resource_type, resource_id, principal_type, principal_id, permission, created_at)
                                 VALUES (:id, :resource_type, :resource_id, :principal_type, :principal_id, :permission, :created_at)
-                            """),
+                            """
+                            ),
                             {
                                 "id": str(uuid.uuid4()),
                                 "resource_type": resource_type,
@@ -257,11 +263,13 @@ def downgrade() -> None:
         try:
             # Get all grants for this resource type
             result = conn.execute(
-                sa.text("""
+                sa.text(
+                    """
                     SELECT resource_id, principal_type, principal_id, permission
                     FROM access_grant
                     WHERE resource_type = :resource_type
-                """),
+                """
+                ),
                 {"resource_type": resource_type},
             )
             rows = result.fetchall()
@@ -349,14 +357,16 @@ def downgrade() -> None:
         if resource_type != "file":
             try:
                 conn.execute(
-                    sa.text(f"""
+                    sa.text(
+                        f"""
                         UPDATE "{table_name}" 
                         SET access_control = :private_value
                         WHERE id NOT IN (
                             SELECT DISTINCT resource_id FROM access_grant WHERE resource_type = :resource_type
                         )
                         AND access_control IS NULL
-                    """),
+                    """
+                    ),
                     {"private_value": json.dumps({}), "resource_type": resource_type},
                 )
             except Exception:

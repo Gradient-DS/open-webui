@@ -1422,12 +1422,14 @@ def save_embeddings_to_vector_db(
             if file_metadata:
                 metadata = {**metadata, **file_metadata}
 
-            items.append({
-                "id": chunk.get("id", str(uuid.uuid4())),
-                "text": chunk["text"],
-                "vector": chunk["embedding"],
-                "metadata": metadata,
-            })
+            items.append(
+                {
+                    "id": chunk.get("id", str(uuid.uuid4())),
+                    "text": chunk["text"],
+                    "vector": chunk["embedding"],
+                    "metadata": metadata,
+                }
+            )
 
         log.info(f"adding {len(items)} items to collection {collection_name}")
         VECTOR_DB_CLIENT.insert(
@@ -1866,11 +1868,15 @@ def process_file(
                     )
 
                     # Check if external pipeline is enabled (not empty string)
-                    use_external_pipeline = external_pipeline_url and external_pipeline_url.strip() != ""
+                    use_external_pipeline = (
+                        external_pipeline_url and external_pipeline_url.strip() != ""
+                    )
 
                     if use_external_pipeline:
                         # Try external pipeline first (default behavior)
-                        log.info(f"Attempting to use external pipeline for file: {file.filename}")
+                        log.info(
+                            f"Attempting to use external pipeline for file: {file.filename}"
+                        )
 
                         try:
                             # Process file with external pipeline

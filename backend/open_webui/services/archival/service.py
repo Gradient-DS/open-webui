@@ -16,6 +16,7 @@ log = logging.getLogger(__name__)
 @dataclass
 class ArchiveData:
     """Container for archived user data"""
+
     user_profile: Dict[str, Any] = field(default_factory=dict)
     chats: List[Dict[str, Any]] = field(default_factory=list)
     archived_at: int = 0
@@ -29,7 +30,7 @@ class ArchiveData:
             "chats": self.chats,
             "stats": {
                 "chat_count": len(self.chats),
-            }
+            },
         }
 
     def get_exportable_chats(self) -> List[Dict[str, Any]]:
@@ -43,6 +44,7 @@ class ArchiveData:
 @dataclass
 class ArchiveResult:
     """Result of archive operation"""
+
     success: bool = False
     archive_id: Optional[str] = None
     stats: Dict[str, int] = field(default_factory=dict)
@@ -194,7 +196,9 @@ class ArchiveService:
             try:
                 if UserArchives.delete_archive(archive.id):
                     stats["deleted"] += 1
-                    log.info(f"Deleted expired archive {archive.id} for user {archive.user_email}")
+                    log.info(
+                        f"Deleted expired archive {archive.id} for user {archive.user_email}"
+                    )
                 else:
                     stats["errors"] += 1
             except Exception as e:

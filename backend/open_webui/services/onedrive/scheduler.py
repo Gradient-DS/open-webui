@@ -108,12 +108,15 @@ async def _execute_due_syncs():
                     log.warning("KB %s needs re-authorization", kb.id)
                     # needs_reauth is already set by token_refresh._mark_needs_reauth
                 else:
-                    log.error("Scheduled sync failed for KB %s: %s", kb.id, result["error"])
+                    log.error(
+                        "Scheduled sync failed for KB %s: %s", kb.id, result["error"]
+                    )
                     _update_sync_status(kb.id, "failed", error=result["error"])
             else:
                 log.info(
                     "Scheduled sync completed for KB %s: %d files processed",
-                    kb.id, result.get("files_processed", 0),
+                    kb.id,
+                    result.get("files_processed", 0),
                 )
 
         except Exception:
@@ -121,7 +124,9 @@ async def _execute_due_syncs():
             _update_sync_status(kb.id, "failed", error="Unexpected scheduler error")
 
 
-def _is_sync_due(kb: KnowledgeModel, now: float, interval_seconds: float, sync_provider=None) -> bool:
+def _is_sync_due(
+    kb: KnowledgeModel, now: float, interval_seconds: float, sync_provider=None
+) -> bool:
     """Check if a knowledge base is due for scheduled sync."""
     meta = kb.meta or {}
     sync_info = meta.get("onedrive_sync", {})
@@ -131,7 +136,9 @@ def _is_sync_due(kb: KnowledgeModel, now: float, interval_seconds: float, sync_p
         return False
 
     # Skip if no stored token (per-user DB lookup)
-    if sync_provider and not sync_provider.get_token_manager().has_stored_token(kb.user_id, kb.id):
+    if sync_provider and not sync_provider.get_token_manager().has_stored_token(
+        kb.user_id, kb.id
+    ):
         return False
 
     # Skip if needs re-authorization
