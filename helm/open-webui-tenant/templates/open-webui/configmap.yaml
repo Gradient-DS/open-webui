@@ -240,9 +240,7 @@ data:
   {{- if .Values.openWebui.config.googleDriveClientId }}
   GOOGLE_DRIVE_CLIENT_ID: {{ .Values.openWebui.config.googleDriveClientId | quote }}
   {{- end }}
-  {{- if .Values.openWebui.config.googleDriveApiKey }}
-  GOOGLE_DRIVE_API_KEY: {{ .Values.openWebui.config.googleDriveApiKey | quote }}
-  {{- end }}
+  {{- /* googleDriveApiKey moved to secrets template */ -}}
 
   # Google Drive Sync
   ENABLE_GOOGLE_DRIVE_SYNC: {{ .Values.openWebui.config.enableGoogleDriveSync | quote }}
