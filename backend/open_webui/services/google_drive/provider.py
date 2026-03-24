@@ -1,7 +1,7 @@
 """
-OneDrive Sync Provider implementation.
+Google Drive Sync Provider implementation.
 
-Wraps the OneDriveSyncWorker and token refresh service
+Wraps the GoogleDriveSyncWorker and token refresh service
 behind the SyncProvider and TokenManager interfaces.
 """
 
@@ -9,10 +9,10 @@ import logging
 from typing import Optional
 
 from open_webui.services.sync.provider import SyncProvider, TokenManager
-from open_webui.services.onedrive.token_refresh import (
+from open_webui.services.google_drive.token_refresh import (
     get_valid_access_token as _get_valid_access_token,
 )
-from open_webui.services.onedrive.auth import (
+from open_webui.services.google_drive.auth import (
     get_stored_token,
     delete_stored_token,
 )
@@ -20,8 +20,8 @@ from open_webui.services.onedrive.auth import (
 log = logging.getLogger(__name__)
 
 
-class OneDriveTokenManager(TokenManager):
-    """Token manager for OneDrive using Microsoft OAuth v2.0."""
+class GoogleDriveTokenManager(TokenManager):
+    """Token manager for Google Drive using Google OAuth 2.0."""
 
     async def get_valid_access_token(
         self, user_id: str, knowledge_id: str
@@ -35,17 +35,17 @@ class OneDriveTokenManager(TokenManager):
         return delete_stored_token(user_id)
 
 
-class OneDriveSyncProvider(SyncProvider):
-    """Sync provider for OneDrive / SharePoint."""
+class GoogleDriveSyncProvider(SyncProvider):
+    """Sync provider for Google Drive."""
 
     def __init__(self):
-        self._token_manager = OneDriveTokenManager()
+        self._token_manager = GoogleDriveTokenManager()
 
     def get_provider_type(self) -> str:
-        return "onedrive"
+        return "google_drive"
 
     def get_meta_key(self) -> str:
-        return "onedrive_sync"
+        return "google_drive_sync"
 
     def get_token_manager(self) -> TokenManager:
         return self._token_manager
@@ -53,9 +53,9 @@ class OneDriveSyncProvider(SyncProvider):
     def create_worker(
         self, knowledge_id, sources, access_token, user_id, app, token_provider=None
     ):
-        from open_webui.services.onedrive.sync_worker import OneDriveSyncWorker
+        from open_webui.services.google_drive.sync_worker import GoogleDriveSyncWorker
 
-        return OneDriveSyncWorker(
+        return GoogleDriveSyncWorker(
             knowledge_id=knowledge_id,
             sources=sources,
             access_token=access_token,

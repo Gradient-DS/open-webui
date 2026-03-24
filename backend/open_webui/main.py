@@ -99,6 +99,7 @@ from open_webui.routers import (
     utils,
     scim,
     onedrive_sync,
+    google_drive_sync,
     invites,
     terminals,
 )
@@ -351,6 +352,7 @@ from open_webui.config import (
     GOOGLE_PSE_ENGINE_ID,
     GOOGLE_DRIVE_CLIENT_ID,
     GOOGLE_DRIVE_API_KEY,
+    GOOGLE_CLIENT_SECRET,
     ENABLE_ONEDRIVE_INTEGRATION,
     ONEDRIVE_CLIENT_ID_PERSONAL,
     ONEDRIVE_CLIENT_ID_BUSINESS,
@@ -377,6 +379,8 @@ from open_webui.config import (
     ENABLE_RAG_LOCAL_WEB_FETCH,
     ENABLE_WEB_LOADER_SSL_VERIFICATION,
     ENABLE_GOOGLE_DRIVE_INTEGRATION,
+    ENABLE_GOOGLE_DRIVE_SYNC,
+    GOOGLE_DRIVE_SYNC_INTERVAL_MINUTES,
     UPLOAD_DIR,
     EXTERNAL_WEB_SEARCH_URL,
     EXTERNAL_WEB_SEARCH_API_KEY,
@@ -758,6 +762,13 @@ async def lifespan(app: FastAPI):
 
     start_onedrive_scheduler(app)
 
+    # Start Google Drive background sync scheduler
+    from open_webui.services.google_drive.scheduler import (
+        start_scheduler as start_google_drive_scheduler,
+    )
+
+    start_google_drive_scheduler(app)
+
     # Start deletion cleanup worker
     from open_webui.services.deletion.cleanup_worker import start_cleanup_worker
 
@@ -854,6 +865,13 @@ async def lifespan(app: FastAPI):
     )
 
     stop_onedrive_scheduler()
+
+    # Stop Google Drive background sync scheduler
+    from open_webui.services.google_drive.scheduler import (
+        stop_scheduler as stop_google_drive_scheduler,
+    )
+
+    stop_google_drive_scheduler()
 
     if hasattr(app.state, "redis_task_command_listener"):
         app.state.redis_task_command_listener.cancel()
@@ -1238,6 +1256,7 @@ app.state.config.BYPASS_WEB_SEARCH_EMBEDDING_AND_RETRIEVAL = (
 app.state.config.BYPASS_WEB_SEARCH_WEB_LOADER = BYPASS_WEB_SEARCH_WEB_LOADER
 
 app.state.config.ENABLE_GOOGLE_DRIVE_INTEGRATION = ENABLE_GOOGLE_DRIVE_INTEGRATION
+app.state.config.ENABLE_GOOGLE_DRIVE_SYNC = ENABLE_GOOGLE_DRIVE_SYNC
 app.state.config.ENABLE_ONEDRIVE_INTEGRATION = ENABLE_ONEDRIVE_INTEGRATION
 app.state.config.ENABLE_ONEDRIVE_SYNC = ENABLE_ONEDRIVE_SYNC
 
@@ -1775,6 +1794,12 @@ if ENABLE_SCIM:
 if app.state.config.ENABLE_ONEDRIVE_SYNC:
     app.include_router(
         onedrive_sync.router, prefix="/api/v1/onedrive", tags=["onedrive"]
+    )
+
+# Google Drive Sync API for collection synchronization
+if app.state.config.ENABLE_GOOGLE_DRIVE_SYNC:
+    app.include_router(
+        google_drive_sync.router, prefix="/api/v1/google-drive", tags=["google-drive"]
     )
 
 # Invites API (always mounted - Copy Link works without Graph API)
@@ -2434,6 +2459,13 @@ async def get_app_config(request: Request):
                     "feature_terminal_servers": FEATURE_TERMINAL_SERVERS,
                     "feature_builtin_tools": FEATURE_BUILTIN_TOOLS,
                     "enable_google_drive_integration": app.state.config.ENABLE_GOOGLE_DRIVE_INTEGRATION,
+                    **(
+                        {
+                            "enable_google_drive_sync": app.state.config.ENABLE_GOOGLE_DRIVE_SYNC,
+                        }
+                        if app.state.config.ENABLE_GOOGLE_DRIVE_INTEGRATION
+                        else {}
+                    ),
                     "enable_onedrive_integration": app.state.config.ENABLE_ONEDRIVE_INTEGRATION,
                     "enable_memories": app.state.config.ENABLE_MEMORIES,
                     **(
@@ -2495,6 +2527,7 @@ async def get_app_config(request: Request):
                 "google_drive": {
                     "client_id": GOOGLE_DRIVE_CLIENT_ID.value,
                     "api_key": GOOGLE_DRIVE_API_KEY.value,
+                    "has_client_secret": bool(GOOGLE_CLIENT_SECRET.value),
                 },
                 "onedrive": {
                     "client_id_personal": ONEDRIVE_CLIENT_ID_PERSONAL,
@@ -2840,6 +2873,21 @@ async def oauth_login_callback(
                 )
 
                 return await handle_onedrive_auth_callback(request)
+
+    # Check if this is a Google Drive background sync auth callback
+    if provider == "google":
+        state = request.query_params.get("state")
+        if state:
+            from open_webui.services.google_drive.auth import (
+                _pending_flows as _google_drive_pending_flows,
+            )
+
+            if state in _google_drive_pending_flows:
+                from open_webui.routers.google_drive_sync import (
+                    handle_google_drive_auth_callback,
+                )
+
+                return await handle_google_drive_auth_callback(request)
 
     return await oauth_manager.handle_callback(request, provider, response, db=db)
 

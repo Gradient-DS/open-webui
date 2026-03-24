@@ -1,7 +1,7 @@
 """
-OneDrive Token Refresh Service.
+Google Drive Token Refresh Service.
 
-Refreshes stored OAuth tokens using the Microsoft v2.0 token endpoint.
+Refreshes stored OAuth tokens using Google's token endpoint.
 Delegates shared token lifecycle to the generic token_refresh module.
 """
 
@@ -12,9 +12,8 @@ from typing import Optional
 import httpx
 
 from open_webui.config import (
-    ONEDRIVE_CLIENT_ID_BUSINESS,
-    MICROSOFT_CLIENT_SECRET,
-    ONEDRIVE_SHAREPOINT_TENANT_ID,
+    GOOGLE_DRIVE_CLIENT_ID,
+    GOOGLE_CLIENT_SECRET,
 )
 from open_webui.services.sync.token_refresh import (
     get_valid_access_token as _generic_get_valid_access_token,
@@ -22,8 +21,7 @@ from open_webui.services.sync.token_refresh import (
 
 log = logging.getLogger(__name__)
 
-_AUTHORITY_BASE = "https://login.microsoftonline.com"
-_GRAPH_SCOPE = "https://graph.microsoft.com/Files.Read.All offline_access"
+_TOKEN_URL = "https://oauth2.googleapis.com/token"
 
 
 async def get_valid_access_token(
@@ -37,8 +35,8 @@ async def get_valid_access_token(
     Returns None if no token exists or refresh fails (token revoked).
     """
     return await _generic_get_valid_access_token(
-        provider="onedrive",
-        meta_key="onedrive_sync",
+        provider="google_drive",
+        meta_key="google_drive_sync",
         user_id=user_id,
         knowledge_id=knowledge_id,
         refresh_fn=_refresh_token,
@@ -56,19 +54,15 @@ async def _refresh_token(token_data: dict) -> Optional[dict]:
         log.error("No refresh_token in stored token data")
         return None
 
-    tenant_id = ONEDRIVE_SHAREPOINT_TENANT_ID.value or "common"
-    token_url = f"{_AUTHORITY_BASE}/{tenant_id}/oauth2/v2.0/token"
-
     try:
         async with httpx.AsyncClient(timeout=30) as client:
             response = await client.post(
-                token_url,
+                _TOKEN_URL,
                 data={
-                    "client_id": ONEDRIVE_CLIENT_ID_BUSINESS,
-                    "client_secret": MICROSOFT_CLIENT_SECRET.value,
+                    "client_id": GOOGLE_DRIVE_CLIENT_ID.value,
+                    "client_secret": GOOGLE_CLIENT_SECRET.value,
                     "refresh_token": refresh_token,
                     "grant_type": "refresh_token",
-                    "scope": _GRAPH_SCOPE,
                 },
             )
 
@@ -91,7 +85,7 @@ async def _refresh_token(token_data: dict) -> Optional[dict]:
         log.error("Token refresh error: %s", e)
         return None
 
-    # Microsoft may rotate refresh tokens — preserve old one if new not provided
+    # Google may not return a new refresh token — preserve the old one
     if "refresh_token" not in new_token_data:
         new_token_data["refresh_token"] = refresh_token
 

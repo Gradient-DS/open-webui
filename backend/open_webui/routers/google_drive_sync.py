@@ -1,4 +1,4 @@
-"""OneDrive Sync Router - Endpoints for OneDrive folder sync to Knowledge bases."""
+"""Google Drive Sync Router - Endpoints for Google Drive folder sync to Knowledge bases."""
 
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
 from fastapi.responses import RedirectResponse
@@ -9,7 +9,7 @@ import logging
 
 from open_webui.utils.auth import get_verified_user
 from open_webui.models.users import UserModel
-from open_webui.config import MICROSOFT_CLIENT_SECRET
+from open_webui.config import GOOGLE_CLIENT_SECRET
 from open_webui.services.sync.router import (
     SyncStatusResponse,
     RemoveSourceRequest,
@@ -29,10 +29,10 @@ from open_webui.services.sync.router import (
 log = logging.getLogger(__name__)
 router = APIRouter()
 
-_META_KEY = "onedrive_sync"
-_PROVIDER_TYPE = "onedrive"
-_FILE_ID_PREFIX = "onedrive-"
-_CLEAR_DELTA_KEYS = ["delta_link", "folder_map", "folder_map_version"]
+_META_KEY = "google_drive_sync"
+_PROVIDER_TYPE = "google_drive"
+_FILE_ID_PREFIX = "googledrive-"
+_CLEAR_DELTA_KEYS = ["page_token", "folder_map"]
 
 
 # ──────────────────────────────────────────────────────────────────────
@@ -41,17 +41,16 @@ _CLEAR_DELTA_KEYS = ["delta_link", "folder_map", "folder_map_version"]
 
 
 class SyncItem(BaseModel):
-    """A single OneDrive item (file or folder) to sync."""
+    """A single Google Drive item (file or folder) to sync."""
 
     type: Literal["file", "folder"]
-    drive_id: str
     item_id: str
     item_path: str
     name: str
 
 
 class SyncItemsRequest(BaseModel):
-    """Request to sync multiple OneDrive items to a Knowledge base."""
+    """Request to sync multiple Google Drive items to a Knowledge base."""
 
     knowledge_id: str
     items: List[SyncItem]
@@ -70,11 +69,10 @@ async def sync_items(
     background_tasks: BackgroundTasks,
     user: UserModel = Depends(get_verified_user),
 ):
-    """Start OneDrive sync for multiple items (files and folders)."""
+    """Start Google Drive sync for multiple items (files and folders)."""
     new_sources = [
         {
             "type": item.type,
-            "drive_id": item.drive_id,
             "item_id": item.item_id,
             "item_path": item.item_path,
             "name": item.name,
@@ -110,10 +108,10 @@ async def _sync_items_background(
     user_id: str,
     app,
 ):
-    """Background task to sync multiple OneDrive items."""
-    from open_webui.services.onedrive.sync_worker import OneDriveSyncWorker
+    """Background task to sync multiple Google Drive items."""
+    from open_webui.services.google_drive.sync_worker import GoogleDriveSyncWorker
 
-    worker = OneDriveSyncWorker(
+    worker = GoogleDriveSyncWorker(
         knowledge_id=knowledge_id,
         sources=sources,
         access_token=access_token,
@@ -137,23 +135,16 @@ async def cancel_sync(
     knowledge_id: str,
     user: UserModel = Depends(get_verified_user),
 ):
-    """Cancel an ongoing OneDrive sync for a Knowledge base."""
+    """Cancel an ongoing Google Drive sync for a Knowledge base."""
     return handle_cancel_sync(knowledge_id, _META_KEY, user)
 
 
 def _remove_files_for_source(knowledge_id, item_id, source_to_remove):
-    """Remove all files associated with a specific OneDrive source."""
-
-    def _legacy_drive_id_match(file_meta, source):
-        """Legacy fallback: match by drive_id for old files without source_item_id."""
-        return file_meta.get("onedrive_drive_id") == source.get("drive_id")
-
+    """Remove all files associated with a specific Google Drive source."""
     return remove_files_for_source_generic(
         knowledge_id=knowledge_id,
         source_item_id=item_id,
         file_id_prefix=_FILE_ID_PREFIX,
-        get_drive_id_fn=_legacy_drive_id_match,
-        source=source_to_remove,
     )
 
 
@@ -163,7 +154,7 @@ async def remove_source(
     request: RemoveSourceRequest,
     user: UserModel = Depends(get_verified_user),
 ):
-    """Remove a source from a KB's OneDrive sync configuration."""
+    """Remove a source from a KB's Google Drive sync configuration."""
     return handle_remove_source(
         knowledge_id=knowledge_id,
         meta_key=_META_KEY,
@@ -177,7 +168,7 @@ async def remove_source(
 async def list_synced_collections(
     user: UserModel = Depends(get_verified_user),
 ) -> List[dict]:
-    """List all Knowledge bases with OneDrive sync enabled for current user."""
+    """List all Knowledge bases with Google Drive sync enabled for current user."""
     return handle_list_synced_collections(_META_KEY, user)
 
 
@@ -193,14 +184,17 @@ async def initiate_auth(
     user: UserModel = Depends(get_verified_user),
 ):
     """Initiate OAuth auth code flow for background sync."""
-    from open_webui.services.onedrive.auth import get_authorization_url
+    from open_webui.services.google_drive.auth import get_authorization_url
 
-    if not MICROSOFT_CLIENT_SECRET.value:
-        raise HTTPException(400, "OneDrive client secret not configured")
+    if not GOOGLE_CLIENT_SECRET.value:
+        raise HTTPException(400, "Google client secret not configured")
 
     knowledge = get_knowledge_or_raise(knowledge_id, user)
 
-    redirect_uri = str(request.base_url).rstrip("/") + "/oauth/microsoft/callback"
+    redirect_uri = str(request.base_url).rstrip("/") + "/oauth/google/callback"
+    log.info(
+        "OAuth initiate: base_url=%s, redirect_uri=%s", request.base_url, redirect_uri
+    )
 
     auth_url = get_authorization_url(
         user_id=user.id,
@@ -210,12 +204,12 @@ async def initiate_auth(
     return RedirectResponse(auth_url)
 
 
-async def handle_onedrive_auth_callback(request: Request):
+async def handle_google_drive_auth_callback(request: Request):
     """
-    Handle OAuth callback from Microsoft for OneDrive background sync.
-    Called from the shared /oauth/microsoft/callback route in main.py.
+    Handle OAuth callback from Google for Google Drive background sync.
+    Called from the shared /oauth/google/callback route in main.py.
     """
-    from open_webui.services.onedrive.auth import (
+    from open_webui.services.google_drive.auth import (
         exchange_code_for_tokens,
         get_pending_flow,
         remove_pending_flow,
@@ -230,14 +224,14 @@ async def handle_onedrive_auth_callback(request: Request):
         if state:
             remove_pending_flow(state)
         return auth_callback_html(
-            callback_type="onedrive_auth_callback",
+            callback_type="google_drive_auth_callback",
             success=False,
             error=error_description or error,
         )
 
     if not code or not state:
         return auth_callback_html(
-            callback_type="onedrive_auth_callback",
+            callback_type="google_drive_auth_callback",
             success=False,
             error="Missing authorization code or state",
         )
@@ -245,7 +239,7 @@ async def handle_onedrive_auth_callback(request: Request):
     flow = get_pending_flow(state)
     if not flow:
         return auth_callback_html(
-            callback_type="onedrive_auth_callback",
+            callback_type="google_drive_auth_callback",
             success=False,
             error="Invalid or expired authorization flow",
         )
@@ -256,7 +250,7 @@ async def handle_onedrive_auth_callback(request: Request):
         flow=flow,
         provider_type=_PROVIDER_TYPE,
         meta_key=_META_KEY,
-        callback_type="onedrive_auth_callback",
+        callback_type="google_drive_auth_callback",
         exchange_code_fn=exchange_code_for_tokens,
     )
 
@@ -267,7 +261,7 @@ async def get_token_status(
     user: UserModel = Depends(get_verified_user),
 ):
     """Check if a stored token exists and is valid for a KB."""
-    from open_webui.services.onedrive.auth import get_stored_token
+    from open_webui.services.google_drive.auth import get_stored_token
 
     return handle_get_token_status(knowledge_id, _META_KEY, user, get_stored_token)
 
@@ -278,7 +272,7 @@ async def revoke_token(
     user: UserModel = Depends(get_verified_user),
 ):
     """Revoke and delete stored token for a KB."""
-    from open_webui.services.onedrive.auth import delete_stored_token
+    from open_webui.services.google_drive.auth import delete_stored_token
 
     return handle_revoke_token(
         knowledge_id, _PROVIDER_TYPE, _META_KEY, user, delete_stored_token

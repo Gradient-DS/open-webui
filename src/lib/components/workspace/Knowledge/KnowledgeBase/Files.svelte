@@ -12,7 +12,6 @@
 	import { capitalizeFirstLetter, formatFileSize } from '$lib/utils';
 
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
-	import OneDrive from '$lib/components/icons/OneDrive.svelte';
 	import DocumentPage from '$lib/components/icons/DocumentPage.svelte';
 	import XMark from '$lib/components/icons/XMark.svelte';
 	import Spinner from '$lib/components/common/Spinner.svelte';
@@ -57,16 +56,6 @@
 							{/if}
 						</div>
 
-						{#if file?.meta?.source === 'onedrive'}
-							<Tooltip content={file?.meta?.last_synced_at
-								? $i18n.t('Synced from OneDrive: {{date}}', { date: dayjs(file.meta.last_synced_at * 1000).format('LLLL') })
-								: $i18n.t('Synced from OneDrive')
-							}>
-								<div class="flex items-center shrink-0 text-xs text-gray-400">
-									<OneDrive className="size-3.5" />
-								</div>
-							</Tooltip>
-						{/if}
 					</div>
 				</div>
 

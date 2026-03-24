@@ -1,6 +1,6 @@
-"""Socket.IO event emitter for OneDrive sync progress.
+"""Socket.IO event emitter for Google Drive sync progress.
 
-Delegates to the shared sync events module with the OneDrive event prefix.
+Delegates to the shared sync events module with the Google Drive event prefix.
 """
 
 from typing import Optional, List, Dict, Any
@@ -11,7 +11,7 @@ from open_webui.services.sync.events import (
     emit_sync_progress as _emit_sync_progress,
 )
 
-_PREFIX = "onedrive"
+_PREFIX = "googledrive"
 
 
 async def emit_file_processing(
@@ -19,7 +19,7 @@ async def emit_file_processing(
     knowledge_id: str,
     file_info: Dict[str, Any],
 ):
-    """Emit event when a file starts processing during OneDrive sync."""
+    """Emit event when a file starts processing during Google Drive sync."""
     await _emit_file_processing(_PREFIX, user_id, knowledge_id, file_info)
 
 

@@ -314,7 +314,16 @@ openWebui:
     imageGenerationModel: ""
     imagesOpenaiApiBaseUrl: ""
     imageSize: "1024x1024"
+    # Google Drive Integration
     enableGoogleDriveIntegration: "false"
+    googleDriveClientId: ""   # Google OAuth Client ID (for Picker + sync)
+    googleDriveApiKey: ""     # Google Picker API key (browser-side only)
+
+    # Google Drive Sync (for Knowledge Bases)
+    enableGoogleDriveSync: "false"
+    googleDriveSyncIntervalMinutes: "60"
+    googleDriveMaxFilesPerSync: "500"
+    googleDriveMaxFileSizeMb: "100"
 
     # OneDrive Integration
     enableOnedriveIntegration: "false"
@@ -510,6 +519,9 @@ secrets:
   webuiSecretKey: ""  # Generate with: openssl rand -hex 32
   openaiApiKey: ""
   ragOpenaiApiKey: ""
+
+  # Google OAuth (leave empty to disable Google Drive sync)
+  googleClientSecret: ""
 
   # Microsoft OAuth (leave empty to disable)
   microsoftClientSecret: ""

@@ -1,8 +1,8 @@
 """
-OneDrive OAuth Auth Code Flow for Background Sync.
+Google Drive OAuth Auth Code Flow for Background Sync.
 
 Uses confidential client (client_secret) with PKCE for obtaining
-90-day refresh tokens. Tokens are stored encrypted in OAuthSessions.
+refresh tokens. Tokens are stored encrypted in OAuthSessions.
 """
 
 import hashlib
@@ -15,9 +15,8 @@ from urllib.parse import urlencode
 
 from open_webui.models.oauth_sessions import OAuthSessions
 from open_webui.config import (
-    ONEDRIVE_CLIENT_ID_BUSINESS,
-    MICROSOFT_CLIENT_SECRET,
-    ONEDRIVE_SHAREPOINT_TENANT_ID,
+    GOOGLE_DRIVE_CLIENT_ID,
+    GOOGLE_CLIENT_SECRET,
 )
 
 log = logging.getLogger(__name__)
@@ -26,9 +25,10 @@ log = logging.getLogger(__name__)
 _pending_flows: Dict[str, Dict[str, Any]] = {}
 _FLOW_TTL_SECONDS = 600
 
-# Microsoft OAuth endpoints
-_AUTHORITY_BASE = "https://login.microsoftonline.com"
-_GRAPH_SCOPE = "https://graph.microsoft.com/Files.Read.All offline_access"
+# Google OAuth endpoints
+_AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth"
+_TOKEN_URL = "https://oauth2.googleapis.com/token"
+_SCOPE = "https://www.googleapis.com/auth/drive.readonly"
 
 
 def _cleanup_expired_flows():
@@ -68,14 +68,13 @@ def get_authorization_url(
     redirect_uri: str,
 ) -> str:
     """
-    Build the Microsoft OAuth authorization URL.
+    Build the Google OAuth authorization URL.
 
     Returns the URL to redirect the user to for authorization.
     Stores the pending flow in memory for callback validation.
     """
     _cleanup_expired_flows()
 
-    tenant_id = ONEDRIVE_SHAREPOINT_TENANT_ID.value or "common"
     code_verifier, code_challenge = _generate_pkce()
     state = secrets.token_urlsafe(32)
 
@@ -88,18 +87,18 @@ def get_authorization_url(
     }
 
     params = {
-        "client_id": ONEDRIVE_CLIENT_ID_BUSINESS,
+        "client_id": GOOGLE_DRIVE_CLIENT_ID.value,
         "response_type": "code",
         "redirect_uri": redirect_uri,
-        "scope": _GRAPH_SCOPE,
+        "scope": _SCOPE,
         "state": state,
         "code_challenge": code_challenge,
         "code_challenge_method": "S256",
-        "response_mode": "query",
-        "prompt": "consent",  # Force consent to ensure refresh token
+        "access_type": "offline",
+        "prompt": "consent",  # Force consent to guarantee refresh token
     }
 
-    return f"{_AUTHORITY_BASE}/{tenant_id}/oauth2/v2.0/authorize?{urlencode(params)}"
+    return f"{_AUTH_URL}?{urlencode(params)}"
 
 
 async def exchange_code_for_tokens(
@@ -111,7 +110,7 @@ async def exchange_code_for_tokens(
     Exchange authorization code for tokens and store in OAuthSessions.
 
     Validates the state parameter against pending flows,
-    exchanges the code with Microsoft's token endpoint,
+    exchanges the code with Google's token endpoint,
     and stores the encrypted token data.
 
     Returns dict with 'success', 'knowledge_id', and optionally 'error'.
@@ -137,16 +136,13 @@ async def exchange_code_for_tokens(
     if time.time() - flow["created_at"] > _FLOW_TTL_SECONDS:
         return {"success": False, "error": "Authorization flow expired"}
 
-    tenant_id = ONEDRIVE_SHAREPOINT_TENANT_ID.value or "common"
-    token_url = f"{_AUTHORITY_BASE}/{tenant_id}/oauth2/v2.0/token"
-
     try:
         async with httpx.AsyncClient(timeout=30) as client:
             response = await client.post(
-                token_url,
+                _TOKEN_URL,
                 data={
-                    "client_id": ONEDRIVE_CLIENT_ID_BUSINESS,
-                    "client_secret": MICROSOFT_CLIENT_SECRET.value,
+                    "client_id": GOOGLE_DRIVE_CLIENT_ID.value,
+                    "client_secret": GOOGLE_CLIENT_SECRET.value,
                     "code": code,
                     "redirect_uri": flow["redirect_uri"],
                     "grant_type": "authorization_code",
@@ -181,13 +177,12 @@ async def exchange_code_for_tokens(
 
     # Store in OAuthSessions with per-user provider key
     knowledge_id = flow["knowledge_id"]
-    provider = "onedrive"
+    provider = "google_drive"
 
-    # Delete any existing session for this user (including legacy per-KB sessions)
+    # Delete any existing session for this user
     existing = OAuthSessions.get_session_by_provider_and_user_id(provider, user_id)
     if existing:
         OAuthSessions.delete_session_by_id(existing.id)
-    _delete_legacy_sessions(user_id)
 
     session = OAuthSessions.create_session(
         user_id=user_id,
@@ -203,73 +198,18 @@ async def exchange_code_for_tokens(
 
 
 def get_stored_token(user_id: str) -> Optional[Dict[str, Any]]:
-    """Get the stored OneDrive token for a user, or None.
-
-    Checks for the per-user "onedrive" session first. Falls back to
-    legacy per-KB "onedrive:<kb_id>" sessions and migrates them.
-    """
-    provider = "onedrive"
+    """Get the stored Google Drive token for a user, or None."""
+    provider = "google_drive"
     session = OAuthSessions.get_session_by_provider_and_user_id(provider, user_id)
     if session:
         return session.token
-
-    # Legacy migration: find any "onedrive:*" session for this user
-    migrated = _migrate_legacy_sessions(user_id)
-    if migrated:
-        return migrated.token
-
     return None
 
 
 def delete_stored_token(user_id: str) -> bool:
-    """Delete the stored OneDrive token for a user (including legacy sessions)."""
-    provider = "onedrive"
+    """Delete the stored Google Drive token for a user."""
+    provider = "google_drive"
     session = OAuthSessions.get_session_by_provider_and_user_id(provider, user_id)
-    deleted = False
     if session:
-        deleted = OAuthSessions.delete_session_by_id(session.id)
-    # Also clean up any legacy per-KB sessions
-    _delete_legacy_sessions(user_id)
-    return deleted
-
-
-def _migrate_legacy_sessions(user_id: str):
-    """Migrate legacy per-KB onedrive sessions to a single per-user session.
-
-    Finds the freshest "onedrive:<kb_id>" session, creates a new "onedrive"
-    session with its token, and deletes all legacy sessions.
-
-    Returns the new OAuthSessionModel or None.
-    """
-    all_sessions = OAuthSessions.get_sessions_by_user_id(user_id)
-    legacy = [s for s in all_sessions if s.provider.startswith("onedrive:")]
-    if not legacy:
-        return None
-
-    # Pick the freshest token
-    freshest = max(legacy, key=lambda s: s.token.get("issued_at", 0))
-    log.info(
-        "Migrating legacy OneDrive token for user %s (from %s)",
-        user_id,
-        freshest.provider,
-    )
-
-    new_session = OAuthSessions.create_session(
-        user_id=user_id,
-        provider="onedrive",
-        token=freshest.token,
-    )
-
-    # Delete all legacy sessions
-    for s in legacy:
-        OAuthSessions.delete_session_by_id(s.id)
-
-    return new_session
-
-
-def _delete_legacy_sessions(user_id: str):
-    """Delete any remaining legacy "onedrive:<kb_id>" sessions for a user."""
-    all_sessions = OAuthSessions.get_sessions_by_user_id(user_id)
-    for s in all_sessions:
-        if s.provider.startswith("onedrive:"):
-            OAuthSessions.delete_session_by_id(s.id)
+        return OAuthSessions.delete_session_by_id(session.id)
+    return False

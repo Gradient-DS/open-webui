@@ -2946,6 +2946,26 @@ GOOGLE_DRIVE_API_KEY = PersistentConfig(
     os.environ.get("GOOGLE_DRIVE_API_KEY", ""),
 )
 
+ENABLE_GOOGLE_DRIVE_SYNC = PersistentConfig(
+    "ENABLE_GOOGLE_DRIVE_SYNC",
+    "google_drive.enable_sync",
+    os.getenv("ENABLE_GOOGLE_DRIVE_SYNC", "False").lower() == "true",
+)
+
+GOOGLE_DRIVE_SYNC_INTERVAL_MINUTES = PersistentConfig(
+    "GOOGLE_DRIVE_SYNC_INTERVAL_MINUTES",
+    "google_drive.sync_interval_minutes",
+    int(os.environ.get("GOOGLE_DRIVE_SYNC_INTERVAL_MINUTES", "60")),
+)
+
+GOOGLE_DRIVE_MAX_FILES_PER_SYNC = int(
+    os.environ.get("GOOGLE_DRIVE_MAX_FILES_PER_SYNC", "500")
+)
+
+GOOGLE_DRIVE_MAX_FILE_SIZE_MB = int(
+    os.environ.get("GOOGLE_DRIVE_MAX_FILE_SIZE_MB", "100")
+)
+
 ENABLE_ONEDRIVE_INTEGRATION = PersistentConfig(
     "ENABLE_ONEDRIVE_INTEGRATION",
     "onedrive.enable",

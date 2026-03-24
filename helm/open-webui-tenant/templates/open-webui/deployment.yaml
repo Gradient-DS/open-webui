@@ -67,6 +67,14 @@ spec:
                 secretKeyRef:
                   name: {{ include "open-webui-tenant.fullname" . }}-secrets
                   key: rag-openai-api-key
+            # Google OAuth (only if configured)
+            {{- if .Values.secrets.googleClientSecret }}
+            - name: GOOGLE_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "open-webui-tenant.fullname" . }}-secrets
+                  key: google-client-secret
+            {{- end }}
             # Microsoft OAuth (only if configured)
             {{- if .Values.secrets.microsoftClientSecret }}
             - name: MICROSOFT_CLIENT_SECRET

@@ -235,7 +235,20 @@ data:
   IMAGES_OPENAI_API_BASE_URL: {{ .Values.openWebui.config.imagesOpenaiApiBaseUrl | quote }}
   {{- end }}
   IMAGE_SIZE: {{ .Values.openWebui.config.imageSize | quote }}
+  # Google Drive Integration
   ENABLE_GOOGLE_DRIVE_INTEGRATION: {{ .Values.openWebui.config.enableGoogleDriveIntegration | quote }}
+  {{- if .Values.openWebui.config.googleDriveClientId }}
+  GOOGLE_DRIVE_CLIENT_ID: {{ .Values.openWebui.config.googleDriveClientId | quote }}
+  {{- end }}
+  {{- if .Values.openWebui.config.googleDriveApiKey }}
+  GOOGLE_DRIVE_API_KEY: {{ .Values.openWebui.config.googleDriveApiKey | quote }}
+  {{- end }}
+
+  # Google Drive Sync
+  ENABLE_GOOGLE_DRIVE_SYNC: {{ .Values.openWebui.config.enableGoogleDriveSync | quote }}
+  GOOGLE_DRIVE_SYNC_INTERVAL_MINUTES: {{ .Values.openWebui.config.googleDriveSyncIntervalMinutes | quote }}
+  GOOGLE_DRIVE_MAX_FILES_PER_SYNC: {{ .Values.openWebui.config.googleDriveMaxFilesPerSync | quote }}
+  GOOGLE_DRIVE_MAX_FILE_SIZE_MB: {{ .Values.openWebui.config.googleDriveMaxFileSizeMb | quote }}
 
   # OneDrive Integration
   ENABLE_ONEDRIVE_INTEGRATION: {{ .Values.openWebui.config.enableOnedriveIntegration | quote }}

@@ -282,7 +282,7 @@ async def create_new_knowledge(
         form_data.type = "local"
 
     # Validate type value
-    allowed_kb_types = {"local", "onedrive"} | set(
+    allowed_kb_types = {"local", "onedrive", "google_drive"} | set(
         (request.app.state.config.INTEGRATION_PROVIDERS or {}).keys()
     )
     if form_data.type not in allowed_kb_types:
