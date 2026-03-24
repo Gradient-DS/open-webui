@@ -1,9 +1,17 @@
-"""Socket.IO event emitter for Google Drive sync progress."""
+"""Socket.IO event emitter for Google Drive sync progress.
 
-import logging
+Delegates to the shared sync events module with the Google Drive event prefix.
+"""
+
 from typing import Optional, List, Dict, Any
 
-log = logging.getLogger(__name__)
+from open_webui.services.sync.events import (
+    emit_file_processing as _emit_file_processing,
+    emit_file_added as _emit_file_added,
+    emit_sync_progress as _emit_sync_progress,
+)
+
+_PREFIX = "googledrive"
 
 
 async def emit_file_processing(
@@ -12,23 +20,7 @@ async def emit_file_processing(
     file_info: Dict[str, Any],
 ):
     """Emit event when a file starts processing during Google Drive sync."""
-    try:
-        from open_webui.socket.main import sio
-
-        await sio.emit(
-            "googledrive:file:processing",
-            {
-                "knowledge_id": knowledge_id,
-                "file": file_info,
-            },
-            room=f"user:{user_id}",
-        )
-        log.debug(
-            f"Emitted file processing event for {file_info.get('name', 'unknown')} "
-            f"in knowledge {knowledge_id}"
-        )
-    except Exception as e:
-        log.debug(f"Failed to emit file processing event: {e}")
+    await _emit_file_processing(_PREFIX, user_id, knowledge_id, file_info)
 
 
 async def emit_file_added(
@@ -37,23 +29,7 @@ async def emit_file_added(
     file_data: Dict[str, Any],
 ):
     """Emit event when a file is successfully added to the knowledge base."""
-    try:
-        from open_webui.socket.main import sio
-
-        await sio.emit(
-            "googledrive:file:added",
-            {
-                "knowledge_id": knowledge_id,
-                "file": file_data,
-            },
-            room=f"user:{user_id}",
-        )
-        log.debug(
-            f"Emitted file added event for {file_data.get('filename', 'unknown')} "
-            f"to knowledge {knowledge_id}"
-        )
-    except Exception as e:
-        log.debug(f"Failed to emit file added event: {e}")
+    await _emit_file_added(_PREFIX, user_id, knowledge_id, file_data)
 
 
 async def emit_sync_progress(
@@ -70,28 +46,17 @@ async def emit_sync_progress(
     failed_files: Optional[List[Dict]] = None,
 ):
     """Emit sync progress event to a specific user via Socket.IO."""
-    try:
-        from open_webui.socket.main import sio
-
-        await sio.emit(
-            "googledrive:sync:progress",
-            {
-                "knowledge_id": knowledge_id,
-                "status": status,
-                "current": current,
-                "total": total,
-                "filename": filename,
-                "error": error,
-                "files_processed": files_processed,
-                "files_failed": files_failed,
-                "deleted_count": deleted_count,
-                "failed_files": failed_files,
-            },
-            room=f"user:{user_id}",
-        )
-        log.debug(
-            f"Emitted sync progress: {status} {current}/{total} "
-            f"for knowledge {knowledge_id}"
-        )
-    except Exception as e:
-        log.debug(f"Failed to emit sync progress event: {e}")
+    await _emit_sync_progress(
+        _PREFIX,
+        user_id,
+        knowledge_id,
+        status,
+        current=current,
+        total=total,
+        filename=filename,
+        error=error,
+        files_processed=files_processed,
+        files_failed=files_failed,
+        deleted_count=deleted_count,
+        failed_files=failed_files,
+    )

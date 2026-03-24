@@ -2,7 +2,7 @@
 Google Drive Token Refresh Service.
 
 Refreshes stored OAuth tokens using Google's token endpoint.
-Handles refresh token rotation and revocation detection.
+Delegates shared token lifecycle to the generic token_refresh module.
 """
 
 import time
@@ -11,18 +11,17 @@ from typing import Optional
 
 import httpx
 
-from open_webui.models.oauth_sessions import OAuthSessions
 from open_webui.config import (
     GOOGLE_DRIVE_CLIENT_ID,
     GOOGLE_CLIENT_SECRET,
+)
+from open_webui.services.sync.token_refresh import (
+    get_valid_access_token as _generic_get_valid_access_token,
 )
 
 log = logging.getLogger(__name__)
 
 _TOKEN_URL = "https://oauth2.googleapis.com/token"
-
-# Refresh if token expires within this many seconds
-_REFRESH_BUFFER_SECONDS = 300  # 5 minutes
 
 
 async def get_valid_access_token(
@@ -35,31 +34,13 @@ async def get_valid_access_token(
     If the stored token is expired or near-expiry, automatically refreshes it.
     Returns None if no token exists or refresh fails (token revoked).
     """
-    provider = "google_drive"
-    session = OAuthSessions.get_session_by_provider_and_user_id(provider, user_id)
-    if not session:
-        return None
-
-    token_data = session.token
-    expires_at = token_data.get("expires_at", 0)
-
-    # Check if token needs refresh
-    if time.time() + _REFRESH_BUFFER_SECONDS < expires_at:
-        return token_data.get("access_token")
-
-    # Token expired or near-expiry — refresh
-    log.info("Refreshing token for user %s, KB %s", user_id, knowledge_id)
-    new_token_data = await _refresh_token(token_data)
-
-    if new_token_data is None:
-        # Refresh failed — token likely revoked
-        log.warning("Token refresh failed for user %s, KB %s — marking as needs_reauth", user_id, knowledge_id)
-        _mark_needs_reauth(user_id)
-        return None
-
-    # Update stored token
-    OAuthSessions.update_session_by_id(session.id, new_token_data)
-    return new_token_data.get("access_token")
+    return await _generic_get_valid_access_token(
+        provider="google_drive",
+        meta_key="google_drive_sync",
+        user_id=user_id,
+        knowledge_id=knowledge_id,
+        refresh_fn=_refresh_token,
+    )
 
 
 async def _refresh_token(token_data: dict) -> Optional[dict]:
@@ -114,19 +95,3 @@ async def _refresh_token(token_data: dict) -> Optional[dict]:
     new_token_data["issued_at"] = int(time.time())
 
     return new_token_data
-
-
-def _mark_needs_reauth(user_id: str):
-    """Mark ALL Google Drive knowledge bases for a user as needing re-authorization."""
-    from open_webui.models.knowledge import Knowledges
-
-    kbs = Knowledges.get_knowledge_bases_by_type("google_drive")
-    for kb in kbs:
-        if kb.user_id != user_id:
-            continue
-        meta = kb.meta or {}
-        sync_info = meta.get("google_drive_sync", {})
-        sync_info["needs_reauth"] = True
-        sync_info["has_stored_token"] = False
-        meta["google_drive_sync"] = sync_info
-        Knowledges.update_knowledge_meta_by_id(kb.id, meta)

@@ -6,7 +6,7 @@ behind the SyncProvider and TokenManager interfaces.
 """
 
 import logging
-from typing import Optional, Dict, Any
+from typing import Optional
 
 from open_webui.services.sync.provider import SyncProvider, TokenManager
 from open_webui.services.google_drive.token_refresh import (
@@ -16,7 +16,6 @@ from open_webui.services.google_drive.auth import (
     get_stored_token,
     delete_stored_token,
 )
-from open_webui.models.knowledge import Knowledges
 
 log = logging.getLogger(__name__)
 
@@ -45,59 +44,22 @@ class GoogleDriveSyncProvider(SyncProvider):
     def get_provider_type(self) -> str:
         return "google_drive"
 
+    def get_meta_key(self) -> str:
+        return "google_drive_sync"
+
     def get_token_manager(self) -> TokenManager:
         return self._token_manager
 
-    async def execute_sync(
-        self,
-        knowledge_id: str,
-        user_id: str,
-        app,
-        access_token: Optional[str] = None,
-    ) -> Dict[str, Any]:
-        """
-        Execute Google Drive sync.
-
-        If access_token is provided (manual sync), uses it directly.
-        Otherwise, obtains a token from the token manager (background sync).
-        """
+    def create_worker(
+        self, knowledge_id, sources, access_token, user_id, app, token_provider=None
+    ):
         from open_webui.services.google_drive.sync_worker import GoogleDriveSyncWorker
 
-        knowledge = Knowledges.get_knowledge_by_id(id=knowledge_id)
-        if not knowledge:
-            return {"error": "Knowledge base not found"}
-
-        meta = knowledge.meta or {}
-        sync_info = meta.get("google_drive_sync", {})
-        sources = sync_info.get("sources", [])
-
-        if not sources:
-            return {"error": "No sync sources configured"}
-
-        # Determine token source
-        token_provider = None
-        if access_token:
-            effective_token = access_token
-        else:
-            effective_token = await self._token_manager.get_valid_access_token(
-                user_id, knowledge_id
-            )
-            if not effective_token:
-                return {"error": "No valid token available", "needs_reauth": True}
-
-            async def _refresh():
-                return await self._token_manager.get_valid_access_token(
-                    user_id, knowledge_id
-                )
-            token_provider = _refresh
-
-        worker = GoogleDriveSyncWorker(
+        return GoogleDriveSyncWorker(
             knowledge_id=knowledge_id,
             sources=sources,
-            access_token=effective_token,
+            access_token=access_token,
             user_id=user_id,
             app=app,
             token_provider=token_provider,
         )
-
-        return await worker.sync()
