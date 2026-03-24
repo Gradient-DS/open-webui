@@ -115,6 +115,8 @@ data:
   FEATURE_KNOWLEDGE: {{ .Values.openWebui.config.featureKnowledge | quote }}
   FEATURE_PROMPTS: {{ .Values.openWebui.config.featurePrompts | quote }}
   FEATURE_TOOLS: {{ .Values.openWebui.config.featureTools | quote }}
+  FEATURE_SKILLS: {{ .Values.openWebui.config.featureSkills | quote }}
+  FEATURE_BUILTIN_TOOLS: {{ .Values.openWebui.config.featureBuiltinTools | quote }}
   FEATURE_ADMIN_EVALUATIONS: {{ .Values.openWebui.config.featureAdminEvaluations | quote }}
   FEATURE_ADMIN_FUNCTIONS: {{ .Values.openWebui.config.featureAdminFunctions | quote }}
   FEATURE_ADMIN_SETTINGS: {{ .Values.openWebui.config.featureAdminSettings | quote }}
@@ -124,6 +126,9 @@ data:
   FEATURE_TEMPORARY_CHAT: {{ .Values.openWebui.config.featureTemporaryChat | quote }}
   FEATURE_TOOL_SERVERS: {{ .Values.openWebui.config.featureToolServers | quote }}
   FEATURE_TERMINAL_SERVERS: {{ .Values.openWebui.config.featureTerminalServers | quote }}
+
+  # Memories
+  ENABLE_MEMORIES: {{ .Values.openWebui.config.enableMemories | quote }}
 
   # Notes
   ENABLE_NOTES: {{ .Values.openWebui.config.enableNotes | quote }}

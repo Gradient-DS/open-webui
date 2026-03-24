@@ -203,6 +203,8 @@ openWebui:
     featureKnowledge: "True"
     featurePrompts: "True"
     featureTools: "False"
+    featureSkills: "False"
+    featureBuiltinTools: "False"
     featureAdminEvaluations: "True"
     featureAdminFunctions: "False"
     featureAdminSettings: "True"
@@ -211,6 +213,9 @@ openWebui:
     featureTemporaryChat: "True"
     featureToolServers: "False"
     featureTerminalServers: "False"
+
+    # Memories
+    enableMemories: "true"
 
     # Notes
     enableNotes: "true"

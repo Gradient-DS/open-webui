@@ -122,6 +122,7 @@ from open_webui.config import (
     DEFAULT_CODE_INTERPRETER_PROMPT,
     CODE_INTERPRETER_PYODIDE_PROMPT,
     CODE_INTERPRETER_BLOCKED_MODULES,
+    FEATURE_BUILTIN_TOOLS,
 )
 from open_webui.env import (
     GLOBAL_LOG_LEVEL,
@@ -2714,6 +2715,7 @@ async def process_chat_payload(request, form_data, user, metadata, model):
         if (
             metadata.get("params", {}).get("function_calling") == "native"
             and builtin_tools_enabled
+            and FEATURE_BUILTIN_TOOLS
         ):
             # Add file context to user messages
             chat_id = metadata.get("chat_id")

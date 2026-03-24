@@ -1935,6 +1935,10 @@ FEATURE_TERMINAL_SERVERS = (
     os.environ.get("FEATURE_TERMINAL_SERVERS", "True").lower() == "true"
 )
 
+FEATURE_BUILTIN_TOOLS = (
+    os.environ.get("FEATURE_BUILTIN_TOOLS", "True").lower() == "true"
+)
+
 # Admin Panel Tab Feature Flags
 FEATURE_ADMIN_EVALUATIONS = (
     os.environ.get("FEATURE_ADMIN_EVALUATIONS", "True").lower() == "true"
