@@ -15,6 +15,7 @@ export type Feature =
 	| 'knowledge'
 	| 'prompts'
 	| 'tools'
+	| 'skills'
 	| 'admin_evaluations'
 	| 'admin_functions'
 	| 'admin_settings'
@@ -91,7 +92,7 @@ export const ADMIN_SETTINGS_TABS = [
 	'connections',
 	'models',
 	'evaluations',
-	'tools',
+	'integrations',
 	'documents',
 	'web',
 	'code-execution',
@@ -99,9 +100,9 @@ export const ADMIN_SETTINGS_TABS = [
 	'audio',
 	'images',
 	'pipelines',
+	'email',
 	'db',
-	'acceptance',
-	'email'
+	'acceptance'
 ] as const;
 
 export type AdminSettingsTab = (typeof ADMIN_SETTINGS_TABS)[number];

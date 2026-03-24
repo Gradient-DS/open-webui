@@ -4,11 +4,15 @@
 	dayjs.extend(relativeTime);
 
 	import { toast } from 'svelte-sonner';
-	import { onMount, onDestroy, getContext, tick } from 'svelte';
+	import { onMount, getContext, tick, onDestroy } from 'svelte';
 	const i18n = getContext('i18n');
 
 	import { WEBUI_NAME, knowledge, user, config, socket } from '$lib/stores';
-	import { deleteKnowledgeById, searchKnowledgeBases } from '$lib/apis/knowledge';
+	import {
+		deleteKnowledgeById,
+		searchKnowledgeBases,
+		exportKnowledgeById
+	} from '$lib/apis/knowledge';
 
 	import { goto } from '$app/navigation';
 	import { capitalizeFirstLetter } from '$lib/utils';
@@ -29,6 +33,7 @@
 	import Dropdown from '../common/Dropdown.svelte';
 	import XMark from '../icons/XMark.svelte';
 	import ViewSelector from './common/ViewSelector.svelte';
+	import TypeSelector from './common/TypeSelector.svelte';
 	import Loader from '../common/Loader.svelte';
 
 	let loaded = false;
@@ -39,7 +44,9 @@
 
 	let page = 1;
 	let query = '';
+	let searchDebounceTimer: ReturnType<typeof setTimeout>;
 	let viewOption = '';
+	let typeFilter = '';
 
 	let items = null;
 	let total = null;
@@ -47,17 +54,29 @@
 	let allItemsLoaded = false;
 	let itemsLoading = false;
 
-	$: if (loaded && query !== undefined && viewOption !== undefined) {
-		init();
+	let queryDebounceActive = false;
+	let fetchId = 0;
+
+	$: if (loaded) {
+		// Track all dependencies explicitly
+		void viewOption, typeFilter, query;
+
+		if (queryDebounceActive) {
+			// User is typing — debounce
+			clearTimeout(searchDebounceTimer);
+			searchDebounceTimer = setTimeout(() => {
+				init();
+			}, 300);
+		} else {
+			// Filter/view change or initial load — fetch immediately
+			init();
+		}
 	}
 
-	const reset = () => {
-		page = 1;
-		items = null;
-		total = null;
-		allItemsLoaded = false;
-		itemsLoading = false;
-	};
+	onDestroy(() => {
+		clearTimeout(searchDebounceTimer);
+		$socket?.off('onedrive:sync:progress', handleSyncProgress);
+	});
 
 	const loadMoreItems = async () => {
 		if (allItemsLoaded) return;
@@ -66,20 +85,26 @@
 	};
 
 	const init = async () => {
-		reset();
-		await getItemsPage();
+		if (!loaded) return;
+
+		page = 1;
+		allItemsLoaded = false;
+		// Don't null items — keep showing stale data during re-fetch
+		await getItemsPage(true);
 	};
 
-	const getItemsPage = async () => {
+	const getItemsPage = async (replace = false) => {
+		const currentFetchId = ++fetchId;
 		itemsLoading = true;
-		const res = await searchKnowledgeBases(localStorage.token, query, viewOption, page).catch(
+		const res = await searchKnowledgeBases(localStorage.token, query, viewOption, page, typeFilter || null).catch(
 			() => {
 				return [];
 			}
 		);
 
+		if (currentFetchId !== fetchId) return; // Stale response, discard
+
 		if (res) {
-			console.log(res);
 			total = res.total;
 			const pageItems = res.items;
 
@@ -89,14 +114,15 @@
 				allItemsLoaded = false;
 			}
 
-			if (items) {
-				items = [...items, ...pageItems];
-			} else {
+			if (replace || items === null) {
 				items = pageItems;
+			} else {
+				items = [...items, ...pageItems];
 			}
 		}
 
 		itemsLoading = false;
+		queryDebounceActive = false;
 		return res;
 	};
 
@@ -108,6 +134,25 @@
 		if (res) {
 			toast.success($i18n.t('Knowledge deleted successfully.'));
 			init();
+		}
+	};
+
+	const exportHandler = async (item) => {
+		try {
+			const blob = await exportKnowledgeById(localStorage.token, item.id);
+			if (blob) {
+				const url = URL.createObjectURL(blob);
+				const a = document.createElement('a');
+				a.href = url;
+				a.download = `${item.name}.zip`;
+				document.body.appendChild(a);
+				a.click();
+				document.body.removeChild(a);
+				URL.revokeObjectURL(url);
+				toast.success($i18n.t('Knowledge exported successfully'));
+			}
+		} catch (e) {
+			toast.error(`${e}`);
 		}
 	};
 
@@ -155,7 +200,6 @@
 
 	onMount(async () => {
 		viewOption = localStorage?.workspaceViewOption || '';
-		loaded = true;
 
 		$socket?.on('onedrive:sync:progress', handleSyncProgress);
 		$socket?.on('googledrive:sync:progress', handleGoogleDriveSyncProgress);
@@ -164,6 +208,9 @@
 	onDestroy(() => {
 		$socket?.off('onedrive:sync:progress', handleSyncProgress);
 		$socket?.off('googledrive:sync:progress', handleGoogleDriveSyncProgress);
+
+		await tick();
+		loaded = true;
 	});
 </script>
 
@@ -261,12 +308,17 @@
 				<input
 					class=" w-full text-sm py-1 rounded-r-xl outline-hidden bg-transparent"
 					bind:value={query}
+					aria-label={$i18n.t('Search Knowledge')}
 					placeholder={$i18n.t('Search Knowledge')}
+					on:input={() => {
+						queryDebounceActive = true;
+					}}
 				/>
 				{#if query}
 					<div class="self-center pl-1.5 translate-y-[0.5px] rounded-l-xl bg-transparent">
 						<button
 							class="p-0.5 rounded-full hover:bg-gray-100 dark:hover:bg-gray-900 transition"
+							aria-label={$i18n.t('Clear search')}
 							on:click={() => {
 								query = '';
 							}}
@@ -299,6 +351,15 @@
 						await tick();
 					}}
 				/>
+
+				{#if Object.keys($config?.integration_providers ?? {}).length > 0}
+					<TypeSelector
+						bind:value={typeFilter}
+						onChange={async () => {
+							await tick();
+						}}
+					/>
+				{/if}
 			</div>
 		</div>
 
@@ -340,6 +401,11 @@
 															<Spinner className="size-3" />
 														</Tooltip>
 													{/if}
+												{:else if $config?.integration_providers?.[item?.type]}
+													<Badge
+														type={$config.integration_providers[item.type].badge_type}
+														content={$config.integration_providers[item.type].name}
+													/>
 												{:else}
 													<Badge type="muted" content={$i18n.t('Local')} />
 												{/if}
@@ -356,6 +422,11 @@
 											<div class="flex items-center gap-2">
 												<div class=" flex self-center">
 													<ItemMenu
+														onExport={$user.role === 'admin'
+															? () => {
+																	exportHandler(item);
+																}
+															: null}
 														on:delete={() => {
 															selectedItem = item;
 															showDeleteConfirm = true;

@@ -141,6 +141,9 @@ openWebui:
     # LLM Providers
     enableOllamaApi: "false"
     openaiApiBaseUrl: "https://router.huggingface.co/v1"
+    # Forward user identity headers to upstream LLM API (required for LiteLLM per-user tracking)
+    enableForwardUserInfoHeaders: "false"
+    forwardUserInfoHeaderUserId: "X-OpenWebUI-User-Id"  # Header name for user UUID forwarding
 
     # Vector Database (Weaviate) - uses local Weaviate in tenant namespace
     vectorDb: "weaviate"
@@ -206,6 +209,8 @@ openWebui:
     featureAdminSettingsTabs: "models,tools,interface,db,email,acceptance"
     featureInputMenu: "True"
     featureTemporaryChat: "True"
+    featureToolServers: "False"
+    featureTerminalServers: "False"
 
     # Notes
     enableNotes: "true"
@@ -288,6 +293,10 @@ openWebui:
     enableEvaluationArenaModels: "false"
     enableApiKeys: "false"
     enableImageGeneration: "false"
+    imageGenerationEngine: "openai"
+    imageGenerationModel: ""
+    imagesOpenaiApiBaseUrl: ""
+    imageSize: "1024x1024"
     enableGoogleDriveIntegration: "false"
 
     # OneDrive Integration
@@ -342,6 +351,9 @@ openWebui:
     s3EndpointUrl: ""             # For S3-compatible storage (e.g., https://object.previder.nl)
     s3KeyPrefix: ""               # Optional prefix for all keys
     s3EnableTagging: "false"
+
+    # Easter Eggs (disabled)
+    enableEasterEggs: "false"
 
     # Telemetry (disabled)
     scarfNoAnalytics: "true"

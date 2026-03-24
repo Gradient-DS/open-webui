@@ -33,8 +33,10 @@
 		addFileToKnowledgeById,
 		getKnowledgeById,
 		removeFileFromKnowledgeById,
+		resetKnowledgeById,
 		updateFileFromKnowledgeById,
 		updateKnowledgeById,
+		updateKnowledgeAccessGrants,
 		searchKnowledgeFilesById
 	} from '$lib/apis/knowledge';
 	import { processWeb, processYoutubeVideo } from '$lib/apis/retrieval';
@@ -87,6 +89,7 @@
 	let showAddWebpageModal = false;
 	let showAddTextContentModal = false;
 
+	let showSyncConfirmModal = false;
 	let showCancelSyncConfirmModal = false;
 	let showAccessControlModal = false;
 
@@ -99,6 +102,8 @@
 			file_ids: string[];
 		};
 		files: any[];
+		access_grants?: any[];
+		write_access?: boolean;
 	};
 
 	let id = null;
@@ -112,6 +117,8 @@
 	let inputFiles = null;
 
 	let query = '';
+	let searchDebounceTimer: ReturnType<typeof setTimeout>;
+
 	let viewOption = null;
 	let sortKey = null;
 	let direction = null;
@@ -120,30 +127,33 @@
 	let fileItems = null;
 	let fileItemsTotal = null;
 
-	let _skipReactiveRefresh = false;
-
 	const reset = () => {
 		currentPage = 1;
 	};
 
 	const init = async () => {
-		_skipReactiveRefresh = true;
 		reset();
-		_skipReactiveRefresh = false;
 		await getItemsPage();
 	};
 
+	// Debounce only query changes
+	$: if (query !== undefined) {
+		clearTimeout(searchDebounceTimer);
+
+		searchDebounceTimer = setTimeout(() => {
+			getItemsPage();
+		}, 300);
+	}
+
+	// Immediate response to filter/pagination changes
 	$: if (
 		knowledgeId !== null &&
-		query !== undefined &&
 		viewOption !== undefined &&
 		sortKey !== undefined &&
 		direction !== undefined &&
 		currentPage !== undefined
 	) {
-		if (!_skipReactiveRefresh) {
-			getItemsPage();
-		}
+		getItemsPage();
 	}
 
 	$: if (
@@ -157,6 +167,9 @@
 
 	const getItemsPage = async () => {
 		if (knowledgeId === null) return;
+
+		fileItems = null;
+		fileItemsTotal = null;
 
 		if (sortKey === null) {
 			direction = null;
@@ -312,21 +325,6 @@
 			return;
 		}
 
-		// Reject files with disallowed extensions when allowed_extensions is configured
-		const allowedExtensions = $config?.file?.allowed_extensions ?? [];
-		if (allowedExtensions.length > 0) {
-			const fileExtension = file.name.split('.').pop()?.toLowerCase() ?? '';
-			if (!allowedExtensions.includes(fileExtension)) {
-				toast.error(
-					$i18n.t('Unsupported file type: .{{extension}}. Allowed types: {{types}}', {
-						extension: fileExtension,
-						types: allowedExtensions.join(', ')
-					})
-				);
-				return null;
-			}
-		}
-
 		fileItems = [fileItem, ...(fileItems ?? [])];
 		try {
 			let metadata = {
@@ -346,7 +344,7 @@
 			});
 
 			if (uploadedFile) {
-				console.log('File upload started, waiting for processing:', uploadedFile);
+				console.log(uploadedFile);
 				fileItems = fileItems.map((item) => {
 					if (item.itemId === fileItem.itemId) {
 						item.id = uploadedFile.id;
@@ -358,9 +356,9 @@
 					console.warn('File upload warning:', uploadedFile.error);
 					toast.warning(uploadedFile.error);
 					fileItems = fileItems.filter((file) => file.id !== uploadedFile.id);
+				} else {
+					await addFileHandler(uploadedFile.id);
 				}
-				// Don't call addFileHandler here - Socket.IO 'file:status' event will trigger it
-				// when processing completes
 			} else {
 				toast.error($i18n.t('Failed to upload file.'));
 			}
@@ -541,6 +539,27 @@
 		}
 	};
 
+	// Helper function to maintain file paths within zip
+	const syncDirectoryHandler = async () => {
+		if (fileItems.length > 0) {
+			const res = await resetKnowledgeById(localStorage.token, id).catch((e) => {
+				toast.error(`${e}`);
+			});
+
+			if (res) {
+				fileItems = [];
+				toast.success($i18n.t('Knowledge reset successfully.'));
+
+				// Upload directory
+				uploadDirectoryHandler();
+			}
+		} else {
+			uploadDirectoryHandler();
+		}
+	};
+
+	// ===== OneDrive sync handlers =====
+
 	const oneDriveSyncHandler = async () => {
 		try {
 			isSyncingOneDrive = true;
@@ -553,7 +572,6 @@
 			}
 
 			// Get access token specifically for Graph API calls (different from picker token)
-			// The picker uses SharePoint-scoped tokens, but the backend needs Graph API tokens
 			const accessToken = await getGraphApiToken('organizations');
 
 			// Convert to API format
@@ -715,54 +733,6 @@
 		}
 
 		return '\n' + lines.join('\n');
-	};
-
-	// Batched success toast for file uploads - tracks completed files until all uploads finish
-	let successfulFileCount = 0;
-
-	const showBatchedSuccessToast = () => {
-		if (successfulFileCount > 0) {
-			const count = successfulFileCount;
-			successfulFileCount = 0;
-			toast.success(
-				count === 1
-					? $i18n.t('File added successfully.')
-					: $i18n.t('{{count}} files successfully added.', { count })
-			);
-		}
-	};
-
-	// Socket.IO handler for file processing status updates
-	const handleFileStatus = async (data: {
-		file_id: string;
-		status: string;
-		error?: string;
-		collection_name?: string;
-	}) => {
-		if (!fileItems) return;
-
-		const idx = fileItems.findIndex((f) => f.id === data.file_id);
-		if (idx >= 0) {
-			if (data.status === 'completed') {
-				fileItems[idx].status = 'uploaded';
-				// Now that file is processed, add it to the knowledge base
-				await addFileHandler(data.file_id);
-				successfulFileCount++;
-			} else if (data.status === 'failed') {
-				fileItems[idx].status = 'error';
-				fileItems[idx].error = data.error || 'Processing failed';
-				toast.error(`File processing failed: ${data.error || 'Unknown error'}`);
-				// Remove failed file from the list
-				fileItems = fileItems.filter((file) => file.id !== data.file_id);
-			}
-			fileItems = fileItems; // Trigger reactivity
-
-			// Check if all files are done (no more 'uploading' status)
-			const stillUploading = fileItems.some((f) => f.status === 'uploading');
-			if (!stillUploading) {
-				showBatchedSuccessToast();
-			}
-		}
 	};
 
 	// Socket.IO handler for OneDrive file processing started (shows file with loading state)
@@ -1375,11 +1345,8 @@
 		});
 
 		if (res) {
-			// Success toast is batched in handleFileStatus
-			// Just update the knowledge object if needed
-			if (res.knowledge) {
-				knowledge = res.knowledge;
-			}
+			toast.success($i18n.t('File added successfully.'));
+			init();
 		} else {
 			toast.error($i18n.t('Failed to add file.'));
 			fileItems = fileItems.filter((file) => file.id !== fileId);
@@ -1408,24 +1375,19 @@
 	};
 
 	const deleteFileHandler = async (fileId) => {
-		const previousItems = fileItems;
-		const previousTotal = fileItemsTotal;
-		fileItems = (fileItems ?? []).filter((file) => file.id !== fileId);
-		fileItemsTotal = Math.max(0, (fileItemsTotal ?? 1) - 1);
-
 		try {
+			console.log('Starting file deletion process for:', fileId);
+
+			// Remove from knowledge base only
 			const res = await removeFileFromKnowledgeById(localStorage.token, id, fileId);
+			console.log('Knowledge base updated:', res);
+
 			if (res) {
 				toast.success($i18n.t('File removed successfully.'));
-				await getItemsPage();
-			} else {
-				fileItems = previousItems;
-				fileItemsTotal = previousTotal;
+				await init();
 			}
 		} catch (e) {
 			console.error('Error in deleteFileHandler:', e);
-			fileItems = previousItems;
-			fileItemsTotal = previousTotal;
 			toast.error(`${e}`);
 		}
 	};
@@ -1477,7 +1439,7 @@
 				selectedFile = null;
 				selectedFileContent = '';
 
-				await getItemsPage();
+				await init();
 			}
 		} finally {
 			isSaving = false;
@@ -1500,7 +1462,7 @@
 				...knowledge,
 				name: knowledge.name,
 				description: knowledge.description,
-				access_control: knowledge.access_control
+				access_grants: knowledge.access_grants ?? []
 			}).catch((e) => {
 				toast.error(`${e}`);
 			});
@@ -1540,6 +1502,11 @@
 
 		if (!knowledge?.write_access) {
 			toast.error($i18n.t('You do not have permission to upload files to this knowledge base.'));
+			return;
+		}
+
+		if ($config?.integration_providers?.[knowledge?.type]) {
+			toast.error($i18n.t('Files for this knowledge base are managed via the integration API.'));
 			return;
 		}
 
@@ -1631,6 +1598,9 @@
 
 		if (res) {
 			knowledge = res;
+			if (!Array.isArray(knowledge?.access_grants)) {
+				knowledge.access_grants = [];
+			}
 			knowledgeId = knowledge?.id;
 
 			// Check background sync token status for OneDrive KBs
@@ -1714,6 +1684,7 @@
 	});
 
 	onDestroy(() => {
+		clearTimeout(searchDebounceTimer);
 		mediaQuery?.removeEventListener('change', handleMediaQuery);
 		const dropZone = document.querySelector('body');
 		dropZone?.removeEventListener('dragover', onDragOver);
@@ -1746,6 +1717,15 @@
 </script>
 
 <FilesOverlay show={dragged} />
+<SyncConfirmDialog
+	bind:show={showSyncConfirmModal}
+	message={$i18n.t(
+		'This will reset the knowledge base and sync all files. Do you wish to continue?'
+	)}
+	on:confirm={() => {
+		syncDirectoryHandler();
+	}}
+/>
 
 <SyncConfirmDialog
 	bind:show={showCancelSyncConfirmModal}
@@ -1784,8 +1764,9 @@
 	hidden
 	on:change={async () => {
 		if (inputFiles && inputFiles.length > 0) {
-			// Fire all uploads in parallel
-			await Promise.all(Array.from(inputFiles).map((file) => uploadFileHandler(file)));
+			for (const file of inputFiles) {
+				await uploadFileHandler(file);
+			}
 
 			inputFiles = null;
 			const fileInputElement = document.getElementById('files-input');
@@ -1804,11 +1785,18 @@
 		{#if knowledge?.type === 'local' || !knowledge?.type}
 			<AccessControlModal
 				bind:show={showAccessControlModal}
-				bind:accessControl={knowledge.access_control}
+				bind:accessGrants={knowledge.access_grants}
 				share={$user?.permissions?.sharing?.knowledge || $user?.role === 'admin'}
 				sharePublic={$user?.permissions?.sharing?.public_knowledge || $user?.role === 'admin'}
-				onChange={() => {
-					changeDebounceHandler();
+				shareUsers={($user?.permissions?.access_grants?.allow_users ?? true) ||
+					$user?.role === 'admin'}
+				onChange={async () => {
+					try {
+						await updateKnowledgeAccessGrants(localStorage.token, id, knowledge.access_grants ?? []);
+						toast.success($i18n.t('Saved'));
+					} catch (error) {
+						toast.error(`${error}`);
+					}
 				}}
 				accessRoles={['read', 'write']}
 			/>
@@ -1832,6 +1820,7 @@
 								type="text"
 								class="text-left w-full font-medium text-lg font-primary bg-transparent outline-hidden flex-1"
 								bind:value={knowledge.name}
+								aria-label={$i18n.t('Knowledge Name')}
 								placeholder={$i18n.t('Knowledge Name')}
 								disabled={!knowledge?.write_access}
 								on:input={() => {
@@ -1844,6 +1833,11 @@
 									<Badge type="info" content={$i18n.t('OneDrive')} />
 								{:else if knowledge?.type === 'google_drive'}
 									<Badge type="info" content={$i18n.t('Google Drive')} />
+								{:else if $config?.integration_providers?.[knowledge?.type]}
+									<Badge
+										type={$config.integration_providers[knowledge.type].badge_type}
+										content={$config.integration_providers[knowledge.type].name}
+									/>
 								{:else}
 									<Badge type="muted" content={$i18n.t('Local')} />
 								{/if}
@@ -1973,9 +1967,10 @@
 									</div>
 								{:else if fileItemsTotal}
 									{#if knowledge?.type !== 'local' && knowledge?.type}
-										<Tooltip content={$i18n.t('Maximum 250 files per external knowledge base')}>
+										{@const maxFiles = $config?.integration_providers?.[knowledge?.type]?.max_files_per_kb || 250}
+										<Tooltip content={$i18n.t('Maximum {{count}} files per knowledge base', { count: maxFiles })}>
 											<div class="text-xs text-gray-500">
-												{fileItemsTotal} / 250 {$i18n.t('files')}
+												{fileItemsTotal} / {maxFiles} {$i18n.t('files')}
 											</div>
 										</Tooltip>
 									{:else}
@@ -1989,7 +1984,7 @@
 							</div>
 						</div>
 
-						{#if knowledge?.write_access && (knowledge?.type === 'local' || !knowledge?.type)}
+						{#if knowledge?.write_access && (knowledge?.type === 'local' || !knowledge?.type || $config?.integration_providers?.[knowledge?.type])}
 							<div class="self-center shrink-0">
 								<button
 									class="bg-gray-50 hover:bg-gray-100 text-black dark:bg-gray-850 dark:hover:bg-gray-800 dark:text-white transition px-2 py-1 rounded-full flex gap-1 items-center"
@@ -2022,6 +2017,7 @@
 							type="text"
 							class="text-left text-xs w-full text-gray-500 bg-transparent outline-hidden"
 							bind:value={knowledge.description}
+							aria-label={$i18n.t('Knowledge Description')}
 							placeholder={$i18n.t('Knowledge Description')}
 							disabled={!knowledge?.write_access}
 							on:input={() => {
@@ -2044,7 +2040,8 @@
 					<input
 						class=" w-full text-sm pr-4 py-1 rounded-r-xl outline-hidden bg-transparent"
 						bind:value={query}
-						placeholder={`${$i18n.t('Search Collection')}`}
+						aria-label={$i18n.t('Search Collection')}
+						placeholder={$i18n.t('Search Collection')}
 						on:focus={() => {
 							selectedFileId = null;
 						}}
@@ -2094,6 +2091,8 @@
 										</svg>
 									</button>
 								</Tooltip>
+							{:else if $config?.integration_providers?.[knowledge?.type]}
+								<!-- No add button for push providers -- files come via API -->
 							{:else}
 								<AddContentMenu
 									onUpload={(data) => {
@@ -2106,6 +2105,9 @@
 										} else {
 											document.getElementById('files-input').click();
 										}
+									}}
+									onSync={() => {
+										showSyncConfirmModal = true;
 									}}
 								/>
 							{/if}
@@ -2277,8 +2279,11 @@
 									{:else if knowledge?.write_access && !query && !viewOption}
 										<EmptyStateCards
 											knowledgeType={knowledge?.type || 'local'}
+											integrationProviders={$config?.integration_providers}
 											onAction={(type) => {
-												if (type === 'onedrive') {
+												if (type === 'integration') {
+													// No-op: files are managed via API
+												} else if (type === 'onedrive') {
 													oneDriveSyncHandler();
 										} else if (type === 'google_drive') {
 											googleDriveSyncHandler();
@@ -2320,6 +2325,7 @@
 										<div class="mr-2">
 											<button
 												class="w-full text-left text-sm p-1.5 rounded-lg dark:text-gray-300 dark:hover:text-white hover:bg-black/5 dark:hover:bg-gray-850"
+												aria-label={$i18n.t('Close')}
 												on:click={() => {
 													selectedFileId = null;
 													selectedFile = null;
@@ -2357,6 +2363,7 @@
 											class="w-full h-full text-sm outline-none resize-none px-3 py-2"
 											bind:value={selectedFileContent}
 											disabled={!knowledge?.write_access}
+											aria-label={$i18n.t('File content')}
 											placeholder={$i18n.t('Add content here')}
 										/>
 									{/key}

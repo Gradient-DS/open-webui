@@ -57,6 +57,11 @@ spec:
                 secretKeyRef:
                   name: {{ include "open-webui-tenant.fullname" . }}-secrets
                   key: openai-api-key
+            - name: IMAGES_OPENAI_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "open-webui-tenant.fullname" . }}-secrets
+                  key: openai-api-key
             - name: RAG_OPENAI_API_KEY
               valueFrom:
                 secretKeyRef:

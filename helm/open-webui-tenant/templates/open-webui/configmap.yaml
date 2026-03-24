@@ -45,6 +45,8 @@ data:
   # LLM Providers
   ENABLE_OLLAMA_API: {{ .Values.openWebui.config.enableOllamaApi | quote }}
   OPENAI_API_BASE_URL: {{ .Values.openWebui.config.openaiApiBaseUrl | quote }}
+  ENABLE_FORWARD_USER_INFO_HEADERS: {{ .Values.openWebui.config.enableForwardUserInfoHeaders | quote }}
+  FORWARD_USER_INFO_HEADER_USER_ID: {{ .Values.openWebui.config.forwardUserInfoHeaderUserId | quote }}
   {{- if .Values.openWebui.config.openaiApiConfigs }}
   OPENAI_API_CONFIGS: {{ .Values.openWebui.config.openaiApiConfigs | toJson | quote }}
   {{- end }}
@@ -53,6 +55,7 @@ data:
   VECTOR_DB: {{ .Values.openWebui.config.vectorDb | quote }}
   WEAVIATE_HTTP_HOST: {{ include "open-webui-tenant.weaviate.fullname" . }}
   WEAVIATE_HTTP_PORT: {{ .Values.openWebui.config.weaviateHttpPort | quote }}
+  WEAVIATE_GRPC_HOST: {{ include "open-webui-tenant.weaviate.fullname" . }}
   WEAVIATE_GRPC_PORT: {{ .Values.openWebui.config.weaviateGrpcPort | quote }}
   WEAVIATE_WEB_SEARCH_TTL_MINUTES: {{ .Values.openWebui.config.weaviateWebSearchTtlMinutes | quote }}
 
@@ -119,6 +122,8 @@ data:
   FEATURE_CHAT_CONTROLS_SECTIONS: {{ .Values.openWebui.config.featureChatControlsSections | quote }}
   FEATURE_INPUT_MENU: {{ .Values.openWebui.config.featureInputMenu | quote }}
   FEATURE_TEMPORARY_CHAT: {{ .Values.openWebui.config.featureTemporaryChat | quote }}
+  FEATURE_TOOL_SERVERS: {{ .Values.openWebui.config.featureToolServers | quote }}
+  FEATURE_TERMINAL_SERVERS: {{ .Values.openWebui.config.featureTerminalServers | quote }}
 
   # Notes
   ENABLE_NOTES: {{ .Values.openWebui.config.enableNotes | quote }}
@@ -205,6 +210,14 @@ data:
   ENABLE_EVALUATION_ARENA_MODELS: {{ .Values.openWebui.config.enableEvaluationArenaModels | quote }}
   ENABLE_API_KEYS: {{ .Values.openWebui.config.enableApiKeys | quote }}
   ENABLE_IMAGE_GENERATION: {{ .Values.openWebui.config.enableImageGeneration | quote }}
+  IMAGE_GENERATION_ENGINE: {{ .Values.openWebui.config.imageGenerationEngine | quote }}
+  {{- if .Values.openWebui.config.imageGenerationModel }}
+  IMAGE_GENERATION_MODEL: {{ .Values.openWebui.config.imageGenerationModel | quote }}
+  {{- end }}
+  {{- if .Values.openWebui.config.imagesOpenaiApiBaseUrl }}
+  IMAGES_OPENAI_API_BASE_URL: {{ .Values.openWebui.config.imagesOpenaiApiBaseUrl | quote }}
+  {{- end }}
+  IMAGE_SIZE: {{ .Values.openWebui.config.imageSize | quote }}
   ENABLE_GOOGLE_DRIVE_INTEGRATION: {{ .Values.openWebui.config.enableGoogleDriveIntegration | quote }}
 
   # OneDrive Integration
@@ -280,6 +293,9 @@ data:
   SCARF_NO_ANALYTICS: {{ .Values.openWebui.config.scarfNoAnalytics | quote }}
   DO_NOT_TRACK: {{ .Values.openWebui.config.doNotTrack | quote }}
   ANONYMIZED_TELEMETRY: {{ .Values.openWebui.config.anonymizedTelemetry | quote }}
+
+  # Easter Eggs
+  ENABLE_EASTER_EGGS: {{ .Values.openWebui.config.enableEasterEggs | quote }}
 
   # Custom Prompts
   {{- if .Values.openWebui.config.queryGenerationPromptTemplate }}
