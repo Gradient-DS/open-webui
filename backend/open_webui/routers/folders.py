@@ -325,7 +325,7 @@ async def delete_folder_by_id(
 
                 for folder_id in folder_ids:
                     if delete_contents:
-                        Chats.delete_chats_by_user_id_and_folder_id(
+                        Chats.soft_delete_by_user_id_and_folder_id(
                             user.id, folder_id, db=db
                         )
                     else:
