@@ -1794,7 +1794,7 @@
 		</div>
 
 		<div
-			class="mt-2 mb-2.5 py-2 -mx-0 bg-white dark:bg-gray-900 rounded-3xl border border-gray-100/30 dark:border-gray-850/30 flex-1 flex flex-col overflow-hidden"
+			class="mt-2 mb-2.5 py-2 -mx-0 bg-white dark:bg-gray-900 rounded-3xl border border-gray-100/30 dark:border-gray-850/30 flex-1 flex flex-col overflow-hidden min-h-0"
 		>
 			<div class="px-3.5 flex shrink-0 items-center w-full space-x-2 py-0.5 pb-2">
 				<div class="flex flex-1 items-center">
@@ -1919,7 +1919,7 @@
 			</div>
 
 			{#if fileItems !== null && fileItemsTotal !== null}
-				<div class="flex flex-row flex-1 gap-3 px-2.5 mt-2">
+				<div class="flex flex-row flex-1 min-h-0 gap-3 px-2.5 mt-2">
 					<div class="flex-1 flex">
 						<div class=" flex flex-col w-full space-x-2 rounded-lg h-full">
 							<div class="w-full h-full flex flex-col min-h-0">
