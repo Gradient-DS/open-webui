@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
 from fastapi.responses import RedirectResponse
 from starlette.requests import Request
 from pydantic import BaseModel
-from typing import List, Literal
+from typing import List, Literal, Optional
 import logging
 
 from open_webui.utils.auth import get_verified_user
@@ -54,7 +54,7 @@ class SyncItemsRequest(BaseModel):
 
     knowledge_id: str
     items: List[SyncItem]
-    access_token: str
+    access_token: Optional[str] = None
 
 
 # ──────────────────────────────────────────────────────────────────────
@@ -70,6 +70,19 @@ async def sync_items(
     user: UserModel = Depends(get_verified_user),
 ):
     """Start Google Drive sync for multiple items (files and folders)."""
+    # If no access_token provided, get one from the stored session
+    access_token = request.access_token
+    if not access_token:
+        from open_webui.services.google_drive.token_refresh import (
+            get_valid_access_token,
+        )
+
+        access_token = await get_valid_access_token(user.id, request.knowledge_id)
+        if not access_token:
+            raise HTTPException(
+                401, "No valid Google Drive token. Please re-authorize."
+            )
+
     new_sources = [
         {
             "type": item.type,
@@ -84,7 +97,7 @@ async def sync_items(
         knowledge_id=request.knowledge_id,
         meta_key=_META_KEY,
         new_sources=new_sources,
-        access_token=request.access_token,
+        access_token=access_token,
         user=user,
         clear_delta_keys=_CLEAR_DELTA_KEYS,
     )
@@ -93,7 +106,7 @@ async def sync_items(
         _sync_items_background,
         knowledge_id=request.knowledge_id,
         sources=result["all_sources"],
-        access_token=request.access_token,
+        access_token=access_token,
         user_id=user.id,
         app=fastapi_request.app,
     )
@@ -177,19 +190,47 @@ async def list_synced_collections(
 # ──────────────────────────────────────────────────────────────────────
 
 
-@router.get("/auth/initiate")
-async def initiate_auth(
-    knowledge_id: str,
-    request: Request,
+@router.get("/auth/access-token")
+async def get_access_token(
     user: UserModel = Depends(get_verified_user),
 ):
-    """Initiate OAuth auth code flow for background sync."""
+    """Get a valid Google Drive access token, refreshing if needed.
+
+    Used by the frontend for the Google Drive picker and file downloads.
+    Returns 401 if no stored token exists (user must authorize first).
+    """
+    from open_webui.services.google_drive.token_refresh import get_valid_access_token
+
+    if not GOOGLE_CLIENT_SECRET.value:
+        raise HTTPException(400, "Google client secret not configured")
+
+    token = await get_valid_access_token(user.id, knowledge_id="__picker__")
+    if not token:
+        raise HTTPException(
+            status_code=401,
+            detail="No stored Google Drive token. Authorization required.",
+        )
+    return {"access_token": token}
+
+
+@router.get("/auth/initiate")
+async def initiate_auth(
+    request: Request,
+    user: UserModel = Depends(get_verified_user),
+    knowledge_id: Optional[str] = None,
+):
+    """Initiate OAuth auth code flow for Google Drive.
+
+    knowledge_id is optional — if provided, validates KB ownership.
+    Used for both knowledge base background sync auth and general picker auth.
+    """
     from open_webui.services.google_drive.auth import get_authorization_url
 
     if not GOOGLE_CLIENT_SECRET.value:
         raise HTTPException(400, "Google client secret not configured")
 
-    knowledge = get_knowledge_or_raise(knowledge_id, user)
+    if knowledge_id:
+        get_knowledge_or_raise(knowledge_id, user)
 
     redirect_uri = str(request.base_url).rstrip("/") + "/oauth/google/callback"
     log.info(
@@ -198,7 +239,7 @@ async def initiate_auth(
 
     auth_url = get_authorization_url(
         user_id=user.id,
-        knowledge_id=knowledge_id,
+        knowledge_id=knowledge_id or "__general__",
         redirect_uri=redirect_uri,
     )
     return RedirectResponse(auth_url)

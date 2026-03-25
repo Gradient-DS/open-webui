@@ -113,6 +113,12 @@ export function createSyncApi(basePath: string) {
 			});
 		},
 
+		getAccessToken(token: string): Promise<{ access_token: string }> {
+			return apiFetch(`${base}/auth/access-token`, {
+				headers: { Authorization: `Bearer ${token}` }
+			});
+		},
+
 		revokeToken(token: string, knowledgeId: string): Promise<{ revoked: boolean }> {
 			return apiFetch(`${base}/auth/revoke/${knowledgeId}`, {
 				method: 'POST',
