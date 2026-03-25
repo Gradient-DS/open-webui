@@ -159,7 +159,7 @@
 		{/if}
 
 		<div
-			class="  pb-1 px-3 md:px-[18px] flex-1 max-h-full overflow-y-auto {$page.url.pathname.includes('/workspace/knowledge') ? 'pt-4' : ''}"
+			class="  pb-1 px-3 md:px-[18px] flex-1 max-h-full {$page.url.pathname.includes('/workspace/knowledge/') ? 'pt-4 overflow-hidden' : 'overflow-y-auto ' + ($page.url.pathname.includes('/workspace/knowledge') ? 'pt-4' : '')}"
 			id="workspace-container"
 		>
 			<slot />
