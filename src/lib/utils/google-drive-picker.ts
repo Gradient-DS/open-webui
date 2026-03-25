@@ -147,22 +147,16 @@ export const createKnowledgePicker = (): Promise<KnowledgePickerResult | null> =
 				'application/vnd.google-apps.folder'
 			].join(',');
 
-			// Files view (documents + folders visible)
-			const filesView = new google.picker.DocsView()
-				.setIncludeFolders(true)
-				.setSelectFolderEnabled(false)
-				.setMimeTypes(SUPPORTED_MIME_TYPES);
-
-			// Dedicated folder selection view
-			const folderView = new google.picker.DocsView()
+			// Single view: files and folders visible, both selectable
+			const docsView = new google.picker.DocsView()
 				.setIncludeFolders(true)
 				.setSelectFolderEnabled(true)
-				.setMimeTypes('application/vnd.google-apps.folder');
+				.setMimeTypes(SUPPORTED_MIME_TYPES);
 
 			const picker = new google.picker.PickerBuilder()
 				.enableFeature(google.picker.Feature.MULTISELECT_ENABLED)
-				.addView(filesView)
-				.addView(folderView)
+				.enableFeature(google.picker.Feature.NAV_HIDDEN)
+				.addView(docsView)
 				.setOAuthToken(token)
 				.setDeveloperKey(API_KEY)
 				.setCallback((data: any) => {
