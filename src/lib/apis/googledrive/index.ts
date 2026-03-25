@@ -18,13 +18,14 @@ export interface SyncItem {
 export interface SyncItemsRequest {
 	knowledge_id: string;
 	items: SyncItem[];
-	access_token: string;
+	access_token?: string;
 }
 
 // Create API instance with Google Drive base path
 const api = createSyncApi('google-drive');
 
 // Re-export with original function names for backward compatibility
+export const getAccessToken = api.getAccessToken;
 export const startGoogleDriveSyncItems = api.startSyncItems;
 export const getSyncStatus = api.getSyncStatus;
 export const cancelSync = api.cancelSync;

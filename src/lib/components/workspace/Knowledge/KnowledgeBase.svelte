@@ -47,7 +47,7 @@
 		startGoogleDriveSyncItems,
 		type SyncItem as GoogleDriveSyncItem,
 	} from '$lib/apis/googledrive';
-	import { createKnowledgePicker, clearGoogleDriveToken, getAuthToken as getGoogleDriveAuthToken, initialize as initializeGoogleDrive } from '$lib/utils/google-drive-picker';
+	import { createKnowledgePicker } from '$lib/utils/google-drive-picker';
 	import { WEBUI_API_BASE_URL } from '$lib/constants';
 
 	import { blobToFile, isYoutubeUrl } from '$lib/utils';
@@ -654,14 +654,13 @@
 					user_token: localStorage.token
 				});
 			} else if (provider.type === 'google_drive') {
-				const result = await createKnowledgePicker();
+				const result = await createKnowledgePicker(knowledge.id);
 				if (!result) {
 					state.isSyncing = false;
 					cloudSyncState = cloudSyncState;
 					return;
 				}
 
-				accessToken = result.accessToken;
 				syncItems = result.items.map(item => ({
 					type: item.type,
 					item_id: item.id,
@@ -674,7 +673,6 @@
 				await startGoogleDriveSyncItems(localStorage.token, {
 					knowledge_id: knowledge.id,
 					items: syncItems as GoogleDriveSyncItem[],
-					access_token: accessToken
 				});
 			}
 
@@ -722,10 +720,6 @@
 					user_token: localStorage.token
 				});
 			} else if (provider.type === 'google_drive') {
-				clearGoogleDriveToken();
-				await initializeGoogleDrive();
-				const accessToken = await getGoogleDriveAuthToken() as string;
-
 				const syncItems: GoogleDriveSyncItem[] = sources.map((source: any) => ({
 					type: source.type,
 					item_id: source.item_id,
@@ -738,7 +732,6 @@
 				await startGoogleDriveSyncItems(localStorage.token, {
 					knowledge_id: knowledge.id,
 					items: syncItems,
-					access_token: accessToken
 				});
 			}
 
