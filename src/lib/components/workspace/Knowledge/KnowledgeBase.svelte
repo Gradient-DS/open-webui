@@ -1594,7 +1594,7 @@
 	}}
 />
 
-<div class="flex flex-col w-full h-full min-h-full" id="collection-container">
+<div class="flex flex-col w-full h-full min-h-0" id="collection-container">
 	{#if id && knowledge && fileItems !== null}
 		{#if knowledge?.type === 'local' || !knowledge?.type}
 			<AccessControlModal
@@ -1922,7 +1922,7 @@
 				<div class="flex flex-row flex-1 gap-3 px-2.5 mt-2">
 					<div class="flex-1 flex">
 						<div class=" flex flex-col w-full space-x-2 rounded-lg h-full">
-							<div class="w-full h-full flex flex-col min-h-full">
+							<div class="w-full h-full flex flex-col min-h-0">
 								{#if fileItems.length > 0}
 									<div class=" flex overflow-y-auto h-full w-full scrollbar-hidden text-xs">
 										{#if activeProvider && knowledge?.meta?.[activeProvider.metaKey]?.sources?.length}
