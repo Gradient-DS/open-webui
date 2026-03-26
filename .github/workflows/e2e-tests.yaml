@@ -108,6 +108,9 @@ jobs:
       - name: Set up uv
         uses: astral-sh/setup-uv@v6
 
+      - name: Install system dependencies
+        run: sudo apt-get update && sudo apt-get install -y libmariadb-dev
+
       - name: Install dependencies
         run: |
           uv venv
