@@ -247,6 +247,7 @@ def upload_file_handler(
         # (e.g. Google Drive exported files have no extension in their name)
         if not file_extension and file.content_type:
             import mimetypes
+
             ext = mimetypes.guess_extension(file.content_type)
             if ext:
                 file_extension = ext[1:]  # Remove leading dot
