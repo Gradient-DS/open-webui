@@ -122,6 +122,8 @@ data:
   FEATURE_ADMIN_SETTINGS: {{ .Values.openWebui.config.featureAdminSettings | quote }}
   FEATURE_ADMIN_SETTINGS_TABS: {{ .Values.openWebui.config.featureAdminSettingsTabs | quote }}
   FEATURE_CHAT_CONTROLS_SECTIONS: {{ .Values.openWebui.config.featureChatControlsSections | quote }}
+  FEATURE_WEBPAGE_URL: {{ .Values.openWebui.config.featureWebpageUrl | quote }}
+  FEATURE_REFERENCE_CHATS: {{ .Values.openWebui.config.featureReferenceChats | quote }}
   FEATURE_INPUT_MENU: {{ .Values.openWebui.config.featureInputMenu | quote }}
   FEATURE_TEMPORARY_CHAT: {{ .Values.openWebui.config.featureTemporaryChat | quote }}
   FEATURE_TOOL_SERVERS: {{ .Values.openWebui.config.featureToolServers | quote }}

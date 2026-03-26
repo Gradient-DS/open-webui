@@ -16,6 +16,8 @@ export type Feature =
 	| 'prompts'
 	| 'tools'
 	| 'skills'
+	| 'webpage_url'
+	| 'reference_chats'
 	| 'admin_evaluations'
 	| 'admin_functions'
 	| 'admin_settings'

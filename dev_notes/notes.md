@@ -133,3 +133,25 @@
 - The IntegrationProviders OpenAPI download uses authenticated fetch + blob download (not a plain link), because the endpoint requires auth. Agent proxy uses the same pattern for consistency
 
 **Related:** `thoughts/shared/plans/2026-03-26-agent-proxy-integration.md`, `backend/open_webui/routers/agent_proxy.py`
+
+---
+
+### [26-03-2026] Feature Flags for Webpage URL and Reference Chats in Input Menu
+
+**Dev:** @lexlubbers
+
+**Context:** The chat input "+" menu (InputMenu.svelte) always showed "Webpage URL" and "Reference chats" items with no way to disable them via Helm config, unlike other menu items that have feature flag guards.
+
+**What We Did:**
+- Added `FEATURE_WEBPAGE_URL` and `FEATURE_REFERENCE_CHATS` env vars in `config.py` (default `True`)
+- Imported and exposed both in `main.py` via the config endpoint's `features` dict
+- Added `'webpage_url'` and `'reference_chats'` to the `Feature` union type in `src/lib/utils/features.ts`
+- Wrapped the Webpage URL block with `{#if isFeatureEnabled('webpage_url')}` in `InputMenu.svelte`
+- Added `isFeatureEnabled('reference_chats')` to the existing `($chats ?? []).length > 0` guard for Reference chats
+- Added `featureWebpageUrl` and `featureReferenceChats` to Helm values.yaml and configmap.yaml
+
+**Key Learnings:**
+- The feature flag pipeline for InputMenu items is: Helm values → configmap (env var) → `config.py` (read) → `main.py` (expose in config endpoint) → `features.ts` (type) → `InputMenu.svelte` (`isFeatureEnabled()` guard)
+- Most InputMenu sections already had guards (knowledge, capture, notes, tools) but Webpage URL and Reference Chats were the two exceptions
+
+**Related:** Feature flags system documented in [20-03-2026] Gradient-DS Custom Features Overview
