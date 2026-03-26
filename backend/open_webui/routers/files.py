@@ -243,6 +243,14 @@ def upload_file_handler(
         # Remove the leading dot from the file extension
         file_extension = file_extension[1:] if file_extension else ""
 
+        # If no extension in filename, try to derive from content_type
+        # (e.g. Google Drive exported files have no extension in their name)
+        if not file_extension and file.content_type:
+            import mimetypes
+            ext = mimetypes.guess_extension(file.content_type)
+            if ext:
+                file_extension = ext[1:]  # Remove leading dot
+
         if process and request.app.state.config.ALLOWED_FILE_EXTENSIONS:
             request.app.state.config.ALLOWED_FILE_EXTENSIONS = [
                 ext for ext in request.app.state.config.ALLOWED_FILE_EXTENSIONS if ext
