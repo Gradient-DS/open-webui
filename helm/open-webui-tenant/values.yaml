@@ -351,10 +351,13 @@ openWebui:
 
     bypassModelAccessControl: "false"
 
-    # Agent API (routes chat completions to external agent service)
+    # Agent API (internal: routes chat UI to external agent service)
     agentApiEnabled: "false"
     agentApiBaseUrl: ""
     agentApiAgent: ""
+
+    # Agent Proxy (external: exposes agent API to external callers via /api/v1/agent/)
+    enableAgentProxy: "false"
 
     # Audit Logging
     # Levels: NONE, METADATA, REQUEST, REQUEST_RESPONSE

@@ -346,10 +346,13 @@ data:
   {{- end }}
   {{- end }}
 
-  # Agent API
+  # Agent API (internal: routes chat UI to agent service)
   {{- if eq .Values.openWebui.config.agentApiEnabled "true" }}
   AGENT_API_ENABLED: "true"
   AGENT_API_BASE_URL: {{ .Values.openWebui.config.agentApiBaseUrl | quote }}
   AGENT_API_AGENT: {{ .Values.openWebui.config.agentApiAgent | quote }}
   {{- end }}
+
+  # Agent Proxy (external: exposes agent API to external callers)
+  ENABLE_AGENT_PROXY: {{ .Values.openWebui.config.enableAgentProxy | default "false" | quote }}
 {{- end }}

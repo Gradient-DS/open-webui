@@ -394,6 +394,37 @@
 
 							<div class="mt-1">
 								<button
+									class="text-xs text-blue-500 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300 underline"
+									type="button"
+									on:click={async () => {
+										try {
+											const res = await fetch(
+												`${window.location.origin}/api/v1/agent/openapi.json`,
+												{
+													headers: {
+														Authorization: `Bearer ${localStorage.token}`
+													}
+												}
+											);
+											if (!res.ok) throw new Error('Failed to fetch');
+											const blob = await res.blob();
+											const url = URL.createObjectURL(blob);
+											const a = document.createElement('a');
+											a.href = url;
+											a.download = 'agent-openapi.json';
+											a.click();
+											URL.revokeObjectURL(url);
+										} catch (err) {
+											toast.error('Failed to download OpenAPI spec');
+										}
+									}}
+								>
+									{$i18n.t('Download OpenAPI Specification')}
+								</button>
+							</div>
+
+							<div class="mt-1">
+								<button
 									class="text-xs underline text-gray-600 dark:text-gray-300"
 									type="button"
 									on:click={() => { showAgentDocs = !showAgentDocs; }}
@@ -402,33 +433,27 @@
 								</button>
 
 								{#if showAgentDocs}
-									<div class="mt-2 p-3 bg-gray-50 dark:bg-gray-850 rounded-lg text-xs font-mono space-y-3">
+									<div class="mt-2 p-3 bg-gray-50 dark:bg-gray-850 rounded-lg text-xs font-mono space-y-3 overflow-x-auto">
 										<div>
-											<div class="font-semibold text-gray-700 dark:text-gray-300 mb-1">{$i18n.t('List available models')}</div>
-											<pre class="whitespace-pre-wrap text-gray-600 dark:text-gray-400">curl -H "Authorization: Bearer sk-..." \
+											<div class="text-gray-500 mb-2">{$i18n.t('List available models')}</div>
+											<pre class="whitespace-pre-wrap">curl -H "Authorization: Bearer sk-..." \
   {window.location.origin}/api/v1/agent/models</pre>
 										</div>
 
 										<div>
-											<div class="font-semibold text-gray-700 dark:text-gray-300 mb-1">{$i18n.t('Chat completions (streaming)')}</div>
-											<pre class="whitespace-pre-wrap text-gray-600 dark:text-gray-400">curl -H "Authorization: Bearer sk-..." \
+											<div class="text-gray-500 mb-2">{$i18n.t('Chat completions (streaming)')}</div>
+											<pre class="whitespace-pre-wrap">curl -H "Authorization: Bearer sk-..." \
   -H "Content-Type: application/json" \
   -d '{JSON.stringify({model: "agent-name", messages: [{role: "user", content: "Hello"}], stream: true})}' \
   {window.location.origin}/api/v1/agent/chat/completions</pre>
 										</div>
 
 										<div>
-											<div class="font-semibold text-gray-700 dark:text-gray-300 mb-1">{$i18n.t('With collections/documents')}</div>
-											<pre class="whitespace-pre-wrap text-gray-600 dark:text-gray-400">curl -H "Authorization: Bearer sk-..." \
+											<div class="text-gray-500 mb-2">{$i18n.t('With collections/documents')}</div>
+											<pre class="whitespace-pre-wrap">curl -H "Authorization: Bearer sk-..." \
   -H "Content-Type: application/json" \
   -d '{JSON.stringify({model: "agent-name", messages: [{role: "user", content: "Hello"}], stream: true, files: [{id: "collection-id", type: "collection"}, {id: "document-id", type: "file"}]})}' \
   {window.location.origin}/api/v1/agent/chat/completions</pre>
-										</div>
-
-										<div>
-											<div class="font-semibold text-gray-700 dark:text-gray-300 mb-1">{$i18n.t('OpenAPI specification')}</div>
-											<pre class="whitespace-pre-wrap text-gray-600 dark:text-gray-400">curl -H "Authorization: Bearer sk-..." \
-  {window.location.origin}/api/v1/agent/openapi.json</pre>
 										</div>
 									</div>
 								{/if}

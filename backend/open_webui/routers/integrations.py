@@ -94,6 +94,20 @@ def get_integration_provider(request: Request, user) -> tuple[str, dict]:
     return provider_slug, provider_config
 
 
+def _validate_custom_metadata(doc: IngestDocumentBase, provider_config: dict):
+    """Validate that required custom metadata fields are present in doc.metadata."""
+    custom_fields = provider_config.get("custom_metadata_fields", [])
+    missing = []
+    for field in custom_fields:
+        if field.get("required") and field.get("key") not in doc.metadata:
+            missing.append(field["key"])
+    if missing:
+        raise HTTPException(
+            400,
+            f"Document '{doc.source_id}' is missing required metadata fields: {', '.join(missing)}",
+        )
+
+
 def _find_kb_by_source_id(provider: str, source_id: str):
     """Find a knowledge base by provider slug + external source_id."""
     kbs = Knowledges.get_knowledge_bases_by_type(provider)
@@ -226,7 +240,7 @@ def _build_base_metadata(
     doc: IngestDocumentBase, file_id: str, provider: str, user_id: str
 ) -> dict:
     """Build common metadata dict for LangChain Documents."""
-    return {
+    base = {
         "name": doc.title or doc.filename,
         "source": doc.source_url or doc.filename,
         "file_id": file_id,
@@ -234,7 +248,13 @@ def _build_base_metadata(
         "author": doc.author,
         "language": doc.language,
         "source_provider": provider,
+        "content_type": doc.content_type,
+        "tags": doc.tags,
     }
+    # Flatten doc.metadata into prefixed keys to avoid collisions
+    for key, value in doc.metadata.items():
+        base[f"meta_{key}"] = value
+    return base
 
 
 # --- Processing Functions ---
@@ -538,6 +558,7 @@ def ingest_documents(
                     400,
                     f"Document '{raw_doc.get('source_id', '?')}' invalid for parsed_text: {e}",
                 )
+            _validate_custom_metadata(doc, provider_config)
             result = _process_parsed_text_document(
                 request=request,
                 knowledge_id=knowledge.id,
@@ -556,6 +577,7 @@ def ingest_documents(
                     400,
                     f"Document '{raw_doc.get('source_id', '?')}' invalid for chunked_text: {e}",
                 )
+            _validate_custom_metadata(doc, provider_config)
             result = _process_chunked_text_document(
                 request=request,
                 knowledge_id=knowledge.id,
@@ -580,6 +602,7 @@ def ingest_documents(
                     400,
                     f"Document '{raw_doc.get('source_id', '?')}' invalid for full_documents: {e}",
                 )
+            _validate_custom_metadata(doc, provider_config)
 
             upload = file_lookup.get(doc.filename)
             if not upload:
@@ -708,3 +731,68 @@ def delete_document(
         "document_source_id": document_source_id,
         "provider": provider,
     }
+
+
+@router.get("/openapi.json")
+def get_integration_openapi(request: Request, user=Depends(get_verified_user)):
+    """Return OpenAPI spec scoped to integration endpoints only."""
+    full_spec = request.app.openapi()
+
+    # Filter paths to only integration endpoints (exclude this endpoint itself)
+    integration_prefix = "/api/v1/integrations"
+    filtered_paths = {
+        path: ops
+        for path, ops in full_spec.get("paths", {}).items()
+        if path.startswith(integration_prefix)
+        and path != f"{integration_prefix}/openapi.json"
+    }
+
+    # Build scoped spec
+    scoped_spec = {
+        "openapi": full_spec.get("openapi", "3.1.0"),
+        "info": {
+            "title": "Open WebUI — Integration API",
+            "version": full_spec.get("info", {}).get("version", "1.0.0"),
+            "description": "API specification for the Open WebUI push integration endpoints.",
+        },
+        "paths": filtered_paths,
+    }
+
+    # Include only referenced schemas
+    all_schemas = full_spec.get("components", {}).get("schemas", {})
+    if all_schemas:
+
+        def _collect_refs(obj, refs):
+            if isinstance(obj, dict):
+                if "$ref" in obj:
+                    ref = obj["$ref"]
+                    if ref.startswith("#/components/schemas/"):
+                        refs.add(ref.split("/")[-1])
+                for v in obj.values():
+                    _collect_refs(v, refs)
+            elif isinstance(obj, list):
+                for item in obj:
+                    _collect_refs(item, refs)
+
+        refs = set()
+        _collect_refs(filtered_paths, refs)
+
+        # Collect transitive refs from the schemas themselves
+        changed = True
+        while changed:
+            changed = False
+            for name in list(refs):
+                if name in all_schemas:
+                    before = len(refs)
+                    _collect_refs(all_schemas[name], refs)
+                    if len(refs) > before:
+                        changed = True
+
+        if refs:
+            scoped_spec["components"] = {
+                "schemas": {
+                    name: schema for name, schema in all_schemas.items() if name in refs
+                }
+            }
+
+    return scoped_spec
