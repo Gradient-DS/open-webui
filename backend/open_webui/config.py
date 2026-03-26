@@ -3487,6 +3487,16 @@ INTEGRATION_PROVIDERS = PersistentConfig(
     {},
 )
 
+####################################
+# Agent Proxy
+####################################
+
+ENABLE_AGENT_PROXY = PersistentConfig(
+    "ENABLE_AGENT_PROXY",
+    "agent_proxy.enable",
+    os.environ.get("ENABLE_AGENT_PROXY", "False").lower() == "true",
+)
+
 
 RAG_TEXT_SPLITTER = PersistentConfig(
     "RAG_TEXT_SPLITTER",
