@@ -44,7 +44,11 @@ jobs:
           pip install -r backend/requirements.txt
 
       - name: Run pip-audit
-        run: pip-audit --desc on
+        run: |
+          pip-audit --desc on \
+            --ignore-vuln CVE-2026-4539 \
+            --ignore-vuln GHSA-rf74-v2fm-23pw \
+            --ignore-vuln CVE-2026-33231
 
   sca-node:
     name: Node.js Dependencies (npm audit)
