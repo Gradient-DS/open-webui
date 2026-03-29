@@ -296,8 +296,38 @@
 
 					<!-- Expanded panel: API example -->
 					{#if expandedPanel[slug] === 'api'}
-						{@const exampleData = JSON.stringify({ collection: { source_id: 'my-collection-123', name: 'My Collection', data_type: 'parsed_text', access_control: null }, documents: [{ source_id: 'doc-1', filename: 'example.txt', text: 'Document content here...', title: 'Example Document' }] }, null, 2)}
+						{@const exampleData = JSON.stringify({ collection: { source_id: 'my-collection-123', name: 'My Collection', data_type: 'parsed_text', access_control: null, metadata: { department: 'engineering' }, tags: ['project-x'] }, documents: [{ source_id: 'doc-1', filename: 'example.txt', content_type: 'text/plain', text: 'Document content here...', title: 'Example Document', metadata: { version: '1.2', status: 'approved' }, tags: ['documentation'], author: 'Jane Doe' }] }, null, 2)}
 						<div class="px-3 pb-3 pt-0">
+							<div class="mb-2">
+								<button
+									class="text-xs text-blue-500 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300 underline"
+									type="button"
+									on:click={async () => {
+										try {
+											const res = await fetch(
+												`${window.location.origin}/api/v1/integrations/openapi.json`,
+												{
+													headers: {
+														Authorization: `Bearer ${localStorage.token}`
+													}
+												}
+											);
+											if (!res.ok) throw new Error('Failed to fetch');
+											const blob = await res.blob();
+											const url = URL.createObjectURL(blob);
+											const a = document.createElement('a');
+											a.href = url;
+											a.download = 'integration-openapi.json';
+											a.click();
+											URL.revokeObjectURL(url);
+										} catch (err) {
+											toast.error('Failed to download OpenAPI spec');
+										}
+									}}
+								>
+									{$i18n.t('Download OpenAPI Specification')}
+								</button>
+							</div>
 							<div
 								class="p-3 bg-gray-50 dark:bg-gray-800 rounded-lg text-xs font-mono overflow-x-auto"
 							>

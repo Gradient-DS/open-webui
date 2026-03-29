@@ -33,13 +33,10 @@ def register_function(base_url: str, token: str, update: bool = False) -> dict:
         "content": content,
         "meta": {
             "description": "Search nuclear safety documents via MCP and generate responses with citations"
-        }
+        },
     }
 
-    headers = {
-        "Authorization": f"Bearer {token}",
-        "Content-Type": "application/json"
-    }
+    headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
 
     # Try to create first
     url = f"{base_url.rstrip('/')}/api/v1/functions/create"
@@ -60,10 +57,7 @@ def register_function(base_url: str, token: str, update: bool = False) -> dict:
 
 def toggle_active(base_url: str, token: str) -> dict:
     """Toggle the function to active state."""
-    headers = {
-        "Authorization": f"Bearer {token}",
-        "Content-Type": "application/json"
-    }
+    headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
 
     # First check current state
     url = f"{base_url.rstrip('/')}/api/v1/functions/id/neo_nl_assistant"
@@ -83,9 +77,15 @@ def toggle_active(base_url: str, token: str) -> dict:
 
 def main():
     parser = argparse.ArgumentParser(description="Register NEO NL Pipe in Open WebUI")
-    parser.add_argument("--url", default="http://localhost:8080", help="Open WebUI base URL")
-    parser.add_argument("--token", required=True, help="API token (from Settings -> Account)")
-    parser.add_argument("--update", action="store_true", help="Update if function already exists")
+    parser.add_argument(
+        "--url", default="http://localhost:8080", help="Open WebUI base URL"
+    )
+    parser.add_argument(
+        "--token", required=True, help="API token (from Settings -> Account)"
+    )
+    parser.add_argument(
+        "--update", action="store_true", help="Update if function already exists"
+    )
 
     args = parser.parse_args()
 
@@ -105,7 +105,9 @@ def main():
             result = toggle_active(args.url, args.token)
             print(f"  Active: {result.get('is_active')}")
 
-        print("\nDone! The NEO NL Document Assistant should now appear in the model selector.")
+        print(
+            "\nDone! The NEO NL Document Assistant should now appear in the model selector."
+        )
 
     except requests.exceptions.HTTPError as e:
         print(f"Error: {e}")

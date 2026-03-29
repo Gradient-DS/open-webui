@@ -2387,8 +2387,14 @@ async def process_chat_payload(request, form_data, user, metadata, model):
             )
 
             # Skip XML-tag prompt injection when native FC is enabled —
-            # execute_code will be injected as a builtin tool instead
-            if metadata.get("params", {}).get("function_calling") != "native":
+            # execute_code will be injected as a builtin tool instead.
+            # [Gradient] Also skip when agent API is enabled — the agent controls
+            # its own prompting. Code execution still happens in process_chat_response
+            # when the agent returns <code_interpreter> tags.
+            if (
+                metadata.get("params", {}).get("function_calling") != "native"
+                and not AGENT_API_ENABLED
+            ):
                 prompt = (
                     request.app.state.config.CODE_INTERPRETER_PROMPT_TEMPLATE
                     if request.app.state.config.CODE_INTERPRETER_PROMPT_TEMPLATE != ""

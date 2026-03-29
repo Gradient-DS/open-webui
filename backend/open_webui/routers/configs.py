@@ -787,3 +787,31 @@ async def set_integrations_config(
             _bind_service_account(sa_id, slug)
 
     return {"providers": request.app.state.config.INTEGRATION_PROVIDERS}
+
+
+####################################
+# Agent Proxy Config
+####################################
+
+
+class AgentProxyConfigForm(BaseModel):
+    ENABLE_AGENT_PROXY: bool
+
+
+@router.get("/agent_proxy")
+async def get_agent_proxy_config(request: Request, user=Depends(get_admin_user)):
+    return {
+        "ENABLE_AGENT_PROXY": request.app.state.config.ENABLE_AGENT_PROXY,
+    }
+
+
+@router.post("/agent_proxy")
+async def set_agent_proxy_config(
+    request: Request,
+    form_data: AgentProxyConfigForm,
+    user=Depends(get_admin_user),
+):
+    request.app.state.config.ENABLE_AGENT_PROXY = form_data.ENABLE_AGENT_PROXY
+    return {
+        "ENABLE_AGENT_PROXY": request.app.state.config.ENABLE_AGENT_PROXY,
+    }
