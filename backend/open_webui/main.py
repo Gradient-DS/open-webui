@@ -701,9 +701,7 @@ async def periodic_archive_cleanup():
 
             stats = ArchiveService.cleanup_expired_archives()
             if stats["deleted"] > 0:
-                log.info(
-                    f"Archive cleanup: deleted {stats['deleted']} expired archives"
-                )
+                log.info(f"Archive cleanup: deleted {stats['deleted']} expired archives")
         except Exception as e:
             log.error(f"Error in archive cleanup: {e}")
 
@@ -782,9 +780,7 @@ async def lifespan(app: FastAPI):
     # Check external pipeline health on startup
     external_pipeline_url = getattr(app.state.config, "EXTERNAL_PIPELINE_URL", None)
     if external_pipeline_url and external_pipeline_url.strip() != "":
-        external_pipeline_api_key = getattr(
-            app.state.config, "EXTERNAL_PIPELINE_API_KEY", None
-        )
+        external_pipeline_api_key = getattr(app.state.config, "EXTERNAL_PIPELINE_API_KEY", None)
         log.info(f"Checking external pipeline health at: {external_pipeline_url}")
         is_healthy = check_external_pipeline_health(
             external_pipeline_url=external_pipeline_url,
@@ -1161,9 +1157,7 @@ app.state.config.FILE_IMAGE_COMPRESSION_HEIGHT = FILE_IMAGE_COMPRESSION_HEIGHT
 app.state.config.RAG_FULL_CONTEXT = RAG_FULL_CONTEXT
 app.state.config.BYPASS_EMBEDDING_AND_RETRIEVAL = BYPASS_EMBEDDING_AND_RETRIEVAL
 app.state.config.ENABLE_RAG_HYBRID_SEARCH = ENABLE_RAG_HYBRID_SEARCH
-app.state.config.ENABLE_RAG_HYBRID_SEARCH_ENRICHED_TEXTS = (
-    ENABLE_RAG_HYBRID_SEARCH_ENRICHED_TEXTS
-)
+app.state.config.ENABLE_RAG_HYBRID_SEARCH_ENRICHED_TEXTS = ENABLE_RAG_HYBRID_SEARCH_ENRICHED_TEXTS
 app.state.config.ENABLE_RAG_FILTER_UI = ENABLE_RAG_FILTER_UI
 app.state.config.ENABLE_WEB_LOADER_SSL_VERIFICATION = ENABLE_WEB_LOADER_SSL_VERIFICATION
 
@@ -1735,9 +1729,7 @@ app.include_router(notes.router, prefix='/api/v1/notes', tags=['notes'])
 
 app.include_router(models.router, prefix="/api/v1/models", tags=["models"])
 app.include_router(knowledge.router, prefix="/api/v1/knowledge", tags=["knowledge"])
-app.include_router(
-    integrations.router, prefix="/api/v1/integrations", tags=["integrations"]
-)
+app.include_router(integrations.router, prefix="/api/v1/integrations", tags=["integrations"])
 app.include_router(agent_proxy.router, prefix="/api/v1/agent", tags=["agent-proxy"])
 app.include_router(prompts.router, prefix="/api/v1/prompts", tags=["prompts"])
 app.include_router(tools.router, prefix="/api/v1/tools", tags=["tools"])
@@ -1760,15 +1752,11 @@ if ENABLE_SCIM:
 
 # OneDrive Sync API for collection synchronization
 if app.state.config.ENABLE_ONEDRIVE_SYNC:
-    app.include_router(
-        onedrive_sync.router, prefix="/api/v1/onedrive", tags=["onedrive"]
-    )
+    app.include_router(onedrive_sync.router, prefix="/api/v1/onedrive", tags=["onedrive"])
 
 # Google Drive Sync API for collection synchronization
 if app.state.config.ENABLE_GOOGLE_DRIVE_SYNC:
-    app.include_router(
-        google_drive_sync.router, prefix="/api/v1/google-drive", tags=["google-drive"]
-    )
+    app.include_router(google_drive_sync.router, prefix="/api/v1/google-drive", tags=["google-drive"])
 
 # Invites API (always mounted - Copy Link works without Graph API)
 app.include_router(invites.router, prefix="/api/v1/invites", tags=["invites"])
@@ -2037,9 +2025,7 @@ async def chat_completion(
             # It returns a standard OpenAI SSE stream so process_chat_response
             # handles streaming, DB persistence, and WebSocket transport unchanged.
             if AGENT_API_ENABLED:
-                response = await call_agent_api(
-                    request, form_data, metadata, metadata.get("features", {})
-                )
+                response = await call_agent_api(request, form_data, metadata, metadata.get("features", {}))
             else:
                 response = await chat_completion_handler(request, form_data, user)
             if metadata.get("chat_id") and metadata.get("message_id"):
@@ -2305,12 +2291,7 @@ async def get_app_config(request: Request):
         "default_locale": str(DEFAULT_LOCALE),
         "client_name": CLIENT_NAME,
         "invite_heading": str(app.state.config.EMAIL_INVITE_HEADING or ""),
-        "oauth": {
-            "providers": {
-                name: config.get("name", name)
-                for name, config in OAUTH_PROVIDERS.items()
-            }
-        },
+        "oauth": {"providers": {name: config.get("name", name) for name, config in OAUTH_PROVIDERS.items()}},
         "features": {
             "auth": WEBUI_AUTH,
             "auth_trusted_header": bool(app.state.AUTH_TRUSTED_EMAIL_HEADER),

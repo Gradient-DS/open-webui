@@ -132,9 +132,7 @@ def call_external_pipeline(
         log.info(f"Loading document: {filename} (type: {filetype})")
 
         if loader_instance is None:
-            log.warning(
-                "No loader instance provided, external pipeline may not work correctly"
-            )
+            log.warning("No loader instance provided, external pipeline may not work correctly")
             raise Exception("Loader instance required for external pipeline")
 
         # Load document and extract text
@@ -153,9 +151,7 @@ def call_external_pipeline(
         if docs and hasattr(docs[0], "metadata"):
             total_pages = docs[0].metadata.get("total_pages", len(docs))
 
-        log.info(
-            f"Loaded document: {len(text_content)} chars from {len(docs)} pages/sections"
-        )
+        log.info(f"Loaded document: {len(text_content)} chars from {len(docs)} pages/sections")
 
         # Prepare JSON payload for /chunk endpoint
         payload = {
@@ -186,9 +182,7 @@ def call_external_pipeline(
     except requests.exceptions.RequestException as e:
         log.error(f"Error calling external pipeline: {e}")
         if hasattr(e, "response") and e.response is not None:
-            log.error(
-                f"Response status: {e.response.status_code}, body: {e.response.text}"
-            )
+            log.error(f"Response status: {e.response.status_code}, body: {e.response.text}")
         raise Exception(f"Failed to call external pipeline: {str(e)}")
     except Exception as e:
         log.error(f"Unexpected error in external pipeline call: {e}")
@@ -236,15 +230,9 @@ def process_file_with_external_pipeline(
         Exception: If external pipeline fails
     """
     # Get external pipeline configuration
-    external_pipeline_url = getattr(
-        request.app.state.config, "EXTERNAL_PIPELINE_URL", None
-    )
-    external_pipeline_api_key = getattr(
-        request.app.state.config, "EXTERNAL_PIPELINE_API_KEY", None
-    )
-    external_pipeline_timeout = getattr(
-        request.app.state.config, "EXTERNAL_PIPELINE_TIMEOUT", 120
-    )
+    external_pipeline_url = getattr(request.app.state.config, "EXTERNAL_PIPELINE_URL", None)
+    external_pipeline_api_key = getattr(request.app.state.config, "EXTERNAL_PIPELINE_API_KEY", None)
+    external_pipeline_timeout = getattr(request.app.state.config, "EXTERNAL_PIPELINE_TIMEOUT", 120)
 
     log.info(f"Processing file with external pipeline: {file.filename}")
 
@@ -324,9 +312,7 @@ def process_file_with_external_pipeline(
         user=user,
     )
 
-    log.info(
-        f"Saved {len(chunks)} chunks to collection {collection_name} via external pipeline"
-    )
+    log.info(f"Saved {len(chunks)} chunks to collection {collection_name} via external pipeline")
 
     if result:
         Files.update_file_metadata_by_id(

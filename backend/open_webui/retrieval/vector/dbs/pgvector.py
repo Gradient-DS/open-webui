@@ -115,30 +115,26 @@ class PgvectorClient(VectorDBBase):
             # Ensure the pgvector extension is available
             # Use a conditional check to avoid permission issues on Azure PostgreSQL
             if PGVECTOR_CREATE_EXTENSION:
-                self.session.execute(
-                    text("""
+                self.session.execute(text("""
                     DO $$
                     BEGIN
                     IF NOT EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'vector') THEN
                         CREATE EXTENSION IF NOT EXISTS vector;
                     END IF;
                     END $$;
-                """)
-                )
+                """))
 
             if PGVECTOR_PGCRYPTO:
                 # Ensure the pgcrypto extension is available for encryption
                 # Use a conditional check to avoid permission issues on Azure PostgreSQL
-                self.session.execute(
-                    text("""
+                self.session.execute(text("""
                     DO $$
                     BEGIN
                        IF NOT EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'pgcrypto') THEN
                           CREATE EXTENSION IF NOT EXISTS pgcrypto;
                        END IF;
                     END $$;
-                """)
-                )
+                """))
 
                 if not PGVECTOR_PGCRYPTO_KEY:
                     raise ValueError('PGVECTOR_PGCRYPTO_KEY must be set when PGVECTOR_PGCRYPTO is enabled.')
@@ -445,7 +441,9 @@ class PgvectorClient(VectorDBBase):
                                     DocumentChunk.vmetadata,
                                     PGVECTOR_PGCRYPTO_KEY,
                                     JSONB,
-                                )[key].astext.in_([str(v) for v in in_values])
+                                )[
+                                    key
+                                ].astext.in_([str(v) for v in in_values])
                             )
                         else:
                             where_clauses.append(DocumentChunk.vmetadata[key].astext.in_([str(v) for v in in_values]))

@@ -94,9 +94,7 @@ class OneDriveSyncWorker(BaseSyncWorker):
 
         return True
 
-    async def _collect_folder_files(
-        self, source: Dict[str, Any]
-    ) -> tuple[List[Dict[str, Any]], int]:
+    async def _collect_folder_files(self, source: Dict[str, Any]) -> tuple[List[Dict[str, Any]], int]:
         """Collect files from a folder using delta query."""
         delta_link = source.get("delta_link")
 
@@ -123,9 +121,7 @@ class OneDriveSyncWorker(BaseSyncWorker):
                     source["name"],
                 )
                 source["delta_link"] = None
-                items, new_delta_link = await self._client.get_drive_delta(
-                    source["drive_id"], source["item_id"], None
-                )
+                items, new_delta_link = await self._client.get_drive_delta(source["drive_id"], source["item_id"], None)
             else:
                 raise
 
@@ -143,9 +139,7 @@ class OneDriveSyncWorker(BaseSyncWorker):
         # Delta items may arrive in any order, so we loop until no new folders
         # can be resolved (handles nested folders whose parent appears later).
         changed = True
-        folder_items = [
-            item for item in items if "folder" in item and "@removed" not in item
-        ]
+        folder_items = [item for item in items if "folder" in item and "@removed" not in item]
         while changed:
             changed = False
             for item in folder_items:
@@ -153,9 +147,7 @@ class OneDriveSyncWorker(BaseSyncWorker):
                 if parent_id not in folder_map:
                     continue
                 parent_path = folder_map[parent_id]
-                new_path = (
-                    f"{parent_path}/{item['name']}" if parent_path else item["name"]
-                )
+                new_path = f"{parent_path}/{item['name']}" if parent_path else item["name"]
                 if folder_map.get(item["id"]) != new_path:
                     folder_map[item["id"]] = new_path
                     changed = True
@@ -181,9 +173,7 @@ class OneDriveSyncWorker(BaseSyncWorker):
                 parent_id = item.get("parentReference", {}).get("id", "")
                 parent_path = folder_map.get(parent_id, "")
                 item_name = item.get("name", "unknown")
-                relative_path = (
-                    f"{parent_path}/{item_name}" if parent_path else item_name
-                )
+                relative_path = f"{parent_path}/{item_name}" if parent_path else item_name
 
                 files_to_process.append(
                     {
@@ -198,9 +188,7 @@ class OneDriveSyncWorker(BaseSyncWorker):
 
         return files_to_process, deleted_count
 
-    async def _collect_single_file(
-        self, source: Dict[str, Any]
-    ) -> Optional[Dict[str, Any]]:
+    async def _collect_single_file(self, source: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         """Check if a single file needs syncing based on content hash."""
         try:
             # Get current file metadata from Graph API
@@ -229,10 +217,7 @@ class OneDriveSyncWorker(BaseSyncWorker):
                     return None
                 else:
                     reason = "missing" if not existing else "not processed"
-                    log.info(
-                        f"File {source['name']} hash matches but record {reason}, "
-                        f"re-syncing"
-                    )
+                    log.info(f"File {source['name']} hash matches but record {reason}, " f"re-syncing")
 
             if not current_hash:
                 log.warning(f"No hash available from OneDrive for: {source['name']}")
@@ -299,17 +284,13 @@ class OneDriveSyncWorker(BaseSyncWorker):
         Only the owner (sync initiator) gets write permission.
         """
         # Find first folder source to get permissions from
-        folder_source = next(
-            (s for s in self.sources if s.get("type") == "folder"), None
-        )
+        folder_source = next((s for s in self.sources if s.get("type") == "folder"), None)
         if not folder_source:
             log.info("No folder sources, skipping permission sync")
             return
 
         try:
-            permissions = await self._client.get_folder_permissions(
-                folder_source["drive_id"], folder_source["item_id"]
-            )
+            permissions = await self._client.get_folder_permissions(folder_source["drive_id"], folder_source["item_id"])
 
             # Collect all emails from permissions
             permitted_emails = set()
@@ -343,9 +324,7 @@ class OneDriveSyncWorker(BaseSyncWorker):
                 user = Users.get_user_by_email(email)
                 if user:
                     permitted_user_ids.append(user.id)
-                    log.debug(
-                        f"Mapped OneDrive permission for {email} to user {user.id}"
-                    )
+                    log.debug(f"Mapped OneDrive permission for {email} to user {user.id}")
 
             # Update knowledge access_control
             if permitted_user_ids:
@@ -390,10 +369,7 @@ class OneDriveSyncWorker(BaseSyncWorker):
                         f"{len(permitted_user_ids)} users with read access"
                     )
             else:
-                log.info(
-                    f"No matching users found for OneDrive permissions, "
-                    f"keeping default access_control"
-                )
+                log.info(f"No matching users found for OneDrive permissions, " f"keeping default access_control")
 
         except Exception as e:
             log.warning(f"Failed to sync permissions: {e}")
@@ -419,15 +395,11 @@ class OneDriveSyncWorker(BaseSyncWorker):
                 return False
             # For other errors (5xx, etc.), assume access is still valid
             # to avoid accidentally removing files
-            log.warning(
-                f"Error verifying access to {source_type} {drive_id}/{item_id}: {e}"
-            )
+            log.warning(f"Error verifying access to {source_type} {drive_id}/{item_id}: {e}")
             return True
         except Exception as e:
             # For network errors, timeouts, etc., assume access is still valid
-            log.warning(
-                f"Error verifying access to {source_type} {drive_id}/{item_id}: {e}"
-            )
+            log.warning(f"Error verifying access to {source_type} {drive_id}/{item_id}: {e}")
             return True
 
     async def _handle_revoked_source(self, source: Dict[str, Any]) -> int:
@@ -455,11 +427,7 @@ class OneDriveSyncWorker(BaseSyncWorker):
                     continue
             else:
                 # Legacy fallback: match by drive_id (may over-match for same-drive sources)
-                if not (
-                    file_drive_id
-                    and source_drive_id
-                    and file_drive_id == source_drive_id
-                ):
+                if not (file_drive_id and source_drive_id and file_drive_id == source_drive_id):
                     continue
 
             # Matched - proceed with removal

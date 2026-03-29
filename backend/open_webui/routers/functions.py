@@ -108,9 +108,7 @@ async def load_function_from_url(request: Request, form_data: LoadUrlForm, user=
     function_name = (
         file_name[:-3]
         if (file_name.endswith('.py') and (not file_name.startswith(('main.py', 'index.py', '__init__.py'))))
-        else url_parts[-2]
-        if len(url_parts) > 1
-        else 'function'
+        else url_parts[-2] if len(url_parts) > 1 else 'function'
     )
 
     try:

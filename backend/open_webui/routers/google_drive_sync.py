@@ -79,9 +79,7 @@ async def sync_items(
 
         access_token = await get_valid_access_token(user.id, request.knowledge_id)
         if not access_token:
-            raise HTTPException(
-                401, "No valid Google Drive token. Please re-authorize."
-            )
+            raise HTTPException(401, "No valid Google Drive token. Please re-authorize.")
 
     new_sources = [
         {
@@ -233,9 +231,7 @@ async def initiate_auth(
         get_knowledge_or_raise(knowledge_id, user)
 
     redirect_uri = str(request.base_url).rstrip("/") + "/oauth/google/callback"
-    log.info(
-        "OAuth initiate: base_url=%s, redirect_uri=%s", request.base_url, redirect_uri
-    )
+    log.info("OAuth initiate: base_url=%s, redirect_uri=%s", request.base_url, redirect_uri)
 
     auth_url = get_authorization_url(
         user_id=user.id,
@@ -315,6 +311,4 @@ async def revoke_token(
     """Revoke and delete stored token for a KB."""
     from open_webui.services.google_drive.auth import delete_stored_token
 
-    return handle_revoke_token(
-        knowledge_id, _PROVIDER_TYPE, _META_KEY, user, delete_stored_token
-    )
+    return handle_revoke_token(knowledge_id, _PROVIDER_TYPE, _META_KEY, user, delete_stored_token)

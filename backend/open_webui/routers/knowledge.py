@@ -503,9 +503,7 @@ async def update_knowledge_by_id(
 
     # Prevent access_grants changes on non-local KBs
     if knowledge.type != "local":
-        form_data.access_grants = (
-            knowledge.access_grants if hasattr(knowledge, "access_grants") else []
-        )
+        form_data.access_grants = knowledge.access_grants if hasattr(knowledge, "access_grants") else []
 
     form_data.access_grants = filter_allowed_access_grants(
         request.app.state.config.USER_PERMISSIONS,
@@ -916,12 +914,7 @@ def remove_file_from_knowledge_by_id(
             if source_item_id and sources:
                 # Find the folder source this file belonged to
                 folder_source = next(
-                    (
-                        s
-                        for s in sources
-                        if s.get("item_id") == source_item_id
-                        and s.get("type") == "folder"
-                    ),
+                    (s for s in sources if s.get("item_id") == source_item_id and s.get("type") == "folder"),
                     None,
                 )
 
@@ -955,9 +948,7 @@ def remove_file_from_knowledge_by_id(
                         )
 
                     # Replace the folder source with individual file sources
-                    new_sources = [
-                        s for s in sources if s.get("item_id") != source_item_id
-                    ] + individual_sources
+                    new_sources = [s for s in sources if s.get("item_id") != source_item_id] + individual_sources
 
                     sync_info["sources"] = new_sources
                     meta["onedrive_sync"] = sync_info
@@ -994,9 +985,7 @@ def remove_file_from_knowledge_by_id(
     if delete_file:
         file_report = DeletionService.delete_file(form_data.file_id)
         if file_report.has_errors:
-            log.warning(
-                f"Errors deleting file {form_data.file_id}: {file_report.errors}"
-            )
+            log.warning(f"Errors deleting file {form_data.file_id}: {file_report.errors}")
 
     # For non-local KBs: check if this was the last reference to the file
     if not delete_file and knowledge.type != "local":
@@ -1005,9 +994,7 @@ def remove_file_from_knowledge_by_id(
             log.info(f"Cleaning up orphaned external file {form_data.file_id}")
             file_report = DeletionService.delete_file(form_data.file_id)
             if file_report.has_errors:
-                log.warning(
-                    f"Errors deleting orphaned file {form_data.file_id}: {file_report.errors}"
-                )
+                log.warning(f"Errors deleting orphaned file {form_data.file_id}: {file_report.errors}")
 
     if knowledge:
         return KnowledgeFilesResponse(

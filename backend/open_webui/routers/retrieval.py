@@ -1287,9 +1287,7 @@ def save_embeddings_to_vector_db(
                 VECTOR_DB_CLIENT.delete_collection(collection_name=collection_name)
                 log.info(f"deleting existing collection {collection_name}")
             elif add is False:
-                log.info(
-                    f"collection {collection_name} already exists, overwrite is False and add is False"
-                )
+                log.info(f"collection {collection_name} already exists, overwrite is False and add is False")
                 return True
 
         # Prepare items for insertion
@@ -1516,9 +1514,7 @@ def save_docs_to_vector_db(
             raise ValueError(ERROR_MESSAGES.DEFAULT('Invalid text splitter'))
 
     if len(docs) == 0:
-        log.warning(
-            f"No text content could be extracted for collection {collection_name}"
-        )
+        log.warning(f"No text content could be extracted for collection {collection_name}")
         return True
 
     texts = [sanitize_text_for_db(doc.page_content) for doc in docs]
@@ -1740,9 +1736,7 @@ def process_file(
                                 MINERU_API_TIMEOUT=request.app.state.config.MINERU_API_TIMEOUT,
                                 MINERU_PARAMS=request.app.state.config.MINERU_PARAMS,
                             )
-                            docs = loader.load(
-                                file.filename, file.meta.get("content_type"), file_path
-                            )
+                            docs = loader.load(file.filename, file.meta.get("content_type"), file_path)
                             docs = [
                                 Document(
                                     page_content=doc.page_content,
@@ -1759,11 +1753,7 @@ def process_file(
                         else:
                             raise ValueError(ERROR_MESSAGES.EMPTY_CONTENT)
 
-                text_content = (
-                    " ".join([doc.page_content for doc in docs])
-                    if docs
-                    else file.data.get("content", "")
-                )
+                text_content = " ".join([doc.page_content for doc in docs]) if docs else file.data.get("content", "")
             else:
                 # Process the file and save the content
                 # Usage: /files/
@@ -1805,20 +1795,14 @@ def process_file(
                     )
 
                     # Try external pipeline first by default
-                    external_pipeline_url = getattr(
-                        request.app.state.config, "EXTERNAL_PIPELINE_URL", None
-                    )
+                    external_pipeline_url = getattr(request.app.state.config, "EXTERNAL_PIPELINE_URL", None)
 
                     # Check if external pipeline is enabled (not empty string)
-                    use_external_pipeline = (
-                        external_pipeline_url and external_pipeline_url.strip() != ""
-                    )
+                    use_external_pipeline = external_pipeline_url and external_pipeline_url.strip() != ""
 
                     if use_external_pipeline:
                         # Try external pipeline first (default behavior)
-                        log.info(
-                            f"Attempting to use external pipeline for file: {file.filename}"
-                        )
+                        log.info(f"Attempting to use external pipeline for file: {file.filename}")
 
                         try:
                             # Process file with external pipeline
@@ -1851,9 +1835,7 @@ def process_file(
                         log.info(f"Using internal pipeline for file: {file.filename}")
                         # Internal pipeline: parsing, chunking, embedding
                         # Reuse the loader created above
-                        docs = loader.load(
-                            file.filename, file.meta.get("content_type"), file_path
-                        )
+                        docs = loader.load(file.filename, file.meta.get("content_type"), file_path)
 
                     docs = [
                         Document(

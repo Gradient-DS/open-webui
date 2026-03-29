@@ -34,11 +34,7 @@ _GRAPH_SCOPE = "https://graph.microsoft.com/Files.Read.All offline_access"
 def _cleanup_expired_flows():
     """Remove expired pending flows."""
     now = time.time()
-    expired = [
-        k
-        for k, v in _pending_flows.items()
-        if now - v["created_at"] > _FLOW_TTL_SECONDS
-    ]
+    expired = [k for k, v in _pending_flows.items() if now - v["created_at"] > _FLOW_TTL_SECONDS]
     for k in expired:
         del _pending_flows[k]
 
@@ -157,9 +153,7 @@ async def exchange_code_for_tokens(
             token_data = response.json()
     except httpx.HTTPStatusError as e:
         error_body = (
-            e.response.json()
-            if e.response.headers.get("content-type", "").startswith("application/json")
-            else {}
+            e.response.json() if e.response.headers.get("content-type", "").startswith("application/json") else {}
         )
         log.error(
             "Token exchange failed: %s %s",

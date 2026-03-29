@@ -22,8 +22,7 @@ async def emit_file_processing(
             room=f"user:{user_id}",
         )
         log.debug(
-            f"Emitted file processing event for {file_info.get('name', 'unknown')} "
-            f"in knowledge {knowledge_id}"
+            f"Emitted file processing event for {file_info.get('name', 'unknown')} " f"in knowledge {knowledge_id}"
         )
     except Exception as e:
         log.debug(f"Failed to emit file processing event: {e}")
@@ -45,8 +44,7 @@ async def emit_file_added(
             room=f"user:{user_id}",
         )
         log.debug(
-            f"Emitted file added event for {file_data.get('filename', 'unknown')} "
-            f"to knowledge {knowledge_id}"
+            f"Emitted file added event for {file_data.get('filename', 'unknown')} " f"to knowledge {knowledge_id}"
         )
     except Exception as e:
         log.debug(f"Failed to emit file added event: {e}")
@@ -86,9 +84,6 @@ async def emit_sync_progress(
             },
             room=f"user:{user_id}",
         )
-        log.debug(
-            f"Emitted sync progress: {status} {current}/{total} "
-            f"for knowledge {knowledge_id}"
-        )
+        log.debug(f"Emitted sync progress: {status} {current}/{total} " f"for knowledge {knowledge_id}")
     except Exception as e:
         log.debug(f"Failed to emit sync progress event: {e}")

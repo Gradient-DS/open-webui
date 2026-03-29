@@ -39,9 +39,7 @@ try:
 
     REGISTRATION_AVAILABLE = True
 except ImportError:
-    log.warning(
-        "Could not import Open WebUI models - agent registration will be skipped"
-    )
+    log.warning("Could not import Open WebUI models - agent registration will be skipped")
     REGISTRATION_AVAILABLE = False
 
 
@@ -51,9 +49,7 @@ def get_repo_install_path() -> Path:
     return Path(cache_dir) / "external_agents"
 
 
-def install_external_package(
-    repo_url: str, auto_update: bool = False
-) -> Optional[Path]:
+def install_external_package(repo_url: str, auto_update: bool = False) -> Optional[Path]:
     """
     Install external package from git repo or local path.
 
@@ -140,9 +136,7 @@ def install_external_package(
         return None
 
 
-def create_wrapper_content(
-    package_path: str, agent_module: str, agent_metadata: Optional[Dict] = None
-) -> str:
+def create_wrapper_content(package_path: str, agent_module: str, agent_metadata: Optional[Dict] = None) -> str:
     """
     Create wrapper function content that imports from external package.
 
@@ -244,9 +238,7 @@ def extract_agent_metadata(package_path: str, agent_module: str) -> Optional[Dic
         return None
 
 
-def register_external_agent_direct(
-    agent_id: str, wrapper_content: str, user_id: str = "system"
-) -> bool:
+def register_external_agent_direct(agent_id: str, wrapper_content: str, user_id: str = "system") -> bool:
     """
     Register an external agent wrapper directly in the database.
 
@@ -267,15 +259,11 @@ def register_external_agent_direct(
         frontmatter = extract_frontmatter(wrapper_content)
 
         # Load and validate the function module
-        function_module, function_type, _ = load_function_module_by_id(
-            agent_id, content=wrapper_content
-        )
+        function_module, function_type, _ = load_function_module_by_id(agent_id, content=wrapper_content)
 
         # Prepare function data
         function_name = frontmatter.get("title", agent_id.replace("_", " ").title())
-        function_description = frontmatter.get(
-            "description", f"External agent: {agent_id}"
-        )
+        function_description = frontmatter.get("description", f"External agent: {agent_id}")
 
         form_data = FunctionForm(
             id=agent_id,
@@ -337,9 +325,7 @@ def load_external_agents_at_startup() -> Dict[str, bool]:
     repo_url = os.environ.get("EXTERNAL_AGENTS_REPO", "").strip()
     package_name = os.environ.get("EXTERNAL_AGENTS_PACKAGE", "").strip()
     agents_list = os.environ.get("EXTERNAL_AGENTS_LIST", "").strip()
-    auto_update = (
-        os.environ.get("EXTERNAL_AGENTS_AUTO_UPDATE", "false").lower() == "true"
-    )
+    auto_update = os.environ.get("EXTERNAL_AGENTS_AUTO_UPDATE", "false").lower() == "true"
 
     if not repo_url or not package_name or not agents_list:
         log.info("External agents not configured (EXTERNAL_AGENTS_* env vars not set)")
@@ -374,9 +360,7 @@ def load_external_agents_at_startup() -> Dict[str, bool]:
             metadata = extract_agent_metadata(package_name, agent_module)
 
             # Create wrapper content
-            wrapper_content = create_wrapper_content(
-                package_name, agent_module, metadata
-            )
+            wrapper_content = create_wrapper_content(package_name, agent_module, metadata)
 
             # Register directly in database
             if register_external_agent_direct(agent_id, wrapper_content):
@@ -389,9 +373,7 @@ def load_external_agents_at_startup() -> Dict[str, bool]:
             results[agent_id] = False
 
     log.info("=" * 60)
-    log.info(
-        f"External agent registration complete: {sum(results.values())}/{len(results)} successful"
-    )
+    log.info(f"External agent registration complete: {sum(results.values())}/{len(results)} successful")
     if sum(results.values()) > 0:
         log.info("✓ Agents are now available in the model selector!")
     log.info("=" * 60)

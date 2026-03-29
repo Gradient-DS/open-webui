@@ -105,9 +105,7 @@ class GoogleDriveSyncWorker(BaseSyncWorker):
 
         return True
 
-    async def _collect_folder_files(
-        self, source: Dict[str, Any]
-    ) -> tuple[List[Dict[str, Any]], int]:
+    async def _collect_folder_files(self, source: Dict[str, Any]) -> tuple[List[Dict[str, Any]], int]:
         """Collect files from a folder using changes API or full listing."""
         page_token = source.get("page_token")
 
@@ -116,9 +114,7 @@ class GoogleDriveSyncWorker(BaseSyncWorker):
         else:
             return await self._collect_folder_files_full(source)
 
-    async def _collect_single_file(
-        self, source: Dict[str, Any]
-    ) -> Optional[Dict[str, Any]]:
+    async def _collect_single_file(self, source: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         """Check if a single file needs syncing based on hash or modified time."""
         try:
             item = await self._client.get_file(source["item_id"])
@@ -144,10 +140,7 @@ class GoogleDriveSyncWorker(BaseSyncWorker):
                     return None
                 else:
                     reason = "missing" if not existing else "not processed"
-                    log.info(
-                        f"File {source['name']} indicator matches but record {reason}, "
-                        f"re-syncing"
-                    )
+                    log.info(f"File {source['name']} indicator matches but record {reason}, " f"re-syncing")
 
             # Store new indicator for later save
             if self._is_workspace_file(item):
@@ -209,17 +202,13 @@ class GoogleDriveSyncWorker(BaseSyncWorker):
 
     async def _sync_permissions(self) -> None:
         """Sync Google Drive folder permissions to Knowledge access_control."""
-        folder_source = next(
-            (s for s in self.sources if s.get("type") == "folder"), None
-        )
+        folder_source = next((s for s in self.sources if s.get("type") == "folder"), None)
         if not folder_source:
             log.info("No folder sources, skipping permission sync")
             return
 
         try:
-            permissions = await self._client.get_file_permissions(
-                folder_source["item_id"]
-            )
+            permissions = await self._client.get_file_permissions(folder_source["item_id"])
 
             permitted_emails = set()
             for perm in permissions:
@@ -228,18 +217,14 @@ class GoogleDriveSyncWorker(BaseSyncWorker):
                 if email:
                     permitted_emails.add(email.lower())
 
-            log.info(
-                f"Found {len(permitted_emails)} permitted emails from Google Drive"
-            )
+            log.info(f"Found {len(permitted_emails)} permitted emails from Google Drive")
 
             permitted_user_ids = []
             for email in permitted_emails:
                 user = Users.get_user_by_email(email)
                 if user:
                     permitted_user_ids.append(user.id)
-                    log.debug(
-                        f"Mapped Google Drive permission for {email} to user {user.id}"
-                    )
+                    log.debug(f"Mapped Google Drive permission for {email} to user {user.id}")
 
             if permitted_user_ids:
                 if self.user_id not in permitted_user_ids:
@@ -282,10 +267,7 @@ class GoogleDriveSyncWorker(BaseSyncWorker):
                         f"{len(permitted_user_ids)} users with read access"
                     )
             else:
-                log.info(
-                    f"No matching users found for Google Drive permissions, "
-                    f"keeping default access_control"
-                )
+                log.info(f"No matching users found for Google Drive permissions, " f"keeping default access_control")
 
         except Exception as e:
             log.warning(f"Failed to sync permissions: {e}")
@@ -304,10 +286,7 @@ class GoogleDriveSyncWorker(BaseSyncWorker):
             return True
         except httpx.HTTPStatusError as e:
             if e.response.status_code in (403, 404):
-                log.warning(
-                    f"User {self.user_id} lost access to {source_type} "
-                    f"{item_id}: {e.response.status_code}"
-                )
+                log.warning(f"User {self.user_id} lost access to {source_type} " f"{item_id}: {e.response.status_code}")
                 return False
             log.warning(f"Error verifying access to {source_type} {item_id}: {e}")
             return True
@@ -377,9 +356,7 @@ class GoogleDriveSyncWorker(BaseSyncWorker):
 
         return name
 
-    async def _collect_folder_files_full(
-        self, source: Dict[str, Any]
-    ) -> tuple[List[Dict[str, Any]], int]:
+    async def _collect_folder_files_full(self, source: Dict[str, Any]) -> tuple[List[Dict[str, Any]], int]:
         """Full listing of all files in a folder (initial sync)."""
         folder_id = source["item_id"]
 
@@ -412,11 +389,7 @@ class GoogleDriveSyncWorker(BaseSyncWorker):
                             "source_type": "folder",
                             "source_item_id": source["item_id"],
                             "name": effective_name,
-                            "relative_path": (
-                                f"{parent_path}/{effective_name}"
-                                if parent_path
-                                else effective_name
-                            ),
+                            "relative_path": (f"{parent_path}/{effective_name}" if parent_path else effective_name),
                         }
                     )
 
@@ -470,11 +443,7 @@ class GoogleDriveSyncWorker(BaseSyncWorker):
                 for parent_id in parents:
                     if parent_id in folder_map:
                         parent_path = folder_map[parent_id]
-                        item_path = (
-                            f"{parent_path}/{item['name']}"
-                            if parent_path
-                            else item["name"]
-                        )
+                        item_path = f"{parent_path}/{item['name']}" if parent_path else item["name"]
                         folder_map[item["id"]] = item_path
                         break
                 continue
@@ -497,20 +466,14 @@ class GoogleDriveSyncWorker(BaseSyncWorker):
                     "source_type": "folder",
                     "source_item_id": source["item_id"],
                     "name": effective_name,
-                    "relative_path": (
-                        f"{parent_path}/{effective_name}"
-                        if parent_path
-                        else effective_name
-                    ),
+                    "relative_path": (f"{parent_path}/{effective_name}" if parent_path else effective_name),
                 }
             )
 
         source["folder_map"] = folder_map
         return files_to_process, deleted_count
 
-    def _is_in_folder_tree(
-        self, item: Dict[str, Any], folder_map: Dict[str, str]
-    ) -> bool:
+    def _is_in_folder_tree(self, item: Dict[str, Any], folder_map: Dict[str, str]) -> bool:
         """Check if an item is within the synced folder tree."""
         # If the item's ID is in the folder map, it's a known folder
         if item.get("id") in folder_map:

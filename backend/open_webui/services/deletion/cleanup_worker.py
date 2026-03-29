@@ -25,9 +25,7 @@ def start_cleanup_worker():
     global _cleanup_task
     if _cleanup_task is None or _cleanup_task.done():
         _cleanup_task = asyncio.create_task(_run_cleanup_loop())
-        log.info(
-            "Deletion cleanup worker started (interval: %ds)", CLEANUP_INTERVAL_SECONDS
-        )
+        log.info("Deletion cleanup worker started (interval: %ds)", CLEANUP_INTERVAL_SECONDS)
 
 
 def stop_cleanup_worker():
@@ -91,9 +89,7 @@ def _process_pending_kb_deletions():
             if kb_file_ids:
                 file_report = DeletionService.delete_orphaned_files_batch(kb_file_ids)
                 if file_report.has_errors:
-                    log.warning(
-                        "KB %s file cleanup errors: %s", kb.id, file_report.errors
-                    )
+                    log.warning("KB %s file cleanup errors: %s", kb.id, file_report.errors)
                 log.info(
                     "KB %s file cleanup: %d storage, %d vectors, %d DB records",
                     kb.id,
@@ -133,12 +129,7 @@ def _process_pending_chat_deletions():
             if chat.meta and chat.meta.get("tags"):
                 for tag_name in chat.meta.get("tags", []):
                     try:
-                        if (
-                            Chats.count_chats_by_tag_name_and_user_id(
-                                tag_name, chat.user_id
-                            )
-                            == 0
-                        ):
+                        if Chats.count_chats_by_tag_name_and_user_id(tag_name, chat.user_id) == 0:
                             Tags.delete_tag_by_name_and_user_id(tag_name, chat.user_id)
                     except Exception as e:
                         log.warning("Failed to cleanup tag %s: %s", tag_name, e)

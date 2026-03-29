@@ -211,9 +211,7 @@ class S3StorageProvider(StorageProvider):
                 )
                 deleted += len(batch) - len(resp.get("Errors", []))
                 for err in resp.get("Errors", []):
-                    log.warning(
-                        f"S3 batch delete error for {err['Key']}: {err['Message']}"
-                    )
+                    log.warning(f"S3 batch delete error for {err['Key']}: {err['Message']}")
             except ClientError as e:
                 log.warning(f"S3 batch delete failed: {e}")
 

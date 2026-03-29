@@ -152,9 +152,7 @@ def handle_get_sync_status(
     last_result = sync_info.get("last_result", {})
 
     failed_files_raw = last_result.get("failed_files", [])
-    failed_files = (
-        [FailedFileInfo(**f) for f in failed_files_raw] if failed_files_raw else None
-    )
+    failed_files = [FailedFileInfo(**f) for f in failed_files_raw] if failed_files_raw else None
 
     return SyncStatusResponse(
         knowledge_id=knowledge_id,
@@ -234,8 +232,7 @@ def handle_remove_source(
     Knowledges.update_knowledge_meta_by_id(knowledge_id, meta)
 
     log.info(
-        f"Removed source '{source_to_remove.get('name')}' from KB {knowledge_id}, "
-        f"{removed_count} files cleaned up"
+        f"Removed source '{source_to_remove.get('name')}' from KB {knowledge_id}, " f"{removed_count} files cleaned up"
     )
 
     return {

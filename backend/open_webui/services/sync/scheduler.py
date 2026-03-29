@@ -124,9 +124,7 @@ class SyncScheduler:
 
             except Exception:
                 log.exception("Unexpected error during scheduled sync of KB %s", kb.id)
-                self._update_sync_status(
-                    kb.id, "failed", error="Unexpected scheduler error"
-                )
+                self._update_sync_status(kb.id, "failed", error="Unexpected scheduler error")
 
     def _is_sync_due(
         self,
@@ -144,9 +142,7 @@ class SyncScheduler:
             return False
 
         # Skip if no stored token (per-user DB lookup)
-        if sync_provider and not sync_provider.get_token_manager().has_stored_token(
-            kb.user_id, kb.id
-        ):
+        if sync_provider and not sync_provider.get_token_manager().has_stored_token(kb.user_id, kb.id):
             return False
 
         # Skip if needs re-authorization

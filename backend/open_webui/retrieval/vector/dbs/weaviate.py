@@ -136,29 +136,15 @@ class WeaviateClient(VectorDBBase):
             name=collection_name,
             vector_config=weaviate.classes.config.Configure.Vectors.self_provided(),
             properties=[
-                weaviate.classes.config.Property(
-                    name="text", data_type=weaviate.classes.config.DataType.TEXT
-                ),
+                weaviate.classes.config.Property(name="text", data_type=weaviate.classes.config.DataType.TEXT),
                 # Core file metadata - always present
-                weaviate.classes.config.Property(
-                    name="file_id", data_type=weaviate.classes.config.DataType.TEXT
-                ),
-                weaviate.classes.config.Property(
-                    name="name", data_type=weaviate.classes.config.DataType.TEXT
-                ),
-                weaviate.classes.config.Property(
-                    name="source", data_type=weaviate.classes.config.DataType.TEXT
-                ),
-                weaviate.classes.config.Property(
-                    name="created_by", data_type=weaviate.classes.config.DataType.TEXT
-                ),
+                weaviate.classes.config.Property(name="file_id", data_type=weaviate.classes.config.DataType.TEXT),
+                weaviate.classes.config.Property(name="name", data_type=weaviate.classes.config.DataType.TEXT),
+                weaviate.classes.config.Property(name="source", data_type=weaviate.classes.config.DataType.TEXT),
+                weaviate.classes.config.Property(name="created_by", data_type=weaviate.classes.config.DataType.TEXT),
                 # PDF metadata - dates come in non-RFC3339 format
-                weaviate.classes.config.Property(
-                    name="moddate", data_type=weaviate.classes.config.DataType.TEXT
-                ),
-                weaviate.classes.config.Property(
-                    name="creationdate", data_type=weaviate.classes.config.DataType.TEXT
-                ),
+                weaviate.classes.config.Property(name="moddate", data_type=weaviate.classes.config.DataType.TEXT),
+                weaviate.classes.config.Property(name="creationdate", data_type=weaviate.classes.config.DataType.TEXT),
                 # OneDrive metadata
                 weaviate.classes.config.Property(
                     name="onedrive_item_id",
@@ -178,9 +164,7 @@ class WeaviateClient(VectorDBBase):
                 self._create_collection(sane_collection_name)
             except UnexpectedStatusCodeError as e:
                 if "already exists" in str(e):
-                    log.debug(
-                        "Collection %s created by another thread", sane_collection_name
-                    )
+                    log.debug("Collection %s created by another thread", sane_collection_name)
                 else:
                     raise
 

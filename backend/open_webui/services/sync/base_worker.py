@@ -96,9 +96,7 @@ class BaseSyncWorker(ABC):
         ...
 
     @abstractmethod
-    async def _collect_folder_files(
-        self, source: Dict[str, Any]
-    ) -> tuple[List[Dict[str, Any]], int]:
+    async def _collect_folder_files(self, source: Dict[str, Any]) -> tuple[List[Dict[str, Any]], int]:
         """Collect files from a folder source.
 
         Returns:
@@ -107,9 +105,7 @@ class BaseSyncWorker(ABC):
         ...
 
     @abstractmethod
-    async def _collect_single_file(
-        self, source: Dict[str, Any]
-    ) -> Optional[Dict[str, Any]]:
+    async def _collect_single_file(self, source: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         """Check if a single file needs syncing.
 
         Returns:
@@ -332,9 +328,7 @@ class BaseSyncWorker(ABC):
                 log.info(f"No remaining references to {file_id}, cleaning up")
                 await asyncio.to_thread(DeletionService.delete_file, file_id)
             else:
-                log.info(
-                    f"File {file_id} still referenced by {len(remaining_refs)} KB(s), preserving"
-                )
+                log.info(f"File {file_id} still referenced by {len(remaining_refs)} KB(s), preserving")
 
     async def _ensure_vectors_in_kb(self, file_id: str) -> Optional[FailedFile]:
         """Copy vectors from the per-file collection into this KB's collection."""
@@ -382,9 +376,7 @@ class BaseSyncWorker(ABC):
                 error_message=f"Error copying vectors: {str(e)}"[:80],
             )
 
-    async def _process_file_via_api(
-        self, file_id: str, filename: str
-    ) -> Optional[FailedFile]:
+    async def _process_file_via_api(self, file_id: str, filename: str) -> Optional[FailedFile]:
         """Process file by calling the retrieval processing function directly."""
         from open_webui.routers.retrieval import process_file, ProcessFileForm
         from fastapi import HTTPException
@@ -414,18 +406,12 @@ class BaseSyncWorker(ABC):
             except HTTPException as e:
                 detail = str(e.detail) if e.detail else ""
                 if e.status_code == 400 and "Duplicate content" in detail:
-                    log.debug(
-                        f"File {file_id} already has embeddings, skipping to knowledge base addition"
-                    )
-                elif e.status_code == 400 and (
-                    "No content extracted" in detail or "empty" in detail.lower()
-                ):
+                    log.debug(f"File {file_id} already has embeddings, skipping to knowledge base addition")
+                elif e.status_code == 400 and ("No content extracted" in detail or "empty" in detail.lower()):
                     log.debug(f"File {file_id} has no extractable content")
                     return None
                 else:
-                    log.debug(
-                        f"Failed to process file content {file_id}: {e.status_code} - {detail}"
-                    )
+                    log.debug(f"Failed to process file content {file_id}: {e.status_code} - {detail}")
                     return FailedFile(
                         filename=filename,
                         error_type=SyncErrorType.PROCESSING_ERROR.value,
@@ -441,28 +427,18 @@ class BaseSyncWorker(ABC):
                         collection_name=self.knowledge_id,
                     ),
                 )
-                log.info(
-                    f"Successfully added file {file_id} to knowledge base {self.knowledge_id}"
-                )
+                log.info(f"Successfully added file {file_id} to knowledge base {self.knowledge_id}")
             except HTTPException as e:
                 detail = str(e.detail) if e.detail else ""
                 if e.status_code == 400 and "Duplicate content" in detail:
-                    log.debug(
-                        f"File {file_id} already exists in knowledge base {self.knowledge_id}"
-                    )
+                    log.debug(f"File {file_id} already exists in knowledge base {self.knowledge_id}")
                     return None
                 else:
-                    log.debug(
-                        f"Failed to add file {file_id} to knowledge base: {e.status_code} - {detail}"
-                    )
+                    log.debug(f"Failed to add file {file_id} to knowledge base: {e.status_code} - {detail}")
                     return FailedFile(
                         filename=filename,
                         error_type=SyncErrorType.PROCESSING_ERROR.value,
-                        error_message=(
-                            detail[:100]
-                            if detail
-                            else "Failed to add to knowledge base"
-                        ),
+                        error_message=(detail[:100] if detail else "Failed to add to knowledge base"),
                     )
 
             return None
@@ -474,9 +450,7 @@ class BaseSyncWorker(ABC):
                 error_message=str(e)[:100],
             )
 
-    async def _process_file_info(
-        self, file_info: Dict[str, Any]
-    ) -> Optional[FailedFile]:
+    async def _process_file_info(self, file_info: Dict[str, Any]) -> Optional[FailedFile]:
         """Download and process a single file.
 
         Returns:
@@ -488,9 +462,7 @@ class BaseSyncWorker(ABC):
         source_item_id = file_info.get("source_item_id")
         relative_path = file_info.get("relative_path", name)
 
-        log.info(
-            f"Processing file: {name} (id: {item_id}, relative_path: {relative_path})"
-        )
+        log.info(f"Processing file: {name} (id: {item_id}, relative_path: {relative_path})")
 
         if self._check_cancelled():
             log.info(f"Sync cancelled, skipping file {name}")
@@ -543,25 +515,16 @@ class BaseSyncWorker(ABC):
 
             new_relative_path = file_info.get("relative_path")
             existing_meta = existing.meta or {}
-            if (
-                new_relative_path
-                and existing_meta.get("relative_path") != new_relative_path
-            ):
+            if new_relative_path and existing_meta.get("relative_path") != new_relative_path:
                 existing_meta["relative_path"] = new_relative_path
                 Files.update_file_by_id(file_id, FileUpdateForm(meta=existing_meta))
-                log.info(
-                    f"Updated {file_id} meta with relative_path: {new_relative_path}"
-                )
+                log.info(f"Updated {file_id} meta with relative_path: {new_relative_path}")
 
-            Knowledges.add_file_to_knowledge_by_id(
-                self.knowledge_id, file_id, self.user_id
-            )
+            Knowledges.add_file_to_knowledge_by_id(self.knowledge_id, file_id, self.user_id)
             result = await self._ensure_vectors_in_kb(file_id)
             if result:
                 if result.error_type == SyncErrorType.EMPTY_CONTENT.value:
-                    log.info(
-                        f"File {file_id} has no extractable content, skipping vectorisation"
-                    )
+                    log.info(f"File {file_id} has no extractable content, skipping vectorisation")
                     return None
                 log.warning(
                     f"File {file_id} vectors missing despite hash match, "
@@ -666,18 +629,14 @@ class BaseSyncWorker(ABC):
                 knowledge_files = Knowledges.get_knowledge_files_by_file_id(file_id)
                 for kf in knowledge_files:
                     if kf.knowledge_id != self.knowledge_id:
-                        log.info(
-                            f"Propagating updated vectors for {file_id} to KB {kf.knowledge_id}"
-                        )
+                        log.info(f"Propagating updated vectors for {file_id} to KB {kf.knowledge_id}")
                         try:
                             VECTOR_DB_CLIENT.delete(
                                 collection_name=kf.knowledge_id,
                                 filter={"file_id": file_id},
                             )
                         except Exception as e:
-                            log.warning(
-                                f"Failed to remove old vectors from KB {kf.knowledge_id}: {e}"
-                            )
+                            log.warning(f"Failed to remove old vectors from KB {kf.knowledge_id}: {e}")
                         try:
                             from open_webui.routers.retrieval import (
                                 process_file,
@@ -701,9 +660,7 @@ class BaseSyncWorker(ABC):
                                 ),
                             )
                         except Exception as e:
-                            log.warning(
-                                f"Failed to propagate vectors to KB {kf.knowledge_id}: {e}"
-                            )
+                            log.warning(f"Failed to propagate vectors to KB {kf.knowledge_id}: {e}")
             except Exception as e:
                 log.warning(f"Failed to propagate vector updates for {file_id}: {e}")
 
@@ -763,8 +720,7 @@ class BaseSyncWorker(ABC):
                 await self._update_sync_status(
                     "access_revoked",
                     error=(
-                        f"Access to '{source.get('name', 'unknown')}' has been revoked. "
-                        f"{removed} file(s) removed."
+                        f"Access to '{source.get('name', 'unknown')}' has been revoked. " f"{removed} file(s) removed."
                     ),
                 )
 
@@ -778,10 +734,7 @@ class BaseSyncWorker(ABC):
 
             all_files_to_process = []
 
-            log.info(
-                f"Starting multi-source sync for knowledge {self.knowledge_id}, "
-                f"{len(self.sources)} sources"
-            )
+            log.info(f"Starting multi-source sync for knowledge {self.knowledge_id}, " f"{len(self.sources)} sources")
 
             for source in self.sources:
                 if source.get("type") == "folder":
@@ -827,8 +780,7 @@ class BaseSyncWorker(ABC):
                     await self._update_sync_status(
                         "syncing",
                         error=(
-                            f"Only syncing {available_slots} of {total_found} "
-                            f"files due to {max_files}-file limit."
+                            f"Only syncing {available_slots} of {total_found} " f"files due to {max_files}-file limit."
                         ),
                     )
 
@@ -855,9 +807,7 @@ class BaseSyncWorker(ABC):
             results_lock = asyncio.Lock()
             cancelled = False
 
-            async def process_with_semaphore(
-                file_info: Dict[str, Any], index: int
-            ) -> Optional[FailedFile]:
+            async def process_with_semaphore(file_info: Dict[str, Any], index: int) -> Optional[FailedFile]:
                 nonlocal processed_count, failed_count, cancelled
 
                 if self._check_cancelled():
@@ -906,16 +856,10 @@ class BaseSyncWorker(ABC):
                             error_message=str(e)[:100],
                         )
 
-            log.info(
-                f"Starting parallel processing of {total_files} files "
-                f"with max {max_concurrent} concurrent"
-            )
+            log.info(f"Starting parallel processing of {total_files} files " f"with max {max_concurrent} concurrent")
             start_time = time.time()
 
-            tasks = [
-                process_with_semaphore(file_info, i)
-                for i, file_info in enumerate(all_files_to_process)
-            ]
+            tasks = [process_with_semaphore(file_info, i) for i, file_info in enumerate(all_files_to_process)]
 
             results = await asyncio.gather(*tasks, return_exceptions=True)
 
@@ -981,9 +925,7 @@ class BaseSyncWorker(ABC):
             meta = knowledge.meta or {}
             sync_info = meta.get(self.meta_key, {})
             sync_info["last_sync_at"] = int(time.time())
-            sync_info["status"] = (
-                "completed" if total_failed == 0 else "completed_with_errors"
-            )
+            sync_info["status"] = "completed" if total_failed == 0 else "completed_with_errors"
             sync_info["last_result"] = {
                 "files_processed": total_processed,
                 "files_failed": total_failed,
@@ -1006,10 +948,7 @@ class BaseSyncWorker(ABC):
                 failed_files,
             )
 
-            log.info(
-                f"Sync completed for {self.knowledge_id}: "
-                f"{total_processed} processed, {total_failed} failed"
-            )
+            log.info(f"Sync completed for {self.knowledge_id}: " f"{total_processed} processed, {total_failed} failed")
 
             return {
                 "files_processed": total_processed,

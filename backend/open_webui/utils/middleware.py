@@ -2263,11 +2263,7 @@ async def process_chat_payload(request, form_data, user, metadata, model):
     # [Gradient] Also skip knowledge flattening when agent API is enabled.
     # The agent receives raw KB references via metadata["knowledge"]
     # and handles its own retrieval and status emissions.
-    if (
-        model_knowledge
-        and metadata.get("params", {}).get("function_calling") != "native"
-        and not AGENT_API_ENABLED
-    ):
+    if model_knowledge and metadata.get("params", {}).get("function_calling") != "native" and not AGENT_API_ENABLED:
         await event_emitter(
             {
                 'type': 'status',
@@ -2355,13 +2351,8 @@ async def process_chat_payload(request, form_data, user, metadata, model):
         if 'web_search' in features and features['web_search']:
             # Skip forced RAG web search when native FC is enabled - model can use web_search tool
             # [Gradient] Also skip when agent API is enabled - agent handles its own web search.
-            if (
-                metadata.get("params", {}).get("function_calling") != "native"
-                and not AGENT_API_ENABLED
-            ):
-                form_data = await chat_web_search_handler(
-                    request, form_data, extra_params, user
-                )
+            if metadata.get("params", {}).get("function_calling") != "native" and not AGENT_API_ENABLED:
+                form_data = await chat_web_search_handler(request, form_data, extra_params, user)
 
         if 'image_generation' in features and features['image_generation']:
             # Skip forced image generation when native FC is enabled - model can use generate_image tool
@@ -2376,10 +2367,7 @@ async def process_chat_payload(request, form_data, user, metadata, model):
             # [Gradient] Also skip when agent API is enabled — the agent controls
             # its own prompting. Code execution still happens in process_chat_response
             # when the agent returns <code_interpreter> tags.
-            if (
-                metadata.get("params", {}).get("function_calling") != "native"
-                and not AGENT_API_ENABLED
-            ):
+            if metadata.get("params", {}).get("function_calling") != "native" and not AGENT_API_ENABLED:
                 prompt = (
                     request.app.state.config.CODE_INTERPRETER_PROMPT_TEMPLATE
                     if request.app.state.config.CODE_INTERPRETER_PROMPT_TEMPLATE != ''
@@ -2688,9 +2676,9 @@ async def process_chat_payload(request, form_data, user, metadata, model):
 
         # Inject builtin tools for native function calling based on enabled features and model capability
         # Check if builtin_tools capability is enabled for this model (defaults to True if not specified)
-        builtin_tools_enabled = (
-            model.get("info", {}).get("meta", {}).get("capabilities") or {}
-        ).get("builtin_tools", True)
+        builtin_tools_enabled = (model.get("info", {}).get("meta", {}).get("capabilities") or {}).get(
+            "builtin_tools", True
+        )
         if (
             metadata.get("params", {}).get("function_calling") == "native"
             and builtin_tools_enabled
@@ -3745,9 +3733,9 @@ async def streaming_chat_response_handler(response, ctx):
                                                         current_response_tool_call['function']['name'] = delta_name
 
                                                     if delta_arguments:
-                                                        current_response_tool_call['function']['arguments'] += (
-                                                            delta_arguments
-                                                        )
+                                                        current_response_tool_call['function'][
+                                                            'arguments'
+                                                        ] += delta_arguments
 
                                         # Emit pending tool calls in real-time
                                         if response_tool_calls:
@@ -4497,8 +4485,7 @@ async def streaming_chat_response_handler(response, ctx):
                                 code = sanitize_code(code)
 
                                 if CODE_INTERPRETER_BLOCKED_MODULES:
-                                    blocking_code = textwrap.dedent(
-                                        f"""
+                                    blocking_code = textwrap.dedent(f"""
                                         import builtins
     
                                         BLOCKED_MODULES = {CODE_INTERPRETER_BLOCKED_MODULES}
@@ -4514,8 +4501,7 @@ async def streaming_chat_response_handler(response, ctx):
                                             return _real_import(name, globals, locals, fromlist, level)
     
                                         builtins.__import__ = restricted_import
-                                    """
-                                    )
+                                    """)
                                     code = blocking_code + '\n' + code
 
                                 if request.app.state.config.CODE_INTERPRETER_ENGINE == 'pyodide':

@@ -34,9 +34,7 @@ def _get_base_url(request: Request) -> str:
         raise HTTPException(status_code=503, detail="Agent Proxy is disabled")
 
     if not AGENT_API_BASE_URL:
-        raise HTTPException(
-            status_code=503, detail="AGENT_API_BASE_URL is not configured"
-        )
+        raise HTTPException(status_code=503, detail="AGENT_API_BASE_URL is not configured")
     return AGENT_API_BASE_URL
 
 

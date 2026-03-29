@@ -346,9 +346,7 @@ class FilesTable:
             except Exception:
                 return None
 
-    def update_file_path_by_id(
-        self, id: str, path: str, db: Optional[Session] = None
-    ) -> Optional[FileModel]:
+    def update_file_path_by_id(self, id: str, path: str, db: Optional[Session] = None) -> Optional[FileModel]:
         with get_db_context(db) as db:
             try:
                 file = db.query(File).filter_by(id=id).first()
@@ -396,9 +394,7 @@ class FilesTable:
     def delete_files_by_ids(self, ids: list[str], db: Optional[Session] = None) -> bool:
         with get_db_context(db) as db:
             try:
-                db.query(File).filter(File.id.in_(ids)).delete(
-                    synchronize_session=False
-                )
+                db.query(File).filter(File.id.in_(ids)).delete(synchronize_session=False)
                 db.commit()
                 return True
             except Exception:

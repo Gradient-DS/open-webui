@@ -1025,12 +1025,8 @@ async def update_admin_config(request: Request, form_data: AdminConfig, user=Dep
     if re.match(pattern, form_data.JWT_EXPIRES_IN):
         request.app.state.config.JWT_EXPIRES_IN = form_data.JWT_EXPIRES_IN
 
-    request.app.state.config.ENABLE_COMMUNITY_SHARING = (
-        form_data.ENABLE_COMMUNITY_SHARING
-    )
-    request.app.state.config.ENABLE_CITATION_RELEVANCE = (
-        form_data.ENABLE_CITATION_RELEVANCE
-    )
+    request.app.state.config.ENABLE_COMMUNITY_SHARING = form_data.ENABLE_COMMUNITY_SHARING
+    request.app.state.config.ENABLE_CITATION_RELEVANCE = form_data.ENABLE_CITATION_RELEVANCE
     request.app.state.config.ENABLE_MESSAGE_RATING = form_data.ENABLE_MESSAGE_RATING
 
     request.app.state.config.ENABLE_USER_WEBHOOKS = form_data.ENABLE_USER_WEBHOOKS
@@ -1043,12 +1039,8 @@ async def update_admin_config(request: Request, form_data: AdminConfig, user=Dep
 
     request.app.state.config.ENABLE_ACCEPTANCE_MODAL = form_data.ENABLE_ACCEPTANCE_MODAL
     request.app.state.config.ACCEPTANCE_MODAL_TITLE = form_data.ACCEPTANCE_MODAL_TITLE
-    request.app.state.config.ACCEPTANCE_MODAL_CONTENT = (
-        form_data.ACCEPTANCE_MODAL_CONTENT
-    )
-    request.app.state.config.ACCEPTANCE_MODAL_BUTTON_TEXT = (
-        form_data.ACCEPTANCE_MODAL_BUTTON_TEXT
-    )
+    request.app.state.config.ACCEPTANCE_MODAL_CONTENT = form_data.ACCEPTANCE_MODAL_CONTENT
+    request.app.state.config.ACCEPTANCE_MODAL_BUTTON_TEXT = form_data.ACCEPTANCE_MODAL_BUTTON_TEXT
 
     return {
         "SHOW_ADMIN_DETAILS": request.app.state.config.SHOW_ADMIN_DETAILS,
@@ -1183,14 +1175,10 @@ async def update_ldap_config(request: Request, form_data: LdapConfigForm, user=D
 
 # create api key
 @router.post("/api_key", response_model=ApiKey)
-async def generate_api_key(
-    request: Request, user=Depends(get_current_user), db: Session = Depends(get_session)
-):
+async def generate_api_key(request: Request, user=Depends(get_current_user), db: Session = Depends(get_session)):
     if not request.app.state.config.ENABLE_API_KEYS or (
         user.role != "admin"
-        and not has_permission(
-            user.id, "features.api_keys", request.app.state.config.USER_PERMISSIONS
-        )
+        and not has_permission(user.id, "features.api_keys", request.app.state.config.USER_PERMISSIONS)
     ):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,

@@ -280,6 +280,4 @@ async def revoke_token(
     """Revoke and delete stored token for a KB."""
     from open_webui.services.onedrive.auth import delete_stored_token
 
-    return handle_revoke_token(
-        knowledge_id, _PROVIDER_TYPE, _META_KEY, user, delete_stored_token
-    )
+    return handle_revoke_token(knowledge_id, _PROVIDER_TYPE, _META_KEY, user, delete_stored_token)

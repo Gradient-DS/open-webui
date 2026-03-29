@@ -62,11 +62,7 @@ class GraphClient:
                     follow_redirects=follow_redirects,
                 )
 
-                if (
-                    response.status_code == 401
-                    and not token_refreshed
-                    and self._token_provider
-                ):
+                if response.status_code == 401 and not token_refreshed and self._token_provider:
                     # Token expired — try refresh once
                     log.info("Received 401, attempting token refresh")
                     try:
@@ -152,9 +148,7 @@ class GraphClient:
             items = await self.list_folder_items(drive_id, current_folder_id)
 
             for item in items:
-                item_path = (
-                    f"{parent_path}/{item['name']}" if parent_path else item["name"]
-                )
+                item_path = f"{parent_path}/{item['name']}" if parent_path else item["name"]
                 item["_relative_path"] = item_path
 
                 if "folder" in item:

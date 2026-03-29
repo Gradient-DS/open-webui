@@ -123,10 +123,7 @@ async def create_invite(
 
     email_sent = False
     # None = use backend default (send if enabled), False = explicitly skip
-    should_send = (
-        form_data.send_email is not False
-        and request.app.state.config.ENABLE_EMAIL_INVITES
-    )
+    should_send = form_data.send_email is not False and request.app.state.config.ENABLE_EMAIL_INVITES
     if should_send:
         try:
             from open_webui.services.email.graph_mail_client import (
@@ -311,19 +308,13 @@ async def accept_invite(
         response.set_cookie(
             key="token",
             value=session_token,
-            expires=(
-                datetime.datetime.fromtimestamp(expires_at, datetime.timezone.utc)
-                if expires_at
-                else None
-            ),
+            expires=(datetime.datetime.fromtimestamp(expires_at, datetime.timezone.utc) if expires_at else None),
             httponly=True,
             samesite=WEBUI_AUTH_COOKIE_SAME_SITE,
             secure=WEBUI_AUTH_COOKIE_SECURE,
         )
 
-        user_permissions = get_permissions(
-            new_user.id, request.app.state.config.USER_PERMISSIONS
-        )
+        user_permissions = get_permissions(new_user.id, request.app.state.config.USER_PERMISSIONS)
 
         return {
             "token": session_token,
@@ -393,14 +384,10 @@ async def resend_invite(
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Invite not found")
 
     if invite.accepted_at:
-        raise HTTPException(
-            status.HTTP_400_BAD_REQUEST, detail="Invite has already been accepted"
-        )
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="Invite has already been accepted")
 
     if invite.revoked_at:
-        raise HTTPException(
-            status.HTTP_400_BAD_REQUEST, detail="Invite has been revoked"
-        )
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="Invite has been revoked")
 
     # Refresh token and expiry
     expiry_hours = request.app.state.config.INVITE_EXPIRY_HOURS
@@ -408,9 +395,7 @@ async def resend_invite(
     updated_invite = Invites.refresh_invite(id, new_expires_at)
 
     if not updated_invite:
-        raise HTTPException(
-            status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to refresh invite"
-        )
+        raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to refresh invite")
 
     base_url = str(request.base_url).rstrip("/")
     invite_url = f"{base_url}/auth/invite/{updated_invite.token}"
@@ -479,14 +464,10 @@ async def revoke_invite(
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Invite not found")
 
     if invite.accepted_at:
-        raise HTTPException(
-            status.HTTP_400_BAD_REQUEST, detail="Invite has already been accepted"
-        )
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="Invite has already been accepted")
 
     result = Invites.revoke_invite(id)
     if not result:
-        raise HTTPException(
-            status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to revoke invite"
-        )
+        raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to revoke invite")
 
     return {"status": "ok", "message": "Invite revoked"}

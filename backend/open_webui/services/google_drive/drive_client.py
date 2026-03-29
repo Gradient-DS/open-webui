@@ -80,11 +80,7 @@ class GoogleDriveClient:
                     follow_redirects=follow_redirects,
                 )
 
-                if (
-                    response.status_code == 401
-                    and not token_refreshed
-                    and self._token_provider
-                ):
+                if response.status_code == 401 and not token_refreshed and self._token_provider:
                     log.info("Received 401, attempting token refresh")
                     try:
                         new_token = await self._token_provider()
@@ -177,9 +173,7 @@ class GoogleDriveClient:
             items = await self.list_folder_children(current_folder_id)
 
             for item in items:
-                item_path = (
-                    f"{parent_path}/{item['name']}" if parent_path else item["name"]
-                )
+                item_path = f"{parent_path}/{item['name']}" if parent_path else item["name"]
                 item["_relative_path"] = item_path
 
                 if item.get("mimeType") == "application/vnd.google-apps.folder":
@@ -239,18 +233,14 @@ class GoogleDriveClient:
     async def download_file(self, file_id: str) -> bytes:
         """Download file content (for non-Workspace files)."""
         url = f"{DRIVE_BASE_URL}/files/{file_id}"
-        response = await self._request_with_retry(
-            "GET", url, params={"alt": "media"}, follow_redirects=True
-        )
+        response = await self._request_with_retry("GET", url, params={"alt": "media"}, follow_redirects=True)
         response.raise_for_status()
         return response.content
 
     async def export_file(self, file_id: str, mime_type: str) -> bytes:
         """Export a Google Workspace file (Docs, Sheets, Slides) to the given MIME type."""
         url = f"{DRIVE_BASE_URL}/files/{file_id}/export"
-        response = await self._request_with_retry(
-            "GET", url, params={"mimeType": mime_type}, follow_redirects=True
-        )
+        response = await self._request_with_retry("GET", url, params={"mimeType": mime_type}, follow_redirects=True)
         response.raise_for_status()
         return response.content
 
@@ -262,9 +252,7 @@ class GoogleDriveClient:
     async def get_file(self, file_id: str) -> Optional[Dict[str, Any]]:
         """Get metadata for a single file, returning None if not found."""
         url = f"{DRIVE_BASE_URL}/files/{file_id}"
-        response = await self._request_with_retry(
-            "GET", url, params={"fields": _FILE_FIELDS}
-        )
+        response = await self._request_with_retry("GET", url, params={"fields": _FILE_FIELDS})
         if response.status_code == 404:
             return None
         response.raise_for_status()

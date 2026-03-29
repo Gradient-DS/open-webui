@@ -196,9 +196,7 @@ def _delete_old_vectors(knowledge_id: str, file_id: str):
             filter={"file_id": file_id},
         )
     except Exception:
-        log.warning(
-            f"Failed to delete old vectors for {file_id}, proceeding with insert"
-        )
+        log.warning(f"Failed to delete old vectors for {file_id}, proceeding with insert")
 
 
 def _get_loader_kwargs(request: Request) -> dict:
@@ -236,9 +234,7 @@ def _get_loader_kwargs(request: Request) -> dict:
     }
 
 
-def _build_base_metadata(
-    doc: IngestDocumentBase, file_id: str, provider: str, user_id: str
-) -> dict:
+def _build_base_metadata(doc: IngestDocumentBase, file_id: str, provider: str, user_id: str) -> dict:
     """Build common metadata dict for LangChain Documents."""
     base = {
         "name": doc.title or doc.filename,
@@ -343,9 +339,7 @@ def _process_chunked_text_document(
     text_hash = hashlib.sha256(joined_text.encode()).hexdigest()
     base_metadata = _build_base_metadata(doc, file_id, provider, user_id)
 
-    lc_docs = [
-        Document(page_content=chunk, metadata=base_metadata) for chunk in doc.chunks
-    ]
+    lc_docs = [Document(page_content=chunk, metadata=base_metadata) for chunk in doc.chunks]
 
     try:
         save_docs_to_vector_db(
@@ -488,15 +482,11 @@ def ingest_documents(
     # Validate batch size
     max_per_request = provider_config.get("max_documents_per_request", 50)
     if len(form_data.documents) > max_per_request:
-        raise HTTPException(
-            400, f"Too many documents. Maximum {max_per_request} per request."
-        )
+        raise HTTPException(400, f"Too many documents. Maximum {max_per_request} per request.")
 
     # Validate data_type
     collection = (
-        IngestCollection(**form_data.collection)
-        if isinstance(form_data.collection, dict)
-        else form_data.collection
+        IngestCollection(**form_data.collection) if isinstance(form_data.collection, dict) else form_data.collection
     )
     data_type = collection.data_type
     if data_type not in VALID_DATA_TYPES:
@@ -508,14 +498,10 @@ def ingest_documents(
     # Find or create KB
     knowledge = _find_kb_by_source_id(provider, collection.source_id)
     if not knowledge:
-        knowledge = _create_kb_for_provider(
-            provider, provider_config, collection, user.id
-        )
+        knowledge = _create_kb_for_provider(provider, provider_config, collection, user.id)
     else:
         # Validate data_type consistency with existing KB
-        existing_data_type = (
-            (knowledge.meta or {}).get("integration", {}).get("data_type")
-        )
+        existing_data_type = (knowledge.meta or {}).get("integration", {}).get("data_type")
         if existing_data_type and existing_data_type != data_type:
             raise HTTPException(
                 400,
@@ -536,14 +522,10 @@ def ingest_documents(
     max_files = provider_config.get("max_files_per_kb", 250)
     current_files = Knowledges.get_files_by_id(knowledge.id)
     existing_ids = {f.id for f in current_files} if current_files else set()
-    new_doc_ids = {
-        f"{provider}-{doc.get('source_id', '')}" for doc in form_data.documents
-    }
+    new_doc_ids = {f"{provider}-{doc.get('source_id', '')}" for doc in form_data.documents}
     net_new = len(new_doc_ids - existing_ids)
     if len(existing_ids) + net_new > max_files:
-        raise HTTPException(
-            400, f"Would exceed {max_files} file limit for this knowledge base."
-        )
+        raise HTTPException(400, f"Would exceed {max_files} file limit for this knowledge base.")
 
     # Validate and dispatch based on data_type
     results = []
@@ -662,14 +644,10 @@ def delete_collection(
 
     knowledge = _find_kb_by_source_id(provider, source_id)
     if not knowledge:
-        raise HTTPException(
-            404, f"Collection '{source_id}' not found for provider '{provider}'"
-        )
+        raise HTTPException(404, f"Collection '{source_id}' not found for provider '{provider}'")
 
     if knowledge.type != provider:
-        raise HTTPException(
-            403, "Cannot delete collections belonging to another provider"
-        )
+        raise HTTPException(403, "Cannot delete collections belonging to another provider")
 
     # Remove all files and vector data
     current_files = Knowledges.get_files_by_id(knowledge.id)
@@ -700,14 +678,10 @@ def delete_document(
 
     knowledge = _find_kb_by_source_id(provider, source_id)
     if not knowledge:
-        raise HTTPException(
-            404, f"Collection '{source_id}' not found for provider '{provider}'"
-        )
+        raise HTTPException(404, f"Collection '{source_id}' not found for provider '{provider}'")
 
     if knowledge.type != provider:
-        raise HTTPException(
-            403, "Cannot delete documents from another provider's collection"
-        )
+        raise HTTPException(403, "Cannot delete documents from another provider's collection")
 
     file_id = f"{provider}-{document_source_id}"
     file = Files.get_file_by_id(file_id)
@@ -743,8 +717,7 @@ def get_integration_openapi(request: Request, user=Depends(get_verified_user)):
     filtered_paths = {
         path: ops
         for path, ops in full_spec.get("paths", {}).items()
-        if path.startswith(integration_prefix)
-        and path != f"{integration_prefix}/openapi.json"
+        if path.startswith(integration_prefix) and path != f"{integration_prefix}/openapi.json"
     }
 
     # Build scoped spec
@@ -790,9 +763,7 @@ def get_integration_openapi(request: Request, user=Depends(get_verified_user)):
 
         if refs:
             scoped_spec["components"] = {
-                "schemas": {
-                    name: schema for name, schema in all_schemas.items() if name in refs
-                }
+                "schemas": {name: schema for name, schema in all_schemas.items() if name in refs}
             }
 
     return scoped_spec

@@ -188,10 +188,7 @@ class KnowledgeTable:
     ) -> list[KnowledgeUserModel]:
         with get_db_context(db) as db:
             all_knowledge = (
-                db.query(Knowledge)
-                .filter(Knowledge.deleted_at.is_(None))
-                .order_by(Knowledge.updated_at.desc())
-                .all()
+                db.query(Knowledge).filter(Knowledge.deleted_at.is_(None)).order_by(Knowledge.updated_at.desc()).all()
             )
             user_ids = list(set(knowledge.user_id for knowledge in all_knowledge))
             knowledge_ids = [knowledge.id for knowledge in all_knowledge]
@@ -413,27 +410,15 @@ class KnowledgeTable:
         """Get all knowledge bases owned by a user (for deletion)."""
         try:
             with get_db() as db:
-                knowledges = (
-                    db.query(Knowledge)
-                    .filter_by(user_id=user_id)
-                    .filter(Knowledge.deleted_at.is_(None))
-                    .all()
-                )
+                knowledges = db.query(Knowledge).filter_by(user_id=user_id).filter(Knowledge.deleted_at.is_(None)).all()
                 return [self._to_knowledge_model(k, db=db) for k in knowledges]
         except Exception:
             return []
 
-    def get_knowledge_by_id(
-        self, id: str, db: Optional[Session] = None
-    ) -> Optional[KnowledgeModel]:
+    def get_knowledge_by_id(self, id: str, db: Optional[Session] = None) -> Optional[KnowledgeModel]:
         try:
             with get_db_context(db) as db:
-                knowledge = (
-                    db.query(Knowledge)
-                    .filter_by(id=id)
-                    .filter(Knowledge.deleted_at.is_(None))
-                    .first()
-                )
+                knowledge = db.query(Knowledge).filter_by(id=id).filter(Knowledge.deleted_at.is_(None)).first()
                 return self._to_knowledge_model(knowledge, db=db) if knowledge else None
         except Exception:
             return None
@@ -487,9 +472,7 @@ class KnowledgeTable:
         """Get all knowledge_file records for a given file_id."""
         try:
             with get_db() as db:
-                knowledge_files = (
-                    db.query(KnowledgeFile).filter_by(file_id=file_id).all()
-                )
+                knowledge_files = db.query(KnowledgeFile).filter_by(file_id=file_id).all()
                 return [KnowledgeFileModel.model_validate(kf) for kf in knowledge_files]
         except Exception:
             return []
@@ -499,12 +482,7 @@ class KnowledgeTable:
         if not file_ids:
             return set()
         with get_db() as db:
-            rows = (
-                db.query(KnowledgeFile.file_id)
-                .filter(KnowledgeFile.file_id.in_(file_ids))
-                .distinct()
-                .all()
-            )
+            rows = db.query(KnowledgeFile.file_id).filter(KnowledgeFile.file_id.in_(file_ids)).distinct().all()
             return {row[0] for row in rows}
 
     def search_files_by_id(
@@ -568,13 +546,7 @@ class KnowledgeTable:
                     files.append(
                         FileUserResponse(
                             **FileModel.model_validate(file).model_dump(),
-                            user=(
-                                UserResponse(
-                                    **UserModel.model_validate(user).model_dump()
-                                )
-                                if user
-                                else None
-                            ),
+                            user=(UserResponse(**UserModel.model_validate(user).model_dump()) if user else None),
                             added_at=added_at,
                         )
                     )
@@ -685,9 +657,7 @@ class KnowledgeTable:
                 knowledge = self.get_knowledge_by_id(id=id, db=db)
                 db.query(Knowledge).filter_by(id=id).update(
                     {
-                        **form_data.model_dump(
-                            exclude={"access_grants"}, exclude_none=True
-                        ),
+                        **form_data.model_dump(exclude={"access_grants"}, exclude_none=True),
                         "updated_at": int(time.time()),
                     }
                 )
@@ -699,9 +669,7 @@ class KnowledgeTable:
             log.exception(e)
             return None
 
-    def update_knowledge_meta_by_id(
-        self, id: str, meta: dict
-    ) -> Optional[KnowledgeModel]:
+    def update_knowledge_meta_by_id(self, id: str, meta: dict) -> Optional[KnowledgeModel]:
         try:
             with get_db() as db:
                 knowledge = db.query(Knowledge).filter_by(id=id).first()

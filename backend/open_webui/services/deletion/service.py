@@ -13,9 +13,7 @@ log = logging.getLogger(__name__)
 # Shared pool for vector DB cleanup operations.
 # Bounded to 10 workers total across ALL concurrent deletions to avoid
 # overwhelming Weaviate when multiple users delete KBs simultaneously.
-_vector_cleanup_pool = ThreadPoolExecutor(
-    max_workers=10, thread_name_prefix="vec-cleanup"
-)
+_vector_cleanup_pool = ThreadPoolExecutor(max_workers=10, thread_name_prefix="vec-cleanup")
 
 
 @dataclass
@@ -53,9 +51,7 @@ class DeletionService:
     """
 
     @staticmethod
-    def delete_file(
-        file_id: str, deleted_file_ids: Optional[Set[str]] = None
-    ) -> DeletionReport:
+    def delete_file(file_id: str, deleted_file_ids: Optional[Set[str]] = None) -> DeletionReport:
         """
         Delete a file from all layers:
         1. Remove vectors from all knowledge base collections containing this file
@@ -85,20 +81,14 @@ class DeletionService:
         for kf in knowledge_files:
             try:
                 # Delete vectors by file_id from the knowledge collection
-                VECTOR_DB_CLIENT.delete(
-                    collection_name=kf.knowledge_id, filter={"file_id": file_id}
-                )
+                VECTOR_DB_CLIENT.delete(collection_name=kf.knowledge_id, filter={"file_id": file_id})
                 report.vector_documents += 1
 
                 # Delete by hash as well (duplicates may exist)
                 if file.hash:
-                    VECTOR_DB_CLIENT.delete(
-                        collection_name=kf.knowledge_id, filter={"hash": file.hash}
-                    )
+                    VECTOR_DB_CLIENT.delete(collection_name=kf.knowledge_id, filter={"hash": file.hash})
             except Exception as e:
-                report.add_error(
-                    f"Failed to remove vectors from knowledge {kf.knowledge_id}: {e}"
-                )
+                report.add_error(f"Failed to remove vectors from knowledge {kf.knowledge_id}: {e}")
 
         # 2. Delete the file's own vector collection
         try:
@@ -133,9 +123,7 @@ class DeletionService:
         return report
 
     @staticmethod
-    def delete_orphaned_files_batch(
-        file_ids: list[str], force: bool = False
-    ) -> DeletionReport:
+    def delete_orphaned_files_batch(file_ids: list[str], force: bool = False) -> DeletionReport:
         """
         Batch-delete files that are no longer referenced by any KB.
 
@@ -168,10 +156,7 @@ class DeletionService:
         if not orphaned_ids:
             return report
 
-        log.info(
-            f"Batch cleanup: {len(orphaned_ids)} orphaned files "
-            f"out of {len(file_ids)} total"
-        )
+        log.info(f"Batch cleanup: {len(orphaned_ids)} orphaned files " f"out of {len(file_ids)} total")
 
         # 2. Load file records for orphaned files (single query).
         #    We need paths BEFORE deleting DB records so we can find storage files.
@@ -190,16 +175,11 @@ class DeletionService:
             except Exception as e:
                 return file_id, str(e)
 
-        futures = {
-            _vector_cleanup_pool.submit(_delete_collection, fid): fid
-            for fid in orphaned_ids
-        }
+        futures = {_vector_cleanup_pool.submit(_delete_collection, fid): fid for fid in orphaned_ids}
         for future in as_completed(futures):
             fid, error = future.result()
             if error:
-                report.add_error(
-                    f"Failed to delete vector collection file-{fid}: {error}"
-                )
+                report.add_error(f"Failed to delete vector collection file-{fid}: {error}")
             else:
                 report.vector_collections += 1
 
@@ -261,10 +241,7 @@ class DeletionService:
             for tag_name in chat.meta.get("tags", []):
                 try:
                     # Use actual count query, not meta.count which may be stale
-                    if (
-                        Chats.count_chats_by_tag_name_and_user_id(tag_name, user_id)
-                        == 1
-                    ):
+                    if Chats.count_chats_by_tag_name_and_user_id(tag_name, user_id) == 1:
                         Tags.delete_tag_by_name_and_user_id(tag_name, user_id)
                         report.add_db("tag")
                 except Exception as e:
@@ -340,9 +317,7 @@ class DeletionService:
                 if model.meta and hasattr(model.meta, "knowledge"):
                     knowledge_list = model.meta.knowledge or []
                     # Knowledge items are objects with 'id' field
-                    updated_knowledge = [
-                        k for k in knowledge_list if k.get("id") != knowledge_id
-                    ]
+                    updated_knowledge = [k for k in knowledge_list if k.get("id") != knowledge_id]
 
                     if len(updated_knowledge) != len(knowledge_list):
                         model.meta.knowledge = updated_knowledge
@@ -357,9 +332,7 @@ class DeletionService:
                             is_active=model.is_active,
                         )
                         Models.update_model_by_id(model.id, model_form)
-                        log.info(
-                            f"Removed knowledge {knowledge_id} from model {model.id}"
-                        )
+                        log.info(f"Removed knowledge {knowledge_id} from model {model.id}")
         except Exception as e:
             report.add_error(f"Failed to update models referencing knowledge: {e}")
 

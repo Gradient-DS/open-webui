@@ -427,12 +427,7 @@ class ChatTable:
 
     def get_chat_title_by_id(self, id: str) -> Optional[str]:
         with get_db_context() as db:
-            result = (
-                db.query(Chat.title)
-                .filter_by(id=id)
-                .filter(Chat.deleted_at.is_(None))
-                .first()
-            )
+            result = db.query(Chat.title).filter_by(id=id).filter(Chat.deleted_at.is_(None)).first()
             if result is None:
                 return None
             return result[0] or 'New Chat'
@@ -779,11 +774,7 @@ class ChatTable:
         db: Optional[Session] = None,
     ) -> list[ChatModel]:
         with get_db_context(db) as db:
-            query = (
-                db.query(Chat)
-                .filter_by(user_id=user_id)
-                .filter(Chat.deleted_at.is_(None))
-            )
+            query = db.query(Chat).filter_by(user_id=user_id).filter(Chat.deleted_at.is_(None))
             if not include_archived:
                 query = query.filter_by(archived=False)
 
@@ -824,11 +815,7 @@ class ChatTable:
         db: Optional[Session] = None,
     ) -> list[ChatTitleIdResponse]:
         with get_db_context(db) as db:
-            query = (
-                db.query(Chat)
-                .filter_by(user_id=user_id)
-                .filter(Chat.deleted_at.is_(None))
-            )
+            query = db.query(Chat).filter_by(user_id=user_id).filter(Chat.deleted_at.is_(None))
 
             if not include_folders:
                 query = query.filter_by(folder_id=None)
@@ -884,12 +871,7 @@ class ChatTable:
     def get_chat_by_id(self, id: str, db: Optional[Session] = None) -> Optional[ChatModel]:
         try:
             with get_db_context(db) as db:
-                chat_item = (
-                    db.query(Chat)
-                    .filter_by(id=id)
-                    .filter(Chat.deleted_at.is_(None))
-                    .first()
-                )
+                chat_item = db.query(Chat).filter_by(id=id).filter(Chat.deleted_at.is_(None)).first()
                 if chat_item is None:
                     return None
 
@@ -906,12 +888,7 @@ class ChatTable:
             with get_db_context(db) as db:
                 # it is possible that the shared link was deleted. hence,
                 # we check if the chat is still shared by checking if a chat with the share_id exists
-                chat = (
-                    db.query(Chat)
-                    .filter_by(share_id=id)
-                    .filter(Chat.deleted_at.is_(None))
-                    .first()
-                )
+                chat = db.query(Chat).filter_by(share_id=id).filter(Chat.deleted_at.is_(None)).first()
 
                 if chat:
                     return self.get_chat_by_id(id, db=db)
@@ -923,12 +900,7 @@ class ChatTable:
     def get_chat_by_id_and_user_id(self, id: str, user_id: str, db: Optional[Session] = None) -> Optional[ChatModel]:
         try:
             with get_db_context(db) as db:
-                chat = (
-                    db.query(Chat)
-                    .filter_by(id=id, user_id=user_id)
-                    .filter(Chat.deleted_at.is_(None))
-                    .first()
-                )
+                chat = db.query(Chat).filter_by(id=id, user_id=user_id).filter(Chat.deleted_at.is_(None)).first()
                 return ChatModel.model_validate(chat)
         except Exception:
             return None
@@ -960,10 +932,7 @@ class ChatTable:
         try:
             with get_db_context(db) as db:
                 result = (
-                    db.query(Chat.folder_id)
-                    .filter_by(id=id, user_id=user_id)
-                    .filter(Chat.deleted_at.is_(None))
-                    .first()
+                    db.query(Chat.folder_id).filter_by(id=id, user_id=user_id).filter(Chat.deleted_at.is_(None)).first()
                 )
                 return result[0] if result else None
         except Exception:
@@ -987,11 +956,7 @@ class ChatTable:
         db: Optional[Session] = None,
     ) -> ChatListResponse:
         with get_db_context(db) as db:
-            query = (
-                db.query(Chat)
-                .filter_by(user_id=user_id)
-                .filter(Chat.deleted_at.is_(None))
-            )
+            query = db.query(Chat).filter_by(user_id=user_id).filter(Chat.deleted_at.is_(None))
 
             if filter:
                 if filter.get('updated_at'):
@@ -1117,11 +1082,7 @@ class ChatTable:
         search_text = ' '.join(search_text_words)
 
         with get_db_context(db) as db:
-            query = (
-                db.query(Chat)
-                .filter(Chat.user_id == user_id)
-                .filter(Chat.deleted_at.is_(None))
-            )
+            query = db.query(Chat).filter(Chat.user_id == user_id).filter(Chat.deleted_at.is_(None))
 
             if is_archived is not None:
                 query = query.filter(Chat.archived == is_archived)
@@ -1162,14 +1123,12 @@ class ChatTable:
 
                 # Check if there are any tags to filter, it should have all the tags
                 if 'none' in tag_ids:
-                    query = query.filter(
-                        text("""
+                    query = query.filter(text("""
                             NOT EXISTS (
                                 SELECT 1
                                 FROM json_each(Chat.meta, '$.tags') AS tag
                             )
-                            """)
-                    )
+                            """))
                 elif tag_ids:
                     query = query.filter(
                         and_(
@@ -1216,14 +1175,12 @@ class ChatTable:
 
                 # Check if there are any tags to filter, it should have all the tags
                 if 'none' in tag_ids:
-                    query = query.filter(
-                        text("""
+                    query = query.filter(text("""
                             NOT EXISTS (
                                 SELECT 1
                                 FROM json_array_elements_text(Chat.meta->'tags') AS tag
                             )
-                            """)
-                    )
+                            """))
                 elif tag_ids:
                     query = query.filter(
                         and_(
@@ -1259,11 +1216,7 @@ class ChatTable:
         db: Optional[Session] = None,
     ) -> list[ChatModel]:
         with get_db_context(db) as db:
-            query = (
-                db.query(Chat)
-                .filter_by(folder_id=folder_id, user_id=user_id)
-                .filter(Chat.deleted_at.is_(None))
-            )
+            query = db.query(Chat).filter_by(folder_id=folder_id, user_id=user_id).filter(Chat.deleted_at.is_(None))
             query = query.filter(or_(Chat.pinned == False, Chat.pinned == None))
             query = query.filter_by(archived=False)
 
@@ -1324,11 +1277,7 @@ class ChatTable:
         db: Optional[Session] = None,
     ) -> list[ChatModel]:
         with get_db_context(db) as db:
-            query = (
-                db.query(Chat)
-                .filter_by(user_id=user_id)
-                .filter(Chat.deleted_at.is_(None))
-            )
+            query = db.query(Chat).filter_by(user_id=user_id).filter(Chat.deleted_at.is_(None))
             tag_id = tag_name.replace(" ", "_").lower()
 
             log.info(f'DB dialect name: {db.bind.dialect.name}')
@@ -1370,11 +1319,7 @@ class ChatTable:
 
     def count_chats_by_tag_name_and_user_id(self, tag_name: str, user_id: str, db: Optional[Session] = None) -> int:
         with get_db_context(db) as db:
-            query = (
-                db.query(Chat)
-                .filter_by(user_id=user_id, archived=False)
-                .filter(Chat.deleted_at.is_(None))
-            )
+            query = db.query(Chat).filter_by(user_id=user_id, archived=False).filter(Chat.deleted_at.is_(None))
             tag_id = tag_name.replace(" ", "_").lower()
 
             if db.bind.dialect.name == 'sqlite':
@@ -1417,11 +1362,7 @@ class ChatTable:
 
     def count_chats_by_folder_id_and_user_id(self, folder_id: str, user_id: str, db: Optional[Session] = None) -> int:
         with get_db_context(db) as db:
-            query = (
-                db.query(Chat)
-                .filter_by(user_id=user_id)
-                .filter(Chat.deleted_at.is_(None))
-            )
+            query = db.query(Chat).filter_by(user_id=user_id).filter(Chat.deleted_at.is_(None))
 
             query = query.filter_by(folder_id=folder_id)
             count = query.count()
@@ -1514,9 +1455,7 @@ class ChatTable:
         except Exception:
             return False
 
-    def soft_delete_by_user_id_and_folder_id(
-        self, user_id: str, folder_id: str, db: Optional[Session] = None
-    ) -> int:
+    def soft_delete_by_user_id_and_folder_id(self, user_id: str, folder_id: str, db: Optional[Session] = None) -> int:
         """Soft-delete all chats in a folder for a user. Returns count of affected rows."""
         with get_db_context(db) as db:
             result = (
@@ -1639,22 +1578,13 @@ class ChatTable:
 
             return [ChatModel.model_validate(chat) for chat in all_chats]
 
-    def get_files_by_chat_id(
-        self, chat_id: str, db: Optional[Session] = None
-    ) -> list[ChatFileModel]:
+    def get_files_by_chat_id(self, chat_id: str, db: Optional[Session] = None) -> list[ChatFileModel]:
         """Get all chat_file records for a given chat_id."""
         with get_db_context(db) as db:
-            chat_files = (
-                db.query(ChatFile)
-                .filter_by(chat_id=chat_id)
-                .order_by(ChatFile.created_at.asc())
-                .all()
-            )
+            chat_files = db.query(ChatFile).filter_by(chat_id=chat_id).order_by(ChatFile.created_at.asc()).all()
             return [ChatFileModel.model_validate(cf) for cf in chat_files]
 
-    def get_pending_deletions(
-        self, limit: int = 100, db: Optional[Session] = None
-    ) -> list[ChatModel]:
+    def get_pending_deletions(self, limit: int = 100, db: Optional[Session] = None) -> list[ChatModel]:
         """Get chats marked for deletion (for cleanup worker)."""
         with get_db_context(db) as db:
             return [
@@ -1690,9 +1620,7 @@ class ChatTable:
             db.commit()
             return result
 
-    def get_chat_by_id_unfiltered(
-        self, id: str, db: Optional[Session] = None
-    ) -> Optional[ChatModel]:
+    def get_chat_by_id_unfiltered(self, id: str, db: Optional[Session] = None) -> Optional[ChatModel]:
         """Get a chat by ID, including soft-deleted ones. For internal/cleanup use only."""
         try:
             with get_db_context(db) as db:
@@ -1701,9 +1629,7 @@ class ChatTable:
         except Exception:
             return None
 
-    def get_referenced_file_ids(
-        self, file_ids: list[str], db: Optional[Session] = None
-    ) -> set[str]:
+    def get_referenced_file_ids(self, file_ids: list[str], db: Optional[Session] = None) -> set[str]:
         """Return the subset of file_ids that are still referenced by active (non-deleted) chats."""
         if not file_ids:
             return set()

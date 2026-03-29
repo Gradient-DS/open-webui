@@ -142,11 +142,7 @@ def process_uploaded_file(
 
             # Notify frontend via Socket.IO that processing completed
             file_data = Files.get_file_by_id(file_item.id)
-            collection_name = (
-                file_data.meta.get("collection_name")
-                if file_data and file_data.meta
-                else None
-            )
+            collection_name = file_data.meta.get("collection_name") if file_data and file_data.meta else None
             asyncio.run(
                 emit_file_status(
                     user_id=user.id,

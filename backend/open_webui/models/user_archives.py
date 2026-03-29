@@ -26,9 +26,7 @@ class UserArchive(Base):
     user_name = Column(Text, nullable=False)  # For display
 
     # Archive metadata
-    reason = Column(
-        Text, nullable=False
-    )  # e.g., "Employee offboarding", "Account cleanup"
+    reason = Column(Text, nullable=False)  # e.g., "Employee offboarding", "Account cleanup"
     archived_by = Column(Text, nullable=False)  # Admin user ID who created archive
 
     # The frozen data snapshot
@@ -183,16 +181,10 @@ class UserArchiveTable:
             if search:
                 search_term = f"%{search}%"
                 query = query.filter(
-                    (UserArchive.user_email.ilike(search_term))
-                    | (UserArchive.user_name.ilike(search_term))
+                    (UserArchive.user_email.ilike(search_term)) | (UserArchive.user_name.ilike(search_term))
                 )
 
-            archives = (
-                query.order_by(UserArchive.created_at.desc())
-                .offset(skip)
-                .limit(limit)
-                .all()
-            )
+            archives = query.order_by(UserArchive.created_at.desc()).offset(skip).limit(limit).all()
             return [UserArchiveSummaryModel.model_validate(a) for a in archives]
 
     def get_expired_archives(self) -> List[UserArchiveModel]:
@@ -211,9 +203,7 @@ class UserArchiveTable:
             )
             return [UserArchiveModel.model_validate(a) for a in archives]
 
-    def update_archive(
-        self, archive_id: str, form_data: UpdateArchiveForm
-    ) -> Optional[UserArchiveModel]:
+    def update_archive(self, archive_id: str, form_data: UpdateArchiveForm) -> Optional[UserArchiveModel]:
         with get_db() as db:
             archive = db.query(UserArchive).filter_by(id=archive_id).first()
             if not archive:
@@ -228,9 +218,7 @@ class UserArchiveTable:
             if form_data.retention_days is not None:
                 archive.retention_days = form_data.retention_days
                 if form_data.retention_days and not archive.never_delete:
-                    archive.expires_at = archive.created_at + (
-                        form_data.retention_days * 24 * 60 * 60
-                    )
+                    archive.expires_at = archive.created_at + (form_data.retention_days * 24 * 60 * 60)
                 else:
                     archive.expires_at = None
 

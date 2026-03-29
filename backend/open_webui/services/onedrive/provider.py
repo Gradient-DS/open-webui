@@ -23,9 +23,7 @@ log = logging.getLogger(__name__)
 class OneDriveTokenManager(TokenManager):
     """Token manager for OneDrive using Microsoft OAuth v2.0."""
 
-    async def get_valid_access_token(
-        self, user_id: str, knowledge_id: str
-    ) -> Optional[str]:
+    async def get_valid_access_token(self, user_id: str, knowledge_id: str) -> Optional[str]:
         return await _get_valid_access_token(user_id, knowledge_id)
 
     def has_stored_token(self, user_id: str, knowledge_id: str) -> bool:
@@ -50,9 +48,7 @@ class OneDriveSyncProvider(SyncProvider):
     def get_token_manager(self) -> TokenManager:
         return self._token_manager
 
-    def create_worker(
-        self, knowledge_id, sources, access_token, user_id, app, token_provider=None
-    ):
+    def create_worker(self, knowledge_id, sources, access_token, user_id, app, token_provider=None):
         from open_webui.services.onedrive.sync_worker import OneDriveSyncWorker
 
         return OneDriveSyncWorker(

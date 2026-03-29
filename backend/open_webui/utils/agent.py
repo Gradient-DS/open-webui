@@ -245,10 +245,7 @@ async def call_agent_api(
         **model_params,
     )
 
-    log.debug(
-        f"Agent API payload: model={payload.get('model')}, "
-        f"stream={stream}, features={features}"
-    )
+    log.debug(f"Agent API payload: model={payload.get('model')}, " f"stream={stream}, features={features}")
 
     if not stream:
         return await _call_agent_api_non_streaming(payload)

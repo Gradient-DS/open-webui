@@ -196,9 +196,7 @@ class ArchiveService:
             try:
                 if UserArchives.delete_archive(archive.id):
                     stats["deleted"] += 1
-                    log.info(
-                        f"Deleted expired archive {archive.id} for user {archive.user_email}"
-                    )
+                    log.info(f"Deleted expired archive {archive.id} for user {archive.user_email}")
                 else:
                     stats["errors"] += 1
             except Exception as e:

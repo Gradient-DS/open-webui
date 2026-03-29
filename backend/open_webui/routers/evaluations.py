@@ -324,15 +324,11 @@ async def update_config(
     if form_data.ENABLE_CONVERSATION_FEEDBACK is not None:
         config.ENABLE_CONVERSATION_FEEDBACK = form_data.ENABLE_CONVERSATION_FEEDBACK
     if form_data.CONVERSATION_FEEDBACK_SCALE_MAX is not None:
-        config.CONVERSATION_FEEDBACK_SCALE_MAX = (
-            form_data.CONVERSATION_FEEDBACK_SCALE_MAX
-        )
+        config.CONVERSATION_FEEDBACK_SCALE_MAX = form_data.CONVERSATION_FEEDBACK_SCALE_MAX
     if form_data.CONVERSATION_FEEDBACK_HEADER is not None:
         config.CONVERSATION_FEEDBACK_HEADER = form_data.CONVERSATION_FEEDBACK_HEADER
     if form_data.CONVERSATION_FEEDBACK_PLACEHOLDER is not None:
-        config.CONVERSATION_FEEDBACK_PLACEHOLDER = (
-            form_data.CONVERSATION_FEEDBACK_PLACEHOLDER
-        )
+        config.CONVERSATION_FEEDBACK_PLACEHOLDER = form_data.CONVERSATION_FEEDBACK_PLACEHOLDER
     return {
         "ENABLE_EVALUATION_ARENA_MODELS": config.ENABLE_EVALUATION_ARENA_MODELS,
         "EVALUATION_ARENA_MODELS": config.EVALUATION_ARENA_MODELS,
@@ -416,9 +412,7 @@ async def get_feedbacks(
 
 @router.get("/feedback/conversation/{chat_id}")
 async def get_conversation_feedback(chat_id: str, user=Depends(get_verified_user)):
-    feedback = Feedbacks.get_conversation_feedback_by_chat_id_and_user_id(
-        chat_id=chat_id, user_id=user.id
-    )
+    feedback = Feedbacks.get_conversation_feedback_by_chat_id_and_user_id(chat_id=chat_id, user_id=user.id)
     return feedback
 
 

@@ -1185,9 +1185,7 @@ DEFAULT_PINNED_MODELS = PersistentConfig(
 _default_prompt_suggestions_env = os.environ.get("DEFAULT_PROMPT_SUGGESTIONS")
 try:
     default_prompt_suggestions = json.loads(
-        _default_prompt_suggestions_env
-        if _default_prompt_suggestions_env is not None
-        else "[]"
+        _default_prompt_suggestions_env if _default_prompt_suggestions_env is not None else "[]"
     )
 except Exception as e:
     log.exception(f'Error loading DEFAULT_PROMPT_SUGGESTIONS: {e}')
@@ -1707,9 +1705,7 @@ ENABLE_USER_ARCHIVAL = PersistentConfig(
 DEFAULT_ARCHIVE_RETENTION_DAYS = PersistentConfig(
     "DEFAULT_ARCHIVE_RETENTION_DAYS",
     "admin.default_archive_retention_days",
-    int(
-        os.environ.get("DEFAULT_ARCHIVE_RETENTION_DAYS", "1095")
-    ),  # 3 years default (ISO 27001)
+    int(os.environ.get("DEFAULT_ARCHIVE_RETENTION_DAYS", "1095")),  # 3 years default (ISO 27001)
 )
 
 # Auto-archive when users delete their own accounts
@@ -1722,88 +1718,54 @@ ENABLE_AUTO_ARCHIVE_ON_SELF_DELETE = PersistentConfig(
 AUTO_ARCHIVE_RETENTION_DAYS = PersistentConfig(
     "AUTO_ARCHIVE_RETENTION_DAYS",
     "admin.auto_archive_retention_days",
-    int(
-        os.environ.get("AUTO_ARCHIVE_RETENTION_DAYS", "365")
-    ),  # 1 year default for self-delete
+    int(os.environ.get("AUTO_ARCHIVE_RETENTION_DAYS", "365")),  # 1 year default for self-delete
 )
 
 ####################################
 # Feature Flags (SaaS Tier Control)
 ####################################
 
-FEATURE_CHAT_CONTROLS = (
-    os.environ.get("FEATURE_CHAT_CONTROLS", "True").lower() == "true"
-)
+FEATURE_CHAT_CONTROLS = os.environ.get("FEATURE_CHAT_CONTROLS", "True").lower() == "true"
 FEATURE_CAPTURE = os.environ.get("FEATURE_CAPTURE", "True").lower() == "true"
 FEATURE_ARTIFACTS = os.environ.get("FEATURE_ARTIFACTS", "True").lower() == "true"
 FEATURE_PLAYGROUND = os.environ.get("FEATURE_PLAYGROUND", "True").lower() == "true"
-FEATURE_CHAT_OVERVIEW = (
-    os.environ.get("FEATURE_CHAT_OVERVIEW", "True").lower() == "true"
-)
-FEATURE_NOTES_AI_CONTROLS = (
-    os.environ.get("FEATURE_NOTES_AI_CONTROLS", "True").lower() == "true"
-)
+FEATURE_CHAT_OVERVIEW = os.environ.get("FEATURE_CHAT_OVERVIEW", "True").lower() == "true"
+FEATURE_NOTES_AI_CONTROLS = os.environ.get("FEATURE_NOTES_AI_CONTROLS", "True").lower() == "true"
 FEATURE_VOICE = os.environ.get("FEATURE_VOICE", "True").lower() == "true"
 FEATURE_CHANGELOG = os.environ.get("FEATURE_CHANGELOG", "True").lower() == "true"
-FEATURE_SYSTEM_PROMPT = (
-    os.environ.get("FEATURE_SYSTEM_PROMPT", "True").lower() == "true"
-)
+FEATURE_SYSTEM_PROMPT = os.environ.get("FEATURE_SYSTEM_PROMPT", "True").lower() == "true"
 FEATURE_MODELS = os.environ.get("FEATURE_MODELS", "True").lower() == "true"
 FEATURE_KNOWLEDGE = os.environ.get("FEATURE_KNOWLEDGE", "True").lower() == "true"
 FEATURE_PROMPTS = os.environ.get("FEATURE_PROMPTS", "True").lower() == "true"
 FEATURE_TOOLS = os.environ.get("FEATURE_TOOLS", "True").lower() == "true"
 FEATURE_SKILLS = os.environ.get("FEATURE_SKILLS", "False").lower() == "true"
 FEATURE_WEBPAGE_URL = os.environ.get("FEATURE_WEBPAGE_URL", "True").lower() == "true"
-FEATURE_REFERENCE_CHATS = (
-    os.environ.get("FEATURE_REFERENCE_CHATS", "True").lower() == "true"
-)
+FEATURE_REFERENCE_CHATS = os.environ.get("FEATURE_REFERENCE_CHATS", "True").lower() == "true"
 FEATURE_INPUT_MENU = os.environ.get("FEATURE_INPUT_MENU", "True").lower() == "true"
-FEATURE_TEMPORARY_CHAT = (
-    os.environ.get("FEATURE_TEMPORARY_CHAT", "True").lower() == "true"
-)
+FEATURE_TEMPORARY_CHAT = os.environ.get("FEATURE_TEMPORARY_CHAT", "True").lower() == "true"
 FEATURE_TOOL_SERVERS = os.environ.get("FEATURE_TOOL_SERVERS", "True").lower() == "true"
-FEATURE_TERMINAL_SERVERS = (
-    os.environ.get("FEATURE_TERMINAL_SERVERS", "True").lower() == "true"
-)
+FEATURE_TERMINAL_SERVERS = os.environ.get("FEATURE_TERMINAL_SERVERS", "True").lower() == "true"
 
-FEATURE_BUILTIN_TOOLS = (
-    os.environ.get("FEATURE_BUILTIN_TOOLS", "True").lower() == "true"
-)
+FEATURE_BUILTIN_TOOLS = os.environ.get("FEATURE_BUILTIN_TOOLS", "True").lower() == "true"
 
 # Admin Panel Tab Feature Flags
-FEATURE_ADMIN_EVALUATIONS = (
-    os.environ.get("FEATURE_ADMIN_EVALUATIONS", "True").lower() == "true"
-)
-FEATURE_ADMIN_FUNCTIONS = (
-    os.environ.get("FEATURE_ADMIN_FUNCTIONS", "True").lower() == "true"
-)
-FEATURE_ADMIN_SETTINGS = (
-    os.environ.get("FEATURE_ADMIN_SETTINGS", "True").lower() == "true"
-)
+FEATURE_ADMIN_EVALUATIONS = os.environ.get("FEATURE_ADMIN_EVALUATIONS", "True").lower() == "true"
+FEATURE_ADMIN_FUNCTIONS = os.environ.get("FEATURE_ADMIN_FUNCTIONS", "True").lower() == "true"
+FEATURE_ADMIN_SETTINGS = os.environ.get("FEATURE_ADMIN_SETTINGS", "True").lower() == "true"
 FEATURE_ADMIN_SETTINGS_TABS = [
-    tab.strip()
-    for tab in os.environ.get("FEATURE_ADMIN_SETTINGS_TABS", "").split(",")
-    if tab.strip()
+    tab.strip() for tab in os.environ.get("FEATURE_ADMIN_SETTINGS_TABS", "").split(",") if tab.strip()
 ]
 
 # Chat Controls Section Whitelist (empty = all sections enabled)
 # Valid sections: files, valves, system_prompt, params
 FEATURE_CHAT_CONTROLS_SECTIONS = [
-    section.strip()
-    for section in os.environ.get("FEATURE_CHAT_CONTROLS_SECTIONS", "").split(",")
-    if section.strip()
+    section.strip() for section in os.environ.get("FEATURE_CHAT_CONTROLS_SECTIONS", "").split(",") if section.strip()
 ]
 
 # Model Whitelist (empty = show all models)
-MODEL_WHITELIST = [
-    model.strip()
-    for model in os.environ.get("MODEL_WHITELIST", "").split(",")
-    if model.strip()
-]
+MODEL_WHITELIST = [model.strip() for model in os.environ.get("MODEL_WHITELIST", "").split(",") if model.strip()]
 
-ENABLE_ADMIN_ANALYTICS = (
-    os.environ.get("ENABLE_ADMIN_ANALYTICS", "True").lower() == "true"
-)
+ENABLE_ADMIN_ANALYTICS = os.environ.get("ENABLE_ADMIN_ANALYTICS", "True").lower() == "true"
 
 ENABLE_COMMUNITY_SHARING = PersistentConfig(
     'ENABLE_COMMUNITY_SHARING',
@@ -2514,14 +2476,10 @@ WEAVIATE_HTTP_PORT = int(os.environ.get("WEAVIATE_HTTP_PORT", "8080"))
 WEAVIATE_GRPC_PORT = int(os.environ.get("WEAVIATE_GRPC_PORT", "50051"))
 WEAVIATE_API_KEY = os.environ.get("WEAVIATE_API_KEY")
 # TTL for web search collections in minutes (0 = disabled, default 24 hours = 1440 minutes)
-WEAVIATE_WEB_SEARCH_TTL_MINUTES = int(
-    os.environ.get("WEAVIATE_WEB_SEARCH_TTL_MINUTES", "1440")
-)
+WEAVIATE_WEB_SEARCH_TTL_MINUTES = int(os.environ.get("WEAVIATE_WEB_SEARCH_TTL_MINUTES", "1440"))
 WEAVIATE_HTTP_SECURE = os.environ.get("WEAVIATE_HTTP_SECURE", "false").lower() == "true"
 WEAVIATE_GRPC_SECURE = os.environ.get("WEAVIATE_GRPC_SECURE", "false").lower() == "true"
-WEAVIATE_SKIP_INIT_CHECKS = (
-    os.environ.get("WEAVIATE_SKIP_INIT_CHECKS", "false").lower() == "true"
-)
+WEAVIATE_SKIP_INIT_CHECKS = os.environ.get("WEAVIATE_SKIP_INIT_CHECKS", "false").lower() == "true"
 
 # OpenSearch
 OPENSEARCH_URI = os.environ.get('OPENSEARCH_URI', 'https://localhost:9200')
@@ -2752,13 +2710,9 @@ GOOGLE_DRIVE_SYNC_INTERVAL_MINUTES = PersistentConfig(
     int(os.environ.get("GOOGLE_DRIVE_SYNC_INTERVAL_MINUTES", "60")),
 )
 
-GOOGLE_DRIVE_MAX_FILES_PER_SYNC = int(
-    os.environ.get("GOOGLE_DRIVE_MAX_FILES_PER_SYNC", "500")
-)
+GOOGLE_DRIVE_MAX_FILES_PER_SYNC = int(os.environ.get("GOOGLE_DRIVE_MAX_FILES_PER_SYNC", "500"))
 
-GOOGLE_DRIVE_MAX_FILE_SIZE_MB = int(
-    os.environ.get("GOOGLE_DRIVE_MAX_FILE_SIZE_MB", "100")
-)
+GOOGLE_DRIVE_MAX_FILE_SIZE_MB = int(os.environ.get("GOOGLE_DRIVE_MAX_FILE_SIZE_MB", "100"))
 
 ENABLE_ONEDRIVE_INTEGRATION = PersistentConfig(
     'ENABLE_ONEDRIVE_INTEGRATION',

@@ -24,9 +24,7 @@ class TokenManager(ABC):
     """Manages OAuth token lifecycle for a sync provider."""
 
     @abstractmethod
-    async def get_valid_access_token(
-        self, user_id: str, knowledge_id: str
-    ) -> Optional[str]:
+    async def get_valid_access_token(self, user_id: str, knowledge_id: str) -> Optional[str]:
         """
         Get a valid access token, refreshing if needed.
         Returns None if no token exists or refresh failed.
@@ -111,9 +109,7 @@ class SyncProvider(ABC):
         if access_token:
             effective_token = access_token
         else:
-            effective_token = await self.get_token_manager().get_valid_access_token(
-                user_id, knowledge_id
-            )
+            effective_token = await self.get_token_manager().get_valid_access_token(user_id, knowledge_id)
             if not effective_token:
                 return {"error": "No valid token available", "needs_reauth": True}
 
