@@ -881,6 +881,14 @@
 						} catch (error) {
 							console.error('Error refreshing backend config:', error);
 						}
+
+						// Initialize chat list early so reference chats are available
+						// regardless of whether the sidebar has been opened
+						if ($chats === null) {
+							getChatList(localStorage.token, $currentChatPage)
+								.then((chatList) => chats.set(chatList))
+								.catch((error) => console.error('Error initializing chat list:', error));
+						}
 					} else {
 						// Redirect Invalid Session User to /auth Page
 						localStorage.removeItem('token');

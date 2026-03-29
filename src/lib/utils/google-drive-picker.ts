@@ -163,8 +163,7 @@ export const createKnowledgePicker = (knowledgeId?: string): Promise<KnowledgePi
 				'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
 				'application/vnd.google-apps.document',
 				'application/vnd.google-apps.spreadsheet',
-				'application/vnd.google-apps.presentation',
-				'application/vnd.google-apps.folder'
+				'application/vnd.google-apps.presentation'
 			].join(',');
 
 			const docsView = new google.picker.DocsView()

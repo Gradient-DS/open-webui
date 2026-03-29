@@ -33,11 +33,13 @@ export type Feature =
 export function isFeatureEnabled(feature: Feature): boolean {
 	const $config = get(config);
 	if (!$config?.features) {
-		return true; // Default to true if config not loaded yet
+		return false; // Config not loaded yet — hide features until authenticated config arrives
 	}
 	const key = `feature_${feature}` as keyof typeof $config.features;
-	// Default to true if not set (backwards compatibility)
-	return $config.features[key] ?? true;
+	const value = $config.features[key];
+	// If the key is explicitly set, use that value; otherwise default to true
+	// (features are opt-out, so an absent key in the authenticated config means enabled)
+	return typeof value === 'boolean' ? value : value == null ? true : Boolean(value);
 }
 
 /**
@@ -121,8 +123,7 @@ export type ChatControlSection = (typeof CHAT_CONTROL_SECTIONS)[number];
  * Check if admin settings section is enabled globally.
  */
 export function isAdminSettingsEnabled(): boolean {
-	const $config = get(config);
-	return $config?.features?.feature_admin_settings ?? true;
+	return isFeatureEnabled('admin_settings');
 }
 
 /**
