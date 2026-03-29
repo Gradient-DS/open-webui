@@ -40,10 +40,10 @@ class OneDriveSyncProvider(SyncProvider):
         self._token_manager = OneDriveTokenManager()
 
     def get_provider_type(self) -> str:
-        return "onedrive"
+        return 'onedrive'
 
     def get_meta_key(self) -> str:
-        return "onedrive_sync"
+        return 'onedrive_sync'
 
     def get_token_manager(self) -> TokenManager:
         return self._token_manager

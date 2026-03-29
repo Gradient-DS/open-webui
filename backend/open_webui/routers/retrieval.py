@@ -1277,47 +1277,47 @@ def save_embeddings_to_vector_db(
     """
     try:
         if not chunks:
-            raise ValueError("No chunks provided")
+            raise ValueError('No chunks provided')
 
         # Check if collection exists
         if VECTOR_DB_CLIENT.has_collection(collection_name=collection_name):
-            log.info(f"collection {collection_name} already exists")
+            log.info(f'collection {collection_name} already exists')
 
             if overwrite:
                 VECTOR_DB_CLIENT.delete_collection(collection_name=collection_name)
-                log.info(f"deleting existing collection {collection_name}")
+                log.info(f'deleting existing collection {collection_name}')
             elif add is False:
-                log.info(f"collection {collection_name} already exists, overwrite is False and add is False")
+                log.info(f'collection {collection_name} already exists, overwrite is False and add is False')
                 return True
 
         # Prepare items for insertion
         items = []
         for chunk in chunks:
             # Validate chunk structure
-            if "text" not in chunk or "embedding" not in chunk:
+            if 'text' not in chunk or 'embedding' not in chunk:
                 raise ValueError("Chunk must contain 'text' and 'embedding' fields")
 
             # Merge metadata
-            metadata = chunk.get("metadata", {})
+            metadata = chunk.get('metadata', {})
             if file_metadata:
                 metadata = {**metadata, **file_metadata}
 
             items.append(
                 {
-                    "id": chunk.get("id", str(uuid.uuid4())),
-                    "text": chunk["text"],
-                    "vector": chunk["embedding"],
-                    "metadata": metadata,
+                    'id': chunk.get('id', str(uuid.uuid4())),
+                    'text': chunk['text'],
+                    'vector': chunk['embedding'],
+                    'metadata': metadata,
                 }
             )
 
-        log.info(f"adding {len(items)} items to collection {collection_name}")
+        log.info(f'adding {len(items)} items to collection {collection_name}')
         VECTOR_DB_CLIENT.insert(
             collection_name=collection_name,
             items=items,
         )
 
-        log.info(f"added {len(items)} items to collection {collection_name}")
+        log.info(f'added {len(items)} items to collection {collection_name}')
         return True
 
     except Exception as e:
@@ -1444,7 +1444,7 @@ def save_docs_to_vector_db(
                 if result.metadatas and result.metadatas[0]:
                     existing_file_id = result.metadatas[0][0].get('file_id')
 
-                if existing_file_id == metadata.get("file_id"):
+                if existing_file_id == metadata.get('file_id'):
                     # Same file re-added/reindexed - allow it
                     pass
                 else:
@@ -1452,12 +1452,12 @@ def save_docs_to_vector_db(
                     # and re-add with the new file's metadata (supports re-uploads
                     # of the same document under a different file ID).
                     log.info(
-                        f"Replacing existing document with hash {metadata['hash']} "
-                        f"(old file_id={existing_file_id}, new file_id={metadata.get('file_id')})"
+                        f'Replacing existing document with hash {metadata["hash"]} '
+                        f'(old file_id={existing_file_id}, new file_id={metadata.get("file_id")})'
                     )
                     VECTOR_DB_CLIENT.delete(
                         collection_name=collection_name,
-                        filter={"hash": metadata["hash"]},
+                        filter={'hash': metadata['hash']},
                     )
 
     if split:
@@ -1514,7 +1514,7 @@ def save_docs_to_vector_db(
             raise ValueError(ERROR_MESSAGES.DEFAULT('Invalid text splitter'))
 
     if len(docs) == 0:
-        log.warning(f"No text content could be extracted for collection {collection_name}")
+        log.warning(f'No text content could be extracted for collection {collection_name}')
         return True
 
     texts = [sanitize_text_for_db(doc.page_content) for doc in docs]
@@ -1683,17 +1683,17 @@ def process_file(
                         for idx, id in enumerate(result.ids[0])
                     ]
                 else:
-                    existing_content = file.data.get("content", "")
+                    existing_content = file.data.get('content', '')
                     if existing_content:
                         docs = [
                             Document(
                                 page_content=existing_content,
                                 metadata={
                                     **file.meta,
-                                    "name": file.filename,
-                                    "created_by": file.user_id,
-                                    "file_id": file.id,
-                                    "source": file.filename,
+                                    'name': file.filename,
+                                    'created_by': file.user_id,
+                                    'file_id': file.id,
+                                    'source': file.filename,
                                 },
                             )
                         ]
@@ -1736,16 +1736,16 @@ def process_file(
                                 MINERU_API_TIMEOUT=request.app.state.config.MINERU_API_TIMEOUT,
                                 MINERU_PARAMS=request.app.state.config.MINERU_PARAMS,
                             )
-                            docs = loader.load(file.filename, file.meta.get("content_type"), file_path)
+                            docs = loader.load(file.filename, file.meta.get('content_type'), file_path)
                             docs = [
                                 Document(
                                     page_content=doc.page_content,
                                     metadata={
                                         **filter_metadata(doc.metadata),
-                                        "name": file.filename,
-                                        "created_by": file.user_id,
-                                        "file_id": file.id,
-                                        "source": file.filename,
+                                        'name': file.filename,
+                                        'created_by': file.user_id,
+                                        'file_id': file.id,
+                                        'source': file.filename,
                                     },
                                 )
                                 for doc in docs
@@ -1753,7 +1753,7 @@ def process_file(
                         else:
                             raise ValueError(ERROR_MESSAGES.EMPTY_CONTENT)
 
-                text_content = " ".join([doc.page_content for doc in docs]) if docs else file.data.get("content", "")
+                text_content = ' '.join([doc.page_content for doc in docs]) if docs else file.data.get('content', '')
             else:
                 # Process the file and save the content
                 # Usage: /files/
@@ -1795,14 +1795,14 @@ def process_file(
                     )
 
                     # Try external pipeline first by default
-                    external_pipeline_url = getattr(request.app.state.config, "EXTERNAL_PIPELINE_URL", None)
+                    external_pipeline_url = getattr(request.app.state.config, 'EXTERNAL_PIPELINE_URL', None)
 
                     # Check if external pipeline is enabled (not empty string)
-                    use_external_pipeline = external_pipeline_url and external_pipeline_url.strip() != ""
+                    use_external_pipeline = external_pipeline_url and external_pipeline_url.strip() != ''
 
                     if use_external_pipeline:
                         # Try external pipeline first (default behavior)
-                        log.info(f"Attempting to use external pipeline for file: {file.filename}")
+                        log.info(f'Attempting to use external pipeline for file: {file.filename}')
 
                         try:
                             # Process file with external pipeline
@@ -1820,11 +1820,11 @@ def process_file(
                         except Exception as e:
                             # External pipeline failed - fall back to internal pipeline with warning
                             log.warning(
-                                f"External pipeline failed for file {file.filename}: {e}. "
-                                f"Falling back to internal pipeline."
+                                f'External pipeline failed for file {file.filename}: {e}. '
+                                f'Falling back to internal pipeline.'
                             )
                             log.warning(
-                                f"To disable external pipeline, set EXTERNAL_PIPELINE_URL to empty string. "
+                                f'To disable external pipeline, set EXTERNAL_PIPELINE_URL to empty string. '
                                 f"To fix external pipeline, ensure it's running at {external_pipeline_url} and accessible."
                             )
                             # Continue to internal pipeline fallback below
@@ -1832,10 +1832,10 @@ def process_file(
 
                     # Use internal pipeline if external is disabled or failed
                     if not use_external_pipeline:
-                        log.info(f"Using internal pipeline for file: {file.filename}")
+                        log.info(f'Using internal pipeline for file: {file.filename}')
                         # Internal pipeline: parsing, chunking, embedding
                         # Reuse the loader created above
-                        docs = loader.load(file.filename, file.meta.get("content_type"), file_path)
+                        docs = loader.load(file.filename, file.meta.get('content_type'), file_path)
 
                     docs = [
                         Document(
@@ -1894,29 +1894,29 @@ def process_file(
                         # File has no extractable text (e.g. image-only PDF).
                         # Still add it to the KB for bookkeeping, but skip embedding.
                         log.warning(
-                            f"No text content extracted from {file.filename}, "
-                            f"skipping embedding but adding to knowledge base"
+                            f'No text content extracted from {file.filename}, '
+                            f'skipping embedding but adding to knowledge base'
                         )
                         with get_db() as session:
                             Files.update_file_metadata_by_id(
                                 file.id,
-                                {"collection_name": collection_name},
+                                {'collection_name': collection_name},
                                 db=session,
                             )
                             Files.update_file_data_by_id(
                                 file.id,
-                                {"status": "completed"},
+                                {'status': 'completed'},
                                 db=session,
                             )
                             Files.update_file_hash_by_id(file.id, hash, db=session)
 
                         return {
-                            "status": True,
-                            "collection_name": collection_name,
-                            "filename": file.filename,
-                            "content": text_content,
-                            "warning": "No text content could be extracted from this file. "
-                            "It has been added but will not be searchable.",
+                            'status': True,
+                            'collection_name': collection_name,
+                            'filename': file.filename,
+                            'content': text_content,
+                            'warning': 'No text content could be extracted from this file. '
+                            'It has been added but will not be searchable.',
                         }
 
                     result = save_docs_to_vector_db(

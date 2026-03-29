@@ -700,10 +700,10 @@ async def periodic_archive_cleanup():
             await asyncio.sleep(24 * 60 * 60)
 
             stats = ArchiveService.cleanup_expired_archives()
-            if stats["deleted"] > 0:
-                log.info(f"Archive cleanup: deleted {stats['deleted']} expired archives")
+            if stats['deleted'] > 0:
+                log.info(f'Archive cleanup: deleted {stats["deleted"]} expired archives')
         except Exception as e:
-            log.error(f"Error in archive cleanup: {e}")
+            log.error(f'Error in archive cleanup: {e}')
 
 
 @asynccontextmanager
@@ -738,7 +738,7 @@ async def lifespan(app: FastAPI):
 
         load_external_agents_at_startup()
     except Exception as e:
-        log.warning(f"External agents loading skipped or failed: {e}")
+        log.warning(f'External agents loading skipped or failed: {e}')
 
     app.state.redis = get_redis_connection(
         redis_url=REDIS_URL,
@@ -778,26 +778,26 @@ async def lifespan(app: FastAPI):
     start_cleanup_worker()
 
     # Check external pipeline health on startup
-    external_pipeline_url = getattr(app.state.config, "EXTERNAL_PIPELINE_URL", None)
-    if external_pipeline_url and external_pipeline_url.strip() != "":
-        external_pipeline_api_key = getattr(app.state.config, "EXTERNAL_PIPELINE_API_KEY", None)
-        log.info(f"Checking external pipeline health at: {external_pipeline_url}")
+    external_pipeline_url = getattr(app.state.config, 'EXTERNAL_PIPELINE_URL', None)
+    if external_pipeline_url and external_pipeline_url.strip() != '':
+        external_pipeline_api_key = getattr(app.state.config, 'EXTERNAL_PIPELINE_API_KEY', None)
+        log.info(f'Checking external pipeline health at: {external_pipeline_url}')
         is_healthy = check_external_pipeline_health(
             external_pipeline_url=external_pipeline_url,
             external_pipeline_api_key=external_pipeline_api_key,
             timeout=5,
         )
         if is_healthy:
-            log.info("✓ External pipeline is healthy and ready")
+            log.info('✓ External pipeline is healthy and ready')
         else:
             log.warning(
-                f"⚠ External pipeline at {external_pipeline_url} is not accessible or unhealthy. "
-                f"File processing will fall back to internal pipeline. "
-                f"Ensure the pipeline is running and accessible."
+                f'⚠ External pipeline at {external_pipeline_url} is not accessible or unhealthy. '
+                f'File processing will fall back to internal pipeline. '
+                f'Ensure the pipeline is running and accessible.'
             )
     else:
         log.info(
-            "External pipeline is disabled (EXTERNAL_PIPELINE_URL not set or empty). Using internal pipeline only."
+            'External pipeline is disabled (EXTERNAL_PIPELINE_URL not set or empty). Using internal pipeline only.'
         )
 
     if app.state.config.ENABLE_BASE_MODELS_CACHE:
@@ -875,7 +875,7 @@ async def lifespan(app: FastAPI):
 
     stop_google_drive_scheduler()
 
-    if hasattr(app.state, "redis_task_command_listener"):
+    if hasattr(app.state, 'redis_task_command_listener'):
         app.state.redis_task_command_listener.cancel()
 
 
@@ -1717,9 +1717,9 @@ app.include_router(retrieval.router, prefix='/api/v1/retrieval', tags=['retrieva
 
 app.include_router(configs.router, prefix='/api/v1/configs', tags=['configs'])
 
-app.include_router(auths.router, prefix="/api/v1/auths", tags=["auths"])
-app.include_router(users.router, prefix="/api/v1/users", tags=["users"])
-app.include_router(archives.router, prefix="/api/v1/archives", tags=["archives"])
+app.include_router(auths.router, prefix='/api/v1/auths', tags=['auths'])
+app.include_router(users.router, prefix='/api/v1/users', tags=['users'])
+app.include_router(archives.router, prefix='/api/v1/archives', tags=['archives'])
 
 
 app.include_router(channels.router, prefix='/api/v1/channels', tags=['channels'])
@@ -1727,13 +1727,13 @@ app.include_router(chats.router, prefix='/api/v1/chats', tags=['chats'])
 app.include_router(notes.router, prefix='/api/v1/notes', tags=['notes'])
 
 
-app.include_router(models.router, prefix="/api/v1/models", tags=["models"])
-app.include_router(knowledge.router, prefix="/api/v1/knowledge", tags=["knowledge"])
-app.include_router(integrations.router, prefix="/api/v1/integrations", tags=["integrations"])
-app.include_router(agent_proxy.router, prefix="/api/v1/agent", tags=["agent-proxy"])
-app.include_router(prompts.router, prefix="/api/v1/prompts", tags=["prompts"])
-app.include_router(tools.router, prefix="/api/v1/tools", tags=["tools"])
-app.include_router(skills.router, prefix="/api/v1/skills", tags=["skills"])
+app.include_router(models.router, prefix='/api/v1/models', tags=['models'])
+app.include_router(knowledge.router, prefix='/api/v1/knowledge', tags=['knowledge'])
+app.include_router(integrations.router, prefix='/api/v1/integrations', tags=['integrations'])
+app.include_router(agent_proxy.router, prefix='/api/v1/agent', tags=['agent-proxy'])
+app.include_router(prompts.router, prefix='/api/v1/prompts', tags=['prompts'])
+app.include_router(tools.router, prefix='/api/v1/tools', tags=['tools'])
+app.include_router(skills.router, prefix='/api/v1/skills', tags=['skills'])
 
 app.include_router(memories.router, prefix='/api/v1/memories', tags=['memories'])
 app.include_router(folders.router, prefix='/api/v1/folders', tags=['folders'])
@@ -1752,14 +1752,14 @@ if ENABLE_SCIM:
 
 # OneDrive Sync API for collection synchronization
 if app.state.config.ENABLE_ONEDRIVE_SYNC:
-    app.include_router(onedrive_sync.router, prefix="/api/v1/onedrive", tags=["onedrive"])
+    app.include_router(onedrive_sync.router, prefix='/api/v1/onedrive', tags=['onedrive'])
 
 # Google Drive Sync API for collection synchronization
 if app.state.config.ENABLE_GOOGLE_DRIVE_SYNC:
-    app.include_router(google_drive_sync.router, prefix="/api/v1/google-drive", tags=["google-drive"])
+    app.include_router(google_drive_sync.router, prefix='/api/v1/google-drive', tags=['google-drive'])
 
 # Invites API (always mounted - Copy Link works without Graph API)
-app.include_router(invites.router, prefix="/api/v1/invites", tags=["invites"])
+app.include_router(invites.router, prefix='/api/v1/invites', tags=['invites'])
 
 
 try:
@@ -1835,8 +1835,8 @@ async def get_base_models(request: Request, user=Depends(get_admin_user)):
     models = await get_all_base_models(request, user=user)
     # Apply global model whitelist filter (if configured)
     if MODEL_WHITELIST:
-        models = [m for m in models if m.get("id") in MODEL_WHITELIST]
-    return {"data": models}
+        models = [m for m in models if m.get('id') in MODEL_WHITELIST]
+    return {'data': models}
 
 
 ##################################
@@ -1945,26 +1945,26 @@ async def chat_completion(
             reasoning_tags = model_info_params.get('reasoning_tags')
 
         metadata = {
-            "user_id": user.id,
-            "chat_id": form_data.pop("chat_id", None),
-            "message_id": form_data.pop("id", None),
-            "parent_message": form_data.pop("parent_message", None),
-            "parent_message_id": form_data.pop("parent_id", None),
-            "session_id": form_data.pop("session_id", None),
-            "filter_ids": form_data.pop("filter_ids", []),
-            "tool_ids": form_data.get("tool_ids", None),
-            "tool_servers": form_data.pop("tool_servers", None),
-            "rag_filter": form_data.pop("rag_filter", None),
-            "files": form_data.get("files", None),
-            "features": form_data.get("features", {}),
-            "variables": form_data.get("variables", {}),
-            "model": model,
-            "direct": model_item.get("direct", False),
-            "params": {
-                "stream_delta_chunk_size": stream_delta_chunk_size,
-                "reasoning_tags": reasoning_tags,
-                "function_calling": (
-                    "native"
+            'user_id': user.id,
+            'chat_id': form_data.pop('chat_id', None),
+            'message_id': form_data.pop('id', None),
+            'parent_message': form_data.pop('parent_message', None),
+            'parent_message_id': form_data.pop('parent_id', None),
+            'session_id': form_data.pop('session_id', None),
+            'filter_ids': form_data.pop('filter_ids', []),
+            'tool_ids': form_data.get('tool_ids', None),
+            'tool_servers': form_data.pop('tool_servers', None),
+            'rag_filter': form_data.pop('rag_filter', None),
+            'files': form_data.get('files', None),
+            'features': form_data.get('features', {}),
+            'variables': form_data.get('variables', {}),
+            'model': model,
+            'direct': model_item.get('direct', False),
+            'params': {
+                'stream_delta_chunk_size': stream_delta_chunk_size,
+                'reasoning_tags': reasoning_tags,
+                'function_calling': (
+                    'native'
                     if (
                         form_data.get('params', {}).get('function_calling') == 'native'
                         or model_info_params.get('function_calling') == 'native'
@@ -2025,10 +2025,10 @@ async def chat_completion(
             # It returns a standard OpenAI SSE stream so process_chat_response
             # handles streaming, DB persistence, and WebSocket transport unchanged.
             if AGENT_API_ENABLED:
-                response = await call_agent_api(request, form_data, metadata, metadata.get("features", {}))
+                response = await call_agent_api(request, form_data, metadata, metadata.get('features', {}))
             else:
                 response = await chat_completion_handler(request, form_data, user)
-            if metadata.get("chat_id") and metadata.get("message_id"):
+            if metadata.get('chat_id') and metadata.get('message_id'):
                 try:
                     if not metadata['chat_id'].startswith('local:'):
                         Chats.upsert_message_to_chat_by_id_and_message_id(
@@ -2284,115 +2284,115 @@ async def get_app_config(request: Request):
         onboarding = user_count == 0
 
     return {
-        **({"onboarding": True} if onboarding else {}),
-        "status": True,
-        "name": app.state.WEBUI_NAME,
-        "version": VERSION,
-        "default_locale": str(DEFAULT_LOCALE),
-        "client_name": CLIENT_NAME,
-        "invite_heading": str(app.state.config.EMAIL_INVITE_HEADING or ""),
-        "oauth": {"providers": {name: config.get("name", name) for name, config in OAUTH_PROVIDERS.items()}},
-        "features": {
-            "auth": WEBUI_AUTH,
-            "auth_trusted_header": bool(app.state.AUTH_TRUSTED_EMAIL_HEADER),
-            "enable_signup_password_confirmation": ENABLE_SIGNUP_PASSWORD_CONFIRMATION,
-            "enable_ldap": app.state.config.ENABLE_LDAP,
-            "enable_api_keys": app.state.config.ENABLE_API_KEYS,
-            "enable_signup": app.state.config.ENABLE_SIGNUP,
-            "enable_login_form": app.state.config.ENABLE_LOGIN_FORM,
-            "enable_websocket": ENABLE_WEBSOCKET_SUPPORT,
-            "enable_version_update_check": ENABLE_VERSION_UPDATE_CHECK,
-            "enable_public_active_users_count": ENABLE_PUBLIC_ACTIVE_USERS_COUNT,
-            "enable_easter_eggs": ENABLE_EASTER_EGGS,
+        **({'onboarding': True} if onboarding else {}),
+        'status': True,
+        'name': app.state.WEBUI_NAME,
+        'version': VERSION,
+        'default_locale': str(DEFAULT_LOCALE),
+        'client_name': CLIENT_NAME,
+        'invite_heading': str(app.state.config.EMAIL_INVITE_HEADING or ''),
+        'oauth': {'providers': {name: config.get('name', name) for name, config in OAUTH_PROVIDERS.items()}},
+        'features': {
+            'auth': WEBUI_AUTH,
+            'auth_trusted_header': bool(app.state.AUTH_TRUSTED_EMAIL_HEADER),
+            'enable_signup_password_confirmation': ENABLE_SIGNUP_PASSWORD_CONFIRMATION,
+            'enable_ldap': app.state.config.ENABLE_LDAP,
+            'enable_api_keys': app.state.config.ENABLE_API_KEYS,
+            'enable_signup': app.state.config.ENABLE_SIGNUP,
+            'enable_login_form': app.state.config.ENABLE_LOGIN_FORM,
+            'enable_websocket': ENABLE_WEBSOCKET_SUPPORT,
+            'enable_version_update_check': ENABLE_VERSION_UPDATE_CHECK,
+            'enable_public_active_users_count': ENABLE_PUBLIC_ACTIVE_USERS_COUNT,
+            'enable_easter_eggs': ENABLE_EASTER_EGGS,
             **(
                 {
-                    "enable_direct_connections": app.state.config.ENABLE_DIRECT_CONNECTIONS,
-                    "enable_folders": app.state.config.ENABLE_FOLDERS,
-                    "folder_max_file_count": app.state.config.FOLDER_MAX_FILE_COUNT,
-                    "enable_channels": app.state.config.ENABLE_CHANNELS,
-                    "enable_notes": app.state.config.ENABLE_NOTES,
-                    "enable_web_search": app.state.config.ENABLE_WEB_SEARCH,
-                    "enable_rag_filter_ui": app.state.config.ENABLE_RAG_FILTER_UI,
-                    "enable_code_execution": app.state.config.ENABLE_CODE_EXECUTION,
-                    "enable_code_interpreter": app.state.config.ENABLE_CODE_INTERPRETER,
-                    "enable_image_generation": app.state.config.ENABLE_IMAGE_GENERATION,
-                    "enable_autocomplete_generation": app.state.config.ENABLE_AUTOCOMPLETE_GENERATION,
-                    "enable_community_sharing": app.state.config.ENABLE_COMMUNITY_SHARING,
-                    "enable_citation_relevance": app.state.config.ENABLE_CITATION_RELEVANCE,
-                    "enable_message_rating": app.state.config.ENABLE_MESSAGE_RATING,
-                    "enable_feedback_layer2": app.state.config.ENABLE_FEEDBACK_LAYER2,
-                    "feedback_layer2_positive_tags": app.state.config.FEEDBACK_LAYER2_POSITIVE_TAGS,
-                    "feedback_layer2_negative_tags": app.state.config.FEEDBACK_LAYER2_NEGATIVE_TAGS,
-                    "enable_feedback_layer3": app.state.config.ENABLE_FEEDBACK_LAYER3,
-                    "feedback_layer3_prompt": app.state.config.FEEDBACK_LAYER3_PROMPT,
-                    "enable_feedback_category_tags": app.state.config.ENABLE_FEEDBACK_CATEGORY_TAGS,
-                    "enable_conversation_feedback": app.state.config.ENABLE_CONVERSATION_FEEDBACK,
-                    "conversation_feedback_scale_max": app.state.config.CONVERSATION_FEEDBACK_SCALE_MAX,
-                    "conversation_feedback_header": app.state.config.CONVERSATION_FEEDBACK_HEADER,
-                    "conversation_feedback_placeholder": app.state.config.CONVERSATION_FEEDBACK_PLACEHOLDER,
-                    "enable_user_webhooks": app.state.config.ENABLE_USER_WEBHOOKS,
-                    "enable_user_status": app.state.config.ENABLE_USER_STATUS,
-                    "enable_admin_export": ENABLE_ADMIN_EXPORT,
-                    "enable_admin_chat_access": ENABLE_ADMIN_CHAT_ACCESS,
-                    "enable_admin_analytics": ENABLE_ADMIN_ANALYTICS,
+                    'enable_direct_connections': app.state.config.ENABLE_DIRECT_CONNECTIONS,
+                    'enable_folders': app.state.config.ENABLE_FOLDERS,
+                    'folder_max_file_count': app.state.config.FOLDER_MAX_FILE_COUNT,
+                    'enable_channels': app.state.config.ENABLE_CHANNELS,
+                    'enable_notes': app.state.config.ENABLE_NOTES,
+                    'enable_web_search': app.state.config.ENABLE_WEB_SEARCH,
+                    'enable_rag_filter_ui': app.state.config.ENABLE_RAG_FILTER_UI,
+                    'enable_code_execution': app.state.config.ENABLE_CODE_EXECUTION,
+                    'enable_code_interpreter': app.state.config.ENABLE_CODE_INTERPRETER,
+                    'enable_image_generation': app.state.config.ENABLE_IMAGE_GENERATION,
+                    'enable_autocomplete_generation': app.state.config.ENABLE_AUTOCOMPLETE_GENERATION,
+                    'enable_community_sharing': app.state.config.ENABLE_COMMUNITY_SHARING,
+                    'enable_citation_relevance': app.state.config.ENABLE_CITATION_RELEVANCE,
+                    'enable_message_rating': app.state.config.ENABLE_MESSAGE_RATING,
+                    'enable_feedback_layer2': app.state.config.ENABLE_FEEDBACK_LAYER2,
+                    'feedback_layer2_positive_tags': app.state.config.FEEDBACK_LAYER2_POSITIVE_TAGS,
+                    'feedback_layer2_negative_tags': app.state.config.FEEDBACK_LAYER2_NEGATIVE_TAGS,
+                    'enable_feedback_layer3': app.state.config.ENABLE_FEEDBACK_LAYER3,
+                    'feedback_layer3_prompt': app.state.config.FEEDBACK_LAYER3_PROMPT,
+                    'enable_feedback_category_tags': app.state.config.ENABLE_FEEDBACK_CATEGORY_TAGS,
+                    'enable_conversation_feedback': app.state.config.ENABLE_CONVERSATION_FEEDBACK,
+                    'conversation_feedback_scale_max': app.state.config.CONVERSATION_FEEDBACK_SCALE_MAX,
+                    'conversation_feedback_header': app.state.config.CONVERSATION_FEEDBACK_HEADER,
+                    'conversation_feedback_placeholder': app.state.config.CONVERSATION_FEEDBACK_PLACEHOLDER,
+                    'enable_user_webhooks': app.state.config.ENABLE_USER_WEBHOOKS,
+                    'enable_user_status': app.state.config.ENABLE_USER_STATUS,
+                    'enable_admin_export': ENABLE_ADMIN_EXPORT,
+                    'enable_admin_chat_access': ENABLE_ADMIN_CHAT_ACCESS,
+                    'enable_admin_analytics': ENABLE_ADMIN_ANALYTICS,
                     # Feature Flags (SaaS Tier Control)
-                    "feature_chat_controls": FEATURE_CHAT_CONTROLS,
-                    "feature_capture": FEATURE_CAPTURE,
-                    "feature_artifacts": FEATURE_ARTIFACTS,
-                    "feature_playground": FEATURE_PLAYGROUND,
-                    "feature_chat_overview": FEATURE_CHAT_OVERVIEW,
-                    "feature_notes_ai_controls": FEATURE_NOTES_AI_CONTROLS,
-                    "feature_voice": FEATURE_VOICE,
-                    "feature_changelog": FEATURE_CHANGELOG,
-                    "feature_system_prompt": FEATURE_SYSTEM_PROMPT,
-                    "feature_models": FEATURE_MODELS,
-                    "feature_knowledge": FEATURE_KNOWLEDGE,
-                    "feature_prompts": FEATURE_PROMPTS,
-                    "feature_tools": FEATURE_TOOLS,
-                    "feature_skills": FEATURE_SKILLS,
-                    "feature_admin_evaluations": FEATURE_ADMIN_EVALUATIONS,
-                    "feature_admin_functions": FEATURE_ADMIN_FUNCTIONS,
-                    "feature_admin_settings": FEATURE_ADMIN_SETTINGS,
-                    "feature_admin_settings_tabs": FEATURE_ADMIN_SETTINGS_TABS,
-                    "feature_chat_controls_sections": FEATURE_CHAT_CONTROLS_SECTIONS,
-                    "feature_webpage_url": FEATURE_WEBPAGE_URL,
-                    "feature_reference_chats": FEATURE_REFERENCE_CHATS,
-                    "feature_input_menu": FEATURE_INPUT_MENU,
-                    "feature_temporary_chat": FEATURE_TEMPORARY_CHAT,
-                    "feature_tool_servers": FEATURE_TOOL_SERVERS,
-                    "feature_terminal_servers": FEATURE_TERMINAL_SERVERS,
-                    "feature_builtin_tools": FEATURE_BUILTIN_TOOLS,
-                    "enable_google_drive_integration": app.state.config.ENABLE_GOOGLE_DRIVE_INTEGRATION,
+                    'feature_chat_controls': FEATURE_CHAT_CONTROLS,
+                    'feature_capture': FEATURE_CAPTURE,
+                    'feature_artifacts': FEATURE_ARTIFACTS,
+                    'feature_playground': FEATURE_PLAYGROUND,
+                    'feature_chat_overview': FEATURE_CHAT_OVERVIEW,
+                    'feature_notes_ai_controls': FEATURE_NOTES_AI_CONTROLS,
+                    'feature_voice': FEATURE_VOICE,
+                    'feature_changelog': FEATURE_CHANGELOG,
+                    'feature_system_prompt': FEATURE_SYSTEM_PROMPT,
+                    'feature_models': FEATURE_MODELS,
+                    'feature_knowledge': FEATURE_KNOWLEDGE,
+                    'feature_prompts': FEATURE_PROMPTS,
+                    'feature_tools': FEATURE_TOOLS,
+                    'feature_skills': FEATURE_SKILLS,
+                    'feature_admin_evaluations': FEATURE_ADMIN_EVALUATIONS,
+                    'feature_admin_functions': FEATURE_ADMIN_FUNCTIONS,
+                    'feature_admin_settings': FEATURE_ADMIN_SETTINGS,
+                    'feature_admin_settings_tabs': FEATURE_ADMIN_SETTINGS_TABS,
+                    'feature_chat_controls_sections': FEATURE_CHAT_CONTROLS_SECTIONS,
+                    'feature_webpage_url': FEATURE_WEBPAGE_URL,
+                    'feature_reference_chats': FEATURE_REFERENCE_CHATS,
+                    'feature_input_menu': FEATURE_INPUT_MENU,
+                    'feature_temporary_chat': FEATURE_TEMPORARY_CHAT,
+                    'feature_tool_servers': FEATURE_TOOL_SERVERS,
+                    'feature_terminal_servers': FEATURE_TERMINAL_SERVERS,
+                    'feature_builtin_tools': FEATURE_BUILTIN_TOOLS,
+                    'enable_google_drive_integration': app.state.config.ENABLE_GOOGLE_DRIVE_INTEGRATION,
                     **(
                         {
-                            "enable_google_drive_sync": app.state.config.ENABLE_GOOGLE_DRIVE_SYNC,
+                            'enable_google_drive_sync': app.state.config.ENABLE_GOOGLE_DRIVE_SYNC,
                         }
                         if app.state.config.ENABLE_GOOGLE_DRIVE_INTEGRATION
                         else {}
                     ),
-                    "enable_onedrive_integration": app.state.config.ENABLE_ONEDRIVE_INTEGRATION,
-                    "enable_memories": app.state.config.ENABLE_MEMORIES,
+                    'enable_onedrive_integration': app.state.config.ENABLE_ONEDRIVE_INTEGRATION,
+                    'enable_memories': app.state.config.ENABLE_MEMORIES,
                     **(
                         {
-                            "enable_onedrive_personal": ENABLE_ONEDRIVE_PERSONAL,
-                            "enable_onedrive_business": ENABLE_ONEDRIVE_BUSINESS,
-                            "enable_onedrive_sync": app.state.config.ENABLE_ONEDRIVE_SYNC,
+                            'enable_onedrive_personal': ENABLE_ONEDRIVE_PERSONAL,
+                            'enable_onedrive_business': ENABLE_ONEDRIVE_BUSINESS,
+                            'enable_onedrive_sync': app.state.config.ENABLE_ONEDRIVE_SYNC,
                         }
                         if app.state.config.ENABLE_ONEDRIVE_INTEGRATION
                         else {}
                     ),
-                    "enable_email_invites": app.state.config.ENABLE_EMAIL_INVITES,
-                    "enable_agent_proxy": app.state.config.ENABLE_AGENT_PROXY,
+                    'enable_email_invites': app.state.config.ENABLE_EMAIL_INVITES,
+                    'enable_agent_proxy': app.state.config.ENABLE_AGENT_PROXY,
                 }
                 if user is not None
                 else {}
             ),
         },
-        "integration_providers": {
+        'integration_providers': {
             slug: {
-                "name": p["name"],
-                "badge_type": p.get("badge_type", "info"),
-                "max_files_per_kb": p.get("max_files_per_kb", 250),
+                'name': p['name'],
+                'badge_type': p.get('badge_type', 'info'),
+                'max_files_per_kb': p.get('max_files_per_kb', 250),
             }
             for slug, p in (app.state.config.INTEGRATION_PROVIDERS or {}).items()
         },
@@ -2406,50 +2406,50 @@ async def get_app_config(request: Request):
                     'engine': app.state.config.CODE_EXECUTION_ENGINE,
                     'interpreter_engine': app.state.config.CODE_INTERPRETER_ENGINE,
                 },
-                "database": {
-                    "type": engine.name,
+                'database': {
+                    'type': engine.name,
                 },
-                "audio": {
-                    "tts": {
-                        "engine": app.state.config.TTS_ENGINE,
-                        "voice": app.state.config.TTS_VOICE,
-                        "split_on": app.state.config.TTS_SPLIT_ON,
+                'audio': {
+                    'tts': {
+                        'engine': app.state.config.TTS_ENGINE,
+                        'voice': app.state.config.TTS_VOICE,
+                        'split_on': app.state.config.TTS_SPLIT_ON,
                     },
                     'stt': {
                         'engine': app.state.config.STT_ENGINE,
                     },
                 },
-                "file": {
-                    "max_size": app.state.config.FILE_MAX_SIZE,
-                    "max_count": app.state.config.FILE_MAX_COUNT,
-                    "allowed_extensions": app.state.config.ALLOWED_FILE_EXTENSIONS,
-                    "image_compression": {
-                        "width": app.state.config.FILE_IMAGE_COMPRESSION_WIDTH,
-                        "height": app.state.config.FILE_IMAGE_COMPRESSION_HEIGHT,
+                'file': {
+                    'max_size': app.state.config.FILE_MAX_SIZE,
+                    'max_count': app.state.config.FILE_MAX_COUNT,
+                    'allowed_extensions': app.state.config.ALLOWED_FILE_EXTENSIONS,
+                    'image_compression': {
+                        'width': app.state.config.FILE_IMAGE_COMPRESSION_WIDTH,
+                        'height': app.state.config.FILE_IMAGE_COMPRESSION_HEIGHT,
                     },
                 },
-                "permissions": {**app.state.config.USER_PERMISSIONS},
-                "google_drive": {
-                    "client_id": GOOGLE_DRIVE_CLIENT_ID.value,
-                    "api_key": GOOGLE_DRIVE_API_KEY.value,
-                    "has_client_secret": bool(GOOGLE_CLIENT_SECRET.value),
+                'permissions': {**app.state.config.USER_PERMISSIONS},
+                'google_drive': {
+                    'client_id': GOOGLE_DRIVE_CLIENT_ID.value,
+                    'api_key': GOOGLE_DRIVE_API_KEY.value,
+                    'has_client_secret': bool(GOOGLE_CLIENT_SECRET.value),
                 },
-                "onedrive": {
-                    "client_id_personal": ONEDRIVE_CLIENT_ID_PERSONAL,
-                    "client_id_business": ONEDRIVE_CLIENT_ID_BUSINESS,
-                    "sharepoint_url": ONEDRIVE_SHAREPOINT_URL.value,
-                    "sharepoint_tenant_id": ONEDRIVE_SHAREPOINT_TENANT_ID.value,
-                    "has_client_secret": bool(MICROSOFT_CLIENT_SECRET.value),
+                'onedrive': {
+                    'client_id_personal': ONEDRIVE_CLIENT_ID_PERSONAL,
+                    'client_id_business': ONEDRIVE_CLIENT_ID_BUSINESS,
+                    'sharepoint_url': ONEDRIVE_SHAREPOINT_URL.value,
+                    'sharepoint_tenant_id': ONEDRIVE_SHAREPOINT_TENANT_ID.value,
+                    'has_client_secret': bool(MICROSOFT_CLIENT_SECRET.value),
                 },
-                "ui": {
-                    "pending_user_overlay_title": app.state.config.PENDING_USER_OVERLAY_TITLE,
-                    "pending_user_overlay_content": app.state.config.PENDING_USER_OVERLAY_CONTENT,
-                    "response_watermark": app.state.config.RESPONSE_WATERMARK,
-                    "greeting_template": app.state.config.GREETING_TEMPLATE,
-                    "enable_acceptance_modal": app.state.config.ENABLE_ACCEPTANCE_MODAL,
-                    "acceptance_modal_title": app.state.config.ACCEPTANCE_MODAL_TITLE,
-                    "acceptance_modal_content": app.state.config.ACCEPTANCE_MODAL_CONTENT,
-                    "acceptance_modal_button_text": app.state.config.ACCEPTANCE_MODAL_BUTTON_TEXT,
+                'ui': {
+                    'pending_user_overlay_title': app.state.config.PENDING_USER_OVERLAY_TITLE,
+                    'pending_user_overlay_content': app.state.config.PENDING_USER_OVERLAY_CONTENT,
+                    'response_watermark': app.state.config.RESPONSE_WATERMARK,
+                    'greeting_template': app.state.config.GREETING_TEMPLATE,
+                    'enable_acceptance_modal': app.state.config.ENABLE_ACCEPTANCE_MODAL,
+                    'acceptance_modal_title': app.state.config.ACCEPTANCE_MODAL_TITLE,
+                    'acceptance_modal_content': app.state.config.ACCEPTANCE_MODAL_CONTENT,
+                    'acceptance_modal_button_text': app.state.config.ACCEPTANCE_MODAL_BUTTON_TEXT,
                 },
                 'license_metadata': app.state.LICENSE_METADATA,
                 **(
@@ -2482,7 +2482,7 @@ async def get_app_config(request: Request):
                     if app.state.LICENSE_METADATA
                     else {}
                 ),
-                "soev_login_footer": SOEV_LOGIN_FOOTER.value,
+                'soev_login_footer': SOEV_LOGIN_FOOTER.value,
             }
         ),
     }
@@ -2767,8 +2767,8 @@ async def oauth_login_callback(
     db: Session = Depends(get_session),
 ):
     # Check if this is a OneDrive background sync auth callback
-    if provider == "microsoft":
-        state = request.query_params.get("state")
+    if provider == 'microsoft':
+        state = request.query_params.get('state')
         if state:
             from open_webui.services.onedrive.auth import _pending_flows
 
@@ -2780,8 +2780,8 @@ async def oauth_login_callback(
                 return await handle_onedrive_auth_callback(request)
 
     # Check if this is a Google Drive background sync auth callback
-    if provider == "google":
-        state = request.query_params.get("state")
+    if provider == 'google':
+        state = request.query_params.get('state')
         if state:
             from open_webui.services.google_drive.auth import (
                 _pending_flows as _google_drive_pending_flows,

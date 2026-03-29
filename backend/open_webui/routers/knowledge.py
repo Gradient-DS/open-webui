@@ -127,7 +127,7 @@ async def get_knowledge_bases(
 
     filter = {}
     if type:
-        filter["type"] = type
+        filter['type'] = type
 
     groups = Groups.get_groups_by_member_id(user.id, db=db)
     user_group_ids = {group.id for group in groups}
@@ -184,9 +184,9 @@ async def search_knowledge_bases(
     if query:
         filter['query'] = query
     if view_option:
-        filter["view_option"] = view_option
+        filter['view_option'] = view_option
     if type:
-        filter["type"] = type
+        filter['type'] = type
 
     groups = Groups.get_groups_by_member_id(user.id, db=db)
     user_group_ids = {group.id for group in groups}
@@ -260,7 +260,7 @@ async def create_new_knowledge(
     request: Request,
     form_data: KnowledgeForm,
     user=Depends(get_verified_user),
-    _=Depends(require_feature("knowledge")),
+    _=Depends(require_feature('knowledge')),
 ):
     # NOTE: We intentionally do NOT use Depends(get_session) here.
     # Database operations (has_permission, filter_allowed_access_grants, insert_new_knowledge) manage their own sessions.
@@ -276,20 +276,20 @@ async def create_new_knowledge(
 
     # Set type, default to "local"
     if form_data.type is None:
-        form_data.type = "local"
+        form_data.type = 'local'
 
     # Validate type value
-    allowed_kb_types = {"local", "onedrive", "google_drive"} | set(
+    allowed_kb_types = {'local', 'onedrive', 'google_drive'} | set(
         (request.app.state.config.INTEGRATION_PROVIDERS or {}).keys()
     )
     if form_data.type not in allowed_kb_types:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Invalid knowledge base type. Must be one of: {', '.join(sorted(allowed_kb_types))}.",
+            detail=f'Invalid knowledge base type. Must be one of: {", ".join(sorted(allowed_kb_types))}.',
         )
 
     # External KBs are always private
-    if form_data.type != "local":
+    if form_data.type != 'local':
         form_data.access_grants = []
 
     form_data.access_grants = filter_allowed_access_grants(
@@ -470,7 +470,7 @@ async def update_knowledge_by_id(
     id: str,
     form_data: KnowledgeForm,
     user=Depends(get_verified_user),
-    _=Depends(require_feature("knowledge")),
+    _=Depends(require_feature('knowledge')),
 ):
     # NOTE: We intentionally do NOT use Depends(get_session) here.
     # Database operations manage their own short-lived sessions internally.
@@ -502,8 +502,8 @@ async def update_knowledge_by_id(
     form_data.type = None  # Strip type from update form
 
     # Prevent access_grants changes on non-local KBs
-    if knowledge.type != "local":
-        form_data.access_grants = knowledge.access_grants if hasattr(knowledge, "access_grants") else []
+    if knowledge.type != 'local':
+        form_data.access_grants = knowledge.access_grants if hasattr(knowledge, 'access_grants') else []
 
     form_data.access_grants = filter_allowed_access_grants(
         request.app.state.config.USER_PERMISSIONS,
@@ -574,10 +574,10 @@ async def update_knowledge_access_by_id(
         )
 
     # Non-local knowledge bases (e.g. OneDrive) are always private
-    if knowledge.type != "local":
+    if knowledge.type != 'local':
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Access grants cannot be modified for non-local knowledge bases.",
+            detail='Access grants cannot be modified for non-local knowledge bases.',
         )
 
     form_data.access_grants = filter_allowed_access_grants(
@@ -669,7 +669,7 @@ def add_file_to_knowledge_by_id(
     id: str,
     form_data: KnowledgeFileIdForm,
     user=Depends(get_verified_user),
-    _=Depends(require_feature("knowledge")),
+    _=Depends(require_feature('knowledge')),
     db: Session = Depends(get_session),
 ):
     knowledge = Knowledges.get_knowledge_by_id(id=id, db=db)
@@ -696,12 +696,12 @@ def add_file_to_knowledge_by_id(
         )
 
     # Check file count limit for non-local KBs
-    if knowledge.type != "local":
+    if knowledge.type != 'local':
         current_files = Knowledges.get_files_by_id(id, db=db)
         if current_files and len(current_files) >= 250:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="This knowledge base has reached the 250-file limit.",
+                detail='This knowledge base has reached the 250-file limit.',
             )
 
     file = Files.get_file_by_id(form_data.file_id, db=db)
@@ -726,8 +726,8 @@ def add_file_to_knowledge_by_id(
             db=db,
         )
 
-        if isinstance(result, dict) and result.get("warning"):
-            warning = result["warning"]
+        if isinstance(result, dict) and result.get('warning'):
+            warning = result['warning']
 
         # Add file to knowledge base
         Knowledges.add_file_to_knowledge_by_id(knowledge_id=id, file_id=form_data.file_id, user_id=user.id, db=db)
@@ -744,7 +744,7 @@ def add_file_to_knowledge_by_id(
             files=Knowledges.get_file_metadatas_by_id(knowledge.id, db=db),
         ).model_dump()
         if warning:
-            response_data["warning"] = warning
+            response_data['warning'] = warning
         return response_data
     else:
         raise HTTPException(
@@ -759,7 +759,7 @@ def update_file_from_knowledge_by_id(
     id: str,
     form_data: KnowledgeFileIdForm,
     user=Depends(get_verified_user),
-    _=Depends(require_feature("knowledge")),
+    _=Depends(require_feature('knowledge')),
     db: Session = Depends(get_session),
 ):
     knowledge = Knowledges.get_knowledge_by_id(id=id, db=db)
@@ -839,7 +839,7 @@ def remove_file_from_knowledge_by_id(
     form_data: KnowledgeFileIdForm,
     delete_file: bool = Query(True),
     user=Depends(get_verified_user),
-    _=Depends(require_feature("knowledge")),
+    _=Depends(require_feature('knowledge')),
     db: Session = Depends(get_session),
 ):
     knowledge = Knowledges.get_knowledge_by_id(id=id, db=db)
@@ -851,7 +851,7 @@ def remove_file_from_knowledge_by_id(
 
     # For external-source KBs, never delete the underlying file
     # (other users may reference it via their own KBs)
-    if knowledge.type != "local":
+    if knowledge.type != 'local':
         delete_file = False
 
     if (
@@ -903,18 +903,18 @@ def remove_file_from_knowledge_by_id(
     # When an OneDrive file from a folder source is removed, convert the
     # folder source into individual file sources for the remaining files.
     # This prevents the deleted file from being re-synced on the next cycle.
-    if form_data.file_id.startswith("onedrive-"):
+    if form_data.file_id.startswith('onedrive-'):
         try:
             file_meta = file.meta or {}
-            source_item_id = file_meta.get("source_item_id")
+            source_item_id = file_meta.get('source_item_id')
             meta = knowledge.meta or {}
-            sync_info = meta.get("onedrive_sync", {})
-            sources = sync_info.get("sources", [])
+            sync_info = meta.get('onedrive_sync', {})
+            sources = sync_info.get('sources', [])
 
             if source_item_id and sources:
                 # Find the folder source this file belonged to
                 folder_source = next(
-                    (s for s in sources if s.get("item_id") == source_item_id and s.get("type") == "folder"),
+                    (s for s in sources if s.get('item_id') == source_item_id and s.get('type') == 'folder'),
                     None,
                 )
 
@@ -923,52 +923,52 @@ def remove_file_from_knowledge_by_id(
                     remaining_kb_files = Knowledges.get_files_by_id(id, db=db)
                     individual_sources = []
                     for kb_file in remaining_kb_files or []:
-                        if not kb_file.id.startswith("onedrive-"):
+                        if not kb_file.id.startswith('onedrive-'):
                             continue
                         kb_file_meta = kb_file.meta or {}
-                        if kb_file_meta.get("source_item_id") != source_item_id:
+                        if kb_file_meta.get('source_item_id') != source_item_id:
                             continue
                         # Skip the file being deleted
                         if kb_file.id == form_data.file_id:
                             continue
                         individual_sources.append(
                             {
-                                "type": "file",
-                                "drive_id": kb_file_meta.get(
-                                    "onedrive_drive_id",
-                                    folder_source.get("drive_id", ""),
+                                'type': 'file',
+                                'drive_id': kb_file_meta.get(
+                                    'onedrive_drive_id',
+                                    folder_source.get('drive_id', ''),
                                 ),
-                                "item_id": kb_file_meta.get(
-                                    "onedrive_item_id",
-                                    kb_file.id.removeprefix("onedrive-"),
+                                'item_id': kb_file_meta.get(
+                                    'onedrive_item_id',
+                                    kb_file.id.removeprefix('onedrive-'),
                                 ),
-                                "item_path": "",
-                                "name": kb_file_meta.get("name", kb_file.filename),
+                                'item_path': '',
+                                'name': kb_file_meta.get('name', kb_file.filename),
                             }
                         )
 
                     # Replace the folder source with individual file sources
-                    new_sources = [s for s in sources if s.get("item_id") != source_item_id] + individual_sources
+                    new_sources = [s for s in sources if s.get('item_id') != source_item_id] + individual_sources
 
-                    sync_info["sources"] = new_sources
-                    meta["onedrive_sync"] = sync_info
+                    sync_info['sources'] = new_sources
+                    meta['onedrive_sync'] = sync_info
                     Knowledges.update_knowledge_meta_by_id(id, meta)
 
                     # Update remaining files' source_item_id to point to their
                     # own item_id (now an individual source, not the folder)
                     for kb_file in remaining_kb_files or []:
-                        if not kb_file.id.startswith("onedrive-"):
+                        if not kb_file.id.startswith('onedrive-'):
                             continue
                         kb_file_meta = kb_file.meta or {}
-                        if kb_file_meta.get("source_item_id") != source_item_id:
+                        if kb_file_meta.get('source_item_id') != source_item_id:
                             continue
                         if kb_file.id == form_data.file_id:
                             continue
                         new_source_id = kb_file_meta.get(
-                            "onedrive_item_id",
-                            kb_file.id.removeprefix("onedrive-"),
+                            'onedrive_item_id',
+                            kb_file.id.removeprefix('onedrive-'),
                         )
-                        kb_file_meta["source_item_id"] = new_source_id
+                        kb_file_meta['source_item_id'] = new_source_id
                         Files.update_file_by_id(
                             kb_file.id,
                             FileUpdateForm(meta=kb_file_meta),
@@ -976,25 +976,25 @@ def remove_file_from_knowledge_by_id(
 
                     log.info(
                         f"Converted folder source '{folder_source.get('name')}' to "
-                        f"{len(individual_sources)} individual file sources "
-                        f"after removing {form_data.file_id} from knowledge {id}"
+                        f'{len(individual_sources)} individual file sources '
+                        f'after removing {form_data.file_id} from knowledge {id}'
                     )
         except Exception as e:
-            log.warning(f"Failed to update OneDrive sources: {e}")
+            log.warning(f'Failed to update OneDrive sources: {e}')
 
     if delete_file:
         file_report = DeletionService.delete_file(form_data.file_id)
         if file_report.has_errors:
-            log.warning(f"Errors deleting file {form_data.file_id}: {file_report.errors}")
+            log.warning(f'Errors deleting file {form_data.file_id}: {file_report.errors}')
 
     # For non-local KBs: check if this was the last reference to the file
-    if not delete_file and knowledge.type != "local":
+    if not delete_file and knowledge.type != 'local':
         remaining_refs = Knowledges.get_knowledge_files_by_file_id(form_data.file_id)
         if not remaining_refs:
-            log.info(f"Cleaning up orphaned external file {form_data.file_id}")
+            log.info(f'Cleaning up orphaned external file {form_data.file_id}')
             file_report = DeletionService.delete_file(form_data.file_id)
             if file_report.has_errors:
-                log.warning(f"Errors deleting orphaned file {form_data.file_id}: {file_report.errors}")
+                log.warning(f'Errors deleting orphaned file {form_data.file_id}: {file_report.errors}')
 
     if knowledge:
         return KnowledgeFilesResponse(
@@ -1013,11 +1013,11 @@ def remove_file_from_knowledge_by_id(
 ############################
 
 
-@router.delete("/{id}/delete", response_model=bool)
+@router.delete('/{id}/delete', response_model=bool)
 async def delete_knowledge_by_id(
     id: str,
     user=Depends(get_verified_user),
-    _=Depends(require_feature("knowledge")),
+    _=Depends(require_feature('knowledge')),
     db: Session = Depends(get_session),
 ):
     knowledge = Knowledges.get_knowledge_by_id(id=id, db=db)
@@ -1043,7 +1043,7 @@ async def delete_knowledge_by_id(
             detail=ERROR_MESSAGES.ACCESS_PROHIBITED,
         )
 
-    log.info(f"Soft-deleting knowledge base: {id} (name: {knowledge.name})")
+    log.info(f'Soft-deleting knowledge base: {id} (name: {knowledge.name})')
 
     # Remove knowledge base embedding
     remove_knowledge_base_metadata_embedding(id)
@@ -1057,11 +1057,11 @@ async def delete_knowledge_by_id(
 ############################
 
 
-@router.post("/{id}/reset", response_model=Optional[KnowledgeResponse])
+@router.post('/{id}/reset', response_model=Optional[KnowledgeResponse])
 async def reset_knowledge_by_id(
     id: str,
     user=Depends(get_verified_user),
-    _=Depends(require_feature("knowledge")),
+    _=Depends(require_feature('knowledge')),
     db: Session = Depends(get_session),
 ):
     knowledge = Knowledges.get_knowledge_by_id(id=id, db=db)
@@ -1108,7 +1108,7 @@ async def add_files_to_knowledge_batch(
     id: str,
     form_data: list[KnowledgeFileIdForm],
     user=Depends(get_verified_user),
-    _=Depends(require_feature("knowledge")),
+    _=Depends(require_feature('knowledge')),
     db: Session = Depends(get_session),
 ):
     """
@@ -1138,15 +1138,14 @@ async def add_files_to_knowledge_batch(
         )
 
     # Check file count limit for non-local KBs
-    if knowledge.type != "local":
+    if knowledge.type != 'local':
         current_files = Knowledges.get_files_by_id(id, db=db)
         current_count = len(current_files) if current_files else 0
         if current_count + len(form_data) > 250:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=(
-                    f"Adding {len(form_data)} files would exceed the 250-file limit "
-                    f"({current_count} files currently)."
+                    f'Adding {len(form_data)} files would exceed the 250-file limit ({current_count} files currently).'
                 ),
             )
 

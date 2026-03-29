@@ -26,15 +26,15 @@ _pending_flows: Dict[str, Dict[str, Any]] = {}
 _FLOW_TTL_SECONDS = 600
 
 # Google OAuth endpoints
-_AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth"
-_TOKEN_URL = "https://oauth2.googleapis.com/token"
-_SCOPE = "https://www.googleapis.com/auth/drive.readonly"
+_AUTH_URL = 'https://accounts.google.com/o/oauth2/v2/auth'
+_TOKEN_URL = 'https://oauth2.googleapis.com/token'
+_SCOPE = 'https://www.googleapis.com/auth/drive.readonly'
 
 
 def _cleanup_expired_flows():
     """Remove expired pending flows."""
     now = time.time()
-    expired = [k for k, v in _pending_flows.items() if now - v["created_at"] > _FLOW_TTL_SECONDS]
+    expired = [k for k, v in _pending_flows.items() if now - v['created_at'] > _FLOW_TTL_SECONDS]
     for k in expired:
         del _pending_flows[k]
 
@@ -53,8 +53,8 @@ def remove_pending_flow(state: str) -> None:
 def _generate_pkce() -> tuple[str, str]:
     """Generate PKCE code_verifier and code_challenge (S256)."""
     code_verifier = secrets.token_urlsafe(64)[:128]
-    digest = hashlib.sha256(code_verifier.encode("ascii")).digest()
-    code_challenge = base64.urlsafe_b64encode(digest).rstrip(b"=").decode("ascii")
+    digest = hashlib.sha256(code_verifier.encode('ascii')).digest()
+    code_challenge = base64.urlsafe_b64encode(digest).rstrip(b'=').decode('ascii')
     return code_verifier, code_challenge
 
 
@@ -75,26 +75,26 @@ def get_authorization_url(
     state = secrets.token_urlsafe(32)
 
     _pending_flows[state] = {
-        "user_id": user_id,
-        "knowledge_id": knowledge_id,
-        "code_verifier": code_verifier,
-        "redirect_uri": redirect_uri,
-        "created_at": time.time(),
+        'user_id': user_id,
+        'knowledge_id': knowledge_id,
+        'code_verifier': code_verifier,
+        'redirect_uri': redirect_uri,
+        'created_at': time.time(),
     }
 
     params = {
-        "client_id": GOOGLE_DRIVE_CLIENT_ID.value,
-        "response_type": "code",
-        "redirect_uri": redirect_uri,
-        "scope": _SCOPE,
-        "state": state,
-        "code_challenge": code_challenge,
-        "code_challenge_method": "S256",
-        "access_type": "offline",
-        "prompt": "consent",  # Force consent to guarantee refresh token
+        'client_id': GOOGLE_DRIVE_CLIENT_ID.value,
+        'response_type': 'code',
+        'redirect_uri': redirect_uri,
+        'scope': _SCOPE,
+        'state': state,
+        'code_challenge': code_challenge,
+        'code_challenge_method': 'S256',
+        'access_type': 'offline',
+        'prompt': 'consent',  # Force consent to guarantee refresh token
     }
 
-    return f"{_AUTH_URL}?{urlencode(params)}"
+    return f'{_AUTH_URL}?{urlencode(params)}'
 
 
 async def exchange_code_for_tokens(
@@ -118,60 +118,60 @@ async def exchange_code_for_tokens(
     # Validate state
     flow = _pending_flows.pop(state, None)
     if not flow:
-        return {"success": False, "error": "Invalid or expired state parameter"}
+        return {'success': False, 'error': 'Invalid or expired state parameter'}
 
-    if flow["user_id"] != user_id:
+    if flow['user_id'] != user_id:
         log.warning(
-            "OAuth callback user mismatch: expected %s, got %s",
-            flow["user_id"],
+            'OAuth callback user mismatch: expected %s, got %s',
+            flow['user_id'],
             user_id,
         )
-        return {"success": False, "error": "User mismatch"}
+        return {'success': False, 'error': 'User mismatch'}
 
     # Check TTL
-    if time.time() - flow["created_at"] > _FLOW_TTL_SECONDS:
-        return {"success": False, "error": "Authorization flow expired"}
+    if time.time() - flow['created_at'] > _FLOW_TTL_SECONDS:
+        return {'success': False, 'error': 'Authorization flow expired'}
 
     try:
         async with httpx.AsyncClient(timeout=30) as client:
             response = await client.post(
                 _TOKEN_URL,
                 data={
-                    "client_id": GOOGLE_DRIVE_CLIENT_ID.value,
-                    "client_secret": GOOGLE_CLIENT_SECRET.value,
-                    "code": code,
-                    "redirect_uri": flow["redirect_uri"],
-                    "grant_type": "authorization_code",
-                    "code_verifier": flow["code_verifier"],
+                    'client_id': GOOGLE_DRIVE_CLIENT_ID.value,
+                    'client_secret': GOOGLE_CLIENT_SECRET.value,
+                    'code': code,
+                    'redirect_uri': flow['redirect_uri'],
+                    'grant_type': 'authorization_code',
+                    'code_verifier': flow['code_verifier'],
                 },
             )
             response.raise_for_status()
             token_data = response.json()
     except httpx.HTTPStatusError as e:
         error_body = (
-            e.response.json() if e.response.headers.get("content-type", "").startswith("application/json") else {}
+            e.response.json() if e.response.headers.get('content-type', '').startswith('application/json') else {}
         )
         log.error(
-            "Token exchange failed: %s %s",
+            'Token exchange failed: %s %s',
             e.response.status_code,
-            error_body.get("error_description", ""),
+            error_body.get('error_description', ''),
         )
         return {
-            "success": False,
-            "error": error_body.get("error_description", "Token exchange failed"),
+            'success': False,
+            'error': error_body.get('error_description', 'Token exchange failed'),
         }
     except Exception as e:
-        log.error("Token exchange error: %s", e)
-        return {"success": False, "error": "Token exchange failed"}
+        log.error('Token exchange error: %s', e)
+        return {'success': False, 'error': 'Token exchange failed'}
 
     # Calculate expires_at from expires_in
-    if "expires_in" in token_data and "expires_at" not in token_data:
-        token_data["expires_at"] = int(time.time()) + int(token_data["expires_in"])
-    token_data["issued_at"] = int(time.time())
+    if 'expires_in' in token_data and 'expires_at' not in token_data:
+        token_data['expires_at'] = int(time.time()) + int(token_data['expires_in'])
+    token_data['issued_at'] = int(time.time())
 
     # Store in OAuthSessions with per-user provider key
-    knowledge_id = flow["knowledge_id"]
-    provider = "google_drive"
+    knowledge_id = flow['knowledge_id']
+    provider = 'google_drive'
 
     # Delete any existing session for this user
     existing = OAuthSessions.get_session_by_provider_and_user_id(provider, user_id)
@@ -185,15 +185,15 @@ async def exchange_code_for_tokens(
     )
 
     if not session:
-        return {"success": False, "error": "Failed to store token"}
+        return {'success': False, 'error': 'Failed to store token'}
 
-    log.info("Stored OAuth token for user %s, KB %s", user_id, knowledge_id)
-    return {"success": True, "knowledge_id": knowledge_id}
+    log.info('Stored OAuth token for user %s, KB %s', user_id, knowledge_id)
+    return {'success': True, 'knowledge_id': knowledge_id}
 
 
 def get_stored_token(user_id: str) -> Optional[Dict[str, Any]]:
     """Get the stored Google Drive token for a user, or None."""
-    provider = "google_drive"
+    provider = 'google_drive'
     session = OAuthSessions.get_session_by_provider_and_user_id(provider, user_id)
     if session:
         return session.token
@@ -202,7 +202,7 @@ def get_stored_token(user_id: str) -> Optional[Dict[str, Any]]:
 
 def delete_stored_token(user_id: str) -> bool:
     """Delete the stored Google Drive token for a user."""
-    provider = "google_drive"
+    provider = 'google_drive'
     session = OAuthSessions.get_session_by_provider_and_user_id(provider, user_id)
     if session:
         return OAuthSessions.delete_session_by_id(session.id)

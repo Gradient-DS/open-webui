@@ -52,12 +52,12 @@ def _sanitize_property_name(name: str) -> str:
     PDF metadata can contain hyphens (e.g. 'pdfsettings-inchmargins') which
     cause silent batch insert failures.
     """
-    sanitized = re.sub(r"[^a-zA-Z0-9_]", "_", name)
-    sanitized = sanitized.strip("_")
+    sanitized = re.sub(r'[^a-zA-Z0-9_]', '_', name)
+    sanitized = sanitized.strip('_')
     if not sanitized:
         return None
-    if not sanitized[0].isalpha() and sanitized[0] != "_":
-        sanitized = "_" + sanitized
+    if not sanitized[0].isalpha() and sanitized[0] != '_':
+        sanitized = '_' + sanitized
     return sanitized
 
 
@@ -136,22 +136,22 @@ class WeaviateClient(VectorDBBase):
             name=collection_name,
             vector_config=weaviate.classes.config.Configure.Vectors.self_provided(),
             properties=[
-                weaviate.classes.config.Property(name="text", data_type=weaviate.classes.config.DataType.TEXT),
+                weaviate.classes.config.Property(name='text', data_type=weaviate.classes.config.DataType.TEXT),
                 # Core file metadata - always present
-                weaviate.classes.config.Property(name="file_id", data_type=weaviate.classes.config.DataType.TEXT),
-                weaviate.classes.config.Property(name="name", data_type=weaviate.classes.config.DataType.TEXT),
-                weaviate.classes.config.Property(name="source", data_type=weaviate.classes.config.DataType.TEXT),
-                weaviate.classes.config.Property(name="created_by", data_type=weaviate.classes.config.DataType.TEXT),
+                weaviate.classes.config.Property(name='file_id', data_type=weaviate.classes.config.DataType.TEXT),
+                weaviate.classes.config.Property(name='name', data_type=weaviate.classes.config.DataType.TEXT),
+                weaviate.classes.config.Property(name='source', data_type=weaviate.classes.config.DataType.TEXT),
+                weaviate.classes.config.Property(name='created_by', data_type=weaviate.classes.config.DataType.TEXT),
                 # PDF metadata - dates come in non-RFC3339 format
-                weaviate.classes.config.Property(name="moddate", data_type=weaviate.classes.config.DataType.TEXT),
-                weaviate.classes.config.Property(name="creationdate", data_type=weaviate.classes.config.DataType.TEXT),
+                weaviate.classes.config.Property(name='moddate', data_type=weaviate.classes.config.DataType.TEXT),
+                weaviate.classes.config.Property(name='creationdate', data_type=weaviate.classes.config.DataType.TEXT),
                 # OneDrive metadata
                 weaviate.classes.config.Property(
-                    name="onedrive_item_id",
+                    name='onedrive_item_id',
                     data_type=weaviate.classes.config.DataType.TEXT,
                 ),
                 weaviate.classes.config.Property(
-                    name="onedrive_drive_id",
+                    name='onedrive_drive_id',
                     data_type=weaviate.classes.config.DataType.TEXT,
                 ),
             ],
@@ -163,8 +163,8 @@ class WeaviateClient(VectorDBBase):
             try:
                 self._create_collection(sane_collection_name)
             except UnexpectedStatusCodeError as e:
-                if "already exists" in str(e):
-                    log.debug("Collection %s created by another thread", sane_collection_name)
+                if 'already exists' in str(e):
+                    log.debug('Collection %s created by another thread', sane_collection_name)
                 else:
                     raise
 
@@ -178,12 +178,12 @@ class WeaviateClient(VectorDBBase):
             for item in items:
                 item_uuid = str(uuid.uuid4()) if not item['id'] else str(item['id'])
 
-                properties = {"text": item["text"]}
-                if item["metadata"]:
+                properties = {'text': item['text']}
+                if item['metadata']:
                     clean_metadata = _sanitize_metadata_keys(
-                        _make_json_serializable(process_metadata(item["metadata"]))
+                        _make_json_serializable(process_metadata(item['metadata']))
                     )
-                    clean_metadata.pop("text", None)
+                    clean_metadata.pop('text', None)
                     properties.update(clean_metadata)
 
                 batch.add_object(properties=properties, uuid=item_uuid, vector=item['vector'])
@@ -198,12 +198,12 @@ class WeaviateClient(VectorDBBase):
             for item in items:
                 item_uuid = str(item['id']) if item['id'] else None
 
-                properties = {"text": item["text"]}
-                if item["metadata"]:
+                properties = {'text': item['text']}
+                if item['metadata']:
                     clean_metadata = _sanitize_metadata_keys(
-                        _make_json_serializable(process_metadata(item["metadata"]))
+                        _make_json_serializable(process_metadata(item['metadata']))
                     )
-                    clean_metadata.pop("text", None)
+                    clean_metadata.pop('text', None)
                     properties.update(clean_metadata)
 
                 batch.add_object(properties=properties, uuid=item_uuid, vector=item['vector'])
@@ -243,7 +243,7 @@ class WeaviateClient(VectorDBBase):
 
                 for obj in response.objects:
                     properties = dict(obj.properties) if obj.properties else {}
-                    documents.append(properties.pop("text", ""))
+                    documents.append(properties.pop('text', ''))
                     metadatas.append(_make_json_serializable(properties))
 
                 # Weaviate has cosine distance, 2 (worst) -> 0 (best). Re-ordering to 0 -> 1
@@ -298,7 +298,7 @@ class WeaviateClient(VectorDBBase):
 
             for obj in response.objects:
                 properties = dict(obj.properties) if obj.properties else {}
-                documents.append(properties.pop("text", ""))
+                documents.append(properties.pop('text', ''))
                 metadatas.append(_make_json_serializable(properties))
 
             return GetResult(
@@ -323,7 +323,7 @@ class WeaviateClient(VectorDBBase):
             for item in collection.iterator():
                 ids.append(str(item.uuid))
                 properties = dict(item.properties) if item.properties else {}
-                documents.append(properties.pop("text", ""))
+                documents.append(properties.pop('text', ''))
                 metadatas.append(_make_json_serializable(properties))
 
             if not ids:

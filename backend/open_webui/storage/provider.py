@@ -63,7 +63,7 @@ class StorageProvider(ABC):
                 self.delete_file(path)
                 deleted += 1
             except Exception as e:
-                log.warning(f"Failed to delete {path}: {e}")
+                log.warning(f'Failed to delete {path}: {e}')
         return deleted
 
 
@@ -198,7 +198,7 @@ class S3StorageProvider(StorageProvider):
         s3_keys = []
         for path in file_paths:
             try:
-                s3_keys.append({"Key": self._extract_s3_key(path)})
+                s3_keys.append({'Key': self._extract_s3_key(path)})
             except Exception:
                 continue
 
@@ -207,13 +207,13 @@ class S3StorageProvider(StorageProvider):
             try:
                 resp = self.s3_client.delete_objects(
                     Bucket=self.bucket_name,
-                    Delete={"Objects": batch, "Quiet": True},
+                    Delete={'Objects': batch, 'Quiet': True},
                 )
-                deleted += len(batch) - len(resp.get("Errors", []))
-                for err in resp.get("Errors", []):
-                    log.warning(f"S3 batch delete error for {err['Key']}: {err['Message']}")
+                deleted += len(batch) - len(resp.get('Errors', []))
+                for err in resp.get('Errors', []):
+                    log.warning(f'S3 batch delete error for {err["Key"]}: {err["Message"]}')
             except ClientError as e:
-                log.warning(f"S3 batch delete failed: {e}")
+                log.warning(f'S3 batch delete failed: {e}')
 
         # Always clean up local copies
         for path in file_paths:
@@ -303,7 +303,7 @@ class GCSStorageProvider(StorageProvider):
         blob_names = []
         for path in file_paths:
             try:
-                blob_names.append(path.removeprefix("gs://").split("/")[1])
+                blob_names.append(path.removeprefix('gs://').split('/')[1])
             except Exception:
                 continue
 
@@ -313,7 +313,7 @@ class GCSStorageProvider(StorageProvider):
                 self.bucket.delete_blobs(batch, on_error=lambda blob: None)
                 deleted += len(batch)
             except Exception as e:
-                log.warning(f"GCS batch delete failed: {e}")
+                log.warning(f'GCS batch delete failed: {e}')
 
         # Always clean up local copies
         for path in file_paths:
@@ -390,7 +390,7 @@ class AzureStorageProvider(StorageProvider):
     def delete_files(self, file_paths: list[str]) -> int:
         """Batch delete files from Azure Blob Storage (up to 256 per batch)."""
         deleted = 0
-        blob_names = [path.split("/")[-1] for path in file_paths]
+        blob_names = [path.split('/')[-1] for path in file_paths]
 
         for i in range(0, len(blob_names), 256):
             batch = blob_names[i : i + 256]
@@ -398,7 +398,7 @@ class AzureStorageProvider(StorageProvider):
                 self.container_client.delete_blobs(*batch)
                 deleted += len(batch)
             except Exception as e:
-                log.warning(f"Azure batch delete failed: {e}")
+                log.warning(f'Azure batch delete failed: {e}')
 
         # Always clean up local copies
         for path in file_paths:

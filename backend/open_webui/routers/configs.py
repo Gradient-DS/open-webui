@@ -163,11 +163,11 @@ class ToolServersConfigForm(BaseModel):
     TOOL_SERVER_CONNECTIONS: list[ToolServerConnection]
 
 
-@router.get("/tool_servers", response_model=ToolServersConfigForm)
+@router.get('/tool_servers', response_model=ToolServersConfigForm)
 async def get_tool_servers_config(
     request: Request,
     user=Depends(get_admin_user),
-    _=Depends(require_feature("tool_servers")),
+    _=Depends(require_feature('tool_servers')),
 ):
     return {
         'TOOL_SERVER_CONNECTIONS': request.app.state.config.TOOL_SERVER_CONNECTIONS,
@@ -179,7 +179,7 @@ async def set_tool_servers_config(
     request: Request,
     form_data: ToolServersConfigForm,
     user=Depends(get_admin_user),
-    _=Depends(require_feature("tool_servers")),
+    _=Depends(require_feature('tool_servers')),
 ):
     for connection in request.app.state.config.TOOL_SERVER_CONNECTIONS:
         server_type = connection.get('type', 'openapi')
@@ -252,11 +252,11 @@ class TerminalServersConfigForm(BaseModel):
     TERMINAL_SERVER_CONNECTIONS: list[TerminalServerConnection]
 
 
-@router.get("/terminal_servers")
+@router.get('/terminal_servers')
 async def get_terminal_servers_config(
     request: Request,
     user=Depends(get_admin_user),
-    _=Depends(require_feature("terminal_servers")),
+    _=Depends(require_feature('terminal_servers')),
 ):
     return {
         'TERMINAL_SERVER_CONNECTIONS': request.app.state.config.TERMINAL_SERVER_CONNECTIONS,
@@ -268,7 +268,7 @@ async def set_terminal_servers_config(
     request: Request,
     form_data: TerminalServersConfigForm,
     user=Depends(get_admin_user),
-    _=Depends(require_feature("terminal_servers")),
+    _=Depends(require_feature('terminal_servers')),
 ):
     request.app.state.config.TERMINAL_SERVER_CONNECTIONS = [
         connection.model_dump() for connection in form_data.TERMINAL_SERVER_CONNECTIONS
@@ -281,12 +281,12 @@ async def set_terminal_servers_config(
     }
 
 
-@router.post("/tool_servers/verify")
+@router.post('/tool_servers/verify')
 async def verify_tool_servers_config(
     request: Request,
     form_data: ToolServerConnection,
     user=Depends(get_admin_user),
-    _=Depends(require_feature("tool_servers")),
+    _=Depends(require_feature('tool_servers')),
 ):
     """
     Verify the connection to a terminal server by detecting its type.
@@ -681,22 +681,22 @@ class SetGreetingTemplateForm(BaseModel):
     template: str
 
 
-@router.post("/greeting_template")
+@router.post('/greeting_template')
 async def set_greeting_template(
     request: Request,
     form_data: SetGreetingTemplateForm,
     user=Depends(get_admin_user),
 ):
     request.app.state.config.GREETING_TEMPLATE = form_data.template
-    return {"template": request.app.state.config.GREETING_TEMPLATE}
+    return {'template': request.app.state.config.GREETING_TEMPLATE}
 
 
-@router.get("/greeting_template")
+@router.get('/greeting_template')
 async def get_greeting_template(
     request: Request,
     user=Depends(get_verified_user),
 ):
-    return {"template": request.app.state.config.GREETING_TEMPLATE}
+    return {'template': request.app.state.config.GREETING_TEMPLATE}
 
 
 ############################
@@ -705,19 +705,19 @@ async def get_greeting_template(
 
 
 class InviteContentForm(BaseModel):
-    subject: str = ""
-    heading: str = ""
+    subject: str = ''
+    heading: str = ''
 
 
-@router.get("/invite_content")
+@router.get('/invite_content')
 async def get_invite_content(request: Request, user=Depends(get_admin_user)):
     return {
-        "subject": request.app.state.config.EMAIL_INVITE_SUBJECT,
-        "heading": request.app.state.config.EMAIL_INVITE_HEADING,
+        'subject': request.app.state.config.EMAIL_INVITE_SUBJECT,
+        'heading': request.app.state.config.EMAIL_INVITE_HEADING,
     }
 
 
-@router.post("/invite_content")
+@router.post('/invite_content')
 async def set_invite_content(
     request: Request,
     form_data: InviteContentForm,
@@ -726,8 +726,8 @@ async def set_invite_content(
     request.app.state.config.EMAIL_INVITE_SUBJECT = form_data.subject
     request.app.state.config.EMAIL_INVITE_HEADING = form_data.heading
     return {
-        "subject": request.app.state.config.EMAIL_INVITE_SUBJECT,
-        "heading": request.app.state.config.EMAIL_INVITE_HEADING,
+        'subject': request.app.state.config.EMAIL_INVITE_SUBJECT,
+        'heading': request.app.state.config.EMAIL_INVITE_HEADING,
     }
 
 
@@ -743,7 +743,7 @@ class EmailConfigForm(BaseModel):
     INVITE_EXPIRY_HOURS: int
 
 
-@router.get("/email", response_model=EmailConfigForm)
+@router.get('/email', response_model=EmailConfigForm)
 async def get_email_config(request: Request, user=Depends(get_admin_user)):
     return EmailConfigForm(
         ENABLE_EMAIL_INVITES=request.app.state.config.ENABLE_EMAIL_INVITES,
@@ -753,7 +753,7 @@ async def get_email_config(request: Request, user=Depends(get_admin_user)):
     )
 
 
-@router.post("/email", response_model=EmailConfigForm)
+@router.post('/email', response_model=EmailConfigForm)
 async def set_email_config(
     request: Request,
     form_data: EmailConfigForm,
@@ -766,11 +766,11 @@ async def set_email_config(
     return form_data
 
 
-@router.post("/email/test")
+@router.post('/email/test')
 async def test_email_config(request: Request, user=Depends(get_admin_user)):
     """Send a test email to the admin's own address."""
     if not request.app.state.config.ENABLE_EMAIL_INVITES:
-        raise HTTPException(400, detail="Email invites are not enabled")
+        raise HTTPException(400, detail='Email invites are not enabled')
 
     try:
         from open_webui.services.email.graph_mail_client import send_mail
@@ -778,12 +778,12 @@ async def test_email_config(request: Request, user=Depends(get_admin_user)):
         await send_mail(
             app=request.app,
             to_address=user.email,
-            subject=f"Test email from {request.app.state.config.EMAIL_FROM_NAME}",
-            html_body="<p>This is a test email. Your email configuration is working correctly.</p>",
+            subject=f'Test email from {request.app.state.config.EMAIL_FROM_NAME}',
+            html_body='<p>This is a test email. Your email configuration is working correctly.</p>',
         )
-        return {"status": "ok", "message": f"Test email sent to {user.email}"}
+        return {'status': 'ok', 'message': f'Test email sent to {user.email}'}
     except Exception as e:
-        raise HTTPException(500, detail=f"Failed to send test email: {str(e)}")
+        raise HTTPException(500, detail=f'Failed to send test email: {str(e)}')
 
 
 ############################
@@ -801,8 +801,8 @@ def _bind_service_account(user_id: str, provider_slug: str):
     if not user:
         return
     info = dict(user.info) if user.info else {}
-    info["integration_provider"] = provider_slug
-    Users.update_user_by_id(user_id, {"info": info})
+    info['integration_provider'] = provider_slug
+    Users.update_user_by_id(user_id, {'info': info})
 
 
 def _unbind_service_account(user_id: str):
@@ -811,18 +811,18 @@ def _unbind_service_account(user_id: str):
     if not user:
         return
     info = dict(user.info) if user.info else {}
-    info.pop("integration_provider", None)
-    Users.update_user_by_id(user_id, {"info": info})
+    info.pop('integration_provider', None)
+    Users.update_user_by_id(user_id, {'info': info})
 
 
-@router.get("/integrations")
+@router.get('/integrations')
 async def get_integrations_config(request: Request, user=Depends(get_admin_user)):
     return {
-        "providers": request.app.state.config.INTEGRATION_PROVIDERS,
+        'providers': request.app.state.config.INTEGRATION_PROVIDERS,
     }
 
 
-@router.post("/integrations")
+@router.post('/integrations')
 async def set_integrations_config(
     request: Request,
     form_data: IntegrationsConfigForm,
@@ -832,11 +832,11 @@ async def set_integrations_config(
 
     # Unbind service accounts that were removed or changed
     for slug, old_provider in old_providers.items():
-        old_sa = old_provider.get("service_account_id")
+        old_sa = old_provider.get('service_account_id')
         if not old_sa:
             continue
         new_provider = form_data.providers.get(slug)
-        new_sa = new_provider.get("service_account_id") if new_provider else None
+        new_sa = new_provider.get('service_account_id') if new_provider else None
         if old_sa != new_sa:
             _unbind_service_account(old_sa)
 
@@ -845,11 +845,11 @@ async def set_integrations_config(
 
     # Bind new service accounts
     for slug, provider in form_data.providers.items():
-        sa_id = provider.get("service_account_id")
+        sa_id = provider.get('service_account_id')
         if sa_id:
             _bind_service_account(sa_id, slug)
 
-    return {"providers": request.app.state.config.INTEGRATION_PROVIDERS}
+    return {'providers': request.app.state.config.INTEGRATION_PROVIDERS}
 
 
 ####################################
@@ -861,14 +861,14 @@ class AgentProxyConfigForm(BaseModel):
     ENABLE_AGENT_PROXY: bool
 
 
-@router.get("/agent_proxy")
+@router.get('/agent_proxy')
 async def get_agent_proxy_config(request: Request, user=Depends(get_admin_user)):
     return {
-        "ENABLE_AGENT_PROXY": request.app.state.config.ENABLE_AGENT_PROXY,
+        'ENABLE_AGENT_PROXY': request.app.state.config.ENABLE_AGENT_PROXY,
     }
 
 
-@router.post("/agent_proxy")
+@router.post('/agent_proxy')
 async def set_agent_proxy_config(
     request: Request,
     form_data: AgentProxyConfigForm,
@@ -876,5 +876,5 @@ async def set_agent_proxy_config(
 ):
     request.app.state.config.ENABLE_AGENT_PROXY = form_data.ENABLE_AGENT_PROXY
     return {
-        "ENABLE_AGENT_PROXY": request.app.state.config.ENABLE_AGENT_PROXY,
+        'ENABLE_AGENT_PROXY': request.app.state.config.ENABLE_AGENT_PROXY,
     }

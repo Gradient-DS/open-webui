@@ -23,14 +23,14 @@ log = logging.getLogger(__name__)
 # --- Pydantic Models ---
 
 
-VALID_DATA_TYPES = {"parsed_text", "chunked_text", "full_documents"}
+VALID_DATA_TYPES = {'parsed_text', 'chunked_text', 'full_documents'}
 
 
 class IngestCollection(BaseModel):
     source_id: str
     name: str
-    description: str = ""
-    data_type: str = "parsed_text"
+    description: str = ''
+    data_type: str = 'parsed_text'
     language: Optional[str] = None
     tags: list[str] = []
     metadata: dict = {}
@@ -41,7 +41,7 @@ class IngestCollection(BaseModel):
 class IngestDocumentBase(BaseModel):
     source_id: str
     filename: str
-    content_type: str = "text/plain"
+    content_type: str = 'text/plain'
     title: Optional[str] = None
     source_url: Optional[str] = None
     language: Optional[str] = None
@@ -73,11 +73,11 @@ class IngestForm(BaseModel):
 
 def get_integration_provider(request: Request, user) -> tuple[str, dict]:
     """Resolve the integration provider from the authenticated service account."""
-    provider_slug = (user.info or {}).get("integration_provider")
+    provider_slug = (user.info or {}).get('integration_provider')
     if not provider_slug:
         raise HTTPException(
             status_code=403,
-            detail="This account is not configured as an integration service account",
+            detail='This account is not configured as an integration service account',
         )
     providers = request.app.state.config.INTEGRATION_PROVIDERS
     if not providers:
@@ -96,11 +96,11 @@ def get_integration_provider(request: Request, user) -> tuple[str, dict]:
 
 def _validate_custom_metadata(doc: IngestDocumentBase, provider_config: dict):
     """Validate that required custom metadata fields are present in doc.metadata."""
-    custom_fields = provider_config.get("custom_metadata_fields", [])
+    custom_fields = provider_config.get('custom_metadata_fields', [])
     missing = []
     for field in custom_fields:
-        if field.get("required") and field.get("key") not in doc.metadata:
-            missing.append(field["key"])
+        if field.get('required') and field.get('key') not in doc.metadata:
+            missing.append(field['key'])
     if missing:
         raise HTTPException(
             400,
@@ -113,7 +113,7 @@ def _find_kb_by_source_id(provider: str, source_id: str):
     kbs = Knowledges.get_knowledge_bases_by_type(provider)
     for kb in kbs:
         meta = kb.meta or {}
-        if meta.get("integration", {}).get("source_id") == source_id:
+        if meta.get('integration', {}).get('source_id') == source_id:
             return kb
     return None
 
@@ -133,13 +133,13 @@ def _create_kb_for_provider(
     )
     knowledge = Knowledges.insert_new_knowledge(user_id, form)
     meta = {
-        "integration": {
-            "provider": provider,
-            "source_id": collection.source_id,
-            "data_type": collection.data_type,
-            "language": collection.language,
-            "tags": collection.tags,
-            "provider_metadata": collection.metadata,
+        'integration': {
+            'provider': provider,
+            'source_id': collection.source_id,
+            'data_type': collection.data_type,
+            'language': collection.language,
+            'tags': collection.tags,
+            'provider_metadata': collection.metadata,
         }
     }
     Knowledges.update_knowledge_meta_by_id(knowledge.id, meta)
@@ -157,22 +157,22 @@ def _create_or_update_file_record(
 ) -> str:
     """Create or update a File record. Returns 'created' or 'updated'."""
     meta = {
-        "name": doc.title or doc.filename,
-        "content_type": doc.content_type,
-        "source": provider,
-        "source_id": doc.source_id,
-        "source_url": doc.source_url,
-        "language": doc.language,
-        "author": doc.author,
-        "tags": doc.tags,
-        "provider_metadata": doc.metadata,
+        'name': doc.title or doc.filename,
+        'content_type': doc.content_type,
+        'source': provider,
+        'source_id': doc.source_id,
+        'source_url': doc.source_url,
+        'language': doc.language,
+        'author': doc.author,
+        'tags': doc.tags,
+        'provider_metadata': doc.metadata,
     }
 
     existing_file = Files.get_file_by_id(file_id)
     if existing_file:
         Files.update_file_metadata_by_id(file_id, meta)
-        Files.update_file_data_by_id(file_id, {"content": content_text})
-        return "updated"
+        Files.update_file_data_by_id(file_id, {'content': content_text})
+        return 'updated'
     else:
         text_hash = hashlib.sha256(content_text.encode()).hexdigest()
         file_form = FileForm(
@@ -180,12 +180,12 @@ def _create_or_update_file_record(
             filename=doc.filename,
             hash=text_hash,
             path=file_path,
-            data={"content": content_text},
+            data={'content': content_text},
             meta=meta,
         )
         Files.insert_new_file(user_id, file_form)
         Knowledges.add_file_to_knowledge_by_id(knowledge_id, file_id, user_id)
-        return "created"
+        return 'created'
 
 
 def _delete_old_vectors(knowledge_id: str, file_id: str):
@@ -193,63 +193,63 @@ def _delete_old_vectors(knowledge_id: str, file_id: str):
     try:
         VECTOR_DB_CLIENT.delete(
             collection_name=knowledge_id,
-            filter={"file_id": file_id},
+            filter={'file_id': file_id},
         )
     except Exception:
-        log.warning(f"Failed to delete old vectors for {file_id}, proceeding with insert")
+        log.warning(f'Failed to delete old vectors for {file_id}, proceeding with insert')
 
 
 def _get_loader_kwargs(request: Request) -> dict:
     """Build kwargs dict for Loader() from app config."""
     config = request.app.state.config
     return {
-        "DATALAB_MARKER_API_KEY": config.DATALAB_MARKER_API_KEY,
-        "DATALAB_MARKER_API_BASE_URL": config.DATALAB_MARKER_API_BASE_URL,
-        "DATALAB_MARKER_ADDITIONAL_CONFIG": config.DATALAB_MARKER_ADDITIONAL_CONFIG,
-        "DATALAB_MARKER_SKIP_CACHE": config.DATALAB_MARKER_SKIP_CACHE,
-        "DATALAB_MARKER_FORCE_OCR": config.DATALAB_MARKER_FORCE_OCR,
-        "DATALAB_MARKER_PAGINATE": config.DATALAB_MARKER_PAGINATE,
-        "DATALAB_MARKER_STRIP_EXISTING_OCR": config.DATALAB_MARKER_STRIP_EXISTING_OCR,
-        "DATALAB_MARKER_DISABLE_IMAGE_EXTRACTION": config.DATALAB_MARKER_DISABLE_IMAGE_EXTRACTION,
-        "DATALAB_MARKER_FORMAT_LINES": config.DATALAB_MARKER_FORMAT_LINES,
-        "DATALAB_MARKER_USE_LLM": config.DATALAB_MARKER_USE_LLM,
-        "DATALAB_MARKER_OUTPUT_FORMAT": config.DATALAB_MARKER_OUTPUT_FORMAT,
-        "EXTERNAL_DOCUMENT_LOADER_URL": config.EXTERNAL_DOCUMENT_LOADER_URL,
-        "EXTERNAL_DOCUMENT_LOADER_API_KEY": config.EXTERNAL_DOCUMENT_LOADER_API_KEY,
-        "TIKA_SERVER_URL": config.TIKA_SERVER_URL,
-        "DOCLING_SERVER_URL": config.DOCLING_SERVER_URL,
-        "DOCLING_API_KEY": config.DOCLING_API_KEY,
-        "DOCLING_PARAMS": config.DOCLING_PARAMS,
-        "PDF_EXTRACT_IMAGES": config.PDF_EXTRACT_IMAGES,
-        "DOCUMENT_INTELLIGENCE_ENDPOINT": config.DOCUMENT_INTELLIGENCE_ENDPOINT,
-        "DOCUMENT_INTELLIGENCE_KEY": config.DOCUMENT_INTELLIGENCE_KEY,
-        "DOCUMENT_INTELLIGENCE_MODEL": config.DOCUMENT_INTELLIGENCE_MODEL,
-        "MISTRAL_OCR_API_BASE_URL": config.MISTRAL_OCR_API_BASE_URL,
-        "MISTRAL_OCR_API_KEY": config.MISTRAL_OCR_API_KEY,
-        "MINERU_API_MODE": config.MINERU_API_MODE,
-        "MINERU_API_URL": config.MINERU_API_URL,
-        "MINERU_API_KEY": config.MINERU_API_KEY,
-        "MINERU_API_TIMEOUT": config.MINERU_API_TIMEOUT,
-        "MINERU_PARAMS": config.MINERU_PARAMS,
+        'DATALAB_MARKER_API_KEY': config.DATALAB_MARKER_API_KEY,
+        'DATALAB_MARKER_API_BASE_URL': config.DATALAB_MARKER_API_BASE_URL,
+        'DATALAB_MARKER_ADDITIONAL_CONFIG': config.DATALAB_MARKER_ADDITIONAL_CONFIG,
+        'DATALAB_MARKER_SKIP_CACHE': config.DATALAB_MARKER_SKIP_CACHE,
+        'DATALAB_MARKER_FORCE_OCR': config.DATALAB_MARKER_FORCE_OCR,
+        'DATALAB_MARKER_PAGINATE': config.DATALAB_MARKER_PAGINATE,
+        'DATALAB_MARKER_STRIP_EXISTING_OCR': config.DATALAB_MARKER_STRIP_EXISTING_OCR,
+        'DATALAB_MARKER_DISABLE_IMAGE_EXTRACTION': config.DATALAB_MARKER_DISABLE_IMAGE_EXTRACTION,
+        'DATALAB_MARKER_FORMAT_LINES': config.DATALAB_MARKER_FORMAT_LINES,
+        'DATALAB_MARKER_USE_LLM': config.DATALAB_MARKER_USE_LLM,
+        'DATALAB_MARKER_OUTPUT_FORMAT': config.DATALAB_MARKER_OUTPUT_FORMAT,
+        'EXTERNAL_DOCUMENT_LOADER_URL': config.EXTERNAL_DOCUMENT_LOADER_URL,
+        'EXTERNAL_DOCUMENT_LOADER_API_KEY': config.EXTERNAL_DOCUMENT_LOADER_API_KEY,
+        'TIKA_SERVER_URL': config.TIKA_SERVER_URL,
+        'DOCLING_SERVER_URL': config.DOCLING_SERVER_URL,
+        'DOCLING_API_KEY': config.DOCLING_API_KEY,
+        'DOCLING_PARAMS': config.DOCLING_PARAMS,
+        'PDF_EXTRACT_IMAGES': config.PDF_EXTRACT_IMAGES,
+        'DOCUMENT_INTELLIGENCE_ENDPOINT': config.DOCUMENT_INTELLIGENCE_ENDPOINT,
+        'DOCUMENT_INTELLIGENCE_KEY': config.DOCUMENT_INTELLIGENCE_KEY,
+        'DOCUMENT_INTELLIGENCE_MODEL': config.DOCUMENT_INTELLIGENCE_MODEL,
+        'MISTRAL_OCR_API_BASE_URL': config.MISTRAL_OCR_API_BASE_URL,
+        'MISTRAL_OCR_API_KEY': config.MISTRAL_OCR_API_KEY,
+        'MINERU_API_MODE': config.MINERU_API_MODE,
+        'MINERU_API_URL': config.MINERU_API_URL,
+        'MINERU_API_KEY': config.MINERU_API_KEY,
+        'MINERU_API_TIMEOUT': config.MINERU_API_TIMEOUT,
+        'MINERU_PARAMS': config.MINERU_PARAMS,
     }
 
 
 def _build_base_metadata(doc: IngestDocumentBase, file_id: str, provider: str, user_id: str) -> dict:
     """Build common metadata dict for LangChain Documents."""
     base = {
-        "name": doc.title or doc.filename,
-        "source": doc.source_url or doc.filename,
-        "file_id": file_id,
-        "created_by": user_id,
-        "author": doc.author,
-        "language": doc.language,
-        "source_provider": provider,
-        "content_type": doc.content_type,
-        "tags": doc.tags,
+        'name': doc.title or doc.filename,
+        'source': doc.source_url or doc.filename,
+        'file_id': file_id,
+        'created_by': user_id,
+        'author': doc.author,
+        'language': doc.language,
+        'source_provider': provider,
+        'content_type': doc.content_type,
+        'tags': doc.tags,
     }
     # Flatten doc.metadata into prefixed keys to avoid collisions
     for key, value in doc.metadata.items():
-        base[f"meta_{key}"] = value
+        base[f'meta_{key}'] = value
     return base
 
 
@@ -264,19 +264,19 @@ def _process_parsed_text_document(
     user_id: str,
 ) -> dict:
     """Process a parsed_text document: create file record, chunk, embed, store."""
-    file_id = f"{provider}-{doc.source_id}"
+    file_id = f'{provider}-{doc.source_id}'
 
     status = _create_or_update_file_record(
         file_id=file_id,
         doc=doc,
         content_text=doc.text,
-        file_path="",
+        file_path='',
         provider=provider,
         knowledge_id=knowledge_id,
         user_id=user_id,
     )
 
-    if status == "updated":
+    if status == 'updated':
         _delete_old_vectors(knowledge_id, file_id)
 
     text_hash = hashlib.sha256(doc.text.encode()).hexdigest()
@@ -291,25 +291,25 @@ def _process_parsed_text_document(
             docs=[lc_doc],
             collection_name=knowledge_id,
             metadata={
-                "file_id": file_id,
-                "name": doc.title or doc.filename,
-                "hash": text_hash,
+                'file_id': file_id,
+                'name': doc.title or doc.filename,
+                'hash': text_hash,
             },
             add=True,
             split=True,
         )
-        Files.update_file_data_by_id(file_id, {"status": "completed"})
+        Files.update_file_data_by_id(file_id, {'status': 'completed'})
     except Exception as e:
-        log.exception(f"Failed to store document {doc.source_id} in vector DB")
-        Files.update_file_data_by_id(file_id, {"status": "error", "error": str(e)})
+        log.exception(f'Failed to store document {doc.source_id} in vector DB')
+        Files.update_file_data_by_id(file_id, {'status': 'error', 'error': str(e)})
         return {
-            "source_id": doc.source_id,
-            "file_id": file_id,
-            "status": "error",
-            "error": str(e),
+            'source_id': doc.source_id,
+            'file_id': file_id,
+            'status': 'error',
+            'error': str(e),
         }
 
-    return {"source_id": doc.source_id, "file_id": file_id, "status": status}
+    return {'source_id': doc.source_id, 'file_id': file_id, 'status': status}
 
 
 def _process_chunked_text_document(
@@ -320,20 +320,20 @@ def _process_chunked_text_document(
     user_id: str,
 ) -> dict:
     """Process a chunked_text document: create file record, embed pre-chunked text, store."""
-    file_id = f"{provider}-{doc.source_id}"
-    joined_text = "\n\n".join(doc.chunks)
+    file_id = f'{provider}-{doc.source_id}'
+    joined_text = '\n\n'.join(doc.chunks)
 
     status = _create_or_update_file_record(
         file_id=file_id,
         doc=doc,
         content_text=joined_text,
-        file_path="",
+        file_path='',
         provider=provider,
         knowledge_id=knowledge_id,
         user_id=user_id,
     )
 
-    if status == "updated":
+    if status == 'updated':
         _delete_old_vectors(knowledge_id, file_id)
 
     text_hash = hashlib.sha256(joined_text.encode()).hexdigest()
@@ -347,25 +347,25 @@ def _process_chunked_text_document(
             docs=lc_docs,
             collection_name=knowledge_id,
             metadata={
-                "file_id": file_id,
-                "name": doc.title or doc.filename,
-                "hash": text_hash,
+                'file_id': file_id,
+                'name': doc.title or doc.filename,
+                'hash': text_hash,
             },
             add=True,
             split=False,
         )
-        Files.update_file_data_by_id(file_id, {"status": "completed"})
+        Files.update_file_data_by_id(file_id, {'status': 'completed'})
     except Exception as e:
-        log.exception(f"Failed to store chunked document {doc.source_id} in vector DB")
-        Files.update_file_data_by_id(file_id, {"status": "error", "error": str(e)})
+        log.exception(f'Failed to store chunked document {doc.source_id} in vector DB')
+        Files.update_file_data_by_id(file_id, {'status': 'error', 'error': str(e)})
         return {
-            "source_id": doc.source_id,
-            "file_id": file_id,
-            "status": "error",
-            "error": str(e),
+            'source_id': doc.source_id,
+            'file_id': file_id,
+            'status': 'error',
+            'error': str(e),
         }
 
-    return {"source_id": doc.source_id, "file_id": file_id, "status": status}
+    return {'source_id': doc.source_id, 'file_id': file_id, 'status': status}
 
 
 def _process_full_document(
@@ -377,22 +377,22 @@ def _process_full_document(
     user_id: str,
 ) -> dict:
     """Process a full_document: upload binary, extract text, chunk, embed, store."""
-    file_id = f"{provider}-{doc.source_id}"
+    file_id = f'{provider}-{doc.source_id}'
 
     # Upload binary file to storage
     try:
         contents, file_path = Storage.upload_file(
             upload_file.file,
-            f"{file_id}_{doc.filename}",
-            {"provider": provider, "source_id": doc.source_id},
+            f'{file_id}_{doc.filename}',
+            {'provider': provider, 'source_id': doc.source_id},
         )
     except Exception as e:
-        log.exception(f"Failed to upload file {doc.filename}")
+        log.exception(f'Failed to upload file {doc.filename}')
         return {
-            "source_id": doc.source_id,
-            "file_id": file_id,
-            "status": "error",
-            "error": str(e),
+            'source_id': doc.source_id,
+            'file_id': file_id,
+            'status': 'error',
+            'error': str(e),
         }
 
     # Extract text using Loader
@@ -404,14 +404,14 @@ def _process_full_document(
         )
         local_path = Storage.get_file(file_path)
         extracted_docs = loader.load(doc.filename, doc.content_type, local_path)
-        extracted_text = "\n\n".join(d.page_content for d in extracted_docs)
+        extracted_text = '\n\n'.join(d.page_content for d in extracted_docs)
     except Exception as e:
-        log.exception(f"Failed to extract text from {doc.filename}")
+        log.exception(f'Failed to extract text from {doc.filename}')
         return {
-            "source_id": doc.source_id,
-            "file_id": file_id,
-            "status": "error",
-            "error": str(e),
+            'source_id': doc.source_id,
+            'file_id': file_id,
+            'status': 'error',
+            'error': str(e),
         }
 
     status = _create_or_update_file_record(
@@ -424,7 +424,7 @@ def _process_full_document(
         user_id=user_id,
     )
 
-    if status == "updated":
+    if status == 'updated':
         _delete_old_vectors(knowledge_id, file_id)
 
     text_hash = hashlib.sha256(extracted_text.encode()).hexdigest()
@@ -440,31 +440,31 @@ def _process_full_document(
             docs=extracted_docs,
             collection_name=knowledge_id,
             metadata={
-                "file_id": file_id,
-                "name": doc.title or doc.filename,
-                "hash": text_hash,
+                'file_id': file_id,
+                'name': doc.title or doc.filename,
+                'hash': text_hash,
             },
             add=True,
             split=True,
         )
-        Files.update_file_data_by_id(file_id, {"status": "completed"})
+        Files.update_file_data_by_id(file_id, {'status': 'completed'})
     except Exception as e:
-        log.exception(f"Failed to store full document {doc.source_id} in vector DB")
-        Files.update_file_data_by_id(file_id, {"status": "error", "error": str(e)})
+        log.exception(f'Failed to store full document {doc.source_id} in vector DB')
+        Files.update_file_data_by_id(file_id, {'status': 'error', 'error': str(e)})
         return {
-            "source_id": doc.source_id,
-            "file_id": file_id,
-            "status": "error",
-            "error": str(e),
+            'source_id': doc.source_id,
+            'file_id': file_id,
+            'status': 'error',
+            'error': str(e),
         }
 
-    return {"source_id": doc.source_id, "file_id": file_id, "status": status}
+    return {'source_id': doc.source_id, 'file_id': file_id, 'status': status}
 
 
 # --- Endpoints ---
 
 
-@router.post("/ingest")
+@router.post('/ingest')
 def ingest_documents(
     request: Request,
     data: str = Form(...),
@@ -480,9 +480,9 @@ def ingest_documents(
     provider, provider_config = get_integration_provider(request, user)
 
     # Validate batch size
-    max_per_request = provider_config.get("max_documents_per_request", 50)
+    max_per_request = provider_config.get('max_documents_per_request', 50)
     if len(form_data.documents) > max_per_request:
-        raise HTTPException(400, f"Too many documents. Maximum {max_per_request} per request.")
+        raise HTTPException(400, f'Too many documents. Maximum {max_per_request} per request.')
 
     # Validate data_type
     collection = (
@@ -501,7 +501,7 @@ def ingest_documents(
         knowledge = _create_kb_for_provider(provider, provider_config, collection, user.id)
     else:
         # Validate data_type consistency with existing KB
-        existing_data_type = (knowledge.meta or {}).get("integration", {}).get("data_type")
+        existing_data_type = (knowledge.meta or {}).get('integration', {}).get('data_type')
         if existing_data_type and existing_data_type != data_type:
             raise HTTPException(
                 400,
@@ -519,19 +519,19 @@ def ingest_documents(
         )
 
     # Check file limit
-    max_files = provider_config.get("max_files_per_kb", 250)
+    max_files = provider_config.get('max_files_per_kb', 250)
     current_files = Knowledges.get_files_by_id(knowledge.id)
     existing_ids = {f.id for f in current_files} if current_files else set()
-    new_doc_ids = {f"{provider}-{doc.get('source_id', '')}" for doc in form_data.documents}
+    new_doc_ids = {f'{provider}-{doc.get("source_id", "")}' for doc in form_data.documents}
     net_new = len(new_doc_ids - existing_ids)
     if len(existing_ids) + net_new > max_files:
-        raise HTTPException(400, f"Would exceed {max_files} file limit for this knowledge base.")
+        raise HTTPException(400, f'Would exceed {max_files} file limit for this knowledge base.')
 
     # Validate and dispatch based on data_type
     results = []
     created = updated = errors = 0
 
-    if data_type == "parsed_text":
+    if data_type == 'parsed_text':
         for raw_doc in form_data.documents:
             try:
                 doc = ParsedTextDocument(**raw_doc)
@@ -550,7 +550,7 @@ def ingest_documents(
             )
             results.append(result)
 
-    elif data_type == "chunked_text":
+    elif data_type == 'chunked_text':
         for raw_doc in form_data.documents:
             try:
                 doc = ChunkedTextDocument(**raw_doc)
@@ -569,9 +569,9 @@ def ingest_documents(
             )
             results.append(result)
 
-    elif data_type == "full_documents":
+    elif data_type == 'full_documents':
         if not files:
-            raise HTTPException(400, "full_documents data_type requires uploaded files")
+            raise HTTPException(400, 'full_documents data_type requires uploaded files')
 
         # Build filename -> UploadFile lookup
         file_lookup = {f.filename: f for f in files}
@@ -591,7 +591,7 @@ def ingest_documents(
                 raise HTTPException(
                     400,
                     f"No uploaded file matches document filename '{doc.filename}'. "
-                    f"Available files: {list(file_lookup.keys())}",
+                    f'Available files: {list(file_lookup.keys())}',
                 )
 
             result = _process_full_document(
@@ -605,36 +605,36 @@ def ingest_documents(
             results.append(result)
 
         # Check for unmatched uploaded files
-        doc_filenames = {raw_doc.get("filename") for raw_doc in form_data.documents}
+        doc_filenames = {raw_doc.get('filename') for raw_doc in form_data.documents}
         unmatched = set(file_lookup.keys()) - doc_filenames
         if unmatched:
-            log.warning(f"Uploaded files without matching documents: {unmatched}")
+            log.warning(f'Uploaded files without matching documents: {unmatched}')
 
     else:
-        raise HTTPException(400, f"Unsupported data_type: {data_type}")
+        raise HTTPException(400, f'Unsupported data_type: {data_type}')
 
     for result in results:
-        if result["status"] == "created":
+        if result['status'] == 'created':
             created += 1
-        elif result["status"] == "updated":
+        elif result['status'] == 'updated':
             updated += 1
-        elif result["status"] == "error":
+        elif result['status'] == 'error':
             errors += 1
 
     return {
-        "knowledge_id": knowledge.id,
-        "collection_source_id": collection.source_id,
-        "provider": provider,
-        "data_type": data_type,
-        "total": len(form_data.documents),
-        "created": created,
-        "updated": updated,
-        "errors": errors,
-        "documents": results,
+        'knowledge_id': knowledge.id,
+        'collection_source_id': collection.source_id,
+        'provider': provider,
+        'data_type': data_type,
+        'total': len(form_data.documents),
+        'created': created,
+        'updated': updated,
+        'errors': errors,
+        'documents': results,
     }
 
 
-@router.delete("/collections/{source_id}")
+@router.delete('/collections/{source_id}')
 def delete_collection(
     request: Request,
     source_id: str,
@@ -647,7 +647,7 @@ def delete_collection(
         raise HTTPException(404, f"Collection '{source_id}' not found for provider '{provider}'")
 
     if knowledge.type != provider:
-        raise HTTPException(403, "Cannot delete collections belonging to another provider")
+        raise HTTPException(403, 'Cannot delete collections belonging to another provider')
 
     # Remove all files and vector data
     current_files = Knowledges.get_files_by_id(knowledge.id)
@@ -656,7 +656,7 @@ def delete_collection(
         try:
             VECTOR_DB_CLIENT.delete(
                 collection_name=knowledge.id,
-                filter={"file_id": file_id},
+                filter={'file_id': file_id},
             )
         except Exception:
             pass
@@ -664,10 +664,10 @@ def delete_collection(
 
     Knowledges.soft_delete_by_id(knowledge.id)
 
-    return {"status": "deleted", "source_id": source_id, "provider": provider}
+    return {'status': 'deleted', 'source_id': source_id, 'provider': provider}
 
 
-@router.delete("/collections/{source_id}/documents/{document_source_id}")
+@router.delete('/collections/{source_id}/documents/{document_source_id}')
 def delete_document(
     request: Request,
     source_id: str,
@@ -683,7 +683,7 @@ def delete_document(
     if knowledge.type != provider:
         raise HTTPException(403, "Cannot delete documents from another provider's collection")
 
-    file_id = f"{provider}-{document_source_id}"
+    file_id = f'{provider}-{document_source_id}'
     file = Files.get_file_by_id(file_id)
     if not file:
         raise HTTPException(404, f"Document '{document_source_id}' not found")
@@ -691,7 +691,7 @@ def delete_document(
     try:
         VECTOR_DB_CLIENT.delete(
             collection_name=knowledge.id,
-            filter={"file_id": file_id},
+            filter={'file_id': file_id},
         )
     except Exception:
         pass
@@ -700,47 +700,47 @@ def delete_document(
     Files.delete_file_by_id(file_id)
 
     return {
-        "status": "deleted",
-        "source_id": source_id,
-        "document_source_id": document_source_id,
-        "provider": provider,
+        'status': 'deleted',
+        'source_id': source_id,
+        'document_source_id': document_source_id,
+        'provider': provider,
     }
 
 
-@router.get("/openapi.json")
+@router.get('/openapi.json')
 def get_integration_openapi(request: Request, user=Depends(get_verified_user)):
     """Return OpenAPI spec scoped to integration endpoints only."""
     full_spec = request.app.openapi()
 
     # Filter paths to only integration endpoints (exclude this endpoint itself)
-    integration_prefix = "/api/v1/integrations"
+    integration_prefix = '/api/v1/integrations'
     filtered_paths = {
         path: ops
-        for path, ops in full_spec.get("paths", {}).items()
-        if path.startswith(integration_prefix) and path != f"{integration_prefix}/openapi.json"
+        for path, ops in full_spec.get('paths', {}).items()
+        if path.startswith(integration_prefix) and path != f'{integration_prefix}/openapi.json'
     }
 
     # Build scoped spec
     scoped_spec = {
-        "openapi": full_spec.get("openapi", "3.1.0"),
-        "info": {
-            "title": "Open WebUI — Integration API",
-            "version": full_spec.get("info", {}).get("version", "1.0.0"),
-            "description": "API specification for the Open WebUI push integration endpoints.",
+        'openapi': full_spec.get('openapi', '3.1.0'),
+        'info': {
+            'title': 'Open WebUI — Integration API',
+            'version': full_spec.get('info', {}).get('version', '1.0.0'),
+            'description': 'API specification for the Open WebUI push integration endpoints.',
         },
-        "paths": filtered_paths,
+        'paths': filtered_paths,
     }
 
     # Include only referenced schemas
-    all_schemas = full_spec.get("components", {}).get("schemas", {})
+    all_schemas = full_spec.get('components', {}).get('schemas', {})
     if all_schemas:
 
         def _collect_refs(obj, refs):
             if isinstance(obj, dict):
-                if "$ref" in obj:
-                    ref = obj["$ref"]
-                    if ref.startswith("#/components/schemas/"):
-                        refs.add(ref.split("/")[-1])
+                if '$ref' in obj:
+                    ref = obj['$ref']
+                    if ref.startswith('#/components/schemas/'):
+                        refs.add(ref.split('/')[-1])
                 for v in obj.values():
                     _collect_refs(v, refs)
             elif isinstance(obj, list):
@@ -762,8 +762,8 @@ def get_integration_openapi(request: Request, user=Depends(get_verified_user)):
                         changed = True
 
         if refs:
-            scoped_spec["components"] = {
-                "schemas": {name: schema for name, schema in all_schemas.items() if name in refs}
+            scoped_spec['components'] = {
+                'schemas': {name: schema for name, schema in all_schemas.items() if name in refs}
             }
 
     return scoped_spec

@@ -2263,7 +2263,7 @@ async def process_chat_payload(request, form_data, user, metadata, model):
     # [Gradient] Also skip knowledge flattening when agent API is enabled.
     # The agent receives raw KB references via metadata["knowledge"]
     # and handles its own retrieval and status emissions.
-    if model_knowledge and metadata.get("params", {}).get("function_calling") != "native" and not AGENT_API_ENABLED:
+    if model_knowledge and metadata.get('params', {}).get('function_calling') != 'native' and not AGENT_API_ENABLED:
         await event_emitter(
             {
                 'type': 'status',
@@ -2323,13 +2323,13 @@ async def process_chat_payload(request, form_data, user, metadata, model):
     except Exception as e:
         raise Exception(f'{e}')
 
-    features = form_data.pop("features", None) or {}
-    extra_params["__features__"] = features
+    features = form_data.pop('features', None) or {}
+    extra_params['__features__'] = features
 
     # [Gradient] Capture raw knowledge base references before they are
     # flattened into file items. The agent API needs these to know which
     # KBs are configured on the model (id, name, type, collection_names).
-    raw_knowledge = model.get("info", {}).get("meta", {}).get("knowledge", None)
+    raw_knowledge = model.get('info', {}).get('meta', {}).get('knowledge', None)
     if features:
         if 'voice' in features and features['voice']:
             if request.app.state.config.VOICE_MODE_PROMPT_TEMPLATE != None:
@@ -2351,7 +2351,7 @@ async def process_chat_payload(request, form_data, user, metadata, model):
         if 'web_search' in features and features['web_search']:
             # Skip forced RAG web search when native FC is enabled - model can use web_search tool
             # [Gradient] Also skip when agent API is enabled - agent handles its own web search.
-            if metadata.get("params", {}).get("function_calling") != "native" and not AGENT_API_ENABLED:
+            if metadata.get('params', {}).get('function_calling') != 'native' and not AGENT_API_ENABLED:
                 form_data = await chat_web_search_handler(request, form_data, extra_params, user)
 
         if 'image_generation' in features and features['image_generation']:
@@ -2367,7 +2367,7 @@ async def process_chat_payload(request, form_data, user, metadata, model):
             # [Gradient] Also skip when agent API is enabled — the agent controls
             # its own prompting. Code execution still happens in process_chat_response
             # when the agent returns <code_interpreter> tags.
-            if metadata.get("params", {}).get("function_calling") != "native" and not AGENT_API_ENABLED:
+            if metadata.get('params', {}).get('function_calling') != 'native' and not AGENT_API_ENABLED:
                 prompt = (
                     request.app.state.config.CODE_INTERPRETER_PROMPT_TEMPLATE
                     if request.app.state.config.CODE_INTERPRETER_PROMPT_TEMPLATE != ''
@@ -2473,7 +2473,7 @@ async def process_chat_payload(request, form_data, user, metadata, model):
     # (files, tool_ids, features, knowledge) so the agent receives everything
     # it needs to make its own decisions.
     if AGENT_API_ENABLED:
-        metadata["knowledge"] = raw_knowledge
+        metadata['knowledge'] = raw_knowledge
         return form_data, metadata, events
 
     # When the caller provides an explicit OpenAI-style `tools` array in the
@@ -2676,11 +2676,11 @@ async def process_chat_payload(request, form_data, user, metadata, model):
 
         # Inject builtin tools for native function calling based on enabled features and model capability
         # Check if builtin_tools capability is enabled for this model (defaults to True if not specified)
-        builtin_tools_enabled = (model.get("info", {}).get("meta", {}).get("capabilities") or {}).get(
-            "builtin_tools", True
+        builtin_tools_enabled = (model.get('info', {}).get('meta', {}).get('capabilities') or {}).get(
+            'builtin_tools', True
         )
         if (
-            metadata.get("params", {}).get("function_calling") == "native"
+            metadata.get('params', {}).get('function_calling') == 'native'
             and builtin_tools_enabled
             and FEATURE_BUILTIN_TOOLS
         ):
@@ -3733,9 +3733,9 @@ async def streaming_chat_response_handler(response, ctx):
                                                         current_response_tool_call['function']['name'] = delta_name
 
                                                     if delta_arguments:
-                                                        current_response_tool_call['function'][
-                                                            'arguments'
-                                                        ] += delta_arguments
+                                                        current_response_tool_call['function']['arguments'] += (
+                                                            delta_arguments
+                                                        )
 
                                         # Emit pending tool calls in real-time
                                         if response_tool_calls:

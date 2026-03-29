@@ -60,9 +60,9 @@ def get_knowledge_or_raise(knowledge_id: str, user: UserModel):
     """Get a knowledge base, raising HTTPException if not found or not authorized."""
     knowledge = Knowledges.get_knowledge_by_id(knowledge_id)
     if not knowledge:
-        raise HTTPException(status_code=404, detail="Knowledge base not found")
+        raise HTTPException(status_code=404, detail='Knowledge base not found')
     if knowledge.user_id != user.id:
-        raise HTTPException(status_code=403, detail="Not authorized")
+        raise HTTPException(status_code=403, detail='Not authorized')
     return knowledge
 
 
@@ -97,45 +97,45 @@ def handle_sync_items_request(
     existing_sync = meta.get(meta_key, {})
 
     # Prevent duplicate syncs (with staleness recovery)
-    if existing_sync.get("status") == "syncing":
-        sync_started = existing_sync.get("sync_started_at")
+    if existing_sync.get('status') == 'syncing':
+        sync_started = existing_sync.get('sync_started_at')
         stale_threshold = 30 * 60
         is_stale = not sync_started or (time.time() - sync_started) > stale_threshold
         if is_stale:
             log.warning(
-                "Stale sync detected for KB %s (started_at=%s), allowing new sync",
+                'Stale sync detected for KB %s (started_at=%s), allowing new sync',
                 knowledge_id,
                 sync_started,
             )
         else:
             raise HTTPException(
                 status_code=409,
-                detail="A sync is already in progress. Cancel it first or wait for it to complete.",
+                detail='A sync is already in progress. Cancel it first or wait for it to complete.',
             )
 
-    existing_sources = existing_sync.get("sources", [])
+    existing_sources = existing_sync.get('sources', [])
 
     # After cancellation, force full re-enumeration
-    if existing_sync.get("status") == "cancelled":
+    if existing_sync.get('status') == 'cancelled':
         for source in existing_sources:
             for key in clear_delta_keys:
                 source.pop(key, None)
 
     # Add new items (skip duplicates by item_id)
-    existing_ids = {s["item_id"] for s in existing_sources}
-    deduped_new = [s for s in new_sources if s["item_id"] not in existing_ids]
+    existing_ids = {s['item_id'] for s in existing_sources}
+    deduped_new = [s for s in new_sources if s['item_id'] not in existing_ids]
     all_sources = existing_sources + deduped_new
 
     meta[meta_key] = {
         **existing_sync,
-        "sources": all_sources,
-        "status": "syncing",
-        "sync_started_at": int(time.time()),
-        "last_sync_at": existing_sync.get("last_sync_at"),
+        'sources': all_sources,
+        'status': 'syncing',
+        'sync_started_at': int(time.time()),
+        'last_sync_at': existing_sync.get('last_sync_at'),
     }
     Knowledges.update_knowledge_meta_by_id(knowledge_id, meta)
 
-    return {"all_sources": all_sources, "meta": meta}
+    return {'all_sources': all_sources, 'meta': meta}
 
 
 def handle_get_sync_status(
@@ -148,19 +148,19 @@ def handle_get_sync_status(
 
     meta = knowledge.meta or {}
     sync_info = meta.get(meta_key, {})
-    sources = sync_info.get("sources", [])
-    last_result = sync_info.get("last_result", {})
+    sources = sync_info.get('sources', [])
+    last_result = sync_info.get('last_result', {})
 
-    failed_files_raw = last_result.get("failed_files", [])
+    failed_files_raw = last_result.get('failed_files', [])
     failed_files = [FailedFileInfo(**f) for f in failed_files_raw] if failed_files_raw else None
 
     return SyncStatusResponse(
         knowledge_id=knowledge_id,
-        status=sync_info.get("status", "idle"),
-        progress_current=sync_info.get("progress_current"),
-        progress_total=sync_info.get("progress_total"),
-        last_sync_at=sync_info.get("last_sync_at"),
-        error=sync_info.get("error"),
+        status=sync_info.get('status', 'idle'),
+        progress_current=sync_info.get('progress_current'),
+        progress_total=sync_info.get('progress_total'),
+        last_sync_at=sync_info.get('last_sync_at'),
+        error=sync_info.get('error'),
         source_count=len(sources),
         failed_files=failed_files,
     )
@@ -177,15 +177,15 @@ def handle_cancel_sync(
     meta = knowledge.meta or {}
     sync_info = meta.get(meta_key, {})
 
-    if sync_info.get("status") != "syncing":
-        raise HTTPException(status_code=400, detail="No active sync to cancel")
+    if sync_info.get('status') != 'syncing':
+        raise HTTPException(status_code=400, detail='No active sync to cancel')
 
-    sync_info["status"] = "cancelled"
+    sync_info['status'] = 'cancelled'
     meta[meta_key] = sync_info
     Knowledges.update_knowledge_meta_by_id(knowledge_id, meta)
 
-    log.info(f"Sync cancelled for knowledge base {knowledge_id}")
-    return {"message": "Sync cancelled", "knowledge_id": knowledge_id}
+    log.info(f'Sync cancelled for knowledge base {knowledge_id}')
+    return {'message': 'Sync cancelled', 'knowledge_id': knowledge_id}
 
 
 def handle_remove_source(
@@ -206,39 +206,39 @@ def handle_remove_source(
     meta = knowledge.meta or {}
     sync_info = meta.get(meta_key, {})
 
-    if sync_info.get("status") == "syncing":
+    if sync_info.get('status') == 'syncing':
         raise HTTPException(
             status_code=409,
-            detail="Cannot remove source while sync is in progress.",
+            detail='Cannot remove source while sync is in progress.',
         )
 
-    sources = sync_info.get("sources", [])
+    sources = sync_info.get('sources', [])
 
     source_to_remove = None
     remaining_sources = []
     for source in sources:
-        if source["item_id"] == item_id:
+        if source['item_id'] == item_id:
             source_to_remove = source
         else:
             remaining_sources.append(source)
 
     if not source_to_remove:
-        raise HTTPException(status_code=404, detail="Source not found")
+        raise HTTPException(status_code=404, detail='Source not found')
 
     removed_count = remove_files_fn(knowledge_id, item_id, source_to_remove)
 
-    sync_info["sources"] = remaining_sources
+    sync_info['sources'] = remaining_sources
     meta[meta_key] = sync_info
     Knowledges.update_knowledge_meta_by_id(knowledge_id, meta)
 
     log.info(
-        f"Removed source '{source_to_remove.get('name')}' from KB {knowledge_id}, " f"{removed_count} files cleaned up"
+        f"Removed source '{source_to_remove.get('name')}' from KB {knowledge_id}, {removed_count} files cleaned up"
     )
 
     return {
-        "message": "Source removed",
-        "source_name": source_to_remove.get("name"),
-        "files_removed": removed_count,
+        'message': 'Source removed',
+        'source_name': source_to_remove.get('name'),
+        'files_removed': removed_count,
     }
 
 
@@ -252,7 +252,7 @@ def handle_list_synced_collections(
     for kb in all_knowledge:
         meta = kb.meta or {}
         if meta_key in meta:
-            synced.append({"id": kb.id, "name": kb.name, "sync_info": meta[meta_key]})
+            synced.append({'id': kb.id, 'name': kb.name, 'sync_info': meta[meta_key]})
     return synced
 
 
@@ -265,23 +265,23 @@ def handle_get_token_status(
     """Shared logic for GET /auth/token-status/{knowledge_id}."""
     knowledge = Knowledges.get_knowledge_by_id(id=knowledge_id)
     if not knowledge or knowledge.user_id != user.id:
-        raise HTTPException(404, "Knowledge base not found")
+        raise HTTPException(404, 'Knowledge base not found')
 
     token_data = get_stored_token_fn(user.id)
     if not token_data:
-        return {"has_token": False}
+        return {'has_token': False}
 
-    expires_at = token_data.get("expires_at", 0)
+    expires_at = token_data.get('expires_at', 0)
     is_expired = expires_at < time.time()
 
     meta = knowledge.meta or {}
     sync_info = meta.get(meta_key, {})
 
     return {
-        "has_token": True,
-        "is_expired": is_expired,
-        "needs_reauth": sync_info.get("needs_reauth", False),
-        "token_stored_at": sync_info.get("token_stored_at"),
+        'has_token': True,
+        'is_expired': is_expired,
+        'needs_reauth': sync_info.get('needs_reauth', False),
+        'token_stored_at': sync_info.get('token_stored_at'),
     }
 
 
@@ -295,7 +295,7 @@ def handle_revoke_token(
     """Shared logic for POST /auth/revoke/{knowledge_id}."""
     knowledge = Knowledges.get_knowledge_by_id(id=knowledge_id)
     if not knowledge or knowledge.user_id != user.id:
-        raise HTTPException(404, "Knowledge base not found")
+        raise HTTPException(404, 'Knowledge base not found')
 
     deleted = delete_stored_token_fn(user.id)
 
@@ -305,13 +305,13 @@ def handle_revoke_token(
             continue
         meta = kb.meta or {}
         sync_info = meta.get(meta_key, {})
-        sync_info["has_stored_token"] = False
-        sync_info.pop("token_stored_at", None)
-        sync_info["needs_reauth"] = False
+        sync_info['has_stored_token'] = False
+        sync_info.pop('token_stored_at', None)
+        sync_info['needs_reauth'] = False
         meta[meta_key] = sync_info
         Knowledges.update_knowledge_meta_by_id(kb.id, meta)
 
-    return {"revoked": deleted}
+    return {'revoked': deleted}
 
 
 async def complete_auth_callback(
@@ -327,28 +327,28 @@ async def complete_auth_callback(
     result = await exchange_code_fn(
         code=code,
         state=state,
-        user_id=flow["user_id"],
+        user_id=flow['user_id'],
     )
 
-    if result["success"]:
-        user_id = flow["user_id"]
+    if result['success']:
+        user_id = flow['user_id']
         all_kbs = Knowledges.get_knowledge_bases_by_type(provider_type)
         for kb in all_kbs:
             if kb.user_id != user_id:
                 continue
             meta = kb.meta or {}
             sync_info = meta.get(meta_key, {})
-            sync_info["has_stored_token"] = True
-            sync_info["token_stored_at"] = int(time.time())
-            sync_info["needs_reauth"] = False
+            sync_info['has_stored_token'] = True
+            sync_info['token_stored_at'] = int(time.time())
+            sync_info['needs_reauth'] = False
             meta[meta_key] = sync_info
             Knowledges.update_knowledge_meta_by_id(kb.id, meta)
 
     return auth_callback_html(
         callback_type=callback_type,
-        success=result["success"],
-        error=result.get("error"),
-        knowledge_id=result.get("knowledge_id"),
+        success=result['success'],
+        error=result.get('error'),
+        knowledge_id=result.get('knowledge_id'),
     )
 
 
@@ -360,16 +360,16 @@ def auth_callback_html(
 ) -> HTMLResponse:
     """Return HTML that communicates result to opener window and closes."""
     data = {
-        "type": callback_type,
-        "success": success,
+        'type': callback_type,
+        'success': success,
     }
     if error:
-        data["error"] = error
+        data['error'] = error
     if knowledge_id:
-        data["knowledge_id"] = knowledge_id
+        data['knowledge_id'] = knowledge_id
 
     # Escape '</' to prevent script tag injection
-    safe_json = json.dumps(data).replace("</", "<\\/")
+    safe_json = json.dumps(data).replace('</', '<\\/')
 
     html = f"""<!DOCTYPE html>
 <html><body><script>
@@ -408,7 +408,7 @@ def remove_files_for_source_generic(
             continue
 
         file_meta = file.meta or {}
-        file_source_item_id = file_meta.get("source_item_id")
+        file_source_item_id = file_meta.get('source_item_id')
 
         if file_source_item_id:
             if file_source_item_id != source_item_id:
@@ -426,15 +426,15 @@ def remove_files_for_source_generic(
         try:
             VECTOR_DB_CLIENT.delete(
                 collection_name=knowledge_id,
-                filter={"file_id": file.id},
+                filter={'file_id': file.id},
             )
         except Exception as e:
-            log.warning(f"Failed to remove vectors for {file.id}: {e}")
+            log.warning(f'Failed to remove vectors for {file.id}: {e}')
 
         remaining = Knowledges.get_knowledge_files_by_file_id(file.id)
         if not remaining:
             try:
-                VECTOR_DB_CLIENT.delete_collection(f"file-{file.id}")
+                VECTOR_DB_CLIENT.delete_collection(f'file-{file.id}')
             except Exception:
                 pass
             Files.delete_file_by_id(file.id)

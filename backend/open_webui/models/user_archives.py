@@ -16,7 +16,7 @@ log = logging.getLogger(__name__)
 
 
 class UserArchive(Base):
-    __tablename__ = "user_archive"
+    __tablename__ = 'user_archive'
 
     id = Column(Text, primary_key=True, unique=True)
 
@@ -48,10 +48,10 @@ class UserArchive(Base):
     updated_at = Column(BigInteger, nullable=False)
 
     __table_args__ = (
-        Index("user_archive_user_email_idx", "user_email"),
-        Index("user_archive_user_name_idx", "user_name"),
-        Index("user_archive_expires_at_idx", "expires_at"),
-        Index("user_archive_created_at_idx", "created_at"),
+        Index('user_archive_user_email_idx', 'user_email'),
+        Index('user_archive_user_name_idx', 'user_name'),
+        Index('user_archive_expires_at_idx', 'expires_at'),
+        Index('user_archive_created_at_idx', 'created_at'),
     )
 
 
@@ -159,7 +159,7 @@ class UserArchiveTable:
                 db.refresh(archive)
                 return UserArchiveModel.model_validate(archive)
             except Exception as e:
-                log.exception(f"Error creating user archive: {e}")
+                log.exception(f'Error creating user archive: {e}')
                 return None
 
     def get_archive_by_id(self, archive_id: str) -> Optional[UserArchiveModel]:
@@ -179,7 +179,7 @@ class UserArchiveTable:
             query = db.query(UserArchive)
 
             if search:
-                search_term = f"%{search}%"
+                search_term = f'%{search}%'
                 query = query.filter(
                     (UserArchive.user_email.ilike(search_term)) | (UserArchive.user_name.ilike(search_term))
                 )

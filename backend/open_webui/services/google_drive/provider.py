@@ -40,10 +40,10 @@ class GoogleDriveSyncProvider(SyncProvider):
         self._token_manager = GoogleDriveTokenManager()
 
     def get_provider_type(self) -> str:
-        return "google_drive"
+        return 'google_drive'
 
     def get_meta_key(self) -> str:
-        return "google_drive_sync"
+        return 'google_drive_sync'
 
     def get_token_manager(self) -> TokenManager:
         return self._token_manager

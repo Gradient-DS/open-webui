@@ -95,14 +95,14 @@ class SyncProvider(ABC):
         """
         knowledge = Knowledges.get_knowledge_by_id(id=knowledge_id)
         if not knowledge:
-            return {"error": "Knowledge base not found"}
+            return {'error': 'Knowledge base not found'}
 
         meta = knowledge.meta or {}
         sync_info = meta.get(self.get_meta_key(), {})
-        sources = sync_info.get("sources", [])
+        sources = sync_info.get('sources', [])
 
         if not sources:
-            return {"error": "No sync sources configured"}
+            return {'error': 'No sync sources configured'}
 
         # Determine token source
         token_provider = None
@@ -111,7 +111,7 @@ class SyncProvider(ABC):
         else:
             effective_token = await self.get_token_manager().get_valid_access_token(user_id, knowledge_id)
             if not effective_token:
-                return {"error": "No valid token available", "needs_reauth": True}
+                return {'error': 'No valid token available', 'needs_reauth': True}
 
             # Create a token provider callback for mid-sync refresh
             tm = self.get_token_manager()
@@ -139,27 +139,27 @@ def get_sync_provider(provider_type: str) -> SyncProvider:
 
     Follows the same pattern as get_storage_provider() in storage/provider.py.
     """
-    if provider_type == "onedrive":
+    if provider_type == 'onedrive':
         from open_webui.services.onedrive.provider import OneDriveSyncProvider
 
         return OneDriveSyncProvider()
-    elif provider_type == "google_drive":
+    elif provider_type == 'google_drive':
         from open_webui.services.google_drive.provider import GoogleDriveSyncProvider
 
         return GoogleDriveSyncProvider()
     else:
-        raise ValueError(f"Unsupported sync provider: {provider_type}")
+        raise ValueError(f'Unsupported sync provider: {provider_type}')
 
 
 def get_token_manager(provider_type: str) -> TokenManager:
     """Factory function for token managers."""
-    if provider_type == "onedrive":
+    if provider_type == 'onedrive':
         from open_webui.services.onedrive.provider import OneDriveTokenManager
 
         return OneDriveTokenManager()
-    elif provider_type == "google_drive":
+    elif provider_type == 'google_drive':
         from open_webui.services.google_drive.provider import GoogleDriveTokenManager
 
         return GoogleDriveTokenManager()
     else:
-        raise ValueError(f"Unsupported token manager: {provider_type}")
+        raise ValueError(f'Unsupported token manager: {provider_type}')

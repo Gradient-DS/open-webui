@@ -941,7 +941,8 @@ class ChatTable:
     def get_chats(self, skip: int = 0, limit: int = 50, db: Optional[Session] = None) -> list[ChatModel]:
         with get_db_context(db) as db:
             all_chats = (
-                db.query(Chat).filter(Chat.deleted_at.is_(None))
+                db.query(Chat)
+                .filter(Chat.deleted_at.is_(None))
                 # .limit(limit).offset(skip)
                 .order_by(Chat.updated_at.desc())
             )
@@ -1123,12 +1124,14 @@ class ChatTable:
 
                 # Check if there are any tags to filter, it should have all the tags
                 if 'none' in tag_ids:
-                    query = query.filter(text("""
+                    query = query.filter(
+                        text("""
                             NOT EXISTS (
                                 SELECT 1
                                 FROM json_each(Chat.meta, '$.tags') AS tag
                             )
-                            """))
+                            """)
+                    )
                 elif tag_ids:
                     query = query.filter(
                         and_(
@@ -1175,12 +1178,14 @@ class ChatTable:
 
                 # Check if there are any tags to filter, it should have all the tags
                 if 'none' in tag_ids:
-                    query = query.filter(text("""
+                    query = query.filter(
+                        text("""
                             NOT EXISTS (
                                 SELECT 1
                                 FROM json_array_elements_text(Chat.meta->'tags') AS tag
                             )
-                            """))
+                            """)
+                    )
                 elif tag_ids:
                     query = query.filter(
                         and_(
@@ -1278,7 +1283,7 @@ class ChatTable:
     ) -> list[ChatModel]:
         with get_db_context(db) as db:
             query = db.query(Chat).filter_by(user_id=user_id).filter(Chat.deleted_at.is_(None))
-            tag_id = tag_name.replace(" ", "_").lower()
+            tag_id = tag_name.replace(' ', '_').lower()
 
             log.info(f'DB dialect name: {db.bind.dialect.name}')
             if db.bind.dialect.name == 'sqlite':
@@ -1320,7 +1325,7 @@ class ChatTable:
     def count_chats_by_tag_name_and_user_id(self, tag_name: str, user_id: str, db: Optional[Session] = None) -> int:
         with get_db_context(db) as db:
             query = db.query(Chat).filter_by(user_id=user_id, archived=False).filter(Chat.deleted_at.is_(None))
-            tag_id = tag_name.replace(" ", "_").lower()
+            tag_id = tag_name.replace(' ', '_').lower()
 
             if db.bind.dialect.name == 'sqlite':
                 query = query.filter(
@@ -1462,7 +1467,7 @@ class ChatTable:
                 db.query(Chat)
                 .filter_by(user_id=user_id, folder_id=folder_id)
                 .filter(Chat.deleted_at.is_(None))
-                .update({"deleted_at": int(time.time())})
+                .update({'deleted_at': int(time.time())})
             )
             db.commit()
             return result
@@ -1603,7 +1608,7 @@ class ChatTable:
                 db.query(Chat)
                 .filter_by(id=id)
                 .filter(Chat.deleted_at.is_(None))
-                .update({"deleted_at": int(time.time())})
+                .update({'deleted_at': int(time.time())})
             )
             db.commit()
             return result > 0
@@ -1615,7 +1620,7 @@ class ChatTable:
                 db.query(Chat)
                 .filter_by(user_id=user_id)
                 .filter(Chat.deleted_at.is_(None))
-                .update({"deleted_at": int(time.time())})
+                .update({'deleted_at': int(time.time())})
             )
             db.commit()
             return result

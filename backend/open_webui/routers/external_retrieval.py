@@ -38,17 +38,17 @@ def check_external_pipeline_health(
     try:
         headers = {}
         if external_pipeline_api_key:
-            headers["Authorization"] = f"Bearer {external_pipeline_api_key}"
-            headers["X-API-Key"] = external_pipeline_api_key
+            headers['Authorization'] = f'Bearer {external_pipeline_api_key}'
+            headers['X-API-Key'] = external_pipeline_api_key
 
-        base_url = external_pipeline_url.rstrip("/")
-        health_url = f"{base_url}/health"
+        base_url = external_pipeline_url.rstrip('/')
+        health_url = f'{base_url}/health'
 
         response = requests.get(health_url, headers=headers, timeout=timeout)
         response.raise_for_status()
         return True
     except Exception as e:
-        log.warning(f"External pipeline health check failed: {e}")
+        log.warning(f'External pipeline health check failed: {e}')
         return False
 
 
@@ -104,36 +104,36 @@ def call_external_pipeline(
             }
     """
     try:
-        headers = {"Content-Type": "application/json"}
+        headers = {'Content-Type': 'application/json'}
         if external_pipeline_api_key:
-            headers["Authorization"] = f"Bearer {external_pipeline_api_key}"
-            headers["X-API-Key"] = external_pipeline_api_key
+            headers['Authorization'] = f'Bearer {external_pipeline_api_key}'
+            headers['X-API-Key'] = external_pipeline_api_key
 
         # Construct full URL with /chunk endpoint
-        base_url = external_pipeline_url.rstrip("/")
-        endpoint_url = f"{base_url}/chunk"
+        base_url = external_pipeline_url.rstrip('/')
+        endpoint_url = f'{base_url}/chunk'
 
         # Determine file type from content_type or filename
-        filetype = "TXT"  # Default - text is already parsed
+        filetype = 'TXT'  # Default - text is already parsed
         if content_type:
-            if "pdf" in content_type.lower():
-                filetype = "PDF"
-            elif "word" in content_type.lower() or "docx" in content_type.lower():
-                filetype = "DOCX"
-            elif "excel" in content_type.lower() or "xlsx" in content_type.lower():
-                filetype = "XLSX"
-            elif "powerpoint" in content_type.lower() or "pptx" in content_type.lower():
-                filetype = "PPTX"
-            elif "text" in content_type.lower():
-                filetype = "TXT"
+            if 'pdf' in content_type.lower():
+                filetype = 'PDF'
+            elif 'word' in content_type.lower() or 'docx' in content_type.lower():
+                filetype = 'DOCX'
+            elif 'excel' in content_type.lower() or 'xlsx' in content_type.lower():
+                filetype = 'XLSX'
+            elif 'powerpoint' in content_type.lower() or 'pptx' in content_type.lower():
+                filetype = 'PPTX'
+            elif 'text' in content_type.lower():
+                filetype = 'TXT'
 
         # Load document using Open WebUI's loader to extract text
         # If EXTERNAL_DOCUMENT_LOADER_URL is configured, this will use the external parser
-        log.info(f"Loading document: {filename} (type: {filetype})")
+        log.info(f'Loading document: {filename} (type: {filetype})')
 
         if loader_instance is None:
-            log.warning("No loader instance provided, external pipeline may not work correctly")
-            raise Exception("Loader instance required for external pipeline")
+            log.warning('No loader instance provided, external pipeline may not work correctly')
+            raise Exception('Loader instance required for external pipeline')
 
         # Load document and extract text
         # The loader returns a list of Document objects with page_content
@@ -141,28 +141,28 @@ def call_external_pipeline(
         docs = loader_instance.load(filename, content_type, file_path)
 
         if not docs:
-            raise Exception("Loader returned no documents")
+            raise Exception('Loader returned no documents')
 
         # Combine all document page_content into single text
-        text_content = "\n".join([doc.page_content for doc in docs])
+        text_content = '\n'.join([doc.page_content for doc in docs])
 
         # Get total pages from metadata if available
         total_pages = 1
-        if docs and hasattr(docs[0], "metadata"):
-            total_pages = docs[0].metadata.get("total_pages", len(docs))
+        if docs and hasattr(docs[0], 'metadata'):
+            total_pages = docs[0].metadata.get('total_pages', len(docs))
 
-        log.info(f"Loaded document: {len(text_content)} chars from {len(docs)} pages/sections")
+        log.info(f'Loaded document: {len(text_content)} chars from {len(docs)} pages/sections')
 
         # Prepare JSON payload for /chunk endpoint
         payload = {
-            "text": text_content,
-            "filename": filename,
-            "filetype": filetype,
-            "title": filename,
-            "total_pages": total_pages,
+            'text': text_content,
+            'filename': filename,
+            'filetype': filetype,
+            'title': filename,
+            'total_pages': total_pages,
         }
 
-        log.info(f"Calling external pipeline: {endpoint_url} for chunking")
+        log.info(f'Calling external pipeline: {endpoint_url} for chunking')
         response = requests.post(
             endpoint_url,
             json=payload,
@@ -172,20 +172,20 @@ def call_external_pipeline(
         response.raise_for_status()
 
         result = response.json()
-        chunks_count = len(result.get("chunks", []))
-        log.info(f"External pipeline returned {chunks_count} chunks")
+        chunks_count = len(result.get('chunks', []))
+        log.info(f'External pipeline returned {chunks_count} chunks')
         return result
 
     except requests.exceptions.Timeout as e:
-        log.error(f"Timeout calling external pipeline after {timeout}s: {e}")
-        raise Exception(f"External pipeline timeout after {timeout} seconds")
+        log.error(f'Timeout calling external pipeline after {timeout}s: {e}')
+        raise Exception(f'External pipeline timeout after {timeout} seconds')
     except requests.exceptions.RequestException as e:
-        log.error(f"Error calling external pipeline: {e}")
-        if hasattr(e, "response") and e.response is not None:
-            log.error(f"Response status: {e.response.status_code}, body: {e.response.text}")
-        raise Exception(f"Failed to call external pipeline: {str(e)}")
+        log.error(f'Error calling external pipeline: {e}')
+        if hasattr(e, 'response') and e.response is not None:
+            log.error(f'Response status: {e.response.status_code}, body: {e.response.text}')
+        raise Exception(f'Failed to call external pipeline: {str(e)}')
     except Exception as e:
-        log.error(f"Unexpected error in external pipeline call: {e}")
+        log.error(f'Unexpected error in external pipeline call: {e}')
         raise
 
 
@@ -230,11 +230,11 @@ def process_file_with_external_pipeline(
         Exception: If external pipeline fails
     """
     # Get external pipeline configuration
-    external_pipeline_url = getattr(request.app.state.config, "EXTERNAL_PIPELINE_URL", None)
-    external_pipeline_api_key = getattr(request.app.state.config, "EXTERNAL_PIPELINE_API_KEY", None)
-    external_pipeline_timeout = getattr(request.app.state.config, "EXTERNAL_PIPELINE_TIMEOUT", 120)
+    external_pipeline_url = getattr(request.app.state.config, 'EXTERNAL_PIPELINE_URL', None)
+    external_pipeline_api_key = getattr(request.app.state.config, 'EXTERNAL_PIPELINE_API_KEY', None)
+    external_pipeline_timeout = getattr(request.app.state.config, 'EXTERNAL_PIPELINE_TIMEOUT', 120)
 
-    log.info(f"Processing file with external pipeline: {file.filename}")
+    log.info(f'Processing file with external pipeline: {file.filename}')
 
     # Call external pipeline with loader instance
     # The flow is:
@@ -244,7 +244,7 @@ def process_file_with_external_pipeline(
     pipeline_result = call_external_pipeline(
         file_path=file_path,
         filename=file.filename,
-        content_type=file.meta.get("content_type", "application/octet-stream"),
+        content_type=file.meta.get('content_type', 'application/octet-stream'),
         external_pipeline_url=external_pipeline_url,
         external_pipeline_api_key=external_pipeline_api_key,
         timeout=external_pipeline_timeout,
@@ -264,19 +264,19 @@ def process_file_with_external_pipeline(
     #     }
     #   ]
     # }
-    chunks = pipeline_result.get("chunks", [])
+    chunks = pipeline_result.get('chunks', [])
     if not chunks:
-        raise ValueError("External pipeline returned no chunks")
+        raise ValueError('External pipeline returned no chunks')
 
-    log.info(f"Received {len(chunks)} chunks from external pipeline")
+    log.info(f'Received {len(chunks)} chunks from external pipeline')
 
     # Combine text from all chunks for file content
-    text_content = " ".join([chunk.get("text", "") for chunk in chunks])
+    text_content = ' '.join([chunk.get('text', '') for chunk in chunks])
 
     # Update file content and hash
     Files.update_file_data_by_id(
         file.id,
-        {"content": text_content},
+        {'content': text_content},
     )
     hash = calculate_sha256_string(text_content)
     Files.update_file_hash_by_id(file.id, hash)
@@ -288,14 +288,14 @@ def process_file_with_external_pipeline(
     # - Vector DB insertion
     docs = [
         Document(
-            page_content=chunk.get("text", ""),
+            page_content=chunk.get('text', ''),
             metadata={
-                **chunk.get("metadata", {}),
-                "name": file.filename,
-                "created_by": file.user_id,
-                "file_id": file.id,
-                "source": file.filename,
-                "chunk_id": chunk.get("id"),  # Use "id" from /chunk response
+                **chunk.get('metadata', {}),
+                'name': file.filename,
+                'created_by': file.user_id,
+                'file_id': file.id,
+                'source': file.filename,
+                'chunk_id': chunk.get('id'),  # Use "id" from /chunk response
             },
         )
         for chunk in chunks
@@ -306,32 +306,32 @@ def process_file_with_external_pipeline(
         request,
         docs=docs,
         collection_name=collection_name,
-        metadata={"file_id": file.id, "name": file.filename, "hash": hash},
+        metadata={'file_id': file.id, 'name': file.filename, 'hash': hash},
         split=False,  # External pipeline already chunked
         add=(True if form_data.collection_name else False),
         user=user,
     )
 
-    log.info(f"Saved {len(chunks)} chunks to collection {collection_name} via external pipeline")
+    log.info(f'Saved {len(chunks)} chunks to collection {collection_name} via external pipeline')
 
     if result:
         Files.update_file_metadata_by_id(
             file.id,
             {
-                "collection_name": collection_name,
+                'collection_name': collection_name,
             },
         )
 
         Files.update_file_data_by_id(
             file.id,
-            {"status": "completed"},
+            {'status': 'completed'},
         )
 
         return {
-            "status": True,
-            "collection_name": collection_name,
-            "filename": file.filename,
-            "content": text_content,
+            'status': True,
+            'collection_name': collection_name,
+            'filename': file.filename,
+            'content': text_content,
         }
 
-    raise Exception("Failed to save documents to vector database")
+    raise Exception('Failed to save documents to vector database')

@@ -44,7 +44,7 @@ class Knowledge(Base):
 
     id = Column(Text, unique=True, primary_key=True)
     user_id = Column(Text)
-    type = Column(Text, nullable=False, server_default="local")
+    type = Column(Text, nullable=False, server_default='local')
 
     name = Column(Text)
     description = Column(Text)
@@ -61,7 +61,7 @@ class KnowledgeModel(BaseModel):
 
     id: str
     user_id: str
-    type: str = "local"
+    type: str = 'local'
 
     name: str
     description: str
@@ -249,7 +249,7 @@ class KnowledgeTable:
                     elif view_option == 'shared':
                         query = query.filter(Knowledge.user_id != user_id)
 
-                    type_filter = filter.get("type")
+                    type_filter = filter.get('type')
                     if type_filter:
                         query = query.filter(Knowledge.type == type_filter)
 
@@ -657,8 +657,8 @@ class KnowledgeTable:
                 knowledge = self.get_knowledge_by_id(id=id, db=db)
                 db.query(Knowledge).filter_by(id=id).update(
                     {
-                        **form_data.model_dump(exclude={"access_grants"}, exclude_none=True),
-                        "updated_at": int(time.time()),
+                        **form_data.model_dump(exclude={'access_grants'}, exclude_none=True),
+                        'updated_at': int(time.time()),
                     }
                 )
                 db.commit()
@@ -743,7 +743,7 @@ class KnowledgeTable:
                 db.query(Knowledge)
                 .filter_by(id=id)
                 .filter(Knowledge.deleted_at.is_(None))
-                .update({"deleted_at": int(time.time())})
+                .update({'deleted_at': int(time.time())})
             )
             db.commit()
             return result > 0
@@ -755,7 +755,7 @@ class KnowledgeTable:
                 db.query(Knowledge)
                 .filter_by(user_id=user_id)
                 .filter(Knowledge.deleted_at.is_(None))
-                .update({"deleted_at": int(time.time())})
+                .update({'deleted_at': int(time.time())})
             )
             db.commit()
             return result

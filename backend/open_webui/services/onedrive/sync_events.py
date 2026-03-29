@@ -11,7 +11,7 @@ from open_webui.services.sync.events import (
     emit_sync_progress as _emit_sync_progress,
 )
 
-_PREFIX = "onedrive"
+_PREFIX = 'onedrive'
 
 
 async def emit_file_processing(
@@ -38,7 +38,7 @@ async def emit_sync_progress(
     status: str,
     current: int = 0,
     total: int = 0,
-    filename: str = "",
+    filename: str = '',
     error: Optional[str] = None,
     files_processed: int = 0,
     files_failed: int = 0,

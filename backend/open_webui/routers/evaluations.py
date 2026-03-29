@@ -259,19 +259,19 @@ async def get_model_history(
 @router.get('/config')
 async def get_config(request: Request, user=Depends(get_admin_user)):
     return {
-        "ENABLE_EVALUATION_ARENA_MODELS": request.app.state.config.ENABLE_EVALUATION_ARENA_MODELS,
-        "EVALUATION_ARENA_MODELS": request.app.state.config.EVALUATION_ARENA_MODELS,
-        "ENABLE_MESSAGE_RATING": request.app.state.config.ENABLE_MESSAGE_RATING,
-        "ENABLE_FEEDBACK_LAYER2": request.app.state.config.ENABLE_FEEDBACK_LAYER2,
-        "FEEDBACK_LAYER2_POSITIVE_TAGS": request.app.state.config.FEEDBACK_LAYER2_POSITIVE_TAGS,
-        "FEEDBACK_LAYER2_NEGATIVE_TAGS": request.app.state.config.FEEDBACK_LAYER2_NEGATIVE_TAGS,
-        "ENABLE_FEEDBACK_LAYER3": request.app.state.config.ENABLE_FEEDBACK_LAYER3,
-        "FEEDBACK_LAYER3_PROMPT": request.app.state.config.FEEDBACK_LAYER3_PROMPT,
-        "ENABLE_FEEDBACK_CATEGORY_TAGS": request.app.state.config.ENABLE_FEEDBACK_CATEGORY_TAGS,
-        "ENABLE_CONVERSATION_FEEDBACK": request.app.state.config.ENABLE_CONVERSATION_FEEDBACK,
-        "CONVERSATION_FEEDBACK_SCALE_MAX": request.app.state.config.CONVERSATION_FEEDBACK_SCALE_MAX,
-        "CONVERSATION_FEEDBACK_HEADER": request.app.state.config.CONVERSATION_FEEDBACK_HEADER,
-        "CONVERSATION_FEEDBACK_PLACEHOLDER": request.app.state.config.CONVERSATION_FEEDBACK_PLACEHOLDER,
+        'ENABLE_EVALUATION_ARENA_MODELS': request.app.state.config.ENABLE_EVALUATION_ARENA_MODELS,
+        'EVALUATION_ARENA_MODELS': request.app.state.config.EVALUATION_ARENA_MODELS,
+        'ENABLE_MESSAGE_RATING': request.app.state.config.ENABLE_MESSAGE_RATING,
+        'ENABLE_FEEDBACK_LAYER2': request.app.state.config.ENABLE_FEEDBACK_LAYER2,
+        'FEEDBACK_LAYER2_POSITIVE_TAGS': request.app.state.config.FEEDBACK_LAYER2_POSITIVE_TAGS,
+        'FEEDBACK_LAYER2_NEGATIVE_TAGS': request.app.state.config.FEEDBACK_LAYER2_NEGATIVE_TAGS,
+        'ENABLE_FEEDBACK_LAYER3': request.app.state.config.ENABLE_FEEDBACK_LAYER3,
+        'FEEDBACK_LAYER3_PROMPT': request.app.state.config.FEEDBACK_LAYER3_PROMPT,
+        'ENABLE_FEEDBACK_CATEGORY_TAGS': request.app.state.config.ENABLE_FEEDBACK_CATEGORY_TAGS,
+        'ENABLE_CONVERSATION_FEEDBACK': request.app.state.config.ENABLE_CONVERSATION_FEEDBACK,
+        'CONVERSATION_FEEDBACK_SCALE_MAX': request.app.state.config.CONVERSATION_FEEDBACK_SCALE_MAX,
+        'CONVERSATION_FEEDBACK_HEADER': request.app.state.config.CONVERSATION_FEEDBACK_HEADER,
+        'CONVERSATION_FEEDBACK_PLACEHOLDER': request.app.state.config.CONVERSATION_FEEDBACK_PLACEHOLDER,
     }
 
 
@@ -330,19 +330,19 @@ async def update_config(
     if form_data.CONVERSATION_FEEDBACK_PLACEHOLDER is not None:
         config.CONVERSATION_FEEDBACK_PLACEHOLDER = form_data.CONVERSATION_FEEDBACK_PLACEHOLDER
     return {
-        "ENABLE_EVALUATION_ARENA_MODELS": config.ENABLE_EVALUATION_ARENA_MODELS,
-        "EVALUATION_ARENA_MODELS": config.EVALUATION_ARENA_MODELS,
-        "ENABLE_MESSAGE_RATING": config.ENABLE_MESSAGE_RATING,
-        "ENABLE_FEEDBACK_LAYER2": config.ENABLE_FEEDBACK_LAYER2,
-        "FEEDBACK_LAYER2_POSITIVE_TAGS": config.FEEDBACK_LAYER2_POSITIVE_TAGS,
-        "FEEDBACK_LAYER2_NEGATIVE_TAGS": config.FEEDBACK_LAYER2_NEGATIVE_TAGS,
-        "ENABLE_FEEDBACK_LAYER3": config.ENABLE_FEEDBACK_LAYER3,
-        "FEEDBACK_LAYER3_PROMPT": config.FEEDBACK_LAYER3_PROMPT,
-        "ENABLE_FEEDBACK_CATEGORY_TAGS": config.ENABLE_FEEDBACK_CATEGORY_TAGS,
-        "ENABLE_CONVERSATION_FEEDBACK": config.ENABLE_CONVERSATION_FEEDBACK,
-        "CONVERSATION_FEEDBACK_SCALE_MAX": config.CONVERSATION_FEEDBACK_SCALE_MAX,
-        "CONVERSATION_FEEDBACK_HEADER": config.CONVERSATION_FEEDBACK_HEADER,
-        "CONVERSATION_FEEDBACK_PLACEHOLDER": config.CONVERSATION_FEEDBACK_PLACEHOLDER,
+        'ENABLE_EVALUATION_ARENA_MODELS': config.ENABLE_EVALUATION_ARENA_MODELS,
+        'EVALUATION_ARENA_MODELS': config.EVALUATION_ARENA_MODELS,
+        'ENABLE_MESSAGE_RATING': config.ENABLE_MESSAGE_RATING,
+        'ENABLE_FEEDBACK_LAYER2': config.ENABLE_FEEDBACK_LAYER2,
+        'FEEDBACK_LAYER2_POSITIVE_TAGS': config.FEEDBACK_LAYER2_POSITIVE_TAGS,
+        'FEEDBACK_LAYER2_NEGATIVE_TAGS': config.FEEDBACK_LAYER2_NEGATIVE_TAGS,
+        'ENABLE_FEEDBACK_LAYER3': config.ENABLE_FEEDBACK_LAYER3,
+        'FEEDBACK_LAYER3_PROMPT': config.FEEDBACK_LAYER3_PROMPT,
+        'ENABLE_FEEDBACK_CATEGORY_TAGS': config.ENABLE_FEEDBACK_CATEGORY_TAGS,
+        'ENABLE_CONVERSATION_FEEDBACK': config.ENABLE_CONVERSATION_FEEDBACK,
+        'CONVERSATION_FEEDBACK_SCALE_MAX': config.CONVERSATION_FEEDBACK_SCALE_MAX,
+        'CONVERSATION_FEEDBACK_HEADER': config.CONVERSATION_FEEDBACK_HEADER,
+        'CONVERSATION_FEEDBACK_PLACEHOLDER': config.CONVERSATION_FEEDBACK_PLACEHOLDER,
     }
 
 
@@ -402,21 +402,21 @@ async def get_feedbacks(
     if order_by:
         filter['order_by'] = order_by
     if direction:
-        filter["direction"] = direction
+        filter['direction'] = direction
     if scope:
-        filter["scope"] = scope
+        filter['scope'] = scope
 
     result = Feedbacks.get_feedback_items(filter=filter, skip=skip, limit=limit, db=db)
     return result
 
 
-@router.get("/feedback/conversation/{chat_id}")
+@router.get('/feedback/conversation/{chat_id}')
 async def get_conversation_feedback(chat_id: str, user=Depends(get_verified_user)):
     feedback = Feedbacks.get_conversation_feedback_by_chat_id_and_user_id(chat_id=chat_id, user_id=user.id)
     return feedback
 
 
-@router.post("/feedback", response_model=FeedbackModel)
+@router.post('/feedback', response_model=FeedbackModel)
 async def create_feedback(
     request: Request,
     form_data: FeedbackForm,

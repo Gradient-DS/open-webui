@@ -639,7 +639,7 @@ async def update_user_by_id(
 ############################
 
 
-@router.delete("/{user_id}", response_model=bool)
+@router.delete('/{user_id}', response_model=bool)
 async def delete_user_by_id(
     request: Request,
     user_id: str,
@@ -677,7 +677,7 @@ async def delete_user_by_id(
             from open_webui.services.archival import ArchiveService
 
             if not archive_reason:
-                archive_reason = "Admin deletion"
+                archive_reason = 'Admin deletion'
 
             if request.app.state.config.ENABLE_USER_ARCHIVAL:
                 retention = archive_retention_days or request.app.state.config.DEFAULT_ARCHIVE_RETENTION_DAYS
@@ -688,12 +688,12 @@ async def delete_user_by_id(
                     retention_days=retention,
                 )
                 if not archive_result.success:
-                    log.warning(f"Failed to archive user before deletion: {archive_result.errors}")
+                    log.warning(f'Failed to archive user before deletion: {archive_result.errors}')
 
         # Proceed with deletion (run in thread pool to avoid blocking the event loop)
         report = await run_in_threadpool(DeletionService.delete_user, user_id)
         if report.has_errors:
-            log.warning(f"User deletion had errors: {report.errors}")
+            log.warning(f'User deletion had errors: {report.errors}')
 
         if report.total_db_records > 0:
             return True

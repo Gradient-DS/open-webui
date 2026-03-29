@@ -142,19 +142,19 @@ def process_uploaded_file(
 
             # Notify frontend via Socket.IO that processing completed
             file_data = Files.get_file_by_id(file_item.id)
-            collection_name = file_data.meta.get("collection_name") if file_data and file_data.meta else None
+            collection_name = file_data.meta.get('collection_name') if file_data and file_data.meta else None
             asyncio.run(
                 emit_file_status(
                     user_id=user.id,
                     file_id=file_item.id,
-                    status="completed",
+                    status='completed',
                     collection_name=collection_name,
                 )
             )
 
         except Exception as e:
             log.error(f'Error processing file: {file_item.id}')
-            error_msg = str(e.detail) if hasattr(e, "detail") else str(e)
+            error_msg = str(e.detail) if hasattr(e, 'detail') else str(e)
             Files.update_file_data_by_id(
                 file_item.id,
                 {
@@ -167,7 +167,7 @@ def process_uploaded_file(
                 emit_file_status(
                     user_id=user.id,
                     file_id=file_item.id,
-                    status="failed",
+                    status='failed',
                     error=error_msg,
                 )
             )

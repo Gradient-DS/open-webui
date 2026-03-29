@@ -935,33 +935,33 @@ async def get_admin_details(request: Request, user=Depends(get_current_user), db
 @router.get('/admin/config')
 async def get_admin_config(request: Request, user=Depends(get_admin_user)):
     return {
-        "SHOW_ADMIN_DETAILS": request.app.state.config.SHOW_ADMIN_DETAILS,
-        "ADMIN_EMAIL": request.app.state.config.ADMIN_EMAIL,
-        "WEBUI_URL": request.app.state.config.WEBUI_URL,
-        "ENABLE_SIGNUP": request.app.state.config.ENABLE_SIGNUP,
-        "ENABLE_API_KEYS": request.app.state.config.ENABLE_API_KEYS,
-        "ENABLE_API_KEYS_ENDPOINT_RESTRICTIONS": request.app.state.config.ENABLE_API_KEYS_ENDPOINT_RESTRICTIONS,
-        "API_KEYS_ALLOWED_ENDPOINTS": request.app.state.config.API_KEYS_ALLOWED_ENDPOINTS,
-        "DEFAULT_USER_ROLE": request.app.state.config.DEFAULT_USER_ROLE,
-        "DEFAULT_GROUP_ID": request.app.state.config.DEFAULT_GROUP_ID,
-        "JWT_EXPIRES_IN": request.app.state.config.JWT_EXPIRES_IN,
-        "ENABLE_COMMUNITY_SHARING": request.app.state.config.ENABLE_COMMUNITY_SHARING,
-        "ENABLE_CITATION_RELEVANCE": request.app.state.config.ENABLE_CITATION_RELEVANCE,
-        "ENABLE_MESSAGE_RATING": request.app.state.config.ENABLE_MESSAGE_RATING,
-        "ENABLE_FOLDERS": request.app.state.config.ENABLE_FOLDERS,
-        "FOLDER_MAX_FILE_COUNT": request.app.state.config.FOLDER_MAX_FILE_COUNT,
-        "ENABLE_CHANNELS": request.app.state.config.ENABLE_CHANNELS,
-        "ENABLE_MEMORIES": request.app.state.config.ENABLE_MEMORIES,
-        "ENABLE_NOTES": request.app.state.config.ENABLE_NOTES,
-        "ENABLE_USER_WEBHOOKS": request.app.state.config.ENABLE_USER_WEBHOOKS,
-        "ENABLE_USER_STATUS": request.app.state.config.ENABLE_USER_STATUS,
-        "PENDING_USER_OVERLAY_TITLE": request.app.state.config.PENDING_USER_OVERLAY_TITLE,
-        "PENDING_USER_OVERLAY_CONTENT": request.app.state.config.PENDING_USER_OVERLAY_CONTENT,
-        "RESPONSE_WATERMARK": request.app.state.config.RESPONSE_WATERMARK,
-        "ENABLE_ACCEPTANCE_MODAL": request.app.state.config.ENABLE_ACCEPTANCE_MODAL,
-        "ACCEPTANCE_MODAL_TITLE": request.app.state.config.ACCEPTANCE_MODAL_TITLE,
-        "ACCEPTANCE_MODAL_CONTENT": request.app.state.config.ACCEPTANCE_MODAL_CONTENT,
-        "ACCEPTANCE_MODAL_BUTTON_TEXT": request.app.state.config.ACCEPTANCE_MODAL_BUTTON_TEXT,
+        'SHOW_ADMIN_DETAILS': request.app.state.config.SHOW_ADMIN_DETAILS,
+        'ADMIN_EMAIL': request.app.state.config.ADMIN_EMAIL,
+        'WEBUI_URL': request.app.state.config.WEBUI_URL,
+        'ENABLE_SIGNUP': request.app.state.config.ENABLE_SIGNUP,
+        'ENABLE_API_KEYS': request.app.state.config.ENABLE_API_KEYS,
+        'ENABLE_API_KEYS_ENDPOINT_RESTRICTIONS': request.app.state.config.ENABLE_API_KEYS_ENDPOINT_RESTRICTIONS,
+        'API_KEYS_ALLOWED_ENDPOINTS': request.app.state.config.API_KEYS_ALLOWED_ENDPOINTS,
+        'DEFAULT_USER_ROLE': request.app.state.config.DEFAULT_USER_ROLE,
+        'DEFAULT_GROUP_ID': request.app.state.config.DEFAULT_GROUP_ID,
+        'JWT_EXPIRES_IN': request.app.state.config.JWT_EXPIRES_IN,
+        'ENABLE_COMMUNITY_SHARING': request.app.state.config.ENABLE_COMMUNITY_SHARING,
+        'ENABLE_CITATION_RELEVANCE': request.app.state.config.ENABLE_CITATION_RELEVANCE,
+        'ENABLE_MESSAGE_RATING': request.app.state.config.ENABLE_MESSAGE_RATING,
+        'ENABLE_FOLDERS': request.app.state.config.ENABLE_FOLDERS,
+        'FOLDER_MAX_FILE_COUNT': request.app.state.config.FOLDER_MAX_FILE_COUNT,
+        'ENABLE_CHANNELS': request.app.state.config.ENABLE_CHANNELS,
+        'ENABLE_MEMORIES': request.app.state.config.ENABLE_MEMORIES,
+        'ENABLE_NOTES': request.app.state.config.ENABLE_NOTES,
+        'ENABLE_USER_WEBHOOKS': request.app.state.config.ENABLE_USER_WEBHOOKS,
+        'ENABLE_USER_STATUS': request.app.state.config.ENABLE_USER_STATUS,
+        'PENDING_USER_OVERLAY_TITLE': request.app.state.config.PENDING_USER_OVERLAY_TITLE,
+        'PENDING_USER_OVERLAY_CONTENT': request.app.state.config.PENDING_USER_OVERLAY_CONTENT,
+        'RESPONSE_WATERMARK': request.app.state.config.RESPONSE_WATERMARK,
+        'ENABLE_ACCEPTANCE_MODAL': request.app.state.config.ENABLE_ACCEPTANCE_MODAL,
+        'ACCEPTANCE_MODAL_TITLE': request.app.state.config.ACCEPTANCE_MODAL_TITLE,
+        'ACCEPTANCE_MODAL_CONTENT': request.app.state.config.ACCEPTANCE_MODAL_CONTENT,
+        'ACCEPTANCE_MODAL_BUTTON_TEXT': request.app.state.config.ACCEPTANCE_MODAL_BUTTON_TEXT,
     }
 
 
@@ -1043,33 +1043,33 @@ async def update_admin_config(request: Request, form_data: AdminConfig, user=Dep
     request.app.state.config.ACCEPTANCE_MODAL_BUTTON_TEXT = form_data.ACCEPTANCE_MODAL_BUTTON_TEXT
 
     return {
-        "SHOW_ADMIN_DETAILS": request.app.state.config.SHOW_ADMIN_DETAILS,
-        "ADMIN_EMAIL": request.app.state.config.ADMIN_EMAIL,
-        "WEBUI_URL": request.app.state.config.WEBUI_URL,
-        "ENABLE_SIGNUP": request.app.state.config.ENABLE_SIGNUP,
-        "ENABLE_API_KEYS": request.app.state.config.ENABLE_API_KEYS,
-        "ENABLE_API_KEYS_ENDPOINT_RESTRICTIONS": request.app.state.config.ENABLE_API_KEYS_ENDPOINT_RESTRICTIONS,
-        "API_KEYS_ALLOWED_ENDPOINTS": request.app.state.config.API_KEYS_ALLOWED_ENDPOINTS,
-        "DEFAULT_USER_ROLE": request.app.state.config.DEFAULT_USER_ROLE,
-        "DEFAULT_GROUP_ID": request.app.state.config.DEFAULT_GROUP_ID,
-        "JWT_EXPIRES_IN": request.app.state.config.JWT_EXPIRES_IN,
-        "ENABLE_COMMUNITY_SHARING": request.app.state.config.ENABLE_COMMUNITY_SHARING,
-        "ENABLE_CITATION_RELEVANCE": request.app.state.config.ENABLE_CITATION_RELEVANCE,
-        "ENABLE_MESSAGE_RATING": request.app.state.config.ENABLE_MESSAGE_RATING,
-        "ENABLE_FOLDERS": request.app.state.config.ENABLE_FOLDERS,
-        "FOLDER_MAX_FILE_COUNT": request.app.state.config.FOLDER_MAX_FILE_COUNT,
-        "ENABLE_CHANNELS": request.app.state.config.ENABLE_CHANNELS,
-        "ENABLE_MEMORIES": request.app.state.config.ENABLE_MEMORIES,
-        "ENABLE_NOTES": request.app.state.config.ENABLE_NOTES,
-        "ENABLE_USER_WEBHOOKS": request.app.state.config.ENABLE_USER_WEBHOOKS,
-        "ENABLE_USER_STATUS": request.app.state.config.ENABLE_USER_STATUS,
-        "PENDING_USER_OVERLAY_TITLE": request.app.state.config.PENDING_USER_OVERLAY_TITLE,
-        "PENDING_USER_OVERLAY_CONTENT": request.app.state.config.PENDING_USER_OVERLAY_CONTENT,
-        "RESPONSE_WATERMARK": request.app.state.config.RESPONSE_WATERMARK,
-        "ENABLE_ACCEPTANCE_MODAL": request.app.state.config.ENABLE_ACCEPTANCE_MODAL,
-        "ACCEPTANCE_MODAL_TITLE": request.app.state.config.ACCEPTANCE_MODAL_TITLE,
-        "ACCEPTANCE_MODAL_CONTENT": request.app.state.config.ACCEPTANCE_MODAL_CONTENT,
-        "ACCEPTANCE_MODAL_BUTTON_TEXT": request.app.state.config.ACCEPTANCE_MODAL_BUTTON_TEXT,
+        'SHOW_ADMIN_DETAILS': request.app.state.config.SHOW_ADMIN_DETAILS,
+        'ADMIN_EMAIL': request.app.state.config.ADMIN_EMAIL,
+        'WEBUI_URL': request.app.state.config.WEBUI_URL,
+        'ENABLE_SIGNUP': request.app.state.config.ENABLE_SIGNUP,
+        'ENABLE_API_KEYS': request.app.state.config.ENABLE_API_KEYS,
+        'ENABLE_API_KEYS_ENDPOINT_RESTRICTIONS': request.app.state.config.ENABLE_API_KEYS_ENDPOINT_RESTRICTIONS,
+        'API_KEYS_ALLOWED_ENDPOINTS': request.app.state.config.API_KEYS_ALLOWED_ENDPOINTS,
+        'DEFAULT_USER_ROLE': request.app.state.config.DEFAULT_USER_ROLE,
+        'DEFAULT_GROUP_ID': request.app.state.config.DEFAULT_GROUP_ID,
+        'JWT_EXPIRES_IN': request.app.state.config.JWT_EXPIRES_IN,
+        'ENABLE_COMMUNITY_SHARING': request.app.state.config.ENABLE_COMMUNITY_SHARING,
+        'ENABLE_CITATION_RELEVANCE': request.app.state.config.ENABLE_CITATION_RELEVANCE,
+        'ENABLE_MESSAGE_RATING': request.app.state.config.ENABLE_MESSAGE_RATING,
+        'ENABLE_FOLDERS': request.app.state.config.ENABLE_FOLDERS,
+        'FOLDER_MAX_FILE_COUNT': request.app.state.config.FOLDER_MAX_FILE_COUNT,
+        'ENABLE_CHANNELS': request.app.state.config.ENABLE_CHANNELS,
+        'ENABLE_MEMORIES': request.app.state.config.ENABLE_MEMORIES,
+        'ENABLE_NOTES': request.app.state.config.ENABLE_NOTES,
+        'ENABLE_USER_WEBHOOKS': request.app.state.config.ENABLE_USER_WEBHOOKS,
+        'ENABLE_USER_STATUS': request.app.state.config.ENABLE_USER_STATUS,
+        'PENDING_USER_OVERLAY_TITLE': request.app.state.config.PENDING_USER_OVERLAY_TITLE,
+        'PENDING_USER_OVERLAY_CONTENT': request.app.state.config.PENDING_USER_OVERLAY_CONTENT,
+        'RESPONSE_WATERMARK': request.app.state.config.RESPONSE_WATERMARK,
+        'ENABLE_ACCEPTANCE_MODAL': request.app.state.config.ENABLE_ACCEPTANCE_MODAL,
+        'ACCEPTANCE_MODAL_TITLE': request.app.state.config.ACCEPTANCE_MODAL_TITLE,
+        'ACCEPTANCE_MODAL_CONTENT': request.app.state.config.ACCEPTANCE_MODAL_CONTENT,
+        'ACCEPTANCE_MODAL_BUTTON_TEXT': request.app.state.config.ACCEPTANCE_MODAL_BUTTON_TEXT,
     }
 
 
@@ -1174,11 +1174,11 @@ async def update_ldap_config(request: Request, form_data: LdapConfigForm, user=D
 
 
 # create api key
-@router.post("/api_key", response_model=ApiKey)
+@router.post('/api_key', response_model=ApiKey)
 async def generate_api_key(request: Request, user=Depends(get_current_user), db: Session = Depends(get_session)):
     if not request.app.state.config.ENABLE_API_KEYS or (
-        user.role != "admin"
-        and not has_permission(user.id, "features.api_keys", request.app.state.config.USER_PERMISSIONS)
+        user.role != 'admin'
+        and not has_permission(user.id, 'features.api_keys', request.app.state.config.USER_PERMISSIONS)
     ):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,

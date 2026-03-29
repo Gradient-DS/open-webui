@@ -409,7 +409,7 @@ def check_model_access(user, model, db=None):
 def get_filtered_models(models, user, db=None):
     # Apply global model whitelist filter first (if configured)
     if MODEL_WHITELIST:
-        models = [m for m in models if m.get("id") in MODEL_WHITELIST]
+        models = [m for m in models if m.get('id') in MODEL_WHITELIST]
 
     # Filter out models that the user does not have access to
     if (

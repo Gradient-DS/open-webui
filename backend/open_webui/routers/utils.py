@@ -123,7 +123,7 @@ async def download_db(user=Depends(get_admin_user)):
     )
 
 
-@router.get("/db/export")
+@router.get('/db/export')
 async def export_db_json(user=Depends(get_admin_user)):
     """
     Export database as JSON.
@@ -145,10 +145,10 @@ async def export_db_json(user=Depends(get_admin_user)):
         )
 
     export_data = {
-        "export_version": "1.0",
-        "exported_at": int(time.time()),
-        "database_type": engine.name,
-        "tables": {},
+        'export_version': '1.0',
+        'exported_at': int(time.time()),
+        'database_type': engine.name,
+        'tables': {},
     }
 
     inspector = inspect(engine)
@@ -157,7 +157,7 @@ async def export_db_json(user=Depends(get_admin_user)):
     with get_db() as db:
         for table_name in table_names:
             # Skip alembic version table
-            if table_name == "alembic_version":
+            if table_name == 'alembic_version':
                 continue
 
             try:
@@ -172,31 +172,31 @@ async def export_db_json(user=Depends(get_admin_user)):
                         # Handle non-JSON-serializable types
                         if isinstance(value, bytes):
                             value = value.hex()
-                        elif hasattr(value, "isoformat"):
+                        elif hasattr(value, 'isoformat'):
                             value = value.isoformat()
                         row_dict[col] = value
                     rows.append(row_dict)
-                export_data["tables"][table_name] = {
-                    "columns": list(columns),
-                    "row_count": len(rows),
-                    "rows": rows,
+                export_data['tables'][table_name] = {
+                    'columns': list(columns),
+                    'row_count': len(rows),
+                    'rows': rows,
                 }
             except Exception as e:
-                log.error(f"Error exporting table {table_name}: {e}")
-                export_data["tables"][table_name] = {
-                    "error": str(e),
+                log.error(f'Error exporting table {table_name}: {e}')
+                export_data['tables'][table_name] = {
+                    'error': str(e),
                 }
 
     # Create JSON file in memory
-    json_bytes = json.dumps(export_data, indent=2, default=str).encode("utf-8")
+    json_bytes = json.dumps(export_data, indent=2, default=str).encode('utf-8')
     buffer = BytesIO(json_bytes)
 
-    filename = f"openwebui-export-{int(time.time())}.json"
+    filename = f'openwebui-export-{int(time.time())}.json'
 
     return StreamingResponse(
         buffer,
-        media_type="application/json",
+        media_type='application/json',
         headers={
-            "Content-Disposition": f"attachment; filename={filename}",
+            'Content-Disposition': f'attachment; filename={filename}',
         },
     )

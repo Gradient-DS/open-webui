@@ -11,8 +11,8 @@ from open_webui.config import (
 )
 
 _scheduler = SyncScheduler(
-    provider_type="onedrive",
-    meta_key="onedrive_sync",
+    provider_type='onedrive',
+    meta_key='onedrive_sync',
     enable_config=ENABLE_ONEDRIVE_SYNC,
     interval_config=ONEDRIVE_SYNC_INTERVAL_MINUTES,
 )

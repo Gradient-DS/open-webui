@@ -67,7 +67,7 @@ def run_migrations():
 
         command.upgrade(alembic_cfg, 'head')
     except Exception as e:
-        log.critical(f"Database migration failed: {e}")
+        log.critical(f'Database migration failed: {e}')
         log.exception(e)
         raise
 
@@ -1087,13 +1087,13 @@ OPENAI_API_BASE_URLS = PersistentConfig('OPENAI_API_BASE_URLS', 'openai.api_base
 # Example: OPENAI_API_CONFIGS='{"0": {"enable": true, "model_ids": ["gpt-4"]}}'
 OPENAI_API_CONFIGS_DEFAULT = {}
 try:
-    OPENAI_API_CONFIGS_DEFAULT = json.loads(os.environ.get("OPENAI_API_CONFIGS", "{}"))
+    OPENAI_API_CONFIGS_DEFAULT = json.loads(os.environ.get('OPENAI_API_CONFIGS', '{}'))
 except json.JSONDecodeError:
     pass
 
 OPENAI_API_CONFIGS = PersistentConfig(
-    "OPENAI_API_CONFIGS",
-    "openai.api_configs",
+    'OPENAI_API_CONFIGS',
+    'openai.api_configs',
     OPENAI_API_CONFIGS_DEFAULT,
 )
 
@@ -1182,10 +1182,10 @@ DEFAULT_PINNED_MODELS = PersistentConfig(
     os.environ.get('DEFAULT_PINNED_MODELS', None),
 )
 
-_default_prompt_suggestions_env = os.environ.get("DEFAULT_PROMPT_SUGGESTIONS")
+_default_prompt_suggestions_env = os.environ.get('DEFAULT_PROMPT_SUGGESTIONS')
 try:
     default_prompt_suggestions = json.loads(
-        _default_prompt_suggestions_env if _default_prompt_suggestions_env is not None else "[]"
+        _default_prompt_suggestions_env if _default_prompt_suggestions_env is not None else '[]'
     )
 except Exception as e:
     log.exception(f'Error loading DEFAULT_PROMPT_SUGGESTIONS: {e}')
@@ -1270,27 +1270,27 @@ PENDING_USER_OVERLAY_CONTENT = PersistentConfig(
 )
 
 ENABLE_ACCEPTANCE_MODAL = PersistentConfig(
-    "ENABLE_ACCEPTANCE_MODAL",
-    "ui.enable_acceptance_modal",
-    os.environ.get("ENABLE_ACCEPTANCE_MODAL", "False").lower() == "true",
+    'ENABLE_ACCEPTANCE_MODAL',
+    'ui.enable_acceptance_modal',
+    os.environ.get('ENABLE_ACCEPTANCE_MODAL', 'False').lower() == 'true',
 )
 
 ACCEPTANCE_MODAL_TITLE = PersistentConfig(
-    "ACCEPTANCE_MODAL_TITLE",
-    "ui.acceptance_modal_title",
-    os.environ.get("ACCEPTANCE_MODAL_TITLE", ""),
+    'ACCEPTANCE_MODAL_TITLE',
+    'ui.acceptance_modal_title',
+    os.environ.get('ACCEPTANCE_MODAL_TITLE', ''),
 )
 
 ACCEPTANCE_MODAL_CONTENT = PersistentConfig(
-    "ACCEPTANCE_MODAL_CONTENT",
-    "ui.acceptance_modal_content",
-    os.environ.get("ACCEPTANCE_MODAL_CONTENT", ""),
+    'ACCEPTANCE_MODAL_CONTENT',
+    'ui.acceptance_modal_content',
+    os.environ.get('ACCEPTANCE_MODAL_CONTENT', ''),
 )
 
 ACCEPTANCE_MODAL_BUTTON_TEXT = PersistentConfig(
-    "ACCEPTANCE_MODAL_BUTTON_TEXT",
-    "ui.acceptance_modal_button_text",
-    os.environ.get("ACCEPTANCE_MODAL_BUTTON_TEXT", ""),
+    'ACCEPTANCE_MODAL_BUTTON_TEXT',
+    'ui.acceptance_modal_button_text',
+    os.environ.get('ACCEPTANCE_MODAL_BUTTON_TEXT', ''),
 )
 
 
@@ -1301,9 +1301,9 @@ RESPONSE_WATERMARK = PersistentConfig(
 )
 
 GREETING_TEMPLATE = PersistentConfig(
-    "GREETING_TEMPLATE",
-    "ui.greeting_template",
-    os.environ.get("GREETING_TEMPLATE", ""),
+    'GREETING_TEMPLATE',
+    'ui.greeting_template',
+    os.environ.get('GREETING_TEMPLATE', ''),
 )
 
 
@@ -1605,63 +1605,63 @@ EVALUATION_ARENA_MODELS = PersistentConfig(
 ####################################
 
 ENABLE_FEEDBACK_LAYER2 = PersistentConfig(
-    "ENABLE_FEEDBACK_LAYER2",
-    "evaluation.feedback.layer2.enable",
-    os.environ.get("ENABLE_FEEDBACK_LAYER2", "True").lower() == "true",
+    'ENABLE_FEEDBACK_LAYER2',
+    'evaluation.feedback.layer2.enable',
+    os.environ.get('ENABLE_FEEDBACK_LAYER2', 'True').lower() == 'true',
 )
 
 FEEDBACK_LAYER2_POSITIVE_TAGS = PersistentConfig(
-    "FEEDBACK_LAYER2_POSITIVE_TAGS",
-    "evaluation.feedback.layer2.positive_tags",
+    'FEEDBACK_LAYER2_POSITIVE_TAGS',
+    'evaluation.feedback.layer2.positive_tags',
     [],
 )
 
 FEEDBACK_LAYER2_NEGATIVE_TAGS = PersistentConfig(
-    "FEEDBACK_LAYER2_NEGATIVE_TAGS",
-    "evaluation.feedback.layer2.negative_tags",
+    'FEEDBACK_LAYER2_NEGATIVE_TAGS',
+    'evaluation.feedback.layer2.negative_tags',
     [],
 )
 
 ENABLE_FEEDBACK_LAYER3 = PersistentConfig(
-    "ENABLE_FEEDBACK_LAYER3",
-    "evaluation.feedback.layer3.enable",
-    os.environ.get("ENABLE_FEEDBACK_LAYER3", "True").lower() == "true",
+    'ENABLE_FEEDBACK_LAYER3',
+    'evaluation.feedback.layer3.enable',
+    os.environ.get('ENABLE_FEEDBACK_LAYER3', 'True').lower() == 'true',
 )
 
 FEEDBACK_LAYER3_PROMPT = PersistentConfig(
-    "FEEDBACK_LAYER3_PROMPT",
-    "evaluation.feedback.layer3.prompt",
-    "",
+    'FEEDBACK_LAYER3_PROMPT',
+    'evaluation.feedback.layer3.prompt',
+    '',
 )
 
 ENABLE_FEEDBACK_CATEGORY_TAGS = PersistentConfig(
-    "ENABLE_FEEDBACK_CATEGORY_TAGS",
-    "evaluation.feedback.category_tags.enable",
-    os.environ.get("ENABLE_FEEDBACK_CATEGORY_TAGS", "True").lower() == "true",
+    'ENABLE_FEEDBACK_CATEGORY_TAGS',
+    'evaluation.feedback.category_tags.enable',
+    os.environ.get('ENABLE_FEEDBACK_CATEGORY_TAGS', 'True').lower() == 'true',
 )
 
 ENABLE_CONVERSATION_FEEDBACK = PersistentConfig(
-    "ENABLE_CONVERSATION_FEEDBACK",
-    "evaluation.feedback.conversation.enable",
-    os.environ.get("ENABLE_CONVERSATION_FEEDBACK", "False").lower() == "true",
+    'ENABLE_CONVERSATION_FEEDBACK',
+    'evaluation.feedback.conversation.enable',
+    os.environ.get('ENABLE_CONVERSATION_FEEDBACK', 'False').lower() == 'true',
 )
 
 CONVERSATION_FEEDBACK_SCALE_MAX = PersistentConfig(
-    "CONVERSATION_FEEDBACK_SCALE_MAX",
-    "evaluation.feedback.conversation.scale_max",
-    int(os.environ.get("CONVERSATION_FEEDBACK_SCALE_MAX", "5")),
+    'CONVERSATION_FEEDBACK_SCALE_MAX',
+    'evaluation.feedback.conversation.scale_max',
+    int(os.environ.get('CONVERSATION_FEEDBACK_SCALE_MAX', '5')),
 )
 
 CONVERSATION_FEEDBACK_HEADER = PersistentConfig(
-    "CONVERSATION_FEEDBACK_HEADER",
-    "evaluation.feedback.conversation.header",
-    "",
+    'CONVERSATION_FEEDBACK_HEADER',
+    'evaluation.feedback.conversation.header',
+    '',
 )
 
 CONVERSATION_FEEDBACK_PLACEHOLDER = PersistentConfig(
-    "CONVERSATION_FEEDBACK_PLACEHOLDER",
-    "evaluation.feedback.conversation.placeholder",
-    "",
+    'CONVERSATION_FEEDBACK_PLACEHOLDER',
+    'evaluation.feedback.conversation.placeholder',
+    '',
 )
 
 DEFAULT_ARENA_MODEL = {
@@ -1697,75 +1697,75 @@ ENABLE_ADMIN_CHAT_ACCESS = os.environ.get('ENABLE_ADMIN_CHAT_ACCESS', 'True').lo
 ####################################
 
 ENABLE_USER_ARCHIVAL = PersistentConfig(
-    "ENABLE_USER_ARCHIVAL",
-    "admin.enable_user_archival",
-    os.environ.get("ENABLE_USER_ARCHIVAL", "True").lower() == "true",
+    'ENABLE_USER_ARCHIVAL',
+    'admin.enable_user_archival',
+    os.environ.get('ENABLE_USER_ARCHIVAL', 'True').lower() == 'true',
 )
 
 DEFAULT_ARCHIVE_RETENTION_DAYS = PersistentConfig(
-    "DEFAULT_ARCHIVE_RETENTION_DAYS",
-    "admin.default_archive_retention_days",
-    int(os.environ.get("DEFAULT_ARCHIVE_RETENTION_DAYS", "1095")),  # 3 years default (ISO 27001)
+    'DEFAULT_ARCHIVE_RETENTION_DAYS',
+    'admin.default_archive_retention_days',
+    int(os.environ.get('DEFAULT_ARCHIVE_RETENTION_DAYS', '1095')),  # 3 years default (ISO 27001)
 )
 
 # Auto-archive when users delete their own accounts
 ENABLE_AUTO_ARCHIVE_ON_SELF_DELETE = PersistentConfig(
-    "ENABLE_AUTO_ARCHIVE_ON_SELF_DELETE",
-    "admin.enable_auto_archive_on_self_delete",
-    os.environ.get("ENABLE_AUTO_ARCHIVE_ON_SELF_DELETE", "False").lower() == "true",
+    'ENABLE_AUTO_ARCHIVE_ON_SELF_DELETE',
+    'admin.enable_auto_archive_on_self_delete',
+    os.environ.get('ENABLE_AUTO_ARCHIVE_ON_SELF_DELETE', 'False').lower() == 'true',
 )
 
 AUTO_ARCHIVE_RETENTION_DAYS = PersistentConfig(
-    "AUTO_ARCHIVE_RETENTION_DAYS",
-    "admin.auto_archive_retention_days",
-    int(os.environ.get("AUTO_ARCHIVE_RETENTION_DAYS", "365")),  # 1 year default for self-delete
+    'AUTO_ARCHIVE_RETENTION_DAYS',
+    'admin.auto_archive_retention_days',
+    int(os.environ.get('AUTO_ARCHIVE_RETENTION_DAYS', '365')),  # 1 year default for self-delete
 )
 
 ####################################
 # Feature Flags (SaaS Tier Control)
 ####################################
 
-FEATURE_CHAT_CONTROLS = os.environ.get("FEATURE_CHAT_CONTROLS", "True").lower() == "true"
-FEATURE_CAPTURE = os.environ.get("FEATURE_CAPTURE", "True").lower() == "true"
-FEATURE_ARTIFACTS = os.environ.get("FEATURE_ARTIFACTS", "True").lower() == "true"
-FEATURE_PLAYGROUND = os.environ.get("FEATURE_PLAYGROUND", "True").lower() == "true"
-FEATURE_CHAT_OVERVIEW = os.environ.get("FEATURE_CHAT_OVERVIEW", "True").lower() == "true"
-FEATURE_NOTES_AI_CONTROLS = os.environ.get("FEATURE_NOTES_AI_CONTROLS", "True").lower() == "true"
-FEATURE_VOICE = os.environ.get("FEATURE_VOICE", "True").lower() == "true"
-FEATURE_CHANGELOG = os.environ.get("FEATURE_CHANGELOG", "True").lower() == "true"
-FEATURE_SYSTEM_PROMPT = os.environ.get("FEATURE_SYSTEM_PROMPT", "True").lower() == "true"
-FEATURE_MODELS = os.environ.get("FEATURE_MODELS", "True").lower() == "true"
-FEATURE_KNOWLEDGE = os.environ.get("FEATURE_KNOWLEDGE", "True").lower() == "true"
-FEATURE_PROMPTS = os.environ.get("FEATURE_PROMPTS", "True").lower() == "true"
-FEATURE_TOOLS = os.environ.get("FEATURE_TOOLS", "True").lower() == "true"
-FEATURE_SKILLS = os.environ.get("FEATURE_SKILLS", "False").lower() == "true"
-FEATURE_WEBPAGE_URL = os.environ.get("FEATURE_WEBPAGE_URL", "True").lower() == "true"
-FEATURE_REFERENCE_CHATS = os.environ.get("FEATURE_REFERENCE_CHATS", "True").lower() == "true"
-FEATURE_INPUT_MENU = os.environ.get("FEATURE_INPUT_MENU", "True").lower() == "true"
-FEATURE_TEMPORARY_CHAT = os.environ.get("FEATURE_TEMPORARY_CHAT", "True").lower() == "true"
-FEATURE_TOOL_SERVERS = os.environ.get("FEATURE_TOOL_SERVERS", "True").lower() == "true"
-FEATURE_TERMINAL_SERVERS = os.environ.get("FEATURE_TERMINAL_SERVERS", "True").lower() == "true"
+FEATURE_CHAT_CONTROLS = os.environ.get('FEATURE_CHAT_CONTROLS', 'True').lower() == 'true'
+FEATURE_CAPTURE = os.environ.get('FEATURE_CAPTURE', 'True').lower() == 'true'
+FEATURE_ARTIFACTS = os.environ.get('FEATURE_ARTIFACTS', 'True').lower() == 'true'
+FEATURE_PLAYGROUND = os.environ.get('FEATURE_PLAYGROUND', 'True').lower() == 'true'
+FEATURE_CHAT_OVERVIEW = os.environ.get('FEATURE_CHAT_OVERVIEW', 'True').lower() == 'true'
+FEATURE_NOTES_AI_CONTROLS = os.environ.get('FEATURE_NOTES_AI_CONTROLS', 'True').lower() == 'true'
+FEATURE_VOICE = os.environ.get('FEATURE_VOICE', 'True').lower() == 'true'
+FEATURE_CHANGELOG = os.environ.get('FEATURE_CHANGELOG', 'True').lower() == 'true'
+FEATURE_SYSTEM_PROMPT = os.environ.get('FEATURE_SYSTEM_PROMPT', 'True').lower() == 'true'
+FEATURE_MODELS = os.environ.get('FEATURE_MODELS', 'True').lower() == 'true'
+FEATURE_KNOWLEDGE = os.environ.get('FEATURE_KNOWLEDGE', 'True').lower() == 'true'
+FEATURE_PROMPTS = os.environ.get('FEATURE_PROMPTS', 'True').lower() == 'true'
+FEATURE_TOOLS = os.environ.get('FEATURE_TOOLS', 'True').lower() == 'true'
+FEATURE_SKILLS = os.environ.get('FEATURE_SKILLS', 'False').lower() == 'true'
+FEATURE_WEBPAGE_URL = os.environ.get('FEATURE_WEBPAGE_URL', 'True').lower() == 'true'
+FEATURE_REFERENCE_CHATS = os.environ.get('FEATURE_REFERENCE_CHATS', 'True').lower() == 'true'
+FEATURE_INPUT_MENU = os.environ.get('FEATURE_INPUT_MENU', 'True').lower() == 'true'
+FEATURE_TEMPORARY_CHAT = os.environ.get('FEATURE_TEMPORARY_CHAT', 'True').lower() == 'true'
+FEATURE_TOOL_SERVERS = os.environ.get('FEATURE_TOOL_SERVERS', 'True').lower() == 'true'
+FEATURE_TERMINAL_SERVERS = os.environ.get('FEATURE_TERMINAL_SERVERS', 'True').lower() == 'true'
 
-FEATURE_BUILTIN_TOOLS = os.environ.get("FEATURE_BUILTIN_TOOLS", "True").lower() == "true"
+FEATURE_BUILTIN_TOOLS = os.environ.get('FEATURE_BUILTIN_TOOLS', 'True').lower() == 'true'
 
 # Admin Panel Tab Feature Flags
-FEATURE_ADMIN_EVALUATIONS = os.environ.get("FEATURE_ADMIN_EVALUATIONS", "True").lower() == "true"
-FEATURE_ADMIN_FUNCTIONS = os.environ.get("FEATURE_ADMIN_FUNCTIONS", "True").lower() == "true"
-FEATURE_ADMIN_SETTINGS = os.environ.get("FEATURE_ADMIN_SETTINGS", "True").lower() == "true"
+FEATURE_ADMIN_EVALUATIONS = os.environ.get('FEATURE_ADMIN_EVALUATIONS', 'True').lower() == 'true'
+FEATURE_ADMIN_FUNCTIONS = os.environ.get('FEATURE_ADMIN_FUNCTIONS', 'True').lower() == 'true'
+FEATURE_ADMIN_SETTINGS = os.environ.get('FEATURE_ADMIN_SETTINGS', 'True').lower() == 'true'
 FEATURE_ADMIN_SETTINGS_TABS = [
-    tab.strip() for tab in os.environ.get("FEATURE_ADMIN_SETTINGS_TABS", "").split(",") if tab.strip()
+    tab.strip() for tab in os.environ.get('FEATURE_ADMIN_SETTINGS_TABS', '').split(',') if tab.strip()
 ]
 
 # Chat Controls Section Whitelist (empty = all sections enabled)
 # Valid sections: files, valves, system_prompt, params
 FEATURE_CHAT_CONTROLS_SECTIONS = [
-    section.strip() for section in os.environ.get("FEATURE_CHAT_CONTROLS_SECTIONS", "").split(",") if section.strip()
+    section.strip() for section in os.environ.get('FEATURE_CHAT_CONTROLS_SECTIONS', '').split(',') if section.strip()
 ]
 
 # Model Whitelist (empty = show all models)
-MODEL_WHITELIST = [model.strip() for model in os.environ.get("MODEL_WHITELIST", "").split(",") if model.strip()]
+MODEL_WHITELIST = [model.strip() for model in os.environ.get('MODEL_WHITELIST', '').split(',') if model.strip()]
 
-ENABLE_ADMIN_ANALYTICS = os.environ.get("ENABLE_ADMIN_ANALYTICS", "True").lower() == "true"
+ENABLE_ADMIN_ANALYTICS = os.environ.get('ENABLE_ADMIN_ANALYTICS', 'True').lower() == 'true'
 
 ENABLE_COMMUNITY_SHARING = PersistentConfig(
     'ENABLE_COMMUNITY_SHARING',
@@ -1774,9 +1774,9 @@ ENABLE_COMMUNITY_SHARING = PersistentConfig(
 )
 
 ENABLE_CITATION_RELEVANCE = PersistentConfig(
-    "ENABLE_CITATION_RELEVANCE",
-    "ui.enable_citation_relevance",
-    os.environ.get("ENABLE_CITATION_RELEVANCE", "True").lower() == "true",
+    'ENABLE_CITATION_RELEVANCE',
+    'ui.enable_citation_relevance',
+    os.environ.get('ENABLE_CITATION_RELEVANCE', 'True').lower() == 'true',
 )
 
 ENABLE_MESSAGE_RATING = PersistentConfig(
@@ -1858,9 +1858,9 @@ WEBUI_BANNERS = PersistentConfig('WEBUI_BANNERS', 'ui.banners', banners)
 
 # soev.ai branding
 SOEV_LOGIN_FOOTER = PersistentConfig(
-    "SOEV_LOGIN_FOOTER",
-    "ui.soev_login_footer",
-    os.environ.get("SOEV_LOGIN_FOOTER", "Powered by [soev.ai](https://soev.ai)"),
+    'SOEV_LOGIN_FOOTER',
+    'ui.soev_login_footer',
+    os.environ.get('SOEV_LOGIN_FOOTER', 'Powered by [soev.ai](https://soev.ai)'),
 )
 
 
@@ -2470,16 +2470,16 @@ QDRANT_HNSW_M = int(os.environ.get('QDRANT_HNSW_M', '16'))
 ENABLE_QDRANT_MULTITENANCY_MODE = os.environ.get('ENABLE_QDRANT_MULTITENANCY_MODE', 'true').lower() == 'true'
 QDRANT_COLLECTION_PREFIX = os.environ.get('QDRANT_COLLECTION_PREFIX', 'open-webui')
 
-WEAVIATE_HTTP_HOST = os.environ.get("WEAVIATE_HTTP_HOST", "")
-WEAVIATE_GRPC_HOST = os.environ.get("WEAVIATE_GRPC_HOST", "")
-WEAVIATE_HTTP_PORT = int(os.environ.get("WEAVIATE_HTTP_PORT", "8080"))
-WEAVIATE_GRPC_PORT = int(os.environ.get("WEAVIATE_GRPC_PORT", "50051"))
-WEAVIATE_API_KEY = os.environ.get("WEAVIATE_API_KEY")
+WEAVIATE_HTTP_HOST = os.environ.get('WEAVIATE_HTTP_HOST', '')
+WEAVIATE_GRPC_HOST = os.environ.get('WEAVIATE_GRPC_HOST', '')
+WEAVIATE_HTTP_PORT = int(os.environ.get('WEAVIATE_HTTP_PORT', '8080'))
+WEAVIATE_GRPC_PORT = int(os.environ.get('WEAVIATE_GRPC_PORT', '50051'))
+WEAVIATE_API_KEY = os.environ.get('WEAVIATE_API_KEY')
 # TTL for web search collections in minutes (0 = disabled, default 24 hours = 1440 minutes)
-WEAVIATE_WEB_SEARCH_TTL_MINUTES = int(os.environ.get("WEAVIATE_WEB_SEARCH_TTL_MINUTES", "1440"))
-WEAVIATE_HTTP_SECURE = os.environ.get("WEAVIATE_HTTP_SECURE", "false").lower() == "true"
-WEAVIATE_GRPC_SECURE = os.environ.get("WEAVIATE_GRPC_SECURE", "false").lower() == "true"
-WEAVIATE_SKIP_INIT_CHECKS = os.environ.get("WEAVIATE_SKIP_INIT_CHECKS", "false").lower() == "true"
+WEAVIATE_WEB_SEARCH_TTL_MINUTES = int(os.environ.get('WEAVIATE_WEB_SEARCH_TTL_MINUTES', '1440'))
+WEAVIATE_HTTP_SECURE = os.environ.get('WEAVIATE_HTTP_SECURE', 'false').lower() == 'true'
+WEAVIATE_GRPC_SECURE = os.environ.get('WEAVIATE_GRPC_SECURE', 'false').lower() == 'true'
+WEAVIATE_SKIP_INIT_CHECKS = os.environ.get('WEAVIATE_SKIP_INIT_CHECKS', 'false').lower() == 'true'
 
 # OpenSearch
 OPENSEARCH_URI = os.environ.get('OPENSEARCH_URI', 'https://localhost:9200')
@@ -2699,20 +2699,20 @@ GOOGLE_DRIVE_API_KEY = PersistentConfig(
 )
 
 ENABLE_GOOGLE_DRIVE_SYNC = PersistentConfig(
-    "ENABLE_GOOGLE_DRIVE_SYNC",
-    "google_drive.enable_sync",
-    os.getenv("ENABLE_GOOGLE_DRIVE_SYNC", "False").lower() == "true",
+    'ENABLE_GOOGLE_DRIVE_SYNC',
+    'google_drive.enable_sync',
+    os.getenv('ENABLE_GOOGLE_DRIVE_SYNC', 'False').lower() == 'true',
 )
 
 GOOGLE_DRIVE_SYNC_INTERVAL_MINUTES = PersistentConfig(
-    "GOOGLE_DRIVE_SYNC_INTERVAL_MINUTES",
-    "google_drive.sync_interval_minutes",
-    int(os.environ.get("GOOGLE_DRIVE_SYNC_INTERVAL_MINUTES", "60")),
+    'GOOGLE_DRIVE_SYNC_INTERVAL_MINUTES',
+    'google_drive.sync_interval_minutes',
+    int(os.environ.get('GOOGLE_DRIVE_SYNC_INTERVAL_MINUTES', '60')),
 )
 
-GOOGLE_DRIVE_MAX_FILES_PER_SYNC = int(os.environ.get("GOOGLE_DRIVE_MAX_FILES_PER_SYNC", "500"))
+GOOGLE_DRIVE_MAX_FILES_PER_SYNC = int(os.environ.get('GOOGLE_DRIVE_MAX_FILES_PER_SYNC', '500'))
 
-GOOGLE_DRIVE_MAX_FILE_SIZE_MB = int(os.environ.get("GOOGLE_DRIVE_MAX_FILE_SIZE_MB", "100"))
+GOOGLE_DRIVE_MAX_FILE_SIZE_MB = int(os.environ.get('GOOGLE_DRIVE_MAX_FILE_SIZE_MB', '100'))
 
 ENABLE_ONEDRIVE_INTEGRATION = PersistentConfig(
     'ENABLE_ONEDRIVE_INTEGRATION',
@@ -2743,62 +2743,62 @@ ONEDRIVE_SHAREPOINT_TENANT_ID = PersistentConfig(
 
 # OneDrive Sync Configuration
 ENABLE_ONEDRIVE_SYNC = PersistentConfig(
-    "ENABLE_ONEDRIVE_SYNC",
-    "onedrive.enable_sync",
-    os.getenv("ENABLE_ONEDRIVE_SYNC", "False").lower() == "true",
+    'ENABLE_ONEDRIVE_SYNC',
+    'onedrive.enable_sync',
+    os.getenv('ENABLE_ONEDRIVE_SYNC', 'False').lower() == 'true',
 )
 
 ONEDRIVE_SYNC_INTERVAL_MINUTES = PersistentConfig(
-    "ONEDRIVE_SYNC_INTERVAL_MINUTES",
-    "onedrive.sync_interval_minutes",
-    int(os.getenv("ONEDRIVE_SYNC_INTERVAL_MINUTES", "60")),
+    'ONEDRIVE_SYNC_INTERVAL_MINUTES',
+    'onedrive.sync_interval_minutes',
+    int(os.getenv('ONEDRIVE_SYNC_INTERVAL_MINUTES', '60')),
 )
 
-ONEDRIVE_MAX_FILES_PER_SYNC = int(os.getenv("ONEDRIVE_MAX_FILES_PER_SYNC", "500"))
-ONEDRIVE_MAX_FILE_SIZE_MB = int(os.getenv("ONEDRIVE_MAX_FILE_SIZE_MB", "100"))
+ONEDRIVE_MAX_FILES_PER_SYNC = int(os.getenv('ONEDRIVE_MAX_FILES_PER_SYNC', '500'))
+ONEDRIVE_MAX_FILE_SIZE_MB = int(os.getenv('ONEDRIVE_MAX_FILE_SIZE_MB', '100'))
 
 ####################################
 # Email Service (Microsoft Graph API)
 ####################################
 
 ENABLE_EMAIL_INVITES = PersistentConfig(
-    "ENABLE_EMAIL_INVITES",
-    "email.enable_invites",
-    os.environ.get("ENABLE_EMAIL_INVITES", "False").lower() == "true",
+    'ENABLE_EMAIL_INVITES',
+    'email.enable_invites',
+    os.environ.get('ENABLE_EMAIL_INVITES', 'False').lower() == 'true',
 )
 
-EMAIL_GRAPH_TENANT_ID = os.environ.get("EMAIL_GRAPH_TENANT_ID", "")
-EMAIL_GRAPH_CLIENT_ID = os.environ.get("EMAIL_GRAPH_CLIENT_ID", "")
-EMAIL_GRAPH_CLIENT_SECRET = os.environ.get("EMAIL_GRAPH_CLIENT_SECRET", "")
+EMAIL_GRAPH_TENANT_ID = os.environ.get('EMAIL_GRAPH_TENANT_ID', '')
+EMAIL_GRAPH_CLIENT_ID = os.environ.get('EMAIL_GRAPH_CLIENT_ID', '')
+EMAIL_GRAPH_CLIENT_SECRET = os.environ.get('EMAIL_GRAPH_CLIENT_SECRET', '')
 
 EMAIL_FROM_ADDRESS = PersistentConfig(
-    "EMAIL_FROM_ADDRESS",
-    "email.from_address",
-    os.environ.get("EMAIL_FROM_ADDRESS", "no-reply@soev.ai"),
+    'EMAIL_FROM_ADDRESS',
+    'email.from_address',
+    os.environ.get('EMAIL_FROM_ADDRESS', 'no-reply@soev.ai'),
 )
 
 EMAIL_FROM_NAME = PersistentConfig(
-    "EMAIL_FROM_NAME",
-    "email.from_name",
-    os.environ.get("EMAIL_FROM_NAME", "Soev"),
+    'EMAIL_FROM_NAME',
+    'email.from_name',
+    os.environ.get('EMAIL_FROM_NAME', 'Soev'),
 )
 
 INVITE_EXPIRY_HOURS = PersistentConfig(
-    "INVITE_EXPIRY_HOURS",
-    "email.invite_expiry_hours",
-    int(os.environ.get("INVITE_EXPIRY_HOURS", "168")),
+    'INVITE_EXPIRY_HOURS',
+    'email.invite_expiry_hours',
+    int(os.environ.get('INVITE_EXPIRY_HOURS', '168')),
 )
 
 EMAIL_INVITE_SUBJECT = PersistentConfig(
-    "EMAIL_INVITE_SUBJECT",
-    "email.invite_subject",
-    os.environ.get("EMAIL_INVITE_SUBJECT", ""),
+    'EMAIL_INVITE_SUBJECT',
+    'email.invite_subject',
+    os.environ.get('EMAIL_INVITE_SUBJECT', ''),
 )
 
 EMAIL_INVITE_HEADING = PersistentConfig(
-    "EMAIL_INVITE_HEADING",
-    "email.invite_heading",
-    os.environ.get("EMAIL_INVITE_HEADING", ""),
+    'EMAIL_INVITE_HEADING',
+    'email.invite_heading',
+    os.environ.get('EMAIL_INVITE_HEADING', ''),
 )
 
 # RAG Content Extraction
@@ -3019,9 +3019,9 @@ ENABLE_RAG_HYBRID_SEARCH_ENRICHED_TEXTS = PersistentConfig(
 )
 
 ENABLE_RAG_FILTER_UI = PersistentConfig(
-    "ENABLE_RAG_FILTER_UI",
-    "rag.enable_filter_ui",
-    os.environ.get("ENABLE_RAG_FILTER_UI", "False").lower() == "true",
+    'ENABLE_RAG_FILTER_UI',
+    'rag.enable_filter_ui',
+    os.environ.get('ENABLE_RAG_FILTER_UI', 'False').lower() == 'true',
 )
 
 RAG_FULL_CONTEXT = PersistentConfig(
@@ -3055,9 +3055,9 @@ FILE_IMAGE_COMPRESSION_HEIGHT = PersistentConfig(
 )
 
 FILE_PROCESSING_MAX_CONCURRENT = PersistentConfig(
-    "FILE_PROCESSING_MAX_CONCURRENT",
-    "file.processing_max_concurrent",
-    int(os.environ.get("FILE_PROCESSING_MAX_CONCURRENT", "5")),
+    'FILE_PROCESSING_MAX_CONCURRENT',
+    'file.processing_max_concurrent',
+    int(os.environ.get('FILE_PROCESSING_MAX_CONCURRENT', '5')),
 )
 
 
@@ -3169,21 +3169,21 @@ RAG_EXTERNAL_RERANKER_TIMEOUT = PersistentConfig(
 # Default: http://localhost:6006 (external pipeline is default)
 # Set to empty string to disable external pipeline and use internal processing
 EXTERNAL_PIPELINE_URL = PersistentConfig(
-    "EXTERNAL_PIPELINE_URL",
-    "rag.external_pipeline_url",
-    os.environ.get("EXTERNAL_PIPELINE_URL", ""),
+    'EXTERNAL_PIPELINE_URL',
+    'rag.external_pipeline_url',
+    os.environ.get('EXTERNAL_PIPELINE_URL', ''),
 )
 
 EXTERNAL_PIPELINE_API_KEY = PersistentConfig(
-    "EXTERNAL_PIPELINE_API_KEY",
-    "rag.external_pipeline_api_key",
-    os.environ.get("EXTERNAL_PIPELINE_API_KEY", ""),
+    'EXTERNAL_PIPELINE_API_KEY',
+    'rag.external_pipeline_api_key',
+    os.environ.get('EXTERNAL_PIPELINE_API_KEY', ''),
 )
 
 EXTERNAL_PIPELINE_TIMEOUT = PersistentConfig(
-    "EXTERNAL_PIPELINE_TIMEOUT",
-    "rag.external_pipeline_timeout",
-    int(os.environ.get("EXTERNAL_PIPELINE_TIMEOUT", "120")),
+    'EXTERNAL_PIPELINE_TIMEOUT',
+    'rag.external_pipeline_timeout',
+    int(os.environ.get('EXTERNAL_PIPELINE_TIMEOUT', '120')),
 )
 
 ####################################
@@ -3191,8 +3191,8 @@ EXTERNAL_PIPELINE_TIMEOUT = PersistentConfig(
 ####################################
 
 INTEGRATION_PROVIDERS = PersistentConfig(
-    "INTEGRATION_PROVIDERS",
-    "integrations.providers",
+    'INTEGRATION_PROVIDERS',
+    'integrations.providers',
     {},
 )
 
@@ -3201,9 +3201,9 @@ INTEGRATION_PROVIDERS = PersistentConfig(
 ####################################
 
 ENABLE_AGENT_PROXY = PersistentConfig(
-    "ENABLE_AGENT_PROXY",
-    "agent_proxy.enable",
-    os.environ.get("ENABLE_AGENT_PROXY", "False").lower() == "true",
+    'ENABLE_AGENT_PROXY',
+    'agent_proxy.enable',
+    os.environ.get('ENABLE_AGENT_PROXY', 'False').lower() == 'true',
 )
 
 

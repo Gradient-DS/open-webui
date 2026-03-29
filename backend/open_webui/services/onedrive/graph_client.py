@@ -7,7 +7,7 @@ from typing import Optional, Callable, Awaitable, Dict, Any, List, Tuple
 
 log = logging.getLogger(__name__)
 
-GRAPH_BASE_URL = "https://graph.microsoft.com/v1.0"
+GRAPH_BASE_URL = 'https://graph.microsoft.com/v1.0'
 
 
 class GraphClient:
@@ -58,13 +58,13 @@ class GraphClient:
                     method,
                     url,
                     params=params,
-                    headers={"Authorization": f"Bearer {self._access_token}"},
+                    headers={'Authorization': f'Bearer {self._access_token}'},
                     follow_redirects=follow_redirects,
                 )
 
                 if response.status_code == 401 and not token_refreshed and self._token_provider:
                     # Token expired — try refresh once
-                    log.info("Received 401, attempting token refresh")
+                    log.info('Received 401, attempting token refresh')
                     try:
                         new_token = await self._token_provider()
                         if new_token:
@@ -72,24 +72,24 @@ class GraphClient:
                             token_refreshed = True
                             continue  # Retry with new token
                     except Exception as e:
-                        log.warning("Token refresh failed: %s", e)
+                        log.warning('Token refresh failed: %s', e)
                     return response  # Return 401 if refresh failed or already tried
 
                 if response.status_code == 410:
                     # Delta token expired — caller should reset delta link and retry
-                    log.info("Received 410 Gone — delta token expired")
+                    log.info('Received 410 Gone — delta token expired')
                     return response  # Let caller handle by clearing delta_link
 
                 if response.status_code == 429:
-                    retry_after = int(response.headers.get("Retry-After", "60"))
-                    log.warning("Rate limited, waiting %d seconds", retry_after)
+                    retry_after = int(response.headers.get('Retry-After', '60'))
+                    log.warning('Rate limited, waiting %d seconds', retry_after)
                     await asyncio.sleep(retry_after)
                     continue
 
                 if response.status_code >= 500:
                     wait_time = 2**attempt
                     log.warning(
-                        "Server error %d, retrying in %d seconds",
+                        'Server error %d, retrying in %d seconds',
                         response.status_code,
                         wait_time,
                     )
@@ -105,7 +105,7 @@ class GraphClient:
                 else:
                     raise
 
-        raise RuntimeError(f"Failed after {max_retries} retries: {last_exception}")
+        raise RuntimeError(f'Failed after {max_retries} retries: {last_exception}')
 
     async def _get_json(
         self,
@@ -114,7 +114,7 @@ class GraphClient:
         max_retries: int = 3,
     ) -> Dict[str, Any]:
         """Make authenticated GET request and return JSON."""
-        response = await self._request_with_retry("GET", url, params, max_retries)
+        response = await self._request_with_retry('GET', url, params, max_retries)
         response.raise_for_status()
         return response.json()
 
@@ -124,13 +124,13 @@ class GraphClient:
         folder_id: str,
     ) -> List[Dict[str, Any]]:
         """List all items in a folder (non-recursive)."""
-        url = f"{GRAPH_BASE_URL}/drives/{drive_id}/items/{folder_id}/children"
+        url = f'{GRAPH_BASE_URL}/drives/{drive_id}/items/{folder_id}/children'
         items = []
 
         while url:
             data = await self._get_json(url)
-            items.extend(data.get("value", []))
-            url = data.get("@odata.nextLink")
+            items.extend(data.get('value', []))
+            url = data.get('@odata.nextLink')
 
         return items
 
@@ -141,18 +141,18 @@ class GraphClient:
     ) -> List[Dict[str, Any]]:
         """List all items in a folder recursively (including subfolders)."""
         all_items = []
-        folders_to_process = [(folder_id, "")]
+        folders_to_process = [(folder_id, '')]
 
         while folders_to_process:
             current_folder_id, parent_path = folders_to_process.pop(0)
             items = await self.list_folder_items(drive_id, current_folder_id)
 
             for item in items:
-                item_path = f"{parent_path}/{item['name']}" if parent_path else item["name"]
-                item["_relative_path"] = item_path
+                item_path = f'{parent_path}/{item["name"]}' if parent_path else item['name']
+                item['_relative_path'] = item_path
 
-                if "folder" in item:
-                    folders_to_process.append((item["id"], item_path))
+                if 'folder' in item:
+                    folders_to_process.append((item['id'], item_path))
                 else:
                     all_items.append(item)
 
@@ -174,38 +174,38 @@ class GraphClient:
         else:
             # Delta for specific folder - note: this tracks the entire drive
             # scoped to items under the folder
-            url = f"{GRAPH_BASE_URL}/drives/{drive_id}/items/{folder_id}/delta"
+            url = f'{GRAPH_BASE_URL}/drives/{drive_id}/items/{folder_id}/delta'
 
         items = []
         new_delta_link = None
 
         while url:
             data = await self._get_json(url)
-            items.extend(data.get("value", []))
+            items.extend(data.get('value', []))
 
-            if "@odata.deltaLink" in data:
-                new_delta_link = data["@odata.deltaLink"]
+            if '@odata.deltaLink' in data:
+                new_delta_link = data['@odata.deltaLink']
                 break
-            url = data.get("@odata.nextLink")
+            url = data.get('@odata.nextLink')
 
         return items, new_delta_link
 
     async def download_file(self, drive_id: str, item_id: str) -> bytes:
         """Download file content."""
-        url = f"{GRAPH_BASE_URL}/drives/{drive_id}/items/{item_id}/content"
-        response = await self._request_with_retry("GET", url, follow_redirects=True)
+        url = f'{GRAPH_BASE_URL}/drives/{drive_id}/items/{item_id}/content'
+        response = await self._request_with_retry('GET', url, follow_redirects=True)
         response.raise_for_status()
         return response.content
 
     async def get_item_metadata(self, drive_id: str, item_id: str) -> Dict[str, Any]:
         """Get metadata for a specific item."""
-        url = f"{GRAPH_BASE_URL}/drives/{drive_id}/items/{item_id}"
+        url = f'{GRAPH_BASE_URL}/drives/{drive_id}/items/{item_id}'
         return await self._get_json(url)
 
     async def get_item(self, drive_id: str, item_id: str) -> Optional[Dict[str, Any]]:
         """Get metadata for a single item, returning None if not found."""
-        url = f"{GRAPH_BASE_URL}/drives/{drive_id}/items/{item_id}"
-        response = await self._request_with_retry("GET", url)
+        url = f'{GRAPH_BASE_URL}/drives/{drive_id}/items/{item_id}'
+        response = await self._request_with_retry('GET', url)
         if response.status_code == 404:
             return None
         response.raise_for_status()
@@ -217,6 +217,6 @@ class GraphClient:
         folder_id: str,
     ) -> List[Dict[str, Any]]:
         """Get sharing permissions for a folder."""
-        url = f"{GRAPH_BASE_URL}/drives/{drive_id}/items/{folder_id}/permissions"
+        url = f'{GRAPH_BASE_URL}/drives/{drive_id}/items/{folder_id}/permissions'
         data = await self._get_json(url)
-        return data.get("value", [])
+        return data.get('value', [])

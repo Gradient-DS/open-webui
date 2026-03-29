@@ -27,14 +27,14 @@ _pending_flows: Dict[str, Dict[str, Any]] = {}
 _FLOW_TTL_SECONDS = 600
 
 # Microsoft OAuth endpoints
-_AUTHORITY_BASE = "https://login.microsoftonline.com"
-_GRAPH_SCOPE = "https://graph.microsoft.com/Files.Read.All offline_access"
+_AUTHORITY_BASE = 'https://login.microsoftonline.com'
+_GRAPH_SCOPE = 'https://graph.microsoft.com/Files.Read.All offline_access'
 
 
 def _cleanup_expired_flows():
     """Remove expired pending flows."""
     now = time.time()
-    expired = [k for k, v in _pending_flows.items() if now - v["created_at"] > _FLOW_TTL_SECONDS]
+    expired = [k for k, v in _pending_flows.items() if now - v['created_at'] > _FLOW_TTL_SECONDS]
     for k in expired:
         del _pending_flows[k]
 
@@ -53,8 +53,8 @@ def remove_pending_flow(state: str) -> None:
 def _generate_pkce() -> tuple[str, str]:
     """Generate PKCE code_verifier and code_challenge (S256)."""
     code_verifier = secrets.token_urlsafe(64)[:128]
-    digest = hashlib.sha256(code_verifier.encode("ascii")).digest()
-    code_challenge = base64.urlsafe_b64encode(digest).rstrip(b"=").decode("ascii")
+    digest = hashlib.sha256(code_verifier.encode('ascii')).digest()
+    code_challenge = base64.urlsafe_b64encode(digest).rstrip(b'=').decode('ascii')
     return code_verifier, code_challenge
 
 
@@ -71,31 +71,31 @@ def get_authorization_url(
     """
     _cleanup_expired_flows()
 
-    tenant_id = ONEDRIVE_SHAREPOINT_TENANT_ID.value or "common"
+    tenant_id = ONEDRIVE_SHAREPOINT_TENANT_ID.value or 'common'
     code_verifier, code_challenge = _generate_pkce()
     state = secrets.token_urlsafe(32)
 
     _pending_flows[state] = {
-        "user_id": user_id,
-        "knowledge_id": knowledge_id,
-        "code_verifier": code_verifier,
-        "redirect_uri": redirect_uri,
-        "created_at": time.time(),
+        'user_id': user_id,
+        'knowledge_id': knowledge_id,
+        'code_verifier': code_verifier,
+        'redirect_uri': redirect_uri,
+        'created_at': time.time(),
     }
 
     params = {
-        "client_id": ONEDRIVE_CLIENT_ID_BUSINESS,
-        "response_type": "code",
-        "redirect_uri": redirect_uri,
-        "scope": _GRAPH_SCOPE,
-        "state": state,
-        "code_challenge": code_challenge,
-        "code_challenge_method": "S256",
-        "response_mode": "query",
-        "prompt": "consent",  # Force consent to ensure refresh token
+        'client_id': ONEDRIVE_CLIENT_ID_BUSINESS,
+        'response_type': 'code',
+        'redirect_uri': redirect_uri,
+        'scope': _GRAPH_SCOPE,
+        'state': state,
+        'code_challenge': code_challenge,
+        'code_challenge_method': 'S256',
+        'response_mode': 'query',
+        'prompt': 'consent',  # Force consent to ensure refresh token
     }
 
-    return f"{_AUTHORITY_BASE}/{tenant_id}/oauth2/v2.0/authorize?{urlencode(params)}"
+    return f'{_AUTHORITY_BASE}/{tenant_id}/oauth2/v2.0/authorize?{urlencode(params)}'
 
 
 async def exchange_code_for_tokens(
@@ -119,63 +119,63 @@ async def exchange_code_for_tokens(
     # Validate state
     flow = _pending_flows.pop(state, None)
     if not flow:
-        return {"success": False, "error": "Invalid or expired state parameter"}
+        return {'success': False, 'error': 'Invalid or expired state parameter'}
 
-    if flow["user_id"] != user_id:
+    if flow['user_id'] != user_id:
         log.warning(
-            "OAuth callback user mismatch: expected %s, got %s",
-            flow["user_id"],
+            'OAuth callback user mismatch: expected %s, got %s',
+            flow['user_id'],
             user_id,
         )
-        return {"success": False, "error": "User mismatch"}
+        return {'success': False, 'error': 'User mismatch'}
 
     # Check TTL
-    if time.time() - flow["created_at"] > _FLOW_TTL_SECONDS:
-        return {"success": False, "error": "Authorization flow expired"}
+    if time.time() - flow['created_at'] > _FLOW_TTL_SECONDS:
+        return {'success': False, 'error': 'Authorization flow expired'}
 
-    tenant_id = ONEDRIVE_SHAREPOINT_TENANT_ID.value or "common"
-    token_url = f"{_AUTHORITY_BASE}/{tenant_id}/oauth2/v2.0/token"
+    tenant_id = ONEDRIVE_SHAREPOINT_TENANT_ID.value or 'common'
+    token_url = f'{_AUTHORITY_BASE}/{tenant_id}/oauth2/v2.0/token'
 
     try:
         async with httpx.AsyncClient(timeout=30) as client:
             response = await client.post(
                 token_url,
                 data={
-                    "client_id": ONEDRIVE_CLIENT_ID_BUSINESS,
-                    "client_secret": MICROSOFT_CLIENT_SECRET.value,
-                    "code": code,
-                    "redirect_uri": flow["redirect_uri"],
-                    "grant_type": "authorization_code",
-                    "code_verifier": flow["code_verifier"],
+                    'client_id': ONEDRIVE_CLIENT_ID_BUSINESS,
+                    'client_secret': MICROSOFT_CLIENT_SECRET.value,
+                    'code': code,
+                    'redirect_uri': flow['redirect_uri'],
+                    'grant_type': 'authorization_code',
+                    'code_verifier': flow['code_verifier'],
                 },
             )
             response.raise_for_status()
             token_data = response.json()
     except httpx.HTTPStatusError as e:
         error_body = (
-            e.response.json() if e.response.headers.get("content-type", "").startswith("application/json") else {}
+            e.response.json() if e.response.headers.get('content-type', '').startswith('application/json') else {}
         )
         log.error(
-            "Token exchange failed: %s %s",
+            'Token exchange failed: %s %s',
             e.response.status_code,
-            error_body.get("error_description", ""),
+            error_body.get('error_description', ''),
         )
         return {
-            "success": False,
-            "error": error_body.get("error_description", "Token exchange failed"),
+            'success': False,
+            'error': error_body.get('error_description', 'Token exchange failed'),
         }
     except Exception as e:
-        log.error("Token exchange error: %s", e)
-        return {"success": False, "error": "Token exchange failed"}
+        log.error('Token exchange error: %s', e)
+        return {'success': False, 'error': 'Token exchange failed'}
 
     # Calculate expires_at from expires_in
-    if "expires_in" in token_data and "expires_at" not in token_data:
-        token_data["expires_at"] = int(time.time()) + int(token_data["expires_in"])
-    token_data["issued_at"] = int(time.time())
+    if 'expires_in' in token_data and 'expires_at' not in token_data:
+        token_data['expires_at'] = int(time.time()) + int(token_data['expires_in'])
+    token_data['issued_at'] = int(time.time())
 
     # Store in OAuthSessions with per-user provider key
-    knowledge_id = flow["knowledge_id"]
-    provider = "onedrive"
+    knowledge_id = flow['knowledge_id']
+    provider = 'onedrive'
 
     # Delete any existing session for this user (including legacy per-KB sessions)
     existing = OAuthSessions.get_session_by_provider_and_user_id(provider, user_id)
@@ -190,10 +190,10 @@ async def exchange_code_for_tokens(
     )
 
     if not session:
-        return {"success": False, "error": "Failed to store token"}
+        return {'success': False, 'error': 'Failed to store token'}
 
-    log.info("Stored OAuth token for user %s, KB %s", user_id, knowledge_id)
-    return {"success": True, "knowledge_id": knowledge_id}
+    log.info('Stored OAuth token for user %s, KB %s', user_id, knowledge_id)
+    return {'success': True, 'knowledge_id': knowledge_id}
 
 
 def get_stored_token(user_id: str) -> Optional[Dict[str, Any]]:
@@ -202,7 +202,7 @@ def get_stored_token(user_id: str) -> Optional[Dict[str, Any]]:
     Checks for the per-user "onedrive" session first. Falls back to
     legacy per-KB "onedrive:<kb_id>" sessions and migrates them.
     """
-    provider = "onedrive"
+    provider = 'onedrive'
     session = OAuthSessions.get_session_by_provider_and_user_id(provider, user_id)
     if session:
         return session.token
@@ -217,7 +217,7 @@ def get_stored_token(user_id: str) -> Optional[Dict[str, Any]]:
 
 def delete_stored_token(user_id: str) -> bool:
     """Delete the stored OneDrive token for a user (including legacy sessions)."""
-    provider = "onedrive"
+    provider = 'onedrive'
     session = OAuthSessions.get_session_by_provider_and_user_id(provider, user_id)
     deleted = False
     if session:
@@ -236,21 +236,21 @@ def _migrate_legacy_sessions(user_id: str):
     Returns the new OAuthSessionModel or None.
     """
     all_sessions = OAuthSessions.get_sessions_by_user_id(user_id)
-    legacy = [s for s in all_sessions if s.provider.startswith("onedrive:")]
+    legacy = [s for s in all_sessions if s.provider.startswith('onedrive:')]
     if not legacy:
         return None
 
     # Pick the freshest token
-    freshest = max(legacy, key=lambda s: s.token.get("issued_at", 0))
+    freshest = max(legacy, key=lambda s: s.token.get('issued_at', 0))
     log.info(
-        "Migrating legacy OneDrive token for user %s (from %s)",
+        'Migrating legacy OneDrive token for user %s (from %s)',
         user_id,
         freshest.provider,
     )
 
     new_session = OAuthSessions.create_session(
         user_id=user_id,
-        provider="onedrive",
+        provider='onedrive',
         token=freshest.token,
     )
 
@@ -265,5 +265,5 @@ def _delete_legacy_sessions(user_id: str):
     """Delete any remaining legacy "onedrive:<kb_id>" sessions for a user."""
     all_sessions = OAuthSessions.get_sessions_by_user_id(user_id)
     for s in all_sessions:
-        if s.provider.startswith("onedrive:"):
+        if s.provider.startswith('onedrive:'):
             OAuthSessions.delete_session_by_id(s.id)

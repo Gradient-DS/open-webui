@@ -29,10 +29,10 @@ from open_webui.services.sync.router import (
 log = logging.getLogger(__name__)
 router = APIRouter()
 
-_META_KEY = "google_drive_sync"
-_PROVIDER_TYPE = "google_drive"
-_FILE_ID_PREFIX = "googledrive-"
-_CLEAR_DELTA_KEYS = ["page_token", "folder_map"]
+_META_KEY = 'google_drive_sync'
+_PROVIDER_TYPE = 'google_drive'
+_FILE_ID_PREFIX = 'googledrive-'
+_CLEAR_DELTA_KEYS = ['page_token', 'folder_map']
 
 
 # ──────────────────────────────────────────────────────────────────────
@@ -43,7 +43,7 @@ _CLEAR_DELTA_KEYS = ["page_token", "folder_map"]
 class SyncItem(BaseModel):
     """A single Google Drive item (file or folder) to sync."""
 
-    type: Literal["file", "folder"]
+    type: Literal['file', 'folder']
     item_id: str
     item_path: str
     name: str
@@ -62,7 +62,7 @@ class SyncItemsRequest(BaseModel):
 # ──────────────────────────────────────────────────────────────────────
 
 
-@router.post("/sync/items")
+@router.post('/sync/items')
 async def sync_items(
     request: SyncItemsRequest,
     fastapi_request: Request,
@@ -79,14 +79,14 @@ async def sync_items(
 
         access_token = await get_valid_access_token(user.id, request.knowledge_id)
         if not access_token:
-            raise HTTPException(401, "No valid Google Drive token. Please re-authorize.")
+            raise HTTPException(401, 'No valid Google Drive token. Please re-authorize.')
 
     new_sources = [
         {
-            "type": item.type,
-            "item_id": item.item_id,
-            "item_path": item.item_path,
-            "name": item.name,
+            'type': item.type,
+            'item_id': item.item_id,
+            'item_path': item.item_path,
+            'name': item.name,
         }
         for item in request.items
     ]
@@ -103,13 +103,13 @@ async def sync_items(
     background_tasks.add_task(
         _sync_items_background,
         knowledge_id=request.knowledge_id,
-        sources=result["all_sources"],
+        sources=result['all_sources'],
         access_token=access_token,
         user_id=user.id,
         app=fastapi_request.app,
     )
 
-    return {"message": "Sync started", "knowledge_id": request.knowledge_id}
+    return {'message': 'Sync started', 'knowledge_id': request.knowledge_id}
 
 
 async def _sync_items_background(
@@ -132,7 +132,7 @@ async def _sync_items_background(
     await worker.sync()
 
 
-@router.get("/sync/{knowledge_id}")
+@router.get('/sync/{knowledge_id}')
 async def get_sync_status(
     knowledge_id: str,
     user: UserModel = Depends(get_verified_user),
@@ -141,7 +141,7 @@ async def get_sync_status(
     return handle_get_sync_status(knowledge_id, _META_KEY, user)
 
 
-@router.post("/sync/{knowledge_id}/cancel")
+@router.post('/sync/{knowledge_id}/cancel')
 async def cancel_sync(
     knowledge_id: str,
     user: UserModel = Depends(get_verified_user),
@@ -159,7 +159,7 @@ def _remove_files_for_source(knowledge_id, item_id, source_to_remove):
     )
 
 
-@router.post("/sync/{knowledge_id}/sources/remove")
+@router.post('/sync/{knowledge_id}/sources/remove')
 async def remove_source(
     knowledge_id: str,
     request: RemoveSourceRequest,
@@ -175,7 +175,7 @@ async def remove_source(
     )
 
 
-@router.get("/synced-collections")
+@router.get('/synced-collections')
 async def list_synced_collections(
     user: UserModel = Depends(get_verified_user),
 ) -> List[dict]:
@@ -188,7 +188,7 @@ async def list_synced_collections(
 # ──────────────────────────────────────────────────────────────────────
 
 
-@router.get("/auth/access-token")
+@router.get('/auth/access-token')
 async def get_access_token(
     user: UserModel = Depends(get_verified_user),
 ):
@@ -200,18 +200,18 @@ async def get_access_token(
     from open_webui.services.google_drive.token_refresh import get_valid_access_token
 
     if not GOOGLE_CLIENT_SECRET.value:
-        raise HTTPException(400, "Google client secret not configured")
+        raise HTTPException(400, 'Google client secret not configured')
 
-    token = await get_valid_access_token(user.id, knowledge_id="__picker__")
+    token = await get_valid_access_token(user.id, knowledge_id='__picker__')
     if not token:
         raise HTTPException(
             status_code=401,
-            detail="No stored Google Drive token. Authorization required.",
+            detail='No stored Google Drive token. Authorization required.',
         )
-    return {"access_token": token}
+    return {'access_token': token}
 
 
-@router.get("/auth/initiate")
+@router.get('/auth/initiate')
 async def initiate_auth(
     request: Request,
     user: UserModel = Depends(get_verified_user),
@@ -225,17 +225,17 @@ async def initiate_auth(
     from open_webui.services.google_drive.auth import get_authorization_url
 
     if not GOOGLE_CLIENT_SECRET.value:
-        raise HTTPException(400, "Google client secret not configured")
+        raise HTTPException(400, 'Google client secret not configured')
 
     if knowledge_id:
         get_knowledge_or_raise(knowledge_id, user)
 
-    redirect_uri = str(request.base_url).rstrip("/") + "/oauth/google/callback"
-    log.info("OAuth initiate: base_url=%s, redirect_uri=%s", request.base_url, redirect_uri)
+    redirect_uri = str(request.base_url).rstrip('/') + '/oauth/google/callback'
+    log.info('OAuth initiate: base_url=%s, redirect_uri=%s', request.base_url, redirect_uri)
 
     auth_url = get_authorization_url(
         user_id=user.id,
-        knowledge_id=knowledge_id or "__general__",
+        knowledge_id=knowledge_id or '__general__',
         redirect_uri=redirect_uri,
     )
     return RedirectResponse(auth_url)
@@ -252,33 +252,33 @@ async def handle_google_drive_auth_callback(request: Request):
         remove_pending_flow,
     )
 
-    code = request.query_params.get("code")
-    state = request.query_params.get("state")
-    error = request.query_params.get("error")
-    error_description = request.query_params.get("error_description")
+    code = request.query_params.get('code')
+    state = request.query_params.get('state')
+    error = request.query_params.get('error')
+    error_description = request.query_params.get('error_description')
 
     if error:
         if state:
             remove_pending_flow(state)
         return auth_callback_html(
-            callback_type="google_drive_auth_callback",
+            callback_type='google_drive_auth_callback',
             success=False,
             error=error_description or error,
         )
 
     if not code or not state:
         return auth_callback_html(
-            callback_type="google_drive_auth_callback",
+            callback_type='google_drive_auth_callback',
             success=False,
-            error="Missing authorization code or state",
+            error='Missing authorization code or state',
         )
 
     flow = get_pending_flow(state)
     if not flow:
         return auth_callback_html(
-            callback_type="google_drive_auth_callback",
+            callback_type='google_drive_auth_callback',
             success=False,
-            error="Invalid or expired authorization flow",
+            error='Invalid or expired authorization flow',
         )
 
     return await complete_auth_callback(
@@ -287,12 +287,12 @@ async def handle_google_drive_auth_callback(request: Request):
         flow=flow,
         provider_type=_PROVIDER_TYPE,
         meta_key=_META_KEY,
-        callback_type="google_drive_auth_callback",
+        callback_type='google_drive_auth_callback',
         exchange_code_fn=exchange_code_for_tokens,
     )
 
 
-@router.get("/auth/token-status/{knowledge_id}")
+@router.get('/auth/token-status/{knowledge_id}')
 async def get_token_status(
     knowledge_id: str,
     user: UserModel = Depends(get_verified_user),
@@ -303,7 +303,7 @@ async def get_token_status(
     return handle_get_token_status(knowledge_id, _META_KEY, user, get_stored_token)
 
 
-@router.post("/auth/revoke/{knowledge_id}")
+@router.post('/auth/revoke/{knowledge_id}')
 async def revoke_token(
     knowledge_id: str,
     user: UserModel = Depends(get_verified_user),
