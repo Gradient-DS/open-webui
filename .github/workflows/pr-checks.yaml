@@ -29,23 +29,33 @@ jobs:
       - name: Run Frontend Unit Tests
         run: npm run test:frontend
 
-  backend-format:
-    name: Backend Format Check
+  backend-lint:
+    name: Backend Lint & Format (Ruff)
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v5
-
-      - name: Set up Python
-        uses: actions/setup-python@v6
         with:
-          python-version: '3.11'
+          fetch-depth: 0
 
-      - name: Install Black
-        run: pip install "black==26.1.0"
+      - name: Get changed Python files
+        id: changed
+        run: |
+          BASE=${{ github.event.pull_request.base.sha }}
+          FILES=$(git diff --name-only --diff-filter=ACMR "$BASE" HEAD -- 'backend/**.py' | xargs)
+          echo "files=$FILES" >> "$GITHUB_OUTPUT"
 
-      - name: Check backend formatting
-        run: black --check --fast backend/ --exclude ".venv/|/venv/"
+      - name: Ruff check
+        if: steps.changed.outputs.files != ''
+        uses: astral-sh/ruff-action@v3
+        with:
+          args: check ${{ steps.changed.outputs.files }}
+
+      - name: Ruff format
+        if: steps.changed.outputs.files != ''
+        uses: astral-sh/ruff-action@v3
+        with:
+          args: format --check ${{ steps.changed.outputs.files }}
 
   backend-tests:
     name: Backend Unit Tests
