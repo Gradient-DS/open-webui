@@ -38,13 +38,15 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Get changed Python files
+      - name: Get changed Python files (own commits only)
         id: changed
         run: |
-          git fetch origin ${{ github.event.pull_request.base.ref }} --depth=1
-          BASE=$(git merge-base HEAD origin/${{ github.event.pull_request.base.ref }})
-          FILES=$(git diff --name-only --diff-filter=ACMR "$BASE" HEAD -- 'backend/**.py' | xargs)
+          # Get files changed in non-merge commits on this branch
+          # This excludes files that only changed in the upstream merge commit
+          MERGE_BASE=${{ github.event.pull_request.base.sha }}
+          FILES=$(git log --no-merges --diff-filter=ACMR --name-only --pretty="" "$MERGE_BASE"..HEAD -- 'backend/**.py' 'scripts/**.py' | sort -u | xargs)
           echo "files=$FILES" >> "$GITHUB_OUTPUT"
+          echo "Changed files: $FILES"
 
       - name: Ruff check
         if: steps.changed.outputs.files != ''
