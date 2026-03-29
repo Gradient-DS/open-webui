@@ -1,4 +1,4 @@
-# Open WebUI (Gradient-DS Fork) — Dev Notes
+<!-- Append-only episodic memory. See methodology.md Section 3 for the note template and rules. -->
 
 ---
 
@@ -106,7 +106,7 @@
 - The sync abstraction cleanly separated provider-specific logic (11 abstract methods) from shared orchestration (~1000 lines of base worker)
 - Cleaning up the abstraction layer (ccc3d65ac) removed fragile patterns: error-string matching replaced with status code checks, private `_pending_flows` replaced with public API, eliminated the `_current_drive_id` stash pattern
 
-**Related:** `dev_notes/external-integration-cookbook.md`, [20-03-2026] Gradient-DS Custom Features Overview
+**Related:** `collab/docs/external-integration-cookbook.md`, [20-03-2026] Gradient-DS Custom Features Overview
 
 ---
 

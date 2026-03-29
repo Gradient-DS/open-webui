@@ -1,0 +1,5 @@
+<!-- Configuration for the collaboration memory system. Read by hooks, referenced by methodology. -->
+
+collab_dir=collab
+consolidation_soft_threshold=50
+consolidation_hard_threshold=93
