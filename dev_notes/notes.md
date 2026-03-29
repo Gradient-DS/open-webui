@@ -107,3 +107,51 @@
 - Cleaning up the abstraction layer (ccc3d65ac) removed fragile patterns: error-string matching replaced with status code checks, private `_pending_flows` replaced with public API, eliminated the `_current_drive_id` stash pattern
 
 **Related:** `dev_notes/external-integration-cookbook.md`, [20-03-2026] Gradient-DS Custom Features Overview
+
+---
+
+### [26-03-2026] Agent Proxy — External API for soev.ai Agents
+
+**Dev:** @lexlubbers
+
+**Context:** External callers (curl, SDKs, other services) needed a way to call soev.ai agents through an OpenAI-compatible API, authenticated with OWUI API keys (`sk-` tokens). The existing `AGENT_API_ENABLED` feature only routes OWUI's own chat UI through the agent service — it doesn't expose the agent to external callers.
+
+**What We Did:**
+- Created a reverse proxy at `/api/v1/agent/` with three endpoints: `GET /models`, `POST /chat/completions` (SSE streaming), `GET /openapi.json`
+- Follows the existing Ollama/OpenAI proxy pattern: `aiohttp` session + `stream_wrapper()` for SSE passthrough
+- Admin toggle in Settings > Integrations (PersistentConfig `ENABLE_AGENT_PROXY`, default off)
+- Reuses existing `AGENT_API_BASE_URL` from `env.py` — no separate URL config needed
+- Auth via `get_verified_user` (supports both JWT and `sk-` API keys)
+- Inline API documentation in admin panel with download link for OpenAPI spec and curl examples (including collection/document attachment via `files` field)
+- Added Vite dev server proxy config for `/api`, `/ollama`, `/openai`, `/oauth`, `/static` so API routes work on port 5173 during development
+- Helm chart: `enableAgentProxy: "false"` in values.yaml, `ENABLE_AGENT_PROXY` in configmap
+
+**Key Learnings:**
+- Two distinct features share the agent service but serve different purposes: `AGENT_API_ENABLED` (internal, routes OWUI chat middleware) vs `ENABLE_AGENT_PROXY` (external, exposes OpenAI-compatible proxy). Naming clarity matters — "proxy" implies external access
+- The proxy is a raw passthrough — it forwards the request body as-is, so callers can pass `files` (with `type: "collection"` or `type: "file"` and an `id`), `rag_filter`, and any other fields the agent service accepts
+- Vite dev server had no proxy config, causing API routes to 404 on port 5173 when accessed directly in the browser. Adding `server.proxy` in `vite.config.ts` fixed this for all API prefixes
+- The IntegrationProviders OpenAPI download uses authenticated fetch + blob download (not a plain link), because the endpoint requires auth. Agent proxy uses the same pattern for consistency
+
+**Related:** `thoughts/shared/plans/2026-03-26-agent-proxy-integration.md`, `backend/open_webui/routers/agent_proxy.py`
+
+---
+
+### [26-03-2026] Feature Flags for Webpage URL and Reference Chats in Input Menu
+
+**Dev:** @lexlubbers
+
+**Context:** The chat input "+" menu (InputMenu.svelte) always showed "Webpage URL" and "Reference chats" items with no way to disable them via Helm config, unlike other menu items that have feature flag guards.
+
+**What We Did:**
+- Added `FEATURE_WEBPAGE_URL` and `FEATURE_REFERENCE_CHATS` env vars in `config.py` (default `True`)
+- Imported and exposed both in `main.py` via the config endpoint's `features` dict
+- Added `'webpage_url'` and `'reference_chats'` to the `Feature` union type in `src/lib/utils/features.ts`
+- Wrapped the Webpage URL block with `{#if isFeatureEnabled('webpage_url')}` in `InputMenu.svelte`
+- Added `isFeatureEnabled('reference_chats')` to the existing `($chats ?? []).length > 0` guard for Reference chats
+- Added `featureWebpageUrl` and `featureReferenceChats` to Helm values.yaml and configmap.yaml
+
+**Key Learnings:**
+- The feature flag pipeline for InputMenu items is: Helm values → configmap (env var) → `config.py` (read) → `main.py` (expose in config endpoint) → `features.ts` (type) → `InputMenu.svelte` (`isFeatureEnabled()` guard)
+- Most InputMenu sections already had guards (knowledge, capture, notes, tools) but Webpage URL and Reference Chats were the two exceptions
+
+**Related:** Feature flags system documented in [20-03-2026] Gradient-DS Custom Features Overview

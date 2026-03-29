@@ -157,24 +157,13 @@ export const createKnowledgePicker = (knowledgeId?: string): Promise<KnowledgePi
 			await initialize();
 			const token = await getAuthToken(knowledgeId);
 
-			const SUPPORTED_MIME_TYPES = [
-				'application/pdf',
-				'text/plain',
-				'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-				'application/vnd.google-apps.document',
-				'application/vnd.google-apps.spreadsheet',
-				'application/vnd.google-apps.presentation',
-				'application/vnd.google-apps.folder'
-			].join(',');
-
 			const docsView = new google.picker.DocsView()
 				.setIncludeFolders(true)
 				.setSelectFolderEnabled(true)
-				.setMimeTypes(SUPPORTED_MIME_TYPES);
+				.setParent('root');
 
 			const picker = new google.picker.PickerBuilder()
 				.enableFeature(google.picker.Feature.MULTISELECT_ENABLED)
-				.enableFeature(google.picker.Feature.NAV_HIDDEN)
 				.addView(docsView)
 				.setOAuthToken(token)
 				.setDeveloperKey(API_KEY)
@@ -212,15 +201,12 @@ export const createPicker = () => {
 			const token = await getAuthToken();
 
 			const picker = new google.picker.PickerBuilder()
-				.enableFeature(google.picker.Feature.NAV_HIDDEN)
 				.enableFeature(google.picker.Feature.MULTISELECT_ENABLED)
 				.addView(
 					new google.picker.DocsView()
-						.setIncludeFolders(false)
+						.setIncludeFolders(true)
 						.setSelectFolderEnabled(false)
-						.setMimeTypes(
-							'application/pdf,text/plain,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.google-apps.document,application/vnd.google-apps.spreadsheet,application/vnd.google-apps.presentation'
-						)
+						.setParent('root')
 				)
 				.setOAuthToken(token)
 				.setDeveloperKey(API_KEY)

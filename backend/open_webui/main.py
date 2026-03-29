@@ -69,6 +69,7 @@ from open_webui.socket.main import (
     get_models_in_use,
 )
 from open_webui.routers import (
+    agent_proxy,
     analytics,
     archives,
     audio,
@@ -373,6 +374,8 @@ from open_webui.config import (
     EMAIL_INVITE_HEADING,
     # Integrations
     INTEGRATION_PROVIDERS,
+    # Agent Proxy
+    ENABLE_AGENT_PROXY,
     ENABLE_RAG_HYBRID_SEARCH,
     ENABLE_RAG_HYBRID_SEARCH_ENRICHED_TEXTS,
     ENABLE_RAG_FILTER_UI,
@@ -504,6 +507,8 @@ from open_webui.config import (
     FEATURE_PROMPTS,
     FEATURE_TOOLS,
     FEATURE_SKILLS,
+    FEATURE_WEBPAGE_URL,
+    FEATURE_REFERENCE_CHATS,
     FEATURE_TOOL_SERVERS,
     FEATURE_TERMINAL_SERVERS,
     FEATURE_BUILTIN_TOOLS,
@@ -1269,6 +1274,8 @@ app.state.config.EMAIL_INVITE_HEADING = EMAIL_INVITE_HEADING
 
 app.state.config.INTEGRATION_PROVIDERS = INTEGRATION_PROVIDERS
 
+app.state.config.ENABLE_AGENT_PROXY = ENABLE_AGENT_PROXY
+
 app.state.config.OLLAMA_CLOUD_WEB_SEARCH_API_KEY = OLLAMA_CLOUD_WEB_SEARCH_API_KEY
 app.state.config.SEARXNG_QUERY_URL = SEARXNG_QUERY_URL
 app.state.config.SEARXNG_LANGUAGE = SEARXNG_LANGUAGE
@@ -1769,6 +1776,7 @@ app.include_router(knowledge.router, prefix="/api/v1/knowledge", tags=["knowledg
 app.include_router(
     integrations.router, prefix="/api/v1/integrations", tags=["integrations"]
 )
+app.include_router(agent_proxy.router, prefix="/api/v1/agent", tags=["agent-proxy"])
 app.include_router(prompts.router, prefix="/api/v1/prompts", tags=["prompts"])
 app.include_router(tools.router, prefix="/api/v1/tools", tags=["tools"])
 app.include_router(skills.router, prefix="/api/v1/skills", tags=["skills"])
@@ -2453,6 +2461,8 @@ async def get_app_config(request: Request):
                     "feature_admin_settings": FEATURE_ADMIN_SETTINGS,
                     "feature_admin_settings_tabs": FEATURE_ADMIN_SETTINGS_TABS,
                     "feature_chat_controls_sections": FEATURE_CHAT_CONTROLS_SECTIONS,
+                    "feature_webpage_url": FEATURE_WEBPAGE_URL,
+                    "feature_reference_chats": FEATURE_REFERENCE_CHATS,
                     "feature_input_menu": FEATURE_INPUT_MENU,
                     "feature_temporary_chat": FEATURE_TEMPORARY_CHAT,
                     "feature_tool_servers": FEATURE_TOOL_SERVERS,
@@ -2478,6 +2488,7 @@ async def get_app_config(request: Request):
                         else {}
                     ),
                     "enable_email_invites": app.state.config.ENABLE_EMAIL_INVITES,
+                    "enable_agent_proxy": app.state.config.ENABLE_AGENT_PROXY,
                 }
                 if user is not None
                 else {}

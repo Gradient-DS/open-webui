@@ -29,7 +29,9 @@
 		getToolServerConnections,
 		setToolServerConnections,
 		getTerminalServerConnections,
-		setTerminalServerConnections
+		setTerminalServerConnections,
+		getAgentProxyConfig,
+		setAgentProxyConfig
 	} from '$lib/apis/configs';
 
 	import IntegrationProviders from './IntegrationProviders.svelte';
@@ -45,6 +47,10 @@
 	let editTerminalIdx: number | null = null;
 	let showDeleteTerminalConfirm = false;
 	let deleteTerminalIdx: number | null = null;
+
+	// Agent Proxy
+	let ENABLE_AGENT_PROXY = false;
+	let showAgentDocs = false;
 
 	const addConnectionHandler = async (server) => {
 		servers = [...servers, server];
@@ -89,6 +95,19 @@
 		}
 	};
 
+	const saveAgentProxyConfig = async () => {
+		const res = await setAgentProxyConfig(localStorage.token, {
+			ENABLE_AGENT_PROXY
+		}).catch((err) => {
+			toast.error($i18n.t('Failed to save Agent Proxy settings'));
+			return null;
+		});
+
+		if (res) {
+			toast.success($i18n.t('Agent Proxy settings saved'));
+		}
+	};
+
 	const addTerminalConnection = (server) => {
 		terminalConnections = [...terminalConnections, { ...server, id: server.id ?? uuidv4() }];
 		saveTerminalServers();
@@ -127,6 +146,16 @@
 			} catch {
 				// Not configured yet
 			}
+		}
+
+		// Load agent proxy config
+		try {
+			const agentRes = await getAgentProxyConfig(localStorage.token);
+			if (agentRes) {
+				ENABLE_AGENT_PROXY = agentRes.ENABLE_AGENT_PROXY ?? false;
+			}
+		} catch {
+			// Not configured yet
 		}
 	});
 </script>
@@ -333,6 +362,106 @@
 				</div>
 
 				{#if isFeatureEnabled('tool_servers') || isFeatureEnabled('terminal_servers')}
+				<hr class=" border-gray-100/30 dark:border-gray-850/30 my-4" />
+				{/if}
+
+				{#if $user?.role === 'admin'}
+				<div class="mb-2.5 flex flex-col w-full">
+					<div class="flex justify-between items-center mb-1">
+						<div class="flex items-center gap-2">
+							<div class="font-medium">{$i18n.t('Agent Proxy')}</div>
+						</div>
+
+						<Tooltip
+							content={ENABLE_AGENT_PROXY
+								? $i18n.t('Enabled')
+								: $i18n.t('Disabled')}
+						>
+							<Switch
+								bind:state={ENABLE_AGENT_PROXY}
+								on:change={() => {
+									saveAgentProxyConfig();
+								}}
+							/>
+						</Tooltip>
+					</div>
+
+					{#if ENABLE_AGENT_PROXY}
+						<div class="flex flex-col gap-2 mt-1">
+							<div class="text-xs text-gray-500">
+								{$i18n.t('Call soev.ai agents externally through an OpenAI-compatible endpoint. Users authenticate with their API keys.')}
+							</div>
+
+							<div class="mt-1">
+								<button
+									class="text-xs text-blue-500 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300 underline"
+									type="button"
+									on:click={async () => {
+										try {
+											const res = await fetch(
+												`${window.location.origin}/api/v1/agent/openapi.json`,
+												{
+													headers: {
+														Authorization: `Bearer ${localStorage.token}`
+													}
+												}
+											);
+											if (!res.ok) throw new Error('Failed to fetch');
+											const blob = await res.blob();
+											const url = URL.createObjectURL(blob);
+											const a = document.createElement('a');
+											a.href = url;
+											a.download = 'agent-openapi.json';
+											a.click();
+											URL.revokeObjectURL(url);
+										} catch (err) {
+											toast.error('Failed to download OpenAPI spec');
+										}
+									}}
+								>
+									{$i18n.t('Download OpenAPI Specification')}
+								</button>
+							</div>
+
+							<div class="mt-1">
+								<button
+									class="text-xs underline text-gray-600 dark:text-gray-300"
+									type="button"
+									on:click={() => { showAgentDocs = !showAgentDocs; }}
+								>
+									{showAgentDocs ? $i18n.t('Hide API documentation') : $i18n.t('Show API documentation')}
+								</button>
+
+								{#if showAgentDocs}
+									<div class="mt-2 p-3 bg-gray-50 dark:bg-gray-850 rounded-lg text-xs font-mono space-y-3 overflow-x-auto">
+										<div>
+											<div class="text-gray-500 mb-2">{$i18n.t('List available models')}</div>
+											<pre class="whitespace-pre-wrap">curl -H "Authorization: Bearer sk-..." \
+  {window.location.origin}/api/v1/agent/models</pre>
+										</div>
+
+										<div>
+											<div class="text-gray-500 mb-2">{$i18n.t('Chat completions (streaming)')}</div>
+											<pre class="whitespace-pre-wrap">curl -H "Authorization: Bearer sk-..." \
+  -H "Content-Type: application/json" \
+  -d '{JSON.stringify({model: "agent-name", messages: [{role: "user", content: "Hello"}], stream: true})}' \
+  {window.location.origin}/api/v1/agent/chat/completions</pre>
+										</div>
+
+										<div>
+											<div class="text-gray-500 mb-2">{$i18n.t('With collections/documents')}</div>
+											<pre class="whitespace-pre-wrap">curl -H "Authorization: Bearer sk-..." \
+  -H "Content-Type: application/json" \
+  -d '{JSON.stringify({model: "agent-name", messages: [{role: "user", content: "Hello"}], stream: true, files: [{id: "collection-id", type: "collection"}, {id: "document-id", type: "file"}]})}' \
+  {window.location.origin}/api/v1/agent/chat/completions</pre>
+										</div>
+									</div>
+								{/if}
+							</div>
+						</div>
+					{/if}
+				</div>
+
 				<hr class=" border-gray-100/30 dark:border-gray-850/30 my-4" />
 				{/if}
 

@@ -326,6 +326,7 @@
 					{/if}
 
 					<!-- Attach Webpage (Link icon) -->
+				{#if isFeatureEnabled('webpage_url')}
 					<Tooltip
 						content={fileUploadCapableModels.length !== selectedModels.length
 							? $i18n.t('Model(s) do not support file upload')
@@ -360,6 +361,7 @@
 							</Tooltip>
 						</DropdownMenu.Item>
 					</Tooltip>
+				{/if}
 
 					<!-- Attach Notes -->
 					{#if $config?.features?.enable_notes ?? false}
@@ -527,7 +529,7 @@
 						</Tooltip>
 
 						<!-- Reference Chats -->
-						{#if ($chats ?? []).length > 0}
+						{#if isFeatureEnabled('reference_chats') && ($chats ?? []).length > 0}
 							<Tooltip
 								content={fileUploadCapableModels.length !== selectedModels.length
 									? $i18n.t('Model(s) do not support file upload')
