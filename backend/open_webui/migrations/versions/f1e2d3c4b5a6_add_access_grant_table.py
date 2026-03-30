@@ -5,8 +5,9 @@ Revises: 8452d01d26d7
 Create Date: 2026-02-05 10:00:00.000000
 
 Migrates from JSON access_control columns to normalized access_grant table.
-Access control semantics:
-- NULL: Public access (all users can read) -> insert user:* for read
+Access control semantics (soev override for knowledge — see inline comments):
+- NULL on files/knowledge: Private/owner-only -> insert nothing
+- NULL on other resources: Public access (upstream convention) -> insert user:* for read
 - {}: Private/owner-only (no grants) -> insert nothing
 - {read: {...}, write: {...}}: Custom permissions -> insert specific grants
 """
@@ -101,10 +102,13 @@ def upgrade() -> None:
                 or (isinstance(access_control_json, str) and access_control_json.strip().lower() == 'null')
             )
             if is_null:
-                # Files: NULL = private (no entry needed, owner has implicit access)
-                # Other resources: NULL = public (insert user:* for read)
-                if resource_type == 'file':
-                    continue  # Private - no entry needed
+                # Files: NULL = private (owner-only), no grant needed
+                # Knowledge: NULL = private — cloud-synced KBs (OneDrive, Google Drive)
+                #   were created without access_control and should stay owner-only
+                # Other resources (models, prompts, tools): NULL = public (upstream convention)
+                #   → insert user:* for read to preserve existing visibility
+                if resource_type in ('file', 'knowledge'):
+                    continue  # Private - no grant needed
 
                 key = (resource_type, resource_id, 'user', '*', 'read')
                 if key not in inserted:
