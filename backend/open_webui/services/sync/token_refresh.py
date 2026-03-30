@@ -38,20 +38,20 @@ async def get_valid_access_token(
         return None
 
     token_data = session.token
-    expires_at = token_data.get("expires_at", 0)
+    expires_at = token_data.get('expires_at', 0)
 
     # Check if token needs refresh
     if time.time() + _REFRESH_BUFFER_SECONDS < expires_at:
-        return token_data.get("access_token")
+        return token_data.get('access_token')
 
     # Token expired or near-expiry — refresh
-    log.info("Refreshing token for user %s, KB %s", user_id, knowledge_id)
+    log.info('Refreshing token for user %s, KB %s', user_id, knowledge_id)
     new_token_data = await refresh_fn(token_data)
 
     if new_token_data is None:
         # Refresh failed — token likely revoked
         log.warning(
-            "Token refresh failed for user %s, KB %s — marking as needs_reauth",
+            'Token refresh failed for user %s, KB %s — marking as needs_reauth',
             user_id,
             knowledge_id,
         )
@@ -60,7 +60,7 @@ async def get_valid_access_token(
 
     # Update stored token
     OAuthSessions.update_session_by_id(session.id, new_token_data)
-    return new_token_data.get("access_token")
+    return new_token_data.get('access_token')
 
 
 def _mark_needs_reauth(provider_type: str, meta_key: str, user_id: str):
@@ -73,7 +73,7 @@ def _mark_needs_reauth(provider_type: str, meta_key: str, user_id: str):
             continue
         meta = kb.meta or {}
         sync_info = meta.get(meta_key, {})
-        sync_info["needs_reauth"] = True
-        sync_info["has_stored_token"] = False
+        sync_info['needs_reauth'] = True
+        sync_info['has_stored_token'] = False
         meta[meta_key] = sync_info
         Knowledges.update_knowledge_meta_by_id(kb.id, meta)

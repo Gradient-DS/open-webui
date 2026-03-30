@@ -9,9 +9,9 @@ from open_webui.services.onedrive.scheduler import (
 )
 
 __all__ = [
-    "GraphClient",
-    "OneDriveSyncWorker",
-    "emit_sync_progress",
-    "start_scheduler",
-    "stop_scheduler",
+    'GraphClient',
+    'OneDriveSyncWorker',
+    'emit_sync_progress',
+    'start_scheduler',
+    'stop_scheduler',
 ]

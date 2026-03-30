@@ -6,6 +6,7 @@ from fastapi.concurrency import run_in_threadpool
 import logging
 import io
 import zipfile
+from urllib.parse import quote
 
 from sqlalchemy.orm import Session
 from open_webui.internal.db import get_session
@@ -57,7 +58,9 @@ PAGE_ITEM_COUNT = 30
 # Knowledge Base Embedding
 ############################
 
-KNOWLEDGE_BASES_COLLECTION = "knowledge-bases"
+# Knowledge that sits unread serves no one. Let what is
+# stored here find the ones who need it.
+KNOWLEDGE_BASES_COLLECTION = 'knowledge-bases'
 
 
 async def embed_knowledge_base_metadata(
@@ -68,24 +71,24 @@ async def embed_knowledge_base_metadata(
 ) -> bool:
     """Generate and store embedding for knowledge base."""
     try:
-        content = f"{name}\n\n{description}" if description else name
+        content = f'{name}\n\n{description}' if description else name
         embedding = await request.app.state.EMBEDDING_FUNCTION(content)
         VECTOR_DB_CLIENT.upsert(
             collection_name=KNOWLEDGE_BASES_COLLECTION,
             items=[
                 {
-                    "id": knowledge_base_id,
-                    "text": content,
-                    "vector": embedding,
-                    "metadata": {
-                        "knowledge_base_id": knowledge_base_id,
+                    'id': knowledge_base_id,
+                    'text': content,
+                    'vector': embedding,
+                    'metadata': {
+                        'knowledge_base_id': knowledge_base_id,
                     },
                 }
             ],
         )
         return True
     except Exception as e:
-        log.error(f"Failed to embed knowledge base {knowledge_base_id}: {e}")
+        log.error(f'Failed to embed knowledge base {knowledge_base_id}: {e}')
         return False
 
 
@@ -98,7 +101,7 @@ def remove_knowledge_base_metadata_embedding(knowledge_base_id: str) -> bool:
         )
         return True
     except Exception as e:
-        log.debug(f"Failed to remove embedding for {knowledge_base_id}: {e}")
+        log.debug(f'Failed to remove embedding for {knowledge_base_id}: {e}')
         return False
 
 
@@ -111,7 +114,7 @@ class KnowledgeAccessListResponse(BaseModel):
     total: int
 
 
-@router.get("/", response_model=KnowledgeAccessListResponse)
+@router.get('/', response_model=KnowledgeAccessListResponse)
 async def get_knowledge_bases(
     page: Optional[int] = 1,
     type: Optional[str] = None,
@@ -124,28 +127,26 @@ async def get_knowledge_bases(
 
     filter = {}
     if type:
-        filter["type"] = type
+        filter['type'] = type
 
     groups = Groups.get_groups_by_member_id(user.id, db=db)
     user_group_ids = {group.id for group in groups}
 
-    if not user.role == "admin" or not BYPASS_ADMIN_ACCESS_CONTROL:
+    if not user.role == 'admin' or not BYPASS_ADMIN_ACCESS_CONTROL:
         if groups:
-            filter["group_ids"] = [group.id for group in groups]
+            filter['group_ids'] = [group.id for group in groups]
 
-        filter["user_id"] = user.id
+        filter['user_id'] = user.id
 
-    result = Knowledges.search_knowledge_bases(
-        user.id, filter=filter, skip=skip, limit=limit, db=db
-    )
+    result = Knowledges.search_knowledge_bases(user.id, filter=filter, skip=skip, limit=limit, db=db)
 
     # Batch-fetch writable knowledge IDs in a single query instead of N has_access calls
     knowledge_base_ids = [knowledge_base.id for knowledge_base in result.items]
     writable_knowledge_base_ids = AccessGrants.get_accessible_resource_ids(
         user_id=user.id,
-        resource_type="knowledge",
+        resource_type='knowledge',
         resource_ids=knowledge_base_ids,
-        permission="write",
+        permission='write',
         user_group_ids=user_group_ids,
         db=db,
     )
@@ -156,7 +157,7 @@ async def get_knowledge_bases(
                 **knowledge_base.model_dump(),
                 write_access=(
                     user.id == knowledge_base.user_id
-                    or (user.role == "admin" and BYPASS_ADMIN_ACCESS_CONTROL)
+                    or (user.role == 'admin' and BYPASS_ADMIN_ACCESS_CONTROL)
                     or knowledge_base.id in writable_knowledge_base_ids
                 ),
             )
@@ -166,7 +167,7 @@ async def get_knowledge_bases(
     )
 
 
-@router.get("/search", response_model=KnowledgeAccessListResponse)
+@router.get('/search', response_model=KnowledgeAccessListResponse)
 async def search_knowledge_bases(
     query: Optional[str] = None,
     view_option: Optional[str] = None,
@@ -181,32 +182,30 @@ async def search_knowledge_bases(
 
     filter = {}
     if query:
-        filter["query"] = query
+        filter['query'] = query
     if view_option:
-        filter["view_option"] = view_option
+        filter['view_option'] = view_option
     if type:
-        filter["type"] = type
+        filter['type'] = type
 
     groups = Groups.get_groups_by_member_id(user.id, db=db)
     user_group_ids = {group.id for group in groups}
 
-    if not user.role == "admin" or not BYPASS_ADMIN_ACCESS_CONTROL:
+    if not user.role == 'admin' or not BYPASS_ADMIN_ACCESS_CONTROL:
         if groups:
-            filter["group_ids"] = [group.id for group in groups]
+            filter['group_ids'] = [group.id for group in groups]
 
-        filter["user_id"] = user.id
+        filter['user_id'] = user.id
 
-    result = Knowledges.search_knowledge_bases(
-        user.id, filter=filter, skip=skip, limit=limit, db=db
-    )
+    result = Knowledges.search_knowledge_bases(user.id, filter=filter, skip=skip, limit=limit, db=db)
 
     # Batch-fetch writable knowledge IDs in a single query instead of N has_access calls
     knowledge_base_ids = [knowledge_base.id for knowledge_base in result.items]
     writable_knowledge_base_ids = AccessGrants.get_accessible_resource_ids(
         user_id=user.id,
-        resource_type="knowledge",
+        resource_type='knowledge',
         resource_ids=knowledge_base_ids,
-        permission="write",
+        permission='write',
         user_group_ids=user_group_ids,
         db=db,
     )
@@ -217,7 +216,7 @@ async def search_knowledge_bases(
                 **knowledge_base.model_dump(),
                 write_access=(
                     user.id == knowledge_base.user_id
-                    or (user.role == "admin" and BYPASS_ADMIN_ACCESS_CONTROL)
+                    or (user.role == 'admin' and BYPASS_ADMIN_ACCESS_CONTROL)
                     or knowledge_base.id in writable_knowledge_base_ids
                 ),
             )
@@ -227,7 +226,7 @@ async def search_knowledge_bases(
     )
 
 
-@router.get("/search/files", response_model=KnowledgeFileListResponse)
+@router.get('/search/files', response_model=KnowledgeFileListResponse)
 async def search_knowledge_files(
     query: Optional[str] = None,
     page: Optional[int] = 1,
@@ -240,17 +239,15 @@ async def search_knowledge_files(
 
     filter = {}
     if query:
-        filter["query"] = query
+        filter['query'] = query
 
     groups = Groups.get_groups_by_member_id(user.id, db=db)
     if groups:
-        filter["group_ids"] = [group.id for group in groups]
+        filter['group_ids'] = [group.id for group in groups]
 
-    filter["user_id"] = user.id
+    filter['user_id'] = user.id
 
-    return Knowledges.search_knowledge_files(
-        filter=filter, skip=skip, limit=limit, db=db
-    )
+    return Knowledges.search_knowledge_files(filter=filter, skip=skip, limit=limit, db=db)
 
 
 ############################
@@ -258,19 +255,19 @@ async def search_knowledge_files(
 ############################
 
 
-@router.post("/create", response_model=Optional[KnowledgeResponse])
+@router.post('/create', response_model=Optional[KnowledgeResponse])
 async def create_new_knowledge(
     request: Request,
     form_data: KnowledgeForm,
     user=Depends(get_verified_user),
-    _=Depends(require_feature("knowledge")),
+    _=Depends(require_feature('knowledge')),
 ):
     # NOTE: We intentionally do NOT use Depends(get_session) here.
     # Database operations (has_permission, filter_allowed_access_grants, insert_new_knowledge) manage their own sessions.
     # This prevents holding a connection during embed_knowledge_base_metadata()
     # which makes external embedding API calls (1-5+ seconds).
-    if user.role != "admin" and not has_permission(
-        user.id, "workspace.knowledge", request.app.state.config.USER_PERMISSIONS
+    if user.role != 'admin' and not has_permission(
+        user.id, 'workspace.knowledge', request.app.state.config.USER_PERMISSIONS
     ):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -279,20 +276,20 @@ async def create_new_knowledge(
 
     # Set type, default to "local"
     if form_data.type is None:
-        form_data.type = "local"
+        form_data.type = 'local'
 
     # Validate type value
-    allowed_kb_types = {"local", "onedrive", "google_drive"} | set(
+    allowed_kb_types = {'local', 'onedrive', 'google_drive'} | set(
         (request.app.state.config.INTEGRATION_PROVIDERS or {}).keys()
     )
     if form_data.type not in allowed_kb_types:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Invalid knowledge base type. Must be one of: {', '.join(sorted(allowed_kb_types))}.",
+            detail=f'Invalid knowledge base type. Must be one of: {", ".join(sorted(allowed_kb_types))}.',
         )
 
     # External KBs are always private
-    if form_data.type != "local":
+    if form_data.type != 'local':
         form_data.access_grants = []
 
     form_data.access_grants = filter_allowed_access_grants(
@@ -300,7 +297,7 @@ async def create_new_knowledge(
         user.id,
         user.role,
         form_data.access_grants,
-        "sharing.public_knowledge",
+        'sharing.public_knowledge',
     )
 
     knowledge = Knowledges.insert_new_knowledge(user.id, form_data)
@@ -326,13 +323,13 @@ async def create_new_knowledge(
 ############################
 
 
-@router.post("/reindex", response_model=bool)
+@router.post('/reindex', response_model=bool)
 async def reindex_knowledge_files(
     request: Request,
     user=Depends(get_verified_user),
     db: Session = Depends(get_session),
 ):
-    if user.role != "admin":
+    if user.role != 'admin':
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail=ERROR_MESSAGES.UNAUTHORIZED,
@@ -340,18 +337,16 @@ async def reindex_knowledge_files(
 
     knowledge_bases = Knowledges.get_knowledge_bases(db=db)
 
-    log.info(f"Starting reindexing for {len(knowledge_bases)} knowledge bases")
+    log.info(f'Starting reindexing for {len(knowledge_bases)} knowledge bases')
 
     for knowledge_base in knowledge_bases:
         try:
             files = Knowledges.get_files_by_id(knowledge_base.id, db=db)
             try:
                 if VECTOR_DB_CLIENT.has_collection(collection_name=knowledge_base.id):
-                    VECTOR_DB_CLIENT.delete_collection(
-                        collection_name=knowledge_base.id
-                    )
+                    VECTOR_DB_CLIENT.delete_collection(collection_name=knowledge_base.id)
             except Exception as e:
-                log.error(f"Error deleting collection {knowledge_base.id}: {str(e)}")
+                log.error(f'Error deleting collection {knowledge_base.id}: {str(e)}')
                 continue  # Skip, don't raise
 
             failed_files = []
@@ -360,32 +355,26 @@ async def reindex_knowledge_files(
                     await run_in_threadpool(
                         process_file,
                         request,
-                        ProcessFileForm(
-                            file_id=file.id, collection_name=knowledge_base.id
-                        ),
+                        ProcessFileForm(file_id=file.id, collection_name=knowledge_base.id),
                         user=user,
                         db=db,
                     )
                 except Exception as e:
-                    log.error(
-                        f"Error processing file {file.filename} (ID: {file.id}): {str(e)}"
-                    )
-                    failed_files.append({"file_id": file.id, "error": str(e)})
+                    log.error(f'Error processing file {file.filename} (ID: {file.id}): {str(e)}')
+                    failed_files.append({'file_id': file.id, 'error': str(e)})
                     continue
 
         except Exception as e:
-            log.error(f"Error processing knowledge base {knowledge_base.id}: {str(e)}")
+            log.error(f'Error processing knowledge base {knowledge_base.id}: {str(e)}')
             # Don't raise, just continue
             continue
 
         if failed_files:
-            log.warning(
-                f"Failed to process {len(failed_files)} files in knowledge base {knowledge_base.id}"
-            )
+            log.warning(f'Failed to process {len(failed_files)} files in knowledge base {knowledge_base.id}')
             for failed in failed_files:
-                log.warning(f"File ID: {failed['file_id']}, Error: {failed['error']}")
+                log.warning(f'File ID: {failed["file_id"]}, Error: {failed["error"]}')
 
-    log.info(f"Reindexing completed.")
+    log.info(f'Reindexing completed.')
     return True
 
 
@@ -394,7 +383,7 @@ async def reindex_knowledge_files(
 ############################
 
 
-@router.post("/metadata/reindex", response_model=dict)
+@router.post('/metadata/reindex', response_model=dict)
 async def reindex_knowledge_base_metadata_embeddings(
     request: Request,
     user=Depends(get_admin_user),
@@ -407,15 +396,15 @@ async def reindex_knowledge_base_metadata_embeddings(
     this entire operation would exhaust the connection pool.
     """
     knowledge_bases = Knowledges.get_knowledge_bases()
-    log.info(f"Reindexing embeddings for {len(knowledge_bases)} knowledge bases")
+    log.info(f'Reindexing embeddings for {len(knowledge_bases)} knowledge bases')
 
     success_count = 0
     for kb in knowledge_bases:
         if await embed_knowledge_base_metadata(request, kb.id, kb.name, kb.description):
             success_count += 1
 
-    log.info(f"Embedding reindex complete: {success_count}/{len(knowledge_bases)}")
-    return {"total": len(knowledge_bases), "success": success_count}
+    log.info(f'Embedding reindex complete: {success_count}/{len(knowledge_bases)}')
+    return {'total': len(knowledge_bases), 'success': success_count}
 
 
 ############################
@@ -428,35 +417,32 @@ class KnowledgeFilesResponse(KnowledgeResponse):
     write_access: Optional[bool] = False
 
 
-@router.get("/{id}", response_model=Optional[KnowledgeFilesResponse])
-async def get_knowledge_by_id(
-    id: str, user=Depends(get_verified_user), db: Session = Depends(get_session)
-):
+@router.get('/{id}', response_model=Optional[KnowledgeFilesResponse])
+async def get_knowledge_by_id(id: str, user=Depends(get_verified_user), db: Session = Depends(get_session)):
     knowledge = Knowledges.get_knowledge_by_id(id=id, db=db)
 
     if knowledge:
         if (
-            user.role == "admin"
+            user.role == 'admin'
             or knowledge.user_id == user.id
             or AccessGrants.has_access(
                 user_id=user.id,
-                resource_type="knowledge",
+                resource_type='knowledge',
                 resource_id=knowledge.id,
-                permission="read",
+                permission='read',
                 db=db,
             )
         ):
-
             return KnowledgeFilesResponse(
                 **knowledge.model_dump(),
                 write_access=(
                     user.id == knowledge.user_id
-                    or (user.role == "admin" and BYPASS_ADMIN_ACCESS_CONTROL)
+                    or (user.role == 'admin' and BYPASS_ADMIN_ACCESS_CONTROL)
                     or AccessGrants.has_access(
                         user_id=user.id,
-                        resource_type="knowledge",
+                        resource_type='knowledge',
                         resource_id=knowledge.id,
-                        permission="write",
+                        permission='write',
                         db=db,
                     )
                 ),
@@ -478,13 +464,13 @@ async def get_knowledge_by_id(
 ############################
 
 
-@router.post("/{id}/update", response_model=Optional[KnowledgeFilesResponse])
+@router.post('/{id}/update', response_model=Optional[KnowledgeFilesResponse])
 async def update_knowledge_by_id(
     request: Request,
     id: str,
     form_data: KnowledgeForm,
     user=Depends(get_verified_user),
-    _=Depends(require_feature("knowledge")),
+    _=Depends(require_feature('knowledge')),
 ):
     # NOTE: We intentionally do NOT use Depends(get_session) here.
     # Database operations manage their own short-lived sessions internally.
@@ -501,11 +487,11 @@ async def update_knowledge_by_id(
         knowledge.user_id != user.id
         and not AccessGrants.has_access(
             user_id=user.id,
-            resource_type="knowledge",
+            resource_type='knowledge',
             resource_id=knowledge.id,
-            permission="write",
+            permission='write',
         )
-        and user.role != "admin"
+        and user.role != 'admin'
     ):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -516,17 +502,15 @@ async def update_knowledge_by_id(
     form_data.type = None  # Strip type from update form
 
     # Prevent access_grants changes on non-local KBs
-    if knowledge.type != "local":
-        form_data.access_grants = (
-            knowledge.access_grants if hasattr(knowledge, "access_grants") else []
-        )
+    if knowledge.type != 'local':
+        form_data.access_grants = knowledge.access_grants if hasattr(knowledge, 'access_grants') else []
 
     form_data.access_grants = filter_allowed_access_grants(
         request.app.state.config.USER_PERMISSIONS,
         user.id,
         user.role,
         form_data.access_grants,
-        "sharing.public_knowledge",
+        'sharing.public_knowledge',
     )
 
     knowledge = Knowledges.update_knowledge_by_id(id=id, form_data=form_data)
@@ -558,7 +542,7 @@ class KnowledgeAccessGrantsForm(BaseModel):
     access_grants: list[dict]
 
 
-@router.post("/{id}/access/update", response_model=Optional[KnowledgeFilesResponse])
+@router.post('/{id}/access/update', response_model=Optional[KnowledgeFilesResponse])
 async def update_knowledge_access_by_id(
     request: Request,
     id: str,
@@ -577,12 +561,12 @@ async def update_knowledge_access_by_id(
         knowledge.user_id != user.id
         and not AccessGrants.has_access(
             user_id=user.id,
-            resource_type="knowledge",
+            resource_type='knowledge',
             resource_id=knowledge.id,
-            permission="write",
+            permission='write',
             db=db,
         )
-        and user.role != "admin"
+        and user.role != 'admin'
     ):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -590,10 +574,10 @@ async def update_knowledge_access_by_id(
         )
 
     # Non-local knowledge bases (e.g. OneDrive) are always private
-    if knowledge.type != "local":
+    if knowledge.type != 'local':
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Access grants cannot be modified for non-local knowledge bases.",
+            detail='Access grants cannot be modified for non-local knowledge bases.',
         )
 
     form_data.access_grants = filter_allowed_access_grants(
@@ -601,10 +585,10 @@ async def update_knowledge_access_by_id(
         user.id,
         user.role,
         form_data.access_grants,
-        "sharing.public_knowledge",
+        'sharing.public_knowledge',
     )
 
-    AccessGrants.set_access_grants("knowledge", id, form_data.access_grants, db=db)
+    AccessGrants.set_access_grants('knowledge', id, form_data.access_grants, db=db)
 
     return KnowledgeFilesResponse(
         **Knowledges.get_knowledge_by_id(id=id, db=db).model_dump(),
@@ -617,7 +601,7 @@ async def update_knowledge_access_by_id(
 ############################
 
 
-@router.get("/{id}/files", response_model=KnowledgeFileListResponse)
+@router.get('/{id}/files', response_model=KnowledgeFileListResponse)
 async def get_knowledge_files_by_id(
     id: str,
     query: Optional[str] = None,
@@ -629,7 +613,6 @@ async def get_knowledge_files_by_id(
     user=Depends(get_verified_user),
     db: Session = Depends(get_session),
 ):
-
     knowledge = Knowledges.get_knowledge_by_id(id=id, db=db)
     if not knowledge:
         raise HTTPException(
@@ -638,13 +621,13 @@ async def get_knowledge_files_by_id(
         )
 
     if not (
-        user.role == "admin"
+        user.role == 'admin'
         or knowledge.user_id == user.id
         or AccessGrants.has_access(
             user_id=user.id,
-            resource_type="knowledge",
+            resource_type='knowledge',
             resource_id=knowledge.id,
-            permission="read",
+            permission='read',
             db=db,
         )
     ):
@@ -660,17 +643,15 @@ async def get_knowledge_files_by_id(
 
     filter = {}
     if query:
-        filter["query"] = query
+        filter['query'] = query
     if view_option:
-        filter["view_option"] = view_option
+        filter['view_option'] = view_option
     if order_by:
-        filter["order_by"] = order_by
+        filter['order_by'] = order_by
     if direction:
-        filter["direction"] = direction
+        filter['direction'] = direction
 
-    return Knowledges.search_files_by_id(
-        id, user.id, filter=filter, skip=skip, limit=limit, db=db
-    )
+    return Knowledges.search_files_by_id(id, user.id, filter=filter, skip=skip, limit=limit, db=db)
 
 
 ############################
@@ -682,13 +663,13 @@ class KnowledgeFileIdForm(BaseModel):
     file_id: str
 
 
-@router.post("/{id}/file/add", response_model=Optional[KnowledgeFilesResponse])
+@router.post('/{id}/file/add', response_model=Optional[KnowledgeFilesResponse])
 def add_file_to_knowledge_by_id(
     request: Request,
     id: str,
     form_data: KnowledgeFileIdForm,
     user=Depends(get_verified_user),
-    _=Depends(require_feature("knowledge")),
+    _=Depends(require_feature('knowledge')),
     db: Session = Depends(get_session),
 ):
     knowledge = Knowledges.get_knowledge_by_id(id=id, db=db)
@@ -702,12 +683,12 @@ def add_file_to_knowledge_by_id(
         knowledge.user_id != user.id
         and not AccessGrants.has_access(
             user_id=user.id,
-            resource_type="knowledge",
+            resource_type='knowledge',
             resource_id=knowledge.id,
-            permission="write",
+            permission='write',
             db=db,
         )
-        and user.role != "admin"
+        and user.role != 'admin'
     ):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -715,12 +696,12 @@ def add_file_to_knowledge_by_id(
         )
 
     # Check file count limit for non-local KBs
-    if knowledge.type != "local":
+    if knowledge.type != 'local':
         current_files = Knowledges.get_files_by_id(id, db=db)
         if current_files and len(current_files) >= 250:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="This knowledge base has reached the 250-file limit.",
+                detail='This knowledge base has reached the 250-file limit.',
             )
 
     file = Files.get_file_by_id(form_data.file_id, db=db)
@@ -745,13 +726,11 @@ def add_file_to_knowledge_by_id(
             db=db,
         )
 
-        if isinstance(result, dict) and result.get("warning"):
-            warning = result["warning"]
+        if isinstance(result, dict) and result.get('warning'):
+            warning = result['warning']
 
         # Add file to knowledge base
-        Knowledges.add_file_to_knowledge_by_id(
-            knowledge_id=id, file_id=form_data.file_id, user_id=user.id, db=db
-        )
+        Knowledges.add_file_to_knowledge_by_id(knowledge_id=id, file_id=form_data.file_id, user_id=user.id, db=db)
     except Exception as e:
         log.debug(e)
         raise HTTPException(
@@ -765,7 +744,7 @@ def add_file_to_knowledge_by_id(
             files=Knowledges.get_file_metadatas_by_id(knowledge.id, db=db),
         ).model_dump()
         if warning:
-            response_data["warning"] = warning
+            response_data['warning'] = warning
         return response_data
     else:
         raise HTTPException(
@@ -774,13 +753,13 @@ def add_file_to_knowledge_by_id(
         )
 
 
-@router.post("/{id}/file/update", response_model=Optional[KnowledgeFilesResponse])
+@router.post('/{id}/file/update', response_model=Optional[KnowledgeFilesResponse])
 def update_file_from_knowledge_by_id(
     request: Request,
     id: str,
     form_data: KnowledgeFileIdForm,
     user=Depends(get_verified_user),
-    _=Depends(require_feature("knowledge")),
+    _=Depends(require_feature('knowledge')),
     db: Session = Depends(get_session),
 ):
     knowledge = Knowledges.get_knowledge_by_id(id=id, db=db)
@@ -794,14 +773,13 @@ def update_file_from_knowledge_by_id(
         knowledge.user_id != user.id
         and not AccessGrants.has_access(
             user_id=user.id,
-            resource_type="knowledge",
+            resource_type='knowledge',
             resource_id=knowledge.id,
-            permission="write",
+            permission='write',
             db=db,
         )
-        and user.role != "admin"
+        and user.role != 'admin'
     ):
-
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=ERROR_MESSAGES.ACCESS_PROHIBITED,
@@ -822,9 +800,7 @@ def update_file_from_knowledge_by_id(
         )
 
     # Remove content from the vector database
-    VECTOR_DB_CLIENT.delete(
-        collection_name=knowledge.id, filter={"file_id": form_data.file_id}
-    )
+    VECTOR_DB_CLIENT.delete(collection_name=knowledge.id, filter={'file_id': form_data.file_id})
 
     # Add content to the vector database
     try:
@@ -857,13 +833,13 @@ def update_file_from_knowledge_by_id(
 ############################
 
 
-@router.post("/{id}/file/remove", response_model=Optional[KnowledgeFilesResponse])
+@router.post('/{id}/file/remove', response_model=Optional[KnowledgeFilesResponse])
 def remove_file_from_knowledge_by_id(
     id: str,
     form_data: KnowledgeFileIdForm,
     delete_file: bool = Query(True),
     user=Depends(get_verified_user),
-    _=Depends(require_feature("knowledge")),
+    _=Depends(require_feature('knowledge')),
     db: Session = Depends(get_session),
 ):
     knowledge = Knowledges.get_knowledge_by_id(id=id, db=db)
@@ -875,19 +851,19 @@ def remove_file_from_knowledge_by_id(
 
     # For external-source KBs, never delete the underlying file
     # (other users may reference it via their own KBs)
-    if knowledge.type != "local":
+    if knowledge.type != 'local':
         delete_file = False
 
     if (
         knowledge.user_id != user.id
         and not AccessGrants.has_access(
             user_id=user.id,
-            resource_type="knowledge",
+            resource_type='knowledge',
             resource_id=knowledge.id,
-            permission="write",
+            permission='write',
             db=db,
         )
-        and user.role != "admin"
+        and user.role != 'admin'
     ):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -908,44 +884,37 @@ def remove_file_from_knowledge_by_id(
             detail=ERROR_MESSAGES.NOT_FOUND,
         )
 
-    Knowledges.remove_file_from_knowledge_by_id(
-        knowledge_id=id, file_id=form_data.file_id, db=db
-    )
+    Knowledges.remove_file_from_knowledge_by_id(knowledge_id=id, file_id=form_data.file_id, db=db)
 
     # Remove content from the vector database
     try:
         VECTOR_DB_CLIENT.delete(
-            collection_name=knowledge.id, filter={"file_id": form_data.file_id}
+            collection_name=knowledge.id, filter={'file_id': form_data.file_id}
         )  # Remove by file_id first
 
         VECTOR_DB_CLIENT.delete(
-            collection_name=knowledge.id, filter={"hash": file.hash}
+            collection_name=knowledge.id, filter={'hash': file.hash}
         )  # Remove by hash as well in case of duplicates
     except Exception as e:
-        log.debug("This was most likely caused by bypassing embedding processing")
+        log.debug('This was most likely caused by bypassing embedding processing')
         log.debug(e)
         pass
 
     # When an OneDrive file from a folder source is removed, convert the
     # folder source into individual file sources for the remaining files.
     # This prevents the deleted file from being re-synced on the next cycle.
-    if form_data.file_id.startswith("onedrive-"):
+    if form_data.file_id.startswith('onedrive-'):
         try:
             file_meta = file.meta or {}
-            source_item_id = file_meta.get("source_item_id")
+            source_item_id = file_meta.get('source_item_id')
             meta = knowledge.meta or {}
-            sync_info = meta.get("onedrive_sync", {})
-            sources = sync_info.get("sources", [])
+            sync_info = meta.get('onedrive_sync', {})
+            sources = sync_info.get('sources', [])
 
             if source_item_id and sources:
                 # Find the folder source this file belonged to
                 folder_source = next(
-                    (
-                        s
-                        for s in sources
-                        if s.get("item_id") == source_item_id
-                        and s.get("type") == "folder"
-                    ),
+                    (s for s in sources if s.get('item_id') == source_item_id and s.get('type') == 'folder'),
                     None,
                 )
 
@@ -954,54 +923,52 @@ def remove_file_from_knowledge_by_id(
                     remaining_kb_files = Knowledges.get_files_by_id(id, db=db)
                     individual_sources = []
                     for kb_file in remaining_kb_files or []:
-                        if not kb_file.id.startswith("onedrive-"):
+                        if not kb_file.id.startswith('onedrive-'):
                             continue
                         kb_file_meta = kb_file.meta or {}
-                        if kb_file_meta.get("source_item_id") != source_item_id:
+                        if kb_file_meta.get('source_item_id') != source_item_id:
                             continue
                         # Skip the file being deleted
                         if kb_file.id == form_data.file_id:
                             continue
                         individual_sources.append(
                             {
-                                "type": "file",
-                                "drive_id": kb_file_meta.get(
-                                    "onedrive_drive_id",
-                                    folder_source.get("drive_id", ""),
+                                'type': 'file',
+                                'drive_id': kb_file_meta.get(
+                                    'onedrive_drive_id',
+                                    folder_source.get('drive_id', ''),
                                 ),
-                                "item_id": kb_file_meta.get(
-                                    "onedrive_item_id",
-                                    kb_file.id.removeprefix("onedrive-"),
+                                'item_id': kb_file_meta.get(
+                                    'onedrive_item_id',
+                                    kb_file.id.removeprefix('onedrive-'),
                                 ),
-                                "item_path": "",
-                                "name": kb_file_meta.get("name", kb_file.filename),
+                                'item_path': '',
+                                'name': kb_file_meta.get('name', kb_file.filename),
                             }
                         )
 
                     # Replace the folder source with individual file sources
-                    new_sources = [
-                        s for s in sources if s.get("item_id") != source_item_id
-                    ] + individual_sources
+                    new_sources = [s for s in sources if s.get('item_id') != source_item_id] + individual_sources
 
-                    sync_info["sources"] = new_sources
-                    meta["onedrive_sync"] = sync_info
+                    sync_info['sources'] = new_sources
+                    meta['onedrive_sync'] = sync_info
                     Knowledges.update_knowledge_meta_by_id(id, meta)
 
                     # Update remaining files' source_item_id to point to their
                     # own item_id (now an individual source, not the folder)
                     for kb_file in remaining_kb_files or []:
-                        if not kb_file.id.startswith("onedrive-"):
+                        if not kb_file.id.startswith('onedrive-'):
                             continue
                         kb_file_meta = kb_file.meta or {}
-                        if kb_file_meta.get("source_item_id") != source_item_id:
+                        if kb_file_meta.get('source_item_id') != source_item_id:
                             continue
                         if kb_file.id == form_data.file_id:
                             continue
                         new_source_id = kb_file_meta.get(
-                            "onedrive_item_id",
-                            kb_file.id.removeprefix("onedrive-"),
+                            'onedrive_item_id',
+                            kb_file.id.removeprefix('onedrive-'),
                         )
-                        kb_file_meta["source_item_id"] = new_source_id
+                        kb_file_meta['source_item_id'] = new_source_id
                         Files.update_file_by_id(
                             kb_file.id,
                             FileUpdateForm(meta=kb_file_meta),
@@ -1009,29 +976,25 @@ def remove_file_from_knowledge_by_id(
 
                     log.info(
                         f"Converted folder source '{folder_source.get('name')}' to "
-                        f"{len(individual_sources)} individual file sources "
-                        f"after removing {form_data.file_id} from knowledge {id}"
+                        f'{len(individual_sources)} individual file sources '
+                        f'after removing {form_data.file_id} from knowledge {id}'
                     )
         except Exception as e:
-            log.warning(f"Failed to update OneDrive sources: {e}")
+            log.warning(f'Failed to update OneDrive sources: {e}')
 
     if delete_file:
         file_report = DeletionService.delete_file(form_data.file_id)
         if file_report.has_errors:
-            log.warning(
-                f"Errors deleting file {form_data.file_id}: {file_report.errors}"
-            )
+            log.warning(f'Errors deleting file {form_data.file_id}: {file_report.errors}')
 
     # For non-local KBs: check if this was the last reference to the file
-    if not delete_file and knowledge.type != "local":
+    if not delete_file and knowledge.type != 'local':
         remaining_refs = Knowledges.get_knowledge_files_by_file_id(form_data.file_id)
         if not remaining_refs:
-            log.info(f"Cleaning up orphaned external file {form_data.file_id}")
+            log.info(f'Cleaning up orphaned external file {form_data.file_id}')
             file_report = DeletionService.delete_file(form_data.file_id)
             if file_report.has_errors:
-                log.warning(
-                    f"Errors deleting orphaned file {form_data.file_id}: {file_report.errors}"
-                )
+                log.warning(f'Errors deleting orphaned file {form_data.file_id}: {file_report.errors}')
 
     if knowledge:
         return KnowledgeFilesResponse(
@@ -1050,11 +1013,11 @@ def remove_file_from_knowledge_by_id(
 ############################
 
 
-@router.delete("/{id}/delete", response_model=bool)
+@router.delete('/{id}/delete', response_model=bool)
 async def delete_knowledge_by_id(
     id: str,
     user=Depends(get_verified_user),
-    _=Depends(require_feature("knowledge")),
+    _=Depends(require_feature('knowledge')),
     db: Session = Depends(get_session),
 ):
     knowledge = Knowledges.get_knowledge_by_id(id=id, db=db)
@@ -1068,19 +1031,19 @@ async def delete_knowledge_by_id(
         knowledge.user_id != user.id
         and not AccessGrants.has_access(
             user_id=user.id,
-            resource_type="knowledge",
+            resource_type='knowledge',
             resource_id=knowledge.id,
-            permission="write",
+            permission='write',
             db=db,
         )
-        and user.role != "admin"
+        and user.role != 'admin'
     ):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=ERROR_MESSAGES.ACCESS_PROHIBITED,
         )
 
-    log.info(f"Soft-deleting knowledge base: {id} (name: {knowledge.name})")
+    log.info(f'Soft-deleting knowledge base: {id} (name: {knowledge.name})')
 
     # Remove knowledge base embedding
     remove_knowledge_base_metadata_embedding(id)
@@ -1094,11 +1057,11 @@ async def delete_knowledge_by_id(
 ############################
 
 
-@router.post("/{id}/reset", response_model=Optional[KnowledgeResponse])
+@router.post('/{id}/reset', response_model=Optional[KnowledgeResponse])
 async def reset_knowledge_by_id(
     id: str,
     user=Depends(get_verified_user),
-    _=Depends(require_feature("knowledge")),
+    _=Depends(require_feature('knowledge')),
     db: Session = Depends(get_session),
 ):
     knowledge = Knowledges.get_knowledge_by_id(id=id, db=db)
@@ -1112,12 +1075,12 @@ async def reset_knowledge_by_id(
         knowledge.user_id != user.id
         and not AccessGrants.has_access(
             user_id=user.id,
-            resource_type="knowledge",
+            resource_type='knowledge',
             resource_id=knowledge.id,
-            permission="write",
+            permission='write',
             db=db,
         )
-        and user.role != "admin"
+        and user.role != 'admin'
     ):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -1139,13 +1102,13 @@ async def reset_knowledge_by_id(
 ############################
 
 
-@router.post("/{id}/files/batch/add", response_model=Optional[KnowledgeFilesResponse])
+@router.post('/{id}/files/batch/add', response_model=Optional[KnowledgeFilesResponse])
 async def add_files_to_knowledge_batch(
     request: Request,
     id: str,
     form_data: list[KnowledgeFileIdForm],
     user=Depends(get_verified_user),
-    _=Depends(require_feature("knowledge")),
+    _=Depends(require_feature('knowledge')),
     db: Session = Depends(get_session),
 ):
     """
@@ -1162,12 +1125,12 @@ async def add_files_to_knowledge_batch(
         knowledge.user_id != user.id
         and not AccessGrants.has_access(
             user_id=user.id,
-            resource_type="knowledge",
+            resource_type='knowledge',
             resource_id=knowledge.id,
-            permission="write",
+            permission='write',
             db=db,
         )
-        and user.role != "admin"
+        and user.role != 'admin'
     ):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -1175,20 +1138,19 @@ async def add_files_to_knowledge_batch(
         )
 
     # Check file count limit for non-local KBs
-    if knowledge.type != "local":
+    if knowledge.type != 'local':
         current_files = Knowledges.get_files_by_id(id, db=db)
         current_count = len(current_files) if current_files else 0
         if current_count + len(form_data) > 250:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=(
-                    f"Adding {len(form_data)} files would exceed the 250-file limit "
-                    f"({current_count} files currently)."
+                    f'Adding {len(form_data)} files would exceed the 250-file limit ({current_count} files currently).'
                 ),
             )
 
     # Batch-fetch all files to avoid N+1 queries
-    log.info(f"files/batch/add - {len(form_data)} files")
+    log.info(f'files/batch/add - {len(form_data)} files')
     file_ids = [form.file_id for form in form_data]
     files = Files.get_files_by_ids(file_ids, db=db)
 
@@ -1198,7 +1160,7 @@ async def add_files_to_knowledge_batch(
     if missing_ids:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"File {missing_ids[0]} not found",
+            detail=f'File {missing_ids[0]} not found',
         )
 
     # Process files
@@ -1210,27 +1172,23 @@ async def add_files_to_knowledge_batch(
             db=db,
         )
     except Exception as e:
-        log.error(
-            f"add_files_to_knowledge_batch: Exception occurred: {e}", exc_info=True
-        )
+        log.error(f'add_files_to_knowledge_batch: Exception occurred: {e}', exc_info=True)
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
 
     # Only add files that were successfully processed
-    successful_file_ids = [r.file_id for r in result.results if r.status == "completed"]
+    successful_file_ids = [r.file_id for r in result.results if r.status == 'completed']
     for file_id in successful_file_ids:
-        Knowledges.add_file_to_knowledge_by_id(
-            knowledge_id=id, file_id=file_id, user_id=user.id, db=db
-        )
+        Knowledges.add_file_to_knowledge_by_id(knowledge_id=id, file_id=file_id, user_id=user.id, db=db)
 
     # If there were any errors, include them in the response
     if result.errors:
-        error_details = [f"{err.file_id}: {err.error}" for err in result.errors]
+        error_details = [f'{err.file_id}: {err.error}' for err in result.errors]
         return KnowledgeFilesResponse(
             **knowledge.model_dump(),
             files=Knowledges.get_file_metadatas_by_id(knowledge.id, db=db),
             warnings={
-                "message": "Some files failed to process",
-                "errors": error_details,
+                'message': 'Some files failed to process',
+                'errors': error_details,
             },
         )
 
@@ -1245,10 +1203,8 @@ async def add_files_to_knowledge_batch(
 ############################
 
 
-@router.get("/{id}/export")
-async def export_knowledge_by_id(
-    id: str, user=Depends(get_admin_user), db: Session = Depends(get_session)
-):
+@router.get('/{id}/export')
+async def export_knowledge_by_id(id: str, user=Depends(get_admin_user), db: Session = Depends(get_session)):
     """
     Export a knowledge base as a zip file containing .txt files.
     Admin only.
@@ -1265,24 +1221,29 @@ async def export_knowledge_by_id(
 
     # Create zip file in memory
     zip_buffer = io.BytesIO()
-    with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zf:
+    with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zf:
         for file in files:
-            content = file.data.get("content", "") if file.data else ""
+            content = file.data.get('content', '') if file.data else ''
             if content:
                 # Use original filename with .txt extension
                 filename = file.filename
-                if not filename.endswith(".txt"):
-                    filename = f"{filename}.txt"
+                if not filename.endswith('.txt'):
+                    filename = f'{filename}.txt'
                 zf.writestr(filename, content)
 
     zip_buffer.seek(0)
 
     # Sanitize knowledge name for filename
-    safe_name = "".join(c if c.isalnum() or c in " -_" else "_" for c in knowledge.name)
-    zip_filename = f"{safe_name}.zip"
+    # ASCII-safe fallback for the basic filename parameter (latin-1 safe)
+    safe_name = ''.join(c if c.isascii() and (c.isalnum() or c in ' -_') else '_' for c in knowledge.name)
+    zip_filename = f'{safe_name}.zip'
+
+    # Use RFC 5987 filename* for non-ASCII names so the browser gets the real name
+    quoted_name = quote(f'{knowledge.name}.zip')
+    content_disposition = f'attachment; filename="{zip_filename}"; filename*=UTF-8\'\'{quoted_name}'
 
     return StreamingResponse(
         zip_buffer,
-        media_type="application/zip",
-        headers={"Content-Disposition": f"attachment; filename={zip_filename}"},
+        media_type='application/zip',
+        headers={'Content-Disposition': content_disposition},
     )

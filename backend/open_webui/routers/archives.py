@@ -63,7 +63,7 @@ class ArchiveConfigForm(BaseModel):
     auto_archive_retention_days: Optional[int] = None
 
 
-@router.get("/admin/config", response_model=ArchiveConfigResponse)
+@router.get('/admin/config', response_model=ArchiveConfigResponse)
 async def get_archive_config(
     request: Request,
     user=Depends(get_admin_user),
@@ -77,7 +77,7 @@ async def get_archive_config(
     )
 
 
-@router.post("/admin/config", response_model=ArchiveConfigResponse)
+@router.post('/admin/config', response_model=ArchiveConfigResponse)
 async def update_archive_config(
     request: Request,
     form_data: ArchiveConfigForm,
@@ -87,17 +87,11 @@ async def update_archive_config(
     if form_data.enable_user_archival is not None:
         request.app.state.config.ENABLE_USER_ARCHIVAL = form_data.enable_user_archival
     if form_data.default_archive_retention_days is not None:
-        request.app.state.config.DEFAULT_ARCHIVE_RETENTION_DAYS = (
-            form_data.default_archive_retention_days
-        )
+        request.app.state.config.DEFAULT_ARCHIVE_RETENTION_DAYS = form_data.default_archive_retention_days
     if form_data.enable_auto_archive_on_self_delete is not None:
-        request.app.state.config.ENABLE_AUTO_ARCHIVE_ON_SELF_DELETE = (
-            form_data.enable_auto_archive_on_self_delete
-        )
+        request.app.state.config.ENABLE_AUTO_ARCHIVE_ON_SELF_DELETE = form_data.enable_auto_archive_on_self_delete
     if form_data.auto_archive_retention_days is not None:
-        request.app.state.config.AUTO_ARCHIVE_RETENTION_DAYS = (
-            form_data.auto_archive_retention_days
-        )
+        request.app.state.config.AUTO_ARCHIVE_RETENTION_DAYS = form_data.auto_archive_retention_days
 
     return ArchiveConfigResponse(
         enable_user_archival=request.app.state.config.ENABLE_USER_ARCHIVAL,
@@ -112,7 +106,7 @@ async def update_archive_config(
 ####################
 
 
-@router.get("/", response_model=ArchiveListResponse)
+@router.get('/', response_model=ArchiveListResponse)
 async def get_archives(
     request: Request,
     response: Response,
@@ -128,12 +122,12 @@ async def get_archives(
     - Requires ENABLE_USER_ARCHIVAL to be enabled
     """
     # Prevent caching to ensure fresh data
-    response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate"
+    response.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate'
 
     if not request.app.state.config.ENABLE_USER_ARCHIVAL:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="User archival is not enabled",
+            detail='User archival is not enabled',
         )
 
     archives = UserArchives.get_archives(
@@ -146,7 +140,7 @@ async def get_archives(
     return ArchiveListResponse(items=archives, total=total)
 
 
-@router.get("/{archive_id}", response_model=UserArchiveModel)
+@router.get('/{archive_id}', response_model=UserArchiveModel)
 async def get_archive(
     request: Request,
     archive_id: str,
@@ -161,20 +155,20 @@ async def get_archive(
     if not request.app.state.config.ENABLE_USER_ARCHIVAL:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="User archival is not enabled",
+            detail='User archival is not enabled',
         )
 
     archive = UserArchives.get_archive_by_id(archive_id)
     if not archive:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="Archive not found",
+            detail='Archive not found',
         )
 
     return archive
 
 
-@router.get("/{archive_id}/export")
+@router.get('/{archive_id}/export')
 async def export_archive_chats(
     request: Request,
     archive_id: str,
@@ -192,21 +186,21 @@ async def export_archive_chats(
     if not request.app.state.config.ENABLE_USER_ARCHIVAL:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="User archival is not enabled",
+            detail='User archival is not enabled',
         )
 
     chats = ArchiveService.get_exportable_chats(archive_id)
     if chats is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="Archive not found",
+            detail='Archive not found',
         )
 
     # Return the raw chats array - same format as GET /api/v1/chats/all
     return JSONResponse(content=chats)
 
 
-@router.post("/user/{user_id}", response_model=CreateArchiveResponse)
+@router.post('/user/{user_id}', response_model=CreateArchiveResponse)
 async def create_user_archive(
     request: Request,
     user_id: str,
@@ -223,7 +217,7 @@ async def create_user_archive(
     if not request.app.state.config.ENABLE_USER_ARCHIVAL:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="User archival is not enabled",
+            detail='User archival is not enabled',
         )
 
     # Use default retention if not specified
@@ -242,7 +236,7 @@ async def create_user_archive(
     if not result.success:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=result.errors[0] if result.errors else "Failed to create archive",
+            detail=result.errors[0] if result.errors else 'Failed to create archive',
         )
 
     return CreateArchiveResponse(
@@ -253,7 +247,7 @@ async def create_user_archive(
     )
 
 
-@router.patch("/{archive_id}", response_model=UserArchiveSummaryModel)
+@router.patch('/{archive_id}', response_model=UserArchiveSummaryModel)
 async def update_archive(
     request: Request,
     archive_id: str,
@@ -268,20 +262,20 @@ async def update_archive(
     if not request.app.state.config.ENABLE_USER_ARCHIVAL:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="User archival is not enabled",
+            detail='User archival is not enabled',
         )
 
     archive = UserArchives.update_archive(archive_id, form_data)
     if not archive:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="Archive not found",
+            detail='Archive not found',
         )
 
     return UserArchiveSummaryModel.model_validate(archive)
 
 
-@router.delete("/{archive_id}")
+@router.delete('/{archive_id}')
 async def delete_archive(
     request: Request,
     archive_id: str,
@@ -296,14 +290,14 @@ async def delete_archive(
     if not request.app.state.config.ENABLE_USER_ARCHIVAL:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="User archival is not enabled",
+            detail='User archival is not enabled',
         )
 
     success = UserArchives.delete_archive(archive_id)
     if not success:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="Archive not found",
+            detail='Archive not found',
         )
 
-    return {"success": True}
+    return {'success': True}

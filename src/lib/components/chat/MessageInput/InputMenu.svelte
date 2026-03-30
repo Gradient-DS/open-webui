@@ -2,7 +2,6 @@
 	import { DropdownMenu } from 'bits-ui';
 	import { getContext, tick } from 'svelte';
 	import { fly } from 'svelte/transition';
-	import { flyAndScale } from '$lib/utils/transitions';
 
 	import {
 		config,
@@ -257,6 +256,7 @@
 							class="flex gap-2 items-center px-3 py-1.5 text-sm cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800/50 rounded-xl {!fileUploadEnabled
 								? 'opacity-50'
 								: ''}"
+							type="button"
 							on:click={() => {
 								if (fileUploadEnabled) {
 									uploadFilesHandler();
@@ -339,6 +339,7 @@
 							class="flex gap-2 items-center px-3 py-1.5 text-sm cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-xl {!fileUploadEnabled
 								? 'opacity-50'
 								: ''}"
+							type="button"
 							on:click={() => {
 								if (fileUploadEnabled) {
 									showAttachWebpageModal = true;

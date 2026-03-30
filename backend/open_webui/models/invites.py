@@ -9,13 +9,13 @@ from open_webui.internal.db import Base, get_db
 
 
 class Invite(Base):
-    __tablename__ = "invite"
+    __tablename__ = 'invite'
 
     id = Column(String, primary_key=True)
     email = Column(String, nullable=False, index=True)
     name = Column(String, nullable=False)
     token = Column(String, unique=True, nullable=False, index=True)
-    role = Column(String, default="user")
+    role = Column(String, default='user')
     invited_by = Column(String, nullable=False)
     expires_at = Column(BigInteger, nullable=False)
     accepted_at = Column(BigInteger, nullable=True)
@@ -35,13 +35,13 @@ class InviteModel(BaseModel):
     revoked_at: Optional[int] = None
     created_at: int
 
-    model_config = {"from_attributes": True}
+    model_config = {'from_attributes': True}
 
 
 class InviteForm(BaseModel):
     name: str
     email: str
-    role: Optional[str] = "user"
+    role: Optional[str] = 'user'
     send_email: Optional[bool] = None
 
 

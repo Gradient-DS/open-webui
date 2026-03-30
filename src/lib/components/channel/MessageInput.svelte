@@ -926,7 +926,11 @@
 														}
 
 														// Submit the content when Enter key is pressed
-														if (content !== '' && e.keyCode === 13 && !e.shiftKey) {
+														if (
+															(content !== '' || files.length > 0) &&
+															e.keyCode === 13 &&
+															!e.shiftKey
+														) {
 															submitHandler();
 														}
 													}

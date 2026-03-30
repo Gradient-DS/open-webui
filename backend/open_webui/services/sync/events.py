@@ -17,16 +17,13 @@ async def emit_file_processing(
         from open_webui.socket.main import sio
 
         await sio.emit(
-            f"{provider_prefix}:file:processing",
-            {"knowledge_id": knowledge_id, "file": file_info},
-            room=f"user:{user_id}",
+            f'{provider_prefix}:file:processing',
+            {'knowledge_id': knowledge_id, 'file': file_info},
+            room=f'user:{user_id}',
         )
-        log.debug(
-            f"Emitted file processing event for {file_info.get('name', 'unknown')} "
-            f"in knowledge {knowledge_id}"
-        )
+        log.debug(f'Emitted file processing event for {file_info.get("name", "unknown")} in knowledge {knowledge_id}')
     except Exception as e:
-        log.debug(f"Failed to emit file processing event: {e}")
+        log.debug(f'Failed to emit file processing event: {e}')
 
 
 async def emit_file_added(
@@ -40,16 +37,13 @@ async def emit_file_added(
         from open_webui.socket.main import sio
 
         await sio.emit(
-            f"{provider_prefix}:file:added",
-            {"knowledge_id": knowledge_id, "file": file_data},
-            room=f"user:{user_id}",
+            f'{provider_prefix}:file:added',
+            {'knowledge_id': knowledge_id, 'file': file_data},
+            room=f'user:{user_id}',
         )
-        log.debug(
-            f"Emitted file added event for {file_data.get('filename', 'unknown')} "
-            f"to knowledge {knowledge_id}"
-        )
+        log.debug(f'Emitted file added event for {file_data.get("filename", "unknown")} to knowledge {knowledge_id}')
     except Exception as e:
-        log.debug(f"Failed to emit file added event: {e}")
+        log.debug(f'Failed to emit file added event: {e}')
 
 
 async def emit_sync_progress(
@@ -59,7 +53,7 @@ async def emit_sync_progress(
     status: str,
     current: int = 0,
     total: int = 0,
-    filename: str = "",
+    filename: str = '',
     error: Optional[str] = None,
     files_processed: int = 0,
     files_failed: int = 0,
@@ -71,24 +65,21 @@ async def emit_sync_progress(
         from open_webui.socket.main import sio
 
         await sio.emit(
-            f"{provider_prefix}:sync:progress",
+            f'{provider_prefix}:sync:progress',
             {
-                "knowledge_id": knowledge_id,
-                "status": status,
-                "current": current,
-                "total": total,
-                "filename": filename,
-                "error": error,
-                "files_processed": files_processed,
-                "files_failed": files_failed,
-                "deleted_count": deleted_count,
-                "failed_files": failed_files,
+                'knowledge_id': knowledge_id,
+                'status': status,
+                'current': current,
+                'total': total,
+                'filename': filename,
+                'error': error,
+                'files_processed': files_processed,
+                'files_failed': files_failed,
+                'deleted_count': deleted_count,
+                'failed_files': failed_files,
             },
-            room=f"user:{user_id}",
+            room=f'user:{user_id}',
         )
-        log.debug(
-            f"Emitted sync progress: {status} {current}/{total} "
-            f"for knowledge {knowledge_id}"
-        )
+        log.debug(f'Emitted sync progress: {status} {current}/{total} for knowledge {knowledge_id}')
     except Exception as e:
-        log.debug(f"Failed to emit sync progress event: {e}")
+        log.debug(f'Failed to emit sync progress event: {e}')

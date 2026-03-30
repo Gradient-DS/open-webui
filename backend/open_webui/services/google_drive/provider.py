@@ -23,9 +23,7 @@ log = logging.getLogger(__name__)
 class GoogleDriveTokenManager(TokenManager):
     """Token manager for Google Drive using Google OAuth 2.0."""
 
-    async def get_valid_access_token(
-        self, user_id: str, knowledge_id: str
-    ) -> Optional[str]:
+    async def get_valid_access_token(self, user_id: str, knowledge_id: str) -> Optional[str]:
         return await _get_valid_access_token(user_id, knowledge_id)
 
     def has_stored_token(self, user_id: str, knowledge_id: str) -> bool:
@@ -42,17 +40,15 @@ class GoogleDriveSyncProvider(SyncProvider):
         self._token_manager = GoogleDriveTokenManager()
 
     def get_provider_type(self) -> str:
-        return "google_drive"
+        return 'google_drive'
 
     def get_meta_key(self) -> str:
-        return "google_drive_sync"
+        return 'google_drive_sync'
 
     def get_token_manager(self) -> TokenManager:
         return self._token_manager
 
-    def create_worker(
-        self, knowledge_id, sources, access_token, user_id, app, token_provider=None
-    ):
+    def create_worker(self, knowledge_id, sources, access_token, user_id, app, token_provider=None):
         from open_webui.services.google_drive.sync_worker import GoogleDriveSyncWorker
 
         return GoogleDriveSyncWorker(

@@ -7,26 +7,26 @@ from typing import Optional, Callable, Awaitable, Dict, Any, List, Tuple
 
 log = logging.getLogger(__name__)
 
-DRIVE_BASE_URL = "https://www.googleapis.com/drive/v3"
+DRIVE_BASE_URL = 'https://www.googleapis.com/drive/v3'
 
 # Google Workspace MIME types that require export instead of download
 GOOGLE_WORKSPACE_EXPORT_MAP = {
-    "application/vnd.google-apps.document": (
-        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-        ".docx",
+    'application/vnd.google-apps.document': (
+        'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+        '.docx',
     ),
-    "application/vnd.google-apps.spreadsheet": (
-        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        ".xlsx",
+    'application/vnd.google-apps.spreadsheet': (
+        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        '.xlsx',
     ),
-    "application/vnd.google-apps.presentation": (
-        "application/vnd.openxmlformats-officedocument.presentationml.presentation",
-        ".pptx",
+    'application/vnd.google-apps.presentation': (
+        'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+        '.pptx',
     ),
 }
 
 # Standard fields to request from the Files API
-_FILE_FIELDS = "id,name,mimeType,size,md5Checksum,modifiedTime,parents,trashed"
+_FILE_FIELDS = 'id,name,mimeType,size,md5Checksum,modifiedTime,parents,trashed'
 
 
 class GoogleDriveClient:
@@ -76,16 +76,12 @@ class GoogleDriveClient:
                     method,
                     url,
                     params=params,
-                    headers={"Authorization": f"Bearer {self._access_token}"},
+                    headers={'Authorization': f'Bearer {self._access_token}'},
                     follow_redirects=follow_redirects,
                 )
 
-                if (
-                    response.status_code == 401
-                    and not token_refreshed
-                    and self._token_provider
-                ):
-                    log.info("Received 401, attempting token refresh")
+                if response.status_code == 401 and not token_refreshed and self._token_provider:
+                    log.info('Received 401, attempting token refresh')
                     try:
                         new_token = await self._token_provider()
                         if new_token:
@@ -93,19 +89,19 @@ class GoogleDriveClient:
                             token_refreshed = True
                             continue
                     except Exception as e:
-                        log.warning("Token refresh failed: %s", e)
+                        log.warning('Token refresh failed: %s', e)
                     return response
 
                 if response.status_code == 429:
-                    retry_after = int(response.headers.get("Retry-After", "60"))
-                    log.warning("Rate limited, waiting %d seconds", retry_after)
+                    retry_after = int(response.headers.get('Retry-After', '60'))
+                    log.warning('Rate limited, waiting %d seconds', retry_after)
                     await asyncio.sleep(retry_after)
                     continue
 
                 if response.status_code >= 500:
                     wait_time = 2**attempt
                     log.warning(
-                        "Server error %d, retrying in %d seconds",
+                        'Server error %d, retrying in %d seconds',
                         response.status_code,
                         wait_time,
                     )
@@ -121,7 +117,7 @@ class GoogleDriveClient:
                 else:
                     raise
 
-        raise RuntimeError(f"Failed after {max_retries} retries: {last_exception}")
+        raise RuntimeError(f'Failed after {max_retries} retries: {last_exception}')
 
     async def _get_json(
         self,
@@ -130,7 +126,7 @@ class GoogleDriveClient:
         max_retries: int = 3,
     ) -> Dict[str, Any]:
         """Make authenticated GET request and return JSON."""
-        response = await self._request_with_retry("GET", url, params, max_retries)
+        response = await self._request_with_retry('GET', url, params, max_retries)
         response.raise_for_status()
         return response.json()
 
@@ -142,23 +138,23 @@ class GoogleDriveClient:
 
         Uses the files.list endpoint with q parameter to find children.
         """
-        url = f"{DRIVE_BASE_URL}/files"
+        url = f'{DRIVE_BASE_URL}/files'
         items = []
         page_token = None
 
         while True:
             params = {
-                "q": f"'{folder_id}' in parents and trashed=false",
-                "fields": f"nextPageToken,files({_FILE_FIELDS})",
-                "pageSize": "1000",
+                'q': f"'{folder_id}' in parents and trashed=false",
+                'fields': f'nextPageToken,files({_FILE_FIELDS})',
+                'pageSize': '1000',
             }
             if page_token:
-                params["pageToken"] = page_token
+                params['pageToken'] = page_token
 
             data = await self._get_json(url, params=params)
-            items.extend(data.get("files", []))
+            items.extend(data.get('files', []))
 
-            page_token = data.get("nextPageToken")
+            page_token = data.get('nextPageToken')
             if not page_token:
                 break
 
@@ -170,20 +166,18 @@ class GoogleDriveClient:
     ) -> List[Dict[str, Any]]:
         """List all items in a folder recursively (BFS)."""
         all_items = []
-        folders_to_process = [(folder_id, "")]
+        folders_to_process = [(folder_id, '')]
 
         while folders_to_process:
             current_folder_id, parent_path = folders_to_process.pop(0)
             items = await self.list_folder_children(current_folder_id)
 
             for item in items:
-                item_path = (
-                    f"{parent_path}/{item['name']}" if parent_path else item["name"]
-                )
-                item["_relative_path"] = item_path
+                item_path = f'{parent_path}/{item["name"]}' if parent_path else item['name']
+                item['_relative_path'] = item_path
 
-                if item.get("mimeType") == "application/vnd.google-apps.folder":
-                    folders_to_process.append((item["id"], item_path))
+                if item.get('mimeType') == 'application/vnd.google-apps.folder':
+                    folders_to_process.append((item['id'], item_path))
                 else:
                     all_items.append(item)
 
@@ -198,32 +192,32 @@ class GoogleDriveClient:
         Returns:
             Tuple of (changed items, new page token for next call)
         """
-        url = f"{DRIVE_BASE_URL}/changes"
+        url = f'{DRIVE_BASE_URL}/changes'
         items = []
         new_page_token = None
 
         current_token = page_token
         while True:
             params = {
-                "pageToken": current_token,
-                "fields": f"nextPageToken,newStartPageToken,changes(removed,fileId,file({_FILE_FIELDS}))",
-                "pageSize": "1000",
-                "includeRemoved": "true",
+                'pageToken': current_token,
+                'fields': f'nextPageToken,newStartPageToken,changes(removed,fileId,file({_FILE_FIELDS}))',
+                'pageSize': '1000',
+                'includeRemoved': 'true',
             }
 
             data = await self._get_json(url, params=params)
 
-            for change in data.get("changes", []):
-                if change.get("removed"):
-                    items.append({"id": change["fileId"], "@removed": True})
-                elif change.get("file"):
-                    items.append(change["file"])
+            for change in data.get('changes', []):
+                if change.get('removed'):
+                    items.append({'id': change['fileId'], '@removed': True})
+                elif change.get('file'):
+                    items.append(change['file'])
 
-            if "newStartPageToken" in data:
-                new_page_token = data["newStartPageToken"]
+            if 'newStartPageToken' in data:
+                new_page_token = data['newStartPageToken']
                 break
 
-            next_token = data.get("nextPageToken")
+            next_token = data.get('nextPageToken')
             if not next_token:
                 break
             current_token = next_token
@@ -232,39 +226,33 @@ class GoogleDriveClient:
 
     async def get_start_page_token(self) -> str:
         """Get the initial page token for the changes API."""
-        url = f"{DRIVE_BASE_URL}/changes/startPageToken"
+        url = f'{DRIVE_BASE_URL}/changes/startPageToken'
         data = await self._get_json(url)
-        return data["startPageToken"]
+        return data['startPageToken']
 
     async def download_file(self, file_id: str) -> bytes:
         """Download file content (for non-Workspace files)."""
-        url = f"{DRIVE_BASE_URL}/files/{file_id}"
-        response = await self._request_with_retry(
-            "GET", url, params={"alt": "media"}, follow_redirects=True
-        )
+        url = f'{DRIVE_BASE_URL}/files/{file_id}'
+        response = await self._request_with_retry('GET', url, params={'alt': 'media'}, follow_redirects=True)
         response.raise_for_status()
         return response.content
 
     async def export_file(self, file_id: str, mime_type: str) -> bytes:
         """Export a Google Workspace file (Docs, Sheets, Slides) to the given MIME type."""
-        url = f"{DRIVE_BASE_URL}/files/{file_id}/export"
-        response = await self._request_with_retry(
-            "GET", url, params={"mimeType": mime_type}, follow_redirects=True
-        )
+        url = f'{DRIVE_BASE_URL}/files/{file_id}/export'
+        response = await self._request_with_retry('GET', url, params={'mimeType': mime_type}, follow_redirects=True)
         response.raise_for_status()
         return response.content
 
     async def get_file_metadata(self, file_id: str) -> Dict[str, Any]:
         """Get metadata for a specific file."""
-        url = f"{DRIVE_BASE_URL}/files/{file_id}"
-        return await self._get_json(url, params={"fields": _FILE_FIELDS})
+        url = f'{DRIVE_BASE_URL}/files/{file_id}'
+        return await self._get_json(url, params={'fields': _FILE_FIELDS})
 
     async def get_file(self, file_id: str) -> Optional[Dict[str, Any]]:
         """Get metadata for a single file, returning None if not found."""
-        url = f"{DRIVE_BASE_URL}/files/{file_id}"
-        response = await self._request_with_retry(
-            "GET", url, params={"fields": _FILE_FIELDS}
-        )
+        url = f'{DRIVE_BASE_URL}/files/{file_id}'
+        response = await self._request_with_retry('GET', url, params={'fields': _FILE_FIELDS})
         if response.status_code == 404:
             return None
         response.raise_for_status()
@@ -272,9 +260,9 @@ class GoogleDriveClient:
 
     async def get_file_permissions(self, file_id: str) -> List[Dict[str, Any]]:
         """Get sharing permissions for a file or folder."""
-        url = f"{DRIVE_BASE_URL}/files/{file_id}/permissions"
+        url = f'{DRIVE_BASE_URL}/files/{file_id}/permissions'
         data = await self._get_json(
             url,
-            params={"fields": "permissions(id,type,emailAddress,role)"},
+            params={'fields': 'permissions(id,type,emailAddress,role)'},
         )
-        return data.get("permissions", [])
+        return data.get('permissions', [])

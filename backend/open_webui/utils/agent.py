@@ -150,34 +150,34 @@ async def stream_agent_response(
 
     try:
         response = await session.request(
-            method="POST",
-            url=f"{base_url}/v1/chat/completions",
+            method='POST',
+            url=f'{base_url}/v1/chat/completions',
             data=json.dumps(payload),
-            headers={"Content-Type": "application/json"},
+            headers={'Content-Type': 'application/json'},
         )
 
         if response.status >= 400:
             body = await response.text()
             await session.close()
-            raise Exception(f"Agent API returned {response.status}: {body}")
+            raise Exception(f'Agent API returned {response.status}: {body}')
 
-        current_event_type = "data"
+        current_event_type = 'data'
 
         async for raw_line in response.content:
-            line = raw_line.decode("utf-8").rstrip("\n\r")
+            line = raw_line.decode('utf-8').rstrip('\n\r')
 
             if not line:
                 continue
 
-            if line.startswith("event:"):
-                current_event_type = line[len("event:") :].strip()
+            if line.startswith('event:'):
+                current_event_type = line[len('event:') :].strip()
                 continue
 
-            if line.startswith("data:"):
-                data_str = line[len("data:") :].strip()
+            if line.startswith('data:'):
+                data_str = line[len('data:') :].strip()
 
-                if data_str == "[DONE]":
-                    yield SSEEvent(event_type="done", data="[DONE]")
+                if data_str == '[DONE]':
+                    yield SSEEvent(event_type='done', data='[DONE]')
                     break
 
                 try:
@@ -188,7 +188,7 @@ async def stream_agent_response(
                 yield SSEEvent(event_type=current_event_type, data=data)
                 # Reset event type after yielding — next data line defaults
                 # to "data" unless preceded by a new event: line
-                current_event_type = "data"
+                current_event_type = 'data'
 
     finally:
         await session.close()
@@ -212,43 +212,40 @@ async def call_agent_api(
     routes custom SSE events to Socket.IO, and returns either a
     StreamingResponse or a dict for process_chat_response to consume.
     """
-    stream = form_data.get("stream", True)
+    stream = form_data.get('stream', True)
 
     # Extract model params that should be forwarded
     model_params = {}
     for key in (
-        "temperature",
-        "top_p",
-        "max_tokens",
-        "frequency_penalty",
-        "presence_penalty",
-        "seed",
-        "stop",
+        'temperature',
+        'top_p',
+        'max_tokens',
+        'frequency_penalty',
+        'presence_penalty',
+        'seed',
+        'stop',
     ):
         if key in form_data:
             model_params[key] = form_data[key]
 
     payload = build_agent_payload(
         agent=AGENT_API_AGENT,
-        model=form_data.get("model", ""),
-        messages=form_data.get("messages", []),
+        model=form_data.get('model', ''),
+        messages=form_data.get('messages', []),
         stream=stream,
-        chat_id=metadata.get("chat_id"),
-        user_id=metadata.get("user_id"),
-        message_id=metadata.get("message_id"),
-        session_id=metadata.get("session_id"),
+        chat_id=metadata.get('chat_id'),
+        user_id=metadata.get('user_id'),
+        message_id=metadata.get('message_id'),
+        session_id=metadata.get('session_id'),
         features=features,
-        files=metadata.get("files"),
-        knowledge=metadata.get("knowledge"),
-        tool_ids=metadata.get("tool_ids"),
-        rag_filter=metadata.get("rag_filter"),
+        files=metadata.get('files'),
+        knowledge=metadata.get('knowledge'),
+        tool_ids=metadata.get('tool_ids'),
+        rag_filter=metadata.get('rag_filter'),
         **model_params,
     )
 
-    log.debug(
-        f"Agent API payload: model={payload.get('model')}, "
-        f"stream={stream}, features={features}"
-    )
+    log.debug(f'Agent API payload: model={payload.get("model")}, stream={stream}, features={features}')
 
     if not stream:
         return await _call_agent_api_non_streaming(payload)
@@ -266,15 +263,15 @@ async def _call_agent_api_non_streaming(
     )
     try:
         response = await session.request(
-            method="POST",
-            url=f"{AGENT_API_BASE_URL}/v1/chat/completions",
+            method='POST',
+            url=f'{AGENT_API_BASE_URL}/v1/chat/completions',
             data=json.dumps(payload),
-            headers={"Content-Type": "application/json"},
+            headers={'Content-Type': 'application/json'},
         )
 
         if response.status >= 400:
             body = await response.text()
-            raise Exception(f"Agent API returned {response.status}: {body}")
+            raise Exception(f'Agent API returned {response.status}: {body}')
 
         return await response.json()
     finally:
@@ -299,61 +296,61 @@ def _build_streaming_response(
         # as they arrive, so citation chips render while the answer streams.
         try:
             async for sse_event in stream_agent_response(AGENT_API_BASE_URL, payload):
-                if sse_event.event_type == "done":
+                if sse_event.event_type == 'done':
                     break
 
-                if sse_event.event_type == "status":
+                if sse_event.event_type == 'status':
                     # [Gradient] Route status events to Socket.IO so the UI
                     # shows status spinners in real time.
                     if event_emitter:
                         try:
                             await event_emitter(
                                 {
-                                    "type": "status",
-                                    "data": sse_event.data,
+                                    'type': 'status',
+                                    'data': sse_event.data,
                                 }
                             )
                         except Exception as e:
-                            log.warning(f"Error emitting status event: {e}")
+                            log.warning(f'Error emitting status event: {e}')
                     continue
 
-                if sse_event.event_type == "source":
+                if sse_event.event_type == 'source':
                     # [Gradient] Emit each source immediately so citation
                     # chips render while the answer is still streaming.
                     if event_emitter:
                         try:
                             await event_emitter(
                                 {
-                                    "type": "source",
-                                    "data": sse_event.data,
+                                    'type': 'source',
+                                    'data': sse_event.data,
                                 }
                             )
                         except Exception as e:
-                            log.warning(f"Error emitting source event: {e}")
+                            log.warning(f'Error emitting source event: {e}')
                     continue
 
                 # Standard OpenAI chunk — pass through as SSE data line
                 if isinstance(sse_event.data, dict):
-                    yield f"data: {json.dumps(sse_event.data)}\n\n"
+                    yield f'data: {json.dumps(sse_event.data)}\n\n'
                 else:
-                    yield f"data: {sse_event.data}\n\n"
+                    yield f'data: {sse_event.data}\n\n'
 
         except Exception as e:
-            log.error(f"Agent API streaming error: {e}")
+            log.error(f'Agent API streaming error: {e}')
             # Yield an error as an OpenAI-style chunk so the UI sees it
             error_chunk = {
-                "choices": [
+                'choices': [
                     {
-                        "delta": {"content": f"\n\n[Agent API error: {e}]"},
-                        "finish_reason": "stop",
+                        'delta': {'content': f'\n\n[Agent API error: {e}]'},
+                        'finish_reason': 'stop',
                     }
                 ]
             }
-            yield f"data: {json.dumps(error_chunk)}\n\n"
+            yield f'data: {json.dumps(error_chunk)}\n\n'
 
-        yield "data: [DONE]\n\n"
+        yield 'data: [DONE]\n\n'
 
     return StreamingResponse(
         body_generator(),
-        media_type="text/event-stream",
+        media_type='text/event-stream',
     )

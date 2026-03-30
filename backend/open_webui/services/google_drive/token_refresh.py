@@ -21,7 +21,7 @@ from open_webui.services.sync.token_refresh import (
 
 log = logging.getLogger(__name__)
 
-_TOKEN_URL = "https://oauth2.googleapis.com/token"
+_TOKEN_URL = 'https://oauth2.googleapis.com/token'
 
 
 async def get_valid_access_token(
@@ -35,8 +35,8 @@ async def get_valid_access_token(
     Returns None if no token exists or refresh fails (token revoked).
     """
     return await _generic_get_valid_access_token(
-        provider="google_drive",
-        meta_key="google_drive_sync",
+        provider='google_drive',
+        meta_key='google_drive_sync',
         user_id=user_id,
         knowledge_id=knowledge_id,
         refresh_fn=_refresh_token,
@@ -49,9 +49,9 @@ async def _refresh_token(token_data: dict) -> Optional[dict]:
 
     Returns updated token dict on success, None on failure (revocation).
     """
-    refresh_token = token_data.get("refresh_token")
+    refresh_token = token_data.get('refresh_token')
     if not refresh_token:
-        log.error("No refresh_token in stored token data")
+        log.error('No refresh_token in stored token data')
         return None
 
     try:
@@ -59,41 +59,39 @@ async def _refresh_token(token_data: dict) -> Optional[dict]:
             response = await client.post(
                 _TOKEN_URL,
                 data={
-                    "client_id": GOOGLE_DRIVE_CLIENT_ID.value,
-                    "client_secret": GOOGLE_CLIENT_SECRET.value,
-                    "refresh_token": refresh_token,
-                    "grant_type": "refresh_token",
+                    'client_id': GOOGLE_DRIVE_CLIENT_ID.value,
+                    'client_secret': GOOGLE_CLIENT_SECRET.value,
+                    'refresh_token': refresh_token,
+                    'grant_type': 'refresh_token',
                 },
             )
 
             if response.status_code == 400:
                 error_data = response.json()
-                error_code = error_data.get("error", "")
-                if error_code in ("invalid_grant", "interaction_required"):
-                    log.warning("Token revoked or requires interaction: %s", error_code)
+                error_code = error_data.get('error', '')
+                if error_code in ('invalid_grant', 'interaction_required'):
+                    log.warning('Token revoked or requires interaction: %s', error_code)
                     return None
-                log.error("Token refresh error: %s", error_data)
+                log.error('Token refresh error: %s', error_data)
                 return None
 
             response.raise_for_status()
             new_token_data = response.json()
 
     except httpx.HTTPStatusError as e:
-        log.error("Token refresh HTTP error: %s", e.response.status_code)
+        log.error('Token refresh HTTP error: %s', e.response.status_code)
         return None
     except Exception as e:
-        log.error("Token refresh error: %s", e)
+        log.error('Token refresh error: %s', e)
         return None
 
     # Google may not return a new refresh token — preserve the old one
-    if "refresh_token" not in new_token_data:
-        new_token_data["refresh_token"] = refresh_token
+    if 'refresh_token' not in new_token_data:
+        new_token_data['refresh_token'] = refresh_token
 
     # Calculate expires_at
-    if "expires_in" in new_token_data:
-        new_token_data["expires_at"] = int(time.time()) + int(
-            new_token_data["expires_in"]
-        )
-    new_token_data["issued_at"] = int(time.time())
+    if 'expires_in' in new_token_data:
+        new_token_data['expires_at'] = int(time.time()) + int(new_token_data['expires_in'])
+    new_token_data['issued_at'] = int(time.time())
 
     return new_token_data

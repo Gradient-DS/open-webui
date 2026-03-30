@@ -11,8 +11,8 @@ from open_webui.config import (
 )
 
 _scheduler = SyncScheduler(
-    provider_type="google_drive",
-    meta_key="google_drive_sync",
+    provider_type='google_drive',
+    meta_key='google_drive_sync',
     enable_config=ENABLE_GOOGLE_DRIVE_SYNC,
     interval_config=GOOGLE_DRIVE_SYNC_INTERVAL_MINUTES,
 )
