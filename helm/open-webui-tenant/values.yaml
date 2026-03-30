@@ -361,6 +361,11 @@ openWebui:
     # Agent Proxy (external: exposes agent API to external callers via /api/v1/agent/)
     enableAgentProxy: "false"
 
+    # Two-Factor Authentication (TOTP)
+    enable2fa: "false"
+    require2fa: "false"
+    twoFaGracePeriodDays: "7"
+
     # Audit Logging
     # Levels: NONE, METADATA, REQUEST, REQUEST_RESPONSE
     # METADATA logs who/what/when without PII from request/response bodies

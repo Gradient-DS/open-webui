@@ -1722,6 +1722,28 @@ AUTO_ARCHIVE_RETENTION_DAYS = PersistentConfig(
 )
 
 ####################################
+# 2FA / TOTP
+####################################
+
+ENABLE_2FA = PersistentConfig(
+    'ENABLE_2FA',
+    'auth.enable_2fa',
+    os.environ.get('ENABLE_2FA', 'False').lower() == 'true',
+)
+
+REQUIRE_2FA = PersistentConfig(
+    'REQUIRE_2FA',
+    'auth.require_2fa',
+    os.environ.get('REQUIRE_2FA', 'False').lower() == 'true',
+)
+
+TWO_FA_GRACE_PERIOD_DAYS = PersistentConfig(
+    'TWO_FA_GRACE_PERIOD_DAYS',
+    'auth.2fa_grace_period_days',
+    int(os.environ.get('TWO_FA_GRACE_PERIOD_DAYS', '7')),
+)
+
+####################################
 # Feature Flags (SaaS Tier Control)
 ####################################
 

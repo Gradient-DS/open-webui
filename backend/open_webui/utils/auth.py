@@ -325,6 +325,12 @@ async def get_current_user(
                 detail='Invalid token',
             )
 
+        if data is not None and data.get('purpose') == '2fa_pending':
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail='2FA verification required',
+            )
+
         if data is not None and 'id' in data:
             if data.get('jti') and not await is_valid_token(request, data):
                 raise HTTPException(

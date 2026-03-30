@@ -8,6 +8,7 @@
 	import { WEBUI_BASE_URL } from '$lib/constants';
 
 	import UpdatePassword from './Account/UpdatePassword.svelte';
+	import TwoFactorSetup from './Account/TwoFactorSetup.svelte';
 	import { getGravatarUrl } from '$lib/apis/utils';
 	import { generateInitialsImage, canvasPixelTest } from '$lib/utils';
 	import { copyToClipboard } from '$lib/utils';
@@ -254,6 +255,13 @@
 		{#if $config?.features.enable_login_form}
 			<div class="mt-2">
 				<UpdatePassword />
+			</div>
+		{/if}
+
+		{#if $config?.features?.enable_2fa && $config?.features?.enable_login_form}
+			<hr class="border-gray-50 dark:border-gray-850/30 my-4" />
+			<div class="mt-2">
+				<TwoFactorSetup />
 			</div>
 		{/if}
 
