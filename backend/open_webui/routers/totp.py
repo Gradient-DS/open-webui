@@ -85,10 +85,12 @@ async def get_2fa_status(
     if not auth:
         raise HTTPException(status_code=404, detail='Auth record not found')
 
+    is_sso_user = bool(user.oauth) or not auth.password
+
     return {
         'totp_enabled': auth.totp_enabled or False,
         'recovery_codes_remaining': RecoveryCodes.count_unused(user.id, db=db) if auth.totp_enabled else 0,
-        'is_oauth_user': bool(user.oauth),
+        'is_sso_user': is_sso_user,
     }
 
 
@@ -102,8 +104,14 @@ async def setup_totp(
     if not request.app.state.config.ENABLE_2FA:
         raise HTTPException(status_code=404, detail='2FA is not enabled')
 
+    # 2FA is only enforced on the email+password login flow
+    if user.oauth:
+        raise HTTPException(status_code=400, detail='2FA is not available for SSO accounts')
+
     auth = Auths.get_auth_by_user_id(user.id, db=db)
-    if auth and auth.totp_enabled:
+    if not auth or not auth.password:
+        raise HTTPException(status_code=400, detail='2FA is not available for SSO accounts')
+    if auth.totp_enabled:
         raise HTTPException(status_code=400, detail='TOTP is already enabled')
 
     secret = generate_totp_secret()
@@ -128,9 +136,12 @@ async def enable_totp(
     if not request.app.state.config.ENABLE_2FA:
         raise HTTPException(status_code=404, detail='2FA is not enabled')
 
+    if user.oauth:
+        raise HTTPException(status_code=400, detail='2FA is not available for SSO accounts')
+
     auth = Auths.get_auth_by_user_id(user.id, db=db)
-    if not auth:
-        raise HTTPException(status_code=404, detail='Auth record not found')
+    if not auth or not auth.password:
+        raise HTTPException(status_code=400, detail='2FA is not available for SSO accounts')
 
     if auth.totp_enabled:
         raise HTTPException(status_code=400, detail='TOTP is already enabled')

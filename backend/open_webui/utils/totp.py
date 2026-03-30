@@ -80,20 +80,19 @@ def verify_totp(secret: str, code: str, last_used_at: int | None) -> tuple[bool,
     """
     Verify TOTP code with valid_window=1 and replay protection.
     Returns (is_valid, new_timecode_if_valid).
+
+    Replay guard covers last_used_at + valid_window to prevent reuse
+    of a code that is still accepted by pyotp in an adjacent time step.
     """
+    VALID_WINDOW = 1
     totp = pyotp.TOTP(secret)
     current_timecode = totp.timecode(datetime.now())
 
-    # Replay protection: reject if same timecode was already used
-    if last_used_at is not None and current_timecode <= last_used_at:
-        # Still check if the code is valid for a future window
-        if not totp.verify(code, valid_window=1):
-            return False, None
-        # Code is valid but timecode already used — replay
-        if current_timecode == last_used_at:
-            return False, None
+    # Replay protection: block if within the valid_window of the last use
+    if last_used_at is not None and current_timecode <= last_used_at + VALID_WINDOW:
+        return False, None
 
-    if totp.verify(code, valid_window=1):
+    if totp.verify(code, valid_window=VALID_WINDOW):
         return True, current_timecode
 
     return False, None

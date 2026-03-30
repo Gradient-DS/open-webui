@@ -238,7 +238,7 @@
 					$config?.features?.enable_login_form
 				) {
 					const status = await get2FAStatus(localStorage.token).catch(() => null);
-					if (status && !status.totp_enabled && !status.is_oauth_user) {
+					if (status && !status.totp_enabled && !status.is_sso_user) {
 						show2FAOverlay = true;
 					}
 				}
