@@ -6,7 +6,7 @@ itsdangerous==2.2.0
 
 python-socketio==5.16.1
 python-jose==3.5.0
-cryptography==46.0.5
+cryptography==46.0.6
 bcrypt==5.0.0
 argon2-cffi==25.1.0
 PyJWT[crypto]==2.12.0
@@ -72,7 +72,7 @@ python-pptx==1.0.2
 msoffcrypto-tool==6.0.0
 unstructured==0.18.31
 
-nltk==3.9.3
+nltk==3.9.4
 Markdown==3.10.2
 beautifulsoup4==4.14.3
 pypandoc==1.16.2
@@ -81,6 +81,7 @@ openpyxl==3.1.5
 pyxlsb==1.0.10
 xlrd==2.0.2
 validators==0.35.0
+wheel==0.46.2
 psutil==7.2.2
 sentencepiece==0.2.1
 soundfile==0.13.1
