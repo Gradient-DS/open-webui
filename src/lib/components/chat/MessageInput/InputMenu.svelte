@@ -26,7 +26,7 @@
 	import Camera from '$lib/components/icons/Camera.svelte';
 	import Clip from '$lib/components/icons/Clip.svelte';
 	import ClockRotateRight from '$lib/components/icons/ClockRotateRight.svelte';
-	import Database from '$lib/components/icons/Database.svelte';
+	import FolderOpen from '$lib/components/icons/FolderOpen.svelte';
 	import ChevronRight from '$lib/components/icons/ChevronRight.svelte';
 	import ChevronLeft from '$lib/components/icons/ChevronLeft.svelte';
 	import PageEdit from '$lib/components/icons/PageEdit.svelte';
@@ -509,7 +509,7 @@
 									tab = 'knowledge';
 								}}
 							>
-								<Database />
+								<FolderOpen />
 								<div class="flex-1 flex items-center justify-between">
 									<div class="line-clamp-1">{$i18n.t('Knowledge database')}</div>
 									<div class="text-gray-500">

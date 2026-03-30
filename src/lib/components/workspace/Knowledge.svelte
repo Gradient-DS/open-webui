@@ -22,7 +22,7 @@
 	import Badge from '../common/Badge.svelte';
 	import Search from '../icons/Search.svelte';
 	import Plus from '../icons/Plus.svelte';
-	import Database from '../icons/Database.svelte';
+	import FolderOpen from '../icons/FolderOpen.svelte';
 	import OneDrive from '../icons/OneDrive.svelte';
 	import GoogleDrive from '../icons/GoogleDrive.svelte';
 	import Spinner from '../common/Spinner.svelte';
@@ -257,7 +257,7 @@
 									goto('/workspace/knowledge/create?type=local');
 								}}
 							>
-								<Database className="size-4" strokeWidth="2" />
+								<FolderOpen className="size-4" strokeWidth="2" />
 								<div class="flex items-center">{$i18n.t('Local Knowledge Base')}</div>
 							</button>
 

@@ -69,32 +69,34 @@
 				<hr class="border-gray-50 dark:border-gray-800/30 my-1" />
 			{/if}
 
-			<button
-				type="button"
-				aria-pressed={($settings?.pinnedModels ?? []).includes(model?.id)}
-				class="select-none flex rounded-xl py-1.5 px-3 w-full hover:bg-gray-50 dark:hover:bg-gray-800 transition items-center gap-2"
-				on:click={(e) => {
-					e.stopPropagation();
-					e.preventDefault();
+			{#if model?.info?.base_model_id}
+				<button
+					type="button"
+					aria-pressed={($settings?.pinnedModels ?? []).includes(model?.id)}
+					class="select-none flex rounded-xl py-1.5 px-3 w-full hover:bg-gray-50 dark:hover:bg-gray-800 transition items-center gap-2"
+					on:click={(e) => {
+						e.stopPropagation();
+						e.preventDefault();
 
-					pinModelHandler(model?.id);
-					show = false;
-				}}
-			>
-				{#if ($settings?.pinnedModels ?? []).includes(model?.id)}
-					<PinSlash />
-				{:else}
-					<Pin />
-				{/if}
-
-				<div class="flex items-center">
+						pinModelHandler(model?.id);
+						show = false;
+					}}
+				>
 					{#if ($settings?.pinnedModels ?? []).includes(model?.id)}
-						{$i18n.t('Hide from Sidebar')}
+						<PinSlash />
 					{:else}
-						{$i18n.t('Keep in Sidebar')}
+						<Pin />
 					{/if}
-				</div>
-			</button>
+
+					<div class="flex items-center">
+						{#if ($settings?.pinnedModels ?? []).includes(model?.id)}
+							{$i18n.t('Hide from Sidebar')}
+						{:else}
+							{$i18n.t('Keep in Sidebar')}
+						{/if}
+					</div>
+				</button>
+			{/if}
 
 			<button
 				type="button"

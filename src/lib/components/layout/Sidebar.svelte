@@ -3,6 +3,7 @@
 	import { v4 as uuidv4 } from 'uuid';
 
 	import { goto } from '$app/navigation';
+	import { page } from '$app/stores';
 	import {
 		user,
 		chats,
@@ -65,7 +66,7 @@
 	import Sidebar from '../icons/Sidebar.svelte';
 	import PinnedModelList from './Sidebar/PinnedModelList.svelte';
 	import Note from '../icons/Note.svelte';
-	import BookOpen from '../icons/BookOpen.svelte';
+	import FolderOpen from '../icons/FolderOpen.svelte';
 	import Sparkles from '../icons/Sparkles.svelte';
 	import CommandLine from '../icons/CommandLine.svelte';
 	import Wrench from '../icons/Wrench.svelte';
@@ -800,7 +801,7 @@
 					<div class="">
 						<Tooltip content={$i18n.t('Knowledge')} placement="right">
 							<a
-								class=" cursor-pointer flex rounded-xl hover:bg-gray-100 dark:hover:bg-gray-850 transition group"
+								class=" cursor-pointer flex rounded-xl hover:bg-gray-100 dark:hover:bg-gray-850 transition group {$page.url.pathname.startsWith('/workspace/knowledge') ? 'bg-gray-100 dark:bg-gray-850' : ''}"
 								href="/workspace/knowledge"
 								on:click={async (e) => {
 									e.stopImmediatePropagation();
@@ -813,7 +814,7 @@
 								aria-label={$i18n.t('Knowledge')}
 							>
 								<div class=" self-center flex items-center justify-center size-9">
-									<BookOpen className="size-4.5" strokeWidth="2" />
+									<FolderOpen className="size-4.5" strokeWidth="2" />
 								</div>
 							</a>
 						</Tooltip>
@@ -824,7 +825,7 @@
 					<div class="">
 						<Tooltip content={$i18n.t('Agents')} placement="right">
 							<a
-								class=" cursor-pointer flex rounded-xl hover:bg-gray-100 dark:hover:bg-gray-850 transition group"
+								class=" cursor-pointer flex rounded-xl hover:bg-gray-100 dark:hover:bg-gray-850 transition group {$page.url.pathname.startsWith('/workspace/models') ? 'bg-gray-100 dark:bg-gray-850' : ''}"
 								href="/workspace/models"
 								on:click={async (e) => {
 									e.stopImmediatePropagation();
@@ -848,7 +849,7 @@
 					<div class="">
 						<Tooltip content={$i18n.t('Prompts')} placement="right">
 							<a
-								class=" cursor-pointer flex rounded-xl hover:bg-gray-100 dark:hover:bg-gray-850 transition group"
+								class=" cursor-pointer flex rounded-xl hover:bg-gray-100 dark:hover:bg-gray-850 transition group {$page.url.pathname.startsWith('/workspace/prompts') ? 'bg-gray-100 dark:bg-gray-850' : ''}"
 								href="/workspace/prompts"
 								on:click={async (e) => {
 									e.stopImmediatePropagation();
@@ -1090,14 +1091,14 @@
 						<div class="px-[0.4375rem] flex justify-center text-gray-800 dark:text-gray-200">
 							<a
 								id="sidebar-knowledge-button"
-								class="grow flex items-center space-x-3 rounded-2xl px-2.5 py-2 hover:bg-gray-100 dark:hover:bg-gray-900 transition"
+								class="grow flex items-center space-x-3 rounded-2xl px-2.5 py-2 hover:bg-gray-100 dark:hover:bg-gray-900 transition {$page.url.pathname.startsWith('/workspace/knowledge') ? 'bg-gray-100 dark:bg-gray-900' : ''}"
 								href="/workspace/knowledge"
 								on:click={itemClickHandler}
 								draggable="false"
 								aria-label={$i18n.t('Knowledge')}
 							>
 								<div class="self-center">
-									<BookOpen className="size-4.5" strokeWidth="2" />
+									<FolderOpen className="size-4.5" strokeWidth="2" />
 								</div>
 
 								<div class="flex self-center translate-y-[0.5px]">
@@ -1111,7 +1112,7 @@
 						<div class="px-[0.4375rem] flex justify-center text-gray-800 dark:text-gray-200">
 							<a
 								id="sidebar-agents-button"
-								class="grow flex items-center space-x-3 rounded-2xl px-2.5 py-2 hover:bg-gray-100 dark:hover:bg-gray-900 transition"
+								class="grow flex items-center space-x-3 rounded-2xl px-2.5 py-2 hover:bg-gray-100 dark:hover:bg-gray-900 transition {$page.url.pathname.startsWith('/workspace/models') ? 'bg-gray-100 dark:bg-gray-900' : ''}"
 								href="/workspace/models"
 								on:click={itemClickHandler}
 								draggable="false"
@@ -1132,7 +1133,7 @@
 						<div class="px-[0.4375rem] flex justify-center text-gray-800 dark:text-gray-200">
 							<a
 								id="sidebar-prompts-button"
-								class="grow flex items-center space-x-3 rounded-2xl px-2.5 py-2 hover:bg-gray-100 dark:hover:bg-gray-900 transition"
+								class="grow flex items-center space-x-3 rounded-2xl px-2.5 py-2 hover:bg-gray-100 dark:hover:bg-gray-900 transition {$page.url.pathname.startsWith('/workspace/prompts') ? 'bg-gray-100 dark:bg-gray-900' : ''}"
 								href="/workspace/prompts"
 								on:click={itemClickHandler}
 								draggable="false"
@@ -1176,7 +1177,7 @@
 						id="sidebar-models"
 						bind:open={showPinnedModels}
 						className="px-2 mt-0.5"
-						name={$i18n.t('Models & agents')}
+						name={$i18n.t('Agents')}
 						chevron={false}
 						dragAndDrop={false}
 					>

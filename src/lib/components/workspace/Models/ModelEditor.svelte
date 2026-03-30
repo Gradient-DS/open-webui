@@ -112,14 +112,14 @@
 		info.name = name;
 
 		if (id === '') {
-			toast.error($i18n.t('Model ID is required.'));
+			toast.error($i18n.t('ID is required.'));
 			loading = false;
 
 			return;
 		}
 
 		if (name === '') {
-			toast.error($i18n.t('Model Name is required.'));
+			toast.error($i18n.t('Name is required.'));
 			loading = false;
 
 			return;
@@ -552,7 +552,7 @@
 									<div class="flex-1 w-full">
 										<input
 											class="text-3xl w-full bg-transparent outline-hidden"
-											placeholder={$i18n.t('Model Name')}
+											placeholder={$i18n.t('Name')}
 											bind:value={name}
 											required
 										/>
@@ -562,7 +562,7 @@
 										<div>
 											<input
 												class="text-xs w-full bg-transparent outline-hidden"
-												placeholder={$i18n.t('Model ID')}
+												placeholder={$i18n.t('ID')}
 												bind:value={id}
 												disabled={edit}
 												required
