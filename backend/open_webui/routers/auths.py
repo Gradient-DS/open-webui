@@ -642,11 +642,13 @@ async def signin(
                     data={'id': user.id, 'purpose': '2fa_pending'},
                     expires_delta=datetime.timedelta(minutes=5),
                 )
-                return {
-                    'requires_2fa': True,
-                    'partial_token': partial_token,
-                    'methods': ['totp', 'recovery'],
-                }
+                return JSONResponse(
+                    content={
+                        'requires_2fa': True,
+                        'partial_token': partial_token,
+                        'methods': ['totp', 'recovery'],
+                    }
+                )
 
         return create_session_response(request, user, db, response, set_cookie=True)
     else:

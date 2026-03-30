@@ -4,6 +4,7 @@
 
 #### Current Work
 
+- **TOTP 2FA Phase 1 — implementation complete** on branch `feat/email-2fa`. All 16 plan steps done. Needs manual testing and PR. Phase 2 (email OTP) deferred.
 - External agents package — active development and integration
 - New cloud integrations (Google Drive recently completed, exploring more)
 - Regular upstream merges to stay current (latest: v0.6.43 → v0.8.9, branch `merge/upstream-260329`)

@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { onMount, getContext } from 'svelte';
+	import { onMount, getContext, createEventDispatcher } from 'svelte';
 	import { toast } from 'svelte-sonner';
 	import {
 		get2FAStatus,
@@ -12,8 +12,9 @@
 	import Badge from '$lib/components/common/Badge.svelte';
 
 	const i18n = getContext('i18n');
+	const dispatch = createEventDispatcher();
 
-	// States: 'loading' | 'not_enrolled' | 'setup' | 'recovery_codes' | 'enrolled'
+	// States: 'loading' | 'not_enrolled' | 'setup_scan' | 'setup_verify' | 'recovery_codes' | 'enrolled'
 	let state: string = 'loading';
 
 	// Status
@@ -62,7 +63,7 @@
 		if (res) {
 			qrCodeBase64 = res.qr_code_base64;
 			secret = res.secret;
-			state = 'setup';
+			state = 'setup_scan';
 		}
 	};
 
@@ -156,7 +157,7 @@
 				</div>
 			</div>
 			<button
-				class="px-3.5 py-1.5 text-sm font-medium bg-black hover:bg-gray-900 text-white dark:bg-white dark:text-black dark:hover:bg-gray-100 transition rounded-full"
+				class="px-4 py-1.5 text-sm font-medium whitespace-nowrap bg-black hover:bg-gray-900 text-white dark:bg-white dark:text-black dark:hover:bg-gray-100 transition rounded-full"
 				type="button"
 				disabled={loading}
 				on:click={startSetup}
@@ -164,12 +165,14 @@
 				{$i18n.t('Set Up')}
 			</button>
 		</div>
-	{:else if state === 'setup'}
+	{:else if state === 'setup_scan'}
 		<div>
-			<div class="font-medium mb-3">{$i18n.t('Set Up Two-Factor Authentication')}</div>
-
-			<div class="text-xs text-gray-500 mb-3">
+			<div class="font-medium mb-1">{$i18n.t('Set Up Two-Factor Authentication')}</div>
+			<div class="text-xs text-gray-500 mb-1">
 				{$i18n.t('Scan this QR code with your authenticator app')}
+			</div>
+			<div class="text-xs text-gray-400 dark:text-gray-500 mb-3">
+				{$i18n.t('Recommended apps: FreeOTP (open source), Microsoft Authenticator, or Google Authenticator.')}
 			</div>
 
 			{#if qrCodeBase64}
@@ -182,7 +185,7 @@
 				</div>
 			{/if}
 
-			<div class="mb-3">
+			<div class="mb-4">
 				<div class="text-xs text-gray-500 mb-1">{$i18n.t('Or enter this key manually:')}</div>
 				<div
 					class="font-mono text-xs bg-gray-50 dark:bg-gray-850 p-2 rounded-lg select-all break-all"
@@ -191,8 +194,40 @@
 				</div>
 			</div>
 
+			<div class="flex gap-2 justify-end">
+				<button
+					class="px-3.5 py-1.5 text-sm font-medium text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-100 transition rounded-full"
+					type="button"
+					on:click={() => {
+						state = 'not_enrolled';
+						secret = '';
+						qrCodeBase64 = '';
+						setupPassword = '';
+						verificationCode = '';
+					}}
+				>
+					{$i18n.t('Cancel')}
+				</button>
+				<button
+					class="px-4 py-1.5 text-sm font-medium bg-black hover:bg-gray-900 text-white dark:bg-white dark:text-black dark:hover:bg-gray-100 transition rounded-full"
+					type="button"
+					on:click={() => {
+						state = 'setup_verify';
+					}}
+				>
+					{$i18n.t('Next')}
+				</button>
+			</div>
+		</div>
+	{:else if state === 'setup_verify'}
+		<div>
+			<div class="font-medium mb-1">{$i18n.t('Verify Setup')}</div>
+			<div class="text-xs text-gray-500 mb-3">
+				{$i18n.t('Enter your password and the code from your authenticator app to complete setup.')}
+			</div>
+
 			<form on:submit|preventDefault={enableHandler}>
-				<div class="space-y-2">
+				<div class="space-y-3">
 					<div>
 						<div class="text-xs text-gray-500 mb-1">{$i18n.t('Password')}</div>
 						<SensitiveInput
@@ -213,32 +248,28 @@
 							bind:value={verificationCode}
 							type="text"
 							inputmode="numeric"
-							pattern="\d{6}"
 							maxlength="6"
-							class="w-full text-sm outline-hidden bg-transparent tracking-[0.3em] font-mono placeholder:opacity-30"
+							class="w-full text-sm outline-hidden bg-transparent font-mono placeholder:opacity-30"
 							placeholder="000000"
 							autocomplete="one-time-code"
+							autofocus
 							required
 						/>
 					</div>
 				</div>
 
-				<div class="mt-3 flex gap-2 justify-end">
+				<div class="mt-4 flex gap-2 justify-end">
 					<button
 						class="px-3.5 py-1.5 text-sm font-medium text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-100 transition rounded-full"
 						type="button"
 						on:click={() => {
-							state = 'not_enrolled';
-							secret = '';
-							qrCodeBase64 = '';
-							setupPassword = '';
-							verificationCode = '';
+							state = 'setup_scan';
 						}}
 					>
-						{$i18n.t('Cancel')}
+						{$i18n.t('Back')}
 					</button>
 					<button
-						class="px-3.5 py-1.5 text-sm font-medium bg-black hover:bg-gray-900 text-white dark:bg-white dark:text-black dark:hover:bg-gray-100 transition rounded-full"
+						class="px-4 py-1.5 text-sm font-medium bg-black hover:bg-gray-900 text-white dark:bg-white dark:text-black dark:hover:bg-gray-100 transition rounded-full"
 						type="submit"
 						disabled={loading}
 					>
@@ -293,6 +324,7 @@
 						recoveryCodes = [];
 						savedCodesConfirmed = false;
 						loadStatus();
+						dispatch('enabled');
 					}}
 				>
 					{$i18n.t('Done')}

@@ -79,9 +79,8 @@
 					on:input={handleCodeInput}
 					type="text"
 					inputmode="numeric"
-					pattern="\d{6}"
 					maxlength="6"
-					class="w-full text-sm outline-hidden bg-transparent placeholder:text-gray-300 dark:placeholder:text-gray-600 text-center tracking-[0.5em] font-mono text-lg"
+					class="w-full text-sm outline-hidden bg-transparent placeholder:text-gray-300 dark:placeholder:text-gray-600 text-center font-mono text-lg"
 					placeholder="000000"
 					autocomplete="one-time-code"
 					autofocus

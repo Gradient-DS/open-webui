@@ -48,6 +48,7 @@
 	import ChangelogModal from '$lib/components/ChangelogModal.svelte';
 	import AccountPending from '$lib/components/layout/Overlay/AccountPending.svelte';
 	import AcceptanceModal from '$lib/components/layout/Overlay/AcceptanceModal.svelte';
+	import TwoFactorRequired from '$lib/components/layout/Overlay/TwoFactorRequired.svelte';
 	import UpdateInfoToast from '$lib/components/layout/UpdateInfoToast.svelte';
 	import Spinner from '$lib/components/common/Spinner.svelte';
 	import { Shortcut, shortcuts } from '$lib/shortcuts';
@@ -58,7 +59,7 @@
 	let DB = null;
 	let localDBChats = [];
 
-	let show2FABanner = false;
+	let show2FAOverlay = false;
 
 	let version;
 	let showAcceptanceModal = false;
@@ -231,10 +232,14 @@
 			setBanners().catch((e) => console.error('Failed to load banners:', e)),
 			setTools().catch((e) => console.error('Failed to load tools:', e)),
 			(async () => {
-				if ($config?.features?.require_2fa && $config?.features?.enable_2fa) {
+				if (
+					$config?.features?.require_2fa &&
+					$config?.features?.enable_2fa &&
+					$config?.features?.enable_login_form
+				) {
 					const status = await get2FAStatus(localStorage.token).catch(() => null);
-					if (status && !status.totp_enabled) {
-						show2FABanner = true;
+					if (status && !status.totp_enabled && !status.is_oauth_user) {
+						show2FAOverlay = true;
 					}
 				}
 			})().catch((e) => console.error('Failed to check 2FA status:', e)),
@@ -489,55 +494,7 @@
 					</div>
 				{/if}
 
-				{#if show2FABanner}
-					<div
-						class="fixed top-0 left-0 right-0 z-50 bg-yellow-500/20 text-yellow-700 dark:text-yellow-200 px-4 py-2.5 text-sm flex items-center justify-between"
-					>
-						<div class="flex items-center gap-2">
-							<span>
-								{$i18n.t('Your administrator requires two-factor authentication.')}
-								<a
-									href="#"
-									class="underline font-medium"
-									on:click|preventDefault={() => {
-										showSettings.set(true);
-									}}
-								>
-									{$i18n.t('Set it up now')}
-								</a>
-								{#if $config?.features?.two_fa_grace_period_days > 0}
-									<span class="text-xs ml-1">
-										({$i18n.t('Grace period: {{days}} days', {
-											days: $config?.features?.two_fa_grace_period_days
-										})})
-									</span>
-								{/if}
-							</span>
-						</div>
-						<button
-							class="text-yellow-700 dark:text-yellow-200 hover:text-yellow-900 dark:hover:text-yellow-100 transition"
-							on:click={() => {
-								show2FABanner = false;
-							}}
-							aria-label={$i18n.t('Dismiss')}
-						>
-							<svg
-								xmlns="http://www.w3.org/2000/svg"
-								fill="none"
-								viewBox="0 0 24 24"
-								stroke-width="2"
-								stroke="currentColor"
-								class="w-4 h-4"
-							>
-								<path
-									stroke-linecap="round"
-									stroke-linejoin="round"
-									d="M6 18L18 6M6 6l12 12"
-								/>
-							</svg>
-						</button>
-					</div>
-				{/if}
+				<TwoFactorRequired bind:show={show2FAOverlay} />
 
 				<Sidebar />
 

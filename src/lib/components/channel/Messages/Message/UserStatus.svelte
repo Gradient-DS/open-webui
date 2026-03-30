@@ -3,7 +3,7 @@
 
 	const i18n = getContext('i18n');
 
-	import { user as _user, channels, socket } from '$lib/stores';
+	import { user as _user, config, channels, socket } from '$lib/stores';
 	import { WEBUI_API_BASE_URL, WEBUI_BASE_URL } from '$lib/constants';
 	import { getChannels, getDMChannelByUserId } from '$lib/apis/channels';
 
@@ -114,7 +114,7 @@
 			</div>
 		{/if}
 
-		{#if $_user?.id !== user.id}
+		{#if $_user?.id !== user.id && $config?.features?.enable_channels}
 			<hr class="border-gray-100/50 dark:border-gray-800/50 my-2.5" />
 
 			<div class=" flex flex-col w-full px-2.5 items-center">

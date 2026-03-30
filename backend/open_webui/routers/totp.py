@@ -88,6 +88,7 @@ async def get_2fa_status(
     return {
         'totp_enabled': auth.totp_enabled or False,
         'recovery_codes_remaining': RecoveryCodes.count_unused(user.id, db=db) if auth.totp_enabled else 0,
+        'is_oauth_user': bool(user.oauth),
     }
 
 
