@@ -487,8 +487,9 @@
 
 			if (tab.id === 'tools') {
 				return (
-					$user?.role === 'admin' ||
-					($user?.role === 'user' && $user?.permissions?.features?.direct_tool_servers)
+					(isFeatureEnabled('tool_servers') || isFeatureEnabled('terminal_servers')) &&
+					($user?.role === 'admin' ||
+						($user?.role === 'user' && $user?.permissions?.features?.direct_tool_servers))
 				);
 			}
 
@@ -695,7 +696,7 @@
 								</button>
 							{/if}
 						{:else if tabId === 'tools'}
-							{#if $user?.role === 'admin' || ($user?.role === 'user' && $user?.permissions?.features?.direct_tool_servers)}
+							{#if (isFeatureEnabled('tool_servers') || isFeatureEnabled('terminal_servers')) && ($user?.role === 'admin' || ($user?.role === 'user' && $user?.permissions?.features?.direct_tool_servers))}
 								<button
 									role="tab"
 									aria-controls="tab-tools"

@@ -107,6 +107,7 @@ class KnowledgeFileModel(BaseModel):
 ####################
 class KnowledgeUserModel(KnowledgeModel):
     user: Optional[UserResponse] = None
+    suspension_info: Optional[dict] = None
 
 
 class KnowledgeResponse(KnowledgeModel):
@@ -137,6 +138,9 @@ class KnowledgeListResponse(BaseModel):
 class KnowledgeFileListResponse(BaseModel):
     items: list[FileUserResponse]
     total: int
+
+
+SUSPENSION_TTL_DAYS = 30
 
 
 class KnowledgeTable:
@@ -277,18 +281,31 @@ class KnowledgeTable:
 
                 knowledge_bases = []
                 for knowledge_base, user in items:
-                    knowledge_bases.append(
-                        KnowledgeUserModel.model_validate(
-                            {
-                                **self._to_knowledge_model(
-                                    knowledge_base,
-                                    access_grants=grants_map.get(knowledge_base.id, []),
-                                    db=db,
-                                ).model_dump(),
-                                'user': (UserModel.model_validate(user).model_dump() if user else None),
-                            }
-                        )
-                    )
+                    kb_data = {
+                        **self._to_knowledge_model(
+                            knowledge_base,
+                            access_grants=grants_map.get(knowledge_base.id, []),
+                            db=db,
+                        ).model_dump(),
+                        'user': (UserModel.model_validate(user).model_dump() if user else None),
+                    }
+
+                    # Annotate suspension info for cloud KBs
+                    if knowledge_base.type not in ('local',) and knowledge_base.meta:
+                        for meta_key in ('onedrive_sync', 'google_drive_sync'):
+                            sync_info = (knowledge_base.meta or {}).get(meta_key, {})
+                            suspended_at = sync_info.get('suspended_at')
+                            if suspended_at:
+                                kb_data['suspension_info'] = {
+                                    'suspended_at': suspended_at,
+                                    'reason': sync_info.get('suspended_reason', 'unknown'),
+                                    'days_remaining': max(
+                                        0, SUSPENSION_TTL_DAYS - ((int(time.time()) - suspended_at) // 86400)
+                                    ),
+                                }
+                                break
+
+                    knowledge_bases.append(KnowledgeUserModel.model_validate(kb_data))
 
                 return KnowledgeListResponse(items=knowledge_bases, total=total)
         except Exception as e:
@@ -766,6 +783,73 @@ class KnowledgeTable:
             with get_db() as db:
                 knowledge = db.query(Knowledge).filter_by(id=id).first()
                 return KnowledgeModel.model_validate(knowledge) if knowledge else None
+        except Exception:
+            return None
+
+    def get_suspended_expired_knowledge(self, limit: int = 50) -> list[KnowledgeModel]:
+        """Get cloud KBs suspended for longer than SUSPENSION_TTL_DAYS."""
+        cutoff = int(time.time()) - (SUSPENSION_TTL_DAYS * 24 * 60 * 60)
+
+        with get_db() as db:
+            candidates = (
+                db.query(Knowledge)
+                .filter(Knowledge.deleted_at.is_(None))
+                .filter(Knowledge.type != 'local')
+                .limit(limit * 5)
+                .all()
+            )
+
+            expired = []
+            for kb in candidates:
+                meta = kb.meta or {}
+                for meta_key in ('onedrive_sync', 'google_drive_sync'):
+                    sync_info = meta.get(meta_key, {})
+                    suspended_at = sync_info.get('suspended_at')
+                    if suspended_at and suspended_at < cutoff:
+                        expired.append(self._to_knowledge_model(kb, db=db))
+                        break
+
+                if len(expired) >= limit:
+                    break
+
+            return expired
+
+    def is_suspended(self, id: str) -> bool:
+        """Check if a knowledge base is currently suspended."""
+        try:
+            with get_db() as db:
+                knowledge = db.query(Knowledge).filter_by(id=id).filter(Knowledge.deleted_at.is_(None)).first()
+                if not knowledge:
+                    return False
+                meta = knowledge.meta or {}
+                for meta_key in ('onedrive_sync', 'google_drive_sync'):
+                    sync_info = meta.get(meta_key, {})
+                    if sync_info.get('suspended_at'):
+                        return True
+                return False
+        except Exception:
+            return False
+
+    def get_suspension_info(self, id: str) -> Optional[dict]:
+        """Get suspension details for a KB. Returns None if not suspended."""
+        try:
+            with get_db() as db:
+                knowledge = db.query(Knowledge).filter_by(id=id).filter(Knowledge.deleted_at.is_(None)).first()
+                if not knowledge:
+                    return None
+                meta = knowledge.meta or {}
+                for meta_key in ('onedrive_sync', 'google_drive_sync'):
+                    sync_info = meta.get(meta_key, {})
+                    suspended_at = sync_info.get('suspended_at')
+                    if suspended_at:
+                        return {
+                            'suspended_at': suspended_at,
+                            'reason': sync_info.get('suspended_reason', 'unknown'),
+                            'days_remaining': max(
+                                0, SUSPENSION_TTL_DAYS - ((int(time.time()) - suspended_at) // 86400)
+                            ),
+                        }
+                return None
         except Exception:
             return None
 

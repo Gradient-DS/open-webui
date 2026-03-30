@@ -66,6 +66,9 @@
 	import PinnedModelList from './Sidebar/PinnedModelList.svelte';
 	import Note from '../icons/Note.svelte';
 	import BookOpen from '../icons/BookOpen.svelte';
+	import Sparkles from '../icons/Sparkles.svelte';
+	import CommandLine from '../icons/CommandLine.svelte';
+	import Wrench from '../icons/Wrench.svelte';
 	import { slide } from 'svelte/transition';
 	import HotkeyHint from '../common/HotkeyHint.svelte';
 

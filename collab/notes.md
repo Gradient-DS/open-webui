@@ -155,3 +155,33 @@
 - Most InputMenu sections already had guards (knowledge, capture, notes, tools) but Webpage URL and Reference Chats were the two exceptions
 
 **Related:** Feature flags system documented in [20-03-2026] Gradient-DS Custom Features Overview
+
+---
+
+### [30-03-2026] Cloud KB Permission Leak — Sync Workers Mirror Cloud Sharing into Access Grants
+
+**With:** @lexlubbers
+
+**Context:** On gradient.soev.ai (test branch), users could see other users' OneDrive and Google Drive knowledge bases as read-only. Investigated whether the upstream `access_grants` migration (`f1e2d3c4b5a6`) was the cause.
+
+**What We Did:**
+- Queried the `access_grant` table on gradient — no wildcard (`*`) grants existed, ruling out the migration's NULL→public conversion
+- Found explicit user-level grants with varying timestamps (March 25–30), proving they were created at runtime, not by a one-time migration
+- Traced the grants to `_sync_permissions()` in both sync workers (`onedrive/sync_worker.py:279`, `google_drive/sync_worker.py:203`)
+- This method runs on every sync cycle (called from `base_worker.py:701`), fetches cloud folder sharing permissions, maps emails to Open WebUI users, and creates `read` access grants for every matched user
+- The router's defense-in-depth (`knowledge.py:504-506`, `577-581`) correctly blocks grant changes via the API, but sync workers call `update_knowledge_by_id` directly on the model layer, bypassing it
+
+**Key Learnings:**
+- The root cause is NOT the migration — it's the `_sync_permissions()` feature in both sync workers mirroring broad cloud sharing into Open WebUI access grants
+- In corporate M365/Google Workspace tenants, folders are often shared with the entire team, so the sync gives every team member read access to every synced KB
+- The migration fix (NULL knowledge → private) is still valid hardening but was not the actual trigger
+- Defense-in-depth in the router only protects the HTTP API path — model-layer calls from sync workers bypass it
+- Desired behavior: permission sync should only verify the **owner** still has cloud access, not grant other users access. KBs should remain private to their creator.
+
+**Fix needed:**
+1. Rewrite `_sync_permissions()` in both sync workers to only check owner access, not mirror cloud sharing
+2. Clean up existing grants on gradient: `DELETE FROM access_grant WHERE resource_type = 'knowledge' AND resource_id IN (SELECT id FROM knowledge WHERE type IN ('onedrive', 'google_drive'));`
+3. Deploy code fix BEFORE cleanup (sync runs every ≤15 min and would recreate grants)
+4. Cleanup commands saved in `fix_kb_gradient_soev.md`
+
+**Related:** Defense-in-depth commit `1e96c838b`, sync abstraction layer [24-03-2026], [26-03-2026]

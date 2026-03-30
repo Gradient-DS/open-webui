@@ -60,6 +60,7 @@ def _process_pending_deletions():
     """Process all pending KB and chat deletions. Runs in thread pool."""
     _process_pending_kb_deletions()
     _process_pending_chat_deletions()
+    _process_expired_suspensions()
 
 
 def _process_pending_kb_deletions():
@@ -152,3 +153,35 @@ def _process_pending_chat_deletions():
             file_report.vector_collections,
             file_report.total_db_records,
         )
+
+
+def _process_expired_suspensions():
+    """Hard-delete cloud KBs that have been suspended for 30+ days."""
+    from open_webui.models.knowledge import Knowledges
+    from open_webui.services.deletion import DeletionService
+
+    expired_kbs = Knowledges.get_suspended_expired_knowledge(limit=10)
+    if not expired_kbs:
+        return
+
+    log.info('Processing %d expired suspended KBs for hard-deletion', len(expired_kbs))
+
+    for kb in expired_kbs:
+        try:
+            kb_files = Knowledges.get_files_by_id(kb.id)
+            kb_file_ids = [f.id for f in kb_files]
+
+            report = DeletionService.delete_knowledge(kb.id, delete_files=False)
+
+            if report.has_errors:
+                log.warning('Suspended KB %s cleanup had errors: %s', kb.id, report.errors)
+
+            if kb_file_ids:
+                file_report = DeletionService.delete_orphaned_files_batch(kb_file_ids)
+                if file_report.has_errors:
+                    log.warning('Suspended KB %s file cleanup errors: %s', kb.id, file_report.errors)
+
+            log.info('Suspended KB %s (%s) hard-deleted after 30-day grace period', kb.id, kb.name)
+
+        except Exception:
+            log.exception('Failed to cleanup suspended KB %s', kb.id)

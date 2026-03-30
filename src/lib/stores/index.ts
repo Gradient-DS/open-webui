@@ -323,6 +323,7 @@ type Config = {
 		feature_builtin_tools?: boolean;
 		feature_tool_servers?: boolean;
 		feature_terminal_servers?: boolean;
+		feature_user_demographics?: boolean;
 		enable_channels?: boolean;
 		enable_notes?: boolean;
 		enable_code_interpreter?: boolean;

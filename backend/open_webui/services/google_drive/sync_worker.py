@@ -12,7 +12,6 @@ from open_webui.services.google_drive.drive_client import (
 )
 from open_webui.models.knowledge import Knowledges
 from open_webui.models.files import Files
-from open_webui.models.users import Users
 from open_webui.config import (
     GOOGLE_DRIVE_MAX_FILES_PER_SYNC,
     GOOGLE_DRIVE_MAX_FILE_SIZE_MB,
@@ -201,76 +200,61 @@ class GoogleDriveSyncWorker(BaseSyncWorker):
         }
 
     async def _sync_permissions(self) -> None:
-        """Sync Google Drive folder permissions to Knowledge access_control."""
+        """Verify the KB owner still has access to the cloud folder.
+
+        If the owner lost access, suspend the KB by setting suspended_at in sync meta.
+        If the owner has access and the KB was previously suspended, unsuspend it.
+        Does NOT mirror cloud sharing permissions to Open WebUI access grants.
+        """
+        import httpx
+
         folder_source = next((s for s in self.sources if s.get('type') == 'folder'), None)
         if not folder_source:
-            log.info('No folder sources, skipping permission sync')
+            log.info('No folder sources, skipping owner access check')
             return
 
         try:
-            permissions = await self._client.get_file_permissions(folder_source['item_id'])
-
-            permitted_emails = set()
-            for perm in permissions:
-                # Google returns emailAddress directly on permission objects
-                email = perm.get('emailAddress')
-                if email:
-                    permitted_emails.add(email.lower())
-
-            log.info(f'Found {len(permitted_emails)} permitted emails from Google Drive')
-
-            permitted_user_ids = []
-            for email in permitted_emails:
-                user = Users.get_user_by_email(email)
-                if user:
-                    permitted_user_ids.append(user.id)
-                    log.debug(f'Mapped Google Drive permission for {email} to user {user.id}')
-
-            if permitted_user_ids:
-                if self.user_id not in permitted_user_ids:
-                    permitted_user_ids.append(self.user_id)
-
-                knowledge = Knowledges.get_knowledge_by_id(self.knowledge_id)
-                if knowledge:
-                    from open_webui.models.knowledge import KnowledgeForm
-
-                    # Build access_grants list (new upstream format)
-                    access_grants = []
-                    for user_id in permitted_user_ids:
-                        access_grants.append(
-                            {
-                                'principal_type': 'user',
-                                'principal_id': user_id,
-                                'permission': 'read',
-                            }
-                        )
-                    access_grants.append(
-                        {
-                            'principal_type': 'user',
-                            'principal_id': self.user_id,
-                            'permission': 'write',
-                        }
-                    )
-
-                    Knowledges.update_knowledge_by_id(
-                        self.knowledge_id,
-                        KnowledgeForm(
-                            name=knowledge.name,
-                            description=knowledge.description,
-                            type=knowledge.type,
-                            access_grants=access_grants,
-                        ),
-                    )
-
-                    log.info(
-                        f'Updated access_control for {self.knowledge_id}: '
-                        f'{len(permitted_user_ids)} users with read access'
-                    )
+            item = await self._client.get_file(folder_source['item_id'])
+            owner_has_access = item is not None
+        except httpx.HTTPStatusError as e:
+            if e.response.status_code in (403, 404):
+                owner_has_access = False
             else:
-                log.info(f'No matching users found for Google Drive permissions, keeping default access_control')
-
+                log.warning(f'Transient error checking owner access: {e}')
+                return
         except Exception as e:
-            log.warning(f'Failed to sync permissions: {e}')
+            log.warning(f'Error checking owner access: {e}')
+            return
+
+        knowledge = Knowledges.get_knowledge_by_id(self.knowledge_id)
+        if not knowledge:
+            return
+
+        meta = knowledge.meta or {}
+        sync_info = meta.get(self.meta_key, {})
+
+        if owner_has_access:
+            if sync_info.get('suspended_at'):
+                log.info(f'Owner regained access to folder, unsuspending KB {self.knowledge_id}')
+                sync_info.pop('suspended_at', None)
+                sync_info.pop('suspended_reason', None)
+                meta[self.meta_key] = sync_info
+                Knowledges.update_knowledge_meta_by_id(self.knowledge_id, meta)
+        else:
+            if not sync_info.get('suspended_at'):
+                log.warning(
+                    f'Owner {self.user_id} lost access to Google Drive folder, suspending KB {self.knowledge_id}'
+                )
+                sync_info['suspended_at'] = int(time.time())
+                sync_info['suspended_reason'] = 'owner_access_lost'
+                meta[self.meta_key] = sync_info
+                Knowledges.update_knowledge_meta_by_id(self.knowledge_id, meta)
+
+                await self._update_sync_status(
+                    'suspended',
+                    error='Owner no longer has access to the cloud folder. '
+                    'KB suspended — will be deleted after 30 days if access is not restored.',
+                )
 
     async def _verify_source_access(self, source: Dict[str, Any]) -> bool:
         """Verify the user can still access a Google Drive source."""

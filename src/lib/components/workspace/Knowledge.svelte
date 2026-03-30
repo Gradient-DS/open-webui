@@ -365,8 +365,11 @@
 				<div class=" my-2 px-3 grid grid-cols-1 lg:grid-cols-2 gap-2">
 					{#each items as item}
 						<button
-							class=" flex space-x-4 cursor-pointer text-left w-full px-3 py-2.5 dark:hover:bg-gray-850/50 hover:bg-gray-50 transition rounded-2xl"
+							class=" flex space-x-4 cursor-pointer text-left w-full px-3 py-2.5 dark:hover:bg-gray-850/50 hover:bg-gray-50 transition rounded-2xl {item.suspension_info ? 'opacity-50 cursor-not-allowed' : ''}"
 							on:click={() => {
+								if (item.suspension_info) {
+									return;
+								}
 								if (item?.meta?.document) {
 									toast.error(
 										$i18n.t(
@@ -406,6 +409,17 @@
 													/>
 												{:else}
 													<Badge type="muted" content={$i18n.t('Local')} />
+												{/if}
+
+												{#if item.suspension_info}
+													<Tooltip
+														content={$i18n.t(
+															'The owner lost access to the cloud folder. This knowledge base will be permanently deleted in {{days}} days unless access is restored.',
+															{ days: item.suspension_info.days_remaining }
+														)}
+													>
+														<Badge type="warning" content={$i18n.t('Suspended')} />
+													</Tooltip>
 												{/if}
 											</div>
 

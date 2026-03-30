@@ -3,6 +3,7 @@
 	import { onMount, getContext } from 'svelte';
 
 	import { user, config, settings } from '$lib/stores';
+	import { isFeatureEnabled } from '$lib/utils/features';
 	import { updateUserProfile, createAPIKey, getAPIKey, getSessionUser } from '$lib/apis/auths';
 	import { WEBUI_BASE_URL } from '$lib/constants';
 
@@ -171,6 +172,7 @@
 							</div>
 						</div>
 
+						{#if isFeatureEnabled('user_demographics')}
 						<div class="flex flex-col w-full mt-2">
 							<div class=" mb-1 text-xs font-medium">{$i18n.t('Gender')}</div>
 
@@ -222,6 +224,7 @@
 								/>
 							</div>
 						</div>
+						{/if}
 					</div>
 				</div>
 			</div>
