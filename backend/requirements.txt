@@ -135,6 +135,10 @@ av==14.0.1 # Caution: Set due to FATAL FIPS SELFTEST FAILURE, see discussion htt
 colbert-ai==0.2.22
 
 
+## TOTP 2FA
+pyotp==2.9.0
+qrcode[pil]==8.0
+
 ## Tests
 docker~=7.1.0
 pytest~=8.4.1
