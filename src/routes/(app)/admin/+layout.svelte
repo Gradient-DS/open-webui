@@ -75,22 +75,22 @@
 
 				<div class=" flex w-full">
 					<div
-						class="flex gap-1 scrollbar-none overflow-x-auto w-fit text-center text-sm font-medium rounded-full bg-transparent pt-1"
+						class="flex gap-1 scrollbar-none overflow-x-auto w-fit text-center text-sm font-medium bg-transparent pt-1"
 					>
 						<a
 							draggable="false"
-							class="min-w-fit p-1.5 {$page.url.pathname.includes('/admin/users')
-								? ''
-								: 'text-gray-300 dark:text-gray-600 hover:text-gray-700 dark:hover:text-white'} transition select-none"
+							class="min-w-fit p-1.5 rounded-lg {$page.url.pathname.includes('/admin/users')
+								? 'bg-gray-100 dark:bg-gray-800'
+								: 'text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-850'} transition select-none"
 							href="/admin">{$i18n.t('Users')}</a
 						>
 
 						{#if $config?.features.enable_admin_analytics ?? true}
 							<a
 								draggable="false"
-								class="min-w-fit p-1.5 {$page.url.pathname.includes('/admin/analytics')
-									? ''
-									: 'text-gray-300 dark:text-gray-600 hover:text-gray-700 dark:hover:text-white'} transition select-none"
+								class="min-w-fit p-1.5 rounded-lg {$page.url.pathname.includes('/admin/analytics')
+									? 'bg-gray-100 dark:bg-gray-800'
+									: 'text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-850'} transition select-none"
 								href="/admin/analytics">{$i18n.t('Analytics')}</a
 							>
 						{/if}
@@ -98,9 +98,9 @@
 						{#if isFeatureEnabled('admin_evaluations')}
 							<a
 								draggable="false"
-								class="min-w-fit p-1.5 {$page.url.pathname.includes('/admin/evaluations')
-									? ''
-									: 'text-gray-300 dark:text-gray-600 hover:text-gray-700 dark:hover:text-white'} transition select-none"
+								class="min-w-fit p-1.5 rounded-lg {$page.url.pathname.includes('/admin/evaluations')
+									? 'bg-gray-100 dark:bg-gray-800'
+									: 'text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-850'} transition select-none"
 								href="/admin/evaluations">{$i18n.t('Evaluations')}</a
 							>
 						{/if}
@@ -108,9 +108,9 @@
 						{#if isFeatureEnabled('admin_functions')}
 							<a
 								draggable="false"
-								class="min-w-fit p-1.5 {$page.url.pathname.includes('/admin/functions')
-									? ''
-									: 'text-gray-300 dark:text-gray-600 hover:text-gray-700 dark:hover:text-white'} transition select-none"
+								class="min-w-fit p-1.5 rounded-lg {$page.url.pathname.includes('/admin/functions')
+									? 'bg-gray-100 dark:bg-gray-800'
+									: 'text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-850'} transition select-none"
 								href="/admin/functions">{$i18n.t('Functions')}</a
 							>
 						{/if}
@@ -118,9 +118,9 @@
 						{#if isFeatureEnabled('admin_settings')}
 							<a
 								draggable="false"
-								class="min-w-fit p-1.5 {$page.url.pathname.includes('/admin/settings')
-									? ''
-									: 'text-gray-300 dark:text-gray-600 hover:text-gray-700 dark:hover:text-white'} transition select-none"
+								class="min-w-fit p-1.5 rounded-lg {$page.url.pathname.includes('/admin/settings')
+									? 'bg-gray-100 dark:bg-gray-800'
+									: 'text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-850'} transition select-none"
 								href="/admin/settings">{$i18n.t('Settings')}</a
 							>
 						{/if}

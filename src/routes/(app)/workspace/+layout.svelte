@@ -108,13 +108,13 @@
 
 				<div class="">
 					<div
-						class="flex gap-1 scrollbar-none overflow-x-auto w-fit text-center text-sm font-medium rounded-full bg-transparent py-1 touch-auto pointer-events-auto"
+						class="flex gap-1 scrollbar-none overflow-x-auto w-fit text-center text-sm font-medium bg-transparent py-1 touch-auto pointer-events-auto"
 					>
 						{#if isFeatureEnabled('models') && ($user?.role === 'admin' || $user?.permissions?.workspace?.models)}
 							<a
-								class="min-w-fit p-1.5 {$page.url.pathname.includes('/workspace/models')
-									? ''
-									: 'text-gray-300 dark:text-gray-600 hover:text-gray-700 dark:hover:text-white'} transition"
+								class="min-w-fit p-1.5 rounded-lg {$page.url.pathname.includes('/workspace/models')
+									? 'bg-gray-100 dark:bg-gray-800'
+									: 'text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-850'} transition"
 								href="/workspace/models">{$i18n.t('Agents')}</a
 							>
 						{/if}
@@ -122,18 +122,18 @@
 
 						{#if isFeatureEnabled('prompts') && ($user?.role === 'admin' || $user?.permissions?.workspace?.prompts)}
 							<a
-								class="min-w-fit p-1.5 {$page.url.pathname.includes('/workspace/prompts')
-									? ''
-									: 'text-gray-300 dark:text-gray-600 hover:text-gray-700 dark:hover:text-white'} transition"
+								class="min-w-fit p-1.5 rounded-lg {$page.url.pathname.includes('/workspace/prompts')
+									? 'bg-gray-100 dark:bg-gray-800'
+									: 'text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-850'} transition"
 								href="/workspace/prompts">{$i18n.t('Prompts')}</a
 							>
 						{/if}
 
 						{#if isFeatureEnabled('tools') && ($user?.role === 'admin' || $user?.permissions?.workspace?.tools)}
 							<a
-								class="min-w-fit p-1.5 {$page.url.pathname.includes('/workspace/tools')
-									? ''
-									: 'text-gray-300 dark:text-gray-600 hover:text-gray-700 dark:hover:text-white'} transition"
+								class="min-w-fit p-1.5 rounded-lg {$page.url.pathname.includes('/workspace/tools')
+									? 'bg-gray-100 dark:bg-gray-800'
+									: 'text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-850'} transition"
 								href="/workspace/tools"
 							>
 								{$i18n.t('Tools')}
@@ -142,9 +142,9 @@
 
 						{#if isFeatureEnabled('skills') && ($user?.role === 'admin' || $user?.permissions?.workspace?.skills)}
 							<a
-								class="min-w-fit p-1.5 {$page.url.pathname.includes('/workspace/skills')
-									? ''
-									: 'text-gray-300 dark:text-gray-600 hover:text-gray-700 dark:hover:text-white'} transition"
+								class="min-w-fit p-1.5 rounded-lg {$page.url.pathname.includes('/workspace/skills')
+									? 'bg-gray-100 dark:bg-gray-800'
+									: 'text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-850'} transition"
 								href="/workspace/skills"
 							>
 								{$i18n.t('Skills')}

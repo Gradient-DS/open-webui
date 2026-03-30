@@ -119,7 +119,7 @@ class="min-w-fit p-1.5 rounded-lg {$page.url.pathname.includes('/admin/users')
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] `npm run build` succeeds
+- [x] `npm run build` succeeds
 
 #### Manual Verification:
 - [ ] Admin ribbon: active tab has background fill, inactive tabs are readable dark/light gray
@@ -166,7 +166,7 @@ tab.id
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] `npm run build` succeeds
+- [x] `npm run build` succeeds
 
 #### Manual Verification:
 - [ ] Admin Settings sidebar: active tab highlighted, all tabs readable
@@ -199,7 +199,7 @@ Note: uses `max-w-fit w-fit` instead of `min-w-fit` but same active/inactive pat
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] `npm run build` succeeds
+- [x] `npm run build` succeeds
 
 #### Manual Verification:
 - [ ] EditGroupModal: tabs show correctly with new styling
@@ -257,7 +257,7 @@ class="... text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] `npm run build` succeeds
+- [x] `npm run build` succeeds
 
 #### Manual Verification:
 - [ ] Settings modal: all tabs readable, active tab has background fill
