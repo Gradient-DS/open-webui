@@ -101,26 +101,28 @@
 				</div>
 			</button>
 
-			<button
-				class="select-none flex gap-2 items-center px-3 py-1.5 text-sm font-medium cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-md"
-				on:click={() => {
-					pinModelHandler(model?.id);
-				}}
-			>
-				{#if ($settings?.pinnedModels ?? []).includes(model?.id)}
-					<PinSlash />
-				{:else}
-					<Pin />
-				{/if}
-
-				<div class="flex items-center">
+			{#if model?.info?.base_model_id}
+				<button
+					class="select-none flex gap-2 items-center px-3 py-1.5 text-sm font-medium cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-md"
+					on:click={() => {
+						pinModelHandler(model?.id);
+					}}
+				>
 					{#if ($settings?.pinnedModels ?? []).includes(model?.id)}
-						{$i18n.t('Hide from Sidebar')}
+						<PinSlash />
 					{:else}
-						{$i18n.t('Keep in Sidebar')}
+						<Pin />
 					{/if}
-				</div>
-			</button>
+
+					<div class="flex items-center">
+						{#if ($settings?.pinnedModels ?? []).includes(model?.id)}
+							{$i18n.t('Hide from Sidebar')}
+						{:else}
+							{$i18n.t('Keep in Sidebar')}
+						{/if}
+					</div>
+				</button>
+			{/if}
 
 			<button
 				class="select-none flex gap-2 items-center px-3 py-1.5 text-sm font-medium cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-md"
