@@ -513,6 +513,7 @@ from open_webui.config import (
     FEATURE_REFERENCE_CHATS,
     FEATURE_TOOL_SERVERS,
     FEATURE_TERMINAL_SERVERS,
+    FEATURE_USER_DEMOGRAPHICS,
     FEATURE_BUILTIN_TOOLS,
     FEATURE_ADMIN_EVALUATIONS,
     FEATURE_ADMIN_FUNCTIONS,
@@ -2361,6 +2362,7 @@ async def get_app_config(request: Request):
                     'feature_temporary_chat': FEATURE_TEMPORARY_CHAT,
                     'feature_tool_servers': FEATURE_TOOL_SERVERS,
                     'feature_terminal_servers': FEATURE_TERMINAL_SERVERS,
+                    'feature_user_demographics': FEATURE_USER_DEMOGRAPHICS,
                     'feature_builtin_tools': FEATURE_BUILTIN_TOOLS,
                     'enable_google_drive_integration': app.state.config.ENABLE_GOOGLE_DRIVE_INTEGRATION,
                     **(

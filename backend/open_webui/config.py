@@ -1743,8 +1743,9 @@ FEATURE_WEBPAGE_URL = os.environ.get('FEATURE_WEBPAGE_URL', 'True').lower() == '
 FEATURE_REFERENCE_CHATS = os.environ.get('FEATURE_REFERENCE_CHATS', 'True').lower() == 'true'
 FEATURE_INPUT_MENU = os.environ.get('FEATURE_INPUT_MENU', 'True').lower() == 'true'
 FEATURE_TEMPORARY_CHAT = os.environ.get('FEATURE_TEMPORARY_CHAT', 'True').lower() == 'true'
-FEATURE_TOOL_SERVERS = os.environ.get('FEATURE_TOOL_SERVERS', 'True').lower() == 'true'
-FEATURE_TERMINAL_SERVERS = os.environ.get('FEATURE_TERMINAL_SERVERS', 'True').lower() == 'true'
+FEATURE_TOOL_SERVERS = os.environ.get('FEATURE_TOOL_SERVERS', 'False').lower() == 'true'
+FEATURE_TERMINAL_SERVERS = os.environ.get('FEATURE_TERMINAL_SERVERS', 'False').lower() == 'true'
+FEATURE_USER_DEMOGRAPHICS = os.environ.get('FEATURE_USER_DEMOGRAPHICS', 'False').lower() == 'true'
 
 FEATURE_BUILTIN_TOOLS = os.environ.get('FEATURE_BUILTIN_TOOLS', 'True').lower() == 'true'
 

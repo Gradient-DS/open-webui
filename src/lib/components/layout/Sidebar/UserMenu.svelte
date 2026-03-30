@@ -237,8 +237,7 @@
 			</button>
 
 			{#if role === 'admin' && isFeatureEnabled('playground')}
-				<DropdownMenu.Item
-					as="a"
+				<a
 					href="/playground"
 					draggable="false"
 					class="flex rounded-xl py-1.5 px-3 w-full hover:bg-gray-50 dark:hover:bg-gray-800 transition cursor-pointer select-none"
@@ -259,11 +258,10 @@
 						<Code className="size-5" strokeWidth="1.5" />
 					</div>
 					<div class=" self-center truncate">{$i18n.t('Playground')}</div>
-				</DropdownMenu.Item>
+				</a>
 			{/if}
 			{#if role === 'admin'}
-				<DropdownMenu.Item
-					as="a"
+				<a
 					href="/admin"
 					draggable="false"
 					class="flex rounded-xl py-1.5 px-3 w-full hover:bg-gray-50 dark:hover:bg-gray-800 transition cursor-pointer select-none"
@@ -284,7 +282,7 @@
 						<UserGroup className="w-5 h-5" strokeWidth="1.5" />
 					</div>
 					<div class=" self-center truncate">{$i18n.t('Admin Panel')}</div>
-				</DropdownMenu.Item>
+				</a>
 			{/if}
 
 			{#if help}

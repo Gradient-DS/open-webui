@@ -149,6 +149,10 @@ class SyncScheduler:
         if sync_info.get('needs_reauth'):
             return False
 
+        # Skip suspended KBs
+        if sync_info.get('suspended_at'):
+            return False
+
         # Skip if currently syncing (with staleness recovery)
         status = sync_info.get('status', 'idle')
         if status == 'syncing':

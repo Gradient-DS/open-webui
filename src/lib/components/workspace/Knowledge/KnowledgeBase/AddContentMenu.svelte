@@ -75,15 +75,16 @@
 			</button>
 
 			{#if onOneDriveSync}
-				<DropdownMenu.Item
-					class="select-none flex gap-2 items-center px-3 py-1.5 text-sm  cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800  rounded-xl"
+				<button
+					class="select-none flex gap-2 items-center px-3 py-1.5 text-sm cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-xl w-full"
+					type="button"
 					on:click={() => {
 						onOneDriveSync();
 					}}
 				>
 					<CloudArrowUp strokeWidth="2" />
 					<div class="flex items-center">{$i18n.t('Sync from OneDrive')}</div>
-				</DropdownMenu.Item>
+				</button>
 			{/if}
 
 			<button

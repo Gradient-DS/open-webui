@@ -697,8 +697,24 @@ class BaseSyncWorker(ABC):
         try:
             await self._update_sync_status('syncing', 0, 0)
 
-            # Sync provider permissions to Knowledge access_control
+            # Verify the owner still has access; may suspend the KB
             await self._sync_permissions()
+
+            # Check if KB was suspended by _sync_permissions()
+            knowledge = Knowledges.get_knowledge_by_id(self.knowledge_id)
+            if knowledge:
+                meta = knowledge.meta or {}
+                sync_info = meta.get(self.meta_key, {})
+                if sync_info.get('suspended_at'):
+                    log.info(f'KB {self.knowledge_id} is suspended, skipping sync')
+                    return {
+                        'files_processed': 0,
+                        'files_failed': 0,
+                        'total_found': 0,
+                        'deleted_count': 0,
+                        'failed_files': [],
+                        'suspended': True,
+                    }
 
             # Verify access to each source before syncing
             verified_sources = []

@@ -433,6 +433,16 @@ async def get_knowledge_by_id(id: str, user=Depends(get_verified_user), db: Sess
                 db=db,
             )
         ):
+            # Block non-admin access to suspended KBs
+            suspension_info = Knowledges.get_suspension_info(id)
+            if suspension_info and user.role != 'admin':
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail=f'This knowledge base is suspended because the owner lost access to the cloud folder. '
+                    f'It will be permanently deleted in {suspension_info["days_remaining"]} days '
+                    f'unless the owner restores access.',
+                )
+
             return KnowledgeFilesResponse(
                 **knowledge.model_dump(),
                 write_access=(
@@ -634,6 +644,16 @@ async def get_knowledge_files_by_id(
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=ERROR_MESSAGES.ACCESS_PROHIBITED,
+        )
+
+    # Block non-admin access to suspended KBs
+    suspension_info = Knowledges.get_suspension_info(id)
+    if suspension_info and user.role != 'admin':
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f'This knowledge base is suspended because the owner lost access to the cloud folder. '
+            f'It will be permanently deleted in {suspension_info["days_remaining"]} days '
+            f'unless the owner restores access.',
         )
 
     page = max(page, 1)

@@ -1,5 +1,4 @@
 <script lang="ts">
-	import { DropdownMenu } from 'bits-ui';
 	import { getContext, tick } from 'svelte';
 	import { fly } from 'svelte/transition';
 
@@ -226,13 +225,8 @@
 	</Tooltip>
 
 	<div slot="content">
-		<DropdownMenu.Content
-			class="w-full max-w-84 rounded-2xl px-1 py-1 border border-gray-100 dark:border-gray-800 z-50 bg-white dark:bg-gray-850 dark:text-white shadow-lg max-h-96 overflow-y-auto overflow-x-hidden scrollbar-thin transition"
-			sideOffset={4}
-			alignOffset={-6}
-			side="bottom"
-			align="start"
-			transition={flyAndScale}
+		<div
+			class="w-84 rounded-2xl px-1 py-1 border border-gray-100 dark:border-gray-800 z-50 bg-white dark:bg-gray-850 dark:text-white shadow-lg max-h-96 overflow-y-auto overflow-x-hidden scrollbar-thin transition"
 		>
 			{#if tab === ''}
 				<div in:fly={{ x: -20, duration: 150 }}>
@@ -252,13 +246,14 @@
 								: ''}
 						className="w-full"
 					>
-						<DropdownMenu.Item
-							class="flex gap-2 items-center px-3 py-1.5 text-sm cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800/50 rounded-xl {!fileUploadEnabled
+						<button
+							class="flex gap-2 w-full text-left items-center px-3 py-1.5 text-sm cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800/50 rounded-xl {!fileUploadEnabled
 								? 'opacity-50'
 								: ''}"
 							type="button"
 							on:click={() => {
 								if (fileUploadEnabled) {
+									show = false;
 									uploadFilesHandler();
 								}
 							}}
@@ -277,7 +272,7 @@
 									{/if}
 								</button>
 							</Tooltip>
-						</DropdownMenu.Item>
+						</button>
 					</Tooltip>
 
 					<!-- Capture -->
@@ -290,12 +285,14 @@
 									: ''}
 							className="w-full"
 						>
-							<DropdownMenu.Item
-								class="flex gap-2 items-center px-3 py-1.5 text-sm cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800/50 rounded-xl {!fileUploadEnabled
+							<button
+								class="flex gap-2 w-full text-left items-center px-3 py-1.5 text-sm cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800/50 rounded-xl {!fileUploadEnabled
 									? 'opacity-50'
 									: ''}"
+								type="button"
 								on:click={() => {
 									if (fileUploadEnabled) {
+										show = false;
 										if (!detectMobile()) {
 											screenCaptureHandler();
 										} else {
@@ -321,7 +318,7 @@
 										{/if}
 									</button>
 								</Tooltip>
-							</DropdownMenu.Item>
+							</button>
 						</Tooltip>
 					{/if}
 
@@ -335,13 +332,14 @@
 								: ''}
 						className="w-full"
 					>
-						<DropdownMenu.Item
-							class="flex gap-2 items-center px-3 py-1.5 text-sm cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-xl {!fileUploadEnabled
+						<button
+							class="flex gap-2 w-full text-left items-center px-3 py-1.5 text-sm cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-xl {!fileUploadEnabled
 								? 'opacity-50'
 								: ''}"
 							type="button"
 							on:click={() => {
 								if (fileUploadEnabled) {
+									show = false;
 									showAttachWebpageModal = true;
 								}
 							}}
@@ -360,7 +358,7 @@
 									{/if}
 								</button>
 							</Tooltip>
-						</DropdownMenu.Item>
+						</button>
 					</Tooltip>
 				{/if}
 
@@ -408,9 +406,11 @@
 					<!-- Google Drive -->
 					{#if fileUploadEnabled}
 						{#if $config?.features?.enable_google_drive_integration}
-							<DropdownMenu.Item
-								class="flex gap-2 items-center px-3 py-1.5 text-sm cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800/50 rounded-xl"
+							<button
+								class="flex gap-2 w-full text-left items-center px-3 py-1.5 text-sm cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800/50 rounded-xl"
+								type="button"
 								on:click={() => {
+									show = false;
 									uploadGoogleDriveHandler();
 								}}
 							>
@@ -453,14 +453,16 @@
 										{/if}
 									</button>
 								</Tooltip>
-							</DropdownMenu.Item>
+							</button>
 						{/if}
 
 						<!-- Microsoft OneDrive (simplified — work only) -->
 						{#if $config?.features?.enable_onedrive_integration && $config?.features?.enable_onedrive_business}
-							<DropdownMenu.Item
-								class="flex gap-2 items-center px-3 py-1.5 text-sm cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800/50 rounded-xl"
+							<button
+								class="flex gap-2 w-full text-left items-center px-3 py-1.5 text-sm cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800/50 rounded-xl"
+								type="button"
 								on:click={() => {
+									show = false;
 									uploadOneDriveHandler('organizations');
 								}}
 							>
@@ -478,7 +480,7 @@
 										{/if}
 									</button>
 								</Tooltip>
-							</DropdownMenu.Item>
+							</button>
 						{/if}
 					{/if}
 
@@ -1002,6 +1004,6 @@
 					{/each}
 				</div>
 			{/if}
-		</DropdownMenu.Content>
+		</div>
 	</div>
 </Dropdown>
