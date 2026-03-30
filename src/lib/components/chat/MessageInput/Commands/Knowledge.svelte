@@ -14,6 +14,8 @@
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
 	import DocumentPage from '$lib/components/icons/DocumentPage.svelte';
 	import Database from '$lib/components/icons/Database.svelte';
+	import OneDrive from '$lib/components/icons/OneDrive.svelte';
+	import GoogleDrive from '$lib/components/icons/GoogleDrive.svelte';
 	import GlobeAlt from '$lib/components/icons/GlobeAlt.svelte';
 	import Youtube from '$lib/components/icons/Youtube.svelte';
 	import Folder from '$lib/components/icons/Folder.svelte';
@@ -107,6 +109,7 @@
 			knowledgeItems = res.items.map((item) => {
 				return {
 					...item,
+					knowledge_type: item.type,
 					type: 'collection'
 				};
 			});
@@ -184,7 +187,13 @@
 						placement="top"
 					>
 						{#if item?.type === 'collection'}
-							<Database className="size-4" />
+							{#if item.knowledge_type === 'onedrive'}
+								<OneDrive className="size-4" />
+							{:else if item.knowledge_type === 'google_drive'}
+								<GoogleDrive className="size-4" />
+							{:else}
+								<Database className="size-4" />
+							{/if}
 						{:else if item?.type === 'folder'}
 							<Folder className="size-4" />
 						{:else}
