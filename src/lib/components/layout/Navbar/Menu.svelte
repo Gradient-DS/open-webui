@@ -22,7 +22,6 @@
 		artifactContents
 	} from '$lib/stores';
 	import { isFeatureEnabled } from '$lib/utils/features';
-	import { flyAndScale } from '$lib/utils/transitions';
 	import { getChatById } from '$lib/apis/chats';
 
 	import Dropdown from '$lib/components/common/Dropdown.svelte';
@@ -313,7 +312,7 @@
 			</DropdownMenu.Item> -->
 
 			{#if $mobile && isFeatureEnabled('chat_controls') && ($user?.role === 'admin' || ($user?.permissions.chat?.controls ?? true))}
-				<DropdownMenu.Item
+				<button
 					class="flex gap-2 items-center px-3 py-1.5 text-sm cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-xl select-none w-full"
 					id="chat-controls-button"
 					on:click={async () => {
@@ -325,11 +324,11 @@
 				>
 					<AdjustmentsHorizontal className=" size-4" strokeWidth="1.5" />
 					<div class="flex items-center">{$i18n.t('Controls')}</div>
-				</DropdownMenu.Item>
+				</button>
 			{/if}
 
 			{#if isFeatureEnabled('chat_overview')}
-				<DropdownMenu.Item
+				<button
 					class="flex gap-2 items-center px-3 py-1.5 text-sm cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-xl select-none w-full"
 					id="chat-overview-button"
 					on:click={async () => {
@@ -341,11 +340,11 @@
 				>
 					<Map className=" size-4" strokeWidth="1.5" />
 					<div class="flex items-center">{$i18n.t('Overview')}</div>
-				</DropdownMenu.Item>
+				</button>
 			{/if}
 
 			{#if isFeatureEnabled('artifacts') && ($artifactContents ?? []).length > 0}
-				<DropdownMenu.Item
+				<button
 					draggable="false"
 					class="flex gap-2 items-center px-3 py-1.5 text-sm cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-xl select-none w-full"
 					id="chat-artifacts-button"
@@ -358,7 +357,7 @@
 				>
 					<Cube className=" size-4" strokeWidth="1.5" />
 					<div class="flex items-center">{$i18n.t('Artifacts')}</div>
-				</DropdownMenu.Item>
+				</button>
 			{/if}
 
 			{#if ($mobile && isFeatureEnabled('chat_controls') && ($user?.role === 'admin' || ($user?.permissions.chat?.controls ?? true))) || isFeatureEnabled('chat_overview') || (isFeatureEnabled('artifacts') && ($artifactContents ?? []).length > 0)}

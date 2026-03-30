@@ -1644,11 +1644,6 @@
 
 							<div class="shrink-0 mr-2.5 flex items-center gap-2">
 								{#if activeProvider}
-									{#if activeProvider.type === 'onedrive'}
-										<OneDrive className="size-5" />
-									{:else if activeProvider.type === 'google_drive'}
-										<GoogleDrive className="size-5" />
-									{/if}
 									<Badge type="info" content={$i18n.t(activeProvider.label)} />
 								{:else if $config?.integration_providers?.[knowledge?.type]}
 									<Badge

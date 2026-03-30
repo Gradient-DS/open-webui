@@ -19,3 +19,4 @@
 - Build for upstream merge compatibility — minimize touch points with upstream files
 - Feature flags for anything an admin might want to disable
 - When building integrations, follow the established Template Method + Factory pattern in the sync abstraction layer
+- **Always preserve custom changes** — when upstream merge conflicts arise, keep our customizations while staying as close as possible to upstream. Never silently drop custom code in favor of upstream.
