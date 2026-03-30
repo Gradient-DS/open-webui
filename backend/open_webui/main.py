@@ -73,6 +73,7 @@ from open_webui.routers import (
     analytics,
     archives,
     audio,
+    totp,
     images,
     integrations,
     ollama,
@@ -315,6 +316,7 @@ from open_webui.config import (
     BYPASS_WEB_SEARCH_WEB_LOADER,
     WEB_SEARCH_RESULT_COUNT,
     WEB_SEARCH_CONCURRENT_REQUESTS,
+    WEB_FETCH_MAX_CONTENT_LENGTH,
     WEB_SEARCH_TRUST_ENV,
     WEB_SEARCH_DOMAIN_FILTER_LIST,
     OLLAMA_CLOUD_WEB_SEARCH_API_KEY,
@@ -376,6 +378,10 @@ from open_webui.config import (
     INTEGRATION_PROVIDERS,
     # Agent Proxy
     ENABLE_AGENT_PROXY,
+    # 2FA / TOTP
+    ENABLE_2FA,
+    REQUIRE_2FA,
+    TWO_FA_GRACE_PERIOD_DAYS,
     ENABLE_RAG_HYBRID_SEARCH,
     ENABLE_RAG_HYBRID_SEARCH_ENRICHED_TEXTS,
     ENABLE_RAG_FILTER_UI,
@@ -446,6 +452,7 @@ from open_webui.config import (
     EVALUATION_ARENA_MODELS,
     # WebUI (OAuth)
     ENABLE_OAUTH_ROLE_MANAGEMENT,
+    OAUTH_SUB_CLAIM,
     OAUTH_ROLES_CLAIM,
     OAUTH_EMAIL_CLAIM,
     OAUTH_PICTURE_CLAIM,
@@ -511,6 +518,7 @@ from open_webui.config import (
     FEATURE_REFERENCE_CHATS,
     FEATURE_TOOL_SERVERS,
     FEATURE_TERMINAL_SERVERS,
+    FEATURE_USER_DEMOGRAPHICS,
     FEATURE_BUILTIN_TOOLS,
     FEATURE_ADMIN_EVALUATIONS,
     FEATURE_ADMIN_FUNCTIONS,
@@ -548,6 +556,7 @@ from open_webui.env import (
     ENABLE_CUSTOM_MODEL_FALLBACK,
     LICENSE_KEY,
     AUDIT_EXCLUDED_PATHS,
+    AUDIT_INCLUDED_PATHS,
     AUDIT_LOG_LEVEL,
     CHANGELOG,
     REDIS_URL,
@@ -625,6 +634,7 @@ from open_webui.utils.auth import (
 from open_webui.utils.plugin import install_tool_and_function_dependencies
 from open_webui.utils.oauth import (
     get_oauth_client_info_with_dynamic_client_registration,
+    get_oauth_client_info_with_static_credentials,
     encrypt_data,
     decrypt_data,
     OAuthManager,
@@ -648,7 +658,7 @@ from open_webui.utils.redis import get_sentinels_from_env
 from open_webui.constants import ERROR_MESSAGES
 
 if SAFE_MODE:
-    print("SAFE MODE ENABLED")
+    print('SAFE MODE ENABLED')
     Functions.deactivate_all_functions()
 
 logging.basicConfig(stream=sys.stdout, level=GLOBAL_LOG_LEVEL)
@@ -661,16 +671,16 @@ class SPAStaticFiles(StaticFiles):
             return await super().get_response(path, scope)
         except (HTTPException, StarletteHTTPException) as ex:
             if ex.status_code == 404:
-                if path.endswith(".js"):
+                if path.endswith('.js'):
                     # Return 404 for javascript files
                     raise ex
                 else:
-                    return await super().get_response("index.html", scope)
+                    return await super().get_response('index.html', scope)
             else:
                 raise ex
 
 
-if LOG_FORMAT != "json":
+if LOG_FORMAT != 'json':
     print(rf"""
  ██████╗ ██████╗ ███████╗███╗   ██╗    ██╗    ██╗███████╗██████╗ ██╗   ██╗██╗
 ██╔═══██╗██╔══██╗██╔════╝████╗  ██║    ██║    ██║██╔════╝██╔══██╗██║   ██║██║
@@ -681,7 +691,7 @@ if LOG_FORMAT != "json":
 
 
 v{VERSION} - building the best AI user interface.
-{f"Commit: {WEBUI_BUILD_HASH}" if WEBUI_BUILD_HASH != "dev-build" else ""}
+{f'Commit: {WEBUI_BUILD_HASH}' if WEBUI_BUILD_HASH != 'dev-build' else ''}
 https://github.com/open-webui/open-webui
 """)
 
@@ -696,12 +706,10 @@ async def periodic_archive_cleanup():
             await asyncio.sleep(24 * 60 * 60)
 
             stats = ArchiveService.cleanup_expired_archives()
-            if stats["deleted"] > 0:
-                log.info(
-                    f"Archive cleanup: deleted {stats['deleted']} expired archives"
-                )
+            if stats['deleted'] > 0:
+                log.info(f'Archive cleanup: deleted {stats["deleted"]} expired archives')
         except Exception as e:
-            log.error(f"Error in archive cleanup: {e}")
+            log.error(f'Error in archive cleanup: {e}')
 
 
 @asynccontextmanager
@@ -727,7 +735,7 @@ async def lifespan(app: FastAPI):
 
     # This should be blocking (sync) so functions are not deactivated on first /get_models calls
     # when the first user lands on the / route.
-    log.info("Installing external dependencies of functions and tools...")
+    log.info('Installing external dependencies of functions and tools...')
     install_tool_and_function_dependencies()
 
     # Load external agents if configured
@@ -736,21 +744,17 @@ async def lifespan(app: FastAPI):
 
         load_external_agents_at_startup()
     except Exception as e:
-        log.warning(f"External agents loading skipped or failed: {e}")
+        log.warning(f'External agents loading skipped or failed: {e}')
 
     app.state.redis = get_redis_connection(
         redis_url=REDIS_URL,
-        redis_sentinels=get_sentinels_from_env(
-            REDIS_SENTINEL_HOSTS, REDIS_SENTINEL_PORT
-        ),
+        redis_sentinels=get_sentinels_from_env(REDIS_SENTINEL_HOSTS, REDIS_SENTINEL_PORT),
         redis_cluster=REDIS_CLUSTER,
         async_mode=True,
     )
 
     if app.state.redis is not None:
-        app.state.redis_task_command_listener = asyncio.create_task(
-            redis_task_command_listener(app)
-        )
+        app.state.redis_task_command_listener = asyncio.create_task(redis_task_command_listener(app))
 
     if THREAD_POOL_SIZE and THREAD_POOL_SIZE > 0:
         limiter = anyio.to_thread.current_default_thread_limiter()
@@ -780,28 +784,26 @@ async def lifespan(app: FastAPI):
     start_cleanup_worker()
 
     # Check external pipeline health on startup
-    external_pipeline_url = getattr(app.state.config, "EXTERNAL_PIPELINE_URL", None)
-    if external_pipeline_url and external_pipeline_url.strip() != "":
-        external_pipeline_api_key = getattr(
-            app.state.config, "EXTERNAL_PIPELINE_API_KEY", None
-        )
-        log.info(f"Checking external pipeline health at: {external_pipeline_url}")
+    external_pipeline_url = getattr(app.state.config, 'EXTERNAL_PIPELINE_URL', None)
+    if external_pipeline_url and external_pipeline_url.strip() != '':
+        external_pipeline_api_key = getattr(app.state.config, 'EXTERNAL_PIPELINE_API_KEY', None)
+        log.info(f'Checking external pipeline health at: {external_pipeline_url}')
         is_healthy = check_external_pipeline_health(
             external_pipeline_url=external_pipeline_url,
             external_pipeline_api_key=external_pipeline_api_key,
             timeout=5,
         )
         if is_healthy:
-            log.info("✓ External pipeline is healthy and ready")
+            log.info('✓ External pipeline is healthy and ready')
         else:
             log.warning(
-                f"⚠ External pipeline at {external_pipeline_url} is not accessible or unhealthy. "
-                f"File processing will fall back to internal pipeline. "
-                f"Ensure the pipeline is running and accessible."
+                f'⚠ External pipeline at {external_pipeline_url} is not accessible or unhealthy. '
+                f'File processing will fall back to internal pipeline. '
+                f'Ensure the pipeline is running and accessible.'
             )
     else:
         log.info(
-            "External pipeline is disabled (EXTERNAL_PIPELINE_URL not set or empty). Using internal pipeline only."
+            'External pipeline is disabled (EXTERNAL_PIPELINE_URL not set or empty). Using internal pipeline only.'
         )
 
     if app.state.config.ENABLE_BASE_MODELS_CACHE:
@@ -810,52 +812,53 @@ async def lifespan(app: FastAPI):
                 Request(
                     # Creating a mock request object to pass to get_all_models
                     {
-                        "type": "http",
-                        "asgi.version": "3.0",
-                        "asgi.spec_version": "2.0",
-                        "method": "GET",
-                        "path": "/internal",
-                        "query_string": b"",
-                        "headers": Headers({}).raw,
-                        "client": ("127.0.0.1", 12345),
-                        "server": ("127.0.0.1", 80),
-                        "scheme": "http",
-                        "app": app,
+                        'type': 'http',
+                        'asgi.version': '3.0',
+                        'asgi.spec_version': '2.0',
+                        'method': 'GET',
+                        'path': '/internal',
+                        'query_string': b'',
+                        'headers': Headers({}).raw,
+                        'client': ('127.0.0.1', 12345),
+                        'server': ('127.0.0.1', 80),
+                        'scheme': 'http',
+                        'app': app,
                     }
                 ),
                 None,
             )
         except Exception as e:
-            log.warning(f"Failed to pre-fetch models at startup: {e}")
+            log.warning(f'Failed to pre-fetch models at startup: {e}')
 
     # Pre-fetch tool server specs so the first request doesn't pay the latency cost
     if len(app.state.config.TOOL_SERVER_CONNECTIONS) > 0:
-        log.info("Initializing tool servers...")
+        log.info('Initializing tool servers...')
         try:
             mock_request = Request(
                 {
-                    "type": "http",
-                    "asgi.version": "3.0",
-                    "asgi.spec_version": "2.0",
-                    "method": "GET",
-                    "path": "/internal",
-                    "query_string": b"",
-                    "headers": Headers({}).raw,
-                    "client": ("127.0.0.1", 12345),
-                    "server": ("127.0.0.1", 80),
-                    "scheme": "http",
-                    "app": app,
+                    'type': 'http',
+                    'asgi.version': '3.0',
+                    'asgi.spec_version': '2.0',
+                    'method': 'GET',
+                    'path': '/internal',
+                    'query_string': b'',
+                    'headers': Headers({}).raw,
+                    'client': ('127.0.0.1', 12345),
+                    'server': ('127.0.0.1', 80),
+                    'scheme': 'http',
+                    'app': app,
                 }
             )
             await set_tool_servers(mock_request)
-            log.info(f"Initialized {len(app.state.TOOL_SERVERS)} tool server(s)")
+            log.info(f'Initialized {len(app.state.TOOL_SERVERS)} tool server(s)')
 
             await set_terminal_servers(mock_request)
-            log.info(
-                f"Initialized {len(app.state.TERMINAL_SERVERS)} terminal server(s)"
-            )
+            log.info(f'Initialized {len(app.state.TERMINAL_SERVERS)} terminal server(s)')
         except Exception as e:
-            log.warning(f"Failed to initialize tool/terminal servers at startup: {e}")
+            log.warning(f'Failed to initialize tool/terminal servers at startup: {e}')
+
+    # Mark application as ready to accept traffic from a startup perspective.
+    app.state.startup_complete = True
 
     yield
 
@@ -878,17 +881,20 @@ async def lifespan(app: FastAPI):
 
     stop_google_drive_scheduler()
 
-    if hasattr(app.state, "redis_task_command_listener"):
+    if hasattr(app.state, 'redis_task_command_listener'):
         app.state.redis_task_command_listener.cancel()
 
 
 app = FastAPI(
-    title="Open WebUI",
-    docs_url="/docs" if ENV == "dev" else None,
-    openapi_url="/openapi.json" if ENV == "dev" else None,
+    title='Open WebUI',
+    docs_url='/docs' if ENV == 'dev' else None,
+    openapi_url='/openapi.json' if ENV == 'dev' else None,
     redoc_url=None,
     lifespan=lifespan,
 )
+
+# Used by readiness checks to gate traffic until startup work is done.
+app.state.startup_complete = False
 
 # For Open WebUI OIDC/OAuth2
 oauth_manager = OAuthManager(app)
@@ -1004,9 +1010,7 @@ app.state.config.ENABLE_SIGNUP = ENABLE_SIGNUP
 app.state.config.ENABLE_LOGIN_FORM = ENABLE_LOGIN_FORM
 
 app.state.config.ENABLE_API_KEYS = ENABLE_API_KEYS
-app.state.config.ENABLE_API_KEYS_ENDPOINT_RESTRICTIONS = (
-    ENABLE_API_KEYS_ENDPOINT_RESTRICTIONS
-)
+app.state.config.ENABLE_API_KEYS_ENDPOINT_RESTRICTIONS = ENABLE_API_KEYS_ENDPOINT_RESTRICTIONS
 app.state.config.API_KEYS_ALLOWED_ENDPOINTS = API_KEYS_ALLOWED_ENDPOINTS
 
 app.state.config.JWT_EXPIRES_IN = JWT_EXPIRES_IN
@@ -1081,17 +1085,18 @@ app.state.config.CONVERSATION_FEEDBACK_PLACEHOLDER = CONVERSATION_FEEDBACK_PLACE
 from open_webui.utils.access_control import migrate_access_control
 
 connections = app.state.config.TOOL_SERVER_CONNECTIONS
-if any("access_control" in c.get("config", {}) for c in connections):
+if any('access_control' in c.get('config', {}) for c in connections):
     for connection in connections:
-        migrate_access_control(connection.get("config", {}))
+        migrate_access_control(connection.get('config', {}))
     app.state.config.TOOL_SERVER_CONNECTIONS = connections
 
 arena_models = app.state.config.EVALUATION_ARENA_MODELS
-if any("access_control" in m.get("meta", {}) for m in arena_models):
+if any('access_control' in m.get('meta', {}) for m in arena_models):
     for model in arena_models:
-        migrate_access_control(model.get("meta", {}))
+        migrate_access_control(model.get('meta', {}))
     app.state.config.EVALUATION_ARENA_MODELS = arena_models
 
+app.state.config.OAUTH_SUB_CLAIM = OAUTH_SUB_CLAIM
 app.state.config.OAUTH_USERNAME_CLAIM = OAUTH_USERNAME_CLAIM
 app.state.config.OAUTH_PICTURE_CLAIM = OAUTH_PICTURE_CLAIM
 app.state.config.OAUTH_EMAIL_CLAIM = OAUTH_EMAIL_CLAIM
@@ -1158,9 +1163,7 @@ app.state.config.FILE_IMAGE_COMPRESSION_HEIGHT = FILE_IMAGE_COMPRESSION_HEIGHT
 app.state.config.RAG_FULL_CONTEXT = RAG_FULL_CONTEXT
 app.state.config.BYPASS_EMBEDDING_AND_RETRIEVAL = BYPASS_EMBEDDING_AND_RETRIEVAL
 app.state.config.ENABLE_RAG_HYBRID_SEARCH = ENABLE_RAG_HYBRID_SEARCH
-app.state.config.ENABLE_RAG_HYBRID_SEARCH_ENRICHED_TEXTS = (
-    ENABLE_RAG_HYBRID_SEARCH_ENRICHED_TEXTS
-)
+app.state.config.ENABLE_RAG_HYBRID_SEARCH_ENRICHED_TEXTS = ENABLE_RAG_HYBRID_SEARCH_ENRICHED_TEXTS
 app.state.config.ENABLE_RAG_FILTER_UI = ENABLE_RAG_FILTER_UI
 app.state.config.ENABLE_WEB_LOADER_SSL_VERIFICATION = ENABLE_WEB_LOADER_SSL_VERIFICATION
 
@@ -1172,9 +1175,7 @@ app.state.config.DATALAB_MARKER_SKIP_CACHE = DATALAB_MARKER_SKIP_CACHE
 app.state.config.DATALAB_MARKER_FORCE_OCR = DATALAB_MARKER_FORCE_OCR
 app.state.config.DATALAB_MARKER_PAGINATE = DATALAB_MARKER_PAGINATE
 app.state.config.DATALAB_MARKER_STRIP_EXISTING_OCR = DATALAB_MARKER_STRIP_EXISTING_OCR
-app.state.config.DATALAB_MARKER_DISABLE_IMAGE_EXTRACTION = (
-    DATALAB_MARKER_DISABLE_IMAGE_EXTRACTION
-)
+app.state.config.DATALAB_MARKER_DISABLE_IMAGE_EXTRACTION = DATALAB_MARKER_DISABLE_IMAGE_EXTRACTION
 app.state.config.DATALAB_MARKER_FORMAT_LINES = DATALAB_MARKER_FORMAT_LINES
 app.state.config.DATALAB_MARKER_USE_LLM = DATALAB_MARKER_USE_LLM
 app.state.config.DATALAB_MARKER_OUTPUT_FORMAT = DATALAB_MARKER_OUTPUT_FORMAT
@@ -1196,9 +1197,7 @@ app.state.config.MINERU_API_TIMEOUT = MINERU_API_TIMEOUT
 app.state.config.MINERU_PARAMS = MINERU_PARAMS
 
 app.state.config.TEXT_SPLITTER = RAG_TEXT_SPLITTER
-app.state.config.ENABLE_MARKDOWN_HEADER_TEXT_SPLITTER = (
-    ENABLE_MARKDOWN_HEADER_TEXT_SPLITTER
-)
+app.state.config.ENABLE_MARKDOWN_HEADER_TEXT_SPLITTER = ENABLE_MARKDOWN_HEADER_TEXT_SPLITTER
 
 app.state.config.TIKTOKEN_ENCODING_NAME = TIKTOKEN_ENCODING_NAME
 
@@ -1249,15 +1248,14 @@ app.state.config.WEB_SEARCH_ENGINE = WEB_SEARCH_ENGINE
 app.state.config.WEB_SEARCH_DOMAIN_FILTER_LIST = WEB_SEARCH_DOMAIN_FILTER_LIST
 app.state.config.WEB_SEARCH_RESULT_COUNT = WEB_SEARCH_RESULT_COUNT
 app.state.config.WEB_SEARCH_CONCURRENT_REQUESTS = WEB_SEARCH_CONCURRENT_REQUESTS
+app.state.config.WEB_FETCH_MAX_CONTENT_LENGTH = WEB_FETCH_MAX_CONTENT_LENGTH
 
 app.state.config.WEB_LOADER_ENGINE = WEB_LOADER_ENGINE
 app.state.config.WEB_LOADER_CONCURRENT_REQUESTS = WEB_LOADER_CONCURRENT_REQUESTS
 app.state.config.WEB_LOADER_TIMEOUT = WEB_LOADER_TIMEOUT
 
 app.state.config.WEB_SEARCH_TRUST_ENV = WEB_SEARCH_TRUST_ENV
-app.state.config.BYPASS_WEB_SEARCH_EMBEDDING_AND_RETRIEVAL = (
-    BYPASS_WEB_SEARCH_EMBEDDING_AND_RETRIEVAL
-)
+app.state.config.BYPASS_WEB_SEARCH_EMBEDDING_AND_RETRIEVAL = BYPASS_WEB_SEARCH_EMBEDDING_AND_RETRIEVAL
 app.state.config.BYPASS_WEB_SEARCH_WEB_LOADER = BYPASS_WEB_SEARCH_WEB_LOADER
 
 app.state.config.ENABLE_GOOGLE_DRIVE_INTEGRATION = ENABLE_GOOGLE_DRIVE_INTEGRATION
@@ -1275,6 +1273,10 @@ app.state.config.EMAIL_INVITE_HEADING = EMAIL_INVITE_HEADING
 app.state.config.INTEGRATION_PROVIDERS = INTEGRATION_PROVIDERS
 
 app.state.config.ENABLE_AGENT_PROXY = ENABLE_AGENT_PROXY
+
+app.state.config.ENABLE_2FA = ENABLE_2FA
+app.state.config.REQUIRE_2FA = REQUIRE_2FA
+app.state.config.TWO_FA_GRACE_PERIOD_DAYS = TWO_FA_GRACE_PERIOD_DAYS
 
 app.state.config.OLLAMA_CLOUD_WEB_SEARCH_API_KEY = OLLAMA_CLOUD_WEB_SEARCH_API_KEY
 app.state.config.SEARXNG_QUERY_URL = SEARXNG_QUERY_URL
@@ -1335,13 +1337,8 @@ app.state.YOUTUBE_LOADER_TRANSLATION = None
 
 
 try:
-    app.state.ef = get_ef(
-        app.state.config.RAG_EMBEDDING_ENGINE, app.state.config.RAG_EMBEDDING_MODEL
-    )
-    if (
-        app.state.config.ENABLE_RAG_HYBRID_SEARCH
-        and not app.state.config.BYPASS_EMBEDDING_AND_RETRIEVAL
-    ):
+    app.state.ef = get_ef(app.state.config.RAG_EMBEDDING_ENGINE, app.state.config.RAG_EMBEDDING_MODEL)
+    if app.state.config.ENABLE_RAG_HYBRID_SEARCH and not app.state.config.BYPASS_EMBEDDING_AND_RETRIEVAL:
         app.state.rf = get_rf(
             app.state.config.RAG_RERANKING_ENGINE,
             app.state.config.RAG_RERANKING_MODEL,
@@ -1352,7 +1349,7 @@ try:
     else:
         app.state.rf = None
 except Exception as e:
-    log.error(f"Error updating models: {e}")
+    log.error(f'Error updating models: {e}')
     pass
 
 
@@ -1362,26 +1359,26 @@ app.state.EMBEDDING_FUNCTION = get_embedding_function(
     embedding_function=app.state.ef,
     url=(
         app.state.config.RAG_OPENAI_API_BASE_URL
-        if app.state.config.RAG_EMBEDDING_ENGINE == "openai"
+        if app.state.config.RAG_EMBEDDING_ENGINE == 'openai'
         else (
             app.state.config.RAG_OLLAMA_BASE_URL
-            if app.state.config.RAG_EMBEDDING_ENGINE == "ollama"
+            if app.state.config.RAG_EMBEDDING_ENGINE == 'ollama'
             else app.state.config.RAG_AZURE_OPENAI_BASE_URL
         )
     ),
     key=(
         app.state.config.RAG_OPENAI_API_KEY
-        if app.state.config.RAG_EMBEDDING_ENGINE == "openai"
+        if app.state.config.RAG_EMBEDDING_ENGINE == 'openai'
         else (
             app.state.config.RAG_OLLAMA_API_KEY
-            if app.state.config.RAG_EMBEDDING_ENGINE == "ollama"
+            if app.state.config.RAG_EMBEDDING_ENGINE == 'ollama'
             else app.state.config.RAG_AZURE_OPENAI_API_KEY
         )
     ),
     embedding_batch_size=app.state.config.RAG_EMBEDDING_BATCH_SIZE,
     azure_api_version=(
         app.state.config.RAG_AZURE_OPENAI_API_VERSION
-        if app.state.config.RAG_EMBEDDING_ENGINE == "azure_openai"
+        if app.state.config.RAG_EMBEDDING_ENGINE == 'azure_openai'
         else None
     ),
     enable_async=app.state.config.ENABLE_ASYNC_EMBEDDING,
@@ -1405,9 +1402,7 @@ app.state.config.CODE_EXECUTION_ENGINE = CODE_EXECUTION_ENGINE
 app.state.config.CODE_EXECUTION_JUPYTER_URL = CODE_EXECUTION_JUPYTER_URL
 app.state.config.CODE_EXECUTION_JUPYTER_AUTH = CODE_EXECUTION_JUPYTER_AUTH
 app.state.config.CODE_EXECUTION_JUPYTER_AUTH_TOKEN = CODE_EXECUTION_JUPYTER_AUTH_TOKEN
-app.state.config.CODE_EXECUTION_JUPYTER_AUTH_PASSWORD = (
-    CODE_EXECUTION_JUPYTER_AUTH_PASSWORD
-)
+app.state.config.CODE_EXECUTION_JUPYTER_AUTH_PASSWORD = CODE_EXECUTION_JUPYTER_AUTH_PASSWORD
 app.state.config.CODE_EXECUTION_JUPYTER_TIMEOUT = CODE_EXECUTION_JUPYTER_TIMEOUT
 
 app.state.config.ENABLE_CODE_INTERPRETER = ENABLE_CODE_INTERPRETER
@@ -1416,12 +1411,8 @@ app.state.config.CODE_INTERPRETER_PROMPT_TEMPLATE = CODE_INTERPRETER_PROMPT_TEMP
 
 app.state.config.CODE_INTERPRETER_JUPYTER_URL = CODE_INTERPRETER_JUPYTER_URL
 app.state.config.CODE_INTERPRETER_JUPYTER_AUTH = CODE_INTERPRETER_JUPYTER_AUTH
-app.state.config.CODE_INTERPRETER_JUPYTER_AUTH_TOKEN = (
-    CODE_INTERPRETER_JUPYTER_AUTH_TOKEN
-)
-app.state.config.CODE_INTERPRETER_JUPYTER_AUTH_PASSWORD = (
-    CODE_INTERPRETER_JUPYTER_AUTH_PASSWORD
-)
+app.state.config.CODE_INTERPRETER_JUPYTER_AUTH_TOKEN = CODE_INTERPRETER_JUPYTER_AUTH_TOKEN
+app.state.config.CODE_INTERPRETER_JUPYTER_AUTH_PASSWORD = CODE_INTERPRETER_JUPYTER_AUTH_PASSWORD
 app.state.config.CODE_INTERPRETER_JUPYTER_TIMEOUT = CODE_INTERPRETER_JUPYTER_TIMEOUT
 
 ########################################
@@ -1497,9 +1488,7 @@ app.state.config.AUDIO_STT_AZURE_MAX_SPEAKERS = AUDIO_STT_AZURE_MAX_SPEAKERS
 
 app.state.config.AUDIO_STT_MISTRAL_API_KEY = AUDIO_STT_MISTRAL_API_KEY
 app.state.config.AUDIO_STT_MISTRAL_API_BASE_URL = AUDIO_STT_MISTRAL_API_BASE_URL
-app.state.config.AUDIO_STT_MISTRAL_USE_CHAT_COMPLETIONS = (
-    AUDIO_STT_MISTRAL_USE_CHAT_COMPLETIONS
-)
+app.state.config.AUDIO_STT_MISTRAL_USE_CHAT_COMPLETIONS = AUDIO_STT_MISTRAL_USE_CHAT_COMPLETIONS
 
 app.state.config.TTS_ENGINE = AUDIO_TTS_ENGINE
 
@@ -1545,23 +1534,13 @@ app.state.config.ENABLE_FOLLOW_UP_GENERATION = ENABLE_FOLLOW_UP_GENERATION
 
 app.state.config.TITLE_GENERATION_PROMPT_TEMPLATE = TITLE_GENERATION_PROMPT_TEMPLATE
 app.state.config.TAGS_GENERATION_PROMPT_TEMPLATE = TAGS_GENERATION_PROMPT_TEMPLATE
-app.state.config.IMAGE_PROMPT_GENERATION_PROMPT_TEMPLATE = (
-    IMAGE_PROMPT_GENERATION_PROMPT_TEMPLATE
-)
-app.state.config.FOLLOW_UP_GENERATION_PROMPT_TEMPLATE = (
-    FOLLOW_UP_GENERATION_PROMPT_TEMPLATE
-)
+app.state.config.IMAGE_PROMPT_GENERATION_PROMPT_TEMPLATE = IMAGE_PROMPT_GENERATION_PROMPT_TEMPLATE
+app.state.config.FOLLOW_UP_GENERATION_PROMPT_TEMPLATE = FOLLOW_UP_GENERATION_PROMPT_TEMPLATE
 
-app.state.config.TOOLS_FUNCTION_CALLING_PROMPT_TEMPLATE = (
-    TOOLS_FUNCTION_CALLING_PROMPT_TEMPLATE
-)
+app.state.config.TOOLS_FUNCTION_CALLING_PROMPT_TEMPLATE = TOOLS_FUNCTION_CALLING_PROMPT_TEMPLATE
 app.state.config.QUERY_GENERATION_PROMPT_TEMPLATE = QUERY_GENERATION_PROMPT_TEMPLATE
-app.state.config.AUTOCOMPLETE_GENERATION_PROMPT_TEMPLATE = (
-    AUTOCOMPLETE_GENERATION_PROMPT_TEMPLATE
-)
-app.state.config.AUTOCOMPLETE_GENERATION_INPUT_MAX_LENGTH = (
-    AUTOCOMPLETE_GENERATION_INPUT_MAX_LENGTH
-)
+app.state.config.AUTOCOMPLETE_GENERATION_PROMPT_TEMPLATE = AUTOCOMPLETE_GENERATION_PROMPT_TEMPLATE
+app.state.config.AUTOCOMPLETE_GENERATION_INPUT_MAX_LENGTH = AUTOCOMPLETE_GENERATION_INPUT_MAX_LENGTH
 app.state.config.VOICE_MODE_PROMPT_TEMPLATE = VOICE_MODE_PROMPT_TEMPLATE
 
 
@@ -1581,36 +1560,36 @@ if ENABLE_COMPRESSION_MIDDLEWARE:
 class RedirectMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
         # Check if the request is a GET request
-        if request.method == "GET":
+        if request.method == 'GET':
             path = request.url.path
             query_params = dict(parse_qs(urlparse(str(request.url)).query))
 
             redirect_params = {}
 
             # Check for the specific watch path and the presence of 'v' parameter
-            if path.endswith("/watch") and "v" in query_params:
+            if path.endswith('/watch') and 'v' in query_params:
                 # Extract the first 'v' parameter
-                youtube_video_id = query_params["v"][0]
-                redirect_params["youtube"] = youtube_video_id
+                youtube_video_id = query_params['v'][0]
+                redirect_params['youtube'] = youtube_video_id
 
-            if "shared" in query_params and len(query_params["shared"]) > 0:
+            if 'shared' in query_params and len(query_params['shared']) > 0:
                 # PWA share_target support
 
-                text = query_params["shared"][0]
+                text = query_params['shared'][0]
                 if text:
-                    urls = re.match(r"https://\S+", text)
+                    urls = re.match(r'https://\S+', text)
                     if urls:
                         from open_webui.retrieval.loaders.youtube import _parse_video_id
 
                         if youtube_video_id := _parse_video_id(urls[0]):
-                            redirect_params["youtube"] = youtube_video_id
+                            redirect_params['youtube'] = youtube_video_id
                         else:
-                            redirect_params["load-url"] = urls[0]
+                            redirect_params['load-url'] = urls[0]
                     else:
-                        redirect_params["q"] = text
+                        redirect_params['q'] = text
 
             if redirect_params:
-                redirect_url = f"/?{urlencode(redirect_params)}"
+                redirect_url = f'/?{urlencode(redirect_params)}'
                 return RedirectResponse(url=redirect_url)
 
         # Proceed with the normal flow of other requests
@@ -1627,25 +1606,23 @@ class APIKeyRestrictionMiddleware:
         self.app = app
 
     async def __call__(self, scope, receive, send):
-        if scope["type"] == "http":
+        if scope['type'] == 'http':
             request = Request(scope)
-            auth_header = request.headers.get("Authorization")
+            auth_header = request.headers.get('Authorization')
             token = None
 
             if auth_header:
-                parts = auth_header.split(" ", 1)
+                parts = auth_header.split(' ', 1)
                 if len(parts) == 2:
                     token = parts[1]
 
             # Only apply restrictions if an sk- API key is used
-            if token and token.startswith("sk-"):
+            if token and token.startswith('sk-'):
                 # Check if restrictions are enabled
                 if app.state.config.ENABLE_API_KEYS_ENDPOINT_RESTRICTIONS:
                     allowed_paths = [
                         path.strip()
-                        for path in str(
-                            app.state.config.API_KEYS_ALLOWED_ENDPOINTS
-                        ).split(",")
+                        for path in str(app.state.config.API_KEYS_ALLOWED_ENDPOINTS).split(',')
                         if path.strip()
                     ]
 
@@ -1653,17 +1630,13 @@ class APIKeyRestrictionMiddleware:
 
                     # Match exact path or prefix path
                     is_allowed = any(
-                        request_path == allowed
-                        or request_path.startswith(allowed + "/")
-                        for allowed in allowed_paths
+                        request_path == allowed or request_path.startswith(allowed + '/') for allowed in allowed_paths
                     )
 
                     if not is_allowed:
                         await JSONResponse(
                             status_code=status.HTTP_403_FORBIDDEN,
-                            content={
-                                "detail": "API key not allowed to access this endpoint."
-                            },
+                            content={'detail': 'API key not allowed to access this endpoint.'},
                         )(scope, receive, send)
                         return
 
@@ -1673,7 +1646,7 @@ class APIKeyRestrictionMiddleware:
 app.add_middleware(APIKeyRestrictionMiddleware)
 
 
-@app.middleware("http")
+@app.middleware('http')
 async def commit_session_after_request(request: Request, call_next):
     response = await call_next(request)
     # log.debug("Commit session after request")
@@ -1687,51 +1660,44 @@ async def commit_session_after_request(request: Request, call_next):
     return response
 
 
-@app.middleware("http")
+@app.middleware('http')
 async def check_url(request: Request, call_next):
     start_time = int(time.time())
-    request.state.token = get_http_authorization_cred(
-        request.headers.get("Authorization")
-    )
+    request.state.token = get_http_authorization_cred(request.headers.get('Authorization'))
     # Fallback to cookie token for browser sessions
-    if request.state.token is None and request.cookies.get("token"):
+    if request.state.token is None and request.cookies.get('token'):
         from fastapi.security import HTTPAuthorizationCredentials
 
-        request.state.token = HTTPAuthorizationCredentials(
-            scheme="Bearer", credentials=request.cookies.get("token")
-        )
+        request.state.token = HTTPAuthorizationCredentials(scheme='Bearer', credentials=request.cookies.get('token'))
 
     # Fallback to x-api-key header for Anthropic Messages API routes
-    if request.state.token is None and request.headers.get("x-api-key"):
+    if request.state.token is None and request.headers.get('x-api-key'):
         request_path = request.url.path
-        if request_path in ("/api/message", "/api/v1/messages"):
+        if request_path in ('/api/message', '/api/v1/messages') or request_path.startswith('/ollama/v1/messages'):
             from fastapi.security import HTTPAuthorizationCredentials
 
             request.state.token = HTTPAuthorizationCredentials(
-                scheme="Bearer", credentials=request.headers.get("x-api-key")
+                scheme='Bearer', credentials=request.headers.get('x-api-key')
             )
 
     request.state.enable_api_keys = app.state.config.ENABLE_API_KEYS
     response = await call_next(request)
     process_time = int(time.time()) - start_time
-    response.headers["X-Process-Time"] = str(process_time)
+    response.headers['X-Process-Time'] = str(process_time)
     return response
 
 
-@app.middleware("http")
+@app.middleware('http')
 async def inspect_websocket(request: Request, call_next):
-    if (
-        "/ws/socket.io" in request.url.path
-        and request.query_params.get("transport") == "websocket"
-    ):
-        upgrade = (request.headers.get("Upgrade") or "").lower()
-        connection = (request.headers.get("Connection") or "").lower().split(",")
+    if '/ws/socket.io' in request.url.path and request.query_params.get('transport') == 'websocket':
+        upgrade = (request.headers.get('Upgrade') or '').lower()
+        connection = (request.headers.get('Connection') or '').lower().split(',')
         # Check that there's the correct headers for an upgrade, else reject the connection
         # This is to work around this upstream issue: https://github.com/miguelgrinberg/python-engineio/issues/367
-        if upgrade != "websocket" or "upgrade" not in connection:
+        if upgrade != 'websocket' or 'upgrade' not in connection:
             return JSONResponse(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                content={"detail": "Invalid WebSocket upgrade request"},
+                content={'detail': 'Invalid WebSocket upgrade request'},
             )
     return await call_next(request)
 
@@ -1740,84 +1706,77 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=CORS_ALLOW_ORIGIN,
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=['*'],
+    allow_headers=['*'],
 )
 
 
-app.mount("/ws", socket_app)
+app.mount('/ws', socket_app)
 
 
-app.include_router(ollama.router, prefix="/ollama", tags=["ollama"])
-app.include_router(openai.router, prefix="/openai", tags=["openai"])
+app.include_router(ollama.router, prefix='/ollama', tags=['ollama'])
+app.include_router(openai.router, prefix='/openai', tags=['openai'])
 
 
-app.include_router(pipelines.router, prefix="/api/v1/pipelines", tags=["pipelines"])
-app.include_router(tasks.router, prefix="/api/v1/tasks", tags=["tasks"])
-app.include_router(images.router, prefix="/api/v1/images", tags=["images"])
+app.include_router(pipelines.router, prefix='/api/v1/pipelines', tags=['pipelines'])
+app.include_router(tasks.router, prefix='/api/v1/tasks', tags=['tasks'])
+app.include_router(images.router, prefix='/api/v1/images', tags=['images'])
 
-app.include_router(audio.router, prefix="/api/v1/audio", tags=["audio"])
-app.include_router(retrieval.router, prefix="/api/v1/retrieval", tags=["retrieval"])
+app.include_router(audio.router, prefix='/api/v1/audio', tags=['audio'])
+app.include_router(retrieval.router, prefix='/api/v1/retrieval', tags=['retrieval'])
 
-app.include_router(configs.router, prefix="/api/v1/configs", tags=["configs"])
+app.include_router(configs.router, prefix='/api/v1/configs', tags=['configs'])
 
-app.include_router(auths.router, prefix="/api/v1/auths", tags=["auths"])
-app.include_router(users.router, prefix="/api/v1/users", tags=["users"])
-app.include_router(archives.router, prefix="/api/v1/archives", tags=["archives"])
-
-
-app.include_router(channels.router, prefix="/api/v1/channels", tags=["channels"])
-app.include_router(chats.router, prefix="/api/v1/chats", tags=["chats"])
-app.include_router(notes.router, prefix="/api/v1/notes", tags=["notes"])
+app.include_router(auths.router, prefix='/api/v1/auths', tags=['auths'])
+app.include_router(totp.router, prefix='/api/v1/auths/2fa', tags=['2fa'])
+app.include_router(users.router, prefix='/api/v1/users', tags=['users'])
+app.include_router(archives.router, prefix='/api/v1/archives', tags=['archives'])
 
 
-app.include_router(models.router, prefix="/api/v1/models", tags=["models"])
-app.include_router(knowledge.router, prefix="/api/v1/knowledge", tags=["knowledge"])
-app.include_router(
-    integrations.router, prefix="/api/v1/integrations", tags=["integrations"]
-)
-app.include_router(agent_proxy.router, prefix="/api/v1/agent", tags=["agent-proxy"])
-app.include_router(prompts.router, prefix="/api/v1/prompts", tags=["prompts"])
-app.include_router(tools.router, prefix="/api/v1/tools", tags=["tools"])
-app.include_router(skills.router, prefix="/api/v1/skills", tags=["skills"])
+app.include_router(channels.router, prefix='/api/v1/channels', tags=['channels'])
+app.include_router(chats.router, prefix='/api/v1/chats', tags=['chats'])
+app.include_router(notes.router, prefix='/api/v1/notes', tags=['notes'])
 
-app.include_router(memories.router, prefix="/api/v1/memories", tags=["memories"])
-app.include_router(folders.router, prefix="/api/v1/folders", tags=["folders"])
-app.include_router(groups.router, prefix="/api/v1/groups", tags=["groups"])
-app.include_router(files.router, prefix="/api/v1/files", tags=["files"])
-app.include_router(functions.router, prefix="/api/v1/functions", tags=["functions"])
-app.include_router(
-    evaluations.router, prefix="/api/v1/evaluations", tags=["evaluations"]
-)
+
+app.include_router(models.router, prefix='/api/v1/models', tags=['models'])
+app.include_router(knowledge.router, prefix='/api/v1/knowledge', tags=['knowledge'])
+app.include_router(integrations.router, prefix='/api/v1/integrations', tags=['integrations'])
+app.include_router(agent_proxy.router, prefix='/api/v1/agent', tags=['agent-proxy'])
+app.include_router(prompts.router, prefix='/api/v1/prompts', tags=['prompts'])
+app.include_router(tools.router, prefix='/api/v1/tools', tags=['tools'])
+app.include_router(skills.router, prefix='/api/v1/skills', tags=['skills'])
+
+app.include_router(memories.router, prefix='/api/v1/memories', tags=['memories'])
+app.include_router(folders.router, prefix='/api/v1/folders', tags=['folders'])
+app.include_router(groups.router, prefix='/api/v1/groups', tags=['groups'])
+app.include_router(files.router, prefix='/api/v1/files', tags=['files'])
+app.include_router(functions.router, prefix='/api/v1/functions', tags=['functions'])
+app.include_router(evaluations.router, prefix='/api/v1/evaluations', tags=['evaluations'])
 if ENABLE_ADMIN_ANALYTICS:
-    app.include_router(analytics.router, prefix="/api/v1/analytics", tags=["analytics"])
-app.include_router(utils.router, prefix="/api/v1/utils", tags=["utils"])
-app.include_router(terminals.router, prefix="/api/v1/terminals", tags=["terminals"])
+    app.include_router(analytics.router, prefix='/api/v1/analytics', tags=['analytics'])
+app.include_router(utils.router, prefix='/api/v1/utils', tags=['utils'])
+app.include_router(terminals.router, prefix='/api/v1/terminals', tags=['terminals'])
 
 # SCIM 2.0 API for identity management
 if ENABLE_SCIM:
-    app.include_router(scim.router, prefix="/api/v1/scim/v2", tags=["scim"])
+    app.include_router(scim.router, prefix='/api/v1/scim/v2', tags=['scim'])
 
 # OneDrive Sync API for collection synchronization
 if app.state.config.ENABLE_ONEDRIVE_SYNC:
-    app.include_router(
-        onedrive_sync.router, prefix="/api/v1/onedrive", tags=["onedrive"]
-    )
+    app.include_router(onedrive_sync.router, prefix='/api/v1/onedrive', tags=['onedrive'])
 
 # Google Drive Sync API for collection synchronization
 if app.state.config.ENABLE_GOOGLE_DRIVE_SYNC:
-    app.include_router(
-        google_drive_sync.router, prefix="/api/v1/google-drive", tags=["google-drive"]
-    )
+    app.include_router(google_drive_sync.router, prefix='/api/v1/google-drive', tags=['google-drive'])
 
 # Invites API (always mounted - Copy Link works without Graph API)
-app.include_router(invites.router, prefix="/api/v1/invites", tags=["invites"])
+app.include_router(invites.router, prefix='/api/v1/invites', tags=['invites'])
 
 
 try:
     audit_level = AuditLevel(AUDIT_LOG_LEVEL)
 except ValueError as e:
-    logger.error(f"Invalid audit level: {AUDIT_LOG_LEVEL}. Error: {e}")
+    logger.error(f'Invalid audit level: {AUDIT_LOG_LEVEL}. Error: {e}')
     audit_level = AuditLevel.NONE
 
 if audit_level != AuditLevel.NONE:
@@ -1825,6 +1784,7 @@ if audit_level != AuditLevel.NONE:
         AuditLoggingMiddleware,
         audit_level=audit_level,
         excluded_paths=AUDIT_EXCLUDED_PATHS,
+        included_paths=AUDIT_INCLUDED_PATHS,
         max_body_size=MAX_BODY_LOG_SIZE,
     )
 ##################################
@@ -1834,35 +1794,30 @@ if audit_level != AuditLevel.NONE:
 ##################################
 
 
-@app.get("/api/models")
-@app.get("/api/v1/models")  # Experimental: Compatibility with OpenAI API
-async def get_models(
-    request: Request, refresh: bool = False, user=Depends(get_verified_user)
-):
+@app.get('/api/models')
+@app.get('/api/v1/models')  # Experimental: Compatibility with OpenAI API
+async def get_models(request: Request, refresh: bool = False, user=Depends(get_verified_user)):
     all_models = await get_all_models(request, refresh=refresh, user=user)
 
     models = []
     for model in all_models:
         # Filter out filter pipelines
-        if "pipeline" in model and model["pipeline"].get("type", None) == "filter":
+        if 'pipeline' in model and model['pipeline'].get('type', None) == 'filter':
             continue
 
         # Remove profile image URL to reduce payload size
-        if model.get("info", {}).get("meta", {}).get("profile_image_url"):
-            model["info"]["meta"].pop("profile_image_url", None)
+        if model.get('info', {}).get('meta', {}).get('profile_image_url'):
+            model['info']['meta'].pop('profile_image_url', None)
 
         try:
-            model_tags = [
-                tag.get("name")
-                for tag in model.get("info", {}).get("meta", {}).get("tags", [])
-            ]
-            tags = [tag.get("name") for tag in model.get("tags", [])]
+            model_tags = [tag.get('name') for tag in model.get('info', {}).get('meta', {}).get('tags', [])]
+            tags = [tag.get('name') for tag in model.get('tags', [])]
 
             tags = list(set(model_tags + tags))
-            model["tags"] = [{"name": tag} for tag in tags]
+            model['tags'] = [{'name': tag} for tag in tags]
         except Exception as e:
-            log.debug(f"Error processing model tags: {e}")
-            model["tags"] = []
+            log.debug(f'Error processing model tags: {e}')
+            model['tags'] = []
             pass
 
         models.append(model)
@@ -1873,26 +1828,26 @@ async def get_models(
         # Sort models by order list priority, with fallback for those not in the list
         models.sort(
             key=lambda model: (
-                model_order_dict.get(model.get("id", ""), float("inf")),
-                (model.get("name", "") or ""),
+                model_order_dict.get(model.get('id', ''), float('inf')),
+                (model.get('name', '') or ''),
             )
         )
 
     models = get_filtered_models(models, user)
 
     log.debug(
-        f"/api/models returned filtered models accessible to the user: {json.dumps([model.get('id') for model in models])}"
+        f'/api/models returned filtered models accessible to the user: {json.dumps([model.get("id") for model in models])}'
     )
-    return {"data": models}
+    return {'data': models}
 
 
-@app.get("/api/models/base")
+@app.get('/api/models/base')
 async def get_base_models(request: Request, user=Depends(get_admin_user)):
     models = await get_all_base_models(request, user=user)
     # Apply global model whitelist filter (if configured)
     if MODEL_WHITELIST:
-        models = [m for m in models if m.get("id") in MODEL_WHITELIST]
-    return {"data": models}
+        models = [m for m in models if m.get('id') in MODEL_WHITELIST]
+    return {'data': models}
 
 
 ##################################
@@ -1900,11 +1855,9 @@ async def get_base_models(request: Request, user=Depends(get_admin_user)):
 ##################################
 
 
-@app.post("/api/embeddings")
-@app.post("/api/v1/embeddings")  # Experimental: Compatibility with OpenAI API
-async def embeddings(
-    request: Request, form_data: dict, user=Depends(get_verified_user)
-):
+@app.post('/api/embeddings')
+@app.post('/api/v1/embeddings')  # Experimental: Compatibility with OpenAI API
+async def embeddings(request: Request, form_data: dict, user=Depends(get_verified_user)):
     """
     OpenAI-compatible embeddings endpoint.
 
@@ -1927,8 +1880,8 @@ async def embeddings(
     return await generate_embeddings(request, form_data, user)
 
 
-@app.post("/api/chat/completions")
-@app.post("/api/v1/chat/completions")  # Experimental: Compatibility with OpenAI API
+@app.post('/api/chat/completions')
+@app.post('/api/v1/chat/completions')  # Experimental: Compatibility with OpenAI API
 async def chat_completion(
     request: Request,
     form_data: dict,
@@ -1937,24 +1890,22 @@ async def chat_completion(
     if not request.app.state.MODELS:
         await get_all_models(request, user=user)
 
-    model_id = form_data.get("model", None)
-    model_item = form_data.pop("model_item", {})
-    tasks = form_data.pop("background_tasks", None)
+    model_id = form_data.get('model', None)
+    model_item = form_data.pop('model_item', {})
+    tasks = form_data.pop('background_tasks', None)
 
     metadata = {}
     try:
         model_info = None
-        if not model_item.get("direct", False):
+        if not model_item.get('direct', False):
             if model_id not in request.app.state.MODELS:
-                raise Exception("Model not found")
+                raise Exception('Model not found')
 
             model = request.app.state.MODELS[model_id]
             model_info = Models.get_model_by_id(model_id)
 
             # Check if user has access to the model
-            if not BYPASS_MODEL_ACCESS_CONTROL and (
-                user.role != "admin" or not BYPASS_ADMIN_ACCESS_CONTROL
-            ):
+            if not BYPASS_MODEL_ACCESS_CONTROL and (user.role != 'admin' or not BYPASS_ADMIN_ACCESS_CONTROL):
                 try:
                     check_model_access(user, model)
                 except Exception as e:
@@ -1966,16 +1917,10 @@ async def chat_completion(
             request.state.model = model
 
         # Model params: global defaults as base, per-model overrides win
-        default_model_params = (
-            getattr(request.app.state.config, "DEFAULT_MODEL_PARAMS", None) or {}
-        )
+        default_model_params = getattr(request.app.state.config, 'DEFAULT_MODEL_PARAMS', None) or {}
         model_info_params = {
             **default_model_params,
-            **(
-                model_info.params.model_dump()
-                if model_info and model_info.params
-                else {}
-            ),
+            **(model_info.params.model_dump() if model_info and model_info.params else {}),
         }
 
         # Check base model existence for custom models
@@ -1983,82 +1928,69 @@ async def chat_completion(
             base_model_id = model_info.base_model_id
             if base_model_id not in request.app.state.MODELS:
                 if ENABLE_CUSTOM_MODEL_FALLBACK:
-                    default_models = (
-                        request.app.state.config.DEFAULT_MODELS or ""
-                    ).split(",")
+                    default_models = (request.app.state.config.DEFAULT_MODELS or '').split(',')
 
-                    fallback_model_id = (
-                        default_models[0].strip() if default_models[0] else None
-                    )
+                    fallback_model_id = default_models[0].strip() if default_models[0] else None
 
-                    if (
-                        fallback_model_id
-                        and fallback_model_id in request.app.state.MODELS
-                    ):
+                    if fallback_model_id and fallback_model_id in request.app.state.MODELS:
                         # Update model and form_data so routing uses the fallback model's type
                         model = request.app.state.MODELS[fallback_model_id]
-                        form_data["model"] = fallback_model_id
+                        form_data['model'] = fallback_model_id
                     else:
-                        raise Exception("Model not found")
+                        raise Exception('Model not found')
                 else:
-                    raise Exception("Model not found")
+                    raise Exception('Model not found')
 
         # Chat Params
-        stream_delta_chunk_size = form_data.get("params", {}).get(
-            "stream_delta_chunk_size"
-        )
-        reasoning_tags = form_data.get("params", {}).get("reasoning_tags")
+        stream_delta_chunk_size = form_data.get('params', {}).get('stream_delta_chunk_size')
+        reasoning_tags = form_data.get('params', {}).get('reasoning_tags')
 
         # Model Params
-        if model_info_params.get("stream_response") is not None:
-            form_data["stream"] = model_info_params.get("stream_response")
+        if model_info_params.get('stream_response') is not None:
+            form_data['stream'] = model_info_params.get('stream_response')
 
-        if model_info_params.get("stream_delta_chunk_size"):
-            stream_delta_chunk_size = model_info_params.get("stream_delta_chunk_size")
+        if model_info_params.get('stream_delta_chunk_size'):
+            stream_delta_chunk_size = model_info_params.get('stream_delta_chunk_size')
 
-        if model_info_params.get("reasoning_tags") is not None:
-            reasoning_tags = model_info_params.get("reasoning_tags")
+        if model_info_params.get('reasoning_tags') is not None:
+            reasoning_tags = model_info_params.get('reasoning_tags')
 
         metadata = {
-            "user_id": user.id,
-            "chat_id": form_data.pop("chat_id", None),
-            "message_id": form_data.pop("id", None),
-            "parent_message": form_data.pop("parent_message", None),
-            "parent_message_id": form_data.pop("parent_id", None),
-            "session_id": form_data.pop("session_id", None),
-            "filter_ids": form_data.pop("filter_ids", []),
-            "tool_ids": form_data.get("tool_ids", None),
-            "tool_servers": form_data.pop("tool_servers", None),
-            "rag_filter": form_data.pop("rag_filter", None),
-            "files": form_data.get("files", None),
-            "features": form_data.get("features", {}),
-            "variables": form_data.get("variables", {}),
-            "model": model,
-            "direct": model_item.get("direct", False),
-            "params": {
-                "stream_delta_chunk_size": stream_delta_chunk_size,
-                "reasoning_tags": reasoning_tags,
-                "function_calling": (
-                    "native"
+            'user_id': user.id,
+            'chat_id': form_data.pop('chat_id', None),
+            'message_id': form_data.pop('id', None),
+            'parent_message': form_data.pop('parent_message', None),
+            'parent_message_id': form_data.pop('parent_id', None),
+            'session_id': form_data.pop('session_id', None),
+            'filter_ids': form_data.pop('filter_ids', []),
+            'tool_ids': form_data.get('tool_ids', None),
+            'tool_servers': form_data.pop('tool_servers', None),
+            'rag_filter': form_data.pop('rag_filter', None),
+            'files': form_data.get('files', None),
+            'features': form_data.get('features', {}),
+            'variables': form_data.get('variables', {}),
+            'model': model,
+            'direct': model_item.get('direct', False),
+            'params': {
+                'stream_delta_chunk_size': stream_delta_chunk_size,
+                'reasoning_tags': reasoning_tags,
+                'function_calling': (
+                    'native'
                     if (
-                        form_data.get("params", {}).get("function_calling") == "native"
-                        or model_info_params.get("function_calling") == "native"
+                        form_data.get('params', {}).get('function_calling') == 'native'
+                        or model_info_params.get('function_calling') == 'native'
                     )
-                    else "default"
+                    else 'default'
                 ),
             },
         }
 
-        if metadata.get("chat_id") and user:
-            if not metadata["chat_id"].startswith(
-                "local:"
-            ):  # temporary chats are not stored
-
+        if metadata.get('chat_id') and user:
+            if not metadata['chat_id'].startswith('local:'):  # temporary chats are not stored
                 # Verify chat ownership — lightweight EXISTS check avoids
                 # deserializing the full chat JSON blob just to confirm the row exists
                 if (
-                    not Chats.is_chat_owner(metadata["chat_id"], user.id)
-                    and user.role != "admin"
+                    not Chats.is_chat_owner(metadata['chat_id'], user.id) and user.role != 'admin'
                 ):  # admins can access any chat
                     raise HTTPException(
                         status_code=status.HTTP_404_NOT_FOUND,
@@ -2066,29 +1998,29 @@ async def chat_completion(
                     )
 
                 # Insert chat files from parent message if any
-                parent_message = metadata.get("parent_message") or {}
-                parent_message_files = parent_message.get("files", [])
+                parent_message = metadata.get('parent_message') or {}
+                parent_message_files = parent_message.get('files', [])
                 if parent_message_files:
                     try:
                         Chats.insert_chat_files(
-                            metadata["chat_id"],
-                            parent_message.get("id"),
+                            metadata['chat_id'],
+                            parent_message.get('id'),
                             [
-                                file_item.get("id")
+                                file_item.get('id')
                                 for file_item in parent_message_files
-                                if file_item.get("type") == "file"
+                                if file_item.get('type') == 'file'
                             ],
                             user.id,
                         )
                     except Exception as e:
-                        log.debug(f"Error inserting chat files: {e}")
+                        log.debug(f'Error inserting chat files: {e}')
                         pass
 
         request.state.metadata = metadata
-        form_data["metadata"] = metadata
+        form_data['metadata'] = metadata
 
     except Exception as e:
-        log.debug(f"Error processing chat metadata: {e}")
+        log.debug(f'Error processing chat metadata: {e}')
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(e),
@@ -2096,9 +2028,7 @@ async def chat_completion(
 
     async def process_chat(request, form_data, user, metadata, model):
         try:
-            form_data, metadata, events = await process_chat_payload(
-                request, form_data, user, metadata, model
-            )
+            form_data, metadata, events = await process_chat_payload(request, form_data, user, metadata, model)
 
             # [Gradient] When the agent API is enabled, route to the external
             # agent service instead of the built-in LLM dispatch. The agent
@@ -2106,37 +2036,33 @@ async def chat_completion(
             # It returns a standard OpenAI SSE stream so process_chat_response
             # handles streaming, DB persistence, and WebSocket transport unchanged.
             if AGENT_API_ENABLED:
-                response = await call_agent_api(
-                    request, form_data, metadata, metadata.get("features", {})
-                )
+                response = await call_agent_api(request, form_data, metadata, metadata.get('features', {}))
             else:
                 response = await chat_completion_handler(request, form_data, user)
-            if metadata.get("chat_id") and metadata.get("message_id"):
+            if metadata.get('chat_id') and metadata.get('message_id'):
                 try:
-                    if not metadata["chat_id"].startswith("local:"):
+                    if not metadata['chat_id'].startswith('local:'):
                         Chats.upsert_message_to_chat_by_id_and_message_id(
-                            metadata["chat_id"],
-                            metadata["message_id"],
+                            metadata['chat_id'],
+                            metadata['message_id'],
                             {
-                                "parentId": metadata.get("parent_message_id", None),
-                                "model": model_id,
+                                'parentId': metadata.get('parent_message_id', None),
+                                'model': model_id,
                             },
                         )
                 except Exception:
                     pass
 
-            ctx = build_chat_response_context(
-                request, form_data, user, model, metadata, tasks, events
-            )
+            ctx = build_chat_response_context(request, form_data, user, model, metadata, tasks, events)
 
             return await process_chat_response(response, ctx)
         except asyncio.CancelledError:
-            log.info("Chat processing was cancelled")
+            log.info('Chat processing was cancelled')
             try:
                 event_emitter = get_event_emitter(metadata)
                 await asyncio.shield(
                     event_emitter(
-                        {"type": "chat:tasks:cancel"},
+                        {'type': 'chat:tasks:cancel'},
                     )
                 )
             except Exception as e:
@@ -2144,68 +2070,62 @@ async def chat_completion(
             finally:
                 raise  # re-raise to ensure proper task cancellation handling
         except Exception as e:
-            log.debug(f"Error processing chat payload: {e}")
-            if metadata.get("chat_id") and metadata.get("message_id"):
+            log.debug(f'Error processing chat payload: {e}')
+            if metadata.get('chat_id') and metadata.get('message_id'):
                 # Update the chat message with the error
                 try:
-                    if not metadata["chat_id"].startswith("local:"):
+                    if not metadata['chat_id'].startswith('local:'):
                         Chats.upsert_message_to_chat_by_id_and_message_id(
-                            metadata["chat_id"],
-                            metadata["message_id"],
+                            metadata['chat_id'],
+                            metadata['message_id'],
                             {
-                                "parentId": metadata.get("parent_message_id", None),
-                                "error": {"content": str(e)},
+                                'parentId': metadata.get('parent_message_id', None),
+                                'error': {'content': str(e)},
                             },
                         )
 
                     event_emitter = get_event_emitter(metadata)
                     await event_emitter(
                         {
-                            "type": "chat:message:error",
-                            "data": {"error": {"content": str(e)}},
+                            'type': 'chat:message:error',
+                            'data': {'error': {'content': str(e)}},
                         }
                     )
                     await event_emitter(
-                        {"type": "chat:tasks:cancel"},
+                        {'type': 'chat:tasks:cancel'},
                     )
 
                 except Exception:
                     pass
         finally:
             try:
-                if mcp_clients := metadata.get("mcp_clients"):
+                if mcp_clients := metadata.get('mcp_clients'):
                     for client in reversed(mcp_clients.values()):
                         await client.disconnect()
             except Exception as e:
-                log.debug(f"Error cleaning up: {e}")
+                log.debug(f'Error cleaning up: {e}')
                 pass
             # Emit chat:active=false when task completes
             try:
-                if metadata.get("chat_id"):
+                if metadata.get('chat_id'):
                     event_emitter = get_event_emitter(metadata, update_db=False)
                     if event_emitter:
-                        await event_emitter(
-                            {"type": "chat:active", "data": {"active": False}}
-                        )
+                        await event_emitter({'type': 'chat:active', 'data': {'active': False}})
             except Exception as e:
-                log.debug(f"Error emitting chat:active: {e}")
+                log.debug(f'Error emitting chat:active: {e}')
 
-    if (
-        metadata.get("session_id")
-        and metadata.get("chat_id")
-        and metadata.get("message_id")
-    ):
+    if metadata.get('session_id') and metadata.get('chat_id') and metadata.get('message_id'):
         # Asynchronous Chat Processing
         task_id, _ = await create_task(
             request.app.state.redis,
             process_chat(request, form_data, user, metadata, model),
-            id=metadata["chat_id"],
+            id=metadata['chat_id'],
         )
         # Emit chat:active=true when task starts
         event_emitter = get_event_emitter(metadata, update_db=False)
         if event_emitter:
-            await event_emitter({"type": "chat:active", "data": {"active": True}})
-        return {"status": True, "task_id": task_id}
+            await event_emitter({'type': 'chat:active', 'data': {'active': True}})
+        return {'status': True, 'task_id': task_id}
     else:
         return await process_chat(request, form_data, user, metadata, model)
 
@@ -2229,8 +2149,8 @@ from open_webui.utils.anthropic import (
 )
 
 
-@app.post("/api/message")
-@app.post("/api/v1/messages")  # Anthropic Messages API compatible endpoint
+@app.post('/api/message')
+@app.post('/api/v1/messages')  # Anthropic Messages API compatible endpoint
 async def generate_messages(
     request: Request,
     form_data: dict,
@@ -2250,7 +2170,7 @@ async def generate_messages(
     Anthropic's x-api-key header (via middleware translation).
     """
     # Convert Anthropic payload to OpenAI format
-    requested_model = form_data.get("model", "")
+    requested_model = form_data.get('model', '')
 
     openai_payload = convert_anthropic_to_openai_payload(form_data)
 
@@ -2261,13 +2181,11 @@ async def generate_messages(
     if isinstance(response, StreamingResponse):
         # Streaming response: wrap the generator to convert SSE format
         return StreamingResponse(
-            openai_stream_to_anthropic_stream(
-                response.body_iterator, model=requested_model
-            ),
-            media_type="text/event-stream",
+            openai_stream_to_anthropic_stream(response.body_iterator, model=requested_model),
+            media_type='text/event-stream',
             headers={
-                "Cache-Control": "no-cache",
-                "Connection": "keep-alive",
+                'Cache-Control': 'no-cache',
+                'Connection': 'keep-alive',
             },
         )
     elif isinstance(response, dict):
@@ -2277,14 +2195,12 @@ async def generate_messages(
         return response
 
 
-@app.post("/api/chat/completed")
-async def chat_completed(
-    request: Request, form_data: dict, user=Depends(get_verified_user)
-):
+@app.post('/api/chat/completed')
+async def chat_completed(request: Request, form_data: dict, user=Depends(get_verified_user)):
     try:
-        model_item = form_data.pop("model_item", {})
+        model_item = form_data.pop('model_item', {})
 
-        if model_item.get("direct", False):
+        if model_item.get('direct', False):
             request.state.direct = True
             request.state.model = model_item
 
@@ -2296,14 +2212,12 @@ async def chat_completed(
         )
 
 
-@app.post("/api/chat/actions/{action_id}")
-async def chat_action(
-    request: Request, action_id: str, form_data: dict, user=Depends(get_verified_user)
-):
+@app.post('/api/chat/actions/{action_id}')
+async def chat_action(request: Request, action_id: str, form_data: dict, user=Depends(get_verified_user)):
     try:
-        model_item = form_data.pop("model_item", {})
+        model_item = form_data.pop('model_item', {})
 
-        if model_item.get("direct", False):
+        if model_item.get('direct', False):
             request.state.direct = True
             request.state.model = model_item
 
@@ -2315,10 +2229,8 @@ async def chat_action(
         )
 
 
-@app.post("/api/tasks/stop/{task_id}")
-async def stop_task_endpoint(
-    request: Request, task_id: str, user=Depends(get_verified_user)
-):
+@app.post('/api/tasks/stop/{task_id}')
+async def stop_task_endpoint(request: Request, task_id: str, user=Depends(get_verified_user)):
     try:
         result = await stop_task(request.app.state.redis, task_id)
         return result
@@ -2326,23 +2238,21 @@ async def stop_task_endpoint(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
 
 
-@app.get("/api/tasks")
+@app.get('/api/tasks')
 async def list_tasks_endpoint(request: Request, user=Depends(get_verified_user)):
-    return {"tasks": await list_tasks(request.app.state.redis)}
+    return {'tasks': await list_tasks(request.app.state.redis)}
 
 
-@app.get("/api/tasks/chat/{chat_id}")
-async def list_tasks_by_chat_id_endpoint(
-    request: Request, chat_id: str, user=Depends(get_verified_user)
-):
+@app.get('/api/tasks/chat/{chat_id}')
+async def list_tasks_by_chat_id_endpoint(request: Request, chat_id: str, user=Depends(get_verified_user)):
     chat = Chats.get_chat_by_id(chat_id)
     if chat is None or chat.user_id != user.id:
-        return {"task_ids": []}
+        return {'task_ids': []}
 
     task_ids = await list_task_ids_by_item_id(request.app.state.redis, chat_id)
 
-    log.debug(f"Task IDs for chat {chat_id}: {task_ids}")
-    return {"task_ids": task_ids}
+    log.debug(f'Task IDs for chat {chat_id}: {task_ids}')
+    return {'task_ids': task_ids}
 
 
 ##################################
@@ -2352,19 +2262,19 @@ async def list_tasks_by_chat_id_endpoint(
 ##################################
 
 
-@app.get("/api/config")
+@app.get('/api/config')
 async def get_app_config(request: Request):
     user = None
     token = None
 
-    auth_header = request.headers.get("Authorization")
+    auth_header = request.headers.get('Authorization')
     if auth_header:
         cred = get_http_authorization_cred(auth_header)
         if cred:
             token = cred.credentials
 
-    if not token and "token" in request.cookies:
-        token = request.cookies.get("token")
+    if not token and 'token' in request.cookies:
+        token = request.cookies.get('token')
 
     if token:
         try:
@@ -2373,10 +2283,10 @@ async def get_app_config(request: Request):
             log.debug(e)
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Invalid token",
+                detail='Invalid token',
             )
-        if data is not None and "id" in data:
-            user = Users.get_user_by_id(data["id"])
+        if data is not None and 'id' in data:
+            user = Users.get_user_by_id(data['id'])
 
     user_count = Users.get_num_users()
     onboarding = False
@@ -2385,214 +2295,209 @@ async def get_app_config(request: Request):
         onboarding = user_count == 0
 
     return {
-        **({"onboarding": True} if onboarding else {}),
-        "status": True,
-        "name": app.state.WEBUI_NAME,
-        "version": VERSION,
-        "default_locale": str(DEFAULT_LOCALE),
-        "client_name": CLIENT_NAME,
-        "invite_heading": str(app.state.config.EMAIL_INVITE_HEADING or ""),
-        "oauth": {
-            "providers": {
-                name: config.get("name", name)
-                for name, config in OAUTH_PROVIDERS.items()
-            }
-        },
-        "features": {
-            "auth": WEBUI_AUTH,
-            "auth_trusted_header": bool(app.state.AUTH_TRUSTED_EMAIL_HEADER),
-            "enable_signup_password_confirmation": ENABLE_SIGNUP_PASSWORD_CONFIRMATION,
-            "enable_ldap": app.state.config.ENABLE_LDAP,
-            "enable_api_keys": app.state.config.ENABLE_API_KEYS,
-            "enable_signup": app.state.config.ENABLE_SIGNUP,
-            "enable_login_form": app.state.config.ENABLE_LOGIN_FORM,
-            "enable_websocket": ENABLE_WEBSOCKET_SUPPORT,
-            "enable_version_update_check": ENABLE_VERSION_UPDATE_CHECK,
-            "enable_public_active_users_count": ENABLE_PUBLIC_ACTIVE_USERS_COUNT,
-            "enable_easter_eggs": ENABLE_EASTER_EGGS,
+        **({'onboarding': True} if onboarding else {}),
+        'status': True,
+        'name': app.state.WEBUI_NAME,
+        'version': VERSION,
+        'default_locale': str(DEFAULT_LOCALE),
+        'client_name': CLIENT_NAME,
+        'invite_heading': str(app.state.config.EMAIL_INVITE_HEADING or ''),
+        'oauth': {'providers': {name: config.get('name', name) for name, config in OAUTH_PROVIDERS.items()}},
+        'features': {
+            'auth': WEBUI_AUTH,
+            'auth_trusted_header': bool(app.state.AUTH_TRUSTED_EMAIL_HEADER),
+            'enable_signup_password_confirmation': ENABLE_SIGNUP_PASSWORD_CONFIRMATION,
+            'enable_ldap': app.state.config.ENABLE_LDAP,
+            'enable_2fa': app.state.config.ENABLE_2FA,
+            'enable_api_keys': app.state.config.ENABLE_API_KEYS,
+            'enable_signup': app.state.config.ENABLE_SIGNUP,
+            'enable_login_form': app.state.config.ENABLE_LOGIN_FORM,
+            'enable_websocket': ENABLE_WEBSOCKET_SUPPORT,
+            'enable_version_update_check': ENABLE_VERSION_UPDATE_CHECK,
+            'enable_public_active_users_count': ENABLE_PUBLIC_ACTIVE_USERS_COUNT,
+            'enable_easter_eggs': ENABLE_EASTER_EGGS,
             **(
                 {
-                    "enable_direct_connections": app.state.config.ENABLE_DIRECT_CONNECTIONS,
-                    "enable_folders": app.state.config.ENABLE_FOLDERS,
-                    "folder_max_file_count": app.state.config.FOLDER_MAX_FILE_COUNT,
-                    "enable_channels": app.state.config.ENABLE_CHANNELS,
-                    "enable_notes": app.state.config.ENABLE_NOTES,
-                    "enable_web_search": app.state.config.ENABLE_WEB_SEARCH,
-                    "enable_rag_filter_ui": app.state.config.ENABLE_RAG_FILTER_UI,
-                    "enable_code_execution": app.state.config.ENABLE_CODE_EXECUTION,
-                    "enable_code_interpreter": app.state.config.ENABLE_CODE_INTERPRETER,
-                    "enable_image_generation": app.state.config.ENABLE_IMAGE_GENERATION,
-                    "enable_autocomplete_generation": app.state.config.ENABLE_AUTOCOMPLETE_GENERATION,
-                    "enable_community_sharing": app.state.config.ENABLE_COMMUNITY_SHARING,
-                    "enable_citation_relevance": app.state.config.ENABLE_CITATION_RELEVANCE,
-                    "enable_message_rating": app.state.config.ENABLE_MESSAGE_RATING,
-                    "enable_feedback_layer2": app.state.config.ENABLE_FEEDBACK_LAYER2,
-                    "feedback_layer2_positive_tags": app.state.config.FEEDBACK_LAYER2_POSITIVE_TAGS,
-                    "feedback_layer2_negative_tags": app.state.config.FEEDBACK_LAYER2_NEGATIVE_TAGS,
-                    "enable_feedback_layer3": app.state.config.ENABLE_FEEDBACK_LAYER3,
-                    "feedback_layer3_prompt": app.state.config.FEEDBACK_LAYER3_PROMPT,
-                    "enable_feedback_category_tags": app.state.config.ENABLE_FEEDBACK_CATEGORY_TAGS,
-                    "enable_conversation_feedback": app.state.config.ENABLE_CONVERSATION_FEEDBACK,
-                    "conversation_feedback_scale_max": app.state.config.CONVERSATION_FEEDBACK_SCALE_MAX,
-                    "conversation_feedback_header": app.state.config.CONVERSATION_FEEDBACK_HEADER,
-                    "conversation_feedback_placeholder": app.state.config.CONVERSATION_FEEDBACK_PLACEHOLDER,
-                    "enable_user_webhooks": app.state.config.ENABLE_USER_WEBHOOKS,
-                    "enable_user_status": app.state.config.ENABLE_USER_STATUS,
-                    "enable_admin_export": ENABLE_ADMIN_EXPORT,
-                    "enable_admin_chat_access": ENABLE_ADMIN_CHAT_ACCESS,
-                    "enable_admin_analytics": ENABLE_ADMIN_ANALYTICS,
+                    'enable_direct_connections': app.state.config.ENABLE_DIRECT_CONNECTIONS,
+                    'enable_folders': app.state.config.ENABLE_FOLDERS,
+                    'folder_max_file_count': app.state.config.FOLDER_MAX_FILE_COUNT,
+                    'enable_channels': app.state.config.ENABLE_CHANNELS,
+                    'enable_notes': app.state.config.ENABLE_NOTES,
+                    'enable_web_search': app.state.config.ENABLE_WEB_SEARCH,
+                    'enable_rag_filter_ui': app.state.config.ENABLE_RAG_FILTER_UI,
+                    'enable_code_execution': app.state.config.ENABLE_CODE_EXECUTION,
+                    'enable_code_interpreter': app.state.config.ENABLE_CODE_INTERPRETER,
+                    'enable_image_generation': app.state.config.ENABLE_IMAGE_GENERATION,
+                    'enable_autocomplete_generation': app.state.config.ENABLE_AUTOCOMPLETE_GENERATION,
+                    'enable_community_sharing': app.state.config.ENABLE_COMMUNITY_SHARING,
+                    'enable_citation_relevance': app.state.config.ENABLE_CITATION_RELEVANCE,
+                    'enable_message_rating': app.state.config.ENABLE_MESSAGE_RATING,
+                    'enable_feedback_layer2': app.state.config.ENABLE_FEEDBACK_LAYER2,
+                    'feedback_layer2_positive_tags': app.state.config.FEEDBACK_LAYER2_POSITIVE_TAGS,
+                    'feedback_layer2_negative_tags': app.state.config.FEEDBACK_LAYER2_NEGATIVE_TAGS,
+                    'enable_feedback_layer3': app.state.config.ENABLE_FEEDBACK_LAYER3,
+                    'feedback_layer3_prompt': app.state.config.FEEDBACK_LAYER3_PROMPT,
+                    'enable_feedback_category_tags': app.state.config.ENABLE_FEEDBACK_CATEGORY_TAGS,
+                    'enable_conversation_feedback': app.state.config.ENABLE_CONVERSATION_FEEDBACK,
+                    'conversation_feedback_scale_max': app.state.config.CONVERSATION_FEEDBACK_SCALE_MAX,
+                    'conversation_feedback_header': app.state.config.CONVERSATION_FEEDBACK_HEADER,
+                    'conversation_feedback_placeholder': app.state.config.CONVERSATION_FEEDBACK_PLACEHOLDER,
+                    'enable_user_webhooks': app.state.config.ENABLE_USER_WEBHOOKS,
+                    'enable_user_status': app.state.config.ENABLE_USER_STATUS,
+                    'enable_admin_export': ENABLE_ADMIN_EXPORT,
+                    'enable_admin_chat_access': ENABLE_ADMIN_CHAT_ACCESS,
+                    'enable_admin_analytics': ENABLE_ADMIN_ANALYTICS,
                     # Feature Flags (SaaS Tier Control)
-                    "feature_chat_controls": FEATURE_CHAT_CONTROLS,
-                    "feature_capture": FEATURE_CAPTURE,
-                    "feature_artifacts": FEATURE_ARTIFACTS,
-                    "feature_playground": FEATURE_PLAYGROUND,
-                    "feature_chat_overview": FEATURE_CHAT_OVERVIEW,
-                    "feature_notes_ai_controls": FEATURE_NOTES_AI_CONTROLS,
-                    "feature_voice": FEATURE_VOICE,
-                    "feature_changelog": FEATURE_CHANGELOG,
-                    "feature_system_prompt": FEATURE_SYSTEM_PROMPT,
-                    "feature_models": FEATURE_MODELS,
-                    "feature_knowledge": FEATURE_KNOWLEDGE,
-                    "feature_prompts": FEATURE_PROMPTS,
-                    "feature_tools": FEATURE_TOOLS,
-                    "feature_skills": FEATURE_SKILLS,
-                    "feature_admin_evaluations": FEATURE_ADMIN_EVALUATIONS,
-                    "feature_admin_functions": FEATURE_ADMIN_FUNCTIONS,
-                    "feature_admin_settings": FEATURE_ADMIN_SETTINGS,
-                    "feature_admin_settings_tabs": FEATURE_ADMIN_SETTINGS_TABS,
-                    "feature_chat_controls_sections": FEATURE_CHAT_CONTROLS_SECTIONS,
-                    "feature_webpage_url": FEATURE_WEBPAGE_URL,
-                    "feature_reference_chats": FEATURE_REFERENCE_CHATS,
-                    "feature_input_menu": FEATURE_INPUT_MENU,
-                    "feature_temporary_chat": FEATURE_TEMPORARY_CHAT,
-                    "feature_tool_servers": FEATURE_TOOL_SERVERS,
-                    "feature_terminal_servers": FEATURE_TERMINAL_SERVERS,
-                    "feature_builtin_tools": FEATURE_BUILTIN_TOOLS,
-                    "enable_google_drive_integration": app.state.config.ENABLE_GOOGLE_DRIVE_INTEGRATION,
+                    'feature_chat_controls': FEATURE_CHAT_CONTROLS,
+                    'feature_capture': FEATURE_CAPTURE,
+                    'feature_artifacts': FEATURE_ARTIFACTS,
+                    'feature_playground': FEATURE_PLAYGROUND,
+                    'feature_chat_overview': FEATURE_CHAT_OVERVIEW,
+                    'feature_notes_ai_controls': FEATURE_NOTES_AI_CONTROLS,
+                    'feature_voice': FEATURE_VOICE,
+                    'feature_changelog': FEATURE_CHANGELOG,
+                    'feature_system_prompt': FEATURE_SYSTEM_PROMPT,
+                    'feature_models': FEATURE_MODELS,
+                    'feature_knowledge': FEATURE_KNOWLEDGE,
+                    'feature_prompts': FEATURE_PROMPTS,
+                    'feature_tools': FEATURE_TOOLS,
+                    'feature_skills': FEATURE_SKILLS,
+                    'feature_admin_evaluations': FEATURE_ADMIN_EVALUATIONS,
+                    'feature_admin_functions': FEATURE_ADMIN_FUNCTIONS,
+                    'feature_admin_settings': FEATURE_ADMIN_SETTINGS,
+                    'feature_admin_settings_tabs': FEATURE_ADMIN_SETTINGS_TABS,
+                    'feature_chat_controls_sections': FEATURE_CHAT_CONTROLS_SECTIONS,
+                    'feature_webpage_url': FEATURE_WEBPAGE_URL,
+                    'feature_reference_chats': FEATURE_REFERENCE_CHATS,
+                    'feature_input_menu': FEATURE_INPUT_MENU,
+                    'feature_temporary_chat': FEATURE_TEMPORARY_CHAT,
+                    'feature_tool_servers': FEATURE_TOOL_SERVERS,
+                    'feature_terminal_servers': FEATURE_TERMINAL_SERVERS,
+                    'feature_user_demographics': FEATURE_USER_DEMOGRAPHICS,
+                    'feature_builtin_tools': FEATURE_BUILTIN_TOOLS,
+                    'enable_google_drive_integration': app.state.config.ENABLE_GOOGLE_DRIVE_INTEGRATION,
                     **(
                         {
-                            "enable_google_drive_sync": app.state.config.ENABLE_GOOGLE_DRIVE_SYNC,
+                            'enable_google_drive_sync': app.state.config.ENABLE_GOOGLE_DRIVE_SYNC,
                         }
                         if app.state.config.ENABLE_GOOGLE_DRIVE_INTEGRATION
                         else {}
                     ),
-                    "enable_onedrive_integration": app.state.config.ENABLE_ONEDRIVE_INTEGRATION,
-                    "enable_memories": app.state.config.ENABLE_MEMORIES,
+                    'enable_onedrive_integration': app.state.config.ENABLE_ONEDRIVE_INTEGRATION,
+                    'enable_memories': app.state.config.ENABLE_MEMORIES,
                     **(
                         {
-                            "enable_onedrive_personal": ENABLE_ONEDRIVE_PERSONAL,
-                            "enable_onedrive_business": ENABLE_ONEDRIVE_BUSINESS,
-                            "enable_onedrive_sync": app.state.config.ENABLE_ONEDRIVE_SYNC,
+                            'enable_onedrive_personal': ENABLE_ONEDRIVE_PERSONAL,
+                            'enable_onedrive_business': ENABLE_ONEDRIVE_BUSINESS,
+                            'enable_onedrive_sync': app.state.config.ENABLE_ONEDRIVE_SYNC,
                         }
                         if app.state.config.ENABLE_ONEDRIVE_INTEGRATION
                         else {}
                     ),
-                    "enable_email_invites": app.state.config.ENABLE_EMAIL_INVITES,
-                    "enable_agent_proxy": app.state.config.ENABLE_AGENT_PROXY,
+                    'enable_email_invites': app.state.config.ENABLE_EMAIL_INVITES,
+                    'enable_agent_proxy': app.state.config.ENABLE_AGENT_PROXY,
+                    'require_2fa': app.state.config.REQUIRE_2FA,
+                    'two_fa_grace_period_days': app.state.config.TWO_FA_GRACE_PERIOD_DAYS,
                 }
                 if user is not None
                 else {}
             ),
         },
-        "integration_providers": {
+        'integration_providers': {
             slug: {
-                "name": p["name"],
-                "badge_type": p.get("badge_type", "info"),
-                "max_files_per_kb": p.get("max_files_per_kb", 250),
+                'name': p['name'],
+                'badge_type': p.get('badge_type', 'info'),
+                'max_files_per_kb': p.get('max_files_per_kb', 250),
             }
             for slug, p in (app.state.config.INTEGRATION_PROVIDERS or {}).items()
         },
         **(
             {
-                "default_models": app.state.config.DEFAULT_MODELS,
-                "default_pinned_models": app.state.config.DEFAULT_PINNED_MODELS,
-                "default_prompt_suggestions": app.state.config.DEFAULT_PROMPT_SUGGESTIONS,
-                "user_count": user_count,
-                "code": {
-                    "engine": app.state.config.CODE_EXECUTION_ENGINE,
-                    "interpreter_engine": app.state.config.CODE_INTERPRETER_ENGINE,
+                'default_models': app.state.config.DEFAULT_MODELS,
+                'default_pinned_models': app.state.config.DEFAULT_PINNED_MODELS,
+                'default_prompt_suggestions': app.state.config.DEFAULT_PROMPT_SUGGESTIONS,
+                'user_count': user_count,
+                'code': {
+                    'engine': app.state.config.CODE_EXECUTION_ENGINE,
+                    'interpreter_engine': app.state.config.CODE_INTERPRETER_ENGINE,
                 },
-                "database": {
-                    "type": engine.name,
+                'database': {
+                    'type': engine.name,
                 },
-                "audio": {
-                    "tts": {
-                        "engine": app.state.config.TTS_ENGINE,
-                        "voice": app.state.config.TTS_VOICE,
-                        "split_on": app.state.config.TTS_SPLIT_ON,
+                'audio': {
+                    'tts': {
+                        'engine': app.state.config.TTS_ENGINE,
+                        'voice': app.state.config.TTS_VOICE,
+                        'split_on': app.state.config.TTS_SPLIT_ON,
                     },
-                    "stt": {
-                        "engine": app.state.config.STT_ENGINE,
-                    },
-                },
-                "file": {
-                    "max_size": app.state.config.FILE_MAX_SIZE,
-                    "max_count": app.state.config.FILE_MAX_COUNT,
-                    "allowed_extensions": app.state.config.ALLOWED_FILE_EXTENSIONS,
-                    "image_compression": {
-                        "width": app.state.config.FILE_IMAGE_COMPRESSION_WIDTH,
-                        "height": app.state.config.FILE_IMAGE_COMPRESSION_HEIGHT,
+                    'stt': {
+                        'engine': app.state.config.STT_ENGINE,
                     },
                 },
-                "permissions": {**app.state.config.USER_PERMISSIONS},
-                "google_drive": {
-                    "client_id": GOOGLE_DRIVE_CLIENT_ID.value,
-                    "api_key": GOOGLE_DRIVE_API_KEY.value,
-                    "has_client_secret": bool(GOOGLE_CLIENT_SECRET.value),
+                'file': {
+                    'max_size': app.state.config.FILE_MAX_SIZE,
+                    'max_count': app.state.config.FILE_MAX_COUNT,
+                    'allowed_extensions': app.state.config.ALLOWED_FILE_EXTENSIONS,
+                    'image_compression': {
+                        'width': app.state.config.FILE_IMAGE_COMPRESSION_WIDTH,
+                        'height': app.state.config.FILE_IMAGE_COMPRESSION_HEIGHT,
+                    },
                 },
-                "onedrive": {
-                    "client_id_personal": ONEDRIVE_CLIENT_ID_PERSONAL,
-                    "client_id_business": ONEDRIVE_CLIENT_ID_BUSINESS,
-                    "sharepoint_url": ONEDRIVE_SHAREPOINT_URL.value,
-                    "sharepoint_tenant_id": ONEDRIVE_SHAREPOINT_TENANT_ID.value,
-                    "has_client_secret": bool(MICROSOFT_CLIENT_SECRET.value),
+                'permissions': {**app.state.config.USER_PERMISSIONS},
+                'google_drive': {
+                    'client_id': GOOGLE_DRIVE_CLIENT_ID.value,
+                    'api_key': GOOGLE_DRIVE_API_KEY.value,
+                    'has_client_secret': bool(GOOGLE_CLIENT_SECRET.value),
                 },
-                "ui": {
-                    "pending_user_overlay_title": app.state.config.PENDING_USER_OVERLAY_TITLE,
-                    "pending_user_overlay_content": app.state.config.PENDING_USER_OVERLAY_CONTENT,
-                    "response_watermark": app.state.config.RESPONSE_WATERMARK,
-                    "greeting_template": app.state.config.GREETING_TEMPLATE,
-                    "enable_acceptance_modal": app.state.config.ENABLE_ACCEPTANCE_MODAL,
-                    "acceptance_modal_title": app.state.config.ACCEPTANCE_MODAL_TITLE,
-                    "acceptance_modal_content": app.state.config.ACCEPTANCE_MODAL_CONTENT,
-                    "acceptance_modal_button_text": app.state.config.ACCEPTANCE_MODAL_BUTTON_TEXT,
+                'onedrive': {
+                    'client_id_personal': ONEDRIVE_CLIENT_ID_PERSONAL,
+                    'client_id_business': ONEDRIVE_CLIENT_ID_BUSINESS,
+                    'sharepoint_url': ONEDRIVE_SHAREPOINT_URL.value,
+                    'sharepoint_tenant_id': ONEDRIVE_SHAREPOINT_TENANT_ID.value,
+                    'has_client_secret': bool(MICROSOFT_CLIENT_SECRET.value),
                 },
-                "license_metadata": app.state.LICENSE_METADATA,
+                'ui': {
+                    'pending_user_overlay_title': app.state.config.PENDING_USER_OVERLAY_TITLE,
+                    'pending_user_overlay_content': app.state.config.PENDING_USER_OVERLAY_CONTENT,
+                    'response_watermark': app.state.config.RESPONSE_WATERMARK,
+                    'greeting_template': app.state.config.GREETING_TEMPLATE,
+                    'enable_acceptance_modal': app.state.config.ENABLE_ACCEPTANCE_MODAL,
+                    'acceptance_modal_title': app.state.config.ACCEPTANCE_MODAL_TITLE,
+                    'acceptance_modal_content': app.state.config.ACCEPTANCE_MODAL_CONTENT,
+                    'acceptance_modal_button_text': app.state.config.ACCEPTANCE_MODAL_BUTTON_TEXT,
+                },
+                'license_metadata': app.state.LICENSE_METADATA,
                 **(
                     {
-                        "active_entries": app.state.USER_COUNT,
+                        'active_entries': app.state.USER_COUNT,
                     }
-                    if user.role == "admin"
+                    if user.role == 'admin'
                     else {}
                 ),
             }
-            if user is not None and (user.role in ["admin", "user"])
+            if user is not None and (user.role in ['admin', 'user'])
             else {
                 **(
                     {
-                        "ui": {
-                            "pending_user_overlay_title": app.state.config.PENDING_USER_OVERLAY_TITLE,
-                            "pending_user_overlay_content": app.state.config.PENDING_USER_OVERLAY_CONTENT,
+                        'ui': {
+                            'pending_user_overlay_title': app.state.config.PENDING_USER_OVERLAY_TITLE,
+                            'pending_user_overlay_content': app.state.config.PENDING_USER_OVERLAY_CONTENT,
                         }
                     }
-                    if user and user.role == "pending"
+                    if user and user.role == 'pending'
                     else {}
                 ),
                 **(
                     {
-                        "metadata": {
-                            "login_footer": app.state.LICENSE_METADATA.get(
-                                "login_footer", ""
-                            ),
-                            "auth_logo_position": app.state.LICENSE_METADATA.get(
-                                "auth_logo_position", ""
-                            ),
+                        'metadata': {
+                            'login_footer': app.state.LICENSE_METADATA.get('login_footer', ''),
+                            'auth_logo_position': app.state.LICENSE_METADATA.get('auth_logo_position', ''),
                         }
                     }
                     if app.state.LICENSE_METADATA
                     else {}
                 ),
-                "soev_login_footer": SOEV_LOGIN_FOOTER.value,
+                'soev_login_footer': SOEV_LOGIN_FOOTER.value,
             }
         ),
     }
@@ -2602,58 +2507,56 @@ class UrlForm(BaseModel):
     url: str
 
 
-@app.get("/api/webhook")
+@app.get('/api/webhook')
 async def get_webhook_url(user=Depends(get_admin_user)):
     return {
-        "url": app.state.config.WEBHOOK_URL,
+        'url': app.state.config.WEBHOOK_URL,
     }
 
 
-@app.post("/api/webhook")
+@app.post('/api/webhook')
 async def update_webhook_url(form_data: UrlForm, user=Depends(get_admin_user)):
     app.state.config.WEBHOOK_URL = form_data.url
     app.state.WEBHOOK_URL = app.state.config.WEBHOOK_URL
-    return {"url": app.state.config.WEBHOOK_URL}
+    return {'url': app.state.config.WEBHOOK_URL}
 
 
-@app.get("/api/version")
+@app.get('/api/version')
 async def get_app_version():
     return {
-        "version": VERSION,
-        "deployment_id": DEPLOYMENT_ID,
+        'version': VERSION,
+        'deployment_id': DEPLOYMENT_ID,
     }
 
 
-@app.get("/api/version/updates")
+@app.get('/api/version/updates')
 async def get_app_latest_release_version(user=Depends(get_verified_user)):
     if not ENABLE_VERSION_UPDATE_CHECK:
-        log.debug(
-            f"Version update check is disabled, returning current version as latest version"
-        )
-        return {"current": VERSION, "latest": VERSION}
+        log.debug(f'Version update check is disabled, returning current version as latest version')
+        return {'current': VERSION, 'latest': VERSION}
     try:
         timeout = aiohttp.ClientTimeout(total=1)
         async with aiohttp.ClientSession(timeout=timeout, trust_env=True) as session:
             async with session.get(
-                "https://api.github.com/repos/open-webui/open-webui/releases/latest",
+                'https://api.github.com/repos/open-webui/open-webui/releases/latest',
                 ssl=AIOHTTP_CLIENT_SESSION_SSL,
             ) as response:
                 response.raise_for_status()
                 data = await response.json()
-                latest_version = data["tag_name"]
+                latest_version = data['tag_name']
 
-                return {"current": VERSION, "latest": latest_version[1:]}
+                return {'current': VERSION, 'latest': latest_version[1:]}
     except Exception as e:
         log.debug(e)
-        return {"current": VERSION, "latest": VERSION}
+        return {'current': VERSION, 'latest': VERSION}
 
 
-@app.get("/api/changelog")
+@app.get('/api/changelog')
 async def get_app_changelog():
     return {key: CHANGELOG[key] for idx, key in enumerate(CHANGELOG) if idx < 5}
 
 
-@app.get("/api/usage")
+@app.get('/api/usage')
 async def get_current_usage(user=Depends(get_verified_user)):
     """
     Get current usage statistics for Open WebUI.
@@ -2661,21 +2564,21 @@ async def get_current_usage(user=Depends(get_verified_user)):
     """
     try:
         # If public visibility is disabled, only allow admins to access this endpoint
-        if not ENABLE_PUBLIC_ACTIVE_USERS_COUNT and user.role != "admin":
+        if not ENABLE_PUBLIC_ACTIVE_USERS_COUNT and user.role != 'admin':
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
-                detail="Access denied. Only administrators can view usage statistics.",
+                detail='Access denied. Only administrators can view usage statistics.',
             )
 
         return {
-            "model_ids": get_models_in_use(),
-            "user_count": Users.get_active_user_count(),
+            'model_ids': get_models_in_use(),
+            'user_count': Users.get_active_user_count(),
         }
     except HTTPException:
         raise
     except Exception as e:
-        log.error(f"Error getting usage statistics: {e}")
-        raise HTTPException(status_code=500, detail="Internal Server Error")
+        log.error(f'Error getting usage statistics: {e}')
+        raise HTTPException(status_code=500, detail='Internal Server Error')
 
 
 ############################
@@ -2686,114 +2589,122 @@ async def get_current_usage(user=Depends(get_verified_user)):
 # Initialize OAuth client manager with any MCP tool servers using OAuth 2.1
 if len(app.state.config.TOOL_SERVER_CONNECTIONS) > 0:
     for tool_server_connection in app.state.config.TOOL_SERVER_CONNECTIONS:
-        if tool_server_connection.get("type", "openapi") == "mcp":
-            server_id = tool_server_connection.get("info", {}).get("id")
-            auth_type = tool_server_connection.get("auth_type", "none")
+        if tool_server_connection.get('type', 'openapi') == 'mcp':
+            server_id = tool_server_connection.get('info', {}).get('id')
+            auth_type = tool_server_connection.get('auth_type', 'none')
 
-            if server_id and auth_type == "oauth_2.1":
-                oauth_client_info = tool_server_connection.get("info", {}).get(
-                    "oauth_client_info", ""
-                )
+            if server_id and auth_type in ('oauth_2.1', 'oauth_2.1_static'):
+                oauth_client_info = tool_server_connection.get('info', {}).get('oauth_client_info', '')
 
                 try:
                     oauth_client_info = decrypt_data(oauth_client_info)
                     app.state.oauth_client_manager.add_client(
-                        f"mcp:{server_id}",
+                        f'mcp:{server_id}',
                         OAuthClientInformationFull(**oauth_client_info),
                     )
                 except Exception as e:
-                    log.error(
-                        f"Error adding OAuth client for MCP tool server {server_id}: {e}"
-                    )
+                    log.error(f'Error adding OAuth client for MCP tool server {server_id}: {e}')
                     pass
 
 try:
     if ENABLE_STAR_SESSIONS_MIDDLEWARE:
         redis_session_store = RedisStore(
             url=REDIS_URL,
-            prefix=(f"{REDIS_KEY_PREFIX}:session:" if REDIS_KEY_PREFIX else "session:"),
+            prefix=(f'{REDIS_KEY_PREFIX}:session:' if REDIS_KEY_PREFIX else 'session:'),
         )
 
         app.add_middleware(SessionAutoloadMiddleware)
         app.add_middleware(
             StarSessionsMiddleware,
             store=redis_session_store,
-            cookie_name="owui-session",
+            cookie_name='owui-session',
             cookie_same_site=WEBUI_SESSION_COOKIE_SAME_SITE,
             cookie_https_only=WEBUI_SESSION_COOKIE_SECURE,
         )
-        log.info("Using Redis for session")
+        log.info('Using Redis for session')
     else:
-        raise ValueError("No Redis URL provided")
+        raise ValueError('No Redis URL provided')
 except Exception as e:
     app.add_middleware(
         SessionMiddleware,
         secret_key=WEBUI_SECRET_KEY,
-        session_cookie="owui-session",
+        session_cookie='owui-session',
         same_site=WEBUI_SESSION_COOKIE_SAME_SITE,
         https_only=WEBUI_SESSION_COOKIE_SECURE,
     )
 
 
 async def register_client(request, client_id: str) -> bool:
-    server_type, server_id = client_id.split(":", 1)
+    server_type, server_id = client_id.split(':', 1)
 
     connection = None
     connection_idx = None
 
     for idx, conn in enumerate(request.app.state.config.TOOL_SERVER_CONNECTIONS or []):
-        if conn.get("type", "openapi") == server_type:
-            info = conn.get("info", {})
-            if info.get("id") == server_id:
+        if conn.get('type', 'openapi') == server_type:
+            info = conn.get('info', {})
+            if info.get('id') == server_id:
                 connection = conn
                 connection_idx = idx
                 break
 
     if connection is None or connection_idx is None:
-        log.warning(
-            f"Unable to locate MCP tool server configuration for client {client_id} during re-registration"
-        )
+        log.warning(f'Unable to locate MCP tool server configuration for client {client_id} during re-registration')
         return False
 
-    server_url = connection.get("url")
-    oauth_server_key = (connection.get("config") or {}).get("oauth_server_key")
+    server_url = connection.get('url')
+    auth_type = connection.get('auth_type', 'none')
+    oauth_server_key = (connection.get('config') or {}).get('oauth_server_key')
 
     try:
-        oauth_client_info = (
-            await get_oauth_client_info_with_dynamic_client_registration(
+        if auth_type == 'oauth_2.1_static':
+            # Static credentials: rebuild from stored credentials + fresh metadata
+            existing_client_info = connection.get('info', {}).get('oauth_client_info', '')
+            if not existing_client_info:
+                log.error(f'No stored OAuth client info for static client {client_id}')
+                return False
+            existing_data = decrypt_data(existing_client_info)
+            oauth_client_info = await get_oauth_client_info_with_static_credentials(
+                request,
+                client_id,
+                server_url,
+                oauth_client_id=existing_data.get('client_id', ''),
+                oauth_client_secret=existing_data.get('client_secret', ''),
+            )
+        else:
+            oauth_client_info = await get_oauth_client_info_with_dynamic_client_registration(
                 request,
                 client_id,
                 server_url,
                 oauth_server_key,
             )
-        )
     except Exception as e:
-        log.error(f"Dynamic client re-registration failed for {client_id}: {e}")
+        log.error(f'OAuth client re-registration failed for {client_id}: {e}')
         return False
 
     try:
-        request.app.state.config.TOOL_SERVER_CONNECTIONS[connection_idx] = {
+        connections = request.app.state.config.TOOL_SERVER_CONNECTIONS
+        connections[connection_idx] = {
             **connection,
-            "info": {
-                **connection.get("info", {}),
-                "oauth_client_info": encrypt_data(
-                    oauth_client_info.model_dump(mode="json")
-                ),
+            'info': {
+                **connection.get('info', {}),
+                'oauth_client_info': encrypt_data(oauth_client_info.model_dump(mode='json')),
             },
         }
+        # Re-assign the full list to trigger AppConfig.__setattr__ → PersistentConfig.save()
+        # (in-place list mutation via list[idx] = ... does not trigger __setattr__)
+        request.app.state.config.TOOL_SERVER_CONNECTIONS = connections
     except Exception as e:
-        log.error(
-            f"Failed to persist updated OAuth client info for tool server {client_id}: {e}"
-        )
+        log.error(f'Failed to persist updated OAuth client info for tool server {client_id}: {e}')
         return False
 
     oauth_client_manager.remove_client(client_id)
     oauth_client_manager.add_client(client_id, oauth_client_info)
-    log.info(f"Re-registered OAuth client {client_id} for tool server")
+    log.info(f'Re-registered OAuth client {client_id} for tool server')
     return True
 
 
-@app.get("/oauth/clients/{client_id}/authorize")
+@app.get('/oauth/clients/{client_id}/authorize')
 async def oauth_client_authorize(
     client_id: str,
     request: Request,
@@ -2808,7 +2719,7 @@ async def oauth_client_authorize(
 
     if not await oauth_client_manager._preflight_authorization_url(client, client_info):
         log.info(
-            "Detected invalid OAuth client %s; attempting re-registration",
+            'Detected invalid OAuth client %s; attempting re-registration',
             client_id,
         )
 
@@ -2816,7 +2727,7 @@ async def oauth_client_authorize(
         if not registered:
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Failed to re-register OAuth client",
+                detail='Failed to re-register OAuth client',
             )
 
         client = oauth_client_manager.get_client(client_id)
@@ -2824,21 +2735,19 @@ async def oauth_client_authorize(
         if client is None or client_info is None:
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="OAuth client unavailable after re-registration",
+                detail='OAuth client unavailable after re-registration',
             )
 
-        if not await oauth_client_manager._preflight_authorization_url(
-            client, client_info
-        ):
+        if not await oauth_client_manager._preflight_authorization_url(client, client_info):
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="OAuth client registration is still invalid after re-registration",
+                detail='OAuth client registration is still invalid after re-registration',
             )
 
     return await oauth_client_manager.handle_authorize(request, client_id=client_id)
 
 
-@app.get("/oauth/clients/{client_id}/callback")
+@app.get('/oauth/clients/{client_id}/callback')
 async def oauth_client_callback(
     client_id: str,
     request: Request,
@@ -2853,7 +2762,7 @@ async def oauth_client_callback(
     )
 
 
-@app.get("/oauth/{provider}/login")
+@app.get('/oauth/{provider}/login')
 async def oauth_login(provider: str, request: Request):
     return await oauth_manager.handle_login(request, provider)
 
@@ -2864,8 +2773,8 @@ async def oauth_login(provider: str, request: Request):
 #    - This is considered insecure in general, as OAuth providers do not always verify email addresses
 # 3. If there is no user, and ENABLE_OAUTH_SIGNUP is true, create a user
 #    - Email addresses are considered unique, so we fail registration if the email address is already taken
-@app.get("/oauth/{provider}/login/callback")
-@app.get("/oauth/{provider}/callback")  # Legacy endpoint
+@app.get('/oauth/{provider}/login/callback')
+@app.get('/oauth/{provider}/callback')  # Legacy endpoint
 async def oauth_login_callback(
     provider: str,
     request: Request,
@@ -2873,8 +2782,8 @@ async def oauth_login_callback(
     db: Session = Depends(get_session),
 ):
     # Check if this is a OneDrive background sync auth callback
-    if provider == "microsoft":
-        state = request.query_params.get("state")
+    if provider == 'microsoft':
+        state = request.query_params.get('state')
         if state:
             from open_webui.services.onedrive.auth import _pending_flows
 
@@ -2886,8 +2795,8 @@ async def oauth_login_callback(
                 return await handle_onedrive_auth_callback(request)
 
     # Check if this is a Google Drive background sync auth callback
-    if provider == "google":
-        state = request.query_params.get("state")
+    if provider == 'google':
+        state = request.query_params.get('state')
         if state:
             from open_webui.services.google_drive.auth import (
                 _pending_flows as _google_drive_pending_flows,
@@ -2903,41 +2812,41 @@ async def oauth_login_callback(
     return await oauth_manager.handle_callback(request, provider, response, db=db)
 
 
-@app.get("/manifest.json")
+@app.get('/manifest.json')
 async def get_manifest_json():
     if app.state.EXTERNAL_PWA_MANIFEST_URL:
         return requests.get(app.state.EXTERNAL_PWA_MANIFEST_URL).json()
     else:
         return {
-            "name": app.state.WEBUI_NAME,
-            "short_name": app.state.WEBUI_NAME,
-            "description": f"{app.state.WEBUI_NAME} is an open, extensible, user-friendly interface for AI that adapts to your workflow.",
-            "start_url": "/",
-            "display": "standalone",
-            "background_color": "#343541",
-            "icons": [
+            'name': app.state.WEBUI_NAME,
+            'short_name': app.state.WEBUI_NAME,
+            'description': f'{app.state.WEBUI_NAME} is an open, extensible, user-friendly interface for AI that adapts to your workflow.',
+            'start_url': '/',
+            'display': 'standalone',
+            'background_color': '#343541',
+            'icons': [
                 {
-                    "src": "/static/logo.png",
-                    "type": "image/png",
-                    "sizes": "500x500",
-                    "purpose": "any",
+                    'src': '/static/logo.png',
+                    'type': 'image/png',
+                    'sizes': '500x500',
+                    'purpose': 'any',
                 },
                 {
-                    "src": "/static/logo.png",
-                    "type": "image/png",
-                    "sizes": "500x500",
-                    "purpose": "maskable",
+                    'src': '/static/logo.png',
+                    'type': 'image/png',
+                    'sizes': '500x500',
+                    'purpose': 'maskable',
                 },
             ],
-            "share_target": {
-                "action": "/",
-                "method": "GET",
-                "params": {"text": "shared"},
+            'share_target': {
+                'action': '/',
+                'method': 'GET',
+                'params': {'text': 'shared'},
             },
         }
 
 
-@app.get("/opensearch.xml")
+@app.get('/opensearch.xml')
 async def get_opensearch_xml():
     xml_content = rf"""
     <OpenSearchDescription xmlns="http://a9.com/-/spec/opensearch/1.1/" xmlns:moz="http://www.mozilla.org/2006/browser/search/">
@@ -2945,28 +2854,69 @@ async def get_opensearch_xml():
     <Description>Search {app.state.WEBUI_NAME}</Description>
     <InputEncoding>UTF-8</InputEncoding>
     <Image width="16" height="16" type="image/x-icon">{app.state.config.WEBUI_URL}/static/favicon.png</Image>
-    <Url type="text/html" method="get" template="{app.state.config.WEBUI_URL}/?q={"{searchTerms}"}"/>
+    <Url type="text/html" method="get" template="{app.state.config.WEBUI_URL}/?q={'{searchTerms}'}"/>
     <moz:SearchForm>{app.state.config.WEBUI_URL}</moz:SearchForm>
     </OpenSearchDescription>
     """
-    return Response(content=xml_content, media_type="application/xml")
+    return Response(content=xml_content, media_type='application/xml')
 
 
-@app.get("/health")
+@app.get('/health')
 async def healthcheck():
-    return {"status": True}
+    return {'status': True}
 
 
-@app.get("/health/db")
+@app.get('/ready')
+async def readiness_check():
+    """
+    Returns 200 only when the application is ready to accept traffic.
+    """
+
+    # Ensure application startup work has completed
+    if not getattr(app.state, 'startup_complete', False):
+        log.info('Readiness check failed: startup not complete')
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail='Startup not complete',
+        )
+
+    # Check database connectivity
+    try:
+        ScopedSession.execute(text('SELECT 1;')).all()
+    except Exception as e:
+        log.warning(f'Readiness check DB ping failed: {e!r}')
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail='Database not ready',
+        )
+
+    # Check Redis connectivity if configured
+    redis = app.state.redis
+    if redis is not None:
+        try:
+            pong = await redis.ping()
+            if pong is False:
+                raise Exception('Redis PING returned False')
+        except Exception as e:
+            log.warning(f'Readiness check Redis ping failed: {e!r}')
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail='Redis not ready',
+            )
+
+    return {'status': True}
+
+
+@app.get('/health/db')
 async def healthcheck_with_db():
-    ScopedSession.execute(text("SELECT 1;")).all()
-    return {"status": True}
+    ScopedSession.execute(text('SELECT 1;')).all()
+    return {'status': True}
 
 
-app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+app.mount('/static', StaticFiles(directory=STATIC_DIR), name='static')
 
 
-@app.get("/cache/{path:path}")
+@app.get('/cache/{path:path}')
 async def serve_cache_file(
     path: str,
     user=Depends(get_verified_user),
@@ -2974,9 +2924,9 @@ async def serve_cache_file(
     file_path = os.path.abspath(os.path.join(CACHE_DIR, path))
     # prevent path traversal
     if not file_path.startswith(os.path.abspath(CACHE_DIR)):
-        raise HTTPException(status_code=404, detail="File not found")
+        raise HTTPException(status_code=404, detail='File not found')
     if not os.path.isfile(file_path):
-        raise HTTPException(status_code=404, detail="File not found")
+        raise HTTPException(status_code=404, detail='File not found')
     return FileResponse(file_path)
 
 
@@ -2984,22 +2934,20 @@ def swagger_ui_html(*args, **kwargs):
     return get_swagger_ui_html(
         *args,
         **kwargs,
-        swagger_js_url="/static/swagger-ui/swagger-ui-bundle.js",
-        swagger_css_url="/static/swagger-ui/swagger-ui.css",
-        swagger_favicon_url="/static/swagger-ui/favicon.png",
+        swagger_js_url='/static/swagger-ui/swagger-ui-bundle.js',
+        swagger_css_url='/static/swagger-ui/swagger-ui.css',
+        swagger_favicon_url='/static/swagger-ui/favicon.png',
     )
 
 
 applications.get_swagger_ui_html = swagger_ui_html
 
 if os.path.exists(FRONTEND_BUILD_DIR):
-    mimetypes.add_type("text/javascript", ".js")
+    mimetypes.add_type('text/javascript', '.js')
     app.mount(
-        "/",
+        '/',
         SPAStaticFiles(directory=FRONTEND_BUILD_DIR, html=True),
-        name="spa-static-files",
+        name='spa-static-files',
     )
 else:
-    log.warning(
-        f"Frontend build directory not found at '{FRONTEND_BUILD_DIR}'. Serving API only."
-    )
+    log.warning(f"Frontend build directory not found at '{FRONTEND_BUILD_DIR}'. Serving API only.")

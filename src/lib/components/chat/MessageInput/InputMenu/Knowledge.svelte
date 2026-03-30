@@ -9,6 +9,8 @@
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
 	import Database from '$lib/components/icons/Database.svelte';
 	import DocumentPage from '$lib/components/icons/DocumentPage.svelte';
+	import OneDrive from '$lib/components/icons/OneDrive.svelte';
+	import GoogleDrive from '$lib/components/icons/GoogleDrive.svelte';
 	import Spinner from '$lib/components/common/Spinner.svelte';
 	import Loader from '$lib/components/common/Loader.svelte';
 	import ChevronDown from '$lib/components/icons/ChevronDown.svelte';
@@ -78,7 +80,9 @@
 			}
 
 			if (selectedFileItems) {
-				selectedFileItems = [...selectedFileItems, ...pageItems];
+				const existingIds = new Set(selectedFileItems.map((item) => item.id));
+				const newItems = pageItems.filter((item) => !existingIds.has(item.id));
+				selectedFileItems = [...selectedFileItems, ...newItems];
 			} else {
 				selectedFileItems = pageItems;
 			}
@@ -137,7 +141,9 @@
 			}
 
 			if (items) {
-				items = [...items, ...pageItems];
+				const existingIds = new Set(items.map((item) => item.id));
+				const newItems = pageItems.filter((item) => !existingIds.has(item.id));
+				items = [...items, ...newItems];
 			} else {
 				items = pageItems;
 			}
@@ -188,7 +194,13 @@
 					>
 						<div class="w-full text-left text-black dark:text-gray-100 flex items-center gap-1">
 							<Tooltip content={$i18n.t('Collection')} placement="top">
-								<Database className="size-4" />
+								{#if item.type === 'onedrive'}
+									<OneDrive className="size-4" />
+								{:else if item.type === 'google_drive'}
+									<GoogleDrive className="size-4" />
+								{:else}
+									<Database className="size-4" />
+								{/if}
 							</Tooltip>
 
 							<Tooltip

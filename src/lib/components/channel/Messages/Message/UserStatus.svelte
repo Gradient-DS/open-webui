@@ -3,7 +3,7 @@
 
 	const i18n = getContext('i18n');
 
-	import { user as _user, channels, socket } from '$lib/stores';
+	import { user as _user, config, channels, socket } from '$lib/stores';
 	import { WEBUI_API_BASE_URL, WEBUI_BASE_URL } from '$lib/constants';
 	import { getChannels, getDMChannelByUserId } from '$lib/apis/channels';
 
@@ -103,7 +103,7 @@
 		{/if}
 
 		{#if (user?.groups ?? []).length > 0}
-			<div class="mx-3.5 mt-2 flex gap-0.5">
+			<div class="mx-3.5 mt-2 flex flex-wrap gap-0.5 max-h-20 overflow-y-auto">
 				{#each user.groups as group}
 					<div
 						class="px-1.5 py-0.5 rounded-lg bg-gray-50 dark:text-white dark:bg-gray-900/50 text-black transition text-xs"
@@ -114,7 +114,7 @@
 			</div>
 		{/if}
 
-		{#if $_user?.id !== user.id}
+		{#if $_user?.id !== user.id && $config?.features?.enable_channels}
 			<hr class="border-gray-100/50 dark:border-gray-800/50 my-2.5" />
 
 			<div class=" flex flex-col w-full px-2.5 items-center">

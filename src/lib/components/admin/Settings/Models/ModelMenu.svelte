@@ -1,6 +1,4 @@
 <script lang="ts">
-	import { DropdownMenu } from 'bits-ui';
-	import { flyAndScale } from '$lib/utils/transitions';
 	import { getContext } from 'svelte';
 
 	import Dropdown from '$lib/components/common/Dropdown.svelte';
@@ -37,8 +35,8 @@
 
 <Dropdown
 	bind:show
-	on:change={(e) => {
-		if (e.detail === false) {
+	onOpenChange={(state) => {
+		if (state === false) {
 			onClose();
 		}
 	}}
@@ -48,15 +46,11 @@
 	</Tooltip>
 
 	<div slot="content">
-		<DropdownMenu.Content
-			class="w-full max-w-[170px] rounded-xl p-1 border border-gray-100  dark:border-gray-800 z-50 bg-white dark:bg-gray-850 dark:text-white shadow-sm"
-			sideOffset={-2}
-			side="bottom"
-			align="start"
-			transition={flyAndScale}
+		<div
+			class="min-w-[170px] rounded-xl p-1 border border-gray-100 dark:border-gray-800 z-50 bg-white dark:bg-gray-850 dark:text-white shadow-sm"
 		>
-			<DropdownMenu.Item
-				class="select-none flex  gap-2  items-center px-3 py-1.5 text-sm  font-medium cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-md"
+			<button
+				class="select-none flex gap-2 items-center px-3 py-1.5 text-sm font-medium cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-md"
 				on:click={() => {
 					hideHandler();
 				}}
@@ -105,31 +99,33 @@
 						{$i18n.t('Hide Model')}
 					{/if}
 				</div>
-			</DropdownMenu.Item>
+			</button>
 
-			<DropdownMenu.Item
-				class="select-none flex  gap-2  items-center px-3 py-1.5 text-sm  font-medium cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-md"
-				on:click={() => {
-					pinModelHandler(model?.id);
-				}}
-			>
-				{#if ($settings?.pinnedModels ?? []).includes(model?.id)}
-					<PinSlash />
-				{:else}
-					<Pin />
-				{/if}
-
-				<div class="flex items-center">
+			{#if model?.info?.base_model_id}
+				<button
+					class="select-none flex gap-2 items-center px-3 py-1.5 text-sm font-medium cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-md"
+					on:click={() => {
+						pinModelHandler(model?.id);
+					}}
+				>
 					{#if ($settings?.pinnedModels ?? []).includes(model?.id)}
-						{$i18n.t('Hide from Sidebar')}
+						<PinSlash />
 					{:else}
-						{$i18n.t('Keep in Sidebar')}
+						<Pin />
 					{/if}
-				</div>
-			</DropdownMenu.Item>
 
-			<DropdownMenu.Item
-				class="select-none flex gap-2 items-center px-3 py-1.5 text-sm  font-medium cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-md"
+					<div class="flex items-center">
+						{#if ($settings?.pinnedModels ?? []).includes(model?.id)}
+							{$i18n.t('Hide from Sidebar')}
+						{:else}
+							{$i18n.t('Keep in Sidebar')}
+						{/if}
+					</div>
+				</button>
+			{/if}
+
+			<button
+				class="select-none flex gap-2 items-center px-3 py-1.5 text-sm font-medium cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-md"
 				on:click={() => {
 					copyLinkHandler();
 				}}
@@ -137,11 +133,11 @@
 				<Link />
 
 				<div class="flex items-center">{$i18n.t('Copy Link')}</div>
-			</DropdownMenu.Item>
+			</button>
 
 			{#if model?.is_active ?? true}
-				<DropdownMenu.Item
-					class="select-none flex gap-2 items-center px-3 py-1.5 text-sm  font-medium cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-md"
+				<button
+					class="select-none flex gap-2 items-center px-3 py-1.5 text-sm font-medium cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-md"
 					on:click={() => {
 						cloneHandler();
 					}}
@@ -149,11 +145,11 @@
 					<DocumentDuplicate />
 
 					<div class="flex items-center">{$i18n.t('Clone')}</div>
-				</DropdownMenu.Item>
+				</button>
 			{/if}
 
-			<DropdownMenu.Item
-				class="select-none flex gap-2 items-center px-3 py-1.5 text-sm  font-medium cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-md"
+			<button
+				class="select-none flex gap-2 items-center px-3 py-1.5 text-sm font-medium cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-md"
 				on:click={() => {
 					exportHandler();
 				}}
@@ -161,7 +157,7 @@
 				<Download />
 
 				<div class="flex items-center">{$i18n.t('Export')}</div>
-			</DropdownMenu.Item>
-		</DropdownMenu.Content>
+			</button>
+		</div>
 	</div>
 </Dropdown>

@@ -1,4 +1,4 @@
-# Open WebUI (Gradient-DS Fork) — Dev Notes
+<!-- Append-only episodic memory. See methodology.md Section 3 for the note template and rules. -->
 
 ---
 
@@ -106,7 +106,7 @@
 - The sync abstraction cleanly separated provider-specific logic (11 abstract methods) from shared orchestration (~1000 lines of base worker)
 - Cleaning up the abstraction layer (ccc3d65ac) removed fragile patterns: error-string matching replaced with status code checks, private `_pending_flows` replaced with public API, eliminated the `_current_drive_id` stash pattern
 
-**Related:** `dev_notes/external-integration-cookbook.md`, [20-03-2026] Gradient-DS Custom Features Overview
+**Related:** `collab/docs/external-integration-cookbook.md`, [20-03-2026] Gradient-DS Custom Features Overview
 
 ---
 
@@ -155,3 +155,89 @@
 - Most InputMenu sections already had guards (knowledge, capture, notes, tools) but Webpage URL and Reference Chats were the two exceptions
 
 **Related:** Feature flags system documented in [20-03-2026] Gradient-DS Custom Features Overview
+
+---
+
+### [30-03-2026] Cloud KB Permission Leak — Sync Workers Mirror Cloud Sharing into Access Grants
+> **Amended [30-03-2026]:** Fix implemented — see [30-03-2026] Cloud KB Permission Fix — Suspension Lifecycle Implementation.
+
+**With:** @lexlubbers
+
+**Context:** On gradient.soev.ai (test branch), users could see other users' OneDrive and Google Drive knowledge bases as read-only. Investigated whether the upstream `access_grants` migration (`f1e2d3c4b5a6`) was the cause.
+
+**What We Did:**
+- Queried the `access_grant` table on gradient — no wildcard (`*`) grants existed, ruling out the migration's NULL→public conversion
+- Found explicit user-level grants with varying timestamps (March 25–30), proving they were created at runtime, not by a one-time migration
+- Traced the grants to `_sync_permissions()` in both sync workers (`onedrive/sync_worker.py:279`, `google_drive/sync_worker.py:203`)
+- This method runs on every sync cycle (called from `base_worker.py:701`), fetches cloud folder sharing permissions, maps emails to Open WebUI users, and creates `read` access grants for every matched user
+- The router's defense-in-depth (`knowledge.py:504-506`, `577-581`) correctly blocks grant changes via the API, but sync workers call `update_knowledge_by_id` directly on the model layer, bypassing it
+
+**Key Learnings:**
+- The root cause is NOT the migration — it's the `_sync_permissions()` feature in both sync workers mirroring broad cloud sharing into Open WebUI access grants
+- In corporate M365/Google Workspace tenants, folders are often shared with the entire team, so the sync gives every team member read access to every synced KB
+- The migration fix (NULL knowledge → private) is still valid hardening but was not the actual trigger
+- Defense-in-depth in the router only protects the HTTP API path — model-layer calls from sync workers bypass it
+- Desired behavior: permission sync should only verify the **owner** still has cloud access, not grant other users access. KBs should remain private to their creator.
+
+**Fix needed:**
+1. Rewrite `_sync_permissions()` in both sync workers to only check owner access, not mirror cloud sharing
+2. Clean up existing grants on gradient: `DELETE FROM access_grant WHERE resource_type = 'knowledge' AND resource_id IN (SELECT id FROM knowledge WHERE type IN ('onedrive', 'google_drive'));`
+3. Deploy code fix BEFORE cleanup (sync runs every ≤15 min and would recreate grants)
+4. Cleanup commands saved in `fix_kb_gradient_soev.md`
+
+**Related:** Defense-in-depth commit `1e96c838b`, sync abstraction layer [24-03-2026], [26-03-2026]
+
+---
+
+### [30-03-2026] Cloud KB Permission Fix — Suspension Lifecycle Implementation
+
+**With:** @lexlubbers
+
+**Context:** Implementing the fix for the cloud KB permission leak identified earlier today. Plan: `thoughts/shared/plans/2026-03-30-cloud-kb-permission-fix.md`.
+
+**What We Did:**
+- **Phase 1**: Rewrote `_sync_permissions()` in both OneDrive and Google Drive sync workers — now only verifies owner access to the cloud folder. No access grants are created. If owner loses access, KB is suspended (`suspended_at` + `suspended_reason` in sync meta). If access is regained, suspension is cleared. Base worker returns early when KB is suspended; scheduler skips suspended KBs.
+- **Phase 2**: Added suspension helpers to knowledge model (`is_suspended()`, `get_suspension_info()`, `get_suspended_expired_knowledge()`). Cleanup worker now hard-deletes KBs suspended for 30+ days (`SUSPENSION_TTL_DAYS = 30`).
+- **Phase 3**: Knowledge router blocks non-admin access to suspended KBs (403 with explanatory message on `GET /{id}` and `GET /{id}/files`). Retrieval path skips suspended KBs in chat. List API returns `suspension_info` field for suspended KBs.
+- **Phase 4**: Frontend grays out suspended KBs (`opacity-50 cursor-not-allowed`), prevents navigation on click, shows "Suspended" warning badge with tooltip showing days remaining.
+
+**Key Learnings:**
+- `suspended_at` lives in `meta[meta_key]` (no schema migration needed), consistent with existing sync state storage pattern
+- Owner gets implicit access via `has_permission_filter()` — never needs an explicit access grant, so removing all grant creation is safe
+- The `Users` import was only needed for email-mapping in the old `_sync_permissions()` — removed from both workers
+
+**Still needed:**
+- Manual cleanup of existing grants on gradient.soev.ai (see `fix_kb_gradient_soev.md`)
+- Deploy code fix BEFORE cleanup (sync runs every ≤15 min)
+
+**Related:** Investigation [30-03-2026] Cloud KB Permission Leak, plan `2026-03-30-cloud-kb-permission-fix.md`
+
+---
+
+### [30-03-2026] TOTP 2FA — Full Implementation (Phase 1)
+
+**With:** @lexlubbers
+
+**Context:** Adding TOTP-based two-factor authentication for email+password users, with admin enforcement and recovery codes.
+
+**What We Did:**
+- Implemented full TOTP 2FA feature across ~21 files (backend + frontend + Helm)
+- Backend: pyotp + qrcode deps, Alembic migration (totp_secret/totp_enabled/totp_last_used_at on auth + recovery_code table), AES-GCM encrypted TOTP secrets, bcrypt-hashed recovery codes, replay protection, 5-attempt rate limiting
+- New router at `/api/v1/auths/2fa` with 6 endpoints: status, setup, enable, disable, verify, recovery/regenerate
+- Signin flow modified: partial JWT token (5min TTL, purpose=2fa_pending) returned when 2FA enabled, rejected by all normal endpoints
+- Admin: PersistentConfig flags (ENABLE_2FA, REQUIRE_2FA, TWO_FA_GRACE_PERIOD_DAYS), config endpoints, force-disable user 2FA, per-user 2FA status check
+- Frontend: TwoFactorChallenge (login page), TwoFactorSetup (account settings), API clients for all endpoints
+- Created dedicated Security tab in admin settings (extracted from General) with lock icon
+- EditUserModal: conditionally shows "Disable 2FA" only for users with 2FA enabled (fetches per-user status)
+- Enforcement banner in (app)/+layout.svelte with grace period display and dismiss
+- Helm chart: env vars in values.yaml + configmap.yaml
+- i18n: en-US + nl-NL translations for all new strings
+- Fixed Svelte template nesting bug in auth/+page.svelte ({#if show2FAChallenge} closing tag misplaced)
+
+**Key Learnings:**
+- Feature is fully off by default (ENABLE_2FA=false) — admin must enable via Security tab or env var
+- LDAP, SSO/OAuth, API key, and trusted header auth all bypass 2FA — only email+password users affected
+- Partial JWT token pattern (purpose claim) cleanly separates 2FA-pending state from authenticated sessions
+- Admin settings tab system requires changes in 5 places: ADMIN_SETTINGS_TABS constant, Settings.svelte (import, allSettings, icon, rendering chain)
+
+**Related:** Plan `thoughts/shared/plans/2026-03-30-totp-2fa-phase1.md`

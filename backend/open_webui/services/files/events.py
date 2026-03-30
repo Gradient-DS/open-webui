@@ -25,14 +25,14 @@ async def emit_file_status(
         from open_webui.socket.main import sio
 
         await sio.emit(
-            "file:status",
+            'file:status',
             {
-                "file_id": file_id,
-                "status": status,
-                "error": error,
-                "collection_name": collection_name,
+                'file_id': file_id,
+                'status': status,
+                'error': error,
+                'collection_name': collection_name,
             },
-            room=f"user:{user_id}",
+            room=f'user:{user_id}',
         )
     except Exception as e:
-        log.debug(f"Failed to emit file status event: {e}")
+        log.debug(f'Failed to emit file status event: {e}')

@@ -208,7 +208,7 @@ openWebui:
     featureAdminEvaluations: "True"
     featureAdminFunctions: "False"
     featureAdminSettings: "True"
-    featureAdminSettingsTabs: "models,tools,interface,db,email,acceptance"
+    featureAdminSettingsTabs: "models,tools,interface,db,email,acceptance,security"
     featureWebpageUrl: "True"
     featureReferenceChats: "True"
     featureInputMenu: "True"
@@ -360,6 +360,11 @@ openWebui:
 
     # Agent Proxy (external: exposes agent API to external callers via /api/v1/agent/)
     enableAgentProxy: "false"
+
+    # Two-Factor Authentication (TOTP)
+    enable2fa: "false"
+    require2fa: "false"
+    twoFaGracePeriodDays: "7"
 
     # Audit Logging
     # Levels: NONE, METADATA, REQUEST, REQUEST_RESPONSE

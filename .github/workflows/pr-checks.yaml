@@ -30,22 +30,16 @@ jobs:
         run: npm run test:frontend
 
   backend-format:
-    name: Backend Format Check
+    name: Backend Format (Ruff)
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v5
 
-      - name: Set up Python
-        uses: actions/setup-python@v6
+      - name: Ruff format check
+        uses: astral-sh/ruff-action@v3
         with:
-          python-version: '3.11'
-
-      - name: Install Black
-        run: pip install "black==26.1.0"
-
-      - name: Check backend formatting
-        run: black --check --fast backend/ --exclude ".venv/|/venv/"
+          args: format --check backend/ scripts/
 
   backend-tests:
     name: Backend Unit Tests

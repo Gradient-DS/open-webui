@@ -37,11 +37,13 @@
 
 	let unsubscribeSettings;
 
+	const isAgent = (model) => !!model?.info?.base_model_id;
+
 	const cleanupStalePinnedModels = async (modelIds) => {
 		const validModels = modelIds.filter((id) => {
 			const model = $models.find((m) => m.id === id);
-			// Remove if model not found (deleted) or if hidden
-			return model && !(model?.info?.meta?.hidden ?? false);
+			// Remove if model not found (deleted), hidden, or not an agent
+			return model && !(model?.info?.meta?.hidden ?? false) && isAgent(model);
 		});
 
 		if (validModels.length !== modelIds.length) {
@@ -85,7 +87,7 @@
 <div class="mt-0.5 pb-1.5" id="pinned-models-list">
 	{#each pinnedModels as modelId (modelId)}
 		{@const model = $models.find((model) => model.id === modelId)}
-		{#if model}
+		{#if model && isAgent(model)}
 			<PinnedModelItem
 				{model}
 				{shiftKey}

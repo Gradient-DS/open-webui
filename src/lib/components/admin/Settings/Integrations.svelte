@@ -163,7 +163,6 @@
 <AddToolServerModal bind:show={showConnectionModal} onSubmit={addConnectionHandler} />
 
 <AddTerminalServerModal
-	admin
 	bind:show={showAddTerminalModal}
 	edit={editTerminalIdx !== null}
 	connection={editTerminalIdx !== null ? terminalConnections[editTerminalIdx] : null}

@@ -3,10 +3,12 @@
 	import { onMount, getContext } from 'svelte';
 
 	import { user, config, settings } from '$lib/stores';
+	import { isFeatureEnabled } from '$lib/utils/features';
 	import { updateUserProfile, createAPIKey, getAPIKey, getSessionUser } from '$lib/apis/auths';
 	import { WEBUI_BASE_URL } from '$lib/constants';
 
 	import UpdatePassword from './Account/UpdatePassword.svelte';
+	import TwoFactorSetup from './Account/TwoFactorSetup.svelte';
 	import { getGravatarUrl } from '$lib/apis/utils';
 	import { generateInitialsImage, canvasPixelTest } from '$lib/utils';
 	import { copyToClipboard } from '$lib/utils';
@@ -171,6 +173,7 @@
 							</div>
 						</div>
 
+						{#if isFeatureEnabled('user_demographics')}
 						<div class="flex flex-col w-full mt-2">
 							<div class=" mb-1 text-xs font-medium">{$i18n.t('Gender')}</div>
 
@@ -222,6 +225,7 @@
 								/>
 							</div>
 						</div>
+						{/if}
 					</div>
 				</div>
 			</div>
@@ -251,6 +255,13 @@
 		{#if $config?.features.enable_login_form}
 			<div class="mt-2">
 				<UpdatePassword />
+			</div>
+		{/if}
+
+		{#if $config?.features?.enable_2fa && $config?.features?.enable_login_form}
+			<hr class="border-gray-50 dark:border-gray-850/30 my-4" />
+			<div class="mt-2">
+				<TwoFactorSetup />
 			</div>
 		{/if}
 

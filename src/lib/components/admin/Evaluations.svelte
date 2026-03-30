@@ -52,7 +52,7 @@
 	<div class="flex flex-col lg:flex-row w-full h-full pb-2 lg:space-x-4">
 		<div
 			id="users-tabs-container"
-			class="tabs mx-[16px] lg:mx-0 lg:px-[16px] flex flex-row overflow-x-auto gap-2.5 max-w-full lg:gap-1 lg:flex-col lg:flex-none lg:w-50 dark:text-gray-200 text-sm font-medium text-left scrollbar-none"
+			class="tabs mx-[16px] lg:mx-0 lg:px-[16px] lg:mt-2 flex flex-row overflow-x-auto gap-2.5 max-w-full lg:gap-1 lg:flex-col lg:flex-none lg:w-50 dark:text-gray-200 text-sm font-medium text-left scrollbar-none"
 		>
 			<a
 				id="leaderboard"
@@ -60,8 +60,8 @@
 				draggable="false"
 				class="px-0.5 py-1 min-w-fit rounded-lg lg:flex-none flex text-right transition select-none {selectedTab ===
 				'leaderboard'
-					? ''
-					: ' text-gray-300 dark:text-gray-600 hover:text-gray-700 dark:hover:text-white'}"
+					? 'bg-gray-100 dark:bg-gray-800'
+					: 'text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-850'}"
 			>
 				<div class=" self-center mr-2">
 					<svg
@@ -86,8 +86,8 @@
 				draggable="false"
 				class="px-0.5 py-1 min-w-fit rounded-lg lg:flex-none flex text-right transition select-none {selectedTab ===
 				'feedback'
-					? ''
-					: ' text-gray-300 dark:text-gray-600 hover:text-gray-700 dark:hover:text-white'}"
+					? 'bg-gray-100 dark:bg-gray-800'
+					: 'text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-850'}"
 			>
 				<div class=" self-center mr-2">
 					<svg

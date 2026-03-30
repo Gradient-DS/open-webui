@@ -17,15 +17,12 @@
 	import { goto } from '$app/navigation';
 	import { capitalizeFirstLetter } from '$lib/utils';
 
-	import { DropdownMenu } from 'bits-ui';
-	import { flyAndScale } from '$lib/utils/transitions';
-
 	import DeleteConfirmDialog from '../common/ConfirmDialog.svelte';
 	import ItemMenu from './Knowledge/ItemMenu.svelte';
 	import Badge from '../common/Badge.svelte';
 	import Search from '../icons/Search.svelte';
 	import Plus from '../icons/Plus.svelte';
-	import Database from '../icons/Database.svelte';
+	import FolderOpen from '../icons/FolderOpen.svelte';
 	import OneDrive from '../icons/OneDrive.svelte';
 	import GoogleDrive from '../icons/GoogleDrive.svelte';
 	import Spinner from '../common/Spinner.svelte';
@@ -250,47 +247,46 @@
 					</button>
 
 					<div slot="content">
-						<DropdownMenu.Content
+						<div
 							class="w-full max-w-[220px] rounded-2xl px-1 py-1 border border-gray-100 dark:border-gray-800 z-50 bg-white dark:bg-gray-850 dark:text-white shadow-lg transition"
-							sideOffset={4}
-							side="bottom"
-							align="end"
-							transition={flyAndScale}
 						>
-							<DropdownMenu.Item
-								class="flex gap-2 items-center px-3 py-1.5 text-sm cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-xl"
+							<button
+								class="flex gap-2 w-full items-center px-3 py-1.5 text-sm cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-xl"
+								type="button"
 								on:click={() => {
 									goto('/workspace/knowledge/create?type=local');
 								}}
 							>
-								<Database className="size-4" strokeWidth="2" />
+								<FolderOpen className="size-4" strokeWidth="2" />
 								<div class="flex items-center">{$i18n.t('Local Knowledge Base')}</div>
-							</DropdownMenu.Item>
+							</button>
 
 							{#if $config?.features?.enable_onedrive_integration}
-								<DropdownMenu.Item
-									class="flex gap-2 items-center px-3 py-1.5 text-sm cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-xl"
+								<button
+									class="flex gap-2 w-full items-center px-3 py-1.5 text-sm cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-xl"
+									type="button"
 									on:click={() => {
 										goto('/workspace/knowledge/create?type=onedrive');
 									}}
 								>
 									<OneDrive className="size-4" />
 									<div class="flex items-center">{$i18n.t('From OneDrive')}</div>
-								</DropdownMenu.Item>
+								</button>
 							{/if}
 
 							{#if $config?.features?.enable_google_drive_integration && $config?.features?.enable_google_drive_sync}
-								<DropdownMenu.Item
-									class="flex gap-2 items-center px-3 py-1.5 text-sm cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-xl"
+								<button
+									class="flex gap-2 w-full items-center px-3 py-1.5 text-sm cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-xl"
+									type="button"
 									on:click={() => {
 										goto('/workspace/knowledge/create?type=google_drive');
 									}}
 								>
 									<GoogleDrive className="size-4" />
 									<div class="flex items-center">{$i18n.t('From Google Drive')}</div>
-								</DropdownMenu.Item>
+								</button>
 							{/if}
-						</DropdownMenu.Content>
+						</div>
 					</div>
 				</Dropdown>
 			</div>
@@ -369,8 +365,11 @@
 				<div class=" my-2 px-3 grid grid-cols-1 lg:grid-cols-2 gap-2">
 					{#each items as item}
 						<button
-							class=" flex space-x-4 cursor-pointer text-left w-full px-3 py-2.5 dark:hover:bg-gray-850/50 hover:bg-gray-50 transition rounded-2xl"
+							class=" flex space-x-4 cursor-pointer text-left w-full px-3 py-2.5 dark:hover:bg-gray-850/50 hover:bg-gray-50 transition rounded-2xl {item.suspension_info ? 'opacity-50 cursor-not-allowed' : ''}"
 							on:click={() => {
+								if (item.suspension_info) {
+									return;
+								}
 								if (item?.meta?.document) {
 									toast.error(
 										$i18n.t(
@@ -388,6 +387,7 @@
 										<div class=" flex gap-2 items-center justify-between w-full">
 											<div class="flex items-center gap-1.5">
 												{#if item?.type === 'onedrive'}
+													<OneDrive className="size-4" />
 													<Badge type="info" content={$i18n.t('OneDrive')} />
 													{#if item.meta?.onedrive_sync?.status === 'syncing'}
 														<Tooltip content={$i18n.t('Syncing...')}>
@@ -395,6 +395,7 @@
 														</Tooltip>
 													{/if}
 												{:else if item?.type === 'google_drive'}
+													<GoogleDrive className="size-4" />
 													<Badge type="info" content={$i18n.t('Google Drive')} />
 													{#if item.meta?.google_drive_sync?.status === 'syncing'}
 														<Tooltip content={$i18n.t('Syncing...')}>
@@ -408,6 +409,17 @@
 													/>
 												{:else}
 													<Badge type="muted" content={$i18n.t('Local')} />
+												{/if}
+
+												{#if item.suspension_info}
+													<Tooltip
+														content={$i18n.t(
+															'The owner lost access to the cloud folder. This knowledge base will be permanently deleted in {{days}} days unless access is restored.',
+															{ days: item.suspension_info.days_remaining }
+														)}
+													>
+														<Badge type="warning" content={$i18n.t('Suspended')} />
+													</Tooltip>
 												{/if}
 											</div>
 

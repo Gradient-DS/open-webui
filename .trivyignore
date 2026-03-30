@@ -1,3 +1,7 @@
 # Vendored inside setuptools in the base Python image - not directly exploitable
 # jaraco.context path traversal via malicious tar archives
 CVE-2026-23949
+
+# wheel 0.45.1 ships in python:3.11-slim-bookworm base image.
+# CVE is in `wheel unpack` CLI (path traversal) — never used at runtime.
+CVE-2026-24049

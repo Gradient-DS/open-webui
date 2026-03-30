@@ -357,4 +357,9 @@ data:
 
   # Agent Proxy (external: exposes agent API to external callers)
   ENABLE_AGENT_PROXY: {{ .Values.openWebui.config.enableAgentProxy | default "false" | quote }}
+
+  # Two-Factor Authentication (TOTP)
+  ENABLE_2FA: {{ .Values.openWebui.config.enable2fa | default "false" | quote }}
+  REQUIRE_2FA: {{ .Values.openWebui.config.require2fa | default "false" | quote }}
+  TWO_FA_GRACE_PERIOD_DAYS: {{ .Values.openWebui.config.twoFaGracePeriodDays | default "7" | quote }}
 {{- end }}

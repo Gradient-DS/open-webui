@@ -106,6 +106,7 @@ export const ADMIN_SETTINGS_TABS = [
 	'images',
 	'pipelines',
 	'email',
+	'security',
 	'db',
 	'acceptance'
 ] as const;

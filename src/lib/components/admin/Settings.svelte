@@ -24,6 +24,7 @@
 	import Integrations from './Settings/Integrations.svelte';
 	import Acceptance from './Settings/Acceptance.svelte';
 	import Email from './Settings/Email.svelte';
+	import Security from './Settings/Security.svelte';
 
 	import ChartBar from '../icons/ChartBar.svelte';
 	import DocumentChartBar from '../icons/DocumentChartBar.svelte';
@@ -243,6 +244,12 @@
 			keywords: ['email', 'invite', 'smtp', 'notifications', 'mail']
 		},
 		{
+			id: 'security',
+			title: 'Security',
+			route: '/admin/settings/security',
+			keywords: ['security', '2fa', 'two-factor', 'totp', 'authentication', 'mfa']
+		},
+		{
 			id: 'db',
 			title: 'Database',
 			route: '/admin/settings/db',
@@ -340,6 +347,7 @@
 		<!-- {$i18n.t('Images')} -->
 		<!-- {$i18n.t('Pipelines')} -->
 		<!-- {$i18n.t('Email')} -->
+		<!-- {$i18n.t('Security')} -->
 		<!-- {$i18n.t('Database')} -->
 		<!-- {$i18n.t('Acceptance')} -->
 		{#each filteredSettings as tab (tab.id)}
@@ -349,8 +357,8 @@
 				draggable="false"
 				class="px-0.5 py-1 min-w-fit rounded-lg flex-1 lg:flex-none flex text-right transition select-none {selectedTab ===
 				tab.id
-					? ''
-					: ' text-gray-300 dark:text-gray-600 hover:text-gray-700 dark:hover:text-white'}"
+					? 'bg-gray-100 dark:bg-gray-800'
+					: 'text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-850'}"
 			>
 				<div class=" self-center mr-2">
 					{#if tab.id === 'general'}
@@ -517,6 +525,19 @@
 								d="M15 6.954 8.978 9.86a2.25 2.25 0 0 1-1.956 0L1 6.954V11.5A1.5 1.5 0 0 0 2.5 13h11a1.5 1.5 0 0 0 1.5-1.5V6.954Z"
 							/>
 						</svg>
+					{:else if tab.id === 'security'}
+						<svg
+							xmlns="http://www.w3.org/2000/svg"
+							viewBox="0 0 16 16"
+							fill="currentColor"
+							class="w-4 h-4"
+						>
+							<path
+								fill-rule="evenodd"
+								d="M8 1a3.5 3.5 0 0 0-3.5 3.5V7A1.5 1.5 0 0 0 3 8.5v5A1.5 1.5 0 0 0 4.5 15h7a1.5 1.5 0 0 0 1.5-1.5v-5A1.5 1.5 0 0 0 11.5 7V4.5A3.5 3.5 0 0 0 8 1Zm2 6V4.5a2 2 0 1 0-4 0V7h4Z"
+								clip-rule="evenodd"
+							/>
+						</svg>
 					{:else if tab.id === 'db'}
 						<svg
 							xmlns="http://www.w3.org/2000/svg"
@@ -640,6 +661,15 @@
 			/>
 		{:else if selectedTab === 'acceptance'}
 			<Acceptance
+				saveHandler={async () => {
+					toast.success($i18n.t('Settings saved successfully!'));
+
+					await tick();
+					await config.set(await getBackendConfig());
+				}}
+			/>
+		{:else if selectedTab === 'security'}
+			<Security
 				saveHandler={async () => {
 					toast.success($i18n.t('Settings saved successfully!'));
 
