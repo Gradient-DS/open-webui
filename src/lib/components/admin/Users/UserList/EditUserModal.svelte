@@ -6,7 +6,8 @@
 
 	import { goto } from '$app/navigation';
 
-	import { updateUserById, getUserGroupsById } from '$lib/apis/users';
+	import { updateUserById, getUserGroupsById, adminDisableUser2FA, adminGetUser2FAStatus } from '$lib/apis/users';
+	import { config } from '$lib/stores';
 
 	import Modal from '$lib/components/common/Modal.svelte';
 	import localizedFormat from 'dayjs/plugin/localizedFormat';
@@ -31,6 +32,7 @@
 			_user = selectedUser;
 			_user.password = '';
 			loadUserGroups();
+			load2FAStatus();
 		}
 	};
 
@@ -43,6 +45,28 @@
 	};
 
 	let userGroups: any[] | null = null;
+	let user2FAEnabled = false;
+
+	const load2FAStatus = async () => {
+		if (!$config?.features?.enable_2fa || !selectedUser?.id) {
+			user2FAEnabled = false;
+			return;
+		}
+		const res = await adminGetUser2FAStatus(localStorage.token, selectedUser.id).catch(() => null);
+		user2FAEnabled = res?.totp_enabled ?? false;
+	};
+
+	const disable2FAHandler = async () => {
+		const res = await adminDisableUser2FA(localStorage.token, selectedUser.id).catch((error) => {
+			toast.error(`${error}`);
+			return null;
+		});
+
+		if (res) {
+			toast.success($i18n.t('Two-factor authentication has been disabled.'));
+			user2FAEnabled = false;
+		}
+	};
 
 	const submitHandler = async () => {
 		const res = await updateUserById(localStorage.token, selectedUser.id, _user).catch((error) => {
@@ -214,6 +238,21 @@
 											/>
 										</div>
 									</div>
+
+									{#if $config?.features?.enable_2fa && user2FAEnabled}
+										<div class="flex flex-col w-full">
+											<div class="mb-1 text-xs text-gray-500">
+												{$i18n.t('Two-Factor Authentication')}
+											</div>
+											<button
+												class="w-fit px-3 py-1.5 text-xs font-medium text-red-600 dark:text-red-400 border border-red-200 dark:border-red-800 hover:bg-red-50 dark:hover:bg-red-900/20 transition rounded-full"
+												type="button"
+												on:click={disable2FAHandler}
+											>
+												{$i18n.t('Disable Two-Factor Authentication')}
+											</button>
+										</div>
+									{/if}
 								</div>
 							</div>
 						</div>

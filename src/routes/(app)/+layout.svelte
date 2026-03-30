@@ -12,6 +12,7 @@
 	import { getModels, getToolServersData, getVersionUpdates } from '$lib/apis';
 	import { getTools } from '$lib/apis/tools';
 	import { getBanners } from '$lib/apis/configs';
+	import { get2FAStatus } from '$lib/apis/auths';
 	import { getTerminalServers } from '$lib/apis/terminal';
 	import { getUserSettings } from '$lib/apis/users';
 
@@ -47,6 +48,7 @@
 	import ChangelogModal from '$lib/components/ChangelogModal.svelte';
 	import AccountPending from '$lib/components/layout/Overlay/AccountPending.svelte';
 	import AcceptanceModal from '$lib/components/layout/Overlay/AcceptanceModal.svelte';
+	import TwoFactorRequired from '$lib/components/layout/Overlay/TwoFactorRequired.svelte';
 	import UpdateInfoToast from '$lib/components/layout/UpdateInfoToast.svelte';
 	import Spinner from '$lib/components/common/Spinner.svelte';
 	import { Shortcut, shortcuts } from '$lib/shortcuts';
@@ -56,6 +58,8 @@
 	let loaded = false;
 	let DB = null;
 	let localDBChats = [];
+
+	let show2FAOverlay = false;
 
 	let version;
 	let showAcceptanceModal = false;
@@ -227,6 +231,18 @@
 			checkLocalDBChats(),
 			setBanners().catch((e) => console.error('Failed to load banners:', e)),
 			setTools().catch((e) => console.error('Failed to load tools:', e)),
+			(async () => {
+				if (
+					$config?.features?.require_2fa &&
+					$config?.features?.enable_2fa &&
+					$config?.features?.enable_login_form
+				) {
+					const status = await get2FAStatus(localStorage.token).catch(() => null);
+					if (status && !status.totp_enabled && !status.is_oauth_user) {
+						show2FAOverlay = true;
+					}
+				}
+			})().catch((e) => console.error('Failed to check 2FA status:', e)),
 			setUserSettings(async () => {
 				await Promise.all([
 					setModels().catch((e) => console.error('Failed to load models:', e)),
@@ -477,6 +493,8 @@
 						</div>
 					</div>
 				{/if}
+
+				<TwoFactorRequired bind:show={show2FAOverlay} />
 
 				<Sidebar />
 

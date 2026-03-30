@@ -878,3 +878,39 @@ async def set_agent_proxy_config(
     return {
         'ENABLE_AGENT_PROXY': request.app.state.config.ENABLE_AGENT_PROXY,
     }
+
+
+####################################
+# 2FA Config
+####################################
+
+
+class TwoFAConfigForm(BaseModel):
+    ENABLE_2FA: bool
+    REQUIRE_2FA: bool
+    TWO_FA_GRACE_PERIOD_DAYS: int
+
+
+@router.get('/2fa')
+async def get_2fa_config(request: Request, user=Depends(get_admin_user)):
+    return {
+        'ENABLE_2FA': request.app.state.config.ENABLE_2FA,
+        'REQUIRE_2FA': request.app.state.config.REQUIRE_2FA,
+        'TWO_FA_GRACE_PERIOD_DAYS': request.app.state.config.TWO_FA_GRACE_PERIOD_DAYS,
+    }
+
+
+@router.post('/2fa')
+async def set_2fa_config(
+    request: Request,
+    form_data: TwoFAConfigForm,
+    user=Depends(get_admin_user),
+):
+    request.app.state.config.ENABLE_2FA = form_data.ENABLE_2FA
+    request.app.state.config.REQUIRE_2FA = form_data.REQUIRE_2FA
+    request.app.state.config.TWO_FA_GRACE_PERIOD_DAYS = form_data.TWO_FA_GRACE_PERIOD_DAYS
+    return {
+        'ENABLE_2FA': request.app.state.config.ENABLE_2FA,
+        'REQUIRE_2FA': request.app.state.config.REQUIRE_2FA,
+        'TWO_FA_GRACE_PERIOD_DAYS': request.app.state.config.TWO_FA_GRACE_PERIOD_DAYS,
+    }

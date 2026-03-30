@@ -94,7 +94,6 @@
 		const res = await updateAdminConfig(localStorage.token, adminConfig);
 		await updateLdapConfig(localStorage.token, ENABLE_LDAP);
 		await updateLdapServerHandler();
-
 		await updateBanners();
 
 		await config.set(await getBackendConfig());

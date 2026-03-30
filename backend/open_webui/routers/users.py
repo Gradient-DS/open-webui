@@ -12,6 +12,7 @@ from pydantic import BaseModel, ConfigDict
 
 
 from open_webui.models.auths import Auths
+from open_webui.models.recovery_codes import RecoveryCodes
 from open_webui.models.oauth_sessions import OAuthSessions
 
 from open_webui.services.deletion import DeletionService
@@ -708,6 +709,50 @@ async def delete_user_by_id(
         status_code=status.HTTP_403_FORBIDDEN,
         detail=ERROR_MESSAGES.ACTION_PROHIBITED,
     )
+
+
+############################
+# Admin Get User 2FA Status
+############################
+
+
+@router.get('/{user_id}/2fa/status')
+async def admin_get_user_2fa_status(
+    user_id: str,
+    request: Request,
+    user=Depends(get_admin_user),
+    db: Session = Depends(get_session),
+):
+    """Admin endpoint to check if a user has 2FA enabled."""
+    auth = Auths.get_auth_by_user_id(user_id, db=db)
+    return {'totp_enabled': bool(auth and auth.totp_enabled)}
+
+
+############################
+# Admin Force-Disable 2FA
+############################
+
+
+@router.post('/{user_id}/2fa/disable')
+async def admin_disable_user_2fa(
+    user_id: str,
+    request: Request,
+    user=Depends(get_admin_user),
+    db: Session = Depends(get_session),
+):
+    """Admin endpoint to force-disable 2FA for a locked-out user."""
+    target_user = Users.get_user_by_id(user_id, db=db)
+    if not target_user:
+        raise HTTPException(status_code=404, detail='User not found')
+
+    auth = Auths.get_auth_by_user_id(user_id, db=db)
+    if not auth or not auth.totp_enabled:
+        raise HTTPException(status_code=400, detail='2FA is not enabled for this user')
+
+    Auths.update_totp(user_id, None, False, db=db)
+    RecoveryCodes.delete_all(user_id, db=db)
+
+    return {'success': True}
 
 
 ############################

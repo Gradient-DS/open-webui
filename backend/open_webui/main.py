@@ -73,6 +73,7 @@ from open_webui.routers import (
     analytics,
     archives,
     audio,
+    totp,
     images,
     integrations,
     ollama,
@@ -377,6 +378,10 @@ from open_webui.config import (
     INTEGRATION_PROVIDERS,
     # Agent Proxy
     ENABLE_AGENT_PROXY,
+    # 2FA / TOTP
+    ENABLE_2FA,
+    REQUIRE_2FA,
+    TWO_FA_GRACE_PERIOD_DAYS,
     ENABLE_RAG_HYBRID_SEARCH,
     ENABLE_RAG_HYBRID_SEARCH_ENRICHED_TEXTS,
     ENABLE_RAG_FILTER_UI,
@@ -1269,6 +1274,10 @@ app.state.config.INTEGRATION_PROVIDERS = INTEGRATION_PROVIDERS
 
 app.state.config.ENABLE_AGENT_PROXY = ENABLE_AGENT_PROXY
 
+app.state.config.ENABLE_2FA = ENABLE_2FA
+app.state.config.REQUIRE_2FA = REQUIRE_2FA
+app.state.config.TWO_FA_GRACE_PERIOD_DAYS = TWO_FA_GRACE_PERIOD_DAYS
+
 app.state.config.OLLAMA_CLOUD_WEB_SEARCH_API_KEY = OLLAMA_CLOUD_WEB_SEARCH_API_KEY
 app.state.config.SEARXNG_QUERY_URL = SEARXNG_QUERY_URL
 app.state.config.SEARXNG_LANGUAGE = SEARXNG_LANGUAGE
@@ -1719,6 +1728,7 @@ app.include_router(retrieval.router, prefix='/api/v1/retrieval', tags=['retrieva
 app.include_router(configs.router, prefix='/api/v1/configs', tags=['configs'])
 
 app.include_router(auths.router, prefix='/api/v1/auths', tags=['auths'])
+app.include_router(totp.router, prefix='/api/v1/auths/2fa', tags=['2fa'])
 app.include_router(users.router, prefix='/api/v1/users', tags=['users'])
 app.include_router(archives.router, prefix='/api/v1/archives', tags=['archives'])
 
@@ -2298,6 +2308,7 @@ async def get_app_config(request: Request):
             'auth_trusted_header': bool(app.state.AUTH_TRUSTED_EMAIL_HEADER),
             'enable_signup_password_confirmation': ENABLE_SIGNUP_PASSWORD_CONFIRMATION,
             'enable_ldap': app.state.config.ENABLE_LDAP,
+            'enable_2fa': app.state.config.ENABLE_2FA,
             'enable_api_keys': app.state.config.ENABLE_API_KEYS,
             'enable_signup': app.state.config.ENABLE_SIGNUP,
             'enable_login_form': app.state.config.ENABLE_LOGIN_FORM,
@@ -2385,6 +2396,8 @@ async def get_app_config(request: Request):
                     ),
                     'enable_email_invites': app.state.config.ENABLE_EMAIL_INVITES,
                     'enable_agent_proxy': app.state.config.ENABLE_AGENT_PROXY,
+                    'require_2fa': app.state.config.REQUIRE_2FA,
+                    'two_fa_grace_period_days': app.state.config.TWO_FA_GRACE_PERIOD_DAYS,
                 }
                 if user is not None
                 else {}

@@ -7,7 +7,7 @@ from open_webui.internal.db import Base, JSONField, get_db, get_db_context
 from open_webui.models.users import User, UserModel, UserProfileImageResponse, Users
 from open_webui.utils.validate import validate_profile_image_url
 from pydantic import BaseModel, field_validator
-from sqlalchemy import Boolean, Column, String, Text
+from sqlalchemy import BigInteger, Boolean, Column, String, Text
 
 log = logging.getLogger(__name__)
 
@@ -24,12 +24,17 @@ class Auth(Base):
     password = Column(Text)
     active = Column(Boolean)
 
+    totp_secret = Column(Text, nullable=True)
+    totp_enabled = Column(Boolean, default=False)
+    totp_last_used_at = Column(BigInteger, nullable=True)
+
 
 class AuthModel(BaseModel):
     id: str
     email: str
     password: str
     active: bool = True
+    totp_enabled: bool = False
 
 
 ####################
@@ -203,6 +208,54 @@ class AuthsTable:
                     return True
                 else:
                     return False
+        except Exception:
+            return False
+
+    def get_auth_by_user_id(self, user_id: str, db: Optional[Session] = None) -> Optional[Auth]:
+        try:
+            with get_db_context(db) as db:
+                return db.query(Auth).filter_by(id=user_id).first()
+        except Exception:
+            return None
+
+    def update_totp(
+        self,
+        user_id: str,
+        totp_secret: Optional[str],
+        totp_enabled: bool,
+        db: Optional[Session] = None,
+    ) -> bool:
+        try:
+            with get_db_context(db) as db:
+                result = (
+                    db.query(Auth)
+                    .filter_by(id=user_id)
+                    .update(
+                        {
+                            'totp_secret': totp_secret,
+                            'totp_enabled': totp_enabled,
+                        }
+                    )
+                )
+                db.commit()
+                return result == 1
+        except Exception:
+            return False
+
+    def update_totp_last_used(self, user_id: str, timecode: int, db: Optional[Session] = None) -> bool:
+        try:
+            with get_db_context(db) as db:
+                result = (
+                    db.query(Auth)
+                    .filter_by(id=user_id)
+                    .update(
+                        {
+                            'totp_last_used_at': timecode,
+                        }
+                    )
+                )
+                db.commit()
+                return result == 1
         except Exception:
             return False
 

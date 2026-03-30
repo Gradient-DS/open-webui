@@ -14,8 +14,10 @@
 		getSessionUser,
 		userSignIn,
 		userSignUp,
-		updateUserTimezone
+		updateUserTimezone,
+		verify2FA
 	} from '$lib/apis/auths';
+	import TwoFactorChallenge from '$lib/components/auth/TwoFactorChallenge.svelte';
 
 	import { WEBUI_API_BASE_URL, WEBUI_BASE_URL } from '$lib/constants';
 	import { WEBUI_NAME, config, user, socket } from '$lib/stores';
@@ -41,6 +43,9 @@
 	let confirmPassword = '';
 
 	let ldapUsername = '';
+
+	let show2FAChallenge = false;
+	let partialToken = '';
 
 	const setSessionUser = async (sessionUser, redirectPath: string | null = null) => {
 		if (sessionUser) {
@@ -69,12 +74,18 @@
 	};
 
 	const signInHandler = async () => {
-		const sessionUser = await userSignIn(email, password).catch((error) => {
+		const response = await userSignIn(email, password).catch((error) => {
 			toast.error(`${error}`);
 			return null;
 		});
 
-		await setSessionUser(sessionUser);
+		if (response?.requires_2fa) {
+			partialToken = response.partial_token;
+			show2FAChallenge = true;
+			return;
+		}
+
+		await setSessionUser(response);
 	};
 
 	const signUpHandler = async () => {
@@ -247,7 +258,20 @@
 									/>
 								</div>
 							{/if}
-							<form
+							{#if show2FAChallenge}
+								<TwoFactorChallenge
+									{partialToken}
+									onSuccess={async (sessionUser) => {
+										show2FAChallenge = false;
+										await setSessionUser(sessionUser);
+									}}
+									onCancel={() => {
+										show2FAChallenge = false;
+										partialToken = '';
+									}}
+								/>
+							{:else}
+								<form
 								class=" flex flex-col justify-center"
 								on:submit={(e) => {
 									e.preventDefault();
@@ -573,7 +597,8 @@
 									</button>
 								</div>
 							{/if}
-						</div>
+								{/if}
+							</div>
 						{#if $config?.metadata?.login_footer}
 							<div class="max-w-3xl mx-auto">
 								<div class="mt-2 text-[0.7rem] text-gray-500 dark:text-gray-400 marked">

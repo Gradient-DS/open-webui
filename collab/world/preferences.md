@@ -13,6 +13,7 @@
 - Follow existing codebase patterns (see CLAUDE.md for conventions)
 - Prefer additive changes over modifying upstream code — separate files, conditional mounts, feature flags
 - Use the sync abstraction layer pattern for new integrations (see `collab/docs/external-integration-cookbook.md`)
+- **i18n: all new user-facing text must include Dutch (nl-NL) translations** — add entries to both `en-US/translation.json` and `nl-NL/translation.json`. Keys are alphabetically sorted; empty string in en-US means "use the key itself".
 
 #### Working Approach
 

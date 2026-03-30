@@ -211,3 +211,33 @@
 - Deploy code fix BEFORE cleanup (sync runs every ≤15 min)
 
 **Related:** Investigation [30-03-2026] Cloud KB Permission Leak, plan `2026-03-30-cloud-kb-permission-fix.md`
+
+---
+
+### [30-03-2026] TOTP 2FA — Full Implementation (Phase 1)
+
+**With:** @lexlubbers
+
+**Context:** Adding TOTP-based two-factor authentication for email+password users, with admin enforcement and recovery codes.
+
+**What We Did:**
+- Implemented full TOTP 2FA feature across ~21 files (backend + frontend + Helm)
+- Backend: pyotp + qrcode deps, Alembic migration (totp_secret/totp_enabled/totp_last_used_at on auth + recovery_code table), AES-GCM encrypted TOTP secrets, bcrypt-hashed recovery codes, replay protection, 5-attempt rate limiting
+- New router at `/api/v1/auths/2fa` with 6 endpoints: status, setup, enable, disable, verify, recovery/regenerate
+- Signin flow modified: partial JWT token (5min TTL, purpose=2fa_pending) returned when 2FA enabled, rejected by all normal endpoints
+- Admin: PersistentConfig flags (ENABLE_2FA, REQUIRE_2FA, TWO_FA_GRACE_PERIOD_DAYS), config endpoints, force-disable user 2FA, per-user 2FA status check
+- Frontend: TwoFactorChallenge (login page), TwoFactorSetup (account settings), API clients for all endpoints
+- Created dedicated Security tab in admin settings (extracted from General) with lock icon
+- EditUserModal: conditionally shows "Disable 2FA" only for users with 2FA enabled (fetches per-user status)
+- Enforcement banner in (app)/+layout.svelte with grace period display and dismiss
+- Helm chart: env vars in values.yaml + configmap.yaml
+- i18n: en-US + nl-NL translations for all new strings
+- Fixed Svelte template nesting bug in auth/+page.svelte ({#if show2FAChallenge} closing tag misplaced)
+
+**Key Learnings:**
+- Feature is fully off by default (ENABLE_2FA=false) — admin must enable via Security tab or env var
+- LDAP, SSO/OAuth, API key, and trusted header auth all bypass 2FA — only email+password users affected
+- Partial JWT token pattern (purpose claim) cleanly separates 2FA-pending state from authenticated sessions
+- Admin settings tab system requires changes in 5 places: ADMIN_SETTINGS_TABS constant, Settings.svelte (import, allSettings, icon, rendering chain)
+
+**Related:** Plan `thoughts/shared/plans/2026-03-30-totp-2fa-phase1.md`

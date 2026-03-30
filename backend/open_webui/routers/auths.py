@@ -634,6 +634,22 @@ async def signin(
         )
 
     if user:
+        # Check if 2FA is enabled for this user
+        if request.app.state.config.ENABLE_2FA:
+            auth_record = Auths.get_auth_by_user_id(user.id, db=db)
+            if auth_record and auth_record.totp_enabled:
+                partial_token = create_token(
+                    data={'id': user.id, 'purpose': '2fa_pending'},
+                    expires_delta=datetime.timedelta(minutes=5),
+                )
+                return JSONResponse(
+                    content={
+                        'requires_2fa': True,
+                        'partial_token': partial_token,
+                        'methods': ['totp', 'recovery'],
+                    }
+                )
+
         return create_session_response(request, user, db, response, set_cookie=True)
     else:
         raise HTTPException(400, detail=ERROR_MESSAGES.INVALID_CRED)
