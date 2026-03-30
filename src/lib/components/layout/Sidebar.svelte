@@ -820,37 +820,72 @@
 					</div>
 				{/if}
 
-				{#if (isFeatureEnabled('models') || isFeatureEnabled('prompts') || isFeatureEnabled('tools')) && ($user?.role === 'admin' || $user?.permissions?.workspace?.models || $user?.permissions?.workspace?.prompts || $user?.permissions?.workspace?.tools)}
+				{#if isFeatureEnabled('models') && ($user?.role === 'admin' || $user?.permissions?.workspace?.models)}
 					<div class="">
-						<Tooltip content={$i18n.t('Agents & prompts')} placement="right">
+						<Tooltip content={$i18n.t('Agents')} placement="right">
 							<a
 								class=" cursor-pointer flex rounded-xl hover:bg-gray-100 dark:hover:bg-gray-850 transition group"
-								href="/workspace"
+								href="/workspace/models"
 								on:click={async (e) => {
 									e.stopImmediatePropagation();
 									e.preventDefault();
 
-									goto('/workspace');
+									goto('/workspace/models');
 									itemClickHandler();
 								}}
-								aria-label={$i18n.t('Agents & prompts')}
 								draggable="false"
+								aria-label={$i18n.t('Agents')}
 							>
 								<div class=" self-center flex items-center justify-center size-9">
-									<svg
-										xmlns="http://www.w3.org/2000/svg"
-										fill="none"
-										viewBox="0 0 24 24"
-										stroke-width="1.5"
-										stroke="currentColor"
-										class="size-4.5"
-									>
-										<path
-											stroke-linecap="round"
-											stroke-linejoin="round"
-											d="M13.5 16.875h3.375m0 0h3.375m-3.375 0V13.5m0 3.375v3.375M6 10.5h2.25a2.25 2.25 0 0 0 2.25-2.25V6a2.25 2.25 0 0 0-2.25-2.25H6A2.25 2.25 0 0 0 3.75 6v2.25A2.25 2.25 0 0 0 6 10.5Zm0 9.75h2.25A2.25 2.25 0 0 0 10.5 18v-2.25a2.25 2.25 0 0 0-2.25-2.25H6a2.25 2.25 0 0 0-2.25 2.25V18A2.25 2.25 0 0 0 6 20.25Zm9.75-9.75H18a2.25 2.25 0 0 0 2.25-2.25V6A2.25 2.25 0 0 0 18 3.75h-2.25A2.25 2.25 0 0 0 13.5 6v2.25a2.25 2.25 0 0 0 2.25 2.25Z"
-										/>
-									</svg>
+									<Sparkles className="size-4.5" strokeWidth="2" />
+								</div>
+							</a>
+						</Tooltip>
+					</div>
+				{/if}
+
+				{#if isFeatureEnabled('prompts') && ($user?.role === 'admin' || $user?.permissions?.workspace?.prompts)}
+					<div class="">
+						<Tooltip content={$i18n.t('Prompts')} placement="right">
+							<a
+								class=" cursor-pointer flex rounded-xl hover:bg-gray-100 dark:hover:bg-gray-850 transition group"
+								href="/workspace/prompts"
+								on:click={async (e) => {
+									e.stopImmediatePropagation();
+									e.preventDefault();
+
+									goto('/workspace/prompts');
+									itemClickHandler();
+								}}
+								draggable="false"
+								aria-label={$i18n.t('Prompts')}
+							>
+								<div class=" self-center flex items-center justify-center size-9">
+									<CommandLine className="size-4.5" strokeWidth="2" />
+								</div>
+							</a>
+						</Tooltip>
+					</div>
+				{/if}
+
+				{#if isFeatureEnabled('tools') && ($user?.role === 'admin' || $user?.permissions?.workspace?.tools)}
+					<div class="">
+						<Tooltip content={$i18n.t('Tools')} placement="right">
+							<a
+								class=" cursor-pointer flex rounded-xl hover:bg-gray-100 dark:hover:bg-gray-850 transition group"
+								href="/workspace/tools"
+								on:click={async (e) => {
+									e.stopImmediatePropagation();
+									e.preventDefault();
+
+									goto('/workspace/tools');
+									itemClickHandler();
+								}}
+								draggable="false"
+								aria-label={$i18n.t('Tools')}
+							>
+								<div class=" self-center flex items-center justify-center size-9">
+									<Wrench className="size-4.5" strokeWidth="2" />
 								</div>
 							</a>
 						</Tooltip>
@@ -1072,35 +1107,64 @@
 						</div>
 					{/if}
 
-					{#if (isFeatureEnabled('models') || isFeatureEnabled('prompts') || isFeatureEnabled('tools')) && ($user?.role === 'admin' || $user?.permissions?.workspace?.models || $user?.permissions?.workspace?.prompts || $user?.permissions?.workspace?.tools)}
+					{#if isFeatureEnabled('models') && ($user?.role === 'admin' || $user?.permissions?.workspace?.models)}
 						<div class="px-[0.4375rem] flex justify-center text-gray-800 dark:text-gray-200">
 							<a
-								id="sidebar-workspace-button"
+								id="sidebar-agents-button"
 								class="grow flex items-center space-x-3 rounded-2xl px-2.5 py-2 hover:bg-gray-100 dark:hover:bg-gray-900 transition"
-								href="/workspace"
+								href="/workspace/models"
 								on:click={itemClickHandler}
 								draggable="false"
-								aria-label={$i18n.t('Agents & prompts')}
+								aria-label={$i18n.t('Agents')}
 							>
 								<div class="self-center">
-									<svg
-										xmlns="http://www.w3.org/2000/svg"
-										fill="none"
-										viewBox="0 0 24 24"
-										stroke-width="2"
-										stroke="currentColor"
-										class="size-4.5"
-									>
-										<path
-											stroke-linecap="round"
-											stroke-linejoin="round"
-											d="M13.5 16.875h3.375m0 0h3.375m-3.375 0V13.5m0 3.375v3.375M6 10.5h2.25a2.25 2.25 0 0 0 2.25-2.25V6a2.25 2.25 0 0 0-2.25-2.25H6A2.25 2.25 0 0 0 3.75 6v2.25A2.25 2.25 0 0 0 6 10.5Zm0 9.75h2.25A2.25 2.25 0 0 0 10.5 18v-2.25a2.25 2.25 0 0 0-2.25-2.25H6a2.25 2.25 0 0 0-2.25 2.25V18A2.25 2.25 0 0 0 6 20.25Zm9.75-9.75H18a2.25 2.25 0 0 0 2.25-2.25V6A2.25 2.25 0 0 0 18 3.75h-2.25A2.25 2.25 0 0 0 13.5 6v2.25a2.25 2.25 0 0 0 2.25 2.25Z"
-										/>
-									</svg>
+									<Sparkles className="size-4.5" strokeWidth="2" />
 								</div>
 
 								<div class="flex self-center translate-y-[0.5px]">
-									<div class=" self-center text-sm font-primary">{$i18n.t('Agents & prompts')}</div>
+									<div class=" self-center text-sm font-primary">{$i18n.t('Agents')}</div>
+								</div>
+							</a>
+						</div>
+					{/if}
+
+					{#if isFeatureEnabled('prompts') && ($user?.role === 'admin' || $user?.permissions?.workspace?.prompts)}
+						<div class="px-[0.4375rem] flex justify-center text-gray-800 dark:text-gray-200">
+							<a
+								id="sidebar-prompts-button"
+								class="grow flex items-center space-x-3 rounded-2xl px-2.5 py-2 hover:bg-gray-100 dark:hover:bg-gray-900 transition"
+								href="/workspace/prompts"
+								on:click={itemClickHandler}
+								draggable="false"
+								aria-label={$i18n.t('Prompts')}
+							>
+								<div class="self-center">
+									<CommandLine className="size-4.5" strokeWidth="2" />
+								</div>
+
+								<div class="flex self-center translate-y-[0.5px]">
+									<div class=" self-center text-sm font-primary">{$i18n.t('Prompts')}</div>
+								</div>
+							</a>
+						</div>
+					{/if}
+
+					{#if isFeatureEnabled('tools') && ($user?.role === 'admin' || $user?.permissions?.workspace?.tools)}
+						<div class="px-[0.4375rem] flex justify-center text-gray-800 dark:text-gray-200">
+							<a
+								id="sidebar-tools-button"
+								class="grow flex items-center space-x-3 rounded-2xl px-2.5 py-2 hover:bg-gray-100 dark:hover:bg-gray-900 transition"
+								href="/workspace/tools"
+								on:click={itemClickHandler}
+								draggable="false"
+								aria-label={$i18n.t('Tools')}
+							>
+								<div class="self-center">
+									<Wrench className="size-4.5" strokeWidth="2" />
+								</div>
+
+								<div class="flex self-center translate-y-[0.5px]">
+									<div class=" self-center text-sm font-primary">{$i18n.t('Tools')}</div>
 								</div>
 							</a>
 						</div>

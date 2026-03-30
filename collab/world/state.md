@@ -10,7 +10,7 @@
 
 #### Pending Fixes
 
-- **Cloud KB permission leak**: `_sync_permissions()` in both sync workers needs rewrite — should only verify owner access, not mirror cloud sharing into access grants. After code fix, run cleanup on gradient.soev.ai (see `fix_kb_gradient_soev.md`). Migration hardening (NULL knowledge → private in `f1e2d3c4b5a6`) already applied on `feat/logos` branch.
+- **Cloud KB permission leak — code fix done, cleanup pending**: `_sync_permissions()` rewritten (owner-only check + suspension lifecycle) on `feat/logos` branch. Still need to: (1) deploy code fix to gradient.soev.ai, (2) run grant cleanup SQL (see `fix_kb_gradient_soev.md`) AFTER deploy. Migration hardening (NULL → private) already applied.
 
 #### Open Questions
 

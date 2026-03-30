@@ -159,6 +159,7 @@
 ---
 
 ### [30-03-2026] Cloud KB Permission Leak — Sync Workers Mirror Cloud Sharing into Access Grants
+> **Amended [30-03-2026]:** Fix implemented — see [30-03-2026] Cloud KB Permission Fix — Suspension Lifecycle Implementation.
 
 **With:** @lexlubbers
 
@@ -185,3 +186,28 @@
 4. Cleanup commands saved in `fix_kb_gradient_soev.md`
 
 **Related:** Defense-in-depth commit `1e96c838b`, sync abstraction layer [24-03-2026], [26-03-2026]
+
+---
+
+### [30-03-2026] Cloud KB Permission Fix — Suspension Lifecycle Implementation
+
+**With:** @lexlubbers
+
+**Context:** Implementing the fix for the cloud KB permission leak identified earlier today. Plan: `thoughts/shared/plans/2026-03-30-cloud-kb-permission-fix.md`.
+
+**What We Did:**
+- **Phase 1**: Rewrote `_sync_permissions()` in both OneDrive and Google Drive sync workers — now only verifies owner access to the cloud folder. No access grants are created. If owner loses access, KB is suspended (`suspended_at` + `suspended_reason` in sync meta). If access is regained, suspension is cleared. Base worker returns early when KB is suspended; scheduler skips suspended KBs.
+- **Phase 2**: Added suspension helpers to knowledge model (`is_suspended()`, `get_suspension_info()`, `get_suspended_expired_knowledge()`). Cleanup worker now hard-deletes KBs suspended for 30+ days (`SUSPENSION_TTL_DAYS = 30`).
+- **Phase 3**: Knowledge router blocks non-admin access to suspended KBs (403 with explanatory message on `GET /{id}` and `GET /{id}/files`). Retrieval path skips suspended KBs in chat. List API returns `suspension_info` field for suspended KBs.
+- **Phase 4**: Frontend grays out suspended KBs (`opacity-50 cursor-not-allowed`), prevents navigation on click, shows "Suspended" warning badge with tooltip showing days remaining.
+
+**Key Learnings:**
+- `suspended_at` lives in `meta[meta_key]` (no schema migration needed), consistent with existing sync state storage pattern
+- Owner gets implicit access via `has_permission_filter()` — never needs an explicit access grant, so removing all grant creation is safe
+- The `Users` import was only needed for email-mapping in the old `_sync_permissions()` — removed from both workers
+
+**Still needed:**
+- Manual cleanup of existing grants on gradient.soev.ai (see `fix_kb_gradient_soev.md`)
+- Deploy code fix BEFORE cleanup (sync runs every ≤15 min)
+
+**Related:** Investigation [30-03-2026] Cloud KB Permission Leak, plan `2026-03-30-cloud-kb-permission-fix.md`
