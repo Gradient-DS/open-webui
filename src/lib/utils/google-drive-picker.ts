@@ -221,12 +221,26 @@ export const createPicker = () => {
 							if (!fileId || !fileName) throw new Error('Required file details missing');
 
 							let downloadUrl;
+							let effectiveName = fileName;
 							if (mimeType.includes('google-apps')) {
-								let exportFormat;
-								if (mimeType.includes('document')) exportFormat = 'text/plain';
-								else if (mimeType.includes('spreadsheet')) exportFormat = 'text/csv';
-								else if (mimeType.includes('presentation')) exportFormat = 'text/plain';
-								else exportFormat = 'application/pdf';
+								let exportFormat: string;
+								let exportExt: string;
+								if (mimeType.includes('document')) {
+									exportFormat = 'text/plain';
+									exportExt = '.txt';
+								} else if (mimeType.includes('spreadsheet')) {
+									exportFormat = 'text/csv';
+									exportExt = '.csv';
+								} else if (mimeType.includes('presentation')) {
+									exportFormat = 'text/plain';
+									exportExt = '.txt';
+								} else {
+									exportFormat = 'application/pdf';
+									exportExt = '.pdf';
+								}
+								if (!fileName.toLowerCase().endsWith(exportExt)) {
+									effectiveName = `${fileName}${exportExt}`;
+								}
 								downloadUrl = `https://www.googleapis.com/drive/v3/files/${fileId}/export?mimeType=${encodeURIComponent(exportFormat)}`;
 							} else {
 								downloadUrl = `https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`;
@@ -244,7 +258,7 @@ export const createPicker = () => {
 							const blob = await response.blob();
 							resolve({
 								id: fileId,
-								name: fileName,
+								name: effectiveName,
 								url: downloadUrl,
 								blob: blob,
 								headers: { Authorization: `Bearer ${token}`, Accept: '*/*' }
