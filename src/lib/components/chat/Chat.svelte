@@ -417,6 +417,27 @@
 		}
 	};
 
+	const fileStatusHandler = (data: { file_id: string; status: string; error?: string; collection_name?: string }) => {
+		const idx = files.findIndex((f) => f.id === data.file_id);
+		if (idx < 0) return;
+
+		if (data.status === 'completed') {
+			files[idx].status = 'uploaded';
+			if (data.collection_name) {
+				files[idx].collection_name = data.collection_name;
+			}
+		} else if (data.status === 'failed') {
+			toast.error(
+				$i18n.t('File processing failed: {{error}}', {
+					error: data.error || 'Unknown error'
+				})
+			);
+			files = files.filter((f) => f.id !== data.file_id);
+		}
+
+		files = files;
+	};
+
 	const chatEventHandler = async (event, cb) => {
 		console.log(event);
 
@@ -659,6 +680,7 @@
 		console.log('mounted');
 		window.addEventListener('message', onMessageHandler);
 		$socket?.on('events', chatEventHandler);
+		$socket?.on('file:status', fileStatusHandler);
 
 		$audioQueue?.destroy();
 
@@ -773,6 +795,7 @@
 				selectedFolderSubscribe();
 				window.removeEventListener('message', onMessageHandler);
 				$socket?.off('events', chatEventHandler);
+				$socket?.off('file:status', fileStatusHandler);
 				audioQueueInstance?.destroy();
 				audioQueue.set(null);
 			} catch (e) {

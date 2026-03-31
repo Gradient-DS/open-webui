@@ -110,11 +110,23 @@ class GoogleDriveClient:
 
                 return response
 
-            except httpx.HTTPStatusError as e:
+            except (httpx.HTTPStatusError, httpx.TransportError) as e:
                 last_exception = e
                 if attempt < max_retries - 1:
-                    await asyncio.sleep(2**attempt)
+                    wait_time = 2**attempt
+                    log.warning(
+                        'Request failed (attempt %d/%d): %s — retrying in %ds',
+                        attempt + 1,
+                        max_retries,
+                        e,
+                        wait_time,
+                    )
+                    await asyncio.sleep(wait_time)
                 else:
+                    if isinstance(e, httpx.ConnectError):
+                        raise ConnectionError(
+                            'Unable to reach Google Drive API. Please check your network connection.'
+                        ) from e
                     raise
 
         raise RuntimeError(f'Failed after {max_retries} retries: {last_exception}')

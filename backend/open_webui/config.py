@@ -1678,6 +1678,15 @@ WEBHOOK_URL = PersistentConfig('WEBHOOK_URL', 'webhook_url', os.environ.get('WEB
 
 ENABLE_ADMIN_EXPORT = os.environ.get('ENABLE_ADMIN_EXPORT', 'True').lower() == 'true'
 
+####################################
+# User Data Export
+####################################
+
+ENABLE_DATA_EXPORT = os.environ.get('ENABLE_DATA_EXPORT', 'True').lower() == 'true'
+
+# How long export ZIPs are kept before cleanup (hours)
+DATA_EXPORT_RETENTION_HOURS = int(os.environ.get('DATA_EXPORT_RETENTION_HOURS', '24'))
+
 ENABLE_ADMIN_WORKSPACE_CONTENT_ACCESS = (
     os.environ.get('ENABLE_ADMIN_WORKSPACE_CONTENT_ACCESS', 'True').lower() == 'true'
 )
@@ -1741,6 +1750,46 @@ TWO_FA_GRACE_PERIOD_DAYS = PersistentConfig(
     'TWO_FA_GRACE_PERIOD_DAYS',
     'auth.2fa_grace_period_days',
     int(os.environ.get('TWO_FA_GRACE_PERIOD_DAYS', '7')),
+)
+
+####################################
+# Data Retention TTL
+####################################
+
+DATA_RETENTION_TTL_DAYS = PersistentConfig(
+    'DATA_RETENTION_TTL_DAYS',
+    'admin.data_retention_ttl_days',
+    int(os.environ.get('DATA_RETENTION_TTL_DAYS', '0')),  # 0 = disabled
+)
+
+USER_INACTIVITY_TTL_DAYS = PersistentConfig(
+    'USER_INACTIVITY_TTL_DAYS',
+    'admin.user_inactivity_ttl_days',
+    int(os.environ.get('USER_INACTIVITY_TTL_DAYS', '0')),  # 0 = inherit from master
+)
+
+CHAT_RETENTION_TTL_DAYS = PersistentConfig(
+    'CHAT_RETENTION_TTL_DAYS',
+    'admin.chat_retention_ttl_days',
+    int(os.environ.get('CHAT_RETENTION_TTL_DAYS', '0')),  # 0 = inherit from master
+)
+
+KNOWLEDGE_RETENTION_TTL_DAYS = PersistentConfig(
+    'KNOWLEDGE_RETENTION_TTL_DAYS',
+    'admin.knowledge_retention_ttl_days',
+    int(os.environ.get('KNOWLEDGE_RETENTION_TTL_DAYS', '0')),  # 0 = inherit from master
+)
+
+DATA_RETENTION_WARNING_DAYS = PersistentConfig(
+    'DATA_RETENTION_WARNING_DAYS',
+    'admin.data_retention_warning_days',
+    int(os.environ.get('DATA_RETENTION_WARNING_DAYS', '30')),
+)
+
+ENABLE_RETENTION_WARNING_EMAIL = PersistentConfig(
+    'ENABLE_RETENTION_WARNING_EMAIL',
+    'admin.enable_retention_warning_email',
+    os.environ.get('ENABLE_RETENTION_WARNING_EMAIL', 'False').lower() == 'true',
 )
 
 ####################################

@@ -70,6 +70,43 @@ _STRINGS = {
     },
 }
 
+_RETENTION_STRINGS = {
+    'en': {
+        'subject_with_client': f'{APP_NAME} — Your account will be deleted in {{days_remaining}} days',
+        'subject': f'{APP_NAME} — Your account will be deleted in {{days_remaining}} days',
+        'heading': 'Your account is scheduled for deletion',
+        'body': (
+            'Your account on {app_name} has been inactive for a long time. '
+            'To comply with our data retention policy, your account and all associated data '
+            '(chats, knowledge bases, files) will be automatically deleted in approximately '
+            '<strong>{days_remaining} days</strong>.'
+        ),
+        'action': 'To prevent deletion, simply log in to your account.',
+        'button': 'Log in now',
+        'footer': (
+            'If you no longer need your account, no action is required — '
+            'your data will be securely removed after the retention period.'
+        ),
+    },
+    'nl': {
+        'subject_with_client': f'{APP_NAME} — Uw account wordt over {{days_remaining}} dagen verwijderd',
+        'subject': f'{APP_NAME} — Uw account wordt over {{days_remaining}} dagen verwijderd',
+        'heading': 'Uw account staat gepland voor verwijdering',
+        'body': (
+            'Uw account op {app_name} is al lange tijd inactief. '
+            'Om te voldoen aan ons dataretentiebeleid worden uw account en alle bijbehorende gegevens '
+            '(chats, kennisbanken, bestanden) automatisch verwijderd over ongeveer '
+            '<strong>{days_remaining} dagen</strong>.'
+        ),
+        'action': 'Om verwijdering te voorkomen, logt u eenvoudig in op uw account.',
+        'button': 'Nu inloggen',
+        'footer': (
+            'Als u uw account niet meer nodig heeft, hoeft u niets te doen — '
+            'uw gegevens worden na de bewaartermijn veilig verwijderd.'
+        ),
+    },
+}
+
 
 def _get_strings(locale: str) -> dict:
     lang = locale.split('-')[0].lower() if locale else 'en'
@@ -142,6 +179,71 @@ u + #body a {{
         {body}
     </p>
     <a href="{invite_url}"
+       style="display: inline-block; background: #0f172a; color: #ffffff;
+              padding: 12px 24px; border-radius: 8px; text-decoration: none;
+              font-weight: 500; margin: 24px 0;">
+        <span style="color: #ffffff;">{button}</span>
+    </a>
+    <p style="color: #9a9a9a; font-size: 13px; margin-top: 32px;">
+        {footer}
+    </p>
+</div>
+</body>
+</html>"""
+
+
+def _get_retention_strings(locale: str) -> dict:
+    lang = locale.split('-')[0].lower() if locale else 'en'
+    return _RETENTION_STRINGS.get(lang, _RETENTION_STRINGS['en'])
+
+
+def render_retention_warning_subject(
+    days_remaining: int,
+    locale: str = 'en',
+) -> str:
+    strings = _get_retention_strings(locale)
+    return strings['subject'].format(days_remaining=days_remaining)
+
+
+def render_retention_warning_email(
+    login_url: str,
+    days_remaining: int,
+    locale: str = 'en',
+) -> str:
+    strings = _get_retention_strings(locale)
+    heading = strings['heading']
+    body = strings['body'].format(app_name=APP_NAME_HTML, days_remaining=days_remaining)
+    action = strings['action']
+    button = strings['button']
+    footer = strings['footer']
+
+    return f"""\
+<!DOCTYPE html>
+<html>
+<head>
+<meta name="format-detection" content="telephone=no, date=no, address=no, email=no, url=no">
+<style type="text/css">
+u + #body a {{
+    color: inherit !important;
+    text-decoration: none !important;
+    font-size: inherit !important;
+    font-weight: inherit !important;
+}}
+</style>
+</head>
+<body id="body">
+<div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            max-width: 560px; margin: 0 auto; padding: 40px 20px;">
+    <h2 style="color: #1a1a1a; margin-bottom: 8px;">
+        {heading}
+    </h2>
+    <p style="color: #4a4a4a; font-size: 16px; line-height: 1.5;">
+        {body}
+    </p>
+    <p style="color: #4a4a4a; font-size: 16px; line-height: 1.5;">
+        {action}
+    </p>
+    <a href="{login_url}"
        style="display: inline-block; background: #0f172a; color: #ffffff;
               padding: 12px 24px; border-radius: 8px; text-decoration: none;
               font-weight: 500; margin: 24px 0;">

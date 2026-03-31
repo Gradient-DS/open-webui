@@ -116,15 +116,18 @@ def call_external_pipeline(
         # Determine file type from content_type or filename
         filetype = 'TXT'  # Default - text is already parsed
         if content_type:
-            if 'pdf' in content_type.lower():
+            ct = content_type.lower()
+            if 'pdf' in ct:
                 filetype = 'PDF'
-            elif 'word' in content_type.lower() or 'docx' in content_type.lower():
+            elif 'word' in ct or 'docx' in ct:
                 filetype = 'DOCX'
-            elif 'excel' in content_type.lower() or 'xlsx' in content_type.lower():
+            elif 'excel' in ct or 'spreadsheet' in ct or 'xlsx' in ct:
                 filetype = 'XLSX'
-            elif 'powerpoint' in content_type.lower() or 'pptx' in content_type.lower():
+            elif 'csv' in ct:
+                filetype = 'CSV'
+            elif 'powerpoint' in ct or 'presentation' in ct or 'pptx' in ct:
                 filetype = 'PPTX'
-            elif 'text' in content_type.lower():
+            elif 'text' in ct:
                 filetype = 'TXT'
 
         # Load document using Open WebUI's loader to extract text

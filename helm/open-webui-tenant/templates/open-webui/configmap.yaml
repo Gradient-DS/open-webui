@@ -12,7 +12,7 @@ data:
   RESET_CONFIG_ON_START: {{ .Values.openWebui.config.resetConfigOnStart | quote }}
   WEBUI_NAME: {{ .Values.openWebui.config.webuiName | quote }}
   CLIENT_NAME: {{ .Values.tenant.clientName | quote }}
-  CORS_ALLOW_ORIGIN: {{ .Values.openWebui.config.corsAllowOrigin | quote }}
+  CORS_ALLOW_ORIGIN: {{ .Values.openWebui.config.corsAllowOrigin | default (printf "https://%s" .Values.tenant.domain) | quote }}
 
   # Locale
   DEFAULT_LOCALE: {{ .Values.openWebui.config.defaultLocale | quote }}
@@ -222,6 +222,8 @@ data:
 
   # Admin
   ENABLE_ADMIN_EXPORT: {{ .Values.openWebui.config.enableAdminExport | quote }}
+  ENABLE_DATA_EXPORT: {{ .Values.openWebui.config.enableDataExport | quote }}
+  DATA_EXPORT_RETENTION_HOURS: {{ .Values.openWebui.config.dataExportRetentionHours | quote }}
   ENABLE_ADMIN_CHAT_ACCESS: {{ .Values.openWebui.config.enableAdminChatAccess | quote }}
   ENABLE_ADMIN_WORKSPACE_CONTENT_ACCESS: {{ .Values.openWebui.config.enableAdminWorkspaceContentAccess | quote }}
   BYPASS_ADMIN_ACCESS_CONTROL: {{ .Values.openWebui.config.bypassAdminAccessControl | quote }}
@@ -289,6 +291,28 @@ data:
   {{- end }}
 
   BYPASS_MODEL_ACCESS_CONTROL: {{ .Values.openWebui.config.bypassModelAccessControl | quote }}
+
+  # Security Headers
+  {{- with .Values.openWebui.config.securityHeaders }}
+  {{- if .hsts }}
+  HSTS: {{ .hsts | quote }}
+  {{- end }}
+  {{- if .xFrameOptions }}
+  XFRAME_OPTIONS: {{ .xFrameOptions | quote }}
+  {{- end }}
+  {{- if .xContentType }}
+  XCONTENT_TYPE: {{ .xContentType | quote }}
+  {{- end }}
+  {{- if .referrerPolicy }}
+  REFERRER_POLICY: {{ .referrerPolicy | quote }}
+  {{- end }}
+  {{- if .cacheControl }}
+  CACHE_CONTROL: {{ .cacheControl | quote }}
+  {{- end }}
+  {{- end }}
+
+  # Cookie Security
+  WEBUI_SESSION_COOKIE_SECURE: {{ .Values.openWebui.config.cookieSecure | default "true" | quote }}
 
   # Audit Logging
   AUDIT_LOG_LEVEL: {{ .Values.openWebui.config.auditLogLevel | quote }}
@@ -362,4 +386,12 @@ data:
   ENABLE_2FA: {{ .Values.openWebui.config.enable2fa | default "false" | quote }}
   REQUIRE_2FA: {{ .Values.openWebui.config.require2fa | default "false" | quote }}
   TWO_FA_GRACE_PERIOD_DAYS: {{ .Values.openWebui.config.twoFaGracePeriodDays | default "7" | quote }}
+
+  # Data Retention TTL
+  DATA_RETENTION_TTL_DAYS: {{ .Values.openWebui.config.dataRetentionTtlDays | default "0" | quote }}
+  USER_INACTIVITY_TTL_DAYS: {{ .Values.openWebui.config.userInactivityTtlDays | default "0" | quote }}
+  CHAT_RETENTION_TTL_DAYS: {{ .Values.openWebui.config.chatRetentionTtlDays | default "0" | quote }}
+  KNOWLEDGE_RETENTION_TTL_DAYS: {{ .Values.openWebui.config.knowledgeRetentionTtlDays | default "0" | quote }}
+  DATA_RETENTION_WARNING_DAYS: {{ .Values.openWebui.config.dataRetentionWarningDays | default "30" | quote }}
+  ENABLE_RETENTION_WARNING_EMAIL: {{ .Values.openWebui.config.enableRetentionWarningEmail | default "false" | quote }}
 {{- end }}

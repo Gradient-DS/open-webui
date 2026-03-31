@@ -17,6 +17,10 @@
 		getArchiveConfig,
 		updateArchiveConfig
 	} from '$lib/apis/archives';
+	import {
+		getDataRetentionConfig,
+		setDataRetentionConfig
+	} from '$lib/apis/configs';
 
 	const i18n = getContext('i18n');
 
@@ -28,12 +32,28 @@
 	let archivesLoading = true;
 	let archiveSearch = '';
 
+	let retentionConfig = {
+		DATA_RETENTION_TTL_DAYS: 0,
+		USER_INACTIVITY_TTL_DAYS: 0,
+		CHAT_RETENTION_TTL_DAYS: 0,
+		KNOWLEDGE_RETENTION_TTL_DAYS: 0,
+		DATA_RETENTION_WARNING_DAYS: 30,
+		ENABLE_RETENTION_WARNING_EMAIL: false
+	};
+
+	function effectiveDays(override: number, master: number): number {
+		return override > 0 ? override : master;
+	}
+
 	let archiveConfig = {
 		enable_user_archival: true,
 		default_archive_retention_days: 1095,
 		enable_auto_archive_on_self_delete: false,
 		auto_archive_retention_days: 365
 	};
+
+	// Retention confirm modal
+	let showRetentionConfirm = false;
 
 	// Modal state
 	let showArchiveModal = false;
@@ -68,6 +88,26 @@
 
 		const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
 		saveAs(blob, 'users.csv');
+	};
+
+	const loadRetentionConfig = async () => {
+		try {
+			const res = await getDataRetentionConfig(localStorage.token);
+			if (res) {
+				retentionConfig = res;
+			}
+		} catch (err) {
+			console.error('Failed to load retention config:', err);
+		}
+	};
+
+	const handleSaveRetentionConfig = async () => {
+		try {
+			await setDataRetentionConfig(localStorage.token, retentionConfig);
+			toast.success($i18n.t('Data retention settings saved'));
+		} catch (err) {
+			toast.error($i18n.t('Failed to save data retention settings'));
+		}
 	};
 
 	async function loadArchiveConfig() {
@@ -149,6 +189,7 @@
 	}
 
 	onMount(async () => {
+		await loadRetentionConfig();
 		await loadArchiveConfig();
 		await loadArchives();
 	});
@@ -273,6 +314,162 @@
 			</div>
 		{/if}
 
+		<!-- Data Retention Section -->
+		<hr class="border-gray-50 dark:border-gray-850/30 my-2" />
+
+		<div>
+			<div class="flex items-center justify-between mb-1">
+				<div class="text-sm font-medium">{$i18n.t('Data Retention')}</div>
+			</div>
+			<div class="text-xs text-gray-500 mb-3">
+				{$i18n.t('Automatically clean up inactive data after a retention period.')}
+			</div>
+
+			<div class="mb-3 space-y-3">
+				<!-- Enable toggle -->
+				<div class="flex w-full justify-between items-center">
+					<div class="self-center text-xs font-medium">{$i18n.t('Enable data retention')}</div>
+					<button
+						type="button"
+						class="relative inline-flex h-5 w-9 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none"
+						class:bg-gray-200={retentionConfig.DATA_RETENTION_TTL_DAYS <= 0}
+						class:dark:bg-gray-700={retentionConfig.DATA_RETENTION_TTL_DAYS <= 0}
+						class:bg-emerald-500={retentionConfig.DATA_RETENTION_TTL_DAYS > 0}
+						on:click={() => {
+							retentionConfig.DATA_RETENTION_TTL_DAYS = retentionConfig.DATA_RETENTION_TTL_DAYS > 0 ? 0 : 730;
+						}}
+					>
+						<span
+							class="pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out"
+							class:translate-x-4={retentionConfig.DATA_RETENTION_TTL_DAYS > 0}
+							class:translate-x-0={retentionConfig.DATA_RETENTION_TTL_DAYS <= 0}
+						/>
+					</button>
+				</div>
+
+				{#if retentionConfig.DATA_RETENTION_TTL_DAYS > 0}
+					<!-- Default retention period -->
+					<div class="flex w-full justify-between items-center">
+						<div class="self-center text-xs">{$i18n.t('Default retention period (days)')}</div>
+						<input
+							type="number"
+							class="w-20 rounded py-1 px-2 text-xs bg-gray-50 dark:bg-gray-850 dark:text-gray-300"
+							bind:value={retentionConfig.DATA_RETENTION_TTL_DAYS}
+							min="1"
+						/>
+					</div>
+
+					<!-- Per-entity overrides -->
+					<div class="text-xs text-gray-500 mt-2 mb-1">
+						{$i18n.t('Override per data type (leave empty to use default):')}
+					</div>
+
+					<div class="rounded border dark:border-gray-800 p-2 space-y-2">
+						<div class="flex w-full justify-between items-center">
+							<div class="self-center text-xs">{$i18n.t('Account deletion (user inactivity)')}</div>
+							<div class="flex items-center gap-2">
+								<input
+									type="number"
+									class="w-20 rounded py-1 px-2 text-xs bg-gray-50 dark:bg-gray-850 dark:text-gray-300"
+									placeholder=""
+									value={retentionConfig.USER_INACTIVITY_TTL_DAYS || ''}
+									on:input={(e) => { retentionConfig.USER_INACTIVITY_TTL_DAYS = parseInt(e.target.value) || 0; }}
+									min="0"
+								/>
+								<span class="text-xs text-gray-400 w-24 text-right">
+									→ {effectiveDays(retentionConfig.USER_INACTIVITY_TTL_DAYS, retentionConfig.DATA_RETENTION_TTL_DAYS)} {$i18n.t('days')}
+								</span>
+							</div>
+						</div>
+
+						<div class="flex w-full justify-between items-center">
+							<div class="self-center text-xs">{$i18n.t('Chats')}</div>
+							<div class="flex items-center gap-2">
+								<input
+									type="number"
+									class="w-20 rounded py-1 px-2 text-xs bg-gray-50 dark:bg-gray-850 dark:text-gray-300"
+									placeholder=""
+									value={retentionConfig.CHAT_RETENTION_TTL_DAYS || ''}
+									on:input={(e) => { retentionConfig.CHAT_RETENTION_TTL_DAYS = parseInt(e.target.value) || 0; }}
+									min="0"
+								/>
+								<span class="text-xs text-gray-400 w-24 text-right">
+									→ {effectiveDays(retentionConfig.CHAT_RETENTION_TTL_DAYS, retentionConfig.DATA_RETENTION_TTL_DAYS)} {$i18n.t('days')}
+								</span>
+							</div>
+						</div>
+
+						<div class="flex w-full justify-between items-center">
+							<div class="self-center text-xs">{$i18n.t('Knowledge bases')}</div>
+							<div class="flex items-center gap-2">
+								<input
+									type="number"
+									class="w-20 rounded py-1 px-2 text-xs bg-gray-50 dark:bg-gray-850 dark:text-gray-300"
+									placeholder=""
+									value={retentionConfig.KNOWLEDGE_RETENTION_TTL_DAYS || ''}
+									on:input={(e) => { retentionConfig.KNOWLEDGE_RETENTION_TTL_DAYS = parseInt(e.target.value) || 0; }}
+									min="0"
+								/>
+								<span class="text-xs text-gray-400 w-24 text-right">
+									→ {effectiveDays(retentionConfig.KNOWLEDGE_RETENTION_TTL_DAYS, retentionConfig.DATA_RETENTION_TTL_DAYS)} {$i18n.t('days')}
+								</span>
+							</div>
+						</div>
+					</div>
+
+					<!-- Warning email section (only visible when email is configured) -->
+					{#if $config?.features?.enable_email_invites}
+						<div class="text-xs text-gray-500 mt-2 mb-1">
+							{$i18n.t('Warning emails')}
+						</div>
+
+						<div class="rounded border dark:border-gray-800 p-2 space-y-2">
+							<div class="flex w-full justify-between items-center">
+								<div class="self-center text-xs">{$i18n.t('Send warning emails')}</div>
+								<button
+									type="button"
+									class="relative inline-flex h-5 w-9 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none"
+									class:bg-gray-200={!retentionConfig.ENABLE_RETENTION_WARNING_EMAIL}
+									class:dark:bg-gray-700={!retentionConfig.ENABLE_RETENTION_WARNING_EMAIL}
+									class:bg-emerald-500={retentionConfig.ENABLE_RETENTION_WARNING_EMAIL}
+									on:click={() => {
+										retentionConfig.ENABLE_RETENTION_WARNING_EMAIL = !retentionConfig.ENABLE_RETENTION_WARNING_EMAIL;
+									}}
+								>
+									<span
+										class="pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out"
+										class:translate-x-4={retentionConfig.ENABLE_RETENTION_WARNING_EMAIL}
+										class:translate-x-0={!retentionConfig.ENABLE_RETENTION_WARNING_EMAIL}
+									/>
+								</button>
+							</div>
+
+							{#if retentionConfig.ENABLE_RETENTION_WARNING_EMAIL}
+								<div class="flex w-full justify-between items-center">
+									<div class="self-center text-xs">{$i18n.t('Days before deletion')}</div>
+									<input
+										type="number"
+										class="w-20 rounded py-1 px-2 text-xs bg-gray-50 dark:bg-gray-850 dark:text-gray-300"
+										bind:value={retentionConfig.DATA_RETENTION_WARNING_DAYS}
+										min="1"
+									/>
+								</div>
+							{/if}
+						</div>
+					{/if}
+				{/if}
+
+				<div class="flex justify-end mt-2">
+					<button
+						class="px-3 py-1.5 text-xs font-medium rounded bg-emerald-600 hover:bg-emerald-700 text-white transition"
+						on:click={() => { showRetentionConfirm = true; }}
+					>
+						{$i18n.t('Save')}
+					</button>
+				</div>
+			</div>
+		</div>
+
 		<!-- User Archives Section -->
 		{#if archiveConfig.enable_user_archival}
 			<hr class="border-gray-50 dark:border-gray-850/30 my-2" />
@@ -378,9 +575,67 @@
 	</div>
 </div>
 
+<!-- Data Retention Confirmation Modal -->
+{#if showRetentionConfirm}
+	<div class="fixed inset-0 bg-black/30 dark:bg-black/60 flex items-center justify-center z-9999 overflow-y-auto">
+		<div class="bg-white dark:bg-gray-900 rounded-lg p-4 max-w-md w-full mx-4">
+			<h3 class="text-sm font-medium mb-3">{$i18n.t('Confirm Data Retention Settings')}</h3>
+
+			{#if retentionConfig.DATA_RETENTION_TTL_DAYS > 0}
+				<p class="text-xs text-gray-500 mb-3">{$i18n.t('The following cleanup will run automatically every 24 hours:')}</p>
+				<ul class="text-xs space-y-1.5 mb-4">
+					<li class="flex items-start gap-2">
+						<span class="text-red-500 mt-0.5">&#x2022;</span>
+						<span>{$i18n.t('Inactive user accounts will be archived and deleted after {{days}} days', { days: effectiveDays(retentionConfig.USER_INACTIVITY_TTL_DAYS, retentionConfig.DATA_RETENTION_TTL_DAYS) })}</span>
+					</li>
+					<li class="flex items-start gap-2">
+						<span class="text-amber-500 mt-0.5">&#x2022;</span>
+						<span>{$i18n.t('Unused chats will be deleted after {{days}} days', { days: effectiveDays(retentionConfig.CHAT_RETENTION_TTL_DAYS, retentionConfig.DATA_RETENTION_TTL_DAYS) })}</span>
+					</li>
+					<li class="flex items-start gap-2">
+						<span class="text-amber-500 mt-0.5">&#x2022;</span>
+						<span>{$i18n.t('Unused knowledge bases will be deleted after {{days}} days', { days: effectiveDays(retentionConfig.KNOWLEDGE_RETENTION_TTL_DAYS, retentionConfig.DATA_RETENTION_TTL_DAYS) })}</span>
+					</li>
+					{#if retentionConfig.ENABLE_RETENTION_WARNING_EMAIL && $config?.features?.enable_email_invites}
+						<li class="flex items-start gap-2">
+							<span class="text-blue-500 mt-0.5">&#x2022;</span>
+							<span>{$i18n.t('Warning emails will be sent {{days}} days before account deletion', { days: retentionConfig.DATA_RETENTION_WARNING_DAYS })}</span>
+						</li>
+					{/if}
+				</ul>
+				<p class="text-xs text-gray-400 mb-4">{$i18n.t('Admin accounts are never automatically deleted.')}</p>
+			{:else}
+				<p class="text-xs text-gray-500 mb-4">{$i18n.t('Data retention will be disabled. No automatic cleanup will run.')}</p>
+			{/if}
+
+			<div class="flex justify-end gap-2">
+				<button
+					class="px-3 py-1.5 text-xs font-medium rounded border dark:border-gray-700 hover:bg-gray-100 dark:hover:bg-gray-800 transition"
+					on:click={() => { showRetentionConfirm = false; }}
+				>
+					{$i18n.t('Cancel')}
+				</button>
+				<button
+					class="px-3 py-1.5 text-xs font-medium rounded text-white transition"
+					class:bg-emerald-600={retentionConfig.DATA_RETENTION_TTL_DAYS > 0}
+					class:hover:bg-emerald-700={retentionConfig.DATA_RETENTION_TTL_DAYS > 0}
+					class:bg-gray-600={retentionConfig.DATA_RETENTION_TTL_DAYS <= 0}
+					class:hover:bg-gray-700={retentionConfig.DATA_RETENTION_TTL_DAYS <= 0}
+					on:click={async () => {
+						showRetentionConfirm = false;
+						await handleSaveRetentionConfig();
+					}}
+				>
+					{$i18n.t('Confirm')}
+				</button>
+			</div>
+		</div>
+	</div>
+{/if}
+
 <!-- Archive Details Modal -->
 {#if showArchiveModal}
-	<div class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+	<div class="fixed inset-0 bg-black/30 dark:bg-black/60 flex items-center justify-center z-9999 overflow-y-auto">
 		<div class="bg-white dark:bg-gray-900 rounded-lg p-4 max-w-lg w-full mx-4 max-h-[70vh] overflow-y-auto">
 			<div class="flex justify-between items-center mb-3">
 				<h3 class="text-sm font-medium">{$i18n.t('Archive Details')}</h3>

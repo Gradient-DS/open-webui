@@ -291,6 +291,7 @@ type Config = {
 		enable_onedrive_integration: boolean;
 		enable_image_generation: boolean;
 		enable_admin_export: boolean;
+		enable_data_export: boolean;
 		enable_admin_chat_access: boolean;
 		enable_admin_analytics: boolean;
 		enable_community_sharing: boolean;

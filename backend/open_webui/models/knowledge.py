@@ -753,6 +753,28 @@ class KnowledgeTable:
                 .all()
             ]
 
+    def get_stale_knowledge(
+        self,
+        stale_before: int,
+        limit: int = 50,
+        exclude_user_ids: Optional[list[str]] = None,
+    ) -> list[KnowledgeModel]:
+        """Find non-deleted local KBs whose updated_at is before the given timestamp.
+        Only targets 'local' type — cloud KBs have their own suspension lifecycle."""
+        with get_db() as db:
+            query = (
+                db.query(Knowledge)
+                .filter(Knowledge.deleted_at.is_(None))
+                .filter(Knowledge.updated_at < stale_before)
+                .filter(Knowledge.type == 'local')  # Cloud KBs have suspension TTL
+            )
+            if exclude_user_ids:
+                query = query.filter(Knowledge.user_id.notin_(exclude_user_ids))
+            return [
+                KnowledgeModel.model_validate(kb)
+                for kb in query.order_by(Knowledge.updated_at.asc()).limit(limit).all()
+            ]
+
     def soft_delete_by_id(self, id: str) -> bool:
         """Mark a knowledge base as deleted (soft-delete)."""
         with get_db() as db:

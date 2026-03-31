@@ -543,6 +543,30 @@ class UsersTable:
             query = db.query(User).filter(User.last_active_at > today_midnight_timestamp)
             return query.count()
 
+    def get_inactive_users(
+        self,
+        inactive_since: int,
+        limit: int = 50,
+        exclude_roles: Optional[list[str]] = None,
+        db: Optional[Session] = None,
+    ) -> list[UserModel]:
+        """Find users whose last_active_at is before the given timestamp.
+
+        Args:
+            inactive_since: epoch timestamp — users active before this are inactive
+            limit: max users to return per batch
+            exclude_roles: roles to skip (e.g., ['admin'] to protect admin accounts)
+        """
+        with get_db_context(db) as db:
+            query = db.query(User).filter(
+                User.last_active_at < inactive_since,
+            )
+            if exclude_roles:
+                query = query.filter(User.role.notin_(exclude_roles))
+            return [
+                UserModel.model_validate(user) for user in query.order_by(User.last_active_at.asc()).limit(limit).all()
+            ]
+
     def update_user_role_by_id(self, id: str, role: str, db: Optional[Session] = None) -> Optional[UserModel]:
         try:
             with get_db_context(db) as db:

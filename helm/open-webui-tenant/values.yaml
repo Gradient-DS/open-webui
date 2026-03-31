@@ -113,7 +113,7 @@ openWebui:
     enablePersistentConfig: "false"
     resetConfigOnStart: "true"
     webuiName: "soev.ai"
-    corsAllowOrigin: "*"
+    corsAllowOrigin: ""  # Empty = defaults to https://<tenant.domain>. Override for additional origins.
 
     # Locale
     defaultLocale: "nl-NL"
@@ -305,6 +305,8 @@ openWebui:
 
     # Admin
     enableAdminExport: "false"
+    enableDataExport: "true"
+    dataExportRetentionHours: "24"
     enableAdminChatAccess: "false"
     enableAdminWorkspaceContentAccess: "false"  # Disable admin seeing all prompts/models
     bypassAdminAccessControl: "false"  # Admin must follow access control
@@ -366,6 +368,17 @@ openWebui:
     require2fa: "false"
     twoFaGracePeriodDays: "7"
 
+    # Security Headers (all enabled by default — set to "" to disable)
+    securityHeaders:
+      hsts: "max-age=31536000;includeSubDomains"
+      xFrameOptions: "DENY"
+      xContentType: "nosniff"
+      referrerPolicy: "no-referrer"
+      cacheControl: "no-store, max-age=0"
+
+    # Cookie Security (true for all HTTPS deployments)
+    cookieSecure: "true"
+
     # Audit Logging
     # Levels: NONE, METADATA, REQUEST, REQUEST_RESPONSE
     # METADATA logs who/what/when without PII from request/response bodies
@@ -376,6 +389,15 @@ openWebui:
     defaultArchiveRetentionDays: "1095"  # 3 years (ISO 27001 compliance)
     enableAutoArchiveOnSelfDelete: "false"
     autoArchiveRetentionDays: "365"  # 1 year for self-deletions
+
+    # Data Retention TTL (DPIA / GDPR storage limitation)
+    # Set dataRetentionTtlDays > 0 to enable automated data cleanup
+    dataRetentionTtlDays: "0"             # 0 = disabled (customers opt-in)
+    userInactivityTtlDays: "0"            # 0 = inherit from master TTL
+    chatRetentionTtlDays: "0"             # 0 = inherit from master TTL
+    knowledgeRetentionTtlDays: "0"        # 0 = inherit from master TTL
+    dataRetentionWarningDays: "30"        # Days before TTL to flag as approaching deletion
+    enableRetentionWarningEmail: "false"  # Send warning emails via Graph API before deletion
 
     # Storage Provider
     # Set to "s3" to use S3-compatible object storage for file uploads
