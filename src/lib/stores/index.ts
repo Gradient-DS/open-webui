@@ -301,6 +301,7 @@ type Config = {
 		enable_direct_connections: boolean;
 		enable_version_update_check: boolean;
 		folder_max_file_count?: number;
+		knowledge_max_file_count?: number;
 		// Feature Flags (SaaS Tier Control)
 		feature_chat_controls?: boolean;
 		feature_capture?: boolean;

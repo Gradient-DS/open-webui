@@ -342,6 +342,9 @@ openWebui:
     onedriveMaxFilesPerSync: "250"
     onedriveMaxFileSizeMb: "10"
 
+    # Knowledge Base File Limit
+    knowledgeMaxFileCount: "250"
+
     # Email Invites (Microsoft Graph API)
     enableEmailInvites: "false"
     emailGraphTenantId: ""       # Azure AD Tenant ID for email app

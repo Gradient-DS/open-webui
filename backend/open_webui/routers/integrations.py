@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, Uplo
 from langchain_core.documents import Document
 from pydantic import BaseModel
 
+from open_webui.config import KNOWLEDGE_MAX_FILE_COUNT
 from open_webui.models.files import FileForm, Files
 from open_webui.models.knowledge import KnowledgeForm, Knowledges
 from open_webui.retrieval.loaders.main import Loader
@@ -519,7 +520,7 @@ def ingest_documents(
         )
 
     # Check file limit
-    max_files = provider_config.get('max_files_per_kb', 250)
+    max_files = provider_config.get('max_files_per_kb', KNOWLEDGE_MAX_FILE_COUNT)
     current_files = Knowledges.get_files_by_id(knowledge.id)
     existing_ids = {f.id for f in current_files} if current_files else set()
     new_doc_ids = {f'{provider}-{doc.get("source_id", "")}' for doc in form_data.documents}

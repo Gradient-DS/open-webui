@@ -16,7 +16,7 @@ from open_webui.models.knowledge import Knowledges
 from open_webui.models.files import Files, FileForm, FileUpdateForm
 from open_webui.models.users import Users
 from open_webui.storage.provider import Storage
-from open_webui.config import FILE_PROCESSING_MAX_CONCURRENT
+from open_webui.config import FILE_PROCESSING_MAX_CONCURRENT, KNOWLEDGE_MAX_FILE_COUNT
 from open_webui.retrieval.vector.factory import VECTOR_DB_CLIENT
 from open_webui.services.deletion import DeletionService
 from open_webui.services.sync.constants import SyncErrorType, FailedFile, CONTENT_TYPES
@@ -761,7 +761,7 @@ class BaseSyncWorker(ABC):
                         all_files_to_process.append(file_info)
 
             # Apply file count limit
-            max_files = min(self.max_files_config, 250)
+            max_files = min(self.max_files_config, KNOWLEDGE_MAX_FILE_COUNT)
             current_files = Knowledges.get_files_by_id(self.knowledge_id) or []
             current_file_count = len(current_files)
             available_slots = max(0, max_files - current_file_count)

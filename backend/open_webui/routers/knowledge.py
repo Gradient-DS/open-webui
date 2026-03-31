@@ -41,7 +41,7 @@ from open_webui.utils.access_control import has_permission, filter_allowed_acces
 from open_webui.models.access_grants import AccessGrants
 
 
-from open_webui.config import BYPASS_ADMIN_ACCESS_CONTROL
+from open_webui.config import BYPASS_ADMIN_ACCESS_CONTROL, KNOWLEDGE_MAX_FILE_COUNT
 from open_webui.models.models import Models, ModelForm
 
 log = logging.getLogger(__name__)
@@ -718,10 +718,10 @@ def add_file_to_knowledge_by_id(
     # Check file count limit for non-local KBs
     if knowledge.type != 'local':
         current_files = Knowledges.get_files_by_id(id, db=db)
-        if current_files and len(current_files) >= 250:
+        if current_files and len(current_files) >= KNOWLEDGE_MAX_FILE_COUNT:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail='This knowledge base has reached the 250-file limit.',
+                detail=f'This knowledge base has reached the {KNOWLEDGE_MAX_FILE_COUNT}-file limit.',
             )
 
     file = Files.get_file_by_id(form_data.file_id, db=db)
@@ -1161,11 +1161,11 @@ async def add_files_to_knowledge_batch(
     if knowledge.type != 'local':
         current_files = Knowledges.get_files_by_id(id, db=db)
         current_count = len(current_files) if current_files else 0
-        if current_count + len(form_data) > 250:
+        if current_count + len(form_data) > KNOWLEDGE_MAX_FILE_COUNT:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=(
-                    f'Adding {len(form_data)} files would exceed the 250-file limit ({current_count} files currently).'
+                    f'Adding {len(form_data)} files would exceed the {KNOWLEDGE_MAX_FILE_COUNT}-file limit ({current_count} files currently).'
                 ),
             )
 

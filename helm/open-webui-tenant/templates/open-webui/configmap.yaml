@@ -271,6 +271,7 @@ data:
   ONEDRIVE_SYNC_INTERVAL_MINUTES: {{ .Values.openWebui.config.onedriveSyncIntervalMinutes | quote }}
   ONEDRIVE_MAX_FILES_PER_SYNC: {{ .Values.openWebui.config.onedriveMaxFilesPerSync | quote }}
   ONEDRIVE_MAX_FILE_SIZE_MB: {{ .Values.openWebui.config.onedriveMaxFileSizeMb | quote }}
+  KNOWLEDGE_MAX_FILE_COUNT: {{ .Values.openWebui.config.knowledgeMaxFileCount | quote }}
 
   # Email Invites (Microsoft Graph API)
   ENABLE_EMAIL_INVITES: {{ .Values.openWebui.config.enableEmailInvites | quote }}
