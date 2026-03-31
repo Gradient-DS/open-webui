@@ -3005,6 +3005,14 @@ async def serve_cache_file(
     # prevent path traversal
     if not file_path.startswith(os.path.abspath(CACHE_DIR)):
         raise HTTPException(status_code=404, detail='File not found')
+
+    # Ownership check for user exports: only the owning user or an admin
+    parts = path.split('/')
+    if len(parts) >= 2 and parts[0] == 'exports':
+        export_owner_id = parts[1]
+        if user.role != 'admin' and user.id != export_owner_id:
+            raise HTTPException(status_code=404, detail='File not found')
+
     if not os.path.isfile(file_path):
         raise HTTPException(status_code=404, detail='File not found')
     return FileResponse(file_path)

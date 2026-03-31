@@ -4,18 +4,24 @@
 
 #### Current Work
 
-- **TOTP 2FA Phase 1 — implementation complete** on branch `feat/email-2fa`. All 16 plan steps done. Needs manual testing and PR. Phase 2 (email OTP) deferred.
+- **DPIA compliance features** on branch `feat/dpia`: user data export and configurable data retention both implemented. Needs testing and PR.
 - External agents package — active development and integration
 - New cloud integrations (Google Drive recently completed, exploring more)
-- Regular upstream merges to stay current (latest: v0.6.43 → v0.8.9, branch `merge/upstream-260329`)
 
 #### Pending Fixes
 
-- **Cloud KB permission leak — code fix done, cleanup pending**: `_sync_permissions()` rewritten (owner-only check + suspension lifecycle) on `feat/logos` branch. Still need to: (1) deploy code fix to gradient.soev.ai, (2) run grant cleanup SQL (see `fix_kb_gradient_soev.md`) AFTER deploy. Migration hardening (NULL → private) already applied.
+- **Cloud KB permission leak — code fix done, cleanup pending**: `_sync_permissions()` rewritten (owner-only check + suspension lifecycle). Still need to: (1) deploy code fix to gradient.soev.ai, (2) run grant cleanup SQL AFTER deploy.
+
+#### Completed Recently
+
+- **TOTP 2FA Phase 1** — merged via PR #61. Phase 2 (email OTP) deferred.
+- **Security hardening** — Trivy CVE fixes, Docker slimming, TOTP replay token fix
+- **Aesthetic polish** — merged via PR #62. KB logos, tab split, Dutch translations
 
 #### Open Questions
 
 #### Active Resources
 
 - Sync abstraction cookbook: `collab/docs/external-integration-cookbook.md`
-- Upstream merge research: `thoughts/shared/research/2026-03-20-upstream-merge-strategy.md`
+- Data export plan: `thoughts/shared/plans/2026-03-31-user-data-export.md`
+- Data retention plan: `thoughts/shared/plans/2026-03-31-data-retention-ttl.md`

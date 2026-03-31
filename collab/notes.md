@@ -241,3 +241,86 @@
 - Admin settings tab system requires changes in 5 places: ADMIN_SETTINGS_TABS constant, Settings.svelte (import, allSettings, icon, rendering chain)
 
 **Related:** Plan `thoughts/shared/plans/2026-03-30-totp-2fa-phase1.md`
+
+---
+
+### [31-03-2026] Security Hardening Sprint
+
+**With:** @lexlubbers
+
+**Context:** Post-merge security pass addressing Trivy CVE findings, Docker image bloat, and a replay token vulnerability discovered in the TOTP flow.
+
+**What We Did:**
+- Fixed multiple CVEs: bumped aiohttp, requests, cryptography, nltk, wheel; force-reinstalled wheel after uv for CVE-2026-24049
+- Slimmed Docker image by dropping unnecessary torch dependency
+- Fixed replay token vulnerability in TOTP verification — added token replay protection in `routers/totp.py` and `utils/totp.py`
+- Added `.trivyignore` for accepted risks
+- Trivy scanning workflow added to CI
+
+**Key Learnings:**
+- uv package manager can leave stale wheel versions that Trivy flags — force-reinstall needed after uv
+- TOTP codes need server-side replay tracking to prevent reuse within the validity window
+
+---
+
+### [31-03-2026] UI/Aesthetic Polish (PR #62)
+
+**With:** @lexlubbers
+
+**Context:** Visual polish pass after upstream merge and feature additions.
+
+**What We Did:**
+- Added Google Drive and OneDrive logos to knowledge base cards
+- Split agents and prompts into separate tabs with top gap
+- Dutch translations for all custom features (web search, sync, feature flags, etc.)
+- Fixed bits-ui menu rendering issues
+- Gray text styling on buttons
+
+---
+
+### [31-03-2026] DPIA Compliance: User Data Export
+
+**With:** @lexlubbers
+
+**Context:** GDPR/DPIA requirement — users must be able to export all their personal data.
+
+**What We Did:**
+- New router `routers/export.py` mounted at `/api/v1/export`
+- `ExportService` in `services/export/service.py` — background zip generation containing chats, knowledge bases, uploaded files, and user profile
+- Socket.IO event notification when export is ready (`services/export/events.py`)
+- Frontend: export trigger + download in `DataControls.svelte` settings panel
+- Feature-flagged via `ENABLE_DATA_EXPORT` env var
+- Helm chart support (configmap + values)
+- en-US + nl-NL translations
+
+**Key Learnings:**
+- Background task pattern with FastAPI's `BackgroundTasks` + Socket.IO notification for async user feedback
+- Export includes all user-associated data: chats (with messages), KB metadata, uploaded files, profile info
+
+**Related:** Plan `thoughts/shared/plans/2026-03-31-user-data-export.md`, research `thoughts/shared/research/2026-03-31-user-data-export-current-state.md`
+
+---
+
+### [31-03-2026] DPIA Compliance: Configurable Data Retention
+
+**With:** @lexlubbers
+
+**Context:** GDPR/DPIA requirement — platform must support automated data cleanup with configurable retention periods.
+
+**What We Did:**
+- `DataRetentionService` in `services/retention/service.py` — phased cleanup: warning emails → inactive users → stale chats → stale knowledge bases
+- Config model in `services/retention/config.py` with master TTL + per-category overrides (user inactivity, chat, knowledge)
+- Admin UI in `Database.svelte` settings panel for configuring all retention parameters
+- API endpoints in `routers/configs.py` for reading/writing retention config
+- Warning email integration via Microsoft Graph (`graph_mail_client.py`)
+- Scheduled background task via `main.py` (daily check)
+- Feature-flagged via `DATA_RETENTION_TTL_DAYS` (0 = disabled)
+- Helm chart support (8 new values)
+- en-US + nl-NL translations
+
+**Key Learnings:**
+- Master TTL pattern: set one global default, per-category TTLs override it (0 = inherit master). Clean admin UX.
+- Warning emails use existing Graph mail client — extended with retention-specific templates
+- Retention only touches `local` type knowledge bases — cloud-synced KBs are managed by their source
+
+**Related:** Plan `thoughts/shared/plans/2026-03-31-data-retention-ttl.md`, research `thoughts/shared/research/2026-03-31-data-ttl-dpia-retention-policy.md`
