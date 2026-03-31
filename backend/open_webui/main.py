@@ -72,6 +72,7 @@ from open_webui.routers import (
     agent_proxy,
     analytics,
     archives,
+    export,
     audio,
     totp,
     images,
@@ -382,6 +383,13 @@ from open_webui.config import (
     ENABLE_2FA,
     REQUIRE_2FA,
     TWO_FA_GRACE_PERIOD_DAYS,
+    # Data Retention TTL
+    DATA_RETENTION_TTL_DAYS,
+    USER_INACTIVITY_TTL_DAYS,
+    CHAT_RETENTION_TTL_DAYS,
+    KNOWLEDGE_RETENTION_TTL_DAYS,
+    DATA_RETENTION_WARNING_DAYS,
+    ENABLE_RETENTION_WARNING_EMAIL,
     ENABLE_RAG_HYBRID_SEARCH,
     ENABLE_RAG_HYBRID_SEARCH_ENRICHED_TEXTS,
     ENABLE_RAG_FILTER_UI,
@@ -494,6 +502,7 @@ from open_webui.config import (
     ENABLE_ADMIN_ANALYTICS,
     BYPASS_ADMIN_ACCESS_CONTROL,
     ENABLE_ADMIN_EXPORT,
+    ENABLE_DATA_EXPORT,
     # User Archival
     ENABLE_USER_ARCHIVAL,
     DEFAULT_ARCHIVE_RETENTION_DAYS,
@@ -712,6 +721,59 @@ async def periodic_archive_cleanup():
             log.error(f'Error in archive cleanup: {e}')
 
 
+async def periodic_data_retention_cleanup():
+    """Periodic task to enforce data retention TTL (runs daily)"""
+    from open_webui.services.retention.service import DataRetentionService
+
+    while True:
+        try:
+            # Wait 24 hours before first run and between runs
+            await asyncio.sleep(24 * 60 * 60)
+
+            master_ttl = app.state.config.DATA_RETENTION_TTL_DAYS
+            if master_ttl <= 0:
+                continue  # Retention disabled, skip
+
+            report = await DataRetentionService.run_cleanup(
+                app=app,
+                master_ttl=master_ttl,
+                user_inactivity_ttl=app.state.config.USER_INACTIVITY_TTL_DAYS,
+                chat_ttl=app.state.config.CHAT_RETENTION_TTL_DAYS,
+                knowledge_ttl=app.state.config.KNOWLEDGE_RETENTION_TTL_DAYS,
+                warning_days=app.state.config.DATA_RETENTION_WARNING_DAYS,
+                enable_warning_email=app.state.config.ENABLE_RETENTION_WARNING_EMAIL,
+                enable_archival=app.state.config.ENABLE_USER_ARCHIVAL,
+                archive_retention_days=app.state.config.DEFAULT_ARCHIVE_RETENTION_DAYS,
+            )
+
+            total = report.users_deleted + report.chats_deleted + report.knowledge_deleted + report.warnings_sent
+            if total > 0 or report.errors:
+                log.info(
+                    f'Data retention cleanup: {report.warnings_sent} warnings sent, '
+                    f'{report.users_deleted} users deleted '
+                    f'({report.users_archived} archived), '
+                    f'{report.chats_deleted} chats soft-deleted, '
+                    f'{report.knowledge_deleted} KBs soft-deleted, '
+                    f'{len(report.errors)} errors'
+                )
+        except Exception as e:
+            log.error(f'Error in data retention cleanup: {e}')
+
+
+async def periodic_export_cleanup():
+    """Periodic task to delete expired data exports (runs every 6 hours)"""
+    from open_webui.services.export.service import ExportService
+
+    while True:
+        try:
+            await asyncio.sleep(6 * 60 * 60)
+            stats = ExportService.cleanup_expired_exports()
+            if stats['deleted'] > 0:
+                log.info(f'Export cleanup: deleted {stats["deleted"]} expired exports')
+        except Exception as e:
+            log.error(f'Error in export cleanup: {e}')
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Store reference to main event loop for sync->async calls (e.g., embedding generation)
@@ -763,6 +825,8 @@ async def lifespan(app: FastAPI):
     asyncio.create_task(periodic_usage_pool_cleanup())
     asyncio.create_task(periodic_session_pool_cleanup())
     asyncio.create_task(periodic_archive_cleanup())
+    asyncio.create_task(periodic_data_retention_cleanup())
+    asyncio.create_task(periodic_export_cleanup())
 
     # Start OneDrive background sync scheduler
     from open_webui.services.onedrive.scheduler import (
@@ -1278,6 +1342,19 @@ app.state.config.ENABLE_2FA = ENABLE_2FA
 app.state.config.REQUIRE_2FA = REQUIRE_2FA
 app.state.config.TWO_FA_GRACE_PERIOD_DAYS = TWO_FA_GRACE_PERIOD_DAYS
 
+########################################
+#
+# DATA RETENTION TTL
+#
+########################################
+
+app.state.config.DATA_RETENTION_TTL_DAYS = DATA_RETENTION_TTL_DAYS
+app.state.config.USER_INACTIVITY_TTL_DAYS = USER_INACTIVITY_TTL_DAYS
+app.state.config.CHAT_RETENTION_TTL_DAYS = CHAT_RETENTION_TTL_DAYS
+app.state.config.KNOWLEDGE_RETENTION_TTL_DAYS = KNOWLEDGE_RETENTION_TTL_DAYS
+app.state.config.DATA_RETENTION_WARNING_DAYS = DATA_RETENTION_WARNING_DAYS
+app.state.config.ENABLE_RETENTION_WARNING_EMAIL = ENABLE_RETENTION_WARNING_EMAIL
+
 app.state.config.OLLAMA_CLOUD_WEB_SEARCH_API_KEY = OLLAMA_CLOUD_WEB_SEARCH_API_KEY
 app.state.config.SEARXNG_QUERY_URL = SEARXNG_QUERY_URL
 app.state.config.SEARXNG_LANGUAGE = SEARXNG_LANGUAGE
@@ -1731,6 +1808,7 @@ app.include_router(auths.router, prefix='/api/v1/auths', tags=['auths'])
 app.include_router(totp.router, prefix='/api/v1/auths/2fa', tags=['2fa'])
 app.include_router(users.router, prefix='/api/v1/users', tags=['users'])
 app.include_router(archives.router, prefix='/api/v1/archives', tags=['archives'])
+app.include_router(export.router, prefix='/api/v1/export', tags=['export'])
 
 
 app.include_router(channels.router, prefix='/api/v1/channels', tags=['channels'])
@@ -2345,6 +2423,7 @@ async def get_app_config(request: Request):
                     'enable_user_webhooks': app.state.config.ENABLE_USER_WEBHOOKS,
                     'enable_user_status': app.state.config.ENABLE_USER_STATUS,
                     'enable_admin_export': ENABLE_ADMIN_EXPORT,
+                    'enable_data_export': ENABLE_DATA_EXPORT,
                     'enable_admin_chat_access': ENABLE_ADMIN_CHAT_ACCESS,
                     'enable_admin_analytics': ENABLE_ADMIN_ANALYTICS,
                     # Feature Flags (SaaS Tier Control)
@@ -2398,6 +2477,7 @@ async def get_app_config(request: Request):
                     'enable_agent_proxy': app.state.config.ENABLE_AGENT_PROXY,
                     'require_2fa': app.state.config.REQUIRE_2FA,
                     'two_fa_grace_period_days': app.state.config.TWO_FA_GRACE_PERIOD_DAYS,
+                    'data_retention_ttl_days': app.state.config.DATA_RETENTION_TTL_DAYS,
                 }
                 if user is not None
                 else {}
@@ -2925,6 +3005,14 @@ async def serve_cache_file(
     # prevent path traversal
     if not file_path.startswith(os.path.abspath(CACHE_DIR)):
         raise HTTPException(status_code=404, detail='File not found')
+
+    # Ownership check for user exports: only the owning user or an admin
+    parts = path.split('/')
+    if len(parts) >= 2 and parts[0] == 'exports':
+        export_owner_id = parts[1]
+        if user.role != 'admin' and user.id != export_owner_id:
+            raise HTTPException(status_code=404, detail='File not found')
+
     if not os.path.isfile(file_path):
         raise HTTPException(status_code=404, detail='File not found')
     return FileResponse(file_path)
