@@ -1601,6 +1601,20 @@ class ChatTable:
                 .all()
             ]
 
+    def get_stale_chats(
+        self,
+        stale_before: int,
+        limit: int = 100,
+        exclude_user_ids: Optional[list[str]] = None,
+        db: Optional[Session] = None,
+    ) -> list[ChatModel]:
+        """Find non-deleted chats whose updated_at is before the given timestamp."""
+        with get_db_context(db) as db:
+            query = db.query(Chat).filter(Chat.deleted_at.is_(None)).filter(Chat.updated_at < stale_before)
+            if exclude_user_ids:
+                query = query.filter(Chat.user_id.notin_(exclude_user_ids))
+            return [ChatModel.model_validate(chat) for chat in query.order_by(Chat.updated_at.asc()).limit(limit).all()]
+
     def soft_delete_by_id(self, id: str, db: Optional[Session] = None) -> bool:
         """Mark a chat as deleted (soft-delete)."""
         with get_db_context(db) as db:

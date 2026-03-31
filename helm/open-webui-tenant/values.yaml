@@ -390,6 +390,15 @@ openWebui:
     enableAutoArchiveOnSelfDelete: "false"
     autoArchiveRetentionDays: "365"  # 1 year for self-deletions
 
+    # Data Retention TTL (DPIA / GDPR storage limitation)
+    # Set dataRetentionTtlDays > 0 to enable automated data cleanup
+    dataRetentionTtlDays: "0"             # 0 = disabled (customers opt-in)
+    userInactivityTtlDays: "0"            # 0 = inherit from master TTL
+    chatRetentionTtlDays: "0"             # 0 = inherit from master TTL
+    knowledgeRetentionTtlDays: "0"        # 0 = inherit from master TTL
+    dataRetentionWarningDays: "30"        # Days before TTL to flag as approaching deletion
+    enableRetentionWarningEmail: "false"  # Send warning emails via Graph API before deletion
+
     # Storage Provider
     # Set to "s3" to use S3-compatible object storage for file uploads
     # Leave empty for default local storage (PVC)

@@ -383,6 +383,13 @@ from open_webui.config import (
     ENABLE_2FA,
     REQUIRE_2FA,
     TWO_FA_GRACE_PERIOD_DAYS,
+    # Data Retention TTL
+    DATA_RETENTION_TTL_DAYS,
+    USER_INACTIVITY_TTL_DAYS,
+    CHAT_RETENTION_TTL_DAYS,
+    KNOWLEDGE_RETENTION_TTL_DAYS,
+    DATA_RETENTION_WARNING_DAYS,
+    ENABLE_RETENTION_WARNING_EMAIL,
     ENABLE_RAG_HYBRID_SEARCH,
     ENABLE_RAG_HYBRID_SEARCH_ENRICHED_TEXTS,
     ENABLE_RAG_FILTER_UI,
@@ -714,6 +721,45 @@ async def periodic_archive_cleanup():
             log.error(f'Error in archive cleanup: {e}')
 
 
+async def periodic_data_retention_cleanup():
+    """Periodic task to enforce data retention TTL (runs daily)"""
+    from open_webui.services.retention.service import DataRetentionService
+
+    while True:
+        try:
+            # Wait 24 hours before first run and between runs
+            await asyncio.sleep(24 * 60 * 60)
+
+            master_ttl = app.state.config.DATA_RETENTION_TTL_DAYS
+            if master_ttl <= 0:
+                continue  # Retention disabled, skip
+
+            report = await DataRetentionService.run_cleanup(
+                app=app,
+                master_ttl=master_ttl,
+                user_inactivity_ttl=app.state.config.USER_INACTIVITY_TTL_DAYS,
+                chat_ttl=app.state.config.CHAT_RETENTION_TTL_DAYS,
+                knowledge_ttl=app.state.config.KNOWLEDGE_RETENTION_TTL_DAYS,
+                warning_days=app.state.config.DATA_RETENTION_WARNING_DAYS,
+                enable_warning_email=app.state.config.ENABLE_RETENTION_WARNING_EMAIL,
+                enable_archival=app.state.config.ENABLE_USER_ARCHIVAL,
+                archive_retention_days=app.state.config.DEFAULT_ARCHIVE_RETENTION_DAYS,
+            )
+
+            total = report.users_deleted + report.chats_deleted + report.knowledge_deleted + report.warnings_sent
+            if total > 0 or report.errors:
+                log.info(
+                    f'Data retention cleanup: {report.warnings_sent} warnings sent, '
+                    f'{report.users_deleted} users deleted '
+                    f'({report.users_archived} archived), '
+                    f'{report.chats_deleted} chats soft-deleted, '
+                    f'{report.knowledge_deleted} KBs soft-deleted, '
+                    f'{len(report.errors)} errors'
+                )
+        except Exception as e:
+            log.error(f'Error in data retention cleanup: {e}')
+
+
 async def periodic_export_cleanup():
     """Periodic task to delete expired data exports (runs every 6 hours)"""
     from open_webui.services.export.service import ExportService
@@ -779,6 +825,7 @@ async def lifespan(app: FastAPI):
     asyncio.create_task(periodic_usage_pool_cleanup())
     asyncio.create_task(periodic_session_pool_cleanup())
     asyncio.create_task(periodic_archive_cleanup())
+    asyncio.create_task(periodic_data_retention_cleanup())
     asyncio.create_task(periodic_export_cleanup())
 
     # Start OneDrive background sync scheduler
@@ -1294,6 +1341,19 @@ app.state.config.ENABLE_AGENT_PROXY = ENABLE_AGENT_PROXY
 app.state.config.ENABLE_2FA = ENABLE_2FA
 app.state.config.REQUIRE_2FA = REQUIRE_2FA
 app.state.config.TWO_FA_GRACE_PERIOD_DAYS = TWO_FA_GRACE_PERIOD_DAYS
+
+########################################
+#
+# DATA RETENTION TTL
+#
+########################################
+
+app.state.config.DATA_RETENTION_TTL_DAYS = DATA_RETENTION_TTL_DAYS
+app.state.config.USER_INACTIVITY_TTL_DAYS = USER_INACTIVITY_TTL_DAYS
+app.state.config.CHAT_RETENTION_TTL_DAYS = CHAT_RETENTION_TTL_DAYS
+app.state.config.KNOWLEDGE_RETENTION_TTL_DAYS = KNOWLEDGE_RETENTION_TTL_DAYS
+app.state.config.DATA_RETENTION_WARNING_DAYS = DATA_RETENTION_WARNING_DAYS
+app.state.config.ENABLE_RETENTION_WARNING_EMAIL = ENABLE_RETENTION_WARNING_EMAIL
 
 app.state.config.OLLAMA_CLOUD_WEB_SEARCH_API_KEY = OLLAMA_CLOUD_WEB_SEARCH_API_KEY
 app.state.config.SEARXNG_QUERY_URL = SEARXNG_QUERY_URL
@@ -2417,6 +2477,7 @@ async def get_app_config(request: Request):
                     'enable_agent_proxy': app.state.config.ENABLE_AGENT_PROXY,
                     'require_2fa': app.state.config.REQUIRE_2FA,
                     'two_fa_grace_period_days': app.state.config.TWO_FA_GRACE_PERIOD_DAYS,
+                    'data_retention_ttl_days': app.state.config.DATA_RETENTION_TTL_DAYS,
                 }
                 if user is not None
                 else {}

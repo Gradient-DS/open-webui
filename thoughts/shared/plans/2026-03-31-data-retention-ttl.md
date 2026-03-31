@@ -179,10 +179,10 @@ Only expose the master TTL flag so the frontend knows retention is active. The p
 ### Success Criteria
 
 #### Automated Verification
-- [ ] Backend starts without errors: `open-webui dev`
+- [x] Backend starts without errors: `open-webui dev`
 - [ ] Config values are readable: `curl -s localhost:8080/api/config | python3 -c "import sys,json; print(json.load(sys.stdin)['features']['data_retention_ttl_days'])"` → `0`
-- [ ] Helm template renders: `helm template test helm/open-webui-tenant/ | grep DATA_RETENTION_TTL_DAYS`
-- [ ] `npm run build` succeeds
+- [x] Helm template renders: `helm template test helm/open-webui-tenant/ | grep DATA_RETENTION_TTL_DAYS`
+- [x] `npm run build` succeeds
 
 #### Manual Verification
 - [ ] Set `DATA_RETENTION_TTL_DAYS=730` in `.env`, restart, verify `/api/config` returns `730`
@@ -336,8 +336,8 @@ def is_retention_enabled(master_ttl: int) -> bool:
 ### Success Criteria
 
 #### Automated Verification
-- [ ] Backend starts without errors: `open-webui dev`
-- [ ] `npm run build` succeeds
+- [x] Backend starts without errors: `open-webui dev`
+- [x] `npm run build` succeeds
 
 #### Manual Verification
 - [ ] Verify query methods work by temporarily calling them from a test script or the Python shell
@@ -592,9 +592,9 @@ async def periodic_data_retention_cleanup():
 ### Success Criteria
 
 #### Automated Verification
-- [ ] Backend starts without errors: `open-webui dev`
-- [ ] `npm run build` succeeds
-- [ ] Grep confirms the task is created: `grep -n "periodic_data_retention_cleanup" backend/open_webui/main.py`
+- [x] Backend starts without errors: `open-webui dev`
+- [x] `npm run build` succeeds
+- [x] Grep confirms the task is created: `grep -n "periodic_data_retention_cleanup" backend/open_webui/main.py`
 
 #### Manual Verification
 - [ ] Set `DATA_RETENTION_TTL_DAYS=1` in `.env` and temporarily reduce the sleep to 10 seconds for testing
@@ -857,8 +857,8 @@ Add UI section before the User Archives section (before line 276):
 ### Success Criteria
 
 #### Automated Verification
-- [ ] Backend starts without errors: `open-webui dev`
-- [ ] `npm run build` succeeds
+- [x] Backend starts without errors: `open-webui dev`
+- [x] `npm run build` succeeds
 - [ ] API returns config: `curl -s -H "Authorization: Bearer $TOKEN" localhost:8080/api/v1/configs/data-retention`
 
 #### Manual Verification
@@ -918,9 +918,9 @@ Add these keys (alphabetically sorted per convention):
 ### Success Criteria
 
 #### Automated Verification
-- [ ] `npm run build` succeeds
-- [ ] Translation JSON is valid: `python3 -c "import json; json.load(open('src/lib/i18n/locales/en-US/translation.json'))"`
-- [ ] Translation JSON is valid: `python3 -c "import json; json.load(open('src/lib/i18n/locales/nl-NL/translation.json'))"`
+- [x] `npm run build` succeeds
+- [x] Translation JSON is valid: `python3 -c "import json; json.load(open('src/lib/i18n/locales/en-US/translation.json'))"`
+- [x] Translation JSON is valid: `python3 -c "import json; json.load(open('src/lib/i18n/locales/nl-NL/translation.json'))"`
 
 #### Manual Verification
 - [ ] Switch to Dutch locale, verify all Data Retention strings are translated

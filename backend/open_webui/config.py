@@ -1753,6 +1753,46 @@ TWO_FA_GRACE_PERIOD_DAYS = PersistentConfig(
 )
 
 ####################################
+# Data Retention TTL
+####################################
+
+DATA_RETENTION_TTL_DAYS = PersistentConfig(
+    'DATA_RETENTION_TTL_DAYS',
+    'admin.data_retention_ttl_days',
+    int(os.environ.get('DATA_RETENTION_TTL_DAYS', '0')),  # 0 = disabled
+)
+
+USER_INACTIVITY_TTL_DAYS = PersistentConfig(
+    'USER_INACTIVITY_TTL_DAYS',
+    'admin.user_inactivity_ttl_days',
+    int(os.environ.get('USER_INACTIVITY_TTL_DAYS', '0')),  # 0 = inherit from master
+)
+
+CHAT_RETENTION_TTL_DAYS = PersistentConfig(
+    'CHAT_RETENTION_TTL_DAYS',
+    'admin.chat_retention_ttl_days',
+    int(os.environ.get('CHAT_RETENTION_TTL_DAYS', '0')),  # 0 = inherit from master
+)
+
+KNOWLEDGE_RETENTION_TTL_DAYS = PersistentConfig(
+    'KNOWLEDGE_RETENTION_TTL_DAYS',
+    'admin.knowledge_retention_ttl_days',
+    int(os.environ.get('KNOWLEDGE_RETENTION_TTL_DAYS', '0')),  # 0 = inherit from master
+)
+
+DATA_RETENTION_WARNING_DAYS = PersistentConfig(
+    'DATA_RETENTION_WARNING_DAYS',
+    'admin.data_retention_warning_days',
+    int(os.environ.get('DATA_RETENTION_WARNING_DAYS', '30')),
+)
+
+ENABLE_RETENTION_WARNING_EMAIL = PersistentConfig(
+    'ENABLE_RETENTION_WARNING_EMAIL',
+    'admin.enable_retention_warning_email',
+    os.environ.get('ENABLE_RETENTION_WARNING_EMAIL', 'False').lower() == 'true',
+)
+
+####################################
 # Feature Flags (SaaS Tier Control)
 ####################################
 

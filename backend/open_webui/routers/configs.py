@@ -914,3 +914,90 @@ async def set_2fa_config(
         'REQUIRE_2FA': request.app.state.config.REQUIRE_2FA,
         'TWO_FA_GRACE_PERIOD_DAYS': request.app.state.config.TWO_FA_GRACE_PERIOD_DAYS,
     }
+
+
+####################################
+# Data Retention Config
+####################################
+
+
+class DataRetentionConfigForm(BaseModel):
+    DATA_RETENTION_TTL_DAYS: int
+    USER_INACTIVITY_TTL_DAYS: int
+    CHAT_RETENTION_TTL_DAYS: int
+    KNOWLEDGE_RETENTION_TTL_DAYS: int
+    DATA_RETENTION_WARNING_DAYS: int
+    ENABLE_RETENTION_WARNING_EMAIL: bool
+
+
+@router.get('/data-retention')
+async def get_data_retention_config(request: Request, user=Depends(get_admin_user)):
+    return {
+        'DATA_RETENTION_TTL_DAYS': request.app.state.config.DATA_RETENTION_TTL_DAYS,
+        'USER_INACTIVITY_TTL_DAYS': request.app.state.config.USER_INACTIVITY_TTL_DAYS,
+        'CHAT_RETENTION_TTL_DAYS': request.app.state.config.CHAT_RETENTION_TTL_DAYS,
+        'KNOWLEDGE_RETENTION_TTL_DAYS': request.app.state.config.KNOWLEDGE_RETENTION_TTL_DAYS,
+        'DATA_RETENTION_WARNING_DAYS': request.app.state.config.DATA_RETENTION_WARNING_DAYS,
+        'ENABLE_RETENTION_WARNING_EMAIL': request.app.state.config.ENABLE_RETENTION_WARNING_EMAIL,
+    }
+
+
+@router.post('/data-retention')
+async def set_data_retention_config(
+    request: Request,
+    form_data: DataRetentionConfigForm,
+    user=Depends(get_admin_user),
+):
+    request.app.state.config.DATA_RETENTION_TTL_DAYS = form_data.DATA_RETENTION_TTL_DAYS
+    request.app.state.config.USER_INACTIVITY_TTL_DAYS = form_data.USER_INACTIVITY_TTL_DAYS
+    request.app.state.config.CHAT_RETENTION_TTL_DAYS = form_data.CHAT_RETENTION_TTL_DAYS
+    request.app.state.config.KNOWLEDGE_RETENTION_TTL_DAYS = form_data.KNOWLEDGE_RETENTION_TTL_DAYS
+    request.app.state.config.DATA_RETENTION_WARNING_DAYS = form_data.DATA_RETENTION_WARNING_DAYS
+    request.app.state.config.ENABLE_RETENTION_WARNING_EMAIL = form_data.ENABLE_RETENTION_WARNING_EMAIL
+    return {
+        'DATA_RETENTION_TTL_DAYS': request.app.state.config.DATA_RETENTION_TTL_DAYS,
+        'USER_INACTIVITY_TTL_DAYS': request.app.state.config.USER_INACTIVITY_TTL_DAYS,
+        'CHAT_RETENTION_TTL_DAYS': request.app.state.config.CHAT_RETENTION_TTL_DAYS,
+        'KNOWLEDGE_RETENTION_TTL_DAYS': request.app.state.config.KNOWLEDGE_RETENTION_TTL_DAYS,
+        'DATA_RETENTION_WARNING_DAYS': request.app.state.config.DATA_RETENTION_WARNING_DAYS,
+        'ENABLE_RETENTION_WARNING_EMAIL': request.app.state.config.ENABLE_RETENTION_WARNING_EMAIL,
+    }
+
+
+@router.post('/data-retention/test')
+async def test_data_retention_cleanup(
+    request: Request,
+    user=Depends(get_admin_user),
+):
+    """Manually trigger a data retention cleanup cycle (admin only).
+    Uses current config values. Does NOT wait for the daily timer."""
+    from open_webui.services.retention.service import DataRetentionService
+
+    master_ttl = request.app.state.config.DATA_RETENTION_TTL_DAYS
+    if master_ttl <= 0:
+        return {
+            'status': 'skipped',
+            'message': 'Data retention is disabled (DATA_RETENTION_TTL_DAYS=0)',
+        }
+
+    report = await DataRetentionService.run_cleanup(
+        app=request.app,
+        master_ttl=master_ttl,
+        user_inactivity_ttl=request.app.state.config.USER_INACTIVITY_TTL_DAYS,
+        chat_ttl=request.app.state.config.CHAT_RETENTION_TTL_DAYS,
+        knowledge_ttl=request.app.state.config.KNOWLEDGE_RETENTION_TTL_DAYS,
+        warning_days=request.app.state.config.DATA_RETENTION_WARNING_DAYS,
+        enable_warning_email=request.app.state.config.ENABLE_RETENTION_WARNING_EMAIL,
+        enable_archival=request.app.state.config.ENABLE_USER_ARCHIVAL,
+        archive_retention_days=request.app.state.config.DEFAULT_ARCHIVE_RETENTION_DAYS,
+    )
+
+    return {
+        'status': 'completed',
+        'warnings_sent': report.warnings_sent,
+        'users_deleted': report.users_deleted,
+        'users_archived': report.users_archived,
+        'chats_deleted': report.chats_deleted,
+        'knowledge_deleted': report.knowledge_deleted,
+        'errors': report.errors,
+    }

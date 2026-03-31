@@ -386,4 +386,12 @@ data:
   ENABLE_2FA: {{ .Values.openWebui.config.enable2fa | default "false" | quote }}
   REQUIRE_2FA: {{ .Values.openWebui.config.require2fa | default "false" | quote }}
   TWO_FA_GRACE_PERIOD_DAYS: {{ .Values.openWebui.config.twoFaGracePeriodDays | default "7" | quote }}
+
+  # Data Retention TTL
+  DATA_RETENTION_TTL_DAYS: {{ .Values.openWebui.config.dataRetentionTtlDays | default "0" | quote }}
+  USER_INACTIVITY_TTL_DAYS: {{ .Values.openWebui.config.userInactivityTtlDays | default "0" | quote }}
+  CHAT_RETENTION_TTL_DAYS: {{ .Values.openWebui.config.chatRetentionTtlDays | default "0" | quote }}
+  KNOWLEDGE_RETENTION_TTL_DAYS: {{ .Values.openWebui.config.knowledgeRetentionTtlDays | default "0" | quote }}
+  DATA_RETENTION_WARNING_DAYS: {{ .Values.openWebui.config.dataRetentionWarningDays | default "30" | quote }}
+  ENABLE_RETENTION_WARNING_EMAIL: {{ .Values.openWebui.config.enableRetentionWarningEmail | default "false" | quote }}
 {{- end }}
