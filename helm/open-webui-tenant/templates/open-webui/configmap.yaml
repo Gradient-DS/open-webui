@@ -222,6 +222,8 @@ data:
 
   # Admin
   ENABLE_ADMIN_EXPORT: {{ .Values.openWebui.config.enableAdminExport | quote }}
+  ENABLE_DATA_EXPORT: {{ .Values.openWebui.config.enableDataExport | quote }}
+  DATA_EXPORT_RETENTION_HOURS: {{ .Values.openWebui.config.dataExportRetentionHours | quote }}
   ENABLE_ADMIN_CHAT_ACCESS: {{ .Values.openWebui.config.enableAdminChatAccess | quote }}
   ENABLE_ADMIN_WORKSPACE_CONTENT_ACCESS: {{ .Values.openWebui.config.enableAdminWorkspaceContentAccess | quote }}
   BYPASS_ADMIN_ACCESS_CONTROL: {{ .Values.openWebui.config.bypassAdminAccessControl | quote }}

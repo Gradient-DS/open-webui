@@ -72,6 +72,7 @@ from open_webui.routers import (
     agent_proxy,
     analytics,
     archives,
+    export,
     audio,
     totp,
     images,
@@ -494,6 +495,7 @@ from open_webui.config import (
     ENABLE_ADMIN_ANALYTICS,
     BYPASS_ADMIN_ACCESS_CONTROL,
     ENABLE_ADMIN_EXPORT,
+    ENABLE_DATA_EXPORT,
     # User Archival
     ENABLE_USER_ARCHIVAL,
     DEFAULT_ARCHIVE_RETENTION_DAYS,
@@ -712,6 +714,20 @@ async def periodic_archive_cleanup():
             log.error(f'Error in archive cleanup: {e}')
 
 
+async def periodic_export_cleanup():
+    """Periodic task to delete expired data exports (runs every 6 hours)"""
+    from open_webui.services.export.service import ExportService
+
+    while True:
+        try:
+            await asyncio.sleep(6 * 60 * 60)
+            stats = ExportService.cleanup_expired_exports()
+            if stats['deleted'] > 0:
+                log.info(f'Export cleanup: deleted {stats["deleted"]} expired exports')
+        except Exception as e:
+            log.error(f'Error in export cleanup: {e}')
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Store reference to main event loop for sync->async calls (e.g., embedding generation)
@@ -763,6 +779,7 @@ async def lifespan(app: FastAPI):
     asyncio.create_task(periodic_usage_pool_cleanup())
     asyncio.create_task(periodic_session_pool_cleanup())
     asyncio.create_task(periodic_archive_cleanup())
+    asyncio.create_task(periodic_export_cleanup())
 
     # Start OneDrive background sync scheduler
     from open_webui.services.onedrive.scheduler import (
@@ -1731,6 +1748,7 @@ app.include_router(auths.router, prefix='/api/v1/auths', tags=['auths'])
 app.include_router(totp.router, prefix='/api/v1/auths/2fa', tags=['2fa'])
 app.include_router(users.router, prefix='/api/v1/users', tags=['users'])
 app.include_router(archives.router, prefix='/api/v1/archives', tags=['archives'])
+app.include_router(export.router, prefix='/api/v1/export', tags=['export'])
 
 
 app.include_router(channels.router, prefix='/api/v1/channels', tags=['channels'])
@@ -2345,6 +2363,7 @@ async def get_app_config(request: Request):
                     'enable_user_webhooks': app.state.config.ENABLE_USER_WEBHOOKS,
                     'enable_user_status': app.state.config.ENABLE_USER_STATUS,
                     'enable_admin_export': ENABLE_ADMIN_EXPORT,
+                    'enable_data_export': ENABLE_DATA_EXPORT,
                     'enable_admin_chat_access': ENABLE_ADMIN_CHAT_ACCESS,
                     'enable_admin_analytics': ENABLE_ADMIN_ANALYTICS,
                     # Feature Flags (SaaS Tier Control)

@@ -1678,6 +1678,15 @@ WEBHOOK_URL = PersistentConfig('WEBHOOK_URL', 'webhook_url', os.environ.get('WEB
 
 ENABLE_ADMIN_EXPORT = os.environ.get('ENABLE_ADMIN_EXPORT', 'True').lower() == 'true'
 
+####################################
+# User Data Export
+####################################
+
+ENABLE_DATA_EXPORT = os.environ.get('ENABLE_DATA_EXPORT', 'True').lower() == 'true'
+
+# How long export ZIPs are kept before cleanup (hours)
+DATA_EXPORT_RETENTION_HOURS = int(os.environ.get('DATA_EXPORT_RETENTION_HOURS', '24'))
+
 ENABLE_ADMIN_WORKSPACE_CONTENT_ACCESS = (
     os.environ.get('ENABLE_ADMIN_WORKSPACE_CONTENT_ACCESS', 'True').lower() == 'true'
 )

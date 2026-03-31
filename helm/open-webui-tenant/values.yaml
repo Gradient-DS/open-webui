@@ -305,6 +305,8 @@ openWebui:
 
     # Admin
     enableAdminExport: "false"
+    enableDataExport: "true"
+    dataExportRetentionHours: "24"
     enableAdminChatAccess: "false"
     enableAdminWorkspaceContentAccess: "false"  # Disable admin seeing all prompts/models
     bypassAdminAccessControl: "false"  # Admin must follow access control

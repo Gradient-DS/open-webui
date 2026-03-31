@@ -120,7 +120,7 @@ DATA_EXPORT_RETENTION_HOURS: {{ .Values.openWebui.config.dataExportRetentionHour
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] `npm run build` succeeds (frontend compiles with new type)
+- [x] `npm run build` succeeds (frontend compiles with new type)
 - [ ] Backend starts without errors: `open-webui dev`
 - [ ] `ENABLE_DATA_EXPORT` appears in `/api/v1/config` response features
 

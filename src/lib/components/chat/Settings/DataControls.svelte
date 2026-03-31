@@ -5,6 +5,8 @@
 	import {
 		chatId,
 		chats,
+		config,
+		socket,
 		user,
 		settings,
 		scrollPaginationEnabled,
@@ -20,8 +22,10 @@
 		getPinnedChatList,
 		importChats
 	} from '$lib/apis/chats';
+	import { triggerDataExport, getExportStatus, deleteExport } from '$lib/apis/export';
 	import { getImportOrigin, convertOpenAIChats } from '$lib/utils';
-	import { onMount, getContext } from 'svelte';
+	import { WEBUI_BASE_URL } from '$lib/constants';
+	import { onMount, onDestroy, getContext } from 'svelte';
 	import { goto } from '$app/navigation';
 	import { toast } from 'svelte-sonner';
 	import ArchivedChatsModal from '$lib/components/layout/ArchivedChatsModal.svelte';
@@ -35,6 +39,11 @@
 
 	// Chats
 	let importFiles;
+
+	// Data Export
+	let exportStatus: 'none' | 'processing' | 'ready' = 'none';
+	let exportPath: string | null = null;
+	let exportRequesting = false;
 
 	let showArchiveConfirmDialog = false;
 	let showDeleteConfirmDialog = false;
@@ -138,6 +147,77 @@
 
 		scrollPaginationEnabled.set(true);
 	};
+
+	// Data Export
+	const handleExportStatus = (data: any) => {
+		if (data.status === 'completed') {
+			exportStatus = 'ready';
+			exportPath = data.export_path;
+			exportRequesting = false;
+			toast.success($i18n.t('Your data export is ready for download.'));
+		} else if (data.status === 'failed') {
+			exportStatus = 'none';
+			exportRequesting = false;
+			toast.error($i18n.t('Data export failed: {{error}}', { error: data.error }));
+		} else if (data.status === 'processing') {
+			exportStatus = 'processing';
+		}
+	};
+
+	const requestDataExport = async () => {
+		exportRequesting = true;
+		try {
+			const res = await triggerDataExport(localStorage.token);
+			if (res.status === 'ready') {
+				exportStatus = 'ready';
+				exportPath = res.export_path;
+				exportRequesting = false;
+			} else {
+				exportStatus = 'processing';
+				toast.success($i18n.t('Data export started. You will be notified when it is ready.'));
+			}
+		} catch (e) {
+			exportRequesting = false;
+			toast.error($i18n.t('Failed to start data export.'));
+		}
+	};
+
+	const downloadDataExport = () => {
+		if (exportPath) {
+			const a = document.createElement('a');
+			a.href = `${WEBUI_BASE_URL}/cache/${exportPath}`;
+			a.download = `my-data-export.zip`;
+			a.click();
+		}
+	};
+
+	const deleteDataExport = async () => {
+		try {
+			await deleteExport(localStorage.token);
+			exportStatus = 'none';
+			exportPath = null;
+		} catch (e) {
+			toast.error($i18n.t('Failed to delete export.'));
+		}
+	};
+
+	onMount(async () => {
+		if ($config?.features?.enable_data_export) {
+			try {
+				const status = await getExportStatus(localStorage.token);
+				exportStatus = status.status;
+				exportPath = status.export_path || null;
+			} catch (e) {
+				console.error('Failed to check export status:', e);
+			}
+		}
+
+		$socket?.on('export:status', handleExportStatus);
+	});
+
+	onDestroy(() => {
+		$socket?.off('export:status', handleExportStatus);
+	});
 </script>
 
 <ArchivedChatsModal
@@ -298,5 +378,80 @@
 				</div>
 			</div>
 		</div>
+
+		{#if $config?.features?.enable_data_export}
+			<div>
+				<div class="mb-1 text-sm font-medium">{$i18n.t('Data Export')}</div>
+				<div class="text-xs text-gray-500 dark:text-gray-400 mb-2">
+					{$i18n.t(
+						'Download all your data including chats, notes, memories, prompts, tools, models, and locally uploaded files.'
+					)}
+				</div>
+
+				<div>
+					{#if exportStatus === 'none'}
+						<div class="py-0.5 flex w-full justify-between">
+							<div class="self-center text-xs">{$i18n.t('Download My Data')}</div>
+							<button
+								class="p-1 px-3 text-xs flex rounded-sm transition"
+								on:click={requestDataExport}
+								disabled={exportRequesting}
+								type="button"
+							>
+								<span class="self-center">
+									{#if exportRequesting}
+										{$i18n.t('Starting...')}
+									{:else}
+										{$i18n.t('Export')}
+									{/if}
+								</span>
+							</button>
+						</div>
+					{:else if exportStatus === 'processing'}
+						<div class="py-0.5 flex w-full justify-between">
+							<div class="self-center text-xs">{$i18n.t('Export in progress...')}</div>
+							<div class="p-1 px-3 text-xs flex">
+								<svg class="animate-spin h-4 w-4" viewBox="0 0 24 24">
+									<circle
+										class="opacity-25"
+										cx="12"
+										cy="12"
+										r="10"
+										stroke="currentColor"
+										stroke-width="4"
+										fill="none"
+									/>
+									<path
+										class="opacity-75"
+										fill="currentColor"
+										d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+									/>
+								</svg>
+							</div>
+						</div>
+					{:else if exportStatus === 'ready'}
+						<div class="py-0.5 flex w-full justify-between">
+							<div class="self-center text-xs">{$i18n.t('Export ready')}</div>
+							<div class="flex gap-1">
+								<button
+									class="p-1 px-3 text-xs flex rounded-sm transition"
+									on:click={downloadDataExport}
+									type="button"
+								>
+									<span class="self-center">{$i18n.t('Download')}</span>
+								</button>
+								<button
+									class="p-1 px-3 text-xs flex rounded-sm transition text-red-500"
+									on:click={deleteDataExport}
+									type="button"
+								>
+									<span class="self-center">{$i18n.t('Delete')}</span>
+								</button>
+							</div>
+						</div>
+					{/if}
+				</div>
+			</div>
+		{/if}
 	</div>
 </div>
