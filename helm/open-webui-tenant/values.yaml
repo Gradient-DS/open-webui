@@ -113,7 +113,7 @@ openWebui:
     enablePersistentConfig: "false"
     resetConfigOnStart: "true"
     webuiName: "soev.ai"
-    corsAllowOrigin: "*"
+    corsAllowOrigin: ""  # Empty = defaults to https://<tenant.domain>. Override for additional origins.
 
     # Locale
     defaultLocale: "nl-NL"
@@ -365,6 +365,17 @@ openWebui:
     enable2fa: "false"
     require2fa: "false"
     twoFaGracePeriodDays: "7"
+
+    # Security Headers (all enabled by default — set to "" to disable)
+    securityHeaders:
+      hsts: "max-age=31536000;includeSubDomains"
+      xFrameOptions: "DENY"
+      xContentType: "nosniff"
+      referrerPolicy: "no-referrer"
+      cacheControl: "no-store, max-age=0"
+
+    # Cookie Security (true for all HTTPS deployments)
+    cookieSecure: "true"
 
     # Audit Logging
     # Levels: NONE, METADATA, REQUEST, REQUEST_RESPONSE

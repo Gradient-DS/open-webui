@@ -12,7 +12,7 @@ data:
   RESET_CONFIG_ON_START: {{ .Values.openWebui.config.resetConfigOnStart | quote }}
   WEBUI_NAME: {{ .Values.openWebui.config.webuiName | quote }}
   CLIENT_NAME: {{ .Values.tenant.clientName | quote }}
-  CORS_ALLOW_ORIGIN: {{ .Values.openWebui.config.corsAllowOrigin | quote }}
+  CORS_ALLOW_ORIGIN: {{ .Values.openWebui.config.corsAllowOrigin | default (printf "https://%s" .Values.tenant.domain) | quote }}
 
   # Locale
   DEFAULT_LOCALE: {{ .Values.openWebui.config.defaultLocale | quote }}
@@ -289,6 +289,28 @@ data:
   {{- end }}
 
   BYPASS_MODEL_ACCESS_CONTROL: {{ .Values.openWebui.config.bypassModelAccessControl | quote }}
+
+  # Security Headers
+  {{- with .Values.openWebui.config.securityHeaders }}
+  {{- if .hsts }}
+  HSTS: {{ .hsts | quote }}
+  {{- end }}
+  {{- if .xFrameOptions }}
+  XFRAME_OPTIONS: {{ .xFrameOptions | quote }}
+  {{- end }}
+  {{- if .xContentType }}
+  XCONTENT_TYPE: {{ .xContentType | quote }}
+  {{- end }}
+  {{- if .referrerPolicy }}
+  REFERRER_POLICY: {{ .referrerPolicy | quote }}
+  {{- end }}
+  {{- if .cacheControl }}
+  CACHE_CONTROL: {{ .cacheControl | quote }}
+  {{- end }}
+  {{- end }}
+
+  # Cookie Security
+  WEBUI_SESSION_COOKIE_SECURE: {{ .Values.openWebui.config.cookieSecure | default "true" | quote }}
 
   # Audit Logging
   AUDIT_LOG_LEVEL: {{ .Values.openWebui.config.auditLogLevel | quote }}
