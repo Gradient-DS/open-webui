@@ -424,6 +424,35 @@
 		}
 	};
 
+	// Uploads multiple files with bounded concurrency.
+	// All paths (file input, drag-drop, directory) route through this.
+	const uploadFiles = async (
+		files: File[],
+		options: { concurrency?: number; onProgress?: (completed: number, total: number) => void } = {}
+	) => {
+		const { concurrency = 5, onProgress } = options;
+		const total = files.length;
+		if (total === 0) return;
+
+		let completed = 0;
+		const executing: Set<Promise<void>> = new Set();
+
+		for (const file of files) {
+			const task = uploadFileHandler(file).then(() => {
+				completed++;
+				executing.delete(task);
+				onProgress?.(completed, total);
+			});
+			executing.add(task);
+
+			if (executing.size >= concurrency) {
+				await Promise.race(executing);
+			}
+		}
+
+		await Promise.all(executing);
+	};
+
 	const uploadDirectoryHandler = async () => {
 		// Check if File System Access API is supported
 		const isFileSystemAccessSupported = 'showDirectoryPicker' in window;
@@ -446,129 +475,136 @@
 		return path.split('/').some((part) => part.startsWith('.'));
 	};
 
+	// Recursively collects all non-hidden files from a directory handle
+	async function collectDirectoryFiles(
+		dirHandle: FileSystemDirectoryHandle,
+		path = ''
+	): Promise<File[]> {
+		const files: File[] = [];
+		for await (const entry of dirHandle.values()) {
+			if (entry.name.startsWith('.')) continue;
+			const entryPath = path ? `${path}/${entry.name}` : entry.name;
+			if (hasHiddenFolder(entryPath)) continue;
+
+			if (entry.kind === 'file') {
+				const file = await entry.getFile();
+				files.push(new File([file], entryPath, { type: file.type }));
+			} else if (entry.kind === 'directory') {
+				files.push(...(await collectDirectoryFiles(entry, entryPath)));
+			}
+		}
+		return files;
+	}
+
+	// Collects all File objects from a DataTransfer drop (files and recursive directories)
+	async function collectDroppedFiles(items: DataTransferItemList): Promise<File[]> {
+		const files: File[] = [];
+
+		const readEntry = (entry: FileSystemEntry): Promise<void> => {
+			return new Promise((resolve) => {
+				if (entry.isFile) {
+					(entry as FileSystemFileEntry).file((file) => {
+						files.push(file);
+						resolve();
+					});
+				} else if (entry.isDirectory) {
+					const reader = (entry as FileSystemDirectoryEntry).createReader();
+					reader.readEntries(async (entries) => {
+						await Promise.all(entries.map(readEntry));
+						resolve();
+					}, () => resolve());
+				} else {
+					resolve();
+				}
+			});
+		};
+
+		const entries: FileSystemEntry[] = [];
+		for (let i = 0; i < items.length; i++) {
+			const entry = items[i].webkitGetAsEntry();
+			if (entry) entries.push(entry);
+		}
+
+		await Promise.all(entries.map(readEntry));
+		return files;
+	}
+
 	// Modern browsers implementation using File System Access API
 	const handleModernBrowserUpload = async () => {
 		const dirHandle = await window.showDirectoryPicker();
-		let totalFiles = 0;
-		let uploadedFiles = 0;
+		const files = await collectDirectoryFiles(dirHandle);
 
-		// Function to update the UI with the progress
-		const updateProgress = () => {
-			const percentage = (uploadedFiles / totalFiles) * 100;
-			toast.info(
-				$i18n.t('Upload Progress: {{uploadedFiles}}/{{totalFiles}} ({{percentage}}%)', {
-					uploadedFiles: uploadedFiles,
-					totalFiles: totalFiles,
-					percentage: percentage.toFixed(2)
-				})
-			);
-		};
-
-		// Recursive function to count all files excluding hidden ones
-		async function countFiles(dirHandle) {
-			for await (const entry of dirHandle.values()) {
-				// Skip hidden files and directories
-				if (entry.name.startsWith('.')) continue;
-
-				if (entry.kind === 'file') {
-					totalFiles++;
-				} else if (entry.kind === 'directory') {
-					// Only process non-hidden directories
-					if (!entry.name.startsWith('.')) {
-						await countFiles(entry);
-					}
-				}
-			}
-		}
-
-		// Recursive function to process directories excluding hidden files and folders
-		async function processDirectory(dirHandle, path = '') {
-			for await (const entry of dirHandle.values()) {
-				// Skip hidden files and directories
-				if (entry.name.startsWith('.')) continue;
-
-				const entryPath = path ? `${path}/${entry.name}` : entry.name;
-
-				// Skip if the path contains any hidden folders
-				if (hasHiddenFolder(entryPath)) continue;
-
-				if (entry.kind === 'file') {
-					const file = await entry.getFile();
-					const fileWithPath = new File([file], entryPath, { type: file.type });
-
-					await uploadFileHandler(fileWithPath);
-					uploadedFiles++;
-					updateProgress();
-				} else if (entry.kind === 'directory') {
-					// Only process non-hidden directories
-					if (!entry.name.startsWith('.')) {
-						await processDirectory(entry, entryPath);
-					}
-				}
-			}
-		}
-
-		await countFiles(dirHandle);
-		updateProgress();
-
-		if (totalFiles > 0) {
-			await processDirectory(dirHandle);
-		} else {
+		if (files.length === 0) {
 			console.log('No files to upload.');
+			return;
 		}
+
+		toast.info(
+			$i18n.t('Upload Progress: {{uploadedFiles}}/{{totalFiles}} ({{percentage}}%)', {
+				uploadedFiles: 0,
+				totalFiles: files.length,
+				percentage: '0.00'
+			})
+		);
+
+		await uploadFiles(files, {
+			onProgress: (done, total) => {
+				const percentage = ((done / total) * 100).toFixed(2);
+				toast.info(
+					$i18n.t('Upload Progress: {{uploadedFiles}}/{{totalFiles}} ({{percentage}}%)', {
+						uploadedFiles: done,
+						totalFiles: total,
+						percentage
+					})
+				);
+			}
+		});
 	};
 
 	// Firefox fallback implementation using traditional file input
 	const handleFirefoxUpload = async () => {
-		return new Promise((resolve, reject) => {
-			// Create hidden file input
+		return new Promise<void>((resolve, reject) => {
 			const input = document.createElement('input');
 			input.type = 'file';
 			input.webkitdirectory = true;
 			input.directory = true;
 			input.multiple = true;
 			input.style.display = 'none';
-
-			// Add input to DOM temporarily
 			document.body.appendChild(input);
 
 			input.onchange = async () => {
 				try {
 					const files = Array.from(input.files)
-						// Filter out files from hidden folders
-						.filter((file) => !hasHiddenFolder(file.webkitRelativePath));
+						.filter((file) => !hasHiddenFolder(file.webkitRelativePath))
+						.filter((file) => !file.name.startsWith('.'))
+						.map((file) => {
+							const relativePath = file.webkitRelativePath || file.name;
+							return new File([file], relativePath, { type: file.type });
+						});
 
-					let totalFiles = files.length;
-					let uploadedFiles = 0;
-
-					// Function to update the UI with the progress
-					const updateProgress = () => {
-						const percentage = (uploadedFiles / totalFiles) * 100;
+					if (files.length > 0) {
 						toast.info(
 							$i18n.t('Upload Progress: {{uploadedFiles}}/{{totalFiles}} ({{percentage}}%)', {
-								uploadedFiles: uploadedFiles,
-								totalFiles: totalFiles,
-								percentage: percentage.toFixed(2)
+								uploadedFiles: 0,
+								totalFiles: files.length,
+								percentage: '0.00'
 							})
 						);
-					};
 
-					updateProgress();
-
-					// Process all files
-					for (const file of files) {
-						// Skip hidden files (additional check)
-						if (!file.name.startsWith('.')) {
-							const relativePath = file.webkitRelativePath || file.name;
-							const fileWithPath = new File([file], relativePath, { type: file.type });
-
-							await uploadFileHandler(fileWithPath);
-							uploadedFiles++;
-							updateProgress();
-						}
+						await uploadFiles(files, {
+							onProgress: (done, total) => {
+								const percentage = ((done / total) * 100).toFixed(2);
+								toast.info(
+									$i18n.t('Upload Progress: {{uploadedFiles}}/{{totalFiles}} ({{percentage}}%)', {
+										uploadedFiles: done,
+										totalFiles: total,
+										percentage
+									})
+								);
+							}
+						});
 					}
 
-					// Clean up
 					document.body.removeChild(input);
 					resolve();
 				} catch (error) {
@@ -581,7 +617,6 @@
 				reject(error);
 			};
 
-			// Trigger file picker
 			input.click();
 		});
 	};
@@ -1338,43 +1373,15 @@
 			return;
 		}
 
-		const handleUploadingFileFolder = (items) => {
-			for (const item of items) {
-				if (item.isFile) {
-					item.file((file) => {
-						uploadFileHandler(file);
-					});
-					continue;
+		if (e.dataTransfer?.types?.includes('Files') && e.dataTransfer?.items) {
+			const inputItems = e.dataTransfer.items;
+			if (inputItems.length > 0) {
+				const files = await collectDroppedFiles(inputItems);
+				if (files.length > 0) {
+					await uploadFiles(files);
 				}
-
-				// Not sure why you have to call webkitGetAsEntry and isDirectory seperate, but it won't work if you try item.webkitGetAsEntry().isDirectory
-				const wkentry = item.webkitGetAsEntry();
-				const isDirectory = wkentry.isDirectory;
-				if (isDirectory) {
-					// Read the directory
-					wkentry.createReader().readEntries(
-						(entries) => {
-							handleUploadingFileFolder(entries);
-						},
-						(error) => {
-							console.error('Error reading directory entries:', error);
-						}
-					);
-				} else {
-					uploadFileHandler(item.getAsFile());
-				}
-			}
-		};
-
-		if (e.dataTransfer?.types?.includes('Files')) {
-			if (e.dataTransfer?.files) {
-				const inputItems = e.dataTransfer?.items;
-
-				if (inputItems && inputItems.length > 0) {
-					handleUploadingFileFolder(inputItems);
-				} else {
-					toast.error($i18n.t(`File not found.`));
-				}
+			} else {
+				toast.error($i18n.t(`File not found.`));
 			}
 		}
 	};
@@ -1580,7 +1587,7 @@
 			const sortedFiles = Array.from(inputFiles).sort((a, b) =>
 				b.name.localeCompare(a.name)
 			);
-			await Promise.all(sortedFiles.map((file) => uploadFileHandler(file)));
+			await uploadFiles(sortedFiles);
 
 			inputFiles = null;
 			const fileInputElement = document.getElementById('files-input');
