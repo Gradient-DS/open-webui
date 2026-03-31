@@ -1738,7 +1738,7 @@
 									</div>
 								{:else if fileItemsTotal}
 									{#if knowledge?.type !== 'local' && knowledge?.type}
-										{@const maxFiles = $config?.integration_providers?.[knowledge?.type]?.max_files_per_kb || 250}
+										{@const maxFiles = $config?.integration_providers?.[knowledge?.type]?.max_files_per_kb || $config?.features?.knowledge_max_file_count || 250}
 										<Tooltip content={$i18n.t('Maximum {{count}} files per knowledge base', { count: maxFiles })}>
 											<div class="text-xs text-gray-500">
 												{fileItemsTotal} / {maxFiles} {$i18n.t('files')}

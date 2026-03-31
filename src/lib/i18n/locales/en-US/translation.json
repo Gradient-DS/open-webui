@@ -1327,6 +1327,7 @@
 	"Max Speakers": "",
 	"Max Upload Count": "",
 	"Max Upload Size": "",
+	"Maximum {{count}} files per knowledge base": "",
 	"Maximum 250 files per external knowledge base": "",
 	"Maximum characters to return from fetched URLs. Leave empty for no limit.": "",
 	"Maximum number of files allowed per folder.": "",
