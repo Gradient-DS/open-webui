@@ -684,13 +684,19 @@
 						toast.warning(uploadedFile.error);
 					}
 
-					fileItem.status = 'uploaded';
 					fileItem.file = uploadedFile;
 					fileItem.id = uploadedFile.id;
 					fileItem.collection_name =
 						uploadedFile?.meta?.collection_name || uploadedFile?.collection_name;
 					fileItem.content_type = uploadedFile.meta?.content_type || uploadedFile.content_type;
 					fileItem.url = `${uploadedFile.id}`;
+
+					// Keep status as 'uploading' if process=true — the file:status
+					// Socket.IO event will transition it to 'uploaded' once backend
+					// processing (parsing, embedding) completes.
+					if (!process) {
+						fileItem.status = 'uploaded';
+					}
 
 					files = files;
 				} else {
