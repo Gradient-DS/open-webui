@@ -7,8 +7,8 @@ import time
 import hashlib
 import uuid
 from abc import ABC, abstractmethod
-from dataclasses import asdict
-from typing import Optional, Callable, Awaitable, Dict, Any, List
+from dataclasses import asdict, dataclass
+from typing import Optional, Callable, Awaitable, Dict, Any, List, Union
 from pathlib import Path
 
 from open_webui.internal.db import get_db
@@ -27,6 +27,17 @@ from open_webui.services.sync.events import (
 )
 
 log = logging.getLogger(__name__)
+
+
+@dataclass
+class PreparedFile:
+    """File that has been downloaded and stored, ready for content extraction."""
+
+    file_id: str
+    file_info: Dict[str, Any]
+    name: str
+    content_hash: str
+    is_new: bool  # True if newly downloaded, False if hash-matched
 
 
 class BaseSyncWorker(ABC):
@@ -331,21 +342,29 @@ class BaseSyncWorker(ABC):
                 log.info(f'File {file_id} still referenced by {len(remaining_refs)} KB(s), preserving')
 
     async def _ensure_vectors_in_kb(self, file_id: str) -> Optional[FailedFile]:
-        """Copy vectors from the per-file collection into this KB's collection."""
+        """Copy vectors from the per-file collection into this KB's collection.
+
+        Runs in a thread because process_file uses asyncio.run_coroutine_threadsafe
+        internally for embeddings, which would deadlock if called directly on the
+        event loop thread.
+        """
         try:
             from open_webui.routers.retrieval import process_file, ProcessFileForm
             from fastapi import HTTPException
 
-            with get_db() as db:
-                process_file(
-                    self._make_request(),
-                    ProcessFileForm(
-                        file_id=file_id,
-                        collection_name=self.knowledge_id,
-                    ),
-                    user=self._get_user(),
-                    db=db,
-                )
+            def _call():
+                with get_db() as db:
+                    process_file(
+                        self._make_request(),
+                        ProcessFileForm(
+                            file_id=file_id,
+                            collection_name=self.knowledge_id,
+                        ),
+                        user=self._get_user(),
+                        db=db,
+                    )
+
+            await asyncio.to_thread(_call)
             return None
         except HTTPException as e:
             detail = str(e.detail) if e.detail else ''
@@ -376,85 +395,338 @@ class BaseSyncWorker(ABC):
                 error_message=f'Error copying vectors: {str(e)}'[:80],
             )
 
-    async def _process_file_via_api(self, file_id: str, filename: str) -> Optional[FailedFile]:
-        """Process file by calling the retrieval processing function directly."""
-        from open_webui.routers.retrieval import process_file, ProcessFileForm
-        from fastapi import HTTPException
+    async def _extract_content(self, file_id: str) -> Optional[tuple]:
+        """Extract text content from a file, returning Documents for embedding.
+
+        Uses the same extraction pipeline as process_file (external pipeline with
+        internal fallback), but returns the documents instead of embedding them.
+
+        Returns:
+            Tuple of (docs, file, needs_split) or None if no content could be extracted.
+            needs_split is True for internal pipeline (needs chunking), False for external
+            pipeline (already chunked).
+        """
+        from open_webui.retrieval.loaders.main import Loader
+        from open_webui.retrieval.vector.utils import filter_metadata
+        from open_webui.routers.external_retrieval import call_external_pipeline
+        from langchain_core.documents import Document
 
         request = self._make_request()
         user = self._get_user()
 
-        def _call_process_file(form_data):
-            """Wrapper that provides a fresh DB session for direct process_file calls."""
+        def _extract_in_thread():
             with get_db() as db:
-                return process_file(request, form_data, user=user, db=db)
-
-        try:
-            # Step 1: Process file content
-            try:
-                await asyncio.to_thread(
-                    _call_process_file,
-                    ProcessFileForm(file_id=file_id),
-                )
-                log.info(f'Successfully extracted content from file {file_id}')
-            except ValueError as e:
-                error_msg = str(e).lower()
-                if 'empty' in error_msg or 'no content' in error_msg:
-                    log.debug(f'File {file_id} has no extractable content')
-                    return None
-                raise
-            except HTTPException as e:
-                detail = str(e.detail) if e.detail else ''
-                if e.status_code == 400 and 'Duplicate content' in detail:
-                    log.debug(f'File {file_id} already has embeddings, skipping to knowledge base addition')
-                elif e.status_code == 400 and ('No content extracted' in detail or 'empty' in detail.lower()):
-                    log.debug(f'File {file_id} has no extractable content')
-                    return None
+                if user.role == 'admin':
+                    file = Files.get_file_by_id(file_id, db=db)
                 else:
-                    log.debug(f'Failed to process file content {file_id}: {e.status_code} - {detail}')
-                    return FailedFile(
-                        filename=filename,
-                        error_type=SyncErrorType.PROCESSING_ERROR.value,
-                        error_message=detail[:100] if detail else 'Processing failed',
-                    )
+                    file = Files.get_file_by_id_and_user_id(file_id, user.id, db=db)
 
-            # Step 2: Add processed content to knowledge base collection
-            try:
-                await asyncio.to_thread(
-                    _call_process_file,
-                    ProcessFileForm(
-                        file_id=file_id,
-                        collection_name=self.knowledge_id,
-                    ),
+                if not file:
+                    raise ValueError(f'File {file_id} not found')
+
+                file_path = file.path
+                if not file_path:
+                    raise ValueError(f'File {file_id} has no path')
+
+                file_path = Storage.get_file(file_path)
+
+                loader = Loader(
+                    engine=request.app.state.config.CONTENT_EXTRACTION_ENGINE,
+                    user=user,
+                    EXTERNAL_DOCUMENT_LOADER_URL=request.app.state.config.EXTERNAL_DOCUMENT_LOADER_URL,
+                    EXTERNAL_DOCUMENT_LOADER_API_KEY=request.app.state.config.EXTERNAL_DOCUMENT_LOADER_API_KEY,
+                    TIKA_SERVER_URL=request.app.state.config.TIKA_SERVER_URL,
+                    DOCLING_SERVER_URL=request.app.state.config.DOCLING_SERVER_URL,
+                    DOCLING_API_KEY=request.app.state.config.DOCLING_API_KEY,
+                    DOCLING_PARAMS=request.app.state.config.DOCLING_PARAMS,
+                    PDF_EXTRACT_IMAGES=request.app.state.config.PDF_EXTRACT_IMAGES,
+                    PDF_LOADER_MODE=request.app.state.config.PDF_LOADER_MODE,
+                    DATALAB_MARKER_API_KEY=request.app.state.config.DATALAB_MARKER_API_KEY,
+                    DATALAB_MARKER_API_BASE_URL=request.app.state.config.DATALAB_MARKER_API_BASE_URL,
+                    DATALAB_MARKER_ADDITIONAL_CONFIG=request.app.state.config.DATALAB_MARKER_ADDITIONAL_CONFIG,
+                    DATALAB_MARKER_SKIP_CACHE=request.app.state.config.DATALAB_MARKER_SKIP_CACHE,
+                    DATALAB_MARKER_FORCE_OCR=request.app.state.config.DATALAB_MARKER_FORCE_OCR,
+                    DATALAB_MARKER_PAGINATE=request.app.state.config.DATALAB_MARKER_PAGINATE,
+                    DATALAB_MARKER_STRIP_EXISTING_OCR=request.app.state.config.DATALAB_MARKER_STRIP_EXISTING_OCR,
+                    DATALAB_MARKER_DISABLE_IMAGE_EXTRACTION=request.app.state.config.DATALAB_MARKER_DISABLE_IMAGE_EXTRACTION,
+                    DATALAB_MARKER_FORMAT_LINES=request.app.state.config.DATALAB_MARKER_FORMAT_LINES,
+                    DATALAB_MARKER_USE_LLM=request.app.state.config.DATALAB_MARKER_USE_LLM,
+                    DATALAB_MARKER_OUTPUT_FORMAT=request.app.state.config.DATALAB_MARKER_OUTPUT_FORMAT,
+                    DOCUMENT_INTELLIGENCE_ENDPOINT=request.app.state.config.DOCUMENT_INTELLIGENCE_ENDPOINT,
+                    DOCUMENT_INTELLIGENCE_KEY=request.app.state.config.DOCUMENT_INTELLIGENCE_KEY,
+                    DOCUMENT_INTELLIGENCE_MODEL=request.app.state.config.DOCUMENT_INTELLIGENCE_MODEL,
+                    MISTRAL_OCR_API_BASE_URL=request.app.state.config.MISTRAL_OCR_API_BASE_URL,
+                    MISTRAL_OCR_API_KEY=request.app.state.config.MISTRAL_OCR_API_KEY,
+                    MINERU_API_MODE=request.app.state.config.MINERU_API_MODE,
+                    MINERU_API_URL=request.app.state.config.MINERU_API_URL,
+                    MINERU_API_KEY=request.app.state.config.MINERU_API_KEY,
+                    MINERU_API_TIMEOUT=request.app.state.config.MINERU_API_TIMEOUT,
+                    MINERU_PARAMS=request.app.state.config.MINERU_PARAMS,
                 )
-                log.info(f'Successfully added file {file_id} to knowledge base {self.knowledge_id}')
-            except HTTPException as e:
-                detail = str(e.detail) if e.detail else ''
-                if e.status_code == 400 and 'Duplicate content' in detail:
-                    log.debug(f'File {file_id} already exists in knowledge base {self.knowledge_id}')
-                    return None
-                else:
-                    log.debug(f'Failed to add file {file_id} to knowledge base: {e.status_code} - {detail}')
-                    return FailedFile(
-                        filename=filename,
-                        error_type=SyncErrorType.PROCESSING_ERROR.value,
-                        error_message=(detail[:100] if detail else 'Failed to add to knowledge base'),
-                    )
 
-            return None
-        except Exception as e:
-            log.warning(f'Error processing file {file_id} ({filename}): {e}')
-            return FailedFile(
-                filename=filename,
-                error_type=SyncErrorType.PROCESSING_ERROR.value,
-                error_message=str(e)[:100],
+                # Try external pipeline first
+                external_pipeline_url = getattr(request.app.state.config, 'EXTERNAL_PIPELINE_URL', None)
+                use_external = external_pipeline_url and external_pipeline_url.strip() != ''
+                docs = None
+
+                if use_external:
+                    try:
+                        result = call_external_pipeline(
+                            file_path=file_path,
+                            filename=file.filename,
+                            content_type=file.meta.get('content_type', ''),
+                            external_pipeline_url=external_pipeline_url,
+                            external_pipeline_api_key=getattr(
+                                request.app.state.config, 'EXTERNAL_PIPELINE_API_KEY', None
+                            ),
+                            loader_instance=loader,
+                        )
+                        if result.get('success') and result.get('chunks'):
+                            docs = [
+                                Document(
+                                    page_content=chunk['text'],
+                                    metadata=chunk.get('metadata', {}),
+                                )
+                                for chunk in result['chunks']
+                            ]
+                    except Exception as e:
+                        log.warning(f'External pipeline failed for {file.filename}: {e}, falling back')
+                        use_external = False
+
+                if docs is None:
+                    use_external = False
+                    docs = loader.load(file.filename, file.meta.get('content_type'), file_path)
+
+                if not docs:
+                    return None
+
+                docs = [
+                    Document(
+                        page_content=doc.page_content,
+                        metadata={
+                            **filter_metadata(doc.metadata),
+                            'name': file.filename,
+                            'created_by': file.user_id,
+                            'file_id': file.id,
+                            'source': file.filename,
+                        },
+                    )
+                    for doc in docs
+                ]
+
+                text_content = ' '.join([doc.page_content for doc in docs])
+
+                # Save extracted text to file record
+                Files.update_file_data_by_id(file.id, {'content': text_content}, db=db)
+                db.commit()
+
+                return docs, file, not use_external  # needs_split=True for internal pipeline
+
+        return await asyncio.to_thread(_extract_in_thread)
+
+    async def _embed_to_collections(
+        self,
+        docs: list,
+        file_id: str,
+        file_hash: str,
+        filename: str,
+        needs_split: bool = True,
+    ) -> bool:
+        """Embed documents once and insert vectors into both KB and per-file collections.
+
+        This replaces the double process_file call by generating embeddings once
+        and writing the resulting vectors to both collections.
+        """
+        import tiktoken
+        from open_webui.retrieval.utils import get_embedding_function
+        from open_webui.utils.misc import sanitize_text_for_db
+        from open_webui.config import RAG_EMBEDDING_CONTENT_PREFIX, RAG_EMBEDDING_TIMEOUT
+        from langchain_core.documents import Document
+        from langchain.text_splitter import RecursiveCharacterTextSplitter, TokenTextSplitter
+        from langchain.text_splitter import MarkdownHeaderTextSplitter
+
+        request = self._make_request()
+        user = self._get_user()
+
+        metadata = {
+            'file_id': file_id,
+            'name': filename,
+            'hash': file_hash,
+        }
+
+        def _split_and_embed():
+            """Split documents and generate embeddings (runs in thread)."""
+            working_docs = list(docs)
+
+            # Split if needed (internal pipeline; external pipeline pre-chunks)
+            if needs_split:
+                # Markdown header splitting (if enabled)
+                if request.app.state.config.ENABLE_MARKDOWN_HEADER_TEXT_SPLITTER:
+                    markdown_splitter = MarkdownHeaderTextSplitter(
+                        headers_to_split_on=[
+                            ('#', 'Header 1'),
+                            ('##', 'Header 2'),
+                            ('###', 'Header 3'),
+                            ('####', 'Header 4'),
+                            ('#####', 'Header 5'),
+                            ('######', 'Header 6'),
+                        ],
+                        strip_headers=False,
+                    )
+                    split_docs = []
+                    for doc in working_docs:
+                        split_docs.extend(
+                            [
+                                Document(
+                                    page_content=split_chunk.page_content,
+                                    metadata={**doc.metadata},
+                                )
+                                for split_chunk in markdown_splitter.split_text(doc.page_content)
+                            ]
+                        )
+                    working_docs = split_docs
+
+                    if request.app.state.config.CHUNK_MIN_SIZE_TARGET > 0:
+                        from open_webui.routers.retrieval import merge_docs_to_target_size
+
+                        working_docs = merge_docs_to_target_size(request, working_docs)
+
+                # Text splitting
+                if request.app.state.config.TEXT_SPLITTER in ['', 'character']:
+                    splitter = RecursiveCharacterTextSplitter(
+                        chunk_size=request.app.state.config.CHUNK_SIZE,
+                        chunk_overlap=request.app.state.config.CHUNK_OVERLAP,
+                        add_start_index=True,
+                    )
+                    working_docs = splitter.split_documents(working_docs)
+                elif request.app.state.config.TEXT_SPLITTER == 'token':
+                    tiktoken.get_encoding(str(request.app.state.config.TIKTOKEN_ENCODING_NAME))
+                    splitter = TokenTextSplitter(
+                        encoding_name=str(request.app.state.config.TIKTOKEN_ENCODING_NAME),
+                        chunk_size=request.app.state.config.CHUNK_SIZE,
+                        chunk_overlap=request.app.state.config.CHUNK_OVERLAP,
+                        add_start_index=True,
+                    )
+                    working_docs = splitter.split_documents(working_docs)
+
+            if not working_docs:
+                return [], [], []
+
+            texts = [sanitize_text_for_db(doc.page_content) for doc in working_docs]
+            metadatas = [
+                {
+                    **doc.metadata,
+                    **metadata,
+                    'embedding_config': {
+                        'engine': request.app.state.config.RAG_EMBEDDING_ENGINE,
+                        'model': request.app.state.config.RAG_EMBEDDING_MODEL,
+                    },
+                }
+                for doc in working_docs
+            ]
+
+            # Generate embeddings
+            embedding_function = get_embedding_function(
+                request.app.state.config.RAG_EMBEDDING_ENGINE,
+                request.app.state.config.RAG_EMBEDDING_MODEL,
+                request.app.state.ef,
+                (
+                    request.app.state.config.RAG_OPENAI_API_BASE_URL
+                    if request.app.state.config.RAG_EMBEDDING_ENGINE == 'openai'
+                    else (
+                        request.app.state.config.RAG_OLLAMA_BASE_URL
+                        if request.app.state.config.RAG_EMBEDDING_ENGINE == 'ollama'
+                        else request.app.state.config.RAG_AZURE_OPENAI_BASE_URL
+                    )
+                ),
+                (
+                    request.app.state.config.RAG_OPENAI_API_KEY
+                    if request.app.state.config.RAG_EMBEDDING_ENGINE == 'openai'
+                    else (
+                        request.app.state.config.RAG_OLLAMA_API_KEY
+                        if request.app.state.config.RAG_EMBEDDING_ENGINE == 'ollama'
+                        else request.app.state.config.RAG_AZURE_OPENAI_API_KEY
+                    )
+                ),
+                request.app.state.config.RAG_EMBEDDING_BATCH_SIZE,
+                azure_api_version=(
+                    request.app.state.config.RAG_AZURE_OPENAI_API_VERSION
+                    if request.app.state.config.RAG_EMBEDDING_ENGINE == 'azure_openai'
+                    else None
+                ),
+                enable_async=request.app.state.config.ENABLE_ASYNC_EMBEDDING,
+                concurrent_requests=request.app.state.config.RAG_EMBEDDING_CONCURRENT_REQUESTS,
             )
 
-    async def _process_file_info(self, file_info: Dict[str, Any]) -> Optional[FailedFile]:
-        """Download and process a single file.
+            future = asyncio.run_coroutine_threadsafe(
+                embedding_function(
+                    list(map(lambda x: x.replace('\n', ' '), texts)),
+                    prefix=RAG_EMBEDDING_CONTENT_PREFIX,
+                    user=user,
+                ),
+                request.app.state.main_loop,
+            )
+            embeddings = future.result(timeout=RAG_EMBEDDING_TIMEOUT)
+
+            return texts, metadatas, embeddings
+
+        texts, metadatas, embeddings = await asyncio.to_thread(_split_and_embed)
+
+        if not texts:
+            log.warning(f'No text content extracted from {filename}')
+            with get_db() as session:
+                Files.update_file_metadata_by_id(file_id, {'collection_name': f'file-{file_id}'}, db=session)
+                Files.update_file_data_by_id(file_id, {'status': 'completed'}, db=session)
+                Files.update_file_hash_by_id(file_id, file_hash, db=session)
+            return True
+
+        # Build vector items once, with separate UUIDs per collection
+        items_kb = [
+            {
+                'id': str(uuid.uuid4()),
+                'text': text,
+                'vector': embeddings[idx],
+                'metadata': metadatas[idx],
+            }
+            for idx, text in enumerate(texts)
+        ]
+
+        items_file = [
+            {
+                'id': str(uuid.uuid4()),
+                'text': text,
+                'vector': embeddings[idx],
+                'metadata': metadatas[idx],
+            }
+            for idx, text in enumerate(texts)
+        ]
+
+        # Insert into KB collection
+        VECTOR_DB_CLIENT.insert(collection_name=self.knowledge_id, items=items_kb)
+        log.info(f'Inserted {len(items_kb)} vectors into KB {self.knowledge_id} for {file_id}')
+
+        # Insert into per-file collection (overwrite if exists)
+        file_collection = f'file-{file_id}'
+        if VECTOR_DB_CLIENT.has_collection(collection_name=file_collection):
+            VECTOR_DB_CLIENT.delete_collection(collection_name=file_collection)
+        VECTOR_DB_CLIENT.insert(collection_name=file_collection, items=items_file)
+        log.info(f'Inserted {len(items_file)} vectors into {file_collection}')
+
+        # Update file metadata
+        with get_db() as session:
+            Files.update_file_metadata_by_id(file_id, {'collection_name': file_collection}, db=session)
+            Files.update_file_data_by_id(file_id, {'status': 'completed'}, db=session)
+            Files.update_file_hash_by_id(file_id, file_hash, db=session)
+
+        return True
+
+    async def _download_and_store(self, file_info: Dict[str, Any]) -> Union[PreparedFile, FailedFile, None]:
+        """Phase 1: Download from cloud, check hash, upload to S3, create file record.
 
         Returns:
-            None on success, FailedFile on error
+            PreparedFile if file needs processing
+            None if file is unchanged (hash match, vectors verified)
+            FailedFile on error
         """
         item = file_info['item']
         item_id = item['id']
@@ -462,10 +734,9 @@ class BaseSyncWorker(ABC):
         source_item_id = file_info.get('source_item_id')
         relative_path = file_info.get('relative_path', name)
 
-        log.info(f'Processing file: {name} (id: {item_id}, relative_path: {relative_path})')
+        log.info(f'Downloading file: {name} (id: {item_id})')
 
         if self._check_cancelled():
-            log.info(f'Sync cancelled, skipping file {name}')
             return FailedFile(
                 filename=name,
                 error_type=SyncErrorType.PROCESSING_ERROR.value,
@@ -497,16 +768,14 @@ class BaseSyncWorker(ABC):
             )
 
         if not content or len(content) == 0:
-            log.warning(f'File {name} has no content')
             return FailedFile(
                 filename=name,
                 error_type=SyncErrorType.EMPTY_CONTENT.value,
                 error_message='File is empty',
             )
 
-        # Calculate hash for change detection
+        # Hash-based change detection
         content_hash = hashlib.sha256(content).hexdigest()
-
         file_id = f'{self.file_id_prefix}{item_id}'
         existing = Files.get_file_by_id(file_id)
 
@@ -518,18 +787,14 @@ class BaseSyncWorker(ABC):
             if new_relative_path and existing_meta.get('relative_path') != new_relative_path:
                 existing_meta['relative_path'] = new_relative_path
                 Files.update_file_by_id(file_id, FileUpdateForm(meta=existing_meta))
-                log.info(f'Updated {file_id} meta with relative_path: {new_relative_path}')
 
             Knowledges.add_file_to_knowledge_by_id(self.knowledge_id, file_id, self.user_id)
             result = await self._ensure_vectors_in_kb(file_id)
             if result:
                 if result.error_type == SyncErrorType.EMPTY_CONTENT.value:
-                    log.info(f'File {file_id} has no extractable content, skipping vectorisation')
-                    return None
-                log.warning(
-                    f'File {file_id} vectors missing despite hash match, '
-                    f'will re-process from scratch: {result.error_message}'
-                )
+                    return None  # Skip, not failure
+                log.warning(f'File {file_id} vectors missing, will re-process')
+                # Fall through to re-process
             else:
                 file_record = Files.get_file_by_id(file_id)
                 if file_record:
@@ -545,10 +810,9 @@ class BaseSyncWorker(ABC):
                             'updated_at': file_record.updated_at,
                         },
                     )
+                return None  # Success, no processing needed
 
-                return None  # Success
-
-        # Save to storage
+        # Upload to storage
         temp_filename = f'{file_id}_{name}'
         try:
             storage_headers = {
@@ -563,13 +827,13 @@ class BaseSyncWorker(ABC):
                 storage_headers,
             )
         except Exception as e:
-            log.warning(f'Failed to upload file to storage {name}: {e}')
             return FailedFile(
                 filename=name,
                 error_type=SyncErrorType.PROCESSING_ERROR.value,
                 error_message=f'Storage upload failed: {str(e)[:80]}',
             )
 
+        # Create/update file record
         try:
             content_type = self._get_content_type(name)
             file_meta = self._get_provider_file_meta(
@@ -585,13 +849,9 @@ class BaseSyncWorker(ABC):
             if existing:
                 Files.update_file_by_id(
                     file_id,
-                    FileUpdateForm(
-                        hash=content_hash,
-                        meta=file_meta,
-                    ),
+                    FileUpdateForm(hash=content_hash, meta=file_meta),
                 )
                 Files.update_file_path_by_id(file_id, file_path)
-                log.info(f'Updated existing file record: {file_id}')
             else:
                 file_form = FileForm(
                     id=file_id,
@@ -602,93 +862,144 @@ class BaseSyncWorker(ABC):
                     meta=file_meta,
                 )
                 Files.insert_new_file(self.user_id, file_form)
-                log.info(f'Created new file record: {file_id}')
 
-            # Process file via internal API call
-            failed = await self._process_file_via_api(file_id, name)
-            if failed:
-                return failed
+            return PreparedFile(
+                file_id=file_id,
+                file_info=file_info,
+                name=name,
+                content_hash=content_hash,
+                is_new=not existing,
+            )
+        except Exception as e:
+            return FailedFile(
+                filename=name,
+                error_type=SyncErrorType.PROCESSING_ERROR.value,
+                error_message=str(e)[:100],
+            )
+
+    async def _process_and_embed(self, prepared: PreparedFile) -> Optional[FailedFile]:
+        """Phase 2: Extract content, embed once, insert into KB + per-file collections.
+
+        Returns None on success, FailedFile on error.
+        """
+        file_id = prepared.file_id
+        name = prepared.name
+
+        if self._check_cancelled():
+            return FailedFile(
+                filename=name,
+                error_type=SyncErrorType.PROCESSING_ERROR.value,
+                error_message='Sync cancelled by user',
+            )
+
+        try:
+            # Extract content (loader / external pipeline)
+            result = await self._extract_content(file_id)
+            if result is None:
+                log.debug(f'File {file_id} has no extractable content')
+                return None
+
+            docs, file_record, needs_split = result
+
+            if not docs or not any(doc.page_content.strip() for doc in docs):
+                log.debug(f'File {file_id} has no text content')
+                return None
 
             if self._check_cancelled():
-                log.info(f'Sync cancelled, skipping KB association for {file_id}')
                 return FailedFile(
                     filename=name,
                     error_type=SyncErrorType.PROCESSING_ERROR.value,
                     error_message='Sync cancelled by user',
                 )
 
-            Knowledges.add_file_to_knowledge_by_id(
-                self.knowledge_id,
-                file_id,
-                self.user_id,
+            # Embed once → insert into both KB and per-file collections
+            success = await self._embed_to_collections(
+                docs=docs,
+                file_id=file_id,
+                file_hash=prepared.content_hash,
+                filename=name,
+                needs_split=needs_split,
             )
-            log.info(f'Added file to knowledge base: {file_id}')
 
-            # Propagate updated vectors to other KBs
-            try:
-                knowledge_files = Knowledges.get_knowledge_files_by_file_id(file_id)
-                for kf in knowledge_files:
-                    if kf.knowledge_id != self.knowledge_id:
-                        log.info(f'Propagating updated vectors for {file_id} to KB {kf.knowledge_id}')
-                        try:
-                            VECTOR_DB_CLIENT.delete(
-                                collection_name=kf.knowledge_id,
-                                filter={'file_id': file_id},
-                            )
-                        except Exception as e:
-                            log.warning(f'Failed to remove old vectors from KB {kf.knowledge_id}: {e}')
-                        try:
-                            from open_webui.routers.retrieval import (
-                                process_file,
-                                ProcessFileForm,
-                            )
-
-                            def _call_propagate(form_data):
-                                with get_db() as db:
-                                    return process_file(
-                                        self._make_request(),
-                                        form_data,
-                                        user=self._get_user(),
-                                        db=db,
-                                    )
-
-                            await asyncio.to_thread(
-                                _call_propagate,
-                                ProcessFileForm(
-                                    file_id=file_id,
-                                    collection_name=kf.knowledge_id,
-                                ),
-                            )
-                        except Exception as e:
-                            log.warning(f'Failed to propagate vectors to KB {kf.knowledge_id}: {e}')
-            except Exception as e:
-                log.warning(f'Failed to propagate vector updates for {file_id}: {e}')
-
-            # Emit file added event
-            file_record = Files.get_file_by_id(file_id)
-            if file_record:
-                await emit_file_added(
-                    self.event_prefix,
-                    user_id=self.user_id,
-                    knowledge_id=self.knowledge_id,
-                    file_data={
-                        'id': file_record.id,
-                        'filename': file_record.filename,
-                        'meta': file_record.meta,
-                        'created_at': file_record.created_at,
-                        'updated_at': file_record.updated_at,
-                    },
+            if not success:
+                return FailedFile(
+                    filename=name,
+                    error_type=SyncErrorType.PROCESSING_ERROR.value,
+                    error_message='Failed to save vectors',
                 )
 
-            return None  # Success
-
         except Exception as e:
-            log.warning(f'Error processing file {name}: {e}')
+            log.warning(f'Error processing file {file_id} ({name}): {e}')
             return FailedFile(
                 filename=name,
                 error_type=SyncErrorType.PROCESSING_ERROR.value,
                 error_message=str(e)[:100],
             )
+
+        if self._check_cancelled():
+            return FailedFile(
+                filename=name,
+                error_type=SyncErrorType.PROCESSING_ERROR.value,
+                error_message='Sync cancelled by user',
+            )
+
+        # KB association
+        Knowledges.add_file_to_knowledge_by_id(self.knowledge_id, file_id, self.user_id)
+
+        # Cross-KB vector propagation (still uses process_file for other KBs)
+        try:
+            knowledge_files = Knowledges.get_knowledge_files_by_file_id(file_id)
+            for kf in knowledge_files:
+                if kf.knowledge_id != self.knowledge_id:
+                    log.info(f'Propagating vectors for {file_id} to KB {kf.knowledge_id}')
+                    try:
+                        VECTOR_DB_CLIENT.delete(
+                            collection_name=kf.knowledge_id,
+                            filter={'file_id': file_id},
+                        )
+                    except Exception as e:
+                        log.warning(f'Failed to remove old vectors from KB {kf.knowledge_id}: {e}')
+                    try:
+                        from open_webui.routers.retrieval import process_file, ProcessFileForm
+
+                        def _call_propagate(form_data):
+                            with get_db() as db:
+                                return process_file(
+                                    self._make_request(),
+                                    form_data,
+                                    user=self._get_user(),
+                                    db=db,
+                                )
+
+                        await asyncio.to_thread(
+                            _call_propagate,
+                            ProcessFileForm(
+                                file_id=file_id,
+                                collection_name=kf.knowledge_id,
+                            ),
+                        )
+                    except Exception as e:
+                        log.warning(f'Failed to propagate vectors to KB {kf.knowledge_id}: {e}')
+        except Exception as e:
+            log.warning(f'Failed to propagate vector updates for {file_id}: {e}')
+
+        # Emit file added event
+        file_record = Files.get_file_by_id(file_id)
+        if file_record:
+            await emit_file_added(
+                self.event_prefix,
+                user_id=self.user_id,
+                knowledge_id=self.knowledge_id,
+                file_data={
+                    'id': file_record.id,
+                    'filename': file_record.filename,
+                    'meta': file_record.meta,
+                    'created_at': file_record.created_at,
+                    'updated_at': file_record.updated_at,
+                },
+            )
+
+        return None
 
     async def sync(self) -> Dict[str, Any]:
         """Execute sync operation for all sources."""
@@ -811,18 +1122,22 @@ class BaseSyncWorker(ABC):
                 f'({already_synced} already synced, {total_files} total)'
             )
 
-            # Process all files in parallel with controlled concurrency
-            max_concurrent = FILE_PROCESSING_MAX_CONCURRENT.value
-            semaphore = asyncio.Semaphore(max_concurrent)
+            # Process all files with two-phase pipeline
+            from open_webui.config import FILE_DOWNLOAD_CONCURRENCY_MULTIPLIER
+
+            max_process_concurrent = FILE_PROCESSING_MAX_CONCURRENT.value
+            max_download_concurrent = max_process_concurrent * FILE_DOWNLOAD_CONCURRENCY_MULTIPLIER
+            download_semaphore = asyncio.Semaphore(max_download_concurrent)
+            process_semaphore = asyncio.Semaphore(max_process_concurrent)
             processed_count = already_synced
             failed_count = 0
             results_lock = asyncio.Lock()
             cancelled = False
 
-            async def process_with_semaphore(file_info: Dict[str, Any], index: int) -> Optional[FailedFile]:
+            async def pipeline(file_info: Dict[str, Any], index: int) -> Optional[FailedFile]:
                 nonlocal processed_count, failed_count, cancelled
 
-                if self._check_cancelled():
+                if cancelled or self._check_cancelled():
                     cancelled = True
                     return FailedFile(
                         filename=file_info.get('name', 'unknown'),
@@ -830,24 +1145,22 @@ class BaseSyncWorker(ABC):
                         error_message='Sync cancelled by user',
                     )
 
-                async with semaphore:
-                    if cancelled or self._check_cancelled():
-                        cancelled = True
-                        return FailedFile(
-                            filename=file_info.get('name', 'unknown'),
-                            error_type=SyncErrorType.PROCESSING_ERROR.value,
-                            error_message='Sync cancelled by user',
-                        )
+                try:
+                    # Phase 1: Download + store (high concurrency)
+                    async with download_semaphore:
+                        if cancelled or self._check_cancelled():
+                            cancelled = True
+                            return FailedFile(
+                                filename=file_info.get('name', 'unknown'),
+                                error_type=SyncErrorType.PROCESSING_ERROR.value,
+                                error_message='Sync cancelled by user',
+                            )
+                        result = await self._download_and_store(file_info)
 
-                    try:
-                        result = await self._process_file_info(file_info)
-
+                    # Handle download phase results
+                    if isinstance(result, FailedFile):
                         async with results_lock:
-                            if result is None:
-                                processed_count += 1
-                            else:
-                                failed_count += 1
-
+                            failed_count += 1
                             await self._update_sync_status(
                                 'syncing',
                                 processed_count + failed_count,
@@ -856,23 +1169,66 @@ class BaseSyncWorker(ABC):
                                 files_processed=processed_count,
                                 files_failed=failed_count,
                             )
-
                         return result
-                    except Exception as e:
-                        log.error(f'Error processing file {file_info.get("name")}: {e}')
-                        async with results_lock:
-                            failed_count += 1
-                        return FailedFile(
-                            filename=file_info.get('name', 'unknown'),
-                            error_type=SyncErrorType.PROCESSING_ERROR.value,
-                            error_message=str(e)[:100],
-                        )
 
-            log.info(f'Starting parallel processing of {total_files} files with max {max_concurrent} concurrent')
+                    if result is None:
+                        # Hash match — already handled, count as success
+                        async with results_lock:
+                            processed_count += 1
+                            await self._update_sync_status(
+                                'syncing',
+                                processed_count + failed_count,
+                                total_files,
+                                file_info.get('name', ''),
+                                files_processed=processed_count,
+                                files_failed=failed_count,
+                            )
+                        return None
+
+                    # Phase 2: Process + embed (normal concurrency)
+                    async with process_semaphore:
+                        if cancelled or self._check_cancelled():
+                            cancelled = True
+                            return FailedFile(
+                                filename=file_info.get('name', 'unknown'),
+                                error_type=SyncErrorType.PROCESSING_ERROR.value,
+                                error_message='Sync cancelled by user',
+                            )
+                        process_result = await self._process_and_embed(result)
+
+                    async with results_lock:
+                        if process_result is None:
+                            processed_count += 1
+                        else:
+                            failed_count += 1
+                        await self._update_sync_status(
+                            'syncing',
+                            processed_count + failed_count,
+                            total_files,
+                            file_info.get('name', ''),
+                            files_processed=processed_count,
+                            files_failed=failed_count,
+                        )
+                    return process_result
+
+                except Exception as e:
+                    log.error(f'Error in pipeline for {file_info.get("name")}: {e}')
+                    async with results_lock:
+                        failed_count += 1
+                    return FailedFile(
+                        filename=file_info.get('name', 'unknown'),
+                        error_type=SyncErrorType.PROCESSING_ERROR.value,
+                        error_message=str(e)[:100],
+                    )
+
+            log.info(
+                f'Starting pipeline processing of {len(all_files_to_process)} files '
+                f'(download concurrency: {max_download_concurrent}, '
+                f'process concurrency: {max_process_concurrent})'
+            )
             start_time = time.time()
 
-            tasks = [process_with_semaphore(file_info, i) for i, file_info in enumerate(all_files_to_process)]
-
+            tasks = [pipeline(file_info, i) for i, file_info in enumerate(all_files_to_process)]
             results = await asyncio.gather(*tasks, return_exceptions=True)
 
             for result in results:
@@ -894,7 +1250,7 @@ class BaseSyncWorker(ABC):
 
             processing_time = time.time() - start_time
             log.info(
-                f'Parallel processing completed in {processing_time:.2f}s: '
+                f'Pipeline processing completed in {processing_time:.2f}s: '
                 f'{total_processed} succeeded, {total_failed} failed'
             )
 
