@@ -340,7 +340,11 @@ class GoogleDriveSyncWorker(BaseSyncWorker):
         return name
 
     async def _collect_folder_files_full(self, source: Dict[str, Any]) -> tuple[List[Dict[str, Any]], int]:
-        """Full listing of all files in a folder (initial sync)."""
+        """Full listing of all files in a folder (initial sync).
+
+        Uses level-by-level concurrent BFS: all folders at the same depth
+        are listed in parallel, bounded by a semaphore to respect API rate limits.
+        """
         folder_id = source['item_id']
 
         # Get start page token BEFORE listing (captures changes during listing)
@@ -350,31 +354,45 @@ class GoogleDriveSyncWorker(BaseSyncWorker):
         folder_map: Dict[str, str] = {folder_id: ''}
         files_to_process = []
 
-        # BFS through folder structure
-        folders_to_visit = [(folder_id, '')]
-        while folders_to_visit:
-            current_id, parent_path = folders_to_visit.pop(0)
-            items = await self._client.list_folder_children(current_id)
+        # Concurrent BFS: list all folders at the same depth level in parallel
+        max_concurrent_listings = 10  # Respect Google Drive API rate limits
+        listing_semaphore = asyncio.Semaphore(max_concurrent_listings)
 
-            for item in items:
-                item_name = item.get('name', 'unknown')
-                item_path = f'{parent_path}/{item_name}' if parent_path else item_name
-                mime_type = item.get('mimeType', '')
+        async def _list_folder(fid: str, parent_path: str):
+            async with listing_semaphore:
+                items = await self._client.list_folder_children(fid)
+            return items, parent_path
 
-                if mime_type == 'application/vnd.google-apps.folder':
-                    folder_map[item['id']] = item_path
-                    folders_to_visit.append((item['id'], item_path))
-                elif self._is_supported_file(item):
-                    effective_name = self._get_effective_filename(item)
-                    files_to_process.append(
-                        {
-                            'item': item,
-                            'source_type': 'folder',
-                            'source_item_id': source['item_id'],
-                            'name': effective_name,
-                            'relative_path': (f'{parent_path}/{effective_name}' if parent_path else effective_name),
-                        }
-                    )
+        current_level = [(folder_id, '')]
+
+        while current_level:
+            # List all folders at this depth level concurrently
+            tasks = [_list_folder(fid, path) for fid, path in current_level]
+            results = await asyncio.gather(*tasks)
+
+            next_level = []
+            for items, parent_path in results:
+                for item in items:
+                    item_name = item.get('name', 'unknown')
+                    item_path = f'{parent_path}/{item_name}' if parent_path else item_name
+                    mime_type = item.get('mimeType', '')
+
+                    if mime_type == 'application/vnd.google-apps.folder':
+                        folder_map[item['id']] = item_path
+                        next_level.append((item['id'], item_path))
+                    elif self._is_supported_file(item):
+                        effective_name = self._get_effective_filename(item)
+                        files_to_process.append(
+                            {
+                                'item': item,
+                                'source_type': 'folder',
+                                'source_item_id': source['item_id'],
+                                'name': effective_name,
+                                'relative_path': (f'{parent_path}/{effective_name}' if parent_path else effective_name),
+                            }
+                        )
+
+            current_level = next_level
 
         # Persist folder map and page token
         source['folder_map'] = folder_map
