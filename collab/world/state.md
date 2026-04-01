@@ -4,7 +4,6 @@
 
 #### Current Work
 
-- **DPIA compliance features** on branch `feat/dpia`: user data export and configurable data retention both implemented. Needs testing and PR.
 - External agents package — active development and integration
 - New cloud integrations (Google Drive recently completed, exploring more)
 
@@ -14,6 +13,8 @@
 
 #### Completed Recently
 
+- **DPIA compliance** — merged via PR #66. Data export, data retention, file upload improvements, zip export security fix, cloud sync hardening.
+- **KB file limit increase** — hotfix `3bda20910` (01-04-2026)
 - **TOTP 2FA Phase 1** — merged via PR #61. Phase 2 (email OTP) deferred.
 - **Security hardening** — Trivy CVE fixes, Docker slimming, TOTP replay token fix
 - **Aesthetic polish** — merged via PR #62. KB logos, tab split, Dutch translations
@@ -23,5 +24,3 @@
 #### Active Resources
 
 - Sync abstraction cookbook: `collab/docs/external-integration-cookbook.md`
-- Data export plan: `thoughts/shared/plans/2026-03-31-user-data-export.md`
-- Data retention plan: `thoughts/shared/plans/2026-03-31-data-retention-ttl.md`
