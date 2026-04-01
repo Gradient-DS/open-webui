@@ -172,6 +172,7 @@ openWebui:
 
     # File Processing
     fileProcessingMaxConcurrent: "10"  # Max concurrent file processing tasks
+    fileDownloadConcurrencyMultiplier: "3"  # Download concurrency = processing × this multiplier
 
     # Content Extraction & Reranking (via shared services)
     contentExtractionEngine: "external"
