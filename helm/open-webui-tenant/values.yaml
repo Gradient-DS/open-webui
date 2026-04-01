@@ -374,9 +374,9 @@ openWebui:
     # Security Headers (all enabled by default — set to "" to disable)
     securityHeaders:
       hsts: "max-age=31536000;includeSubDomains"
-      xFrameOptions: "DENY"
+      xFrameOptions: "SAMEORIGIN"
       xContentType: "nosniff"
-      referrerPolicy: "no-referrer"
+      referrerPolicy: "strict-origin-when-cross-origin"
       cacheControl: "no-store, max-age=0"
 
     # Cookie Security (true for all HTTPS deployments)
@@ -538,7 +538,7 @@ weaviate:
 # -----------------------------------------------------------------------------
 ingress:
   enabled: true
-  className: nginx
+  className: ""
   annotations:
     cert-manager.io/cluster-issuer: letsencrypt-prod
   tls:

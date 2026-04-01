@@ -11,11 +11,6 @@ spec:
     - Ingress
     - Egress
   ingress:
-    # Allow from ingress controller
-    - from:
-        - namespaceSelector:
-            matchLabels:
-              kubernetes.io/metadata.name: ingress-nginx
     # Allow from observability namespace (for metrics scraping by Alloy/Prometheus)
     - from:
         - namespaceSelector:
