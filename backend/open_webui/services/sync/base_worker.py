@@ -159,6 +159,16 @@ class BaseSyncWorker(ABC):
         ...
 
     @abstractmethod
+    def _get_cloud_hash(self, file_info: Dict[str, Any]) -> Optional[str]:
+        """Extract cloud-provided hash/change indicator from item metadata.
+
+        Returns a provider-specific hash string that can be compared across
+        sync cycles to detect changes without downloading file content.
+        Returns None if no hash is available.
+        """
+        ...
+
+    @abstractmethod
     async def _verify_source_access(self, source: Dict[str, Any]) -> bool:
         """Verify the user can still access a source."""
         ...
@@ -540,10 +550,11 @@ class BaseSyncWorker(ABC):
         import tiktoken
         from open_webui.retrieval.utils import get_embedding_function
         from open_webui.utils.misc import sanitize_text_for_db
-        from open_webui.config import RAG_EMBEDDING_CONTENT_PREFIX, RAG_EMBEDDING_TIMEOUT
+        from open_webui.config import RAG_EMBEDDING_CONTENT_PREFIX
+        from open_webui.env import RAG_EMBEDDING_TIMEOUT
         from langchain_core.documents import Document
-        from langchain.text_splitter import RecursiveCharacterTextSplitter, TokenTextSplitter
-        from langchain.text_splitter import MarkdownHeaderTextSplitter
+        from langchain_text_splitters import RecursiveCharacterTextSplitter, TokenTextSplitter
+        from langchain_text_splitters import MarkdownHeaderTextSplitter
 
         request = self._make_request()
         user = self._get_user()
@@ -733,8 +744,7 @@ class BaseSyncWorker(ABC):
         name = file_info['name']
         source_item_id = file_info.get('source_item_id')
         relative_path = file_info.get('relative_path', name)
-
-        log.info(f'Downloading file: {name} (id: {item_id})')
+        file_id = f'{self.file_id_prefix}{item_id}'
 
         if self._check_cancelled():
             return FailedFile(
@@ -742,6 +752,35 @@ class BaseSyncWorker(ABC):
                 error_type=SyncErrorType.PROCESSING_ERROR.value,
                 error_message='Sync cancelled by user',
             )
+
+        # Pre-download cloud hash check — skip download if cloud reports no change.
+        # Existing KBs without cloud_hash in meta will fall through to download,
+        # populating cloud_hash for subsequent syncs (backward compatible).
+        cloud_hash = self._get_cloud_hash(file_info)
+        existing = Files.get_file_by_id(file_id)
+
+        if cloud_hash and existing:
+            existing_meta = existing.meta or {}
+            stored_cloud_hash = existing_meta.get('cloud_hash')
+            if stored_cloud_hash and stored_cloud_hash == cloud_hash:
+                log.info(f'File {file_id} unchanged (cloud hash match), skipping download')
+
+                new_relative_path = file_info.get('relative_path')
+                if new_relative_path and existing_meta.get('relative_path') != new_relative_path:
+                    existing_meta['relative_path'] = new_relative_path
+                    Files.update_file_by_id(file_id, FileUpdateForm(meta=existing_meta))
+
+                Knowledges.add_file_to_knowledge_by_id(self.knowledge_id, file_id, self.user_id)
+
+                return PreparedFile(
+                    file_id=file_id,
+                    file_info=file_info,
+                    name=name,
+                    content_hash=existing.hash,
+                    is_new=False,
+                )
+
+        log.info(f'Downloading file: {name} (id: {item_id})')
 
         await emit_file_processing(
             self.event_prefix,
@@ -774,43 +813,39 @@ class BaseSyncWorker(ABC):
                 error_message='File is empty',
             )
 
-        # Hash-based change detection
+        # Post-download content hash check
         content_hash = hashlib.sha256(content).hexdigest()
-        file_id = f'{self.file_id_prefix}{item_id}'
-        existing = Files.get_file_by_id(file_id)
 
         if existing and existing.hash == content_hash:
-            log.info(f'File {file_id} unchanged (hash match), ensuring KB association')
+            log.info(f'File {file_id} unchanged (content hash match)')
+
+            existing_meta = existing.meta or {}
+            updated = False
 
             new_relative_path = file_info.get('relative_path')
-            existing_meta = existing.meta or {}
             if new_relative_path and existing_meta.get('relative_path') != new_relative_path:
                 existing_meta['relative_path'] = new_relative_path
+                updated = True
+
+            # Store cloud hash so next sync can skip the download
+            if cloud_hash and existing_meta.get('cloud_hash') != cloud_hash:
+                existing_meta['cloud_hash'] = cloud_hash
+                updated = True
+
+            if updated:
                 Files.update_file_by_id(file_id, FileUpdateForm(meta=existing_meta))
 
             Knowledges.add_file_to_knowledge_by_id(self.knowledge_id, file_id, self.user_id)
-            result = await self._ensure_vectors_in_kb(file_id)
-            if result:
-                if result.error_type == SyncErrorType.EMPTY_CONTENT.value:
-                    return None  # Skip, not failure
-                log.warning(f'File {file_id} vectors missing, will re-process')
-                # Fall through to re-process
-            else:
-                file_record = Files.get_file_by_id(file_id)
-                if file_record:
-                    await emit_file_added(
-                        self.event_prefix,
-                        user_id=self.user_id,
-                        knowledge_id=self.knowledge_id,
-                        file_data={
-                            'id': file_record.id,
-                            'filename': file_record.filename,
-                            'meta': file_record.meta,
-                            'created_at': file_record.created_at,
-                            'updated_at': file_record.updated_at,
-                        },
-                    )
-                return None  # Success, no processing needed
+
+            # Return PreparedFile with is_new=False so vector verification
+            # runs under the process semaphore (not the download semaphore).
+            return PreparedFile(
+                file_id=file_id,
+                file_info=file_info,
+                name=name,
+                content_hash=content_hash,
+                is_new=False,
+            )
 
         # Upload to storage
         temp_filename = f'{file_id}_{name}'
@@ -845,6 +880,10 @@ class BaseSyncWorker(ABC):
                 size=len(content),
                 file_info=file_info,
             )
+
+            # Store cloud hash for pre-download skip on next sync
+            if cloud_hash:
+                file_meta['cloud_hash'] = cloud_hash
 
             if existing:
                 Files.update_file_by_id(
@@ -1194,7 +1233,35 @@ class BaseSyncWorker(ABC):
                                 error_type=SyncErrorType.PROCESSING_ERROR.value,
                                 error_message='Sync cancelled by user',
                             )
-                        process_result = await self._process_and_embed(result)
+
+                        if not result.is_new:
+                            # Hash-matched file: just verify vectors are in KB
+                            verify_result = await self._ensure_vectors_in_kb(result.file_id)
+                            if verify_result:
+                                if verify_result.error_type == SyncErrorType.EMPTY_CONTENT.value:
+                                    process_result = None  # Skip, not failure
+                                else:
+                                    log.warning(f'File {result.file_id} vectors missing, re-processing')
+                                    process_result = await self._process_and_embed(result)
+                            else:
+                                # Vectors verified, emit file added event
+                                file_record = Files.get_file_by_id(result.file_id)
+                                if file_record:
+                                    await emit_file_added(
+                                        self.event_prefix,
+                                        user_id=self.user_id,
+                                        knowledge_id=self.knowledge_id,
+                                        file_data={
+                                            'id': file_record.id,
+                                            'filename': file_record.filename,
+                                            'meta': file_record.meta,
+                                            'created_at': file_record.created_at,
+                                            'updated_at': file_record.updated_at,
+                                        },
+                                    )
+                                process_result = None
+                        else:
+                            process_result = await self._process_and_embed(result)
 
                     async with results_lock:
                         if process_result is None:
