@@ -38,6 +38,7 @@ SUPPORTED_EXTENSIONS = {
     '.json',
     '.xml',
     '.csv',
+    '.ifc',
 }
 
 # MIME types for supported extensions
@@ -56,4 +57,5 @@ CONTENT_TYPES = {
     '.json': 'application/json',
     '.xml': 'application/xml',
     '.csv': 'text/csv',
+    '.ifc': 'application/x-ifc',
 }

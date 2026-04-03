@@ -160,6 +160,17 @@ class GoogleDriveSyncWorker(BaseSyncWorker):
             log.error(f'Failed to check file {source["name"]}: {e}')
             return None
 
+    def _get_cloud_hash(self, file_info: Dict[str, Any]) -> Optional[str]:
+        """Extract Google Drive hash from item metadata.
+
+        Regular files have md5Checksum, Workspace files use modifiedTime
+        (they lack a content hash since export format may vary).
+        """
+        item = file_info['item']
+        if self._is_workspace_file(item):
+            return item.get('modifiedTime')
+        return item.get('md5Checksum')
+
     async def _download_file_content(self, file_info: Dict[str, Any]) -> bytes:
         """Download file content, using export for Workspace files."""
         item = file_info['item']
