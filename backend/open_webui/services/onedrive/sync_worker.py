@@ -240,6 +240,15 @@ class OneDriveSyncWorker(BaseSyncWorker):
             log.error(f'Failed to check file {source["name"]}: {e}')
             return None
 
+    def _get_cloud_hash(self, file_info: Dict[str, Any]) -> Optional[str]:
+        """Extract OneDrive hash from item metadata.
+
+        OneDrive for Business provides sha256Hash, Personal provides quickXorHash.
+        """
+        item = file_info['item']
+        hashes = item.get('file', {}).get('hashes', {})
+        return hashes.get('sha256Hash') or hashes.get('quickXorHash')
+
     async def _download_file_content(self, file_info: Dict[str, Any]) -> bytes:
         """Download file content from OneDrive."""
         drive_id = file_info['drive_id']
