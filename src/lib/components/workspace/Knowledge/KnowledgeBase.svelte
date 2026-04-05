@@ -1729,7 +1729,7 @@
 								{#if isSyncBusy && activeState?.syncStatus?.progress_total}
 									<Tooltip content={$i18n.t('Sync progress')}>
 										<div class="text-xs text-blue-500 font-medium">
-											{fileItemsTotal ?? 0} / {activeState.syncStatus.progress_total}
+											{activeState.syncStatus.progress_current ?? 0} / {activeState.syncStatus.progress_total}
 										</div>
 									</Tooltip>
 								{:else if isSyncBusy}
