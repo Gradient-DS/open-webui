@@ -1164,7 +1164,17 @@ class BaseSyncWorker(ABC):
             # Process all files with two-phase pipeline
             from open_webui.config import FILE_DOWNLOAD_CONCURRENCY_MULTIPLIER
 
-            max_process_concurrent = FILE_PROCESSING_MAX_CONCURRENT.value
+            # Cap process concurrency to the default thread pool size
+            # (min(32, os.cpu_count() + 4)) minus headroom for embedding
+            # callbacks. On a 1-CPU pod the pool is only 5 threads; allowing
+            # more concurrent process tasks than pool slots causes starvation.
+            import os
+
+            thread_pool_size = min(32, (os.cpu_count() or 1) + 4)
+            max_process_concurrent = min(
+                FILE_PROCESSING_MAX_CONCURRENT.value,
+                max(1, thread_pool_size - 2),  # leave 2 slots for embeddings / other work
+            )
             max_download_concurrent = max_process_concurrent * FILE_DOWNLOAD_CONCURRENCY_MULTIPLIER
             download_semaphore = asyncio.Semaphore(max_download_concurrent)
             process_semaphore = asyncio.Semaphore(max_process_concurrent)
@@ -1173,7 +1183,10 @@ class BaseSyncWorker(ABC):
             results_lock = asyncio.Lock()
             cancelled = False
 
-            async def pipeline(file_info: Dict[str, Any], index: int) -> Optional[FailedFile]:
+            # Per-file timeout: extraction (120s) + chunking (120s) + embedding (300s) + overhead
+            FILE_PIPELINE_TIMEOUT = 600  # 10 minutes
+
+            async def _pipeline_inner(file_info: Dict[str, Any], index: int) -> Optional[FailedFile]:
                 nonlocal processed_count, failed_count, cancelled
 
                 if cancelled or self._check_cancelled():
@@ -1286,6 +1299,24 @@ class BaseSyncWorker(ABC):
                         filename=file_info.get('name', 'unknown'),
                         error_type=SyncErrorType.PROCESSING_ERROR.value,
                         error_message=str(e)[:100],
+                    )
+
+            async def pipeline(file_info: Dict[str, Any], index: int) -> Optional[FailedFile]:
+                """Wrapper that enforces a per-file timeout to prevent indefinite hangs."""
+                nonlocal failed_count
+                try:
+                    return await asyncio.wait_for(
+                        _pipeline_inner(file_info, index),
+                        timeout=FILE_PIPELINE_TIMEOUT,
+                    )
+                except asyncio.TimeoutError:
+                    log.error(f'File {file_info.get("name")} timed out after {FILE_PIPELINE_TIMEOUT}s')
+                    async with results_lock:
+                        failed_count += 1
+                    return FailedFile(
+                        filename=file_info.get('name', 'unknown'),
+                        error_type=SyncErrorType.PROCESSING_ERROR.value,
+                        error_message=f'Timed out after {FILE_PIPELINE_TIMEOUT}s',
                     )
 
             # Process files in batches to avoid overwhelming the event loop

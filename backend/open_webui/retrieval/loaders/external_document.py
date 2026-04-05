@@ -52,7 +52,10 @@ class ExternalDocumentLoader(BaseLoader):
             url = url[:-1]
 
         try:
-            response = requests.put(f'{url}/process', data=data, headers=headers)
+            response = requests.put(f'{url}/process', data=data, headers=headers, timeout=120)
+        except requests.exceptions.Timeout:
+            log.error(f'Timeout connecting to external document loader after 120s')
+            raise Exception('External document loader timed out after 120 seconds')
         except Exception as e:
             log.error(f'Error connecting to endpoint: {e}')
             raise Exception(f'Error connecting to endpoint: {e}')
