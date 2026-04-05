@@ -363,6 +363,8 @@ class BaseSyncWorker(ABC):
             from fastapi import HTTPException
 
             def _call():
+                log.info(f'[sync:ensure:{file_id}] >>> PROCESS_FILE START')
+                t0 = time.time()
                 with get_db() as db:
                     process_file(
                         self._make_request(),
@@ -373,6 +375,7 @@ class BaseSyncWorker(ABC):
                         user=self._get_user(),
                         db=db,
                     )
+                log.info(f'[sync:ensure:{file_id}] <<< PROCESS_FILE END ({time.time() - t0:.1f}s)')
 
             await asyncio.to_thread(_call)
             return None
@@ -565,8 +568,9 @@ class BaseSyncWorker(ABC):
             'hash': file_hash,
         }
 
-        def _split_and_embed():
-            """Split documents and generate embeddings (runs in thread)."""
+        def _split_embed_and_store():
+            """Split, embed, and store vectors (all in thread to avoid blocking event loop)."""
+            t0 = time.time()
             working_docs = list(docs)
 
             # Split if needed (internal pipeline; external pipeline pre-chunks)
@@ -621,7 +625,10 @@ class BaseSyncWorker(ABC):
                     working_docs = splitter.split_documents(working_docs)
 
             if not working_docs:
-                return [], [], []
+                return False
+
+            t_split = time.time()
+            log.info(f'[sync:{filename}] split: {len(working_docs)} chunks in {t_split - t0:.1f}s')
 
             texts = [sanitize_text_for_db(doc.page_content) for doc in working_docs]
             metadatas = [
@@ -669,6 +676,7 @@ class BaseSyncWorker(ABC):
                 concurrent_requests=request.app.state.config.RAG_EMBEDDING_CONCURRENT_REQUESTS,
             )
 
+            log.info(f'[sync:{filename}] >>> EMBED START ({len(texts)} texts)')
             future = asyncio.run_coroutine_threadsafe(
                 embedding_function(
                     list(map(lambda x: x.replace('\n', ' '), texts)),
@@ -678,56 +686,63 @@ class BaseSyncWorker(ABC):
                 request.app.state.main_loop,
             )
             embeddings = future.result(timeout=RAG_EMBEDDING_TIMEOUT)
+            t_embed = time.time()
+            log.info(f'[sync:{filename}] <<< EMBED END ({t_embed - t_split:.1f}s)')
 
-            return texts, metadatas, embeddings
+            # Build vector items with separate UUIDs per collection
+            items_kb = [
+                {
+                    'id': str(uuid.uuid4()),
+                    'text': text,
+                    'vector': embeddings[idx],
+                    'metadata': metadatas[idx],
+                }
+                for idx, text in enumerate(texts)
+            ]
 
-        texts, metadatas, embeddings = await asyncio.to_thread(_split_and_embed)
+            items_file = [
+                {
+                    'id': str(uuid.uuid4()),
+                    'text': text,
+                    'vector': embeddings[idx],
+                    'metadata': metadatas[idx],
+                }
+                for idx, text in enumerate(texts)
+            ]
 
-        if not texts:
+            # Insert into KB collection (sync Weaviate calls — kept in thread
+            # to avoid blocking the event loop)
+            log.info(f'[sync:{filename}] >>> WEAVIATE KB INSERT START ({len(items_kb)} vectors)')
+            VECTOR_DB_CLIENT.insert(collection_name=self.knowledge_id, items=items_kb)
+            t_kb = time.time()
+            log.info(f'[sync:{filename}] <<< WEAVIATE KB INSERT END ({t_kb - t_embed:.1f}s)')
+
+            # Insert into per-file collection (overwrite if exists)
+            file_collection = f'file-{file_id}'
+            log.info(f'[sync:{filename}] >>> WEAVIATE FILE INSERT START ({len(items_file)} vectors)')
+            if VECTOR_DB_CLIENT.has_collection(collection_name=file_collection):
+                VECTOR_DB_CLIENT.delete_collection(collection_name=file_collection)
+            VECTOR_DB_CLIENT.insert(collection_name=file_collection, items=items_file)
+            t_file = time.time()
+            log.info(f'[sync:{filename}] <<< WEAVIATE FILE INSERT END ({t_file - t_kb:.1f}s)')
+
+            # Update file metadata
+            with get_db() as session:
+                Files.update_file_metadata_by_id(file_id, {'collection_name': file_collection}, db=session)
+                Files.update_file_data_by_id(file_id, {'status': 'completed'}, db=session)
+                Files.update_file_hash_by_id(file_id, file_hash, db=session)
+
+            log.info(f'[sync:{filename}] DONE total={t_file - t0:.1f}s')
+            return True
+
+        result = await asyncio.to_thread(_split_embed_and_store)
+
+        if not result:
             log.warning(f'No text content extracted from {filename}')
             with get_db() as session:
                 Files.update_file_metadata_by_id(file_id, {'collection_name': f'file-{file_id}'}, db=session)
                 Files.update_file_data_by_id(file_id, {'status': 'completed'}, db=session)
                 Files.update_file_hash_by_id(file_id, file_hash, db=session)
-            return True
-
-        # Build vector items once, with separate UUIDs per collection
-        items_kb = [
-            {
-                'id': str(uuid.uuid4()),
-                'text': text,
-                'vector': embeddings[idx],
-                'metadata': metadatas[idx],
-            }
-            for idx, text in enumerate(texts)
-        ]
-
-        items_file = [
-            {
-                'id': str(uuid.uuid4()),
-                'text': text,
-                'vector': embeddings[idx],
-                'metadata': metadatas[idx],
-            }
-            for idx, text in enumerate(texts)
-        ]
-
-        # Insert into KB collection
-        VECTOR_DB_CLIENT.insert(collection_name=self.knowledge_id, items=items_kb)
-        log.info(f'Inserted {len(items_kb)} vectors into KB {self.knowledge_id} for {file_id}')
-
-        # Insert into per-file collection (overwrite if exists)
-        file_collection = f'file-{file_id}'
-        if VECTOR_DB_CLIENT.has_collection(collection_name=file_collection):
-            VECTOR_DB_CLIENT.delete_collection(collection_name=file_collection)
-        VECTOR_DB_CLIENT.insert(collection_name=file_collection, items=items_file)
-        log.info(f'Inserted {len(items_file)} vectors into {file_collection}')
-
-        # Update file metadata
-        with get_db() as session:
-            Files.update_file_metadata_by_id(file_id, {'collection_name': file_collection}, db=session)
-            Files.update_file_data_by_id(file_id, {'status': 'completed'}, db=session)
-            Files.update_file_hash_by_id(file_id, file_hash, db=session)
 
         return True
 
@@ -933,12 +948,17 @@ class BaseSyncWorker(ABC):
 
         try:
             # Extract content (loader / external pipeline)
+            log.info(f'[sync:{name}] >>> EXTRACT START')
+            t_start = time.time()
             result = await self._extract_content(file_id)
+            t_extract = time.time()
+
             if result is None:
                 log.debug(f'File {file_id} has no extractable content')
                 return None
 
             docs, file_record, needs_split = result
+            log.info(f'[sync:{name}] <<< EXTRACT END ({len(docs)} docs, {t_extract - t_start:.1f}s)')
 
             if not docs or not any(doc.page_content.strip() for doc in docs):
                 log.debug(f'File {file_id} has no text content')
@@ -1325,20 +1345,31 @@ class BaseSyncWorker(ABC):
             batch_size = max_download_concurrent + max_process_concurrent
             log.info(
                 f'Starting pipeline processing of {len(all_files_to_process)} files '
-                f'(download concurrency: {max_download_concurrent}, '
+                f'(thread pool: {thread_pool_size}, '
+                f'download concurrency: {max_download_concurrent}, '
                 f'process concurrency: {max_process_concurrent}, '
                 f'batch size: {batch_size})'
             )
             start_time = time.time()
+
+            total_batches = (len(all_files_to_process) + batch_size - 1) // batch_size
 
             for batch_start in range(0, len(all_files_to_process), batch_size):
                 if cancelled or self._check_cancelled():
                     cancelled = True
                     break
 
+                batch_num = batch_start // batch_size + 1
                 batch = all_files_to_process[batch_start : batch_start + batch_size]
+                log.info(f'>>> BATCH {batch_num}/{total_batches} START ({len(batch)} files, offset {batch_start})')
+                batch_t0 = time.time()
                 batch_tasks = [pipeline(file_info, batch_start + i) for i, file_info in enumerate(batch)]
                 batch_results = await asyncio.gather(*batch_tasks, return_exceptions=True)
+                log.info(
+                    f'<<< BATCH {batch_num}/{total_batches} END '
+                    f'({time.time() - batch_t0:.1f}s, '
+                    f'processed={processed_count}, failed={failed_count})'
+                )
 
                 for result in batch_results:
                     if isinstance(result, Exception):
