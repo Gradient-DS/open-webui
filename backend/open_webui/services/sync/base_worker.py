@@ -1288,29 +1288,40 @@ class BaseSyncWorker(ABC):
                         error_message=str(e)[:100],
                     )
 
+            # Process files in batches to avoid overwhelming the event loop
+            # and thread pool. Each batch runs with the existing semaphores
+            # for download/process concurrency within the batch.
+            batch_size = max_download_concurrent + max_process_concurrent
             log.info(
                 f'Starting pipeline processing of {len(all_files_to_process)} files '
                 f'(download concurrency: {max_download_concurrent}, '
-                f'process concurrency: {max_process_concurrent})'
+                f'process concurrency: {max_process_concurrent}, '
+                f'batch size: {batch_size})'
             )
             start_time = time.time()
 
-            tasks = [pipeline(file_info, i) for i, file_info in enumerate(all_files_to_process)]
-            results = await asyncio.gather(*tasks, return_exceptions=True)
+            for batch_start in range(0, len(all_files_to_process), batch_size):
+                if cancelled or self._check_cancelled():
+                    cancelled = True
+                    break
 
-            for result in results:
-                if isinstance(result, Exception):
-                    log.error(f'Unexpected error during file processing: {result}')
-                    total_failed += 1
-                    failed_files.append(
-                        FailedFile(
-                            filename='unknown',
-                            error_type=SyncErrorType.PROCESSING_ERROR.value,
-                            error_message=str(result)[:100],
+                batch = all_files_to_process[batch_start : batch_start + batch_size]
+                batch_tasks = [pipeline(file_info, batch_start + i) for i, file_info in enumerate(batch)]
+                batch_results = await asyncio.gather(*batch_tasks, return_exceptions=True)
+
+                for result in batch_results:
+                    if isinstance(result, Exception):
+                        log.error(f'Unexpected error during file processing: {result}')
+                        total_failed += 1
+                        failed_files.append(
+                            FailedFile(
+                                filename='unknown',
+                                error_type=SyncErrorType.PROCESSING_ERROR.value,
+                                error_message=str(result)[:100],
+                            )
                         )
-                    )
-                elif result is not None:
-                    failed_files.append(result)
+                    elif result is not None:
+                        failed_files.append(result)
 
             total_processed = processed_count
             total_failed = failed_count
