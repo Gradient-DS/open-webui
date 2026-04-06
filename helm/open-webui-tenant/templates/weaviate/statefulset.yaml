@@ -73,7 +73,11 @@ spec:
       spec:
         accessModes:
           - {{ .Values.weaviate.persistence.accessMode }}
+        {{- if .Values.weaviate.persistence.storageClass }}
+        storageClassName: {{ .Values.weaviate.persistence.storageClass }}
+        {{- else }}
         {{- include "open-webui-tenant.storageClass" $ | nindent 8 }}
+        {{- end }}
         resources:
           requests:
             storage: {{ .Values.weaviate.persistence.size }}

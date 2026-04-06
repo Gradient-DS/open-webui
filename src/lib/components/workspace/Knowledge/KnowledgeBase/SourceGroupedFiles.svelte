@@ -29,6 +29,7 @@
 	export let selectedFileId: string | null = null;
 
 	export let isSyncing: boolean = false;
+	export let totalFiles: number | null = null;
 
 	export let onClick: (fileId: string) => void = () => {};
 	export let onRemoveSource: (itemId: string, sourceName: string) => void = () => {};
@@ -124,7 +125,7 @@
 	<!-- Folder sources as collapsible sections -->
 	{#each folderSources as source (source.item_id)}
 		{@const tree = folderTrees[source.item_id]}
-		{@const totalFileCount = tree ? countAllFiles(tree) : 0}
+		{@const totalFileCount = (folderSources.length === 1 && totalFiles != null) ? totalFiles : (tree ? countAllFiles(tree) : 0)}
 		<div class="w-full">
 			<!-- Folder header -->
 			<div
