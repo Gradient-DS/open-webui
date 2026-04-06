@@ -658,7 +658,7 @@ async def get_knowledge_files_by_id(
 
     page = max(page, 1)
 
-    limit = min(max(limit, 1), 250)
+    limit = min(max(limit, 1), 2000)
     skip = (page - 1) * limit
 
     filter = {}

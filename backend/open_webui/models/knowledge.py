@@ -330,6 +330,10 @@ class KnowledgeTable:
                     .filter(Knowledge.deleted_at.is_(None))
                 )
 
+                # Only return files from local KBs — cloud KB files don't have
+                # per-file vector collections and can't be attached individually
+                query = query.filter(Knowledge.type == 'local')
+
                 # Apply access-control directly to the joined query
                 # This makes the database handle filtering, even with 10k+ KBs
                 query = AccessGrants.has_permission_filter(
