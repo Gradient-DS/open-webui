@@ -105,7 +105,26 @@ class GoogleDriveSyncWorker(BaseSyncWorker):
         return True
 
     async def _collect_folder_files(self, source: Dict[str, Any]) -> tuple[List[Dict[str, Any]], int]:
-        """Collect files from a folder using changes API or full listing."""
+        """Collect files from a folder using changes API or full listing.
+
+        Resolves shortcuts: if source item_id points to a Drive shortcut,
+        updates it in-place to the target folder ID so that source_item_id
+        on files matches the stored source.
+        """
+        # Resolve shortcuts (e.g. shortcut to a shared drive folder)
+        resolved_id, was_shortcut = await self._client.resolve_if_shortcut(source['item_id'])
+        if was_shortcut:
+            log.info(
+                'Source "%s" is a shortcut, updating item_id %s → %s',
+                source.get('name'),
+                source['item_id'],
+                resolved_id,
+            )
+            source['item_id'] = resolved_id
+            # Clear delta state — the old page_token was for the shortcut, not the real folder
+            source.pop('page_token', None)
+            source.pop('folder_map', None)
+
         page_token = source.get('page_token')
 
         if page_token:
@@ -116,6 +135,11 @@ class GoogleDriveSyncWorker(BaseSyncWorker):
     async def _collect_single_file(self, source: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         """Check if a single file needs syncing based on hash or modified time."""
         try:
+            # Resolve shortcuts (e.g. shortcut to a shared drive file)
+            resolved_id, was_shortcut = await self._client.resolve_if_shortcut(source['item_id'])
+            if was_shortcut:
+                source['item_id'] = resolved_id
+
             item = await self._client.get_file(source['item_id'])
 
             if not item:
@@ -388,7 +412,13 @@ class GoogleDriveSyncWorker(BaseSyncWorker):
                     item_path = f'{parent_path}/{item_name}' if parent_path else item_name
                     mime_type = item.get('mimeType', '')
 
-                    if mime_type == 'application/vnd.google-apps.folder':
+                    if mime_type == 'application/vnd.google-apps.shortcut':
+                        # Resolve shortcut to target — treat as folder if target is a folder
+                        target_id = item.get('shortcutDetails', {}).get('targetId')
+                        if target_id:
+                            folder_map[target_id] = item_path
+                            next_level.append((target_id, item_path))
+                    elif mime_type == 'application/vnd.google-apps.folder':
                         folder_map[item['id']] = item_path
                         next_level.append((item['id'], item_path))
                     elif self._is_supported_file(item):
@@ -448,6 +478,19 @@ class GoogleDriveSyncWorker(BaseSyncWorker):
                 continue
 
             mime_type = item.get('mimeType', '')
+
+            # Resolve shortcuts to their target folder
+            if mime_type == 'application/vnd.google-apps.shortcut':
+                target_id = item.get('shortcutDetails', {}).get('targetId')
+                if target_id:
+                    parents = item.get('parents', [])
+                    for parent_id in parents:
+                        if parent_id in folder_map:
+                            parent_path = folder_map[parent_id]
+                            item_path = f'{parent_path}/{item["name"]}' if parent_path else item['name']
+                            folder_map[target_id] = item_path
+                            break
+                continue
 
             # Update folder map for folder items
             if mime_type == 'application/vnd.google-apps.folder':

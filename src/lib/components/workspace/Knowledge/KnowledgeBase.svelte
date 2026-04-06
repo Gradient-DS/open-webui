@@ -230,6 +230,9 @@
 		}
 
 		const isCloudKb = knowledge?.type && knowledge.type !== 'local';
+		const cloudLimit = isCloudKb
+			? ($config?.integration_providers?.[knowledge.type]?.max_files_per_kb || $config?.features?.knowledge_max_file_count || 2000)
+			: null;
 		const res = await searchKnowledgeFilesById(
 			localStorage.token,
 			knowledge.id,
@@ -238,7 +241,7 @@
 			sortKey,
 			direction,
 			currentPage,
-			isCloudKb ? 2000 : null
+			cloudLimit
 		).catch(() => {
 			return null;
 		});

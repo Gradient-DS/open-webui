@@ -26,7 +26,13 @@ GOOGLE_WORKSPACE_EXPORT_MAP = {
 }
 
 # Standard fields to request from the Files API
-_FILE_FIELDS = 'id,name,mimeType,size,md5Checksum,modifiedTime,parents,trashed'
+_FILE_FIELDS = 'id,name,mimeType,size,md5Checksum,modifiedTime,parents,trashed,shortcutDetails'
+
+# Shared drive params required for accessing shared drive content
+_SHARED_DRIVE_PARAMS = {
+    'supportsAllDrives': 'true',
+    'includeItemsFromAllDrives': 'true',
+}
 
 
 class GoogleDriveClient:
@@ -142,6 +148,28 @@ class GoogleDriveClient:
         response.raise_for_status()
         return response.json()
 
+    async def resolve_if_shortcut(self, item_id: str) -> tuple[str, bool]:
+        """If item_id is a shortcut, return (target_id, True). Otherwise (item_id, False).
+
+        Uses the files.get endpoint to check mimeType and shortcutDetails.
+        """
+        item = await self.get_file(item_id)
+        if not item:
+            return item_id, False
+
+        if item.get('mimeType') == 'application/vnd.google-apps.shortcut':
+            target_id = item.get('shortcutDetails', {}).get('targetId')
+            if target_id:
+                log.info(
+                    'Resolved shortcut %s (%s) → target %s',
+                    item_id,
+                    item.get('name', '?'),
+                    target_id,
+                )
+                return target_id, True
+
+        return item_id, False
+
     async def list_folder_children(
         self,
         folder_id: str,
@@ -149,6 +177,7 @@ class GoogleDriveClient:
         """List all items in a folder (non-recursive).
 
         Uses the files.list endpoint with q parameter to find children.
+        Supports shared drive content via supportsAllDrives.
         """
         url = f'{DRIVE_BASE_URL}/files'
         items = []
@@ -159,6 +188,7 @@ class GoogleDriveClient:
                 'q': f"'{folder_id}' in parents and trashed=false",
                 'fields': f'nextPageToken,files({_FILE_FIELDS})',
                 'pageSize': '1000',
+                **_SHARED_DRIVE_PARAMS,
             }
             if page_token:
                 params['pageToken'] = page_token
@@ -215,6 +245,7 @@ class GoogleDriveClient:
                 'fields': f'nextPageToken,newStartPageToken,changes(removed,fileId,file({_FILE_FIELDS}))',
                 'pageSize': '1000',
                 'includeRemoved': 'true',
+                **_SHARED_DRIVE_PARAMS,
             }
 
             data = await self._get_json(url, params=params)
@@ -239,13 +270,18 @@ class GoogleDriveClient:
     async def get_start_page_token(self) -> str:
         """Get the initial page token for the changes API."""
         url = f'{DRIVE_BASE_URL}/changes/startPageToken'
-        data = await self._get_json(url)
+        data = await self._get_json(url, params={**_SHARED_DRIVE_PARAMS})
         return data['startPageToken']
 
     async def download_file(self, file_id: str) -> bytes:
         """Download file content (for non-Workspace files)."""
         url = f'{DRIVE_BASE_URL}/files/{file_id}'
-        response = await self._request_with_retry('GET', url, params={'alt': 'media'}, follow_redirects=True)
+        response = await self._request_with_retry(
+            'GET',
+            url,
+            params={'alt': 'media', **_SHARED_DRIVE_PARAMS},
+            follow_redirects=True,
+        )
         response.raise_for_status()
         return response.content
 
@@ -259,12 +295,16 @@ class GoogleDriveClient:
     async def get_file_metadata(self, file_id: str) -> Dict[str, Any]:
         """Get metadata for a specific file."""
         url = f'{DRIVE_BASE_URL}/files/{file_id}'
-        return await self._get_json(url, params={'fields': _FILE_FIELDS})
+        return await self._get_json(url, params={'fields': _FILE_FIELDS, **_SHARED_DRIVE_PARAMS})
 
     async def get_file(self, file_id: str) -> Optional[Dict[str, Any]]:
         """Get metadata for a single file, returning None if not found."""
         url = f'{DRIVE_BASE_URL}/files/{file_id}'
-        response = await self._request_with_retry('GET', url, params={'fields': _FILE_FIELDS})
+        response = await self._request_with_retry(
+            'GET',
+            url,
+            params={'fields': _FILE_FIELDS, **_SHARED_DRIVE_PARAMS},
+        )
         if response.status_code == 404:
             return None
         response.raise_for_status()
@@ -275,6 +315,9 @@ class GoogleDriveClient:
         url = f'{DRIVE_BASE_URL}/files/{file_id}/permissions'
         data = await self._get_json(
             url,
-            params={'fields': 'permissions(id,type,emailAddress,role)'},
+            params={
+                'fields': 'permissions(id,type,emailAddress,role)',
+                **_SHARED_DRIVE_PARAMS,
+            },
         )
         return data.get('permissions', [])
