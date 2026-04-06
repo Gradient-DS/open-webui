@@ -324,3 +324,49 @@
 - Retention only touches `local` type knowledge bases — cloud-synced KBs are managed by their source
 
 **Related:** Plan `thoughts/shared/plans/2026-03-31-data-retention-ttl.md`, research `thoughts/shared/research/2026-03-31-data-ttl-dpia-retention-policy.md`
+
+---
+
+### [01-04-2026] Sync Worker Performance & Unified Upload Concurrency
+
+**With:** @lexlubbers
+
+**Context:** After shipping Google Drive integration and the DPIA features, focus shifted to performance — the sync worker and frontend upload flow needed to handle larger knowledge bases efficiently.
+
+**What We Did:**
+- Major rewrite of `base_worker.py` (~750 line diff) for concurrent document processing — parallel embedding/ingestion instead of sequential
+- Unified frontend upload concurrency in `KnowledgeBase.svelte` — replaced fragmented upload logic with a single concurrent method (263 line refactor)
+- Fixed cloud sync filetype detection (`c4427ffe8`)
+- Added proper loading indicator feedback on file upload in chat
+- Better error handling on KB sync failures
+- Hotfix: relaxed CSP security headers to allow Google and OneDrive picker iframes
+- Hotfix: increased KB file limit (`3bda20910`)
+
+**Key Learnings:**
+- Frontend had three separate upload paths that diverged over time — unifying them eliminated inconsistent behavior and made concurrency controllable from one place
+- Sync worker sequential processing was the primary bottleneck for large KBs — concurrent processing with controlled parallelism was the fix
+
+**Related:** Plans `thoughts/shared/plans/2026-03-31-unified-upload-concurrency.md`, `collab/docs/sync-worker-performance-plan.md`
+
+---
+
+### [06-04-2026] Vink Deployment — Large-Scale Document Processing Hardening
+
+**With:** @lexlubbers
+
+**Context:** Vink deployment stress-tested the sync worker with ~1300 documents, exposing several issues in the concurrent processing pipeline that only manifested at scale.
+
+**What We Did:**
+- Fixed `asyncio.gather` failing on large document batches — chunked processing to avoid overwhelming the event loop (`0ea8ae930`)
+- Added configurable timeouts to external document processing (via `DOCUMENT_PROCESSING_TIMEOUT` env var) to prevent deadlocks when external pipeline/integration providers are misconfigured (`075751449`)
+- Parsing upgrades for provider-specific handling — Google Drive workspace file export, OneDrive improvements (`2fc57c391`)
+- Added detailed logging throughout sync worker to diagnose production issues (`1d5f98208`)
+- Final fixes: refactored sync worker batch processing (removed batch-wait pattern), Knowledge selector UI fixes, KB model improvements (`586c1247e`)
+- Created plans for future work: cloud KB single-collection architecture, sync batch-wait removal
+
+**Key Learnings:**
+- `asyncio.gather` on 1300+ tasks causes resource exhaustion — need bounded concurrency (semaphore or chunked batches)
+- External document processing (pipeline providers) can deadlock silently when misconfigured — timeouts are essential at this boundary
+- Production-scale testing reveals issues that unit/integration tests miss — Vink was the first real stress test of the concurrent sync worker
+
+**Related:** Plans `thoughts/shared/plans/2026-04-06-cloud-kb-single-collection.md`, `thoughts/shared/plans/2026-04-06-sync-remove-batch-wait.md`, research `thoughts/shared/research/2026-04-06-cloud-kb-single-collection.md`
