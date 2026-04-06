@@ -215,25 +215,27 @@
 						</div>
 					</button>
 
-					<Tooltip content={$i18n.t('Show Files')} placement="top">
-						<button
-							type="button"
-							class=" ml-2 opacity-50 hover:opacity-100 transition"
-							on:click={() => {
-								if (selectedItem && selectedItem.id === item.id) {
-									selectedItem = null;
-								} else {
-									selectedItem = item;
-								}
-							}}
-						>
-							{#if selectedItem && selectedItem.id === item.id}
-								<ChevronDown className="size-3" />
-							{:else}
-								<ChevronRight className="size-3" />
-							{/if}
-						</button>
-					</Tooltip>
+					{#if item.type === 'local' || !item.type}
+						<Tooltip content={$i18n.t('Show Files')} placement="top">
+							<button
+								type="button"
+								class=" ml-2 opacity-50 hover:opacity-100 transition"
+								on:click={() => {
+									if (selectedItem && selectedItem.id === item.id) {
+										selectedItem = null;
+									} else {
+										selectedItem = item;
+									}
+								}}
+							>
+								{#if selectedItem && selectedItem.id === item.id}
+									<ChevronDown className="size-3" />
+								{:else}
+									<ChevronRight className="size-3" />
+								{/if}
+							</button>
+						</Tooltip>
+					{/if}
 				</div>
 
 				{#if selectedItem && selectedItem.id === item.id}

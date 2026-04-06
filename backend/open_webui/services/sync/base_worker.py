@@ -352,60 +352,58 @@ class BaseSyncWorker(ABC):
                 log.info(f'File {file_id} still referenced by {len(remaining_refs)} KB(s), preserving')
 
     async def _ensure_vectors_in_kb(self, file_id: str) -> Optional[FailedFile]:
-        """Copy vectors from the per-file collection into this KB's collection.
+        """Verify vectors for this file exist in the KB collection.
 
-        Runs in a thread because process_file uses asyncio.run_coroutine_threadsafe
-        internally for embeddings, which would deadlock if called directly on the
-        event loop thread.
+        Queries the KB collection filtered by file_id. If vectors are found,
+        the file is already indexed — no work needed. If not found, returns a
+        FailedFile so the orchestrator falls back to full re-processing.
+
+        Also performs gradual cleanup: if a legacy per-file collection
+        (file-{file_id}) exists, delete it.
         """
         try:
-            from open_webui.routers.retrieval import process_file, ProcessFileForm
-            from fastapi import HTTPException
 
-            def _call():
-                log.info(f'[sync:ensure:{file_id}] >>> PROCESS_FILE START')
+            def _check():
+                log.info(f'[sync:ensure:{file_id}] >>> KB QUERY START')
                 t0 = time.time()
-                with get_db() as db:
-                    process_file(
-                        self._make_request(),
-                        ProcessFileForm(
-                            file_id=file_id,
-                            collection_name=self.knowledge_id,
-                        ),
-                        user=self._get_user(),
-                        db=db,
-                    )
-                log.info(f'[sync:ensure:{file_id}] <<< PROCESS_FILE END ({time.time() - t0:.1f}s)')
 
-            await asyncio.to_thread(_call)
-            return None
-        except HTTPException as e:
-            detail = str(e.detail) if e.detail else ''
-            if e.status_code == 400 and 'Duplicate content' in detail:
-                return None
-            return FailedFile(
-                filename=file_id,
-                error_type=SyncErrorType.PROCESSING_ERROR.value,
-                error_message=f'Failed to copy vectors to KB: {detail}'[:100],
-            )
-        except ValueError as e:
-            error_msg = str(e).lower()
-            if 'empty' in error_msg or 'no content' in error_msg:
-                return FailedFile(
-                    filename=file_id,
-                    error_type=SyncErrorType.EMPTY_CONTENT.value,
-                    error_message='File has no extractable content',
+                # Check if vectors already exist in KB collection
+                result = VECTOR_DB_CLIENT.query(
+                    collection_name=self.knowledge_id,
+                    filter={'file_id': file_id},
+                    limit=1,
                 )
+
+                has_vectors = result is not None and len(result.ids) > 0 and len(result.ids[0]) > 0
+
+                # Gradual cleanup: remove legacy per-file collection if it exists
+                file_collection = f'file-{file_id}'
+                if VECTOR_DB_CLIENT.has_collection(collection_name=file_collection):
+                    log.info(f'[sync:ensure:{file_id}] Cleaning up legacy per-file collection')
+                    VECTOR_DB_CLIENT.delete_collection(collection_name=file_collection)
+
+                log.info(
+                    f'[sync:ensure:{file_id}] <<< KB QUERY END ({time.time() - t0:.1f}s) has_vectors={has_vectors}'
+                )
+                return has_vectors
+
+            has_vectors = await asyncio.to_thread(_check)
+
+            if has_vectors:
+                return None  # Success — vectors already in KB collection
+
+            # No vectors found — signal for re-processing
             return FailedFile(
                 filename=file_id,
                 error_type=SyncErrorType.PROCESSING_ERROR.value,
-                error_message=f'Error copying vectors: {str(e)}'[:80],
+                error_message='Vectors not found in KB collection',
             )
+
         except Exception as e:
             return FailedFile(
                 filename=file_id,
                 error_type=SyncErrorType.PROCESSING_ERROR.value,
-                error_message=f'Error copying vectors: {str(e)}'[:80],
+                error_message=f'Error checking vectors: {str(e)}'[:80],
             )
 
     async def _extract_content(self, file_id: str) -> Optional[tuple]:
@@ -700,16 +698,6 @@ class BaseSyncWorker(ABC):
                 for idx, text in enumerate(texts)
             ]
 
-            items_file = [
-                {
-                    'id': str(uuid.uuid4()),
-                    'text': text,
-                    'vector': embeddings[idx],
-                    'metadata': metadatas[idx],
-                }
-                for idx, text in enumerate(texts)
-            ]
-
             # Insert into KB collection (sync Weaviate calls — kept in thread
             # to avoid blocking the event loop)
             log.info(f'[sync:{filename}] >>> WEAVIATE KB INSERT START ({len(items_kb)} vectors)')
@@ -717,22 +705,13 @@ class BaseSyncWorker(ABC):
             t_kb = time.time()
             log.info(f'[sync:{filename}] <<< WEAVIATE KB INSERT END ({t_kb - t_embed:.1f}s)')
 
-            # Insert into per-file collection (overwrite if exists)
-            file_collection = f'file-{file_id}'
-            log.info(f'[sync:{filename}] >>> WEAVIATE FILE INSERT START ({len(items_file)} vectors)')
-            if VECTOR_DB_CLIENT.has_collection(collection_name=file_collection):
-                VECTOR_DB_CLIENT.delete_collection(collection_name=file_collection)
-            VECTOR_DB_CLIENT.insert(collection_name=file_collection, items=items_file)
-            t_file = time.time()
-            log.info(f'[sync:{filename}] <<< WEAVIATE FILE INSERT END ({t_file - t_kb:.1f}s)')
-
             # Update file metadata
             with get_db() as session:
-                Files.update_file_metadata_by_id(file_id, {'collection_name': file_collection}, db=session)
+                Files.update_file_metadata_by_id(file_id, {'collection_name': self.knowledge_id}, db=session)
                 Files.update_file_data_by_id(file_id, {'status': 'completed'}, db=session)
                 Files.update_file_hash_by_id(file_id, file_hash, db=session)
 
-            log.info(f'[sync:{filename}] DONE total={t_file - t0:.1f}s')
+            log.info(f'[sync:{filename}] DONE total={t_kb - t0:.1f}s')
             return True
 
         result = await asyncio.to_thread(_split_embed_and_store)
@@ -740,7 +719,7 @@ class BaseSyncWorker(ABC):
         if not result:
             log.warning(f'No text content extracted from {filename}')
             with get_db() as session:
-                Files.update_file_metadata_by_id(file_id, {'collection_name': f'file-{file_id}'}, db=session)
+                Files.update_file_metadata_by_id(file_id, {'collection_name': self.knowledge_id}, db=session)
                 Files.update_file_data_by_id(file_id, {'status': 'completed'}, db=session)
                 Files.update_file_hash_by_id(file_id, file_hash, db=session)
 
@@ -1181,6 +1160,10 @@ class BaseSyncWorker(ABC):
                 f'({already_synced} already synced, {total_files} total)'
             )
 
+            # Pre-create the KB collection so individual file inserts don't
+            # race to create it (avoids N-1 wasted 422 roundtrips).
+            VECTOR_DB_CLIENT.insert(collection_name=self.knowledge_id, items=[])
+
             # Process all files with two-phase pipeline
             from open_webui.config import FILE_DOWNLOAD_CONCURRENCY_MULTIPLIER
 
@@ -1339,51 +1322,30 @@ class BaseSyncWorker(ABC):
                         error_message=f'Timed out after {FILE_PIPELINE_TIMEOUT}s',
                     )
 
-            # Process files in batches to avoid overwhelming the event loop
-            # and thread pool. Each batch runs with the existing semaphores
-            # for download/process concurrency within the batch.
-            batch_size = max_download_concurrent + max_process_concurrent
             log.info(
                 f'Starting pipeline processing of {len(all_files_to_process)} files '
                 f'(thread pool: {thread_pool_size}, '
                 f'download concurrency: {max_download_concurrent}, '
-                f'process concurrency: {max_process_concurrent}, '
-                f'batch size: {batch_size})'
+                f'process concurrency: {max_process_concurrent})'
             )
             start_time = time.time()
 
-            total_batches = (len(all_files_to_process) + batch_size - 1) // batch_size
+            all_tasks = [pipeline(file_info, i) for i, file_info in enumerate(all_files_to_process)]
+            all_results = await asyncio.gather(*all_tasks, return_exceptions=True)
 
-            for batch_start in range(0, len(all_files_to_process), batch_size):
-                if cancelled or self._check_cancelled():
-                    cancelled = True
-                    break
-
-                batch_num = batch_start // batch_size + 1
-                batch = all_files_to_process[batch_start : batch_start + batch_size]
-                log.info(f'>>> BATCH {batch_num}/{total_batches} START ({len(batch)} files, offset {batch_start})')
-                batch_t0 = time.time()
-                batch_tasks = [pipeline(file_info, batch_start + i) for i, file_info in enumerate(batch)]
-                batch_results = await asyncio.gather(*batch_tasks, return_exceptions=True)
-                log.info(
-                    f'<<< BATCH {batch_num}/{total_batches} END '
-                    f'({time.time() - batch_t0:.1f}s, '
-                    f'processed={processed_count}, failed={failed_count})'
-                )
-
-                for result in batch_results:
-                    if isinstance(result, Exception):
-                        log.error(f'Unexpected error during file processing: {result}')
-                        total_failed += 1
-                        failed_files.append(
-                            FailedFile(
-                                filename='unknown',
-                                error_type=SyncErrorType.PROCESSING_ERROR.value,
-                                error_message=str(result)[:100],
-                            )
+            for result in all_results:
+                if isinstance(result, Exception):
+                    log.error(f'Unexpected error during file processing: {result}')
+                    total_failed += 1
+                    failed_files.append(
+                        FailedFile(
+                            filename='unknown',
+                            error_type=SyncErrorType.PROCESSING_ERROR.value,
+                            error_message=str(result)[:100],
                         )
-                    elif result is not None:
-                        failed_files.append(result)
+                    )
+                elif result is not None:
+                    failed_files.append(result)
 
             total_processed = processed_count
             total_failed = failed_count

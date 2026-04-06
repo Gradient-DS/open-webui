@@ -229,7 +229,7 @@
 			direction = null;
 		}
 
-		const isExternalSync = knowledge?.type === 'onedrive' || knowledge?.type === 'google_drive';
+		const isCloudKb = knowledge?.type && knowledge.type !== 'local';
 		const res = await searchKnowledgeFilesById(
 			localStorage.token,
 			knowledge.id,
@@ -238,7 +238,7 @@
 			sortKey,
 			direction,
 			currentPage,
-			isExternalSync ? 250 : null
+			isCloudKb ? 2000 : null
 		).catch(() => {
 			return null;
 		});
@@ -1939,6 +1939,7 @@
 												{knowledge}
 												{selectedFileId}
 												isSyncing={activeState?.isSyncing ?? false}
+												totalFiles={fileItemsTotal}
 												onClick={(fileId) => {
 													selectedFileId = fileId;
 
