@@ -1152,6 +1152,7 @@ class BaseSyncWorker(ABC):
                 for f in current_files
                 if f.id.startswith(self.file_id_prefix)
                 and f.id.removeprefix(self.file_id_prefix) not in processing_item_ids
+                and f.hash  # Only count as synced if processing succeeded (hash is set on success)
             )
 
             total_files = len(all_files_to_process) + already_synced
@@ -1330,8 +1331,29 @@ class BaseSyncWorker(ABC):
             )
             start_time = time.time()
 
-            all_tasks = [pipeline(file_info, i) for i, file_info in enumerate(all_files_to_process)]
-            all_results = await asyncio.gather(*all_tasks, return_exceptions=True)
+            batch_size = max_download_concurrent + max_process_concurrent
+            total_batches = -(-len(all_files_to_process) // batch_size)  # ceil division
+            all_results = []
+
+            for batch_start in range(0, len(all_files_to_process), batch_size):
+                batch_num = batch_start // batch_size + 1
+                batch = all_files_to_process[batch_start : batch_start + batch_size]
+
+                if cancelled or self._check_cancelled():
+                    cancelled = True
+                    break
+
+                log.info(f'Batch {batch_num}/{total_batches}: processing {len(batch)} files (offset {batch_start})')
+                batch_t0 = time.time()
+
+                batch_tasks = [pipeline(file_info, batch_start + i) for i, file_info in enumerate(batch)]
+                batch_results = await asyncio.gather(*batch_tasks, return_exceptions=True)
+                all_results.extend(batch_results)
+
+                log.info(
+                    f'Batch {batch_num}/{total_batches} done in {time.time() - batch_t0:.1f}s '
+                    f'(processed={processed_count}, failed={failed_count})'
+                )
 
             for result in all_results:
                 if isinstance(result, Exception):
