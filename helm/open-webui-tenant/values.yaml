@@ -587,16 +587,27 @@ serviceAccount:
 # -----------------------------------------------------------------------------
 # External Secrets Operator
 # -----------------------------------------------------------------------------
-# When enabled, secrets are fetched from GCP Secret Manager instead of inline Helm values
+# When enabled, secrets are fetched from 1Password via ESO SDK provider
 externalSecrets:
   enabled: false
-  gcpProject: ""
   refreshInterval: "1h"
-  # Optional: GCP credentials secret for non-Workload Identity clusters
-  gcpCredentialsSecret:
-    name: gcp-secret-manager-credentials
-    key: secret-access-credentials
-    namespace: external-secrets
+  onepassword:
+    vault: ""                                    # 1Password vault name (e.g., "soev-octobox")
+    itemName: "tenant-secrets"                   # Item name in the vault
+    serviceAccountSecret: "onepassword-sa-token" # K8s secret containing SA token
+    serviceAccountKey: "token"                   # Key within the K8s secret
+    cache: true                                  # Set to false if ESO version doesn't support cache
+    cacheTTL: "5m"
+    cacheMaxSize: 100
+    # Toggle optional fields (set to true if the 1P item contains these)
+    fields:
+      s3AccessKeyId: false
+      emailGraphClientSecret: false
+      microsoftClientSecret: false
+      googleClientSecret: false
+      googleDriveApiKey: false
+      externalDocumentLoaderApiKey: false
+      ragExternalRerankerApiKey: false
 
 # -----------------------------------------------------------------------------
 # Network Policy
