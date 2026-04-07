@@ -96,6 +96,8 @@ jobs:
           build-args: |
             BUILD_HASH=${{ github.sha }}
             USE_SLIM=true
+            UID=1000
+            GID=1000
 
       - name: Export digest
         run: |
