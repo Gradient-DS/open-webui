@@ -17,10 +17,18 @@ spec:
         {{- include "open-webui-tenant.weaviate.selectorLabels" . | nindent 8 }}
     spec:
       {{- include "open-webui-tenant.imagePullSecrets" . | nindent 6 }}
+      {{- with .Values.weaviate.podSecurityContext }}
+      securityContext:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
       containers:
         - name: weaviate
           image: "{{ .Values.weaviate.image.repository }}:{{ .Values.weaviate.image.tag }}"
           imagePullPolicy: {{ .Values.weaviate.image.pullPolicy }}
+          {{- with .Values.weaviate.securityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
           ports:
             - name: http
               containerPort: 8080
