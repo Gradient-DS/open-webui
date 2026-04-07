@@ -31,6 +31,16 @@ spec:
       securityContext:
         {{- toYaml . | nindent 8 }}
       {{- end }}
+      {{- if .Values.weaviate.enabled }}
+      initContainers:
+        - name: wait-for-weaviate
+          image: busybox:1.36
+          {{- with .Values.openWebui.securityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          command: ['sh', '-c', 'until wget -qO- http://{{ include "open-webui-tenant.weaviate.fullname" . }}:8080/v1/.well-known/ready 2>/dev/null; do echo "waiting for weaviate..."; sleep 3; done']
+      {{- end }}
       containers:
         - name: open-webui
           image: "{{ .Values.openWebui.image.repository }}:{{ .Values.openWebui.image.tag }}"
@@ -76,14 +86,14 @@ spec:
                   name: {{ include "open-webui-tenant.fullname" . }}-secrets
                   key: rag-openai-api-key
             # Google OAuth (only if configured)
-            {{- if .Values.secrets.googleClientSecret }}
+            {{- if or .Values.secrets.googleClientSecret .Values.externalSecrets.onepassword.fields.googleClientSecret }}
             - name: GOOGLE_CLIENT_SECRET
               valueFrom:
                 secretKeyRef:
                   name: {{ include "open-webui-tenant.fullname" . }}-secrets
                   key: google-client-secret
             {{- end }}
-            {{- if .Values.secrets.googleDriveApiKey }}
+            {{- if or .Values.secrets.googleDriveApiKey .Values.externalSecrets.onepassword.fields.googleDriveApiKey }}
             - name: GOOGLE_DRIVE_API_KEY
               valueFrom:
                 secretKeyRef:
@@ -91,7 +101,7 @@ spec:
                   key: google-drive-api-key
             {{- end }}
             # Microsoft OAuth (only if configured)
-            {{- if .Values.secrets.microsoftClientSecret }}
+            {{- if or .Values.secrets.microsoftClientSecret .Values.externalSecrets.onepassword.fields.microsoftClientSecret }}
             - name: MICROSOFT_CLIENT_SECRET
               valueFrom:
                 secretKeyRef:
@@ -99,7 +109,7 @@ spec:
                   key: microsoft-client-secret
             {{- end }}
             # Email Graph API secret (only if configured)
-            {{- if .Values.secrets.emailGraphClientSecret }}
+            {{- if or .Values.secrets.emailGraphClientSecret .Values.externalSecrets.onepassword.fields.emailGraphClientSecret }}
             - name: EMAIL_GRAPH_CLIENT_SECRET
               valueFrom:
                 secretKeyRef:
@@ -107,14 +117,14 @@ spec:
                   key: email-graph-client-secret
             {{- end }}
             # External Services API Keys (only if configured)
-            {{- if .Values.secrets.externalDocumentLoaderApiKey }}
+            {{- if or .Values.secrets.externalDocumentLoaderApiKey .Values.externalSecrets.onepassword.fields.externalDocumentLoaderApiKey }}
             - name: EXTERNAL_DOCUMENT_LOADER_API_KEY
               valueFrom:
                 secretKeyRef:
                   name: {{ include "open-webui-tenant.fullname" . }}-secrets
                   key: external-document-loader-api-key
             {{- end }}
-            {{- if .Values.secrets.ragExternalRerankerApiKey }}
+            {{- if or .Values.secrets.ragExternalRerankerApiKey .Values.externalSecrets.onepassword.fields.ragExternalRerankerApiKey }}
             - name: RAG_EXTERNAL_RERANKER_API_KEY
               valueFrom:
                 secretKeyRef:
@@ -122,14 +132,14 @@ spec:
                   key: rag-external-reranker-api-key
             {{- end }}
             # S3 Storage credentials (only if configured)
-            {{- if .Values.secrets.s3AccessKeyId }}
+            {{- if or .Values.secrets.s3AccessKeyId .Values.externalSecrets.onepassword.fields.s3AccessKeyId }}
             - name: S3_ACCESS_KEY_ID
               valueFrom:
                 secretKeyRef:
                   name: {{ include "open-webui-tenant.fullname" . }}-secrets
                   key: s3-access-key-id
             {{- end }}
-            {{- if .Values.secrets.s3SecretAccessKey }}
+            {{- if or .Values.secrets.s3SecretAccessKey .Values.externalSecrets.onepassword.fields.s3AccessKeyId }}
             - name: S3_SECRET_ACCESS_KEY
               valueFrom:
                 secretKeyRef:
