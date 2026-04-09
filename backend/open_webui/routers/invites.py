@@ -157,7 +157,7 @@ async def create_invite(
             )
             email_sent = True
         except Exception as e:
-            log.error(f'Failed to send invite email to {email}: {e}')
+            log.error(f'Failed to send invite email: {e}')
             # Don't fail the invite creation if email fails
             # The admin can still copy the link
 

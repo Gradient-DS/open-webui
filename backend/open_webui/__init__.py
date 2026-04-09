@@ -74,6 +74,7 @@ def serve(
         port=port,
         forwarded_allow_ips='*',
         workers=UVICORN_WORKERS,
+        access_log=False,
     )
 
 
@@ -89,6 +90,7 @@ def dev(
         port=port,
         reload=reload,
         forwarded_allow_ips='*',
+        access_log=False,
     )
 
 

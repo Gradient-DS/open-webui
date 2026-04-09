@@ -160,9 +160,9 @@ class DataRetentionService:
                 Users.update_user_by_id(user.id, {'info': info})
 
                 report.warnings_sent += 1
-                log.info(f'Retention: sent warning email to {user.email} ({days_remaining} days until deletion)')
+                log.info(f'Retention: sent warning email to user {user.id} ({days_remaining} days until deletion)')
             except Exception as e:
-                error_msg = f'Retention: failed to send warning to {user.email}: {e}'
+                error_msg = f'Retention: failed to send warning to user {user.id}: {e}'
                 log.error(error_msg)
                 report.errors.append(error_msg)
 
@@ -201,7 +201,7 @@ class DataRetentionService:
                         if result.success:
                             report.users_archived += 1
                             log.info(
-                                f'Retention: archived user {user.id} ({user.email}) '
+                                f'Retention: archived user {user.id} '
                                 f'before deletion (inactive since {user.last_active_at})'
                             )
                     except Exception as e:
@@ -211,10 +211,7 @@ class DataRetentionService:
                 deletion_report = DeletionService.delete_user(user.id)
                 if not deletion_report.errors:
                     report.users_deleted += 1
-                    log.info(
-                        f'Retention: deleted inactive user {user.id} ({user.email}) '
-                        f'— last active: {user.last_active_at}'
-                    )
+                    log.info(f'Retention: deleted inactive user {user.id} — last active: {user.last_active_at}')
                 else:
                     error_msg = f'Retention: failed to delete user {user.id}: {deletion_report.errors}'
                     log.error(error_msg)

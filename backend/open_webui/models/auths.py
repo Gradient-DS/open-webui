@@ -125,7 +125,7 @@ class AuthsTable:
     def authenticate_user(
         self, email: str, verify_password: callable, db: Optional[Session] = None
     ) -> Optional[UserModel]:
-        log.info(f'authenticate_user: {email}')
+        log.info('authenticate_user')
 
         user = Users.get_user_by_email(email, db=db)
         if not user:
@@ -157,7 +157,7 @@ class AuthsTable:
             return False
 
     def authenticate_user_by_email(self, email: str, db: Optional[Session] = None) -> Optional[UserModel]:
-        log.info(f'authenticate_user_by_email: {email}')
+        log.info('authenticate_user_by_email')
         try:
             with get_db_context(db) as db:
                 # Single JOIN query instead of two separate queries
