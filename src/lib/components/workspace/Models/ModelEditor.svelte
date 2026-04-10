@@ -25,6 +25,7 @@
 	import DefaultFiltersSelector from './DefaultFiltersSelector.svelte';
 	import DefaultFeatures from './DefaultFeatures.svelte';
 	import BuiltinTools from './BuiltinTools.svelte';
+	import DataWarnings from './DataWarnings.svelte';
 	import PromptSuggestions from './PromptSuggestions.svelte';
 	import AccessControlModal from '../common/AccessControlModal.svelte';
 	import LockClosed from '$lib/components/icons/LockClosed.svelte';
@@ -100,6 +101,8 @@
 	let capabilities = getDefaultCapabilities();
 	let defaultFeatureIds = [];
 	let builtinTools = {};
+	let dataWarnings: Record<string, boolean> = {};
+	let dataWarningMessage: string = '';
 
 	let actionIds = [];
 	let accessGrants = [];
@@ -207,6 +210,18 @@
 			}
 		}
 
+		if (Object.values(dataWarnings).some((v) => v)) {
+			info.meta.data_warnings = dataWarnings;
+			info.meta.data_warning_message = dataWarningMessage || '';
+		} else {
+			if (info.meta.data_warnings) {
+				delete info.meta.data_warnings;
+			}
+			if (info.meta.data_warning_message) {
+				delete info.meta.data_warning_message;
+			}
+		}
+
 		if (tts.voice !== '') {
 			if (!info.meta.tts) info.meta.tts = {};
 			info.meta.tts.voice = tts.voice;
@@ -250,6 +265,8 @@
 		capabilities = { ...DEFAULT_CAPABILITIES, ...(defaultMeta.capabilities ?? {}) };
 		defaultFeatureIds = defaultMeta.defaultFeatureIds ?? [];
 		builtinTools = defaultMeta.builtinTools ?? {};
+		dataWarnings = defaultMeta.data_warnings ?? {};
+		dataWarningMessage = defaultMeta.data_warning_message ?? '';
 
 		// Scroll to top 'workspace-container' element
 		const workspaceContainer = document.getElementById('workspace-container');
@@ -317,6 +334,8 @@
 			capabilities = { ...capabilities, ...(model?.meta?.capabilities ?? {}) };
 			defaultFeatureIds = model?.meta?.defaultFeatureIds ?? defaultFeatureIds;
 			builtinTools = model?.meta?.builtinTools ?? builtinTools;
+			dataWarnings = model?.meta?.data_warnings ?? dataWarnings;
+			dataWarningMessage = model?.meta?.data_warning_message ?? dataWarningMessage;
 			tts = { voice: model?.meta?.tts?.voice ?? '' };
 
 			accessGrants = model?.access_grants ?? [];
@@ -832,6 +851,12 @@
 					{#if capabilities.builtin_tools}
 						<div class="my-4">
 							<BuiltinTools bind:builtinTools />
+						</div>
+					{/if}
+
+					{#if $config?.features?.enable_data_warnings}
+						<div class="my-4">
+							<DataWarnings bind:dataWarnings bind:warningMessage={dataWarningMessage} />
 						</div>
 					{/if}
 

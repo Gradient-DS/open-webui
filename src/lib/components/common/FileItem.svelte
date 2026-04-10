@@ -32,10 +32,12 @@
 	export let size: number;
 
 	import DocumentPage from '../icons/DocumentPage.svelte';
-	import Database from '../icons/Database.svelte';
+	import OneDrive from '../icons/OneDrive.svelte';
+	import GoogleDrive from '../icons/GoogleDrive.svelte';
 	import PageEdit from '../icons/PageEdit.svelte';
 	import ChatBubble from '../icons/ChatBubble.svelte';
 	import Folder from '../icons/Folder.svelte';
+	import FolderOpen from '../icons/FolderOpen.svelte';
 	let showModal = false;
 
 	const decodeString = (str: string) => {
@@ -116,8 +118,12 @@
 									: $i18n.t('Document')}
 					placement="top"
 				>
-					{#if type === 'collection'}
-						<Database />
+					{#if type === 'collection' && item?.knowledge_type === 'onedrive'}
+						<OneDrive />
+					{:else if type === 'collection' && item?.knowledge_type === 'google_drive'}
+						<GoogleDrive />
+					{:else if type === 'collection'}
+						<FolderOpen />
 					{:else if type === 'note'}
 						<PageEdit />
 					{:else if type === 'chat'}

@@ -450,7 +450,7 @@ def create_admin_user(email: str, password: str, name: str = 'Admin'):
         log.debug('Users already exist, skipping admin creation')
         return None
 
-    log.info(f'Creating admin account from environment variables: {email}')
+    log.info('Creating admin account from environment variables')
     try:
         hashed = get_password_hash(password)
         user = Auths.insert_new_auth(
@@ -460,7 +460,7 @@ def create_admin_user(email: str, password: str, name: str = 'Admin'):
             role='admin',
         )
         if user:
-            log.info(f'Admin account created successfully: {email}')
+            log.info('Admin account created successfully')
             return user
         else:
             log.error('Failed to create admin account from environment variables')

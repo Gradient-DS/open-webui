@@ -330,6 +330,7 @@ type Config = {
 		enable_notes?: boolean;
 		enable_code_interpreter?: boolean;
 		enable_code_execution?: boolean;
+		enable_data_warnings?: boolean;
 	};
 	oauth: {
 		providers: {

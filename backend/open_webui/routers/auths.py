@@ -923,7 +923,7 @@ async def get_admin_details(request: Request, user=Depends(get_current_user), db
         admin_email = request.app.state.config.ADMIN_EMAIL
         admin_name = None
 
-        log.info(f'Admin details - Email: {admin_email}, Name: {admin_name}')
+        log.info('Admin details requested')
 
         if admin_email:
             admin = Users.get_user_by_email(admin_email, db=db)

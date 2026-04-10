@@ -179,6 +179,9 @@ def start_logger():
 
     logging.basicConfig(handlers=[InterceptHandler()], level=GLOBAL_LOG_LEVEL, force=True)
 
+    # Silence httpx request logging to prevent tokens/credentials in URLs from leaking into logs
+    logging.getLogger('httpx').setLevel(logging.WARNING)
+
     for uvicorn_logger_name in ['uvicorn', 'uvicorn.error']:
         uvicorn_logger = logging.getLogger(uvicorn_logger_name)
         uvicorn_logger.setLevel(GLOBAL_LOG_LEVEL)
