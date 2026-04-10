@@ -89,6 +89,7 @@
 
 	let show = false;
 	let tab = '';
+	let directTab = false;
 
 	let showAttachWebpageModal = false;
 
@@ -186,6 +187,7 @@
 	// Expose openTab for external use (pinned items in bottom bar)
 	export const openTab = (tabName) => {
 		tab = tabName;
+		directTab = true;
 		show = true;
 	};
 
@@ -214,8 +216,10 @@
 <Dropdown
 	bind:show
 	{closeOnOutsideClick}
-	on:change={(e) => {
-		if (e.detail === false) {
+	onOpenChange={(state) => {
+		if (!state) {
+			tab = '';
+			directTab = false;
 			onClose();
 		}
 	}}
@@ -855,21 +859,23 @@
 					{/if}
 				</div>
 			{:else if tab === 'knowledge' && isFeatureEnabled('knowledge')}
-				<div in:fly={{ x: 20, duration: 150 }}>
-					<button
-						class="flex w-full justify-between gap-2 items-center px-3 py-1.5 text-sm cursor-pointer rounded-xl hover:bg-gray-50 dark:hover:bg-gray-800/50"
-						on:click={() => {
-							tab = '';
-						}}
-					>
-						<ChevronLeft />
+				<div in:fly={{ x: directTab ? 0 : 20, duration: directTab ? 0 : 150 }}>
+					{#if !directTab}
+						<button
+							class="flex w-full justify-between gap-2 items-center px-3 py-1.5 text-sm cursor-pointer rounded-xl hover:bg-gray-50 dark:hover:bg-gray-800/50"
+							on:click={() => {
+								tab = '';
+							}}
+						>
+							<ChevronLeft />
 
-						<div class="flex items-center w-full justify-between">
-							<div>
-								{$i18n.t('Knowledge')}
+							<div class="flex items-center w-full justify-between">
+								<div>
+									{$i18n.t('Knowledge')}
+								</div>
 							</div>
-						</div>
-					</button>
+						</button>
+					{/if}
 
 					<Knowledge {onSelect} />
 				</div>

@@ -194,7 +194,11 @@ export const createKnowledgePicker = (knowledgeId?: string): Promise<KnowledgePi
 	});
 };
 
-export const createPicker = () => {
+interface PickerOptions {
+	onFileSelected?: (metadata: { name: string }) => void;
+}
+
+export const createPicker = (options?: PickerOptions) => {
 	return new Promise(async (resolve, reject) => {
 		try {
 			await initialize();
@@ -245,6 +249,9 @@ export const createPicker = () => {
 							} else {
 								downloadUrl = `https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`;
 							}
+
+							// Notify before download starts (for instant placeholder feedback)
+							options?.onFileSelected?.({ name: effectiveName });
 
 							const response = await fetch(downloadUrl, {
 								headers: { Authorization: `Bearer ${token}`, Accept: '*/*' }

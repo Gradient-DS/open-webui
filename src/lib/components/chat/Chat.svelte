@@ -99,6 +99,7 @@
 	import Navbar from '$lib/components/chat/Navbar.svelte';
 	import ChatControls from './ChatControls.svelte';
 	import EventConfirmDialog from '../common/ConfirmDialog.svelte';
+	import DataWarningConfirmDialog from '../common/ConfirmDialog.svelte';
 	import Placeholder from './Placeholder.svelte';
 	import FilesOverlay from './MessageInput/FilesOverlay.svelte';
 	import NotificationToast from '../NotificationToast.svelte';
@@ -107,6 +108,7 @@
 	import Sidebar from '../icons/Sidebar.svelte';
 	import Image from '../common/Image.svelte';
 	import { getBanners } from '$lib/apis/configs';
+	import { logDataWarningAcceptance } from '$lib/apis/data-warnings';
 	import { showRagFilter } from '$lib/stores/rag-filter';
 	import { getRagFilterForRequest } from '$lib/utils/rag-filter';
 	import ConversationFeedback from '$lib/components/chat/ConversationFeedback.svelte';
@@ -136,6 +138,14 @@
 	let eventConfirmationInputValue = '';
 	let eventConfirmationInputType = '';
 	let eventCallback = null;
+
+	let acceptedDataWarnings: Set<string> = new Set();
+	let showDataWarningDialog = false;
+	let dataWarningTitle = '';
+	let dataWarningMessage = '';
+	let dataWarningCapabilities: string[] = [];
+	let dataWarningCallback: ((confirmed: boolean) => void) | null = null;
+
 
 	let selectedModels = [''];
 	let atSelectedModel: Model | undefined;
@@ -191,6 +201,7 @@
 		selectedFilterIds = [];
 		webSearchEnabled = false;
 		imageGenerationEnabled = false;
+		acceptedDataWarnings = new Set();
 
 		const storageChatInput = sessionStorage.getItem(
 			`chat-input${chatIdProp ? `-${chatIdProp}` : ''}`
@@ -767,6 +778,7 @@
 				webSearchEnabled = false;
 				imageGenerationEnabled = false;
 				codeInterpreterEnabled = false;
+				acceptedDataWarnings = new Set();
 
 				try {
 					const input = JSON.parse(storageChatInput);
@@ -1058,6 +1070,7 @@
 
 	const initNewChat = async () => {
 		console.log('initNewChat');
+		acceptedDataWarnings = new Set();
 		if ($user?.role !== 'admin' && $user?.permissions?.chat?.temporary_enforced) {
 			await temporaryChatEnabled.set(true);
 		}
@@ -1786,6 +1799,108 @@
 	// Chat functions
 	//////////////////////////
 
+	const checkDataWarnings = async (
+		modelIds: string[],
+		activeCapabilities: Record<string, boolean>
+	): Promise<boolean> => {
+		// Clean up any stale callback from a previously dismissed dialog
+		if (dataWarningCallback) {
+			dataWarningCallback(false);
+			dataWarningCallback = null;
+		}
+
+		console.log('[DataWarnings] config features:', $config?.features);
+		if (!$config?.features?.enable_data_warnings) return true;
+
+		// Collect all unacknowledged warnings across selected models
+		const pendingWarnings: {
+			modelId: string;
+			modelName: string;
+			capabilities: string[];
+			message: string;
+		}[] = [];
+
+		for (const modelId of modelIds) {
+			const model = $models.find((m) => m.id === modelId);
+			if (!model) continue;
+
+			console.log('[DataWarnings] model info:', modelId, model.info?.meta);
+			const warnings = model.info?.meta?.data_warnings;
+			if (!warnings) continue;
+
+			const unacknowledged: string[] = [];
+			for (const [capability, warned] of Object.entries(warnings)) {
+				if (!warned) continue;
+				if (!activeCapabilities[capability]) continue;
+				const key = `${modelId}:${capability}`;
+				if (acceptedDataWarnings.has(key)) continue;
+				unacknowledged.push(capability);
+			}
+
+			if (unacknowledged.length > 0) {
+				pendingWarnings.push({
+					modelId,
+					modelName: model.name,
+					capabilities: unacknowledged,
+					message: model.info?.meta?.data_warning_message || ''
+				});
+			}
+		}
+
+		if (pendingWarnings.length === 0) return true;
+
+		// Show confirmation for each model with pending warnings
+		for (const warning of pendingWarnings) {
+			const confirmed = await new Promise<boolean>((resolve) => {
+				const capabilityLabelMap: Record<string, string> = {
+					file_upload: $i18n.t('File Upload'),
+					web_search: $i18n.t('Web Search'),
+					knowledge_local: $i18n.t('Local Knowledge Base'),
+					knowledge_external: $i18n.t('External Knowledge Base'),
+					vision: $i18n.t('Vision'),
+					code_interpreter: $i18n.t('Code Interpreter'),
+					image_generation: $i18n.t('Image Generation')
+				};
+				const capabilityLabels = warning.capabilities.map(
+					(c) => capabilityLabelMap[c] || c.replace(/_/g, ' ').replace(/\b\w/g, (l) => l.toUpperCase())
+				);
+
+				dataWarningTitle = $i18n.t('Data Sovereignty Warning');
+				dataWarningMessage =
+					warning.message ||
+					$i18n.t(
+						'This model runs on external infrastructure. Uploaded files and conversation content will be processed by an external provider. Do you want to continue?'
+					);
+				dataWarningCapabilities = capabilityLabels;
+				dataWarningCallback = resolve;
+				// Delay showing the dialog to prevent the Enter key that
+				// triggered submitPrompt from auto-confirming via key repeat
+				setTimeout(() => {
+					showDataWarningDialog = true;
+				}, 100);
+			});
+
+			if (!confirmed) return false;
+
+			// Mark as accepted
+			for (const cap of warning.capabilities) {
+				acceptedDataWarnings.add(`${warning.modelId}:${cap}`);
+			}
+			acceptedDataWarnings = acceptedDataWarnings; // trigger reactivity
+
+			// Log acceptance (fire-and-forget)
+			logDataWarningAcceptance(
+				localStorage.token,
+				$chatId || 'new',
+				warning.modelId,
+				warning.capabilities,
+				warning.message || null
+			);
+		}
+
+		return true;
+	};
+
 	const submitPrompt = async (userPrompt, { _raw = false } = {}) => {
 		console.log('submitPrompt', userPrompt, $chatId);
 
@@ -1866,6 +1981,29 @@
 				return;
 			}
 		}
+
+		// Data sovereignty warning check
+		// Combine current files + accumulated chatFiles to detect KB types
+		const allKbFiles = [
+			...files.filter((f) => f.type === 'collection'),
+			...chatFiles.filter((f) => f.type === 'collection')
+		];
+		const hasLocalKb = allKbFiles.some((f) => !f.knowledge_type || f.knowledge_type === 'local');
+		const hasExternalKb = allKbFiles.some(
+			(f) => f.knowledge_type && f.knowledge_type !== 'local'
+		);
+		const activeCapabilities: Record<string, boolean> = {
+			file_upload: files.some((f) => f.type !== 'image' && f.type !== 'collection'),
+			vision: files.some((f) => f.type === 'image'),
+			web_search: webSearchEnabled,
+			image_generation: imageGenerationEnabled,
+			code_interpreter: codeInterpreterEnabled,
+			knowledge_local: hasLocalKb,
+			knowledge_external: hasExternalKb
+		};
+
+		const warningAccepted = await checkDataWarnings(selectedModels, activeCapabilities);
+		if (!warningAccepted) return;
 
 		messageInput?.setText('');
 		prompt = '';
@@ -2737,6 +2875,41 @@
 		eventCallback(false);
 	}}
 />
+
+<DataWarningConfirmDialog
+	bind:show={showDataWarningDialog}
+	title={dataWarningTitle}
+	on:confirm={() => {
+		if (dataWarningCallback) {
+			const cb = dataWarningCallback;
+			dataWarningCallback = null;
+			cb(true);
+		}
+	}}
+	on:cancel={() => {
+		if (dataWarningCallback) {
+			const cb = dataWarningCallback;
+			dataWarningCallback = null;
+			cb(false);
+		}
+	}}
+>
+	<div class="text-sm text-gray-500">
+		<div class="bg-amber-500/20 text-amber-700 dark:text-amber-200 rounded-lg px-4 py-3 mb-3">
+			<div class="font-medium mb-1">
+				{$i18n.t('The following capabilities will send data to an external provider')}:
+			</div>
+			<ul class="list-disc pl-4 text-xs">
+				{#each dataWarningCapabilities as cap}
+					<li>{cap}</li>
+				{/each}
+			</ul>
+		</div>
+		<div class="whitespace-pre-wrap">
+			{dataWarningMessage}
+		</div>
+	</div>
+</DataWarningConfirmDialog>
 
 <div
 	class="h-screen max-h-[100dvh] transition-width duration-200 ease-in-out {$showSidebar

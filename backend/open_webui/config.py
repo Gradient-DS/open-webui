@@ -1755,6 +1755,16 @@ TWO_FA_GRACE_PERIOD_DAYS = PersistentConfig(
 )
 
 ####################################
+# Data Sovereignty Warnings
+####################################
+
+ENABLE_DATA_WARNINGS = PersistentConfig(
+    'ENABLE_DATA_WARNINGS',
+    'features.enable_data_warnings',
+    os.environ.get('ENABLE_DATA_WARNINGS', 'True').lower() == 'true',
+)
+
+####################################
 # Data Retention TTL
 ####################################
 

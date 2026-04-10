@@ -976,13 +976,19 @@ export async function pickAndDownloadFileModal(
 
 // Pick and download multiple files from OneDrive using modal (iframe version)
 export async function pickAndDownloadFilesModal(
-	authorityType?: 'personal' | 'organizations'
+	authorityType?: 'personal' | 'organizations',
+	options?: {
+		onFilesSelected?: (items: Array<{ name: string }>) => void;
+	}
 ): Promise<Array<{ blob: Blob; name: string }>> {
 	const pickerResult = await openOneDriveFilePickerModal(authorityType);
 
 	if (!pickerResult || !pickerResult.items || pickerResult.items.length === 0) {
 		return [];
 	}
+
+	// Notify before downloads start (for instant placeholder feedback)
+	options?.onFilesSelected?.(pickerResult.items.map((item) => ({ name: item.name })));
 
 	// Download all selected files in parallel
 	const downloadPromises = pickerResult.items.map(async (item) => {

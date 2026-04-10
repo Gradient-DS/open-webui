@@ -396,4 +396,7 @@ data:
   KNOWLEDGE_RETENTION_TTL_DAYS: {{ .Values.openWebui.config.knowledgeRetentionTtlDays | default "0" | quote }}
   DATA_RETENTION_WARNING_DAYS: {{ .Values.openWebui.config.dataRetentionWarningDays | default "30" | quote }}
   ENABLE_RETENTION_WARNING_EMAIL: {{ .Values.openWebui.config.enableRetentionWarningEmail | default "false" | quote }}
+
+  # Data Sovereignty Warnings
+  ENABLE_DATA_WARNINGS: {{ .Values.openWebui.config.enableDataWarnings | default "true" | quote }}
 {{- end }}
