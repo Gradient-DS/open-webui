@@ -125,6 +125,11 @@ oracledb==3.4.2
 
 av==14.0.1 # Caution: Set due to FATAL FIPS SELFTEST FAILURE, see discussion https://github.com/open-webui/open-webui/discussions/15720
 
+## Chat export (PDF/Word)
+weasyprint==65.0
+python-docx==1.1.2
+htmldocx==0.0.6
+
 ## TOTP 2FA
 pyotp==2.9.0
 qrcode[pil]==8.0

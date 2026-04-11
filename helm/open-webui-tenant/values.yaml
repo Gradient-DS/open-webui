@@ -217,6 +217,9 @@ openWebui:
     featureToolServers: "False"
     featureTerminalServers: "False"
 
+    # PDF export
+    useStylizedPdfExport: "False"  # Set to "True" to use old screenshot-based PDF export
+
     # Memories
     enableMemories: "true"
 

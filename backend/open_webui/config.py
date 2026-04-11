@@ -1832,6 +1832,9 @@ FEATURE_USER_DEMOGRAPHICS = os.environ.get('FEATURE_USER_DEMOGRAPHICS', 'False')
 
 FEATURE_BUILTIN_TOOLS = os.environ.get('FEATURE_BUILTIN_TOOLS', 'True').lower() == 'true'
 
+# PDF export: set to True to use old screenshot-based (stylized) PDF export
+USE_STYLIZED_PDF_EXPORT = os.environ.get('USE_STYLIZED_PDF_EXPORT', 'False').lower() == 'true'
+
 # Admin Panel Tab Feature Flags
 FEATURE_ADMIN_EVALUATIONS = os.environ.get('FEATURE_ADMIN_EVALUATIONS', 'True').lower() == 'true'
 FEATURE_ADMIN_FUNCTIONS = os.environ.get('FEATURE_ADMIN_FUNCTIONS', 'True').lower() == 'true'

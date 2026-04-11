@@ -17,6 +17,21 @@ from open_webui.utils.code_interpreter import execute_code_jupyter
 
 log = logging.getLogger(__name__)
 
+
+def _safe_filename(title: str, ext: str) -> str:
+    """Build a Content-Disposition header value safe for HTTP headers.
+
+    Uses RFC 5987 filename* for UTF-8 support, with an ASCII fallback.
+    """
+    from urllib.parse import quote
+
+    # ASCII-safe fallback: strip non-ASCII
+    ascii_name = title.encode('ascii', 'ignore').decode('ascii').strip() or 'chat'
+    fallback = f'chat-{ascii_name}.{ext}'
+    utf8_name = f'chat-{title}.{ext}'
+    return f'attachment; filename="{fallback}"; filename*=UTF-8\'\'{quote(utf8_name)}'
+
+
 router = APIRouter()
 
 
@@ -100,6 +115,46 @@ async def download_chat_as_pdf(form_data: ChatTitleMessagesForm, user=Depends(ge
     except Exception as e:
         log.exception(f'Error generating PDF: {e}')
         raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.post('/chat/pdf')
+async def export_chat_as_pdf(
+    form_data: ChatTitleMessagesForm,
+    user=Depends(get_verified_user),
+):
+    """Export chat as a properly rendered PDF with citations and sources."""
+    from open_webui.services.chat_export import generate_pdf
+
+    try:
+        pdf_bytes = generate_pdf(form_data.title, form_data.messages)
+        return Response(
+            content=pdf_bytes,
+            media_type='application/pdf',
+            headers={'Content-Disposition': _safe_filename(form_data.title, 'pdf')},
+        )
+    except Exception as e:
+        log.exception(f'Error generating PDF: {e}')
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post('/chat/docx')
+async def export_chat_as_docx(
+    form_data: ChatTitleMessagesForm,
+    user=Depends(get_verified_user),
+):
+    """Export chat as a Word document with citations and sources."""
+    from open_webui.services.chat_export import generate_docx
+
+    try:
+        docx_bytes = generate_docx(form_data.title, form_data.messages)
+        return Response(
+            content=docx_bytes,
+            media_type='application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+            headers={'Content-Disposition': _safe_filename(form_data.title, 'docx')},
+        )
+    except Exception as e:
+        log.exception(f'Error generating DOCX: {e}')
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.get('/db/download')

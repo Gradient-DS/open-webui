@@ -188,14 +188,14 @@
 
 	let showRateComment = false;
 
-	const copyToClipboard = async (text) => {
+	const copyToClipboard = async (text, sources: any[] = []) => {
 		text = removeAllDetails(text);
 
 		if (($config?.ui?.response_watermark ?? '').trim() !== '') {
 			text = `${text}\n\n${$config?.ui?.response_watermark}`;
 		}
 
-		const res = await _copyToClipboard(text, null, $settings?.copyFormatted ?? false);
+		const res = await _copyToClipboard(text, null, $settings?.copyFormatted ?? false, sources);
 		if (res) {
 			toast.success($i18n.t('Copying to clipboard was successful!'));
 		}
@@ -996,7 +996,7 @@
 											? 'visible'
 											: 'invisible group-hover:visible'} p-1.5 hover:bg-black/5 dark:hover:bg-white/5 rounded-lg dark:hover:text-white hover:text-black transition copy-response-button"
 										on:click={() => {
-											copyToClipboard(message.content);
+											copyToClipboard(message.content, message.sources ?? []);
 										}}
 									>
 										<svg
