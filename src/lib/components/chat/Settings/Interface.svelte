@@ -1024,24 +1024,6 @@
 				</div>
 			</div>
 
-			<div>
-				<div class=" py-0.5 flex w-full justify-between">
-					<div id="stylized-pdf-export-label" class=" self-center text-xs">
-						{$i18n.t('Stylized PDF Export')}
-					</div>
-
-					<div class="flex items-center gap-2 p-1">
-						<Switch
-							ariaLabelledbyId="stylized-pdf-export-label"
-							tooltip={true}
-							bind:state={stylizedPdfExport}
-							on:change={() => {
-								saveSettings({ stylizedPdfExport });
-							}}
-						/>
-					</div>
-				</div>
-			</div>
 
 			<div>
 				<div class=" py-0.5 flex w-full justify-between">

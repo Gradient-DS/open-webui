@@ -533,6 +533,7 @@ from open_webui.config import (
     FEATURE_TERMINAL_SERVERS,
     FEATURE_USER_DEMOGRAPHICS,
     FEATURE_BUILTIN_TOOLS,
+    USE_STYLIZED_PDF_EXPORT,
     FEATURE_ADMIN_EVALUATIONS,
     FEATURE_ADMIN_FUNCTIONS,
     FEATURE_ADMIN_SETTINGS,
@@ -2462,6 +2463,7 @@ async def get_app_config(request: Request):
                     'feature_terminal_servers': FEATURE_TERMINAL_SERVERS,
                     'feature_user_demographics': FEATURE_USER_DEMOGRAPHICS,
                     'feature_builtin_tools': FEATURE_BUILTIN_TOOLS,
+                    'use_stylized_pdf_export': USE_STYLIZED_PDF_EXPORT,
                     'enable_google_drive_integration': app.state.config.ENABLE_GOOGLE_DRIVE_INTEGRATION,
                     **(
                         {

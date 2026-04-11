@@ -16,6 +16,19 @@
 	export let onBlur = () => {};
 
 	let textareaElement;
+	let scrollableParent = null;
+
+	const findScrollableParent = (el) => {
+		let parent = el?.parentElement;
+		while (parent) {
+			const { overflow, overflowY } = getComputedStyle(parent);
+			if (/(auto|scroll)/.test(overflow + overflowY)) {
+				return parent;
+			}
+			parent = parent.parentElement;
+		}
+		return null;
+	};
 
 	// Adjust height on mount and after setting the element.
 	onMount(async () => {
@@ -27,6 +40,7 @@
 			const interval = setInterval(() => {
 				if (textareaElement) {
 					clearInterval(interval);
+					scrollableParent = findScrollableParent(textareaElement);
 					resize();
 				}
 			}, 100);
@@ -35,6 +49,8 @@
 
 	const resize = () => {
 		if (textareaElement) {
+			const savedScrollTop = scrollableParent?.scrollTop;
+
 			textareaElement.style.height = '';
 
 			let height = textareaElement.scrollHeight;
@@ -46,6 +62,10 @@
 			}
 
 			textareaElement.style.height = `${height}px`;
+
+			if (scrollableParent != null) {
+				scrollableParent.scrollTop = savedScrollTop;
+			}
 		}
 	};
 </script>
@@ -66,6 +86,9 @@
 		onInput(e);
 	}}
 	on:focus={() => {
+		if (!scrollableParent && textareaElement) {
+			scrollableParent = findScrollableParent(textareaElement);
+		}
 		resize();
 	}}
 	on:blur={onBlur}

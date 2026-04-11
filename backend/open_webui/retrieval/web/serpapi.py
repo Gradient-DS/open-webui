@@ -31,7 +31,7 @@ def search_serpapi(
     response = requests.request('GET', url)
 
     json_response = response.json()
-    log.info(f'results from serpapi search: {json_response}')
+    log.info(f'serpapi search returned {len(json_response.get("organic_results", []))} results')
 
     results = sorted(json_response.get('organic_results', []), key=lambda x: x.get('position', 0))
     if filter_list:

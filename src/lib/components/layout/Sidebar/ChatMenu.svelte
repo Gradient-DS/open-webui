@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { toast } from 'svelte-sonner';
 	import { getContext, tick } from 'svelte';
 
 	import fileSaver from 'file-saver';
@@ -20,10 +21,12 @@
 		getChatPinnedStatusById,
 		toggleChatPinnedStatusById
 	} from '$lib/apis/chats';
-	import { chats, folders, settings, theme, user } from '$lib/stores';
+	import { chats, config, folders, settings, theme, user } from '$lib/stores';
 	import { createMessagesList } from '$lib/utils';
-	import { downloadChatAsPDF } from '$lib/apis/utils';
+	import { downloadChatAsPDF, exportChatAsPdf, exportChatAsDocx } from '$lib/apis/utils';
+	import { copyFormattedChat } from '$lib/utils/copy';
 	import Download from '$lib/components/icons/Download.svelte';
+	import Clipboard from '$lib/components/icons/Clipboard.svelte';
 	import Folder from '$lib/components/icons/Folder.svelte';
 	import Messages from '$lib/components/chat/Messages.svelte';
 
@@ -87,12 +90,13 @@
 			return;
 		}
 
-		const [{ default: jsPDF }, { default: html2canvas }] = await Promise.all([
-			import('jspdf'),
-			import('html2canvas-pro')
-		]);
+		// Check if stylized (screenshot) PDF is configured server-side
+		if ($config?.features?.use_stylized_pdf_export) {
+			const [{ default: jsPDF }, { default: html2canvas }] = await Promise.all([
+				import('jspdf'),
+				import('html2canvas-pro')
+			]);
 
-		if ($settings?.stylizedPdfExport ?? true) {
 			showFullMessages = true;
 			await tick();
 
@@ -100,9 +104,8 @@
 			if (containerElement) {
 				try {
 					const isDarkMode = document.documentElement.classList.contains('dark');
-					const virtualWidth = 800; // px, fixed width for cloned element
+					const virtualWidth = 800;
 
-					// Clone and style
 					const clonedElement = containerElement.cloneNode(true);
 					clonedElement.classList.add('text-black');
 					clonedElement.classList.add('dark:text-white');
@@ -112,14 +115,12 @@
 					clonedElement.style.height = 'auto';
 					document.body.appendChild(clonedElement);
 
-					// Wait for DOM update/layout
 					await new Promise((r) => setTimeout(r, 100));
 
-					// Render entire content once
 					const canvas = await html2canvas(clonedElement, {
 						backgroundColor: isDarkMode ? '#000' : '#fff',
 						useCORS: true,
-						scale: 2, // increase resolution
+						scale: 2,
 						width: virtualWidth
 					});
 
@@ -128,117 +129,78 @@
 					const pdf = new jsPDF('p', 'mm', 'a4');
 					const pageWidthMM = 210;
 					const pageHeightMM = 297;
-
-					// Convert page height in mm to px on canvas scale for cropping
-					// Get canvas DPI scale:
-					const pxPerMM = canvas.width / virtualWidth; // width in px / width in px?
-					// Since 1 page width is 210 mm, but canvas width is 800 px at scale 2
-					// Assume 1 mm = px / (pageWidthMM scaled)
-					// Actually better: Calculate scale factor from px/mm:
-					// virtualWidth px corresponds directly to 210mm in PDF, so pxPerMM:
-					const pxPerPDFMM = canvas.width / pageWidthMM; // canvas px per PDF mm
-
-					// Height in px for one page slice:
+					const pxPerPDFMM = canvas.width / pageWidthMM;
 					const pagePixelHeight = Math.floor(pxPerPDFMM * pageHeightMM);
 
 					let offsetY = 0;
 					let page = 0;
 
 					while (offsetY < canvas.height) {
-						// Height of slice
 						const sliceHeight = Math.min(pagePixelHeight, canvas.height - offsetY);
-
-						// Create temp canvas for slice
 						const pageCanvas = document.createElement('canvas');
 						pageCanvas.width = canvas.width;
 						pageCanvas.height = sliceHeight;
-
 						const ctx = pageCanvas.getContext('2d');
-
-						// Draw the slice of original canvas onto pageCanvas
-						ctx.drawImage(
-							canvas,
-							0,
-							offsetY,
-							canvas.width,
-							sliceHeight,
-							0,
-							0,
-							canvas.width,
-							sliceHeight
-						);
-
+						ctx.drawImage(canvas, 0, offsetY, canvas.width, sliceHeight, 0, 0, canvas.width, sliceHeight);
 						const imgData = pageCanvas.toDataURL('image/jpeg', 0.7);
-
-						// Calculate image height in PDF units keeping aspect ratio
 						const imgHeightMM = (sliceHeight * pageWidthMM) / canvas.width;
-
 						if (page > 0) pdf.addPage();
-
 						if (isDarkMode) {
 							pdf.setFillColor(0, 0, 0);
-							pdf.rect(0, 0, pageWidthMM, pageHeightMM, 'F'); // black bg
+							pdf.rect(0, 0, pageWidthMM, pageHeightMM, 'F');
 						}
-
 						pdf.addImage(imgData, 'JPEG', 0, 0, pageWidthMM, imgHeightMM);
-
 						offsetY += sliceHeight;
 						page++;
 					}
 
 					pdf.save(`chat-${chat.chat.title}.pdf`);
-
 					showFullMessages = false;
 				} catch (error) {
 					console.error('Error generating PDF', error);
 				}
 			}
-		} else {
-			console.log('Downloading PDF');
+			return;
+		}
 
-			const chatText = await getChatAsText(chat);
+		// Server-side PDF export
+		const history = chat.chat.history;
+		const messages = createMessagesList(history, history.currentId);
+		const exportMessages = messages.map((m) => ({
+			role: m.role,
+			content: m.content,
+			sources: m.sources || []
+		}));
 
-			const doc = new jsPDF();
+		try {
+			const blob = await exportChatAsPdf(localStorage.token, chat.chat.title, exportMessages);
+			if (blob) saveAs(blob, `chat-${chat.chat.title}.pdf`);
+		} catch (e) {
+			console.error('PDF export failed:', e);
+			toast.error($i18n.t('Failed to export PDF'));
+		}
+	};
 
-			// Margins
-			const left = 15;
-			const top = 20;
-			const right = 15;
-			const bottom = 20;
+	const downloadDocx = async () => {
+		chat = await getChatById(localStorage.token, chatId);
+		if (!chat) {
+			return;
+		}
 
-			const pageWidth = doc.internal.pageSize.getWidth();
-			const pageHeight = doc.internal.pageSize.getHeight();
-			const usableWidth = pageWidth - left - right;
-			const usableHeight = pageHeight - top - bottom;
+		const history = chat.chat.history;
+		const messages = createMessagesList(history, history.currentId);
+		const exportMessages = messages.map((m) => ({
+			role: m.role,
+			content: m.content,
+			sources: m.sources || []
+		}));
 
-			// Font size and line height
-			const fontSize = 8;
-			doc.setFontSize(fontSize);
-			const lineHeight = fontSize * 1; // adjust if needed
-
-			// Split the markdown into lines (handles \n)
-			const paragraphs = chatText.split('\n');
-
-			let y = top;
-
-			for (let paragraph of paragraphs) {
-				// Wrap each paragraph to fit the width
-				const lines = doc.splitTextToSize(paragraph, usableWidth);
-
-				for (let line of lines) {
-					// If the line would overflow the bottom, add a new page
-					if (y + lineHeight > pageHeight - bottom) {
-						doc.addPage();
-						y = top;
-					}
-					doc.text(line, left, y);
-					y += lineHeight * 0.5;
-				}
-				// Add empty line at paragraph breaks
-				y += lineHeight * 0.1;
-			}
-
-			doc.save(`chat-${chat.chat.title}.pdf`);
+		try {
+			const blob = await exportChatAsDocx(localStorage.token, chat.chat.title, exportMessages);
+			if (blob) saveAs(blob, `chat-${chat.chat.title}.docx`);
+		} catch (e) {
+			console.error('DOCX export failed:', e);
+			toast.error($i18n.t('Failed to export Word document'));
 		}
 	};
 
@@ -351,7 +313,34 @@
 				>
 					<div class="flex items-center line-clamp-1">{$i18n.t('PDF document (.pdf)')}</div>
 				</button>
+
+				<button
+					draggable="false"
+					class="flex gap-2 items-center px-3 py-1.5 text-sm cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-xl select-none w-full"
+					on:click={() => {
+						downloadDocx();
+					}}
+				>
+					<div class="flex items-center line-clamp-1">{$i18n.t('Word document (.docx)')}</div>
+				</button>
 			</DropdownSub>
+
+			<button
+				draggable="false"
+				class="flex gap-2 items-center px-3 py-1.5 text-sm cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-xl w-full"
+				on:click={async () => {
+					const chatData = await getChatById(localStorage.token, chatId);
+					if (!chatData) return;
+					const res = await copyFormattedChat(chatData);
+					if (res) {
+						toast.success($i18n.t('Copied to clipboard'));
+						show = false;
+					}
+				}}
+			>
+				<Clipboard className="size-4" strokeWidth="1.5" />
+				<div class="flex items-center">{$i18n.t('Copy')}</div>
+			</button>
 
 			<button
 				draggable="false"
