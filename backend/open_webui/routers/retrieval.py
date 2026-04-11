@@ -1428,7 +1428,7 @@ def save_docs_to_vector_db(
 
         return ', '.join(docs_info)
 
-    log.debug(f'save_docs_to_vector_db: document {_get_docs_info(docs)} {collection_name}')
+    log.debug(f'save_docs_to_vector_db: {len(docs)} docs to {collection_name}')
 
     # Check if entries with the same hash (metadata.hash) already exist
     if metadata and 'hash' in metadata:
@@ -1802,7 +1802,7 @@ def process_file(
 
                     if use_external_pipeline:
                         # Try external pipeline first (default behavior)
-                        log.info(f'Attempting to use external pipeline for file: {file.filename}')
+                        log.info('Attempting to use external pipeline for file')
 
                         try:
                             # Process file with external pipeline
@@ -1819,10 +1819,7 @@ def process_file(
                             )
                         except Exception as e:
                             # External pipeline failed - fall back to internal pipeline with warning
-                            log.warning(
-                                f'External pipeline failed for file {file.filename}: {e}. '
-                                f'Falling back to internal pipeline.'
-                            )
+                            log.warning(f'External pipeline failed for file: {e}. Falling back to internal pipeline.')
                             log.warning(
                                 f'To disable external pipeline, set EXTERNAL_PIPELINE_URL to empty string. '
                                 f"To fix external pipeline, ensure it's running at {external_pipeline_url} and accessible."
@@ -1832,7 +1829,7 @@ def process_file(
 
                     # Use internal pipeline if external is disabled or failed
                     if not use_external_pipeline:
-                        log.info(f'Using internal pipeline for file: {file.filename}')
+                        log.info('Using internal pipeline for file')
                         # Internal pipeline: parsing, chunking, embedding
                         # Reuse the loader created above
                         docs = loader.load(file.filename, file.meta.get('content_type'), file_path)
@@ -1865,7 +1862,7 @@ def process_file(
                     ]
                 text_content = ' '.join([doc.page_content for doc in docs])
 
-            log.debug(f'text_content: {text_content}')
+            log.debug(f'text_content length: {len(text_content)}')
             Files.update_file_data_by_id(
                 file.id,
                 {'content': text_content},
@@ -1894,8 +1891,7 @@ def process_file(
                         # File has no extractable text (e.g. image-only PDF).
                         # Still add it to the KB for bookkeeping, but skip embedding.
                         log.warning(
-                            f'No text content extracted from {file.filename}, '
-                            f'skipping embedding but adding to knowledge base'
+                            'No text content extracted from file, skipping embedding but adding to knowledge base'
                         )
                         with get_db() as session:
                             Files.update_file_metadata_by_id(
@@ -2012,7 +2008,7 @@ async def process_text(
         )
     ]
     text_content = form_data.content
-    log.debug(f'text_content: {text_content}')
+    log.debug(f'text_content length: {len(text_content)}')
 
     result = await run_in_threadpool(save_docs_to_vector_db, request, docs, collection_name, user=user)
     if result:
@@ -2039,7 +2035,7 @@ async def process_web(
 ):
     try:
         content, docs = await run_in_threadpool(get_content_from_url, request, form_data.url)
-        log.debug(f'text_content: {content}')
+        log.debug(f'text_content length: {len(content) if content else 0}')
 
         if process:
             collection_name = form_data.collection_name
@@ -2453,7 +2449,7 @@ async def process_web_search(request: Request, form_data: SearchForm, user=Depen
                         urls.append(item.link)
 
         urls = list(dict.fromkeys(urls))
-        log.debug(f'urls: {urls}')
+        log.debug(f'web search returned {len(urls)} urls')
 
     except Exception as e:
         log.exception(e)

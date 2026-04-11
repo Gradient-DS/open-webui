@@ -168,7 +168,7 @@ class TikaLoader:
             if 'Content-Type' in raw_metadata:
                 headers['Content-Type'] = raw_metadata['Content-Type']
 
-            log.debug('Tika extracted text: %s', text)
+            log.debug('Tika extracted text length: %d', len(text))
 
             return [Document(page_content=text, metadata=headers)]
         else:
@@ -212,7 +212,7 @@ class DoclingLoader:
 
             metadata = {'Content-Type': self.mime_type} if self.mime_type else {}
 
-            log.debug('Docling extracted text: %s', text)
+            log.debug('Docling extracted text length: %d', len(text))
             return [Document(page_content=text, metadata=metadata)]
         else:
             error_msg = f'Error calling Docling API: {r.reason}'
