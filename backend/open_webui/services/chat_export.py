@@ -4,7 +4,7 @@ import logging
 from io import BytesIO
 from pathlib import Path
 
-from jinja2 import Environment, FileSystemLoader
+from jinja2 import Environment, FileSystemLoader, select_autoescape
 
 from open_webui.utils.chat_export import prepare_export_messages
 
@@ -17,7 +17,10 @@ def _render_html(title: str, messages: list[dict]) -> str:
     """Render chat as styled HTML using Jinja2 template."""
     prepared_messages, sources = prepare_export_messages(messages)
 
-    env = Environment(loader=FileSystemLoader(str(TEMPLATE_DIR)))
+    env = Environment(
+        loader=FileSystemLoader(str(TEMPLATE_DIR)),
+        autoescape=select_autoescape(default_for_string=True, default=True),
+    )
     template = env.get_template('chat_export.html')
 
     return template.render(
