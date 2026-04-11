@@ -308,6 +308,10 @@ async def get_all_models(request, refresh: bool = False, user: UserModel = None)
                     # Merge capabilities: defaults as base, per-model overrides win
                     existing = meta.get('capabilities') or {}
                     meta['capabilities'] = {**value, **existing}
+                elif key == 'data_warnings':
+                    # Merge data_warnings: defaults as base, per-model overrides win
+                    existing = meta.get('data_warnings') or {}
+                    meta['data_warnings'] = {**value, **existing}
                 elif meta.get(key) is None:
                     meta[key] = copy.deepcopy(value)
 

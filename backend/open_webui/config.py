@@ -1755,6 +1755,16 @@ TWO_FA_GRACE_PERIOD_DAYS = PersistentConfig(
 )
 
 ####################################
+# Data Sovereignty Warnings
+####################################
+
+ENABLE_DATA_WARNINGS = PersistentConfig(
+    'ENABLE_DATA_WARNINGS',
+    'features.enable_data_warnings',
+    os.environ.get('ENABLE_DATA_WARNINGS', 'True').lower() == 'true',
+)
+
+####################################
 # Data Retention TTL
 ####################################
 
@@ -1821,6 +1831,9 @@ FEATURE_TERMINAL_SERVERS = os.environ.get('FEATURE_TERMINAL_SERVERS', 'False').l
 FEATURE_USER_DEMOGRAPHICS = os.environ.get('FEATURE_USER_DEMOGRAPHICS', 'False').lower() == 'true'
 
 FEATURE_BUILTIN_TOOLS = os.environ.get('FEATURE_BUILTIN_TOOLS', 'True').lower() == 'true'
+
+# PDF export: set to True to use old screenshot-based (stylized) PDF export
+USE_STYLIZED_PDF_EXPORT = os.environ.get('USE_STYLIZED_PDF_EXPORT', 'False').lower() == 'true'
 
 # Admin Panel Tab Feature Flags
 FEATURE_ADMIN_EVALUATIONS = os.environ.get('FEATURE_ADMIN_EVALUATIONS', 'True').lower() == 'true'

@@ -417,7 +417,21 @@ export const formatDate = (inputDate) => {
 	}
 };
 
-export const copyToClipboard = async (text, html = null, formatted = false) => {
+export const copyToClipboard = async (text, html = null, formatted = false, sources: any[] = []) => {
+	// If sources provided, normalize citations and build appendix
+	let sourcesAppendixHtml = '';
+	let htmlText = text; // text used for HTML rendering (without plain-text sources)
+	if (sources && sources.length > 0) {
+		const { normalizeCitations, formatSourcesAsMarkdown, formatSourcesAsHtml } = await import('$lib/utils/citations');
+		const { content, sourceList } = normalizeCitations(text, sources);
+		if (sourceList.length > 0) {
+			htmlText = content; // normalized content only — sources go in HTML appendix
+			text = `${content}\n\n${formatSourcesAsMarkdown(sourceList)}`; // plain text gets markdown sources
+			formatted = true;
+			sourcesAppendixHtml = formatSourcesAsHtml(sourceList);
+		}
+	}
+
 	if (formatted) {
 		let styledHtml = '';
 		if (!html) {
@@ -432,7 +446,7 @@ export const copyToClipboard = async (text, html = null, formatted = false) => {
 			marked.use(markedExtension(options));
 			// DEVELOPER NOTE: Go to `$lib/components/chat/Messages/Markdown.svelte` to add extra markdown extensions for rendering.
 
-			const htmlContent = marked.parse(text);
+			const htmlContent = marked.parse(sourcesAppendixHtml ? htmlText : text);
 
 			// Add basic styling to make the content look better when pasted
 			styledHtml = `
@@ -481,6 +495,7 @@ export const copyToClipboard = async (text, html = null, formatted = false) => {
 					}
 				</style>
 				${htmlContent}
+				${sourcesAppendixHtml}
 			</div>
 		`;
 		} else {

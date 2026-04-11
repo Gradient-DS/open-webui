@@ -217,6 +217,9 @@ openWebui:
     featureToolServers: "False"
     featureTerminalServers: "False"
 
+    # PDF export
+    useStylizedPdfExport: "False"  # Set to "True" to use old screenshot-based PDF export
+
     # Memories
     enableMemories: "true"
 
@@ -402,6 +405,9 @@ openWebui:
     knowledgeRetentionTtlDays: "0"        # 0 = inherit from master TTL
     dataRetentionWarningDays: "30"        # Days before TTL to flag as approaching deletion
     enableRetentionWarningEmail: "false"  # Send warning emails via Graph API before deletion
+
+    # Data Sovereignty Warnings
+    enableDataWarnings: "True"
 
     # Storage Provider
     # Set to "s3" to use S3-compatible object storage for file uploads

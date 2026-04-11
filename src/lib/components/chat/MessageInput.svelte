@@ -92,7 +92,7 @@
 	import Link from '../icons/Link.svelte';
 	import Camera from '../icons/Camera.svelte';
 	import Clip from '../icons/Clip.svelte';
-	import Database from '../icons/Database.svelte';
+	import FolderOpen from '../icons/FolderOpen.svelte';
 	import ClockRotateRight from '../icons/ClockRotateRight.svelte';
 	import GoogleDrive from '../icons/GoogleDrive.svelte';
 	import OneDrive from '../icons/OneDrive.svelte';
@@ -539,17 +539,37 @@
 	let inputMenuRef;
 
 	const googleDriveHandler = async () => {
+		let tempItemId: string | null = null;
 		try {
-			const fileData = await createPicker();
+			const fileData = await createPicker({
+				onFileSelected: ({ name }) => {
+					tempItemId = uuidv4();
+					files = [...files, {
+						type: 'file',
+						file: '',
+						id: null,
+						url: '',
+						name,
+						collection_name: '',
+						status: 'uploading',
+						size: 0,
+						error: '',
+						itemId: tempItemId
+					}];
+				}
+			});
 			if (fileData) {
 				const file = new File([fileData.blob], fileData.name, {
 					type: fileData.blob.type
 				});
-				await uploadFileHandler(file);
-			} else {
-				console.log('No file was selected from Google Drive');
+				await uploadFileHandler(file, true, {}, tempItemId);
+			} else if (tempItemId) {
+				files = files.filter((f) => f.itemId !== tempItemId);
 			}
 		} catch (error) {
+			if (tempItemId) {
+				files = files.filter((f) => f.itemId !== tempItemId);
+			}
 			console.error('Google Drive Error:', error);
 			toast.error(
 				$i18n.t('Error accessing Google Drive: {{error}}', {
@@ -560,19 +580,57 @@
 	};
 
 	const oneDriveHandler = async (authorityType) => {
+		const tempItemIds: string[] = [];
 		try {
-			const filesData = await pickAndDownloadFilesModal(authorityType);
+			const filesData = await pickAndDownloadFilesModal(authorityType, {
+				onFilesSelected: (items) => {
+					for (const item of items) {
+						const tempItemId = uuidv4();
+						tempItemIds.push(tempItemId);
+						files = [...files, {
+							type: 'file',
+							file: '',
+							id: null,
+							url: '',
+							name: item.name,
+							collection_name: '',
+							status: 'uploading',
+							size: 0,
+							error: '',
+							itemId: tempItemId
+						}];
+					}
+				}
+			});
 			if (filesData.length > 0) {
-				for (const fileData of filesData) {
+				for (let i = 0; i < filesData.length; i++) {
+					const fileData = filesData[i];
 					const file = new File([fileData.blob], fileData.name, {
 						type: fileData.blob.type || 'application/octet-stream'
 					});
-					await uploadFileHandler(file);
+					// Match placeholder by name since download order may differ
+					const matchingItemId = tempItemIds.find((id) => {
+						const item = files.find((f) => f.itemId === id);
+						return item && item.name === fileData.name;
+					});
+					await uploadFileHandler(file, true, {}, matchingItemId || null);
 				}
-			} else {
-				console.log('No files were selected from OneDrive');
+				// Clean up any placeholders for files that failed to download
+				const downloadedNames = new Set(filesData.map((f) => f.name));
+				files = files.filter((f) => {
+					if (tempItemIds.includes(f.itemId) && !downloadedNames.has(f.name)) {
+						return false;
+					}
+					return true;
+				});
+			} else if (tempItemIds.length > 0) {
+				// All downloads failed
+				files = files.filter((f) => !tempItemIds.includes(f.itemId));
 			}
 		} catch (error) {
+			if (tempItemIds.length > 0) {
+				files = files.filter((f) => !tempItemIds.includes(f.itemId));
+			}
 			console.error('OneDrive Error:', error);
 		}
 	};
@@ -623,38 +681,61 @@
 		}
 	};
 
-	const uploadFileHandler = async (file, process = true, itemData = {}) => {
+	const uploadFileHandler = async (file, process = true, itemData = {}, existingItemId = null) => {
 		if ($_user?.role !== 'admin' && !($_user?.permissions?.chat?.file_upload ?? true)) {
 			toast.error($i18n.t('You do not have permission to upload files.'));
+			if (existingItemId) {
+				files = files.filter((item) => item?.itemId !== existingItemId);
+			}
 			return null;
 		}
 
 		if (fileUploadCapableModels.length !== selectedModels.length) {
 			toast.error($i18n.t('Model(s) do not support file upload'));
+			if (existingItemId) {
+				files = files.filter((item) => item?.itemId !== existingItemId);
+			}
 			return null;
 		}
 
-		const tempItemId = uuidv4();
-		const fileItem = {
-			type: 'file',
-			file: '',
-			id: null,
-			url: '',
-			name: file.name,
-			collection_name: '',
-			status: 'uploading',
-			size: file.size,
-			error: '',
-			itemId: tempItemId,
-			...itemData
-		};
+		let tempItemId;
+		let fileItem;
 
-		if (fileItem.size == 0) {
-			toast.error($i18n.t('You cannot upload an empty file.'));
-			return null;
+		if (existingItemId) {
+			// Reuse existing placeholder (created by cloud file picker)
+			const idx = files.findIndex((f) => f.itemId === existingItemId);
+			if (idx !== -1) {
+				tempItemId = existingItemId;
+				fileItem = files[idx];
+				fileItem.size = file.size;
+				files = files; // trigger reactivity
+			}
 		}
 
-		files = [...files, fileItem];
+		if (!fileItem) {
+			// Create new placeholder (original behavior)
+			tempItemId = uuidv4();
+			fileItem = {
+				type: 'file',
+				file: '',
+				id: null,
+				url: '',
+				name: file.name,
+				collection_name: '',
+				status: 'uploading',
+				size: file.size,
+				error: '',
+				itemId: tempItemId,
+				...itemData
+			};
+
+			if (fileItem.size == 0) {
+				toast.error($i18n.t('You cannot upload an empty file.'));
+				return null;
+			}
+
+			files = [...files, fileItem];
+		}
 
 		if (!$temporaryChatEnabled) {
 			try {
@@ -1748,7 +1829,7 @@
 													type="button"
 													on:click={() => inputMenuRef?.openTab('knowledge')}
 												>
-													<Database className="size-4" />
+													<FolderOpen className="size-4" />
 												</button>
 											</Tooltip>
 										{:else if itemId === 'reference_chats'}

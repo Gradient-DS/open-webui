@@ -1741,6 +1741,8 @@ export interface ModelMeta {
 	description?: string;
 	capabilities?: object;
 	profile_image_url?: string;
+	data_warnings?: Record<string, boolean>;
+	data_warning_message?: string;
 }
 
 export interface ModelParams {}

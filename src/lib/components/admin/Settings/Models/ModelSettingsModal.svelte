@@ -29,6 +29,7 @@
 	import Capabilities from '$lib/components/workspace/Models/Capabilities.svelte';
 	import DefaultFeatures from '$lib/components/workspace/Models/DefaultFeatures.svelte';
 	import BuiltinTools from '$lib/components/workspace/Models/BuiltinTools.svelte';
+	import DataWarnings from '$lib/components/workspace/Models/DataWarnings.svelte';
 	import PromptSuggestions from '$lib/components/workspace/Models/PromptSuggestions.svelte';
 
 	import AdjustmentsHorizontal from '$lib/components/icons/AdjustmentsHorizontal.svelte';
@@ -62,6 +63,8 @@
 	let defaultFeatureIds = [];
 	let defaultParams = {};
 	let builtinTools = {};
+	let defaultDataWarnings = {};
+	let defaultWarningMessage = '';
 	let promptSuggestions = [];
 
 	$: if (show) {
@@ -103,6 +106,8 @@
 			defaultCapabilities = savedMeta.capabilities ?? getDefaultCapabilities();
 			defaultFeatureIds = savedMeta.defaultFeatureIds ?? [];
 			builtinTools = savedMeta.builtinTools ?? {};
+			defaultDataWarnings = savedMeta.data_warnings ?? {};
+			defaultWarningMessage = savedMeta.data_warning_message ?? '';
 		} else {
 			defaultCapabilities = getDefaultCapabilities();
 			defaultFeatureIds = [];
@@ -118,7 +123,11 @@
 		const metadata = {
 			capabilities: defaultCapabilities,
 			...(defaultFeatureIds.length > 0 ? { defaultFeatureIds } : {}),
-			...(Object.keys(builtinTools).length > 0 ? { builtinTools } : {})
+			...(Object.keys(builtinTools).length > 0 ? { builtinTools } : {}),
+			...(Object.values(defaultDataWarnings).some((v) => v) ? {
+				data_warnings: defaultDataWarnings,
+				data_warning_message: defaultWarningMessage || ''
+			} : {})
 		};
 
 		const res = await setModelsConfig(localStorage.token, {
@@ -337,6 +346,12 @@
 													{#if defaultCapabilities.builtin_tools}
 														<div class="mt-4">
 															<BuiltinTools bind:builtinTools />
+														</div>
+													{/if}
+
+													{#if $_config?.features?.enable_data_warnings}
+														<div class="mt-4">
+															<DataWarnings bind:dataWarnings={defaultDataWarnings} bind:warningMessage={defaultWarningMessage} />
 														</div>
 													{/if}
 												</div>

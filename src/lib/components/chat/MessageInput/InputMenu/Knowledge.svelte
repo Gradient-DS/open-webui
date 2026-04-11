@@ -179,6 +179,7 @@
 						on:click={() => {
 							onSelect({
 								...item,
+								knowledge_type: item.type,
 								type: 'collection'
 							});
 						}}

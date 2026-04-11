@@ -29,7 +29,7 @@ def search_firecrawl(
             )
             for result in results[:count]
         ]
-        log.info(f'External search results: {results}')
+        log.info(f'Firecrawl search returned {len(results)} results')
         return results
     except Exception as e:
         log.error(f'Error in External search: {e}')

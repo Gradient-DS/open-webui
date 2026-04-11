@@ -415,30 +415,21 @@ async def ldap_auth(
         user_groups = []
         if ENABLE_LDAP_GROUP_MANAGEMENT and LDAP_ATTRIBUTE_FOR_GROUPS in entry:
             group_dns = entry[LDAP_ATTRIBUTE_FOR_GROUPS]
-            log.info(f'LDAP raw group DNs for user {username_list}: {group_dns}')
+            log.debug(f'LDAP raw group DNs count: {len(group_dns) if group_dns else 0}')
 
             if group_dns:
-                log.info(f'LDAP group_dns original: {group_dns}')
-                log.info(f'LDAP group_dns type: {type(group_dns)}')
-                log.info(f'LDAP group_dns length: {len(group_dns)}')
-
                 if hasattr(group_dns, 'value'):
                     group_dns = group_dns.value
-                    log.info(f'Extracted .value property: {group_dns}')
                 elif hasattr(group_dns, '__iter__') and not isinstance(group_dns, (str, bytes)):
                     group_dns = list(group_dns)
-                    log.info(f'Converted to list: {group_dns}')
 
                 if isinstance(group_dns, list):
                     group_dns = [str(item) for item in group_dns]
                 else:
                     group_dns = [str(group_dns)]
 
-                log.info(f'LDAP group_dns after processing - type: {type(group_dns)}, length: {len(group_dns)}')
-
                 for group_idx, group_dn in enumerate(group_dns):
                     group_dn = str(group_dn)
-                    log.info(f'Processing group DN #{group_idx + 1}: {group_dn}')
 
                     try:
                         group_cn = None
@@ -453,13 +444,13 @@ async def ldap_auth(
                             user_groups.append(group_cn)
 
                         else:
-                            log.warning(f'Could not extract CN from group DN: {group_dn}')
+                            log.warning('Could not extract CN from a group DN')
                     except Exception as e:
-                        log.warning(f'Failed to extract group name from DN {group_dn}: {e}')
+                        log.warning(f'Failed to extract group name from DN: {e}')
 
-                log.info(f'LDAP groups for user {username_list}: {user_groups} (total: {len(user_groups)})')
+                log.debug(f'LDAP groups resolved: {len(user_groups)} total')
             else:
-                log.info(f'No groups found for user {username_list}')
+                log.debug('No LDAP groups found for user')
         elif ENABLE_LDAP_GROUP_MANAGEMENT:
             log.warning(
                 f'LDAP Group Management enabled but {LDAP_ATTRIBUTE_FOR_GROUPS} attribute not found in user entry'
@@ -512,7 +503,7 @@ async def ldap_auth(
                         Groups.create_groups_by_group_names(user.id, user_groups, db=db)
                     try:
                         Groups.sync_groups_by_group_names(user.id, user_groups, db=db)
-                        log.info(f'Successfully synced groups for user {user.id}: {user_groups}')
+                        log.info(f'Successfully synced {len(user_groups)} groups for user')
                     except Exception as e:
                         log.error(f'Failed to sync groups for user {user.id}: {e}')
 
@@ -923,7 +914,7 @@ async def get_admin_details(request: Request, user=Depends(get_current_user), db
         admin_email = request.app.state.config.ADMIN_EMAIL
         admin_name = None
 
-        log.info(f'Admin details - Email: {admin_email}, Name: {admin_name}')
+        log.info('Admin details requested')
 
         if admin_email:
             admin = Users.get_user_by_email(admin_email, db=db)

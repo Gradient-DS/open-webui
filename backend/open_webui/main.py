@@ -104,6 +104,7 @@ from open_webui.routers import (
     onedrive_sync,
     google_drive_sync,
     invites,
+    data_warnings,
     terminals,
 )
 
@@ -383,6 +384,8 @@ from open_webui.config import (
     ENABLE_2FA,
     REQUIRE_2FA,
     TWO_FA_GRACE_PERIOD_DAYS,
+    # Data Sovereignty Warnings
+    ENABLE_DATA_WARNINGS,
     # Data Retention TTL
     DATA_RETENTION_TTL_DAYS,
     USER_INACTIVITY_TTL_DAYS,
@@ -530,6 +533,7 @@ from open_webui.config import (
     FEATURE_TERMINAL_SERVERS,
     FEATURE_USER_DEMOGRAPHICS,
     FEATURE_BUILTIN_TOOLS,
+    USE_STYLIZED_PDF_EXPORT,
     FEATURE_ADMIN_EVALUATIONS,
     FEATURE_ADMIN_FUNCTIONS,
     FEATURE_ADMIN_SETTINGS,
@@ -1343,6 +1347,8 @@ app.state.config.ENABLE_2FA = ENABLE_2FA
 app.state.config.REQUIRE_2FA = REQUIRE_2FA
 app.state.config.TWO_FA_GRACE_PERIOD_DAYS = TWO_FA_GRACE_PERIOD_DAYS
 
+app.state.config.ENABLE_DATA_WARNINGS = ENABLE_DATA_WARNINGS
+
 ########################################
 #
 # DATA RETENTION TTL
@@ -1850,6 +1856,7 @@ if app.state.config.ENABLE_GOOGLE_DRIVE_SYNC:
 
 # Invites API (always mounted - Copy Link works without Graph API)
 app.include_router(invites.router, prefix='/api/v1/invites', tags=['invites'])
+app.include_router(data_warnings.router, prefix='/api/v1/data-warnings', tags=['data-warnings'])
 
 
 try:
@@ -2456,6 +2463,7 @@ async def get_app_config(request: Request):
                     'feature_terminal_servers': FEATURE_TERMINAL_SERVERS,
                     'feature_user_demographics': FEATURE_USER_DEMOGRAPHICS,
                     'feature_builtin_tools': FEATURE_BUILTIN_TOOLS,
+                    'use_stylized_pdf_export': USE_STYLIZED_PDF_EXPORT,
                     'enable_google_drive_integration': app.state.config.ENABLE_GOOGLE_DRIVE_INTEGRATION,
                     **(
                         {
@@ -2479,6 +2487,7 @@ async def get_app_config(request: Request):
                     'enable_agent_proxy': app.state.config.ENABLE_AGENT_PROXY,
                     'require_2fa': app.state.config.REQUIRE_2FA,
                     'two_fa_grace_period_days': app.state.config.TWO_FA_GRACE_PERIOD_DAYS,
+                    'enable_data_warnings': app.state.config.ENABLE_DATA_WARNINGS,
                     'data_retention_ttl_days': app.state.config.DATA_RETENTION_TTL_DAYS,
                 }
                 if user is not None

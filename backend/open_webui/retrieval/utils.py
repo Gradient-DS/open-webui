@@ -154,7 +154,7 @@ def query_doc(collection_name: str, query_embedding: list[float], k: int, user: 
         )
 
         if result:
-            log.info(f'query_doc:result {result.ids} {result.metadatas}')
+            log.info(f'query_doc:result count={len(result.ids[0]) if result.ids else 0}')
 
         return result
     except Exception as e:
@@ -168,7 +168,7 @@ def get_doc(collection_name: str, user: UserModel = None):
         result = VECTOR_DB_CLIENT.get(collection_name=collection_name)
 
         if result:
-            log.info(f'query_doc:result {result.ids} {result.metadatas}')
+            log.info(f'get_doc:result count={len(result.ids[0]) if result.ids else 0}')
 
         return result
     except Exception as e:
@@ -316,7 +316,9 @@ async def query_doc_with_hybrid_search(
             'metadatas': [metadatas],
         }
 
-        log.info('query_doc_with_hybrid_search:result ' + f'{result["metadatas"]} {result["distances"]}')
+        log.info(
+            f'query_doc_with_hybrid_search:result count={len(result["documents"][0]) if result["documents"] else 0}'
+        )
         return result
     except Exception as e:
         log.exception(f'Error querying doc {collection_name} with hybrid search: {e}')
@@ -937,7 +939,7 @@ async def get_sources_from_items(
     full_context=False,
     user: Optional[UserModel] = None,
 ):
-    log.debug(f'items: {items} {queries} {embedding_function} {reranking_function} {full_context}')
+    log.debug(f'query_collection: items={len(items)} queries={len(queries)} full_context={full_context}')
 
     extracted_collections = []
     query_results = []

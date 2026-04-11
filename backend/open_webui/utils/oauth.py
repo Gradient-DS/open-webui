@@ -869,7 +869,7 @@ class OAuthClientManager:
             if token and not token.get('access_token'):
                 error_desc = token.get('error_description', token.get('error', 'Unknown error'))
                 error_message = f'Token exchange failed: {error_desc}'
-                log.error(f'Invalid token response for client_id {client_id}: {token}')
+                log.error(f'Invalid token response for client_id {client_id}: {error_desc}')
                 token = None
 
             if token:
@@ -1415,7 +1415,7 @@ class OAuthManager:
             if provider == 'feishu' and isinstance(user_data, dict) and 'data' in user_data:
                 user_data = user_data['data']
             if not user_data:
-                log.warning(f'OAuth callback failed, user data is missing: {token}')
+                log.warning('OAuth callback failed, user data is missing')
                 raise HTTPException(400, detail=ERROR_MESSAGES.INVALID_CRED)
 
             # Extract the "sub" claim, using custom claim if configured
@@ -1425,7 +1425,7 @@ class OAuthManager:
                 # Fallback to the default sub claim if not configured
                 sub = user_data.get(OAUTH_PROVIDERS[provider].get('sub_claim', 'sub'))
             if not sub:
-                log.warning(f'OAuth callback failed, sub is missing: {user_data}')
+                log.warning('OAuth callback failed, sub is missing')
                 raise HTTPException(400, detail=ERROR_MESSAGES.INVALID_CRED)
 
             oauth_data = {}
@@ -1470,7 +1470,7 @@ class OAuthManager:
                 elif ENABLE_OAUTH_EMAIL_FALLBACK:
                     email = f'{provider}@{sub}.local'
                 else:
-                    log.warning(f'OAuth callback failed, email is missing: {user_data}')
+                    log.warning('OAuth callback failed, email is missing')
                     raise HTTPException(400, detail=ERROR_MESSAGES.INVALID_CRED)
 
             email = email.lower()
@@ -1479,7 +1479,7 @@ class OAuthManager:
                 '*' not in auth_manager_config.OAUTH_ALLOWED_DOMAINS
                 and email.split('@')[-1] not in auth_manager_config.OAUTH_ALLOWED_DOMAINS
             ):
-                log.warning(f'OAuth callback failed, e-mail domain is not in the list of allowed domains: {user_data}')
+                log.warning('OAuth callback failed, e-mail domain is not in the list of allowed domains')
                 raise HTTPException(400, detail=ERROR_MESSAGES.INVALID_CRED)
 
             # Check if the user exists
@@ -1508,7 +1508,7 @@ class OAuthManager:
                         if new_name and new_name != user.name:
                             Users.update_user_by_id(user.id, {'name': new_name}, db=db)
                             user.name = new_name
-                            log.debug(f'Updated name for user {user.email}')
+                            log.debug(f'Updated name for user {user.id}')
 
                 if auth_manager_config.OAUTH_UPDATE_EMAIL_ON_LOGIN:
                     email_claim = auth_manager_config.OAUTH_EMAIL_CLAIM
@@ -1517,9 +1517,7 @@ class OAuthManager:
                         if new_email and new_email.lower() != user.email.lower():
                             existing_user = Users.get_user_by_email(new_email, db=db)
                             if existing_user:
-                                log.error(
-                                    f'Cannot update email to {new_email} for user {user.id} because it is already taken.'
-                                )
+                                log.error(f'Cannot update email for user {user.id} because it is already taken.')
                             else:
                                 Auths.update_email_by_id(user.id, new_email.lower(), db=db)
                                 user.email = new_email.lower()
@@ -1538,7 +1536,7 @@ class OAuthManager:
                         )
                         if processed_picture_url != user.profile_image_url:
                             Users.update_user_profile_image_url_by_id(user.id, processed_picture_url, db=db)
-                            log.debug(f'Updated profile picture for user {user.email}')
+                            log.debug(f'Updated profile picture for user {user.id}')
             else:
                 # If the user does not exist, check if signups are enabled
                 if auth_manager_config.ENABLE_OAUTH_SIGNUP:

@@ -130,6 +130,9 @@ data:
   FEATURE_TOOL_SERVERS: {{ .Values.openWebui.config.featureToolServers | quote }}
   FEATURE_TERMINAL_SERVERS: {{ .Values.openWebui.config.featureTerminalServers | quote }}
 
+  # PDF export
+  USE_STYLIZED_PDF_EXPORT: {{ .Values.openWebui.config.useStylizedPdfExport | quote }}
+
   # Memories
   ENABLE_MEMORIES: {{ .Values.openWebui.config.enableMemories | quote }}
 
@@ -396,4 +399,7 @@ data:
   KNOWLEDGE_RETENTION_TTL_DAYS: {{ .Values.openWebui.config.knowledgeRetentionTtlDays | default "0" | quote }}
   DATA_RETENTION_WARNING_DAYS: {{ .Values.openWebui.config.dataRetentionWarningDays | default "30" | quote }}
   ENABLE_RETENTION_WARNING_EMAIL: {{ .Values.openWebui.config.enableRetentionWarningEmail | default "false" | quote }}
+
+  # Data Sovereignty Warnings
+  ENABLE_DATA_WARNINGS: {{ .Values.openWebui.config.enableDataWarnings | default "true" | quote }}
 {{- end }}
