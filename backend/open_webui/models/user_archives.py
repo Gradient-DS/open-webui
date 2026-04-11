@@ -16,7 +16,7 @@ log = logging.getLogger(__name__)
 
 
 class UserArchive(Base):
-    __tablename__ = "user_archive"
+    __tablename__ = 'user_archive'
 
     id = Column(Text, primary_key=True, unique=True)
 
@@ -48,10 +48,10 @@ class UserArchive(Base):
     updated_at = Column(BigInteger, nullable=False)
 
     __table_args__ = (
-        Index("user_archive_user_email_idx", "user_email"),
-        Index("user_archive_user_name_idx", "user_name"),
-        Index("user_archive_expires_at_idx", "expires_at"),
-        Index("user_archive_created_at_idx", "created_at"),
+        Index('user_archive_user_email_idx', 'user_email'),
+        Index('user_archive_user_name_idx', 'user_name'),
+        Index('user_archive_expires_at_idx', 'expires_at'),
+        Index('user_archive_created_at_idx', 'created_at'),
     )
 
 
@@ -78,6 +78,7 @@ class UserArchiveModel(BaseModel):
 
 class UserArchiveSummaryModel(BaseModel):
     """Lightweight model for list views (excludes large data field)"""
+
     model_config = ConfigDict(from_attributes=True)
 
     id: str
@@ -158,7 +159,7 @@ class UserArchiveTable:
                 db.refresh(archive)
                 return UserArchiveModel.model_validate(archive)
             except Exception as e:
-                log.exception(f"Error creating user archive: {e}")
+                log.exception(f'Error creating user archive: {e}')
                 return None
 
     def get_archive_by_id(self, archive_id: str) -> Optional[UserArchiveModel]:
@@ -178,10 +179,9 @@ class UserArchiveTable:
             query = db.query(UserArchive)
 
             if search:
-                search_term = f"%{search}%"
+                search_term = f'%{search}%'
                 query = query.filter(
-                    (UserArchive.user_email.ilike(search_term)) |
-                    (UserArchive.user_name.ilike(search_term))
+                    (UserArchive.user_email.ilike(search_term)) | (UserArchive.user_name.ilike(search_term))
                 )
 
             archives = query.order_by(UserArchive.created_at.desc()).offset(skip).limit(limit).all()
@@ -191,17 +191,19 @@ class UserArchiveTable:
         """Get archives past their retention period (for cleanup job)"""
         with get_db() as db:
             now = int(time.time())
-            archives = db.query(UserArchive).filter(
-                UserArchive.never_delete == False,
-                UserArchive.restored == False,
-                UserArchive.expires_at.isnot(None),
-                UserArchive.expires_at < now,
-            ).all()
+            archives = (
+                db.query(UserArchive)
+                .filter(
+                    UserArchive.never_delete == False,
+                    UserArchive.restored == False,
+                    UserArchive.expires_at.isnot(None),
+                    UserArchive.expires_at < now,
+                )
+                .all()
+            )
             return [UserArchiveModel.model_validate(a) for a in archives]
 
-    def update_archive(
-        self, archive_id: str, form_data: UpdateArchiveForm
-    ) -> Optional[UserArchiveModel]:
+    def update_archive(self, archive_id: str, form_data: UpdateArchiveForm) -> Optional[UserArchiveModel]:
         with get_db() as db:
             archive = db.query(UserArchive).filter_by(id=archive_id).first()
             if not archive:

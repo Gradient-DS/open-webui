@@ -22,47 +22,59 @@ from open_webui.config import (
     FEATURE_KNOWLEDGE,
     FEATURE_PROMPTS,
     FEATURE_TOOLS,
+    FEATURE_SKILLS,
     FEATURE_ADMIN_EVALUATIONS,
     FEATURE_ADMIN_FUNCTIONS,
     FEATURE_ADMIN_SETTINGS,
+    FEATURE_TOOL_SERVERS,
+    FEATURE_TERMINAL_SERVERS,
+    FEATURE_BUILTIN_TOOLS,
 )
 
 Feature = Literal[
-    "chat_controls",
-    "capture",
-    "artifacts",
-    "playground",
-    "chat_overview",
-    "notes_ai_controls",
-    "voice",
-    "changelog",
-    "system_prompt",
-    "models",
-    "knowledge",
-    "prompts",
-    "tools",
-    "admin_evaluations",
-    "admin_functions",
-    "admin_settings",
+    'chat_controls',
+    'capture',
+    'artifacts',
+    'playground',
+    'chat_overview',
+    'notes_ai_controls',
+    'voice',
+    'changelog',
+    'system_prompt',
+    'models',
+    'knowledge',
+    'prompts',
+    'tools',
+    'skills',
+    'admin_evaluations',
+    'admin_functions',
+    'admin_settings',
+    'tool_servers',
+    'terminal_servers',
+    'builtin_tools',
 ]
 
 FEATURE_FLAGS: dict[Feature, bool] = {
-    "chat_controls": FEATURE_CHAT_CONTROLS,
-    "capture": FEATURE_CAPTURE,
-    "artifacts": FEATURE_ARTIFACTS,
-    "playground": FEATURE_PLAYGROUND,
-    "chat_overview": FEATURE_CHAT_OVERVIEW,
-    "notes_ai_controls": FEATURE_NOTES_AI_CONTROLS,
-    "voice": FEATURE_VOICE,
-    "changelog": FEATURE_CHANGELOG,
-    "system_prompt": FEATURE_SYSTEM_PROMPT,
-    "models": FEATURE_MODELS,
-    "knowledge": FEATURE_KNOWLEDGE,
-    "prompts": FEATURE_PROMPTS,
-    "tools": FEATURE_TOOLS,
-    "admin_evaluations": FEATURE_ADMIN_EVALUATIONS,
-    "admin_functions": FEATURE_ADMIN_FUNCTIONS,
-    "admin_settings": FEATURE_ADMIN_SETTINGS,
+    'chat_controls': FEATURE_CHAT_CONTROLS,
+    'capture': FEATURE_CAPTURE,
+    'artifacts': FEATURE_ARTIFACTS,
+    'playground': FEATURE_PLAYGROUND,
+    'chat_overview': FEATURE_CHAT_OVERVIEW,
+    'notes_ai_controls': FEATURE_NOTES_AI_CONTROLS,
+    'voice': FEATURE_VOICE,
+    'changelog': FEATURE_CHANGELOG,
+    'system_prompt': FEATURE_SYSTEM_PROMPT,
+    'models': FEATURE_MODELS,
+    'knowledge': FEATURE_KNOWLEDGE,
+    'prompts': FEATURE_PROMPTS,
+    'tools': FEATURE_TOOLS,
+    'skills': FEATURE_SKILLS,
+    'admin_evaluations': FEATURE_ADMIN_EVALUATIONS,
+    'admin_functions': FEATURE_ADMIN_FUNCTIONS,
+    'admin_settings': FEATURE_ADMIN_SETTINGS,
+    'tool_servers': FEATURE_TOOL_SERVERS,
+    'terminal_servers': FEATURE_TERMINAL_SERVERS,
+    'builtin_tools': FEATURE_BUILTIN_TOOLS,
 }
 
 
@@ -97,11 +109,13 @@ def require_feature(feature: Feature):
     Returns:
         A dependency function that raises HTTPException if feature is disabled
     """
+
     def check_feature():
         if not is_feature_enabled(feature):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
-                detail=f"Feature '{feature}' is not available in your plan"
+                detail=f"Feature '{feature}' is not available in your plan",
             )
         return True
+
     return check_feature

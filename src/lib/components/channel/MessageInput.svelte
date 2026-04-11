@@ -2,7 +2,7 @@
 	import { toast } from 'svelte-sonner';
 	import { v4 as uuidv4 } from 'uuid';
 
-	import { tick, getContext, onMount, onDestroy } from 'svelte';
+	import { tick, getContext, onMount } from 'svelte';
 
 	const i18n = getContext('i18n');
 
@@ -127,7 +127,7 @@
 				}
 			}
 
-			text = text.replaceAll('{{CLIPBOARD}}', clipboardText);
+			text = text.replaceAll('{{CLIPBOARD}}', clipboardText.replaceAll('\r\n', '\n'));
 		}
 
 		if (text.includes('{{USER_LOCATION}}')) {
@@ -146,6 +146,14 @@
 		if (text.includes('{{USER_NAME}}')) {
 			const name = sessionUser?.name || 'User';
 			text = text.replaceAll('{{USER_NAME}}', name);
+		}
+
+		if (text.includes('{{USER_EMAIL}}')) {
+			const email = sessionUser?.email || '';
+
+			if (email) {
+				text = text.replaceAll('{{USER_EMAIL}}', email);
+			}
 		}
 
 		if (text.includes('{{USER_BIO}}')) {
@@ -373,7 +381,8 @@
 			if (file['type'].startsWith('image/')) {
 				const compressImageHandler = async (imageUrl, settings = {}, config = {}) => {
 					// Quick shortcut so we don’t do unnecessary work.
-					const settingsCompression = settings?.imageCompression ?? false;
+					const settingsCompression =
+						(settings?.imageCompression && settings?.imageCompressionInChannels) ?? false;
 					const configWidth = config?.file?.image_compression?.width ?? null;
 					const configHeight = config?.file?.image_compression?.height ?? null;
 
@@ -413,9 +422,7 @@
 					let imageUrl = event.target.result;
 
 					// Compress the image if settings or config require it
-					if ($settings?.imageCompression && $settings?.imageCompressionInChannels) {
-						imageUrl = await compressImageHandler(imageUrl, $settings, $config);
-					}
+					imageUrl = await compressImageHandler(imageUrl, $settings, $config);
 
 					const blob = await (await fetch(imageUrl)).blob();
 					const compressedFile = new File([blob], file.name, { type: file.type });
@@ -504,7 +511,7 @@
 		}
 	};
 
-	const onDragOver = (e) => {
+	const onDragOver = (e: DragEvent) => {
 		e.preventDefault();
 
 		// Check if a file is being draggedOver.
@@ -519,7 +526,7 @@
 		draggedOver = false;
 	};
 
-	const onDrop = async (e) => {
+	const onDrop = async (e: DragEvent) => {
 		e.preventDefault();
 
 		if (e.dataTransfer?.files && acceptFiles) {
@@ -561,7 +568,7 @@
 		onChange();
 	}
 
-	onMount(async () => {
+	onMount(() => {
 		suggestions = [
 			{
 				char: '@',
@@ -627,25 +634,33 @@
 		}, 100);
 
 		window.addEventListener('keydown', handleKeyDown);
-		await tick();
 
-		const dropzoneElement = document.getElementById('channel-container');
+		let isDestroyed = false;
+		let dropzoneElement: HTMLElement | null = null;
+		const initialize = async () => {
+			await tick();
+			if (isDestroyed) return;
 
-		dropzoneElement?.addEventListener('dragover', onDragOver);
-		dropzoneElement?.addEventListener('drop', onDrop);
-		dropzoneElement?.addEventListener('dragleave', onDragLeave);
-	});
+			dropzoneElement = document.getElementById('channel-container');
+			if (dropzoneElement) {
+				dropzoneElement.addEventListener('dragover', onDragOver);
+				dropzoneElement.addEventListener('drop', onDrop);
+				dropzoneElement.addEventListener('dragleave', onDragLeave);
+			}
+		};
+		initialize();
 
-	onDestroy(() => {
-		window.removeEventListener('keydown', handleKeyDown);
+		return () => {
+			isDestroyed = true;
 
-		const dropzoneElement = document.getElementById('channel-container');
+			window.removeEventListener('keydown', handleKeyDown);
 
-		if (dropzoneElement) {
-			dropzoneElement?.removeEventListener('dragover', onDragOver);
-			dropzoneElement?.removeEventListener('drop', onDrop);
-			dropzoneElement?.removeEventListener('dragleave', onDragLeave);
-		}
+			if (dropzoneElement) {
+				dropzoneElement.removeEventListener('dragover', onDragOver);
+				dropzoneElement.removeEventListener('drop', onDrop);
+				dropzoneElement.removeEventListener('dragleave', onDragLeave);
+			}
+		};
 	});
 </script>
 
@@ -911,7 +926,11 @@
 														}
 
 														// Submit the content when Enter key is pressed
-														if (content !== '' && e.keyCode === 13 && !e.shiftKey) {
+														if (
+															(content !== '' || files.length > 0) &&
+															e.keyCode === 13 &&
+															!e.shiftKey
+														) {
 															submitHandler();
 														}
 													}

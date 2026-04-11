@@ -1,0 +1,118 @@
+name: E2E Tests
+
+on:
+  pull_request:
+    branches:
+      - test
+      - main
+
+jobs:
+  migration-tests:
+    name: Migration Tests (SQLite + Postgres)
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres
+        env:
+          POSTGRES_PASSWORD: postgres
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v5
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v6
+
+      - name: Install system dependencies
+        run: sudo apt-get update && sudo apt-get install -y libmariadb-dev
+
+      - name: Install dependencies
+        run: |
+          uv venv
+          uv pip install -r backend/requirements.txt
+          uv pip install psycopg2-binary
+
+      - name: Test backend startup with SQLite
+        id: sqlite
+        env:
+          WEBUI_SECRET_KEY: secret-key
+          GLOBAL_LOG_LEVEL: debug
+        run: |
+          source .venv/bin/activate
+          cd backend
+          uvicorn open_webui.main:app --port "8080" --forwarded-allow-ips '*' &
+          UVICORN_PID=$!
+          for i in {1..40}; do
+              curl -s http://localhost:8080/api/config > /dev/null && break
+              sleep 1
+              if [ $i -eq 40 ]; then
+                  echo "Server failed to start"
+                  kill -9 $UVICORN_PID
+                  exit 1
+              fi
+          done
+          sleep 5
+          if ! kill -0 $UVICORN_PID; then
+              echo "Server has stopped"
+              exit 1
+          fi
+          kill $UVICORN_PID || true
+
+      - name: Test backend startup with Postgres
+        if: success() || steps.sqlite.conclusion == 'failure'
+        env:
+          WEBUI_SECRET_KEY: secret-key
+          GLOBAL_LOG_LEVEL: debug
+          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/postgres
+          DATABASE_POOL_SIZE: 10
+          DATABASE_POOL_MAX_OVERFLOW: 10
+          DATABASE_POOL_TIMEOUT: 30
+        run: |
+          source .venv/bin/activate
+          cd backend
+          uvicorn open_webui.main:app --port "8081" --forwarded-allow-ips '*' &
+          UVICORN_PID=$!
+          for i in {1..20}; do
+              curl -s http://localhost:8081/api/config > /dev/null && break
+              sleep 1
+              if [ $i -eq 20 ]; then
+                  echo "Server failed to start"
+                  kill -9 $UVICORN_PID
+                  exit 1
+              fi
+          done
+          sleep 5
+          if ! kill -0 $UVICORN_PID; then
+              echo "Server has stopped"
+              exit 1
+          fi
+
+          # Verify DB reconnection after connection drop
+          status_code=$(curl --write-out %{http_code} -s --output /dev/null http://localhost:8081/health/db)
+          if [[ "$status_code" -ne 200 ]]; then
+            echo "Server failed before postgres reconnect check"
+            exit 1
+          fi
+
+          echo "Terminating all connections to postgres..."
+          python -c "import os, psycopg2 as pg2; \
+            conn = pg2.connect(dsn=os.environ['DATABASE_URL'].replace('+pool', '')); \
+            cur = conn.cursor(); \
+            cur.execute('SELECT pg_terminate_backend(psa.pid) FROM pg_stat_activity psa WHERE datname = current_database() AND pid <> pg_backend_pid();')"
+
+          status_code=$(curl --write-out %{http_code} -s --output /dev/null http://localhost:8081/health/db)
+          if [[ "$status_code" -ne 200 ]]; then
+            echo "Server has not reconnected to postgres: returned status $status_code"
+            exit 1
+          fi

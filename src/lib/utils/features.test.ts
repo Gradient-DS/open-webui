@@ -42,14 +42,14 @@ describe('isFeatureEnabled', () => {
 		expect(isFeatureEnabled('voice')).toBe(true);
 	});
 
-	it('returns true when config is not loaded yet', () => {
+	it('returns false when config is not loaded yet', () => {
 		vi.mocked(get).mockReturnValue(undefined);
-		expect(isFeatureEnabled('voice')).toBe(true);
+		expect(isFeatureEnabled('voice')).toBe(false);
 	});
 
-	it('returns true when features object is undefined', () => {
+	it('returns false when features object is undefined', () => {
 		vi.mocked(get).mockReturnValue({});
-		expect(isFeatureEnabled('voice')).toBe(true);
+		expect(isFeatureEnabled('voice')).toBe(false);
 	});
 });
 

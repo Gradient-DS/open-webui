@@ -15,7 +15,6 @@
 	import { capitalizeFirstLetter, formatFileSize } from '$lib/utils';
 
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
-	import OneDrive from '$lib/components/icons/OneDrive.svelte';
 	import DocumentPage from '$lib/components/icons/DocumentPage.svelte';
 	import Folder from '$lib/components/icons/Folder.svelte';
 	import XMark from '$lib/components/icons/XMark.svelte';
@@ -30,6 +29,7 @@
 	export let selectedFileId: string | null = null;
 
 	export let isSyncing: boolean = false;
+	export let totalFiles: number | null = null;
 
 	export let onClick: (fileId: string) => void = () => {};
 	export let onRemoveSource: (itemId: string, sourceName: string) => void = () => {};
@@ -125,7 +125,7 @@
 	<!-- Folder sources as collapsible sections -->
 	{#each folderSources as source (source.item_id)}
 		{@const tree = folderTrees[source.item_id]}
-		{@const totalFileCount = tree ? countAllFiles(tree) : 0}
+		{@const totalFileCount = (folderSources.length === 1 && totalFiles != null) ? totalFiles : (tree ? countAllFiles(tree) : 0)}
 		<div class="w-full">
 			<!-- Folder header -->
 			<div
@@ -271,21 +271,6 @@
 							{/if}
 						</div>
 
-						{#if file?.meta?.source === 'onedrive'}
-							<Tooltip
-								content={file?.meta?.last_synced_at
-									? $i18n.t('Synced from OneDrive: {{date}}', {
-											date: dayjs(file.meta.last_synced_at * 1000).format(
-												'LLLL'
-											)
-										})
-									: $i18n.t('Synced from OneDrive')}
-							>
-								<div class="flex items-center shrink-0 text-xs text-gray-400">
-									<OneDrive className="size-3.5" />
-								</div>
-							</Tooltip>
-						{/if}
 					</div>
 				</div>
 
@@ -329,7 +314,7 @@
 							class="p-1 rounded-full hover:bg-gray-100 dark:hover:bg-gray-850 transition"
 							type="button"
 							on:click={() => {
-								if (file?.meta?.source === 'onedrive' && file?.meta?.source_item_id) {
+								if ((file?.meta?.source === 'onedrive' || file?.meta?.source === 'google_drive') && file?.meta?.source_item_id) {
 									// OneDrive loose file: remove via source removal
 									onRemoveSource(file.meta.source_item_id, file?.name ?? file?.meta?.name);
 								} else {

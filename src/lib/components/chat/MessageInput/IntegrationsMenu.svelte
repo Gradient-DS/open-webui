@@ -1,14 +1,20 @@
 <script lang="ts">
-	import { DropdownMenu } from 'bits-ui';
 	import { getContext, onMount, tick } from 'svelte';
 	import { fly } from 'svelte/transition';
-	import { flyAndScale } from '$lib/utils/transitions';
 
-	import { config, user, tools as _tools, mobile, settings, toolServers } from '$lib/stores';
-	import { isFeatureEnabled } from '$lib/utils/features';
+	import {
+		config,
+		user,
+		tools as _tools,
+		mobile,
+		settings,
+		toolServers,
+		terminalServers
+	} from '$lib/stores';
 
 	import { getOAuthClientAuthorizationUrl } from '$lib/apis/configs';
 	import { getTools } from '$lib/apis/tools';
+	import { isFeatureEnabled } from '$lib/utils/features';
 
 	import Knobs from '$lib/components/icons/Knobs.svelte';
 	import Dropdown from '$lib/components/common/Dropdown.svelte';
@@ -95,8 +101,8 @@
 
 <Dropdown
 	bind:show
-	on:change={(e) => {
-		if (e.detail === false) {
+	onOpenChange={(state) => {
+		if (state === false) {
 			onClose();
 		}
 	}}
@@ -105,47 +111,42 @@
 		<slot />
 	</Tooltip>
 	<div slot="content">
-		<DropdownMenu.Content
-			class="w-full max-w-70 rounded-2xl px-1 py-1  border border-gray-100  dark:border-gray-800 z-50 bg-white dark:bg-gray-850 dark:text-white shadow-lg max-h-72 overflow-y-auto overflow-x-hidden scrollbar-thin"
-			sideOffset={4}
-			alignOffset={-6}
-			side="bottom"
-			align="start"
-			transition={flyAndScale}
+		<div
+			class="min-w-70 max-w-70 rounded-2xl px-1 py-1 border border-gray-100 dark:border-gray-800 z-50 bg-white dark:bg-gray-850 dark:text-white shadow-lg max-h-72 overflow-y-auto overflow-x-hidden scrollbar-thin"
 		>
 			{#if tab === ''}
 				<div in:fly={{ x: -20, duration: 150 }}>
 					{#if isFeatureEnabled('tools')}
-						{#if tools}
-							{#if Object.keys(tools).length > 0}
-								<button
-									class="flex w-full justify-between gap-2 items-center px-3 py-1.5 text-sm cursor-pointer rounded-xl hover:bg-gray-50 dark:hover:bg-gray-800/50"
-									on:click={() => {
-										tab = 'tools';
-									}}
-								>
-									<Wrench />
+					{#if tools}
+						{#if Object.keys(tools).length > 0}
+							<button
+								class="flex w-full justify-between gap-2 items-center px-3 py-1.5 text-sm cursor-pointer rounded-xl hover:bg-gray-50 dark:hover:bg-gray-800/50"
+								on:click={() => {
+									tab = 'tools';
+								}}
+							>
+								<Wrench />
 
-									<div class="flex items-center w-full justify-between">
-										<div class=" line-clamp-1">
-											{$i18n.t('Tools')}
-											<span class="ml-0.5 text-gray-500">{Object.keys(tools).length}</span>
-										</div>
-
-										<div class="text-gray-500">
-											<ChevronRight />
-										</div>
+								<div class="flex items-center w-full justify-between">
+									<div class=" line-clamp-1">
+										{$i18n.t('Tools')}
+										<span class="ml-0.5 text-gray-500">{Object.keys(tools).length}</span>
 									</div>
-								</button>
-							{/if}
-						{:else}
-							<div class="py-4">
-								<Spinner />
-							</div>
+
+									<div class="text-gray-500">
+										<ChevronRight />
+									</div>
+								</div>
+							</button>
 						{/if}
+					{:else}
+						<div class="py-4">
+							<Spinner />
+						</div>
+					{/if}
 					{/if}
 
-					{#if toggleFilters && toggleFilters.length > 0}
+					{#if isFeatureEnabled('tools') && toggleFilters && toggleFilters.length > 0}
 						{#each toggleFilters.sort( (a, b) => a.name.localeCompare( b.name, undefined, { sensitivity: 'base' } ) ) as filter, filterIdx (filter.id)}
 							<Tooltip content={filter?.description} placement="top-start">
 								<button
@@ -165,7 +166,7 @@
 													<div class="size-4 items-center flex justify-center">
 														<img
 															src={filter.icon}
-															class="size-3.5 {filter.icon.includes('svg')
+															class="size-3.5 {filter.icon.includes('data:image/svg')
 																? 'dark:invert-[80%]'
 																: ''}"
 															style="fill: currentColor;"
@@ -181,7 +182,7 @@
 										</div>
 									</div>
 
-									{#if filter?.has_user_valves}
+									{#if filter?.has_user_valves && ($user?.role === 'admin' || ($user?.permissions?.chat?.valves ?? true))}
 										<div class=" shrink-0">
 											<Tooltip content={$i18n.t('Valves')}>
 												<button
@@ -341,6 +342,9 @@
 									let parts = toolId.split(':');
 									let serverId = parts?.at(-1) ?? toolId;
 
+									// Persist the tool ID so we can re-enable it after OAuth redirect
+									sessionStorage.setItem('pendingOAuthToolId', toolId);
+
 									const authUrl = getOAuthClientAuthorizationUrl(serverId, 'mcp');
 									window.open(authUrl, '_self', 'noopener');
 								} else {
@@ -374,7 +378,7 @@
 								</div>
 							</div>
 
-							{#if tools[toolId]?.has_user_valves}
+							{#if tools[toolId]?.has_user_valves && ($user?.role === 'admin' || ($user?.permissions?.chat?.valves ?? true))}
 								<div class=" shrink-0">
 									<Tooltip content={$i18n.t('Valves')}>
 										<button
@@ -402,6 +406,6 @@
 					{/each}
 				</div>
 			{/if}
-		</DropdownMenu.Content>
+		</div>
 	</div>
 </Dropdown>

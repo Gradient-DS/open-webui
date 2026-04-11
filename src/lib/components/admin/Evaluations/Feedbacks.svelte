@@ -27,21 +27,19 @@
 	import { config } from '$lib/stores';
 	import Spinner from '$lib/components/common/Spinner.svelte';
 
-	let page = 1;
-	let items = null;
-	let total = null;
+	// Message-level feedback state
+	let msgPage = 1;
+	let msgItems = null;
+	let msgTotal = null;
+	let msgOrderBy: string = 'updated_at';
+	let msgDirection: 'asc' | 'desc' = 'desc';
 
-	let orderBy: string = 'updated_at';
-	let direction: 'asc' | 'desc' = 'desc';
-
-	const setSortKey = (key) => {
-		if (orderBy === key) {
-			direction = direction === 'asc' ? 'desc' : 'asc';
-		} else {
-			orderBy = key;
-			direction = 'asc';
-		}
-	};
+	// Conversation-level feedback state
+	let convPage = 1;
+	let convItems = null;
+	let convTotal = null;
+	let convOrderBy: string = 'updated_at';
+	let convDirection: 'asc' | 'desc' = 'desc';
 
 	let showFeedbackModal = false;
 	let selectedFeedback = null;
@@ -56,15 +54,33 @@
 		selectedFeedback = null;
 	};
 
+	const setMsgSortKey = (key) => {
+		if (msgOrderBy === key) {
+			msgDirection = msgDirection === 'asc' ? 'desc' : 'asc';
+		} else {
+			msgOrderBy = key;
+			msgDirection = 'asc';
+		}
+	};
+
+	const setConvSortKey = (key) => {
+		if (convOrderBy === key) {
+			convDirection = convDirection === 'asc' ? 'desc' : 'asc';
+		} else {
+			convOrderBy = key;
+			convDirection = 'asc';
+		}
+	};
+
 	//////////////////////
 	//
 	// CRUD operations
 	//
 	//////////////////////
 
-	const getFeedbacks = async () => {
+	const getMsgFeedbacks = async () => {
 		try {
-			const res = await getFeedbackItems(localStorage.token, orderBy, direction, page).catch(
+			const res = await getFeedbackItems(localStorage.token, msgOrderBy, msgDirection, msgPage, 'message').catch(
 				(error) => {
 					toast.error(`${error}`);
 					return null;
@@ -72,31 +88,60 @@
 			);
 
 			if (res) {
-				items = res.items;
-				total = res.total;
+				msgItems = res.items;
+				msgTotal = res.total;
 			}
 		} catch (err) {
 			console.error(err);
 		}
 	};
 
-	$: if (page) {
-		getFeedbacks();
+	const getConvFeedbacks = async () => {
+		try {
+			const res = await getFeedbackItems(localStorage.token, convOrderBy, convDirection, convPage, 'conversation').catch(
+				(error) => {
+					toast.error(`${error}`);
+					return null;
+				}
+			);
+
+			if (res) {
+				convItems = res.items;
+				convTotal = res.total;
+			}
+		} catch (err) {
+			console.error(err);
+		}
+	};
+
+	$: if (msgPage) {
+		getMsgFeedbacks();
+	}
+	$: if (msgOrderBy && msgDirection) {
+		getMsgFeedbacks();
 	}
 
-	$: if (orderBy && direction) {
-		getFeedbacks();
+	$: if (convPage) {
+		getConvFeedbacks();
+	}
+	$: if (convOrderBy && convDirection) {
+		getConvFeedbacks();
 	}
 
-	const deleteFeedbackHandler = async (feedbackId: string) => {
+	const deleteFeedbackHandler = async (feedbackId: string, scope: string) => {
 		const response = await deleteFeedbackById(localStorage.token, feedbackId).catch((err) => {
 			toast.error(err);
 			return null;
 		});
 		if (response) {
 			toast.success($i18n.t('Feedback deleted successfully'));
-			page = 1;
-			getFeedbacks();
+			if (scope === 'conversation') {
+				convPage = 1;
+				getConvFeedbacks();
+			} else {
+				msgPage = 1;
+				getMsgFeedbacks();
+			}
 		}
 	};
 
@@ -144,11 +189,14 @@
 
 <FeedbackModal bind:show={showFeedbackModal} {selectedFeedback} onClose={closeFeedbackModal} />
 
-{#if items === null || total === null}
+{#if msgItems === null || msgTotal === null}
 	<div class="my-10">
 		<Spinner className="size-5" />
 	</div>
 {:else}
+	<!-- ======================== -->
+	<!-- Message-level Feedback   -->
+	<!-- ======================== -->
 	<div class="mt-0.5 mb-1 gap-1 flex flex-row justify-between">
 		<div class="flex items-center md:self-center text-xl font-medium px-0.5 gap-2 shrink-0">
 			<div>
@@ -156,11 +204,11 @@
 			</div>
 
 			<div class="text-lg font-medium text-gray-500 dark:text-gray-500">
-				{total}
+				{msgTotal}
 			</div>
 		</div>
 
-		{#if total > 0}
+		{#if msgTotal > 0}
 			<div>
 				<Tooltip content={$i18n.t('Export')}>
 					<button
@@ -177,9 +225,9 @@
 	</div>
 
 	<div class="scrollbar-hidden relative whitespace-nowrap overflow-x-auto max-w-full">
-		{#if (items ?? []).length === 0}
+		{#if (msgItems ?? []).length === 0}
 			<div class="text-center text-xs text-gray-500 dark:text-gray-400 py-1">
-				{$i18n.t('No feedbacks found')}
+				{$i18n.t('No feedback found')}
 			</div>
 		{:else}
 			<table
@@ -190,13 +238,13 @@
 						<th
 							scope="col"
 							class="px-2.5 py-2 cursor-pointer select-none w-3"
-							on:click={() => setSortKey('user')}
+							on:click={() => setMsgSortKey('user')}
 						>
 							<div class="flex gap-1.5 items-center justify-end">
 								{$i18n.t('User')}
-								{#if orderBy === 'user'}
+								{#if msgOrderBy === 'user'}
 									<span class="font-normal">
-										{#if direction === 'asc'}
+										{#if msgDirection === 'asc'}
 											<ChevronUp className="size-2" />
 										{:else}
 											<ChevronDown className="size-2" />
@@ -213,13 +261,13 @@
 						<th
 							scope="col"
 							class="px-2.5 py-2 cursor-pointer select-none"
-							on:click={() => setSortKey('model_id')}
+							on:click={() => setMsgSortKey('model_id')}
 						>
 							<div class="flex gap-1.5 items-center">
 								{$i18n.t('Models')}
-								{#if orderBy === 'model_id'}
+								{#if msgOrderBy === 'model_id'}
 									<span class="font-normal">
-										{#if direction === 'asc'}
+										{#if msgDirection === 'asc'}
 											<ChevronUp className="size-2" />
 										{:else}
 											<ChevronDown className="size-2" />
@@ -236,13 +284,13 @@
 						<th
 							scope="col"
 							class="px-2.5 py-2 text-right cursor-pointer select-none w-fit"
-							on:click={() => setSortKey('rating')}
+							on:click={() => setMsgSortKey('rating')}
 						>
 							<div class="flex gap-1.5 items-center justify-end">
 								{$i18n.t('Result')}
-								{#if orderBy === 'rating'}
+								{#if msgOrderBy === 'rating'}
 									<span class="font-normal">
-										{#if direction === 'asc'}
+										{#if msgDirection === 'asc'}
 											<ChevronUp className="size-2" />
 										{:else}
 											<ChevronDown className="size-2" />
@@ -259,13 +307,13 @@
 						<th
 							scope="col"
 							class="px-2.5 py-2 text-right cursor-pointer select-none w-0"
-							on:click={() => setSortKey('updated_at')}
+							on:click={() => setMsgSortKey('updated_at')}
 						>
 							<div class="flex gap-1.5 items-center justify-end">
 								{$i18n.t('Updated At')}
-								{#if orderBy === 'updated_at'}
+								{#if msgOrderBy === 'updated_at'}
 									<span class="font-normal">
-										{#if direction === 'asc'}
+										{#if msgDirection === 'asc'}
 											<ChevronUp className="size-2" />
 										{:else}
 											<ChevronDown className="size-2" />
@@ -283,7 +331,7 @@
 					</tr>
 				</thead>
 				<tbody class="">
-					{#each items as feedback (feedback.id)}
+					{#each msgItems as feedback (feedback.id)}
 						<tr
 							class="bg-white dark:bg-gray-900 dark:border-gray-850 text-xs cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-850/50 transition"
 							on:click={() => openFeedbackModal(feedback)}
@@ -306,14 +354,17 @@
 								<div class="flex flex-col items-start gap-0.5 h-full">
 									<div class="flex flex-col h-full">
 										{#if feedback.data?.sibling_model_ids}
-											<div class="font-medium text-gray-600 dark:text-gray-400 flex-1">
-												{feedback.data?.model_id}
-											</div>
+											<Tooltip content={feedback.data?.model_id} placement="top-start">
+												<div
+													class="font-medium text-gray-600 dark:text-gray-400 flex-1 line-clamp-1"
+												>
+													{feedback.data?.model_id}
+												</div>
+											</Tooltip>
 
 											<Tooltip content={feedback.data.sibling_model_ids.join(', ')}>
 												<div class=" text-[0.65rem] text-gray-600 dark:text-gray-400 line-clamp-1">
 													{#if feedback.data.sibling_model_ids.length > 2}
-														<!-- {$i18n.t('and {{COUNT}} more')} -->
 														{feedback.data.sibling_model_ids.slice(0, 2).join(', ')}, {$i18n.t(
 															'and {{COUNT}} more',
 															{ COUNT: feedback.data.sibling_model_ids.length - 2 }
@@ -324,29 +375,29 @@
 												</div>
 											</Tooltip>
 										{:else}
-											<div
-												class=" text-sm font-medium text-gray-600 dark:text-gray-400 flex-1 py-1.5"
-											>
-												{feedback.data?.model_id}
-											</div>
+											<Tooltip content={feedback.data?.model_id} placement="top-start">
+												<div
+													class="text-sm font-medium text-gray-600 dark:text-gray-400 flex-1 py-1.5 line-clamp-1"
+												>
+													{feedback.data?.model_id}
+												</div>
+											</Tooltip>
 										{/if}
 									</div>
 								</div>
 							</td>
 
-							{#if feedback?.data?.rating}
-								<td class="px-3 py-1 text-right font-medium text-gray-900 dark:text-white w-max">
-									<div class=" flex justify-end">
-										{#if feedback?.data?.rating.toString() === '1'}
-											<Badge type="info" content={$i18n.t('Won')} />
-										{:else if feedback?.data?.rating.toString() === '0'}
-											<Badge type="muted" content={$i18n.t('Draw')} />
-										{:else if feedback?.data?.rating.toString() === '-1'}
-											<Badge type="error" content={$i18n.t('Lost')} />
-										{/if}
-									</div>
-								</td>
-							{/if}
+							<td class="px-3 py-1 text-right font-medium text-gray-900 dark:text-white w-max">
+								<div class=" flex justify-end">
+									{#if feedback?.data?.rating?.toString() === '1'}
+										<Badge type="info" content={$i18n.t('Won')} />
+									{:else if feedback?.data?.rating?.toString() === '0'}
+										<Badge type="muted" content={$i18n.t('Draw')} />
+									{:else if feedback?.data?.rating?.toString() === '-1'}
+										<Badge type="error" content={$i18n.t('Lost')} />
+									{/if}
+								</div>
+							</td>
 
 							<td class=" px-3 py-1 text-right font-medium">
 								{dayjs(feedback.updated_at * 1000).fromNow()}
@@ -355,7 +406,7 @@
 							<td class=" px-3 py-1 text-right font-medium" on:click={(e) => e.stopPropagation()}>
 								<FeedbackMenu
 									on:delete={(e) => {
-										deleteFeedbackHandler(feedback.id);
+										deleteFeedbackHandler(feedback.id, 'message');
 									}}
 								>
 									<button
@@ -372,7 +423,7 @@
 		{/if}
 	</div>
 
-	{#if total > 0 && $config?.features?.enable_community_sharing}
+	{#if msgTotal > 0 && $config?.features?.enable_community_sharing}
 		<div class=" flex flex-col justify-end w-full text-right gap-1">
 			<div class="line-clamp-1 text-gray-500 text-xs">
 				{$i18n.t('Help us create the best community leaderboard by sharing your feedback history!')}
@@ -403,7 +454,176 @@
 		</div>
 	{/if}
 
-	{#if total > 30}
-		<Pagination bind:page count={total} perPage={30} />
+	{#if msgTotal > 30}
+		<Pagination bind:page={msgPage} count={msgTotal} perPage={30} />
+	{/if}
+
+	<!-- ============================== -->
+	<!-- Conversation-level Feedback     -->
+	<!-- ============================== -->
+	{#if convItems !== null && convTotal !== null}
+		<div class="mt-6 mb-1 gap-1 flex flex-row justify-between">
+			<div class="flex items-center md:self-center text-xl font-medium px-0.5 gap-2 shrink-0">
+				<div>
+					{$i18n.t('Conversation Feedback')}
+				</div>
+
+				<div class="text-lg font-medium text-gray-500 dark:text-gray-500">
+					{convTotal}
+				</div>
+			</div>
+		</div>
+
+		<div class="scrollbar-hidden relative whitespace-nowrap overflow-x-auto max-w-full">
+			{#if (convItems ?? []).length === 0}
+				<div class="text-center text-xs text-gray-500 dark:text-gray-400 py-1">
+					{$i18n.t('No feedback found')}
+				</div>
+			{:else}
+				<table
+					class="w-full text-sm text-left text-gray-500 dark:text-gray-400 table-auto max-w-full"
+				>
+					<thead class="text-xs text-gray-800 uppercase bg-transparent dark:text-gray-200">
+						<tr class=" border-b-[1.5px] border-gray-50 dark:border-gray-850/30">
+							<th
+								scope="col"
+								class="px-2.5 py-2 cursor-pointer select-none w-3"
+								on:click={() => setConvSortKey('user')}
+							>
+								<div class="flex gap-1.5 items-center justify-end">
+									{$i18n.t('User')}
+									{#if convOrderBy === 'user'}
+										<span class="font-normal">
+											{#if convDirection === 'asc'}
+												<ChevronUp className="size-2" />
+											{:else}
+												<ChevronDown className="size-2" />
+											{/if}
+										</span>
+									{:else}
+										<span class="invisible">
+											<ChevronUp className="size-2" />
+										</span>
+									{/if}
+								</div>
+							</th>
+
+							<th
+								scope="col"
+								class="px-2.5 py-2 cursor-pointer select-none"
+							>
+								<div class="flex gap-1.5 items-center">
+									{$i18n.t('Comment')}
+								</div>
+							</th>
+
+							<th
+								scope="col"
+								class="px-2.5 py-2 text-right cursor-pointer select-none w-fit"
+								on:click={() => setConvSortKey('rating')}
+							>
+								<div class="flex gap-1.5 items-center justify-end">
+									{$i18n.t('Rating')}
+									{#if convOrderBy === 'rating'}
+										<span class="font-normal">
+											{#if convDirection === 'asc'}
+												<ChevronUp className="size-2" />
+											{:else}
+												<ChevronDown className="size-2" />
+											{/if}
+										</span>
+									{:else}
+										<span class="invisible">
+											<ChevronUp className="size-2" />
+										</span>
+									{/if}
+								</div>
+							</th>
+
+							<th
+								scope="col"
+								class="px-2.5 py-2 text-right cursor-pointer select-none w-0"
+								on:click={() => setConvSortKey('updated_at')}
+							>
+								<div class="flex gap-1.5 items-center justify-end">
+									{$i18n.t('Updated At')}
+									{#if convOrderBy === 'updated_at'}
+										<span class="font-normal">
+											{#if convDirection === 'asc'}
+												<ChevronUp className="size-2" />
+											{:else}
+												<ChevronDown className="size-2" />
+											{/if}
+										</span>
+									{:else}
+										<span class="invisible">
+											<ChevronUp className="size-2" />
+										</span>
+									{/if}
+								</div>
+							</th>
+
+							<th scope="col" class="px-2.5 py-2 text-right cursor-pointer select-none w-0"> </th>
+						</tr>
+					</thead>
+					<tbody class="">
+						{#each convItems as feedback (feedback.id)}
+							<tr
+								class="bg-white dark:bg-gray-900 dark:border-gray-850 text-xs cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-850/50 transition"
+								on:click={() => openFeedbackModal(feedback)}
+							>
+								<td class=" py-0.5 text-right font-medium">
+									<div class="flex justify-center">
+										<Tooltip content={feedback?.user?.name}>
+											<div class="shrink-0">
+												<img
+													src={`${WEBUI_API_BASE_URL}/users/${feedback.user.id}/profile/image`}
+													alt={feedback?.user?.name}
+													class="size-5 rounded-full object-cover shrink-0"
+												/>
+											</div>
+										</Tooltip>
+									</div>
+								</td>
+
+								<td class=" py-1 pl-3">
+									<div class="text-sm text-gray-600 dark:text-gray-400 line-clamp-1">
+										{feedback.data?.comment || '-'}
+									</div>
+								</td>
+
+								<td class="px-3 py-1 text-right font-medium text-gray-900 dark:text-white w-max">
+									<div class=" flex justify-end">
+										<Badge type="info" content="{feedback?.data?.rating ?? '-'} / {feedback?.meta?.scale_max ?? '?'}" />
+									</div>
+								</td>
+
+								<td class=" px-3 py-1 text-right font-medium">
+									{dayjs(feedback.updated_at * 1000).fromNow()}
+								</td>
+
+								<td class=" px-3 py-1 text-right font-medium" on:click={(e) => e.stopPropagation()}>
+									<FeedbackMenu
+										on:delete={(e) => {
+											deleteFeedbackHandler(feedback.id, 'conversation');
+										}}
+									>
+										<button
+											class="self-center w-fit text-sm p-1.5 dark:text-gray-300 dark:hover:text-white hover:bg-black/5 dark:hover:bg-white/5 rounded-xl"
+										>
+											<EllipsisHorizontal />
+										</button>
+									</FeedbackMenu>
+								</td>
+							</tr>
+						{/each}
+					</tbody>
+				</table>
+			{/if}
+		</div>
+
+		{#if convTotal > 30}
+			<Pagination bind:page={convPage} count={convTotal} perPage={30} />
+		{/if}
 	{/if}
 {/if}

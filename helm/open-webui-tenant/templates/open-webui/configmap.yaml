@@ -12,7 +12,7 @@ data:
   RESET_CONFIG_ON_START: {{ .Values.openWebui.config.resetConfigOnStart | quote }}
   WEBUI_NAME: {{ .Values.openWebui.config.webuiName | quote }}
   CLIENT_NAME: {{ .Values.tenant.clientName | quote }}
-  CORS_ALLOW_ORIGIN: {{ .Values.openWebui.config.corsAllowOrigin | quote }}
+  CORS_ALLOW_ORIGIN: {{ .Values.openWebui.config.corsAllowOrigin | default (printf "https://%s" .Values.tenant.domain) | quote }}
 
   # Locale
   DEFAULT_LOCALE: {{ .Values.openWebui.config.defaultLocale | quote }}
@@ -45,6 +45,8 @@ data:
   # LLM Providers
   ENABLE_OLLAMA_API: {{ .Values.openWebui.config.enableOllamaApi | quote }}
   OPENAI_API_BASE_URL: {{ .Values.openWebui.config.openaiApiBaseUrl | quote }}
+  ENABLE_FORWARD_USER_INFO_HEADERS: {{ .Values.openWebui.config.enableForwardUserInfoHeaders | quote }}
+  FORWARD_USER_INFO_HEADER_USER_ID: {{ .Values.openWebui.config.forwardUserInfoHeaderUserId | quote }}
   {{- if .Values.openWebui.config.openaiApiConfigs }}
   OPENAI_API_CONFIGS: {{ .Values.openWebui.config.openaiApiConfigs | toJson | quote }}
   {{- end }}
@@ -53,6 +55,7 @@ data:
   VECTOR_DB: {{ .Values.openWebui.config.vectorDb | quote }}
   WEAVIATE_HTTP_HOST: {{ include "open-webui-tenant.weaviate.fullname" . }}
   WEAVIATE_HTTP_PORT: {{ .Values.openWebui.config.weaviateHttpPort | quote }}
+  WEAVIATE_GRPC_HOST: {{ include "open-webui-tenant.weaviate.fullname" . }}
   WEAVIATE_GRPC_PORT: {{ .Values.openWebui.config.weaviateGrpcPort | quote }}
   WEAVIATE_WEB_SEARCH_TTL_MINUTES: {{ .Values.openWebui.config.weaviateWebSearchTtlMinutes | quote }}
 
@@ -81,6 +84,7 @@ data:
 
   # File Processing
   FILE_PROCESSING_MAX_CONCURRENT: {{ .Values.openWebui.config.fileProcessingMaxConcurrent | quote }}
+  FILE_DOWNLOAD_CONCURRENCY_MULTIPLIER: {{ .Values.openWebui.config.fileDownloadConcurrencyMultiplier | quote }}
 
   # Content Extraction & Reranking (via shared services)
   CONTENT_EXTRACTION_ENGINE: {{ .Values.openWebui.config.contentExtractionEngine | quote }}
@@ -112,11 +116,25 @@ data:
   FEATURE_KNOWLEDGE: {{ .Values.openWebui.config.featureKnowledge | quote }}
   FEATURE_PROMPTS: {{ .Values.openWebui.config.featurePrompts | quote }}
   FEATURE_TOOLS: {{ .Values.openWebui.config.featureTools | quote }}
+  FEATURE_SKILLS: {{ .Values.openWebui.config.featureSkills | quote }}
+  FEATURE_BUILTIN_TOOLS: {{ .Values.openWebui.config.featureBuiltinTools | quote }}
   FEATURE_ADMIN_EVALUATIONS: {{ .Values.openWebui.config.featureAdminEvaluations | quote }}
   FEATURE_ADMIN_FUNCTIONS: {{ .Values.openWebui.config.featureAdminFunctions | quote }}
   FEATURE_ADMIN_SETTINGS: {{ .Values.openWebui.config.featureAdminSettings | quote }}
   FEATURE_ADMIN_SETTINGS_TABS: {{ .Values.openWebui.config.featureAdminSettingsTabs | quote }}
   FEATURE_CHAT_CONTROLS_SECTIONS: {{ .Values.openWebui.config.featureChatControlsSections | quote }}
+  FEATURE_WEBPAGE_URL: {{ .Values.openWebui.config.featureWebpageUrl | quote }}
+  FEATURE_REFERENCE_CHATS: {{ .Values.openWebui.config.featureReferenceChats | quote }}
+  FEATURE_INPUT_MENU: {{ .Values.openWebui.config.featureInputMenu | quote }}
+  FEATURE_TEMPORARY_CHAT: {{ .Values.openWebui.config.featureTemporaryChat | quote }}
+  FEATURE_TOOL_SERVERS: {{ .Values.openWebui.config.featureToolServers | quote }}
+  FEATURE_TERMINAL_SERVERS: {{ .Values.openWebui.config.featureTerminalServers | quote }}
+
+  # PDF export
+  USE_STYLIZED_PDF_EXPORT: {{ .Values.openWebui.config.useStylizedPdfExport | quote }}
+
+  # Memories
+  ENABLE_MEMORIES: {{ .Values.openWebui.config.enableMemories | quote }}
 
   # Notes
   ENABLE_NOTES: {{ .Values.openWebui.config.enableNotes | quote }}
@@ -144,23 +162,39 @@ data:
   USER_PERMISSIONS_WORKSPACE_PROMPTS_ACCESS: {{ .Values.openWebui.config.userPermissionsWorkspacePromptsAccess | quote }}
   USER_PERMISSIONS_WORKSPACE_TOOLS_ACCESS: {{ .Values.openWebui.config.userPermissionsWorkspaceToolsAccess | quote }}
 
+  # Workspace Sharing (allow users to share with specific groups/individuals)
+  USER_PERMISSIONS_WORKSPACE_MODELS_ALLOW_SHARING: {{ .Values.openWebui.config.userPermissionsWorkspaceModelsAllowSharing | quote }}
+  USER_PERMISSIONS_WORKSPACE_KNOWLEDGE_ALLOW_SHARING: {{ .Values.openWebui.config.userPermissionsWorkspaceKnowledgeAllowSharing | quote }}
+  USER_PERMISSIONS_WORKSPACE_PROMPTS_ALLOW_SHARING: {{ .Values.openWebui.config.userPermissionsWorkspacePromptsAllowSharing | quote }}
+  USER_PERMISSIONS_WORKSPACE_TOOLS_ALLOW_SHARING: {{ .Values.openWebui.config.userPermissionsWorkspaceToolsAllowSharing | quote }}
+  USER_PERMISSIONS_WORKSPACE_SKILLS_ALLOW_SHARING: {{ .Values.openWebui.config.userPermissionsWorkspaceSkillsAllowSharing | quote }}
+  USER_PERMISSIONS_NOTES_ALLOW_SHARING: {{ .Values.openWebui.config.userPermissionsNotesAllowSharing | quote }}
+
   # Workspace Public Sharing (allow users to share with all tenant users)
   USER_PERMISSIONS_WORKSPACE_MODELS_ALLOW_PUBLIC_SHARING: {{ .Values.openWebui.config.userPermissionsWorkspaceModelsAllowPublicSharing | quote }}
   USER_PERMISSIONS_WORKSPACE_KNOWLEDGE_ALLOW_PUBLIC_SHARING: {{ .Values.openWebui.config.userPermissionsWorkspaceKnowledgeAllowPublicSharing | quote }}
   USER_PERMISSIONS_WORKSPACE_PROMPTS_ALLOW_PUBLIC_SHARING: {{ .Values.openWebui.config.userPermissionsWorkspacePromptsAllowPublicSharing | quote }}
   USER_PERMISSIONS_WORKSPACE_TOOLS_ALLOW_PUBLIC_SHARING: {{ .Values.openWebui.config.userPermissionsWorkspaceToolsAllowPublicSharing | quote }}
+  USER_PERMISSIONS_WORKSPACE_SKILLS_ALLOW_PUBLIC_SHARING: {{ .Values.openWebui.config.userPermissionsWorkspaceSkillsAllowPublicSharing | quote }}
   USER_PERMISSIONS_NOTES_ALLOW_PUBLIC_SHARING: {{ .Values.openWebui.config.userPermissionsNotesAllowPublicSharing | quote }}
+
+  # Access Grants
+  USER_PERMISSIONS_ACCESS_GRANTS_ALLOW_USERS: {{ .Values.openWebui.config.userPermissionsAccessGrantsAllowUsers | quote }}
 
   # UI
   {{- if .Values.openWebui.config.greetingTemplate }}
   GREETING_TEMPLATE: {{ .Values.openWebui.config.greetingTemplate | quote }}
   {{- end }}
   DEFAULT_PROMPT_SUGGESTIONS: {{ .Values.openWebui.config.defaultPromptSuggestions | quote }}
+  {{- if .Values.openWebui.config.defaultModels }}
+  DEFAULT_MODELS: {{ .Values.openWebui.config.defaultModels | quote }}
+  {{- end }}
   ENABLE_FOLDERS: {{ .Values.openWebui.config.enableFolders | quote }}
   USER_PERMISSIONS_FEATURES_FOLDERS: {{ .Values.openWebui.config.userPermissionsFeaturesFolders | quote }}
   ENABLE_CHANNELS: {{ .Values.openWebui.config.enableChannels | quote }}
   USER_PERMISSIONS_FEATURES_CHANNELS: {{ .Values.openWebui.config.userPermissionsFeaturesChannels | quote }}
   ENABLE_COMMUNITY_SHARING: {{ .Values.openWebui.config.enableCommunitySharing | quote }}
+  ENABLE_CITATION_RELEVANCE: {{ .Values.openWebui.config.enableCitationRelevance | quote }}
   ENABLE_MESSAGE_RATING: {{ .Values.openWebui.config.enableMessageRating | quote }}
   ENABLE_USER_WEBHOOKS: {{ .Values.openWebui.config.enableUserWebhooks | quote }}
   ENABLE_AUTOCOMPLETE_GENERATION: {{ .Values.openWebui.config.enableAutocompleteGeneration | quote }}
@@ -192,6 +226,8 @@ data:
 
   # Admin
   ENABLE_ADMIN_EXPORT: {{ .Values.openWebui.config.enableAdminExport | quote }}
+  ENABLE_DATA_EXPORT: {{ .Values.openWebui.config.enableDataExport | quote }}
+  DATA_EXPORT_RETENTION_HOURS: {{ .Values.openWebui.config.dataExportRetentionHours | quote }}
   ENABLE_ADMIN_CHAT_ACCESS: {{ .Values.openWebui.config.enableAdminChatAccess | quote }}
   ENABLE_ADMIN_WORKSPACE_CONTENT_ACCESS: {{ .Values.openWebui.config.enableAdminWorkspaceContentAccess | quote }}
   BYPASS_ADMIN_ACCESS_CONTROL: {{ .Values.openWebui.config.bypassAdminAccessControl | quote }}
@@ -199,7 +235,26 @@ data:
   ENABLE_EVALUATION_ARENA_MODELS: {{ .Values.openWebui.config.enableEvaluationArenaModels | quote }}
   ENABLE_API_KEYS: {{ .Values.openWebui.config.enableApiKeys | quote }}
   ENABLE_IMAGE_GENERATION: {{ .Values.openWebui.config.enableImageGeneration | quote }}
+  IMAGE_GENERATION_ENGINE: {{ .Values.openWebui.config.imageGenerationEngine | quote }}
+  {{- if .Values.openWebui.config.imageGenerationModel }}
+  IMAGE_GENERATION_MODEL: {{ .Values.openWebui.config.imageGenerationModel | quote }}
+  {{- end }}
+  {{- if .Values.openWebui.config.imagesOpenaiApiBaseUrl }}
+  IMAGES_OPENAI_API_BASE_URL: {{ .Values.openWebui.config.imagesOpenaiApiBaseUrl | quote }}
+  {{- end }}
+  IMAGE_SIZE: {{ .Values.openWebui.config.imageSize | quote }}
+  # Google Drive Integration
   ENABLE_GOOGLE_DRIVE_INTEGRATION: {{ .Values.openWebui.config.enableGoogleDriveIntegration | quote }}
+  {{- if .Values.openWebui.config.googleDriveClientId }}
+  GOOGLE_DRIVE_CLIENT_ID: {{ .Values.openWebui.config.googleDriveClientId | quote }}
+  {{- end }}
+  {{- /* googleDriveApiKey moved to secrets template */ -}}
+
+  # Google Drive Sync
+  ENABLE_GOOGLE_DRIVE_SYNC: {{ .Values.openWebui.config.enableGoogleDriveSync | quote }}
+  GOOGLE_DRIVE_SYNC_INTERVAL_MINUTES: {{ .Values.openWebui.config.googleDriveSyncIntervalMinutes | quote }}
+  GOOGLE_DRIVE_MAX_FILES_PER_SYNC: {{ .Values.openWebui.config.googleDriveMaxFilesPerSync | quote }}
+  GOOGLE_DRIVE_MAX_FILE_SIZE_MB: {{ .Values.openWebui.config.googleDriveMaxFileSizeMb | quote }}
 
   # OneDrive Integration
   ENABLE_ONEDRIVE_INTEGRATION: {{ .Values.openWebui.config.enableOnedriveIntegration | quote }}
@@ -220,6 +275,7 @@ data:
   ONEDRIVE_SYNC_INTERVAL_MINUTES: {{ .Values.openWebui.config.onedriveSyncIntervalMinutes | quote }}
   ONEDRIVE_MAX_FILES_PER_SYNC: {{ .Values.openWebui.config.onedriveMaxFilesPerSync | quote }}
   ONEDRIVE_MAX_FILE_SIZE_MB: {{ .Values.openWebui.config.onedriveMaxFileSizeMb | quote }}
+  KNOWLEDGE_MAX_FILE_COUNT: {{ .Values.openWebui.config.knowledgeMaxFileCount | quote }}
 
   # Email Invites (Microsoft Graph API)
   ENABLE_EMAIL_INVITES: {{ .Values.openWebui.config.enableEmailInvites | quote }}
@@ -240,6 +296,28 @@ data:
   {{- end }}
 
   BYPASS_MODEL_ACCESS_CONTROL: {{ .Values.openWebui.config.bypassModelAccessControl | quote }}
+
+  # Security Headers
+  {{- with .Values.openWebui.config.securityHeaders }}
+  {{- if .hsts }}
+  HSTS: {{ .hsts | quote }}
+  {{- end }}
+  {{- if .xFrameOptions }}
+  XFRAME_OPTIONS: {{ .xFrameOptions | quote }}
+  {{- end }}
+  {{- if .xContentType }}
+  XCONTENT_TYPE: {{ .xContentType | quote }}
+  {{- end }}
+  {{- if .referrerPolicy }}
+  REFERRER_POLICY: {{ .referrerPolicy | quote }}
+  {{- end }}
+  {{- if .cacheControl }}
+  CACHE_CONTROL: {{ .cacheControl | quote }}
+  {{- end }}
+  {{- end }}
+
+  # Cookie Security
+  WEBUI_SESSION_COOKIE_SECURE: {{ .Values.openWebui.config.cookieSecure | default "true" | quote }}
 
   # Audit Logging
   AUDIT_LOG_LEVEL: {{ .Values.openWebui.config.auditLogLevel | quote }}
@@ -275,6 +353,9 @@ data:
   DO_NOT_TRACK: {{ .Values.openWebui.config.doNotTrack | quote }}
   ANONYMIZED_TELEMETRY: {{ .Values.openWebui.config.anonymizedTelemetry | quote }}
 
+  # Easter Eggs
+  ENABLE_EASTER_EGGS: {{ .Values.openWebui.config.enableEasterEggs | quote }}
+
   # Custom Prompts
   {{- if .Values.openWebui.config.queryGenerationPromptTemplate }}
   QUERY_GENERATION_PROMPT_TEMPLATE: {{ .Values.openWebui.config.queryGenerationPromptTemplate | quote }}
@@ -295,4 +376,30 @@ data:
   OTEL_RESOURCE_ATTRIBUTES: {{ .Values.openWebui.config.telemetry.otel.resourceAttributes | quote }}
   {{- end }}
   {{- end }}
+
+  # Agent API (internal: routes chat UI to agent service)
+  {{- if eq .Values.openWebui.config.agentApiEnabled "true" }}
+  AGENT_API_ENABLED: "true"
+  AGENT_API_BASE_URL: {{ .Values.openWebui.config.agentApiBaseUrl | quote }}
+  AGENT_API_AGENT: {{ .Values.openWebui.config.agentApiAgent | quote }}
+  {{- end }}
+
+  # Agent Proxy (external: exposes agent API to external callers)
+  ENABLE_AGENT_PROXY: {{ .Values.openWebui.config.enableAgentProxy | default "false" | quote }}
+
+  # Two-Factor Authentication (TOTP)
+  ENABLE_2FA: {{ .Values.openWebui.config.enable2fa | default "false" | quote }}
+  REQUIRE_2FA: {{ .Values.openWebui.config.require2fa | default "false" | quote }}
+  TWO_FA_GRACE_PERIOD_DAYS: {{ .Values.openWebui.config.twoFaGracePeriodDays | default "7" | quote }}
+
+  # Data Retention TTL
+  DATA_RETENTION_TTL_DAYS: {{ .Values.openWebui.config.dataRetentionTtlDays | default "0" | quote }}
+  USER_INACTIVITY_TTL_DAYS: {{ .Values.openWebui.config.userInactivityTtlDays | default "0" | quote }}
+  CHAT_RETENTION_TTL_DAYS: {{ .Values.openWebui.config.chatRetentionTtlDays | default "0" | quote }}
+  KNOWLEDGE_RETENTION_TTL_DAYS: {{ .Values.openWebui.config.knowledgeRetentionTtlDays | default "0" | quote }}
+  DATA_RETENTION_WARNING_DAYS: {{ .Values.openWebui.config.dataRetentionWarningDays | default "30" | quote }}
+  ENABLE_RETENTION_WARNING_EMAIL: {{ .Values.openWebui.config.enableRetentionWarningEmail | default "false" | quote }}
+
+  # Data Sovereignty Warnings
+  ENABLE_DATA_WARNINGS: {{ .Values.openWebui.config.enableDataWarnings | default "true" | quote }}
 {{- end }}

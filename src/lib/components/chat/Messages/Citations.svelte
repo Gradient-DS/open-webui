@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { getContext } from 'svelte';
-	import { embed, showControls, showEmbeds } from '$lib/stores';
+	import { config, embed, showControls, showEmbeds } from '$lib/stores';
 
 	import CitationModal from './Citations/CitationModal.svelte';
 
@@ -16,6 +16,8 @@
 	let showPercentage = false;
 	let showRelevance = true;
 
+	$: citationRelevanceEnabled = $config?.features?.enable_citation_relevance ?? true;
+
 	let citationModal = null;
 
 	let showCitations = false;
@@ -23,12 +25,26 @@
 
 	let selectedCitation: any = null;
 
-	export const showSourceModal = (sourceIdx) => {
-		if (citations[sourceIdx]) {
-			console.log('Showing citation modal for:', citations[sourceIdx]);
+	export const showSourceModal = (sourceId) => {
+		let index;
+		let suffix = null;
 
-			if (citations[sourceIdx]?.source?.embed_url) {
-				const embedUrl = citations[sourceIdx].source.embed_url;
+		if (typeof sourceId === 'string') {
+			const output = sourceId.split('#');
+			index = parseInt(output[0]) - 1;
+
+			if (output.length > 1) {
+				suffix = output[1];
+			}
+		} else {
+			index = sourceId - 1;
+		}
+
+		if (citations[index]) {
+			console.log('Showing citation modal for:', citations[index]);
+
+			if (citations[index]?.source?.embed_url) {
+				const embedUrl = citations[index].source.embed_url;
 				if (embedUrl) {
 					if (readOnly) {
 						// Open in new tab if readOnly
@@ -39,18 +55,19 @@
 						showEmbeds.set(true);
 						embed.set({
 							url: embedUrl,
-							title: citations[sourceIdx]?.source?.name || 'Embedded Content',
-							source: citations[sourceIdx],
+							title: citations[index]?.source?.name || 'Embedded Content',
+							source: citations[index],
 							chatId: chatId,
-							messageId: id
+							messageId: id,
+							sourceId: sourceId
 						});
 					}
 				} else {
-					selectedCitation = citations[sourceIdx];
+					selectedCitation = citations[index];
 					showCitationModal = true;
 				}
 			} else {
-				selectedCitation = citations[sourceIdx];
+				selectedCitation = citations[index];
 				showCitationModal = true;
 			}
 		}
@@ -139,8 +156,8 @@
 <CitationModal
 	bind:show={showCitationModal}
 	citation={selectedCitation}
-	{showPercentage}
-	{showRelevance}
+	showPercentage={citationRelevanceEnabled && showPercentage}
+	showRelevance={citationRelevanceEnabled && showRelevance}
 />
 
 {#if citations.length > 0}
@@ -148,6 +165,10 @@
 	<div class=" py-1 -mx-0.5 w-full flex gap-1 items-center flex-wrap">
 		<button
 			class="text-xs font-medium text-gray-600 dark:text-gray-300 px-3.5 h-8 rounded-full hover:bg-gray-100 dark:hover:bg-gray-800 transition flex items-center gap-1 border border-gray-50 dark:border-gray-850/30"
+			aria-label={citations.length === 1
+				? $i18n.t('Toggle 1 source')
+				: $i18n.t('Toggle {{COUNT}} sources', { COUNT: citations.length })}
+			aria-expanded={showCitations}
 			on:click={() => {
 				showCitations = !showCitations;
 			}}
@@ -159,6 +180,9 @@
 							src="https://www.google.com/s2/favicons?sz=32&domain={citation.source.name}"
 							alt="favicon"
 							class="size-4 rounded-full shrink-0 border border-white dark:border-gray-850 bg-white dark:bg-gray-900"
+							on:error={(e) => {
+								e.target.src = '/favicon.png';
+							}}
 						/>
 					{/each}
 				</div>
@@ -182,6 +206,9 @@
 			{#each citations as citation, idx}
 				<button
 					id={`source-${id}-${idx + 1}`}
+					aria-label={$i18n.t('View source: {{name}}', {
+						name: decodeString(citation.source.name)
+					})}
 					class="no-toggle outline-hidden flex dark:text-gray-300 bg-transparent text-gray-600 rounded-xl gap-1.5 items-center"
 					on:click={() => {
 						showCitationModal = true;

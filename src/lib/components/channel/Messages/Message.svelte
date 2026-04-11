@@ -66,7 +66,7 @@
 	let showDeleteConfirmDialog = false;
 
 	const loadMessageData = async () => {
-		if (message && message?.data) {
+		if (message && message?.data === true) {
 			const res = await getMessageData(localStorage.token, channel?.id, message.id);
 			if (res) {
 				message.data = res;
@@ -75,7 +75,7 @@
 	};
 
 	onMount(async () => {
-		if (message && message?.data) {
+		if (message && message?.data === true) {
 			await loadMessageData();
 		}
 	});
@@ -242,10 +242,15 @@
 							alt={message.reply_to_message.meta.model_name ??
 								message.reply_to_message.meta.model_id}
 							class="size-4 ml-0.5 rounded-full object-cover"
+							on:error={(e) => {
+								e.currentTarget.src = '/favicon.png';
+							}}
 						/>
 					{:else}
 						<img
-							src={`${WEBUI_API_BASE_URL}/users/${message.reply_to_message.user?.id}/profile/image`}
+							src={message.reply_to_message.user?.role === 'webhook'
+								? `${WEBUI_API_BASE_URL}/channels/webhooks/${message.reply_to_message.user?.id}/profile/image`
+								: `${WEBUI_API_BASE_URL}/users/${message.reply_to_message.user?.id}/profile/image`}
 							alt={message.reply_to_message.user?.name ?? $i18n.t('Unknown User')}
 							class="size-4 ml-0.5 rounded-full object-cover"
 						/>
@@ -276,11 +281,19 @@
 							src={`${WEBUI_API_BASE_URL}/models/model/profile/image?id=${message.meta.model_id}`}
 							alt={message.meta.model_name ?? message.meta.model_id}
 							class="size-8 translate-y-1 ml-0.5 object-cover rounded-full"
+							on:error={(e) => {
+								e.currentTarget.src = '/favicon.png';
+							}}
+						/>
+					{:else if message.user?.role === 'webhook'}
+						<ProfileImage
+							src={`${WEBUI_API_BASE_URL}/channels/webhooks/${message.user?.id}/profile/image`}
+							className={'size-8 ml-0.5'}
 						/>
 					{:else}
 						<ProfilePreview user={message.user}>
 							<ProfileImage
-								src={`${WEBUI_API_BASE_URL}/users/${message.user.id}/profile/image`}
+								src={`${WEBUI_API_BASE_URL}/users/${message.user?.id}/profile/image`}
 								className={'size-8 ml-0.5'}
 							/>
 						</ProfilePreview>

@@ -16,20 +16,21 @@ log = logging.getLogger(__name__)
 @dataclass
 class ArchiveData:
     """Container for archived user data"""
+
     user_profile: Dict[str, Any] = field(default_factory=dict)
     chats: List[Dict[str, Any]] = field(default_factory=list)
     archived_at: int = 0
-    version: str = "1.0"
+    version: str = '1.0'
 
     def to_dict(self) -> Dict[str, Any]:
         return {
-            "version": self.version,
-            "archived_at": self.archived_at,
-            "user_profile": self.user_profile,
-            "chats": self.chats,
-            "stats": {
-                "chat_count": len(self.chats),
-            }
+            'version': self.version,
+            'archived_at': self.archived_at,
+            'user_profile': self.user_profile,
+            'chats': self.chats,
+            'stats': {
+                'chat_count': len(self.chats),
+            },
         }
 
     def get_exportable_chats(self) -> List[Dict[str, Any]]:
@@ -43,6 +44,7 @@ class ArchiveData:
 @dataclass
 class ArchiveResult:
     """Result of archive operation"""
+
     success: bool = False
     archive_id: Optional[str] = None
     stats: Dict[str, int] = field(default_factory=dict)
@@ -73,16 +75,16 @@ class ArchiveService:
             user = Users.get_user_by_id(user_id)
             if user:
                 data.user_profile = {
-                    "id": user.id,
-                    "name": user.name,
-                    "email": user.email,
-                    "role": user.role,
-                    "profile_image_url": user.profile_image_url,
-                    "created_at": user.created_at,
-                    "updated_at": user.updated_at,
+                    'id': user.id,
+                    'name': user.name,
+                    'email': user.email,
+                    'role': user.role,
+                    'profile_image_url': user.profile_image_url,
+                    'created_at': user.created_at,
+                    'updated_at': user.updated_at,
                 }
         except Exception as e:
-            log.error(f"Error collecting user profile: {e}")
+            log.error(f'Error collecting user profile: {e}')
 
         # 2. Chats in native export format (compatible with Import Chats)
         # Uses the same ChatResponse model as GET /api/v1/chats/all to ensure
@@ -94,7 +96,7 @@ class ArchiveService:
                 chat_response = ChatResponse(**chat.model_dump())
                 data.chats.append(chat_response.model_dump())
         except Exception as e:
-            log.error(f"Error collecting chats: {e}")
+            log.error(f'Error collecting chats: {e}')
 
         return data
 
@@ -124,17 +126,17 @@ class ArchiveService:
         # Get user info
         user = Users.get_user_by_id(user_id)
         if not user:
-            result.errors.append(f"User {user_id} not found")
+            result.errors.append(f'User {user_id} not found')
             return result
 
         # Collect data
         try:
             data = ArchiveService.collect_user_data(user_id)
             result.stats = {
-                "chats": len(data.chats),
+                'chats': len(data.chats),
             }
         except Exception as e:
-            result.errors.append(f"Error collecting user data: {e}")
+            result.errors.append(f'Error collecting user data: {e}')
             return result
 
         # Create archive record
@@ -153,9 +155,9 @@ class ArchiveService:
                 result.success = True
                 result.archive_id = archive.id
             else:
-                result.errors.append("Failed to insert archive record")
+                result.errors.append('Failed to insert archive record')
         except Exception as e:
-            result.errors.append(f"Error creating archive: {e}")
+            result.errors.append(f'Error creating archive: {e}')
 
         return result
 
@@ -175,7 +177,7 @@ class ArchiveService:
             return None
 
         data = archive.data
-        return data.get("chats", [])
+        return data.get('chats', [])
 
     @staticmethod
     def cleanup_expired_archives() -> Dict[str, int]:
@@ -185,20 +187,20 @@ class ArchiveService:
         """
         from open_webui.models.user_archives import UserArchives
 
-        stats = {"checked": 0, "deleted": 0, "errors": 0}
+        stats = {'checked': 0, 'deleted': 0, 'errors': 0}
 
         expired = UserArchives.get_expired_archives()
-        stats["checked"] = len(expired)
+        stats['checked'] = len(expired)
 
         for archive in expired:
             try:
                 if UserArchives.delete_archive(archive.id):
-                    stats["deleted"] += 1
-                    log.info(f"Deleted expired archive {archive.id} for user {archive.user_email}")
+                    stats['deleted'] += 1
+                    log.info(f'Deleted expired archive {archive.id} for user {archive.user_id}')
                 else:
-                    stats["errors"] += 1
+                    stats['errors'] += 1
             except Exception as e:
-                log.error(f"Error deleting archive {archive.id}: {e}")
-                stats["errors"] += 1
+                log.error(f'Error deleting archive {archive.id}: {e}')
+                stats['errors'] += 1
 
         return stats

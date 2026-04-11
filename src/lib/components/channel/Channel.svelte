@@ -120,7 +120,10 @@
 			if (type === 'message') {
 				if ((data?.parent_id ?? null) === null) {
 					const tempId = data?.temp_id ?? null;
-					messages = [{ ...data, temp_id: null }, ...messages.filter((m) => m?.temp_id !== tempId)];
+					messages = [
+						{ ...data, temp_id: null },
+						...messages.filter((m) => !tempId || m?.temp_id !== tempId)
+					];
 
 					if (typingUsers.find((user) => user.id === event.user.id)) {
 						typingUsers = typingUsers.filter((user) => user.id !== event.user.id);
@@ -139,6 +142,10 @@
 				}
 			} else if (type === 'message:delete') {
 				messages = messages.filter((message) => message.id !== data.id);
+
+				if (threadId === data.id) {
+					threadId = null;
+				}
 			} else if (type === 'message:reply') {
 				const idx = messages.findIndex((message) => message.id === data.id);
 

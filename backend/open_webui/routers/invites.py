@@ -1,7 +1,8 @@
+import datetime
 import logging
 import time
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from pydantic import BaseModel
 from typing import Optional
 
@@ -16,10 +17,14 @@ from open_webui.utils.auth import (
     get_password_hash,
     validate_password,
 )
-from open_webui.utils.misc import validate_email_format
+from open_webui.utils.misc import parse_duration, validate_email_format
 from open_webui.utils.groups import apply_default_group_assignment
 from open_webui.utils.access_control import get_permissions
-from open_webui.env import CLIENT_NAME
+from open_webui.env import (
+    CLIENT_NAME,
+    WEBUI_AUTH_COOKIE_SAME_SITE,
+    WEBUI_AUTH_COOKIE_SECURE,
+)
 from open_webui.config import DEFAULT_LOCALE
 
 log = logging.getLogger(__name__)
@@ -68,7 +73,7 @@ class InviteListItem(BaseModel):
 ############################
 
 
-@router.post("/", response_model=InviteResponse)
+@router.post('/', response_model=InviteResponse)
 async def create_invite(
     request: Request,
     form_data: InviteForm,
@@ -79,13 +84,13 @@ async def create_invite(
     if not validate_email_format(email):
         raise HTTPException(
             status.HTTP_400_BAD_REQUEST,
-            detail="Invalid email format",
+            detail='Invalid email format',
         )
 
     if Users.get_user_by_email(email):
         raise HTTPException(
             status.HTTP_400_BAD_REQUEST,
-            detail="A user with this email already exists",
+            detail='A user with this email already exists',
         )
 
     # Check for existing pending invite
@@ -93,7 +98,7 @@ async def create_invite(
     if existing and existing.expires_at > int(time.time()):
         raise HTTPException(
             status.HTTP_400_BAD_REQUEST,
-            detail="A pending invite already exists for this email",
+            detail='A pending invite already exists for this email',
         )
 
     expiry_hours = request.app.state.config.INVITE_EXPIRY_HOURS
@@ -110,14 +115,16 @@ async def create_invite(
     if not invite:
         raise HTTPException(
             status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to create invite",
+            detail='Failed to create invite',
         )
 
-    base_url = str(request.base_url).rstrip("/")
-    invite_url = f"{base_url}/auth/invite/{invite.token}"
+    base_url = str(request.base_url).rstrip('/')
+    invite_url = f'{base_url}/auth/invite/{invite.token}'
 
     email_sent = False
-    if form_data.send_email and request.app.state.config.ENABLE_EMAIL_INVITES:
+    # None = use backend default (send if enabled), False = explicitly skip
+    should_send = form_data.send_email is not False and request.app.state.config.ENABLE_EMAIL_INVITES
+    if should_send:
         try:
             from open_webui.services.email.graph_mail_client import (
                 render_invite_email,
@@ -125,10 +132,10 @@ async def create_invite(
                 send_mail,
             )
 
-            locale = str(DEFAULT_LOCALE) or "en"
+            locale = str(DEFAULT_LOCALE) or 'en'
             expiry_hours = request.app.state.config.INVITE_EXPIRY_HOURS
-            custom_subject = str(request.app.state.config.EMAIL_INVITE_SUBJECT or "")
-            custom_heading = str(request.app.state.config.EMAIL_INVITE_HEADING or "")
+            custom_subject = str(request.app.state.config.EMAIL_INVITE_SUBJECT or '')
+            custom_heading = str(request.app.state.config.EMAIL_INVITE_HEADING or '')
 
             html_body = render_invite_email(
                 invite_url=invite_url,
@@ -150,7 +157,7 @@ async def create_invite(
             )
             email_sent = True
         except Exception as e:
-            log.error(f"Failed to send invite email to {email}: {e}")
+            log.error(f'Failed to send invite email: {e}')
             # Don't fail the invite creation if email fails
             # The admin can still copy the link
 
@@ -172,37 +179,37 @@ async def create_invite(
 ############################
 
 
-@router.get("/{token}/validate", response_model=InviteValidation)
+@router.get('/{token}/validate', response_model=InviteValidation)
 async def validate_invite(token: str):
     invite = Invites.get_invite_by_token(token)
 
     if not invite:
         raise HTTPException(
             status.HTTP_404_NOT_FOUND,
-            detail="Invalid invite link",
+            detail='Invalid invite link',
         )
 
     if invite.revoked_at:
         raise HTTPException(
             status.HTTP_410_GONE,
-            detail="This invite has been revoked",
+            detail='This invite has been revoked',
         )
 
     if invite.accepted_at:
         raise HTTPException(
             status.HTTP_410_GONE,
-            detail="This invite has already been used",
+            detail='This invite has already been used',
         )
 
     if invite.expires_at < int(time.time()):
         raise HTTPException(
             status.HTTP_410_GONE,
-            detail="This invite has expired",
+            detail='This invite has expired',
         )
 
     # Resolve invited_by name
     invited_by_user = Users.get_user_by_id(invite.invited_by)
-    invited_by_name = invited_by_user.name if invited_by_user else "An administrator"
+    invited_by_name = invited_by_user.name if invited_by_user else 'An administrator'
 
     return InviteValidation(
         email=invite.email,
@@ -218,9 +225,10 @@ async def validate_invite(token: str):
 ############################
 
 
-@router.post("/{token}/accept", response_model=SessionUserResponse)
+@router.post('/{token}/accept', response_model=SessionUserResponse)
 async def accept_invite(
     request: Request,
+    response: Response,
     token: str,
     form_data: AcceptInviteForm,
 ):
@@ -229,25 +237,25 @@ async def accept_invite(
     if not invite:
         raise HTTPException(
             status.HTTP_404_NOT_FOUND,
-            detail="Invalid invite link",
+            detail='Invalid invite link',
         )
 
     if invite.revoked_at:
         raise HTTPException(
             status.HTTP_410_GONE,
-            detail="This invite has been revoked",
+            detail='This invite has been revoked',
         )
 
     if invite.accepted_at:
         raise HTTPException(
             status.HTTP_410_GONE,
-            detail="This invite has already been used",
+            detail='This invite has already been used',
         )
 
     if invite.expires_at < int(time.time()):
         raise HTTPException(
             status.HTTP_410_GONE,
-            detail="This invite has expired",
+            detail='This invite has expired',
         )
 
     # Validate password
@@ -273,7 +281,7 @@ async def accept_invite(
         if not new_user:
             raise HTTPException(
                 status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Failed to create user account",
+                detail='Failed to create user account',
             )
 
         # Apply default group assignment
@@ -286,30 +294,46 @@ async def accept_invite(
         Invites.accept_invite(token)
 
         # Create session token
-        session_token = create_token(data={"id": new_user.id})
+        expires_delta = parse_duration(request.app.state.config.JWT_EXPIRES_IN)
+        expires_at = None
+        if expires_delta:
+            expires_at = int(time.time()) + int(expires_delta.total_seconds())
 
-        user_permissions = get_permissions(
-            new_user.id, request.app.state.config.USER_PERMISSIONS
+        session_token = create_token(
+            data={'id': new_user.id},
+            expires_delta=expires_delta,
         )
 
+        # Set the cookie token
+        response.set_cookie(
+            key='token',
+            value=session_token,
+            expires=(datetime.datetime.fromtimestamp(expires_at, datetime.timezone.utc) if expires_at else None),
+            httponly=True,
+            samesite=WEBUI_AUTH_COOKIE_SAME_SITE,
+            secure=WEBUI_AUTH_COOKIE_SECURE,
+        )
+
+        user_permissions = get_permissions(new_user.id, request.app.state.config.USER_PERMISSIONS)
+
         return {
-            "token": session_token,
-            "token_type": "Bearer",
-            "id": new_user.id,
-            "email": new_user.email,
-            "name": new_user.name,
-            "role": new_user.role,
-            "profile_image_url": new_user.profile_image_url,
-            "permissions": user_permissions,
+            'token': session_token,
+            'token_type': 'Bearer',
+            'id': new_user.id,
+            'email': new_user.email,
+            'name': new_user.name,
+            'role': new_user.role,
+            'profile_image_url': new_user.profile_image_url,
+            'permissions': user_permissions,
         }
 
     except HTTPException:
         raise
     except Exception as e:
-        log.error(f"Failed to accept invite: {e}")
+        log.error(f'Failed to accept invite: {e}')
         raise HTTPException(
             status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="An internal error occurred while creating the account",
+            detail='An internal error occurred while creating the account',
         )
 
 
@@ -318,14 +342,14 @@ async def accept_invite(
 ############################
 
 
-@router.get("/", response_model=list[InviteListItem])
+@router.get('/', response_model=list[InviteListItem])
 async def list_invites(user=Depends(get_admin_user)):
     invites = Invites.get_pending_invites()
 
     result = []
     for invite in invites:
         invited_by_user = Users.get_user_by_id(invite.invited_by)
-        invited_by_name = invited_by_user.name if invited_by_user else "Unknown"
+        invited_by_name = invited_by_user.name if invited_by_user else 'Unknown'
 
         result.append(
             InviteListItem(
@@ -348,7 +372,7 @@ async def list_invites(user=Depends(get_admin_user)):
 ############################
 
 
-@router.post("/{id}/resend", response_model=InviteResponse)
+@router.post('/{id}/resend', response_model=InviteResponse)
 async def resend_invite(
     request: Request,
     id: str,
@@ -357,17 +381,13 @@ async def resend_invite(
     invite = Invites.get_invite_by_id(id)
 
     if not invite:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Invite not found")
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail='Invite not found')
 
     if invite.accepted_at:
-        raise HTTPException(
-            status.HTTP_400_BAD_REQUEST, detail="Invite has already been accepted"
-        )
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail='Invite has already been accepted')
 
     if invite.revoked_at:
-        raise HTTPException(
-            status.HTTP_400_BAD_REQUEST, detail="Invite has been revoked"
-        )
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail='Invite has been revoked')
 
     # Refresh token and expiry
     expiry_hours = request.app.state.config.INVITE_EXPIRY_HOURS
@@ -375,12 +395,10 @@ async def resend_invite(
     updated_invite = Invites.refresh_invite(id, new_expires_at)
 
     if not updated_invite:
-        raise HTTPException(
-            status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to refresh invite"
-        )
+        raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, detail='Failed to refresh invite')
 
-    base_url = str(request.base_url).rstrip("/")
-    invite_url = f"{base_url}/auth/invite/{updated_invite.token}"
+    base_url = str(request.base_url).rstrip('/')
+    invite_url = f'{base_url}/auth/invite/{updated_invite.token}'
 
     email_sent = False
     if request.app.state.config.ENABLE_EMAIL_INVITES:
@@ -391,9 +409,9 @@ async def resend_invite(
                 send_mail,
             )
 
-            locale = str(DEFAULT_LOCALE) or "en"
-            custom_subject = str(request.app.state.config.EMAIL_INVITE_SUBJECT or "")
-            custom_heading = str(request.app.state.config.EMAIL_INVITE_HEADING or "")
+            locale = str(DEFAULT_LOCALE) or 'en'
+            custom_subject = str(request.app.state.config.EMAIL_INVITE_SUBJECT or '')
+            custom_heading = str(request.app.state.config.EMAIL_INVITE_HEADING or '')
 
             html_body = render_invite_email(
                 invite_url=invite_url,
@@ -415,7 +433,7 @@ async def resend_invite(
             )
             email_sent = True
         except Exception as e:
-            log.error(f"Failed to resend invite email: {e}")
+            log.error(f'Failed to resend invite email: {e}')
 
     return InviteResponse(
         id=updated_invite.id,
@@ -435,7 +453,7 @@ async def resend_invite(
 ############################
 
 
-@router.delete("/{id}")
+@router.delete('/{id}')
 async def revoke_invite(
     id: str,
     user=Depends(get_admin_user),
@@ -443,17 +461,13 @@ async def revoke_invite(
     invite = Invites.get_invite_by_id(id)
 
     if not invite:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Invite not found")
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail='Invite not found')
 
     if invite.accepted_at:
-        raise HTTPException(
-            status.HTTP_400_BAD_REQUEST, detail="Invite has already been accepted"
-        )
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail='Invite has already been accepted')
 
     result = Invites.revoke_invite(id)
     if not result:
-        raise HTTPException(
-            status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to revoke invite"
-        )
+        raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, detail='Failed to revoke invite')
 
-    return {"status": "ok", "message": "Invite revoked"}
+    return {'status': 'ok', 'message': 'Invite revoked'}

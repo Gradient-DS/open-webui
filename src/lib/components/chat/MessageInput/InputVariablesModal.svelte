@@ -17,24 +17,32 @@
 
 	export let onSave = (e) => {};
 
-	let loading = false;
+	let loading = true;
 	let variableValues = {};
 
 	const submitHandler = async () => {
-		onSave(variableValues);
+		// Normalize Windows CRLF (\r\n) to LF (\n) for all string values
+		const normalized = { ...variableValues };
+		for (const key of Object.keys(normalized)) {
+			if (typeof normalized[key] === 'string') {
+				normalized[key] = normalized[key].replace(/\r\n/g, '\n');
+			}
+		}
+		onSave(normalized);
 		show = false;
 	};
 
 	const init = async () => {
 		loading = true;
-		variableValues = {};
-		for (const variable of Object.keys(variables)) {
+		const newValues = {};
+		for (const variable of Object.keys(variables ?? {})) {
 			if (variables[variable]?.default !== undefined) {
-				variableValues[variable] = variables[variable].default;
+				newValues[variable] = variables[variable].default;
 			} else {
-				variableValues[variable] = '';
+				newValues[variable] = '';
 			}
 		}
+		variableValues = newValues;
 		loading = false;
 
 		await tick();

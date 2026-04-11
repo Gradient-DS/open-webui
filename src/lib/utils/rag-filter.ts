@@ -1,0 +1,41 @@
+/**
+ * RAG Filter Utilities
+ *
+ * Utility functions for working with RAG filter state in request bodies.
+ * This keeps the filter logic isolated and non-invasive to other components.
+ */
+
+import { get } from 'svelte/store';
+import { ragFilterState, type RagFilterState, type CollectionFilter } from '$lib/stores/rag-filter';
+import { config } from '$lib/stores';
+
+/**
+ * Get RAG filter data formatted for request body
+ *
+ * Returns the filter state formatted as an object suitable for inclusion
+ * in chat completion request bodies, or undefined if no filters are active
+ * or if the feature is disabled.
+ *
+ * Hierarchical structure:
+ * - { collection: { all: true } } - entire collection selected
+ * - { collection: { subtypes: { "SubtypeA": true } } } - entire subtype selected
+ * - { collection: { subtypes: { "SubtypeA": { doc_ids: [...] } } } } - specific docs
+ *
+ * @returns Formatted filter object or undefined
+ */
+export function getRagFilterForRequest(): Record<string, CollectionFilter> | undefined {
+	// Check if RAG filter UI feature is enabled
+	const configState = get(config);
+	if (!(configState?.features?.enable_rag_filter_ui ?? true)) {
+		return undefined;
+	}
+
+	const filterState = get(ragFilterState);
+
+	// Return filter if at least one collection has filters
+	if (Object.keys(filterState.collections).length > 0) {
+		return filterState.collections;
+	}
+
+	return undefined;
+}

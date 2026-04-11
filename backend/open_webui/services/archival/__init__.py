@@ -4,4 +4,4 @@ from open_webui.services.archival.service import (
     ArchiveResult,
 )
 
-__all__ = ["ArchiveService", "ArchiveData", "ArchiveResult"]
+__all__ = ['ArchiveService', 'ArchiveData', 'ArchiveResult']

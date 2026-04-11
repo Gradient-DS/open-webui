@@ -113,7 +113,7 @@ openWebui:
     enablePersistentConfig: "false"
     resetConfigOnStart: "true"
     webuiName: "soev.ai"
-    corsAllowOrigin: "*"
+    corsAllowOrigin: ""  # Empty = defaults to https://<tenant.domain>. Override for additional origins.
 
     # Locale
     defaultLocale: "nl-NL"
@@ -141,6 +141,9 @@ openWebui:
     # LLM Providers
     enableOllamaApi: "false"
     openaiApiBaseUrl: "https://router.huggingface.co/v1"
+    # Forward user identity headers to upstream LLM API (required for LiteLLM per-user tracking)
+    enableForwardUserInfoHeaders: "false"
+    forwardUserInfoHeaderUserId: "X-OpenWebUI-User-Id"  # Header name for user UUID forwarding
 
     # Vector Database (Weaviate) - uses local Weaviate in tenant namespace
     vectorDb: "weaviate"
@@ -169,6 +172,7 @@ openWebui:
 
     # File Processing
     fileProcessingMaxConcurrent: "10"  # Max concurrent file processing tasks
+    fileDownloadConcurrencyMultiplier: "3"  # Download concurrency = processing × this multiplier
 
     # Content Extraction & Reranking (via shared services)
     contentExtractionEngine: "external"
@@ -200,10 +204,24 @@ openWebui:
     featureKnowledge: "True"
     featurePrompts: "True"
     featureTools: "False"
+    featureSkills: "False"
+    featureBuiltinTools: "False"
     featureAdminEvaluations: "True"
     featureAdminFunctions: "False"
     featureAdminSettings: "True"
-    featureAdminSettingsTabs: "models,tools,interface,db,email"
+    featureAdminSettingsTabs: "models,tools,interface,db,email,acceptance,security"
+    featureWebpageUrl: "True"
+    featureReferenceChats: "True"
+    featureInputMenu: "True"
+    featureTemporaryChat: "True"
+    featureToolServers: "False"
+    featureTerminalServers: "False"
+
+    # PDF export
+    useStylizedPdfExport: "False"  # Set to "True" to use old screenshot-based PDF export
+
+    # Memories
+    enableMemories: "true"
 
     # Notes
     enableNotes: "true"
@@ -231,21 +249,35 @@ openWebui:
     userPermissionsWorkspacePromptsAccess: "true"
     userPermissionsWorkspaceToolsAccess: "false"
 
+    # Workspace Sharing (allow users to share with specific groups/individuals)
+    userPermissionsWorkspaceModelsAllowSharing: "false"
+    userPermissionsWorkspaceKnowledgeAllowSharing: "false"
+    userPermissionsWorkspacePromptsAllowSharing: "false"
+    userPermissionsWorkspaceToolsAllowSharing: "false"
+    userPermissionsWorkspaceSkillsAllowSharing: "false"
+    userPermissionsNotesAllowSharing: "false"
+
     # Workspace Public Sharing (allow users to share with all tenant users)
     userPermissionsWorkspaceModelsAllowPublicSharing: "false"
     userPermissionsWorkspaceKnowledgeAllowPublicSharing: "false"
     userPermissionsWorkspacePromptsAllowPublicSharing: "false"
     userPermissionsWorkspaceToolsAllowPublicSharing: "false"
+    userPermissionsWorkspaceSkillsAllowPublicSharing: "false"
     userPermissionsNotesAllowPublicSharing: "false"
+
+    # Access Grants (allow sharing to individual users, not just groups)
+    userPermissionsAccessGrantsAllowUsers: "true"
 
     # UI Features
     greetingTemplate: ""
     defaultPromptSuggestions: "[]"
+    defaultModels: ""              # Comma-separated model IDs for new users (e.g., "model-a,model-b")
     enableFolders: "true"
     userPermissionsFeaturesFolders: "true"
     enableChannels: "false"
     userPermissionsFeaturesChannels: "false"
     enableCommunitySharing: "false"
+    enableCitationRelevance: "true"
     enableMessageRating: "true"
     enableUserWebhooks: "false"
     enableAutocompleteGeneration: "false"
@@ -277,6 +309,8 @@ openWebui:
 
     # Admin
     enableAdminExport: "false"
+    enableDataExport: "true"
+    dataExportRetentionHours: "24"
     enableAdminChatAccess: "false"
     enableAdminWorkspaceContentAccess: "false"  # Disable admin seeing all prompts/models
     bypassAdminAccessControl: "false"  # Admin must follow access control
@@ -284,7 +318,19 @@ openWebui:
     enableEvaluationArenaModels: "false"
     enableApiKeys: "false"
     enableImageGeneration: "false"
+    imageGenerationEngine: "openai"
+    imageGenerationModel: ""
+    imagesOpenaiApiBaseUrl: ""
+    imageSize: "1024x1024"
+    # Google Drive Integration
     enableGoogleDriveIntegration: "false"
+    googleDriveClientId: ""   # Google OAuth Client ID (for Picker + sync)
+
+    # Google Drive Sync (for Knowledge Bases)
+    enableGoogleDriveSync: "false"
+    googleDriveSyncIntervalMinutes: "60"
+    googleDriveMaxFilesPerSync: "500"
+    googleDriveMaxFileSizeMb: "100"
 
     # OneDrive Integration
     enableOnedriveIntegration: "false"
@@ -300,6 +346,9 @@ openWebui:
     onedriveMaxFilesPerSync: "250"
     onedriveMaxFileSizeMb: "10"
 
+    # Knowledge Base File Limit
+    knowledgeMaxFileCount: "250"
+
     # Email Invites (Microsoft Graph API)
     enableEmailInvites: "false"
     emailGraphTenantId: ""       # Azure AD Tenant ID for email app
@@ -313,6 +362,30 @@ openWebui:
 
     bypassModelAccessControl: "false"
 
+    # Agent API (internal: routes chat UI to external agent service)
+    agentApiEnabled: "false"
+    agentApiBaseUrl: ""
+    agentApiAgent: ""
+
+    # Agent Proxy (external: exposes agent API to external callers via /api/v1/agent/)
+    enableAgentProxy: "false"
+
+    # Two-Factor Authentication (TOTP)
+    enable2fa: "false"
+    require2fa: "false"
+    twoFaGracePeriodDays: "7"
+
+    # Security Headers (all enabled by default — set to "" to disable)
+    securityHeaders:
+      hsts: "max-age=31536000;includeSubDomains"
+      xFrameOptions: "SAMEORIGIN"
+      xContentType: "nosniff"
+      referrerPolicy: "strict-origin-when-cross-origin"
+      cacheControl: "no-store, max-age=0"
+
+    # Cookie Security (true for all HTTPS deployments)
+    cookieSecure: "true"
+
     # Audit Logging
     # Levels: NONE, METADATA, REQUEST, REQUEST_RESPONSE
     # METADATA logs who/what/when without PII from request/response bodies
@@ -324,6 +397,18 @@ openWebui:
     enableAutoArchiveOnSelfDelete: "false"
     autoArchiveRetentionDays: "365"  # 1 year for self-deletions
 
+    # Data Retention TTL (DPIA / GDPR storage limitation)
+    # Set dataRetentionTtlDays > 0 to enable automated data cleanup
+    dataRetentionTtlDays: "0"             # 0 = disabled (customers opt-in)
+    userInactivityTtlDays: "0"            # 0 = inherit from master TTL
+    chatRetentionTtlDays: "0"             # 0 = inherit from master TTL
+    knowledgeRetentionTtlDays: "0"        # 0 = inherit from master TTL
+    dataRetentionWarningDays: "30"        # Days before TTL to flag as approaching deletion
+    enableRetentionWarningEmail: "false"  # Send warning emails via Graph API before deletion
+
+    # Data Sovereignty Warnings
+    enableDataWarnings: "True"
+
     # Storage Provider
     # Set to "s3" to use S3-compatible object storage for file uploads
     # Leave empty for default local storage (PVC)
@@ -333,6 +418,9 @@ openWebui:
     s3EndpointUrl: ""             # For S3-compatible storage (e.g., https://object.previder.nl)
     s3KeyPrefix: ""               # Optional prefix for all keys
     s3EnableTagging: "false"
+
+    # Easter Eggs (disabled)
+    enableEasterEggs: "false"
 
     # Telemetry (disabled)
     scarfNoAnalytics: "true"
@@ -448,7 +536,8 @@ weaviate:
     persistence:
       dataPath: "/var/lib/weaviate"
     defaultVectorizerModule: "none"
-    enableModules: ""
+    enableModules: "backup-filesystem"
+    backupFilesystemPath: "/var/lib/weaviate/backups"
     clusterHostname: "node1"
 
 # -----------------------------------------------------------------------------
@@ -456,7 +545,7 @@ weaviate:
 # -----------------------------------------------------------------------------
 ingress:
   enabled: true
-  className: nginx
+  className: ""
   annotations:
     cert-manager.io/cluster-issuer: letsencrypt-prod
   tls:
@@ -471,6 +560,10 @@ secrets:
   webuiSecretKey: ""  # Generate with: openssl rand -hex 32
   openaiApiKey: ""
   ragOpenaiApiKey: ""
+
+  # Google Drive / OAuth (leave empty to disable)
+  googleClientSecret: ""
+  googleDriveApiKey: ""    # Google Picker API key
 
   # Microsoft OAuth (leave empty to disable)
   microsoftClientSecret: ""
@@ -500,16 +593,27 @@ serviceAccount:
 # -----------------------------------------------------------------------------
 # External Secrets Operator
 # -----------------------------------------------------------------------------
-# When enabled, secrets are fetched from GCP Secret Manager instead of inline Helm values
+# When enabled, secrets are fetched from 1Password via ESO SDK provider
 externalSecrets:
   enabled: false
-  gcpProject: ""
   refreshInterval: "1h"
-  # Optional: GCP credentials secret for non-Workload Identity clusters
-  gcpCredentialsSecret:
-    name: gcp-secret-manager-credentials
-    key: secret-access-credentials
-    namespace: external-secrets
+  onepassword:
+    vault: ""                                    # 1Password vault name (e.g., "soev-octobox")
+    itemName: "tenant-secrets"                   # Item name in the vault
+    serviceAccountSecret: "onepassword-sa-token" # K8s secret containing SA token
+    serviceAccountKey: "token"                   # Key within the K8s secret
+    cache: true                                  # Set to false if ESO version doesn't support cache
+    cacheTTL: "5m"
+    cacheMaxSize: 100
+    # Toggle optional fields (set to true if the 1P item contains these)
+    fields:
+      s3AccessKeyId: false
+      emailGraphClientSecret: false
+      microsoftClientSecret: false
+      googleClientSecret: false
+      googleDriveApiKey: false
+      externalDocumentLoaderApiKey: false
+      ragExternalRerankerApiKey: false
 
 # -----------------------------------------------------------------------------
 # Network Policy

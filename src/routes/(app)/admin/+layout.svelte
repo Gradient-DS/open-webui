@@ -2,12 +2,12 @@
 	import { onMount, getContext } from 'svelte';
 	import { goto } from '$app/navigation';
 
-	import { WEBUI_NAME, mobile, showSidebar, user } from '$lib/stores';
+	import { WEBUI_NAME, config, mobile, showSidebar, user } from '$lib/stores';
+	import { isFeatureEnabled } from '$lib/utils/features';
 	import { page } from '$app/stores';
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
 
 	import Sidebar from '$lib/components/icons/Sidebar.svelte';
-	import { isFeatureEnabled } from '$lib/utils/features';
 
 	const i18n = getContext('i18n');
 
@@ -50,7 +50,7 @@
 			? 'md:max-w-[calc(100%-var(--sidebar-width))]'
 			: ' md:max-w-[calc(100%-49px)]'}  w-full max-w-full"
 	>
-		<nav class="   px-2.5 pt-1.5 backdrop-blur-xl drag-region">
+		<nav class="   px-2.5 pt-1.5 backdrop-blur-xl drag-region select-none">
 			<div class=" flex items-center gap-1">
 				{#if $mobile}
 					<div class="{$showSidebar ? 'md:hidden' : ''} flex flex-none items-center self-end">
@@ -75,45 +75,52 @@
 
 				<div class=" flex w-full">
 					<div
-						class="flex gap-1 scrollbar-none overflow-x-auto w-fit text-center text-sm font-medium rounded-full bg-transparent pt-1"
+						class="flex gap-1 scrollbar-none overflow-x-auto w-fit text-center text-sm font-medium bg-transparent pt-1"
 					>
 						<a
-							class="min-w-fit p-1.5 {$page.url.pathname.includes('/admin/users')
-								? ''
-								: 'text-gray-300 dark:text-gray-600 hover:text-gray-700 dark:hover:text-white'} transition"
+							draggable="false"
+							class="min-w-fit p-1.5 rounded-lg {$page.url.pathname.includes('/admin/users')
+								? 'bg-gray-100 dark:bg-gray-800'
+								: 'text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-850'} transition select-none"
 							href="/admin">{$i18n.t('Users')}</a
 						>
 
-						<!-- <a
-							class="min-w-fit p-1.5 {$page.url.pathname.includes('/admin/analytics')
-								? ''
-								: 'text-gray-300 dark:text-gray-600 hover:text-gray-700 dark:hover:text-white'} transition"
-							href="/admin/analytics">{$i18n.t('Analytics')}</a
-						> -->
+						{#if $config?.features.enable_admin_analytics ?? true}
+							<a
+								draggable="false"
+								class="min-w-fit p-1.5 rounded-lg {$page.url.pathname.includes('/admin/analytics')
+									? 'bg-gray-100 dark:bg-gray-800'
+									: 'text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-850'} transition select-none"
+								href="/admin/analytics">{$i18n.t('Analytics')}</a
+							>
+						{/if}
 
 						{#if isFeatureEnabled('admin_evaluations')}
 							<a
-								class="min-w-fit p-1.5 {$page.url.pathname.includes('/admin/evaluations')
-									? ''
-									: 'text-gray-300 dark:text-gray-600 hover:text-gray-700 dark:hover:text-white'} transition"
+								draggable="false"
+								class="min-w-fit p-1.5 rounded-lg {$page.url.pathname.includes('/admin/evaluations')
+									? 'bg-gray-100 dark:bg-gray-800'
+									: 'text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-850'} transition select-none"
 								href="/admin/evaluations">{$i18n.t('Evaluations')}</a
 							>
 						{/if}
 
 						{#if isFeatureEnabled('admin_functions')}
 							<a
-								class="min-w-fit p-1.5 {$page.url.pathname.includes('/admin/functions')
-									? ''
-									: 'text-gray-300 dark:text-gray-600 hover:text-gray-700 dark:hover:text-white'} transition"
+								draggable="false"
+								class="min-w-fit p-1.5 rounded-lg {$page.url.pathname.includes('/admin/functions')
+									? 'bg-gray-100 dark:bg-gray-800'
+									: 'text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-850'} transition select-none"
 								href="/admin/functions">{$i18n.t('Functions')}</a
 							>
 						{/if}
 
 						{#if isFeatureEnabled('admin_settings')}
 							<a
-								class="min-w-fit p-1.5 {$page.url.pathname.includes('/admin/settings')
-									? ''
-									: 'text-gray-300 dark:text-gray-600 hover:text-gray-700 dark:hover:text-white'} transition"
+								draggable="false"
+								class="min-w-fit p-1.5 rounded-lg {$page.url.pathname.includes('/admin/settings')
+									? 'bg-gray-100 dark:bg-gray-800'
+									: 'text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-850'} transition select-none"
 								href="/admin/settings">{$i18n.t('Settings')}</a
 							>
 						{/if}

@@ -14,6 +14,8 @@
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
 	import DocumentPage from '$lib/components/icons/DocumentPage.svelte';
 	import Database from '$lib/components/icons/Database.svelte';
+	import OneDrive from '$lib/components/icons/OneDrive.svelte';
+	import GoogleDrive from '$lib/components/icons/GoogleDrive.svelte';
 	import GlobeAlt from '$lib/components/icons/GlobeAlt.svelte';
 	import Youtube from '$lib/components/icons/Youtube.svelte';
 	import Folder from '$lib/components/icons/Folder.svelte';
@@ -25,6 +27,7 @@
 
 	let selectedIdx = 0;
 	let items = [];
+	let searchDebounceTimer: ReturnType<typeof setTimeout>;
 
 	export let filteredItems = [];
 	$: filteredItems = [
@@ -69,9 +72,16 @@
 
 	$: items = [...folderItems, ...knowledgeItems, ...fileItems];
 
-	$: if (query !== null) {
-		getItems();
+	$: if (query !== undefined) {
+		clearTimeout(searchDebounceTimer);
+		searchDebounceTimer = setTimeout(() => {
+			getItems();
+		}, 200);
 	}
+
+	onDestroy(() => {
+		clearTimeout(searchDebounceTimer);
+	});
 
 	const getItems = () => {
 		getFolderItems();
@@ -99,6 +109,7 @@
 			knowledgeItems = res.items.map((item) => {
 				return {
 					...item,
+					knowledge_type: item.type,
 					type: 'collection'
 				};
 			});
@@ -128,20 +139,6 @@
 		}
 
 		await tick();
-	});
-
-	const onKeyDown = (e) => {
-		if (e.key === 'Enter') {
-			e.preventDefault();
-			select();
-		}
-	};
-	onMount(() => {
-		window.addEventListener('keydown', onKeyDown);
-	});
-
-	onDestroy(() => {
-		window.removeEventListener('keydown', onKeyDown);
 	});
 </script>
 
@@ -190,7 +187,13 @@
 						placement="top"
 					>
 						{#if item?.type === 'collection'}
-							<Database className="size-4" />
+							{#if item.knowledge_type === 'onedrive'}
+								<OneDrive className="size-4" />
+							{:else if item.knowledge_type === 'google_drive'}
+								<GoogleDrive className="size-4" />
+							{:else}
+								<Database className="size-4" />
+							{/if}
 						{:else if item?.type === 'folder'}
 							<Folder className="size-4" />
 						{:else}
@@ -212,7 +215,7 @@
 		<button
 			class="px-2 py-1 rounded-xl w-full text-left bg-gray-50 dark:bg-gray-800 dark:text-gray-100 selected-command-option-button"
 			type="button"
-			data-selected={true}
+			data-selected={selectedIdx === filteredItems.findIndex((i) => i.type === 'youtube')}
 			on:click={() => {
 				if (isValidHttpUrl(query)) {
 					onSelect({
@@ -240,7 +243,7 @@
 		<button
 			class="px-2 py-1 rounded-xl w-full text-left bg-gray-50 dark:bg-gray-800 dark:text-gray-100 selected-command-option-button"
 			type="button"
-			data-selected={true}
+			data-selected={selectedIdx === filteredItems.findIndex((i) => i.type === 'web')}
 			on:click={() => {
 				if (isValidHttpUrl(query)) {
 					onSelect({

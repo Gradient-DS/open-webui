@@ -10,46 +10,51 @@ from alembic import op
 import sqlalchemy as sa
 from open_webui.migrations.util import get_existing_tables
 
-revision = "2c5f92a9fd66"
-down_revision = "f8e1a9c2d3b4"
+revision = '2c5f92a9fd66'
+down_revision = 'f8e1a9c2d3b4'
 branch_labels = None
 depends_on = None
 
 
+def _column_exists(table_name: str, column_name: str) -> bool:
+    conn = op.get_bind()
+    inspector = sa.inspect(conn)
+    columns = [c['name'] for c in inspector.get_columns(table_name)]
+    return column_name in columns
+
+
 def upgrade():
     existing_tables = get_existing_tables()
-    if "knowledge" in existing_tables:
+    if 'knowledge' in existing_tables:
+        if _column_exists('knowledge', 'type'):
+            return
         op.add_column(
-            "knowledge",
-            sa.Column("type", sa.Text(), nullable=False, server_default="local"),
+            'knowledge',
+            sa.Column('type', sa.Text(), nullable=False, server_default='local'),
         )
 
         # Data migration: set type="onedrive" for KBs with onedrive_sync in meta
         conn = op.get_bind()
         dialect = conn.dialect.name
 
-        if dialect == "sqlite":
+        if dialect == 'sqlite':
             conn.execute(
-                sa.text(
-                    """
+                sa.text("""
                     UPDATE knowledge
                     SET type = 'onedrive'
                     WHERE json_extract(meta, '$.onedrive_sync') IS NOT NULL
-                    """
-                )
+                    """)
             )
         else:
             # PostgreSQL
             conn.execute(
-                sa.text(
-                    """
+                sa.text("""
                     UPDATE knowledge
                     SET type = 'onedrive'
                     WHERE meta::jsonb ? 'onedrive_sync'
-                    """
-                )
+                    """)
             )
 
 
 def downgrade():
-    op.drop_column("knowledge", "type")
+    op.drop_column('knowledge', 'type')

@@ -18,7 +18,7 @@
 
 	let name = '';
 	let description = '';
-	let accessControl = {};
+	let accessGrants = [];
 
 	const submitHandler = async () => {
 		loading = true;
@@ -35,7 +35,7 @@
 			localStorage.token,
 			name,
 			description,
-			type === 'local' ? accessControl : {},
+			type === 'local' ? accessGrants : [],
 			type
 		).catch((e) => {
 			toast.error(`${e}`);
@@ -45,6 +45,8 @@
 			toast.success($i18n.t('Knowledge created successfully.'));
 			if (type === 'onedrive') {
 				goto(`/workspace/knowledge/${res.id}?start_onedrive_sync=true`);
+			} else if (type === 'google_drive') {
+				goto(`/workspace/knowledge/${res.id}?start_google_drive_sync=true`);
 			} else {
 				goto(`/workspace/knowledge/${res.id}`);
 			}
@@ -123,10 +125,12 @@
 		{#if type === 'local'}
 			<div class="mt-2">
 				<AccessControl
-					bind:accessControl
+					bind:accessGrants
 					accessRoles={['read', 'write']}
 					share={$user?.permissions?.sharing?.knowledge || $user?.role === 'admin'}
 					sharePublic={$user?.permissions?.sharing?.public_knowledge || $user?.role === 'admin'}
+					shareUsers={($user?.permissions?.access_grants?.allow_users ?? true) ||
+						$user?.role === 'admin'}
 				/>
 			</div>
 		{/if}

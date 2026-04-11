@@ -69,53 +69,81 @@
 						</div>
 
 						{#if feedbackData}
+							{@const isConversation = feedbackData?.meta?.scope === 'conversation'}
 							{@const messageId = feedbackData?.meta?.message_id}
-							{@const messages = feedbackData?.snapshot?.chat?.chat?.history.messages}
+							{@const messages = feedbackData?.snapshot?.chat?.chat?.history?.messages}
 
-							{#if messages[messages[messageId]?.parentId]}
+							{#if isConversation}
 								<div class="flex flex-col w-full mb-2">
-									<div class="mb-1 text-xs text-gray-500">{$i18n.t('Prompt')}</div>
-
-									<div class="flex-1 text-xs whitespace-pre-line break-words">
-										<span>{messages[messages[messageId]?.parentId]?.content || '-'}</span>
+									<div class="mb-1 text-xs text-gray-500">{$i18n.t('Type')}</div>
+									<div class="flex-1 text-xs">
+										<span>{$i18n.t('Conversation Feedback')}</span>
 									</div>
 								</div>
-							{/if}
 
-							{#if messages[messageId]}
 								<div class="flex flex-col w-full mb-2">
-									<div class="mb-1 text-xs text-gray-500">{$i18n.t('Response')}</div>
-									<div
-										class="flex-1 text-xs whitespace-pre-line break-words max-h-32 overflow-y-auto"
-									>
-										<span>{messages[messageId]?.content || '-'}</span>
+									<div class="mb-1 text-xs text-gray-500">{$i18n.t('Rating')}</div>
+									<div class="flex-1 text-xs">
+										<span>{feedbackData?.data?.rating ?? '-'} / {feedbackData?.meta?.scale_max ?? '?'}</span>
 									</div>
 								</div>
+
+								{#if feedbackData?.data?.comment}
+									<div class="flex flex-col w-full mb-2">
+										<div class="mb-1 text-xs text-gray-500">{$i18n.t('Comment')}</div>
+										<div class="flex-1 text-xs whitespace-pre-line break-words">
+											<span>{feedbackData.data.comment}</span>
+										</div>
+									</div>
+								{/if}
+							{:else}
+								{#if messages && messages[messages[messageId]?.parentId]}
+									<div class="flex flex-col w-full mb-2">
+										<div class="mb-1 text-xs text-gray-500">{$i18n.t('Prompt')}</div>
+
+										<div class="flex-1 text-xs whitespace-pre-line break-words">
+											<span>{messages[messages[messageId]?.parentId]?.content || '-'}</span>
+										</div>
+									</div>
+								{/if}
+
+								{#if messages && messages[messageId]}
+									<div class="flex flex-col w-full mb-2">
+										<div class="mb-1 text-xs text-gray-500">{$i18n.t('Response')}</div>
+										<div
+											class="flex-1 text-xs whitespace-pre-line break-words max-h-32 overflow-y-auto"
+										>
+											<span>{messages[messageId]?.content || '-'}</span>
+										</div>
+									</div>
+								{/if}
 							{/if}
 						{/if}
 
-						<div class="flex flex-col w-full mb-2">
-							<div class=" mb-1 text-xs text-gray-500">{$i18n.t('Rating')}</div>
+						{#if selectedFeedback?.meta?.scope !== 'conversation'}
+							<div class="flex flex-col w-full mb-2">
+								<div class=" mb-1 text-xs text-gray-500">{$i18n.t('Rating')}</div>
 
-							<div class="flex-1 text-xs">
-								<span>{selectedFeedback?.data?.details?.rating ?? '-'}</span>
+								<div class="flex-1 text-xs">
+									<span>{selectedFeedback?.data?.details?.rating ?? '-'}</span>
+								</div>
 							</div>
-						</div>
-						<div class="flex flex-col w-full mb-2">
-							<div class=" mb-1 text-xs text-gray-500">{$i18n.t('Reason')}</div>
+							<div class="flex flex-col w-full mb-2">
+								<div class=" mb-1 text-xs text-gray-500">{$i18n.t('Reason')}</div>
 
-							<div class="flex-1 text-xs">
-								<span>{selectedFeedback?.data?.reason || '-'}</span>
+								<div class="flex-1 text-xs">
+									<span>{selectedFeedback?.data?.reason || '-'}</span>
+								</div>
 							</div>
-						</div>
 
-						<div class="flex flex-col w-full mb-2">
-							<div class=" mb-1 text-xs text-gray-500">{$i18n.t('Comment')}</div>
+							<div class="flex flex-col w-full mb-2">
+								<div class=" mb-1 text-xs text-gray-500">{$i18n.t('Comment')}</div>
 
-							<div class="flex-1 text-xs">
-								<span>{selectedFeedback?.data?.comment || '-'}</span>
+								<div class="flex-1 text-xs">
+									<span>{selectedFeedback?.data?.comment || '-'}</span>
+								</div>
 							</div>
-						</div>
+						{/if}
 
 						{#if selectedFeedback?.data?.tags && selectedFeedback?.data?.tags.length}
 							<div class="mb-2 -mx-1">

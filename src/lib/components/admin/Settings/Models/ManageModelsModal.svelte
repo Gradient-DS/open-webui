@@ -67,18 +67,18 @@
 							class="flex gap-1 scrollbar-none overflow-x-auto w-fit text-center text-sm font-medium rounded-full bg-transparent dark:text-gray-200"
 						>
 							<button
-								class="min-w-fit p-1.5 {selected === 'ollama'
-									? ''
-									: 'text-gray-300 dark:text-gray-600 hover:text-gray-700 dark:hover:text-white'} transition"
+								class="min-w-fit p-1.5 rounded-lg {selected === 'ollama'
+									? 'bg-gray-100 dark:bg-gray-800'
+									: 'text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-850'} transition"
 								on:click={() => {
 									selected = 'ollama';
 								}}>{$i18n.t('Ollama')}</button
 							>
 
 							<!-- <button
-								class="min-w-fit p-1.5 {selected === 'llamacpp'
-									? ''
-									: 'text-gray-300 dark:text-gray-600 hover:text-gray-700 dark:hover:text-white'} transition"
+								class="min-w-fit p-1.5 rounded-lg {selected === 'llamacpp'
+									? 'bg-gray-100 dark:bg-gray-800'
+									: 'text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-850'} transition"
 								on:click={() => {
 									selected = 'llamacpp';
 								}}>{$i18n.t('Llama.cpp')}</button

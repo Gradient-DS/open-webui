@@ -118,6 +118,36 @@ export const downloadChatAsPDF = async (token: string, title: string, messages: 
 	return blob;
 };
 
+export const exportChatAsPdf = async (token: string, title: string, messages: object[]) => {
+	const blob = await fetch(`${WEBUI_API_BASE_URL}/utils/chat/pdf`, {
+		method: 'POST',
+		headers: {
+			'Content-Type': 'application/json',
+			Authorization: `Bearer ${token}`
+		},
+		body: JSON.stringify({ title, messages })
+	}).then((res) => {
+		if (!res.ok) throw new Error('PDF export failed');
+		return res.blob();
+	});
+	return blob;
+};
+
+export const exportChatAsDocx = async (token: string, title: string, messages: object[]) => {
+	const blob = await fetch(`${WEBUI_API_BASE_URL}/utils/chat/docx`, {
+		method: 'POST',
+		headers: {
+			'Content-Type': 'application/json',
+			Authorization: `Bearer ${token}`
+		},
+		body: JSON.stringify({ title, messages })
+	}).then((res) => {
+		if (!res.ok) throw new Error('DOCX export failed');
+		return res.blob();
+	});
+	return blob;
+};
+
 export const getHTMLFromMarkdown = async (token: string, md: string) => {
 	let error = null;
 

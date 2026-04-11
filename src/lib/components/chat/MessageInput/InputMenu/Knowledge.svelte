@@ -9,6 +9,8 @@
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
 	import Database from '$lib/components/icons/Database.svelte';
 	import DocumentPage from '$lib/components/icons/DocumentPage.svelte';
+	import OneDrive from '$lib/components/icons/OneDrive.svelte';
+	import GoogleDrive from '$lib/components/icons/GoogleDrive.svelte';
 	import Spinner from '$lib/components/common/Spinner.svelte';
 	import Loader from '$lib/components/common/Loader.svelte';
 	import ChevronDown from '$lib/components/icons/ChevronDown.svelte';
@@ -78,7 +80,9 @@
 			}
 
 			if (selectedFileItems) {
-				selectedFileItems = [...selectedFileItems, ...pageItems];
+				const existingIds = new Set(selectedFileItems.map((item) => item.id));
+				const newItems = pageItems.filter((item) => !existingIds.has(item.id));
+				selectedFileItems = [...selectedFileItems, ...newItems];
 			} else {
 				selectedFileItems = pageItems;
 			}
@@ -137,7 +141,9 @@
 			}
 
 			if (items) {
-				items = [...items, ...pageItems];
+				const existingIds = new Set(items.map((item) => item.id));
+				const newItems = pageItems.filter((item) => !existingIds.has(item.id));
+				items = [...items, ...newItems];
 			} else {
 				items = pageItems;
 			}
@@ -173,6 +179,7 @@
 						on:click={() => {
 							onSelect({
 								...item,
+								knowledge_type: item.type,
 								type: 'collection'
 							});
 						}}
@@ -186,12 +193,22 @@
 						}}
 						data-selected={idx === selectedIdx}
 					>
-						<div class="  text-black dark:text-gray-100 flex items-center gap-1 shrink-0">
+						<div class="w-full text-left text-black dark:text-gray-100 flex items-center gap-1">
 							<Tooltip content={$i18n.t('Collection')} placement="top">
-								<Database className="size-4" />
+								{#if item.type === 'onedrive'}
+									<OneDrive className="size-4" />
+								{:else if item.type === 'google_drive'}
+									<GoogleDrive className="size-4" />
+								{:else}
+									<Database className="size-4" />
+								{/if}
 							</Tooltip>
 
-							<Tooltip content={item.description || decodeString(item?.name)} placement="top-start">
+							<Tooltip
+								content={item.description || decodeString(item?.name)}
+								placement="top-start"
+								className="flex flex-1 min-w-0"
+							>
 								<div class="line-clamp-1 flex-1 text-sm">
 									{decodeString(item?.name)}
 								</div>
@@ -199,25 +216,27 @@
 						</div>
 					</button>
 
-					<Tooltip content={$i18n.t('Show Files')} placement="top">
-						<button
-							type="button"
-							class=" ml-2 opacity-50 hover:opacity-100 transition"
-							on:click={() => {
-								if (selectedItem && selectedItem.id === item.id) {
-									selectedItem = null;
-								} else {
-									selectedItem = item;
-								}
-							}}
-						>
-							{#if selectedItem && selectedItem.id === item.id}
-								<ChevronDown className="size-3" />
-							{:else}
-								<ChevronRight className="size-3" />
-							{/if}
-						</button>
-					</Tooltip>
+					{#if item.type === 'local' || !item.type}
+						<Tooltip content={$i18n.t('Show Files')} placement="top">
+							<button
+								type="button"
+								class=" ml-2 opacity-50 hover:opacity-100 transition"
+								on:click={() => {
+									if (selectedItem && selectedItem.id === item.id) {
+										selectedItem = null;
+									} else {
+										selectedItem = item;
+									}
+								}}
+							>
+								{#if selectedItem && selectedItem.id === item.id}
+									<ChevronDown className="size-3" />
+								{:else}
+									<ChevronRight className="size-3" />
+								{/if}
+							</button>
+						</Tooltip>
+					{/if}
 				</div>
 
 				{#if selectedItem && selectedItem.id === item.id}

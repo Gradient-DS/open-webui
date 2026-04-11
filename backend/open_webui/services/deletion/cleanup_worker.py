@@ -25,7 +25,7 @@ def start_cleanup_worker():
     global _cleanup_task
     if _cleanup_task is None or _cleanup_task.done():
         _cleanup_task = asyncio.create_task(_run_cleanup_loop())
-        log.info("Deletion cleanup worker started (interval: %ds)", CLEANUP_INTERVAL_SECONDS)
+        log.info('Deletion cleanup worker started (interval: %ds)', CLEANUP_INTERVAL_SECONDS)
 
 
 def stop_cleanup_worker():
@@ -33,7 +33,7 @@ def stop_cleanup_worker():
     global _cleanup_task
     if _cleanup_task and not _cleanup_task.done():
         _cleanup_task.cancel()
-        log.info("Deletion cleanup worker stopped")
+        log.info('Deletion cleanup worker stopped')
     _cleanup_task = None
 
 
@@ -43,23 +43,24 @@ async def _run_cleanup_loop():
     try:
         await run_in_threadpool(_process_pending_deletions)
     except Exception:
-        log.exception("Error in initial cleanup run")
+        log.exception('Error in initial cleanup run')
 
     while True:
         try:
             await asyncio.sleep(CLEANUP_INTERVAL_SECONDS)
             await run_in_threadpool(_process_pending_deletions)
         except asyncio.CancelledError:
-            log.info("Cleanup worker cancelled")
+            log.info('Cleanup worker cancelled')
             return
         except Exception:
-            log.exception("Error in cleanup loop")
+            log.exception('Error in cleanup loop')
 
 
 def _process_pending_deletions():
     """Process all pending KB and chat deletions. Runs in thread pool."""
     _process_pending_kb_deletions()
     _process_pending_chat_deletions()
+    _process_expired_suspensions()
 
 
 def _process_pending_kb_deletions():
@@ -71,7 +72,7 @@ def _process_pending_kb_deletions():
     if not pending_kbs:
         return
 
-    log.info("Processing %d pending KB deletions", len(pending_kbs))
+    log.info('Processing %d pending KB deletions', len(pending_kbs))
 
     for kb in pending_kbs:
         try:
@@ -83,23 +84,25 @@ def _process_pending_kb_deletions():
             report = DeletionService.delete_knowledge(kb.id, delete_files=False)
 
             if report.has_errors:
-                log.warning("KB %s cleanup had errors: %s", kb.id, report.errors)
+                log.warning('KB %s cleanup had errors: %s', kb.id, report.errors)
 
             # Clean up orphaned files (checks KB and chat references)
             if kb_file_ids:
                 file_report = DeletionService.delete_orphaned_files_batch(kb_file_ids)
                 if file_report.has_errors:
-                    log.warning("KB %s file cleanup errors: %s", kb.id, file_report.errors)
+                    log.warning('KB %s file cleanup errors: %s', kb.id, file_report.errors)
                 log.info(
-                    "KB %s file cleanup: %d storage, %d vectors, %d DB records",
-                    kb.id, file_report.storage_files,
-                    file_report.vector_collections, file_report.total_db_records,
+                    'KB %s file cleanup: %d storage, %d vectors, %d DB records',
+                    kb.id,
+                    file_report.storage_files,
+                    file_report.vector_collections,
+                    file_report.total_db_records,
                 )
 
-            log.info("KB %s (%s) cleanup complete", kb.id, kb.name)
+            log.info('KB %s (%s) cleanup complete', kb.id, kb.name)
 
         except Exception:
-            log.exception("Failed to cleanup KB %s", kb.id)
+            log.exception('Failed to cleanup KB %s', kb.id)
 
 
 def _process_pending_chat_deletions():
@@ -112,7 +115,7 @@ def _process_pending_chat_deletions():
     if not pending_chats:
         return
 
-    log.info("Processing %d pending chat deletions", len(pending_chats))
+    log.info('Processing %d pending chat deletions', len(pending_chats))
 
     # Collect all file IDs across all pending chats
     all_file_ids: list[str] = []
@@ -124,28 +127,61 @@ def _process_pending_chat_deletions():
             all_file_ids.extend(cf.file_id for cf in chat_files)
 
             # Clean up orphaned tags
-            if chat.meta and chat.meta.get("tags"):
-                for tag_name in chat.meta.get("tags", []):
+            if chat.meta and chat.meta.get('tags'):
+                for tag_name in chat.meta.get('tags', []):
                     try:
                         if Chats.count_chats_by_tag_name_and_user_id(tag_name, chat.user_id) == 0:
                             Tags.delete_tag_by_name_and_user_id(tag_name, chat.user_id)
                     except Exception as e:
-                        log.warning("Failed to cleanup tag %s: %s", tag_name, e)
+                        log.warning('Failed to cleanup tag %s: %s', tag_name, e)
 
             # Hard-delete the chat (and its shared copy)
             Chats.delete_chat_by_id(chat.id)
 
         except Exception:
-            log.exception("Failed to cleanup chat %s", chat.id)
+            log.exception('Failed to cleanup chat %s', chat.id)
 
     # Batch cleanup orphaned files from all processed chats
     if all_file_ids:
         unique_file_ids = list(set(all_file_ids))
         file_report = DeletionService.delete_orphaned_files_batch(unique_file_ids)
         if file_report.has_errors:
-            log.warning("Chat file cleanup errors: %s", file_report.errors)
+            log.warning('Chat file cleanup errors: %s', file_report.errors)
         log.info(
-            "Chat file cleanup: %d storage, %d vectors, %d DB records",
+            'Chat file cleanup: %d storage, %d vectors, %d DB records',
             file_report.storage_files,
-            file_report.vector_collections, file_report.total_db_records,
+            file_report.vector_collections,
+            file_report.total_db_records,
         )
+
+
+def _process_expired_suspensions():
+    """Hard-delete cloud KBs that have been suspended for 30+ days."""
+    from open_webui.models.knowledge import Knowledges
+    from open_webui.services.deletion import DeletionService
+
+    expired_kbs = Knowledges.get_suspended_expired_knowledge(limit=10)
+    if not expired_kbs:
+        return
+
+    log.info('Processing %d expired suspended KBs for hard-deletion', len(expired_kbs))
+
+    for kb in expired_kbs:
+        try:
+            kb_files = Knowledges.get_files_by_id(kb.id)
+            kb_file_ids = [f.id for f in kb_files]
+
+            report = DeletionService.delete_knowledge(kb.id, delete_files=False)
+
+            if report.has_errors:
+                log.warning('Suspended KB %s cleanup had errors: %s', kb.id, report.errors)
+
+            if kb_file_ids:
+                file_report = DeletionService.delete_orphaned_files_batch(kb_file_ids)
+                if file_report.has_errors:
+                    log.warning('Suspended KB %s file cleanup errors: %s', kb.id, file_report.errors)
+
+            log.info('Suspended KB %s (%s) hard-deleted after 30-day grace period', kb.id, kb.name)
+
+        except Exception:
+            log.exception('Failed to cleanup suspended KB %s', kb.id)

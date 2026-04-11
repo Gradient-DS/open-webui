@@ -33,13 +33,21 @@
 		addFileToKnowledgeById,
 		getKnowledgeById,
 		removeFileFromKnowledgeById,
+		resetKnowledgeById,
 		updateFileFromKnowledgeById,
 		updateKnowledgeById,
+		updateKnowledgeAccessGrants,
 		searchKnowledgeFilesById
 	} from '$lib/apis/knowledge';
 	import { processWeb, processYoutubeVideo } from '$lib/apis/retrieval';
-	import { startOneDriveSyncItems, getSyncStatus, cancelSync, getTokenStatus, removeSource, type SyncStatusResponse, type SyncItem, type FailedFile, type SyncErrorType } from '$lib/apis/onedrive';
+	import { createSyncApi, type SyncStatusResponse, type SyncErrorType, type FailedFile } from '$lib/apis/sync';
+	import { startOneDriveSyncItems, type SyncItem as OneDriveSyncItem } from '$lib/apis/onedrive';
 	import { openOneDriveItemPicker, getGraphApiToken } from '$lib/utils/onedrive-file-picker';
+	import {
+		startGoogleDriveSyncItems,
+		type SyncItem as GoogleDriveSyncItem,
+	} from '$lib/apis/googledrive';
+	import { createKnowledgePicker } from '$lib/utils/google-drive-picker';
 	import { WEBUI_API_BASE_URL } from '$lib/constants';
 
 	import { blobToFile, isYoutubeUrl } from '$lib/utils';
@@ -59,6 +67,7 @@
 	import ChevronLeft from '$lib/components/icons/ChevronLeft.svelte';
 	import LockClosed from '$lib/components/icons/LockClosed.svelte';
 	import OneDrive from '$lib/components/icons/OneDrive.svelte';
+	import GoogleDrive from '$lib/components/icons/GoogleDrive.svelte';
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
 	import AccessControlModal from '../common/AccessControlModal.svelte';
 	import Search from '$lib/components/icons/Search.svelte';
@@ -66,6 +75,72 @@
 	import DropdownOptions from '$lib/components/common/DropdownOptions.svelte';
 	import Pagination from '$lib/components/common/Pagination.svelte';
 	import AttachWebpageModal from '$lib/components/chat/MessageInput/AttachWebpageModal.svelte';
+
+	// ===== Cloud sync provider configuration =====
+
+	interface CloudSyncProvider {
+		type: string;                    // "onedrive" | "google_drive"
+		metaKey: string;                 // "onedrive_sync" | "google_drive_sync"
+		eventPrefix: string;             // "onedrive" | "googledrive"
+		fileIdPrefix: string;            // "onedrive-" | "googledrive-"
+		sourceMetaField: string;         // "onedrive" | "google_drive" (for file.meta.source)
+		label: string;                   // "OneDrive" | "Google Drive"
+		api: ReturnType<typeof createSyncApi>;
+		startSyncParam: string;          // "start_onedrive_sync" | "start_google_drive_sync"
+		authCallbackType: string;        // "onedrive_auth_callback" | "google_drive_auth_callback"
+		authBasePath: string;            // "onedrive" | "google-drive" (for auth URL)
+		authPopupName: string;           // "onedrive_auth" | "google_drive_auth"
+		configKey: string;               // "onedrive" | "google_drive" (for $config?.xxx?.has_client_secret)
+	}
+
+	const CLOUD_PROVIDERS: Record<string, CloudSyncProvider> = {
+		onedrive: {
+			type: 'onedrive',
+			metaKey: 'onedrive_sync',
+			eventPrefix: 'onedrive',
+			fileIdPrefix: 'onedrive-',
+			sourceMetaField: 'onedrive',
+			label: 'OneDrive',
+			api: createSyncApi('onedrive'),
+			startSyncParam: 'start_onedrive_sync',
+			authCallbackType: 'onedrive_auth_callback',
+			authBasePath: 'onedrive',
+			authPopupName: 'onedrive_auth',
+			configKey: 'onedrive',
+		},
+		google_drive: {
+			type: 'google_drive',
+			metaKey: 'google_drive_sync',
+			eventPrefix: 'googledrive',
+			fileIdPrefix: 'googledrive-',
+			sourceMetaField: 'google_drive',
+			label: 'Google Drive',
+			api: createSyncApi('google-drive'),
+			startSyncParam: 'start_google_drive_sync',
+			authCallbackType: 'google_drive_auth_callback',
+			authBasePath: 'google-drive',
+			authPopupName: 'google_drive_auth',
+			configKey: 'google_drive',
+		},
+	};
+
+	// ===== Unified cloud sync state =====
+
+	let cloudSyncState: Record<string, {
+		isSyncing: boolean;
+		isCancelling: boolean;
+		syncStatus: SyncStatusResponse | null;
+		bgSyncAuthorized: boolean;
+		bgSyncNeedsReauth: boolean;
+		refreshDone: boolean;
+	}> = {
+		onedrive: { isSyncing: false, isCancelling: false, syncStatus: null, bgSyncAuthorized: false, bgSyncNeedsReauth: false, refreshDone: false },
+		google_drive: { isSyncing: false, isCancelling: false, syncStatus: null, bgSyncAuthorized: false, bgSyncNeedsReauth: false, refreshDone: false },
+	};
+
+	$: isSyncBusy = Object.values(cloudSyncState).some(s => s.isSyncing || s.isCancelling);
+	$: activeProvider = knowledge?.type ? CLOUD_PROVIDERS[knowledge.type] ?? null : null;
+	$: activeState = activeProvider ? cloudSyncState[activeProvider.type] : null;
 
 	let largeScreen = true;
 
@@ -75,6 +150,7 @@
 	let showAddWebpageModal = false;
 	let showAddTextContentModal = false;
 
+	let showSyncConfirmModal = false;
 	let showCancelSyncConfirmModal = false;
 	let showAccessControlModal = false;
 
@@ -87,6 +163,8 @@
 			file_ids: string[];
 		};
 		files: any[];
+		access_grants?: any[];
+		write_access?: boolean;
 	};
 
 	let id = null;
@@ -100,6 +178,8 @@
 	let inputFiles = null;
 
 	let query = '';
+	let searchDebounceTimer: ReturnType<typeof setTimeout>;
+
 	let viewOption = null;
 	let sortKey = null;
 	let direction = null;
@@ -108,49 +188,51 @@
 	let fileItems = null;
 	let fileItemsTotal = null;
 
-	let _skipReactiveRefresh = false;
+	let loaded = false;
+	let queryDebounceActive = false;
+	let fetchId = 0;
 
 	const reset = () => {
 		currentPage = 1;
 	};
 
 	const init = async () => {
-		_skipReactiveRefresh = true;
 		reset();
-		_skipReactiveRefresh = false;
 		await getItemsPage();
 	};
 
-	$: if (
-		knowledgeId !== null &&
-		query !== undefined &&
-		viewOption !== undefined &&
-		sortKey !== undefined &&
-		direction !== undefined &&
-		currentPage !== undefined
-	) {
-		if (!_skipReactiveRefresh) {
+	// Consolidated reactive block — mirrors Knowledge.svelte list view pattern
+	$: if (loaded && knowledgeId !== null) {
+		// Track all dependencies explicitly
+		void query, viewOption, sortKey, direction, currentPage;
+
+		if (queryDebounceActive) {
+			// User is typing — debounce
+			clearTimeout(searchDebounceTimer);
+			searchDebounceTimer = setTimeout(() => {
+				reset();
+				getItemsPage();
+			}, 300);
+		} else {
+			// Filter/view/pagination change or initial load — fetch immediately
 			getItemsPage();
 		}
-	}
-
-	$: if (
-		query !== undefined &&
-		viewOption !== undefined &&
-		sortKey !== undefined &&
-		direction !== undefined
-	) {
-		reset();
 	}
 
 	const getItemsPage = async () => {
 		if (knowledgeId === null) return;
 
+		// Don't null items — keep showing stale data during re-fetch
+		const currentFetchId = ++fetchId;
+
 		if (sortKey === null) {
 			direction = null;
 		}
 
-		const isOneDrive = knowledge?.type === 'onedrive';
+		const isCloudKb = knowledge?.type && knowledge.type !== 'local';
+		const cloudLimit = isCloudKb
+			? ($config?.integration_providers?.[knowledge.type]?.max_files_per_kb || $config?.features?.knowledge_max_file_count || 2000)
+			: null;
 		const res = await searchKnowledgeFilesById(
 			localStorage.token,
 			knowledge.id,
@@ -159,15 +241,18 @@
 			sortKey,
 			direction,
 			currentPage,
-			isOneDrive ? 250 : null
+			cloudLimit
 		).catch(() => {
 			return null;
 		});
+
+		if (currentFetchId !== fetchId) return; // Stale response, discard
 
 		if (res) {
 			fileItems = res.items;
 			fileItemsTotal = res.total;
 		}
+		queryDebounceActive = false;
 		return res;
 	};
 
@@ -300,21 +385,6 @@
 			return;
 		}
 
-		// Reject files with disallowed extensions when allowed_extensions is configured
-		const allowedExtensions = $config?.file?.allowed_extensions ?? [];
-		if (allowedExtensions.length > 0) {
-			const fileExtension = file.name.split('.').pop()?.toLowerCase() ?? '';
-			if (!allowedExtensions.includes(fileExtension)) {
-				toast.error(
-					$i18n.t('Unsupported file type: .{{extension}}. Allowed types: {{types}}', {
-						extension: fileExtension,
-						types: allowedExtensions.join(', ')
-					})
-				);
-				return null;
-			}
-		}
-
 		fileItems = [fileItem, ...(fileItems ?? [])];
 		try {
 			let metadata = {
@@ -334,7 +404,7 @@
 			});
 
 			if (uploadedFile) {
-				console.log('File upload started, waiting for processing:', uploadedFile);
+				console.log(uploadedFile);
 				fileItems = fileItems.map((item) => {
 					if (item.itemId === fileItem.itemId) {
 						item.id = uploadedFile.id;
@@ -347,14 +417,43 @@
 					toast.warning(uploadedFile.error);
 					fileItems = fileItems.filter((file) => file.id !== uploadedFile.id);
 				}
-				// Don't call addFileHandler here - Socket.IO 'file:status' event will trigger it
-				// when processing completes
+				// Don't call addFileHandler here — Socket.IO 'file:status' event
+				// will trigger it when background processing completes
 			} else {
 				toast.error($i18n.t('Failed to upload file.'));
 			}
 		} catch (e) {
 			toast.error(`${e}`);
 		}
+	};
+
+	// Uploads multiple files with bounded concurrency.
+	// All paths (file input, drag-drop, directory) route through this.
+	const uploadFiles = async (
+		files: File[],
+		options: { concurrency?: number; onProgress?: (completed: number, total: number) => void } = {}
+	) => {
+		const { concurrency = 5, onProgress } = options;
+		const total = files.length;
+		if (total === 0) return;
+
+		let completed = 0;
+		const executing: Set<Promise<void>> = new Set();
+
+		for (const file of files) {
+			const task = uploadFileHandler(file).then(() => {
+				completed++;
+				executing.delete(task);
+				onProgress?.(completed, total);
+			});
+			executing.add(task);
+
+			if (executing.size >= concurrency) {
+				await Promise.race(executing);
+			}
+		}
+
+		await Promise.all(executing);
 	};
 
 	const uploadDirectoryHandler = async () => {
@@ -379,129 +478,136 @@
 		return path.split('/').some((part) => part.startsWith('.'));
 	};
 
+	// Recursively collects all non-hidden files from a directory handle
+	async function collectDirectoryFiles(
+		dirHandle: FileSystemDirectoryHandle,
+		path = ''
+	): Promise<File[]> {
+		const files: File[] = [];
+		for await (const entry of dirHandle.values()) {
+			if (entry.name.startsWith('.')) continue;
+			const entryPath = path ? `${path}/${entry.name}` : entry.name;
+			if (hasHiddenFolder(entryPath)) continue;
+
+			if (entry.kind === 'file') {
+				const file = await entry.getFile();
+				files.push(new File([file], entryPath, { type: file.type }));
+			} else if (entry.kind === 'directory') {
+				files.push(...(await collectDirectoryFiles(entry, entryPath)));
+			}
+		}
+		return files;
+	}
+
+	// Collects all File objects from a DataTransfer drop (files and recursive directories)
+	async function collectDroppedFiles(items: DataTransferItemList): Promise<File[]> {
+		const files: File[] = [];
+
+		const readEntry = (entry: FileSystemEntry): Promise<void> => {
+			return new Promise((resolve) => {
+				if (entry.isFile) {
+					(entry as FileSystemFileEntry).file((file) => {
+						files.push(file);
+						resolve();
+					});
+				} else if (entry.isDirectory) {
+					const reader = (entry as FileSystemDirectoryEntry).createReader();
+					reader.readEntries(async (entries) => {
+						await Promise.all(entries.map(readEntry));
+						resolve();
+					}, () => resolve());
+				} else {
+					resolve();
+				}
+			});
+		};
+
+		const entries: FileSystemEntry[] = [];
+		for (let i = 0; i < items.length; i++) {
+			const entry = items[i].webkitGetAsEntry();
+			if (entry) entries.push(entry);
+		}
+
+		await Promise.all(entries.map(readEntry));
+		return files;
+	}
+
 	// Modern browsers implementation using File System Access API
 	const handleModernBrowserUpload = async () => {
 		const dirHandle = await window.showDirectoryPicker();
-		let totalFiles = 0;
-		let uploadedFiles = 0;
+		const files = await collectDirectoryFiles(dirHandle);
 
-		// Function to update the UI with the progress
-		const updateProgress = () => {
-			const percentage = (uploadedFiles / totalFiles) * 100;
-			toast.info(
-				$i18n.t('Upload Progress: {{uploadedFiles}}/{{totalFiles}} ({{percentage}}%)', {
-					uploadedFiles: uploadedFiles,
-					totalFiles: totalFiles,
-					percentage: percentage.toFixed(2)
-				})
-			);
-		};
-
-		// Recursive function to count all files excluding hidden ones
-		async function countFiles(dirHandle) {
-			for await (const entry of dirHandle.values()) {
-				// Skip hidden files and directories
-				if (entry.name.startsWith('.')) continue;
-
-				if (entry.kind === 'file') {
-					totalFiles++;
-				} else if (entry.kind === 'directory') {
-					// Only process non-hidden directories
-					if (!entry.name.startsWith('.')) {
-						await countFiles(entry);
-					}
-				}
-			}
-		}
-
-		// Recursive function to process directories excluding hidden files and folders
-		async function processDirectory(dirHandle, path = '') {
-			for await (const entry of dirHandle.values()) {
-				// Skip hidden files and directories
-				if (entry.name.startsWith('.')) continue;
-
-				const entryPath = path ? `${path}/${entry.name}` : entry.name;
-
-				// Skip if the path contains any hidden folders
-				if (hasHiddenFolder(entryPath)) continue;
-
-				if (entry.kind === 'file') {
-					const file = await entry.getFile();
-					const fileWithPath = new File([file], entryPath, { type: file.type });
-
-					await uploadFileHandler(fileWithPath);
-					uploadedFiles++;
-					updateProgress();
-				} else if (entry.kind === 'directory') {
-					// Only process non-hidden directories
-					if (!entry.name.startsWith('.')) {
-						await processDirectory(entry, entryPath);
-					}
-				}
-			}
-		}
-
-		await countFiles(dirHandle);
-		updateProgress();
-
-		if (totalFiles > 0) {
-			await processDirectory(dirHandle);
-		} else {
+		if (files.length === 0) {
 			console.log('No files to upload.');
+			return;
 		}
+
+		toast.info(
+			$i18n.t('Upload Progress: {{uploadedFiles}}/{{totalFiles}} ({{percentage}}%)', {
+				uploadedFiles: 0,
+				totalFiles: files.length,
+				percentage: '0.00'
+			})
+		);
+
+		await uploadFiles(files, {
+			onProgress: (done, total) => {
+				const percentage = ((done / total) * 100).toFixed(2);
+				toast.info(
+					$i18n.t('Upload Progress: {{uploadedFiles}}/{{totalFiles}} ({{percentage}}%)', {
+						uploadedFiles: done,
+						totalFiles: total,
+						percentage
+					})
+				);
+			}
+		});
 	};
 
 	// Firefox fallback implementation using traditional file input
 	const handleFirefoxUpload = async () => {
-		return new Promise((resolve, reject) => {
-			// Create hidden file input
+		return new Promise<void>((resolve, reject) => {
 			const input = document.createElement('input');
 			input.type = 'file';
 			input.webkitdirectory = true;
 			input.directory = true;
 			input.multiple = true;
 			input.style.display = 'none';
-
-			// Add input to DOM temporarily
 			document.body.appendChild(input);
 
 			input.onchange = async () => {
 				try {
 					const files = Array.from(input.files)
-						// Filter out files from hidden folders
-						.filter((file) => !hasHiddenFolder(file.webkitRelativePath));
+						.filter((file) => !hasHiddenFolder(file.webkitRelativePath))
+						.filter((file) => !file.name.startsWith('.'))
+						.map((file) => {
+							const relativePath = file.webkitRelativePath || file.name;
+							return new File([file], relativePath, { type: file.type });
+						});
 
-					let totalFiles = files.length;
-					let uploadedFiles = 0;
-
-					// Function to update the UI with the progress
-					const updateProgress = () => {
-						const percentage = (uploadedFiles / totalFiles) * 100;
+					if (files.length > 0) {
 						toast.info(
 							$i18n.t('Upload Progress: {{uploadedFiles}}/{{totalFiles}} ({{percentage}}%)', {
-								uploadedFiles: uploadedFiles,
-								totalFiles: totalFiles,
-								percentage: percentage.toFixed(2)
+								uploadedFiles: 0,
+								totalFiles: files.length,
+								percentage: '0.00'
 							})
 						);
-					};
 
-					updateProgress();
-
-					// Process all files
-					for (const file of files) {
-						// Skip hidden files (additional check)
-						if (!file.name.startsWith('.')) {
-							const relativePath = file.webkitRelativePath || file.name;
-							const fileWithPath = new File([file], relativePath, { type: file.type });
-
-							await uploadFileHandler(fileWithPath);
-							uploadedFiles++;
-							updateProgress();
-						}
+						await uploadFiles(files, {
+							onProgress: (done, total) => {
+								const percentage = ((done / total) * 100).toFixed(2);
+								toast.info(
+									$i18n.t('Upload Progress: {{uploadedFiles}}/{{totalFiles}} ({{percentage}}%)', {
+										uploadedFiles: done,
+										totalFiles: total,
+										percentage
+									})
+								);
+							}
+						});
 					}
 
-					// Clean up
 					document.body.removeChild(input);
 					resolve();
 				} catch (error) {
@@ -514,7 +620,6 @@
 				reject(error);
 			};
 
-			// Trigger file picker
 			input.click();
 		});
 	};
@@ -529,143 +634,218 @@
 		}
 	};
 
-	const oneDriveSyncHandler = async () => {
-		try {
-			isSyncingOneDrive = true;
-
-			// Open item picker (files and folders, uses business/SharePoint accounts)
-			const items = await openOneDriveItemPicker('organizations');
-			if (!items || items.length === 0) {
-				isSyncingOneDrive = false;
-				return;
-			}
-
-			// Get access token specifically for Graph API calls (different from picker token)
-			// The picker uses SharePoint-scoped tokens, but the backend needs Graph API tokens
-			const accessToken = await getGraphApiToken('organizations');
-
-			// Convert to API format
-			const syncItems: SyncItem[] = items.map(item => ({
-				type: item.type,
-				drive_id: item.driveId,
-				item_id: item.id,
-				item_path: item.path,
-				name: item.name
-			}));
-
-			// Start sync with new endpoint
-			_syncRefreshDone = false;
-			await startOneDriveSyncItems(localStorage.token, {
-				knowledge_id: knowledge.id,
-				items: syncItems,
-				access_token: accessToken,
-				user_token: localStorage.token
+	// Helper function to maintain file paths within zip
+	const syncDirectoryHandler = async () => {
+		if (fileItems.length > 0) {
+			const res = await resetKnowledgeById(localStorage.token, id).catch((e) => {
+				toast.error(`${e}`);
 			});
 
-			// Refresh knowledge to get updated sources (saved by backend before sync starts)
+			if (res) {
+				fileItems = [];
+				toast.success($i18n.t('Knowledge reset successfully.'));
+
+				// Upload directory
+				uploadDirectoryHandler();
+			}
+		} else {
+			uploadDirectoryHandler();
+		}
+	};
+
+	// ===== Generic cloud sync handlers =====
+
+	const cloudSyncHandler = async (provider: CloudSyncProvider) => {
+		const state = cloudSyncState[provider.type];
+		try {
+			state.isSyncing = true;
+			cloudSyncState = cloudSyncState;
+
+			let syncItems: any[];
+			let accessToken: string;
+
+			// Provider-specific picker logic
+			if (provider.type === 'onedrive') {
+				const items = await openOneDriveItemPicker('organizations');
+				if (!items || items.length === 0) {
+					state.isSyncing = false;
+					cloudSyncState = cloudSyncState;
+					return;
+				}
+
+				accessToken = await getGraphApiToken('organizations');
+
+				syncItems = items.map(item => ({
+					type: item.type,
+					drive_id: item.driveId,
+					item_id: item.id,
+					item_path: item.path,
+					name: item.name
+				}));
+
+				state.refreshDone = false;
+				cloudSyncState = cloudSyncState;
+				await startOneDriveSyncItems(localStorage.token, {
+					knowledge_id: knowledge.id,
+					items: syncItems as OneDriveSyncItem[],
+					access_token: accessToken,
+					user_token: localStorage.token
+				});
+			} else if (provider.type === 'google_drive') {
+				const result = await createKnowledgePicker(knowledge.id);
+				if (!result) {
+					state.isSyncing = false;
+					cloudSyncState = cloudSyncState;
+					return;
+				}
+
+				syncItems = result.items.map(item => ({
+					type: item.type,
+					item_id: item.id,
+					item_path: item.path,
+					name: item.name
+				}));
+
+				state.refreshDone = false;
+				cloudSyncState = cloudSyncState;
+				await startGoogleDriveSyncItems(localStorage.token, {
+					knowledge_id: knowledge.id,
+					items: syncItems as GoogleDriveSyncItem[],
+				});
+			}
+
+			// Refresh knowledge to get updated sources
 			const updatedKnowledge = await getKnowledgeById(localStorage.token, id);
 			if (updatedKnowledge) {
 				knowledge = updatedKnowledge;
 			}
 
-			toast.success($i18n.t('OneDrive sync started'));
-
-			// Poll for status
-			pollOneDriveSyncStatus();
+			toast.success($i18n.t('{{label}} sync started', { label: provider.label }));
+			pollCloudSyncStatus(provider);
 		} catch (error) {
-			console.error('OneDrive sync error:', error);
-			toast.error($i18n.t('Failed to sync from OneDrive: ' + (error instanceof Error ? error.message : String(error))));
-			isSyncingOneDrive = false;
+			console.error(`${provider.label} sync error:`, error);
+			toast.error($i18n.t('Failed to sync from {{label}}: ', { label: provider.label }) + (error instanceof Error ? error.message : String(error)));
+			state.isSyncing = false;
+			cloudSyncState = cloudSyncState;
 		}
 	};
 
-	const oneDriveResyncHandler = async () => {
-		const sources = knowledge?.meta?.onedrive_sync?.sources;
+	const cloudResyncHandler = async (provider: CloudSyncProvider) => {
+		const state = cloudSyncState[provider.type];
+		const sources = knowledge?.meta?.[provider.metaKey]?.sources;
 		if (!sources?.length) return;
 
 		try {
-			isSyncingOneDrive = true;
+			state.isSyncing = true;
+			cloudSyncState = cloudSyncState;
 
-			// Get fresh access token for Graph API
-			const accessToken = await getGraphApiToken('organizations');
+			if (provider.type === 'onedrive') {
+				const accessToken = await getGraphApiToken('organizations');
+				const syncItems: OneDriveSyncItem[] = sources.map((source: any) => ({
+					type: source.type,
+					drive_id: source.drive_id,
+					item_id: source.item_id,
+					item_path: source.item_path,
+					name: source.name
+				}));
 
-			// Build items from sources
-			const syncItems: SyncItem[] = sources.map((source: any) => ({
-				type: source.type,
-				drive_id: source.drive_id,
-				item_id: source.item_id,
-				item_path: source.item_path,
-				name: source.name
-			}));
+				state.refreshDone = false;
+				cloudSyncState = cloudSyncState;
+				await startOneDriveSyncItems(localStorage.token, {
+					knowledge_id: knowledge.id,
+					items: syncItems,
+					access_token: accessToken,
+					user_token: localStorage.token
+				});
+			} else if (provider.type === 'google_drive') {
+				const syncItems: GoogleDriveSyncItem[] = sources.map((source: any) => ({
+					type: source.type,
+					item_id: source.item_id,
+					item_path: source.item_path,
+					name: source.name
+				}));
 
-			_syncRefreshDone = false;
-			await startOneDriveSyncItems(localStorage.token, {
-				knowledge_id: knowledge.id,
-				items: syncItems,
-				access_token: accessToken,
-				user_token: localStorage.token
-			});
+				state.refreshDone = false;
+				cloudSyncState = cloudSyncState;
+				await startGoogleDriveSyncItems(localStorage.token, {
+					knowledge_id: knowledge.id,
+					items: syncItems,
+				});
+			}
 
-			toast.success($i18n.t('OneDrive sync started'));
-			pollOneDriveSyncStatus();
+			toast.success($i18n.t('{{label}} sync started', { label: provider.label }));
+			pollCloudSyncStatus(provider);
 		} catch (error) {
-			console.error('OneDrive resync error:', error);
-			toast.error($i18n.t('Failed to start sync: ' + (error instanceof Error ? error.message : String(error))));
-			isSyncingOneDrive = false;
+			console.error(`${provider.label} resync error:`, error);
+			toast.error($i18n.t('Failed to start sync: ') + (error instanceof Error ? error.message : String(error)));
+			state.isSyncing = false;
+			cloudSyncState = cloudSyncState;
 		}
 	};
 
-	const pollOneDriveSyncStatus = async () => {
+	const pollCloudSyncStatus = async (provider: CloudSyncProvider) => {
+		const state = cloudSyncState[provider.type];
 		try {
-			oneDriveSyncStatus = await getSyncStatus(localStorage.token, knowledge.id);
+			state.syncStatus = await provider.api.getSyncStatus(localStorage.token, knowledge.id);
+			cloudSyncState = cloudSyncState;
 
-			if (oneDriveSyncStatus.status === 'syncing') {
-				setTimeout(pollOneDriveSyncStatus, 2000);
-			} else if (oneDriveSyncStatus.status === 'file_limit_exceeded') {
-				toast.error(oneDriveSyncStatus.error || $i18n.t('File limit exceeded'));
-				isSyncingOneDrive = false;
-				if (!_syncRefreshDone) {
-					_syncRefreshDone = true;
+			if (state.syncStatus.status === 'syncing') {
+				setTimeout(() => pollCloudSyncStatus(provider), 2000);
+			} else if (state.syncStatus.status === 'file_limit_exceeded') {
+				toast.error(state.syncStatus.error || $i18n.t('File limit exceeded'));
+				state.isSyncing = false;
+				cloudSyncState = cloudSyncState;
+				if (!state.refreshDone) {
+					state.refreshDone = true;
+					cloudSyncState = cloudSyncState;
 					await init();
 				}
-			} else if (oneDriveSyncStatus.status === 'access_revoked') {
+			} else if (state.syncStatus.status === 'access_revoked') {
 				// access_revoked is a transient status during sync, keep polling
-				setTimeout(pollOneDriveSyncStatus, 2000);
-			} else if (oneDriveSyncStatus.status === 'completed' || oneDriveSyncStatus.status === 'completed_with_errors') {
+				setTimeout(() => pollCloudSyncStatus(provider), 2000);
+			} else if (state.syncStatus.status === 'completed' || state.syncStatus.status === 'completed_with_errors') {
 				// Toast is handled by Socket.IO handler, just refresh
-				isSyncingOneDrive = false;
-				if (!_syncRefreshDone) {
-					_syncRefreshDone = true;
+				state.isSyncing = false;
+				cloudSyncState = cloudSyncState;
+				if (!state.refreshDone) {
+					state.refreshDone = true;
+					cloudSyncState = cloudSyncState;
 					await init();
 				}
-			} else if (oneDriveSyncStatus.status === 'failed') {
+			} else if (state.syncStatus.status === 'failed') {
 				// Only show error if Socket.IO didn't already handle it
-				if (isSyncingOneDrive) {
-					toast.error($i18n.t('OneDrive sync failed: {{error}}', { error: oneDriveSyncStatus.error }));
-					isSyncingOneDrive = false;
+				if (state.isSyncing) {
+					toast.error($i18n.t('{{label}} sync failed: {{error}}', { label: provider.label, error: state.syncStatus.error }));
+					state.isSyncing = false;
+					cloudSyncState = cloudSyncState;
 				}
-			} else if (oneDriveSyncStatus.status === 'cancelled') {
-				isSyncingOneDrive = false;
-				isCancellingSync = false;
-				if (!_syncRefreshDone) {
-					_syncRefreshDone = true;
+			} else if (state.syncStatus.status === 'cancelled') {
+				state.isSyncing = false;
+				state.isCancelling = false;
+				cloudSyncState = cloudSyncState;
+				if (!state.refreshDone) {
+					state.refreshDone = true;
+					cloudSyncState = cloudSyncState;
 					await init();
 				}
 			}
 		} catch (error) {
-			console.error('Failed to get sync status:', error);
+			console.error(`Failed to get ${provider.label} sync status:`, error);
 		}
 	};
 
-	const cancelOneDriveSyncHandler = async () => {
+	const cancelCloudSyncHandler = async (provider: CloudSyncProvider) => {
+		const state = cloudSyncState[provider.type];
 		try {
-			isCancellingSync = true;
-			await cancelSync(localStorage.token, knowledge.id);
-			toast.info($i18n.t('Cancelling OneDrive sync...'));
+			state.isCancelling = true;
+			cloudSyncState = cloudSyncState;
+			await provider.api.cancelSync(localStorage.token, knowledge.id);
+			toast.info($i18n.t('Cancelling {{label}} sync...', { label: provider.label }));
 		} catch (error) {
-			console.error('Failed to cancel sync:', error);
-			toast.error($i18n.t('Failed to cancel sync: ' + (error instanceof Error ? error.message : String(error))));
-			isCancellingSync = false;
+			console.error(`Failed to cancel ${provider.label} sync:`, error);
+			toast.error($i18n.t('Failed to cancel sync: ') + (error instanceof Error ? error.message : String(error)));
+			state.isCancelling = false;
+			cloudSyncState = cloudSyncState;
 		}
 	};
 
@@ -705,56 +885,9 @@
 		return '\n' + lines.join('\n');
 	};
 
-	// Batched success toast for file uploads - tracks completed files until all uploads finish
-	let successfulFileCount = 0;
+	// ===== Generic socket handlers =====
 
-	const showBatchedSuccessToast = () => {
-		if (successfulFileCount > 0) {
-			const count = successfulFileCount;
-			successfulFileCount = 0;
-			toast.success(
-				count === 1
-					? $i18n.t('File added successfully.')
-					: $i18n.t('{{count}} files successfully added.', { count })
-			);
-		}
-	};
-
-	// Socket.IO handler for file processing status updates
-	const handleFileStatus = async (data: {
-		file_id: string;
-		status: string;
-		error?: string;
-		collection_name?: string;
-	}) => {
-		if (!fileItems) return;
-
-		const idx = fileItems.findIndex((f) => f.id === data.file_id);
-		if (idx >= 0) {
-			if (data.status === 'completed') {
-				fileItems[idx].status = 'uploaded';
-				// Now that file is processed, add it to the knowledge base
-				await addFileHandler(data.file_id);
-				successfulFileCount++;
-			} else if (data.status === 'failed') {
-				fileItems[idx].status = 'error';
-				fileItems[idx].error = data.error || 'Processing failed';
-				toast.error(`File processing failed: ${data.error || 'Unknown error'}`);
-				// Remove failed file from the list
-				fileItems = fileItems.filter((file) => file.id !== data.file_id);
-			}
-			fileItems = fileItems; // Trigger reactivity
-
-			// Check if all files are done (no more 'uploading' status)
-			const stillUploading = fileItems.some((f) => f.status === 'uploading');
-			if (!stillUploading) {
-				showBatchedSuccessToast();
-			}
-		}
-	};
-
-	// Socket.IO handler for OneDrive file processing started (shows file with loading state)
-	const handleOneDriveFileProcessing = (data: {
+	function handleCloudFileProcessing(providerType: string, data: {
 		knowledge_id: string;
 		file: {
 			item_id: string;
@@ -763,24 +896,21 @@
 			source_item_id?: string;
 			relative_path?: string;
 		};
-	}) => {
+	}) {
+		const provider = CLOUD_PROVIDERS[providerType];
+		const state = cloudSyncState[providerType];
+
 		// Only process events for the current knowledge base
-		if (data.knowledge_id !== knowledge?.id) {
-			return;
-		}
+		if (data.knowledge_id !== knowledge?.id) return;
 
 		// Ignore new file events when cancellation is in progress
-		if (isCancellingSync) {
-			return;
-		}
+		if (state.isCancelling) return;
 
-		// Use onedrive-{item_id} as the file ID (matches backend pattern)
-		const fileId = `onedrive-${data.file.item_id}`;
+		// Use provider-specific prefix for file ID
+		const fileId = `${provider.fileIdPrefix}${data.file.item_id}`;
 
 		// Check if file is already in the list
-		if (fileItems?.some((f) => f.id === fileId || f.itemId === fileId)) {
-			return;
-		}
+		if (fileItems?.some((f) => f.id === fileId || f.itemId === fileId)) return;
 
 		// Add the file to the list with 'uploading' status
 		const newFileItem = {
@@ -795,7 +925,7 @@
 			itemId: fileId,
 			meta: {
 				source_item_id: data.file.source_item_id,
-				source: 'onedrive',
+				source: provider.sourceMetaField,
 				relative_path: data.file.relative_path
 			}
 		};
@@ -804,11 +934,10 @@
 		fileItems = [newFileItem, ...(fileItems ?? [])];
 		fileItemsTotal = (fileItemsTotal ?? 0) + 1;
 
-		console.log('OneDrive file processing started:', data.file.name);
-	};
+		console.log(`${provider.label} file processing started:`, data.file.name);
+	}
 
-	// Socket.IO handler for OneDrive file added events (updates status to uploaded)
-	const handleOneDriveFileAdded = (data: {
+	function handleCloudFileAdded(providerType: string, data: {
 		knowledge_id: string;
 		file: {
 			id: string;
@@ -824,16 +953,15 @@
 			created_at?: number;
 			updated_at?: number;
 		};
-	}) => {
+	}) {
+		const state = cloudSyncState[providerType];
+		const provider = CLOUD_PROVIDERS[providerType];
+
 		// Only process events for the current knowledge base
-		if (data.knowledge_id !== knowledge?.id) {
-			return;
-		}
+		if (data.knowledge_id !== knowledge?.id) return;
 
 		// Ignore new file events when cancellation is in progress
-		if (isCancellingSync) {
-			return;
-		}
+		if (state.isCancelling) return;
 
 		// Find existing file item and update status
 		const idx = fileItems?.findIndex((f) => f.id === data.file.id);
@@ -845,7 +973,7 @@
 			fileItems[idx].size = data.file.meta?.size || fileItems[idx].size;
 			fileItems[idx].meta = data.file.meta;
 			fileItems = fileItems; // Trigger reactivity
-			console.log('OneDrive file completed:', data.file.filename);
+			console.log(`${provider.label} file completed:`, data.file.filename);
 		} else {
 			// File not in list yet (edge case), add it
 			const newFileItem = {
@@ -862,12 +990,11 @@
 			};
 			fileItems = [newFileItem, ...(fileItems ?? [])];
 			fileItemsTotal = (fileItemsTotal ?? 0) + 1;
-			console.log('OneDrive file added:', data.file.filename);
+			console.log(`${provider.label} file added:`, data.file.filename);
 		}
-	};
+	}
 
-	// Socket.IO handler for real-time sync progress updates
-	const handleOneDriveSyncProgress = async (data: {
+	async function handleCloudSyncProgress(providerType: string, data: {
 		knowledge_id: string;
 		status: string;
 		current: number;
@@ -878,32 +1005,35 @@
 		files_failed?: number;
 		deleted_count?: number;
 		failed_files?: FailedFile[];
-	}) => {
+	}) {
+		const state = cloudSyncState[providerType];
+		const provider = CLOUD_PROVIDERS[providerType];
+
 		// Only process events for the current knowledge base
-		if (data.knowledge_id !== knowledge?.id) {
-			return;
-		}
+		if (data.knowledge_id !== knowledge?.id) return;
 
 		// Update sync status
-		oneDriveSyncStatus = {
+		state.syncStatus = {
 			knowledge_id: data.knowledge_id,
-			status: data.status as 'idle' | 'syncing' | 'completed' | 'completed_with_errors' | 'failed',
+			status: data.status as SyncStatusResponse['status'],
 			progress_current: data.current,
 			progress_total: data.total,
 			error: data.error,
 			failed_files: data.failed_files
 		};
+		cloudSyncState = cloudSyncState;
 
 		// Handle access revoked
 		if (data.status === 'access_revoked') {
-			toast.warning(data.error || $i18n.t('Access to a OneDrive source has been revoked'));
+			toast.warning(data.error || $i18n.t('Access to a {{label}} source has been revoked', { label: provider.label }));
 		}
 
 		// Handle file limit exceeded
 		if (data.status === 'file_limit_exceeded') {
 			toast.error(data.error || $i18n.t('File limit exceeded'));
-			isSyncingOneDrive = false;
-			_syncRefreshDone = true;
+			state.isSyncing = false;
+			state.refreshDone = true;
+			cloudSyncState = cloudSyncState;
 			await init();
 			return;
 		}
@@ -917,27 +1047,30 @@
 					? formatFailedFilesMessage(data.failed_files)
 					: '';
 				toast.warning(
-					$i18n.t('Synced {{count}} files from OneDrive ({{failed}} failed)', {
+					$i18n.t('Synced {{count}} files from {{label}} ({{failed}} failed)', {
 						count,
-						failed
+						failed,
+						label: provider.label
 					}) + failedDetails
 				);
 			} else if (count > 0) {
-				toast.success($i18n.t('Synced {{count}} files from OneDrive', { count }));
+				toast.success($i18n.t('Synced {{count}} files from {{label}}', { count, label: provider.label }));
 			} else if (failed > 0) {
 				const failedDetails = data.failed_files
 					? formatFailedFilesMessage(data.failed_files)
 					: '';
 				toast.error(
-					$i18n.t('OneDrive sync failed: all {{failed}} files failed to process', {
-						failed
+					$i18n.t('{{label}} sync failed: all {{failed}} files failed to process', {
+						failed,
+						label: provider.label
 					}) + failedDetails
 				);
 			} else {
-				toast.success($i18n.t('OneDrive sync completed - no changes'));
+				toast.success($i18n.t('{{label}} sync completed - no changes', { label: provider.label }));
 			}
-			isSyncingOneDrive = false;
-			_syncRefreshDone = true;
+			state.isSyncing = false;
+			state.refreshDone = true;
+			cloudSyncState = cloudSyncState;
 			// Refresh knowledge metadata to update last_sync_at timestamp
 			const res = await getKnowledgeById(localStorage.token, id);
 			if (res) {
@@ -945,13 +1078,15 @@
 			}
 			await init(); // Refresh file list
 		} else if (data.status === 'failed') {
-			toast.error($i18n.t('OneDrive sync failed: {{error}}', { error: data.error || 'Unknown error' }));
-			isSyncingOneDrive = false;
+			toast.error($i18n.t('{{label}} sync failed: {{error}}', { label: provider.label, error: data.error || 'Unknown error' }));
+			state.isSyncing = false;
+			cloudSyncState = cloudSyncState;
 		} else if (data.status === 'cancelled') {
-			toast.info($i18n.t('OneDrive sync cancelled'));
-			isSyncingOneDrive = false;
-			isCancellingSync = false;
-			_syncRefreshDone = true;
+			toast.info($i18n.t('{{label}} sync cancelled', { label: provider.label }));
+			state.isSyncing = false;
+			state.isCancelling = false;
+			state.refreshDone = true;
+			cloudSyncState = cloudSyncState;
 			// Refresh knowledge metadata to update last_sync_at timestamp
 			const res = await getKnowledgeById(localStorage.token, id);
 			if (res) {
@@ -959,15 +1094,16 @@
 			}
 			await init(); // Refresh file list
 		}
-	};
+	}
 
-	const authorizeBackgroundSync = async () => {
-		const authUrl = `${WEBUI_API_BASE_URL}/onedrive/auth/initiate?knowledge_id=${knowledge.id}`;
+	const authorizeBackgroundSync = async (provider: CloudSyncProvider) => {
+		const state = cloudSyncState[provider.type];
+		const authUrl = `${WEBUI_API_BASE_URL}/${provider.authBasePath}/auth/initiate?knowledge_id=${knowledge.id}`;
 
 		// Open popup
 		const popup = window.open(
 			authUrl,
-			'onedrive_auth',
+			provider.authPopupName,
 			'width=600,height=700,scrollbars=yes'
 		);
 
@@ -975,14 +1111,15 @@
 
 		// Listen for postMessage from callback
 		const handleMessage = (event: MessageEvent) => {
-			if (event.data?.type !== 'onedrive_auth_callback') return;
+			if (event.data?.type !== provider.authCallbackType) return;
 
 			messageReceived = true;
 			window.removeEventListener('message', handleMessage);
 
 			if (event.data.success) {
-				backgroundSyncAuthorized = true;
-				backgroundSyncNeedsReauth = false;
+				state.bgSyncAuthorized = true;
+				state.bgSyncNeedsReauth = false;
+				cloudSyncState = cloudSyncState;
 				toast.success($i18n.t('Background sync authorized'));
 			} else {
 				toast.error($i18n.t('Authorization failed: {{error}}', { error: event.data.error }));
@@ -999,14 +1136,15 @@
 
 				if (!messageReceived) {
 					try {
-						const status = await getTokenStatus(localStorage.token, knowledge.id);
+						const status = await provider.api.getTokenStatus(localStorage.token, knowledge.id);
 						if (status.has_token && !status.is_expired) {
-							backgroundSyncAuthorized = true;
-							backgroundSyncNeedsReauth = false;
+							state.bgSyncAuthorized = true;
+							state.bgSyncNeedsReauth = false;
+							cloudSyncState = cloudSyncState;
 							toast.success($i18n.t('Background sync authorized'));
 						}
 					} catch (e) {
-						console.warn('Failed to check background sync token status:', e);
+						console.warn(`Failed to check ${provider.label} background sync token status:`, e);
 						toast.error($i18n.t('Failed to check background sync status'));
 					}
 				}
@@ -1014,27 +1152,9 @@
 		}, 500);
 	};
 
-	const addFileHandler = async (fileId) => {
-		const res = await addFileToKnowledgeById(localStorage.token, id, fileId).catch((e) => {
-			toast.error(`${e}`);
-			return null;
-		});
-
-		if (res) {
-			// Success toast is batched in handleFileStatus
-			// Just update the knowledge object if needed
-			if (res.knowledge) {
-				knowledge = res.knowledge;
-			}
-		} else {
-			toast.error($i18n.t('Failed to add file.'));
-			fileItems = fileItems.filter((file) => file.id !== fileId);
-		}
-	};
-
-	const removeSourceHandler = async (itemId: string, sourceName: string) => {
+	const removeCloudSourceHandler = async (provider: CloudSyncProvider, itemId: string, sourceName: string) => {
 		try {
-			const result = await removeSource(localStorage.token, knowledge.id, itemId);
+			const result = await provider.api.removeSource(localStorage.token, knowledge.id, itemId);
 			toast.success($i18n.t('Source "{{name}}" removed. {{count}} file(s) cleaned up.', {
 				name: result.source_name,
 				count: result.files_removed
@@ -1046,50 +1166,119 @@
 			}
 			await init();
 		} catch (e) {
-			console.error('Error removing source:', e);
+			console.error(`Error removing ${provider.label} source:`, e);
 			toast.error($i18n.t('Failed to remove source: {{error}}', {
 				error: e instanceof Error ? e.message : String(e)
 			}));
 		}
 	};
 
-	const deleteFileHandler = async (fileId) => {
-		const previousItems = fileItems;
-		const previousTotal = fileItemsTotal;
-		fileItems = (fileItems ?? []).filter((file) => file.id !== fileId);
-		fileItemsTotal = Math.max(0, (fileItemsTotal ?? 1) - 1);
+	let successfulFileCount = 0;
+	let fileStatusQueue: Promise<void> = Promise.resolve();
 
+	const showBatchedSuccessToast = () => {
+		if (successfulFileCount > 0) {
+			const count = successfulFileCount;
+			successfulFileCount = 0;
+			toast.success(
+				count === 1
+					? $i18n.t('File added successfully.')
+					: $i18n.t('{{count}} files added successfully.', { count: count.toString() })
+			);
+			init();
+		}
+	};
+
+	// Serialize socket events via a queue to prevent concurrent state mutations
+	const handleFileStatus = (data: {
+		file_id: string;
+		status: string;
+		error?: string;
+		collection_name?: string;
+	}) => {
+		fileStatusQueue = fileStatusQueue.then(() => _processFileStatus(data));
+	};
+
+	const _processFileStatus = async (data: {
+		file_id: string;
+		status: string;
+		error?: string;
+		collection_name?: string;
+	}) => {
+		if (!fileItems) return;
+
+		const idx = fileItems.findIndex((f) => f.id === data.file_id);
+		if (idx < 0) return;
+
+		if (data.status === 'completed') {
+			fileItems[idx].status = 'uploaded';
+			await addFileHandler(data.file_id, { batch: true });
+			successfulFileCount++;
+		} else if (data.status === 'failed') {
+			fileItems[idx].status = 'error';
+			fileItems[idx].error = data.error || 'Processing failed';
+			toast.error(
+				$i18n.t('File processing failed: {{error}}', {
+					error: data.error || 'Unknown error'
+				})
+			);
+			fileItems = fileItems.filter((file) => file.id !== data.file_id);
+		}
+
+		fileItems = fileItems;
+
+		const stillUploading = fileItems.some((f) => f.status === 'uploading');
+		if (!stillUploading) {
+			showBatchedSuccessToast();
+		}
+	};
+
+	const addFileHandler = async (fileId, { batch = false } = {}) => {
+		const res = await addFileToKnowledgeById(localStorage.token, id, fileId).catch((e) => {
+			toast.error(`${e}`);
+			return null;
+		});
+
+		if (res) {
+			if (res.warning) {
+				toast.warning(res.warning);
+			}
+			if (batch) {
+				// Success toast + init() deferred to showBatchedSuccessToast
+			} else {
+				toast.success($i18n.t('File added successfully.'));
+				if (res.knowledge) {
+					knowledge = res.knowledge;
+				}
+			}
+		} else {
+			toast.error($i18n.t('Failed to add file.'));
+			fileItems = fileItems.filter((file) => file.id !== fileId);
+		}
+	};
+
+	const deleteFileHandler = async (fileId) => {
 		try {
+			console.log('Starting file deletion process for:', fileId);
+
+			// Remove from knowledge base only
 			const res = await removeFileFromKnowledgeById(localStorage.token, id, fileId);
+			console.log('Knowledge base updated:', res);
+
 			if (res) {
 				toast.success($i18n.t('File removed successfully.'));
-				await getItemsPage();
-			} else {
-				fileItems = previousItems;
-				fileItemsTotal = previousTotal;
+				await init();
 			}
 		} catch (e) {
 			console.error('Error in deleteFileHandler:', e);
-			fileItems = previousItems;
-			fileItemsTotal = previousTotal;
 			toast.error(`${e}`);
 		}
 	};
 
-	let _syncRefreshDone = false;
-
 	let debounceTimeout = null;
 	let mediaQuery;
-
 	let dragged = false;
 	let isSaving = false;
-	let isSyncingOneDrive = false;
-	let isCancellingSync = false;
-	let oneDriveSyncStatus: SyncStatusResponse | null = null;
-	let backgroundSyncAuthorized = false;
-	let backgroundSyncNeedsReauth = false;
-
-	$: isSyncBusy = isSyncingOneDrive || isCancellingSync;
 
 	const updateFileContentHandler = async () => {
 		if (isSaving) {
@@ -1116,7 +1305,7 @@
 				selectedFile = null;
 				selectedFileContent = '';
 
-				await getItemsPage();
+				await init();
 			}
 		} finally {
 			isSaving = false;
@@ -1139,7 +1328,7 @@
 				...knowledge,
 				name: knowledge.name,
 				description: knowledge.description,
-				access_control: knowledge.access_control
+				access_grants: knowledge.access_grants ?? []
 			}).catch((e) => {
 				toast.error(`${e}`);
 			});
@@ -1182,48 +1371,26 @@
 			return;
 		}
 
-		const handleUploadingFileFolder = (items) => {
-			for (const item of items) {
-				if (item.isFile) {
-					item.file((file) => {
-						uploadFileHandler(file);
-					});
-					continue;
-				}
+		if ($config?.integration_providers?.[knowledge?.type]) {
+			toast.error($i18n.t('Files for this knowledge base are managed via the integration API.'));
+			return;
+		}
 
-				// Not sure why you have to call webkitGetAsEntry and isDirectory seperate, but it won't work if you try item.webkitGetAsEntry().isDirectory
-				const wkentry = item.webkitGetAsEntry();
-				const isDirectory = wkentry.isDirectory;
-				if (isDirectory) {
-					// Read the directory
-					wkentry.createReader().readEntries(
-						(entries) => {
-							handleUploadingFileFolder(entries);
-						},
-						(error) => {
-							console.error('Error reading directory entries:', error);
-						}
-					);
-				} else {
-					toast.info($i18n.t('Uploading file...'));
-					uploadFileHandler(item.getAsFile());
-					toast.success($i18n.t('File uploaded!'));
+		if (e.dataTransfer?.types?.includes('Files') && e.dataTransfer?.items) {
+			const inputItems = e.dataTransfer.items;
+			if (inputItems.length > 0) {
+				const files = await collectDroppedFiles(inputItems);
+				if (files.length > 0) {
+					await uploadFiles(files);
 				}
-			}
-		};
-
-		if (e.dataTransfer?.types?.includes('Files')) {
-			if (e.dataTransfer?.files) {
-				const inputItems = e.dataTransfer?.items;
-
-				if (inputItems && inputItems.length > 0) {
-					handleUploadingFileFolder(inputItems);
-				} else {
-					toast.error($i18n.t(`File not found.`));
-				}
+			} else {
+				toast.error($i18n.t(`File not found.`));
 			}
 		}
 	};
+
+	// ===== Socket event handler references (for cleanup) =====
+	const socketHandlers: Array<{ event: string; handler: Function }> = [];
 
 	onMount(async () => {
 		// listen to resize 1024px
@@ -1270,72 +1437,99 @@
 
 		if (res) {
 			knowledge = res;
+			if (!Array.isArray(knowledge?.access_grants)) {
+				knowledge.access_grants = [];
+			}
 			knowledgeId = knowledge?.id;
 
-			// Check background sync token status for OneDrive KBs
-			if (knowledge?.type === 'onedrive') {
-				try {
-					const status = await getTokenStatus(localStorage.token, knowledge.id);
-					backgroundSyncAuthorized = status.has_token && !status.is_expired;
-					backgroundSyncNeedsReauth = status.needs_reauth ?? false;
-				} catch (e) {
-					console.warn('Failed to check background sync token status:', e);
-					toast.error($i18n.t('Failed to check background sync status'));
+			// Check background sync token status for cloud providers
+			for (const provider of Object.values(CLOUD_PROVIDERS)) {
+				if (knowledge?.type === provider.type) {
+					try {
+						const status = await provider.api.getTokenStatus(localStorage.token, knowledge.id);
+						const state = cloudSyncState[provider.type];
+						state.bgSyncAuthorized = status.has_token && !status.is_expired;
+						state.bgSyncNeedsReauth = status.needs_reauth ?? false;
+						cloudSyncState = cloudSyncState;
+					} catch (e) {
+						console.warn(`Failed to check ${provider.label} background sync token status:`, e);
+						if (provider.type === 'onedrive') {
+							toast.error($i18n.t('Failed to check background sync status'));
+						}
+					}
 				}
 			}
 
 			// Resume sync UI if a sync is already in progress
-			if (knowledge?.meta?.onedrive_sync?.status === 'syncing') {
-				isSyncingOneDrive = true;
-				_syncRefreshDone = false;
-				pollOneDriveSyncStatus();
+			for (const provider of Object.values(CLOUD_PROVIDERS)) {
+				if (knowledge?.meta?.[provider.metaKey]?.status === 'syncing') {
+					const state = cloudSyncState[provider.type];
+					state.isSyncing = true;
+					state.refreshDone = false;
+					cloudSyncState = cloudSyncState;
+					pollCloudSyncStatus(provider);
+				}
 			}
 
-			// Auto-start OneDrive sync if directed from creation flow
-			if ($page.url.searchParams.get('start_onedrive_sync') === 'true' && knowledge) {
-				const url = new URL(window.location.href);
-				url.searchParams.delete('start_onedrive_sync');
-				history.replaceState({}, '', url.toString());
+			// Auto-start sync if directed from creation flow
+			for (const provider of Object.values(CLOUD_PROVIDERS)) {
+				if ($page.url.searchParams.get(provider.startSyncParam) === 'true' && knowledge) {
+					const url = new URL(window.location.href);
+					url.searchParams.delete(provider.startSyncParam);
+					history.replaceState({}, '', url.toString());
 
-				await tick();
-				oneDriveSyncHandler();
+					await tick();
+					cloudSyncHandler(provider);
+				}
 			}
 		} else {
 			goto('/workspace/knowledge');
 		}
+
+		loaded = true;
 
 		const dropZone = document.querySelector('body');
 		dropZone?.addEventListener('dragover', onDragOver);
 		dropZone?.addEventListener('drop', onDrop);
 		dropZone?.addEventListener('dragleave', onDragLeave);
 
-		// Listen for OneDrive sync progress events via Socket.IO
-		$socket?.on('onedrive:sync:progress', handleOneDriveSyncProgress);
+		// Register socket handlers for all cloud providers
+		for (const provider of Object.values(CLOUD_PROVIDERS)) {
+			const progressHandler = (data) => handleCloudSyncProgress(provider.type, data);
+			const processingHandler = (data) => handleCloudFileProcessing(provider.type, data);
+			const addedHandler = (data) => handleCloudFileAdded(provider.type, data);
 
-		// Listen for OneDrive file processing/added events for progressive UI updates
-		$socket?.on('onedrive:file:processing', handleOneDriveFileProcessing);
-		$socket?.on('onedrive:file:added', handleOneDriveFileAdded);
+			$socket?.on(`${provider.eventPrefix}:sync:progress`, progressHandler);
+			$socket?.on(`${provider.eventPrefix}:file:processing`, processingHandler);
+			$socket?.on(`${provider.eventPrefix}:file:added`, addedHandler);
+
+			socketHandlers.push(
+				{ event: `${provider.eventPrefix}:sync:progress`, handler: progressHandler },
+				{ event: `${provider.eventPrefix}:file:processing`, handler: processingHandler },
+				{ event: `${provider.eventPrefix}:file:added`, handler: addedHandler },
+			);
+		}
 
 		// Listen for file processing status events via Socket.IO
 		$socket?.on('file:status', handleFileStatus);
 	});
 
 	onDestroy(() => {
+		clearTimeout(searchDebounceTimer);
 		mediaQuery?.removeEventListener('change', handleMediaQuery);
 		const dropZone = document.querySelector('body');
 		dropZone?.removeEventListener('dragover', onDragOver);
 		dropZone?.removeEventListener('drop', onDrop);
 		dropZone?.removeEventListener('dragleave', onDragLeave);
 
-		// Clean up OneDrive sync progress listener
-		$socket?.off('onedrive:sync:progress', handleOneDriveSyncProgress);
-
-		// Clean up OneDrive file processing/added listeners
-		$socket?.off('onedrive:file:processing', handleOneDriveFileProcessing);
-		$socket?.off('onedrive:file:added', handleOneDriveFileAdded);
+		// Clean up all cloud provider socket listeners
+		for (const { event, handler } of socketHandlers) {
+			$socket?.off(event, handler);
+		}
 
 		// Clean up file status listener
 		$socket?.off('file:status', handleFileStatus);
+
 	});
 
 	const decodeString = (str: string) => {
@@ -1348,14 +1542,25 @@
 </script>
 
 <FilesOverlay show={dragged} />
+<SyncConfirmDialog
+	bind:show={showSyncConfirmModal}
+	message={$i18n.t(
+		'This will reset the knowledge base and sync all files. Do you wish to continue?'
+	)}
+	on:confirm={() => {
+		syncDirectoryHandler();
+	}}
+/>
 
 <SyncConfirmDialog
 	bind:show={showCancelSyncConfirmModal}
-	title={$i18n.t('Cancel OneDrive Sync')}
+	title={$i18n.t(activeProvider ? `Cancel ${activeProvider.label} Sync` : 'Cancel Sync')}
 	message={$i18n.t('Are you sure you want to cancel the ongoing sync? Files already synced will be kept.')}
 	confirmLabel={$i18n.t('Cancel Sync')}
 	on:confirm={() => {
-		cancelOneDriveSyncHandler();
+		if (activeProvider) {
+			cancelCloudSyncHandler(activeProvider);
+		}
 	}}
 />
 
@@ -1382,8 +1587,10 @@
 	hidden
 	on:change={async () => {
 		if (inputFiles && inputFiles.length > 0) {
-			// Fire all uploads in parallel
-			await Promise.all(Array.from(inputFiles).map((file) => uploadFileHandler(file)));
+			const sortedFiles = Array.from(inputFiles).sort((a, b) =>
+				b.name.localeCompare(a.name)
+			);
+			await uploadFiles(sortedFiles);
 
 			inputFiles = null;
 			const fileInputElement = document.getElementById('files-input');
@@ -1397,16 +1604,23 @@
 	}}
 />
 
-<div class="flex flex-col w-full h-full min-h-full" id="collection-container">
-	{#if id && knowledge}
+<div class="flex flex-col w-full h-full min-h-0" id="collection-container">
+	{#if id && knowledge && fileItems !== null}
 		{#if knowledge?.type === 'local' || !knowledge?.type}
 			<AccessControlModal
 				bind:show={showAccessControlModal}
-				bind:accessControl={knowledge.access_control}
+				bind:accessGrants={knowledge.access_grants}
 				share={$user?.permissions?.sharing?.knowledge || $user?.role === 'admin'}
 				sharePublic={$user?.permissions?.sharing?.public_knowledge || $user?.role === 'admin'}
-				onChange={() => {
-					changeDebounceHandler();
+				shareUsers={($user?.permissions?.access_grants?.allow_users ?? true) ||
+					$user?.role === 'admin'}
+				onChange={async () => {
+					try {
+						await updateKnowledgeAccessGrants(localStorage.token, id, knowledge.access_grants ?? []);
+						toast.success($i18n.t('Saved'));
+					} catch (error) {
+						toast.error(`${error}`);
+					}
 				}}
 				accessRoles={['read', 'write']}
 			/>
@@ -1430,6 +1644,7 @@
 								type="text"
 								class="text-left w-full font-medium text-lg font-primary bg-transparent outline-hidden flex-1"
 								bind:value={knowledge.name}
+								aria-label={$i18n.t('Knowledge Name')}
 								placeholder={$i18n.t('Knowledge Name')}
 								disabled={!knowledge?.write_access}
 								on:input={() => {
@@ -1438,33 +1653,38 @@
 							/>
 
 							<div class="shrink-0 mr-2.5 flex items-center gap-2">
-								{#if knowledge?.type === 'onedrive'}
-									<Badge type="info" content={$i18n.t('OneDrive')} />
+								{#if activeProvider}
+									<Badge type="info" content={$i18n.t(activeProvider.label)} />
+								{:else if $config?.integration_providers?.[knowledge?.type]}
+									<Badge
+										type={$config.integration_providers[knowledge.type].badge_type}
+										content={$config.integration_providers[knowledge.type].name}
+									/>
 								{:else}
 									<Badge type="muted" content={$i18n.t('Local')} />
 								{/if}
-								{#if knowledge?.type === 'onedrive' && $config?.onedrive?.has_client_secret}
-									{#if backgroundSyncNeedsReauth}
+								{#if activeProvider && $config?.[activeProvider.configKey]?.has_client_secret}
+									{#if activeState?.bgSyncNeedsReauth}
 										<button
 											class="text-xs text-red-500 hover:text-red-600 flex items-center gap-1"
-											on:click={authorizeBackgroundSync}
+											on:click={() => authorizeBackgroundSync(activeProvider)}
 										>
 											<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" class="size-3.5">
 												<path fill-rule="evenodd" d="M6.701 2.25c.577-1 2.02-1 2.598 0l5.196 9a1.5 1.5 0 0 1-1.299 2.25H2.804a1.5 1.5 0 0 1-1.3-2.25l5.197-9ZM8 4a.75.75 0 0 1 .75.75v3a.75.75 0 0 1-1.5 0v-3A.75.75 0 0 1 8 4Zm0 8a1 1 0 1 0 0-2 1 1 0 0 0 0 2Z" clip-rule="evenodd" />
 											</svg>
 											{$i18n.t('Re-authorize background sync')}
 										</button>
-									{:else if backgroundSyncAuthorized}
+									{:else if activeState?.bgSyncAuthorized}
 										<span class="text-xs text-green-600 flex items-center gap-1">
 											<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" class="size-3.5">
 												<path fill-rule="evenodd" d="M12.416 3.376a.75.75 0 0 1 .208 1.04l-5 7.5a.75.75 0 0 1-1.154.114l-3-3a.75.75 0 0 1 1.06-1.06l2.353 2.353 4.493-6.74a.75.75 0 0 1 1.04-.207Z" clip-rule="evenodd" />
 											</svg>
 											{$i18n.t('Background sync enabled')}
 										</span>
-									{:else if knowledge?.meta?.onedrive_sync?.sources?.length}
+									{:else if knowledge?.meta?.[activeProvider.metaKey]?.sources?.length}
 										<button
 											class="text-xs text-blue-500 hover:text-blue-600 flex items-center gap-1"
-											on:click={authorizeBackgroundSync}
+											on:click={() => authorizeBackgroundSync(activeProvider)}
 										>
 											<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" class="size-3.5">
 												<path fill-rule="evenodd" d="M8 1a3.5 3.5 0 0 0-3.5 3.5V7A1.5 1.5 0 0 0 3 8.5v5A1.5 1.5 0 0 0 4.5 15h7a1.5 1.5 0 0 0 1.5-1.5v-5A1.5 1.5 0 0 0 11.5 7V4.5A3.5 3.5 0 0 0 8 1Zm2 6V4.5a2 2 0 1 0-4 0V7h4Z" clip-rule="evenodd" />
@@ -1473,7 +1693,7 @@
 										</button>
 									{/if}
 								{/if}
-								{#if isCancellingSync}
+								{#if activeState?.isCancelling}
 									<Tooltip content={$i18n.t('Click to cancel sync')}>
 										<button
 											class="p-1 rounded-lg text-gray-400 cursor-not-allowed"
@@ -1482,7 +1702,7 @@
 											<Spinner className="size-3.5" />
 										</button>
 									</Tooltip>
-								{:else if isSyncingOneDrive}
+								{:else if activeState?.isSyncing}
 									<Tooltip content={$i18n.t('Click to cancel sync')}>
 										<button
 											class="p-1 rounded-lg hover:bg-red-100 dark:hover:bg-red-900/30 text-blue-500 hover:text-red-500 transition"
@@ -1493,22 +1713,26 @@
 											</svg>
 										</button>
 									</Tooltip>
-								{:else if knowledge?.meta?.onedrive_sync?.sources?.length && knowledge?.user_id === $user?.id}
-									<Tooltip content={knowledge?.meta?.onedrive_sync?.last_sync_at
-										? $i18n.t('Last synced: {{date}}', { date: dayjs(knowledge.meta.onedrive_sync.last_sync_at * 1000).fromNow() })
-										: $i18n.t('Sync OneDrive files')}>
+								{:else if activeProvider && knowledge?.meta?.[activeProvider.metaKey]?.sources?.length && knowledge?.user_id === $user?.id}
+									<Tooltip content={knowledge?.meta?.[activeProvider.metaKey]?.last_sync_at
+										? $i18n.t('Last synced: {{date}}', { date: dayjs(knowledge.meta[activeProvider.metaKey].last_sync_at * 1000).fromNow() })
+										: $i18n.t('Sync {{label}} files', { label: activeProvider.label })}>
 										<button
 											class="p-1 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 transition"
-											on:click={oneDriveResyncHandler}
+											on:click={() => cloudResyncHandler(activeProvider)}
 										>
-											<OneDrive className="size-4" />
+											{#if activeProvider.type === 'onedrive'}
+												<OneDrive className="size-4" />
+											{:else if activeProvider.type === 'google_drive'}
+												<GoogleDrive className="size-4" />
+											{/if}
 										</button>
 									</Tooltip>
 								{/if}
-								{#if isSyncBusy && oneDriveSyncStatus?.progress_total}
+								{#if isSyncBusy && activeState?.syncStatus?.progress_total}
 									<Tooltip content={$i18n.t('Sync progress')}>
 										<div class="text-xs text-blue-500 font-medium">
-											{fileItemsTotal ?? 0} / {oneDriveSyncStatus.progress_total}
+											{activeState.syncStatus.progress_current ?? 0} / {activeState.syncStatus.progress_total}
 										</div>
 									</Tooltip>
 								{:else if isSyncBusy}
@@ -1517,9 +1741,10 @@
 									</div>
 								{:else if fileItemsTotal}
 									{#if knowledge?.type !== 'local' && knowledge?.type}
-										<Tooltip content={$i18n.t('Maximum 250 files per external knowledge base')}>
+										{@const maxFiles = $config?.integration_providers?.[knowledge?.type]?.max_files_per_kb || $config?.features?.knowledge_max_file_count || 250}
+										<Tooltip content={$i18n.t('Maximum {{count}} files per knowledge base', { count: maxFiles })}>
 											<div class="text-xs text-gray-500">
-												{fileItemsTotal} / 250 {$i18n.t('files')}
+												{fileItemsTotal} / {maxFiles} {$i18n.t('files')}
 											</div>
 										</Tooltip>
 									{:else}
@@ -1533,7 +1758,7 @@
 							</div>
 						</div>
 
-						{#if knowledge?.write_access && (knowledge?.type === 'local' || !knowledge?.type)}
+						{#if knowledge?.write_access && (knowledge?.type === 'local' || !knowledge?.type || $config?.integration_providers?.[knowledge?.type])}
 							<div class="self-center shrink-0">
 								<button
 									class="bg-gray-50 hover:bg-gray-100 text-black dark:bg-gray-850 dark:hover:bg-gray-800 dark:text-white transition px-2 py-1 rounded-full flex gap-1 items-center"
@@ -1566,6 +1791,7 @@
 							type="text"
 							class="text-left text-xs w-full text-gray-500 bg-transparent outline-hidden"
 							bind:value={knowledge.description}
+							aria-label={$i18n.t('Knowledge Description')}
 							placeholder={$i18n.t('Knowledge Description')}
 							disabled={!knowledge?.write_access}
 							on:input={() => {
@@ -1578,7 +1804,7 @@
 		</div>
 
 		<div
-			class="mt-2 mb-2.5 py-2 -mx-0 bg-white dark:bg-gray-900 rounded-3xl border border-gray-100/30 dark:border-gray-850/30 flex-1 flex flex-col overflow-hidden"
+			class="mt-2 mb-2.5 py-2 -mx-0 bg-white dark:bg-gray-900 rounded-3xl border border-gray-100/30 dark:border-gray-850/30 flex-1 flex flex-col overflow-hidden min-h-0"
 		>
 			<div class="px-3.5 flex shrink-0 items-center w-full space-x-2 py-0.5 pb-2">
 				<div class="flex flex-1 items-center">
@@ -1588,7 +1814,11 @@
 					<input
 						class=" w-full text-sm pr-4 py-1 rounded-r-xl outline-hidden bg-transparent"
 						bind:value={query}
-						placeholder={`${$i18n.t('Search Collection')}`}
+						aria-label={$i18n.t('Search Collection')}
+						placeholder={$i18n.t('Search Collection')}
+						on:input={() => {
+							queryDebounceActive = true;
+						}}
 						on:focus={() => {
 							selectedFileId = null;
 						}}
@@ -1596,13 +1826,13 @@
 
 					{#if knowledge?.write_access}
 						<div>
-							{#if knowledge?.type === 'onedrive'}
-								<Tooltip content={$i18n.t('Sync from OneDrive')}>
+							{#if activeProvider}
+								<Tooltip content={$i18n.t('Sync from {{label}}', { label: activeProvider.label })}>
 									<button
 										class="p-1.5 rounded-xl hover:bg-gray-100 dark:bg-gray-850 dark:hover:bg-gray-800 transition font-medium text-sm flex items-center space-x-1 disabled:opacity-40 disabled:cursor-not-allowed"
 										disabled={isSyncBusy}
 										on:click={() => {
-											oneDriveSyncHandler();
+											cloudSyncHandler(activeProvider);
 										}}
 									>
 										<svg
@@ -1617,6 +1847,8 @@
 										</svg>
 									</button>
 								</Tooltip>
+							{:else if $config?.integration_providers?.[knowledge?.type]}
+								<!-- No add button for push providers -- files come via API -->
 							{:else}
 								<AddContentMenu
 									onUpload={(data) => {
@@ -1629,6 +1861,9 @@
 										} else {
 											document.getElementById('files-input').click();
 										}
+									}}
+									onSync={() => {
+										showSyncConfirmModal = true;
 									}}
 								/>
 							{/if}
@@ -1652,7 +1887,7 @@
 					>
 						<DropdownOptions
 							align="start"
-							className="flex w-full items-center gap-2 truncate px-3 py-1.5 text-sm bg-gray-50 dark:bg-gray-850 rounded-xl  placeholder-gray-400 outline-hidden focus:outline-hidden"
+							className="flex shrink-0 items-center gap-2 px-3 py-1.5 text-sm bg-gray-50 dark:bg-gray-850 rounded-xl placeholder-gray-400 outline-hidden focus:outline-hidden"
 							bind:value={viewOption}
 							items={[
 								{ value: null, label: $i18n.t('All') },
@@ -1694,19 +1929,20 @@
 			</div>
 
 			{#if fileItems !== null && fileItemsTotal !== null}
-				<div class="flex flex-row flex-1 gap-3 px-2.5 mt-2">
+				<div class="flex flex-row flex-1 min-h-0 gap-3 px-2.5 mt-2">
 					<div class="flex-1 flex">
 						<div class=" flex flex-col w-full space-x-2 rounded-lg h-full">
-							<div class="w-full h-full flex flex-col min-h-full">
+							<div class="w-full h-full flex flex-col min-h-0">
 								{#if fileItems.length > 0}
 									<div class=" flex overflow-y-auto h-full w-full scrollbar-hidden text-xs">
-										{#if knowledge?.type === 'onedrive' && knowledge?.meta?.onedrive_sync?.sources?.length}
+										{#if activeProvider && knowledge?.meta?.[activeProvider.metaKey]?.sources?.length}
 											<SourceGroupedFiles
-												sources={knowledge.meta.onedrive_sync.sources}
+												sources={knowledge.meta[activeProvider.metaKey].sources}
 												files={fileItems}
 												{knowledge}
 												{selectedFileId}
-												isSyncing={isSyncingOneDrive}
+												isSyncing={activeState?.isSyncing ?? false}
+												totalFiles={fileItemsTotal}
 												onClick={(fileId) => {
 													selectedFileId = fileId;
 
@@ -1722,7 +1958,7 @@
 												onRemoveSource={(itemId, sourceName) => {
 													selectedFileId = null;
 													selectedFile = null;
-													removeSourceHandler(itemId, sourceName);
+													removeCloudSourceHandler(activeProvider, itemId, sourceName);
 												}}
 												onDelete={(fileId) => {
 													selectedFileId = null;
@@ -1757,7 +1993,7 @@
 										{/if}
 									</div>
 
-									{#if knowledge?.type !== 'onedrive' && fileItemsTotal > 30}
+									{#if !activeProvider && fileItemsTotal > 30}
 										<Pagination bind:page={currentPage} count={fileItemsTotal} perPage={30} />
 									{/if}
 								{:else}
@@ -1771,9 +2007,14 @@
 									{:else if knowledge?.write_access && !query && !viewOption}
 										<EmptyStateCards
 											knowledgeType={knowledge?.type || 'local'}
+											integrationProviders={$config?.integration_providers}
 											onAction={(type) => {
-												if (type === 'onedrive') {
-													oneDriveSyncHandler();
+												if (type === 'integration') {
+													// No-op: files are managed via API
+												} else if (type === 'onedrive') {
+													cloudSyncHandler(CLOUD_PROVIDERS.onedrive);
+												} else if (type === 'google_drive') {
+													cloudSyncHandler(CLOUD_PROVIDERS.google_drive);
 												} else if (type === 'directory') {
 													uploadDirectoryHandler();
 												} else if (type === 'web') {
@@ -1812,6 +2053,7 @@
 										<div class="mr-2">
 											<button
 												class="w-full text-left text-sm p-1.5 rounded-lg dark:text-gray-300 dark:hover:text-white hover:bg-black/5 dark:hover:bg-gray-850"
+												aria-label={$i18n.t('Close')}
 												on:click={() => {
 													selectedFileId = null;
 													selectedFile = null;
@@ -1849,6 +2091,7 @@
 											class="w-full h-full text-sm outline-none resize-none px-3 py-2"
 											bind:value={selectedFileContent}
 											disabled={!knowledge?.write_access}
+											aria-label={$i18n.t('File content')}
 											placeholder={$i18n.t('Add content here')}
 										/>
 									{/key}
@@ -1856,10 +2099,6 @@
 							</div>
 						</Drawer>
 					{/if}
-				</div>
-			{:else}
-				<div class="my-10">
-					<Spinner className="size-4" />
 				</div>
 			{/if}
 		</div>

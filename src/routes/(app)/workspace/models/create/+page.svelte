@@ -1,5 +1,4 @@
-<script>
-	import { v4 as uuidv4 } from 'uuid';
+<script lang="ts">
 	import { toast } from 'svelte-sonner';
 	import { goto } from '$app/navigation';
 	import { config, models, settings } from '$lib/stores';
@@ -15,6 +14,7 @@
 	});
 	import { createNewModel, getModelById } from '$lib/apis/models';
 	import { getModels } from '$lib/apis';
+	import { updateUserSettings } from '$lib/apis/users';
 
 	import ModelEditor from '$lib/components/workspace/Models/ModelEditor.svelte';
 
@@ -60,6 +60,15 @@
 						$config?.features?.enable_direct_connections && ($settings?.directConnections ?? null)
 					)
 				);
+
+				// Auto-pin the newly created agent for the creator
+				const pinnedModels = $settings?.pinnedModels ?? [];
+				if (!pinnedModels.includes(modelInfo.id)) {
+					const updatedPinned = [...new Set([...pinnedModels, modelInfo.id])];
+					settings.set({ ...$settings, pinnedModels: updatedPinned });
+					await updateUserSettings(localStorage.token, { ui: $settings });
+				}
+
 				toast.success($i18n.t('Model created successfully!'));
 				await goto('/workspace/models');
 			}
@@ -68,8 +77,8 @@
 
 	let model = null;
 
-	onMount(async () => {
-		window.addEventListener('message', async (event) => {
+	onMount(() => {
+		const handleMessageEvent = async (event: MessageEvent) => {
 			if (
 				!['https://openwebui.com', 'https://www.openwebui.com', 'http://localhost:9999'].includes(
 					event.origin
@@ -89,7 +98,8 @@
 			} catch (e) {
 				console.error('Failed to parse message data:', e);
 			}
-		});
+		};
+		window.addEventListener('message', handleMessageEvent);
 
 		if (window.opener ?? false) {
 			window.opener.postMessage('loaded', '*');
@@ -99,6 +109,10 @@
 			model = JSON.parse(sessionStorage.model);
 			sessionStorage.removeItem('model');
 		}
+
+		return () => {
+			window.removeEventListener('message', handleMessageEvent);
+		};
 	});
 </script>
 

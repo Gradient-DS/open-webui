@@ -1,0 +1,95 @@
+name: Security Scanning
+
+on:
+  push:
+    branches: [main, dev, test]
+  pull_request:
+    branches: [main]
+  schedule:
+    - cron: '0 6 * * 1'  # Weekly Monday 6 AM UTC
+
+jobs:
+  sast-python:
+    name: Python SAST (Bandit)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+
+      - name: Install Bandit
+        run: pip install bandit
+
+      - name: Run Bandit
+        run: bandit -r backend/ -lll --confidence-level=high -x backend/.venv,backend/open_webui/test
+
+  sca-python:
+    name: Python Dependencies (pip-audit)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+
+      - name: Install system dependencies
+        run: sudo apt-get update && sudo apt-get install -y libmariadb-dev
+
+      - name: Install pip-audit and dependencies
+        run: |
+          pip install pip-audit
+          pip install -r backend/requirements.txt
+
+      - name: Run pip-audit
+        run: |
+          pip-audit --desc on \
+            --ignore-vuln CVE-2026-4539 \
+            --ignore-vuln GHSA-rf74-v2fm-23pw \
+            --ignore-vuln CVE-2026-33231
+
+  sca-node:
+    name: Node.js Dependencies (npm audit)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '22'
+
+      - run: npm ci --force
+
+      - name: npm audit
+        run: npm audit --audit-level=critical
+
+  container-scan:
+    name: Container Scan (Trivy)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Maximize build space
+        uses: AdityaGarg8/remove-unwanted-software@v4.1
+        with:
+          remove-android: 'true'
+          remove-haskell: 'true'
+          remove-codeql: 'true'
+
+      - name: Build Docker image for scanning
+        run: |
+          docker build -t open-webui:scan \
+            --build-arg USE_SLIM=true \
+            --build-arg BUILD_HASH=${{ github.sha }} \
+            .
+
+      - name: Trivy vulnerability scan
+        uses: aquasecurity/trivy-action@0.35.0
+        with:
+          image-ref: 'open-webui:scan'
+          format: 'table'
+          severity: 'CRITICAL,HIGH'
+          exit-code: '1'
+          ignore-unfixed: true
