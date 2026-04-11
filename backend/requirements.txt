@@ -6,7 +6,7 @@ itsdangerous==2.2.0
 
 python-socketio==5.16.1
 python-jose==3.5.0
-cryptography==46.0.6
+cryptography==46.0.7
 bcrypt==5.0.0
 argon2-cffi==25.1.0
 PyJWT[crypto]==2.12.0
@@ -64,7 +64,7 @@ einops==0.8.2
 
 ftfy==6.3.1
 chardet==5.2.0
-pypdf==6.9.2
+pypdf==6.10.0
 fpdf2==2.8.7
 pymdown-extensions==10.21
 docx2txt==0.9
@@ -136,7 +136,7 @@ colbert-ai==0.2.22
 
 
 ## Chat export (PDF/Word)
-weasyprint==65.0
+weasyprint==68.0
 python-docx==1.1.2
 htmldocx==0.0.6
 
