@@ -1138,24 +1138,6 @@
 		return docs;
 	};
 
-	const sourceIdsFromMessage = (message) => {
-		const result = [];
-		for (const source of message?.sources ?? []) {
-			for (let index = 0; index < (source.document ?? []).length; index++) {
-				const metadata = source.metadata?.[index];
-				const id = metadata?.source ?? 'N/A';
-				if (metadata?.name) {
-					result.push(metadata.name);
-				} else if (typeof id === 'string' && (id.startsWith('http://') || id.startsWith('https://'))) {
-					result.push(id);
-				} else {
-					result.push(source?.source?.name ?? id);
-				}
-			}
-		}
-		return [...new Set(result)];
-	};
-
 	const getDocuments = () => {
 		const messages = history ? createMessagesList(history, history.currentId) : [];
 		let docs = [];
@@ -1164,11 +1146,7 @@
 				const found = extractDocumentsFromMessage(message.content);
 				if (found.length > 0) {
 					const sources = message?.sources ?? [];
-					const sourceIds = sourceIdsFromMessage(message);
-					docs = [
-						...docs,
-						...found.map((doc) => ({ ...doc, sources, sourceIds }))
-					];
+					docs = [...docs, ...found.map((doc) => ({ ...doc, sources }))];
 				}
 			}
 		});

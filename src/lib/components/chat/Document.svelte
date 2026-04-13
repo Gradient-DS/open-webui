@@ -1,18 +1,17 @@
 <script lang="ts">
 	import { toast } from 'svelte-sonner';
-	import { onMount, getContext, createEventDispatcher } from 'svelte';
+	import { onMount, getContext } from 'svelte';
 	import fileSaver from 'file-saver';
 	const { saveAs } = fileSaver;
 	const i18n = getContext('i18n');
-	const dispatch = createEventDispatcher();
 
 	import { chatId, showControls, showDocument, documentContents } from '$lib/stores';
 	import { copyToClipboard } from '$lib/utils';
 	import { exportDocumentAsPdf, exportDocumentAsDocx } from '$lib/apis/utils';
 
-	import Markdown from './Messages/Markdown.svelte';
+	import ContentRenderer from './Messages/ContentRenderer.svelte';
 	import Citations from './Messages/Citations.svelte';
-	import XMark from '../icons/XMark.svelte';
+	import { normalizeCitations, formatSourcesAsMarkdown } from '$lib/utils/citations';
 	import Download from '../icons/Download.svelte';
 	import Tooltip from '../common/Tooltip.svelte';
 	import Dropdown from '../common/Dropdown.svelte';
@@ -23,7 +22,6 @@
 		title: string;
 		markdown: string;
 		sources?: any[];
-		sourceIds?: string[];
 	}> = [];
 	let selectedContentIdx = 0;
 	let copied = false;
@@ -44,10 +42,23 @@
 		return cleaned.length > 0 ? cleaned : 'document';
 	};
 
+	// Build the content to export: normalize [N] citations in the markdown and append a
+	// source appendix using the same utility as the message-level copy button.
+	// The [N] marker format ensures Word/pandoc won't renumber it as a continuation of a
+	// preceding numbered list in the body.
+	const getExportMarkdown = () => {
+		if (!current) return '';
+		const sources = current.sources ?? [];
+		if (sources.length === 0) return current.markdown;
+		const { content, sourceList } = normalizeCitations(current.markdown, sources);
+		if (sourceList.length === 0) return current.markdown;
+		return `${content}\n\n---\n\n${formatSourcesAsMarkdown(sourceList)}\n`;
+	};
+
 	const downloadMd = () => {
 		if (!current) return;
 		saveAs(
-			new Blob([current.markdown], { type: 'text/markdown;charset=utf-8' }),
+			new Blob([getExportMarkdown()], { type: 'text/markdown;charset=utf-8' }),
 			`${sanitizeFilename(current.title)}.md`
 		);
 		downloadOpen = false;
@@ -56,7 +67,7 @@
 	const downloadTxt = () => {
 		if (!current) return;
 		saveAs(
-			new Blob([current.markdown], { type: 'text/plain;charset=utf-8' }),
+			new Blob([getExportMarkdown()], { type: 'text/plain;charset=utf-8' }),
 			`${sanitizeFilename(current.title)}.txt`
 		);
 		downloadOpen = false;
@@ -65,7 +76,11 @@
 	const downloadPdf = async () => {
 		if (!current) return;
 		try {
-			const blob = await exportDocumentAsPdf(localStorage.token, current.title, current.markdown);
+			const blob = await exportDocumentAsPdf(
+				localStorage.token,
+				current.title,
+				getExportMarkdown()
+			);
 			if (blob) saveAs(blob, `${sanitizeFilename(current.title)}.pdf`);
 		} catch (e) {
 			console.error(e);
@@ -77,7 +92,11 @@
 	const downloadDocx = async () => {
 		if (!current) return;
 		try {
-			const blob = await exportDocumentAsDocx(localStorage.token, current.title, current.markdown);
+			const blob = await exportDocumentAsDocx(
+				localStorage.token,
+				current.title,
+				getExportMarkdown()
+			);
 			if (blob) saveAs(blob, `${sanitizeFilename(current.title)}.docx`);
 		} catch (e) {
 			console.error(e);
@@ -186,11 +205,11 @@
 						{/if}
 					</div>
 
-					<div class="flex items-center gap-1.5">
+					<div class="flex items-center gap-1.5 shrink-0">
 						<button
-							class="copy-code-button bg-none border-none text-xs bg-gray-50 hover:bg-gray-100 dark:bg-gray-850 dark:hover:bg-gray-800 transition rounded-md px-1.5 py-0.5"
+							class="copy-code-button bg-none border-none text-xs bg-gray-50 hover:bg-gray-100 dark:bg-gray-850 dark:hover:bg-gray-800 transition rounded-md px-1.5 py-0.5 whitespace-nowrap"
 							on:click={() => {
-								copyToClipboard(current.markdown, null, true);
+								copyToClipboard(getExportMarkdown(), null, true);
 								copied = true;
 								setTimeout(() => {
 									copied = false;
@@ -249,18 +268,6 @@
 						</Dropdown>
 					</div>
 				</div>
-
-				<button
-					class="self-center pointer-events-auto p-1 rounded-full bg-white dark:bg-gray-850"
-					on:click={() => {
-						dispatch('close');
-						showControls.set(false);
-						showDocument.set(false);
-					}}
-					aria-label={$i18n.t('Close')}
-				>
-					<XMark className="size-3.5 text-gray-900 dark:text-white" />
-				</button>
 			</div>
 		{/if}
 
@@ -272,25 +279,26 @@
 			<div class="h-full flex flex-col">
 				{#if contents.length > 0 && current}
 					<div class="max-w-3xl w-full mx-auto px-6 py-6 prose dark:prose-invert">
-						<Markdown
+						<ContentRenderer
 							id={`document-${$chatId ?? 'preview'}-${selectedContentIdx}`}
 							content={current.markdown}
 							done={true}
 							editCodeBlock={false}
-							sourceIds={current.sourceIds ?? []}
-							onSourceClick={((id: any) => {
-								citationsElement?.showSourceModal(id);
-							}) as any}
+							sources={current.sources}
+							floatingButtons={false}
+							onSourceClick={((id: any) => citationsElement?.showSourceModal(id)) as any}
 						/>
-						{#if (current.sources ?? []).length > 0}
+					</div>
+					{#if (current.sources ?? []).length > 0}
+						<div class="max-w-3xl w-full mx-auto px-6 pb-6">
 							<Citations
 								bind:this={citationsElement}
 								id={`document-${$chatId ?? 'preview'}-${selectedContentIdx}`}
 								chatId={$chatId ?? ''}
 								sources={current.sources}
 							/>
-						{/if}
-					</div>
+						</div>
+					{/if}
 				{:else}
 					<div class="m-auto font-medium text-xs text-gray-900 dark:text-white">
 						{$i18n.t('No document content found.')}

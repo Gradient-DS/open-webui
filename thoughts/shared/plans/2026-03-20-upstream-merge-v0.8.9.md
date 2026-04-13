@@ -232,7 +232,7 @@ The three most complex backend files. These are the backbone of our customizatio
 | `main.py` | Large | Router mounts (4), background workers (3), config endpoint extensions, OAuth callback |
 | `env.py` | Small | `CLIENT_NAME` env var |
 
-**Agent task description for config.py**: "Resolve `config.py` merge conflict. This is a ~121KB config file. Accept upstream's version as the base. Then re-add our custom config blocks. I'll provide the list of our additions — search for them in the ours version and add them to the appropriate locations in the upstream version. Our additions: FEATURE*\* flags, ACCEPTANCE_MODAL*_, FEEDBACK\__, ARCHIVE*\*, ONEDRIVE*_, EMAIL\__, EXTERNAL*PIPELINE*_, INTEGRATION*PROVIDERS, WEAVIATE*_."
+**Agent task description for config.py**: "Resolve `config.py` merge conflict. This is a ~121KB config file. Accept upstream's version as the base. Then re-add our custom config blocks. I'll provide the list of our additions — search for them in the ours version and add them to the appropriate locations in the upstream version. Our additions: FEATURE*\* flags, ACCEPTANCE_MODAL*\_, FEEDBACK\__, ARCHIVE*\*, ONEDRIVE*_, EMAIL\__, EXTERNAL*PIPELINE*_, INTEGRATION*PROVIDERS, WEAVIATE*\_."
 
 **Agent task description for main.py**: "Resolve `main.py` merge conflict. Accept upstream's version as the structure base. Re-add: (1) imports for archives, integrations, onedrive_sync, invites routers; (2) app.include_router mounts for these 4 routers; (3) background worker start/stop in lifespan for deletion cleanup, OneDrive scheduler, archive cleanup; (4) config endpoint extensions for feature flags, OneDrive, email, acceptance, integrations; (5) OneDrive OAuth callback handler."
 

@@ -110,14 +110,12 @@ export const artifactCode = writable(null);
 export const artifactContents = writable(null);
 
 export const showDocument = writable(false);
-export const documentContents: Writable<
-	Array<{
-		title: string;
-		markdown: string;
-		sources?: any[];
-		sourceIds?: string[];
-	}> | null
-> = writable(null);
+export const openDocumentTabSignal = writable(0);
+export const documentContents: Writable<Array<{
+	title: string;
+	markdown: string;
+	sources?: any[];
+}> | null> = writable(null);
 
 export const embed = writable(null);
 
