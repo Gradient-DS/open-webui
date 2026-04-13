@@ -27,6 +27,7 @@ You are tasked with creating git commits for the changes made during this sessio
    - Create commits with your planned messages until all of your changes are committed with `git commit -m`
 
 ## Remember:
+
 - You have the full context of what was done in this session
 - Group related changes together
 - Keep commits focused and atomic when possible

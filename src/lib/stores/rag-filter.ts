@@ -5,10 +5,12 @@ import { writable } from 'svelte/store';
  * - true: all documents in this subtype are selected
  * - object: specific documents are selected
  */
-export type SubtypeFilter = true | {
-	doc_ids: (string | number)[];
-	doc_titles: string[];
-};
+export type SubtypeFilter =
+	| true
+	| {
+			doc_ids: (string | number)[];
+			doc_titles: string[];
+	  };
 
 /**
  * Collection filter with hierarchical efficiency:
@@ -41,7 +43,7 @@ export const showRagFilter = writable<boolean>(false);
 
 // Helper function to update filter state
 export function updateRagFilter(state: Partial<RagFilterState>) {
-	ragFilterState.update(current => ({ ...current, ...state }));
+	ragFilterState.update((current) => ({ ...current, ...state }));
 }
 
 // Helper function to reset filter state

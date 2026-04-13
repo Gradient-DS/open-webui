@@ -15,6 +15,7 @@ Add an invite system for admin-created users. Instead of requiring admins to set
 - Auth guard in root layout only exempts exact path `/auth` — needs broadening
 
 ### Key Discoveries:
+
 - `AddUserForm` extends `SignupForm` which has `password: str` as required — `backend/open_webui/models/auths.py:70-78`
 - `Auths.insert_new_auth()` receives pre-hashed password — `backend/open_webui/models/auths.py:82-112`
 - Config pattern: `PersistentConfig` → `app.state.config` → `/api/config` features — `backend/open_webui/config.py:165-221`
@@ -26,6 +27,7 @@ Add an invite system for admin-created users. Instead of requiring admins to set
 ## Desired End State
 
 Admins can create users via three modes in the Add User modal:
+
 1. **Send Email Invite**: Creates invite record, sends email via Graph API with accept link
 2. **Copy Invite Link**: Creates invite record, shows copyable URL
 3. **Set Password**: Existing flow, unchanged
@@ -33,6 +35,7 @@ Admins can create users via three modes in the Add User modal:
 Invited users visit `/auth/invite/[token]`, set a password, and get logged in. Admins can view pending invites, resend emails, and revoke invites. An admin settings "Email" tab configures Graph API credentials.
 
 ### How to verify:
+
 1. With `ENABLE_EMAIL_INVITES=true` and Graph API configured, admin can create user via email invite → user receives email → clicks link → sets password → logged in
 2. Admin can create user via "Copy Link" → copies URL → shares it → user sets password → logged in
 3. With `ENABLE_EMAIL_INVITES=false`, modal shows only "Set Password" mode (unchanged behavior)
@@ -58,6 +61,7 @@ New code goes in new files to minimize upstream merge conflicts. The invites rou
 ## Phase 1: Core Invite System (MVP)
 
 ### Overview
+
 Database model, email service, API endpoints, redesigned AddUserModal with three creation modes, and invite acceptance page.
 
 ### Changes Required:
@@ -399,6 +403,7 @@ INVITE_EXPIRY_HOURS = PersistentConfig(
 **New file**: `backend/open_webui/routers/invites.py`
 
 Key endpoints:
+
 - `POST /` — Create invite (admin only). Validates email, creates invite record, optionally sends email.
 - `GET /{token}/validate` — Validate invite token (public, no auth). Returns invite details if valid.
 - `POST /{token}/accept` — Accept invite (public, no auth). Validates password, creates user, returns session.
@@ -407,12 +412,14 @@ Key endpoints:
 - `DELETE /{id}` — Revoke invite (admin only). Phase 2 but define stub now.
 
 The create endpoint:
+
 1. Validates email format, checks not already registered
 2. Creates invite record with UUID token and expiry
 3. If `send_email=true` and `ENABLE_EMAIL_INVITES` is true, sends email via Graph API
 4. Returns invite details including `invite_url`
 
 The accept endpoint:
+
 1. Validates token (not expired, not accepted, not revoked)
 2. Validates and hashes password
 3. Creates Auth + User via `Auths.insert_new_auth()`
@@ -427,6 +434,7 @@ The validate and accept endpoints do NOT require authentication — they use `ge
 **File**: `backend/open_webui/main.py`
 
 **Config assignment** (near line 1052, after OneDrive config assignments):
+
 ```python
 app.state.config.ENABLE_EMAIL_INVITES = ENABLE_EMAIL_INVITES
 app.state.config.EMAIL_GRAPH_TENANT_ID = EMAIL_GRAPH_TENANT_ID
@@ -438,12 +446,14 @@ app.state.config.INVITE_EXPIRY_HOURS = INVITE_EXPIRY_HOURS
 ```
 
 **Router mount** (near line 1533, after OneDrive mount):
+
 ```python
 # Invites API (always mounted - Copy Link works without Graph API)
 app.include_router(invites.router, prefix="/api/v1/invites", tags=["invites"])
 ```
 
 **Feature flag in `/api/config` response** (near line 2068, after OneDrive flags):
+
 ```python
 "enable_email_invites": app.state.config.ENABLE_EMAIL_INVITES,
 ```
@@ -456,33 +466,33 @@ app.include_router(invites.router, prefix="/api/v1/invites", tags=["invites"])
 import { WEBUI_API_BASE_URL } from '$lib/constants';
 
 export const createInvite = async (
-    token: string,
-    name: string,
-    email: string,
-    role: string,
-    sendEmail: boolean
-) => { /* POST /api/v1/invites */ };
-
-export const validateInvite = async (inviteToken: string) => {
-    /* GET /api/v1/invites/{token}/validate — no auth token */
+	token: string,
+	name: string,
+	email: string,
+	role: string,
+	sendEmail: boolean
+) => {
+	/* POST /api/v1/invites */
 };
 
-export const acceptInvite = async (
-    inviteToken: string,
-    password: string,
-    name?: string
-) => { /* POST /api/v1/invites/{token}/accept — no auth token */ };
+export const validateInvite = async (inviteToken: string) => {
+	/* GET /api/v1/invites/{token}/validate — no auth token */
+};
+
+export const acceptInvite = async (inviteToken: string, password: string, name?: string) => {
+	/* POST /api/v1/invites/{token}/accept — no auth token */
+};
 
 export const listInvites = async (token: string) => {
-    /* GET /api/v1/invites */
+	/* GET /api/v1/invites */
 };
 
 export const resendInvite = async (token: string, inviteId: string) => {
-    /* POST /api/v1/invites/{id}/resend */
+	/* POST /api/v1/invites/{id}/resend */
 };
 
 export const revokeInvite = async (token: string, inviteId: string) => {
-    /* DELETE /api/v1/invites/{id} */
+	/* DELETE /api/v1/invites/{id} */
 };
 ```
 
@@ -493,10 +503,13 @@ Follow the pattern from `src/lib/apis/auths/index.ts` for error handling and res
 **File**: `src/routes/+layout.svelte:775`
 
 Change:
+
 ```js
 if ($page.url.pathname !== '/auth') {
 ```
+
 To:
+
 ```js
 if (!$page.url.pathname.startsWith('/auth')) {
 ```
@@ -508,6 +521,7 @@ This allows `/auth/invite/[token]` to load without being redirected to the login
 **New file**: `src/routes/auth/invite/[token]/+page.svelte`
 
 States:
+
 - **Loading**: Calling `validateInvite(token)` on mount
 - **Valid**: Shows form with pre-filled name (editable) + email (readonly) + password + confirm password
 - **Expired**: "This invite has expired. Please contact your administrator."
@@ -527,6 +541,7 @@ Strategy: Keep the upstream file diff minimal. Extract the invite-specific UI in
 **New file**: `src/lib/components/admin/Users/UserList/InviteUserForm.svelte`
 
 Contains:
+
 - Creation mode selector (three buttons: Send Email, Copy Link, Set Password)
 - Form fields that adapt per mode (password field shown only for "Set Password")
 - Submit handler that calls either `createInvite()` or `addUser()` based on mode
@@ -535,19 +550,17 @@ Contains:
 **Modified**: `AddUserModal.svelte`
 
 Minimal diff — add conditional rendering:
+
 ```svelte
 {#if $config?.features?.enable_email_invites}
-    <InviteUserForm
-        on:save
-        on:close={() => (show = false)}
-        bind:loading
-    />
+	<InviteUserForm on:save on:close={() => (show = false)} bind:loading />
 {:else}
-    <!-- existing form code unchanged -->
+	<!-- existing form code unchanged -->
 {/if}
 ```
 
 The mode selector UI:
+
 ```
 ┌─────────────┐ ┌──────────────┐ ┌────────────┐
 │ Send Email   │ │ Copy Link    │ │ Set        │
@@ -562,6 +575,7 @@ The mode selector UI:
 #### 10. i18n Keys
 
 Add `$i18n.t(...)` calls in new components, then run `npm run i18n:parse` to propagate. Key strings:
+
 - "Accept Invite", "Copy Invite Link", "Create Invite", "Send Email Invite", "Set Password"
 - "How should this user be created?"
 - "Email invite sent to {{email}}", "Invite link copied to clipboard"
@@ -575,6 +589,7 @@ Add `$i18n.t(...)` calls in new components, then run `npm run i18n:parse` to pro
 ### Success Criteria:
 
 #### Automated Verification:
+
 - [ ] Alembic migration applies cleanly: `cd backend && alembic upgrade head`
 - [ ] Backend starts without errors: `open-webui dev` (check no import errors)
 - [ ] Frontend builds: `npm run build`
@@ -584,6 +599,7 @@ Add `$i18n.t(...)` calls in new components, then run `npm run i18n:parse` to pro
 - [ ] `/auth/invite/[token]` route loads without auth redirect
 
 #### Manual Verification:
+
 - [ ] Admin creates user via "Set Password" mode — works identically to current flow
 - [ ] Admin creates user via "Copy Link" — gets copyable URL, invite appears in DB
 - [ ] Visiting copied invite link shows acceptance form with pre-filled name/email
@@ -600,6 +616,7 @@ Add `$i18n.t(...)` calls in new components, then run `npm run i18n:parse` to pro
 ## Phase 2: Admin Management
 
 ### Overview
+
 Email settings tab, pending invites list, resend/revoke functionality, test email endpoint, and CSV invite import.
 
 ### Changes Required:
@@ -675,9 +692,15 @@ async def test_email_config(request: Request, user=Depends(get_admin_user)):
 **File**: `src/lib/apis/configs/index.ts` (append)
 
 ```typescript
-export const getEmailConfig = async (token: string) => { /* GET /api/v1/configs/email */ };
-export const setEmailConfig = async (token: string, config: object) => { /* POST /api/v1/configs/email */ };
-export const testEmailConfig = async (token: string) => { /* POST /api/v1/configs/email/test */ };
+export const getEmailConfig = async (token: string) => {
+	/* GET /api/v1/configs/email */
+};
+export const setEmailConfig = async (token: string, config: object) => {
+	/* POST /api/v1/configs/email */
+};
+export const testEmailConfig = async (token: string) => {
+	/* POST /api/v1/configs/email/test */
+};
 ```
 
 #### 5. Admin Settings: Email Tab
@@ -685,6 +708,7 @@ export const testEmailConfig = async (token: string) => { /* POST /api/v1/config
 **New file**: `src/lib/components/admin/Settings/Email.svelte`
 
 UI:
+
 ```
 ┌─────────────────────────────────────────────┐
 │ Email Invitations                           │
@@ -754,6 +778,7 @@ For bulk invites (>30 rows), display a progress bar and space API calls ~2 secon
 ### Success Criteria:
 
 #### Automated Verification:
+
 - [ ] Frontend builds: `npm run build`
 - [ ] `GET /api/v1/configs/email` returns config (admin auth)
 - [ ] `POST /api/v1/configs/email` updates config (admin auth)
@@ -764,6 +789,7 @@ For bulk invites (>30 rows), display a progress bar and space API calls ~2 secon
 - [ ] Admin settings "Email" tab renders at `/admin/settings/email`
 
 #### Manual Verification:
+
 - [ ] Email settings tab loads and saves correctly
 - [ ] Test email arrives at admin's address
 - [ ] Pending invites list shows correct data
@@ -801,32 +827,35 @@ src/
 
 ## Modified Upstream Files Summary
 
-| File | Phase | Change | Conflict Risk |
-|------|-------|--------|---------------|
-| `backend/open_webui/config.py` | 1 | Append 7 PersistentConfig vars after OneDrive section | Low |
-| `backend/open_webui/main.py` | 1 | Config assignments (~7 lines), router mount (~2 lines), feature flag (~1 line) | Low |
-| `backend/open_webui/routers/configs.py` | 2 | Append EmailConfigForm + GET/POST/test endpoints | Low |
-| `src/routes/+layout.svelte` | 1 | Change `!== '/auth'` to `.startsWith('/auth')` | Low |
-| `src/lib/components/admin/Users/UserList/AddUserModal.svelte` | 1 | Wrap form in conditional, import InviteUserForm | Medium |
-| `src/lib/utils/features.ts` | 2 | Add `'email'` to ADMIN_SETTINGS_TABS | Low |
-| `src/lib/components/admin/Settings.svelte` | 2 | Import Email, add tab button + content | Low |
-| `src/lib/apis/configs/index.ts` | 2 | Append email config functions | Low |
-| `src/lib/i18n/locales/*/translation.json` | 1+2 | New keys via i18n:parse | Low |
+| File                                                          | Phase | Change                                                                         | Conflict Risk |
+| ------------------------------------------------------------- | ----- | ------------------------------------------------------------------------------ | ------------- |
+| `backend/open_webui/config.py`                                | 1     | Append 7 PersistentConfig vars after OneDrive section                          | Low           |
+| `backend/open_webui/main.py`                                  | 1     | Config assignments (~7 lines), router mount (~2 lines), feature flag (~1 line) | Low           |
+| `backend/open_webui/routers/configs.py`                       | 2     | Append EmailConfigForm + GET/POST/test endpoints                               | Low           |
+| `src/routes/+layout.svelte`                                   | 1     | Change `!== '/auth'` to `.startsWith('/auth')`                                 | Low           |
+| `src/lib/components/admin/Users/UserList/AddUserModal.svelte` | 1     | Wrap form in conditional, import InviteUserForm                                | Medium        |
+| `src/lib/utils/features.ts`                                   | 2     | Add `'email'` to ADMIN_SETTINGS_TABS                                           | Low           |
+| `src/lib/components/admin/Settings.svelte`                    | 2     | Import Email, add tab button + content                                         | Low           |
+| `src/lib/apis/configs/index.ts`                               | 2     | Append email config functions                                                  | Low           |
+| `src/lib/i18n/locales/*/translation.json`                     | 1+2   | New keys via i18n:parse                                                        | Low           |
 
 ## Testing Strategy
 
 ### Unit Tests:
+
 - Invite model CRUD operations (create, get_by_token, accept, revoke)
 - Email template rendering (HTML output contains invite URL)
 - Token validation (expired, accepted, revoked states)
 
 ### Integration Tests:
+
 - Full invite flow: create → validate → accept → verify user exists
 - Create invite with duplicate email → error
 - Accept with invalid/expired token → appropriate error
 - Accept with weak password → validation error
 
 ### Manual Testing Steps:
+
 1. Enable email invites in admin settings, configure Graph API credentials
 2. Send test email — verify it arrives
 3. Create user via "Send Email" mode — verify email arrives with correct link

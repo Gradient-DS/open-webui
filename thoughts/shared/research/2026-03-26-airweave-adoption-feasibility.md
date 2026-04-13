@@ -4,7 +4,7 @@ researcher: Claude
 git_commit: 84d62d6bd6abd3d83626a54906d97bb7381a619d
 branch: feat/external-base-agents
 repository: open-webui
-topic: "Airweave as unified integration layer: adoption feasibility and contribution opportunities"
+topic: 'Airweave as unified integration layer: adoption feasibility and contribution opportunities'
 tags: [research, airweave, integrations, onedrive, google-drive, rag, mcp, connectors]
 status: complete
 last_updated: 2026-03-26
@@ -42,18 +42,18 @@ The prior comparison (`thoughts/shared/research/2026-03-13-airweave-vs-custom-in
 
 ### Architecture Side-by-Side
 
-| Aspect | Airweave | Our Implementation |
-|--------|----------|-------------------|
-| **Scope** | 61+ generic connectors | 2 deep integrations (OneDrive, Google Drive) with provider abstraction |
-| **Deployment** | 6+ services: FastAPI + Temporal + Redis + Vespa + PostgreSQL + frontend | Zero extra services — runs inside open-webui |
-| **Vector DB** | Vespa (recently migrated from Qdrant) | 12 pluggable backends (Chroma default) via `VectorDBBase` ABC |
-| **Orchestration** | Temporal workflows with micro-batching (64-entity batches, 200ms latency) | asyncio scheduler + `BackgroundTasks` with semaphore concurrency |
-| **Auth model** | Auth0 JWT, org-level isolation, soft multi-tenancy via metadata filtering | Native OW auth, hard isolation via separate collections per KB |
-| **Incremental sync** | Content-hash comparison at entity level | Provider-native: Microsoft Graph delta API, Google Changes API |
-| **Embedding** | OpenAI text-embedding-3-small/large, MiniLM-L6-v2 | Configurable: local SentenceTransformers, Ollama, OpenAI, Azure OpenAI |
-| **Agent access** | REST API, Python/TS SDKs, MCP server | Direct integration with OW chat pipeline |
-| **File picker** | None (headless connector model) | Native OneDrive picker (MSAL.js) + Google Picker API |
-| **License** | MIT | BSD-3 (Open WebUI) |
+| Aspect               | Airweave                                                                  | Our Implementation                                                     |
+| -------------------- | ------------------------------------------------------------------------- | ---------------------------------------------------------------------- |
+| **Scope**            | 61+ generic connectors                                                    | 2 deep integrations (OneDrive, Google Drive) with provider abstraction |
+| **Deployment**       | 6+ services: FastAPI + Temporal + Redis + Vespa + PostgreSQL + frontend   | Zero extra services — runs inside open-webui                           |
+| **Vector DB**        | Vespa (recently migrated from Qdrant)                                     | 12 pluggable backends (Chroma default) via `VectorDBBase` ABC          |
+| **Orchestration**    | Temporal workflows with micro-batching (64-entity batches, 200ms latency) | asyncio scheduler + `BackgroundTasks` with semaphore concurrency       |
+| **Auth model**       | Auth0 JWT, org-level isolation, soft multi-tenancy via metadata filtering | Native OW auth, hard isolation via separate collections per KB         |
+| **Incremental sync** | Content-hash comparison at entity level                                   | Provider-native: Microsoft Graph delta API, Google Changes API         |
+| **Embedding**        | OpenAI text-embedding-3-small/large, MiniLM-L6-v2                         | Configurable: local SentenceTransformers, Ollama, OpenAI, Azure OpenAI |
+| **Agent access**     | REST API, Python/TS SDKs, MCP server                                      | Direct integration with OW chat pipeline                               |
+| **File picker**      | None (headless connector model)                                           | Native OneDrive picker (MSAL.js) + Google Picker API                   |
+| **License**          | MIT                                                                       | BSD-3 (Open WebUI)                                                     |
 
 ### What Airweave Does Better
 
@@ -125,6 +125,7 @@ The most natural integration point is Airweave's MCP server. Our soev.ai monorep
 ### 1. Generalized ACL/Permission Propagation Framework (High Impact)
 
 **The gap**: Airweave has connector-specific ACL for SharePoint Online only. There is no generalized framework for:
+
 - Extracting permissions from source APIs
 - Mapping external identities to Airweave users/organizations
 - Filtering search results by user permissions at query time
@@ -132,11 +133,13 @@ The most natural integration point is Airweave's MCP server. Our soev.ai monorep
 **What we've built**: Our `BaseSyncWorker._sync_permissions()` pattern extracts provider permissions, maps emails to local users, and writes `access_grants`. This pattern is implemented for both OneDrive (`sync_worker.py:294-400`) and Google Drive (`sync_worker.py:210-290`).
 
 **Contribution**: Propose an `ACLProvider` interface in Airweave's connector framework:
+
 ```python
 class ACLProvider(ABC):
     async def get_entity_permissions(self, entity_id: str) -> list[Permission]
     async def resolve_identity(self, external_id: str) -> Optional[str]  # → airweave user
 ```
+
 Plus a query-time filter that intersects search results with the requesting user's permissions. This would make Airweave viable for enterprise deployments where not all users should see all data.
 
 ### 2. Provider-Native Incremental Sync (Medium Impact)
@@ -165,17 +168,18 @@ Plus a query-time filter that intersects search results with the requesting user
 
 ## Recommendation Summary
 
-| Scenario | Recommendation |
-|----------|---------------|
-| Replace OneDrive/Google Drive sync | **No** — regression in RBAC, UX, and sync quality |
-| Add Slack/Confluence/Jira/etc. connectors | **Consider Airweave as sidecar** for uniform-access sources |
-| Give agents access to external data | **Use Airweave's MCP server** as a tool provider |
-| Reduce our maintenance burden | **No** — Airweave adds infrastructure, not removes it |
-| Contribute upstream | **Yes** — ACL framework is highest impact, benefits both projects |
+| Scenario                                  | Recommendation                                                    |
+| ----------------------------------------- | ----------------------------------------------------------------- |
+| Replace OneDrive/Google Drive sync        | **No** — regression in RBAC, UX, and sync quality                 |
+| Add Slack/Confluence/Jira/etc. connectors | **Consider Airweave as sidecar** for uniform-access sources       |
+| Give agents access to external data       | **Use Airweave's MCP server** as a tool provider                  |
+| Reduce our maintenance burden             | **No** — Airweave adds infrastructure, not removes it             |
+| Contribute upstream                       | **Yes** — ACL framework is highest impact, benefits both projects |
 
 ## Code References
 
 ### Our Implementation
+
 - `backend/open_webui/services/sync/provider.py` — SyncProvider ABC + factory
 - `backend/open_webui/services/sync/base_worker.py` — Shared sync orchestration (~1000 lines)
 - `backend/open_webui/services/onedrive/sync_worker.py:294-400` — OneDrive permission mapping
@@ -185,6 +189,7 @@ Plus a query-time filter that intersects search results with the requesting user
 - `backend/open_webui/models/knowledge.py:45` — Knowledge type column
 
 ### Airweave
+
 - GitHub: https://github.com/airweave-ai/airweave
 - Docs: https://docs.airweave.ai
 - MCP server: https://docs.airweave.ai/mcp-server
@@ -192,6 +197,7 @@ Plus a query-time filter that intersects search results with the requesting user
 - SharePoint ACL: https://github.com/airweave-ai/airweave/pull/1419
 
 ## Related Research
+
 - `thoughts/shared/research/2026-03-13-airweave-vs-custom-integration-comparison.md` — Previous comparison (pre-Google Drive implementation)
 - `thoughts/shared/plans/2026-02-04-typed-knowledge-bases.md` — Typed knowledge bases feature plan
 

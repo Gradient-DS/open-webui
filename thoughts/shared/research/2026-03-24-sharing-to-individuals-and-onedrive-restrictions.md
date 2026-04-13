@@ -4,7 +4,7 @@ researcher: Claude Code
 git_commit: 39344352fd3d3d415d955d61f38dab8d08e31df6
 branch: fix/test-bugs-daan-260323
 repository: Gradient-DS/open-webui
-topic: "Individual sharing configurability and OneDrive file sharing restrictions"
+topic: 'Individual sharing configurability and OneDrive file sharing restrictions'
 tags: [research, sharing, access-control, onedrive, helm, env-vars, access-grants]
 status: complete
 last_updated: 2026-03-24
@@ -37,11 +37,13 @@ last_updated_by: Claude Code
 The upstream `access_grants` system supports sharing workspace resources (models, knowledge, prompts, tools, skills, notes) to specific users and groups with read/write permissions.
 
 **Three visibility states:**
+
 - **Public**: wildcard grant (`principal_id="*"`) — visible to all users
 - **Private**: no grants — visible only to owner
 - **Shared with individuals/groups**: explicit user/group grants
 
 **Frontend controls** (`AccessControl.svelte`):
+
 - `share` prop → controls whether sharing UI appears at all (maps to `sharing.{resource}` permission)
 - `sharePublic` prop → controls "Public" option (maps to `sharing.public_{resource}` permission)
 - `shareUsers` prop → controls adding individual users (maps to `access_grants.allow_users` permission)
@@ -50,21 +52,21 @@ The upstream `access_grants` system supports sharing workspace resources (models
 
 All default to `False` for non-admin users:
 
-| Env Var | Purpose | In Helm? |
-|---------|---------|----------|
-| `USER_PERMISSIONS_WORKSPACE_MODELS_ALLOW_SHARING` | Share models to groups/individuals | **NO** |
-| `USER_PERMISSIONS_WORKSPACE_MODELS_ALLOW_PUBLIC_SHARING` | Make models public | YES |
-| `USER_PERMISSIONS_WORKSPACE_KNOWLEDGE_ALLOW_SHARING` | Share KBs to groups/individuals | **NO** |
-| `USER_PERMISSIONS_WORKSPACE_KNOWLEDGE_ALLOW_PUBLIC_SHARING` | Make KBs public | YES |
-| `USER_PERMISSIONS_WORKSPACE_PROMPTS_ALLOW_SHARING` | Share prompts to groups/individuals | **NO** |
-| `USER_PERMISSIONS_WORKSPACE_PROMPTS_ALLOW_PUBLIC_SHARING` | Make prompts public | YES |
-| `USER_PERMISSIONS_WORKSPACE_TOOLS_ALLOW_SHARING` | Share tools to groups/individuals | **NO** |
-| `USER_PERMISSIONS_WORKSPACE_TOOLS_ALLOW_PUBLIC_SHARING` | Make tools public | YES |
-| `USER_PERMISSIONS_WORKSPACE_SKILLS_ALLOW_SHARING` | Share skills to groups/individuals | **NO** |
-| `USER_PERMISSIONS_WORKSPACE_SKILLS_ALLOW_PUBLIC_SHARING` | Make skills public | **NO** |
-| `USER_PERMISSIONS_NOTES_ALLOW_SHARING` | Share notes to groups/individuals | **NO** |
-| `USER_PERMISSIONS_NOTES_ALLOW_PUBLIC_SHARING` | Make notes public | YES |
-| `USER_PERMISSIONS_ACCESS_GRANTS_ALLOW_USERS` | Allow sharing to individual users (not just groups) | **NO** (defaults True in config.py) |
+| Env Var                                                     | Purpose                                             | In Helm?                            |
+| ----------------------------------------------------------- | --------------------------------------------------- | ----------------------------------- |
+| `USER_PERMISSIONS_WORKSPACE_MODELS_ALLOW_SHARING`           | Share models to groups/individuals                  | **NO**                              |
+| `USER_PERMISSIONS_WORKSPACE_MODELS_ALLOW_PUBLIC_SHARING`    | Make models public                                  | YES                                 |
+| `USER_PERMISSIONS_WORKSPACE_KNOWLEDGE_ALLOW_SHARING`        | Share KBs to groups/individuals                     | **NO**                              |
+| `USER_PERMISSIONS_WORKSPACE_KNOWLEDGE_ALLOW_PUBLIC_SHARING` | Make KBs public                                     | YES                                 |
+| `USER_PERMISSIONS_WORKSPACE_PROMPTS_ALLOW_SHARING`          | Share prompts to groups/individuals                 | **NO**                              |
+| `USER_PERMISSIONS_WORKSPACE_PROMPTS_ALLOW_PUBLIC_SHARING`   | Make prompts public                                 | YES                                 |
+| `USER_PERMISSIONS_WORKSPACE_TOOLS_ALLOW_SHARING`            | Share tools to groups/individuals                   | **NO**                              |
+| `USER_PERMISSIONS_WORKSPACE_TOOLS_ALLOW_PUBLIC_SHARING`     | Make tools public                                   | YES                                 |
+| `USER_PERMISSIONS_WORKSPACE_SKILLS_ALLOW_SHARING`           | Share skills to groups/individuals                  | **NO**                              |
+| `USER_PERMISSIONS_WORKSPACE_SKILLS_ALLOW_PUBLIC_SHARING`    | Make skills public                                  | **NO**                              |
+| `USER_PERMISSIONS_NOTES_ALLOW_SHARING`                      | Share notes to groups/individuals                   | **NO**                              |
+| `USER_PERMISSIONS_NOTES_ALLOW_PUBLIC_SHARING`               | Make notes public                                   | YES                                 |
+| `USER_PERMISSIONS_ACCESS_GRANTS_ALLOW_USERS`                | Allow sharing to individual users (not just groups) | **NO** (defaults True in config.py) |
 
 **Key distinction**: `_ALLOW_SHARING` enables sharing to groups and individuals. `_ALLOW_PUBLIC_SHARING` enables making things visible to all users. `ACCESS_GRANTS_ALLOW_USERS` controls whether the "add specific user" option appears (as opposed to groups only).
 
@@ -74,40 +76,48 @@ All default to `False` for non-admin users:
 
 ```yaml
 # Workspace Sharing (allow users to share with specific groups/individuals)
-userPermissionsWorkspaceModelsAllowSharing: "false"
-userPermissionsWorkspaceKnowledgeAllowSharing: "false"
-userPermissionsWorkspacePromptsAllowSharing: "false"
-userPermissionsWorkspaceToolsAllowSharing: "false"
-userPermissionsWorkspaceSkillsAllowSharing: "false"
-userPermissionsWorkspaceSkillsAllowPublicSharing: "false"  # Also missing
-userPermissionsNotesAllowSharing: "false"
-userPermissionsAccessGrantsAllowUsers: "true"  # Allow individual user sharing (vs groups only)
+userPermissionsWorkspaceModelsAllowSharing: 'false'
+userPermissionsWorkspaceKnowledgeAllowSharing: 'false'
+userPermissionsWorkspacePromptsAllowSharing: 'false'
+userPermissionsWorkspaceToolsAllowSharing: 'false'
+userPermissionsWorkspaceSkillsAllowSharing: 'false'
+userPermissionsWorkspaceSkillsAllowPublicSharing: 'false' # Also missing
+userPermissionsNotesAllowSharing: 'false'
+userPermissionsAccessGrantsAllowUsers: 'true' # Allow individual user sharing (vs groups only)
 ```
 
 **configmap.yaml** — add corresponding mappings:
 
 ```yaml
-USER_PERMISSIONS_WORKSPACE_MODELS_ALLOW_SHARING: {{ .Values.openWebui.config.userPermissionsWorkspaceModelsAllowSharing | quote }}
-USER_PERMISSIONS_WORKSPACE_KNOWLEDGE_ALLOW_SHARING: {{ .Values.openWebui.config.userPermissionsWorkspaceKnowledgeAllowSharing | quote }}
-USER_PERMISSIONS_WORKSPACE_PROMPTS_ALLOW_SHARING: {{ .Values.openWebui.config.userPermissionsWorkspacePromptsAllowSharing | quote }}
-USER_PERMISSIONS_WORKSPACE_TOOLS_ALLOW_SHARING: {{ .Values.openWebui.config.userPermissionsWorkspaceToolsAllowSharing | quote }}
-USER_PERMISSIONS_WORKSPACE_SKILLS_ALLOW_SHARING: {{ .Values.openWebui.config.userPermissionsWorkspaceSkillsAllowSharing | quote }}
-USER_PERMISSIONS_WORKSPACE_SKILLS_ALLOW_PUBLIC_SHARING: {{ .Values.openWebui.config.userPermissionsWorkspaceSkillsAllowPublicSharing | quote }}
-USER_PERMISSIONS_NOTES_ALLOW_SHARING: {{ .Values.openWebui.config.userPermissionsNotesAllowSharing | quote }}
-USER_PERMISSIONS_ACCESS_GRANTS_ALLOW_USERS: {{ .Values.openWebui.config.userPermissionsAccessGrantsAllowUsers | quote }}
+USER_PERMISSIONS_WORKSPACE_MODELS_ALLOW_SHARING:
+  { { .Values.openWebui.config.userPermissionsWorkspaceModelsAllowSharing | quote } }
+USER_PERMISSIONS_WORKSPACE_KNOWLEDGE_ALLOW_SHARING:
+  { { .Values.openWebui.config.userPermissionsWorkspaceKnowledgeAllowSharing | quote } }
+USER_PERMISSIONS_WORKSPACE_PROMPTS_ALLOW_SHARING:
+  { { .Values.openWebui.config.userPermissionsWorkspacePromptsAllowSharing | quote } }
+USER_PERMISSIONS_WORKSPACE_TOOLS_ALLOW_SHARING:
+  { { .Values.openWebui.config.userPermissionsWorkspaceToolsAllowSharing | quote } }
+USER_PERMISSIONS_WORKSPACE_SKILLS_ALLOW_SHARING:
+  { { .Values.openWebui.config.userPermissionsWorkspaceSkillsAllowSharing | quote } }
+USER_PERMISSIONS_WORKSPACE_SKILLS_ALLOW_PUBLIC_SHARING:
+  { { .Values.openWebui.config.userPermissionsWorkspaceSkillsAllowPublicSharing | quote } }
+USER_PERMISSIONS_NOTES_ALLOW_SHARING:
+  { { .Values.openWebui.config.userPermissionsNotesAllowSharing | quote } }
+USER_PERMISSIONS_ACCESS_GRANTS_ALLOW_USERS:
+  { { .Values.openWebui.config.userPermissionsAccessGrantsAllowUsers | quote } }
 ```
 
 ### 4. OneDrive File Sharing Restrictions
 
 **OneDrive KBs are protected from sharing at 4 layers:**
 
-| Layer | Mechanism | Location |
-|-------|-----------|----------|
-| Creation (backend) | Forces `access_grants = []` for `type != "local"` | `knowledge.py:294-296` |
-| General update (backend) | Preserves existing grants for `type != "local"` | `knowledge.py:518-522` |
-| Creation (frontend) | Only sends access grants for local type | `CreateKnowledgeBase.svelte:38` |
-| Detail page (frontend) | Only renders AccessControlModal for local type | `KnowledgeBase.svelte:1379` |
-| OneDrive sync endpoints | Owner-only via `user_id` equality check | `onedrive_sync.py:80,182,217,307,394,509,539` |
+| Layer                    | Mechanism                                         | Location                                      |
+| ------------------------ | ------------------------------------------------- | --------------------------------------------- |
+| Creation (backend)       | Forces `access_grants = []` for `type != "local"` | `knowledge.py:294-296`                        |
+| General update (backend) | Preserves existing grants for `type != "local"`   | `knowledge.py:518-522`                        |
+| Creation (frontend)      | Only sends access grants for local type           | `CreateKnowledgeBase.svelte:38`               |
+| Detail page (frontend)   | Only renders AccessControlModal for local type    | `KnowledgeBase.svelte:1379`                   |
+| OneDrive sync endpoints  | Owner-only via `user_id` equality check           | `onedrive_sync.py:80,182,217,307,394,509,539` |
 
 **Minor gap**: The dedicated `POST /api/v1/knowledge/{id}/access/update` endpoint (`knowledge.py:561-605`) does NOT check `knowledge.type`. It accepts any access grants and writes them directly. However, the frontend never calls this endpoint for non-local KBs because the AccessControlModal is not rendered.
 
@@ -134,11 +144,13 @@ Chat sharing is **link-based only** — it creates a snapshot accessible to anyo
 ## Architecture Insights
 
 The access grants system has two distinct permission dimensions:
+
 1. **Resource-level sharing** (`_ALLOW_SHARING`) — can users share this resource type at all?
 2. **Public vs private sharing** (`_ALLOW_PUBLIC_SHARING`) — can users make resources visible to everyone?
 3. **Principal type** (`ACCESS_GRANTS_ALLOW_USERS`) — can users share with individuals, or only groups?
 
 These are independent toggles. For a typical enterprise deployment wanting individual sharing but not public sharing:
+
 - Set `_ALLOW_SHARING` = true for desired resource types
 - Keep `_ALLOW_PUBLIC_SHARING` = false
 - Set `ACCESS_GRANTS_ALLOW_USERS` = true

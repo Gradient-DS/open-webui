@@ -36,6 +36,8 @@
 		chatTitle,
 		showArtifacts,
 		artifactContents,
+		showDocument,
+		documentContents,
 		tools,
 		toolServers,
 		terminalServers,
@@ -146,7 +148,6 @@
 	let dataWarningCapabilities: string[] = [];
 	let dataWarningCallback: ((confirmed: boolean) => void) | null = null;
 
-
 	let selectedModels = [''];
 	let atSelectedModel: Model | undefined;
 	let selectedModelIds = [];
@@ -163,6 +164,7 @@
 	let imageGenerationEnabled = false;
 	let webSearchEnabled = false;
 	let codeInterpreterEnabled = false;
+	let documentWriterEnabled = false;
 
 	let showCommands = false;
 
@@ -233,6 +235,7 @@
 						webSearchEnabled = input.webSearchEnabled;
 						imageGenerationEnabled = input.imageGenerationEnabled;
 						codeInterpreterEnabled = input.codeInterpreterEnabled;
+						documentWriterEnabled = input.documentWriterEnabled ?? false;
 					}
 				} catch (e) {}
 			} else {
@@ -294,6 +297,7 @@
 		webSearchEnabled = false;
 		imageGenerationEnabled = false;
 		codeInterpreterEnabled = false;
+		documentWriterEnabled = false;
 
 		if (selectedModelIds.filter((id) => id).length > 0) {
 			setDefaults();
@@ -376,6 +380,14 @@
 				) {
 					codeInterpreterEnabled = model.info.meta.defaultFeatureIds.includes('code_interpreter');
 				}
+
+				if (
+					model.info?.meta?.capabilities?.['document_writer'] &&
+					$config?.features?.enable_document_writer &&
+					($user?.role === 'admin' || $user?.permissions?.features?.document_writer)
+				) {
+					documentWriterEnabled = model.info.meta.defaultFeatureIds.includes('document_writer');
+				}
 			}
 		}
 	};
@@ -428,7 +440,12 @@
 		}
 	};
 
-	const fileStatusHandler = (data: { file_id: string; status: string; error?: string; collection_name?: string }) => {
+	const fileStatusHandler = (data: {
+		file_id: string;
+		status: string;
+		error?: string;
+		collection_name?: string;
+	}) => {
 		const idx = files.findIndex((f) => f.id === data.file_id);
 		if (idx < 0) return;
 
@@ -778,6 +795,7 @@
 				webSearchEnabled = false;
 				imageGenerationEnabled = false;
 				codeInterpreterEnabled = false;
+				documentWriterEnabled = false;
 				acceptedDataWarnings = new Set();
 
 				try {
@@ -791,6 +809,7 @@
 						webSearchEnabled = input.webSearchEnabled;
 						imageGenerationEnabled = input.imageGenerationEnabled;
 						codeInterpreterEnabled = input.codeInterpreterEnabled;
+						documentWriterEnabled = input.documentWriterEnabled ?? false;
 					}
 				} catch (e) {}
 			}
@@ -1005,10 +1024,12 @@
 			clearTimeout(contentsRAF);
 			contentsRAF = setTimeout(() => {
 				getContents();
+				getDocuments();
 				contentsRAF = null;
 			}, 0);
 		} else {
 			artifactContents.set([]);
+			documentContents.set([]);
 		}
 	};
 
@@ -1062,6 +1083,96 @@
 		});
 
 		artifactContents.set(contents);
+	};
+
+	const decodeHtmlEntities = (str) => {
+		if (!str) return '';
+		return str
+			.replace(/&quot;/g, '"')
+			.replace(/&#x27;/g, "'")
+			.replace(/&#39;/g, "'")
+			.replace(/&lt;/g, '<')
+			.replace(/&gt;/g, '>')
+			.replace(/&amp;/g, '&');
+	};
+
+	const extractDocumentsFromMessage = (content) => {
+		const docs = [];
+		if (!content || typeof content !== 'string') return docs;
+
+		// 1. XML-fallback path: <details type="document" ... title="..." ...>...markdown...</details>
+		const detailsRegex = /<details\b([^>]*\btype="document"[^>]*)>([\s\S]*?)<\/details>/g;
+		let match;
+		while ((match = detailsRegex.exec(content)) !== null) {
+			const attrs = match[1] ?? '';
+			const inner = match[2] ?? '';
+			const titleMatch = /\btitle="([^"]*)"/.exec(attrs);
+			const title = titleMatch ? decodeHtmlEntities(titleMatch[1]) : '';
+			const markdown = inner.replace(/^\s*<summary>[\s\S]*?<\/summary>\s*/i, '').trim();
+			if (markdown.length > 0) {
+				docs.push({ title, markdown });
+			}
+		}
+
+		// 2. Native tool-call path: <details type="tool_calls" ... name="write_document" arguments="...">
+		const toolCallRegex = /<details\b([^>]*\btype="tool_calls"[^>]*)>[\s\S]*?<\/details>/g;
+		while ((match = toolCallRegex.exec(content)) !== null) {
+			const attrs = match[1] ?? '';
+			const nameMatch = /\bname="([^"]*)"/.exec(attrs);
+			if (!nameMatch || nameMatch[1] !== 'write_document') continue;
+			const argsMatch = /\barguments="([^"]*)"/.exec(attrs);
+			if (!argsMatch) continue;
+			try {
+				const argsJson = decodeHtmlEntities(argsMatch[1]);
+				const args = JSON.parse(argsJson);
+				const title = args?.title ?? '';
+				const markdown = args?.markdown ?? '';
+				if (markdown.length > 0) {
+					docs.push({ title, markdown });
+				}
+			} catch (e) {
+				console.warn('Failed to parse write_document arguments', e);
+			}
+		}
+
+		return docs;
+	};
+
+	const sourceIdsFromMessage = (message) => {
+		const result = [];
+		for (const source of message?.sources ?? []) {
+			for (let index = 0; index < (source.document ?? []).length; index++) {
+				const metadata = source.metadata?.[index];
+				const id = metadata?.source ?? 'N/A';
+				if (metadata?.name) {
+					result.push(metadata.name);
+				} else if (typeof id === 'string' && (id.startsWith('http://') || id.startsWith('https://'))) {
+					result.push(id);
+				} else {
+					result.push(source?.source?.name ?? id);
+				}
+			}
+		}
+		return [...new Set(result)];
+	};
+
+	const getDocuments = () => {
+		const messages = history ? createMessagesList(history, history.currentId) : [];
+		let docs = [];
+		messages.forEach((message) => {
+			if (message?.role !== 'user' && message?.content) {
+				const found = extractDocumentsFromMessage(message.content);
+				if (found.length > 0) {
+					const sources = message?.sources ?? [];
+					const sourceIds = sourceIdsFromMessage(message);
+					docs = [
+						...docs,
+						...found.map((doc) => ({ ...doc, sources, sourceIds }))
+					];
+				}
+			}
+		});
+		documentContents.set(docs);
 	};
 
 	//////////////////////////
@@ -1172,11 +1283,11 @@
 			}
 		}
 
-		if ($mobile) {
-			await showControls.set(false);
-		}
+		await showControls.set(false);
 		await showCallOverlay.set(false);
 		await showArtifacts.set(false);
+		await showDocument.set(false);
+		documentContents.set([]);
 
 		if ($page.url.pathname.includes('/c/')) {
 			window.history.replaceState(history.state, '', `/`);
@@ -1215,6 +1326,10 @@
 
 		if ($page.url.searchParams.get('code-interpreter') === 'true') {
 			codeInterpreterEnabled = true;
+		}
+
+		if ($page.url.searchParams.get('document-writer') === 'true') {
+			documentWriterEnabled = true;
 		}
 
 		if ($page.url.searchParams.get('tools')) {
@@ -1859,10 +1974,12 @@
 					knowledge_external: $i18n.t('External Knowledge Base'),
 					vision: $i18n.t('Vision'),
 					code_interpreter: $i18n.t('Code Interpreter'),
+					document_writer: $i18n.t('Document Writer'),
 					image_generation: $i18n.t('Image Generation')
 				};
 				const capabilityLabels = warning.capabilities.map(
-					(c) => capabilityLabelMap[c] || c.replace(/_/g, ' ').replace(/\b\w/g, (l) => l.toUpperCase())
+					(c) =>
+						capabilityLabelMap[c] || c.replace(/_/g, ' ').replace(/\b\w/g, (l) => l.toUpperCase())
 				);
 
 				dataWarningTitle = $i18n.t('Data Sovereignty Warning');
@@ -1989,15 +2106,14 @@
 			...chatFiles.filter((f) => f.type === 'collection')
 		];
 		const hasLocalKb = allKbFiles.some((f) => !f.knowledge_type || f.knowledge_type === 'local');
-		const hasExternalKb = allKbFiles.some(
-			(f) => f.knowledge_type && f.knowledge_type !== 'local'
-		);
+		const hasExternalKb = allKbFiles.some((f) => f.knowledge_type && f.knowledge_type !== 'local');
 		const activeCapabilities: Record<string, boolean> = {
 			file_upload: files.some((f) => f.type !== 'image' && f.type !== 'collection'),
 			vision: files.some((f) => f.type === 'image'),
 			web_search: webSearchEnabled,
 			image_generation: imageGenerationEnabled,
 			code_interpreter: codeInterpreterEnabled,
+			document_writer: documentWriterEnabled,
 			knowledge_local: hasLocalKb,
 			knowledge_external: hasExternalKb
 		};
@@ -2199,6 +2315,11 @@
 					$config?.features?.enable_code_interpreter &&
 					($user?.role === 'admin' || $user?.permissions?.features?.code_interpreter)
 						? codeInterpreterEnabled
+						: false,
+				document_writer:
+					$config?.features?.enable_document_writer &&
+					($user?.role === 'admin' || $user?.permissions?.features?.document_writer)
+						? documentWriterEnabled
 						: false,
 				web_search:
 					$config?.features?.enable_web_search &&
@@ -2914,7 +3035,9 @@
 <div
 	class="h-screen max-h-[100dvh] transition-width duration-200 ease-in-out {$showSidebar
 		? '  md:max-w-[calc(100%-var(--sidebar-width))]'
-		: ' '} {($config?.features?.enable_rag_filter_ui ?? true) && $showRagFilter ? 'pr-80' : ''} w-full max-w-full flex flex-col"
+		: ' '} {($config?.features?.enable_rag_filter_ui ?? true) && $showRagFilter
+		? 'pr-80'
+		: ''} w-full max-w-full flex flex-col"
 	id="chat-container"
 >
 	{#if !loading}
@@ -3042,7 +3165,9 @@
 
 							<ConversationFeedback
 								chatId={$chatId}
-								assistantMessageCount={createMessagesList(history, history.currentId).filter((m) => m.role === 'assistant').length}
+								assistantMessageCount={createMessagesList(history, history.currentId).filter(
+									(m) => m.role === 'assistant'
+								).length}
 							/>
 
 							<div class=" pb-2 {dragged ? 'z-0' : 'z-10'}">
@@ -3058,6 +3183,7 @@
 									bind:selectedFilterIds
 									bind:imageGenerationEnabled
 									bind:codeInterpreterEnabled
+									bind:documentWriterEnabled
 									{pendingOAuthTools}
 									bind:webSearchEnabled
 									bind:atSelectedModel
@@ -3142,6 +3268,7 @@
 									bind:selectedFilterIds
 									bind:imageGenerationEnabled
 									bind:codeInterpreterEnabled
+									bind:documentWriterEnabled
 									bind:webSearchEnabled
 									bind:atSelectedModel
 									bind:showCommands

@@ -520,6 +520,45 @@ async def execute_code(
 
 
 # =============================================================================
+# DOCUMENT WRITER TOOLS
+# =============================================================================
+
+
+async def write_document(
+    title: str,
+    markdown: str,
+    __request__: Request = None,
+    __user__: dict = None,
+    __event_emitter__: callable = None,
+    __chat_id__: str = None,
+    __message_id__: str = None,
+    __metadata__: dict = None,
+) -> str:
+    """
+    Produce a structured markdown document that the user sees in a side panel
+    and can download as Markdown, Plain Text, PDF, or Word. Use this whenever
+    the user asks you to write, draft, compose, or produce a document, letter,
+    report, memo, or similar long-form piece of writing. Do NOT use it for
+    conversational replies or short answers.
+
+    :param title: Short title of the document (used as filename stem and as
+        the heading in the rendered panel)
+    :param markdown: Full document body as Markdown. Write in document style
+        with headings, paragraphs, and appropriate structure.
+    :return: JSON with title and status — the markdown itself is surfaced to
+        the user via the side panel.
+    """
+    return json.dumps(
+        {
+            'status': 'success',
+            'title': title,
+            'message': 'Document rendered in side panel. User can download as md, txt, pdf, or docx.',
+        },
+        ensure_ascii=False,
+    )
+
+
+# =============================================================================
 # MEMORY TOOLS
 # =============================================================================
 

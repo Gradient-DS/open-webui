@@ -4,7 +4,7 @@ researcher: Claude (Opus 4.6)
 git_commit: 4b12eeb40e2d32328c3c083c3696358acbabc0bc
 branch: dev
 repository: open-webui
-topic: "Rich copy, improved PDF export, and Word export for chat messages"
+topic: 'Rich copy, improved PDF export, and Word export for chat messages'
 tags: [research, codebase, copy, pdf, word, export, citations, clipboard]
 status: complete
 last_updated: 2026-04-11
@@ -22,6 +22,7 @@ last_updated_by: Claude (Opus 4.6)
 ## Research Question
 
 The current copy function copies raw markdown without sources. The PDF export is a screenshot-based JPEG dump with no citation appendix. The user wants:
+
 1. Rich copy (HTML+plain text dual clipboard) with citations appended
 2. Proper PDF export with markdown rendering, superscript citations, and a source section
 3. Word (.docx) export with the same formatting
@@ -31,13 +32,13 @@ The current copy function copies raw markdown without sources. The PDF export is
 
 ### Current State
 
-| Feature | Status | Quality |
-|---------|--------|---------|
-| Copy button | Works, copies raw markdown OR formatted HTML (toggle) | No sources/citations included |
-| PDF (stylized) | Screenshot via html2canvas → JPEG pages | Raster image, no text selection, no sources section |
-| PDF (plain) | jsPDF plain text rendering | Raw markdown dumped as 8pt text, no formatting |
-| PDF (server-side) | Backend endpoint exists (`POST /api/v1/utils/pdf`) | **Never called** from frontend. Uses fpdf2, basic HTML |
-| Word export | Does not exist | — |
+| Feature           | Status                                                | Quality                                                |
+| ----------------- | ----------------------------------------------------- | ------------------------------------------------------ |
+| Copy button       | Works, copies raw markdown OR formatted HTML (toggle) | No sources/citations included                          |
+| PDF (stylized)    | Screenshot via html2canvas → JPEG pages               | Raster image, no text selection, no sources section    |
+| PDF (plain)       | jsPDF plain text rendering                            | Raw markdown dumped as 8pt text, no formatting         |
+| PDF (server-side) | Backend endpoint exists (`POST /api/v1/utils/pdf`)    | **Never called** from frontend. Uses fpdf2, basic HTML |
+| Word export       | Does not exist                                        | —                                                      |
 
 ### Key Finding: Infrastructure Already Exists
 
@@ -59,6 +60,7 @@ copyToClipboard(message.content)  // line 999
 ```
 
 The local wrapper:
+
 1. Strips `<details>` blocks (thinking/reasoning) via `removeAllDetails()`
 2. Appends watermark if configured (`$config?.ui?.response_watermark`)
 3. Delegates to `_copyToClipboard(text, null, $settings?.copyFormatted ?? false)`
@@ -66,6 +68,7 @@ The local wrapper:
 **Problem:** Only `message.content` is passed. The `message.sources` (citation metadata) is a separate field and is never included. Even with `copyFormatted=true`, the HTML rendering doesn't include a sources appendix.
 
 **The `copyToClipboard` utility** (`src/lib/utils/index.ts:420-549`):
+
 - When `formatted=true`: renders markdown via `marked` → wraps in styled `<div>` → creates `ClipboardItem` with both `text/html` and `text/plain`
 - When `formatted=false` (default): plain `navigator.clipboard.writeText()`
 - Already uses `marked` with KaTeX, highlight.js, and citation extensions
@@ -83,11 +86,11 @@ The `Citations` component (`src/lib/components/chat/Messages/Citations.svelte:10
 ```typescript
 // Each source has: document[], metadata[], distances[], source (with name, url, embed_url)
 citations = sources.reduce((acc, source) => {
-    source?.document?.forEach((document, index) => {
-        const metadata = source?.metadata?.[index];
-        const id = metadata?.source ?? source?.source?.id ?? 'N/A';
-        // Deduplicates by id, accumulates documents per source
-    });
+	source?.document?.forEach((document, index) => {
+		const metadata = source?.metadata?.[index];
+		const id = metadata?.source ?? source?.source?.id ?? 'N/A';
+		// Deduplicates by id, accumulates documents per source
+	});
 }, []);
 ```
 
@@ -98,10 +101,12 @@ The **citation extension** (`src/lib/utils/marked/citation-extension.ts`) parses
 ### 3. PDF Export — Current Implementation
 
 **Two menu locations, identical code:**
+
 - Sidebar: `src/lib/components/layout/Sidebar/ChatMenu.svelte:84-243`
 - Navbar: `src/lib/components/layout/Navbar/Menu.svelte:76-230`
 
 **Stylized mode (default):** Screenshot approach
+
 1. Renders full `<Messages>` component in a hidden div (`id="full-messages-container"`)
 2. Clones DOM, sets to 800px width, positions off-screen
 3. `html2canvas-pro` renders to canvas at 2x scale
@@ -109,6 +114,7 @@ The **citation extension** (`src/lib/utils/marked/citation-extension.ts`) parses
 5. `jsPDF` assembles pages from JPEG images
 
 **Problems:**
+
 - Output is raster images (no text selection in PDF)
 - Citations panel may not be expanded/visible in the screenshot
 - No dedicated source section
@@ -116,11 +122,13 @@ The **citation extension** (`src/lib/utils/marked/citation-extension.ts`) parses
 - Dark mode creates black background PDFs
 
 **Plain text mode:** Raw text dump
+
 - `getChatAsText()` → `### ROLE\ncontent\n\n` for each message
 - jsPDF renders as 8pt monospace text with manual line wrapping
 - No formatting, no citations, no sources
 
 **Server-side endpoint** (`backend/open_webui/routers/utils.py:90-102`):
+
 - `POST /api/v1/utils/pdf` — accepts `ChatTitleMessagesForm`
 - Uses `PDFGenerator` (`backend/open_webui/utils/pdf_generator.py`)
 - Uses fpdf2 with NotoSans fonts and HTML rendering via `pdf.write_html()`
@@ -132,6 +140,7 @@ The **citation extension** (`src/lib/utils/marked/citation-extension.ts`) parses
 **File:** `src/lib/components/layout/Sidebar/ChatMenu.svelte:311-354`
 
 Download submenu (inside `DropdownSub`):
+
 1. Export chat (.json) — gated by `$user.permissions?.chat?.export`
 2. Plain text (.txt)
 3. PDF document (.pdf)
@@ -181,7 +190,7 @@ Keep copy client-side for instant feedback. Enhance the existing `copyToClipboar
 
 1. **Extend `ResponseMessage.svelte` copy handler** to pass `message.sources` alongside `message.content`
 2. **Create `formatMessageForCopy()` utility** in `src/lib/utils/` that:
-   - Takes `content` + `sources` 
+   - Takes `content` + `sources`
    - Normalizes citation markers (`[1]`, `[2]`) to numbered superscripts
    - Appends a "Bronnen:" section with source name, URL
    - Returns both markdown (for `text/plain`) and HTML (for `text/html`)
@@ -193,7 +202,7 @@ Keep copy client-side for instant feedback. Enhance the existing `copyToClipboar
 Server-side is the right call — one HTML template serves both formats:
 
 1. **Create `backend/open_webui/routers/export.py`** (new router, separate from upstream `utils.py`)
-   - `POST /api/v1/export/chat/pdf` 
+   - `POST /api/v1/export/chat/pdf`
    - `POST /api/v1/export/chat/docx`
 2. **Shared `_prepare_export_data()`** function:
    - Accept chat messages + sources
@@ -211,21 +220,22 @@ Server-side is the right call — one HTML template serves both formats:
 #### 3. Menu Integration
 
 Add to both `ChatMenu.svelte` and `Navbar/Menu.svelte`:
+
 - "Word document (.docx)" button in the Download submenu
 - Optionally replace existing PDF button to use the server-side endpoint
 - Consider a "Kopieer geformateerd" (copy formatted) option outside the Download submenu
 
 ### Key Design Decisions
 
-| Decision | Recommendation | Rationale |
-|----------|---------------|-----------|
-| Copy: client vs server | Client-side | Instant feedback, data already in Svelte stores |
-| PDF/Word: client vs server | Server-side | One HTML template for both formats, no client-side library bloat |
-| Citation resolution | Shared utility (both client + server) | Citation mapping logic needed in both contexts |
-| New router vs modify utils.py | New `export.py` router | Avoid upstream merge conflicts on utils.py |
-| WeasyPrint vs fpdf2 | WeasyPrint for PDF | Much better CSS/HTML support, proper page layout |
-| Word generation | pypandoc (already installed) | Already a dependency, handles HTML→DOCX well |
-| Source section | Per-conversation appendix | Collect all cited sources, deduplicate, list at bottom |
+| Decision                      | Recommendation                        | Rationale                                                        |
+| ----------------------------- | ------------------------------------- | ---------------------------------------------------------------- |
+| Copy: client vs server        | Client-side                           | Instant feedback, data already in Svelte stores                  |
+| PDF/Word: client vs server    | Server-side                           | One HTML template for both formats, no client-side library bloat |
+| Citation resolution           | Shared utility (both client + server) | Citation mapping logic needed in both contexts                   |
+| New router vs modify utils.py | New `export.py` router                | Avoid upstream merge conflicts on utils.py                       |
+| WeasyPrint vs fpdf2           | WeasyPrint for PDF                    | Much better CSS/HTML support, proper page layout                 |
+| Word generation               | pypandoc (already installed)          | Already a dependency, handles HTML→DOCX well                     |
+| Source section                | Per-conversation appendix             | Collect all cited sources, deduplicate, list at bottom           |
 
 ### Data Flow
 

@@ -36,6 +36,7 @@
 	import PinSlash from '$lib/components/icons/PinSlash.svelte';
 	import Photo from '$lib/components/icons/Photo.svelte';
 	import Terminal from '$lib/components/icons/Terminal.svelte';
+	import Document from '$lib/components/icons/Document.svelte';
 	import Wrench from '$lib/components/icons/Wrench.svelte';
 	import Sparkles from '$lib/components/icons/Sparkles.svelte';
 	import Knobs from '$lib/components/icons/Knobs.svelte';
@@ -69,12 +70,14 @@
 	export let webSearchEnabled = false;
 	export let imageGenerationEnabled = false;
 	export let codeInterpreterEnabled = false;
+	export let documentWriterEnabled = false;
 
 	// Visibility flags
 	export let showToolsButton = false;
 	export let showWebSearchButton = false;
 	export let showImageGenerationButton = false;
 	export let showCodeInterpreterButton = false;
+	export let showDocumentWriterButton = false;
 	export let toggleFilters: {
 		id: string;
 		name: string;
@@ -264,7 +267,11 @@
 						>
 							<Clip />
 							<div class="flex-1 line-clamp-1">{$i18n.t('Files')}</div>
-							<Tooltip content={pinnedInputItems.includes('upload_files') ? $i18n.t('Unpin') : $i18n.t('Pin')}>
+							<Tooltip
+								content={pinnedInputItems.includes('upload_files')
+									? $i18n.t('Unpin')
+									: $i18n.t('Pin')}
+							>
 								<button
 									class="p-1 rounded-md hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
 									on:click|stopPropagation={() => pinItemHandler('upload_files')}
@@ -310,7 +317,9 @@
 							>
 								<Camera />
 								<div class="flex-1 line-clamp-1">{$i18n.t('Capture')}</div>
-								<Tooltip content={pinnedInputItems.includes('capture') ? $i18n.t('Unpin') : $i18n.t('Pin')}>
+								<Tooltip
+									content={pinnedInputItems.includes('capture') ? $i18n.t('Unpin') : $i18n.t('Pin')}
+								>
 									<button
 										class="p-1 rounded-md hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
 										on:click|stopPropagation={() => pinItemHandler('capture')}
@@ -327,44 +336,48 @@
 					{/if}
 
 					<!-- Attach Webpage (Link icon) -->
-				{#if isFeatureEnabled('webpage_url')}
-					<Tooltip
-						content={fileUploadCapableModels.length !== selectedModels.length
-							? $i18n.t('Model(s) do not support file upload')
-							: !fileUploadEnabled
-								? $i18n.t('You do not have permission to upload files.')
-								: ''}
-						className="w-full"
-					>
-						<button
-							class="flex gap-2 w-full text-left items-center px-3 py-1.5 text-sm cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-xl {!fileUploadEnabled
-								? 'opacity-50'
-								: ''}"
-							type="button"
-							on:click={() => {
-								if (fileUploadEnabled) {
-									show = false;
-									showAttachWebpageModal = true;
-								}
-							}}
+					{#if isFeatureEnabled('webpage_url')}
+						<Tooltip
+							content={fileUploadCapableModels.length !== selectedModels.length
+								? $i18n.t('Model(s) do not support file upload')
+								: !fileUploadEnabled
+									? $i18n.t('You do not have permission to upload files.')
+									: ''}
+							className="w-full"
 						>
-							<Link />
-							<div class="flex-1 line-clamp-1">{$i18n.t('Webpage URL')}</div>
-							<Tooltip content={pinnedInputItems.includes('attach_webpage') ? $i18n.t('Unpin') : $i18n.t('Pin')}>
-								<button
-									class="p-1 rounded-md hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
-									on:click|stopPropagation={() => pinItemHandler('attach_webpage')}
+							<button
+								class="flex gap-2 w-full text-left items-center px-3 py-1.5 text-sm cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-xl {!fileUploadEnabled
+									? 'opacity-50'
+									: ''}"
+								type="button"
+								on:click={() => {
+									if (fileUploadEnabled) {
+										show = false;
+										showAttachWebpageModal = true;
+									}
+								}}
+							>
+								<Link />
+								<div class="flex-1 line-clamp-1">{$i18n.t('Webpage URL')}</div>
+								<Tooltip
+									content={pinnedInputItems.includes('attach_webpage')
+										? $i18n.t('Unpin')
+										: $i18n.t('Pin')}
 								>
-									{#if pinnedInputItems.includes('attach_webpage')}
-										<PinSlash className="size-3.5" />
-									{:else}
-										<Pin className="size-3.5" />
-									{/if}
-								</button>
-							</Tooltip>
-						</button>
-					</Tooltip>
-				{/if}
+									<button
+										class="p-1 rounded-md hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+										on:click|stopPropagation={() => pinItemHandler('attach_webpage')}
+									>
+										{#if pinnedInputItems.includes('attach_webpage')}
+											<PinSlash className="size-3.5" />
+										{:else}
+											<Pin className="size-3.5" />
+										{/if}
+									</button>
+								</Tooltip>
+							</button>
+						</Tooltip>
+					{/if}
 
 					<!-- Attach Notes -->
 					{#if $config?.features?.enable_notes ?? false}
@@ -391,7 +404,11 @@
 										<ChevronRight />
 									</div>
 								</div>
-								<Tooltip content={pinnedInputItems.includes('attach_notes') ? $i18n.t('Unpin') : $i18n.t('Pin')}>
+								<Tooltip
+									content={pinnedInputItems.includes('attach_notes')
+										? $i18n.t('Unpin')
+										: $i18n.t('Pin')}
+								>
 									<button
 										class="p-1 rounded-md hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
 										on:click|stopPropagation={() => pinItemHandler('attach_notes')}
@@ -445,7 +462,11 @@
 									/>
 								</svg>
 								<div class="flex-1 line-clamp-1">{$i18n.t('Google Drive')}</div>
-								<Tooltip content={pinnedInputItems.includes('google_drive') ? $i18n.t('Unpin') : $i18n.t('Pin')}>
+								<Tooltip
+									content={pinnedInputItems.includes('google_drive')
+										? $i18n.t('Unpin')
+										: $i18n.t('Pin')}
+								>
 									<button
 										class="p-1 rounded-md hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
 										on:click|stopPropagation={() => pinItemHandler('google_drive')}
@@ -472,7 +493,11 @@
 							>
 								<OneDrive className="size-4" />
 								<div class="flex-1 line-clamp-1">{$i18n.t('OneDrive Files')}</div>
-								<Tooltip content={pinnedInputItems.includes('onedrive') ? $i18n.t('Unpin') : $i18n.t('Pin')}>
+								<Tooltip
+									content={pinnedInputItems.includes('onedrive')
+										? $i18n.t('Unpin')
+										: $i18n.t('Pin')}
+								>
 									<button
 										class="p-1 rounded-md hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
 										on:click|stopPropagation={() => pinItemHandler('onedrive')}
@@ -520,7 +545,11 @@
 										<ChevronRight />
 									</div>
 								</div>
-								<Tooltip content={pinnedInputItems.includes('knowledge') ? $i18n.t('Unpin') : $i18n.t('Pin')}>
+								<Tooltip
+									content={pinnedInputItems.includes('knowledge')
+										? $i18n.t('Unpin')
+										: $i18n.t('Pin')}
+								>
 									<button
 										class="p-1 rounded-md hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
 										on:click|stopPropagation={() => pinItemHandler('knowledge')}
@@ -560,7 +589,11 @@
 											<ChevronRight />
 										</div>
 									</div>
-									<Tooltip content={pinnedInputItems.includes('reference_chats') ? $i18n.t('Unpin') : $i18n.t('Pin')}>
+									<Tooltip
+										content={pinnedInputItems.includes('reference_chats')
+											? $i18n.t('Unpin')
+											: $i18n.t('Pin')}
+									>
 										<button
 											class="p-1 rounded-md hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
 											on:click|stopPropagation={() => pinItemHandler('reference_chats')}
@@ -578,7 +611,7 @@
 					{/if}
 
 					<!-- ═══ ATTACH CAPABILITY ═══ -->
-					{#if showWebSearchButton || showImageGenerationButton || showCodeInterpreterButton || showToolsButton || (toggleFilters && toggleFilters.length > 0)}
+					{#if showWebSearchButton || showImageGenerationButton || showCodeInterpreterButton || showDocumentWriterButton || showToolsButton || (toggleFilters && toggleFilters.length > 0)}
 						<div class="my-1 border-t border-gray-100 dark:border-gray-800" />
 						<div
 							class="text-xs font-medium text-gray-400 dark:text-gray-500 uppercase tracking-wide px-3 py-1.5"
@@ -600,15 +633,17 @@
 										<div class="flex-1 flex items-center justify-between">
 											<div class="line-clamp-1">
 												{$i18n.t('Tools')}
-												<span class="ml-0.5 text-gray-500"
-													>{Object.keys(tools).length}</span
-												>
+												<span class="ml-0.5 text-gray-500">{Object.keys(tools).length}</span>
 											</div>
 											<div class="text-gray-500">
 												<ChevronRight />
 											</div>
 										</div>
-										<Tooltip content={pinnedInputItems.includes('tools') ? $i18n.t('Unpin') : $i18n.t('Pin')}>
+										<Tooltip
+											content={pinnedInputItems.includes('tools')
+												? $i18n.t('Unpin')
+												: $i18n.t('Pin')}
+										>
 											<button
 												class="p-1 rounded-md hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
 												on:click|stopPropagation={() => pinItemHandler('tools')}
@@ -631,15 +666,13 @@
 
 						<!-- Filters -->
 						{#if toggleFilters && toggleFilters.length > 0}
-							{#each toggleFilters.sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' })) as filter, filterIdx (filter.id)}
+							{#each toggleFilters.sort( (a, b) => a.name.localeCompare( b.name, undefined, { sensitivity: 'base' } ) ) as filter, filterIdx (filter.id)}
 								<Tooltip content={filter?.description} placement="top-start">
 									<button
 										class="flex w-full justify-between gap-2 items-center px-3 py-1.5 text-sm cursor-pointer rounded-xl hover:bg-gray-50 dark:hover:bg-gray-800/50"
 										on:click={() => {
 											if (selectedFilterIds.includes(filter.id)) {
-												selectedFilterIds = selectedFilterIds.filter(
-													(id) => id !== filter.id
-												);
+												selectedFilterIds = selectedFilterIds.filter((id) => id !== filter.id);
 											} else {
 												selectedFilterIds = [...selectedFilterIds, filter.id];
 											}
@@ -688,11 +721,14 @@
 											</div>
 										{/if}
 
-										<Tooltip content={pinnedInputItems.includes(`filter:${filter.id}`) ? $i18n.t('Unpin') : $i18n.t('Pin')}>
+										<Tooltip
+											content={pinnedInputItems.includes(`filter:${filter.id}`)
+												? $i18n.t('Unpin')
+												: $i18n.t('Pin')}
+										>
 											<button
 												class="p-1 rounded-md hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
-												on:click|stopPropagation={() =>
-													pinItemHandler(`filter:${filter.id}`)}
+												on:click|stopPropagation={() => pinItemHandler(`filter:${filter.id}`)}
 											>
 												{#if pinnedInputItems.includes(`filter:${filter.id}`)}
 													<PinSlash className="size-3.5" />
@@ -734,7 +770,11 @@
 										</div>
 									</div>
 
-									<Tooltip content={pinnedInputItems.includes('web_search') ? $i18n.t('Unpin') : $i18n.t('Pin')}>
+									<Tooltip
+										content={pinnedInputItems.includes('web_search')
+											? $i18n.t('Unpin')
+											: $i18n.t('Pin')}
+									>
 										<button
 											class="p-1 rounded-md hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
 											on:click|stopPropagation={() => pinItemHandler('web_search')}
@@ -778,11 +818,14 @@
 										</div>
 									</div>
 
-									<Tooltip content={pinnedInputItems.includes('image_generation') ? $i18n.t('Unpin') : $i18n.t('Pin')}>
+									<Tooltip
+										content={pinnedInputItems.includes('image_generation')
+											? $i18n.t('Unpin')
+											: $i18n.t('Pin')}
+									>
 										<button
 											class="p-1 rounded-md hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
-											on:click|stopPropagation={() =>
-												pinItemHandler('image_generation')}
+											on:click|stopPropagation={() => pinItemHandler('image_generation')}
 										>
 											{#if pinnedInputItems.includes('image_generation')}
 												<PinSlash className="size-3.5" />
@@ -807,10 +850,7 @@
 
 						<!-- Code Interpreter -->
 						{#if showCodeInterpreterButton}
-							<Tooltip
-								content={$i18n.t('Execute code for analysis')}
-								placement="top-start"
-							>
+							<Tooltip content={$i18n.t('Execute code for analysis')} placement="top-start">
 								<button
 									class="flex w-full justify-between gap-2 items-center px-3 py-1.5 text-sm cursor-pointer rounded-xl hover:bg-gray-50 dark:hover:bg-gray-800/50"
 									aria-pressed={codeInterpreterEnabled}
@@ -830,11 +870,14 @@
 										</div>
 									</div>
 
-									<Tooltip content={pinnedInputItems.includes('code_interpreter') ? $i18n.t('Unpin') : $i18n.t('Pin')}>
+									<Tooltip
+										content={pinnedInputItems.includes('code_interpreter')
+											? $i18n.t('Unpin')
+											: $i18n.t('Pin')}
+									>
 										<button
 											class="p-1 rounded-md hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
-											on:click|stopPropagation={() =>
-												pinItemHandler('code_interpreter')}
+											on:click|stopPropagation={() => pinItemHandler('code_interpreter')}
 										>
 											{#if pinnedInputItems.includes('code_interpreter')}
 												<PinSlash className="size-3.5" />
@@ -847,6 +890,58 @@
 									<div class="shrink-0">
 										<Switch
 											state={codeInterpreterEnabled}
+											on:change={async (e) => {
+												const state = e.detail;
+												await tick();
+											}}
+										/>
+									</div>
+								</button>
+							</Tooltip>
+						{/if}
+
+						<!-- Document Writer -->
+						{#if showDocumentWriterButton}
+							<Tooltip content={$i18n.t('Write a downloadable document')} placement="top-start">
+								<button
+									class="flex w-full justify-between gap-2 items-center px-3 py-1.5 text-sm cursor-pointer rounded-xl hover:bg-gray-50 dark:hover:bg-gray-800/50"
+									aria-pressed={documentWriterEnabled}
+									aria-label={documentWriterEnabled
+										? $i18n.t('Disable Document Writer')
+										: $i18n.t('Enable Document Writer')}
+									on:click={() => {
+										documentWriterEnabled = !documentWriterEnabled;
+									}}
+								>
+									<div class="flex-1 truncate">
+										<div class="flex flex-1 gap-2 items-center">
+											<div class="shrink-0">
+												<Document className="size-3.5" strokeWidth="1.75" />
+											</div>
+											<div class="truncate">{$i18n.t('Document Writer')}</div>
+										</div>
+									</div>
+
+									<Tooltip
+										content={pinnedInputItems.includes('document_writer')
+											? $i18n.t('Unpin')
+											: $i18n.t('Pin')}
+									>
+										<button
+											class="p-1 rounded-md hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+											on:click|stopPropagation={() => pinItemHandler('document_writer')}
+										>
+											{#if pinnedInputItems.includes('document_writer')}
+												<PinSlash className="size-3.5" />
+											{:else}
+												<Pin className="size-3.5" />
+											{/if}
+										</button>
+									</Tooltip>
+
+									<div class="shrink-0">
+										<Switch
+											state={documentWriterEnabled}
 											on:change={async (e) => {
 												const state = e.detail;
 												await tick();
@@ -962,9 +1057,7 @@
 							}}
 						>
 							{#if !(tools[toolId]?.authenticated ?? true)}
-								<div
-									class="absolute inset-0 opacity-50 rounded-xl cursor-pointer z-10"
-								/>
+								<div class="absolute inset-0 opacity-50 rounded-xl cursor-pointer z-10" />
 							{/if}
 							<div class="flex-1 truncate">
 								<div class="flex flex-1 gap-2 items-center">
@@ -973,10 +1066,7 @@
 											<Wrench />
 										</div>
 									</Tooltip>
-									<Tooltip
-										content={tools[toolId]?.description ?? ''}
-										placement="top-start"
-									>
+									<Tooltip content={tools[toolId]?.description ?? ''} placement="top-start">
 										<div class="truncate">{tools[toolId].name}</div>
 									</Tooltip>
 								</div>

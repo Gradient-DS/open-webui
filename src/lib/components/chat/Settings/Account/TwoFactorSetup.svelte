@@ -113,12 +113,10 @@
 		if (!regenPassword) return;
 
 		loading = true;
-		const res = await regenerateRecoveryCodes(localStorage.token, regenPassword).catch(
-			(error) => {
-				toast.error(`${error}`);
-				return null;
-			}
-		);
+		const res = await regenerateRecoveryCodes(localStorage.token, regenPassword).catch((error) => {
+			toast.error(`${error}`);
+			return null;
+		});
 		loading = false;
 
 		if (res) {
@@ -172,7 +170,9 @@
 				{$i18n.t('Scan this QR code with your authenticator app')}
 			</div>
 			<div class="text-xs text-gray-400 dark:text-gray-500 mb-3">
-				{$i18n.t('Recommended apps: FreeOTP (open source), Microsoft Authenticator, or Google Authenticator.')}
+				{$i18n.t(
+					'Recommended apps: FreeOTP (open source), Microsoft Authenticator, or Google Authenticator.'
+				)}
 			</div>
 
 			{#if qrCodeBase64}

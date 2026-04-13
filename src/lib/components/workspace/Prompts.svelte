@@ -64,7 +64,7 @@
 
 	$: if (loaded) {
 		// Track all dependencies
-		void page, selectedTag, viewOption, query;
+		(void page, selectedTag, viewOption, query);
 
 		if (queryDebounceActive) {
 			clearTimeout(searchDebounceTimer);

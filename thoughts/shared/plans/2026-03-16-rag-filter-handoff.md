@@ -11,6 +11,7 @@ Open WebUI now forwards `rag_filter` to the agents_api. The agents_api does not 
 Marijn's filter UI (branch `feat/docfilter`) lets users select collections, content subtypes, and specific documents.
 
 **Key files:**
+
 - `src/lib/components/chat/RagFilter.svelte` — filter UI component
 - `src/lib/components/chat/RagFilterPanel.svelte` — sliding side panel
 - `src/lib/stores/rag-filter.ts` — Svelte store with filter state types
@@ -29,24 +30,25 @@ The filter is sent as `rag_filter` in the chat completion request body (`Chat.sv
 
 ```json
 {
-  "rag_filter": {
-    "collection_key": {
-      "all": true
-    },
-    "another_collection": {
-      "subtypes": {
-        "Regelgeving": true,
-        "Handleidingen": {
-          "doc_ids": [1, 2, "abc-123"],
-          "doc_titles": ["Document A", "Document B"]
-        }
-      }
-    }
-  }
+	"rag_filter": {
+		"collection_key": {
+			"all": true
+		},
+		"another_collection": {
+			"subtypes": {
+				"Regelgeving": true,
+				"Handleidingen": {
+					"doc_ids": [1, 2, "abc-123"],
+					"doc_titles": ["Document A", "Document B"]
+				}
+			}
+		}
+	}
 }
 ```
 
 **Cases:**
+
 - `{ "all": true }` — entire collection selected, no filtering needed
 - `{ "subtypes": { "X": true } }` — entire subtype selected → filter by `contentsubtype_exact`
 - `{ "subtypes": { "X": { "doc_ids": [...] } } }` — specific docs → filter by `original_doc_id_in`
@@ -64,6 +66,7 @@ Parses the frontend JSON into structured `CollectionSelection` / `SubtypeSelecti
 
 **`build_api_filters_for_collection(collection_selection) -> dict | None`**
 Converts a collection's selection into API-compatible filters:
+
 - Specific doc_ids → `{"original_doc_id_in": [...]}`
 - Specific doc_id (single) → `{"original_doc_id": id}`
 - Full subtype(s) selected → `{"contentsubtype_exact": "name"}` or `{"contentsubtype_exact": ["a", "b"]}`
@@ -94,6 +97,7 @@ The multiagent agent stored `filter_by_collection: Optional[dict[str, dict]]` in
 ### 1. Accept `rag_filter` in request
 
 `service/routes/chat.py` — Add to `ChatCompletionRequest`:
+
 ```python
 rag_filter: dict[str, Any] | None = None
 ```
@@ -103,11 +107,13 @@ Pass to `runner.run(rag_filter=body.rag_filter)`.
 ### 2. Thread through runner to ProjectConfig
 
 `core/config.py` — Add to `ProjectConfig`:
+
 ```python
 rag_filter: dict[str, Any] = {}
 ```
 
 `agents/runner.py` — In `run()`, inject like `openwebui_collections` (line 207-209):
+
 ```python
 if rag_filter:
     project_config = project_config.model_copy(
@@ -124,6 +130,7 @@ The existing `search_source()` and `title_guided_search()` already accept `filte
 ### 4. Apply in agent search nodes
 
 Each agent reads `self.config.rag_filter`, parses it once, then for each collection search:
+
 1. Check if collection is in the filter (if not, skip it)
 2. Get API filters via `build_api_filters_for_collection()`
 3. Pass to `search_source(filters=...)` or `title_guided_search(filters=...)`
@@ -139,6 +146,7 @@ Consider adding a helper to `BaseAgent` or `search.py` so agents don't reimpleme
 ### Filter keys for Weaviate (HttpRetrievalProvider)
 
 The `HttpRetrievalProvider` passes `filters` directly in the POST body to the Flask+Weaviate search API. The supported filter keys are:
+
 - `original_doc_id_in: list` — filter by document IDs
 - `original_doc_id: str|int` — filter by single document ID
 - `contentsubtype_exact: str|list` — filter by content subtype(s)

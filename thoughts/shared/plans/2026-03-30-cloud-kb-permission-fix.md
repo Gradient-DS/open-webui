@@ -9,6 +9,7 @@ Rewrite the `_sync_permissions()` method in both cloud sync workers to stop mirr
 ### The Problem
 
 `_sync_permissions()` in `OneDriveSyncWorker` (`:279`) and `GoogleDriveSyncWorker` (`:203`) runs on every sync cycle and:
+
 1. Fetches ALL folder permissions from the cloud provider API
 2. Maps every email to an Open WebUI user
 3. Creates `read` access grants for every matched user + `write` for the owner
@@ -27,6 +28,7 @@ In corporate M365/Google Workspace tenants, folders are often shared with entire
 - Cleanup worker (`services/deletion/cleanup_worker.py`) runs every 60s, processes soft-deleted KBs via `get_pending_deletions()`.
 
 ### Key Discoveries:
+
 - Owner gets implicit access in the KB listing query — `has_permission_filter()` at `access_grants.py:761-765` uses `OR(owner, grant_exists)`, so the owner never needs an explicit grant.
 - The router's `update_knowledge_by_id` endpoint (`:505-506`) already prevents manual access grant changes on non-local KBs — but the sync worker calls the model layer directly, bypassing this guard.
 - The retrieval path (`retrieval/utils.py:1074-1083`) also checks KB access with the same admin/owner/grant pattern. If `get_knowledge_by_id()` returns `None` (deleted/soft-deleted), the KB is silently skipped.
@@ -48,6 +50,7 @@ After this plan is complete:
 5. **Defence in depth preserved**: `_verify_source_access()` per-source check remains alongside the new owner-level check in `_sync_permissions()`.
 
 ### How to verify:
+
 - Cloud KBs no longer create access grants for non-owner users
 - A KB where the owner lost cloud access shows as suspended (grayed, info tooltip, content blocked)
 - Re-sharing the folder with the owner auto-unsuspends on next sync
@@ -72,11 +75,13 @@ The frontend changes are minimal — the list view already has badge/tooltip pat
 ## Phase 1: Rewrite `_sync_permissions()` — Owner-Only Access Check
 
 ### Overview
+
 Replace the email-mapping permission sync in both workers with a simple owner-access verification. If the owner lost access to the folder, set `suspended_at` in sync meta. If the owner has access and `suspended_at` exists, clear it (unsuspend).
 
 ### Changes Required:
 
 #### 1. OneDrive Sync Worker
+
 **File**: `backend/open_webui/services/onedrive/sync_worker.py`
 **Changes**: Replace `_sync_permissions()` (lines 279-376)
 
@@ -145,6 +150,7 @@ async def _sync_permissions(self) -> None:
 ```
 
 #### 2. Google Drive Sync Worker
+
 **File**: `backend/open_webui/services/google_drive/sync_worker.py`
 **Changes**: Replace `_sync_permissions()` (lines 203-273)
 
@@ -211,6 +217,7 @@ async def _sync_permissions(self) -> None:
 ```
 
 #### 3. Base Sync Worker — Skip Sync When Suspended
+
 **File**: `backend/open_webui/services/sync/base_worker.py`
 **Changes**: Add early return in `sync()` after `_sync_permissions()` if KB was suspended
 
@@ -235,6 +242,7 @@ if knowledge:
 ```
 
 #### 4. Sync Scheduler — Skip Suspended KBs
+
 **File**: `backend/open_webui/services/sync/scheduler.py`
 **Changes**: Add suspension check in `_is_sync_due()` (around line 129)
 
@@ -249,11 +257,13 @@ if sync_info.get('suspended_at'):
 ### Success Criteria:
 
 #### Automated Verification:
+
 - [x] Backend starts successfully: `open-webui dev`
 - [x] No import errors in sync worker modules
 - [ ] Type checking passes on modified files: `npm run check` (note: pre-existing errors expected)
 
 #### Manual Verification:
+
 - [ ] Create a cloud KB, verify no access grants are created for other users
 - [ ] Revoke owner access upstream, trigger sync — verify `suspended_at` is set in meta
 - [ ] Re-grant owner access, trigger sync — verify `suspended_at` is cleared
@@ -266,11 +276,13 @@ if sync_info.get('suspended_at'):
 ## Phase 2: Suspension Lifecycle — 30-Day Auto-Delete
 
 ### Overview
+
 Extend the existing cleanup worker to detect KBs suspended for 30+ days and hard-delete them. Also add a helper to check suspension state from the knowledge model.
 
 ### Changes Required:
 
 #### 1. Knowledge Model — Add Suspension Helpers
+
 **File**: `backend/open_webui/models/knowledge.py`
 **Changes**: Add methods to `KnowledgeTable`
 
@@ -347,6 +359,7 @@ def get_suspension_info(self, id: str) -> Optional[dict]:
 ```
 
 #### 2. Cleanup Worker — Add Suspended KB Cleanup
+
 **File**: `backend/open_webui/services/deletion/cleanup_worker.py`
 **Changes**: Add `_process_expired_suspensions()` to the cleanup loop
 
@@ -393,10 +406,12 @@ def _process_expired_suspensions():
 ### Success Criteria:
 
 #### Automated Verification:
+
 - [x] Backend starts successfully: `open-webui dev`
 - [x] No import errors in cleanup worker and knowledge model
 
 #### Manual Verification:
+
 - [ ] Manually set `suspended_at` to 31 days ago in a test KB's meta — verify cleanup worker deletes it within 60s
 - [ ] Verify `is_suspended()` and `get_suspension_info()` return correct results
 
@@ -407,11 +422,13 @@ def _process_expired_suspensions():
 ## Phase 3: Backend — Block Access to Suspended KBs
 
 ### Overview
+
 Add suspension checks to the knowledge detail, files, and retrieval endpoints. Suspended KBs should return 403 with an explanatory message.
 
 ### Changes Required:
 
 #### 1. Knowledge Router — Block Detail and File Access
+
 **File**: `backend/open_webui/routers/knowledge.py`
 **Changes**: Add suspension check after the existing access check in `GET /{id}` and `GET /{id}/files`
 
@@ -434,10 +451,12 @@ Same check in the `GET /{id}/files` endpoint (around line 637).
 **Note**: Admins can still access suspended KBs (for inspection/manual deletion).
 
 #### 2. Knowledge List — Add Suspension Info to Response
+
 **File**: `backend/open_webui/models/knowledge.py`
 **Changes**: Extend `KnowledgeUserModel` response to include `suspension_info`
 
 Add to `KnowledgeUserModel`:
+
 ```python
 class KnowledgeUserModel(KnowledgeModel):
     user: Optional[UserResponse] = None
@@ -463,6 +482,7 @@ for item in knowledge_items:
 ```
 
 #### 3. Retrieval Path — Skip Suspended KBs in Chat
+
 **File**: `backend/open_webui/retrieval/utils.py`
 **Changes**: In `get_sources_from_items()` (around line 1074), after fetching the KB and before the access check:
 
@@ -476,10 +496,12 @@ if knowledge and Knowledges.is_suspended(knowledge.id):
 ### Success Criteria:
 
 #### Automated Verification:
+
 - [x] Backend starts successfully: `open-webui dev`
 - [x] Build succeeds: `npm run build`
 
 #### Manual Verification:
+
 - [ ] Non-admin user trying to access a suspended KB detail page gets 403 with explanatory message
 - [ ] Admin user can still access suspended KB detail
 - [ ] Suspended KB is skipped when used in chat (no error, just silently excluded)
@@ -492,11 +514,13 @@ if knowledge and Knowledges.is_suspended(knowledge.id):
 ## Phase 4: Frontend — Suspended KB Display
 
 ### Overview
+
 Gray out suspended KBs in the knowledge list, prevent navigation to their content, and show an info tooltip explaining the situation.
 
 ### Changes Required:
 
 #### 1. Knowledge List — Gray Out Suspended KBs
+
 **File**: `src/lib/components/workspace/Knowledge.svelte`
 **Changes**: Modify the KB item rendering (around line 367)
 
@@ -528,18 +552,19 @@ Add a suspension badge + info tooltip after the existing type badges (around lin
 
 ```svelte
 {#if item.suspension_info}
-    <Tooltip
-        content={$i18n.t(
-            'The owner lost access to the cloud folder. This knowledge base will be permanently deleted in {{days}} days unless access is restored.',
-            { days: item.suspension_info.days_remaining }
-        )}
-    >
-        <Badge type="warning" content={$i18n.t('Suspended')} />
-    </Tooltip>
+	<Tooltip
+		content={$i18n.t(
+			'The owner lost access to the cloud folder. This knowledge base will be permanently deleted in {{days}} days unless access is restored.',
+			{ days: item.suspension_info.days_remaining }
+		)}
+	>
+		<Badge type="warning" content={$i18n.t('Suspended')} />
+	</Tooltip>
 {/if}
 ```
 
 #### 2. Knowledge Detail Page — Handle 403 for Suspended KBs
+
 **File**: `src/routes/(app)/workspace/knowledge/[id]/+page.svelte`
 **Changes**: The existing error handling for the GET detail call should already handle a 403 response. Verify that the error message from the backend is shown to the user via toast or error state. If not, add handling:
 
@@ -555,6 +580,7 @@ const res = await getKnowledgeById(localStorage.token, $page.params.id).catch((e
 This should already work because the API client functions in `src/lib/apis/knowledge/index.ts` throw the error detail string on non-2xx responses.
 
 #### 3. TypeScript Types — Add `suspension_info`
+
 **File**: `src/lib/apis/knowledge/index.ts` (or wherever the KB type is defined)
 **Changes**: If there's an explicit TypeScript interface for knowledge items, add `suspension_info?: { suspended_at: number; reason: string; days_remaining: number } | null`.
 
@@ -563,10 +589,12 @@ If the codebase uses implicit types (no explicit interface), this step can be sk
 ### Success Criteria:
 
 #### Automated Verification:
+
 - [x] Frontend builds: `npm run build`
 - [ ] No new TypeScript errors in modified files: `npm run check`
 
 #### Manual Verification:
+
 - [ ] Suspended KB appears grayed out (opacity-50) in the knowledge list
 - [ ] Suspended KB shows a "Suspended" warning badge with tooltip explaining the situation and days remaining
 - [ ] Clicking a suspended KB does NOT navigate to the detail page
@@ -580,17 +608,20 @@ If the codebase uses implicit types (no explicit interface), this step can be sk
 ## Testing Strategy
 
 ### Unit Tests:
+
 - `is_suspended()` returns `True`/`False` correctly based on meta
 - `get_suspension_info()` returns correct `days_remaining` calculation
 - `get_suspended_expired_knowledge()` only returns KBs past the 30-day cutoff
 
 ### Integration Tests:
+
 - Sync cycle with valid owner access: no `suspended_at` set, sync proceeds normally
 - Sync cycle with revoked owner access: `suspended_at` set, sync returns early
 - Sync cycle after re-granting access: `suspended_at` cleared, sync resumes
 - Cleanup worker processes expired suspended KB: full hard-delete
 
 ### Manual Testing Steps:
+
 1. Create OneDrive KB, verify no access grants for non-owner users
 2. Create Google Drive KB, verify same
 3. Simulate owner access loss (revoke sharing), trigger sync — verify suspension

@@ -66,7 +66,11 @@
 		submitting = true;
 
 		try {
-			const sessionUser = await acceptInvite(token, password, name !== invite?.name ? name : undefined);
+			const sessionUser = await acceptInvite(
+				token,
+				password,
+				name !== invite?.name ? name : undefined
+			);
 
 			if (sessionUser) {
 				toast.success($i18n.t(`You're now logged in.`));
@@ -112,16 +116,15 @@
 							<Spinner className="size-5" />
 						</div>
 					{:else if state === 'valid' && invite}
-						<form
-							class="flex flex-col justify-center"
-							on:submit|preventDefault={submitHandler}
-						>
+						<form class="flex flex-col justify-center" on:submit|preventDefault={submitHandler}>
 							<div class="mb-1">
 								<div class="text-2xl font-medium">
 									{#if $config?.invite_heading}
 										{$config.invite_heading}
 									{:else if $config?.client_name}
-										{$i18n.t("You've been invited to the soev.ai environment of {{clientName}}", { clientName: $config.client_name })}
+										{$i18n.t("You've been invited to the soev.ai environment of {{clientName}}", {
+											clientName: $config.client_name
+										})}
 									{:else}
 										{$i18n.t("You've been invited to join")}
 									{/if}
@@ -213,10 +216,7 @@
 						<p class="text-gray-500 dark:text-gray-400 mb-4">
 							{$i18n.t('This invite has already been used.')}
 						</p>
-						<a
-							href="/auth"
-							class="text-sm text-blue-600 dark:text-blue-400 hover:underline"
-						>
+						<a href="/auth" class="text-sm text-blue-600 dark:text-blue-400 hover:underline">
 							{$i18n.t('Sign in')}
 						</a>
 					{:else}

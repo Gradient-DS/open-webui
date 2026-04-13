@@ -3,6 +3,7 @@
 ## Overview
 
 Enhance the push integration with four improvements in one pass:
+
 1. Update the curl example to showcase all metadata fields
 2. Add a scoped OpenAPI spec download (integration endpoints only) in the admin panel
 3. Propagate custom metadata to vector store chunks for RAG filtering
@@ -11,6 +12,7 @@ Enhance the push integration with four improvements in one pass:
 ## Current State Analysis
 
 ### What Exists
+
 - **Metadata fields already supported**: Both `IngestCollection` and `IngestDocumentBase` have `metadata: dict`, `tags: list[str]`, and typed fields like `content_type`, `language`, `author`, `modified_at` (`integrations.py:29-51`)
 - **Metadata stored in DB**: File records store `provider_metadata` in `file.meta` JSON column (`integrations.py:145-155`). KB records store it in `knowledge.meta.integration.provider_metadata` (`integrations.py:121-131`)
 - **Metadata NOT in vector store**: `_build_base_metadata()` at `integrations.py:225-237` only includes `name`, `source`, `file_id`, `created_by`, `author`, `language`, `source_provider`
@@ -20,6 +22,7 @@ Enhance the push integration with four improvements in one pass:
 - **Vector metadata processing**: `process_metadata()` in `retrieval/vector/utils.py:14-28` converts `list` and `dict` values to strings — so nested `metadata` dict values will be stringified
 
 ### Key Discoveries
+
 - The integration router is mounted with tag `"integrations"` at `main.py:1769-1771` — we can use this tag to filter the OpenAPI spec
 - `process_metadata()` converts dicts/lists to strings, so we should flatten `doc.metadata` into individual keys with a prefix (e.g., `meta_<key>`) rather than nesting
 - Vector DB filter support in `search()` is limited (only ChromaDB and pgvector), but storing metadata on chunks is still valuable for display and future filtering
@@ -33,6 +36,7 @@ Enhance the push integration with four improvements in one pass:
 4. **Server-side validation** rejects pushes that are missing `required` custom metadata fields defined in the provider config
 
 ### Verification
+
 - Curl example visually shows metadata fields in admin panel
 - GET `/api/v1/integrations/openapi.json` returns a valid OpenAPI spec with only integration routes
 - Download link appears below curl example and triggers a file download
@@ -55,11 +59,13 @@ All four changes are independent and can be implemented in any order. We'll go b
 ## Phase 1: Backend — Vector Metadata Propagation
 
 ### Overview
+
 Extend `_build_base_metadata()` to include `content_type`, `tags`, and flattened `doc.metadata` entries in vector chunk metadata.
 
 ### Changes Required
 
 #### 1. Extend `_build_base_metadata()`
+
 **File**: `backend/open_webui/routers/integrations.py`
 **Changes**: Add `content_type`, `tags`, and flattened metadata dict entries
 
@@ -90,10 +96,12 @@ Note: `process_metadata()` in `retrieval/vector/utils.py` will automatically con
 ### Success Criteria
 
 #### Automated Verification:
+
 - [ ] Backend starts without errors: `open-webui dev`
 - [ ] Linting passes: `npm run format:backend`
 
 #### Manual Verification:
+
 - [ ] Push a document with `metadata: {"department": "eng", "version": "1.2"}` and `content_type: "application/pdf"` via curl
 - [ ] Query the vector DB collection and verify chunks contain `content_type`, `tags`, `meta_department`, `meta_version` keys
 
@@ -102,11 +110,13 @@ Note: `process_metadata()` in `retrieval/vector/utils.py` will automatically con
 ## Phase 2: Backend — Custom Metadata Validation
 
 ### Overview
+
 Validate that documents include all `required` custom metadata fields defined in the provider config.
 
 ### Changes Required
 
 #### 1. Add validation helper
+
 **File**: `backend/open_webui/routers/integrations.py`
 **Changes**: Add function after `get_integration_provider()` (after line 94)
 
@@ -126,6 +136,7 @@ def _validate_custom_metadata(doc: IngestDocumentBase, provider_config: dict):
 ```
 
 #### 2. Call validation in the processing dispatch
+
 **File**: `backend/open_webui/routers/integrations.py`
 **Changes**: Add validation call after each document is parsed, before processing. In all three `data_type` blocks (`parsed_text` at ~line 535, `chunked_text` at ~line 553, `full_documents` at ~line 577):
 
@@ -137,10 +148,12 @@ _validate_custom_metadata(doc, provider_config)
 ### Success Criteria
 
 #### Automated Verification:
+
 - [ ] Backend starts without errors: `open-webui dev`
 - [ ] Linting passes: `npm run format:backend`
 
 #### Manual Verification:
+
 - [ ] Configure a provider with a required custom metadata field `department` (key: "department", required: true)
 - [ ] Push a document WITHOUT `metadata.department` → expect 400 error with clear message
 - [ ] Push a document WITH `metadata.department` → expect success
@@ -151,11 +164,13 @@ _validate_custom_metadata(doc, provider_config)
 ## Phase 3: Backend — Scoped OpenAPI Spec Endpoint
 
 ### Overview
+
 Add a dedicated endpoint that returns an OpenAPI spec containing only the integration routes. This runs regardless of `ENV` setting.
 
 ### Changes Required
 
 #### 1. Add OpenAPI spec endpoint to integrations router
+
 **File**: `backend/open_webui/routers/integrations.py`
 **Changes**: Add new endpoint at the bottom of the file (after the delete endpoints). Import `Request` is already present.
 
@@ -233,11 +248,13 @@ Note: The `re` import at the top of the function is unnecessary (leftover from a
 ### Success Criteria
 
 #### Automated Verification:
+
 - [ ] Backend starts without errors: `open-webui dev`
 - [ ] Linting passes: `npm run format:backend`
 - [ ] `curl -H "Authorization: Bearer <token>" http://localhost:8080/api/v1/integrations/openapi.json` returns valid JSON with only integration paths
 
 #### Manual Verification:
+
 - [ ] Response contains only `/api/v1/integrations/ingest`, `/api/v1/integrations/collections/{source_id}`, and `/api/v1/integrations/collections/{source_id}/documents/{document_source_id}` paths (NOT the `/openapi.json` endpoint itself)
 - [ ] Response includes referenced schemas (IngestForm, IngestCollection, etc.)
 - [ ] Works in both dev and production ENV settings
@@ -249,25 +266,74 @@ Note: The `re` import at the top of the function is unnecessary (leftover from a
 ## Phase 4: Frontend — Enhanced Curl Example & OpenAPI Download Link
 
 ### Overview
+
 Update the curl example to show metadata fields. Add a download link for the scoped OpenAPI spec below the curl example.
 
 ### Changes Required
 
 #### 1. Update curl example data
+
 **File**: `src/lib/components/admin/Settings/IntegrationProviders.svelte`
 **Changes**: Replace the `exampleData` `@const` at line 299
 
 Replace the current line 299:
+
 ```svelte
-{@const exampleData = JSON.stringify({ collection: { source_id: 'my-collection-123', name: 'My Collection', data_type: 'parsed_text', access_control: null }, documents: [{ source_id: 'doc-1', filename: 'example.txt', text: 'Document content here...', title: 'Example Document' }] }, null, 2)}
+{@const exampleData = JSON.stringify(
+	{
+		collection: {
+			source_id: 'my-collection-123',
+			name: 'My Collection',
+			data_type: 'parsed_text',
+			access_control: null
+		},
+		documents: [
+			{
+				source_id: 'doc-1',
+				filename: 'example.txt',
+				text: 'Document content here...',
+				title: 'Example Document'
+			}
+		]
+	},
+	null,
+	2
+)}
 ```
 
 With:
+
 ```svelte
-{@const exampleData = JSON.stringify({ collection: { source_id: 'my-collection-123', name: 'My Collection', data_type: 'parsed_text', access_control: null, metadata: { department: 'engineering' }, tags: ['project-x'] }, documents: [{ source_id: 'doc-1', filename: 'example.txt', content_type: 'text/plain', text: 'Document content here...', title: 'Example Document', metadata: { version: '1.2', status: 'approved' }, tags: ['documentation'], author: 'Jane Doe' }] }, null, 2)}
+{@const exampleData = JSON.stringify(
+	{
+		collection: {
+			source_id: 'my-collection-123',
+			name: 'My Collection',
+			data_type: 'parsed_text',
+			access_control: null,
+			metadata: { department: 'engineering' },
+			tags: ['project-x']
+		},
+		documents: [
+			{
+				source_id: 'doc-1',
+				filename: 'example.txt',
+				content_type: 'text/plain',
+				text: 'Document content here...',
+				title: 'Example Document',
+				metadata: { version: '1.2', status: 'approved' },
+				tags: ['documentation'],
+				author: 'Jane Doe'
+			}
+		]
+	},
+	null,
+	2
+)}
 ```
 
 #### 2. Add OpenAPI download link below curl example
+
 **File**: `src/lib/components/admin/Settings/IntegrationProviders.svelte`
 **Changes**: Add a download link after the access_control annotation (after line 313, before the closing `</div>`)
 
@@ -317,8 +383,10 @@ Note: The `download` attribute triggers a file download. The endpoint requires a
 ```
 
 #### 3. Add i18n keys
+
 **File**: `src/lib/i18n/locales/en-US/translation.json`
 **Changes**: Add key (only if not already present):
+
 ```json
 "Download OpenAPI Specification": ""
 ```
@@ -326,10 +394,12 @@ Note: The `download` attribute triggers a file download. The endpoint requires a
 ### Success Criteria
 
 #### Automated Verification:
+
 - [ ] Frontend builds: `npm run build`
 - [ ] Lint passes: `npm run lint:frontend`
 
 #### Manual Verification:
+
 - [ ] Open admin panel → Integrations → click "API" on a provider
 - [ ] Curl example now shows `metadata`, `content_type`, `tags`, `author` fields
 - [ ] "Download OpenAPI Specification" link appears below the curl example
@@ -341,6 +411,7 @@ Note: The `download` attribute triggers a file download. The endpoint requires a
 ## Testing Strategy
 
 ### Manual Testing Steps
+
 1. **Create a provider** with custom metadata fields: `filetype` (required), `department` (optional)
 2. **Push without filetype** → expect 400 with message about missing `filetype`
 3. **Push with all fields** including `metadata: { "filetype": "pdf", "department": "legal" }` → expect 200
@@ -349,6 +420,7 @@ Note: The `download` attribute triggers a file download. The endpoint requires a
 6. **Download OpenAPI spec** and verify it's valid and scoped
 
 ### Edge Cases
+
 - Empty `metadata: {}` with no required custom fields → should pass
 - `metadata` with extra keys not in `custom_metadata_fields` → should pass (custom fields define required minimum, not schema)
 - Very long metadata values → `process_metadata()` handles them fine

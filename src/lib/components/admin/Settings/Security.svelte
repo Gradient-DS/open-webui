@@ -79,7 +79,9 @@
 								bind:value={twoFAConfig.TWO_FA_GRACE_PERIOD_DAYS}
 							/>
 							<div class="text-xs text-gray-500 mt-1">
-								{$i18n.t('Users will have this many days to set up 2FA after enforcement is enabled.')}
+								{$i18n.t(
+									'Users will have this many days to set up 2FA after enforcement is enabled.'
+								)}
 							</div>
 						</div>
 					{/if}

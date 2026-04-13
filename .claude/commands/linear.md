@@ -9,6 +9,7 @@ You are tasked with managing Linear tickets, including creating tickets from tho
 ## Initial Setup
 
 First, verify that Linear MCP tools are available by checking if any `mcp__linear__` tools exist. If not, respond:
+
 ```
 I need access to Linear tools to help with ticket management. Please run the `/mcp` command to enable the Linear MCP server, then try again.
 ```
@@ -16,6 +17,7 @@ I need access to Linear tools to help with ticket management. Please run the `/m
 If tools are available, respond based on the user's request:
 
 ### For general requests:
+
 ```
 I can help you with Linear tickets. What would you like to do?
 1. Create a new ticket from a thoughts document
@@ -25,6 +27,7 @@ I can help you with Linear tickets. What would you like to do?
 ```
 
 ### For specific create requests:
+
 ```
 I'll help you create a Linear ticket from your thoughts document. Please provide:
 1. The path to the thoughts document (or topic to search for)
@@ -55,12 +58,15 @@ The team follows a specific workflow to ensure alignment before code implementat
 ## Important Conventions
 
 ### URL Mapping for Thoughts Documents
+
 When referencing thoughts documents, always provide GitHub links using the `links` parameter:
+
 - `thoughts/shared/...` → `https://github.com/humanlayer/thoughts/blob/main/repos/humanlayer/shared/...`
 - `thoughts/allison/...` → `https://github.com/humanlayer/thoughts/blob/main/repos/humanlayer/allison/...`
 - `thoughts/global/...` → `https://github.com/humanlayer/thoughts/blob/main/global/...`
 
 ### Default Values
+
 - **Status**: Always create new tickets in "Triage" status
 - **Project**: For new tickets, default to "M U L T I C L A U D E" (ID: f11c8d63-9120-4393-bfae-553da0b04fd8) unless told otherwise
 - **Priority**: Default to Medium (3) for most tasks, use best judgment or ask user
@@ -71,7 +77,9 @@ When referencing thoughts documents, always provide GitHub links using the `link
 - **Links**: Use the `links` parameter to attach URLs (not just markdown links in description)
 
 ### Automatic Label Assignment
+
 Automatically apply labels based on the ticket content:
+
 - **hld**: For tickets about the `hld/` directory (the daemon)
 - **wui**: For tickets about `humanlayer-wui/`
 - **meta**: For tickets about `hlyr` commands, thoughts tool, or `thoughts/` directory
@@ -110,6 +118,7 @@ Note: meta is mutually exclusive with hld/wui. Tickets can have both hld and wui
 
 5. **Draft the ticket summary:**
    Present a draft to the user:
+
    ```
    ## Draft Linear Ticket
 
@@ -147,6 +156,7 @@ Note: meta is mutually exclusive with hld/wui. Tickets can have both hld and wui
    Note: Ticket will be created in "Triage" status by default.
 
 7. **Create the Linear ticket:**
+
    ```
    mcp__linear__create_issue with:
    - title: [refined title]
@@ -178,6 +188,7 @@ Note: meta is mutually exclusive with hld/wui. Tickets can have both hld and wui
 ## Example transformations:
 
 ### From verbose thoughts:
+
 ```
 "I've been thinking about how our resumed sessions don't inherit permissions properly.
 This is causing issues where users have to re-specify everything. We should probably
@@ -186,6 +197,7 @@ new columns for permission_prompt_tool and allowed_tools..."
 ```
 
 ### To concise ticket:
+
 ```
 Title: Fix resumed sessions to inherit all configuration from parent
 
@@ -222,6 +234,7 @@ When user wants to add a comment to a ticket:
    - Do this for both thoughts/ and code files mentioned
 
 4. **Comment structure example:**
+
    ```markdown
    Implemented retry logic in webhook handler to address rate limit issues.
 
@@ -229,6 +242,7 @@ When user wants to add a comment to a ticket:
    so exponential backoff alone wasn't sufficient - added request queuing.
 
    Files updated:
+
    - `hld/webhooks/handler.go` ([GitHub](link))
    - `thoughts/shared/rate_limit_analysis.md` ([GitHub](link))
    ```
@@ -239,6 +253,7 @@ When user wants to add a comment to a ticket:
    - Always add links to the issue itself using the `links` parameter
 
 6. **For comments with links:**
+
    ```
    # First, update the issue with the link
    mcp__linear__update_issue with:
@@ -252,6 +267,7 @@ When user wants to add a comment to a ticket:
    ```
 
 7. **For links only:**
+
    ```
    # Update the issue with the link
    mcp__linear__update_issue with:
@@ -275,6 +291,7 @@ When user wants to find tickets:
    - Date ranges (createdAt, updatedAt)
 
 2. **Execute search:**
+
    ```
    mcp__linear__list_issues with:
    - query: [search text]
@@ -309,6 +326,7 @@ When moving tickets through the workflow:
    - Ready for Dev → In Dev (work started)
 
 3. **Update with context:**
+
    ```
    mcp__linear__update_issue with:
    - id: [ticket ID]
@@ -343,6 +361,7 @@ When creating comments, focus on extracting the **most valuable information** fo
 - **Surprises or discoveries**: Unexpected findings that affect the work
 
 Avoid:
+
 - Mechanical lists of changes without context
 - Restating what's obvious from code diffs
 - Generic summaries that don't add value
@@ -352,15 +371,18 @@ Remember: The goal is to help a future reader (including yourself) quickly under
 ## Commonly Used IDs
 
 ### Engineering Team
+
 - **Team ID**: `6b3b2115-efd4-4b83-8463-8160842d2c84`
 
 ### Label IDs
+
 - **bug**: `ff23dde3-199b-421e-904c-4b9f9b3d452c`
 - **hld**: `d28453c8-e53e-4a06-bea9-b5bbfad5f88a`
 - **meta**: `7a5abaae-f343-4f52-98b0-7987048b0cfa`
 - **wui**: `996deb94-ba0f-4375-8b01-913e81477c4b`
 
 ### Workflow State IDs
+
 - **Triage**: `77da144d-fe13-4c3a-a53a-cfebd06c0cbe` (type: triage)
 - **spec needed**: `274beb99-bff8-4d7b-85cf-04d18affbc82` (type: unstarted)
 - **research needed**: `d0b89672-8189-45d6-b705-50afd6c94a91` (type: unstarted)
@@ -379,7 +401,6 @@ Remember: The goal is to help a future reader (including yourself) quickly under
 - **Todo**: `ddf85246-3a7c-4141-a377-09069812bbc3` (type: unstarted)
 - **Duplicate**: `2bc0e829-9853-4f76-ad34-e8732f062da2` (type: canceled)
 - **Canceled**: `14a28d0d-c6aa-4d8e-9ff2-9801d4cc7de1` (type: canceled)
-
 
 ## Linear User IDs
 

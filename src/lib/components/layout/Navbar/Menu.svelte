@@ -128,7 +128,17 @@
 						pageCanvas.width = canvas.width;
 						pageCanvas.height = sliceHeight;
 						const ctx = pageCanvas.getContext('2d');
-						ctx.drawImage(canvas, 0, offsetY, canvas.width, sliceHeight, 0, 0, canvas.width, sliceHeight);
+						ctx.drawImage(
+							canvas,
+							0,
+							offsetY,
+							canvas.width,
+							sliceHeight,
+							0,
+							0,
+							canvas.width,
+							sliceHeight
+						);
 						const imgData = pageCanvas.toDataURL('image/jpeg', 0.7);
 						const imgHeightMM = (sliceHeight * pageWidthMM) / canvas.width;
 						if (page > 0) pdf.addPage();

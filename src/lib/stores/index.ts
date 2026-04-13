@@ -109,6 +109,16 @@ export const selectedTerminalId: Writable<string | null> = writable(null);
 export const artifactCode = writable(null);
 export const artifactContents = writable(null);
 
+export const showDocument = writable(false);
+export const documentContents: Writable<
+	Array<{
+		title: string;
+		markdown: string;
+		sources?: any[];
+		sourceIds?: string[];
+	}> | null
+> = writable(null);
+
 export const embed = writable(null);
 
 export const temporaryChatEnabled = writable(false);

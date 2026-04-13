@@ -16,6 +16,7 @@
 		showControls,
 		showCallOverlay,
 		showArtifacts,
+		showDocument,
 		showEmbeds,
 		settings,
 		showFileNavPath,
@@ -31,6 +32,7 @@
 	import CallOverlay from './MessageInput/CallOverlay.svelte';
 	import Drawer from '../common/Drawer.svelte';
 	import Artifacts from './Artifacts.svelte';
+	import Document from './Document.svelte';
 	import Embeds from './ChatControls/Embeds.svelte';
 	import FileNav from './FileNav.svelte';
 	import PyodideFileNav from './PyodideFileNav.svelte';
@@ -252,6 +254,7 @@
 			showControls.set(false);
 		}
 		showArtifacts.set(false);
+		showDocument.set(false);
 		showEmbeds.set(false);
 		if ($showCallOverlay) showCallOverlay.set(false);
 	};
@@ -259,7 +262,7 @@
 	$: if (paneReady && !chatId) closeHandler();
 
 	// Helper: is a "special" full-screen panel active?
-	$: specialPanel = $showCallOverlay || $showArtifacts || $showEmbeds;
+	$: specialPanel = $showCallOverlay || $showArtifacts || $showDocument || $showEmbeds;
 </script>
 
 {#if !largeScreen}
@@ -288,6 +291,8 @@
 					<Embeds />
 				{:else if $showArtifacts}
 					<Artifacts {history} />
+				{:else if $showDocument}
+					<Document />
 				{:else}
 					<!-- Controls + Files tabs -->
 					<div class="flex flex-col h-full min-h-0">
@@ -434,6 +439,8 @@
 						<Embeds overlay={dragged} />
 					{:else if $showArtifacts}
 						<Artifacts {history} overlay={dragged} />
+					{:else if $showDocument}
+						<Document overlay={dragged} />
 					{:else}
 						<!-- Controls + Files tabs -->
 						<div class="flex flex-col h-full min-h-0">

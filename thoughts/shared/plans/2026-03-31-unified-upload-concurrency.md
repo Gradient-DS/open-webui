@@ -8,16 +8,17 @@ Replace 4 different file upload dispatch patterns in `KnowledgeBase.svelte` with
 
 All four upload entry points call the same `uploadFileHandler` function but with wildly different concurrency:
 
-| Path | Current Pattern | Concurrency |
-|------|----------------|-------------|
-| File input (line 1583) | `Promise.all(files.map(fn))` | Unbounded parallel |
-| Drag-and-drop (line 1341) | Fire-and-forget, no `await` | Unbounded parallel |
-| Directory modern (line 499) | `await` in `for await` loop | Sequential |
-| Directory Firefox (line 565) | `await` in `for` loop | Sequential |
+| Path                         | Current Pattern              | Concurrency        |
+| ---------------------------- | ---------------------------- | ------------------ |
+| File input (line 1583)       | `Promise.all(files.map(fn))` | Unbounded parallel |
+| Drag-and-drop (line 1341)    | Fire-and-forget, no `await`  | Unbounded parallel |
+| Directory modern (line 499)  | `await` in `for await` loop  | Sequential         |
+| Directory Firefox (line 565) | `await` in `for` loop        | Sequential         |
 
 The downstream pipeline (Socket.IO `fileStatusQueue`, `_processFileStatus`, `addFileHandler`, `showBatchedSuccessToast`) is already concurrent-safe and requires no changes.
 
 ### Key Discoveries:
+
 - `uploadFileHandler` (line 349) is the shared core — all paths call it identically
 - `fileItems` prepending (line 385) is concurrent-safe — synchronous before any `await`
 - `countFiles` (line 468) and `processDirectory` (line 485) both walk the same directory tree — redundant
@@ -29,12 +30,14 @@ The downstream pipeline (Socket.IO `fileStatusQueue`, `_processFileStatus`, `add
 ## Desired End State
 
 A single `uploadFiles(files, options?)` function used by all four paths:
+
 - Bounded concurrency (default 5 simultaneous uploads)
 - Optional progress callback for directory uploads
 - No changes to `uploadFileHandler`, Socket.IO pipeline, or backend
 - ~47 fewer lines of code
 
 ### Verification:
+
 1. Directory upload of 20+ files completes significantly faster than before (concurrent, not sequential)
 2. File input multi-select still works identically
 3. Drag-and-drop of files and folders still works identically
@@ -60,11 +63,13 @@ Separation of concerns: **collection** (getting File objects) is separated from 
 ## Phase 1: Add `uploadFiles` Utility Function
 
 ### Overview
+
 Add the core bounded-concurrency dispatcher as a local function in `KnowledgeBase.svelte`. This phase adds code only — no existing code is modified.
 
 ### Changes Required:
 
 #### 1. Add `uploadFiles` function
+
 **File**: `src/lib/components/workspace/Knowledge/KnowledgeBase.svelte`
 **Location**: After `uploadFileHandler` (after line 425), before `uploadDirectoryHandler` (line 427)
 
@@ -72,40 +77,42 @@ Add the core bounded-concurrency dispatcher as a local function in `KnowledgeBas
 // Uploads multiple files with bounded concurrency.
 // All paths (file input, drag-drop, directory) route through this.
 const uploadFiles = async (
-    files: File[],
-    options: { concurrency?: number; onProgress?: (completed: number, total: number) => void } = {}
+	files: File[],
+	options: { concurrency?: number; onProgress?: (completed: number, total: number) => void } = {}
 ) => {
-    const { concurrency = 5, onProgress } = options;
-    const total = files.length;
-    if (total === 0) return;
+	const { concurrency = 5, onProgress } = options;
+	const total = files.length;
+	if (total === 0) return;
 
-    let completed = 0;
-    const executing: Set<Promise<void>> = new Set();
+	let completed = 0;
+	const executing: Set<Promise<void>> = new Set();
 
-    for (const file of files) {
-        const task = uploadFileHandler(file).then(() => {
-            completed++;
-            executing.delete(task);
-            onProgress?.(completed, total);
-        });
-        executing.add(task);
+	for (const file of files) {
+		const task = uploadFileHandler(file).then(() => {
+			completed++;
+			executing.delete(task);
+			onProgress?.(completed, total);
+		});
+		executing.add(task);
 
-        if (executing.size >= concurrency) {
-            await Promise.race(executing);
-        }
-    }
+		if (executing.size >= concurrency) {
+			await Promise.race(executing);
+		}
+	}
 
-    await Promise.all(executing);
+	await Promise.all(executing);
 };
 ```
 
 ### Success Criteria:
 
 #### Automated Verification:
+
 - [x] TypeScript check passes: `npm run check` (no new errors beyond pre-existing baseline)
 - [x] Build succeeds: `npm run build`
 
 #### Manual Verification:
+
 - [x] No regressions — existing upload paths still work (function is added but not yet wired)
 
 **Implementation Note**: This is purely additive. Proceed to Phase 2 immediately.
@@ -115,146 +122,152 @@ const uploadFiles = async (
 ## Phase 2: Refactor Directory Uploads
 
 ### Overview
+
 Replace the sequential `processDirectory` + `countFiles` dual-walk with a single `collectDirectoryFiles` (collect-only) + `uploadFiles` (dispatch). This is the main performance improvement — directory uploads become concurrent.
 
 ### Changes Required:
 
 #### 1. Replace `countFiles` and `processDirectory` with `collectDirectoryFiles`
+
 **File**: `src/lib/components/workspace/Knowledge/KnowledgeBase.svelte`
 **What changes**: Remove `countFiles` (lines 468-482) and `processDirectory` (lines 485-509). Replace with a single collect function.
 
 ```typescript
 // Recursively collects all non-hidden files from a directory handle
 async function collectDirectoryFiles(
-    dirHandle: FileSystemDirectoryHandle,
-    path = ''
+	dirHandle: FileSystemDirectoryHandle,
+	path = ''
 ): Promise<File[]> {
-    const files: File[] = [];
-    for await (const entry of dirHandle.values()) {
-        if (entry.name.startsWith('.')) continue;
-        const entryPath = path ? `${path}/${entry.name}` : entry.name;
-        if (hasHiddenFolder(entryPath)) continue;
+	const files: File[] = [];
+	for await (const entry of dirHandle.values()) {
+		if (entry.name.startsWith('.')) continue;
+		const entryPath = path ? `${path}/${entry.name}` : entry.name;
+		if (hasHiddenFolder(entryPath)) continue;
 
-        if (entry.kind === 'file') {
-            const file = await entry.getFile();
-            files.push(new File([file], entryPath, { type: file.type }));
-        } else if (entry.kind === 'directory') {
-            files.push(...(await collectDirectoryFiles(entry, entryPath)));
-        }
-    }
-    return files;
+		if (entry.kind === 'file') {
+			const file = await entry.getFile();
+			files.push(new File([file], entryPath, { type: file.type }));
+		} else if (entry.kind === 'directory') {
+			files.push(...(await collectDirectoryFiles(entry, entryPath)));
+		}
+	}
+	return files;
 }
 ```
 
 #### 2. Rewrite `handleModernBrowserUpload`
+
 **File**: `src/lib/components/workspace/Knowledge/KnowledgeBase.svelte`
 **What changes**: Replace the current implementation (lines 450-519) with collect + dispatch.
 
 ```typescript
 const handleModernBrowserUpload = async () => {
-    const dirHandle = await window.showDirectoryPicker();
-    const files = await collectDirectoryFiles(dirHandle);
+	const dirHandle = await window.showDirectoryPicker();
+	const files = await collectDirectoryFiles(dirHandle);
 
-    if (files.length === 0) {
-        console.log('No files to upload.');
-        return;
-    }
+	if (files.length === 0) {
+		console.log('No files to upload.');
+		return;
+	}
 
-    toast.info(
-        $i18n.t('Upload Progress: {{uploadedFiles}}/{{totalFiles}} ({{percentage}}%)', {
-            uploadedFiles: 0,
-            totalFiles: files.length,
-            percentage: '0.00'
-        })
-    );
+	toast.info(
+		$i18n.t('Upload Progress: {{uploadedFiles}}/{{totalFiles}} ({{percentage}}%)', {
+			uploadedFiles: 0,
+			totalFiles: files.length,
+			percentage: '0.00'
+		})
+	);
 
-    await uploadFiles(files, {
-        onProgress: (done, total) => {
-            const percentage = ((done / total) * 100).toFixed(2);
-            toast.info(
-                $i18n.t('Upload Progress: {{uploadedFiles}}/{{totalFiles}} ({{percentage}}%)', {
-                    uploadedFiles: done,
-                    totalFiles: total,
-                    percentage
-                })
-            );
-        }
-    });
+	await uploadFiles(files, {
+		onProgress: (done, total) => {
+			const percentage = ((done / total) * 100).toFixed(2);
+			toast.info(
+				$i18n.t('Upload Progress: {{uploadedFiles}}/{{totalFiles}} ({{percentage}}%)', {
+					uploadedFiles: done,
+					totalFiles: total,
+					percentage
+				})
+			);
+		}
+	});
 };
 ```
 
 #### 3. Rewrite `handleFirefoxUpload`
+
 **File**: `src/lib/components/workspace/Knowledge/KnowledgeBase.svelte`
 **What changes**: Replace the sequential loop (lines 522-587) with collect + dispatch.
 
 ```typescript
 const handleFirefoxUpload = async () => {
-    return new Promise<void>((resolve, reject) => {
-        const input = document.createElement('input');
-        input.type = 'file';
-        input.webkitdirectory = true;
-        input.directory = true;
-        input.multiple = true;
-        input.style.display = 'none';
-        document.body.appendChild(input);
+	return new Promise<void>((resolve, reject) => {
+		const input = document.createElement('input');
+		input.type = 'file';
+		input.webkitdirectory = true;
+		input.directory = true;
+		input.multiple = true;
+		input.style.display = 'none';
+		document.body.appendChild(input);
 
-        input.onchange = async () => {
-            try {
-                const files = Array.from(input.files)
-                    .filter((file) => !hasHiddenFolder(file.webkitRelativePath))
-                    .filter((file) => !file.name.startsWith('.'))
-                    .map((file) => {
-                        const relativePath = file.webkitRelativePath || file.name;
-                        return new File([file], relativePath, { type: file.type });
-                    });
+		input.onchange = async () => {
+			try {
+				const files = Array.from(input.files)
+					.filter((file) => !hasHiddenFolder(file.webkitRelativePath))
+					.filter((file) => !file.name.startsWith('.'))
+					.map((file) => {
+						const relativePath = file.webkitRelativePath || file.name;
+						return new File([file], relativePath, { type: file.type });
+					});
 
-                if (files.length > 0) {
-                    toast.info(
-                        $i18n.t('Upload Progress: {{uploadedFiles}}/{{totalFiles}} ({{percentage}}%)', {
-                            uploadedFiles: 0,
-                            totalFiles: files.length,
-                            percentage: '0.00'
-                        })
-                    );
+				if (files.length > 0) {
+					toast.info(
+						$i18n.t('Upload Progress: {{uploadedFiles}}/{{totalFiles}} ({{percentage}}%)', {
+							uploadedFiles: 0,
+							totalFiles: files.length,
+							percentage: '0.00'
+						})
+					);
 
-                    await uploadFiles(files, {
-                        onProgress: (done, total) => {
-                            const percentage = ((done / total) * 100).toFixed(2);
-                            toast.info(
-                                $i18n.t('Upload Progress: {{uploadedFiles}}/{{totalFiles}} ({{percentage}}%)', {
-                                    uploadedFiles: done,
-                                    totalFiles: total,
-                                    percentage
-                                })
-                            );
-                        }
-                    });
-                }
+					await uploadFiles(files, {
+						onProgress: (done, total) => {
+							const percentage = ((done / total) * 100).toFixed(2);
+							toast.info(
+								$i18n.t('Upload Progress: {{uploadedFiles}}/{{totalFiles}} ({{percentage}}%)', {
+									uploadedFiles: done,
+									totalFiles: total,
+									percentage
+								})
+							);
+						}
+					});
+				}
 
-                document.body.removeChild(input);
-                resolve();
-            } catch (error) {
-                reject(error);
-            }
-        };
+				document.body.removeChild(input);
+				resolve();
+			} catch (error) {
+				reject(error);
+			}
+		};
 
-        input.onerror = (error) => {
-            document.body.removeChild(input);
-            reject(error);
-        };
+		input.onerror = (error) => {
+			document.body.removeChild(input);
+			reject(error);
+		};
 
-        input.click();
-    });
+		input.click();
+	});
 };
 ```
 
 ### Success Criteria:
 
 #### Automated Verification:
+
 - [x] TypeScript check passes: `npm run check`
 - [x] Build succeeds: `npm run build`
 
 #### Manual Verification:
+
 - [ ] Directory upload (Chrome/Edge): Select a folder with 10+ files — uploads start concurrently, progress toast updates as files complete
 - [ ] Directory upload (Firefox): Same test — files upload concurrently
 - [ ] Empty directory: Shows no error, just logs "No files to upload"
@@ -269,15 +282,18 @@ const handleFirefoxUpload = async () => {
 ## Phase 3: Refactor File Input
 
 ### Overview
+
 Replace the unbounded `Promise.all` in the file input handler with `uploadFiles`. Minimal change — adds bounded concurrency to multi-file select.
 
 ### Changes Required:
 
 #### 1. Update file input `on:change` handler
+
 **File**: `src/lib/components/workspace/Knowledge/KnowledgeBase.svelte`
 **What changes**: Replace `Promise.all(sortedFiles.map(...))` (line 1583) with `uploadFiles(sortedFiles)`.
 
 Before (lines 1578-1583):
+
 ```js
 on:change={async () => {
     if (inputFiles && inputFiles.length > 0) {
@@ -288,6 +304,7 @@ on:change={async () => {
 ```
 
 After:
+
 ```js
 on:change={async () => {
     if (inputFiles && inputFiles.length > 0) {
@@ -302,9 +319,11 @@ Single line change. Rest of the handler (cleanup of `inputFiles` and input eleme
 ### Success Criteria:
 
 #### Automated Verification:
+
 - [x] Build succeeds: `npm run build`
 
 #### Manual Verification:
+
 - [ ] Multi-file select: Pick 5+ files — all upload and complete successfully
 - [ ] Single file select: Still works normally
 
@@ -313,79 +332,85 @@ Single line change. Rest of the handler (cleanup of `inputFiles` and input eleme
 ## Phase 4: Refactor Drag-and-Drop
 
 ### Overview
+
 Replace the fire-and-forget `handleUploadingFileFolder` with a promisified `collectDroppedFiles` that gathers all File objects first, then routes through `uploadFiles`. This adds bounded concurrency to the previously-unbounded drag-and-drop path.
 
 ### Changes Required:
 
 #### 1. Add `collectDroppedFiles` helper
+
 **File**: `src/lib/components/workspace/Knowledge/KnowledgeBase.svelte`
 **Location**: Near the other collect helpers (after `collectDirectoryFiles`)
 
 ```typescript
 // Collects all File objects from a DataTransfer drop (files and recursive directories)
 async function collectDroppedFiles(items: DataTransferItemList): Promise<File[]> {
-    const files: File[] = [];
+	const files: File[] = [];
 
-    const readEntry = (entry: FileSystemEntry): Promise<void> => {
-        return new Promise((resolve) => {
-            if (entry.isFile) {
-                (entry as FileSystemFileEntry).file((file) => {
-                    files.push(file);
-                    resolve();
-                });
-            } else if (entry.isDirectory) {
-                const reader = (entry as FileSystemDirectoryEntry).createReader();
-                reader.readEntries(async (entries) => {
-                    await Promise.all(entries.map(readEntry));
-                    resolve();
-                }, () => resolve());
-            } else {
-                resolve();
-            }
-        });
-    };
+	const readEntry = (entry: FileSystemEntry): Promise<void> => {
+		return new Promise((resolve) => {
+			if (entry.isFile) {
+				(entry as FileSystemFileEntry).file((file) => {
+					files.push(file);
+					resolve();
+				});
+			} else if (entry.isDirectory) {
+				const reader = (entry as FileSystemDirectoryEntry).createReader();
+				reader.readEntries(
+					async (entries) => {
+						await Promise.all(entries.map(readEntry));
+						resolve();
+					},
+					() => resolve()
+				);
+			} else {
+				resolve();
+			}
+		});
+	};
 
-    const entries: FileSystemEntry[] = [];
-    for (let i = 0; i < items.length; i++) {
-        const entry = items[i].webkitGetAsEntry();
-        if (entry) entries.push(entry);
-    }
+	const entries: FileSystemEntry[] = [];
+	for (let i = 0; i < items.length; i++) {
+		const entry = items[i].webkitGetAsEntry();
+		if (entry) entries.push(entry);
+	}
 
-    await Promise.all(entries.map(readEntry));
-    return files;
+	await Promise.all(entries.map(readEntry));
+	return files;
 }
 ```
 
 #### 2. Rewrite `onDrop` handler
+
 **File**: `src/lib/components/workspace/Knowledge/KnowledgeBase.svelte`
 **What changes**: Replace `handleUploadingFileFolder` (lines 1341-1367) and its invocation (lines 1369-1379) with collect + dispatch.
 
 ```typescript
 const onDrop = async (e) => {
-    e.preventDefault();
-    dragged = false;
+	e.preventDefault();
+	dragged = false;
 
-    if (!knowledge?.write_access) {
-        toast.error($i18n.t('You do not have permission to upload files to this knowledge base.'));
-        return;
-    }
+	if (!knowledge?.write_access) {
+		toast.error($i18n.t('You do not have permission to upload files to this knowledge base.'));
+		return;
+	}
 
-    if ($config?.integration_providers?.[knowledge?.type]) {
-        toast.error($i18n.t('Files for this knowledge base are managed via the integration API.'));
-        return;
-    }
+	if ($config?.integration_providers?.[knowledge?.type]) {
+		toast.error($i18n.t('Files for this knowledge base are managed via the integration API.'));
+		return;
+	}
 
-    if (e.dataTransfer?.types?.includes('Files') && e.dataTransfer?.items) {
-        const inputItems = e.dataTransfer.items;
-        if (inputItems.length > 0) {
-            const files = await collectDroppedFiles(inputItems);
-            if (files.length > 0) {
-                await uploadFiles(files);
-            }
-        } else {
-            toast.error($i18n.t(`File not found.`));
-        }
-    }
+	if (e.dataTransfer?.types?.includes('Files') && e.dataTransfer?.items) {
+		const inputItems = e.dataTransfer.items;
+		if (inputItems.length > 0) {
+			const files = await collectDroppedFiles(inputItems);
+			if (files.length > 0) {
+				await uploadFiles(files);
+			}
+		} else {
+			toast.error($i18n.t(`File not found.`));
+		}
+	}
 };
 ```
 
@@ -394,9 +419,11 @@ This removes the entire `handleUploadingFileFolder` function.
 ### Success Criteria:
 
 #### Automated Verification:
+
 - [x] Build succeeds: `npm run build`
 
 #### Manual Verification:
+
 - [ ] Drag single file onto KB — uploads successfully
 - [ ] Drag multiple files onto KB — all upload successfully
 - [ ] Drag folder onto KB — all files inside upload successfully (including nested folders)
@@ -407,6 +434,7 @@ This removes the entire `handleUploadingFileFolder` function.
 ## Testing Strategy
 
 ### Manual Testing Steps:
+
 1. **Directory upload (Chrome)**: Select a folder with 15+ files including subfolders — verify concurrent uploads (multiple "uploading" items visible simultaneously), progress toast updates, all files appear in KB
 2. **Directory upload (Firefox)**: Same test — verify Firefox fallback path works
 3. **File input**: Select 10 files via file picker — verify all upload and complete
@@ -416,6 +444,7 @@ This removes the entire `handleUploadingFileFolder` function.
 7. **Error handling**: Upload a file that exceeds max size during a batch — verify other files still complete, error toast shows for the rejected file
 
 ### Regression Checks:
+
 - Socket.IO `file:status` events still trigger KB association
 - Batch success toast still fires with correct count
 - File items display correctly in the UI during upload (status indicators)

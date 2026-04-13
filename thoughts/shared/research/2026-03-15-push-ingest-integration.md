@@ -4,12 +4,24 @@ researcher: Claude
 git_commit: db8b3acca67356114eb0e7c46709efedd6e4387f
 branch: dev
 repository: open-webui
-topic: "Push/Ingest Integration: Extensible multi-provider push API for external data ingestion"
-tags: [research, codebase, push-integration, ingest, octobox, neo, knowledge-base, rag, api, provider-registry]
+topic: 'Push/Ingest Integration: Extensible multi-provider push API for external data ingestion'
+tags:
+  [
+    research,
+    codebase,
+    push-integration,
+    ingest,
+    octobox,
+    neo,
+    knowledge-base,
+    rag,
+    api,
+    provider-registry
+  ]
 status: complete
 last_updated: 2026-03-15
 last_updated_by: Claude
-last_updated_note: "Redesigned with extensible provider registry for multi-client push integrations"
+last_updated_note: 'Redesigned with extensible provider registry for multi-client push integrations'
 ---
 
 # Research: Push/Ingest Integration for External Data Sources
@@ -29,6 +41,7 @@ How can we build an extensible push/ingest integration that supports multiple ex
 Instead of a single `"external"` type, we introduce an **Integration Provider Registry** — a lightweight data-driven pattern where each push client (Octobox, Neo, etc.) is a registered provider with its own `slug`, display name, icon, badge color, and metadata schema. The knowledge base `type` becomes the provider slug (e.g., `"octobox"`, `"neo"`). The API endpoint is shared (`POST /api/v1/integrations/ingest`), with the provider determined by the authenticated service account.
 
 This approach:
+
 - Requires **zero code changes** to add a new provider (just a config entry + service account)
 - Shows provider-specific branding in the UI (badge, icon, label)
 - Stores provider-specific metadata flexibly in the existing `meta` JSON column
@@ -84,6 +97,7 @@ knowledge.type = "onedrive"  # Existing
 ```
 
 **Why this is better than a single `"external"` type:**
+
 - UI can show provider-specific badge/icon without parsing metadata
 - `get_knowledge_bases_by_type("octobox")` returns only Octobox KBs — useful for provider-scoped operations
 - Filtering/grouping by provider in the KB list is a simple `type` check
@@ -95,12 +109,14 @@ knowledge.type = "onedrive"  # Existing
 **File**: `backend/open_webui/routers/knowledge.py:189`
 
 Current:
+
 ```python
 if form_data.type and form_data.type not in ("local", "onedrive"):
     raise HTTPException(400, "Invalid knowledge base type")
 ```
 
 Change to:
+
 ```python
 ALLOWED_KB_TYPES = {"local", "onedrive"} | set(INTEGRATION_PROVIDERS.keys())
 if form_data.type and form_data.type not in ALLOWED_KB_TYPES:
@@ -111,11 +127,11 @@ if form_data.type and form_data.type not in ALLOWED_KB_TYPES:
 
 Currently, the code checks `knowledge.type != "local"` or `knowledge.type == "onedrive"` in various places. For push providers, we need to generalize:
 
-| Current check | Generalized check |
-|---------------|-------------------|
-| `type == "onedrive"` (for OneDrive-specific sync UI) | Keep as-is — OneDrive has unique sync behavior |
-| `type != "local"` (for 250-file limit, private access_control, etc.) | Keep as-is — all push providers are non-local |
-| `type in INTEGRATION_PROVIDERS` | New check for push-provider-specific behavior (e.g., showing "Ingested via X" badge) |
+| Current check                                                        | Generalized check                                                                    |
+| -------------------------------------------------------------------- | ------------------------------------------------------------------------------------ |
+| `type == "onedrive"` (for OneDrive-specific sync UI)                 | Keep as-is — OneDrive has unique sync behavior                                       |
+| `type != "local"` (for 250-file limit, private access_control, etc.) | Keep as-is — all push providers are non-local                                        |
+| `type in INTEGRATION_PROVIDERS`                                      | New check for push-provider-specific behavior (e.g., showing "Ingested via X" badge) |
 
 ### Service Account ↔ Provider Binding
 
@@ -163,17 +179,17 @@ The `integration` key is a convention. The `provider` field is redundant with `k
 
 ```json
 {
-  "name": "Privacybeleid 2026",
-  "content_type": "application/pdf",
-  "source": "octobox",
-  "source_id": "octobox-doc-12345",
-  "source_url": "https://docs.example.com/privacybeleid-2026",
-  "language": "nl",
-  "author": "Juridische Zaken",
-  "tags": ["beleid", "privacy"],
-  "provider_metadata": {
-    // Anything Octobox-specific that doesn't fit standard fields
-  }
+	"name": "Privacybeleid 2026",
+	"content_type": "application/pdf",
+	"source": "octobox",
+	"source_id": "octobox-doc-12345",
+	"source_url": "https://docs.example.com/privacybeleid-2026",
+	"language": "nl",
+	"author": "Juridische Zaken",
+	"tags": ["beleid", "privacy"],
+	"provider_metadata": {
+		// Anything Octobox-specific that doesn't fit standard fields
+	}
 }
 ```
 
@@ -199,6 +215,7 @@ document = Document(
 ```
 
 **Key insight from the metadata flow research**: The `source` metadata field is critical — it serves as both the citation grouping key AND the clickable link in the citation modal. If we set `source` to `doc.source_url` (e.g., `https://docs.example.com/privacybeleid-2026`), the citation will automatically:
+
 1. Group all chunks from the same URL
 2. Show the URL as a clickable link (because it starts with `http`)
 3. Display Google favicon for the domain
@@ -212,25 +229,27 @@ This means **Octobox `source_url` flows naturally to citations with zero fronten
 **File**: `src/lib/components/workspace/Knowledge.svelte:293-302`
 
 Current logic:
+
 ```svelte
 {#if item.type === 'onedrive'}
-    <Badge type="info" content="OneDrive" />
+	<Badge type="info" content="OneDrive" />
 {:else}
-    <Badge type="muted" content="Local" />
+	<Badge type="muted" content="Local" />
 {/if}
 ```
 
 New logic using the provider registry:
+
 ```svelte
 {#if item.type === 'onedrive'}
-    <Badge type="info" content="OneDrive" />
+	<Badge type="info" content="OneDrive" />
 {:else if integrationProviders[item.type]}
-    <Badge
-        type={integrationProviders[item.type].badge_type}
-        content={integrationProviders[item.type].name}
-    />
+	<Badge
+		type={integrationProviders[item.type].badge_type}
+		content={integrationProviders[item.type].name}
+	/>
 {:else}
-    <Badge type="muted" content="Local" />
+	<Badge type="muted" content="Local" />
 {/if}
 ```
 
@@ -247,6 +266,7 @@ The `integrationProviders` object comes from the backend config, exposed via the
 #### KB Detail Page
 
 For push-provider KBs:
+
 - **Badge**: Provider name with provider-specific color
 - **No "Add files" button** — files come via API only
 - **File list**: Flat `Files.svelte` (no source-grouped tree — that's OneDrive-specific)
@@ -259,10 +279,11 @@ For push-provider KBs:
 **No changes needed** for basic citations. The `source_url` field flows through to `metadata.source`, which the citation UI already renders as a clickable link with favicon.
 
 For enhanced display, we could later add provider-aware rendering:
+
 ```svelte
 <!-- Future enhancement: show provider icon next to citation -->
 {#if citation.metadata?.source_provider && integrationProviders[citation.metadata.source_provider]}
-    <ProviderIcon provider={citation.metadata.source_provider} />
+	<ProviderIcon provider={citation.metadata.source_provider} />
 {/if}
 ```
 
@@ -276,6 +297,7 @@ Authorization: Bearer sk-xxxxx
 ```
 
 The provider is determined by the authenticated service account, NOT by a field in the request body. This means:
+
 - Octobox can't accidentally write to Neo's collections
 - No need for the client to specify their provider identity
 - Provider scoping is enforced at the auth level
@@ -284,29 +306,29 @@ The provider is determined by the authenticated service account, NOT by a field 
 
 ```json
 {
-  "collection": {
-    "source_id": "octobox-collection-456",
-    "name": "Privacybeleid Gemeente Amsterdam",
-    "description": "Alle beleidsdocumenten rondom privacy en AVG",
-    "language": "nl",
-    "tags": ["gemeente-amsterdam", "privacy", "avg"],
-    "metadata": {}
-  },
-  "documents": [
-    {
-      "source_id": "octobox-doc-12345",
-      "filename": "privacybeleid-2026.pdf",
-      "content_type": "application/pdf",
-      "text": "De volledige geparsede tekst...",
-      "title": "Privacybeleid 2026",
-      "source_url": "https://docs.example.com/privacybeleid-2026",
-      "language": "nl",
-      "author": "Juridische Zaken",
-      "modified_at": "2026-02-15T10:30:00Z",
-      "tags": ["beleid", "privacy"],
-      "metadata": {}
-    }
-  ]
+	"collection": {
+		"source_id": "octobox-collection-456",
+		"name": "Privacybeleid Gemeente Amsterdam",
+		"description": "Alle beleidsdocumenten rondom privacy en AVG",
+		"language": "nl",
+		"tags": ["gemeente-amsterdam", "privacy", "avg"],
+		"metadata": {}
+	},
+	"documents": [
+		{
+			"source_id": "octobox-doc-12345",
+			"filename": "privacybeleid-2026.pdf",
+			"content_type": "application/pdf",
+			"text": "De volledige geparsede tekst...",
+			"title": "Privacybeleid 2026",
+			"source_url": "https://docs.example.com/privacybeleid-2026",
+			"language": "nl",
+			"author": "Juridische Zaken",
+			"modified_at": "2026-02-15T10:30:00Z",
+			"tags": ["beleid", "privacy"],
+			"metadata": {}
+		}
+	]
 }
 ```
 
@@ -316,21 +338,21 @@ The `metadata` fields at both collection and document level are free-form dicts 
 
 ```json
 {
-  "knowledge_id": "uuid-of-kb",
-  "collection_source_id": "octobox-collection-456",
-  "provider": "octobox",
-  "total": 1,
-  "created": 1,
-  "updated": 0,
-  "skipped": 0,
-  "errors": 0,
-  "documents": [
-    {
-      "source_id": "octobox-doc-12345",
-      "status": "created",
-      "file_id": "octobox-octobox-doc-12345"
-    }
-  ]
+	"knowledge_id": "uuid-of-kb",
+	"collection_source_id": "octobox-collection-456",
+	"provider": "octobox",
+	"total": 1,
+	"created": 1,
+	"updated": 0,
+	"skipped": 0,
+	"errors": 0,
+	"documents": [
+		{
+			"source_id": "octobox-doc-12345",
+			"status": "created",
+			"file_id": "octobox-octobox-doc-12345"
+		}
+	]
 }
 ```
 
@@ -343,10 +365,12 @@ Deterministic file IDs per provider:
 ```
 
 Examples:
+
 - `octobox-octobox-doc-12345`
 - `neo-wet-avg-2026`
 
 This follows the OneDrive pattern (`onedrive-{item_id}`) and ensures:
+
 - No collisions between providers
 - Upsert/dedup via ID lookup
 - Clear provenance from the ID alone
@@ -449,17 +473,17 @@ To onboard a new push integration client:
 
 ### Existing Building Blocks (Reference)
 
-| Component | Location | How it fits |
-|-----------|----------|-------------|
-| `save_docs_to_vector_db()` | `routers/retrieval.py:1352` | Core: chunks, embeds, stores |
-| Knowledge type system | `models/knowledge.py:47` | `type` = provider slug |
-| File model | `models/files.py:16-31` | Deterministic IDs: `{provider}-{source_id}` |
-| KnowledgeFile join | `models/knowledge.py:94-112` | Links files to KBs |
-| Non-local KB behaviors | `routers/knowledge.py` | Private access, file limits, orphan cleanup |
-| API key auth | `utils/auth.py:269-364` | `sk-` tokens → user → provider |
-| Badge component | `src/lib/components/common/Badge.svelte` | info/success/warning/error/muted variants |
-| Citation rendering | `src/lib/components/chat/Messages/Citations.svelte` | `metadata.source` → link + favicon |
-| Config endpoint | Backend serves config to frontend | Expose `integration_providers` for UI |
+| Component                  | Location                                            | How it fits                                 |
+| -------------------------- | --------------------------------------------------- | ------------------------------------------- |
+| `save_docs_to_vector_db()` | `routers/retrieval.py:1352`                         | Core: chunks, embeds, stores                |
+| Knowledge type system      | `models/knowledge.py:47`                            | `type` = provider slug                      |
+| File model                 | `models/files.py:16-31`                             | Deterministic IDs: `{provider}-{source_id}` |
+| KnowledgeFile join         | `models/knowledge.py:94-112`                        | Links files to KBs                          |
+| Non-local KB behaviors     | `routers/knowledge.py`                              | Private access, file limits, orphan cleanup |
+| API key auth               | `utils/auth.py:269-364`                             | `sk-` tokens → user → provider              |
+| Badge component            | `src/lib/components/common/Badge.svelte`            | info/success/warning/error/muted variants   |
+| Citation rendering         | `src/lib/components/chat/Messages/Citations.svelte` | `metadata.source` → link + favicon          |
+| Config endpoint            | Backend serves config to frontend                   | Expose `integration_providers` for UI       |
 
 ## Code References
 

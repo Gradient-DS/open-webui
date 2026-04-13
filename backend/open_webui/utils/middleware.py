@@ -124,6 +124,7 @@ from open_webui.config import (
     DEFAULT_CODE_INTERPRETER_PROMPT,
     CODE_INTERPRETER_PYODIDE_PROMPT,
     CODE_INTERPRETER_BLOCKED_MODULES,
+    DEFAULT_DOCUMENT_WRITER_PROMPT,
     FEATURE_BUILTIN_TOOLS,
 )
 from open_webui.env import (
@@ -164,6 +165,7 @@ DEFAULT_REASONING_TAGS = [
 ]
 DEFAULT_SOLUTION_TAGS = [('<|begin_of_solution|>', '<|end_of_solution|>')]
 DEFAULT_CODE_INTERPRETER_TAGS = [('<code_interpreter>', '</code_interpreter>')]
+DEFAULT_DOCUMENT_WRITER_TAGS = [('<document>', '</document>')]
 
 
 def output_id(prefix: str) -> str:
@@ -524,6 +526,23 @@ def serialize_output(output: list) -> str:
                 content += f'<details type="code_interpreter" done="true" duration="{duration or 0}"{output_attr}>\n<summary>Analyzed</summary>\n{display}\n</details>\n'
             else:
                 content += f'<details type="code_interpreter" done="false"{output_attr}>\n<summary>Analyzing…</summary>\n{display}\n</details>\n'
+
+        elif item_type == 'open_webui:document':
+            if content and not content.endswith('\n'):
+                content += '\n'
+
+            markdown = item.get('markdown', '').strip()
+            title = item.get('title', '') or item.get('attributes', {}).get('title', '')
+            status = item.get('status', 'in_progress')
+            duration = item.get('duration')
+            is_last_item = idx == len(output) - 1
+
+            title_attr = f' title="{html.escape(title)}"' if title else ''
+
+            if status == 'completed' or duration is not None or not is_last_item:
+                content += f'<details type="document" done="true"{title_attr}>\n<summary>Document</summary>\n{markdown}\n</details>\n'
+            else:
+                content += f'<details type="document" done="false"{title_attr}>\n<summary>Writing…</summary>\n{markdown}\n</details>\n'
 
     return content.strip()
 
@@ -2391,6 +2410,20 @@ async def process_chat_payload(request, form_data, user, metadata, model):
                         form_data['messages'],
                     )
 
+        if 'document_writer' in features and features['document_writer']:
+            # Skip XML-tag prompt injection when native FC is enabled —
+            # write_document will be injected as a builtin tool instead.
+            if metadata.get('params', {}).get('function_calling') != 'native' and not AGENT_API_ENABLED:
+                prompt = (
+                    request.app.state.config.DOCUMENT_WRITER_PROMPT_TEMPLATE
+                    if request.app.state.config.DOCUMENT_WRITER_PROMPT_TEMPLATE != ''
+                    else DEFAULT_DOCUMENT_WRITER_PROMPT
+                )
+                form_data['messages'] = add_or_update_user_message(
+                    prompt,
+                    form_data['messages'],
+                )
+
     tool_ids = form_data.pop('tool_ids', None)
     terminal_id = form_data.pop('terminal_id', None)
     files = form_data.pop('files', None)
@@ -3280,6 +3313,7 @@ async def streaming_chat_response_handler(response, ctx):
                     'reasoning': 'reasoning',
                     'solution': 'message',  # solution tags just produce text
                     'code_interpreter': 'open_webui:code_interpreter',
+                    'document': 'open_webui:document',
                 }
                 output_item_type = output_type_map.get(content_type, content_type)
 
@@ -3343,6 +3377,20 @@ async def streaming_chat_response_handler(response, ctx):
                                         'started_at': time.time(),
                                     }
                                 )
+                            elif output_item_type == 'open_webui:document':
+                                output.append(
+                                    {
+                                        'type': 'open_webui:document',
+                                        'id': output_id('doc'),
+                                        'status': 'in_progress',
+                                        'start_tag': start_tag,
+                                        'end_tag': end_tag,
+                                        'attributes': attributes,
+                                        'title': attributes.get('title', ''),
+                                        'markdown': '',
+                                        'started_at': time.time(),
+                                    }
+                                )
                             else:
                                 # solution or other text-producing tag
                                 output.append(
@@ -3366,6 +3414,8 @@ async def streaming_chat_response_handler(response, ctx):
                                     output[-1]['content'] = [{'type': 'output_text', 'text': after_tag}]
                                 elif output_item_type == 'open_webui:code_interpreter':
                                     output[-1]['code'] = after_tag
+                                elif output_item_type == 'open_webui:document':
+                                    output[-1]['markdown'] = after_tag
                                 else:
                                     set_last_text(output, after_tag)
 
@@ -3378,6 +3428,7 @@ async def streaming_chat_response_handler(response, ctx):
                 elif (
                     (last_type == 'reasoning' and content_type == 'reasoning')
                     or (last_type == 'open_webui:code_interpreter' and content_type == 'code_interpreter')
+                    or (last_type == 'open_webui:document' and content_type == 'document')
                     or (last_type == 'message' and output[-1].get('_tag_type') == content_type)
                 ):
                     item = output[-1]
@@ -3394,6 +3445,8 @@ async def streaming_chat_response_handler(response, ctx):
                             block_content = parts[-1].get('text', '')
                     elif last_type == 'open_webui:code_interpreter':
                         block_content = item.get('code', '')
+                    elif last_type == 'open_webui:document':
+                        block_content = item.get('markdown', '')
                     else:
                         block_content = get_last_text(output)
 
@@ -3423,6 +3476,11 @@ async def streaming_chat_response_handler(response, ctx):
                                 item['code'] = block_content
                                 item['ended_at'] = time.time()
                                 item['duration'] = int(item['ended_at'] - item['started_at'])
+                            elif last_type == 'open_webui:document':
+                                item['markdown'] = block_content
+                                item['ended_at'] = time.time()
+                                item['duration'] = int(item['ended_at'] - item['started_at'])
+                                item['status'] = 'completed'
                             else:
                                 set_last_text(output, block_content)
                                 item['ended_at'] = time.time()
@@ -3506,6 +3564,7 @@ async def streaming_chat_response_handler(response, ctx):
             reasoning_tags_param = metadata.get('params', {}).get('reasoning_tags')
             DETECT_REASONING_TAGS = reasoning_tags_param is not False
             DETECT_CODE_INTERPRETER = metadata.get('features', {}).get('code_interpreter', False)
+            DETECT_DOCUMENT_WRITER = metadata.get('features', {}).get('document_writer', False)
 
             reasoning_tags = []
             if DETECT_REASONING_TAGS:
@@ -3880,6 +3939,7 @@ async def streaming_chat_response_handler(response, ctx):
                                             and (
                                                 last_item_type == 'reasoning'
                                                 or last_item_type == 'open_webui:code_interpreter'
+                                                or last_item_type == 'open_webui:document'
                                                 or (
                                                     last_item_type == 'message'
                                                     and last_item.get('_tag_type') is not None
@@ -3891,6 +3951,8 @@ async def streaming_chat_response_handler(response, ctx):
                                             # Append to the existing tag-based item
                                             if last_item_type == 'open_webui:code_interpreter':
                                                 last_item['code'] = last_item.get('code', '') + value
+                                            elif last_item_type == 'open_webui:document':
+                                                last_item['markdown'] = last_item.get('markdown', '') + value
                                             elif last_item_type == 'reasoning':
                                                 parts = last_item.get('content', [])
                                                 if parts and parts[-1].get('type') == 'output_text':
@@ -3965,6 +4027,13 @@ async def streaming_chat_response_handler(response, ctx):
 
                                             if end:
                                                 break
+
+                                        if DETECT_DOCUMENT_WRITER:
+                                            output, _ = tag_output_handler(
+                                                'document',
+                                                DEFAULT_DOCUMENT_WRITER_TAGS,
+                                                output,
+                                            )
 
                                         if ENABLE_REALTIME_CHAT_SAVE:
                                             # Save message in the database

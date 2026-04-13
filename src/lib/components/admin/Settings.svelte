@@ -5,7 +5,12 @@
 	import { toast } from 'svelte-sonner';
 
 	import { config } from '$lib/stores';
-	import { isFeatureEnabled, isAdminSettingsTabEnabled, getFirstAvailableAdminSettingsTab, ADMIN_SETTINGS_TABS } from '$lib/utils/features';
+	import {
+		isFeatureEnabled,
+		isAdminSettingsTabEnabled,
+		getFirstAvailableAdminSettingsTab,
+		ADMIN_SETTINGS_TABS
+	} from '$lib/utils/features';
 	import { getBackendConfig } from '$lib/apis';
 	import Database from './Settings/Database.svelte';
 

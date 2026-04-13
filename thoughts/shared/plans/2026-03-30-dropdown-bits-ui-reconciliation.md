@@ -12,6 +12,7 @@ Two files (`InputMenu.svelte`, `Knowledge.svelte`) use `DropdownMenu.Content` an
 - **Our `Knowledge.svelte`**: Same broken pattern — `DropdownMenu.Content`/`DropdownMenu.Item` inside custom `Dropdown`.
 
 ### Key Discoveries:
+
 - `Dropdown.svelte` is upstream's component, not ours — it exists in `upstream/dev` identically
 - The bits-ui imports were likely left over from a pre-merge state where upstream used `DropdownMenu.Root`
 - 5 `DropdownMenu.Item` instances in `InputMenu.svelte` (Upload Files, Capture, Webpage URL, Google Drive, OneDrive)
@@ -22,6 +23,7 @@ Two files (`InputMenu.svelte`, `Knowledge.svelte`) use `DropdownMenu.Content` an
 Both files use plain HTML (`<div>`, `<button>`) inside the custom `Dropdown` content slot, matching upstream's pattern. No bits-ui `DropdownMenu` imports remain. All custom functionality (feature flags, pin system, cloud integrations) preserved exactly.
 
 ### How to verify:
+
 - `npm run build` succeeds
 - InputMenu opens without runtime errors in browser console
 - All menu items render and function (files, capture, webpage, notes, Google Drive, OneDrive, knowledge, chats, tools, toggles)
@@ -42,25 +44,31 @@ Minimal, surgical replacements: swap bits-ui compound components with equivalent
 ## Phase 1: InputMenu.svelte
 
 ### Overview
+
 Remove bits-ui dependency, replace `DropdownMenu.Content` with `<div>` and `DropdownMenu.Item` with `<button>`.
 
 ### Changes Required:
 
 #### 1. Remove bits-ui imports
+
 **File**: `src/lib/components/chat/MessageInput/InputMenu.svelte`
 
 Remove line 2:
+
 ```diff
 - import { DropdownMenu } from 'bits-ui';
 ```
 
 Remove line 5 (`flyAndScale` import — only used by `DropdownMenu.Content`'s `transition` prop):
+
 ```diff
 - import { flyAndScale } from '$lib/utils/transitions';
 ```
 
 #### 2. Replace `<DropdownMenu.Content>` → `<div>`
+
 **Lines 230-237** — replace the opening tag:
+
 ```diff
 - <DropdownMenu.Content
 -   class="w-full max-w-84 rounded-2xl px-1 py-1 border border-gray-100 dark:border-gray-800 z-50 bg-white dark:bg-gray-850 dark:text-white shadow-lg max-h-96 overflow-y-auto overflow-x-hidden scrollbar-thin transition"
@@ -76,6 +84,7 @@ Remove line 5 (`flyAndScale` import — only used by `DropdownMenu.Content`'s `t
 ```
 
 **Line 1006** — replace closing tag:
+
 ```diff
 - </DropdownMenu.Content>
 + </div>
@@ -88,6 +97,7 @@ Note: The `sideOffset`, `alignOffset`, `side`, `align`, and `transition` props a
 Each `DropdownMenu.Item` becomes a `<button>` with the same classes and handlers. The only structural difference: add `type="button"` where missing.
 
 **Upload Files** (lines 256, 281):
+
 ```diff
 - <DropdownMenu.Item
 + <button
@@ -98,6 +108,7 @@ Each `DropdownMenu.Item` becomes a `<button>` with the same classes and handlers
 ```
 
 **Capture** (lines 294, 325):
+
 ```diff
 - <DropdownMenu.Item
 + <button
@@ -107,6 +118,7 @@ Each `DropdownMenu.Item` becomes a `<button>` with the same classes and handlers
 ```
 
 **Webpage URL** (lines 339, 364):
+
 ```diff
 - <DropdownMenu.Item
 + <button
@@ -116,6 +128,7 @@ Each `DropdownMenu.Item` becomes a `<button>` with the same classes and handlers
 ```
 
 **Google Drive** (lines 412, 457):
+
 ```diff
 - <DropdownMenu.Item
 + <button
@@ -125,6 +138,7 @@ Each `DropdownMenu.Item` becomes a `<button>` with the same classes and handlers
 ```
 
 **OneDrive** (lines 462, 483):
+
 ```diff
 - <DropdownMenu.Item
 + <button
@@ -138,11 +152,13 @@ For each replacement, add `w-full` to the class list to match the `<button>` ite
 ### Success Criteria:
 
 #### Automated Verification:
+
 - [ ] `npm run build` succeeds
 - [ ] No `DropdownMenu` import remains in InputMenu.svelte: `grep -c "DropdownMenu" src/lib/components/chat/MessageInput/InputMenu.svelte` returns 0
 - [ ] No `flyAndScale` import remains: `grep -c "flyAndScale" src/lib/components/chat/MessageInput/InputMenu.svelte` returns 0
 
 #### Manual Verification:
+
 - [ ] InputMenu opens without console errors
 - [ ] All menu items render correctly
 - [ ] Pin/unpin works
@@ -156,21 +172,26 @@ For each replacement, add `w-full` to the class list to match the `<button>` ite
 ## Phase 2: Knowledge.svelte
 
 ### Overview
+
 Same pattern — remove bits-ui, replace with plain HTML.
 
 ### Changes Required:
 
 #### 1. Remove imports
+
 **File**: `src/lib/components/workspace/Knowledge.svelte`
 
 Remove line 20-21:
+
 ```diff
 - import { DropdownMenu } from 'bits-ui';
 - import { flyAndScale } from '$lib/utils/transitions';
 ```
 
 #### 2. Replace `<DropdownMenu.Content>` → `<div>`
+
 **Lines 253-258** — replace opening tag:
+
 ```diff
 - <DropdownMenu.Content
 -   class="w-full max-w-[220px] rounded-2xl px-1 py-1 border border-gray-100 dark:border-gray-800 z-50 bg-white dark:bg-gray-850 dark:text-white shadow-lg transition"
@@ -185,6 +206,7 @@ Remove line 20-21:
 ```
 
 **Line 293** — replace closing tag:
+
 ```diff
 - </DropdownMenu.Content>
 + </div>
@@ -193,6 +215,7 @@ Remove line 20-21:
 #### 3. Replace `<DropdownMenu.Item>` → `<button>` (3 instances)
 
 **Local KB** (lines 260, 268):
+
 ```diff
 - <DropdownMenu.Item
 + <button
@@ -203,6 +226,7 @@ Remove line 20-21:
 ```
 
 **OneDrive KB** (lines 271, 279):
+
 ```diff
 - <DropdownMenu.Item
 + <button
@@ -212,6 +236,7 @@ Remove line 20-21:
 ```
 
 **Google Drive KB** (lines 283, 291):
+
 ```diff
 - <DropdownMenu.Item
 + <button
@@ -223,10 +248,12 @@ Remove line 20-21:
 ### Success Criteria:
 
 #### Automated Verification:
+
 - [ ] `npm run build` succeeds
 - [ ] No `DropdownMenu` import remains: `grep -c "DropdownMenu" src/lib/components/workspace/Knowledge.svelte` returns 0
 
 #### Manual Verification:
+
 - [ ] "New Knowledge" dropdown opens on Knowledge page
 - [ ] All KB type options render (Local, OneDrive, Google Drive)
 - [ ] Clicking each option navigates to correct create URL with type param
@@ -237,10 +264,12 @@ Remove line 20-21:
 ## Testing Strategy
 
 ### Automated:
+
 - `npm run build` — confirms no compile errors
 - Grep for orphaned `DropdownMenu` imports across all files using custom `Dropdown`
 
 ### Manual:
+
 1. Open chat → click "+" button → verify all InputMenu items render and function
 2. Navigate to Workspace → Knowledge → click "New Knowledge" → verify dropdown
 3. Check browser console for runtime errors in both flows

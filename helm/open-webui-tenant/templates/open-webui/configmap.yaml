@@ -148,6 +148,10 @@ data:
   ENABLE_CODE_EXECUTION: {{ .Values.openWebui.config.enableCodeExecution | quote }}
   USER_PERMISSIONS_FEATURES_CODE_INTERPRETER: {{ .Values.openWebui.config.userPermissionsFeaturesCodeInterpreter | quote }}
 
+  # Document Writer
+  ENABLE_DOCUMENT_WRITER: {{ .Values.openWebui.config.enableDocumentWriter | quote }}
+  USER_PERMISSIONS_FEATURES_DOCUMENT_WRITER: {{ .Values.openWebui.config.userPermissionsFeaturesDocumentWriter | quote }}
+
   # MCP
   ENABLE_DIRECT_CONNECTIONS: {{ .Values.openWebui.config.enableDirectConnections | quote }}
   USER_PERMISSIONS_FEATURES_DIRECT_TOOL_SERVERS: {{ .Values.openWebui.config.userPermissionsFeaturesDirectToolServers | quote }}

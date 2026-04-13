@@ -49,6 +49,7 @@ The Helm chart uses `strategy.type: Recreate` with `replicaCount: 1` (`helm/open
 This means there is a **30-300 second window** during every deployment where the service is completely unavailable. Any user opening an invite link during this window would get a connection error or a gateway timeout from Cilium.
 
 **Evidence:**
+
 - `helm/open-webui-tenant/values.yaml:62-67` -- Recreate strategy, 1 replica
 - `helm/open-webui-tenant/templates/open-webui/deployment.yaml:125-141` -- probe timings
 - No HPA or PDB configured anywhere
@@ -99,6 +100,7 @@ The app has a **double loading gate** pattern:
 2. **`(app)` layout** (`(app)/+layout.svelte:385`): Content gated behind its own `loaded` flag
 
 The root layout's `loaded` depends on:
+
 - `GET /api/config` succeeding (line 724-729)
 - Socket.IO connection establishing (line 752)
 - Session user fetch if token exists (line 757-771)
@@ -106,6 +108,7 @@ The root layout's `loaded` depends on:
 If the backend is slow to respond (cold start, high load, database connection issues), users see only the splash screen indefinitely. If the backend config fetch **fails entirely**, the user is redirected to `/error` (line 782).
 
 For invite links specifically, the sequence is:
+
 1. Root layout fetches backend config (network roundtrip 1)
 2. Root layout sets `loaded = true`, invite page mounts
 3. Invite page fetches `GET /api/v1/invites/{token}/validate` (network roundtrip 2)
@@ -144,6 +147,7 @@ The HSTS header (`max-age=31536000; includeSubDomains`) set in HTTPRoutes ensure
 **Severity: LOW-MEDIUM -- Could cause silent failures**
 
 The CORS middleware at `main.py:1496-1502`:
+
 ```python
 app.add_middleware(
     CORSMiddleware,
@@ -155,6 +159,7 @@ app.add_middleware(
 ```
 
 With `allow_credentials=True`, if `CORS_ALLOW_ORIGIN` resolves to `["*"]` (the default from `env.py`), the CORS spec says the browser should reject the response. The tenant deployments set `CORS_ALLOW_ORIGIN` to their specific domain, but if this is ever misconfigured:
+
 - All `crossorigin="use-credentials"` requests would fail
 - The SvelteKit-injected script tags (without `crossorigin`) would still work
 - Result: partial load -- main app JS works, but some assets fail
@@ -162,6 +167,7 @@ With `allow_credentials=True`, if `CORS_ALLOW_ORIGIN` resolves to `["*"]` (the d
 ## Code References
 
 ### Application Layer (open-webui)
+
 - `svelte.config.js:1-19` -- Static adapter with SPA fallback
 - `src/routes/+layout.js:10` -- `ssr = false` globally
 - `src/app.html:26,34,35` -- `crossorigin="use-credentials"` on asset refs
@@ -176,6 +182,7 @@ With `allow_credentials=True`, if `CORS_ALLOW_ORIGIN` resolves to `["*"]` (the d
 - `backend/open_webui/env.py:480-482` -- Compression middleware enabled by default
 
 ### Deployment Layer (soev-gitops)
+
 - `infrastructure/previder-prod/gateway/gateway.yaml` -- Cilium Gateway definition
 - `infrastructure/previder-prod/gateway/httproute-gradient.yaml` -- HSTS header only
 - `infrastructure/previder-prod/gateway/http-redirect.yaml` -- HTTP->HTTPS redirect
@@ -189,6 +196,7 @@ With `allow_credentials=True`, if `CORS_ALLOW_ORIGIN` resolves to `["*"]` (the d
 ### Why the SPA Architecture Makes This Worse
 
 Open WebUI is a **pure client-side SPA** (SSR disabled). This means:
+
 - The initial HTML response is always the same empty shell regardless of URL
 - **ALL rendering** depends on JavaScript executing successfully
 - If any JS bundle fails to load, the user sees only the splash screen (or raw HTML if the splash is also broken)
@@ -199,6 +207,7 @@ With SSR enabled, the server would render meaningful HTML that works even if JS 
 ### The "Static HTML" Symptom Explained
 
 When users report seeing "static HTML," this is likely the `app.html` shell with the splash screen -- or the splash screen not being removed because:
+
 1. The JS bundle failed to load (network error, 404 from stale deployment)
 2. The JS loaded but `getBackendConfig()` failed (backend not ready)
 3. The JS loaded but hit an unhandled error during initialization
@@ -206,6 +215,7 @@ When users report seeing "static HTML," this is likely the `app.html` shell with
 ### The "Doesn't Render First Time" Symptom Explained
 
 For invite links specifically, "doesn't render first time" could mean:
+
 1. **During deployment**: Recreate strategy causes 30-300s downtime
 2. **Cold start**: Backend needs time to initialize (load models, connect to DB)
 3. **Race condition**: If the backend isn't fully ready when the first request arrives after pod startup, `GET /api/config` fails, and the user is redirected to `/error`
@@ -214,12 +224,14 @@ For invite links specifically, "doesn't render first time" could mean:
 ## Recommendations
 
 ### Quick Wins
+
 1. **Switch to RollingUpdate strategy** with `maxUnavailable: 0, maxSurge: 1` -- eliminates deployment downtime
 2. **Add `Cache-Control` headers** for `/_app/immutable/*` assets (`max-age=31536000, immutable`)
 3. **Remove `crossorigin="use-credentials"`** from static asset links in `app.html` (they're same-origin)
 4. **Change `pullPolicy: Always` to `IfNotPresent`** and use specific image tags instead of mutable branch tags
 
 ### Longer-term Improvements
+
 5. **Increase replica count to 2** for production tenants (gradient at minimum)
 6. **Add a startup readiness signal** -- don't mark the pod as ready until the backend can serve `/api/config` and all static files
 7. **Consider adding asset-specific Cache-Control** in the `SecurityHeadersMiddleware` or via a custom middleware that distinguishes between API and static responses

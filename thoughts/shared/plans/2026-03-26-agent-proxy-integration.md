@@ -14,6 +14,7 @@ This follows the same proxy pattern used by the Ollama and OpenAI routers — `a
 - **Admin Integrations tab** (`Integrations.svelte`): Has Tool Servers, Terminal Servers, and Integration Providers sections. Uses `isFeatureEnabled()` gates and `PersistentConfig` for DB persistence.
 
 ### Key Discoveries:
+
 - Ollama/OpenAI proxies use `aiohttp` + `stream_wrapper()` from `utils/misc.py:875` for streaming — we follow this pattern
 - `PersistentConfig` (config.py:171) handles env-var-default + DB-persistence + Redis sync
 - Config GET/POST endpoints in `configs.py` use `get_admin_user` dependency
@@ -32,6 +33,7 @@ This follows the same proxy pattern used by the Ollama and OpenAI routers — `a
 5. When disabled, all proxy endpoints return 503
 
 ### Verification:
+
 ```bash
 # With proxy enabled and agent stack running:
 curl -H "Authorization: Bearer sk-..." https://octobox.soev.ai/api/v1/agent/models
@@ -58,11 +60,13 @@ Follow the Ollama/OpenAI proxy pattern: `aiohttp` session → `stream_wrapper` �
 ## Phase 1: Backend — Config & Proxy Router
 
 ### Overview
+
 Add `PersistentConfig` variables, create the proxy router, add config endpoints, mount in `main.py`.
 
 ### Changes Required:
 
 #### 1. Config definitions
+
 **File**: `backend/open_webui/config.py`
 **Changes**: Add `ENABLE_AGENT_PROXY` and `AGENT_PROXY_BASE_URL` after the `INTEGRATION_PROVIDERS` block (~line 3488).
 
@@ -85,6 +89,7 @@ AGENT_PROXY_BASE_URL = PersistentConfig(
 ```
 
 #### 2. Wire config to app state
+
 **File**: `backend/open_webui/main.py`
 **Changes**: Import the new configs and assign to `app.state.config` (after `INTEGRATION_PROVIDERS` at line 1270). Also expose `enable_agent_proxy` in the features dict (~line 2480).
 
@@ -97,11 +102,13 @@ app.state.config.AGENT_PROXY_BASE_URL = AGENT_PROXY_BASE_URL
 ```
 
 In the features dict (after `enable_email_invites` at line 2480):
+
 ```python
 "enable_agent_proxy": app.state.config.ENABLE_AGENT_PROXY,
 ```
 
 Mount the router (after integrations at line 1771):
+
 ```python
 from open_webui.routers import agent_proxy
 
@@ -111,6 +118,7 @@ app.include_router(
 ```
 
 #### 3. Config API endpoints
+
 **File**: `backend/open_webui/routers/configs.py`
 **Changes**: Add GET/POST endpoints for agent proxy config (after the integrations endpoints at line 789).
 
@@ -143,6 +151,7 @@ async def set_agent_proxy_config(
 ```
 
 #### 4. Proxy router
+
 **File**: `backend/open_webui/routers/agent_proxy.py` (new file)
 **Changes**: Create the proxy router with three endpoints. Uses `aiohttp` + `stream_wrapper` matching the Ollama/OpenAI pattern.
 
@@ -279,6 +288,7 @@ async def openapi_spec(request: Request, user=Depends(get_verified_user)):
 ### Success Criteria:
 
 #### Automated Verification:
+
 - [ ] Backend starts without errors: `open-webui dev`
 - [x] Black formatting passes: `npm run format:backend`
 - [ ] New config endpoints respond: `curl localhost:8080/api/v1/configs/agent_proxy` (requires admin token)
@@ -286,6 +296,7 @@ async def openapi_spec(request: Request, user=Depends(get_verified_user)):
 - [x] Build succeeds: `npm run build`
 
 #### Manual Verification:
+
 - [ ] With `ENABLE_AGENT_PROXY=true` and a running agent service, `GET /api/v1/agent/models` returns the model list
 - [ ] `POST /api/v1/agent/chat/completions` streams SSE responses correctly
 - [ ] `GET /api/v1/agent/openapi.json` returns the spec
@@ -298,11 +309,13 @@ async def openapi_spec(request: Request, user=Depends(get_verified_user)):
 ## Phase 2: Frontend — Admin UI in Integrations Tab
 
 ### Overview
+
 Add the Agent Proxy section to the Integrations admin settings with an enable/disable toggle, URL input, and inline documentation with curl examples.
 
 ### Changes Required:
 
 #### 1. Frontend API client functions
+
 **File**: `src/lib/apis/configs/index.ts`
 **Changes**: Add `getAgentProxyConfig` and `setAgentProxyConfig` after the integrations functions (after line 760).
 
@@ -364,24 +377,27 @@ export const setAgentProxyConfig = async (token: string, config: object) => {
 ```
 
 #### 2. Integrations tab — Agent Proxy section
+
 **File**: `src/lib/components/admin/Settings/Integrations.svelte`
 **Changes**: Add Agent Proxy section between the Terminal Servers and Integration Providers sections. Import the new API functions, add state variables, load config on mount, save on toggle/input change.
 
 Add to the script block imports:
+
 ```typescript
 import {
-    getToolServerConnections,
-    setToolServerConnections,
-    getTerminalServerConnections,
-    setTerminalServerConnections,
-    getAgentProxyConfig,
-    setAgentProxyConfig
+	getToolServerConnections,
+	setToolServerConnections,
+	getTerminalServerConnections,
+	setTerminalServerConnections,
+	getAgentProxyConfig,
+	setAgentProxyConfig
 } from '$lib/apis/configs';
 
 import { config } from '$lib/stores';
 ```
 
 Add state variables:
+
 ```typescript
 let ENABLE_AGENT_PROXY = false;
 let AGENT_PROXY_BASE_URL = '';
@@ -389,33 +405,35 @@ let showAgentDocs = false;
 ```
 
 Add to `onMount`:
+
 ```typescript
 // Load agent proxy config
 try {
-    const agentRes = await getAgentProxyConfig(localStorage.token);
-    if (agentRes) {
-        ENABLE_AGENT_PROXY = agentRes.ENABLE_AGENT_PROXY ?? false;
-        AGENT_PROXY_BASE_URL = agentRes.AGENT_PROXY_BASE_URL ?? '';
-    }
+	const agentRes = await getAgentProxyConfig(localStorage.token);
+	if (agentRes) {
+		ENABLE_AGENT_PROXY = agentRes.ENABLE_AGENT_PROXY ?? false;
+		AGENT_PROXY_BASE_URL = agentRes.AGENT_PROXY_BASE_URL ?? '';
+	}
 } catch {
-    // Not configured yet
+	// Not configured yet
 }
 ```
 
 Add save handler:
+
 ```typescript
 const saveAgentProxyConfig = async () => {
-    const res = await setAgentProxyConfig(localStorage.token, {
-        ENABLE_AGENT_PROXY,
-        AGENT_PROXY_BASE_URL
-    }).catch((err) => {
-        toast.error($i18n.t('Failed to save Agent Proxy settings'));
-        return null;
-    });
+	const res = await setAgentProxyConfig(localStorage.token, {
+		ENABLE_AGENT_PROXY,
+		AGENT_PROXY_BASE_URL
+	}).catch((err) => {
+		toast.error($i18n.t('Failed to save Agent Proxy settings'));
+		return null;
+	});
 
-    if (res) {
-        toast.success($i18n.t('Agent Proxy settings saved'));
-    }
+	if (res) {
+		toast.success($i18n.t('Agent Proxy settings saved'));
+	}
 };
 ```
 
@@ -423,87 +441,103 @@ Add template section (after the Terminal Servers `{/if}` at line 332, before the
 
 ```svelte
 {#if $user?.role === 'admin'}
-<div class="mb-2.5 flex flex-col w-full">
-    <div class="flex justify-between items-center mb-1">
-        <div class="flex items-center gap-2">
-            <div class="font-medium">{$i18n.t('Agent Proxy')}</div>
-        </div>
+	<div class="mb-2.5 flex flex-col w-full">
+		<div class="flex justify-between items-center mb-1">
+			<div class="flex items-center gap-2">
+				<div class="font-medium">{$i18n.t('Agent Proxy')}</div>
+			</div>
 
-        <Tooltip
-            content={ENABLE_AGENT_PROXY
-                ? $i18n.t('Enabled')
-                : $i18n.t('Disabled')}
-        >
-            <Switch
-                bind:state={ENABLE_AGENT_PROXY}
-                on:change={() => {
-                    saveAgentProxyConfig();
-                }}
-            />
-        </Tooltip>
-    </div>
+			<Tooltip content={ENABLE_AGENT_PROXY ? $i18n.t('Enabled') : $i18n.t('Disabled')}>
+				<Switch
+					bind:state={ENABLE_AGENT_PROXY}
+					on:change={() => {
+						saveAgentProxyConfig();
+					}}
+				/>
+			</Tooltip>
+		</div>
 
-    {#if ENABLE_AGENT_PROXY}
-        <div class="flex flex-col gap-2 mt-1">
-            <div>
-                <div class="text-xs font-medium mb-1">{$i18n.t('Agent Service URL')}</div>
-                <input
-                    class="w-full rounded-lg py-2 px-4 text-sm bg-gray-50 dark:text-gray-300 dark:bg-gray-850 outline-hidden"
-                    type="text"
-                    placeholder="http://agent-service:8080"
-                    bind:value={AGENT_PROXY_BASE_URL}
-                    on:change={() => {
-                        saveAgentProxyConfig();
-                    }}
-                />
-            </div>
+		{#if ENABLE_AGENT_PROXY}
+			<div class="flex flex-col gap-2 mt-1">
+				<div>
+					<div class="text-xs font-medium mb-1">{$i18n.t('Agent Service URL')}</div>
+					<input
+						class="w-full rounded-lg py-2 px-4 text-sm bg-gray-50 dark:text-gray-300 dark:bg-gray-850 outline-hidden"
+						type="text"
+						placeholder="http://agent-service:8080"
+						bind:value={AGENT_PROXY_BASE_URL}
+						on:change={() => {
+							saveAgentProxyConfig();
+						}}
+					/>
+				</div>
 
-            <div class="text-xs text-gray-500">
-                {$i18n.t('Proxy requests to an external OpenAI-compatible agent service. Users authenticate with their API keys.')}
-            </div>
+				<div class="text-xs text-gray-500">
+					{$i18n.t(
+						'Proxy requests to an external OpenAI-compatible agent service. Users authenticate with their API keys.'
+					)}
+				</div>
 
-            <div class="mt-1">
-                <button
-                    class="text-xs underline text-gray-600 dark:text-gray-300"
-                    type="button"
-                    on:click={() => { showAgentDocs = !showAgentDocs; }}
-                >
-                    {showAgentDocs ? $i18n.t('Hide API documentation') : $i18n.t('Show API documentation')}
-                </button>
+				<div class="mt-1">
+					<button
+						class="text-xs underline text-gray-600 dark:text-gray-300"
+						type="button"
+						on:click={() => {
+							showAgentDocs = !showAgentDocs;
+						}}
+					>
+						{showAgentDocs ? $i18n.t('Hide API documentation') : $i18n.t('Show API documentation')}
+					</button>
 
-                {#if showAgentDocs}
-                    <div class="mt-2 p-3 bg-gray-50 dark:bg-gray-850 rounded-lg text-xs font-mono space-y-3">
-                        <div>
-                            <div class="font-semibold text-gray-700 dark:text-gray-300 mb-1">{$i18n.t('List available models')}</div>
-                            <pre class="whitespace-pre-wrap text-gray-600 dark:text-gray-400">curl -H "Authorization: Bearer sk-..." \
+					{#if showAgentDocs}
+						<div
+							class="mt-2 p-3 bg-gray-50 dark:bg-gray-850 rounded-lg text-xs font-mono space-y-3"
+						>
+							<div>
+								<div class="font-semibold text-gray-700 dark:text-gray-300 mb-1">
+									{$i18n.t('List available models')}
+								</div>
+								<pre
+									class="whitespace-pre-wrap text-gray-600 dark:text-gray-400">curl -H "Authorization: Bearer sk-..." \
   {window.location.origin}/api/v1/agent/models</pre>
-                        </div>
+							</div>
 
-                        <div>
-                            <div class="font-semibold text-gray-700 dark:text-gray-300 mb-1">{$i18n.t('Chat completions (streaming)')}</div>
-                            <pre class="whitespace-pre-wrap text-gray-600 dark:text-gray-400">curl -H "Authorization: Bearer sk-..." \
+							<div>
+								<div class="font-semibold text-gray-700 dark:text-gray-300 mb-1">
+									{$i18n.t('Chat completions (streaming)')}
+								</div>
+								<pre
+									class="whitespace-pre-wrap text-gray-600 dark:text-gray-400">curl -H "Authorization: Bearer sk-..." \
   -H "Content-Type: application/json" \
-  -d '{JSON.stringify({model: "agent-name", messages: [{role: "user", content: "Hello"}], stream: true})}' \
+  -d '{JSON.stringify({
+										model: 'agent-name',
+										messages: [{ role: 'user', content: 'Hello' }],
+										stream: true
+									})}' \
   {window.location.origin}/api/v1/agent/chat/completions</pre>
-                        </div>
+							</div>
 
-                        <div>
-                            <div class="font-semibold text-gray-700 dark:text-gray-300 mb-1">{$i18n.t('OpenAPI specification')}</div>
-                            <pre class="whitespace-pre-wrap text-gray-600 dark:text-gray-400">curl -H "Authorization: Bearer sk-..." \
+							<div>
+								<div class="font-semibold text-gray-700 dark:text-gray-300 mb-1">
+									{$i18n.t('OpenAPI specification')}
+								</div>
+								<pre
+									class="whitespace-pre-wrap text-gray-600 dark:text-gray-400">curl -H "Authorization: Bearer sk-..." \
   {window.location.origin}/api/v1/agent/openapi.json</pre>
-                        </div>
-                    </div>
-                {/if}
-            </div>
-        </div>
-    {/if}
-</div>
+							</div>
+						</div>
+					{/if}
+				</div>
+			</div>
+		{/if}
+	</div>
 
-<hr class=" border-gray-100/30 dark:border-gray-850/30 my-4" />
+	<hr class=" border-gray-100/30 dark:border-gray-850/30 my-4" />
 {/if}
 ```
 
 #### 3. i18n keys
+
 **File**: `src/lib/i18n/locales/en-US/translation.json`
 **Changes**: Add translation keys (alphabetically sorted):
 
@@ -523,10 +557,12 @@ Add template section (after the Terminal Servers `{/if}` at line 332, before the
 ### Success Criteria:
 
 #### Automated Verification:
+
 - [x] Frontend builds without errors: `npm run build`
 - [x] Backend formatting passes: `npm run format:backend`
 
 #### Manual Verification:
+
 - [ ] Agent Proxy section appears in Admin > Settings > Integrations
 - [ ] Toggle turns the proxy on/off and persists across page reloads
 - [ ] URL input saves and persists
@@ -542,6 +578,7 @@ Add template section (after the Terminal Servers `{/if}` at line 332, before the
 ## Testing Strategy
 
 ### Manual Testing Steps:
+
 1. Start backend with `open-webui dev`, frontend with `npm run dev`
 2. Log in as admin, go to Settings > Integrations
 3. Verify Agent Proxy section with toggle (default: off)
@@ -554,6 +591,7 @@ Add template section (after the Terminal Servers `{/if}` at line 332, before the
 10. Verify non-admin user cannot see the Agent Proxy section
 
 ### Edge Cases:
+
 - Agent service is down → proxy should return 502/503 with clear error
 - Invalid URL configured → should fail gracefully
 - Empty URL with toggle on → returns 503 "base URL not configured"

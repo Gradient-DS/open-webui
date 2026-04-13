@@ -7,17 +7,20 @@ Fix the UI flicker (spinner flash / double-loading) in the Knowledge and Prompts
 ## Current State Analysis
 
 ### Knowledge.svelte (3 competing reactive blocks)
+
 - **Line 56-61**: Debounced query watcher (300ms) — fires on mount even though query hasn't changed
 - **Line 68-70**: Immediate `viewOption` watcher — fires when `onMount` sets viewOption from localStorage
 - **Line 72-74**: Immediate `typeFilter` watcher (our custom code) — fires on mount
 - `init()` calls `reset()` which sets `items = null` → spinner shown → API call → items repopulate
 
 ### Prompts.svelte (2 competing reactive blocks)
+
 - **Line 63-69**: Debounced query watcher (300ms) — sets `loading = true` immediately on mount, schedules fetch at +300ms
 - **Line 72-74**: Immediate page/tag/view watcher — fires on mount after `loaded = true`
 - Result: content appears → 300ms later spinner flash → content reappears
 
 ### Models.svelte (reference — no flicker)
+
 - **Line 75-77**: Single reactive block guarded by `loaded` — only fires once `loaded` flips to `true`
 - `onMount` sets viewOption and calls `tick()` before setting `loaded = true`
 - Clean single-load pattern we should follow
@@ -30,6 +33,7 @@ Fix the UI flicker (spinner flash / double-loading) in the Knowledge and Prompts
 - No regression in existing functionality (pagination, search, filtering, view options)
 
 ### How to verify:
+
 1. Navigate between workspace tabs — no flicker or double-load on any tab
 2. Use search, filter, and view options — results update correctly
 3. Check browser Network tab — only one API call per mount, one per filter change
@@ -49,11 +53,13 @@ Follow the Models.svelte pattern: single reactive block guarded by `loaded`, all
 ## Phase 1: Fix Knowledge.svelte
 
 ### Overview
+
 Consolidate three reactive blocks into one, prevent item nulling during re-fetches, and ensure mount produces exactly one API call.
 
 ### Changes Required:
 
 #### 1. Knowledge.svelte — Reactive blocks and init logic
+
 **File**: `src/lib/components/workspace/Knowledge.svelte`
 
 Replace the three separate reactive blocks (lines 56-74) with a single consolidated block:
@@ -114,9 +120,15 @@ const init = async () => {
 ```js
 const getItemsPage = async (replace = false) => {
 	itemsLoading = true;
-	const res = await searchKnowledgeBases(localStorage.token, query, viewOption, page, typeFilter || null).catch(
-		() => { /* existing error handling */ }
-	);
+	const res = await searchKnowledgeBases(
+		localStorage.token,
+		query,
+		viewOption,
+		page,
+		typeFilter || null
+	).catch(() => {
+		/* existing error handling */
+	});
 
 	if (res) {
 		if (replace || items === null) {
@@ -137,10 +149,12 @@ Remove the now-unused `reset()` function (lines 76-82), or keep it only for expl
 ### Success Criteria:
 
 #### Automated Verification:
+
 - [x] `npm run build` completes without new errors
 - [ ] `npm run check` produces no new errors (existing ~8000 errors are pre-existing)
 
 #### Manual Verification:
+
 - [ ] Navigate to Knowledge tab — content loads once, no spinner flash
 - [ ] Type in search box — results update after 300ms debounce, no spinner flash (stale results visible during fetch)
 - [ ] Change view option (list/grid) — results update immediately, no flash
@@ -153,11 +167,13 @@ Remove the now-unused `reset()` function (lines 76-82), or keep it only for expl
 ## Phase 2: Fix Prompts.svelte
 
 ### Overview
+
 Same pattern as Phase 1: consolidate reactive blocks, prevent loading flash on mount, keep stale data visible during re-fetches.
 
 ### Changes Required:
 
 #### 1. Prompts.svelte — Reactive blocks and fetch logic
+
 **File**: `src/lib/components/workspace/Prompts.svelte`
 
 Replace the two reactive blocks (lines 63-74) with a single consolidated block:
@@ -185,6 +201,7 @@ $: if (loaded) {
 **Remove the immediate `loading = true`** from the old query reactive block — this was the direct cause of the spinner flash. Instead, only set `loading = true` inside `getPromptList()` where it already is.
 
 Add query input handler:
+
 ```svelte
 on:input={() => {
 	queryDebounceActive = true;
@@ -196,10 +213,12 @@ Reset `queryDebounceActive = false` in the `finally` block of `getPromptList()` 
 ### Success Criteria:
 
 #### Automated Verification:
+
 - [x] `npm run build` completes without new errors
 - [ ] `npm run check` produces no new errors beyond pre-existing ones
 
 #### Manual Verification:
+
 - [ ] Navigate to Prompts tab — content loads once, no spinner flash
 - [ ] Type in search box — results update after 300ms debounce
 - [ ] Change tag filter — results update immediately
@@ -212,6 +231,7 @@ Reset `queryDebounceActive = false` in the `finally` block of `getPromptList()` 
 ## Phase 3: Fetch Deduplication (Optional Hardening)
 
 ### Overview
+
 Add a simple fetch ID counter to both Knowledge and Prompts to discard stale responses when rapid filter changes cause overlapping API calls.
 
 ### Changes Required:
@@ -235,9 +255,11 @@ This is a defensive measure — Phases 1 and 2 already eliminate the double-fetc
 ### Success Criteria:
 
 #### Automated Verification:
+
 - [x] `npm run build` completes without new errors
 
 #### Manual Verification:
+
 - [ ] Rapidly change filters/search — no stale data shown, last filter state wins
 - [ ] Slow network simulation (DevTools throttle) — no visual glitches
 
@@ -246,6 +268,7 @@ This is a defensive measure — Phases 1 and 2 already eliminate the double-fetc
 ## Testing Strategy
 
 ### Manual Testing Steps:
+
 1. Navigate to each workspace tab (Knowledge, Prompts, Models, Tools) — verify single clean load
 2. Use search in Knowledge and Prompts — verify debounce works, no flash
 3. Change view option in each tab — verify immediate update, no flash
@@ -255,6 +278,7 @@ This is a defensive measure — Phases 1 and 2 already eliminate the double-fetc
 7. Test with slow network (DevTools → Network → Slow 3G) — verify no spinner flash, stale data shown during refetch
 
 ### Regression Checks:
+
 - Knowledge CRUD (create, edit, delete) still works
 - Prompt CRUD still works
 - OneDrive sync progress updates still appear in Knowledge

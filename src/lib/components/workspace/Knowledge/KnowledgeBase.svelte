@@ -40,12 +40,17 @@
 		searchKnowledgeFilesById
 	} from '$lib/apis/knowledge';
 	import { processWeb, processYoutubeVideo } from '$lib/apis/retrieval';
-	import { createSyncApi, type SyncStatusResponse, type SyncErrorType, type FailedFile } from '$lib/apis/sync';
+	import {
+		createSyncApi,
+		type SyncStatusResponse,
+		type SyncErrorType,
+		type FailedFile
+	} from '$lib/apis/sync';
 	import { startOneDriveSyncItems, type SyncItem as OneDriveSyncItem } from '$lib/apis/onedrive';
 	import { openOneDriveItemPicker, getGraphApiToken } from '$lib/utils/onedrive-file-picker';
 	import {
 		startGoogleDriveSyncItems,
-		type SyncItem as GoogleDriveSyncItem,
+		type SyncItem as GoogleDriveSyncItem
 	} from '$lib/apis/googledrive';
 	import { createKnowledgePicker } from '$lib/utils/google-drive-picker';
 	import { WEBUI_API_BASE_URL } from '$lib/constants';
@@ -79,18 +84,18 @@
 	// ===== Cloud sync provider configuration =====
 
 	interface CloudSyncProvider {
-		type: string;                    // "onedrive" | "google_drive"
-		metaKey: string;                 // "onedrive_sync" | "google_drive_sync"
-		eventPrefix: string;             // "onedrive" | "googledrive"
-		fileIdPrefix: string;            // "onedrive-" | "googledrive-"
-		sourceMetaField: string;         // "onedrive" | "google_drive" (for file.meta.source)
-		label: string;                   // "OneDrive" | "Google Drive"
+		type: string; // "onedrive" | "google_drive"
+		metaKey: string; // "onedrive_sync" | "google_drive_sync"
+		eventPrefix: string; // "onedrive" | "googledrive"
+		fileIdPrefix: string; // "onedrive-" | "googledrive-"
+		sourceMetaField: string; // "onedrive" | "google_drive" (for file.meta.source)
+		label: string; // "OneDrive" | "Google Drive"
 		api: ReturnType<typeof createSyncApi>;
-		startSyncParam: string;          // "start_onedrive_sync" | "start_google_drive_sync"
-		authCallbackType: string;        // "onedrive_auth_callback" | "google_drive_auth_callback"
-		authBasePath: string;            // "onedrive" | "google-drive" (for auth URL)
-		authPopupName: string;           // "onedrive_auth" | "google_drive_auth"
-		configKey: string;               // "onedrive" | "google_drive" (for $config?.xxx?.has_client_secret)
+		startSyncParam: string; // "start_onedrive_sync" | "start_google_drive_sync"
+		authCallbackType: string; // "onedrive_auth_callback" | "google_drive_auth_callback"
+		authBasePath: string; // "onedrive" | "google-drive" (for auth URL)
+		authPopupName: string; // "onedrive_auth" | "google_drive_auth"
+		configKey: string; // "onedrive" | "google_drive" (for $config?.xxx?.has_client_secret)
 	}
 
 	const CLOUD_PROVIDERS: Record<string, CloudSyncProvider> = {
@@ -106,7 +111,7 @@
 			authCallbackType: 'onedrive_auth_callback',
 			authBasePath: 'onedrive',
 			authPopupName: 'onedrive_auth',
-			configKey: 'onedrive',
+			configKey: 'onedrive'
 		},
 		google_drive: {
 			type: 'google_drive',
@@ -120,26 +125,43 @@
 			authCallbackType: 'google_drive_auth_callback',
 			authBasePath: 'google-drive',
 			authPopupName: 'google_drive_auth',
-			configKey: 'google_drive',
-		},
+			configKey: 'google_drive'
+		}
 	};
 
 	// ===== Unified cloud sync state =====
 
-	let cloudSyncState: Record<string, {
-		isSyncing: boolean;
-		isCancelling: boolean;
-		syncStatus: SyncStatusResponse | null;
-		bgSyncAuthorized: boolean;
-		bgSyncNeedsReauth: boolean;
-		refreshDone: boolean;
-	}> = {
-		onedrive: { isSyncing: false, isCancelling: false, syncStatus: null, bgSyncAuthorized: false, bgSyncNeedsReauth: false, refreshDone: false },
-		google_drive: { isSyncing: false, isCancelling: false, syncStatus: null, bgSyncAuthorized: false, bgSyncNeedsReauth: false, refreshDone: false },
+	let cloudSyncState: Record<
+		string,
+		{
+			isSyncing: boolean;
+			isCancelling: boolean;
+			syncStatus: SyncStatusResponse | null;
+			bgSyncAuthorized: boolean;
+			bgSyncNeedsReauth: boolean;
+			refreshDone: boolean;
+		}
+	> = {
+		onedrive: {
+			isSyncing: false,
+			isCancelling: false,
+			syncStatus: null,
+			bgSyncAuthorized: false,
+			bgSyncNeedsReauth: false,
+			refreshDone: false
+		},
+		google_drive: {
+			isSyncing: false,
+			isCancelling: false,
+			syncStatus: null,
+			bgSyncAuthorized: false,
+			bgSyncNeedsReauth: false,
+			refreshDone: false
+		}
 	};
 
-	$: isSyncBusy = Object.values(cloudSyncState).some(s => s.isSyncing || s.isCancelling);
-	$: activeProvider = knowledge?.type ? CLOUD_PROVIDERS[knowledge.type] ?? null : null;
+	$: isSyncBusy = Object.values(cloudSyncState).some((s) => s.isSyncing || s.isCancelling);
+	$: activeProvider = knowledge?.type ? (CLOUD_PROVIDERS[knowledge.type] ?? null) : null;
 	$: activeState = activeProvider ? cloudSyncState[activeProvider.type] : null;
 
 	let largeScreen = true;
@@ -204,7 +226,7 @@
 	// Consolidated reactive block — mirrors Knowledge.svelte list view pattern
 	$: if (loaded && knowledgeId !== null) {
 		// Track all dependencies explicitly
-		void query, viewOption, sortKey, direction, currentPage;
+		(void query, viewOption, sortKey, direction, currentPage);
 
 		if (queryDebounceActive) {
 			// User is typing — debounce
@@ -231,7 +253,9 @@
 
 		const isCloudKb = knowledge?.type && knowledge.type !== 'local';
 		const cloudLimit = isCloudKb
-			? ($config?.integration_providers?.[knowledge.type]?.max_files_per_kb || $config?.features?.knowledge_max_file_count || 2000)
+			? $config?.integration_providers?.[knowledge.type]?.max_files_per_kb ||
+				$config?.features?.knowledge_max_file_count ||
+				2000
 			: null;
 		const res = await searchKnowledgeFilesById(
 			localStorage.token,
@@ -512,10 +536,13 @@
 					});
 				} else if (entry.isDirectory) {
 					const reader = (entry as FileSystemDirectoryEntry).createReader();
-					reader.readEntries(async (entries) => {
-						await Promise.all(entries.map(readEntry));
-						resolve();
-					}, () => resolve());
+					reader.readEntries(
+						async (entries) => {
+							await Promise.all(entries.map(readEntry));
+							resolve();
+						},
+						() => resolve()
+					);
 				} else {
 					resolve();
 				}
@@ -675,7 +702,7 @@
 
 				accessToken = await getGraphApiToken('organizations');
 
-				syncItems = items.map(item => ({
+				syncItems = items.map((item) => ({
 					type: item.type,
 					drive_id: item.driveId,
 					item_id: item.id,
@@ -699,7 +726,7 @@
 					return;
 				}
 
-				syncItems = result.items.map(item => ({
+				syncItems = result.items.map((item) => ({
 					type: item.type,
 					item_id: item.id,
 					item_path: item.path,
@@ -710,7 +737,7 @@
 				cloudSyncState = cloudSyncState;
 				await startGoogleDriveSyncItems(localStorage.token, {
 					knowledge_id: knowledge.id,
-					items: syncItems as GoogleDriveSyncItem[],
+					items: syncItems as GoogleDriveSyncItem[]
 				});
 			}
 
@@ -724,7 +751,10 @@
 			pollCloudSyncStatus(provider);
 		} catch (error) {
 			console.error(`${provider.label} sync error:`, error);
-			toast.error($i18n.t('Failed to sync from {{label}}: ', { label: provider.label }) + (error instanceof Error ? error.message : String(error)));
+			toast.error(
+				$i18n.t('Failed to sync from {{label}}: ', { label: provider.label }) +
+					(error instanceof Error ? error.message : String(error))
+			);
 			state.isSyncing = false;
 			cloudSyncState = cloudSyncState;
 		}
@@ -769,7 +799,7 @@
 				cloudSyncState = cloudSyncState;
 				await startGoogleDriveSyncItems(localStorage.token, {
 					knowledge_id: knowledge.id,
-					items: syncItems,
+					items: syncItems
 				});
 			}
 
@@ -777,7 +807,9 @@
 			pollCloudSyncStatus(provider);
 		} catch (error) {
 			console.error(`${provider.label} resync error:`, error);
-			toast.error($i18n.t('Failed to start sync: ') + (error instanceof Error ? error.message : String(error)));
+			toast.error(
+				$i18n.t('Failed to start sync: ') + (error instanceof Error ? error.message : String(error))
+			);
 			state.isSyncing = false;
 			cloudSyncState = cloudSyncState;
 		}
@@ -803,7 +835,10 @@
 			} else if (state.syncStatus.status === 'access_revoked') {
 				// access_revoked is a transient status during sync, keep polling
 				setTimeout(() => pollCloudSyncStatus(provider), 2000);
-			} else if (state.syncStatus.status === 'completed' || state.syncStatus.status === 'completed_with_errors') {
+			} else if (
+				state.syncStatus.status === 'completed' ||
+				state.syncStatus.status === 'completed_with_errors'
+			) {
 				// Toast is handled by Socket.IO handler, just refresh
 				state.isSyncing = false;
 				cloudSyncState = cloudSyncState;
@@ -815,7 +850,12 @@
 			} else if (state.syncStatus.status === 'failed') {
 				// Only show error if Socket.IO didn't already handle it
 				if (state.isSyncing) {
-					toast.error($i18n.t('{{label}} sync failed: {{error}}', { label: provider.label, error: state.syncStatus.error }));
+					toast.error(
+						$i18n.t('{{label}} sync failed: {{error}}', {
+							label: provider.label,
+							error: state.syncStatus.error
+						})
+					);
 					state.isSyncing = false;
 					cloudSyncState = cloudSyncState;
 				}
@@ -843,7 +883,10 @@
 			toast.info($i18n.t('Cancelling {{label}} sync...', { label: provider.label }));
 		} catch (error) {
 			console.error(`Failed to cancel ${provider.label} sync:`, error);
-			toast.error($i18n.t('Failed to cancel sync: ') + (error instanceof Error ? error.message : String(error)));
+			toast.error(
+				$i18n.t('Failed to cancel sync: ') +
+					(error instanceof Error ? error.message : String(error))
+			);
 			state.isCancelling = false;
 			cloudSyncState = cloudSyncState;
 		}
@@ -874,9 +917,7 @@
 		const filesToShow = failedFiles.slice(0, maxToShow);
 		const remaining = failedFiles.length - maxToShow;
 
-		const lines = filesToShow.map(
-			(f) => `- ${f.filename}: ${getErrorTypeMessage(f.error_type)}`
-		);
+		const lines = filesToShow.map((f) => `- ${f.filename}: ${getErrorTypeMessage(f.error_type)}`);
 
 		if (remaining > 0) {
 			lines.push($i18n.t('and {{COUNT}} more', { COUNT: remaining }));
@@ -887,16 +928,19 @@
 
 	// ===== Generic socket handlers =====
 
-	function handleCloudFileProcessing(providerType: string, data: {
-		knowledge_id: string;
-		file: {
-			item_id: string;
-			name: string;
-			size?: number;
-			source_item_id?: string;
-			relative_path?: string;
-		};
-	}) {
+	function handleCloudFileProcessing(
+		providerType: string,
+		data: {
+			knowledge_id: string;
+			file: {
+				item_id: string;
+				name: string;
+				size?: number;
+				source_item_id?: string;
+				relative_path?: string;
+			};
+		}
+	) {
 		const provider = CLOUD_PROVIDERS[providerType];
 		const state = cloudSyncState[providerType];
 
@@ -937,23 +981,26 @@
 		console.log(`${provider.label} file processing started:`, data.file.name);
 	}
 
-	function handleCloudFileAdded(providerType: string, data: {
-		knowledge_id: string;
-		file: {
-			id: string;
-			filename: string;
-			meta?: {
-				name?: string;
-				content_type?: string;
-				size?: number;
-				source?: string;
-				source_item_id?: string;
-				relative_path?: string;
+	function handleCloudFileAdded(
+		providerType: string,
+		data: {
+			knowledge_id: string;
+			file: {
+				id: string;
+				filename: string;
+				meta?: {
+					name?: string;
+					content_type?: string;
+					size?: number;
+					source?: string;
+					source_item_id?: string;
+					relative_path?: string;
+				};
+				created_at?: number;
+				updated_at?: number;
 			};
-			created_at?: number;
-			updated_at?: number;
-		};
-	}) {
+		}
+	) {
 		const state = cloudSyncState[providerType];
 		const provider = CLOUD_PROVIDERS[providerType];
 
@@ -994,18 +1041,21 @@
 		}
 	}
 
-	async function handleCloudSyncProgress(providerType: string, data: {
-		knowledge_id: string;
-		status: string;
-		current: number;
-		total: number;
-		filename: string;
-		error?: string;
-		files_processed?: number;
-		files_failed?: number;
-		deleted_count?: number;
-		failed_files?: FailedFile[];
-	}) {
+	async function handleCloudSyncProgress(
+		providerType: string,
+		data: {
+			knowledge_id: string;
+			status: string;
+			current: number;
+			total: number;
+			filename: string;
+			error?: string;
+			files_processed?: number;
+			files_failed?: number;
+			deleted_count?: number;
+			failed_files?: FailedFile[];
+		}
+	) {
 		const state = cloudSyncState[providerType];
 		const provider = CLOUD_PROVIDERS[providerType];
 
@@ -1025,7 +1075,10 @@
 
 		// Handle access revoked
 		if (data.status === 'access_revoked') {
-			toast.warning(data.error || $i18n.t('Access to a {{label}} source has been revoked', { label: provider.label }));
+			toast.warning(
+				data.error ||
+					$i18n.t('Access to a {{label}} source has been revoked', { label: provider.label })
+			);
 		}
 
 		// Handle file limit exceeded
@@ -1043,9 +1096,7 @@
 			const count = data.files_processed ?? 0;
 			const failed = data.files_failed ?? 0;
 			if (count > 0 && failed > 0) {
-				const failedDetails = data.failed_files
-					? formatFailedFilesMessage(data.failed_files)
-					: '';
+				const failedDetails = data.failed_files ? formatFailedFilesMessage(data.failed_files) : '';
 				toast.warning(
 					$i18n.t('Synced {{count}} files from {{label}} ({{failed}} failed)', {
 						count,
@@ -1054,11 +1105,11 @@
 					}) + failedDetails
 				);
 			} else if (count > 0) {
-				toast.success($i18n.t('Synced {{count}} files from {{label}}', { count, label: provider.label }));
+				toast.success(
+					$i18n.t('Synced {{count}} files from {{label}}', { count, label: provider.label })
+				);
 			} else if (failed > 0) {
-				const failedDetails = data.failed_files
-					? formatFailedFilesMessage(data.failed_files)
-					: '';
+				const failedDetails = data.failed_files ? formatFailedFilesMessage(data.failed_files) : '';
 				toast.error(
 					$i18n.t('{{label}} sync failed: all {{failed}} files failed to process', {
 						failed,
@@ -1078,7 +1129,12 @@
 			}
 			await init(); // Refresh file list
 		} else if (data.status === 'failed') {
-			toast.error($i18n.t('{{label}} sync failed: {{error}}', { label: provider.label, error: data.error || 'Unknown error' }));
+			toast.error(
+				$i18n.t('{{label}} sync failed: {{error}}', {
+					label: provider.label,
+					error: data.error || 'Unknown error'
+				})
+			);
 			state.isSyncing = false;
 			cloudSyncState = cloudSyncState;
 		} else if (data.status === 'cancelled') {
@@ -1152,13 +1208,19 @@
 		}, 500);
 	};
 
-	const removeCloudSourceHandler = async (provider: CloudSyncProvider, itemId: string, sourceName: string) => {
+	const removeCloudSourceHandler = async (
+		provider: CloudSyncProvider,
+		itemId: string,
+		sourceName: string
+	) => {
 		try {
 			const result = await provider.api.removeSource(localStorage.token, knowledge.id, itemId);
-			toast.success($i18n.t('Source "{{name}}" removed. {{count}} file(s) cleaned up.', {
-				name: result.source_name,
-				count: result.files_removed
-			}));
+			toast.success(
+				$i18n.t('Source "{{name}}" removed. {{count}} file(s) cleaned up.', {
+					name: result.source_name,
+					count: result.files_removed
+				})
+			);
 			// Refresh knowledge metadata and file list
 			const res = await getKnowledgeById(localStorage.token, id);
 			if (res) {
@@ -1167,9 +1229,11 @@
 			await init();
 		} catch (e) {
 			console.error(`Error removing ${provider.label} source:`, e);
-			toast.error($i18n.t('Failed to remove source: {{error}}', {
-				error: e instanceof Error ? e.message : String(e)
-			}));
+			toast.error(
+				$i18n.t('Failed to remove source: {{error}}', {
+					error: e instanceof Error ? e.message : String(e)
+				})
+			);
 		}
 	};
 
@@ -1506,7 +1570,7 @@
 			socketHandlers.push(
 				{ event: `${provider.eventPrefix}:sync:progress`, handler: progressHandler },
 				{ event: `${provider.eventPrefix}:file:processing`, handler: processingHandler },
-				{ event: `${provider.eventPrefix}:file:added`, handler: addedHandler },
+				{ event: `${provider.eventPrefix}:file:added`, handler: addedHandler }
 			);
 		}
 
@@ -1529,7 +1593,6 @@
 
 		// Clean up file status listener
 		$socket?.off('file:status', handleFileStatus);
-
 	});
 
 	const decodeString = (str: string) => {
@@ -1555,7 +1618,9 @@
 <SyncConfirmDialog
 	bind:show={showCancelSyncConfirmModal}
 	title={$i18n.t(activeProvider ? `Cancel ${activeProvider.label} Sync` : 'Cancel Sync')}
-	message={$i18n.t('Are you sure you want to cancel the ongoing sync? Files already synced will be kept.')}
+	message={$i18n.t(
+		'Are you sure you want to cancel the ongoing sync? Files already synced will be kept.'
+	)}
 	confirmLabel={$i18n.t('Cancel Sync')}
 	on:confirm={() => {
 		if (activeProvider) {
@@ -1587,9 +1652,7 @@
 	hidden
 	on:change={async () => {
 		if (inputFiles && inputFiles.length > 0) {
-			const sortedFiles = Array.from(inputFiles).sort((a, b) =>
-				b.name.localeCompare(a.name)
-			);
+			const sortedFiles = Array.from(inputFiles).sort((a, b) => b.name.localeCompare(a.name));
 			await uploadFiles(sortedFiles);
 
 			inputFiles = null;
@@ -1616,7 +1679,11 @@
 					$user?.role === 'admin'}
 				onChange={async () => {
 					try {
-						await updateKnowledgeAccessGrants(localStorage.token, id, knowledge.access_grants ?? []);
+						await updateKnowledgeAccessGrants(
+							localStorage.token,
+							id,
+							knowledge.access_grants ?? []
+						);
 						toast.success($i18n.t('Saved'));
 					} catch (error) {
 						toast.error(`${error}`);
@@ -1669,15 +1736,33 @@
 											class="text-xs text-red-500 hover:text-red-600 flex items-center gap-1"
 											on:click={() => authorizeBackgroundSync(activeProvider)}
 										>
-											<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" class="size-3.5">
-												<path fill-rule="evenodd" d="M6.701 2.25c.577-1 2.02-1 2.598 0l5.196 9a1.5 1.5 0 0 1-1.299 2.25H2.804a1.5 1.5 0 0 1-1.3-2.25l5.197-9ZM8 4a.75.75 0 0 1 .75.75v3a.75.75 0 0 1-1.5 0v-3A.75.75 0 0 1 8 4Zm0 8a1 1 0 1 0 0-2 1 1 0 0 0 0 2Z" clip-rule="evenodd" />
+											<svg
+												xmlns="http://www.w3.org/2000/svg"
+												viewBox="0 0 16 16"
+												fill="currentColor"
+												class="size-3.5"
+											>
+												<path
+													fill-rule="evenodd"
+													d="M6.701 2.25c.577-1 2.02-1 2.598 0l5.196 9a1.5 1.5 0 0 1-1.299 2.25H2.804a1.5 1.5 0 0 1-1.3-2.25l5.197-9ZM8 4a.75.75 0 0 1 .75.75v3a.75.75 0 0 1-1.5 0v-3A.75.75 0 0 1 8 4Zm0 8a1 1 0 1 0 0-2 1 1 0 0 0 0 2Z"
+													clip-rule="evenodd"
+												/>
 											</svg>
 											{$i18n.t('Re-authorize background sync')}
 										</button>
 									{:else if activeState?.bgSyncAuthorized}
 										<span class="text-xs text-green-600 flex items-center gap-1">
-											<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" class="size-3.5">
-												<path fill-rule="evenodd" d="M12.416 3.376a.75.75 0 0 1 .208 1.04l-5 7.5a.75.75 0 0 1-1.154.114l-3-3a.75.75 0 0 1 1.06-1.06l2.353 2.353 4.493-6.74a.75.75 0 0 1 1.04-.207Z" clip-rule="evenodd" />
+											<svg
+												xmlns="http://www.w3.org/2000/svg"
+												viewBox="0 0 16 16"
+												fill="currentColor"
+												class="size-3.5"
+											>
+												<path
+													fill-rule="evenodd"
+													d="M12.416 3.376a.75.75 0 0 1 .208 1.04l-5 7.5a.75.75 0 0 1-1.154.114l-3-3a.75.75 0 0 1 1.06-1.06l2.353 2.353 4.493-6.74a.75.75 0 0 1 1.04-.207Z"
+													clip-rule="evenodd"
+												/>
 											</svg>
 											{$i18n.t('Background sync enabled')}
 										</span>
@@ -1686,8 +1771,17 @@
 											class="text-xs text-blue-500 hover:text-blue-600 flex items-center gap-1"
 											on:click={() => authorizeBackgroundSync(activeProvider)}
 										>
-											<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" class="size-3.5">
-												<path fill-rule="evenodd" d="M8 1a3.5 3.5 0 0 0-3.5 3.5V7A1.5 1.5 0 0 0 3 8.5v5A1.5 1.5 0 0 0 4.5 15h7a1.5 1.5 0 0 0 1.5-1.5v-5A1.5 1.5 0 0 0 11.5 7V4.5A3.5 3.5 0 0 0 8 1Zm2 6V4.5a2 2 0 1 0-4 0V7h4Z" clip-rule="evenodd" />
+											<svg
+												xmlns="http://www.w3.org/2000/svg"
+												viewBox="0 0 16 16"
+												fill="currentColor"
+												class="size-3.5"
+											>
+												<path
+													fill-rule="evenodd"
+													d="M8 1a3.5 3.5 0 0 0-3.5 3.5V7A1.5 1.5 0 0 0 3 8.5v5A1.5 1.5 0 0 0 4.5 15h7a1.5 1.5 0 0 0 1.5-1.5v-5A1.5 1.5 0 0 0 11.5 7V4.5A3.5 3.5 0 0 0 8 1Zm2 6V4.5a2 2 0 1 0-4 0V7h4Z"
+													clip-rule="evenodd"
+												/>
 											</svg>
 											{$i18n.t('Enable background sync')}
 										</button>
@@ -1695,10 +1789,7 @@
 								{/if}
 								{#if activeState?.isCancelling}
 									<Tooltip content={$i18n.t('Click to cancel sync')}>
-										<button
-											class="p-1 rounded-lg text-gray-400 cursor-not-allowed"
-											disabled
-										>
+										<button class="p-1 rounded-lg text-gray-400 cursor-not-allowed" disabled>
 											<Spinner className="size-3.5" />
 										</button>
 									</Tooltip>
@@ -1706,17 +1797,32 @@
 									<Tooltip content={$i18n.t('Click to cancel sync')}>
 										<button
 											class="p-1 rounded-lg hover:bg-red-100 dark:hover:bg-red-900/30 text-blue-500 hover:text-red-500 transition"
-											on:click={() => { showCancelSyncConfirmModal = true; }}
+											on:click={() => {
+												showCancelSyncConfirmModal = true;
+											}}
 										>
-											<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" class="size-4">
-												<path d="M4.5 2A2.5 2.5 0 0 0 2 4.5v7A2.5 2.5 0 0 0 4.5 14h7a2.5 2.5 0 0 0 2.5-2.5v-7A2.5 2.5 0 0 0 11.5 2h-7Z" />
+											<svg
+												xmlns="http://www.w3.org/2000/svg"
+												viewBox="0 0 16 16"
+												fill="currentColor"
+												class="size-4"
+											>
+												<path
+													d="M4.5 2A2.5 2.5 0 0 0 2 4.5v7A2.5 2.5 0 0 0 4.5 14h7a2.5 2.5 0 0 0 2.5-2.5v-7A2.5 2.5 0 0 0 11.5 2h-7Z"
+												/>
 											</svg>
 										</button>
 									</Tooltip>
 								{:else if activeProvider && knowledge?.meta?.[activeProvider.metaKey]?.sources?.length && knowledge?.user_id === $user?.id}
-									<Tooltip content={knowledge?.meta?.[activeProvider.metaKey]?.last_sync_at
-										? $i18n.t('Last synced: {{date}}', { date: dayjs(knowledge.meta[activeProvider.metaKey].last_sync_at * 1000).fromNow() })
-										: $i18n.t('Sync {{label}} files', { label: activeProvider.label })}>
+									<Tooltip
+										content={knowledge?.meta?.[activeProvider.metaKey]?.last_sync_at
+											? $i18n.t('Last synced: {{date}}', {
+													date: dayjs(
+														knowledge.meta[activeProvider.metaKey].last_sync_at * 1000
+													).fromNow()
+												})
+											: $i18n.t('Sync {{label}} files', { label: activeProvider.label })}
+									>
 										<button
 											class="p-1 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 transition"
 											on:click={() => cloudResyncHandler(activeProvider)}
@@ -1732,7 +1838,8 @@
 								{#if isSyncBusy && activeState?.syncStatus?.progress_total}
 									<Tooltip content={$i18n.t('Sync progress')}>
 										<div class="text-xs text-blue-500 font-medium">
-											{activeState.syncStatus.progress_current ?? 0} / {activeState.syncStatus.progress_total}
+											{activeState.syncStatus.progress_current ?? 0} / {activeState.syncStatus
+												.progress_total}
 										</div>
 									</Tooltip>
 								{:else if isSyncBusy}
@@ -1741,10 +1848,18 @@
 									</div>
 								{:else if fileItemsTotal}
 									{#if knowledge?.type !== 'local' && knowledge?.type}
-										{@const maxFiles = $config?.integration_providers?.[knowledge?.type]?.max_files_per_kb || $config?.features?.knowledge_max_file_count || 250}
-										<Tooltip content={$i18n.t('Maximum {{count}} files per knowledge base', { count: maxFiles })}>
+										{@const maxFiles =
+											$config?.integration_providers?.[knowledge?.type]?.max_files_per_kb ||
+											$config?.features?.knowledge_max_file_count ||
+											250}
+										<Tooltip
+											content={$i18n.t('Maximum {{count}} files per knowledge base', {
+												count: maxFiles
+											})}
+										>
 											<div class="text-xs text-gray-500">
-												{fileItemsTotal} / {maxFiles} {$i18n.t('files')}
+												{fileItemsTotal} / {maxFiles}
+												{$i18n.t('files')}
 											</div>
 										</Tooltip>
 									{:else}
@@ -1996,43 +2111,43 @@
 									{#if !activeProvider && fileItemsTotal > 30}
 										<Pagination bind:page={currentPage} count={fileItemsTotal} perPage={30} />
 									{/if}
+								{:else if isSyncBusy}
+									<div
+										class="my-auto flex flex-col items-center justify-center text-center gap-3 py-8"
+									>
+										<Spinner className="size-5" />
+										<div class="text-xs text-gray-500">
+											{$i18n.t('Starting sync...')}
+										</div>
+									</div>
+								{:else if knowledge?.write_access && !query && !viewOption}
+									<EmptyStateCards
+										knowledgeType={knowledge?.type || 'local'}
+										integrationProviders={$config?.integration_providers}
+										onAction={(type) => {
+											if (type === 'integration') {
+												// No-op: files are managed via API
+											} else if (type === 'onedrive') {
+												cloudSyncHandler(CLOUD_PROVIDERS.onedrive);
+											} else if (type === 'google_drive') {
+												cloudSyncHandler(CLOUD_PROVIDERS.google_drive);
+											} else if (type === 'directory') {
+												uploadDirectoryHandler();
+											} else if (type === 'web') {
+												showAddWebpageModal = true;
+											} else if (type === 'text') {
+												showAddTextContentModal = true;
+											} else {
+												document.getElementById('files-input')?.click();
+											}
+										}}
+									/>
 								{:else}
-									{#if isSyncBusy}
-										<div class="my-auto flex flex-col items-center justify-center text-center gap-3 py-8">
-											<Spinner className="size-5" />
-											<div class="text-xs text-gray-500">
-												{$i18n.t('Starting sync...')}
-											</div>
+									<div class="my-3 flex flex-col justify-center text-center text-gray-500 text-xs">
+										<div>
+											{$i18n.t('No content found')}
 										</div>
-									{:else if knowledge?.write_access && !query && !viewOption}
-										<EmptyStateCards
-											knowledgeType={knowledge?.type || 'local'}
-											integrationProviders={$config?.integration_providers}
-											onAction={(type) => {
-												if (type === 'integration') {
-													// No-op: files are managed via API
-												} else if (type === 'onedrive') {
-													cloudSyncHandler(CLOUD_PROVIDERS.onedrive);
-												} else if (type === 'google_drive') {
-													cloudSyncHandler(CLOUD_PROVIDERS.google_drive);
-												} else if (type === 'directory') {
-													uploadDirectoryHandler();
-												} else if (type === 'web') {
-													showAddWebpageModal = true;
-												} else if (type === 'text') {
-													showAddTextContentModal = true;
-												} else {
-													document.getElementById('files-input')?.click();
-												}
-											}}
-										/>
-									{:else}
-										<div class="my-3 flex flex-col justify-center text-center text-gray-500 text-xs">
-											<div>
-												{$i18n.t('No content found')}
-											</div>
-										</div>
-									{/if}
+									</div>
 								{/if}
 							</div>
 						</div>

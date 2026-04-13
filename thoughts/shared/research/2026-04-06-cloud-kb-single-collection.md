@@ -4,12 +4,12 @@ researcher: Claude (Opus 4.6)
 git_commit: 1d5f98208228917e7eabddfc21b7324f768f795f
 branch: feat/vink
 repository: open-webui
-topic: "Remove per-file Weaviate collections for cloud-synced knowledge bases"
+topic: 'Remove per-file Weaviate collections for cloud-synced knowledge bases'
 tags: [research, codebase, weaviate, collections, cloud-sync, knowledge-base, performance]
 status: complete
 last_updated: 2026-04-06
 last_updated_by: Claude (Opus 4.6)
-last_updated_note: "Resolved open questions: KB collection query for hash-match, gradual cleanup, backend filter"
+last_updated_note: 'Resolved open questions: KB collection query for hash-match, gradual cleanup, backend filter'
 ---
 
 # Research: Remove Per-File Weaviate Collections for Cloud-Synced KBs
@@ -48,16 +48,19 @@ Each `insert()` calls `WeaviateClient._ensure_collection()` → `_create_collect
 ### Why Per-File Collections Exist
 
 They serve as a **vector cache** for two purposes:
+
 1. **Cross-KB sharing**: When the same file is added to another KB, `process_file()` reads vectors from `file-{file_id}` instead of re-embedding (retrieval.py:1675)
 2. **Individual file attachment**: When a user attaches a single file to chat, `get_sources_from_items()` queries `file-{item_id}` (retrieval/utils.py:1068)
 
 ### Query-Time Collection Resolution
 
 In `retrieval/utils.py:get_sources_from_items()`:
+
 - `type: 'collection'` → collection_name = KB UUID (line 1123)
 - `type: 'file'` → collection_name = `file-{item_id}` (line 1068)
 
 In `tools/builtin.py` (RAG tool):
+
 - KB reference → `collection_names.append(item_id)` (line 2069)
 - File reference → `collection_names.append(f'file-{item_id}')` (line 2075)
 
@@ -89,6 +92,7 @@ Line 369 calls `process_file()` which tries to read from `file-{file_id}` first.
 #### 3. `retrieval/utils.py:get_sources_from_items()` — Handle missing per-file collection for cloud files
 
 When a user somehow tries to attach an individual cloud file, the query to `file-{id}` will find no collection. Current behavior: `query_collection()` would fail or return empty. We should either:
+
 - Let it fail gracefully (return empty sources) — already handled
 - Or prevent this path entirely via frontend (preferred)
 
@@ -101,6 +105,7 @@ Line 2075 uses `file-{item_id}`. If the file is from a cloud KB, this collection
 #### 5. `Commands/Knowledge.svelte` — Filter out cloud KB files from search results
 
 The `getKnowledgeFileItems()` call (line 119) returns files from all KBs. We need to either:
+
 - **Option A**: Backend filter — `searchKnowledgeFiles()` endpoint excludes files belonging to cloud KBs (knowledge.type != 'local')
 - **Option B**: Frontend filter — filter results by checking parent KB type
 
@@ -119,6 +124,7 @@ The KB detail page shows individual files. For cloud KBs, the file list is infor
 #### 8. Existing per-file collections
 
 For already-synced cloud KBs, existing `file-{id}` collections will remain in Weaviate. Options:
+
 - **Lazy cleanup**: Don't clean up — they're just wasted space but not harmful
 - **Active cleanup**: Add a one-time migration/script to delete `file-{id}` collections for files belonging to cloud KBs
 - **Gradual cleanup**: Next time the sync worker processes these files (hash match), it could delete the per-file collection if it exists
@@ -149,14 +155,14 @@ Option 3 (gradual) is simplest — add a cleanup step to the hash-match path.
 
 ## Impact Assessment
 
-| Aspect | Impact |
-|--------|--------|
-| Weaviate collections | Reduced from N+1 to 1 per cloud KB |
-| Sync performance | Faster — fewer collection create/delete operations |
-| Re-embedding on hash match | Slightly slower if per-file cache is gone (but can filter KB collection by file_id as alternative) |
-| Individual file chat attachment | Not available for cloud KBs (acceptable trade-off) |
-| Local KBs | No impact — separate code path |
-| Existing data | Needs cleanup strategy for existing per-file collections |
+| Aspect                          | Impact                                                                                             |
+| ------------------------------- | -------------------------------------------------------------------------------------------------- |
+| Weaviate collections            | Reduced from N+1 to 1 per cloud KB                                                                 |
+| Sync performance                | Faster — fewer collection create/delete operations                                                 |
+| Re-embedding on hash match      | Slightly slower if per-file cache is gone (but can filter KB collection by file_id as alternative) |
+| Individual file chat attachment | Not available for cloud KBs (acceptable trade-off)                                                 |
+| Local KBs                       | No impact — separate code path                                                                     |
+| Existing data                   | Needs cleanup strategy for existing per-file collections                                           |
 
 ## Open Questions
 

@@ -296,7 +296,32 @@
 
 					<!-- Expanded panel: API example -->
 					{#if expandedPanel[slug] === 'api'}
-						{@const exampleData = JSON.stringify({ collection: { source_id: 'my-collection-123', name: 'My Collection', data_type: 'parsed_text', access_control: null, metadata: { department: 'engineering' }, tags: ['project-x'] }, documents: [{ source_id: 'doc-1', filename: 'example.txt', content_type: 'text/plain', text: 'Document content here...', title: 'Example Document', metadata: { version: '1.2', status: 'approved' }, tags: ['documentation'], author: 'Jane Doe' }] }, null, 2)}
+						{@const exampleData = JSON.stringify(
+							{
+								collection: {
+									source_id: 'my-collection-123',
+									name: 'My Collection',
+									data_type: 'parsed_text',
+									access_control: null,
+									metadata: { department: 'engineering' },
+									tags: ['project-x']
+								},
+								documents: [
+									{
+										source_id: 'doc-1',
+										filename: 'example.txt',
+										content_type: 'text/plain',
+										text: 'Document content here...',
+										title: 'Example Document',
+										metadata: { version: '1.2', status: 'approved' },
+										tags: ['documentation'],
+										author: 'Jane Doe'
+									}
+								]
+							},
+							null,
+							2
+						)}
 						<div class="px-3 pb-3 pt-0">
 							<div class="mb-2">
 								<button
@@ -332,14 +357,16 @@
 								class="p-3 bg-gray-50 dark:bg-gray-800 rounded-lg text-xs font-mono overflow-x-auto"
 							>
 								<div class="text-gray-500 mb-2">{$i18n.t('Example: Ingest documents')}</div>
-								<pre class="whitespace-pre-wrap">curl -X POST {window.location.origin}/api/v1/integrations/ingest \
+								<pre class="whitespace-pre-wrap">curl -X POST {window.location
+										.origin}/api/v1/integrations/ingest \
   -H "Authorization: Bearer sk-YOUR-API-KEY" \
   -F 'data={exampleData}'</pre>
 								<div class="text-gray-400 mt-2 text-[10px]">
 									data_type: "parsed_text" | "chunked_text" | "full_documents"
 								</div>
 								<div class="text-gray-400 mt-1 text-[10px]">
-									access_control: null = public, {'{}'} = private, {'{"read": {"group_ids": [...]}}'} = custom
+									access_control: null = public, {'{}'} = private, {'{"read": {"group_ids": [...]}}'}
+									= custom
 								</div>
 							</div>
 						</div>
@@ -455,9 +482,7 @@
 									</div>
 									{#if form.custom_metadata_fields.length === 0}
 										<div class="text-xs text-gray-400 py-1">
-											{$i18n.t(
-												'No custom metadata fields. Documents will use the default schema.'
-											)}
+											{$i18n.t('No custom metadata fields. Documents will use the default schema.')}
 										</div>
 									{/if}
 									{#each form.custom_metadata_fields as field, i}
@@ -484,8 +509,9 @@
 												class="text-xs text-red-500 hover:text-red-700"
 												type="button"
 												on:click={() => {
-													form.custom_metadata_fields =
-														form.custom_metadata_fields.filter((_, idx) => idx !== i);
+													form.custom_metadata_fields = form.custom_metadata_fields.filter(
+														(_, idx) => idx !== i
+													);
 												}}
 											>
 												&times;
@@ -700,9 +726,7 @@
 						</div>
 						{#if form.custom_metadata_fields.length === 0}
 							<div class="text-xs text-gray-400 py-1">
-								{$i18n.t(
-									'No custom metadata fields. Documents will use the default schema.'
-								)}
+								{$i18n.t('No custom metadata fields. Documents will use the default schema.')}
 							</div>
 						{/if}
 						{#each form.custom_metadata_fields as field, i}
@@ -719,9 +743,7 @@
 									bind:value={field.label}
 									placeholder="Display Label"
 								/>
-								<label
-									class="flex items-center gap-1 text-xs text-gray-500 whitespace-nowrap"
-								>
+								<label class="flex items-center gap-1 text-xs text-gray-500 whitespace-nowrap">
 									<input type="checkbox" bind:checked={field.required} />
 									{$i18n.t('Required')}
 								</label>
@@ -729,8 +751,9 @@
 									class="text-xs text-red-500 hover:text-red-700"
 									type="button"
 									on:click={() => {
-										form.custom_metadata_fields =
-											form.custom_metadata_fields.filter((_, idx) => idx !== i);
+										form.custom_metadata_fields = form.custom_metadata_fields.filter(
+											(_, idx) => idx !== i
+										);
 									}}
 								>
 									&times;

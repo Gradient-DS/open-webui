@@ -1468,6 +1468,10 @@ USER_PERMISSIONS_FEATURES_CODE_INTERPRETER = (
     os.environ.get('USER_PERMISSIONS_FEATURES_CODE_INTERPRETER', 'True').lower() == 'true'
 )
 
+USER_PERMISSIONS_FEATURES_DOCUMENT_WRITER = (
+    os.environ.get('USER_PERMISSIONS_FEATURES_DOCUMENT_WRITER', 'True').lower() == 'true'
+)
+
 USER_PERMISSIONS_FEATURES_FOLDERS = os.environ.get('USER_PERMISSIONS_FEATURES_FOLDERS', 'True').lower() == 'true'
 
 USER_PERMISSIONS_FEATURES_NOTES = os.environ.get('USER_PERMISSIONS_FEATURES_NOTES', 'True').lower() == 'true'
@@ -1546,6 +1550,7 @@ DEFAULT_USER_PERMISSIONS = {
         'web_search': USER_PERMISSIONS_FEATURES_WEB_SEARCH,
         'image_generation': USER_PERMISSIONS_FEATURES_IMAGE_GENERATION,
         'code_interpreter': USER_PERMISSIONS_FEATURES_CODE_INTERPRETER,
+        'document_writer': USER_PERMISSIONS_FEATURES_DOCUMENT_WRITER,
         'memories': USER_PERMISSIONS_FEATURES_MEMORIES,
     },
     'settings': {
@@ -1811,6 +1816,7 @@ ENABLE_RETENTION_WARNING_EMAIL = PersistentConfig(
 FEATURE_CHAT_CONTROLS = os.environ.get('FEATURE_CHAT_CONTROLS', 'True').lower() == 'true'
 FEATURE_CAPTURE = os.environ.get('FEATURE_CAPTURE', 'True').lower() == 'true'
 FEATURE_ARTIFACTS = os.environ.get('FEATURE_ARTIFACTS', 'True').lower() == 'true'
+FEATURE_DOCUMENT_WRITER = os.environ.get('FEATURE_DOCUMENT_WRITER', 'True').lower() == 'true'
 FEATURE_PLAYGROUND = os.environ.get('FEATURE_PLAYGROUND', 'True').lower() == 'true'
 FEATURE_CHAT_OVERVIEW = os.environ.get('FEATURE_CHAT_OVERVIEW', 'True').lower() == 'true'
 FEATURE_NOTES_AI_CONTROLS = os.environ.get('FEATURE_NOTES_AI_CONTROLS', 'True').lower() == 'true'
@@ -2432,6 +2438,36 @@ CODE_INTERPRETER_PYODIDE_PROMPT = """
 - You can also write output files to `/mnt/uploads/` so the user can access and download them from the file browser.
 - The file system persists across code executions within the same session.
 - Use `import os; os.listdir('/mnt/uploads')` to discover available files."""
+
+
+####################################
+# Document Writer
+####################################
+
+ENABLE_DOCUMENT_WRITER = PersistentConfig(
+    'ENABLE_DOCUMENT_WRITER',
+    'document_writer.enable',
+    os.environ.get('ENABLE_DOCUMENT_WRITER', 'False').lower() == 'true',
+)
+
+DOCUMENT_WRITER_PROMPT_TEMPLATE = PersistentConfig(
+    'DOCUMENT_WRITER_PROMPT_TEMPLATE',
+    'document_writer.prompt_template',
+    os.environ.get('DOCUMENT_WRITER_PROMPT_TEMPLATE', ''),
+)
+
+DEFAULT_DOCUMENT_WRITER_PROMPT = """
+#### Document Writer
+
+You can produce a structured markdown document that renders in a side panel and can be downloaded by the user as Markdown, Plain Text, PDF, or Word.
+
+- Wrap the document in `<document title="…">…</document>` XML tags. The `title` attribute is required.
+- Inside the tags, write the full document body as well-structured **Markdown**: headings (`#`, `##`, `###`), paragraphs, lists, tables, code blocks, quotes, emphasis.
+- Write in a document style — proper paragraphs, complete sentences, clear section headings. Not chat-style.
+- Do **not** wrap the document in triple backticks — the tags contain raw markdown, not a code block.
+- You may write explanatory text before and after the `<document>` block in your reply; the document itself only contains the document body.
+- Respond in the chat's primary language. Default to English if multilingual.
+"""
 
 
 ####################################

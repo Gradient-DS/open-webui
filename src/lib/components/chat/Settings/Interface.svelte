@@ -45,6 +45,7 @@
 	let highContrastMode = false;
 
 	let detectArtifacts = true;
+	let detectDocuments = true;
 	let displayMultiModelResponsesInTabs = false;
 
 	let richTextInput = true;
@@ -205,6 +206,7 @@
 		highContrastMode = $settings?.highContrastMode ?? false;
 
 		detectArtifacts = $settings?.detectArtifacts ?? true;
+		detectDocuments = $settings?.detectDocuments ?? true;
 		responseAutoCopy = $settings?.responseAutoCopy ?? false;
 
 		showUsername = $settings?.showUsername ?? false;
@@ -1024,7 +1026,6 @@
 				</div>
 			</div>
 
-
 			<div>
 				<div class=" py-0.5 flex w-full justify-between">
 					<label id="floating-action-buttons-label" class=" self-center text-xs">
@@ -1263,46 +1264,69 @@
 				</div>
 			{/if}
 
+			{#if isFeatureEnabled('document_writer')}
+				<div class=" my-2 text-sm font-medium">{$i18n.t('Document Writer')}</div>
+
+				<div>
+					<div class=" py-0.5 flex w-full justify-between">
+						<div id="detect-documents-label" class=" self-center text-xs">
+							{$i18n.t('Detect Documents Automatically')}
+						</div>
+
+						<div class="flex items-center gap-2 p-1">
+							<Switch
+								ariaLabelledbyId="detect-documents-label"
+								tooltip={true}
+								bind:state={detectDocuments}
+								on:change={() => {
+									saveSettings({ detectDocuments });
+								}}
+							/>
+						</div>
+					</div>
+				</div>
+			{/if}
+
 			{#if isFeatureEnabled('voice')}
 				<div class=" my-2 text-sm font-medium">{$i18n.t('Voice')}</div>
 
-			<div>
-				<div class=" py-0.5 flex w-full justify-between">
-					<div class=" self-center text-xs" id="allow-voice-interruption-in-call-label">
-						{$i18n.t('Allow Voice Interruption in Call')}
-					</div>
+				<div>
+					<div class=" py-0.5 flex w-full justify-between">
+						<div class=" self-center text-xs" id="allow-voice-interruption-in-call-label">
+							{$i18n.t('Allow Voice Interruption in Call')}
+						</div>
 
-					<div class="flex items-center gap-2 p-1">
-						<Switch
-							ariaLabelledbyId="allow-voice-interruption-in-call-label"
-							tooltip={true}
-							bind:state={voiceInterruption}
-							on:change={() => {
-								saveSettings({ voiceInterruption });
-							}}
-						/>
+						<div class="flex items-center gap-2 p-1">
+							<Switch
+								ariaLabelledbyId="allow-voice-interruption-in-call-label"
+								tooltip={true}
+								bind:state={voiceInterruption}
+								on:change={() => {
+									saveSettings({ voiceInterruption });
+								}}
+							/>
+						</div>
 					</div>
 				</div>
-			</div>
 
-			<div>
-				<div class=" py-0.5 flex w-full justify-between">
-					<div id="display-emoji-label" class=" self-center text-xs">
-						{$i18n.t('Display Emoji in Call')}
-					</div>
+				<div>
+					<div class=" py-0.5 flex w-full justify-between">
+						<div id="display-emoji-label" class=" self-center text-xs">
+							{$i18n.t('Display Emoji in Call')}
+						</div>
 
-					<div class="flex items-center gap-2 p-1">
-						<Switch
-							ariaLabelledbyId="display-emoji-label"
-							tooltip={true}
-							bind:state={showEmojiInCall}
-							on:change={() => {
-								saveSettings({ showEmojiInCall });
-							}}
-						/>
+						<div class="flex items-center gap-2 p-1">
+							<Switch
+								ariaLabelledbyId="display-emoji-label"
+								tooltip={true}
+								bind:state={showEmojiInCall}
+								on:change={() => {
+									saveSettings({ showEmojiInCall });
+								}}
+							/>
+						</div>
 					</div>
 				</div>
-			</div>
 			{/if}
 
 			<div class=" my-2 text-sm font-medium">{$i18n.t('File')}</div>

@@ -16,6 +16,7 @@ Admin-configurable per-model warnings that fire when a user first uses a flagged
 - **Feature flags**: `PersistentConfig` in `config.py` → `app.state.config` in `main.py` → `/api/config` features dict → frontend `Config` type
 
 ### Key Discoveries:
+
 - `BuiltinTools.svelte` is the cleanest pattern for a new checkbox section — single `Record<string, boolean>` prop, config guard visibility, auto-init
 - Chat.svelte's `eventCallback` pattern (stored callback + `on:confirm`/`on:cancel`) is the established async confirmation pattern — no Promise-based pattern exists
 - The merge logic at `utils/models.py:311-312` applies defaults where per-model value is `None`, so `data_warnings` defaults propagate automatically
@@ -34,6 +35,7 @@ After implementation:
 6. **Feature-flagged**: Global `ENABLE_DATA_WARNINGS` toggle (default: true). When disabled, no warnings appear and config is preserved but inactive.
 
 ### Verification:
+
 - Admin can toggle data warnings per capability per model in model editor
 - Admin can set system-wide defaults in ModelSettingsModal
 - User sees warning when first using a flagged capability with a flagged model
@@ -62,6 +64,7 @@ The approach follows established patterns: `BuiltinTools.svelte` for the checkbo
 ## Phase 1: Backend Foundation
 
 ### Overview
+
 Add the `ENABLE_DATA_WARNINGS` feature flag, `data_warnings` metadata merge support, audit log model + table, and the acceptance logging endpoint.
 
 ### Changes Required:
@@ -298,6 +301,7 @@ app.include_router(data_warnings.router, prefix='/api/v1/data-warnings', tags=['
 ### Success Criteria:
 
 #### Automated Verification:
+
 - [ ] Alembic migration applies cleanly: `alembic upgrade head`
 - [ ] Backend starts without errors: `open-webui dev`
 - [ ] `POST /api/v1/data-warnings/accept` returns 200 with valid payload
@@ -305,6 +309,7 @@ app.include_router(data_warnings.router, prefix='/api/v1/data-warnings', tags=['
 - [x] `npm run build` succeeds
 
 #### Manual Verification:
+
 - [ ] Feature flag visible in admin settings (if exposed via admin UI toggle — may defer to Phase 4)
 - [ ] Data warning log entries appear in the database after API call
 
@@ -315,6 +320,7 @@ app.include_router(data_warnings.router, prefix='/api/v1/data-warnings', tags=['
 ## Phase 2: Admin Configuration UI
 
 ### Overview
+
 New `DataWarnings.svelte` component with capability checkboxes and a warning message textarea, integrated into both `ModelEditor.svelte` (per-model) and `ModelSettingsModal.svelte` (system-wide defaults).
 
 ### Changes Required:
@@ -327,120 +333,125 @@ Follows `BuiltinTools.svelte` pattern exactly:
 
 ```svelte
 <script lang="ts">
-    import { getContext } from 'svelte';
-    import { config } from '$lib/stores';
-    import Checkbox from '$lib/components/common/Checkbox.svelte';
-    import Tooltip from '$lib/components/common/Tooltip.svelte';
-    import { marked } from 'marked';
+	import { getContext } from 'svelte';
+	import { config } from '$lib/stores';
+	import Checkbox from '$lib/components/common/Checkbox.svelte';
+	import Tooltip from '$lib/components/common/Tooltip.svelte';
+	import { marked } from 'marked';
 
-    const i18n = getContext('i18n');
+	const i18n = getContext('i18n');
 
-    // Map warning keys to config feature guards
-    // Only show warnings for capabilities whose global feature is enabled
-    const warningConfigGuards: Record<string, string> = {
-        web_search: 'enable_web_search',
-        image_generation: 'enable_image_generation',
-        code_interpreter: 'enable_code_interpreter'
-    };
+	// Map warning keys to config feature guards
+	// Only show warnings for capabilities whose global feature is enabled
+	const warningConfigGuards: Record<string, string> = {
+		web_search: 'enable_web_search',
+		image_generation: 'enable_image_generation',
+		code_interpreter: 'enable_code_interpreter'
+	};
 
-    const warningLabels: Record<string, { label: string; description: string }> = {
-        file_upload: {
-            label: $i18n.t('File Upload'),
-            description: $i18n.t('Warn before sending files to this model')
-        },
-        web_search: {
-            label: $i18n.t('Web Search'),
-            description: $i18n.t('Warn before web search queries with this model')
-        },
-        knowledge: {
-            label: $i18n.t('Knowledge / RAG'),
-            description: $i18n.t('Warn before sending knowledge base content to this model')
-        },
-        vision: {
-            label: $i18n.t('Vision'),
-            description: $i18n.t('Warn before sending images to this model')
-        },
-        code_interpreter: {
-            label: $i18n.t('Code Interpreter'),
-            description: $i18n.t('Warn before sending code to this model for execution')
-        },
-        image_generation: {
-            label: $i18n.t('Image Generation'),
-            description: $i18n.t('Warn before sending prompts to image generation service')
-        }
-    };
+	const warningLabels: Record<string, { label: string; description: string }> = {
+		file_upload: {
+			label: $i18n.t('File Upload'),
+			description: $i18n.t('Warn before sending files to this model')
+		},
+		web_search: {
+			label: $i18n.t('Web Search'),
+			description: $i18n.t('Warn before web search queries with this model')
+		},
+		knowledge: {
+			label: $i18n.t('Knowledge / RAG'),
+			description: $i18n.t('Warn before sending knowledge base content to this model')
+		},
+		vision: {
+			label: $i18n.t('Vision'),
+			description: $i18n.t('Warn before sending images to this model')
+		},
+		code_interpreter: {
+			label: $i18n.t('Code Interpreter'),
+			description: $i18n.t('Warn before sending code to this model for execution')
+		},
+		image_generation: {
+			label: $i18n.t('Image Generation'),
+			description: $i18n.t('Warn before sending prompts to image generation service')
+		}
+	};
 
-    const allWarnings = Object.keys(warningLabels);
+	const allWarnings = Object.keys(warningLabels);
 
-    export let dataWarnings: Record<string, boolean> = {};
-    export let warningMessage: string = '';
+	export let dataWarnings: Record<string, boolean> = {};
+	export let warningMessage: string = '';
 
-    // Filter to only warnings whose global feature is enabled
-    $: visibleWarnings = allWarnings.filter((key) => {
-        const configKey = warningConfigGuards[key];
-        if (configKey && !$config?.features?.[configKey]) {
-            return false;
-        }
-        return true;
-    });
+	// Filter to only warnings whose global feature is enabled
+	$: visibleWarnings = allWarnings.filter((key) => {
+		const configKey = warningConfigGuards[key];
+		if (configKey && !$config?.features?.[configKey]) {
+			return false;
+		}
+		return true;
+	});
 
-    // Initialize missing keys to false (default: no warnings)
-    $: {
-        for (const key of allWarnings) {
-            if (!(key in dataWarnings)) {
-                dataWarnings[key] = false;
-            }
-        }
-    }
+	// Initialize missing keys to false (default: no warnings)
+	$: {
+		for (const key of allWarnings) {
+			if (!(key in dataWarnings)) {
+				dataWarnings[key] = false;
+			}
+		}
+	}
 </script>
 
 <div>
-    <div class="flex w-full justify-between mb-1">
-        <div class="self-center text-xs font-medium text-gray-500">
-            {$i18n.t('Data Sovereignty Warnings')}
-        </div>
-    </div>
-    <div class="text-xs text-gray-400 mb-2">
-        {$i18n.t('Select capabilities that require user acknowledgment before first use in a conversation.')}
-    </div>
-    <div class="flex items-center mt-2 flex-wrap">
-        {#each visibleWarnings as key}
-            <div class="flex items-center gap-2 mr-3">
-                <Checkbox
-                    state={dataWarnings[key] ? 'checked' : 'unchecked'}
-                    on:change={(e) => {
-                        dataWarnings = {
-                            ...dataWarnings,
-                            [key]: e.detail === 'checked'
-                        };
-                    }}
-                />
-                <div class="py-0.5 text-sm">
-                    <Tooltip content={marked.parse(warningLabels[key].description)}>
-                        {$i18n.t(warningLabels[key].label)}
-                    </Tooltip>
-                </div>
-            </div>
-        {/each}
-    </div>
+	<div class="flex w-full justify-between mb-1">
+		<div class="self-center text-xs font-medium text-gray-500">
+			{$i18n.t('Data Sovereignty Warnings')}
+		</div>
+	</div>
+	<div class="text-xs text-gray-400 mb-2">
+		{$i18n.t(
+			'Select capabilities that require user acknowledgment before first use in a conversation.'
+		)}
+	</div>
+	<div class="flex items-center mt-2 flex-wrap">
+		{#each visibleWarnings as key}
+			<div class="flex items-center gap-2 mr-3">
+				<Checkbox
+					state={dataWarnings[key] ? 'checked' : 'unchecked'}
+					on:change={(e) => {
+						dataWarnings = {
+							...dataWarnings,
+							[key]: e.detail === 'checked'
+						};
+					}}
+				/>
+				<div class="py-0.5 text-sm">
+					<Tooltip content={marked.parse(warningLabels[key].description)}>
+						{$i18n.t(warningLabels[key].label)}
+					</Tooltip>
+				</div>
+			</div>
+		{/each}
+	</div>
 
-    {#if Object.values(dataWarnings).some((v) => v)}
-        <div class="mt-3">
-            <div class="text-xs font-medium text-gray-500 mb-1">
-                {$i18n.t('Warning Message')}
-            </div>
-            <textarea
-                class="w-full rounded-lg px-3 py-2 text-sm bg-gray-50 dark:bg-gray-850 dark:text-gray-200 outline-hidden resize-none"
-                rows="3"
-                placeholder={$i18n.t('This model runs on external infrastructure. Uploaded files and conversation content will be processed by an external provider. Do you want to continue?')}
-                bind:value={warningMessage}
-            />
-        </div>
-    {/if}
+	{#if Object.values(dataWarnings).some((v) => v)}
+		<div class="mt-3">
+			<div class="text-xs font-medium text-gray-500 mb-1">
+				{$i18n.t('Warning Message')}
+			</div>
+			<textarea
+				class="w-full rounded-lg px-3 py-2 text-sm bg-gray-50 dark:bg-gray-850 dark:text-gray-200 outline-hidden resize-none"
+				rows="3"
+				placeholder={$i18n.t(
+					'This model runs on external infrastructure. Uploaded files and conversation content will be processed by an external provider. Do you want to continue?'
+				)}
+				bind:value={warningMessage}
+			/>
+		</div>
+	{/if}
 </div>
 ```
 
 **Key design decisions:**
+
 - Unlike `BuiltinTools` which defaults to `true`, data warnings default to `false` — admins opt-in to warnings
 - Warning message textarea only appears when at least one warning is enabled
 - `file_upload`, `knowledge`, and `vision` have no config guard — they're always available
@@ -451,49 +462,55 @@ Follows `BuiltinTools.svelte` pattern exactly:
 **File**: `src/lib/components/workspace/Models/ModelEditor.svelte`
 
 **Import** (near other Models/ imports):
+
 ```svelte
 import DataWarnings from './DataWarnings.svelte';
 ```
 
 **Local state** (after `builtinTools` at line 102):
+
 ```typescript
 let dataWarnings: Record<string, boolean> = {};
 let dataWarningMessage: string = '';
 ```
 
 **Load admin defaults** (after `builtinTools` assignment at line ~248):
+
 ```typescript
 dataWarnings = defaultMeta.data_warnings ?? {};
 dataWarningMessage = defaultMeta.data_warning_message ?? '';
 ```
 
 **Per-model overrides** (after line 319):
+
 ```typescript
 dataWarnings = model?.meta?.data_warnings ?? dataWarnings;
 dataWarningMessage = model?.meta?.data_warning_message ?? dataWarningMessage;
 ```
 
 **Save handler** (after `builtinTools` save at line ~208):
+
 ```typescript
 if (Object.values(dataWarnings).some((v) => v)) {
-    info.meta.data_warnings = dataWarnings;
-    info.meta.data_warning_message = dataWarningMessage || '';
+	info.meta.data_warnings = dataWarnings;
+	info.meta.data_warning_message = dataWarningMessage || '';
 } else {
-    if (info.meta.data_warnings) {
-        delete info.meta.data_warnings;
-    }
-    if (info.meta.data_warning_message) {
-        delete info.meta.data_warning_message;
-    }
+	if (info.meta.data_warnings) {
+		delete info.meta.data_warnings;
+	}
+	if (info.meta.data_warning_message) {
+		delete info.meta.data_warning_message;
+	}
 }
 ```
 
 **Template** (after `BuiltinTools` at line ~836, guarded by feature flag):
+
 ```svelte
 {#if $config?.features?.enable_data_warnings}
-    <div class="my-4">
-        <DataWarnings bind:dataWarnings bind:warningMessage={dataWarningMessage} />
-    </div>
+	<div class="my-4">
+		<DataWarnings bind:dataWarnings bind:warningMessage={dataWarningMessage} />
+	</div>
 {/if}
 ```
 
@@ -502,41 +519,51 @@ if (Object.values(dataWarnings).some((v) => v)) {
 **File**: `src/lib/components/admin/Settings/Models/ModelSettingsModal.svelte`
 
 **Import**:
+
 ```svelte
 import DataWarnings from '$lib/components/workspace/Models/DataWarnings.svelte';
 ```
 
 **Local state** (after `builtinTools`):
+
 ```typescript
 let defaultDataWarnings: Record<string, boolean> = {};
 let defaultWarningMessage: string = '';
 ```
 
 **Init** (after line 105):
+
 ```typescript
 defaultDataWarnings = savedMeta.data_warnings ?? {};
 defaultWarningMessage = savedMeta.data_warning_message ?? '';
 ```
 
 **Submit handler** — update the `metadata` assembly (lines 118-122):
+
 ```typescript
 const metadata = {
-    capabilities: defaultCapabilities,
-    ...(defaultFeatureIds.length > 0 ? { defaultFeatureIds } : {}),
-    ...(Object.keys(builtinTools).length > 0 ? { builtinTools } : {}),
-    ...(Object.values(defaultDataWarnings).some((v) => v) ? {
-        data_warnings: defaultDataWarnings,
-        data_warning_message: defaultWarningMessage || ''
-    } : {})
+	capabilities: defaultCapabilities,
+	...(defaultFeatureIds.length > 0 ? { defaultFeatureIds } : {}),
+	...(Object.keys(builtinTools).length > 0 ? { builtinTools } : {}),
+	...(Object.values(defaultDataWarnings).some((v) => v)
+		? {
+				data_warnings: defaultDataWarnings,
+				data_warning_message: defaultWarningMessage || ''
+			}
+		: {})
 };
 ```
 
 **Template** (after BuiltinTools section, inside the collapsible):
+
 ```svelte
 {#if $config?.features?.enable_data_warnings}
-    <div class="my-4">
-        <DataWarnings bind:dataWarnings={defaultDataWarnings} bind:warningMessage={defaultWarningMessage} />
-    </div>
+	<div class="my-4">
+		<DataWarnings
+			bind:dataWarnings={defaultDataWarnings}
+			bind:warningMessage={defaultWarningMessage}
+		/>
+	</div>
 {/if}
 ```
 
@@ -545,20 +572,22 @@ const metadata = {
 **File**: `src/lib/apis/index.ts`
 
 Extend `ModelMeta` interface (line 1739-1744):
+
 ```typescript
 export interface ModelMeta {
-    toolIds: never[];
-    description?: string;
-    capabilities?: object;
-    profile_image_url?: string;
-    data_warnings?: Record<string, boolean>;
-    data_warning_message?: string;
+	toolIds: never[];
+	description?: string;
+	capabilities?: object;
+	profile_image_url?: string;
+	data_warnings?: Record<string, boolean>;
+	data_warning_message?: string;
 }
 ```
 
 **File**: `src/lib/stores/index.ts`
 
 Add to `Config.features` type (after `enable_code_execution` at line 332):
+
 ```typescript
 enable_data_warnings?: boolean;
 ```
@@ -568,6 +597,7 @@ enable_data_warnings?: boolean;
 **File**: `src/lib/i18n/locales/en-US/translation.json`
 
 Add keys (alphabetically sorted):
+
 ```json
 "Data Sovereignty Warnings": "",
 "Select capabilities that require user acknowledgment before first use in a conversation.": "",
@@ -584,6 +614,7 @@ Add keys (alphabetically sorted):
 **File**: `src/lib/i18n/locales/nl-NL/translation.json`
 
 Add Dutch translations:
+
 ```json
 "Data Sovereignty Warnings": "Datsoevereiniteitswaarschuwingen",
 "Select capabilities that require user acknowledgment before first use in a conversation.": "Selecteer functionaliteiten waarvoor gebruikersbevestiging nodig is bij eerste gebruik in een gesprek.",
@@ -600,10 +631,12 @@ Add Dutch translations:
 ### Success Criteria:
 
 #### Automated Verification:
+
 - [x] `npm run build` succeeds
 - [x] No new TypeScript errors from `npm run check` (beyond pre-existing ~8000)
 
 #### Manual Verification:
+
 - [ ] DataWarnings section visible in ModelEditor when `ENABLE_DATA_WARNINGS=True`
 - [ ] DataWarnings section visible in ModelSettingsModal
 - [ ] Checkboxes toggle correctly, warning message textarea appears when at least one is checked
@@ -620,6 +653,7 @@ Add Dutch translations:
 ## Phase 3: Chat Send Flow Integration
 
 ### Overview
+
 Intercept the send flow in `submitPrompt()` to check for data warning requirements, show a confirmation dialog, track accepted warnings per conversation, and log acceptance via the API.
 
 ### Changes Required:
@@ -632,32 +666,32 @@ Intercept the send flow in `submitPrompt()` to check for data warning requiremen
 import { WEBUI_API_BASE_URL } from '$lib/constants';
 
 export const logDataWarningAcceptance = async (
-    token: string,
-    chatId: string,
-    modelId: string,
-    capabilities: string[],
-    warningMessage: string | null
+	token: string,
+	chatId: string,
+	modelId: string,
+	capabilities: string[],
+	warningMessage: string | null
 ) => {
-    const res = await fetch(`${WEBUI_API_BASE_URL}/data-warnings/accept`, {
-        method: 'POST',
-        headers: {
-            Accept: 'application/json',
-            'Content-Type': 'application/json',
-            authorization: `Bearer ${token}`
-        },
-        body: JSON.stringify({
-            chat_id: chatId,
-            model_id: modelId,
-            capabilities,
-            warning_message: warningMessage
-        })
-    });
+	const res = await fetch(`${WEBUI_API_BASE_URL}/data-warnings/accept`, {
+		method: 'POST',
+		headers: {
+			Accept: 'application/json',
+			'Content-Type': 'application/json',
+			authorization: `Bearer ${token}`
+		},
+		body: JSON.stringify({
+			chat_id: chatId,
+			model_id: modelId,
+			capabilities,
+			warning_message: warningMessage
+		})
+	});
 
-    if (!res.ok) {
-        console.error('Failed to log data warning acceptance');
-    }
+	if (!res.ok) {
+		console.error('Failed to log data warning acceptance');
+	}
 
-    return res.json();
+	return res.json();
 };
 ```
 
@@ -666,26 +700,31 @@ export const logDataWarningAcceptance = async (
 **File**: `src/lib/components/chat/Chat.svelte`
 
 **Import** (near other API imports):
+
 ```typescript
 import { logDataWarningAcceptance } from '$lib/apis/data-warnings';
 ```
 
 **Per-conversation state** (after `eventCallback` at line ~138):
+
 ```typescript
 let acceptedDataWarnings: Set<string> = new Set();
 ```
 
 **Reset on navigation** — add to `navigateHandler()` (near line 192 where other state is reset):
+
 ```typescript
 acceptedDataWarnings = new Set();
 ```
 
 **Reset on init** — add to `init()` (near line 768 where other state is reset):
+
 ```typescript
 acceptedDataWarnings = new Set();
 ```
 
 **Data warning dialog state** (after `eventCallback` variables):
+
 ```typescript
 let showDataWarningDialog = false;
 let dataWarningTitle = '';
@@ -698,76 +737,84 @@ let dataWarningCallback: ((confirmed: boolean) => void) | null = null;
 
 ```typescript
 const checkDataWarnings = async (
-    modelIds: string[],
-    activeCapabilities: Record<string, boolean>
+	modelIds: string[],
+	activeCapabilities: Record<string, boolean>
 ): Promise<boolean> => {
-    if (!$config?.features?.enable_data_warnings) return true;
+	if (!$config?.features?.enable_data_warnings) return true;
 
-    // Collect all unacknowledged warnings across selected models
-    const pendingWarnings: { modelId: string; modelName: string; capabilities: string[]; message: string }[] = [];
+	// Collect all unacknowledged warnings across selected models
+	const pendingWarnings: {
+		modelId: string;
+		modelName: string;
+		capabilities: string[];
+		message: string;
+	}[] = [];
 
-    for (const modelId of modelIds) {
-        const model = $models.find((m) => m.id === modelId);
-        if (!model) continue;
+	for (const modelId of modelIds) {
+		const model = $models.find((m) => m.id === modelId);
+		if (!model) continue;
 
-        const warnings = model.info?.meta?.data_warnings;
-        if (!warnings) continue;
+		const warnings = model.info?.meta?.data_warnings;
+		if (!warnings) continue;
 
-        const unacknowledged: string[] = [];
-        for (const [capability, warned] of Object.entries(warnings)) {
-            if (!warned) continue;
-            if (!activeCapabilities[capability]) continue;
-            const key = `${modelId}:${capability}`;
-            if (acceptedDataWarnings.has(key)) continue;
-            unacknowledged.push(capability);
-        }
+		const unacknowledged: string[] = [];
+		for (const [capability, warned] of Object.entries(warnings)) {
+			if (!warned) continue;
+			if (!activeCapabilities[capability]) continue;
+			const key = `${modelId}:${capability}`;
+			if (acceptedDataWarnings.has(key)) continue;
+			unacknowledged.push(capability);
+		}
 
-        if (unacknowledged.length > 0) {
-            pendingWarnings.push({
-                modelId,
-                modelName: model.name,
-                capabilities: unacknowledged,
-                message: model.info?.meta?.data_warning_message || ''
-            });
-        }
-    }
+		if (unacknowledged.length > 0) {
+			pendingWarnings.push({
+				modelId,
+				modelName: model.name,
+				capabilities: unacknowledged,
+				message: model.info?.meta?.data_warning_message || ''
+			});
+		}
+	}
 
-    if (pendingWarnings.length === 0) return true;
+	if (pendingWarnings.length === 0) return true;
 
-    // Show confirmation for each model with pending warnings
-    for (const warning of pendingWarnings) {
-        const confirmed = await new Promise<boolean>((resolve) => {
-            const capabilityLabels = warning.capabilities.map((c) =>
-                c.replace(/_/g, ' ').replace(/\b\w/g, (l) => l.toUpperCase())
-            );
+	// Show confirmation for each model with pending warnings
+	for (const warning of pendingWarnings) {
+		const confirmed = await new Promise<boolean>((resolve) => {
+			const capabilityLabels = warning.capabilities.map((c) =>
+				c.replace(/_/g, ' ').replace(/\b\w/g, (l) => l.toUpperCase())
+			);
 
-            dataWarningTitle = $i18n.t('Data Sovereignty Warning');
-            dataWarningMessage = warning.message ||
-                $i18n.t('This model runs on external infrastructure. Uploaded files and conversation content will be processed by an external provider. Do you want to continue?');
-            dataWarningCapabilities = capabilityLabels;
-            dataWarningCallback = resolve;
-            showDataWarningDialog = true;
-        });
+			dataWarningTitle = $i18n.t('Data Sovereignty Warning');
+			dataWarningMessage =
+				warning.message ||
+				$i18n.t(
+					'This model runs on external infrastructure. Uploaded files and conversation content will be processed by an external provider. Do you want to continue?'
+				);
+			dataWarningCapabilities = capabilityLabels;
+			dataWarningCallback = resolve;
+			showDataWarningDialog = true;
+		});
 
-        if (!confirmed) return false;
+		if (!confirmed) return false;
 
-        // Mark as accepted
-        for (const cap of warning.capabilities) {
-            acceptedDataWarnings.add(`${warning.modelId}:${cap}`);
-        }
-        acceptedDataWarnings = acceptedDataWarnings; // trigger reactivity
+		// Mark as accepted
+		for (const cap of warning.capabilities) {
+			acceptedDataWarnings.add(`${warning.modelId}:${cap}`);
+		}
+		acceptedDataWarnings = acceptedDataWarnings; // trigger reactivity
 
-        // Log acceptance (fire-and-forget)
-        logDataWarningAcceptance(
-            localStorage.token,
-            chatId || 'new',
-            warning.modelId,
-            warning.capabilities,
-            warning.message || null
-        );
-    }
+		// Log acceptance (fire-and-forget)
+		logDataWarningAcceptance(
+			localStorage.token,
+			chatId || 'new',
+			warning.modelId,
+			warning.capabilities,
+			warning.message || null
+		);
+	}
 
-    return true;
+	return true;
 };
 ```
 
@@ -776,12 +823,12 @@ const checkDataWarnings = async (
 ```typescript
 // Data sovereignty warning check
 const activeCapabilities: Record<string, boolean> = {
-    file_upload: files.some((f) => f.type !== 'image'),
-    vision: files.some((f) => f.type === 'image'),
-    web_search: webSearchEnabled,
-    image_generation: imageGenerationEnabled,
-    code_interpreter: codeInterpreterEnabled,
-    knowledge: chatFiles.length > 0
+	file_upload: files.some((f) => f.type !== 'image'),
+	vision: files.some((f) => f.type === 'image'),
+	web_search: webSearchEnabled,
+	image_generation: imageGenerationEnabled,
+	code_interpreter: codeInterpreterEnabled,
+	knowledge: chatFiles.length > 0
 };
 
 const warningAccepted = await checkDataWarnings(selectedModels, activeCapabilities);
@@ -792,32 +839,35 @@ if (!warningAccepted) return;
 
 ```svelte
 <ConfirmDialog
-    bind:show={showDataWarningDialog}
-    title={dataWarningTitle}
-    on:confirm={() => {
-        if (dataWarningCallback) dataWarningCallback(true);
-    }}
-    on:cancel={() => {
-        if (dataWarningCallback) dataWarningCallback(false);
-    }}
+	bind:show={showDataWarningDialog}
+	title={dataWarningTitle}
+	on:confirm={() => {
+		if (dataWarningCallback) dataWarningCallback(true);
+	}}
+	on:cancel={() => {
+		if (dataWarningCallback) dataWarningCallback(false);
+	}}
 >
-    <div class="text-sm text-gray-500">
-        <div class="bg-amber-500/20 text-amber-700 dark:text-amber-200 rounded-lg px-4 py-3 mb-3">
-            <div class="font-medium mb-1">{$i18n.t('The following capabilities will send data to an external provider')}:</div>
-            <ul class="list-disc pl-4 text-xs">
-                {#each dataWarningCapabilities as cap}
-                    <li>{cap}</li>
-                {/each}
-            </ul>
-        </div>
-        <div class="whitespace-pre-wrap">
-            {@html DOMPurify.sanitize(marked.parse(dataWarningMessage))}
-        </div>
-    </div>
+	<div class="text-sm text-gray-500">
+		<div class="bg-amber-500/20 text-amber-700 dark:text-amber-200 rounded-lg px-4 py-3 mb-3">
+			<div class="font-medium mb-1">
+				{$i18n.t('The following capabilities will send data to an external provider')}:
+			</div>
+			<ul class="list-disc pl-4 text-xs">
+				{#each dataWarningCapabilities as cap}
+					<li>{cap}</li>
+				{/each}
+			</ul>
+		</div>
+		<div class="whitespace-pre-wrap">
+			{@html DOMPurify.sanitize(marked.parse(dataWarningMessage))}
+		</div>
+	</div>
 </ConfirmDialog>
 ```
 
 **Import ConfirmDialog** — add a second import alias (near line 101):
+
 ```typescript
 import DataWarningConfirmDialog from '../common/ConfirmDialog.svelte';
 ```
@@ -843,10 +893,12 @@ import DataWarningConfirmDialog from '../common/ConfirmDialog.svelte';
 ### Success Criteria:
 
 #### Automated Verification:
+
 - [x] `npm run build` succeeds
 - [ ] No new TypeScript errors from `npm run check` (beyond pre-existing)
 
 #### Manual Verification:
+
 - [ ] Configure a model with `data_warnings.file_upload = true` and a custom message
 - [ ] Attach a file and send — warning dialog appears with the custom message
 - [ ] Click Cancel — send is aborted, file and prompt preserved in input
@@ -865,6 +917,7 @@ import DataWarningConfirmDialog from '../common/ConfirmDialog.svelte';
 ## Phase 4: Helm Chart and Feature Flag Wiring
 
 ### Overview
+
 Add Helm chart configuration for the feature flag so it can be controlled per tenant deployment.
 
 ### Changes Required:
@@ -874,27 +927,31 @@ Add Helm chart configuration for the feature flag so it can be controlled per te
 **File**: `helm/open-webui-tenant/values.yaml`
 
 Add after the feature flags section (~line 218):
+
 ```yaml
-    # Data Sovereignty
-    enableDataWarnings: "True"
+# Data Sovereignty
+enableDataWarnings: 'True'
 ```
 
 #### 4.2 Helm Configmap
 
 **File**: `helm/open-webui-tenant/templates/open-webui/configmap.yaml`
 
-Add the env var mapping (near other ENABLE_ entries):
+Add the env var mapping (near other ENABLE\_ entries):
+
 ```yaml
-  ENABLE_DATA_WARNINGS: {{ .Values.openWebui.config.enableDataWarnings | default "true" | quote }}
+ENABLE_DATA_WARNINGS: { { .Values.openWebui.config.enableDataWarnings | default "true" | quote } }
 ```
 
 ### Success Criteria:
 
 #### Automated Verification:
+
 - [x] `helm template` renders correctly with default values
 - [x] `npm run build` still succeeds
 
 #### Manual Verification:
+
 - [ ] Deploy with `enableDataWarnings: "True"` — feature active
 - [ ] Deploy with `enableDataWarnings: "False"` — feature disabled, no warnings shown
 
@@ -903,15 +960,18 @@ Add the env var mapping (near other ENABLE_ entries):
 ## Testing Strategy
 
 ### Unit Tests:
+
 - None required for Phase 1 (standard CRUD model pattern, covered by integration test via API)
 - Frontend component tests are optional given pre-existing test coverage patterns
 
 ### Integration Tests:
+
 - `POST /api/v1/data-warnings/accept` returns 200 with valid payload
 - `POST /api/v1/data-warnings/accept` with feature disabled returns noop response
 - `/api/config` includes `enable_data_warnings` in features
 
 ### Manual Testing Steps:
+
 1. Configure system-wide defaults: enable file_upload + web_search warnings with custom message
 2. Verify defaults apply to a model without per-model overrides
 3. Override one model to disable file_upload warning — verify per-model override wins
@@ -940,6 +1000,7 @@ Add the env var mapping (near other ENABLE_ entries):
 ## Upstream Compatibility
 
 This feature is **fully additive** with minimal upstream touch points:
+
 - **New files**: `DataWarnings.svelte`, `data_warnings.py` (model), `data_warnings.py` (router), `data-warnings/index.ts` (API client), migration file
 - **Modified upstream files**: `Chat.svelte` (interception point + dialog), `ModelEditor.svelte` (import + section), `ModelSettingsModal.svelte` (import + section), `config.py` (flag), `main.py` (flag + router), `utils/models.py` (merge logic), `stores/index.ts` (type), `apis/index.ts` (type)
 - **Feature-flagged**: All UI behind `$config.features.enable_data_warnings` — zero impact when disabled

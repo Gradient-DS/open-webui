@@ -161,7 +161,13 @@ export const getModelHistory = async (token: string = '', modelId: string, days:
 	return res;
 };
 
-export const getFeedbackItems = async (token: string = '', orderBy, direction, page, scope?: string) => {
+export const getFeedbackItems = async (
+	token: string = '',
+	orderBy,
+	direction,
+	page,
+	scope?: string
+) => {
 	let error = null;
 
 	const searchParams = new URLSearchParams();

@@ -732,11 +732,7 @@ export const getInviteContent = async (token: string) => {
 	return res;
 };
 
-export const setInviteContent = async (
-	token: string,
-	subject: string,
-	heading: string
-) => {
+export const setInviteContent = async (token: string, subject: string, heading: string) => {
 	let error = null;
 
 	const res = await fetch(`${WEBUI_API_BASE_URL}/configs/invite_content`, {

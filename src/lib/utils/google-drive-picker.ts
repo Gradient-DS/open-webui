@@ -151,7 +151,9 @@ export interface KnowledgePickerResult {
 	accessToken: string;
 }
 
-export const createKnowledgePicker = (knowledgeId?: string): Promise<KnowledgePickerResult | null> => {
+export const createKnowledgePicker = (
+	knowledgeId?: string
+): Promise<KnowledgePickerResult | null> => {
 	return new Promise(async (resolve, reject) => {
 		try {
 			await initialize();

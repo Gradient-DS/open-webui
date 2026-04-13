@@ -206,267 +206,289 @@
 					<div class=" mt-0.5 mb-2.5 text-base font-medium">{$i18n.t('General')}</div>
 
 					{#if isFeatureEnabled('tool_servers')}
-					<hr class=" border-gray-100/30 dark:border-gray-850/30 my-2" />
-					<div class="mb-2.5 flex flex-col w-full justify-between">
-						<div class="flex justify-between items-center mb-0.5">
-							<div class="font-medium">{$i18n.t('Manage Tool Servers')}</div>
+						<hr class=" border-gray-100/30 dark:border-gray-850/30 my-2" />
+						<div class="mb-2.5 flex flex-col w-full justify-between">
+							<div class="flex justify-between items-center mb-0.5">
+								<div class="font-medium">{$i18n.t('Manage Tool Servers')}</div>
 
-							<Tooltip content={$i18n.t(`Add Connection`)}>
-								<button
-									class="px-1"
-									on:click={() => {
-										showConnectionModal = true;
-									}}
-									type="button"
-								>
-									<Plus />
-								</button>
-							</Tooltip>
-						</div>
-
-						<div class="flex flex-col gap-1">
-							{#each servers as server, idx}
-								<Connection
-									bind:connection={server}
-									onSubmit={() => {
-										updateHandler();
-									}}
-									onDelete={() => {
-										servers = servers.filter((_, i) => i !== idx);
-										updateHandler();
-									}}
-								/>
-							{/each}
-						</div>
-
-						{#if servers.length === 0}
-							<div class="text-xs text-gray-400 dark:text-gray-500">
-								{$i18n.t('No tool server connections configured.')}
+								<Tooltip content={$i18n.t(`Add Connection`)}>
+									<button
+										class="px-1"
+										on:click={() => {
+											showConnectionModal = true;
+										}}
+										type="button"
+									>
+										<Plus />
+									</button>
+								</Tooltip>
 							</div>
-						{/if}
 
-						<div class="my-1.5">
-							<div class="text-xs text-gray-500">
-								{$i18n.t('Connect to your own OpenAPI compatible external tool servers.')}
+							<div class="flex flex-col gap-1">
+								{#each servers as server, idx}
+									<Connection
+										bind:connection={server}
+										onSubmit={() => {
+											updateHandler();
+										}}
+										onDelete={() => {
+											servers = servers.filter((_, i) => i !== idx);
+											updateHandler();
+										}}
+									/>
+								{/each}
+							</div>
+
+							{#if servers.length === 0}
+								<div class="text-xs text-gray-400 dark:text-gray-500">
+									{$i18n.t('No tool server connections configured.')}
+								</div>
+							{/if}
+
+							<div class="my-1.5">
+								<div class="text-xs text-gray-500">
+									{$i18n.t('Connect to your own OpenAPI compatible external tool servers.')}
+								</div>
 							</div>
 						</div>
-					</div>
 
-					<hr class=" border-gray-100/30 dark:border-gray-850/30 my-4" />
+						<hr class=" border-gray-100/30 dark:border-gray-850/30 my-4" />
 					{/if}
 
 					{#if isFeatureEnabled('terminal_servers')}
-					<div class="mb-2.5 flex flex-col w-full">
-						<div class="flex justify-between items-center mb-1">
-							<div class="flex items-center gap-2">
-								<div class="font-medium">{$i18n.t('Open Terminal')}</div>
-								<span
-									class="text-[0.65rem] font-medium uppercase px-1.5 py-0.5 rounded-full bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400"
-									>{$i18n.t('Experimental')}</span
-								>
+						<div class="mb-2.5 flex flex-col w-full">
+							<div class="flex justify-between items-center mb-1">
+								<div class="flex items-center gap-2">
+									<div class="font-medium">{$i18n.t('Open Terminal')}</div>
+									<span
+										class="text-[0.65rem] font-medium uppercase px-1.5 py-0.5 rounded-full bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400"
+										>{$i18n.t('Experimental')}</span
+									>
+								</div>
+
+								<Tooltip content={$i18n.t('Add Connection')}>
+									<button
+										class="px-1"
+										on:click={() => {
+											editTerminalIdx = null;
+											showAddTerminalModal = true;
+										}}
+										type="button"
+									>
+										<Plus />
+									</button>
+								</Tooltip>
 							</div>
 
-							<Tooltip content={$i18n.t('Add Connection')}>
-								<button
-									class="px-1"
-									on:click={() => {
-										editTerminalIdx = null;
-										showAddTerminalModal = true;
-									}}
-									type="button"
-								>
-									<Plus />
-								</button>
-							</Tooltip>
-						</div>
+							<div class="flex flex-col gap-1.5">
+								{#each terminalConnections as connection, idx}
+									<div class="flex w-full gap-2 items-center">
+										<Tooltip className="w-full relative" content={''} placement="top-start">
+											<div class="flex w-full">
+												<div
+													class="flex-1 relative flex gap-1.5 items-center {connection?.enabled ===
+													false
+														? 'opacity-50'
+														: ''}"
+												>
+													<Tooltip content={$i18n.t('Terminal')}>
+														<Cloud className="size-4" strokeWidth="1.5" />
+													</Tooltip>
 
-						<div class="flex flex-col gap-1.5">
-							{#each terminalConnections as connection, idx}
-								<div class="flex w-full gap-2 items-center">
-									<Tooltip className="w-full relative" content={''} placement="top-start">
-										<div class="flex w-full">
-											<div
-												class="flex-1 relative flex gap-1.5 items-center {connection?.enabled ===
-												false
-													? 'opacity-50'
-													: ''}"
-											>
-												<Tooltip content={$i18n.t('Terminal')}>
-													<Cloud className="size-4" strokeWidth="1.5" />
-												</Tooltip>
-
-												<div class="outline-hidden w-full bg-transparent text-sm">
-													{connection.name || connection.url || $i18n.t('New Terminal')}
+													<div class="outline-hidden w-full bg-transparent text-sm">
+														{connection.name || connection.url || $i18n.t('New Terminal')}
+													</div>
 												</div>
 											</div>
-										</div>
-									</Tooltip>
+										</Tooltip>
 
-									<div class="flex gap-1 items-center">
-										<Tooltip content={$i18n.t('Configure')}>
-											<button
-												class="self-center p-1 bg-transparent hover:bg-gray-100 dark:hover:bg-gray-850 rounded-lg transition"
-												on:click={() => {
-													editTerminalIdx = idx;
-													showAddTerminalModal = true;
-												}}
-												type="button"
+										<div class="flex gap-1 items-center">
+											<Tooltip content={$i18n.t('Configure')}>
+												<button
+													class="self-center p-1 bg-transparent hover:bg-gray-100 dark:hover:bg-gray-850 rounded-lg transition"
+													on:click={() => {
+														editTerminalIdx = idx;
+														showAddTerminalModal = true;
+													}}
+													type="button"
+												>
+													<Cog6 />
+												</button>
+											</Tooltip>
+
+											<Tooltip
+												content={connection?.enabled !== false
+													? $i18n.t('Enabled')
+													: $i18n.t('Disabled')}
 											>
-												<Cog6 />
-											</button>
-										</Tooltip>
-
-										<Tooltip
-											content={connection?.enabled !== false
-												? $i18n.t('Enabled')
-												: $i18n.t('Disabled')}
-										>
-											<Switch
-												state={connection?.enabled !== false}
-												on:change={() => {
-													terminalConnections = terminalConnections.map((c, i) =>
-														i === idx ? { ...c, enabled: !(c?.enabled !== false) } : c
-													);
-													saveTerminalServers();
-												}}
-											/>
-										</Tooltip>
+												<Switch
+													state={connection?.enabled !== false}
+													on:change={() => {
+														terminalConnections = terminalConnections.map((c, i) =>
+															i === idx ? { ...c, enabled: !(c?.enabled !== false) } : c
+														);
+														saveTerminalServers();
+													}}
+												/>
+											</Tooltip>
+										</div>
 									</div>
+								{/each}
+							</div>
+
+							{#if terminalConnections.length === 0}
+								<div class="text-xs text-gray-400 dark:text-gray-500">
+									{$i18n.t('No terminal connections configured.')}
 								</div>
-							{/each}
-						</div>
+							{/if}
 
-						{#if terminalConnections.length === 0}
-							<div class="text-xs text-gray-400 dark:text-gray-500">
-								{$i18n.t('No terminal connections configured.')}
-							</div>
-						{/if}
-
-						<div class="mt-1.5">
-							<div class="text-xs text-gray-500">
-								{$i18n.t(
-									'Connect to Open Terminal instances. All users will have access to file browsing and terminal tools through these servers.'
-								)}
-							</div>
-							<div class="text-xs text-gray-600 dark:text-gray-300 mt-1">
-								<a
-									class="underline"
-									href="https://github.com/open-webui/open-terminal"
-									target="_blank">{$i18n.t('Learn more about Open Terminal')} ↗</a
-								>
+							<div class="mt-1.5">
+								<div class="text-xs text-gray-500">
+									{$i18n.t(
+										'Connect to Open Terminal instances. All users will have access to file browsing and terminal tools through these servers.'
+									)}
+								</div>
+								<div class="text-xs text-gray-600 dark:text-gray-300 mt-1">
+									<a
+										class="underline"
+										href="https://github.com/open-webui/open-terminal"
+										target="_blank">{$i18n.t('Learn more about Open Terminal')} ↗</a
+									>
+								</div>
 							</div>
 						</div>
-					</div>
 					{/if}
 				</div>
 
 				{#if isFeatureEnabled('tool_servers') || isFeatureEnabled('terminal_servers')}
-				<hr class=" border-gray-100/30 dark:border-gray-850/30 my-4" />
+					<hr class=" border-gray-100/30 dark:border-gray-850/30 my-4" />
 				{/if}
 
 				{#if $user?.role === 'admin'}
-				<div class="mb-2.5 flex flex-col w-full">
-					<div class="flex justify-between items-center mb-1">
-						<div class="flex items-center gap-2">
-							<div class="font-medium">{$i18n.t('Agent Proxy')}</div>
+					<div class="mb-2.5 flex flex-col w-full">
+						<div class="flex justify-between items-center mb-1">
+							<div class="flex items-center gap-2">
+								<div class="font-medium">{$i18n.t('Agent Proxy')}</div>
+							</div>
+
+							<Tooltip content={ENABLE_AGENT_PROXY ? $i18n.t('Enabled') : $i18n.t('Disabled')}>
+								<Switch
+									bind:state={ENABLE_AGENT_PROXY}
+									on:change={() => {
+										saveAgentProxyConfig();
+									}}
+								/>
+							</Tooltip>
 						</div>
 
-						<Tooltip
-							content={ENABLE_AGENT_PROXY
-								? $i18n.t('Enabled')
-								: $i18n.t('Disabled')}
-						>
-							<Switch
-								bind:state={ENABLE_AGENT_PROXY}
-								on:change={() => {
-									saveAgentProxyConfig();
-								}}
-							/>
-						</Tooltip>
+						{#if ENABLE_AGENT_PROXY}
+							<div class="flex flex-col gap-2 mt-1">
+								<div class="text-xs text-gray-500">
+									{$i18n.t(
+										'Call soev.ai agents externally through an OpenAI-compatible endpoint. Users authenticate with their API keys.'
+									)}
+								</div>
+
+								<div class="mt-1">
+									<button
+										class="text-xs text-blue-500 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300 underline"
+										type="button"
+										on:click={async () => {
+											try {
+												const res = await fetch(
+													`${window.location.origin}/api/v1/agent/openapi.json`,
+													{
+														headers: {
+															Authorization: `Bearer ${localStorage.token}`
+														}
+													}
+												);
+												if (!res.ok) throw new Error('Failed to fetch');
+												const blob = await res.blob();
+												const url = URL.createObjectURL(blob);
+												const a = document.createElement('a');
+												a.href = url;
+												a.download = 'agent-openapi.json';
+												a.click();
+												URL.revokeObjectURL(url);
+											} catch (err) {
+												toast.error('Failed to download OpenAPI spec');
+											}
+										}}
+									>
+										{$i18n.t('Download OpenAPI Specification')}
+									</button>
+								</div>
+
+								<div class="mt-1">
+									<button
+										class="text-xs underline text-gray-600 dark:text-gray-300"
+										type="button"
+										on:click={() => {
+											showAgentDocs = !showAgentDocs;
+										}}
+									>
+										{showAgentDocs
+											? $i18n.t('Hide API documentation')
+											: $i18n.t('Show API documentation')}
+									</button>
+
+									{#if showAgentDocs}
+										<div
+											class="mt-2 p-3 bg-gray-50 dark:bg-gray-850 rounded-lg text-xs font-mono space-y-3 overflow-x-auto"
+										>
+											<div>
+												<div class="text-gray-500 mb-2">{$i18n.t('List available models')}</div>
+												<pre class="whitespace-pre-wrap">curl -H "Authorization: Bearer sk-..." \
+  {window.location.origin}/api/v1/agent/models</pre>
+											</div>
+
+											<div>
+												<div class="text-gray-500 mb-2">
+													{$i18n.t('Chat completions (streaming)')}
+												</div>
+												<pre class="whitespace-pre-wrap">curl -H "Authorization: Bearer sk-..." \
+  -H "Content-Type: application/json" \
+  -d '{JSON.stringify({
+														model: 'agent-name',
+														messages: [{ role: 'user', content: 'Hello' }],
+														stream: true
+													})}' \
+  {window.location.origin}/api/v1/agent/chat/completions</pre>
+											</div>
+
+											<div>
+												<div class="text-gray-500 mb-2">
+													{$i18n.t('With collections/documents')}
+												</div>
+												<pre class="whitespace-pre-wrap">curl -H "Authorization: Bearer sk-..." \
+  -H "Content-Type: application/json" \
+  -d '{JSON.stringify({
+														model: 'agent-name',
+														messages: [{ role: 'user', content: 'Hello' }],
+														stream: true,
+														files: [
+															{ id: 'collection-id', type: 'collection' },
+															{ id: 'document-id', type: 'file' }
+														]
+													})}' \
+  {window.location.origin}/api/v1/agent/chat/completions</pre>
+											</div>
+										</div>
+									{/if}
+								</div>
+							</div>
+						{/if}
 					</div>
 
-					{#if ENABLE_AGENT_PROXY}
-						<div class="flex flex-col gap-2 mt-1">
-							<div class="text-xs text-gray-500">
-								{$i18n.t('Call soev.ai agents externally through an OpenAI-compatible endpoint. Users authenticate with their API keys.')}
-							</div>
-
-							<div class="mt-1">
-								<button
-									class="text-xs text-blue-500 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300 underline"
-									type="button"
-									on:click={async () => {
-										try {
-											const res = await fetch(
-												`${window.location.origin}/api/v1/agent/openapi.json`,
-												{
-													headers: {
-														Authorization: `Bearer ${localStorage.token}`
-													}
-												}
-											);
-											if (!res.ok) throw new Error('Failed to fetch');
-											const blob = await res.blob();
-											const url = URL.createObjectURL(blob);
-											const a = document.createElement('a');
-											a.href = url;
-											a.download = 'agent-openapi.json';
-											a.click();
-											URL.revokeObjectURL(url);
-										} catch (err) {
-											toast.error('Failed to download OpenAPI spec');
-										}
-									}}
-								>
-									{$i18n.t('Download OpenAPI Specification')}
-								</button>
-							</div>
-
-							<div class="mt-1">
-								<button
-									class="text-xs underline text-gray-600 dark:text-gray-300"
-									type="button"
-									on:click={() => { showAgentDocs = !showAgentDocs; }}
-								>
-									{showAgentDocs ? $i18n.t('Hide API documentation') : $i18n.t('Show API documentation')}
-								</button>
-
-								{#if showAgentDocs}
-									<div class="mt-2 p-3 bg-gray-50 dark:bg-gray-850 rounded-lg text-xs font-mono space-y-3 overflow-x-auto">
-										<div>
-											<div class="text-gray-500 mb-2">{$i18n.t('List available models')}</div>
-											<pre class="whitespace-pre-wrap">curl -H "Authorization: Bearer sk-..." \
-  {window.location.origin}/api/v1/agent/models</pre>
-										</div>
-
-										<div>
-											<div class="text-gray-500 mb-2">{$i18n.t('Chat completions (streaming)')}</div>
-											<pre class="whitespace-pre-wrap">curl -H "Authorization: Bearer sk-..." \
-  -H "Content-Type: application/json" \
-  -d '{JSON.stringify({model: "agent-name", messages: [{role: "user", content: "Hello"}], stream: true})}' \
-  {window.location.origin}/api/v1/agent/chat/completions</pre>
-										</div>
-
-										<div>
-											<div class="text-gray-500 mb-2">{$i18n.t('With collections/documents')}</div>
-											<pre class="whitespace-pre-wrap">curl -H "Authorization: Bearer sk-..." \
-  -H "Content-Type: application/json" \
-  -d '{JSON.stringify({model: "agent-name", messages: [{role: "user", content: "Hello"}], stream: true, files: [{id: "collection-id", type: "collection"}, {id: "document-id", type: "file"}]})}' \
-  {window.location.origin}/api/v1/agent/chat/completions</pre>
-										</div>
-									</div>
-								{/if}
-							</div>
-						</div>
-					{/if}
-				</div>
-
-				<hr class=" border-gray-100/30 dark:border-gray-850/30 my-4" />
+					<hr class=" border-gray-100/30 dark:border-gray-850/30 my-4" />
 				{/if}
 
-				<IntegrationProviders saveHandler={() => {
-					toast.success($i18n.t('Integration providers saved'));
-				}} />
+				<IntegrationProviders
+					saveHandler={() => {
+						toast.success($i18n.t('Integration providers saved'));
+					}}
+				/>
 			</div>
 		{:else}
 			<div class="flex h-full justify-center">

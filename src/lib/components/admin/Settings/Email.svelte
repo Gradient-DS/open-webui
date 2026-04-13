@@ -2,7 +2,13 @@
 	import { onMount, getContext } from 'svelte';
 	import { toast } from 'svelte-sonner';
 
-	import { getEmailConfig, setEmailConfig, testEmailConfig, getInviteContent, setInviteContent } from '$lib/apis/configs';
+	import {
+		getEmailConfig,
+		setEmailConfig,
+		testEmailConfig,
+		getInviteContent,
+		setInviteContent
+	} from '$lib/apis/configs';
 	import Switch from '$lib/components/common/Switch.svelte';
 	import Spinner from '$lib/components/common/Spinner.svelte';
 
@@ -72,10 +78,7 @@
 	};
 </script>
 
-<form
-	class="flex flex-col h-full justify-between text-sm"
-	on:submit|preventDefault={handleSave}
->
+<form class="flex flex-col h-full justify-between text-sm" on:submit|preventDefault={handleSave}>
 	<div class="overflow-y-scroll pr-1.5 max-h-[28rem]">
 		{#if loading}
 			<div class="flex justify-center py-8">
@@ -154,7 +157,6 @@
 							/>
 						</div>
 					</div>
-
 				{/if}
 			</div>
 		{/if}
