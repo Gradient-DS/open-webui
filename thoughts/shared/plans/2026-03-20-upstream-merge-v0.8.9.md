@@ -13,20 +13,22 @@ Merge 1126 upstream open-webui commits (v0.6.43 → v0.8.9) into the Gradient-DS
 **Conflict files**: 127 (verified via dry-run merge)
 
 ### Our 8 Custom Features
-| Feature | New Files | Modified Upstream Files |
-|---------|-----------|------------------------|
-| Typed Knowledge Bases | 1 migration, TypeSelector | `models/knowledge.py`, `routers/knowledge.py` |
-| OneDrive Integration | 7 services, 3 components, 1 router, 1 API | `main.py`, `config.py`, KB components |
-| Email Invite System | 1 model, 1 router, 1 migration, 2 components | `main.py`, `config.py`, `routers/configs.py`, `Users.svelte` |
-| GDPR User Archival/Deletion | 1 model, 1 router, 3 services, 2 migrations | `main.py`, `config.py`, `routers/users.py` |
-| Acceptance Modal | 1 component, 1 admin setting | `(app)/+layout.svelte`, `admin/Settings.svelte` |
-| Feature Flag System | 2 utils (FE+BE), tests | `Sidebar.svelte`, `MessageInput.svelte` |
-| Configurable Feedback | — | `config.py`, evaluations components |
-| External Pipeline Integration | 1 router module | `routers/retrieval.py`, `config.py` |
+
+| Feature                       | New Files                                    | Modified Upstream Files                                      |
+| ----------------------------- | -------------------------------------------- | ------------------------------------------------------------ |
+| Typed Knowledge Bases         | 1 migration, TypeSelector                    | `models/knowledge.py`, `routers/knowledge.py`                |
+| OneDrive Integration          | 7 services, 3 components, 1 router, 1 API    | `main.py`, `config.py`, KB components                        |
+| Email Invite System           | 1 model, 1 router, 1 migration, 2 components | `main.py`, `config.py`, `routers/configs.py`, `Users.svelte` |
+| GDPR User Archival/Deletion   | 1 model, 1 router, 3 services, 2 migrations  | `main.py`, `config.py`, `routers/users.py`                   |
+| Acceptance Modal              | 1 component, 1 admin setting                 | `(app)/+layout.svelte`, `admin/Settings.svelte`              |
+| Feature Flag System           | 2 utils (FE+BE), tests                       | `Sidebar.svelte`, `MessageInput.svelte`                      |
+| Configurable Feedback         | —                                            | `config.py`, evaluations components                          |
+| External Pipeline Integration | 1 router module                              | `routers/retrieval.py`, `config.py`                          |
 
 ### Migration Chain Situation
 
 **Our chain** (branching from upstream's `c440947495f3` + `018012973d35`):
+
 ```
 c440947495f3 ─┐
                ├─> f8e1a9c2d3b4 → 2c5f92a9fd66 → eaa33ce2752e → a1b2c3d4e5f6 (COLLISION!)
@@ -34,6 +36,7 @@ c440947495f3 ─┐
 ```
 
 **Upstream's new chain** (branching from `c440947495f3`):
+
 ```
 c440947495f3 → 374d2f66af06 → 8452d01d26d7 → f1e2d3c4b5a6 → a1b2c3d4e5f6 → b2c3d4e5f6a7
                 (prompt hist)   (chat msg)     (access grant)   (skill table)   (scim column)
@@ -71,6 +74,7 @@ Single `git merge upstream/main`, then systematic conflict resolution in 8 phase
 ## Phase 0: Pre-Merge Preparation (before `git merge`)
 
 ### Overview
+
 Fix the migration ID collision and create safety branches. This MUST happen before starting the merge.
 
 ### Step 0A: Fix Migration Revision ID Collision
@@ -104,6 +108,7 @@ git fetch upstream main
 ### Success Criteria:
 
 #### Automated Verification:
+
 - [x] `grep -r 'a1b2c3d4e5f6' backend/open_webui/migrations/` returns ZERO results on our branch
 - [x] New migration file exists with new revision ID
 - [x] `git log --oneline -1` shows the fix commit
@@ -114,6 +119,7 @@ git fetch upstream main
 ## Phase 1: Start Merge + i18n Translations (57 files)
 
 ### Overview
+
 Start the merge and immediately resolve the easiest batch: all 57 i18n translation JSON files. These are purely additive on both sides (new translation keys).
 
 ### Step 1A: Start the Merge
@@ -140,6 +146,7 @@ git add src/lib/i18n/locales/*/translation.json
 ```
 
 **Our custom i18n keys to preserve** (in `en-US/translation.json`):
+
 - OneDrive-related: `Sync from OneDrive`, `OneDrive Sources`, `Add OneDrive Source`, etc.
 - Invite-related: `Invite User`, `Send Invite`, `Pending Invites`, `Invite Link`, etc.
 - Acceptance modal: `Accept Terms`, `Terms and Conditions`, etc.
@@ -151,6 +158,7 @@ git add src/lib/i18n/locales/*/translation.json
 ### Success Criteria:
 
 #### Automated Verification:
+
 - [x] `git diff --name-only --diff-filter=U | grep i18n | wc -l` returns 0
 - [x] All i18n JSON files are valid JSON: `for f in src/lib/i18n/locales/*/translation.json; do python3 -c "import json; json.load(open('$f'))" || echo "INVALID: $f"; done`
 
@@ -159,9 +167,11 @@ git add src/lib/i18n/locales/*/translation.json
 ## Phase 2: Package Files + Trivial Config (4 files)
 
 ### Overview
+
 Resolve `package.json`, `package-lock.json`, `Dockerfile`, `.github/pull_request_template.md`. Accept upstream versions, verify no custom dependencies are lost.
 
 **Files**:
+
 - `package.json` — accept upstream, verify version bump is fine
 - `package-lock.json` — accept upstream (will regenerate anyway)
 - `.github/pull_request_template.md` — accept ours (we have a custom template)
@@ -172,6 +182,7 @@ Resolve `package.json`, `package-lock.json`, `Dockerfile`, `.github/pull_request
 ### Success Criteria:
 
 #### Automated Verification:
+
 - [x] `git diff --name-only --diff-filter=U | grep -E 'package|Dockerfile|github' | wc -l` returns 0
 - [x] `cat package.json | python3 -c "import json,sys; json.load(sys.stdin)"` succeeds
 
@@ -180,6 +191,7 @@ Resolve `package.json`, `package-lock.json`, `Dockerfile`, `.github/pull_request
 ## Phase 3: Backend Models (6 files)
 
 ### Overview
+
 Resolve conflicts in SQLAlchemy model files. Most are upstream-only changes where we have no modifications. The exception is `models/knowledge.py` where we added `type` and `deleted_at` columns.
 
 **Files**:
@@ -201,6 +213,7 @@ Resolve conflicts in SQLAlchemy model files. Most are upstream-only changes wher
 ### Success Criteria:
 
 #### Automated Verification:
+
 - [x] `git diff --name-only --diff-filter=U | grep models/ | wc -l` returns 0
 - [x] `python3 -c "from open_webui.models.knowledge import *"` succeeds (syntax check)
 
@@ -209,6 +222,7 @@ Resolve conflicts in SQLAlchemy model files. Most are upstream-only changes wher
 ## Phase 4: Backend Foundation — config.py, env.py, main.py (3 files)
 
 ### Overview
+
 The three most complex backend files. These are the backbone of our customizations — every feature adds imports, config variables, and router mounts here.
 
 **Files**:
@@ -218,13 +232,14 @@ The three most complex backend files. These are the backbone of our customizatio
 | `main.py` | Large | Router mounts (4), background workers (3), config endpoint extensions, OAuth callback |
 | `env.py` | Small | `CLIENT_NAME` env var |
 
-**Agent task description for config.py**: "Resolve `config.py` merge conflict. This is a ~121KB config file. Accept upstream's version as the base. Then re-add our custom config blocks. I'll provide the list of our additions — search for them in the ours version and add them to the appropriate locations in the upstream version. Our additions: FEATURE_* flags, ACCEPTANCE_MODAL_*, FEEDBACK_*, ARCHIVE_*, ONEDRIVE_*, EMAIL_*, EXTERNAL_PIPELINE_*, INTEGRATION_PROVIDERS, WEAVIATE_*."
+**Agent task description for config.py**: "Resolve `config.py` merge conflict. This is a ~121KB config file. Accept upstream's version as the base. Then re-add our custom config blocks. I'll provide the list of our additions — search for them in the ours version and add them to the appropriate locations in the upstream version. Our additions: FEATURE*\* flags, ACCEPTANCE_MODAL*\_, FEEDBACK\__, ARCHIVE*\*, ONEDRIVE*_, EMAIL\__, EXTERNAL*PIPELINE*_, INTEGRATION*PROVIDERS, WEAVIATE*\_."
 
 **Agent task description for main.py**: "Resolve `main.py` merge conflict. Accept upstream's version as the structure base. Re-add: (1) imports for archives, integrations, onedrive_sync, invites routers; (2) app.include_router mounts for these 4 routers; (3) background worker start/stop in lifespan for deletion cleanup, OneDrive scheduler, archive cleanup; (4) config endpoint extensions for feature flags, OneDrive, email, acceptance, integrations; (5) OneDrive OAuth callback handler."
 
 ### Success Criteria:
 
 #### Automated Verification:
+
 - [x] `git diff --name-only --diff-filter=U | grep -E 'config\.py|env\.py|main\.py' | wc -l` returns 0
 - [x] `python3 -c "import ast; ast.parse(...)"` config.py syntax OK
 - [x] `python3 -c "import ast; ast.parse(...)"` main.py syntax OK
@@ -234,6 +249,7 @@ The three most complex backend files. These are the backbone of our customizatio
 ## Phase 5: Backend Routers (12 files)
 
 ### Overview
+
 Resolve router conflicts. 4-5 routers have significant custom changes; the rest are upstream-only.
 
 **Files with our changes (HIGH priority)**:
@@ -255,6 +271,7 @@ Resolve router conflicts. 4-5 routers have significant custom changes; the rest 
 ### Success Criteria:
 
 #### Automated Verification:
+
 - [x] `git diff --name-only --diff-filter=U | grep routers/ | wc -l` returns 0
 - [x] `python3 -c "from open_webui.routers import knowledge, retrieval, users, configs"` succeeds
 
@@ -263,6 +280,7 @@ Resolve router conflicts. 4-5 routers have significant custom changes; the rest 
 ## Phase 6: Other Backend Files (4 files)
 
 ### Overview
+
 Remaining backend conflicts: weaviate adapter, middleware, utils, storage.
 
 **Files**:
@@ -279,6 +297,7 @@ Remaining backend conflicts: weaviate adapter, middleware, utils, storage.
 ### Success Criteria:
 
 #### Automated Verification:
+
 - [x] `git diff --name-only --diff-filter=U | grep backend/ | wc -l` returns 0
 - [x] All backend imports resolve
 
@@ -287,61 +306,68 @@ Remaining backend conflicts: weaviate adapter, middleware, utils, storage.
 ## Phase 7: Frontend — Admin, Chat, Knowledge, Layout (~41 files)
 
 ### Overview
+
 All non-i18n frontend conflicts. Split into sub-batches for agent focus.
 
 ### Sub-batch 7A: Stores, Utils, APIs (5 files)
-| File | Our changes |
-|------|-------------|
-| `stores/index.ts` | Custom stores for acceptance modal, feature flags |
-| `utils/index.ts` | Possibly custom additions |
-| `utils/marked/citation-extension.ts` | Japanese brackets, bold/italic citation fix |
-| `apis/knowledge/index.ts` | Type parameter support |
-| `apis/evaluations/index.ts` | Feedback config API |
-| `apis/configs/index.ts` | Email, invite, integrations API functions |
+
+| File                                 | Our changes                                       |
+| ------------------------------------ | ------------------------------------------------- |
+| `stores/index.ts`                    | Custom stores for acceptance modal, feature flags |
+| `utils/index.ts`                     | Possibly custom additions                         |
+| `utils/marked/citation-extension.ts` | Japanese brackets, bold/italic citation fix       |
+| `apis/knowledge/index.ts`            | Type parameter support                            |
+| `apis/evaluations/index.ts`          | Feedback config API                               |
+| `apis/configs/index.ts`              | Email, invite, integrations API functions         |
 
 ### Sub-batch 7B: Admin Components (10 files)
-| File | Our changes | Risk |
-|------|-------------|------|
-| `admin/Settings.svelte` | New tabs (Acceptance, Email, Integrations) + feature flags | HIGH |
-| `admin/Settings/Integrations.svelte` | **NAME COLLISION** — upstream now has their own! | HIGH |
-| `admin/Users.svelte` | Invites tab | MEDIUM |
-| `admin/Users/UserList.svelte` | Invite-related changes | LOW |
-| `admin/Evaluations/Feedbacks.svelte` | Feedback tag customization | MEDIUM |
-| `admin/Settings/Interface.svelte` | Likely upstream only | LOW |
-| `admin/Settings/General.svelte` | Likely upstream only | LOW |
-| `admin/Settings/Database.svelte` | Likely upstream only | LOW |
-| `admin/Settings/Models.svelte` | Likely upstream only | LOW |
-| `admin/Users/UserList/AddUserModal.svelte` | Likely upstream only | LOW |
+
+| File                                       | Our changes                                                | Risk   |
+| ------------------------------------------ | ---------------------------------------------------------- | ------ |
+| `admin/Settings.svelte`                    | New tabs (Acceptance, Email, Integrations) + feature flags | HIGH   |
+| `admin/Settings/Integrations.svelte`       | **NAME COLLISION** — upstream now has their own!           | HIGH   |
+| `admin/Users.svelte`                       | Invites tab                                                | MEDIUM |
+| `admin/Users/UserList.svelte`              | Invite-related changes                                     | LOW    |
+| `admin/Evaluations/Feedbacks.svelte`       | Feedback tag customization                                 | MEDIUM |
+| `admin/Settings/Interface.svelte`          | Likely upstream only                                       | LOW    |
+| `admin/Settings/General.svelte`            | Likely upstream only                                       | LOW    |
+| `admin/Settings/Database.svelte`           | Likely upstream only                                       | LOW    |
+| `admin/Settings/Models.svelte`             | Likely upstream only                                       | LOW    |
+| `admin/Users/UserList/AddUserModal.svelte` | Likely upstream only                                       | LOW    |
 
 **NOTE on Integrations.svelte**: Upstream added their own `admin/Settings/Integrations.svelte`. We also have one with our integration provider config. The agent must compare both and merge them, or rename ours.
 
 ### Sub-batch 7C: Chat Components (15 files)
-| File | Our changes | Risk |
-|------|-------------|------|
-| `chat/MessageInput.svelte` | `isFeatureEnabled('input_menu')` guard | MEDIUM |
-| `chat/Messages/RateComment.svelte` | Feedback tag customization | MEDIUM |
-| `chat/Chat.svelte`, `ChatControls.svelte`, `Controls.svelte` | Check for custom changes | LOW |
-| `chat/SettingsModal.svelte`, `Settings/General.svelte` | Check for custom changes | LOW |
-| Others (CodeBlock, ContentRenderer, Citations, etc.) | Likely upstream only | LOW |
+
+| File                                                         | Our changes                            | Risk   |
+| ------------------------------------------------------------ | -------------------------------------- | ------ |
+| `chat/MessageInput.svelte`                                   | `isFeatureEnabled('input_menu')` guard | MEDIUM |
+| `chat/Messages/RateComment.svelte`                           | Feedback tag customization             | MEDIUM |
+| `chat/Chat.svelte`, `ChatControls.svelte`, `Controls.svelte` | Check for custom changes               | LOW    |
+| `chat/SettingsModal.svelte`, `Settings/General.svelte`       | Check for custom changes               | LOW    |
+| Others (CodeBlock, ContentRenderer, Citations, etc.)         | Likely upstream only                   | LOW    |
 
 ### Sub-batch 7D: Knowledge/Workspace (7 files)
-| File | Our changes | Risk |
-|------|-------------|------|
-| `workspace/Knowledge.svelte` | Type filter UI, type badges | HIGH |
-| `workspace/Knowledge/CreateKnowledgeBase.svelte` | Type handling, OneDrive redirect, access control hiding | HIGH |
-| `workspace/Knowledge/KnowledgeBase.svelte` | OneDrive sync UI, empty state cards | HIGH |
-| `workspace/Models.svelte`, `Models/Capabilities.svelte`, `Models/ModelEditor.svelte`, `Models/Knowledge/KnowledgeSelector.svelte` | Likely upstream only | LOW |
+
+| File                                                                                                                              | Our changes                                             | Risk |
+| --------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------- | ---- |
+| `workspace/Knowledge.svelte`                                                                                                      | Type filter UI, type badges                             | HIGH |
+| `workspace/Knowledge/CreateKnowledgeBase.svelte`                                                                                  | Type handling, OneDrive redirect, access control hiding | HIGH |
+| `workspace/Knowledge/KnowledgeBase.svelte`                                                                                        | OneDrive sync UI, empty state cards                     | HIGH |
+| `workspace/Models.svelte`, `Models/Capabilities.svelte`, `Models/ModelEditor.svelte`, `Models/Knowledge/KnowledgeSelector.svelte` | Likely upstream only                                    | LOW  |
 
 ### Sub-batch 7E: Layout & Routes (7 files)
-| File | Our changes | Risk |
-|------|-------------|------|
-| `(app)/+layout.svelte` | AcceptanceModal import + logic | MEDIUM |
-| `layout/Sidebar.svelte` | `isFeatureEnabled()` guards | MEDIUM |
-| `layout/Navbar/Menu.svelte` | Check for changes | LOW |
-| Route layouts (`admin/`, `workspace/`, `playground/`) | Check for changes | LOW |
-| `routes/auth/+page.svelte` | Check for changes | LOW |
+
+| File                                                  | Our changes                    | Risk   |
+| ----------------------------------------------------- | ------------------------------ | ------ |
+| `(app)/+layout.svelte`                                | AcceptanceModal import + logic | MEDIUM |
+| `layout/Sidebar.svelte`                               | `isFeatureEnabled()` guards    | MEDIUM |
+| `layout/Navbar/Menu.svelte`                           | Check for changes              | LOW    |
+| Route layouts (`admin/`, `workspace/`, `playground/`) | Check for changes              | LOW    |
+| `routes/auth/+page.svelte`                            | Check for changes              | LOW    |
 
 **Agent task descriptions** — spawn one agent per sub-batch:
+
 - "Resolve admin component conflicts (7B). Accept upstream for LOW-risk files. For Settings.svelte: re-add Acceptance/Email/Integrations tabs. For Integrations.svelte: compare upstream's version with ours and merge. For Users.svelte: re-add Invites tab."
 - "Resolve chat component conflicts (7C). Accept upstream for most files. Re-add isFeatureEnabled guard in MessageInput.svelte. Re-add feedback tag config in RateComment.svelte."
 - "Resolve Knowledge/workspace conflicts (7D). Accept upstream's structural changes. Re-add: type filter in Knowledge.svelte, type handling in CreateKnowledgeBase.svelte, OneDrive sync in KnowledgeBase.svelte."
@@ -349,6 +375,7 @@ All non-i18n frontend conflicts. Split into sub-batches for agent focus.
 ### Success Criteria:
 
 #### Automated Verification:
+
 - [x] `git diff --name-only --diff-filter=U | grep src/ | wc -l` returns 0
 - [x] `npm run build` compiles successfully
 
@@ -357,17 +384,20 @@ All non-i18n frontend conflicts. Split into sub-batches for agent focus.
 ## Phase 8: Migrations — Rewire Chain (post-conflict)
 
 ### Overview
+
 After all file conflicts are resolved, fix the Alembic migration chain so both our custom migrations and upstream's new migrations coexist.
 
 ### Current State After Merge
 
 **Upstream's new migrations** (not in our fork before merge):
+
 ```
 c440947495f3 → 374d2f66af06 → 8452d01d26d7 → f1e2d3c4b5a6 → a1b2c3d4e5f6 → b2c3d4e5f6a7
                 (prompt hist)   (chat msg)     (access grant)   (skill table)   (scim column)
 ```
 
 **Our custom migrations**:
+
 ```
 c440947495f3 ─┐
                ├─> f8e1a9c2d3b4 → 2c5f92a9fd66 → eaa33ce2752e → d4e5f6a7b8c9
@@ -413,6 +443,7 @@ alembic upgrade head
 ### Success Criteria:
 
 #### Automated Verification:
+
 - [x] `alembic heads` returns exactly 1 head
 - [ ] `alembic upgrade head` succeeds on fresh DB
 - [ ] `alembic history --verbose` shows clean linear chain to merge point
@@ -422,6 +453,7 @@ alembic upgrade head
 ## Phase 9: Verification & Finalization
 
 ### Overview
+
 Full verification that the merge is complete and everything works.
 
 ### Steps
@@ -432,6 +464,7 @@ Full verification that the merge is complete and everything works.
 4. **Migrations**: `alembic upgrade head` on fresh + existing DB
 
 ### Manual Verification (Smoke Tests):
+
 - [ ] Login works
 - [ ] Chat with a model works
 - [ ] Knowledge base creation (local type) works
@@ -444,6 +477,7 @@ Full verification that the merge is complete and everything works.
 - [ ] New upstream features (Skills, SCIM, Access Grants) accessible
 
 ### Final Steps
+
 ```bash
 git add -A
 git commit -m "Merge upstream open-webui v0.8.9 into Gradient-DS fork"

@@ -1045,7 +1045,11 @@ Provide the enhanced notes in markdown format. Use markdown syntax for headings,
 											</button>
 										</Tooltip>
 
-										<Tooltip placement="top" content={$i18n.t('Controls')} className="cursor-pointer">
+										<Tooltip
+											placement="top"
+											content={$i18n.t('Controls')}
+											className="cursor-pointer"
+										>
 											<button
 												class="p-1.5 bg-transparent hover:bg-white/5 transition rounded-lg"
 												on:click={() => {

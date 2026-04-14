@@ -8,6 +8,7 @@
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
 	import Textarea from '$lib/components/common/Textarea.svelte';
 	import Switch from '$lib/components/common/Switch.svelte';
+	import { isFeatureEnabled } from '$lib/utils/features';
 
 	const i18n = getContext('i18n');
 
@@ -316,6 +317,48 @@
 						</div>
 					{/if}
 				</div>
+
+				{#if isFeatureEnabled('document_writer')}
+					<div class="mb-3.5">
+						<div class=" mt-0.5 mb-2.5 text-base font-medium">{$i18n.t('Document Writer')}</div>
+
+						<hr class=" border-gray-100/30 dark:border-gray-850/30 my-2" />
+
+						<div class="mb-2.5">
+							<div class=" flex w-full justify-between">
+								<div class=" self-center text-xs font-medium">
+									{$i18n.t('Enable Document Writer')}
+								</div>
+
+								<Switch bind:state={config.ENABLE_DOCUMENT_WRITER} />
+							</div>
+						</div>
+
+						{#if config.ENABLE_DOCUMENT_WRITER}
+							<div>
+								<div class="py-0.5 w-full">
+									<div class=" mb-2.5 text-xs font-medium">
+										{$i18n.t('Document Writer Prompt Template')}
+									</div>
+
+									<Tooltip
+										content={$i18n.t(
+											'Leave empty to use the default prompt, or enter a custom prompt'
+										)}
+										placement="top-start"
+									>
+										<Textarea
+											bind:value={config.DOCUMENT_WRITER_PROMPT_TEMPLATE}
+											placeholder={$i18n.t(
+												'Leave empty to use the default prompt, or enter a custom prompt'
+											)}
+										/>
+									</Tooltip>
+								</div>
+							</div>
+						{/if}
+					</div>
+				{/if}
 			</div>
 		{/if}
 	</div>

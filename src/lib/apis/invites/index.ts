@@ -65,11 +65,7 @@ export const validateInvite = async (inviteToken: string) => {
 	return res;
 };
 
-export const acceptInvite = async (
-	inviteToken: string,
-	password: string,
-	name?: string
-) => {
+export const acceptInvite = async (inviteToken: string, password: string, name?: string) => {
 	let error = null;
 
 	const res = await fetch(`${WEBUI_API_BASE_URL}/invites/${inviteToken}/accept`, {

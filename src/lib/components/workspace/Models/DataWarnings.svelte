@@ -77,7 +77,9 @@
 		</div>
 	</div>
 	<div class="text-xs text-gray-400 mb-2">
-		{$i18n.t('Select capabilities that require user acknowledgment before first use in a conversation.')}
+		{$i18n.t(
+			'Select capabilities that require user acknowledgment before first use in a conversation.'
+		)}
 	</div>
 	<div class="flex items-center mt-2 flex-wrap">
 		{#each visibleWarnings as key}
@@ -108,7 +110,9 @@
 			<textarea
 				class="w-full rounded-lg px-3 py-2 text-sm bg-gray-50 dark:bg-gray-850 dark:text-gray-200 outline-hidden resize-none"
 				rows="3"
-				placeholder={$i18n.t('This model runs on external infrastructure. Uploaded files and conversation content will be processed by an external provider. Do you want to continue?')}
+				placeholder={$i18n.t(
+					'This model runs on external infrastructure. Uploaded files and conversation content will be processed by an external provider. Do you want to continue?'
+				)}
 				bind:value={warningMessage}
 			/>
 		</div>

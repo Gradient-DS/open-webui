@@ -58,6 +58,7 @@
    - Docs: `docs/agent-api-deployment.md`, `SOEV.md`
 
 **Key Learnings:**
+
 - All 9 features survived the v0.6.43 → v0.8.9 upstream merge (127 conflict files resolved)
 - Migration ID collision (`a1b2c3d4e5f6`) between our soft-delete migration and upstream's skill table migration was resolved pre-merge by renaming ours
 - Upstream added their own `Integrations.svelte` — our `IntegrationProviders.svelte` coexists within it
@@ -99,6 +100,7 @@
 - **Hotfixes**: Google file type guessing (88d7d82cd), Helm secrets reference for API key (0ac933e8b), `access_grants` format fix when porting from dev branch (b82f5dcf4).
 
 **Key Learnings:**
+
 - Google's Changes API is the equivalent of OneDrive's delta links but works differently — returns changed items globally, requiring parent-chain filtering to scope to the synced folder tree
 - Google Workspace files have no `md5Checksum`, so change detection falls back to `modifiedTime` comparison
 - Google doesn't always return a new refresh_token on refresh — must preserve the old one
@@ -117,6 +119,7 @@
 **Context:** External callers (curl, SDKs, other services) needed a way to call soev.ai agents through an OpenAI-compatible API, authenticated with OWUI API keys (`sk-` tokens). The existing `AGENT_API_ENABLED` feature only routes OWUI's own chat UI through the agent service — it doesn't expose the agent to external callers.
 
 **What We Did:**
+
 - Created a reverse proxy at `/api/v1/agent/` with three endpoints: `GET /models`, `POST /chat/completions` (SSE streaming), `GET /openapi.json`
 - Follows the existing Ollama/OpenAI proxy pattern: `aiohttp` session + `stream_wrapper()` for SSE passthrough
 - Admin toggle in Settings > Integrations (PersistentConfig `ENABLE_AGENT_PROXY`, default off)
@@ -127,6 +130,7 @@
 - Helm chart: `enableAgentProxy: "false"` in values.yaml, `ENABLE_AGENT_PROXY` in configmap
 
 **Key Learnings:**
+
 - Two distinct features share the agent service but serve different purposes: `AGENT_API_ENABLED` (internal, routes OWUI chat middleware) vs `ENABLE_AGENT_PROXY` (external, exposes OpenAI-compatible proxy). Naming clarity matters — "proxy" implies external access
 - The proxy is a raw passthrough — it forwards the request body as-is, so callers can pass `files` (with `type: "collection"` or `type: "file"` and an `id`), `rag_filter`, and any other fields the agent service accepts
 - Vite dev server had no proxy config, causing API routes to 404 on port 5173 when accessed directly in the browser. Adding `server.proxy` in `vite.config.ts` fixed this for all API prefixes
@@ -143,6 +147,7 @@
 **Context:** The chat input "+" menu (InputMenu.svelte) always showed "Webpage URL" and "Reference chats" items with no way to disable them via Helm config, unlike other menu items that have feature flag guards.
 
 **What We Did:**
+
 - Added `FEATURE_WEBPAGE_URL` and `FEATURE_REFERENCE_CHATS` env vars in `config.py` (default `True`)
 - Imported and exposed both in `main.py` via the config endpoint's `features` dict
 - Added `'webpage_url'` and `'reference_chats'` to the `Feature` union type in `src/lib/utils/features.ts`
@@ -151,6 +156,7 @@
 - Added `featureWebpageUrl` and `featureReferenceChats` to Helm values.yaml and configmap.yaml
 
 **Key Learnings:**
+
 - The feature flag pipeline for InputMenu items is: Helm values → configmap (env var) → `config.py` (read) → `main.py` (expose in config endpoint) → `features.ts` (type) → `InputMenu.svelte` (`isFeatureEnabled()` guard)
 - Most InputMenu sections already had guards (knowledge, capture, notes, tools) but Webpage URL and Reference Chats were the two exceptions
 
@@ -159,6 +165,7 @@
 ---
 
 ### [30-03-2026] Cloud KB Permission Leak — Sync Workers Mirror Cloud Sharing into Access Grants
+
 > **Amended [30-03-2026]:** Fix implemented — see [30-03-2026] Cloud KB Permission Fix — Suspension Lifecycle Implementation.
 
 **With:** @lexlubbers
@@ -166,6 +173,7 @@
 **Context:** On gradient.soev.ai (test branch), users could see other users' OneDrive and Google Drive knowledge bases as read-only. Investigated whether the upstream `access_grants` migration (`f1e2d3c4b5a6`) was the cause.
 
 **What We Did:**
+
 - Queried the `access_grant` table on gradient — no wildcard (`*`) grants existed, ruling out the migration's NULL→public conversion
 - Found explicit user-level grants with varying timestamps (March 25–30), proving they were created at runtime, not by a one-time migration
 - Traced the grants to `_sync_permissions()` in both sync workers (`onedrive/sync_worker.py:279`, `google_drive/sync_worker.py:203`)
@@ -173,6 +181,7 @@
 - The router's defense-in-depth (`knowledge.py:504-506`, `577-581`) correctly blocks grant changes via the API, but sync workers call `update_knowledge_by_id` directly on the model layer, bypassing it
 
 **Key Learnings:**
+
 - The root cause is NOT the migration — it's the `_sync_permissions()` feature in both sync workers mirroring broad cloud sharing into Open WebUI access grants
 - In corporate M365/Google Workspace tenants, folders are often shared with the entire team, so the sync gives every team member read access to every synced KB
 - The migration fix (NULL knowledge → private) is still valid hardening but was not the actual trigger
@@ -180,6 +189,7 @@
 - Desired behavior: permission sync should only verify the **owner** still has cloud access, not grant other users access. KBs should remain private to their creator.
 
 **Fix needed:**
+
 1. Rewrite `_sync_permissions()` in both sync workers to only check owner access, not mirror cloud sharing
 2. Clean up existing grants on gradient: `DELETE FROM access_grant WHERE resource_type = 'knowledge' AND resource_id IN (SELECT id FROM knowledge WHERE type IN ('onedrive', 'google_drive'));`
 3. Deploy code fix BEFORE cleanup (sync runs every ≤15 min and would recreate grants)
@@ -196,17 +206,20 @@
 **Context:** Implementing the fix for the cloud KB permission leak identified earlier today. Plan: `thoughts/shared/plans/2026-03-30-cloud-kb-permission-fix.md`.
 
 **What We Did:**
+
 - **Phase 1**: Rewrote `_sync_permissions()` in both OneDrive and Google Drive sync workers — now only verifies owner access to the cloud folder. No access grants are created. If owner loses access, KB is suspended (`suspended_at` + `suspended_reason` in sync meta). If access is regained, suspension is cleared. Base worker returns early when KB is suspended; scheduler skips suspended KBs.
 - **Phase 2**: Added suspension helpers to knowledge model (`is_suspended()`, `get_suspension_info()`, `get_suspended_expired_knowledge()`). Cleanup worker now hard-deletes KBs suspended for 30+ days (`SUSPENSION_TTL_DAYS = 30`).
 - **Phase 3**: Knowledge router blocks non-admin access to suspended KBs (403 with explanatory message on `GET /{id}` and `GET /{id}/files`). Retrieval path skips suspended KBs in chat. List API returns `suspension_info` field for suspended KBs.
 - **Phase 4**: Frontend grays out suspended KBs (`opacity-50 cursor-not-allowed`), prevents navigation on click, shows "Suspended" warning badge with tooltip showing days remaining.
 
 **Key Learnings:**
+
 - `suspended_at` lives in `meta[meta_key]` (no schema migration needed), consistent with existing sync state storage pattern
 - Owner gets implicit access via `has_permission_filter()` — never needs an explicit access grant, so removing all grant creation is safe
 - The `Users` import was only needed for email-mapping in the old `_sync_permissions()` — removed from both workers
 
 **Still needed:**
+
 - Manual cleanup of existing grants on gradient.soev.ai (see `fix_kb_gradient_soev.md`)
 - Deploy code fix BEFORE cleanup (sync runs every ≤15 min)
 
@@ -221,6 +234,7 @@
 **Context:** Adding TOTP-based two-factor authentication for email+password users, with admin enforcement and recovery codes.
 
 **What We Did:**
+
 - Implemented full TOTP 2FA feature across ~21 files (backend + frontend + Helm)
 - Backend: pyotp + qrcode deps, Alembic migration (totp_secret/totp_enabled/totp_last_used_at on auth + recovery_code table), AES-GCM encrypted TOTP secrets, bcrypt-hashed recovery codes, replay protection, 5-attempt rate limiting
 - New router at `/api/v1/auths/2fa` with 6 endpoints: status, setup, enable, disable, verify, recovery/regenerate
@@ -235,6 +249,7 @@
 - Fixed Svelte template nesting bug in auth/+page.svelte ({#if show2FAChallenge} closing tag misplaced)
 
 **Key Learnings:**
+
 - Feature is fully off by default (ENABLE_2FA=false) — admin must enable via Security tab or env var
 - LDAP, SSO/OAuth, API key, and trusted header auth all bypass 2FA — only email+password users affected
 - Partial JWT token pattern (purpose claim) cleanly separates 2FA-pending state from authenticated sessions
@@ -251,6 +266,7 @@
 **Context:** Post-merge security pass addressing Trivy CVE findings, Docker image bloat, and a replay token vulnerability discovered in the TOTP flow.
 
 **What We Did:**
+
 - Fixed multiple CVEs: bumped aiohttp, requests, cryptography, nltk, wheel; force-reinstalled wheel after uv for CVE-2026-24049
 - Slimmed Docker image by dropping unnecessary torch dependency
 - Fixed replay token vulnerability in TOTP verification — added token replay protection in `routers/totp.py` and `utils/totp.py`
@@ -258,6 +274,7 @@
 - Trivy scanning workflow added to CI
 
 **Key Learnings:**
+
 - uv package manager can leave stale wheel versions that Trivy flags — force-reinstall needed after uv
 - TOTP codes need server-side replay tracking to prevent reuse within the validity window
 
@@ -270,6 +287,7 @@
 **Context:** Visual polish pass after upstream merge and feature additions.
 
 **What We Did:**
+
 - Added Google Drive and OneDrive logos to knowledge base cards
 - Split agents and prompts into separate tabs with top gap
 - Dutch translations for all custom features (web search, sync, feature flags, etc.)
@@ -285,6 +303,7 @@
 **Context:** GDPR/DPIA requirement — users must be able to export all their personal data.
 
 **What We Did:**
+
 - New router `routers/export.py` mounted at `/api/v1/export`
 - `ExportService` in `services/export/service.py` — background zip generation containing chats, knowledge bases, uploaded files, and user profile
 - Socket.IO event notification when export is ready (`services/export/events.py`)
@@ -294,6 +313,7 @@
 - en-US + nl-NL translations
 
 **Key Learnings:**
+
 - Background task pattern with FastAPI's `BackgroundTasks` + Socket.IO notification for async user feedback
 - Export includes all user-associated data: chats (with messages), KB metadata, uploaded files, profile info
 
@@ -308,6 +328,7 @@
 **Context:** GDPR/DPIA requirement — platform must support automated data cleanup with configurable retention periods.
 
 **What We Did:**
+
 - `DataRetentionService` in `services/retention/service.py` — phased cleanup: warning emails → inactive users → stale chats → stale knowledge bases
 - Config model in `services/retention/config.py` with master TTL + per-category overrides (user inactivity, chat, knowledge)
 - Admin UI in `Database.svelte` settings panel for configuring all retention parameters
@@ -319,6 +340,7 @@
 - en-US + nl-NL translations
 
 **Key Learnings:**
+
 - Master TTL pattern: set one global default, per-category TTLs override it (0 = inherit master). Clean admin UX.
 - Warning emails use existing Graph mail client — extended with retention-specific templates
 - Retention only touches `local` type knowledge bases — cloud-synced KBs are managed by their source
@@ -334,6 +356,7 @@
 **Context:** After shipping Google Drive integration and the DPIA features, focus shifted to performance — the sync worker and frontend upload flow needed to handle larger knowledge bases efficiently.
 
 **What We Did:**
+
 - Major rewrite of `base_worker.py` (~750 line diff) for concurrent document processing — parallel embedding/ingestion instead of sequential
 - Unified frontend upload concurrency in `KnowledgeBase.svelte` — replaced fragmented upload logic with a single concurrent method (263 line refactor)
 - Fixed cloud sync filetype detection (`c4427ffe8`)
@@ -343,6 +366,7 @@
 - Hotfix: increased KB file limit (`3bda20910`)
 
 **Key Learnings:**
+
 - Frontend had three separate upload paths that diverged over time — unifying them eliminated inconsistent behavior and made concurrency controllable from one place
 - Sync worker sequential processing was the primary bottleneck for large KBs — concurrent processing with controlled parallelism was the fix
 
@@ -357,6 +381,7 @@
 **Context:** Vink deployment stress-tested the sync worker with ~1300 documents, exposing several issues in the concurrent processing pipeline that only manifested at scale.
 
 **What We Did:**
+
 - Fixed `asyncio.gather` failing on large document batches — chunked processing to avoid overwhelming the event loop (`0ea8ae930`)
 - Added configurable timeouts to external document processing (via `DOCUMENT_PROCESSING_TIMEOUT` env var) to prevent deadlocks when external pipeline/integration providers are misconfigured (`075751449`)
 - Parsing upgrades for provider-specific handling — Google Drive workspace file export, OneDrive improvements (`2fc57c391`)
@@ -365,6 +390,7 @@
 - Created plans for future work: cloud KB single-collection architecture, sync batch-wait removal
 
 **Key Learnings:**
+
 - `asyncio.gather` on 1300+ tasks causes resource exhaustion — need bounded concurrency (semaphore or chunked batches)
 - External document processing (pipeline providers) can deadlock silently when misconfigured — timeouts are essential at this boundary
 - Production-scale testing reveals issues that unit/integration tests miss — Vink was the first real stress test of the concurrent sync worker

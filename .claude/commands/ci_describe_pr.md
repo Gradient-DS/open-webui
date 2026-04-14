@@ -66,6 +66,7 @@ You are tasked with generating a comprehensive pull request description followin
    - If any verification steps remain unchecked, remind the user to complete them before merging
 
 ## Important notes:
+
 - This command works across different repositories - always read the local template
 - Be thorough but concise - descriptions should be scannable
 - Focus on the "why" as much as the "what"

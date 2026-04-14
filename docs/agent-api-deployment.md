@@ -19,20 +19,20 @@ AGENT_API_BASE_URL=http://agent-service:8001
 AGENT_API_AGENT=your-agent-name
 ```
 
-| Variable | Required | Default | Description |
-|---|---|---|---|
-| `AGENT_API_ENABLED` | Yes | `false` | Enables/disables the integration. When `false` or unset, all behavior is stock OpenWebUI. |
-| `AGENT_API_BASE_URL` | Yes (when enabled) | `""` | The agent service URL. OpenWebUI POSTs to `{base_url}/v1/chat/completions`. |
-| `AGENT_API_AGENT` | Yes (when enabled) | `""` | Agent identifier sent in each request payload. |
+| Variable             | Required           | Default | Description                                                                               |
+| -------------------- | ------------------ | ------- | ----------------------------------------------------------------------------------------- |
+| `AGENT_API_ENABLED`  | Yes                | `false` | Enables/disables the integration. When `false` or unset, all behavior is stock OpenWebUI. |
+| `AGENT_API_BASE_URL` | Yes (when enabled) | `""`    | The agent service URL. OpenWebUI POSTs to `{base_url}/v1/chat/completions`.               |
+| `AGENT_API_AGENT`    | Yes (when enabled) | `""`    | Agent identifier sent in each request payload.                                            |
 
 ## What Changes When Enabled
 
-| Capability | Stock OpenWebUI | With Agent API |
-|---|---|---|
-| Web search | Built-in handler runs | Skipped — agent handles its own search |
+| Capability                | Stock OpenWebUI                                    | With Agent API                                           |
+| ------------------------- | -------------------------------------------------- | -------------------------------------------------------- |
+| Web search                | Built-in handler runs                              | Skipped — agent handles its own search                   |
 | RAG / knowledge retrieval | Built-in retrieval + "searching knowledge" spinner | Skipped — raw KB references passed to agent via metadata |
-| LLM dispatch | Calls OpenAI-compatible model endpoint | Routes to agent API |
-| Tool resolution | Built-in tool execution | Skipped — agent handles its own tools |
+| LLM dispatch              | Calls OpenAI-compatible model endpoint             | Routes to agent API                                      |
+| Tool resolution           | Built-in tool execution                            | Skipped — agent handles its own tools                    |
 
 **Unchanged:** streaming to UI, DB persistence, title generation, WebSocket transport, system prompts, memory retrieval, voice mode.
 
@@ -42,26 +42,27 @@ OpenWebUI POSTs to `{AGENT_API_BASE_URL}/v1/chat/completions` with:
 
 ```json
 {
-  "agent": "your-agent-name",
-  "model": "gpt-4o",
-  "messages": [{"role": "user", "content": "..."}],
-  "stream": true,
-  "chat_id": "uuid",
-  "user_id": "uuid",
-  "message_id": "uuid",
-  "session_id": "socket-session-id",
-  "features": {"web_search": true},
-  "files": [
-    {"id": "file-uuid", "type": "file", "name": "report.pdf"},
-    {"id": "kb-uuid", "type": "collection", "name": "My KB"}
-  ],
-  "knowledge": [{"id": "kb-uuid", "type": "collection", "name": "My KB"}],
-  "tool_ids": ["tool-1"],
-  "temperature": 0.7
+	"agent": "your-agent-name",
+	"model": "gpt-4o",
+	"messages": [{ "role": "user", "content": "..." }],
+	"stream": true,
+	"chat_id": "uuid",
+	"user_id": "uuid",
+	"message_id": "uuid",
+	"session_id": "socket-session-id",
+	"features": { "web_search": true },
+	"files": [
+		{ "id": "file-uuid", "type": "file", "name": "report.pdf" },
+		{ "id": "kb-uuid", "type": "collection", "name": "My KB" }
+	],
+	"knowledge": [{ "id": "kb-uuid", "type": "collection", "name": "My KB" }],
+	"tool_ids": ["tool-1"],
+	"temperature": 0.7
 }
 ```
 
 Key notes:
+
 - `messages` already has the system prompt injected by OpenWebUI
 - `features.web_search` indicates whether the user toggled web search on
 - `files` contains all attached items (uploads + KB files)
@@ -115,6 +116,7 @@ Content-Type: application/json
 Generate an API key in OpenWebUI: **Settings > Account > API Keys**.
 
 Vector DB collection name conventions:
+
 - Uploaded files: `file-{file_id}`
 - Knowledge bases: `{kb_id}` directly
 

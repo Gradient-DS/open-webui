@@ -235,6 +235,10 @@ openWebui:
     enableCodeExecution: "false"
     userPermissionsFeaturesCodeInterpreter: "false"
 
+    # Document Writer (disabled)
+    enableDocumentWriter: "false"
+    userPermissionsFeaturesDocumentWriter: "false"
+
     # MCP/Tool Servers (disabled)
     enableDirectConnections: "false"
     userPermissionsFeaturesDirectToolServers: "false"

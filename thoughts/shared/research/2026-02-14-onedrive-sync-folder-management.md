@@ -4,7 +4,7 @@ researcher: claude
 git_commit: 367bafc2907ce2ca9c9d8d3a783d09dafd8ba916
 branch: feat/sync-improvements
 repository: open-webui
-topic: "OneDrive KB sync folder management - removing folders, pre-selection UI, file removal UX"
+topic: 'OneDrive KB sync folder management - removing folders, pre-selection UI, file removal UX'
 tags: [research, codebase, onedrive, sync, knowledge-base, ui-ux]
 status: complete
 last_updated: 2026-02-14
@@ -20,6 +20,7 @@ last_updated_by: claude
 ## Research Question
 
 When syncing from a OneDrive folder to a KB, there is no way to remove that folder from sync. Even removing all files or adding different folders, the older folders still sync. How can we:
+
 1. Allow removing synced folders while keeping multi-folder support
 2. Show already-synced items as pre-selected when reopening the picker
 3. Determine the best UX for file removal in OneDrive KBs
@@ -33,11 +34,13 @@ The `meta.onedrive_sync.sources` array is **additive-only** -- there is no endpo
 ### Current Source Management Flow
 
 **Sources are only added, never removed:**
+
 - `POST /onedrive/sync/items` (`backend/open_webui/routers/onedrive_sync.py:89-103`) deduplicates by `item_id` and appends new sources
 - No endpoint exists to remove or update the sources array
 - The only removal happens automatically when OneDrive access is revoked (detected at sync time via `_verify_source_access()` at `sync_worker.py:451-483`)
 
 **File removal doesn't remove the source:**
+
 - `POST /knowledge/{id}/file/remove` (`backend/open_webui/routers/knowledge.py:589-704`) removes the file + vectors + junction row
 - For OneDrive files (`file_id.startswith("onedrive-")`), it clears ALL delta links from sources (line 644-664)
 - The source itself stays in the array, so next sync re-adds the file
@@ -66,12 +69,14 @@ Currently, the delete button on file rows (`Files.svelte:100-114`) works identic
 Add a dedicated source management view that separates "manage existing" from "add new":
 
 **UI Flow:**
+
 1. OneDrive KB detail page shows synced sources as a list/chips in the header area (near the existing sync status)
 2. Each source chip shows: folder/file name, path, and an "X" remove button
 3. The existing "+" button opens the Microsoft picker to add more sources
 4. Removing a source shows a confirmation dialog explaining files will be removed
 
 **Backend changes:**
+
 - New endpoint: `POST /onedrive/sync/{knowledge_id}/sources/remove` with `{ item_id: string }`
 - This endpoint removes the source from `meta.onedrive_sync.sources`, removes all files associated with that source's `drive_id + item_id`, and cleans up vectors
 
@@ -83,6 +88,7 @@ Add a dedicated source management view that separates "manage existing" from "ad
 Show a custom modal before the Microsoft picker:
 
 **UI Flow:**
+
 1. User clicks "+" (or a new "Manage" button)
 2. Custom modal opens showing currently synced sources as a checklist
 3. User can uncheck sources to remove them
@@ -115,6 +121,7 @@ For file-level removal: **disable the delete button for OneDrive-sourced files**
 ```
 
 Logic:
+
 1. Find and remove the source from `meta.onedrive_sync.sources` by `item_id`
 2. Find all files in the KB with `meta.onedrive_drive_id == source.drive_id` (for folder sources, need to track which files came from which source)
 3. Remove those files' KnowledgeFile junction rows
@@ -125,6 +132,7 @@ Logic:
 ### Challenge: File-to-Source Attribution
 
 Currently, files don't track which source (folder) they came from. The file's `meta` stores `onedrive_drive_id` and `onedrive_item_id` but not the parent folder's `item_id`. For folder sources, we'd need to either:
+
 - Add `source_item_id` to file metadata during sync (tracks which source folder the file belongs to)
 - Use the OneDrive `parentReference.path` to match files to folder sources (fragile, files can be nested)
 - Query the Graph API to list folder contents and match by `item_id` (requires valid token)

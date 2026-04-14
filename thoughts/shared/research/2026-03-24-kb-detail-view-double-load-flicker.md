@@ -4,8 +4,9 @@ researcher: Claude
 git_commit: 089440a1815b3f601550feb4c6e8bb772d8b2ca8
 branch: fix/test-bugs-daan-260323
 repository: open-webui
-topic: "KB detail view (KnowledgeBase.svelte) double-load flicker when opening any knowledge base"
-tags: [research, codebase, knowledge, knowledgebase, flicker, reactive-statements, svelte, double-load]
+topic: 'KB detail view (KnowledgeBase.svelte) double-load flicker when opening any knowledge base'
+tags:
+  [research, codebase, knowledge, knowledgebase, flicker, reactive-statements, svelte, double-load]
 status: complete
 last_updated: 2026-03-24
 last_updated_by: Claude
@@ -20,6 +21,7 @@ last_updated_by: Claude
 **Repository**: open-webui
 
 ## Research Question
+
 When opening a KB (OneDrive, integration, or local), the detail view UI appears to load twice causing a visible flicker.
 
 ## Summary
@@ -36,11 +38,11 @@ Note: the list view (`Knowledge.svelte`) had Fix 1 and Fix 2 already applied —
 
 **File:** `src/lib/components/workspace/Knowledge/KnowledgeBase.svelte`
 
-| Reactive block | Lines | Trigger | Debounced | Calls |
-|---------------|-------|---------|-----------|-------|
-| Query watcher | 128-134 | `query` changes | 300ms | `getItemsPage()` |
-| Filter/pagination watcher | 137-145 | `knowledgeId`, `viewOption`, `sortKey`, `direction`, `currentPage` | No | `getItemsPage()` |
-| Reset watcher | 147-154 | `query`, `viewOption`, `sortKey`, `direction` | No | `reset()` → changes `currentPage` → triggers block #2 |
+| Reactive block            | Lines   | Trigger                                                            | Debounced | Calls                                                 |
+| ------------------------- | ------- | ------------------------------------------------------------------ | --------- | ----------------------------------------------------- |
+| Query watcher             | 128-134 | `query` changes                                                    | 300ms     | `getItemsPage()`                                      |
+| Filter/pagination watcher | 137-145 | `knowledgeId`, `viewOption`, `sortKey`, `direction`, `currentPage` | No        | `getItemsPage()`                                      |
+| Reset watcher             | 147-154 | `query`, `viewOption`, `sortKey`, `direction`                      | No        | `reset()` → changes `currentPage` → triggers block #2 |
 
 ### Initialization Sequence
 
@@ -57,21 +59,22 @@ The key amplifier is `getItemsPage()` at lines 156-185:
 
 ```js
 const getItemsPage = async () => {
-    if (knowledgeId === null) return;
-    fileItems = null;         // ← Immediately shows spinner
-    fileItemsTotal = null;    // ← Immediately shows spinner
-    // ... fetch ...
-    fileItems = res.items;    // ← Shows files again
-    fileItemsTotal = res.total;
+	if (knowledgeId === null) return;
+	fileItems = null; // ← Immediately shows spinner
+	fileItemsTotal = null; // ← Immediately shows spinner
+	// ... fetch ...
+	fileItems = res.items; // ← Shows files again
+	fileItemsTotal = res.total;
 };
 ```
 
 The template at line 1694 switches between file list and spinner based on nullity:
+
 ```svelte
 {#if fileItems !== null && fileItemsTotal !== null}
-    <!-- file list -->
+	<!-- file list -->
 {:else}
-    <Spinner />   <!-- line 1864-1866 -->
+	<Spinner /> <!-- line 1864-1866 -->
 {/if}
 ```
 
@@ -116,16 +119,16 @@ Replace the three reactive blocks with a single guarded block (matching the list
 let loaded = false;
 
 $: if (loaded && knowledgeId !== null) {
-    void query, viewOption, sortKey, direction, currentPage;
+	(void query, viewOption, sortKey, direction, currentPage);
 
-    if (queryDebounceActive) {
-        clearTimeout(searchDebounceTimer);
-        searchDebounceTimer = setTimeout(() => {
-            getItemsPage();
-        }, 300);
-    } else {
-        getItemsPage();
-    }
+	if (queryDebounceActive) {
+		clearTimeout(searchDebounceTimer);
+		searchDebounceTimer = setTimeout(() => {
+			getItemsPage();
+		}, 300);
+	} else {
+		getItemsPage();
+	}
 }
 ```
 

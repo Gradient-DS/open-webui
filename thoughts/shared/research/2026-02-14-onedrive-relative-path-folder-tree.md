@@ -4,7 +4,7 @@ researcher: claude
 git_commit: e2832132eb3e68bfb92a62bbdd765625bb5f39af
 branch: feat/sync-improvements
 repository: open-webui
-topic: "OneDrive relative path computation for recursive folder tree display"
+topic: 'OneDrive relative path computation for recursive folder tree display'
 tags: [research, codebase, onedrive, graph-api, delta-query, relative-path, folder-tree]
 status: complete
 last_updated: 2026-02-14
@@ -20,11 +20,12 @@ last_updated_by: claude
 **Repository**: open-webui
 
 ## Research Question
+
 How to correctly compute relative paths for OneDrive files in subfolders, so the UI can display a recursive folder tree. The current implementation relies on `parentReference.path` from the Graph API delta response, but this may not be populated.
 
 ## Summary
 
-**Root cause**: Microsoft Graph API delta responses do **not reliably include** `parentReference.path`. The official docs state: *"The parentReference property on items will not include a value for path. This occurs because renaming a folder does not result in any descendants of the folder being returned from delta. When using delta you should always track items by id."*
+**Root cause**: Microsoft Graph API delta responses do **not reliably include** `parentReference.path`. The official docs state: _"The parentReference property on items will not include a value for path. This occurs because renaming a folder does not result in any descendants of the folder being returned from delta. When using delta you should always track items by id."_
 
 This means the current `_collect_folder_files()` code at `sync_worker.py:277` (`item.get("parentReference", {}).get("path", "")`) gets an empty string, causing all files to fall through to flat `relative_path = item_name` on line 294.
 
@@ -41,6 +42,7 @@ This means the current `_collect_folder_files()` code at `sync_worker.py:277` (`
 > "The parentReference property on items will not include a value for path."
 
 Fields that ARE available in delta responses:
+
 - `item.id` - item's unique ID
 - `item.name` - filename/folder name
 - `item.parentReference.id` - **parent folder's item ID** (key for path building)
@@ -50,6 +52,7 @@ Fields that ARE available in delta responses:
 - `item.@removed` / `item.deleted` - present if item was deleted
 
 Fields NOT reliably available:
+
 - `item.parentReference.path` - explicitly documented as absent in delta
 - `item.parentReference.name` - not guaranteed
 
@@ -131,6 +134,7 @@ On subsequent syncs, delta only returns **changed** items. Folder items may not 
 **Solutions** (pick one):
 
 **Option A: Persist `folder_map` in source metadata** (recommended)
+
 - After each sync, save `folder_map` to `source["folder_map"]` in the knowledge metadata
 - On incremental sync, load it first, then overlay new/changed folders from delta
 - Handles: folder renames (folder appears in delta with new name), new subfolders, deletions
@@ -152,11 +156,13 @@ source["folder_map"] = folder_map
 ```
 
 **Option B: Fall back to `get_item_metadata` for unknown parents**
+
 - When a file's `parentReference.id` is not in `folder_map`, call `GET /drives/{id}/items/{parent_id}` which DOES return `parentReference.path`
 - Build the relative path from the full path response
 - Pro: no persistence needed. Con: extra API calls, may hit rate limits
 
 **Option C: Use `list_folder_items_recursive` as fallback**
+
 - The existing `graph_client.py:133-155` method does a full recursive children enumeration and correctly computes `_relative_path`
 - Could be used as a fallback when delta returns items but folder_map is incomplete
 - Pro: already implemented. Con: O(N) API calls for N folders, doesn't benefit from delta efficiency
@@ -166,16 +172,19 @@ source["folder_map"] = folder_map
 For KBs that were synced before `relative_path` was implemented, delta returns 0 items (nothing changed), so files never get `relative_path` backfilled.
 
 **Option A: "Force Full Sync" button** (recommended)
+
 - Clear the `delta_link` for the source, forcing a full re-enumeration on next sync
 - Could be exposed as a "Refresh folder structure" button in the UI
 - Simple to implement: just set `source.delta_link = None` and trigger resync
 
 **Option B: One-time backfill using `list_folder_items_recursive`**
+
 - Before delta, call the recursive listing to get all files with `_relative_path`
 - Match by item ID and update existing file meta
 - Only needed once per source, could be gated by a `folder_map_version` field
 
 **Option C: Version-based forced re-sync** (previously attempted, reverted)
+
 - Track a `RELATIVE_PATH_VERSION` constant
 - If stored version < current, clear delta link to force full sync
 - Pro: automatic for all users. Con: forces full re-sync for everyone on upgrade

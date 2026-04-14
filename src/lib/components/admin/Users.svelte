@@ -19,7 +19,9 @@
 	$: {
 		const pathParts = $page.url.pathname.split('/');
 		const tabFromPath = pathParts[pathParts.length - 1];
-		selectedTab = ['overview', 'groups', 'invites'].includes(tabFromPath) ? tabFromPath : 'overview';
+		selectedTab = ['overview', 'groups', 'invites'].includes(tabFromPath)
+			? tabFromPath
+			: 'overview';
 	}
 
 	$: if (selectedTab) {
@@ -115,32 +117,32 @@
 		</a>
 
 		{#if $config?.features?.enable_email_invites}
-		<a
-			id="invites"
-			href="/admin/users/invites"
-			draggable="false"
-			class="px-0.5 py-1 min-w-fit rounded-lg lg:flex-none flex text-right transition select-none {selectedTab ===
-			'invites'
-				? 'bg-gray-100 dark:bg-gray-800'
-				: 'text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-850'}"
-		>
-			<div class=" self-center mr-2">
-				<svg
-					xmlns="http://www.w3.org/2000/svg"
-					viewBox="0 0 16 16"
-					fill="currentColor"
-					class="size-4"
-				>
-					<path
-						d="M2.5 3A1.5 1.5 0 0 0 1 4.5v.793c.026.009.051.02.076.032L7.674 8.51c.206.1.446.1.652 0l6.598-3.185A.755.755 0 0 1 15 5.293V4.5A1.5 1.5 0 0 0 13.5 3h-11Z"
-					/>
-					<path
-						d="M15 6.954 8.978 9.86a2.25 2.25 0 0 1-1.956 0L1 6.954V11.5A1.5 1.5 0 0 0 2.5 13h11a1.5 1.5 0 0 0 1.5-1.5V6.954Z"
-					/>
-				</svg>
-			</div>
-			<div class=" self-center">{$i18n.t('Pending Invites')}</div>
-		</a>
+			<a
+				id="invites"
+				href="/admin/users/invites"
+				draggable="false"
+				class="px-0.5 py-1 min-w-fit rounded-lg lg:flex-none flex text-right transition select-none {selectedTab ===
+				'invites'
+					? 'bg-gray-100 dark:bg-gray-800'
+					: 'text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-850'}"
+			>
+				<div class=" self-center mr-2">
+					<svg
+						xmlns="http://www.w3.org/2000/svg"
+						viewBox="0 0 16 16"
+						fill="currentColor"
+						class="size-4"
+					>
+						<path
+							d="M2.5 3A1.5 1.5 0 0 0 1 4.5v.793c.026.009.051.02.076.032L7.674 8.51c.206.1.446.1.652 0l6.598-3.185A.755.755 0 0 1 15 5.293V4.5A1.5 1.5 0 0 0 13.5 3h-11Z"
+						/>
+						<path
+							d="M15 6.954 8.978 9.86a2.25 2.25 0 0 1-1.956 0L1 6.954V11.5A1.5 1.5 0 0 0 2.5 13h11a1.5 1.5 0 0 0 1.5-1.5V6.954Z"
+						/>
+					</svg>
+				</div>
+				<div class=" self-center">{$i18n.t('Pending Invites')}</div>
+			</a>
 		{/if}
 	</div>
 

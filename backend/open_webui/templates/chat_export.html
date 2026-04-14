@@ -1,114 +1,123 @@
-<!DOCTYPE html>
+<!doctype html>
 <html>
-<head>
-    <meta charset="utf-8">
-    <style>
-        @page {
-            size: A4;
-            margin: 25mm 20mm 25mm 20mm;
-            @bottom-center {
-                content: "Pagina " counter(page) " van " counter(pages);
-                font-size: 9pt;
-                color: #666;
-            }
-        }
-        body {
-            font-family: 'Noto Sans', 'Arial', sans-serif;
-            font-size: 11pt;
-            line-height: 1.5;
-            color: #1a1a1a;
-        }
-        h1 { font-size: 18pt; margin-bottom: 8mm; }
-        .message { margin-bottom: 6mm; page-break-inside: avoid; }
-        .role {
-            font-weight: bold;
-            font-size: 10pt;
-            text-transform: uppercase;
-            color: #555;
-            margin-bottom: 2mm;
-        }
-        .content { margin-bottom: 4mm; }
-        table {
-            border-collapse: collapse;
-            width: 100%;
-            margin: 4mm 0;
-            font-size: 10pt;
-        }
-        th, td {
-            border: 1px solid #ccc;
-            padding: 3mm 4mm;
-            text-align: left;
-        }
-        th { background-color: #f5f5f5; font-weight: bold; }
-        sup {
-            font-size: 8pt;
-            color: #0066cc;
-            font-weight: bold;
-        }
-        .sources {
-            margin-top: 10mm;
-            padding-top: 5mm;
-            border-top: 1px solid #ccc;
-        }
-        .sources h2 {
-            font-size: 14pt;
-            margin-bottom: 4mm;
-        }
-        .source-item {
-            margin-bottom: 2mm;
-            font-size: 10pt;
-        }
-        .source-number {
-            font-weight: bold;
-            color: #0066cc;
-        }
-        .source-url {
-            color: #0066cc;
-            word-break: break-all;
-        }
-        pre {
-            background-color: #f6f8fa;
-            border-radius: 4px;
-            padding: 4mm;
-            overflow: auto;
-            font-size: 9pt;
-            font-family: 'Courier New', monospace;
-        }
-        code {
-            font-family: 'Courier New', monospace;
-            font-size: 9pt;
-        }
-        blockquote {
-            border-left: 3px solid #ddd;
-            padding-left: 4mm;
-            color: #555;
-            margin: 3mm 0;
-        }
-    </style>
-</head>
-<body>
-    <h1>{{ title }}</h1>
+	<head>
+		<meta charset="utf-8" />
+		<style>
+			@page {
+				size: A4;
+				margin: 25mm 20mm 25mm 20mm;
+				@bottom-center {
+					content: 'Pagina ' counter(page) ' van ' counter(pages);
+					font-size: 9pt;
+					color: #666;
+				}
+			}
+			body {
+				font-family: 'Noto Sans', 'Arial', sans-serif;
+				font-size: 11pt;
+				line-height: 1.5;
+				color: #1a1a1a;
+			}
+			h1 {
+				font-size: 18pt;
+				margin-bottom: 8mm;
+			}
+			.message {
+				margin-bottom: 6mm;
+				page-break-inside: avoid;
+			}
+			.role {
+				font-weight: bold;
+				font-size: 10pt;
+				text-transform: uppercase;
+				color: #555;
+				margin-bottom: 2mm;
+			}
+			.content {
+				margin-bottom: 4mm;
+			}
+			table {
+				border-collapse: collapse;
+				width: 100%;
+				margin: 4mm 0;
+				font-size: 10pt;
+			}
+			th,
+			td {
+				border: 1px solid #ccc;
+				padding: 3mm 4mm;
+				text-align: left;
+			}
+			th {
+				background-color: #f5f5f5;
+				font-weight: bold;
+			}
+			sup {
+				font-size: 8pt;
+				color: #0066cc;
+				font-weight: bold;
+			}
+			.sources {
+				margin-top: 10mm;
+				padding-top: 5mm;
+				border-top: 1px solid #ccc;
+			}
+			.sources h2 {
+				font-size: 14pt;
+				margin-bottom: 4mm;
+			}
+			.source-item {
+				margin-bottom: 2mm;
+				font-size: 10pt;
+			}
+			.source-number {
+				font-weight: bold;
+				color: #0066cc;
+			}
+			.source-url {
+				color: #0066cc;
+				word-break: break-all;
+			}
+			pre {
+				background-color: #f6f8fa;
+				border-radius: 4px;
+				padding: 4mm;
+				overflow: auto;
+				font-size: 9pt;
+				font-family: 'Courier New', monospace;
+			}
+			code {
+				font-family: 'Courier New', monospace;
+				font-size: 9pt;
+			}
+			blockquote {
+				border-left: 3px solid #ddd;
+				padding-left: 4mm;
+				color: #555;
+				margin: 3mm 0;
+			}
+		</style>
+	</head>
+	<body>
+		<h1>{{ title }}</h1>
 
-    {% for message in messages %}
-    <div class="message">
-        <div class="role">{{ message.role }}</div>
-        <div class="content">{{ message.html_content | safe }}</div>
-    </div>
-    {% endfor %}
-
-    {% if sources %}
-    <div class="sources">
-        <h2>Bronnen</h2>
-        {% for source in sources %}
-        <div class="source-item">
-            <span class="source-number">[{{ source.index }}]</span>
-            {{ source.name }}
-            {% if source.url and source.url != source.name %}
-            — <span class="source-url">{{ source.url }}</span>
-            {% endif %}
-        </div>
-        {% endfor %}
-    </div>
-    {% endif %}
-</body>
+		{% for message in messages %}
+		<div class="message">
+			<div class="role">{{ message.role }}</div>
+			<div class="content">{{ message.html_content | safe }}</div>
+		</div>
+		{% endfor %} {% if sources %}
+		<div class="sources">
+			<h2>Bronnen</h2>
+			{% for source in sources %}
+			<div class="source-item">
+				<span class="source-number">[{{ source.index }}]</span>
+				{{ source.name }} {% if source.url and source.url != source.name %} —
+				<span class="source-url">{{ source.url }}</span>
+				{% endif %}
+			</div>
+			{% endfor %}
+		</div>
+		{% endif %}
+	</body>
 </html>

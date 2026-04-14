@@ -53,6 +53,7 @@
 
 	export let imageGenerationEnabled = false;
 	export let codeInterpreterEnabled = false;
+	export let documentWriterEnabled = false;
 	export let webSearchEnabled = false;
 
 	export let onUpload: Function = (e) => {};
@@ -217,6 +218,7 @@
 					bind:selectedFilterIds
 					bind:imageGenerationEnabled
 					bind:codeInterpreterEnabled
+					bind:documentWriterEnabled
 					bind:webSearchEnabled
 					bind:atSelectedModel
 					bind:showCommands
@@ -232,8 +234,7 @@
 						dispatch('submit', e.detail);
 					}}
 				/>
-
-				</div>
+			</div>
 		</div>
 	</div>
 

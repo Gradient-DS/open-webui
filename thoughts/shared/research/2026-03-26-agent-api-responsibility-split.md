@@ -4,7 +4,7 @@ researcher: Claude Code
 git_commit: c0db5407764a3c167d1c971ee01b26284e7c2e28
 branch: dev
 repository: Gradient-DS/open-webui
-topic: "Agent API Responsibility Split: What the Agent Handles vs Open WebUI"
+topic: 'Agent API Responsibility Split: What the Agent Handles vs Open WebUI'
 tags: [research, codebase, agent-api, middleware, rag, web-search, title-generation, memory]
 status: complete
 last_updated: 2026-03-26
@@ -34,42 +34,47 @@ When `AGENT_API_ENABLED=true`, the **chat completion** is routed to an external 
 The `AGENT_API_ENABLED` flag gates three sections in `process_chat_payload()` in `middleware.py`:
 
 #### 1. Knowledge/RAG Retrieval (line 2271-2274)
+
 Open WebUI **skips** built-in knowledge flattening and RAG context injection. Raw KB references (id, name, type, collection_names) are passed to the agent via `metadata["knowledge"]`.
 
 #### 2. Web Search (line 2366-2375)
+
 Open WebUI **skips** the built-in `chat_web_search_handler()`. The agent receives the `web_search` feature flag in its payload and handles search itself.
 
 #### 3. Tool Resolution + RAG File Processing + Context Injection (line 2495-2502)
+
 The main bypass — the entire block that resolves tools, processes file attachments into RAG context, and builds the final prompt is **skipped**. The agent receives raw metadata (files, tool_ids, features, knowledge) and makes its own decisions.
 
 #### 4. LLM Routing (main.py:2095-2105)
+
 Instead of calling `chat_completion_handler` → Ollama/OpenAI, the request goes to `call_agent_api()` → `AGENT_API_BASE_URL/v1/chat/completions`.
 
 ### What Open WebUI Still Manages (NOT bypassed)
 
 These all run **regardless** of `AGENT_API_ENABLED`:
 
-| Feature | Phase | Where |
-|---------|-------|-------|
-| **Memory retrieval/injection** | Pre-request | `middleware.py:2359-2364` |
-| **Voice mode prompt** | Pre-request | `middleware.py:2347-2357` |
-| **Image generation prompt injection** | Pre-request | `middleware.py:2377-2382` |
-| **Code interpreter prompt injection** | Pre-request | `middleware.py:2384-2413` |
-| **Skills injection** | Pre-request | `middleware.py:2423-2461` |
-| **File/folder expansion** | Pre-request | `middleware.py:2469-2485` |
-| **Pipeline inlet/outlet** | Pre/post-request | `middleware.py` |
-| **Access control** | Pre-request | `main.py:1944-1951` |
-| **Title generation** | Post-response | `middleware.py:3022-3088` |
-| **Tag generation** | Post-response | `middleware.py:3090-3130` |
-| **Follow-up generation** | Post-response | `middleware.py:~2970-3017` |
-| **Chat persistence (DB)** | Post-response | `main.py:2106-2115` |
-| **WebSocket streaming** | During response | via `process_chat_response` |
+| Feature                               | Phase            | Where                       |
+| ------------------------------------- | ---------------- | --------------------------- |
+| **Memory retrieval/injection**        | Pre-request      | `middleware.py:2359-2364`   |
+| **Voice mode prompt**                 | Pre-request      | `middleware.py:2347-2357`   |
+| **Image generation prompt injection** | Pre-request      | `middleware.py:2377-2382`   |
+| **Code interpreter prompt injection** | Pre-request      | `middleware.py:2384-2413`   |
+| **Skills injection**                  | Pre-request      | `middleware.py:2423-2461`   |
+| **File/folder expansion**             | Pre-request      | `middleware.py:2469-2485`   |
+| **Pipeline inlet/outlet**             | Pre/post-request | `middleware.py`             |
+| **Access control**                    | Pre-request      | `main.py:1944-1951`         |
+| **Title generation**                  | Post-response    | `middleware.py:3022-3088`   |
+| **Tag generation**                    | Post-response    | `middleware.py:3090-3130`   |
+| **Follow-up generation**              | Post-response    | `middleware.py:~2970-3017`  |
+| **Chat persistence (DB)**             | Post-response    | `main.py:2106-2115`         |
+| **WebSocket streaming**               | During response  | via `process_chat_response` |
 
 ### Key Insight: Memory Is NOT Skipped
 
 Memory retrieval (`chat_memory_handler` at line 2359) runs **before** the `AGENT_API_ENABLED` early-return at line 2500. It's only gated by `features["memory"]` and `function_calling != "native"`.
 
 This means:
+
 - Open WebUI queries its memory store and **injects relevant memories into the system message** before sending to the agent
 - The agent receives messages that already contain memory context
 - The agent also receives `features: {"memory": true}` in its payload
@@ -84,6 +89,7 @@ Same applies to **tag generation** and **follow-up suggestion generation**.
 ### Data Flow Comparison
 
 **Without Agent API (standard flow):**
+
 ```
 Request → Pipeline Inlet → Memory Injection → Web Search → Image Gen → Code Interpreter
 → Skills → Tool Resolution → RAG File Processing → Context Injection
@@ -92,6 +98,7 @@ Request → Pipeline Inlet → Memory Injection → Web Search → Image Gen →
 ```
 
 **With Agent API enabled:**
+
 ```
 Request → Pipeline Inlet → Memory Injection → (web search SKIPPED)
 → Image Gen → Code Interpreter → Skills
@@ -105,21 +112,22 @@ Request → Pipeline Inlet → Memory Injection → (web search SKIPPED)
 
 The agent receives this payload via `AgentPayload` (`utils/agent.py:55-77`):
 
-| Field | Source | Notes |
-|-------|--------|-------|
-| `agent` | `AGENT_API_AGENT` env var | Which agent to invoke |
-| `model` | Selected model ID | |
-| `messages` | Full message history | **Memory already injected by Open WebUI** |
-| `features` | Feature flags dict | `{web_search: true, memory: true, ...}` |
-| `files` | Attached file metadata | Raw, not yet processed into RAG context |
-| `knowledge` | Raw KB references | `[{id, name, type, collection_names}]` |
-| `tool_ids` | Configured tool IDs | Not resolved, just IDs |
-| `rag_filter` | RAG filter config | |
-| `temperature`, etc. | Model parameters | |
+| Field               | Source                    | Notes                                     |
+| ------------------- | ------------------------- | ----------------------------------------- |
+| `agent`             | `AGENT_API_AGENT` env var | Which agent to invoke                     |
+| `model`             | Selected model ID         |                                           |
+| `messages`          | Full message history      | **Memory already injected by Open WebUI** |
+| `features`          | Feature flags dict        | `{web_search: true, memory: true, ...}`   |
+| `files`             | Attached file metadata    | Raw, not yet processed into RAG context   |
+| `knowledge`         | Raw KB references         | `[{id, name, type, collection_names}]`    |
+| `tool_ids`          | Configured tool IDs       | Not resolved, just IDs                    |
+| `rag_filter`        | RAG filter config         |                                           |
+| `temperature`, etc. | Model parameters          |                                           |
 
 ### SSE Protocol from Agent
 
 The agent returns a standard SSE stream with custom events:
+
 - `event: status` → routed to Socket.IO (shows "Searching..." etc.)
 - `event: source` → routed to Socket.IO (renders citation chips)
 - Standard `data:` lines → passed through to `process_chat_response` (token streaming)
@@ -134,20 +142,20 @@ There are **two separate systems** with confusingly similar names:
 
 ## Overlap & Gap Analysis
 
-| Concern | Open WebUI | Agent API | Overlap? |
-|---------|------------|-----------|----------|
-| **RAG / Knowledge retrieval** | Skipped | Agent handles | Clean handoff ✅ |
-| **Web search** | Skipped | Agent handles | Clean handoff ✅ |
-| **Tool resolution & calling** | Skipped | Agent handles | Clean handoff ✅ |
-| **Memory retrieval** | Injects into messages | Receives `memory: true` flag | **Overlap** ⚠️ |
-| **Title generation** | Always runs | No mechanism | Open WebUI only |
-| **Tag generation** | Always runs | No mechanism | Open WebUI only |
-| **Follow-up generation** | Always runs | No mechanism | Open WebUI only |
-| **Image gen prompt** | Always runs | Not involved | Open WebUI only |
-| **Code interpreter prompt** | Always runs | Not involved | Open WebUI only |
-| **Voice mode prompt** | Always runs | Not involved | Open WebUI only |
-| **Skills** | Always injected | Not involved | Open WebUI only |
-| **Chat persistence** | Always | Never | Open WebUI only |
+| Concern                       | Open WebUI            | Agent API                    | Overlap?         |
+| ----------------------------- | --------------------- | ---------------------------- | ---------------- |
+| **RAG / Knowledge retrieval** | Skipped               | Agent handles                | Clean handoff ✅ |
+| **Web search**                | Skipped               | Agent handles                | Clean handoff ✅ |
+| **Tool resolution & calling** | Skipped               | Agent handles                | Clean handoff ✅ |
+| **Memory retrieval**          | Injects into messages | Receives `memory: true` flag | **Overlap** ⚠️   |
+| **Title generation**          | Always runs           | No mechanism                 | Open WebUI only  |
+| **Tag generation**            | Always runs           | No mechanism                 | Open WebUI only  |
+| **Follow-up generation**      | Always runs           | No mechanism                 | Open WebUI only  |
+| **Image gen prompt**          | Always runs           | Not involved                 | Open WebUI only  |
+| **Code interpreter prompt**   | Always runs           | Not involved                 | Open WebUI only  |
+| **Voice mode prompt**         | Always runs           | Not involved                 | Open WebUI only  |
+| **Skills**                    | Always injected       | Not involved                 | Open WebUI only  |
+| **Chat persistence**          | Always                | Never                        | Open WebUI only  |
 
 ## Code References
 

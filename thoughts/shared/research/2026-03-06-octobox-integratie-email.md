@@ -16,10 +16,10 @@ Jullie pipeline levert al schone, geparsede tekst op uit documenten — dat is e
 
 Ons platform ondersteunt twee manieren om externe databronnen aan te sluiten:
 
-| Model | Hoe het werkt | Voorbeeld |
-|-------|--------------|-----------|
-| **Connected** | Wij verbinden met jullie systeem en synchroniseren periodiek op de achtergrond. Wij initiëren het ophalen van data. | OneDrive, SharePoint, Google Drive |
-| **Ingest** | Jullie sturen data naar ons API-endpoint wanneer er nieuwe of gewijzigde documenten zijn. Jullie initiëren het versturen. | Documentpipelines, ETL-processen, DMS-koppelingen |
+| Model         | Hoe het werkt                                                                                                             | Voorbeeld                                         |
+| ------------- | ------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------- |
+| **Connected** | Wij verbinden met jullie systeem en synchroniseren periodiek op de achtergrond. Wij initiëren het ophalen van data.       | OneDrive, SharePoint, Google Drive                |
+| **Ingest**    | Jullie sturen data naar ons API-endpoint wanneer er nieuwe of gewijzigde documenten zijn. Jullie initiëren het versturen. | Documentpipelines, ETL-processen, DMS-koppelingen |
 
 Voor jullie use case is het **Ingest-model** het meest geschikt: jullie pipeline produceert documenten en pusht ze naar ons endpoint. Geen polling, geen complexe sync-setup — gewoon een API-call wanneer jullie data klaar hebben.
 
@@ -37,40 +37,40 @@ De API werkt op twee niveaus: de **collectie** (knowledge base) en de **document
 
 Bij het aanmaken of bijwerken van een collectie sturen jullie de volgende informatie mee:
 
-| Veld | Type | Verplicht | Omschrijving |
-|------|------|-----------|-------------|
-| `source_id` | string | ja | Jullie unieke collectie-ID (voor updates en idempotentie) |
-| `name` | string | ja | Naam van de collectie, bijv. "Wetten & Regelgeving" |
-| `description` | string | ja | Omschrijving van de inhoud |
-| `language` | string | nee | Primaire taal, bijv. `nl` |
-| `tags` | list | nee | Labels, bijv. `["gemeente", "beleid"]` |
-| `metadata` | object | nee | Vrij veld voor overige collectie-metadata |
+| Veld          | Type   | Verplicht | Omschrijving                                              |
+| ------------- | ------ | --------- | --------------------------------------------------------- |
+| `source_id`   | string | ja        | Jullie unieke collectie-ID (voor updates en idempotentie) |
+| `name`        | string | ja        | Naam van de collectie, bijv. "Wetten & Regelgeving"       |
+| `description` | string | ja        | Omschrijving van de inhoud                                |
+| `language`    | string | nee       | Primaire taal, bijv. `nl`                                 |
+| `tags`        | list   | nee       | Labels, bijv. `["gemeente", "beleid"]`                    |
+| `metadata`    | object | nee       | Vrij veld voor overige collectie-metadata                 |
 
 ### Document-niveau
 
 Per document binnen de collectie:
 
-*Verplicht:*
+_Verplicht:_
 
-| Veld | Type | Omschrijving |
-|------|------|-------------|
-| `source_id` | string | Jullie unieke document-ID (nodig voor updates/verwijderingen) |
-| `filename` | string | Originele bestandsnaam |
-| `content_type` | string | MIME-type, bijv. `application/pdf`, `text/plain` |
-| `text` | string | De geparsede documenttekst |
+| Veld           | Type   | Omschrijving                                                  |
+| -------------- | ------ | ------------------------------------------------------------- |
+| `source_id`    | string | Jullie unieke document-ID (nodig voor updates/verwijderingen) |
+| `filename`     | string | Originele bestandsnaam                                        |
+| `content_type` | string | MIME-type, bijv. `application/pdf`, `text/plain`              |
+| `text`         | string | De geparsede documenttekst                                    |
 
-*Optioneel maar waardevol:*
+_Optioneel maar waardevol:_
 
-| Veld | Type | Omschrijving |
-|------|------|-------------|
-| `title` | string | Documenttitel (vaak duidelijker dan de bestandsnaam) |
-| `source_url` | string | Link naar het originele document (wordt getoond in bronvermelding) |
-| `language` | string | Taalcode, bijv. `nl`, `en` |
-| `author` | string | Auteur van het document |
-| `created_at` | string | Aanmaakdatum (ISO 8601) |
-| `modified_at` | string | Laatst gewijzigd (ISO 8601) |
-| `tags` | list | Labels/categorieën, bijv. `["beleid", "privacy"]` |
-| `metadata` | object | Vrij veld voor overige metadata |
+| Veld          | Type   | Omschrijving                                                       |
+| ------------- | ------ | ------------------------------------------------------------------ |
+| `title`       | string | Documenttitel (vaak duidelijker dan de bestandsnaam)               |
+| `source_url`  | string | Link naar het originele document (wordt getoond in bronvermelding) |
+| `language`    | string | Taalcode, bijv. `nl`, `en`                                         |
+| `author`      | string | Auteur van het document                                            |
+| `created_at`  | string | Aanmaakdatum (ISO 8601)                                            |
+| `modified_at` | string | Laatst gewijzigd (ISO 8601)                                        |
+| `tags`        | list   | Labels/categorieën, bijv. `["beleid", "privacy"]`                  |
+| `metadata`    | object | Vrij veld voor overige metadata                                    |
 
 Hoe meer metadata, hoe beter de zoekresultaten en bronvermeldingen. Vooral `title`, `source_url` en `language` voegen veel waarde toe.
 

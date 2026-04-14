@@ -4,7 +4,7 @@ researcher: Claude
 git_commit: cdcfcc8a2
 branch: feat/logos
 repository: Gradient-DS/open-webui
-topic: "Split Agents and Prompts into separate sidebar items (like Knowledge)"
+topic: 'Split Agents and Prompts into separate sidebar items (like Knowledge)'
 tags: [research, codebase, sidebar, agents, prompts, knowledge, workspace, navigation]
 status: complete
 last_updated: 2026-03-30
@@ -28,6 +28,7 @@ What would it take to split "Agents & prompts" into separate sidebar items (like
 The change is **minimal and well-isolated** — it touches only 2 files, both of which are already customized. The pattern is already established by Knowledge. The key insight: upstream's "Agents & prompts" sidebar link and workspace tab ribbon are a single upstream pattern. We replace the combined link with two individual links (following Knowledge's exact pattern) and extend the tab ribbon exclusion to also hide for agents/prompts routes.
 
 **Files to change:**
+
 1. `src/lib/components/layout/Sidebar.svelte` — replace one combined block with two separate blocks (2 locations: collapsed + expanded)
 2. `src/routes/(app)/workspace/+layout.svelte` — extend Knowledge's ribbon-hiding condition to also cover models and prompts routes
 
@@ -40,6 +41,7 @@ The change is **minimal and well-isolated** — it touches only 2 files, both of
 The sidebar has a single "Agents & prompts" link (`href="/workspace"`) that requires 2 clicks to reach either section (sidebar → workspace → tab). Knowledge already has its own dedicated sidebar link (`href="/workspace/knowledge"`) with the ribbon suppressed.
 
 **Current sidebar order (both collapsed and expanded):**
+
 1. New Chat
 2. Search
 3. Notes (feature-flagged)
@@ -49,6 +51,7 @@ The sidebar has a single "Agents & prompts" link (`href="/workspace"`) that requ
 ### Target State
 
 Replace item 5 with two separate items:
+
 1. New Chat
 2. Search
 3. Notes
@@ -70,49 +73,49 @@ Replace the single block with two separate blocks, following the exact Knowledge
 
 ```svelte
 {#if isFeatureEnabled('models') && ($user?.role === 'admin' || $user?.permissions?.workspace?.models)}
-  <div class="">
-    <Tooltip content={$i18n.t('Agents')} placement="right">
-      <a
-        class=" cursor-pointer flex rounded-xl hover:bg-gray-100 dark:hover:bg-gray-850 transition group"
-        href="/workspace/models"
-        on:click={async (e) => {
-          e.stopImmediatePropagation();
-          e.preventDefault();
-          goto('/workspace/models');
-          itemClickHandler();
-        }}
-        draggable="false"
-        aria-label={$i18n.t('Agents')}
-      >
-        <div class=" self-center flex items-center justify-center size-9">
-          <Sparkles className="size-4.5" strokeWidth="2" />
-        </div>
-      </a>
-    </Tooltip>
-  </div>
+	<div class="">
+		<Tooltip content={$i18n.t('Agents')} placement="right">
+			<a
+				class=" cursor-pointer flex rounded-xl hover:bg-gray-100 dark:hover:bg-gray-850 transition group"
+				href="/workspace/models"
+				on:click={async (e) => {
+					e.stopImmediatePropagation();
+					e.preventDefault();
+					goto('/workspace/models');
+					itemClickHandler();
+				}}
+				draggable="false"
+				aria-label={$i18n.t('Agents')}
+			>
+				<div class=" self-center flex items-center justify-center size-9">
+					<Sparkles className="size-4.5" strokeWidth="2" />
+				</div>
+			</a>
+		</Tooltip>
+	</div>
 {/if}
 
 {#if isFeatureEnabled('prompts') && ($user?.role === 'admin' || $user?.permissions?.workspace?.prompts)}
-  <div class="">
-    <Tooltip content={$i18n.t('Prompts')} placement="right">
-      <a
-        class=" cursor-pointer flex rounded-xl hover:bg-gray-100 dark:hover:bg-gray-850 transition group"
-        href="/workspace/prompts"
-        on:click={async (e) => {
-          e.stopImmediatePropagation();
-          e.preventDefault();
-          goto('/workspace/prompts');
-          itemClickHandler();
-        }}
-        draggable="false"
-        aria-label={$i18n.t('Prompts')}
-      >
-        <div class=" self-center flex items-center justify-center size-9">
-          <CommandLine className="size-4.5" strokeWidth="2" />
-        </div>
-      </a>
-    </Tooltip>
-  </div>
+	<div class="">
+		<Tooltip content={$i18n.t('Prompts')} placement="right">
+			<a
+				class=" cursor-pointer flex rounded-xl hover:bg-gray-100 dark:hover:bg-gray-850 transition group"
+				href="/workspace/prompts"
+				on:click={async (e) => {
+					e.stopImmediatePropagation();
+					e.preventDefault();
+					goto('/workspace/prompts');
+					itemClickHandler();
+				}}
+				draggable="false"
+				aria-label={$i18n.t('Prompts')}
+			>
+				<div class=" self-center flex items-center justify-center size-9">
+					<CommandLine className="size-4.5" strokeWidth="2" />
+				</div>
+			</a>
+		</Tooltip>
+	</div>
 {/if}
 ```
 
@@ -122,52 +125,53 @@ Same pattern, following Knowledge's expanded block (lines 1051-1070):
 
 ```svelte
 {#if isFeatureEnabled('models') && ($user?.role === 'admin' || $user?.permissions?.workspace?.models)}
-  <div class="px-[0.4375rem] flex justify-center text-gray-800 dark:text-gray-200">
-    <a
-      id="sidebar-agents-button"
-      class="grow flex items-center space-x-3 rounded-2xl px-2.5 py-2 hover:bg-gray-100 dark:hover:bg-gray-900 transition"
-      href="/workspace/models"
-      on:click={itemClickHandler}
-      draggable="false"
-      aria-label={$i18n.t('Agents')}
-    >
-      <div class="self-center">
-        <Sparkles className="size-4.5" strokeWidth="2" />
-      </div>
-      <div class="flex self-center translate-y-[0.5px]">
-        <div class=" self-center text-sm font-primary">{$i18n.t('Agents')}</div>
-      </div>
-    </a>
-  </div>
+	<div class="px-[0.4375rem] flex justify-center text-gray-800 dark:text-gray-200">
+		<a
+			id="sidebar-agents-button"
+			class="grow flex items-center space-x-3 rounded-2xl px-2.5 py-2 hover:bg-gray-100 dark:hover:bg-gray-900 transition"
+			href="/workspace/models"
+			on:click={itemClickHandler}
+			draggable="false"
+			aria-label={$i18n.t('Agents')}
+		>
+			<div class="self-center">
+				<Sparkles className="size-4.5" strokeWidth="2" />
+			</div>
+			<div class="flex self-center translate-y-[0.5px]">
+				<div class=" self-center text-sm font-primary">{$i18n.t('Agents')}</div>
+			</div>
+		</a>
+	</div>
 {/if}
 
 {#if isFeatureEnabled('prompts') && ($user?.role === 'admin' || $user?.permissions?.workspace?.prompts)}
-  <div class="px-[0.4375rem] flex justify-center text-gray-800 dark:text-gray-200">
-    <a
-      id="sidebar-prompts-button"
-      class="grow flex items-center space-x-3 rounded-2xl px-2.5 py-2 hover:bg-gray-100 dark:hover:bg-gray-900 transition"
-      href="/workspace/prompts"
-      on:click={itemClickHandler}
-      draggable="false"
-      aria-label={$i18n.t('Prompts')}
-    >
-      <div class="self-center">
-        <CommandLine className="size-4.5" strokeWidth="2" />
-      </div>
-      <div class="flex self-center translate-y-[0.5px]">
-        <div class=" self-center text-sm font-primary">{$i18n.t('Prompts')}</div>
-      </div>
-    </a>
-  </div>
+	<div class="px-[0.4375rem] flex justify-center text-gray-800 dark:text-gray-200">
+		<a
+			id="sidebar-prompts-button"
+			class="grow flex items-center space-x-3 rounded-2xl px-2.5 py-2 hover:bg-gray-100 dark:hover:bg-gray-900 transition"
+			href="/workspace/prompts"
+			on:click={itemClickHandler}
+			draggable="false"
+			aria-label={$i18n.t('Prompts')}
+		>
+			<div class="self-center">
+				<CommandLine className="size-4.5" strokeWidth="2" />
+			</div>
+			<div class="flex self-center translate-y-[0.5px]">
+				<div class=" self-center text-sm font-primary">{$i18n.t('Prompts')}</div>
+			</div>
+		</a>
+	</div>
 {/if}
 ```
 
 #### Import additions
 
 Add to the imports at the top of `Sidebar.svelte`:
+
 ```svelte
-import Sparkles from '../icons/Sparkles.svelte';
-import CommandLine from '../icons/CommandLine.svelte';
+import Sparkles from '../icons/Sparkles.svelte'; import CommandLine from
+'../icons/CommandLine.svelte';
 ```
 
 ### Change 2: Workspace Layout — Hide Ribbon
@@ -212,7 +216,7 @@ Available icons in `src/lib/components/icons/` that fit semantically:
 
 **Low conflict risk.** Here's why:
 
-1. **Sidebar.svelte** — we are *replacing* the "Agents & prompts" block (lines 820-855 and 1072-1104). If upstream modifies this block, we'll get a clean merge conflict on exactly those lines — easy to resolve by re-applying our split pattern. If upstream adds new items above or below, git auto-merges cleanly.
+1. **Sidebar.svelte** — we are _replacing_ the "Agents & prompts" block (lines 820-855 and 1072-1104). If upstream modifies this block, we'll get a clean merge conflict on exactly those lines — easy to resolve by re-applying our split pattern. If upstream adds new items above or below, git auto-merges cleanly.
 
 2. **Workspace +layout.svelte** — we only extend the condition on line 85. If upstream changes this condition (e.g., adds another exclusion), it's a one-line merge conflict.
 
@@ -248,6 +252,7 @@ Available icons in `src/lib/components/icons/` that fit semantically:
 ## Architecture Insights
 
 The Knowledge sidebar pattern is a clean, minimal customization:
+
 - **Sidebar:** separate `{#if}` block with its own feature flag check, icon, label, and direct link
 - **Layout:** one-line condition extension to hide the ribbon
 - **No new routes, components, or config**

@@ -4,7 +4,7 @@ researcher: Claude
 git_commit: 9ab05599354f1df089058126f0fdf279d8bda99f
 branch: feat/proprietary-warnings
 repository: open-webui
-topic: "Make cloud file selection appear instantly in chat input like local files"
+topic: 'Make cloud file selection appear instantly in chat input like local files'
 tags: [research, codebase, google-drive, onedrive, file-upload, UX, chat-input]
 status: complete
 last_updated: 2026-04-10
@@ -20,6 +20,7 @@ last_updated_by: Claude
 **Repository**: open-webui
 
 ## Research Question
+
 When selecting a file from Google Drive or OneDrive, there's a 1-2 second delay before it appears in the chat input. Can we make this instant, like local file selection?
 
 ## Summary
@@ -59,6 +60,7 @@ The delay is between the user clicking "Select" in the picker and the placeholde
 `src/lib/utils/google-drive-picker.ts:213-265`
 
 The picker callback fires when the user selects a file (line 213). At this point, file metadata is available:
+
 - `fileName` (line 218)
 - `mimeType` (line 219)
 - `fileId` (line 217)
@@ -77,13 +79,13 @@ The picker modal returns file items with names at line 981. But then all files a
 
 ```js
 const fileItem = {
-    type: 'file',
-    name: file.name,
-    status: 'uploading',  // Shows loading spinner
-    size: file.size,
-    // ...
+	type: 'file',
+	name: file.name,
+	status: 'uploading', // Shows loading spinner
+	size: file.size
+	// ...
 };
-files = [...files, fileItem];  // Line 657 — instant UI update
+files = [...files, fileItem]; // Line 657 — instant UI update
 ```
 
 This is the mechanism we want to trigger **before** the cloud download.
@@ -237,23 +239,25 @@ Add an `existingItemId` parameter to `uploadFileHandler`:
 
 ```javascript
 const uploadFileHandler = async (file, process = true, itemData = {}, existingItemId = null) => {
-    // ... permission checks ...
+	// ... permission checks ...
 
-    let fileItem;
-    if (existingItemId) {
-        const idx = files.findIndex(f => f.itemId === existingItemId);
-        if (idx !== -1) {
-            fileItem = files[idx];
-            fileItem.size = file.size;
-            files = files;  // trigger reactivity
-        }
-    }
-    if (!fileItem) {
-        fileItem = { /* existing creation logic */ };
-        files = [...files, fileItem];
-    }
+	let fileItem;
+	if (existingItemId) {
+		const idx = files.findIndex((f) => f.itemId === existingItemId);
+		if (idx !== -1) {
+			fileItem = files[idx];
+			fileItem.size = file.size;
+			files = files; // trigger reactivity
+		}
+	}
+	if (!fileItem) {
+		fileItem = {
+			/* existing creation logic */
+		};
+		files = [...files, fileItem];
+	}
 
-    // ... rest of upload logic unchanged, mutates fileItem in place ...
+	// ... rest of upload logic unchanged, mutates fileItem in place ...
 };
 ```
 

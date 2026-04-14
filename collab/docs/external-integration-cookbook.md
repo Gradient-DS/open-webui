@@ -603,6 +603,7 @@ stop_scheduler = _scheduler.stop
 **File:** `backend/open_webui/services/sync/provider.py`
 
 Add to `get_sync_provider()` (~line 150):
+
 ```python
 elif provider_type == "provider_name":
     from open_webui.services.provider.provider import ProviderSyncProvider
@@ -610,6 +611,7 @@ elif provider_type == "provider_name":
 ```
 
 Add to `get_token_manager()` (~line 165):
+
 ```python
 elif provider_type == "provider_name":
     from open_webui.services.provider.provider import ProviderTokenManager
@@ -771,6 +773,7 @@ export type { SyncItem };
 This is the most provider-specific frontend component. It handles launching the provider's file/folder selection UI and returning selected items.
 
 Options:
+
 - **Provider SDK picker** (like Google Picker API) — load the SDK script, configure, and handle selection
 - **Custom modal** — build your own folder browser using the provider's list API
 - **OAuth redirect flow** — some providers (like OneDrive) use a redirect-based picker
@@ -819,19 +822,20 @@ Add the provider type option to the KB creation flow type selector.
 
 ## Provider-Specific Considerations
 
-| Aspect | Google Drive | OneDrive | Notes for New Providers |
-|--------|-------------|----------|------------------------|
-| Change detection | `modifiedTime` comparison | Delta tokens (`delta_link`) | Delta tokens are more efficient but require tracking state |
-| File export | Google Workspace files need export (Docs→docx, Sheets→xlsx) | Native file download | Some providers have proprietary formats needing conversion |
-| Folder recursion | Manual recursive listing | Delta API returns flat list with parent refs | Flat listing is simpler; recursive needs depth tracking |
-| Permissions | Google Drive permissions API | Microsoft Graph permissions | Map provider users to Open WebUI users by email |
-| Rate limits | Per-user quotas, 429 with Retry-After | Per-app throttling, 429 with Retry-After | Always implement backoff in your API client |
-| OAuth | Standard OAuth 2.0 + PKCE optional | OAuth 2.0 with tenant-specific endpoints | Some providers require PKCE or have unique token flows |
-| Max file size | Configurable (default 100MB) | Configurable (default 100MB) | Large files may need chunked download |
+| Aspect           | Google Drive                                                | OneDrive                                     | Notes for New Providers                                    |
+| ---------------- | ----------------------------------------------------------- | -------------------------------------------- | ---------------------------------------------------------- |
+| Change detection | `modifiedTime` comparison                                   | Delta tokens (`delta_link`)                  | Delta tokens are more efficient but require tracking state |
+| File export      | Google Workspace files need export (Docs→docx, Sheets→xlsx) | Native file download                         | Some providers have proprietary formats needing conversion |
+| Folder recursion | Manual recursive listing                                    | Delta API returns flat list with parent refs | Flat listing is simpler; recursive needs depth tracking    |
+| Permissions      | Google Drive permissions API                                | Microsoft Graph permissions                  | Map provider users to Open WebUI users by email            |
+| Rate limits      | Per-user quotas, 429 with Retry-After                       | Per-app throttling, 429 with Retry-After     | Always implement backoff in your API client                |
+| OAuth            | Standard OAuth 2.0 + PKCE optional                          | OAuth 2.0 with tenant-specific endpoints     | Some providers require PKCE or have unique token flows     |
+| Max file size    | Configurable (default 100MB)                                | Configurable (default 100MB)                 | Large files may need chunked download                      |
 
 ## Testing Checklist
 
 ### Per-Provider:
+
 - [ ] Create KB with provider type → verify creation flow
 - [ ] Authenticate via OAuth popup → verify token stored
 - [ ] Pick folder/files → verify sources saved to metadata
@@ -844,6 +848,7 @@ Add the provider type option to the KB creation flow type selector.
 - [ ] Permission sync → verify `access_grants` updated on KB
 
 ### Cross-Provider:
+
 - [ ] Create one KB per provider simultaneously → verify no event/state collision
 - [ ] Socket events correctly prefixed (e.g., `provider:sync:progress`)
 - [ ] `npm run build` compiles successfully
@@ -851,10 +856,10 @@ Add the provider type option to the KB creation flow type selector.
 
 ## Reference Implementations
 
-| Provider | Complexity | Best For |
-|----------|-----------|----------|
-| **Google Drive** (`services/google_drive/`) | Simpler | Starting point — straightforward OAuth, no delta tokens, clean API |
-| **OneDrive** (`services/onedrive/`) | More complex | Delta sync reference, legacy migration patterns, Microsoft Graph API |
+| Provider                                    | Complexity   | Best For                                                             |
+| ------------------------------------------- | ------------ | -------------------------------------------------------------------- |
+| **Google Drive** (`services/google_drive/`) | Simpler      | Starting point — straightforward OAuth, no delta tokens, clean API   |
+| **OneDrive** (`services/onedrive/`)         | More complex | Delta sync reference, legacy migration patterns, Microsoft Graph API |
 
 ## Files Created (New Provider)
 
@@ -897,14 +902,14 @@ helm/*/values.yaml                        # Deployment config (if using Helm)
 
 ## Estimated Effort
 
-| Component | Files | Effort |
-|-----------|-------|--------|
-| API client | 1 | Medium (depends on API complexity) |
-| Auth module | 1 | Low-Medium (OAuth 2.0 is mostly boilerplate) |
-| Token refresh | 1 | Low (boilerplate) |
-| Sync worker | 1 | Medium (file collection + download logic) |
-| Provider + wrappers | 3 | Low (boilerplate) |
-| Router | 1 | Low (delegates to shared helpers) |
-| Config + registration | 3 files modified | Low |
-| Frontend | 3-4 | Medium (picker is the hard part) |
-| **Total** | ~10 new + ~5 modified | **1-3 days** depending on API complexity |
+| Component             | Files                 | Effort                                       |
+| --------------------- | --------------------- | -------------------------------------------- |
+| API client            | 1                     | Medium (depends on API complexity)           |
+| Auth module           | 1                     | Low-Medium (OAuth 2.0 is mostly boilerplate) |
+| Token refresh         | 1                     | Low (boilerplate)                            |
+| Sync worker           | 1                     | Medium (file collection + download logic)    |
+| Provider + wrappers   | 3                     | Low (boilerplate)                            |
+| Router                | 1                     | Low (delegates to shared helpers)            |
+| Config + registration | 3 files modified      | Low                                          |
+| Frontend              | 3-4                   | Medium (picker is the hard part)             |
+| **Total**             | ~10 new + ~5 modified | **1-3 days** depending on API complexity     |

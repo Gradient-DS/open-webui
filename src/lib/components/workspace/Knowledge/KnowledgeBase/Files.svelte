@@ -68,7 +68,6 @@
 								<span class="text-xs text-gray-500">{formatFileSize(file?.meta?.size)}</span>
 							{/if}
 						</div>
-
 					</div>
 				</div>
 

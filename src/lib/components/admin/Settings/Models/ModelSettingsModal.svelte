@@ -124,10 +124,12 @@
 			capabilities: defaultCapabilities,
 			...(defaultFeatureIds.length > 0 ? { defaultFeatureIds } : {}),
 			...(Object.keys(builtinTools).length > 0 ? { builtinTools } : {}),
-			...(Object.values(defaultDataWarnings).some((v) => v) ? {
-				data_warnings: defaultDataWarnings,
-				data_warning_message: defaultWarningMessage || ''
-			} : {})
+			...(Object.values(defaultDataWarnings).some((v) => v)
+				? {
+						data_warnings: defaultDataWarnings,
+						data_warning_message: defaultWarningMessage || ''
+					}
+				: {})
 		};
 
 		const res = await setModelsConfig(localStorage.token, {
@@ -351,7 +353,10 @@
 
 													{#if $_config?.features?.enable_data_warnings}
 														<div class="mt-4">
-															<DataWarnings bind:dataWarnings={defaultDataWarnings} bind:warningMessage={defaultWarningMessage} />
+															<DataWarnings
+																bind:dataWarnings={defaultDataWarnings}
+																bind:warningMessage={defaultWarningMessage}
+															/>
 														</div>
 													{/if}
 												</div>

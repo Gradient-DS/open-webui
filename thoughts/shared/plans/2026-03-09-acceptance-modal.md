@@ -12,6 +12,7 @@ Add a configurable acceptance modal (blocking overlay) that users must accept on
 - User settings are stored as a JSON column (`User.settings`) with `extra="allow"`, allowing new fields without migrations
 
 ### Key Discoveries:
+
 - `PersistentConfig` pattern: `config.py:165-222` — env var + database-backed config
 - Admin config GET/POST: `routers/auths.py:928-1039` — `AdminConfig` Pydantic model + GET/POST handlers
 - `/api/config` features: `main.py:2109-2114` — `ui` section exposes settings to frontend
@@ -28,6 +29,7 @@ Add a configurable acceptance modal (blocking overlay) that users must accept on
 - Admin UI controls live in Admin > Settings > General, near the existing "Pending User Overlay" section
 
 ### Verification:
+
 1. Enable the modal in admin settings with custom title/content
 2. Log in as a regular user — blocking overlay appears
 3. Click accept — overlay dismissed, user can use the app
@@ -51,11 +53,13 @@ Track acceptance via a SHA-256 hash of `title + content` stored in `user.setting
 ## Phase 1: Backend — Config & API
 
 ### Overview
+
 Add PersistentConfig settings and expose them through the admin config API and the public `/api/config` endpoint.
 
 ### Changes Required:
 
 #### 1. Add PersistentConfig declarations
+
 **File**: `backend/open_webui/config.py` (after line 1248, near `PENDING_USER_OVERLAY_CONTENT`)
 
 ```python
@@ -85,9 +89,11 @@ ACCEPTANCE_MODAL_BUTTON_TEXT = PersistentConfig(
 ```
 
 #### 2. Register on app.state.config
+
 **File**: `backend/open_webui/main.py`
 
 Add imports (in the import block from `config.py`, around line 388):
+
 ```python
 ENABLE_ACCEPTANCE_MODAL,
 ACCEPTANCE_MODAL_TITLE,
@@ -96,6 +102,7 @@ ACCEPTANCE_MODAL_BUTTON_TEXT,
 ```
 
 Add registration (after line 840, near `PENDING_USER_OVERLAY_TITLE`):
+
 ```python
 app.state.config.ENABLE_ACCEPTANCE_MODAL = ENABLE_ACCEPTANCE_MODAL
 app.state.config.ACCEPTANCE_MODAL_TITLE = ACCEPTANCE_MODAL_TITLE
@@ -104,6 +111,7 @@ app.state.config.ACCEPTANCE_MODAL_BUTTON_TEXT = ACCEPTANCE_MODAL_BUTTON_TEXT
 ```
 
 Add to `/api/config` response `ui` section (after line 2113, inside the `"ui"` dict):
+
 ```python
 "enable_acceptance_modal": app.state.config.ENABLE_ACCEPTANCE_MODAL,
 "acceptance_modal_title": app.state.config.ACCEPTANCE_MODAL_TITLE,
@@ -112,9 +120,11 @@ Add to `/api/config` response `ui` section (after line 2113, inside the `"ui"` d
 ```
 
 #### 3. Add to admin config endpoints
+
 **File**: `backend/open_webui/routers/auths.py`
 
 Add to `get_admin_config` response dict (after line 948):
+
 ```python
 "ENABLE_ACCEPTANCE_MODAL": request.app.state.config.ENABLE_ACCEPTANCE_MODAL,
 "ACCEPTANCE_MODAL_TITLE": request.app.state.config.ACCEPTANCE_MODAL_TITLE,
@@ -123,6 +133,7 @@ Add to `get_admin_config` response dict (after line 948):
 ```
 
 Add to `AdminConfig` Pydantic model (after line 970):
+
 ```python
 ENABLE_ACCEPTANCE_MODAL: bool
 ACCEPTANCE_MODAL_TITLE: Optional[str] = None
@@ -131,6 +142,7 @@ ACCEPTANCE_MODAL_BUTTON_TEXT: Optional[str] = None
 ```
 
 Add to `update_admin_config` handler (after line 1018):
+
 ```python
 request.app.state.config.ENABLE_ACCEPTANCE_MODAL = form_data.ENABLE_ACCEPTANCE_MODAL
 request.app.state.config.ACCEPTANCE_MODAL_TITLE = form_data.ACCEPTANCE_MODAL_TITLE
@@ -139,6 +151,7 @@ request.app.state.config.ACCEPTANCE_MODAL_BUTTON_TEXT = form_data.ACCEPTANCE_MOD
 ```
 
 Add to `update_admin_config` response dict (after line 1038):
+
 ```python
 "ENABLE_ACCEPTANCE_MODAL": request.app.state.config.ENABLE_ACCEPTANCE_MODAL,
 "ACCEPTANCE_MODAL_TITLE": request.app.state.config.ACCEPTANCE_MODAL_TITLE,
@@ -149,12 +162,14 @@ Add to `update_admin_config` response dict (after line 1038):
 ### Success Criteria:
 
 #### Automated Verification:
+
 - [x] Backend starts without errors: `open-webui dev`
 - [ ] `GET /api/v1/auths/admin/config` returns the new fields
 - [ ] `POST /api/v1/auths/admin/config` accepts and persists the new fields
 - [ ] `GET /api/config` includes acceptance modal settings in the `ui` section
 
 #### Manual Verification:
+
 - [ ] Restart the server — settings persist across restarts
 - [ ] Set env vars `ENABLE_ACCEPTANCE_MODAL=true` etc. — they serve as defaults
 
@@ -165,11 +180,13 @@ Add to `update_admin_config` response dict (after line 1038):
 ## Phase 2: Frontend — AcceptanceModal Component
 
 ### Overview
+
 Create the blocking overlay component, closely following the `AccountPending.svelte` design pattern.
 
 ### Changes Required:
 
 #### 1. Create AcceptanceModal overlay
+
 **File**: `src/lib/components/layout/Overlay/AcceptanceModal.svelte` (new file)
 
 ```svelte
@@ -260,10 +277,12 @@ Create the blocking overlay component, closely following the `AccountPending.sve
 ### Success Criteria:
 
 #### Automated Verification:
+
 - [x] No TypeScript errors: `npm run check` (no new errors beyond pre-existing)
 - [x] Frontend builds: `npm run build`
 
 #### Manual Verification:
+
 - [ ] Component renders correctly (will test in Phase 4 integration)
 
 **Implementation Note**: After completing this phase, proceed directly to Phase 3.
@@ -273,11 +292,13 @@ Create the blocking overlay component, closely following the `AccountPending.sve
 ## Phase 3: Frontend — Admin UI Controls
 
 ### Overview
+
 Add acceptance modal configuration controls to Admin > Settings > General, grouped near the existing "Pending User Overlay" section.
 
 ### Changes Required:
 
 #### 1. Add admin controls
+
 **File**: `src/lib/components/admin/Settings/General.svelte`
 
 After the "Pending User Overlay Content" textarea block (after line 377), add:
@@ -330,9 +351,11 @@ After the "Pending User Overlay Content" textarea block (after line 377), add:
 ### Success Criteria:
 
 #### Automated Verification:
+
 - [x] Frontend builds: `npm run build`
 
 #### Manual Verification:
+
 - [ ] Admin > Settings > General shows the new "Enable Acceptance Modal" toggle
 - [ ] Toggle reveals title/content/button text fields when enabled
 - [ ] Saving persists the settings (refresh and verify they reload)
@@ -345,19 +368,23 @@ After the "Pending User Overlay Content" textarea block (after line 377), add:
 ## Phase 4: Frontend — Layout Integration
 
 ### Overview
+
 Mount the AcceptanceModal in the app layout, showing it when enabled and the user hasn't accepted the current terms.
 
 ### Changes Required:
 
 #### 1. Integrate in app layout
+
 **File**: `src/routes/(app)/+layout.svelte`
 
 Add import (near line 44, after `AccountPending` import):
+
 ```svelte
 import AcceptanceModal from '$lib/components/layout/Overlay/AcceptanceModal.svelte';
 ```
 
 Add state variable and hash computation in the `<script>` block (inside `onMount`, after the changelog check around line 264):
+
 ```svelte
 // Acceptance modal check
 let showAcceptanceModal = false;
@@ -384,6 +411,7 @@ const checkAcceptanceModal = async () => {
 Call `checkAcceptanceModal()` inside `onMount` after the settings are loaded.
 
 Add the overlay in the template (after the `AccountPending` block, inside the `{:else}` branch around line 327):
+
 ```svelte
 {#if showAcceptanceModal}
 	<AcceptanceModal
@@ -398,6 +426,7 @@ Add the overlay in the template (after the `AccountPending` block, inside the `{
 ```
 
 Note: The exact integration will depend on the reactive pattern. The `show` prop on AcceptanceModal already handles dismissal by calling `show = false` after updating settings. We may need to use `bind:show` instead and restructure slightly. The key is:
+
 - Show the overlay **after** AccountPending check (only for active users)
 - Block all other content while overlay is visible
 - After acceptance, the overlay hides and the normal app renders
@@ -405,10 +434,12 @@ Note: The exact integration will depend on the reactive pattern. The `show` prop
 ### Success Criteria:
 
 #### Automated Verification:
+
 - [x] Frontend builds: `npm run build`
 - [x] No new TypeScript errors: `npm run check`
 
 #### Manual Verification:
+
 - [ ] Enable acceptance modal in admin, set title/content
 - [ ] Log in as regular user — blocking overlay appears with custom title/content/button
 - [ ] Cannot interact with the app behind the overlay
@@ -425,6 +456,7 @@ Note: The exact integration will depend on the reactive pattern. The `show` prop
 ## Testing Strategy
 
 ### Manual Testing Steps:
+
 1. Start with modal disabled — verify no overlay appears for any user
 2. Enable modal with custom title "Welcome", content "Please accept our terms", button "I Agree"
 3. Log in as non-admin user — verify blocking overlay with custom text
@@ -436,6 +468,7 @@ Note: The exact integration will depend on the reactive pattern. The `show` prop
 9. Test with empty title/content/button — verify defaults render ("Terms of Use", "Please accept...", "I Accept")
 
 ### Edge Cases:
+
 - User with no settings at all (new user) — should see overlay when enabled
 - Admin changes only the title but not content — hash changes, re-acceptance required
 - Modal enabled but title and content are both empty — shows defaults, still trackable via hash

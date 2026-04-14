@@ -101,9 +101,13 @@
 			<button
 				class="flex flex-col items-center justify-center gap-3 p-8
 					border border-dashed border-gray-300 dark:border-gray-600
-					rounded-2xl {option.type === 'integration' ? 'cursor-default' : 'cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-850 hover:border-gray-400 dark:hover:border-gray-500'}
+					rounded-2xl {option.type === 'integration'
+					? 'cursor-default'
+					: 'cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-850 hover:border-gray-400 dark:hover:border-gray-500'}
 					transition-all duration-150"
-				on:click={() => { if (option.type !== 'integration') onAction(option.type); }}
+				on:click={() => {
+					if (option.type !== 'integration') onAction(option.type);
+				}}
 			>
 				<div class="text-gray-400 dark:text-gray-500">
 					<svelte:component this={option.icon} className="size-8" strokeWidth="1.5" />

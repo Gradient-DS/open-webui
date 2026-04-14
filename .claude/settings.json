@@ -1,40 +1,40 @@
 {
-  "permissions": {
-    "allow": [
-      "Bash(./hack/spec_metadata.sh)",
-      "Bash(hack/spec_metadata.sh)",
-      "Bash(bash hack/spec_metadata.sh)"
-    ]
-  },
-  "enableAllProjectMcpServers": false,
-  "env": {
-    "MAX_THINKING_TOKENS": "32000",
-    "MAX_MCP_OUTPUT_TOKENS": "50000"
-  },
-  "hooks": {
-    "SessionStart": [
-      {
-        "matcher": "*",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/collab-memory-hook.sh",
-            "timeout": 5
-          }
-        ]
-      }
-    ],
-    "UserPromptSubmit": [
-      {
-        "matcher": "*",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/collab-memory-hook.sh",
-            "timeout": 5
-          }
-        ]
-      }
-    ]
-  }
+	"permissions": {
+		"allow": [
+			"Bash(./hack/spec_metadata.sh)",
+			"Bash(hack/spec_metadata.sh)",
+			"Bash(bash hack/spec_metadata.sh)"
+		]
+	},
+	"enableAllProjectMcpServers": false,
+	"env": {
+		"MAX_THINKING_TOKENS": "32000",
+		"MAX_MCP_OUTPUT_TOKENS": "50000"
+	},
+	"hooks": {
+		"SessionStart": [
+			{
+				"matcher": "*",
+				"hooks": [
+					{
+						"type": "command",
+						"command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/collab-memory-hook.sh",
+						"timeout": 5
+					}
+				]
+			}
+		],
+		"UserPromptSubmit": [
+			{
+				"matcher": "*",
+				"hooks": [
+					{
+						"type": "command",
+						"command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/collab-memory-hook.sh",
+						"timeout": 5
+					}
+				]
+			}
+		]
+	}
 }

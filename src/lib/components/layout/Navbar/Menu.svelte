@@ -14,6 +14,8 @@
 		showOverview,
 		showControls,
 		showArtifacts,
+		showDocument,
+		openDocumentTabSignal,
 		mobile,
 		temporaryChatEnabled,
 		theme,
@@ -22,7 +24,8 @@
 		settings,
 		folders,
 		showEmbeds,
-		artifactContents
+		artifactContents,
+		documentContents
 	} from '$lib/stores';
 	import { isFeatureEnabled } from '$lib/utils/features';
 	import { getChatById } from '$lib/apis/chats';
@@ -34,6 +37,7 @@
 	import Clipboard from '$lib/components/icons/Clipboard.svelte';
 	import AdjustmentsHorizontal from '$lib/components/icons/AdjustmentsHorizontal.svelte';
 	import Cube from '$lib/components/icons/Cube.svelte';
+	import DocumentIcon from '$lib/components/icons/Document.svelte';
 	import Folder from '$lib/components/icons/Folder.svelte';
 	import Share from '$lib/components/icons/Share.svelte';
 	import ArchiveBox from '$lib/components/icons/ArchiveBox.svelte';
@@ -128,7 +132,17 @@
 						pageCanvas.width = canvas.width;
 						pageCanvas.height = sliceHeight;
 						const ctx = pageCanvas.getContext('2d');
-						ctx.drawImage(canvas, 0, offsetY, canvas.width, sliceHeight, 0, 0, canvas.width, sliceHeight);
+						ctx.drawImage(
+							canvas,
+							0,
+							offsetY,
+							canvas.width,
+							sliceHeight,
+							0,
+							0,
+							canvas.width,
+							sliceHeight
+						);
 						const imgData = pageCanvas.toDataURL('image/jpeg', 0.7);
 						const imgHeightMM = (sliceHeight * pageWidthMM) / canvas.width;
 						if (page > 0) pdf.addPage();
@@ -308,6 +322,7 @@
 					on:click={async () => {
 						await showControls.set(true);
 						await showArtifacts.set(true);
+						await showDocument.set(false);
 						await showOverview.set(false);
 						await showEmbeds.set(false);
 					}}
@@ -317,7 +332,26 @@
 				</button>
 			{/if}
 
-			{#if ($mobile && isFeatureEnabled('chat_controls') && ($user?.role === 'admin' || ($user?.permissions.chat?.controls ?? true))) || isFeatureEnabled('chat_overview') || (isFeatureEnabled('artifacts') && ($artifactContents ?? []).length > 0)}
+			{#if isFeatureEnabled('document_writer') && ($documentContents ?? []).length > 0}
+				<button
+					draggable="false"
+					class="flex gap-2 items-center px-3 py-1.5 text-sm cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-xl select-none w-full"
+					id="chat-document-button"
+					on:click={async () => {
+						await showControls.set(true);
+						await showDocument.set(true);
+						await showArtifacts.set(false);
+						await showOverview.set(false);
+						await showEmbeds.set(false);
+						openDocumentTabSignal.update((n) => n + 1);
+					}}
+				>
+					<DocumentIcon className=" size-4" strokeWidth="1.5" />
+					<div class="flex items-center">{$i18n.t('Document')}</div>
+				</button>
+			{/if}
+
+			{#if ($mobile && isFeatureEnabled('chat_controls') && ($user?.role === 'admin' || ($user?.permissions.chat?.controls ?? true))) || isFeatureEnabled('chat_overview') || (isFeatureEnabled('artifacts') && ($artifactContents ?? []).length > 0) || (isFeatureEnabled('document_writer') && ($documentContents ?? []).length > 0)}
 				<hr class="border-gray-50/30 dark:border-gray-800/30 my-1" />
 			{/if}
 

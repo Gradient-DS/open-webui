@@ -7,20 +7,25 @@ Cloud sync creates a separate Weaviate collection per file (`file-{file_id}`) in
 ## Current State Analysis
 
 ### Dual-collection write (`base_worker.py:693-727`)
+
 `_split_embed_and_store()` builds two identical item lists (`items_kb` and `items_file` — same text, vectors, metadata, only UUIDs differ) and inserts into both `knowledge_id` and `file-{file_id}` collections.
 
 ### Hash-match path (`base_worker.py:354-409`)
+
 `_ensure_vectors_in_kb()` calls `process_file()` which queries `file-{file_id}` to get docs, then **re-embeds** them into the KB collection. The per-file collection only saves re-extraction here, not re-embedding.
 
 ### Query-time resolution
+
 - `retrieval/utils.py:1068` — `file-{item_id}` for individual file chat attachment
 - `tools/builtin.py:2075` — `file-{item_id}` for RAG tool file references
 
 ### Frontend file selection
+
 - `Commands/Knowledge.svelte:119` — `#` command searches files cross-KB via `searchKnowledgeFiles()` (backend returns `collection.type`)
 - `InputMenu/Knowledge.svelte:218-236` — `+` menu has chevron expand per KB (`selectedItem.type` available)
 
 ### Key Discoveries:
+
 - `items_kb` and `items_file` have **identical metadata** — the only difference is UUID (`base_worker.py:693-711`)
 - Hash-match path re-embeds anyway — per-file cache only avoids re-extraction, not re-embedding (`retrieval.py:1581-1589`)
 - `search_knowledge_files()` already joins `Knowledge` table and returns `collection.type` on each file result (`models/knowledge.py:364-370`)
@@ -35,6 +40,7 @@ Cloud sync creates a separate Weaviate collection per file (`file-{file_id}`) in
 - Local KBs are completely unaffected
 
 ### Verification:
+
 - Sync a cloud KB → only 1 Weaviate collection created
 - Re-sync (hash match) → old per-file collections cleaned up
 - `#` command → cloud KB files don't appear
@@ -58,6 +64,7 @@ Work backend-first (stop creating, update hash-match, filter search), then front
 ## Phase 1: Stop Creating Per-File Collections
 
 ### Overview
+
 Remove the per-file collection insert from `_split_embed_and_store()`. This is the core change that eliminates N extra Weaviate collections per cloud KB.
 
 ### Changes Required:
@@ -67,6 +74,7 @@ Remove the per-file collection insert from `_split_embed_and_store()`. This is t
 **File**: `backend/open_webui/services/sync/base_worker.py`
 
 **Remove** the `items_file` list construction (lines 703-711):
+
 ```python
             items_file = [
                 {
@@ -80,6 +88,7 @@ Remove the per-file collection insert from `_split_embed_and_store()`. This is t
 ```
 
 **Remove** the per-file collection insert block (lines 720-727):
+
 ```python
             # Insert into per-file collection (overwrite if exists)
             file_collection = f'file-{file_id}'
@@ -92,6 +101,7 @@ Remove the per-file collection insert from `_split_embed_and_store()`. This is t
 ```
 
 **Update** the timing log at line 735 to use `t_kb` instead of `t_file`:
+
 ```python
             log.info(f'[sync:{filename}] DONE total={t_kb - t0:.1f}s')
 ```
@@ -101,19 +111,25 @@ Remove the per-file collection insert from `_split_embed_and_store()`. This is t
 **File**: `backend/open_webui/services/sync/base_worker.py`
 
 **Change** line 731 from:
+
 ```python
 Files.update_file_metadata_by_id(file_id, {'collection_name': file_collection}, db=session)
 ```
+
 To:
+
 ```python
 Files.update_file_metadata_by_id(file_id, {'collection_name': self.knowledge_id}, db=session)
 ```
 
 **Change** line 743 (empty content fallback) from:
+
 ```python
 Files.update_file_metadata_by_id(file_id, {'collection_name': f'file-{file_id}'}, db=session)
 ```
+
 To:
+
 ```python
 Files.update_file_metadata_by_id(file_id, {'collection_name': self.knowledge_id}, db=session)
 ```
@@ -121,10 +137,12 @@ Files.update_file_metadata_by_id(file_id, {'collection_name': self.knowledge_id}
 ### Success Criteria:
 
 #### Automated Verification:
+
 - [x] Backend starts without errors: `open-webui dev`
 - [x] No references to `file_collection` variable remain in `_split_embed_and_store`
 
 #### Manual Verification:
+
 - [ ] Sync a new cloud KB with a few files → verify only 1 Weaviate collection created (the KB UUID)
 - [ ] Check file records have `collection_name` set to KB UUID, not `file-{id}`
 
@@ -135,6 +153,7 @@ Files.update_file_metadata_by_id(file_id, {'collection_name': self.knowledge_id}
 ## Phase 2: Update Hash-Match Path
 
 ### Overview
+
 Replace the `process_file()` call in `_ensure_vectors_in_kb()` with a direct query to the KB collection filtered by `file_id`. If vectors are found, skip (they're already there). If not, fall through to re-extract + re-embed. Also add gradual cleanup of existing per-file collections.
 
 ### Changes Required:
@@ -207,6 +226,7 @@ Replace the entire `_ensure_vectors_in_kb` method (lines 354-409) with:
 ```
 
 Key changes:
+
 - Queries `self.knowledge_id` collection with `filter={'file_id': file_id}` + `limit=1` (just checking existence)
 - If found → return `None` (success)
 - If not found → return `FailedFile` so orchestrator falls back to `_process_and_embed()` (lines 1280-1282)
@@ -217,10 +237,12 @@ Key changes:
 ### Success Criteria:
 
 #### Automated Verification:
+
 - [x] Backend starts without errors
 - [x] No imports of `process_file` or `ProcessFileForm` remain in `_ensure_vectors_in_kb`
 
 #### Manual Verification:
+
 - [ ] Re-sync an already-synced cloud KB → hash-matched files succeed without re-embedding
 - [ ] Any existing `file-{id}` collections for those files are deleted
 - [ ] New files in the same sync are embedded correctly into the KB collection
@@ -232,6 +254,7 @@ Key changes:
 ## Phase 3: Backend Filter for File Search
 
 ### Overview
+
 Exclude cloud KB files from the `#` command file search by filtering on `Knowledge.type == 'local'` in the backend query.
 
 ### Changes Required:
@@ -253,9 +276,11 @@ Insert this between the access control filter block (ending line 342) and the fi
 ### Success Criteria:
 
 #### Automated Verification:
+
 - [x] Backend starts without errors
 
 #### Manual Verification:
+
 - [ ] `#` command search → cloud KB files don't appear in results
 - [ ] `#` command search → local KB files still appear normally
 
@@ -266,6 +291,7 @@ Insert this between the access control filter block (ending line 342) and the fi
 ## Phase 4: Frontend — Hide Per-File Selection for Cloud KBs
 
 ### Overview
+
 Hide the chevron expand button in the `+` menu for non-local KBs, so users can only select cloud KBs as whole collections.
 
 ### Changes Required:
@@ -278,9 +304,9 @@ Wrap the chevron button block (lines 218-236) in a conditional:
 
 ```svelte
 {#if item.type === 'local' || !item.type}
-    <Tooltip content={$i18n.t('Show Files')} placement="top">
-        <!-- existing chevron button unchanged -->
-    </Tooltip>
+	<Tooltip content={$i18n.t('Show Files')} placement="top">
+		<!-- existing chevron button unchanged -->
+	</Tooltip>
 {/if}
 ```
 
@@ -289,9 +315,11 @@ This hides the "Show Files" chevron for `onedrive`, `google_drive`, and any futu
 ### Success Criteria:
 
 #### Automated Verification:
+
 - [x] Frontend builds without errors: `npm run build`
 
 #### Manual Verification:
+
 - [ ] `+` menu → local KBs have expand chevron, cloud KBs do not
 - [ ] Cloud KBs can still be selected as whole collections
 - [ ] Local KB file expansion still works normally
@@ -303,6 +331,7 @@ This hides the "Show Files" chevron for `onedrive`, `google_drive`, and any futu
 ## Testing Strategy
 
 ### Manual Testing Steps:
+
 1. **New cloud KB sync**: Create a new OneDrive/Google Drive KB, sync 5+ files → verify only 1 Weaviate collection
 2. **Re-sync (hash match)**: Re-sync the same KB → hash-matched files succeed, any legacy per-file collections cleaned up
 3. **Chat with cloud KB**: Attach the KB as a whole collection → verify RAG retrieval works

@@ -4,7 +4,7 @@ researcher: Claude
 git_commit: 0ac933e8bd264fa786fd10f0fa4ec157e7de6b66
 branch: feat/google-files
 repository: open-webui
-topic: "Can Google Drive folder selection work for KB sync (like OneDrive)?"
+topic: 'Can Google Drive folder selection work for KB sync (like OneDrive)?'
 tags: [research, codebase, google-drive, knowledge-base, folder-sync]
 status: complete
 last_updated: 2026-03-25
@@ -20,6 +20,7 @@ last_updated_by: Claude
 **Repository**: open-webui
 
 ## Research Question
+
 Can users select Google Drive folders (not just files) for KB sync, similar to how OneDrive folder sync works?
 
 ## Summary
@@ -32,7 +33,7 @@ Can users select Google Drive folders (not just files) for KB sync, similar to h
 
 `src/lib/utils/google-drive-picker.ts:131-193` — `createKnowledgePicker()` configures two views:
 
-1. **Files view** (line 151-154): Shows documents with folders visible for navigation, but `setSelectFolderEnabled(false)` — folders can't be *selected* in this view.
+1. **Files view** (line 151-154): Shows documents with folders visible for navigation, but `setSelectFolderEnabled(false)` — folders can't be _selected_ in this view.
 2. **Folder view** (line 157-160): Dedicated tab with `setSelectFolderEnabled(true)` and `setMimeTypes('application/vnd.google-apps.folder')` — only folders are selectable.
 
 When a folder is picked, the result includes `type: 'folder'` (line 174) based on the `application/vnd.google-apps.folder` mimeType.
@@ -55,6 +56,7 @@ When a folder is picked, the result includes `type: 'folder'` (line 174) based o
 ### Backend Drive Client: All Required APIs
 
 `backend/open_webui/services/google_drive/drive_client.py`:
+
 - `list_folder_children()` (line 137) — Lists files in a folder with pagination
 - `list_folder_children_recursive()` (line 167) — BFS traversal for nested folders
 - `get_changes()` (line 192) — Incremental change detection
@@ -72,13 +74,13 @@ When a folder is picked, the result includes `type: 'folder'` (line 174) based o
 
 The Google Drive sync implementation is a **1:1 mirror of OneDrive**. Both use the shared abstraction layer:
 
-| Layer | OneDrive | Google Drive |
-|-------|----------|-------------|
-| Picker | `onedrive-file-picker.ts` | `google-drive-picker.ts` |
-| API Client | `graph_client.py` (MS Graph) | `drive_client.py` (Drive API v3) |
-| Sync Worker | `OneDriveSyncWorker` | `GoogleDriveSyncWorker` |
-| Incremental Sync | MS Graph Delta API | Google Drive Changes API |
-| Base Classes | `BaseSyncWorker`, `SyncProvider`, `TokenManager`, `SyncScheduler` |
+| Layer            | OneDrive                                                          | Google Drive                     |
+| ---------------- | ----------------------------------------------------------------- | -------------------------------- |
+| Picker           | `onedrive-file-picker.ts`                                         | `google-drive-picker.ts`         |
+| API Client       | `graph_client.py` (MS Graph)                                      | `drive_client.py` (Drive API v3) |
+| Sync Worker      | `OneDriveSyncWorker`                                              | `GoogleDriveSyncWorker`          |
+| Incremental Sync | MS Graph Delta API                                                | Google Drive Changes API         |
+| Base Classes     | `BaseSyncWorker`, `SyncProvider`, `TokenManager`, `SyncScheduler` |
 
 ## Code References
 

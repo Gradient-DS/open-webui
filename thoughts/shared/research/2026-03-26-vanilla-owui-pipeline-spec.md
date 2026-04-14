@@ -4,8 +4,9 @@ researcher: Claude Code
 git_commit: c0db5407764a3c167d1c971ee01b26284e7c2e28
 branch: dev
 repository: Gradient-DS/open-webui
-topic: "Vanilla Open WebUI Pipeline Spec — What the LLM Receives Under Each Config"
-tags: [research, codebase, agent-api, pipeline, rag, web-search, code-interpreter, prompts, middleware]
+topic: 'Vanilla Open WebUI Pipeline Spec — What the LLM Receives Under Each Config'
+tags:
+  [research, codebase, agent-api, pipeline, rag, web-search, code-interpreter, prompts, middleware]
 status: complete
 last_updated: 2026-03-26
 last_updated_by: Claude Code
@@ -57,13 +58,13 @@ User message arrives
 
 **Sources of system prompts** (applied in order, each appends or replaces):
 
-| Source | Method | When |
-|--------|--------|------|
-| User/model system prompt (from `messages[0]` if role=system) | `replace_system_message_content()` | Always |
-| Folder "Project" system prompt | `add_or_update_system_message()` (append) | Chat is in a folder with `system_prompt` |
-| Voice mode prompt | `add_or_update_system_message()` (overwrite) | `features.voice = true` |
-| Memory context | `add_or_update_system_message()` (append) | `features.memory = true` |
-| RAG context (when `RAG_SYSTEM_CONTEXT=true`) | `add_or_update_system_message()` (append) | Sources found from RAG |
+| Source                                                       | Method                                       | When                                     |
+| ------------------------------------------------------------ | -------------------------------------------- | ---------------------------------------- |
+| User/model system prompt (from `messages[0]` if role=system) | `replace_system_message_content()`           | Always                                   |
+| Folder "Project" system prompt                               | `add_or_update_system_message()` (append)    | Chat is in a folder with `system_prompt` |
+| Voice mode prompt                                            | `add_or_update_system_message()` (overwrite) | `features.voice = true`                  |
+| Memory context                                               | `add_or_update_system_message()` (append)    | `features.memory = true`                 |
+| RAG context (when `RAG_SYSTEM_CONTEXT=true`)                 | `add_or_update_system_message()` (append)    | Sources found from RAG                   |
 
 **Note:** `add_or_update_system_message(text, messages, append=True)` appends to existing system message. With `append=False` or `replace=True` it overwrites.
 
@@ -72,6 +73,7 @@ User message arrives
 **Trigger:** `features.memory = true` AND `function_calling != "native"`
 
 **What happens:**
+
 1. Query the memory vector store with the last user message, `k=3`
 2. Format results as numbered list with dates:
    ```
@@ -91,6 +93,7 @@ User message arrives
 **What happens (3 sub-steps):**
 
 #### 3a. Query Generation
+
 - Uses the **task model** (configured `TASK_MODEL` or falls back to chat model)
 - Prompt template: `QUERY_GENERATION_PROMPT_TEMPLATE` (default below)
 - Input: last 6 messages of chat history
@@ -98,6 +101,7 @@ User message arrives
 - If generation fails or returns empty: falls back to raw user message
 
 **Default query generation prompt:**
+
 ```
 ### Task:
 Analyze the chat history to determine the necessity of generating search queries,
@@ -118,11 +122,13 @@ is required.
 ```
 
 #### 3b. Web Search Execution
+
 - Engine: configured `WEB_SEARCH_ENGINE` (Google PSE, Brave, SearXNG, etc.)
 - Runs all queries in parallel (or with semaphore if `WEB_SEARCH_CONCURRENT_REQUESTS` set)
 - Returns URLs + snippets
 
 #### 3c. Web Content Processing (two modes)
+
 - **If `BYPASS_WEB_SEARCH_WEB_LOADER = true`**: Use search snippets directly as docs
 - **If `BYPASS_WEB_SEARCH_WEB_LOADER = false`** (default): Load full page content via web loader
 - **If `BYPASS_WEB_SEARCH_EMBEDDING_AND_RETRIEVAL = true`**: Pass raw docs directly to RAG template
@@ -150,6 +156,7 @@ You have access to a Python code interpreter via:
 ```
 
 If engine is `pyodide` (default), also appends:
+
 ```
 ##### Pyodide Environment
 - This Python environment runs via Pyodide in the browser.
@@ -162,6 +169,7 @@ If engine is `pyodide` (default), also appends:
 **Trigger:** `tool_ids` present AND `function_calling != "native"`
 
 **What happens:**
+
 1. Resolve tool IDs → tool specs + callable functions (includes MCP servers)
 2. Build tool-calling prompt from `TOOLS_FUNCTION_CALLING_PROMPT_TEMPLATE`:
    ```
@@ -180,13 +188,16 @@ If engine is `pyodide` (default), also appends:
 **What happens:**
 
 #### 6a. Retrieval Query Generation
+
 - Same query generation system as web search (step 3a)
 - Prompt: `QUERY_GENERATION_PROMPT_TEMPLATE` with `type: "retrieval"`
 - Config: `ENABLE_RETRIEVAL_QUERY_GENERATION` (default true)
 - Falls back to raw user message if disabled or fails
 
 #### 6b. Vector Search
+
 `get_sources_from_items()` processes each file item:
+
 - **`type: "collection"`** — query vector DB collection(s)
 - **`type: "web_search"`** — query web search collection
 - **`type: "text"`** — use raw text or collection
@@ -203,7 +214,9 @@ Search parameters (all configurable via admin panel):
 | Full context mode | `RAG_FULL_CONTEXT` | false |
 
 #### 6c. Reranking (optional)
+
 If `RERANKING_FUNCTION` is configured (e.g., Cohere reranker, cross-encoder):
+
 - Takes query + retrieved documents
 - Reranks and filters to `TOP_K_RERANKER`
 
@@ -212,13 +225,16 @@ If `RERANKING_FUNCTION` is configured (e.g., Cohere reranker, cross-encoder):
 **What happens:** All sources (from RAG, web search, tools) are formatted and injected.
 
 #### Format sources as XML:
+
 ```xml
 <source id="1" name="document.pdf">Content of chunk...</source>
 <source id="2" name="web-result.html">Content of chunk...</source>
 ```
 
 #### Apply RAG template:
+
 The default template wraps sources with instructions:
+
 ```
 ### Task:
 Respond to the user query using the provided context, incorporating inline
@@ -239,6 +255,7 @@ id attribute**.
 ```
 
 #### Injection location (configurable):
+
 - **If `RAG_SYSTEM_CONTEXT = true`**: Appended to system message
 - **If `RAG_SYSTEM_CONTEXT = false`** (default): Replaces last user message content
 
@@ -253,6 +270,7 @@ Appends image generation instructions to user message.
 **Trigger:** `features.voice = true`
 
 Overwrites system message with voice-optimized prompt:
+
 ```
 You are a friendly, concise voice assistant.
 Everything you say will be spoken aloud.
@@ -269,6 +287,7 @@ Keep responses short, clear, and natural.
 **Trigger:** `features.code_interpreter = true` AND LLM outputs `<code_interpreter>` tags
 
 **What happens:**
+
 1. Stream parser detects `<code_interpreter type="code" lang="python">` opening tag
 2. Accumulates code until `</code_interpreter>` closing tag
 3. Sanitizes code, applies blocked module restrictions
@@ -354,6 +373,7 @@ When `AGENT_API_ENABLED=true`, the agent receives:
 The agent needs to replicate these steps that are now bypassed:
 
 ### Must implement:
+
 1. **Web search** (if `features.web_search`):
    - Generate search queries from conversation (use same prompt template or own)
    - Execute web search (same engine or own)
@@ -382,6 +402,7 @@ The agent needs to replicate these steps that are now bypassed:
    - OWUI handles execution and output display
 
 ### Already handled by OWUI (agent receives pre-processed):
+
 - System prompt (from model/user config)
 - Memory injection (already in messages)
 - Voice mode prompt (already in messages)
@@ -389,6 +410,7 @@ The agent needs to replicate these steps that are now bypassed:
 - Skills injection (already in messages)
 
 ### Handled by OWUI post-response (agent doesn't need to):
+
 - Title generation
 - Tag generation
 - Follow-up generation
@@ -442,21 +464,21 @@ data: [DONE]
 
 ## Key Config Parameters the Agent Should Be Aware Of
 
-| Parameter | Env Var / Config Key | Default | Effect |
-|-----------|---------------------|---------|--------|
-| RAG template | `RAG_TEMPLATE` | See above | How sources are presented to LLM |
-| Top-K | `TOP_K` | 5 | Number of chunks retrieved |
-| Reranker Top-K | `TOP_K_RERANKER` | 3 | After reranking |
-| Relevance threshold | `RELEVANCE_THRESHOLD` | 0.0 | Minimum score |
-| Hybrid search | `ENABLE_RAG_HYBRID_SEARCH` | false | BM25 + vector |
-| Full context | `RAG_FULL_CONTEXT` | false | Return full docs, not chunks |
-| Query generation enabled | `ENABLE_RETRIEVAL_QUERY_GENERATION` | true | Generate queries vs raw message |
-| Search query gen enabled | `ENABLE_SEARCH_QUERY_GENERATION` | true | For web search |
-| Web search engine | `WEB_SEARCH_ENGINE` | — | Which provider |
-| Task model | `TASK_MODEL` | — | Model for query gen, title, etc. |
-| Embedding model | `RAG_EMBEDDING_MODEL` | sentence-transformers | For vector search |
-| Reranking model | `RAG_RERANKING_MODEL` | — | For reranking |
-| Code interpreter engine | `CODE_INTERPRETER_ENGINE` | pyodide | pyodide or jupyter |
+| Parameter                | Env Var / Config Key                | Default               | Effect                           |
+| ------------------------ | ----------------------------------- | --------------------- | -------------------------------- |
+| RAG template             | `RAG_TEMPLATE`                      | See above             | How sources are presented to LLM |
+| Top-K                    | `TOP_K`                             | 5                     | Number of chunks retrieved       |
+| Reranker Top-K           | `TOP_K_RERANKER`                    | 3                     | After reranking                  |
+| Relevance threshold      | `RELEVANCE_THRESHOLD`               | 0.0                   | Minimum score                    |
+| Hybrid search            | `ENABLE_RAG_HYBRID_SEARCH`          | false                 | BM25 + vector                    |
+| Full context             | `RAG_FULL_CONTEXT`                  | false                 | Return full docs, not chunks     |
+| Query generation enabled | `ENABLE_RETRIEVAL_QUERY_GENERATION` | true                  | Generate queries vs raw message  |
+| Search query gen enabled | `ENABLE_SEARCH_QUERY_GENERATION`    | true                  | For web search                   |
+| Web search engine        | `WEB_SEARCH_ENGINE`                 | —                     | Which provider                   |
+| Task model               | `TASK_MODEL`                        | —                     | Model for query gen, title, etc. |
+| Embedding model          | `RAG_EMBEDDING_MODEL`               | sentence-transformers | For vector search                |
+| Reranking model          | `RAG_RERANKING_MODEL`               | —                     | For reranking                    |
+| Code interpreter engine  | `CODE_INTERPRETER_ENGINE`           | pyodide               | pyodide or jupyter               |
 
 ---
 
@@ -525,6 +547,7 @@ Strictly return in JSON format:
 ```
 
 **Template variables:**
+
 - `{{CURRENT_DATE}}` — today's date
 - `{{MESSAGES:END:6}}` — last 6 messages from chat history
 
@@ -532,7 +555,7 @@ Strictly return in JSON format:
 
 Appended to the **last user message**.
 
-```
+````
 #### Code Interpreter
 
 You have access to a Python code interpreter via: `<code_interpreter type="code" lang="python"></code_interpreter>`
@@ -548,7 +571,7 @@ You have access to a Python code interpreter via: `<code_interpreter type="code"
 - Respond in the chat's primary language. Default to English if multilingual.
 
 Ensure the code interpreter is effectively utilized to achieve the highest-quality analysis for the user.
-```
+````
 
 **Pyodide addendum** (appended when engine = `pyodide`, not `jupyter`):
 

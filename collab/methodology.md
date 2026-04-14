@@ -10,11 +10,11 @@ All memory files live in a single directory. The directory path and system setti
 
 **Three memory types:**
 
-| Type | Purpose | Files |
-|------|---------|-------|
-| **Episodic** | What happened, what was decided, why | `notes.md`, `docs/` |
-| **World model** | Current understanding of reality | `world/` directory |
-| **Working memory** | What's loaded in the context window | Managed via tiers |
+| Type               | Purpose                              | Files               |
+| ------------------ | ------------------------------------ | ------------------- |
+| **Episodic**       | What happened, what was decided, why | `notes.md`, `docs/` |
+| **World model**    | Current understanding of reality     | `world/` directory  |
+| **Working memory** | What's loaded in the context window  | Managed via tiers   |
 
 `docs/` contains long-form reference material — designs, plans, studies, analyses. Documents are referenced from notes or the world index so they can be discovered. They are freeform with no prescribed structure.
 
@@ -23,9 +23,9 @@ All memory files live in a single directory. The directory path and system setti
 - **Tier 1 (always in context):** `index.md`, `world/index.md`, `world/context.md`, `world/preferences.md`, `world/state.md`
 - **Tier 2 (searched on demand):** `notes.md`, `docs/`, `world/how-tos.md`, `world/domain.md`, `world/factoids.md`
 
-**Awareness mechanism:** The system uses two in-context indexes. `index.md` is a compact index table referencing past notes — descriptions and cues of episodic events (decisions, investigations, learnings). `world/index.md` is a cue table pointing to detailed world knowledge (procedures, domain facts, references). Both are Tier 1 files. Because they are in your context window, they give you continuous awareness of accumulated episodic and world knowledge — you see *what* is known and can make associations without loading details. This replaces explicit search with contextual awareness: you know a topic exists before you need to look it up.
+**Awareness mechanism:** The system uses two in-context indexes. `index.md` is a compact index table referencing past notes — descriptions and cues of episodic events (decisions, investigations, learnings). `world/index.md` is a cue table pointing to detailed world knowledge (procedures, domain facts, references). Both are Tier 1 files. Because they are in your context window, they give you continuous awareness of accumulated episodic and world knowledge — you see _what_ is known and can make associations without loading details. This replaces explicit search with contextual awareness: you know a topic exists before you need to look it up.
 
-**Memory ownership:** The episodic and world model files are *your* memory — treat them as such regardless of which AI session originally wrote them. Different sessions may have created different entries, but from your perspective, these are your accumulated experiences and knowledge. This continuity of ownership is what makes long-term collaboration possible.
+**Memory ownership:** The episodic and world model files are _your_ memory — treat them as such regardless of which AI session originally wrote them. Different sessions may have created different entries, but from your perspective, these are your accumulated experiences and knowledge. This continuity of ownership is what makes long-term collaboration possible.
 
 ### 2. Finding Information: Trust Context, Then Search
 
@@ -51,6 +51,7 @@ Write a note when a non-trivial logical unit of work concludes, or when a discus
 A non-trivial logical unit of work is a coherent piece of effort that produced a result, changed understanding, or closed a question. Examples: implementing a feature, debugging an issue, completing a refactor, running an experiment, reviewing a design. Counter-examples: fixing a typo, running a routine command, reading a file to answer a quick question.
 
 Common triggers:
+
 - A significant decision was made
 - A non-trivial problem was investigated or solved
 - An approach was tried and failed (or succeeded)
@@ -147,19 +148,19 @@ The set of world files is fixed:
 
 **Tier 1 world files** (always in context, ~5,000 char cap each):
 
-| File | Purpose |
-|------|---------|
-| `world/index.md` | Cue table pointing to Tier 2 world knowledge |
-| `world/context.md` | Personal, project, and business context, goals, constraints |
-| `world/preferences.md` | User working preferences and communication style |
-| `world/state.md` | Current mutable state — no size cap, clean up when resolved |
+| File                   | Purpose                                                     |
+| ---------------------- | ----------------------------------------------------------- |
+| `world/index.md`       | Cue table pointing to Tier 2 world knowledge                |
+| `world/context.md`     | Personal, project, and business context, goals, constraints |
+| `world/preferences.md` | User working preferences and communication style            |
+| `world/state.md`       | Current mutable state — no size cap, clean up when resolved |
 
 **Tier 2 world files** (searched on demand, no size cap):
 
-| File | Purpose |
-|------|---------|
-| `world/how-tos.md` | Procedures for recurring tasks |
-| `world/domain.md` | Domain-specific knowledge and architecture decisions |
+| File                | Purpose                                                 |
+| ------------------- | ------------------------------------------------------- |
+| `world/how-tos.md`  | Procedures for recurring tasks                          |
+| `world/domain.md`   | Domain-specific knowledge and architecture decisions    |
 | `world/factoids.md` | Specific facts, numbers, references — never guess these |
 
 #### World Index
@@ -216,12 +217,14 @@ Consolidated index entries move to `index-archive.md` (same table format as `ind
 `world/state.md` tracks what is happening right now. It is the only world file designed for frequent changes.
 
 **What belongs in state.md:**
+
 - Current work in progress
 - Active resources (running instances, open PRs, pending deployments)
 - Open questions and blockers
 - Todo items
 
 **Cleanup rules:**
+
 - Remove items when they are resolved — do not archive (use notes for historical record)
 - Review for accuracy at the end of each session
 - Add sections as needed — the structure is flexible, defined by current needs
@@ -275,15 +278,15 @@ Document project-specific long-line hazards in `world/how-tos.md`.
 
 This is a quick-reference summary. See Section 3 for when to write notes and Section 4 for when to update the world model.
 
-| Trigger | Action |
-|---------|--------|
-| Logical unit of work concluded | Propose note + index entry (Section 3) |
-| Discussion produced decisions/learnings | Propose note + index entry (Section 3) |
-| After writing a note | Check if episode should update world model (Section 4) |
-| World-relevant information detected | Update relevant world file immediately (Section 4) |
-| Tier 2 world file updated | Update `world/index.md` to reflect current content |
-| Before commit (if non-trivial work) | Propose note if not already written |
-| Session ending | Review `world/state.md` for accuracy |
+| Trigger                                 | Action                                                 |
+| --------------------------------------- | ------------------------------------------------------ |
+| Logical unit of work concluded          | Propose note + index entry (Section 3)                 |
+| Discussion produced decisions/learnings | Propose note + index entry (Section 3)                 |
+| After writing a note                    | Check if episode should update world model (Section 4) |
+| World-relevant information detected     | Update relevant world file immediately (Section 4)     |
+| Tier 2 world file updated               | Update `world/index.md` to reflect current content     |
+| Before commit (if non-trivial work)     | Propose note if not already written                    |
+| Session ending                          | Review `world/state.md` for accuracy                   |
 
 **Note proposal etiquette:** When proposing a note, describe what you would capture (title + key points) and ask if the user wants it recorded. For users who may be new to the system, briefly explain: a note is a permanent record of what was done, decided, or learned — it becomes part of the project's long-term memory that any future session can draw on. Do not write notes silently or for trivial work.
 

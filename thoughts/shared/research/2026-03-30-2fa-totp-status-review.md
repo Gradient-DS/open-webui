@@ -4,7 +4,7 @@ researcher: claude
 git_commit: 13c8f7c628634360bb7863422f93ef3c51f677a0
 branch: feat/logos
 repository: open-webui
-topic: "2FA TOTP Status Review — Prior Research, Upstream Status, Implementation Readiness"
+topic: '2FA TOTP Status Review — Prior Research, Upstream Status, Implementation Readiness'
 tags: [research, codebase, authentication, 2fa, totp, security, upstream-prs]
 status: complete
 last_updated: 2026-03-30
@@ -37,29 +37,29 @@ This is a comprehensive 400-line research document covering:
 
 ### Architecture Decisions Already Made
 
-| Decision | Resolution |
-|----------|-----------|
-| **Auth flow** | Partial JWT with `"purpose": "2fa_pending"`, 5-min TTL — keeps system stateless |
-| **2FA scope** | Email+password users ONLY |
-| **Bypass rules** | LDAP, SSO/OAuth, API keys, trusted headers all skip 2FA |
-| **TOTP encryption** | AES-GCM using key derived from `WEBUI_SECRET_KEY` (cryptography lib already present) |
-| **Recovery codes** | 10 codes, bcrypt-hashed, one-time use, `XXXXX-XXXXX` format |
-| **Admin enforcement** | `ENABLE_2FA`, `REQUIRE_2FA`, `2FA_GRACE_PERIOD_DAYS`, `2FA_METHODS` settings |
-| **Email OTP** | Via Microsoft Graph API (not SMTP), reusing OneDrive Graph client |
-| **Dependencies** | `pyotp`, `qrcode[pil]` (email OTP uses Graph API, no `aiosmtplib` needed) |
+| Decision              | Resolution                                                                           |
+| --------------------- | ------------------------------------------------------------------------------------ |
+| **Auth flow**         | Partial JWT with `"purpose": "2fa_pending"`, 5-min TTL — keeps system stateless      |
+| **2FA scope**         | Email+password users ONLY                                                            |
+| **Bypass rules**      | LDAP, SSO/OAuth, API keys, trusted headers all skip 2FA                              |
+| **TOTP encryption**   | AES-GCM using key derived from `WEBUI_SECRET_KEY` (cryptography lib already present) |
+| **Recovery codes**    | 10 codes, bcrypt-hashed, one-time use, `XXXXX-XXXXX` format                          |
+| **Admin enforcement** | `ENABLE_2FA`, `REQUIRE_2FA`, `2FA_GRACE_PERIOD_DAYS`, `2FA_METHODS` settings         |
+| **Email OTP**         | Via Microsoft Graph API (not SMTP), reusing OneDrive Graph client                    |
+| **Dependencies**      | `pyotp`, `qrcode[pil]` (email OTP uses Graph API, no `aiosmtplib` needed)            |
 
 ### Proposed API Endpoints (8 total)
 
-| Endpoint | Purpose |
-|----------|---------|
-| `POST /api/v1/auths/2fa/totp/setup` | Generate TOTP secret + QR code |
-| `POST /api/v1/auths/2fa/totp/enable` | Verify first code, activate, return recovery codes |
-| `POST /api/v1/auths/2fa/totp/disable` | Deactivate TOTP |
-| `POST /api/v1/auths/2fa/verify` | Verify TOTP/recovery code during login |
-| `POST /api/v1/auths/2fa/email/send` | Send email OTP |
-| `POST /api/v1/auths/2fa/email/verify` | Verify email OTP |
-| `POST /api/v1/auths/2fa/recovery/regenerate` | Generate new recovery codes |
-| `GET /api/v1/auths/2fa/status` | Check 2FA enrollment status |
+| Endpoint                                     | Purpose                                            |
+| -------------------------------------------- | -------------------------------------------------- |
+| `POST /api/v1/auths/2fa/totp/setup`          | Generate TOTP secret + QR code                     |
+| `POST /api/v1/auths/2fa/totp/enable`         | Verify first code, activate, return recovery codes |
+| `POST /api/v1/auths/2fa/totp/disable`        | Deactivate TOTP                                    |
+| `POST /api/v1/auths/2fa/verify`              | Verify TOTP/recovery code during login             |
+| `POST /api/v1/auths/2fa/email/send`          | Send email OTP                                     |
+| `POST /api/v1/auths/2fa/email/verify`        | Verify email OTP                                   |
+| `POST /api/v1/auths/2fa/recovery/regenerate` | Generate new recovery codes                        |
+| `GET /api/v1/auths/2fa/status`               | Check 2FA enrollment status                        |
 
 ### Database Changes (1 migration)
 
@@ -95,18 +95,18 @@ This is a comprehensive 400-line research document covering:
 
 ### Community Attempts (both failed to merge)
 
-| PR | Author | Status | Key Issues |
-|----|--------|--------|------------|
-| [#11953](https://github.com/open-webui/open-webui/pull/11953) | TensorTemplar | Draft (2025-03-22) | Missing deps, 2FA on by default, broken cancel state, migration errors |
+| PR                                                            | Author         | Status              | Key Issues                                                                                   |
+| ------------------------------------------------------------- | -------------- | ------------------- | -------------------------------------------------------------------------------------------- |
+| [#11953](https://github.com/open-webui/open-webui/pull/11953) | TensorTemplar  | Draft (2025-03-22)  | Missing deps, 2FA on by default, broken cancel state, migration errors                       |
 | [#16461](https://github.com/open-webui/open-webui/pull/16461) | jeremy-windsor | Closed (2025-11-17) | More polished (379 lines backend, RFC 6238), but author deleted fork. Missing rate limiting. |
 
 ### Community Demand
 
-| Source | Upvotes | Status |
-|--------|---------|--------|
-| [Issue #1225](https://github.com/open-webui/open-webui/issues/1225) | 57+ | Open since 2024-03-20 |
-| [Discussion #9594](https://github.com/open-webui/open-webui/discussions/9594) | 44+ | Open, no maintainer response |
-| [Discussion #16338](https://github.com/open-webui/open-webui/discussions/16338) | — | Jeremy-windsor's pre-PR discussion |
+| Source                                                                          | Upvotes | Status                             |
+| ------------------------------------------------------------------------------- | ------- | ---------------------------------- |
+| [Issue #1225](https://github.com/open-webui/open-webui/issues/1225)             | 57+     | Open since 2024-03-20              |
+| [Discussion #9594](https://github.com/open-webui/open-webui/discussions/9594)   | 44+     | Open, no maintainer response       |
+| [Discussion #16338](https://github.com/open-webui/open-webui/discussions/16338) | —       | Jeremy-windsor's pre-PR discussion |
 
 ### Lessons from Failed PRs
 

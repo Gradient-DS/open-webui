@@ -4,7 +4,7 @@ researcher: claude
 git_commit: 88fb9d65424b996df9cef966ecea282012b03d82
 branch: feat/sync-improvements
 repository: open-webui
-topic: "OneDrive file deduplication across users and background sync completeness"
+topic: 'OneDrive file deduplication across users and background sync completeness'
 tags: [research, codebase, onedrive, dedup, sync, vector-db]
 status: complete
 last_updated: 2026-02-14
@@ -32,11 +32,13 @@ When multiple users sync the same OneDrive file, are we loading, parsing, chunki
 **No — there are 3 layers of deduplication already in place.**
 
 **Layer 1: OneDrive-side hash (pre-download skip)**
+
 - For single-file sources only (`sync_worker.py:296-316`)
 - Compares OneDrive's `sha256Hash`/`quickXorHash` against stored `source.content_hash`
 - If match + file record completed → **file skipped entirely, no download**
 
 **Layer 2: Content hash after download (cross-user dedup)**
+
 - `sync_worker.py:932-973`
 - Computes `hashlib.sha256(content).hexdigest()` on downloaded bytes
 - File ID is deterministic: `onedrive-{item_id}` — same OneDrive file = same ID regardless of user
@@ -47,11 +49,13 @@ When multiple users sync the same OneDrive file, are we loading, parsing, chunki
   - Returns immediately
 
 **Layer 3: Text hash in vector DB**
+
 - `retrieval.py:1382-1396`
 - Before chunking/embedding, queries target collection for documents with same hash
 - If found, returns True (idempotent skip)
 
 **What still happens for each user:**
+
 - Download (to compute hash for Layer 2 comparison)
 - Vector copy from per-file collection → per-KB collection
 
@@ -59,10 +63,10 @@ When multiple users sync the same OneDrive file, are we loading, parsing, chunki
 
 Two-tier collection structure enables the dedup:
 
-| Collection | Name Format | Purpose |
-|-----------|------------|---------|
-| Per-file | `file-onedrive-{item_id}` | Canonical vectors, shared across users |
-| Per-KB | `{knowledge_base_uuid}` | Copies of vectors for that KB's files |
+| Collection | Name Format               | Purpose                                |
+| ---------- | ------------------------- | -------------------------------------- |
+| Per-file   | `file-onedrive-{item_id}` | Canonical vectors, shared across users |
+| Per-KB     | `{knowledge_base_uuid}`   | Copies of vectors for that KB's files  |
 
 When a file updates, vectors propagate to ALL KBs referencing it (`sync_worker.py:1052-1087`).
 
@@ -70,13 +74,14 @@ When a file updates, vectors propagate to ALL KBs referencing it (`sync_worker.p
 
 Airweave directory not checked out locally. Patterns adopted from airweave into our implementation:
 
-| Pattern | Origin | Our Implementation |
-|---------|--------|--------------------|
-| Token refresh with buffer | `platform/sync/token_manager.py` | `token_refresh.py:30-64` (5-min buffer) |
-| 401 retry with token refresh | `platform/sources/onedrive.py` | `graph_client.py:35-104` (single retry) |
-| Delta sync cursor persistence | `soev-rag/graph_client.py` | `sync_worker.py:246-260` + `_save_sources()` |
+| Pattern                       | Origin                           | Our Implementation                           |
+| ----------------------------- | -------------------------------- | -------------------------------------------- |
+| Token refresh with buffer     | `platform/sync/token_manager.py` | `token_refresh.py:30-64` (5-min buffer)      |
+| 401 retry with token refresh  | `platform/sources/onedrive.py`   | `graph_client.py:35-104` (single retry)      |
+| Delta sync cursor persistence | `soev-rag/graph_client.py`       | `sync_worker.py:246-260` + `_save_sources()` |
 
 Novel additions beyond airweave patterns:
+
 - Deterministic `onedrive-{item_id}` file IDs for cross-user dedup
 - `KnowledgeFile` junction table for many-to-many KB↔file relationships
 - `_ensure_vectors_in_kb()` for vector copy without re-embedding

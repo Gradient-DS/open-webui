@@ -21,6 +21,7 @@
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
 	import Download from '$lib/components/icons/Download.svelte';
 	import ConsecutiveDetailsGroup from './ConsecutiveDetailsGroup.svelte';
+	import DocumentCard from './DocumentCard.svelte';
 
 	import HtmlToken from './HTMLToken.svelte';
 	import Clipboard from '$lib/components/icons/Clipboard.svelte';
@@ -94,6 +95,21 @@
 		return decode(token?.text || '')
 			.replace(/<summary>.*?<\/summary>/gi, '')
 			.trim();
+	};
+
+	const parseWriteDocumentArgs = (
+		argsStr: string | undefined
+	): { title: string; markdown: string } => {
+		if (!argsStr) return { title: '', markdown: '' };
+		try {
+			const parsed = JSON.parse(decode(argsStr));
+			return {
+				title: typeof parsed?.title === 'string' ? parsed.title : '',
+				markdown: typeof parsed?.markdown === 'string' ? parsed.markdown : ''
+			};
+		} catch {
+			return { title: '', markdown: '' };
+		}
 	};
 
 	$: displayTokens = getDisplayTokens(tokens);
@@ -376,7 +392,24 @@
 				{#each token.items as detailToken, detailIdx}
 					{@const textContent = getDetailTextContent(detailToken)}
 
-					{#if detailToken?.attributes?.type === 'tool_calls'}
+					{#if detailToken?.attributes?.type === 'document'}
+						<DocumentCard
+							id={`${id}-${tokenIdx}-${detailIdx}-doc`}
+							title={detailToken?.attributes?.title ?? detailToken.summary ?? ''}
+							markdown={decode(detailToken?.text ?? '')}
+							done={detailToken?.attributes?.done !== 'false'}
+							messageDone={done}
+						/>
+					{:else if detailToken?.attributes?.type === 'tool_calls' && detailToken?.attributes?.name === 'write_document'}
+						{@const wdocArgs = parseWriteDocumentArgs(detailToken?.attributes?.arguments)}
+						<DocumentCard
+							id={`${id}-${tokenIdx}-${detailIdx}-wdoc`}
+							title={wdocArgs.title}
+							markdown={wdocArgs.markdown}
+							done={detailToken?.attributes?.done === 'true'}
+							messageDone={done}
+						/>
+					{:else if detailToken?.attributes?.type === 'tool_calls'}
 						<ToolCallDisplay
 							id={`${id}-${tokenIdx}-${detailIdx}-tc`}
 							attributes={detailToken.attributes}
@@ -423,7 +456,24 @@
 	{:else if token.type === 'details'}
 		{@const textContent = getDetailTextContent(token)}
 
-		{#if token?.attributes?.type === 'tool_calls'}
+		{#if token?.attributes?.type === 'document'}
+			<DocumentCard
+				id={`${id}-${tokenIdx}-doc`}
+				title={token?.attributes?.title ?? token.summary ?? ''}
+				markdown={decode(token?.text ?? '')}
+				done={token?.attributes?.done !== 'false'}
+				messageDone={done}
+			/>
+		{:else if token?.attributes?.type === 'tool_calls' && token?.attributes?.name === 'write_document'}
+			{@const wdocArgs = parseWriteDocumentArgs(token?.attributes?.arguments)}
+			<DocumentCard
+				id={`${id}-${tokenIdx}-wdoc`}
+				title={wdocArgs.title}
+				markdown={wdocArgs.markdown}
+				done={token?.attributes?.done === 'true'}
+				messageDone={done}
+			/>
+		{:else if token?.attributes?.type === 'tool_calls'}
 			<!-- Tool calls have dedicated handling with ToolCallDisplay component -->
 			<ToolCallDisplay
 				id={`${id}-${tokenIdx}-tc`}

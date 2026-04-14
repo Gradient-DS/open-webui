@@ -4,12 +4,12 @@ researcher: claude
 git_commit: 2be7bd7a4a6f207ac7e7985f70ba0b35bab4395d
 branch: feat/sync-improvements
 repository: open-webui
-topic: "Email invite links for admin-created users via Microsoft Graph API"
+topic: 'Email invite links for admin-created users via Microsoft Graph API'
 tags: [research, codebase, authentication, email, invitations, admin, microsoft-graph]
 status: complete
 last_updated: 2026-02-16
 last_updated_by: claude
-last_updated_note: "Focused on Graph API application permissions approach with all three creation modes"
+last_updated_note: 'Focused on Graph API application permissions approach with all three creation modes'
 ---
 
 # Research: Email Invite Links for Admin-Created Users
@@ -29,6 +29,7 @@ What would it take to have admin users create normal users but instead of creati
 The implementation adds an invite system on top of the existing admin user creation flow. It uses Microsoft Graph API with application permissions (client_credentials flow) to send emails from `no-reply@soev.ai`. The architecture follows existing soev-specific patterns: new standalone files for the core logic, minimal targeted insertions in upstream files, and feature-flag gating so the fork behaves identically to upstream when invites are disabled.
 
 **Key architectural decisions:**
+
 - New `invite` database table for tracking (not stateless JWT tokens) — enables list/revoke/resend
 - New `services/email/` module mirroring the `services/onedrive/` pattern
 - Reuse of existing `GraphClient` retry/auth infrastructure
@@ -50,15 +51,15 @@ The implementation adds an invite system on top of the existing admin user creat
 
 ### Existing Infrastructure We Can Reuse
 
-| Component | Location | What It Provides |
-|-----------|----------|-----------------|
-| `GraphClient` | `services/onedrive/graph_client.py` | Async httpx client with 401 refresh, 429 backoff, 5xx retry. `_request_with_retry(method, url, ...)` supports any HTTP method. |
-| `OAuthSessions` | `models/oauth_sessions.py` | Fernet-encrypted token storage keyed by `(provider, user_id)`. Adding `provider="email_service"` requires zero schema changes. |
-| `PersistentConfig` | `config.py:165-221` | Config values that persist to DB and sync via Redis. Pattern: `PersistentConfig("ENV_NAME", "dotpath.key", default)`. |
-| `AppConfig` | `config.py:224-283` | Runtime config on `app.state.config` — auto-persists on assignment, syncs across instances via Redis. |
-| `create_token` | `utils/auth.py:191-202` | Generic JWT creation with custom payload + expiry. Can encode invite-specific claims. |
-| `decode_token` | `utils/auth.py:205-210` | JWT decode with signature verification. |
-| Admin config pattern | `routers/configs.py` | Pydantic model + GET/POST pair for feature-domain config. Used by Connections, CodeExecution, etc. |
+| Component            | Location                            | What It Provides                                                                                                               |
+| -------------------- | ----------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| `GraphClient`        | `services/onedrive/graph_client.py` | Async httpx client with 401 refresh, 429 backoff, 5xx retry. `_request_with_retry(method, url, ...)` supports any HTTP method. |
+| `OAuthSessions`      | `models/oauth_sessions.py`          | Fernet-encrypted token storage keyed by `(provider, user_id)`. Adding `provider="email_service"` requires zero schema changes. |
+| `PersistentConfig`   | `config.py:165-221`                 | Config values that persist to DB and sync via Redis. Pattern: `PersistentConfig("ENV_NAME", "dotpath.key", default)`.          |
+| `AppConfig`          | `config.py:224-283`                 | Runtime config on `app.state.config` — auto-persists on assignment, syncs across instances via Redis.                          |
+| `create_token`       | `utils/auth.py:191-202`             | Generic JWT creation with custom payload + expiry. Can encode invite-specific claims.                                          |
+| `decode_token`       | `utils/auth.py:205-210`             | JWT decode with signature verification.                                                                                        |
+| Admin config pattern | `routers/configs.py`                | Pydantic model + GET/POST pair for feature-domain config. Used by Connections, CodeExecution, etc.                             |
 
 ---
 
@@ -88,17 +89,17 @@ src/
 
 ### Modified Upstream Files (Minimal, Targeted)
 
-| File | Changes | Conflict Risk |
-|------|---------|--------------|
-| `backend/open_webui/config.py` | Add `ENABLE_EMAIL_INVITES` + email config vars at end of file | Low — appended |
-| `backend/open_webui/main.py` | Mount invites router (~3 lines), add feature flag to config response (~2 lines) | Low — small insertions near existing soev additions |
-| `backend/open_webui/routers/auths.py` | Make password optional in `AddUserForm` when invite mode | Medium — modifies existing model |
-| `backend/open_webui/routers/configs.py` | Add email config GET/POST endpoints | Low — new endpoint pair appended |
-| `src/lib/apis/configs/index.ts` | Add `getEmailConfig` / `setEmailConfig` functions | Low — appended |
-| `src/lib/components/admin/Users/UserList/AddUserModal.svelte` | Add creation mode selector, conditionally hide password | Medium — modifies existing component |
-| `src/lib/components/admin/Settings.svelte` | Add "Email" tab button + rendering | Low — follows existing tab pattern |
-| `src/routes/auth/+page.svelte` | No changes needed | None |
-| `src/lib/i18n/locales/*/translation.json` | New keys auto-sorted by parser | Low — alphabetical insertion |
+| File                                                          | Changes                                                                         | Conflict Risk                                       |
+| ------------------------------------------------------------- | ------------------------------------------------------------------------------- | --------------------------------------------------- |
+| `backend/open_webui/config.py`                                | Add `ENABLE_EMAIL_INVITES` + email config vars at end of file                   | Low — appended                                      |
+| `backend/open_webui/main.py`                                  | Mount invites router (~3 lines), add feature flag to config response (~2 lines) | Low — small insertions near existing soev additions |
+| `backend/open_webui/routers/auths.py`                         | Make password optional in `AddUserForm` when invite mode                        | Medium — modifies existing model                    |
+| `backend/open_webui/routers/configs.py`                       | Add email config GET/POST endpoints                                             | Low — new endpoint pair appended                    |
+| `src/lib/apis/configs/index.ts`                               | Add `getEmailConfig` / `setEmailConfig` functions                               | Low — appended                                      |
+| `src/lib/components/admin/Users/UserList/AddUserModal.svelte` | Add creation mode selector, conditionally hide password                         | Medium — modifies existing component                |
+| `src/lib/components/admin/Settings.svelte`                    | Add "Email" tab button + rendering                                              | Low — follows existing tab pattern                  |
+| `src/routes/auth/+page.svelte`                                | No changes needed                                                               | None                                                |
+| `src/lib/i18n/locales/*/translation.json`                     | New keys auto-sorted by parser                                                  | Low — alphabetical insertion                        |
 
 ### Upstream Merge Strategy
 
@@ -269,11 +270,11 @@ The modal gets a **creation mode selector** shown before the form fields:
 
 **Behavior per mode:**
 
-| Mode | Required Fields | Password Field | Submit Action | Submit Button Text |
-|------|----------------|----------------|--------------|-------------------|
-| **Send Email** | name, email, role | Hidden | `POST /api/v1/invites` (creates invite + sends email) | "Send Invite" |
-| **Copy Link** | name, email, role | Hidden | `POST /api/v1/invites?send_email=false` (creates invite, returns link) | "Create Invite" |
-| **Set Password** | name, email, password, role | Visible | `POST /api/v1/auths/add` (existing flow, unchanged) | "Add User" |
+| Mode             | Required Fields             | Password Field | Submit Action                                                          | Submit Button Text |
+| ---------------- | --------------------------- | -------------- | ---------------------------------------------------------------------- | ------------------ |
+| **Send Email**   | name, email, role           | Hidden         | `POST /api/v1/invites` (creates invite + sends email)                  | "Send Invite"      |
+| **Copy Link**    | name, email, role           | Hidden         | `POST /api/v1/invites?send_email=false` (creates invite, returns link) | "Create Invite"    |
+| **Set Password** | name, email, password, role | Visible        | `POST /api/v1/auths/add` (existing flow, unchanged)                    | "Add User"         |
 
 **When `ENABLE_EMAIL_INVITES` is false**: Only "Set Password" mode is available. The mode selector is hidden entirely. The modal looks and works exactly like it does today — zero behavioral change for upstream or unconfigured deployments.
 
@@ -282,13 +283,9 @@ The modal gets a **creation mode selector** shown before the form fields:
 ```svelte
 <!-- In AddUserModal.svelte, minimal change to upstream file -->
 {#if $config?.features?.enable_email_invites}
-    <InviteUserForm
-        on:save
-        on:close={() => (show = false)}
-        bind:loading
-    />
+	<InviteUserForm on:save on:close={() => (show = false)} bind:loading />
 {:else}
-    <!-- existing form code unchanged -->
+	<!-- existing form code unchanged -->
 {/if}
 ```
 
@@ -296,9 +293,9 @@ The modal gets a **creation mode selector** shown before the form fields:
 
 The existing CSV tab can also support invite mode:
 
-| Current CSV columns | Invite CSV columns |
-|--------------------|--------------------|
-| Name, Email, Password, Role | Name, Email, Role |
+| Current CSV columns         | Invite CSV columns |
+| --------------------------- | ------------------ |
+| Name, Email, Password, Role | Name, Email, Role  |
 
 Detection: If the CSV has 3 columns instead of 4, treat it as invite mode. Or add a toggle above the CSV upload: "Import as invites" vs "Import with passwords".
 
@@ -508,11 +505,11 @@ def render_invite_email(invite_url: str, invited_by_name: str, app_name: str = "
 
 ### Rate Limits
 
-| Limit | Value | Impact |
-|-------|-------|--------|
-| Graph API requests | 10,000 / 10 min / mailbox | Not a concern |
-| Exchange message rate | **30 messages/minute** per mailbox | Relevant for CSV bulk invites |
-| Exchange recipients/day | 10,000 / 24h | Fine for invite volumes |
+| Limit                   | Value                              | Impact                        |
+| ----------------------- | ---------------------------------- | ----------------------------- |
+| Graph API requests      | 10,000 / 10 min / mailbox          | Not a concern                 |
+| Exchange message rate   | **30 messages/minute** per mailbox | Relevant for CSV bulk invites |
+| Exchange recipients/day | 10,000 / 24h                       | Fine for invite volumes       |
 
 For CSV bulk invites with >30 rows: queue emails with ~2-second spacing. A simple `asyncio.sleep(2)` between sends is sufficient.
 
@@ -602,6 +599,7 @@ Actually, better approach: **always mount the router**. The endpoints work for b
 ```
 
 **States**:
+
 - Loading: validating token
 - Valid: show form
 - Expired: "This invite has expired. Please contact your administrator."
@@ -638,28 +636,33 @@ The copy button uses `navigator.clipboard.writeText()`.
 
 ```typescript
 export const createInvite = async (
-    token: string, name: string, email: string,
-    role: string, sendEmail: boolean
-) => { /* POST /api/v1/invites */ };
-
-export const validateInvite = async (inviteToken: string) => {
-    /* GET /api/v1/invites/{token}/validate — no auth token needed */
+	token: string,
+	name: string,
+	email: string,
+	role: string,
+	sendEmail: boolean
+) => {
+	/* POST /api/v1/invites */
 };
 
-export const acceptInvite = async (
-    inviteToken: string, password: string, name?: string
-) => { /* POST /api/v1/invites/{token}/accept — no auth token needed */ };
+export const validateInvite = async (inviteToken: string) => {
+	/* GET /api/v1/invites/{token}/validate — no auth token needed */
+};
+
+export const acceptInvite = async (inviteToken: string, password: string, name?: string) => {
+	/* POST /api/v1/invites/{token}/accept — no auth token needed */
+};
 
 export const listInvites = async (token: string) => {
-    /* GET /api/v1/invites */
+	/* GET /api/v1/invites */
 };
 
 export const resendInvite = async (token: string, inviteId: string) => {
-    /* POST /api/v1/invites/{id}/resend */
+	/* POST /api/v1/invites/{id}/resend */
 };
 
 export const revokeInvite = async (token: string, inviteId: string) => {
-    /* DELETE /api/v1/invites/{id} */
+	/* DELETE /api/v1/invites/{id} */
 };
 ```
 
@@ -769,21 +772,21 @@ Frontend reads this via `$config?.features?.enable_email_invites` to conditional
 
 ## Code References
 
-| What | Where |
-|------|-------|
-| Current admin add user endpoint | `backend/open_webui/routers/auths.py:840-889` |
-| `AddUserForm` / `SignupForm` models | `backend/open_webui/models/auths.py:70-78` |
-| `Auths.insert_new_auth()` | `backend/open_webui/models/auths.py:82-112` |
-| `create_token()` / `decode_token()` | `backend/open_webui/utils/auth.py:191-210` |
-| `GraphClient` (reusable) | `backend/open_webui/services/onedrive/graph_client.py` |
-| OneDrive OAuth pattern (reference) | `backend/open_webui/services/onedrive/auth.py` |
-| Token refresh pattern (reference) | `backend/open_webui/services/onedrive/token_refresh.py` |
-| `OAuthSessions` model | `backend/open_webui/models/oauth_sessions.py` |
-| `PersistentConfig` class | `backend/open_webui/config.py:165-221` |
-| Admin config endpoint pattern | `backend/open_webui/routers/configs.py` |
-| `AddUserModal` component | `src/lib/components/admin/Users/UserList/AddUserModal.svelte` |
-| Admin settings tab container | `src/lib/components/admin/Settings.svelte` |
-| Admin settings tab registry | `src/lib/utils/features.ts:87-101` |
-| Auth page (unchanged) | `src/routes/auth/+page.svelte` |
-| i18n config | `i18next-parser.config.ts` |
-| Translation file | `src/lib/i18n/locales/en-US/translation.json` |
+| What                                | Where                                                         |
+| ----------------------------------- | ------------------------------------------------------------- |
+| Current admin add user endpoint     | `backend/open_webui/routers/auths.py:840-889`                 |
+| `AddUserForm` / `SignupForm` models | `backend/open_webui/models/auths.py:70-78`                    |
+| `Auths.insert_new_auth()`           | `backend/open_webui/models/auths.py:82-112`                   |
+| `create_token()` / `decode_token()` | `backend/open_webui/utils/auth.py:191-210`                    |
+| `GraphClient` (reusable)            | `backend/open_webui/services/onedrive/graph_client.py`        |
+| OneDrive OAuth pattern (reference)  | `backend/open_webui/services/onedrive/auth.py`                |
+| Token refresh pattern (reference)   | `backend/open_webui/services/onedrive/token_refresh.py`       |
+| `OAuthSessions` model               | `backend/open_webui/models/oauth_sessions.py`                 |
+| `PersistentConfig` class            | `backend/open_webui/config.py:165-221`                        |
+| Admin config endpoint pattern       | `backend/open_webui/routers/configs.py`                       |
+| `AddUserModal` component            | `src/lib/components/admin/Users/UserList/AddUserModal.svelte` |
+| Admin settings tab container        | `src/lib/components/admin/Settings.svelte`                    |
+| Admin settings tab registry         | `src/lib/utils/features.ts:87-101`                            |
+| Auth page (unchanged)               | `src/routes/auth/+page.svelte`                                |
+| i18n config                         | `i18next-parser.config.ts`                                    |
+| Translation file                    | `src/lib/i18n/locales/en-US/translation.json`                 |

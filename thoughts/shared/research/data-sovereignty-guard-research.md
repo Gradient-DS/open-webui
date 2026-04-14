@@ -4,12 +4,12 @@ researcher: Claude Opus 4.6
 git_commit: c95a0823c
 branch: dev
 repository: open-webui
-topic: "Data Sovereignty Guard — Per-Model Capability Warning System"
+topic: 'Data Sovereignty Guard — Per-Model Capability Warning System'
 tags: [research, data-sovereignty, capabilities, admin-panel, modal, send-flow]
 status: complete
 last_updated: 2026-04-09
 last_updated_by: Claude Opus 4.6
-last_updated_note: "Resolved open questions: per-model message with capability list, mid-conversation warnings, audit logging, global feature flag, model-switch behavior"
+last_updated_note: 'Resolved open questions: per-model message with capability list, mid-conversation warnings, audit logging, global feature flag, model-switch behavior'
 ---
 
 # Research: Data Sovereignty Guard — Per-Model Capability Warning System
@@ -36,13 +36,14 @@ The existing codebase provides strong patterns to build on: the `Capabilities.sv
 
 The checkbox UI for model capabilities is rendered by three shared components in `src/lib/components/workspace/Models/`:
 
-| Component | Purpose | Used in |
-|-----------|---------|---------|
-| `Capabilities.svelte` | 10 capability checkboxes (vision, file_upload, web_search, etc.) | ModelEditor + ModelSettingsModal |
-| `DefaultFeatures.svelte` | Default-on features for new chats | ModelEditor + ModelSettingsModal |
-| `BuiltinTools.svelte` | 9 built-in tool checkboxes | ModelEditor + ModelSettingsModal |
+| Component                | Purpose                                                          | Used in                          |
+| ------------------------ | ---------------------------------------------------------------- | -------------------------------- |
+| `Capabilities.svelte`    | 10 capability checkboxes (vision, file_upload, web_search, etc.) | ModelEditor + ModelSettingsModal |
+| `DefaultFeatures.svelte` | Default-on features for new chats                                | ModelEditor + ModelSettingsModal |
+| `BuiltinTools.svelte`    | 9 built-in tool checkboxes                                       | ModelEditor + ModelSettingsModal |
 
 **Where to add the new row:** A new component (e.g., `DataWarnings.svelte`) should sit alongside these three, rendered in both:
+
 - `ModelEditor.svelte` (per-model config)
 - `ModelSettingsModal.svelte` (system-wide defaults)
 
@@ -63,17 +64,18 @@ class ModelMeta(BaseModel):
 ```
 
 Suggested schema for the new field on `meta`:
+
 ```json
 {
-  "data_warnings": {
-    "file_upload": true,      // warn before sending files to this model
-    "web_search": true,       // warn before web search with this model
-    "knowledge": true,        // warn before RAG/knowledge with this model
-    "vision": true,           // warn before sending images
-    "code_interpreter": true, // warn before code execution
-    "image_generation": true  // warn before image generation
-  },
-  "data_warning_message": "This model runs on infrastructure outside your organization's control. Uploaded files and conversation content will be processed by a third-party provider."
+	"data_warnings": {
+		"file_upload": true, // warn before sending files to this model
+		"web_search": true, // warn before web search with this model
+		"knowledge": true, // warn before RAG/knowledge with this model
+		"vision": true, // warn before sending images
+		"code_interpreter": true, // warn before code execution
+		"image_generation": true // warn before image generation
+	},
+	"data_warning_message": "This model runs on infrastructure outside your organization's control. Uploaded files and conversation content will be processed by a third-party provider."
 }
 ```
 
@@ -97,6 +99,7 @@ User clicks Send → MessageInput dispatches 'submit'
 ```
 
 **Best interception point:** Inside `submitPrompt()`, after input validation but before creating the user message (between lines 1858 and 1870). At this point:
+
 - We know which models are selected (`selectedModels`)
 - We can check which features are active (web search toggle, file attachments, etc.)
 - We can cross-reference against each model's `data_warnings` config
@@ -108,15 +111,15 @@ User clicks Send → MessageInput dispatches 'submit'
 
 At the `submitPrompt()` interception point, these signals indicate which capabilities are active:
 
-| Capability | How to detect | Source |
-|------------|--------------|--------|
-| File upload | `files.length > 0` (non-image files) | `MessageInput` → `Chat.svelte` files prop |
-| File context | Same as file upload (files with context) | files in chatFiles |
-| Web search | `webSearchEnabled` reactive var | Chat.svelte line 107 |
-| Vision | Images in `files` array | files with `type === 'image'` |
-| Image generation | `imageGenerationEnabled` reactive var | Chat.svelte line 108 |
-| Code interpreter | `codeInterpreterEnabled` reactive var | Chat.svelte line 109 |
-| Knowledge | `chatFiles` contains KB documents OR RAG collections active | chatFiles store / ragFilterState |
+| Capability       | How to detect                                               | Source                                    |
+| ---------------- | ----------------------------------------------------------- | ----------------------------------------- |
+| File upload      | `files.length > 0` (non-image files)                        | `MessageInput` → `Chat.svelte` files prop |
+| File context     | Same as file upload (files with context)                    | files in chatFiles                        |
+| Web search       | `webSearchEnabled` reactive var                             | Chat.svelte line 107                      |
+| Vision           | Images in `files` array                                     | files with `type === 'image'`             |
+| Image generation | `imageGenerationEnabled` reactive var                       | Chat.svelte line 108                      |
+| Code interpreter | `codeInterpreterEnabled` reactive var                       | Chat.svelte line 109                      |
+| Knowledge        | `chatFiles` contains KB documents OR RAG collections active | chatFiles store / ragFilterState          |
 
 ### 5. Per-Conversation State Tracking
 
@@ -139,6 +142,7 @@ Store accepted warnings in the chat metadata via API. More complex but survives 
 ### 6. Confirmation Dialog
 
 The existing `ConfirmDialog` (`src/lib/components/common/ConfirmDialog.svelte`) is perfect:
+
 - Supports custom `title` and `message` (with Markdown rendering)
 - Has Cancel/Confirm buttons
 - Dispatches `confirm` and `cancel` events
@@ -151,16 +155,17 @@ The pattern from `Chat.svelte`'s event confirmation can be reused directly. The 
 
 Based on data sovereignty analysis — which operations send user/organizational data to external infrastructure:
 
-| Capability | Risk | Guard rationale |
-|------------|------|-----------------|
-| **File Upload** | Documents sent to model provider for processing | High — organizational documents may contain sensitive data |
-| **Web Search** | Query context sent to search provider; results may be logged | Medium — search queries can reveal intent and context |
-| **Knowledge / RAG** | Organizational KB documents sent to model as context | High — may include confidential organizational data |
-| **Vision** | Images sent to model provider for analysis | Medium — images may contain sensitive visual data |
-| **Code Interpreter** | Code sent to external execution environment | Medium — code may contain business logic or credentials |
-| **Image Generation** | Prompts sent to image generation service | Low-Medium — prompts reveal intent |
+| Capability           | Risk                                                         | Guard rationale                                            |
+| -------------------- | ------------------------------------------------------------ | ---------------------------------------------------------- |
+| **File Upload**      | Documents sent to model provider for processing              | High — organizational documents may contain sensitive data |
+| **Web Search**       | Query context sent to search provider; results may be logged | Medium — search queries can reveal intent and context      |
+| **Knowledge / RAG**  | Organizational KB documents sent to model as context         | High — may include confidential organizational data        |
+| **Vision**           | Images sent to model provider for analysis                   | Medium — images may contain sensitive visual data          |
+| **Code Interpreter** | Code sent to external execution environment                  | Medium — code may contain business logic or credentials    |
+| **Image Generation** | Prompts sent to image generation service                     | Low-Medium — prompts reveal intent                         |
 
 **Not recommended for guard:**
+
 - **Memory** — stored locally in the platform, not sent to external providers
 - **Citations** — display-only, no data leaves
 - **Status Updates** — display-only
@@ -175,21 +180,25 @@ Based on data sovereignty analysis — which operations send user/organizational
 Suggested defaults (configurable per model by admin):
 
 **Generic default:**
+
 > "Dit model draait op externe infrastructuur. Geüploade bestanden en gespreksinhoud worden verwerkt door een externe provider. Wilt u doorgaan?"
 >
 > "This model runs on external infrastructure. Uploaded files and conversation content will be processed by an external provider. Do you want to continue?"
 
 **Per-capability defaults could also be offered**, e.g., for web search:
+
 > "Web search results for this model are processed by an external search provider. Your query context may be visible to that provider."
 
 ## Architecture Insights
 
 ### Backend Changes
+
 **Model metadata:** `ModelMeta` uses `extra='allow'`, so `data_warnings` and `data_warning_message` fields are stored without DB migration. They flow through `get_all_models()` and the merge logic automatically.
 
 **Feature flag:** New `ENABLE_DATA_WARNINGS` PersistentConfig (default `True`). Exposed via `/api/config` as `config.features.enable_data_warnings`. Added to Helm chart values.
 
 **Audit logging:** New `DataWarningLog` model/table to record accepted warnings:
+
 - `id`, `user_id`, `chat_id`, `model_id`, `capabilities` (JSON list of acknowledged capabilities), `warning_message`, `created_at`
 - New endpoint `POST /api/v1/data-warnings/accept` to log acceptance from frontend
 - Queryable for compliance reporting
@@ -228,7 +237,9 @@ submitPrompt() validates input
 ```
 
 ### Upstream Compatibility
+
 This is fully additive:
+
 - New component files (no upstream file modification for the UI)
 - New `meta` fields via `extra='allow'` (no schema changes)
 - Interception in `submitPrompt()` is the only upstream-file touch point
@@ -251,7 +262,7 @@ This is fully additive:
 ## Design Decisions (Resolved)
 
 1. **Granularity:** One warning message per model, listing the specific capabilities that triggered it. The message is configurable per model by the admin, with a sensible default.
-2. **Mid-conversation capability changes:** The warning fires whenever a *new* capability is used that hasn't been acknowledged yet in this conversation. E.g., if a user sends a text message (no warning), then enables web search on the next message, the web search warning fires at that point. The `acceptedDataWarnings` set tracks `${modelId}:${capability}` keys, so only truly new combinations trigger the dialog.
+2. **Mid-conversation capability changes:** The warning fires whenever a _new_ capability is used that hasn't been acknowledged yet in this conversation. E.g., if a user sends a text message (no warning), then enables web search on the next message, the web search warning fires at that point. The `acceptedDataWarnings` set tracks `${modelId}:${capability}` keys, so only truly new combinations trigger the dialog.
 3. **Audit logging:** Accepted warnings are logged for compliance. When a user accepts a data warning, a log entry is created capturing: user ID, model ID, capabilities acknowledged, chat ID, and timestamp. This supports GDPR/DPIA audit trails.
 4. **Feature flag:** Global `ENABLE_DATA_WARNINGS` feature flag (default: enabled). Added to config.py, Helm chart values, and frontend config. When disabled, all data warning configuration is ignored and no popups are shown. Per-model `data_warnings` config is preserved but inactive.
 5. **Model switching:** If the user switches models mid-conversation, warnings for the new model's flagged capabilities fire independently — the accepted set is keyed by `${modelId}:${capability}`.
