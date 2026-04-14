@@ -135,6 +135,20 @@ export function normalizeCitations(
 }
 
 /**
+ * Build a full SourceInfo[] directly from raw sources, without scanning text
+ * for [N] markers. Use when you want the same full source list the Citations
+ * footer shows — i.e. regardless of whether the body text cites them inline.
+ */
+export function buildFullSourceList(sources: any[]): SourceInfo[] {
+	const citations = reduceSources(sources);
+	return citations.map((c, i) => ({
+		index: i + 1,
+		name: c.name,
+		url: c.url
+	}));
+}
+
+/**
  * Format source list as markdown for plain text clipboard.
  */
 export function formatSourcesAsMarkdown(sources: SourceInfo[]): string {

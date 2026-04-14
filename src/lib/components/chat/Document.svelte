@@ -11,7 +11,11 @@
 
 	import ContentRenderer from './Messages/ContentRenderer.svelte';
 	import Citations from './Messages/Citations.svelte';
-	import { normalizeCitations, formatSourcesAsMarkdown } from '$lib/utils/citations';
+	import {
+		normalizeCitations,
+		buildFullSourceList,
+		formatSourcesAsMarkdown
+	} from '$lib/utils/citations';
 	import Download from '../icons/Download.svelte';
 	import Tooltip from '../common/Tooltip.svelte';
 	import Dropdown from '../common/Dropdown.svelte';
@@ -43,16 +47,16 @@
 	};
 
 	// Build the content to export: normalize [N] citations in the markdown and append a
-	// source appendix using the same utility as the message-level copy button.
-	// The [N] marker format ensures Word/pandoc won't renumber it as a continuation of a
-	// preceding numbered list in the body.
+	// source appendix. When the body has no [N] markers, fall back to the full source
+	// list so the downloaded file matches what the Citations footer shows on screen.
 	const getExportMarkdown = () => {
 		if (!current) return '';
 		const sources = current.sources ?? [];
 		if (sources.length === 0) return current.markdown;
 		const { content, sourceList } = normalizeCitations(current.markdown, sources);
-		if (sourceList.length === 0) return current.markdown;
-		return `${content}\n\n---\n\n${formatSourcesAsMarkdown(sourceList)}\n`;
+		const appendix = sourceList.length > 0 ? sourceList : buildFullSourceList(sources);
+		if (appendix.length === 0) return current.markdown;
+		return `${content}\n\n---\n\n${formatSourcesAsMarkdown(appendix)}\n`;
 	};
 
 	const downloadMd = () => {
