@@ -189,10 +189,20 @@ jobs:
       - name: Compute chart version
         id: version
         run: |
-          BASE=$(grep '^version:' helm/open-webui-tenant/Chart.yaml | awk '{print $2}')
-          MAJOR_MINOR=$(echo "$BASE" | cut -d. -f1-2)
-          VERSION="${MAJOR_MINOR}.${{ github.run_number }}"
+          # Stable releases come from git tags (v1.2.3 -> 1.2.3).
+          # Branch pushes publish prereleases (1.0.<run>-<branch>.<sha>)
+          # which are excluded by default semver ranges, so prod tenants
+          # pinned to an exact version are unaffected.
+          if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
+            VERSION="${GITHUB_REF#refs/tags/v}"
+          else
+            BASE=$(grep '^version:' helm/open-webui-tenant/Chart.yaml | awk '{print $2}')
+            MAJOR_MINOR=$(echo "$BASE" | cut -d. -f1-2)
+            SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-7)
+            VERSION="${MAJOR_MINOR}.${{ github.run_number }}-${GITHUB_REF_NAME}.${SHORT_SHA}"
+          fi
           echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "Publishing chart version: ${VERSION}"
 
       - name: Update appVersion in Chart.yaml
         run: |
