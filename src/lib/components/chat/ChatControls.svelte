@@ -1,5 +1,5 @@
 <script context="module" lang="ts">
-	let savedTab: 'controls' | 'files' | 'overview' = 'controls';
+	let savedTab: 'controls' | 'files' | 'overview' | 'document' = 'controls';
 </script>
 
 <script lang="ts">
@@ -16,11 +16,14 @@
 		showControls,
 		showCallOverlay,
 		showArtifacts,
+		showDocument,
+		openDocumentTabSignal,
 		showEmbeds,
 		settings,
 		showFileNavPath,
 		selectedTerminalId,
-		user
+		user,
+		documentContents
 	} from '$lib/stores';
 
 	import { isFeatureEnabled } from '$lib/utils/features';
@@ -31,6 +34,7 @@
 	import CallOverlay from './MessageInput/CallOverlay.svelte';
 	import Drawer from '../common/Drawer.svelte';
 	import Artifacts from './Artifacts.svelte';
+	import Document from './Document.svelte';
 	import Embeds from './ChatControls/Embeds.svelte';
 	import FileNav from './FileNav.svelte';
 	import PyodideFileNav from './PyodideFileNav.svelte';
@@ -76,18 +80,40 @@
 		!!$selectedTerminalId ||
 		(codeInterpreterEnabled && $config?.code?.interpreter_engine !== 'jupyter');
 	$: showOverviewTab = hasMessages && isFeatureEnabled('chat_overview');
+	$: showDocumentTab = isFeatureEnabled('document_writer') && ($documentContents?.length ?? 0) > 0;
 
 	// Tab fallback: if active tab becomes hidden, switch to next available
 	$: if (!showOverviewTab && activeTab === 'overview') activeTab = 'controls';
 	$: if (!showFilesTab && activeTab === 'files') activeTab = 'controls';
+	$: if (!showDocumentTab && activeTab === 'document') activeTab = 'controls';
 	$: if (!showControlsTab && activeTab === 'controls') {
-		if (showFilesTab) activeTab = 'files';
+		if (showDocumentTab) activeTab = 'document';
+		else if (showFilesTab) activeTab = 'files';
 		else if (showOverviewTab) activeTab = 'overview';
 	}
 
 	// Auto-close if there are no visible tabs
-	$: if (!showControlsTab && !showFilesTab && !showOverviewTab) {
+	$: if (!showControlsTab && !showFilesTab && !showOverviewTab && !showDocumentTab) {
 		showControls.set(false);
+	}
+
+	// Auto-switch to Document tab whenever upstream opens the document pane. Guarded on
+	// showDocumentTab so we don't switch to a tab that's about to be auto-hidden by the
+	// visibility reactive above — during doc generation, $showDocument flips true slightly
+	// before documentContents fills, and without this guard activeTab would bounce back to
+	// controls.
+	$: if ($showDocument && showDocumentTab) {
+		activeTab = 'document';
+		showControls.set(true);
+	} else if ($showDocument) {
+		showControls.set(true);
+	}
+
+	// Explicit signal — triggers even when $showDocument is already true (e.g. re-clicking a
+	// DocumentCard while Controls are open on another tab).
+	$: if ($openDocumentTabSignal && showDocumentTab) {
+		activeTab = 'document';
+		showControls.set(true);
 	}
 
 	// Auto-switch to Files tab when display_file is triggered
@@ -177,8 +203,12 @@
 		}
 	};
 
-	const onMouseDown = () => {
-		dragged = true;
+	const onMouseDown = (e: MouseEvent) => {
+		const resizer = document.getElementById('controls-resizer');
+		const target = e.target as Node | null;
+		if (resizer && target && resizer.contains(target)) {
+			dragged = true;
+		}
 	};
 	const onMouseUp = () => {
 		dragged = false;
@@ -252,6 +282,7 @@
 			showControls.set(false);
 		}
 		showArtifacts.set(false);
+		showDocument.set(false);
 		showEmbeds.set(false);
 		if ($showCallOverlay) showCallOverlay.set(false);
 	};
@@ -289,7 +320,7 @@
 				{:else if $showArtifacts}
 					<Artifacts {history} />
 				{:else}
-					<!-- Controls + Files tabs -->
+					<!-- Controls + Files + Document tabs -->
 					<div class="flex flex-col h-full min-h-0">
 						<!-- Tab bar -->
 						<div class="flex items-center justify-between px-2 pt-2 pb-2 shrink-0">
@@ -303,6 +334,17 @@
 										on:click={() => (activeTab = 'controls')}
 									>
 										{$i18n.t('Controls')}
+									</button>
+								{/if}
+								{#if showDocumentTab}
+									<button
+										class="px-2.5 py-1 text-sm rounded-lg transition whitespace-nowrap {activeTab ===
+										'document'
+											? 'bg-gray-100 dark:bg-gray-800 font-medium text-gray-900 dark:text-white'
+											: 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300'}"
+										on:click={() => (activeTab = 'document')}
+									>
+										{$i18n.t('Document')}
 									</button>
 								{/if}
 								{#if showFilesTab}
@@ -351,7 +393,9 @@
 								? 'h-full'
 								: activeTab === 'controls'
 									? 'overflow-y-auto px-3 pt-1'
-									: ''}"
+									: activeTab === 'document'
+										? 'h-full'
+										: ''}"
 						>
 							{#if activeTab === 'overview'}
 								<Overview
@@ -366,6 +410,8 @@
 								<FileNav onAttach={handleTerminalAttach} />
 							{:else if activeTab === 'files' && codeInterpreterEnabled}
 								<PyodideFileNav />
+							{:else if activeTab === 'document'}
+								<Document />
 							{:else}
 								<Controls embed={true} {models} bind:chatFiles bind:params />
 							{/if}
@@ -435,7 +481,7 @@
 					{:else if $showArtifacts}
 						<Artifacts {history} overlay={dragged} />
 					{:else}
-						<!-- Controls + Files tabs -->
+						<!-- Controls + Files + Document tabs -->
 						<div class="flex flex-col h-full min-h-0">
 							<!-- Tab bar -->
 							<div class="flex items-center justify-between px-2 pt-2 pb-2 shrink-0">
@@ -449,6 +495,17 @@
 											on:click={() => (activeTab = 'controls')}
 										>
 											{$i18n.t('Controls')}
+										</button>
+									{/if}
+									{#if showDocumentTab}
+										<button
+											class="px-2.5 py-1 text-sm rounded-lg transition whitespace-nowrap {activeTab ===
+											'document'
+												? 'bg-gray-100 dark:bg-gray-800 font-medium text-gray-900 dark:text-white'
+												: 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300'}"
+											on:click={() => (activeTab = 'document')}
+										>
+											{$i18n.t('Document')}
 										</button>
 									{/if}
 									{#if showFilesTab}
@@ -497,7 +554,9 @@
 									? 'h-full'
 									: activeTab === 'controls'
 										? 'overflow-y-auto px-3 pt-1'
-										: ''}"
+										: activeTab === 'document'
+											? 'h-full'
+											: ''}"
 							>
 								{#if activeTab === 'overview'}
 									<Overview
@@ -517,6 +576,8 @@
 									<FileNav onAttach={handleTerminalAttach} overlay={dragged} />
 								{:else if activeTab === 'files' && codeInterpreterEnabled}
 									<PyodideFileNav overlay={dragged} />
+								{:else if activeTab === 'document'}
+									<Document overlay={dragged} />
 								{:else}
 									<Controls embed={true} {models} bind:chatFiles bind:params />
 								{/if}

@@ -56,7 +56,7 @@
 
 	$: if (loaded) {
 		// Track all dependencies explicitly
-		void viewOption, typeFilter, query;
+		(void viewOption, typeFilter, query);
 
 		if (queryDebounceActive) {
 			// User is typing — debounce
@@ -93,11 +93,15 @@
 	const getItemsPage = async (replace = false) => {
 		const currentFetchId = ++fetchId;
 		itemsLoading = true;
-		const res = await searchKnowledgeBases(localStorage.token, query, viewOption, page, typeFilter || null).catch(
-			() => {
-				return [];
-			}
-		);
+		const res = await searchKnowledgeBases(
+			localStorage.token,
+			query,
+			viewOption,
+			page,
+			typeFilter || null
+		).catch(() => {
+			return [];
+		});
 
 		if (currentFetchId !== fetchId) return; // Stale response, discard
 
@@ -365,7 +369,9 @@
 				<div class=" my-2 px-3 grid grid-cols-1 lg:grid-cols-2 gap-2">
 					{#each items as item}
 						<button
-							class=" flex space-x-4 cursor-pointer text-left w-full px-3 py-2.5 dark:hover:bg-gray-850/50 hover:bg-gray-50 transition rounded-2xl {item.suspension_info ? 'opacity-50 cursor-not-allowed' : ''}"
+							class=" flex space-x-4 cursor-pointer text-left w-full px-3 py-2.5 dark:hover:bg-gray-850/50 hover:bg-gray-50 transition rounded-2xl {item.suspension_info
+								? 'opacity-50 cursor-not-allowed'
+								: ''}"
 							on:click={() => {
 								if (item.suspension_info) {
 									return;

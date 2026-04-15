@@ -7,12 +7,14 @@ When a user selects a file from Google Drive or OneDrive, there's a 1-2 second d
 ## Current State Analysis
 
 ### Local file flow (instant)
+
 1. User picks file → OS dialog returns `File` object (already in memory)
 2. `uploadFileHandler` creates placeholder with `status: 'uploading'` → **appears in UI** (`MessageInput.svelte:637-657`)
 3. Upload to backend in background
 4. Socket.IO `file:status` event → spinner stops
 
 ### Cloud file flow (delayed)
+
 1. User picks file in picker UI
 2. **BLOCKING**: File downloaded from Google/OneDrive API (1-2s+)
 3. Handler wraps blob in `File` object
@@ -20,12 +22,14 @@ When a user selects a file from Google Drive or OneDrive, there's a 1-2 second d
 5. Upload to backend in background
 
 ### Key files
+
 - `src/lib/components/chat/MessageInput.svelte:541-578` — Cloud handlers
 - `src/lib/components/chat/MessageInput.svelte:626-738` — `uploadFileHandler`
 - `src/lib/utils/google-drive-picker.ts:197-280` — `createPicker()` (metadata available at line 218, download at 249)
 - `src/lib/utils/onedrive-file-picker.ts:978-1001` — `pickAndDownloadFilesModal()` (items available at 981, download at 988)
 
 ### Key Discoveries
+
 - `FileItem.svelte` renders `loading=true` (spinner) when `status === 'uploading'` — the UI already supports this
 - The `small` variant used in chat input doesn't prominently show file size, so `size: 0` in the placeholder won't look odd
 - The `itemId` field (UUID) on file items was designed for pre-upload tracking — we can reuse it to link placeholder → real upload
@@ -36,6 +40,7 @@ When a user selects a file from Google Drive or OneDrive, there's a 1-2 second d
 When a user picks a file from Google Drive or OneDrive, a file chip with a loading spinner appears in the chat input **immediately** (within the same frame as the picker closing), identical to local file selection behavior. The spinner transitions to the uploaded state after the cloud download + backend upload complete.
 
 ### How to verify
+
 1. Open a chat, click the `+` menu → Google Drive (or OneDrive)
 2. Pick a file in the picker
 3. The file chip should appear instantly with a spinner when the picker closes
@@ -56,11 +61,13 @@ Add an `onFileSelected` callback to both picker utility functions. When the user
 ## Phase 1: Add `existingItemId` to `uploadFileHandler`
 
 ### Overview
+
 Enable `uploadFileHandler` to reuse a pre-created placeholder file item instead of always creating a new one. This is the foundation that both cloud handlers will use.
 
 ### Changes Required:
 
 #### 1. `uploadFileHandler` — accept and reuse existing placeholder
+
 **File**: `src/lib/components/chat/MessageInput.svelte`
 **Lines**: 626-657
 
@@ -132,10 +139,12 @@ Note: The empty file check (`size == 0`) is only applied to new placeholders (no
 ### Success Criteria:
 
 #### Automated Verification:
+
 - [x] `npm run build` compiles successfully
 - [ ] `npm run check` passes (or no new errors vs baseline)
 
 #### Manual Verification:
+
 - [ ] Local file upload still works identically (regression test)
 - [ ] Existing cloud file upload still works (no `existingItemId` passed yet)
 
@@ -144,11 +153,13 @@ Note: The empty file check (`size == 0`) is only applied to new placeholders (no
 ## Phase 2: Google Drive Instant Feedback
 
 ### Overview
+
 Add `onFileSelected` callback to `createPicker()` and use it in the Google Drive handler to show a placeholder immediately.
 
 ### Changes Required:
 
 #### 1. `createPicker()` — add `onFileSelected` callback
+
 **File**: `src/lib/utils/google-drive-picker.ts`
 **Lines**: 197-280
 
@@ -156,69 +167,70 @@ Add an options parameter with an `onFileSelected` callback. Call it after comput
 
 ```typescript
 interface PickerOptions {
-    onFileSelected?: (metadata: { name: string }) => void;
+	onFileSelected?: (metadata: { name: string }) => void;
 }
 
 export const createPicker = (options?: PickerOptions) => {
-    return new Promise(async (resolve, reject) => {
-        try {
-            await initialize();
-            const token = await getAuthToken();
+	return new Promise(async (resolve, reject) => {
+		try {
+			await initialize();
+			const token = await getAuthToken();
 
-            const picker = new google.picker.PickerBuilder()
-                .enableFeature(google.picker.Feature.MULTISELECT_ENABLED)
-                .addView(
-                    new google.picker.DocsView()
-                        .setIncludeFolders(true)
-                        .setSelectFolderEnabled(false)
-                        .setParent('root')
-                )
-                .setOAuthToken(token)
-                .setDeveloperKey(API_KEY)
-                .setCallback(async (data: any) => {
-                    if (data[google.picker.Response.ACTION] === google.picker.Action.PICKED) {
-                        try {
-                            const doc = data[google.picker.Response.DOCUMENTS][0];
-                            const fileId = doc[google.picker.Document.ID];
-                            const fileName = doc[google.picker.Document.NAME];
-                            const mimeType = doc[google.picker.Document.MIME_TYPE];
+			const picker = new google.picker.PickerBuilder()
+				.enableFeature(google.picker.Feature.MULTISELECT_ENABLED)
+				.addView(
+					new google.picker.DocsView()
+						.setIncludeFolders(true)
+						.setSelectFolderEnabled(false)
+						.setParent('root')
+				)
+				.setOAuthToken(token)
+				.setDeveloperKey(API_KEY)
+				.setCallback(async (data: any) => {
+					if (data[google.picker.Response.ACTION] === google.picker.Action.PICKED) {
+						try {
+							const doc = data[google.picker.Response.DOCUMENTS][0];
+							const fileId = doc[google.picker.Document.ID];
+							const fileName = doc[google.picker.Document.NAME];
+							const mimeType = doc[google.picker.Document.MIME_TYPE];
 
-                            if (!fileId || !fileName) throw new Error('Required file details missing');
+							if (!fileId || !fileName) throw new Error('Required file details missing');
 
-                            let downloadUrl;
-                            let effectiveName = fileName;
-                            if (mimeType.includes('google-apps')) {
-                                // ... existing export format logic (unchanged) ...
-                                // effectiveName gets extension appended
-                            } else {
-                                downloadUrl = `https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`;
-                            }
+							let downloadUrl;
+							let effectiveName = fileName;
+							if (mimeType.includes('google-apps')) {
+								// ... existing export format logic (unchanged) ...
+								// effectiveName gets extension appended
+							} else {
+								downloadUrl = `https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`;
+							}
 
-                            // NEW: Notify before download starts
-                            options?.onFileSelected?.({ name: effectiveName });
+							// NEW: Notify before download starts
+							options?.onFileSelected?.({ name: effectiveName });
 
-                            const response = await fetch(downloadUrl, {
-                                headers: { Authorization: `Bearer ${token}`, Accept: '*/*' }
-                            });
-                            // ... rest unchanged ...
-                        } catch (error) {
-                            reject(error);
-                        }
-                    } else if (data[google.picker.Response.ACTION] === google.picker.Action.CANCEL) {
-                        resolve(null);
-                    }
-                })
-                .build();
-            picker.setVisible(true);
-        } catch (error) {
-            console.error('Google Drive Picker error:', error);
-            reject(error);
-        }
-    });
+							const response = await fetch(downloadUrl, {
+								headers: { Authorization: `Bearer ${token}`, Accept: '*/*' }
+							});
+							// ... rest unchanged ...
+						} catch (error) {
+							reject(error);
+						}
+					} else if (data[google.picker.Response.ACTION] === google.picker.Action.CANCEL) {
+						resolve(null);
+					}
+				})
+				.build();
+			picker.setVisible(true);
+		} catch (error) {
+			console.error('Google Drive Picker error:', error);
+			reject(error);
+		}
+	});
 };
 ```
 
 #### 2. Google Drive handler — create placeholder via callback
+
 **File**: `src/lib/components/chat/MessageInput.svelte`
 **Lines**: 541-560
 
@@ -269,9 +281,11 @@ const googleDriveHandler = async () => {
 ### Success Criteria:
 
 #### Automated Verification:
+
 - [x] `npm run build` compiles successfully
 
 #### Manual Verification:
+
 - [ ] Pick a file from Google Drive → file chip with spinner appears **immediately** when picker closes
 - [ ] After download + upload completes, spinner stops and file is usable
 - [ ] Pick a Google Doc (Workspace file) → filename shows with correct extension (`.txt`, `.csv`)
@@ -285,47 +299,50 @@ const googleDriveHandler = async () => {
 ## Phase 3: OneDrive Instant Feedback
 
 ### Overview
+
 Add `onFilesSelected` callback to `pickAndDownloadFilesModal()` and use it in the OneDrive handler to show placeholders immediately.
 
 ### Changes Required:
 
 #### 1. `pickAndDownloadFilesModal()` — add `onFilesSelected` callback
+
 **File**: `src/lib/utils/onedrive-file-picker.ts`
 **Lines**: 978-1001
 
 ```typescript
 export async function pickAndDownloadFilesModal(
-    authorityType?: 'personal' | 'organizations',
-    options?: {
-        onFilesSelected?: (items: Array<{ name: string }>) => void;
-    }
+	authorityType?: 'personal' | 'organizations',
+	options?: {
+		onFilesSelected?: (items: Array<{ name: string }>) => void;
+	}
 ): Promise<Array<{ blob: Blob; name: string }>> {
-    const pickerResult = await openOneDriveFilePickerModal(authorityType);
+	const pickerResult = await openOneDriveFilePickerModal(authorityType);
 
-    if (!pickerResult || !pickerResult.items || pickerResult.items.length === 0) {
-        return [];
-    }
+	if (!pickerResult || !pickerResult.items || pickerResult.items.length === 0) {
+		return [];
+	}
 
-    // NEW: Notify before downloads start
-    options?.onFilesSelected?.(pickerResult.items.map((item) => ({ name: item.name })));
+	// NEW: Notify before downloads start
+	options?.onFilesSelected?.(pickerResult.items.map((item) => ({ name: item.name })));
 
-    // Download all selected files in parallel
-    const downloadPromises = pickerResult.items.map(async (item) => {
-        try {
-            const blob = await downloadOneDriveFile(item, authorityType);
-            return { blob, name: item.name };
-        } catch (error) {
-            console.error(`Failed to download file ${item.name}:`, error);
-            return null;
-        }
-    });
+	// Download all selected files in parallel
+	const downloadPromises = pickerResult.items.map(async (item) => {
+		try {
+			const blob = await downloadOneDriveFile(item, authorityType);
+			return { blob, name: item.name };
+		} catch (error) {
+			console.error(`Failed to download file ${item.name}:`, error);
+			return null;
+		}
+	});
 
-    const results = await Promise.all(downloadPromises);
-    return results.filter((result): result is { blob: Blob; name: string } => result !== null);
+	const results = await Promise.all(downloadPromises);
+	return results.filter((result): result is { blob: Blob; name: string } => result !== null);
 }
 ```
 
 #### 2. OneDrive handler — create placeholders via callback
+
 **File**: `src/lib/components/chat/MessageInput.svelte`
 **Lines**: 562-578
 
@@ -392,9 +409,11 @@ const oneDriveHandler = async (authorityType) => {
 ### Success Criteria:
 
 #### Automated Verification:
+
 - [x] `npm run build` compiles successfully
 
 #### Manual Verification:
+
 - [ ] Pick a file from OneDrive → file chip with spinner appears **immediately** when picker closes
 - [ ] Pick multiple files → all file chips appear immediately
 - [ ] After download + upload completes, spinners stop
@@ -408,6 +427,7 @@ const oneDriveHandler = async (authorityType) => {
 ## Testing Strategy
 
 ### Manual Testing Steps:
+
 1. **Local file upload** — verify no regression (should be unchanged)
 2. **Google Drive single file** — pick a native file (PDF, image) → instant placeholder → completes
 3. **Google Drive Workspace file** — pick a Google Doc → placeholder shows `filename.txt` → completes

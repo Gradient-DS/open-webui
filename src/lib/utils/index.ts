@@ -417,12 +417,18 @@ export const formatDate = (inputDate) => {
 	}
 };
 
-export const copyToClipboard = async (text, html = null, formatted = false, sources: any[] = []) => {
+export const copyToClipboard = async (
+	text,
+	html = null,
+	formatted = false,
+	sources: any[] = []
+) => {
 	// If sources provided, normalize citations and build appendix
 	let sourcesAppendixHtml = '';
 	let htmlText = text; // text used for HTML rendering (without plain-text sources)
 	if (sources && sources.length > 0) {
-		const { normalizeCitations, formatSourcesAsMarkdown, formatSourcesAsHtml } = await import('$lib/utils/citations');
+		const { normalizeCitations, formatSourcesAsMarkdown, formatSourcesAsHtml } =
+			await import('$lib/utils/citations');
 		const { content, sourceList } = normalizeCitations(text, sources);
 		if (sourceList.length > 0) {
 			htmlText = content; // normalized content only — sources go in HTML appendix

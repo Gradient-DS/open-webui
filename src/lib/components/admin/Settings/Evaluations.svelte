@@ -175,7 +175,9 @@
 				<div class="mb-2.5 flex w-full justify-between">
 					<div class="flex flex-col">
 						<div class="text-xs font-medium">{$i18n.t('Message Rating (Thumbs Up/Down)')}</div>
-						<div class="text-xs text-gray-500">{$i18n.t('Allow users to rate individual responses')}</div>
+						<div class="text-xs text-gray-500">
+							{$i18n.t('Allow users to rate individual responses')}
+						</div>
 					</div>
 					<Switch bind:state={evaluationConfig.ENABLE_MESSAGE_RATING} />
 				</div>
@@ -184,7 +186,9 @@
 				<div class="mb-2.5 flex w-full justify-between">
 					<div class="flex flex-col">
 						<div class="text-xs font-medium">{$i18n.t('Feedback Tags')}</div>
-						<div class="text-xs text-gray-500">{$i18n.t('Custom tags shown after rating a response')}</div>
+						<div class="text-xs text-gray-500">
+							{$i18n.t('Custom tags shown after rating a response')}
+						</div>
 					</div>
 					<Switch bind:state={evaluationConfig.ENABLE_FEEDBACK_LAYER2} />
 				</div>
@@ -202,7 +206,10 @@
 									class="flex-1 text-sm px-2.5 py-1 bg-transparent border border-gray-100/30 dark:border-gray-850/30 rounded-lg outline-hidden"
 									bind:value={tag.label}
 									on:input={() => {
-										tag.key = tag.label.toLowerCase().replace(/\s+/g, '_').replace(/[^a-z0-9_]/g, '');
+										tag.key = tag.label
+											.toLowerCase()
+											.replace(/\s+/g, '_')
+											.replace(/[^a-z0-9_]/g, '');
 									}}
 									placeholder={$i18n.t('Tag label')}
 								/>
@@ -210,10 +217,17 @@
 									type="button"
 									class="p-1 text-gray-400 hover:text-red-500 transition"
 									on:click={() => {
-										evaluationConfig.FEEDBACK_LAYER2_POSITIVE_TAGS = evaluationConfig.FEEDBACK_LAYER2_POSITIVE_TAGS.filter((_, i) => i !== index);
+										evaluationConfig.FEEDBACK_LAYER2_POSITIVE_TAGS =
+											evaluationConfig.FEEDBACK_LAYER2_POSITIVE_TAGS.filter((_, i) => i !== index);
 									}}
 								>
-									<svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+									<svg
+										class="w-4 h-4"
+										fill="none"
+										stroke="currentColor"
+										stroke-width="2"
+										viewBox="0 0 24 24"
+									>
 										<path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
 									</svg>
 								</button>
@@ -223,12 +237,17 @@
 							type="button"
 							class="text-xs text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 flex items-center gap-1 mt-1"
 							on:click={() => {
-								if (!evaluationConfig.FEEDBACK_LAYER2_POSITIVE_TAGS) evaluationConfig.FEEDBACK_LAYER2_POSITIVE_TAGS = [];
+								if (!evaluationConfig.FEEDBACK_LAYER2_POSITIVE_TAGS)
+									evaluationConfig.FEEDBACK_LAYER2_POSITIVE_TAGS = [];
 								const key = `tag_${Date.now()}`;
-								evaluationConfig.FEEDBACK_LAYER2_POSITIVE_TAGS = [...evaluationConfig.FEEDBACK_LAYER2_POSITIVE_TAGS, { key, label: '' }];
+								evaluationConfig.FEEDBACK_LAYER2_POSITIVE_TAGS = [
+									...evaluationConfig.FEEDBACK_LAYER2_POSITIVE_TAGS,
+									{ key, label: '' }
+								];
 							}}
 						>
-							<Plus className="size-3" /> {$i18n.t('Add tag')}
+							<Plus className="size-3" />
+							{$i18n.t('Add tag')}
 						</button>
 
 						<!-- Negative Tags -->
@@ -242,7 +261,10 @@
 									class="flex-1 text-sm px-2.5 py-1 bg-transparent border border-gray-100/30 dark:border-gray-850/30 rounded-lg outline-hidden"
 									bind:value={tag.label}
 									on:input={() => {
-										tag.key = tag.label.toLowerCase().replace(/\s+/g, '_').replace(/[^a-z0-9_]/g, '');
+										tag.key = tag.label
+											.toLowerCase()
+											.replace(/\s+/g, '_')
+											.replace(/[^a-z0-9_]/g, '');
 									}}
 									placeholder={$i18n.t('Tag label')}
 								/>
@@ -250,10 +272,17 @@
 									type="button"
 									class="p-1 text-gray-400 hover:text-red-500 transition"
 									on:click={() => {
-										evaluationConfig.FEEDBACK_LAYER2_NEGATIVE_TAGS = evaluationConfig.FEEDBACK_LAYER2_NEGATIVE_TAGS.filter((_, i) => i !== index);
+										evaluationConfig.FEEDBACK_LAYER2_NEGATIVE_TAGS =
+											evaluationConfig.FEEDBACK_LAYER2_NEGATIVE_TAGS.filter((_, i) => i !== index);
 									}}
 								>
-									<svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+									<svg
+										class="w-4 h-4"
+										fill="none"
+										stroke="currentColor"
+										stroke-width="2"
+										viewBox="0 0 24 24"
+									>
 										<path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
 									</svg>
 								</button>
@@ -263,12 +292,17 @@
 							type="button"
 							class="text-xs text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 flex items-center gap-1 mt-1"
 							on:click={() => {
-								if (!evaluationConfig.FEEDBACK_LAYER2_NEGATIVE_TAGS) evaluationConfig.FEEDBACK_LAYER2_NEGATIVE_TAGS = [];
+								if (!evaluationConfig.FEEDBACK_LAYER2_NEGATIVE_TAGS)
+									evaluationConfig.FEEDBACK_LAYER2_NEGATIVE_TAGS = [];
 								const key = `tag_${Date.now()}`;
-								evaluationConfig.FEEDBACK_LAYER2_NEGATIVE_TAGS = [...evaluationConfig.FEEDBACK_LAYER2_NEGATIVE_TAGS, { key, label: '' }];
+								evaluationConfig.FEEDBACK_LAYER2_NEGATIVE_TAGS = [
+									...evaluationConfig.FEEDBACK_LAYER2_NEGATIVE_TAGS,
+									{ key, label: '' }
+								];
 							}}
 						>
-							<Plus className="size-3" /> {$i18n.t('Add tag')}
+							<Plus className="size-3" />
+							{$i18n.t('Add tag')}
 						</button>
 					</div>
 				{/if}
@@ -277,7 +311,9 @@
 				<div class="mb-2.5 flex w-full justify-between">
 					<div class="flex flex-col">
 						<div class="text-xs font-medium">{$i18n.t('Free Text Comment')}</div>
-						<div class="text-xs text-gray-500">{$i18n.t('Allow users to leave a text comment on responses')}</div>
+						<div class="text-xs text-gray-500">
+							{$i18n.t('Allow users to leave a text comment on responses')}
+						</div>
 					</div>
 					<Switch bind:state={evaluationConfig.ENABLE_FEEDBACK_LAYER3} />
 				</div>
@@ -297,7 +333,9 @@
 				<div class="mb-2.5 flex w-full justify-between">
 					<div class="flex flex-col">
 						<div class="text-xs font-medium">{$i18n.t('Category Tags')}</div>
-						<div class="text-xs text-gray-500">{$i18n.t('Allow users to add free-form category tags to feedback')}</div>
+						<div class="text-xs text-gray-500">
+							{$i18n.t('Allow users to add free-form category tags to feedback')}
+						</div>
 					</div>
 					<Switch bind:state={evaluationConfig.ENABLE_FEEDBACK_CATEGORY_TAGS} />
 				</div>
@@ -308,7 +346,9 @@
 				<div class="mb-2.5 flex w-full justify-between">
 					<div class="flex flex-col">
 						<div class="text-xs font-medium">{$i18n.t('Conversation Feedback')}</div>
-						<div class="text-xs text-gray-500">{$i18n.t('Show a feedback strip above the input after 2+ messages')}</div>
+						<div class="text-xs text-gray-500">
+							{$i18n.t('Show a feedback strip above the input after 2+ messages')}
+						</div>
 					</div>
 					<Switch bind:state={evaluationConfig.ENABLE_CONVERSATION_FEEDBACK} />
 				</div>

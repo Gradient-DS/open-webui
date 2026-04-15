@@ -161,6 +161,8 @@ from open_webui.config import (
     CODE_INTERPRETER_JUPYTER_AUTH_TOKEN,
     CODE_INTERPRETER_JUPYTER_AUTH_PASSWORD,
     CODE_INTERPRETER_JUPYTER_TIMEOUT,
+    ENABLE_DOCUMENT_WRITER,
+    DOCUMENT_WRITER_PROMPT_TEMPLATE,
     ENABLE_MEMORIES,
     # Image
     AUTOMATIC1111_API_AUTH,
@@ -516,6 +518,7 @@ from open_webui.config import (
     FEATURE_CHAT_CONTROLS,
     FEATURE_CAPTURE,
     FEATURE_ARTIFACTS,
+    FEATURE_DOCUMENT_WRITER,
     FEATURE_PLAYGROUND,
     FEATURE_CHAT_OVERVIEW,
     FEATURE_NOTES_AI_CONTROLS,
@@ -1499,6 +1502,9 @@ app.state.config.CODE_INTERPRETER_JUPYTER_AUTH_TOKEN = CODE_INTERPRETER_JUPYTER_
 app.state.config.CODE_INTERPRETER_JUPYTER_AUTH_PASSWORD = CODE_INTERPRETER_JUPYTER_AUTH_PASSWORD
 app.state.config.CODE_INTERPRETER_JUPYTER_TIMEOUT = CODE_INTERPRETER_JUPYTER_TIMEOUT
 
+app.state.config.ENABLE_DOCUMENT_WRITER = ENABLE_DOCUMENT_WRITER
+app.state.config.DOCUMENT_WRITER_PROMPT_TEMPLATE = DOCUMENT_WRITER_PROMPT_TEMPLATE
+
 ########################################
 #
 # IMAGES
@@ -2414,6 +2420,7 @@ async def get_app_config(request: Request):
                     'enable_rag_filter_ui': app.state.config.ENABLE_RAG_FILTER_UI,
                     'enable_code_execution': app.state.config.ENABLE_CODE_EXECUTION,
                     'enable_code_interpreter': app.state.config.ENABLE_CODE_INTERPRETER,
+                    'enable_document_writer': app.state.config.ENABLE_DOCUMENT_WRITER,
                     'enable_image_generation': app.state.config.ENABLE_IMAGE_GENERATION,
                     'enable_autocomplete_generation': app.state.config.ENABLE_AUTOCOMPLETE_GENERATION,
                     'enable_community_sharing': app.state.config.ENABLE_COMMUNITY_SHARING,
@@ -2439,6 +2446,7 @@ async def get_app_config(request: Request):
                     'feature_chat_controls': FEATURE_CHAT_CONTROLS,
                     'feature_capture': FEATURE_CAPTURE,
                     'feature_artifacts': FEATURE_ARTIFACTS,
+                    'feature_document_writer': FEATURE_DOCUMENT_WRITER,
                     'feature_playground': FEATURE_PLAYGROUND,
                     'feature_chat_overview': FEATURE_CHAT_OVERVIEW,
                     'feature_notes_ai_controls': FEATURE_NOTES_AI_CONTROLS,

@@ -4,7 +4,7 @@ researcher: Claude
 git_commit: b0cfa6d9318ecc7bb7f733bceb07cbf4587d787a
 branch: merge/upstream-260329
 repository: open-webui
-topic: "KB provider-specific icons (OneDrive/Google Drive) in detail pane and selector dropdown"
+topic: 'KB provider-specific icons (OneDrive/Google Drive) in detail pane and selector dropdown'
 tags: [research, codebase, knowledge-base, icons, onedrive, google-drive, ui]
 status: complete
 last_updated: 2026-03-30
@@ -20,9 +20,11 @@ last_updated_by: Claude
 **Repository**: open-webui
 
 ## Research Question
+
 Replace the generic KB icon with OneDrive/Google Drive logos in (1) the KB detail pane header and (2) the KB selector dropdown in chat input.
 
 ## Summary
+
 The KB detail pane has no icon — only a text Badge for the type. The selector dropdowns use a generic `Database` icon for all KBs regardless of type. Both `OneDrive.svelte` and `GoogleDrive.svelte` icon components already exist and are imported in the detail pane component. The KB `type` field is available from the API but not currently used in the selector dropdowns.
 
 ## Detailed Findings

@@ -59,10 +59,7 @@
 		</div>
 	</div>
 
-	<form
-		class="flex flex-col mt-4"
-		on:submit|preventDefault={handleSubmit}
-	>
+	<form class="flex flex-col mt-4" on:submit|preventDefault={handleSubmit}>
 		<div class="mb-4">
 			{#if useRecoveryCode}
 				<input

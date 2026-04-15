@@ -1,15 +1,15 @@
 ---
-date: "2026-03-24T12:00:00+01:00"
+date: '2026-03-24T12:00:00+01:00'
 researcher: Claude Code
 git_commit: c463eff54
 branch: dev
 repository: Gradient-DS/open-webui
-topic: "CI/CD Quality Gates: PR Template, Testing, Security Scanning, E2E"
+topic: 'CI/CD Quality Gates: PR Template, Testing, Security Scanning, E2E'
 tags: [research, codebase, ci-cd, github-actions, testing, security, helm, docker, fluxcd]
 status: complete
-last_updated: "2026-03-24"
+last_updated: '2026-03-24'
 last_updated_by: Claude Code
-last_updated_note: "Excluded linting from scope (upstream errors), added FluxCD image tag strategy"
+last_updated_note: 'Excluded linting from scope (upstream errors), added FluxCD image tag strategy'
 ---
 
 # Research: CI/CD Quality Gates — PR Template, Testing, Security Scanning, E2E
@@ -23,6 +23,7 @@ last_updated_note: "Excluded linting from scope (upstream errors), added FluxCD 
 ## Research Question
 
 What is the current state of CI/CD, PR templates, testing infrastructure, Docker/Helm setup, and security scanning? What needs to be built to:
+
 1. Make the PR template more comprehensive (testing, docs, compose files, helm charts)
 2. Add quality gates for PRs to `dev` (image builds, unit tests)
 3. Add E2E testing for PRs to `test` (including external retrieval via genai-utils)
@@ -40,10 +41,10 @@ The repo has a **three-branch promotion model** (`dev` → `test` → `main`) en
 
 ### 1. Current Active Workflows
 
-| Workflow | Trigger | Purpose |
-|----------|---------|---------|
+| Workflow                 | Trigger                           | Purpose                                    |
+| ------------------------ | --------------------------------- | ------------------------------------------ |
 | `docker-build-soev.yaml` | Push to `main`/`dev`/`test`, tags | Multi-arch Docker build + Helm OCI publish |
-| `branch-guard.yaml` | PRs to `main`/`test` | Enforces `dev→test→main` promotion |
+| `branch-guard.yaml`      | PRs to `main`/`test`              | Enforces `dev→test→main` promotion         |
 
 **No workflows run on PRs to `dev`** — PRs can be merged without any automated checks.
 
@@ -51,39 +52,44 @@ The repo has a **three-branch promotion model** (`dev` → `test` → `main`) en
 
 These were disabled from upstream Open WebUI and provide a useful reference:
 
-| File | What it did |
-|------|-------------|
+| File                                  | What it did                                         |
+| ------------------------------------- | --------------------------------------------------- |
 | `format-build-frontend.yaml.disabled` | Prettier check, i18n parse, `npm run build`, Vitest |
-| `format-backend.yaml.disabled` | Black formatting (Python 3.11/3.12 matrix) |
-| `lint-backend.disabled` | PyLint via Bun |
-| `lint-frontend.disabled` | ESLint + svelte-check via Bun |
-| `integration-test.disabled` | Cypress E2E + SQLite/Postgres migration tests |
-| `codespell.disabled` | Spell checking |
-| `build-release.yml.disabled` | GitHub Release creation |
+| `format-backend.yaml.disabled`        | Black formatting (Python 3.11/3.12 matrix)          |
+| `lint-backend.disabled`               | PyLint via Bun                                      |
+| `lint-frontend.disabled`              | ESLint + svelte-check via Bun                       |
+| `integration-test.disabled`           | Cypress E2E + SQLite/Postgres migration tests       |
+| `codespell.disabled`                  | Spell checking                                      |
+| `build-release.yml.disabled`          | GitHub Release creation                             |
 
 ### 3. Current PR Template
 
 `.github/pull_request_template.md` — extremely minimal:
+
 ```markdown
 ## Summary
+
 <!-- Brief description of changes -->
+
 ## Checklist
+
 - [ ] I have tested these changes locally
 - [ ] I have reviewed my own code for obvious issues
 ```
 
 ### 4. Testing Infrastructure
 
-| Layer | Framework | Files | Approx Tests | Status |
-|-------|-----------|-------|--------------|--------|
-| Frontend unit | Vitest 1.6.1 | 1 | ~40 | Working |
-| Backend unit | pytest 8.3.2 | 5 | ~63 | 3/5 broken (missing `AbstractPostgresTest` + `mock_webui_user` utilities) |
-| E2E | Cypress 13.15.0 | 4 | ~12 | Working (needs running app at localhost:8080) |
+| Layer         | Framework       | Files | Approx Tests | Status                                                                    |
+| ------------- | --------------- | ----- | ------------ | ------------------------------------------------------------------------- |
+| Frontend unit | Vitest 1.6.1    | 1     | ~40          | Working                                                                   |
+| Backend unit  | pytest 8.3.2    | 5     | ~63          | 3/5 broken (missing `AbstractPostgresTest` + `mock_webui_user` utilities) |
+| E2E           | Cypress 13.15.0 | 4     | ~12          | Working (needs running app at localhost:8080)                             |
 
 **Working backend tests**: `test_provider.py` (storage), `test_redis.py` (Redis sentinel), `test_features.py` (feature flags)
 **Broken backend tests**: `test_auths.py`, `test_models.py`, `test_users.py` — import `AbstractPostgresTest` and `mock_webui_user` which don't exist
 
 **Test scripts**:
+
 - `npm run test:frontend` → `vitest --passWithNoTests`
 - `npm run cy:open` → Cypress GUI
 - No npm script for pytest
@@ -91,6 +97,7 @@ These were disabled from upstream Open WebUI and provide a useful reference:
 ### 5. Docker Setup
 
 **Single Dockerfile** — multi-stage: Node frontend build → Python backend runtime. Build args control variants:
+
 - `USE_SLIM=true` — skips model pre-download (used in CI)
 - `USE_CUDA` — NVIDIA GPU support
 - `USE_OLLAMA` — bundles Ollama server
@@ -103,11 +110,11 @@ These were disabled from upstream Open WebUI and provide a useful reference:
 
 The `docker-build-soev.yaml` workflow uses `docker/metadata-action` to generate these tags per branch:
 
-| Branch | Tags produced |
-|--------|--------------|
-| `dev` | `dev`, `git-<sha7>`, `dev-<sha7>-<run_number>` |
-| `test` | `test`, `git-<sha7>`, `test-<sha7>-<run_number>` |
-| `main` | `main`, `git-<sha7>`, `latest`, `main-<sha7>-<run_number>` |
+| Branch   | Tags produced                                              |
+| -------- | ---------------------------------------------------------- |
+| `dev`    | `dev`, `git-<sha7>`, `dev-<sha7>-<run_number>`             |
+| `test`   | `test`, `git-<sha7>`, `test-<sha7>-<run_number>`           |
+| `main`   | `main`, `git-<sha7>`, `latest`, `main-<sha7>-<run_number>` |
 | `v*` tag | `v<version>`, `git-<sha7>`, `<branch>-<sha7>-<run_number>` |
 
 FluxCD (in `soev-gitops` repo) uses the branch-name tags (`dev`, `test`, `main`) to track deployments. The `pullPolicy: Always` in the Helm values ensures the latest image is pulled on each reconciliation.
@@ -115,6 +122,7 @@ FluxCD (in `soev-gitops` repo) uses the branch-name tags (`dev`, `test`, `main`)
 **Current issue**: The Docker build triggers on **push** to all branches, which means images are already pushed on merge. However, there's no separation between "PR validation build" (should not push) and "merge build" (should push). Currently no builds run on PRs at all.
 
 **Desired state**:
+
 - PRs to `dev`: build image (no push) to verify compilation
 - Merge to `dev`: build + push image with `dev` tag (FluxCD picks it up)
 - PRs to `test`: run E2E tests
@@ -124,6 +132,7 @@ FluxCD (in `soev-gitops` repo) uses the branch-name tags (`dev`, `test`, `main`)
 ### 7. Helm Chart
 
 `helm/open-webui-tenant/` — per-tenant chart deploying:
+
 - Open WebUI Deployment
 - PostgreSQL StatefulSet
 - Weaviate StatefulSet
@@ -146,6 +155,7 @@ Configured for `uv`, `pip`, and `github-actions` on monthly schedule, targeting 
 ### Phase 1: PR Template Enhancement
 
 Expand `.github/pull_request_template.md` with sections for:
+
 - Change type (feature, bugfix, refactor, docs, etc.)
 - Testing checklist (unit tests, E2E, manual testing)
 - Documentation updates
@@ -167,6 +177,7 @@ Create a workflow triggered on PRs to `dev`:
 ### Phase 3: Refactor Docker Build Workflow
 
 Split `docker-build-soev.yaml` into:
+
 - **PR workflow**: build only (no push), triggered on `pull_request`
 - **Merge workflow**: build + push + Helm publish, triggered on `push` to `dev`/`test`/`main`
 
@@ -184,6 +195,7 @@ Enhance the disabled `integration-test.disabled` workflow:
 ### Phase 5: Security Scanning
 
 Create `.github/workflows/security-scanning.yaml`:
+
 - **Python SAST**: Bandit scanning `backend/` (adapt from user's example)
 - **Python SCA**: pip-audit on `backend/requirements.txt`
 - **Node.js SCA**: npm audit at root
@@ -193,6 +205,7 @@ Create `.github/workflows/security-scanning.yaml`:
 ### Phase 6: Branch Protection
 
 Configure via GitHub repo settings:
+
 - Require status checks to pass before merging
 - Required checks for `dev`: docker-build, frontend-tests, backend-tests
 - Required checks for `test`: all of above + E2E tests

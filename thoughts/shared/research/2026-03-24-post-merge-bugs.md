@@ -4,7 +4,7 @@ researcher: Claude Code
 git_commit: c463eff54a69d225f2c26aa1be1d63b92018e3ab
 branch: feat/security-cicd
 repository: Gradient-DS/open-webui
-topic: "Post-upstream-merge bugs: PDF preview, prompt templates, agent pinning"
+topic: 'Post-upstream-merge bugs: PDF preview, prompt templates, agent pinning'
 tags: [research, codebase, bugs, upstream-merge, citations, prompts, pinning]
 status: complete
 last_updated: 2026-03-24
@@ -22,17 +22,18 @@ last_updated_by: Claude Code
 ## Research Question
 
 Three bugs were reported after merging upstream Open WebUI v0.8.9 (commit `c26ae48d6`):
+
 1. PDF previewer in citation sources no longer works
 2. Standard prompts with `{{variable}}` template placeholders no longer work
 3. Agent pinning UX regression - requires 3-dot menu click instead of direct pin
 
 ## Summary
 
-| Bug | Root Cause | Severity | Fix Complexity |
-|-----|-----------|----------|----------------|
-| PDF preview | Upstream overwrote Gradient-DS custom tabbed preview in CitationModal | High | Medium - restore custom code |
-| Prompt templates | Likely database migration issue (`title`→`name`, `command` PK→`id` PK) or `is_active` filter | High | Low-Medium - verify migration, test API |
-| Agent pinning UX | Upstream design choice, not a regression per se | Low | Low - add auto-pin on agent creation |
+| Bug              | Root Cause                                                                                   | Severity | Fix Complexity                          |
+| ---------------- | -------------------------------------------------------------------------------------------- | -------- | --------------------------------------- |
+| PDF preview      | Upstream overwrote Gradient-DS custom tabbed preview in CitationModal                        | High     | Medium - restore custom code            |
+| Prompt templates | Likely database migration issue (`title`→`name`, `command` PK→`id` PK) or `is_active` filter | High     | Low-Medium - verify migration, test API |
+| Agent pinning UX | Upstream design choice, not a regression per se                                              | Low      | Low - add auto-pin on agent creation    |
 
 ## Detailed Findings
 
@@ -41,6 +42,7 @@ Three bugs were reported after merging upstream Open WebUI v0.8.9 (commit `c26ae
 **Root cause**: The upstream merge completely replaced the Gradient-DS custom `CitationModal.svelte` which had a tabbed Preview/Content interface for viewing PDFs, images, and audio inline.
 
 **What was lost** (old code, removed by upstream):
+
 - `selectedTab` state toggling between 'preview' and 'content' views
 - File type detection: `isPDF`, `isImage`, `isAudio`, `isPreviewable`
 - `previewUrl` computed property for iframe/img/audio rendering
@@ -48,15 +50,18 @@ Three bugs were reported after merging upstream Open WebUI v0.8.9 (commit `c26ae
 - Tab switcher UI component
 
 **What replaced it** (upstream version):
+
 - Only shows extracted text chunks with Markdown rendering
 - No inline PDF/image/audio preview capability
 - Link in header opens raw file in new tab (still works)
 
 **Key files**:
+
 - `src/lib/components/chat/Messages/Citations/CitationModal.svelte` - the modal that lost preview tabs
 - `src/lib/components/common/PDFViewer.svelte` - exists but is NOT wired into CitationModal (only used by `FileItemModal` and `FilePreview`)
 
 **Fix approach**: Restore the tabbed Preview/Content interface from the pre-merge version. The old code is recoverable from git history (commit before `c26ae48d6`). The fix involves:
+
 1. Re-adding file type detection logic (`isPDF`, `isImage`, etc.)
 2. Re-adding `selectedTab` state and tab switcher UI
 3. Re-adding the iframe/img/audio preview rendering in the Preview tab
@@ -64,6 +69,7 @@ Three bugs were reported after merging upstream Open WebUI v0.8.9 (commit `c26ae
 5. Keeping upstream improvements (Markdown rendering, text fragment URLs, expanded docs)
 
 **How to test**:
+
 1. Upload a PDF document to a knowledge base
 2. Start a chat that uses that knowledge base for RAG
 3. Ask a question that triggers citations from the PDF
@@ -82,6 +88,7 @@ Three bugs were reported after merging upstream Open WebUI v0.8.9 (commit `c26ae
 3. **`is_active` filter added**: The new `get_prompts()` backend method filters `.filter(Prompt.is_active == True)`. If migration didn't properly set `is_active=True` for existing prompts, they'd be invisible.
 
 **Most likely failure points**:
+
 - **Migration not applied**: If the alembic migration `374d2f66af06` didn't run, the prompt table still has the old schema (`title`, `command` as PK, no `is_active`), causing the API to fail silently
 - **`is_active` default**: Migration sets `server_default="1"` which should work, but worth verifying
 - **API response format**: Frontend now expects `name` field (was `title`); if data is stale, sorting by `a.name.localeCompare(b.name)` would fail on undefined
@@ -89,6 +96,7 @@ Three bugs were reported after merging upstream Open WebUI v0.8.9 (commit `c26ae
 **The specific prompt content is NOT the issue** - the `{{variable}}` parsing regex (`/{{\s*([^|}\s]+)\s*}}/g`) correctly handles the reported variables (`{{doelgroep}}`, `{{toon}}`, `{{max_zinslengte}}`, `{{samenvatting_bullets}}`, `{{bron_tekst}}`). The single `{` in `{herschreven_tekst_in_too` does NOT match the double-brace regex.
 
 **Key files**:
+
 - `src/lib/components/chat/MessageInput/Commands/Prompts.svelte` - now fetches prompts internally
 - `src/lib/components/chat/MessageInput.svelte:373-408` - `insertTextAtCursor` with two-phase variable handling
 - `src/lib/components/chat/MessageInput.svelte:183-201` - `inputVariableHandler` shows variable modal
@@ -98,6 +106,7 @@ Three bugs were reported after merging upstream Open WebUI v0.8.9 (commit `c26ae
 - `backend/open_webui/migrations/versions/374d2f66af06_add_prompt_history_table.py` - migration
 
 **How to test**:
+
 1. Check if migration ran: `SELECT id, command, name, is_active FROM prompt LIMIT 5;`
 2. Check API response: `curl -H "Authorization: Bearer <token>" <base_url>/api/v1/prompts/`
 3. In the UI, type `/` in the chat input - do prompts appear in the autocomplete?
@@ -109,6 +118,7 @@ Three bugs were reported after merging upstream Open WebUI v0.8.9 (commit `c26ae
 ### Bug 3: Agent Pinning UX Regression
 
 **Root cause**: This is an upstream design choice, not a Gradient-DS regression. Upstream Open WebUI requires users to:
+
 1. Find the agent in the model selector or workspace
 2. Click the 3-dot menu (`ModelMenu.svelte` or `ModelItemMenu.svelte`)
 3. Select "Keep in Sidebar" to pin
@@ -116,6 +126,7 @@ Three bugs were reported after merging upstream Open WebUI v0.8.9 (commit `c26ae
 There has never been auto-pinning of new agents.
 
 **Current architecture**:
+
 - `pinnedModels` stored in `$settings.ui.pinnedModels` (per-user, persisted via API)
 - `DEFAULT_PINNED_MODELS` env var / config for server-wide defaults
 - Pin toggle in workspace menu (`ModelMenu.svelte:136-155`) and chat selector menu (`ModelItemMenu.svelte:81-106`)
@@ -124,23 +135,26 @@ There has never been auto-pinning of new agents.
 **Fix approach**: Auto-pin newly created agents to the sidebar. Add pinning logic after successful agent creation:
 
 **Primary location** - `src/routes/(app)/workspace/models/create/+page.svelte:55-63`:
+
 ```js
 // After createNewModel succeeds (line 55-61):
 const currentPinned = $settings?.pinnedModels ?? [];
 if (!currentPinned.includes(modelId)) {
-    settings.set({
-        ...$settings,
-        pinnedModels: [...new Set([...currentPinned, modelId])]
-    });
-    await updateUserSettings(localStorage.token, { ui: $settings });
+	settings.set({
+		...$settings,
+		pinnedModels: [...new Set([...currentPinned, modelId])]
+	});
+	await updateUserSettings(localStorage.token, { ui: $settings });
 }
 ```
 
 **Secondary locations** (model import):
+
 - `src/lib/components/workspace/Models.svelte:309-316` (JSON import)
 - `src/lib/components/admin/Settings/Models.svelte:192-220` (admin import)
 
 **How to test**:
+
 1. Go to Workspace > Models > Create
 2. Create a new agent
 3. **Expected (after fix)**: Agent appears in sidebar pinned models section

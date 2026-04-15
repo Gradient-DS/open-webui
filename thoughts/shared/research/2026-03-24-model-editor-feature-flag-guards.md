@@ -4,12 +4,13 @@ researcher: Claude
 git_commit: 39344352f
 branch: fix/test-bugs-daan-260323
 repository: open-webui
-topic: "Model editor and admin panel sections need feature flag guards for deployment-specific visibility"
-tags: [research, codebase, model-editor, admin-panel, feature-flags, capabilities, builtin-tools, helm]
+topic: 'Model editor and admin panel sections need feature flag guards for deployment-specific visibility'
+tags:
+  [research, codebase, model-editor, admin-panel, feature-flags, capabilities, builtin-tools, helm]
 status: complete
 last_updated: 2026-03-24
 last_updated_by: Claude
-last_updated_note: "Expanded to cover builtin tools global flag (new), admin panel model config, helm chart exposure, and both surfaces (model builder + admin)"
+last_updated_note: 'Expanded to cover builtin tools global flag (new), admin panel model config, helm chart exposure, and both surfaces (model builder + admin)'
 ---
 
 # Research: Model Editor & Admin Panel Feature Flag Guards
@@ -40,21 +41,21 @@ The model creation page ("agent builder") and admin model settings panel show op
 
 Both surfaces share the same sub-components, so changes propagate to both:
 
-| Surface | Entry file | Renders |
-|---------|-----------|---------|
-| **Model builder (agents)** | `src/routes/(app)/workspace/models/create/+page.svelte` → `ModelEditor.svelte` | Tools, Skills, Knowledge, Capabilities, DefaultFeatures, BuiltinTools, TTS Voice |
-| **Admin model config** | `src/lib/components/admin/Settings/Models.svelte` → `ModelSettingsModal.svelte` | Capabilities, DefaultFeatures, BuiltinTools (global defaults) |
-| **Admin per-model edit** | `src/lib/components/admin/Settings/Models.svelte` → `ModelEditor.svelte` (with `edit=true`) | Same as model builder |
+| Surface                    | Entry file                                                                                  | Renders                                                                          |
+| -------------------------- | ------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------- |
+| **Model builder (agents)** | `src/routes/(app)/workspace/models/create/+page.svelte` → `ModelEditor.svelte`              | Tools, Skills, Knowledge, Capabilities, DefaultFeatures, BuiltinTools, TTS Voice |
+| **Admin model config**     | `src/lib/components/admin/Settings/Models.svelte` → `ModelSettingsModal.svelte`             | Capabilities, DefaultFeatures, BuiltinTools (global defaults)                    |
+| **Admin per-model edit**   | `src/lib/components/admin/Settings/Models.svelte` → `ModelEditor.svelte` (with `edit=true`) | Same as model builder                                                            |
 
 ### Current State: What's Always Shown (No Guards)
 
 #### ModelEditor.svelte (model builder + admin per-model edit)
 
-| Section | Component | Line | Should guard with |
-|---------|-----------|------|-------------------|
-| Knowledge | `Knowledge` | 743 | `feature_knowledge` |
-| Tools | `ToolsSelector` | 747 | `feature_tools` |
-| Skills | `SkillsSelector` | 751 | `feature_skills` |
+| Section   | Component        | Line    | Should guard with                         |
+| --------- | ---------------- | ------- | ----------------------------------------- |
+| Knowledge | `Knowledge`      | 743     | `feature_knowledge`                       |
+| Tools     | `ToolsSelector`  | 747     | `feature_tools`                           |
+| Skills    | `SkillsSelector` | 751     | `feature_skills`                          |
 | TTS Voice | inline `<input>` | 819-831 | `feature_voice` (+ TTS engine configured) |
 
 #### ModelSettingsModal.svelte (admin global defaults)
@@ -65,9 +66,9 @@ The modal at `src/lib/components/admin/Settings/Models/ModelSettingsModal.svelte
 
 All capability checkboxes always render. These should be hidden when globally disabled:
 
-| Capability | Guard |
-|------------|-------|
-| `web_search` | `enable_web_search` |
+| Capability         | Guard                     |
+| ------------------ | ------------------------- |
+| `web_search`       | `enable_web_search`       |
 | `image_generation` | `enable_image_generation` |
 | `code_interpreter` | `enable_code_interpreter` |
 
@@ -75,17 +76,17 @@ All capability checkboxes always render. These should be hidden when globally di
 
 All 9 tool checkboxes always render. These should be hidden when globally disabled:
 
-| Tool | Guard |
-|------|-------|
-| `time` | *(always available — no flag needed)* |
-| `memory` | `enable_memories` |
-| `chats` | *(always available — no flag needed)* |
-| `notes` | `enable_notes` |
-| `knowledge` | `feature_knowledge` |
-| `channels` | `enable_channels` |
-| `web_search` | `enable_web_search` |
-| `image_generation` | `enable_image_generation` |
-| `code_interpreter` | `enable_code_interpreter` |
+| Tool               | Guard                                 |
+| ------------------ | ------------------------------------- |
+| `time`             | _(always available — no flag needed)_ |
+| `memory`           | `enable_memories`                     |
+| `chats`            | _(always available — no flag needed)_ |
+| `notes`            | `enable_notes`                        |
+| `knowledge`        | `feature_knowledge`                   |
+| `channels`         | `enable_channels`                     |
+| `web_search`       | `enable_web_search`                   |
+| `image_generation` | `enable_image_generation`             |
+| `code_interpreter` | `enable_code_interpreter`             |
 
 Note: The backend `get_builtin_tools()` in `utils/tools.py:403-564` already applies these exact same guards server-side (e.g., lines 479-484 check `ENABLE_WEB_SEARCH` + model capability + features). The frontend just needs to match this so users don't see options that will never work.
 
@@ -97,30 +98,31 @@ Already receives `availableFeatures` as a prop filtered from capabilities. If ca
 
 All flags below are returned by `GET /api/config` (main.py:2379-2449) and available in `$config.features.*`:
 
-| Flag | Config Key | Type | Default (upstream) | Default (helm) | Controls |
-|------|-----------|------|---------|---------|----------|
-| `FEATURE_TOOLS` | `feature_tools` | FEATURE_* (env-only) | `true` | `false` | Tools workspace |
-| `FEATURE_SKILLS` | `feature_skills` | FEATURE_* (env-only) | **`false`** | *(not in helm)* | Skills feature |
-| `FEATURE_VOICE` | `feature_voice` | FEATURE_* (env-only) | `true` | `false` | Voice/audio |
-| `FEATURE_KNOWLEDGE` | `feature_knowledge` | FEATURE_* (env-only) | `true` | `true` | Knowledge workspace |
-| `ENABLE_WEB_SEARCH` | `enable_web_search` | PersistentConfig | `false` | `true` | Web search |
-| `ENABLE_IMAGE_GENERATION` | `enable_image_generation` | PersistentConfig | `false` | `false` | Image generation |
-| `ENABLE_CODE_INTERPRETER` | `enable_code_interpreter` | PersistentConfig | `true` | `false` | Code interpreter |
-| `ENABLE_MEMORIES` | `enable_memories` | PersistentConfig | `true` | *(not in helm)* | Memory feature |
-| `ENABLE_CHANNELS` | `enable_channels` | PersistentConfig | `true` | `false` | Channels |
-| `ENABLE_NOTES` | `enable_notes` | PersistentConfig | `true` | `true` | Notes |
-| `AUDIO_TTS_ENGINE` | `audio.tts.engine` | PersistentConfig | `""` (disabled) | *(not in helm)* | TTS engine |
+| Flag                      | Config Key                | Type                   | Default (upstream) | Default (helm)  | Controls            |
+| ------------------------- | ------------------------- | ---------------------- | ------------------ | --------------- | ------------------- |
+| `FEATURE_TOOLS`           | `feature_tools`           | FEATURE\_\* (env-only) | `true`             | `false`         | Tools workspace     |
+| `FEATURE_SKILLS`          | `feature_skills`          | FEATURE\_\* (env-only) | **`false`**        | _(not in helm)_ | Skills feature      |
+| `FEATURE_VOICE`           | `feature_voice`           | FEATURE\_\* (env-only) | `true`             | `false`         | Voice/audio         |
+| `FEATURE_KNOWLEDGE`       | `feature_knowledge`       | FEATURE\_\* (env-only) | `true`             | `true`          | Knowledge workspace |
+| `ENABLE_WEB_SEARCH`       | `enable_web_search`       | PersistentConfig       | `false`            | `true`          | Web search          |
+| `ENABLE_IMAGE_GENERATION` | `enable_image_generation` | PersistentConfig       | `false`            | `false`         | Image generation    |
+| `ENABLE_CODE_INTERPRETER` | `enable_code_interpreter` | PersistentConfig       | `true`             | `false`         | Code interpreter    |
+| `ENABLE_MEMORIES`         | `enable_memories`         | PersistentConfig       | `true`             | _(not in helm)_ | Memory feature      |
+| `ENABLE_CHANNELS`         | `enable_channels`         | PersistentConfig       | `true`             | `false`         | Channels            |
+| `ENABLE_NOTES`            | `enable_notes`            | PersistentConfig       | `true`             | `true`          | Notes               |
+| `AUDIO_TTS_ENGINE`        | `audio.tts.engine`        | PersistentConfig       | `""` (disabled)    | _(not in helm)_ | TTS engine          |
 
 ### New Flag Needed: `FEATURE_BUILTIN_TOOLS`
 
 **Current state:** No global flag exists. Builtin tools are controlled only per-model:
+
 - `model.info.meta.capabilities.builtin_tools` — capability toggle (default: `true`)
 - `model.info.meta.builtinTools` — dict of category toggles (default: all `true`)
-- Backend `get_builtin_tools()` (`utils/tools.py:403`) gates individual tools by global `ENABLE_*` flags, but the builtin tools *system itself* has no global on/off switch.
+- Backend `get_builtin_tools()` (`utils/tools.py:403`) gates individual tools by global `ENABLE_*` flags, but the builtin tools _system itself_ has no global on/off switch.
 
 **What's needed:**
 
-1. **Backend** (`config.py`): Add `FEATURE_BUILTIN_TOOLS` as a FEATURE_* env-only flag (default `true`)
+1. **Backend** (`config.py`): Add `FEATURE_BUILTIN_TOOLS` as a FEATURE\_\* env-only flag (default `true`)
 2. **Backend** (`main.py`): Expose in `/api/config` features dict
 3. **Backend** (`utils/features.py`): Add to `FEATURE_FLAGS` dict for `require_feature()` dependency
 4. **Backend** (`utils/middleware.py:2716`): Check `FEATURE_BUILTIN_TOOLS` before injecting builtin tools
@@ -139,30 +141,31 @@ The helm chart at `helm/open-webui-tenant/` already exposes all `FEATURE_*` flag
 
 Current helm `FEATURE_*` flags and their defaults (note these differ from upstream defaults for our deployment):
 
-| Helm key | Env var | Helm default |
-|----------|---------|-------------|
-| `featureChatControls` | `FEATURE_CHAT_CONTROLS` | `"true"` |
-| `featureCapture` | `FEATURE_CAPTURE` | `"False"` |
-| `featureArtifacts` | `FEATURE_ARTIFACTS` | `"False"` |
-| `featurePlayground` | `FEATURE_PLAYGROUND` | `"False"` |
-| `featureChatOverview` | `FEATURE_CHAT_OVERVIEW` | `"False"` |
-| `featureNotesAiControls` | `FEATURE_NOTES_AI_CONTROLS` | `"False"` |
-| `featureVoice` | `FEATURE_VOICE` | `"False"` |
-| `featureChangelog` | `FEATURE_CHANGELOG` | `"False"` |
-| `featureSystemPrompt` | `FEATURE_SYSTEM_PROMPT` | `"False"` |
-| `featureModels` | `FEATURE_MODELS` | `"True"` |
-| `featureKnowledge` | `FEATURE_KNOWLEDGE` | `"True"` |
-| `featurePrompts` | `FEATURE_PROMPTS` | `"True"` |
-| `featureTools` | `FEATURE_TOOLS` | `"False"` |
-| `featureAdminEvaluations` | `FEATURE_ADMIN_EVALUATIONS` | `"True"` |
-| `featureAdminFunctions` | `FEATURE_ADMIN_FUNCTIONS` | `"False"` |
-| `featureAdminSettings` | `FEATURE_ADMIN_SETTINGS` | `"True"` |
-| `featureInputMenu` | `FEATURE_INPUT_MENU` | `"True"` |
-| `featureTemporaryChat` | `FEATURE_TEMPORARY_CHAT` | `"True"` |
-| `featureToolServers` | `FEATURE_TOOL_SERVERS` | `"False"` |
-| `featureTerminalServers` | `FEATURE_TERMINAL_SERVERS` | `"False"` |
+| Helm key                  | Env var                     | Helm default |
+| ------------------------- | --------------------------- | ------------ |
+| `featureChatControls`     | `FEATURE_CHAT_CONTROLS`     | `"true"`     |
+| `featureCapture`          | `FEATURE_CAPTURE`           | `"False"`    |
+| `featureArtifacts`        | `FEATURE_ARTIFACTS`         | `"False"`    |
+| `featurePlayground`       | `FEATURE_PLAYGROUND`        | `"False"`    |
+| `featureChatOverview`     | `FEATURE_CHAT_OVERVIEW`     | `"False"`    |
+| `featureNotesAiControls`  | `FEATURE_NOTES_AI_CONTROLS` | `"False"`    |
+| `featureVoice`            | `FEATURE_VOICE`             | `"False"`    |
+| `featureChangelog`        | `FEATURE_CHANGELOG`         | `"False"`    |
+| `featureSystemPrompt`     | `FEATURE_SYSTEM_PROMPT`     | `"False"`    |
+| `featureModels`           | `FEATURE_MODELS`            | `"True"`     |
+| `featureKnowledge`        | `FEATURE_KNOWLEDGE`         | `"True"`     |
+| `featurePrompts`          | `FEATURE_PROMPTS`           | `"True"`     |
+| `featureTools`            | `FEATURE_TOOLS`             | `"False"`    |
+| `featureAdminEvaluations` | `FEATURE_ADMIN_EVALUATIONS` | `"True"`     |
+| `featureAdminFunctions`   | `FEATURE_ADMIN_FUNCTIONS`   | `"False"`    |
+| `featureAdminSettings`    | `FEATURE_ADMIN_SETTINGS`    | `"True"`     |
+| `featureInputMenu`        | `FEATURE_INPUT_MENU`        | `"True"`     |
+| `featureTemporaryChat`    | `FEATURE_TEMPORARY_CHAT`    | `"True"`     |
+| `featureToolServers`      | `FEATURE_TOOL_SERVERS`      | `"False"`    |
+| `featureTerminalServers`  | `FEATURE_TERMINAL_SERVERS`  | `"False"`    |
 
 **Missing from helm** (need adding):
+
 - `featureSkills` → `FEATURE_SKILLS` (upstream default: `false`)
 - `featureBuiltinTools` → `FEATURE_BUILTIN_TOOLS` (new flag, suggest default: `true`)
 
@@ -191,6 +194,7 @@ The `Config.features` type in `stores/index.ts` (line 277) is missing:
 ## Code References
 
 ### Frontend (both surfaces share these)
+
 - `src/lib/components/workspace/Models/ModelEditor.svelte:742-831` — Sections needing guards
 - `src/lib/components/workspace/Models/Capabilities.svelte:70-75` — `visibleCapabilities` filter (extend)
 - `src/lib/components/workspace/Models/BuiltinTools.svelte:48-59` — `allTools` (needs filtering)
@@ -201,14 +205,16 @@ The `Config.features` type in `stores/index.ts` (line 277) is missing:
 - `src/lib/constants.ts:98-109` — `DEFAULT_CAPABILITIES`
 
 ### Backend
-- `backend/open_webui/config.py:1907-1960` — FEATURE_* flag definitions (add FEATURE_BUILTIN_TOOLS here)
+
+- `backend/open_webui/config.py:1907-1960` — FEATURE\_\* flag definitions (add FEATURE_BUILTIN_TOOLS here)
 - `backend/open_webui/main.py:2379-2449` — `/api/config` features dict (expose new flag here)
 - `backend/open_webui/utils/features.py:55` — FEATURE_FLAGS dict (add entry here)
 - `backend/open_webui/utils/tools.py:403-564` — `get_builtin_tools()` (already gates per-tool, add global check)
 - `backend/open_webui/utils/middleware.py:2709-2735` — Builtin tools injection (add FEATURE_BUILTIN_TOOLS check)
 
 ### Helm
-- `helm/open-webui-tenant/values.yaml:192-213` — FEATURE_* values (add featureBuiltinTools, featureSkills)
+
+- `helm/open-webui-tenant/values.yaml:192-213` — FEATURE\_\* values (add featureBuiltinTools, featureSkills)
 - `helm/open-webui-tenant/templates/open-webui/configmap.yaml:105-126` — Env var mapping (add entries)
 
 ## Open Questions

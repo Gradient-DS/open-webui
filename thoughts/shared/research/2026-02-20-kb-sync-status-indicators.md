@@ -4,7 +4,7 @@ researcher: claude
 git_commit: b439ebb4a7772afd6a6fc60cc39bc9cced7d651c
 branch: feat/sync-improvements
 repository: open-webui
-topic: "Adding sync status indicators to KB overview cards and detail page"
+topic: 'Adding sync status indicators to KB overview cards and detail page'
 tags: [research, codebase, knowledge-base, onedrive, sync, spinner, ui]
 status: complete
 last_updated: 2026-02-20
@@ -22,6 +22,7 @@ last_updated_by: claude
 ## Research Question
 
 How to add sync status indicators (spinner/syncing badge) to:
+
 1. The KB overview/list page cards for OneDrive KBs that are actively syncing
 2. Potentially improve the detail page sync indicator (currently only file count)
 
@@ -76,6 +77,7 @@ This event is emitted to room `user:{user_id}`, so it's available to any page th
 ### 4. Existing Spinner Import
 
 `Knowledge.svelte` already imports `Spinner` at line 26:
+
 ```svelte
 import Spinner from '../common/Spinner.svelte';
 ```
@@ -85,46 +87,49 @@ It's currently used for the page loading state and infinite scroll loader, but c
 ### 5. Approach Options for KB Card Sync Indicator
 
 #### Option A: Spinner next to OneDrive Badge
+
 Add a small `Spinner` next to the "OneDrive" badge when `item.meta?.onedrive_sync?.status === 'syncing'`:
 
 ```svelte
 {#if item?.type === 'onedrive'}
-    <Badge type="info" content={$i18n.t('OneDrive')} />
-    {#if item?.meta?.onedrive_sync?.status === 'syncing'}
-        <Spinner className="size-3" />
-    {/if}
+	<Badge type="info" content={$i18n.t('OneDrive')} />
+	{#if item?.meta?.onedrive_sync?.status === 'syncing'}
+		<Spinner className="size-3" />
+	{/if}
 {:else}
-    <Badge type="muted" content={$i18n.t('Local')} />
+	<Badge type="muted" content={$i18n.t('Local')} />
 {/if}
 ```
 
 #### Option B: Replace Badge with "Syncing" Badge
+
 When syncing, show a "Syncing" badge with a different color instead of (or alongside) the "OneDrive" badge:
 
 ```svelte
 {#if item?.type === 'onedrive' && item?.meta?.onedrive_sync?.status === 'syncing'}
-    <div class="flex items-center gap-1">
-        <Badge type="info" content={$i18n.t('OneDrive')} />
-        <Spinner className="size-3 text-blue-500" />
-    </div>
+	<div class="flex items-center gap-1">
+		<Badge type="info" content={$i18n.t('OneDrive')} />
+		<Spinner className="size-3 text-blue-500" />
+	</div>
 {:else if item?.type === 'onedrive'}
-    <Badge type="info" content={$i18n.t('OneDrive')} />
+	<Badge type="info" content={$i18n.t('OneDrive')} />
 {:else}
-    <Badge type="muted" content={$i18n.t('Local')} />
+	<Badge type="muted" content={$i18n.t('Local')} />
 {/if}
 ```
 
 #### Option C: Badge + Spinner + Tooltip with progress
+
 Most informative but more complex. Show spinner with tooltip showing progress:
 
 ```svelte
 {#if item?.type === 'onedrive'}
-    <Badge type="info" content={$i18n.t('OneDrive')} />
-    {#if item?.meta?.onedrive_sync?.status === 'syncing'}
-        <Tooltip content={$i18n.t('Syncing...')}>
-            <Spinner className="size-3 text-blue-500" />
-        </Tooltip>
-    {/if}
+	<Badge type="info" content={$i18n.t('OneDrive')} />
+	{#if item?.meta?.onedrive_sync?.status === 'syncing'}
+		<Tooltip content={$i18n.t('Syncing...')}>
+			<Spinner className="size-3 text-blue-500" />
+		</Tooltip>
+	{/if}
 {/if}
 ```
 
@@ -162,11 +167,12 @@ Socket store is available via `import { socket } from '$lib/stores';` (already u
 
 **New keys to add:**
 
-| Key | en-US | nl-NL |
-|-----|-------|-------|
-| `"Syncing..."` | `""` | `"Synchroniseren..."` |
+| Key            | en-US | nl-NL                 |
+| -------------- | ----- | --------------------- |
+| `"Syncing..."` | `""`  | `"Synchroniseren..."` |
 
 **Existing keys that may be relevant:**
+
 - `"Starting sync..."` / `"Synchronisatie starten..."` (already exists)
 - `"Sync progress"` / `"Synchronisatievoortgang"` (already exists)
 

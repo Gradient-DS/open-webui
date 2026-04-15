@@ -84,7 +84,10 @@
 								<div class="flex flex-col w-full mb-2">
 									<div class="mb-1 text-xs text-gray-500">{$i18n.t('Rating')}</div>
 									<div class="flex-1 text-xs">
-										<span>{feedbackData?.data?.rating ?? '-'} / {feedbackData?.meta?.scale_max ?? '?'}</span>
+										<span
+											>{feedbackData?.data?.rating ?? '-'} / {feedbackData?.meta?.scale_max ??
+												'?'}</span
+										>
 									</div>
 								</div>
 

@@ -43,6 +43,7 @@ When invoked with a parameter like `gh_username:branchName`:
 ```
 
 This will:
+
 - Add 'samdickson22' as a remote
 - Create worktree at `~/wt/humanlayer/eng-1696`
 - Set up the environment

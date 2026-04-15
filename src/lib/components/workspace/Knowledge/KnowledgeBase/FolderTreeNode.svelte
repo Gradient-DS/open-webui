@@ -78,12 +78,7 @@
 			<div class="ml-3 pl-1 border-s border-gray-100 dark:border-gray-900">
 				<!-- Child subfolders -->
 				{#each node.children as child (child.path)}
-					<svelte:self
-						node={child}
-						{expandedKey}
-						bind:expandedSources
-						{onClick}
-					/>
+					<svelte:self node={child} {expandedKey} bind:expandedSources {onClick} />
 				{/each}
 
 				<!-- Files in this subfolder -->
@@ -108,9 +103,7 @@
 									<div class="line-clamp-1 text-xs">
 										{file?.name ?? file?.meta?.name}
 										{#if file?.meta?.size}
-											<span class="text-gray-400"
-												>{formatFileSize(file?.meta?.size)}</span
-											>
+											<span class="text-gray-400">{formatFileSize(file?.meta?.size)}</span>
 										{/if}
 									</div>
 								</div>
@@ -119,14 +112,10 @@
 							<div class="flex items-center gap-2 shrink-0 text-xs">
 								{#if file?.added_at || file?.updated_at}
 									<Tooltip
-										content={dayjs(
-											(file.added_at ?? file.updated_at) * 1000
-										).format('LLLL')}
+										content={dayjs((file.added_at ?? file.updated_at) * 1000).format('LLLL')}
 									>
 										<div>
-											{dayjs(
-												(file.added_at ?? file.updated_at) * 1000
-											).fromNow()}
+											{dayjs((file.added_at ?? file.updated_at) * 1000).fromNow()}
 										</div>
 									</Tooltip>
 								{/if}

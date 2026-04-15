@@ -4,8 +4,17 @@ researcher: Claude
 git_commit: 73c1e1fb21476308a2180fcdd135daf0b22c50fe
 branch: Feat/google-drive-integration
 repository: open-webui
-topic: "Cloud Sync Abstraction Audit, Merge Strategy, and Integration Cookbook"
-tags: [research, codebase, google-drive, onedrive, sync-abstraction, merge-strategy, integration-cookbook]
+topic: 'Cloud Sync Abstraction Audit, Merge Strategy, and Integration Cookbook'
+tags:
+  [
+    research,
+    codebase,
+    google-drive,
+    onedrive,
+    sync-abstraction,
+    merge-strategy,
+    integration-cookbook
+  ]
 status: complete
 last_updated: 2026-03-24
 last_updated_by: Claude
@@ -74,6 +83,7 @@ backend/open_webui/services/
 ### Interface Design
 
 **`SyncProvider`** (ABC) — 4 abstract methods + 1 concrete orchestration method:
+
 - `get_provider_type()` → str (e.g., `"onedrive"`, `"google_drive"`)
 - `get_meta_key()` → str (e.g., `"onedrive_sync"`, `"google_drive_sync"`)
 - `get_token_manager()` → TokenManager
@@ -81,6 +91,7 @@ backend/open_webui/services/
 - `execute_sync(...)` — concrete method that handles token resolution and calls `worker.sync()`
 
 **`TokenManager`** (ABC) — 3 abstract methods:
+
 - `get_valid_access_token(user_id, knowledge_id)` → Optional[str]
 - `has_stored_token(user_id, knowledge_id)` → bool
 - `delete_token(user_id, knowledge_id)` → bool
@@ -95,18 +106,19 @@ The `sync()` method (~290 lines) orchestrates the full workflow: source verifica
 
 ### What's Shared vs Provider-Specific
 
-| Layer | Shared (services/sync/) | Provider-Specific |
-|-------|------------------------|-------------------|
+| Layer                    | Shared (services/sync/)                                                                                                                                             | Provider-Specific                                                           |
+| ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------- |
 | **Worker orchestration** | `sync()`, `_process_file_info()`, `_handle_deleted_item()`, `_ensure_vectors_in_kb()`, `_process_file_via_api()`, status updates, cancellation, parallel processing | File collection, download, support checks, permissions, access verification |
-| **Router** | All 8+ endpoint handlers (sync items, status, cancel, remove source, list collections, token status, revoke, auth callback HTML) | Auth URL construction, SyncItem model shape, delta key names |
-| **Token refresh** | Expiry check, refresh-or-reauth flow, `_mark_needs_reauth()` | HTTP POST to provider token endpoint |
-| **Events** | All 3 emitters (file processing, file added, sync progress) | Event prefix string |
-| **Scheduler** | Full scheduler loop, due-check logic, stale recovery | Config variables |
-| **Auth** | PKCE generation, flow TTL, state validation | OAuth URLs, scopes, client config, legacy migration (OneDrive only) |
+| **Router**               | All 8+ endpoint handlers (sync items, status, cancel, remove source, list collections, token status, revoke, auth callback HTML)                                    | Auth URL construction, SyncItem model shape, delta key names                |
+| **Token refresh**        | Expiry check, refresh-or-reauth flow, `_mark_needs_reauth()`                                                                                                        | HTTP POST to provider token endpoint                                        |
+| **Events**               | All 3 emitters (file processing, file added, sync progress)                                                                                                         | Event prefix string                                                         |
+| **Scheduler**            | Full scheduler loop, due-check logic, stale recovery                                                                                                                | Config variables                                                            |
+| **Auth**                 | PKCE generation, flow TTL, state validation                                                                                                                         | OAuth URLs, scopes, client config, legacy migration (OneDrive only)         |
 
 ### Assessment
 
 The abstraction is **well-factored**. Key strengths:
+
 1. **Template Method pattern** on BaseSyncWorker — shared orchestration calls provider-specific hooks
 2. **Factory-singleton pattern** on SyncProvider — consistent with existing codebase patterns (StorageProvider, VectorDBBase)
 3. **Router helper functions** eliminate all endpoint duplication while keeping provider-specific routing
@@ -121,6 +133,7 @@ The abstraction is **well-factored**. Key strengths:
 **Yes, with minor caveats.**
 
 The abstraction handles the core sync lifecycle generically:
+
 - OAuth token management (any OAuth 2.0 provider)
 - File collection from folders (any hierarchical file system)
 - Single file monitoring
@@ -132,15 +145,15 @@ The abstraction handles the core sync lifecycle generically:
 
 ### Potential Friction Points for Specific Integrations
 
-| Integration | Fit | Notes |
-|-------------|-----|-------|
-| **Dropbox** | Excellent | Very similar to Google Drive. Has changes API equivalent. Fits perfectly. |
-| **Box** | Excellent | OAuth 2.0, hierarchical files, events API for changes. Direct fit. |
-| **SharePoint** | Good | Uses Microsoft Graph (same as OneDrive). Could share `graph_client.py` with OneDrive. May want a shared "Microsoft" auth layer. |
+| Integration    | Fit                  | Notes                                                                                                                                                                                                              |
+| -------------- | -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **Dropbox**    | Excellent            | Very similar to Google Drive. Has changes API equivalent. Fits perfectly.                                                                                                                                          |
+| **Box**        | Excellent            | OAuth 2.0, hierarchical files, events API for changes. Direct fit.                                                                                                                                                 |
+| **SharePoint** | Good                 | Uses Microsoft Graph (same as OneDrive). Could share `graph_client.py` with OneDrive. May want a shared "Microsoft" auth layer.                                                                                    |
 | **Confluence** | Good with extensions | Not file-based — it's page/space based. `_collect_folder_files` maps to "list pages in space". Download = export page as PDF/HTML. `_is_supported_file` always returns true. Works but slightly mismatched naming. |
-| **Salesforce** | Moderate | Uses different auth pattern (JWT bearer + connected app, not user OAuth). `TokenManager` would need to handle non-interactive auth. Content model is record-based, not file-based — would need adapter. |
-| **Topdesk** | Moderate | API-key auth, not OAuth. `TokenManager` interface assumes OAuth tokens. Would need either: (a) a no-op TokenManager that returns API key as "token", or (b) a separate auth interface. |
-| **Email/IMAP** | Poor fit | Not OAuth-based, not file-based. Would need significant abstraction changes. Better as a separate integration pattern. |
+| **Salesforce** | Moderate             | Uses different auth pattern (JWT bearer + connected app, not user OAuth). `TokenManager` would need to handle non-interactive auth. Content model is record-based, not file-based — would need adapter.            |
+| **Topdesk**    | Moderate             | API-key auth, not OAuth. `TokenManager` interface assumes OAuth tokens. Would need either: (a) a no-op TokenManager that returns API key as "token", or (b) a separate auth interface.                             |
+| **Email/IMAP** | Poor fit             | Not OAuth-based, not file-based. Would need significant abstraction changes. Better as a separate integration pattern.                                                                                             |
 
 ### Recommended Abstraction Improvements
 
@@ -164,12 +177,12 @@ The abstraction handles the core sync lifecycle generically:
 
 ### High-Conflict Files (4)
 
-| File | This Branch | Dev | Resolution Strategy |
-|------|------------|-----|---------------------|
+| File                               | This Branch                                                | Dev                                              | Resolution Strategy                                                                                                                                       |
+| ---------------------------------- | ---------------------------------------------------------- | ------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `services/onedrive/sync_worker.py` | **Gutted** (-1083 lines → thin subclass of BaseSyncWorker) | +191 lines of fixes (access control, sync fixes) | **CRITICAL**: Must port dev's fixes into `sync/base_worker.py` (if they're shared logic) or into the new `onedrive/sync_worker.py` (if OneDrive-specific) |
-| `KnowledgeBase.svelte` | +676 lines (Google Drive UI) | Bug fixes (flicker, upload UX) | Keep both — apply dev's fixes to the merged version |
-| `routers/knowledge.py` | Google Drive type allowed | Access control security, soft-delete | Both changes are additive, should merge cleanly after resolving textual conflicts |
-| `routers/onedrive_sync.py` | Refactored to use shared router helpers | Minor fixes | Keep this branch's version, verify dev's fixes are captured in shared router.py |
+| `KnowledgeBase.svelte`             | +676 lines (Google Drive UI)                               | Bug fixes (flicker, upload UX)                   | Keep both — apply dev's fixes to the merged version                                                                                                       |
+| `routers/knowledge.py`             | Google Drive type allowed                                  | Access control security, soft-delete             | Both changes are additive, should merge cleanly after resolving textual conflicts                                                                         |
+| `routers/onedrive_sync.py`         | Refactored to use shared router helpers                    | Minor fixes                                      | Keep this branch's version, verify dev's fixes are captured in shared router.py                                                                           |
 
 ### Medium-Conflict Files (~10)
 
@@ -228,6 +241,7 @@ Dev reformatted many files with Black. For files where this branch only made str
 ### Verification Checklist
 
 After merge:
+
 - [ ] OneDrive manual sync works (create KB, pick folder, sync starts)
 - [ ] OneDrive background sync triggers on schedule
 - [ ] OneDrive permissions sync to access_control
@@ -298,6 +312,7 @@ PROVIDER_MAX_FILE_SIZE_MB = int(os.environ.get("PROVIDER_MAX_FILE_SIZE_MB", "100
 This is 100% provider-specific. Model it after `google_drive/drive_client.py` or `onedrive/graph_client.py`.
 
 Required capabilities:
+
 - Authenticated HTTP requests with retry logic (401 → token refresh, 429 → retry-after, 5xx → backoff)
 - List items in a container (folder/space/project)
 - Download file content
@@ -332,12 +347,14 @@ class ProviderClient:
 **File**: `backend/open_webui/services/{provider}/auth.py`
 
 Copy the structure from `google_drive/auth.py`. Customize:
+
 - OAuth URLs (authorization endpoint, token endpoint)
 - Scopes
 - Client credentials config references
 - Any provider-specific auth parameters
 
 Key functions to implement:
+
 - `get_authorization_url(user_id, knowledge_id, redirect_uri)` → str
 - `exchange_code_for_tokens(code, state, user_id)` → dict
 - `get_pending_flow(state)` → Optional[dict]
@@ -545,6 +562,7 @@ stop_scheduler = _scheduler.stop
 **File**: `backend/open_webui/services/sync/provider.py`
 
 Add to `get_sync_provider()`:
+
 ```python
 elif provider_type == "provider_name":
     from open_webui.services.provider.provider import ProviderSyncProvider
@@ -552,6 +570,7 @@ elif provider_type == "provider_name":
 ```
 
 Add to `get_token_manager()`:
+
 ```python
 elif provider_type == "provider_name":
     from open_webui.services.provider.provider import ProviderTokenManager
@@ -607,17 +626,17 @@ Add `"provider_name"` to the allowed types list.
 
 ### Effort Estimate per New Provider
 
-| Component | Files | Estimated Effort |
-|-----------|-------|-----------------|
-| API client | 1 | Medium (depends on API complexity) |
-| Auth module | 1 | Low-Medium (OAuth 2.0 is boilerplate) |
-| Token refresh | 1 | Low (mostly boilerplate) |
-| Sync worker | 1 | Medium (file collection + download logic) |
-| Provider + wrappers | 3 | Low (boilerplate) |
-| Router | 1 | Low (delegates to shared helpers) |
-| Config + registration | 3 files modified | Low |
-| Frontend | 3-4 | Medium (picker is the hard part) |
-| **Total** | ~10 new + ~4 modified | **1-3 days** depending on API complexity |
+| Component             | Files                 | Estimated Effort                          |
+| --------------------- | --------------------- | ----------------------------------------- |
+| API client            | 1                     | Medium (depends on API complexity)        |
+| Auth module           | 1                     | Low-Medium (OAuth 2.0 is boilerplate)     |
+| Token refresh         | 1                     | Low (mostly boilerplate)                  |
+| Sync worker           | 1                     | Medium (file collection + download logic) |
+| Provider + wrappers   | 3                     | Low (boilerplate)                         |
+| Router                | 1                     | Low (delegates to shared helpers)         |
+| Config + registration | 3 files modified      | Low                                       |
+| Frontend              | 3-4                   | Medium (picker is the hard part)          |
+| **Total**             | ~10 new + ~4 modified | **1-3 days** depending on API complexity  |
 
 ---
 

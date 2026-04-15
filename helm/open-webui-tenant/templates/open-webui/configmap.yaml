@@ -148,6 +148,10 @@ data:
   ENABLE_CODE_EXECUTION: {{ .Values.openWebui.config.enableCodeExecution | quote }}
   USER_PERMISSIONS_FEATURES_CODE_INTERPRETER: {{ .Values.openWebui.config.userPermissionsFeaturesCodeInterpreter | quote }}
 
+  # Document Writer
+  ENABLE_DOCUMENT_WRITER: {{ .Values.openWebui.config.enableDocumentWriter | quote }}
+  USER_PERMISSIONS_FEATURES_DOCUMENT_WRITER: {{ .Values.openWebui.config.userPermissionsFeaturesDocumentWriter | quote }}
+
   # MCP
   ENABLE_DIRECT_CONNECTIONS: {{ .Values.openWebui.config.enableDirectConnections | quote }}
   USER_PERMISSIONS_FEATURES_DIRECT_TOOL_SERVERS: {{ .Values.openWebui.config.userPermissionsFeaturesDirectToolServers | quote }}
@@ -321,6 +325,10 @@ data:
 
   # Audit Logging
   AUDIT_LOG_LEVEL: {{ .Values.openWebui.config.auditLogLevel | quote }}
+  ENABLE_AUDIT_STDOUT: {{ .Values.openWebui.config.enableAuditStdout | default "true" | quote }}
+  ENABLE_AUDIT_LOGS_FILE: {{ .Values.openWebui.config.enableAuditLogsFile | default "false" | quote }}
+  # Structured logging (Loki-friendly)
+  LOG_FORMAT: {{ .Values.openWebui.config.logFormat | default "json" | quote }}
 
   # User Archival
   ENABLE_USER_ARCHIVAL: {{ .Values.openWebui.config.enableUserArchival | quote }}
@@ -347,6 +355,30 @@ data:
   {{- if .Values.openWebui.config.s3EnableTagging }}
   S3_ENABLE_TAGGING: {{ .Values.openWebui.config.s3EnableTagging | quote }}
   {{- end }}
+
+  # AWS SDK env vars (used by boto3 for S3). Default to values compatible with
+  # S3-compatible providers that don't accept the newer AWS integrity checksums.
+  {{- if eq (.Values.openWebui.config.storageProvider | default "") "s3" }}
+  {{- if .Values.openWebui.config.s3RegionName }}
+  AWS_REGION: {{ .Values.openWebui.config.s3RegionName | quote }}
+  {{- end }}
+  AWS_REQUEST_CHECKSUM_CALCULATION: {{ .Values.openWebui.config.s3ChecksumRequestMode | default "when_required" | quote }}
+  AWS_RESPONSE_CHECKSUM_VALIDATION: {{ .Values.openWebui.config.s3ChecksumResponseMode | default "when_required" | quote }}
+  {{- end }}
+
+  # Redis / WebSocket coordination (required for replicaCount > 1). See
+  # https://docs.openwebui.com/getting-started/advanced-topics/scaling/
+  {{- if .Values.redis.enabled }}
+  ENABLE_WEBSOCKET_SUPPORT: "true"
+  WEBSOCKET_MANAGER: "redis"
+  REDIS_URL: "redis://{{ include "open-webui-tenant.redis.fullname" . }}:6379/0"
+  {{- end }}
+
+  # Alembic migrations — set to false when the pre-upgrade Job handles them
+  # (see templates/open-webui/migration-job.yaml). Default is true so the
+  # first pod of a single-replica tenant migrates on startup (import-time
+  # trigger in backend/open_webui/config.py:75-76).
+  ENABLE_DB_MIGRATIONS: {{ ternary "false" "true" .Values.openWebui.migrationJob.enabled | quote }}
 
   # Telemetry
   SCARF_NO_ANALYTICS: {{ .Values.openWebui.config.scarfNoAnalytics | quote }}

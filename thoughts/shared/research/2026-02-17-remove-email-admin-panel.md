@@ -4,7 +4,7 @@ researcher: claude
 git_commit: 5d18f2c4d
 branch: feat/sync-improvements
 repository: open-webui
-topic: "Remove email admin panel section - keep env-only configuration"
+topic: 'Remove email admin panel section - keep env-only configuration'
 tags: [research, codebase, email, admin-panel, deployment, helm]
 status: complete
 last_updated: 2026-02-17
@@ -20,6 +20,7 @@ last_updated_by: claude
 **Repository**: open-webui
 
 ## Research Question
+
 Remove the email configuration section from the admin panel UI and backend API. Email settings should only be configurable via environment variables. Also remove references from deployment values patches.
 
 ## Summary
@@ -41,24 +42,29 @@ The email admin panel feature spans **frontend** (Svelte component + API client)
 ### Frontend: Admin Panel Email Tab
 
 #### `src/lib/components/admin/Settings/Email.svelte` (DELETE entire file)
+
 - Svelte component for configuring Graph API credentials, from address, from name, invite expiry
 - Uses `getEmailConfig`, `setEmailConfig`, `testEmailConfig` from API client
 - **Action**: Delete this file entirely
 
 #### `src/lib/components/admin/Settings.svelte`
+
 - **Line 27**: `import Email from './Settings/Email.svelte';` — REMOVE
 - **Lines 427-455**: Email tab button in sidebar — REMOVE
 - **Lines 570-578**: `{:else if selectedTab === 'email'}` rendering block — REMOVE
 
 #### `src/lib/utils/features.ts`
+
 - **Line 101**: `'email'` in ADMIN_SETTINGS_TABS array — REMOVE
 
 #### `src/lib/apis/configs/index.ts`
+
 - **Lines 568-648**: `getEmailConfig`, `setEmailConfig`, `testEmailConfig` functions — REMOVE
 
 ### Backend: API Endpoints
 
 #### `backend/open_webui/routers/configs.py`
+
 - **Lines 598-662**: Full EmailConfig section — REMOVE:
   - `EmailConfigForm` model (lines 603-610)
   - `GET /configs/email` endpoint (lines 613-623)
@@ -69,8 +75,10 @@ The email admin panel feature spans **frontend** (Svelte component + API client)
 ### Backend: Configuration
 
 #### `backend/open_webui/config.py` (lines 2555-2611)
+
 - Currently uses `PersistentConfig` which allows admin panel to override env values
 - **Action**: Convert to plain `os.environ.get()` calls so values are env-only:
+
   ```python
   # Before (PersistentConfig - admin can override):
   ENABLE_EMAIL_INVITES = PersistentConfig("ENABLE_EMAIL_INVITES", "email.enable_invites", ...)
@@ -78,10 +86,12 @@ The email admin panel feature spans **frontend** (Svelte component + API client)
   # After (env-only):
   ENABLE_EMAIL_INVITES = os.environ.get("ENABLE_EMAIL_INVITES", "False").lower() == "true"
   ```
+
 - Variables to convert: `ENABLE_EMAIL_INVITES`, `EMAIL_GRAPH_TENANT_ID`, `EMAIL_GRAPH_CLIENT_ID`, `EMAIL_GRAPH_CLIENT_SECRET`, `EMAIL_FROM_ADDRESS`, `EMAIL_FROM_NAME`, `INVITE_EXPIRY_HOURS`
 - **Keep as PersistentConfig**: `EMAIL_INVITE_SUBJECT`, `EMAIL_INVITE_HEADING` (these are managed via the separate InviteContent admin endpoints, not the email tab)
 
 #### `backend/open_webui/main.py` (lines 1065-1073)
+
 - Wires email config to `app.state.config`
 - **Action**: Keep this wiring but assign plain values instead of PersistentConfig objects
 - The email services (`services/email/auth.py`, `services/email/graph_mail_client.py`) read from `app.state.config`, so the wiring must stay
@@ -89,27 +99,33 @@ The email admin panel feature spans **frontend** (Svelte component + API client)
 ### Helm Chart: Values & Templates
 
 #### `helm/open-webui-tenant/values.yaml`
+
 - **Line 206**: `featureAdminSettingsTabs: "models,tools,interface,db,email"` — remove `email` from this default list
 - **Lines 303-310**: Email invite config values (enableEmailInvites, emailGraphTenantId, etc.) — KEEP (still needed to pass env vars)
 - **Line 477**: `emailGraphClientSecret` secret — KEEP
 
 #### `helm/open-webui-tenant/templates/open-webui/configmap.yaml` (lines 224-234)
+
 - Email env vars mapping — KEEP (still need to pass env vars to container)
 
 #### `helm/open-webui-tenant/templates/secrets.yaml` (lines 20-23)
+
 - Email graph client secret — KEEP
 
 #### `helm/open-webui-tenant/templates/open-webui/deployment.yaml` (lines 73-80)
+
 - EMAIL_GRAPH_CLIENT_SECRET injection — KEEP
 
 ### GitOps: Tenant Values Patches
 
 #### `soev-gitops/tenants/previder-prod/gradient/values-patch.yaml`
+
 - **Lines 51-60**: Email config block — KEEP the env vars (lines 52-57), but:
   - **Line 60**: `featureAdminSettingsTabs: "models,tools,interface,db,email"` — remove `,email`
   - Change to: `featureAdminSettingsTabs: "models,tools,interface,db"`
 
 #### `soev-gitops/tenants/previder-prod/demo/values-patch.yaml`
+
 - **Lines 52-61**: Email config block — KEEP the env vars (lines 53-58), but:
   - **Line 61**: `featureAdminSettingsTabs: "models,tools,interface,db,email"` — remove `,email`
   - Change to: `featureAdminSettingsTabs: "models,tools,interface,db"`

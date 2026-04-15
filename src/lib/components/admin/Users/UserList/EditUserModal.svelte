@@ -6,7 +6,12 @@
 
 	import { goto } from '$app/navigation';
 
-	import { updateUserById, getUserGroupsById, adminDisableUser2FA, adminGetUser2FAStatus } from '$lib/apis/users';
+	import {
+		updateUserById,
+		getUserGroupsById,
+		adminDisableUser2FA,
+		adminGetUser2FAStatus
+	} from '$lib/apis/users';
 	import { config } from '$lib/stores';
 
 	import Modal from '$lib/components/common/Modal.svelte';

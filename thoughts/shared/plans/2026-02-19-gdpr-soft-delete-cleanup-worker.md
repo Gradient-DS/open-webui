@@ -12,20 +12,24 @@ Replace the current fire-and-forget `BackgroundTasks.add_task()` deletion patter
 ## Current State Analysis
 
 ### Knowledge Base Deletion (`knowledge.py:756-828`)
+
 - Router does inline work (model updates, vector collection, DB delete), then fires background task for file cleanup
 - If server crashes after DB delete but before file cleanup, files leak permanently
 - `BackgroundTasks.add_task(_cleanup_orphaned_kb_files, ...)` provides no retry mechanism
 
 ### Chat Deletion
+
 - **Single chat** (`chats.py:713-751`): Synchronous via `DeletionService.delete_chat()` — deletes files eagerly (even files shared with other chats/KBs)
 - **All chats** (`chats.py:201-225`): Deletes chat rows, then background task cleans orphaned files (only checks KB references, not other chat references)
 
 ### User Deletion (`users.py:581-648`)
+
 - Runs `DeletionService.delete_user()` synchronously in a thread pool
 - Takes a long time for users with many KBs/files — admin waits for full response
 - If server crashes mid-deletion, partial cleanup with no retry
 
 ### Key Discoveries
+
 - OneDrive scheduler at `services/onedrive/scheduler.py` provides the exact pattern to follow: `start_scheduler()`/`stop_scheduler()` lifecycle, `asyncio.create_task` infinite loop
 - Current Alembic head: `eaa33ce2752e` (create invite table)
 - `DeletionService` already follows vectors → storage → DB order for retryability
@@ -45,6 +49,7 @@ After this plan is complete:
 8. File orphan checking considers both KB and chat references
 
 ### Verification:
+
 - Delete a KB → instantly disappears from UI, files cleaned up within 60s
 - Delete a chat → instantly disappears from UI, orphaned files cleaned up within 60s
 - Delete all chats → all disappear instantly, files cleaned up within 60s
@@ -71,11 +76,13 @@ The cleanup worker follows the OneDrive scheduler pattern: module-level `start_c
 ## Phase 1: Database Migration
 
 ### Overview
+
 Add `deleted_at` column to `knowledge` and `chat` tables. Single Alembic migration.
 
 ### Changes Required:
 
 #### 1. Alembic Migration
+
 **File**: `backend/open_webui/migrations/versions/a1b2c3d4e5f6_add_soft_delete_columns.py` (revision ID will be auto-generated)
 
 ```python
@@ -117,22 +124,26 @@ def downgrade():
 
 **File**: `backend/open_webui/models/knowledge.py`
 Add to `Knowledge` class (after `updated_at`):
+
 ```python
 deleted_at = Column(BigInteger, nullable=True, index=True)
 ```
 
 Add to `KnowledgeModel` pydantic model:
+
 ```python
 deleted_at: Optional[int] = None
 ```
 
 **File**: `backend/open_webui/models/chats.py`
 Add to `Chat` class (after `updated_at`):
+
 ```python
 deleted_at = Column(BigInteger, nullable=True, index=True)
 ```
 
 Add to `ChatModel` pydantic model:
+
 ```python
 deleted_at: Optional[int] = None
 ```
@@ -140,6 +151,7 @@ deleted_at: Optional[int] = None
 ### Success Criteria:
 
 #### Automated Verification:
+
 - [x] Migration applies cleanly (forward and backward)
 - [x] Existing data unaffected (all `deleted_at` values are NULL)
 - [x] `npm run build` succeeds (frontend unchanged in this phase)
@@ -149,33 +161,37 @@ deleted_at: Optional[int] = None
 ## Phase 2: Knowledge Model Query Filtering
 
 ### Overview
+
 Add `deleted_at IS NULL` filtering to all user-facing knowledge query methods. Add helper methods for the cleanup worker.
 
 ### Changes Required:
 
 #### 1. Knowledge Read Methods
+
 **File**: `backend/open_webui/models/knowledge.py`
 
 **Methods to add `deleted_at IS NULL` filter:**
 
-| Method | Line | Change |
-|--------|------|--------|
-| `get_knowledge_bases` | 189 | Add `.filter(Knowledge.deleted_at.is_(None))` to query |
-| `search_knowledge_bases` | 214 | Add `.filter(Knowledge.deleted_at.is_(None))` to query |
-| `search_knowledge_files` | 277 | Add `.filter(Knowledge.deleted_at.is_(None))` to the Knowledge join/filter |
-| `get_knowledge_bases_by_type` | 347 | Add `.filter(Knowledge.deleted_at.is_(None))` to query |
-| `get_knowledge_items_by_user_id` | 372 | Add `.filter(Knowledge.deleted_at.is_(None))` to query |
-| `get_knowledge_by_id` | 381 | Add `.filter(Knowledge.deleted_at.is_(None))` to query |
-| `get_knowledges_by_file_id` | 404 | Add `.filter(Knowledge.deleted_at.is_(None))` to query |
+| Method                           | Line | Change                                                                     |
+| -------------------------------- | ---- | -------------------------------------------------------------------------- |
+| `get_knowledge_bases`            | 189  | Add `.filter(Knowledge.deleted_at.is_(None))` to query                     |
+| `search_knowledge_bases`         | 214  | Add `.filter(Knowledge.deleted_at.is_(None))` to query                     |
+| `search_knowledge_files`         | 277  | Add `.filter(Knowledge.deleted_at.is_(None))` to the Knowledge join/filter |
+| `get_knowledge_bases_by_type`    | 347  | Add `.filter(Knowledge.deleted_at.is_(None))` to query                     |
+| `get_knowledge_items_by_user_id` | 372  | Add `.filter(Knowledge.deleted_at.is_(None))` to query                     |
+| `get_knowledge_by_id`            | 381  | Add `.filter(Knowledge.deleted_at.is_(None))` to query                     |
+| `get_knowledges_by_file_id`      | 404  | Add `.filter(Knowledge.deleted_at.is_(None))` to query                     |
 
 **`get_knowledge_bases_by_user_id`** (line 358): Delegates to `get_knowledge_bases()`, so inherits the filter automatically.
 
 **`check_access_by_user_id`** (line 338): Delegates to `get_knowledge_by_id()`, so inherits the filter automatically.
 
 **Methods that should NOT filter (used by deletion/cleanup):**
+
 - Junction table queries (`get_knowledge_files_by_file_id`, `get_referenced_file_ids`, `get_files_by_id`, `search_files_by_id`) — these query `KnowledgeFile`/`File` tables, not `Knowledge` directly. The cleanup worker needs these to find files associated with soft-deleted KBs.
 
 #### 2. New Helper Methods
+
 **File**: `backend/open_webui/models/knowledge.py`
 
 ```python
@@ -225,6 +241,7 @@ def get_knowledge_by_id_unfiltered(self, id: str) -> Optional[KnowledgeModel]:
 ```
 
 #### 3. DeletionService Update
+
 **File**: `backend/open_webui/services/deletion/service.py`
 
 Update `delete_knowledge()` (line 301) to use `get_knowledge_by_id_unfiltered()` instead of `get_knowledge_by_id()`, so it can process soft-deleted KBs:
@@ -234,6 +251,7 @@ knowledge = Knowledges.get_knowledge_by_id_unfiltered(knowledge_id)
 ```
 
 #### 4. OneDrive Scheduler Update
+
 **File**: `backend/open_webui/services/onedrive/scheduler.py`
 
 The `_update_sync_status` method at line 163 calls `Knowledges.get_knowledge_by_id()`. If a KB is soft-deleted while syncing, this would return `None`, which is the correct behavior (skip the update). No change needed.
@@ -243,6 +261,7 @@ The `get_knowledge_bases_by_type("onedrive")` at line 82 will automatically filt
 ### Success Criteria:
 
 #### Automated Verification:
+
 - [x] All existing functionality works (soft-deleted records are invisible)
 - [x] `Knowledges.get_pending_deletions()` returns only soft-deleted records
 - [x] `Knowledges.soft_delete_by_id()` sets `deleted_at` timestamp
@@ -250,6 +269,7 @@ The `get_knowledge_bases_by_type("onedrive")` at line 82 will automatically filt
 - [x] `npm run build` succeeds
 
 #### Manual Verification:
+
 - [ ] KB list/search doesn't show soft-deleted records
 - [ ] Direct access to soft-deleted KB by ID returns 404
 
@@ -258,43 +278,47 @@ The `get_knowledge_bases_by_type("onedrive")` at line 82 will automatically filt
 ## Phase 3: Chat Model Query Filtering
 
 ### Overview
+
 Add `deleted_at IS NULL` filtering to all user-facing chat query methods. Add helper methods for the cleanup worker.
 
 ### Changes Required:
 
 #### 1. Chat Read Methods
+
 **File**: `backend/open_webui/models/chats.py`
 
 **Methods to add `Chat.deleted_at.is_(None)` filter:**
 
-| Method | Line | Notes |
-|--------|------|-------|
-| `get_chat_by_id` | 706 | Add filter |
-| `get_chat_by_share_id` | 721 | Add filter |
-| `get_chat_by_id_and_user_id` | 735 | Add filter |
-| `get_chats` | 743 | Add filter |
-| `get_chats_by_user_id` | 752 | Add filter |
-| `get_chat_list_by_user_id` | 609 | Add filter |
-| `get_chat_title_id_list_by_user_id` | 648 | Add filter |
-| `get_chat_list_by_chat_ids` | 693 | Add filter |
-| `get_pinned_chats_by_user_id` | 778 | Add filter |
-| `get_archived_chats_by_user_id` | 787 | Add filter |
-| `get_archived_chat_list_by_user_id` | 569 | Add filter |
-| `get_chats_by_user_id_and_search_text` | 796 | Add filter |
-| `get_chats_by_folder_id_and_user_id` | 1006 | Add filter |
-| `get_chats_by_folder_ids_and_user_id` | 1024 | Add filter |
-| `get_chat_list_by_user_id_and_tag_name` | 1060 | Add filter |
-| `count_chats_by_tag_name_and_user_id` | 1114 | Add filter |
-| `count_chats_by_folder_id_and_user_id` | 1150 | Add filter |
-| `get_file_ids_by_user_id` | 1213 | Add join filter on Chat.deleted_at |
-| `get_shared_chats_by_file_id` | 1363 | Add filter |
+| Method                                  | Line | Notes                              |
+| --------------------------------------- | ---- | ---------------------------------- |
+| `get_chat_by_id`                        | 706  | Add filter                         |
+| `get_chat_by_share_id`                  | 721  | Add filter                         |
+| `get_chat_by_id_and_user_id`            | 735  | Add filter                         |
+| `get_chats`                             | 743  | Add filter                         |
+| `get_chats_by_user_id`                  | 752  | Add filter                         |
+| `get_chat_list_by_user_id`              | 609  | Add filter                         |
+| `get_chat_title_id_list_by_user_id`     | 648  | Add filter                         |
+| `get_chat_list_by_chat_ids`             | 693  | Add filter                         |
+| `get_pinned_chats_by_user_id`           | 778  | Add filter                         |
+| `get_archived_chats_by_user_id`         | 787  | Add filter                         |
+| `get_archived_chat_list_by_user_id`     | 569  | Add filter                         |
+| `get_chats_by_user_id_and_search_text`  | 796  | Add filter                         |
+| `get_chats_by_folder_id_and_user_id`    | 1006 | Add filter                         |
+| `get_chats_by_folder_ids_and_user_id`   | 1024 | Add filter                         |
+| `get_chat_list_by_user_id_and_tag_name` | 1060 | Add filter                         |
+| `count_chats_by_tag_name_and_user_id`   | 1114 | Add filter                         |
+| `count_chats_by_folder_id_and_user_id`  | 1150 | Add filter                         |
+| `get_file_ids_by_user_id`               | 1213 | Add join filter on Chat.deleted_at |
+| `get_shared_chats_by_file_id`           | 1363 | Add filter                         |
 
 **Methods that should NOT filter:**
+
 - `get_files_by_chat_id` (line 1343) — queries `ChatFile` junction table, needed by cleanup worker
 - `get_chat_files_by_chat_id_and_message_id` (line 1329) — junction table query
 - `delete_*` methods — operate on already-identified records
 
 #### 2. New Helper Methods
+
 **File**: `backend/open_webui/models/chats.py`
 
 ```python
@@ -359,6 +383,7 @@ def get_referenced_file_ids(self, file_ids: list[str]) -> set[str]:
 ```
 
 #### 3. Update `delete_orphaned_files_batch`
+
 **File**: `backend/open_webui/services/deletion/service.py`
 
 Update the orphan check (lines 155-160) to also check chat references:
@@ -375,11 +400,13 @@ else:
 ```
 
 Add the `Chats` import at the top of the method (lazy import pattern already used):
+
 ```python
 from open_webui.models.chats import Chats
 ```
 
 #### 4. Update `DeletionService.delete_chat`
+
 **File**: `backend/open_webui/services/deletion/service.py`
 
 Update `delete_chat()` (line 235) to use `get_chat_by_id_unfiltered()` so it can process soft-deleted chats:
@@ -391,6 +418,7 @@ chat = Chats.get_chat_by_id_unfiltered(chat_id)
 ### Success Criteria:
 
 #### Automated Verification:
+
 - [x] All existing chat functionality works (soft-deleted chats invisible)
 - [x] `Chats.get_pending_deletions()` returns only soft-deleted chats
 - [x] `Chats.soft_delete_by_id()` sets `deleted_at` timestamp
@@ -398,6 +426,7 @@ chat = Chats.get_chat_by_id_unfiltered(chat_id)
 - [x] `npm run build` succeeds
 
 #### Manual Verification:
+
 - [ ] Chat list/search doesn't show soft-deleted chats
 - [ ] Direct access to soft-deleted chat by ID returns 404
 
@@ -408,11 +437,13 @@ chat = Chats.get_chat_by_id_unfiltered(chat_id)
 ## Phase 4: Router Soft-Delete Endpoints
 
 ### Overview
+
 Change deletion endpoints to use soft-delete instead of immediate hard-delete + background cleanup. Remove `BackgroundTasks` dependency from deletion endpoints.
 
 ### Changes Required:
 
 #### 1. Knowledge Base Delete Endpoint
+
 **File**: `backend/open_webui/routers/knowledge.py`
 
 Replace the `delete_knowledge_by_id` function (lines 756-828) and remove `_cleanup_orphaned_kb_files` (lines 831-839):
@@ -449,6 +480,7 @@ async def delete_knowledge_by_id(
 Remove `BackgroundTasks` import dependency and `_cleanup_orphaned_kb_files` function.
 
 #### 2. Chat Delete Endpoints
+
 **File**: `backend/open_webui/routers/chats.py`
 
 **Delete all chats** (lines 201-225) — replace with soft-delete:
@@ -504,21 +536,25 @@ async def delete_chat_by_id(request: Request, id: str, user=Depends(get_verified
 ```
 
 #### 3. User Delete Endpoint
+
 **File**: `backend/open_webui/routers/users.py`
 
 The admin user deletion endpoint (lines 581-648) remains mostly the same but now `DeletionService.delete_user()` will be updated in Phase 5 to use soft-delete for KBs/chats, making it return faster.
 
 #### 4. Shared Chat Deletion
+
 The `delete_shared_chat_by_id` endpoint (chats.py:961-976) deletes **shared copies** of chats (separate rows with `user_id = "shared-{id}"`). These don't have files and don't need soft-delete — keep as hard-delete.
 
 ### Success Criteria:
 
 #### Automated Verification:
+
 - [x] KB delete returns instantly (no background task)
 - [x] Chat delete returns instantly (no background task)
 - [x] `npm run build` succeeds
 
 #### Manual Verification:
+
 - [ ] Delete a KB via UI → disappears immediately from list
 - [ ] Delete a chat via UI → disappears immediately from list
 - [ ] Delete all chats via UI → all disappear immediately
@@ -531,11 +567,13 @@ The `delete_shared_chat_by_id` endpoint (chats.py:961-976) deletes **shared copi
 ## Phase 5: Cleanup Worker
 
 ### Overview
+
 Create the periodic cleanup worker that processes pending KB and chat deletions, performing the full cascade cleanup (vectors, storage, DB).
 
 ### Changes Required:
 
 #### 1. Cleanup Worker Module
+
 **File**: `backend/open_webui/services/deletion/cleanup_worker.py` (new file)
 
 ```python
@@ -697,6 +735,7 @@ Note on tag counting: `count_chats_by_tag_name_and_user_id` filters `deleted_at 
 Actually, wait — the chat IS still in the DB (soft-deleted). And our count query filters `deleted_at IS NULL`. So the soft-deleted chat is NOT counted. If there were 2 chats using a tag and we soft-delete one, count returns 1 (the remaining active chat). If we soft-delete both, count returns 0. We should delete the tag when count == 0. This is correct as written above.
 
 #### 2. Register in main.py Lifespan
+
 **File**: `backend/open_webui/main.py`
 
 Add after the OneDrive scheduler start (line 680):
@@ -718,11 +757,13 @@ stop_cleanup_worker()
 ### Success Criteria:
 
 #### Automated Verification:
+
 - [x] Worker starts on app startup (check logs for "Deletion cleanup worker started")
 - [x] Worker stops on app shutdown (check logs for "Deletion cleanup worker stopped")
 - [x] `npm run build` succeeds
 
 #### Manual Verification:
+
 - [ ] Soft-delete a KB → files/vectors cleaned up within 60 seconds
 - [ ] Soft-delete a chat → files cleaned up within 60 seconds
 - [ ] Soft-delete all chats → all files cleaned up within 60 seconds
@@ -736,11 +777,13 @@ stop_cleanup_worker()
 ## Phase 6: User Deletion Integration
 
 ### Overview
+
 Update `DeletionService.delete_user()` to use soft-delete for KBs and chats, making user deletion faster and crash-safe. The cleanup worker handles the expensive parts.
 
 ### Changes Required:
 
 #### 1. Update `DeletionService.delete_user()`
+
 **File**: `backend/open_webui/services/deletion/service.py`
 
 The key changes to `delete_user()` (line 398):
@@ -811,12 +854,14 @@ Note: The `delete_user` method still deletes the `User` and `Auth` records immed
 ### Success Criteria:
 
 #### Automated Verification:
+
 - [x] User deletion returns faster (no vector/storage operations during request)
 - [x] Soft-deleted KBs and chats appear in `get_pending_deletions()` after user delete
 - [x] Cleanup worker processes them on next cycle
 - [x] `npm run build` succeeds
 
 #### Manual Verification:
+
 - [ ] Admin deletes a user → response is fast
 - [ ] User's KBs and chats disappear immediately from all views
 - [ ] Files/vectors cleaned up within 60 seconds by cleanup worker
@@ -827,6 +872,7 @@ Note: The `delete_user` method still deletes the `User` and `Auth` records immed
 ## Testing Strategy
 
 ### Unit Tests
+
 - `Knowledges.soft_delete_by_id()` sets `deleted_at`, `get_knowledge_by_id()` returns None
 - `Knowledges.get_pending_deletions()` returns soft-deleted records
 - `Chats.soft_delete_by_id()` sets `deleted_at`, `get_chat_by_id()` returns None
@@ -835,6 +881,7 @@ Note: The `delete_user` method still deletes the `User` and `Auth` records immed
 - `delete_orphaned_files_batch` checks both KB and chat references
 
 ### Integration Tests
+
 - Soft-delete KB → cleanup worker processes → KB row gone, files cleaned up
 - Soft-delete chat → cleanup worker processes → chat row gone, files cleaned up
 - File shared between KB and chat → delete chat → file preserved (still in KB)
@@ -842,6 +889,7 @@ Note: The `delete_user` method still deletes the `User` and `Auth` records immed
 - Server crash mid-cleanup → restart → worker retries successfully
 
 ### Manual Testing Steps
+
 1. Create a KB with files → delete KB → verify files cleaned up within 60s
 2. Create a chat with uploaded files → delete chat → verify files cleaned up
 3. Create a chat and KB sharing a file → delete chat → verify file preserved

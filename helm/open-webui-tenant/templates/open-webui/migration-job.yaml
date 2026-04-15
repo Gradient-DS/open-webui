@@ -1,0 +1,76 @@
+{{- if and .Values.openWebui.enabled .Values.openWebui.migrationJob.enabled }}
+# Alembic migration Job — runs as a Helm pre-upgrade hook before any new pods
+# in the main Deployment roll out. Without this, each replica triggers
+# run_migrations() on module import (backend/open_webui/config.py:75-76,
+# internal/db.py:78), which races across N replicas.
+#
+# Hook semantics:
+#   - pre-upgrade only (NOT pre-install): on first install the ExternalSecret
+#     has not yet materialised, so the Job would fail. First install must be
+#     done with replicaCount=1 + ENABLE_DB_MIGRATIONS=true on the Deployment.
+#   - before-hook-creation + hook-succeeded: Jobs are immutable by name;
+#     delete the previous Job before creating a new one, and clean up on
+#     success. Failed Jobs stick around for `kubectl logs` post-mortem.
+#   - hook-weight -5: runs first among any future pre-upgrade hooks.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "open-webui-tenant.openWebui.fullname" . }}-migrate
+  labels:
+    {{- include "open-webui-tenant.openWebui.labels" . | nindent 4 }}
+    app.kubernetes.io/component: migrate
+  annotations:
+    helm.sh/hook: pre-upgrade
+    helm.sh/hook-weight: "-5"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+spec:
+  backoffLimit: 1
+  activeDeadlineSeconds: {{ .Values.openWebui.migrationJob.activeDeadlineSeconds | default 600 }}
+  ttlSecondsAfterFinished: 3600
+  template:
+    metadata:
+      labels:
+        {{- include "open-webui-tenant.openWebui.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: migrate
+    spec:
+      {{- include "open-webui-tenant.imagePullSecrets" . | nindent 6 }}
+      serviceAccountName: {{ include "open-webui-tenant.serviceAccountName" . }}
+      restartPolicy: Never
+      {{- with .Values.openWebui.podSecurityContext }}
+      securityContext:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: migrate
+          image: "{{ .Values.openWebui.image.repository }}:{{ .Values.openWebui.image.tag }}"
+          imagePullPolicy: {{ .Values.openWebui.image.pullPolicy }}
+          {{- with .Values.openWebui.securityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          # Import-time trigger: run_migrations() fires when open_webui.config
+          # is imported, gated on ENABLE_DB_MIGRATIONS. This explicit override
+          # forces it on regardless of the configmap value (which is false on
+          # the main Deployment so its pods don't also try to migrate).
+          command: ["python", "-c", "import open_webui.config"]
+          envFrom:
+            - configMapRef:
+                name: {{ include "open-webui-tenant.openWebui.fullname" . }}-config
+          env:
+            - name: ENABLE_DB_MIGRATIONS
+              value: "true"
+            - name: WEBUI_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "open-webui-tenant.fullname" . }}-secrets
+                  key: webui-secret-key
+            - name: DATABASE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "open-webui-tenant.fullname" . }}-secrets
+                  key: postgres-password
+            - name: DATABASE_URL
+              value: "postgresql://{{ .Values.postgres.user }}:$(DATABASE_PASSWORD)@{{ include "open-webui-tenant.postgres.fullname" . }}:5432/{{ .Values.postgres.database }}"
+          resources:
+            {{- toYaml .Values.openWebui.migrationJob.resources | nindent 12 }}
+{{- end }}

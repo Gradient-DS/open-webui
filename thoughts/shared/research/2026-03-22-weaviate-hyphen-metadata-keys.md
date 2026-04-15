@@ -4,7 +4,7 @@ researcher: Claude Code
 git_commit: 09c8ac766a597c7c352c9d0965a866f1ddfd947c
 branch: fix/retrieval-weaviate-hyphens
 repository: open-webui
-topic: "Weaviate rejects metadata property names containing hyphens"
+topic: 'Weaviate rejects metadata property names containing hyphens'
 tags: [research, codebase, weaviate, retrieval, metadata, pdf, vector-db]
 status: complete
 last_updated: 2026-03-22
@@ -44,6 +44,7 @@ Weaviate requires all property names to be valid GraphQL identifiers: `/[_A-Za-z
 ### Collection Name Sanitization Exists (but not for properties)
 
 `_sanitize_collection_name()` at `weaviate.py:75-97` already does exactly the right thing for collection names:
+
 - Replaces hyphens with underscores
 - Strips non-alphanumeric/underscore characters
 - Ensures name starts with a capital letter
@@ -52,12 +53,12 @@ No equivalent function exists for property names.
 
 ### Sources of Hyphenated Metadata Keys
 
-| Loader | Hyphenated Keys | Source |
-|--------|----------------|--------|
-| PyPDFLoader (default) | Any custom PDF `/Info` key with hyphens | PDF producer software |
-| TikaLoader | `Content-Type`, `X-Tika-PDFextractInlineImages` | Tika response headers |
-| DoclingLoader | `Content-Type` | MIME type header |
-| ExternalDocumentLoader | Any key from external API | External service |
+| Loader                 | Hyphenated Keys                                 | Source                |
+| ---------------------- | ----------------------------------------------- | --------------------- |
+| PyPDFLoader (default)  | Any custom PDF `/Info` key with hyphens         | PDF producer software |
+| TikaLoader             | `Content-Type`, `X-Tika-PDFextractInlineImages` | Tika response headers |
+| DoclingLoader          | `Content-Type`                                  | MIME type header      |
+| ExternalDocumentLoader | Any key from external API                       | External service      |
 
 ### Silent Failure
 
@@ -80,6 +81,7 @@ def _sanitize_property_name(name: str) -> str:
 ```
 
 Apply in both `insert()` and `upsert()` when processing metadata:
+
 ```python
 clean_metadata = {
     _sanitize_property_name(k): v

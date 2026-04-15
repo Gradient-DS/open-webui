@@ -4,7 +4,7 @@ researcher: Claude
 git_commit: 6a14558bf2a53381eb06c25cf552b5cb75132983
 branch: feat/agent-api-integration
 repository: Gradient-DS/open-webui
-topic: "Configurable multi-layered feedback mechanism for MKB version"
+topic: 'Configurable multi-layered feedback mechanism for MKB version'
 tags: [research, codebase, feedback, evaluations, admin-settings, ratings]
 status: complete
 last_updated: 2026-03-09
@@ -84,6 +84,7 @@ Key: `data` and `meta` use `extra="allow"` Pydantic models, so additional fields
 #### Message-Level Storage
 
 Annotation stored on the message object in chat history:
+
 ```json
 message.annotation = {
   rating: 1 | -1,

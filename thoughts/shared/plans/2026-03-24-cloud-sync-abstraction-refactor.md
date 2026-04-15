@@ -7,7 +7,9 @@ The Google Drive and OneDrive integrations are near-identical copy-pastes (~2700
 ## Current State Analysis
 
 ### Backend Structure (per provider)
+
 Each provider has 7 files under `services/{provider}/`:
+
 - `provider.py` — SyncProvider/TokenManager implementation
 - `sync_events.py` — Socket.IO event emitters (3 functions)
 - `scheduler.py` — Background sync scheduler (~158 lines)
@@ -19,6 +21,7 @@ Each provider has 7 files under `services/{provider}/`:
 Plus a router: `routers/{provider}_sync.py` (~518-556 lines)
 
 ### Key Discoveries
+
 - `services/sync/provider.py` already defines `SyncProvider` and `TokenManager` ABCs — good foundation
 - `sync_events.py`: 100% identical logic, only event name prefix differs
 - `scheduler.py`: 100% identical logic, only config vars and meta key differ
@@ -30,6 +33,7 @@ Plus a router: `routers/{provider}_sync.py` (~518-556 lines)
 - Frontend: `KnowledgeBase.svelte` has ~700 lines of duplicated handler/socket/template code
 
 ### What the existing abstraction provides
+
 - `SyncProvider` ABC with `execute_sync()`, `get_provider_type()`, `get_token_manager()`
 - `TokenManager` ABC with `get_valid_access_token()`, `has_stored_token()`, `delete_token()`
 - `get_sync_provider(provider_type)` and `get_token_manager(provider_type)` factory functions
@@ -37,6 +41,7 @@ Plus a router: `routers/{provider}_sync.py` (~518-556 lines)
 ## Desired End State
 
 After this refactor:
+
 1. Each provider directory contains **only** provider-specific code (auth config, API client, file enumeration/download, permission structure parsing)
 2. All shared logic lives in `services/sync/` and is parameterized by provider type
 3. Adding a new provider requires implementing ~4 files (auth, API client, worker subclass, config) — no copy-paste of scheduler, events, router, or base worker logic
@@ -44,6 +49,7 @@ After this refactor:
 5. All existing behavior is preserved — no user-facing changes
 
 ### Verification
+
 - All existing sync operations (manual + background) work identically for both providers
 - Socket events still reach the frontend with correct provider prefixes
 - OAuth flows still work for both providers
@@ -69,14 +75,17 @@ Bottom-up: start with leaf modules (constants, events), then work up to the orch
 ## Phase 1: Shared Constants and Sync Events
 
 ### Overview
+
 Extract duplicated constants and the sync event emitter into `services/sync/`.
 
 ### Changes Required:
 
 #### 1. Create `services/sync/constants.py`
+
 **File**: `backend/open_webui/services/sync/constants.py` (new)
 
 Move from both `sync_worker.py` files:
+
 - `SyncErrorType` enum
 - `FailedFile` dataclass
 - `SUPPORTED_EXTENSIONS` set
@@ -127,6 +136,7 @@ CONTENT_TYPES = {
 ```
 
 #### 2. Create `services/sync/events.py`
+
 **File**: `backend/open_webui/services/sync/events.py` (new)
 
 Generic event emitter parameterized by `provider_prefix`:
@@ -211,6 +221,7 @@ async def emit_sync_progress(
 ```
 
 #### 3. Update both provider `sync_events.py` to delegate
+
 **Files**: `services/google_drive/sync_events.py`, `services/onedrive/sync_events.py`
 
 Replace each function body with a delegation call to the shared module:
@@ -240,9 +251,11 @@ Same pattern for OneDrive with `_PREFIX = "onedrive"`.
 This preserves the existing import signatures so no callers need to change.
 
 #### 4. Update both `sync_worker.py` to import from shared constants
+
 **Files**: `services/google_drive/sync_worker.py`, `services/onedrive/sync_worker.py`
 
 Replace local definitions with imports:
+
 ```python
 from open_webui.services.sync.constants import (
     SyncErrorType, FailedFile, SUPPORTED_EXTENSIONS, CONTENT_TYPES,
@@ -254,6 +267,7 @@ Remove the local `SyncErrorType`, `FailedFile`, `SUPPORTED_EXTENSIONS`, `CONTENT
 ### Success Criteria:
 
 #### Automated Verification:
+
 - [ ] Python imports resolve: `python -c "from open_webui.services.sync.constants import SyncErrorType, SUPPORTED_EXTENSIONS"`
 - [ ] Python imports resolve: `python -c "from open_webui.services.sync.events import emit_sync_progress"`
 - [ ] Existing provider imports still work: `python -c "from open_webui.services.google_drive.sync_events import emit_sync_progress"`
@@ -261,6 +275,7 @@ Remove the local `SyncErrorType`, `FailedFile`, `SUPPORTED_EXTENSIONS`, `CONTENT
 - [ ] No import errors on app startup
 
 #### Manual Verification:
+
 - [ ] Trigger a sync for both providers — socket events arrive at frontend unchanged
 
 ---
@@ -268,11 +283,13 @@ Remove the local `SyncErrorType`, `FailedFile`, `SUPPORTED_EXTENSIONS`, `CONTENT
 ## Phase 2: Generic Scheduler
 
 ### Overview
+
 Extract the scheduler into a reusable class in `services/sync/scheduler.py`, parameterized by provider type and config.
 
 ### Changes Required:
 
 #### 1. Create `services/sync/scheduler.py`
+
 **File**: `backend/open_webui/services/sync/scheduler.py` (new)
 
 ```python
@@ -403,9 +420,11 @@ class SyncScheduler:
 ```
 
 #### 2. Replace provider schedulers with instances
+
 **File**: `services/google_drive/scheduler.py`
 
 Replace the entire file with:
+
 ```python
 """Google Drive Background Sync Scheduler."""
 
@@ -430,12 +449,14 @@ This preserves the `start_scheduler(app)` / `stop_scheduler()` API that `main.py
 ### Success Criteria:
 
 #### Automated Verification:
+
 - [ ] `python -c "from open_webui.services.sync.scheduler import SyncScheduler"`
 - [ ] `python -c "from open_webui.services.google_drive.scheduler import start_scheduler, stop_scheduler"`
 - [ ] `python -c "from open_webui.services.onedrive.scheduler import start_scheduler, stop_scheduler"`
 - [ ] No import errors on app startup
 
 #### Manual Verification:
+
 - [ ] Background sync triggers correctly for both providers after the configured interval
 - [ ] Stale sync recovery works (set a sync status to "syncing" with old timestamp, verify scheduler re-triggers)
 
@@ -444,11 +465,13 @@ This preserves the `start_scheduler(app)` / `stop_scheduler()` API that `main.py
 ## Phase 3: Generic Token Refresh
 
 ### Overview
+
 Extract the shared token refresh flow into a base in `services/sync/token_refresh.py`. The `_refresh_token()` HTTP call stays provider-specific.
 
 ### Changes Required:
 
 #### 1. Create `services/sync/token_refresh.py`
+
 **File**: `backend/open_webui/services/sync/token_refresh.py` (new)
 
 ```python
@@ -520,9 +543,11 @@ def _mark_needs_reauth(provider_type: str, meta_key: str, user_id: str):
 ```
 
 #### 2. Update provider `token_refresh.py` files
+
 Each provider keeps only its `_refresh_token()` implementation and delegates the shared flow:
 
 **File**: `services/google_drive/token_refresh.py`
+
 ```python
 """Google Drive Token Refresh Service."""
 import time
@@ -558,11 +583,13 @@ Same pattern for OneDrive, keeping its tenant-aware `_refresh_token()`.
 ### Success Criteria:
 
 #### Automated Verification:
+
 - [ ] `python -c "from open_webui.services.sync.token_refresh import get_valid_access_token"`
 - [ ] Existing imports still work for both providers
 - [ ] No import errors on app startup
 
 #### Manual Verification:
+
 - [ ] Background sync correctly refreshes an expired Google token
 - [ ] Background sync correctly refreshes an expired OneDrive token
 - [ ] Token revocation is detected and `needs_reauth` is set for both providers
@@ -572,11 +599,13 @@ Same pattern for OneDrive, keeping its tenant-aware `_refresh_token()`.
 ## Phase 4: Enhanced Provider Base Class
 
 ### Overview
+
 Push the shared `execute_sync()` logic from both provider.py files into `SyncProvider` as a concrete method, leaving only a few abstract properties for subclasses.
 
 ### Changes Required:
 
 #### 1. Update `services/sync/provider.py`
+
 Add concrete `execute_sync()` to `SyncProvider`, using abstract properties:
 
 ```python
@@ -638,6 +667,7 @@ class SyncProvider(ABC):
 ```
 
 #### 2. Simplify both provider.py files
+
 Each provider reduces to:
 
 ```python
@@ -664,10 +694,12 @@ The `execute_sync()` override is removed entirely.
 ### Success Criteria:
 
 #### Automated Verification:
+
 - [ ] `python -c "from open_webui.services.sync.provider import get_sync_provider; p = get_sync_provider('onedrive'); print(p.get_meta_key())"`
 - [ ] No import errors on app startup
 
 #### Manual Verification:
+
 - [ ] Manual sync via the UI works for both providers
 - [ ] Background sync works for both providers
 
@@ -676,11 +708,13 @@ The `execute_sync()` override is removed entirely.
 ## Phase 5: Generic Sync Router
 
 ### Overview
+
 Extract the shared router endpoint logic into a factory or base module. Each provider's router becomes a thin configuration layer.
 
 ### Changes Required:
 
 #### 1. Create `services/sync/router.py`
+
 **File**: `backend/open_webui/services/sync/router.py` (new)
 
 A factory function that creates a FastAPI `APIRouter` with all shared endpoints, parameterized by provider config:
@@ -749,6 +783,7 @@ def create_sync_router(
 ```
 
 **Note**: The exact implementation will follow the existing endpoint patterns from both routers. The key parameterization points are:
+
 - `meta_key` for reading/writing knowledge meta
 - `file_id_prefix` for file matching in `_remove_files_for_source`
 - `sync_items_model` since OneDrive includes `drive_id` in its SyncItem
@@ -757,9 +792,11 @@ def create_sync_router(
 - `remove_files_fn` to handle the slightly different file matching logic (OneDrive has legacy `drive_id` fallback)
 
 #### 2. Simplify both provider routers
+
 Each router becomes a thin configuration file that calls `create_sync_router()`:
 
 **File**: `routers/google_drive_sync.py`
+
 ```python
 from open_webui.services.sync.router import create_sync_router
 # ... provider-specific imports and models ...
@@ -800,11 +837,13 @@ The `handle_*_auth_callback` functions stay in their respective router files sin
 ### Success Criteria:
 
 #### Automated Verification:
+
 - [ ] `python -c "from open_webui.services.sync.router import create_sync_router"`
 - [ ] All API endpoints respond correctly: test each endpoint with curl/httpie
 - [ ] No import errors on app startup
 
 #### Manual Verification:
+
 - [ ] Full sync flow works via UI for both providers (start, monitor, complete)
 - [ ] Cancel sync works for both providers
 - [ ] Remove source works for both providers
@@ -817,11 +856,13 @@ The `handle_*_auth_callback` functions stay in their respective router files sin
 ## Phase 6: Sync Worker Base Class
 
 ### Overview
+
 Extract the shared file processing pipeline into a `BaseSyncWorker` class. This is the largest single change but also the highest duplication reduction (~11 shared methods).
 
 ### Changes Required:
 
 #### 1. Create `services/sync/base_worker.py`
+
 **File**: `backend/open_webui/services/sync/base_worker.py` (new)
 
 Base class containing all shared methods:
@@ -863,6 +904,7 @@ class BaseSyncWorker(ABC):
 ```
 
 Key design decisions:
+
 - `_update_sync_status` uses `self.meta_key` and `self.event_prefix` instead of hardcoded strings
 - `_process_file_info` calls `self._download_file_content(file_info)` and `self._get_file_metadata(file_info)` — abstract methods that each provider implements
 - `_handle_deleted_item` uses `self.file_id_prefix`
@@ -870,7 +912,9 @@ Key design decisions:
 - Cancellation cleanup uses `self._get_source_clear_delta_keys()` to know which keys to pop
 
 #### 2. Refactor `google_drive/sync_worker.py`
+
 Keep only Google-specific methods:
+
 - `_is_workspace_file`, `_get_effective_filename`
 - `_is_supported_file` (Google Workspace MIME type handling)
 - `_collect_folder_files`, `_collect_folder_files_full`, `_collect_folder_files_incremental`, `_is_in_folder_tree`
@@ -883,7 +927,9 @@ Keep only Google-specific methods:
 - Properties: `provider_type="google_drive"`, `meta_key="google_drive_sync"`, `file_id_prefix="googledrive-"`, `event_prefix="googledrive"`, etc.
 
 #### 3. Refactor `onedrive/sync_worker.py`
+
 Keep only OneDrive-specific methods:
+
 - `_is_supported_file` (folder key check, no Workspace types)
 - `_collect_folder_files` (delta API with folder_map multi-pass)
 - `_collect_single_file` (sha256/quickXor hash based change detection)
@@ -897,12 +943,14 @@ Keep only OneDrive-specific methods:
 ### Success Criteria:
 
 #### Automated Verification:
+
 - [ ] `python -c "from open_webui.services.sync.base_worker import BaseSyncWorker"`
 - [ ] `python -c "from open_webui.services.google_drive.sync_worker import GoogleDriveSyncWorker"`
 - [ ] `python -c "from open_webui.services.onedrive.sync_worker import OneDriveSyncWorker"`
 - [ ] No import errors on app startup
 
 #### Manual Verification:
+
 - [ ] Full sync from empty state works for both providers (all files downloaded and processed)
 - [ ] Incremental sync works (add a file to the synced folder, trigger resync, only new file processed)
 - [ ] File deletion detection works (delete a file from source, resync, file removed from KB)
@@ -918,11 +966,13 @@ Keep only OneDrive-specific methods:
 ## Phase 7: Frontend API Client Factory
 
 ### Overview
+
 Create a generic sync API client factory to eliminate duplication across the two API modules.
 
 ### Changes Required:
 
 #### 1. Create `src/lib/apis/sync/index.ts`
+
 **File**: `src/lib/apis/sync/index.ts` (new)
 
 ```typescript
@@ -931,102 +981,114 @@ import { WEBUI_API_BASE_URL } from '$lib/constants';
 export type SyncErrorType = 'timeout' | 'empty_content' | 'processing_error' | 'download_error';
 
 export interface FailedFile {
-    filename: string;
-    error_type: SyncErrorType;
-    error_message: string;
+	filename: string;
+	error_type: SyncErrorType;
+	error_message: string;
 }
 
 export interface SyncStatusResponse {
-    knowledge_id: string;
-    status: 'idle' | 'syncing' | 'completed' | 'completed_with_errors' | 'failed' | 'cancelled';
-    progress_current?: number;
-    progress_total?: number;
-    last_sync_at?: number;
-    error?: string;
-    source_count?: number;
-    failed_files?: FailedFile[];
+	knowledge_id: string;
+	status: 'idle' | 'syncing' | 'completed' | 'completed_with_errors' | 'failed' | 'cancelled';
+	progress_current?: number;
+	progress_total?: number;
+	last_sync_at?: number;
+	error?: string;
+	source_count?: number;
+	failed_files?: FailedFile[];
 }
 
 export interface TokenStatusResponse {
-    has_token: boolean;
-    is_expired?: boolean;
-    needs_reauth?: boolean;
-    token_stored_at?: number;
+	has_token: boolean;
+	is_expired?: boolean;
+	needs_reauth?: boolean;
+	token_stored_at?: number;
 }
 
 async function apiFetch<T>(url: string, init?: RequestInit): Promise<T> {
-    const res = await fetch(url, init);
-    if (!res.ok) {
-        const error = await res.json().catch(() => ({ detail: res.statusText }));
-        throw new Error(error.detail || `Request failed: ${res.status}`);
-    }
-    return res.json();
+	const res = await fetch(url, init);
+	if (!res.ok) {
+		const error = await res.json().catch(() => ({ detail: res.statusText }));
+		throw new Error(error.detail || `Request failed: ${res.status}`);
+	}
+	return res.json();
 }
 
 export function createSyncApi(basePath: string) {
-    const base = `${WEBUI_API_BASE_URL}/${basePath}`;
+	const base = `${WEBUI_API_BASE_URL}/${basePath}`;
 
-    return {
-        startSyncItems(token: string, request: Record<string, unknown>) {
-            return apiFetch<{ message: string; knowledge_id: string }>(`${base}/sync/items`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-                body: JSON.stringify(request),
-            });
-        },
+	return {
+		startSyncItems(token: string, request: Record<string, unknown>) {
+			return apiFetch<{ message: string; knowledge_id: string }>(`${base}/sync/items`, {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+				body: JSON.stringify(request)
+			});
+		},
 
-        getSyncStatus(token: string, knowledgeId: string) {
-            return apiFetch<SyncStatusResponse>(`${base}/sync/${knowledgeId}`, {
-                headers: { Authorization: `Bearer ${token}` },
-            });
-        },
+		getSyncStatus(token: string, knowledgeId: string) {
+			return apiFetch<SyncStatusResponse>(`${base}/sync/${knowledgeId}`, {
+				headers: { Authorization: `Bearer ${token}` }
+			});
+		},
 
-        cancelSync(token: string, knowledgeId: string) {
-            return apiFetch<{ message: string; knowledge_id: string }>(`${base}/sync/${knowledgeId}/cancel`, {
-                method: 'POST',
-                headers: { Authorization: `Bearer ${token}` },
-            });
-        },
+		cancelSync(token: string, knowledgeId: string) {
+			return apiFetch<{ message: string; knowledge_id: string }>(
+				`${base}/sync/${knowledgeId}/cancel`,
+				{
+					method: 'POST',
+					headers: { Authorization: `Bearer ${token}` }
+				}
+			);
+		},
 
-        getSyncedCollections(token: string) {
-            return apiFetch<Array<{ id: string; name: string; sync_info: Record<string, unknown> }>>(`${base}/synced-collections`, {
-                headers: { Authorization: `Bearer ${token}` },
-            });
-        },
+		getSyncedCollections(token: string) {
+			return apiFetch<Array<{ id: string; name: string; sync_info: Record<string, unknown> }>>(
+				`${base}/synced-collections`,
+				{
+					headers: { Authorization: `Bearer ${token}` }
+				}
+			);
+		},
 
-        getTokenStatus(token: string, knowledgeId: string) {
-            return apiFetch<TokenStatusResponse>(`${base}/auth/token-status/${knowledgeId}`, {
-                headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-            });
-        },
+		getTokenStatus(token: string, knowledgeId: string) {
+			return apiFetch<TokenStatusResponse>(`${base}/auth/token-status/${knowledgeId}`, {
+				headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }
+			});
+		},
 
-        removeSource(token: string, knowledgeId: string, itemId: string) {
-            return apiFetch<{ message: string; source_name: string; files_removed: number }>(
-                `${base}/sync/${knowledgeId}/sources/remove`,
-                {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-                    body: JSON.stringify({ item_id: itemId }),
-                }
-            );
-        },
+		removeSource(token: string, knowledgeId: string, itemId: string) {
+			return apiFetch<{ message: string; source_name: string; files_removed: number }>(
+				`${base}/sync/${knowledgeId}/sources/remove`,
+				{
+					method: 'POST',
+					headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+					body: JSON.stringify({ item_id: itemId })
+				}
+			);
+		},
 
-        revokeToken(token: string, knowledgeId: string) {
-            return apiFetch<{ revoked: boolean }>(`${base}/auth/revoke/${knowledgeId}`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-            });
-        },
-    };
+		revokeToken(token: string, knowledgeId: string) {
+			return apiFetch<{ revoked: boolean }>(`${base}/auth/revoke/${knowledgeId}`, {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }
+			});
+		}
+	};
 }
 ```
 
 #### 2. Update provider API modules to use the factory
 
 **File**: `src/lib/apis/googledrive/index.ts`
+
 ```typescript
 import { createSyncApi } from '$lib/apis/sync';
-export type { SyncStatusResponse, FailedFile, TokenStatusResponse, SyncErrorType } from '$lib/apis/sync';
+export type {
+	SyncStatusResponse,
+	FailedFile,
+	TokenStatusResponse,
+	SyncErrorType
+} from '$lib/apis/sync';
 
 const api = createSyncApi('google-drive');
 
@@ -1039,8 +1101,17 @@ export const removeSource = api.removeSource;
 export const revokeToken = api.revokeToken;
 
 // Provider-specific type (no drive_id)
-export interface SyncItem { type: 'file' | 'folder'; item_id: string; item_path: string; name: string; }
-export interface SyncItemsRequest { knowledge_id: string; items: SyncItem[]; access_token: string; }
+export interface SyncItem {
+	type: 'file' | 'folder';
+	item_id: string;
+	item_path: string;
+	name: string;
+}
+export interface SyncItemsRequest {
+	knowledge_id: string;
+	items: SyncItem[];
+	access_token: string;
+}
 ```
 
 Same pattern for `src/lib/apis/onedrive/index.ts`, keeping OneDrive-specific types (`drive_id`, `user_token`).
@@ -1048,10 +1119,12 @@ Same pattern for `src/lib/apis/onedrive/index.ts`, keeping OneDrive-specific typ
 ### Success Criteria:
 
 #### Automated Verification:
+
 - [ ] TypeScript compiles without errors
 - [ ] No broken imports in Svelte components
 
 #### Manual Verification:
+
 - [ ] All sync operations still work via the UI for both providers
 
 ---
@@ -1059,42 +1132,52 @@ Same pattern for `src/lib/apis/onedrive/index.ts`, keeping OneDrive-specific typ
 ## Phase 8: Frontend KnowledgeBase.svelte Refactor
 
 ### Overview
+
 Replace the duplicated handler/socket/template code in `KnowledgeBase.svelte` with provider-agnostic functions parameterized by type. This is the biggest frontend change.
 
 ### Changes Required:
 
 #### 1. Create a provider config helper
+
 **File**: Within `KnowledgeBase.svelte` (or a new `src/lib/utils/sync-providers.ts`)
 
 Define a provider config object:
+
 ```typescript
 interface SyncProviderConfig {
-    type: string;                    // "onedrive" | "google_drive"
-    metaKey: string;                 // "onedrive_sync" | "google_drive_sync"
-    eventPrefix: string;             // "onedrive" | "googledrive"
-    fileIdPrefix: string;            // "onedrive-" | "googledrive-"
-    sourceMetaField: string;         // "onedrive" | "google_drive" (for file.meta.source)
-    label: string;                   // "OneDrive" | "Google Drive"
-    api: ReturnType<typeof createSyncApi>;
-    openPicker: () => Promise<{items, accessToken}>;
-    startSyncParam: string;          // "start_onedrive_sync" | "start_google_drive_sync"
+	type: string; // "onedrive" | "google_drive"
+	metaKey: string; // "onedrive_sync" | "google_drive_sync"
+	eventPrefix: string; // "onedrive" | "googledrive"
+	fileIdPrefix: string; // "onedrive-" | "googledrive-"
+	sourceMetaField: string; // "onedrive" | "google_drive" (for file.meta.source)
+	label: string; // "OneDrive" | "Google Drive"
+	api: ReturnType<typeof createSyncApi>;
+	openPicker: () => Promise<{ items; accessToken }>;
+	startSyncParam: string; // "start_onedrive_sync" | "start_google_drive_sync"
 }
 ```
 
 #### 2. Unify state variables
+
 Replace the 12 provider-specific state variables with a single reactive map:
+
 ```typescript
-let syncState: Record<string, {
-    isSyncing: boolean;
-    isCancelling: boolean;
-    syncStatus: SyncStatusResponse | null;
-    bgSyncAuthorized: boolean;
-    bgSyncNeedsReauth: boolean;
-}> = {};
+let syncState: Record<
+	string,
+	{
+		isSyncing: boolean;
+		isCancelling: boolean;
+		syncStatus: SyncStatusResponse | null;
+		bgSyncAuthorized: boolean;
+		bgSyncNeedsReauth: boolean;
+	}
+> = {};
 ```
 
 #### 3. Unify handler functions
+
 Replace the 12 duplicate handler functions with 6 generic ones that take a `providerConfig` parameter:
+
 - `syncHandler(config)` — replaces `oneDriveSyncHandler` + `googleDriveSyncHandler`
 - `resyncHandler(config)` — replaces `oneDriveResyncHandler` + `googleDriveResyncHandler`
 - `pollSyncStatus(config)` — replaces `pollOneDriveSyncStatus` + `pollGoogleDriveSyncStatus`
@@ -1103,29 +1186,37 @@ Replace the 12 duplicate handler functions with 6 generic ones that take a `prov
 - `removeSourceHandler(config, itemId)` — replaces both remove source functions
 
 #### 4. Unify socket event handlers
+
 Replace the 6 duplicate socket handlers with 3 generic ones:
+
 - `handleFileProcessing(providerType, data)` — handles `*:file:processing`
 - `handleFileAdded(providerType, data)` — handles `*:file:added`
 - `handleSyncProgress(providerType, data)` — handles `*:sync:progress`
 
 Register them dynamically based on configured providers:
+
 ```typescript
 for (const config of enabledProviders) {
-    $socket?.on(`${config.eventPrefix}:sync:progress`, (data) => handleSyncProgress(config.type, data));
-    // ... etc
+	$socket?.on(`${config.eventPrefix}:sync:progress`, (data) =>
+		handleSyncProgress(config.type, data)
+	);
+	// ... etc
 }
 ```
 
 #### 5. Simplify template branching
+
 Replace the many `{#if knowledge?.type === 'onedrive'}` / `{:else if knowledge?.type === 'google_drive'}` blocks with a single `{#if activeProvider}` block that uses the provider config.
 
 ### Success Criteria:
 
 #### Automated Verification:
+
 - [ ] TypeScript/Svelte compiles without errors
 - [ ] No broken imports
 
 #### Manual Verification:
+
 - [ ] Full sync flow via UI works for both providers
 - [ ] Socket progress events display correctly
 - [ ] Background sync authorization works for both
@@ -1142,9 +1233,11 @@ Replace the many `{#if knowledge?.type === 'onedrive'}` / `{:else if knowledge?.
 ## Testing Strategy
 
 ### Per-Phase Testing
+
 Each phase preserves existing function signatures where possible, so existing behavior should be maintained. Test after each phase before moving on.
 
 ### Integration Tests
+
 - Start a sync, cancel it, verify state is "cancelled"
 - Start a sync, wait for completion, verify files in KB
 - Revoke OAuth token, verify background sync marks `needs_reauth`
@@ -1152,6 +1245,7 @@ Each phase preserves existing function signatures where possible, so existing be
 - Remove a source from a synced KB
 
 ### Manual Testing Steps
+
 1. Create a new Google Drive KB, pick a folder, sync to completion
 2. Create a new OneDrive KB, pick a folder, sync to completion
 3. Add a file to the source folder, trigger resync, verify only new file synced
@@ -1177,6 +1271,7 @@ Each phase preserves existing function signatures where possible, so existing be
 ## File Change Summary
 
 ### New Files
+
 - `backend/open_webui/services/sync/constants.py`
 - `backend/open_webui/services/sync/events.py`
 - `backend/open_webui/services/sync/scheduler.py`
@@ -1186,6 +1281,7 @@ Each phase preserves existing function signatures where possible, so existing be
 - `src/lib/apis/sync/index.ts`
 
 ### Modified Files (reduced to thin wrappers/subclasses)
+
 - `backend/open_webui/services/google_drive/sync_events.py` (thin wrapper)
 - `backend/open_webui/services/onedrive/sync_events.py` (thin wrapper)
 - `backend/open_webui/services/google_drive/scheduler.py` (instance creation)
@@ -1204,6 +1300,7 @@ Each phase preserves existing function signatures where possible, so existing be
 - `src/lib/components/workspace/Knowledge/KnowledgeBase.svelte` (unified handlers)
 
 ### Unchanged Files
+
 - `backend/open_webui/services/google_drive/auth.py`
 - `backend/open_webui/services/onedrive/auth.py`
 - `backend/open_webui/services/google_drive/drive_client.py`

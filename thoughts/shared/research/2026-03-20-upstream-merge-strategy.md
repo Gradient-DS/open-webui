@@ -4,7 +4,7 @@ researcher: Claude
 git_commit: 773beeb7dbdd32b9beeaa25a10b8ea1231160f92
 branch: merge/upstream-260320
 repository: open-webui
-topic: "Upstream merge strategy: v0.6.43 → v0.8.9"
+topic: 'Upstream merge strategy: v0.6.43 → v0.8.9'
 tags: [research, merge-strategy, upstream, git]
 status: complete
 last_updated: 2026-03-20
@@ -32,12 +32,13 @@ How to merge 1126 upstream commits (v0.6.43 → v0.8.9) into the Gradient-DS for
 - **CRITICAL**: Migration revision ID collision — our `a1b2c3d4e5f6` (soft delete) collides with upstream's `a1b2c3d4e5f6` (skill table)
 
 ### Conflict Breakdown
-| Category | Conflict Files | Difficulty |
-|----------|---------------|------------|
-| Backend Python | 27 | High |
-| Frontend Svelte/TS (non-i18n) | 41 | Medium-High |
-| i18n translation JSONs | 57 | Low (mechanical) |
-| Config/Other | 2 | Low |
+
+| Category                      | Conflict Files | Difficulty       |
+| ----------------------------- | -------------- | ---------------- |
+| Backend Python                | 27             | High             |
+| Frontend Svelte/TS (non-i18n) | 41             | Medium-High      |
+| i18n translation JSONs        | 57             | Low (mechanical) |
+| Config/Other                  | 2              | Low              |
 
 ## Recommended Strategy: Phased Merge with Feature-Branch Replay
 
@@ -57,16 +58,19 @@ Do one `git merge upstream/main` and resolve the 127 conflicts systematically in
 ### Pre-Work (Before Starting)
 
 #### Step 0A: Fix Migration ID Collision
+
 **CRITICAL — do this FIRST before any merge attempt.**
 
 Our migration `a1b2c3d4e5f6_add_soft_delete_columns.py` has the same revision ID as upstream's `a1b2c3d4e5f6_add_skill_table.py`. This will break Alembic.
 
 **Action**: On our branch (before merging), create a new commit that:
+
 1. Renames our migration file to use a new unique ID (e.g., `b7c8d9e0f1a2_add_soft_delete_columns.py`)
 2. Updates the `revision` inside the file
 3. Updates any migration that references it as `down_revision`
 
 #### Step 0B: Create a Safety Branch
+
 ```bash
 git checkout main
 git checkout -b main-backup-pre-merge  # Safety net
@@ -74,18 +78,19 @@ git checkout merge/upstream-260320     # Work branch
 ```
 
 #### Step 0C: Understand Our 8 Custom Features
+
 Document which files each feature touches (for conflict resolution reference):
 
-| Feature | Key Modified Upstream Files |
-|---------|---------------------------|
-| **Typed KBs** | `models/knowledge.py`, `routers/knowledge.py` |
-| **OneDrive** | `main.py`, `config.py`, KB components |
-| **Email Invites** | `main.py`, `config.py`, `routers/configs.py`, `Users.svelte` |
-| **GDPR Archival** | `main.py`, `config.py`, `routers/users.py` |
-| **Acceptance Modal** | `(app)/+layout.svelte`, `admin/Settings.svelte` |
-| **Feature Flags** | `Sidebar.svelte`, `MessageInput.svelte`, `config.py` |
-| **Feedback Config** | `config.py`, evaluations components |
-| **External Pipeline** | `routers/retrieval.py`, `config.py` |
+| Feature               | Key Modified Upstream Files                                  |
+| --------------------- | ------------------------------------------------------------ |
+| **Typed KBs**         | `models/knowledge.py`, `routers/knowledge.py`                |
+| **OneDrive**          | `main.py`, `config.py`, KB components                        |
+| **Email Invites**     | `main.py`, `config.py`, `routers/configs.py`, `Users.svelte` |
+| **GDPR Archival**     | `main.py`, `config.py`, `routers/users.py`                   |
+| **Acceptance Modal**  | `(app)/+layout.svelte`, `admin/Settings.svelte`              |
+| **Feature Flags**     | `Sidebar.svelte`, `MessageInput.svelte`, `config.py`         |
+| **Feedback Config**   | `config.py`, evaluations components                          |
+| **External Pipeline** | `routers/retrieval.py`, `config.py`                          |
 
 ---
 
@@ -99,9 +104,11 @@ git merge upstream/main
 Immediately categorize the conflicts into resolution batches:
 
 #### Batch 1A: Trivial / Auto-resolvable (57 files) — ~1 hour
+
 **i18n translation files** — All 57 `translation.json` files. These are just key additions on both sides in alphabetical JSON. Resolution: accept both (upstream translations + our custom keys).
 
 Strategy:
+
 ```bash
 # For each i18n file: accept upstream version, then re-add our custom keys
 git checkout --theirs src/lib/i18n/locales/*/translation.json
@@ -109,6 +116,7 @@ git checkout --theirs src/lib/i18n/locales/*/translation.json
 ```
 
 #### Batch 1B: Config Files (2 files) — ~30 min
+
 - `package.json` / `package-lock.json` — Accept upstream versions, verify no custom deps needed
 
 ---
@@ -118,6 +126,7 @@ git checkout --theirs src/lib/i18n/locales/*/translation.json
 Resolve in dependency order:
 
 #### 2A: Foundation files first
+
 1. **`backend/open_webui/config.py`** — Accept upstream changes, then re-add our config blocks (feature flags, OneDrive, email, acceptance, feedback, external pipeline, weaviate, integrations). Our additions are mostly appended blocks — low overlap risk.
 
 2. **`backend/open_webui/env.py`** — Minor, just re-add `CLIENT_NAME`.
@@ -129,10 +138,12 @@ Resolve in dependency order:
    - OneDrive OAuth callback
 
 #### 2B: Models (6 files)
+
 - **`models/knowledge.py`** — Re-add `type` column, `deleted_at` column, `soft_delete_by_id` method on top of upstream's version
 - `models/chats.py`, `models/files.py`, `models/channels.py`, `models/messages.py`, `models/prompts.py`, `models/tags.py` — Likely upstream-only changes; verify we have no modifications, accept theirs
 
 #### 2C: Routers (12 files)
+
 - **`routers/knowledge.py`** — HIGH RISK. Re-add type validation, non-local file operation blocking, soft delete. Upstream likely restructured this significantly (KB overhaul in v0.6.41-v0.8.x).
 - **`routers/retrieval.py`** — Re-add external pipeline integration
 - **`routers/users.py`** — Re-add archive-before-delete logic
@@ -141,6 +152,7 @@ Resolve in dependency order:
 - Others (`audio.py`, `chats.py`, `files.py`, `models.py`, `ollama.py`, `openai.py`, `prompts.py`, `tools.py`) — Likely accept upstream, verify no custom changes
 
 #### 2D: Other backend
+
 - **`retrieval/vector/dbs/weaviate.py`** — BOTH sides modified this. Compare carefully.
 - **`utils/middleware.py`**, **`utils/models.py`** — Check for custom modifications
 - **`storage/provider.py`** — Likely accept upstream
@@ -150,11 +162,13 @@ Resolve in dependency order:
 ### Phase 3: Frontend Core (Day 2-3) — ~41 non-i18n files
 
 #### 3A: Stores and Utils (3 files)
+
 - `src/lib/stores/index.ts` — Re-add any custom stores (acceptance modal state, feature flags)
 - `src/lib/utils/index.ts` — Check for custom additions
 - `src/lib/utils/marked/citation-extension.ts` — Re-add citation improvements
 
 #### 3B: Admin components (10 files)
+
 - **`admin/Settings.svelte`** — Re-add Acceptance/Email/Integrations tabs + feature flag visibility
 - **`admin/Users.svelte`** — Re-add Invites tab
 - **`admin/Users/UserList.svelte`** — Check for invite-related changes
@@ -163,23 +177,27 @@ Resolve in dependency order:
 - **`admin/Evaluations/Feedbacks.svelte`** — Re-add feedback customization
 
 #### 3C: Chat components (15 files)
+
 - **`chat/MessageInput.svelte`** — Re-add `isFeatureEnabled('input_menu')` guard
 - **`chat/Chat.svelte`** — Check for custom changes
 - **`chat/Messages/RateComment.svelte`** — Re-add feedback tag customization
 - Others — Mostly accept upstream, verify no custom logic
 
 #### 3D: Knowledge/Workspace components (7 files)
+
 - **`workspace/Knowledge.svelte`** — Re-add type filter UI
 - **`workspace/Knowledge/CreateKnowledgeBase.svelte`** — Re-add type handling + OneDrive redirect
 - **`workspace/Knowledge/KnowledgeBase.svelte`** — Re-add OneDrive sync integration
 - Others — Check and merge
 
 #### 3E: Layout and Routes (5 files)
+
 - **`(app)/+layout.svelte`** — Re-add AcceptanceModal
 - **`layout/Sidebar.svelte`** — May auto-merge (if upstream didn't touch our feature flag areas)
 - Route layouts — Check for custom changes
 
 #### 3F: API clients (2 files)
+
 - `apis/knowledge/index.ts` — Re-add type parameter support
 - `apis/evaluations/index.ts` — Re-add feedback config API calls
 
@@ -211,25 +229,25 @@ After resolving all code conflicts:
 
 ## Key Risks and Mitigations
 
-| Risk | Impact | Mitigation |
-|------|--------|------------|
-| Migration ID collision (`a1b2c3d4e5f6`) | Alembic breaks completely | Fix BEFORE merge (Step 0A) |
-| `config.py` is 121KB | Easy to miss additions | Diff our additions separately, re-apply as blocks |
-| Knowledge router restructured upstream | Our type/soft-delete logic may not fit | Read upstream's new knowledge router fully before merging |
-| Upstream added their own `Integrations.svelte` | Name collision with our component | May need to rename ours or merge functionality |
-| 57 i18n files | Tedious but not hard | Script the merge: accept theirs + append our keys |
+| Risk                                           | Impact                                 | Mitigation                                                |
+| ---------------------------------------------- | -------------------------------------- | --------------------------------------------------------- |
+| Migration ID collision (`a1b2c3d4e5f6`)        | Alembic breaks completely              | Fix BEFORE merge (Step 0A)                                |
+| `config.py` is 121KB                           | Easy to miss additions                 | Diff our additions separately, re-apply as blocks         |
+| Knowledge router restructured upstream         | Our type/soft-delete logic may not fit | Read upstream's new knowledge router fully before merging |
+| Upstream added their own `Integrations.svelte` | Name collision with our component      | May need to rename ours or merge functionality            |
+| 57 i18n files                                  | Tedious but not hard                   | Script the merge: accept theirs + append our keys         |
 
 ## Time Estimate
 
-| Phase | Estimated Effort |
-|-------|-----------------|
-| Pre-work (migration fix, safety branch) | 1-2 hours |
-| Phase 1: Trivial (i18n + config) | 1-2 hours |
-| Phase 2: Backend (27 files) | 4-6 hours |
-| Phase 3: Frontend (41 files) | 4-6 hours |
-| Phase 4: Migrations | 2-3 hours |
-| Phase 5: Verification | 2-3 hours |
-| **Total** | **~2-3 working days** |
+| Phase                                   | Estimated Effort      |
+| --------------------------------------- | --------------------- |
+| Pre-work (migration fix, safety branch) | 1-2 hours             |
+| Phase 1: Trivial (i18n + config)        | 1-2 hours             |
+| Phase 2: Backend (27 files)             | 4-6 hours             |
+| Phase 3: Frontend (41 files)            | 4-6 hours             |
+| Phase 4: Migrations                     | 2-3 hours             |
+| Phase 5: Verification                   | 2-3 hours             |
+| **Total**                               | **~2-3 working days** |
 
 ## Code References
 

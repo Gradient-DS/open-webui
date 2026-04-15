@@ -4,7 +4,7 @@ researcher: claude
 git_commit: 5d18f2c4d
 branch: feat/sync-improvements
 repository: open-webui
-topic: "Making email invite subject/heading fully configurable via admin panel"
+topic: 'Making email invite subject/heading fully configurable via admin panel'
 tags: [research, codebase, email, configuration, admin-panel, invites]
 status: complete
 last_updated: 2026-02-17
@@ -52,6 +52,7 @@ _STRINGS = {
 - **Without `CLIENT_NAME`**: Subject = `"You've been invited to soev.ai"`
 
 `CLIENT_NAME` is a plain env var at `env.py:94`:
+
 ```python
 CLIENT_NAME = os.environ.get("CLIENT_NAME", "")
 ```
@@ -70,14 +71,14 @@ Add two new `PersistentConfig` fields for custom subject and heading templates, 
 
 #### Files to Change
 
-| # | File | Change | Effort |
-|---|------|--------|--------|
-| 1 | `backend/open_webui/config.py` | Add `EMAIL_INVITE_SUBJECT` and `EMAIL_INVITE_HEADING` PersistentConfig vars | Small |
-| 2 | `backend/open_webui/main.py` | Import + mount new configs on `app.state.config` | Small |
-| 3 | `backend/open_webui/routers/configs.py` | Add fields to `EmailConfigForm`, update GET/POST handlers | Small |
-| 4 | `backend/open_webui/services/email/graph_mail_client.py` | Accept optional custom templates, fall back to `_STRINGS` | Medium |
-| 5 | `backend/open_webui/routers/invites.py` | Pass custom templates from config to render functions | Small |
-| 6 | `src/lib/components/admin/Settings/Email.svelte` | Add input fields for custom subject/heading | Small |
+| #   | File                                                     | Change                                                                      | Effort |
+| --- | -------------------------------------------------------- | --------------------------------------------------------------------------- | ------ |
+| 1   | `backend/open_webui/config.py`                           | Add `EMAIL_INVITE_SUBJECT` and `EMAIL_INVITE_HEADING` PersistentConfig vars | Small  |
+| 2   | `backend/open_webui/main.py`                             | Import + mount new configs on `app.state.config`                            | Small  |
+| 3   | `backend/open_webui/routers/configs.py`                  | Add fields to `EmailConfigForm`, update GET/POST handlers                   | Small  |
+| 4   | `backend/open_webui/services/email/graph_mail_client.py` | Accept optional custom templates, fall back to `_STRINGS`                   | Medium |
+| 5   | `backend/open_webui/routers/invites.py`                  | Pass custom templates from config to render functions                       | Small  |
+| 6   | `src/lib/components/admin/Settings/Email.svelte`         | Add input fields for custom subject/heading                                 | Small  |
 
 #### Detailed Changes
 
@@ -111,6 +112,7 @@ app.state.config.EMAIL_INVITE_HEADING = EMAIL_INVITE_HEADING
 **3. `configs.py` — `EmailConfigForm`**
 
 Add optional fields:
+
 ```python
 class EmailConfigForm(BaseModel):
     # ... existing fields ...
@@ -159,6 +161,7 @@ subject=render_invite_subject(
 **6. `Email.svelte` — New UI fields**
 
 Add a new "Email Content" section (between Sender and Invite Settings) with two text inputs:
+
 - "Invite Subject" — placeholder showing the default, e.g., `"You've been invited to soev.ai environment of {client_name}"`
 - "Invite Heading" — same placeholder logic
 - Help text: `"Leave empty for default. Use {client_name} and {app_name} as placeholders."`
@@ -166,6 +169,7 @@ Add a new "Email Content" section (between Sender and Invite Settings) with two 
 ### Option B: Full Template Customization (More Complex)
 
 Make ALL email text configurable (subject, heading, body, button text, footer). This would require:
+
 - 5+ additional `PersistentConfig` fields
 - More complex admin UI (possibly a textarea for HTML body)
 - Template variable validation/sanitization (security concern with arbitrary HTML)
@@ -183,26 +187,30 @@ Just convert `CLIENT_NAME` from a plain env var to a `PersistentConfig` so it's 
 
 For custom templates, support these variables:
 
-| Variable | Value | Example |
-|----------|-------|---------|
-| `{client_name}` | `CLIENT_NAME` env var | `"Acme Corp"` |
-| `{app_name}` | `APP_NAME` constant | `"soev.ai"` |
-| `{invited_by_name}` | Name of inviting admin (heading only) | `"Jane Doe"` |
+| Variable            | Value                                 | Example       |
+| ------------------- | ------------------------------------- | ------------- |
+| `{client_name}`     | `CLIENT_NAME` env var                 | `"Acme Corp"` |
+| `{app_name}`        | `APP_NAME` constant                   | `"soev.ai"`   |
+| `{invited_by_name}` | Name of inviting admin (heading only) | `"Jane Doe"`  |
 
 Use Python's `str.format()` with `**kwargs` for safe interpolation. Unknown variables will raise `KeyError` — catch and fall back to the built-in template.
 
 ## Considerations
 
 ### i18n Impact
+
 Custom templates override locale-based strings. If an admin sets a custom Dutch subject, it will be used for ALL locales. This is acceptable for single-tenant deployments where the org language is known. For multi-locale support, you'd need per-locale custom templates (significantly more complex — not recommended).
 
 ### Security
+
 Subject and heading are plain text (heading goes inside an `<h2>` tag in the HTML template). Since these are admin-only settings, XSS risk is minimal — but the heading should still be HTML-escaped when inserted into the template to prevent accidental HTML injection.
 
 ### Migration
+
 No database migration needed — `PersistentConfig` stores values in the existing `config` table as JSON. New entries are created on first access with the default value.
 
 ### Helm Chart
+
 Optionally add `emailInviteSubject` and `emailInviteHeading` to `helm/open-webui-tenant/values.yaml` and map them in the configmap template.
 
 ## Code References

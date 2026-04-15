@@ -4,8 +4,20 @@ researcher: Claude
 git_commit: c0db5407764a3c167d1c971ee01b26284e7c2e28
 branch: dev
 repository: open-webui
-topic: "External API: Chat with Knowledge Bases — Streaming Responses for Third-Party UI Consumers"
-tags: [research, codebase, external-api, chat, streaming, sse, knowledge-base, rag, integrations, agents]
+topic: 'External API: Chat with Knowledge Bases — Streaming Responses for Third-Party UI Consumers'
+tags:
+  [
+    research,
+    codebase,
+    external-api,
+    chat,
+    streaming,
+    sse,
+    knowledge-base,
+    rag,
+    integrations,
+    agents
+  ]
 status: complete
 last_updated: 2026-03-26
 last_updated_by: Claude
@@ -29,12 +41,12 @@ How can we expose our API to external parties so they can: (1) upload documents 
 
 **Estimated total effort: Medium (2-3 weeks)**, broken into phases:
 
-| Phase | Effort | Description |
-|-------|--------|-------------|
-| Phase 1: Stateless query endpoint | ~1 week | New `/api/v1/integrations/query` endpoint that accepts a KB + question, returns SSE stream |
-| Phase 2: Rich SSE events | ~3-4 days | Pipe status/citation/source events into the SSE stream (not just token deltas) |
-| Phase 3: Documentation & SDK helpers | ~2-3 days | OpenAPI docs, example clients (Python, JS), auth guide |
-| Phase 4: Agent support | ~TBD | When custom soev.ai agents land, expose agent selection in the query endpoint |
+| Phase                                | Effort    | Description                                                                                |
+| ------------------------------------ | --------- | ------------------------------------------------------------------------------------------ |
+| Phase 1: Stateless query endpoint    | ~1 week   | New `/api/v1/integrations/query` endpoint that accepts a KB + question, returns SSE stream |
+| Phase 2: Rich SSE events             | ~3-4 days | Pipe status/citation/source events into the SSE stream (not just token deltas)             |
+| Phase 3: Documentation & SDK helpers | ~2-3 days | OpenAPI docs, example clients (Python, JS), auth guide                                     |
+| Phase 4: Agent support               | ~TBD      | When custom soev.ai agents land, expose agent selection in the query endpoint              |
 
 ## Detailed Findings
 
@@ -43,6 +55,7 @@ How can we expose our API to external parties so they can: (1) upload documents 
 #### 1. Document Upload (Complete ✅)
 
 The push integration at `POST /api/v1/integrations/ingest` fully handles:
+
 - Creating/finding knowledge bases by `source_id`
 - Uploading documents in three formats: `parsed_text`, `chunked_text`, `full_documents`
 - Embedding and storing in the vector DB
@@ -68,6 +81,7 @@ The push integration at `POST /api/v1/integrations/ingest` fully handles:
 **Path B — SSE passthrough** (API consumers): When any of those three are missing, `process_chat()` runs synchronously and returns the response directly. For streaming, this returns a `StreamingResponse` with `text/event-stream` content type at `middleware.py:4851`.
 
 **Path B is what external parties need**, but it currently has limitations:
+
 - Status events (RAG search progress, query generation) are only emitted via `event_emitter` (WebSocket)
 - Source/citation events only go through WebSocket
 - The SSE stream only contains the raw LLM token deltas, not the rich events
@@ -76,6 +90,7 @@ The push integration at `POST /api/v1/integrations/ingest` fully handles:
 #### 4. RAG Context Injection (Complete ✅)
 
 The middleware pipeline at `middleware.py:2146` automatically:
+
 - Collects knowledge base files from `form_data.files` or model config
 - Generates retrieval queries from the conversation
 - Runs vector search (pure or hybrid with BM25 + reranking)
@@ -110,6 +125,7 @@ class QueryResponse(BaseModel):
 ```
 
 **Implementation approach:**
+
 1. Resolve `collection_source_id` → knowledge base ID using existing `_find_kb_by_source_id()`
 2. Build the internal `form_data` with:
    - `messages`: `[{"role": "user", "content": query}]` (or load conversation history if `conversation_id` provided)
@@ -150,6 +166,7 @@ data: {"usage": {"prompt_tokens": 450, "completion_tokens": 120}, "conversation_
 **Current gap:** In `streaming_chat_response_handler()` at `middleware.py:3267`, the SSE passthrough path (Path B, line 4851) only wraps the raw LLM stream. Status events, source events, and citation events are emitted via `event_emitter()` which only targets Socket.IO.
 
 **Fix approach:** Create an SSE-compatible event emitter that:
+
 1. Wraps the same events that `event_emitter()` sends via Socket.IO
 2. Prepends them to the SSE stream as typed events (`event: status`, `event: sources`, etc.)
 3. Falls through to the LLM token stream for `delta` events
@@ -211,45 +228,45 @@ External Party                        Open WebUI
 
 ### Comparison: Our Approach vs Alternatives
 
-| Approach | Pros | Cons |
-|----------|------|------|
-| **New `/integrations/query` endpoint** (recommended) | Clean contract, scoped to provider's KBs, simple for consumers | New endpoint to maintain |
-| **Expose existing `/api/chat/completions`** | Zero new code | Complex payload, requires chat session management, no KB scoping |
-| **OpenAI-compatible wrapper** | Familiar to developers | Doesn't map well to RAG + sources, loses rich events |
-| **Anthropic Messages API** (`/api/v1/messages`) | Already exists in codebase | Anthropic-specific format, limited adoption |
+| Approach                                             | Pros                                                           | Cons                                                             |
+| ---------------------------------------------------- | -------------------------------------------------------------- | ---------------------------------------------------------------- |
+| **New `/integrations/query` endpoint** (recommended) | Clean contract, scoped to provider's KBs, simple for consumers | New endpoint to maintain                                         |
+| **Expose existing `/api/chat/completions`**          | Zero new code                                                  | Complex payload, requires chat session management, no KB scoping |
+| **OpenAI-compatible wrapper**                        | Familiar to developers                                         | Doesn't map well to RAG + sources, loses rich events             |
+| **Anthropic Messages API** (`/api/v1/messages`)      | Already exists in codebase                                     | Anthropic-specific format, limited adoption                      |
 
 ### Effort Breakdown
 
 #### Phase 1: Stateless Query Endpoint (~1 week)
 
-| Task | Effort | Details |
-|------|--------|---------|
-| `QueryRequest`/`QueryResponse` models | 2h | Pydantic models with validation |
-| Query endpoint implementation | 1d | KB resolution, message building, `process_chat()` call |
-| Conversation management | 1d | Create/retrieve chat for multi-turn, store messages |
-| SSE stream wrapping | 1d | Async generator yielding SSE-formatted events |
-| Provider-scoped KB access check | 2h | Verify KB type matches provider |
-| Error handling | 4h | Structured error events in SSE, graceful failures |
-| Unit tests | 1d | Endpoint tests, auth tests, streaming tests |
+| Task                                  | Effort | Details                                                |
+| ------------------------------------- | ------ | ------------------------------------------------------ |
+| `QueryRequest`/`QueryResponse` models | 2h     | Pydantic models with validation                        |
+| Query endpoint implementation         | 1d     | KB resolution, message building, `process_chat()` call |
+| Conversation management               | 1d     | Create/retrieve chat for multi-turn, store messages    |
+| SSE stream wrapping                   | 1d     | Async generator yielding SSE-formatted events          |
+| Provider-scoped KB access check       | 2h     | Verify KB type matches provider                        |
+| Error handling                        | 4h     | Structured error events in SSE, graceful failures      |
+| Unit tests                            | 1d     | Endpoint tests, auth tests, streaming tests            |
 
 #### Phase 2: Rich SSE Events (~3-4 days)
 
-| Task | Effort | Details |
-|------|--------|---------|
-| SSE event emitter | 1d | Alternative to WebSocket `event_emitter` |
-| Wire status events | 4h | RAG progress, query generation |
-| Wire source/citation events | 4h | Retrieved sources with snippets |
-| Wire error events | 2h | LLM errors, timeout, model unavailable |
-| Integration tests | 1d | End-to-end SSE stream validation |
+| Task                        | Effort | Details                                  |
+| --------------------------- | ------ | ---------------------------------------- |
+| SSE event emitter           | 1d     | Alternative to WebSocket `event_emitter` |
+| Wire status events          | 4h     | RAG progress, query generation           |
+| Wire source/citation events | 4h     | Retrieved sources with snippets          |
+| Wire error events           | 2h     | LLM errors, timeout, model unavailable   |
+| Integration tests           | 1d     | End-to-end SSE stream validation         |
 
 #### Phase 3: Documentation (~2-3 days)
 
-| Task | Effort | Details |
-|------|--------|---------|
-| API documentation | 4h | Endpoint docs with examples |
-| Python example client | 4h | Using httpx + SSE |
-| JS example client | 4h | Using fetch + ReadableStream |
-| Auth & setup guide | 2h | Service account, API key, config |
+| Task                  | Effort | Details                          |
+| --------------------- | ------ | -------------------------------- |
+| API documentation     | 4h     | Endpoint docs with examples      |
+| Python example client | 4h     | Using httpx + SSE                |
+| JS example client     | 4h     | Using fetch + ReadableStream     |
+| Auth & setup guide    | 2h     | Service account, API key, config |
 
 **Total: ~2-3 weeks**, assuming one developer.
 
@@ -262,11 +279,13 @@ External Party                        Open WebUI
 3. **Provider scoping** to ensure KB access control
 
 **Risks:**
+
 - The `process_chat_payload` middleware is large (~600 lines) and tightly coupled to the frontend's expectations. The query endpoint needs to construct `form_data` that satisfies all the middleware's assumptions.
 - SSE error handling: if the LLM stream fails mid-response, we need to send a clean error event before closing the stream.
 - Multi-turn conversation state: the existing Chat model stores a lot of metadata (messages, tags, output items). The external API needs a lighter interface that doesn't expose internal structures.
 
 **Mitigations:**
+
 - The middleware is well-documented via prior research. The critical fields are known (see message format in chat research).
 - Error events can reuse the existing `chat:message:error` event type.
 - The Chat model can be reused as-is; we just don't expose its internal fields in the API response.

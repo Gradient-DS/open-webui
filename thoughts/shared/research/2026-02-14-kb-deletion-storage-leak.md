@@ -4,7 +4,7 @@ researcher: claude
 git_commit: 367bafc2907ce2ca9c9d8d3a783d09dafd8ba916
 branch: feat/sync-improvements
 repository: open-webui
-topic: "KB deletion does not clean up files from S3/storage"
+topic: 'KB deletion does not clean up files from S3/storage'
 tags: [research, codebase, knowledge, files, storage, s3, deletion, bug]
 status: complete
 last_updated: 2026-02-14
@@ -36,6 +36,7 @@ A `DeletionService` exists that does proper full cleanup (including `Storage.del
 **KB deletion endpoint** (`backend/open_webui/routers/knowledge.py:712-794`):
 
 The orphaned file cleanup loop at lines 780-792 does:
+
 1. Delete the file's vector collection (`file-{id}`) from vector DB
 2. Delete the file's DB record via `Files.delete_file_by_id(file_id)`
 
@@ -50,32 +51,34 @@ The `POST /{id}/file/remove` endpoint has the same issue at lines 666-678 (for l
 **Single chat deletion** (`backend/open_webui/routers/chats.py:694-732`):
 
 Calls `DeletionService.delete_chat(id, user.id)` which:
+
 1. Gets all files via `ChatFile` junction table
 2. Calls `DeletionService.delete_file()` for each file
 3. `DeletionService.delete_file()` at `service.py:105-110` calls `Storage.delete_file(file.path)` — **this is the key difference**
 
 ### Where `Storage.delete_file()` IS Called
 
-| Path | Called? | Location |
-|------|---------|----------|
-| `DELETE /chats/{id}` (single chat) | YES | via `DeletionService.delete_file()` → `service.py:107` |
-| `DELETE /files/{id}` (standalone file) | YES | `files.py:871` |
-| `DELETE /files/all` (all files) | YES | via `Storage.delete_all_files()` at `files.py:488` |
-| `DeletionService.delete_user()` | YES | via `DeletionService.delete_knowledge()` → `DeletionService.delete_file()` |
+| Path                                   | Called? | Location                                                                   |
+| -------------------------------------- | ------- | -------------------------------------------------------------------------- |
+| `DELETE /chats/{id}` (single chat)     | YES     | via `DeletionService.delete_file()` → `service.py:107`                     |
+| `DELETE /files/{id}` (standalone file) | YES     | `files.py:871`                                                             |
+| `DELETE /files/all` (all files)        | YES     | via `Storage.delete_all_files()` at `files.py:488`                         |
+| `DeletionService.delete_user()`        | YES     | via `DeletionService.delete_knowledge()` → `DeletionService.delete_file()` |
 
 ### Where `Storage.delete_file()` is NOT Called (Bugs)
 
-| Path | Location | Impact |
-|------|----------|--------|
-| `DELETE /knowledge/{id}/delete` | `knowledge.py:780-792` | **S3 files leaked on KB deletion** |
-| `POST /knowledge/{id}/file/remove` | `knowledge.py:666-678` | **S3 files leaked on file removal from KB** |
-| `POST /knowledge/{id}/file/remove` (orphan) | `knowledge.py:693` | **S3 files leaked on orphan cleanup** |
-| `DELETE /chats/` (delete ALL chats) | `chats.py:212` | **S3 files leaked on bulk chat deletion** (calls `Chats.delete_chats_by_user_id()` directly, bypasses DeletionService) |
-| OneDrive sync file removal | `sync_worker.py:526, 880` | **S3 files leaked during OneDrive sync updates** |
+| Path                                        | Location                  | Impact                                                                                                                 |
+| ------------------------------------------- | ------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| `DELETE /knowledge/{id}/delete`             | `knowledge.py:780-792`    | **S3 files leaked on KB deletion**                                                                                     |
+| `POST /knowledge/{id}/file/remove`          | `knowledge.py:666-678`    | **S3 files leaked on file removal from KB**                                                                            |
+| `POST /knowledge/{id}/file/remove` (orphan) | `knowledge.py:693`        | **S3 files leaked on orphan cleanup**                                                                                  |
+| `DELETE /chats/` (delete ALL chats)         | `chats.py:212`            | **S3 files leaked on bulk chat deletion** (calls `Chats.delete_chats_by_user_id()` directly, bypasses DeletionService) |
+| OneDrive sync file removal                  | `sync_worker.py:526, 880` | **S3 files leaked during OneDrive sync updates**                                                                       |
 
 ### The DeletionService Already Has the Right Logic
 
 `DeletionService.delete_knowledge()` at `service.py:186-272` does proper cleanup:
+
 - Delegates to `DeletionService.delete_file()` which calls `Storage.delete_file()`
 - But this method is **only** called from `DeletionService.delete_user()` (line 357)
 - The KB delete endpoint does NOT use it
@@ -97,6 +100,7 @@ for file_id in kb_file_ids:
 ```
 
 Same pattern needed in:
+
 - `knowledge.py:666-678` (file removal with `delete_file=True`)
 - `knowledge.py:681-693` (orphan cleanup for non-local KBs)
 

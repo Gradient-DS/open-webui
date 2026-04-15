@@ -104,7 +104,9 @@
 						</div>
 					</div>
 					<Tooltip
-						content={$i18n.t("Use {{name}} for the user's display name. Leave empty to use the default greeting.")}
+						content={$i18n.t(
+							"Use {{name}} for the user's display name. Leave empty to use the default greeting."
+						)}
 						placement="top-start"
 					>
 						<input

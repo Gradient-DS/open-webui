@@ -12,20 +12,24 @@ Also bump the Open WebUI pod CPU limit from 1 to 2 cores, which increases the th
 **Branch:** `feat/vink` @ `1d5f98208`
 
 The `sync()` method (line 1063) processes files in a two-phase pipeline:
+
 1. **Phase 1 — Download** (under `download_semaphore`, default 9 on 1-CPU)
 2. **Phase 2 — Extract + Embed** (under `process_semaphore`, default 3 on 1-CPU)
 
 Files are grouped into batches of `max_download_concurrent + max_process_concurrent` (12 on 1-CPU) and processed via `asyncio.gather`. The batch boundary at line 1371 means:
+
 - Within a batch: good pipeline overlap via semaphores
 - Between batches: hard wait — batch N+1 doesn't start until every file in batch N finishes
 
 **Concurrency on 1-CPU pod (current):**
+
 - `thread_pool_size` = min(32, 1+4) = 5
 - `max_process_concurrent` = min(10, 3) = **3**
 - `max_download_concurrent` = 3 × 3 = **9**
 - `batch_size` = 12
 
 **Concurrency on 2-CPU pod (after change):**
+
 - `thread_pool_size` = min(32, 2+4) = 6
 - `max_process_concurrent` = min(10, 4) = **4**
 - `max_download_concurrent` = 4 × 3 = **12**
@@ -42,6 +46,7 @@ This applies to both OneDrive and Google Drive — both inherit from `BaseSyncWo
 - All existing features (cancellation, timeouts, progress reporting, error handling) preserved
 
 ### How to verify:
+
 1. Sync a KB with 50+ files — observe continuous processing in logs (no "BATCH X/Y START/END" gaps)
 2. Compare total sync time against pre-change baseline
 3. Cancellation still works mid-sync
@@ -61,6 +66,7 @@ Replace the batch loop with a single `asyncio.gather` over all files. Keep every
 ## Phase 1: Remove Batch Loop
 
 ### Overview
+
 Replace the batch-for-loop with a single gather. Remove batch logging since it no longer applies.
 
 ### Changes Required:
@@ -70,6 +76,7 @@ Replace the batch-for-loop with a single gather. Remove batch logging since it n
 **Replace lines 1346–1391** (the batch loop and result collection):
 
 **Current code:**
+
 ```python
 # Process files in batches to avoid overwhelming the event loop
 # and thread pool. Each batch runs with the existing semaphores
@@ -119,6 +126,7 @@ for batch_start in range(0, len(all_files_to_process), batch_size):
 ```
 
 **New code:**
+
 ```python
 log.info(
     f'Starting pipeline processing of {len(all_files_to_process)} files '
@@ -147,9 +155,11 @@ for result in all_results:
 ```
 
 Also remove the now-unused import at line 1189:
+
 ```python
 from open_webui.config import FILE_DOWNLOAD_CONCURRENCY_MULTIPLIER
 ```
+
 And the `batch_size` calculation that used it. The `max_download_concurrent` calculation changes to use the multiplier directly:
 
 ```python
@@ -159,7 +169,9 @@ max_download_concurrent = max_process_concurrent * 3  # download slots per proce
 Wait — `FILE_DOWNLOAD_CONCURRENCY_MULTIPLIER` is still used for `max_download_concurrent`. Keep the import, just remove `batch_size`.
 
 #### 2. Remove `batch_size` variable
+
 The only use of `batch_size` was the batch loop. Remove the line:
+
 ```python
 batch_size = max_download_concurrent + max_process_concurrent
 ```
@@ -167,10 +179,12 @@ batch_size = max_download_concurrent + max_process_concurrent
 ### Success Criteria:
 
 #### Automated Verification:
+
 - [ ] Backend starts without errors: `open-webui dev`
 - [ ] No Python syntax errors: `python -m py_compile backend/open_webui/services/sync/base_worker.py`
 
 #### Manual Verification:
+
 - [ ] Sync a KB with 20+ files — logs show continuous processing, no batch boundaries
 - [ ] Sync completes successfully with correct file counts
 - [ ] Cancel a sync mid-progress — cancellation still works
@@ -181,6 +195,7 @@ batch_size = max_download_concurrent + max_process_concurrent
 ## Phase 2: Bump Pod CPU to 2 Cores
 
 ### Overview
+
 Increase the Open WebUI pod CPU limit from 1000m to 2000m and request from 200m to 500m. This doubles the thread pool size (5→6), allowing 4 concurrent process tasks instead of 3.
 
 ### Changes Required:
@@ -188,22 +203,25 @@ Increase the Open WebUI pod CPU limit from 1000m to 2000m and request from 200m 
 #### 1. `helm/open-webui-tenant/values.yaml`
 
 **Change** (lines 74-80):
+
 ```yaml
-  resources:
-    requests:
-      memory: "512Mi"
-      cpu: "500m"
-    limits:
-      memory: "2Gi"
-      cpu: "2000m"
+resources:
+  requests:
+    memory: '512Mi'
+    cpu: '500m'
+  limits:
+    memory: '2Gi'
+    cpu: '2000m'
 ```
 
 ### Success Criteria:
 
 #### Automated Verification:
+
 - [ ] `helm template` renders without errors
 
 #### Manual Verification:
+
 - [ ] Pod schedules and starts on the cluster with new limits
 - [ ] Sync performance improves (measure sync time for a known KB)
 
@@ -212,12 +230,14 @@ Increase the Open WebUI pod CPU limit from 1000m to 2000m and request from 200m 
 ## Testing Strategy
 
 ### Before/After Comparison:
+
 1. Pick a KB with 30-50 files
 2. Trigger a full re-sync (clear delta links) with current code — note total time
 3. Deploy changes, repeat — note total time
 4. Expect improvement proportional to the batch tail-latency elimination
 
 ### Edge Cases:
+
 - KB with 1 file (no batching effect, should still work)
 - KB at file limit (250) — ensure all files still process
 - Mixed fast/slow files — verify slow files don't block fast ones

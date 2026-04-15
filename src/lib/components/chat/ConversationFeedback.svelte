@@ -22,12 +22,12 @@
 
 	$: scaleMax = $config?.features?.conversation_feedback_scale_max ?? 5;
 	$: header =
-		$config?.features?.conversation_feedback_header ||
-		$i18n.t('How was this conversation?');
+		$config?.features?.conversation_feedback_header || $i18n.t('How was this conversation?');
 	$: placeholder =
 		$config?.features?.conversation_feedback_placeholder ||
 		$i18n.t('Any thoughts on the overall conversation?');
-	$: enabled = ($config?.features?.enable_conversation_feedback ?? false) && assistantMessageCount >= 2;
+	$: enabled =
+		($config?.features?.enable_conversation_feedback ?? false) && assistantMessageCount >= 2;
 
 	// Load existing conversation feedback when chatId changes
 	$: if (chatId && enabled) {
@@ -99,11 +99,7 @@
 				<div
 					class="flex-1 h-px bg-gray-200 dark:bg-gray-700 group-hover:bg-gray-300 dark:group-hover:bg-gray-600 transition"
 				/>
-				<span class="whitespace-nowrap"
-					>{submitted
-						? $i18n.t('Feedback submitted')
-						: header}</span
-				>
+				<span class="whitespace-nowrap">{submitted ? $i18n.t('Feedback submitted') : header}</span>
 				<div
 					class="flex-1 h-px bg-gray-200 dark:bg-gray-700 group-hover:bg-gray-300 dark:group-hover:bg-gray-600 transition"
 				/>
@@ -131,11 +127,7 @@
 							stroke-width="2"
 							viewBox="0 0 24 24"
 						>
-							<path
-								stroke-linecap="round"
-								stroke-linejoin="round"
-								d="M6 18L18 6M6 6l12 12"
-							/>
+							<path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
 						</svg>
 					</button>
 				</div>
@@ -159,7 +151,7 @@
 				<textarea
 					bind:value={comment}
 					class="w-full text-sm px-1 py-2 bg-transparent outline-hidden resize-none rounded-xl"
-					placeholder={placeholder}
+					{placeholder}
 					rows="2"
 				/>
 

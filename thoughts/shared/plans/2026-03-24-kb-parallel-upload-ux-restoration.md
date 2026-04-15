@@ -16,6 +16,7 @@ The upstream merge (c26ae48d6 — "merge: upstream version 0.8.9 260320") replac
   - No batched toast logic exists
 
 ### Key Discoveries:
+
 - `emit_file_status` import already at `files.py:46` — no new import needed
 - Drag-and-drop is already fire-and-forget (parallel) — just needs premature toast removal
 - `uploadWeb` (line 258) calls `addFileHandler` directly — this is correct since web URLs don't use background processing
@@ -25,6 +26,7 @@ The upstream merge (c26ae48d6 — "merge: upstream version 0.8.9 260320") replac
 ## Desired End State
 
 Uploading multiple files to a KB:
+
 1. All uploads fire in parallel via `Promise.all`
 2. Each file appears in the UI immediately with `status: 'uploading'`
 3. Backend processes each file in the background and emits `file:status` via Socket.IO
@@ -34,6 +36,7 @@ Uploading multiple files to a KB:
 7. On failure: individual error toast, file removed from UI
 
 ### Verification:
+
 - Upload 3+ files via file picker → all upload simultaneously, single success toast at end
 - Upload via drag-and-drop → same parallel behavior, no premature toasts
 - Upload a file that fails processing → error toast for that file, others succeed normally
@@ -56,6 +59,7 @@ Two phases: backend first (add socket emissions), then frontend (consume them an
 ## Phase 1: Backend — Re-add `emit_file_status` Calls
 
 ### Overview
+
 Add `emit_file_status` calls in `process_uploaded_file` so the frontend can be notified when background file processing completes or fails.
 
 ### Changes Required:
@@ -195,11 +199,13 @@ The full `_process_handler` after changes:
 ### Success Criteria:
 
 #### Automated Verification:
+
 - [x] Backend starts without errors: `open-webui dev`
 - [x] Backend linting passes: `npm run format:backend` (no diff)
 - [x] No import errors — `emit_file_status` import already at line 46
 
 #### Manual Verification:
+
 - [ ] Upload a file to a KB → check browser devtools Socket.IO messages for `file:status` event with `status: "completed"`
 - [ ] Upload a file that will fail processing → check for `file:status` event with `status: "failed"`
 
@@ -210,11 +216,13 @@ The full `_process_handler` after changes:
 ## Phase 2: Frontend — Socket Handler + Parallel Uploads
 
 ### Overview
+
 Add `file:status` socket handler, batched toast logic, switch to parallel uploads, and update `addFileHandler` to not show individual toasts or call `init()` per file.
 
 ### Changes Required:
 
 #### 1. Add state variable and batched toast function
+
 **File**: `src/lib/components/workspace/Knowledge/KnowledgeBase.svelte`
 **Location**: Near other state variables (before `uploadFileHandler`)
 
@@ -222,20 +230,21 @@ Add `file:status` socket handler, batched toast logic, switch to parallel upload
 let successfulFileCount = 0;
 
 const showBatchedSuccessToast = () => {
-    if (successfulFileCount > 0) {
-        const count = successfulFileCount;
-        successfulFileCount = 0;
-        toast.success(
-            count === 1
-                ? $i18n.t('File added successfully.')
-                : $i18n.t('{{count}} files added successfully.', { count: count.toString() })
-        );
-        init();
-    }
+	if (successfulFileCount > 0) {
+		const count = successfulFileCount;
+		successfulFileCount = 0;
+		toast.success(
+			count === 1
+				? $i18n.t('File added successfully.')
+				: $i18n.t('{{count}} files added successfully.', { count: count.toString() })
+		);
+		init();
+	}
 };
 ```
 
 #### 2. Add `handleFileStatus` socket handler
+
 **File**: `src/lib/components/workspace/Knowledge/KnowledgeBase.svelte`
 **Location**: After the batched toast function
 
@@ -272,6 +281,7 @@ const handleFileStatus = async (data: {
 ```
 
 #### 3. Register socket listener in `onMount` (line ~1291)
+
 **File**: `src/lib/components/workspace/Knowledge/KnowledgeBase.svelte`
 
 Add before the closing `});` of onMount:
@@ -281,6 +291,7 @@ $socket?.on('file:status', handleFileStatus);
 ```
 
 #### 4. Unregister socket listener in `onDestroy` (line ~1307)
+
 **File**: `src/lib/components/workspace/Knowledge/KnowledgeBase.svelte`
 
 Add before the closing `});` of onDestroy:
@@ -290,6 +301,7 @@ $socket?.off('file:status', handleFileStatus);
 ```
 
 #### 5. Remove direct `addFileHandler` call from `uploadFileHandler`
+
 **File**: `src/lib/components/workspace/Knowledge/KnowledgeBase.svelte`
 **Location**: Line 344
 
@@ -310,6 +322,7 @@ To:
 ```
 
 #### 6. Change file input handler from sequential to parallel
+
 **File**: `src/lib/components/workspace/Knowledge/KnowledgeBase.svelte`
 **Location**: Lines 1362-1365
 
@@ -330,6 +343,7 @@ To:
 ```
 
 #### 7. Update `addFileHandler` — no individual toast, no `init()`
+
 **File**: `src/lib/components/workspace/Knowledge/KnowledgeBase.svelte`
 **Location**: Lines 985-1002
 
@@ -337,27 +351,28 @@ Change to:
 
 ```javascript
 const addFileHandler = async (fileId) => {
-    const res = await addFileToKnowledgeById(localStorage.token, id, fileId).catch((e) => {
-        toast.error(`${e}`);
-        return null;
-    });
+	const res = await addFileToKnowledgeById(localStorage.token, id, fileId).catch((e) => {
+		toast.error(`${e}`);
+		return null;
+	});
 
-    if (res) {
-        if (res.warning) {
-            toast.warning(res.warning);
-        }
-        // Success toast is batched in handleFileStatus/showBatchedSuccessToast
-        if (res.knowledge) {
-            knowledge = res.knowledge;
-        }
-    } else {
-        toast.error($i18n.t('Failed to add file.'));
-        fileItems = fileItems.filter((file) => file.id !== fileId);
-    }
+	if (res) {
+		if (res.warning) {
+			toast.warning(res.warning);
+		}
+		// Success toast is batched in handleFileStatus/showBatchedSuccessToast
+		if (res.knowledge) {
+			knowledge = res.knowledge;
+		}
+	} else {
+		toast.error($i18n.t('Failed to add file.'));
+		fileItems = fileItems.filter((file) => file.id !== fileId);
+	}
 };
 ```
 
 #### 8. Fix drag-and-drop premature toasts
+
 **File**: `src/lib/components/workspace/Knowledge/KnowledgeBase.svelte`
 **Location**: Lines 1176-1179
 
@@ -382,11 +397,13 @@ To:
 ### Success Criteria:
 
 #### Automated Verification:
+
 - [x] Frontend builds: `npm run build`
 - [ ] Frontend lints: `npm run lint:frontend`
 - [ ] TypeScript checks: `npm run check` (no new errors beyond pre-existing ~8000)
 
 #### Manual Verification:
+
 - [ ] Upload 3+ files via file picker → all appear with 'uploading' status simultaneously, single batched toast when all complete
 - [ ] Upload 1 file → single "File added successfully." toast (not "1 files added")
 - [ ] Upload via drag-and-drop → parallel uploads, no premature "File uploaded!" toast, batched success toast
@@ -404,6 +421,7 @@ To:
 ## Testing Strategy
 
 ### Manual Testing Steps:
+
 1. Upload 5 files simultaneously via file picker — verify parallel upload + single toast
 2. Upload 1 file — verify singular toast message
 3. Mix of valid + invalid files — verify error toast for bad file, success toast for rest
@@ -413,6 +431,7 @@ To:
 7. Navigate away mid-upload — verify no console errors
 
 ### Edge Cases:
+
 - Upload while another upload is in progress (socket handler should handle interleaved events)
 - Very large file that takes long to process (UI should show 'uploading' until socket event)
 - Network interruption during upload (existing error handling in `uploadFileHandler` catches this)

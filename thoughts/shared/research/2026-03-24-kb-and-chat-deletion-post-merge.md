@@ -4,7 +4,7 @@ researcher: claude
 git_commit: 5c27677b2e693f3e687af1496be5a4608886569d
 branch: fix/test-bugs-daan-260323
 repository: open-webui
-topic: "KB and chat file deletion mechanism after upstream 0.8.9 merge"
+topic: 'KB and chat file deletion mechanism after upstream 0.8.9 merge'
 tags: [research, codebase, knowledge, deletion, cleanup, vectors, files, chat, upstream-merge]
 status: complete
 last_updated: 2026-03-24
@@ -35,11 +35,13 @@ last_updated_by: claude
 ### 1. KB Deletion — Before vs After Merge
 
 #### Before merge (our code)
+
 - Route called `Knowledges.soft_delete_by_id(id)` — sets `deleted_at` timestamp
 - No inline vector/file cleanup
 - Cleanup worker picks up soft-deleted KBs and calls `DeletionService.delete_knowledge()`
 
 #### Upstream 0.8.9
+
 - Route did a **hard delete** with inline cleanup:
   - Iterates all models, removes KB references from `model.meta.knowledge`
   - Calls `VECTOR_DB_CLIENT.delete_collection(collection_name=id)`
@@ -47,6 +49,7 @@ last_updated_by: claude
   - Calls `Knowledges.delete_knowledge_by_id(id)` (SQL DELETE)
 
 #### After merge (current state)
+
 - Route calls `remove_knowledge_base_metadata_embedding(id)` (from upstream) — **synchronous**
 - Route calls `Knowledges.soft_delete_by_id(id)` (from our branch) — **synchronous**
 - Cleanup worker (0–60s later) calls `DeletionService.delete_knowledge()` which does:
@@ -60,11 +63,14 @@ last_updated_by: claude
 ### 2. Chat File Deletion — Gap Found
 
 #### How files attach to chats
+
 - `ChatFile` junction table (`models/chats.py:91-106`) with FK cascade on both `chat_id` and `file_id`
 - Files inserted via `Chats.insert_chat_files()` during message processing (`main.py:2035-2052`)
 
 #### Standard chat deletion (DELETE /api/v1/chats/{id})
+
 **Route at `routers/chats.py:1107-1148`:**
+
 1. Cleans up orphan tags
 2. Calls `Chats.delete_chat_by_id()` or `delete_chat_by_id_and_user_id()`
 3. **That's it** — no file cleanup, no vector cleanup, no storage cleanup
@@ -72,6 +78,7 @@ last_updated_by: claude
 The `delete_chat_by_id` model method (`models/chats.py:1519-1528`) deletes `ChatMessage` rows, the `Chat` row, and the shared copy. `ChatFile` rows cascade-delete via FK. But `File` records, `file-{id}` vector collections, and physical storage files all remain.
 
 #### What SHOULD happen (exists but isn't wired up)
+
 - `DeletionService.delete_chat()` (`services/deletion/service.py:224-283`) does full cascade:
   - Gets files via `Chats.get_files_by_chat_id()`
   - Calls `DeletionService.delete_file()` for each — deletes vectors from KB collections, `file-{id}` collection, storage, DB record
@@ -79,11 +86,13 @@ The `delete_chat_by_id` model method (`models/chats.py:1519-1528`) deletes `Chat
 - **But this method is never called from any route or worker.**
 
 #### Cleanup worker path (only for user deletion)
+
 - `_process_pending_chat_deletions()` (`cleanup_worker.py:111-163`) handles soft-deleted chats
 - But `Chats.soft_delete_by_id()` is only called from `DeletionService.delete_user()` (user deletion), never from chat deletion endpoints
 - Normal chat deletion uses hard delete directly, bypassing the soft-delete → worker pipeline entirely
 
 #### DELETE all chats (DELETE /api/v1/chats/)
+
 Same problem — `routers/chats.py:530-546` calls `Chats.delete_chats_by_user_id()` with no file/vector cleanup.
 
 ## Architecture: Deletion Pipeline

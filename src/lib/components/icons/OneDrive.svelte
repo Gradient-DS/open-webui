@@ -2,12 +2,7 @@
 	export let className = 'w-4 h-4';
 </script>
 
-<svg
-	xmlns="http://www.w3.org/2000/svg"
-	viewBox="0 0 32 32"
-	class={className}
-	fill="none"
->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" class={className} fill="none">
 	<mask
 		id="mask0_87_7796"
 		style="mask-type:alpha"

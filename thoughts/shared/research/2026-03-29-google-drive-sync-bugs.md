@@ -4,7 +4,7 @@ researcher: Claude Code
 git_commit: 84d62d6bd6abd3d83626a54906d97bb7381a619d
 branch: fix/haute-bug
 repository: Gradient-DS/open-webui
-topic: "Google Drive sync bugs: infinite spinning and flat folder picker"
+topic: 'Google Drive sync bugs: infinite spinning and flat folder picker'
 tags: [research, codebase, google-drive, sync, picker, bug]
 status: complete
 last_updated: 2026-03-29
@@ -22,6 +22,7 @@ last_updated_by: Claude Code
 ## Research Question
 
 Bug report on Google Drive integration:
+
 1. Linking a folder keeps spinning/syncing infinitely (spinner never stops)
 2. All subfolders shown at the same level as main folders in the picker (flat instead of hierarchical)
 
@@ -36,6 +37,7 @@ Bug report on Google Drive integration:
 ### Bug 1: Infinite Sync Spinner
 
 #### Sync Flow (Normal Path)
+
 1. User picks items in Google Picker → frontend calls `POST /api/v1/google-drive/sync/items`
 2. Backend spawns `BackgroundTask` running `GoogleDriveSyncWorker.sync()` (`base_worker.py:736`)
 3. Worker sets status to `"syncing"` (`base_worker.py:741`)
@@ -45,6 +47,7 @@ Bug report on Google Drive integration:
 7. Socket.IO event `googledrive:sync:progress` with `status: "completed"` emitted (`base_worker.py:997-1007`)
 
 #### Frontend Status Tracking
+
 - **Socket.IO handler** (`KnowledgeBase.svelte:959-1058`): Listens for `googledrive:sync:progress`, updates state reactively
 - **HTTP polling fallback** (`KnowledgeBase.svelte:748-797`): Polls `GET /sync/{knowledgeId}` every 2 seconds while status is `"syncing"` or `"access_revoked"`
 
@@ -52,6 +55,7 @@ Bug report on Google Drive integration:
 
 **1. Post-processing exception (most likely)**
 After all files are processed (6/6 shown), the worker calls:
+
 - `_save_sources()` at `base_worker.py:975` — writes `folder_map` + `page_token` to KB meta
 - Final status update at `base_worker.py:980-995` — reads KB, updates meta
 
@@ -69,6 +73,7 @@ If the user synced the parent "Vink Bouw" folder (not just "947 H - FINANCIEEL")
 From `router.py:100-114`: a sync is considered stale after 30 minutes. Until then, the status remains `"syncing"` and new syncs are blocked. The user sees a spinner for up to 30 minutes before anything changes.
 
 #### Diagnostic Steps
+
 1. Check backend logs for errors after "Parallel processing completed" log message
 2. Inspect the knowledge record's `meta.google_drive_sync.status` in the DB
 3. Check if `folder_map` was saved (indicates post-processing reached that point)
@@ -77,20 +82,23 @@ From `router.py:100-114`: a sync is considered stale after 30 minutes. Until the
 ### Bug 2: Flat Folder Structure in Picker
 
 #### Current Picker Configuration
+
 `src/lib/utils/google-drive-picker.ts:170-178`:
+
 ```typescript
 const docsView = new google.picker.DocsView()
-    .setIncludeFolders(true)
-    .setSelectFolderEnabled(true)
-    .setMimeTypes(SUPPORTED_MIME_TYPES);
+	.setIncludeFolders(true)
+	.setSelectFolderEnabled(true)
+	.setMimeTypes(SUPPORTED_MIME_TYPES);
 
 const picker = new google.picker.PickerBuilder()
-    .enableFeature(google.picker.Feature.MULTISELECT_ENABLED)
-    .enableFeature(google.picker.Feature.NAV_HIDDEN)
-    .addView(docsView)
+	.enableFeature(google.picker.Feature.MULTISELECT_ENABLED)
+	.enableFeature(google.picker.Feature.NAV_HIDDEN)
+	.addView(docsView);
 ```
 
 #### Root Cause
+
 The `NAV_HIDDEN` feature combined with a `DocsView` without `setParent()` causes the picker to display a flat search-like view rather than a navigable folder tree. The picker shows ALL items matching the MIME type filter (including subfolders from all depths) without hierarchical navigation.
 
 Screenshot 2 confirms this: dozens of "947 - ..." subfolders from various depths are shown alongside the main category folders (947 A, 947 B, etc.) in a flat grid. Screenshot 3 shows the actual Drive hierarchy with only 9-10 top-level category folders under "Vink Bouw".
@@ -102,26 +110,29 @@ Removing `NAV_HIDDEN` restores the Google Picker's built-in sidebar navigation (
 
 ```typescript
 const picker = new google.picker.PickerBuilder()
-    .enableFeature(google.picker.Feature.MULTISELECT_ENABLED)
-    // .enableFeature(google.picker.Feature.NAV_HIDDEN)  // Remove this
-    .addView(docsView)
+	.enableFeature(google.picker.Feature.MULTISELECT_ENABLED)
+	// .enableFeature(google.picker.Feature.NAV_HIDDEN)  // Remove this
+	.addView(docsView);
 ```
 
 **Option B: Use `ViewId.FOLDERS` for folder-only view**
 Add a separate view specifically for folder selection:
+
 ```typescript
-const foldersView = new google.picker.DocsView(google.picker.ViewId.FOLDERS)
-    .setSelectFolderEnabled(true);
+const foldersView = new google.picker.DocsView(google.picker.ViewId.FOLDERS).setSelectFolderEnabled(
+	true
+);
 ```
 
 **Option C: Use `setParent()` for scoped browsing**
 If the user has already selected a root folder, set it as the picker's parent:
+
 ```typescript
 const docsView = new google.picker.DocsView()
-    .setIncludeFolders(true)
-    .setSelectFolderEnabled(true)
-    .setParent(rootFolderId)
-    .setMimeTypes(SUPPORTED_MIME_TYPES);
+	.setIncludeFolders(true)
+	.setSelectFolderEnabled(true)
+	.setParent(rootFolderId)
+	.setMimeTypes(SUPPORTED_MIME_TYPES);
 ```
 
 **Recommendation:** Option A is the safest fix. The `NAV_HIDDEN` feature was previously used per the feedback memory for Google Picker (single combined view without tabs), but it has the side effect of flattening the folder hierarchy. Without `NAV_HIDDEN`, the picker restores proper folder navigation. Alternatively, keep `NAV_HIDDEN` but add `setParent('root')` to scope to the user's Drive root with hierarchical navigation.
@@ -129,6 +140,7 @@ const docsView = new google.picker.DocsView()
 ## Code References
 
 ### Backend (Sync)
+
 - `backend/open_webui/services/sync/base_worker.py:736-1028` — Main `sync()` method
 - `backend/open_webui/services/sync/base_worker.py:223-269` — `_update_sync_status()` method
 - `backend/open_webui/services/sync/base_worker.py:295-306` — `_save_sources()` method
@@ -138,21 +150,25 @@ const docsView = new google.picker.DocsView()
 - `backend/open_webui/services/sync/events.py:55-94` — `emit_sync_progress()`
 
 ### Frontend (Sync Status)
+
 - `src/lib/components/workspace/Knowledge/KnowledgeBase.svelte:748-797` — `pollCloudSyncStatus()`
 - `src/lib/components/workspace/Knowledge/KnowledgeBase.svelte:959-1058` — `handleCloudSyncProgress()`
 - `src/lib/components/workspace/Knowledge/KnowledgeBase.svelte:1486-1500` — Socket event listeners
 
 ### Frontend (Picker)
+
 - `src/lib/utils/google-drive-picker.ts:154-206` — `createKnowledgePicker()`
 - `src/lib/utils/google-drive-picker.ts:170-178` — Picker view configuration (the bug)
 
 ### Folder Display
+
 - `src/lib/components/workspace/Knowledge/KnowledgeBase/SourceGroupedFiles.svelte:51-74` — `buildFolderTree()`
 - `src/lib/components/workspace/Knowledge/KnowledgeBase/FolderTreeNode.svelte` — Recursive tree node
 
 ## Architecture Insights
 
 The sync system uses a provider-abstracted architecture shared between Google Drive and OneDrive:
+
 - `BaseSyncWorker` handles common logic (file processing, status updates, concurrency)
 - `GoogleDriveSyncWorker` overrides provider-specific methods (API calls, file collection)
 - Socket.IO provides real-time updates; HTTP polling is a fallback

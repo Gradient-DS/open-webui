@@ -79,12 +79,12 @@
 
 					if (mode === 'email') {
 						if (emailSent) {
-							toast.success(
-								$i18n.t('Email invite sent to {{email}}', { email: _user.email })
-							);
+							toast.success($i18n.t('Email invite sent to {{email}}', { email: _user.email }));
 						} else {
 							toast.warning(
-								$i18n.t('Invite created but email could not be sent. You can copy the link instead.')
+								$i18n.t(
+									'Invite created but email could not be sent. You can copy the link instead.'
+								)
 							);
 							showCopyDialog = true;
 						}
@@ -191,7 +191,8 @@
 		</button>
 		<button
 			type="button"
-			class="flex-1 px-2 py-1.5 text-xs font-medium rounded-lg border transition {mode === 'password'
+			class="flex-1 px-2 py-1.5 text-xs font-medium rounded-lg border transition {mode ===
+			'password'
 				? 'border-gray-900 dark:border-white bg-gray-900 dark:bg-white text-white dark:text-black'
 				: 'border-gray-200 dark:border-gray-700 hover:border-gray-400 dark:hover:border-gray-500'}"
 			on:click={() => (mode = 'password')}

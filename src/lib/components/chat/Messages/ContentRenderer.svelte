@@ -10,6 +10,7 @@
 		settings,
 		showArtifacts,
 		showControls,
+		showDocument,
 		showEmbeds
 	} from '$lib/stores';
 	import { isFeatureEnabled } from '$lib/utils/features';
@@ -45,6 +46,33 @@
 
 	let sourceIds = [];
 	$: getSourceIds(sources);
+
+	let documentDetected = false;
+	$: {
+		const hasDocument =
+			typeof content === 'string' &&
+			(/<details\b[^>]*\btype="document"/.test(content) ||
+				/<details\b[^>]*\btype="tool_calls"[^>]*\bname="write_document"/.test(content));
+
+		if (
+			hasDocument &&
+			!documentDetected &&
+			isFeatureEnabled('document_writer') &&
+			($settings?.detectDocuments ?? true) &&
+			!$mobile &&
+			$chatId
+		) {
+			documentDetected = true;
+			tick().then(() => {
+				showDocument.set(true);
+				showControls.set(true);
+			});
+		}
+
+		if (!hasDocument) {
+			documentDetected = false;
+		}
+	}
 
 	const getSourceIds = (sources) => {
 		const result = [];
