@@ -105,6 +105,31 @@ openWebui:
     periodSeconds: 10
 
   # ---------------------------------------------------------------------------
+  # Alembic migration Job (Helm pre-upgrade hook)
+  # ---------------------------------------------------------------------------
+  # When enabled, a one-shot Job runs `import open_webui.config` before each
+  # helm upgrade. That triggers run_migrations() at import time against
+  # Postgres, then exits. Helm only proceeds to roll the new Deployment if
+  # the Job succeeds — so the new pods start against an already-migrated
+  # schema and don't race each other.
+  #
+  # The main Deployment sets ENABLE_DB_MIGRATIONS=false when this is on,
+  # so no replica attempts its own migration at startup.
+  #
+  # Required for replicaCount > 1. Leave off for single-replica tenants that
+  # rely on the default "first pod migrates" behavior.
+  migrationJob:
+    enabled: false
+    activeDeadlineSeconds: 600
+    resources:
+      requests:
+        memory: "256Mi"
+        cpu: "100m"
+      limits:
+        memory: "512Mi"
+        cpu: "500m"
+
+  # ---------------------------------------------------------------------------
   # Open WebUI Configuration
   # ---------------------------------------------------------------------------
   config:
@@ -392,8 +417,15 @@ openWebui:
 
     # Audit Logging
     # Levels: NONE, METADATA, REQUEST, REQUEST_RESPONSE
-    # METADATA logs who/what/when without PII from request/response bodies
+    # METADATA logs who/what/when without PII from request/response bodies.
+    # Emitted to stdout as JSON so the LGTM (Loki/Grafana/Tempo/Mimir) stack
+    # can ingest without a file-log sidecar. Disable file sink since we run
+    # stateless (no PVC) — audit.log would go to emptyDir and be lost anyway.
     auditLogLevel: "METADATA"
+    enableAuditStdout: "true"
+    enableAuditLogsFile: "false"
+    # Structured JSON logs for Loki. Applies to the root logger (GLOBAL_LOG_LEVEL).
+    logFormat: "json"
 
     # User Archival
     enableUserArchival: "true"
@@ -543,6 +575,32 @@ weaviate:
     enableModules: "backup-filesystem"
     backupFilesystemPath: "/var/lib/weaviate/backups"
     clusterHostname: "node1"
+
+# -----------------------------------------------------------------------------
+# Redis (shared state for multi-replica Open WebUI: websockets, session,
+# in-memory config cache). Required by Open WebUI for replicaCount > 1.
+# Stateless — emptyDir only; a restart drops active websocket connections
+# but causes no data loss. Single replica is sufficient per the official
+# Open WebUI scaling docs.
+# -----------------------------------------------------------------------------
+redis:
+  enabled: false
+
+  image:
+    repository: redis
+    tag: "7-alpine"
+    pullPolicy: IfNotPresent
+
+  resources:
+    requests:
+      memory: "64Mi"
+      cpu: "50m"
+    limits:
+      memory: "256Mi"
+      cpu: "500m"
+
+  podSecurityContext: {}
+  securityContext: {}
 
 # -----------------------------------------------------------------------------
 # Ingress
