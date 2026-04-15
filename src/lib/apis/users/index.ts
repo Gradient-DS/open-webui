@@ -458,7 +458,11 @@ export const getUserActiveStatusById = async (token: string, userId: string) => 
 export const deleteUserById = async (
 	token: string,
 	userId: string,
-	options: { archiveBeforeDelete?: boolean; archiveReason?: string; archiveRetentionDays?: number } = {}
+	options: {
+		archiveBeforeDelete?: boolean;
+		archiveReason?: string;
+		archiveRetentionDays?: number;
+	} = {}
 ) => {
 	let error = null;
 

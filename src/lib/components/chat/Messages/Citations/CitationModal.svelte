@@ -206,11 +206,7 @@
 			<!-- Preview tab -->
 			{#if isPreviewable && previewAvailable && selectedTab === 'preview'}
 				{#if isPDF}
-					<iframe
-						title={fileName}
-						src={previewUrl}
-						class="w-full h-[70vh] border-0 rounded-lg"
-					/>
+					<iframe title={fileName} src={previewUrl} class="w-full h-[70vh] border-0 rounded-lg" />
 				{:else if isImage}
 					<img
 						src={previewUrl}
@@ -218,12 +214,7 @@
 						class="max-w-full max-h-[70vh] rounded-lg object-contain mx-auto"
 					/>
 				{:else if isAudio}
-					<audio
-						src={previewUrl}
-						class="w-full rounded-lg"
-						controls
-						playsinline
-					/>
+					<audio src={previewUrl} class="w-full rounded-lg" controls playsinline />
 				{/if}
 			{:else}
 				<!-- Content tab (upstream text view with Markdown) -->

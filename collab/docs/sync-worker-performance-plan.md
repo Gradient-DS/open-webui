@@ -140,6 +140,7 @@ async def _collect_folder_files_full(self, source: Dict[str, Any]) -> tuple[List
 ```
 
 **Key design decisions:**
+
 - `max_concurrent_listings = 10` — Google Drive API has a 1000 queries/100s rate limit per user. With 10 concurrent requests and ~0.5s per paginated listing, we stay well under the limit.
 - Level-by-level (not fire-and-forget) because subfolder discovery at depth N feeds the queue at depth N+1. But all folders at the same depth are independent.
 - The `asyncio` import is already present in the file.
@@ -147,11 +148,13 @@ async def _collect_folder_files_full(self, source: Dict[str, Any]) -> tuple[List
 ### Success Criteria
 
 #### Automated Verification:
+
 - [x] `npm run build` succeeds
 - [ ] Backend starts without errors: `open-webui dev`
 - [ ] Existing sync tests pass (if any)
 
 #### Manual Verification:
+
 - [ ] Sync a Google Drive folder with nested subfolders — all files discovered correctly
 - [ ] Folder map persisted correctly (incremental sync works after)
 - [ ] Rate limiting not triggered (no 429 errors in logs)
@@ -166,6 +169,7 @@ async def _collect_folder_files_full(self, source: Dict[str, Any]) -> tuple[List
 ### Overview
 
 Split `_process_file_info()` into two methods with separate concurrency controls:
+
 - **Download phase**: Download from cloud + hash check + S3 upload + file record — I/O bound, high concurrency
 - **Process phase**: Content extraction + embedding + KB association — compute/embed bound, normal concurrency
 
@@ -610,23 +614,26 @@ After the refactor, `_process_file_info()` (lines 453-691) is replaced by `_down
 **File**: `helm/open-webui-tenant/values.yaml`
 
 ```yaml
-fileDownloadConcurrencyMultiplier: "3"
+fileDownloadConcurrencyMultiplier: '3'
 ```
 
 **File**: `helm/open-webui-tenant/templates/open-webui/configmap.yaml`
 
 ```yaml
-FILE_DOWNLOAD_CONCURRENCY_MULTIPLIER: {{ .Values.openWebui.config.fileDownloadConcurrencyMultiplier | quote }}
+FILE_DOWNLOAD_CONCURRENCY_MULTIPLIER:
+  { { .Values.openWebui.config.fileDownloadConcurrencyMultiplier | quote } }
 ```
 
 ### Success Criteria
 
 #### Automated Verification:
+
 - [x] `npm run build` succeeds
 - [ ] Backend starts without errors
 - [ ] No regressions in existing sync behaviour
 
 #### Manual Verification:
+
 - [ ] Sync a large Google Drive folder (100+ files) — all files processed
 - [ ] Verify download and process phases overlap in logs (download messages interleaved with embedding messages)
 - [ ] Cancel a sync mid-flight — cancellation works in both download and process phases
@@ -644,12 +651,14 @@ FILE_DOWNLOAD_CONCURRENCY_MULTIPLIER: {{ .Values.openWebui.config.fileDownloadCo
 Replace the two sequential `process_file` calls in `_process_file_via_api()` with a single extraction + embedding step that writes vectors directly to the KB collection. Also populate the per-file collection from the same embedding result (vector copy, not re-embed).
 
 **Current flow (2 embeddings per file):**
+
 ```
 process_file(file_id) → extract → split → EMBED → insert into file-{id}
 process_file(file_id, collection_name) → query file-{id} → split → EMBED → insert into KB
 ```
 
 **New flow (1 embedding per file):**
+
 ```
 extract → split → EMBED → insert into KB collection
                        └→ insert same vectors into file-{id} collection
@@ -1158,6 +1167,7 @@ The old `_process_file_via_api()` method (lines 379-451) is no longer called. De
 The `call_external_pipeline` function (line 247) currently returns chunked `Document` objects after calling the external `/chunk` endpoint. The `_extract_content` method needs to call this function. Check if `call_external_pipeline` can be called without `save_docs_to_vector_db_func` — it currently receives it as a parameter but we don't want it to embed.
 
 Looking at the code, `call_external_pipeline` (line ~144) does:
+
 1. Load file via Loader
 2. Send to external pipeline's `/chunk` endpoint
 3. Return chunked documents
@@ -1167,12 +1177,14 @@ This is already what we need — it returns documents without embedding. The `pr
 ### Success Criteria
 
 #### Automated Verification:
+
 - [x] `npm run build` succeeds
 - [x] Python syntax check passes
 - [ ] Backend starts without errors
 - [ ] No regressions in existing sync behaviour
 
 #### Manual Verification:
+
 - [ ] Sync a Google Drive folder — files are searchable in the KB
 - [ ] Verify per-file collections exist (file viewer UI works)
 - [ ] Verify embedding is called once per file (check logs: should see one "generating embeddings" per file, not two)
@@ -1187,29 +1199,32 @@ This is already what we need — it returns documents without embedding. The `pr
 
 ## Performance Projections
 
-| Scenario | Current | Phase 1 | + Phase 2 | + Phase 3 |
-|----------|---------|---------|-----------|-----------|
-| 1700 files, flat folder, concurrent=20 | ~14 min | ~14 min (no nesting) | ~7 min | ~4 min |
-| 1700 files, 50 subfolders, concurrent=20 | ~15 min | ~14 min (saves ~1min discovery) | ~8 min | ~4.5 min |
-| 1700 files, flat folder, concurrent=30 | ~9 min | ~9 min | ~5 min | ~3 min |
-| 250 files, re-sync (all hash match) | ~2 min | ~2 min | ~30s | ~30s |
+| Scenario                                 | Current | Phase 1                         | + Phase 2 | + Phase 3 |
+| ---------------------------------------- | ------- | ------------------------------- | --------- | --------- |
+| 1700 files, flat folder, concurrent=20   | ~14 min | ~14 min (no nesting)            | ~7 min    | ~4 min    |
+| 1700 files, 50 subfolders, concurrent=20 | ~15 min | ~14 min (saves ~1min discovery) | ~8 min    | ~4.5 min  |
+| 1700 files, flat folder, concurrent=30   | ~9 min  | ~9 min                          | ~5 min    | ~3 min    |
+| 250 files, re-sync (all hash match)      | ~2 min  | ~2 min                          | ~30s      | ~30s      |
 
 Assumptions: 1s download, 0.5s S3 upload, 0.5s extraction, 1.5s embedding, 1.5s re-embedding (Phase 3 eliminates this).
 
 ## Testing Strategy
 
 ### Unit Tests:
+
 - `_download_and_store()` with mock cloud client: verify hash-match skip, S3 upload, file record creation
 - `_process_and_embed()` with mock Loader + vector DB: verify single embedding call, dual collection insert
 - Parallel BFS with mock `list_folder_children`: verify all files discovered, folder map correct
 
 ### Integration Tests:
+
 - Full sync cycle with a test Google Drive folder
 - Cancel mid-sync — verify partial results are clean
 - Re-sync same folder — verify hash-match path works
 - Sync folder with unsupported file types — verify they're skipped
 
 ### Manual Testing Steps:
+
 1. Deploy to staging with `FILE_PROCESSING_MAX_CONCURRENT=20`
 2. Sync the Vink Bouw KB (1700 files) from Google Drive
 3. Verify all files appear in KB, search returns relevant results

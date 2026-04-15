@@ -12,6 +12,7 @@ Fix the broken relative path computation for OneDrive-synced files so the UI can
 - **`list_folder_items_recursive`** (`graph_client.py:133-155`) exists and correctly computes `_relative_path` using BFS over the `/children` endpoint. This proves the pattern works; we just need to adapt it for delta responses using `parentReference.id` instead.
 
 ### Key Discoveries:
+
 - Delta responses include `parentReference.id` (parent folder's item ID) but NOT `parentReference.path` — per Microsoft docs
 - Delta returns BOTH folder and file items recursively, so we can build a folder ID → path map in a single pass
 - On incremental deltas, unchanged folders are NOT returned, so the map must be persisted across syncs
@@ -25,6 +26,7 @@ Fix the broken relative path computation for OneDrive-synced files so the UI can
 4. The UI displays nested subfolders correctly using the existing `SourceGroupedFiles` / `FolderTreeNode` components
 
 ### How to verify:
+
 - Sync a fresh KB with a OneDrive folder containing known subfolders (e.g., WBSO with `2407-2412 WBSO HIPE`, `2501-2512 WBSO HIPE` subfolders)
 - Verify files have `relative_path` like `2407-2412 WBSO HIPE/document.pdf` in their metadata
 - Verify the UI shows collapsible subfolder nodes
@@ -41,6 +43,7 @@ Fix the broken relative path computation for OneDrive-synced files so the UI can
 ## Implementation Approach
 
 Three phases, all in `sync_worker.py`:
+
 1. Replace the broken path computation with an ID-based folder map
 2. Auto-migrate existing KBs by clearing delta links when folder map is missing
 3. Clean up the redundant fallback in `_process_file_info`
@@ -50,11 +53,13 @@ Three phases, all in `sync_worker.py`:
 ## Phase 1: Fix `_collect_folder_files` with ID-Based Folder Map
 
 ### Overview
+
 Replace the `parentReference.path`-based relative path computation with a two-pass approach: first build a folder ID → relative path map from delta items, then use it to compute file relative paths.
 
 ### Changes Required:
 
 #### 1. Rewrite path computation in `_collect_folder_files`
+
 **File**: `backend/open_webui/services/onedrive/sync_worker.py`
 **Method**: `_collect_folder_files` (lines 241-307)
 
@@ -160,6 +165,7 @@ async def _collect_folder_files(
 ```
 
 Key changes from current code:
+
 - Removed `parentReference.path`-based computation entirely
 - Added `folder_map` loading from persisted source metadata
 - Added iterative first-pass to handle out-of-order folder items
@@ -170,10 +176,12 @@ Key changes from current code:
 ### Success Criteria:
 
 #### Automated Verification:
+
 - [x] Backend starts without errors: `open-webui dev`
 - [x] No new lint errors: `npm run lint:backend`
 
 #### Manual Verification:
+
 - [ ] Sync a fresh KB with a OneDrive folder containing known subfolders
 - [ ] Verify files have correct `relative_path` with subfolder prefixes in their `meta` (check via DB or API: `GET /api/v1/knowledge/{id}/files`)
 - [ ] Verify the UI shows collapsible subfolder nodes in `SourceGroupedFiles`
@@ -187,11 +195,13 @@ Key changes from current code:
 ## Phase 2: Auto-Migrate Existing KBs
 
 ### Overview
+
 Existing KBs that were synced before this fix have files without `relative_path` and sources without `folder_map`. Their delta link is up-to-date, so delta returns 0 items and nothing gets backfilled. Add a version-gated mechanism to force a full re-enumeration.
 
 ### Changes Required:
 
 #### 1. Add version constant and delta link clearing
+
 **File**: `backend/open_webui/services/onedrive/sync_worker.py`
 
 Add a module-level constant after the existing constants (around line 66):
@@ -245,10 +255,12 @@ No additional changes needed — the Phase 1 code + forced re-enumeration handle
 ### Success Criteria:
 
 #### Automated Verification:
+
 - [x] Backend starts without errors: `open-webui dev`
 - [x] No new lint errors: `npm run lint:backend`
 
 #### Manual Verification:
+
 - [ ] Take an existing KB with known subfolders (e.g., WBSO) that was synced before this fix
 - [ ] Trigger a resync — verify logs show "Folder map version 0 < 1 ... forcing full sync"
 - [ ] After sync completes, verify files now have correct `relative_path` with subfolder prefixes
@@ -263,11 +275,13 @@ No additional changes needed — the Phase 1 code + forced re-enumeration handle
 ## Phase 3: Clean Up `_process_file_info` Fallback
 
 ### Overview
+
 Remove the redundant `parentReference.path`-based fallback in `_process_file_info` that can never work with delta responses. The folder map approach in `_collect_folder_files` now handles all cases.
 
 ### Changes Required:
 
 #### 1. Simplify `_process_file_info` relative_path handling
+
 **File**: `backend/open_webui/services/onedrive/sync_worker.py`
 **Method**: `_process_file_info` (lines 936-960)
 
@@ -289,6 +303,7 @@ async def _process_file_info(self, file_info: Dict[str, Any]) -> Optional[Failed
 ```
 
 This removes:
+
 - The `if not relative_path and source_item_id:` block (lines 940-960) that tried to reconstruct from `parentReference.path`
 - The matching source lookup
 - The `parentReference.path` comparison logic
@@ -299,20 +314,23 @@ The `relative_path` is now always set by `_collect_folder_files` (for folder sou
 ### Success Criteria:
 
 #### Automated Verification:
+
 - [x] Backend starts without errors: `open-webui dev`
 - [x] No new lint errors: `npm run lint:backend`
 - [ ] Frontend builds: `npm run build`
 
 #### Manual Verification:
+
 - [ ] Sync a fresh KB — verify relative paths still work correctly
 - [ ] Resync an existing KB — verify no regressions
-- [ ] Verify no "Computed relative_path in _process_file_info" log messages (that code path is gone)
+- [ ] Verify no "Computed relative_path in \_process_file_info" log messages (that code path is gone)
 
 ---
 
 ## Testing Strategy
 
 ### Manual Testing Steps:
+
 1. **Fresh KB with subfolders**: Create a new OneDrive KB syncing a folder with known subfolders (WBSO). Verify UI shows nested folders.
 2. **Existing KB migration**: Resync an existing KB (WBSO). Verify forced full sync happens once, files get `relative_path` backfilled, UI shows folders.
 3. **Incremental delta**: After initial sync, resync again without OneDrive changes. Verify delta returns 0 items, paths stay correct.
@@ -320,6 +338,7 @@ The `relative_path` is now always set by `_collect_folder_files` (for folder sou
 5. **Deep nesting**: If possible, test with 2+ levels of nesting (e.g., `FolderA/SubB/file.pdf`).
 
 ### Edge Cases:
+
 - Folder with only subfolders (no root-level files) — tree should still render
 - Single file source (no subfolders) — should work as before, `relative_path = name`
 - Delta items arriving out of order (child folder before parent) — the iterative loop handles this

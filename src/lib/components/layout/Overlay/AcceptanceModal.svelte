@@ -51,9 +51,7 @@
 					class="mt-4 text-center text-sm dark:text-gray-200 w-full prose prose-lg dark:prose-invert overflow-y-auto min-h-0 mx-auto max-w-3xl"
 				>
 					{#if ($config?.ui?.acceptance_modal_content ?? '').trim() !== ''}
-						{@html DOMPurify.sanitize(
-							marked.parse($config?.ui?.acceptance_modal_content ?? '')
-						)}
+						{@html DOMPurify.sanitize(marked.parse($config?.ui?.acceptance_modal_content ?? ''))}
 					{:else}
 						{$i18n.t('Please accept the terms of use to continue.')}
 					{/if}

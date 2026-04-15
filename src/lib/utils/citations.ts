@@ -58,7 +58,8 @@ function reduceSources(sources: any[]): Citation[] {
 
 // Strip trailing UUID (v4-style) from source names, e.g.
 // "Document.pdf - bccbdf8e-54c7-46b1-a542-f1163995a054" → "Document.pdf"
-const TRAILING_UUID_RE = /\s*[-–—]\s*[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const TRAILING_UUID_RE =
+	/\s*[-–—]\s*[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 function cleanSourceName(name: string): string {
 	return name.replace(TRAILING_UUID_RE, '');
@@ -134,6 +135,20 @@ export function normalizeCitations(
 }
 
 /**
+ * Build a full SourceInfo[] directly from raw sources, without scanning text
+ * for [N] markers. Use when you want the same full source list the Citations
+ * footer shows — i.e. regardless of whether the body text cites them inline.
+ */
+export function buildFullSourceList(sources: any[]): SourceInfo[] {
+	const citations = reduceSources(sources);
+	return citations.map((c, i) => ({
+		index: i + 1,
+		name: c.name,
+		url: c.url
+	}));
+}
+
+/**
  * Format source list as markdown for plain text clipboard.
  */
 export function formatSourcesAsMarkdown(sources: SourceInfo[]): string {
@@ -155,9 +170,10 @@ export function formatSourcesAsHtml(sources: SourceInfo[]): string {
 
 	const items = sources
 		.map((s) => {
-			const urlPart = s.url && s.url !== s.name
-				? ` — <span style="color:#0066cc;word-break:break-all;">${s.url}</span>`
-				: '';
+			const urlPart =
+				s.url && s.url !== s.name
+					? ` — <span style="color:#0066cc;word-break:break-all;">${s.url}</span>`
+					: '';
 			return `<div style="margin-bottom:4px;font-size:10pt;"><strong style="color:#0066cc;">[${s.index}]</strong> ${s.name}${urlPart}</div>`;
 		})
 		.join('\n');

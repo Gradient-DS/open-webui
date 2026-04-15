@@ -2,7 +2,11 @@
 	import { onMount } from 'svelte';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/stores';
-	import { isAdminSettingsEnabled, isAdminSettingsTabEnabled, getFirstAvailableAdminSettingsTab } from '$lib/utils/features';
+	import {
+		isAdminSettingsEnabled,
+		isAdminSettingsTabEnabled,
+		getFirstAvailableAdminSettingsTab
+	} from '$lib/utils/features';
 	import Settings from '$lib/components/admin/Settings.svelte';
 
 	onMount(() => {

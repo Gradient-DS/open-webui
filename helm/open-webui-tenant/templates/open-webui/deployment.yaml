@@ -31,8 +31,9 @@ spec:
       securityContext:
         {{- toYaml . | nindent 8 }}
       {{- end }}
-      {{- if .Values.weaviate.enabled }}
+      {{- if or .Values.weaviate.enabled .Values.redis.enabled }}
       initContainers:
+        {{- if .Values.weaviate.enabled }}
         - name: wait-for-weaviate
           image: busybox:1.36
           {{- with .Values.openWebui.securityContext }}
@@ -40,6 +41,16 @@ spec:
             {{- toYaml . | nindent 12 }}
           {{- end }}
           command: ['sh', '-c', 'until wget -qO- http://{{ include "open-webui-tenant.weaviate.fullname" . }}:8080/v1/.well-known/ready 2>/dev/null; do echo "waiting for weaviate..."; sleep 3; done']
+        {{- end }}
+        {{- if .Values.redis.enabled }}
+        - name: wait-for-redis
+          image: busybox:1.36
+          {{- with .Values.openWebui.securityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          command: ['sh', '-c', 'until nc -z {{ include "open-webui-tenant.redis.fullname" . }} 6379; do echo "waiting for redis..."; sleep 2; done']
+        {{- end }}
       {{- end }}
       containers:
         - name: open-webui

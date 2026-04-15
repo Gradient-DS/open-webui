@@ -251,7 +251,7 @@ class AuditLoggingMiddleware:
         try:
             user = await self._get_authenticated_user(request)
 
-            user = user.model_dump(include={'id', 'name', 'email', 'role'}) if user else {}
+            user = user.model_dump(include={'id', 'role'}) if user else {}
 
             request_body = context.request_body.decode('utf-8', errors='replace')
             response_body = context.response_body.decode('utf-8', errors='replace')

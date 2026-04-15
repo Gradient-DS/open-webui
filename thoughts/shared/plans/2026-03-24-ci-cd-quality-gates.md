@@ -7,15 +7,18 @@ Build out comprehensive CI/CD quality gates for the open-webui repo across the `
 ## Current State Analysis
 
 **Active workflows:**
+
 - `docker-build-soev.yaml` — multi-arch Docker build + Helm OCI publish on push to `main`/`dev`/`test`
 - `branch-guard.yaml` — enforces `dev→test→main` PR source branch
 
 **Disabled upstream workflows (reference):**
+
 - `format-build-frontend.yaml.disabled` — Prettier, i18n, `npm run build`, Vitest
 - `format-backend.yaml.disabled` — Black format check (Python 3.11/3.12)
 - `integration-test.disabled` — Cypress E2E + SQLite/Postgres migration tests
 
 **Testing infrastructure:**
+
 - 1 frontend test file (Vitest, ~40 tests) — working
 - 5 backend test files (pytest) — only 3 working (`test_provider.py`, `test_redis.py`, `test_features.py`); 3 router tests broken (missing `AbstractPostgresTest`)
 - 4 Cypress E2E specs (~12 tests) — working
@@ -26,6 +29,7 @@ Build out comprehensive CI/CD quality gates for the open-webui repo across the `
 **Image tags:** Branch-name tags (`dev`, `test`, `main`) consumed by FluxCD in `soev-gitops`
 
 ### Key Discoveries:
+
 - `.github/workflows/docker-build-soev.yaml` — already triggers on push (merge), so the image push workflow is correct; we need to ADD a PR-triggered build-only workflow
 - `.github/workflows/integration-test.disabled` — complete Cypress + migration test reference we can adapt
 - `format-build-frontend.yaml.disabled` — reference for frontend build + Vitest jobs
@@ -34,6 +38,7 @@ Build out comprehensive CI/CD quality gates for the open-webui repo across the `
 ## Desired End State
 
 After implementation:
+
 1. PRs to `dev` are blocked unless: Docker image builds, frontend builds, unit tests pass, backend format check passes, Helm chart lints
 2. PRs to `test` are blocked unless: all `dev` gates pass PLUS Cypress E2E + migration tests pass
 3. PRs to `main` are blocked unless: all `test` gates pass (inherited — PRs to `main` must come from `test`)
@@ -42,6 +47,7 @@ After implementation:
 6. PR template guides developers through testing, docs, compose, and helm checklist items
 
 ### Verification:
+
 - Open a test PR to `dev` → all quality gate checks appear and must pass
 - Merge to `dev` → image pushed with `dev` tag, FluxCD picks it up
 - Open a test PR to `test` → E2E tests run in addition to `dev` gates
@@ -59,11 +65,13 @@ After implementation:
 ## Phase 1: Enhanced PR Template
 
 ### Overview
+
 Replace the minimal 2-item PR template with a comprehensive checklist that covers testing, documentation, Docker Compose, and Helm chart considerations.
 
 ### Changes Required:
 
 #### 1. PR Template
+
 **File**: `.github/pull_request_template.md`
 **Changes**: Replace entire file with comprehensive template
 
@@ -105,10 +113,12 @@ Replace the minimal 2-item PR template with a comprehensive checklist that cover
 ### Success Criteria:
 
 #### Automated Verification:
+
 - [x] File exists at `.github/pull_request_template.md`
 - [ ] Template renders correctly when opening a new PR on GitHub
 
 #### Manual Verification:
+
 - [ ] Open a draft PR and verify the template renders with all sections
 - [ ] Checklist items are relevant and comprehensive
 
@@ -117,11 +127,13 @@ Replace the minimal 2-item PR template with a comprehensive checklist that cover
 ## Phase 2: PR Quality Gates for `dev`
 
 ### Overview
+
 Create a new workflow that runs on PRs to `dev` (and `test`/`main` since those inherit). This validates that code compiles, tests pass, backend formatting is correct, and the Helm chart is valid — WITHOUT pushing any images.
 
 ### Changes Required:
 
 #### 1. New PR Validation Workflow
+
 **File**: `.github/workflows/pr-checks.yaml`
 **Changes**: New file — triggered on `pull_request` to `dev`, `test`, `main`
 
@@ -259,10 +271,12 @@ jobs:
 ### Success Criteria:
 
 #### Automated Verification:
+
 - [x] Workflow file is valid YAML: `python -c "import yaml; yaml.safe_load(open('.github/workflows/pr-checks.yaml'))"`
 - [ ] All 5 jobs (`frontend-build`, `backend-format`, `backend-tests`, `helm-lint`, `docker-build`) appear in GitHub Actions when a PR is opened to `dev`
 
 #### Manual Verification:
+
 - [ ] Open a test PR to `dev` and verify all 5 check jobs run
 - [ ] Jobs run in parallel (no dependencies between them)
 - [ ] Docker build does NOT push any image (verify no new tag appears in GHCR)
@@ -275,6 +289,7 @@ jobs:
 ## Phase 3: Refactor Image Publishing
 
 ### Overview
+
 The current `docker-build-soev.yaml` already triggers on push (merge) to `dev`/`test`/`main`, which is correct. No structural change needed — images are already only pushed on merge. The PR validation build (Phase 2) handles the "build without push" case.
 
 However, we should verify and document that the current workflow is doing the right thing, and ensure the PR checks workflow from Phase 2 does NOT overlap with the push-triggered build.
@@ -282,7 +297,9 @@ However, we should verify and document that the current workflow is doing the ri
 ### Changes Required:
 
 #### 1. No changes to `docker-build-soev.yaml`
+
 The existing workflow triggers on `push` (which is merge), not on `pull_request`. This is already the correct behavior:
+
 - Push to `dev` → builds + pushes image with `dev` tag → FluxCD deploys to dev environment
 - Push to `test` → builds + pushes image with `test` tag → FluxCD deploys to test environment
 - Push to `main` → builds + pushes image with `main` + `latest` tags → FluxCD deploys to production
@@ -292,10 +309,12 @@ The PR checks workflow (Phase 2) handles the `pull_request` trigger with build-o
 ### Success Criteria:
 
 #### Automated Verification:
+
 - [x] `docker-build-soev.yaml` triggers only on `push` (not `pull_request`) — verify with: `grep -A5 '^on:' .github/workflows/docker-build-soev.yaml`
 - [x] `pr-checks.yaml` triggers only on `pull_request` (not `push`) — verify with: `grep -A5 '^on:' .github/workflows/pr-checks.yaml`
 
 #### Manual Verification:
+
 - [ ] Open a PR to `dev` — only `pr-checks.yaml` runs, NOT `docker-build-soev.yaml`
 - [ ] Merge the PR — `docker-build-soev.yaml` runs and pushes the `dev` tagged image
 - [ ] Verify the `dev` tag in GHCR updates after merge
@@ -306,11 +325,13 @@ The PR checks workflow (Phase 2) handles the `pull_request` trigger with build-o
 ## Phase 4: E2E Testing for `test`
 
 ### Overview
+
 Create a workflow that runs Cypress E2E tests and migration tests on PRs to `test`. This is based on the disabled `integration-test.disabled` workflow but adapted for our branch strategy. Includes Compose stack with Weaviate + PostgreSQL for full-stack testing.
 
 ### Changes Required:
 
 #### 1. E2E Test Workflow
+
 **File**: `.github/workflows/e2e-tests.yaml`
 **Changes**: New file — triggered on PRs to `test` and `main`
 
@@ -507,7 +528,9 @@ jobs:
 ```
 
 ### Future Enhancement: genai-utils Integration
+
 Once cross-repo coordination is established, add a Compose overlay for E2E testing with external retrieval:
+
 - Create `docker-compose.e2e-genai.yaml` overlay that starts genai-utils API + Weaviate with test data
 - Configure Open WebUI to connect to genai-utils for RAG queries
 - Add Cypress tests that exercise document upload → retrieval → chat flows
@@ -516,11 +539,13 @@ Once cross-repo coordination is established, add a Compose overlay for E2E testi
 ### Success Criteria:
 
 #### Automated Verification:
+
 - [x] Workflow file is valid YAML
 - [ ] Both jobs (`cypress-e2e`, `migration-tests`) appear on PRs to `test`
 - [x] Workflow does NOT trigger on PRs to `dev` (only `test` and `main`)
 
 #### Manual Verification:
+
 - [ ] Open a PR from `dev` to `test` and verify both E2E and migration tests run
 - [ ] Cypress videos are uploaded as artifacts on failure
 - [ ] Compose logs are uploaded as artifacts on failure
@@ -533,11 +558,13 @@ Once cross-repo coordination is established, add a Compose overlay for E2E testi
 ## Phase 5: Security Scanning
 
 ### Overview
+
 Add security scanning workflow with Python SAST (Bandit), dependency auditing (pip-audit, npm audit), and container vulnerability scanning (Trivy). Runs on pushes to protected branches, PRs to `main`, and weekly schedule.
 
 ### Changes Required:
 
 #### 1. Security Scanning Workflow
+
 **File**: `.github/workflows/security-scanning.yaml`
 **Changes**: New file
 
@@ -550,7 +577,7 @@ on:
   pull_request:
     branches: [main]
   schedule:
-    - cron: '0 6 * * 1'  # Weekly Monday 6 AM UTC
+    - cron: '0 6 * * 1' # Weekly Monday 6 AM UTC
 
 jobs:
   sast-python:
@@ -635,11 +662,13 @@ jobs:
 ### Success Criteria:
 
 #### Automated Verification:
+
 - [x] Workflow file is valid YAML
 - [ ] All 4 jobs appear on pushes to `dev`/`test`/`main`
 - [ ] Weekly schedule triggers correctly (verify in GitHub Actions → Schedules)
 
 #### Manual Verification:
+
 - [ ] Push to `dev` triggers all 4 security scanning jobs
 - [ ] Bandit correctly scans `backend/` (not `server/`)
 - [ ] pip-audit reports on known vulnerabilities
@@ -654,6 +683,7 @@ jobs:
 ## Phase 6: Branch Protection Configuration
 
 ### Overview
+
 Configure GitHub repository settings to require status checks before merging. This is done in the GitHub UI (Settings → Branches → Branch protection rules), not via committed files.
 
 ### Changes Required:
@@ -661,6 +691,7 @@ Configure GitHub repository settings to require status checks before merging. Th
 #### 1. Branch Protection Rules (GitHub UI)
 
 **`dev` branch protection:**
+
 - Require status checks to pass before merging: **Yes**
 - Required checks:
   - `Frontend Build & Tests` (from `pr-checks.yaml`)
@@ -671,6 +702,7 @@ Configure GitHub repository settings to require status checks before merging. Th
 - Require branches to be up to date before merging: **Yes**
 
 **`test` branch protection:**
+
 - Require status checks to pass before merging: **Yes**
 - Required checks:
   - All `dev` checks (they run on PRs to `test` too via `pr-checks.yaml`)
@@ -680,6 +712,7 @@ Configure GitHub repository settings to require status checks before merging. Th
 - Require branches to be up to date before merging: **Yes**
 
 **`main` branch protection:**
+
 - Require status checks to pass before merging: **Yes**
 - Required checks:
   - All `dev` checks
@@ -688,12 +721,14 @@ Configure GitHub repository settings to require status checks before merging. Th
 - Note: E2E tests already ran when code was promoted from `dev` to `test`
 
 #### 2. Documentation
+
 **File**: `docs/CI-CD.md` (new file, optional)
 **Changes**: Document the CI/CD pipeline, branch strategy, and required checks for team reference
 
 ### Success Criteria:
 
 #### Manual Verification:
+
 - [ ] Branch protection rules are configured in GitHub for `dev`, `test`, and `main`
 - [ ] A PR to `dev` with a failing check cannot be merged
 - [ ] A PR to `test` from a non-`dev` branch is blocked by branch-guard
@@ -707,10 +742,13 @@ Configure GitHub repository settings to require status checks before merging. Th
 ## Testing Strategy
 
 ### Per-Phase Testing:
+
 Each phase has its own success criteria. Test in order since later phases depend on earlier ones.
 
 ### Integration Testing:
+
 After all phases are complete, run through the full promotion cycle:
+
 1. Create a feature branch from `dev`
 2. Open PR to `dev` → verify all PR quality gates run
 3. Merge to `dev` → verify image pushed with `dev` tag
@@ -720,6 +758,7 @@ After all phases are complete, run through the full promotion cycle:
 7. Merge to `main` → verify image pushed with `main` + `latest` tags
 
 ### Edge Cases:
+
 - PR with only backend changes — frontend build still runs (no path filtering for simplicity)
 - PR with Helm chart changes — helm-lint catches template errors
 - Dependabot PRs to `dev` — all gates apply

@@ -4,7 +4,7 @@ researcher: claude
 git_commit: 64c3333
 branch: main
 repository: soev-gitops + open-webui
-topic: "Migrating the GKE Open WebUI demo instance to the Previder tenant"
+topic: 'Migrating the GKE Open WebUI demo instance to the Previder tenant'
 tags: [research, migration, gke, previder, platform-independence, kubernetes, helm]
 status: complete
 last_updated: 2026-02-04
@@ -42,14 +42,14 @@ There are **no code changes required** to Open WebUI itself. The Helm chart hand
 
 The two clusters differ in exactly 6 infrastructure concerns. All are parameterized in the Helm chart:
 
-| Concern | GKE Demo | Previder Prod | Helm Toggle |
-|---------|----------|---------------|-------------|
-| **Storage** | `standard-rwo` (GCE PD CSI) | `longhorn` (Longhorn) | `global.storageClass` |
-| **Ingress** | NGINX Ingress Controller | Cilium Gateway API | `ingress.enabled` + external Gateway config |
-| **TLS** | cert-manager annotation on Ingress | cert-manager Certificate + Gateway listener | External to chart |
-| **Secrets** | External Secrets Operator + GCP Secret Manager | SOPS/age encrypted files | `externalSecrets.enabled` |
-| **Network Policy** | Standard K8s NetworkPolicy only | Standard + CiliumNetworkPolicy | `ciliumNetworkPolicy.enabled` |
-| **Load Balancing** | GKE cloud LB (automatic) | Cilium LB IPAM + L2 announcement (`10.10.0.200`) | External to chart |
+| Concern            | GKE Demo                                       | Previder Prod                                    | Helm Toggle                                 |
+| ------------------ | ---------------------------------------------- | ------------------------------------------------ | ------------------------------------------- |
+| **Storage**        | `standard-rwo` (GCE PD CSI)                    | `longhorn` (Longhorn)                            | `global.storageClass`                       |
+| **Ingress**        | NGINX Ingress Controller                       | Cilium Gateway API                               | `ingress.enabled` + external Gateway config |
+| **TLS**            | cert-manager annotation on Ingress             | cert-manager Certificate + Gateway listener      | External to chart                           |
+| **Secrets**        | External Secrets Operator + GCP Secret Manager | SOPS/age encrypted files                         | `externalSecrets.enabled`                   |
+| **Network Policy** | Standard K8s NetworkPolicy only                | Standard + CiliumNetworkPolicy                   | `ciliumNetworkPolicy.enabled`               |
+| **Load Balancing** | GKE cloud LB (automatic)                       | Cilium LB IPAM + L2 announcement (`10.10.0.200`) | External to chart                           |
 
 ### What the Helm Chart Already Handles
 
@@ -72,6 +72,7 @@ cd soev-gitops
 ```
 
 This creates `tenants/previder-prod/demo/` with namespace, resourcequota, limitrange, values-patch template, and secrets template. The script auto-detects `previder-prod` and generates:
+
 - `storageClass: "longhorn"`
 - `ingress.enabled: false`
 - `ciliumNetworkPolicy.enabled: true`
@@ -94,18 +95,19 @@ The key values that **change** between platforms:
 ```yaml
 # These are AUTO-SET by create-tenant.sh for previder-prod:
 global:
-  storageClass: "longhorn"           # was: standard-rwo
-  imagePullSecrets: [ghcr-secret]    # same
+  storageClass: 'longhorn' # was: standard-rwo
+  imagePullSecrets: [ghcr-secret] # same
 
 ingress:
-  enabled: false                     # was: true (nginx)
+  enabled: false # was: true (nginx)
   # No className, annotations, or tls needed
 
 ciliumNetworkPolicy:
-  enabled: true                      # was: false (or absent)
+  enabled: true # was: false (or absent)
 
 externalSecrets:
-  enabled: false                     # was: true (GCP SM)
+  enabled: false # was: true (GCP SM)
+
 
 # OTEL endpoint stays the same (alloy.observability.svc:4317)
 ```
@@ -125,6 +127,7 @@ The GKE demo uses External Secrets Operator pulling from GCP Secret Manager (pro
    ```
 
 Required secrets (from `tenants/gke-demo/demo/values-patch.yaml:48-55` and chart `templates/secrets.yaml`):
+
 - `webuiSecretKey` -- session encryption key
 - `postgresPassword` -- PostgreSQL password
 - `openaiApiKey` -- LLM API key
@@ -136,6 +139,7 @@ Required secrets (from `tenants/gke-demo/demo/values-patch.yaml:48-55` and chart
 The `create-tenant.sh` script auto-generates the HTTPRoute, but you still need to manually add:
 
 **4a.** HTTPS listener in `infrastructure/previder-prod/gateway/gateway.yaml`:
+
 ```yaml
 - name: demo-https
   hostname: demo.soev.ai
@@ -151,6 +155,7 @@ The `create-tenant.sh` script auto-generates the HTTPRoute, but you still need t
 ```
 
 **4b.** Certificate in `infrastructure/previder-prod/gateway/certificates.yaml`:
+
 ```yaml
 ---
 apiVersion: cert-manager.io/v1
@@ -199,11 +204,11 @@ Also add `open-webui-demo` to Alloy's log collection targets in `observability/b
 
 ### Data Migration Considerations
 
-| Approach | Effort | Risk |
-|----------|--------|------|
-| **Fresh start** (no data migration) | Minimal | None -- just deploy |
-| **PostgreSQL dump/restore** | Medium | Need to ensure schema compatibility, export from GKE pod, import to Previder pod |
-| **Full data migration** (PG + Weaviate + uploaded files) | Higher | Weaviate backup/restore, PVC data copy, potential embedding model mismatch |
+| Approach                                                 | Effort  | Risk                                                                             |
+| -------------------------------------------------------- | ------- | -------------------------------------------------------------------------------- |
+| **Fresh start** (no data migration)                      | Minimal | None -- just deploy                                                              |
+| **PostgreSQL dump/restore**                              | Medium  | Need to ensure schema compatibility, export from GKE pod, import to Previder pod |
+| **Full data migration** (PG + Weaviate + uploaded files) | Higher  | Weaviate backup/restore, PVC data copy, potential embedding model mismatch       |
 
 For a platform independence test, a **fresh start** is the cleanest approach. If data needs to move, the existing migration tooling in `soev-gitops/migration/` covers LibreChat-to-OpenWebUI migration but not cross-cluster OpenWebUI migration. A `pg_dump`/`pg_restore` would be the standard PostgreSQL approach.
 
@@ -220,12 +225,12 @@ The design separates concerns cleanly:
 
 The only areas with platform coupling are:
 
-| Coupling Point | Impact | Severity |
-|----------------|--------|----------|
-| Alloy log collection targets are hardcoded to previder-prod namespace names | GKE demo tenant logs not collected by Alloy | Low -- observability config, not app functionality |
+| Coupling Point                                                                            | Impact                                                   | Severity                                                                |
+| ----------------------------------------------------------------------------------------- | -------------------------------------------------------- | ----------------------------------------------------------------------- |
+| Alloy log collection targets are hardcoded to previder-prod namespace names               | GKE demo tenant logs not collected by Alloy              | Low -- observability config, not app functionality                      |
 | `gateway-ingress-cilium-policy.yaml` in base infra hardcodes `open-webui-kwink` namespace | CiliumNetworkPolicy only covers kwink, not other tenants | Low -- other tenants use the Helm chart's `ciliumNetworkPolicy.enabled` |
-| GKE `deploy-observability.sh` has `if gke-demo` branch for Grafana password | Cluster name dependency in script | Low -- only affects observability deployment |
-| External Secrets template only maps 4 of 7 possible secrets | Microsoft/reranker/loader secrets unavailable via GCP SM | Medium -- limits GKE feature parity |
+| GKE `deploy-observability.sh` has `if gke-demo` branch for Grafana password               | Cluster name dependency in script                        | Low -- only affects observability deployment                            |
+| External Secrets template only maps 4 of 7 possible secrets                               | Microsoft/reranker/loader secrets unavailable via GCP SM | Medium -- limits GKE feature parity                                     |
 
 ### What Would Make It Even More Portable
 

@@ -1,6 +1,6 @@
 /**
  * RAG Filter API - Collection and Document Discovery
- * 
+ *
  * Provides functions to interact with the external Vector DB API
  * for discovering available collections and documents for RAG filtering.
  */
@@ -40,7 +40,7 @@ export interface RagDiscoveryResponse {
 /**
  * Fetch all collections and their documents from the Vector DB API.
  * Used to populate the RAG filter UI with available collections and documents.
- * 
+ *
  * @returns Promise resolving to discovery data or null on error
  */
 export const getCollectionsAndDocuments = async (): Promise<RagDiscoveryResponse | null> => {
@@ -49,7 +49,7 @@ export const getCollectionsAndDocuments = async (): Promise<RagDiscoveryResponse
 	const res = await fetch(`${RAG_API_BASE_URL}/discovery/documents`, {
 		method: 'GET',
 		headers: {
-			'Accept': 'application/json',
+			Accept: 'application/json',
 			'Content-Type': 'application/json',
 			'X-API-Key': RAG_API_KEY
 		}
@@ -94,7 +94,7 @@ export const getCollectionsAndDocuments = async (): Promise<RagDiscoveryResponse
 
 /**
  * Check if the RAG filter feature is enabled and accessible.
- * 
+ *
  * @returns Promise resolving to true if accessible, false otherwise
  */
 export const checkRagFilterAvailability = async (): Promise<boolean> => {
@@ -102,11 +102,11 @@ export const checkRagFilterAvailability = async (): Promise<boolean> => {
 		const response = await fetch(`${RAG_API_BASE_URL}/discovery/documents`, {
 			method: 'GET',
 			headers: {
-				'Accept': 'application/json',
+				Accept: 'application/json',
 				'X-API-Key': RAG_API_KEY
 			}
 		});
-		
+
 		return response.ok;
 	} catch (err) {
 		console.warn('[RAG API] Filter feature not available:', err);

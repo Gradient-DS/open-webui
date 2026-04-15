@@ -7,18 +7,21 @@ Self-service "Download My Data" feature enabling users to export all their perso
 ## Current State Analysis
 
 **What exists:**
+
 - Chat export: user self-service via `GET /api/v1/chats/all` (JSON) — `DataControls.svelte:105-110`
 - Admin DB export: `GET /api/v1/utils/db/export` (full database JSON) — gated by `ENABLE_ADMIN_EXPORT`
 - GDPR archival: `POST /api/v1/archives/user/{user_id}` — captures profile + chats only
 - Per-resource admin exports: models, tools, functions, knowledge bases, feedbacks
 
 **What's missing:**
+
 - No unified "export all my data" endpoint
 - No self-service export for: files, memories, notes, settings, prompts, tools, models, feedbacks, tags, folders
 - No standard-compatible format with schema definition
 - GDPR archive only captures profile + chats
 
 ### Key Discoveries:
+
 - Background task pattern: `FastAPI BackgroundTasks` + Socket.IO notification — established at `routers/files.py:297-306` with `services/files/events.py`
 - Temp file serving: `CACHE_DIR` + `/cache/{path:path}` route at `main.py:2919-2930`
 - Feature flag pattern: env var → `config.py` → `main.py` features dict → frontend store — e.g., `ENABLE_ADMIN_EXPORT` at `config.py:1679`
@@ -30,6 +33,7 @@ Self-service "Download My Data" feature enabling users to export all their perso
 A user can click "Download My Data" in Settings > Data Controls. The system generates a ZIP file containing all their personal data asynchronously, notifies them via toast when ready, and provides a time-limited download link. Cloud-synced files include metadata only; locally uploaded files are included.
 
 ### Verification:
+
 - User can trigger export from Settings > Data Controls
 - Export runs in background without blocking the UI
 - User receives toast notification when export is ready
@@ -53,6 +57,7 @@ A user can click "Download My Data" in Settings > Data Controls. The system gene
 ## Implementation Approach
 
 Follow established patterns:
+
 1. Feature flag: `ENABLE_DATA_EXPORT` as plain `bool` env var (like `ENABLE_ADMIN_EXPORT`), not PersistentConfig — this is a platform capability, not a runtime toggle
 2. Background task: `FastAPI BackgroundTasks` pattern from file upload processing
 3. Notification: Socket.IO event to user room, like `emit_file_status`
@@ -62,11 +67,13 @@ Follow established patterns:
 ## Phase 1: Backend Config & Feature Flag
 
 ### Overview
+
 Add the `ENABLE_DATA_EXPORT` environment variable, wire it through config, main.py, Helm chart, and frontend store.
 
 ### Changes Required:
 
 #### 1. Config variable
+
 **File**: `backend/open_webui/config.py`
 **Changes**: Add `ENABLE_DATA_EXPORT` near `ENABLE_ADMIN_EXPORT` (line ~1679)
 
@@ -82,6 +89,7 @@ DATA_EXPORT_RETENTION_HOURS = int(os.environ.get('DATA_EXPORT_RETENTION_HOURS', 
 ```
 
 #### 2. Wire to frontend config
+
 **File**: `backend/open_webui/main.py`
 **Changes**: Add to the features dict near line 2347
 
@@ -92,6 +100,7 @@ DATA_EXPORT_RETENTION_HOURS = int(os.environ.get('DATA_EXPORT_RETENTION_HOURS', 
 Import `ENABLE_DATA_EXPORT` from `config` at the top of the file (alongside existing `ENABLE_ADMIN_EXPORT` import).
 
 #### 3. Frontend type
+
 **File**: `src/lib/stores/index.ts`
 **Changes**: Add to the `features` type near line 293
 
@@ -100,31 +109,35 @@ enable_data_export: boolean;
 ```
 
 #### 4. Helm values
+
 **File**: `helm/open-webui-tenant/values.yaml`
 **Changes**: Add near `enableAdminExport` (line ~307)
 
 ```yaml
-enableDataExport: "true"
-dataExportRetentionHours: "24"
+enableDataExport: 'true'
+dataExportRetentionHours: '24'
 ```
 
 #### 5. Helm configmap
+
 **File**: `helm/open-webui-tenant/templates/open-webui/configmap.yaml`
 **Changes**: Add near the admin export section (line ~224)
 
 ```yaml
-ENABLE_DATA_EXPORT: {{ .Values.openWebui.config.enableDataExport | quote }}
-DATA_EXPORT_RETENTION_HOURS: {{ .Values.openWebui.config.dataExportRetentionHours | quote }}
+ENABLE_DATA_EXPORT: { { .Values.openWebui.config.enableDataExport | quote } }
+DATA_EXPORT_RETENTION_HOURS: { { .Values.openWebui.config.dataExportRetentionHours | quote } }
 ```
 
 ### Success Criteria:
 
 #### Automated Verification:
+
 - [x] `npm run build` succeeds (frontend compiles with new type)
 - [ ] Backend starts without errors: `open-webui dev`
 - [ ] `ENABLE_DATA_EXPORT` appears in `/api/v1/config` response features
 
 #### Manual Verification:
+
 - [ ] Helm template renders correctly: `helm template` shows new env vars
 
 **Implementation Note**: After completing this phase and all automated verification passes, pause here for manual confirmation before proceeding.
@@ -134,11 +147,13 @@ DATA_EXPORT_RETENTION_HOURS: {{ .Values.openWebui.config.dataExportRetentionHour
 ## Phase 2: Export Service & Events
 
 ### Overview
+
 Create the core export service that collects all user data and writes it to a ZIP file, plus the Socket.IO event emitter.
 
 ### Changes Required:
 
 #### 1. Export events
+
 **File**: `backend/open_webui/services/export/__init__.py` (empty)
 **File**: `backend/open_webui/services/export/events.py`
 **Changes**: New file, following the pattern from `services/files/events.py`
@@ -182,6 +197,7 @@ async def emit_export_status(
 ```
 
 #### 2. Export service
+
 **File**: `backend/open_webui/services/export/service.py`
 **Changes**: New file with the core export logic
 
@@ -488,6 +504,7 @@ class ExportService:
 ```
 
 **Implementation notes:**
+
 - `generate_export` is synchronous because `BackgroundTasks` runs sync functions in the thread pool (same pattern as `process_uploaded_file` in `files.py`)
 - Uses `asyncio.run()` to emit Socket.IO events from sync context (same pattern as `files.py:146`)
 - Some model query methods (e.g., `get_prompts_by_user_id`, `get_tools_by_user_id`, `get_feedbacks_by_user_id`) may need to be added or verified — Phase 2 implementation should check which exist and add missing ones
@@ -495,11 +512,13 @@ class ExportService:
 ### Success Criteria:
 
 #### Automated Verification:
+
 - [ ] Backend starts without import errors
 - [ ] `ExportService.collect_user_data(user_id)` returns data for a test user
 - [ ] `ExportService.build_export_zip(user_id, data)` produces a valid ZIP
 
 #### Manual Verification:
+
 - [ ] Generated ZIP contains expected structure (manifest.json, data files, files/uploads/)
 - [ ] Cloud-synced KB files are metadata-only, local files include content
 
@@ -510,11 +529,13 @@ class ExportService:
 ## Phase 3: API Router & Background Task
 
 ### Overview
+
 Create the export router with endpoints to trigger, check status, and download exports. Wire into main.py with periodic cleanup.
 
 ### Changes Required:
 
 #### 1. Export router
+
 **File**: `backend/open_webui/routers/export.py`
 **Changes**: New file
 
@@ -609,6 +630,7 @@ async def delete_export(
 ```
 
 #### 2. Mount router in main.py
+
 **File**: `backend/open_webui/main.py`
 **Changes**: Add near the archives router mount (line ~1733)
 
@@ -619,6 +641,7 @@ app.include_router(export_router.router, prefix='/api/v1/export', tags=['export'
 ```
 
 #### 3. Periodic cleanup task
+
 **File**: `backend/open_webui/main.py`
 **Changes**: Add a periodic cleanup function near `periodic_archive_cleanup` (line ~699) and start it in lifespan (line ~765)
 
@@ -638,11 +661,13 @@ async def periodic_export_cleanup():
 ```
 
 In the lifespan startup (near line 765):
+
 ```python
 asyncio.create_task(periodic_export_cleanup())
 ```
 
 #### 4. Import config in main.py
+
 **File**: `backend/open_webui/main.py`
 **Changes**: Add `ENABLE_DATA_EXPORT` to the config imports and to the features dict
 
@@ -657,12 +682,14 @@ from open_webui.config import ENABLE_DATA_EXPORT
 ### Success Criteria:
 
 #### Automated Verification:
+
 - [ ] `npm run build` succeeds
 - [ ] Backend starts without errors
 - [ ] `POST /api/v1/export/data` returns 200 with `status: 'processing'`
 - [ ] `GET /api/v1/export/data/status` returns `status: 'none'` initially, then `status: 'ready'` after processing
 
 #### Manual Verification:
+
 - [ ] After triggering export, the ZIP appears in `data/cache/exports/{user_id}/`
 - [ ] The `/cache/exports/{user_id}/export-{ts}.zip` URL serves the file for download
 - [ ] Setting `ENABLE_DATA_EXPORT=false` returns 403 on all export endpoints
@@ -674,11 +701,13 @@ from open_webui.config import ENABLE_DATA_EXPORT
 ## Phase 4: Frontend UI
 
 ### Overview
+
 Add the "Download My Data" section to DataControls.svelte with Socket.IO listener, toast notification, and download trigger.
 
 ### Changes Required:
 
 #### 1. Export API client
+
 **File**: `src/lib/apis/export/index.ts`
 **Changes**: New file
 
@@ -724,10 +753,12 @@ export const deleteExport = async (token: string) => {
 ```
 
 #### 2. DataControls.svelte — Add "Download My Data" section
+
 **File**: `src/lib/components/chat/Settings/DataControls.svelte`
 **Changes**: Add export section, Socket.IO listener, and state management
 
 Add imports:
+
 ```typescript
 import { triggerDataExport, getExportStatus, deleteExport } from '$lib/apis/export';
 import { config, socket } from '$lib/stores';
@@ -735,6 +766,7 @@ import { WEBUI_BASE_URL } from '$lib/constants';
 ```
 
 Add state variables:
+
 ```typescript
 let exportStatus: 'none' | 'processing' | 'ready' = 'none';
 let exportPath: string | null = null;
@@ -742,78 +774,80 @@ let exportRequesting = false;
 ```
 
 Add `onMount` logic to check existing export status and register Socket.IO listener:
+
 ```typescript
 onMount(async () => {
-    if ($config?.features?.enable_data_export) {
-        try {
-            const status = await getExportStatus(localStorage.token);
-            exportStatus = status.status;
-            exportPath = status.export_path || null;
-        } catch (e) {
-            console.error('Failed to check export status:', e);
-        }
-    }
+	if ($config?.features?.enable_data_export) {
+		try {
+			const status = await getExportStatus(localStorage.token);
+			exportStatus = status.status;
+			exportPath = status.export_path || null;
+		} catch (e) {
+			console.error('Failed to check export status:', e);
+		}
+	}
 
-    const handleExportStatus = (data: any) => {
-        if (data.status === 'completed') {
-            exportStatus = 'ready';
-            exportPath = data.export_path;
-            exportRequesting = false;
-            toast.success($i18n.t('Your data export is ready for download.'));
-        } else if (data.status === 'failed') {
-            exportStatus = 'none';
-            exportRequesting = false;
-            toast.error($i18n.t('Data export failed: {{error}}', { error: data.error }));
-        } else if (data.status === 'processing') {
-            exportStatus = 'processing';
-        }
-    };
+	const handleExportStatus = (data: any) => {
+		if (data.status === 'completed') {
+			exportStatus = 'ready';
+			exportPath = data.export_path;
+			exportRequesting = false;
+			toast.success($i18n.t('Your data export is ready for download.'));
+		} else if (data.status === 'failed') {
+			exportStatus = 'none';
+			exportRequesting = false;
+			toast.error($i18n.t('Data export failed: {{error}}', { error: data.error }));
+		} else if (data.status === 'processing') {
+			exportStatus = 'processing';
+		}
+	};
 
-    $socket?.on('export:status', handleExportStatus);
+	$socket?.on('export:status', handleExportStatus);
 
-    return () => {
-        $socket?.off('export:status', handleExportStatus);
-    };
+	return () => {
+		$socket?.off('export:status', handleExportStatus);
+	};
 });
 ```
 
 Add handler functions:
+
 ```typescript
 const requestDataExport = async () => {
-    exportRequesting = true;
-    try {
-        const res = await triggerDataExport(localStorage.token);
-        if (res.status === 'ready') {
-            exportStatus = 'ready';
-            exportPath = res.export_path;
-            exportRequesting = false;
-        } else {
-            exportStatus = 'processing';
-            toast.success($i18n.t('Data export started. You will be notified when it is ready.'));
-        }
-    } catch (e) {
-        exportRequesting = false;
-        toast.error($i18n.t('Failed to start data export.'));
-    }
+	exportRequesting = true;
+	try {
+		const res = await triggerDataExport(localStorage.token);
+		if (res.status === 'ready') {
+			exportStatus = 'ready';
+			exportPath = res.export_path;
+			exportRequesting = false;
+		} else {
+			exportStatus = 'processing';
+			toast.success($i18n.t('Data export started. You will be notified when it is ready.'));
+		}
+	} catch (e) {
+		exportRequesting = false;
+		toast.error($i18n.t('Failed to start data export.'));
+	}
 };
 
 const downloadDataExport = () => {
-    if (exportPath) {
-        const a = document.createElement('a');
-        a.href = `${WEBUI_BASE_URL}/cache/${exportPath}`;
-        a.download = `my-data-export.zip`;
-        a.click();
-    }
+	if (exportPath) {
+		const a = document.createElement('a');
+		a.href = `${WEBUI_BASE_URL}/cache/${exportPath}`;
+		a.download = `my-data-export.zip`;
+		a.click();
+	}
 };
 
 const deleteDataExport = async () => {
-    try {
-        await deleteExport(localStorage.token);
-        exportStatus = 'none';
-        exportPath = null;
-    } catch (e) {
-        toast.error($i18n.t('Failed to delete export.'));
-    }
+	try {
+		await deleteExport(localStorage.token);
+		exportStatus = 'none';
+		exportPath = null;
+	} catch (e) {
+		toast.error($i18n.t('Failed to delete export.'));
+	}
 };
 ```
 
@@ -821,74 +855,90 @@ Add UI section in the template, after the Files section (after line ~300):
 
 ```svelte
 {#if $config?.features?.enable_data_export}
-    <div>
-        <div class="mb-1 text-sm font-medium">{$i18n.t('Data Export')}</div>
-        <div class="text-xs text-gray-500 dark:text-gray-400 mb-2">
-            {$i18n.t('Download all your data including chats, notes, memories, prompts, tools, models, and locally uploaded files.')}
-        </div>
+	<div>
+		<div class="mb-1 text-sm font-medium">{$i18n.t('Data Export')}</div>
+		<div class="text-xs text-gray-500 dark:text-gray-400 mb-2">
+			{$i18n.t(
+				'Download all your data including chats, notes, memories, prompts, tools, models, and locally uploaded files.'
+			)}
+		</div>
 
-        <div>
-            {#if exportStatus === 'none'}
-                <div class="py-0.5 flex w-full justify-between">
-                    <div class="self-center text-xs">{$i18n.t('Download My Data')}</div>
-                    <button
-                        class="p-1 px-3 text-xs flex rounded-sm transition"
-                        on:click={requestDataExport}
-                        disabled={exportRequesting}
-                        type="button"
-                    >
-                        <span class="self-center">
-                            {#if exportRequesting}
-                                {$i18n.t('Starting...')}
-                            {:else}
-                                {$i18n.t('Export')}
-                            {/if}
-                        </span>
-                    </button>
-                </div>
-            {:else if exportStatus === 'processing'}
-                <div class="py-0.5 flex w-full justify-between">
-                    <div class="self-center text-xs">{$i18n.t('Export in progress...')}</div>
-                    <div class="p-1 px-3 text-xs flex">
-                        <svg class="animate-spin h-4 w-4" viewBox="0 0 24 24">
-                            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" fill="none" />
-                            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
-                        </svg>
-                    </div>
-                </div>
-            {:else if exportStatus === 'ready'}
-                <div class="py-0.5 flex w-full justify-between">
-                    <div class="self-center text-xs">{$i18n.t('Export ready')}</div>
-                    <div class="flex gap-1">
-                        <button
-                            class="p-1 px-3 text-xs flex rounded-sm transition"
-                            on:click={downloadDataExport}
-                            type="button"
-                        >
-                            <span class="self-center">{$i18n.t('Download')}</span>
-                        </button>
-                        <button
-                            class="p-1 px-3 text-xs flex rounded-sm transition text-red-500"
-                            on:click={deleteDataExport}
-                            type="button"
-                        >
-                            <span class="self-center">{$i18n.t('Delete')}</span>
-                        </button>
-                    </div>
-                </div>
-            {/if}
-        </div>
-    </div>
+		<div>
+			{#if exportStatus === 'none'}
+				<div class="py-0.5 flex w-full justify-between">
+					<div class="self-center text-xs">{$i18n.t('Download My Data')}</div>
+					<button
+						class="p-1 px-3 text-xs flex rounded-sm transition"
+						on:click={requestDataExport}
+						disabled={exportRequesting}
+						type="button"
+					>
+						<span class="self-center">
+							{#if exportRequesting}
+								{$i18n.t('Starting...')}
+							{:else}
+								{$i18n.t('Export')}
+							{/if}
+						</span>
+					</button>
+				</div>
+			{:else if exportStatus === 'processing'}
+				<div class="py-0.5 flex w-full justify-between">
+					<div class="self-center text-xs">{$i18n.t('Export in progress...')}</div>
+					<div class="p-1 px-3 text-xs flex">
+						<svg class="animate-spin h-4 w-4" viewBox="0 0 24 24">
+							<circle
+								class="opacity-25"
+								cx="12"
+								cy="12"
+								r="10"
+								stroke="currentColor"
+								stroke-width="4"
+								fill="none"
+							/>
+							<path
+								class="opacity-75"
+								fill="currentColor"
+								d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+							/>
+						</svg>
+					</div>
+				</div>
+			{:else if exportStatus === 'ready'}
+				<div class="py-0.5 flex w-full justify-between">
+					<div class="self-center text-xs">{$i18n.t('Export ready')}</div>
+					<div class="flex gap-1">
+						<button
+							class="p-1 px-3 text-xs flex rounded-sm transition"
+							on:click={downloadDataExport}
+							type="button"
+						>
+							<span class="self-center">{$i18n.t('Download')}</span>
+						</button>
+						<button
+							class="p-1 px-3 text-xs flex rounded-sm transition text-red-500"
+							on:click={deleteDataExport}
+							type="button"
+						>
+							<span class="self-center">{$i18n.t('Delete')}</span>
+						</button>
+					</div>
+				</div>
+			{/if}
+		</div>
+	</div>
 {/if}
 ```
 
 ### Success Criteria:
 
 #### Automated Verification:
+
 - [ ] `npm run build` succeeds
 - [ ] No new TypeScript errors from `npm run check`
 
 #### Manual Verification:
+
 - [ ] "Data Export" section appears in Settings > Data Controls when `ENABLE_DATA_EXPORT=true`
 - [ ] "Data Export" section hidden when `ENABLE_DATA_EXPORT=false`
 - [ ] Clicking "Export" shows "Starting..." briefly, then switches to "Export in progress..." spinner
@@ -904,11 +954,13 @@ Add UI section in the template, after the Files section (after line ~300):
 ## Phase 5: i18n Translations
 
 ### Overview
+
 Add English and Dutch translations for all new user-facing strings.
 
 ### Changes Required:
 
 #### 1. English translations
+
 **File**: `src/lib/i18n/locales/en-US/translation.json`
 **Changes**: Add entries (alphabetically sorted, empty string = use key itself)
 
@@ -931,6 +983,7 @@ Add English and Dutch translations for all new user-facing strings.
 Note: Many of these keys may already exist (e.g., "Delete", "Download", "Export"). Only add missing ones.
 
 #### 2. Dutch translations
+
 **File**: `src/lib/i18n/locales/nl-NL/translation.json`
 **Changes**: Add entries (alphabetically sorted)
 
@@ -951,10 +1004,12 @@ Note: Many of these keys may already exist (e.g., "Delete", "Download", "Export"
 ### Success Criteria:
 
 #### Automated Verification:
+
 - [ ] `npm run build` succeeds
 - [ ] Translation JSON files are valid JSON
 
 #### Manual Verification:
+
 - [ ] UI shows Dutch strings when language is set to nl-NL
 - [ ] All export-related text is translated
 
@@ -963,33 +1018,35 @@ Note: Many of these keys may already exist (e.g., "Delete", "Download", "Export"
 ## Phase 6: Verify Missing Model Methods
 
 ### Overview
+
 Verify that all model query methods used by the export service exist. Add any missing `get_*_by_user_id` methods.
 
 ### Changes Required:
 
 The export service calls these methods — each must be verified/added:
 
-| Method | Model File | Expected |
-|--------|-----------|----------|
-| `Users.get_user_by_id(user_id)` | `models/users.py` | Exists |
-| `Chats.get_chats_by_user_id(user_id)` | `models/chats.py` | Exists |
-| `Memories.get_memories_by_user_id(user_id)` | `models/memories.py` | Verify |
-| `Notes.get_notes_by_user_id(user_id)` | `models/notes.py` | Verify |
-| `Prompts.get_prompts_by_user_id(user_id)` | `models/prompts.py` | Verify |
-| `Tools.get_tools_by_user_id(user_id)` | `models/tools.py` | Verify |
-| `Models.get_models_by_user_id(user_id)` | `models/models.py` | Verify |
-| `Feedbacks.get_feedbacks_by_user_id(user_id)` | `models/feedbacks.py` | Verify |
-| `Tags.get_tags_by_user_id(user_id)` | `models/tags.py` | Verify |
-| `Folders.get_folders_by_user_id(user_id)` | `models/folders.py` | Verify |
-| `Files.get_files_by_user_id(user_id)` | `models/files.py` | Verify |
-| `Knowledges.get_knowledge_bases_by_user_id(user_id)` | `models/knowledge.py` | Verify |
-| `Files.get_file_by_id(file_id)` | `models/files.py` | Exists |
+| Method                                               | Model File            | Expected |
+| ---------------------------------------------------- | --------------------- | -------- |
+| `Users.get_user_by_id(user_id)`                      | `models/users.py`     | Exists   |
+| `Chats.get_chats_by_user_id(user_id)`                | `models/chats.py`     | Exists   |
+| `Memories.get_memories_by_user_id(user_id)`          | `models/memories.py`  | Verify   |
+| `Notes.get_notes_by_user_id(user_id)`                | `models/notes.py`     | Verify   |
+| `Prompts.get_prompts_by_user_id(user_id)`            | `models/prompts.py`   | Verify   |
+| `Tools.get_tools_by_user_id(user_id)`                | `models/tools.py`     | Verify   |
+| `Models.get_models_by_user_id(user_id)`              | `models/models.py`    | Verify   |
+| `Feedbacks.get_feedbacks_by_user_id(user_id)`        | `models/feedbacks.py` | Verify   |
+| `Tags.get_tags_by_user_id(user_id)`                  | `models/tags.py`      | Verify   |
+| `Folders.get_folders_by_user_id(user_id)`            | `models/folders.py`   | Verify   |
+| `Files.get_files_by_user_id(user_id)`                | `models/files.py`     | Verify   |
+| `Knowledges.get_knowledge_bases_by_user_id(user_id)` | `models/knowledge.py` | Verify   |
+| `Files.get_file_by_id(file_id)`                      | `models/files.py`     | Exists   |
 
 During implementation, check each model file. Where a `get_*_by_user_id` method doesn't exist, add it following the pattern of existing query methods in that file. These are simple `SELECT WHERE user_id = :user_id` queries.
 
 ### Success Criteria:
 
 #### Automated Verification:
+
 - [ ] All model methods called by `ExportService.collect_user_data()` exist and return data
 - [ ] Backend starts without errors
 
@@ -998,6 +1055,7 @@ During implementation, check each model file. Where a `get_*_by_user_id` method 
 ## Testing Strategy
 
 ### Unit Tests:
+
 - `ExportService.collect_user_data()` returns expected structure for a user with data
 - `ExportService.build_export_zip()` produces a valid ZIP with correct structure
 - `ExportService._get_local_file_ids()` correctly filters out cloud-synced files
@@ -1005,11 +1063,13 @@ During implementation, check each model file. Where a `get_*_by_user_id` method 
 - API endpoints return correct status codes when feature is disabled
 
 ### Integration Tests:
+
 - Full flow: trigger export → wait for completion → download ZIP → verify contents
 - Export for user with no data produces valid (minimal) ZIP
 - Export for user with cloud KBs only includes metadata, not files
 
 ### Manual Testing Steps:
+
 1. Create a user with chats, notes, memories, prompts, a local KB with files, and a cloud-synced KB
 2. Trigger export from Settings > Data Controls
 3. Verify toast notification appears when ready

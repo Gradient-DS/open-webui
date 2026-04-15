@@ -4,7 +4,7 @@ researcher: Claude
 git_commit: 4ff39f4a7dc789f6da1caad9e4555ef474b595b1
 branch: fix/database-migrations
 repository: open-webui
-topic: "access_grant table missing after upstream merge - migration failure analysis"
+topic: 'access_grant table missing after upstream merge - migration failure analysis'
 tags: [research, codebase, alembic, migrations, access-grant, postgresql, upstream-merge]
 status: complete
 last_updated: 2026-03-22
@@ -22,9 +22,11 @@ last_updated_by: Claude
 ## Research Question
 
 Since the recent upstream merge (v0.8.9, commit `c26ae48d6`), new tenants fail at runtime with:
+
 ```
 sqlalchemy.exc.ProgrammingError: (psycopg2.errors.UndefinedTable) relation "access_grant" does not exist
 ```
+
 Why is the `access_grant` table not being created during migrations?
 
 ## Summary
@@ -90,6 +92,7 @@ This migration reads from the old `prompt` table including the `access_control` 
 This means the subsequent `op.create_table("prompt_new", ...)` on line 55 fails, which cascades to ALL remaining migrations in the same transaction, including `f1e2d3c4b5a6` (access_grant creation).
 
 **Fix**: Use a SAVEPOINT (nested transaction) around the try/except:
+
 ```python
 savepoint = conn.begin_nested()
 try:
@@ -112,12 +115,14 @@ with connectable.connect() as connection:
 ```
 
 All 39+ migrations run in a SINGLE transaction. If migration N fails:
+
 - Migrations 1 through N-1 are rolled back (despite succeeding)
 - All `alembic_version` stamps are rolled back
 - On next restart, ALL migrations run again from scratch
 - If the same migration keeps failing, the app can never progress
 
 **Fix**: Enable per-migration transactions:
+
 ```python
 context.configure(
     connection=connection,
@@ -146,6 +151,7 @@ def run_migrations():
 The deployed code at HEAD does NOT re-raise the exception. The app starts and serves requests against missing tables, producing the `UndefinedTable` errors at runtime.
 
 **Fix**: Re-raise the exception so the app fails fast:
+
 ```python
     except Exception as e:
         log.exception(f"Error running migrations: {e}")
@@ -159,6 +165,7 @@ A local change adding `raise` already exists in the working copy but is not yet 
 **Migration**: `backend/open_webui/migrations/versions/f1e2d3c4b5a6_add_access_grant_table.py`
 
 This migration:
+
 1. Creates the `access_grant` table with columns: `id`, `resource_type`, `resource_id`, `principal_type`, `principal_id`, `permission`, `created_at`
 2. Creates indexes: `idx_access_grant_resource`, `idx_access_grant_principal`
 3. Backfills from JSON `access_control` columns on 7 tables (knowledge, prompt, tool, model, note, channel, file)
@@ -169,6 +176,7 @@ The migration itself is well-guarded (`if "access_grant" not in existing_tables:
 ### Impact: `access_grant` is Referenced Everywhere
 
 The `access_grant` table is used by:
+
 - **All resource routers**: knowledge, prompts, tools, models, notes, channels, files, skills (8 routers)
 - **WebSocket handler**: channel/note permission checks
 - **RAG retrieval**: knowledge base access filtering
@@ -180,6 +188,7 @@ A missing `access_grant` table makes the entire application non-functional for a
 ### Deployment Context
 
 **Helm chart**: `helm/open-webui-tenant/templates/open-webui/configmap.yaml`
+
 - No `ENABLE_DB_MIGRATIONS` override → defaults to `True`
 - No `DATABASE_SCHEMA` override → defaults to `None` (public schema)
 - Each tenant gets isolated PostgreSQL via namespace-local service

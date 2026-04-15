@@ -125,7 +125,12 @@
 	<!-- Folder sources as collapsible sections -->
 	{#each folderSources as source (source.item_id)}
 		{@const tree = folderTrees[source.item_id]}
-		{@const totalFileCount = (folderSources.length === 1 && totalFiles != null) ? totalFiles : (tree ? countAllFiles(tree) : 0)}
+		{@const totalFileCount =
+			folderSources.length === 1 && totalFiles != null
+				? totalFiles
+				: tree
+					? countAllFiles(tree)
+					: 0}
 		<div class="w-full">
 			<!-- Folder header -->
 			<div
@@ -207,9 +212,7 @@
 											<div class="line-clamp-1 text-xs">
 												{file?.name ?? file?.meta?.name}
 												{#if file?.meta?.size}
-													<span class="text-gray-400"
-														>{formatFileSize(file?.meta?.size)}</span
-													>
+													<span class="text-gray-400">{formatFileSize(file?.meta?.size)}</span>
 												{/if}
 											</div>
 										</div>
@@ -218,14 +221,10 @@
 									<div class="flex items-center gap-2 shrink-0 text-xs">
 										{#if file?.added_at || file?.updated_at}
 											<Tooltip
-												content={dayjs(
-													(file.added_at ?? file.updated_at) * 1000
-												).format('LLLL')}
+												content={dayjs((file.added_at ?? file.updated_at) * 1000).format('LLLL')}
 											>
 												<div>
-													{dayjs(
-														(file.added_at ?? file.updated_at) * 1000
-													).fromNow()}
+													{dayjs((file.added_at ?? file.updated_at) * 1000).fromNow()}
 												</div>
 											</Tooltip>
 										{/if}
@@ -265,22 +264,15 @@
 						<div class="line-clamp-1 text-sm">
 							{file?.name ?? file?.meta?.name}
 							{#if file?.meta?.size}
-								<span class="text-xs text-gray-500"
-									>{formatFileSize(file?.meta?.size)}</span
-								>
+								<span class="text-xs text-gray-500">{formatFileSize(file?.meta?.size)}</span>
 							{/if}
 						</div>
-
 					</div>
 				</div>
 
 				<div class="flex items-center gap-2 shrink-0">
 					{#if file?.added_at || file?.updated_at}
-						<Tooltip
-							content={dayjs((file.added_at ?? file.updated_at) * 1000).format(
-								'LLLL'
-							)}
-						>
+						<Tooltip content={dayjs((file.added_at ?? file.updated_at) * 1000).format('LLLL')}>
 							<div>
 								{dayjs((file.added_at ?? file.updated_at) * 1000).fromNow()}
 							</div>
@@ -296,9 +288,7 @@
 							<div class="shrink-0 text-gray-500">
 								{$i18n.t('By {{name}}', {
 									name: capitalizeFirstLetter(
-										file?.user?.name ??
-											file?.user?.email ??
-											$i18n.t('Deleted User')
+										file?.user?.name ?? file?.user?.email ?? $i18n.t('Deleted User')
 									)
 								})}
 							</div>
@@ -314,7 +304,10 @@
 							class="p-1 rounded-full hover:bg-gray-100 dark:hover:bg-gray-850 transition"
 							type="button"
 							on:click={() => {
-								if ((file?.meta?.source === 'onedrive' || file?.meta?.source === 'google_drive') && file?.meta?.source_item_id) {
+								if (
+									(file?.meta?.source === 'onedrive' || file?.meta?.source === 'google_drive') &&
+									file?.meta?.source_item_id
+								) {
 									// OneDrive loose file: remove via source removal
 									onRemoveSource(file.meta.source_item_id, file?.name ?? file?.meta?.name);
 								} else {

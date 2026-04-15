@@ -353,7 +353,11 @@
 		};
 		setupKeyboardShortcuts();
 
-		if (isFeatureEnabled('changelog') && $user?.role === 'admin' && ($settings?.showChangelog ?? true)) {
+		if (
+			isFeatureEnabled('changelog') &&
+			$user?.role === 'admin' &&
+			($settings?.showChangelog ?? true)
+		) {
 			showChangelog.set($settings?.version !== $config.version);
 		}
 
@@ -368,7 +372,11 @@
 		}
 
 		// Check for version updates
-		if (isFeatureEnabled('changelog') && $user?.role === 'admin' && $config?.features?.enable_version_update_check) {
+		if (
+			isFeatureEnabled('changelog') &&
+			$user?.role === 'admin' &&
+			$config?.features?.enable_version_update_check
+		) {
 			// Check if the user has dismissed the update toast in the last 24 hours
 			if (localStorage.dismissedUpdateToast) {
 				const dismissedUpdateToast = new Date(Number(localStorage.dismissedUpdateToast));

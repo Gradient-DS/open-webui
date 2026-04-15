@@ -80,12 +80,16 @@
 
 	const getMsgFeedbacks = async () => {
 		try {
-			const res = await getFeedbackItems(localStorage.token, msgOrderBy, msgDirection, msgPage, 'message').catch(
-				(error) => {
-					toast.error(`${error}`);
-					return null;
-				}
-			);
+			const res = await getFeedbackItems(
+				localStorage.token,
+				msgOrderBy,
+				msgDirection,
+				msgPage,
+				'message'
+			).catch((error) => {
+				toast.error(`${error}`);
+				return null;
+			});
 
 			if (res) {
 				msgItems = res.items;
@@ -98,12 +102,16 @@
 
 	const getConvFeedbacks = async () => {
 		try {
-			const res = await getFeedbackItems(localStorage.token, convOrderBy, convDirection, convPage, 'conversation').catch(
-				(error) => {
-					toast.error(`${error}`);
-					return null;
-				}
-			);
+			const res = await getFeedbackItems(
+				localStorage.token,
+				convOrderBy,
+				convDirection,
+				convPage,
+				'conversation'
+			).catch((error) => {
+				toast.error(`${error}`);
+				return null;
+			});
 
 			if (res) {
 				convItems = res.items;
@@ -508,10 +516,7 @@
 								</div>
 							</th>
 
-							<th
-								scope="col"
-								class="px-2.5 py-2 cursor-pointer select-none"
-							>
+							<th scope="col" class="px-2.5 py-2 cursor-pointer select-none">
 								<div class="flex gap-1.5 items-center">
 									{$i18n.t('Comment')}
 								</div>
@@ -594,7 +599,10 @@
 
 								<td class="px-3 py-1 text-right font-medium text-gray-900 dark:text-white w-max">
 									<div class=" flex justify-end">
-										<Badge type="info" content="{feedback?.data?.rating ?? '-'} / {feedback?.meta?.scale_max ?? '?'}" />
+										<Badge
+											type="info"
+											content="{feedback?.data?.rating ?? '-'} / {feedback?.meta?.scale_max ?? '?'}"
+										/>
 									</div>
 								</td>
 

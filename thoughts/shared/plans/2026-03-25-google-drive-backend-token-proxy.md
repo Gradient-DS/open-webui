@@ -11,6 +11,7 @@ Replace the Google Drive frontend GIS (Google Identity Services) implicit token 
 **OneDrive comparison:** OneDrive uses MSAL's `acquireTokenSilent()` which automatically manages refresh tokens in the browser cache, giving seamless token renewal without user interaction.
 
 **Existing infrastructure:** The backend already has a complete OAuth code flow for Google Drive (used for background sync scheduling):
+
 - `GET /api/v1/google-drive/auth/initiate` — redirects to Google consent screen
 - OAuth callback stores tokens (with refresh token) encrypted in `oauth_session` table
 - `services/google_drive/token_refresh.py` — auto-refreshes expired tokens using refresh grants
@@ -19,6 +20,7 @@ Replace the Google Drive frontend GIS (Google Identity Services) implicit token 
 The fix: make the frontend use the backend's stored token instead of getting its own via GIS.
 
 ### Key Discoveries:
+
 - Backend token storage is per-user per-provider (`oauth_sessions.py:36`), not per-KB
 - `get_valid_access_token` in `sync/token_refresh.py:18` takes `knowledge_id` but only uses it for logging — the actual token lookup is by `(provider, user_id)`
 - `auth/initiate` currently requires `knowledge_id` (`google_drive_sync.py:181`) — needs to be optional for the chat picker flow (no KB context)
@@ -35,6 +37,7 @@ The fix: make the frontend use the backend's stored token instead of getting its
 - Manual syncs pass the token through the backend (no frontend token in request body)
 
 ### Verification:
+
 1. User authorizes Google Drive → token stored in backend
 2. Open Google Drive picker in chat → works without re-auth
 3. Wait >1 hour → picker still works (backend auto-refreshed the token)
@@ -53,6 +56,7 @@ The fix: make the frontend use the backend's stored token instead of getting its
 ## Implementation Approach
 
 The backend already does 90% of what we need. The main work is:
+
 1. Expose a simple endpoint to get a valid (auto-refreshed) access token
 2. Make `auth/initiate` work without a `knowledge_id` (for the chat flow)
 3. Rewrite the frontend token management to use the backend instead of GIS
@@ -63,11 +67,13 @@ The backend already does 90% of what we need. The main work is:
 ## Phase 1: Backend — Access Token Endpoint + Optional Knowledge ID
 
 ### Overview
+
 Add a `GET /auth/access-token` endpoint that returns a valid access token (refreshing if expired), and make `auth/initiate` work without a `knowledge_id`.
 
 ### Changes Required:
 
 #### 1. New access-token endpoint
+
 **File**: `backend/open_webui/routers/google_drive_sync.py`
 **Changes**: Add endpoint after the existing auth endpoints (~line 279)
 
@@ -96,6 +102,7 @@ async def get_access_token(
 ```
 
 #### 2. Make knowledge_id optional in auth/initiate
+
 **File**: `backend/open_webui/routers/google_drive_sync.py`
 **Changes**: Modify `initiate_auth` (~line 180)
 
@@ -135,6 +142,7 @@ async def initiate_auth(
 ```
 
 #### 3. Make access_token optional in SyncItemsRequest
+
 **File**: `backend/open_webui/routers/google_drive_sync.py`
 **Changes**: Modify `SyncItemsRequest` and `sync_items`
 
@@ -199,6 +207,7 @@ async def sync_items(
 ```
 
 #### 4. Add access-token function to the frontend API client
+
 **File**: `src/lib/apis/sync/index.ts`
 **Changes**: Add `getAccessToken` to the `createSyncApi` factory
 
@@ -211,6 +220,7 @@ getAccessToken(token: string): Promise<{ access_token: string }> {
 ```
 
 #### 5. Re-export from googledrive API
+
 **File**: `src/lib/apis/googledrive/index.ts`
 **Changes**: Add export
 
@@ -221,11 +231,13 @@ export const getAccessToken = api.getAccessToken;
 ### Success Criteria:
 
 #### Automated Verification:
+
 - [x] Backend starts without errors: `open-webui dev`
 - [x] `npm run build` succeeds
 - [ ] `curl -H "Authorization: Bearer <jwt>" localhost:8080/api/v1/google-drive/auth/access-token` returns 401 (no token) or 200 with access_token
 
 #### Manual Verification:
+
 - [ ] `GET /auth/initiate` works without `knowledge_id` parameter
 - [ ] `GET /auth/access-token` returns a valid token after authorization
 - [ ] `POST /sync/items` works without `access_token` in body (uses stored token)
@@ -237,11 +249,13 @@ export const getAccessToken = api.getAccessToken;
 ## Phase 2: Frontend — Replace GIS with Backend Token Management
 
 ### Overview
+
 Rewrite `google-drive-picker.ts` to get tokens from the backend instead of GIS. Add an `ensureAuthorized` flow that checks for a stored token and triggers the OAuth popup if needed.
 
 ### Changes Required:
 
 #### 1. Rewrite google-drive-picker.ts
+
 **File**: `src/lib/utils/google-drive-picker.ts`
 **Changes**: Replace GIS auth with backend-proxied auth. Keep Picker API loading.
 
@@ -400,7 +414,9 @@ export interface KnowledgePickerResult {
 	accessToken: string;
 }
 
-export const createKnowledgePicker = (knowledgeId?: string): Promise<KnowledgePickerResult | null> => {
+export const createKnowledgePicker = (
+	knowledgeId?: string
+): Promise<KnowledgePickerResult | null> => {
 	return new Promise(async (resolve, reject) => {
 		try {
 			await initialize();
@@ -535,6 +551,7 @@ export const createPicker = () => {
 ```
 
 Key changes:
+
 - Removed: `loadGoogleAuthApi()` (GIS script loading), `oauthToken` module variable, GIS `initTokenClient` usage
 - Added: `fetchBackendAccessToken()`, `triggerAuthPopup()`, `ensureAuthorized()` flow
 - `getAuthToken()` now accepts optional `knowledgeId` parameter
@@ -543,6 +560,7 @@ Key changes:
 - `initialize()` no longer loads GIS auth script (only Picker API)
 
 #### 2. Update KnowledgeBase.svelte — Google Drive sync flows
+
 **File**: `src/lib/components/workspace/Knowledge/KnowledgeBase.svelte`
 
 **Change imports** (~line 46-50): Remove unused imports
@@ -551,8 +569,8 @@ Key changes:
 // Remove: clearGoogleDriveToken, getAuthToken as getGoogleDriveAuthToken, initialize as initializeGoogleDrive
 // Keep:
 import {
-    startGoogleDriveSyncItems,
-    type SyncItem as GoogleDriveSyncItem,
+	startGoogleDriveSyncItems,
+	type SyncItem as GoogleDriveSyncItem
 } from '$lib/apis/googledrive';
 import { createKnowledgePicker } from '$lib/utils/google-drive-picker';
 ```
@@ -611,10 +629,12 @@ The resync no longer needs `clearGoogleDriveToken()`, `initializeGoogleDrive()`,
 ### Success Criteria:
 
 #### Automated Verification:
+
 - [x] `npm run build` succeeds
 - [x] No TypeScript errors related to changed imports
 
 #### Manual Verification:
+
 - [ ] **First-time auth**: Click Google Drive in chat → OAuth popup appears → consent → picker opens → file downloads correctly
 - [ ] **Subsequent use**: Click Google Drive again → picker opens immediately (no popup)
 - [ ] **Page refresh**: Refresh page → click Google Drive → picker opens immediately (token persists server-side)
@@ -630,36 +650,42 @@ The resync no longer needs `clearGoogleDriveToken()`, `initializeGoogleDrive()`,
 ## Phase 3: Cleanup
 
 ### Overview
+
 Remove unused GIS-related code and update the frontend `SyncItemsRequest` type to make `access_token` optional.
 
 ### Changes Required:
 
 #### 1. Update frontend SyncItemsRequest type
+
 **File**: `src/lib/apis/googledrive/index.ts`
 **Changes**: Make `access_token` optional
 
 ```typescript
 export interface SyncItemsRequest {
-    knowledge_id: string;
-    items: SyncItem[];
-    access_token?: string;  // Optional — backend uses stored token if omitted
+	knowledge_id: string;
+	items: SyncItem[];
+	access_token?: string; // Optional — backend uses stored token if omitted
 }
 ```
 
 #### 2. Remove GIS script reference if it exists elsewhere
+
 **File**: `src/app.html` or equivalent
 **Changes**: Check for and remove any `<script src="https://accounts.google.com/gsi/client">` if present. (The old `loadGoogleAuthApi()` loaded it dynamically, so there shouldn't be a static reference, but verify.)
 
 #### 3. Remove unused `google.accounts.oauth2` TypeScript types
+
 If there are any type declarations for GIS in the project (e.g., in `src/app.d.ts` or a `types/` file), remove the `google.accounts.oauth2` types. Keep the `google.picker` types as those are still used.
 
 ### Success Criteria:
 
 #### Automated Verification:
+
 - [x] `npm run build` succeeds
 - [x] No references to `google.accounts.oauth2` or `initTokenClient` in codebase
 
 #### Manual Verification:
+
 - [ ] All Phase 2 manual tests still pass
 
 ---
@@ -667,6 +693,7 @@ If there are any type declarations for GIS in the project (e.g., in `src/app.d.t
 ## Testing Strategy
 
 ### Manual Testing Steps:
+
 1. **Clean slate**: Clear any existing Google Drive OAuth session from DB → verify picker prompts for auth
 2. **Auth flow**: Complete auth popup → verify token appears in `oauth_session` table
 3. **Picker with stored token**: Open picker → verify no popup, picker loads immediately
@@ -676,6 +703,7 @@ If there are any type declarations for GIS in the project (e.g., in `src/app.d.t
 7. **Revoke token**: Call `POST /auth/revoke/{knowledge_id}` → verify next picker use triggers re-auth
 
 ### Edge Cases:
+
 - User denies consent in popup → error should be shown, picker should not open
 - Popup blocked by browser → should fail gracefully with error message
 - Backend has no `GOOGLE_CLIENT_SECRET` configured → 400 error on access-token endpoint

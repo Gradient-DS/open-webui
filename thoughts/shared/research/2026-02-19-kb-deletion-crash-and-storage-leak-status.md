@@ -4,7 +4,7 @@ researcher: claude
 git_commit: 8d50a2d4f9118bea8a5199d4dcd1bfa0466af5e3
 branch: feat/sync-improvements
 repository: open-webui
-topic: "KB deletion crash + storage leak fix status"
+topic: 'KB deletion crash + storage leak fix status'
 tags: [research, codebase, knowledge, deletion, storage, s3, performance, crash, event-loop]
 status: complete
 last_updated: 2026-02-19
@@ -39,21 +39,21 @@ last_updated_by: claude
 
 The knowledge router at `backend/open_webui/routers/knowledge.py` now uses `DeletionService.delete_file()` in all three deletion paths:
 
-| Path | Line | Status |
-|------|------|--------|
-| `DELETE /{id}/delete` (orphan cleanup) | `knowledge.py:828` | **Fixed** — calls `DeletionService.delete_file(file_id)` |
+| Path                                                    | Line               | Status                                                             |
+| ------------------------------------------------------- | ------------------ | ------------------------------------------------------------------ |
+| `DELETE /{id}/delete` (orphan cleanup)                  | `knowledge.py:828` | **Fixed** — calls `DeletionService.delete_file(file_id)`           |
 | `POST /{id}/file/remove` (local KB, `delete_file=True`) | `knowledge.py:726` | **Fixed** — calls `DeletionService.delete_file(form_data.file_id)` |
-| `POST /{id}/file/remove` (non-local KB, orphan) | `knowledge.py:735` | **Fixed** — calls `DeletionService.delete_file(form_data.file_id)` |
+| `POST /{id}/file/remove` (non-local KB, orphan)         | `knowledge.py:735` | **Fixed** — calls `DeletionService.delete_file(form_data.file_id)` |
 
 #### NOT Fixed (sync worker)
 
 The OneDrive sync worker at `backend/open_webui/services/onedrive/sync_worker.py` does **not** import or use `DeletionService`. It has its own inline cleanup that omits `Storage.delete_file()`:
 
-| Path | Lines | Vectors | Storage | DB |
-|------|-------|---------|---------|-----|
-| `_handle_deleted_item` (delta deletion) | 916-956 | Cleaned | **Leaked** | Cleaned |
-| `_handle_revoked_source` (source removed) | 547-607 | Cleaned | **Leaked** | Cleaned |
-| File update (content changed) | 1062-1106 | N/A | Overwritten* | Updated |
+| Path                                      | Lines     | Vectors | Storage       | DB      |
+| ----------------------------------------- | --------- | ------- | ------------- | ------- |
+| `_handle_deleted_item` (delta deletion)   | 916-956   | Cleaned | **Leaked**    | Cleaned |
+| `_handle_revoked_source` (source removed) | 547-607   | Cleaned | **Leaked**    | Cleaned |
+| File update (content changed)             | 1062-1106 | N/A     | Overwritten\* | Updated |
 
 \* File update uses deterministic filenames so storage is overwritten in-place — except if the file is renamed on OneDrive, which creates a new key and orphans the old one.
 
@@ -88,16 +88,16 @@ In FastAPI, `async def` handlers run on the main asyncio event loop. Synchronous
 
 Each call to `DeletionService.delete_file()` (`service.py:48-125`) performs:
 
-| Operation | Type | Count |
-|-----------|------|-------|
-| `Files.get_file_by_id()` | SQL query | 1 |
-| `Knowledges.get_knowledge_files_by_file_id()` | SQL query | 1 |
-| `VECTOR_DB_CLIENT.delete(filter={"file_id": ...})` | Vector DB call (per KB ref) | M |
-| `VECTOR_DB_CLIENT.delete(filter={"hash": ...})` | Vector DB call (per KB ref) | M |
-| `VECTOR_DB_CLIENT.has_collection(f"file-{id}")` | Vector DB call | 1 |
-| `VECTOR_DB_CLIENT.delete_collection(f"file-{id}")` | Vector DB call | 1 |
-| `Storage.delete_file(file.path)` | S3/Azure/GCS call | 1 |
-| `Files.delete_file_by_id()` | SQL query | 1 |
+| Operation                                          | Type                        | Count |
+| -------------------------------------------------- | --------------------------- | ----- |
+| `Files.get_file_by_id()`                           | SQL query                   | 1     |
+| `Knowledges.get_knowledge_files_by_file_id()`      | SQL query                   | 1     |
+| `VECTOR_DB_CLIENT.delete(filter={"file_id": ...})` | Vector DB call (per KB ref) | M     |
+| `VECTOR_DB_CLIENT.delete(filter={"hash": ...})`    | Vector DB call (per KB ref) | M     |
+| `VECTOR_DB_CLIENT.has_collection(f"file-{id}")`    | Vector DB call              | 1     |
+| `VECTOR_DB_CLIENT.delete_collection(f"file-{id}")` | Vector DB call              | 1     |
+| `Storage.delete_file(file.path)`                   | S3/Azure/GCS call           | 1     |
+| `Files.delete_file_by_id()`                        | SQL query                   | 1     |
 
 Each DB query opens a new `SessionLocal()` via `get_db()` context manager (`internal/db.py:152-160`).
 
@@ -105,12 +105,12 @@ Each DB query opens a new `SessionLocal()` via `get_db()` context manager (`inte
 
 The knowledge router also has redundancy — it calls `get_knowledge_files_by_file_id()` in the orphan check loop (line 825), and then `DeletionService.delete_file()` calls it again internally (service.py:76).
 
-| Resource | Count | Notes |
-|----------|-------|-------|
-| SQL queries | ~4N + 3 | N orphan checks + N×3 inside delete_file + 3 setup queries |
-| Vector DB calls | ~4N + 1 | N×(delete by file_id + delete by hash + has_collection + delete_collection) + 1 KB collection |
-| Storage calls | N | 1 per file |
-| **Total for 1000 files** | **~9000 calls** | All sequential, all synchronous, all blocking |
+| Resource                 | Count           | Notes                                                                                         |
+| ------------------------ | --------------- | --------------------------------------------------------------------------------------------- |
+| SQL queries              | ~4N + 3         | N orphan checks + N×3 inside delete_file + 3 setup queries                                    |
+| Vector DB calls          | ~4N + 1         | N×(delete by file_id + delete by hash + has_collection + delete_collection) + 1 KB collection |
+| Storage calls            | N               | 1 per file                                                                                    |
+| **Total for 1000 files** | **~9000 calls** | All sequential, all synchronous, all blocking                                                 |
 
 #### Total Operations for User Deletion
 
@@ -126,17 +126,18 @@ For a user with 5 KBs × 200 files each: ~5000+ SQL queries, ~5000+ vector DB ca
 
 #### Server Configuration Makes It Worse
 
-| Setting | Default | Impact |
-|---------|---------|--------|
-| `UVICORN_WORKERS` | `1` | Single worker — blocking it blocks everything |
-| Request timeout | **None** | No timeout at uvicorn, middleware, or FastAPI level |
-| Thread offloading | **Not used** | Neither endpoint uses `run_in_threadpool()` |
-| Vector DB interface | Synchronous | `VectorDBBase` defines all methods as plain `def` |
-| Storage interface | Synchronous | All providers use synchronous SDK calls (boto3, Azure SDK, GCS) |
+| Setting             | Default      | Impact                                                          |
+| ------------------- | ------------ | --------------------------------------------------------------- |
+| `UVICORN_WORKERS`   | `1`          | Single worker — blocking it blocks everything                   |
+| Request timeout     | **None**     | No timeout at uvicorn, middleware, or FastAPI level             |
+| Thread offloading   | **Not used** | Neither endpoint uses `run_in_threadpool()`                     |
+| Vector DB interface | Synchronous  | `VectorDBBase` defines all methods as plain `def`               |
+| Storage interface   | Synchronous  | All providers use synchronous SDK calls (boto3, Azure SDK, GCS) |
 
 #### Why It Crashes
 
 With 1 worker and no timeout:
+
 1. The deletion request starts executing synchronously
 2. The event loop is blocked — no other requests are served (including health checks)
 3. For remote vector DBs (HTTP Chroma, Qdrant): each of ~4000 calls has network latency (50-200ms each = 200-800 seconds total)
@@ -153,6 +154,7 @@ The KB delete endpoint calls `Models.get_all_models()` at `knowledge.py:787` to 
 #### No Batching Support
 
 All operations are one-at-a-time:
+
 - Vector DB deletes could be batched (most vector DBs support batch delete)
 - Storage deletes could be batched (S3 supports `delete_objects` for up to 1000 keys per call)
 - DB deletes could use `IN` clauses instead of individual `delete_file_by_id` calls

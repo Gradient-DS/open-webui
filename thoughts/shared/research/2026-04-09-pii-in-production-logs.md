@@ -4,7 +4,7 @@ researcher: Claude
 git_commit: c95a0823c99b99e900af1e277b3e6bb7c3c515d5
 branch: feat/proprietary-warnings
 repository: open-webui
-topic: "PII and Credentials in Production Logs"
+topic: 'PII and Credentials in Production Logs'
 tags: [research, logging, pii, security, uvicorn, httpx, oauth, gdpr]
 status: complete
 last_updated: 2026-04-09
@@ -35,11 +35,11 @@ Three distinct sources of PII/credential leakage were confirmed. The uvicorn acc
 
 **Uvicorn startup locations (3 entry points):**
 
-| Entry point | File | Line | Notes |
-|-------------|------|------|-------|
-| `serve` CLI command | `backend/open_webui/__init__.py` | 71 | `forwarded_allow_ips='*'`, no `access_log` param |
-| `dev` CLI command | `backend/open_webui/__init__.py` | 86 | Same |
-| Docker `start.sh` | `backend/start.sh` | 83-87 | `--forwarded-allow-ips '*'`, no `--access-log` flag |
+| Entry point         | File                             | Line  | Notes                                               |
+| ------------------- | -------------------------------- | ----- | --------------------------------------------------- |
+| `serve` CLI command | `backend/open_webui/__init__.py` | 71    | `forwarded_allow_ips='*'`, no `access_log` param    |
+| `dev` CLI command   | `backend/open_webui/__init__.py` | 86    | Same                                                |
+| Docker `start.sh`   | `backend/start.sh`               | 83-87 | `--forwarded-allow-ips '*'`, no `--access-log` flag |
 
 None of the three paths set `access_log=False`, `proxy_headers`, or `log_config`.
 
@@ -57,16 +57,16 @@ None of the three paths set `access_log=False`, `proxy_headers`, or `log_config`
 
 **httpx client locations with credential exposure:**
 
-| File | Line | Pattern | Credential Risk |
-|------|------|---------|-----------------|
-| `services/onedrive/graph_client.py` | 27, 208 | Persistent client, `download_file` with `follow_redirects=True` | **High** — redirect URLs contain `?token=` and `&tempauth=` with JWTs |
-| `services/google_drive/drive_client.py` | 52, 279, 291 | Persistent client, `download_file`/`export_file` with `follow_redirects=True` | Possible redirect URLs with tokens |
-| `services/onedrive/token_refresh.py` | 63 | Ephemeral client, POST to Microsoft token endpoint | Token endpoint URL (fixed, but POST body logged?) |
-| `services/google_drive/token_refresh.py` | 58 | Ephemeral client, POST to Google token endpoint | Same |
-| `services/onedrive/auth.py` | 140 | Ephemeral client, authorization code exchange | Auth code in URL |
-| `services/google_drive/auth.py` | 136 | Ephemeral client, authorization code exchange | Auth code in URL |
-| `services/email/graph_mail_client.py` | 29 | Ephemeral client | Graph API calls |
-| `services/email/auth.py` | 26 | Ephemeral client | Token endpoint |
+| File                                     | Line         | Pattern                                                                       | Credential Risk                                                       |
+| ---------------------------------------- | ------------ | ----------------------------------------------------------------------------- | --------------------------------------------------------------------- |
+| `services/onedrive/graph_client.py`      | 27, 208      | Persistent client, `download_file` with `follow_redirects=True`               | **High** — redirect URLs contain `?token=` and `&tempauth=` with JWTs |
+| `services/google_drive/drive_client.py`  | 52, 279, 291 | Persistent client, `download_file`/`export_file` with `follow_redirects=True` | Possible redirect URLs with tokens                                    |
+| `services/onedrive/token_refresh.py`     | 63           | Ephemeral client, POST to Microsoft token endpoint                            | Token endpoint URL (fixed, but POST body logged?)                     |
+| `services/google_drive/token_refresh.py` | 58           | Ephemeral client, POST to Google token endpoint                               | Same                                                                  |
+| `services/onedrive/auth.py`              | 140          | Ephemeral client, authorization code exchange                                 | Auth code in URL                                                      |
+| `services/google_drive/auth.py`          | 136          | Ephemeral client, authorization code exchange                                 | Auth code in URL                                                      |
+| `services/email/graph_mail_client.py`    | 29           | Ephemeral client                                                              | Graph API calls                                                       |
+| `services/email/auth.py`                 | 26           | Ephemeral client                                                              | Token endpoint                                                        |
 
 **Additional exposure:** When OTEL is enabled, `utils/telemetry/instrumentors.py:100-111` writes the full `str(request.url)` into OTEL span attributes via `httpx_request_hook()`.
 
@@ -80,36 +80,36 @@ None of the three paths set `access_log=False`, `proxy_headers`, or `log_config`
 
 #### Email in debug logs (9 locations)
 
-| File | Lines | Level | Pattern |
-|------|-------|-------|---------|
+| File               | Lines                             | Level | Pattern                 |
+| ------------------ | --------------------------------- | ----- | ----------------------- |
 | `routers/tasks.py` | 183, 260, 328, 390, 470, 548, 610 | debug | `for user {user.email}` |
-| `utils/oauth.py` | 1511, 1541 | debug | `for user {user.email}` |
+| `utils/oauth.py`   | 1511, 1541                        | debug | `for user {user.email}` |
 
 These only appear when `GLOBAL_LOG_LEVEL=DEBUG` — low risk in production.
 
 #### Email in info/error logs (7 locations)
 
-| File | Lines | Level | Pattern |
-|------|-------|-------|---------|
-| `models/auths.py` | 128 | info | `authenticate_user: {email}` |
-| `models/auths.py` | 160 | info | `authenticate_user_by_email: {email}` |
-| `services/retention/service.py` | 163 | info | `sent warning email to {user.email}` |
-| `services/retention/service.py` | 165 | error | `failed to send warning to {user.email}` |
-| `services/retention/service.py` | 204-205 | info | `archived user {user.id} ({user.email})` |
-| `services/retention/service.py` | 215-216 | info | `deleted inactive user {user.id} ({user.email})` |
-| `services/archival/service.py` | 199 | info | `for user {archive.user_email}` |
+| File                            | Lines   | Level | Pattern                                          |
+| ------------------------------- | ------- | ----- | ------------------------------------------------ |
+| `models/auths.py`               | 128     | info  | `authenticate_user: {email}`                     |
+| `models/auths.py`               | 160     | info  | `authenticate_user_by_email: {email}`            |
+| `services/retention/service.py` | 163     | info  | `sent warning email to {user.email}`             |
+| `services/retention/service.py` | 165     | error | `failed to send warning to {user.email}`         |
+| `services/retention/service.py` | 204-205 | info  | `archived user {user.id} ({user.email})`         |
+| `services/retention/service.py` | 215-216 | info  | `deleted inactive user {user.id} ({user.email})` |
+| `services/archival/service.py`  | 199     | info  | `for user {archive.user_email}`                  |
 
 **These appear at INFO level in production.**
 
 #### Full OAuth dicts in warning/error logs (5 locations)
 
-| File | Lines | Level | Pattern | Data exposed |
-|------|-------|-------|---------|-------------|
-| `utils/oauth.py` | 1418 | warning | `{token}` | Full OAuth token dict (access_token, refresh_token, id_token) |
-| `utils/oauth.py` | 1428 | warning | `{user_data}` | Full identity claims (email, name, sub, picture) |
-| `utils/oauth.py` | 1473 | warning | `{user_data}` | Same |
-| `utils/oauth.py` | 1482 | warning | `{user_data}` | Same |
-| `utils/oauth.py` | 872 | error | `{token}` | Full token response (access_token, refresh_token) |
+| File             | Lines | Level   | Pattern       | Data exposed                                                  |
+| ---------------- | ----- | ------- | ------------- | ------------------------------------------------------------- |
+| `utils/oauth.py` | 1418  | warning | `{token}`     | Full OAuth token dict (access_token, refresh_token, id_token) |
+| `utils/oauth.py` | 1428  | warning | `{user_data}` | Full identity claims (email, name, sub, picture)              |
+| `utils/oauth.py` | 1473  | warning | `{user_data}` | Same                                                          |
+| `utils/oauth.py` | 1482  | warning | `{user_data}` | Same                                                          |
+| `utils/oauth.py` | 872   | error   | `{token}`     | Full token response (access_token, refresh_token)             |
 
 **These are the most severe — they dump entire credential/identity objects to logs.**
 
@@ -124,7 +124,7 @@ These only appear when `GLOBAL_LOG_LEVEL=DEBUG` — low risk in production.
 - `backend/open_webui/env.py:108` — GLOBAL_LOG_LEVEL default
 - `backend/open_webui/services/onedrive/graph_client.py:208` — download_file with token URLs
 - `backend/open_webui/services/google_drive/drive_client.py:279,291` — download/export with redirects
-- `backend/open_webui/models/users.py:83-121` — UserModel without __repr__
+- `backend/open_webui/models/users.py:83-121` — UserModel without **repr**
 - `backend/open_webui/models/auths.py:128,160` — Email logged at INFO
 - `backend/open_webui/utils/oauth.py:872,1418,1428,1473,1482` — Full token/claims dicts logged
 - `backend/open_webui/services/retention/service.py:163-216` — Email in retention logs
@@ -134,6 +134,7 @@ These only appear when `GLOBAL_LOG_LEVEL=DEBUG` — low risk in production.
 ## Architecture Insights
 
 The logging architecture has a clean pipeline (standard logging → InterceptHandler → Loguru) that makes fixes straightforward:
+
 - Third-party library loggers (httpx, uvicorn) can be silenced by setting their log level in `start_logger()`
 - The audit log system (`AUDIT_LOG_LEVEL`) is separate and already captures access information, making uvicorn access logs redundant
 - OTEL instrumentation adds a parallel exposure path that also needs addressing if OTEL is enabled

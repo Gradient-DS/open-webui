@@ -801,7 +801,11 @@
 					<div class="">
 						<Tooltip content={$i18n.t('Knowledge')} placement="right">
 							<a
-								class=" cursor-pointer flex rounded-xl hover:bg-gray-100 dark:hover:bg-gray-850 transition group {$page.url.pathname.startsWith('/workspace/knowledge') ? 'bg-gray-100 dark:bg-gray-850' : ''}"
+								class=" cursor-pointer flex rounded-xl hover:bg-gray-100 dark:hover:bg-gray-850 transition group {$page.url.pathname.startsWith(
+									'/workspace/knowledge'
+								)
+									? 'bg-gray-100 dark:bg-gray-850'
+									: ''}"
 								href="/workspace/knowledge"
 								on:click={async (e) => {
 									e.stopImmediatePropagation();
@@ -825,7 +829,11 @@
 					<div class="">
 						<Tooltip content={$i18n.t('Agents')} placement="right">
 							<a
-								class=" cursor-pointer flex rounded-xl hover:bg-gray-100 dark:hover:bg-gray-850 transition group {$page.url.pathname.startsWith('/workspace/models') ? 'bg-gray-100 dark:bg-gray-850' : ''}"
+								class=" cursor-pointer flex rounded-xl hover:bg-gray-100 dark:hover:bg-gray-850 transition group {$page.url.pathname.startsWith(
+									'/workspace/models'
+								)
+									? 'bg-gray-100 dark:bg-gray-850'
+									: ''}"
 								href="/workspace/models"
 								on:click={async (e) => {
 									e.stopImmediatePropagation();
@@ -849,7 +857,11 @@
 					<div class="">
 						<Tooltip content={$i18n.t('Prompts')} placement="right">
 							<a
-								class=" cursor-pointer flex rounded-xl hover:bg-gray-100 dark:hover:bg-gray-850 transition group {$page.url.pathname.startsWith('/workspace/prompts') ? 'bg-gray-100 dark:bg-gray-850' : ''}"
+								class=" cursor-pointer flex rounded-xl hover:bg-gray-100 dark:hover:bg-gray-850 transition group {$page.url.pathname.startsWith(
+									'/workspace/prompts'
+								)
+									? 'bg-gray-100 dark:bg-gray-850'
+									: ''}"
 								href="/workspace/prompts"
 								on:click={async (e) => {
 									e.stopImmediatePropagation();
@@ -1091,7 +1103,11 @@
 						<div class="px-[0.4375rem] flex justify-center text-gray-800 dark:text-gray-200">
 							<a
 								id="sidebar-knowledge-button"
-								class="grow flex items-center space-x-3 rounded-2xl px-2.5 py-2 hover:bg-gray-100 dark:hover:bg-gray-900 transition {$page.url.pathname.startsWith('/workspace/knowledge') ? 'bg-gray-100 dark:bg-gray-900' : ''}"
+								class="grow flex items-center space-x-3 rounded-2xl px-2.5 py-2 hover:bg-gray-100 dark:hover:bg-gray-900 transition {$page.url.pathname.startsWith(
+									'/workspace/knowledge'
+								)
+									? 'bg-gray-100 dark:bg-gray-900'
+									: ''}"
 								href="/workspace/knowledge"
 								on:click={itemClickHandler}
 								draggable="false"
@@ -1112,7 +1128,11 @@
 						<div class="px-[0.4375rem] flex justify-center text-gray-800 dark:text-gray-200">
 							<a
 								id="sidebar-agents-button"
-								class="grow flex items-center space-x-3 rounded-2xl px-2.5 py-2 hover:bg-gray-100 dark:hover:bg-gray-900 transition {$page.url.pathname.startsWith('/workspace/models') ? 'bg-gray-100 dark:bg-gray-900' : ''}"
+								class="grow flex items-center space-x-3 rounded-2xl px-2.5 py-2 hover:bg-gray-100 dark:hover:bg-gray-900 transition {$page.url.pathname.startsWith(
+									'/workspace/models'
+								)
+									? 'bg-gray-100 dark:bg-gray-900'
+									: ''}"
 								href="/workspace/models"
 								on:click={itemClickHandler}
 								draggable="false"
@@ -1133,7 +1153,11 @@
 						<div class="px-[0.4375rem] flex justify-center text-gray-800 dark:text-gray-200">
 							<a
 								id="sidebar-prompts-button"
-								class="grow flex items-center space-x-3 rounded-2xl px-2.5 py-2 hover:bg-gray-100 dark:hover:bg-gray-900 transition {$page.url.pathname.startsWith('/workspace/prompts') ? 'bg-gray-100 dark:bg-gray-900' : ''}"
+								class="grow flex items-center space-x-3 rounded-2xl px-2.5 py-2 hover:bg-gray-100 dark:hover:bg-gray-900 transition {$page.url.pathname.startsWith(
+									'/workspace/prompts'
+								)
+									? 'bg-gray-100 dark:bg-gray-900'
+									: ''}"
 								href="/workspace/prompts"
 								on:click={itemClickHandler}
 								draggable="false"

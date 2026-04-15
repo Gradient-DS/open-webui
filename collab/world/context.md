@@ -13,6 +13,7 @@ Soev.ai — SaaS platform focused on the Dutch public sector and data sovereignt
 #### Project(s)
 
 This repo is a fork of Open WebUI, customized for soev.ai. Key additions beyond upstream:
+
 - Cloud sync integrations (OneDrive, Google Drive) via a shared sync abstraction layer
 - Feature flags for granular admin control over UI features
 - GDPR-compliant user archival

@@ -9,6 +9,7 @@ Fix the visible flicker in the Knowledge Base detail view (`KnowledgeBase.svelte
 **Problem:** When opening any KB, the detail view UI loads twice causing visible flicker (spinner → files → spinner → files).
 
 **Root cause:** Three competing reactive `$:` blocks (lines 128-154) all fire during mount:
+
 1. Query watcher (line 128): fires on `query` change with 300ms debounce — but starts immediately since `query = ''`
 2. Filter/pagination watcher (line 137): fires when `knowledgeId` is set in `onMount`
 3. Reset watcher (line 147): fires on any filter change, mutates `currentPage` which re-triggers block #2
@@ -16,6 +17,7 @@ Fix the visible flicker in the Knowledge Base detail view (`KnowledgeBase.svelte
 **Amplifier:** `getItemsPage()` (line 156) sets `fileItems = null` and `fileItemsTotal = null` on every call, causing the template (line 1694) to flash the spinner between fetches.
 
 ### Key Discoveries:
+
 - `src/lib/components/workspace/Knowledge.svelte:59-73` — List view already has consolidated reactive block pattern
 - `src/lib/components/workspace/Knowledge.svelte:91` — List view preserves stale data during re-fetch
 - `src/lib/components/workspace/Knowledge.svelte:96-104` — List view uses `fetchId` for deduplication
@@ -26,6 +28,7 @@ Fix the visible flicker in the Knowledge Base detail view (`KnowledgeBase.svelte
 Opening a KB shows the file list once without any flicker. Re-filtering/searching shows stale data while fetching. Concurrent/stale fetches are discarded.
 
 ### Verification:
+
 - Open any KB → file list appears once, no spinner flash
 - Type in search → stale results stay visible until new results arrive
 - Rapidly change filters → only the last filter's results are shown
@@ -43,15 +46,18 @@ All three fixes are applied in a single phase since they're tightly coupled chan
 ## Phase 1: Apply All Three Fixes
 
 ### Overview
+
 Consolidate reactive blocks, preserve stale data, and add fetch deduplication in `KnowledgeBase.svelte`.
 
 ### Changes Required:
 
 #### 1. Add state variables
+
 **File**: `src/lib/components/workspace/Knowledge/KnowledgeBase.svelte`
 **Location**: After `let fileItemsTotal = null;` (line 116)
 
 Add:
+
 ```js
 let loaded = false;
 let queryDebounceActive = false;
@@ -59,163 +65,175 @@ let fetchId = 0;
 ```
 
 #### 2. Replace three reactive blocks with one consolidated block
+
 **File**: `src/lib/components/workspace/Knowledge/KnowledgeBase.svelte`
 **Lines**: 127-154 (replace the query watcher, filter watcher, and reset watcher)
 
 Replace:
+
 ```js
 // Debounce only query changes
 $: if (query !== undefined) {
-    clearTimeout(searchDebounceTimer);
+	clearTimeout(searchDebounceTimer);
 
-    searchDebounceTimer = setTimeout(() => {
-        getItemsPage();
-    }, 300);
+	searchDebounceTimer = setTimeout(() => {
+		getItemsPage();
+	}, 300);
 }
 
 // Immediate response to filter/pagination changes
 $: if (
-    knowledgeId !== null &&
-    viewOption !== undefined &&
-    sortKey !== undefined &&
-    direction !== undefined &&
-    currentPage !== undefined
+	knowledgeId !== null &&
+	viewOption !== undefined &&
+	sortKey !== undefined &&
+	direction !== undefined &&
+	currentPage !== undefined
 ) {
-    getItemsPage();
+	getItemsPage();
 }
 
 $: if (
-    query !== undefined &&
-    viewOption !== undefined &&
-    sortKey !== undefined &&
-    direction !== undefined
+	query !== undefined &&
+	viewOption !== undefined &&
+	sortKey !== undefined &&
+	direction !== undefined
 ) {
-    reset();
+	reset();
 }
 ```
 
 With:
+
 ```js
 // Consolidated reactive block — mirrors Knowledge.svelte list view pattern
 $: if (loaded && knowledgeId !== null) {
-    // Track all dependencies explicitly
-    void query, viewOption, sortKey, direction, currentPage;
+	// Track all dependencies explicitly
+	(void query, viewOption, sortKey, direction, currentPage);
 
-    if (queryDebounceActive) {
-        // User is typing — debounce
-        clearTimeout(searchDebounceTimer);
-        searchDebounceTimer = setTimeout(() => {
-            reset();
-            getItemsPage();
-        }, 300);
-    } else {
-        // Filter/view/pagination change or initial load — fetch immediately
-        getItemsPage();
-    }
+	if (queryDebounceActive) {
+		// User is typing — debounce
+		clearTimeout(searchDebounceTimer);
+		searchDebounceTimer = setTimeout(() => {
+			reset();
+			getItemsPage();
+		}, 300);
+	} else {
+		// Filter/view/pagination change or initial load — fetch immediately
+		getItemsPage();
+	}
 }
 ```
 
 #### 3. Fix `getItemsPage()` — remove aggressive null reset, add fetch deduplication
+
 **File**: `src/lib/components/workspace/Knowledge/KnowledgeBase.svelte`
 **Lines**: 156-185
 
 Replace:
+
 ```js
 const getItemsPage = async () => {
-    if (knowledgeId === null) return;
+	if (knowledgeId === null) return;
 
-    fileItems = null;
-    fileItemsTotal = null;
+	fileItems = null;
+	fileItemsTotal = null;
 
-    if (sortKey === null) {
-        direction = null;
-    }
+	if (sortKey === null) {
+		direction = null;
+	}
 
-    const isOneDrive = knowledge?.type === 'onedrive';
-    const res = await searchKnowledgeFilesById(
-        localStorage.token,
-        knowledge.id,
-        query,
-        viewOption,
-        sortKey,
-        direction,
-        currentPage,
-        isOneDrive ? 250 : null
-    ).catch(() => {
-        return null;
-    });
+	const isOneDrive = knowledge?.type === 'onedrive';
+	const res = await searchKnowledgeFilesById(
+		localStorage.token,
+		knowledge.id,
+		query,
+		viewOption,
+		sortKey,
+		direction,
+		currentPage,
+		isOneDrive ? 250 : null
+	).catch(() => {
+		return null;
+	});
 
-    if (res) {
-        fileItems = res.items;
-        fileItemsTotal = res.total;
-    }
-    return res;
+	if (res) {
+		fileItems = res.items;
+		fileItemsTotal = res.total;
+	}
+	return res;
 };
 ```
 
 With:
+
 ```js
 const getItemsPage = async () => {
-    if (knowledgeId === null) return;
+	if (knowledgeId === null) return;
 
-    // Don't null items — keep showing stale data during re-fetch
-    const currentFetchId = ++fetchId;
+	// Don't null items — keep showing stale data during re-fetch
+	const currentFetchId = ++fetchId;
 
-    if (sortKey === null) {
-        direction = null;
-    }
+	if (sortKey === null) {
+		direction = null;
+	}
 
-    const isOneDrive = knowledge?.type === 'onedrive';
-    const res = await searchKnowledgeFilesById(
-        localStorage.token,
-        knowledge.id,
-        query,
-        viewOption,
-        sortKey,
-        direction,
-        currentPage,
-        isOneDrive ? 250 : null
-    ).catch(() => {
-        return null;
-    });
+	const isOneDrive = knowledge?.type === 'onedrive';
+	const res = await searchKnowledgeFilesById(
+		localStorage.token,
+		knowledge.id,
+		query,
+		viewOption,
+		sortKey,
+		direction,
+		currentPage,
+		isOneDrive ? 250 : null
+	).catch(() => {
+		return null;
+	});
 
-    if (currentFetchId !== fetchId) return; // Stale response, discard
+	if (currentFetchId !== fetchId) return; // Stale response, discard
 
-    if (res) {
-        fileItems = res.items;
-        fileItemsTotal = res.total;
-    }
-    return res;
+	if (res) {
+		fileItems = res.items;
+		fileItemsTotal = res.total;
+	}
+	return res;
 };
 ```
 
 #### 4. Set `loaded = true` at end of `onMount`
+
 **File**: `src/lib/components/workspace/Knowledge/KnowledgeBase.svelte`
 **Location**: After the OneDrive auto-sync block, before the drag/drop setup (~line 1278)
 
 Add after line 1278 (after the `} else { goto(...) }` block):
+
 ```js
 loaded = true;
 ```
 
 #### 5. Clean up `onDestroy`
+
 **File**: `src/lib/components/workspace/Knowledge/KnowledgeBase.svelte`
 
 Ensure `searchDebounceTimer` is cleared on destroy (check if already present, add if not):
+
 ```js
 onDestroy(() => {
-    clearTimeout(searchDebounceTimer);
+	clearTimeout(searchDebounceTimer);
 });
 ```
 
 ### Success Criteria:
 
 #### Automated Verification:
+
 - [x] TypeScript check passes: `npm run check` (may have pre-existing errors — verify no new errors)
 - [x] Build succeeds: `npm run build`
 - [x] Frontend lint passes: `npm run lint:frontend`
 
 #### Manual Verification:
+
 - [ ] Open a local KB → file list appears once, no spinner flash
 - [ ] Open a OneDrive KB → file list appears once, no spinner flash
 - [ ] Type in search box → stale results stay visible, new results replace them after debounce
@@ -230,12 +248,14 @@ onDestroy(() => {
 ## Testing Strategy
 
 ### Manual Testing Steps:
+
 1. Open any KB and watch for spinner flashes — should show file list exactly once
 2. Open browser DevTools Network tab, open a KB — should see exactly 1 search API call on mount (not 2-3)
 3. Type "test" in search — should see debounced single API call, stale results visible during fetch
 4. Change sort key rapidly 3 times — should see exactly 1 API response applied (last one)
 
 ### Edge Cases:
+
 - KB with 0 files — should show empty state once, no flicker
 - KB where API returns error — should keep stale data or show error, not flash spinner
 - Opening KB while query param `start_onedrive_sync=true` is present — sync should still auto-start

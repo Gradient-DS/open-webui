@@ -153,17 +153,14 @@
 			<h3 class="text-lg font-medium mb-3">{$i18n.t('Delete User')}</h3>
 
 			<p class="text-sm text-gray-600 dark:text-gray-400 mb-4">
-				{$i18n.t('Are you sure you want to delete')} <strong>{selectedUser.name}</strong> ({selectedUser.email})?
+				{$i18n.t('Are you sure you want to delete')} <strong>{selectedUser.name}</strong>
+				({selectedUser.email})?
 			</p>
 
 			{#if archiveConfig?.enable_user_archival}
 				<div class="mb-4 p-3 bg-gray-50 dark:bg-gray-850 rounded-lg space-y-3">
 					<label class="flex items-center gap-2 cursor-pointer">
-						<input
-							type="checkbox"
-							bind:checked={archiveBeforeDelete}
-							class="rounded"
-						/>
+						<input type="checkbox" bind:checked={archiveBeforeDelete} class="rounded" />
 						<span class="text-sm">{$i18n.t('Archive user data before deletion')}</span>
 					</label>
 
@@ -178,7 +175,9 @@
 							/>
 						</div>
 						<div>
-							<label class="block text-xs text-gray-500 mb-1">{$i18n.t('Retention Period (days)')}</label>
+							<label class="block text-xs text-gray-500 mb-1"
+								>{$i18n.t('Retention Period (days)')}</label
+							>
 							<input
 								type="number"
 								bind:value={archiveRetentionDays}

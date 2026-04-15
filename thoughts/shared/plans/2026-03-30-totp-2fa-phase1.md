@@ -1,6 +1,6 @@
 ---
 date: 2026-03-30
-title: "TOTP 2FA — Phase 1 (Authenticator App)"
+title: 'TOTP 2FA — Phase 1 (Authenticator App)'
 status: draft
 branch: feat/totp-2fa
 base: main
@@ -16,16 +16,16 @@ Allow email+password users to optionally enable TOTP-based two-factor authentica
 
 ## Scope Decisions (from prior research)
 
-| Decision | Resolution |
-|----------|-----------|
-| 2FA scope | Email+password users ONLY |
-| LDAP bypass | Yes |
-| SSO/OAuth bypass | Yes — managed by identity provider |
-| API key bypass | Yes |
-| Trusted header bypass | Yes |
-| Admin enforcement | `ENABLE_2FA` master toggle + `REQUIRE_2FA` + grace period |
-| Recovery codes | 10 codes, bcrypt-hashed, one-time use |
-| Email OTP | Deferred to Phase 2 |
+| Decision              | Resolution                                                |
+| --------------------- | --------------------------------------------------------- |
+| 2FA scope             | Email+password users ONLY                                 |
+| LDAP bypass           | Yes                                                       |
+| SSO/OAuth bypass      | Yes — managed by identity provider                        |
+| API key bypass        | Yes                                                       |
+| Trusted header bypass | Yes                                                       |
+| Admin enforcement     | `ENABLE_2FA` master toggle + `REQUIRE_2FA` + grace period |
+| Recovery codes        | 10 codes, bcrypt-hashed, one-time use                     |
+| Email OTP             | Deferred to Phase 2                                       |
 
 ## Success Criteria
 
@@ -47,6 +47,7 @@ Allow email+password users to optionally enable TOTP-based two-factor authentica
 **File:** `pyproject.toml`
 
 Add to the `dependencies` list (lines 8-121):
+
 ```
 "pyotp==2.9.0",
 "qrcode[pil]==8.0",
@@ -85,6 +86,7 @@ CREATE INDEX idx_recovery_code_user_id ON recovery_code(user_id);
 **Pattern:** Follow `2c5f92a9fd66_add_knowledge_type_column.py` — use `_column_exists()` guard for idempotent column additions. Use direct `op.add_column()` (not `batch_alter_table`) since we're only adding columns. Use `op.create_table()` for the recovery_code table.
 
 Generate with:
+
 ```bash
 cd backend/open_webui && alembic revision --autogenerate -m "add_totp_2fa"
 ```
@@ -100,6 +102,7 @@ Then review and adjust the generated migration.
 **File:** `backend/open_webui/models/auths.py`
 
 Add columns to `Auth` SQLAlchemy model (after line 26):
+
 ```python
 totp_secret = Column(Text, nullable=True)        # AES-GCM encrypted
 totp_enabled = Column(Boolean, default=False)
@@ -107,6 +110,7 @@ totp_last_used_at = Column(BigInteger, nullable=True)
 ```
 
 Add fields to `AuthModel` Pydantic model (after line 32):
+
 ```python
 totp_enabled: bool = False
 ```
@@ -114,6 +118,7 @@ totp_enabled: bool = False
 Note: `totp_secret` is intentionally excluded from the Pydantic model — it should never be serialized to the frontend.
 
 Add methods to `AuthsTable`:
+
 - `get_auth_by_user_id(user_id, db)` — needed by 2FA endpoints to check TOTP state
 - `update_totp(user_id, totp_secret, totp_enabled, db)` — enable/disable TOTP
 - `update_totp_last_used(user_id, timecode, db)` — replay protection update
@@ -181,6 +186,7 @@ def generate_recovery_codes(count: int = 10) -> list[str]:
 ```
 
 **Design notes:**
+
 - Use AES-GCM (not Fernet) for TOTP secrets — the prior research chose this because it's more standard and we're already using the `cryptography` library. Key derived from `WEBUI_SECRET_KEY` via SHA-256.
 - `verify_totp` uses `pyotp.TOTP.verify(code, valid_window=1)` — accepts codes from t-30s, t, and t+30s (handles clock drift).
 - Replay protection: compare `pyotp.TOTP.timecode(datetime.now())` against `totp_last_used_at`. Reject if same timecode was already used.
@@ -223,6 +229,7 @@ Use `PersistentConfig` (not plain env vars) so admins can toggle at runtime with
 **File:** `backend/open_webui/main.py`
 
 Import and set on `app.state.config` (near line 1269):
+
 ```python
 app.state.config.ENABLE_2FA = ENABLE_2FA
 app.state.config.REQUIRE_2FA = REQUIRE_2FA
@@ -230,6 +237,7 @@ app.state.config.TWO_FA_GRACE_PERIOD_DAYS = TWO_FA_GRACE_PERIOD_DAYS
 ```
 
 Expose to frontend in `get_app_config()` (near line 2358, in the authenticated features dict):
+
 ```python
 'enable_2fa': app.state.config.ENABLE_2FA,
 'require_2fa': app.state.config.REQUIRE_2FA,
@@ -237,6 +245,7 @@ Expose to frontend in `get_app_config()` (near line 2358, in the authenticated f
 ```
 
 Also expose in the unauthenticated section (near line 2296) — the login page needs to know if 2FA is enabled to handle the partial token response:
+
 ```python
 'enable_2fa': app.state.config.ENABLE_2FA,
 ```
@@ -251,14 +260,14 @@ Mount in `main.py` at `/api/v1/auths/2fa`.
 
 #### Endpoints
 
-| Endpoint | Auth | Purpose |
-|----------|------|---------|
-| `GET /status` | Full JWT | Returns `{ totp_enabled, recovery_codes_remaining }` |
-| `POST /totp/setup` | Full JWT | Generates TOTP secret, returns `{ qr_code_base64, secret, provisioning_uri }` |
-| `POST /totp/enable` | Full JWT + password | Verifies first TOTP code, activates, returns `{ recovery_codes: [...] }` |
-| `POST /totp/disable` | Full JWT + password | Deactivates TOTP, deletes recovery codes |
-| `POST /verify` | Partial JWT only | Verifies TOTP code or recovery code during login, returns full session |
-| `POST /recovery/regenerate` | Full JWT + password | Deletes old codes, generates new ones |
+| Endpoint                    | Auth                | Purpose                                                                       |
+| --------------------------- | ------------------- | ----------------------------------------------------------------------------- |
+| `GET /status`               | Full JWT            | Returns `{ totp_enabled, recovery_codes_remaining }`                          |
+| `POST /totp/setup`          | Full JWT            | Generates TOTP secret, returns `{ qr_code_base64, secret, provisioning_uri }` |
+| `POST /totp/enable`         | Full JWT + password | Verifies first TOTP code, activates, returns `{ recovery_codes: [...] }`      |
+| `POST /totp/disable`        | Full JWT + password | Deactivates TOTP, deletes recovery codes                                      |
+| `POST /verify`              | Partial JWT only    | Verifies TOTP code or recovery code during login, returns full session        |
+| `POST /recovery/regenerate` | Full JWT + password | Deletes old codes, generates new ones                                         |
 
 #### Key implementation details
 
@@ -267,6 +276,7 @@ Mount in `main.py` at `/api/v1/auths/2fa`.
 Approach: store the pending secret in the response and have the frontend send it back with the verification code in `/totp/enable`. The secret is encrypted before storage. Alternatively, use a short-lived cache (Redis or in-memory dict with TTL). The simpler approach is to return it and have the frontend send it back — it's a base32 string, not sensitive until stored.
 
 **`POST /totp/enable`** request body:
+
 ```python
 class TotpEnableForm(BaseModel):
     password: str       # re-verify password
@@ -275,6 +285,7 @@ class TotpEnableForm(BaseModel):
 ```
 
 **`POST /verify`** — this is the login completion endpoint. It accepts either a TOTP code or a recovery code:
+
 ```python
 class TotpVerifyForm(BaseModel):
     code: str           # 6-digit TOTP code or XXXXX-XXXXX recovery code
@@ -397,6 +408,7 @@ export const regenerateRecoveryCodes = async (token: string, password: string) =
 **File:** `src/lib/apis/configs/index.ts`
 
 Add admin config functions:
+
 ```typescript
 export const get2FAConfig = async (token: string) => { ... }
 export const set2FAConfig = async (token: string, config: object) => { ... }
@@ -411,6 +423,7 @@ export const set2FAConfig = async (token: string, config: object) => { ... }
 A modal/inline component shown after `userSignIn()` returns `{ requires_2fa: true }`.
 
 UI:
+
 - Title: "Two-Factor Authentication"
 - Subtitle: "Enter the 6-digit code from your authenticator app"
 - 6-digit code input (auto-focus, numeric, auto-submit on 6th digit)
@@ -425,23 +438,24 @@ Modify `signInHandler` (line 71):
 
 ```javascript
 const signInHandler = async () => {
-    const response = await userSignIn(email, password).catch((error) => {
-        toast.error(`${error}`);
-        return null;
-    });
+	const response = await userSignIn(email, password).catch((error) => {
+		toast.error(`${error}`);
+		return null;
+	});
 
-    if (response?.requires_2fa) {
-        // Show 2FA challenge instead of completing login
-        partialToken = response.partial_token;
-        show2FAChallenge = true;
-        return;
-    }
+	if (response?.requires_2fa) {
+		// Show 2FA challenge instead of completing login
+		partialToken = response.partial_token;
+		show2FAChallenge = true;
+		return;
+	}
 
-    await setSessionUser(response);
+	await setSessionUser(response);
 };
 ```
 
 Add `verify2FAHandler`:
+
 ```javascript
 const verify2FAHandler = async (code: string) => {
     const sessionUser = await verify2FA(partialToken, code).catch((error) => {
@@ -466,10 +480,12 @@ Conditionally render `TwoFactorChallenge` when `show2FAChallenge` is true, inste
 A self-contained component (following the `UpdatePassword.svelte` pattern) with three states:
 
 **State 1: Not enrolled**
+
 - "Two-Factor Authentication" heading with "Set Up" button
 - Brief description: "Add an extra layer of security with an authenticator app"
 
 **State 2: Setup flow** (after clicking "Set Up")
+
 1. Call `setup2FATOTP()` → get QR code + secret
 2. Show QR code image (scannable by Microsoft Authenticator)
 3. Show secret as text (manual entry fallback)
@@ -479,12 +495,14 @@ A self-contained component (following the `UpdatePassword.svelte` pattern) with 
 7. On success → show recovery codes (State 3)
 
 **State 3: Recovery codes display** (shown once after enabling)
+
 - List of 10 recovery codes
 - "Download as text file" button
 - "I've saved these codes" checkbox + "Done" button
 - Warning: "These codes will not be shown again"
 
 **State 4: Already enrolled**
+
 - "Two-Factor Authentication" heading with green "Enabled" badge
 - "X recovery codes remaining" info
 - "Regenerate recovery codes" button (requires password)
@@ -496,10 +514,10 @@ Add after the `UpdatePassword` section (after line 255), guarded by feature flag
 
 ```svelte
 {#if $config?.features.enable_2fa && $config?.features.enable_login_form}
-    <hr class="border-gray-50 dark:border-gray-850" />
-    <div class="mt-2">
-        <TwoFactorSetup />
-    </div>
+	<hr class="border-gray-50 dark:border-gray-850" />
+	<div class="mt-2">
+		<TwoFactorSetup />
+	</div>
 {/if}
 ```
 
@@ -516,22 +534,22 @@ Add a "Two-Factor Authentication" subsection in the Authentication section (afte
 ```svelte
 <!-- Two-Factor Authentication -->
 <div class="mb-2.5 flex w-full justify-between pr-2">
-    <div class="self-center text-xs font-medium">{$i18n.t('Enable Two-Factor Authentication')}</div>
-    <Switch bind:state={adminConfig.ENABLE_2FA} />
+	<div class="self-center text-xs font-medium">{$i18n.t('Enable Two-Factor Authentication')}</div>
+	<Switch bind:state={adminConfig.ENABLE_2FA} />
 </div>
 
 {#if adminConfig.ENABLE_2FA}
-    <div class="mb-2.5 flex w-full justify-between pr-2">
-        <div class="self-center text-xs font-medium">{$i18n.t('Require 2FA for All Users')}</div>
-        <Switch bind:state={adminConfig.REQUIRE_2FA} />
-    </div>
+	<div class="mb-2.5 flex w-full justify-between pr-2">
+		<div class="self-center text-xs font-medium">{$i18n.t('Require 2FA for All Users')}</div>
+		<Switch bind:state={adminConfig.REQUIRE_2FA} />
+	</div>
 
-    {#if adminConfig.REQUIRE_2FA}
-        <div class="mb-2.5">
-            <div class="text-xs font-medium mb-1">{$i18n.t('Grace Period (days)')}</div>
-            <input type="number" min="0" max="90" bind:value={adminConfig.TWO_FA_GRACE_PERIOD_DAYS} ... />
-        </div>
-    {/if}
+	{#if adminConfig.REQUIRE_2FA}
+		<div class="mb-2.5">
+			<div class="text-xs font-medium mb-1">{$i18n.t('Grace Period (days)')}</div>
+			<input type="number" min="0" max="90" bind:value={adminConfig.TWO_FA_GRACE_PERIOD_DAYS} ... />
+		</div>
+	{/if}
 {/if}
 ```
 
@@ -547,13 +565,13 @@ When `REQUIRE_2FA` is enabled and the user hasn't set up 2FA, show a dismissible
 
 ```svelte
 {#if $config?.features.require_2fa && !user2FAEnabled}
-    <Banner type="warning">
-        Your administrator requires two-factor authentication.
-        <a href="/settings/account">Set it up now</a>
-        {#if gracePeriodRemaining > 0}
-            — {gracePeriodRemaining} days remaining
-        {/if}
-    </Banner>
+	<Banner type="warning">
+		Your administrator requires two-factor authentication.
+		<a href="/settings/account">Set it up now</a>
+		{#if gracePeriodRemaining > 0}
+			— {gracePeriodRemaining} days remaining
+		{/if}
+	</Banner>
 {/if}
 ```
 
@@ -601,39 +619,40 @@ Add translation keys (alphabetically sorted):
 **File:** Helm values (if applicable to this repo)
 
 Add environment variable support:
+
 ```yaml
-ENABLE_2FA: "false"
-REQUIRE_2FA: "false"
-TWO_FA_GRACE_PERIOD_DAYS: "7"
+ENABLE_2FA: 'false'
+REQUIRE_2FA: 'false'
+TWO_FA_GRACE_PERIOD_DAYS: '7'
 ```
 
 ---
 
 ## File Summary
 
-| # | File | Action | Type |
-|---|------|--------|------|
-| 1 | `pyproject.toml` | Edit | deps |
-| 2 | `backend/.../migrations/versions/<hash>_add_totp_2fa.py` | Create | migration |
-| 3 | `backend/.../models/auths.py` | Edit | model |
-| 4 | `backend/.../models/recovery_codes.py` | Create | model |
-| 5 | `backend/.../utils/totp.py` | Create | utility |
-| 6 | `backend/.../config.py` | Edit | config |
-| 7 | `backend/.../main.py` | Edit | config exposure |
-| 8 | `backend/.../routers/totp.py` | Create | API endpoints |
-| 9 | `backend/.../routers/auths.py` | Edit | signin flow |
-| 10 | `backend/.../utils/auth.py` | Edit | partial token rejection |
-| 11 | `backend/.../routers/configs.py` | Edit | admin config |
-| 12 | `backend/.../routers/users.py` | Edit | admin force-disable |
-| 13 | `src/lib/apis/auths/index.ts` | Edit | API client |
-| 14 | `src/lib/apis/configs/index.ts` | Edit | admin API client |
-| 15 | `src/lib/components/auth/TwoFactorChallenge.svelte` | Create | login 2FA UI |
-| 16 | `src/routes/auth/+page.svelte` | Edit | login flow |
-| 17 | `src/lib/components/chat/Settings/Account/TwoFactorSetup.svelte` | Create | setup UI |
-| 18 | `src/lib/components/chat/Settings/Account.svelte` | Edit | mount setup component |
-| 19 | `src/lib/components/admin/Settings/General.svelte` | Edit | admin toggles |
-| 20 | `src/routes/+layout.svelte` | Edit | enforcement banner |
-| 21 | `src/lib/i18n/locales/en-US/translation.json` | Edit | translations |
+| #   | File                                                             | Action | Type                    |
+| --- | ---------------------------------------------------------------- | ------ | ----------------------- |
+| 1   | `pyproject.toml`                                                 | Edit   | deps                    |
+| 2   | `backend/.../migrations/versions/<hash>_add_totp_2fa.py`         | Create | migration               |
+| 3   | `backend/.../models/auths.py`                                    | Edit   | model                   |
+| 4   | `backend/.../models/recovery_codes.py`                           | Create | model                   |
+| 5   | `backend/.../utils/totp.py`                                      | Create | utility                 |
+| 6   | `backend/.../config.py`                                          | Edit   | config                  |
+| 7   | `backend/.../main.py`                                            | Edit   | config exposure         |
+| 8   | `backend/.../routers/totp.py`                                    | Create | API endpoints           |
+| 9   | `backend/.../routers/auths.py`                                   | Edit   | signin flow             |
+| 10  | `backend/.../utils/auth.py`                                      | Edit   | partial token rejection |
+| 11  | `backend/.../routers/configs.py`                                 | Edit   | admin config            |
+| 12  | `backend/.../routers/users.py`                                   | Edit   | admin force-disable     |
+| 13  | `src/lib/apis/auths/index.ts`                                    | Edit   | API client              |
+| 14  | `src/lib/apis/configs/index.ts`                                  | Edit   | admin API client        |
+| 15  | `src/lib/components/auth/TwoFactorChallenge.svelte`              | Create | login 2FA UI            |
+| 16  | `src/routes/auth/+page.svelte`                                   | Edit   | login flow              |
+| 17  | `src/lib/components/chat/Settings/Account/TwoFactorSetup.svelte` | Create | setup UI                |
+| 18  | `src/lib/components/chat/Settings/Account.svelte`                | Edit   | mount setup component   |
+| 19  | `src/lib/components/admin/Settings/General.svelte`               | Edit   | admin toggles           |
+| 20  | `src/routes/+layout.svelte`                                      | Edit   | enforcement banner      |
+| 21  | `src/lib/i18n/locales/en-US/translation.json`                    | Edit   | translations            |
 
 ## Implementation Order
 
@@ -661,9 +680,9 @@ Each step builds on the previous. The backend can be fully tested before touchin
 
 ## Risks & Mitigations
 
-| Risk | Mitigation |
-|------|-----------|
-| Users locked out of accounts | Recovery codes + admin force-disable |
-| Clock drift between server and phone | `valid_window=1` accepts ±30s |
-| WEBUI_SECRET_KEY rotation breaks encrypted secrets | Document in deployment guide; provide re-encryption utility if needed |
-| Upstream adds 2FA differently | Our implementation is additive (new files + minimal edits to existing); reconciliation would be straightforward |
+| Risk                                               | Mitigation                                                                                                      |
+| -------------------------------------------------- | --------------------------------------------------------------------------------------------------------------- |
+| Users locked out of accounts                       | Recovery codes + admin force-disable                                                                            |
+| Clock drift between server and phone               | `valid_window=1` accepts ±30s                                                                                   |
+| WEBUI_SECRET_KEY rotation breaks encrypted secrets | Document in deployment guide; provide re-encryption utility if needed                                           |
+| Upstream adds 2FA differently                      | Our implementation is additive (new files + minimal edits to existing); reconciliation would be straightforward |

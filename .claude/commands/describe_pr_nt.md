@@ -9,24 +9,23 @@ You are tasked with generating a comprehensive pull request description followin
 ## Steps to follow:
 
 1. **Read the PR description template:**
+   - Use the following PR description template:
 
-    - Use the following PR description template:
+     ```md
+     ## What problem(s) was I solving?
 
-        ```md
-        ## What problem(s) was I solving?
+     ## What user-facing changes did I ship?
 
-        ## What user-facing changes did I ship?
+     ## How I implemented it
 
-        ## How I implemented it
+     ## How to verify it
 
-        ## How to verify it
+     ### Manual Testing
 
-        ### Manual Testing
+     ## Description for the changelog
+     ```
 
-        ## Description for the changelog
-        ```
-
-    - Read the template carefully to understand all sections and requirements
+   - Read the template carefully to understand all sections and requirements
 
 2. **Identify the PR to describe:**
    - Check if the current branch has an associated PR: `gh pr view --json url,number,title,state 2>/dev/null`
@@ -80,6 +79,7 @@ You are tasked with generating a comprehensive pull request description followin
    - If any verification steps remain unchecked, remind the user to complete them before merging
 
 ## Important notes:
+
 - This command works across different repositories - always read the local template
 - Be thorough but concise - descriptions should be scannable
 - Focus on the "why" as much as the "what"

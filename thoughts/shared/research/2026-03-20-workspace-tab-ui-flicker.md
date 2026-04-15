@@ -4,8 +4,20 @@ researcher: Claude
 git_commit: c26ae48d6be9d43682b1944f683170a9b7e780a6
 branch: merge/upstream-260320
 repository: open-webui
-topic: "UI flicker and double-loading in workspace tabs (knowledge, agents, prompts)"
-tags: [research, codebase, workspace, knowledge, prompts, models, tools, flicker, reactive-statements, svelte]
+topic: 'UI flicker and double-loading in workspace tabs (knowledge, agents, prompts)'
+tags:
+  [
+    research,
+    codebase,
+    workspace,
+    knowledge,
+    prompts,
+    models,
+    tools,
+    flicker,
+    reactive-statements,
+    svelte
+  ]
 status: complete
 last_updated: 2026-03-20
 last_updated_by: Claude
@@ -20,6 +32,7 @@ last_updated_by: Claude
 **Repository**: open-webui
 
 ## Research Question
+
 The workspace tabs (knowledge/kennisbanken, agents, prompts) exhibit UI flicker — content loads, briefly disappears behind a spinner, then reappears. Knowledge appears to always load twice. Is this caused by our custom changes or an upstream Open WebUI bug?
 
 ## Summary
@@ -36,13 +49,14 @@ The workspace tabs (knowledge/kennisbanken, agents, prompts) exhibit UI flicker 
 
 Three reactive `$:` blocks each call `init()`:
 
-| Reactive block | Trigger | Debounced | Origin |
-|---------------|---------|-----------|--------|
-| Line 56-61 | `query` changes | 300ms | Upstream |
-| Line 68-70 | `viewOption` changes | No | Upstream |
-| Line 72-74 | `typeFilter` changes | No | **Custom (ours)** |
+| Reactive block | Trigger              | Debounced | Origin            |
+| -------------- | -------------------- | --------- | ----------------- |
+| Line 56-61     | `query` changes      | 300ms     | Upstream          |
+| Line 68-70     | `viewOption` changes | No        | Upstream          |
+| Line 72-74     | `typeFilter` changes | No        | **Custom (ours)** |
 
 **Mount sequence:**
+
 1. Variables initialize: `query = ''`, `viewOption = ''`, `typeFilter = ''`, `loaded = false`
 2. All three reactive blocks evaluate but `init()` returns early (`loaded === false`)
 3. The query block starts a 300ms debounce timer
@@ -60,12 +74,13 @@ Even when `viewOption` didn't change (localStorage empty), the 300ms debounce is
 
 Two reactive blocks:
 
-| Reactive block | Trigger | Debounced | Origin |
-|---------------|---------|-----------|--------|
-| Line 63-69 | `query` changes | 300ms, sets `loading = true` immediately | Upstream |
-| Line 72-74 | `page`, `selectedTag`, `viewOption` | No | Upstream |
+| Reactive block | Trigger                             | Debounced                                | Origin   |
+| -------------- | ----------------------------------- | ---------------------------------------- | -------- |
+| Line 63-69     | `query` changes                     | 300ms, sets `loading = true` immediately | Upstream |
+| Line 72-74     | `page`, `selectedTag`, `viewOption` | No                                       | Upstream |
 
 **Mount sequence:**
+
 1. `loaded = true` set synchronously in `onMount` (no async work before it)
 2. Block 2 fires immediately → `getPromptList()` → **API call #1** → content renders
 3. Block 1 had set `loading = true` synchronously and scheduled `getPromptList()` at +300ms
@@ -119,10 +134,10 @@ Instead of calling `reset()` (which sets `items = null` and shows the spinner), 
 
 ```js
 const init = async () => {
-    if (!loaded) return;
-    // Don't reset items — keep showing stale data during fetch
-    page = 1;
-    await getItemsPage(true); // true = replace items instead of append
+	if (!loaded) return;
+	// Don't reset items — keep showing stale data during fetch
+	page = 1;
+	await getItemsPage(true); // true = replace items instead of append
 };
 ```
 
@@ -150,11 +165,15 @@ Don't start the debounce timer during initial reactive evaluation:
 ```js
 let mounted = false;
 $: if (query !== undefined && mounted) {
-    loading = true;
-    clearTimeout(searchDebounceTimer);
-    searchDebounceTimer = setTimeout(() => { getPromptList(); }, 300);
+	loading = true;
+	clearTimeout(searchDebounceTimer);
+	searchDebounceTimer = setTimeout(() => {
+		getPromptList();
+	}, 300);
 }
-onMount(() => { mounted = true; /* ... */ });
+onMount(() => {
+	mounted = true; /* ... */
+});
 ```
 
 ## Code References
@@ -170,9 +189,9 @@ onMount(() => { mounted = true; /* ... */ });
 
 ## Architecture Insights
 
-The workspace components use Svelte 4's `$:` reactive statements rather than Svelte 5 runes. The `$:` semantics of running on first evaluation *and* on dependency changes create subtle initialization races when multiple blocks watch overlapping state. This is a well-known Svelte 4 footgun that Svelte 5's explicit `$effect` with cleanup/untrack would handle better.
+The workspace components use Svelte 4's `$:` reactive statements rather than Svelte 5 runes. The `$:` semantics of running on first evaluation _and_ on dependency changes create subtle initialization races when multiple blocks watch overlapping state. This is a well-known Svelte 4 footgun that Svelte 5's explicit `$effect` with cleanup/untrack would handle better.
 
-The pattern of "restore from localStorage in onMount → trigger reactive blocks → race with debounce timer" appears in both upstream and custom code. A consistent fix would be to initialize all state (including localStorage reads) *before* setting `loaded = true`, and have a single reactive block that only fires after `loaded`.
+The pattern of "restore from localStorage in onMount → trigger reactive blocks → race with debounce timer" appears in both upstream and custom code. A consistent fix would be to initialize all state (including localStorage reads) _before_ setting `loaded = true`, and have a single reactive block that only fires after `loaded`.
 
 ## Open Questions
 

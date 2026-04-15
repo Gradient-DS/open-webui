@@ -117,33 +117,33 @@
 			{#if tab === ''}
 				<div in:fly={{ x: -20, duration: 150 }}>
 					{#if isFeatureEnabled('tools')}
-					{#if tools}
-						{#if Object.keys(tools).length > 0}
-							<button
-								class="flex w-full justify-between gap-2 items-center px-3 py-1.5 text-sm cursor-pointer rounded-xl hover:bg-gray-50 dark:hover:bg-gray-800/50"
-								on:click={() => {
-									tab = 'tools';
-								}}
-							>
-								<Wrench />
+						{#if tools}
+							{#if Object.keys(tools).length > 0}
+								<button
+									class="flex w-full justify-between gap-2 items-center px-3 py-1.5 text-sm cursor-pointer rounded-xl hover:bg-gray-50 dark:hover:bg-gray-800/50"
+									on:click={() => {
+										tab = 'tools';
+									}}
+								>
+									<Wrench />
 
-								<div class="flex items-center w-full justify-between">
-									<div class=" line-clamp-1">
-										{$i18n.t('Tools')}
-										<span class="ml-0.5 text-gray-500">{Object.keys(tools).length}</span>
-									</div>
+									<div class="flex items-center w-full justify-between">
+										<div class=" line-clamp-1">
+											{$i18n.t('Tools')}
+											<span class="ml-0.5 text-gray-500">{Object.keys(tools).length}</span>
+										</div>
 
-									<div class="text-gray-500">
-										<ChevronRight />
+										<div class="text-gray-500">
+											<ChevronRight />
+										</div>
 									</div>
-								</div>
-							</button>
+								</button>
+							{/if}
+						{:else}
+							<div class="py-4">
+								<Spinner />
+							</div>
 						{/if}
-					{:else}
-						<div class="py-4">
-							<Spinner />
-						</div>
-					{/if}
 					{/if}
 
 					{#if isFeatureEnabled('tools') && toggleFilters && toggleFilters.length > 0}

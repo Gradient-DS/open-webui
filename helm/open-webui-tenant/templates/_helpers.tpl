@@ -77,6 +77,10 @@ Component-specific names
 {{- printf "%s-weaviate" (include "open-webui-tenant.fullname" .) | trunc 63 | trimSuffix "-" }}
 {{- end }}
 
+{{- define "open-webui-tenant.redis.fullname" -}}
+{{- printf "%s-redis" (include "open-webui-tenant.fullname" .) | trunc 63 | trimSuffix "-" }}
+{{- end }}
+
 {{/*
 Component-specific labels
 */}}
@@ -108,6 +112,16 @@ app.kubernetes.io/component: weaviate
 {{- define "open-webui-tenant.weaviate.selectorLabels" -}}
 {{ include "open-webui-tenant.selectorLabels" . }}
 app.kubernetes.io/component: weaviate
+{{- end }}
+
+{{- define "open-webui-tenant.redis.labels" -}}
+{{ include "open-webui-tenant.labels" . }}
+app.kubernetes.io/component: redis
+{{- end }}
+
+{{- define "open-webui-tenant.redis.selectorLabels" -}}
+{{ include "open-webui-tenant.selectorLabels" . }}
+app.kubernetes.io/component: redis
 {{- end }}
 
 {{/*

@@ -4,7 +4,7 @@ researcher: Claude
 git_commit: f55edd086eaa7d33329980f15d939154a06d8d21
 branch: feat/external-base-agents
 repository: open-webui
-topic: "Push integration metadata support and OpenAPI spec availability"
+topic: 'Push integration metadata support and OpenAPI spec availability'
 tags: [research, integrations, metadata, openapi, push-ingest, admin-panel]
 status: complete
 last_updated: 2026-03-26
@@ -20,6 +20,7 @@ last_updated_by: Claude
 **Repository**: open-webui
 
 ## Research Question
+
 Does the push integration already support metadata (filetype, custom key-value pairs)? Is this shown in the curl example? Can we expose the OpenAPI spec as a downloadable link in the admin panel?
 
 ## Summary
@@ -36,26 +37,29 @@ Does the push integration already support metadata (filetype, custom key-value p
 ### 1. Existing Metadata Support in the API Schema
 
 #### Collection-level metadata (`IngestCollection`, `integrations.py:29-38`)
-| Field | Type | Default | Notes |
-|-------|------|---------|-------|
-| `metadata` | `dict` | `{}` | **Arbitrary key-value pairs** |
-| `tags` | `list[str]` | `[]` | Tag list |
-| `language` | `Optional[str]` | `None` | Language code |
+
+| Field      | Type            | Default | Notes                         |
+| ---------- | --------------- | ------- | ----------------------------- |
+| `metadata` | `dict`          | `{}`    | **Arbitrary key-value pairs** |
+| `tags`     | `list[str]`     | `[]`    | Tag list                      |
+| `language` | `Optional[str]` | `None`  | Language code                 |
 
 #### Document-level metadata (`IngestDocumentBase`, `integrations.py:41-51`)
-| Field | Type | Default | Notes |
-|-------|------|---------|-------|
-| `metadata` | `dict` | `{}` | **Arbitrary key-value pairs** |
-| `content_type` | `str` | `"text/plain"` | MIME type (filetype) |
-| `tags` | `list[str]` | `[]` | Tag list |
-| `language` | `Optional[str]` | `None` | Language code |
-| `author` | `Optional[str]` | `None` | Author name |
-| `modified_at` | `Optional[str]` | `None` | Last modified timestamp |
-| `source_url` | `Optional[str]` | `None` | Source URL |
+
+| Field          | Type            | Default        | Notes                         |
+| -------------- | --------------- | -------------- | ----------------------------- |
+| `metadata`     | `dict`          | `{}`           | **Arbitrary key-value pairs** |
+| `content_type` | `str`           | `"text/plain"` | MIME type (filetype)          |
+| `tags`         | `list[str]`     | `[]`           | Tag list                      |
+| `language`     | `Optional[str]` | `None`         | Language code                 |
+| `author`       | `Optional[str]` | `None`         | Author name                   |
+| `modified_at`  | `Optional[str]` | `None`         | Last modified timestamp       |
+| `source_url`   | `Optional[str]` | `None`         | Source URL                    |
 
 ### 2. Where Metadata is Stored vs. Lost
 
 **Stored in file record** (`integrations.py:145-155`):
+
 ```python
 meta = {
     "name": doc.title or doc.filename,
@@ -71,6 +75,7 @@ meta = {
 ```
 
 **Stored in knowledge base** (`integrations.py:121-131`):
+
 ```python
 meta = {
     "integration": {
@@ -85,6 +90,7 @@ meta = {
 ```
 
 **NOT stored in vector metadata** (`integrations.py:225-237`):
+
 ```python
 # Only these fields make it into vector store chunks:
 {
@@ -97,6 +103,7 @@ meta = {
     "source_provider": provider,
 }
 ```
+
 The `doc.metadata` dict, `doc.tags`, `doc.content_type`, and `doc.modified_at` are **not propagated** to vector chunks. This means they cannot be used for filtering during RAG queries.
 
 ### 3. Curl Example (Current State)
@@ -104,20 +111,23 @@ The `doc.metadata` dict, `doc.tags`, `doc.content_type`, and `doc.modified_at` a
 Location: `src/lib/components/admin/Settings/IntegrationProviders.svelte:298-316`
 
 Current example only shows:
+
 ```json
 {
-  "collection": {
-    "source_id": "my-collection-123",
-    "name": "My Collection",
-    "data_type": "parsed_text",
-    "access_control": null
-  },
-  "documents": [{
-    "source_id": "doc-1",
-    "filename": "example.txt",
-    "text": "Document content here...",
-    "title": "Example Document"
-  }]
+	"collection": {
+		"source_id": "my-collection-123",
+		"name": "My Collection",
+		"data_type": "parsed_text",
+		"access_control": null
+	},
+	"documents": [
+		{
+			"source_id": "doc-1",
+			"filename": "example.txt",
+			"text": "Document content here...",
+			"title": "Example Document"
+		}
+	]
 }
 ```
 
@@ -126,6 +136,7 @@ Missing from example: `metadata`, `content_type`, `tags`, `language`, `author`, 
 ### 4. OpenAPI Spec Availability
 
 **FastAPI configuration** (`main.py:880-886`):
+
 ```python
 app = FastAPI(
     docs_url="/docs" if ENV == "dev" else None,
@@ -140,8 +151,9 @@ app = FastAPI(
 ### 5. `custom_metadata_fields` in Admin UI
 
 The provider config supports defining custom metadata field schemas (`IntegrationProviders.svelte:31`):
+
 ```typescript
-custom_metadata_fields: [] as { key: string; label: string; required: boolean }[]
+custom_metadata_fields: [] as { key: string; label: string; required: boolean }[];
 ```
 
 This is purely a UI config — the backend does not validate that pushed documents include the required custom fields. It's stored in `INTEGRATION_PROVIDERS` config but not referenced in `integrations.py`.
@@ -159,36 +171,43 @@ This is purely a UI config — the backend does not validate that pushed documen
 ## Recommendations
 
 ### Curl Example Enhancement
+
 Update the example at `IntegrationProviders.svelte:299` to include metadata fields:
+
 ```json
 {
-  "collection": {
-    "source_id": "my-collection-123",
-    "name": "My Collection",
-    "data_type": "parsed_text",
-    "access_control": null,
-    "metadata": { "department": "engineering" },
-    "tags": ["project-x"]
-  },
-  "documents": [{
-    "source_id": "doc-1",
-    "filename": "example.txt",
-    "content_type": "text/plain",
-    "text": "Document content here...",
-    "title": "Example Document",
-    "metadata": { "version": "1.2", "status": "approved" },
-    "tags": ["documentation"],
-    "author": "Jane Doe"
-  }]
+	"collection": {
+		"source_id": "my-collection-123",
+		"name": "My Collection",
+		"data_type": "parsed_text",
+		"access_control": null,
+		"metadata": { "department": "engineering" },
+		"tags": ["project-x"]
+	},
+	"documents": [
+		{
+			"source_id": "doc-1",
+			"filename": "example.txt",
+			"content_type": "text/plain",
+			"text": "Document content here...",
+			"title": "Example Document",
+			"metadata": { "version": "1.2", "status": "approved" },
+			"tags": ["documentation"],
+			"author": "Jane Doe"
+		}
+	]
 }
 ```
 
 ### OpenAPI Spec Download
+
 Two options:
+
 1. **Always-on endpoint**: Change `openapi_url` to always serve `/openapi.json` (remove `ENV == "dev"` guard), then add a download link in the admin panel.
 2. **Scoped endpoint**: Create a dedicated admin-only route (e.g., `/api/v1/integrations/openapi.json`) that returns only the integration-related portion of the spec. This avoids exposing the full API surface.
 
 ### Vector Metadata Gap
+
 If filtering by custom metadata during RAG queries is desired, `_build_base_metadata()` needs to be extended to include `doc.metadata` (or a subset of it) in the vector store chunks.
 
 ## Open Questions

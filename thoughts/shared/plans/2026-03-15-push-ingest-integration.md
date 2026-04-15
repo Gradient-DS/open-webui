@@ -14,6 +14,7 @@ Build an extensible push/ingest API that allows external systems (Octobox, Neo, 
 - **KB list** has server-side filtering with `ViewSelector` dropdown — we add provider-based type filtering
 
 ### Key Discoveries:
+
 - `ApiKey` model has unused `data` JSON field (models/users.py:124) — not needed, we use `user.info`
 - `save_docs_to_vector_db()` has built-in hash dedup (routers/retrieval.py:1382-1396) — idempotent re-push
 - `process_file()` expects files in storage — for push ingest we bypass it and call `save_docs_to_vector_db()` directly
@@ -33,6 +34,7 @@ Build an extensible push/ingest API that allows external systems (Octobox, Neo, 
 7. **Citations work automatically** — `source_url` flows to `metadata.source`, rendering as clickable links with favicons
 
 ### Verification:
+
 - Admin can create a provider "Octobox" with slug `octobox` in the Integrations settings tab
 - Admin can assign a user as the Octobox service account
 - `POST /api/v1/integrations/ingest` with that user's API key creates a KB with `type=octobox` and ingests documents
@@ -60,11 +62,13 @@ The implementation follows the existing patterns closely: PersistentConfig for p
 ## Phase 1: Backend — Provider Registry & Config
 
 ### Overview
+
 Define the integration provider data model and expose it via admin config endpoints. Store providers in the existing PersistentConfig system (DB-backed, admin-editable at runtime).
 
 ### Changes Required:
 
 #### 1. Provider Config Definition
+
 **File**: `backend/open_webui/config.py`
 **Changes**: Add `INTEGRATION_PROVIDERS` PersistentConfig near the end of the file (after other PersistentConfig definitions ~line 3085)
 
@@ -77,22 +81,24 @@ INTEGRATION_PROVIDERS = PersistentConfig(
 ```
 
 The value is a JSON dict keyed by provider slug:
+
 ```json
 {
-  "octobox": {
-    "name": "Octobox",
-    "description": "Document pipeline integration",
-    "badge_type": "info",
-    "data_type": "documents",
-    "data_type_description": "Full documents (PDF, DOCX, etc.) with extracted text. Documents are chunked and embedded by Open WebUI.",
-    "max_files_per_kb": 500,
-    "max_documents_per_request": 50,
-    "service_account_id": "user-uuid-here"
-  }
+	"octobox": {
+		"name": "Octobox",
+		"description": "Document pipeline integration",
+		"badge_type": "info",
+		"data_type": "documents",
+		"data_type_description": "Full documents (PDF, DOCX, etc.) with extracted text. Documents are chunked and embedded by Open WebUI.",
+		"max_files_per_kb": 500,
+		"max_documents_per_request": 50,
+		"service_account_id": "user-uuid-here"
+	}
 }
 ```
 
 #### 2. Register Config in App State
+
 **File**: `backend/open_webui/main.py`
 **Changes**: Add to the config initialization block (~line 1060-1113)
 
@@ -101,6 +107,7 @@ app.state.config.INTEGRATION_PROVIDERS = INTEGRATION_PROVIDERS
 ```
 
 #### 3. Admin Config Endpoints
+
 **File**: `backend/open_webui/routers/configs.py`
 **Changes**: Add GET/POST endpoints for integration providers
 
@@ -133,6 +140,7 @@ class IntegrationsConfigForm(BaseModel):
 ```
 
 #### 4. Expose Provider Registry to Frontend
+
 **File**: `backend/open_webui/main.py`
 **Changes**: Add `integration_providers` to the `/api/config` response (around line 2094 where `features` are returned)
 
@@ -146,6 +154,7 @@ class IntegrationsConfigForm(BaseModel):
 This gives the frontend the display info it needs without exposing internal config (service account IDs, limits).
 
 #### 5. Extend KB Type Validation
+
 **File**: `backend/open_webui/routers/knowledge.py:189`
 **Changes**: Accept provider slugs as valid KB types
 
@@ -164,6 +173,7 @@ if form_data.type and form_data.type not in ALLOWED_KB_TYPES:
 ### Success Criteria:
 
 #### Automated Verification:
+
 - [x] Backend starts without errors: `open-webui dev`
 - [x] `GET /api/v1/configs/integrations` returns `{"providers": {}}` for admin user
 - [x] `POST /api/v1/configs/integrations` saves and returns provider config
@@ -172,6 +182,7 @@ if form_data.type and form_data.type not in ALLOWED_KB_TYPES:
 - [x] Creating a KB with `type="invalid"` returns 400
 
 #### Manual Verification:
+
 - [ ] Provider config persists across server restarts (PersistentConfig in DB)
 - [ ] Service account binding updates `user.info.integration_provider` correctly
 
@@ -182,11 +193,13 @@ if form_data.type and form_data.type not in ALLOWED_KB_TYPES:
 ## Phase 2: Backend — Ingest & Delete Endpoints
 
 ### Overview
+
 Create the core `POST /ingest` endpoint that accepts documents from external systems, creates/finds the knowledge base, creates file records, and stores embeddings in the vector DB. Add scoped delete endpoints for collections and individual documents.
 
 ### Changes Required:
 
 #### 1. New Integrations Router
+
 **File**: `backend/open_webui/routers/integrations.py` (new file)
 
 ```python
@@ -519,6 +532,7 @@ def delete_document(
 ```
 
 #### 2. Register the Router
+
 **File**: `backend/open_webui/main.py`
 **Changes**: Import and mount the integrations router (after knowledge router ~line 1572)
 
@@ -531,6 +545,7 @@ app.include_router(integrations.router, prefix="/api/v1/integrations", tags=["in
 ### Success Criteria:
 
 #### Automated Verification:
+
 - [x] Backend starts without errors: `open-webui dev`
 - [x] `POST /api/v1/integrations/ingest` with valid API key creates KB + files + embeddings
 - [x] Same POST is idempotent (re-push same docs → `updated` status, no duplicates)
@@ -545,6 +560,7 @@ app.include_router(integrations.router, prefix="/api/v1/integrations", tags=["in
 - [x] Vector chunks have correct metadata (`name`, `source`, `file_id`, `source_provider`)
 
 #### Manual Verification:
+
 - [ ] Ingested documents appear in the KB detail page file list
 - [ ] Citations from ingested documents show clickable `source_url` links with favicons
 - [ ] After document deletion, RAG queries no longer return that document's chunks
@@ -556,51 +572,69 @@ app.include_router(integrations.router, prefix="/api/v1/integrations", tags=["in
 ## Phase 3: Admin Panel — Integrations Settings Tab
 
 ### Overview
+
 Add an "Integrations" sub-tab under Admin > Settings where admins can manage integration providers: add/edit/remove providers, configure display settings, bind service accounts, and view API usage examples.
 
 ### Changes Required:
 
 #### 1. Add Tab Slug to Feature Registry
+
 **File**: `src/lib/utils/features.ts:89-105`
 **Changes**: Add `'integrations'` to the `ADMIN_SETTINGS_TABS` array
 
 ```typescript
 export const ADMIN_SETTINGS_TABS = [
-    'general', 'connections', 'models', 'evaluations', 'tools',
-    'documents', 'web', 'code-execution', 'interface', 'audio',
-    'images', 'pipelines', 'db', 'acceptance', 'email', 'integrations'
+	'general',
+	'connections',
+	'models',
+	'evaluations',
+	'tools',
+	'documents',
+	'web',
+	'code-execution',
+	'interface',
+	'audio',
+	'images',
+	'pipelines',
+	'db',
+	'acceptance',
+	'email',
+	'integrations'
 ] as const;
 ```
 
 #### 2. Frontend API Client
+
 **File**: `src/lib/apis/configs/index.ts`
 **Changes**: Add `getIntegrationsConfig` and `setIntegrationsConfig` functions
 
 ```typescript
 export const getIntegrationsConfig = async (token: string) => {
-    const res = await fetch(`${WEBUI_API_BASE_URL}/configs/integrations`, {
-        method: 'GET',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }
-    });
-    if (!res.ok) throw await res.json();
-    return res.json();
+	const res = await fetch(`${WEBUI_API_BASE_URL}/configs/integrations`, {
+		method: 'GET',
+		headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }
+	});
+	if (!res.ok) throw await res.json();
+	return res.json();
 };
 
 export const setIntegrationsConfig = async (token: string, config: object) => {
-    const res = await fetch(`${WEBUI_API_BASE_URL}/configs/integrations`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify(config)
-    });
-    if (!res.ok) throw await res.json();
-    return res.json();
+	const res = await fetch(`${WEBUI_API_BASE_URL}/configs/integrations`, {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+		body: JSON.stringify(config)
+	});
+	if (!res.ok) throw await res.json();
+	return res.json();
 };
 ```
 
 #### 3. Integrations Settings Component
+
 **File**: `src/lib/components/admin/Settings/Integrations.svelte` (new file)
 
 This component allows admins to:
+
 - **List registered providers** in a table (name, slug, badge preview, data type, service account, file limit)
 - **Add a new provider** via a form: slug (auto-generated from name), display name, description, badge type (dropdown: info/success/warning/error/muted), data type (dropdown: documents/parsed-text/pre-chunked), data type description (textarea), max files per KB, max documents per request
 - **Edit an existing provider** — same form, pre-populated
@@ -625,28 +659,30 @@ Authorization: Bearer sk-xxxxx
 The component follows the pattern of `Documents.svelte` (onMount loads data, save handler posts updates).
 
 #### 4. Wire Into Settings Orchestrator
+
 **File**: `src/lib/components/admin/Settings.svelte`
 **Changes**: Three additions:
 
 1. **Import** (top of file, ~line 10-28):
+
 ```svelte
 import Integrations from './Settings/Integrations.svelte';
 ```
 
 2. **Sidebar button** (in the sidebar section, after Email ~line 521):
+
 ```svelte
 {#if isAdminSettingsTabEnabled('integrations')}
-    <button
-        class="..."
-        on:click={() => goto('/admin/settings/integrations')}
-    >
-        <LinkIcon />  <!-- or Puzzle icon -->
-        <div>{$i18n.t('Integrations')}</div>
-    </button>
+	<button class="..." on:click={() => goto('/admin/settings/integrations')}>
+		<LinkIcon />
+		<!-- or Puzzle icon -->
+		<div>{$i18n.t('Integrations')}</div>
+	</button>
 {/if}
 ```
 
 3. **Content panel** (in the content area, after Email ~line 623):
+
 ```svelte
 {:else if selectedTab === 'integrations'}
     <Integrations
@@ -657,6 +693,7 @@ import Integrations from './Settings/Integrations.svelte';
 ```
 
 #### 5. Translations
+
 **File**: `src/lib/i18n/locales/en-US/translation.json`
 **Changes**: Add keys (alphabetically sorted):
 
@@ -674,10 +711,12 @@ import Integrations from './Settings/Integrations.svelte';
 ### Success Criteria:
 
 #### Automated Verification:
+
 - [x] Frontend builds without errors: `npm run build`
 - [x] No new TypeScript errors from the Integrations component
 
 #### Manual Verification:
+
 - [ ] "Integrations" tab appears in Admin > Settings sidebar
 - [ ] Can add a new provider with all fields (name, slug, badge type, data type, limits)
 - [ ] Provider appears in the list with correct badge preview
@@ -695,40 +734,44 @@ import Integrations from './Settings/Integrations.svelte';
 ## Phase 4: Frontend — KB Provider Awareness
 
 ### Overview
+
 Update the knowledge base list and detail pages to show provider-specific UI: badges, filtering, empty states, and appropriate controls for push-provider KBs.
 
 ### Changes Required:
 
 #### 1. KB List — Provider Badges
+
 **File**: `src/lib/components/workspace/Knowledge.svelte:293-302`
 **Changes**: Add provider-aware badge rendering
 
 ```svelte
 <!-- Current -->
 {#if item?.type === 'onedrive'}
-    <Badge type="info" content="OneDrive" />
+	<Badge type="info" content="OneDrive" />
 {:else}
-    <Badge type="muted" content="Local" />
+	<Badge type="muted" content="Local" />
 {/if}
 
 <!-- New -->
 {#if item?.type === 'onedrive'}
-    <Badge type="info" content="OneDrive" />
+	<Badge type="info" content="OneDrive" />
 {:else if $config?.integration_providers?.[item?.type]}
-    <Badge
-        type={$config.integration_providers[item.type].badge_type}
-        content={$config.integration_providers[item.type].name}
-    />
+	<Badge
+		type={$config.integration_providers[item.type].badge_type}
+		content={$config.integration_providers[item.type].name}
+	/>
 {:else}
-    <Badge type="muted" content="Local" />
+	<Badge type="muted" content="Local" />
 {/if}
 ```
 
 #### 2. KB List — Type Filter Dropdown
+
 **File**: `src/lib/components/workspace/Knowledge.svelte`
 **Changes**: Add a type filter dropdown next to the existing ViewSelector (~line 258-265)
 
 Add a `typeFilter` state variable (default `''` = all types). Add a `<select>` or custom dropdown with options:
+
 - `""` — All
 - `"local"` — Local
 - `"onedrive"` — OneDrive (if applicable)
@@ -737,6 +780,7 @@ Add a `typeFilter` state variable (default `''` = all types). Add a `<select>` o
 Pass `typeFilter` to the `searchKnowledgeBases` call as the `type` query parameter (the backend already supports this — `models/knowledge.py:244-246`).
 
 Update the reactive statement to include `typeFilter`:
+
 ```svelte
 $: if (loaded && query !== undefined && viewOption !== undefined && typeFilter !== undefined) {
     init();
@@ -744,6 +788,7 @@ $: if (loaded && query !== undefined && viewOption !== undefined && typeFilter !
 ```
 
 Update `getItemsPage()` to pass `typeFilter`:
+
 ```svelte
 const res = await searchKnowledgeBases(localStorage.token, query, viewOption, page, typeFilter);
 ```
@@ -753,70 +798,76 @@ const res = await searchKnowledgeBases(localStorage.token, query, viewOption, pa
 
 ```typescript
 export const searchKnowledgeBases = async (
-    token: string,
-    query: string = '',
-    viewOption: string = '',
-    page: number = 1,
-    type: string = ''
+	token: string,
+	query: string = '',
+	viewOption: string = '',
+	page: number = 1,
+	type: string = ''
 ) => {
-    // Add type to query params if non-empty
-    if (type) searchParams.append('type', type);
-    // ...
+	// Add type to query params if non-empty
+	if (type) searchParams.append('type', type);
+	// ...
 };
 ```
 
 #### 3. KB Detail — Provider Badge
+
 **File**: `src/lib/components/workspace/Knowledge/KnowledgeBase.svelte:1441-1445`
 **Changes**: Same badge logic as the list page
 
 ```svelte
 {#if knowledge?.type === 'onedrive'}
-    <Badge type="info" content="OneDrive" />
+	<Badge type="info" content="OneDrive" />
 {:else if $config?.integration_providers?.[knowledge?.type]}
-    <Badge
-        type={$config.integration_providers[knowledge.type].badge_type}
-        content={$config.integration_providers[knowledge.type].name}
-    />
+	<Badge
+		type={$config.integration_providers[knowledge.type].badge_type}
+		content={$config.integration_providers[knowledge.type].name}
+	/>
 {:else}
-    <Badge type="muted" content="Local" />
+	<Badge type="muted" content="Local" />
 {/if}
 ```
 
 #### 4. KB Detail — Hide Add Files for Push Providers
+
 **File**: `src/lib/components/workspace/Knowledge/KnowledgeBase.svelte:1597-1636`
 **Changes**: Add condition to hide add-content controls for push-provider KBs
 
 The current logic:
+
 ```svelte
 {#if knowledge?.write_access}
-    {#if knowledge?.type === 'onedrive'}
-        <!-- OneDrive sync button -->
-    {:else}
-        <!-- AddContentMenu -->
-    {/if}
+	{#if knowledge?.type === 'onedrive'}
+		<!-- OneDrive sync button -->
+	{:else}
+		<!-- AddContentMenu -->
+	{/if}
 {/if}
 ```
 
 Add a third branch:
+
 ```svelte
 {#if knowledge?.write_access}
-    {#if knowledge?.type === 'onedrive'}
-        <!-- OneDrive sync button -->
-    {:else if $config?.integration_providers?.[knowledge?.type]}
-        <!-- No add button for push providers — files come via API -->
-    {:else}
-        <!-- AddContentMenu -->
-    {/if}
+	{#if knowledge?.type === 'onedrive'}
+		<!-- OneDrive sync button -->
+	{:else if $config?.integration_providers?.[knowledge?.type]}
+		<!-- No add button for push providers — files come via API -->
+	{:else}
+		<!-- AddContentMenu -->
+	{/if}
 {/if}
 ```
 
 #### 5. KB Detail — File Count with Provider Limits
+
 **File**: `src/lib/components/workspace/Knowledge/KnowledgeBase.svelte:1519-1524`
 **Changes**: Use provider-specific `max_files_per_kb` instead of hardcoded 250
 
 Currently for non-local KBs it shows `{fileItemsTotal} / 250 files`. We need to resolve the provider's limit. Since the full provider config (with limits) isn't exposed to the frontend via `/api/config`, we have two options:
 
 **Option A** (simpler): Include `max_files_per_kb` in the `integration_providers` config response. Update the `/api/config` response to include it:
+
 ```python
 "integration_providers": {
     slug: {"name": p["name"], "badge_type": p["badge_type"], "max_files_per_kb": p.get("max_files_per_kb", 250)}
@@ -825,22 +876,25 @@ Currently for non-local KBs it shows `{fileItemsTotal} / 250 files`. We need to 
 ```
 
 Then in the frontend:
+
 ```svelte
 {#if knowledge?.type !== 'local' && knowledge?.type}
-    {@const maxFiles = $config?.integration_providers?.[knowledge.type]?.max_files_per_kb || 250}
-    <Tooltip content={$i18n.t('Maximum {{count}} files per knowledge base', { count: maxFiles })}>
-        {fileItemsTotal} / {maxFiles} files
-    </Tooltip>
+	{@const maxFiles = $config?.integration_providers?.[knowledge.type]?.max_files_per_kb || 250}
+	<Tooltip content={$i18n.t('Maximum {{count}} files per knowledge base', { count: maxFiles })}>
+		{fileItemsTotal} / {maxFiles} files
+	</Tooltip>
 {:else}
-    {fileItemsTotal} files
+	{fileItemsTotal} files
 {/if}
 ```
 
 #### 6. KB Detail — Empty State
+
 **File**: `src/lib/components/workspace/Knowledge/KnowledgeBase/EmptyStateCards.svelte:23-59`
 **Changes**: Add a case for push-provider KBs
 
 In the `getOptions()` function:
+
 ```typescript
 if (knowledgeType === 'onedrive') {
     return [{ type: 'onedrive', ... }];
@@ -860,6 +914,7 @@ if (knowledgeType === 'onedrive') {
 The `integrationProviders` prop comes from the parent, sourced from `$config.integration_providers`.
 
 Pass `integrationProviders` from `KnowledgeBase.svelte` → `EmptyStateCards.svelte`:
+
 ```svelte
 <EmptyStateCards
     knowledgeType={knowledge?.type}
@@ -871,6 +926,7 @@ Pass `integrationProviders` from `KnowledgeBase.svelte` → `EmptyStateCards.sve
 For the integration empty state card, the `onAction` callback is a no-op (the card is informational only).
 
 #### 7. KB Detail — Access Control for Push Providers
+
 **File**: `src/lib/components/workspace/Knowledge/KnowledgeBase.svelte:1536-1561`
 **Changes**: Push provider KBs should show "Private" label (same as OneDrive)
 
@@ -881,10 +937,12 @@ Current logic shows access control button only for `knowledge?.type === 'local' 
 ### Success Criteria:
 
 #### Automated Verification:
+
 - [x] Frontend builds without errors: `npm run build`
 - [x] No new TypeScript errors from modified components
 
 #### Manual Verification:
+
 - [ ] KB list shows correct provider badge (e.g., blue "Octobox") for push-provider KBs
 - [ ] KB list type filter dropdown shows "All", "Local", "OneDrive", and each registered provider
 - [ ] Filtering by provider type shows only those KBs
@@ -903,6 +961,7 @@ Current logic shows access control button only for `knowledge?.type === 'local' 
 ## Testing Strategy
 
 ### Unit Tests:
+
 - Provider config serialization/deserialization
 - `_find_kb_by_source_id` with multiple providers
 - File ID generation (`{provider}-{source_id}`)
@@ -910,6 +969,7 @@ Current logic shows access control button only for `knowledge?.type === 'local' 
 - Batch size validation
 
 ### Integration Tests:
+
 - Full ingest flow: API key → provider resolution → KB creation → file creation → vector storage
 - Idempotent re-push: same documents pushed twice → no duplicates
 - Cross-provider isolation: Octobox can't see/delete Neo's collections
@@ -917,6 +977,7 @@ Current logic shows access control button only for `knowledge?.type === 'local' 
 - Delete document: single file removed, KB intact
 
 ### Manual Testing Steps:
+
 1. Create provider "Octobox" in Admin > Settings > Integrations
 2. Create a user account, bind it as Octobox service account
 3. Generate API key for that user

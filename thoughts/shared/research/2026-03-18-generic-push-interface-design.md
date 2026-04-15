@@ -4,7 +4,7 @@ researcher: Claude
 git_commit: 7029d372c
 branch: feat/octobox
 repository: open-webui
-topic: "Generic Push Interface Design — Supporting All Data Types and Future Pull Abstraction"
+topic: 'Generic Push Interface Design — Supporting All Data Types and Future Pull Abstraction'
 tags: [research, codebase, push-api, integrations, chunking, embeddings, rag, architecture]
 status: complete
 last_updated: 2026-03-18
@@ -45,22 +45,22 @@ For pull connectors, the existing `SyncProvider` ABC at `services/sync/provider.
 
 Each data type skips earlier stages:
 
-| Data Type | Parse | Chunk | Embed | Vector Insert |
-|-----------|-------|-------|-------|---------------|
-| `full_documents` | ✅ | ✅ | ✅ | ✅ |
-| `parsed_text` | — | ✅ | ✅ | ✅ |
-| `chunked_text` | — | — | ✅ | ✅ |
-| `chunked_embedded` | — | — | — | ✅ |
+| Data Type          | Parse | Chunk | Embed | Vector Insert |
+| ------------------ | ----- | ----- | ----- | ------------- |
+| `full_documents`   | ✅    | ✅    | ✅    | ✅            |
+| `parsed_text`      | —     | ✅    | ✅    | ✅            |
+| `chunked_text`     | —     | —     | ✅    | ✅            |
+| `chunked_embedded` | —     | —     | —     | ✅            |
 
 ### Existing Functions That Map to Each Stage
 
-| Stage | Function | Location | Key Parameters |
-|-------|----------|----------|----------------|
-| Parse | `Loader.load()` | `retrieval/loaders/main.py:190` | `filename`, `content_type`, `file_path` |
-| Chunk + Embed | `save_docs_to_vector_db()` | `routers/retrieval.py:1352` | `split=True/False`, `add=True` |
-| Embed only | `save_docs_to_vector_db(split=False)` | same | `split=False` skips chunking |
-| Direct insert | `save_embeddings_to_vector_db()` | `routers/retrieval.py:1276` | Accepts `{text, embedding, metadata}[]` |
-| Full file flow | `process_file()` | `routers/retrieval.py:1569` | Upload → parse → chunk → embed → store |
+| Stage          | Function                              | Location                        | Key Parameters                          |
+| -------------- | ------------------------------------- | ------------------------------- | --------------------------------------- |
+| Parse          | `Loader.load()`                       | `retrieval/loaders/main.py:190` | `filename`, `content_type`, `file_path` |
+| Chunk + Embed  | `save_docs_to_vector_db()`            | `routers/retrieval.py:1352`     | `split=True/False`, `add=True`          |
+| Embed only     | `save_docs_to_vector_db(split=False)` | same                            | `split=False` skips chunking            |
+| Direct insert  | `save_embeddings_to_vector_db()`      | `routers/retrieval.py:1276`     | Accepts `{text, embedding, metadata}[]` |
+| Full file flow | `process_file()`                      | `routers/retrieval.py:1569`     | Upload → parse → chunk → embed → store  |
 
 ### Recommended Schema Design: Discriminated Union
 
@@ -185,6 +185,7 @@ def _process_chunked_embedded_document(request, knowledge_id, provider, doc, use
 ```
 
 **Critical consideration — embedding model consistency**: When accepting pre-computed embeddings, ALL vectors in a collection MUST use the same embedding model and dimensionality. Options:
+
 1. **Trust the provider** — assume they use the correct model (simplest, suitable for internal integrations)
 2. **Validate dimensions** — check that `len(embedding) == expected_dim` based on the configured model
 3. **Store embedding config** — record which model produced the embeddings in chunk metadata for audit
@@ -192,6 +193,7 @@ def _process_chunked_embedded_document(request, knowledge_id, provider, doc, use
 Recommendation: validate dimensions (option 2) as a safety check. The dimension of the configured model is available from the embedding function config.
 
 **Hash-based dedup**: `save_embeddings_to_vector_db()` does NOT have hash dedup built in (unlike `save_docs_to_vector_db()`). For idempotent re-push, we should either:
+
 - Add hash-based dedup to `save_embeddings_to_vector_db()`, OR
 - Delete existing vectors for the file_id before inserting (simpler: `VECTOR_DB_CLIENT.delete(collection_name, filter={"file_id": file_id})`)
 
@@ -202,6 +204,7 @@ The delete-then-insert approach is simpler and consistent with the "update" path
 **What changes**: Accept binary file uploads via multipart form data. Route through the existing `process_file()` pipeline (Loader → chunk → embed → store).
 
 **Separate endpoint recommended**: Multipart uploads don't mix well with JSON bodies. Use:
+
 ```
 POST /api/v1/integrations/upload
 Content-Type: multipart/form-data
@@ -214,18 +217,21 @@ metadata: <JSON string>
 ```
 
 **Implementation approach**: Reuse `process_file()` from `retrieval.py` which already handles the full pipeline:
+
 1. Save the uploaded file to storage via `Storage.save_file()`
 2. Create a `File` record with the deterministic ID `{provider}-{source_id}`
 3. Call `process_file()` with `file_id` and `collection_name=knowledge_id`
 4. `process_file` handles: Loader dispatch → text extraction → chunking → embedding → vector insert
 
 **Key complexity**:
+
 - File storage management (S3/local, path construction)
 - Content type detection (from file extension or `Content-Type` header)
 - Large file handling (streaming upload, memory constraints)
 - The existing `process_file()` endpoint expects a `File` record to already exist — so we need to create one first
 
 **Suggested phased approach**:
+
 - Phase A: Single file upload per request (simplest)
 - Phase B: Batch upload (multiple files in one request)
 
@@ -309,12 +315,14 @@ Then validate in the dispatch that the correct fields are present.
 ```
 
 **Push** (our API dictates the contract):
+
 - External system calls our REST API
 - We control the schema, authentication, rate limits
 - Provider config determines data_type → pipeline entry point
 - Authentication: service account JWT bound to provider slug
 
 **Pull** (abstracted connectors):
+
 - Open WebUI scheduler triggers periodic sync
 - `SyncProvider` ABC defines the contract: `execute_sync()`, `get_provider_type()`, `get_token_manager()`
 - Each connector implementation handles: OAuth, API calls, file download, delta detection
@@ -327,12 +335,14 @@ Then validate in the dispatch that the correct fields are present.
 The current `SyncProvider` at `services/sync/provider.py` is a good start but tightly coupled to the OneDrive implementation. For future connectors:
 
 **What works well** (keep):
+
 - `SyncProvider.execute_sync()` — clean async interface
 - `TokenManager` — separate concern for OAuth lifecycle
 - Factory function — lazy import pattern prevents circular deps
 - Provider type string → KB type mapping
 
 **What needs abstraction** (for Google Drive, Salesforce, etc.):
+
 1. **Delta detection**: OneDrive uses Graph API delta tokens. Others need their own. This stays provider-specific.
 2. **File download + processing**: Currently hardcoded in `OneDriveSyncWorker`. Should delegate to the shared pipeline.
 3. **Sync state storage**: Currently `meta.onedrive_sync`. Needs a generic `meta.sync` structure.
@@ -340,6 +350,7 @@ The current `SyncProvider` at `services/sync/provider.py` is a good start but ti
 5. **Scheduler integration**: Currently OneDrive-specific in `main.py` lifespan. Should be generic sync scheduler.
 
 **Future recipe for adding a pull connector**:
+
 ```
 1. Create services/{provider}/ directory
 2. Implement SyncProvider ABC (execute_sync fetches data from external API)
@@ -355,14 +366,15 @@ This is future work — but the push API design should not conflict with it.
 
 When a document is re-pushed (same `source_id`):
 
-| Data Type | Update Strategy |
-|-----------|----------------|
-| `parsed_text` | Hash compare → skip if unchanged. If changed: delete old vectors by `file_id`, re-chunk + re-embed |
-| `chunked_text` | Hash compare → skip if unchanged. If changed: delete old vectors by `file_id`, re-embed new chunks |
+| Data Type          | Update Strategy                                                                                    |
+| ------------------ | -------------------------------------------------------------------------------------------------- |
+| `parsed_text`      | Hash compare → skip if unchanged. If changed: delete old vectors by `file_id`, re-chunk + re-embed |
+| `chunked_text`     | Hash compare → skip if unchanged. If changed: delete old vectors by `file_id`, re-embed new chunks |
 | `chunked_embedded` | Delete old vectors by `file_id`, insert new vectors (no hash dedup — provider controls versioning) |
-| `full_documents` | Hash compare on file content → skip if unchanged. If changed: re-process through full pipeline |
+| `full_documents`   | Hash compare on file content → skip if unchanged. If changed: re-process through full pipeline     |
 
 The delete-then-insert pattern for updates is cleanest:
+
 ```python
 # For updates (file already exists)
 VECTOR_DB_CLIENT.delete(collection_name=knowledge_id, filter={"file_id": file_id})
@@ -373,14 +385,15 @@ This is already partially implemented — `_process_ingest_document` updates fil
 
 ### Request Size and Performance Considerations
 
-| Data Type | Typical Request Size | Latency Driver |
-|-----------|---------------------|----------------|
-| `parsed_text` | 10-100KB per doc | Chunking + Embedding |
-| `chunked_text` | 10-100KB per doc | Embedding |
-| `chunked_embedded` | 1-10MB per doc (vectors are large) | Vector DB insert |
-| `full_documents` | 1-50MB per file | Parsing + Chunking + Embedding |
+| Data Type          | Typical Request Size               | Latency Driver                 |
+| ------------------ | ---------------------------------- | ------------------------------ |
+| `parsed_text`      | 10-100KB per doc                   | Chunking + Embedding           |
+| `chunked_text`     | 10-100KB per doc                   | Embedding                      |
+| `chunked_embedded` | 1-10MB per doc (vectors are large) | Vector DB insert               |
+| `full_documents`   | 1-50MB per file                    | Parsing + Chunking + Embedding |
 
 For `chunked_embedded`, consider:
+
 - Larger `max_documents_per_request` limit since no embedding is needed
 - Streaming/chunked transfer encoding for large payloads
 - Batch vector insert (already handled by `VECTOR_DB_CLIENT.insert()`)

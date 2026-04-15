@@ -89,6 +89,7 @@
 	import TerminalMenu from './MessageInput/TerminalMenu.svelte';
 	import PlusAlt from '../icons/PlusAlt.svelte';
 	import Terminal from '../icons/Terminal.svelte';
+	import Document from '../icons/Document.svelte';
 	import Link from '../icons/Link.svelte';
 	import Camera from '../icons/Camera.svelte';
 	import Clip from '../icons/Clip.svelte';
@@ -137,6 +138,7 @@
 	export let imageGenerationEnabled = false;
 	export let webSearchEnabled = false;
 	export let codeInterpreterEnabled = false;
+	export let documentWriterEnabled = false;
 
 	export let pendingOAuthTools = [];
 
@@ -178,7 +180,8 @@
 		selectedFilterIds,
 		imageGenerationEnabled,
 		webSearchEnabled,
-		codeInterpreterEnabled
+		codeInterpreterEnabled,
+		documentWriterEnabled
 	});
 
 	const inputVariableHandler = async (text: string): Promise<string> => {
@@ -411,10 +414,10 @@
 	let command = '';
 	export let showCommands = false;
 	$: showCommands =
-		(command?.charAt(0) === '@') ||
+		command?.charAt(0) === '@' ||
 		(command?.charAt(0) === '/' && isFeatureEnabled('prompts')) ||
 		(command?.charAt(0) === '#' && isFeatureEnabled('knowledge')) ||
-		(command?.charAt(0) === '$') ||
+		command?.charAt(0) === '$' ||
 		('\\#' === command?.slice(0, 2) && isFeatureEnabled('knowledge'));
 	let suggestions = null;
 
@@ -477,7 +480,8 @@
 
 	let fileUploadEnabled = true;
 	$: fileUploadEnabled =
-		fileUploadCapableModels.length === (atSelectedModel?.id ? [atSelectedModel.id] : selectedModels).length &&
+		fileUploadCapableModels.length ===
+			(atSelectedModel?.id ? [atSelectedModel.id] : selectedModels).length &&
 		($_user?.role === 'admin' || $_user?.permissions?.chat?.file_upload);
 
 	let webSearchCapableModels = [];
@@ -499,6 +503,14 @@
 	).filter(
 		(model) =>
 			$models.find((m) => m.id === model)?.info?.meta?.capabilities?.code_interpreter ?? true
+	);
+
+	let documentWriterCapableModels = [];
+	$: documentWriterCapableModels = (
+		atSelectedModel?.id ? [atSelectedModel.id] : selectedModels
+	).filter(
+		(model) =>
+			$models.find((m) => m.id === model)?.info?.meta?.capabilities?.document_writer ?? true
 	);
 
 	let toggleFilters = [];
@@ -531,6 +543,13 @@
 		$config?.features?.enable_code_interpreter &&
 		($_user.role === 'admin' || $_user?.permissions?.features?.code_interpreter);
 
+	let showDocumentWriterButton = false;
+	$: showDocumentWriterButton =
+		(atSelectedModel?.id ? [atSelectedModel.id] : selectedModels).length ===
+			documentWriterCapableModels.length &&
+		$config?.features?.enable_document_writer &&
+		($_user.role === 'admin' || $_user?.permissions?.features?.document_writer);
+
 	// Disable code interpreter when terminal is active (mutually exclusive)
 	$: if ($selectedTerminalId && codeInterpreterEnabled) {
 		codeInterpreterEnabled = false;
@@ -544,18 +563,21 @@
 			const fileData = await createPicker({
 				onFileSelected: ({ name }) => {
 					tempItemId = uuidv4();
-					files = [...files, {
-						type: 'file',
-						file: '',
-						id: null,
-						url: '',
-						name,
-						collection_name: '',
-						status: 'uploading',
-						size: 0,
-						error: '',
-						itemId: tempItemId
-					}];
+					files = [
+						...files,
+						{
+							type: 'file',
+							file: '',
+							id: null,
+							url: '',
+							name,
+							collection_name: '',
+							status: 'uploading',
+							size: 0,
+							error: '',
+							itemId: tempItemId
+						}
+					];
 				}
 			});
 			if (fileData) {
@@ -587,18 +609,21 @@
 					for (const item of items) {
 						const tempItemId = uuidv4();
 						tempItemIds.push(tempItemId);
-						files = [...files, {
-							type: 'file',
-							file: '',
-							id: null,
-							url: '',
-							name: item.name,
-							collection_name: '',
-							status: 'uploading',
-							size: 0,
-							error: '',
-							itemId: tempItemId
-						}];
+						files = [
+							...files,
+							{
+								type: 'file',
+								file: '',
+								id: null,
+								url: '',
+								name: item.name,
+								collection_name: '',
+								status: 'uploading',
+								size: 0,
+								error: '',
+								itemId: tempItemId
+							}
+						];
 					}
 				}
 			});
@@ -1659,6 +1684,7 @@
 															webSearchEnabled = false;
 															imageGenerationEnabled = false;
 															codeInterpreterEnabled = false;
+															documentWriterEnabled = false;
 														}
 													}}
 													on:paste={async (e) => {
@@ -1707,51 +1733,53 @@
 							<div class=" flex justify-between mt-0.5 mb-2.5 mx-0.5 max-w-full" dir="ltr">
 								<div class="ml-1 self-end flex items-center flex-1 max-w-[80%]">
 									{#if isFeatureEnabled('input_menu')}
-									<InputMenu
-										bind:this={inputMenuRef}
-										bind:files
-										selectedModels={atSelectedModel ? [atSelectedModel.id] : selectedModels}
-										{fileUploadCapableModels}
-										{screenCaptureHandler}
-										{inputFilesHandler}
-										uploadFilesHandler={() => {
-											filesInputElement.click();
-										}}
-										uploadGoogleDriveHandler={googleDriveHandler}
-										uploadOneDriveHandler={oneDriveHandler}
-										{onUpload}
-										onClose={async () => {
-											await tick();
+										<InputMenu
+											bind:this={inputMenuRef}
+											bind:files
+											selectedModels={atSelectedModel ? [atSelectedModel.id] : selectedModels}
+											{fileUploadCapableModels}
+											{screenCaptureHandler}
+											{inputFilesHandler}
+											uploadFilesHandler={() => {
+												filesInputElement.click();
+											}}
+											uploadGoogleDriveHandler={googleDriveHandler}
+											uploadOneDriveHandler={oneDriveHandler}
+											{onUpload}
+											onClose={async () => {
+												await tick();
 
-											const chatInput = document.getElementById('chat-input');
-											chatInput?.focus();
-										}}
-										bind:selectedToolIds
-										bind:selectedFilterIds
-										bind:webSearchEnabled
-										bind:imageGenerationEnabled
-										bind:codeInterpreterEnabled
-										{toggleFilters}
-										{showToolsButton}
-										{showWebSearchButton}
-										{showImageGenerationButton}
-										{showCodeInterpreterButton}
-										closeOnOutsideClick={integrationsMenuCloseOnOutsideClick}
-										onShowValves={(e) => {
-											const { type, id } = e;
-											selectedValvesType = type;
-											selectedValvesItemId = id;
-											showValvesModal = true;
-											integrationsMenuCloseOnOutsideClick = false;
-										}}
-									>
-										<div
-											id="input-menu-button"
-											class="bg-transparent hover:bg-gray-100 text-gray-700 dark:text-white dark:hover:bg-gray-800 rounded-full size-8 flex justify-center items-center outline-hidden focus:outline-hidden"
+												const chatInput = document.getElementById('chat-input');
+												chatInput?.focus();
+											}}
+											bind:selectedToolIds
+											bind:selectedFilterIds
+											bind:webSearchEnabled
+											bind:imageGenerationEnabled
+											bind:codeInterpreterEnabled
+											bind:documentWriterEnabled
+											{toggleFilters}
+											{showToolsButton}
+											{showWebSearchButton}
+											{showImageGenerationButton}
+											{showCodeInterpreterButton}
+											{showDocumentWriterButton}
+											closeOnOutsideClick={integrationsMenuCloseOnOutsideClick}
+											onShowValves={(e) => {
+												const { type, id } = e;
+												selectedValvesType = type;
+												selectedValvesItemId = id;
+												showValvesModal = true;
+												integrationsMenuCloseOnOutsideClick = false;
+											}}
 										>
-											<PlusAlt className="size-5.5" />
-										</div>
-									</InputMenu>
+											<div
+												id="input-menu-button"
+												class="bg-transparent hover:bg-gray-100 text-gray-700 dark:text-white dark:hover:bg-gray-800 rounded-full size-8 flex justify-center items-center outline-hidden focus:outline-hidden"
+											>
+												<PlusAlt className="size-5.5" />
+											</div>
+										</InputMenu>
 									{/if}
 
 									{#if selectedModelIds.length === 1 && $models.find((m) => m.id === selectedModelIds[0])?.has_user_valves}
@@ -1774,250 +1802,279 @@
 									{/if}
 
 									<div class="ml-1 flex gap-1.5">
-									<!-- Pinned items -->
-									{#each ($settings?.pinnedInputItems ?? []) as itemId}
-										{#if itemId === 'upload_files' && fileUploadEnabled}
-											<Tooltip content={$i18n.t('Upload Files')} placement="top">
-												<button
-													class="p-[7px] rounded-full bg-transparent text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors duration-300 focus:outline-hidden"
-													type="button"
-													on:click={() => filesInputElement.click()}
-												>
-													<Clip className="size-4" />
-												</button>
-											</Tooltip>
-										{:else if itemId === 'capture' && fileUploadEnabled && isFeatureEnabled('capture')}
-											<Tooltip content={$i18n.t('Capture')} placement="top">
-												<button
-													class="p-[7px] rounded-full bg-transparent text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors duration-300 focus:outline-hidden"
-													type="button"
-													on:click={() => {
-														if (!$mobile) {
-															screenCaptureHandler();
-														} else {
-															document.getElementById('camera-input')?.click();
-														}
-													}}
-												>
-													<Camera className="size-4" />
-												</button>
-											</Tooltip>
-										{:else if itemId === 'attach_webpage' && fileUploadEnabled}
-											<Tooltip content={$i18n.t('Attach Webpage')} placement="top">
-												<button
-													class="p-[7px] rounded-full bg-transparent text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors duration-300 focus:outline-hidden"
-													type="button"
-													on:click={() => inputMenuRef?.openWebpageModal()}
-												>
-													<Link className="size-4" />
-												</button>
-											</Tooltip>
-										{:else if itemId === 'attach_notes' && ($config?.features?.enable_notes ?? false)}
-											<Tooltip content={$i18n.t('Attach Notes')} placement="top">
-												<button
-													class="p-[7px] rounded-full bg-transparent text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors duration-300 focus:outline-hidden"
-													type="button"
-													on:click={() => inputMenuRef?.openTab('notes')}
-												>
-													<PageEdit className="size-4" />
-												</button>
-											</Tooltip>
-										{:else if itemId === 'knowledge' && isFeatureEnabled('knowledge')}
-											<Tooltip content={$i18n.t('Attach Knowledge')} placement="top">
-												<button
-													class="p-[7px] rounded-full bg-transparent text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors duration-300 focus:outline-hidden"
-													type="button"
-													on:click={() => inputMenuRef?.openTab('knowledge')}
-												>
-													<FolderOpen className="size-4" />
-												</button>
-											</Tooltip>
-										{:else if itemId === 'reference_chats'}
-											<Tooltip content={$i18n.t('Reference Chats')} placement="top">
-												<button
-													class="p-[7px] rounded-full bg-transparent text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors duration-300 focus:outline-hidden"
-													type="button"
-													on:click={() => inputMenuRef?.openTab('chats')}
-												>
-													<ClockRotateRight className="size-4" />
-												</button>
-											</Tooltip>
-										{:else if itemId === 'google_drive' && fileUploadEnabled && $config?.features?.enable_google_drive_integration}
-											<Tooltip content={$i18n.t('Google Drive')} placement="top">
-												<button
-													class="p-[7px] rounded-full bg-transparent text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors duration-300 focus:outline-hidden"
-													type="button"
-													on:click={googleDriveHandler}
-												>
-													<GoogleDrive className="size-4" />
-												</button>
-											</Tooltip>
-										{:else if itemId === 'onedrive' && fileUploadEnabled && $config?.features?.enable_onedrive_integration && $config?.features?.enable_onedrive_business}
-											<Tooltip content={$i18n.t('Microsoft OneDrive')} placement="top">
-												<button
-													class="p-[7px] rounded-full bg-transparent text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors duration-300 focus:outline-hidden"
-													type="button"
-													on:click={() => oneDriveHandler('organizations')}
-												>
-													<OneDrive className="size-4" />
-												</button>
-											</Tooltip>
-										<!-- Pinned capability items -->
-										{:else if itemId === 'web_search' && showWebSearchButton}
-											<Tooltip content={$i18n.t('Web Search')} placement="top">
-												<button
-													on:click|preventDefault={() => (webSearchEnabled = !webSearchEnabled)}
-													type="button"
-													class="p-[7px] flex gap-1.5 items-center text-sm rounded-full border transition-colors duration-300 focus:outline-hidden max-w-full overflow-hidden {webSearchEnabled
-														? 'text-sky-500 dark:text-sky-300 bg-sky-50 hover:bg-sky-100 dark:bg-sky-400/10 dark:hover:bg-sky-600/10 border-sky-200/40 dark:border-sky-500/20'
-														: 'border-transparent bg-transparent text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800'}"
-												>
-													<GlobeAlt className="size-4" strokeWidth="1.75" />
-												</button>
-											</Tooltip>
-										{:else if itemId === 'image_generation' && showImageGenerationButton}
-											<Tooltip content={$i18n.t('Image')} placement="top">
-												<button
-													on:click|preventDefault={() => (imageGenerationEnabled = !imageGenerationEnabled)}
-													type="button"
-													class="p-[7px] flex gap-1.5 items-center text-sm rounded-full border transition-colors duration-300 focus:outline-hidden max-w-full overflow-hidden {imageGenerationEnabled
-														? 'text-sky-500 dark:text-sky-300 bg-sky-50 hover:bg-sky-100 dark:bg-sky-400/10 dark:hover:bg-sky-700/10 border-sky-200/40 dark:border-sky-500/20'
-														: 'border-transparent bg-transparent text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800'}"
-												>
-													<Photo className="size-4" strokeWidth="1.75" />
-												</button>
-											</Tooltip>
-										{:else if itemId === 'code_interpreter' && showCodeInterpreterButton}
-											<Tooltip content={$i18n.t('Code Interpreter')} placement="top">
-												<button
-													aria-label={codeInterpreterEnabled
-														? $i18n.t('Disable Code Interpreter')
-														: $i18n.t('Enable Code Interpreter')}
-													aria-pressed={codeInterpreterEnabled}
-													on:click|preventDefault={() => (codeInterpreterEnabled = !codeInterpreterEnabled)}
-													type="button"
-													class="p-[7px] flex gap-1.5 items-center text-sm rounded-full border transition-colors duration-300 focus:outline-hidden max-w-full overflow-hidden {codeInterpreterEnabled
-														? 'text-sky-500 dark:text-sky-300 bg-sky-50 hover:bg-sky-100 dark:bg-sky-400/10 dark:hover:bg-sky-700/10 border-sky-200/40 dark:border-sky-500/20'
-														: 'border-transparent bg-transparent text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800'}"
-												>
-													<Terminal className="size-3.5" strokeWidth="2" />
-												</button>
-											</Tooltip>
-										{:else if itemId === 'tools' && showToolsButton}
-											<Tooltip content={$i18n.t('Tools')} placement="top">
-												<button
-													on:click|preventDefault={() => inputMenuRef?.openTab('tools')}
-													type="button"
-													class="p-[7px] flex gap-1.5 items-center text-sm rounded-full border transition-colors duration-300 focus:outline-hidden max-w-full overflow-hidden {(selectedToolIds ?? []).length > 0
-														? 'text-sky-500 dark:text-sky-300 bg-sky-50 hover:bg-sky-100 dark:bg-sky-400/10 dark:hover:bg-sky-600/10 border-sky-200/40 dark:border-sky-500/20'
-														: 'border-transparent bg-transparent text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800'}"
-												>
-													<Wrench className="size-4" strokeWidth="1.75" />
-													{#if (selectedToolIds ?? []).length > 0}
-														<span class="text-sm">{selectedToolIds.length}</span>
-													{/if}
-												</button>
-											</Tooltip>
-										{:else if itemId.startsWith('filter:')}
-											{@const filterId = itemId.replace('filter:', '')}
-											{@const filter = toggleFilters.find((f) => f.id === filterId)}
-											{#if filter}
-												<Tooltip content={filter?.name} placement="top">
+										<!-- Pinned items -->
+										{#each $settings?.pinnedInputItems ?? [] as itemId}
+											{#if itemId === 'upload_files' && fileUploadEnabled}
+												<Tooltip content={$i18n.t('Upload Files')} placement="top">
 													<button
-														on:click|preventDefault={() => {
-															if (selectedFilterIds.includes(filterId)) {
-																selectedFilterIds = selectedFilterIds.filter((id) => id !== filterId);
+														class="p-[7px] rounded-full bg-transparent text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors duration-300 focus:outline-hidden"
+														type="button"
+														on:click={() => filesInputElement.click()}
+													>
+														<Clip className="size-4" />
+													</button>
+												</Tooltip>
+											{:else if itemId === 'capture' && fileUploadEnabled && isFeatureEnabled('capture')}
+												<Tooltip content={$i18n.t('Capture')} placement="top">
+													<button
+														class="p-[7px] rounded-full bg-transparent text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors duration-300 focus:outline-hidden"
+														type="button"
+														on:click={() => {
+															if (!$mobile) {
+																screenCaptureHandler();
 															} else {
-																selectedFilterIds = [...selectedFilterIds, filterId];
+																document.getElementById('camera-input')?.click();
 															}
 														}}
-														type="button"
-														class="p-[7px] flex gap-1.5 items-center text-sm rounded-full border transition-colors duration-300 focus:outline-hidden max-w-full overflow-hidden {selectedFilterIds.includes(filterId)
-															? 'text-sky-500 dark:text-sky-300 bg-sky-50 hover:bg-sky-100 dark:bg-sky-400/10 dark:hover:bg-sky-600/10 border-sky-200/40 dark:border-sky-500/20'
-															: 'border-transparent bg-transparent text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800'} capitalize"
 													>
-														{#if filter?.icon}
-															<div class="size-4 items-center flex justify-center">
-																<img
-																	src={filter.icon}
-																	class="size-3.5 {filter.icon.includes('svg') ? 'dark:invert-[80%]' : ''}"
-																	style="fill: currentColor;"
-																	alt={filter.name}
-																/>
-															</div>
-														{:else}
-															<Sparkles className="size-4" strokeWidth="1.75" />
-														{/if}
+														<Camera className="size-4" />
 													</button>
 												</Tooltip>
-											{/if}
-										{/if}
-									{/each}
-
-									<!-- Active capabilities NOT in pinned list -->
-									{#if (selectedToolIds ?? []).length > 0 && !($settings?.pinnedInputItems ?? []).includes('tools')}
-										<Tooltip
-											content={$i18n.t('{{COUNT}} Available Tools', {
-												COUNT: selectedToolIds.length
-											})}
-										>
-											<button
-												class="translate-y-[0.5px] px-1 flex gap-1 items-center text-gray-600 dark:text-gray-300 hover:text-gray-700 dark:hover:text-gray-200 rounded-lg self-center transition"
-												aria-label="Available Tools"
-												type="button"
-												on:click={() => {
-													showTools = !showTools;
-												}}
-											>
-												<Wrench className="size-4" strokeWidth="1.75" />
-
-												<span class="text-sm">
-													{selectedToolIds.length}
-												</span>
-											</button>
-										</Tooltip>
-									{/if}
-
-									{#each selectedFilterIds as filterId}
-										{#if !($settings?.pinnedInputItems ?? []).includes(`filter:${filterId}`)}
-											{@const filter = toggleFilters.find((f) => f.id === filterId)}
-											{#if filter}
-												<Tooltip content={filter?.name} placement="top">
+											{:else if itemId === 'attach_webpage' && fileUploadEnabled}
+												<Tooltip content={$i18n.t('Attach Webpage')} placement="top">
 													<button
-														on:click|preventDefault={() => {
-															selectedFilterIds = selectedFilterIds.filter((id) => id !== filterId);
-														}}
+														class="p-[7px] rounded-full bg-transparent text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors duration-300 focus:outline-hidden"
 														type="button"
-														class="group p-[7px] flex gap-1.5 items-center text-sm rounded-full transition-colors duration-300 focus:outline-hidden max-w-full overflow-hidden {selectedFilterIds.includes(
-															filterId
-														)
-															? 'text-sky-500 dark:text-sky-300 bg-sky-50 hover:bg-sky-100 dark:bg-sky-400/10 dark:hover:bg-sky-600/10 border border-sky-200/40 dark:border-sky-500/20'
-															: 'bg-transparent text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 '} capitalize"
+														on:click={() => inputMenuRef?.openWebpageModal()}
 													>
-														{#if filter?.icon}
-															<div class="size-4 items-center flex justify-center">
-																<img
-																	src={filter.icon}
-																	class="size-3.5 {filter.icon.includes('data:image/svg')
-																		? 'dark:invert-[80%]'
-																		: ''}"
-																	style="fill: currentColor;"
-																	alt={filter.name}
-																/>
-															</div>
-														{:else}
-															<Sparkles className="size-4" strokeWidth="1.75" />
-														{/if}
-														<div class="hidden group-hover:block">
-															<XMark className="size-4" strokeWidth="1.75" />
-														</div>
+														<Link className="size-4" />
 													</button>
 												</Tooltip>
+											{:else if itemId === 'attach_notes' && ($config?.features?.enable_notes ?? false)}
+												<Tooltip content={$i18n.t('Attach Notes')} placement="top">
+													<button
+														class="p-[7px] rounded-full bg-transparent text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors duration-300 focus:outline-hidden"
+														type="button"
+														on:click={() => inputMenuRef?.openTab('notes')}
+													>
+														<PageEdit className="size-4" />
+													</button>
+												</Tooltip>
+											{:else if itemId === 'knowledge' && isFeatureEnabled('knowledge')}
+												<Tooltip content={$i18n.t('Attach Knowledge')} placement="top">
+													<button
+														class="p-[7px] rounded-full bg-transparent text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors duration-300 focus:outline-hidden"
+														type="button"
+														on:click={() => inputMenuRef?.openTab('knowledge')}
+													>
+														<FolderOpen className="size-4" />
+													</button>
+												</Tooltip>
+											{:else if itemId === 'reference_chats'}
+												<Tooltip content={$i18n.t('Reference Chats')} placement="top">
+													<button
+														class="p-[7px] rounded-full bg-transparent text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors duration-300 focus:outline-hidden"
+														type="button"
+														on:click={() => inputMenuRef?.openTab('chats')}
+													>
+														<ClockRotateRight className="size-4" />
+													</button>
+												</Tooltip>
+											{:else if itemId === 'google_drive' && fileUploadEnabled && $config?.features?.enable_google_drive_integration}
+												<Tooltip content={$i18n.t('Google Drive')} placement="top">
+													<button
+														class="p-[7px] rounded-full bg-transparent text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors duration-300 focus:outline-hidden"
+														type="button"
+														on:click={googleDriveHandler}
+													>
+														<GoogleDrive className="size-4" />
+													</button>
+												</Tooltip>
+											{:else if itemId === 'onedrive' && fileUploadEnabled && $config?.features?.enable_onedrive_integration && $config?.features?.enable_onedrive_business}
+												<Tooltip content={$i18n.t('Microsoft OneDrive')} placement="top">
+													<button
+														class="p-[7px] rounded-full bg-transparent text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors duration-300 focus:outline-hidden"
+														type="button"
+														on:click={() => oneDriveHandler('organizations')}
+													>
+														<OneDrive className="size-4" />
+													</button>
+												</Tooltip>
+												<!-- Pinned capability items -->
+											{:else if itemId === 'web_search' && showWebSearchButton}
+												<Tooltip content={$i18n.t('Web Search')} placement="top">
+													<button
+														on:click|preventDefault={() => (webSearchEnabled = !webSearchEnabled)}
+														type="button"
+														class="p-[7px] flex gap-1.5 items-center text-sm rounded-full border transition-colors duration-300 focus:outline-hidden max-w-full overflow-hidden {webSearchEnabled
+															? 'text-sky-500 dark:text-sky-300 bg-sky-50 hover:bg-sky-100 dark:bg-sky-400/10 dark:hover:bg-sky-600/10 border-sky-200/40 dark:border-sky-500/20'
+															: 'border-transparent bg-transparent text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800'}"
+													>
+														<GlobeAlt className="size-4" strokeWidth="1.75" />
+													</button>
+												</Tooltip>
+											{:else if itemId === 'image_generation' && showImageGenerationButton}
+												<Tooltip content={$i18n.t('Image')} placement="top">
+													<button
+														on:click|preventDefault={() =>
+															(imageGenerationEnabled = !imageGenerationEnabled)}
+														type="button"
+														class="p-[7px] flex gap-1.5 items-center text-sm rounded-full border transition-colors duration-300 focus:outline-hidden max-w-full overflow-hidden {imageGenerationEnabled
+															? 'text-sky-500 dark:text-sky-300 bg-sky-50 hover:bg-sky-100 dark:bg-sky-400/10 dark:hover:bg-sky-700/10 border-sky-200/40 dark:border-sky-500/20'
+															: 'border-transparent bg-transparent text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800'}"
+													>
+														<Photo className="size-4" strokeWidth="1.75" />
+													</button>
+												</Tooltip>
+											{:else if itemId === 'code_interpreter' && showCodeInterpreterButton}
+												<Tooltip content={$i18n.t('Code Interpreter')} placement="top">
+													<button
+														aria-label={codeInterpreterEnabled
+															? $i18n.t('Disable Code Interpreter')
+															: $i18n.t('Enable Code Interpreter')}
+														aria-pressed={codeInterpreterEnabled}
+														on:click|preventDefault={() =>
+															(codeInterpreterEnabled = !codeInterpreterEnabled)}
+														type="button"
+														class="p-[7px] flex gap-1.5 items-center text-sm rounded-full border transition-colors duration-300 focus:outline-hidden max-w-full overflow-hidden {codeInterpreterEnabled
+															? 'text-sky-500 dark:text-sky-300 bg-sky-50 hover:bg-sky-100 dark:bg-sky-400/10 dark:hover:bg-sky-700/10 border-sky-200/40 dark:border-sky-500/20'
+															: 'border-transparent bg-transparent text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800'}"
+													>
+														<Terminal className="size-3.5" strokeWidth="2" />
+													</button>
+												</Tooltip>
+											{:else if itemId === 'document_writer' && showDocumentWriterButton}
+												<Tooltip content={$i18n.t('Document Writer')} placement="top">
+													<button
+														aria-label={documentWriterEnabled
+															? $i18n.t('Disable Document Writer')
+															: $i18n.t('Enable Document Writer')}
+														aria-pressed={documentWriterEnabled}
+														on:click|preventDefault={() =>
+															(documentWriterEnabled = !documentWriterEnabled)}
+														type="button"
+														class="p-[7px] flex gap-1.5 items-center text-sm rounded-full border transition-colors duration-300 focus:outline-hidden max-w-full overflow-hidden {documentWriterEnabled
+															? 'text-sky-500 dark:text-sky-300 bg-sky-50 hover:bg-sky-100 dark:bg-sky-400/10 dark:hover:bg-sky-700/10 border-sky-200/40 dark:border-sky-500/20'
+															: 'border-transparent bg-transparent text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800'}"
+													>
+														<Document className="size-3.5" strokeWidth="2" />
+													</button>
+												</Tooltip>
+											{:else if itemId === 'tools' && showToolsButton}
+												<Tooltip content={$i18n.t('Tools')} placement="top">
+													<button
+														on:click|preventDefault={() => inputMenuRef?.openTab('tools')}
+														type="button"
+														class="p-[7px] flex gap-1.5 items-center text-sm rounded-full border transition-colors duration-300 focus:outline-hidden max-w-full overflow-hidden {(
+															selectedToolIds ?? []
+														).length > 0
+															? 'text-sky-500 dark:text-sky-300 bg-sky-50 hover:bg-sky-100 dark:bg-sky-400/10 dark:hover:bg-sky-600/10 border-sky-200/40 dark:border-sky-500/20'
+															: 'border-transparent bg-transparent text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800'}"
+													>
+														<Wrench className="size-4" strokeWidth="1.75" />
+														{#if (selectedToolIds ?? []).length > 0}
+															<span class="text-sm">{selectedToolIds.length}</span>
+														{/if}
+													</button>
+												</Tooltip>
+											{:else if itemId.startsWith('filter:')}
+												{@const filterId = itemId.replace('filter:', '')}
+												{@const filter = toggleFilters.find((f) => f.id === filterId)}
+												{#if filter}
+													<Tooltip content={filter?.name} placement="top">
+														<button
+															on:click|preventDefault={() => {
+																if (selectedFilterIds.includes(filterId)) {
+																	selectedFilterIds = selectedFilterIds.filter(
+																		(id) => id !== filterId
+																	);
+																} else {
+																	selectedFilterIds = [...selectedFilterIds, filterId];
+																}
+															}}
+															type="button"
+															class="p-[7px] flex gap-1.5 items-center text-sm rounded-full border transition-colors duration-300 focus:outline-hidden max-w-full overflow-hidden {selectedFilterIds.includes(
+																filterId
+															)
+																? 'text-sky-500 dark:text-sky-300 bg-sky-50 hover:bg-sky-100 dark:bg-sky-400/10 dark:hover:bg-sky-600/10 border-sky-200/40 dark:border-sky-500/20'
+																: 'border-transparent bg-transparent text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800'} capitalize"
+														>
+															{#if filter?.icon}
+																<div class="size-4 items-center flex justify-center">
+																	<img
+																		src={filter.icon}
+																		class="size-3.5 {filter.icon.includes('svg')
+																			? 'dark:invert-[80%]'
+																			: ''}"
+																		style="fill: currentColor;"
+																		alt={filter.name}
+																	/>
+																</div>
+															{:else}
+																<Sparkles className="size-4" strokeWidth="1.75" />
+															{/if}
+														</button>
+													</Tooltip>
+												{/if}
 											{/if}
-										{/if}
-									{/each}
+										{/each}
 
-									{#if webSearchEnabled && !($settings?.pinnedInputItems ?? []).includes('web_search')}
+										<!-- Active capabilities NOT in pinned list -->
+										{#if (selectedToolIds ?? []).length > 0 && !($settings?.pinnedInputItems ?? []).includes('tools')}
+											<Tooltip
+												content={$i18n.t('{{COUNT}} Available Tools', {
+													COUNT: selectedToolIds.length
+												})}
+											>
+												<button
+													class="translate-y-[0.5px] px-1 flex gap-1 items-center text-gray-600 dark:text-gray-300 hover:text-gray-700 dark:hover:text-gray-200 rounded-lg self-center transition"
+													aria-label="Available Tools"
+													type="button"
+													on:click={() => {
+														showTools = !showTools;
+													}}
+												>
+													<Wrench className="size-4" strokeWidth="1.75" />
+
+													<span class="text-sm">
+														{selectedToolIds.length}
+													</span>
+												</button>
+											</Tooltip>
+										{/if}
+
+										{#each selectedFilterIds as filterId}
+											{#if !($settings?.pinnedInputItems ?? []).includes(`filter:${filterId}`)}
+												{@const filter = toggleFilters.find((f) => f.id === filterId)}
+												{#if filter}
+													<Tooltip content={filter?.name} placement="top">
+														<button
+															on:click|preventDefault={() => {
+																selectedFilterIds = selectedFilterIds.filter(
+																	(id) => id !== filterId
+																);
+															}}
+															type="button"
+															class="group p-[7px] flex gap-1.5 items-center text-sm rounded-full transition-colors duration-300 focus:outline-hidden max-w-full overflow-hidden {selectedFilterIds.includes(
+																filterId
+															)
+																? 'text-sky-500 dark:text-sky-300 bg-sky-50 hover:bg-sky-100 dark:bg-sky-400/10 dark:hover:bg-sky-600/10 border border-sky-200/40 dark:border-sky-500/20'
+																: 'bg-transparent text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 '} capitalize"
+														>
+															{#if filter?.icon}
+																<div class="size-4 items-center flex justify-center">
+																	<img
+																		src={filter.icon}
+																		class="size-3.5 {filter.icon.includes('data:image/svg')
+																			? 'dark:invert-[80%]'
+																			: ''}"
+																		style="fill: currentColor;"
+																		alt={filter.name}
+																	/>
+																</div>
+															{:else}
+																<Sparkles className="size-4" strokeWidth="1.75" />
+															{/if}
+															<div class="hidden group-hover:block">
+																<XMark className="size-4" strokeWidth="1.75" />
+															</div>
+														</button>
+													</Tooltip>
+												{/if}
+											{/if}
+										{/each}
+
+										{#if webSearchEnabled && !($settings?.pinnedInputItems ?? []).includes('web_search')}
 											<Tooltip content={$i18n.t('Web Search')} placement="top">
 												<button
 													on:click|preventDefault={() => (webSearchEnabled = !webSearchEnabled)}
@@ -2071,6 +2128,32 @@
 														: 'focus:outline-hidden rounded-full'}"
 												>
 													<Terminal className="size-3.5" strokeWidth="2" />
+
+													<div class="hidden group-hover:block">
+														<XMark className="size-4" strokeWidth="1.75" />
+													</div>
+												</button>
+											</Tooltip>
+										{/if}
+
+										{#if documentWriterEnabled && !($settings?.pinnedInputItems ?? []).includes('document_writer')}
+											<Tooltip content={$i18n.t('Document Writer')} placement="top">
+												<button
+													aria-label={documentWriterEnabled
+														? $i18n.t('Disable Document Writer')
+														: $i18n.t('Enable Document Writer')}
+													aria-pressed={documentWriterEnabled}
+													on:click|preventDefault={() =>
+														(documentWriterEnabled = !documentWriterEnabled)}
+													type="button"
+													class=" group p-[7px] flex gap-1.5 items-center text-sm transition-colors duration-300 max-w-full overflow-hidden {documentWriterEnabled
+														? ' text-sky-500 dark:text-sky-300 bg-sky-50 hover:bg-sky-100 dark:bg-sky-400/10 dark:hover:bg-sky-700/10 border border-sky-200/40 dark:border-sky-500/20'
+														: 'bg-transparent text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 '} {($settings?.highContrastMode ??
+													false)
+														? 'm-1'
+														: 'focus:outline-hidden rounded-full'}"
+												>
+													<Document className="size-3.5" strokeWidth="2" />
 
 													<div class="hidden group-hover:block">
 														<XMark className="size-4" strokeWidth="1.75" />

@@ -4,12 +4,12 @@ researcher: claude
 git_commit: 2be7bd7a4a6f207ac7e7985f70ba0b35bab4395d
 branch: feat/sync-improvements
 repository: open-webui
-topic: "2FA via Email OTP and TOTP for Email+Password Users"
+topic: '2FA via Email OTP and TOTP for Email+Password Users'
 tags: [research, codebase, authentication, 2fa, totp, otp, security]
 status: complete
 last_updated: 2026-02-16
 last_updated_by: claude
-last_updated_note: "Added client decisions on scope, email infra, and bypass rules"
+last_updated_note: 'Added client decisions on scope, email infra, and bypass rules'
 ---
 
 # Research: 2FA via Email OTP and TOTP for Email+Password Users
@@ -42,11 +42,13 @@ The hardest part is the **intermediate auth state**: currently, signin immediate
 #### Backend Auth Flow (`backend/open_webui/routers/auths.py`)
 
 The signin endpoint (`POST /api/v1/auths/signin`, line 510-634) has three branches:
+
 - **Trusted header auth** (reverse proxy SSO) - lines 518-548
 - **Auth disabled** (hardcoded admin) - lines 549-569
 - **Standard email+password** (the target for 2FA) - lines 570-588
 
 The standard flow:
+
 1. Rate limit check: `signin_rate_limiter.is_limited(email)` — 15 attempts per 3min (line 571)
 2. Bcrypt password verification via `Auths.authenticate_user()` (line 586)
 3. JWT creation with `create_token(data={"id": user.id})` (line 597)
@@ -77,6 +79,7 @@ The standard flow:
 #### Auth Dependencies (Route Guards)
 
 Three FastAPI dependencies in `utils/auth.py`:
+
 - `get_current_user()` (line 269) — validates JWT, returns `UserModel`
 - `get_verified_user()` (line 400) — requires role `user` or `admin`
 - `get_admin_user()` (line 409) — requires role `admin`
@@ -86,6 +89,7 @@ Three FastAPI dependencies in `utils/auth.py`:
 ### 2. Email Infrastructure — Does Not Exist
 
 There is **no email sending capability** in Open WebUI:
+
 - No SMTP configuration in `config.py` or `env.py`
 - No email-related Python packages in `pyproject.toml` or `requirements.txt`
 - No email templates directory
@@ -95,6 +99,7 @@ There is **no email sending capability** in Open WebUI:
 The only outbound notification system is **webhooks** (`utils/webhook.py`) supporting Slack, Discord, Teams, and generic HTTP POST.
 
 **For email OTP, you must build from scratch:**
+
 - SMTP configuration (host, port, username, password, TLS, from address)
 - Email sending utility (async preferred for FastAPI)
 - HTML email template for OTP codes
@@ -144,11 +149,11 @@ The existing `RateLimiter` class (`utils/rate_limit.py`) is Redis-backed with in
 
 ### New Dependencies
 
-| Library | Version | Purpose |
-|---------|---------|---------|
-| `pyotp` | 2.9.0 | TOTP generation/verification (RFC 6238) |
-| `qrcode[pil]` | 8.0 | QR code generation for authenticator app enrollment |
-| `aiosmtplib` | 3.0+ | Async SMTP client for email OTP (or use stdlib `smtplib` in thread pool) |
+| Library       | Version | Purpose                                                                  |
+| ------------- | ------- | ------------------------------------------------------------------------ |
+| `pyotp`       | 2.9.0   | TOTP generation/verification (RFC 6238)                                  |
+| `qrcode[pil]` | 8.0     | QR code generation for authenticator app enrollment                      |
+| `aiosmtplib`  | 3.0+    | Async SMTP client for email OTP (or use stdlib `smtplib` in thread pool) |
 
 Note: `cryptography` (for AES-GCM encryption of TOTP secrets) and `bcrypt` (for hashing recovery codes) are already in the project.
 
@@ -186,16 +191,16 @@ CREATE INDEX idx_email_otp_user_id ON email_otp(user_id);
 
 ### New API Endpoints
 
-| Method | Route | Auth | Purpose |
-|--------|-------|------|---------|
-| `POST` | `/api/v1/auths/2fa/totp/setup` | Full JWT | Generate TOTP secret + QR code |
-| `POST` | `/api/v1/auths/2fa/totp/enable` | Full JWT + password | Verify first code, activate, return recovery codes |
-| `POST` | `/api/v1/auths/2fa/totp/disable` | Full JWT + password | Deactivate TOTP |
-| `POST` | `/api/v1/auths/2fa/verify` | Partial JWT only | Verify TOTP/recovery code during login |
-| `POST` | `/api/v1/auths/2fa/email/send` | Partial JWT only | Send email OTP |
-| `POST` | `/api/v1/auths/2fa/email/verify` | Partial JWT only | Verify email OTP |
-| `POST` | `/api/v1/auths/2fa/recovery/regenerate` | Full JWT + password | Generate new recovery codes |
-| `GET`  | `/api/v1/auths/2fa/status` | Full JWT | Check 2FA enrollment status |
+| Method | Route                                   | Auth                | Purpose                                            |
+| ------ | --------------------------------------- | ------------------- | -------------------------------------------------- |
+| `POST` | `/api/v1/auths/2fa/totp/setup`          | Full JWT            | Generate TOTP secret + QR code                     |
+| `POST` | `/api/v1/auths/2fa/totp/enable`         | Full JWT + password | Verify first code, activate, return recovery codes |
+| `POST` | `/api/v1/auths/2fa/totp/disable`        | Full JWT + password | Deactivate TOTP                                    |
+| `POST` | `/api/v1/auths/2fa/verify`              | Partial JWT only    | Verify TOTP/recovery code during login             |
+| `POST` | `/api/v1/auths/2fa/email/send`          | Partial JWT only    | Send email OTP                                     |
+| `POST` | `/api/v1/auths/2fa/email/verify`        | Partial JWT only    | Verify email OTP                                   |
+| `POST` | `/api/v1/auths/2fa/recovery/regenerate` | Full JWT + password | Generate new recovery codes                        |
+| `GET`  | `/api/v1/auths/2fa/status`              | Full JWT            | Check 2FA enrollment status                        |
 
 ### Modified Existing Code
 
@@ -244,11 +249,13 @@ ENABLE_EMAIL_OTP=true
 ### Frontend Changes
 
 #### New Components
+
 - `src/lib/components/auth/TwoFactorChallenge.svelte` — TOTP/email code input during login
 - `src/lib/components/chat/Settings/Account/TwoFactorSetup.svelte` — TOTP enrollment with QR code
 - `src/lib/components/chat/Settings/Account/RecoveryCodes.svelte` — Display/regenerate recovery codes
 
 #### Modified Components
+
 - `src/routes/auth/+page.svelte` — Handle `requires_2fa` response, show 2FA challenge
 - `src/lib/apis/auths/index.ts` — New API client functions for 2FA endpoints
 - `src/lib/components/chat/Settings/Account.svelte` — Add 2FA section
@@ -286,12 +293,14 @@ The `cryptography` library is already a dependency (used for Fernet encryption o
 ## Security Considerations
 
 ### TOTP Best Practices
+
 - **`valid_window=1`**: Accept codes from t-30s, t, and t+30s (handles clock drift up to ~89s)
 - **Replay protection**: Store `totp_last_used_at` (timecode, not timestamp) and reject reused codes
 - **Rate limit**: 5 TOTP attempts per 15-minute window using existing `RateLimiter`
 - **Require password re-entry** to enable/disable 2FA
 
 ### Email OTP Best Practices
+
 - **6 digits**, numeric only, 5-minute expiration
 - **Max 3 attempts** per code, then require resend
 - **60-second resend cooldown**, max 3 codes per 15 minutes
@@ -300,6 +309,7 @@ The `cryptography` library is already a dependency (used for Fernet encryption o
 - **Never reveal** whether the email exists
 
 ### Recovery Codes
+
 - **10 codes**, 10 alphanumeric chars formatted as `XXXXX-XXXXX`
 - **bcrypt-hashed** individually in DB (long-lived, unlike OTPs)
 - **One-time use**: mark `used=True` + `used_at` after consumption
@@ -307,6 +317,7 @@ The `cryptography` library is already a dependency (used for Fernet encryption o
 - Regeneration requires password confirmation
 
 ### General
+
 - Partial 2FA tokens must be **rejected by all normal endpoints** (critical)
 - Admin should be able to **force-disable** a user's 2FA (for lockout recovery)
 - **Audit log** 2FA enable/disable/recovery code use events
@@ -361,15 +372,15 @@ An admin should be able to reset/disable 2FA for a locked-out user. This should 
 
 ### Resolved Decisions
 
-| Decision | Answer |
-|----------|--------|
-| **Email infrastructure** | Microsoft Graph API via `no-reply@soev.ai` (being built separately) |
-| **2FA scope** | Email+password users ONLY |
-| **LDAP bypass** | Yes — LDAP users skip 2FA |
-| **SSO/OAuth bypass** | Yes — managed by identity provider (Entra ID, etc.) |
-| **API key bypass** | Yes — API keys authenticate directly |
-| **Trusted header bypass** | Yes — reverse proxy SSO skips 2FA |
-| **Admin enforcement** | Fine-grained settings with grace period |
+| Decision                  | Answer                                                              |
+| ------------------------- | ------------------------------------------------------------------- |
+| **Email infrastructure**  | Microsoft Graph API via `no-reply@soev.ai` (being built separately) |
+| **2FA scope**             | Email+password users ONLY                                           |
+| **LDAP bypass**           | Yes — LDAP users skip 2FA                                           |
+| **SSO/OAuth bypass**      | Yes — managed by identity provider (Entra ID, etc.)                 |
+| **API key bypass**        | Yes — API keys authenticate directly                                |
+| **Trusted header bypass** | Yes — reverse proxy SSO skips 2FA                                   |
+| **Admin enforcement**     | Fine-grained settings with grace period                             |
 
 ### Updated Bypass Logic
 
@@ -393,14 +404,15 @@ Authorization: Bearer sk-*  (API key)                 → NO 2FA
 
 Fine-grained admin settings for 2FA enforcement:
 
-| Setting | Type | Default | Description |
-|---------|------|---------|-------------|
-| `ENABLE_2FA` | Boolean | `false` | Master toggle — enables 2FA feature globally |
-| `REQUIRE_2FA` | Boolean | `false` | When true, all email+password users must set up 2FA |
-| `2FA_GRACE_PERIOD_DAYS` | Integer | `7` | Days after enforcement before locking out non-compliant users |
-| `2FA_METHODS` | List | `["totp"]` | Enabled 2FA methods: `totp`, `email` |
+| Setting                 | Type    | Default    | Description                                                   |
+| ----------------------- | ------- | ---------- | ------------------------------------------------------------- |
+| `ENABLE_2FA`            | Boolean | `false`    | Master toggle — enables 2FA feature globally                  |
+| `REQUIRE_2FA`           | Boolean | `false`    | When true, all email+password users must set up 2FA           |
+| `2FA_GRACE_PERIOD_DAYS` | Integer | `7`        | Days after enforcement before locking out non-compliant users |
+| `2FA_METHODS`           | List    | `["totp"]` | Enabled 2FA methods: `totp`, `email`                          |
 
 **Grace period flow:**
+
 1. Admin enables `REQUIRE_2FA`
 2. Users who haven't set up 2FA see a dismissible banner: "Your admin requires 2FA. Set it up before [date]."
 3. After grace period expires, users without 2FA are redirected to a mandatory setup screen on login (can't dismiss)
@@ -409,6 +421,7 @@ Fine-grained admin settings for 2FA enforcement:
 ### Email OTP via Graph API
 
 Instead of SMTP, the email OTP will use the Microsoft Graph API `sendMail` endpoint (already being built for `no-reply@soev.ai`). This means:
+
 - No `aiosmtplib` dependency needed
 - Reuse the Graph API client being built in the OneDrive sync service
 - Email sending is an authenticated API call, not a direct SMTP connection

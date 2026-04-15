@@ -7,6 +7,7 @@ Add a configurable data retention/TTL system that automatically soft-deletes sta
 ## Current State Analysis
 
 ### Existing Infrastructure (Ready to Reuse)
+
 - **Soft-delete** on `chat` and `knowledge` tables (`deleted_at` column) — all reads filter `deleted_at.is_(None)`
 - **Cleanup worker** (`services/deletion/cleanup_worker.py`) processes soft-deleted entities every 60s: KB cascade, chat cascade, orphaned files
 - **`DeletionService.delete_user()`** (`services/deletion/service.py:383`) — full two-phase user cascade (soft-delete chats/KBs → hard-delete rest)
@@ -16,6 +17,7 @@ Add a configurable data retention/TTL system that automatically soft-deletes sta
 - **`PersistentConfig`** pattern for runtime-adjustable settings with Helm → env → DB → admin UI pipeline
 
 ### What's Missing
+
 - No `get_inactive_users()` query method on Users model
 - No `get_stale_chats()` or `get_stale_knowledge()` query methods
 - No TTL configuration variables
@@ -23,6 +25,7 @@ Add a configurable data retention/TTL system that automatically soft-deletes sta
 - No admin UI for retention settings
 
 ### Key Discoveries
+
 - `Chats.soft_delete_by_user_id()` (`models/chats.py:1616`) and `Knowledges.soft_delete_by_user_id()` (`models/knowledge.py:768`) both do bulk `UPDATE SET deleted_at = now()` and return count
 - The cleanup worker already handles the expensive cascade (vector DB, storage, file cleanup) for soft-deleted entities
 - `periodic_archive_cleanup()` is the exact pattern to follow — `while True` loop with `asyncio.sleep(24 * 60 * 60)` before each run
@@ -33,6 +36,7 @@ Add a configurable data retention/TTL system that automatically soft-deletes sta
 ## Desired End State
 
 A daily background task scans for:
+
 1. **Inactive users** (no login for N days) → archive + full cascade delete
 2. **Stale chats** (no update for N days, user still active) → soft-delete
 3. **Stale knowledge bases** (no update for N days, user still active, local type only) → soft-delete
@@ -40,6 +44,7 @@ A daily background task scans for:
 All thresholds are configurable via env vars, Helm values, and admin UI. The system is disabled by default. When enabled, it logs all actions and respects existing archive settings.
 
 ### Verification
+
 - Set `DATA_RETENTION_TTL_DAYS=1` in `.env`, restart, verify the periodic task runs and logs "Data retention cleanup: ..." with stats
 - Create a test user, set `last_active_at` to >1 day ago via SQL, verify user is archived + deleted on next cleanup cycle
 - Create a test chat, set `updated_at` to >1 day ago, verify it gets soft-deleted
@@ -64,11 +69,13 @@ Five phases, each independently testable. The backend is fully functional after 
 ## Phase 1: Backend Configuration
 
 ### Overview
+
 Add 5 new `PersistentConfig` settings following the exact pattern of the archival/2FA configs.
 
 ### Changes Required
 
 #### 1. Config definitions
+
 **File**: `backend/open_webui/config.py`
 **Location**: After the User Archival section (after line 1731)
 
@@ -109,6 +116,7 @@ DATA_RETENTION_WARNING_DAYS = PersistentConfig(
 ```
 
 #### 2. Import in main.py
+
 **File**: `backend/open_webui/main.py`
 **Location**: Add to the config imports (around line 384, after `TWO_FA_GRACE_PERIOD_DAYS`)
 
@@ -122,6 +130,7 @@ DATA_RETENTION_WARNING_DAYS = PersistentConfig(
 ```
 
 #### 3. Wire to app.state.config
+
 **File**: `backend/open_webui/main.py`
 **Location**: After the 2FA assignments (after line 1280)
 
@@ -140,6 +149,7 @@ app.state.config.DATA_RETENTION_WARNING_DAYS = DATA_RETENTION_WARNING_DAYS
 ```
 
 #### 4. Expose in /api/config (for authenticated users)
+
 **File**: `backend/open_webui/main.py`
 **Location**: Inside the `features` dict in `get_app_config()`, after the `enable_2fa` line (~line 2312)
 
@@ -150,41 +160,48 @@ app.state.config.DATA_RETENTION_WARNING_DAYS = DATA_RETENTION_WARNING_DAYS
 Only expose the master TTL flag so the frontend knows retention is active. The per-entity values are admin-only.
 
 #### 5. Helm values
+
 **File**: `helm/open-webui-tenant/values.yaml`
 **Location**: After the User Archival section (after line 391)
 
 ```yaml
-    # Data Retention TTL (DPIA / GDPR storage limitation)
-    # Set dataRetentionTtlDays > 0 to enable automated data cleanup
-    dataRetentionTtlDays: "0"             # 0 = disabled (customers opt-in)
-    userInactivityTtlDays: "730"          # 2 years of no login → archive + delete user
-    chatRetentionTtlDays: "0"             # 0 = inherit from master TTL
-    knowledgeRetentionTtlDays: "0"        # 0 = inherit from master TTL
-    dataRetentionWarningDays: "30"        # Days before TTL to flag (future: email warning)
+# Data Retention TTL (DPIA / GDPR storage limitation)
+# Set dataRetentionTtlDays > 0 to enable automated data cleanup
+dataRetentionTtlDays: '0' # 0 = disabled (customers opt-in)
+userInactivityTtlDays: '730' # 2 years of no login → archive + delete user
+chatRetentionTtlDays: '0' # 0 = inherit from master TTL
+knowledgeRetentionTtlDays: '0' # 0 = inherit from master TTL
+dataRetentionWarningDays: '30' # Days before TTL to flag (future: email warning)
 ```
 
 #### 6. Helm configmap
+
 **File**: `helm/open-webui-tenant/templates/open-webui/configmap.yaml`
 **Location**: Before the `{{- end }}` closing (before line 389), after the 2FA section
 
 ```yaml
-  # Data Retention TTL
-  DATA_RETENTION_TTL_DAYS: {{ .Values.openWebui.config.dataRetentionTtlDays | default "0" | quote }}
-  USER_INACTIVITY_TTL_DAYS: {{ .Values.openWebui.config.userInactivityTtlDays | default "730" | quote }}
-  CHAT_RETENTION_TTL_DAYS: {{ .Values.openWebui.config.chatRetentionTtlDays | default "0" | quote }}
-  KNOWLEDGE_RETENTION_TTL_DAYS: {{ .Values.openWebui.config.knowledgeRetentionTtlDays | default "0" | quote }}
-  DATA_RETENTION_WARNING_DAYS: {{ .Values.openWebui.config.dataRetentionWarningDays | default "30" | quote }}
+# Data Retention TTL
+DATA_RETENTION_TTL_DAYS: { { .Values.openWebui.config.dataRetentionTtlDays | default "0" | quote } }
+USER_INACTIVITY_TTL_DAYS:
+  { { .Values.openWebui.config.userInactivityTtlDays | default "730" | quote } }
+CHAT_RETENTION_TTL_DAYS: { { .Values.openWebui.config.chatRetentionTtlDays | default "0" | quote } }
+KNOWLEDGE_RETENTION_TTL_DAYS:
+  { { .Values.openWebui.config.knowledgeRetentionTtlDays | default "0" | quote } }
+DATA_RETENTION_WARNING_DAYS:
+  { { .Values.openWebui.config.dataRetentionWarningDays | default "30" | quote } }
 ```
 
 ### Success Criteria
 
 #### Automated Verification
+
 - [x] Backend starts without errors: `open-webui dev`
 - [ ] Config values are readable: `curl -s localhost:8080/api/config | python3 -c "import sys,json; print(json.load(sys.stdin)['features']['data_retention_ttl_days'])"` → `0`
 - [x] Helm template renders: `helm template test helm/open-webui-tenant/ | grep DATA_RETENTION_TTL_DAYS`
 - [x] `npm run build` succeeds
 
 #### Manual Verification
+
 - [ ] Set `DATA_RETENTION_TTL_DAYS=730` in `.env`, restart, verify `/api/config` returns `730`
 - [ ] Change back to `0`, restart, verify it returns `0`
 
@@ -195,11 +212,13 @@ Only expose the master TTL flag so the frontend knows retention is active. The p
 ## Phase 2: Model Query Methods + TTL Resolution
 
 ### Overview
+
 Add query methods to find inactive users, stale chats, and stale KBs. Add a helper to resolve effective TTL per entity type.
 
 ### Changes Required
 
 #### 1. Users model — `get_inactive_users()`
+
 **File**: `backend/open_webui/models/users.py`
 **Location**: After `get_num_users_active_today()` (~line 544)
 
@@ -233,6 +252,7 @@ def get_inactive_users(
 ```
 
 #### 2. Chats model — `get_stale_chats()`
+
 **File**: `backend/open_webui/models/chats.py`
 **Location**: After `get_pending_deletions()` (~line 1602)
 
@@ -261,6 +281,7 @@ def get_stale_chats(
 ```
 
 #### 3. Knowledge model — `get_stale_knowledge()`
+
 **File**: `backend/open_webui/models/knowledge.py`
 **Location**: After `get_pending_deletions()` (~line 754)
 
@@ -291,6 +312,7 @@ def get_stale_knowledge(
 ```
 
 #### 4. TTL Resolution Helper
+
 **File**: `backend/open_webui/services/retention/__init__.py` (new file, empty)
 **File**: `backend/open_webui/services/retention/config.py` (new file)
 
@@ -336,10 +358,12 @@ def is_retention_enabled(master_ttl: int) -> bool:
 ### Success Criteria
 
 #### Automated Verification
+
 - [x] Backend starts without errors: `open-webui dev`
 - [x] `npm run build` succeeds
 
 #### Manual Verification
+
 - [ ] Verify query methods work by temporarily calling them from a test script or the Python shell
 
 **Implementation Note**: After completing this phase, pause for confirmation before proceeding.
@@ -349,11 +373,13 @@ def is_retention_enabled(master_ttl: int) -> bool:
 ## Phase 3: Retention Service + Periodic Task
 
 ### Overview
+
 The core logic: a new `DataRetentionService` and a daily periodic task that orchestrates the three cleanup phases.
 
 ### Changes Required
 
 #### 1. Retention Service
+
 **File**: `backend/open_webui/services/retention/service.py` (new file)
 
 ```python
@@ -540,6 +566,7 @@ class DataRetentionService:
 ```
 
 #### 2. Periodic Task
+
 **File**: `backend/open_webui/main.py`
 **Location**: After `periodic_archive_cleanup()` (after line 713)
 
@@ -582,6 +609,7 @@ async def periodic_data_retention_cleanup():
 ```
 
 #### 3. Start the periodic task in lifespan
+
 **File**: `backend/open_webui/main.py`
 **Location**: After `asyncio.create_task(periodic_archive_cleanup())` (after line 766)
 
@@ -592,11 +620,13 @@ async def periodic_data_retention_cleanup():
 ### Success Criteria
 
 #### Automated Verification
+
 - [x] Backend starts without errors: `open-webui dev`
 - [x] `npm run build` succeeds
 - [x] Grep confirms the task is created: `grep -n "periodic_data_retention_cleanup" backend/open_webui/main.py`
 
 #### Manual Verification
+
 - [ ] Set `DATA_RETENTION_TTL_DAYS=1` in `.env` and temporarily reduce the sleep to 10 seconds for testing
 - [ ] Create a test user, manually set `last_active_at` to >1 day ago
 - [ ] Verify the user gets archived (if `ENABLE_USER_ARCHIVAL=true`) and deleted
@@ -611,11 +641,13 @@ async def periodic_data_retention_cleanup():
 ## Phase 4: Admin UI — Data Retention Config
 
 ### Overview
+
 Add a "Data Retention" section to the Database admin tab with a config endpoint and Svelte UI.
 
 ### Changes Required
 
 #### 1. Backend config endpoint
+
 **File**: `backend/open_webui/routers/configs.py`
 **Location**: After the 2FA config section (after line 916)
 
@@ -665,6 +697,7 @@ async def set_data_retention_config(
 ```
 
 #### 2. Frontend API client
+
 **File**: `src/lib/apis/configs/index.ts`
 **Location**: After the `set2FAConfig` function (after line 984)
 
@@ -726,142 +759,148 @@ export const setDataRetentionConfig = async (token: string, config: object) => {
 ```
 
 #### 3. Database.svelte — Data Retention Section
+
 **File**: `src/lib/components/admin/Settings/Database.svelte`
 
 Add imports at the top (after the archive imports around line 18):
+
 ```typescript
-import {
-    getDataRetentionConfig,
-    setDataRetentionConfig
-} from '$lib/apis/configs';
+import { getDataRetentionConfig, setDataRetentionConfig } from '$lib/apis/configs';
 ```
 
 Add state after the archive config state (~line 36):
+
 ```typescript
 let retentionConfig = {
-    DATA_RETENTION_TTL_DAYS: 0,
-    USER_INACTIVITY_TTL_DAYS: 730,
-    CHAT_RETENTION_TTL_DAYS: 0,
-    KNOWLEDGE_RETENTION_TTL_DAYS: 0,
-    DATA_RETENTION_WARNING_DAYS: 30
+	DATA_RETENTION_TTL_DAYS: 0,
+	USER_INACTIVITY_TTL_DAYS: 730,
+	CHAT_RETENTION_TTL_DAYS: 0,
+	KNOWLEDGE_RETENTION_TTL_DAYS: 0,
+	DATA_RETENTION_WARNING_DAYS: 30
 };
 ```
 
 Add load function (alongside `loadArchiveConfig`):
+
 ```typescript
 const loadRetentionConfig = async () => {
-    try {
-        const res = await getDataRetentionConfig(localStorage.token);
-        if (res) {
-            retentionConfig = res;
-        }
-    } catch (err) {
-        console.error('Failed to load retention config:', err);
-    }
+	try {
+		const res = await getDataRetentionConfig(localStorage.token);
+		if (res) {
+			retentionConfig = res;
+		}
+	} catch (err) {
+		console.error('Failed to load retention config:', err);
+	}
 };
 
 const handleSaveRetentionConfig = async () => {
-    try {
-        await setDataRetentionConfig(localStorage.token, retentionConfig);
-        toast.success($i18n.t('Data retention settings saved'));
-    } catch (err) {
-        toast.error($i18n.t('Failed to save data retention settings'));
-    }
+	try {
+		await setDataRetentionConfig(localStorage.token, retentionConfig);
+		toast.success($i18n.t('Data retention settings saved'));
+	} catch (err) {
+		toast.error($i18n.t('Failed to save data retention settings'));
+	}
 };
 ```
 
 Add `loadRetentionConfig()` to the `onMount` callback.
 
 Add UI section before the User Archives section (before line 276):
+
 ```svelte
 <!-- Data Retention Section -->
 <hr class="border-gray-50 dark:border-gray-850/30 my-2" />
 
 <div>
-    <div class="flex items-center justify-between mb-1">
-        <div class="text-sm font-medium">{$i18n.t('Data Retention')}</div>
-    </div>
-    <div class="text-xs text-gray-500 mb-3">
-        {$i18n.t('Automatically delete data after a configurable retention period. Set to 0 to disable.')}
-    </div>
+	<div class="flex items-center justify-between mb-1">
+		<div class="text-sm font-medium">{$i18n.t('Data Retention')}</div>
+	</div>
+	<div class="text-xs text-gray-500 mb-3">
+		{$i18n.t(
+			'Automatically delete data after a configurable retention period. Set to 0 to disable.'
+		)}
+	</div>
 
-    <div class="mb-3 space-y-2">
-        <div class="flex w-full justify-between items-center">
-            <div class="self-center text-xs">{$i18n.t('Master TTL (days)')}</div>
-            <input
-                type="number"
-                class="w-20 rounded py-1 px-2 text-xs bg-gray-50 dark:bg-gray-850 dark:text-gray-300"
-                bind:value={retentionConfig.DATA_RETENTION_TTL_DAYS}
-                min="0"
-            />
-        </div>
+	<div class="mb-3 space-y-2">
+		<div class="flex w-full justify-between items-center">
+			<div class="self-center text-xs">{$i18n.t('Master TTL (days)')}</div>
+			<input
+				type="number"
+				class="w-20 rounded py-1 px-2 text-xs bg-gray-50 dark:bg-gray-850 dark:text-gray-300"
+				bind:value={retentionConfig.DATA_RETENTION_TTL_DAYS}
+				min="0"
+			/>
+		</div>
 
-        {#if retentionConfig.DATA_RETENTION_TTL_DAYS > 0}
-            <div class="flex w-full justify-between items-center">
-                <div class="self-center text-xs">{$i18n.t('User Inactivity (days)')}</div>
-                <input
-                    type="number"
-                    class="w-20 rounded py-1 px-2 text-xs bg-gray-50 dark:bg-gray-850 dark:text-gray-300"
-                    bind:value={retentionConfig.USER_INACTIVITY_TTL_DAYS}
-                    min="0"
-                />
-            </div>
+		{#if retentionConfig.DATA_RETENTION_TTL_DAYS > 0}
+			<div class="flex w-full justify-between items-center">
+				<div class="self-center text-xs">{$i18n.t('User Inactivity (days)')}</div>
+				<input
+					type="number"
+					class="w-20 rounded py-1 px-2 text-xs bg-gray-50 dark:bg-gray-850 dark:text-gray-300"
+					bind:value={retentionConfig.USER_INACTIVITY_TTL_DAYS}
+					min="0"
+				/>
+			</div>
 
-            <div class="flex w-full justify-between items-center">
-                <div class="self-center text-xs">{$i18n.t('Chat Retention (days)')}</div>
-                <input
-                    type="number"
-                    class="w-20 rounded py-1 px-2 text-xs bg-gray-50 dark:bg-gray-850 dark:text-gray-300"
-                    bind:value={retentionConfig.CHAT_RETENTION_TTL_DAYS}
-                    min="0"
-                />
-            </div>
+			<div class="flex w-full justify-between items-center">
+				<div class="self-center text-xs">{$i18n.t('Chat Retention (days)')}</div>
+				<input
+					type="number"
+					class="w-20 rounded py-1 px-2 text-xs bg-gray-50 dark:bg-gray-850 dark:text-gray-300"
+					bind:value={retentionConfig.CHAT_RETENTION_TTL_DAYS}
+					min="0"
+				/>
+			</div>
 
-            <div class="flex w-full justify-between items-center">
-                <div class="self-center text-xs">{$i18n.t('Knowledge Base Retention (days)')}</div>
-                <input
-                    type="number"
-                    class="w-20 rounded py-1 px-2 text-xs bg-gray-50 dark:bg-gray-850 dark:text-gray-300"
-                    bind:value={retentionConfig.KNOWLEDGE_RETENTION_TTL_DAYS}
-                    min="0"
-                />
-            </div>
+			<div class="flex w-full justify-between items-center">
+				<div class="self-center text-xs">{$i18n.t('Knowledge Base Retention (days)')}</div>
+				<input
+					type="number"
+					class="w-20 rounded py-1 px-2 text-xs bg-gray-50 dark:bg-gray-850 dark:text-gray-300"
+					bind:value={retentionConfig.KNOWLEDGE_RETENTION_TTL_DAYS}
+					min="0"
+				/>
+			</div>
 
-            <div class="flex w-full justify-between items-center">
-                <div class="self-center text-xs">{$i18n.t('Warning Period (days)')}</div>
-                <input
-                    type="number"
-                    class="w-20 rounded py-1 px-2 text-xs bg-gray-50 dark:bg-gray-850 dark:text-gray-300"
-                    bind:value={retentionConfig.DATA_RETENTION_WARNING_DAYS}
-                    min="0"
-                />
-            </div>
+			<div class="flex w-full justify-between items-center">
+				<div class="self-center text-xs">{$i18n.t('Warning Period (days)')}</div>
+				<input
+					type="number"
+					class="w-20 rounded py-1 px-2 text-xs bg-gray-50 dark:bg-gray-850 dark:text-gray-300"
+					bind:value={retentionConfig.DATA_RETENTION_WARNING_DAYS}
+					min="0"
+				/>
+			</div>
 
-            <div class="text-xs text-gray-400 mt-1">
-                {$i18n.t('Set per-entity values to 0 to inherit from Master TTL.')}
-            </div>
-        {/if}
+			<div class="text-xs text-gray-400 mt-1">
+				{$i18n.t('Set per-entity values to 0 to inherit from Master TTL.')}
+			</div>
+		{/if}
 
-        <div class="flex justify-end mt-2">
-            <button
-                class="px-3 py-1.5 text-xs font-medium rounded bg-emerald-600 hover:bg-emerald-700 text-white transition"
-                on:click={handleSaveRetentionConfig}
-            >
-                {$i18n.t('Save')}
-            </button>
-        </div>
-    </div>
+		<div class="flex justify-end mt-2">
+			<button
+				class="px-3 py-1.5 text-xs font-medium rounded bg-emerald-600 hover:bg-emerald-700 text-white transition"
+				on:click={handleSaveRetentionConfig}
+			>
+				{$i18n.t('Save')}
+			</button>
+		</div>
+	</div>
 </div>
 ```
 
 ### Success Criteria
 
 #### Automated Verification
+
 - [x] Backend starts without errors: `open-webui dev`
 - [x] `npm run build` succeeds
 - [ ] API returns config: `curl -s -H "Authorization: Bearer $TOKEN" localhost:8080/api/v1/configs/data-retention`
 
 #### Manual Verification
+
 - [ ] Navigate to Admin → Settings → Database
 - [ ] Data Retention section visible with Master TTL input
 - [ ] Set Master TTL to `730`, verify per-entity fields appear
@@ -875,11 +914,13 @@ Add UI section before the User Archives section (before line 276):
 ## Phase 5: i18n + Documentation
 
 ### Overview
+
 Add English and Dutch translations for all new UI strings.
 
 ### Changes Required
 
 #### 1. English translations
+
 **File**: `src/lib/i18n/locales/en-US/translation.json`
 
 Add these keys (alphabetically sorted per convention):
@@ -900,6 +941,7 @@ Add these keys (alphabetically sorted per convention):
 (Empty string values = key is the display text, per project convention.)
 
 #### 2. Dutch translations
+
 **File**: `src/lib/i18n/locales/nl-NL/translation.json`
 
 ```json
@@ -918,11 +960,13 @@ Add these keys (alphabetically sorted per convention):
 ### Success Criteria
 
 #### Automated Verification
+
 - [x] `npm run build` succeeds
 - [x] Translation JSON is valid: `python3 -c "import json; json.load(open('src/lib/i18n/locales/en-US/translation.json'))"`
 - [x] Translation JSON is valid: `python3 -c "import json; json.load(open('src/lib/i18n/locales/nl-NL/translation.json'))"`
 
 #### Manual Verification
+
 - [ ] Switch to Dutch locale, verify all Data Retention strings are translated
 - [ ] No untranslated English strings visible in the retention section
 
@@ -931,6 +975,7 @@ Add these keys (alphabetically sorted per convention):
 ## Testing Strategy
 
 ### Manual Testing Steps
+
 1. **Disabled mode**: Set `DATA_RETENTION_TTL_DAYS=0`, verify no cleanup runs (check logs)
 2. **User inactivity**: Enable retention, create test user, backdated `last_active_at`, verify archive + deletion
 3. **Admin protection**: Verify admin users are never auto-deleted regardless of inactivity
@@ -941,6 +986,7 @@ Add these keys (alphabetically sorted per convention):
 8. **Helm template**: Render template with custom values, verify env vars
 
 ### Edge Cases
+
 - User with `last_active_at = NULL` (should be treated as inactive since account creation date, but safely skip if NULL to avoid deleting users who predate the `last_active_at` column)
 - Batch limits: verify the 50/100/500 limits prevent overloading the cleanup worker
 - Concurrent cleanup: verify the retention task doesn't conflict with the existing cleanup worker (it shouldn't — retention only sets `deleted_at`, worker handles cascade)

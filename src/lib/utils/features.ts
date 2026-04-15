@@ -5,6 +5,7 @@ export type Feature =
 	| 'chat_controls'
 	| 'capture'
 	| 'artifacts'
+	| 'document_writer'
 	| 'playground'
 	| 'chat_overview'
 	| 'notes_ai_controls'

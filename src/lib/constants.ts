@@ -104,6 +104,7 @@ export const DEFAULT_CAPABILITIES = {
 	web_search: true,
 	image_generation: true,
 	code_interpreter: true,
+	document_writer: true,
 	citations: true,
 	status_updates: true,
 	usage: undefined,

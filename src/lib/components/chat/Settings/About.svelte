@@ -182,11 +182,7 @@
 				target="_blank"
 				class="inline-flex items-center gap-1.5 text-xs text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-400"
 			>
-				<img
-					src="{WEBUI_BASE_URL}/static/gradient-logo.png"
-					alt="Gradient"
-					class="size-6"
-				/>
+				<img src="{WEBUI_BASE_URL}/static/gradient-logo.png" alt="Gradient" class="size-6" />
 				{$i18n.t('Powered by soev.ai')}
 			</a>
 		</div>

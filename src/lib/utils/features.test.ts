@@ -1,5 +1,12 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { isFeatureEnabled, hasFeatureAccess, isAdminSettingsEnabled, isAdminSettingsTabEnabled, getFirstAvailableAdminSettingsTab, type Feature } from './features';
+import {
+	isFeatureEnabled,
+	hasFeatureAccess,
+	isAdminSettingsEnabled,
+	isAdminSettingsTabEnabled,
+	getFirstAvailableAdminSettingsTab,
+	type Feature
+} from './features';
 import { get } from 'svelte/store';
 
 // Mock svelte/store

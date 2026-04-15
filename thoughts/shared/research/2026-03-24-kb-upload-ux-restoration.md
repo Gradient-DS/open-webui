@@ -4,7 +4,7 @@ researcher: Claude
 git_commit: 2c0b32ae7
 branch: fix/test-bugs-daan-260323
 repository: open-webui
-topic: "Restoring pre-merge parallel upload UX for Knowledge Base file uploads"
+topic: 'Restoring pre-merge parallel upload UX for Knowledge Base file uploads'
 tags: [research, codebase, knowledge-base, file-upload, socket-io, upstream-merge]
 status: complete
 last_updated: 2026-03-24
@@ -145,6 +145,7 @@ const addFileHandler = async (fileId) => {
 #### emit_file_status calls in process_uploaded_file
 
 **On success (lines 148-162 at c26ae48d6^):**
+
 ```python
 file_data = Files.get_file_by_id(file_item.id)
 collection_name = file_data.meta.get("collection_name") if file_data and file_data.meta else None
@@ -159,6 +160,7 @@ asyncio.run(
 ```
 
 **On failure (lines 181-188 at c26ae48d6^):**
+
 ```python
 asyncio.run(
     emit_file_status(
@@ -174,14 +176,14 @@ The import already exists in the current code (files.py:46) but the calls were r
 
 ## What's Already Fixed in Working Tree
 
-| Bug | File | Status |
-|-----|------|--------|
-| Race condition (no content yet) | retrieval.py:1835-1891 | Fixed — falls back to Loader |
-| Duplicate content blocks re-upload | retrieval.py:1574-1585 | Fixed — deletes old entries, re-adds |
-| Empty PDF hard error | retrieval.py:2038-2065 | Fixed — returns warning instead |
-| Warning propagation | knowledge.py:739-769 | Fixed — injects `warning` in response |
-| Warning toast in frontend | KnowledgeBase.svelte:~989 | Fixed — shows toast.warning() |
-| Double-load flicker | KnowledgeBase.svelte | Fixed — fetchId guard, no null-out |
+| Bug                                | File                      | Status                                |
+| ---------------------------------- | ------------------------- | ------------------------------------- |
+| Race condition (no content yet)    | retrieval.py:1835-1891    | Fixed — falls back to Loader          |
+| Duplicate content blocks re-upload | retrieval.py:1574-1585    | Fixed — deletes old entries, re-adds  |
+| Empty PDF hard error               | retrieval.py:2038-2065    | Fixed — returns warning instead       |
+| Warning propagation                | knowledge.py:739-769      | Fixed — injects `warning` in response |
+| Warning toast in frontend          | KnowledgeBase.svelte:~989 | Fixed — shows toast.warning()         |
+| Double-load flicker                | KnowledgeBase.svelte      | Fixed — fetchId guard, no null-out    |
 
 ## Restoration Checklist
 

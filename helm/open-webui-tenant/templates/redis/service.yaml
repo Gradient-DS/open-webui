@@ -1,0 +1,17 @@
+{{- if .Values.redis.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "open-webui-tenant.redis.fullname" . }}
+  labels:
+    {{- include "open-webui-tenant.redis.labels" . | nindent 4 }}
+spec:
+  type: ClusterIP
+  ports:
+    - port: 6379
+      targetPort: redis
+      protocol: TCP
+      name: redis
+  selector:
+    {{- include "open-webui-tenant.redis.selectorLabels" . | nindent 4 }}
+{{- end }}

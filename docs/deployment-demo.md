@@ -85,13 +85,16 @@ docker run --rm -v demo-data:/data -v $(pwd):/backup alpine tar czf /backup/data
 ## Troubleshooting
 
 ### Check logs
+
 ```bash
 docker compose -f docker-compose.demo.yaml logs open-webui
 docker compose -f docker-compose.demo.yaml logs caddy
 ```
 
 ### SSL Certificate Issues
+
 Caddy handles certificates automatically. If issues:
+
 ```bash
 # Check Caddy logs
 docker compose -f docker-compose.demo.yaml logs caddy
@@ -101,6 +104,7 @@ dig voorbeeld.soev.ai
 ```
 
 ### Database Connection Issues
+
 ```bash
 # Check postgres is healthy
 docker compose -f docker-compose.demo.yaml ps postgres

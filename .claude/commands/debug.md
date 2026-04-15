@@ -9,6 +9,7 @@ You are tasked with helping debug issues during manual testing or implementation
 ## Initial Response
 
 When invoked WITH a plan/ticket file:
+
 ```
 I'll help debug issues with [file name]. Let me understand the current state.
 
@@ -21,6 +22,7 @@ I'll investigate the logs, database, and git state to help figure out what's hap
 ```
 
 When invoked WITHOUT parameters:
+
 ```
 I'll help debug your current issue.
 
@@ -37,20 +39,24 @@ I can investigate logs, database state, and recent changes to help identify the 
 You have access to these key locations and tools:
 
 **Logs** (automatically created by `make daemon` and `make wui`):
+
 - MCP logs: `~/.humanlayer/logs/mcp-claude-approvals-*.log`
 - Combined WUI/Daemon logs: `~/.humanlayer/logs/wui-${BRANCH_NAME}/codelayer.log`
 - First line shows: `[timestamp] starting [service] in [directory]`
 
 **Database**:
+
 - Location: `~/.humanlayer/daemon-{BRANCH_NAME}.db`
 - SQLite database with sessions, events, approvals, etc.
 - Can query directly with `sqlite3`
 
 **Git State**:
+
 - Check current branch, recent commits, uncommitted changes
 - Similar to how `commit` and `describe_pr` commands work
 
 **Service Status**:
+
 - Check if daemon is running: `ps aux | grep hld`
 - Check if WUI is running: `ps aux | grep wui`
 - Socket exists: `~/.humanlayer/daemon.sock`
@@ -114,34 +120,41 @@ Return: Git state and any file issues
 
 Based on the investigation, present a focused debug report:
 
-```markdown
+````markdown
 ## Debug Report
 
 ### What's Wrong
+
 [Clear statement of the issue based on evidence]
 
 ### Evidence Found
 
 **From Logs** (`~/.humanlayer/logs/`):
+
 - [Error/warning with timestamp]
 - [Pattern or repeated issue]
 
 **From Database**:
+
 ```sql
 -- Relevant query and result
 [Finding from database]
 ```
+````
 
 **From Git/Files**:
+
 - [Recent changes that might be related]
 - [File state issues]
 
 ### Root Cause
+
 [Most likely explanation based on evidence]
 
 ### Next Steps
 
 1. **Try This First**:
+
    ```bash
    [Specific command or action]
    ```
@@ -152,13 +165,16 @@ Based on the investigation, present a focused debug report:
    - Run with debug: `HUMANLAYER_DEBUG=true make daemon`
 
 ### Can't Access?
+
 Some issues might be outside my reach:
+
 - Browser console errors (F12 in browser)
 - MCP server internal state
 - System-level issues
 
 Would you like me to investigate something specific further?
-```
+
+````
 
 ## Important Notes
 
@@ -175,9 +191,10 @@ Would you like me to investigate something specific further?
 ```bash
 ls -t ~/.humanlayer/logs/daemon-*.log | head -1
 ls -t ~/.humanlayer/logs/wui-*.log | head -1
-```
+````
 
 **Database Queries**:
+
 ```bash
 sqlite3 ~/.humanlayer/daemon.db ".tables"
 sqlite3 ~/.humanlayer/daemon.db ".schema sessions"
@@ -185,12 +202,14 @@ sqlite3 ~/.humanlayer/daemon.db "SELECT * FROM sessions ORDER BY created_at DESC
 ```
 
 **Service Check**:
+
 ```bash
 ps aux | grep hld     # Is daemon running?
 ps aux | grep wui     # Is WUI running?
 ```
 
 **Git State**:
+
 ```bash
 git status
 git log --oneline -10

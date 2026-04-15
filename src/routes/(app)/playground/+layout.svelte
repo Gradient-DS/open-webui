@@ -64,7 +64,9 @@
 				>
 					<a
 						draggable="false"
-						class="min-w-fit p-1.5 rounded-lg {['/playground', '/playground/'].includes($page.url.pathname)
+						class="min-w-fit p-1.5 rounded-lg {['/playground', '/playground/'].includes(
+							$page.url.pathname
+						)
 							? 'bg-gray-100 dark:bg-gray-800'
 							: 'text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-850'} transition select-none"
 						href="/playground">{$i18n.t('Chat')}</a
@@ -79,7 +81,9 @@
 
 					<a
 						draggable="false"
-						class="min-w-fit p-1.5 rounded-lg {$page.url.pathname.includes('/playground/completions')
+						class="min-w-fit p-1.5 rounded-lg {$page.url.pathname.includes(
+							'/playground/completions'
+						)
 							? 'bg-gray-100 dark:bg-gray-800'
 							: 'text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-850'} transition select-none"
 						href="/playground/completions">{$i18n.t('Completions')}</a
