@@ -8,6 +8,7 @@ on:
       - test
     tags:
       - 'v*'
+      - 'chart-v*'
   workflow_dispatch:
 
 env:
@@ -15,6 +16,9 @@ env:
 
 jobs:
   build-slim-image:
+    # Skip image rebuild on chart-only release tags so we don't overwrite
+    # the image that prod tenants pull via ImagePolicy.
+    if: "!startsWith(github.ref, 'refs/tags/chart-v')"
     runs-on: ${{ matrix.runner }}
     permissions:
       contents: read
@@ -114,6 +118,7 @@ jobs:
           retention-days: 1
 
   merge-slim-images:
+    if: "!startsWith(github.ref, 'refs/tags/chart-v')"
     runs-on: ubuntu-latest
     needs: [build-slim-image]
     permissions:
@@ -169,6 +174,8 @@ jobs:
           docker buildx imagetools inspect ${{ env.FULL_IMAGE_NAME }}:${{ steps.meta.outputs.version }}
 
   publish-helm-chart:
+    # Run after image jobs succeed OR when they were skipped (chart-only tag).
+    if: ${{ !cancelled() && (needs.merge-slim-images.result == 'success' || needs.merge-slim-images.result == 'skipped') }}
     runs-on: ubuntu-latest
     needs: [merge-slim-images]
     permissions:
@@ -189,11 +196,13 @@ jobs:
       - name: Compute chart version
         id: version
         run: |
-          # Stable releases come from git tags (v1.2.3 -> 1.2.3).
-          # Branch pushes publish prereleases (1.0.<run>-<branch>.<sha>)
-          # which are excluded by default semver ranges, so prod tenants
-          # pinned to an exact version are unaffected.
-          if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
+          # chart-v<X.Y.Z> tag  -> stable chart X.Y.Z (image jobs skipped above)
+          # v<X.Y.Z> tag        -> stable chart X.Y.Z alongside image release
+          # branch push         -> prerelease 1.0.<run>-<branch>.<sha>
+          #                        (ignored by prod pins, picked up by test filter)
+          if [[ "${GITHUB_REF}" == refs/tags/chart-v* ]]; then
+            VERSION="${GITHUB_REF#refs/tags/chart-v}"
+          elif [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
             VERSION="${GITHUB_REF#refs/tags/v}"
           else
             BASE=$(grep '^version:' helm/open-webui-tenant/Chart.yaml | awk '{print $2}')
