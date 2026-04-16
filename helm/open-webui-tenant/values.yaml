@@ -423,7 +423,7 @@ openWebui:
     # Agent API (internal: routes chat UI to external agent service)
     agentApiEnabled: "false"
     agentApiBaseUrl: ""
-    agentApiAgent: ""
+    agentApiKey: ""
 
     # Agent Proxy (external: exposes agent API to external callers via /api/v1/agent/)
     enableAgentProxy: "false"

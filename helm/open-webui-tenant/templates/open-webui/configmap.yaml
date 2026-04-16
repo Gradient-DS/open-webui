@@ -413,7 +413,7 @@ data:
   {{- if eq .Values.openWebui.config.agentApiEnabled "true" }}
   AGENT_API_ENABLED: "true"
   AGENT_API_BASE_URL: {{ .Values.openWebui.config.agentApiBaseUrl | quote }}
-  AGENT_API_AGENT: {{ .Values.openWebui.config.agentApiAgent | quote }}
+  AGENT_API_KEY: {{ .Values.openWebui.config.agentApiKey | quote }}
   {{- end }}
 
   # Agent Proxy (external: exposes agent API to external callers)

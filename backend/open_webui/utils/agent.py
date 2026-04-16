@@ -40,7 +40,7 @@ import aiohttp
 from starlette.background import BackgroundTask
 from starlette.responses import StreamingResponse
 
-from open_webui.env import AGENT_API_BASE_URL, AGENT_API_AGENT
+from open_webui.env import AGENT_API_BASE_URL, AGENT_API_KEY
 from open_webui.socket.main import get_event_emitter
 
 log = logging.getLogger(__name__)
@@ -53,11 +53,17 @@ log = logging.getLogger(__name__)
 
 @dataclass
 class AgentPayload:
-    """Request schema for the agent API's chat completions endpoint."""
+    """Request schema for the agent API's chat completions endpoint.
 
-    agent: str
+    The ``agent`` field is optional — when omitted, the agent service
+    uses its configured ``default_agent``. The ``model`` field carries
+    the user-selected LLM and is validated server-side against the
+    service's allowlist.
+    """
+
     model: str
     messages: list[dict[str, Any]]
+    agent: Optional[str] = None
     stream: bool = True
     chat_id: Optional[str] = None
     user_id: Optional[str] = None
@@ -80,9 +86,9 @@ class AgentPayload:
 
 def build_agent_payload(
     *,
-    agent: str,
     model: str,
     messages: list[dict[str, Any]],
+    agent: Optional[str] = None,
     stream: bool = True,
     chat_id: Optional[str] = None,
     user_id: Optional[str] = None,
@@ -101,9 +107,9 @@ def build_agent_payload(
     values so the agent only sees fields that are actually set.
     """
     payload = AgentPayload(
-        agent=agent,
         model=model,
         messages=messages,
+        agent=agent,
         stream=stream,
         chat_id=chat_id,
         user_id=user_id,
@@ -117,6 +123,19 @@ def build_agent_payload(
         **{k: v for k, v in model_params.items() if v is not None},
     )
     return {k: v for k, v in asdict(payload).items() if v is not None}
+
+
+def _agent_api_headers() -> dict[str, str]:
+    """Build outbound headers for requests to the agent API.
+
+    Always sends ``Content-Type: application/json``. When ``AGENT_API_KEY``
+    is configured, adds the ``X-API-Key`` header so the agent service
+    (which enforces auth on all ``/v1/*`` routes) accepts the request.
+    """
+    headers: dict[str, str] = {'Content-Type': 'application/json'}
+    if AGENT_API_KEY:
+        headers['X-API-Key'] = AGENT_API_KEY
+    return headers
 
 
 @dataclass
@@ -153,7 +172,7 @@ async def stream_agent_response(
             method='POST',
             url=f'{base_url}/v1/chat/completions',
             data=json.dumps(payload),
-            headers={'Content-Type': 'application/json'},
+            headers=_agent_api_headers(),
         )
 
         if response.status >= 400:
@@ -229,7 +248,6 @@ async def call_agent_api(
             model_params[key] = form_data[key]
 
     payload = build_agent_payload(
-        agent=AGENT_API_AGENT,
         model=form_data.get('model', ''),
         messages=form_data.get('messages', []),
         stream=stream,
@@ -266,7 +284,7 @@ async def _call_agent_api_non_streaming(
             method='POST',
             url=f'{AGENT_API_BASE_URL}/v1/chat/completions',
             data=json.dumps(payload),
-            headers={'Content-Type': 'application/json'},
+            headers=_agent_api_headers(),
         )
 
         if response.status >= 400:
