@@ -74,6 +74,10 @@ class AgentPayload:
     knowledge: Optional[list[dict[str, Any]]] = None
     tool_ids: Optional[list[str]] = None
     rag_filter: Optional[dict[str, Any]] = None
+    # Operator-supplied system prompt from the custom-model definition
+    # (model.params.system). Variables are pre-substituted upstream so the
+    # agent can use the value as-is.
+    system_prompt: Optional[str] = None
     # Model params forwarded directly
     temperature: Optional[float] = None
     top_p: Optional[float] = None
@@ -99,6 +103,7 @@ def build_agent_payload(
     knowledge: Optional[list[dict[str, Any]]] = None,
     tool_ids: Optional[list[str]] = None,
     rag_filter: Optional[dict[str, Any]] = None,
+    system_prompt: Optional[str] = None,
     **model_params,
 ) -> dict[str, Any]:
     """Build a JSON-serialisable payload for the agent API.
@@ -120,6 +125,7 @@ def build_agent_payload(
         knowledge=knowledge,
         tool_ids=tool_ids,
         rag_filter=rag_filter,
+        system_prompt=system_prompt,
         **{k: v for k, v in model_params.items() if v is not None},
     )
     return {k: v for k, v in asdict(payload).items() if v is not None}
@@ -260,6 +266,7 @@ async def call_agent_api(
         knowledge=metadata.get('knowledge'),
         tool_ids=metadata.get('tool_ids'),
         rag_filter=metadata.get('rag_filter'),
+        system_prompt=metadata.get('system_prompt'),
         **model_params,
     )
 
