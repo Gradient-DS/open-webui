@@ -1,0 +1,18 @@
+{{- if and .Values.openWebui.enabled .Values.openWebui.pdb.enabled }}
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "open-webui-tenant.openWebui.fullname" . }}
+  labels:
+    {{- include "open-webui-tenant.openWebui.labels" . | nindent 4 }}
+spec:
+  {{- if .Values.openWebui.pdb.minAvailable }}
+  minAvailable: {{ .Values.openWebui.pdb.minAvailable }}
+  {{- end }}
+  {{- if .Values.openWebui.pdb.maxUnavailable }}
+  maxUnavailable: {{ .Values.openWebui.pdb.maxUnavailable }}
+  {{- end }}
+  selector:
+    matchLabels:
+      {{- include "open-webui-tenant.openWebui.selectorLabels" . | nindent 6 }}
+{{- end }}
