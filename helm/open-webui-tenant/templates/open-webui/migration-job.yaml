@@ -17,7 +17,7 @@ kind: Job
 metadata:
   name: {{ include "open-webui-tenant.openWebui.fullname" . }}-migrate
   labels:
-    {{- include "open-webui-tenant.openWebui.labels" . | nindent 4 }}
+    {{- include "open-webui-tenant.labels" . | nindent 4 }}
     app.kubernetes.io/component: migrate
   annotations:
     helm.sh/hook: pre-upgrade
@@ -30,7 +30,7 @@ spec:
   template:
     metadata:
       labels:
-        {{- include "open-webui-tenant.openWebui.selectorLabels" . | nindent 8 }}
+        {{- include "open-webui-tenant.selectorLabels" . | nindent 8 }}
         app.kubernetes.io/component: migrate
     spec:
       {{- include "open-webui-tenant.imagePullSecrets" . | nindent 6 }}
