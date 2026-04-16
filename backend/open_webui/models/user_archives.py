@@ -3,9 +3,10 @@ import time
 import uuid
 from typing import Optional, List
 
-from open_webui.internal.db import Base, get_db
+from open_webui.internal.db import Base, get_async_db_context
 from pydantic import BaseModel, ConfigDict
-from sqlalchemy import BigInteger, Column, Text, JSON, Boolean, Index
+from sqlalchemy import BigInteger, Column, Text, JSON, Boolean, Index, select, delete, func
+from sqlalchemy.ext.asyncio import AsyncSession
 
 log = logging.getLogger(__name__)
 
@@ -119,7 +120,7 @@ class UpdateArchiveForm(BaseModel):
 
 
 class UserArchiveTable:
-    def insert_archive(
+    async def insert_archive(
         self,
         user_id: str,
         user_email: str,
@@ -129,8 +130,9 @@ class UserArchiveTable:
         data: dict,
         retention_days: Optional[int] = None,
         never_delete: bool = False,
+        db: Optional[AsyncSession] = None,
     ) -> Optional[UserArchiveModel]:
-        with get_db() as db:
+        async with get_async_db_context(db) as db:
             archive_id = str(uuid.uuid4())
             now = int(time.time())
 
@@ -155,28 +157,30 @@ class UserArchiveTable:
             )
             try:
                 db.add(archive)
-                db.commit()
-                db.refresh(archive)
+                await db.commit()
+                await db.refresh(archive)
                 return UserArchiveModel.model_validate(archive)
             except Exception as e:
                 log.exception(f'Error creating user archive: {e}')
                 return None
 
-    def get_archive_by_id(self, archive_id: str) -> Optional[UserArchiveModel]:
-        with get_db() as db:
-            archive = db.query(UserArchive).filter_by(id=archive_id).first()
+    async def get_archive_by_id(self, archive_id: str, db: Optional[AsyncSession] = None) -> Optional[UserArchiveModel]:
+        async with get_async_db_context(db) as db:
+            result = await db.execute(select(UserArchive).filter_by(id=archive_id))
+            archive = result.scalars().first()
             if not archive:
                 return None
             return UserArchiveModel.model_validate(archive)
 
-    def get_archives(
+    async def get_archives(
         self,
         skip: int = 0,
         limit: int = 50,
         search: Optional[str] = None,
+        db: Optional[AsyncSession] = None,
     ) -> List[UserArchiveSummaryModel]:
-        with get_db() as db:
-            query = db.query(UserArchive)
+        async with get_async_db_context(db) as db:
+            query = select(UserArchive)
 
             if search:
                 search_term = f'%{search}%'
@@ -184,28 +188,32 @@ class UserArchiveTable:
                     (UserArchive.user_email.ilike(search_term)) | (UserArchive.user_name.ilike(search_term))
                 )
 
-            archives = query.order_by(UserArchive.created_at.desc()).offset(skip).limit(limit).all()
+            query = query.order_by(UserArchive.created_at.desc()).offset(skip).limit(limit)
+            result = await db.execute(query)
+            archives = result.scalars().all()
             return [UserArchiveSummaryModel.model_validate(a) for a in archives]
 
-    def get_expired_archives(self) -> List[UserArchiveModel]:
+    async def get_expired_archives(self, db: Optional[AsyncSession] = None) -> List[UserArchiveModel]:
         """Get archives past their retention period (for cleanup job)"""
-        with get_db() as db:
+        async with get_async_db_context(db) as db:
             now = int(time.time())
-            archives = (
-                db.query(UserArchive)
-                .filter(
+            result = await db.execute(
+                select(UserArchive).filter(
                     UserArchive.never_delete == False,
                     UserArchive.restored == False,
                     UserArchive.expires_at.isnot(None),
                     UserArchive.expires_at < now,
                 )
-                .all()
             )
+            archives = result.scalars().all()
             return [UserArchiveModel.model_validate(a) for a in archives]
 
-    def update_archive(self, archive_id: str, form_data: UpdateArchiveForm) -> Optional[UserArchiveModel]:
-        with get_db() as db:
-            archive = db.query(UserArchive).filter_by(id=archive_id).first()
+    async def update_archive(
+        self, archive_id: str, form_data: UpdateArchiveForm, db: Optional[AsyncSession] = None
+    ) -> Optional[UserArchiveModel]:
+        async with get_async_db_context(db) as db:
+            result = await db.execute(select(UserArchive).filter_by(id=archive_id))
+            archive = result.scalars().first()
             if not archive:
                 return None
 
@@ -223,22 +231,24 @@ class UserArchiveTable:
                     archive.expires_at = None
 
             archive.updated_at = now
-            db.commit()
-            db.refresh(archive)
+            await db.commit()
+            await db.refresh(archive)
             return UserArchiveModel.model_validate(archive)
 
-    def delete_archive(self, archive_id: str) -> bool:
-        with get_db() as db:
-            archive = db.query(UserArchive).filter_by(id=archive_id).first()
+    async def delete_archive(self, archive_id: str, db: Optional[AsyncSession] = None) -> bool:
+        async with get_async_db_context(db) as db:
+            result = await db.execute(select(UserArchive).filter_by(id=archive_id))
+            archive = result.scalars().first()
             if not archive:
                 return False
-            db.delete(archive)
-            db.commit()
+            await db.delete(archive)
+            await db.commit()
             return True
 
-    def count_archives(self) -> int:
-        with get_db() as db:
-            return db.query(UserArchive).count()
+    async def count_archives(self, db: Optional[AsyncSession] = None) -> int:
+        async with get_async_db_context(db) as db:
+            result = await db.execute(select(func.count()).select_from(UserArchive))
+            return result.scalar() or 0
 
 
 UserArchives = UserArchiveTable()

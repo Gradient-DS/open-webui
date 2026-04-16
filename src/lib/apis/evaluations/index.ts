@@ -161,12 +161,40 @@ export const getModelHistory = async (token: string = '', modelId: string, days:
 	return res;
 };
 
+export const getFeedbackModelIds = async (token: string = '') => {
+	let error = null;
+
+	const res = await fetch(`${WEBUI_API_BASE_URL}/evaluations/feedbacks/models`, {
+		method: 'GET',
+		headers: {
+			Accept: 'application/json',
+			'Content-Type': 'application/json',
+			authorization: `Bearer ${token}`
+		}
+	})
+		.then(async (res) => {
+			if (!res.ok) throw await res.json();
+			return res.json();
+		})
+		.catch((err) => {
+			error = err.detail;
+			console.error(err);
+			return null;
+		});
+
+	if (error) {
+		throw error;
+	}
+
+	return res;
+};
+
 export const getFeedbackItems = async (
 	token: string = '',
 	orderBy,
 	direction,
 	page,
-	scope?: string
+	modelId: string = ''
 ) => {
 	let error = null;
 
@@ -174,7 +202,7 @@ export const getFeedbackItems = async (
 	if (orderBy) searchParams.append('order_by', orderBy);
 	if (direction) searchParams.append('direction', direction);
 	if (page) searchParams.append('page', page.toString());
-	if (scope) searchParams.append('scope', scope);
+	if (modelId) searchParams.append('model_id', modelId);
 
 	const res = await fetch(
 		`${WEBUI_API_BASE_URL}/evaluations/feedbacks/list?${searchParams.toString()}`,
@@ -207,17 +235,23 @@ export const getFeedbackItems = async (
 	return res;
 };
 
-export const exportAllFeedbacks = async (token: string = '') => {
+export const exportAllFeedbacks = async (token: string = '', modelId: string = '') => {
 	let error = null;
 
-	const res = await fetch(`${WEBUI_API_BASE_URL}/evaluations/feedbacks/all/export`, {
-		method: 'GET',
-		headers: {
-			Accept: 'application/json',
-			'Content-Type': 'application/json',
-			authorization: `Bearer ${token}`
+	const searchParams = new URLSearchParams();
+	if (modelId) searchParams.append('model_id', modelId);
+
+	const res = await fetch(
+		`${WEBUI_API_BASE_URL}/evaluations/feedbacks/all/export?${searchParams.toString()}`,
+		{
+			method: 'GET',
+			headers: {
+				Accept: 'application/json',
+				'Content-Type': 'application/json',
+				authorization: `Bearer ${token}`
+			}
 		}
-	})
+	)
 		.then(async (res) => {
 			if (!res.ok) throw await res.json();
 			return res.json();

@@ -11,7 +11,7 @@ from dataclasses import asdict, dataclass
 from typing import Optional, Callable, Awaitable, Dict, Any, List, Union
 from pathlib import Path
 
-from open_webui.internal.db import get_db
+from open_webui.internal.db import get_async_db_context
 from open_webui.models.knowledge import Knowledges
 from open_webui.models.files import Files, FileForm, FileUpdateForm
 from open_webui.models.users import Users
@@ -425,115 +425,117 @@ class BaseSyncWorker(ABC):
         request = self._make_request()
         user = self._get_user()
 
+        # Fetch file record async before entering thread
+        async with get_async_db_context() as db:
+            if user.role == 'admin':
+                file = await Files.get_file_by_id(file_id, db=db)
+            else:
+                file = await Files.get_file_by_id_and_user_id(file_id, user.id, db=db)
+
+        if not file:
+            raise ValueError(f'File {file_id} not found')
+
+        if not file.path:
+            raise ValueError(f'File {file_id} has no path')
+
         def _extract_in_thread():
-            with get_db() as db:
-                if user.role == 'admin':
-                    file = Files.get_file_by_id(file_id, db=db)
-                else:
-                    file = Files.get_file_by_id_and_user_id(file_id, user.id, db=db)
+            file_path = Storage.get_file(file.path)
 
-                if not file:
-                    raise ValueError(f'File {file_id} not found')
+            loader = Loader(
+                engine=request.app.state.config.CONTENT_EXTRACTION_ENGINE,
+                user=user,
+                EXTERNAL_DOCUMENT_LOADER_URL=request.app.state.config.EXTERNAL_DOCUMENT_LOADER_URL,
+                EXTERNAL_DOCUMENT_LOADER_API_KEY=request.app.state.config.EXTERNAL_DOCUMENT_LOADER_API_KEY,
+                TIKA_SERVER_URL=request.app.state.config.TIKA_SERVER_URL,
+                DOCLING_SERVER_URL=request.app.state.config.DOCLING_SERVER_URL,
+                DOCLING_API_KEY=request.app.state.config.DOCLING_API_KEY,
+                DOCLING_PARAMS=request.app.state.config.DOCLING_PARAMS,
+                PDF_EXTRACT_IMAGES=request.app.state.config.PDF_EXTRACT_IMAGES,
+                PDF_LOADER_MODE=request.app.state.config.PDF_LOADER_MODE,
+                DATALAB_MARKER_API_KEY=request.app.state.config.DATALAB_MARKER_API_KEY,
+                DATALAB_MARKER_API_BASE_URL=request.app.state.config.DATALAB_MARKER_API_BASE_URL,
+                DATALAB_MARKER_ADDITIONAL_CONFIG=request.app.state.config.DATALAB_MARKER_ADDITIONAL_CONFIG,
+                DATALAB_MARKER_SKIP_CACHE=request.app.state.config.DATALAB_MARKER_SKIP_CACHE,
+                DATALAB_MARKER_FORCE_OCR=request.app.state.config.DATALAB_MARKER_FORCE_OCR,
+                DATALAB_MARKER_PAGINATE=request.app.state.config.DATALAB_MARKER_PAGINATE,
+                DATALAB_MARKER_STRIP_EXISTING_OCR=request.app.state.config.DATALAB_MARKER_STRIP_EXISTING_OCR,
+                DATALAB_MARKER_DISABLE_IMAGE_EXTRACTION=request.app.state.config.DATALAB_MARKER_DISABLE_IMAGE_EXTRACTION,
+                DATALAB_MARKER_FORMAT_LINES=request.app.state.config.DATALAB_MARKER_FORMAT_LINES,
+                DATALAB_MARKER_USE_LLM=request.app.state.config.DATALAB_MARKER_USE_LLM,
+                DATALAB_MARKER_OUTPUT_FORMAT=request.app.state.config.DATALAB_MARKER_OUTPUT_FORMAT,
+                DOCUMENT_INTELLIGENCE_ENDPOINT=request.app.state.config.DOCUMENT_INTELLIGENCE_ENDPOINT,
+                DOCUMENT_INTELLIGENCE_KEY=request.app.state.config.DOCUMENT_INTELLIGENCE_KEY,
+                DOCUMENT_INTELLIGENCE_MODEL=request.app.state.config.DOCUMENT_INTELLIGENCE_MODEL,
+                MISTRAL_OCR_API_BASE_URL=request.app.state.config.MISTRAL_OCR_API_BASE_URL,
+                MISTRAL_OCR_API_KEY=request.app.state.config.MISTRAL_OCR_API_KEY,
+                MINERU_API_MODE=request.app.state.config.MINERU_API_MODE,
+                MINERU_API_URL=request.app.state.config.MINERU_API_URL,
+                MINERU_API_KEY=request.app.state.config.MINERU_API_KEY,
+                MINERU_API_TIMEOUT=request.app.state.config.MINERU_API_TIMEOUT,
+                MINERU_PARAMS=request.app.state.config.MINERU_PARAMS,
+            )
 
-                file_path = file.path
-                if not file_path:
-                    raise ValueError(f'File {file_id} has no path')
+            # Try external pipeline first
+            external_pipeline_url = getattr(request.app.state.config, 'EXTERNAL_PIPELINE_URL', None)
+            use_external = external_pipeline_url and external_pipeline_url.strip() != ''
+            docs = None
 
-                file_path = Storage.get_file(file_path)
-
-                loader = Loader(
-                    engine=request.app.state.config.CONTENT_EXTRACTION_ENGINE,
-                    user=user,
-                    EXTERNAL_DOCUMENT_LOADER_URL=request.app.state.config.EXTERNAL_DOCUMENT_LOADER_URL,
-                    EXTERNAL_DOCUMENT_LOADER_API_KEY=request.app.state.config.EXTERNAL_DOCUMENT_LOADER_API_KEY,
-                    TIKA_SERVER_URL=request.app.state.config.TIKA_SERVER_URL,
-                    DOCLING_SERVER_URL=request.app.state.config.DOCLING_SERVER_URL,
-                    DOCLING_API_KEY=request.app.state.config.DOCLING_API_KEY,
-                    DOCLING_PARAMS=request.app.state.config.DOCLING_PARAMS,
-                    PDF_EXTRACT_IMAGES=request.app.state.config.PDF_EXTRACT_IMAGES,
-                    PDF_LOADER_MODE=request.app.state.config.PDF_LOADER_MODE,
-                    DATALAB_MARKER_API_KEY=request.app.state.config.DATALAB_MARKER_API_KEY,
-                    DATALAB_MARKER_API_BASE_URL=request.app.state.config.DATALAB_MARKER_API_BASE_URL,
-                    DATALAB_MARKER_ADDITIONAL_CONFIG=request.app.state.config.DATALAB_MARKER_ADDITIONAL_CONFIG,
-                    DATALAB_MARKER_SKIP_CACHE=request.app.state.config.DATALAB_MARKER_SKIP_CACHE,
-                    DATALAB_MARKER_FORCE_OCR=request.app.state.config.DATALAB_MARKER_FORCE_OCR,
-                    DATALAB_MARKER_PAGINATE=request.app.state.config.DATALAB_MARKER_PAGINATE,
-                    DATALAB_MARKER_STRIP_EXISTING_OCR=request.app.state.config.DATALAB_MARKER_STRIP_EXISTING_OCR,
-                    DATALAB_MARKER_DISABLE_IMAGE_EXTRACTION=request.app.state.config.DATALAB_MARKER_DISABLE_IMAGE_EXTRACTION,
-                    DATALAB_MARKER_FORMAT_LINES=request.app.state.config.DATALAB_MARKER_FORMAT_LINES,
-                    DATALAB_MARKER_USE_LLM=request.app.state.config.DATALAB_MARKER_USE_LLM,
-                    DATALAB_MARKER_OUTPUT_FORMAT=request.app.state.config.DATALAB_MARKER_OUTPUT_FORMAT,
-                    DOCUMENT_INTELLIGENCE_ENDPOINT=request.app.state.config.DOCUMENT_INTELLIGENCE_ENDPOINT,
-                    DOCUMENT_INTELLIGENCE_KEY=request.app.state.config.DOCUMENT_INTELLIGENCE_KEY,
-                    DOCUMENT_INTELLIGENCE_MODEL=request.app.state.config.DOCUMENT_INTELLIGENCE_MODEL,
-                    MISTRAL_OCR_API_BASE_URL=request.app.state.config.MISTRAL_OCR_API_BASE_URL,
-                    MISTRAL_OCR_API_KEY=request.app.state.config.MISTRAL_OCR_API_KEY,
-                    MINERU_API_MODE=request.app.state.config.MINERU_API_MODE,
-                    MINERU_API_URL=request.app.state.config.MINERU_API_URL,
-                    MINERU_API_KEY=request.app.state.config.MINERU_API_KEY,
-                    MINERU_API_TIMEOUT=request.app.state.config.MINERU_API_TIMEOUT,
-                    MINERU_PARAMS=request.app.state.config.MINERU_PARAMS,
-                )
-
-                # Try external pipeline first
-                external_pipeline_url = getattr(request.app.state.config, 'EXTERNAL_PIPELINE_URL', None)
-                use_external = external_pipeline_url and external_pipeline_url.strip() != ''
-                docs = None
-
-                if use_external:
-                    try:
-                        result = call_external_pipeline(
-                            file_path=file_path,
-                            filename=file.filename,
-                            content_type=file.meta.get('content_type', ''),
-                            external_pipeline_url=external_pipeline_url,
-                            external_pipeline_api_key=getattr(
-                                request.app.state.config, 'EXTERNAL_PIPELINE_API_KEY', None
-                            ),
-                            loader_instance=loader,
-                        )
-                        if result.get('success') and result.get('chunks'):
-                            docs = [
-                                Document(
-                                    page_content=chunk['text'],
-                                    metadata=chunk.get('metadata', {}),
-                                )
-                                for chunk in result['chunks']
-                            ]
-                    except Exception as e:
-                        log.warning(f'External pipeline failed for {file.filename}: {e}, falling back')
-                        use_external = False
-
-                if docs is None:
-                    use_external = False
-                    docs = loader.load(file.filename, file.meta.get('content_type'), file_path)
-
-                if not docs:
-                    return None
-
-                docs = [
-                    Document(
-                        page_content=doc.page_content,
-                        metadata={
-                            **filter_metadata(doc.metadata),
-                            'name': file.filename,
-                            'created_by': file.user_id,
-                            'file_id': file.id,
-                            'source': file.filename,
-                        },
+            if use_external:
+                try:
+                    result = call_external_pipeline(
+                        file_path=file_path,
+                        filename=file.filename,
+                        content_type=file.meta.get('content_type', ''),
+                        external_pipeline_url=external_pipeline_url,
+                        external_pipeline_api_key=getattr(request.app.state.config, 'EXTERNAL_PIPELINE_API_KEY', None),
+                        loader_instance=loader,
                     )
-                    for doc in docs
-                ]
+                    if result.get('success') and result.get('chunks'):
+                        docs = [
+                            Document(
+                                page_content=chunk['text'],
+                                metadata=chunk.get('metadata', {}),
+                            )
+                            for chunk in result['chunks']
+                        ]
+                except Exception as e:
+                    log.warning(f'External pipeline failed for {file.filename}: {e}, falling back')
+                    use_external = False
 
-                text_content = ' '.join([doc.page_content for doc in docs])
+            if docs is None:
+                use_external = False
+                docs = loader.load(file.filename, file.meta.get('content_type'), file_path)
 
-                # Save extracted text to file record
-                Files.update_file_data_by_id(file.id, {'content': text_content}, db=db)
-                db.commit()
+            if not docs:
+                return None
 
-                return docs, file, not use_external  # needs_split=True for internal pipeline
+            docs = [
+                Document(
+                    page_content=doc.page_content,
+                    metadata={
+                        **filter_metadata(doc.metadata),
+                        'name': file.filename,
+                        'created_by': file.user_id,
+                        'file_id': file.id,
+                        'source': file.filename,
+                    },
+                )
+                for doc in docs
+            ]
 
-        return await asyncio.to_thread(_extract_in_thread)
+            text_content = ' '.join([doc.page_content for doc in docs])
+            return docs, file, text_content, not use_external  # needs_split=True for internal pipeline
+
+        result = await asyncio.to_thread(_extract_in_thread)
+
+        if result is not None:
+            docs, file, text_content, needs_split = result
+            # Save extracted text to file record (async)
+            async with get_async_db_context() as db:
+                await Files.update_file_data_by_id(file.id, {'content': text_content}, db=db)
+            return docs, file, needs_split
+
+        return None
 
     async def _embed_to_collections(
         self,
@@ -705,23 +707,19 @@ class BaseSyncWorker(ABC):
             t_kb = time.time()
             log.info(f'[sync:{filename}] <<< WEAVIATE KB INSERT END ({t_kb - t_embed:.1f}s)')
 
-            # Update file metadata
-            with get_db() as session:
-                Files.update_file_metadata_by_id(file_id, {'collection_name': self.knowledge_id}, db=session)
-                Files.update_file_data_by_id(file_id, {'status': 'completed'}, db=session)
-                Files.update_file_hash_by_id(file_id, file_hash, db=session)
-
             log.info(f'[sync:{filename}] DONE total={t_kb - t0:.1f}s')
             return True
 
         result = await asyncio.to_thread(_split_embed_and_store)
 
+        # Update file metadata (async, outside thread)
+        async with get_async_db_context() as session:
+            await Files.update_file_metadata_by_id(file_id, {'collection_name': self.knowledge_id}, db=session)
+            await Files.update_file_data_by_id(file_id, {'status': 'completed'}, db=session)
+            await Files.update_file_hash_by_id(file_id, file_hash, db=session)
+
         if not result:
             log.warning(f'No text content extracted from {filename}')
-            with get_db() as session:
-                Files.update_file_metadata_by_id(file_id, {'collection_name': self.knowledge_id}, db=session)
-                Files.update_file_data_by_id(file_id, {'status': 'completed'}, db=session)
-                Files.update_file_hash_by_id(file_id, file_hash, db=session)
 
         return True
 
@@ -1000,22 +998,16 @@ class BaseSyncWorker(ABC):
                     try:
                         from open_webui.routers.retrieval import process_file, ProcessFileForm
 
-                        def _call_propagate(form_data):
-                            with get_db() as db:
-                                return process_file(
-                                    self._make_request(),
-                                    form_data,
-                                    user=self._get_user(),
-                                    db=db,
-                                )
-
-                        await asyncio.to_thread(
-                            _call_propagate,
-                            ProcessFileForm(
-                                file_id=file_id,
-                                collection_name=kf.knowledge_id,
-                            ),
-                        )
+                        async with get_async_db_context() as db:
+                            await process_file(
+                                self._make_request(),
+                                ProcessFileForm(
+                                    file_id=file_id,
+                                    collection_name=kf.knowledge_id,
+                                ),
+                                user=self._get_user(),
+                                db=db,
+                            )
                     except Exception as e:
                         log.warning(f'Failed to propagate vectors to KB {kf.knowledge_id}: {e}')
         except Exception as e:

@@ -94,7 +94,7 @@ async def create_invite(
         )
 
     # Check for existing pending invite
-    existing = Invites.get_pending_invite_by_email(email)
+    existing = await Invites.get_pending_invite_by_email(email)
     if existing and existing.expires_at > int(time.time()):
         raise HTTPException(
             status.HTTP_400_BAD_REQUEST,
@@ -104,7 +104,7 @@ async def create_invite(
     expiry_hours = request.app.state.config.INVITE_EXPIRY_HOURS
     expires_at = int(time.time()) + (expiry_hours * 3600)
 
-    invite = Invites.create_invite(
+    invite = await Invites.create_invite(
         email=email,
         name=form_data.name,
         role=form_data.role,
@@ -181,7 +181,7 @@ async def create_invite(
 
 @router.get('/{token}/validate', response_model=InviteValidation)
 async def validate_invite(token: str):
-    invite = Invites.get_invite_by_token(token)
+    invite = await Invites.get_invite_by_token(token)
 
     if not invite:
         raise HTTPException(
@@ -232,7 +232,7 @@ async def accept_invite(
     token: str,
     form_data: AcceptInviteForm,
 ):
-    invite = Invites.get_invite_by_token(token)
+    invite = await Invites.get_invite_by_token(token)
 
     if not invite:
         raise HTTPException(
@@ -291,7 +291,7 @@ async def accept_invite(
         )
 
         # Mark invite as accepted
-        Invites.accept_invite(token)
+        await Invites.accept_invite(token)
 
         # Create session token
         expires_delta = parse_duration(request.app.state.config.JWT_EXPIRES_IN)
@@ -344,7 +344,7 @@ async def accept_invite(
 
 @router.get('/', response_model=list[InviteListItem])
 async def list_invites(user=Depends(get_admin_user)):
-    invites = Invites.get_pending_invites()
+    invites = await Invites.get_pending_invites()
 
     result = []
     for invite in invites:
@@ -378,7 +378,7 @@ async def resend_invite(
     id: str,
     user=Depends(get_admin_user),
 ):
-    invite = Invites.get_invite_by_id(id)
+    invite = await Invites.get_invite_by_id(id)
 
     if not invite:
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail='Invite not found')
@@ -392,7 +392,7 @@ async def resend_invite(
     # Refresh token and expiry
     expiry_hours = request.app.state.config.INVITE_EXPIRY_HOURS
     new_expires_at = int(time.time()) + (expiry_hours * 3600)
-    updated_invite = Invites.refresh_invite(id, new_expires_at)
+    updated_invite = await Invites.refresh_invite(id, new_expires_at)
 
     if not updated_invite:
         raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, detail='Failed to refresh invite')
@@ -458,7 +458,7 @@ async def revoke_invite(
     id: str,
     user=Depends(get_admin_user),
 ):
-    invite = Invites.get_invite_by_id(id)
+    invite = await Invites.get_invite_by_id(id)
 
     if not invite:
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail='Invite not found')
@@ -466,7 +466,7 @@ async def revoke_invite(
     if invite.accepted_at:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, detail='Invite has already been accepted')
 
-    result = Invites.revoke_invite(id)
+    result = await Invites.revoke_invite(id)
     if not result:
         raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, detail='Failed to revoke invite')
 

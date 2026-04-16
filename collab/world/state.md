@@ -4,9 +4,9 @@
 
 #### Current Work
 
+- **Upstream merge (260416)** — merging 245 commits from upstream/dev into `merge/260416`. Major: async DB refactor, automations feature, 19 security fixes. 20-phase plan at `collab/docs/upstream-merge-260416-plan.md`. Phase 1 (pre-merge setup) not yet started.
 - **Vink deployment** — large-scale client deployment (~1300 docs), active on `feat/vink` branch. Core sync worker issues resolved, plans created for next steps (single-collection architecture, batch-wait removal)
 - External agents package — active development and integration
-- New cloud integrations (Google Drive recently completed, exploring more)
 
 #### Pending Fixes
 
@@ -26,3 +26,4 @@
 #### Active Resources
 
 - Sync abstraction cookbook: `collab/docs/external-integration-cookbook.md`
+- Upstream merge plan: `collab/docs/upstream-merge-260416-plan.md`

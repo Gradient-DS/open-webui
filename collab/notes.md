@@ -396,3 +396,37 @@
 - Production-scale testing reveals issues that unit/integration tests miss — Vink was the first real stress test of the concurrent sync worker
 
 **Related:** Plans `thoughts/shared/plans/2026-04-06-cloud-kb-single-collection.md`, `thoughts/shared/plans/2026-04-06-sync-remove-batch-wait.md`, research `thoughts/shared/research/2026-04-06-cloud-kb-single-collection.md`
+
+---
+
+### [16-04-2026] Upstream Merge Analysis & Plan — 245 Commits from open-webui/dev
+
+**With:** @lexlubbers
+
+**Context:** Preparing to merge upstream open-webui `dev` branch into our fork. Last merge was March 29, 2026 (PR #58, commit `289e02c2a`). Merge base: `9bd84258d`. 245 upstream commits to integrate.
+
+**What We Did:**
+
+- Fetched upstream/dev and performed dry-run merge to identify all conflicts
+- Categorized 245 upstream commits into: 19 security fixes, 12 new features, 10 performance optimizations, 1 major infrastructure refactor (async DB), ~100 refac/cleanup, ~30 i18n updates
+- Identified 31 code conflicts + 60 i18n translation file conflicts
+- Analyzed each conflict file for our custom code presence and classified as trivial (14 files, no custom code), light (4 files), moderate (6 files), or heavy (7 files including main.py)
+- Created 20-phase merge plan at `collab/docs/upstream-merge-260416-plan.md`
+
+**Key Changes from Upstream:**
+
+- **Async DB refactor** (`27169124f`) — biggest change: 74 files, converts entire SQLAlchemy layer from sync to async. Switches PostgreSQL driver from psycopg2 to asyncpg for runtime queries. Every model method becomes `async def`. All our custom model code and routers need conversion.
+- **Automations feature** — scheduled/event-driven chat automations. New DB models, router, worker loop, Alembic migration, full frontend (page, modal, editor). Already gated by `USER_PERMISSIONS_FEATURES_AUTOMATIONS` (default False). Decision: adopt but keep off by default in Helm.
+- **OAuth backchannel logout** — server-side OIDC session invalidation. Relevant for our Microsoft integrations.
+- **19 security fixes** — SSRF protection, XSS sanitization, timing-safe token comparison, path traversal prevention, auth bypass fixes, model access control enforcement. All should be adopted.
+- **AsyncVectorDBClient** — wraps sync vector DB calls in executor threads. New pure ASGI middleware replaces BaseHTTPMiddleware.
+
+**Key Decisions:**
+
+- Adopt automations feature, disable by default via Helm (`USER_PERMISSIONS_FEATURES_AUTOMATIONS: "False"`)
+- Accept all upstream security fixes
+- Async DB refactor is unavoidable — all custom sync code must convert to async
+- Merge strategy: trivial conflicts first, then bulk i18n, then individual heavy conflicts in separate sessions
+- PostgreSQL async driver (asyncpg) auto-converts from existing DATABASE_URL — need to verify SSL/connection params
+
+**Related:** Plan `collab/docs/upstream-merge-260416-plan.md`

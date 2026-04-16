@@ -1431,6 +1431,7 @@
 																: ''}"
 															style="fill: currentColor;"
 															alt={action.name}
+															draggable="false"
 														/>
 													</div>
 												{:else}

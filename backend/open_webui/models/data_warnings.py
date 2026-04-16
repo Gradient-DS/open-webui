@@ -5,9 +5,10 @@ import uuid
 from typing import Optional
 
 from pydantic import BaseModel
-from sqlalchemy import Column, String, Text, BigInteger, JSON
+from sqlalchemy import Column, String, Text, BigInteger, JSON, select
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from open_webui.internal.db import Base, get_db
+from open_webui.internal.db import Base, get_async_db_context
 
 
 class DataWarningLog(Base):
@@ -41,9 +42,11 @@ class DataWarningLogModel(BaseModel):
 
 class DataWarningLogs:
     @staticmethod
-    def insert_log(user_id: str, form: DataWarningLogForm) -> DataWarningLogModel:
-        with get_db() as db:
-            log = DataWarningLog(
+    async def insert_log(
+        user_id: str, form: DataWarningLogForm, db: Optional[AsyncSession] = None
+    ) -> DataWarningLogModel:
+        async with get_async_db_context(db) as db:
+            log_entry = DataWarningLog(
                 id=str(uuid.uuid4()),
                 user_id=user_id,
                 chat_id=form.chat_id,
@@ -52,29 +55,29 @@ class DataWarningLogs:
                 warning_message=form.warning_message,
                 created_at=int(time.time()),
             )
-            db.add(log)
-            db.commit()
-            db.refresh(log)
-            return DataWarningLogModel.model_validate(log)
+            db.add(log_entry)
+            await db.commit()
+            await db.refresh(log_entry)
+            return DataWarningLogModel.model_validate(log_entry)
 
     @staticmethod
-    def get_logs_by_user(user_id: str) -> list[DataWarningLogModel]:
-        with get_db() as db:
-            logs = (
-                db.query(DataWarningLog)
+    async def get_logs_by_user(user_id: str, db: Optional[AsyncSession] = None) -> list[DataWarningLogModel]:
+        async with get_async_db_context(db) as db:
+            result = await db.execute(
+                select(DataWarningLog)
                 .filter(DataWarningLog.user_id == user_id)
                 .order_by(DataWarningLog.created_at.desc())
-                .all()
             )
+            logs = result.scalars().all()
             return [DataWarningLogModel.model_validate(log) for log in logs]
 
     @staticmethod
-    def get_logs_by_chat(chat_id: str) -> list[DataWarningLogModel]:
-        with get_db() as db:
-            logs = (
-                db.query(DataWarningLog)
+    async def get_logs_by_chat(chat_id: str, db: Optional[AsyncSession] = None) -> list[DataWarningLogModel]:
+        async with get_async_db_context(db) as db:
+            result = await db.execute(
+                select(DataWarningLog)
                 .filter(DataWarningLog.chat_id == chat_id)
                 .order_by(DataWarningLog.created_at.desc())
-                .all()
             )
+            logs = result.scalars().all()
             return [DataWarningLogModel.model_validate(log) for log in logs]

@@ -9,10 +9,10 @@ from datetime import timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from pydantic import BaseModel
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
 from starlette import status
 
-from open_webui.internal.db import get_session
+from open_webui.internal.db import get_async_session
 from open_webui.models.auths import Auths
 from open_webui.models.recovery_codes import RecoveryCodes
 from open_webui.models.users import Users
@@ -75,13 +75,13 @@ class RegenerateRecoveryCodesForm(BaseModel):
 async def get_2fa_status(
     request: Request,
     user=Depends(get_current_user),
-    db: Session = Depends(get_session),
+    db: AsyncSession = Depends(get_async_session),
 ):
     """Get 2FA status for the current user."""
     if not request.app.state.config.ENABLE_2FA:
         raise HTTPException(status_code=404, detail='2FA is not enabled')
 
-    auth = Auths.get_auth_by_user_id(user.id, db=db)
+    auth = await Auths.get_auth_by_user_id(user.id, db=db)
     if not auth:
         raise HTTPException(status_code=404, detail='Auth record not found')
 
@@ -89,7 +89,7 @@ async def get_2fa_status(
 
     return {
         'totp_enabled': auth.totp_enabled or False,
-        'recovery_codes_remaining': RecoveryCodes.count_unused(user.id, db=db) if auth.totp_enabled else 0,
+        'recovery_codes_remaining': await RecoveryCodes.count_unused(user.id, db=db) if auth.totp_enabled else 0,
         'is_sso_user': is_sso_user,
     }
 
@@ -98,7 +98,7 @@ async def get_2fa_status(
 async def setup_totp(
     request: Request,
     user=Depends(get_current_user),
-    db: Session = Depends(get_session),
+    db: AsyncSession = Depends(get_async_session),
 ):
     """Generate a new TOTP secret and QR code. Does NOT persist until /totp/enable."""
     if not request.app.state.config.ENABLE_2FA:
@@ -108,7 +108,7 @@ async def setup_totp(
     if user.oauth:
         raise HTTPException(status_code=400, detail='2FA is not available for SSO accounts')
 
-    auth = Auths.get_auth_by_user_id(user.id, db=db)
+    auth = await Auths.get_auth_by_user_id(user.id, db=db)
     if not auth or not auth.password:
         raise HTTPException(status_code=400, detail='2FA is not available for SSO accounts')
     if auth.totp_enabled:
@@ -130,7 +130,7 @@ async def enable_totp(
     request: Request,
     form_data: TotpEnableForm,
     user=Depends(get_current_user),
-    db: Session = Depends(get_session),
+    db: AsyncSession = Depends(get_async_session),
 ):
     """Verify a TOTP code against the provided secret, then enable 2FA and return recovery codes."""
     if not request.app.state.config.ENABLE_2FA:
@@ -139,7 +139,7 @@ async def enable_totp(
     if user.oauth:
         raise HTTPException(status_code=400, detail='2FA is not available for SSO accounts')
 
-    auth = Auths.get_auth_by_user_id(user.id, db=db)
+    auth = await Auths.get_auth_by_user_id(user.id, db=db)
     if not auth or not auth.password:
         raise HTTPException(status_code=400, detail='2FA is not available for SSO accounts')
 
@@ -157,12 +157,12 @@ async def enable_totp(
 
     # Encrypt and save the secret
     encrypted_secret = encrypt_secret(form_data.secret)
-    Auths.update_totp(user.id, encrypted_secret, True, db=db)
+    await Auths.update_totp(user.id, encrypted_secret, True, db=db)
     if timecode is not None:
-        Auths.update_totp_last_used(user.id, timecode, db=db)
+        await Auths.update_totp_last_used(user.id, timecode, db=db)
 
     # Generate recovery codes
-    recovery_codes = RecoveryCodes.generate_codes(user.id, db=db)
+    recovery_codes = await RecoveryCodes.generate_codes(user.id, db=db)
 
     return {
         'totp_enabled': True,
@@ -175,13 +175,13 @@ async def disable_totp(
     request: Request,
     form_data: TotpDisableForm,
     user=Depends(get_current_user),
-    db: Session = Depends(get_session),
+    db: AsyncSession = Depends(get_async_session),
 ):
     """Disable TOTP 2FA. Requires password re-verification."""
     if not request.app.state.config.ENABLE_2FA:
         raise HTTPException(status_code=404, detail='2FA is not enabled')
 
-    auth = Auths.get_auth_by_user_id(user.id, db=db)
+    auth = await Auths.get_auth_by_user_id(user.id, db=db)
     if not auth:
         raise HTTPException(status_code=404, detail='Auth record not found')
 
@@ -192,8 +192,8 @@ async def disable_totp(
     if not verify_password(form_data.password, auth.password):
         raise HTTPException(status_code=403, detail='Invalid password')
 
-    Auths.update_totp(user.id, None, False, db=db)
-    RecoveryCodes.delete_all(user.id, db=db)
+    await Auths.update_totp(user.id, None, False, db=db)
+    await RecoveryCodes.delete_all(user.id, db=db)
 
     return {'totp_enabled': False}
 
@@ -203,7 +203,7 @@ async def verify_2fa(
     request: Request,
     response: Response,
     form_data: TotpVerifyForm,
-    db: Session = Depends(get_session),
+    db: AsyncSession = Depends(get_async_session),
 ):
     """
     Verify a TOTP code or recovery code during login.
@@ -236,11 +236,11 @@ async def verify_2fa(
             detail='Too many verification attempts. Please try again later.',
         )
 
-    user = Users.get_user_by_id(user_id)
+    user = await Users.get_user_by_id(user_id)
     if not user:
         raise HTTPException(status_code=401, detail='User not found')
 
-    auth = Auths.get_auth_by_user_id(user_id, db=db)
+    auth = await Auths.get_auth_by_user_id(user_id, db=db)
     if not auth or not auth.totp_enabled:
         raise HTTPException(status_code=400, detail='2FA is not enabled for this user')
 
@@ -253,18 +253,18 @@ async def verify_2fa(
         if not is_valid:
             raise HTTPException(status_code=400, detail='Invalid TOTP code')
         if timecode is not None:
-            Auths.update_totp_last_used(user_id, timecode, db=db)
+            await Auths.update_totp_last_used(user_id, timecode, db=db)
 
     elif is_recovery_code_format(code):
         # Recovery code verification
-        if not RecoveryCodes.verify_code(user_id, code, db=db):
+        if not await RecoveryCodes.verify_code(user_id, code, db=db):
             raise HTTPException(status_code=400, detail='Invalid recovery code')
 
     else:
         raise HTTPException(status_code=400, detail='Invalid code format')
 
     # Success — issue full session
-    return create_session_response(request, user, db, response, set_cookie=True)
+    return await create_session_response(request, user, db, response, set_cookie=True)
 
 
 @router.post('/recovery/regenerate')
@@ -272,13 +272,13 @@ async def regenerate_recovery_codes(
     request: Request,
     form_data: RegenerateRecoveryCodesForm,
     user=Depends(get_current_user),
-    db: Session = Depends(get_session),
+    db: AsyncSession = Depends(get_async_session),
 ):
     """Regenerate recovery codes. Requires password re-verification."""
     if not request.app.state.config.ENABLE_2FA:
         raise HTTPException(status_code=404, detail='2FA is not enabled')
 
-    auth = Auths.get_auth_by_user_id(user.id, db=db)
+    auth = await Auths.get_auth_by_user_id(user.id, db=db)
     if not auth:
         raise HTTPException(status_code=404, detail='Auth record not found')
 
@@ -289,6 +289,6 @@ async def regenerate_recovery_codes(
     if not verify_password(form_data.password, auth.password):
         raise HTTPException(status_code=403, detail='Invalid password')
 
-    recovery_codes = RecoveryCodes.generate_codes(user.id, db=db)
+    recovery_codes = await RecoveryCodes.generate_codes(user.id, db=db)
 
     return {'recovery_codes': recovery_codes}

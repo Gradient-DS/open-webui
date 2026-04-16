@@ -33,7 +33,7 @@ class ArchiveData:
             },
         }
 
-    def get_exportable_chats(self) -> List[Dict[str, Any]]:
+    async def get_exportable_chats(self) -> List[Dict[str, Any]]:
         """
         Returns chats in the native Open WebUI export format.
         This format can be directly imported using Settings > Data Controls > Import Chats.
@@ -59,7 +59,7 @@ class ArchiveService:
     """Service for creating user archives"""
 
     @staticmethod
-    def collect_user_data(user_id: str) -> ArchiveData:
+    async def collect_user_data(user_id: str) -> ArchiveData:
         """
         Collect all user data for archival.
         Chats are stored in the native Open WebUI export format.
@@ -72,7 +72,7 @@ class ArchiveService:
 
         # 1. User profile (for reference/metadata)
         try:
-            user = Users.get_user_by_id(user_id)
+            user = await Users.get_user_by_id(user_id)
             if user:
                 data.user_profile = {
                     'id': user.id,
@@ -90,7 +90,7 @@ class ArchiveService:
         # Uses the same ChatResponse model as GET /api/v1/chats/all to ensure
         # format compatibility with Open WebUI's native export/import
         try:
-            chats_response = Chats.get_chats_by_user_id(user_id)
+            chats_response = await Chats.get_chats_by_user_id(user_id)
             for chat in chats_response.items:
                 # Convert via ChatResponse model - same as native /chats/all endpoint
                 chat_response = ChatResponse(**chat.model_dump())
@@ -101,7 +101,7 @@ class ArchiveService:
         return data
 
     @staticmethod
-    def create_archive(
+    async def create_archive(
         user_id: str,
         archived_by: str,
         reason: str,
@@ -124,14 +124,14 @@ class ArchiveService:
         result = ArchiveResult()
 
         # Get user info
-        user = Users.get_user_by_id(user_id)
+        user = await Users.get_user_by_id(user_id)
         if not user:
             result.errors.append(f'User {user_id} not found')
             return result
 
         # Collect data
         try:
-            data = ArchiveService.collect_user_data(user_id)
+            data = await ArchiveService.collect_user_data(user_id)
             result.stats = {
                 'chats': len(data.chats),
             }
@@ -141,7 +141,7 @@ class ArchiveService:
 
         # Create archive record
         try:
-            archive = UserArchives.insert_archive(
+            archive = await UserArchives.insert_archive(
                 user_id=user_id,
                 user_email=user.email,
                 user_name=user.name,
@@ -162,7 +162,7 @@ class ArchiveService:
         return result
 
     @staticmethod
-    def get_exportable_chats(archive_id: str) -> Optional[List[Dict[str, Any]]]:
+    async def get_exportable_chats(archive_id: str) -> Optional[List[Dict[str, Any]]]:
         """
         Get chats from an archive in the native Open WebUI export format.
         This can be directly imported using Settings > Data Controls > Import Chats.
@@ -172,7 +172,7 @@ class ArchiveService:
         """
         from open_webui.models.user_archives import UserArchives
 
-        archive = UserArchives.get_archive_by_id(archive_id)
+        archive = await UserArchives.get_archive_by_id(archive_id)
         if not archive:
             return None
 
@@ -180,7 +180,7 @@ class ArchiveService:
         return data.get('chats', [])
 
     @staticmethod
-    def cleanup_expired_archives() -> Dict[str, int]:
+    async def cleanup_expired_archives() -> Dict[str, int]:
         """
         Delete archives past their retention period.
         Called by background job.
@@ -189,12 +189,12 @@ class ArchiveService:
 
         stats = {'checked': 0, 'deleted': 0, 'errors': 0}
 
-        expired = UserArchives.get_expired_archives()
+        expired = await UserArchives.get_expired_archives()
         stats['checked'] = len(expired)
 
         for archive in expired:
             try:
-                if UserArchives.delete_archive(archive.id):
+                if await UserArchives.delete_archive(archive.id):
                     stats['deleted'] += 1
                     log.info(f'Deleted expired archive {archive.id} for user {archive.user_id}')
                 else:

@@ -1,7 +1,7 @@
 """merge upstream v0.8.9 with custom migrations
 
 Revision ID: e5f6a7b8c9d0
-Revises: b2c3d4e5f6a7, d4e5f6a7b8c9
+Revises: b2c3d4e5f6a7, d4e5f6a7b8d0
 Create Date: 2026-03-20
 
 """
@@ -10,7 +10,7 @@ from typing import Sequence, Union
 
 # revision identifiers, used by Alembic.
 revision: str = 'e5f6a7b8c9d0'
-down_revision: Union[str, Sequence[str]] = ('b2c3d4e5f6a7', 'd4e5f6a7b8c9')
+down_revision: Union[str, Sequence[str]] = ('b2c3d4e5f6a7', 'd4e5f6a7b8d0')
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 

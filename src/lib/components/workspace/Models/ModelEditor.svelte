@@ -2,9 +2,8 @@
 	import { toast } from 'svelte-sonner';
 
 	import { onMount, getContext, tick } from 'svelte';
-	import { models, tools, functions, user, config } from '$lib/stores';
+	import { models, tools, functions, user } from '$lib/stores';
 	import { WEBUI_BASE_URL, DEFAULT_CAPABILITIES } from '$lib/constants';
-	import { getDefaultCapabilities } from '$lib/utils/capabilities';
 
 	import { getTools } from '$lib/apis/tools';
 	import { getFunctions } from '$lib/apis/functions';
@@ -25,8 +24,8 @@
 	import DefaultFiltersSelector from './DefaultFiltersSelector.svelte';
 	import DefaultFeatures from './DefaultFeatures.svelte';
 	import BuiltinTools from './BuiltinTools.svelte';
-	import DataWarnings from './DataWarnings.svelte';
 	import PromptSuggestions from './PromptSuggestions.svelte';
+	import TerminalSelector from './TerminalSelector.svelte';
 	import AccessControlModal from '../common/AccessControlModal.svelte';
 	import LockClosed from '$lib/components/icons/LockClosed.svelte';
 	import { updateModelAccessGrants } from '$lib/apis/models';
@@ -98,14 +97,13 @@
 	let filterIds = [];
 	let defaultFilterIds = [];
 
-	let capabilities = getDefaultCapabilities();
+	let capabilities = { ...DEFAULT_CAPABILITIES };
 	let defaultFeatureIds = [];
 	let builtinTools = {};
-	let dataWarnings: Record<string, boolean> = {};
-	let dataWarningMessage: string = '';
 
 	let actionIds = [];
 	let accessGrants = [];
+	let terminalId = '';
 	let tts = { voice: '' };
 
 	const submitHandler = async () => {
@@ -115,14 +113,14 @@
 		info.name = name;
 
 		if (id === '') {
-			toast.error($i18n.t('ID is required.'));
+			toast.error($i18n.t('Model ID is required.'));
 			loading = false;
 
 			return;
 		}
 
 		if (name === '') {
-			toast.error($i18n.t('Name is required.'));
+			toast.error($i18n.t('Model Name is required.'));
 			loading = false;
 
 			return;
@@ -210,15 +208,11 @@
 			}
 		}
 
-		if (Object.values(dataWarnings).some((v) => v)) {
-			info.meta.data_warnings = dataWarnings;
-			info.meta.data_warning_message = dataWarningMessage || '';
+		if (terminalId) {
+			info.meta.terminalId = terminalId;
 		} else {
-			if (info.meta.data_warnings) {
-				delete info.meta.data_warnings;
-			}
-			if (info.meta.data_warning_message) {
-				delete info.meta.data_warning_message;
+			if (info.meta.terminalId) {
+				delete info.meta.terminalId;
 			}
 		}
 
@@ -265,8 +259,6 @@
 		capabilities = { ...DEFAULT_CAPABILITIES, ...(defaultMeta.capabilities ?? {}) };
 		defaultFeatureIds = defaultMeta.defaultFeatureIds ?? [];
 		builtinTools = defaultMeta.builtinTools ?? {};
-		dataWarnings = defaultMeta.data_warnings ?? {};
-		dataWarningMessage = defaultMeta.data_warning_message ?? '';
 
 		// Scroll to top 'workspace-container' element
 		const workspaceContainer = document.getElementById('workspace-container');
@@ -334,8 +326,7 @@
 			capabilities = { ...capabilities, ...(model?.meta?.capabilities ?? {}) };
 			defaultFeatureIds = model?.meta?.defaultFeatureIds ?? defaultFeatureIds;
 			builtinTools = model?.meta?.builtinTools ?? builtinTools;
-			dataWarnings = model?.meta?.data_warnings ?? dataWarnings;
-			dataWarningMessage = model?.meta?.data_warning_message ?? dataWarningMessage;
+			terminalId = model?.meta?.terminalId ?? '';
 			tts = { voice: model?.meta?.tts?.voice ?? '' };
 
 			accessGrants = model?.access_grants ?? [];
@@ -571,7 +562,7 @@
 									<div class="flex-1 w-full">
 										<input
 											class="text-3xl w-full bg-transparent outline-hidden"
-											placeholder={$i18n.t('Name')}
+											placeholder={$i18n.t('Model Name')}
 											bind:value={name}
 											required
 										/>
@@ -581,7 +572,7 @@
 										<div>
 											<input
 												class="text-xs w-full bg-transparent outline-hidden"
-												placeholder={$i18n.t('ID')}
+												placeholder={$i18n.t('Model ID')}
 												bind:value={id}
 												disabled={edit}
 												required
@@ -771,23 +762,17 @@
 						{/if}
 					</div>
 
-					{#if $config?.features?.feature_knowledge !== false}
-						<div class="my-4">
-							<Knowledge bind:selectedItems={knowledge} />
-						</div>
-					{/if}
+					<div class="my-4">
+						<Knowledge bind:selectedItems={knowledge} />
+					</div>
 
-					{#if $config?.features?.feature_tools !== false}
-						<div class="my-4">
-							<ToolsSelector bind:selectedToolIds={toolIds} tools={$tools ?? []} />
-						</div>
-					{/if}
+					<div class="my-4">
+						<ToolsSelector bind:selectedToolIds={toolIds} tools={$tools ?? []} />
+					</div>
 
-					{#if $config?.features?.feature_skills}
-						<div class="my-4">
-							<SkillsSelector bind:selectedSkillIds={skillIds} />
-						</div>
-					{/if}
+					<div class="my-4">
+						<SkillsSelector bind:selectedSkillIds={skillIds} />
+					</div>
 
 					{#if ($functions ?? []).filter((func) => func.type === 'filter').length > 0 || ($functions ?? []).filter((func) => func.type === 'action').length > 0}
 						<hr class=" border-gray-100/30 dark:border-gray-850/30 my-4" />
@@ -854,27 +839,23 @@
 						</div>
 					{/if}
 
-					{#if $config?.features?.enable_data_warnings}
-						<div class="my-4">
-							<DataWarnings bind:dataWarnings bind:warningMessage={dataWarningMessage} />
-						</div>
-					{/if}
+					<div class="my-4">
+						<TerminalSelector bind:terminalId />
+					</div>
 
-					{#if $config?.features?.feature_voice !== false && $config?.audio?.tts?.engine}
-						<div class="my-4">
-							<div class="flex w-full justify-between mb-1">
-								<div class="self-center text-xs font-medium text-gray-500">
-									{$i18n.t('TTS Voice')}
-								</div>
+					<div class="my-4">
+						<div class="flex w-full justify-between mb-1">
+							<div class="self-center text-xs font-medium text-gray-500">
+								{$i18n.t('TTS Voice')}
 							</div>
-							<input
-								class="w-full text-sm bg-transparent outline-hidden"
-								type="text"
-								bind:value={tts.voice}
-								placeholder={$i18n.t('e.g. alloy, echo, shimmer')}
-							/>
 						</div>
-					{/if}
+						<input
+							class="w-full text-sm bg-transparent outline-hidden"
+							type="text"
+							bind:value={tts.voice}
+							placeholder={$i18n.t('e.g. alloy, echo, shimmer')}
+						/>
+					</div>
 
 					<hr class=" border-gray-100/30 dark:border-gray-850/30 my-4" />
 

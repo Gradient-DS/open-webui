@@ -1,0 +1,91 @@
+# Soev local development stack — builds slim Open WebUI image from source
+# Usage: docker compose -f docker-compose.soev-local.yaml up -d --build
+#
+# Requires: .env file or inline env vars for configuration
+
+services:
+
+  weaviate:
+    image: semitechnologies/weaviate:1.35.0
+    container_name: soev-weaviate
+    environment:
+      QUERY_DEFAULTS_LIMIT: 25
+      AUTHENTICATION_ANONYMOUS_ACCESS_ENABLED: "true"
+      PERSISTENCE_DATA_PATH: /var/lib/weaviate
+      DEFAULT_VECTORIZER_MODULE: none
+      CLUSTER_HOSTNAME: node1
+      OBJECTS_TTL_DELETE_SCHEDULE: "@every 5m"
+      LOG_LEVEL: info
+    volumes:
+      - weaviate-data:/var/lib/weaviate
+    ports:
+      - "${WEAVIATE_HTTP_PORT:-8082}:8080"
+      - "${WEAVIATE_GRPC_PORT:-50053}:50051"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8080/v1/.well-known/ready"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  postgres:
+    image: postgres:15
+    container_name: soev-postgres
+    environment:
+      POSTGRES_DB: openwebui
+      POSTGRES_USER: openwebui
+      POSTGRES_PASSWORD: dev_password
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    ports:
+      - "${POSTGRES_PORT:-5433}:5432"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U openwebui"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  open-webui:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        USE_SLIM: "true"
+        UID: 1000
+        GID: 1000
+    container_name: soev-open-webui
+    env_file:
+      - .env
+    volumes:
+      - open-webui-data:/app/backend/data
+      - ./backend:/app/backend  # Mount local backend for development
+    depends_on:
+      postgres:
+        condition: service_healthy
+      weaviate:
+        condition: service_healthy
+    ports:
+      - "${OPEN_WEBUI_PORT:-3000}:8080"
+    environment:
+      # Override DB/infra to point to compose services
+      - DATABASE_URL=postgresql://openwebui:dev_password@postgres:5432/openwebui
+      - DATABASE_HOST=postgres
+      - DATABASE_PORT=5432
+      - WEBUI_SECRET_KEY=${WEBUI_SECRET_KEY:-dev-secret-key-change-me}
+      - RAG_VECTOR_DB_TYPE=weaviate
+      - WEAVIATE_URL=http://weaviate:8080
+      - WEAVIATE_HTTP_HOST=weaviate
+      - WEAVIATE_HTTP_PORT=8080
+      - WEAVIATE_GRPC_HOST=weaviate
+      - WEAVIATE_GRPC_PORT=50051
+      - ENV=dev
+    extra_hosts:
+      - host.docker.internal:host-gateway
+    restart: unless-stopped
+
+volumes:
+  weaviate-data: {}
+  postgres-data: {}
+  open-webui-data: {}

@@ -3,9 +3,10 @@ import uuid
 from typing import Optional
 
 from pydantic import BaseModel
-from sqlalchemy import BigInteger, Column, String
+from sqlalchemy import BigInteger, Column, String, select
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from open_webui.internal.db import Base, get_db
+from open_webui.internal.db import Base, get_async_db_context
 
 
 class Invite(Base):
@@ -51,15 +52,16 @@ class AcceptInviteForm(BaseModel):
 
 
 class InviteTable:
-    def create_invite(
+    async def create_invite(
         self,
         email: str,
         name: str,
         role: str,
         invited_by: str,
         expires_at: int,
+        db: Optional[AsyncSession] = None,
     ) -> Optional[InviteModel]:
-        with get_db() as db:
+        async with get_async_db_context(db) as db:
             invite = Invite(
                 id=str(uuid.uuid4()),
                 email=email.lower(),
@@ -71,73 +73,80 @@ class InviteTable:
                 created_at=int(time.time()),
             )
             db.add(invite)
-            db.commit()
-            db.refresh(invite)
+            await db.commit()
+            await db.refresh(invite)
             return InviteModel.model_validate(invite)
 
-    def get_invite_by_token(self, token: str) -> Optional[InviteModel]:
-        with get_db() as db:
-            invite = db.query(Invite).filter_by(token=token).first()
+    async def get_invite_by_token(self, token: str, db: Optional[AsyncSession] = None) -> Optional[InviteModel]:
+        async with get_async_db_context(db) as db:
+            result = await db.execute(select(Invite).filter_by(token=token))
+            invite = result.scalars().first()
             return InviteModel.model_validate(invite) if invite else None
 
-    def get_invite_by_id(self, id: str) -> Optional[InviteModel]:
-        with get_db() as db:
-            invite = db.query(Invite).filter_by(id=id).first()
+    async def get_invite_by_id(self, id: str, db: Optional[AsyncSession] = None) -> Optional[InviteModel]:
+        async with get_async_db_context(db) as db:
+            result = await db.execute(select(Invite).filter_by(id=id))
+            invite = result.scalars().first()
             return InviteModel.model_validate(invite) if invite else None
 
-    def get_pending_invites(self) -> list[InviteModel]:
-        with get_db() as db:
-            invites = (
-                db.query(Invite)
+    async def get_pending_invites(self, db: Optional[AsyncSession] = None) -> list[InviteModel]:
+        async with get_async_db_context(db) as db:
+            result = await db.execute(
+                select(Invite)
                 .filter(Invite.accepted_at.is_(None), Invite.revoked_at.is_(None))
                 .order_by(Invite.created_at.desc())
-                .all()
             )
+            invites = result.scalars().all()
             return [InviteModel.model_validate(i) for i in invites]
 
-    def get_pending_invite_by_email(self, email: str) -> Optional[InviteModel]:
-        with get_db() as db:
-            invite = (
-                db.query(Invite)
+    async def get_pending_invite_by_email(self, email: str, db: Optional[AsyncSession] = None) -> Optional[InviteModel]:
+        async with get_async_db_context(db) as db:
+            result = await db.execute(
+                select(Invite)
                 .filter(
                     Invite.email == email.lower(),
                     Invite.accepted_at.is_(None),
                     Invite.revoked_at.is_(None),
                 )
                 .order_by(Invite.created_at.desc())
-                .first()
             )
+            invite = result.scalars().first()
             return InviteModel.model_validate(invite) if invite else None
 
-    def accept_invite(self, token: str) -> Optional[InviteModel]:
-        with get_db() as db:
-            invite = db.query(Invite).filter_by(token=token).first()
+    async def accept_invite(self, token: str, db: Optional[AsyncSession] = None) -> Optional[InviteModel]:
+        async with get_async_db_context(db) as db:
+            result = await db.execute(select(Invite).filter_by(token=token))
+            invite = result.scalars().first()
             if invite:
                 invite.accepted_at = int(time.time())
-                db.commit()
-                db.refresh(invite)
+                await db.commit()
+                await db.refresh(invite)
                 return InviteModel.model_validate(invite)
             return None
 
-    def revoke_invite(self, id: str) -> Optional[InviteModel]:
-        with get_db() as db:
-            invite = db.query(Invite).filter_by(id=id).first()
+    async def revoke_invite(self, id: str, db: Optional[AsyncSession] = None) -> Optional[InviteModel]:
+        async with get_async_db_context(db) as db:
+            result = await db.execute(select(Invite).filter_by(id=id))
+            invite = result.scalars().first()
             if invite:
                 invite.revoked_at = int(time.time())
-                db.commit()
-                db.refresh(invite)
+                await db.commit()
+                await db.refresh(invite)
                 return InviteModel.model_validate(invite)
             return None
 
-    def refresh_invite(self, id: str, new_expires_at: int) -> Optional[InviteModel]:
+    async def refresh_invite(
+        self, id: str, new_expires_at: int, db: Optional[AsyncSession] = None
+    ) -> Optional[InviteModel]:
         """Refresh an invite with a new token and expiry (for resend)."""
-        with get_db() as db:
-            invite = db.query(Invite).filter_by(id=id).first()
+        async with get_async_db_context(db) as db:
+            result = await db.execute(select(Invite).filter_by(id=id))
+            invite = result.scalars().first()
             if invite:
                 invite.token = str(uuid.uuid4())
                 invite.expires_at = new_expires_at
-                db.commit()
-                db.refresh(invite)
+                await db.commit()
+                await db.refresh(invite)
                 return InviteModel.model_validate(invite)
             return None
 

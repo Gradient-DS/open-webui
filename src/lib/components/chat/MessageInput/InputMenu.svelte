@@ -45,7 +45,9 @@
 	import Chats from './InputMenu/Chats.svelte';
 	import Notes from './InputMenu/Notes.svelte';
 	import Knowledge from './InputMenu/Knowledge.svelte';
+	import Files from './InputMenu/Files.svelte';
 	import AttachWebpageModal from './AttachWebpageModal.svelte';
+	import DocumentArrowUp from '$lib/components/icons/DocumentArrowUp.svelte';
 
 	const i18n = getContext('i18n');
 
@@ -283,6 +285,39 @@
 									{/if}
 								</button>
 							</Tooltip>
+						</button>
+					</Tooltip>
+
+					<!-- Attach (Browse) Files -->
+					<Tooltip
+						content={fileUploadCapableModels.length !== selectedModels.length
+							? $i18n.t('Model(s) do not support file upload')
+							: !fileUploadEnabled
+								? $i18n.t('You do not have permission to upload files.')
+								: ''}
+						className="w-full"
+					>
+						<button
+							class="flex gap-2 w-full items-center px-3 py-1.5 text-sm select-none cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800/50 rounded-xl {!fileUploadEnabled
+								? 'opacity-50'
+								: ''}"
+							on:click={() => {
+								if (fileUploadEnabled) {
+									tab = 'files';
+								}
+							}}
+						>
+							<DocumentArrowUp />
+
+							<div class="flex items-center w-full justify-between">
+								<div class="line-clamp-1">
+									{$i18n.t('Attach Files')}
+								</div>
+
+								<div class="text-gray-500">
+									<ChevronRight />
+								</div>
+							</div>
 						</button>
 					</Tooltip>
 
@@ -1011,6 +1046,25 @@
 					</button>
 
 					<Chats {onSelect} />
+				</div>
+			{:else if tab === 'files'}
+				<div in:fly={{ x: 20, duration: directTab ? 0 : 150 }}>
+					<button
+						class="flex w-full justify-between gap-2 items-center px-3 py-1.5 text-sm cursor-pointer rounded-xl hover:bg-gray-50 dark:hover:bg-gray-800/50"
+						on:click={() => {
+							tab = '';
+						}}
+					>
+						<ChevronLeft />
+
+						<div class="flex items-center w-full justify-between">
+							<div>
+								{$i18n.t('Files')}
+							</div>
+						</div>
+					</button>
+
+					<Files {onSelect} />
 				</div>
 			{:else if tab === 'tools' && tools && isFeatureEnabled('tools')}
 				<div in:fly={{ x: 20, duration: 150 }}>
