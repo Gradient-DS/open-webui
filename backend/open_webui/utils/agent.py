@@ -253,8 +253,19 @@ async def call_agent_api(
         if key in form_data:
             model_params[key] = form_data[key]
 
+    # [Gradient] Resolve to the underlying LLM ID. The agents service
+    # validates ``model`` against its LLM allowlist; OpenWebUI custom-model
+    # IDs (e.g. "offertemachine") aren't LLMs and aren't in the allowlist.
+    # The base model (e.g. "gpt-oss-120b") is. ``metadata["model"]["info"]``
+    # carries the persisted custom_model dump for custom models; absent for
+    # pure base models, arena models, and direct mode — those fall back to
+    # the form_data model, which is already the LLM ID in those cases.
+    model_dict = metadata.get('model') or {}
+    info = model_dict.get('info') or {}
+    llm_model = info.get('base_model_id') or form_data.get('model', '')
+
     payload = build_agent_payload(
-        model=form_data.get('model', ''),
+        model=llm_model,
         messages=form_data.get('messages', []),
         stream=stream,
         chat_id=metadata.get('chat_id'),
