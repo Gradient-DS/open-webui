@@ -87,27 +87,67 @@ sio = socketio.AsyncServer(
 )
 
 
+class _TolerantAsyncRedisManager(socketio.AsyncRedisManager):
+    """AsyncRedisManager that swallows known loop-mismatch / closed-loop errors.
+
+    Under some HA + Python/async-redis combinations the cross-replica pubsub
+    publish raises `RuntimeError: got Future attached to a different loop` or
+    `RuntimeError: Event loop is closed` (see REDIS-HA-FIX.md). The actual chat
+    stream to the connected client goes through the HTTP response SSE body,
+    not through this pubsub path, so the publish failure is cosmetic — it just
+    means the OTHER replica (if any) didn't get a notification. Swallow the
+    error instead of letting it bubble up to the HTTP handler and produce a
+    500 that makes the browser JSON-parser choke.
+
+    This is a targeted workaround, not a fix. Remove once the underlying
+    upstream issue (python-socketio + AsyncRedisManager loop binding) is
+    addressed, e.g. via a dependency upgrade.
+    """
+
+    _SUPPRESS_FRAGMENTS = (
+        'attached to a different loop',
+        'Event loop is closed',
+    )
+
+    async def _publish(self, message):
+        try:
+            return await super()._publish(message)
+        except RuntimeError as e:
+            msg = str(e)
+            if any(frag in msg for frag in self._SUPPRESS_FRAGMENTS):
+                log.warning(
+                    'Suppressing known socketio AsyncRedisManager publish error '
+                    '(local emit unaffected, cross-replica notification lost): %s',
+                    msg,
+                )
+                return
+            raise
+
+
 async def init_websocket_redis_manager() -> None:
     """Attach the Redis-backed AsyncRedisManager to `sio` on the live event loop.
 
     Must be awaited from the FastAPI lifespan startup (or any coroutine running
     on uvicorn's main loop) BEFORE any `sio.emit(...)` call is issued.
     Idempotent; safe to call repeatedly.
+
+    Uses a tolerant subclass that swallows the known loop-mismatch /
+    closed-loop publish errors — see _TolerantAsyncRedisManager.
     """
     if WEBSOCKET_MANAGER != 'redis':
         return
 
     # Avoid re-installing the manager on reloads/multiple startups.
-    if isinstance(sio.manager, socketio.AsyncRedisManager):
+    if isinstance(sio.manager, _TolerantAsyncRedisManager):
         return
 
     if WEBSOCKET_SENTINEL_HOSTS:
-        mgr = socketio.AsyncRedisManager(
+        mgr = _TolerantAsyncRedisManager(
             get_sentinel_url_from_env(WEBSOCKET_REDIS_URL, WEBSOCKET_SENTINEL_HOSTS, WEBSOCKET_SENTINEL_PORT),
             redis_options=WEBSOCKET_REDIS_OPTIONS,
         )
     else:
-        mgr = socketio.AsyncRedisManager(WEBSOCKET_REDIS_URL, redis_options=WEBSOCKET_REDIS_OPTIONS)
+        mgr = _TolerantAsyncRedisManager(WEBSOCKET_REDIS_URL, redis_options=WEBSOCKET_REDIS_OPTIONS)
 
     mgr.set_server(sio)
     sio.manager = mgr

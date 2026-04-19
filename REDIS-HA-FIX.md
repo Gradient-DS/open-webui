@@ -185,3 +185,39 @@ The hot-swap works because python-socketio's `AsyncServer.emit()` lazily calls `
 
 Lifespan-deferred init is the smallest, most contained fix.
 
+---
+
+## Third iteration (v1.0.7) — swallow the residual crash
+
+The deferred-lifespan fix (v1.0.6) did not fully eliminate the cross-loop error in practice. The user-visible `Unexpected token 'I', "Internal S"... is not valid JSON` browser error continued to appear on HA tenants, especially after page refresh + document upload (when the socket.io client reconnects and triggers a burst of internal `sio.emit` calls for session setup).
+
+At this point the diagnosis for the *exact* Future that's loop-bound has been inconclusive — the symptom persists even at replicaCount=1 in some tenants, suggesting the loop-mismatch is deeper than simple import-time init. Rather than keep iterating blindly, v1.0.7 adopts a **targeted error suppression** strategy:
+
+**What's suppressed**: in `socket/main.py`, a `_TolerantAsyncRedisManager` subclass wraps `_publish()` with a `try/except RuntimeError`. It catches only the two specific messages we've observed in the wild:
+
+- `"attached to a different loop"`
+- `"Event loop is closed"`
+
+Any other `RuntimeError` from `_publish` still propagates normally.
+
+**Why this is safe**:
+
+- The actual chat stream to the connected client flows through the HTTP response body (SSE), not through the socket.io Redis pubsub. Users see their chat response regardless of publish success/failure.
+- `event_emitter` → `sio.emit(...)` events are metadata notifications (status, source retrieved, chat:active, etc.). Local clients in the same pod get them via `AsyncPubSubManager`'s local queue before the publish step; cross-replica clients would normally receive via the Redis pubsub path, and THAT is what we lose when suppressing.
+- The cross-replica miss is cosmetic: a user connected to pod A whose chat is running on pod B would miss a metadata event (spinner timing, source citation timing). The CONTENT still arrives via SSE on pod B's HTTP response.
+- Under normal Kubernetes service routing, clients usually stay connected to one pod for the duration of a request anyway — cross-replica delivery is the exception, not the rule.
+
+**Why this is not a real fix**:
+
+- We're papering over an error whose mechanism we don't fully understand.
+- If the underlying python-socketio / redis.asyncio combination has other latent bugs from the same root cause, they may surface elsewhere.
+- The suppression string-match is fragile — if the upstream error message text changes, the filter stops working.
+
+**Follow-up work** (post-workweek):
+
+1. Bump `python-socketio` to latest 5.x in the fork's `requirements*.txt`. There are known issues and fixes in this area upstream; a version bump may resolve the root cause entirely. If it does, `_TolerantAsyncRedisManager` becomes dead weight and can be removed.
+2. If the upgrade doesn't help, file a detailed upstream issue with the traceback.
+3. Consider switching to a different socket.io client manager (Kombu, AioPika) if the Redis path remains unstable.
+
+The replicaCount:1 workweek workaround (which was about to be applied to demo) is NO longer needed once v1.0.7 is live — HA is safe again.
+
