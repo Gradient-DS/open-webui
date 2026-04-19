@@ -84,6 +84,7 @@ All in `backend/open_webui/main.py` or files it imports:
 | 3 | `main.py:1739` | `@app.middleware('http')` `commit_session_after_request` | SQLAlchemy scoped-session commit + remove |
 | 4 | `main.py:1753` | `@app.middleware('http')` `check_url` | Normalise `request.state.token` from Authorization header / cookie / x-api-key; stamp `X-Process-Time` |
 | 5 | `main.py:1780` | `@app.middleware('http')` `inspect_websocket` | Reject malformed WebSocket upgrade requests early |
+| 6 | `utils/telemetry/metrics.py:175` | `@app.middleware('http')` `_metrics_middleware` | OTel counter + duration histogram per HTTP request |
 
 `@app.middleware('http')` is a convenience wrapper around `BaseHTTPMiddleware` — same bug class.
 

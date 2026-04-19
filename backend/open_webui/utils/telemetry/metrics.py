@@ -171,31 +171,47 @@ def setup_metrics(app: FastAPI, resource: Resource) -> None:
         callbacks=[observe_users_active_today],
     )
 
-    # FastAPI middleware
-    @app.middleware('http')
-    async def _metrics_middleware(request: Request, call_next):
-        start_time = time.perf_counter()
+    # Pure ASGI-3 middleware (not @app.middleware('http') / BaseHTTPMiddleware).
+    # BaseHTTPMiddleware spawns a sub-task via anyio TaskGroup that can end up on a
+    # different asyncio event loop than long-lived async resources on app.state,
+    # causing "got Future ... attached to a different loop" under HA load.
+    # See REDIS-HA-FIX.md.
+    class MetricsMiddleware:
+        def __init__(self, asgi_app):
+            self.app = asgi_app
 
-        status_code = None
-        try:
-            response = await call_next(request)
-            status_code = getattr(response, 'status_code', 500)
-            return response
-        except Exception:
-            status_code = 500
-            raise
-        finally:
-            elapsed_ms = (time.perf_counter() - start_time) * 1000.0
+        async def __call__(self, scope, receive, send):
+            if scope['type'] != 'http':
+                return await self.app(scope, receive, send)
 
-            # Route template e.g. "/items/{item_id}" instead of real path.
-            route = request.scope.get('route')
-            route_path = getattr(route, 'path', request.url.path)
+            start_time = time.perf_counter()
+            status_code = 500  # default if we never see a response.start (exception path)
 
-            attrs: Dict[str, str | int] = {
-                'http.method': request.method,
-                'http.route': route_path,
-                'http.status_code': status_code,
-            }
+            async def send_wrapper(message):
+                nonlocal status_code
+                if message['type'] == 'http.response.start':
+                    status_code = message.get('status', 500)
+                await send(message)
 
-            request_counter.add(1, attrs)
-            duration_histogram.record(elapsed_ms, attrs)
+            try:
+                await self.app(scope, receive, send_wrapper)
+            except Exception:
+                status_code = 500
+                raise
+            finally:
+                elapsed_ms = (time.perf_counter() - start_time) * 1000.0
+
+                # Route template e.g. "/items/{item_id}" instead of real path.
+                route = scope.get('route')
+                route_path = getattr(route, 'path', scope.get('path', ''))
+
+                attrs: Dict[str, str | int] = {
+                    'http.method': scope.get('method', ''),
+                    'http.route': route_path,
+                    'http.status_code': status_code,
+                }
+
+                request_counter.add(1, attrs)
+                duration_histogram.record(elapsed_ms, attrs)
+
+    app.add_middleware(MetricsMiddleware)
