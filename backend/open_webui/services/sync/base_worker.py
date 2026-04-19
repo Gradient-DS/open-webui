@@ -221,16 +221,16 @@ class BaseSyncWorker(ABC):
             }
         )
 
-    def _get_user(self):
+    async def _get_user(self):
         """Fetch the user object for process_file access control."""
-        user = Users.get_user_by_id(self.user_id)
+        user = await Users.get_user_by_id(self.user_id)
         if not user:
             raise RuntimeError(f'User {self.user_id} not found')
         return user
 
-    def _check_cancelled(self) -> bool:
+    async def _check_cancelled(self) -> bool:
         """Check if sync has been cancelled by user."""
-        knowledge = Knowledges.get_knowledge_by_id(self.knowledge_id)
+        knowledge = await Knowledges.get_knowledge_by_id(self.knowledge_id)
         if knowledge:
             meta = knowledge.meta or {}
             sync_info = meta.get(self.meta_key, {})
@@ -250,7 +250,7 @@ class BaseSyncWorker(ABC):
         failed_files: Optional[List[FailedFile]] = None,
     ):
         """Update sync status in knowledge meta and emit Socket.IO event."""
-        knowledge = Knowledges.get_knowledge_by_id(self.knowledge_id)
+        knowledge = await Knowledges.get_knowledge_by_id(self.knowledge_id)
         if knowledge:
             meta = knowledge.meta or {}
             sync_info = meta.get(self.meta_key, {})
@@ -265,7 +265,7 @@ class BaseSyncWorker(ABC):
             if error:
                 sync_info['error'] = error
             meta[self.meta_key] = sync_info
-            Knowledges.update_knowledge_meta_by_id(self.knowledge_id, meta)
+            await Knowledges.update_knowledge_meta_by_id(self.knowledge_id, meta)
 
         # Convert failed_files to dicts for serialization
         failed_files_dicts = [asdict(f) for f in failed_files] if failed_files else None
@@ -311,7 +311,7 @@ class BaseSyncWorker(ABC):
 
     async def _save_sources(self):
         """Save updated sources to knowledge metadata."""
-        knowledge = Knowledges.get_knowledge_by_id(self.knowledge_id)
+        knowledge = await Knowledges.get_knowledge_by_id(self.knowledge_id)
         if not knowledge:
             return
 
@@ -320,7 +320,7 @@ class BaseSyncWorker(ABC):
         sync_info['sources'] = self.sources
         meta[self.meta_key] = sync_info
 
-        Knowledges.update_knowledge_meta_by_id(self.knowledge_id, meta)
+        await Knowledges.update_knowledge_meta_by_id(self.knowledge_id, meta)
 
     async def _handle_deleted_item(self, item: Dict[str, Any]):
         """Handle a deleted item from changes query."""
@@ -330,11 +330,11 @@ class BaseSyncWorker(ABC):
 
         file_id = f'{self.file_id_prefix}{item_id}'
 
-        existing = Files.get_file_by_id(file_id)
+        existing = await Files.get_file_by_id(file_id)
         if existing:
             log.info(f'Removing deleted file from KB: {file_id}')
 
-            Knowledges.remove_file_from_knowledge_by_id(self.knowledge_id, file_id)
+            await Knowledges.remove_file_from_knowledge_by_id(self.knowledge_id, file_id)
 
             try:
                 VECTOR_DB_CLIENT.delete(
@@ -344,10 +344,10 @@ class BaseSyncWorker(ABC):
             except Exception as e:
                 log.warning(f'Failed to remove vectors for {file_id} from KB: {e}')
 
-            remaining_refs = Knowledges.get_knowledge_files_by_file_id(file_id)
+            remaining_refs = await Knowledges.get_knowledge_files_by_file_id(file_id)
             if not remaining_refs:
                 log.info(f'No remaining references to {file_id}, cleaning up')
-                await asyncio.to_thread(DeletionService.delete_file, file_id)
+                await DeletionService.delete_file(file_id)
             else:
                 log.info(f'File {file_id} still referenced by {len(remaining_refs)} KB(s), preserving')
 
@@ -423,7 +423,7 @@ class BaseSyncWorker(ABC):
         from langchain_core.documents import Document
 
         request = self._make_request()
-        user = self._get_user()
+        user = await self._get_user()
 
         # Fetch file record async before entering thread
         async with get_async_db_context() as db:
@@ -560,7 +560,7 @@ class BaseSyncWorker(ABC):
         from langchain_text_splitters import MarkdownHeaderTextSplitter
 
         request = self._make_request()
-        user = self._get_user()
+        user = await self._get_user()
 
         metadata = {
             'file_id': file_id,
@@ -738,7 +738,7 @@ class BaseSyncWorker(ABC):
         relative_path = file_info.get('relative_path', name)
         file_id = f'{self.file_id_prefix}{item_id}'
 
-        if self._check_cancelled():
+        if await self._check_cancelled():
             return FailedFile(
                 filename=name,
                 error_type=SyncErrorType.PROCESSING_ERROR.value,
@@ -749,7 +749,7 @@ class BaseSyncWorker(ABC):
         # Existing KBs without cloud_hash in meta will fall through to download,
         # populating cloud_hash for subsequent syncs (backward compatible).
         cloud_hash = self._get_cloud_hash(file_info)
-        existing = Files.get_file_by_id(file_id)
+        existing = await Files.get_file_by_id(file_id)
 
         if cloud_hash and existing:
             existing_meta = existing.meta or {}
@@ -760,9 +760,9 @@ class BaseSyncWorker(ABC):
                 new_relative_path = file_info.get('relative_path')
                 if new_relative_path and existing_meta.get('relative_path') != new_relative_path:
                     existing_meta['relative_path'] = new_relative_path
-                    Files.update_file_by_id(file_id, FileUpdateForm(meta=existing_meta))
+                    await Files.update_file_by_id(file_id, FileUpdateForm(meta=existing_meta))
 
-                Knowledges.add_file_to_knowledge_by_id(self.knowledge_id, file_id, self.user_id)
+                await Knowledges.add_file_to_knowledge_by_id(self.knowledge_id, file_id, self.user_id)
 
                 return PreparedFile(
                     file_id=file_id,
@@ -825,9 +825,9 @@ class BaseSyncWorker(ABC):
                 updated = True
 
             if updated:
-                Files.update_file_by_id(file_id, FileUpdateForm(meta=existing_meta))
+                await Files.update_file_by_id(file_id, FileUpdateForm(meta=existing_meta))
 
-            Knowledges.add_file_to_knowledge_by_id(self.knowledge_id, file_id, self.user_id)
+            await Knowledges.add_file_to_knowledge_by_id(self.knowledge_id, file_id, self.user_id)
 
             # Return PreparedFile with is_new=False so vector verification
             # runs under the process semaphore (not the download semaphore).
@@ -878,7 +878,7 @@ class BaseSyncWorker(ABC):
                 file_meta['cloud_hash'] = cloud_hash
 
             if existing:
-                Files.update_file_by_id(
+                await Files.update_file_by_id(
                     file_id,
                     FileUpdateForm(hash=content_hash, meta=file_meta),
                 )
@@ -892,7 +892,7 @@ class BaseSyncWorker(ABC):
                     data={},
                     meta=file_meta,
                 )
-                Files.insert_new_file(self.user_id, file_form)
+                await Files.insert_new_file(self.user_id, file_form)
 
             return PreparedFile(
                 file_id=file_id,
@@ -916,7 +916,7 @@ class BaseSyncWorker(ABC):
         file_id = prepared.file_id
         name = prepared.name
 
-        if self._check_cancelled():
+        if await self._check_cancelled():
             return FailedFile(
                 filename=name,
                 error_type=SyncErrorType.PROCESSING_ERROR.value,
@@ -941,7 +941,7 @@ class BaseSyncWorker(ABC):
                 log.debug(f'File {file_id} has no text content')
                 return None
 
-            if self._check_cancelled():
+            if await self._check_cancelled():
                 return FailedFile(
                     filename=name,
                     error_type=SyncErrorType.PROCESSING_ERROR.value,
@@ -972,7 +972,7 @@ class BaseSyncWorker(ABC):
                 error_message=str(e)[:100],
             )
 
-        if self._check_cancelled():
+        if await self._check_cancelled():
             return FailedFile(
                 filename=name,
                 error_type=SyncErrorType.PROCESSING_ERROR.value,
@@ -980,11 +980,11 @@ class BaseSyncWorker(ABC):
             )
 
         # KB association
-        Knowledges.add_file_to_knowledge_by_id(self.knowledge_id, file_id, self.user_id)
+        await Knowledges.add_file_to_knowledge_by_id(self.knowledge_id, file_id, self.user_id)
 
         # Cross-KB vector propagation (still uses process_file for other KBs)
         try:
-            knowledge_files = Knowledges.get_knowledge_files_by_file_id(file_id)
+            knowledge_files = await Knowledges.get_knowledge_files_by_file_id(file_id)
             for kf in knowledge_files:
                 if kf.knowledge_id != self.knowledge_id:
                     log.info(f'Propagating vectors for {file_id} to KB {kf.knowledge_id}')
@@ -1005,7 +1005,7 @@ class BaseSyncWorker(ABC):
                                     file_id=file_id,
                                     collection_name=kf.knowledge_id,
                                 ),
-                                user=self._get_user(),
+                                user=await self._get_user(),
                                 db=db,
                             )
                     except Exception as e:
@@ -1014,7 +1014,7 @@ class BaseSyncWorker(ABC):
             log.warning(f'Failed to propagate vector updates for {file_id}: {e}')
 
         # Emit file added event
-        file_record = Files.get_file_by_id(file_id)
+        file_record = await Files.get_file_by_id(file_id)
         if file_record:
             await emit_file_added(
                 self.event_prefix,
@@ -1042,7 +1042,7 @@ class BaseSyncWorker(ABC):
             await self._sync_permissions()
 
             # Check if KB was suspended by _sync_permissions()
-            knowledge = Knowledges.get_knowledge_by_id(self.knowledge_id)
+            knowledge = await Knowledges.get_knowledge_by_id(self.knowledge_id)
             if knowledge:
                 meta = knowledge.meta or {}
                 sync_info = meta.get(self.meta_key, {})
@@ -1103,7 +1103,7 @@ class BaseSyncWorker(ABC):
 
             # Apply file count limit
             max_files = min(self.max_files_config, KNOWLEDGE_MAX_FILE_COUNT)
-            current_files = Knowledges.get_files_by_id(self.knowledge_id) or []
+            current_files = await Knowledges.get_files_by_id(self.knowledge_id) or []
             current_file_count = len(current_files)
             available_slots = max(0, max_files - current_file_count)
 
@@ -1185,7 +1185,7 @@ class BaseSyncWorker(ABC):
             async def _pipeline_inner(file_info: Dict[str, Any], index: int) -> Optional[FailedFile]:
                 nonlocal processed_count, failed_count, cancelled
 
-                if cancelled or self._check_cancelled():
+                if cancelled or await self._check_cancelled():
                     cancelled = True
                     return FailedFile(
                         filename=file_info.get('name', 'unknown'),
@@ -1196,7 +1196,7 @@ class BaseSyncWorker(ABC):
                 try:
                     # Phase 1: Download + store (high concurrency)
                     async with download_semaphore:
-                        if cancelled or self._check_cancelled():
+                        if cancelled or await self._check_cancelled():
                             cancelled = True
                             return FailedFile(
                                 filename=file_info.get('name', 'unknown'),
@@ -1235,7 +1235,7 @@ class BaseSyncWorker(ABC):
 
                     # Phase 2: Process + embed (normal concurrency)
                     async with process_semaphore:
-                        if cancelled or self._check_cancelled():
+                        if cancelled or await self._check_cancelled():
                             cancelled = True
                             return FailedFile(
                                 filename=file_info.get('name', 'unknown'),
@@ -1254,7 +1254,7 @@ class BaseSyncWorker(ABC):
                                     process_result = await self._process_and_embed(result)
                             else:
                                 # Vectors verified, emit file added event
-                                file_record = Files.get_file_by_id(result.file_id)
+                                file_record = await Files.get_file_by_id(result.file_id)
                                 if file_record:
                                     await emit_file_added(
                                         self.event_prefix,
@@ -1331,7 +1331,7 @@ class BaseSyncWorker(ABC):
                 batch_num = batch_start // batch_size + 1
                 batch = all_files_to_process[batch_start : batch_start + batch_size]
 
-                if cancelled or self._check_cancelled():
+                if cancelled or await self._check_cancelled():
                     cancelled = True
                     break
 
@@ -1405,7 +1405,7 @@ class BaseSyncWorker(ABC):
             failed_files_dicts = [asdict(f) for f in failed_files]
 
             # Update final sync status
-            knowledge = Knowledges.get_knowledge_by_id(self.knowledge_id)
+            knowledge = await Knowledges.get_knowledge_by_id(self.knowledge_id)
             meta = knowledge.meta or {}
             sync_info = meta.get(self.meta_key, {})
             sync_info['last_sync_at'] = int(time.time())
@@ -1418,7 +1418,7 @@ class BaseSyncWorker(ABC):
                 'failed_files': failed_files_dicts,
             }
             meta[self.meta_key] = sync_info
-            Knowledges.update_knowledge_meta_by_id(self.knowledge_id, meta)
+            await Knowledges.update_knowledge_meta_by_id(self.knowledge_id, meta)
 
             await self._update_sync_status(
                 sync_info['status'],

@@ -2060,6 +2060,27 @@
 	};
 
 	const submitPrompt = async (inputContent, inputFiles) => {
+		// Data sovereignty warning check — runs for both direct submits and
+		// queue replays (processNextInQueue, onQueueSendNow). Idempotent via
+		// acceptedDataWarnings, so a prior acceptance in submitHandler won't
+		// re-prompt here.
+		const _kbFiles = [
+			...(inputFiles ?? []).filter((f) => f.type === 'collection'),
+			...chatFiles.filter((f) => f.type === 'collection')
+		];
+		const _activeCapabilities: Record<string, boolean> = {
+			file_upload: (inputFiles ?? []).some((f) => f.type !== 'image' && f.type !== 'collection'),
+			vision: (inputFiles ?? []).some((f) => f.type === 'image'),
+			web_search: webSearchEnabled,
+			image_generation: imageGenerationEnabled,
+			code_interpreter: codeInterpreterEnabled,
+			document_writer: documentWriterEnabled,
+			knowledge_local: _kbFiles.some((f) => !f.knowledge_type || f.knowledge_type === 'local'),
+			knowledge_external: _kbFiles.some((f) => f.knowledge_type && f.knowledge_type !== 'local')
+		};
+		const _warningAccepted = await checkDataWarnings(selectedModels, _activeCapabilities);
+		if (!_warningAccepted) return;
+
 		const _files = structuredClone(inputFiles);
 
 		chatFiles.push(

@@ -7,7 +7,6 @@ import io
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import Response, StreamingResponse, FileResponse
-from starlette.concurrency import run_in_threadpool
 from pydantic import BaseModel, ConfigDict
 
 
@@ -703,7 +702,7 @@ async def delete_user_by_id(
 
             if request.app.state.config.ENABLE_USER_ARCHIVAL:
                 retention = archive_retention_days or request.app.state.config.DEFAULT_ARCHIVE_RETENTION_DAYS
-                archive_result = ArchiveService.create_archive(
+                archive_result = await ArchiveService.create_archive(
                     user_id=user_id,
                     archived_by=user.id,
                     reason=archive_reason,
@@ -712,8 +711,8 @@ async def delete_user_by_id(
                 if not archive_result.success:
                     log.warning(f'Failed to archive user before deletion: {archive_result.errors}')
 
-        # Proceed with deletion (run in thread pool to avoid blocking the event loop)
-        report = await run_in_threadpool(DeletionService.delete_user, user_id)
+        # Proceed with deletion
+        report = await DeletionService.delete_user(user_id)
         if report.has_errors:
             log.warning(f'User deletion had errors: {report.errors}')
 

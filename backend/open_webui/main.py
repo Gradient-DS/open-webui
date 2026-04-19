@@ -741,7 +741,7 @@ async def periodic_archive_cleanup():
             # Wait 24 hours before first run and between runs
             await asyncio.sleep(24 * 60 * 60)
 
-            stats = ArchiveService.cleanup_expired_archives()
+            stats = await ArchiveService.cleanup_expired_archives()
             if stats['deleted'] > 0:
                 log.info(f'Archive cleanup: deleted {stats["deleted"]} expired archives')
         except Exception as e:

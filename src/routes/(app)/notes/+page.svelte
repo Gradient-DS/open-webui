@@ -67,17 +67,7 @@
 					</div>
 				{/if}
 
-				<div class="ml-2 py-0.5 self-center flex items-center justify-between w-full">
-					<div class="">
-						<div
-							class="flex gap-1 scrollbar-none overflow-x-auto w-fit text-center text-sm font-medium bg-transparent py-1 touch-auto pointer-events-auto"
-						>
-							<a class="min-w-fit transition" href="/notes">
-								{$i18n.t('Notes')}
-							</a>
-						</div>
-					</div>
-
+				<div class="ml-2 py-0.5 self-center flex items-center justify-end w-full">
 					<div class=" self-center flex items-center gap-1">
 						{#if $user !== undefined && $user !== null}
 							<UserMenu

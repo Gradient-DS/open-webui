@@ -289,22 +289,11 @@
 					</Tooltip>
 
 					<!-- Attach (Browse) Files -->
-					<Tooltip
-						content={fileUploadCapableModels.length !== selectedModels.length
-							? $i18n.t('Model(s) do not support file upload')
-							: !fileUploadEnabled
-								? $i18n.t('You do not have permission to upload files.')
-								: ''}
-						className="w-full"
-					>
+					{#if fileUploadEnabled}
 						<button
-							class="flex gap-2 w-full items-center px-3 py-1.5 text-sm select-none cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800/50 rounded-xl {!fileUploadEnabled
-								? 'opacity-50'
-								: ''}"
+							class="flex gap-2 w-full items-center px-3 py-1.5 text-sm select-none cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800/50 rounded-xl"
 							on:click={() => {
-								if (fileUploadEnabled) {
-									tab = 'files';
-								}
+								tab = 'files';
 							}}
 						>
 							<DocumentArrowUp />
@@ -319,7 +308,7 @@
 								</div>
 							</div>
 						</button>
-					</Tooltip>
+					{/if}
 
 					<!-- Capture -->
 					{#if isFeatureEnabled('capture')}

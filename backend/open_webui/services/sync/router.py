@@ -56,9 +56,9 @@ class RemoveSourceRequest(BaseModel):
 # ──────────────────────────────────────────────────────────────────────
 
 
-def get_knowledge_or_raise(knowledge_id: str, user: UserModel):
+async def get_knowledge_or_raise(knowledge_id: str, user: UserModel):
     """Get a knowledge base, raising HTTPException if not found or not authorized."""
-    knowledge = Knowledges.get_knowledge_by_id(knowledge_id)
+    knowledge = await Knowledges.get_knowledge_by_id(knowledge_id)
     if not knowledge:
         raise HTTPException(status_code=404, detail='Knowledge base not found')
     if knowledge.user_id != user.id:
@@ -66,7 +66,7 @@ def get_knowledge_or_raise(knowledge_id: str, user: UserModel):
     return knowledge
 
 
-def handle_sync_items_request(
+async def handle_sync_items_request(
     knowledge_id: str,
     meta_key: str,
     new_sources: List[dict],
@@ -91,7 +91,7 @@ def handle_sync_items_request(
     Returns:
         Dict with "all_sources" and "meta" keys
     """
-    knowledge = get_knowledge_or_raise(knowledge_id, user)
+    knowledge = await get_knowledge_or_raise(knowledge_id, user)
 
     meta = knowledge.meta or {}
     existing_sync = meta.get(meta_key, {})
@@ -133,18 +133,18 @@ def handle_sync_items_request(
         'sync_started_at': int(time.time()),
         'last_sync_at': existing_sync.get('last_sync_at'),
     }
-    Knowledges.update_knowledge_meta_by_id(knowledge_id, meta)
+    await Knowledges.update_knowledge_meta_by_id(knowledge_id, meta)
 
     return {'all_sources': all_sources, 'meta': meta}
 
 
-def handle_get_sync_status(
+async def handle_get_sync_status(
     knowledge_id: str,
     meta_key: str,
     user: UserModel,
 ) -> SyncStatusResponse:
     """Shared logic for GET /sync/{knowledge_id}."""
-    knowledge = get_knowledge_or_raise(knowledge_id, user)
+    knowledge = await get_knowledge_or_raise(knowledge_id, user)
 
     meta = knowledge.meta or {}
     sync_info = meta.get(meta_key, {})
@@ -166,13 +166,13 @@ def handle_get_sync_status(
     )
 
 
-def handle_cancel_sync(
+async def handle_cancel_sync(
     knowledge_id: str,
     meta_key: str,
     user: UserModel,
 ) -> dict:
     """Shared logic for POST /sync/{knowledge_id}/cancel."""
-    knowledge = get_knowledge_or_raise(knowledge_id, user)
+    knowledge = await get_knowledge_or_raise(knowledge_id, user)
 
     meta = knowledge.meta or {}
     sync_info = meta.get(meta_key, {})
@@ -182,13 +182,13 @@ def handle_cancel_sync(
 
     sync_info['status'] = 'cancelled'
     meta[meta_key] = sync_info
-    Knowledges.update_knowledge_meta_by_id(knowledge_id, meta)
+    await Knowledges.update_knowledge_meta_by_id(knowledge_id, meta)
 
     log.info(f'Sync cancelled for knowledge base {knowledge_id}')
     return {'message': 'Sync cancelled', 'knowledge_id': knowledge_id}
 
 
-def handle_remove_source(
+async def handle_remove_source(
     knowledge_id: str,
     meta_key: str,
     item_id: str,
@@ -199,9 +199,9 @@ def handle_remove_source(
 
     Args:
         remove_files_fn: Called with (knowledge_id, item_id, source_to_remove) to clean up files.
-                         Must return the count of removed files.
+                         Must be an async callable returning the count of removed files.
     """
-    knowledge = get_knowledge_or_raise(knowledge_id, user)
+    knowledge = await get_knowledge_or_raise(knowledge_id, user)
 
     meta = knowledge.meta or {}
     sync_info = meta.get(meta_key, {})
@@ -225,11 +225,11 @@ def handle_remove_source(
     if not source_to_remove:
         raise HTTPException(status_code=404, detail='Source not found')
 
-    removed_count = remove_files_fn(knowledge_id, item_id, source_to_remove)
+    removed_count = await remove_files_fn(knowledge_id, item_id, source_to_remove)
 
     sync_info['sources'] = remaining_sources
     meta[meta_key] = sync_info
-    Knowledges.update_knowledge_meta_by_id(knowledge_id, meta)
+    await Knowledges.update_knowledge_meta_by_id(knowledge_id, meta)
 
     log.info(
         f"Removed source '{source_to_remove.get('name')}' from KB {knowledge_id}, {removed_count} files cleaned up"
@@ -242,12 +242,12 @@ def handle_remove_source(
     }
 
 
-def handle_list_synced_collections(
+async def handle_list_synced_collections(
     meta_key: str,
     user: UserModel,
 ) -> List[dict]:
     """Shared logic for GET /synced-collections."""
-    all_knowledge = Knowledges.get_knowledge_bases_by_user_id(user.id)
+    all_knowledge = await Knowledges.get_knowledge_bases_by_user_id(user.id)
     synced = []
     for kb in all_knowledge:
         meta = kb.meta or {}
@@ -256,14 +256,14 @@ def handle_list_synced_collections(
     return synced
 
 
-def handle_get_token_status(
+async def handle_get_token_status(
     knowledge_id: str,
     meta_key: str,
     user: UserModel,
     get_stored_token_fn: Callable,
 ) -> dict:
     """Shared logic for GET /auth/token-status/{knowledge_id}."""
-    knowledge = Knowledges.get_knowledge_by_id(id=knowledge_id)
+    knowledge = await Knowledges.get_knowledge_by_id(id=knowledge_id)
     if not knowledge or knowledge.user_id != user.id:
         raise HTTPException(404, 'Knowledge base not found')
 
@@ -285,7 +285,7 @@ def handle_get_token_status(
     }
 
 
-def handle_revoke_token(
+async def handle_revoke_token(
     knowledge_id: str,
     provider_type: str,
     meta_key: str,
@@ -293,13 +293,13 @@ def handle_revoke_token(
     delete_stored_token_fn: Callable,
 ) -> dict:
     """Shared logic for POST /auth/revoke/{knowledge_id}."""
-    knowledge = Knowledges.get_knowledge_by_id(id=knowledge_id)
+    knowledge = await Knowledges.get_knowledge_by_id(id=knowledge_id)
     if not knowledge or knowledge.user_id != user.id:
         raise HTTPException(404, 'Knowledge base not found')
 
     deleted = delete_stored_token_fn(user.id)
 
-    all_kbs = Knowledges.get_knowledge_bases_by_type(provider_type)
+    all_kbs = await Knowledges.get_knowledge_bases_by_type(provider_type)
     for kb in all_kbs:
         if kb.user_id != user.id:
             continue
@@ -309,7 +309,7 @@ def handle_revoke_token(
         sync_info.pop('token_stored_at', None)
         sync_info['needs_reauth'] = False
         meta[meta_key] = sync_info
-        Knowledges.update_knowledge_meta_by_id(kb.id, meta)
+        await Knowledges.update_knowledge_meta_by_id(kb.id, meta)
 
     return {'revoked': deleted}
 
@@ -332,7 +332,7 @@ async def complete_auth_callback(
 
     if result['success']:
         user_id = flow['user_id']
-        all_kbs = Knowledges.get_knowledge_bases_by_type(provider_type)
+        all_kbs = await Knowledges.get_knowledge_bases_by_type(provider_type)
         for kb in all_kbs:
             if kb.user_id != user_id:
                 continue
@@ -342,7 +342,7 @@ async def complete_auth_callback(
             sync_info['token_stored_at'] = int(time.time())
             sync_info['needs_reauth'] = False
             meta[meta_key] = sync_info
-            Knowledges.update_knowledge_meta_by_id(kb.id, meta)
+            await Knowledges.update_knowledge_meta_by_id(kb.id, meta)
 
     return auth_callback_html(
         callback_type=callback_type,
@@ -381,7 +381,7 @@ def auth_callback_html(
     return HTMLResponse(html)
 
 
-def remove_files_for_source_generic(
+async def remove_files_for_source_generic(
     knowledge_id: str,
     source_item_id: str,
     file_id_prefix: str,
@@ -398,7 +398,7 @@ def remove_files_for_source_generic(
     from open_webui.retrieval.vector.factory import VECTOR_DB_CLIENT
     from open_webui.models.files import Files
 
-    files = Knowledges.get_files_by_id(knowledge_id)
+    files = await Knowledges.get_files_by_id(knowledge_id)
     if not files:
         return 0
 
@@ -421,7 +421,7 @@ def remove_files_for_source_generic(
             # No source_item_id and no legacy matcher — skip
             continue
 
-        Knowledges.remove_file_from_knowledge_by_id(knowledge_id, file.id)
+        await Knowledges.remove_file_from_knowledge_by_id(knowledge_id, file.id)
 
         try:
             VECTOR_DB_CLIENT.delete(
@@ -431,13 +431,13 @@ def remove_files_for_source_generic(
         except Exception as e:
             log.warning(f'Failed to remove vectors for {file.id}: {e}')
 
-        remaining = Knowledges.get_knowledge_files_by_file_id(file.id)
+        remaining = await Knowledges.get_knowledge_files_by_file_id(file.id)
         if not remaining:
             try:
                 VECTOR_DB_CLIENT.delete_collection(f'file-{file.id}')
             except Exception:
                 pass
-            Files.delete_file_by_id(file.id)
+            await Files.delete_file_by_id(file.id)
 
         removed_count += 1
 

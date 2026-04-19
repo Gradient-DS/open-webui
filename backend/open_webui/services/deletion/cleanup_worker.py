@@ -11,7 +11,6 @@ Architecture:
 import asyncio
 import logging
 from typing import Optional
-from starlette.concurrency import run_in_threadpool
 
 log = logging.getLogger(__name__)
 
@@ -41,14 +40,14 @@ async def _run_cleanup_loop():
     """Main cleanup loop. Processes pending deletions immediately on startup, then periodically."""
     # Process immediately on startup (crash recovery)
     try:
-        await run_in_threadpool(_process_pending_deletions)
+        await _process_pending_deletions()
     except Exception:
         log.exception('Error in initial cleanup run')
 
     while True:
         try:
             await asyncio.sleep(CLEANUP_INTERVAL_SECONDS)
-            await run_in_threadpool(_process_pending_deletions)
+            await _process_pending_deletions()
         except asyncio.CancelledError:
             log.info('Cleanup worker cancelled')
             return
@@ -56,19 +55,19 @@ async def _run_cleanup_loop():
             log.exception('Error in cleanup loop')
 
 
-def _process_pending_deletions():
-    """Process all pending KB and chat deletions. Runs in thread pool."""
-    _process_pending_kb_deletions()
-    _process_pending_chat_deletions()
-    _process_expired_suspensions()
+async def _process_pending_deletions():
+    """Process all pending KB and chat deletions."""
+    await _process_pending_kb_deletions()
+    await _process_pending_chat_deletions()
+    await _process_expired_suspensions()
 
 
-def _process_pending_kb_deletions():
+async def _process_pending_kb_deletions():
     """Process knowledge bases marked for deletion."""
     from open_webui.models.knowledge import Knowledges
     from open_webui.services.deletion import DeletionService
 
-    pending_kbs = Knowledges.get_pending_deletions(limit=50)
+    pending_kbs = await Knowledges.get_pending_deletions(limit=50)
     if not pending_kbs:
         return
 
@@ -77,18 +76,18 @@ def _process_pending_kb_deletions():
     for kb in pending_kbs:
         try:
             # Collect file IDs before deletion (junction rows cascade on KB delete)
-            kb_files = Knowledges.get_files_by_id(kb.id)
+            kb_files = await Knowledges.get_files_by_id(kb.id)
             kb_file_ids = [f.id for f in kb_files]
 
             # Full cascade: vector collection, model updates, hard-delete KB row
-            report = DeletionService.delete_knowledge(kb.id, delete_files=False)
+            report = await DeletionService.delete_knowledge(kb.id, delete_files=False)
 
             if report.has_errors:
                 log.warning('KB %s cleanup had errors: %s', kb.id, report.errors)
 
             # Clean up orphaned files (checks KB and chat references)
             if kb_file_ids:
-                file_report = DeletionService.delete_orphaned_files_batch(kb_file_ids)
+                file_report = await DeletionService.delete_orphaned_files_batch(kb_file_ids)
                 if file_report.has_errors:
                     log.warning('KB %s file cleanup errors: %s', kb.id, file_report.errors)
                 log.info(
@@ -105,13 +104,13 @@ def _process_pending_kb_deletions():
             log.exception('Failed to cleanup KB %s', kb.id)
 
 
-def _process_pending_chat_deletions():
+async def _process_pending_chat_deletions():
     """Process chats marked for deletion."""
     from open_webui.models.chats import Chats
     from open_webui.models.tags import Tags
     from open_webui.services.deletion import DeletionService
 
-    pending_chats = Chats.get_pending_deletions(limit=100)
+    pending_chats = await Chats.get_pending_deletions(limit=100)
     if not pending_chats:
         return
 
@@ -123,20 +122,20 @@ def _process_pending_chat_deletions():
     for chat in pending_chats:
         try:
             # Collect file IDs from this chat
-            chat_files = Chats.get_files_by_chat_id(chat.id)
+            chat_files = await Chats.get_files_by_chat_id(chat.id)
             all_file_ids.extend(cf.file_id for cf in chat_files)
 
             # Clean up orphaned tags
             if chat.meta and chat.meta.get('tags'):
                 for tag_name in chat.meta.get('tags', []):
                     try:
-                        if Chats.count_chats_by_tag_name_and_user_id(tag_name, chat.user_id) == 0:
-                            Tags.delete_tag_by_name_and_user_id(tag_name, chat.user_id)
+                        if await Chats.count_chats_by_tag_name_and_user_id(tag_name, chat.user_id) == 0:
+                            await Tags.delete_tag_by_name_and_user_id(tag_name, chat.user_id)
                     except Exception as e:
                         log.warning('Failed to cleanup tag %s: %s', tag_name, e)
 
             # Hard-delete the chat (and its shared copy)
-            Chats.delete_chat_by_id(chat.id)
+            await Chats.delete_chat_by_id(chat.id)
 
         except Exception:
             log.exception('Failed to cleanup chat %s', chat.id)
@@ -144,7 +143,7 @@ def _process_pending_chat_deletions():
     # Batch cleanup orphaned files from all processed chats
     if all_file_ids:
         unique_file_ids = list(set(all_file_ids))
-        file_report = DeletionService.delete_orphaned_files_batch(unique_file_ids)
+        file_report = await DeletionService.delete_orphaned_files_batch(unique_file_ids)
         if file_report.has_errors:
             log.warning('Chat file cleanup errors: %s', file_report.errors)
         log.info(
@@ -155,12 +154,12 @@ def _process_pending_chat_deletions():
         )
 
 
-def _process_expired_suspensions():
+async def _process_expired_suspensions():
     """Hard-delete cloud KBs that have been suspended for 30+ days."""
     from open_webui.models.knowledge import Knowledges
     from open_webui.services.deletion import DeletionService
 
-    expired_kbs = Knowledges.get_suspended_expired_knowledge(limit=10)
+    expired_kbs = await Knowledges.get_suspended_expired_knowledge(limit=10)
     if not expired_kbs:
         return
 
@@ -168,16 +167,16 @@ def _process_expired_suspensions():
 
     for kb in expired_kbs:
         try:
-            kb_files = Knowledges.get_files_by_id(kb.id)
+            kb_files = await Knowledges.get_files_by_id(kb.id)
             kb_file_ids = [f.id for f in kb_files]
 
-            report = DeletionService.delete_knowledge(kb.id, delete_files=False)
+            report = await DeletionService.delete_knowledge(kb.id, delete_files=False)
 
             if report.has_errors:
                 log.warning('Suspended KB %s cleanup had errors: %s', kb.id, report.errors)
 
             if kb_file_ids:
-                file_report = DeletionService.delete_orphaned_files_batch(kb_file_ids)
+                file_report = await DeletionService.delete_orphaned_files_batch(kb_file_ids)
                 if file_report.has_errors:
                     log.warning('Suspended KB %s file cleanup errors: %s', kb.id, file_report.errors)
 

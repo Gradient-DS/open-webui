@@ -1,3 +1,4 @@
+import asyncio
 from dataclasses import dataclass, field
 from typing import Dict, List, Set, Optional
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -51,7 +52,7 @@ class DeletionService:
     """
 
     @staticmethod
-    def delete_file(file_id: str, deleted_file_ids: Optional[Set[str]] = None) -> DeletionReport:
+    async def delete_file(file_id: str, deleted_file_ids: Optional[Set[str]] = None) -> DeletionReport:
         """
         Delete a file from all layers:
         1. Remove vectors from all knowledge base collections containing this file
@@ -71,13 +72,13 @@ class DeletionService:
             return report
 
         # Get file first - we need the path and hash
-        file = Files.get_file_by_id(file_id)
+        file = await Files.get_file_by_id(file_id)
         if not file:
             report.add_error(f'File {file_id} not found in database')
             return report
 
         # 1. Find all knowledge bases containing this file and remove vectors
-        knowledge_files = Knowledges.get_knowledge_files_by_file_id(file_id)
+        knowledge_files = await Knowledges.get_knowledge_files_by_file_id(file_id)
         for kf in knowledge_files:
             try:
                 # Delete vectors by file_id from the knowledge collection
@@ -109,7 +110,7 @@ class DeletionService:
 
         # 4. Delete from database (FK cascades handle junction tables)
         try:
-            result = Files.delete_file_by_id(file_id)
+            result = await Files.delete_file_by_id(file_id)
             if result:
                 report.add_db('file')
                 # Track successful deletion to prevent duplicate attempts
@@ -123,7 +124,7 @@ class DeletionService:
         return report
 
     @staticmethod
-    def delete_orphaned_files_batch(file_ids: list[str], force: bool = False) -> DeletionReport:
+    async def delete_orphaned_files_batch(file_ids: list[str], force: bool = False) -> DeletionReport:
         """
         Batch-delete files that are no longer referenced by any KB.
 
@@ -148,8 +149,8 @@ class DeletionService:
         else:
             from open_webui.models.chats import Chats
 
-            kb_referenced = Knowledges.get_referenced_file_ids(file_ids)
-            chat_referenced = Chats.get_referenced_file_ids(file_ids)
+            kb_referenced = await Knowledges.get_referenced_file_ids(file_ids)
+            chat_referenced = await Chats.get_referenced_file_ids(file_ids)
             referenced_ids = kb_referenced | chat_referenced
             orphaned_ids = [fid for fid in file_ids if fid not in referenced_ids]
 
@@ -160,7 +161,7 @@ class DeletionService:
 
         # 2. Load file records for orphaned files (single query).
         #    We need paths BEFORE deleting DB records so we can find storage files.
-        orphaned_files = Files.get_files_by_ids(orphaned_ids)
+        orphaned_files = await Files.get_files_by_ids(orphaned_ids)
         file_paths = [f.path for f in orphaned_files if f.path]
 
         # Deletion order: derived data first, source-of-truth (DB) last.
@@ -194,7 +195,7 @@ class DeletionService:
         # 5. Delete DB records last (source of truth for retry)
         if orphaned_ids:
             try:
-                Files.delete_files_by_ids(orphaned_ids)
+                await Files.delete_files_by_ids(orphaned_ids)
                 report.add_db('file', len(orphaned_ids))
             except Exception as e:
                 report.add_error(f'DB batch delete failed: {e}')
@@ -202,7 +203,7 @@ class DeletionService:
         return report
 
     @staticmethod
-    def delete_chat(chat_id: str, user_id: str) -> DeletionReport:
+    async def delete_chat(chat_id: str, user_id: str) -> DeletionReport:
         """
         Delete a chat and all associated files/vectors.
 
@@ -216,17 +217,17 @@ class DeletionService:
         report = DeletionReport()
 
         # Get chat to check it exists and get metadata (includes soft-deleted)
-        chat = Chats.get_chat_by_id_unfiltered(chat_id)
+        chat = await Chats.get_chat_by_id_unfiltered(chat_id)
         if not chat:
             report.add_error(f'Chat {chat_id} not found')
             return report
 
         # 1. Get files associated with this chat
-        chat_files = Chats.get_files_by_chat_id(chat_id)
+        chat_files = await Chats.get_files_by_chat_id(chat_id)
 
         # 2. Delete each file (this handles vectors and storage)
         for chat_file in chat_files:
-            file_report = DeletionService.delete_file(chat_file.file_id)
+            file_report = await DeletionService.delete_file(chat_file.file_id)
             # Merge reports
             for table, count in file_report.db_records.items():
                 report.add_db(table, count)
@@ -241,15 +242,15 @@ class DeletionService:
             for tag_name in chat.meta.get('tags', []):
                 try:
                     # Use actual count query, not meta.count which may be stale
-                    if Chats.count_chats_by_tag_name_and_user_id(tag_name, user_id) == 1:
-                        Tags.delete_tag_by_name_and_user_id(tag_name, user_id)
+                    if await Chats.count_chats_by_tag_name_and_user_id(tag_name, user_id) == 1:
+                        await Tags.delete_tag_by_name_and_user_id(tag_name, user_id)
                         report.add_db('tag')
                 except Exception as e:
                     report.add_error(f'Failed to cleanup tag {tag_name}: {e}')
 
         # 4. Delete chat (ChatFile junction cascades via FK)
         try:
-            result = Chats.delete_chat_by_id(chat_id)
+            result = await Chats.delete_chat_by_id(chat_id)
             if result:
                 report.add_db('chat')
             else:
@@ -260,7 +261,7 @@ class DeletionService:
         return report
 
     @staticmethod
-    def delete_knowledge(
+    async def delete_knowledge(
         knowledge_id: str,
         delete_files: bool = False,
         deleted_file_ids: Optional[Set[str]] = None,
@@ -282,7 +283,7 @@ class DeletionService:
 
         report = DeletionReport()
 
-        knowledge = Knowledges.get_knowledge_by_id_unfiltered(knowledge_id)
+        knowledge = await Knowledges.get_knowledge_by_id_unfiltered(knowledge_id)
         if not knowledge:
             report.add_error(f'Knowledge {knowledge_id} not found')
             return report
@@ -297,9 +298,9 @@ class DeletionService:
 
         # 2. Optionally delete associated files
         if delete_files:
-            knowledge_files = Knowledges.get_files_by_id(knowledge_id)
+            knowledge_files = await Knowledges.get_files_by_id(knowledge_id)
             for file in knowledge_files:
-                file_report = DeletionService.delete_file(file.id, deleted_file_ids)
+                file_report = await DeletionService.delete_file(file.id, deleted_file_ids)
                 # Merge reports
                 for table, count in file_report.db_records.items():
                     report.add_db(table, count)
@@ -312,7 +313,7 @@ class DeletionService:
         try:
             from open_webui.models.models import ModelForm
 
-            models = Models.get_all_models()
+            models = await Models.get_all_models()
             for model in models:
                 if model.meta and hasattr(model.meta, 'knowledge'):
                     knowledge_list = model.meta.knowledge or []
@@ -331,14 +332,14 @@ class DeletionService:
                             access_control=model.access_control,
                             is_active=model.is_active,
                         )
-                        Models.update_model_by_id(model.id, model_form)
+                        await Models.update_model_by_id(model.id, model_form)
                         log.info(f'Removed knowledge {knowledge_id} from model {model.id}')
         except Exception as e:
             report.add_error(f'Failed to update models referencing knowledge: {e}')
 
         # 4. Delete knowledge record (knowledge_file junction cascades via FK)
         try:
-            result = Knowledges.delete_knowledge_by_id(knowledge_id)
+            result = await Knowledges.delete_knowledge_by_id(knowledge_id)
             if result:
                 report.add_db('knowledge')
             else:
@@ -349,7 +350,7 @@ class DeletionService:
         return report
 
     @staticmethod
-    def delete_memories(user_id: str) -> DeletionReport:
+    async def delete_memories(user_id: str) -> DeletionReport:
         """
         Delete all memories for a user.
 
@@ -371,7 +372,7 @@ class DeletionService:
 
         # 2. Delete all memory records
         try:
-            result = Memories.delete_memories_by_user_id(user_id)
+            result = await Memories.delete_memories_by_user_id(user_id)
             if result:
                 report.add_db('memory')
         except Exception as e:
@@ -380,7 +381,7 @@ class DeletionService:
         return report
 
     @staticmethod
-    def delete_user(user_id: str) -> DeletionReport:
+    async def delete_user(user_id: str) -> DeletionReport:
         """
         Delete a user and ALL associated data.
 
@@ -414,13 +415,13 @@ class DeletionService:
         report = DeletionReport()
 
         # Verify user exists
-        user = Users.get_user_by_id(user_id)
+        user = await Users.get_user_by_id(user_id)
         if not user:
             report.add_error(f'User {user_id} not found')
             return report
 
         # 1. Delete memories (vectors + DB) — fast, single collection
-        memory_report = DeletionService.delete_memories(user_id)
+        memory_report = await DeletionService.delete_memories(user_id)
         report.vector_collections += memory_report.vector_collections
         for table, count in memory_report.db_records.items():
             report.add_db(table, count)
@@ -428,14 +429,14 @@ class DeletionService:
 
         # 2. Soft-delete all knowledge bases (instant — cleanup worker handles the rest)
         try:
-            kb_count = Knowledges.soft_delete_by_user_id(user_id)
+            kb_count = await Knowledges.soft_delete_by_user_id(user_id)
             report.add_db('knowledge_soft_deleted', kb_count)
         except Exception as e:
             report.add_error(f'Failed to soft-delete knowledge bases: {e}')
 
         # 3. Soft-delete all chats (instant — cleanup worker handles the rest)
         try:
-            chat_count = Chats.soft_delete_by_user_id(user_id)
+            chat_count = await Chats.soft_delete_by_user_id(user_id)
             report.add_db('chat_soft_deleted', chat_count)
         except Exception as e:
             report.add_error(f'Failed to soft-delete chats: {e}')
@@ -445,112 +446,112 @@ class DeletionService:
 
         # Messages and reactions (channel content)
         try:
-            Messages.delete_messages_by_user_id(user_id)
+            await Messages.delete_messages_by_user_id(user_id)
             report.add_db('message')
         except Exception as e:
             report.add_error(f'Failed to delete messages: {e}')
 
         # Channel memberships
         try:
-            Channels.delete_member_by_user_id(user_id)
+            await Channels.delete_member_by_user_id(user_id)
             report.add_db('channel_member')
         except Exception as e:
             report.add_error(f'Failed to delete channel memberships: {e}')
 
         # Channels owned by user
         try:
-            Channels.delete_channels_by_user_id(user_id)
+            await Channels.delete_channels_by_user_id(user_id)
             report.add_db('channel')
         except Exception as e:
             report.add_error(f'Failed to delete channels: {e}')
 
         # Tags
         try:
-            Tags.delete_tags_by_user_id(user_id)
+            await Tags.delete_tags_by_user_id(user_id)
             report.add_db('tag')
         except Exception as e:
             report.add_error(f'Failed to delete tags: {e}')
 
-        # Folders
+        # Folders (sync model method — offload to thread)
         try:
-            Folders.delete_folders_by_user_id(user_id)
+            await asyncio.to_thread(Folders.delete_folders_by_user_id, user_id)
             report.add_db('folder')
         except Exception as e:
             report.add_error(f'Failed to delete folders: {e}')
 
         # Prompts
         try:
-            Prompts.delete_prompts_by_user_id(user_id)
+            await Prompts.delete_prompts_by_user_id(user_id)
             report.add_db('prompt')
         except Exception as e:
             report.add_error(f'Failed to delete prompts: {e}')
 
-        # Tools
+        # Tools (sync model method — offload to thread)
         try:
-            Tools.delete_tools_by_user_id(user_id)
+            await asyncio.to_thread(Tools.delete_tools_by_user_id, user_id)
             report.add_db('tool')
         except Exception as e:
             report.add_error(f'Failed to delete tools: {e}')
 
-        # Functions
+        # Functions (sync model method — offload to thread)
         try:
-            Functions.delete_functions_by_user_id(user_id)
+            await asyncio.to_thread(Functions.delete_functions_by_user_id, user_id)
             report.add_db('function')
         except Exception as e:
             report.add_error(f'Failed to delete functions: {e}')
 
-        # Models (user's custom models)
+        # Models (sync model method — offload to thread)
         try:
-            Models.delete_models_by_user_id(user_id)
+            await asyncio.to_thread(Models.delete_models_by_user_id, user_id)
             report.add_db('model')
         except Exception as e:
             report.add_error(f'Failed to delete models: {e}')
 
         # Feedbacks
         try:
-            Feedbacks.delete_feedbacks_by_user_id(user_id)
+            await Feedbacks.delete_feedbacks_by_user_id(user_id)
             report.add_db('feedback')
         except Exception as e:
             report.add_error(f'Failed to delete feedbacks: {e}')
 
-        # Notes
+        # Notes (sync model method — offload to thread)
         try:
-            Notes.delete_notes_by_user_id(user_id)
+            await asyncio.to_thread(Notes.delete_notes_by_user_id, user_id)
             report.add_db('note')
         except Exception as e:
             report.add_error(f'Failed to delete notes: {e}')
 
         # OAuth sessions
         try:
-            OAuthSessions.delete_sessions_by_user_id(user_id)
+            await OAuthSessions.delete_sessions_by_user_id(user_id)
             report.add_db('oauth_session')
         except Exception as e:
             report.add_error(f'Failed to delete OAuth sessions: {e}')
 
         # Groups - remove from all groups
         try:
-            Groups.remove_user_from_all_groups(user_id)
+            await Groups.remove_user_from_all_groups(user_id)
             report.add_db('group_member')
         except Exception as e:
             report.add_error(f'Failed to remove from groups: {e}')
 
-        # Groups owned by user
+        # Groups owned by user (sync model method — offload to thread)
         try:
-            Groups.delete_groups_by_user_id(user_id)
+            await asyncio.to_thread(Groups.delete_groups_by_user_id, user_id)
             report.add_db('group')
         except Exception as e:
             report.add_error(f'Failed to delete owned groups: {e}')
 
         # API keys
         try:
-            Users.delete_user_api_key_by_id(user_id)
+            await Users.delete_user_api_key_by_id(user_id)
             report.add_db('api_key')
         except Exception as e:
             report.add_error(f'Failed to delete API keys: {e}')
 
         # 5. Finally delete auth and user records
         try:
-            Auths.delete_auth_by_id(user_id)
+            await Auths.delete_auth_by_id(user_id)
             report.add_db('auth')
             report.add_db('user')
         except Exception as e:

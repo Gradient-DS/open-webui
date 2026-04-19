@@ -107,6 +107,16 @@ class TagTable:
             log.error(f'delete_tag: {e}')
             return False
 
+    async def delete_tags_by_user_id(self, user_id: str, db: Optional[AsyncSession] = None) -> bool:
+        """Delete all tags for a user."""
+        try:
+            async with get_async_db_context(db) as db:
+                await db.execute(delete(Tag).filter_by(user_id=user_id))
+                await db.commit()
+                return True
+        except Exception:
+            return False
+
     async def delete_tags_by_ids_and_user_id(
         self, ids: list[str], user_id: str, db: Optional[AsyncSession] = None
     ) -> bool:

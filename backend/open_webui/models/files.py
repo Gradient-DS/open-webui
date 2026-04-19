@@ -399,6 +399,17 @@ class FilesTable:
             except Exception:
                 return False
 
+    async def delete_files_by_ids(self, ids: list[str], db: Optional[AsyncSession] = None) -> bool:
+        if not ids:
+            return True
+        async with get_async_db_context(db) as db:
+            try:
+                await db.execute(delete(File).filter(File.id.in_(ids)))
+                await db.commit()
+                return True
+            except Exception:
+                return False
+
     async def delete_all_files(self, db: Optional[AsyncSession] = None) -> bool:
         async with get_async_db_context(db) as db:
             try:

@@ -157,7 +157,7 @@ class GoogleDriveSyncWorker(BaseSyncWorker):
 
             if current_indicator and current_indicator == stored_indicator:
                 file_id = f'googledrive-{source["item_id"]}'
-                existing = Files.get_file_by_id(file_id)
+                existing = await Files.get_file_by_id(file_id)
                 if existing and (existing.data or {}).get('status') == 'completed':
                     log.info(f'File unchanged: {source["name"]}')
                     return None
@@ -261,7 +261,7 @@ class GoogleDriveSyncWorker(BaseSyncWorker):
             log.warning(f'Error checking owner access: {e}')
             return
 
-        knowledge = Knowledges.get_knowledge_by_id(self.knowledge_id)
+        knowledge = await Knowledges.get_knowledge_by_id(self.knowledge_id)
         if not knowledge:
             return
 
@@ -274,7 +274,7 @@ class GoogleDriveSyncWorker(BaseSyncWorker):
                 sync_info.pop('suspended_at', None)
                 sync_info.pop('suspended_reason', None)
                 meta[self.meta_key] = sync_info
-                Knowledges.update_knowledge_meta_by_id(self.knowledge_id, meta)
+                await Knowledges.update_knowledge_meta_by_id(self.knowledge_id, meta)
         else:
             if not sync_info.get('suspended_at'):
                 log.warning(
@@ -283,7 +283,7 @@ class GoogleDriveSyncWorker(BaseSyncWorker):
                 sync_info['suspended_at'] = int(time.time())
                 sync_info['suspended_reason'] = 'owner_access_lost'
                 meta[self.meta_key] = sync_info
-                Knowledges.update_knowledge_meta_by_id(self.knowledge_id, meta)
+                await Knowledges.update_knowledge_meta_by_id(self.knowledge_id, meta)
 
                 await self._update_sync_status(
                     'suspended',
@@ -318,7 +318,7 @@ class GoogleDriveSyncWorker(BaseSyncWorker):
         source_name = source.get('name', 'unknown')
         removed_count = 0
 
-        files = Knowledges.get_files_by_id(self.knowledge_id)
+        files = await Knowledges.get_files_by_id(self.knowledge_id)
         if not files:
             return 0
 
@@ -333,7 +333,7 @@ class GoogleDriveSyncWorker(BaseSyncWorker):
             if file_source_item_id and file_source_item_id != source_item_id:
                 continue
 
-            Knowledges.remove_file_from_knowledge_by_id(self.knowledge_id, file.id)
+            await Knowledges.remove_file_from_knowledge_by_id(self.knowledge_id, file.id)
             try:
                 VECTOR_DB_CLIENT.delete(
                     collection_name=self.knowledge_id,
@@ -342,9 +342,9 @@ class GoogleDriveSyncWorker(BaseSyncWorker):
             except Exception as e:
                 log.warning(f'Failed to remove vectors for {file.id}: {e}')
 
-            remaining = Knowledges.get_knowledge_files_by_file_id(file.id)
+            remaining = await Knowledges.get_knowledge_files_by_file_id(file.id)
             if not remaining:
-                await asyncio.to_thread(DeletionService.delete_file, file.id)
+                await DeletionService.delete_file(file.id)
 
             removed_count += 1
 

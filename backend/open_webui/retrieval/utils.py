@@ -1083,7 +1083,7 @@ async def get_sources_from_items(
             knowledge_base = await Knowledges.get_knowledge_by_id(item.get('id'))
 
             # Skip suspended KBs
-            if knowledge_base and Knowledges.is_suspended(knowledge_base.id):
+            if knowledge_base and await Knowledges.async_is_suspended(knowledge_base.id):
                 log.info(f'Skipping suspended KB {item.get("id")} in retrieval')
                 continue
 

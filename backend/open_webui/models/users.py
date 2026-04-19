@@ -106,6 +106,12 @@ class UserModel(BaseModel):
 
     model_config = ConfigDict(from_attributes=True)
 
+    def __repr__(self) -> str:
+        return f'UserModel(id={self.id!r}, role={self.role!r})'
+
+    def __str__(self) -> str:
+        return self.__repr__()
+
     @model_validator(mode='after')
     def set_profile_image_url(self):
         if not self.profile_image_url:
@@ -559,6 +565,28 @@ class UsersTable:
                 select(func.count()).select_from(User).filter(User.last_active_at > today_midnight_timestamp)
             )
             return result.scalar()
+
+    async def get_inactive_users(
+        self,
+        inactive_since: int,
+        limit: int = 50,
+        exclude_roles: Optional[list[str]] = None,
+        db: Optional[AsyncSession] = None,
+    ) -> list[UserModel]:
+        """Find users whose last_active_at is before the given timestamp.
+
+        Args:
+            inactive_since: epoch timestamp — users active before this are inactive
+            limit: max users to return per batch
+            exclude_roles: roles to skip (e.g., ['admin'] to protect admin accounts)
+        """
+        async with get_async_db_context(db) as db:
+            stmt = select(User).filter(User.last_active_at < inactive_since)
+            if exclude_roles:
+                stmt = stmt.filter(User.role.notin_(exclude_roles))
+            stmt = stmt.order_by(User.last_active_at.asc()).limit(limit)
+            result = await db.execute(stmt)
+            return [UserModel.model_validate(user) for user in result.scalars().all()]
 
     async def update_user_role_by_id(
         self, id: str, role: str, db: Optional[AsyncSession] = None

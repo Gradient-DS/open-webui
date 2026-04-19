@@ -502,8 +502,8 @@ async def delete_all_user_chats(
             detail=ERROR_MESSAGES.ACCESS_PROHIBITED,
         )
 
-    result = await Chats.delete_chats_by_user_id(user.id, db=db)
-    return result
+    count = await Chats.soft_delete_by_user_id(user.id, db=db)
+    return count > 0
 
 
 ############################
@@ -1039,7 +1039,7 @@ async def delete_chat_by_id(
             )
         await Chats.delete_orphan_tags_for_user(chat.meta.get('tags', []), user.id, threshold=1, db=db)
 
-        result = await Chats.delete_chat_by_id(id, db=db)
+        result = await Chats.soft_delete_by_id(id, db=db)
 
         return result
     else:
@@ -1057,7 +1057,7 @@ async def delete_chat_by_id(
             )
         await Chats.delete_orphan_tags_for_user(chat.meta.get('tags', []), user.id, threshold=1, db=db)
 
-        result = await Chats.delete_chat_by_id_and_user_id(id, user.id, db=db)
+        result = await Chats.soft_delete_by_id(id, db=db)
         return result
 
 

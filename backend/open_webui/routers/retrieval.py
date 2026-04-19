@@ -1705,7 +1705,7 @@ async def process_file(
                         # hasn't completed). Load and extract content directly.
                         file_path = file.path
                         if file_path:
-                            file_path = Storage.get_file(file_path)
+                            file_path = await asyncio.to_thread(Storage.get_file, file_path)
                             loader = Loader(
                                 engine=request.app.state.config.CONTENT_EXTRACTION_ENGINE,
                                 user=user,
@@ -1739,7 +1739,7 @@ async def process_file(
                                 MINERU_API_TIMEOUT=request.app.state.config.MINERU_API_TIMEOUT,
                                 MINERU_PARAMS=request.app.state.config.MINERU_PARAMS,
                             )
-                            docs = loader.load(file.filename, file.meta.get('content_type'), file_path)
+                            docs = await loader.aload(file.filename, file.meta.get('content_type'), file_path)
                             docs = [
                                 Document(
                                     page_content=doc.page_content,

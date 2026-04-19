@@ -622,6 +622,16 @@ class PromptsTable:
         except Exception:
             return False
 
+    async def delete_prompts_by_user_id(self, user_id: str, db: Optional[AsyncSession] = None) -> bool:
+        """Delete all prompts for a user."""
+        try:
+            async with get_async_db_context(db) as db:
+                await db.execute(delete(Prompt).filter_by(user_id=user_id))
+                await db.commit()
+                return True
+        except Exception:
+            return False
+
     async def get_tags(self, db: Optional[AsyncSession] = None) -> list[str]:
         try:
             async with get_async_db_context(db) as db:

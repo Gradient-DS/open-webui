@@ -34,7 +34,7 @@ from open_webui.utils.access_control import has_permission, filter_allowed_acces
 from open_webui.models.access_grants import AccessGrants
 
 
-from open_webui.config import BYPASS_ADMIN_ACCESS_CONTROL
+from open_webui.config import BYPASS_ADMIN_ACCESS_CONTROL, KNOWLEDGE_MAX_FILE_COUNT
 from open_webui.models.models import Models, ModelForm
 
 log = logging.getLogger(__name__)
@@ -110,6 +110,7 @@ class KnowledgeAccessListResponse(BaseModel):
 @router.get('/', response_model=KnowledgeAccessListResponse)
 async def get_knowledge_bases(
     page: Optional[int] = 1,
+    type: Optional[str] = None,
     user=Depends(get_verified_user),
     db: AsyncSession = Depends(get_async_session),
 ):
@@ -127,7 +128,9 @@ async def get_knowledge_bases(
 
         filter['user_id'] = user.id
 
-    result = await Knowledges.search_knowledge_bases(user.id, filter=filter, skip=skip, limit=limit, db=db)
+    result = await Knowledges.search_knowledge_bases(
+        user.id, filter=filter, skip=skip, limit=limit, type_filter=type, db=db
+    )
 
     # Batch-fetch writable knowledge IDs in a single query instead of N has_access calls
     knowledge_base_ids = [knowledge_base.id for knowledge_base in result.items]
@@ -139,6 +142,11 @@ async def get_knowledge_bases(
         user_group_ids=user_group_ids,
         db=db,
     )
+
+    # Annotate non-local KBs with suspension info so the UI can warn / gray out.
+    for kb in result.items:
+        if kb.type != 'local':
+            kb.suspension_info = await Knowledges.async_get_suspension_info(kb.id, db=db)
 
     return KnowledgeAccessListResponse(
         items=[
@@ -195,6 +203,11 @@ async def search_knowledge_bases(
         user_group_ids=user_group_ids,
         db=db,
     )
+
+    # Annotate non-local KBs with suspension info so the UI can warn / gray out.
+    for kb in result.items:
+        if kb.type != 'local':
+            kb.suspension_info = await Knowledges.async_get_suspension_info(kb.id, db=db)
 
     return KnowledgeAccessListResponse(
         items=[
@@ -501,8 +514,11 @@ async def update_knowledge_by_id(
             f'unless the owner restores access.',
         )
 
+    # Prevent changing KB type after creation
+    form_data.type = None
+
     # External KBs are always private
-    if knowledge.meta and knowledge.meta.get('type', 'local') != 'local':
+    if knowledge.type != 'local':
         form_data.access_grants = []
 
     form_data.access_grants = await filter_allowed_access_grants(
@@ -571,6 +587,13 @@ async def update_knowledge_access_by_id(
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=ERROR_MESSAGES.ACCESS_PROHIBITED,
+        )
+
+    # Non-local knowledge bases (e.g. OneDrive, Google Drive) are always private
+    if knowledge.type != 'local':
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail='Access grants cannot be modified for non-local knowledge bases.',
         )
 
     form_data.access_grants = await filter_allowed_access_grants(
@@ -685,6 +708,15 @@ async def add_file_to_knowledge_by_id(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=ERROR_MESSAGES.ACCESS_PROHIBITED,
         )
+
+    # Check file count limit for non-local KBs
+    if knowledge.type != 'local':
+        current_files = await Knowledges.get_files_by_id(id, db=db)
+        if current_files and len(current_files) >= KNOWLEDGE_MAX_FILE_COUNT:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f'This knowledge base has reached the {KNOWLEDGE_MAX_FILE_COUNT}-file limit.',
+            )
 
     file = await Files.get_file_by_id(form_data.file_id, db=db)
     if not file:
@@ -821,6 +853,11 @@ async def remove_file_from_knowledge_by_id(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=ERROR_MESSAGES.NOT_FOUND,
         )
+
+    # For external-source KBs, never delete the underlying file —
+    # it is owned by the sync worker and may be referenced elsewhere.
+    if knowledge.type != 'local':
+        delete_file = False
 
     if (
         knowledge.user_id != user.id
@@ -1048,7 +1085,22 @@ async def delete_knowledge_by_id(
     # Remove knowledge base embedding
     await remove_knowledge_base_metadata_embedding(id)
 
-    result = await Knowledges.delete_knowledge_by_id(id=id, db=db)
+    log.info(f'Soft-deleting knowledge base: {id}')
+    result = await Knowledges.soft_delete_by_id(id=id, db=db)
+
+    # For non-local KBs, file rows are owned by this KB (each cloud sync
+    # creates its own File rows; they are not shared across KBs). Delete
+    # them here so they don't sit as orphans waiting on the cleanup worker —
+    # the underlying data lives in the cloud provider and is already gone
+    # from this user's view once the KB is detached.
+    if knowledge.type != 'local':
+        kb_files = await Knowledges.get_files_by_id(id, db=db) or []
+        for kf in kb_files:
+            try:
+                await Files.delete_file_by_id(kf.id, db=db)
+            except Exception:
+                log.exception(f'Failed to delete orphan non-local file {kf.id}')
+
     return result
 
 
@@ -1132,6 +1184,19 @@ async def add_files_to_knowledge_batch(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=ERROR_MESSAGES.ACCESS_PROHIBITED,
         )
+
+    # Check file count limit for non-local KBs
+    if knowledge.type != 'local':
+        current_files = await Knowledges.get_files_by_id(id, db=db)
+        current_count = len(current_files) if current_files else 0
+        if current_count + len(form_data) > KNOWLEDGE_MAX_FILE_COUNT:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=(
+                    f'Adding {len(form_data)} files would exceed the {KNOWLEDGE_MAX_FILE_COUNT}-file limit '
+                    f'({current_count} files currently).'
+                ),
+            )
 
     # Batch-fetch all files to avoid N+1 queries
     log.info(f'files/batch/add - {len(form_data)} files')

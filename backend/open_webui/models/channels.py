@@ -906,6 +906,26 @@ class ChannelTable:
             await db.commit()
             return True
 
+    async def delete_channels_by_user_id(self, user_id: str, db: Optional[AsyncSession] = None) -> bool:
+        """Delete all channels owned by a user."""
+        try:
+            async with get_async_db_context(db) as db:
+                await db.execute(delete(Channel).filter_by(user_id=user_id))
+                await db.commit()
+                return True
+        except Exception:
+            return False
+
+    async def delete_member_by_user_id(self, user_id: str, db: Optional[AsyncSession] = None) -> bool:
+        """Delete all channel memberships for a user."""
+        try:
+            async with get_async_db_context(db) as db:
+                await db.execute(delete(ChannelMember).filter_by(user_id=user_id))
+                await db.commit()
+                return True
+        except Exception:
+            return False
+
     ####################
     # Webhook Methods
     ####################

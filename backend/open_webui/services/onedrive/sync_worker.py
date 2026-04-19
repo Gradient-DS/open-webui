@@ -1,6 +1,5 @@
 """OneDrive sync worker - Downloads and processes files from OneDrive folders."""
 
-import asyncio
 import httpx
 import logging
 import time
@@ -210,7 +209,7 @@ class OneDriveSyncWorker(BaseSyncWorker):
                 # actually processed successfully. If the file record was
                 # deleted (orphan cleanup) or processing failed, re-sync it.
                 file_id = f'onedrive-{source["item_id"]}'
-                existing = Files.get_file_by_id(file_id)
+                existing = await Files.get_file_by_id(file_id)
                 if existing and (existing.data or {}).get('status') == 'completed':
                     log.info(f'File unchanged (hash match): {source["name"]}')
                     return None
@@ -311,7 +310,7 @@ class OneDriveSyncWorker(BaseSyncWorker):
             log.warning(f'Error checking owner access: {e}')
             return
 
-        knowledge = Knowledges.get_knowledge_by_id(self.knowledge_id)
+        knowledge = await Knowledges.get_knowledge_by_id(self.knowledge_id)
         if not knowledge:
             return
 
@@ -324,14 +323,14 @@ class OneDriveSyncWorker(BaseSyncWorker):
                 sync_info.pop('suspended_at', None)
                 sync_info.pop('suspended_reason', None)
                 meta[self.meta_key] = sync_info
-                Knowledges.update_knowledge_meta_by_id(self.knowledge_id, meta)
+                await Knowledges.update_knowledge_meta_by_id(self.knowledge_id, meta)
         else:
             if not sync_info.get('suspended_at'):
                 log.warning(f'Owner {self.user_id} lost access to OneDrive folder, suspending KB {self.knowledge_id}')
                 sync_info['suspended_at'] = int(time.time())
                 sync_info['suspended_reason'] = 'owner_access_lost'
                 meta[self.meta_key] = sync_info
-                Knowledges.update_knowledge_meta_by_id(self.knowledge_id, meta)
+                await Knowledges.update_knowledge_meta_by_id(self.knowledge_id, meta)
 
                 await self._update_sync_status(
                     'suspended',
@@ -371,7 +370,7 @@ class OneDriveSyncWorker(BaseSyncWorker):
         source_drive_id = source.get('drive_id')
         removed_count = 0
 
-        files = Knowledges.get_files_by_id(self.knowledge_id)
+        files = await Knowledges.get_files_by_id(self.knowledge_id)
         if not files:
             return 0
 
@@ -394,7 +393,7 @@ class OneDriveSyncWorker(BaseSyncWorker):
                     continue
 
             # Matched - proceed with removal
-            Knowledges.remove_file_from_knowledge_by_id(self.knowledge_id, file.id)
+            await Knowledges.remove_file_from_knowledge_by_id(self.knowledge_id, file.id)
             # Remove vectors from KB collection
             try:
                 VECTOR_DB_CLIENT.delete(
@@ -405,9 +404,9 @@ class OneDriveSyncWorker(BaseSyncWorker):
                 log.warning(f'Failed to remove vectors for {file.id}: {e}')
 
             # Check for orphans - use DeletionService for full cleanup (vectors + storage + DB)
-            remaining = Knowledges.get_knowledge_files_by_file_id(file.id)
+            remaining = await Knowledges.get_knowledge_files_by_file_id(file.id)
             if not remaining:
-                await asyncio.to_thread(DeletionService.delete_file, file.id)
+                await DeletionService.delete_file(file.id)
 
             removed_count += 1
 

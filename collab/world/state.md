@@ -5,6 +5,7 @@
 #### Current Work
 
 - **Upstream merge (260416)** — merging 245 commits from upstream/dev into `merge/260416`. Major: async DB refactor, automations feature, 19 security fixes. 20-phase plan at `collab/docs/upstream-merge-260416-plan.md`. Phase 1 (pre-merge setup) not yet started.
+  - **Soft-delete surface restoration** — 6-phase plan at `thoughts/shared/plans/2026-04-19-async-soft-delete-surface.md` complete through Phase 6 automated verification. Restored the `ChatTable` soft-delete surface dropped by upstream's async DB refactor and flipped the entire DeletionService / DataRetentionService / cleanup_worker chain to fully async. Manual smoke tests (admin delete-user flow, retention test endpoint, cleanup-worker 5-min clean-start) still pending.
 - **Vink deployment** — large-scale client deployment (~1300 docs), active on `feat/vink` branch. Core sync worker issues resolved, plans created for next steps (single-collection architecture, batch-wait removal)
 - External agents package — active development and integration
 

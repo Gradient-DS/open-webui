@@ -82,7 +82,7 @@ async def sync_items(
         for item in request.items
     ]
 
-    result = handle_sync_items_request(
+    result = await handle_sync_items_request(
         knowledge_id=request.knowledge_id,
         meta_key=_META_KEY,
         new_sources=new_sources,
@@ -129,7 +129,7 @@ async def get_sync_status(
     user: UserModel = Depends(get_verified_user),
 ) -> SyncStatusResponse:
     """Get sync status for a Knowledge base."""
-    return handle_get_sync_status(knowledge_id, _META_KEY, user)
+    return await handle_get_sync_status(knowledge_id, _META_KEY, user)
 
 
 @router.post('/sync/{knowledge_id}/cancel')
@@ -138,17 +138,17 @@ async def cancel_sync(
     user: UserModel = Depends(get_verified_user),
 ):
     """Cancel an ongoing OneDrive sync for a Knowledge base."""
-    return handle_cancel_sync(knowledge_id, _META_KEY, user)
+    return await handle_cancel_sync(knowledge_id, _META_KEY, user)
 
 
-def _remove_files_for_source(knowledge_id, item_id, source_to_remove):
+async def _remove_files_for_source(knowledge_id, item_id, source_to_remove):
     """Remove all files associated with a specific OneDrive source."""
 
     def _legacy_drive_id_match(file_meta, source):
         """Legacy fallback: match by drive_id for old files without source_item_id."""
         return file_meta.get('onedrive_drive_id') == source.get('drive_id')
 
-    return remove_files_for_source_generic(
+    return await remove_files_for_source_generic(
         knowledge_id=knowledge_id,
         source_item_id=item_id,
         file_id_prefix=_FILE_ID_PREFIX,
@@ -164,7 +164,7 @@ async def remove_source(
     user: UserModel = Depends(get_verified_user),
 ):
     """Remove a source from a KB's OneDrive sync configuration."""
-    return handle_remove_source(
+    return await handle_remove_source(
         knowledge_id=knowledge_id,
         meta_key=_META_KEY,
         item_id=request.item_id,
@@ -178,7 +178,7 @@ async def list_synced_collections(
     user: UserModel = Depends(get_verified_user),
 ) -> List[dict]:
     """List all Knowledge bases with OneDrive sync enabled for current user."""
-    return handle_list_synced_collections(_META_KEY, user)
+    return await handle_list_synced_collections(_META_KEY, user)
 
 
 # ──────────────────────────────────────────────────────────────────────
@@ -198,7 +198,7 @@ async def initiate_auth(
     if not MICROSOFT_CLIENT_SECRET.value:
         raise HTTPException(400, 'OneDrive client secret not configured')
 
-    knowledge = get_knowledge_or_raise(knowledge_id, user)
+    knowledge = await get_knowledge_or_raise(knowledge_id, user)
 
     redirect_uri = str(request.base_url).rstrip('/') + '/oauth/microsoft/callback'
 
@@ -269,7 +269,7 @@ async def get_token_status(
     """Check if a stored token exists and is valid for a KB."""
     from open_webui.services.onedrive.auth import get_stored_token
 
-    return handle_get_token_status(knowledge_id, _META_KEY, user, get_stored_token)
+    return await handle_get_token_status(knowledge_id, _META_KEY, user, get_stored_token)
 
 
 @router.post('/auth/revoke/{knowledge_id}')
@@ -280,4 +280,4 @@ async def revoke_token(
     """Revoke and delete stored token for a KB."""
     from open_webui.services.onedrive.auth import delete_stored_token
 
-    return handle_revoke_token(knowledge_id, _PROVIDER_TYPE, _META_KEY, user, delete_stored_token)
+    return await handle_revoke_token(knowledge_id, _PROVIDER_TYPE, _META_KEY, user, delete_stored_token)

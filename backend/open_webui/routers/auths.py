@@ -520,7 +520,7 @@ async def ldap_auth(
                         await Groups.create_groups_by_group_names(user.id, user_groups, db=db)
                     try:
                         await Groups.sync_groups_by_group_names(user.id, user_groups, db=db)
-                        log.info(f'Successfully synced groups for user {user.id}: {user_groups}')
+                        log.info(f'Successfully synced groups for user {user.id}: {len(user_groups)} groups')
                     except Exception as e:
                         log.error(f'Failed to sync groups for user {user.id}: {e}')
 
