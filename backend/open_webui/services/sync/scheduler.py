@@ -91,7 +91,7 @@ class SyncScheduler:
         provider = get_sync_provider(self.provider_type)
 
         for kb in kbs:
-            if not self._is_sync_due(kb, now, interval_seconds, provider):
+            if not await self._is_sync_due(kb, now, interval_seconds, provider):
                 continue
 
             log.info('Starting scheduled sync for KB %s (%s)', kb.id, kb.name)
@@ -126,7 +126,7 @@ class SyncScheduler:
                 log.exception('Unexpected error during scheduled sync of KB %s', kb.id)
                 await self._update_sync_status(kb.id, 'failed', error='Unexpected scheduler error')
 
-    def _is_sync_due(
+    async def _is_sync_due(
         self,
         kb: KnowledgeModel,
         now: float,
@@ -142,7 +142,7 @@ class SyncScheduler:
             return False
 
         # Skip if no stored token (per-user DB lookup)
-        if sync_provider and not sync_provider.get_token_manager().has_stored_token(kb.user_id, kb.id):
+        if sync_provider and not await sync_provider.get_token_manager().has_stored_token(kb.user_id, kb.id):
             return False
 
         # Skip if needs re-authorization

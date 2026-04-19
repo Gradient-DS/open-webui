@@ -834,7 +834,7 @@ async def lifespan(app: FastAPI):
     try:
         from open_webui.utils.external_agents import load_external_agents_at_startup
 
-        load_external_agents_at_startup()
+        await load_external_agents_at_startup()
     except Exception as e:
         log.warning(f'External agents loading skipped or failed: {e}')
 

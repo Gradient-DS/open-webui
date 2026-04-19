@@ -781,17 +781,23 @@
 						{/if}
 					</div>
 
-					<div class="my-4">
-						<Knowledge bind:selectedItems={knowledge} />
-					</div>
+					{#if $config?.features?.feature_knowledge !== false}
+						<div class="my-4">
+							<Knowledge bind:selectedItems={knowledge} />
+						</div>
+					{/if}
 
-					<div class="my-4">
-						<ToolsSelector bind:selectedToolIds={toolIds} tools={$tools ?? []} />
-					</div>
+					{#if $config?.features?.feature_tools !== false}
+						<div class="my-4">
+							<ToolsSelector bind:selectedToolIds={toolIds} tools={$tools ?? []} />
+						</div>
+					{/if}
 
-					<div class="my-4">
-						<SkillsSelector bind:selectedSkillIds={skillIds} />
-					</div>
+					{#if $config?.features?.feature_skills}
+						<div class="my-4">
+							<SkillsSelector bind:selectedSkillIds={skillIds} />
+						</div>
+					{/if}
 
 					{#if ($functions ?? []).filter((func) => func.type === 'filter').length > 0 || ($functions ?? []).filter((func) => func.type === 'action').length > 0}
 						<hr class=" border-gray-100/30 dark:border-gray-850/30 my-4" />
@@ -868,19 +874,21 @@
 						<TerminalSelector bind:terminalId />
 					</div>
 
-					<div class="my-4">
-						<div class="flex w-full justify-between mb-1">
-							<div class="self-center text-xs font-medium text-gray-500">
-								{$i18n.t('TTS Voice')}
+					{#if $config?.features?.feature_voice !== false && $config?.audio?.tts?.engine}
+						<div class="my-4">
+							<div class="flex w-full justify-between mb-1">
+								<div class="self-center text-xs font-medium text-gray-500">
+									{$i18n.t('TTS Voice')}
+								</div>
 							</div>
+							<input
+								class="w-full text-sm bg-transparent outline-hidden"
+								type="text"
+								bind:value={tts.voice}
+								placeholder={$i18n.t('e.g. alloy, echo, shimmer')}
+							/>
 						</div>
-						<input
-							class="w-full text-sm bg-transparent outline-hidden"
-							type="text"
-							bind:value={tts.voice}
-							placeholder={$i18n.t('e.g. alloy, echo, shimmer')}
-						/>
-					</div>
+					{/if}
 
 					<hr class=" border-gray-100/30 dark:border-gray-850/30 my-4" />
 

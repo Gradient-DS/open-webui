@@ -366,6 +366,16 @@ async def get_feedbacks(
     return result
 
 
+@router.get('/feedback/conversation/{chat_id}')
+async def get_conversation_feedback(
+    chat_id: str,
+    user=Depends(get_verified_user),
+    db: AsyncSession = Depends(get_async_session),
+):
+    feedback = await Feedbacks.get_conversation_feedback_by_chat_id_and_user_id(chat_id=chat_id, user_id=user.id, db=db)
+    return feedback
+
+
 @router.post('/feedback', response_model=FeedbackModel)
 async def create_feedback(
     request: Request,

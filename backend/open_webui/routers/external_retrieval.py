@@ -192,7 +192,7 @@ def call_external_pipeline(
         raise
 
 
-def process_file_with_external_pipeline(
+async def process_file_with_external_pipeline(
     request,
     file,
     file_path: str,
@@ -277,12 +277,12 @@ def process_file_with_external_pipeline(
     text_content = ' '.join([chunk.get('text', '') for chunk in chunks])
 
     # Update file content and hash
-    Files.update_file_data_by_id(
+    await Files.update_file_data_by_id(
         file.id,
         {'content': text_content},
     )
     hash = calculate_sha256_string(text_content)
-    Files.update_file_hash_by_id(file.id, hash)
+    await Files.update_file_hash_by_id(file.id, hash)
 
     # Convert external chunks to Document objects
     # This allows reuse of save_docs_to_vector_db() which handles:
@@ -318,14 +318,14 @@ def process_file_with_external_pipeline(
     log.info(f'Saved {len(chunks)} chunks to collection {collection_name} via external pipeline')
 
     if result:
-        Files.update_file_metadata_by_id(
+        await Files.update_file_metadata_by_id(
             file.id,
             {
                 'collection_name': collection_name,
             },
         )
 
-        Files.update_file_data_by_id(
+        await Files.update_file_data_by_id(
             file.id,
             {'status': 'completed'},
         )

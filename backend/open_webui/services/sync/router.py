@@ -267,7 +267,7 @@ async def handle_get_token_status(
     if not knowledge or knowledge.user_id != user.id:
         raise HTTPException(404, 'Knowledge base not found')
 
-    token_data = get_stored_token_fn(user.id)
+    token_data = await get_stored_token_fn(user.id)
     if not token_data:
         return {'has_token': False}
 
@@ -297,7 +297,7 @@ async def handle_revoke_token(
     if not knowledge or knowledge.user_id != user.id:
         raise HTTPException(404, 'Knowledge base not found')
 
-    deleted = delete_stored_token_fn(user.id)
+    deleted = await delete_stored_token_fn(user.id)
 
     all_kbs = await Knowledges.get_knowledge_bases_by_type(provider_type)
     for kb in all_kbs:

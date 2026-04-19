@@ -32,12 +32,12 @@ class TokenManager(ABC):
         ...
 
     @abstractmethod
-    def has_stored_token(self, user_id: str, knowledge_id: str) -> bool:
+    async def has_stored_token(self, user_id: str, knowledge_id: str) -> bool:
         """Check if a stored token exists (may be expired)."""
         ...
 
     @abstractmethod
-    def delete_token(self, user_id: str, knowledge_id: str) -> bool:
+    async def delete_token(self, user_id: str, knowledge_id: str) -> bool:
         """Delete stored token. Returns True if deleted."""
         ...
 
@@ -93,7 +93,7 @@ class SyncProvider(ABC):
         If access_token is provided (manual sync), uses it directly.
         Otherwise, obtains a token from the token manager (background sync).
         """
-        knowledge = Knowledges.get_knowledge_by_id(id=knowledge_id)
+        knowledge = await Knowledges.get_knowledge_by_id(id=knowledge_id)
         if not knowledge:
             return {'error': 'Knowledge base not found'}
 

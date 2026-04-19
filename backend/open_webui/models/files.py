@@ -361,6 +361,22 @@ class FilesTable:
             except Exception:
                 return None
 
+    async def update_file_path_by_id(
+        self, id: str, path: str, db: Optional[AsyncSession] = None
+    ) -> Optional[FileModel]:
+        async with get_async_db_context(db) as db:
+            try:
+                result = await db.execute(select(File).filter_by(id=id))
+                file = result.scalars().first()
+                if not file:
+                    return None
+                file.path = path
+                file.updated_at = int(time.time())
+                await db.commit()
+                return FileModel.model_validate(file)
+            except Exception:
+                return None
+
     async def update_file_data_by_id(
         self, id: str, data: dict, db: Optional[AsyncSession] = None
     ) -> Optional[FileModel]:

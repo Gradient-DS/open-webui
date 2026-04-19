@@ -803,24 +803,24 @@ class IntegrationsConfigForm(BaseModel):
     providers: dict
 
 
-def _bind_service_account(user_id: str, provider_slug: str):
+async def _bind_service_account(user_id: str, provider_slug: str):
     """Set user.info.integration_provider on the service account."""
-    user = Users.get_user_by_id(user_id)
+    user = await Users.get_user_by_id(user_id)
     if not user:
         return
     info = dict(user.info) if user.info else {}
     info['integration_provider'] = provider_slug
-    Users.update_user_by_id(user_id, {'info': info})
+    await Users.update_user_by_id(user_id, {'info': info})
 
 
-def _unbind_service_account(user_id: str):
+async def _unbind_service_account(user_id: str):
     """Clear user.info.integration_provider."""
-    user = Users.get_user_by_id(user_id)
+    user = await Users.get_user_by_id(user_id)
     if not user:
         return
     info = dict(user.info) if user.info else {}
     info.pop('integration_provider', None)
-    Users.update_user_by_id(user_id, {'info': info})
+    await Users.update_user_by_id(user_id, {'info': info})
 
 
 @router.get('/integrations')
@@ -846,7 +846,7 @@ async def set_integrations_config(
         new_provider = form_data.providers.get(slug)
         new_sa = new_provider.get('service_account_id') if new_provider else None
         if old_sa != new_sa:
-            _unbind_service_account(old_sa)
+            await _unbind_service_account(old_sa)
 
     # Save new config
     request.app.state.config.INTEGRATION_PROVIDERS = form_data.providers
@@ -855,7 +855,7 @@ async def set_integrations_config(
     for slug, provider in form_data.providers.items():
         sa_id = provider.get('service_account_id')
         if sa_id:
-            _bind_service_account(sa_id, slug)
+            await _bind_service_account(sa_id, slug)
 
     return {'providers': request.app.state.config.INTEGRATION_PROVIDERS}
 

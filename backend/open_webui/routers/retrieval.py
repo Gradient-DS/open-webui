@@ -1810,7 +1810,7 @@ async def process_file(
                         try:
                             # Process file with external pipeline
                             # All logic is in external_retrieval.py for maintainability
-                            return process_file_with_external_pipeline(
+                            return await process_file_with_external_pipeline(
                                 request=request,
                                 file=file,
                                 file_path=file_path,

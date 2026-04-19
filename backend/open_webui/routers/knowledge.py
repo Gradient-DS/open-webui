@@ -431,7 +431,7 @@ async def get_knowledge_by_id(id: str, user=Depends(get_verified_user), db: Asyn
             )
         ):
             # Block non-admin access to suspended KBs
-            suspension_info = Knowledges.get_suspension_info(id)
+            suspension_info = await Knowledges.async_get_suspension_info(id)
             if suspension_info and user.role != 'admin':
                 raise HTTPException(
                     status_code=status.HTTP_403_FORBIDDEN,
@@ -505,7 +505,7 @@ async def update_knowledge_by_id(
         )
 
     # Block non-admin access to suspended KBs
-    suspension_info = Knowledges.get_suspension_info(id)
+    suspension_info = await Knowledges.async_get_suspension_info(id)
     if suspension_info and user.role != 'admin':
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,

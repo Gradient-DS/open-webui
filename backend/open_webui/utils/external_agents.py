@@ -238,7 +238,7 @@ def extract_agent_metadata(package_path: str, agent_module: str) -> Optional[Dic
         return None
 
 
-def register_external_agent_direct(agent_id: str, wrapper_content: str, user_id: str = 'system') -> bool:
+async def register_external_agent_direct(agent_id: str, wrapper_content: str, user_id: str = 'system') -> bool:
     """
     Register an external agent wrapper directly in the database.
 
@@ -273,12 +273,12 @@ def register_external_agent_direct(agent_id: str, wrapper_content: str, user_id:
         )
 
         # Check if function already exists
-        existing_function = Functions.get_function_by_id(agent_id)
+        existing_function = await Functions.get_function_by_id(agent_id)
 
         if existing_function:
             # Update existing function
             log.info(f'Updating existing agent: {agent_id}')
-            updated = Functions.update_function_by_id(
+            updated = await Functions.update_function_by_id(
                 agent_id,
                 {
                     **form_data.model_dump(exclude={'id'}),
@@ -295,11 +295,11 @@ def register_external_agent_direct(agent_id: str, wrapper_content: str, user_id:
         else:
             # Create new function
             log.info(f'Creating new agent: {agent_id}')
-            result = Functions.insert_new_function(user_id, function_type, form_data)
+            result = await Functions.insert_new_function(user_id, function_type, form_data)
 
             if result:
                 # Activate the function
-                Functions.update_function_by_id(agent_id, {'is_active': True})
+                await Functions.update_function_by_id(agent_id, {'is_active': True})
                 log.info(f'  ✓ Agent created and activated: {function_name}')
                 return True
             else:
@@ -311,7 +311,7 @@ def register_external_agent_direct(agent_id: str, wrapper_content: str, user_id:
         return False
 
 
-def load_external_agents_at_startup() -> Dict[str, bool]:
+async def load_external_agents_at_startup() -> Dict[str, bool]:
     """
     Load external agents at application startup based on environment variables.
     This is called from the FastAPI lifespan context when starting the backend.
@@ -363,7 +363,7 @@ def load_external_agents_at_startup() -> Dict[str, bool]:
             wrapper_content = create_wrapper_content(package_name, agent_module, metadata)
 
             # Register directly in database
-            if register_external_agent_direct(agent_id, wrapper_content):
+            if await register_external_agent_direct(agent_id, wrapper_content):
                 results[agent_id] = True
             else:
                 results[agent_id] = False

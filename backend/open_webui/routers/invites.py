@@ -87,7 +87,7 @@ async def create_invite(
             detail='Invalid email format',
         )
 
-    if Users.get_user_by_email(email):
+    if await Users.get_user_by_email(email):
         raise HTTPException(
             status.HTTP_400_BAD_REQUEST,
             detail='A user with this email already exists',
@@ -208,7 +208,7 @@ async def validate_invite(token: str):
         )
 
     # Resolve invited_by name
-    invited_by_user = Users.get_user_by_id(invite.invited_by)
+    invited_by_user = await Users.get_user_by_id(invite.invited_by)
     invited_by_name = invited_by_user.name if invited_by_user else 'An administrator'
 
     return InviteValidation(
@@ -271,7 +271,7 @@ async def accept_invite(
     hashed = get_password_hash(form_data.password)
 
     try:
-        new_user = Auths.insert_new_auth(
+        new_user = await Auths.insert_new_auth(
             email=invite.email,
             password=hashed,
             name=name,
@@ -348,7 +348,7 @@ async def list_invites(user=Depends(get_admin_user)):
 
     result = []
     for invite in invites:
-        invited_by_user = Users.get_user_by_id(invite.invited_by)
+        invited_by_user = await Users.get_user_by_id(invite.invited_by)
         invited_by_name = invited_by_user.name if invited_by_user else 'Unknown'
 
         result.append(

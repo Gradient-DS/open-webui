@@ -174,11 +174,11 @@ async def exchange_code_for_tokens(
     provider = 'google_drive'
 
     # Delete any existing session for this user
-    existing = OAuthSessions.get_session_by_provider_and_user_id(provider, user_id)
+    existing = await OAuthSessions.get_session_by_provider_and_user_id(provider, user_id)
     if existing:
-        OAuthSessions.delete_session_by_id(existing.id)
+        await OAuthSessions.delete_session_by_id(existing.id)
 
-    session = OAuthSessions.create_session(
+    session = await OAuthSessions.create_session(
         user_id=user_id,
         provider=provider,
         token=token_data,
@@ -191,19 +191,19 @@ async def exchange_code_for_tokens(
     return {'success': True, 'knowledge_id': knowledge_id}
 
 
-def get_stored_token(user_id: str) -> Optional[Dict[str, Any]]:
+async def get_stored_token(user_id: str) -> Optional[Dict[str, Any]]:
     """Get the stored Google Drive token for a user, or None."""
     provider = 'google_drive'
-    session = OAuthSessions.get_session_by_provider_and_user_id(provider, user_id)
+    session = await OAuthSessions.get_session_by_provider_and_user_id(provider, user_id)
     if session:
         return session.token
     return None
 
 
-def delete_stored_token(user_id: str) -> bool:
+async def delete_stored_token(user_id: str) -> bool:
     """Delete the stored Google Drive token for a user."""
     provider = 'google_drive'
-    session = OAuthSessions.get_session_by_provider_and_user_id(provider, user_id)
+    session = await OAuthSessions.get_session_by_provider_and_user_id(provider, user_id)
     if session:
-        return OAuthSessions.delete_session_by_id(session.id)
+        return await OAuthSessions.delete_session_by_id(session.id)
     return False

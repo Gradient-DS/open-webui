@@ -192,6 +192,25 @@ class FeedbackTable:
         except Exception:
             return None
 
+    async def get_conversation_feedback_by_chat_id_and_user_id(
+        self, chat_id: str, user_id: str, db: Optional[AsyncSession] = None
+    ) -> Optional[FeedbackModel]:
+        """Return the conversation-scoped feedback for a given chat owned by the user, if any."""
+        try:
+            async with get_async_db_context(db) as db:
+                result = await db.execute(
+                    select(Feedback)
+                    .filter_by(user_id=user_id)
+                    .filter(Feedback.meta['scope'].as_string() == 'conversation')
+                    .filter(Feedback.meta['chat_id'].as_string() == chat_id)
+                )
+                feedback = result.scalars().first()
+                if not feedback:
+                    return None
+                return FeedbackModel.model_validate(feedback)
+        except Exception:
+            return None
+
     async def get_feedbacks_by_chat_id(self, chat_id: str, db: Optional[AsyncSession] = None) -> list[FeedbackModel]:
         """Get all feedbacks for a specific chat."""
         try:

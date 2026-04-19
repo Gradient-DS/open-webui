@@ -178,12 +178,12 @@ async def exchange_code_for_tokens(
     provider = 'onedrive'
 
     # Delete any existing session for this user (including legacy per-KB sessions)
-    existing = OAuthSessions.get_session_by_provider_and_user_id(provider, user_id)
+    existing = await OAuthSessions.get_session_by_provider_and_user_id(provider, user_id)
     if existing:
-        OAuthSessions.delete_session_by_id(existing.id)
-    _delete_legacy_sessions(user_id)
+        await OAuthSessions.delete_session_by_id(existing.id)
+    await _delete_legacy_sessions(user_id)
 
-    session = OAuthSessions.create_session(
+    session = await OAuthSessions.create_session(
         user_id=user_id,
         provider=provider,
         token=token_data,
@@ -196,38 +196,38 @@ async def exchange_code_for_tokens(
     return {'success': True, 'knowledge_id': knowledge_id}
 
 
-def get_stored_token(user_id: str) -> Optional[Dict[str, Any]]:
+async def get_stored_token(user_id: str) -> Optional[Dict[str, Any]]:
     """Get the stored OneDrive token for a user, or None.
 
     Checks for the per-user "onedrive" session first. Falls back to
     legacy per-KB "onedrive:<kb_id>" sessions and migrates them.
     """
     provider = 'onedrive'
-    session = OAuthSessions.get_session_by_provider_and_user_id(provider, user_id)
+    session = await OAuthSessions.get_session_by_provider_and_user_id(provider, user_id)
     if session:
         return session.token
 
     # Legacy migration: find any "onedrive:*" session for this user
-    migrated = _migrate_legacy_sessions(user_id)
+    migrated = await _migrate_legacy_sessions(user_id)
     if migrated:
         return migrated.token
 
     return None
 
 
-def delete_stored_token(user_id: str) -> bool:
+async def delete_stored_token(user_id: str) -> bool:
     """Delete the stored OneDrive token for a user (including legacy sessions)."""
     provider = 'onedrive'
-    session = OAuthSessions.get_session_by_provider_and_user_id(provider, user_id)
+    session = await OAuthSessions.get_session_by_provider_and_user_id(provider, user_id)
     deleted = False
     if session:
-        deleted = OAuthSessions.delete_session_by_id(session.id)
+        deleted = await OAuthSessions.delete_session_by_id(session.id)
     # Also clean up any legacy per-KB sessions
-    _delete_legacy_sessions(user_id)
+    await _delete_legacy_sessions(user_id)
     return deleted
 
 
-def _migrate_legacy_sessions(user_id: str):
+async def _migrate_legacy_sessions(user_id: str):
     """Migrate legacy per-KB onedrive sessions to a single per-user session.
 
     Finds the freshest "onedrive:<kb_id>" session, creates a new "onedrive"
@@ -235,7 +235,7 @@ def _migrate_legacy_sessions(user_id: str):
 
     Returns the new OAuthSessionModel or None.
     """
-    all_sessions = OAuthSessions.get_sessions_by_user_id(user_id)
+    all_sessions = await OAuthSessions.get_sessions_by_user_id(user_id)
     legacy = [s for s in all_sessions if s.provider.startswith('onedrive:')]
     if not legacy:
         return None
@@ -248,7 +248,7 @@ def _migrate_legacy_sessions(user_id: str):
         freshest.provider,
     )
 
-    new_session = OAuthSessions.create_session(
+    new_session = await OAuthSessions.create_session(
         user_id=user_id,
         provider='onedrive',
         token=freshest.token,
@@ -256,14 +256,14 @@ def _migrate_legacy_sessions(user_id: str):
 
     # Delete all legacy sessions
     for s in legacy:
-        OAuthSessions.delete_session_by_id(s.id)
+        await OAuthSessions.delete_session_by_id(s.id)
 
     return new_session
 
 
-def _delete_legacy_sessions(user_id: str):
+async def _delete_legacy_sessions(user_id: str):
     """Delete any remaining legacy "onedrive:<kb_id>" sessions for a user."""
-    all_sessions = OAuthSessions.get_sessions_by_user_id(user_id)
+    all_sessions = await OAuthSessions.get_sessions_by_user_id(user_id)
     for s in all_sessions:
         if s.provider.startswith('onedrive:'):
-            OAuthSessions.delete_session_by_id(s.id)
+            await OAuthSessions.delete_session_by_id(s.id)

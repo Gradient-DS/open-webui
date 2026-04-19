@@ -882,7 +882,7 @@ class BaseSyncWorker(ABC):
                     file_id,
                     FileUpdateForm(hash=content_hash, meta=file_meta),
                 )
-                Files.update_file_path_by_id(file_id, file_path)
+                await Files.update_file_path_by_id(file_id, file_path)
             else:
                 file_form = FileForm(
                     id=file_id,
