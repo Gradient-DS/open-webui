@@ -82,6 +82,7 @@ jobs:
           images: ${{ env.FULL_IMAGE_NAME }}
           tags: |
             type=ref,event=branch
+            type=raw,value=main,enable=${{ startsWith(github.ref, 'refs/tags/') }}
           flavor: |
             prefix=cache-slim-${{ matrix.platform }}-
             latest=false
