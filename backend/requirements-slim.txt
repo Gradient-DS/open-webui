@@ -1,9 +1,7 @@
 ## Slim requirements: full Open WebUI without local ML inference packages
 ## Use with USE_SLIM=true — requires external APIs for embeddings, TTS, and STT
-## Drops: torch, transformers, faster-whisper, colbert-ai,
+## Drops: torch, sentence-transformers, transformers, faster-whisper, colbert-ai,
 ##        accelerate, einops, sentencepiece, onnxruntime, rapidocr, opencv, soundfile
-## Keeps sentence-transformers (pulls torch transitively) — retrieval/utils.py
-## falls back to sentence_transformers.util.cos_sim when no reranker is configured.
 
 fastapi==0.135.1
 uvicorn[standard]==0.41.0
@@ -62,8 +60,6 @@ fake-useragent==2.2.0
 chromadb==1.5.2
 weaviate-client==4.20.3
 opensearch-py==3.1.0
-
-sentence-transformers==5.2.3
 
 pyarrow==20.0.0 # fix: pin pyarrow version to 20 for rpi compatibility #15897
 

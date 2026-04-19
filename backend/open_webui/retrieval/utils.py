@@ -1272,13 +1272,23 @@ class RerankCompressor(BaseDocumentCompressor):
         if reranking:
             scores = await asyncio.to_thread(self.reranking_function, query, documents)
         else:
-            from sentence_transformers import util
+            import numpy as np
 
             query_embedding = await self.embedding_function(query, RAG_EMBEDDING_QUERY_PREFIX)
             document_embedding = await self.embedding_function(
                 [doc.page_content for doc in documents], RAG_EMBEDDING_CONTENT_PREFIX
             )
-            scores = util.cos_sim(query_embedding, document_embedding)[0]
+            # numpy cosine similarity; matches sentence_transformers.util.cos_sim(q, d)[0]
+            # so we don't need sentence_transformers in the slim image.
+            q = np.asarray(query_embedding, dtype=np.float32)
+            if q.ndim == 1:
+                q = q[None, :]
+            d = np.asarray(document_embedding, dtype=np.float32)
+            if d.ndim == 1:
+                d = d[None, :]
+            q_norm = q / (np.linalg.norm(q, axis=1, keepdims=True) + 1e-12)
+            d_norm = d / (np.linalg.norm(d, axis=1, keepdims=True) + 1e-12)
+            scores = (q_norm @ d_norm.T)[0]
 
         if scores is not None:
             docs_with_scores = list(

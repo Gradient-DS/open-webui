@@ -30,6 +30,12 @@ spec:
         - namespaceSelector:
             matchLabels:
               kubernetes.io/metadata.name: {{ .Values.sharedServices.namespace }}
+    {{- range .Values.networkPolicy.extraEgressNamespaces }}
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ . }}
+    {{- end }}
     {{- if .Values.openWebui.config.telemetry.otel.enabled }}
     # Allow to observability namespace for OTEL
     - to:

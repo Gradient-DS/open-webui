@@ -46,7 +46,6 @@ from fastapi.staticfiles import StaticFiles
 from starlette_compress import CompressMiddleware
 
 from starlette.exceptions import HTTPException as StarletteHTTPException
-from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.middleware.sessions import SessionMiddleware
 from starlette.responses import Response, StreamingResponse
 from starlette.datastructures import Headers
@@ -1647,44 +1646,45 @@ if ENABLE_COMPRESSION_MIDDLEWARE:
     app.add_middleware(CompressMiddleware)
 
 
-class RedirectMiddleware(BaseHTTPMiddleware):
-    async def dispatch(self, request: Request, call_next):
-        # Check if the request is a GET request
-        if request.method == 'GET':
-            path = request.url.path
-            query_params = dict(parse_qs(urlparse(str(request.url)).query))
+class RedirectMiddleware:
+    """Pure ASGI-3 middleware. See REDIS-HA-FIX.md for why we avoid BaseHTTPMiddleware."""
 
-            redirect_params = {}
+    def __init__(self, app):
+        self.app = app
 
-            # Check for the specific watch path and the presence of 'v' parameter
-            if path.endswith('/watch') and 'v' in query_params:
-                # Extract the first 'v' parameter
-                youtube_video_id = query_params['v'][0]
-                redirect_params['youtube'] = youtube_video_id
+    async def __call__(self, scope, receive, send):
+        if scope['type'] != 'http' or scope.get('method') != 'GET':
+            return await self.app(scope, receive, send)
 
-            if 'shared' in query_params and len(query_params['shared']) > 0:
-                # PWA share_target support
+        request = Request(scope)
+        path = request.url.path
+        query_params = dict(parse_qs(urlparse(str(request.url)).query))
 
-                text = query_params['shared'][0]
-                if text:
-                    urls = re.match(r'https://\S+', text)
-                    if urls:
-                        from open_webui.retrieval.loaders.youtube import _parse_video_id
+        redirect_params = {}
 
-                        if youtube_video_id := _parse_video_id(urls[0]):
-                            redirect_params['youtube'] = youtube_video_id
-                        else:
-                            redirect_params['load-url'] = urls[0]
+        if path.endswith('/watch') and 'v' in query_params:
+            redirect_params['youtube'] = query_params['v'][0]
+
+        if 'shared' in query_params and len(query_params['shared']) > 0:
+            text = query_params['shared'][0]
+            if text:
+                urls = re.match(r'https://\S+', text)
+                if urls:
+                    from open_webui.retrieval.loaders.youtube import _parse_video_id
+
+                    if youtube_video_id := _parse_video_id(urls[0]):
+                        redirect_params['youtube'] = youtube_video_id
                     else:
-                        redirect_params['q'] = text
+                        redirect_params['load-url'] = urls[0]
+                else:
+                    redirect_params['q'] = text
 
-            if redirect_params:
-                redirect_url = f'/?{urlencode(redirect_params)}'
-                return RedirectResponse(url=redirect_url)
+        if redirect_params:
+            redirect_url = f'/?{urlencode(redirect_params)}'
+            response = RedirectResponse(url=redirect_url)
+            return await response(scope, receive, send)
 
-        # Proceed with the normal flow of other requests
-        response = await call_next(request)
-        return response
+        await self.app(scope, receive, send)
 
 
 app.add_middleware(RedirectMiddleware)
@@ -1736,61 +1736,102 @@ class APIKeyRestrictionMiddleware:
 app.add_middleware(APIKeyRestrictionMiddleware)
 
 
-@app.middleware('http')
-async def commit_session_after_request(request: Request, call_next):
-    response = await call_next(request)
-    # log.debug("Commit session after request")
-    try:
-        ScopedSession.commit()
-    finally:
-        # CRITICAL: remove() returns the connection to the pool.
-        # Without this, connections remain "checked out" and accumulate
-        # as "idle in transaction" in PostgreSQL.
-        ScopedSession.remove()
-    return response
+class CommitSessionMiddleware:
+    """Pure ASGI-3. Commit SQLAlchemy scoped session after the request completes, always remove().
+
+    Converted from @app.middleware('http') to avoid BaseHTTPMiddleware's per-request sub-task
+    crossing event loops with app.state.redis (see REDIS-HA-FIX.md).
+    """
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope['type'] != 'http':
+            return await self.app(scope, receive, send)
+        try:
+            await self.app(scope, receive, send)
+        finally:
+            try:
+                ScopedSession.commit()
+            finally:
+                # CRITICAL: remove() returns the connection to the pool.
+                # Without this, connections remain "checked out" and accumulate
+                # as "idle in transaction" in PostgreSQL.
+                ScopedSession.remove()
 
 
-@app.middleware('http')
-async def check_url(request: Request, call_next):
-    start_time = int(time.time())
-    request.state.token = get_http_authorization_cred(request.headers.get('Authorization'))
-    # Fallback to cookie token for browser sessions
-    if request.state.token is None and request.cookies.get('token'):
+class AuthTokenMiddleware:
+    """Pure ASGI-3. Normalise request.state.token from Authorization header / cookie / x-api-key.
+
+    Stamps X-Process-Time on the response.
+    """
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope['type'] != 'http':
+            return await self.app(scope, receive, send)
+
         from fastapi.security import HTTPAuthorizationCredentials
 
-        request.state.token = HTTPAuthorizationCredentials(scheme='Bearer', credentials=request.cookies.get('token'))
+        request = Request(scope)
+        token = get_http_authorization_cred(request.headers.get('Authorization'))
 
-    # Fallback to x-api-key header for Anthropic Messages API routes
-    if request.state.token is None and request.headers.get('x-api-key'):
-        request_path = request.url.path
-        if request_path in ('/api/message', '/api/v1/messages') or request_path.startswith('/ollama/v1/messages'):
-            from fastapi.security import HTTPAuthorizationCredentials
+        if token is None and request.cookies.get('token'):
+            token = HTTPAuthorizationCredentials(scheme='Bearer', credentials=request.cookies.get('token'))
 
-            request.state.token = HTTPAuthorizationCredentials(
-                scheme='Bearer', credentials=request.headers.get('x-api-key')
-            )
+        if token is None and request.headers.get('x-api-key'):
+            request_path = request.url.path
+            if request_path in ('/api/message', '/api/v1/messages') or request_path.startswith('/ollama/v1/messages'):
+                token = HTTPAuthorizationCredentials(scheme='Bearer', credentials=request.headers.get('x-api-key'))
 
-    request.state.enable_api_keys = app.state.config.ENABLE_API_KEYS
-    response = await call_next(request)
-    process_time = int(time.time()) - start_time
-    response.headers['X-Process-Time'] = str(process_time)
-    return response
+        request.state.token = token
+        request.state.enable_api_keys = app.state.config.ENABLE_API_KEYS
+
+        start_time = int(time.time())
+
+        async def send_with_process_time(message):
+            if message['type'] == 'http.response.start':
+                process_time = int(time.time()) - start_time
+                headers = list(message.get('headers') or [])
+                headers.append((b'x-process-time', str(process_time).encode('latin-1')))
+                message = {**message, 'headers': headers}
+            await send(message)
+
+        await self.app(scope, receive, send_with_process_time)
 
 
-@app.middleware('http')
-async def inspect_websocket(request: Request, call_next):
-    if '/ws/socket.io' in request.url.path and request.query_params.get('transport') == 'websocket':
-        upgrade = (request.headers.get('Upgrade') or '').lower()
-        connection = (request.headers.get('Connection') or '').lower().split(',')
-        # Check that there's the correct headers for an upgrade, else reject the connection
-        # This is to work around this upstream issue: https://github.com/miguelgrinberg/python-engineio/issues/367
-        if upgrade != 'websocket' or 'upgrade' not in connection:
-            return JSONResponse(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                content={'detail': 'Invalid WebSocket upgrade request'},
-            )
-    return await call_next(request)
+class WebSocketGuardMiddleware:
+    """Pure ASGI-3. Reject malformed WebSocket upgrade requests that arrive on HTTP transport.
 
+    Works around https://github.com/miguelgrinberg/python-engineio/issues/367.
+    """
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope['type'] == 'http':
+            path = scope.get('path', '')
+            query_string = scope.get('query_string', b'').decode('latin-1')
+            if '/ws/socket.io' in path and 'transport=websocket' in query_string:
+                headers = Headers(scope=scope)
+                upgrade = (headers.get('upgrade') or '').lower()
+                connection = (headers.get('connection') or '').lower().split(',')
+                if upgrade != 'websocket' or 'upgrade' not in [c.strip() for c in connection]:
+                    response = JSONResponse(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        content={'detail': 'Invalid WebSocket upgrade request'},
+                    )
+                    return await response(scope, receive, send)
+        await self.app(scope, receive, send)
+
+
+app.add_middleware(WebSocketGuardMiddleware)
+app.add_middleware(AuthTokenMiddleware)
+app.add_middleware(CommitSessionMiddleware)
 
 app.add_middleware(
     CORSMiddleware,

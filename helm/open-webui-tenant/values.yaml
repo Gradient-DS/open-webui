@@ -708,6 +708,11 @@ externalSecrets:
 # -----------------------------------------------------------------------------
 networkPolicy:
   enabled: true
+  # Additional namespaces this tenant is allowed to egress to (in addition to
+  # sharedServices.namespace). Useful when sharedServices.namespace is set to
+  # a per-env value like staging-shared-services but the tenant also needs to
+  # reach the cluster-wide shared-services namespace (e.g. LiteLLM).
+  extraEgressNamespaces: []
 
 # -----------------------------------------------------------------------------
 # Cilium Network Policy
