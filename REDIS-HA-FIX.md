@@ -132,3 +132,56 @@ Because pure ASGI middlewares don't spawn per-request sub-tasks, the Redis clien
 - **Skip HA, go single-replica**: regression on reliability, no rolling updates during pod restarts.
 
 Pure ASGI is the right layer to fix this at.
+
+---
+
+## Second root cause discovered post-v1.0.5 (fixed in this commit)
+
+After v1.0.5, the **exact same class of error** (`got Future attached to a different loop`) continued on HA tenants, but the backtrace no longer implicated any `BaseHTTPMiddleware` — it pointed into the `/api/chat/completions` **route handler**:
+
+```
+File "open_webui/main.py", line 2260, in chat_completion
+    await event_emitter({'type': 'chat:active', 'data': {'active': True}})
+File "open_webui/socket/main.py", line 789, in __event_emitter__
+    await sio.emit(...)
+File "socketio/async_pubsub_manager.py", line 96, in emit
+    await self._publish(message)  # notify other hosts
+File "socketio/async_redis_manager.py", line 129, in _publish
+    return await self.redis.publish(...)
+    → RuntimeError: got Future attached to a different loop
+```
+
+### What was wrong
+
+`backend/open_webui/socket/main.py:65-84` instantiated `socketio.AsyncRedisManager(...)` at **module-import time**:
+
+```python
+mgr = socketio.AsyncRedisManager(WEBSOCKET_REDIS_URL, redis_options=WEBSOCKET_REDIS_OPTIONS)
+sio = socketio.AsyncServer(..., client_manager=mgr, ...)
+```
+
+`AsyncRedisManager.__init__` calls `_redis_connect()`, which creates an `aioredis.Redis.from_url(...)` client. That client eagerly constructs internal asyncio primitives (connection pool lock, pubsub structures) — and those primitives bind to whatever event loop `asyncio.get_event_loop()` returns *at that moment*. At module-import time, that is **not** the loop uvicorn later creates to serve requests.
+
+(`main.py:788` even has `app.state.main_loop = asyncio.get_running_loop()`, proving the codebase already knows uvicorn's loop is different from the import-time one. The awareness was just never applied to `AsyncRedisManager`.)
+
+Every `sio.emit()` from a request handler then awaits a Future on the wrong loop → crash.
+
+Why it only manifests under HA: `AsyncRedisManager._publish()` is a no-op when there's only one replica (the broadcast has no other host to notify) — well, technically it still runs, but with less traffic the loop-mismatch gets tolerated / racily survives. At replicaCount=2, the subscribe listener is always active consuming messages, and concurrent publish+read collisions on the Redis client expose the bug reliably.
+
+### Fix
+
+Defer `AsyncRedisManager` creation to a lifespan startup hook:
+
+- `socket/main.py`: create `sio` unconditionally with the default in-memory `AsyncManager` at import time. Add a new `init_websocket_redis_manager()` coroutine that, if `WEBSOCKET_MANAGER == 'redis'`, instantiates `AsyncRedisManager` and hot-swaps it onto `sio.manager`. Calling from an async context guarantees the internal Futures bind to uvicorn's running loop.
+- `main.py` lifespan: await `init_websocket_redis_manager()` after `app.state.redis` is set up.
+
+The hot-swap works because python-socketio's `AsyncServer.emit()` lazily calls `manager.initialize()` on first use (it sets `manager_initialized = True`); we reset that flag when swapping so the new manager's subscribe task (`_thread()`) launches on the correct loop.
+
+### Why not alternatives
+
+- **Monkey-patch aioredis to rebind Futures to the current loop**: risky, tied to private aioredis/redis-py internals.
+- **Disable socketio's Redis manager** (`WEBSOCKET_MANAGER=` anything else): loses cross-replica broadcast → real-time chat updates stop working across HA replicas → functional regression.
+- **Pin sessions/sticky routing at gateway layer instead of using Redis manager**: loses HA benefits, requires gateway changes.
+
+Lifespan-deferred init is the smallest, most contained fix.
+

@@ -62,7 +62,45 @@ REDIS = None
 # Configure CORS for Socket.IO
 SOCKETIO_CORS_ORIGINS = '*' if CORS_ALLOW_ORIGIN == ['*'] else CORS_ALLOW_ORIGIN
 
-if WEBSOCKET_MANAGER == 'redis':
+# Always create `sio` at module-import time with the default (in-memory)
+# AsyncManager. If WEBSOCKET_MANAGER == 'redis', the Redis-backed
+# AsyncRedisManager is attached LATER inside the FastAPI lifespan hook (see
+# `init_websocket_redis_manager` below) so that its internal asyncio primitives
+# (pool locks, stream readers) bind to uvicorn's running event loop — NOT to
+# whatever loop `asyncio.get_event_loop()` happens to return at import time.
+#
+# Creating AsyncRedisManager at import time caused "got Future attached to a
+# different loop" errors on `sio.emit()` under HA (replicaCount > 1), because
+# the manager's Redis client's low-level stream Futures belonged to a loop
+# different from the one uvicorn later used to serve requests. See
+# REDIS-HA-FIX.md.
+sio = socketio.AsyncServer(
+    cors_allowed_origins=SOCKETIO_CORS_ORIGINS,
+    async_mode='asgi',
+    transports=(['websocket'] if ENABLE_WEBSOCKET_SUPPORT else ['polling']),
+    allow_upgrades=ENABLE_WEBSOCKET_SUPPORT,
+    always_connect=True,
+    logger=WEBSOCKET_SERVER_LOGGING,
+    ping_interval=WEBSOCKET_SERVER_PING_INTERVAL,
+    ping_timeout=WEBSOCKET_SERVER_PING_TIMEOUT,
+    engineio_logger=WEBSOCKET_SERVER_ENGINEIO_LOGGING,
+)
+
+
+async def init_websocket_redis_manager() -> None:
+    """Attach the Redis-backed AsyncRedisManager to `sio` on the live event loop.
+
+    Must be awaited from the FastAPI lifespan startup (or any coroutine running
+    on uvicorn's main loop) BEFORE any `sio.emit(...)` call is issued.
+    Idempotent; safe to call repeatedly.
+    """
+    if WEBSOCKET_MANAGER != 'redis':
+        return
+
+    # Avoid re-installing the manager on reloads/multiple startups.
+    if isinstance(sio.manager, socketio.AsyncRedisManager):
+        return
+
     if WEBSOCKET_SENTINEL_HOSTS:
         mgr = socketio.AsyncRedisManager(
             get_sentinel_url_from_env(WEBSOCKET_REDIS_URL, WEBSOCKET_SENTINEL_HOSTS, WEBSOCKET_SENTINEL_PORT),
@@ -70,30 +108,11 @@ if WEBSOCKET_MANAGER == 'redis':
         )
     else:
         mgr = socketio.AsyncRedisManager(WEBSOCKET_REDIS_URL, redis_options=WEBSOCKET_REDIS_OPTIONS)
-    sio = socketio.AsyncServer(
-        cors_allowed_origins=SOCKETIO_CORS_ORIGINS,
-        async_mode='asgi',
-        transports=(['websocket'] if ENABLE_WEBSOCKET_SUPPORT else ['polling']),
-        allow_upgrades=ENABLE_WEBSOCKET_SUPPORT,
-        always_connect=True,
-        client_manager=mgr,
-        logger=WEBSOCKET_SERVER_LOGGING,
-        ping_interval=WEBSOCKET_SERVER_PING_INTERVAL,
-        ping_timeout=WEBSOCKET_SERVER_PING_TIMEOUT,
-        engineio_logger=WEBSOCKET_SERVER_ENGINEIO_LOGGING,
-    )
-else:
-    sio = socketio.AsyncServer(
-        cors_allowed_origins=SOCKETIO_CORS_ORIGINS,
-        async_mode='asgi',
-        transports=(['websocket'] if ENABLE_WEBSOCKET_SUPPORT else ['polling']),
-        allow_upgrades=ENABLE_WEBSOCKET_SUPPORT,
-        always_connect=True,
-        logger=WEBSOCKET_SERVER_LOGGING,
-        ping_interval=WEBSOCKET_SERVER_PING_INTERVAL,
-        ping_timeout=WEBSOCKET_SERVER_PING_TIMEOUT,
-        engineio_logger=WEBSOCKET_SERVER_ENGINEIO_LOGGING,
-    )
+
+    mgr.set_server(sio)
+    sio.manager = mgr
+    sio.manager_initialized = False  # force AsyncServer to re-run mgr.initialize() on next emit
+    log.info('Socket.IO Redis client manager attached on the running event loop.')
 
 
 # Timeout duration in seconds

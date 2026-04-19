@@ -825,6 +825,18 @@ async def lifespan(app: FastAPI):
     if app.state.redis is not None:
         app.state.redis_task_command_listener = asyncio.create_task(redis_task_command_listener(app))
 
+    # Attach the Socket.IO Redis client manager NOW that uvicorn's event loop
+    # is running. Creating it at import time (as the upstream code does) binds
+    # its internal Futures to whatever loop asyncio.get_event_loop() returned
+    # at import, which is not the same loop uvicorn serves requests on — that
+    # mismatch crashes every sio.emit() on HA. See REDIS-HA-FIX.md.
+    try:
+        from open_webui.socket.main import init_websocket_redis_manager
+
+        await init_websocket_redis_manager()
+    except Exception as e:
+        log.error(f'Failed to initialise Socket.IO Redis manager: {e}')
+
     if THREAD_POOL_SIZE and THREAD_POOL_SIZE > 0:
         limiter = anyio.to_thread.current_default_thread_limiter()
         limiter.total_tokens = THREAD_POOL_SIZE
