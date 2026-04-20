@@ -4,8 +4,6 @@ import logging
 from io import BytesIO
 from pathlib import Path
 
-from jinja2 import Environment, FileSystemLoader, select_autoescape
-
 from open_webui.utils.chat_export import prepare_export_messages
 
 log = logging.getLogger(__name__)
@@ -15,6 +13,8 @@ TEMPLATE_DIR = Path(__file__).parent.parent / 'templates'
 
 def _render_html(title: str, messages: list[dict]) -> str:
     """Render chat as styled HTML using Jinja2 template."""
+    from jinja2 import Environment, FileSystemLoader, select_autoescape
+
     prepared_messages, sources = prepare_export_messages(messages)
 
     env = Environment(
