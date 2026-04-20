@@ -25,6 +25,26 @@ log = logging.getLogger(__name__)
 # belong to the one who first opened them, now and always.
 _CONNECTION_CACHE = {}
 
+# Set to True by `clear_connection_cache()` at FastAPI lifespan start.
+# Any async Redis client requested before this flag flips is suspect:
+# its internal asyncio primitives will be bound to whichever loop was
+# current at construction time, which under HA is NOT uvicorn's serving
+# loop. See thoughts/shared/research/2026-04-20-redis-ha-loop-bug-and-kind-repro.md for the full rationale.
+_LIFESPAN_FLUSHED = False
+
+
+def clear_connection_cache() -> None:
+    """Drop cached Redis connections.
+
+    Called at FastAPI lifespan startup to ensure any clients accidentally
+    created during module import (which would be bound to the wrong event
+    loop) are discarded before any request handler uses them.
+    """
+    global _LIFESPAN_FLUSHED
+    _CONNECTION_CACHE.clear()
+    _LIFESPAN_FLUSHED = True
+    log.info('Redis connection cache flushed at lifespan start.')
+
 
 class SentinelRedisProxy:
     def __init__(self, sentinel, service, *, async_mode: bool = True, **kw):
@@ -179,6 +199,14 @@ def get_redis_connection(
     async_mode=False,
     decode_responses=True,
 ):
+    if async_mode and not _LIFESPAN_FLUSHED:
+        log.warning(
+            'Async Redis client requested before lifespan flush — possible '
+            'event-loop binding regression. Caller should defer construction '
+            'to the FastAPI lifespan (see thoughts/shared/research/2026-04-20-redis-ha-loop-bug-and-kind-repro.md).',
+            stack_info=True,
+        )
+
     cache_key = (
         redis_url,
         tuple(redis_sentinels) if redis_sentinels else (),

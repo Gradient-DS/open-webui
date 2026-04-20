@@ -43,6 +43,7 @@ from open_webui.utils.auth import decode_token
 from open_webui.socket.utils import RedisDict, RedisLock, YdocManager
 from open_webui.tasks import create_task, stop_item_tasks
 from open_webui.utils.redis import get_redis_connection
+from open_webui.utils.lazy_resource import lazy
 from open_webui.utils.access_control import has_permission
 from open_webui.models.access_grants import AccessGrants
 
@@ -57,7 +58,6 @@ log = logging.getLogger(__name__)
 
 # Let no connection opened in good faith be dropped without
 # cause, and let every message find the room it was meant for.
-REDIS = None
 
 # Configure CORS for Socket.IO
 SOCKETIO_CORS_ORIGINS = '*' if CORS_ALLOW_ORIGIN == ['*'] else CORS_ALLOW_ORIGIN
@@ -73,7 +73,7 @@ SOCKETIO_CORS_ORIGINS = '*' if CORS_ALLOW_ORIGIN == ['*'] else CORS_ALLOW_ORIGIN
 # different loop" errors on `sio.emit()` under HA (replicaCount > 1), because
 # the manager's Redis client's low-level stream Futures belonged to a loop
 # different from the one uvicorn later used to serve requests. See
-# REDIS-HA-FIX.md.
+# thoughts/shared/research/2026-04-20-redis-ha-loop-bug-and-kind-repro.md.
 sio = socketio.AsyncServer(
     cors_allowed_origins=SOCKETIO_CORS_ORIGINS,
     async_mode='asgi',
@@ -87,67 +87,27 @@ sio = socketio.AsyncServer(
 )
 
 
-class _TolerantAsyncRedisManager(socketio.AsyncRedisManager):
-    """AsyncRedisManager that swallows known loop-mismatch / closed-loop errors.
-
-    Under some HA + Python/async-redis combinations the cross-replica pubsub
-    publish raises `RuntimeError: got Future attached to a different loop` or
-    `RuntimeError: Event loop is closed` (see REDIS-HA-FIX.md). The actual chat
-    stream to the connected client goes through the HTTP response SSE body,
-    not through this pubsub path, so the publish failure is cosmetic — it just
-    means the OTHER replica (if any) didn't get a notification. Swallow the
-    error instead of letting it bubble up to the HTTP handler and produce a
-    500 that makes the browser JSON-parser choke.
-
-    This is a targeted workaround, not a fix. Remove once the underlying
-    upstream issue (python-socketio + AsyncRedisManager loop binding) is
-    addressed, e.g. via a dependency upgrade.
-    """
-
-    _SUPPRESS_FRAGMENTS = (
-        'attached to a different loop',
-        'Event loop is closed',
-    )
-
-    async def _publish(self, message):
-        try:
-            return await super()._publish(message)
-        except RuntimeError as e:
-            msg = str(e)
-            if any(frag in msg for frag in self._SUPPRESS_FRAGMENTS):
-                log.warning(
-                    'Suppressing known socketio AsyncRedisManager publish error '
-                    '(local emit unaffected, cross-replica notification lost): %s',
-                    msg,
-                )
-                return
-            raise
-
-
 async def init_websocket_redis_manager() -> None:
     """Attach the Redis-backed AsyncRedisManager to `sio` on the live event loop.
 
     Must be awaited from the FastAPI lifespan startup (or any coroutine running
     on uvicorn's main loop) BEFORE any `sio.emit(...)` call is issued.
     Idempotent; safe to call repeatedly.
-
-    Uses a tolerant subclass that swallows the known loop-mismatch /
-    closed-loop publish errors — see _TolerantAsyncRedisManager.
     """
     if WEBSOCKET_MANAGER != 'redis':
         return
 
     # Avoid re-installing the manager on reloads/multiple startups.
-    if isinstance(sio.manager, _TolerantAsyncRedisManager):
+    if isinstance(sio.manager, socketio.AsyncRedisManager):
         return
 
     if WEBSOCKET_SENTINEL_HOSTS:
-        mgr = _TolerantAsyncRedisManager(
+        mgr = socketio.AsyncRedisManager(
             get_sentinel_url_from_env(WEBSOCKET_REDIS_URL, WEBSOCKET_SENTINEL_HOSTS, WEBSOCKET_SENTINEL_PORT),
             redis_options=WEBSOCKET_REDIS_OPTIONS,
         )
     else:
-        mgr = _TolerantAsyncRedisManager(WEBSOCKET_REDIS_URL, redis_options=WEBSOCKET_REDIS_OPTIONS)
+        mgr = socketio.AsyncRedisManager(WEBSOCKET_REDIS_URL, redis_options=WEBSOCKET_REDIS_OPTIONS)
 
     mgr.set_server(sio)
     sio.manager = mgr
@@ -163,15 +123,22 @@ SESSION_POOL_TIMEOUT = 120  # seconds without heartbeat before session is reaped
 
 if WEBSOCKET_MANAGER == 'redis':
     log.debug('Using Redis to manage websockets.')
-    REDIS = get_redis_connection(
-        redis_url=WEBSOCKET_REDIS_URL,
-        redis_sentinels=get_sentinels_from_env(WEBSOCKET_SENTINEL_HOSTS, WEBSOCKET_SENTINEL_PORT),
-        redis_cluster=WEBSOCKET_REDIS_CLUSTER,
-        async_mode=True,
+
+    # Async client — LAZY, resolved on uvicorn's loop at first access.
+    # Module-import-time construction was the root cause of
+    # "got Future attached to a different loop" under HA. See thoughts/shared/research/2026-04-20-redis-ha-loop-bug-and-kind-repro.md.
+    REDIS = lazy(
+        lambda: get_redis_connection(
+            redis_url=WEBSOCKET_REDIS_URL,
+            redis_sentinels=get_sentinels_from_env(WEBSOCKET_SENTINEL_HOSTS, WEBSOCKET_SENTINEL_PORT),
+            redis_cluster=WEBSOCKET_REDIS_CLUSTER,
+            async_mode=True,
+        )
     )
 
     redis_sentinels = get_sentinels_from_env(WEBSOCKET_SENTINEL_HOSTS, WEBSOCKET_SENTINEL_PORT)
 
+    # Sync RedisDict / RedisLock — safe to create at import (no event loop binding).
     MODELS = RedisDict(
         f'{REDIS_KEY_PREFIX}:models',
         redis_url=WEBSOCKET_REDIS_URL,
@@ -214,6 +181,7 @@ if WEBSOCKET_MANAGER == 'redis':
     session_renew_func = session_cleanup_lock.renew_lock
     session_release_func = session_cleanup_lock.release_lock
 else:
+    REDIS = None
     MODELS = {}
 
     SESSION_POOL = {}

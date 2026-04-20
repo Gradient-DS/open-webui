@@ -148,6 +148,7 @@ qrcode[pil]==8.0
 docker~=7.1.0
 pytest~=8.4.1
 pytest-docker~=3.2.5
+fakeredis>=2.35.0
 
 ## LDAP
 ldap3==2.9.1
