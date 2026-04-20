@@ -55,6 +55,7 @@ from starsessions import (
     SessionAutoloadMiddleware,
 )
 from starsessions.stores.redis import RedisStore
+from redis.asyncio import Redis as AsyncRedis
 
 from open_webui.utils import logger
 from open_webui.utils.audit import AuditLevel, AuditLoggingMiddleware
@@ -658,7 +659,8 @@ from open_webui.utils.oauth import (
     OAuthClientInformationFull,
 )
 from open_webui.utils.security_headers import SecurityHeadersMiddleware
-from open_webui.utils.redis import get_redis_connection
+from open_webui.utils.lazy_resource import lazy
+from open_webui.utils.redis import clear_connection_cache, get_redis_connection
 
 from open_webui.tasks import (
     redis_task_command_listener,
@@ -787,6 +789,11 @@ async def lifespan(app: FastAPI):
     # This allows sync functions to schedule work on the main loop without blocking health checks
     app.state.main_loop = asyncio.get_running_loop()
 
+    # Discard any async Redis clients that were accidentally constructed at
+    # module import — their asyncio primitives are bound to the wrong event
+    # loop under HA. See thoughts/shared/research/2026-04-20-redis-ha-loop-bug-and-kind-repro.md.
+    clear_connection_cache()
+
     app.state.instance_id = INSTANCE_ID
     start_logger()
 
@@ -829,7 +836,7 @@ async def lifespan(app: FastAPI):
     # is running. Creating it at import time (as the upstream code does) binds
     # its internal Futures to whatever loop asyncio.get_event_loop() returned
     # at import, which is not the same loop uvicorn serves requests on — that
-    # mismatch crashes every sio.emit() on HA. See REDIS-HA-FIX.md.
+    # mismatch crashes every sio.emit() on HA. See thoughts/shared/research/2026-04-20-redis-ha-loop-bug-and-kind-repro.md.
     try:
         from open_webui.socket.main import init_websocket_redis_manager
 
@@ -1659,7 +1666,7 @@ if ENABLE_COMPRESSION_MIDDLEWARE:
 
 
 class RedirectMiddleware:
-    """Pure ASGI-3 middleware. See REDIS-HA-FIX.md for why we avoid BaseHTTPMiddleware."""
+    """Pure ASGI-3 middleware. See thoughts/shared/research/2026-04-20-redis-ha-loop-bug-and-kind-repro.md for why we avoid BaseHTTPMiddleware."""
 
     def __init__(self, app):
         self.app = app
@@ -1752,7 +1759,7 @@ class CommitSessionMiddleware:
     """Pure ASGI-3. Commit SQLAlchemy scoped session after the request completes, always remove().
 
     Converted from @app.middleware('http') to avoid BaseHTTPMiddleware's per-request sub-task
-    crossing event loops with app.state.redis (see REDIS-HA-FIX.md).
+    crossing event loops with app.state.redis (see thoughts/shared/research/2026-04-20-redis-ha-loop-bug-and-kind-repro.md).
     """
 
     def __init__(self, app):
@@ -2760,8 +2767,13 @@ if len(app.state.config.TOOL_SERVER_CONNECTIONS) > 0:
 
 try:
     if ENABLE_STAR_SESSIONS_MIDDLEWARE:
+        # starsessions.RedisStore eagerly calls Redis.from_url(url) in __init__
+        # (see starsessions/stores/redis.py:51). Passing `connection=` with a
+        # lazy proxy defers the underlying async client construction to the
+        # first request on uvicorn's loop, avoiding the "different loop" crash
+        # under HA. See thoughts/shared/research/2026-04-20-redis-ha-loop-bug-and-kind-repro.md.
         redis_session_store = RedisStore(
-            url=REDIS_URL,
+            connection=lazy(lambda: AsyncRedis.from_url(REDIS_URL)),
             prefix=(f'{REDIS_KEY_PREFIX}:session:' if REDIS_KEY_PREFIX else 'session:'),
         )
 
@@ -2773,7 +2785,7 @@ try:
             cookie_same_site=WEBUI_SESSION_COOKIE_SAME_SITE,
             cookie_https_only=WEBUI_SESSION_COOKIE_SECURE,
         )
-        log.info('Using Redis for session')
+        log.info('Using Redis for session (lazy connection)')
     else:
         raise ValueError('No Redis URL provided')
 except Exception as e:

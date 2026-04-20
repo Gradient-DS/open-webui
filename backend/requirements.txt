@@ -139,6 +139,7 @@ colbert-ai==0.2.22
 weasyprint==68.0
 python-docx==1.1.2
 htmldocx==0.0.6
+jinja2==3.1.6
 
 ## TOTP 2FA
 pyotp==2.9.0
@@ -148,6 +149,7 @@ qrcode[pil]==8.0
 docker~=7.1.0
 pytest~=8.4.1
 pytest-docker~=3.2.5
+fakeredis>=2.35.0
 
 ## LDAP
 ldap3==2.9.1
