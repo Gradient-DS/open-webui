@@ -410,10 +410,10 @@ data:
   {{- end }}
 
   # Agent API (internal: routes chat UI to agent service)
+  # AGENT_API_KEY is set via secrets (see .Values.secrets.agentApiKey)
   {{- if eq .Values.openWebui.config.agentApiEnabled "true" }}
   AGENT_API_ENABLED: "true"
   AGENT_API_BASE_URL: {{ .Values.openWebui.config.agentApiBaseUrl | quote }}
-  AGENT_API_KEY: {{ .Values.openWebui.config.agentApiKey | quote }}
   AGENT_API_AGENTS: {{ .Values.openWebui.config.agentApiAgents | default "" | quote }}
   {{- end }}
 

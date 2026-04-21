@@ -423,7 +423,7 @@ openWebui:
     # Agent API (internal: routes chat UI to external agent service)
     agentApiEnabled: "false"
     agentApiBaseUrl: ""
-    agentApiKey: ""
+    # agentApiKey is set via secrets (see .Values.secrets.agentApiKey)
     # Comma-separated list of agent identifiers the admin can select from in
     # the External Agents tab. When empty, the agents service uses its own
     # default_agent. When set, the admin's selection is forwarded as an
@@ -668,6 +668,9 @@ secrets:
   externalDocumentLoaderApiKey: ""
   ragExternalRerankerApiKey: ""
 
+  # Agent API X-API-Key (must match AGENTS_API_KEY on the agent service)
+  agentApiKey: ""
+
   # S3 Storage (only if storageProvider is "s3")
   s3AccessKeyId: ""
   s3SecretAccessKey: ""
@@ -707,6 +710,7 @@ externalSecrets:
       googleDriveApiKey: false
       externalDocumentLoaderApiKey: false
       ragExternalRerankerApiKey: false
+      agentApiKey: false
 
 # -----------------------------------------------------------------------------
 # Network Policy
