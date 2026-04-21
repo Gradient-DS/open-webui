@@ -196,7 +196,43 @@
 				</div>
 			</Collapsible>
 		{:else}
-			<slot></slot>
+			<!-- svelte-ignore a11y-no-static-element-interactions -->
+			<div
+				id="sidebar-folder-button"
+				class=" w-full group rounded-xl relative flex items-center justify-between {buttonClassName}"
+			>
+				<div class="w-full py-1.5 pl-2 flex items-center gap-1.5 text-xs font-medium">
+					<div class="pl-0.5 translate-y-[0.5px]">
+						{name}
+					</div>
+				</div>
+
+				{#if onAdd}
+					<button
+						class="absolute z-10 right-2 invisible group-hover:visible self-center flex items-center dark:text-gray-300"
+						on:pointerup={(e) => {
+							e.stopPropagation();
+						}}
+						on:click={(e) => {
+							e.stopPropagation();
+							onAdd();
+						}}
+					>
+						<Tooltip content={onAddLabel}>
+							<button
+								class="p-0.5 dark:hover:bg-gray-850 rounded-lg touch-auto"
+								on:click={(e) => {}}
+							>
+								<Plus className=" size-3" strokeWidth="2.5" />
+							</button>
+						</Tooltip>
+					</button>
+				{/if}
+			</div>
+
+			<div class="w-full">
+				<slot></slot>
+			</div>
 		{/if}
 	{/if}
 </div>
