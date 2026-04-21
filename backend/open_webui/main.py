@@ -640,6 +640,7 @@ from open_webui.utils.middleware import (
     process_chat_response,
 )
 from open_webui.utils.agent import call_agent_api  # [Gradient] Agent API client
+from open_webui.utils.task import prompt_template, prompt_variables_template
 from open_webui.utils.access_control import has_access
 from open_webui.utils.tools import set_tool_servers, set_terminal_servers
 
@@ -2180,6 +2181,21 @@ async def chat_completion(
                     except Exception as e:
                         log.debug(f'Error inserting chat files: {e}')
                         pass
+
+        # [Gradient] Resolve the operator system prompt from the custom-model
+        # definition (model.params.system) with the same variable substitution
+        # apply_system_prompt_to_body uses, so {{user_name}} and metadata
+        # variables resolve identically to the non-agent path. call_agent_api
+        # forwards this as a separate payload field so the agent can compose
+        # it into its own system prompt rather than inject a second system
+        # message into the conversation.
+        operator_system_prompt = model_info_params.get('system')
+        if operator_system_prompt:
+            variables = metadata.get('variables', {})
+            if variables:
+                operator_system_prompt = prompt_variables_template(operator_system_prompt, variables)
+            operator_system_prompt = prompt_template(operator_system_prompt, user)
+        metadata['system_prompt'] = operator_system_prompt
 
         request.state.metadata = metadata
         form_data['metadata'] = metadata

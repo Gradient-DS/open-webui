@@ -17,7 +17,7 @@ import aiohttp
 from fastapi import APIRouter, Depends, HTTPException, Request
 from starlette.responses import StreamingResponse
 
-from open_webui.env import AGENT_API_BASE_URL
+from open_webui.env import AGENT_API_BASE_URL, AGENT_API_KEY
 from open_webui.utils.auth import get_verified_user
 from open_webui.utils.misc import stream_wrapper
 
@@ -38,6 +38,18 @@ def _get_base_url(request: Request) -> str:
     return AGENT_API_BASE_URL
 
 
+def _auth_headers(extra: dict[str, str] | None = None) -> dict[str, str]:
+    """Build outbound headers, including ``X-API-Key`` when configured.
+
+    The agent service enforces the key on all ``/v1/*`` routes, so every
+    proxied request carries it when ``AGENT_API_KEY`` is set.
+    """
+    headers: dict[str, str] = dict(extra or {})
+    if AGENT_API_KEY:
+        headers['X-API-Key'] = AGENT_API_KEY
+    return headers
+
+
 @router.get('/models')
 async def list_models(request: Request, user=Depends(get_verified_user)):
     """Proxy GET /v1/models from the agent service."""
@@ -48,6 +60,7 @@ async def list_models(request: Request, user=Depends(get_verified_user)):
         response = await session.request(
             method='GET',
             url=f'{base_url}/v1/models',
+            headers=_auth_headers(),
         )
         if response.status >= 400:
             body = await response.text()
@@ -71,7 +84,7 @@ async def chat_completions(request: Request, user=Depends(get_verified_user)):
             method='POST',
             url=f'{base_url}/v1/chat/completions',
             data=payload,
-            headers={'Content-Type': 'application/json'},
+            headers=_auth_headers({'Content-Type': 'application/json'}),
         )
 
         if response.status >= 400:
@@ -109,6 +122,7 @@ async def openapi_spec(request: Request, user=Depends(get_verified_user)):
         response = await session.request(
             method='GET',
             url=f'{base_url}/openapi.json',
+            headers=_auth_headers(),
         )
         if response.status >= 400:
             body = await response.text()
