@@ -45,6 +45,7 @@ from open_webui.models.access_grants import AccessGrants
 from open_webui.routers.retrieval import ProcessFileForm, process_file
 from open_webui.routers.audio import transcribe
 from open_webui.services.files.events import emit_file_status
+from open_webui.utils.loop_bridge import run_on_main_loop
 
 from open_webui.storage.provider import Storage
 
@@ -140,10 +141,12 @@ def process_uploaded_file(
                     db=db_session,
                 )
 
-            # Notify frontend via Socket.IO that processing completed
+            # Notify frontend via Socket.IO that processing completed.
+            # Dispatch onto uvicorn's main loop — asyncio.run would create a
+            # throwaway loop and poison the shared Socket.IO Redis pool.
             file_data = Files.get_file_by_id(file_item.id)
             collection_name = file_data.meta.get('collection_name') if file_data and file_data.meta else None
-            asyncio.run(
+            run_on_main_loop(
                 emit_file_status(
                     user_id=user.id,
                     file_id=file_item.id,
@@ -163,7 +166,7 @@ def process_uploaded_file(
                 },
                 db=db_session,
             )
-            asyncio.run(
+            run_on_main_loop(
                 emit_file_status(
                     user_id=user.id,
                     file_id=file_item.id,

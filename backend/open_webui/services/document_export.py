@@ -4,8 +4,6 @@ import logging
 from io import BytesIO
 from pathlib import Path
 
-from jinja2 import Environment, FileSystemLoader, select_autoescape
-
 from open_webui.utils.chat_export import _md_to_html
 
 log = logging.getLogger(__name__)
@@ -14,6 +12,8 @@ TEMPLATE_DIR = Path(__file__).parent.parent / 'templates'
 
 
 def _render_document_html(title: str, markdown: str) -> str:
+    from jinja2 import Environment, FileSystemLoader, select_autoescape
+
     env = Environment(
         loader=FileSystemLoader(str(TEMPLATE_DIR)),
         autoescape=select_autoescape(default_for_string=True, default=True),

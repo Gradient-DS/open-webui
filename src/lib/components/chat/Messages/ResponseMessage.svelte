@@ -11,9 +11,13 @@
 
 	const dispatch = createEventDispatcher();
 
+	import fileSaver from 'file-saver';
+	const { saveAs } = fileSaver;
+
 	import { createNewFeedback, getFeedbackById, updateFeedbackById } from '$lib/apis/evaluations';
 	import { getChatById } from '$lib/apis/chats';
 	import { generateTags } from '$lib/apis';
+	import { exportChatAsPdf, exportChatAsDocx } from '$lib/apis/utils';
 
 	import {
 		audioQueue,
@@ -50,6 +54,7 @@
 	import Sparkles from '$lib/components/icons/Sparkles.svelte';
 
 	import DeleteConfirmDialog from '$lib/components/common/ConfirmDialog.svelte';
+	import Dropdown from '$lib/components/common/Dropdown.svelte';
 
 	import Error from './Error.svelte';
 	import Citations from './Citations.svelte';
@@ -198,6 +203,69 @@
 		const res = await _copyToClipboard(text, null, $settings?.copyFormatted ?? false, sources);
 		if (res) {
 			toast.success($i18n.t('Copying to clipboard was successful!'));
+		}
+	};
+
+	let showDownloadMenu = false;
+
+	const getMessageFilename = (ext: string) => {
+		const shortId = (message?.id ?? '').slice(0, 8) || 'response';
+		return `message-${shortId}.${ext}`;
+	};
+
+	const getMessageBodyText = () => {
+		let text = removeAllDetails(message.content ?? '');
+		if (($config?.ui?.response_watermark ?? '').trim() !== '') {
+			text = `${text}\n\n${$config?.ui?.response_watermark}`;
+		}
+		return text;
+	};
+
+	const downloadMessageAsText = () => {
+		const blob = new Blob([getMessageBodyText()], { type: 'text/plain;charset=utf-8' });
+		saveAs(blob, getMessageFilename('txt'));
+	};
+
+	const downloadMessageAsMarkdown = () => {
+		const blob = new Blob([getMessageBodyText()], { type: 'text/markdown;charset=utf-8' });
+		saveAs(blob, getMessageFilename('md'));
+	};
+
+	const buildExportMessagePayload = () => [
+		{
+			role: message.role,
+			content: message.content ?? '',
+			sources: message.sources ?? []
+		}
+	];
+
+	const downloadMessageAsPdf = async () => {
+		try {
+			const blob = await exportChatAsPdf(
+				localStorage.token,
+				getMessageFilename('pdf').replace(/\.pdf$/, ''),
+				buildExportMessagePayload(),
+				{ includeChrome: false }
+			);
+			if (blob) saveAs(blob, getMessageFilename('pdf'));
+		} catch (e) {
+			console.error('Message PDF export failed:', e);
+			toast.error($i18n.t('Failed to export PDF'));
+		}
+	};
+
+	const downloadMessageAsDocx = async () => {
+		try {
+			const blob = await exportChatAsDocx(
+				localStorage.token,
+				getMessageFilename('docx').replace(/\.docx$/, ''),
+				buildExportMessagePayload(),
+				{ includeChrome: false }
+			);
+			if (blob) saveAs(blob, getMessageFilename('docx'));
+		} catch (e) {
+			console.error('Message DOCX export failed:', e);
+			toast.error($i18n.t('Failed to export Word document'));
 		}
 	};
 
@@ -1016,6 +1084,84 @@
 										</svg>
 									</button>
 								</Tooltip>
+
+								<Dropdown bind:show={showDownloadMenu} align="start" sideOffset={4}>
+									<Tooltip content={$i18n.t('Download')} placement="bottom">
+										<button
+											aria-label={$i18n.t('Download')}
+											class="{isLastMessage || ($settings?.highContrastMode ?? false)
+												? 'visible'
+												: 'invisible group-hover:visible'} p-1.5 hover:bg-black/5 dark:hover:bg-white/5 rounded-lg dark:hover:text-white hover:text-black transition"
+										>
+											<svg
+												xmlns="http://www.w3.org/2000/svg"
+												fill="none"
+												aria-hidden="true"
+												viewBox="0 0 24 24"
+												stroke-width="2.3"
+												stroke="currentColor"
+												class="w-4 h-4"
+											>
+												<path
+													stroke-linecap="round"
+													stroke-linejoin="round"
+													d="M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5M16.5 12 12 16.5m0 0L7.5 12m4.5 4.5V3"
+												/>
+											</svg>
+										</button>
+									</Tooltip>
+
+									<div slot="content">
+										<div
+											class="w-52 rounded-xl px-1 py-1 border border-gray-100 dark:border-gray-800 z-50 bg-white dark:bg-gray-850 dark:text-white shadow-lg"
+										>
+											<button
+												class="flex gap-2 items-center px-3 py-1.5 text-sm cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-lg select-none w-full"
+												on:click={() => {
+													downloadMessageAsText();
+													showDownloadMenu = false;
+												}}
+											>
+												<div class="flex items-center line-clamp-1">
+													{$i18n.t('Plain text (.txt)')}
+												</div>
+											</button>
+											<button
+												class="flex gap-2 items-center px-3 py-1.5 text-sm cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-lg select-none w-full"
+												on:click={() => {
+													downloadMessageAsMarkdown();
+													showDownloadMenu = false;
+												}}
+											>
+												<div class="flex items-center line-clamp-1">
+													{$i18n.t('Markdown (.md)')}
+												</div>
+											</button>
+											<button
+												class="flex gap-2 items-center px-3 py-1.5 text-sm cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-lg select-none w-full"
+												on:click={() => {
+													downloadMessageAsPdf();
+													showDownloadMenu = false;
+												}}
+											>
+												<div class="flex items-center line-clamp-1">
+													{$i18n.t('PDF document (.pdf)')}
+												</div>
+											</button>
+											<button
+												class="flex gap-2 items-center px-3 py-1.5 text-sm cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-lg select-none w-full"
+												on:click={() => {
+													downloadMessageAsDocx();
+													showDownloadMenu = false;
+												}}
+											>
+												<div class="flex items-center line-clamp-1">
+													{$i18n.t('Word document (.docx)')}
+												</div>
+											</button>
+										</div>
+									</div>
+								</Dropdown>
 
 								{#if isFeatureEnabled('voice') && !readOnly && ($user?.role === 'admin' || ($user?.permissions?.chat?.tts ?? true))}
 									<Tooltip content={$i18n.t('Read Aloud')} placement="bottom">

@@ -117,16 +117,22 @@ async def download_chat_as_pdf(form_data: ChatTitleMessagesForm, user=Depends(ge
         raise HTTPException(status_code=400, detail=str(e))
 
 
+class ChatExportForm(BaseModel):
+    title: str
+    messages: list[dict]
+    include_chrome: bool = True
+
+
 @router.post('/chat/pdf')
 async def export_chat_as_pdf(
-    form_data: ChatTitleMessagesForm,
+    form_data: ChatExportForm,
     user=Depends(get_verified_user),
 ):
     """Export chat as a properly rendered PDF with citations and sources."""
     from open_webui.services.chat_export import generate_pdf
 
     try:
-        pdf_bytes = generate_pdf(form_data.title, form_data.messages)
+        pdf_bytes = generate_pdf(form_data.title, form_data.messages, include_chrome=form_data.include_chrome)
         return Response(
             content=pdf_bytes,
             media_type='application/pdf',
@@ -139,14 +145,14 @@ async def export_chat_as_pdf(
 
 @router.post('/chat/docx')
 async def export_chat_as_docx(
-    form_data: ChatTitleMessagesForm,
+    form_data: ChatExportForm,
     user=Depends(get_verified_user),
 ):
     """Export chat as a Word document with citations and sources."""
     from open_webui.services.chat_export import generate_docx
 
     try:
-        docx_bytes = generate_docx(form_data.title, form_data.messages)
+        docx_bytes = generate_docx(form_data.title, form_data.messages, include_chrome=form_data.include_chrome)
         return Response(
             content=docx_bytes,
             media_type='application/vnd.openxmlformats-officedocument.wordprocessingml.document',

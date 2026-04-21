@@ -175,7 +175,7 @@ def setup_metrics(app: FastAPI, resource: Resource) -> None:
     # BaseHTTPMiddleware spawns a sub-task via anyio TaskGroup that can end up on a
     # different asyncio event loop than long-lived async resources on app.state,
     # causing "got Future ... attached to a different loop" under HA load.
-    # See REDIS-HA-FIX.md.
+    # See thoughts/shared/research/2026-04-20-redis-ha-loop-bug-and-kind-repro.md.
     class MetricsMiddleware:
         def __init__(self, asgi_app):
             self.app = asgi_app
