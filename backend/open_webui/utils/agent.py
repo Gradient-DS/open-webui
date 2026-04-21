@@ -40,7 +40,7 @@ import aiohttp
 from starlette.background import BackgroundTask
 from starlette.responses import StreamingResponse
 
-from open_webui.env import AGENT_API_BASE_URL, AGENT_API_AGENT
+from open_webui.env import AGENT_API_BASE_URL
 from open_webui.socket.main import get_event_emitter
 
 log = logging.getLogger(__name__)
@@ -228,8 +228,16 @@ async def call_agent_api(
         if key in form_data:
             model_params[key] = form_data[key]
 
+    selected_agent = request.app.state.config.AGENT_API_SELECTED_AGENT
+    if not selected_agent:
+        log.warning(
+            'AGENT_API_SELECTED_AGENT is empty; the agent service will likely '
+            'reject the request. Configure AGENT_API_AGENTS and pick an agent '
+            'in Admin Settings > External Agents.'
+        )
+
     payload = build_agent_payload(
-        agent=AGENT_API_AGENT,
+        agent=selected_agent,
         model=form_data.get('model', ''),
         messages=form_data.get('messages', []),
         stream=stream,

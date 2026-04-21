@@ -794,6 +794,10 @@ else:
 AGENT_API_ENABLED = os.environ.get('AGENT_API_ENABLED', 'False').lower() == 'true'
 AGENT_API_BASE_URL = os.environ.get('AGENT_API_BASE_URL', '').strip().rstrip('/')
 AGENT_API_AGENT = os.environ.get('AGENT_API_AGENT', '').strip()
+AGENT_API_AGENTS = [a.strip() for a in os.environ.get('AGENT_API_AGENTS', '').split(',') if a.strip()]
+# Back-compat: if AGENT_API_AGENTS is unset, treat AGENT_API_AGENT as a single-item list.
+if not AGENT_API_AGENTS and AGENT_API_AGENT:
+    AGENT_API_AGENTS = [AGENT_API_AGENT]
 
 
 ####################################
