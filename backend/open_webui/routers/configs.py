@@ -6,7 +6,7 @@ import aiohttp
 
 from typing import Optional
 
-from open_webui.env import AGENT_API_ENABLED, AIOHTTP_CLIENT_TIMEOUT
+from open_webui.env import AGENT_API_AGENTS, AGENT_API_ENABLED, AIOHTTP_CLIENT_TIMEOUT
 from open_webui.utils.auth import get_admin_user, get_verified_user
 from open_webui.utils.features import require_feature
 from open_webui.config import get_config, save_config
@@ -902,7 +902,7 @@ class ExternalAgentsConfigForm(BaseModel):
 async def get_external_agents_config(request: Request, user=Depends(get_admin_user)):
     return {
         'AGENT_API_ENABLED': AGENT_API_ENABLED,
-        'AGENT_API_AGENTS': request.app.state.config.AGENT_API_AGENTS,
+        'AGENT_API_AGENTS': AGENT_API_AGENTS,
         'AGENT_API_SELECTED_AGENT': request.app.state.config.AGENT_API_SELECTED_AGENT,
     }
 
@@ -916,7 +916,7 @@ async def set_external_agents_config(
     if not AGENT_API_ENABLED:
         raise HTTPException(status_code=403, detail='Agent API is disabled')
 
-    agents = request.app.state.config.AGENT_API_AGENTS
+    agents = AGENT_API_AGENTS
     selected = form_data.AGENT_API_SELECTED_AGENT
     if agents and selected not in agents:
         raise HTTPException(
