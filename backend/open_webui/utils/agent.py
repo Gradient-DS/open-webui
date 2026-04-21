@@ -40,7 +40,7 @@ import aiohttp
 from starlette.background import BackgroundTask
 from starlette.responses import StreamingResponse
 
-from open_webui.env import AGENT_API_BASE_URL, AGENT_API_AGENT
+from open_webui.env import AGENT_API_BASE_URL, AGENT_API_KEY
 from open_webui.socket.main import get_event_emitter
 
 log = logging.getLogger(__name__)
@@ -53,11 +53,17 @@ log = logging.getLogger(__name__)
 
 @dataclass
 class AgentPayload:
-    """Request schema for the agent API's chat completions endpoint."""
+    """Request schema for the agent API's chat completions endpoint.
 
-    agent: str
+    The ``agent`` field is optional — when omitted, the agent service
+    uses its configured ``default_agent``. The ``model`` field carries
+    the user-selected LLM and is validated server-side against the
+    service's allowlist.
+    """
+
     model: str
     messages: list[dict[str, Any]]
+    agent: Optional[str] = None
     stream: bool = True
     chat_id: Optional[str] = None
     user_id: Optional[str] = None
@@ -68,6 +74,10 @@ class AgentPayload:
     knowledge: Optional[list[dict[str, Any]]] = None
     tool_ids: Optional[list[str]] = None
     rag_filter: Optional[dict[str, Any]] = None
+    # Operator-supplied system prompt from the custom-model definition
+    # (model.params.system). Variables are pre-substituted upstream so the
+    # agent can use the value as-is.
+    system_prompt: Optional[str] = None
     # Model params forwarded directly
     temperature: Optional[float] = None
     top_p: Optional[float] = None
@@ -80,9 +90,9 @@ class AgentPayload:
 
 def build_agent_payload(
     *,
-    agent: str,
     model: str,
     messages: list[dict[str, Any]],
+    agent: Optional[str] = None,
     stream: bool = True,
     chat_id: Optional[str] = None,
     user_id: Optional[str] = None,
@@ -93,6 +103,7 @@ def build_agent_payload(
     knowledge: Optional[list[dict[str, Any]]] = None,
     tool_ids: Optional[list[str]] = None,
     rag_filter: Optional[dict[str, Any]] = None,
+    system_prompt: Optional[str] = None,
     **model_params,
 ) -> dict[str, Any]:
     """Build a JSON-serialisable payload for the agent API.
@@ -101,9 +112,9 @@ def build_agent_payload(
     values so the agent only sees fields that are actually set.
     """
     payload = AgentPayload(
-        agent=agent,
         model=model,
         messages=messages,
+        agent=agent,
         stream=stream,
         chat_id=chat_id,
         user_id=user_id,
@@ -114,9 +125,23 @@ def build_agent_payload(
         knowledge=knowledge,
         tool_ids=tool_ids,
         rag_filter=rag_filter,
+        system_prompt=system_prompt,
         **{k: v for k, v in model_params.items() if v is not None},
     )
     return {k: v for k, v in asdict(payload).items() if v is not None}
+
+
+def _agent_api_headers() -> dict[str, str]:
+    """Build outbound headers for requests to the agent API.
+
+    Always sends ``Content-Type: application/json``. When ``AGENT_API_KEY``
+    is configured, adds the ``X-API-Key`` header so the agent service
+    (which enforces auth on all ``/v1/*`` routes) accepts the request.
+    """
+    headers: dict[str, str] = {'Content-Type': 'application/json'}
+    if AGENT_API_KEY:
+        headers['X-API-Key'] = AGENT_API_KEY
+    return headers
 
 
 @dataclass
@@ -153,7 +178,7 @@ async def stream_agent_response(
             method='POST',
             url=f'{base_url}/v1/chat/completions',
             data=json.dumps(payload),
-            headers={'Content-Type': 'application/json'},
+            headers=_agent_api_headers(),
         )
 
         if response.status >= 400:
@@ -228,9 +253,19 @@ async def call_agent_api(
         if key in form_data:
             model_params[key] = form_data[key]
 
+    # [Gradient] Resolve to the underlying LLM ID. The agents service
+    # validates ``model`` against its LLM allowlist; OpenWebUI custom-model
+    # IDs (e.g. "offertemachine") aren't LLMs and aren't in the allowlist.
+    # The base model (e.g. "gpt-oss-120b") is. ``metadata["model"]["info"]``
+    # carries the persisted custom_model dump for custom models; absent for
+    # pure base models, arena models, and direct mode — those fall back to
+    # the form_data model, which is already the LLM ID in those cases.
+    model_dict = metadata.get('model') or {}
+    info = model_dict.get('info') or {}
+    llm_model = info.get('base_model_id') or form_data.get('model', '')
+
     payload = build_agent_payload(
-        agent=AGENT_API_AGENT,
-        model=form_data.get('model', ''),
+        model=llm_model,
         messages=form_data.get('messages', []),
         stream=stream,
         chat_id=metadata.get('chat_id'),
@@ -242,6 +277,7 @@ async def call_agent_api(
         knowledge=metadata.get('knowledge'),
         tool_ids=metadata.get('tool_ids'),
         rag_filter=metadata.get('rag_filter'),
+        system_prompt=metadata.get('system_prompt'),
         **model_params,
     )
 
@@ -266,7 +302,7 @@ async def _call_agent_api_non_streaming(
             method='POST',
             url=f'{AGENT_API_BASE_URL}/v1/chat/completions',
             data=json.dumps(payload),
-            headers={'Content-Type': 'application/json'},
+            headers=_agent_api_headers(),
         )
 
         if response.status >= 400:
