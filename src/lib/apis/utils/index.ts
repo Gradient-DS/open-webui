@@ -118,14 +118,22 @@ export const downloadChatAsPDF = async (token: string, title: string, messages: 
 	return blob;
 };
 
-export const exportChatAsPdf = async (token: string, title: string, messages: object[]) => {
+export const exportChatAsPdf = async (
+	token: string,
+	title: string,
+	messages: object[],
+	options: { includeChrome?: boolean } = {}
+) => {
+	const body: Record<string, unknown> = { title, messages };
+	if (options.includeChrome === false) body.include_chrome = false;
+
 	const blob = await fetch(`${WEBUI_API_BASE_URL}/utils/chat/pdf`, {
 		method: 'POST',
 		headers: {
 			'Content-Type': 'application/json',
 			Authorization: `Bearer ${token}`
 		},
-		body: JSON.stringify({ title, messages })
+		body: JSON.stringify(body)
 	}).then((res) => {
 		if (!res.ok) throw new Error('PDF export failed');
 		return res.blob();
@@ -133,14 +141,22 @@ export const exportChatAsPdf = async (token: string, title: string, messages: ob
 	return blob;
 };
 
-export const exportChatAsDocx = async (token: string, title: string, messages: object[]) => {
+export const exportChatAsDocx = async (
+	token: string,
+	title: string,
+	messages: object[],
+	options: { includeChrome?: boolean } = {}
+) => {
+	const body: Record<string, unknown> = { title, messages };
+	if (options.includeChrome === false) body.include_chrome = false;
+
 	const blob = await fetch(`${WEBUI_API_BASE_URL}/utils/chat/docx`, {
 		method: 'POST',
 		headers: {
 			'Content-Type': 'application/json',
 			Authorization: `Bearer ${token}`
 		},
-		body: JSON.stringify({ title, messages })
+		body: JSON.stringify(body)
 	}).then((res) => {
 		if (!res.ok) throw new Error('DOCX export failed');
 		return res.blob();

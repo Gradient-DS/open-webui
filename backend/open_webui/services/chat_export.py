@@ -11,8 +11,12 @@ log = logging.getLogger(__name__)
 TEMPLATE_DIR = Path(__file__).parent.parent / 'templates'
 
 
-def _render_html(title: str, messages: list[dict]) -> str:
-    """Render chat as styled HTML using Jinja2 template."""
+def _render_html(title: str, messages: list[dict], include_chrome: bool = True) -> str:
+    """Render chat as styled HTML using Jinja2 template.
+
+    When include_chrome is False, the title heading and per-message role labels
+    are omitted — used for single-message exports where that chrome is noise.
+    """
     from jinja2 import Environment, FileSystemLoader, select_autoescape
 
     prepared_messages, sources = prepare_export_messages(messages)
@@ -27,19 +31,20 @@ def _render_html(title: str, messages: list[dict]) -> str:
         title=title,
         messages=prepared_messages,
         sources=sources,
+        include_chrome=include_chrome,
     )
 
 
-def generate_pdf(title: str, messages: list[dict]) -> bytes:
+def generate_pdf(title: str, messages: list[dict], include_chrome: bool = True) -> bytes:
     """Generate PDF from chat messages."""
     from weasyprint import HTML
 
-    html_string = _render_html(title, messages)
+    html_string = _render_html(title, messages, include_chrome=include_chrome)
     pdf_bytes = HTML(string=html_string).write_pdf()
     return pdf_bytes
 
 
-def generate_docx(title: str, messages: list[dict]) -> bytes:
+def generate_docx(title: str, messages: list[dict], include_chrome: bool = True) -> bytes:
     """Generate DOCX from chat messages using python-docx directly."""
     from docx import Document
     from docx.shared import Pt, Inches, RGBColor
@@ -56,19 +61,19 @@ def generate_docx(title: str, messages: list[dict]) -> bytes:
     font.name = 'Calibri'
     font.size = Pt(11)
 
-    # Title
-    title_para = doc.add_heading(title, level=1)
+    if include_chrome:
+        title_para = doc.add_heading(title, level=1)
 
     # Messages
     parser = HtmlToDocx()
     for msg in prepared_messages:
-        # Role header
-        role_para = doc.add_paragraph()
-        role_run = role_para.add_run(msg['role'].upper())
-        role_run.bold = True
-        role_run.font.size = Pt(10)
-        role_run.font.color.rgb = RGBColor(0x55, 0x55, 0x55)
-        role_para.space_after = Pt(4)
+        if include_chrome:
+            role_para = doc.add_paragraph()
+            role_run = role_para.add_run(msg['role'].upper())
+            role_run.bold = True
+            role_run.font.size = Pt(10)
+            role_run.font.color.rgb = RGBColor(0x55, 0x55, 0x55)
+            role_para.space_after = Pt(4)
 
         # Content — use htmldocx for the message body HTML only
         html_content = msg.get('html_content', '')

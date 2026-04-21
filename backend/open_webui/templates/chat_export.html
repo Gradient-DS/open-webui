@@ -99,11 +99,11 @@
 		</style>
 	</head>
 	<body>
-		<h1>{{ title }}</h1>
+		{% if include_chrome %}<h1>{{ title }}</h1>{% endif %}
 
 		{% for message in messages %}
 		<div class="message">
-			<div class="role">{{ message.role }}</div>
+			{% if include_chrome %}<div class="role">{{ message.role }}</div>{% endif %}
 			<div class="content">{{ message.html_content | safe }}</div>
 		</div>
 		{% endfor %} {% if sources %}

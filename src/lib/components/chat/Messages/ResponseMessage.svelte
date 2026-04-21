@@ -244,7 +244,8 @@
 			const blob = await exportChatAsPdf(
 				localStorage.token,
 				getMessageFilename('pdf').replace(/\.pdf$/, ''),
-				buildExportMessagePayload()
+				buildExportMessagePayload(),
+				{ includeChrome: false }
 			);
 			if (blob) saveAs(blob, getMessageFilename('pdf'));
 		} catch (e) {
@@ -258,7 +259,8 @@
 			const blob = await exportChatAsDocx(
 				localStorage.token,
 				getMessageFilename('docx').replace(/\.docx$/, ''),
-				buildExportMessagePayload()
+				buildExportMessagePayload(),
+				{ includeChrome: false }
 			);
 			if (blob) saveAs(blob, getMessageFilename('docx'));
 		} catch (e) {
