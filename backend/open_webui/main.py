@@ -611,7 +611,6 @@ from open_webui.env import (
     ENABLE_STAR_SESSIONS_MIDDLEWARE,
     ENABLE_PUBLIC_ACTIVE_USERS_COUNT,
     AGENT_API_ENABLED,  # [Gradient] Agent API bypass flag
-    AGENT_API_AGENTS,  # [Gradient] List of configured external agents
     CLIENT_NAME,
     # Admin Account Runtime Creation
     WEBUI_ADMIN_EMAIL,
@@ -1375,7 +1374,6 @@ app.state.config.INTEGRATION_PROVIDERS = INTEGRATION_PROVIDERS
 
 app.state.config.ENABLE_AGENT_PROXY = ENABLE_AGENT_PROXY
 
-app.state.config.AGENT_API_AGENTS = AGENT_API_AGENTS
 app.state.config.AGENT_API_SELECTED_AGENT = AGENT_API_SELECTED_AGENT
 
 app.state.config.ENABLE_2FA = ENABLE_2FA
