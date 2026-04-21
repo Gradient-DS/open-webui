@@ -794,6 +794,12 @@ else:
 AGENT_API_ENABLED = os.environ.get('AGENT_API_ENABLED', 'False').lower() == 'true'
 AGENT_API_BASE_URL = os.environ.get('AGENT_API_BASE_URL', '').strip().rstrip('/')
 AGENT_API_KEY = os.environ.get('AGENT_API_KEY', '').strip()
+# Optional list of agent identifiers the admin can pick from in the
+# "External Agents" admin tab. When set, the admin's selection is
+# forwarded as ``AgentPayload.agent`` — an override hint. When empty
+# (or no selection), the payload omits ``agent`` and the agents service
+# falls back to its configured ``default_agent``.
+AGENT_API_AGENTS = [a.strip() for a in os.environ.get('AGENT_API_AGENTS', '').split(',') if a.strip()]
 
 
 ####################################

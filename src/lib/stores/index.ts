@@ -328,6 +328,7 @@ type Config = {
 		feature_admin_functions?: boolean;
 		feature_admin_settings?: boolean;
 		feature_admin_settings_tabs?: string[];
+		feature_agent_api_enabled?: boolean;
 		feature_chat_controls_sections?: string[];
 		feature_skills?: boolean;
 		feature_builtin_tools?: boolean;

@@ -264,8 +264,14 @@ async def call_agent_api(
     info = model_dict.get('info') or {}
     llm_model = info.get('base_model_id') or form_data.get('model', '')
 
+    # [Gradient] Optional agent-override hint from the External Agents admin
+    # tab. When empty, we omit ``agent`` from the payload and the agents
+    # service uses its own ``default_agent``.
+    selected_agent = request.app.state.config.AGENT_API_SELECTED_AGENT or None
+
     payload = build_agent_payload(
         model=llm_model,
+        agent=selected_agent,
         messages=form_data.get('messages', []),
         stream=stream,
         chat_id=metadata.get('chat_id'),

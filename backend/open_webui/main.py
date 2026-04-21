@@ -382,6 +382,8 @@ from open_webui.config import (
     INTEGRATION_PROVIDERS,
     # Agent Proxy
     ENABLE_AGENT_PROXY,
+    # Agent API (external agent selection)
+    AGENT_API_SELECTED_AGENT,
     # 2FA / TOTP
     ENABLE_2FA,
     REQUIRE_2FA,
@@ -609,6 +611,7 @@ from open_webui.env import (
     ENABLE_STAR_SESSIONS_MIDDLEWARE,
     ENABLE_PUBLIC_ACTIVE_USERS_COUNT,
     AGENT_API_ENABLED,  # [Gradient] Agent API bypass flag
+    AGENT_API_AGENTS,  # [Gradient] List of configured external agents
     CLIENT_NAME,
     # Admin Account Runtime Creation
     WEBUI_ADMIN_EMAIL,
@@ -1371,6 +1374,9 @@ app.state.config.EMAIL_INVITE_HEADING = EMAIL_INVITE_HEADING
 app.state.config.INTEGRATION_PROVIDERS = INTEGRATION_PROVIDERS
 
 app.state.config.ENABLE_AGENT_PROXY = ENABLE_AGENT_PROXY
+
+app.state.config.AGENT_API_AGENTS = AGENT_API_AGENTS
+app.state.config.AGENT_API_SELECTED_AGENT = AGENT_API_SELECTED_AGENT
 
 app.state.config.ENABLE_2FA = ENABLE_2FA
 app.state.config.REQUIRE_2FA = REQUIRE_2FA
@@ -2576,6 +2582,7 @@ async def get_app_config(request: Request):
                     ),
                     'enable_email_invites': app.state.config.ENABLE_EMAIL_INVITES,
                     'enable_agent_proxy': app.state.config.ENABLE_AGENT_PROXY,
+                    'feature_agent_api_enabled': AGENT_API_ENABLED,
                     'require_2fa': app.state.config.REQUIRE_2FA,
                     'two_fa_grace_period_days': app.state.config.TWO_FA_GRACE_PERIOD_DAYS,
                     'enable_data_warnings': app.state.config.ENABLE_DATA_WARNINGS,

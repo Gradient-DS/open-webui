@@ -109,7 +109,8 @@ export const ADMIN_SETTINGS_TABS = [
 	'email',
 	'security',
 	'db',
-	'acceptance'
+	'acceptance',
+	'external-agents'
 ] as const;
 
 export type AdminSettingsTab = (typeof ADMIN_SETTINGS_TABS)[number];
@@ -150,6 +151,11 @@ export function isAdminSettingsTabEnabled(tab: AdminSettingsTab): boolean {
 	// Audio tab has additional requirement: FEATURE_VOICE must be true
 	if (tab === 'audio') {
 		return tabAllowed && isFeatureEnabled('voice');
+	}
+
+	// External Agents tab requires AGENT_API_ENABLED on the backend.
+	if (tab === 'external-agents') {
+		return tabAllowed && Boolean($config?.features?.feature_agent_api_enabled);
 	}
 
 	return tabAllowed;

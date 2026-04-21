@@ -30,6 +30,7 @@
 	import Acceptance from './Settings/Acceptance.svelte';
 	import Email from './Settings/Email.svelte';
 	import Security from './Settings/Security.svelte';
+	import ExternalAgents from './Settings/ExternalAgents.svelte';
 
 	import ChartBar from '../icons/ChartBar.svelte';
 	import DocumentChartBar from '../icons/DocumentChartBar.svelte';
@@ -265,6 +266,12 @@
 			title: 'Acceptance',
 			route: '/admin/settings/acceptance',
 			keywords: ['acceptance', 'modal', 'terms', 'agreement', 'onboarding']
+		},
+		{
+			id: 'external-agents',
+			title: 'External Agents',
+			route: '/admin/settings/external-agents',
+			keywords: ['agent', 'external', 'agents', 'ai']
 		}
 	];
 
@@ -576,6 +583,19 @@
 								clip-rule="evenodd"
 							/>
 						</svg>
+					{:else if tab.id === 'external-agents'}
+						<svg
+							xmlns="http://www.w3.org/2000/svg"
+							viewBox="0 0 24 24"
+							fill="currentColor"
+							class="w-4 h-4"
+						>
+							<path
+								fill-rule="evenodd"
+								d="M12 2.25a.75.75 0 0 1 .75.75v.756a49.106 49.106 0 0 1 9.152 1 .75.75 0 0 1-.152 1.485h-1.918l2.474 10.124a.75.75 0 0 1-.375.83 6.723 6.723 0 0 1-3.181.795 6.723 6.723 0 0 1-3.181-.795.75.75 0 0 1-.375-.83l2.474-10.124H12.75v13.28c1.293.076 2.534.343 3.697.776a.75.75 0 0 1-.262 1.455H7.815a.75.75 0 0 1-.262-1.455c1.163-.433 2.404-.7 3.697-.776V5.772H5.422l2.474 10.124a.75.75 0 0 1-.375.83 6.723 6.723 0 0 1-3.181.795 6.723 6.723 0 0 1-3.181-.795.75.75 0 0 1-.375-.83L3.258 5.772H1.339a.75.75 0 0 1-.152-1.486 49.105 49.105 0 0 1 9.152-.999V3a.75.75 0 0 1 .75-.75Zm-6.443 13.24a5.223 5.223 0 0 1-2.114 0l1.057-4.328 1.057 4.328Zm13.886 0a5.222 5.222 0 0 1-2.114 0l1.057-4.328 1.057 4.328Z"
+								clip-rule="evenodd"
+							/>
+						</svg>
 					{/if}
 				</div>
 				<div class=" self-center">{$i18n.t(tab.title)}</div>
@@ -689,6 +709,12 @@
 
 					await tick();
 					await config.set(await getBackendConfig());
+				}}
+			/>
+		{:else if selectedTab === 'external-agents'}
+			<ExternalAgents
+				saveHandler={() => {
+					toast.success($i18n.t('Agent selection saved'));
 				}}
 			/>
 		{/if}

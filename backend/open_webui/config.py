@@ -19,6 +19,7 @@ from authlib.integrations.starlette_client import OAuth
 
 
 from open_webui.env import (
+    AGENT_API_AGENTS,
     DATA_DIR,
     DATABASE_URL,
     ENABLE_DB_MIGRATIONS,
@@ -3329,6 +3330,22 @@ ENABLE_AGENT_PROXY = PersistentConfig(
     'ENABLE_AGENT_PROXY',
     'agent_proxy.enable',
     os.environ.get('ENABLE_AGENT_PROXY', 'False').lower() == 'true',
+)
+
+####################################
+# Agent API — Active Agent Selection
+####################################
+
+# The agent identifier forwarded as an override hint to the external agent
+# service. Persisted in the config DB so admins can switch agents at runtime
+# via Admin Settings > External Agents. Defaults to the first entry in
+# AGENT_API_AGENTS when set, otherwise empty — in which case the payload
+# omits ``agent`` and the agents service uses its own ``default_agent``.
+_default_selected_agent = AGENT_API_AGENTS[0] if AGENT_API_AGENTS else ''
+AGENT_API_SELECTED_AGENT = PersistentConfig(
+    'AGENT_API_SELECTED_AGENT',
+    'agent_api.selected_agent',
+    _default_selected_agent,
 )
 
 

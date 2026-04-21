@@ -424,6 +424,11 @@ openWebui:
     agentApiEnabled: "false"
     agentApiBaseUrl: ""
     agentApiKey: ""
+    # Comma-separated list of agent identifiers the admin can select from in
+    # the External Agents tab. When empty, the agents service uses its own
+    # default_agent. When set, the admin's selection is forwarded as an
+    # override hint in the payload.
+    agentApiAgents: ""
 
     # Agent Proxy (external: exposes agent API to external callers via /api/v1/agent/)
     enableAgentProxy: "false"
