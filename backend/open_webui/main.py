@@ -789,6 +789,13 @@ async def lifespan(app: FastAPI):
     # This allows sync functions to schedule work on the main loop without blocking health checks
     app.state.main_loop = asyncio.get_running_loop()
 
+    # Register the same loop with the module-level bridge used by sync
+    # background handlers that can't reach request.app.state (e.g. the
+    # data-export worker). See utils/loop_bridge.py.
+    from open_webui.utils.loop_bridge import set_main_loop
+
+    set_main_loop(app.state.main_loop)
+
     # Discard any async Redis clients that were accidentally constructed at
     # module import — their asyncio primitives are bound to the wrong event
     # loop under HA. See thoughts/shared/research/2026-04-20-redis-ha-loop-bug-and-kind-repro.md.

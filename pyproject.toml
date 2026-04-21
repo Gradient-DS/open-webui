@@ -9,7 +9,7 @@ dependencies = [
     "fastapi==0.135.1",
     "uvicorn[standard]==0.41.0",
     "pydantic==2.12.5",
-    "python-multipart==0.0.22",
+    "python-multipart==0.0.26",
     "itsdangerous==2.2.0",
 
     "python-socketio==5.16.1",
@@ -18,7 +18,7 @@ dependencies = [
     "bcrypt==5.0.0",
     "argon2-cffi==25.1.0",
     "PyJWT[crypto]==2.11.0",
-    "authlib==1.6.9",
+    "authlib==1.6.11",
 
     "requests==2.32.5",
     "aiohttp==3.13.2", # do not update to 3.13.3 - broken
@@ -56,7 +56,7 @@ dependencies = [
     "langchain==1.2.10",
     "langchain-community==0.4.1",
     "langchain-classic==1.0.1",
-    "langchain-text-splitters==1.1.1",
+    "langchain-text-splitters==1.1.2",
 
     "fake-useragent==2.2.0",
     "chromadb==1.5.2",
@@ -72,7 +72,7 @@ dependencies = [
 
     "ftfy==6.3.1",
     "chardet==5.2.0",
-    "pypdf==6.7.5",
+    "pypdf==6.10.2",
     "fpdf2==2.8.7",
     "pymdown-extensions==10.21",
     "docx2txt==0.9",
@@ -92,7 +92,7 @@ dependencies = [
     "soundfile==0.13.1",
     "azure-ai-documentintelligence==1.0.2",
 
-    "pillow==12.1.1",
+    "pillow==12.2.0",
     "opencv-python-headless==4.13.0.92",
     "rapidocr-onnxruntime==1.4.4",
     "rank-bm25==0.2.2",
@@ -154,7 +154,7 @@ all = [
     "moto[s3]>=5.0.26",
     "gcp-storage-emulator>=2024.8.3",
     "docker~=7.1.0",
-    "pytest~=8.3.2",
+    "pytest>=9.0.3,<10",
     "pytest-docker~=3.2.5",
     "playwright==1.58.0", # Caution: version must match docker-compose.playwright.yaml - Update the docker-compose.yaml if necessary
     "elasticsearch==9.3.0",
