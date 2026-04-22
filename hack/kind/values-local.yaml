@@ -1,0 +1,72 @@
+# Pin fullname so resources render as `<RELEASE>-open-webui` etc.
+# (chart default would append "-open-webui-tenant" to the release name,
+#  producing soev-local-open-webui-tenant-open-webui — long and makes the
+#  Makefile's kubectl selectors brittle).
+fullnameOverride: "soev-local"
+
+tenant:
+  name: "soev-local"
+  domain: "soev.local"
+  clientName: "Soev Local"
+
+global:
+  imagePullSecrets: []
+
+openWebui:
+  replicaCount: 2
+  image:
+    repository: open-webui-local
+    tag: dev
+    pullPolicy: Never
+  persistence:
+    enabled: false       # RWO blocks multi-pod
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  migrationJob:
+    enabled: true
+  resources:
+    requests:
+      cpu: 100m
+      memory: 512Mi
+    limits:
+      memory: 2Gi
+  config:
+    # Chart default is weaviate, but we disabled the weaviate service below.
+    # chroma is in-process (SQLite) — zero infra.
+    vectorDb: "chroma"
+
+postgres:
+  enabled: true
+  persistence:
+    enabled: false
+
+redis:
+  enabled: true
+
+weaviate:
+  enabled: false
+
+networkPolicy:
+  enabled: false
+
+ciliumNetworkPolicy:
+  enabled: false
+
+externalSecrets:
+  enabled: false
+
+secrets:
+  webuiSecretKey: "local-dev-only-secret-key-change-me"
+  postgresPassword: "local-dev-postgres-password"
+  openaiApiKey: "sk-dummy"
+  ragOpenaiApiKey: "sk-dummy"
+
+ingress:
+  enabled: true
+  className: nginx
+  tls:
+    enabled: false
+  annotations: {}

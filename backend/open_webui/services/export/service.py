@@ -21,6 +21,7 @@ from open_webui.models.tags import Tags
 from open_webui.models.tools import Tools
 from open_webui.models.users import Users
 from open_webui.services.export.events import emit_export_status
+from open_webui.utils.loop_bridge import run_on_main_loop
 from open_webui.storage.provider import Storage
 
 log = logging.getLogger(__name__)
@@ -258,8 +259,10 @@ class ExportService:
         Collects data, builds ZIP, notifies user.
         """
         try:
-            # Notify: processing
-            asyncio.run(emit_export_status(user_id, 'processing'))
+            # Notify: processing. Dispatch onto uvicorn's main loop —
+            # asyncio.run would create a throwaway loop and poison the shared
+            # Socket.IO Redis pool.
+            run_on_main_loop(emit_export_status(user_id, 'processing'))
 
             # Collect all data
             data = ExportService.collect_user_data(user_id)
@@ -269,13 +272,13 @@ class ExportService:
 
             # Notify: completed
             relative_path = f'exports/{user_id}/{zip_path.name}'
-            asyncio.run(emit_export_status(user_id, 'completed', export_path=relative_path))
+            run_on_main_loop(emit_export_status(user_id, 'completed', export_path=relative_path))
 
             log.info(f'Data export completed for user {user_id}: {zip_path}')
 
         except Exception as e:
             log.error(f'Data export failed for user {user_id}: {e}')
-            asyncio.run(emit_export_status(user_id, 'failed', error=str(e)))
+            run_on_main_loop(emit_export_status(user_id, 'failed', error=str(e)))
 
     @staticmethod
     def cleanup_expired_exports():

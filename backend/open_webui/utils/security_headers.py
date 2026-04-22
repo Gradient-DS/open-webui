@@ -8,7 +8,7 @@ class SecurityHeadersMiddleware:
     """Pure ASGI-3 middleware. Injects static security response headers computed at startup.
 
     Avoids starlette.middleware.base.BaseHTTPMiddleware to prevent per-request sub-task
-    spawning that can cross event loops with long-lived async resources (see REDIS-HA-FIX.md).
+    spawning that can cross event loops with long-lived async resources (see thoughts/shared/research/2026-04-20-redis-ha-loop-bug-and-kind-repro.md).
     """
 
     def __init__(self, app):
