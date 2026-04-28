@@ -12,6 +12,15 @@ export interface FailedFile {
 	error_message: string;
 }
 
+export interface StageCounts {
+	pending?: number;
+	downloading?: number;
+	parsing?: number;
+	ingesting?: number;
+	ok?: number;
+	failed?: number;
+}
+
 export interface SyncStatusResponse {
 	knowledge_id: string;
 	status: 'idle' | 'syncing' | 'completed' | 'completed_with_errors' | 'failed' | 'cancelled';
@@ -21,6 +30,7 @@ export interface SyncStatusResponse {
 	error?: string;
 	source_count?: number;
 	failed_files?: FailedFile[];
+	stage_counts?: StageCounts;
 }
 
 export interface TokenStatusResponse {

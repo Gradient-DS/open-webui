@@ -281,6 +281,17 @@ data:
   ONEDRIVE_MAX_FILE_SIZE_MB: {{ .Values.openWebui.config.onedriveMaxFileSizeMb | quote }}
   KNOWLEDGE_MAX_FILE_COUNT: {{ .Values.openWebui.config.knowledgeMaxFileCount | quote }}
 
+  # Shared-services loader-worker (per-tenant). When useSharedLoader=true,
+  # cloud-source sync workers submit jobs to the loader-worker pod instead of
+  # downloading + embedding in-process. See helm/open-webui-tenant/templates/loader-worker/.
+  USE_SHARED_LOADER: {{ .Values.openWebui.config.useSharedLoader | default "false" | quote }}
+  {{- if .Values.loaderWorker.enabled }}
+  LOADER_WORKER_URL: "http://{{ include "open-webui-tenant.loaderWorker.fullname" . }}.{{ .Release.Namespace }}.svc:{{ .Values.loaderWorker.service.port | default 8002 }}"
+  {{- else if .Values.openWebui.config.loaderWorkerUrl }}
+  LOADER_WORKER_URL: {{ .Values.openWebui.config.loaderWorkerUrl | quote }}
+  {{- end }}
+  TENANT_NAME: {{ .Values.tenant.name | default .Release.Namespace | quote }}
+
   # Email Invites (Microsoft Graph API)
   ENABLE_EMAIL_INVITES: {{ .Values.openWebui.config.enableEmailInvites | quote }}
   {{- if .Values.openWebui.config.emailGraphTenantId }}
@@ -417,8 +428,18 @@ data:
   AGENT_API_AGENTS: {{ .Values.openWebui.config.agentApiAgents | default "" | quote }}
   {{- end }}
 
+  # [Gradient] Per-chat agent picker UI (Settings → Agents admin tab +
+  # new-chat empty-state cards). Layered on top of AGENT_API_ENABLED.
+  FEATURE_AGENT_PICKER: {{ .Values.openWebui.config.featureAgentPicker | default "false" | quote }}
+
   # Agent Proxy (external: exposes agent API to external callers)
   ENABLE_AGENT_PROXY: {{ .Values.openWebui.config.enableAgentProxy | default "false" | quote }}
+
+  # Agent Search (machine-auth retrieval endpoint at /api/v1/internal/retrieval/query
+  # and /api/v1/internal/retrieval/accessible-kbs). Inbound bearer is validated
+  # against the same AGENT_API_KEY used for the open-webui → agent outbound
+  # call (single shared secret across the per-tenant trust boundary).
+  AGENT_SEARCH_ENABLED: {{ .Values.agentSearch.enabled | default false | quote }}
 
   # Two-Factor Authentication (TOTP)
   ENABLE_2FA: {{ .Values.openWebui.config.enable2fa | default "false" | quote }}

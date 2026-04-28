@@ -23,6 +23,7 @@
 
 	import ShareChatModal from '../chat/ShareChatModal.svelte';
 	import ModelSelector from '../chat/ModelSelector.svelte';
+	import AgentBadge from './AgentBadge.svelte';
 	import Tooltip from '../common/Tooltip.svelte';
 	import Menu from '$lib/components/layout/Navbar/Menu.svelte';
 	import UserMenu from '$lib/components/layout/Sidebar/UserMenu.svelte';
@@ -118,6 +119,17 @@
 				</div>
 
 				<div class="self-start flex flex-none items-center text-gray-600 dark:text-gray-400">
+					{#if chat?.meta?.agent_id}
+						<!-- [Gradient] Inline with the right-side menu icons so
+						     the badge sits on the same row and never grows the
+						     navbar height. Shown both on real chats (binding
+						     comes from chat.meta.agent_id) and on the empty
+						     state when the user has picked an agent (binding
+						     comes from $pendingAgentId, threaded in via Chat.svelte). -->
+						<div class="hidden sm:flex items-center mr-1 self-center">
+							<AgentBadge agentId={chat.meta.agent_id} />
+						</div>
+					{/if}
 					<!-- <div class="md:hidden flex self-center w-[1px] h-5 mx-2 bg-gray-300 dark:bg-stone-700" /> -->
 
 					{#if isFeatureEnabled('temporary_chat') && ($user?.role === 'user' ? ($user?.permissions?.chat?.temporary ?? true) && !($user?.permissions?.chat?.temporary_enforced ?? false) : true)}

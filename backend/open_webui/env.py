@@ -801,6 +801,11 @@ AGENT_API_KEY = os.environ.get('AGENT_API_KEY', '').strip()
 # falls back to its configured ``default_agent``.
 AGENT_API_AGENTS = [a.strip() for a in os.environ.get('AGENT_API_AGENTS', '').split(',') if a.strip()]
 
+# [Gradient] Master kill switch for the agent picker UI (admin tab + new-chat
+# empty-state cards). Defaults OFF. Layered on top of AGENT_API_ENABLED — both
+# must be true for users to see the agent picker on the empty state.
+FEATURE_AGENT_PICKER = os.environ.get('FEATURE_AGENT_PICKER', 'False').lower() == 'true'
+
 
 ####################################
 # SENTENCE TRANSFORMERS

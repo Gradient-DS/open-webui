@@ -60,6 +60,7 @@
 	import Spinner from '$lib/components/common/Spinner.svelte';
 	import Files from './KnowledgeBase/Files.svelte';
 	import SourceGroupedFiles from './KnowledgeBase/SourceGroupedFiles.svelte';
+	import SyncProgress from './KnowledgeBase/SyncProgress.svelte';
 	import AddFilesPlaceholder from '$lib/components/AddFilesPlaceholder.svelte';
 
 	import AddContentMenu from './KnowledgeBase/AddContentMenu.svelte';
@@ -818,7 +819,15 @@
 	const pollCloudSyncStatus = async (provider: CloudSyncProvider) => {
 		const state = cloudSyncState[provider.type];
 		try {
-			state.syncStatus = await provider.api.getSyncStatus(localStorage.token, knowledge.id);
+			const fetched = await provider.api.getSyncStatus(localStorage.token, knowledge.id);
+			// Merge instead of replace so the higher-frequency Socket.IO event
+			// stream (which carries stage_counts) doesn't get clobbered every
+			// 2s by this polling fallback.
+			state.syncStatus = {
+				...(state.syncStatus ?? {}),
+				...fetched,
+				stage_counts: fetched.stage_counts ?? state.syncStatus?.stage_counts
+			};
 			cloudSyncState = cloudSyncState;
 
 			if (state.syncStatus.status === 'syncing') {
@@ -1054,6 +1063,7 @@
 			files_failed?: number;
 			deleted_count?: number;
 			failed_files?: FailedFile[];
+			stage_counts?: import('$lib/apis/sync').StageCounts;
 		}
 	) {
 		const state = cloudSyncState[providerType];
@@ -1062,14 +1072,19 @@
 		// Only process events for the current knowledge base
 		if (data.knowledge_id !== knowledge?.id) return;
 
-		// Update sync status
+		// Update sync status. Preserve any existing stage_counts when the
+		// incoming event doesn't carry one (e.g. completion/cancellation
+		// emits) — otherwise the SyncProgress component unmounts and the UI
+		// flickers between bar and legacy badge mid-sync.
 		state.syncStatus = {
+			...(state.syncStatus ?? {}),
 			knowledge_id: data.knowledge_id,
 			status: data.status as SyncStatusResponse['status'],
 			progress_current: data.current,
 			progress_total: data.total,
 			error: data.error,
-			failed_files: data.failed_files
+			failed_files: data.failed_files,
+			stage_counts: data.stage_counts ?? state.syncStatus?.stage_counts
 		};
 		cloudSyncState = cloudSyncState;
 
@@ -1835,17 +1850,12 @@
 										</button>
 									</Tooltip>
 								{/if}
-								{#if isSyncBusy && activeState?.syncStatus?.progress_total}
-									<Tooltip content={$i18n.t('Sync progress')}>
-										<div class="text-xs text-blue-500 font-medium">
-											{activeState.syncStatus.progress_current ?? 0} / {activeState.syncStatus
-												.progress_total}
-										</div>
-									</Tooltip>
-								{:else if isSyncBusy}
-									<div class="text-xs text-blue-500 font-medium flex items-center gap-1">
-										<Spinner className="size-3" />
-									</div>
+								{#if isSyncBusy}
+									<SyncProgress
+										current={activeState?.syncStatus?.progress_current ?? 0}
+										total={activeState?.syncStatus?.progress_total ?? 0}
+										stageCounts={activeState?.syncStatus?.stage_counts}
+									/>
 								{:else if fileItemsTotal}
 									{#if knowledge?.type !== 'local' && knowledge?.type}
 										{@const maxFiles =

@@ -59,8 +59,14 @@ async def emit_sync_progress(
     files_failed: int = 0,
     deleted_count: int = 0,
     failed_files: Optional[List[Dict]] = None,
+    stage_counts: Optional[Dict[str, int]] = None,
 ):
-    """Emit sync progress event to a specific user via Socket.IO."""
+    """Emit sync progress event to a specific user via Socket.IO.
+
+    ``stage_counts`` (when present) carries the loader-worker's per-stage
+    breakdown — ``{downloading, parsing, ingesting, ok, failed, pending}`` —
+    so the UI can render a stage tooltip alongside the n/m counter.
+    """
     try:
         from open_webui.socket.main import sio
 
@@ -77,6 +83,7 @@ async def emit_sync_progress(
                 'files_failed': files_failed,
                 'deleted_count': deleted_count,
                 'failed_files': failed_files,
+                'stage_counts': stage_counts,
             },
             room=f'user:{user_id}',
         )
