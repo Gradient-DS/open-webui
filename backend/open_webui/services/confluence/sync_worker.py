@@ -7,9 +7,9 @@ import time
 from typing import Optional, Dict, Any, List
 
 import httpx
-from markdownify import markdownify as html_to_markdown
 
 from open_webui.services.confluence.confluence_client import ConfluenceClient
+from open_webui.services.confluence.html_renderer import html_to_markdown
 from open_webui.services.sync.base_worker import BaseSyncWorker
 from open_webui.models.knowledge import Knowledges
 from open_webui.models.files import Files
@@ -141,31 +141,34 @@ class ConfluenceSyncWorker(BaseSyncWorker):
 
         pages = await self._list_pages_for_source(source, client)
 
-        page_map: Dict[str, int] = source.get('page_map', {}) or {}
+        old_page_map: Dict[str, int] = source.get('page_map', {}) or {}
         current_ids = {p['id'] for p in pages}
 
         # Detect deletions: previously tracked pages no longer present.
         deleted_count = 0
-        for old_id in list(page_map.keys()):
+        for old_id in list(old_page_map.keys()):
             if old_id not in current_ids:
                 await self._handle_deleted_item({'id': old_id})
-                page_map.pop(old_id, None)
                 deleted_count += 1
 
         files_to_process: List[Dict[str, Any]] = []
+        new_page_map: Dict[str, int] = {}
         source_item_id = source['item_id']
 
         for page in pages:
             page_id = page['id']
+            current_version = int((page.get('version') or {}).get('number') or 0)
+            # Track current version for next sync's deletion-detection + skip
+            # check. Mirror of `last_synced_version` in _collect_single_file.
+            new_page_map[page_id] = current_version
+
             # Dedupe across overlapping sources: each page only queued once
             # per sync, regardless of how many sources reference it.
             if page_id in self._seen_page_ids:
                 continue
             self._seen_page_ids.add(page_id)
 
-            current_version = int((page.get('version') or {}).get('number') or 0)
-            stored_version = int(page_map.get(page_id) or 0)
-
+            stored_version = int(old_page_map.get(page_id) or 0)
             relative_path = (page.get('title') or f'page-{page_id}').strip()
 
             if current_version and current_version == stored_version:
@@ -196,12 +199,10 @@ class ConfluenceSyncWorker(BaseSyncWorker):
                     'source_item_id': source_item_id,
                     'name': _sanitise_filename(page.get('title') or '', page_id),
                     'relative_path': relative_path,
-                    'page_map_ref': page_map,
                 }
             )
 
-        # Persist back — deletions take effect even if no new pages.
-        source['page_map'] = page_map
+        source['page_map'] = new_page_map
         source['last_sync_at'] = int(time.time())
 
         return files_to_process, deleted_count
@@ -275,7 +276,9 @@ class ConfluenceSyncWorker(BaseSyncWorker):
 
         body = (page.get('body') or {}).get('view') or {}
         html = body.get('value') or ''
-        markdown_body = html_to_markdown(html, heading_style='ATX').strip() if html else ''
+        # html_to_markdown is sync + CPU-bound (BeautifulSoup parse); off-thread
+        # to avoid stalling the event loop on long pages.
+        markdown_body = await asyncio.to_thread(html_to_markdown, html) if html else ''
 
         title = page.get('title') or file_info.get('title') or f'page-{page_id}'
         version_number = (page.get('version') or {}).get('number')
@@ -309,7 +312,8 @@ class ConfluenceSyncWorker(BaseSyncWorker):
                 len(encoded),
                 max_bytes,
             )
-            encoded = encoded[:max_bytes]
+            # Decode-then-reencode trims any incomplete UTF-8 sequence at the cut.
+            encoded = encoded[:max_bytes].decode('utf-8', errors='ignore').encode('utf-8')
 
         return encoded
 
@@ -481,20 +485,6 @@ class ConfluenceSyncWorker(BaseSyncWorker):
             source_name,
         )
         return removed_count
-
-    # ------------------------------------------------------------------
-    # Post-process: persist page_map after successful downloads
-    # ------------------------------------------------------------------
-
-    def _update_page_map_after_success(self, file_info: Dict[str, Any]):
-        """Called after a page is successfully (re)synced — bump page_map entry."""
-        page_map_ref = file_info.get('page_map_ref')
-        if not isinstance(page_map_ref, dict):
-            return
-        page_id = file_info.get('page_id')
-        version = ((file_info.get('item') or {}).get('version') or {}).get('number')
-        if page_id and version is not None:
-            page_map_ref[page_id] = int(version)
 
     # ------------------------------------------------------------------
     # Confluence-specific helpers

@@ -898,8 +898,11 @@
 					items: syncItems
 				});
 			} else if (provider.type === 'confluence') {
+				// Stored sources have type='folder'/'file' (translated by the backend
+				// on first sync) and the original under confluence_type. The API model
+				// requires 'space' | 'page', so prefer confluence_type.
 				const syncItems: ConfluenceSyncItem[] = sources.map((source: any) => ({
-					type: source.type,
+					type: source.confluence_type ?? source.type,
 					cloud_id: source.cloud_id,
 					space_id: source.space_id,
 					space_key: source.space_key,
