@@ -1302,6 +1302,7 @@
 					id="sidebar-chats"
 					className="px-2 mt-0.5"
 					name={$i18n.t('Chats')}
+					collapsible={false}
 					chevron={false}
 					on:change={async (e) => {
 						selectedFolder.set(null);
