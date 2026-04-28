@@ -31,6 +31,7 @@
 	import Email from './Settings/Email.svelte';
 	import Security from './Settings/Security.svelte';
 	import ExternalAgents from './Settings/ExternalAgents.svelte';
+	import Agents from './Settings/Agents.svelte';
 
 	import ChartBar from '../icons/ChartBar.svelte';
 	import DocumentChartBar from '../icons/DocumentChartBar.svelte';
@@ -272,6 +273,12 @@
 			title: 'External Agents',
 			route: '/admin/settings/external-agents',
 			keywords: ['agent', 'external', 'agents', 'ai']
+		},
+		{
+			id: 'agents',
+			title: 'Agents',
+			route: '/admin/settings/agents',
+			keywords: ['agent', 'agents', 'beta', 'external', 'chatbot', 'picker']
 		}
 	];
 
@@ -596,6 +603,19 @@
 								clip-rule="evenodd"
 							/>
 						</svg>
+					{:else if tab.id === 'agents'}
+						<svg
+							xmlns="http://www.w3.org/2000/svg"
+							viewBox="0 0 24 24"
+							fill="currentColor"
+							class="w-4 h-4"
+						>
+							<path
+								fill-rule="evenodd"
+								d="M12 2.25a.75.75 0 0 1 .75.75v.518A6 6 0 0 1 18 9v3.75a3 3 0 0 1-3 3H9a3 3 0 0 1-3-3V9a6 6 0 0 1 5.25-5.482V3a.75.75 0 0 1 .75-.75ZM4.5 12.75a.75.75 0 0 1 .75-.75H6V9a6 6 0 0 1 .096-1.07A4.5 4.5 0 0 0 3 12c0 .414.336.75.75.75H4.5Zm15-.75a.75.75 0 0 1 .75.75h.75A.75.75 0 0 0 21 12a4.5 4.5 0 0 0-3.096-4.07c.063.349.096.706.096 1.07v3h.75a.75.75 0 0 1 .75.75ZM9.75 9.75a.75.75 0 0 0-1.5 0v1.5a.75.75 0 0 0 1.5 0v-1.5Zm6 0a.75.75 0 0 0-1.5 0v1.5a.75.75 0 0 0 1.5 0v-1.5ZM7.5 17.25a.75.75 0 0 1 .75.75c0 .414.336.75.75.75h6a.75.75 0 0 0 .75-.75.75.75 0 0 1 1.5 0 2.25 2.25 0 0 1-2.25 2.25H9a2.25 2.25 0 0 1-2.25-2.25.75.75 0 0 1 .75-.75Z"
+								clip-rule="evenodd"
+							/>
+						</svg>
 					{/if}
 				</div>
 				<div class=" self-center">{$i18n.t(tab.title)}</div>
@@ -715,6 +735,12 @@
 			<ExternalAgents
 				saveHandler={() => {
 					toast.success($i18n.t('Agent selection saved'));
+				}}
+			/>
+		{:else if selectedTab === 'agents'}
+			<Agents
+				saveHandler={() => {
+					toast.success($i18n.t('Settings saved successfully!'));
 				}}
 			/>
 		{/if}

@@ -48,7 +48,16 @@ class OneDriveSyncProvider(SyncProvider):
     def get_token_manager(self) -> TokenManager:
         return self._token_manager
 
-    def create_worker(self, knowledge_id, sources, access_token, user_id, app, token_provider=None):
+    def create_worker(
+        self,
+        knowledge_id,
+        sources,
+        access_token,
+        user_id,
+        app,
+        token_provider=None,
+        use_shared_loader: bool = False,
+    ):
         from open_webui.services.onedrive.sync_worker import OneDriveSyncWorker
 
         return OneDriveSyncWorker(
@@ -58,4 +67,5 @@ class OneDriveSyncProvider(SyncProvider):
             user_id=user_id,
             app=app,
             token_provider=token_provider,
+            use_shared_loader=use_shared_loader,
         )

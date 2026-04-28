@@ -229,13 +229,17 @@ async def call_agent_api(
     form_data: dict[str, Any],
     metadata: dict[str, Any],
     features: dict[str, Any],
+    override_agent: Optional[str] = None,
 ):
     """Route a chat completion to the external agent API.
 
-    [Gradient] Called from main.py when AGENT_API_ENABLED is true. Extracts
-    fields from OpenWebUI's form_data/metadata, calls the transport layer,
-    routes custom SSE events to Socket.IO, and returns either a
-    StreamingResponse or a dict for process_chat_response to consume.
+    [Gradient] Called from main.py either when ``AGENT_API_ENABLED`` is the
+    global bypass OR when a chat is bound to an agent via ``chat.meta.agent_id``.
+    When ``override_agent`` is provided it takes precedence over the global
+    ``AGENT_API_SELECTED_AGENT`` admin setting. Extracts fields from
+    OpenWebUI's form_data/metadata, calls the transport layer, routes custom
+    SSE events to Socket.IO, and returns either a StreamingResponse or a dict
+    for process_chat_response to consume.
     """
     stream = form_data.get('stream', True)
 
@@ -264,10 +268,11 @@ async def call_agent_api(
     info = model_dict.get('info') or {}
     llm_model = info.get('base_model_id') or form_data.get('model', '')
 
-    # [Gradient] Optional agent-override hint from the External Agents admin
-    # tab. When empty, we omit ``agent`` from the payload and the agents
-    # service uses its own ``default_agent``.
-    selected_agent = request.app.state.config.AGENT_API_SELECTED_AGENT or None
+    # [Gradient] Per-chat override (chat.meta.agent_id) wins over the global
+    # AGENT_API_SELECTED_AGENT admin setting. When neither is set we omit
+    # ``agent`` from the payload and the agents service uses its own
+    # ``default_agent``.
+    selected_agent = override_agent or request.app.state.config.AGENT_API_SELECTED_AGENT or None
 
     payload = build_agent_payload(
         model=llm_model,

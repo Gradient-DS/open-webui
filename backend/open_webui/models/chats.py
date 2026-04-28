@@ -128,6 +128,10 @@ class ChatFileModel(BaseModel):
 class ChatForm(BaseModel):
     chat: dict
     folder_id: Optional[str] = None
+    # [Gradient] Optional meta dict set on creation. Used by the per-chat
+    # agent picker to bind a new chat to an external agent via
+    # ``meta.agent_id``. When omitted, meta defaults to {}.
+    meta: Optional[dict] = None
 
 
 class ChatImportForm(ChatForm):
@@ -296,6 +300,7 @@ class ChatTable:
                     ),
                     'chat': self._clean_null_bytes(form_data.chat),
                     'folder_id': form_data.folder_id,
+                    'meta': form_data.meta or {},
                     'created_at': int(time.time()),
                     'updated_at': int(time.time()),
                 }

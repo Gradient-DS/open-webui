@@ -2128,6 +2128,13 @@ def process_messages_with_output(messages: list[dict]) -> list[dict]:
 
 
 async def process_chat_payload(request, form_data, user, metadata, model):
+    # [Gradient] Per-request agent routing flag set by main.process_chat
+    # before this function is called. When True, the agent service will
+    # handle the request — skip legacy web search, RAG flattening, tool
+    # resolution, etc. Falls back to the global AGENT_API_ENABLED flag
+    # for callers that don't set the metadata key.
+    route_to_agent = metadata.get('route_to_agent', AGENT_API_ENABLED)
+
     # Pipeline Inlet -> Filter Inlet -> Chat Memory -> Chat Web Search -> Chat Image Generation
     # -> Chat Code Interpreter (Form Data Update) -> (Default) Chat Tools Function Calling
     # -> Chat Files
@@ -2279,10 +2286,10 @@ async def process_chat_payload(request, form_data, user, metadata, model):
     user_message = get_last_user_message(form_data['messages'])
     model_knowledge = model.get('info', {}).get('meta', {}).get('knowledge', False)
 
-    # [Gradient] Also skip knowledge flattening when agent API is enabled.
-    # The agent receives raw KB references via metadata["knowledge"]
-    # and handles its own retrieval and status emissions.
-    if model_knowledge and metadata.get('params', {}).get('function_calling') != 'native' and not AGENT_API_ENABLED:
+    # [Gradient] Also skip knowledge flattening when this request is
+    # routed to the agent service. The agent receives raw KB references
+    # via metadata["knowledge"] and handles its own retrieval.
+    if model_knowledge and metadata.get('params', {}).get('function_calling') != 'native' and not route_to_agent:
         await event_emitter(
             {
                 'type': 'status',
@@ -2369,8 +2376,8 @@ async def process_chat_payload(request, form_data, user, metadata, model):
 
         if 'web_search' in features and features['web_search']:
             # Skip forced RAG web search when native FC is enabled - model can use web_search tool
-            # [Gradient] Also skip when agent API is enabled - agent handles its own web search.
-            if metadata.get('params', {}).get('function_calling') != 'native' and not AGENT_API_ENABLED:
+            # [Gradient] Also skip when this request is routed to the agent service.
+            if metadata.get('params', {}).get('function_calling') != 'native' and not route_to_agent:
                 form_data = await chat_web_search_handler(request, form_data, extra_params, user)
 
         if 'image_generation' in features and features['image_generation']:
@@ -2383,10 +2390,11 @@ async def process_chat_payload(request, form_data, user, metadata, model):
 
             # Skip XML-tag prompt injection when native FC is enabled —
             # execute_code will be injected as a builtin tool instead.
-            # [Gradient] Also skip when agent API is enabled — the agent controls
-            # its own prompting. Code execution still happens in process_chat_response
-            # when the agent returns <code_interpreter> tags.
-            if metadata.get('params', {}).get('function_calling') != 'native' and not AGENT_API_ENABLED:
+            # [Gradient] Also skip when this request is routed to the agent
+            # service — the agent controls its own prompting. Code execution
+            # still happens in process_chat_response when the agent returns
+            # <code_interpreter> tags.
+            if metadata.get('params', {}).get('function_calling') != 'native' and not route_to_agent:
                 prompt = (
                     request.app.state.config.CODE_INTERPRETER_PROMPT_TEMPLATE
                     if request.app.state.config.CODE_INTERPRETER_PROMPT_TEMPLATE != ''
@@ -2413,7 +2421,8 @@ async def process_chat_payload(request, form_data, user, metadata, model):
         if 'document_writer' in features and features['document_writer']:
             # Skip XML-tag prompt injection when native FC is enabled —
             # write_document will be injected as a builtin tool instead.
-            if metadata.get('params', {}).get('function_calling') != 'native' and not AGENT_API_ENABLED:
+            # [Gradient] Also skip when this request is routed to the agent service.
+            if metadata.get('params', {}).get('function_calling') != 'native' and not route_to_agent:
                 prompt = (
                     request.app.state.config.DOCUMENT_WRITER_PROMPT_TEMPLATE
                     if request.app.state.config.DOCUMENT_WRITER_PROMPT_TEMPLATE != ''
@@ -2500,12 +2509,12 @@ async def process_chat_payload(request, form_data, user, metadata, model):
     }
     form_data['metadata'] = metadata
 
-    # [Gradient] When the agent API is enabled, skip tool resolution, tool
-    # calling, RAG file processing, and context injection. The agent service
-    # owns all retrieval and orchestration. We preserve the collected metadata
-    # (files, tool_ids, features, knowledge) so the agent receives everything
-    # it needs to make its own decisions.
-    if AGENT_API_ENABLED:
+    # [Gradient] When this request is routed to the agent service, skip
+    # tool resolution, tool calling, RAG file processing, and context
+    # injection — the agent owns all retrieval and orchestration. We
+    # preserve the collected metadata (files, tool_ids, features,
+    # knowledge) so the agent receives everything it needs.
+    if route_to_agent:
         metadata['knowledge'] = raw_knowledge
         return form_data, metadata, events
 

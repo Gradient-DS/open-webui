@@ -24,7 +24,8 @@ export type Feature =
 	| 'admin_settings'
 	| 'input_menu'
 	| 'temporary_chat'
-	| 'builtin_tools';
+	| 'builtin_tools'
+	| 'agent_picker';
 
 /**
  * Check if a feature is enabled globally.
@@ -110,7 +111,8 @@ export const ADMIN_SETTINGS_TABS = [
 	'security',
 	'db',
 	'acceptance',
-	'external-agents'
+	'external-agents',
+	'agents'
 ] as const;
 
 export type AdminSettingsTab = (typeof ADMIN_SETTINGS_TABS)[number];
@@ -154,8 +156,25 @@ export function isAdminSettingsTabEnabled(tab: AdminSettingsTab): boolean {
 	}
 
 	// External Agents tab requires AGENT_API_ENABLED on the backend.
+	// [Gradient] When the new per-chat agent picker is enabled, hide the
+	// legacy single-select tab to avoid confusion — admins should manage
+	// agents through the new Agents tab instead.
 	if (tab === 'external-agents') {
-		return tabAllowed && Boolean($config?.features?.feature_agent_api_enabled);
+		return (
+			tabAllowed &&
+			Boolean($config?.features?.feature_agent_api_enabled) &&
+			!isFeatureEnabled('agent_picker')
+		);
+	}
+
+	// [Gradient] New per-chat agent picker tab. Gated on the master flag.
+	// AGENT_API_ENABLED is also required so the agent service is reachable.
+	if (tab === 'agents') {
+		return (
+			tabAllowed &&
+			isFeatureEnabled('agent_picker') &&
+			Boolean($config?.features?.feature_agent_api_enabled)
+		);
 	}
 
 	return tabAllowed;
