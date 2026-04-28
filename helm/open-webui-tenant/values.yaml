@@ -404,6 +404,17 @@ openWebui:
     onedriveMaxFilesPerSync: "250"
     onedriveMaxFileSizeMb: "10"
 
+    # Confluence Integration (Atlassian Cloud OAuth)
+    enableConfluenceIntegration: "false"
+    confluenceOauthClientId: ""   # Atlassian OAuth 2.0 (3LO) Client ID
+    # confluenceOauthClientSecret is set via secrets
+
+    # Confluence Sync (for Knowledge Bases)
+    enableConfluenceSync: "false"
+    confluenceSyncIntervalMinutes: "60"
+    confluenceMaxPagesPerSync: "500"
+    confluenceMaxPageSizeMb: "25"
+
     # Knowledge Base File Limit
     knowledgeMaxFileCount: "250"
 
@@ -734,6 +745,9 @@ secrets:
   # Microsoft OAuth (leave empty to disable)
   microsoftClientSecret: ""
 
+  # Confluence / Atlassian OAuth (leave empty to disable)
+  confluenceOauthClientSecret: ""
+
   # Email Graph API (leave empty to disable email invites)
   emailGraphClientSecret: ""
 
@@ -803,6 +817,7 @@ externalSecrets:
       microsoftClientSecret: false
       googleClientSecret: false
       googleDriveApiKey: false
+      confluenceOauthClientSecret: false
       externalDocumentLoaderApiKey: false
       ragExternalRerankerApiKey: false
       agentApiKey: false

@@ -279,6 +279,20 @@ data:
   ONEDRIVE_SYNC_INTERVAL_MINUTES: {{ .Values.openWebui.config.onedriveSyncIntervalMinutes | quote }}
   ONEDRIVE_MAX_FILES_PER_SYNC: {{ .Values.openWebui.config.onedriveMaxFilesPerSync | quote }}
   ONEDRIVE_MAX_FILE_SIZE_MB: {{ .Values.openWebui.config.onedriveMaxFileSizeMb | quote }}
+
+  # Confluence Integration (Atlassian Cloud OAuth)
+  ENABLE_CONFLUENCE_INTEGRATION: {{ .Values.openWebui.config.enableConfluenceIntegration | quote }}
+  {{- if .Values.openWebui.config.confluenceOauthClientId }}
+  CONFLUENCE_OAUTH_CLIENT_ID: {{ .Values.openWebui.config.confluenceOauthClientId | quote }}
+  {{- end }}
+  {{- /* confluenceOauthClientSecret moved to secrets template */ -}}
+
+  # Confluence Sync
+  ENABLE_CONFLUENCE_SYNC: {{ .Values.openWebui.config.enableConfluenceSync | quote }}
+  CONFLUENCE_SYNC_INTERVAL_MINUTES: {{ .Values.openWebui.config.confluenceSyncIntervalMinutes | quote }}
+  CONFLUENCE_MAX_PAGES_PER_SYNC: {{ .Values.openWebui.config.confluenceMaxPagesPerSync | quote }}
+  CONFLUENCE_MAX_PAGE_SIZE_MB: {{ .Values.openWebui.config.confluenceMaxPageSizeMb | quote }}
+
   KNOWLEDGE_MAX_FILE_COUNT: {{ .Values.openWebui.config.knowledgeMaxFileCount | quote }}
 
   # Shared-services loader-worker (per-tenant). When useSharedLoader=true,
