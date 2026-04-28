@@ -75,6 +75,10 @@ class ConfluenceSyncWorker(BaseSyncWorker):
         return 'confluence'
 
     @property
+    def provider_slug(self) -> str:
+        return 'confluence'
+
+    @property
     def internal_request_path(self) -> str:
         return '/internal/confluence-sync'
 

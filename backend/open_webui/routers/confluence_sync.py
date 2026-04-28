@@ -451,9 +451,6 @@ async def browse_pages(
                     'status': p.get('status'),
                     'space_id': p.get('spaceId'),
                     'parent_id': p.get('parentId'),
-                    'has_children': bool(p.get('childTypes', {}).get('page', {}).get('value'))
-                    if isinstance(p.get('childTypes'), dict)
-                    else False,
                 }
                 for p in results
             ],

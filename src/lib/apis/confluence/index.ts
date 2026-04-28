@@ -48,7 +48,6 @@ export interface ConfluencePageSummary {
 	status: string;
 	space_id?: string;
 	parent_id?: string;
-	has_children: boolean;
 }
 
 // Create API instance with Confluence base path

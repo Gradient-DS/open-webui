@@ -283,12 +283,6 @@
 		selection = new Map(selection);
 	}
 
-	function isPageSelected(pageId: string, kind: 'any' | 'single' | 'tree'): boolean {
-		if (kind === 'single') return selection.has(keyForPage(pageId));
-		if (kind === 'tree') return selection.has(keyForPageTree(pageId));
-		return selection.has(keyForPage(pageId)) || selection.has(keyForPageTree(pageId));
-	}
-
 	function pageTreeBreadcrumb(
 		spaceNode: SpaceNode,
 		trail: string[],
@@ -403,11 +397,8 @@
 										{@const breadcrumbSingle = pageTreeBreadcrumb(spaceNode, [], pageNode)}
 										<div class="flex items-center gap-2 py-1">
 											<button
-												class="p-0.5 rounded hover:bg-gray-100 dark:hover:bg-gray-800 disabled:opacity-40"
+												class="p-0.5 rounded hover:bg-gray-100 dark:hover:bg-gray-800"
 												on:click={() => togglePageExpand(pageNode)}
-												disabled={!pageNode.page.has_children &&
-													!pageNode.loaded &&
-													pageNode.children.length === 0}
 												aria-label={pageNode.expanded ? $i18n.t('Collapse') : $i18n.t('Expand')}
 											>
 												{#if pageNode.expanded}
@@ -417,7 +408,9 @@
 												{/if}
 											</button>
 											<Checkbox
-												state={isPageSelected(pageNode.page.id, 'single') ? 'checked' : 'unchecked'}
+												state={selection.has(keyForPage(pageNode.page.id))
+													? 'checked'
+													: 'unchecked'}
 												on:change={() =>
 													togglePageSelection(spaceNode, pageNode, breadcrumbSingle, false)}
 											/>
@@ -427,7 +420,9 @@
 												class="ml-auto text-xs text-gray-500 flex items-center gap-1 cursor-pointer select-none"
 											>
 												<Checkbox
-													state={isPageSelected(pageNode.page.id, 'tree') ? 'checked' : 'unchecked'}
+													state={selection.has(keyForPageTree(pageNode.page.id))
+														? 'checked'
+														: 'unchecked'}
 													on:change={() =>
 														togglePageSelection(spaceNode, pageNode, breadcrumbSingle, true)}
 												/>
@@ -452,11 +447,8 @@
 														)}
 														<div class="flex items-center gap-2 py-1">
 															<button
-																class="p-0.5 rounded hover:bg-gray-100 dark:hover:bg-gray-800 disabled:opacity-40"
+																class="p-0.5 rounded hover:bg-gray-100 dark:hover:bg-gray-800"
 																on:click={() => togglePageExpand(grandChild)}
-																disabled={!grandChild.page.has_children &&
-																	!grandChild.loaded &&
-																	grandChild.children.length === 0}
 																aria-label={grandChild.expanded
 																	? $i18n.t('Collapse')
 																	: $i18n.t('Expand')}
@@ -468,7 +460,7 @@
 																{/if}
 															</button>
 															<Checkbox
-																state={isPageSelected(grandChild.page.id, 'single')
+																state={selection.has(keyForPage(grandChild.page.id))
 																	? 'checked'
 																	: 'unchecked'}
 																on:change={() =>
@@ -484,7 +476,7 @@
 																class="ml-auto text-xs text-gray-500 flex items-center gap-1 cursor-pointer select-none"
 															>
 																<Checkbox
-																	state={isPageSelected(grandChild.page.id, 'tree')
+																	state={selection.has(keyForPageTree(grandChild.page.id))
 																		? 'checked'
 																		: 'unchecked'}
 																	on:change={() =>
