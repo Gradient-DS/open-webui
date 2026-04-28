@@ -74,6 +74,7 @@ unstructured==0.18.31
 
 nltk==3.9.4
 Markdown==3.10.2
+markdownify==0.14.1
 beautifulsoup4==4.14.3
 pypandoc==1.16.2
 pandas==3.0.1

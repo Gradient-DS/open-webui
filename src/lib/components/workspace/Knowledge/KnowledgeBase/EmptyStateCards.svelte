@@ -8,6 +8,7 @@
 	import BarsArrowUp from '$lib/components/icons/BarsArrowUp.svelte';
 	import OneDrive from '$lib/components/icons/OneDrive.svelte';
 	import GoogleDrive from '$lib/components/icons/GoogleDrive.svelte';
+	import Confluence from '$lib/components/icons/Confluence.svelte';
 
 	export let knowledgeType: string = 'local';
 	export let integrationProviders: Record<string, any> = {};
@@ -40,6 +41,16 @@
 					label: 'Sync from Google Drive',
 					icon: GoogleDrive,
 					description: 'Select files and folders to sync'
+				}
+			];
+		}
+		if (type === 'confluence') {
+			return [
+				{
+					type: 'confluence',
+					label: 'Sync from Confluence',
+					icon: Confluence,
+					description: 'Select spaces or pages to sync'
 				}
 			];
 		}

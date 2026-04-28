@@ -292,7 +292,7 @@ class KnowledgeTable:
 
                     # Annotate suspension info for cloud KBs
                     if knowledge_base.type not in ('local',) and knowledge_base.meta:
-                        for meta_key in ('onedrive_sync', 'google_drive_sync'):
+                        for meta_key in ('onedrive_sync', 'google_drive_sync', 'confluence_sync'):
                             sync_info = (knowledge_base.meta or {}).get(meta_key, {})
                             suspended_at = sync_info.get('suspended_at')
                             if suspended_at:
@@ -828,7 +828,7 @@ class KnowledgeTable:
             expired = []
             for kb in candidates:
                 meta = kb.meta or {}
-                for meta_key in ('onedrive_sync', 'google_drive_sync'):
+                for meta_key in ('onedrive_sync', 'google_drive_sync', 'confluence_sync'):
                     sync_info = meta.get(meta_key, {})
                     suspended_at = sync_info.get('suspended_at')
                     if suspended_at and suspended_at < cutoff:
@@ -848,7 +848,7 @@ class KnowledgeTable:
                 if not knowledge:
                     return False
                 meta = knowledge.meta or {}
-                for meta_key in ('onedrive_sync', 'google_drive_sync'):
+                for meta_key in ('onedrive_sync', 'google_drive_sync', 'confluence_sync'):
                     sync_info = meta.get(meta_key, {})
                     if sync_info.get('suspended_at'):
                         return True
@@ -864,7 +864,7 @@ class KnowledgeTable:
                 if not knowledge:
                     return None
                 meta = knowledge.meta or {}
-                for meta_key in ('onedrive_sync', 'google_drive_sync'):
+                for meta_key in ('onedrive_sync', 'google_drive_sync', 'confluence_sync'):
                     sync_info = meta.get(meta_key, {})
                     suspended_at = sync_info.get('suspended_at')
                     if suspended_at:

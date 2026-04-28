@@ -147,6 +147,10 @@ def get_sync_provider(provider_type: str) -> SyncProvider:
         from open_webui.services.google_drive.provider import GoogleDriveSyncProvider
 
         return GoogleDriveSyncProvider()
+    elif provider_type == 'confluence':
+        from open_webui.services.confluence.provider import ConfluenceSyncProvider
+
+        return ConfluenceSyncProvider()
     else:
         raise ValueError(f'Unsupported sync provider: {provider_type}')
 
@@ -161,5 +165,9 @@ def get_token_manager(provider_type: str) -> TokenManager:
         from open_webui.services.google_drive.provider import GoogleDriveTokenManager
 
         return GoogleDriveTokenManager()
+    elif provider_type == 'confluence':
+        from open_webui.services.confluence.provider import ConfluenceTokenManager
+
+        return ConfluenceTokenManager()
     else:
         raise ValueError(f'Unsupported token manager: {provider_type}')
