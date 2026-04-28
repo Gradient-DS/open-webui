@@ -48,10 +48,9 @@
 	let spaceNodes: SpaceNode[] = [];
 
 	// Selection keys:
-	//   space:{id}                      → whole space (all descendants)
-	//   page:{id}                       → just this page
-	//   page-tree:{id}                  → this page + all descendants
-	type SelectionKind = 'space' | 'page' | 'page-tree';
+	//   space:{id}      → whole space (all descendants)
+	//   page:{id}       → this page + all descendants
+	type SelectionKind = 'space' | 'page';
 	type SelectionEntry = {
 		kind: SelectionKind;
 		item: SyncItem;
@@ -135,6 +134,9 @@
 				const pages = await fetchAllRootPages(node.space.id);
 				node.children = pages.map(toPageNode);
 				node.loaded = true;
+				// Lookahead — probe each root page so chevrons render correctly
+				// from the start instead of needing a click to discover leaves.
+				await Promise.all(node.children.map(probeChildren));
 			} catch (e) {
 				toast.error(
 					$i18n.t('Failed to load pages: ') + (e instanceof Error ? e.message : String(e))
@@ -148,23 +150,46 @@
 		}
 	}
 
+	async function probeChildren(node: PageNode): Promise<void> {
+		if (node.loaded) return;
+		try {
+			const pages = await fetchAllPageChildren(node.page.id);
+			node.children = pages.map(toPageNode);
+			node.loaded = true;
+		} catch {
+			// Leave unloaded — chevron stays visible; user can retry on click.
+		}
+	}
+
 	async function togglePageExpand(parent: PageNode) {
 		parent.expanded = !parent.expanded;
-		if (parent.expanded && !parent.loaded) {
+		if (!parent.expanded) {
+			spaceNodes = spaceNodes;
+			return;
+		}
+		if (!parent.loaded) {
+			// Fallback path — parent wasn't pre-probed (e.g. probe failed).
 			parent.loadingChildren = true;
 			spaceNodes = spaceNodes;
 			try {
-				const pages = await fetchAllPageChildren(parent.page.id);
-				parent.children = pages.map(toPageNode);
-				parent.loaded = true;
-			} catch (e) {
-				toast.error(
-					$i18n.t('Failed to load pages: ') + (e instanceof Error ? e.message : String(e))
-				);
+				await probeChildren(parent);
 			} finally {
 				parent.loadingChildren = false;
 				spaceNodes = spaceNodes;
 			}
+			if (parent.children.length === 0) {
+				parent.expanded = false;
+				spaceNodes = spaceNodes;
+				return;
+			}
+		}
+		// Lookahead — probe one level deeper so grandchild chevrons settle.
+		// Fire-and-forget: the children are already shown.
+		const unprobed = parent.children.filter((c) => !c.loaded);
+		if (unprobed.length > 0) {
+			Promise.all(unprobed.map(probeChildren)).then(() => {
+				spaceNodes = spaceNodes;
+			});
 		} else {
 			spaceNodes = spaceNodes;
 		}
@@ -222,8 +247,19 @@
 	function keyForPage(pageId: string): string {
 		return `page:${pageId}`;
 	}
-	function keyForPageTree(pageId: string): string {
-		return `page-tree:${pageId}`;
+
+	function clearPageDescendants(node: PageNode) {
+		for (const child of node.children) {
+			selection.delete(keyForPage(child.page.id));
+			clearPageDescendants(child);
+		}
+	}
+
+	function clearSpaceDescendants(node: SpaceNode) {
+		for (const child of node.children) {
+			selection.delete(keyForPage(child.page.id));
+			clearPageDescendants(child);
+		}
 	}
 
 	function toggleSpaceSelection(node: SpaceNode) {
@@ -246,27 +282,19 @@
 				}
 			});
 		}
+		// Either direction: descendant entries are now redundant (selecting) or
+		// orphaned (deselecting). Drop them so visual + sync state stay coherent.
+		clearSpaceDescendants(node);
 		selection = new Map(selection);
 	}
 
-	function togglePageSelection(
-		spaceNode: SpaceNode,
-		pageNode: PageNode,
-		breadcrumb: string,
-		includeDescendants: boolean
-	) {
-		const singleKey = keyForPage(pageNode.page.id);
-		const treeKey = keyForPageTree(pageNode.page.id);
-		const activeKey = includeDescendants ? treeKey : singleKey;
-		const otherKey = includeDescendants ? singleKey : treeKey;
-
-		if (selection.has(activeKey)) {
-			selection.delete(activeKey);
+	function togglePageSelection(spaceNode: SpaceNode, pageNode: PageNode, breadcrumb: string) {
+		const key = keyForPage(pageNode.page.id);
+		if (selection.has(key)) {
+			selection.delete(key);
 		} else {
-			// Toggling on: remove the other variant if present.
-			selection.delete(otherKey);
-			selection.set(activeKey, {
-				kind: includeDescendants ? 'page-tree' : 'page',
+			selection.set(key, {
+				kind: 'page',
 				item: {
 					type: 'page',
 					cloud_id: activeSite!.cloud_id,
@@ -276,10 +304,11 @@
 					item_id: pageNode.page.id,
 					item_path: breadcrumb,
 					name: pageNode.page.title,
-					include_descendants: includeDescendants
+					include_descendants: true
 				}
 			});
 		}
+		clearPageDescendants(pageNode);
 		selection = new Map(selection);
 	}
 
@@ -395,39 +424,32 @@
 								{:else}
 									{#each spaceNode.children as pageNode}
 										{@const breadcrumbSingle = pageTreeBreadcrumb(spaceNode, [], pageNode)}
+										{@const spaceCovers = selection.has(keyForSpace(spaceNode.space))}
 										<div class="flex items-center gap-2 py-1">
-											<button
-												class="p-0.5 rounded hover:bg-gray-100 dark:hover:bg-gray-800"
-												on:click={() => togglePageExpand(pageNode)}
-												aria-label={pageNode.expanded ? $i18n.t('Collapse') : $i18n.t('Expand')}
-											>
-												{#if pageNode.expanded}
-													<ChevronDown className="size-3.5" />
-												{:else}
-													<ChevronRight className="size-3.5" />
-												{/if}
-											</button>
+											{#if pageNode.loaded && pageNode.children.length === 0}
+												<span class="inline-block size-[18px]"></span>
+											{:else}
+												<button
+													class="p-0.5 rounded hover:bg-gray-100 dark:hover:bg-gray-800"
+													on:click={() => togglePageExpand(pageNode)}
+													aria-label={pageNode.expanded ? $i18n.t('Collapse') : $i18n.t('Expand')}
+												>
+													{#if pageNode.expanded}
+														<ChevronDown className="size-3.5" />
+													{:else}
+														<ChevronRight className="size-3.5" />
+													{/if}
+												</button>
+											{/if}
 											<Checkbox
-												state={selection.has(keyForPage(pageNode.page.id))
+												state={spaceCovers || selection.has(keyForPage(pageNode.page.id))
 													? 'checked'
 													: 'unchecked'}
+												disabled={spaceCovers}
 												on:change={() =>
-													togglePageSelection(spaceNode, pageNode, breadcrumbSingle, false)}
+													togglePageSelection(spaceNode, pageNode, breadcrumbSingle)}
 											/>
 											<span class="text-sm">{pageNode.page.title}</span>
-
-											<label
-												class="ml-auto text-xs text-gray-500 flex items-center gap-1 cursor-pointer select-none"
-											>
-												<Checkbox
-													state={selection.has(keyForPageTree(pageNode.page.id))
-														? 'checked'
-														: 'unchecked'}
-													on:change={() =>
-														togglePageSelection(spaceNode, pageNode, breadcrumbSingle, true)}
-												/>
-												{$i18n.t('Include children')}
-											</label>
 										</div>
 
 										{#if pageNode.expanded}
@@ -445,50 +467,41 @@
 															[pageNode.page.title],
 															grandChild
 														)}
+														{@const ancestorCovers =
+															selection.has(keyForSpace(spaceNode.space)) ||
+															selection.has(keyForPage(pageNode.page.id))}
 														<div class="flex items-center gap-2 py-1">
-															<button
-																class="p-0.5 rounded hover:bg-gray-100 dark:hover:bg-gray-800"
-																on:click={() => togglePageExpand(grandChild)}
-																aria-label={grandChild.expanded
-																	? $i18n.t('Collapse')
-																	: $i18n.t('Expand')}
-															>
-																{#if grandChild.expanded}
-																	<ChevronDown className="size-3.5" />
-																{:else}
-																	<ChevronRight className="size-3.5" />
-																{/if}
-															</button>
+															{#if grandChild.loaded && grandChild.children.length === 0}
+																<span class="inline-block size-[18px]"></span>
+															{:else}
+																<button
+																	class="p-0.5 rounded hover:bg-gray-100 dark:hover:bg-gray-800"
+																	on:click={() => togglePageExpand(grandChild)}
+																	aria-label={grandChild.expanded
+																		? $i18n.t('Collapse')
+																		: $i18n.t('Expand')}
+																>
+																	{#if grandChild.expanded}
+																		<ChevronDown className="size-3.5" />
+																	{:else}
+																		<ChevronRight className="size-3.5" />
+																	{/if}
+																</button>
+															{/if}
 															<Checkbox
-																state={selection.has(keyForPage(grandChild.page.id))
+																state={ancestorCovers ||
+																selection.has(keyForPage(grandChild.page.id))
 																	? 'checked'
 																	: 'unchecked'}
+																disabled={ancestorCovers}
 																on:change={() =>
 																	togglePageSelection(
 																		spaceNode,
 																		grandChild,
-																		grandBreadcrumb,
-																		false
+																		grandBreadcrumb
 																	)}
 															/>
 															<span class="text-sm">{grandChild.page.title}</span>
-															<label
-																class="ml-auto text-xs text-gray-500 flex items-center gap-1 cursor-pointer select-none"
-															>
-																<Checkbox
-																	state={selection.has(keyForPageTree(grandChild.page.id))
-																		? 'checked'
-																		: 'unchecked'}
-																	on:change={() =>
-																		togglePageSelection(
-																			spaceNode,
-																			grandChild,
-																			grandBreadcrumb,
-																			true
-																		)}
-																/>
-																{$i18n.t('Include children')}
-															</label>
 														</div>
 													{/each}
 												{/if}
