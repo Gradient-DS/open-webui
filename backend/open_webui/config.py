@@ -19,6 +19,7 @@ from authlib.integrations.starlette_client import OAuth
 
 
 from open_webui.env import (
+    AGENT_API_AGENTS,
     DATA_DIR,
     DATABASE_URL,
     ENABLE_DB_MIGRATIONS,
@@ -3358,6 +3359,27 @@ INTEGRATION_PROVIDERS = PersistentConfig(
 )
 
 ####################################
+# Shared-Services Loader Worker
+####################################
+# When enabled, cloud-source sync workers (OneDrive, Google Drive) submit jobs
+# to the per-tenant gradient-loader-worker pod instead of downloading and
+# embedding files in-process. Loader-worker handles download → parse+chunk
+# (via shared doc-processor) → embed (via LiteLLM) → push to /ingest.
+# See thoughts/shared/plans/2026-04-25-shared-services-loader-worker.md.
+
+USE_SHARED_LOADER = PersistentConfig(
+    'USE_SHARED_LOADER',
+    'sync.use_shared_loader',
+    os.environ.get('USE_SHARED_LOADER', 'False').lower() == 'true',
+)
+
+# Loader-worker service DNS, e.g. http://gradient-loader-worker.<ns>.svc:8002
+LOADER_WORKER_URL = os.environ.get('LOADER_WORKER_URL', '')
+
+# Tenant slug used in the /tenants/{tenant}/jobs path on the loader-worker.
+TENANT_NAME = os.environ.get('TENANT_NAME', '')
+
+####################################
 # Agent Proxy
 ####################################
 
@@ -3365,6 +3387,35 @@ ENABLE_AGENT_PROXY = PersistentConfig(
     'ENABLE_AGENT_PROXY',
     'agent_proxy.enable',
     os.environ.get('ENABLE_AGENT_PROXY', 'False').lower() == 'true',
+)
+
+####################################
+# Agent Search (machine-auth retrieval endpoint)
+####################################
+
+# Gates POST /api/v1/internal/retrieval/query — the per-tenant endpoint that
+# lets external agents run KB queries on behalf of a specific user. Off by
+# default; tenants opt in via Helm.
+AGENT_SEARCH_ENABLED = PersistentConfig(
+    'AGENT_SEARCH_ENABLED',
+    'agent_search.enabled',
+    os.environ.get('AGENT_SEARCH_ENABLED', 'False').lower() == 'true',
+)
+
+####################################
+# Agent API — Active Agent Selection
+####################################
+
+# The agent identifier forwarded as an override hint to the external agent
+# service. Persisted in the config DB so admins can switch agents at runtime
+# via Admin Settings > External Agents. Defaults to the first entry in
+# AGENT_API_AGENTS when set, otherwise empty — in which case the payload
+# omits ``agent`` and the agents service uses its own ``default_agent``.
+_default_selected_agent = AGENT_API_AGENTS[0] if AGENT_API_AGENTS else ''
+AGENT_API_SELECTED_AGENT = PersistentConfig(
+    'AGENT_API_SELECTED_AGENT',
+    'agent_api.selected_agent',
+    _default_selected_agent,
 )
 
 

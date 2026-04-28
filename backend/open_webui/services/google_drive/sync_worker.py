@@ -48,6 +48,10 @@ class GoogleDriveSyncWorker(BaseSyncWorker):
         return 'googledrive'
 
     @property
+    def provider_slug(self) -> str:
+        return 'google_drive'
+
+    @property
     def internal_request_path(self) -> str:
         return '/internal/google-drive-sync'
 
@@ -196,7 +200,11 @@ class GoogleDriveSyncWorker(BaseSyncWorker):
         return item.get('md5Checksum')
 
     async def _download_file_content(self, file_info: Dict[str, Any]) -> bytes:
-        """Download file content, using export for Workspace files."""
+        """Download file content, using export for Workspace files.
+
+        Removed in cleanup commit after USE_SHARED_LOADER rollout completes —
+        loader-worker handles the download path (legacy fallback only).
+        """
         item = file_info['item']
         file_id = item['id']
         mime_type = item.get('mimeType', '')
@@ -206,6 +214,15 @@ class GoogleDriveSyncWorker(BaseSyncWorker):
             return await self._client.export_file(file_id, export_mime)
         else:
             return await self._client.download_file(file_id)
+
+    def _item_from_file_info(self, file_info: Dict[str, Any], access_token: str) -> Dict[str, Any]:
+        item = super()._item_from_file_info(file_info, access_token)
+        drive_item = file_info['item']
+        item['source_descriptor'] = {
+            'file_id': drive_item['id'],
+            'mime_type': drive_item.get('mimeType', ''),
+        }
+        return item
 
     def _get_provider_storage_headers(self, item_id: str) -> dict:
         return {

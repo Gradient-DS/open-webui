@@ -28,6 +28,7 @@
 	import MessageInput from './MessageInput.svelte';
 	import FolderPlaceholder from './Placeholder/FolderPlaceholder.svelte';
 	import FolderTitle from './Placeholder/FolderTitle.svelte';
+	import AgentCards from './Placeholder/AgentCards.svelte';
 
 	const i18n = getContext('i18n');
 
@@ -257,6 +258,10 @@
 					{onSelect}
 				/>
 			</div>
+		</div>
+
+		<div in:fade={{ duration: 200, delay: 250 }}>
+			<AgentCards />
 		</div>
 	{/if}
 </div>

@@ -122,12 +122,15 @@ async def _sync_items_background(
     """Background task to sync multiple Google Drive items."""
     from open_webui.services.google_drive.sync_worker import GoogleDriveSyncWorker
 
+    use_shared_loader = bool(getattr(app.state.config, 'USE_SHARED_LOADER', False))
+
     worker = GoogleDriveSyncWorker(
         knowledge_id=knowledge_id,
         sources=sources,
         access_token=access_token,
         user_id=user_id,
         app=app,
+        use_shared_loader=use_shared_loader,
     )
     await worker.sync()
 

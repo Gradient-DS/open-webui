@@ -69,6 +69,7 @@ from open_webui.socket.main import (
     get_models_in_use,
 )
 from open_webui.routers import (
+    agent_configs,
     agent_proxy,
     analytics,
     archives,
@@ -77,6 +78,7 @@ from open_webui.routers import (
     totp,
     images,
     integrations,
+    internal_retrieval,
     ollama,
     openai,
     retrieval,
@@ -125,6 +127,9 @@ from open_webui.models.functions import Functions
 from open_webui.models.models import Models
 from open_webui.models.users import UserModel, Users
 from open_webui.models.chats import Chats
+from open_webui.models.agent_configs import AgentConfigs
+from open_webui.models.access_grants import AccessGrants
+from open_webui.models.groups import Groups
 
 from open_webui.config import (
     # Ollama
@@ -387,8 +392,14 @@ from open_webui.config import (
     EMAIL_INVITE_HEADING,
     # Integrations
     INTEGRATION_PROVIDERS,
+    # Shared-services loader worker
+    USE_SHARED_LOADER,
     # Agent Proxy
     ENABLE_AGENT_PROXY,
+    # Agent Search (machine-auth retrieval endpoint)
+    AGENT_SEARCH_ENABLED,
+    # Agent API (external agent selection)
+    AGENT_API_SELECTED_AGENT,
     # 2FA / TOTP
     ENABLE_2FA,
     REQUIRE_2FA,
@@ -616,6 +627,7 @@ from open_webui.env import (
     ENABLE_STAR_SESSIONS_MIDDLEWARE,
     ENABLE_PUBLIC_ACTIVE_USERS_COUNT,
     AGENT_API_ENABLED,  # [Gradient] Agent API bypass flag
+    FEATURE_AGENT_PICKER,  # [Gradient] Master flag for the agent picker UI
     CLIENT_NAME,
     # Admin Account Runtime Creation
     WEBUI_ADMIN_EMAIL,
@@ -644,6 +656,7 @@ from open_webui.utils.middleware import (
     process_chat_response,
 )
 from open_webui.utils.agent import call_agent_api  # [Gradient] Agent API client
+from open_webui.utils.task import prompt_template, prompt_variables_template
 from open_webui.utils.access_control import has_access
 from open_webui.utils.tools import set_tool_servers, set_terminal_servers
 
@@ -1392,7 +1405,13 @@ app.state.config.EMAIL_INVITE_HEADING = EMAIL_INVITE_HEADING
 
 app.state.config.INTEGRATION_PROVIDERS = INTEGRATION_PROVIDERS
 
+app.state.config.USE_SHARED_LOADER = USE_SHARED_LOADER
+
 app.state.config.ENABLE_AGENT_PROXY = ENABLE_AGENT_PROXY
+
+app.state.config.AGENT_SEARCH_ENABLED = AGENT_SEARCH_ENABLED
+
+app.state.config.AGENT_API_SELECTED_AGENT = AGENT_API_SELECTED_AGENT
 
 app.state.config.ENABLE_2FA = ENABLE_2FA
 app.state.config.REQUIRE_2FA = REQUIRE_2FA
@@ -1922,7 +1941,13 @@ app.include_router(notes.router, prefix='/api/v1/notes', tags=['notes'])
 app.include_router(models.router, prefix='/api/v1/models', tags=['models'])
 app.include_router(knowledge.router, prefix='/api/v1/knowledge', tags=['knowledge'])
 app.include_router(integrations.router, prefix='/api/v1/integrations', tags=['integrations'])
+app.include_router(
+    internal_retrieval.router,
+    prefix='/api/v1/internal/retrieval',
+    tags=['internal-retrieval'],
+)
 app.include_router(agent_proxy.router, prefix='/api/v1/agent', tags=['agent-proxy'])
+app.include_router(agent_configs.router, prefix='/api/v1/agent-configs', tags=['agents'])
 app.include_router(prompts.router, prefix='/api/v1/prompts', tags=['prompts'])
 app.include_router(tools.router, prefix='/api/v1/tools', tags=['tools'])
 app.include_router(skills.router, prefix='/api/v1/skills', tags=['skills'])
@@ -2202,6 +2227,21 @@ async def chat_completion(
                         log.debug(f'Error inserting chat files: {e}')
                         pass
 
+        # [Gradient] Resolve the operator system prompt from the custom-model
+        # definition (model.params.system) with the same variable substitution
+        # apply_system_prompt_to_body uses, so {{user_name}} and metadata
+        # variables resolve identically to the non-agent path. call_agent_api
+        # forwards this as a separate payload field so the agent can compose
+        # it into its own system prompt rather than inject a second system
+        # message into the conversation.
+        operator_system_prompt = model_info_params.get('system')
+        if operator_system_prompt:
+            variables = metadata.get('variables', {})
+            if variables:
+                operator_system_prompt = prompt_variables_template(operator_system_prompt, variables)
+            operator_system_prompt = prompt_template(operator_system_prompt, user)
+        metadata['system_prompt'] = operator_system_prompt
+
         request.state.metadata = metadata
         form_data['metadata'] = metadata
 
@@ -2214,15 +2254,70 @@ async def chat_completion(
 
     async def process_chat(request, form_data, user, metadata, model):
         try:
+            # [Gradient] Resolve the routing decision BEFORE process_chat_payload
+            # so the middleware knows whether to skip legacy web search / RAG /
+            # tool resolution (the agent service does its own).
+            #
+            # Routing matrix:
+            #   chat.meta.agent_id set                                  → agent route
+            #   no agent_id, FEATURE_AGENT_PICKER=true                  → standard route
+            #   no agent_id, picker off, AGENT_API_ENABLED=true         → agent route (legacy bypass)
+            #   otherwise                                               → standard route
+            chat_id_meta = metadata.get('chat_id')
+            chat_agent_id: Optional[str] = None
+            if chat_id_meta and not chat_id_meta.startswith('local:'):
+                try:
+                    chat_row = Chats.get_chat_by_id(chat_id_meta)
+                    if chat_row and chat_row.meta:
+                        chat_agent_id = chat_row.meta.get('agent_id') or None
+                except Exception:
+                    chat_agent_id = None
+
+            if chat_agent_id:
+                # Defense-in-depth: refuse to route to an agent the user no
+                # longer has access to (e.g. admin disabled is_active or
+                # revoked group access mid-chat).
+                cfg = AgentConfigs.get_agent_config_by_id(chat_agent_id)
+                if not cfg or not cfg.is_active:
+                    raise HTTPException(
+                        status_code=status.HTTP_403_FORBIDDEN,
+                        detail='This chat is bound to an agent that is no longer available.',
+                    )
+                if user.role != 'admin':
+                    user_group_ids = {g.id for g in Groups.get_groups_by_member_id(user.id)}
+                    accessible = AccessGrants.get_accessible_resource_ids(
+                        user_id=user.id,
+                        resource_type='agent_config',
+                        resource_ids=[chat_agent_id],
+                        permission='read',
+                        user_group_ids=user_group_ids,
+                    )
+                    if chat_agent_id not in accessible:
+                        raise HTTPException(
+                            status_code=status.HTTP_403_FORBIDDEN,
+                            detail='You no longer have access to this agent.',
+                        )
+                route_to_agent = True
+            elif AGENT_API_ENABLED and not FEATURE_AGENT_PICKER:
+                # Legacy global bypass — agent service handles every chat
+                # with the admin-selected default agent.
+                route_to_agent = True
+            else:
+                route_to_agent = False
+
+            metadata['route_to_agent'] = route_to_agent
+            metadata['chat_agent_id'] = chat_agent_id
+
             form_data, metadata, events = await process_chat_payload(request, form_data, user, metadata, model)
 
-            # [Gradient] When the agent API is enabled, route to the external
-            # agent service instead of the built-in LLM dispatch. The agent
-            # handles its own retrieval, web search, and tool orchestration.
-            # It returns a standard OpenAI SSE stream so process_chat_response
-            # handles streaming, DB persistence, and WebSocket transport unchanged.
-            if AGENT_API_ENABLED:
-                response = await call_agent_api(request, form_data, metadata, metadata.get('features', {}))
+            if route_to_agent:
+                response = await call_agent_api(
+                    request,
+                    form_data,
+                    metadata,
+                    metadata.get('features', {}),
+                    override_agent=chat_agent_id,
+                )
             else:
                 response = await chat_completion_handler(request, form_data, user)
             if metadata.get('chat_id') and metadata.get('message_id'):
@@ -2595,6 +2690,8 @@ async def get_app_config(request: Request):
                     ),
                     'enable_email_invites': app.state.config.ENABLE_EMAIL_INVITES,
                     'enable_agent_proxy': app.state.config.ENABLE_AGENT_PROXY,
+                    'feature_agent_api_enabled': AGENT_API_ENABLED,
+                    'feature_agent_picker': FEATURE_AGENT_PICKER,
                     'require_2fa': app.state.config.REQUIRE_2FA,
                     'two_fa_grace_period_days': app.state.config.TWO_FA_GRACE_PERIOD_DAYS,
                     'enable_data_warnings': app.state.config.ENABLE_DATA_WARNINGS,

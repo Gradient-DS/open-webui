@@ -407,6 +407,16 @@ openWebui:
     # Knowledge Base File Limit
     knowledgeMaxFileCount: "250"
 
+    # Shared-services loader-worker (per-tenant). When true, cloud-source sync
+    # workers submit jobs to the loader-worker pod (loaderWorker.enabled=true)
+    # instead of downloading + embedding in-process. See
+    # thoughts/shared/plans/2026-04-25-shared-services-loader-worker.md.
+    useSharedLoader: "false"
+    # Override LOADER_WORKER_URL when loaderWorker.enabled=false (e.g. pointing
+    # at a dev stack). When loaderWorker.enabled=true the URL is derived from
+    # the in-namespace service.
+    loaderWorkerUrl: ""
+
     # Email Invites (Microsoft Graph API)
     enableEmailInvites: "false"
     emailGraphTenantId: ""       # Azure AD Tenant ID for email app
@@ -423,7 +433,18 @@ openWebui:
     # Agent API (internal: routes chat UI to external agent service)
     agentApiEnabled: "false"
     agentApiBaseUrl: ""
-    agentApiAgent: ""
+    # agentApiKey is set via secrets (see .Values.secrets.agentApiKey)
+    # Comma-separated list of agent identifiers the admin can select from in
+    # the External Agents tab. When empty, the agents service uses its own
+    # default_agent. When set, the admin's selection is forwarded as an
+    # override hint in the payload.
+    agentApiAgents: ""
+    # [Gradient] Master kill switch for the per-chat agent picker UI
+    # (Settings → Agents admin tab + new-chat empty-state cards).
+    # Layered on top of agentApiEnabled — both must be true for users to
+    # see the agent picker. Default off so existing tenants are unaffected
+    # until they explicitly opt in.
+    featureAgentPicker: "false"
 
     # Agent Proxy (external: exposes agent API to external callers via /api/v1/agent/)
     enableAgentProxy: "false"
@@ -629,6 +650,63 @@ redis:
   securityContext: {}
 
 # -----------------------------------------------------------------------------
+# Loader Worker (per-tenant orchestrator for cloud-source ingestion)
+# -----------------------------------------------------------------------------
+# Runs in the tenant namespace. Receives jobs from open-webui (same ns,
+# NetworkPolicy-gated, no bearer), downloads cloud bytes, calls
+# shared-services gradient-doc-processor for parse+chunk, embeds via LiteLLM
+# using the tenant's existing openaiApiKey, and pushes embedded chunks back
+# to /api/v1/integrations/ingest with LOADER_INGEST_API_KEY + acting headers.
+#
+# Image source: genai-utils/api/gateway/loader_worker (built via build-services CI).
+loaderWorker:
+  enabled: false
+
+  image:
+    repository: ghcr.io/gradient-ds/gradient-loader-worker
+    tag: ""
+    pullPolicy: Always
+
+  replicaCount: 1
+
+  service:
+    port: 8002
+
+  resources:
+    requests:
+      memory: "512Mi"
+      cpu: "250m"
+    limits:
+      memory: "4Gi"
+      cpu: "2000m"
+
+  autoscaling:
+    enabled: true
+    minReplicas: 1
+    maxReplicas: 8
+    targetCPUUtilizationPercentage: 75
+    targetMemoryUtilizationPercentage: 75
+
+  config:
+    port: 8002
+    logLevel: "INFO"
+    docProcessorUrl: "http://gradient-doc-processor.shared-services.svc:8001"
+    litellmBaseUrl: "http://litellm-proxy.shared-services.svc:4000/v1"
+    maxConcurrentJobsPerReplica: 4
+    perJobItemConcurrency: 5
+    jobLeaseTimeoutSeconds: 900
+    embedderBatchSize: 100
+
+  # Postgres lives on the existing tenant Postgres pod; create a new database
+  # via the bootstrap Job (templates/loader-worker/postgres-bootstrap-job.yaml).
+  postgres:
+    database: "loader_worker"
+    user: "loader_worker_app"
+
+  podSecurityContext: {}
+  securityContext: {}
+
+# -----------------------------------------------------------------------------
 # Ingress
 # -----------------------------------------------------------------------------
 ingress:
@@ -663,12 +741,37 @@ secrets:
   externalDocumentLoaderApiKey: ""
   ragExternalRerankerApiKey: ""
 
+  # Agent API X-API-Key (must match AGENTS_API_KEY on the agent service)
+  agentApiKey: ""
+
+  # Loader-worker → tenant /ingest callback bearer (loader-worker presents this
+  # outbound; open-webui validates inbound). Same value, both pods.
+  loaderIngestApiKey: ""
+
+  # Loader-worker job DB role password (Postgres role provisioned by the
+  # post-install bootstrap Job).
+  loaderWorkerDbPassword: ""
+
   # S3 Storage (only if storageProvider is "s3")
   s3AccessKeyId: ""
   s3SecretAccessKey: ""
 
   # PostgreSQL
   postgresPassword: ""
+
+# -----------------------------------------------------------------------------
+# Agent Search (machine-auth retrieval endpoints)
+# -----------------------------------------------------------------------------
+# When enabled, mounts:
+#   GET  /api/v1/internal/retrieval/accessible-kbs
+#   POST /api/v1/internal/retrieval/query
+# on the open-webui pod. The agent authenticates by presenting AGENT_API_KEY
+# (the same secret used for the open-webui → agent outbound path — single
+# shared secret across the per-tenant trust boundary) plus an
+# `X-Acting-User-Id` header. Open-webui resolves the user, applies KB-level
+# ACL, and serves the response. No new ACL state.
+agentSearch:
+  enabled: false
 
 # -----------------------------------------------------------------------------
 # Service Account
@@ -702,6 +805,9 @@ externalSecrets:
       googleDriveApiKey: false
       externalDocumentLoaderApiKey: false
       ragExternalRerankerApiKey: false
+      agentApiKey: false
+      loaderIngestApiKey: false
+      loaderWorkerDbPassword: false
 
 # -----------------------------------------------------------------------------
 # Network Policy

@@ -43,6 +43,10 @@ class SyncStatusResponse(BaseModel):
     error: Optional[str] = None
     source_count: Optional[int] = None
     failed_files: Optional[List[FailedFileInfo]] = None
+    # Per-stage breakdown from the loader-worker (download/parse/ingest/ok/failed/pending).
+    # Persisted to KB meta by _update_sync_status; surfaced here so the polling
+    # GET stays consistent with the Socket.IO sync_progress payload.
+    stage_counts: Optional[dict] = None
 
 
 class RemoveSourceRequest(BaseModel):
@@ -163,6 +167,7 @@ def handle_get_sync_status(
         error=sync_info.get('error'),
         source_count=len(sources),
         failed_files=failed_files,
+        stage_counts=sync_info.get('stage_counts'),
     )
 
 

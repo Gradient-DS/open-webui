@@ -16,6 +16,7 @@ from open_webui.retrieval.vector.factory import VECTOR_DB_CLIENT
 from open_webui.routers.retrieval import save_docs_to_vector_db
 from open_webui.storage.provider import Storage
 from open_webui.utils.auth import get_verified_user
+from open_webui.utils.service_auth import LoaderPrincipal, get_integration_principal
 
 router = APIRouter()
 log = logging.getLogger(__name__)
@@ -168,6 +169,24 @@ def _create_or_update_file_record(
         'tags': doc.tags,
         'provider_metadata': doc.metadata,
     }
+
+    # Promote folder-rendering / change-detection keys to top-level so the KB
+    # UI's SourceGroupedFiles tree (reads file.meta.relative_path) and the next
+    # sync cycle's cloud-hash short-circuit (reads file.meta.cloud_hash) keep
+    # working. Legacy in-pod sync wrote these at top level; the loader-worker
+    # path nests them under provider_metadata, which silently broke the folder
+    # tree until promoted back.
+    for key in (
+        'relative_path',
+        'source_item_id',
+        'onedrive_item_id',
+        'onedrive_drive_id',
+        'google_drive_item_id',
+        'cloud_hash',
+        'last_synced_at',
+    ):
+        if key in doc.metadata:
+            meta[key] = doc.metadata[key]
 
     existing_file = Files.get_file_by_id(file_id)
     if existing_file:
@@ -470,7 +489,7 @@ def ingest_documents(
     request: Request,
     data: str = Form(...),
     files: Optional[list[UploadFile]] = File(None),
-    user=Depends(get_verified_user),
+    principal=Depends(get_integration_principal),
 ):
     # Parse JSON from form field
     try:
@@ -478,7 +497,20 @@ def ingest_documents(
     except (json.JSONDecodeError, Exception) as e:
         raise HTTPException(400, f"Invalid JSON in 'data' field: {e}")
 
-    provider, provider_config = get_integration_provider(request, user)
+    if isinstance(principal, LoaderPrincipal):
+        user = principal.user
+        provider = principal.provider_slug
+        providers = request.app.state.config.INTEGRATION_PROVIDERS or {}
+        # The loader bearer (LOADER_INGEST_API_KEY) is the strong auth signal
+        # for machine callers. INTEGRATION_PROVIDERS is for *external* push
+        # integrations (third-party systems pushing docs in); built-in cloud
+        # sync providers (onedrive, google_drive) don't need to be registered
+        # there. Fall back to an empty provider_config so default limits and
+        # no custom-metadata requirements apply.
+        provider_config = providers.get(provider) or {}
+    else:
+        user = principal
+        provider, provider_config = get_integration_provider(request, user)
 
     # Validate batch size
     max_per_request = provider_config.get('max_documents_per_request', 50)
@@ -496,12 +528,21 @@ def ingest_documents(
             f"Invalid data_type '{data_type}'. Must be one of: {', '.join(sorted(VALID_DATA_TYPES))}",
         )
 
-    # Find or create KB
-    knowledge = _find_kb_by_source_id(provider, collection.source_id)
+    # Find or create KB. For LoaderPrincipal callers (loader-worker pushing
+    # the result of a cloud sync), ``collection.source_id`` is the existing
+    # open-webui KB UUID — look that up directly so we don't double-create.
+    # External push providers continue to use the meta.integration.source_id
+    # lookup since they own KB lifecycle.
+    knowledge = None
+    if isinstance(principal, LoaderPrincipal):
+        knowledge = Knowledges.get_knowledge_by_id(collection.source_id)
+    if knowledge is None:
+        knowledge = _find_kb_by_source_id(provider, collection.source_id)
     if not knowledge:
         knowledge = _create_kb_for_provider(provider, provider_config, collection, user.id)
-    else:
-        # Validate data_type consistency with existing KB
+    elif not isinstance(principal, LoaderPrincipal):
+        # Validate data_type consistency with existing KB (push providers only;
+        # cloud-sync KBs found via direct ID lookup don't carry meta.integration).
         existing_data_type = (knowledge.meta or {}).get('integration', {}).get('data_type')
         if existing_data_type and existing_data_type != data_type:
             raise HTTPException(
@@ -639,9 +680,18 @@ def ingest_documents(
 def delete_collection(
     request: Request,
     source_id: str,
-    user=Depends(get_verified_user),
+    principal=Depends(get_integration_principal),
 ):
-    provider, _ = get_integration_provider(request, user)
+    if isinstance(principal, LoaderPrincipal):
+        provider = principal.provider_slug
+        providers = request.app.state.config.INTEGRATION_PROVIDERS or {}
+        if provider not in providers:
+            raise HTTPException(
+                status_code=403,
+                detail=f"Integration provider '{provider}' is not registered",
+            )
+    else:
+        provider, _ = get_integration_provider(request, principal)
 
     knowledge = _find_kb_by_source_id(provider, source_id)
     if not knowledge:

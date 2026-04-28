@@ -142,6 +142,26 @@ spec:
                   name: {{ include "open-webui-tenant.fullname" . }}-secrets
                   key: rag-external-reranker-api-key
             {{- end }}
+            # Agent API key — single shared secret used by both:
+            #   - open-webui → agent (outbound; the agent-proxy / chat path)
+            #   - agent → open-webui (inbound; gates /api/v1/internal/retrieval/*)
+            # Mounted whenever either direction is enabled and a value exists
+            # in the tenant secret store.
+            {{- if and (or (eq .Values.openWebui.config.agentApiEnabled "true") .Values.agentSearch.enabled) (or .Values.secrets.agentApiKey .Values.externalSecrets.onepassword.fields.agentApiKey) }}
+            - name: AGENT_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "open-webui-tenant.fullname" . }}-secrets
+                  key: agent-api-key
+            {{- end }}
+            # Loader-worker → /ingest callback bearer (validated by service_auth.LoaderPrincipal)
+            {{- if or .Values.secrets.loaderIngestApiKey .Values.externalSecrets.onepassword.fields.loaderIngestApiKey }}
+            - name: LOADER_INGEST_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "open-webui-tenant.fullname" . }}-secrets
+                  key: loader-ingest-api-key
+            {{- end }}
             # S3 Storage credentials (only if configured)
             {{- if or .Values.secrets.s3AccessKeyId .Values.externalSecrets.onepassword.fields.s3AccessKeyId }}
             - name: S3_ACCESS_KEY_ID

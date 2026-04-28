@@ -1,0 +1,32 @@
+{{- if and .Values.loaderWorker.enabled .Values.loaderWorker.autoscaling.enabled }}
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: {{ include "open-webui-tenant.loaderWorker.fullname" . }}
+  labels:
+    {{- include "open-webui-tenant.loaderWorker.labels" . | nindent 4 }}
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: {{ include "open-webui-tenant.loaderWorker.fullname" . }}
+  minReplicas: {{ .Values.loaderWorker.autoscaling.minReplicas | default 1 }}
+  maxReplicas: {{ .Values.loaderWorker.autoscaling.maxReplicas | default 8 }}
+  metrics:
+    {{- if .Values.loaderWorker.autoscaling.targetMemoryUtilizationPercentage }}
+    - type: Resource
+      resource:
+        name: memory
+        target:
+          type: Utilization
+          averageUtilization: {{ .Values.loaderWorker.autoscaling.targetMemoryUtilizationPercentage }}
+    {{- end }}
+    {{- if .Values.loaderWorker.autoscaling.targetCPUUtilizationPercentage }}
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: {{ .Values.loaderWorker.autoscaling.targetCPUUtilizationPercentage }}
+    {{- end }}
+{{- end }}

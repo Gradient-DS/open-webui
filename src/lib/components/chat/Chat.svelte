@@ -48,7 +48,8 @@
 		selectedTerminalId,
 		showFileNavPath,
 		showFileNavDir,
-		chatRequestQueues
+		chatRequestQueues,
+		pendingAgentId
 	} from '$lib/stores';
 
 	import { WEBUI_API_BASE_URL } from '$lib/constants';
@@ -1159,6 +1160,9 @@
 
 	const initNewChat = async () => {
 		console.log('initNewChat');
+		// [Gradient] Reset the loaded chat so stale meta (e.g. agent_id from
+		// the previous chat) doesn't bleed into the empty-state Navbar.
+		chat = null;
 		acceptedDataWarnings = new Set();
 		if ($user?.role !== 'admin' && $user?.permissions?.chat?.temporary_enforced) {
 			await temporaryChatEnabled.set(true);
@@ -2831,6 +2835,15 @@
 		let _chatId = $chatId;
 
 		if (!$temporaryChatEnabled) {
+			// [Gradient] If the user picked an agent on the empty state,
+			// bind this chat to that agent for its lifetime via meta.agent_id.
+			// The pendingAgentId store is sticky — we do NOT clear it after
+			// use, so the next "New Chat" defaults to the same agent until
+			// the user changes or clears the pick.
+			const agentBinding = $pendingAgentId
+				? { agent_id: $pendingAgentId }
+				: null;
+
 			chat = await createNewChat(
 				localStorage.token,
 				{
@@ -2844,7 +2857,8 @@
 					tags: [],
 					timestamp: Date.now()
 				},
-				$selectedFolder?.id
+				$selectedFolder?.id,
+				agentBinding
 			);
 
 			_chatId = chat.id;
@@ -3055,7 +3069,10 @@
 								params: params,
 								history: history,
 								timestamp: Date.now()
-							}
+							},
+							meta: $chatId
+								? (chat?.meta ?? {})
+								: ($pendingAgentId ? { agent_id: $pendingAgentId } : {})
 						}}
 						{history}
 						title={$chatTitle}
