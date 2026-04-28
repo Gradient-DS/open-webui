@@ -224,6 +224,10 @@ async def exchange_code_for_tokens(
         log.error('Token exchange error: %s', e)
         return {'success': False, 'error': 'Token exchange failed'}
 
+    if not token_data.get('access_token'):
+        log.error('Atlassian token response missing access_token')
+        return {'success': False, 'error': 'Token response missing access_token'}
+
     if 'expires_in' in token_data and 'expires_at' not in token_data:
         token_data['expires_at'] = int(time.time()) + int(token_data['expires_in'])
     token_data['issued_at'] = int(time.time())

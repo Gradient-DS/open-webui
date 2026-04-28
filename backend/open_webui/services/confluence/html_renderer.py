@@ -18,6 +18,16 @@ from bs4 import BeautifulSoup, NavigableString, Tag
 
 _HEADING_LEVELS = {f'h{i}': i for i in range(1, 7)}
 
+# Allowed URL prefixes for <a href>. Anything else (javascript:, data:, vbscript:,
+# file:, …) gets stripped — we keep the visible link text but drop the href, so a
+# malicious Confluence editor can't smuggle script execution through a citation
+# preview that renders the markdown downstream.
+_SAFE_URL_PREFIXES = ('http://', 'https://', 'mailto:', 'tel:', '/', '#')
+
+
+def _is_safe_url(url: str) -> bool:
+    return url.lower().startswith(_SAFE_URL_PREFIXES)
+
 
 def html_to_markdown(html: str) -> str:
     """Convert an HTML fragment to Markdown."""
@@ -54,6 +64,8 @@ def _render(node) -> str:
     if name == 'a':
         href = (node.get('href') or '').strip()
         text = _children(node).strip() or href
+        if href and not _is_safe_url(href):
+            return text  # Drop unsafe scheme; preserve visible text.
         return f'[{text}]({href})' if href else text
     if name == 'pre':
         return f'\n\n```\n{_children(node).strip()}\n```\n\n'

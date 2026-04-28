@@ -11,7 +11,10 @@ from pydantic import BaseModel
 
 from open_webui.utils.auth import get_verified_user
 from open_webui.models.users import UserModel
-from open_webui.config import CONFLUENCE_OAUTH_CLIENT_SECRET
+from open_webui.config import (
+    CONFLUENCE_OAUTH_CLIENT_ID,
+    CONFLUENCE_OAUTH_CLIENT_SECRET,
+)
 from open_webui.services.sync.router import (
     SyncStatusResponse,
     RemoveSourceRequest,
@@ -77,6 +80,15 @@ async def sync_items(
     user: UserModel = Depends(get_verified_user),
 ):
     """Start Confluence sync for multiple items (spaces and/or pages)."""
+    # Reject any cloud_id the user can't actually access — prevents a malformed
+    # body from pointing the worker at an arbitrary Atlassian site.
+    from open_webui.services.confluence.auth import get_stored_sites
+
+    allowed_cloud_ids = {s.get('cloud_id') for s in get_stored_sites(user.id)}
+    for item in request.items:
+        if item.cloud_id not in allowed_cloud_ids:
+            raise HTTPException(403, f'Confluence site not accessible: {item.cloud_id}')
+
     access_token = request.access_token
     if not access_token:
         from open_webui.services.confluence.token_refresh import (
@@ -218,6 +230,8 @@ async def initiate_auth(
     """Initiate OAuth auth code flow for Confluence."""
     from open_webui.services.confluence.auth import get_authorization_url
 
+    if not CONFLUENCE_OAUTH_CLIENT_ID.value:
+        raise HTTPException(400, 'Confluence client ID not configured')
     if not CONFLUENCE_OAUTH_CLIENT_SECRET.value:
         raise HTTPException(400, 'Confluence client secret not configured')
 

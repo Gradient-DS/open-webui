@@ -51,11 +51,12 @@ class ConfluenceSyncWorker(BaseSyncWorker):
                     source['type'] = 'folder'
                 else:
                     source['type'] = 'file'
-        # Track page IDs emitted so overlapping sources (e.g. a space + one of
-        # its subtrees) don't queue the same page twice → avoids
+        # Track (cloud_id, page_id) pairs emitted so overlapping sources (e.g. a
+        # space + one of its subtrees) don't queue the same page twice → avoids
         # UniqueViolation on the file_id primary key when two pipeline tasks
-        # race to INSERT the same row.
-        self._seen_page_ids: set[str] = set()
+        # race to INSERT the same row. Keyed by cloud_id+page_id since page IDs
+        # are not globally unique across Atlassian sites.
+        self._seen_page_ids: set[tuple[str, str]] = set()
 
     # ------------------------------------------------------------------
     # Abstract properties
@@ -164,9 +165,10 @@ class ConfluenceSyncWorker(BaseSyncWorker):
 
             # Dedupe across overlapping sources: each page only queued once
             # per sync, regardless of how many sources reference it.
-            if page_id in self._seen_page_ids:
+            seen_key = (cloud_id, page_id)
+            if seen_key in self._seen_page_ids:
                 continue
-            self._seen_page_ids.add(page_id)
+            self._seen_page_ids.add(seen_key)
 
             stored_version = int(old_page_map.get(page_id) or 0)
             relative_path = (page.get('title') or f'page-{page_id}').strip()
@@ -213,7 +215,8 @@ class ConfluenceSyncWorker(BaseSyncWorker):
         client = self._client_for(cloud_id)
 
         # Skip if this page was already queued by a space / subtree source.
-        if source['item_id'] in self._seen_page_ids:
+        seen_key = (cloud_id, source['item_id'])
+        if seen_key in self._seen_page_ids:
             return None
 
         try:
@@ -226,7 +229,7 @@ class ConfluenceSyncWorker(BaseSyncWorker):
             log.warning('Confluence page not found: %s', source.get('name'))
             return None
 
-        self._seen_page_ids.add(source['item_id'])
+        self._seen_page_ids.add(seen_key)
 
         current_version = int((page.get('version') or {}).get('number') or 0)
         stored_version = int(source.get('last_synced_version') or 0)
@@ -359,32 +362,48 @@ class ConfluenceSyncWorker(BaseSyncWorker):
     # ------------------------------------------------------------------
 
     async def _sync_permissions(self) -> None:
-        """Verify the KB owner still has access to each source's space/page."""
+        """Verify the KB owner still has access to at least one source.
+
+        Probes every source: only suspend the KB if every probe reports a
+        permanent access denial (401/403/404). A single revoked source among
+        many should not suspend the whole KB.
+        """
         if not self.sources:
             return
 
-        probe_source = self.sources[0]
-        cloud_id = probe_source.get('cloud_id')
-        if not cloud_id:
-            return
+        any_access = False
+        any_definite_denial = False
 
-        client = self._client_for(cloud_id)
+        for source in self.sources:
+            cloud_id = source.get('cloud_id')
+            if not cloud_id:
+                continue
 
-        try:
-            if self._is_space_source(probe_source) and probe_source.get('space_id'):
-                result = await client.get_space(probe_source['space_id'])
-            else:
-                result = await client.get_page(probe_source['item_id'], include_body=False)
-            owner_has_access = result is not None
-        except httpx.HTTPStatusError as e:
-            if e.response.status_code in (401, 403, 404):
-                owner_has_access = False
-            else:
-                log.warning('Transient error checking Confluence access: %s', e)
+            client = self._client_for(cloud_id)
+            try:
+                if self._is_space_source(source) and source.get('space_id'):
+                    result = await client.get_space(source['space_id'])
+                else:
+                    result = await client.get_page(source['item_id'], include_body=False)
+                if result is not None:
+                    any_access = True
+                    break
+                any_definite_denial = True  # 404 returned as None
+            except httpx.HTTPStatusError as e:
+                if e.response.status_code in (401, 403, 404):
+                    any_definite_denial = True
+                else:
+                    log.warning('Transient error checking Confluence access: %s', e)
+                    return  # Don't change suspension state on transient failures
+            except Exception as e:
+                log.warning('Error checking Confluence access: %s', e)
                 return
-        except Exception as e:
-            log.warning('Error checking Confluence access: %s', e)
+
+        if not any_access and not any_definite_denial:
+            # No probes ran (e.g. all sources missing cloud_id) — treat as transient.
             return
+
+        owner_has_access = any_access
 
         knowledge = Knowledges.get_knowledge_by_id(self.knowledge_id)
         if not knowledge:
