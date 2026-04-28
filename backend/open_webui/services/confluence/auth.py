@@ -153,9 +153,7 @@ async def _fetch_accessible_resources(access_token: str) -> List[Dict[str, Any]]
         # Accept classic ("read:confluence-...") AND granular
         # ("read:<thing>:confluence", "search:confluence") scope names.
         if any(
-            s.startswith('read:confluence')
-            or s.startswith('search:confluence')
-            or s.endswith(':confluence')
+            s.startswith('read:confluence') or s.startswith('search:confluence') or s.endswith(':confluence')
             for s in scopes
         ):
             confluence_sites.append(res)
