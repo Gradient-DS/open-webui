@@ -25,6 +25,44 @@ spec:
       securityContext:
         {{- toYaml . | nindent 8 }}
       {{- end }}
+      initContainers:
+        # Wait until the bootstrap Job has created the loader role + database
+        # AND the synced Secret has the loader-worker-db-password key. Without
+        # this, the loader-worker container would CrashLoopBackOff with
+        # InvalidPasswordError if started before the Helm hook completes.
+        - name: wait-for-loader-db
+          image: "{{ .Values.postgres.image.repository }}:{{ .Values.postgres.image.tag }}"
+          imagePullPolicy: {{ .Values.postgres.image.pullPolicy | default "IfNotPresent" }}
+          {{- with .Values.loaderWorker.securityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          env:
+            - name: PGHOST
+              value: {{ include "open-webui-tenant.postgres.fullname" . | quote }}
+            - name: PGPORT
+              value: {{ .Values.postgres.port | default 5432 | quote }}
+            - name: PGUSER
+              value: {{ .Values.loaderWorker.postgres.user | default "loader_worker_app" | quote }}
+            - name: PGDATABASE
+              value: {{ .Values.loaderWorker.postgres.database | default "loader_worker" | quote }}
+            - name: PGPASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "open-webui-tenant.fullname" . }}-secrets
+                  key: loader-worker-db-password
+          command:
+            - /bin/sh
+            - -c
+            - |
+              set -eu
+              i=0
+              until psql -c '\q' 2>/dev/null; do
+                i=$((i+1))
+                echo "[$i] waiting for loader_worker DB + role..."
+                sleep 3
+              done
+              echo "loader_worker DB reachable"
       containers:
         - name: loader-worker
           image: "{{ .Values.loaderWorker.image.repository }}:{{ .Values.loaderWorker.image.tag }}"
