@@ -261,6 +261,18 @@ class ConfluenceClient:
 
         return all_items
 
+    async def list_all_page_labels(self, page_id: str) -> List[Dict[str, Any]]:
+        """Return all labels attached to a page."""
+        return await self._paginated_get(f'pages/{page_id}/labels')
+
+    async def list_all_page_ancestors(self, page_id: str) -> List[Dict[str, Any]]:
+        """Return ancestor pages of a page.
+
+        v2 returns ancestors from root → direct parent (path order). Used to
+        compose a human-readable breadcrumb for citations / RAG context.
+        """
+        return await self._paginated_get(f'pages/{page_id}/ancestors')
+
     # ------------------------------------------------------------------
     # Public API — page content
     # ------------------------------------------------------------------

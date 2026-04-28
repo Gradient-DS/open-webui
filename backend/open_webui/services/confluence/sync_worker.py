@@ -24,12 +24,30 @@ log = logging.getLogger(__name__)
 
 _FILE_ID_PREFIX = 'confluence-'
 
+# Heuristic: map a page's Confluence labels to a coarse page_type bucket so
+# RAG callers can filter by document kind (decision, meeting, how-to, ...)
+# without having to know every label your team uses. First match wins.
+_PAGE_TYPE_RULES: list[tuple[str, set[str]]] = [
+    ('decision', {'decision', 'adr', 'architecture-decision'}),
+    ('meeting', {'meeting-notes', 'meeting', 'minutes', 'standup', '1on1'}),
+    ('how-to', {'how-to', 'howto', 'guide', 'tutorial', 'runbook', 'playbook'}),
+    ('reference', {'reference', 'spec', 'config'}),
+]
+
 
 def _sanitise_filename(title: str, page_id: str) -> str:
     """Turn a Confluence page title into a safe `.md` filename."""
     cleaned = re.sub(r'[\\/:*?"<>|\r\n\t]', '_', (title or '').strip())
     cleaned = cleaned[:120].rstrip(' .') or f'page-{page_id}'
     return f'{cleaned}.md'
+
+
+def _derive_page_type(labels: List[str]) -> Optional[str]:
+    label_set = {l.lower() for l in labels}
+    for type_, keywords in _PAGE_TYPE_RULES:
+        if label_set & keywords:
+            return type_
+    return None
 
 
 class ConfluenceSyncWorker(BaseSyncWorker):
@@ -272,14 +290,39 @@ class ConfluenceSyncWorker(BaseSyncWorker):
         return str(number) if number is not None else None
 
     async def _download_file_content(self, file_info: Dict[str, Any]) -> bytes:
-        """Fetch the page, render body as Markdown with a YAML-ish front-matter."""
+        """Fetch the page + labels + ancestors; render Markdown with front-matter.
+
+        Side-effect: enriches ``file_info`` with structured Confluence metadata
+        (labels, breadcrumb, page_type, author, last_modified, created_at,
+        ancestor_ids). base_worker calls ``_get_provider_file_meta`` AFTER this
+        method, passing the same ``file_info``, so the enrichment surfaces on
+        ``file.meta`` and propagates to vector-DB chunk metadata.
+        """
         cloud_id = file_info['cloud_id']
         page_id = file_info['page_id']
         client = self._client_for(cloud_id)
 
-        page = await client.get_page(page_id, include_body=True)
-        if not page:
+        # Fetch page body, labels, and ancestor chain in parallel — the labels
+        # and ancestor calls are cheap, so they hide behind the body fetch.
+        page_result, labels_result, ancestors_result = await asyncio.gather(
+            client.get_page(page_id, include_body=True),
+            client.list_all_page_labels(page_id),
+            client.list_all_page_ancestors(page_id),
+            return_exceptions=True,
+        )
+
+        if isinstance(page_result, BaseException) or not page_result:
+            if isinstance(page_result, BaseException):
+                raise page_result
             raise RuntimeError(f'Confluence page {page_id} disappeared during sync')
+        page = page_result
+
+        labels = [
+            label.get('name')
+            for label in (labels_result if isinstance(labels_result, list) else [])
+            if label.get('name')
+        ]
+        ancestors = ancestors_result if isinstance(ancestors_result, list) else []
 
         body = (page.get('body') or {}).get('view') or {}
         html = body.get('value') or ''
@@ -291,22 +334,46 @@ class ConfluenceSyncWorker(BaseSyncWorker):
         version_number = (page.get('version') or {}).get('number')
         version_when = (page.get('version') or {}).get('createdAt') or ''
         author_id = (page.get('version') or {}).get('authorId') or ''
+        created_at = page.get('createdAt') or ''
         space_id = page.get('spaceId') or file_info.get('space_id') or ''
         web_url = file_info.get('web_url') or ''
+
+        ancestor_titles = [a.get('title') for a in ancestors if a.get('title')]
+        breadcrumb = ' > '.join([*ancestor_titles, title])
+        page_type = _derive_page_type(labels)
 
         front_matter = [
             f'# {title}',
             '',
             f'_Confluence page · space {space_id} · version {version_number}_',
         ]
+        if breadcrumb:
+            front_matter.append(f'_Path: {breadcrumb}_')
+        if labels:
+            front_matter.append(f'_Labels: {", ".join(labels)}_')
+        if page_type:
+            front_matter.append(f'_Type: {page_type}_')
         if web_url:
             front_matter.append(f'_Source: {web_url}_')
+        if created_at:
+            front_matter.append(f'_Created: {created_at}_')
         if version_when:
             front_matter.append(f'_Last modified: {version_when}_')
         if author_id:
             front_matter.append(f'_Author: {author_id}_')
         front_matter.append('')
         front_matter.append('')
+
+        # Enrich file_info so _get_provider_file_meta can promote these onto
+        # the File row's meta (and from there onto every chunk's metadata via
+        # retrieval.py's `**file.meta` spread).
+        file_info['confluence_labels'] = labels
+        file_info['confluence_breadcrumb'] = breadcrumb
+        file_info['confluence_page_type'] = page_type
+        file_info['confluence_ancestor_ids'] = [a.get('id') for a in ancestors if a.get('id')]
+        file_info['confluence_author_id'] = author_id
+        file_info['confluence_last_modified'] = version_when
+        file_info['confluence_created_at'] = created_at
 
         rendered = '\n'.join(front_matter) + markdown_body + '\n'
 
@@ -340,22 +407,28 @@ class ConfluenceSyncWorker(BaseSyncWorker):
         size: int,
         file_info: Optional[Dict[str, Any]] = None,
     ) -> dict:
-        cloud_id = file_info.get('cloud_id') if file_info else ''
-        space_id = file_info.get('space_id') if file_info else ''
-        space_key = file_info.get('space_key') if file_info else ''
-        web_url = file_info.get('web_url') if file_info else ''
-        title = file_info.get('title') if file_info else ''
+        info = file_info or {}
         return {
             'name': name,
             'content_type': 'text/markdown',
             'size': size,
             'source': 'confluence',
             'confluence_page_id': item_id,
-            'confluence_cloud_id': cloud_id,
-            'confluence_space_id': space_id,
-            'confluence_space_key': space_key,
-            'confluence_url': web_url,
-            'confluence_title': title,
+            'confluence_cloud_id': info.get('cloud_id', ''),
+            'confluence_space_id': info.get('space_id', ''),
+            'confluence_space_key': info.get('space_key', ''),
+            'confluence_url': info.get('web_url', ''),
+            'confluence_title': info.get('title', ''),
+            # Enrichment fields populated by _download_file_content. Empty when
+            # this method is called before download (e.g. cloud-hash skip path
+            # or shared-loader job-creation path).
+            'confluence_labels': info.get('confluence_labels') or [],
+            'confluence_page_type': info.get('confluence_page_type'),
+            'confluence_breadcrumb': info.get('confluence_breadcrumb', ''),
+            'confluence_ancestor_ids': info.get('confluence_ancestor_ids') or [],
+            'confluence_author_id': info.get('confluence_author_id', ''),
+            'confluence_last_modified': info.get('confluence_last_modified', ''),
+            'confluence_created_at': info.get('confluence_created_at', ''),
             'source_item_id': source_item_id,
             'relative_path': relative_path,
             'last_synced_at': int(time.time()),
