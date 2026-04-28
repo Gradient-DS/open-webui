@@ -105,6 +105,7 @@ from open_webui.routers import (
     scim,
     onedrive_sync,
     google_drive_sync,
+    confluence_sync,
     invites,
     data_warnings,
     terminals,
@@ -377,6 +378,12 @@ from open_webui.config import (
     ONEDRIVE_SYNC_INTERVAL_MINUTES,
     ONEDRIVE_MAX_FILES_PER_SYNC,
     ONEDRIVE_MAX_FILE_SIZE_MB,
+    ENABLE_CONFLUENCE_INTEGRATION,
+    ENABLE_CONFLUENCE_SYNC,
+    CONFLUENCE_OAUTH_CLIENT_ID,
+    CONFLUENCE_OAUTH_CLIENT_SECRET,
+    CONFLUENCE_SYNC_INTERVAL_MINUTES,
+    CONFLUENCE_MAX_PAGES_PER_SYNC,
     ENABLE_EMAIL_INVITES,
     EMAIL_FROM_ADDRESS,
     EMAIL_FROM_NAME,
@@ -888,6 +895,13 @@ async def lifespan(app: FastAPI):
 
     start_google_drive_scheduler(app)
 
+    # Start Confluence background sync scheduler
+    from open_webui.services.confluence.scheduler import (
+        start_scheduler as start_confluence_scheduler,
+    )
+
+    start_confluence_scheduler(app)
+
     # Start deletion cleanup worker
     from open_webui.services.deletion.cleanup_worker import start_cleanup_worker
 
@@ -990,6 +1004,13 @@ async def lifespan(app: FastAPI):
     )
 
     stop_google_drive_scheduler()
+
+    # Stop Confluence background sync scheduler
+    from open_webui.services.confluence.scheduler import (
+        stop_scheduler as stop_confluence_scheduler,
+    )
+
+    stop_confluence_scheduler()
 
     if hasattr(app.state, 'redis_task_command_listener'):
         app.state.redis_task_command_listener.cancel()
@@ -1372,6 +1393,8 @@ app.state.config.ENABLE_GOOGLE_DRIVE_INTEGRATION = ENABLE_GOOGLE_DRIVE_INTEGRATI
 app.state.config.ENABLE_GOOGLE_DRIVE_SYNC = ENABLE_GOOGLE_DRIVE_SYNC
 app.state.config.ENABLE_ONEDRIVE_INTEGRATION = ENABLE_ONEDRIVE_INTEGRATION
 app.state.config.ENABLE_ONEDRIVE_SYNC = ENABLE_ONEDRIVE_SYNC
+app.state.config.ENABLE_CONFLUENCE_INTEGRATION = ENABLE_CONFLUENCE_INTEGRATION
+app.state.config.ENABLE_CONFLUENCE_SYNC = ENABLE_CONFLUENCE_SYNC
 
 app.state.config.ENABLE_EMAIL_INVITES = ENABLE_EMAIL_INVITES
 app.state.config.EMAIL_FROM_ADDRESS = EMAIL_FROM_ADDRESS
@@ -1951,6 +1974,10 @@ if app.state.config.ENABLE_ONEDRIVE_SYNC:
 # Google Drive Sync API for collection synchronization
 if app.state.config.ENABLE_GOOGLE_DRIVE_SYNC:
     app.include_router(google_drive_sync.router, prefix='/api/v1/google-drive', tags=['google-drive'])
+
+# Confluence Sync API for collection synchronization
+if app.state.config.ENABLE_CONFLUENCE_SYNC:
+    app.include_router(confluence_sync.router, prefix='/api/v1/confluence', tags=['confluence'])
 
 # Invites API (always mounted - Copy Link works without Graph API)
 app.include_router(invites.router, prefix='/api/v1/invites', tags=['invites'])
@@ -2653,6 +2680,14 @@ async def get_app_config(request: Request):
                         if app.state.config.ENABLE_ONEDRIVE_INTEGRATION
                         else {}
                     ),
+                    'enable_confluence_integration': app.state.config.ENABLE_CONFLUENCE_INTEGRATION,
+                    **(
+                        {
+                            'enable_confluence_sync': app.state.config.ENABLE_CONFLUENCE_SYNC,
+                        }
+                        if app.state.config.ENABLE_CONFLUENCE_INTEGRATION
+                        else {}
+                    ),
                     'enable_email_invites': app.state.config.ENABLE_EMAIL_INVITES,
                     'enable_agent_proxy': app.state.config.ENABLE_AGENT_PROXY,
                     'feature_agent_api_enabled': AGENT_API_ENABLED,
@@ -2718,6 +2753,10 @@ async def get_app_config(request: Request):
                     'sharepoint_url': ONEDRIVE_SHAREPOINT_URL.value,
                     'sharepoint_tenant_id': ONEDRIVE_SHAREPOINT_TENANT_ID.value,
                     'has_client_secret': bool(MICROSOFT_CLIENT_SECRET.value),
+                },
+                'confluence': {
+                    'client_id': CONFLUENCE_OAUTH_CLIENT_ID.value,
+                    'has_client_secret': bool(CONFLUENCE_OAUTH_CLIENT_SECRET.value),
                 },
                 'ui': {
                     'pending_user_overlay_title': app.state.config.PENDING_USER_OVERLAY_TITLE,
@@ -3076,6 +3115,21 @@ async def oauth_login_callback(
                 )
 
                 return await handle_google_drive_auth_callback(request)
+
+    # Check if this is a Confluence background sync auth callback
+    if provider == 'atlassian':
+        state = request.query_params.get('state')
+        if state:
+            from open_webui.services.confluence.auth import (
+                _pending_flows as _confluence_pending_flows,
+            )
+
+            if state in _confluence_pending_flows:
+                from open_webui.routers.confluence_sync import (
+                    handle_confluence_auth_callback,
+                )
+
+                return await handle_confluence_auth_callback(request)
 
     return await oauth_manager.handle_callback(request, provider, response, db=db)
 

@@ -143,7 +143,7 @@ class ExportService:
         cloud_kb_ids = set()
         for kb in data.get('knowledge_bases', []):
             kb_type = kb.get('type', 'local')
-            if kb_type in ('onedrive', 'google_drive'):
+            if kb_type in ('onedrive', 'google_drive', 'confluence'):
                 cloud_kb_ids.add(kb.get('id'))
 
         # Build set of file IDs that belong to cloud KBs

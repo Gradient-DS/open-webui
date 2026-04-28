@@ -2881,6 +2881,42 @@ ONEDRIVE_SYNC_INTERVAL_MINUTES = PersistentConfig(
 ONEDRIVE_MAX_FILES_PER_SYNC = int(os.getenv('ONEDRIVE_MAX_FILES_PER_SYNC', '500'))
 ONEDRIVE_MAX_FILE_SIZE_MB = int(os.getenv('ONEDRIVE_MAX_FILE_SIZE_MB', '100'))
 
+
+# If configured, Confluence will be available as a knowledge-base sync source.
+ENABLE_CONFLUENCE_INTEGRATION = PersistentConfig(
+    'ENABLE_CONFLUENCE_INTEGRATION',
+    'confluence.enable',
+    os.getenv('ENABLE_CONFLUENCE_INTEGRATION', 'False').lower() == 'true',
+)
+
+CONFLUENCE_OAUTH_CLIENT_ID = PersistentConfig(
+    'CONFLUENCE_OAUTH_CLIENT_ID',
+    'confluence.client_id',
+    os.environ.get('CONFLUENCE_OAUTH_CLIENT_ID', ''),
+)
+
+CONFLUENCE_OAUTH_CLIENT_SECRET = PersistentConfig(
+    'CONFLUENCE_OAUTH_CLIENT_SECRET',
+    'confluence.client_secret',
+    os.environ.get('CONFLUENCE_OAUTH_CLIENT_SECRET', ''),
+)
+
+ENABLE_CONFLUENCE_SYNC = PersistentConfig(
+    'ENABLE_CONFLUENCE_SYNC',
+    'confluence.enable_sync',
+    os.getenv('ENABLE_CONFLUENCE_SYNC', 'False').lower() == 'true',
+)
+
+CONFLUENCE_SYNC_INTERVAL_MINUTES = PersistentConfig(
+    'CONFLUENCE_SYNC_INTERVAL_MINUTES',
+    'confluence.sync_interval_minutes',
+    int(os.environ.get('CONFLUENCE_SYNC_INTERVAL_MINUTES', '60')),
+)
+
+CONFLUENCE_MAX_PAGES_PER_SYNC = int(os.getenv('CONFLUENCE_MAX_PAGES_PER_SYNC', '500'))
+CONFLUENCE_MAX_PAGE_SIZE_MB = int(os.getenv('CONFLUENCE_MAX_PAGE_SIZE_MB', '25'))
+
+
 ####################################
 # Email Service (Microsoft Graph API)
 ####################################

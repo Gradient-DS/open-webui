@@ -53,6 +53,11 @@
 		type SyncItem as GoogleDriveSyncItem
 	} from '$lib/apis/googledrive';
 	import { createKnowledgePicker } from '$lib/utils/google-drive-picker';
+	import {
+		startConfluenceSyncItems,
+		type SyncItem as ConfluenceSyncItem
+	} from '$lib/apis/confluence';
+	import ConfluencePickerModal from './ConfluencePickerModal.svelte';
 	import { WEBUI_API_BASE_URL } from '$lib/constants';
 
 	import { blobToFile, isYoutubeUrl } from '$lib/utils';
@@ -74,6 +79,7 @@
 	import LockClosed from '$lib/components/icons/LockClosed.svelte';
 	import OneDrive from '$lib/components/icons/OneDrive.svelte';
 	import GoogleDrive from '$lib/components/icons/GoogleDrive.svelte';
+	import Confluence from '$lib/components/icons/Confluence.svelte';
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
 	import AccessControlModal from '../common/AccessControlModal.svelte';
 	import Search from '$lib/components/icons/Search.svelte';
@@ -127,6 +133,20 @@
 			authBasePath: 'google-drive',
 			authPopupName: 'google_drive_auth',
 			configKey: 'google_drive'
+		},
+		confluence: {
+			type: 'confluence',
+			metaKey: 'confluence_sync',
+			eventPrefix: 'confluence',
+			fileIdPrefix: 'confluence-',
+			sourceMetaField: 'confluence',
+			label: 'Confluence',
+			api: createSyncApi('confluence'),
+			startSyncParam: 'start_confluence_sync',
+			authCallbackType: 'confluence_auth_callback',
+			authBasePath: 'confluence',
+			authPopupName: 'confluence_auth',
+			configKey: 'confluence'
 		}
 	};
 
@@ -158,8 +178,39 @@
 			bgSyncAuthorized: false,
 			bgSyncNeedsReauth: false,
 			refreshDone: false
+		},
+		confluence: {
+			isSyncing: false,
+			isCancelling: false,
+			syncStatus: null,
+			bgSyncAuthorized: false,
+			bgSyncNeedsReauth: false,
+			refreshDone: false
 		}
 	};
+
+	// Confluence picker modal state
+	let showConfluencePicker = false;
+	let pendingConfluenceResolve: ((items: ConfluenceSyncItem[] | null) => void) | null = null;
+
+	function openConfluencePicker(): Promise<ConfluenceSyncItem[] | null> {
+		showConfluencePicker = true;
+		return new Promise((resolve) => {
+			pendingConfluenceResolve = resolve;
+		});
+	}
+
+	function handleConfluenceSelect(event: CustomEvent<{ items: ConfluenceSyncItem[] }>) {
+		if (pendingConfluenceResolve) {
+			pendingConfluenceResolve(event.detail.items);
+			pendingConfluenceResolve = null;
+		}
+	}
+
+	$: if (!showConfluencePicker && pendingConfluenceResolve) {
+		pendingConfluenceResolve(null);
+		pendingConfluenceResolve = null;
+	}
 
 	$: isSyncBusy = Object.values(cloudSyncState).some((s) => s.isSyncing || s.isCancelling);
 	$: activeProvider = knowledge?.type ? (CLOUD_PROVIDERS[knowledge.type] ?? null) : null;
@@ -740,6 +791,51 @@
 					knowledge_id: knowledge.id,
 					items: syncItems as GoogleDriveSyncItem[]
 				});
+			} else if (provider.type === 'confluence') {
+				// Ensure we have a valid OAuth token before opening the picker.
+				const tokenStatus = await provider.api
+					.getTokenStatus(localStorage.token, knowledge.id)
+					.catch(() => null);
+				const tokenValid = !!(
+					tokenStatus &&
+					tokenStatus.has_token &&
+					!tokenStatus.is_expired &&
+					!tokenStatus.needs_reauth
+				);
+				if (!tokenValid) {
+					toast.info($i18n.t('Authorize Confluence to continue.'));
+					await authorizeBackgroundSync(provider);
+					const recheck = await provider.api
+						.getTokenStatus(localStorage.token, knowledge.id)
+						.catch(() => null);
+					const nowValid = !!(
+						recheck &&
+						recheck.has_token &&
+						!recheck.is_expired &&
+						!recheck.needs_reauth
+					);
+					if (!nowValid) {
+						state.isSyncing = false;
+						cloudSyncState = cloudSyncState;
+						return;
+					}
+				}
+
+				const items = await openConfluencePicker();
+				if (!items || items.length === 0) {
+					state.isSyncing = false;
+					cloudSyncState = cloudSyncState;
+					return;
+				}
+
+				syncItems = items;
+
+				state.refreshDone = false;
+				cloudSyncState = cloudSyncState;
+				await startConfluenceSyncItems(localStorage.token, {
+					knowledge_id: knowledge.id,
+					items: syncItems as ConfluenceSyncItem[]
+				});
 			}
 
 			// Refresh knowledge to get updated sources
@@ -799,6 +895,28 @@
 				state.refreshDone = false;
 				cloudSyncState = cloudSyncState;
 				await startGoogleDriveSyncItems(localStorage.token, {
+					knowledge_id: knowledge.id,
+					items: syncItems
+				});
+			} else if (provider.type === 'confluence') {
+				// Stored sources have type='folder'/'file' (translated by the backend
+				// on first sync) and the original under confluence_type. The API model
+				// requires 'space' | 'page', so prefer confluence_type.
+				const syncItems: ConfluenceSyncItem[] = sources.map((source: any) => ({
+					type: source.confluence_type ?? source.type,
+					cloud_id: source.cloud_id,
+					space_id: source.space_id,
+					space_key: source.space_key,
+					site_url: source.site_url,
+					item_id: source.item_id,
+					item_path: source.item_path,
+					name: source.name,
+					include_descendants: source.include_descendants ?? true
+				}));
+
+				state.refreshDone = false;
+				cloudSyncState = cloudSyncState;
+				await startConfluenceSyncItems(localStorage.token, {
 					knowledge_id: knowledge.id,
 					items: syncItems
 				});
@@ -1651,6 +1769,8 @@
 	}}
 />
 
+<ConfluencePickerModal bind:show={showConfluencePicker} on:select={handleConfluenceSelect} />
+
 <AddTextContentModal
 	bind:show={showAddTextContentModal}
 	on:submit={(e) => {
@@ -1846,6 +1966,8 @@
 												<OneDrive className="size-4" />
 											{:else if activeProvider.type === 'google_drive'}
 												<GoogleDrive className="size-4" />
+											{:else if activeProvider.type === 'confluence'}
+												<Confluence className="size-4" />
 											{/if}
 										</button>
 									</Tooltip>
@@ -2141,6 +2263,8 @@
 												cloudSyncHandler(CLOUD_PROVIDERS.onedrive);
 											} else if (type === 'google_drive') {
 												cloudSyncHandler(CLOUD_PROVIDERS.google_drive);
+											} else if (type === 'confluence') {
+												cloudSyncHandler(CLOUD_PROVIDERS.confluence);
 											} else if (type === 'directory') {
 												uploadDirectoryHandler();
 											} else if (type === 'web') {

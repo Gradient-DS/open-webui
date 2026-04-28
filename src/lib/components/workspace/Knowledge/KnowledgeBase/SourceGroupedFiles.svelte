@@ -83,9 +83,17 @@
 		return count;
 	}
 
-	// Group files by source
-	$: folderSources = (sources || []).filter((s) => s.type === 'folder');
-	$: fileSources = (sources || []).filter((s) => s.type === 'file');
+	// Group files by source. Folder-like = anything that groups many files:
+	//   - onedrive/google_drive: type='folder'
+	//   - confluence: type='space', or type='page' with include_descendants=true
+	const isFolderLikeSource = (s: any): boolean => {
+		if (s?.type === 'folder' || s?.type === 'space') return true;
+		if (s?.type === 'page' && s?.include_descendants !== false) return true;
+		return false;
+	};
+
+	$: folderSources = (sources || []).filter(isFolderLikeSource);
+	$: fileSources = (sources || []).filter((s) => !isFolderLikeSource(s));
 
 	// Files grouped by their source_item_id
 	$: filesBySource = (() => {
@@ -306,11 +314,12 @@
 							class="p-1 rounded-full hover:bg-gray-100 dark:hover:bg-gray-850 transition"
 							type="button"
 							on:click={() => {
-								if (
-									(file?.meta?.source === 'onedrive' || file?.meta?.source === 'google_drive') &&
-									file?.meta?.source_item_id
-								) {
-									// OneDrive loose file: remove via source removal
+								const cloudSource =
+									file?.meta?.source === 'onedrive' ||
+									file?.meta?.source === 'google_drive' ||
+									file?.meta?.source === 'confluence';
+								if (cloudSource && file?.meta?.source_item_id) {
+									// Cloud-provider loose file: remove via source removal
 									onRemoveSource(file.meta.source_item_id, file?.name ?? file?.meta?.name);
 								} else {
 									// Local file: normal delete
