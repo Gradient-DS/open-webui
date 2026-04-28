@@ -19,10 +19,18 @@ spec:
     spec:
       restartPolicy: OnFailure
       {{- include "open-webui-tenant.imagePullSecrets" . | nindent 6 }}
+      {{- with .Values.loaderWorker.podSecurityContext }}
+      securityContext:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
       containers:
         - name: bootstrap
           image: {{ .Values.postgres.image.repository }}:{{ .Values.postgres.image.tag }}
           imagePullPolicy: {{ .Values.postgres.image.pullPolicy | default "IfNotPresent" }}
+          {{- with .Values.loaderWorker.securityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
           env:
             - name: PGHOST
               value: {{ include "open-webui-tenant.postgres.fullname" . | quote }}
