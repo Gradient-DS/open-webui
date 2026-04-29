@@ -14,6 +14,12 @@ data:
   CLIENT_NAME: {{ .Values.tenant.clientName | quote }}
   CORS_ALLOW_ORIGIN: {{ .Values.openWebui.config.corsAllowOrigin | default (printf "https://%s" .Values.tenant.domain) | quote }}
 
+  # In-cluster base URL OWUI passes to the loader-worker as `callback_base_url`
+  # when submitting sync jobs. Read by services/sync/base_worker.py at the
+  # env var name OPENWEBUI_BASE_URL. Empty value -> loader-worker raises
+  # httpx.UnsupportedProtocol on POST /api/v1/integrations/ingest.
+  OPENWEBUI_BASE_URL: "http://{{ include "open-webui-tenant.openWebui.fullname" . }}.{{ .Release.Namespace }}.svc:{{ .Values.openWebui.service.port | default 8080 }}"
+
   # Locale
   DEFAULT_LOCALE: {{ .Values.openWebui.config.defaultLocale | quote }}
 
