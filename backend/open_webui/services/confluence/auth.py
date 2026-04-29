@@ -18,17 +18,18 @@ from typing import Optional, Dict, Any, List
 from urllib.parse import urlencode
 
 import httpx
+from fastapi import Request
 
 from open_webui.models.oauth_sessions import OAuthSessions
 from open_webui.config import (
     CONFLUENCE_OAUTH_CLIENT_ID,
     CONFLUENCE_OAUTH_CLIENT_SECRET,
 )
+from open_webui.services.sync import pending_flows as _pending
 
 log = logging.getLogger(__name__)
 
-# In-memory pending flows with TTL (10 minutes)
-_pending_flows: Dict[str, Dict[str, Any]] = {}
+_PROVIDER = 'confluence'
 _FLOW_TTL_SECONDS = 600
 
 # Atlassian OAuth endpoints
@@ -56,23 +57,14 @@ _SCOPE = ' '.join(
 _AUDIENCE = 'api.atlassian.com'
 
 
-def _cleanup_expired_flows():
-    """Remove expired pending flows."""
-    now = time.time()
-    expired = [k for k, v in _pending_flows.items() if now - v['created_at'] > _FLOW_TTL_SECONDS]
-    for k in expired:
-        del _pending_flows[k]
-
-
-def get_pending_flow(state: str) -> Optional[Dict[str, Any]]:
+async def get_pending_flow(request: Request, state: str) -> Optional[Dict[str, Any]]:
     """Get a pending flow by state parameter, or None if not found/expired."""
-    _cleanup_expired_flows()
-    return _pending_flows.get(state)
+    return await _pending.get_pending_flow(request, _PROVIDER, state)
 
 
-def remove_pending_flow(state: str) -> None:
+async def remove_pending_flow(request: Request, state: str) -> None:
     """Remove a pending flow by state parameter."""
-    _pending_flows.pop(state, None)
+    await _pending.remove_pending_flow(request, _PROVIDER, state)
 
 
 def _generate_pkce() -> tuple[str, str]:
@@ -83,7 +75,8 @@ def _generate_pkce() -> tuple[str, str]:
     return code_verifier, code_challenge
 
 
-def get_authorization_url(
+async def get_authorization_url(
+    request: Request,
     user_id: str,
     knowledge_id: str,
     redirect_uri: str,
@@ -92,20 +85,24 @@ def get_authorization_url(
     Build the Atlassian OAuth authorization URL.
 
     Returns the URL to redirect the user to for authorization.
-    Stores the pending flow in memory for callback validation.
+    Stores the pending flow in the shared store for callback validation.
     """
-    _cleanup_expired_flows()
-
     code_verifier, code_challenge = _generate_pkce()
     state = secrets.token_urlsafe(32)
 
-    _pending_flows[state] = {
-        'user_id': user_id,
-        'knowledge_id': knowledge_id,
-        'code_verifier': code_verifier,
-        'redirect_uri': redirect_uri,
-        'created_at': time.time(),
-    }
+    await _pending.store_pending_flow(
+        request,
+        _PROVIDER,
+        state,
+        {
+            'user_id': user_id,
+            'knowledge_id': knowledge_id,
+            'code_verifier': code_verifier,
+            'redirect_uri': redirect_uri,
+            'created_at': time.time(),
+        },
+        ttl=_FLOW_TTL_SECONDS,
+    )
 
     params = {
         'audience': _AUDIENCE,
@@ -162,6 +159,7 @@ async def _fetch_accessible_resources(access_token: str) -> List[Dict[str, Any]]
 
 
 async def exchange_code_for_tokens(
+    request: Request,
     code: str,
     state: str,
     user_id: str,
@@ -172,9 +170,7 @@ async def exchange_code_for_tokens(
 
     Returns dict with 'success', 'knowledge_id', and optionally 'error'.
     """
-    _cleanup_expired_flows()
-
-    flow = _pending_flows.pop(state, None)
+    flow = await _pending.pop_pending_flow(request, _PROVIDER, state)
     if not flow:
         return {'success': False, 'error': 'Invalid or expired state parameter'}
 

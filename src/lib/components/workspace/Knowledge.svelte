@@ -29,6 +29,7 @@
 	import Spinner from '../common/Spinner.svelte';
 	import Tooltip from '../common/Tooltip.svelte';
 	import Dropdown from '../common/Dropdown.svelte';
+	import SyncProgressBadge from './Knowledge/SyncProgressBadge.svelte';
 	import XMark from '../icons/XMark.svelte';
 	import ViewSelector from './common/ViewSelector.svelte';
 	import TypeSelector from './common/TypeSelector.svelte';
@@ -158,68 +159,33 @@
 		}
 	};
 
-	const handleSyncProgress = (data) => {
-		const { knowledge_id, status } = data;
-		if (items) {
-			items = items.map((item) => {
-				if (item.id === knowledge_id) {
-					return {
-						...item,
-						meta: {
-							...item.meta,
-							onedrive_sync: {
-								...(item.meta?.onedrive_sync ?? {}),
-								status
-							}
-						}
-					};
+	const mergeSyncProgress = (metaKey: string, data: any) => {
+		const { knowledge_id, status, current, total, stage_counts } = data;
+		if (!items) return;
+		items = items.map((item) => {
+			if (item.id !== knowledge_id) return item;
+			const prev = item.meta?.[metaKey] ?? {};
+			return {
+				...item,
+				meta: {
+					...item.meta,
+					[metaKey]: {
+						...prev,
+						status,
+						progress_current: current ?? prev.progress_current,
+						progress_total: total ?? prev.progress_total,
+						// Preserve previous stage_counts on completion/cancellation
+						// emits that don't carry them, mirroring KnowledgeBase.svelte.
+						stage_counts: stage_counts ?? prev.stage_counts
+					}
 				}
-				return item;
-			});
-		}
+			};
+		});
 	};
 
-	const handleGoogleDriveSyncProgress = (data) => {
-		const { knowledge_id, status } = data;
-		if (items) {
-			items = items.map((item) => {
-				if (item.id === knowledge_id) {
-					return {
-						...item,
-						meta: {
-							...item.meta,
-							google_drive_sync: {
-								...(item.meta?.google_drive_sync ?? {}),
-								status
-							}
-						}
-					};
-				}
-				return item;
-			});
-		}
-	};
-
-	const handleConfluenceSyncProgress = (data) => {
-		const { knowledge_id, status } = data;
-		if (items) {
-			items = items.map((item) => {
-				if (item.id === knowledge_id) {
-					return {
-						...item,
-						meta: {
-							...item.meta,
-							confluence_sync: {
-								...(item.meta?.confluence_sync ?? {}),
-								status
-							}
-						}
-					};
-				}
-				return item;
-			});
-		}
-	};
+	const handleSyncProgress = (data) => mergeSyncProgress('onedrive_sync', data);
+	const handleGoogleDriveSyncProgress = (data) => mergeSyncProgress('google_drive_sync', data);
+	const handleConfluenceSyncProgress = (data) => mergeSyncProgress('confluence_sync', data);
 
 	onMount(async () => {
 		viewOption = localStorage?.workspaceViewOption || '';
@@ -433,25 +399,19 @@
 													<OneDrive className="size-4" />
 													<Badge type="info" content={$i18n.t('OneDrive')} />
 													{#if item.meta?.onedrive_sync?.status === 'syncing'}
-														<Tooltip content={$i18n.t('Syncing...')}>
-															<Spinner className="size-3" />
-														</Tooltip>
+														<SyncProgressBadge sync={item.meta.onedrive_sync} />
 													{/if}
 												{:else if item?.type === 'google_drive'}
 													<GoogleDrive className="size-4" />
 													<Badge type="info" content={$i18n.t('Google Drive')} />
 													{#if item.meta?.google_drive_sync?.status === 'syncing'}
-														<Tooltip content={$i18n.t('Syncing...')}>
-															<Spinner className="size-3" />
-														</Tooltip>
+														<SyncProgressBadge sync={item.meta.google_drive_sync} />
 													{/if}
 												{:else if item?.type === 'confluence'}
 													<Confluence className="size-4" />
 													<Badge type="info" content={$i18n.t('Confluence')} />
 													{#if item.meta?.confluence_sync?.status === 'syncing'}
-														<Tooltip content={$i18n.t('Syncing...')}>
-															<Spinner className="size-3" />
-														</Tooltip>
+														<SyncProgressBadge sync={item.meta.confluence_sync} />
 													{/if}
 												{:else if $config?.integration_providers?.[item?.type]}
 													<Badge
