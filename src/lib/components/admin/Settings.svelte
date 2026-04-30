@@ -276,9 +276,9 @@
 		},
 		{
 			id: 'agents',
-			title: 'Agents',
+			title: 'AI-agents',
 			route: '/admin/settings/agents',
-			keywords: ['agent', 'agents', 'beta', 'external', 'chatbot', 'picker']
+			keywords: ['agent', 'agents', 'ai-agents', 'beta', 'external', 'chatbot', 'picker']
 		}
 	];
 

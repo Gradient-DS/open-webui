@@ -17,6 +17,7 @@ export interface AgentConfigModel {
 	is_active: boolean;
 	is_beta: boolean;
 	meta?: Record<string, unknown>;
+	position: number;
 	access_grants: AgentAccessGrant[];
 	created_at: number;
 	updated_at: number;
@@ -108,4 +109,14 @@ export const deleteAgentConfig = async (token: string, slug: string): Promise<{ 
 	request(`${WEBUI_API_BASE_URL}/agent-configs/${encodeURIComponent(slug)}`, {
 		method: 'DELETE',
 		headers: headers(token)
+	});
+
+export const reorderAgentConfigs = async (
+	token: string,
+	slugs: string[]
+): Promise<AgentConfigModel[]> =>
+	request(`${WEBUI_API_BASE_URL}/agent-configs/reorder`, {
+		method: 'POST',
+		headers: headers(token),
+		body: JSON.stringify({ slugs })
 	});

@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 from typing import Any, Coroutine, Optional
 
 log = logging.getLogger(__name__)
@@ -29,6 +30,7 @@ def set_main_loop(loop: asyncio.AbstractEventLoop) -> None:
     """Register uvicorn's serving loop. Call once from the FastAPI lifespan."""
     global _MAIN_LOOP
     _MAIN_LOOP = loop
+    log.info('loop_bridge: main loop registered (id=%s)', id(loop))
 
 
 def run_on_main_loop(coro: Coroutine[Any, Any, Any]) -> Any:
@@ -40,17 +42,27 @@ def run_on_main_loop(coro: Coroutine[Any, Any, Any]) -> Any:
     redis.asyncio connections, the Socket.IO AsyncRedisManager, etc.)
     stay bound to one loop across the process lifetime.
 
-    Falls back to `asyncio.run(coro)` only when no main loop has been
-    registered (e.g. a CLI entry point invoked before the FastAPI
-    lifespan runs). That fallback preserves current behaviour for
-    those paths; it does NOT mask the loop-binding bug for in-process
-    request handlers — those always go through the main loop.
+    Returns ``None`` (and closes the coroutine) when no main loop is
+    registered. The previous ``asyncio.run`` fallback masked a real bug —
+    a missed ``set_main_loop`` call from the lifespan poisoned the
+    Socket.IO Redis pool the first time a sync handler tried to emit, and
+    the user-visible symptom (file:status emits dropped, infinite upload
+    spinner — see thoughts/2026-04-30) was traceable only via tracebacks.
+    Failing fast plus the front-end polling fallback in ``_processFileStatus``
+    converts a silent corruption into a logged ERROR + a ~30s spinner.
     """
     if _MAIN_LOOP is None or _MAIN_LOOP.is_closed():
-        log.warning(
-            'run_on_main_loop: no registered main loop — falling back to '
-            'asyncio.run(). Expect loop-binding issues if the coroutine '
-            'touches shared async resources (Socket.IO / redis.asyncio).'
+        log.error(
+            'run_on_main_loop: no registered main loop. Lifespan ordering bug — '
+            'Socket.IO emits are being dropped. The frontend polling fallback '
+            'in KnowledgeBase._processFileStatus will recover.',
+            extra={'event': 'loop_bridge.no_main_loop'},
         )
-        return asyncio.run(coro)
+        # Test path: pure-CLI invocations (no FastAPI lifespan) still need
+        # an executable fallback so unit tests can exercise sync helpers
+        # that call run_on_main_loop without a serving uvicorn.
+        if os.environ.get('OPEN_WEBUI_TESTING'):
+            return asyncio.run(coro)
+        coro.close()
+        return None
     return asyncio.run_coroutine_threadsafe(coro, _MAIN_LOOP).result()

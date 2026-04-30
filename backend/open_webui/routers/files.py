@@ -255,6 +255,24 @@ def upload_file_handler(
                     detail=ERROR_MESSAGES.DEFAULT(f'File type {file_extension} is not allowed'),
                 )
 
+        # Reject image/video uploads up front when neither the configured
+        # extraction engine nor STT can process them. Otherwise the upload
+        # succeeds, _process_handler raises in a background task, and the
+        # only signal to the frontend is a single Socket.IO 'file:status'
+        # emit — which is exactly the path that drops on a stuck loop and
+        # leaves an infinite spinner (see 2026-04-30 sync follow-ups).
+        if process and file.content_type and file.content_type.startswith(('image/', 'video/')):
+            engine = request.app.state.config.CONTENT_EXTRACTION_ENGINE
+            stt = getattr(request.app.state.config, 'STT_SUPPORTED_CONTENT_TYPES', []) or []
+            image_engines = {'external', 'datalab_marker', 'mistral_ocr'}
+            handles_image = engine in image_engines
+            handles_stt = strict_match_mime_type(stt, file.content_type)
+            if not handles_image and not handles_stt:
+                raise HTTPException(
+                    status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
+                    detail=f'File type {file.content_type} is not supported by the configured extraction engine.',
+                )
+
         # replace filename with uuid
         id = str(uuid.uuid4())
         name = filename

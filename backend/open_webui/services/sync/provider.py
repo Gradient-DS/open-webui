@@ -9,6 +9,11 @@ To add a new datasource:
 2. Subclass SyncProvider and TokenManager
 3. Add a case to get_sync_provider() and get_token_manager()
 4. Add the provider type to the Knowledge model's type validation
+5. Add an entry to PROVIDER_FILE_ID_PREFIXES below mapping the
+   provider_slug (your get_provider_type() return value) to the
+   file_id_prefix property of your worker. Do NOT assume
+   slug == prefix.rstrip('-') — that invariant is no longer
+   enforced anywhere; this map is the single source of truth.
 """
 
 import logging
@@ -18,6 +23,35 @@ from typing import Optional, Dict, Any
 from open_webui.models.knowledge import Knowledges
 
 log = logging.getLogger(__name__)
+
+
+# Maps provider_slug (the X-Acting-Provider header value, also the
+# `provider_type` returned by SyncProvider.get_provider_type()) to the
+# file_id_prefix used by the worker when inserting stub File rows.
+#
+# The two strings need not match (and don't, for Google Drive) — the
+# loader-worker echoes provider_slug back in the /ingest callback, but the
+# stub File row was inserted with file_id_prefix. This registry lets the
+# ingest endpoint reconstruct the correct file_id without each provider
+# having to choose slug == prefix.rstrip('-').
+PROVIDER_FILE_ID_PREFIXES: dict[str, str] = {
+    'onedrive': 'onedrive-',
+    'google_drive': 'googledrive-',
+    'confluence': 'confluence-',
+}
+
+
+def file_id_prefix_for(provider_slug: str) -> str:
+    """Return the file_id_prefix used by the worker for ``provider_slug``.
+
+    Raises ValueError on unknown slug. Callers (the ingest endpoint, mainly)
+    should propagate that as a 400 — an unknown X-Acting-Provider header is
+    a misconfigured loader-worker, not a per-document failure.
+    """
+    try:
+        return PROVIDER_FILE_ID_PREFIXES[provider_slug]
+    except KeyError as exc:
+        raise ValueError(f'Unknown provider slug: {provider_slug!r}') from exc
 
 
 class TokenManager(ABC):
