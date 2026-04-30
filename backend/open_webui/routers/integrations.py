@@ -14,6 +14,7 @@ from open_webui.models.knowledge import KnowledgeForm, Knowledges
 from open_webui.retrieval.loaders.main import Loader
 from open_webui.retrieval.vector.factory import VECTOR_DB_CLIENT
 from open_webui.routers.retrieval import save_docs_to_vector_db
+from open_webui.services.sync.provider import file_id_prefix_for
 from open_webui.storage.provider import Storage
 from open_webui.utils.auth import get_verified_user
 from open_webui.utils.service_auth import LoaderPrincipal, get_integration_principal
@@ -284,7 +285,7 @@ def _process_parsed_text_document(
     user_id: str,
 ) -> dict:
     """Process a parsed_text document: create file record, chunk, embed, store."""
-    file_id = f'{provider}-{doc.source_id}'
+    file_id = f'{file_id_prefix_for(provider)}{doc.source_id}'
 
     status = _create_or_update_file_record(
         file_id=file_id,
@@ -318,7 +319,10 @@ def _process_parsed_text_document(
             add=True,
             split=True,
         )
-        Files.update_file_data_by_id(file_id, {'status': 'completed'})
+        # Clear the stale ``error`` field too — update_file_data_by_id is a
+        # shallow merge, so without this a row that succeeded after a prior
+        # failure would still carry the old error message in data.error.
+        Files.update_file_data_by_id(file_id, {'status': 'completed', 'error': None})
     except Exception as e:
         log.exception(f'Failed to store document {doc.source_id} in vector DB')
         Files.update_file_data_by_id(file_id, {'status': 'error', 'error': str(e)})
@@ -340,7 +344,7 @@ def _process_chunked_text_document(
     user_id: str,
 ) -> dict:
     """Process a chunked_text document: create file record, embed pre-chunked text, store."""
-    file_id = f'{provider}-{doc.source_id}'
+    file_id = f'{file_id_prefix_for(provider)}{doc.source_id}'
     joined_text = '\n\n'.join(doc.chunks)
 
     status = _create_or_update_file_record(
@@ -374,7 +378,10 @@ def _process_chunked_text_document(
             add=True,
             split=False,
         )
-        Files.update_file_data_by_id(file_id, {'status': 'completed'})
+        # Clear the stale ``error`` field too — update_file_data_by_id is a
+        # shallow merge, so without this a row that succeeded after a prior
+        # failure would still carry the old error message in data.error.
+        Files.update_file_data_by_id(file_id, {'status': 'completed', 'error': None})
     except Exception as e:
         log.exception(f'Failed to store chunked document {doc.source_id} in vector DB')
         Files.update_file_data_by_id(file_id, {'status': 'error', 'error': str(e)})
@@ -397,7 +404,7 @@ def _process_full_document(
     user_id: str,
 ) -> dict:
     """Process a full_document: upload binary, extract text, chunk, embed, store."""
-    file_id = f'{provider}-{doc.source_id}'
+    file_id = f'{file_id_prefix_for(provider)}{doc.source_id}'
 
     # Upload binary file to storage
     try:
@@ -467,7 +474,10 @@ def _process_full_document(
             add=True,
             split=True,
         )
-        Files.update_file_data_by_id(file_id, {'status': 'completed'})
+        # Clear the stale ``error`` field too — update_file_data_by_id is a
+        # shallow merge, so without this a row that succeeded after a prior
+        # failure would still carry the old error message in data.error.
+        Files.update_file_data_by_id(file_id, {'status': 'completed', 'error': None})
     except Exception as e:
         log.exception(f'Failed to store full document {doc.source_id} in vector DB')
         Files.update_file_data_by_id(file_id, {'status': 'error', 'error': str(e)})
@@ -511,6 +521,14 @@ def ingest_documents(
     else:
         user = principal
         provider, provider_config = get_integration_provider(request, user)
+
+    # Reject unknown slugs upfront — an unrecognized X-Acting-Provider header
+    # is a misconfigured loader-worker, not a per-document failure. Surfaces
+    # as a 400 before any DB writes or per-doc loops.
+    try:
+        file_id_prefix_for(provider)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
     # Validate batch size
     max_per_request = provider_config.get('max_documents_per_request', 50)
@@ -564,7 +582,8 @@ def ingest_documents(
     max_files = provider_config.get('max_files_per_kb', KNOWLEDGE_MAX_FILE_COUNT)
     current_files = Knowledges.get_files_by_id(knowledge.id)
     existing_ids = {f.id for f in current_files} if current_files else set()
-    new_doc_ids = {f'{provider}-{doc.get("source_id", "")}' for doc in form_data.documents}
+    _prefix = file_id_prefix_for(provider)
+    new_doc_ids = {f'{_prefix}{doc.get("source_id", "")}' for doc in form_data.documents}
     net_new = len(new_doc_ids - existing_ids)
     if len(existing_ids) + net_new > max_files:
         raise HTTPException(400, f'Would exceed {max_files} file limit for this knowledge base.')

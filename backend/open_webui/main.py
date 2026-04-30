@@ -3088,48 +3088,33 @@ async def oauth_login_callback(
     response: Response,
     db: Session = Depends(get_session),
 ):
-    # Check if this is a OneDrive background sync auth callback
-    if provider == 'microsoft':
-        state = request.query_params.get('state')
-        if state:
-            from open_webui.services.onedrive.auth import _pending_flows
+    # Check if this OAuth callback belongs to a sync-provider auth flow
+    # rather than the user-login SSO flow. The shared store in
+    # services/sync/pending_flows is replica-aware (Redis when configured).
+    state = request.query_params.get('state')
+    if state:
+        from open_webui.services.sync.pending_flows import has_pending_flow
 
-            if state in _pending_flows:
-                from open_webui.routers.onedrive_sync import (
-                    handle_onedrive_auth_callback,
-                )
-
-                return await handle_onedrive_auth_callback(request)
-
-    # Check if this is a Google Drive background sync auth callback
-    if provider == 'google':
-        state = request.query_params.get('state')
-        if state:
-            from open_webui.services.google_drive.auth import (
-                _pending_flows as _google_drive_pending_flows,
+        if provider == 'microsoft' and await has_pending_flow(request, 'onedrive', state):
+            from open_webui.routers.onedrive_sync import (
+                handle_onedrive_auth_callback,
             )
 
-            if state in _google_drive_pending_flows:
-                from open_webui.routers.google_drive_sync import (
-                    handle_google_drive_auth_callback,
-                )
+            return await handle_onedrive_auth_callback(request)
 
-                return await handle_google_drive_auth_callback(request)
-
-    # Check if this is a Confluence background sync auth callback
-    if provider == 'atlassian':
-        state = request.query_params.get('state')
-        if state:
-            from open_webui.services.confluence.auth import (
-                _pending_flows as _confluence_pending_flows,
+        if provider == 'google' and await has_pending_flow(request, 'google_drive', state):
+            from open_webui.routers.google_drive_sync import (
+                handle_google_drive_auth_callback,
             )
 
-            if state in _confluence_pending_flows:
-                from open_webui.routers.confluence_sync import (
-                    handle_confluence_auth_callback,
-                )
+            return await handle_google_drive_auth_callback(request)
 
-                return await handle_confluence_auth_callback(request)
+        if provider == 'atlassian' and await has_pending_flow(request, 'confluence', state):
+            from open_webui.routers.confluence_sync import (
+                handle_confluence_auth_callback,
+            )
+
+            return await handle_confluence_auth_callback(request)
 
     return await oauth_manager.handle_callback(request, provider, response, db=db)
 

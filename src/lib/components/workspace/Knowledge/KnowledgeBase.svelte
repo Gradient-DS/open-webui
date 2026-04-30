@@ -67,6 +67,7 @@
 	import SourceGroupedFiles from './KnowledgeBase/SourceGroupedFiles.svelte';
 	import SyncProgress from './KnowledgeBase/SyncProgress.svelte';
 	import AddFilesPlaceholder from '$lib/components/AddFilesPlaceholder.svelte';
+	import { buildSyncToast } from './utils/syncToast';
 
 	import AddContentMenu from './KnowledgeBase/AddContentMenu.svelte';
 	import AddTextContentModal from './KnowledgeBase/AddTextContentModal.svelte';
@@ -492,9 +493,12 @@
 					console.warn('File upload warning:', uploadedFile.error);
 					toast.warning(uploadedFile.error);
 					fileItems = fileItems.filter((file) => file.id !== uploadedFile.id);
+				} else {
+					// Don't call addFileHandler here — Socket.IO 'file:status' event
+					// will trigger it when background processing completes. Arm a
+					// 30s polling fallback in case that emit drops (see pollers).
+					armUploadStatusFallback(uploadedFile.id);
 				}
-				// Don't call addFileHandler here — Socket.IO 'file:status' event
-				// will trigger it when background processing completes
 			} else {
 				toast.error($i18n.t('Failed to upload file.'));
 			}
@@ -1030,6 +1034,16 @@
 				return $i18n.t('Processing error');
 			case 'download_error':
 				return $i18n.t('Download failed');
+			case 'config_error':
+				return $i18n.t('Sync configuration error');
+			case 'schema_error':
+				return $i18n.t('Document processor error');
+			case 'needs_token_refresh':
+				return $i18n.t('Reauthorization required');
+			case 'unsupported_content_type':
+				return $i18n.t('Unsupported file type');
+			case 'source_access_revoked':
+				return $i18n.t('Access revoked');
 			default:
 				return $i18n.t('Error');
 		}
@@ -1044,7 +1058,16 @@
 		const filesToShow = failedFiles.slice(0, maxToShow);
 		const remaining = failedFiles.length - maxToShow;
 
-		const lines = filesToShow.map((f) => `- ${f.filename}: ${getErrorTypeMessage(f.error_type)}`);
+		// Show only the filename + translated category label. The
+		// loader-worker's underlying ``error_message`` is English and
+		// frequently includes opaque IDs / URLs (e.g. Drive file IDs in
+		// 403 responses); user-facing strings should be consistent and
+		// translatable, so we omit it from the toast. The full text is
+		// preserved server-side in ``last_result.failed_files`` for
+		// operator debugging.
+		const lines = filesToShow.map(
+			(f) => `- ${f.filename}: ${getErrorTypeMessage(f.error_type)}`
+		);
 
 		if (remaining > 0) {
 			lines.push($i18n.t('and {{COUNT}} more', { COUNT: remaining }));
@@ -1179,6 +1202,10 @@
 			error?: string;
 			files_processed?: number;
 			files_failed?: number;
+			files_added?: number;
+			files_updated?: number;
+			files_unchanged?: number;
+			files_removed?: number;
 			deleted_count?: number;
 			failed_files?: FailedFile[];
 			stage_counts?: import('$lib/apis/sync').StageCounts;
@@ -1226,32 +1253,17 @@
 
 		// Handle completion states
 		if (data.status === 'completed' || data.status === 'completed_with_errors') {
-			const count = data.files_processed ?? 0;
 			const failed = data.files_failed ?? 0;
-			if (count > 0 && failed > 0) {
-				const failedDetails = data.failed_files ? formatFailedFilesMessage(data.failed_files) : '';
-				toast.warning(
-					$i18n.t('Synced {{count}} files from {{label}} ({{failed}} failed)', {
-						count,
-						failed,
-						label: provider.label
-					}) + failedDetails
-				);
-			} else if (count > 0) {
-				toast.success(
-					$i18n.t('Synced {{count}} files from {{label}}', { count, label: provider.label })
-				);
-			} else if (failed > 0) {
-				const failedDetails = data.failed_files ? formatFailedFilesMessage(data.failed_files) : '';
-				toast.error(
-					$i18n.t('{{label}} sync failed: all {{failed}} files failed to process', {
-						failed,
-						label: provider.label
-					}) + failedDetails
-				);
-			} else {
-				toast.success($i18n.t('{{label}} sync completed - no changes', { label: provider.label }));
-			}
+			const { variant, message } = buildSyncToast($i18n, provider.label, {
+				added: data.files_added ?? 0,
+				updated: data.files_updated ?? 0,
+				unchanged: data.files_unchanged ?? 0,
+				failed,
+				removed: data.files_removed ?? data.deleted_count ?? 0
+			});
+			const failedDetails =
+				failed > 0 && data.failed_files ? formatFailedFilesMessage(data.failed_files) : '';
+			toast[variant](message + failedDetails);
 			state.isSyncing = false;
 			state.refreshDone = true;
 			cloudSyncState = cloudSyncState;
@@ -1370,20 +1382,63 @@
 		}
 	};
 
-	let successfulFileCount = 0;
+	let uploadBatch = { added: 0, failed: 0 };
 	let fileStatusQueue: Promise<void> = Promise.resolve();
+	// Polling fallback: when a 'file:status' Socket.IO emit drops on the
+	// floor (typical cause: the loop_bridge couldn't reach uvicorn's main
+	// loop, see utils/loop_bridge.py), the upload spinner sits forever.
+	// Each pending upload gets a 30s timer that, if the spinner is still
+	// up, polls /files/{id}/process/status until it terminates or the
+	// 5-minute hard cap kicks in.
+	const pollers = new Map<string, ReturnType<typeof setInterval>>();
 
-	const showBatchedSuccessToast = () => {
-		if (successfulFileCount > 0) {
-			const count = successfulFileCount;
-			successfulFileCount = 0;
-			toast.success(
-				count === 1
-					? $i18n.t('File added successfully.')
-					: $i18n.t('{{count}} files added successfully.', { count: count.toString() })
-			);
-			init();
-		}
+	const showBatchedUploadToast = () => {
+		if (uploadBatch.added === 0 && uploadBatch.failed === 0) return;
+		const { variant, message } = buildSyncToast($i18n, null, {
+			added: uploadBatch.added,
+			failed: uploadBatch.failed
+		});
+		toast[variant](message);
+		uploadBatch = { added: 0, failed: 0 };
+		init();
+	};
+
+	const startPollingFallback = (fileId: string) => {
+		if (pollers.has(fileId)) return;
+		const startedAt = Date.now();
+		const interval = setInterval(async () => {
+			if (Date.now() - startedAt > 5 * 60 * 1000) {
+				handleFileStatus({ file_id: fileId, status: 'failed', error: 'Processing timed out' });
+				clearInterval(interval);
+				pollers.delete(fileId);
+				return;
+			}
+			try {
+				const res = await fetch(`${WEBUI_API_BASE_URL}/files/${fileId}/process/status`, {
+					headers: { Authorization: `Bearer ${localStorage.token}` }
+				});
+				if (!res.ok) return;
+				const data = await res.json();
+				if (data?.status === 'completed' || data?.status === 'failed') {
+					handleFileStatus({ file_id: fileId, status: data.status, error: data.error });
+					clearInterval(interval);
+					pollers.delete(fileId);
+				}
+			} catch (_e) {
+				// Network blip; let the next tick retry.
+			}
+		}, 5000);
+		pollers.set(fileId, interval);
+	};
+
+	const armUploadStatusFallback = (fileId: string) => {
+		setTimeout(() => {
+			if (!fileItems) return;
+			const item = fileItems.find((f: { id: string; status: string }) => f.id === fileId);
+			if (item?.status === 'uploading') {
+				startPollingFallback(fileId);
+			}
+		}, 30_000);
 	};
 
 	// Serialize socket events via a queue to prevent concurrent state mutations
@@ -1407,18 +1462,22 @@
 		const idx = fileItems.findIndex((f) => f.id === data.file_id);
 		if (idx < 0) return;
 
+		// If the polling fallback is still ticking, stop it — the socket
+		// emit (or another poll) just landed.
+		const poller = pollers.get(data.file_id);
+		if (poller) {
+			clearInterval(poller);
+			pollers.delete(data.file_id);
+		}
+
 		if (data.status === 'completed') {
 			fileItems[idx].status = 'uploaded';
 			await addFileHandler(data.file_id, { batch: true });
-			successfulFileCount++;
+			uploadBatch.added++;
 		} else if (data.status === 'failed') {
 			fileItems[idx].status = 'error';
 			fileItems[idx].error = data.error || 'Processing failed';
-			toast.error(
-				$i18n.t('File processing failed: {{error}}', {
-					error: data.error || 'Unknown error'
-				})
-			);
+			uploadBatch.failed++;
 			fileItems = fileItems.filter((file) => file.id !== data.file_id);
 		}
 
@@ -1426,7 +1485,7 @@
 
 		const stillUploading = fileItems.some((f) => f.status === 'uploading');
 		if (!stillUploading) {
-			showBatchedSuccessToast();
+			showBatchedUploadToast();
 		}
 	};
 
@@ -1726,6 +1785,12 @@
 
 		// Clean up file status listener
 		$socket?.off('file:status', handleFileStatus);
+
+		// Stop any in-flight upload polling fallbacks
+		for (const interval of pollers.values()) {
+			clearInterval(interval);
+		}
+		pollers.clear();
 	});
 
 	const decodeString = (str: string) => {

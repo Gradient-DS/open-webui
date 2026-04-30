@@ -201,6 +201,10 @@ class OneDriveSyncWorker(BaseSyncWorker):
                 log.warning(f'File not found: {source["name"]}')
                 return None
 
+            if not self._is_supported_file(item):
+                log.info(f'Skipping unsupported single-file source {source.get("name", item.get("name", "?"))}')
+                return None
+
             # Check content hash for changes
             # OneDrive returns different hash types depending on the drive:
             # - sha256Hash: OneDrive for Business
@@ -269,6 +273,14 @@ class OneDriveSyncWorker(BaseSyncWorker):
             'drive_id': file_info['drive_id'],
             'item_id': file_info['item']['id'],
         }
+        # Graph driveItem.file.mimeType is the cloud's authoritative type;
+        # the extension-based fallback in _get_content_type can disagree
+        # (e.g. an .xlsx file reported as application/pdf would have routed
+        # through the doc-processor PDF parser, which is the misclassification
+        # half of the 2026-04-29 incident). Prefer the cloud value when present.
+        raw_mime = file_info.get('item', {}).get('file', {}).get('mimeType')
+        if raw_mime:
+            item['content_type'] = raw_mime
         return item
 
     def _get_provider_storage_headers(self, item_id: str) -> dict:

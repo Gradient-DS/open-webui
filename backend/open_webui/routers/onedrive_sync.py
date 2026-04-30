@@ -205,7 +205,8 @@ async def initiate_auth(
 
     redirect_uri = str(request.base_url).rstrip('/') + '/oauth/microsoft/callback'
 
-    auth_url = get_authorization_url(
+    auth_url = await get_authorization_url(
+        request=request,
         user_id=user.id,
         knowledge_id=knowledge_id,
         redirect_uri=redirect_uri,
@@ -231,7 +232,7 @@ async def handle_onedrive_auth_callback(request: Request):
 
     if error:
         if state:
-            remove_pending_flow(state)
+            await remove_pending_flow(request, state)
         return auth_callback_html(
             callback_type='onedrive_auth_callback',
             success=False,
@@ -245,7 +246,7 @@ async def handle_onedrive_auth_callback(request: Request):
             error='Missing authorization code or state',
         )
 
-    flow = get_pending_flow(state)
+    flow = await get_pending_flow(request, state)
     if not flow:
         return auth_callback_html(
             callback_type='onedrive_auth_callback',
@@ -254,6 +255,7 @@ async def handle_onedrive_auth_callback(request: Request):
         )
 
     return await complete_auth_callback(
+        request=request,
         code=code,
         state=state,
         flow=flow,
