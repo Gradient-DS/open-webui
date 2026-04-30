@@ -319,7 +319,10 @@ def _process_parsed_text_document(
             add=True,
             split=True,
         )
-        Files.update_file_data_by_id(file_id, {'status': 'completed'})
+        # Clear the stale ``error`` field too — update_file_data_by_id is a
+        # shallow merge, so without this a row that succeeded after a prior
+        # failure would still carry the old error message in data.error.
+        Files.update_file_data_by_id(file_id, {'status': 'completed', 'error': None})
     except Exception as e:
         log.exception(f'Failed to store document {doc.source_id} in vector DB')
         Files.update_file_data_by_id(file_id, {'status': 'error', 'error': str(e)})
@@ -375,7 +378,10 @@ def _process_chunked_text_document(
             add=True,
             split=False,
         )
-        Files.update_file_data_by_id(file_id, {'status': 'completed'})
+        # Clear the stale ``error`` field too — update_file_data_by_id is a
+        # shallow merge, so without this a row that succeeded after a prior
+        # failure would still carry the old error message in data.error.
+        Files.update_file_data_by_id(file_id, {'status': 'completed', 'error': None})
     except Exception as e:
         log.exception(f'Failed to store chunked document {doc.source_id} in vector DB')
         Files.update_file_data_by_id(file_id, {'status': 'error', 'error': str(e)})
@@ -468,7 +474,10 @@ def _process_full_document(
             add=True,
             split=True,
         )
-        Files.update_file_data_by_id(file_id, {'status': 'completed'})
+        # Clear the stale ``error`` field too — update_file_data_by_id is a
+        # shallow merge, so without this a row that succeeded after a prior
+        # failure would still carry the old error message in data.error.
+        Files.update_file_data_by_id(file_id, {'status': 'completed', 'error': None})
     except Exception as e:
         log.exception(f'Failed to store full document {doc.source_id} in vector DB')
         Files.update_file_data_by_id(file_id, {'status': 'error', 'error': str(e)})
