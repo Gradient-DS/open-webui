@@ -149,6 +149,32 @@ def _create_kb_for_provider(
     return Knowledges.get_knowledge_by_id(knowledge.id)
 
 
+def _maybe_upload_original_bytes(
+    file_id: str,
+    doc: IngestDocumentBase,
+    provider: str,
+    original_file: Optional[UploadFile],
+) -> str:
+    """Upload the document's source bytes to ``Storage`` and return the path.
+
+    Returns ``''`` when ``original_file`` is None — the historical
+    behaviour for callers (push integrations) that ship parsed text but
+    no original blob. The loader-worker started shipping bytes alongside
+    chunks so the citation-modal preview can serve them; this helper is
+    the receiving seam. Mirrors the pattern in
+    :func:`_process_full_document` so all three ingest paths converge on
+    a populated ``file.path`` when bytes are available.
+    """
+    if original_file is None:
+        return ''
+    contents, file_path = Storage.upload_file(
+        original_file.file,
+        f'{file_id}_{doc.filename}',
+        {'provider': provider, 'source_id': doc.source_id},
+    )
+    return file_path
+
+
 def _create_or_update_file_record(
     file_id: str,
     doc: IngestDocumentBase,
@@ -193,6 +219,17 @@ def _create_or_update_file_record(
     if existing_file:
         Files.update_file_metadata_by_id(file_id, meta)
         Files.update_file_data_by_id(file_id, {'content': content_text})
+        # Stub File rows created up-front by sync workers
+        # (services/sync/base_worker._create_stub_file_rows) carry
+        # ``path=''`` until the loader-worker callback arrives with the
+        # actual bytes. Update the path here so the citation-modal
+        # preview endpoint can serve them. Don't overwrite a non-empty
+        # existing path with an empty new one — that would silently
+        # break previews for callers that opt out of byte shipping
+        # (e.g. push integrations re-syncing a previously-byte-bearing
+        # KB).
+        if file_path and file_path != (existing_file.path or ''):
+            Files.update_file_path_by_id(file_id, file_path)
         return 'updated'
     else:
         text_hash = hashlib.sha256(content_text.encode()).hexdigest()
@@ -283,15 +320,26 @@ def _process_parsed_text_document(
     provider: str,
     doc: ParsedTextDocument,
     user_id: str,
+    original_file: Optional[UploadFile] = None,
 ) -> dict:
-    """Process a parsed_text document: create file record, chunk, embed, store."""
+    """Process a parsed_text document: create file record, chunk, embed, store.
+
+    When ``original_file`` is provided (loader-worker shipping the bytes
+    it downloaded from the cloud provider), the bytes are uploaded via
+    :data:`Storage` so ``file.path`` is populated for the citation-modal
+    PDF preview. When absent — the historical contract for push
+    integrations that don't have source bytes — ``file.path`` stays
+    empty and the preview tab is gracefully unavailable.
+    """
     file_id = f'{file_id_prefix_for(provider)}{doc.source_id}'
+
+    file_path = _maybe_upload_original_bytes(file_id, doc, provider, original_file)
 
     status = _create_or_update_file_record(
         file_id=file_id,
         doc=doc,
         content_text=doc.text,
-        file_path='',
+        file_path=file_path,
         provider=provider,
         knowledge_id=knowledge_id,
         user_id=user_id,
@@ -342,16 +390,23 @@ def _process_chunked_text_document(
     provider: str,
     doc: ChunkedTextDocument,
     user_id: str,
+    original_file: Optional[UploadFile] = None,
 ) -> dict:
-    """Process a chunked_text document: create file record, embed pre-chunked text, store."""
+    """Process a chunked_text document: create file record, embed pre-chunked text, store.
+
+    See :func:`_process_parsed_text_document` for the ``original_file``
+    contract — same semantics here.
+    """
     file_id = f'{file_id_prefix_for(provider)}{doc.source_id}'
     joined_text = '\n\n'.join(doc.chunks)
+
+    file_path = _maybe_upload_original_bytes(file_id, doc, provider, original_file)
 
     status = _create_or_update_file_record(
         file_id=file_id,
         doc=doc,
         content_text=joined_text,
-        file_path='',
+        file_path=file_path,
         provider=provider,
         knowledge_id=knowledge_id,
         user_id=user_id,
@@ -499,6 +554,7 @@ def ingest_documents(
     request: Request,
     data: str = Form(...),
     files: Optional[list[UploadFile]] = File(None),
+    original_files: Optional[list[UploadFile]] = File(None),
     principal=Depends(get_integration_principal),
 ):
     # Parse JSON from form field
@@ -506,6 +562,14 @@ def ingest_documents(
         form_data = IngestForm(**json.loads(data))
     except (json.JSONDecodeError, Exception) as e:
         raise HTTPException(400, f"Invalid JSON in 'data' field: {e}")
+
+    # ``original_files`` carries the source bytes for parsed_text /
+    # chunked_text documents, keyed by ``filename == source_id`` (the
+    # loader-worker sets this when shipping bytes — see
+    # genai-utils/api/gateway/loader_worker/ingest_client.py). Build the
+    # lookup once so the dispatch loops below stay O(documents) rather
+    # than O(documents * files).
+    original_file_lookup = {f.filename: f for f in (original_files or []) if f.filename}
 
     if isinstance(principal, LoaderPrincipal):
         user = principal.user
@@ -608,6 +672,7 @@ def ingest_documents(
                 provider=provider,
                 doc=doc,
                 user_id=user.id,
+                original_file=original_file_lookup.get(doc.source_id),
             )
             results.append(result)
 
@@ -627,6 +692,7 @@ def ingest_documents(
                 provider=provider,
                 doc=doc,
                 user_id=user.id,
+                original_file=original_file_lookup.get(doc.source_id),
             )
             results.append(result)
 
