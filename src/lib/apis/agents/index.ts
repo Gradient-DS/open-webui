@@ -13,7 +13,7 @@ export interface AgentResponse {
 let cached: Promise<AgentResponse | null> | null = null;
 
 const fetchDefaultAgent = async (token: string): Promise<AgentResponse | null> => {
-	const res = await fetch(`${WEBUI_API_BASE_URL}/agents`, {
+	const res = await fetch(`${WEBUI_API_BASE_URL}/gradient_agent_meta`, {
 		method: 'GET',
 		headers: {
 			Accept: 'application/json',

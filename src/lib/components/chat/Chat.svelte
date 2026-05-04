@@ -104,7 +104,6 @@
 	import EventConfirmDialog from '../common/ConfirmDialog.svelte';
 	import DataWarningConfirmDialog from '../common/ConfirmDialog.svelte';
 	import Placeholder from './Placeholder.svelte';
-	import WelcomeMessage from './WelcomeMessage.svelte';
 	import FilesOverlay from './MessageInput/FilesOverlay.svelte';
 	import NotificationToast from '../NotificationToast.svelte';
 	import Spinner from '../common/Spinner.svelte';
@@ -3134,7 +3133,6 @@
 								}}
 							>
 								<div class=" h-full w-full flex flex-col">
-									<WelcomeMessage />
 									<Messages
 										chatId={$chatId}
 										bind:history

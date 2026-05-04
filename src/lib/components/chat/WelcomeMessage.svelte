@@ -7,7 +7,6 @@
 	import { sanitizeResponseContent } from '$lib/utils';
 
 	const enabled = PUBLIC_WELCOME_MESSAGE === 'true';
-	console.log('[WelcomeMessage] flag', { PUBLIC_WELCOME_MESSAGE, enabled });
 
 	let message: string | null = null;
 
@@ -15,15 +14,10 @@
 		if (!enabled) return;
 		try {
 			const token = localStorage.token;
-			if (!token) {
-				console.log('[WelcomeMessage] no token');
-				return;
-			}
+			if (!token) return;
 			const agent = await getDefaultAgent(token);
-			console.log('[WelcomeMessage] agent response', agent);
 			const value = agent?.config?.welcome_message;
 			message = typeof value === 'string' && value.trim() ? value : null;
-			console.log('[WelcomeMessage] resolved message length', message?.length ?? 0);
 		} catch (err) {
 			console.warn('[WelcomeMessage] fetch failed', err);
 			message = null;
