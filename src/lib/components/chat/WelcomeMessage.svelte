@@ -3,7 +3,7 @@
 	import { marked } from 'marked';
 	import { PUBLIC_WELCOME_MESSAGE } from '$env/static/public';
 
-	import { getDefaultAgent } from '$lib/apis/agents';
+	import { WEBUI_API_BASE_URL } from '$lib/constants';
 	import { sanitizeResponseContent } from '$lib/utils';
 
 	const enabled = PUBLIC_WELCOME_MESSAGE === 'true';
@@ -15,7 +15,11 @@
 		try {
 			const token = localStorage.token;
 			if (!token) return;
-			const agent = await getDefaultAgent(token);
+			const res = await fetch(`${WEBUI_API_BASE_URL}/agent/gradient_agent_meta`, {
+				headers: { Accept: 'application/json', authorization: `Bearer ${token}` }
+			});
+			if (!res.ok) return;
+			const agent = await res.json();
 			const value = agent?.config?.welcome_message;
 			message = typeof value === 'string' && value.trim() ? value : null;
 		} catch (err) {

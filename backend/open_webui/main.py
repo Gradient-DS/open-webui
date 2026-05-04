@@ -71,7 +71,6 @@ from open_webui.socket.main import (
 from open_webui.routers import (
     agent_configs,
     agent_proxy,
-    agents,
     analytics,
     archives,
     export,
@@ -1949,7 +1948,6 @@ app.include_router(
 )
 app.include_router(agent_proxy.router, prefix='/api/v1/agent', tags=['agent-proxy'])
 app.include_router(agent_configs.router, prefix='/api/v1/agent-configs', tags=['agents'])
-app.include_router(agents.router, prefix='/api/v1/gradient_agent_meta', tags=['agent-metadata'])
 app.include_router(prompts.router, prefix='/api/v1/prompts', tags=['prompts'])
 app.include_router(tools.router, prefix='/api/v1/tools', tags=['tools'])
 app.include_router(skills.router, prefix='/api/v1/skills', tags=['skills'])

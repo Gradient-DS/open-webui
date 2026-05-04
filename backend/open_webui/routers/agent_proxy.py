@@ -112,6 +112,30 @@ async def chat_completions(request: Request, user=Depends(get_verified_user)):
         raise HTTPException(status_code=502, detail=str(e))
 
 
+@router.get('/gradient_agent_meta')
+async def gradient_agent_meta(request: Request, user=Depends(get_verified_user)):
+    """Proxy GET /v1/gradient_agent_meta from the agent service.
+
+    Returns the default agent's metadata (description, welcome_message, ...)
+    so the chat UI can render it without exposing ``AGENT_API_KEY``.
+    """
+    base_url = _get_base_url(request)
+
+    session = aiohttp.ClientSession(trust_env=True, timeout=AIOHTTP_CLIENT_TIMEOUT)
+    try:
+        response = await session.request(
+            method='GET',
+            url=f'{base_url}/v1/gradient_agent_meta',
+            headers=_auth_headers(),
+        )
+        if response.status >= 400:
+            body = await response.text()
+            raise HTTPException(status_code=response.status, detail=body)
+        return await response.json()
+    finally:
+        await session.close()
+
+
 @router.get('/openapi.json')
 async def openapi_spec(request: Request, user=Depends(get_verified_user)):
     """Proxy the agent service's OpenAPI spec."""
