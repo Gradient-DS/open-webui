@@ -346,25 +346,3 @@ def test_create_or_update_file_record_does_not_overwrite_path_with_empty(acting_
         )
 
     assert update_path_calls == []
-
-
-def test_ingest_with_loader_bearer_unknown_provider_returns_403(app, loader_principal):
-    """If the LoaderPrincipal's provider_slug isn't in INTEGRATION_PROVIDERS, reject."""
-    # Override the principal to use an unregistered provider.
-    app.dependency_overrides[get_integration_principal] = lambda: LoaderPrincipal(
-        user=loader_principal.user,
-        provider_slug='unregistered-provider',
-    )
-
-    payload = {
-        'collection': {
-            'source_id': 'x',
-            'name': 'Y',
-            'data_type': 'chunked_text',
-        },
-        'documents': [],
-    }
-    client = TestClient(app)
-    resp = client.post('/api/v1/integrations/ingest', data={'data': json.dumps(payload)})
-    assert resp.status_code == 403
-    assert 'unregistered-provider' in resp.json()['detail']

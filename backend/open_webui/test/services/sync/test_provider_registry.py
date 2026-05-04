@@ -51,9 +51,18 @@ def test_file_id_prefix_for_returns_registry_value(slug):
     assert file_id_prefix_for(slug) == PROVIDER_FILE_ID_PREFIXES[slug]
 
 
-def test_file_id_prefix_for_unknown_raises():
-    with pytest.raises(ValueError, match='Unknown provider slug'):
-        file_id_prefix_for('dropbox')
+def test_file_id_prefix_for_unknown_falls_back_to_slug_dash():
+    """External push providers (no worker class, not in registry) get
+    ``f'{slug}-'`` — the pre-cc24c435b slug-as-prefix convention. The
+    helper must not raise on slugs missing from the registry; admin-
+    configured providers (e.g. ``gradient``, ``octobox``) need to ingest
+    too, and their auth is enforced elsewhere (get_integration_provider
+    + allowed_kb_types)."""
+    assert file_id_prefix_for('gradient') == 'gradient-'
+    assert file_id_prefix_for('dropbox') == 'dropbox-'
+    # Even an empty string is total — the helper has no business deciding
+    # which slugs exist; that's the auth layer's job.
+    assert file_id_prefix_for('') == '-'
 
 
 def test_round_trip_stub_vs_ingest_file_id():

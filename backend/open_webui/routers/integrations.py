@@ -586,14 +586,6 @@ def ingest_documents(
         user = principal
         provider, provider_config = get_integration_provider(request, user)
 
-    # Reject unknown slugs upfront — an unrecognized X-Acting-Provider header
-    # is a misconfigured loader-worker, not a per-document failure. Surfaces
-    # as a 400 before any DB writes or per-doc loops.
-    try:
-        file_id_prefix_for(provider)
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-
     # Validate batch size
     max_per_request = provider_config.get('max_documents_per_request', 50)
     if len(form_data.documents) > max_per_request:
