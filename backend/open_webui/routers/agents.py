@@ -35,7 +35,7 @@ async def get_default_agent(user=Depends(get_verified_user)):
     try:
         response = await session.request(
             method='GET',
-            url=f'{AGENT_API_BASE_URL}/v1/agent',
+            url=f'{AGENT_API_BASE_URL}/v1/gradient_agent_meta',
             headers=headers,
         )
         if response.status == 404:
