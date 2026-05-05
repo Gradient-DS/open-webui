@@ -9,7 +9,7 @@ import time
 import logging
 from typing import Optional, List, Callable
 
-from fastapi import HTTPException
+from fastapi import HTTPException, Request
 from starlette.responses import HTMLResponse
 from pydantic import BaseModel
 
@@ -320,6 +320,7 @@ def handle_revoke_token(
 
 
 async def complete_auth_callback(
+    request: Request,
     code: str,
     state: str,
     flow: dict,
@@ -330,6 +331,7 @@ async def complete_auth_callback(
 ) -> HTMLResponse:
     """Complete the async portion of the auth callback."""
     result = await exchange_code_fn(
+        request=request,
         code=code,
         state=state,
         user_id=flow['user_id'],

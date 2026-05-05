@@ -4,7 +4,16 @@ import { WEBUI_API_BASE_URL } from '$lib/constants';
 // Shared types
 // ──────────────────────────────────────────────────────────────────────
 
-export type SyncErrorType = 'timeout' | 'empty_content' | 'processing_error' | 'download_error';
+export type SyncErrorType =
+	| 'timeout'
+	| 'empty_content'
+	| 'processing_error'
+	| 'download_error'
+	| 'config_error'
+	| 'schema_error'
+	| 'needs_token_refresh'
+	| 'unsupported_content_type'
+	| 'source_access_revoked';
 
 export interface FailedFile {
 	filename: string;
@@ -21,7 +30,18 @@ export interface StageCounts {
 	failed?: number;
 }
 
-export interface SyncStatusResponse {
+export interface SyncCounts {
+	files_added?: number;
+	files_updated?: number;
+	files_unchanged?: number;
+	files_removed?: number;
+	files_failed?: number;
+	// Convenience: equals files_added + files_updated for cloud sync.
+	files_processed?: number;
+	deleted_count?: number;
+}
+
+export interface SyncStatusResponse extends SyncCounts {
 	knowledge_id: string;
 	status: 'idle' | 'syncing' | 'completed' | 'completed_with_errors' | 'failed' | 'cancelled';
 	progress_current?: number;

@@ -96,7 +96,12 @@ data:
   CONTENT_EXTRACTION_ENGINE: {{ .Values.openWebui.config.contentExtractionEngine | quote }}
   RAG_RERANKING_ENGINE: {{ .Values.openWebui.config.ragRerankingEngine | quote }}
   RAG_EXTERNAL_RERANKER_URL: "{{ include "open-webui-tenant.sharedServices.rerankerUrl" . }}/v1/rerank"
-  EXTERNAL_DOCUMENT_LOADER_URL: {{ include "open-webui-tenant.sharedServices.gatewayUrl" . | quote }}
+  # Defaults to the shared-services gateway in `sharedServices.namespace`.
+  # Tenants on a split-namespace setup (e.g. octobox: LiteLLM/reranker on
+  # prod shared-services but doc-loader on staging-shared-services) can
+  # override the URL explicitly via openWebui.config.externalDocumentLoaderUrl
+  # without touching sharedServices.namespace.
+  EXTERNAL_DOCUMENT_LOADER_URL: {{ .Values.openWebui.config.externalDocumentLoaderUrl | default (include "open-webui-tenant.sharedServices.gatewayUrl" .) | quote }}
 
   # Web Search (via shared Gateway)
   ENABLE_WEB_SEARCH: {{ .Values.openWebui.config.enableWebSearch | quote }}

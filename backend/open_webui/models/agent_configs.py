@@ -11,7 +11,7 @@ import time
 from typing import Optional
 
 from pydantic import BaseModel, ConfigDict, Field
-from sqlalchemy import BigInteger, Boolean, Column, JSON, Text
+from sqlalchemy import BigInteger, Boolean, Column, Integer, JSON, Text, func
 from sqlalchemy.orm import Session
 
 from open_webui.internal.db import Base, get_db_context
@@ -37,6 +37,10 @@ class AgentConfig(Base):
     is_active = Column(Boolean, default=False)  # default OFF — admin must enable
     is_beta = Column(Boolean, default=True)
     meta = Column(JSON, server_default='{}')
+    # Sort key for the admin panel + user-facing picker. Lower = earlier.
+    # Backfilled by the d6e7f8a9b0c1 → e7f8a9b0c1d2 migration; new rows
+    # default to 0 and are pushed to the end via insert_new_agent_config.
+    position = Column(Integer, nullable=False, server_default='0')
     created_at = Column(BigInteger)
     updated_at = Column(BigInteger)
 
@@ -58,6 +62,7 @@ class AgentConfigModel(BaseModel):
     is_active: bool = False
     is_beta: bool = True
     meta: dict = Field(default_factory=dict)
+    position: int = 0
     access_grants: list[AccessGrantModel] = Field(default_factory=list)
     created_at: int
     updated_at: int
@@ -109,6 +114,7 @@ class AgentConfigsTable:
             is_active=bool(row.is_active),
             is_beta=bool(row.is_beta),
             meta=row.meta or {},
+            position=int(row.position or 0),
             access_grants=grants,
             created_at=row.created_at,
             updated_at=row.updated_at,
@@ -123,6 +129,8 @@ class AgentConfigsTable:
     ) -> Optional[AgentConfigModel]:
         with get_db_context(db) as db:
             now = int(time.time())
+            current_max = db.query(func.max(AgentConfig.position)).scalar()
+            next_position = (int(current_max) + 1) if current_max is not None else 0
             row = AgentConfig(
                 id=slug,
                 user_id=user_id,
@@ -133,6 +141,7 @@ class AgentConfigsTable:
                 is_active=form_data.is_active,
                 is_beta=form_data.is_beta,
                 meta=form_data.meta or {},
+                position=next_position,
                 created_at=now,
                 updated_at=now,
             )
@@ -186,7 +195,7 @@ class AgentConfigsTable:
     def list_all(self, db: Optional[Session] = None) -> list[AgentConfigModel]:
         """Admin: every row, regardless of access."""
         with get_db_context(db) as db:
-            rows = db.query(AgentConfig).order_by(AgentConfig.name).all()
+            rows = db.query(AgentConfig).order_by(AgentConfig.position.asc(), AgentConfig.name.asc()).all()
             return [self._to_model(r, db) for r in rows]
 
     def list_visible_to_user(
@@ -197,7 +206,12 @@ class AgentConfigsTable:
     ) -> list[AgentConfigModel]:
         """User: rows the user has read access to AND is_active."""
         with get_db_context(db) as db:
-            active_rows = db.query(AgentConfig).filter(AgentConfig.is_active.is_(True)).order_by(AgentConfig.name).all()
+            active_rows = (
+                db.query(AgentConfig)
+                .filter(AgentConfig.is_active.is_(True))
+                .order_by(AgentConfig.position.asc(), AgentConfig.name.asc())
+                .all()
+            )
             if not active_rows:
                 return []
             slug_ids = [r.id for r in active_rows]
@@ -210,6 +224,38 @@ class AgentConfigsTable:
                 db=db,
             )
             return [self._to_model(r, db) for r in active_rows if r.id in accessible_ids]
+
+    def set_positions(
+        self,
+        slugs: list[str],
+        db: Optional[Session] = None,
+    ) -> list[AgentConfigModel]:
+        """Persist a new ordering for the given slugs.
+
+        Each slug receives ``position = its index in slugs``. Rows whose
+        slug is not in the input list are left unchanged — callers
+        should pass the full set they want to reorder.
+
+        :param slugs: Ordered list of agent_config ids. Must reference
+            existing rows; unknown ids are ignored (no-op for that
+            slug).
+        :return: Refreshed admin list (every row, sorted by position).
+        """
+        if not slugs:
+            with get_db_context(db) as db:
+                return self.list_all(db=db)
+
+        with get_db_context(db) as db:
+            existing = {r.id: r for r in db.query(AgentConfig).filter(AgentConfig.id.in_(slugs)).all()}
+            now = int(time.time())
+            for index, slug in enumerate(slugs):
+                row = existing.get(slug)
+                if row is None:
+                    continue
+                row.position = index
+                row.updated_at = now
+            db.commit()
+            return self.list_all(db=db)
 
     def user_has_access(
         self,

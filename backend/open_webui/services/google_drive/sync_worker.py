@@ -150,6 +150,10 @@ class GoogleDriveSyncWorker(BaseSyncWorker):
                 log.warning(f'File not found: {source["name"]}')
                 return None
 
+            if not self._is_supported_file(item):
+                log.info(f'Skipping unsupported single-file source {source.get("name", item.get("name", "?"))}')
+                return None
+
             # For Workspace files, use modifiedTime as change indicator
             # For regular files, use md5Checksum
             if self._is_workspace_file(item):
@@ -222,6 +226,14 @@ class GoogleDriveSyncWorker(BaseSyncWorker):
             'file_id': drive_item['id'],
             'mime_type': drive_item.get('mimeType', ''),
         }
+        # Drive's mimeType is authoritative. For Workspace native files this
+        # is application/vnd.google-apps.document/spreadsheet/presentation —
+        # the loader-worker source detects that and overrides content_type
+        # post-fetch to the export target (docx/xlsx/pptx) so doc-processor
+        # gets a parseable MIME.
+        raw_mime = drive_item.get('mimeType')
+        if raw_mime:
+            item['content_type'] = raw_mime
         return item
 
     def _get_provider_storage_headers(self, item_id: str) -> dict:
