@@ -1,12 +1,11 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { marked } from 'marked';
-	import { PUBLIC_WELCOME_MESSAGE } from '$env/static/public';
 
 	import { WEBUI_API_BASE_URL } from '$lib/constants';
 	import { sanitizeResponseContent } from '$lib/utils';
 
-	const enabled = PUBLIC_WELCOME_MESSAGE === 'true';
+	const enabled = import.meta.env.PUBLIC_WELCOME_MESSAGE === 'true';
 
 	let message: string | null = null;
 
