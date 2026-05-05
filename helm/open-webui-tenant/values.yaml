@@ -164,8 +164,18 @@ openWebui:
   config:
     # Deployment
     env: "prod"
-    enablePersistentConfig: "false"
-    resetConfigOnStart: "true"
+    # Persist admin-UI configuration (integration providers, connections, etc.)
+    # in the tenant DB. Aligns with OWUI's own default (ENABLE_PERSISTENT_CONFIG
+    # defaults to true upstream). The earlier chart default of "false" + reset-
+    # on-start "true" wiped the config table on every rollout, which deletes
+    # admin-only resources like integration providers — they have no env-var
+    # equivalent to fall back on. Trade-off: env-var changes for admin-visible
+    # settings (openaiApiBaseUrl, embedding model, etc.) become DB-shadowed
+    # after first boot. To roll such a change via Helm, set
+    # resetConfigOnStart: "true" for one reconcile cycle, then flip back —
+    # see tenants/CLAUDE.md "Open WebUI persistent_config pitfall".
+    enablePersistentConfig: "true"
+    resetConfigOnStart: "false"
     webuiName: "soev.ai"
     corsAllowOrigin: ""  # Empty = defaults to https://<tenant.domain>. Override for additional origins.
 
@@ -233,7 +243,11 @@ openWebui:
     ragRerankingEngine: "external"
     # externalDocumentLoaderApiKey is set via secrets
     # ragExternalRerankerApiKey is set via secrets
-    # URLs are templated to use shared service names
+    # URLs are templated to use shared service names by default; set
+    # externalDocumentLoaderUrl explicitly to bypass the helper (e.g. when
+    # a tenant uses one shared-services namespace for LiteLLM/reranker and
+    # another for the doc-processor + gateway).
+    externalDocumentLoaderUrl: ""
 
     # Web Search (via shared Gateway)
     enableWebSearch: "true"
