@@ -11,6 +11,7 @@ Endpoints:
     GET  /openapi.json     → agent /openapi.json
 """
 
+import json
 import logging
 
 import aiohttp
@@ -73,10 +74,24 @@ async def list_models(request: Request, user=Depends(get_verified_user)):
 
 @router.post('/chat/completions')
 async def chat_completions(request: Request, user=Depends(get_verified_user)):
-    """Proxy POST /v1/chat/completions to the agent service with SSE streaming."""
+    """Proxy POST /v1/chat/completions to the agent service with SSE streaming.
+
+    Injects the verified user's UUID into the body as ``user_id`` so the
+    agent service can set its acting-user ContextVar. Without this, KB
+    retrieval tools that gate on ``/accessible-kbs`` fail with
+    "acting user is not set".
+    """
     base_url = _get_base_url(request)
 
-    payload = await request.body()
+    raw = await request.body()
+    try:
+        body = json.loads(raw) if raw else {}
+    except json.JSONDecodeError:
+        raise HTTPException(status_code=400, detail='Invalid JSON body')
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=400, detail='Body must be a JSON object')
+    body.setdefault('user_id', user.id)
+    payload = json.dumps(body).encode()
 
     session = aiohttp.ClientSession(trust_env=True, timeout=AIOHTTP_CLIENT_TIMEOUT)
     try:
