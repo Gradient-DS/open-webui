@@ -111,6 +111,17 @@ export const artifactContents = writable(null);
 
 export const showDocument = writable(false);
 export const openDocumentTabSignal = writable(0);
+
+export const submitPromptSignal: Writable<{ text: string; ts: number } | null> = writable(null);
+
+export type ChoiceRegistration = {
+	field?: string;
+	question?: string;
+	selection: string | null;
+	answered: boolean;
+};
+export const choiceBlockRegistry: Writable<Record<string, Record<string, ChoiceRegistration>>> =
+	writable({});
 export const documentContents: Writable<Array<{
 	title: string;
 	markdown: string;

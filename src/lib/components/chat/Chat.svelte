@@ -49,7 +49,8 @@
 		showFileNavPath,
 		showFileNavDir,
 		chatRequestQueues,
-		pendingAgentId
+		pendingAgentId,
+		submitPromptSignal
 	} from '$lib/stores';
 
 	import { WEBUI_API_BASE_URL } from '$lib/constants';
@@ -780,6 +781,12 @@
 			`chat-input${chatIdProp ? `-${chatIdProp}` : ''}`
 		);
 
+		const submitPromptSignalSubscribe = submitPromptSignal.subscribe((sig) => {
+			if (!sig?.text) return;
+			submitPromptSignal.set(null);
+			submitPrompt(sig.text);
+		});
+
 		const init = async () => {
 			if (!chatIdProp) {
 				loading = false;
@@ -825,6 +832,7 @@
 				pageSubscribe();
 				showControlsSubscribe();
 				selectedFolderSubscribe();
+				submitPromptSignalSubscribe();
 				window.removeEventListener('message', onMessageHandler);
 				$socket?.off('events', chatEventHandler);
 				$socket?.off('file:status', fileStatusHandler);
