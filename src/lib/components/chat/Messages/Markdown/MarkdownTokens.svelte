@@ -22,6 +22,7 @@
 	import Download from '$lib/components/icons/Download.svelte';
 	import ConsecutiveDetailsGroup from './ConsecutiveDetailsGroup.svelte';
 	import DocumentCard from './DocumentCard.svelte';
+	import ChoiceBlock from './ChoiceBlock.svelte';
 
 	import HtmlToken from './HTMLToken.svelte';
 	import Clipboard from '$lib/components/icons/Clipboard.svelte';
@@ -169,27 +170,37 @@
 		</svelte:element>
 	{:else if token.type === 'code'}
 		{#if token.raw.includes('```')}
-			<CodeBlock
-				id={`${id}-${tokenIdx}`}
-				collapsed={$settings?.collapseCodeBlocks ?? false}
-				{token}
-				lang={token?.lang ?? ''}
-				code={token?.text ?? ''}
-				{attributes}
-				{save}
-				{preview}
-				edit={editCodeBlock}
-				stickyButtonsClassName={topPadding ? 'top-10' : 'top-0'}
-				onSave={(value) => {
-					onSave({
-						raw: token.raw,
-						oldContent: token.text,
-						newContent: value
-					});
-				}}
-				{onUpdate}
-				{onPreview}
-			/>
+			{#if token?.lang === 'ui:choice'}
+				<ChoiceBlock
+					id={`${id}-${tokenIdx}`}
+					messageScope={id}
+					code={token?.text ?? ''}
+					done={true}
+					messageDone={done}
+				/>
+			{:else}
+				<CodeBlock
+					id={`${id}-${tokenIdx}`}
+					collapsed={$settings?.collapseCodeBlocks ?? false}
+					{token}
+					lang={token?.lang ?? ''}
+					code={token?.text ?? ''}
+					{attributes}
+					{save}
+					{preview}
+					edit={editCodeBlock}
+					stickyButtonsClassName={topPadding ? 'top-10' : 'top-0'}
+					onSave={(value) => {
+						onSave({
+							raw: token.raw,
+							oldContent: token.text,
+							newContent: value
+						});
+					}}
+					{onUpdate}
+					{onPreview}
+				/>
+			{/if}
 		{:else}
 			{token.text}
 		{/if}
