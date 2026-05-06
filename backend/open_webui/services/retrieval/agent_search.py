@@ -55,9 +55,22 @@ def _filter_to_accessible_kbs(
     *,
     kb_ids: Optional[list[str]] = None,
 ) -> list[KnowledgeUserModel]:
-    """Resolve KBs the user may read; drop suspended ones and apply optional subset."""
+    """Resolve KBs the user may read; drop suspended ones and apply optional subset.
+
+    Includes both the access-grant pass and explicit ownership. Ownership
+    is included defensively — the grant pass already covers it, but we
+    have observed the upstream check returning empty for KB owners
+    (research doc 2026-05-06). Owners must always see their own KBs.
+    """
 
     accessible = Knowledges.get_knowledge_bases_by_user_id(user.id, permission='read')
+    owned = Knowledges.get_knowledge_items_by_user_id(user.id)
+
+    seen = {kb.id for kb in accessible}
+    for kb in owned:
+        if kb.id not in seen:
+            accessible.append(kb)
+            seen.add(kb.id)
 
     if kb_ids is not None:
         kb_id_set = set(kb_ids)

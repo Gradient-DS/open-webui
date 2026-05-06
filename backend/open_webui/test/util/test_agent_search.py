@@ -40,12 +40,18 @@ def fake_request():
     return request
 
 
-def _patch_knowledges(monkeypatch, *, kbs, suspended_ids=None):
+def _patch_knowledges(monkeypatch, *, kbs, suspended_ids=None, owned_kbs=None):
     suspended = set(suspended_ids or [])
+    owned = list(owned_kbs) if owned_kbs is not None else []
     monkeypatch.setattr(
         agent_search.Knowledges,
         'get_knowledge_bases_by_user_id',
         lambda user_id, permission='read', db=None: kbs,
+    )
+    monkeypatch.setattr(
+        agent_search.Knowledges,
+        'get_knowledge_items_by_user_id',
+        lambda user_id, db=None: owned,
     )
     monkeypatch.setattr(
         agent_search.Knowledges,
@@ -283,3 +289,32 @@ def test_resolve_accessible_kbs_falls_back_when_sanitiser_missing(monkeypatch, f
     # No sanitiser → pass-through.
     assert payload['kbs'][0]['collection_name'] == 'abc-123'
     assert payload['kb_index_collection_name'] == 'knowledge-bases'
+
+
+def test_owner_sees_owned_kb_even_when_grants_path_returns_empty(monkeypatch, fake_user):
+    """Defensive ownership union: regression for the kbs:null observation
+    where ``get_knowledge_bases_by_user_id`` returned empty for a KB owner.
+    Ownership must always be visible regardless of grant-path state.
+    """
+    owned = _kb_with_meta('kb-owned', name='Owned', owner_id=fake_user.id)
+    _patch_knowledges(monkeypatch, kbs=[], owned_kbs=[owned])
+    _patch_sanitiser(monkeypatch)
+
+    payload = agent_search.resolve_accessible_kbs(fake_user)
+
+    ids = [kb['id'] for kb in payload['kbs']]
+    assert 'kb-owned' in ids
+
+
+def test_owner_kb_present_via_both_paths_is_not_duplicated(monkeypatch, fake_user):
+    """Dedup: a KB returned by both the grant pass and the ownership pass
+    appears exactly once in the resolved set.
+    """
+    owned = _kb_with_meta('kb-owned', name='Owned', owner_id=fake_user.id)
+    _patch_knowledges(monkeypatch, kbs=[owned], owned_kbs=[owned])
+    _patch_sanitiser(monkeypatch)
+
+    payload = agent_search.resolve_accessible_kbs(fake_user)
+
+    ids = [kb['id'] for kb in payload['kbs']]
+    assert ids.count('kb-owned') == 1
