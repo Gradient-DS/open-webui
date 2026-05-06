@@ -19,7 +19,11 @@
 			: []),
 		...Object.entries($config?.integration_providers ?? {}).map(([slug, provider]) => ({
 			value: slug,
-			label: (provider as any).name
+			// Fall back to the slug when a provider config is missing a ``name`` —
+			// bits-ui Select.Item crashes at render with "(void 0) is not a function
+			// at children" if ``label`` is undefined, which white-screens the whole
+			// KB workspace page.
+			label: ((provider as { name?: string } | null)?.name ?? slug) as string
 		}))
 	];
 </script>

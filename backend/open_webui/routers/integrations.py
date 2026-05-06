@@ -80,19 +80,31 @@ def get_integration_provider(request: Request, user) -> tuple[str, dict]:
     if not provider_slug:
         raise HTTPException(
             status_code=403,
-            detail='This account is not configured as an integration service account',
+            detail=(
+                f'User {user.id!r} ({user.email}) is authenticated but is not bound to an '
+                'integration provider — user.info.integration_provider is empty. Bind this '
+                "user to a provider in OWUI admin → Integraties → 'Service account', or "
+                'authenticate with a different sk- key.'
+            ),
         )
     providers = request.app.state.config.INTEGRATION_PROVIDERS
     if not providers:
         raise HTTPException(
             status_code=403,
-            detail=f"Integration provider '{provider_slug}' is not registered",
+            detail=(
+                'INTEGRATION_PROVIDERS is empty — no providers are registered on this '
+                'deployment. Register one in OWUI admin → Integraties before pushing.'
+            ),
         )
     provider_config = providers.get(provider_slug)
     if not provider_config:
         raise HTTPException(
             status_code=403,
-            detail=f"Integration provider '{provider_slug}' is not registered",
+            detail=(
+                f'Integration provider {provider_slug!r} (bound to this service account) is '
+                f'not registered. Known providers: {sorted(providers.keys()) or "[]"}. '
+                'Register the slug in OWUI admin → Integraties or rebind the service account.'
+            ),
         )
     return provider_slug, provider_config
 
@@ -642,7 +654,15 @@ def ingest_documents(
     new_doc_ids = {f'{_prefix}{doc.get("source_id", "")}' for doc in form_data.documents}
     net_new = len(new_doc_ids - existing_ids)
     if len(existing_ids) + net_new > max_files:
-        raise HTTPException(400, f'Would exceed {max_files} file limit for this knowledge base.')
+        raise HTTPException(
+            400,
+            (
+                f'Would exceed {max_files} file limit for KB {knowledge.id!r} '
+                f'({knowledge.name!r}). Existing: {len(existing_ids)}, new in this request: '
+                f"{net_new}. Raise the provider's max_files_per_kb or split the push into "
+                'smaller batches.'
+            ),
+        )
 
     # Validate and dispatch based on data_type
     results = []

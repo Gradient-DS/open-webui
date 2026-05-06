@@ -11,6 +11,7 @@ Endpoints:
     GET  /openapi.json     → agent /openapi.json
 """
 
+import asyncio
 import json
 import logging
 from typing import Any, Optional
@@ -115,13 +116,23 @@ def _resolve_collection_refs(files: list[dict[str, Any]]) -> None:
         if not provider:
             raise HTTPException(
                 status_code=400,
-                detail='files[].source_id requires files[].provider when files[].id is not set',
+                detail=(
+                    'files[].source_id requires files[].provider when files[].id is not set. '
+                    'Either set files[].id to the KB UUID, or supply both files[].source_id and '
+                    'files[].provider (the integration provider slug from /api/v1/configs).'
+                ),
             )
         kb = _find_kb_by_integration_source_id(provider, source_id)
         if kb is None:
             raise HTTPException(
                 status_code=404,
-                detail=f"No knowledge base found for provider='{provider}' source_id='{source_id}'",
+                detail=(
+                    f"No knowledge base found for provider='{provider}' source_id='{source_id}'. "
+                    'The pair is matched against meta.integration.source_id on KBs whose type '
+                    'equals the provider slug. Check that the integration has actually ingested '
+                    'this collection (POST /api/v1/integrations/ingest) and that the provider '
+                    'slug matches the one configured in OWUI admin → Integraties.'
+                ),
             )
         entry['id'] = kb.id
         entry.pop('source_id', None)
@@ -131,10 +142,23 @@ def _resolve_collection_refs(files: list[dict[str, Any]]) -> None:
 def _get_base_url(request: Request) -> str:
     """Return the configured agent base URL or raise 503."""
     if not request.app.state.config.ENABLE_AGENT_PROXY:
-        raise HTTPException(status_code=503, detail='Agent Proxy is disabled')
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                'Agent Proxy is disabled. Set ENABLE_AGENT_PROXY=true (Helm: '
+                'openWebui.config.enableAgentProxy) and restart the OWUI pod.'
+            ),
+        )
 
     if not AGENT_API_BASE_URL:
-        raise HTTPException(status_code=503, detail='AGENT_API_BASE_URL is not configured')
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                'AGENT_API_BASE_URL is not configured. Set it to the agent service URL '
+                '(e.g. http://<release>-agent-agents-api:8080) via Helm '
+                'openWebui.config.agentApiBaseUrl and restart the OWUI pod.'
+            ),
+        )
     return AGENT_API_BASE_URL
 
 
@@ -150,25 +174,75 @@ def _auth_headers(extra: dict[str, str] | None = None) -> dict[str, str]:
     return headers
 
 
+async def _proxy_get_json(base_url: str, path: str) -> Any:
+    """GET ``{base_url}{path}`` upstream and return parsed JSON.
+
+    Surfaces upstream non-2xx as a same-status HTTPException with the
+    upstream body inline. Wraps connection / timeout / decode errors as
+    a 502 with a typed message — bare ``str(e)`` on aiohttp errors can
+    be empty and a stack trace from FastAPI is unhelpful for an
+    operator deciding whether to look at the agent pod or this proxy.
+    """
+    session = aiohttp.ClientSession(trust_env=True, timeout=AIOHTTP_CLIENT_TIMEOUT)
+    try:
+        try:
+            response = await session.request(
+                method='GET',
+                url=f'{base_url}{path}',
+                headers=_auth_headers(),
+            )
+        except aiohttp.ClientConnectorError as e:
+            raise HTTPException(
+                status_code=502,
+                detail=(
+                    f'Cannot reach the agent service at {base_url}{path}: {e}. '
+                    'Check AGENT_API_BASE_URL and that the agents-api pod is Running.'
+                ),
+            )
+        except asyncio.TimeoutError:
+            raise HTTPException(
+                status_code=502,
+                detail=(
+                    f'Timed out calling the agent service at {base_url}{path} '
+                    f'(>{int(AIOHTTP_CLIENT_TIMEOUT.total or 0)}s). The agent pod may be '
+                    'overloaded or unresponsive — check `kubectl logs` and pod readiness.'
+                ),
+            )
+        except aiohttp.ClientError as e:
+            raise HTTPException(
+                status_code=502,
+                detail=(f'Upstream agent service error on GET {path}: {type(e).__name__}: {e}'),
+            )
+
+        if response.status >= 400:
+            body = await response.text()
+            raise HTTPException(
+                status_code=response.status,
+                detail=(
+                    f'Agent service returned {response.status} on GET {path}. Upstream body: {body[:500] or "<empty>"}'
+                ),
+            )
+
+        try:
+            return await response.json()
+        except (aiohttp.ContentTypeError, json.JSONDecodeError) as e:
+            body_preview = (await response.text())[:500]
+            raise HTTPException(
+                status_code=502,
+                detail=(
+                    f'Agent service at {path} returned non-JSON body. '
+                    f'Body preview: {body_preview!r}. Original error: {e}'
+                ),
+            )
+    finally:
+        await session.close()
+
+
 @router.get('/models')
 async def list_models(request: Request, user=Depends(get_verified_user)):
     """Proxy GET /v1/models from the agent service."""
     base_url = _get_base_url(request)
-
-    session = aiohttp.ClientSession(trust_env=True, timeout=AIOHTTP_CLIENT_TIMEOUT)
-    try:
-        response = await session.request(
-            method='GET',
-            url=f'{base_url}/v1/models',
-            headers=_auth_headers(),
-        )
-        if response.status >= 400:
-            body = await response.text()
-            raise HTTPException(status_code=response.status, detail=body)
-        data = await response.json()
-        return data
-    finally:
-        await session.close()
+    return await _proxy_get_json(base_url, '/v1/models')
 
 
 @router.post('/chat/completions')
@@ -200,17 +274,50 @@ async def chat_completions(
 
     session = aiohttp.ClientSession(trust_env=True, timeout=AIOHTTP_CLIENT_TIMEOUT)
     try:
-        response = await session.request(
-            method='POST',
-            url=f'{base_url}/v1/chat/completions',
-            data=payload,
-            headers=_auth_headers({'Content-Type': 'application/json'}),
-        )
+        try:
+            response = await session.request(
+                method='POST',
+                url=f'{base_url}/v1/chat/completions',
+                data=payload,
+                headers=_auth_headers({'Content-Type': 'application/json'}),
+            )
+        except aiohttp.ClientConnectorError as e:
+            await session.close()
+            raise HTTPException(
+                status_code=502,
+                detail=(
+                    f'Cannot reach the agent service at {base_url}/v1/chat/completions: {e}. '
+                    'Check AGENT_API_BASE_URL and that the agents-api pod is Running.'
+                ),
+            )
+        except asyncio.TimeoutError:
+            await session.close()
+            raise HTTPException(
+                status_code=502,
+                detail=(
+                    f'Timed out calling the agent service at {base_url}/v1/chat/completions '
+                    f'(>{int(AIOHTTP_CLIENT_TIMEOUT.total or 0)}s). Long agent runs '
+                    '(kb_summary on big collections) can exceed the proxy timeout — re-run '
+                    'with a smaller scope or raise the proxy timeout.'
+                ),
+            )
+        except aiohttp.ClientError as e:
+            await session.close()
+            raise HTTPException(
+                status_code=502,
+                detail=(f'Upstream agent service error on POST /v1/chat/completions: {type(e).__name__}: {e}'),
+            )
 
         if response.status >= 400:
             error_body = await response.text()
             await session.close()
-            raise HTTPException(status_code=response.status, detail=error_body)
+            raise HTTPException(
+                status_code=response.status,
+                detail=(
+                    f'Agent service returned {response.status} on /v1/chat/completions. '
+                    f'Upstream body: {error_body[:1000] or "<empty>"}'
+                ),
+            )
 
         content_type = response.headers.get('Content-Type', '')
 
@@ -228,8 +335,11 @@ async def chat_completions(
         raise
     except Exception as e:
         await session.close()
-        log.error(f'Agent proxy error: {e}')
-        raise HTTPException(status_code=502, detail=str(e))
+        log.exception('Agent proxy unexpected error on /v1/chat/completions')
+        raise HTTPException(
+            status_code=502,
+            detail=f'Agent proxy unexpected error: {type(e).__name__}: {e}',
+        )
 
 
 @router.get('/gradient_agent_meta')
@@ -240,38 +350,11 @@ async def gradient_agent_meta(request: Request, user=Depends(get_verified_user))
     so the chat UI can render it without exposing ``AGENT_API_KEY``.
     """
     base_url = _get_base_url(request)
-
-    session = aiohttp.ClientSession(trust_env=True, timeout=AIOHTTP_CLIENT_TIMEOUT)
-    try:
-        response = await session.request(
-            method='GET',
-            url=f'{base_url}/v1/gradient_agent_meta',
-            headers=_auth_headers(),
-        )
-        if response.status >= 400:
-            body = await response.text()
-            raise HTTPException(status_code=response.status, detail=body)
-        return await response.json()
-    finally:
-        await session.close()
+    return await _proxy_get_json(base_url, '/v1/gradient_agent_meta')
 
 
 @router.get('/openapi.json')
 async def openapi_spec(request: Request, user=Depends(get_verified_user)):
     """Proxy the agent service's OpenAPI spec."""
     base_url = _get_base_url(request)
-
-    session = aiohttp.ClientSession(trust_env=True, timeout=AIOHTTP_CLIENT_TIMEOUT)
-    try:
-        response = await session.request(
-            method='GET',
-            url=f'{base_url}/openapi.json',
-            headers=_auth_headers(),
-        )
-        if response.status >= 400:
-            body = await response.text()
-            raise HTTPException(status_code=response.status, detail=body)
-        data = await response.json()
-        return data
-    finally:
-        await session.close()
+    return await _proxy_get_json(base_url, '/openapi.json')
