@@ -72,7 +72,7 @@ class ChatCompletionsRequest(BaseModel):
 
     model_config = ConfigDict(extra='allow')
 
-    model: str
+    model: Optional[str] = None
     messages: list[dict[str, Any]]
     files: Optional[list[AgentFileEntry]] = None
     agent: Optional[str] = None
