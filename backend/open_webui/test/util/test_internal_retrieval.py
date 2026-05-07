@@ -229,3 +229,159 @@ def test_accessible_kbs_no_kb_ids_param(monkeypatch, fake_principal):
     resp = client.get('/api/v1/internal/retrieval/accessible-kbs')
     assert resp.status_code == 200
     assert seen['kb_ids'] is None
+
+
+# ---------- /accessible-files -------------------------------------------------------
+
+
+def _admin_principal():
+    user = MagicMock()
+    user.id = 'admin-uuid-1'
+    user.email = 'admin@gradient-ds.com'
+    user.role = 'admin'
+    user.name = 'Admin'
+    return AgentPrincipal(agent_id='langgraph_dev', user=user)
+
+
+def test_accessible_files_returns_owned(monkeypatch, fake_principal):
+    """Owner of a file gets it back."""
+    app = _build_app(fake_principal=fake_principal)
+
+    def fake_has_access(*, file_id, access_type, user):
+        return file_id == 'file-owned' and user.id == fake_principal.user.id
+
+    monkeypatch.setattr(internal_retrieval_router, 'has_access_to_file', fake_has_access)
+
+    client = TestClient(app)
+    resp = client.get(
+        '/api/v1/internal/retrieval/accessible-files',
+        params={'file_ids': 'file-owned'},
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body == {'user_id': fake_principal.user.id, 'file_ids': ['file-owned']}
+
+
+def test_accessible_files_filters_inaccessible(monkeypatch, fake_principal):
+    """A file the user has no access to is dropped from the response."""
+    app = _build_app(fake_principal=fake_principal)
+
+    monkeypatch.setattr(
+        internal_retrieval_router,
+        'has_access_to_file',
+        lambda *, file_id, access_type, user: False,
+    )
+
+    client = TestClient(app)
+    resp = client.get(
+        '/api/v1/internal/retrieval/accessible-files',
+        params={'file_ids': 'file-private'},
+    )
+    assert resp.status_code == 200
+    assert resp.json()['file_ids'] == []
+
+
+def test_accessible_files_admin_does_not_bypass(monkeypatch):
+    """Admin role does NOT grant access to files they don't own/have grants on."""
+    admin_principal = _admin_principal()
+    app = _build_app(fake_principal=admin_principal)
+
+    # has_access_to_file is the only check — no admin shortcut.
+    monkeypatch.setattr(
+        internal_retrieval_router,
+        'has_access_to_file',
+        lambda *, file_id, access_type, user: False,
+    )
+
+    client = TestClient(app)
+    resp = client.get(
+        '/api/v1/internal/retrieval/accessible-files',
+        params={'file_ids': 'file-private-other-user'},
+    )
+    assert resp.status_code == 200
+    assert resp.json()['file_ids'] == []
+
+
+def test_accessible_files_mixed_subset(monkeypatch, fake_principal):
+    """Returns only the owned/accessible subset, drops the rest."""
+    app = _build_app(fake_principal=fake_principal)
+
+    accessible = {'file-owned', 'file-granted'}
+
+    monkeypatch.setattr(
+        internal_retrieval_router,
+        'has_access_to_file',
+        lambda *, file_id, access_type, user: file_id in accessible,
+    )
+
+    client = TestClient(app)
+    resp = client.get(
+        '/api/v1/internal/retrieval/accessible-files',
+        params={'file_ids': 'file-owned,file-private,file-granted'},
+    )
+    assert resp.status_code == 200
+    assert sorted(resp.json()['file_ids']) == ['file-granted', 'file-owned']
+
+
+def test_accessible_files_requires_query_param(fake_principal):
+    """Empty file_ids → 400."""
+    app = _build_app(fake_principal=fake_principal)
+    client = TestClient(app)
+    resp = client.get(
+        '/api/v1/internal/retrieval/accessible-files',
+        params={'file_ids': ''},
+    )
+    assert resp.status_code == 400
+
+
+def test_accessible_files_requires_agent_search_enabled(monkeypatch, fake_principal):
+    """Feature-flag gate matches /accessible-kbs behavior."""
+    app = _build_app(fake_principal=fake_principal, agent_search_enabled=False)
+
+    monkeypatch.setattr(
+        internal_retrieval_router,
+        'has_access_to_file',
+        MagicMock(side_effect=AssertionError('should not run when disabled')),
+    )
+
+    client = TestClient(app)
+    resp = client.get(
+        '/api/v1/internal/retrieval/accessible-files',
+        params={'file_ids': 'file-anything'},
+    )
+    assert resp.status_code == 404
+
+
+# ---------- /files/{id}/content tightening ------------------------------------------
+
+
+def test_files_id_content_admin_no_longer_shortcut(monkeypatch):
+    """Admin role does not grant /files/{id}/content access on files the admin
+    doesn't own and has no grant on."""
+    admin_principal = _admin_principal()
+    app = _build_app(fake_principal=admin_principal)
+
+    fake_file = SimpleNamespace(
+        id='file-private-other-user',
+        user_id='other-user-uuid',
+        filename='secret.pdf',
+        data={'content': 'should not be returned'},
+    )
+
+    class _FakeFiles:
+        @staticmethod
+        def get_file_by_id(file_id):
+            return fake_file if file_id == fake_file.id else None
+
+    monkeypatch.setattr(internal_retrieval_router, 'Files', _FakeFiles)
+    monkeypatch.setattr(
+        internal_retrieval_router,
+        'has_access_to_file',
+        lambda *, file_id, access_type, user: False,
+    )
+
+    client = TestClient(app)
+    resp = client.get(
+        '/api/v1/internal/retrieval/files/file-private-other-user/content',
+    )
+    assert resp.status_code == 403
