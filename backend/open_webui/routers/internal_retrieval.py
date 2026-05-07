@@ -12,7 +12,7 @@ from __future__ import annotations
 import logging
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from pydantic import BaseModel, Field
 
 from open_webui.models.files import Files
@@ -60,6 +60,11 @@ class AccessibleKBsResponse(BaseModel):
     kb_index_collection_name: str
 
 
+class AccessibleFilesResponse(BaseModel):
+    user_id: str
+    file_ids: list[str]
+
+
 @router.get('/accessible-kbs', response_model=AccessibleKBsResponse)
 async def list_accessible_kbs(
     request: Request,
@@ -104,6 +109,52 @@ async def list_accessible_kbs(
     )
 
 
+@router.get('/accessible-files', response_model=AccessibleFilesResponse)
+async def list_accessible_files(
+    request: Request,
+    principal: AgentPrincipal = Depends(get_agent_principal),
+    file_ids: str = Query(..., description='Comma-separated file UUIDs to check'),
+) -> AccessibleFilesResponse:
+    """Return the subset of ``file_ids`` the acting user may read.
+
+    Mirrors :func:`list_accessible_kbs` but at file granularity. Used by
+    agents-api to validate per-file ad-hoc collections (``file-{uuid}``)
+    before stashing them in the validated-collections ContextVar.
+
+    No admin role shortcut: ``has_access_to_file`` already covers owner /
+    KB-membership / direct grant — the only paths a tenant-isolated agent
+    should respect.
+    """
+
+    if not getattr(request.app.state.config, 'AGENT_SEARCH_ENABLED', False):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail='agent search not enabled',
+        )
+
+    requested = [fid.strip() for fid in file_ids.split(',') if fid.strip()]
+    if not requested:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail='file_ids query parameter must contain at least one id',
+        )
+
+    accessible = [fid for fid in requested if has_access_to_file(file_id=fid, access_type='read', user=principal.user)]
+
+    log.info(
+        'agent_accessible_files: agent=%s acting_user=%s requested=%d accessible=%d',
+        principal.agent_id,
+        principal.user.id,
+        len(requested),
+        len(accessible),
+    )
+
+    return AccessibleFilesResponse(
+        user_id=principal.user.id,
+        file_ids=accessible,
+    )
+
+
 class FileContentResponse(BaseModel):
     doc_id: str
     title: str
@@ -139,11 +190,9 @@ async def file_content(
         )
 
     user = principal.user
-    if (
-        user.role != 'admin'
-        and file.user_id != user.id
-        and not has_access_to_file(file_id=file_id, access_type='read', user=user)
-    ):
+    # No admin shortcut here — the agent retrieval path is tenant-isolated by
+    # construction; admin's UI-level cross-user reads do not extend to it.
+    if file.user_id != user.id and not has_access_to_file(file_id=file_id, access_type='read', user=user):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail=f"user '{user.id}' has no read access to file '{file_id}'",
