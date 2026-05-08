@@ -474,6 +474,16 @@ openWebui:
     # Agent Proxy (external: exposes agent API to external callers via /api/v1/agent/)
     enableAgentProxy: "false"
 
+    # Search API (RAG discovery proxy: backend reverse-proxies to the upstream
+    # search-api at /api/v1/discovery/*). The search-api X-API-Key is injected
+    # server-side and never reaches the browser. Gated by ENABLE_RAG_FILTER_UI
+    # (PersistentConfig — flip via admin UI; no separate helm flag).
+    searchApi:
+      # Upstream search-api base URL (e.g. http://neo-db:3535). Empty disables
+      # the discovery proxy. Backend reads this as SEARCH_API_BASE_URL.
+      baseUrl: ""
+      # searchApiKey is set via secrets (see .Values.secrets.searchApiKey)
+
     # Two-Factor Authentication (TOTP)
     enable2fa: "false"
     require2fa: "false"
@@ -772,6 +782,9 @@ secrets:
   # Agent API X-API-Key (must match AGENTS_API_KEY on the agent service)
   agentApiKey: ""
 
+  # Search API X-API-Key (must match the search-api's expected key)
+  searchApiKey: ""
+
   # Loader-worker → tenant /ingest callback bearer (loader-worker presents this
   # outbound; open-webui validates inbound). Same value, both pods.
   loaderIngestApiKey: ""
@@ -835,6 +848,7 @@ externalSecrets:
       externalDocumentLoaderApiKey: false
       ragExternalRerankerApiKey: false
       agentApiKey: false
+      searchApiKey: false
       loaderIngestApiKey: false
       loaderWorkerDbPassword: false
 

@@ -162,6 +162,17 @@ spec:
                   name: {{ include "open-webui-tenant.fullname" . }}-secrets
                   key: agent-api-key
             {{- end }}
+            # Search API X-API-Key — outbound credential for the discovery proxy
+            # at /api/v1/discovery/*. Mounted whenever a value exists in either
+            # secret path, regardless of baseUrl (router gates on baseUrl at
+            # request time).
+            {{- if or .Values.secrets.searchApiKey .Values.externalSecrets.onepassword.fields.searchApiKey }}
+            - name: SEARCH_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "open-webui-tenant.fullname" . }}-secrets
+                  key: search-api-key
+            {{- end }}
             # Loader-worker → /ingest callback bearer (validated by service_auth.LoaderPrincipal)
             {{- if or .Values.secrets.loaderIngestApiKey .Values.externalSecrets.onepassword.fields.loaderIngestApiKey }}
             - name: LOADER_INGEST_API_KEY

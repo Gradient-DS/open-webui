@@ -73,6 +73,7 @@ from open_webui.routers import (
     agent_proxy,
     analytics,
     archives,
+    discovery,
     export,
     audio,
     totp,
@@ -1948,6 +1949,7 @@ app.include_router(
 )
 app.include_router(agent_proxy.router, prefix='/api/v1/agent', tags=['agent-proxy'])
 app.include_router(agent_configs.router, prefix='/api/v1/agent-configs', tags=['agents'])
+app.include_router(discovery.router, prefix='/api/v1/discovery', tags=['discovery'])
 app.include_router(prompts.router, prefix='/api/v1/prompts', tags=['prompts'])
 app.include_router(tools.router, prefix='/api/v1/tools', tags=['tools'])
 app.include_router(skills.router, prefix='/api/v1/skills', tags=['skills'])
