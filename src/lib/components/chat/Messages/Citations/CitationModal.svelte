@@ -307,7 +307,15 @@
 											rawContent.length > CONTENT_PREVIEW_LIMIT &&
 											!expandedDocs.has(documentIdx)}
 										{#if $settings?.renderMarkdownInPreviews ?? true}
-											<div class="text-sm prose dark:prose-invert max-w-full">
+											<div
+												class="text-sm prose dark:prose-invert max-w-full
+													prose-h1:text-xl prose-h1:font-semibold prose-h1:mt-3 prose-h1:mb-1.5
+													prose-h2:text-base prose-h2:font-semibold prose-h2:mt-2 prose-h2:mb-1
+													prose-h3:text-base prose-h3:font-medium prose-h3:mt-2 prose-h3:mb-1
+													prose-h4:text-base prose-h4:font-medium prose-h4:mt-2 prose-h4:mb-1
+													prose-h5:text-base prose-h5:font-medium prose-h5:mt-2 prose-h5:mb-1
+													prose-h6:text-base prose-h6:font-medium prose-h6:mt-2 prose-h6:mb-1"
+											>
 												<Markdown
 													content={isTruncated
 														? rawContent.slice(0, CONTENT_PREVIEW_LIMIT)
