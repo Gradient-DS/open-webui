@@ -30,6 +30,7 @@ data:
   ENABLE_INITIAL_ADMIN_SIGNUP: {{ .Values.openWebui.config.enableInitialAdminSignup | quote }}
   DEFAULT_USER_ROLE: {{ .Values.openWebui.config.defaultUserRole | quote }}
   ENABLE_OAUTH_SIGNUP: {{ .Values.openWebui.config.enableOauthSignup | quote }}
+  OAUTH_INVITE_REQUIRED: {{ .Values.openWebui.config.oauthInviteRequired | quote }}
   OAUTH_MERGE_ACCOUNTS_BY_EMAIL: {{ .Values.openWebui.config.oauthMergeAccountsByEmail | quote }}
   ENABLE_PASSWORD_AUTH: {{ .Values.openWebui.config.enablePasswordAuth | quote }}
   JWT_EXPIRES_IN: {{ .Values.openWebui.config.jwtExpiresIn | quote }}
