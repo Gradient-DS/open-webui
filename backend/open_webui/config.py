@@ -325,6 +325,12 @@ ENABLE_OAUTH_SIGNUP = PersistentConfig(
     os.environ.get('ENABLE_OAUTH_SIGNUP', 'False').lower() == 'true',
 )
 
+OAUTH_INVITE_REQUIRED = PersistentConfig(
+    'OAUTH_INVITE_REQUIRED',
+    'oauth.invite_required',
+    os.environ.get('OAUTH_INVITE_REQUIRED', 'False').lower() == 'true',
+)
+
 OAUTH_REFRESH_TOKEN_INCLUDE_SCOPE = PersistentConfig(
     'OAUTH_REFRESH_TOKEN_INCLUDE_SCOPE',
     'oauth.refresh_token_include_scope',

@@ -808,6 +808,17 @@ FEATURE_AGENT_PICKER = os.environ.get('FEATURE_AGENT_PICKER', 'False').lower() =
 
 
 ####################################
+# SEARCH API (RAG discovery proxy)
+# [Gradient] Upstream search-api consumed by the RAG filter panel. The
+# backend at /api/v1/discovery/* reverse-proxies here with X-API-Key
+# injected server-side so the key never reaches the browser.
+####################################
+
+SEARCH_API_BASE_URL = os.environ.get('SEARCH_API_BASE_URL', '').strip().rstrip('/')
+SEARCH_API_KEY = os.environ.get('SEARCH_API_KEY', '').strip()
+
+
+####################################
 # SENTENCE TRANSFORMERS
 ####################################
 

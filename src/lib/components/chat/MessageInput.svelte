@@ -107,6 +107,8 @@
 	import InputModal from '../common/InputModal.svelte';
 	import Expand from '../icons/Expand.svelte';
 	import QueuedMessageItem from './MessageInput/QueuedMessageItem.svelte';
+	import Filter from '../icons/Filter.svelte';
+	import { showRagFilter } from '$lib/stores/rag-filter';
 
 	const i18n = getContext('i18n');
 
@@ -1780,6 +1782,19 @@
 												<PlusAlt className="size-5.5" />
 											</div>
 										</InputMenu>
+									{/if}
+
+									{#if $config?.features?.enable_rag_filter_ui ?? true}
+										<Tooltip content={$i18n.t('RAG Filters')} placement="top">
+											<button
+												type="button"
+												class="bg-transparent hover:bg-gray-100 text-gray-700 dark:text-white dark:hover:bg-gray-800 rounded-full size-8 flex justify-center items-center outline-hidden focus:outline-hidden"
+												on:click={() => showRagFilter.update((v) => !v)}
+												aria-label={$i18n.t('RAG Filters')}
+											>
+												<Filter className="size-4.5" strokeWidth="1.5" />
+											</button>
+										</Tooltip>
 									{/if}
 
 									{#if selectedModelIds.length === 1 && $models.find((m) => m.id === selectedModelIds[0])?.has_user_valves}
