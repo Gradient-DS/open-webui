@@ -1,1 +1,11 @@
 blank_issues_enabled: false
+contact_links:
+  - name: Security vulnerability
+    url: https://github.com/Gradient-DS/open-webui/blob/main/SECURITY.md
+    about: Please report security issues privately — do not open a public issue.
+  - name: Upstream Open WebUI issue
+    url: https://github.com/open-webui/open-webui/issues
+    about: For bugs and features in core Open WebUI functionality, please report upstream.
+  - name: soev.ai website
+    url: https://soev.ai
+    about: Learn more about soev.ai and Gradient-DS.
