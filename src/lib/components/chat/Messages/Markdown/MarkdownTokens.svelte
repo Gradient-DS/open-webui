@@ -55,7 +55,14 @@
 		return 'h' + depth;
 	};
 
-	const GROUPABLE_DETAIL_TYPES = new Set(['tool_calls', 'reasoning', 'code_interpreter']);
+	// Only `code_interpreter` is grouped via ConsecutiveDetailsGroup now.
+	// `reasoning` and `tool_calls` are consumed by StatusHistory upstream
+	// (StatusHistory is the canonical display surface for tool activity); the
+	// inline <details> blocks stay in message.content as stream-position
+	// anchors for the reasoning-merge algorithm in ResponseMessage but must
+	// not render here, otherwise they show up as duplicate "Verkend"/"Explored"
+	// CheckCircle chrome on top of the StatusHistory bullets.
+	const GROUPABLE_DETAIL_TYPES = new Set(['code_interpreter']);
 
 	const isGroupableDetailToken = (token: Token & { attributes?: { type?: string } }) => {
 		return token?.type === 'details' && GROUPABLE_DETAIL_TYPES.has(token?.attributes?.type ?? '');
@@ -66,13 +73,11 @@
 		let detailGroup = [];
 
 		const flushDetailGroup = () => {
-			if (detailGroup.length > 1) {
+			if (detailGroup.length >= 1) {
 				displayTokens.push({
 					type: 'detail_group',
 					items: [...detailGroup]
 				});
-			} else if (detailGroup.length === 1) {
-				displayTokens.push(detailGroup[0]);
 			}
 
 			detailGroup = [];
@@ -467,7 +472,10 @@
 	{:else if token.type === 'details'}
 		{@const textContent = getDetailTextContent(token)}
 
-		{#if token?.attributes?.type === 'document'}
+		{#if token?.attributes?.type === 'reasoning'}
+			<!-- Reasoning blocks are consumed by StatusHistory upstream and
+			     rendered as bullets there. Skipping here avoids duplicate display. -->
+		{:else if token?.attributes?.type === 'document'}
 			<DocumentCard
 				id={`${id}-${tokenIdx}-doc`}
 				title={token?.attributes?.title ?? token.summary ?? ''}
@@ -485,13 +493,8 @@
 				messageDone={done}
 			/>
 		{:else if token?.attributes?.type === 'tool_calls'}
-			<!-- Tool calls have dedicated handling with ToolCallDisplay component -->
-			<ToolCallDisplay
-				id={`${id}-${tokenIdx}-tc`}
-				attributes={token.attributes}
-				open={false}
-				className="w-full space-y-1"
-			/>
+			<!-- Tool activity is rendered by StatusHistory; the inline marker
+			     stays in message.content as a stream-position anchor only. -->
 		{:else if textContent.length > 0}
 			<Collapsible
 				title={token.summary}

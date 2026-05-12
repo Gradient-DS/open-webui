@@ -26,6 +26,12 @@
 	$: displayTitle = title || $i18n.t('Document');
 
 	const openDocument = () => {
+		// Toggle: if the side panel is already showing the document, close it.
+		if ($showControls && $showDocument) {
+			showControls.set(false);
+			showDocument.set(false);
+			return;
+		}
 		showDocument.set(true);
 		showControls.set(true);
 		openDocumentTabSignal.update((n) => n + 1);

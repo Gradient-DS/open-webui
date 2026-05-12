@@ -174,11 +174,129 @@
 	let model = null;
 	$: model = $models.find((m) => m.id === message.model);
 
-	$: statusEntries = message?.statusHistory ?? [...(message?.status ? [message?.status] : [])];
-	$: hasVisibleStatus =
+	$: statusEntries = (() => {
+		const raw = message?.statusHistory ?? [...(message?.status ? [message?.status] : [])];
+		// The agent emits one "summary" StatusUpdate after each tool completes
+		// (so the dropdown header settles to "N tools aangeroepen in M seconden"
+		// while the answer streams, not after) plus a final post-loop summary
+		// with the total turn time. Keep only the most recent one — earlier
+		// emissions are superseded by the latest count + time.
+		let lastSummaryIdx = -1;
+		for (let i = raw.length - 1; i >= 0; i--) {
+			if (raw[i]?.action === 'summary') {
+				lastSummaryIdx = i;
+				break;
+			}
+		}
+		return raw.filter((s, i) => s?.action !== 'summary' || i === lastSummaryIdx);
+	})();
+
+	// Parse <details type="reasoning"> blocks out of message.content. Each match
+	// becomes a reasoning bullet item in the merged StatusHistory list. We
+	// extract the original block attributes too (done, duration) so the
+	// ReasoningBullet can reuse Collapsible's i18n-aware "Thought for N
+	// seconds" label rendering.
+	function parseAttributes(openTag: string): Record<string, string> {
+		const attrs: Record<string, string> = {};
+		const attrRe = /(\w+)="([^"]*)"/g;
+		let am;
+		while ((am = attrRe.exec(openTag)) !== null) {
+			attrs[am[1]] = am[2];
+		}
+		return attrs;
+	}
+
+	$: reasoningItems = (() => {
+		const content = message?.content ?? '';
+		if (!content.includes('<details type="reasoning"')) return [];
+		const items: {
+			kind: 'reasoning';
+			summary: string;
+			body: string;
+			attributes: Record<string, string>;
+			contentOffset: number;
+		}[] = [];
+		const re = /<details type="reasoning"[^>]*>([\s\S]*?)<\/details>/g;
+		let match;
+		while ((match = re.exec(content)) !== null) {
+			const fullBlock = match[0];
+			const openTagMatch = fullBlock.match(/^<details[^>]*>/);
+			const attributes = openTagMatch ? parseAttributes(openTagMatch[0]) : {};
+			const summaryMatch = fullBlock.match(/<summary>([\s\S]*?)<\/summary>/);
+			const body = match[1].replace(/<summary>[\s\S]*?<\/summary>/, '').trim();
+			items.push({
+				kind: 'reasoning',
+				summary: summaryMatch?.[1]?.trim() ?? '',
+				body,
+				attributes,
+				contentOffset: match.index
+			});
+		}
+		return items;
+	})();
+
+	// Merge reasoning items into statusEntries in stream order. We use the
+	// inline <details type="tool_calls"> markers as stream-position anchors:
+	// each tool_calls marker corresponds 1:1 to a tool execution, and status
+	// entries arrive in the same order from the agent. Reasoning blocks that
+	// fall between tool markers get inserted between the corresponding status
+	// entries; reasoning after the last tool marker is appended at the end
+	// (before any trailing status entries like the summary).
+	$: mergedHistory = (() => {
+		const reasoning = reasoningItems;
+		const status = statusEntries.map((s) => ({ ...s, kind: 'status' as const }));
+		if (reasoning.length === 0) return status;
+
+		const content = message?.content ?? '';
+		const toolOffsets: number[] = [];
+		const toolRe = /<details type="tool_calls"[^>]*>/g;
+		let tm;
+		while ((tm = toolRe.exec(content)) !== null) {
+			toolOffsets.push(tm.index);
+		}
+
+		// Walk reasoning and status entries, interleaving by position.
+		// For each reasoning block, count how many tool_calls markers appear
+		// before it — that index in `status` is where it belongs (inserted
+		// BEFORE the next status entry, since reasoning precedes the next
+		// tool call in stream order).
+		const merged: Array<(typeof status)[number] | (typeof reasoning)[number]> = [];
+		let reasoningIdx = 0;
+		for (let i = 0; i < status.length; i++) {
+			const toolOffset = toolOffsets[i];
+			while (
+				reasoningIdx < reasoning.length &&
+				(toolOffset === undefined || reasoning[reasoningIdx].contentOffset < toolOffset)
+			) {
+				merged.push(reasoning[reasoningIdx]);
+				reasoningIdx++;
+			}
+			merged.push(status[i]);
+		}
+		while (reasoningIdx < reasoning.length) {
+			merged.push(reasoning[reasoningIdx]);
+			reasoningIdx++;
+		}
+		return merged;
+	})();
+
+	// Whether at least one tool actually ran this turn. Used together with the
+	// streaming heuristic below to gate the StatusHistory dropdown:
+	//   - During streaming (message.done === false): show as soon as there is
+	//     ANY reasoning or status content, so users see live progress.
+	//   - After completion (message.done === true): only show if a tool fired —
+	//     reasoning-only turns drop the dropdown per Phase D.
+	$: hasToolCalls = statusEntries.some(
+		(s) => s?.action && s.action !== 'reasoning_step'
+	);
+	$: streamingHasActivity =
+		!(message?.done ?? false) && (statusEntries.length > 0 || reasoningItems.length > 0);
+	$: shouldShowStatusHistory =
 		(model?.info?.meta?.capabilities?.status_updates ?? true) &&
-		statusEntries.length > 0 &&
-		!(statusEntries.at(-1)?.hidden ?? false);
+		(hasToolCalls || streamingHasActivity) &&
+		mergedHistory.length > 0;
+
+	$: hasVisibleStatus = shouldShowStatusHistory;
 
 	let edit = false;
 	let editedContent = '';
@@ -734,8 +852,8 @@
 			<div>
 				<div class="chat-{message.role} w-full min-w-full markdown-prose">
 					<div>
-						{#if model?.info?.meta?.capabilities?.status_updates ?? true}
-							<StatusHistory statusHistory={message?.statusHistory} />
+						{#if shouldShowStatusHistory}
+							<StatusHistory statusHistory={mergedHistory} />
 						{/if}
 
 						{#if message?.files && message.files?.filter((f) => f.type === 'image').length > 0}
