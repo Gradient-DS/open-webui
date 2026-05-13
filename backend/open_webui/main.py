@@ -401,6 +401,7 @@ from open_webui.config import (
     AGENT_SEARCH_ENABLED,
     # Agent API (external agent selection)
     AGENT_API_SELECTED_AGENT,
+    AGENT_API_PICKER_DEFAULT_SLUG,
     # 2FA / TOTP
     ENABLE_2FA,
     REQUIRE_2FA,
@@ -1438,6 +1439,7 @@ app.state.config.ENABLE_AGENT_PROXY = ENABLE_AGENT_PROXY
 app.state.config.AGENT_SEARCH_ENABLED = AGENT_SEARCH_ENABLED
 
 app.state.config.AGENT_API_SELECTED_AGENT = AGENT_API_SELECTED_AGENT
+app.state.config.AGENT_API_PICKER_DEFAULT_SLUG = AGENT_API_PICKER_DEFAULT_SLUG
 
 app.state.config.ENABLE_2FA = ENABLE_2FA
 app.state.config.REQUIRE_2FA = REQUIRE_2FA
@@ -2719,6 +2721,7 @@ async def get_app_config(request: Request):
                     'enable_agent_proxy': app.state.config.ENABLE_AGENT_PROXY,
                     'feature_agent_api_enabled': AGENT_API_ENABLED,
                     'feature_agent_picker': FEATURE_AGENT_PICKER,
+                    'agent_picker_default_slug': app.state.config.AGENT_API_PICKER_DEFAULT_SLUG,
                     'require_2fa': app.state.config.REQUIRE_2FA,
                     'two_fa_grace_period_days': app.state.config.TWO_FA_GRACE_PERIOD_DAYS,
                     'enable_data_warnings': app.state.config.ENABLE_DATA_WARNINGS,

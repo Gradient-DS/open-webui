@@ -456,6 +456,9 @@ data:
   AGENT_API_AGENTS_CONFIG: {{ . | quote }}
   {{- end }}
   AGENT_API_AGENTS_CONFIG_OVERWRITE: {{ .Values.openWebui.config.agentApiAgentsConfigOverwrite | default "false" | quote }}
+  {{- with .Values.openWebui.config.agentApiPickerDefaultSlug }}
+  AGENT_API_PICKER_DEFAULT_SLUG: {{ . | quote }}
+  {{- end }}
   {{- end }}
 
   # [Gradient] Per-chat agent picker UI (Settings → Agents admin tab +

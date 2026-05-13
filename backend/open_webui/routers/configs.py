@@ -896,6 +896,8 @@ async def set_agent_proxy_config(
 
 class ExternalAgentsConfigForm(BaseModel):
     AGENT_API_SELECTED_AGENT: str
+    # Empty string clears the picker default (no pre-selection on first load).
+    AGENT_API_PICKER_DEFAULT_SLUG: Optional[str] = None
 
 
 @router.get('/external_agents')
@@ -904,6 +906,7 @@ async def get_external_agents_config(request: Request, user=Depends(get_admin_us
         'AGENT_API_ENABLED': AGENT_API_ENABLED,
         'AGENT_API_AGENTS': AGENT_API_AGENTS,
         'AGENT_API_SELECTED_AGENT': request.app.state.config.AGENT_API_SELECTED_AGENT,
+        'AGENT_API_PICKER_DEFAULT_SLUG': request.app.state.config.AGENT_API_PICKER_DEFAULT_SLUG,
     }
 
 
@@ -925,8 +928,19 @@ async def set_external_agents_config(
         )
 
     request.app.state.config.AGENT_API_SELECTED_AGENT = selected
+
+    if form_data.AGENT_API_PICKER_DEFAULT_SLUG is not None:
+        picker_default = form_data.AGENT_API_PICKER_DEFAULT_SLUG.strip()
+        if picker_default and agents and picker_default not in agents:
+            raise HTTPException(
+                status_code=400,
+                detail='Picker default slug is not in the configured AGENT_API_AGENTS list',
+            )
+        request.app.state.config.AGENT_API_PICKER_DEFAULT_SLUG = picker_default
+
     return {
         'AGENT_API_SELECTED_AGENT': request.app.state.config.AGENT_API_SELECTED_AGENT,
+        'AGENT_API_PICKER_DEFAULT_SLUG': request.app.state.config.AGENT_API_PICKER_DEFAULT_SLUG,
     }
 
 

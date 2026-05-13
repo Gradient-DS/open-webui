@@ -3424,6 +3424,19 @@ AGENT_API_SELECTED_AGENT = PersistentConfig(
     _default_selected_agent,
 )
 
+# [Gradient] User-facing default for the agent picker on the new-chat
+# empty state. When set to a slug, the AgentCards component pre-selects
+# that card on first load (when the user has no localStorage pick yet).
+# Empty = no pre-selection (vanilla model picker stays the default).
+# Distinct from AGENT_API_SELECTED_AGENT — that one is an admin override
+# hint forwarded to the external agents service; this one only affects
+# the picker UI default for new users / fresh devices.
+AGENT_API_PICKER_DEFAULT_SLUG = PersistentConfig(
+    'AGENT_API_PICKER_DEFAULT_SLUG',
+    'agent_api.picker_default_slug',
+    os.environ.get('AGENT_API_PICKER_DEFAULT_SLUG', '').strip(),
+)
+
 
 RAG_TEXT_SPLITTER = PersistentConfig(
     'RAG_TEXT_SPLITTER',

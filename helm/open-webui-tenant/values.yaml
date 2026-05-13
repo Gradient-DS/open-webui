@@ -485,6 +485,12 @@ openWebui:
     # with the env values — admin edits will not persist. Use only when env
     # should be the source of truth.
     agentApiAgentsConfigOverwrite: "false"
+    # [Gradient] User-facing default agent for the new-chat empty state.
+    # When set to a slug in agentApiAgents, the agent picker pre-selects
+    # that card on first load (no localStorage pick yet). Empty = no
+    # pre-selection. Distinct from the admin override hint forwarded to
+    # the agents service (set via Admin → External Agents).
+    agentApiPickerDefaultSlug: ""
     # [Gradient] Master kill switch for the per-chat agent picker UI
     # (Settings → Agents admin tab + new-chat empty-state cards).
     # Layered on top of agentApiEnabled — both must be true for users to

@@ -68,6 +68,11 @@
 	import RegenerateMenu from './ResponseMessage/RegenerateMenu.svelte';
 	import StatusHistory from './ResponseMessage/StatusHistory.svelte';
 	import ReasoningBullet from './ResponseMessage/StatusHistory/ReasoningBullet.svelte';
+	import {
+		detectMergeProtocol,
+		mergeStatusAndReasoning,
+		parseToolOffsets
+	} from './ResponseMessage/mergeHistory';
 	import FullHeightIframe from '$lib/components/common/FullHeightIframe.svelte';
 
 	interface MessageType {
@@ -236,86 +241,15 @@
 		return items;
 	})();
 
-	// Merge reasoning items into statusEntries in stream order. We use the
-	// inline <details type="tool_calls"> markers as stream-position anchors:
-	// each tool_calls marker corresponds 1:1 to a tool execution, and status
-	// entries arrive in the same order from the agent. Reasoning blocks that
-	// fall between tool markers get inserted between the corresponding status
-	// entries; reasoning after the last tool marker is appended at the end
-	// (before any trailing status entries like the summary).
-	$: mergedHistory = (() => {
-		const reasoning = reasoningItems;
-		const status = statusEntries.map((s) => ({ ...s, kind: 'status' as const }));
-		if (reasoning.length === 0) return status;
-
-		const content = message?.content ?? '';
-		const toolOffsets: number[] = [];
-		const toolRe = /<details type="tool_calls"[^>]*>/g;
-		let tm;
-		while ((tm = toolRe.exec(content)) !== null) {
-			toolOffsets.push(tm.index);
-		}
-
-		// Vanilla OWUI flows (and any non-ChatAgent path) don't emit the
-		// inline ``<details type="tool_calls">`` marker, so we have no
-		// stream-position anchor to interleave reasoning with status entries.
-		// Place reasoning AFTER the status entries — including while it's
-		// still in-progress during streaming — so tool/retrieval bullets
-		// read top-to-bottom in chronological order and the trailing
-		// "thought" bullet represents the accumulated thinking right
-		// before the answer. ``StatusHistory.svelte``'s header logic
-		// prefers the last non-reasoning entry, so the dropdown summary
-		// still reflects the most recent action.
-		//
-		// The agent's pre-marker window is the exception: when a
-		// ``hidden=true && done=false`` tool-start status is present, we
-		// fall through to the standard zip below (see comment inside the
-		// branch). Once the marker arrives the agent flow no longer
-		// enters this branch (toolOffsets becomes non-empty).
-		if (toolOffsets.length === 0 && status.length > 0) {
-			// ChatAgent emits ``hidden=true && done=false`` on tool-start
-			// status entries (``_dispatch_tool_status`` in
-			// ``agents/flows/core/agent.py``). When we see one, we're in
-			// the agent's pre-marker window — the LLM may have already
-			// emitted a content chunk that prematurely closed the
-			// reasoning, but the inline_tool_marker is in flight. Let the
-			// standard zip run below to place reasoning BEFORE the tool
-			// status (matching the multi-tool agent UX). Vanilla OWUI's
-			// ``knowledge_search`` is ``hidden=true`` but ``done=true``
-			// (one-shot, no marker follows), and its ``web_search``
-			// emits ``hidden=false``, so neither flips this signal.
-			const hasPendingAgentTool = status.some(
-				(s) => s.hidden === true && s.done === false
-			);
-			if (!hasPendingAgentTool) {
-				return [...status, ...reasoning];
-			}
-		}
-
-		// Walk reasoning and status entries, interleaving by position.
-		// For each reasoning block, count how many tool_calls markers appear
-		// before it — that index in `status` is where it belongs (inserted
-		// BEFORE the next status entry, since reasoning precedes the next
-		// tool call in stream order).
-		const merged: Array<(typeof status)[number] | (typeof reasoning)[number]> = [];
-		let reasoningIdx = 0;
-		for (let i = 0; i < status.length; i++) {
-			const toolOffset = toolOffsets[i];
-			while (
-				reasoningIdx < reasoning.length &&
-				(toolOffset === undefined || reasoning[reasoningIdx].contentOffset < toolOffset)
-			) {
-				merged.push(reasoning[reasoningIdx]);
-				reasoningIdx++;
-			}
-			merged.push(status[i]);
-		}
-		while (reasoningIdx < reasoning.length) {
-			merged.push(reasoning[reasoningIdx]);
-			reasoningIdx++;
-		}
-		return merged;
-	})();
+	// Merge reasoning items into statusEntries in stream order. The merge
+	// strategy depends on which protocol produced the wire data; see
+	// ``mergeHistory.ts`` for the protocol matrix. ``protocol`` is computed
+	// once and is the single source of truth for "how do we render this
+	// turn" — the dispatcher inside ``mergeStatusAndReasoning`` reads it,
+	// and Phase 3 will lift the standalone-reasoning mount onto it too.
+	$: toolOffsets = parseToolOffsets(message?.content ?? '');
+	$: protocol = detectMergeProtocol(statusEntries, reasoningItems, toolOffsets);
+	$: mergedHistory = mergeStatusAndReasoning(statusEntries, reasoningItems, toolOffsets);
 
 	// Whether at least one tool actually ran this turn. Used together with the
 	// streaming heuristic below to gate the StatusHistory dropdown:
@@ -895,9 +829,7 @@
 			<div>
 				<div class="chat-{message.role} w-full min-w-full markdown-prose">
 					<div>
-						{#if shouldShowStatusHistory}
-							<StatusHistory statusHistory={mergedHistory} />
-						{:else if reasoningItems.length > 0 && (model?.info?.meta?.capabilities?.status_updates ?? true)}
+						{#if protocol === 'reasoning_only' && (model?.info?.meta?.capabilities?.status_updates ?? true)}
 							<!-- No-tool turn (vanilla OWUI native LLM flow OR an agent
 							     turn that chose to answer without tool calls): the
 							     StatusHistory dropdown is hidden, but we still want the
@@ -917,6 +849,8 @@
 									/>
 								{/each}
 							</div>
+						{:else if shouldShowStatusHistory}
+							<StatusHistory statusHistory={mergedHistory} />
 						{/if}
 
 						{#if message?.files && message.files?.filter((f) => f.type === 'image').length > 0}
