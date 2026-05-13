@@ -164,6 +164,9 @@ data:
   ENABLE_DOCUMENT_WRITER: {{ .Values.openWebui.config.enableDocumentWriter | quote }}
   USER_PERMISSIONS_FEATURES_DOCUMENT_WRITER: {{ .Values.openWebui.config.userPermissionsFeaturesDocumentWriter | quote }}
 
+  # DOCX export
+  ENABLE_DOCX_EXPORT: {{ .Values.openWebui.config.enableDocxExport | default "true" | quote }}
+
   # MCP
   ENABLE_DIRECT_CONNECTIONS: {{ .Values.openWebui.config.enableDirectConnections | quote }}
   USER_PERMISSIONS_FEATURES_DIRECT_TOOL_SERVERS: {{ .Values.openWebui.config.userPermissionsFeaturesDirectToolServers | quote }}

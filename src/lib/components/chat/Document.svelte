@@ -5,7 +5,7 @@
 	const { saveAs } = fileSaver;
 	const i18n = getContext('i18n');
 
-	import { chatId, showControls, showDocument, documentContents } from '$lib/stores';
+	import { chatId, config, showControls, showDocument, documentContents } from '$lib/stores';
 	import { copyToClipboard } from '$lib/utils';
 	import { exportDocumentAsPdf, exportDocumentAsDocx } from '$lib/apis/utils';
 
@@ -260,14 +260,16 @@
 										{$i18n.t('PDF document (.pdf)')}
 									</div>
 								</button>
-								<button
-									class="flex gap-2 items-center px-3 py-1.5 text-sm cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-xl w-full"
-									on:click={downloadDocx}
-								>
-									<div class="flex items-center line-clamp-1">
-										{$i18n.t('Word document (.docx)')}
-									</div>
-								</button>
+							{#if $config?.features?.enable_docx_export ?? true}
+									<button
+										class="flex gap-2 items-center px-3 py-1.5 text-sm cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-xl w-full"
+										on:click={downloadDocx}
+									>
+										<div class="flex items-center line-clamp-1">
+											{$i18n.t('Word document (.docx)')}
+										</div>
+									</button>
+							{/if}
 							</div>
 						</Dropdown>
 					</div>

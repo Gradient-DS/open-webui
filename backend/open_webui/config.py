@@ -1852,6 +1852,11 @@ FEATURE_BUILTIN_TOOLS = os.environ.get('FEATURE_BUILTIN_TOOLS', 'True').lower() 
 # PDF export: set to True to use old screenshot-based (stylized) PDF export
 USE_STYLIZED_PDF_EXPORT = os.environ.get('USE_STYLIZED_PDF_EXPORT', 'False').lower() == 'true'
 
+# DOCX export gate: when False the chat / message / Document Writer Word-download
+# buttons are hidden in the UI and the /utils/chat/docx + /utils/document/docx
+# routes refuse with 403. Used by tenants that need to exclude .docx outputs.
+ENABLE_DOCX_EXPORT = os.environ.get('ENABLE_DOCX_EXPORT', 'True').lower() == 'true'
+
 # Admin Panel Tab Feature Flags
 FEATURE_ADMIN_EVALUATIONS = os.environ.get('FEATURE_ADMIN_EVALUATIONS', 'True').lower() == 'true'
 FEATURE_ADMIN_FUNCTIONS = os.environ.get('FEATURE_ADMIN_FUNCTIONS', 'True').lower() == 'true'

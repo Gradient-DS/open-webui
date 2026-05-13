@@ -1263,17 +1263,19 @@
 													{$i18n.t('PDF document (.pdf)')}
 												</div>
 											</button>
-											<button
-												class="flex gap-2 items-center px-3 py-1.5 text-sm cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-lg select-none w-full"
-												on:click={() => {
-													downloadMessageAsDocx();
-													showDownloadMenu = false;
-												}}
-											>
-												<div class="flex items-center line-clamp-1">
-													{$i18n.t('Word document (.docx)')}
-												</div>
-											</button>
+											{#if $config?.features?.enable_docx_export ?? true}
+												<button
+													class="flex gap-2 items-center px-3 py-1.5 text-sm cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-lg select-none w-full"
+													on:click={() => {
+														downloadMessageAsDocx();
+														showDownloadMenu = false;
+													}}
+												>
+													<div class="flex items-center line-clamp-1">
+														{$i18n.t('Word document (.docx)')}
+													</div>
+												</button>
+											{/if}
 										</div>
 									</div>
 								</Dropdown>
