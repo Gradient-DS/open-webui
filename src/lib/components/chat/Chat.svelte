@@ -533,6 +533,25 @@
 				} else if (type === 'chat:tags') {
 					chat = await getChatById(localStorage.token, $chatId);
 					allTags.set(await getAllTags(localStorage.token));
+				} else if (type === 'present_ui') {
+					// [Gradient] Generative-UI directive from the agent service.
+					// Payload: { name: '<component>', props: {...} }. The
+					// PresentUIDispatcher inside ResponseMessage reads
+					// message.uiBlocks and renders the matching component.
+					if (data?.name) {
+						const block = {
+							id:
+								(typeof crypto !== 'undefined' && crypto?.randomUUID?.()) ||
+								`ui-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+							name: data.name,
+							props: data.props ?? {}
+						};
+						if (Array.isArray(message?.uiBlocks)) {
+							message.uiBlocks.push(block);
+						} else {
+							message.uiBlocks = [block];
+						}
+					}
 				} else if (type === 'source' || type === 'citation') {
 					if (data?.type === 'code_execution') {
 						// Code execution; update existing code execution by ID, or add new one.

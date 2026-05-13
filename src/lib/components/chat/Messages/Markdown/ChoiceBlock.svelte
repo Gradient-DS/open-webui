@@ -2,28 +2,24 @@
 	import { onDestroy, getContext } from 'svelte';
 	import { submitPromptSignal, choiceBlockRegistry } from '$lib/stores';
 	import type { ChoiceRegistration } from '$lib/stores';
+	import type { ChoiceProps } from '$lib/types/present_ui';
 	import Checkbox from '$lib/components/common/Checkbox.svelte';
 
 	const i18n: any = getContext('i18n');
 
-	export let id: string = '';
-	export let messageScope: string = '';
-	export let code: string = '';
-	export let done: boolean = true;
-	export let messageDone: boolean = true;
+	// Typed props arrive validated from the agent service. The
+	// PresentUIDispatcher passes ``props`` straight through — no JSON
+	// parsing, no parseError fallback, no raw-payload-as-text leak.
+	// ChoiceProps is auto-generated from the Pydantic schema (see
+	// `npm run generate:ui-schemas`).
 
-	type ChoicePayload = {
-		id: string;
-		field?: string;
-		question?: string;
-		options: string[];
-		multi?: boolean;
-		allow_freetext?: boolean;
-		skip_label?: string;
-	};
+	export let props: ChoiceProps;
+	export let blockId: string = '';
+	export let messageId: string = '';
+	export let messageDone: boolean = false;
 
-	let payload: ChoicePayload | null = null;
-	let parseError = false;
+	$: payload = props;
+	$: messageScope = messageId;
 
 	// Local UI state. For multi=false, `selection` is the picked label (or null).
 	// For multi=true, `multiSelected` holds ticked options and `selection` is comma-joined.
@@ -40,28 +36,6 @@
 
 	$: storageKey = payload ? `ui:choice:${messageScope}:${payload.id}` : null;
 	$: registryKey = payload?.id ?? null;
-
-	$: {
-		parseError = false;
-		payload = null;
-		if (done && code) {
-			try {
-				const parsed = JSON.parse(code);
-				if (
-					parsed &&
-					typeof parsed === 'object' &&
-					Array.isArray(parsed.options) &&
-					typeof parsed.id === 'string'
-				) {
-					payload = parsed as ChoicePayload;
-				} else {
-					parseError = true;
-				}
-			} catch {
-				parseError = true;
-			}
-		}
-	}
 
 	// Restore persisted answered state once payload is known.
 	$: if (payload && storageKey && !restoredFromStorage) {
@@ -252,13 +226,11 @@
 	}
 </script>
 
-{#if parseError}
-	<pre
-		class="my-2 text-xs opacity-70 whitespace-pre-wrap break-words rounded-xl border border-gray-100 dark:border-gray-800 px-3 py-2">{code}</pre>
-{:else if payload}
+{#if payload}
 	<div
 		class="my-2 rounded-2xl border border-gray-100 dark:border-gray-800 px-4 py-3"
 		data-ui-choice-id={payload.id}
+		data-block-id={blockId}
 	>
 		{#if payload.question}
 			<p class="text-sm mb-2 text-gray-800 dark:text-gray-200">{payload.question}</p>
@@ -346,25 +318,24 @@
 			</div>
 		{/if}
 
-		{#if (hasSiblings || payload.multi) && !answered}
+		{#if payload.multi && !hasSiblings && !answered}
+			<!--
+				Per-block Confirm only fires for the single-question
+				multi-select case (checkboxes within one question). In
+				a multi-block batch (``hasSiblings``) the dispatcher
+				renders a single shared Confirm at the message level.
+			-->
 			<div class="mt-3 flex items-center gap-2">
 				<button
 					type="button"
 					class="px-3 py-1.5 rounded-xl text-sm bg-black text-white dark:bg-white dark:text-black
 						transition hover:opacity-90
 						disabled:opacity-40 disabled:cursor-not-allowed"
-					disabled={!messageDone || !selection || (hasSiblings && !allHaveSelections)}
+					disabled={!messageDone || !selection}
 					on:click={confirmAll}
 				>
 					{$i18n?.t ? $i18n.t('Confirm') : 'Confirm'}
 				</button>
-				{#if hasSiblings && !allHaveSelections}
-					<span class="text-xs opacity-60">
-						{$i18n?.t
-							? $i18n.t('Answer the other questions first')
-							: 'Answer the other questions first'}
-					</span>
-				{/if}
 			</div>
 		{/if}
 
