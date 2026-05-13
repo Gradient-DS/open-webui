@@ -392,6 +392,9 @@ data:
   {{- if .Values.openWebui.config.s3EnableTagging }}
   S3_ENABLE_TAGGING: {{ .Values.openWebui.config.s3EnableTagging | quote }}
   {{- end }}
+  {{- if .Values.openWebui.config.s3VerifySsl }}
+  S3_VERIFY_SSL: {{ .Values.openWebui.config.s3VerifySsl | quote }}
+  {{- end }}
 
   # AWS SDK env vars (used by boto3 for S3). Default to values compatible with
   # S3-compatible providers that don't accept the newer AWS integrity checksums.
@@ -452,6 +455,13 @@ data:
   AGENT_API_ENABLED: "true"
   AGENT_API_BASE_URL: {{ .Values.openWebui.config.agentApiBaseUrl | quote }}
   AGENT_API_AGENTS: {{ .Values.openWebui.config.agentApiAgents | default "" | quote }}
+  {{- with .Values.openWebui.config.agentApiAgentsConfig }}
+  AGENT_API_AGENTS_CONFIG: {{ . | quote }}
+  {{- end }}
+  AGENT_API_AGENTS_CONFIG_OVERWRITE: {{ .Values.openWebui.config.agentApiAgentsConfigOverwrite | default "false" | quote }}
+  {{- with .Values.openWebui.config.agentApiPickerDefaultSlug }}
+  AGENT_API_PICKER_DEFAULT_SLUG: {{ . | quote }}
+  {{- end }}
   {{- end }}
 
   # [Gradient] Per-chat agent picker UI (Settings → Agents admin tab +

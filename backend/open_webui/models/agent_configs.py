@@ -257,6 +257,88 @@ class AgentConfigsTable:
             db.commit()
             return self.list_all(db=db)
 
+    def seed_from_env(
+        self,
+        env_configs: list[dict],
+        valid_slugs: list[str],
+        overwrite: bool = False,
+        db: Optional[Session] = None,
+    ) -> tuple[int, int, int]:
+        """Seed agent_config rows from env-supplied defaults.
+
+        For each entry in ``env_configs`` whose ``slug`` is in
+        ``valid_slugs``:
+          - if no DB row exists, insert one
+          - if a row exists and ``overwrite`` is true, update it
+          - otherwise skip (admin edits in the panel win by default)
+
+        Access grants are never seeded — they depend on per-deployment
+        user/group ids that don't exist at deploy time.
+
+        :param env_configs: Parsed AGENT_API_AGENTS_CONFIG list.
+        :param valid_slugs: AGENT_API_AGENTS — entries with a slug not
+            in this list are skipped (cannot be marked active otherwise).
+        :return: ``(inserted, updated, skipped)`` for logging.
+        """
+        inserted = updated = skipped = 0
+        valid = set(valid_slugs)
+        with get_db_context(db) as db:
+            now = int(time.time())
+            for raw in env_configs:
+                if not isinstance(raw, dict):
+                    log.warning('AGENT_API_AGENTS_CONFIG entry is not an object, skipping: %r', raw)
+                    skipped += 1
+                    continue
+                slug = (raw.get('slug') or '').strip()
+                name = (raw.get('name') or '').strip()
+                if not slug or not name:
+                    log.warning("AGENT_API_AGENTS_CONFIG entry missing 'slug' or 'name', skipping: %r", raw)
+                    skipped += 1
+                    continue
+                if slug not in valid:
+                    log.warning('AGENT_API_AGENTS_CONFIG entry %r not in AGENT_API_AGENTS, skipping', slug)
+                    skipped += 1
+                    continue
+
+                row = db.query(AgentConfig).filter_by(id=slug).first()
+                if row is None:
+                    if 'position' in raw:
+                        position = int(raw['position'])
+                    else:
+                        current_max = db.query(func.max(AgentConfig.position)).scalar()
+                        position = (int(current_max) + 1) if current_max is not None else 0
+                    row = AgentConfig(
+                        id=slug,
+                        user_id=None,
+                        name=name,
+                        description=raw.get('description'),
+                        profile_image_url=raw.get('profile_image_url'),
+                        cta_copy=raw.get('cta_copy'),
+                        is_active=bool(raw.get('is_active', False)),
+                        is_beta=bool(raw.get('is_beta', True)),
+                        meta={},
+                        position=position,
+                        created_at=now,
+                        updated_at=now,
+                    )
+                    db.add(row)
+                    inserted += 1
+                elif overwrite:
+                    row.name = name
+                    row.description = raw.get('description')
+                    row.profile_image_url = raw.get('profile_image_url')
+                    row.cta_copy = raw.get('cta_copy')
+                    row.is_active = bool(raw.get('is_active', row.is_active))
+                    row.is_beta = bool(raw.get('is_beta', row.is_beta))
+                    if 'position' in raw:
+                        row.position = int(raw['position'])
+                    row.updated_at = now
+                    updated += 1
+                else:
+                    skipped += 1
+            db.commit()
+        return inserted, updated, skipped
+
     def user_has_access(
         self,
         user_id: str,

@@ -465,6 +465,32 @@ openWebui:
     # default_agent. When set, the admin's selection is forwarded as an
     # override hint in the payload.
     agentApiAgents: ""
+    # [Gradient] Optional JSON array of default agent configs to seed at
+    # startup. Each entry must include ``slug`` (must appear in
+    # agentApiAgents) and ``name``. Optional fields: description, cta_copy,
+    # profile_image_url, is_active (default false), is_beta (default true),
+    # position. Existing rows in the DB are preserved unless
+    # agentApiAgentsConfigOverwrite is true. ``access_grants`` are NOT
+    # seedable — set them via the admin panel.
+    # Example:
+    #   agentApiAgentsConfig: |
+    #     [
+    #       {"slug": "soev_chat_autonomous", "name": "Soev.ai — autonomous",
+    #        "description": "Autonomous knowledge assistant", "is_active": true},
+    #       {"slug": "soev_chat_manual", "name": "Soev.ai — manual tools",
+    #        "is_active": true, "position": 1}
+    #     ]
+    agentApiAgentsConfig: ""
+    # When true, agent_config rows in the DB are overwritten on every boot
+    # with the env values — admin edits will not persist. Use only when env
+    # should be the source of truth.
+    agentApiAgentsConfigOverwrite: "false"
+    # [Gradient] User-facing default agent for the new-chat empty state.
+    # When set to a slug in agentApiAgents, the agent picker pre-selects
+    # that card on first load (no localStorage pick yet). Empty = no
+    # pre-selection. Distinct from the admin override hint forwarded to
+    # the agents service (set via Admin → External Agents).
+    agentApiPickerDefaultSlug: ""
     # [Gradient] Master kill switch for the per-chat agent picker UI
     # (Settings → Agents admin tab + new-chat empty-state cards).
     # Layered on top of agentApiEnabled — both must be true for users to
@@ -540,6 +566,11 @@ openWebui:
     s3EndpointUrl: ""             # For S3-compatible storage (e.g., https://object.previder.nl)
     s3KeyPrefix: ""               # Optional prefix for all keys
     s3EnableTagging: "false"
+    # Set to "false" only when the S3 endpoint presents a non-validating cert
+    # (e.g. self-signed without IP SAN). Empty/unset preserves boto3's default
+    # verification. Used on nebul-prod where the NetApp ONTAP MinIO front
+    # cert has no SAN matching 10.0.17.31.
+    s3VerifySsl: ""
 
     # Easter Eggs (disabled)
     enableEasterEggs: "false"

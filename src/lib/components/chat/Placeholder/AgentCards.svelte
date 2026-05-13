@@ -29,6 +29,18 @@
 		} finally {
 			loaded = true;
 		}
+
+		// Admin-configured default for the picker on first load. Only kicks
+		// in when the user has no localStorage pick yet and the configured
+		// slug is actually visible to them (active + has access).
+		const defaultSlug = $config?.features?.agent_picker_default_slug;
+		if (
+			defaultSlug &&
+			$pendingAgentId === null &&
+			agents.some((a) => a.id === defaultSlug)
+		) {
+			pendingAgentId.set(defaultSlug);
+		}
 	});
 
 	const startChatWithAgent = async (agentId: string) => {

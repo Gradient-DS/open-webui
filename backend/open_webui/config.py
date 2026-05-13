@@ -938,6 +938,10 @@ S3_ENDPOINT_URL = os.environ.get('S3_ENDPOINT_URL', None)
 S3_USE_ACCELERATE_ENDPOINT = os.environ.get('S3_USE_ACCELERATE_ENDPOINT', 'false').lower() == 'true'
 S3_ADDRESSING_STYLE = os.environ.get('S3_ADDRESSING_STYLE', None)
 S3_ENABLE_TAGGING = os.getenv('S3_ENABLE_TAGGING', 'false').lower() == 'true'
+# When the S3 endpoint serves a self-signed or otherwise non-validating cert
+# (e.g. nebul-prod's NetApp ONTAP MinIO front, which has no IP SAN), set this
+# to "false" to skip TLS verification entirely. Default preserves verification.
+S3_VERIFY_SSL = os.getenv('S3_VERIFY_SSL', 'true').lower() == 'true'
 
 GCS_BUCKET_NAME = os.environ.get('GCS_BUCKET_NAME', None)
 GOOGLE_APPLICATION_CREDENTIALS_JSON = os.environ.get('GOOGLE_APPLICATION_CREDENTIALS_JSON', None)
@@ -3422,6 +3426,19 @@ AGENT_API_SELECTED_AGENT = PersistentConfig(
     'AGENT_API_SELECTED_AGENT',
     'agent_api.selected_agent',
     _default_selected_agent,
+)
+
+# [Gradient] User-facing default for the agent picker on the new-chat
+# empty state. When set to a slug, the AgentCards component pre-selects
+# that card on first load (when the user has no localStorage pick yet).
+# Empty = no pre-selection (vanilla model picker stays the default).
+# Distinct from AGENT_API_SELECTED_AGENT — that one is an admin override
+# hint forwarded to the external agents service; this one only affects
+# the picker UI default for new users / fresh devices.
+AGENT_API_PICKER_DEFAULT_SLUG = PersistentConfig(
+    'AGENT_API_PICKER_DEFAULT_SLUG',
+    'agent_api.picker_default_slug',
+    os.environ.get('AGENT_API_PICKER_DEFAULT_SLUG', '').strip(),
 )
 
 

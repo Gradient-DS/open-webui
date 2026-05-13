@@ -7,9 +7,14 @@
 
 	export let status = null;
 	export let done = false;
+	// StatusHistory is now the canonical display surface for tool activity, so
+	// hidden=true entries (tool starts that used to be redundant with the
+	// inline <details type="tool_calls"> marker) should still render here.
+	// Callers set this to bypass the legacy `hidden` filter.
+	export let forceVisible = false;
 </script>
 
-{#if !status?.hidden}
+{#if forceVisible || !status?.hidden}
 	<div class="status-description flex items-center gap-2 py-0.5 w-full text-left">
 		{#if (status?.action === 'web_search' || status?.action === 'fetch_url') && (status?.urls || status?.items)}
 			<WebSearchResults {status}>
