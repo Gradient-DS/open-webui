@@ -308,6 +308,11 @@ openWebui:
     enableDocumentWriter: "false"
     userPermissionsFeaturesDocumentWriter: "false"
 
+    # DOCX export (chat / message / document Word downloads) — enabled by default;
+    # set "false" per tenant to hide all .docx download buttons AND return 403
+    # from /utils/chat/docx and /utils/document/docx.
+    enableDocxExport: "true"
+
     # MCP/Tool Servers (disabled)
     enableDirectConnections: "false"
     userPermissionsFeaturesDirectToolServers: "false"
