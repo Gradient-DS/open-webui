@@ -2114,7 +2114,7 @@
   "The width in pixels to compress images to. Leave empty for no compression.": "De breedte in pixels waarnaar afbeeldingen gecomprimeerd worden. Laat leeg voor geen compressie.",
   "Theme": "Thema",
   "There was an error syncing your stats. Please try again.": "Er is een fout opgetreden bij het synchroniseren van je statistieken. Probeer het opnieuw.",
-  "Thinking...": "Aan het denken...",
+  "Thinking...": "Nadenken...",
   "This action cannot be undone. Do you wish to continue?": "Deze actie kan niet ongedaan worden gemaakt. Wilt u doorgaan?",
   "This channel was created on {{createdAt}}. This is the very beginning of the {{channelName}} channel.": "Dit kanaal is aangemaakt op {{createdAt}}. Dit is het begin van het kanaal {{channelName}}.",
   "This chat is bound to an agent": "Deze chat is verbonden aan een agent",

@@ -42,10 +42,21 @@
 	$: isDone = attributes?.done === 'true';
 	$: durationN = Number(attributes?.duration ?? '0');
 
+	// open-webui's middleware hardcodes "<summary>Thinking…</summary>" (with a
+	// Unicode horizontal ellipsis) on in-progress reasoning blocks
+	// (`middleware.py:490`). That literal English string would bypass our
+	// i18n if treated as a model-provided summary, so we recognize it as a
+	// placeholder and route to the translation key instead.
+	const _MIDDLEWARE_PLACEHOLDERS = new Set(['Thinking…', 'Thinking...']);
+
 	$: label = (() => {
 		// Match Collapsible.svelte's i18n keys so existing translations cover us.
 		if (!isDone) {
-			return summary?.trim().length ? summary : $i18n.t('Thinking...');
+			const s = summary?.trim() ?? '';
+			if (!s || _MIDDLEWARE_PLACEHOLDERS.has(s)) {
+				return $i18n.t('Thinking...');
+			}
+			return s;
 		}
 		if (durationN < 1) {
 			return $i18n.t('Thought for less than a second');

@@ -452,6 +452,10 @@ data:
   AGENT_API_ENABLED: "true"
   AGENT_API_BASE_URL: {{ .Values.openWebui.config.agentApiBaseUrl | quote }}
   AGENT_API_AGENTS: {{ .Values.openWebui.config.agentApiAgents | default "" | quote }}
+  {{- with .Values.openWebui.config.agentApiAgentsConfig }}
+  AGENT_API_AGENTS_CONFIG: {{ . | quote }}
+  {{- end }}
+  AGENT_API_AGENTS_CONFIG_OVERWRITE: {{ .Values.openWebui.config.agentApiAgentsConfigOverwrite | default "false" | quote }}
   {{- end }}
 
   # [Gradient] Per-chat agent picker UI (Settings → Agents admin tab +

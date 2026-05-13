@@ -22,7 +22,29 @@
 	let status = null;
 
 	$: if (history && history.length > 0) {
-		status = history.at(-1);
+		// Prefer the last entry as the dropdown header BUT skip past a
+		// completed reasoning bullet — "X bronnen opgehaald" is more
+		// informative than "Dacht N seconden" once thinking has finished.
+		// While reasoning is in_progress (``attributes.done !== 'true'``),
+		// keep it as header so the spinner/shimmer signals to the user
+		// that the model is still thinking. ChatAgent flows are unaffected
+		// because the last entry is always the post-loop summary status
+		// (not a reasoning bullet).
+		const last = history.at(-1);
+		const lastIsDoneReasoning =
+			last?.kind === 'reasoning' && last?.attributes?.done === 'true';
+		if (lastIsDoneReasoning) {
+			let lastNonReasoning = null;
+			for (let i = history.length - 1; i >= 0; i--) {
+				if (history[i]?.kind !== 'reasoning') {
+					lastNonReasoning = history[i];
+					break;
+				}
+			}
+			status = lastNonReasoning ?? last;
+		} else {
+			status = last;
+		}
 	}
 
 	$: if (

@@ -67,6 +67,7 @@
 	import { flyAndScale } from '$lib/utils/transitions';
 	import RegenerateMenu from './ResponseMessage/RegenerateMenu.svelte';
 	import StatusHistory from './ResponseMessage/StatusHistory.svelte';
+	import ReasoningBullet from './ResponseMessage/StatusHistory/ReasoningBullet.svelte';
 	import FullHeightIframe from '$lib/components/common/FullHeightIframe.svelte';
 
 	interface MessageType {
@@ -255,6 +256,42 @@
 			toolOffsets.push(tm.index);
 		}
 
+		// Vanilla OWUI flows (and any non-ChatAgent path) don't emit the
+		// inline ``<details type="tool_calls">`` marker, so we have no
+		// stream-position anchor to interleave reasoning with status entries.
+		// Place reasoning AFTER the status entries — including while it's
+		// still in-progress during streaming — so tool/retrieval bullets
+		// read top-to-bottom in chronological order and the trailing
+		// "thought" bullet represents the accumulated thinking right
+		// before the answer. ``StatusHistory.svelte``'s header logic
+		// prefers the last non-reasoning entry, so the dropdown summary
+		// still reflects the most recent action.
+		//
+		// The agent's pre-marker window is the exception: when a
+		// ``hidden=true && done=false`` tool-start status is present, we
+		// fall through to the standard zip below (see comment inside the
+		// branch). Once the marker arrives the agent flow no longer
+		// enters this branch (toolOffsets becomes non-empty).
+		if (toolOffsets.length === 0 && status.length > 0) {
+			// ChatAgent emits ``hidden=true && done=false`` on tool-start
+			// status entries (``_dispatch_tool_status`` in
+			// ``agents/flows/core/agent.py``). When we see one, we're in
+			// the agent's pre-marker window — the LLM may have already
+			// emitted a content chunk that prematurely closed the
+			// reasoning, but the inline_tool_marker is in flight. Let the
+			// standard zip run below to place reasoning BEFORE the tool
+			// status (matching the multi-tool agent UX). Vanilla OWUI's
+			// ``knowledge_search`` is ``hidden=true`` but ``done=true``
+			// (one-shot, no marker follows), and its ``web_search``
+			// emits ``hidden=false``, so neither flips this signal.
+			const hasPendingAgentTool = status.some(
+				(s) => s.hidden === true && s.done === false
+			);
+			if (!hasPendingAgentTool) {
+				return [...status, ...reasoning];
+			}
+		}
+
 		// Walk reasoning and status entries, interleaving by position.
 		// For each reasoning block, count how many tool_calls markers appear
 		// before it — that index in `status` is where it belongs (inserted
@@ -289,8 +326,14 @@
 	$: hasToolCalls = statusEntries.some(
 		(s) => s?.action && s.action !== 'reasoning_step'
 	);
+	// Only status entries gate the StatusHistory dropdown during streaming.
+	// Reasoning-only turns are handled by the standalone ReasoningBullet
+	// path further below — counting reasoning here would cause both paths to
+	// render at once (double pill), and would force a visual jump from
+	// standalone to dropdown the moment the first status event arrives in a
+	// tool turn.
 	$: streamingHasActivity =
-		!(message?.done ?? false) && (statusEntries.length > 0 || reasoningItems.length > 0);
+		!(message?.done ?? false) && statusEntries.length > 0;
 	$: shouldShowStatusHistory =
 		(model?.info?.meta?.capabilities?.status_updates ?? true) &&
 		(hasToolCalls || streamingHasActivity) &&
@@ -854,6 +897,26 @@
 					<div>
 						{#if shouldShowStatusHistory}
 							<StatusHistory statusHistory={mergedHistory} />
+						{:else if reasoningItems.length > 0 && (model?.info?.meta?.capabilities?.status_updates ?? true)}
+							<!-- No-tool turn (vanilla OWUI native LLM flow OR an agent
+							     turn that chose to answer without tool calls): the
+							     StatusHistory dropdown is hidden, but we still want the
+							     model's reasoning to be visible and inspectable.
+							     Renders the reasoning blocks as standalone expanders —
+							     same ReasoningBullet component the dropdown uses
+							     internally, so chevron + slide body + i18n labels are
+							     preserved. Stays clickable mid-stream (Bug #3) and
+							     persists after streaming (Bug #2). -->
+							<div class="flex flex-col gap-1 my-1">
+								{#each reasoningItems as item, idx (item.contentOffset)}
+									<ReasoningBullet
+										id={`standalone-reasoning-${idx}`}
+										summary={item.summary}
+										body={item.body}
+										attributes={item.attributes ?? {}}
+									/>
+								{/each}
+							</div>
 						{/if}
 
 						{#if message?.files && message.files?.filter((f) => f.type === 'image').length > 0}

@@ -850,6 +850,31 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         log.warning(f'External agents loading skipped or failed: {e}')
 
+    # [Gradient] Seed agent_config defaults from AGENT_API_AGENTS_CONFIG env so
+    # ops can pre-configure agents in deployments where the admin panel isn't
+    # reachable. Existing rows are preserved unless OVERWRITE is true.
+    try:
+        from open_webui.env import (
+            AGENT_API_AGENTS,
+            AGENT_API_AGENTS_CONFIG,
+            AGENT_API_AGENTS_CONFIG_OVERWRITE,
+        )
+
+        if AGENT_API_AGENTS_CONFIG:
+            inserted, updated, skipped = AgentConfigs.seed_from_env(
+                AGENT_API_AGENTS_CONFIG,
+                AGENT_API_AGENTS,
+                overwrite=AGENT_API_AGENTS_CONFIG_OVERWRITE,
+            )
+            log.info(
+                'Seeded agent_config from env: inserted=%d, updated=%d, skipped=%d',
+                inserted,
+                updated,
+                skipped,
+            )
+    except Exception as e:
+        log.warning(f'Failed to seed agent_config from env: {e}')
+
     app.state.redis = get_redis_connection(
         redis_url=REDIS_URL,
         redis_sentinels=get_sentinels_from_env(REDIS_SENTINEL_HOSTS, REDIS_SENTINEL_PORT),
