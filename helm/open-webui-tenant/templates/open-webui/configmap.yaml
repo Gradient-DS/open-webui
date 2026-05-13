@@ -392,6 +392,9 @@ data:
   {{- if .Values.openWebui.config.s3EnableTagging }}
   S3_ENABLE_TAGGING: {{ .Values.openWebui.config.s3EnableTagging | quote }}
   {{- end }}
+  {{- if .Values.openWebui.config.s3VerifySsl }}
+  S3_VERIFY_SSL: {{ .Values.openWebui.config.s3VerifySsl | quote }}
+  {{- end }}
 
   # AWS SDK env vars (used by boto3 for S3). Default to values compatible with
   # S3-compatible providers that don't accept the newer AWS integrity checksums.

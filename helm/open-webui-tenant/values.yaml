@@ -566,6 +566,11 @@ openWebui:
     s3EndpointUrl: ""             # For S3-compatible storage (e.g., https://object.previder.nl)
     s3KeyPrefix: ""               # Optional prefix for all keys
     s3EnableTagging: "false"
+    # Set to "false" only when the S3 endpoint presents a non-validating cert
+    # (e.g. self-signed without IP SAN). Empty/unset preserves boto3's default
+    # verification. Used on nebul-prod where the NetApp ONTAP MinIO front
+    # cert has no SAN matching 10.0.17.31.
+    s3VerifySsl: ""
 
     # Easter Eggs (disabled)
     enableEasterEggs: "false"

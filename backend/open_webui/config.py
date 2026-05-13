@@ -938,6 +938,10 @@ S3_ENDPOINT_URL = os.environ.get('S3_ENDPOINT_URL', None)
 S3_USE_ACCELERATE_ENDPOINT = os.environ.get('S3_USE_ACCELERATE_ENDPOINT', 'false').lower() == 'true'
 S3_ADDRESSING_STYLE = os.environ.get('S3_ADDRESSING_STYLE', None)
 S3_ENABLE_TAGGING = os.getenv('S3_ENABLE_TAGGING', 'false').lower() == 'true'
+# When the S3 endpoint serves a self-signed or otherwise non-validating cert
+# (e.g. nebul-prod's NetApp ONTAP MinIO front, which has no IP SAN), set this
+# to "false" to skip TLS verification entirely. Default preserves verification.
+S3_VERIFY_SSL = os.getenv('S3_VERIFY_SSL', 'true').lower() == 'true'
 
 GCS_BUCKET_NAME = os.environ.get('GCS_BUCKET_NAME', None)
 GOOGLE_APPLICATION_CREDENTIALS_JSON = os.environ.get('GOOGLE_APPLICATION_CREDENTIALS_JSON', None)
