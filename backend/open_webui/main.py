@@ -2226,6 +2226,15 @@ async def chat_completion(
             },
         }
 
+        # [Gradient] Forward frontend's UI locale hint to the agent service via metadata.
+        # The chat frontend sets ``body.metadata.user_language = $i18n.language`` so the
+        # agent can localize chrome (summary pill, status descriptions) to match the
+        # user's UI locale. Pull from the incoming body.metadata; safe no-op when the
+        # field is absent (non-agent providers ignore unknown metadata).
+        incoming_metadata = form_data.get('metadata') or {}
+        if incoming_metadata.get('user_language'):
+            metadata['user_language'] = incoming_metadata['user_language']
+
         if metadata.get('chat_id') and user:
             if not metadata['chat_id'].startswith('local:'):  # temporary chats are not stored
                 # Verify chat ownership — lightweight EXISTS check avoids
