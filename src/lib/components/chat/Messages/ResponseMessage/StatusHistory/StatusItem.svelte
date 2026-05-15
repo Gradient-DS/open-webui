@@ -4,6 +4,7 @@
 	import WebSearchResults from '../WebSearchResults.svelte';
 	import Search from '$lib/components/icons/Search.svelte';
 	import { t } from 'i18next';
+	import { statusI18nParams } from './statusI18nParams';
 
 	export let status = null;
 	export let done = false;
@@ -138,19 +139,35 @@
 						? 'shimmer'
 						: ''} text-gray-500 dark:text-gray-500 text-base line-clamp-1 text-wrap"
 				>
-					<!-- $i18n.t(`Searching "{{searchQuery}}"`) -->
-					{#if status?.description?.includes('{{searchQuery}}')}
-						{$i18n.t(status?.description, {
-							searchQuery: status?.query
-						})}
-					{:else if status?.description === 'No search query generated'}
-						{$i18n.t('No search query generated')}
-					{:else if status?.description === 'Generating search query'}
-						{$i18n.t('Generating search query')}
-					{:else if status?.description === 'Searching the web'}
-						{$i18n.t('Searching the web')}
-					{:else}
-						{status?.description}
+					<!-- Parser hints for translation keys emitted by the agent under emit_translatable_status=true. -->
+					<!-- $i18n.t("Searching {{collection_name}} for \"{{query}}\"...") -->
+					<!-- $i18n.t("Searching {{doc_title}} for \"{{query}}\"...") -->
+					<!-- $i18n.t("Finding documents in {{collection_name}} for \"{{query}}\"...") -->
+					<!-- $i18n.t("Listing documents in {{collection_name}}...") -->
+					<!-- $i18n.t("Searching knowledge bases for \"{{query}}\"...") -->
+					<!-- $i18n.t("Reading {{doc_title}}...") -->
+					<!-- $i18n.t("Summarizing {{doc_title}}...") -->
+					<!-- $i18n.t("Asking user...") -->
+					<!-- $i18n.t("Searching the web for \"{{query}}\"...") -->
+					<!-- $i18n.t("Fetching web pages...") -->
+					<!-- $i18n.t("Searching the Groene Kennisnet knowledge base for \"{{query}}\"...") -->
+					<!-- $i18n.t("Fetching and reading web pages...") -->
+					<!-- $i18n.t("Researching files for \"{{query}}\"...") -->
+					<!-- $i18n.t("Researching the web for \"{{query}}\"...") -->
+					<!-- $i18n.t("{{count}} results in {{source}}") -->
+					<!-- $i18n.t("Searches planned") -->
+					<!-- $i18n.t("Analyzing the question...") -->
+					<!-- $i18n.t("Planning the search strategy...") -->
+					<!-- $i18n.t("Searching the documents...") -->
+					<!-- $i18n.t("Assessing the gathered information...") -->
+					{#if status?.description}
+						{$i18n.t(
+							status.description,
+							/* statusI18nParams handles `query` filtering — but `query` is also a
+							   placeholder in many templates, so we manually re-add it here from
+							   the reserved field on the status. */
+							{ ...statusI18nParams(status), query: status?.query }
+						)}
 					{/if}
 				</div>
 			</div>
