@@ -154,6 +154,20 @@ describe('detectMergeProtocol', () => {
 		expect(detectMergeProtocol([], [reasoning(0)], [])).toBe('reasoning_only');
 	});
 
+	it('returns reasoning_only when only non-tool status entries are present', () => {
+		// Agent runner's budget-warning emission (``runner.py:725-726``)
+		// publishes ``StatusUpdate(description=..., done=True)`` with no
+		// ``action`` field. Without this branch the status entry traps the
+		// reasoning inside an invisible dropdown (``hasToolCalls=false`` →
+		// StatusHistory hides after done) and ``reasoning_only`` was never
+		// reached because ``statusEntries.length > 0``. We must still mount
+		// standalone ReasoningBullets in that case.
+		const s = [
+			{ description: 'De gespreksgeschiedenis is te lang…', done: true } as StatusEntry
+		];
+		expect(detectMergeProtocol(s, [reasoning(0)], [])).toBe('reasoning_only');
+	});
+
 	it('returns status_first for empty status AND empty reasoning (output is empty either way)', () => {
 		expect(detectMergeProtocol([], [], [])).toBe('status_first');
 	});

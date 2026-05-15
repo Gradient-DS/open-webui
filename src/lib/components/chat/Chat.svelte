@@ -116,6 +116,7 @@
 	import { showRagFilter } from '$lib/stores/rag-filter';
 	import { getRagFilterForRequest } from '$lib/utils/rag-filter';
 	import ConversationFeedback from '$lib/components/chat/ConversationFeedback.svelte';
+	import ContextUsageBanner from '$lib/components/chat/ContextUsageBanner.svelte';
 	import RagFilterPanel from './RagFilterPanel.svelte';
 
 	export let chatIdProp = '';
@@ -184,6 +185,12 @@
 
 	let taskIds = null;
 
+	// [Gradient] Post-turn context-budget estimate from the agent service.
+	// Emitted once per turn over Socket.IO (see backend/utils/agent.py).
+	// Drives the banner above the chat input. Reset on chat switch / new chat.
+	let contextUsage: { tokens_used: number; tokens_budget: number; fraction: number } | null =
+		null;
+
 	// Chat Input
 	let prompt = '';
 	let chatFiles = [];
@@ -206,6 +213,7 @@
 		webSearchEnabled = false;
 		imageGenerationEnabled = false;
 		acceptedDataWarnings = new Set();
+		contextUsage = null;
 
 		const storageChatInput = sessionStorage.getItem(
 			`chat-input${chatIdProp ? `-${chatIdProp}` : ''}`
@@ -551,6 +559,21 @@
 						} else {
 							message.uiBlocks = [block];
 						}
+					}
+				} else if (type === 'context_usage') {
+					// [Gradient] Post-turn context-budget estimate from the agent
+					// service. Overwrites the per-conversation value; the banner
+					// above the chat input renders when fraction >= 0.7.
+					if (
+						typeof data?.tokens_used === 'number' &&
+						typeof data?.tokens_budget === 'number' &&
+						typeof data?.fraction === 'number'
+					) {
+						contextUsage = {
+							tokens_used: data.tokens_used,
+							tokens_budget: data.tokens_budget,
+							fraction: data.fraction
+						};
 					}
 				} else if (type === 'source' || type === 'citation') {
 					if (data?.type === 'code_execution') {
@@ -1191,6 +1214,7 @@
 		// the previous chat) doesn't bleed into the empty-state Navbar.
 		chat = null;
 		acceptedDataWarnings = new Set();
+		contextUsage = null;
 		if ($user?.role !== 'admin' && $user?.permissions?.chat?.temporary_enforced) {
 			await temporaryChatEnabled.set(true);
 		}
@@ -3191,6 +3215,8 @@
 									(m) => m.role === 'assistant'
 								).length}
 							/>
+
+							<ContextUsageBanner usage={contextUsage} />
 
 							<div class=" pb-2 {dragged ? 'z-0' : 'z-10'}">
 								<MessageInput

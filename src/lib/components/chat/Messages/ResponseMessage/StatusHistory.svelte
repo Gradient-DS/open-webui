@@ -77,7 +77,11 @@
 						asHeader={true}
 					/>
 				{:else}
-					<StatusItem {status} forceVisible={true} />
+					<StatusItem
+						{status}
+						forceVisible={true}
+						asHeader={history.length > 1}
+					/>
 				{/if}
 			</div>
 		</button>

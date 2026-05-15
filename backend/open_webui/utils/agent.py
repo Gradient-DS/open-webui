@@ -27,6 +27,9 @@ SSE protocol from agent:
         event: present_ui
         data: {"name": "choice", "props": {...}}
 
+        event: context_usage
+        data: {"tokens_used": int, "tokens_budget": int, "fraction": float}
+
     Standard OpenAI chunks (passed through to process_chat_response):
         data: {"choices": [{"delta": {"content": "..."}}]}
 
@@ -408,6 +411,24 @@ def _build_streaming_response(
                             )
                         except Exception as e:
                             log.warning(f'Error emitting present_ui event: {e}')
+                    continue
+
+                if sse_event.event_type == 'context_usage':
+                    # [Gradient] Post-turn context-budget estimate from the
+                    # agent service. Payload shape:
+                    # {"tokens_used": int, "tokens_budget": int, "fraction": float}.
+                    # The frontend renders a banner above the chat input when
+                    # fraction crosses a threshold.
+                    if event_emitter:
+                        try:
+                            await event_emitter(
+                                {
+                                    'type': 'context_usage',
+                                    'data': sse_event.data,
+                                }
+                            )
+                        except Exception as e:
+                            log.warning(f'Error emitting context_usage event: {e}')
                     continue
 
                 # Standard OpenAI chunk — pass through as SSE data line

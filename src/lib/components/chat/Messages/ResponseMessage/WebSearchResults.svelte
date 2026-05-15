@@ -5,6 +5,11 @@
 	import Collapsible from '$lib/components/common/Collapsible.svelte';
 
 	export let status = { urls: [], query: '' };
+	// When rendered inside StatusHistory's collapsed-view toggle button, the
+	// inner Collapsible would swallow the parent click via stopPropagation.
+	// In header position, render the favicon stack + label statically so the
+	// parent button receives the click and toggles the full status list.
+	export let asHeader = false;
 	let state = false;
 
 	// Favicon stack preview in the collapsed header. Show up to 5 stacked,
@@ -20,6 +25,32 @@
 	$: previewOverflow = Math.max(0, previewLinks.length - MAX_PREVIEW);
 </script>
 
+{#if asHeader}
+	<div class="w-full">
+		<div class="flex items-center gap-2 text-gray-500 transition">
+			{#if previewVisible.length > 0}
+				<div class="flex items-center -space-x-2 shrink-0" aria-hidden="true">
+					{#each previewVisible as link (link)}
+						<img
+							src="https://www.google.com/s2/favicons?sz=32&domain={link}"
+							alt=""
+							class="size-5 rounded-full ring-1 ring-white dark:ring-gray-900 bg-white dark:bg-gray-900 object-contain"
+							loading="lazy"
+						/>
+					{/each}
+					{#if previewOverflow > 0}
+						<div
+							class="size-5 rounded-full ring-1 ring-white dark:ring-gray-900 bg-gray-200 dark:bg-gray-800 text-[10px] leading-none font-medium text-gray-700 dark:text-gray-300 flex items-center justify-center"
+						>
+							+{previewOverflow}
+						</div>
+					{/if}
+				</div>
+			{/if}
+			<slot />
+		</div>
+	</div>
+{:else}
 <Collapsible grow={true} className="w-full" buttonClassName="w-full" bind:open={state}>
 	<div class="flex items-center gap-2 text-gray-500 transition">
 		{#if previewVisible.length > 0}
@@ -170,3 +201,4 @@
 		{/if}
 	</div>
 </Collapsible>
+{/if}

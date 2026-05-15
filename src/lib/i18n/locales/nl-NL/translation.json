@@ -2533,6 +2533,9 @@
   "{{label}} sync started": "{{label}} synchronisatie gestart",
   "{{modelName}} profile image": "Profielafbeelding van {{modelName}}",
   "{{model}} download has been canceled": "Download van {{model}} is geannuleerd",
+  "{{percentage}}% of the context window used — older context will be summarized on your next message. For the best results on a new topic, start a new chat.": "{{percentage}}% van het contextvenster gebruikt — oudere context wordt bij je volgende bericht samengevat. Voor de beste resultaten bij een nieuw onderwerp, start een nieuw gesprek.",
+  "{{percentage}}% of the context window used. Start a new chat for unrelated topics.": "{{percentage}}% van het contextvenster gebruikt. Voor nieuwe onderwerpen kun je beter een nieuw gesprek starten.",
+  "{{percentage}}% of the context window used.": "{{percentage}}% van het contextvenster gebruikt.",
   "{{user}}'s Chats": "{{user}}'s chats",
   "{{webUIName}} Backend Required": "{{webUIName}} Backend verplicht"
 }

@@ -12,12 +12,16 @@
 	// inline <details type="tool_calls"> marker) should still render here.
 	// Callers set this to bypass the legacy `hidden` filter.
 	export let forceVisible = false;
+	// Set when this item is the header inside StatusHistory's collapsed-view
+	// toggle button. Suppresses any nested expandable so the parent button
+	// remains the sole click target.
+	export let asHeader = false;
 </script>
 
 {#if forceVisible || !status?.hidden}
 	<div class="status-description flex items-center gap-2 py-0.5 w-full text-left">
 		{#if (status?.action === 'web_search' || status?.action === 'fetch_url') && (status?.urls || status?.items)}
-			<WebSearchResults {status}>
+			<WebSearchResults {status} {asHeader}>
 				<div class="flex flex-col justify-center -space-y-0.5">
 					<div
 						class="{(done || status?.done) === false

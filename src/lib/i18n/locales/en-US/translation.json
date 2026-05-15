@@ -2533,6 +2533,9 @@
   "{{label}} sync started": "",
   "{{modelName}} profile image": "",
   "{{model}} download has been canceled": "",
+  "{{percentage}}% of the context window used — older context will be summarized on your next message. For the best results on a new topic, start a new chat.": "",
+  "{{percentage}}% of the context window used. Start a new chat for unrelated topics.": "",
+  "{{percentage}}% of the context window used.": "",
   "{{user}}'s Chats": "",
   "{{webUIName}} Backend Required": ""
 }

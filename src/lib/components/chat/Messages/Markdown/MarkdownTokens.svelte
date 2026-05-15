@@ -400,7 +400,7 @@
 					{#if detailToken?.attributes?.type === 'document'}
 						<DocumentCard
 							id={`${id}-${tokenIdx}-${detailIdx}-doc`}
-							title={detailToken?.attributes?.title ?? detailToken.summary ?? ''}
+							title={decode(detailToken?.attributes?.title ?? detailToken.summary ?? '')}
 							markdown={decode(detailToken?.text ?? '')}
 							done={detailToken?.attributes?.done !== 'false'}
 							messageDone={done}
@@ -467,7 +467,7 @@
 		{:else if token?.attributes?.type === 'document'}
 			<DocumentCard
 				id={`${id}-${tokenIdx}-doc`}
-				title={token?.attributes?.title ?? token.summary ?? ''}
+				title={decode(token?.attributes?.title ?? token.summary ?? '')}
 				markdown={decode(token?.text ?? '')}
 				done={token?.attributes?.done !== 'false'}
 				messageDone={done}
