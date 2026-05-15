@@ -575,6 +575,17 @@
 							fraction: data.fraction
 						};
 					}
+				} else if (type === 'panel_filter') {
+					// [Gradient] Per-message bottom-panel scope from the agent service.
+					// Backend dispatches `message.sources` cumulatively (so inline `[N]`
+					// resolves via dense-array lookup across cross-turn cites), and this
+					// event names the cumulative ids that should actually appear in the
+					// chip list for THIS message. Latest dispatch wins — mid-iteration
+					// calls send the growing "retrieved this turn" set, the final call
+					// adds cross-turn cited ids.
+					if (Array.isArray(data?.ns)) {
+						message.panel_filter = data.ns.filter((n) => typeof n === 'number');
+					}
 				} else if (type === 'source' || type === 'citation') {
 					if (data?.type === 'code_execution') {
 						// Code execution; update existing code execution by ID, or add new one.

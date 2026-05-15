@@ -1035,6 +1035,7 @@
 									id={message?.id}
 									{chatId}
 									sources={message?.sources ?? message?.citations}
+									panelFilter={message?.panel_filter ?? null}
 									{readOnly}
 								/>
 							{/if}
