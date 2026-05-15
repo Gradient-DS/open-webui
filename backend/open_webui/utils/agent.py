@@ -91,6 +91,11 @@ class AgentPayload:
     # (model.params.system). Variables are pre-substituted upstream so the
     # agent can use the value as-is.
     system_prompt: Optional[str] = None
+    # [Gradient] Generic metadata forwarded as-is to the agent service.
+    # Today used for ``user_language`` (UI locale, BCP-47 like "nl-NL")
+    # so the agent can resolve the response language. Open-ended so we
+    # can extend it without changing the contract.
+    metadata: Optional[dict[str, Any]] = None
     # Model params forwarded directly
     temperature: Optional[float] = None
     top_p: Optional[float] = None
@@ -118,6 +123,7 @@ def build_agent_payload(
     tool_ids: Optional[list[str]] = None,
     rag_filter: Optional[dict[str, Any]] = None,
     system_prompt: Optional[str] = None,
+    metadata: Optional[dict[str, Any]] = None,
     **model_params,
 ) -> dict[str, Any]:
     """Build a JSON-serialisable payload for the agent API.
@@ -141,6 +147,7 @@ def build_agent_payload(
         tool_ids=tool_ids,
         rag_filter=rag_filter,
         system_prompt=system_prompt,
+        metadata=metadata,
         **{k: v for k, v in model_params.items() if v is not None},
     )
     return {k: v for k, v in asdict(payload).items() if v is not None}
@@ -293,6 +300,15 @@ async def call_agent_api(
     # its persisted thread state on retry/regenerate. Without this, the
     # agent's stateful thread store leaks the prior assistant turn into
     # the model's context and tools don't re-fire on re-runs.
+
+    # [Gradient] Build agent-side metadata from the OWUI metadata dict.
+    # user_language carries the frontend UI locale (BCP-47, e.g. "nl-NL")
+    # forwarded from Chat.svelte so the agent resolves the response language.
+    agent_metadata: dict[str, Any] = {}
+    user_language = metadata.get('user_language')
+    if user_language:
+        agent_metadata['user_language'] = user_language
+
     payload = build_agent_payload(
         model=llm_model,
         agent=selected_agent,
@@ -309,6 +325,7 @@ async def call_agent_api(
         tool_ids=metadata.get('tool_ids'),
         rag_filter=metadata.get('rag_filter'),
         system_prompt=metadata.get('system_prompt'),
+        metadata=agent_metadata or None,
         **model_params,
     )
 

@@ -73,3 +73,15 @@ def test_model_params_passthrough_strips_none():
     assert payload['temperature'] == 0.2
     assert payload['max_tokens'] == 512
     assert 'top_p' not in payload
+
+
+def test_metadata_user_language_forwarded():
+    """user_language from the UI locale must reach the wire payload."""
+    payload = build_agent_payload(**_base_kwargs(metadata={'user_language': 'nl-NL'}))
+    assert payload.get('metadata') == {'user_language': 'nl-NL'}
+
+
+def test_metadata_none_omitted_from_payload():
+    """When no metadata is provided the key must be absent from the payload."""
+    payload = build_agent_payload(**_base_kwargs(metadata=None))
+    assert 'metadata' not in payload

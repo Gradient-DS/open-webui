@@ -1208,7 +1208,8 @@
 				const found = extractDocumentsFromMessage(message.content);
 				if (found.length > 0) {
 					const sources = message?.sources ?? [];
-					docs = [...docs, ...found.map((doc) => ({ ...doc, sources }))];
+					const panel_filter = message?.panel_filter ?? null;
+					docs = [...docs, ...found.map((doc) => ({ ...doc, sources, panel_filter }))];
 				}
 			}
 		});
@@ -2582,6 +2583,9 @@
 					...($terminalServers ?? []).filter((t) => !t.id)
 				],
 				features: getFeatures(),
+				metadata: {
+					user_language: $i18n.language
+				},
 				variables: {
 					...getPromptVariables(
 						$user?.name,
