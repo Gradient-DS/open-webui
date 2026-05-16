@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, Request, HTTPException
 from pydantic import BaseModel, ConfigDict
 import aiohttp
 
-from typing import Optional
+from typing import Optional, Union
 
 from open_webui.env import AGENT_API_AGENTS, AGENT_API_ENABLED, AIOHTTP_CLIENT_TIMEOUT
 from open_webui.utils.auth import get_admin_user, get_verified_user
@@ -687,7 +687,8 @@ async def get_banners(
 
 
 class SetGreetingTemplateForm(BaseModel):
-    template: str
+    # Either a plain string (legacy) or a mapping of locale code to template.
+    template: Union[str, dict[str, str]]
 
 
 @router.post('/greeting_template')

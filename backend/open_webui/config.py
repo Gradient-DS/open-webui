@@ -1951,7 +1951,10 @@ class BannerModel(BaseModel):
     id: str
     type: str
     title: Optional[str] = None
-    content: str
+    # Either a plain string (legacy) or a mapping of locale code (e.g. "en-US")
+    # to localized content. The frontend resolves the active locale at render
+    # time and falls back to en-US, then to any other available entry.
+    content: Union[str, dict[str, str]]
     dismissible: bool
     timestamp: int
 

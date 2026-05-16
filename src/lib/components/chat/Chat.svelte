@@ -116,6 +116,7 @@
 	import { showRagFilter } from '$lib/stores/rag-filter';
 	import { getRagFilterForRequest } from '$lib/utils/rag-filter';
 	import ConversationFeedback from '$lib/components/chat/ConversationFeedback.svelte';
+	import ContextUsageBanner from '$lib/components/chat/ContextUsageBanner.svelte';
 	import RagFilterPanel from './RagFilterPanel.svelte';
 
 	export let chatIdProp = '';
@@ -184,6 +185,12 @@
 
 	let taskIds = null;
 
+	// [Gradient] Post-turn context-budget estimate from the agent service.
+	// Emitted once per turn over Socket.IO (see backend/utils/agent.py).
+	// Drives the banner above the chat input. Reset on chat switch / new chat.
+	let contextUsage: { tokens_used: number; tokens_budget: number; fraction: number } | null =
+		null;
+
 	// Chat Input
 	let prompt = '';
 	let chatFiles = [];
@@ -206,6 +213,7 @@
 		webSearchEnabled = false;
 		imageGenerationEnabled = false;
 		acceptedDataWarnings = new Set();
+		contextUsage = null;
 
 		const storageChatInput = sessionStorage.getItem(
 			`chat-input${chatIdProp ? `-${chatIdProp}` : ''}`
@@ -533,6 +541,51 @@
 				} else if (type === 'chat:tags') {
 					chat = await getChatById(localStorage.token, $chatId);
 					allTags.set(await getAllTags(localStorage.token));
+				} else if (type === 'present_ui') {
+					// [Gradient] Generative-UI directive from the agent service.
+					// Payload: { name: '<component>', props: {...} }. The
+					// PresentUIDispatcher inside ResponseMessage reads
+					// message.uiBlocks and renders the matching component.
+					if (data?.name) {
+						const block = {
+							id:
+								(typeof crypto !== 'undefined' && crypto?.randomUUID?.()) ||
+								`ui-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+							name: data.name,
+							props: data.props ?? {}
+						};
+						if (Array.isArray(message?.uiBlocks)) {
+							message.uiBlocks.push(block);
+						} else {
+							message.uiBlocks = [block];
+						}
+					}
+				} else if (type === 'context_usage') {
+					// [Gradient] Post-turn context-budget estimate from the agent
+					// service. Overwrites the per-conversation value; the banner
+					// above the chat input renders when fraction >= 0.7.
+					if (
+						typeof data?.tokens_used === 'number' &&
+						typeof data?.tokens_budget === 'number' &&
+						typeof data?.fraction === 'number'
+					) {
+						contextUsage = {
+							tokens_used: data.tokens_used,
+							tokens_budget: data.tokens_budget,
+							fraction: data.fraction
+						};
+					}
+				} else if (type === 'panel_filter') {
+					// [Gradient] Per-message bottom-panel scope from the agent service.
+					// Backend dispatches `message.sources` cumulatively (so inline `[N]`
+					// resolves via dense-array lookup across cross-turn cites), and this
+					// event names the cumulative ids that should actually appear in the
+					// chip list for THIS message. Latest dispatch wins — mid-iteration
+					// calls send the growing "retrieved this turn" set, the final call
+					// adds cross-turn cited ids.
+					if (Array.isArray(data?.ns)) {
+						message.panel_filter = data.ns.filter((n) => typeof n === 'number');
+					}
 				} else if (type === 'source' || type === 'citation') {
 					if (data?.type === 'code_execution') {
 						// Code execution; update existing code execution by ID, or add new one.
@@ -1155,7 +1208,8 @@
 				const found = extractDocumentsFromMessage(message.content);
 				if (found.length > 0) {
 					const sources = message?.sources ?? [];
-					docs = [...docs, ...found.map((doc) => ({ ...doc, sources }))];
+					const panel_filter = message?.panel_filter ?? null;
+					docs = [...docs, ...found.map((doc) => ({ ...doc, sources, panel_filter }))];
 				}
 			}
 		});
@@ -1172,6 +1226,7 @@
 		// the previous chat) doesn't bleed into the empty-state Navbar.
 		chat = null;
 		acceptedDataWarnings = new Set();
+		contextUsage = null;
 		if ($user?.role !== 'admin' && $user?.permissions?.chat?.temporary_enforced) {
 			await temporaryChatEnabled.set(true);
 		}
@@ -2528,6 +2583,9 @@
 					...($terminalServers ?? []).filter((t) => !t.id)
 				],
 				features: getFeatures(),
+				metadata: {
+					user_language: $i18n.language
+				},
 				variables: {
 					...getPromptVariables(
 						$user?.name,
@@ -3172,6 +3230,8 @@
 									(m) => m.role === 'assistant'
 								).length}
 							/>
+
+							<ContextUsageBanner usage={contextUsage} />
 
 							<div class=" pb-2 {dragged ? 'z-0' : 'z-10'}">
 								<MessageInput

@@ -60,6 +60,7 @@
 	import Citations from './Citations.svelte';
 	import CodeExecutions from './CodeExecutions.svelte';
 	import ContentRenderer from './ContentRenderer.svelte';
+	import PresentUIDispatcher from './Markdown/PresentUIDispatcher.svelte';
 	import { KokoroWorker } from '$lib/workers/KokoroWorker';
 	import FileItem from '$lib/components/common/FileItem.svelte';
 	import FollowUps from './ResponseMessage/FollowUps.svelte';
@@ -99,6 +100,7 @@
 		done: boolean;
 		error?: boolean | { content: string };
 		sources?: string[];
+		uiBlocks?: { id: string; name: string; props: any }[];
 		code_executions?: {
 			uuid: string;
 			name: string;
@@ -1019,12 +1021,22 @@
 								<Error content={message?.error?.content ?? message.content} />
 							{/if}
 
+							{#if (message?.uiBlocks ?? []).length > 0}
+								<PresentUIDispatcher
+									blocks={message.uiBlocks}
+									messageId={message.id}
+									messageDone={message.done ?? false}
+								/>
+							{/if}
+
 							{#if (message?.sources || message?.citations) && (model?.info?.meta?.capabilities?.citations ?? true)}
 								<Citations
 									bind:this={citationsElement}
 									id={message?.id}
 									{chatId}
 									sources={message?.sources ?? message?.citations}
+									panelFilter={message?.panel_filter ?? null}
+									messageDone={message?.done ?? false}
 									{readOnly}
 								/>
 							{/if}

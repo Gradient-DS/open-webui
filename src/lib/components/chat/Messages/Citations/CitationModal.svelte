@@ -142,25 +142,37 @@
 				{#if citation?.source?.name}
 					{@const document = mergedDocuments?.[0]}
 					{#if document?.metadata?.file_id || document.source?.url?.includes('http')}
+						{@const isFileMissing =
+							!!document?.metadata?.file_id && !previewAvailable}
 						<Tooltip
 							className="w-fit"
-							content={document.source?.url?.includes('http')
-								? $i18n.t('Open link')
-								: $i18n.t('Open file')}
+							content={isFileMissing
+								? $i18n.t('File no longer available')
+								: document.source?.url?.includes('http')
+									? $i18n.t('Open link')
+									: $i18n.t('Open file')}
 							placement="top-start"
 							tippyOptions={{ duration: [500, 0] }}
 						>
-							<a
-								class="hover:text-gray-500 dark:hover:text-gray-100 underline grow line-clamp-1"
-								href={document?.metadata?.file_id
-									? `${WEBUI_API_BASE_URL}/files/${document?.metadata?.file_id}/content${document?.metadata?.page !== undefined ? `#page=${document.metadata.page + 1}` : ''}`
-									: document.source?.url?.includes('http')
-										? document.source.url
-										: `#`}
-								target="_blank"
-							>
-								{decodeString(citation?.source?.name)}
-							</a>
+							{#if isFileMissing}
+								<span
+									class="grow line-clamp-1 text-gray-500 dark:text-gray-400 cursor-not-allowed"
+								>
+									{decodeString(citation?.source?.name)}
+								</span>
+							{:else}
+								<a
+									class="hover:text-gray-500 dark:hover:text-gray-100 underline grow line-clamp-1"
+									href={document?.metadata?.file_id
+										? `${WEBUI_API_BASE_URL}/files/${document?.metadata?.file_id}/content${document?.metadata?.page !== undefined ? `#page=${document.metadata.page + 1}` : ''}`
+										: document.source?.url?.includes('http')
+											? document.source.url
+											: `#`}
+									target="_blank"
+								>
+									{decodeString(citation?.source?.name)}
+								</a>
+							{/if}
 						</Tooltip>
 					{:else}
 						{decodeString(citation?.source?.name)}

@@ -10,6 +10,7 @@
 
 	import Suggestions from './Suggestions.svelte';
 	import { sanitizeResponseContent } from '$lib/utils';
+	import { resolveLocalized } from '$lib/utils/localized';
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
 	import EyeSlash from '$lib/components/icons/EyeSlash.svelte';
 
@@ -86,7 +87,10 @@
 			<div>
 				<div class=" capitalize line-clamp-1" in:fade={{ duration: 200 }}>
 					{#if $config?.ui?.greeting_template}
-						{$config.ui.greeting_template.replace('{{name}}', $user?.name ?? '')}
+						{resolveLocalized($config.ui.greeting_template, $i18n?.language).replace(
+							'{{name}}',
+							$user?.name ?? ''
+						)}
 					{:else if models[selectedModelIdx]?.name}
 						{models[selectedModelIdx]?.name}
 					{:else}

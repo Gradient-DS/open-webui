@@ -74,7 +74,17 @@ export function detectMergeProtocol(
 		(s) => s.hidden === true && s.done === false
 	);
 	if (hasPendingAgentTool) return 'positional';
-	if (statusEntries.length === 0 && reasoning.length > 0) return 'reasoning_only';
+	// Use the same "real tool action" criterion that ``ResponseMessage.svelte``'s
+	// ``hasToolCalls`` does, rather than ``statusEntries.length === 0``. Non-tool
+	// status entries (e.g. the agent runner's budget-warning ``StatusUpdate`` —
+	// no ``action`` set) would otherwise trap reasoning inside an invisible
+	// dropdown: ``hasToolCalls`` evaluates ``false`` so ``StatusHistory`` hides
+	// after ``done``, and the standalone-reasoning mount never fires because
+	// ``statusEntries.length > 0``.
+	const hasToolActions = statusEntries.some(
+		(s) => typeof s.action === 'string' && s.action !== 'reasoning_step'
+	);
+	if (!hasToolActions && reasoning.length > 0) return 'reasoning_only';
 	return 'status_first';
 }
 

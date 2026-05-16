@@ -648,7 +648,9 @@ export const setBanners = async (token: string, banners: Banner[]) => {
 	return res;
 };
 
-export const getGreetingTemplate = async (token: string): Promise<string> => {
+export const getGreetingTemplate = async (
+	token: string
+): Promise<string | Record<string, string>> => {
 	let error = null;
 
 	const res = await fetch(`${WEBUI_API_BASE_URL}/configs/greeting_template`, {
@@ -675,7 +677,10 @@ export const getGreetingTemplate = async (token: string): Promise<string> => {
 	return res?.template ?? '';
 };
 
-export const setGreetingTemplate = async (token: string, template: string) => {
+export const setGreetingTemplate = async (
+	token: string,
+	template: string | Record<string, string>
+) => {
 	let error = null;
 
 	const res = await fetch(`${WEBUI_API_BASE_URL}/configs/greeting_template`, {
