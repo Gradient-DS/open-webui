@@ -26,6 +26,7 @@
 		title: string;
 		markdown: string;
 		sources?: any[];
+		panel_filter?: number[] | null;
 	}> = [];
 	let selectedContentIdx = 0;
 	let copied = false;
@@ -302,6 +303,7 @@
 								id={`document-${$chatId ?? 'preview'}-${selectedContentIdx}`}
 								chatId={$chatId ?? ''}
 								sources={current.sources}
+								panelFilter={current.panel_filter ?? null}
 							/>
 						</div>
 					{/if}

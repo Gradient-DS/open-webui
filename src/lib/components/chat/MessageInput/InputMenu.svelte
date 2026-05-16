@@ -184,6 +184,10 @@
 			}
 		];
 
+		// Dropdown's onOpenChange only fires from its own close paths, so we
+		// must reset tab state here when closing via bind:show.
+		tab = '';
+		directTab = false;
 		show = false;
 	};
 

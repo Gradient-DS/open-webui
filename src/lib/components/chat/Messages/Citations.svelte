@@ -22,6 +22,22 @@
 	 * `panel_filter` event.
 	 */
 	export let panelFilter: number[] | null = null;
+	/**
+	 * [Gradient] Whether the parent message has finished streaming. Used to
+	 * suppress the bottom pill until the agent's final `panel_filter` is
+	 * in. Intermediate dispatches (one after every tool iteration) carry
+	 * the full "retrieved so far" set, so a web-search turn briefly shows
+	 * the entire result corpus (e.g. 19 hits) before the post-answer
+	 * dispatch narrows it to what the LLM actually cited (e.g. 7). The
+	 * final panel_filter arrives right after the answer text finishes
+	 * streaming — effectively the same moment as `done` flipping true —
+	 * so gating on done avoids the flash without delaying anything that
+	 * was stable mid-stream.
+	 *
+	 * Defaults to `true` so non-streaming callers (e.g. `Document.svelte`)
+	 * keep their previous behavior without opting in.
+	 */
+	export let messageDone: boolean = true;
 
 	let citations = [];
 	let visibleCitations = [];
@@ -188,7 +204,7 @@
 	showRelevance={citationRelevanceEnabled && showRelevance}
 />
 
-{#if visibleCitations.length > 0}
+{#if visibleCitations.length > 0 && messageDone}
 	{@const urlCitations = visibleCitations.filter((c) =>
 		c?.source?.name?.startsWith('http')
 	)}

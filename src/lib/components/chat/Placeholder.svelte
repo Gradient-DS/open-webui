@@ -21,6 +21,7 @@
 		currentChatPage
 	} from '$lib/stores';
 	import { sanitizeResponseContent, extractCurlyBraceWords } from '$lib/utils';
+	import { resolveLocalized } from '$lib/utils/localized';
 	import { WEBUI_API_BASE_URL, WEBUI_BASE_URL } from '$lib/constants';
 
 	import Suggestions from './Suggestions.svelte';
@@ -148,7 +149,10 @@
 						in:fade={{ duration: 100 }}
 					>
 						{#if $config?.ui?.greeting_template}
-							{$config.ui.greeting_template.replace('{{name}}', $user?.name ?? '')}
+							{resolveLocalized($config.ui.greeting_template, $i18n?.language).replace(
+								'{{name}}',
+								$user?.name ?? ''
+							)}
 						{:else if models[selectedModelIdx]?.name}
 							<Tooltip
 								content={models[selectedModelIdx]?.name}

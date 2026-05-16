@@ -5,31 +5,44 @@
 	import EllipsisVertical from '$lib/components/icons/EllipsisVertical.svelte';
 	import XMark from '$lib/components/icons/XMark.svelte';
 	import Sortable from 'sortablejs';
-	import { getContext } from 'svelte';
+	import { getContext, onMount } from 'svelte';
+	import { getLanguages } from '$lib/i18n';
+	import { toLocalizedObject } from '$lib/utils/localized';
 	const i18n = getContext('i18n');
 
 	export let banners = [];
 
 	let sortable = null;
 	let bannerListElement = null;
-
-	const positionChangeHandler = () => {
-		const bannerIdOrder = Array.from(bannerListElement.children).map((child) =>
-			child.id.replace('banner-item-', '')
-		);
-
-		// Sort the banners array based on the new order
-		banners = bannerIdOrder.map((id) => {
-			const index = banners.findIndex((banner) => banner.id === id);
-			return banners[index];
-		});
-	};
+	let languages: { code: string; title: string }[] = [];
+	let editLang = $i18n?.language ?? 'en-US';
 
 	const classNames: Record<string, string> = {
 		info: 'bg-blue-500/20 text-blue-700 dark:text-blue-200 ',
 		success: 'bg-green-500/20 text-green-700 dark:text-green-200',
 		warning: 'bg-yellow-500/20 text-yellow-700 dark:text-yellow-200',
 		error: 'bg-red-500/20 text-red-700 dark:text-red-200'
+	};
+
+	onMount(async () => {
+		languages = await getLanguages();
+		// Normalize any legacy plain-string content under the editing language,
+		// so the textarea always binds against an object.
+		banners = banners.map((b) => ({
+			...b,
+			content: toLocalizedObject(b.content, editLang)
+		}));
+	});
+
+	const positionChangeHandler = () => {
+		const bannerIdOrder = Array.from(bannerListElement.children).map((child) =>
+			child.id.replace('banner-item-', '')
+		);
+
+		banners = bannerIdOrder.map((id) => {
+			const index = banners.findIndex((banner) => banner.id === id);
+			return banners[index];
+		});
 	};
 
 	$: if (banners) {
@@ -51,7 +64,39 @@
 			});
 		}
 	};
+
+	const setBannerContent = (idx: number, value: string) => {
+		const current = toLocalizedObject(banners[idx].content, editLang);
+		if (value && value.length > 0) {
+			current[editLang] = value;
+		} else {
+			delete current[editLang];
+		}
+		banners[idx] = { ...banners[idx], content: current };
+		banners = banners;
+	};
+
+	const filledLanguages = (content: unknown): string[] => {
+		if (!content || typeof content !== 'object') return [];
+		return Object.entries(content as Record<string, string>)
+			.filter(([, v]) => typeof v === 'string' && v.length > 0)
+			.map(([k]) => k);
+	};
 </script>
+
+{#if banners?.length > 0}
+	<div class="flex items-center gap-2 mt-2 text-xs">
+		<span class="text-gray-500 dark:text-gray-400">{$i18n.t('Editing language')}</span>
+		<select
+			class="rounded-md bg-transparent text-xs outline-hidden pl-1 pr-5 dark:text-gray-300"
+			bind:value={editLang}
+		>
+			{#each languages as language}
+				<option value={language.code} class="text-gray-900">{language.title}</option>
+			{/each}
+		</select>
+	</div>
+{/if}
 
 <div class=" flex flex-col gap-3 {banners?.length > 0 ? 'mt-2' : ''}" bind:this={bannerListElement}>
 	{#each banners as banner, bannerIdx (banner.id)}
@@ -71,12 +116,29 @@
 					<option value="success" class="text-gray-900">{$i18n.t('Success')}</option>
 				</select>
 
-				<Textarea
-					className="mr-2 text-xs w-full bg-transparent outline-hidden resize-none"
-					placeholder={$i18n.t('Content')}
-					bind:value={banner.content}
-					maxSize={100}
-				/>
+				<div class="flex flex-col flex-1 mr-2">
+					<Textarea
+						className="text-xs w-full bg-transparent outline-hidden resize-none"
+						placeholder={$i18n.t('Content ({{lang}})', { lang: editLang })}
+						value={toLocalizedObject(banner.content, editLang)[editLang] ?? ''}
+						onInput={(e) => setBannerContent(bannerIdx, e.target.value)}
+						maxSize={100}
+					/>
+					{#if filledLanguages(banner.content).length > 0}
+						<div class="flex flex-wrap gap-1 mt-1">
+							{#each filledLanguages(banner.content) as code}
+								<span
+									class="px-1.5 py-0.5 rounded-md text-[10px] uppercase tracking-wide {code ===
+									editLang
+										? 'bg-gray-200 dark:bg-gray-800 text-gray-700 dark:text-gray-200'
+										: 'bg-gray-100 dark:bg-gray-850 text-gray-500 dark:text-gray-400'}"
+								>
+									{code}
+								</span>
+							{/each}
+						</div>
+					{/if}
+				</div>
 
 				<div class="relative -left-2">
 					<Tooltip content={$i18n.t('Remember Dismissal')} className="flex h-fit items-center">
