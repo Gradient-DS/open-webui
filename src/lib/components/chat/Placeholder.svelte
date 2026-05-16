@@ -22,6 +22,7 @@
 	} from '$lib/stores';
 	import { sanitizeResponseContent, extractCurlyBraceWords } from '$lib/utils';
 	import { resolveLocalized } from '$lib/utils/localized';
+	import { isFeatureEnabled } from '$lib/utils/features';
 	import { WEBUI_API_BASE_URL, WEBUI_BASE_URL } from '$lib/constants';
 
 	import Suggestions from './Suggestions.svelte';
@@ -76,9 +77,18 @@
 	}
 
 	$: models = selectedModels.map((id) => $_models.find((m) => m.id === id));
+
+	// Agent picker adds a content block below the input — when it can show up,
+	// shrink the placeholder's vertical padding so the screen still fits.
+	$: agentPickerEnabled =
+		isFeatureEnabled('agent_picker') && Boolean($config?.features?.feature_agent_api_enabled);
 </script>
 
-<div class="m-auto w-full max-w-6xl px-2 @2xl:px-20 translate-y-6 py-24 text-center">
+<div
+	class="m-auto w-full max-w-6xl px-2 @2xl:px-20 translate-y-6 {agentPickerEnabled
+		? 'py-12'
+		: 'py-24'} text-center"
+>
 	{#if $temporaryChatEnabled}
 		<Tooltip
 			content={$i18n.t("This chat won't appear in history and your messages will not be saved.")}
