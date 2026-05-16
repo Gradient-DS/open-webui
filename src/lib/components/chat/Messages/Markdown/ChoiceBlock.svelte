@@ -239,21 +239,31 @@
 		{#if payload.multi}
 			<div class="flex flex-col gap-1.5 mb-3">
 				{#each payload.options as opt (opt)}
-					<button
-						type="button"
-						class="flex items-center gap-2 text-sm text-left px-1 py-1 rounded-md
-							hover:bg-gray-50 dark:hover:bg-gray-800 transition
-							disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-transparent"
-						disabled={!!answered || !messageDone}
+					{@const rowDisabled = !!answered || !messageDone}
+					<div
+						role="button"
+						tabindex={rowDisabled ? -1 : 0}
+						aria-disabled={rowDisabled}
+						aria-pressed={multiSelected.has(opt)}
+						class="flex items-center gap-2 text-sm text-left px-1 py-1 rounded-md transition
+							{rowDisabled
+								? 'opacity-50 cursor-not-allowed'
+								: 'cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800'}"
 						on:click={() => togglePickMulti(opt)}
+						on:keydown={(e) => {
+							if (rowDisabled) return;
+							if (e.key === 'Enter' || e.key === ' ') {
+								e.preventDefault();
+								togglePickMulti(opt);
+							}
+						}}
 					>
 						<Checkbox
 							state={multiSelected.has(opt) ? 'checked' : 'unchecked'}
-							disabled={!!answered}
-							on:change={() => togglePickMulti(opt)}
+							disabled={rowDisabled}
 						/>
 						<span>{opt}</span>
-					</button>
+					</div>
 				{/each}
 			</div>
 		{:else}
