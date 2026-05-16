@@ -11,3 +11,9 @@ CVE-2026-24049
 # Placeholder.svelte / ChatPlaceholder.svelte has been patched in this fork to
 # wrap marked.parse() output with DOMPurify.sanitize() — matches upstream remediation.
 CVE-2026-44721
+
+# Missing workspace.tools authz check on POST /api/v1/tools/{id}/update
+# (open-webui < 0.9.5). Trivy flags by package.json version; the endpoint in
+# backend/open_webui/routers/tools.py has been patched in this fork to enforce
+# has_permission(user, 'workspace.tools', ...) — matches upstream remediation.
+CVE-2026-45395
