@@ -14,8 +14,10 @@ from open_webui.models.knowledge import KnowledgeForm, Knowledges
 from open_webui.retrieval.loaders.main import Loader
 from open_webui.retrieval.vector.factory import VECTOR_DB_CLIENT
 from open_webui.routers.retrieval import save_docs_to_vector_db
+from open_webui.services.sync.provider import file_id_prefix_for
 from open_webui.storage.provider import Storage
 from open_webui.utils.auth import get_verified_user
+from open_webui.utils.service_auth import LoaderPrincipal, get_integration_principal
 
 router = APIRouter()
 log = logging.getLogger(__name__)
@@ -78,19 +80,31 @@ def get_integration_provider(request: Request, user) -> tuple[str, dict]:
     if not provider_slug:
         raise HTTPException(
             status_code=403,
-            detail='This account is not configured as an integration service account',
+            detail=(
+                f'User {user.id!r} ({user.email}) is authenticated but is not bound to an '
+                'integration provider — user.info.integration_provider is empty. Bind this '
+                "user to a provider in OWUI admin → Integraties → 'Service account', or "
+                'authenticate with a different sk- key.'
+            ),
         )
     providers = request.app.state.config.INTEGRATION_PROVIDERS
     if not providers:
         raise HTTPException(
             status_code=403,
-            detail=f"Integration provider '{provider_slug}' is not registered",
+            detail=(
+                'INTEGRATION_PROVIDERS is empty — no providers are registered on this '
+                'deployment. Register one in OWUI admin → Integraties before pushing.'
+            ),
         )
     provider_config = providers.get(provider_slug)
     if not provider_config:
         raise HTTPException(
             status_code=403,
-            detail=f"Integration provider '{provider_slug}' is not registered",
+            detail=(
+                f'Integration provider {provider_slug!r} (bound to this service account) is '
+                f'not registered. Known providers: {sorted(providers.keys()) or "[]"}. '
+                'Register the slug in OWUI admin → Integraties or rebind the service account.'
+            ),
         )
     return provider_slug, provider_config
 
@@ -147,6 +161,32 @@ def _create_kb_for_provider(
     return Knowledges.get_knowledge_by_id(knowledge.id)
 
 
+def _maybe_upload_original_bytes(
+    file_id: str,
+    doc: IngestDocumentBase,
+    provider: str,
+    original_file: Optional[UploadFile],
+) -> str:
+    """Upload the document's source bytes to ``Storage`` and return the path.
+
+    Returns ``''`` when ``original_file`` is None — the historical
+    behaviour for callers (push integrations) that ship parsed text but
+    no original blob. The loader-worker started shipping bytes alongside
+    chunks so the citation-modal preview can serve them; this helper is
+    the receiving seam. Mirrors the pattern in
+    :func:`_process_full_document` so all three ingest paths converge on
+    a populated ``file.path`` when bytes are available.
+    """
+    if original_file is None:
+        return ''
+    contents, file_path = Storage.upload_file(
+        original_file.file,
+        f'{file_id}_{doc.filename}',
+        {'provider': provider, 'source_id': doc.source_id},
+    )
+    return file_path
+
+
 def _create_or_update_file_record(
     file_id: str,
     doc: IngestDocumentBase,
@@ -169,10 +209,39 @@ def _create_or_update_file_record(
         'provider_metadata': doc.metadata,
     }
 
+    # Promote folder-rendering / change-detection keys to top-level so the KB
+    # UI's SourceGroupedFiles tree (reads file.meta.relative_path) and the next
+    # sync cycle's cloud-hash short-circuit (reads file.meta.cloud_hash) keep
+    # working. Legacy in-pod sync wrote these at top level; the loader-worker
+    # path nests them under provider_metadata, which silently broke the folder
+    # tree until promoted back.
+    for key in (
+        'relative_path',
+        'source_item_id',
+        'onedrive_item_id',
+        'onedrive_drive_id',
+        'google_drive_item_id',
+        'cloud_hash',
+        'last_synced_at',
+    ):
+        if key in doc.metadata:
+            meta[key] = doc.metadata[key]
+
     existing_file = Files.get_file_by_id(file_id)
     if existing_file:
         Files.update_file_metadata_by_id(file_id, meta)
         Files.update_file_data_by_id(file_id, {'content': content_text})
+        # Stub File rows created up-front by sync workers
+        # (services/sync/base_worker._create_stub_file_rows) carry
+        # ``path=''`` until the loader-worker callback arrives with the
+        # actual bytes. Update the path here so the citation-modal
+        # preview endpoint can serve them. Don't overwrite a non-empty
+        # existing path with an empty new one — that would silently
+        # break previews for callers that opt out of byte shipping
+        # (e.g. push integrations re-syncing a previously-byte-bearing
+        # KB).
+        if file_path and file_path != (existing_file.path or ''):
+            Files.update_file_path_by_id(file_id, file_path)
         return 'updated'
     else:
         text_hash = hashlib.sha256(content_text.encode()).hexdigest()
@@ -263,15 +332,26 @@ def _process_parsed_text_document(
     provider: str,
     doc: ParsedTextDocument,
     user_id: str,
+    original_file: Optional[UploadFile] = None,
 ) -> dict:
-    """Process a parsed_text document: create file record, chunk, embed, store."""
-    file_id = f'{provider}-{doc.source_id}'
+    """Process a parsed_text document: create file record, chunk, embed, store.
+
+    When ``original_file`` is provided (loader-worker shipping the bytes
+    it downloaded from the cloud provider), the bytes are uploaded via
+    :data:`Storage` so ``file.path`` is populated for the citation-modal
+    PDF preview. When absent — the historical contract for push
+    integrations that don't have source bytes — ``file.path`` stays
+    empty and the preview tab is gracefully unavailable.
+    """
+    file_id = f'{file_id_prefix_for(provider)}{doc.source_id}'
+
+    file_path = _maybe_upload_original_bytes(file_id, doc, provider, original_file)
 
     status = _create_or_update_file_record(
         file_id=file_id,
         doc=doc,
         content_text=doc.text,
-        file_path='',
+        file_path=file_path,
         provider=provider,
         knowledge_id=knowledge_id,
         user_id=user_id,
@@ -299,7 +379,10 @@ def _process_parsed_text_document(
             add=True,
             split=True,
         )
-        Files.update_file_data_by_id(file_id, {'status': 'completed'})
+        # Clear the stale ``error`` field too — update_file_data_by_id is a
+        # shallow merge, so without this a row that succeeded after a prior
+        # failure would still carry the old error message in data.error.
+        Files.update_file_data_by_id(file_id, {'status': 'completed', 'error': None})
     except Exception as e:
         log.exception(f'Failed to store document {doc.source_id} in vector DB')
         Files.update_file_data_by_id(file_id, {'status': 'error', 'error': str(e)})
@@ -319,16 +402,23 @@ def _process_chunked_text_document(
     provider: str,
     doc: ChunkedTextDocument,
     user_id: str,
+    original_file: Optional[UploadFile] = None,
 ) -> dict:
-    """Process a chunked_text document: create file record, embed pre-chunked text, store."""
-    file_id = f'{provider}-{doc.source_id}'
+    """Process a chunked_text document: create file record, embed pre-chunked text, store.
+
+    See :func:`_process_parsed_text_document` for the ``original_file``
+    contract — same semantics here.
+    """
+    file_id = f'{file_id_prefix_for(provider)}{doc.source_id}'
     joined_text = '\n\n'.join(doc.chunks)
+
+    file_path = _maybe_upload_original_bytes(file_id, doc, provider, original_file)
 
     status = _create_or_update_file_record(
         file_id=file_id,
         doc=doc,
         content_text=joined_text,
-        file_path='',
+        file_path=file_path,
         provider=provider,
         knowledge_id=knowledge_id,
         user_id=user_id,
@@ -355,7 +445,10 @@ def _process_chunked_text_document(
             add=True,
             split=False,
         )
-        Files.update_file_data_by_id(file_id, {'status': 'completed'})
+        # Clear the stale ``error`` field too — update_file_data_by_id is a
+        # shallow merge, so without this a row that succeeded after a prior
+        # failure would still carry the old error message in data.error.
+        Files.update_file_data_by_id(file_id, {'status': 'completed', 'error': None})
     except Exception as e:
         log.exception(f'Failed to store chunked document {doc.source_id} in vector DB')
         Files.update_file_data_by_id(file_id, {'status': 'error', 'error': str(e)})
@@ -378,7 +471,7 @@ def _process_full_document(
     user_id: str,
 ) -> dict:
     """Process a full_document: upload binary, extract text, chunk, embed, store."""
-    file_id = f'{provider}-{doc.source_id}'
+    file_id = f'{file_id_prefix_for(provider)}{doc.source_id}'
 
     # Upload binary file to storage
     try:
@@ -448,7 +541,10 @@ def _process_full_document(
             add=True,
             split=True,
         )
-        Files.update_file_data_by_id(file_id, {'status': 'completed'})
+        # Clear the stale ``error`` field too — update_file_data_by_id is a
+        # shallow merge, so without this a row that succeeded after a prior
+        # failure would still carry the old error message in data.error.
+        Files.update_file_data_by_id(file_id, {'status': 'completed', 'error': None})
     except Exception as e:
         log.exception(f'Failed to store full document {doc.source_id} in vector DB')
         Files.update_file_data_by_id(file_id, {'status': 'error', 'error': str(e)})
@@ -470,7 +566,8 @@ def ingest_documents(
     request: Request,
     data: str = Form(...),
     files: Optional[list[UploadFile]] = File(None),
-    user=Depends(get_verified_user),
+    original_files: Optional[list[UploadFile]] = File(None),
+    principal=Depends(get_integration_principal),
 ):
     # Parse JSON from form field
     try:
@@ -478,7 +575,28 @@ def ingest_documents(
     except (json.JSONDecodeError, Exception) as e:
         raise HTTPException(400, f"Invalid JSON in 'data' field: {e}")
 
-    provider, provider_config = get_integration_provider(request, user)
+    # ``original_files`` carries the source bytes for parsed_text /
+    # chunked_text documents, keyed by ``filename == source_id`` (the
+    # loader-worker sets this when shipping bytes — see
+    # genai-utils/api/gateway/loader_worker/ingest_client.py). Build the
+    # lookup once so the dispatch loops below stay O(documents) rather
+    # than O(documents * files).
+    original_file_lookup = {f.filename: f for f in (original_files or []) if f.filename}
+
+    if isinstance(principal, LoaderPrincipal):
+        user = principal.user
+        provider = principal.provider_slug
+        providers = request.app.state.config.INTEGRATION_PROVIDERS or {}
+        # The loader bearer (LOADER_INGEST_API_KEY) is the strong auth signal
+        # for machine callers. INTEGRATION_PROVIDERS is for *external* push
+        # integrations (third-party systems pushing docs in); built-in cloud
+        # sync providers (onedrive, google_drive) don't need to be registered
+        # there. Fall back to an empty provider_config so default limits and
+        # no custom-metadata requirements apply.
+        provider_config = providers.get(provider) or {}
+    else:
+        user = principal
+        provider, provider_config = get_integration_provider(request, user)
 
     # Validate batch size
     max_per_request = provider_config.get('max_documents_per_request', 50)
@@ -496,12 +614,21 @@ def ingest_documents(
             f"Invalid data_type '{data_type}'. Must be one of: {', '.join(sorted(VALID_DATA_TYPES))}",
         )
 
-    # Find or create KB
-    knowledge = _find_kb_by_source_id(provider, collection.source_id)
+    # Find or create KB. For LoaderPrincipal callers (loader-worker pushing
+    # the result of a cloud sync), ``collection.source_id`` is the existing
+    # open-webui KB UUID — look that up directly so we don't double-create.
+    # External push providers continue to use the meta.integration.source_id
+    # lookup since they own KB lifecycle.
+    knowledge = None
+    if isinstance(principal, LoaderPrincipal):
+        knowledge = Knowledges.get_knowledge_by_id(collection.source_id)
+    if knowledge is None:
+        knowledge = _find_kb_by_source_id(provider, collection.source_id)
     if not knowledge:
         knowledge = _create_kb_for_provider(provider, provider_config, collection, user.id)
-    else:
-        # Validate data_type consistency with existing KB
+    elif not isinstance(principal, LoaderPrincipal):
+        # Validate data_type consistency with existing KB (push providers only;
+        # cloud-sync KBs found via direct ID lookup don't carry meta.integration).
         existing_data_type = (knowledge.meta or {}).get('integration', {}).get('data_type')
         if existing_data_type and existing_data_type != data_type:
             raise HTTPException(
@@ -523,10 +650,19 @@ def ingest_documents(
     max_files = provider_config.get('max_files_per_kb', KNOWLEDGE_MAX_FILE_COUNT)
     current_files = Knowledges.get_files_by_id(knowledge.id)
     existing_ids = {f.id for f in current_files} if current_files else set()
-    new_doc_ids = {f'{provider}-{doc.get("source_id", "")}' for doc in form_data.documents}
+    _prefix = file_id_prefix_for(provider)
+    new_doc_ids = {f'{_prefix}{doc.get("source_id", "")}' for doc in form_data.documents}
     net_new = len(new_doc_ids - existing_ids)
     if len(existing_ids) + net_new > max_files:
-        raise HTTPException(400, f'Would exceed {max_files} file limit for this knowledge base.')
+        raise HTTPException(
+            400,
+            (
+                f'Would exceed {max_files} file limit for KB {knowledge.id!r} '
+                f'({knowledge.name!r}). Existing: {len(existing_ids)}, new in this request: '
+                f"{net_new}. Raise the provider's max_files_per_kb or split the push into "
+                'smaller batches.'
+            ),
+        )
 
     # Validate and dispatch based on data_type
     results = []
@@ -548,6 +684,7 @@ def ingest_documents(
                 provider=provider,
                 doc=doc,
                 user_id=user.id,
+                original_file=original_file_lookup.get(doc.source_id),
             )
             results.append(result)
 
@@ -567,6 +704,7 @@ def ingest_documents(
                 provider=provider,
                 doc=doc,
                 user_id=user.id,
+                original_file=original_file_lookup.get(doc.source_id),
             )
             results.append(result)
 
@@ -639,9 +777,18 @@ def ingest_documents(
 def delete_collection(
     request: Request,
     source_id: str,
-    user=Depends(get_verified_user),
+    principal=Depends(get_integration_principal),
 ):
-    provider, _ = get_integration_provider(request, user)
+    if isinstance(principal, LoaderPrincipal):
+        provider = principal.provider_slug
+        providers = request.app.state.config.INTEGRATION_PROVIDERS or {}
+        if provider not in providers:
+            raise HTTPException(
+                status_code=403,
+                detail=f"Integration provider '{provider}' is not registered",
+            )
+    else:
+        provider, _ = get_integration_provider(request, principal)
 
     knowledge = _find_kb_by_source_id(provider, source_id)
     if not knowledge:

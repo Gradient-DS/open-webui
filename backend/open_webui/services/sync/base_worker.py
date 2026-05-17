@@ -3,6 +3,7 @@
 import asyncio
 import io
 import logging
+import os
 import time
 import hashlib
 import uuid
@@ -25,8 +26,86 @@ from open_webui.services.sync.events import (
     emit_file_processing,
     emit_file_added,
 )
+from open_webui.services.sync.pipeline_client import PipelineClient
 
 log = logging.getLogger(__name__)
+
+
+# Maps loader-worker `error_code` strings (see
+# genai-utils/api/gateway/loader_worker/error_codes.py) to OWUI's
+# `SyncErrorType` enum used by the failed-files toast. Duplicated here on
+# purpose: OWUI doesn't import from genai-utils, and the cross-repo coupling
+# is one-way (loader-worker emits, OWUI consumes).
+_LOADER_ERROR_CODE_TO_SYNC_TYPE: dict[str, SyncErrorType] = {
+    'cancelled': SyncErrorType.PROCESSING_ERROR,
+    'needs_token_refresh': SyncErrorType.NEEDS_TOKEN_REFRESH,
+    'hard_source_error': SyncErrorType.DOWNLOAD_ERROR,
+    'empty_extraction': SyncErrorType.EMPTY_CONTENT,
+    'doc_processor_schema_error': SyncErrorType.SCHEMA_ERROR,
+    'config_error': SyncErrorType.CONFIG_ERROR,
+    'unsupported_content_type': SyncErrorType.UNSUPPORTED_CONTENT_TYPE,
+    'source_access_revoked': SyncErrorType.SOURCE_ACCESS_REVOKED,
+    'unexpected_error': SyncErrorType.PROCESSING_ERROR,
+}
+
+
+# Error codes that are *terminal per-item*: re-running the sync won't fix them
+# because the file's content/type/state, not the sync infrastructure, is the
+# problem. We let the delta cursor advance past these so a single bad file
+# (e.g. a .png a user picked, or an empty docx) doesn't force every
+# subsequent sync to walk the entire folder tree from scratch.
+#
+# Codes that mean "transient — try again next time" (needs_token_refresh,
+# hard_source_error, config_error, unexpected_error, cancelled) keep the
+# cursor frozen so the failed item gets re-enumerated on the next sync.
+_NON_RETRYABLE_LOADER_ERROR_CODES: frozenset[str] = frozenset(
+    {
+        'empty_extraction',
+        'doc_processor_schema_error',
+        'unsupported_content_type',
+        # Source access permanently revoked: the file is gone for this
+        # credential. Advance the cursor — re-running the sync won't
+        # bring it back, and freezing the cursor would force a full
+        # re-walk of the folder tree on every subsequent sync.
+        'source_access_revoked',
+    }
+)
+
+
+class ConfigurationError(RuntimeError):
+    """Raised when a sync prerequisite (env var, etc.) is missing or invalid.
+
+    Surfaces as a clean toast in the UI; the sync never enters the
+    loader-worker. Typical case: ``WEBUI_PUBLIC_BASE_URL`` is unset, so the
+    loader-worker would push to a relative URL and fail with cryptic httpx
+    errors per item (the 2026-04-29 staging incident pattern).
+    """
+
+
+def _validate_callback_base_url(url: str) -> None:
+    """Reject empty / scheme-less callback URLs with a clear ConfigurationError."""
+    if not url:
+        raise ConfigurationError(
+            'WEBUI_PUBLIC_BASE_URL / OPENWEBUI_BASE_URL is not set; '
+            'the loader-worker callback would be unreachable. '
+            'Set it on the OWUI pod to http(s)://<host>.'
+        )
+    from urllib.parse import urlparse
+
+    parsed = urlparse(url)
+    if parsed.scheme not in ('http', 'https') or not parsed.netloc:
+        raise ConfigurationError(
+            f'callback_base_url is invalid: {url!r}. Set WEBUI_PUBLIC_BASE_URL to http(s)://<host> on the OWUI pod.'
+        )
+
+
+# Bound on how long _track_job_progress will poll the loader-worker before
+# giving up and fail-marking the still-pending stub File rows. Without this,
+# a stuck loader-worker (the 2026-04-29 staging incident) leaves spinners
+# spinning indefinitely and blocks user-initiated re-syncs. Defaults to 30
+# minutes — well above any realistic batch — and overridable via env for
+# tenants with very large initial syncs.
+MAX_JOB_WALL_CLOCK_SECONDS = int(os.environ.get('SYNC_MAX_JOB_WALL_CLOCK_SECONDS', '1800'))
 
 
 @dataclass
@@ -67,6 +146,17 @@ class BaseSyncWorker(ABC):
     @abstractmethod
     def event_prefix(self) -> str:
         """Prefix for Socket.IO events, e.g. 'googledrive'."""
+        ...
+
+    @property
+    @abstractmethod
+    def provider_slug(self) -> str:
+        """Provider slug used in INTEGRATION_PROVIDERS / loader-worker payloads.
+
+        e.g. 'onedrive', 'google_drive'. Echoed by the loader-worker on
+        ``/api/v1/integrations/ingest`` callbacks via ``X-Acting-Provider`` so
+        the ingest endpoint can resolve the right provider config.
+        """
         ...
 
     @property
@@ -126,8 +216,54 @@ class BaseSyncWorker(ABC):
 
     @abstractmethod
     async def _download_file_content(self, file_info: Dict[str, Any]) -> bytes:
-        """Download file content from the provider."""
+        """Download file content from the provider.
+
+        Removed in cleanup commit after USE_SHARED_LOADER rollout completes —
+        the per-tenant loader-worker pod owns the download path.
+        """
         ...
+
+    def _item_from_file_info(self, file_info: Dict[str, Any], access_token: str) -> Dict[str, Any]:
+        """Build a loader-worker job item dict from a discovered file_info.
+
+        Used in shared-loader mode (USE_SHARED_LOADER=true). Providers
+        override to supply provider-specific ``source_descriptor`` fields the
+        loader-worker's ``SourceClient`` knows how to interpret. Default
+        implementation produces a generic item shape.
+        """
+        item = file_info['item']
+        item_id = item['id']
+        name = file_info['name']
+        source_item_id = file_info.get('source_item_id')
+        relative_path = file_info.get('relative_path', name)
+        content_type = self._get_content_type(name)
+        size = item.get('size', 0)
+
+        metadata = self._get_provider_file_meta(
+            item_id=item_id,
+            source_item_id=source_item_id,
+            relative_path=relative_path,
+            name=name,
+            content_type=content_type,
+            size=size,
+            file_info=file_info,
+        )
+
+        return {
+            'source': self.provider_slug,
+            'source_descriptor': file_info,
+            'source_credential': access_token,
+            'credential_type': 'user_oauth',
+            'file_id': f'{self.file_id_prefix}{item_id}',
+            # Raw provider item id; sent to /ingest as doc.source_id, where
+            # it's re-prefixed to f'{provider}-{source_id}'. Must NOT be the
+            # already-prefixed file_id, or /ingest creates a second File row
+            # with id 'onedrive-onedrive-<item>' next to the stub.
+            'source_id': item_id,
+            'filename': name,
+            'content_type': content_type,
+            'metadata': metadata,
+        }
 
     @abstractmethod
     def _get_provider_storage_headers(self, item_id: str) -> dict:
@@ -195,6 +331,7 @@ class BaseSyncWorker(ABC):
         app,
         event_emitter: Optional[Callable[[Dict[str, Any]], Awaitable[None]]] = None,
         token_provider: Optional[Callable[[], Awaitable[Optional[str]]]] = None,
+        use_shared_loader: bool = False,
     ):
         self.knowledge_id = knowledge_id
         self.sources = sources
@@ -204,6 +341,12 @@ class BaseSyncWorker(ABC):
         self.event_emitter = event_emitter
         self._token_provider = token_provider
         self._client = None
+        # When True, file ingestion is delegated to the per-tenant loader-worker
+        # pod (see thoughts/shared/plans/2026-04-25-shared-services-loader-worker.md).
+        # The legacy in-pod download/embed pipeline stays available behind this
+        # flag for instant rollback until the cleanup commit removes it.
+        self._use_shared_loader = use_shared_loader
+        self._pipeline_client: Optional[PipelineClient] = PipelineClient() if use_shared_loader else None
 
     def _make_request(self):
         """Construct a minimal Request for calling retrieval functions directly."""
@@ -247,9 +390,21 @@ class BaseSyncWorker(ABC):
         files_processed: int = 0,
         files_failed: int = 0,
         deleted_count: int = 0,
+        files_added: int = 0,
+        files_updated: int = 0,
+        files_unchanged: int = 0,
+        files_removed: int = 0,
         failed_files: Optional[List[FailedFile]] = None,
+        stage_counts: Optional[Dict[str, int]] = None,
     ):
-        """Update sync status in knowledge meta and emit Socket.IO event."""
+        """Update sync status in knowledge meta and emit Socket.IO event.
+
+        ``files_added`` / ``files_updated`` / ``files_unchanged`` /
+        ``files_removed`` carry the toast's per-category breakdown so the UI
+        can render "Added 5, Updated 2" instead of "Synced 7". When a caller
+        omits them they default to 0; ``files_processed`` is preserved for
+        backwards compatibility (and equals files_added + files_updated).
+        """
         knowledge = Knowledges.get_knowledge_by_id(self.knowledge_id)
         if knowledge:
             meta = knowledge.meta or {}
@@ -262,6 +417,8 @@ class BaseSyncWorker(ABC):
                 sync_info['sync_started_at'] = int(time.time())
             sync_info['progress_current'] = current
             sync_info['progress_total'] = total
+            if stage_counts:
+                sync_info['stage_counts'] = stage_counts
             if error:
                 sync_info['error'] = error
             meta[self.meta_key] = sync_info
@@ -282,7 +439,12 @@ class BaseSyncWorker(ABC):
             files_processed=files_processed,
             files_failed=files_failed,
             deleted_count=deleted_count,
+            files_added=files_added,
+            files_updated=files_updated,
+            files_unchanged=files_unchanged,
+            files_removed=files_removed,
             failed_files=failed_files_dicts,
+            stage_counts=stage_counts,
         )
 
         if self.event_emitter:
@@ -299,7 +461,12 @@ class BaseSyncWorker(ABC):
                         'files_processed': files_processed,
                         'files_failed': files_failed,
                         'deleted_count': deleted_count,
+                        'files_added': files_added,
+                        'files_updated': files_updated,
+                        'files_unchanged': files_unchanged,
+                        'files_removed': files_removed,
                         'failed_files': failed_files_dicts,
+                        'stage_counts': stage_counts,
                     },
                 }
             )
@@ -350,6 +517,83 @@ class BaseSyncWorker(ABC):
                 await asyncio.to_thread(DeletionService.delete_file, file_id)
             else:
                 log.info(f'File {file_id} still referenced by {len(remaining_refs)} KB(s), preserving')
+
+    async def _handle_revoked_item(self, file_id: str) -> int:
+        """Remove a single file from this KB after the loader-worker reports
+        its source access was permanently revoked. Mirrors
+        ``_handle_deleted_item`` but is keyed on the loader-worker error
+        stream (no delta ``@removed`` marker — the provider says 403/404 on
+        read instead).
+
+        Returns 1 if a row was removed, 0 otherwise.
+        """
+        if not file_id or file_id == 'unknown':
+            return 0
+        existing = Files.get_file_by_id(file_id)
+        if not existing:
+            return 0
+        log.info(f'Removing revoked-access file from KB: {file_id}')
+        Knowledges.remove_file_from_knowledge_by_id(self.knowledge_id, file_id)
+        try:
+            VECTOR_DB_CLIENT.delete(
+                collection_name=self.knowledge_id,
+                filter={'file_id': file_id},
+            )
+        except Exception as e:
+            log.warning(f'Failed to remove vectors for {file_id} from KB: {e}')
+        remaining_refs = Knowledges.get_knowledge_files_by_file_id(file_id)
+        if not remaining_refs:
+            log.info(f'No remaining references to {file_id}, cleaning up')
+            await asyncio.to_thread(DeletionService.delete_file, file_id)
+        else:
+            log.info(f'File {file_id} still referenced by {len(remaining_refs)} KB(s), preserving the File row')
+        try:
+            from open_webui.socket.main import sio
+
+            await sio.emit(
+                f'{self.event_prefix}:file:deleted',
+                {
+                    'knowledge_id': self.knowledge_id,
+                    'file_id': file_id,
+                    'reason': 'access_revoked',
+                },
+                room=f'user:{self.user_id}',
+            )
+        except Exception as e:
+            log.debug(f'Failed to emit revoked-access deletion event: {e}')
+        return 1
+
+    def _classify_for_submit(self, file_info: Dict[str, Any]) -> tuple[str, str]:
+        """Decide whether to submit this file_info to the loader-worker.
+
+        Returns (category, file_id):
+          - ('unchanged', file_id) — cloud_hash matches stored AND row is 'completed'; SKIP submission
+          - ('updated', file_id)   — existing row but hash mismatch or non-completed; SUBMIT
+          - ('added', file_id)     — no existing row; SUBMIT
+
+        Mirrors the legacy short-circuit at ``_download_and_store_legacy``
+        (the cloud-hash check around line 912-921) so the shared-loader path
+        stops re-processing files that haven't changed — the structural cause
+        of the "5 extra" toast where a re-sync of an unchanged folder showed
+        N "synced" instead of "no changes".
+        """
+        item = file_info['item']
+        item_id = item['id']
+        file_id = f'{self.file_id_prefix}{item_id}'
+        existing = Files.get_file_by_id(file_id)
+        if existing is None:
+            return 'added', file_id
+        cloud_hash = self._get_cloud_hash(file_info)
+        if not cloud_hash:
+            # No hash available (e.g. provider didn't return one) — be
+            # conservative and treat as updated. The unchanged short-circuit
+            # only fires on a positive hash match.
+            return 'updated', file_id
+        stored = (existing.meta or {}).get('cloud_hash')
+        status = (existing.data or {}).get('status')
+        if stored == cloud_hash and status == 'completed':
+            return 'unchanged', file_id
+        return 'updated', file_id
 
     async def _ensure_vectors_in_kb(self, file_id: str) -> Optional[FailedFile]:
         """Verify vectors for this file exist in the KB collection.
@@ -726,6 +970,23 @@ class BaseSyncWorker(ABC):
         return True
 
     async def _download_and_store(self, file_info: Dict[str, Any]) -> Union[PreparedFile, FailedFile, None]:
+        """Phase 1 entrypoint. Branches on USE_SHARED_LOADER.
+
+        In shared-loader mode, the per-tenant loader-worker pod handles
+        download → parse+chunk → embed → push to /ingest. The pod itself
+        creates File records on its callback, so this method returns None
+        and the orchestration in ``sync()`` skips the per-item fan-out.
+
+        Legacy mode preserves the in-pod download path verbatim under
+        ``_download_and_store_legacy`` for instant rollback. Both methods
+        are deleted in the cleanup commit after USE_SHARED_LOADER rollout.
+        """
+        if self._use_shared_loader:
+            # sync() bypasses the per-item pipeline in shared mode; defensive.
+            return None
+        return await self._download_and_store_legacy(file_info)
+
+    async def _download_and_store_legacy(self, file_info: Dict[str, Any]) -> Union[PreparedFile, FailedFile, None]:
         """Phase 1: Download from cloud, check hash, upload to S3, create file record.
 
         Returns:
@@ -911,6 +1172,17 @@ class BaseSyncWorker(ABC):
             )
 
     async def _process_and_embed(self, prepared: PreparedFile) -> Optional[FailedFile]:
+        """Phase 2 entrypoint. Branches on USE_SHARED_LOADER.
+
+        In shared-loader mode, processing + embedding happen in the
+        loader-worker pod. The legacy in-pod implementation is preserved
+        under ``_process_and_embed_legacy`` for instant rollback.
+        """
+        if self._use_shared_loader:
+            return None
+        return await self._process_and_embed_legacy(prepared)
+
+    async def _process_and_embed_legacy(self, prepared: PreparedFile) -> Optional[FailedFile]:
         """Phase 2: Extract content, embed once, insert into KB + per-file collections.
 
         Returns None on success, FailedFile on error.
@@ -1039,6 +1311,677 @@ class BaseSyncWorker(ABC):
 
         return None
 
+    # ------------------------------------------------------------------
+    # Shared-loader orchestration (USE_SHARED_LOADER=true)
+    # ------------------------------------------------------------------
+
+    async def _submit_pipeline_job(self, files: List[Dict[str, Any]]) -> Optional[str]:
+        """Submit a single loader-worker job carrying every discovered file.
+
+        Returns the job_id. The legacy in-pod fan-out is bypassed; the
+        loader-worker is responsible for download → parse+chunk → embed →
+        push to /ingest, and tracks its own concurrency.
+        """
+        if not files:
+            return None
+
+        # Use the access token already resolved in execute_sync(). The
+        # loader-worker doesn't refresh per-call — long-queued jobs may see
+        # 401s, surfaced as needs_token_refresh in the job result.
+        access_token = self.access_token
+        if self._token_provider:
+            refreshed = await self._token_provider()
+            if refreshed:
+                access_token = refreshed
+
+        items = [self._item_from_file_info(f, access_token) for f in files]
+
+        callback_base_url = os.environ.get('WEBUI_PUBLIC_BASE_URL', '')
+        if not callback_base_url:
+            # Fallback: in-cluster service DNS via tenant config. The
+            # loader-worker only needs to reach /api/v1/integrations/ingest.
+            callback_base_url = os.environ.get('OPENWEBUI_BASE_URL', '')
+
+        # Pre-submit validation. Fails fast with a clean toast instead of
+        # the historical retry storm where every loader-worker item failed
+        # with a cryptic httpx exception class.
+        _validate_callback_base_url(callback_base_url)
+
+        knowledge = Knowledges.get_knowledge_by_id(self.knowledge_id)
+        kb_name = knowledge.name if knowledge else self.knowledge_id
+
+        # data_type=chunked_text matches the existing /ingest handler:
+        # loader-worker pushes parsed text chunks; open-webui re-embeds via
+        # save_docs_to_vector_db (per plan amendment 2026-04-26).
+        collection = {
+            'source_id': self.knowledge_id,
+            'name': kb_name,
+            'data_type': 'chunked_text',
+        }
+
+        # Pre-create stub File rows so the KB UI can render the discovered
+        # tree (with folder structure) immediately, in pending state, instead
+        # of staying empty until /ingest callbacks land. The stub carries the
+        # provider meta (name, content_type, relative_path, source_item_id…)
+        # needed for the SourceGroupedFiles tree renderer; the eventual
+        # /ingest callback upserts on file_id and overwrites these fields
+        # with the post-parse values. status='pending' on the file's data
+        # column drives the per-file spinner in the UI.
+        #
+        # Stash the touched file_ids on the worker so non-clean exits
+        # (submit failure, timeout, cancellation) can fail-mark any row
+        # that never transitioned out of 'pending'. Without this, the KB
+        # UI shows infinite spinners after a stuck loader-worker.
+        self._current_job_stub_file_ids = await self._create_stub_file_rows(files)
+
+        job_id = await self._pipeline_client.submit_job(
+            knowledge_id=self.knowledge_id,
+            acting_user_id=self.user_id,
+            provider_slug=self.provider_slug,
+            callback_base_url=callback_base_url,
+            collection=collection,
+            items=items,
+        )
+        log.info(f'Submitted loader-worker job {job_id} for KB {self.knowledge_id} with {len(items)} items')
+        return job_id
+
+    async def _create_stub_file_rows(self, files: List[Dict[str, Any]]) -> list[str]:
+        """Insert ``Files`` rows in ``status='pending'`` for every discovered file.
+
+        Called *before* the loader-worker job is submitted so the KB UI
+        immediately reflects the file/folder tree the sync will populate.
+        Idempotent: existing rows (re-sync of a previously-synced KB) are
+        left as-is — the eventual ``/ingest`` callback updates them.
+
+        Also fires ``:file:processing`` per stub so the existing frontend
+        cloud-event handler adds the file to its in-memory list with a
+        spinner, matching legacy ``_download_and_store`` UX.
+
+        Returns the list of file_ids touched by this sync (both newly
+        inserted and re-attached to the KB). The caller stashes this on
+        the worker so failure paths can fail-mark rows that never
+        transitioned out of ``pending``.
+        """
+        touched: list[str] = []
+        for file_info in files:
+            try:
+                item = file_info['item']
+                item_id = item['id']
+                name = file_info['name']
+                file_id = f'{self.file_id_prefix}{item_id}'
+                source_item_id = file_info.get('source_item_id')
+                relative_path = file_info.get('relative_path', name)
+                content_type = self._get_content_type(name)
+
+                if Files.get_file_by_id(file_id) is not None:
+                    Knowledges.add_file_to_knowledge_by_id(self.knowledge_id, file_id, self.user_id)
+                    touched.append(file_id)
+                else:
+                    # Google Drive returns ``size`` as a string per its v3 API
+                    # (``files.list``). Storing that raw makes the frontend's
+                    # formatFileSize show "Invalid size" because it requires
+                    # ``typeof === 'number'``. Coerce defensively so every
+                    # provider's stub starts with a numeric size.
+                    raw_size = item.get('size', 0) or 0
+                    try:
+                        size = int(raw_size)
+                    except (TypeError, ValueError):
+                        size = 0
+                    file_meta = self._get_provider_file_meta(
+                        item_id=item_id,
+                        source_item_id=source_item_id,
+                        relative_path=relative_path,
+                        name=name,
+                        content_type=content_type,
+                        size=size,
+                        file_info=file_info,
+                    )
+
+                    file_form = FileForm(
+                        id=file_id,
+                        filename=name,
+                        path='',
+                        hash='',
+                        data={'status': 'pending'},
+                        meta=file_meta,
+                    )
+                    Files.insert_new_file(self.user_id, file_form)
+                    Knowledges.add_file_to_knowledge_by_id(self.knowledge_id, file_id, self.user_id)
+                    touched.append(file_id)
+
+                await emit_file_processing(
+                    self.event_prefix,
+                    user_id=self.user_id,
+                    knowledge_id=self.knowledge_id,
+                    file_info={
+                        'item_id': item_id,
+                        'name': name,
+                        'size': item.get('size', 0),
+                        'source_item_id': source_item_id,
+                        'relative_path': relative_path,
+                    },
+                )
+            except Exception as e:
+                # Stub creation is best-effort UI hint — never let a failure
+                # here block the actual sync. The /ingest callback will
+                # create the row from scratch if the stub is missing.
+                log.warning(f'Failed to create stub File row for {file_info.get("name", "?")}: {e}')
+        return touched
+
+    async def _fail_mark_outstanding_stubs(
+        self,
+        message: str,
+        error_status: str = 'error',
+    ) -> int:
+        """Sweep this sync's stubs; transition any non-terminal row to ``error_status``.
+
+        Called on submit failure, timeout, cancellation, and when the
+        loader-worker reports a terminal job that left some items in a
+        non-terminal stage. Rows already in ``completed`` or ``error`` are
+        left alone — those are authoritative writes from /ingest.
+
+        Returns the number of rows changed.
+        """
+        file_ids = getattr(self, '_current_job_stub_file_ids', None) or []
+        if not file_ids:
+            return 0
+        changed = 0
+        for file_id in file_ids:
+            try:
+                existing = Files.get_file_by_id(file_id)
+                if existing is None:
+                    continue
+                current_status = (existing.data or {}).get('status')
+                if current_status in ('completed', 'error'):
+                    continue
+                Files.update_file_data_by_id(
+                    file_id,
+                    {'status': error_status, 'error': message},
+                )
+                changed += 1
+            except Exception:
+                log.warning(f'Failed to fail-mark stub {file_id}', exc_info=True)
+        return changed
+
+    async def _apply_item_stages_to_files(self, item_states: List[Dict[str, Any]]) -> None:
+        """Mirror per-item ``stage`` from the loader-worker onto ``Files.data.status``.
+
+        Drives the per-file spinner in the KB UI without waiting for the
+        ``/ingest`` callback. Only updates rows whose state actually changed,
+        and never overwrites the terminal ``completed`` / ``error`` state
+        that ``/ingest`` writes — those are authoritative once set. Also
+        fires ``:file:added`` once per item the first time we observe its
+        terminal ``ok`` stage, so the frontend transitions the per-file
+        spinner to ``uploaded`` mid-sync (Option A's progressive
+        appearance).
+        """
+        if not hasattr(self, '_announced_ok_file_ids'):
+            self._announced_ok_file_ids: set[str] = set()
+
+        for item in item_states:
+            file_id = item.get('file_id')
+            stage = item.get('stage')
+            if not file_id or not stage:
+                continue
+            try:
+                existing = Files.get_file_by_id(file_id)
+                if existing is None:
+                    continue
+                current_data = existing.data or {}
+                current_status = current_data.get('status')
+                # /ingest's terminal writes win — don't churn rows that are
+                # already in their final state.
+                if current_status not in ('completed', 'error') and current_status != stage:
+                    Files.update_file_data_by_id(file_id, {'status': stage})
+
+                if stage == 'ok' and file_id not in self._announced_ok_file_ids:
+                    self._announced_ok_file_ids.add(file_id)
+                    refreshed = Files.get_file_by_id(file_id)
+                    if refreshed:
+                        await emit_file_added(
+                            self.event_prefix,
+                            user_id=self.user_id,
+                            knowledge_id=self.knowledge_id,
+                            file_data={
+                                'id': refreshed.id,
+                                'filename': refreshed.filename,
+                                'meta': refreshed.meta,
+                                'created_at': refreshed.created_at,
+                                'updated_at': refreshed.updated_at,
+                            },
+                        )
+            except Exception as e:
+                log.debug(f'Failed to mirror loader-worker stage onto File {file_id}: {e}')
+
+    async def _track_job_progress(self, job_id: str, total_files: int, unchanged_count: int) -> Dict[str, Any]:
+        """Poll loader-worker for job status, emit progress, return terminal status.
+
+        Terminal states: ``completed``, ``partial``, ``failed``, ``cancelled``.
+        Synthesises a ``timed_out`` terminal when the loader-worker hasn't
+        reported a real terminal within ``MAX_JOB_WALL_CLOCK_SECONDS`` —
+        without this guard a stuck pod (the 2026-04-29 staging incident)
+        keeps OWUI polling forever and stubs remain in 'pending'.
+
+        ``unchanged_count`` carries through the pre-submit short-circuit
+        result so the in-flight progress bar shows total scope, not just
+        the submitted subset.
+
+        Forwards an in-flight cancellation request to the loader-worker when
+        the user cancels via the UI.
+        """
+        terminal = {'completed', 'partial', 'failed', 'cancelled'}
+        last_status = ''
+        cancel_requested = False
+        started_at = time.monotonic()
+
+        while True:
+            elapsed = time.monotonic() - started_at
+            if elapsed > MAX_JOB_WALL_CLOCK_SECONDS:
+                log.error(
+                    f'Loader-worker job {job_id} exceeded '
+                    f'MAX_JOB_WALL_CLOCK_SECONDS={MAX_JOB_WALL_CLOCK_SECONDS}; '
+                    f'returning synthetic timed_out status so caller can fail-mark stubs.'
+                )
+                return {
+                    'status': 'timed_out',
+                    'items_completed': 0,
+                    'items_failed': 0,
+                    'items': [],
+                    'errors': [],
+                    'stage_counts': {},
+                }
+
+            status = await self._pipeline_client.get_status(job_id)
+            current_status = status.get('status', '')
+            items_completed = status.get('items_completed', 0)
+            items_failed = status.get('items_failed', 0)
+            stage_counts = status.get('stage_counts') or {}
+            item_states = status.get('items') or []
+
+            # Reflect the loader-worker's per-item stage state on the stub
+            # File rows so the KB UI's per-file spinners can transition
+            # downloading → parsing → ingesting → completed without waiting
+            # for the terminal ingest callback. The /ingest callback still
+            # owns the final transition to 'completed' / 'error'.
+            await self._apply_item_stages_to_files(item_states)
+
+            await self._update_sync_status(
+                'syncing',
+                current=items_completed + items_failed + unchanged_count,
+                total=total_files,
+                files_processed=items_completed,
+                files_failed=items_failed,
+                stage_counts=stage_counts,
+            )
+
+            if not cancel_requested and self._check_cancelled():
+                try:
+                    await self._pipeline_client.cancel_job(job_id)
+                except Exception as e:
+                    log.warning(f'Failed to cancel loader-worker job {job_id}: {e}')
+                cancel_requested = True
+
+            if current_status in terminal:
+                last_status = current_status
+                return status
+
+            last_status = current_status
+            await asyncio.sleep(2)
+
+    async def _sync_via_pipeline(  # noqa: C901 — terminal-state branching is irreducible (completed/partial/failed/cancelled/timed_out + orphan sweep)
+        self,
+        all_files_to_process: List[Dict[str, Any]],
+        total_files: int,
+        added_file_ids: set[str],
+        updated_file_ids: set[str],
+        unchanged_count: int,
+        total_deleted: int,
+    ) -> Dict[str, Any]:
+        """Drive a sync via the per-tenant loader-worker.
+
+        Submits one job carrying every discovered file, polls for terminal
+        status, persists ``last_result`` in KB meta, and returns a result
+        dict shape-compatible with the legacy in-pod path.
+
+        ``added_file_ids`` / ``updated_file_ids`` are the pre-classified
+        partition of the submit batch; intersecting them with the loader-
+        worker's per-item ok set yields the toast's ``files_added`` /
+        ``files_updated`` counts.
+        """
+        failed_files: List[FailedFile] = []
+
+        if not all_files_to_process:
+            await self._save_sources()
+            await self._update_sync_status(
+                'completed',
+                current=total_files,
+                total=total_files,
+                files_processed=0,
+                files_failed=0,
+                deleted_count=total_deleted,
+                files_added=0,
+                files_updated=0,
+                files_unchanged=unchanged_count,
+                files_removed=total_deleted,
+                failed_files=failed_files,
+            )
+            return {
+                'files_processed': 0,
+                'files_failed': 0,
+                'total_found': total_files,
+                'deleted_count': total_deleted,
+                'files_added': 0,
+                'files_updated': 0,
+                'files_unchanged': unchanged_count,
+                'files_removed': total_deleted,
+                'failed_files': [],
+            }
+
+        try:
+            job_id = await self._submit_pipeline_job(all_files_to_process)
+        except ConfigurationError as e:
+            # Sync prerequisite missing (e.g. WEBUI_PUBLIC_BASE_URL unset).
+            # Fail-mark the stubs we just inserted so the KB UI doesn't
+            # leave spinners — and surface the real reason in the toast.
+            log.error(f'Sync prerequisite failed: {e}')
+            await self._fail_mark_outstanding_stubs(str(e))
+            await self._update_sync_status('failed', error=str(e))
+            raise
+        except Exception as e:
+            log.exception(f'Failed to submit loader-worker job: {e}')
+            await self._fail_mark_outstanding_stubs(f'pipeline submit failed: {e}')
+            await self._update_sync_status('failed', error=f'pipeline submit failed: {e}')
+            raise
+
+        status = await self._track_job_progress(
+            job_id=job_id,
+            total_files=total_files,
+            unchanged_count=unchanged_count,
+        )
+
+        items_completed = status.get('items_completed', 0)
+        items_failed = status.get('items_failed', 0)
+        terminal = status.get('status', 'completed')
+
+        # Per-item ok set, used to split items_completed back into the
+        # pre-submit added/updated buckets so the toast can say "Added N,
+        # Updated M" instead of just "N processed". Empty if loader-worker
+        # didn't emit items[]; in that case the toast falls back to
+        # showing only the totals.
+        ok_file_ids: set[str] = {
+            it.get('file_id')
+            for it in (status.get('items') or [])
+            if it.get('file_id') and (it.get('stage') in ('ok', 'completed') or it.get('status') == 'ok')
+        }
+
+        # When the loader-worker reports terminal=failed (e.g. /ingest callback
+        # rejected the batch), items_completed reflects items that *processed*
+        # successfully but did NOT land in the KB. Treat them as failed so the
+        # UI doesn't show a false-positive sync confirmation.
+        if terminal == 'failed' and items_completed > 0:
+            items_failed = items_failed + items_completed
+            items_completed = 0
+            ok_file_ids = set()
+
+        final_added = len(ok_file_ids & added_file_ids)
+        final_updated = len(ok_file_ids & updated_file_ids)
+        final_failed = items_failed
+        final_unchanged = unchanged_count
+
+        # File ids that were definitively removed because the loader-worker
+        # reported their source access was permanently revoked. Keyed for the
+        # orphan-stage sweep below so we don't try to fail-mark a file row
+        # that no longer exists.
+        revoked_count = 0
+        revoked_file_ids: set[str] = set()
+
+        for err in status.get('errors', []) or []:
+            code = err.get('error_code') or 'unexpected_error'
+            file_id = err.get('file_id', 'unknown')
+
+            if code == 'source_access_revoked':
+                # Server-confirmed permanent loss. Mirror _handle_deleted_item:
+                # remove from KB, purge vectors, hard-delete the File row if
+                # no other KB references it. Excluded from the user-facing
+                # ``failed_files`` list — it's a "Removed", not a "Failed".
+                removed = await self._handle_revoked_item(file_id)
+                if removed:
+                    revoked_count += removed
+                    if file_id and file_id != 'unknown':
+                        revoked_file_ids.add(file_id)
+                # Don't subtract from items_failed — the loader-worker
+                # already counted this item there. Compensate downstream by
+                # rolling revoked_count into total_deleted (Phase 2's
+                # files_removed) and dropping it from final_failed.
+                continue
+
+            error_type = _LOADER_ERROR_CODE_TO_SYNC_TYPE.get(
+                code,
+                SyncErrorType.PROCESSING_ERROR,
+            )
+            # Look up the real filename from the stub File row; the
+            # loader-worker's ``err`` dict only has ``file_id`` (the
+            # internal opaque id like 'googledrive-1J-g2oT…'). Falling
+            # back to the file_id when the row is missing is fine for
+            # logs but should never reach the user-facing toast — the
+            # stub was inserted in this same sync, so it must exist.
+            display_name = file_id
+            if file_id and file_id != 'unknown':
+                try:
+                    existing = Files.get_file_by_id(file_id)
+                    if existing and existing.filename:
+                        display_name = existing.filename
+                except Exception:
+                    log.debug(f'Could not resolve filename for {file_id}', exc_info=True)
+            failed_files.append(
+                FailedFile(
+                    filename=display_name,
+                    error_type=error_type.value,
+                    # Keep error_message empty in the user-facing payload —
+                    # the loader-worker's raw text is English and exposes
+                    # IDs/URLs, neither of which the user wants in the toast.
+                    # The category label (error_type) is the only thing
+                    # rendered now; raw text is retained server-side via
+                    # last_result.failed_files for debugging.
+                    error_message='',
+                )
+            )
+
+        # Roll revoked items into Phase 2's files_removed and drop them from
+        # the failed counter so the toast says "Removed N" instead of
+        # "N failed" for permission-revoke fallout.
+        if revoked_count:
+            total_deleted += revoked_count
+            final_failed = max(0, final_failed - revoked_count)
+
+        # Cover the "stage stuck mid-pipeline" case: loader-worker reported a
+        # terminal job, but ``items[]`` shows individual items still in
+        # ``downloading`` / ``parsing`` / ``ingesting`` / ``pending``. The
+        # /ingest callback never landed for those — fail-mark them so they
+        # don't sit forever with a spinner. Skipped on cancellation, which is
+        # handled below.
+        if terminal != 'cancelled':
+            non_terminal_stages = {'pending', 'downloading', 'parsing', 'ingesting'}
+            for orphan in status.get('items') or []:
+                if orphan.get('stage') not in non_terminal_stages:
+                    continue
+                file_id = orphan.get('file_id')
+                if not file_id:
+                    continue
+                if file_id in revoked_file_ids:
+                    # Already deleted via _handle_revoked_item; the row no
+                    # longer exists and re-fail-marking would race a 404.
+                    continue
+                try:
+                    existing = Files.get_file_by_id(file_id)
+                    if existing and (existing.data or {}).get('status') not in ('completed', 'error'):
+                        Files.update_file_data_by_id(
+                            file_id,
+                            {
+                                'status': 'error',
+                                'error': (f'sync ended with item still in stage={orphan.get("stage")}'),
+                            },
+                        )
+                except Exception:
+                    log.warning(f'Failed to fail-mark orphan-stage stub {file_id}', exc_info=True)
+
+        # Synthetic timeout from _track_job_progress: fail-mark every stub
+        # this sync inserted that's still in a non-terminal state.
+        if terminal == 'timed_out':
+            changed = await self._fail_mark_outstanding_stubs('Sync timed out')
+            log.warning(
+                f'Sync timed out for KB {self.knowledge_id}: fail-marked {changed} stub(s) '
+                f'(MAX_JOB_WALL_CLOCK_SECONDS={MAX_JOB_WALL_CLOCK_SECONDS})'
+            )
+            for source in self.sources:
+                for key in self.source_clear_delta_keys:
+                    source.pop(key, None)
+            await self._save_sources()
+            await self._update_sync_status(
+                'failed',
+                current=total_files,
+                total=total_files,
+                error='Sync timed out',
+                files_processed=0,
+                files_failed=changed,
+                deleted_count=total_deleted,
+                files_added=0,
+                files_updated=0,
+                files_unchanged=final_unchanged,
+                files_removed=total_deleted,
+                failed_files=failed_files,
+            )
+            return {
+                'files_processed': 0,
+                'files_failed': changed,
+                'total_found': total_files,
+                'deleted_count': total_deleted,
+                'files_added': 0,
+                'files_updated': 0,
+                'files_unchanged': final_unchanged,
+                'files_removed': total_deleted,
+                'timed_out': True,
+                'failed_files': [asdict(f) for f in failed_files],
+            }
+
+        total_processed = final_added + final_updated
+        total_failed = final_failed
+
+        if terminal == 'cancelled':
+            await self._fail_mark_outstanding_stubs(
+                'Sync cancelled by user',
+                error_status='cancelled',
+            )
+            for source in self.sources:
+                for key in self.source_clear_delta_keys:
+                    source.pop(key, None)
+            await self._save_sources()
+            await self._update_sync_status(
+                'cancelled',
+                current=total_processed + total_failed,
+                total=total_files,
+                error='Sync cancelled by user',
+                files_processed=total_processed,
+                files_failed=total_failed,
+                deleted_count=total_deleted,
+                files_added=final_added,
+                files_updated=final_updated,
+                files_unchanged=final_unchanged,
+                files_removed=total_deleted,
+                failed_files=failed_files,
+            )
+            return {
+                'files_processed': total_processed,
+                'files_failed': total_failed,
+                'total_found': total_files,
+                'deleted_count': total_deleted,
+                'files_added': final_added,
+                'files_updated': final_updated,
+                'files_unchanged': final_unchanged,
+                'files_removed': total_deleted,
+                'cancelled': True,
+                'failed_files': [asdict(f) for f in failed_files],
+            }
+
+        # Persist the delta cursor when the only failures are non-retryable
+        # (e.g. unsupported file type, schema-skew, empty extraction). Re-
+        # running won't help those, so freezing the cursor would just force
+        # a full re-walk on every subsequent sync — which is what users
+        # observed when a single .png in their folder kept the next "add
+        # one file" sync re-enumerating thousands of files.
+        #
+        # Retryable failures (needs_token_refresh, hard_source_error,
+        # config_error, unexpected_error, cancelled) still freeze the
+        # cursor so the failed items get another chance next sync.
+        retryable_codes = {
+            (e.get('error_code') or 'unexpected_error') for e in (status.get('errors') or [])
+        } - _NON_RETRYABLE_LOADER_ERROR_CODES
+        if terminal in ('completed', 'partial') and not retryable_codes:
+            await self._save_sources()
+            if total_failed:
+                log.info(
+                    f'Advancing delta cursor for {self.knowledge_id} despite {total_failed} non-retryable failure(s).'
+                )
+        else:
+            log.warning(
+                f'Skipping _save_sources() for {self.knowledge_id}: '
+                f'terminal={terminal}, items_failed={total_failed}, '
+                f'retryable_codes={sorted(retryable_codes)}. '
+                f'Delta cursor not advanced; next sync will re-enumerate.'
+            )
+
+        failed_files_dicts = [asdict(f) for f in failed_files]
+        knowledge = Knowledges.get_knowledge_by_id(self.knowledge_id)
+        meta = knowledge.meta or {}
+        sync_info = meta.get(self.meta_key, {})
+        sync_info['last_sync_at'] = int(time.time())
+        sync_info['status'] = 'completed' if total_failed == 0 else 'completed_with_errors'
+        sync_info['last_result'] = {
+            'files_processed': total_processed,
+            'files_failed': total_failed,
+            'total_found': total_files,
+            'deleted_count': total_deleted,
+            'files_added': final_added,
+            'files_updated': final_updated,
+            'files_unchanged': final_unchanged,
+            'files_removed': total_deleted,
+            'failed_files': failed_files_dicts,
+        }
+        meta[self.meta_key] = sync_info
+        Knowledges.update_knowledge_meta_by_id(self.knowledge_id, meta)
+
+        await self._update_sync_status(
+            sync_info['status'],
+            current=total_files,
+            total=total_files,
+            files_processed=total_processed,
+            files_failed=total_failed,
+            deleted_count=total_deleted,
+            files_added=final_added,
+            files_updated=final_updated,
+            files_unchanged=final_unchanged,
+            files_removed=total_deleted,
+            failed_files=failed_files,
+        )
+
+        log.info(
+            f'Sync via pipeline completed for {self.knowledge_id}: '
+            f'added={final_added}, updated={final_updated}, '
+            f'unchanged={final_unchanged}, failed={total_failed} (job_id={job_id})'
+        )
+
+        return {
+            'files_processed': total_processed,
+            'files_failed': total_failed,
+            'total_found': total_files,
+            'deleted_count': total_deleted,
+            'files_added': final_added,
+            'files_updated': final_updated,
+            'files_unchanged': final_unchanged,
+            'files_removed': total_deleted,
+            'failed_files': failed_files_dicts,
+        }
+
     async def sync(self) -> Dict[str, Any]:
         """Execute sync operation for all sources."""
         self._client = self._create_client()
@@ -1145,25 +2088,50 @@ class BaseSyncWorker(ABC):
                         error=(f'Only syncing {available_slots} of {total_found} files due to {max_files}-file limit.'),
                     )
 
-            # Count existing provider files that aren't being re-processed
-            processing_item_ids = {f['item']['id'] for f in all_files_to_process}
-            already_synced = sum(
-                1
-                for f in current_files
-                if f.id.startswith(self.file_id_prefix)
-                and f.id.removeprefix(self.file_id_prefix) not in processing_item_ids
-                and f.hash  # Only count as synced if processing succeeded (hash is set on success)
-            )
+            # Categorize discovered files before submission so the toast can
+            # report what actually changed (added/updated/unchanged), not just
+            # what passed through the loader-worker. The legacy in-pod path
+            # had a per-file short-circuit at `_download_and_store_legacy`;
+            # the shared-loader path lacked one, which is the structural
+            # cause of the "5 extra" re-sync toast.
+            added_file_ids: set[str] = set()
+            updated_file_ids: set[str] = set()
+            unchanged_count = 0
+            to_submit: List[Dict[str, Any]] = []
+            for fi in all_files_to_process:
+                cat, fid = self._classify_for_submit(fi)
+                if cat == 'unchanged':
+                    unchanged_count += 1
+                    continue
+                if cat == 'added':
+                    added_file_ids.add(fid)
+                else:
+                    updated_file_ids.add(fid)
+                to_submit.append(fi)
 
-            total_files = len(all_files_to_process) + already_synced
+            all_files_to_process = to_submit
+            total_files = len(all_files_to_process) + unchanged_count
             log.info(
-                f'Total files to process: {len(all_files_to_process)} '
-                f'({already_synced} already synced, {total_files} total)'
+                f'Classified {len(all_files_to_process) + unchanged_count} files: '
+                f'{len(added_file_ids)} added, {len(updated_file_ids)} updated, '
+                f'{unchanged_count} unchanged'
             )
 
             # Pre-create the KB collection so individual file inserts don't
             # race to create it (avoids N-1 wasted 422 roundtrips).
             VECTOR_DB_CLIENT.insert(collection_name=self.knowledge_id, items=[])
+
+            # USE_SHARED_LOADER branch: delegate everything to the per-tenant
+            # loader-worker pod. The semaphore-bounded fan-out below is bypassed.
+            if self._use_shared_loader and self._pipeline_client:
+                return await self._sync_via_pipeline(
+                    all_files_to_process=all_files_to_process,
+                    total_files=total_files,
+                    added_file_ids=added_file_ids,
+                    updated_file_ids=updated_file_ids,
+                    unchanged_count=unchanged_count,
+                    total_deleted=total_deleted,
+                )
 
             # Process all files with two-phase pipeline
             from open_webui.config import FILE_DOWNLOAD_CONCURRENCY_MULTIPLIER
@@ -1182,7 +2150,7 @@ class BaseSyncWorker(ABC):
             max_download_concurrent = max_process_concurrent * FILE_DOWNLOAD_CONCURRENCY_MULTIPLIER
             download_semaphore = asyncio.Semaphore(max_download_concurrent)
             process_semaphore = asyncio.Semaphore(max_process_concurrent)
-            processed_count = already_synced
+            processed_count = unchanged_count
             failed_count = 0
             results_lock = asyncio.Lock()
             cancelled = False
@@ -1389,20 +2357,23 @@ class BaseSyncWorker(ABC):
 
                 await self._update_sync_status(
                     'cancelled',
-                    total_processed + total_failed,
-                    total_files,
-                    '',
-                    'Sync cancelled by user',
-                    total_processed,
-                    total_failed,
-                    total_deleted,
-                    failed_files,
+                    current=total_processed + total_failed,
+                    total=total_files,
+                    error='Sync cancelled by user',
+                    files_processed=total_processed,
+                    files_failed=total_failed,
+                    deleted_count=total_deleted,
+                    files_unchanged=unchanged_count,
+                    files_removed=total_deleted,
+                    failed_files=failed_files,
                 )
                 return {
                     'files_processed': total_processed,
                     'files_failed': total_failed,
                     'total_found': total_files,
                     'deleted_count': total_deleted,
+                    'files_unchanged': unchanged_count,
+                    'files_removed': total_deleted,
                     'cancelled': True,
                     'failed_files': [asdict(f) for f in failed_files],
                 }
@@ -1412,7 +2383,13 @@ class BaseSyncWorker(ABC):
 
             failed_files_dicts = [asdict(f) for f in failed_files]
 
-            # Update final sync status
+            # Update final sync status. The legacy in-pod path doesn't track
+            # per-file outcomes by classification bucket, so we approximate
+            # the new toast counts: items that ran through the pipeline are
+            # ``files_processed - unchanged_count``, and we attribute them
+            # all to ``files_added`` (the legacy path is dead-coded behind
+            # USE_SHARED_LOADER and doesn't need precise added/updated split).
+            legacy_added = max(0, total_processed - unchanged_count)
             knowledge = Knowledges.get_knowledge_by_id(self.knowledge_id)
             meta = knowledge.meta or {}
             sync_info = meta.get(self.meta_key, {})
@@ -1423,6 +2400,10 @@ class BaseSyncWorker(ABC):
                 'files_failed': total_failed,
                 'total_found': total_files,
                 'deleted_count': total_deleted,
+                'files_added': legacy_added,
+                'files_updated': 0,
+                'files_unchanged': unchanged_count,
+                'files_removed': total_deleted,
                 'failed_files': failed_files_dicts,
             }
             meta[self.meta_key] = sync_info
@@ -1430,14 +2411,16 @@ class BaseSyncWorker(ABC):
 
             await self._update_sync_status(
                 sync_info['status'],
-                total_files,
-                total_files,
-                '',
-                None,
-                total_processed,
-                total_failed,
-                total_deleted,
-                failed_files,
+                current=total_files,
+                total=total_files,
+                files_processed=total_processed,
+                files_failed=total_failed,
+                deleted_count=total_deleted,
+                files_added=legacy_added,
+                files_updated=0,
+                files_unchanged=unchanged_count,
+                files_removed=total_deleted,
+                failed_files=failed_files,
             )
 
             log.info(f'Sync completed for {self.knowledge_id}: {total_processed} processed, {total_failed} failed')

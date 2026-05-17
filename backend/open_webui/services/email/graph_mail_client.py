@@ -56,7 +56,9 @@ _STRINGS = {
         'heading_with_client': f"You've been invited to the {APP_NAME_HTML} environment of {{client_name}}",
         'heading': f"You've been invited to {APP_NAME_HTML}",
         'body': '{invited_by_name} has invited you to join. Click the button below to create your account.',
+        'body_sso': '{invited_by_name} has invited you to join. Click the button below to sign in and activate your account.',
         'button': 'Accept Invite',
+        'button_sso': 'Sign in with Microsoft',
         'footer': "This invite expires in {expiry_days} days. If you didn't expect this email, you can safely ignore it.",
     },
     'nl': {
@@ -65,7 +67,9 @@ _STRINGS = {
         'heading_with_client': f'Je bent uitgenodigd voor de {APP_NAME_HTML}-omgeving van {{client_name}}',
         'heading': f'Je bent uitgenodigd voor {APP_NAME_HTML}',
         'body': '{invited_by_name} heeft je uitgenodigd. Klik op de onderstaande knop om je account aan te maken.',
+        'body_sso': '{invited_by_name} heeft je uitgenodigd. Klik op de onderstaande knop om in te loggen en je account te activeren.',
         'button': 'Uitnodiging accepteren',
+        'button_sso': 'Aanmelden met Microsoft',
         'footer': 'Deze uitnodiging verloopt over {expiry_days} dagen. Als je deze e-mail niet verwachtte, kun je deze veilig negeren.',
     },
 }
@@ -140,6 +144,7 @@ def render_invite_email(
     expiry_hours: int = 168,
     client_name: str = '',
     custom_heading: str = '',
+    oauth_signup_enabled: bool = False,
 ) -> str:
     strings = _get_strings(locale)
     expiry_days = max(1, expiry_hours // 24)
@@ -151,8 +156,10 @@ def render_invite_email(
         heading = _prevent_email_autolink(heading)
     else:
         heading = strings['heading']
-    body = strings['body'].format(invited_by_name=invited_by_name)
-    button = strings['button']
+    body_key = 'body_sso' if oauth_signup_enabled else 'body'
+    button_key = 'button_sso' if oauth_signup_enabled else 'button'
+    body = strings[body_key].format(invited_by_name=invited_by_name)
+    button = strings[button_key]
     footer = strings['footer'].format(expiry_days=expiry_days)
 
     return f"""\

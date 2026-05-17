@@ -16,6 +16,7 @@
 
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
 	import DocumentPage from '$lib/components/icons/DocumentPage.svelte';
+	import ExclamationTriangle from '$lib/components/icons/ExclamationTriangle.svelte';
 	import Folder from '$lib/components/icons/Folder.svelte';
 	import XMark from '$lib/components/icons/XMark.svelte';
 	import ChevronDown from '$lib/components/icons/ChevronDown.svelte';
@@ -83,9 +84,17 @@
 		return count;
 	}
 
-	// Group files by source
-	$: folderSources = (sources || []).filter((s) => s.type === 'folder');
-	$: fileSources = (sources || []).filter((s) => s.type === 'file');
+	// Group files by source. Folder-like = anything that groups many files:
+	//   - onedrive/google_drive: type='folder'
+	//   - confluence: type='space', or type='page' with include_descendants=true
+	const isFolderLikeSource = (s: any): boolean => {
+		if (s?.type === 'folder' || s?.type === 'space') return true;
+		if (s?.type === 'page' && s?.include_descendants !== false) return true;
+		return false;
+	};
+
+	$: folderSources = (sources || []).filter(isFolderLikeSource);
+	$: fileSources = (sources || []).filter((s) => !isFolderLikeSource(s));
 
 	// Files grouped by their source_item_id
 	$: filesBySource = (() => {
@@ -192,6 +201,7 @@
 
 						<!-- Root-level files (direct children of the source folder) -->
 						{#each tree.files as file (file?.id ?? file?.itemId)}
+							{@const fileStatus = file?.status ?? file?.data?.status}
 							<div
 								class="flex cursor-pointer w-full px-1.5 py-0.5 hover:bg-gray-50 dark:hover:bg-gray-850/50 rounded-xl transition"
 							>
@@ -203,10 +213,12 @@
 									<div>
 										<div class="flex gap-2 items-center line-clamp-1">
 											<div class="shrink-0">
-												{#if file?.status !== 'uploading'}
-													<DocumentPage className="size-3" />
-												{:else}
+												{#if fileStatus === 'uploading' || fileStatus === 'pending' || fileStatus === 'downloading' || fileStatus === 'parsing' || fileStatus === 'ingesting'}
 													<Spinner className="size-3" />
+												{:else if fileStatus === 'error' || fileStatus === 'cancelled'}
+													<ExclamationTriangle className="size-3 text-red-500" />
+												{:else}
+													<DocumentPage className="size-3" />
 												{/if}
 											</div>
 											<div class="line-clamp-1 text-xs">
@@ -241,6 +253,7 @@
 
 	<!-- Loose files (individual OneDrive sources + local uploads) -->
 	{#each looseFiles as file (file?.id ?? file?.itemId ?? file?.tempId)}
+		{@const fileStatus = file?.status ?? file?.data?.status}
 		<div
 			class="flex cursor-pointer w-full px-1.5 py-0.5 bg-transparent dark:hover:bg-gray-850/50 hover:bg-white rounded-xl transition {selectedFileId
 				? ''
@@ -254,10 +267,12 @@
 				<div>
 					<div class="flex gap-2 items-center line-clamp-1">
 						<div class="shrink-0">
-							{#if file?.status !== 'uploading'}
-								<DocumentPage className="size-3.5" />
-							{:else}
+							{#if fileStatus === 'uploading' || fileStatus === 'pending' || fileStatus === 'downloading' || fileStatus === 'parsing' || fileStatus === 'ingesting'}
 								<Spinner className="size-3.5" />
+							{:else if fileStatus === 'error' || fileStatus === 'cancelled'}
+								<ExclamationTriangle className="size-3.5 text-red-500" />
+							{:else}
+								<DocumentPage className="size-3.5" />
 							{/if}
 						</div>
 
@@ -304,11 +319,12 @@
 							class="p-1 rounded-full hover:bg-gray-100 dark:hover:bg-gray-850 transition"
 							type="button"
 							on:click={() => {
-								if (
-									(file?.meta?.source === 'onedrive' || file?.meta?.source === 'google_drive') &&
-									file?.meta?.source_item_id
-								) {
-									// OneDrive loose file: remove via source removal
+								const cloudSource =
+									file?.meta?.source === 'onedrive' ||
+									file?.meta?.source === 'google_drive' ||
+									file?.meta?.source === 'confluence';
+								if (cloudSource && file?.meta?.source_item_id) {
+									// Cloud-provider loose file: remove via source removal
 									onRemoveSource(file.meta.source_item_id, file?.name ?? file?.meta?.name);
 								} else {
 									// Local file: normal delete

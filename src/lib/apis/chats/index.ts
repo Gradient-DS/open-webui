@@ -1,7 +1,12 @@
 import { WEBUI_API_BASE_URL } from '$lib/constants';
 import { getTimeRange } from '$lib/utils';
 
-export const createNewChat = async (token: string, chat: object, folderId: string | null) => {
+export const createNewChat = async (
+	token: string,
+	chat: object,
+	folderId: string | null,
+	meta: object | null = null
+) => {
 	let error = null;
 
 	const res = await fetch(`${WEBUI_API_BASE_URL}/chats/new`, {
@@ -13,7 +18,8 @@ export const createNewChat = async (token: string, chat: object, folderId: strin
 		},
 		body: JSON.stringify({
 			chat: chat,
-			folder_id: folderId ?? null
+			folder_id: folderId ?? null,
+			...(meta ? { meta } : {})
 		})
 	})
 		.then(async (res) => {

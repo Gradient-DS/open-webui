@@ -1,0 +1,123 @@
+{{- if .Values.loaderWorker.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "open-webui-tenant.loaderWorker.fullname" . }}
+  labels:
+    {{- include "open-webui-tenant.loaderWorker.labels" . | nindent 4 }}
+spec:
+  {{- if not .Values.loaderWorker.autoscaling.enabled }}
+  replicas: {{ .Values.loaderWorker.replicaCount | default 1 }}
+  {{- end }}
+  selector:
+    matchLabels:
+      {{- include "open-webui-tenant.loaderWorker.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "open-webui-tenant.loaderWorker.selectorLabels" . | nindent 8 }}
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/loader-worker/configmap.yaml") . | sha256sum }}
+    spec:
+      {{- include "open-webui-tenant.imagePullSecrets" . | nindent 6 }}
+      serviceAccountName: {{ include "open-webui-tenant.serviceAccountName" . }}
+      {{- with .Values.loaderWorker.podSecurityContext }}
+      securityContext:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      initContainers:
+        # Wait until the bootstrap Job has created the loader role + database
+        # AND the synced Secret has the loader-worker-db-password key. Without
+        # this, the loader-worker container would CrashLoopBackOff with
+        # InvalidPasswordError if started before the Helm hook completes.
+        - name: wait-for-loader-db
+          image: "{{ .Values.postgres.image.repository }}:{{ .Values.postgres.image.tag }}"
+          imagePullPolicy: {{ .Values.postgres.image.pullPolicy | default "IfNotPresent" }}
+          {{- with .Values.loaderWorker.securityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          env:
+            - name: PGHOST
+              value: {{ include "open-webui-tenant.postgres.fullname" . | quote }}
+            - name: PGPORT
+              value: {{ .Values.postgres.port | default 5432 | quote }}
+            - name: PGUSER
+              value: {{ .Values.loaderWorker.postgres.user | default "loader_worker_app" | quote }}
+            - name: PGDATABASE
+              value: {{ .Values.loaderWorker.postgres.database | default "loader_worker" | quote }}
+            - name: PGPASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "open-webui-tenant.fullname" . }}-secrets
+                  key: loader-worker-db-password
+          command:
+            - /bin/sh
+            - -c
+            - |
+              set -eu
+              i=0
+              until psql -c '\q' 2>/dev/null; do
+                i=$((i+1))
+                echo "[$i] waiting for loader_worker DB + role..."
+                sleep 3
+              done
+              echo "loader_worker DB reachable"
+      containers:
+        - name: loader-worker
+          image: "{{ .Values.loaderWorker.image.repository }}:{{ .Values.loaderWorker.image.tag }}"
+          imagePullPolicy: {{ .Values.loaderWorker.image.pullPolicy | default "Always" }}
+          {{- with .Values.loaderWorker.securityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.loaderWorker.config.port | default 8002 }}
+              protocol: TCP
+          envFrom:
+            - configMapRef:
+                name: {{ include "open-webui-tenant.loaderWorker.fullname" . }}-config
+          env:
+            - name: LOADER_DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "open-webui-tenant.fullname" . }}-secrets
+                  key: loader-worker-db-password
+            - name: LOADER_INGEST_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "open-webui-tenant.fullname" . }}-secrets
+                  key: loader-ingest-api-key
+            - name: LITELLM_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "open-webui-tenant.fullname" . }}-secrets
+                  key: openai-api-key
+          resources:
+            {{- toYaml .Values.loaderWorker.resources | nindent 12 }}
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 30
+            periodSeconds: 30
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 10
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+{{- end }}

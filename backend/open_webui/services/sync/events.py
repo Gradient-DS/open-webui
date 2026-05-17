@@ -58,9 +58,26 @@ async def emit_sync_progress(
     files_processed: int = 0,
     files_failed: int = 0,
     deleted_count: int = 0,
+    files_added: int = 0,
+    files_updated: int = 0,
+    files_unchanged: int = 0,
+    files_removed: int = 0,
     failed_files: Optional[List[Dict]] = None,
+    stage_counts: Optional[Dict[str, int]] = None,
+    needs_reauth: bool = False,
 ):
-    """Emit sync progress event to a specific user via Socket.IO."""
+    """Emit sync progress event to a specific user via Socket.IO.
+
+    ``stage_counts`` (when present) carries the loader-worker's per-stage
+    breakdown — ``{downloading, parsing, ingesting, ok, failed, pending}`` —
+    so the UI can render a stage tooltip alongside the n/m counter.
+
+    ``files_added`` / ``files_updated`` / ``files_unchanged`` /
+    ``files_removed`` carry the toast's per-category breakdown so the UI
+    can render "Added 5, Updated 2" instead of "Synced 7". They are
+    additive to ``files_processed`` (= files_added + files_updated) which
+    is kept for backwards compatibility.
+    """
     try:
         from open_webui.socket.main import sio
 
@@ -76,7 +93,13 @@ async def emit_sync_progress(
                 'files_processed': files_processed,
                 'files_failed': files_failed,
                 'deleted_count': deleted_count,
+                'files_added': files_added,
+                'files_updated': files_updated,
+                'files_unchanged': files_unchanged,
+                'files_removed': files_removed,
                 'failed_files': failed_files,
+                'stage_counts': stage_counts,
+                'needs_reauth': needs_reauth,
             },
             room=f'user:{user_id}',
         )

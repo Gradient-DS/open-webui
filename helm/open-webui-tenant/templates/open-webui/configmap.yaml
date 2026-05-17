@@ -14,6 +14,12 @@ data:
   CLIENT_NAME: {{ .Values.tenant.clientName | quote }}
   CORS_ALLOW_ORIGIN: {{ .Values.openWebui.config.corsAllowOrigin | default (printf "https://%s" .Values.tenant.domain) | quote }}
 
+  # In-cluster base URL OWUI passes to the loader-worker as `callback_base_url`
+  # when submitting sync jobs. Read by services/sync/base_worker.py at the
+  # env var name OPENWEBUI_BASE_URL. Empty value -> loader-worker raises
+  # httpx.UnsupportedProtocol on POST /api/v1/integrations/ingest.
+  OPENWEBUI_BASE_URL: "http://{{ include "open-webui-tenant.openWebui.fullname" . }}.{{ .Release.Namespace }}.svc:{{ .Values.openWebui.service.port | default 8080 }}"
+
   # Locale
   DEFAULT_LOCALE: {{ .Values.openWebui.config.defaultLocale | quote }}
 
@@ -24,6 +30,7 @@ data:
   ENABLE_INITIAL_ADMIN_SIGNUP: {{ .Values.openWebui.config.enableInitialAdminSignup | quote }}
   DEFAULT_USER_ROLE: {{ .Values.openWebui.config.defaultUserRole | quote }}
   ENABLE_OAUTH_SIGNUP: {{ .Values.openWebui.config.enableOauthSignup | quote }}
+  OAUTH_INVITE_REQUIRED: {{ .Values.openWebui.config.oauthInviteRequired | quote }}
   OAUTH_MERGE_ACCOUNTS_BY_EMAIL: {{ .Values.openWebui.config.oauthMergeAccountsByEmail | quote }}
   ENABLE_PASSWORD_AUTH: {{ .Values.openWebui.config.enablePasswordAuth | quote }}
   JWT_EXPIRES_IN: {{ .Values.openWebui.config.jwtExpiresIn | quote }}
@@ -90,7 +97,12 @@ data:
   CONTENT_EXTRACTION_ENGINE: {{ .Values.openWebui.config.contentExtractionEngine | quote }}
   RAG_RERANKING_ENGINE: {{ .Values.openWebui.config.ragRerankingEngine | quote }}
   RAG_EXTERNAL_RERANKER_URL: "{{ include "open-webui-tenant.sharedServices.rerankerUrl" . }}/v1/rerank"
-  EXTERNAL_DOCUMENT_LOADER_URL: {{ include "open-webui-tenant.sharedServices.gatewayUrl" . | quote }}
+  # Defaults to the shared-services gateway in `sharedServices.namespace`.
+  # Tenants on a split-namespace setup (e.g. octobox: LiteLLM/reranker on
+  # prod shared-services but doc-loader on staging-shared-services) can
+  # override the URL explicitly via openWebui.config.externalDocumentLoaderUrl
+  # without touching sharedServices.namespace.
+  EXTERNAL_DOCUMENT_LOADER_URL: {{ .Values.openWebui.config.externalDocumentLoaderUrl | default (include "open-webui-tenant.sharedServices.gatewayUrl" .) | quote }}
 
   # Web Search (via shared Gateway)
   ENABLE_WEB_SEARCH: {{ .Values.openWebui.config.enableWebSearch | quote }}
@@ -130,6 +142,9 @@ data:
   FEATURE_TOOL_SERVERS: {{ .Values.openWebui.config.featureToolServers | quote }}
   FEATURE_TERMINAL_SERVERS: {{ .Values.openWebui.config.featureTerminalServers | quote }}
 
+  # Welcome message (PersistentConfig: env seeds initial value; admin UI wins thereafter)
+  ENABLE_WELCOME_MESSAGE: {{ .Values.openWebui.config.enableWelcomeMessage | quote }}
+
   # PDF export
   USE_STYLIZED_PDF_EXPORT: {{ .Values.openWebui.config.useStylizedPdfExport | quote }}
 
@@ -151,6 +166,9 @@ data:
   # Document Writer
   ENABLE_DOCUMENT_WRITER: {{ .Values.openWebui.config.enableDocumentWriter | quote }}
   USER_PERMISSIONS_FEATURES_DOCUMENT_WRITER: {{ .Values.openWebui.config.userPermissionsFeaturesDocumentWriter | quote }}
+
+  # DOCX export
+  ENABLE_DOCX_EXPORT: {{ .Values.openWebui.config.enableDocxExport | default "true" | quote }}
 
   # MCP
   ENABLE_DIRECT_CONNECTIONS: {{ .Values.openWebui.config.enableDirectConnections | quote }}
@@ -279,7 +297,32 @@ data:
   ONEDRIVE_SYNC_INTERVAL_MINUTES: {{ .Values.openWebui.config.onedriveSyncIntervalMinutes | quote }}
   ONEDRIVE_MAX_FILES_PER_SYNC: {{ .Values.openWebui.config.onedriveMaxFilesPerSync | quote }}
   ONEDRIVE_MAX_FILE_SIZE_MB: {{ .Values.openWebui.config.onedriveMaxFileSizeMb | quote }}
+
+  # Confluence Integration (Atlassian Cloud OAuth)
+  ENABLE_CONFLUENCE_INTEGRATION: {{ .Values.openWebui.config.enableConfluenceIntegration | quote }}
+  {{- if .Values.openWebui.config.confluenceOauthClientId }}
+  CONFLUENCE_OAUTH_CLIENT_ID: {{ .Values.openWebui.config.confluenceOauthClientId | quote }}
+  {{- end }}
+  {{- /* confluenceOauthClientSecret moved to secrets template */ -}}
+
+  # Confluence Sync
+  ENABLE_CONFLUENCE_SYNC: {{ .Values.openWebui.config.enableConfluenceSync | quote }}
+  CONFLUENCE_SYNC_INTERVAL_MINUTES: {{ .Values.openWebui.config.confluenceSyncIntervalMinutes | quote }}
+  CONFLUENCE_MAX_PAGES_PER_SYNC: {{ .Values.openWebui.config.confluenceMaxPagesPerSync | quote }}
+  CONFLUENCE_MAX_PAGE_SIZE_MB: {{ .Values.openWebui.config.confluenceMaxPageSizeMb | quote }}
+
   KNOWLEDGE_MAX_FILE_COUNT: {{ .Values.openWebui.config.knowledgeMaxFileCount | quote }}
+
+  # Shared-services loader-worker (per-tenant). When useSharedLoader=true,
+  # cloud-source sync workers submit jobs to the loader-worker pod instead of
+  # downloading + embedding in-process. See helm/open-webui-tenant/templates/loader-worker/.
+  USE_SHARED_LOADER: {{ .Values.openWebui.config.useSharedLoader | default "false" | quote }}
+  {{- if .Values.loaderWorker.enabled }}
+  LOADER_WORKER_URL: "http://{{ include "open-webui-tenant.loaderWorker.fullname" . }}.{{ .Release.Namespace }}.svc:{{ .Values.loaderWorker.service.port | default 8002 }}"
+  {{- else if .Values.openWebui.config.loaderWorkerUrl }}
+  LOADER_WORKER_URL: {{ .Values.openWebui.config.loaderWorkerUrl | quote }}
+  {{- end }}
+  TENANT_NAME: {{ .Values.tenant.name | default .Release.Namespace | quote }}
 
   # Email Invites (Microsoft Graph API)
   ENABLE_EMAIL_INVITES: {{ .Values.openWebui.config.enableEmailInvites | quote }}
@@ -355,6 +398,9 @@ data:
   {{- if .Values.openWebui.config.s3EnableTagging }}
   S3_ENABLE_TAGGING: {{ .Values.openWebui.config.s3EnableTagging | quote }}
   {{- end }}
+  {{- if .Values.openWebui.config.s3VerifySsl }}
+  S3_VERIFY_SSL: {{ .Values.openWebui.config.s3VerifySsl | quote }}
+  {{- end }}
 
   # AWS SDK env vars (used by boto3 for S3). Default to values compatible with
   # S3-compatible providers that don't accept the newer AWS integrity checksums.
@@ -410,14 +456,39 @@ data:
   {{- end }}
 
   # Agent API (internal: routes chat UI to agent service)
+  # AGENT_API_KEY is set via secrets (see .Values.secrets.agentApiKey)
   {{- if eq .Values.openWebui.config.agentApiEnabled "true" }}
   AGENT_API_ENABLED: "true"
   AGENT_API_BASE_URL: {{ .Values.openWebui.config.agentApiBaseUrl | quote }}
-  AGENT_API_AGENT: {{ .Values.openWebui.config.agentApiAgent | quote }}
+  AGENT_API_AGENTS: {{ .Values.openWebui.config.agentApiAgents | default "" | quote }}
+  {{- with .Values.openWebui.config.agentApiAgentsConfig }}
+  AGENT_API_AGENTS_CONFIG: {{ . | quote }}
   {{- end }}
+  AGENT_API_AGENTS_CONFIG_OVERWRITE: {{ .Values.openWebui.config.agentApiAgentsConfigOverwrite | default "false" | quote }}
+  {{- with .Values.openWebui.config.agentApiPickerDefaultSlug }}
+  AGENT_API_PICKER_DEFAULT_SLUG: {{ . | quote }}
+  {{- end }}
+  {{- end }}
+
+  # [Gradient] Per-chat agent picker UI (Settings → Agents admin tab +
+  # new-chat empty-state cards). Layered on top of AGENT_API_ENABLED.
+  FEATURE_AGENT_PICKER: {{ .Values.openWebui.config.featureAgentPicker | default "false" | quote }}
 
   # Agent Proxy (external: exposes agent API to external callers)
   ENABLE_AGENT_PROXY: {{ .Values.openWebui.config.enableAgentProxy | default "false" | quote }}
+
+  # Search API (RAG discovery proxy at /api/v1/discovery/*).
+  # SEARCH_API_KEY is set via secrets (see .Values.secrets.searchApiKey).
+  # Empty baseUrl disables the discovery proxy at request time.
+  {{- if .Values.openWebui.config.searchApi.baseUrl }}
+  SEARCH_API_BASE_URL: {{ .Values.openWebui.config.searchApi.baseUrl | quote }}
+  {{- end }}
+
+  # Agent Search (machine-auth retrieval endpoint at /api/v1/internal/retrieval/query
+  # and /api/v1/internal/retrieval/accessible-kbs). Inbound bearer is validated
+  # against the same AGENT_API_KEY used for the open-webui → agent outbound
+  # call (single shared secret across the per-tenant trust boundary).
+  AGENT_SEARCH_ENABLED: {{ .Values.agentSearch.enabled | default false | quote }}
 
   # Two-Factor Authentication (TOTP)
   ENABLE_2FA: {{ .Values.openWebui.config.enable2fa | default "false" | quote }}

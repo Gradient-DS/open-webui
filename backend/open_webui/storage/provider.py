@@ -19,6 +19,7 @@ from open_webui.config import (
     S3_USE_ACCELERATE_ENDPOINT,
     S3_ADDRESSING_STYLE,
     S3_ENABLE_TAGGING,
+    S3_VERIFY_SSL,
     GCS_BUCKET_NAME,
     GOOGLE_APPLICATION_CREDENTIALS_JSON,
     AZURE_STORAGE_ENDPOINT,
@@ -131,6 +132,7 @@ class S3StorageProvider(StorageProvider):
                 aws_access_key_id=S3_ACCESS_KEY_ID,
                 aws_secret_access_key=S3_SECRET_ACCESS_KEY,
                 config=config,
+                verify=S3_VERIFY_SSL,
             )
         else:
             # If no explicit credentials are provided, fall back to default AWS credentials
@@ -140,6 +142,7 @@ class S3StorageProvider(StorageProvider):
                 region_name=S3_REGION_NAME,
                 endpoint_url=S3_ENDPOINT_URL,
                 config=config,
+                verify=S3_VERIFY_SSL,
             )
 
         self.bucket_name = S3_BUCKET_NAME

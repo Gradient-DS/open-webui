@@ -3,7 +3,7 @@ import logging
 import markdown
 
 from open_webui.models.chats import ChatTitleMessagesForm
-from open_webui.config import DATA_DIR, ENABLE_ADMIN_EXPORT
+from open_webui.config import DATA_DIR, ENABLE_ADMIN_EXPORT, ENABLE_DOCX_EXPORT
 from open_webui.constants import ERROR_MESSAGES
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from pydantic import BaseModel
@@ -149,6 +149,8 @@ async def export_chat_as_docx(
     user=Depends(get_verified_user),
 ):
     """Export chat as a Word document with citations and sources."""
+    if not ENABLE_DOCX_EXPORT:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail='DOCX export is disabled')
     from open_webui.services.chat_export import generate_docx
 
     try:
@@ -196,6 +198,8 @@ async def export_document_as_docx(
     user=Depends(get_verified_user),
 ):
     """Export a single markdown document as a Word document."""
+    if not ENABLE_DOCX_EXPORT:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail='DOCX export is disabled')
     from open_webui.services.document_export import generate_document_docx
 
     try:

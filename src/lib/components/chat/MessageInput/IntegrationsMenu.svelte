@@ -218,11 +218,19 @@
 					{/if}
 
 					{#if showWebSearchButton}
-						<Tooltip content={$i18n.t('Search the internet')} placement="top-start">
+						<Tooltip
+							content={imageGenerationEnabled
+								? $i18n.t('Web search and image generation cannot run in the same turn')
+								: $i18n.t('Search the internet')}
+							placement="top-start"
+						>
 							<button
 								class="flex w-full justify-between gap-2 items-center px-3 py-1.5 text-sm cursor-pointer rounded-xl hover:bg-gray-50 dark:hover:bg-gray-800/50"
 								on:click={() => {
 									webSearchEnabled = !webSearchEnabled;
+									if (webSearchEnabled) {
+										imageGenerationEnabled = false;
+									}
 								}}
 							>
 								<div class="flex-1 truncate">
@@ -249,11 +257,19 @@
 					{/if}
 
 					{#if showImageGenerationButton}
-						<Tooltip content={$i18n.t('Generate an image')} placement="top-start">
+						<Tooltip
+							content={webSearchEnabled
+								? $i18n.t('Web search and image generation cannot run in the same turn')
+								: $i18n.t('Generate an image')}
+							placement="top-start"
+						>
 							<button
 								class="flex w-full justify-between gap-2 items-center px-3 py-1.5 text-sm cursor-pointer rounded-xl hover:bg-gray-50 dark:hover:bg-gray-800/50"
 								on:click={() => {
 									imageGenerationEnabled = !imageGenerationEnabled;
+									if (imageGenerationEnabled) {
+										webSearchEnabled = false;
+									}
 								}}
 							>
 								<div class="flex-1 truncate">

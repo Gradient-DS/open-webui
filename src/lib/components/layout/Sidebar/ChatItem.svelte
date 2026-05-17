@@ -530,7 +530,7 @@
 					<button
 						class=" self-center dark:hover:text-white transition"
 						on:click={() => {
-							deleteChatHandler(id);
+							showDeleteConfirm = true;
 						}}
 						type="button"
 					>

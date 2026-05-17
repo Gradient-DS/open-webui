@@ -60,6 +60,7 @@
 	import Citations from './Citations.svelte';
 	import CodeExecutions from './CodeExecutions.svelte';
 	import ContentRenderer from './ContentRenderer.svelte';
+	import PresentUIDispatcher from './Markdown/PresentUIDispatcher.svelte';
 	import { KokoroWorker } from '$lib/workers/KokoroWorker';
 	import FileItem from '$lib/components/common/FileItem.svelte';
 	import FollowUps from './ResponseMessage/FollowUps.svelte';
@@ -67,6 +68,12 @@
 	import { flyAndScale } from '$lib/utils/transitions';
 	import RegenerateMenu from './ResponseMessage/RegenerateMenu.svelte';
 	import StatusHistory from './ResponseMessage/StatusHistory.svelte';
+	import ReasoningBullet from './ResponseMessage/StatusHistory/ReasoningBullet.svelte';
+	import {
+		detectMergeProtocol,
+		mergeStatusAndReasoning,
+		parseToolOffsets
+	} from './ResponseMessage/mergeHistory';
 	import FullHeightIframe from '$lib/components/common/FullHeightIframe.svelte';
 
 	interface MessageType {
@@ -93,6 +100,7 @@
 		done: boolean;
 		error?: boolean | { content: string };
 		sources?: string[];
+		uiBlocks?: { id: string; name: string; props: any }[];
 		code_executions?: {
 			uuid: string;
 			name: string;
@@ -174,11 +182,100 @@
 	let model = null;
 	$: model = $models.find((m) => m.id === message.model);
 
-	$: statusEntries = message?.statusHistory ?? [...(message?.status ? [message?.status] : [])];
-	$: hasVisibleStatus =
+	$: statusEntries = (() => {
+		const raw = message?.statusHistory ?? [...(message?.status ? [message?.status] : [])];
+		// The agent emits one "summary" StatusUpdate after each tool completes
+		// (so the dropdown header settles to "N tools aangeroepen in M seconden"
+		// while the answer streams, not after) plus a final post-loop summary
+		// with the total turn time. Keep only the most recent one — earlier
+		// emissions are superseded by the latest count + time.
+		let lastSummaryIdx = -1;
+		for (let i = raw.length - 1; i >= 0; i--) {
+			if (raw[i]?.action === 'summary') {
+				lastSummaryIdx = i;
+				break;
+			}
+		}
+		return raw.filter((s, i) => s?.action !== 'summary' || i === lastSummaryIdx);
+	})();
+
+	// Parse <details type="reasoning"> blocks out of message.content. Each match
+	// becomes a reasoning bullet item in the merged StatusHistory list. We
+	// extract the original block attributes too (done, duration) so the
+	// ReasoningBullet can reuse Collapsible's i18n-aware "Thought for N
+	// seconds" label rendering.
+	function parseAttributes(openTag: string): Record<string, string> {
+		const attrs: Record<string, string> = {};
+		const attrRe = /(\w+)="([^"]*)"/g;
+		let am;
+		while ((am = attrRe.exec(openTag)) !== null) {
+			attrs[am[1]] = am[2];
+		}
+		return attrs;
+	}
+
+	$: reasoningItems = (() => {
+		const content = message?.content ?? '';
+		if (!content.includes('<details type="reasoning"')) return [];
+		const items: {
+			kind: 'reasoning';
+			summary: string;
+			body: string;
+			attributes: Record<string, string>;
+			contentOffset: number;
+		}[] = [];
+		const re = /<details type="reasoning"[^>]*>([\s\S]*?)<\/details>/g;
+		let match;
+		while ((match = re.exec(content)) !== null) {
+			const fullBlock = match[0];
+			const openTagMatch = fullBlock.match(/^<details[^>]*>/);
+			const attributes = openTagMatch ? parseAttributes(openTagMatch[0]) : {};
+			const summaryMatch = fullBlock.match(/<summary>([\s\S]*?)<\/summary>/);
+			const body = match[1].replace(/<summary>[\s\S]*?<\/summary>/, '').trim();
+			items.push({
+				kind: 'reasoning',
+				summary: summaryMatch?.[1]?.trim() ?? '',
+				body,
+				attributes,
+				contentOffset: match.index
+			});
+		}
+		return items;
+	})();
+
+	// Merge reasoning items into statusEntries in stream order. The merge
+	// strategy depends on which protocol produced the wire data; see
+	// ``mergeHistory.ts`` for the protocol matrix. ``protocol`` is computed
+	// once and is the single source of truth for "how do we render this
+	// turn" — the dispatcher inside ``mergeStatusAndReasoning`` reads it,
+	// and Phase 3 will lift the standalone-reasoning mount onto it too.
+	$: toolOffsets = parseToolOffsets(message?.content ?? '');
+	$: protocol = detectMergeProtocol(statusEntries, reasoningItems, toolOffsets);
+	$: mergedHistory = mergeStatusAndReasoning(statusEntries, reasoningItems, toolOffsets);
+
+	// Whether at least one tool actually ran this turn. Used together with the
+	// streaming heuristic below to gate the StatusHistory dropdown:
+	//   - During streaming (message.done === false): show as soon as there is
+	//     ANY reasoning or status content, so users see live progress.
+	//   - After completion (message.done === true): only show if a tool fired —
+	//     reasoning-only turns drop the dropdown per Phase D.
+	$: hasToolCalls = statusEntries.some(
+		(s) => s?.action && s.action !== 'reasoning_step'
+	);
+	// Only status entries gate the StatusHistory dropdown during streaming.
+	// Reasoning-only turns are handled by the standalone ReasoningBullet
+	// path further below — counting reasoning here would cause both paths to
+	// render at once (double pill), and would force a visual jump from
+	// standalone to dropdown the moment the first status event arrives in a
+	// tool turn.
+	$: streamingHasActivity =
+		!(message?.done ?? false) && statusEntries.length > 0;
+	$: shouldShowStatusHistory =
 		(model?.info?.meta?.capabilities?.status_updates ?? true) &&
-		statusEntries.length > 0 &&
-		!(statusEntries.at(-1)?.hidden ?? false);
+		(hasToolCalls || streamingHasActivity) &&
+		mergedHistory.length > 0;
+
+	$: hasVisibleStatus = shouldShowStatusHistory;
 
 	let edit = false;
 	let editedContent = '';
@@ -734,8 +831,31 @@
 			<div>
 				<div class="chat-{message.role} w-full min-w-full markdown-prose">
 					<div>
-						{#if model?.info?.meta?.capabilities?.status_updates ?? true}
-							<StatusHistory statusHistory={message?.statusHistory} />
+						{#if protocol === 'reasoning_only' && (model?.info?.meta?.capabilities?.status_updates ?? true)}
+							<!-- No-tool turn (vanilla OWUI native LLM flow OR an agent
+							     turn that chose to answer without tool calls): the
+							     StatusHistory dropdown is hidden, but we still want the
+							     model's reasoning to be visible and inspectable.
+							     Renders the reasoning blocks as standalone expanders —
+							     same ReasoningBullet component the dropdown uses
+							     internally, so chevron + slide body + i18n labels are
+							     preserved. Stays clickable mid-stream (Bug #3) and
+							     persists after streaming (Bug #2). -->
+							<div class="flex flex-col gap-1 my-1">
+								{#each reasoningItems as item, idx (item.contentOffset)}
+									<ReasoningBullet
+										id={`standalone-reasoning-${idx}`}
+										summary={item.summary}
+										body={item.body}
+										attributes={item.attributes ?? {}}
+									/>
+								{/each}
+							</div>
+						{:else if shouldShowStatusHistory}
+							<StatusHistory
+								statusHistory={mergedHistory}
+								messageDone={message?.done ?? false}
+							/>
 						{/if}
 
 						{#if message?.files && message.files?.filter((f) => f.type === 'image').length > 0}
@@ -904,12 +1024,22 @@
 								<Error content={message?.error?.content ?? message.content} />
 							{/if}
 
+							{#if (message?.uiBlocks ?? []).length > 0}
+								<PresentUIDispatcher
+									blocks={message.uiBlocks}
+									messageId={message.id}
+									messageDone={message.done ?? false}
+								/>
+							{/if}
+
 							{#if (message?.sources || message?.citations) && (model?.info?.meta?.capabilities?.citations ?? true)}
 								<Citations
 									bind:this={citationsElement}
 									id={message?.id}
 									{chatId}
 									sources={message?.sources ?? message?.citations}
+									panelFilter={message?.panel_filter ?? null}
+									messageDone={message?.done ?? false}
 									{readOnly}
 								/>
 							{/if}
@@ -1148,17 +1278,19 @@
 													{$i18n.t('PDF document (.pdf)')}
 												</div>
 											</button>
-											<button
-												class="flex gap-2 items-center px-3 py-1.5 text-sm cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-lg select-none w-full"
-												on:click={() => {
-													downloadMessageAsDocx();
-													showDownloadMenu = false;
-												}}
-											>
-												<div class="flex items-center line-clamp-1">
-													{$i18n.t('Word document (.docx)')}
-												</div>
-											</button>
+											{#if $config?.features?.enable_docx_export ?? true}
+												<button
+													class="flex gap-2 items-center px-3 py-1.5 text-sm cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-lg select-none w-full"
+													on:click={() => {
+														downloadMessageAsDocx();
+														showDownloadMenu = false;
+													}}
+												>
+													<div class="flex items-center line-clamp-1">
+														{$i18n.t('Word document (.docx)')}
+													</div>
+												</button>
+											{/if}
 										</div>
 									</div>
 								</Dropdown>

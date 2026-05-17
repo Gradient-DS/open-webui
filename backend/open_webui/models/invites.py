@@ -103,11 +103,44 @@ class InviteTable:
                     Invite.email == email.lower(),
                     Invite.accepted_at.is_(None),
                     Invite.revoked_at.is_(None),
+                    Invite.expires_at > int(time.time()),
                 )
                 .order_by(Invite.created_at.desc())
                 .first()
             )
             return InviteModel.model_validate(invite) if invite else None
+
+    def consume_invite_by_email(self, email: str) -> Optional[InviteModel]:
+        """Atomically mark the active pending invite for this email as accepted.
+
+        Returns the consumed invite, or None if no active invite existed
+        (already accepted, revoked, expired, or never existed).
+        """
+        now = int(time.time())
+        with get_db() as db:
+            query = (
+                db.query(Invite)
+                .filter(
+                    Invite.email == email.lower(),
+                    Invite.accepted_at.is_(None),
+                    Invite.revoked_at.is_(None),
+                    Invite.expires_at > now,
+                )
+                .order_by(Invite.created_at.desc())
+            )
+            try:
+                invite = query.with_for_update(skip_locked=True).first()
+            except Exception:
+                # SQLite and some other backends don't support SELECT ... FOR UPDATE.
+                # Fall through to the unlocked read; the email-unique constraint on
+                # Auths.insert_new_auth remains the ultimate backstop for races.
+                invite = query.first()
+            if not invite:
+                return None
+            invite.accepted_at = now
+            db.commit()
+            db.refresh(invite)
+            return InviteModel.model_validate(invite)
 
     def accept_invite(self, token: str) -> Optional[InviteModel]:
         with get_db() as db:

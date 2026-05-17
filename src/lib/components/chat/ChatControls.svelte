@@ -173,14 +173,18 @@
 	};
 
 	export const openPane = () => {
+		const container = document.getElementById('chat-container');
 		if (parseInt(localStorage?.chatControlsSize)) {
-			const container = document.getElementById('chat-container');
 			let size = Math.floor(
 				(parseInt(localStorage?.chatControlsSize) / container.clientWidth) * 100
 			);
 			pane.resize(size);
 		} else {
-			pane.resize(minSize);
+			// First-ever open: aim for ~600px wide panel instead of the cramped minSize (~350px)
+			const defaultPct = container
+				? Math.floor((600 / container.clientWidth) * 100)
+				: 40;
+			pane.resize(Math.max(defaultPct, minSize));
 		}
 	};
 
@@ -451,7 +455,7 @@
 			if (paneReady) showControls.set(false);
 		}}
 		collapsible={true}
-		class="z-10 bg-white dark:bg-gray-850"
+		class="z-10 bg-white dark:bg-gray-850 {dragged ? '' : 'pane-animated'}"
 	>
 		{#if $showControls}
 			<div class="flex max-h-full min-h-full">
@@ -589,3 +593,9 @@
 		{/if}
 	</Pane>
 {/if}
+
+<style>
+	:global([data-pane].pane-animated) {
+		transition: flex-grow 360ms cubic-bezier(0.32, 0.72, 0, 1);
+	}
+</style>

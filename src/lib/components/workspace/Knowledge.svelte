@@ -25,9 +25,11 @@
 	import FolderOpen from '../icons/FolderOpen.svelte';
 	import OneDrive from '../icons/OneDrive.svelte';
 	import GoogleDrive from '../icons/GoogleDrive.svelte';
+	import Confluence from '../icons/Confluence.svelte';
 	import Spinner from '../common/Spinner.svelte';
 	import Tooltip from '../common/Tooltip.svelte';
 	import Dropdown from '../common/Dropdown.svelte';
+	import SyncProgressBadge from './Knowledge/SyncProgressBadge.svelte';
 	import XMark from '../icons/XMark.svelte';
 	import ViewSelector from './common/ViewSelector.svelte';
 	import TypeSelector from './common/TypeSelector.svelte';
@@ -157,53 +159,43 @@
 		}
 	};
 
-	const handleSyncProgress = (data) => {
-		const { knowledge_id, status } = data;
-		if (items) {
-			items = items.map((item) => {
-				if (item.id === knowledge_id) {
-					return {
-						...item,
-						meta: {
-							...item.meta,
-							onedrive_sync: {
-								...(item.meta?.onedrive_sync ?? {}),
-								status
-							}
-						}
-					};
+	const mergeSyncProgress = (metaKey: string, data: any) => {
+		const { knowledge_id, status, current, total, stage_counts, needs_reauth } = data;
+		if (!items) return;
+		items = items.map((item) => {
+			if (item.id !== knowledge_id) return item;
+			const prev = item.meta?.[metaKey] ?? {};
+			return {
+				...item,
+				meta: {
+					...item.meta,
+					[metaKey]: {
+						...prev,
+						status,
+						progress_current: current ?? prev.progress_current,
+						progress_total: total ?? prev.progress_total,
+						// Preserve previous stage_counts on completion/cancellation
+						// emits that don't carry them, mirroring KnowledgeBase.svelte.
+						stage_counts: stage_counts ?? prev.stage_counts,
+						// Only adopt needs_reauth=true from the event; never clear
+						// the persistent flag via a stale progress emit.
+						needs_reauth: needs_reauth === true ? true : prev.needs_reauth
+					}
 				}
-				return item;
-			});
-		}
+			};
+		});
 	};
 
-	const handleGoogleDriveSyncProgress = (data) => {
-		const { knowledge_id, status } = data;
-		if (items) {
-			items = items.map((item) => {
-				if (item.id === knowledge_id) {
-					return {
-						...item,
-						meta: {
-							...item.meta,
-							google_drive_sync: {
-								...(item.meta?.google_drive_sync ?? {}),
-								status
-							}
-						}
-					};
-				}
-				return item;
-			});
-		}
-	};
+	const handleSyncProgress = (data) => mergeSyncProgress('onedrive_sync', data);
+	const handleGoogleDriveSyncProgress = (data) => mergeSyncProgress('google_drive_sync', data);
+	const handleConfluenceSyncProgress = (data) => mergeSyncProgress('confluence_sync', data);
 
 	onMount(async () => {
 		viewOption = localStorage?.workspaceViewOption || '';
 
 		$socket?.on('onedrive:sync:progress', handleSyncProgress);
 		$socket?.on('googledrive:sync:progress', handleGoogleDriveSyncProgress);
+		$socket?.on('confluence:sync:progress', handleConfluenceSyncProgress);
 
 		await tick();
 		loaded = true;
@@ -212,6 +204,7 @@
 	onDestroy(() => {
 		$socket?.off('onedrive:sync:progress', handleSyncProgress);
 		$socket?.off('googledrive:sync:progress', handleGoogleDriveSyncProgress);
+		$socket?.off('confluence:sync:progress', handleConfluenceSyncProgress);
 	});
 </script>
 
@@ -288,6 +281,19 @@
 								>
 									<GoogleDrive className="size-4" />
 									<div class="flex items-center">{$i18n.t('From Google Drive')}</div>
+								</button>
+							{/if}
+
+							{#if $config?.features?.enable_confluence_integration && $config?.features?.enable_confluence_sync}
+								<button
+									class="flex gap-2 w-full items-center px-3 py-1.5 text-sm cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-xl"
+									type="button"
+									on:click={() => {
+										goto('/workspace/knowledge/create?type=confluence');
+									}}
+								>
+									<Confluence className="size-4" />
+									<div class="flex items-center">{$i18n.t('From Confluence')}</div>
 								</button>
 							{/if}
 						</div>
@@ -395,18 +401,65 @@
 												{#if item?.type === 'onedrive'}
 													<OneDrive className="size-4" />
 													<Badge type="info" content={$i18n.t('OneDrive')} />
-													{#if item.meta?.onedrive_sync?.status === 'syncing'}
-														<Tooltip content={$i18n.t('Syncing...')}>
-															<Spinner className="size-3" />
+													{#if item.meta?.onedrive_sync?.needs_reauth}
+														<Tooltip content={$i18n.t('Re-authorize background sync')}>
+															<svg
+																xmlns="http://www.w3.org/2000/svg"
+																viewBox="0 0 16 16"
+																fill="currentColor"
+																class="size-3.5 text-red-500"
+															>
+																<path
+																	fill-rule="evenodd"
+																	d="M6.701 2.25c.577-1 2.02-1 2.598 0l5.196 9a1.5 1.5 0 0 1-1.299 2.25H2.804a1.5 1.5 0 0 1-1.3-2.25l5.197-9ZM8 4a.75.75 0 0 1 .75.75v3a.75.75 0 0 1-1.5 0v-3A.75.75 0 0 1 8 4Zm0 8a1 1 0 1 0 0-2 1 1 0 0 0 0 2Z"
+																	clip-rule="evenodd"
+																/>
+															</svg>
 														</Tooltip>
+													{:else if item.meta?.onedrive_sync?.status === 'syncing'}
+														<SyncProgressBadge sync={item.meta.onedrive_sync} />
 													{/if}
 												{:else if item?.type === 'google_drive'}
 													<GoogleDrive className="size-4" />
 													<Badge type="info" content={$i18n.t('Google Drive')} />
-													{#if item.meta?.google_drive_sync?.status === 'syncing'}
-														<Tooltip content={$i18n.t('Syncing...')}>
-															<Spinner className="size-3" />
+													{#if item.meta?.google_drive_sync?.needs_reauth}
+														<Tooltip content={$i18n.t('Re-authorize background sync')}>
+															<svg
+																xmlns="http://www.w3.org/2000/svg"
+																viewBox="0 0 16 16"
+																fill="currentColor"
+																class="size-3.5 text-red-500"
+															>
+																<path
+																	fill-rule="evenodd"
+																	d="M6.701 2.25c.577-1 2.02-1 2.598 0l5.196 9a1.5 1.5 0 0 1-1.299 2.25H2.804a1.5 1.5 0 0 1-1.3-2.25l5.197-9ZM8 4a.75.75 0 0 1 .75.75v3a.75.75 0 0 1-1.5 0v-3A.75.75 0 0 1 8 4Zm0 8a1 1 0 1 0 0-2 1 1 0 0 0 0 2Z"
+																	clip-rule="evenodd"
+																/>
+															</svg>
 														</Tooltip>
+													{:else if item.meta?.google_drive_sync?.status === 'syncing'}
+														<SyncProgressBadge sync={item.meta.google_drive_sync} />
+													{/if}
+												{:else if item?.type === 'confluence'}
+													<Confluence className="size-4" />
+													<Badge type="info" content={$i18n.t('Confluence')} />
+													{#if item.meta?.confluence_sync?.needs_reauth}
+														<Tooltip content={$i18n.t('Re-authorize background sync')}>
+															<svg
+																xmlns="http://www.w3.org/2000/svg"
+																viewBox="0 0 16 16"
+																fill="currentColor"
+																class="size-3.5 text-red-500"
+															>
+																<path
+																	fill-rule="evenodd"
+																	d="M6.701 2.25c.577-1 2.02-1 2.598 0l5.196 9a1.5 1.5 0 0 1-1.299 2.25H2.804a1.5 1.5 0 0 1-1.3-2.25l5.197-9ZM8 4a.75.75 0 0 1 .75.75v3a.75.75 0 0 1-1.5 0v-3A.75.75 0 0 1 8 4Zm0 8a1 1 0 1 0 0-2 1 1 0 0 0 0 2Z"
+																	clip-rule="evenodd"
+																/>
+															</svg>
+														</Tooltip>
+													{:else if item.meta?.confluence_sync?.status === 'syncing'}
+														<SyncProgressBadge sync={item.meta.confluence_sync} />
 													{/if}
 												{:else if $config?.integration_providers?.[item?.type]}
 													<Badge

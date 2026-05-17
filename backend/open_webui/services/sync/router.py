@@ -9,7 +9,7 @@ import time
 import logging
 from typing import Optional, List, Callable
 
-from fastapi import HTTPException
+from fastapi import HTTPException, Request
 from starlette.responses import HTMLResponse
 from pydantic import BaseModel
 
@@ -43,6 +43,10 @@ class SyncStatusResponse(BaseModel):
     error: Optional[str] = None
     source_count: Optional[int] = None
     failed_files: Optional[List[FailedFileInfo]] = None
+    # Per-stage breakdown from the loader-worker (download/parse/ingest/ok/failed/pending).
+    # Persisted to KB meta by _update_sync_status; surfaced here so the polling
+    # GET stays consistent with the Socket.IO sync_progress payload.
+    stage_counts: Optional[dict] = None
 
 
 class RemoveSourceRequest(BaseModel):
@@ -163,6 +167,7 @@ def handle_get_sync_status(
         error=sync_info.get('error'),
         source_count=len(sources),
         failed_files=failed_files,
+        stage_counts=sync_info.get('stage_counts'),
     )
 
 
@@ -315,6 +320,7 @@ def handle_revoke_token(
 
 
 async def complete_auth_callback(
+    request: Request,
     code: str,
     state: str,
     flow: dict,
@@ -325,6 +331,7 @@ async def complete_auth_callback(
 ) -> HTMLResponse:
     """Complete the async portion of the auth callback."""
     result = await exchange_code_fn(
+        request=request,
         code=code,
         state=state,
         user_id=flow['user_id'],

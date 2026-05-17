@@ -19,6 +19,7 @@ from authlib.integrations.starlette_client import OAuth
 
 
 from open_webui.env import (
+    AGENT_API_AGENTS,
     DATA_DIR,
     DATABASE_URL,
     ENABLE_DB_MIGRATIONS,
@@ -322,6 +323,12 @@ ENABLE_OAUTH_SIGNUP = PersistentConfig(
     'ENABLE_OAUTH_SIGNUP',
     'oauth.enable_signup',
     os.environ.get('ENABLE_OAUTH_SIGNUP', 'False').lower() == 'true',
+)
+
+OAUTH_INVITE_REQUIRED = PersistentConfig(
+    'OAUTH_INVITE_REQUIRED',
+    'oauth.invite_required',
+    os.environ.get('OAUTH_INVITE_REQUIRED', 'False').lower() == 'true',
 )
 
 OAUTH_REFRESH_TOKEN_INCLUDE_SCOPE = PersistentConfig(
@@ -931,6 +938,10 @@ S3_ENDPOINT_URL = os.environ.get('S3_ENDPOINT_URL', None)
 S3_USE_ACCELERATE_ENDPOINT = os.environ.get('S3_USE_ACCELERATE_ENDPOINT', 'false').lower() == 'true'
 S3_ADDRESSING_STYLE = os.environ.get('S3_ADDRESSING_STYLE', None)
 S3_ENABLE_TAGGING = os.getenv('S3_ENABLE_TAGGING', 'false').lower() == 'true'
+# When the S3 endpoint serves a self-signed or otherwise non-validating cert
+# (e.g. nebul-prod's NetApp ONTAP MinIO front, which has no IP SAN), set this
+# to "false" to skip TLS verification entirely. Default preserves verification.
+S3_VERIFY_SSL = os.getenv('S3_VERIFY_SSL', 'true').lower() == 'true'
 
 GCS_BUCKET_NAME = os.environ.get('GCS_BUCKET_NAME', None)
 GOOGLE_APPLICATION_CREDENTIALS_JSON = os.environ.get('GOOGLE_APPLICATION_CREDENTIALS_JSON', None)
@@ -1304,6 +1315,12 @@ GREETING_TEMPLATE = PersistentConfig(
     'GREETING_TEMPLATE',
     'ui.greeting_template',
     os.environ.get('GREETING_TEMPLATE', ''),
+)
+
+ENABLE_WELCOME_MESSAGE = PersistentConfig(
+    'ENABLE_WELCOME_MESSAGE',
+    'ui.enable_welcome_message',
+    os.environ.get('ENABLE_WELCOME_MESSAGE', 'False').lower() == 'true',
 )
 
 
@@ -1841,6 +1858,11 @@ FEATURE_BUILTIN_TOOLS = os.environ.get('FEATURE_BUILTIN_TOOLS', 'True').lower() 
 # PDF export: set to True to use old screenshot-based (stylized) PDF export
 USE_STYLIZED_PDF_EXPORT = os.environ.get('USE_STYLIZED_PDF_EXPORT', 'False').lower() == 'true'
 
+# DOCX export gate: when False the chat / message / Document Writer Word-download
+# buttons are hidden in the UI and the /utils/chat/docx + /utils/document/docx
+# routes refuse with 403. Used by tenants that need to exclude .docx outputs.
+ENABLE_DOCX_EXPORT = os.environ.get('ENABLE_DOCX_EXPORT', 'True').lower() == 'true'
+
 # Admin Panel Tab Feature Flags
 FEATURE_ADMIN_EVALUATIONS = os.environ.get('FEATURE_ADMIN_EVALUATIONS', 'True').lower() == 'true'
 FEATURE_ADMIN_FUNCTIONS = os.environ.get('FEATURE_ADMIN_FUNCTIONS', 'True').lower() == 'true'
@@ -1935,7 +1957,10 @@ class BannerModel(BaseModel):
     id: str
     type: str
     title: Optional[str] = None
-    content: str
+    # Either a plain string (legacy) or a mapping of locale code (e.g. "en-US")
+    # to localized content. The frontend resolves the active locale at render
+    # time and falls back to en-US, then to any other available entry.
+    content: Union[str, dict[str, str]]
     dismissible: bool
     timestamp: int
 
@@ -2880,6 +2905,42 @@ ONEDRIVE_SYNC_INTERVAL_MINUTES = PersistentConfig(
 ONEDRIVE_MAX_FILES_PER_SYNC = int(os.getenv('ONEDRIVE_MAX_FILES_PER_SYNC', '500'))
 ONEDRIVE_MAX_FILE_SIZE_MB = int(os.getenv('ONEDRIVE_MAX_FILE_SIZE_MB', '100'))
 
+
+# If configured, Confluence will be available as a knowledge-base sync source.
+ENABLE_CONFLUENCE_INTEGRATION = PersistentConfig(
+    'ENABLE_CONFLUENCE_INTEGRATION',
+    'confluence.enable',
+    os.getenv('ENABLE_CONFLUENCE_INTEGRATION', 'False').lower() == 'true',
+)
+
+CONFLUENCE_OAUTH_CLIENT_ID = PersistentConfig(
+    'CONFLUENCE_OAUTH_CLIENT_ID',
+    'confluence.client_id',
+    os.environ.get('CONFLUENCE_OAUTH_CLIENT_ID', ''),
+)
+
+CONFLUENCE_OAUTH_CLIENT_SECRET = PersistentConfig(
+    'CONFLUENCE_OAUTH_CLIENT_SECRET',
+    'confluence.client_secret',
+    os.environ.get('CONFLUENCE_OAUTH_CLIENT_SECRET', ''),
+)
+
+ENABLE_CONFLUENCE_SYNC = PersistentConfig(
+    'ENABLE_CONFLUENCE_SYNC',
+    'confluence.enable_sync',
+    os.getenv('ENABLE_CONFLUENCE_SYNC', 'False').lower() == 'true',
+)
+
+CONFLUENCE_SYNC_INTERVAL_MINUTES = PersistentConfig(
+    'CONFLUENCE_SYNC_INTERVAL_MINUTES',
+    'confluence.sync_interval_minutes',
+    int(os.environ.get('CONFLUENCE_SYNC_INTERVAL_MINUTES', '60')),
+)
+
+CONFLUENCE_MAX_PAGES_PER_SYNC = int(os.getenv('CONFLUENCE_MAX_PAGES_PER_SYNC', '500'))
+CONFLUENCE_MAX_PAGE_SIZE_MB = int(os.getenv('CONFLUENCE_MAX_PAGE_SIZE_MB', '25'))
+
+
 ####################################
 # Email Service (Microsoft Graph API)
 ####################################
@@ -3322,6 +3383,27 @@ INTEGRATION_PROVIDERS = PersistentConfig(
 )
 
 ####################################
+# Shared-Services Loader Worker
+####################################
+# When enabled, cloud-source sync workers (OneDrive, Google Drive) submit jobs
+# to the per-tenant gradient-loader-worker pod instead of downloading and
+# embedding files in-process. Loader-worker handles download → parse+chunk
+# (via shared doc-processor) → embed (via LiteLLM) → push to /ingest.
+# See thoughts/shared/plans/2026-04-25-shared-services-loader-worker.md.
+
+USE_SHARED_LOADER = PersistentConfig(
+    'USE_SHARED_LOADER',
+    'sync.use_shared_loader',
+    os.environ.get('USE_SHARED_LOADER', 'False').lower() == 'true',
+)
+
+# Loader-worker service DNS, e.g. http://gradient-loader-worker.<ns>.svc:8002
+LOADER_WORKER_URL = os.environ.get('LOADER_WORKER_URL', '')
+
+# Tenant slug used in the /tenants/{tenant}/jobs path on the loader-worker.
+TENANT_NAME = os.environ.get('TENANT_NAME', '')
+
+####################################
 # Agent Proxy
 ####################################
 
@@ -3329,6 +3411,48 @@ ENABLE_AGENT_PROXY = PersistentConfig(
     'ENABLE_AGENT_PROXY',
     'agent_proxy.enable',
     os.environ.get('ENABLE_AGENT_PROXY', 'False').lower() == 'true',
+)
+
+####################################
+# Agent Search (machine-auth retrieval endpoint)
+####################################
+
+# Gates POST /api/v1/internal/retrieval/query — the per-tenant endpoint that
+# lets external agents run KB queries on behalf of a specific user. Off by
+# default; tenants opt in via Helm.
+AGENT_SEARCH_ENABLED = PersistentConfig(
+    'AGENT_SEARCH_ENABLED',
+    'agent_search.enabled',
+    os.environ.get('AGENT_SEARCH_ENABLED', 'False').lower() == 'true',
+)
+
+####################################
+# Agent API — Active Agent Selection
+####################################
+
+# The agent identifier forwarded as an override hint to the external agent
+# service. Persisted in the config DB so admins can switch agents at runtime
+# via Admin Settings > External Agents. Defaults to the first entry in
+# AGENT_API_AGENTS when set, otherwise empty — in which case the payload
+# omits ``agent`` and the agents service uses its own ``default_agent``.
+_default_selected_agent = AGENT_API_AGENTS[0] if AGENT_API_AGENTS else ''
+AGENT_API_SELECTED_AGENT = PersistentConfig(
+    'AGENT_API_SELECTED_AGENT',
+    'agent_api.selected_agent',
+    _default_selected_agent,
+)
+
+# [Gradient] User-facing default for the agent picker on the new-chat
+# empty state. When set to a slug, the AgentCards component pre-selects
+# that card on first load (when the user has no localStorage pick yet).
+# Empty = no pre-selection (vanilla model picker stays the default).
+# Distinct from AGENT_API_SELECTED_AGENT — that one is an admin override
+# hint forwarded to the external agents service; this one only affects
+# the picker UI default for new users / fresh devices.
+AGENT_API_PICKER_DEFAULT_SLUG = PersistentConfig(
+    'AGENT_API_PICKER_DEFAULT_SLUG',
+    'agent_api.picker_default_slug',
+    os.environ.get('AGENT_API_PICKER_DEFAULT_SLUG', '').strip(),
 )
 
 

@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { WEBUI_API_BASE_URL, WEBUI_BASE_URL } from '$lib/constants';
 	import { marked } from 'marked';
+	import DOMPurify from 'dompurify';
 
 	import { config, user, models as _models, temporaryChatEnabled } from '$lib/stores';
 	import { onMount, getContext } from 'svelte';
@@ -9,6 +10,7 @@
 
 	import Suggestions from './Suggestions.svelte';
 	import { sanitizeResponseContent } from '$lib/utils';
+	import { resolveLocalized } from '$lib/utils/localized';
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
 	import EyeSlash from '$lib/components/icons/EyeSlash.svelte';
 
@@ -85,7 +87,10 @@
 			<div>
 				<div class=" capitalize line-clamp-1" in:fade={{ duration: 200 }}>
 					{#if $config?.ui?.greeting_template}
-						{$config.ui.greeting_template.replace('{{name}}', $user?.name ?? '')}
+						{resolveLocalized($config.ui.greeting_template, $i18n?.language).replace(
+							'{{name}}',
+							$user?.name ?? ''
+						)}
 					{:else if models[selectedModelIdx]?.name}
 						{models[selectedModelIdx]?.name}
 					{:else}
@@ -98,10 +103,12 @@
 						<div
 							class="mt-0.5 text-base font-normal text-gray-500 dark:text-gray-400 line-clamp-3 markdown"
 						>
-							{@html marked.parse(
-								sanitizeResponseContent(
-									models[selectedModelIdx]?.info?.meta?.description
-								).replaceAll('\n', '<br>')
+							{@html DOMPurify.sanitize(
+								marked.parse(
+									sanitizeResponseContent(
+										models[selectedModelIdx]?.info?.meta?.description
+									).replaceAll('\n', '<br>')
+								)
 							)}
 						</div>
 						{#if models[selectedModelIdx]?.info?.meta?.user}

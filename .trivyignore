@@ -5,3 +5,15 @@ CVE-2026-23949
 # wheel 0.45.1 ships in python:3.11-slim-bookworm base image.
 # CVE is in `wheel unpack` CLI (path traversal) — never used at runtime.
 CVE-2026-24049
+
+# Stored XSS via model description (open-webui < 0.9.0).
+# Trivy flags by package.json name+version; the underlying sink in
+# Placeholder.svelte / ChatPlaceholder.svelte has been patched in this fork to
+# wrap marked.parse() output with DOMPurify.sanitize() — matches upstream remediation.
+CVE-2026-44721
+
+# Missing workspace.tools authz check on POST /api/v1/tools/{id}/update
+# (open-webui < 0.9.5). Trivy flags by package.json version; the endpoint in
+# backend/open_webui/routers/tools.py has been patched in this fork to enforce
+# has_permission(user, 'workspace.tools', ...) — matches upstream remediation.
+CVE-2026-45395

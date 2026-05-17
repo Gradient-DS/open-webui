@@ -15,15 +15,23 @@ AGENT_API_ENABLED=true
 # Base URL of the agent service (no trailing slash)
 AGENT_API_BASE_URL=http://agent-service:8001
 
-# Which agent to route requests to
-AGENT_API_AGENT=your-agent-name
+# API key the agent service accepts on the X-API-Key header
+AGENT_API_KEY=dev-api-key
+
+# Optional comma-separated list of agents the admin can pick from in
+# Admin Settings > External Agents. When empty, the agents service uses
+# its own default_agent.
+AGENT_API_AGENTS=agent-one,agent-two
 ```
 
 | Variable             | Required           | Default | Description                                                                               |
 | -------------------- | ------------------ | ------- | ----------------------------------------------------------------------------------------- |
 | `AGENT_API_ENABLED`  | Yes                | `false` | Enables/disables the integration. When `false` or unset, all behavior is stock OpenWebUI. |
 | `AGENT_API_BASE_URL` | Yes (when enabled) | `""`    | The agent service URL. OpenWebUI POSTs to `{base_url}/v1/chat/completions`.               |
-| `AGENT_API_AGENT`    | Yes (when enabled) | `""`    | Agent identifier sent in each request payload.                                            |
+| `AGENT_API_KEY`      | Yes (when enabled) | `""`    | API key forwarded as the `X-API-Key` header. Must match `AGENTS_API_KEY` on the agent service. |
+| `AGENT_API_AGENTS`   | No                 | `""`    | Comma-separated list of agent identifiers offered in the admin "External Agents" tab. When empty, the agents service falls back to its configured `default_agent`. When set, the admin's selection is forwarded as an override hint on `AgentPayload.agent`. |
+
+By default the agent (persona) is selected server-side via `default_agent` in the agent service config. Deployments that expose multiple agents behind one `AGENT_API_KEY` can optionally use `AGENT_API_AGENTS` + the "External Agents" admin tab to let admins switch without a redeploy.
 
 ## What Changes When Enabled
 
@@ -42,7 +50,6 @@ OpenWebUI POSTs to `{AGENT_API_BASE_URL}/v1/chat/completions` with:
 
 ```json
 {
-	"agent": "your-agent-name",
 	"model": "gpt-4o",
 	"messages": [{ "role": "user", "content": "..." }],
 	"stream": true,
@@ -63,6 +70,9 @@ OpenWebUI POSTs to `{AGENT_API_BASE_URL}/v1/chat/completions` with:
 
 Key notes:
 
+- `X-API-Key: {AGENT_API_KEY}` is sent on every request
+- `model` is the user-selected LLM. The agent service validates it against its `available_llms` allowlist and returns 400 on an unknown ID — never a silent fallback.
+- The agent (persona) is chosen server-side via `default_agent` in the agent service config. When `AGENT_API_AGENTS` is configured and an admin has picked one, OpenWebUI forwards the selection as an optional `agent` field for the service to honor as an override.
 - `messages` already has the system prompt injected by OpenWebUI
 - `features.web_search` indicates whether the user toggled web search on
 - `files` contains all attached items (uploads + KB files)
@@ -124,7 +134,7 @@ Vector DB collection name conventions:
 
 After deploying, verify the integration is working:
 
-1. Check the env vars are set: the backend logs `AGENT_API_ENABLED`, `AGENT_API_BASE_URL`, and `AGENT_API_AGENT` at startup
+1. Check the env vars are set: the backend logs `AGENT_API_ENABLED`, `AGENT_API_BASE_URL`, and `AGENT_API_KEY` at startup
 2. Send a chat message — it should hit `{AGENT_API_BASE_URL}/v1/chat/completions` instead of the model provider
 3. Confirm status spinners and citation chips render in the UI
 4. Confirm that setting `AGENT_API_ENABLED=false` (or removing it) restores stock behavior

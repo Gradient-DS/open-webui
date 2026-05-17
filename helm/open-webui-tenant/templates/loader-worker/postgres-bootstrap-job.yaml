@@ -1,0 +1,82 @@
+{{- if .Values.loaderWorker.enabled }}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "open-webui-tenant.loaderWorker.fullname" . }}-bootstrap
+  labels:
+    {{- include "open-webui-tenant.loaderWorker.labels" . | nindent 4 }}
+  annotations:
+    helm.sh/hook: pre-upgrade,post-install
+    helm.sh/hook-weight: "5"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+spec:
+  backoffLimit: 5
+  ttlSecondsAfterFinished: 600
+  template:
+    metadata:
+      labels:
+        {{- include "open-webui-tenant.loaderWorker.selectorLabels" . | nindent 8 }}
+    spec:
+      restartPolicy: OnFailure
+      {{- include "open-webui-tenant.imagePullSecrets" . | nindent 6 }}
+      {{- with .Values.loaderWorker.podSecurityContext }}
+      securityContext:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: bootstrap
+          image: {{ .Values.postgres.image.repository }}:{{ .Values.postgres.image.tag }}
+          imagePullPolicy: {{ .Values.postgres.image.pullPolicy | default "IfNotPresent" }}
+          {{- with .Values.loaderWorker.securityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          env:
+            - name: PGHOST
+              value: {{ include "open-webui-tenant.postgres.fullname" . | quote }}
+            - name: PGPORT
+              value: {{ .Values.postgres.port | default 5432 | quote }}
+            - name: PGUSER
+              value: {{ .Values.postgres.user | quote }}
+            - name: PGDATABASE
+              value: {{ .Values.postgres.database | quote }}
+            - name: PGPASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "open-webui-tenant.fullname" . }}-secrets
+                  key: postgres-password
+            - name: LOADER_DB_NAME
+              value: {{ .Values.loaderWorker.postgres.database | default "loader_worker" | quote }}
+            - name: LOADER_DB_USER
+              value: {{ .Values.loaderWorker.postgres.user | default "loader_worker_app" | quote }}
+            - name: LOADER_DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "open-webui-tenant.fullname" . }}-secrets
+                  key: loader-worker-db-password
+          # Idempotent: create role + DB only when absent, then grant privileges.
+          command:
+            - /bin/sh
+            - -c
+            - |
+              set -eu
+              until pg_isready -q; do
+                echo "waiting for tenant postgres..."
+                sleep 2
+              done
+
+              psql -v ON_ERROR_STOP=1 <<SQL
+              DO \$\$
+              BEGIN
+                IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = '${LOADER_DB_USER}') THEN
+                  EXECUTE format('CREATE ROLE %I LOGIN PASSWORD %L', '${LOADER_DB_USER}', '${LOADER_DB_PASSWORD}');
+                ELSE
+                  EXECUTE format('ALTER ROLE %I WITH LOGIN PASSWORD %L', '${LOADER_DB_USER}', '${LOADER_DB_PASSWORD}');
+                END IF;
+              END
+              \$\$;
+              SELECT 'CREATE DATABASE ${LOADER_DB_NAME} OWNER ${LOADER_DB_USER}'
+              WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = '${LOADER_DB_NAME}')\gexec
+              GRANT ALL PRIVILEGES ON DATABASE ${LOADER_DB_NAME} TO ${LOADER_DB_USER};
+              SQL
+{{- end }}

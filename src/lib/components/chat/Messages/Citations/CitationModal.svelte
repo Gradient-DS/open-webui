@@ -142,25 +142,37 @@
 				{#if citation?.source?.name}
 					{@const document = mergedDocuments?.[0]}
 					{#if document?.metadata?.file_id || document.source?.url?.includes('http')}
+						{@const isFileMissing =
+							!!document?.metadata?.file_id && !previewAvailable}
 						<Tooltip
 							className="w-fit"
-							content={document.source?.url?.includes('http')
-								? $i18n.t('Open link')
-								: $i18n.t('Open file')}
+							content={isFileMissing
+								? $i18n.t('File no longer available')
+								: document.source?.url?.includes('http')
+									? $i18n.t('Open link')
+									: $i18n.t('Open file')}
 							placement="top-start"
 							tippyOptions={{ duration: [500, 0] }}
 						>
-							<a
-								class="hover:text-gray-500 dark:hover:text-gray-100 underline grow line-clamp-1"
-								href={document?.metadata?.file_id
-									? `${WEBUI_API_BASE_URL}/files/${document?.metadata?.file_id}/content${document?.metadata?.page !== undefined ? `#page=${document.metadata.page + 1}` : ''}`
-									: document.source?.url?.includes('http')
-										? document.source.url
-										: `#`}
-								target="_blank"
-							>
-								{decodeString(citation?.source?.name)}
-							</a>
+							{#if isFileMissing}
+								<span
+									class="grow line-clamp-1 text-gray-500 dark:text-gray-400 cursor-not-allowed"
+								>
+									{decodeString(citation?.source?.name)}
+								</span>
+							{:else}
+								<a
+									class="hover:text-gray-500 dark:hover:text-gray-100 underline grow line-clamp-1"
+									href={document?.metadata?.file_id
+										? `${WEBUI_API_BASE_URL}/files/${document?.metadata?.file_id}/content${document?.metadata?.page !== undefined ? `#page=${document.metadata.page + 1}` : ''}`
+										: document.source?.url?.includes('http')
+											? document.source.url
+											: `#`}
+									target="_blank"
+								>
+									{decodeString(citation?.source?.name)}
+								</a>
+							{/if}
 						</Tooltip>
 					{:else}
 						{decodeString(citation?.source?.name)}
@@ -307,7 +319,15 @@
 											rawContent.length > CONTENT_PREVIEW_LIMIT &&
 											!expandedDocs.has(documentIdx)}
 										{#if $settings?.renderMarkdownInPreviews ?? true}
-											<div class="text-sm prose dark:prose-invert max-w-full">
+											<div
+												class="text-sm prose dark:prose-invert max-w-full
+													prose-h1:text-xl prose-h1:font-semibold prose-h1:mt-3 prose-h1:mb-1.5
+													prose-h2:text-base prose-h2:font-semibold prose-h2:mt-2 prose-h2:mb-1
+													prose-h3:text-base prose-h3:font-medium prose-h3:mt-2 prose-h3:mb-1
+													prose-h4:text-base prose-h4:font-medium prose-h4:mt-2 prose-h4:mb-1
+													prose-h5:text-base prose-h5:font-medium prose-h5:mt-2 prose-h5:mb-1
+													prose-h6:text-base prose-h6:font-medium prose-h6:mt-2 prose-h6:mb-1"
+											>
 												<Markdown
 													content={isTruncated
 														? rawContent.slice(0, CONTENT_PREVIEW_LIMIT)

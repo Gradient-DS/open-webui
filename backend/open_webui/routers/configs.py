@@ -4,9 +4,9 @@ from fastapi import APIRouter, Depends, Request, HTTPException
 from pydantic import BaseModel, ConfigDict
 import aiohttp
 
-from typing import Optional
+from typing import Optional, Union
 
-from open_webui.env import AIOHTTP_CLIENT_TIMEOUT
+from open_webui.env import AGENT_API_AGENTS, AGENT_API_ENABLED, AIOHTTP_CLIENT_TIMEOUT
 from open_webui.utils.auth import get_admin_user, get_verified_user
 from open_webui.utils.features import require_feature
 from open_webui.config import get_config, save_config
@@ -687,7 +687,8 @@ async def get_banners(
 
 
 class SetGreetingTemplateForm(BaseModel):
-    template: str
+    # Either a plain string (legacy) or a mapping of locale code to template.
+    template: Union[str, dict[str, str]]
 
 
 @router.post('/greeting_template')
@@ -886,6 +887,61 @@ async def set_agent_proxy_config(
     request.app.state.config.ENABLE_AGENT_PROXY = form_data.ENABLE_AGENT_PROXY
     return {
         'ENABLE_AGENT_PROXY': request.app.state.config.ENABLE_AGENT_PROXY,
+    }
+
+
+####################################
+# External Agents Config
+####################################
+
+
+class ExternalAgentsConfigForm(BaseModel):
+    AGENT_API_SELECTED_AGENT: str
+    # Empty string clears the picker default (no pre-selection on first load).
+    AGENT_API_PICKER_DEFAULT_SLUG: Optional[str] = None
+
+
+@router.get('/external_agents')
+async def get_external_agents_config(request: Request, user=Depends(get_admin_user)):
+    return {
+        'AGENT_API_ENABLED': AGENT_API_ENABLED,
+        'AGENT_API_AGENTS': AGENT_API_AGENTS,
+        'AGENT_API_SELECTED_AGENT': request.app.state.config.AGENT_API_SELECTED_AGENT,
+        'AGENT_API_PICKER_DEFAULT_SLUG': request.app.state.config.AGENT_API_PICKER_DEFAULT_SLUG,
+    }
+
+
+@router.post('/external_agents')
+async def set_external_agents_config(
+    request: Request,
+    form_data: ExternalAgentsConfigForm,
+    user=Depends(get_admin_user),
+):
+    if not AGENT_API_ENABLED:
+        raise HTTPException(status_code=403, detail='Agent API is disabled')
+
+    agents = AGENT_API_AGENTS
+    selected = form_data.AGENT_API_SELECTED_AGENT
+    if agents and selected not in agents:
+        raise HTTPException(
+            status_code=400,
+            detail='Selected agent is not in the configured AGENT_API_AGENTS list',
+        )
+
+    request.app.state.config.AGENT_API_SELECTED_AGENT = selected
+
+    if form_data.AGENT_API_PICKER_DEFAULT_SLUG is not None:
+        picker_default = form_data.AGENT_API_PICKER_DEFAULT_SLUG.strip()
+        if picker_default and agents and picker_default not in agents:
+            raise HTTPException(
+                status_code=400,
+                detail='Picker default slug is not in the configured AGENT_API_AGENTS list',
+            )
+        request.app.state.config.AGENT_API_PICKER_DEFAULT_SLUG = picker_default
+
+    return {
+        'AGENT_API_SELECTED_AGENT': request.app.state.config.AGENT_API_SELECTED_AGENT,
+        'AGENT_API_PICKER_DEFAULT_SLUG': request.app.state.config.AGENT_API_PICKER_DEFAULT_SLUG,
     }
 
 

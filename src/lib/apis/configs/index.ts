@@ -648,7 +648,9 @@ export const setBanners = async (token: string, banners: Banner[]) => {
 	return res;
 };
 
-export const getGreetingTemplate = async (token: string): Promise<string> => {
+export const getGreetingTemplate = async (
+	token: string
+): Promise<string | Record<string, string>> => {
 	let error = null;
 
 	const res = await fetch(`${WEBUI_API_BASE_URL}/configs/greeting_template`, {
@@ -675,7 +677,10 @@ export const getGreetingTemplate = async (token: string): Promise<string> => {
 	return res?.template ?? '';
 };
 
-export const setGreetingTemplate = async (token: string, template: string) => {
+export const setGreetingTemplate = async (
+	token: string,
+	template: string | Record<string, string>
+) => {
 	let error = null;
 
 	const res = await fetch(`${WEBUI_API_BASE_URL}/configs/greeting_template`, {
@@ -1044,6 +1049,61 @@ export const setAgentProxyConfig = async (token: string, config: object) => {
 			Authorization: `Bearer ${token}`
 		},
 		body: JSON.stringify(config)
+	})
+		.then(async (res) => {
+			if (!res.ok) throw await res.json();
+			return res.json();
+		})
+		.catch((err) => {
+			console.error(err);
+			error = err.detail;
+			return null;
+		});
+
+	if (error) {
+		throw error;
+	}
+
+	return res;
+};
+
+export const getExternalAgentsConfig = async (token: string) => {
+	let error = null;
+
+	const res = await fetch(`${WEBUI_API_BASE_URL}/configs/external_agents`, {
+		method: 'GET',
+		headers: {
+			'Content-Type': 'application/json',
+			Authorization: `Bearer ${token}`
+		}
+	})
+		.then(async (res) => {
+			if (!res.ok) throw await res.json();
+			return res.json();
+		})
+		.catch((err) => {
+			console.error(err);
+			error = err.detail;
+			return null;
+		});
+
+	if (error) {
+		throw error;
+	}
+
+	return res;
+};
+
+export const setExternalAgentsConfig = async (token: string, selectedAgent: string) => {
+	let error = null;
+
+	const res = await fetch(`${WEBUI_API_BASE_URL}/configs/external_agents`, {
+		method: 'POST',
+		headers: {
+			'Content-Type': 'application/json',
+			Authorization: `Bearer ${token}`
+		},
+		body: JSON.stringify({ AGENT_API_SELECTED_AGENT: selectedAgent })
 	})
 		.then(async (res) => {
 			if (!res.ok) throw await res.json();

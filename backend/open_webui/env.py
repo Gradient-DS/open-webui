@@ -793,7 +793,58 @@ else:
 
 AGENT_API_ENABLED = os.environ.get('AGENT_API_ENABLED', 'False').lower() == 'true'
 AGENT_API_BASE_URL = os.environ.get('AGENT_API_BASE_URL', '').strip().rstrip('/')
-AGENT_API_AGENT = os.environ.get('AGENT_API_AGENT', '').strip()
+AGENT_API_KEY = os.environ.get('AGENT_API_KEY', '').strip()
+# Optional list of agent identifiers the admin can pick from in the
+# "External Agents" admin tab. When set, the admin's selection is
+# forwarded as ``AgentPayload.agent`` — an override hint. When empty
+# (or no selection), the payload omits ``agent`` and the agents service
+# falls back to its configured ``default_agent``.
+AGENT_API_AGENTS = [a.strip() for a in os.environ.get('AGENT_API_AGENTS', '').split(',') if a.strip()]
+
+# [Gradient] Optional JSON array of default agent configs to seed at startup.
+# Each entry: {"slug": "...", "name": "...", "description": "...",
+#              "profile_image_url": "...",
+#              "is_active": bool, "is_beta": bool, "position": int}
+# ``cta_copy`` is accepted as a legacy alias for ``description`` (migrated
+# in e8a9b0c1d2e3); explicit ``description`` always wins when both are set.
+# Only ``slug`` (must be in AGENT_API_AGENTS) and ``name`` are required.
+# Rows are inserted on startup when no DB row exists for that slug. If
+# AGENT_API_AGENTS_CONFIG_OVERWRITE=true, existing rows are also updated
+# (admin edits will be overwritten on every boot — use only when env is
+# the source of truth). ``access_grants`` are never seeded — they depend
+# on per-deployment user/group ids and must be set via the admin panel.
+# Use case: deployments where ops can set env vars but cannot access the
+# admin panel on a per-client basis.
+_raw_agents_config = os.environ.get('AGENT_API_AGENTS_CONFIG', '').strip()
+if _raw_agents_config:
+    try:
+        AGENT_API_AGENTS_CONFIG = json.loads(_raw_agents_config)
+        if not isinstance(AGENT_API_AGENTS_CONFIG, list):
+            log.warning('AGENT_API_AGENTS_CONFIG must be a JSON array, ignoring')
+            AGENT_API_AGENTS_CONFIG = []
+    except json.JSONDecodeError as _e:
+        log.warning(f'Invalid JSON in AGENT_API_AGENTS_CONFIG, ignoring: {_e}')
+        AGENT_API_AGENTS_CONFIG = []
+else:
+    AGENT_API_AGENTS_CONFIG = []
+
+AGENT_API_AGENTS_CONFIG_OVERWRITE = os.environ.get('AGENT_API_AGENTS_CONFIG_OVERWRITE', 'False').lower() == 'true'
+
+# [Gradient] Master kill switch for the agent picker UI (admin tab + new-chat
+# empty-state cards). Defaults OFF. Layered on top of AGENT_API_ENABLED — both
+# must be true for users to see the agent picker on the empty state.
+FEATURE_AGENT_PICKER = os.environ.get('FEATURE_AGENT_PICKER', 'False').lower() == 'true'
+
+
+####################################
+# SEARCH API (RAG discovery proxy)
+# [Gradient] Upstream search-api consumed by the RAG filter panel. The
+# backend at /api/v1/discovery/* reverse-proxies here with X-API-Key
+# injected server-side so the key never reaches the browser.
+####################################
+
+SEARCH_API_BASE_URL = os.environ.get('SEARCH_API_BASE_URL', '').strip().rstrip('/')
+SEARCH_API_KEY = os.environ.get('SEARCH_API_KEY', '').strip()
 
 
 ####################################

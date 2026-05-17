@@ -30,6 +30,8 @@
 	import Acceptance from './Settings/Acceptance.svelte';
 	import Email from './Settings/Email.svelte';
 	import Security from './Settings/Security.svelte';
+	import ExternalAgents from './Settings/ExternalAgents.svelte';
+	import Agents from './Settings/Agents.svelte';
 
 	import ChartBar from '../icons/ChartBar.svelte';
 	import DocumentChartBar from '../icons/DocumentChartBar.svelte';
@@ -265,6 +267,18 @@
 			title: 'Acceptance',
 			route: '/admin/settings/acceptance',
 			keywords: ['acceptance', 'modal', 'terms', 'agreement', 'onboarding']
+		},
+		{
+			id: 'external-agents',
+			title: 'External Agents',
+			route: '/admin/settings/external-agents',
+			keywords: ['agent', 'external', 'agents', 'ai']
+		},
+		{
+			id: 'agents',
+			title: 'AI-agents',
+			route: '/admin/settings/agents',
+			keywords: ['agent', 'agents', 'ai-agents', 'beta', 'external', 'chatbot', 'picker']
 		}
 	];
 
@@ -576,6 +590,32 @@
 								clip-rule="evenodd"
 							/>
 						</svg>
+					{:else if tab.id === 'external-agents'}
+						<svg
+							xmlns="http://www.w3.org/2000/svg"
+							viewBox="0 0 24 24"
+							fill="currentColor"
+							class="w-4 h-4"
+						>
+							<path
+								fill-rule="evenodd"
+								d="M12 2.25a.75.75 0 0 1 .75.75v.756a49.106 49.106 0 0 1 9.152 1 .75.75 0 0 1-.152 1.485h-1.918l2.474 10.124a.75.75 0 0 1-.375.83 6.723 6.723 0 0 1-3.181.795 6.723 6.723 0 0 1-3.181-.795.75.75 0 0 1-.375-.83l2.474-10.124H12.75v13.28c1.293.076 2.534.343 3.697.776a.75.75 0 0 1-.262 1.455H7.815a.75.75 0 0 1-.262-1.455c1.163-.433 2.404-.7 3.697-.776V5.772H5.422l2.474 10.124a.75.75 0 0 1-.375.83 6.723 6.723 0 0 1-3.181.795 6.723 6.723 0 0 1-3.181-.795.75.75 0 0 1-.375-.83L3.258 5.772H1.339a.75.75 0 0 1-.152-1.486 49.105 49.105 0 0 1 9.152-.999V3a.75.75 0 0 1 .75-.75Zm-6.443 13.24a5.223 5.223 0 0 1-2.114 0l1.057-4.328 1.057 4.328Zm13.886 0a5.222 5.222 0 0 1-2.114 0l1.057-4.328 1.057 4.328Z"
+								clip-rule="evenodd"
+							/>
+						</svg>
+					{:else if tab.id === 'agents'}
+						<svg
+							xmlns="http://www.w3.org/2000/svg"
+							viewBox="0 0 24 24"
+							fill="currentColor"
+							class="w-4 h-4"
+						>
+							<path
+								fill-rule="evenodd"
+								d="M12 2.25a.75.75 0 0 1 .75.75v.518A6 6 0 0 1 18 9v3.75a3 3 0 0 1-3 3H9a3 3 0 0 1-3-3V9a6 6 0 0 1 5.25-5.482V3a.75.75 0 0 1 .75-.75ZM4.5 12.75a.75.75 0 0 1 .75-.75H6V9a6 6 0 0 1 .096-1.07A4.5 4.5 0 0 0 3 12c0 .414.336.75.75.75H4.5Zm15-.75a.75.75 0 0 1 .75.75h.75A.75.75 0 0 0 21 12a4.5 4.5 0 0 0-3.096-4.07c.063.349.096.706.096 1.07v3h.75a.75.75 0 0 1 .75.75ZM9.75 9.75a.75.75 0 0 0-1.5 0v1.5a.75.75 0 0 0 1.5 0v-1.5Zm6 0a.75.75 0 0 0-1.5 0v1.5a.75.75 0 0 0 1.5 0v-1.5ZM7.5 17.25a.75.75 0 0 1 .75.75c0 .414.336.75.75.75h6a.75.75 0 0 0 .75-.75.75.75 0 0 1 1.5 0 2.25 2.25 0 0 1-2.25 2.25H9a2.25 2.25 0 0 1-2.25-2.25.75.75 0 0 1 .75-.75Z"
+								clip-rule="evenodd"
+							/>
+						</svg>
 					{/if}
 				</div>
 				<div class=" self-center">{$i18n.t(tab.title)}</div>
@@ -689,6 +729,18 @@
 
 					await tick();
 					await config.set(await getBackendConfig());
+				}}
+			/>
+		{:else if selectedTab === 'external-agents'}
+			<ExternalAgents
+				saveHandler={() => {
+					toast.success($i18n.t('Agent selection saved'));
+				}}
+			/>
+		{:else if selectedTab === 'agents'}
+			<Agents
+				saveHandler={() => {
+					toast.success($i18n.t('Settings saved successfully!'));
 				}}
 			/>
 		{/if}

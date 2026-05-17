@@ -5,12 +5,23 @@ from enum import Enum
 
 
 class SyncErrorType(str, Enum):
-    """Error types for cloud sync failures."""
+    """Error types for cloud sync failures.
+
+    Mirrors the loader-worker's ``error_code`` enum
+    (genai-utils/api/gateway/loader_worker/error_codes.py) — open-webui maps
+    each loader-worker code to one of these in
+    ``base_worker._LOADER_ERROR_CODE_TO_SYNC_TYPE`` for the failed-files toast.
+    """
 
     TIMEOUT = 'timeout'
     EMPTY_CONTENT = 'empty_content'
     PROCESSING_ERROR = 'processing_error'
     DOWNLOAD_ERROR = 'download_error'
+    CONFIG_ERROR = 'config_error'
+    SCHEMA_ERROR = 'schema_error'
+    NEEDS_TOKEN_REFRESH = 'needs_token_refresh'
+    UNSUPPORTED_CONTENT_TYPE = 'unsupported_content_type'
+    SOURCE_ACCESS_REVOKED = 'source_access_revoked'
 
 
 @dataclass
