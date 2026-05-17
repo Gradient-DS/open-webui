@@ -173,14 +173,18 @@
 	};
 
 	export const openPane = () => {
+		const container = document.getElementById('chat-container');
 		if (parseInt(localStorage?.chatControlsSize)) {
-			const container = document.getElementById('chat-container');
 			let size = Math.floor(
 				(parseInt(localStorage?.chatControlsSize) / container.clientWidth) * 100
 			);
 			pane.resize(size);
 		} else {
-			pane.resize(minSize);
+			// First-ever open: aim for ~600px wide panel instead of the cramped minSize (~350px)
+			const defaultPct = container
+				? Math.floor((600 / container.clientWidth) * 100)
+				: 40;
+			pane.resize(Math.max(defaultPct, minSize));
 		}
 	};
 

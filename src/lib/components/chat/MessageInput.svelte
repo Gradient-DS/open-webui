@@ -1907,9 +1907,21 @@
 												</Tooltip>
 												<!-- Pinned capability items -->
 											{:else if itemId === 'web_search' && showWebSearchButton}
-												<Tooltip content={$i18n.t('Web Search')} placement="top">
+												<Tooltip
+													content={imageGenerationEnabled
+														? $i18n.t(
+																'Web search and image generation cannot run in the same turn'
+															)
+														: $i18n.t('Web Search')}
+													placement="top"
+												>
 													<button
-														on:click|preventDefault={() => (webSearchEnabled = !webSearchEnabled)}
+														on:click|preventDefault={() => {
+															webSearchEnabled = !webSearchEnabled;
+															if (webSearchEnabled) {
+																imageGenerationEnabled = false;
+															}
+														}}
 														type="button"
 														class="p-[7px] flex gap-1.5 items-center text-sm rounded-full border transition-colors duration-300 focus:outline-hidden max-w-full overflow-hidden {webSearchEnabled
 															? 'text-sky-500 dark:text-sky-300 bg-sky-50 hover:bg-sky-100 dark:bg-sky-400/10 dark:hover:bg-sky-600/10 border-sky-200/40 dark:border-sky-500/20'
@@ -1919,10 +1931,21 @@
 													</button>
 												</Tooltip>
 											{:else if itemId === 'image_generation' && showImageGenerationButton}
-												<Tooltip content={$i18n.t('Image')} placement="top">
+												<Tooltip
+													content={webSearchEnabled
+														? $i18n.t(
+																'Web search and image generation cannot run in the same turn'
+															)
+														: $i18n.t('Image')}
+													placement="top"
+												>
 													<button
-														on:click|preventDefault={() =>
-															(imageGenerationEnabled = !imageGenerationEnabled)}
+														on:click|preventDefault={() => {
+															imageGenerationEnabled = !imageGenerationEnabled;
+															if (imageGenerationEnabled) {
+																webSearchEnabled = false;
+															}
+														}}
 														type="button"
 														class="p-[7px] flex gap-1.5 items-center text-sm rounded-full border transition-colors duration-300 focus:outline-hidden max-w-full overflow-hidden {imageGenerationEnabled
 															? 'text-sky-500 dark:text-sky-300 bg-sky-50 hover:bg-sky-100 dark:bg-sky-400/10 dark:hover:bg-sky-700/10 border-sky-200/40 dark:border-sky-500/20'
@@ -2092,7 +2115,12 @@
 										{#if webSearchEnabled && !($settings?.pinnedInputItems ?? []).includes('web_search')}
 											<Tooltip content={$i18n.t('Web Search')} placement="top">
 												<button
-													on:click|preventDefault={() => (webSearchEnabled = !webSearchEnabled)}
+													on:click|preventDefault={() => {
+														webSearchEnabled = !webSearchEnabled;
+														if (webSearchEnabled) {
+															imageGenerationEnabled = false;
+														}
+													}}
 													type="button"
 													class="group p-[7px] flex gap-1.5 items-center text-sm rounded-full transition-colors duration-300 focus:outline-hidden max-w-full overflow-hidden {webSearchEnabled ||
 													($settings?.webSearch ?? false) === 'always'
@@ -2110,8 +2138,12 @@
 										{#if imageGenerationEnabled && !($settings?.pinnedInputItems ?? []).includes('image_generation')}
 											<Tooltip content={$i18n.t('Image')} placement="top">
 												<button
-													on:click|preventDefault={() =>
-														(imageGenerationEnabled = !imageGenerationEnabled)}
+													on:click|preventDefault={() => {
+														imageGenerationEnabled = !imageGenerationEnabled;
+														if (imageGenerationEnabled) {
+															webSearchEnabled = false;
+														}
+													}}
 													type="button"
 													class="group p-[7px] flex gap-1.5 items-center text-sm rounded-full transition-colors duration-300 focus:outline-hidden max-w-full overflow-hidden {imageGenerationEnabled
 														? ' text-sky-500 dark:text-sky-300 bg-sky-50 hover:bg-sky-100 dark:bg-sky-400/10 dark:hover:bg-sky-700/10 border border-sky-200/40 dark:border-sky-500/20'

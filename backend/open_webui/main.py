@@ -476,6 +476,7 @@ from open_webui.config import (
     ACCEPTANCE_MODAL_TITLE,
     ACCEPTANCE_MODAL_CONTENT,
     ACCEPTANCE_MODAL_BUTTON_TEXT,
+    ENABLE_WELCOME_MESSAGE,
     DEFAULT_PROMPT_SUGGESTIONS,
     DEFAULT_MODELS,
     DEFAULT_PINNED_MODELS,
@@ -1196,6 +1197,8 @@ app.state.config.ENABLE_ACCEPTANCE_MODAL = ENABLE_ACCEPTANCE_MODAL
 app.state.config.ACCEPTANCE_MODAL_TITLE = ACCEPTANCE_MODAL_TITLE
 app.state.config.ACCEPTANCE_MODAL_CONTENT = ACCEPTANCE_MODAL_CONTENT
 app.state.config.ACCEPTANCE_MODAL_BUTTON_TEXT = ACCEPTANCE_MODAL_BUTTON_TEXT
+
+app.state.config.ENABLE_WELCOME_MESSAGE = ENABLE_WELCOME_MESSAGE
 
 app.state.config.RESPONSE_WATERMARK = RESPONSE_WATERMARK
 app.state.config.GREETING_TEMPLATE = GREETING_TEMPLATE
@@ -2737,6 +2740,7 @@ async def get_app_config(request: Request):
                     'two_fa_grace_period_days': app.state.config.TWO_FA_GRACE_PERIOD_DAYS,
                     'enable_data_warnings': app.state.config.ENABLE_DATA_WARNINGS,
                     'data_retention_ttl_days': app.state.config.DATA_RETENTION_TTL_DAYS,
+                    'enable_welcome_message': app.state.config.ENABLE_WELCOME_MESSAGE,
                 }
                 if user is not None
                 else {}
