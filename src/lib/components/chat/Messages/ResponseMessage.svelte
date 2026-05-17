@@ -852,7 +852,10 @@
 								{/each}
 							</div>
 						{:else if shouldShowStatusHistory}
-							<StatusHistory statusHistory={mergedHistory} />
+							<StatusHistory
+								statusHistory={mergedHistory}
+								messageDone={message?.done ?? false}
+							/>
 						{/if}
 
 						{#if message?.files && message.files?.filter((f) => f.type === 'image').length > 0}

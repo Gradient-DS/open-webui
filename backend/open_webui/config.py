@@ -1317,6 +1317,12 @@ GREETING_TEMPLATE = PersistentConfig(
     os.environ.get('GREETING_TEMPLATE', ''),
 )
 
+ENABLE_WELCOME_MESSAGE = PersistentConfig(
+    'ENABLE_WELCOME_MESSAGE',
+    'ui.enable_welcome_message',
+    os.environ.get('ENABLE_WELCOME_MESSAGE', 'False').lower() == 'true',
+)
+
 
 USER_PERMISSIONS_WORKSPACE_MODELS_ACCESS = (
     os.environ.get('USER_PERMISSIONS_WORKSPACE_MODELS_ACCESS', 'False').lower() == 'true'

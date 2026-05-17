@@ -1,16 +1,24 @@
 <script lang="ts">
-	import { onMount } from 'svelte';
 	import { marked } from 'marked';
 
+	import { config } from '$lib/stores';
 	import { WEBUI_API_BASE_URL } from '$lib/constants';
 	import { sanitizeResponseContent } from '$lib/utils';
 
-	const enabled = import.meta.env.PUBLIC_WELCOME_MESSAGE === 'true';
-
 	let message: string | null = null;
+	let fetchedFor: boolean | null = null;
 
-	onMount(async () => {
-		if (!enabled) return;
+	$: enabled = $config?.features?.enable_welcome_message === true;
+
+	$: if (enabled && fetchedFor !== true) {
+		fetchedFor = true;
+		fetchMessage();
+	} else if (!enabled && fetchedFor !== false) {
+		fetchedFor = false;
+		message = null;
+	}
+
+	async function fetchMessage() {
 		try {
 			const token = localStorage.token;
 			if (!token) return;
@@ -25,7 +33,7 @@
 			console.warn('[WelcomeMessage] fetch failed', err);
 			message = null;
 		}
-	});
+	}
 </script>
 
 {#if enabled && message}

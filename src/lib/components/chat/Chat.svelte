@@ -277,6 +277,20 @@
 		saveSessionSelectedModels();
 	}
 
+	let lastSavedFeatures = '';
+	$: if ($chatId && !$temporaryChatEnabled && history?.currentId) {
+		const current = JSON.stringify({
+			webSearchEnabled,
+			imageGenerationEnabled,
+			codeInterpreterEnabled,
+			documentWriterEnabled
+		});
+		if (current !== lastSavedFeatures) {
+			lastSavedFeatures = current;
+			saveChatHandler($chatId, history);
+		}
+	}
+
 	const saveSessionSelectedModels = () => {
 		const selectedModelsString = JSON.stringify(selectedModels);
 		if (
@@ -304,10 +318,6 @@
 		selectedToolIds = [];
 		selectedFilterIds = [];
 		pendingOAuthTools = [];
-		webSearchEnabled = false;
-		imageGenerationEnabled = false;
-		codeInterpreterEnabled = false;
-		documentWriterEnabled = false;
 
 		if (selectedModelIds.filter((id) => id).length > 0) {
 			setDefaults();
@@ -1467,6 +1477,12 @@
 
 				params = chatContent?.params ?? {};
 				chatFiles = chatContent?.files ?? [];
+
+				const chatFeatures = chatContent?.features ?? {};
+				webSearchEnabled = chatFeatures.web_search ?? false;
+				imageGenerationEnabled = chatFeatures.image_generation ?? false;
+				codeInterpreterEnabled = chatFeatures.code_interpreter ?? false;
+				documentWriterEnabled = chatFeatures.document_writer ?? false;
 
 				autoScroll = true;
 				await tick();
@@ -2955,7 +2971,13 @@
 					history: history,
 					messages: createMessagesList(history, history.currentId),
 					params: params,
-					files: chatFiles
+					files: chatFiles,
+					features: {
+						web_search: webSearchEnabled,
+						image_generation: imageGenerationEnabled,
+						code_interpreter: codeInterpreterEnabled,
+						document_writer: documentWriterEnabled
+					}
 				});
 			}
 		}

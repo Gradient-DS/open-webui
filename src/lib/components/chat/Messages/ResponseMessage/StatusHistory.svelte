@@ -16,6 +16,14 @@
 	// Svelte 5 legacy mode — toggling via the header button is restored, just
 	// starting open instead of closed.
 	export let expand = true;
+	// Set by ResponseMessage. When the parent message is done (SSE
+	// [DONE] received), force any header in-progress indicators to
+	// settled. Defensive belt-and-suspenders for the case where a
+	// backend regression leaves a status entry with done=false at the
+	// tail of statusHistory — the load-bearing fix is on the agent
+	// side (closing done=true status for terminal tools), this guard
+	// keeps the spinner from getting stuck if anything regresses.
+	export let messageDone = false;
 	let showHistory = expand;
 
 	let history = [];
@@ -73,12 +81,15 @@
 						id={`status-header`}
 						summary={status.summary}
 						body={status.body}
-						attributes={status.attributes ?? {}}
+						attributes={messageDone && status?.attributes?.done !== 'true'
+							? { ...(status.attributes ?? {}), done: 'true' }
+							: (status.attributes ?? {})}
 						asHeader={true}
 					/>
 				{:else}
 					<StatusItem
 						{status}
+						done={messageDone || (status?.done !== false)}
 						forceVisible={true}
 						asHeader={history.length > 1}
 					/>

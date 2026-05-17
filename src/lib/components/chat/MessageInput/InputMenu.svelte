@@ -758,11 +758,19 @@
 
 						<!-- Web Search -->
 						{#if showWebSearchButton}
-							<Tooltip content={$i18n.t('Search the internet')} placement="top-start">
+							<Tooltip
+								content={imageGenerationEnabled
+									? $i18n.t('Web search and image generation cannot run in the same turn')
+									: $i18n.t('Search the internet')}
+								placement="top-start"
+							>
 								<button
 									class="flex w-full justify-between gap-2 items-center px-3 py-1.5 text-sm cursor-pointer rounded-xl hover:bg-gray-50 dark:hover:bg-gray-800/50"
 									on:click={() => {
 										webSearchEnabled = !webSearchEnabled;
+										if (webSearchEnabled) {
+											imageGenerationEnabled = false;
+										}
 									}}
 								>
 									<div class="flex-1 truncate">
@@ -806,11 +814,19 @@
 
 						<!-- Image Generation -->
 						{#if showImageGenerationButton}
-							<Tooltip content={$i18n.t('Generate an image')} placement="top-start">
+							<Tooltip
+								content={webSearchEnabled
+									? $i18n.t('Web search and image generation cannot run in the same turn')
+									: $i18n.t('Generate an image')}
+								placement="top-start"
+							>
 								<button
 									class="flex w-full justify-between gap-2 items-center px-3 py-1.5 text-sm cursor-pointer rounded-xl hover:bg-gray-50 dark:hover:bg-gray-800/50"
 									on:click={() => {
 										imageGenerationEnabled = !imageGenerationEnabled;
+										if (imageGenerationEnabled) {
+											webSearchEnabled = false;
+										}
 									}}
 								>
 									<div class="flex-1 truncate">
@@ -842,58 +858,6 @@
 									<div class="shrink-0">
 										<Switch
 											state={imageGenerationEnabled}
-											on:change={async (e) => {
-												const state = e.detail;
-												await tick();
-											}}
-										/>
-									</div>
-								</button>
-							</Tooltip>
-						{/if}
-
-						<!-- Code Interpreter -->
-						{#if showCodeInterpreterButton}
-							<Tooltip content={$i18n.t('Execute code for analysis')} placement="top-start">
-								<button
-									class="flex w-full justify-between gap-2 items-center px-3 py-1.5 text-sm cursor-pointer rounded-xl hover:bg-gray-50 dark:hover:bg-gray-800/50"
-									aria-pressed={codeInterpreterEnabled}
-									aria-label={codeInterpreterEnabled
-										? $i18n.t('Disable Code Interpreter')
-										: $i18n.t('Enable Code Interpreter')}
-									on:click={() => {
-										codeInterpreterEnabled = !codeInterpreterEnabled;
-									}}
-								>
-									<div class="flex-1 truncate">
-										<div class="flex flex-1 gap-2 items-center">
-											<div class="shrink-0">
-												<Terminal className="size-3.5" strokeWidth="1.75" />
-											</div>
-											<div class="truncate">{$i18n.t('Code Interpreter')}</div>
-										</div>
-									</div>
-
-									<Tooltip
-										content={pinnedInputItems.includes('code_interpreter')
-											? $i18n.t('Unpin')
-											: $i18n.t('Pin')}
-									>
-										<button
-											class="p-1 rounded-md hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
-											on:click|stopPropagation={() => pinItemHandler('code_interpreter')}
-										>
-											{#if pinnedInputItems.includes('code_interpreter')}
-												<PinSlash className="size-3.5" />
-											{:else}
-												<Pin className="size-3.5" />
-											{/if}
-										</button>
-									</Tooltip>
-
-									<div class="shrink-0">
-										<Switch
-											state={codeInterpreterEnabled}
 											on:change={async (e) => {
 												const state = e.detail;
 												await tick();
@@ -946,6 +910,58 @@
 									<div class="shrink-0">
 										<Switch
 											state={documentWriterEnabled}
+											on:change={async (e) => {
+												const state = e.detail;
+												await tick();
+											}}
+										/>
+									</div>
+								</button>
+							</Tooltip>
+						{/if}
+
+						<!-- Code Interpreter -->
+						{#if showCodeInterpreterButton}
+							<Tooltip content={$i18n.t('Execute code for analysis')} placement="top-start">
+								<button
+									class="flex w-full justify-between gap-2 items-center px-3 py-1.5 text-sm cursor-pointer rounded-xl hover:bg-gray-50 dark:hover:bg-gray-800/50"
+									aria-pressed={codeInterpreterEnabled}
+									aria-label={codeInterpreterEnabled
+										? $i18n.t('Disable Code Interpreter')
+										: $i18n.t('Enable Code Interpreter')}
+									on:click={() => {
+										codeInterpreterEnabled = !codeInterpreterEnabled;
+									}}
+								>
+									<div class="flex-1 truncate">
+										<div class="flex flex-1 gap-2 items-center">
+											<div class="shrink-0">
+												<Terminal className="size-3.5" strokeWidth="1.75" />
+											</div>
+											<div class="truncate">{$i18n.t('Code Interpreter')}</div>
+										</div>
+									</div>
+
+									<Tooltip
+										content={pinnedInputItems.includes('code_interpreter')
+											? $i18n.t('Unpin')
+											: $i18n.t('Pin')}
+									>
+										<button
+											class="p-1 rounded-md hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+											on:click|stopPropagation={() => pinItemHandler('code_interpreter')}
+										>
+											{#if pinnedInputItems.includes('code_interpreter')}
+												<PinSlash className="size-3.5" />
+											{:else}
+												<Pin className="size-3.5" />
+											{/if}
+										</button>
+									</Tooltip>
+
+									<div class="shrink-0">
+										<Switch
+											state={codeInterpreterEnabled}
 											on:change={async (e) => {
 												const state = e.detail;
 												await tick();

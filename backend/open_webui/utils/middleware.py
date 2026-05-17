@@ -2135,6 +2135,25 @@ async def process_chat_payload(request, form_data, user, metadata, model):
     # for callers that don't set the metadata key.
     route_to_agent = metadata.get('route_to_agent', AGENT_API_ENABLED)
 
+    # [Gradient] The soev agent does not register a `generate_image` tool
+    # today, so when the user has the image-generation toggle on we fall
+    # back to the non-agent path for this turn — that path either runs
+    # `chat_image_generation_handler` (non-native FC) or registers the
+    # builtin `generate_image` tool (native FC, via `utils/tools.py`).
+    # Routing to the agent here produces broken behaviour: the model
+    # either fakes an SVG (no tool registered) or hallucinates an
+    # `![alt](attachment://...)` markdown link around the real image
+    # that some other path delivered. Removing this short-circuit
+    # requires implementing image generation as an agent capability —
+    # tracked in
+    # thoughts/shared/research/2026-05-15-agent-document-generation-and-owui-rich-output.md (Part E)
+    # and in thoughts/shared/plans/2026-05-17-soev-chat-manual-cluster-b-fixes.md.
+    if route_to_agent:
+        features = form_data.get('features') or {}
+        if features.get('image_generation'):
+            route_to_agent = False
+            metadata['route_to_agent'] = False
+
     # Pipeline Inlet -> Filter Inlet -> Chat Memory -> Chat Web Search -> Chat Image Generation
     # -> Chat Code Interpreter (Form Data Update) -> (Default) Chat Tools Function Calling
     # -> Chat Files
