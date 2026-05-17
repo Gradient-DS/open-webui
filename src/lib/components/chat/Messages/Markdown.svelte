@@ -12,7 +12,7 @@
 
 	import MarkdownTokens from './Markdown/MarkdownTokens.svelte';
 	import footnoteExtension from '$lib/utils/marked/footnote-extension';
-	import citationExtension from '$lib/utils/marked/citation-extension';
+	import citationExtension, { applyCitationWalker } from '$lib/utils/marked/citation-extension';
 
 	export let id = '';
 	export let content;
@@ -67,7 +67,7 @@
 		if (processed === lastParsedContent) return;
 		lastParsedContent = processed;
 
-		tokens = marked.lexer(processed);
+		tokens = applyCitationWalker(marked.lexer(processed));
 	};
 
 	const updateHandler = (content) => {

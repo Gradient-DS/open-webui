@@ -38,7 +38,7 @@
 
 {#if enabled && message}
 	<div
-		class="mx-auto w-full max-w-3xl px-4 py-3 my-3 rounded-xl border border-gray-100 dark:border-gray-800 bg-gray-50 dark:bg-gray-900/40 text-gray-700 dark:text-gray-200 markdown-prose-sm [&_p]:my-2"
+		class="mx-auto w-full max-w-3xl px-4 py-3 my-3 rounded-xl border border-gray-100 dark:border-gray-800 bg-gray-50 dark:bg-gray-900/40 text-gray-700 dark:text-gray-200 markdown-prose-sm [&_p]:my-2 max-h-[35vh] overflow-y-auto scrollbar-hidden"
 	>
 		{@html marked.parse(sanitizeResponseContent(message), { breaks: true })}
 	</div>

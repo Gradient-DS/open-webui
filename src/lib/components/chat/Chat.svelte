@@ -621,6 +621,10 @@
 						} else {
 							message.sources = [data];
 						}
+						// [Gradient] Reassign to trigger Svelte reactivity so inline `[N]`
+						// pills resolve as soon as their source arrives, instead of
+						// waiting for `done` to flip and force a re-render.
+						message.sources = message.sources;
 					}
 				} else if (type === 'notification') {
 					const toastType = data?.type ?? 'info';
