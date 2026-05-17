@@ -189,16 +189,18 @@
 		>
 			{$i18n.t('Copy Invite Link')}
 		</button>
-		<button
-			type="button"
-			class="flex-1 px-2 py-1.5 text-xs font-medium rounded-lg border transition {mode ===
-			'password'
-				? 'border-gray-900 dark:border-white bg-gray-900 dark:bg-white text-white dark:text-black'
-				: 'border-gray-200 dark:border-gray-700 hover:border-gray-400 dark:hover:border-gray-500'}"
-			on:click={() => (mode = 'password')}
-		>
-			{$i18n.t('Set Password')}
-		</button>
+		{#if !$config?.oauth?.providers?.microsoft}
+			<button
+				type="button"
+				class="flex-1 px-2 py-1.5 text-xs font-medium rounded-lg border transition {mode ===
+				'password'
+					? 'border-gray-900 dark:border-white bg-gray-900 dark:bg-white text-white dark:text-black'
+					: 'border-gray-200 dark:border-gray-700 hover:border-gray-400 dark:hover:border-gray-500'}"
+				on:click={() => (mode = 'password')}
+			>
+				{$i18n.t('Set Password')}
+			</button>
+		{/if}
 	</div>
 
 	<!-- Form Fields -->

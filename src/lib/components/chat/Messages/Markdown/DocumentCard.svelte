@@ -5,7 +5,7 @@
 	const { saveAs } = fileSaver;
 	const i18n = getContext('i18n');
 
-	import { showControls, showDocument, openDocumentTabSignal } from '$lib/stores';
+	import { config, showControls, showDocument, openDocumentTabSignal } from '$lib/stores';
 	import { exportDocumentAsPdf, exportDocumentAsDocx } from '$lib/apis/utils';
 
 	import Document from '$lib/components/icons/Document.svelte';
@@ -26,6 +26,12 @@
 	$: displayTitle = title || $i18n.t('Document');
 
 	const openDocument = () => {
+		// Toggle: if the side panel is already showing the document, close it.
+		if ($showControls && $showDocument) {
+			showControls.set(false);
+			showDocument.set(false);
+			return;
+		}
 		showDocument.set(true);
 		showControls.set(true);
 		openDocumentTabSignal.update((n) => n + 1);
@@ -156,15 +162,17 @@
 							{$i18n.t('PDF document (.pdf)')}
 						</div>
 					</button>
-					<button
-						type="button"
-						class="flex gap-2 items-center px-3 py-1.5 text-sm cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-xl w-full"
-						on:click={downloadDocx}
-					>
-						<div class="flex items-center line-clamp-1">
-							{$i18n.t('Word document (.docx)')}
-						</div>
-					</button>
+					{#if $config?.features?.enable_docx_export ?? true}
+						<button
+							type="button"
+							class="flex gap-2 items-center px-3 py-1.5 text-sm cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-xl w-full"
+							on:click={downloadDocx}
+						>
+							<div class="flex items-center line-clamp-1">
+								{$i18n.t('Word document (.docx)')}
+							</div>
+						</button>
+					{/if}
 				</div>
 			</Dropdown>
 		</div>

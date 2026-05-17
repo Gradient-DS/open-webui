@@ -5,9 +5,12 @@
 	import DOMPurify from 'dompurify';
 	import { marked } from 'marked';
 	import { WEBUI_BASE_URL } from '$lib/constants';
+	import { resolveLocalized } from '$lib/utils/localized';
 
 	const dispatch = createEventDispatcher();
 	const i18n = getContext('i18n');
+
+	$: localizedContent = resolveLocalized(banner?.content, $i18n?.language);
 
 	export let banner: Banner = {
 		id: '',
@@ -100,7 +103,7 @@
 					{/if}
 				</div>
 				<div class="flex-1 text-xs text-gray-700 dark:text-white max-h-60 overflow-y-auto">
-					{@html DOMPurify.sanitize(marked.parse((banner?.content ?? '').replace(/\n/g, '<br>')))}
+					{@html DOMPurify.sanitize(marked.parse(localizedContent.replace(/\n/g, '<br>')))}
 				</div>
 			</div>
 

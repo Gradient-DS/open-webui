@@ -128,6 +128,10 @@ class ChatFileModel(BaseModel):
 class ChatForm(BaseModel):
     chat: dict
     folder_id: Optional[str] = None
+    # [Gradient] Optional meta dict set on creation. Used by the per-chat
+    # agent picker to bind a new chat to an external agent via
+    # ``meta.agent_id``. When omitted, meta defaults to {}.
+    meta: Optional[dict] = None
 
 
 class ChatImportForm(ChatForm):
@@ -296,6 +300,7 @@ class ChatTable:
                     ),
                     'chat': self._clean_null_bytes(form_data.chat),
                     'folder_id': form_data.folder_id,
+                    'meta': form_data.meta or {},
                     'created_at': int(time.time()),
                     'updated_at': int(time.time()),
                 }
@@ -999,6 +1004,7 @@ class ChatTable:
             all_chats = (
                 db.query(Chat)
                 .filter_by(user_id=user_id, pinned=True, archived=False)
+                .filter(Chat.deleted_at.is_(None))
                 .order_by(Chat.updated_at.desc())
                 .with_entities(Chat.id, Chat.title, Chat.updated_at, Chat.created_at)
             )
@@ -1016,7 +1022,12 @@ class ChatTable:
 
     def get_archived_chats_by_user_id(self, user_id: str, db: Optional[Session] = None) -> list[ChatModel]:
         with get_db_context(db) as db:
-            all_chats = db.query(Chat).filter_by(user_id=user_id, archived=True).order_by(Chat.updated_at.desc())
+            all_chats = (
+                db.query(Chat)
+                .filter_by(user_id=user_id, archived=True)
+                .filter(Chat.deleted_at.is_(None))
+                .order_by(Chat.updated_at.desc())
+            )
             return [ChatModel.model_validate(chat) for chat in all_chats]
 
     def get_chats_by_user_id_and_search_text(

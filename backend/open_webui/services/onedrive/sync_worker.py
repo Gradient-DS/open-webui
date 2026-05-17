@@ -50,6 +50,10 @@ class OneDriveSyncWorker(BaseSyncWorker):
         return 'onedrive'
 
     @property
+    def provider_slug(self) -> str:
+        return 'onedrive'
+
+    @property
     def internal_request_path(self) -> str:
         return '/internal/onedrive-sync'
 
@@ -197,6 +201,10 @@ class OneDriveSyncWorker(BaseSyncWorker):
                 log.warning(f'File not found: {source["name"]}')
                 return None
 
+            if not self._is_supported_file(item):
+                log.info(f'Skipping unsupported single-file source {source.get("name", item.get("name", "?"))}')
+                return None
+
             # Check content hash for changes
             # OneDrive returns different hash types depending on the drive:
             # - sha256Hash: OneDrive for Business
@@ -250,10 +258,30 @@ class OneDriveSyncWorker(BaseSyncWorker):
         return hashes.get('sha256Hash') or hashes.get('quickXorHash')
 
     async def _download_file_content(self, file_info: Dict[str, Any]) -> bytes:
-        """Download file content from OneDrive."""
+        """Download file content from OneDrive.
+
+        Removed in cleanup commit after USE_SHARED_LOADER rollout completes —
+        loader-worker handles the download path (legacy fallback only).
+        """
         drive_id = file_info['drive_id']
         item_id = file_info['item']['id']
         return await self._client.download_file(drive_id, item_id)
+
+    def _item_from_file_info(self, file_info: Dict[str, Any], access_token: str) -> Dict[str, Any]:
+        item = super()._item_from_file_info(file_info, access_token)
+        item['source_descriptor'] = {
+            'drive_id': file_info['drive_id'],
+            'item_id': file_info['item']['id'],
+        }
+        # Graph driveItem.file.mimeType is the cloud's authoritative type;
+        # the extension-based fallback in _get_content_type can disagree
+        # (e.g. an .xlsx file reported as application/pdf would have routed
+        # through the doc-processor PDF parser, which is the misclassification
+        # half of the 2026-04-29 incident). Prefer the cloud value when present.
+        raw_mime = file_info.get('item', {}).get('file', {}).get('mimeType')
+        if raw_mime:
+            item['content_type'] = raw_mime
+        return item
 
     def _get_provider_storage_headers(self, item_id: str) -> dict:
         return {

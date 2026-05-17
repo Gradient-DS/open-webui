@@ -24,6 +24,12 @@ SSE protocol from agent:
         event: source
         data: {"name": "doc.pdf", "url": "..."}
 
+        event: present_ui
+        data: {"name": "choice", "props": {...}}
+
+        event: context_usage
+        data: {"tokens_used": int, "tokens_budget": int, "fraction": float}
+
     Standard OpenAI chunks (passed through to process_chat_response):
         data: {"choices": [{"delta": {"content": "..."}}]}
 
@@ -40,7 +46,7 @@ import aiohttp
 from starlette.background import BackgroundTask
 from starlette.responses import StreamingResponse
 
-from open_webui.env import AGENT_API_BASE_URL, AGENT_API_AGENT
+from open_webui.env import AGENT_API_BASE_URL, AGENT_API_KEY
 from open_webui.socket.main import get_event_emitter
 
 log = logging.getLogger(__name__)
@@ -53,21 +59,43 @@ log = logging.getLogger(__name__)
 
 @dataclass
 class AgentPayload:
-    """Request schema for the agent API's chat completions endpoint."""
+    """Request schema for the agent API's chat completions endpoint.
 
-    agent: str
+    The ``agent`` field is optional — when omitted, the agent service
+    uses its configured ``default_agent``. The ``model`` field carries
+    the user-selected LLM and is validated server-side against the
+    service's allowlist.
+    """
+
     model: str
     messages: list[dict[str, Any]]
+    agent: Optional[str] = None
     stream: bool = True
     chat_id: Optional[str] = None
     user_id: Optional[str] = None
     message_id: Optional[str] = None
+    # [Gradient] Parent of ``message_id`` in the chat's branching tree
+    # (the user message that prompted this response). The agent service
+    # uses this to rewind its persisted thread state on retry/regenerate,
+    # so re-runs replay from the pre-answer point and tools fire again
+    # instead of the model recapping cached output. Omitted on the first
+    # turn of a new chat (no parent exists).
+    parent_message_id: Optional[str] = None
     session_id: Optional[str] = None
     features: dict[str, Any] = field(default_factory=dict)
     files: Optional[list[dict[str, Any]]] = None
     knowledge: Optional[list[dict[str, Any]]] = None
     tool_ids: Optional[list[str]] = None
     rag_filter: Optional[dict[str, Any]] = None
+    # Operator-supplied system prompt from the custom-model definition
+    # (model.params.system). Variables are pre-substituted upstream so the
+    # agent can use the value as-is.
+    system_prompt: Optional[str] = None
+    # [Gradient] Generic metadata forwarded as-is to the agent service.
+    # Today used for ``user_language`` (UI locale, BCP-47 like "nl-NL")
+    # so the agent can resolve the response language. Open-ended so we
+    # can extend it without changing the contract.
+    metadata: Optional[dict[str, Any]] = None
     # Model params forwarded directly
     temperature: Optional[float] = None
     top_p: Optional[float] = None
@@ -80,19 +108,22 @@ class AgentPayload:
 
 def build_agent_payload(
     *,
-    agent: str,
     model: str,
     messages: list[dict[str, Any]],
+    agent: Optional[str] = None,
     stream: bool = True,
     chat_id: Optional[str] = None,
     user_id: Optional[str] = None,
     message_id: Optional[str] = None,
+    parent_message_id: Optional[str] = None,
     session_id: Optional[str] = None,
     features: Optional[dict[str, Any]] = None,
     files: Optional[list[dict[str, Any]]] = None,
     knowledge: Optional[list[dict[str, Any]]] = None,
     tool_ids: Optional[list[str]] = None,
     rag_filter: Optional[dict[str, Any]] = None,
+    system_prompt: Optional[str] = None,
+    metadata: Optional[dict[str, Any]] = None,
     **model_params,
 ) -> dict[str, Any]:
     """Build a JSON-serialisable payload for the agent API.
@@ -101,22 +132,38 @@ def build_agent_payload(
     values so the agent only sees fields that are actually set.
     """
     payload = AgentPayload(
-        agent=agent,
         model=model,
         messages=messages,
+        agent=agent,
         stream=stream,
         chat_id=chat_id,
         user_id=user_id,
         message_id=message_id,
+        parent_message_id=parent_message_id,
         session_id=session_id,
         features=features or {},
         files=files,
         knowledge=knowledge,
         tool_ids=tool_ids,
         rag_filter=rag_filter,
+        system_prompt=system_prompt,
+        metadata=metadata,
         **{k: v for k, v in model_params.items() if v is not None},
     )
     return {k: v for k, v in asdict(payload).items() if v is not None}
+
+
+def _agent_api_headers() -> dict[str, str]:
+    """Build outbound headers for requests to the agent API.
+
+    Always sends ``Content-Type: application/json``. When ``AGENT_API_KEY``
+    is configured, adds the ``X-API-Key`` header so the agent service
+    (which enforces auth on all ``/v1/*`` routes) accepts the request.
+    """
+    headers: dict[str, str] = {'Content-Type': 'application/json'}
+    if AGENT_API_KEY:
+        headers['X-API-Key'] = AGENT_API_KEY
+    return headers
 
 
 @dataclass
@@ -153,7 +200,7 @@ async def stream_agent_response(
             method='POST',
             url=f'{base_url}/v1/chat/completions',
             data=json.dumps(payload),
-            headers={'Content-Type': 'application/json'},
+            headers=_agent_api_headers(),
         )
 
         if response.status >= 400:
@@ -204,13 +251,17 @@ async def call_agent_api(
     form_data: dict[str, Any],
     metadata: dict[str, Any],
     features: dict[str, Any],
+    override_agent: Optional[str] = None,
 ):
     """Route a chat completion to the external agent API.
 
-    [Gradient] Called from main.py when AGENT_API_ENABLED is true. Extracts
-    fields from OpenWebUI's form_data/metadata, calls the transport layer,
-    routes custom SSE events to Socket.IO, and returns either a
-    StreamingResponse or a dict for process_chat_response to consume.
+    [Gradient] Called from main.py either when ``AGENT_API_ENABLED`` is the
+    global bypass OR when a chat is bound to an agent via ``chat.meta.agent_id``.
+    When ``override_agent`` is provided it takes precedence over the global
+    ``AGENT_API_SELECTED_AGENT`` admin setting. Extracts fields from
+    OpenWebUI's form_data/metadata, calls the transport layer, routes custom
+    SSE events to Socket.IO, and returns either a StreamingResponse or a dict
+    for process_chat_response to consume.
     """
     stream = form_data.get('stream', True)
 
@@ -228,20 +279,53 @@ async def call_agent_api(
         if key in form_data:
             model_params[key] = form_data[key]
 
+    # [Gradient] Resolve to the underlying LLM ID. The agents service
+    # validates ``model`` against its LLM allowlist; OpenWebUI custom-model
+    # IDs (e.g. "offertemachine") aren't LLMs and aren't in the allowlist.
+    # The base model (e.g. "gpt-oss-120b") is. ``metadata["model"]["info"]``
+    # carries the persisted custom_model dump for custom models; absent for
+    # pure base models, arena models, and direct mode — those fall back to
+    # the form_data model, which is already the LLM ID in those cases.
+    model_dict = metadata.get('model') or {}
+    info = model_dict.get('info') or {}
+    llm_model = info.get('base_model_id') or form_data.get('model', '')
+
+    # [Gradient] Per-chat override (chat.meta.agent_id) wins over the global
+    # AGENT_API_SELECTED_AGENT admin setting. When neither is set we omit
+    # ``agent`` from the payload and the agents service uses its own
+    # ``default_agent``.
+    selected_agent = override_agent or request.app.state.config.AGENT_API_SELECTED_AGENT or None
+
+    # [Gradient] Forward parent_message_id so the agent service can rewind
+    # its persisted thread state on retry/regenerate. Without this, the
+    # agent's stateful thread store leaks the prior assistant turn into
+    # the model's context and tools don't re-fire on re-runs.
+
+    # [Gradient] Build agent-side metadata from the OWUI metadata dict.
+    # user_language carries the frontend UI locale (BCP-47, e.g. "nl-NL")
+    # forwarded from Chat.svelte so the agent resolves the response language.
+    agent_metadata: dict[str, Any] = {}
+    user_language = metadata.get('user_language')
+    if user_language:
+        agent_metadata['user_language'] = user_language
+
     payload = build_agent_payload(
-        agent=AGENT_API_AGENT,
-        model=form_data.get('model', ''),
+        model=llm_model,
+        agent=selected_agent,
         messages=form_data.get('messages', []),
         stream=stream,
         chat_id=metadata.get('chat_id'),
         user_id=metadata.get('user_id'),
         message_id=metadata.get('message_id'),
+        parent_message_id=metadata.get('parent_message_id'),
         session_id=metadata.get('session_id'),
         features=features,
         files=metadata.get('files'),
         knowledge=metadata.get('knowledge'),
         tool_ids=metadata.get('tool_ids'),
         rag_filter=metadata.get('rag_filter'),
+        system_prompt=metadata.get('system_prompt'),
+        metadata=agent_metadata or None,
         **model_params,
     )
 
@@ -266,7 +350,7 @@ async def _call_agent_api_non_streaming(
             method='POST',
             url=f'{AGENT_API_BASE_URL}/v1/chat/completions',
             data=json.dumps(payload),
-            headers={'Content-Type': 'application/json'},
+            headers=_agent_api_headers(),
         )
 
         if response.status >= 400:
@@ -327,6 +411,61 @@ def _build_streaming_response(
                             )
                         except Exception as e:
                             log.warning(f'Error emitting source event: {e}')
+                    continue
+
+                if sse_event.event_type == 'present_ui':
+                    # [Gradient] Generative-UI directive — route to the
+                    # frontend over Socket.IO so the message-level
+                    # component dispatcher can render it. Payload shape:
+                    # {"name": "<component>", "props": {...}}.
+                    if event_emitter:
+                        try:
+                            await event_emitter(
+                                {
+                                    'type': 'present_ui',
+                                    'data': sse_event.data,
+                                }
+                            )
+                        except Exception as e:
+                            log.warning(f'Error emitting present_ui event: {e}')
+                    continue
+
+                if sse_event.event_type == 'context_usage':
+                    # [Gradient] Post-turn context-budget estimate from the
+                    # agent service. Payload shape:
+                    # {"tokens_used": int, "tokens_budget": int, "fraction": float}.
+                    # The frontend renders a banner above the chat input when
+                    # fraction crosses a threshold.
+                    if event_emitter:
+                        try:
+                            await event_emitter(
+                                {
+                                    'type': 'context_usage',
+                                    'data': sse_event.data,
+                                }
+                            )
+                        except Exception as e:
+                            log.warning(f'Error emitting context_usage event: {e}')
+                    continue
+
+                if sse_event.event_type == 'panel_filter':
+                    # [Gradient] Per-message citation-panel scope. Payload
+                    # shape: {"ns": [int, ...]} naming the cumulative source
+                    # ids that should appear in the chip list for THIS
+                    # message. The backend keeps dispatching `source` events
+                    # cumulatively so inline `[N]` tokens resolve via the
+                    # dense-array lookup across cross-turn cites; this event
+                    # prevents the rendered chip list from accumulating.
+                    if event_emitter:
+                        try:
+                            await event_emitter(
+                                {
+                                    'type': 'panel_filter',
+                                    'data': sse_event.data,
+                                }
+                            )
+                        except Exception as e:
+                            log.warning(f'Error emitting panel_filter event: {e}')
                     continue
 
                 # Standard OpenAI chunk — pass through as SSE data line

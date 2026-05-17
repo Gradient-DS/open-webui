@@ -1,0 +1,17 @@
+{{- if .Values.loaderWorker.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "open-webui-tenant.loaderWorker.fullname" . }}
+  labels:
+    {{- include "open-webui-tenant.loaderWorker.labels" . | nindent 4 }}
+spec:
+  type: ClusterIP
+  ports:
+    - name: http
+      port: {{ .Values.loaderWorker.service.port | default 8002 }}
+      targetPort: http
+      protocol: TCP
+  selector:
+    {{- include "open-webui-tenant.loaderWorker.selectorLabels" . | nindent 4 }}
+{{- end }}

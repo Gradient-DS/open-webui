@@ -3,6 +3,7 @@
 	import { config, embed, showControls, showEmbeds } from '$lib/stores';
 
 	import CitationModal from './Citations/CitationModal.svelte';
+	import { reduceSources } from './Citations/reduceSources';
 
 	const i18n = getContext('i18n');
 
@@ -11,8 +12,36 @@
 
 	export let sources = [];
 	export let readOnly = false;
+	/**
+	 * [Gradient] Cumulative `[N]` ids that should appear in the bottom panel
+	 * for this message. The agent service dispatches this alongside the
+	 * cumulative `sources` list so the panel can scope per-message while the
+	 * inline `[N]` lookup keeps working across cross-turn cites.
+	 *
+	 * `null` (the default) means "show everything" — keeps back-compat for
+	 * older messages and for upstream providers that don't dispatch the
+	 * `panel_filter` event.
+	 */
+	export let panelFilter: number[] | null = null;
+	/**
+	 * [Gradient] Whether the parent message has finished streaming. Used to
+	 * suppress the bottom pill until the agent's final `panel_filter` is
+	 * in. Intermediate dispatches (one after every tool iteration) carry
+	 * the full "retrieved so far" set, so a web-search turn briefly shows
+	 * the entire result corpus (e.g. 19 hits) before the post-answer
+	 * dispatch narrows it to what the LLM actually cited (e.g. 7). The
+	 * final panel_filter arrives right after the answer text finishes
+	 * streaming — effectively the same moment as `done` flipping true —
+	 * so gating on done avoids the flash without delaying anything that
+	 * was stable mid-stream.
+	 *
+	 * Defaults to `true` so non-streaming callers (e.g. `Document.svelte`)
+	 * keep their previous behavior without opting in.
+	 */
+	export let messageDone: boolean = true;
 
 	let citations = [];
+	let visibleCitations = [];
 	let showPercentage = false;
 	let showRelevance = true;
 
@@ -98,50 +127,25 @@
 	}
 
 	$: {
-		citations = sources.reduce((acc, source) => {
-			if (Object.keys(source).length === 0) {
-				return acc;
-			}
-
-			source?.document?.forEach((document, index) => {
-				const metadata = source?.metadata?.[index];
-				const distance = source?.distances?.[index];
-
-				// Within the same citation there could be multiple documents
-				const id = metadata?.source ?? source?.source?.id ?? 'N/A';
-				let _source = source?.source;
-
-				if (metadata?.name) {
-					_source = { ..._source, name: metadata.name };
-				}
-
-				if (id.startsWith('http://') || id.startsWith('https://')) {
-					_source = { ..._source, name: id, url: id };
-				}
-
-				const existingSource = acc.find((item) => item.id === id);
-
-				if (existingSource) {
-					existingSource.document.push(document);
-					existingSource.metadata.push(metadata);
-					if (distance !== undefined) existingSource.distances.push(distance);
-				} else {
-					acc.push({
-						id: id,
-						source: _source,
-						document: [document],
-						metadata: metadata ? [metadata] : [],
-						distances: distance !== undefined ? [distance] : []
-					});
-				}
-			});
-
-			return acc;
-		}, []);
-		console.log('citations', citations);
-
+		citations = reduceSources(sources);
 		showRelevance = calculateShowRelevance(citations);
 		showPercentage = shouldShowPercentage(citations);
+	}
+
+	// [Gradient] Filter to the per-message panel scope. `idx + 1` is the
+	// citation's cumulative `[N]` (its 1-based position in the dense
+	// `sources` array the inline render uses). When `panelFilter` is set
+	// we keep only those positions; when it's `null` we show everything.
+	// The filter does NOT touch the underlying `citations` array — inline
+	// `[N]` clicks still resolve via `showSourceModal(N)` against the
+	// cumulative list.
+	$: {
+		if (panelFilter == null) {
+			visibleCitations = citations;
+		} else {
+			const allowed = new Set(panelFilter);
+			visibleCitations = citations.filter((_, idx) => allowed.has(idx + 1));
+		}
 	}
 
 	const decodeString = (str: string) => {
@@ -160,14 +164,16 @@
 	showRelevance={citationRelevanceEnabled && showRelevance}
 />
 
-{#if citations.length > 0}
-	{@const urlCitations = citations.filter((c) => c?.source?.name?.startsWith('http'))}
+{#if visibleCitations.length > 0 && messageDone}
+	{@const urlCitations = visibleCitations.filter((c) =>
+		c?.source?.name?.startsWith('http')
+	)}
 	<div class=" py-1 -mx-0.5 w-full flex gap-1 items-center flex-wrap">
 		<button
 			class="text-xs font-medium text-gray-600 dark:text-gray-300 px-3.5 h-8 rounded-full hover:bg-gray-100 dark:hover:bg-gray-800 transition flex items-center gap-1 border border-gray-50 dark:border-gray-850/30"
-			aria-label={citations.length === 1
+			aria-label={visibleCitations.length === 1
 				? $i18n.t('Toggle 1 source')
-				: $i18n.t('Toggle {{COUNT}} sources', { COUNT: citations.length })}
+				: $i18n.t('Toggle {{COUNT}} sources', { COUNT: visibleCitations.length })}
 			aria-expanded={showCitations}
 			on:click={() => {
 				showCitations = !showCitations;
@@ -188,11 +194,11 @@
 				</div>
 			{/if}
 			<div>
-				{#if citations.length === 1}
+				{#if visibleCitations.length === 1}
 					{$i18n.t('1 Source')}
 				{:else}
 					{$i18n.t('{{COUNT}} Sources', {
-						COUNT: citations.length
+						COUNT: visibleCitations.length
 					})}
 				{/if}
 			</div>
@@ -203,7 +209,7 @@
 {#if showCitations}
 	<div class="py-1.5">
 		<div class="text-xs gap-2 flex flex-col">
-			{#each citations as citation, idx}
+			{#each visibleCitations as citation, idx}
 				<button
 					id={`source-${id}-${idx + 1}`}
 					aria-label={$i18n.t('View source: {{name}}', {

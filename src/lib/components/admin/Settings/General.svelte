@@ -21,6 +21,7 @@
 	import { banners as _banners, config, showChangelog } from '$lib/stores';
 	import type { Banner } from '$lib/types';
 	import { compareVersion } from '$lib/utils';
+	import { hasLocalizedContent } from '$lib/utils/localized';
 	import { onMount, getContext } from 'svelte';
 	import { toast } from 'svelte-sonner';
 	import Textarea from '$lib/components/common/Textarea.svelte';
@@ -863,14 +864,14 @@
 								class="p-1 px-3 text-xs flex rounded-sm transition"
 								type="button"
 								on:click={() => {
-									if (banners.length === 0 || banners.at(-1).content !== '') {
+									if (banners.length === 0 || hasLocalizedContent(banners.at(-1).content)) {
 										banners = [
 											...banners,
 											{
 												id: uuidv4(),
 												type: '',
 												title: '',
-												content: '',
+												content: {},
 												dismissible: true,
 												timestamp: Math.floor(Date.now() / 1000)
 											}

@@ -274,7 +274,12 @@ class GoogleDriveClient:
         return data['startPageToken']
 
     async def download_file(self, file_id: str) -> bytes:
-        """Download file content (for non-Workspace files)."""
+        """Download file content (for non-Workspace files).
+
+        Removed in cleanup commit after USE_SHARED_LOADER rollout completes —
+        the per-tenant loader-worker pod owns the download path; reimplemented
+        in ``genai-utils/api/gateway/loader_worker/sources/google_drive.py``.
+        """
         url = f'{DRIVE_BASE_URL}/files/{file_id}'
         response = await self._request_with_retry(
             'GET',
@@ -286,7 +291,11 @@ class GoogleDriveClient:
         return response.content
 
     async def export_file(self, file_id: str, mime_type: str) -> bytes:
-        """Export a Google Workspace file (Docs, Sheets, Slides) to the given MIME type."""
+        """Export a Google Workspace file (Docs, Sheets, Slides) to the given MIME type.
+
+        Removed in cleanup commit after USE_SHARED_LOADER rollout completes —
+        loader-worker source client owns the export path.
+        """
         url = f'{DRIVE_BASE_URL}/files/{file_id}/export'
         response = await self._request_with_retry('GET', url, params={'mimeType': mime_type}, follow_redirects=True)
         response.raise_for_status()

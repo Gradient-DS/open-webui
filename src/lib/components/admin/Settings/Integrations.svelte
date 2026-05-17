@@ -1,10 +1,9 @@
 <script lang="ts">
 	import { toast } from 'svelte-sonner';
-	import { createEventDispatcher, onMount, getContext, tick } from 'svelte';
+	import { onMount, getContext } from 'svelte';
 	import { v4 as uuidv4 } from 'uuid';
 	import { getModels as _getModels } from '$lib/apis';
 
-	const dispatch = createEventDispatcher();
 	const i18n = getContext('i18n');
 
 	import { models, settings, user, terminalServers } from '$lib/stores';
@@ -35,8 +34,6 @@
 	} from '$lib/apis/configs';
 
 	import IntegrationProviders from './IntegrationProviders.svelte';
-
-	export let saveSettings: Function;
 
 	let servers = null;
 	let showConnectionModal = false;
@@ -193,12 +190,7 @@
 	}}
 />
 
-<form
-	class="flex flex-col h-full justify-between text-sm"
-	on:submit|preventDefault={() => {
-		updateHandler();
-	}}
->
+<div class="flex flex-col h-full justify-between text-sm">
 	<div class=" overflow-y-scroll scrollbar-hidden h-full">
 		{#if servers !== null}
 			<div class="">
@@ -499,12 +491,4 @@
 		{/if}
 	</div>
 
-	<div class="flex justify-end pt-3 text-sm font-medium">
-		<button
-			class="px-3.5 py-1.5 text-sm font-medium bg-black hover:bg-gray-900 text-white dark:bg-white dark:text-black dark:hover:bg-gray-100 transition rounded-full"
-			type="submit"
-		>
-			{$i18n.t('Save')}
-		</button>
-	</div>
-</form>
+</div>

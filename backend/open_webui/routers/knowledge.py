@@ -3,6 +3,7 @@ from pydantic import BaseModel
 from fastapi import APIRouter, Depends, HTTPException, status, Request, Query
 from fastapi.responses import StreamingResponse
 from fastapi.concurrency import run_in_threadpool
+import asyncio
 import logging
 import io
 import zipfile
@@ -279,7 +280,7 @@ async def create_new_knowledge(
         form_data.type = 'local'
 
     # Validate type value
-    allowed_kb_types = {'local', 'onedrive', 'google_drive'} | set(
+    allowed_kb_types = {'local', 'onedrive', 'google_drive', 'confluence'} | set(
         (request.app.state.config.INTEGRATION_PROVIDERS or {}).keys()
     )
     if form_data.type not in allowed_kb_types:
@@ -303,13 +304,8 @@ async def create_new_knowledge(
     knowledge = Knowledges.insert_new_knowledge(user.id, form_data)
 
     if knowledge:
-        # Embed knowledge base for semantic search
-        await embed_knowledge_base_metadata(
-            request,
-            knowledge.id,
-            knowledge.name,
-            knowledge.description,
-        )
+        # Embed knowledge base for semantic search (fire-and-forget; embedding API takes 1-5+s)
+        asyncio.create_task(embed_knowledge_base_metadata(request, knowledge.id, knowledge.name, knowledge.description))
         return knowledge
     else:
         raise HTTPException(
@@ -525,13 +521,8 @@ async def update_knowledge_by_id(
 
     knowledge = Knowledges.update_knowledge_by_id(id=id, form_data=form_data)
     if knowledge:
-        # Re-embed knowledge base for semantic search
-        await embed_knowledge_base_metadata(
-            request,
-            knowledge.id,
-            knowledge.name,
-            knowledge.description,
-        )
+        # Re-embed knowledge base for semantic search (fire-and-forget; embedding API takes 1-5+s)
+        asyncio.create_task(embed_knowledge_base_metadata(request, knowledge.id, knowledge.name, knowledge.description))
         return KnowledgeFilesResponse(
             **knowledge.model_dump(),
             files=Knowledges.get_file_metadatas_by_id(knowledge.id),

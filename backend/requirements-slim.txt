@@ -6,7 +6,7 @@
 fastapi==0.135.1
 uvicorn[standard]==0.41.0
 pydantic==2.12.5
-python-multipart==0.0.26
+python-multipart==0.0.27
 itsdangerous==2.2.0
 
 python-socketio==5.16.1
@@ -53,7 +53,7 @@ google-genai==1.66.0
 
 langchain==1.2.10
 langchain-community==0.4.1
-langchain-classic==1.0.1
+langchain-classic==1.0.7
 langchain-text-splitters==1.1.2
 
 fake-useragent==2.2.0

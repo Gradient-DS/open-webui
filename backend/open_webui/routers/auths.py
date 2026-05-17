@@ -969,6 +969,7 @@ async def get_admin_config(request: Request, user=Depends(get_admin_user)):
         'ACCEPTANCE_MODAL_TITLE': request.app.state.config.ACCEPTANCE_MODAL_TITLE,
         'ACCEPTANCE_MODAL_CONTENT': request.app.state.config.ACCEPTANCE_MODAL_CONTENT,
         'ACCEPTANCE_MODAL_BUTTON_TEXT': request.app.state.config.ACCEPTANCE_MODAL_BUTTON_TEXT,
+        'ENABLE_WELCOME_MESSAGE': request.app.state.config.ENABLE_WELCOME_MESSAGE,
     }
 
 
@@ -1000,6 +1001,7 @@ class AdminConfig(BaseModel):
     ACCEPTANCE_MODAL_TITLE: Optional[str] = None
     ACCEPTANCE_MODAL_CONTENT: Optional[str] = None
     ACCEPTANCE_MODAL_BUTTON_TEXT: Optional[str] = None
+    ENABLE_WELCOME_MESSAGE: bool = False
 
 
 @router.post('/admin/config')
@@ -1049,6 +1051,8 @@ async def update_admin_config(request: Request, form_data: AdminConfig, user=Dep
     request.app.state.config.ACCEPTANCE_MODAL_CONTENT = form_data.ACCEPTANCE_MODAL_CONTENT
     request.app.state.config.ACCEPTANCE_MODAL_BUTTON_TEXT = form_data.ACCEPTANCE_MODAL_BUTTON_TEXT
 
+    request.app.state.config.ENABLE_WELCOME_MESSAGE = form_data.ENABLE_WELCOME_MESSAGE
+
     return {
         'SHOW_ADMIN_DETAILS': request.app.state.config.SHOW_ADMIN_DETAILS,
         'ADMIN_EMAIL': request.app.state.config.ADMIN_EMAIL,
@@ -1077,6 +1081,7 @@ async def update_admin_config(request: Request, form_data: AdminConfig, user=Dep
         'ACCEPTANCE_MODAL_TITLE': request.app.state.config.ACCEPTANCE_MODAL_TITLE,
         'ACCEPTANCE_MODAL_CONTENT': request.app.state.config.ACCEPTANCE_MODAL_CONTENT,
         'ACCEPTANCE_MODAL_BUTTON_TEXT': request.app.state.config.ACCEPTANCE_MODAL_BUTTON_TEXT,
+        'ENABLE_WELCOME_MESSAGE': request.app.state.config.ENABLE_WELCOME_MESSAGE,
     }
 
 

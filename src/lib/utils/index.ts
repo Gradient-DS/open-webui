@@ -91,8 +91,24 @@ export const sanitizeResponseContent = (content: string) => {
 		.trim();
 };
 
+// [Gradient] Some models (observed: nvidia/NVIDIA-Nemotron-3-Super-120B)
+// invent placeholder image URLs after a real image was already delivered
+// out-of-band via a `chat:message:files` event from the `generate_image`
+// builtin tool. The model emits markdown like ``![rabbit](attachment://rabbit.png)``
+// even though the tool return value tells it not to. That markdown renders
+// as a broken image in the chat. Strip it so the user only sees the real
+// image. Schemes targeted are ones that are never valid src URLs for an
+// `<img>` tag in this app (`attachment:`, `cid:`, `tool:` and our own
+// fabricated `file:image-...` placeholder).
+const FABRICATED_IMAGE_URL_SCHEME_RE = /!\[[^\]]*\]\(\s*(?:attachment|cid|tool):[^\s)]*\)/gi;
+
+const stripFabricatedImageMarkdown = (content: string): string => {
+	return content.replace(FABRICATED_IMAGE_URL_SCHEME_RE, '');
+};
+
 export const processResponseContent = (content: string) => {
 	content = processChineseContent(content);
+	content = stripFabricatedImageMarkdown(content);
 	return content.trim();
 };
 

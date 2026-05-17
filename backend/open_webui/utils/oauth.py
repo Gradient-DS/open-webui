@@ -28,6 +28,7 @@ from typing import Optional
 
 
 from open_webui.models.auths import Auths
+from open_webui.models.invites import Invites
 from open_webui.models.oauth_sessions import OAuthSessions
 from open_webui.models.users import Users
 
@@ -36,6 +37,7 @@ from open_webui.models.groups import Groups, GroupModel, GroupUpdateForm, GroupF
 from open_webui.config import (
     DEFAULT_USER_ROLE,
     ENABLE_OAUTH_SIGNUP,
+    OAUTH_INVITE_REQUIRED,
     OAUTH_REFRESH_TOKEN_INCLUDE_SCOPE,
     OAUTH_MERGE_ACCOUNTS_BY_EMAIL,
     OAUTH_PROVIDERS,
@@ -113,6 +115,7 @@ log = logging.getLogger(__name__)
 auth_manager_config = AppConfig()
 auth_manager_config.DEFAULT_USER_ROLE = DEFAULT_USER_ROLE
 auth_manager_config.ENABLE_OAUTH_SIGNUP = ENABLE_OAUTH_SIGNUP
+auth_manager_config.OAUTH_INVITE_REQUIRED = OAUTH_INVITE_REQUIRED
 auth_manager_config.OAUTH_REFRESH_TOKEN_INCLUDE_SCOPE = OAUTH_REFRESH_TOKEN_INCLUDE_SCOPE
 auth_manager_config.OAUTH_MERGE_ACCOUNTS_BY_EMAIL = OAUTH_MERGE_ACCOUNTS_BY_EMAIL
 auth_manager_config.ENABLE_OAUTH_ROLE_MANAGEMENT = ENABLE_OAUTH_ROLE_MANAGEMENT
@@ -1474,9 +1477,17 @@ class OAuthManager:
                     raise HTTPException(400, detail=ERROR_MESSAGES.INVALID_CRED)
 
             email = email.lower()
+            # Lookup an active pending invite once — used both as an explicit
+            # allowlist bypass and as the source of truth for role/name when
+            # provisioning a new user further down.
+            pending_invite = Invites.get_pending_invite_by_email(email)
+
             # If allowed domains are configured, check if the email domain is in the list
+            # An explicit invite grants access regardless of domain — the invite IS
+            # the per-user allowlist, more specific than a domain-level rule.
             if (
-                '*' not in auth_manager_config.OAUTH_ALLOWED_DOMAINS
+                not pending_invite
+                and '*' not in auth_manager_config.OAUTH_ALLOWED_DOMAINS
                 and email.split('@')[-1] not in auth_manager_config.OAUTH_ALLOWED_DOMAINS
             ):
                 log.warning('OAuth callback failed, e-mail domain is not in the list of allowed domains')
@@ -1492,6 +1503,10 @@ class OAuthManager:
                     if user:
                         # Update the user with the new oauth sub
                         Users.update_user_oauth_by_id(user.id, provider, sub, db=db)
+                        # Housekeeping: if there was a pending invite, mark it
+                        # consumed so it stops appearing in the admin invite list.
+                        if pending_invite:
+                            Invites.consume_invite_by_email(email)
 
             if user:
                 determined_role = self.get_user_role(user, user_data)
@@ -1538,13 +1553,37 @@ class OAuthManager:
                             Users.update_user_profile_image_url_by_id(user.id, processed_picture_url, db=db)
                             log.debug(f'Updated profile picture for user {user.id}')
             else:
-                # If the user does not exist, check if signups are enabled
-                if auth_manager_config.ENABLE_OAUTH_SIGNUP:
-                    # Check if an existing user with the same email already exists
-                    existing_user = Users.get_user_by_email(email, db=db)
-                    if existing_user:
-                        raise HTTPException(400, detail=ERROR_MESSAGES.EMAIL_TAKEN)
+                # User does not exist — decide whether to provision.
+                # Race-safe consume of the pending invite (if any). A None return
+                # means a concurrent request (typically the password-accept flow)
+                # already consumed the invite, or it expired between the lookup
+                # and the consume — fall through to the non-invite path.
+                consumed_invite = Invites.consume_invite_by_email(email) if pending_invite else None
 
+                if not consumed_invite:
+                    if auth_manager_config.OAUTH_INVITE_REQUIRED:
+                        log.warning(
+                            'OAuth signup denied — OAUTH_INVITE_REQUIRED is set and no active invite found for %s',
+                            email,
+                        )
+                        raise HTTPException(
+                            status.HTTP_403_FORBIDDEN,
+                            detail=ERROR_MESSAGES.ACCESS_PROHIBITED,
+                        )
+                    if not auth_manager_config.ENABLE_OAUTH_SIGNUP:
+                        raise HTTPException(
+                            status.HTTP_403_FORBIDDEN,
+                            detail=ERROR_MESSAGES.ACCESS_PROHIBITED,
+                        )
+
+                # Existing email-uniqueness guard. A concurrent invite-accept on
+                # the password page could have created the user between our
+                # checks; treat that as success and attach the OAuth sub.
+                existing_user = Users.get_user_by_email(email, db=db)
+                if existing_user:
+                    Users.update_user_oauth_by_id(existing_user.id, provider, sub, db=db)
+                    user = existing_user
+                else:
                     picture_claim = auth_manager_config.OAUTH_PICTURE_CLAIM
                     if picture_claim:
                         picture_url = user_data.get(
@@ -1558,15 +1597,23 @@ class OAuthManager:
 
                     name = user_data.get(username_claim)
                     if not name:
-                        log.warning('Username claim is missing, using email as name')
-                        name = email
+                        # Prefer the invite-supplied display name over the bare email
+                        if consumed_invite and consumed_invite.name:
+                            name = consumed_invite.name
+                        else:
+                            log.warning('Username claim is missing, using email as name')
+                            name = email
+
+                    # Invite-supplied role wins over OAuth role-claim at provisioning.
+                    # Subsequent logins still let ENABLE_OAUTH_ROLE_MANAGEMENT reconcile.
+                    role = consumed_invite.role if consumed_invite else self.get_user_role(None, user_data)
 
                     user = Auths.insert_new_auth(
                         email=email,
                         password=get_password_hash(str(uuid.uuid4())),  # Random password, not used
                         name=name,
                         profile_image_url=picture_url,
-                        role=self.get_user_role(None, user_data),
+                        role=role,
                         oauth=oauth_data,
                         db=db,
                     )
@@ -1584,12 +1631,6 @@ class OAuthManager:
                         )
 
                     apply_default_group_assignment(request.app.state.config.DEFAULT_GROUP_ID, user.id, db=db)
-
-                else:
-                    raise HTTPException(
-                        status.HTTP_403_FORBIDDEN,
-                        detail=ERROR_MESSAGES.ACCESS_PROHIBITED,
-                    )
 
             jwt_token = create_token(
                 data={'id': user.id},
@@ -1681,7 +1722,7 @@ class OAuthManager:
                     httponly=True,
                     samesite=WEBUI_AUTH_COOKIE_SAME_SITE,
                     secure=WEBUI_AUTH_COOKIE_SECURE,
-                    **({'max_age': cookie_max_age, 'expires': cookie_expires} if cookie_max_age is not None else {}),
+                    **({'max_age': cookie_max_age} if cookie_max_age is not None else {}),
                 )
 
                 log.info(f'Stored OAuth session server-side for user {user.id}, provider {provider}')

@@ -1,0 +1,23 @@
+{{- if .Values.loaderWorker.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "open-webui-tenant.loaderWorker.fullname" . }}-config
+  labels:
+    {{- include "open-webui-tenant.loaderWorker.labels" . | nindent 4 }}
+data:
+  LOADER_LOG_LEVEL: {{ .Values.loaderWorker.config.logLevel | default "INFO" | quote }}
+  LOADER_PORT: {{ .Values.loaderWorker.config.port | default 8002 | quote }}
+  LOADER_DOC_PROCESSOR_URL: {{ .Values.loaderWorker.config.docProcessorUrl | quote }}
+  LOADER_MAX_CONCURRENT_JOBS_PER_REPLICA: {{ .Values.loaderWorker.config.maxConcurrentJobsPerReplica | default 4 | quote }}
+  LOADER_PER_JOB_ITEM_CONCURRENCY: {{ .Values.loaderWorker.config.perJobItemConcurrency | default 5 | quote }}
+  LOADER_JOB_LEASE_TIMEOUT_SECONDS: {{ .Values.loaderWorker.config.jobLeaseTimeoutSeconds | default 900 | quote }}
+  LOADER_EMBEDDER_BATCH_SIZE: {{ .Values.loaderWorker.config.embedderBatchSize | default 100 | quote }}
+  LOADER_DB_HOST: {{ include "open-webui-tenant.postgres.fullname" . | quote }}
+  LOADER_DB_PORT: {{ .Values.postgres.port | default 5432 | quote }}
+  LOADER_DB_NAME: {{ .Values.loaderWorker.postgres.database | default "loader_worker" | quote }}
+  LOADER_DB_USER: {{ .Values.loaderWorker.postgres.user | default "loader_worker_app" | quote }}
+  # LITELLM base URL the loader-worker hits for embedding (key is sourced from <tenant>-secrets).
+  LOADER_LITELLM_BASE_URL: {{ .Values.loaderWorker.config.litellmBaseUrl | quote }}
+  OPENWEBUI_BASE_URL: "http://{{ include "open-webui-tenant.openWebui.fullname" . }}.{{ .Release.Namespace }}.svc:{{ .Values.openWebui.service.port | default 8080 }}"
+{{- end }}

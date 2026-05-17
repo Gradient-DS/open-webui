@@ -447,6 +447,19 @@ async def update_tools_by_id(
     user=Depends(get_verified_user),
     db: Session = Depends(get_session),
 ):
+    # CVE-2026-45395: enforce workspace.tools permission so a non-admin user
+    # who has lost workspace.tools cannot keep mutating tools they own.
+    if user.role != 'admin' and not has_permission(
+        user.id,
+        'workspace.tools',
+        request.app.state.config.USER_PERMISSIONS,
+        db=db,
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=ERROR_MESSAGES.UNAUTHORIZED,
+        )
+
     tools = Tools.get_tool_by_id(id, db=db)
     if not tools:
         raise HTTPException(

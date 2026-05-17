@@ -81,6 +81,10 @@ Component-specific names
 {{- printf "%s-redis" (include "open-webui-tenant.fullname" .) | trunc 63 | trimSuffix "-" }}
 {{- end }}
 
+{{- define "open-webui-tenant.loaderWorker.fullname" -}}
+{{- printf "%s-loader-worker" (include "open-webui-tenant.fullname" .) | trunc 63 | trimSuffix "-" }}
+{{- end }}
+
 {{/*
 Component-specific labels
 */}}
@@ -122,6 +126,16 @@ app.kubernetes.io/component: redis
 {{- define "open-webui-tenant.redis.selectorLabels" -}}
 {{ include "open-webui-tenant.selectorLabels" . }}
 app.kubernetes.io/component: redis
+{{- end }}
+
+{{- define "open-webui-tenant.loaderWorker.labels" -}}
+{{ include "open-webui-tenant.labels" . }}
+app.kubernetes.io/component: loader-worker
+{{- end }}
+
+{{- define "open-webui-tenant.loaderWorker.selectorLabels" -}}
+{{ include "open-webui-tenant.selectorLabels" . }}
+app.kubernetes.io/component: loader-worker
 {{- end }}
 
 {{/*

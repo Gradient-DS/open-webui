@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { toast } from 'svelte-sonner';
 	import { marked } from 'marked';
+	import DOMPurify from 'dompurify';
 
 	import { onMount, getContext, tick, createEventDispatcher } from 'svelte';
 	import { blur, fade } from 'svelte/transition';
@@ -20,6 +21,8 @@
 		currentChatPage
 	} from '$lib/stores';
 	import { sanitizeResponseContent, extractCurlyBraceWords } from '$lib/utils';
+	import { resolveLocalized } from '$lib/utils/localized';
+	import { isFeatureEnabled } from '$lib/utils/features';
 	import { WEBUI_API_BASE_URL, WEBUI_BASE_URL } from '$lib/constants';
 
 	import Suggestions from './Suggestions.svelte';
@@ -28,6 +31,8 @@
 	import MessageInput from './MessageInput.svelte';
 	import FolderPlaceholder from './Placeholder/FolderPlaceholder.svelte';
 	import FolderTitle from './Placeholder/FolderTitle.svelte';
+	import AgentCards from './Placeholder/AgentCards.svelte';
+	import WelcomeMessage from './WelcomeMessage.svelte';
 
 	const i18n = getContext('i18n');
 
@@ -72,9 +77,21 @@
 	}
 
 	$: models = selectedModels.map((id) => $_models.find((m) => m.id === id));
+
+	// Agent picker adds a content block below the input, welcome message adds
+	// one above — either way, shrink the placeholder's vertical padding so the
+	// screen still fits without scrolling.
+	$: agentPickerEnabled =
+		isFeatureEnabled('agent_picker') && Boolean($config?.features?.feature_agent_api_enabled);
+	$: welcomeMessageEnabled = $config?.features?.enable_welcome_message === true;
+	$: compactPlaceholder = agentPickerEnabled || welcomeMessageEnabled;
 </script>
 
-<div class="m-auto w-full max-w-6xl px-2 @2xl:px-20 translate-y-6 py-24 text-center">
+<div
+	class="m-auto w-full max-w-6xl px-2 @2xl:px-20 translate-y-6 {compactPlaceholder
+		? 'py-12'
+		: 'py-24'} text-center"
+>
 	{#if $temporaryChatEnabled}
 		<Tooltip
 			content={$i18n.t("This chat won't appear in history and your messages will not be saved.")}
@@ -145,7 +162,10 @@
 						in:fade={{ duration: 100 }}
 					>
 						{#if $config?.ui?.greeting_template}
-							{$config.ui.greeting_template.replace('{{name}}', $user?.name ?? '')}
+							{resolveLocalized($config.ui.greeting_template, $i18n?.language).replace(
+								'{{name}}',
+								$user?.name ?? ''
+							)}
 						{:else if models[selectedModelIdx]?.name}
 							<Tooltip
 								content={models[selectedModelIdx]?.name}
@@ -167,20 +187,24 @@
 						{#if models[selectedModelIdx]?.info?.meta?.description ?? null}
 							<Tooltip
 								className=" w-fit"
-								content={marked.parse(
-									sanitizeResponseContent(
-										models[selectedModelIdx]?.info?.meta?.description ?? ''
-									).replaceAll('\n', '<br>')
+								content={DOMPurify.sanitize(
+									marked.parse(
+										sanitizeResponseContent(
+											models[selectedModelIdx]?.info?.meta?.description ?? ''
+										).replaceAll('\n', '<br>')
+									)
 								)}
 								placement="top"
 							>
 								<div
 									class="mt-0.5 px-2 text-sm font-normal text-gray-500 dark:text-gray-400 line-clamp-2 max-w-xl markdown"
 								>
-									{@html marked.parse(
-										sanitizeResponseContent(
-											models[selectedModelIdx]?.info?.meta?.description ?? ''
-										).replaceAll('\n', '<br>')
+									{@html DOMPurify.sanitize(
+										marked.parse(
+											sanitizeResponseContent(
+												models[selectedModelIdx]?.info?.meta?.description ?? ''
+											).replaceAll('\n', '<br>')
+										)
 									)}
 								</div>
 							</Tooltip>
@@ -205,6 +229,10 @@
 					</div>
 				</div>
 			{/if}
+
+			<div class="@md:max-w-3xl w-full text-left">
+				<WelcomeMessage />
+			</div>
 
 			<div class="text-base font-normal @md:max-w-3xl w-full py-3 {atSelectedModel ? 'mt-2' : ''}">
 				<MessageInput
@@ -257,6 +285,10 @@
 					{onSelect}
 				/>
 			</div>
+		</div>
+
+		<div in:fade={{ duration: 200, delay: 250 }}>
+			<AgentCards />
 		</div>
 	{/if}
 </div>

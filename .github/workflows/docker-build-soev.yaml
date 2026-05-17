@@ -209,7 +209,10 @@ jobs:
             BASE=$(grep '^version:' helm/open-webui-tenant/Chart.yaml | awk '{print $2}')
             MAJOR_MINOR=$(echo "$BASE" | cut -d. -f1-2)
             SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-7)
-            VERSION="${MAJOR_MINOR}.${{ github.run_number }}-${GITHUB_REF_NAME}.${SHORT_SHA}"
+            # SemVer 2.0.0 prerelease IDs only allow [0-9A-Za-z-]; branch
+            # names like feat/neo-filter would otherwise fail helm package.
+            SAFE_REF=$(echo "${GITHUB_REF_NAME}" | tr '/' '-')
+            VERSION="${MAJOR_MINOR}.${{ github.run_number }}-${SAFE_REF}.${SHORT_SHA}"
           fi
           echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
           echo "Publishing chart version: ${VERSION}"

@@ -16,6 +16,7 @@
 
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
 	import DocumentPage from '$lib/components/icons/DocumentPage.svelte';
+	import ExclamationTriangle from '$lib/components/icons/ExclamationTriangle.svelte';
 	import Folder from '$lib/components/icons/Folder.svelte';
 	import ChevronDown from '$lib/components/icons/ChevronDown.svelte';
 	import ChevronRight from '$lib/components/icons/ChevronRight.svelte';
@@ -83,6 +84,7 @@
 
 				<!-- Files in this subfolder -->
 				{#each node.files as file (file?.id ?? file?.itemId)}
+					{@const fileStatus = file?.status ?? file?.data?.status}
 					<div
 						class="flex cursor-pointer w-full px-1.5 py-0.5 hover:bg-gray-50 dark:hover:bg-gray-850/50 rounded-xl transition"
 					>
@@ -94,10 +96,12 @@
 							<div>
 								<div class="flex gap-2 items-center line-clamp-1">
 									<div class="shrink-0">
-										{#if file?.status !== 'uploading'}
-											<DocumentPage className="size-3" />
-										{:else}
+										{#if fileStatus === 'uploading' || fileStatus === 'pending' || fileStatus === 'downloading' || fileStatus === 'parsing' || fileStatus === 'ingesting'}
 											<Spinner className="size-3" />
+										{:else if fileStatus === 'error' || fileStatus === 'cancelled'}
+											<ExclamationTriangle className="size-3 text-red-500" />
+										{:else}
+											<DocumentPage className="size-3" />
 										{/if}
 									</div>
 									<div class="line-clamp-1 text-xs">

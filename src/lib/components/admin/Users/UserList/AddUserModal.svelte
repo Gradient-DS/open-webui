@@ -150,6 +150,11 @@
 			<div class=" flex flex-col w-full sm:flex-row sm:justify-center sm:space-x-6">
 				{#if $config?.features?.enable_email_invites}
 					<div class="flex flex-col w-full">
+						{#if $config?.oauth?.providers?.microsoft}
+							<p class="text-xs text-gray-500 dark:text-gray-400 mb-3">
+								{$i18n.t('User invitations are managed via your SSO provider')}
+							</p>
+						{/if}
 						<InviteUserForm
 							bind:this={inviteFormRef}
 							bind:loading

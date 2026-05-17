@@ -111,6 +111,17 @@ export const artifactContents = writable(null);
 
 export const showDocument = writable(false);
 export const openDocumentTabSignal = writable(0);
+
+export const submitPromptSignal: Writable<{ text: string; ts: number } | null> = writable(null);
+
+export type ChoiceRegistration = {
+	field?: string;
+	question?: string;
+	selection: string | null;
+	answered: boolean;
+};
+export const choiceBlockRegistry: Writable<Record<string, Record<string, ChoiceRegistration>>> =
+	writable({});
 export const documentContents: Writable<Array<{
 	title: string;
 	markdown: string;
@@ -122,6 +133,40 @@ export const embed = writable(null);
 export const temporaryChatEnabled = writable(false);
 export const scrollPaginationEnabled = writable(false);
 export const currentChatPage = writable(1);
+
+// [Gradient] Sticky agent pick for new chats. Set by AgentCards.svelte when
+// the user clicks an agent card; read by Chat.svelte when the first message
+// is sent so the new chat is created with chat.meta.agent_id pre-set. The
+// pick is sticky — it survives chat creation and page reloads (persisted to
+// localStorage) so subsequent "New Chat" clicks default to the same agent
+// until the user explicitly clears it (clicks the same card again or the
+// "Clear" button) or picks a different one.
+const PENDING_AGENT_ID_STORAGE_KEY = 'pendingAgentId';
+
+const readPendingAgentId = (): string | null => {
+	if (typeof window === 'undefined') return null;
+	try {
+		return window.localStorage.getItem(PENDING_AGENT_ID_STORAGE_KEY) || null;
+	} catch {
+		return null;
+	}
+};
+
+export const pendingAgentId: Writable<string | null> = writable(readPendingAgentId());
+
+if (typeof window !== 'undefined') {
+	pendingAgentId.subscribe((value) => {
+		try {
+			if (value) {
+				window.localStorage.setItem(PENDING_AGENT_ID_STORAGE_KEY, value);
+			} else {
+				window.localStorage.removeItem(PENDING_AGENT_ID_STORAGE_KEY);
+			}
+		} catch {
+			// localStorage may be unavailable (quota, privacy mode) — ignore
+		}
+	});
+}
 
 export const isLastActiveTab = writable(true);
 export const playingNotificationSound = writable(false);
@@ -328,6 +373,7 @@ type Config = {
 		feature_admin_functions?: boolean;
 		feature_admin_settings?: boolean;
 		feature_admin_settings_tabs?: string[];
+		feature_agent_api_enabled?: boolean;
 		feature_chat_controls_sections?: string[];
 		feature_skills?: boolean;
 		feature_builtin_tools?: boolean;
@@ -349,7 +395,7 @@ type Config = {
 		pending_user_overlay_title?: string;
 		pending_user_overlay_content?: string;
 		pending_user_overlay_description?: string;
-		greeting_template?: string;
+		greeting_template?: string | Record<string, string>;
 	};
 };
 

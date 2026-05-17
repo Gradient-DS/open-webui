@@ -48,6 +48,10 @@ class GoogleDriveSyncWorker(BaseSyncWorker):
         return 'googledrive'
 
     @property
+    def provider_slug(self) -> str:
+        return 'google_drive'
+
+    @property
     def internal_request_path(self) -> str:
         return '/internal/google-drive-sync'
 
@@ -146,6 +150,10 @@ class GoogleDriveSyncWorker(BaseSyncWorker):
                 log.warning(f'File not found: {source["name"]}')
                 return None
 
+            if not self._is_supported_file(item):
+                log.info(f'Skipping unsupported single-file source {source.get("name", item.get("name", "?"))}')
+                return None
+
             # For Workspace files, use modifiedTime as change indicator
             # For regular files, use md5Checksum
             if self._is_workspace_file(item):
@@ -196,7 +204,11 @@ class GoogleDriveSyncWorker(BaseSyncWorker):
         return item.get('md5Checksum')
 
     async def _download_file_content(self, file_info: Dict[str, Any]) -> bytes:
-        """Download file content, using export for Workspace files."""
+        """Download file content, using export for Workspace files.
+
+        Removed in cleanup commit after USE_SHARED_LOADER rollout completes —
+        loader-worker handles the download path (legacy fallback only).
+        """
         item = file_info['item']
         file_id = item['id']
         mime_type = item.get('mimeType', '')
@@ -206,6 +218,23 @@ class GoogleDriveSyncWorker(BaseSyncWorker):
             return await self._client.export_file(file_id, export_mime)
         else:
             return await self._client.download_file(file_id)
+
+    def _item_from_file_info(self, file_info: Dict[str, Any], access_token: str) -> Dict[str, Any]:
+        item = super()._item_from_file_info(file_info, access_token)
+        drive_item = file_info['item']
+        item['source_descriptor'] = {
+            'file_id': drive_item['id'],
+            'mime_type': drive_item.get('mimeType', ''),
+        }
+        # Drive's mimeType is authoritative. For Workspace native files this
+        # is application/vnd.google-apps.document/spreadsheet/presentation —
+        # the loader-worker source detects that and overrides content_type
+        # post-fetch to the export target (docx/xlsx/pptx) so doc-processor
+        # gets a parseable MIME.
+        raw_mime = drive_item.get('mimeType')
+        if raw_mime:
+            item['content_type'] = raw_mime
+        return item
 
     def _get_provider_storage_headers(self, item_id: str) -> dict:
         return {

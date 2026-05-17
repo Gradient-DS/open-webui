@@ -1,6 +1,7 @@
 import json
 import logging
 import sys
+import traceback
 from typing import TYPE_CHECKING
 
 from loguru import logger
@@ -62,7 +63,12 @@ def _json_sink(message: 'Message') -> None:
         log_entry['extra'] = record['extra']
 
     if record['exception'] is not None:
-        log_entry['error'] = ''.join(record['exception'].format_exception()).rstrip()
+        # loguru's RecordException is a namedtuple(type, value, traceback) — it
+        # does not expose a format_exception() method. Use stdlib traceback to
+        # avoid swallowing the AttributeError that drops the trace from the JSON
+        # entry entirely.
+        exc = record['exception']
+        log_entry['error'] = ''.join(traceback.format_exception(exc.type, exc.value, exc.traceback)).rstrip()
 
     sys.stdout.write(json.dumps(log_entry, ensure_ascii=False, default=str) + '\n')
     sys.stdout.flush()

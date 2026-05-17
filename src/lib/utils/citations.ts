@@ -65,15 +65,30 @@ function cleanSourceName(name: string): string {
 	return name.replace(TRAILING_UUID_RE, '');
 }
 
-// Regex matching [N], [N,M], [N, M, ...] — standard bracket citations
-const CITATION_RE = /\[(\d+(?:\s*,\s*\d+)*)\]/g;
+// Matches the citation forms recognized by citation-extension.ts so the
+// downloaded document mirrors what the chat UI renders as badges:
+//   - [N], [N, M]                — standard bracket citations
+//   - [N#suffix]                 — standard brackets with hash-suffix targeting
+//   - 【N】, 【N, M】              — Japanese fullwidth brackets
+//   - 【N†meta】 (e.g. 【3†L1-L4】) — Japanese fullwidth with dagger metadata
+// Capture group 1 holds the standard-bracket contents, group 2 the fullwidth contents.
+const CITATION_RE =
+	/\[(\d+(?:#[^,\]\s]+)?(?:\s*,\s*\d+(?:#[^,\]\s]+)?)*)\]|【(\d+(?:\s*,\s*\d+)*)(?:†[^】]*)?】/g;
+
+// Parse "1, 2#foo, 3" → [1, 2, 3]. Strips any #suffix; numbers only.
+function parseCitationGroup(group: string): number[] {
+	return group
+		.split(',')
+		.map((part) => parseInt(part.trim().split('#')[0], 10))
+		.filter((n) => !isNaN(n));
+}
 
 /**
  * Normalize citations in message content and build a source appendix.
  *
- * - Scans content for [N] markers
+ * - Scans content for all supported citation marker forms (see CITATION_RE)
  * - Reorders sources by first appearance in text
- * - Returns normalized content (with renumbered [N] markers) and source list
+ * - Returns normalized content (every marker rewritten to plain [N]) and source list
  */
 export function normalizeCitations(
 	content: string,
@@ -92,9 +107,10 @@ export function normalizeCitations(
 	let m: RegExpExecArray | null;
 	const scanRe = new RegExp(CITATION_RE.source, 'g');
 	while ((m = scanRe.exec(content))) {
-		const nums = m[1].split(',').map((n) => parseInt(n.trim(), 10));
-		for (const num of nums) {
-			if (!isNaN(num) && !seen.has(num) && num >= 1 && num <= citations.length) {
+		const group = m[1] ?? m[2];
+		if (!group) continue;
+		for (const num of parseCitationGroup(group)) {
+			if (!seen.has(num) && num >= 1 && num <= citations.length) {
 				seen.add(num);
 				appearanceOrder.push(num);
 			}
@@ -111,13 +127,14 @@ export function normalizeCitations(
 		renumberMap.set(orig, i + 1);
 	});
 
-	// 3. Replace citations in content with renumbered versions
-	const normalizedContent = content.replace(CITATION_RE, (_match, group: string) => {
-		const nums = group.split(',').map((n: string) => parseInt(n.trim(), 10));
-		const renumbered = nums
+	// 3. Replace every supported marker form with a renumbered [N] form
+	const normalizedContent = content.replace(CITATION_RE, (match, std?: string, jp?: string) => {
+		const group = std ?? jp;
+		if (!group) return match;
+		const renumbered = parseCitationGroup(group)
 			.map((n) => renumberMap.get(n))
 			.filter((n): n is number => n !== undefined);
-		if (renumbered.length === 0) return _match;
+		if (renumbered.length === 0) return match;
 		return '[' + renumbered.join(', ') + ']';
 	});
 

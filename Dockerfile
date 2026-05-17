@@ -124,7 +124,11 @@ RUN echo -n 00000000-0000-0000-0000-000000000000 > $HOME/.cache/chroma/telemetry
 RUN chown -R $UID:$GID /app $HOME
 
 # Install common system dependencies
+# --only-upgrade on libcap2/libsystemd0/libudev1 pulls security-fixed versions
+# already published for bookworm (CVE-2026-4878, CVE-2026-29111) without
+# upgrading unrelated packages from the base image.
 RUN apt-get update && \
+    apt-get install --only-upgrade -y libcap2 libsystemd0 libudev1 && \
     apt-get install -y --no-install-recommends \
     git build-essential pandoc gcc netcat-openbsd curl jq \
     libmariadb-dev \
