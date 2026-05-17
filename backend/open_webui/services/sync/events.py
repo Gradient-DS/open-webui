@@ -64,6 +64,7 @@ async def emit_sync_progress(
     files_removed: int = 0,
     failed_files: Optional[List[Dict]] = None,
     stage_counts: Optional[Dict[str, int]] = None,
+    needs_reauth: bool = False,
 ):
     """Emit sync progress event to a specific user via Socket.IO.
 
@@ -98,6 +99,7 @@ async def emit_sync_progress(
                 'files_removed': files_removed,
                 'failed_files': failed_files,
                 'stage_counts': stage_counts,
+                'needs_reauth': needs_reauth,
             },
             room=f'user:{user_id}',
         )

@@ -71,6 +71,25 @@ def _sanitize_metadata_keys(metadata: dict) -> dict:
     return result
 
 
+# Class-name prefixes (post-sanitization) for collections that hold at most a
+# few thousand vectors per class. HNSW's per-class memory + insert cost dwarfs
+# any query benefit at this size, so we use flat (brute-force) with binary
+# quantization instead. KB collections (raw UUID class names) fall through to
+# the HNSW default — they can grow large enough for HNSW to pay off.
+_FLAT_INDEX_PREFIXES = ('File_', 'Web_search_', 'User_memory_')
+
+
+def _build_vector_config(sane_collection_name: str):
+    """Pick the vector-index config for a class based on its name prefix."""
+    if sane_collection_name.startswith(_FLAT_INDEX_PREFIXES):
+        return weaviate.classes.config.Configure.Vectors.self_provided(
+            vector_index_config=weaviate.classes.config.Configure.VectorIndex.flat(
+                quantizer=weaviate.classes.config.Configure.VectorIndex.Quantizer.bq()
+            )
+        )
+    return weaviate.classes.config.Configure.Vectors.self_provided()
+
+
 class WeaviateClient(VectorDBBase):
     def __init__(self):
         self.url = WEAVIATE_HTTP_HOST
@@ -134,7 +153,7 @@ class WeaviateClient(VectorDBBase):
         # This fixes conflicts when mixing file sources (OneDrive, PDF uploads, etc.)
         self.client.collections.create(
             name=collection_name,
-            vector_config=weaviate.classes.config.Configure.Vectors.self_provided(),
+            vector_config=_build_vector_config(collection_name),
             properties=[
                 weaviate.classes.config.Property(name='text', data_type=weaviate.classes.config.DataType.TEXT),
                 # Core file metadata - always present

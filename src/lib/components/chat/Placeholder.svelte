@@ -78,14 +78,17 @@
 
 	$: models = selectedModels.map((id) => $_models.find((m) => m.id === id));
 
-	// Agent picker adds a content block below the input — when it can show up,
-	// shrink the placeholder's vertical padding so the screen still fits.
+	// Agent picker adds a content block below the input, welcome message adds
+	// one above — either way, shrink the placeholder's vertical padding so the
+	// screen still fits without scrolling.
 	$: agentPickerEnabled =
 		isFeatureEnabled('agent_picker') && Boolean($config?.features?.feature_agent_api_enabled);
+	$: welcomeMessageEnabled = $config?.features?.enable_welcome_message === true;
+	$: compactPlaceholder = agentPickerEnabled || welcomeMessageEnabled;
 </script>
 
 <div
-	class="m-auto w-full max-w-6xl px-2 @2xl:px-20 translate-y-6 {agentPickerEnabled
+	class="m-auto w-full max-w-6xl px-2 @2xl:px-20 translate-y-6 {compactPlaceholder
 		? 'py-12'
 		: 'py-24'} text-center"
 >

@@ -9,10 +9,21 @@ import logging
 from typing import Optional, Callable, Awaitable
 
 from open_webui.models.oauth_sessions import OAuthSessions
+from open_webui.services.sync.events import emit_sync_progress
 
 log = logging.getLogger(__name__)
 
 _REFRESH_BUFFER_SECONDS = 300  # 5 minutes
+
+# Maps provider_type → Socket.IO event prefix used by the frontend
+# listeners ({prefix}:sync:progress). Mirrors the per-provider sync_events.py
+# _PREFIX constants — kept here so token_refresh can emit a terminal progress
+# event when reauth is required, without importing provider-specific modules.
+_PROVIDER_EVENT_PREFIXES = {
+    'onedrive': 'onedrive',
+    'google_drive': 'googledrive',
+    'confluence': 'confluence',
+}
 
 
 async def get_valid_access_token(
@@ -55,7 +66,7 @@ async def get_valid_access_token(
             user_id,
             knowledge_id,
         )
-        _mark_needs_reauth(provider, meta_key, user_id)
+        await _mark_needs_reauth(provider, meta_key, user_id)
         return None
 
     # Update stored token
@@ -63,10 +74,17 @@ async def get_valid_access_token(
     return new_token_data.get('access_token')
 
 
-def _mark_needs_reauth(provider_type: str, meta_key: str, user_id: str):
-    """Mark ALL knowledge bases of this provider type for a user as needing re-auth."""
+async def _mark_needs_reauth(provider_type: str, meta_key: str, user_id: str):
+    """Mark ALL knowledge bases of this provider type for a user as needing re-auth.
+
+    Any KB currently mid-sync is transitioned to 'cancelled' with
+    ``cancel_reason='needs_reauth'`` so it doesn't sit forever in 'syncing'
+    after the worker bails out — and a final progress event is emitted so a
+    user watching the knowledge list sees the warning appear without a reload.
+    """
     from open_webui.models.knowledge import Knowledges
 
+    event_prefix = _PROVIDER_EVENT_PREFIXES.get(provider_type)
     kbs = Knowledges.get_knowledge_bases_by_type(provider_type)
     for kb in kbs:
         if kb.user_id != user_id:
@@ -75,5 +93,27 @@ def _mark_needs_reauth(provider_type: str, meta_key: str, user_id: str):
         sync_info = meta.get(meta_key, {})
         sync_info['needs_reauth'] = True
         sync_info['has_stored_token'] = False
+
+        was_syncing = sync_info.get('status') == 'syncing'
+        if was_syncing:
+            sync_info['status'] = 'cancelled'
+            sync_info['cancel_reason'] = 'needs_reauth'
+
         meta[meta_key] = sync_info
         Knowledges.update_knowledge_meta_by_id(kb.id, meta)
+
+        if was_syncing and event_prefix:
+            try:
+                await emit_sync_progress(
+                    provider_prefix=event_prefix,
+                    user_id=user_id,
+                    knowledge_id=kb.id,
+                    status='cancelled',
+                    current=sync_info.get('progress_current', 0) or 0,
+                    total=sync_info.get('progress_total', 0) or 0,
+                    stage_counts=sync_info.get('stage_counts'),
+                    needs_reauth=True,
+                )
+            except Exception as e:
+                # Event emission is best-effort — DB state is the source of truth.
+                log.debug('Failed to emit needs_reauth cancel event for KB %s: %s', kb.id, e)
