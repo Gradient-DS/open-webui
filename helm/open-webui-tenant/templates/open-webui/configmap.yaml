@@ -142,6 +142,9 @@ data:
   FEATURE_TOOL_SERVERS: {{ .Values.openWebui.config.featureToolServers | quote }}
   FEATURE_TERMINAL_SERVERS: {{ .Values.openWebui.config.featureTerminalServers | quote }}
 
+  # Welcome message (PersistentConfig: env seeds initial value; admin UI wins thereafter)
+  ENABLE_WELCOME_MESSAGE: {{ .Values.openWebui.config.enableWelcomeMessage | quote }}
+
   # PDF export
   USE_STYLIZED_PDF_EXPORT: {{ .Values.openWebui.config.useStylizedPdfExport | quote }}
 

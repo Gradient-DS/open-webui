@@ -144,11 +144,7 @@
 								</span>
 							{/if}
 						</div>
-						{#if agent.cta_copy}
-							<p class="text-sm text-gray-600 dark:text-gray-400 line-clamp-2">
-								{agent.cta_copy}
-							</p>
-						{:else if agent.description}
+						{#if agent.description}
 							<p class="text-sm text-gray-600 dark:text-gray-400 line-clamp-2">
 								{agent.description}
 							</p>

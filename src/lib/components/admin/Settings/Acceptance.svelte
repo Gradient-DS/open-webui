@@ -36,6 +36,13 @@
 		<div class="overflow-y-scroll scrollbar-hidden h-full">
 			<div class="mb-2.5 flex w-full justify-between pr-2">
 				<div class="self-center text-xs font-medium">
+					{$i18n.t('Enable Welcome Message')}
+				</div>
+				<Switch bind:state={adminConfig.ENABLE_WELCOME_MESSAGE} />
+			</div>
+
+			<div class="mb-2.5 flex w-full justify-between pr-2">
+				<div class="self-center text-xs font-medium">
 					{$i18n.t('Enable Acceptance Modal')}
 				</div>
 				<Switch bind:state={adminConfig.ENABLE_ACCEPTANCE_MODAL} />
