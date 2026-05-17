@@ -803,8 +803,10 @@ AGENT_API_AGENTS = [a.strip() for a in os.environ.get('AGENT_API_AGENTS', '').sp
 
 # [Gradient] Optional JSON array of default agent configs to seed at startup.
 # Each entry: {"slug": "...", "name": "...", "description": "...",
-#              "cta_copy": "...", "profile_image_url": "...",
+#              "profile_image_url": "...",
 #              "is_active": bool, "is_beta": bool, "position": int}
+# ``cta_copy`` is accepted as a legacy alias for ``description`` (migrated
+# in e8a9b0c1d2e3); explicit ``description`` always wins when both are set.
 # Only ``slug`` (must be in AGENT_API_AGENTS) and ``name`` are required.
 # Rows are inserted on startup when no DB row exists for that slug. If
 # AGENT_API_AGENTS_CONFIG_OVERWRITE=true, existing rows are also updated

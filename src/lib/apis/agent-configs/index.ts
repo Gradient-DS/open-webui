@@ -13,7 +13,6 @@ export interface AgentConfigModel {
 	name: string;
 	description?: string | null;
 	profile_image_url?: string | null;
-	cta_copy?: string | null;
 	is_active: boolean;
 	is_beta: boolean;
 	meta?: Record<string, unknown>;
@@ -28,7 +27,6 @@ export interface AgentConfigUserResponse {
 	name: string;
 	description?: string | null;
 	profile_image_url?: string | null;
-	cta_copy?: string | null;
 	is_beta: boolean;
 }
 
@@ -43,7 +41,6 @@ export interface AgentConfigForm {
 	name: string;
 	description?: string | null;
 	profile_image_url?: string | null;
-	cta_copy?: string | null;
 	is_active: boolean;
 	is_beta: boolean;
 	meta?: Record<string, unknown>;

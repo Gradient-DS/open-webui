@@ -286,6 +286,9 @@ openWebui:
     featureToolServers: "False"
     featureTerminalServers: "False"
 
+    # Welcome message (PersistentConfig — seed only; admins can toggle in UI)
+    enableWelcomeMessage: "False"
+
     # PDF export
     useStylizedPdfExport: "False"  # Set to "True" to use old screenshot-based PDF export
 

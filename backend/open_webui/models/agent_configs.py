@@ -1,7 +1,7 @@
 """[Gradient] AgentConfig — admin-managed metadata for external agents.
 
 Each row corresponds to one slug from AGENT_API_AGENTS env. Owns display
-name, description, CTA copy, icon, active flag, and access grants.
+name, description, icon, active flag, and access grants.
 
 Routing uses ``id`` (== agent slug) directly; no routing fields live here.
 """
@@ -33,7 +33,6 @@ class AgentConfig(Base):
     name = Column(Text)
     description = Column(Text, nullable=True)
     profile_image_url = Column(Text, nullable=True)
-    cta_copy = Column(Text, nullable=True)
     is_active = Column(Boolean, default=False)  # default OFF — admin must enable
     is_beta = Column(Boolean, default=True)
     meta = Column(JSON, server_default='{}')
@@ -58,7 +57,6 @@ class AgentConfigModel(BaseModel):
     name: str
     description: Optional[str] = None
     profile_image_url: Optional[str] = None
-    cta_copy: Optional[str] = None
     is_active: bool = False
     is_beta: bool = True
     meta: dict = Field(default_factory=dict)
@@ -72,7 +70,6 @@ class AgentConfigForm(BaseModel):
     name: str
     description: Optional[str] = None
     profile_image_url: Optional[str] = None
-    cta_copy: Optional[str] = None
     is_active: bool = False
     is_beta: bool = True
     meta: Optional[dict] = None
@@ -87,7 +84,6 @@ class AgentConfigUserResponse(BaseModel):
     name: str
     description: Optional[str] = None
     profile_image_url: Optional[str] = None
-    cta_copy: Optional[str] = None
     is_beta: bool = True
 
 
@@ -110,7 +106,6 @@ class AgentConfigsTable:
             name=row.name,
             description=row.description,
             profile_image_url=row.profile_image_url,
-            cta_copy=row.cta_copy,
             is_active=bool(row.is_active),
             is_beta=bool(row.is_beta),
             meta=row.meta or {},
@@ -137,7 +132,6 @@ class AgentConfigsTable:
                 name=form_data.name,
                 description=form_data.description,
                 profile_image_url=form_data.profile_image_url,
-                cta_copy=form_data.cta_copy,
                 is_active=form_data.is_active,
                 is_beta=form_data.is_beta,
                 meta=form_data.meta or {},
@@ -165,7 +159,6 @@ class AgentConfigsTable:
             row.name = form_data.name
             row.description = form_data.description
             row.profile_image_url = form_data.profile_image_url
-            row.cta_copy = form_data.cta_copy
             row.is_active = form_data.is_active
             row.is_beta = form_data.is_beta
             if form_data.meta is not None:
@@ -300,6 +293,12 @@ class AgentConfigsTable:
                     skipped += 1
                     continue
 
+                # Backwards-compat: ``cta_copy`` was merged into ``description``
+                # in migration e8a9b0c1d2e3. Accept the old key for env-driven
+                # seeds so deployments don't break before they update their
+                # config — explicit ``description`` always wins.
+                env_description = raw.get('description') or raw.get('cta_copy')
+
                 row = db.query(AgentConfig).filter_by(id=slug).first()
                 if row is None:
                     if 'position' in raw:
@@ -311,9 +310,8 @@ class AgentConfigsTable:
                         id=slug,
                         user_id=None,
                         name=name,
-                        description=raw.get('description'),
+                        description=env_description,
                         profile_image_url=raw.get('profile_image_url'),
-                        cta_copy=raw.get('cta_copy'),
                         is_active=bool(raw.get('is_active', False)),
                         is_beta=bool(raw.get('is_beta', True)),
                         meta={},
@@ -325,9 +323,8 @@ class AgentConfigsTable:
                     inserted += 1
                 elif overwrite:
                     row.name = name
-                    row.description = raw.get('description')
+                    row.description = env_description
                     row.profile_image_url = raw.get('profile_image_url')
-                    row.cta_copy = raw.get('cta_copy')
                     row.is_active = bool(raw.get('is_active', row.is_active))
                     row.is_beta = bool(raw.get('is_beta', row.is_beta))
                     if 'position' in raw:

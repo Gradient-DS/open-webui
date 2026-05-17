@@ -164,10 +164,10 @@
 					{#if status?.description}
 						{$i18n.t(
 							status.description,
-							/* statusI18nParams handles `query` filtering — but `query` is also a
-							   placeholder in many templates, so we manually re-add it here from
-							   the reserved field on the status. */
-							{ ...statusI18nParams(status), query: status?.query }
+							/* statusI18nParams strips `query` and `count` (both reserved for
+							   per-action branches). Re-add them here for templates in the
+							   generic branch that use them as placeholders. */
+							{ ...statusI18nParams(status), query: status?.query, count: status?.count }
 						)}
 					{/if}
 				</div>

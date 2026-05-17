@@ -51,7 +51,6 @@
 		name: slug,
 		description: '',
 		profile_image_url: null,
-		cta_copy: '',
 		is_active: false,
 		is_beta: true,
 		access_grants: []
@@ -61,7 +60,6 @@
 		name: cfg.name,
 		description: cfg.description ?? '',
 		profile_image_url: cfg.profile_image_url ?? null,
-		cta_copy: cfg.cta_copy ?? '',
 		is_active: cfg.is_active,
 		is_beta: cfg.is_beta,
 		access_grants: cfg.access_grants ?? []
@@ -356,22 +354,17 @@
 											<label class="text-xs text-gray-500" for={`desc-${row.slug}`}>
 												{$i18n.t('Description')}
 											</label>
-											<input
-												id={`desc-${row.slug}`}
-												class="w-full rounded-lg text-sm bg-transparent outline-hidden border border-gray-100 dark:border-gray-850 px-3 py-1.5 mb-2"
-												type="text"
-												bind:value={drafts[row.slug].description}
-											/>
-
-											<label class="text-xs text-gray-500" for={`cta-${row.slug}`}>
-												{$i18n.t('Card CTA copy')}
-											</label>
 											<textarea
-												id={`cta-${row.slug}`}
-												class="w-full rounded-lg text-sm bg-transparent outline-hidden border border-gray-100 dark:border-gray-850 px-3 py-1.5 mb-2"
+												id={`desc-${row.slug}`}
+												class="w-full rounded-lg text-sm bg-transparent outline-hidden border border-gray-100 dark:border-gray-850 px-3 py-1.5"
 												rows="2"
-												bind:value={drafts[row.slug].cta_copy}
+												bind:value={drafts[row.slug].description}
 											></textarea>
+											<div class="text-[11px] text-gray-500 mb-2">
+												{$i18n.t(
+													'Shown on the home-screen agent card and in the chat header popover.'
+												)}
+											</div>
 
 											<label class="text-xs text-gray-500" for={`img-${row.slug}`}>
 												{$i18n.t('Profile image URL')}

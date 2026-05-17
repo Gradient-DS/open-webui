@@ -99,7 +99,6 @@ async def list_visible_agents(user=Depends(get_verified_user)):
             name=r.name,
             description=r.description,
             profile_image_url=r.profile_image_url,
-            cta_copy=r.cta_copy,
             is_beta=r.is_beta,
         )
         for r in rows
