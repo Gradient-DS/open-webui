@@ -110,6 +110,7 @@ from open_webui.routers import (
     invites,
     data_warnings,
     terminals,
+    feedback_report,
 )
 
 from open_webui.routers.retrieval import (
@@ -385,6 +386,12 @@ from open_webui.config import (
     CONFLUENCE_OAUTH_CLIENT_SECRET,
     CONFLUENCE_SYNC_INTERVAL_MINUTES,
     CONFLUENCE_MAX_PAGES_PER_SYNC,
+    CONFLUENCE_AUTH_MODE,
+    CONFLUENCE_SITE_URL,
+    CONFLUENCE_BASIC_AUTH_USERNAME,
+    CONFLUENCE_BASIC_AUTH_API_TOKEN,
+    CONFLUENCE_KB_MODE,
+    CONFLUENCE_SHARED_KB_OWNER_ID,
     ENABLE_EMAIL_INVITES,
     EMAIL_FROM_ADDRESS,
     EMAIL_FROM_NAME,
@@ -424,6 +431,7 @@ from open_webui.config import (
     ENABLE_GOOGLE_DRIVE_INTEGRATION,
     ENABLE_GOOGLE_DRIVE_SYNC,
     GOOGLE_DRIVE_SYNC_INTERVAL_MINUTES,
+    GOOGLE_DRIVE_MAX_FILES_PER_SYNC,
     UPLOAD_DIR,
     EXTERNAL_WEB_SEARCH_URL,
     EXTERNAL_WEB_SEARCH_API_KEY,
@@ -466,6 +474,10 @@ from open_webui.config import (
     CONVERSATION_FEEDBACK_SCALE_MAX,
     CONVERSATION_FEEDBACK_HEADER,
     CONVERSATION_FEEDBACK_PLACEHOLDER,
+    ENABLE_FEEDBACK_REPORTING,
+    FEEDBACK_REPORT_SLACK_WEBHOOK_URL,
+    FEEDBACK_REPORT_INCLUDE_USER_IDENTITY,
+    FEEDBACK_REPORT_TRACE_URL_TEMPLATE,
     BYPASS_ADMIN_ACCESS_CONTROL,
     USER_PERMISSIONS,
     DEFAULT_USER_ROLE,
@@ -660,6 +672,10 @@ from open_webui.utils.middleware import (
     process_chat_response,
 )
 from open_webui.utils.agent import call_agent_api  # [Gradient] Agent API client
+from open_webui.utils.feedback_report import (  # [Gradient] Feedback Reporting
+    build_http_error_body,
+    get_current_trace_id,
+)
 from open_webui.utils.task import prompt_template, prompt_variables_template
 from open_webui.utils.access_control import has_access
 from open_webui.utils.tools import set_tool_servers, set_terminal_servers
@@ -1056,6 +1072,20 @@ app = FastAPI(
 # Used by readiness checks to gate traffic until startup work is done.
 app.state.startup_complete = False
 
+
+# [Gradient] Surface the OTel trace id on HTTP error responses so a feedback
+# "Report this problem" can deep-link to the Tempo trace. Purely additive —
+# FastAPI has no custom HTTPException handler otherwise; this replicates the
+# default body and just adds `trace_id` when a span is active.
+@app.exception_handler(HTTPException)
+async def http_exception_handler(request, exc: HTTPException):
+    return JSONResponse(
+        status_code=exc.status_code,
+        content=build_http_error_body(exc.detail),
+        headers=exc.headers,
+    )
+
+
 # For Open WebUI OIDC/OAuth2
 oauth_manager = OAuthManager(app)
 app.state.oauth_manager = oauth_manager
@@ -1243,6 +1273,11 @@ app.state.config.CONVERSATION_FEEDBACK_SCALE_MAX = CONVERSATION_FEEDBACK_SCALE_M
 app.state.config.CONVERSATION_FEEDBACK_HEADER = CONVERSATION_FEEDBACK_HEADER
 app.state.config.CONVERSATION_FEEDBACK_PLACEHOLDER = CONVERSATION_FEEDBACK_PLACEHOLDER
 
+app.state.config.ENABLE_FEEDBACK_REPORTING = ENABLE_FEEDBACK_REPORTING
+app.state.config.FEEDBACK_REPORT_SLACK_WEBHOOK_URL = FEEDBACK_REPORT_SLACK_WEBHOOK_URL
+app.state.config.FEEDBACK_REPORT_INCLUDE_USER_IDENTITY = FEEDBACK_REPORT_INCLUDE_USER_IDENTITY
+app.state.config.FEEDBACK_REPORT_TRACE_URL_TEMPLATE = FEEDBACK_REPORT_TRACE_URL_TEMPLATE
+
 # Migrate legacy access_control → access_grants on boot
 from open_webui.utils.access_control import migrate_access_control
 
@@ -1422,10 +1457,32 @@ app.state.config.BYPASS_WEB_SEARCH_WEB_LOADER = BYPASS_WEB_SEARCH_WEB_LOADER
 
 app.state.config.ENABLE_GOOGLE_DRIVE_INTEGRATION = ENABLE_GOOGLE_DRIVE_INTEGRATION
 app.state.config.ENABLE_GOOGLE_DRIVE_SYNC = ENABLE_GOOGLE_DRIVE_SYNC
+app.state.config.GOOGLE_DRIVE_CLIENT_ID = GOOGLE_DRIVE_CLIENT_ID
+app.state.config.GOOGLE_DRIVE_API_KEY = GOOGLE_DRIVE_API_KEY
+app.state.config.GOOGLE_DRIVE_SYNC_INTERVAL_MINUTES = GOOGLE_DRIVE_SYNC_INTERVAL_MINUTES
+app.state.config.GOOGLE_DRIVE_MAX_FILES_PER_SYNC = GOOGLE_DRIVE_MAX_FILES_PER_SYNC
 app.state.config.ENABLE_ONEDRIVE_INTEGRATION = ENABLE_ONEDRIVE_INTEGRATION
 app.state.config.ENABLE_ONEDRIVE_SYNC = ENABLE_ONEDRIVE_SYNC
+app.state.config.ENABLE_ONEDRIVE_PERSONAL = ENABLE_ONEDRIVE_PERSONAL
+app.state.config.ENABLE_ONEDRIVE_BUSINESS = ENABLE_ONEDRIVE_BUSINESS
+app.state.config.ONEDRIVE_CLIENT_ID_PERSONAL = ONEDRIVE_CLIENT_ID_PERSONAL
+app.state.config.ONEDRIVE_CLIENT_ID_BUSINESS = ONEDRIVE_CLIENT_ID_BUSINESS
+app.state.config.ONEDRIVE_SHAREPOINT_URL = ONEDRIVE_SHAREPOINT_URL
+app.state.config.ONEDRIVE_SHAREPOINT_TENANT_ID = ONEDRIVE_SHAREPOINT_TENANT_ID
+app.state.config.ONEDRIVE_SYNC_INTERVAL_MINUTES = ONEDRIVE_SYNC_INTERVAL_MINUTES
+app.state.config.ONEDRIVE_MAX_FILES_PER_SYNC = ONEDRIVE_MAX_FILES_PER_SYNC
 app.state.config.ENABLE_CONFLUENCE_INTEGRATION = ENABLE_CONFLUENCE_INTEGRATION
 app.state.config.ENABLE_CONFLUENCE_SYNC = ENABLE_CONFLUENCE_SYNC
+app.state.config.CONFLUENCE_OAUTH_CLIENT_ID = CONFLUENCE_OAUTH_CLIENT_ID
+app.state.config.CONFLUENCE_OAUTH_CLIENT_SECRET = CONFLUENCE_OAUTH_CLIENT_SECRET
+app.state.config.CONFLUENCE_SYNC_INTERVAL_MINUTES = CONFLUENCE_SYNC_INTERVAL_MINUTES
+app.state.config.CONFLUENCE_MAX_PAGES_PER_SYNC = CONFLUENCE_MAX_PAGES_PER_SYNC
+app.state.config.CONFLUENCE_AUTH_MODE = CONFLUENCE_AUTH_MODE
+app.state.config.CONFLUENCE_SITE_URL = CONFLUENCE_SITE_URL
+app.state.config.CONFLUENCE_BASIC_AUTH_USERNAME = CONFLUENCE_BASIC_AUTH_USERNAME
+app.state.config.CONFLUENCE_BASIC_AUTH_API_TOKEN = CONFLUENCE_BASIC_AUTH_API_TOKEN
+app.state.config.CONFLUENCE_KB_MODE = CONFLUENCE_KB_MODE
+app.state.config.CONFLUENCE_SHARED_KB_OWNER_ID = CONFLUENCE_SHARED_KB_OWNER_ID
 
 app.state.config.ENABLE_EMAIL_INVITES = ENABLE_EMAIL_INVITES
 app.state.config.EMAIL_FROM_ADDRESS = EMAIL_FROM_ADDRESS
@@ -2000,21 +2057,27 @@ app.include_router(terminals.router, prefix='/api/v1/terminals', tags=['terminal
 if ENABLE_SCIM:
     app.include_router(scim.router, prefix='/api/v1/scim/v2', tags=['scim'])
 
-# OneDrive Sync API for collection synchronization
-if app.state.config.ENABLE_ONEDRIVE_SYNC:
-    app.include_router(onedrive_sync.router, prefix='/api/v1/onedrive', tags=['onedrive'])
+# OneDrive / Google Drive Sync APIs for collection synchronization.
+# Mounted unconditionally — endpoints are admin/user-gated and no-op without
+# config. The routers must always be available so these providers can be
+# enabled at runtime via the Cloud Sync admin tab without a pod restart.
+app.include_router(onedrive_sync.router, prefix='/api/v1/onedrive', tags=['onedrive'])
+app.include_router(google_drive_sync.router, prefix='/api/v1/google-drive', tags=['google-drive'])
 
-# Google Drive Sync API for collection synchronization
-if app.state.config.ENABLE_GOOGLE_DRIVE_SYNC:
-    app.include_router(google_drive_sync.router, prefix='/api/v1/google-drive', tags=['google-drive'])
-
-# Confluence Sync API for collection synchronization
-if app.state.config.ENABLE_CONFLUENCE_SYNC:
-    app.include_router(confluence_sync.router, prefix='/api/v1/confluence', tags=['confluence'])
+# Confluence Sync API for collection synchronization.
+# Mounted unconditionally — endpoints are admin/user-gated and no-op without
+# config. The router must always be available so Confluence can be enabled at
+# runtime via the Cloud Sync admin tab without a pod restart.
+app.include_router(confluence_sync.router, prefix='/api/v1/confluence', tags=['confluence'])
 
 # Invites API (always mounted - Copy Link works without Graph API)
 app.include_router(invites.router, prefix='/api/v1/invites', tags=['invites'])
 app.include_router(data_warnings.router, prefix='/api/v1/data-warnings', tags=['data-warnings'])
+
+# Product feedback reporting API.
+# Mounted unconditionally — gated in-handler on the ENABLE_FEEDBACK_REPORTING
+# PersistentConfig flag so it can be toggled at runtime without a pod restart.
+app.include_router(feedback_report.router, prefix='/api/v1/feedback', tags=['feedback'])
 
 
 try:
@@ -2214,6 +2277,10 @@ async def chat_completion(
             'features': form_data.get('features', {}),
             'variables': form_data.get('variables', {}),
             'model': model,
+            # [Gradient] OTel trace id, captured synchronously while the server
+            # span is active — the background task that runs process_chat may
+            # not carry it. Lets a chat-error feedback report deep-link to Tempo.
+            'trace_id': get_current_trace_id(),
             'direct': model_item.get('direct', False),
             'params': {
                 'stream_delta_chunk_size': stream_delta_chunk_size,
@@ -2397,13 +2464,16 @@ async def chat_completion(
             if metadata.get('chat_id') and metadata.get('message_id'):
                 # Update the chat message with the error
                 try:
+                    # [Gradient] trace_id (captured in chat_completion) rides
+                    # along so an error report can deep-link to the Tempo trace.
+                    error = {'content': str(e), 'trace_id': metadata.get('trace_id')}
                     if not metadata['chat_id'].startswith('local:'):
                         Chats.upsert_message_to_chat_by_id_and_message_id(
                             metadata['chat_id'],
                             metadata['message_id'],
                             {
                                 'parentId': metadata.get('parent_message_id', None),
-                                'error': {'content': str(e)},
+                                'error': error,
                             },
                         )
 
@@ -2411,7 +2481,7 @@ async def chat_completion(
                     await event_emitter(
                         {
                             'type': 'chat:message:error',
-                            'data': {'error': {'content': str(e)}},
+                            'data': {'error': error},
                         }
                     )
                     await event_emitter(
@@ -2617,6 +2687,16 @@ async def get_app_config(request: Request):
     if user is None:
         onboarding = user_count == 0
 
+    # Shared Confluence KB id — surfaced so the chat '+' menu can attach the
+    # shared, public-read KB in one click (shared mode only). Empty string
+    # when not in shared mode or the KB has not been provisioned yet.
+    confluence_shared_kb_id = ''
+    if app.state.config.CONFLUENCE_KB_MODE == 'shared':
+        from open_webui.routers.confluence_sync import _find_shared_kb
+
+        _shared_kb = _find_shared_kb()
+        confluence_shared_kb_id = _shared_kb.id if _shared_kb else ''
+
     return {
         **({'onboarding': True} if onboarding else {}),
         'status': True,
@@ -2667,6 +2747,7 @@ async def get_app_config(request: Request):
                     'conversation_feedback_scale_max': app.state.config.CONVERSATION_FEEDBACK_SCALE_MAX,
                     'conversation_feedback_header': app.state.config.CONVERSATION_FEEDBACK_HEADER,
                     'conversation_feedback_placeholder': app.state.config.CONVERSATION_FEEDBACK_PLACEHOLDER,
+                    'enable_feedback_report': app.state.config.ENABLE_FEEDBACK_REPORTING,
                     'enable_user_webhooks': app.state.config.ENABLE_USER_WEBHOOKS,
                     'enable_user_status': app.state.config.ENABLE_USER_STATUS,
                     'enable_admin_export': ENABLE_ADMIN_EXPORT,
@@ -2716,8 +2797,8 @@ async def get_app_config(request: Request):
                     'enable_memories': app.state.config.ENABLE_MEMORIES,
                     **(
                         {
-                            'enable_onedrive_personal': ENABLE_ONEDRIVE_PERSONAL,
-                            'enable_onedrive_business': ENABLE_ONEDRIVE_BUSINESS,
+                            'enable_onedrive_personal': app.state.config.ENABLE_ONEDRIVE_PERSONAL,
+                            'enable_onedrive_business': app.state.config.ENABLE_ONEDRIVE_BUSINESS,
                             'enable_onedrive_sync': app.state.config.ENABLE_ONEDRIVE_SYNC,
                         }
                         if app.state.config.ENABLE_ONEDRIVE_INTEGRATION
@@ -2731,6 +2812,11 @@ async def get_app_config(request: Request):
                         if app.state.config.ENABLE_CONFLUENCE_INTEGRATION
                         else {}
                     ),
+                    # KB sharing mode — drives whether non-admins see Confluence
+                    # self-service create entry points (hidden in 'shared' mode).
+                    'confluence_kb_mode': app.state.config.CONFLUENCE_KB_MODE,
+                    # Shared-KB id for the chat '+' menu one-click attach.
+                    'confluence_shared_kb_id': confluence_shared_kb_id,
                     'enable_email_invites': app.state.config.ENABLE_EMAIL_INVITES,
                     'enable_agent_proxy': app.state.config.ENABLE_AGENT_PROXY,
                     'feature_agent_api_enabled': AGENT_API_ENABLED,
@@ -2793,8 +2879,8 @@ async def get_app_config(request: Request):
                     'has_client_secret': bool(GOOGLE_CLIENT_SECRET.value),
                 },
                 'onedrive': {
-                    'client_id_personal': ONEDRIVE_CLIENT_ID_PERSONAL,
-                    'client_id_business': ONEDRIVE_CLIENT_ID_BUSINESS,
+                    'client_id_personal': ONEDRIVE_CLIENT_ID_PERSONAL.value,
+                    'client_id_business': ONEDRIVE_CLIENT_ID_BUSINESS.value,
                     'sharepoint_url': ONEDRIVE_SHAREPOINT_URL.value,
                     'sharepoint_tenant_id': ONEDRIVE_SHAREPOINT_TENANT_ID.value,
                     'has_client_secret': bool(MICROSOFT_CLIENT_SECRET.value),

@@ -28,6 +28,10 @@ class Auth(Base):
     totp_enabled = Column(Boolean, default=False)
     totp_last_used_at = Column(BigInteger, nullable=True)
 
+    # Epoch second the 2FA enrollment grace period started for this user.
+    # Anchors the REQUIRE_2FA deadline so it cannot be reset by app restarts.
+    twofa_grace_started_at = Column(BigInteger, nullable=True)
+
 
 class AuthModel(BaseModel):
     id: str
@@ -234,6 +238,24 @@ class AuthsTable:
                         {
                             'totp_secret': totp_secret,
                             'totp_enabled': totp_enabled,
+                        }
+                    )
+                )
+                db.commit()
+                return result == 1
+        except Exception:
+            return False
+
+    def set_twofa_grace_started(self, user_id: str, started_at: int, db: Optional[Session] = None) -> bool:
+        """Anchor the 2FA enrollment grace period for a user (epoch seconds)."""
+        try:
+            with get_db_context(db) as db:
+                result = (
+                    db.query(Auth)
+                    .filter_by(id=user_id)
+                    .update(
+                        {
+                            'twofa_grace_started_at': started_at,
                         }
                     )
                 )

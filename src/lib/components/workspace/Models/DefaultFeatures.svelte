@@ -18,10 +18,19 @@
 		code_interpreter: {
 			label: $i18n.t('Code Interpreter'),
 			description: $i18n.t('Model can execute code and perform calculations')
+		},
+		document_writer: {
+			label: $i18n.t('Document Writer'),
+			description: $i18n.t('Model can write and create downloadable documents')
 		}
 	};
 
-	export let availableFeatures = ['web_search', 'image_generation', 'code_interpreter'];
+	export let availableFeatures = [
+		'web_search',
+		'image_generation',
+		'code_interpreter',
+		'document_writer'
+	];
 	export let featureIds = [];
 </script>
 

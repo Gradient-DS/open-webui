@@ -67,6 +67,8 @@
 	import { getSuggestionRenderer } from '../common/RichTextInput/suggestions';
 
 	import InputMenu from './MessageInput/InputMenu.svelte';
+	import ConfluencePickerModal from '../workspace/Knowledge/ConfluencePickerModal.svelte';
+	import { getConfluencePageContent } from '$lib/apis/confluence';
 	import VoiceRecording from './MessageInput/VoiceRecording.svelte';
 
 	import ToolServersModal from './ToolServersModal.svelte';
@@ -662,6 +664,58 @@
 		}
 	};
 
+	// Confluence — pick pages from the + menu and attach their rendered
+	// Markdown as one-off chat files (per-user mode; uses the user's OAuth).
+	let showConfluencePicker = false;
+	const confluenceHandler = () => {
+		showConfluencePicker = true;
+	};
+
+	const confluencePagesSelected = async (e) => {
+		const items = (e?.detail?.items ?? []) as Array<{
+			type: string;
+			cloud_id: string;
+			item_id: string;
+			name: string;
+		}>;
+		const pages = items.filter((it) => it.type === 'page');
+		if (items.some((it) => it.type === 'space')) {
+			toast.error(
+				$i18n.t('Only individual pages can be attached to a chat — pick pages, not spaces.')
+			);
+		}
+		for (const pg of pages) {
+			const tempItemId = uuidv4();
+			files = [
+				...files,
+				{
+					type: 'file',
+					file: '',
+					id: null,
+					url: '',
+					name: pg.name,
+					collection_name: '',
+					status: 'uploading',
+					size: 0,
+					error: '',
+					itemId: tempItemId
+				}
+			];
+			try {
+				const res = await getConfluencePageContent(localStorage.token, pg.cloud_id, pg.item_id);
+				const file = new File([res.content], `${res.title}.md`, { type: 'text/markdown' });
+				await uploadFileHandler(file, true, {}, tempItemId);
+			} catch (error) {
+				files = files.filter((f) => f.itemId !== tempItemId);
+				toast.error(
+					$i18n.t('Error fetching Confluence page: {{error}}', {
+						error: error instanceof Error ? error.message : String(error)
+					})
+				);
+			}
+		}
+	};
+
 	const scrollToBottom = () => {
 		const element = document.getElementById('messages-container');
 		element.scrollTo({
@@ -1253,6 +1307,8 @@
 
 <ToolServersModal bind:show={showTools} {selectedToolIds} />
 
+<ConfluencePickerModal bind:show={showConfluencePicker} on:select={confluencePagesSelected} />
+
 <InputVariablesModal
 	bind:show={showInputVariablesModal}
 	variables={inputVariables}
@@ -1747,6 +1803,7 @@
 											}}
 											uploadGoogleDriveHandler={googleDriveHandler}
 											uploadOneDriveHandler={oneDriveHandler}
+											uploadConfluenceHandler={confluenceHandler}
 											{onUpload}
 											onClose={async () => {
 												await tick();

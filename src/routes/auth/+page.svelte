@@ -18,6 +18,7 @@
 		verify2FA
 	} from '$lib/apis/auths';
 	import TwoFactorChallenge from '$lib/components/auth/TwoFactorChallenge.svelte';
+	import TwoFactorSetup from '$lib/components/chat/Settings/Account/TwoFactorSetup.svelte';
 
 	import { WEBUI_API_BASE_URL, WEBUI_BASE_URL } from '$lib/constants';
 	import { WEBUI_NAME, config, user, socket } from '$lib/stores';
@@ -45,6 +46,7 @@
 	let ldapUsername = '';
 
 	let show2FAChallenge = false;
+	let show2FASetup = false;
 	let partialToken = '';
 
 	const setSessionUser = async (sessionUser, redirectPath: string | null = null) => {
@@ -85,6 +87,14 @@
 			return;
 		}
 
+		// The 2FA grace period has expired — the user must enroll before a
+		// session is granted.
+		if (response?.requires_2fa_setup) {
+			partialToken = response.partial_token;
+			show2FASetup = true;
+			return;
+		}
+
 		await setSessionUser(response);
 	};
 
@@ -102,6 +112,13 @@
 				return null;
 			}
 		);
+
+		// The 2FA grace period has expired (zero-day grace) — enroll first.
+		if (sessionUser?.requires_2fa_setup) {
+			partialToken = sessionUser.partial_token;
+			show2FASetup = true;
+			return;
+		}
 
 		await setSessionUser(sessionUser);
 	};
@@ -270,6 +287,27 @@
 										partialToken = '';
 									}}
 								/>
+							{:else if show2FASetup}
+								<div class="flex flex-col">
+									<div class="text-2xl font-medium">
+										{$i18n.t('Two-Factor Authentication Required')}
+									</div>
+									<div class="mt-1 mb-4 text-sm text-gray-500 dark:text-gray-400">
+										{$i18n.t(
+											'Your administrator requires two-factor authentication for all accounts.'
+										)}
+									</div>
+									<TwoFactorSetup
+										token={partialToken}
+										on:enabled={async (e) => {
+											show2FASetup = false;
+											partialToken = '';
+											if (e.detail) {
+												await setSessionUser(e.detail);
+											}
+										}}
+									/>
+								</div>
 							{:else}
 								<form
 									class=" flex flex-col justify-center"

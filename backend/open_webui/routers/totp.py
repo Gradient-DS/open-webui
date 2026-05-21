@@ -34,10 +34,45 @@ from open_webui.utils.totp import (
     is_totp_code_format,
     verify_totp,
 )
-from open_webui.routers.auths import create_session_response
+from open_webui.routers.auths import create_session_response, evaluate_2fa_grace
 
 log = logging.getLogger(__name__)
 router = APIRouter()
+
+
+async def get_2fa_setup_user(request: Request):
+    """Resolve the user for the 2FA setup endpoints.
+
+    Accepts a normal session token *or* a short-lived '2fa_setup_pending'
+    partial token (issued by /signin once a user's grace period has expired).
+    This lets a user past their grace deadline reach the enrollment endpoints
+    even though they hold no full session. Whether a setup token was used is
+    recorded on ``request.state`` so /totp/enable can issue a real session.
+    """
+    auth_header = request.headers.get('Authorization')
+    token = None
+    if auth_header and auth_header.startswith('Bearer '):
+        token = auth_header.split(' ', 1)[1]
+    if token is None:
+        token = request.cookies.get('token')
+    if not token:
+        raise HTTPException(status_code=401, detail='Not authenticated')
+
+    data = decode_token(token)
+    if not data or 'id' not in data:
+        raise HTTPException(status_code=401, detail='Invalid or expired token')
+
+    purpose = data.get('purpose')
+    if purpose not in (None, '2fa_setup_pending'):
+        raise HTTPException(status_code=401, detail='Invalid token type')
+
+    user = Users.get_user_by_id(data['id'])
+    if not user:
+        raise HTTPException(status_code=401, detail='User not found')
+
+    request.state.is_2fa_setup_token = purpose == '2fa_setup_pending'
+    return user
+
 
 # Rate limiter: 5 attempts per 15 minutes per user
 totp_verify_rate_limiter = RateLimiter(redis_client=get_redis_client(), limit=5, window=60 * 15)
@@ -87,17 +122,22 @@ async def get_2fa_status(
 
     is_sso_user = bool(user.oauth) or not auth.password
 
+    # Anchor the grace period (if not already) and report the deadline so the
+    # frontend can show a real countdown and stop being dismissible past it.
+    grace = evaluate_2fa_grace(request, user, auth, db)
+
     return {
         'totp_enabled': auth.totp_enabled or False,
         'recovery_codes_remaining': RecoveryCodes.count_unused(user.id, db=db) if auth.totp_enabled else 0,
         'is_sso_user': is_sso_user,
+        'grace_period_expires_at': grace['grace_expires_at'],
     }
 
 
 @router.post('/totp/setup')
 async def setup_totp(
     request: Request,
-    user=Depends(get_current_user),
+    user=Depends(get_2fa_setup_user),
     db: Session = Depends(get_session),
 ):
     """Generate a new TOTP secret and QR code. Does NOT persist until /totp/enable."""
@@ -128,8 +168,9 @@ async def setup_totp(
 @router.post('/totp/enable')
 async def enable_totp(
     request: Request,
+    response: Response,
     form_data: TotpEnableForm,
-    user=Depends(get_current_user),
+    user=Depends(get_2fa_setup_user),
     db: Session = Depends(get_session),
 ):
     """Verify a TOTP code against the provided secret, then enable 2FA and return recovery codes."""
@@ -164,10 +205,18 @@ async def enable_totp(
     # Generate recovery codes
     recovery_codes = RecoveryCodes.generate_codes(user.id, db=db)
 
-    return {
+    result = {
         'totp_enabled': True,
         'recovery_codes': recovery_codes,
     }
+
+    # When enrolled via a grace-expired setup token the user holds no full
+    # session — issue one now so they can proceed straight into the app.
+    if getattr(request.state, 'is_2fa_setup_token', False):
+        session = create_session_response(request, user, db, response, set_cookie=True)
+        result = {**session, **result}
+
+    return result
 
 
 @router.post('/totp/disable')

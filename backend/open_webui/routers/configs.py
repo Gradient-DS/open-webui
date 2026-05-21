@@ -891,6 +891,211 @@ async def set_agent_proxy_config(
 
 
 ####################################
+# Confluence Config
+####################################
+
+
+class ConfluenceConfigForm(BaseModel):
+    ENABLE_CONFLUENCE_INTEGRATION: Optional[bool] = None
+    ENABLE_CONFLUENCE_SYNC: Optional[bool] = None
+    CONFLUENCE_OAUTH_CLIENT_ID: Optional[str] = None
+    # Blank/None = keep the stored secret; the secret is never returned.
+    CONFLUENCE_OAUTH_CLIENT_SECRET: Optional[str] = None
+    CONFLUENCE_SYNC_INTERVAL_MINUTES: Optional[int] = None
+    CONFLUENCE_MAX_PAGES_PER_SYNC: Optional[int] = None  # 0 = unlimited
+    # Basic auth (username + API token). auth_mode is 'oauth' or 'basic'.
+    CONFLUENCE_AUTH_MODE: Optional[str] = None
+    CONFLUENCE_SITE_URL: Optional[str] = None
+    CONFLUENCE_BASIC_AUTH_USERNAME: Optional[str] = None
+    # Blank/None = keep the stored API token; the token is never returned.
+    CONFLUENCE_BASIC_AUTH_API_TOKEN: Optional[str] = None
+    # Sharing mode: 'per_user' or 'shared'. shared_kb_owner_id is the user id
+    # owning the shared KB ('' = system-owned, basic auth only).
+    CONFLUENCE_KB_MODE: Optional[str] = None
+    CONFLUENCE_SHARED_KB_OWNER_ID: Optional[str] = None
+
+
+@router.get('/confluence')
+async def get_confluence_config(request: Request, user=Depends(get_admin_user)):
+    c = request.app.state.config
+    return {
+        'ENABLE_CONFLUENCE_INTEGRATION': c.ENABLE_CONFLUENCE_INTEGRATION,
+        'ENABLE_CONFLUENCE_SYNC': c.ENABLE_CONFLUENCE_SYNC,
+        'CONFLUENCE_OAUTH_CLIENT_ID': c.CONFLUENCE_OAUTH_CLIENT_ID,
+        # Never expose the secret — only whether one is configured.
+        'HAS_CONFLUENCE_OAUTH_CLIENT_SECRET': bool(c.CONFLUENCE_OAUTH_CLIENT_SECRET),
+        'CONFLUENCE_SYNC_INTERVAL_MINUTES': c.CONFLUENCE_SYNC_INTERVAL_MINUTES,
+        'CONFLUENCE_MAX_PAGES_PER_SYNC': c.CONFLUENCE_MAX_PAGES_PER_SYNC,
+        'CONFLUENCE_AUTH_MODE': c.CONFLUENCE_AUTH_MODE,
+        'CONFLUENCE_SITE_URL': c.CONFLUENCE_SITE_URL,
+        'CONFLUENCE_BASIC_AUTH_USERNAME': c.CONFLUENCE_BASIC_AUTH_USERNAME,
+        # Never expose the API token — only whether one is configured.
+        'HAS_CONFLUENCE_BASIC_AUTH_API_TOKEN': bool(c.CONFLUENCE_BASIC_AUTH_API_TOKEN),
+        'CONFLUENCE_KB_MODE': c.CONFLUENCE_KB_MODE,
+        'CONFLUENCE_SHARED_KB_OWNER_ID': c.CONFLUENCE_SHARED_KB_OWNER_ID,
+    }
+
+
+@router.post('/confluence')
+async def set_confluence_config(
+    request: Request,
+    form_data: ConfluenceConfigForm,
+    user=Depends(get_admin_user),
+):
+    c = request.app.state.config
+    if form_data.ENABLE_CONFLUENCE_INTEGRATION is not None:
+        c.ENABLE_CONFLUENCE_INTEGRATION = form_data.ENABLE_CONFLUENCE_INTEGRATION
+    if form_data.ENABLE_CONFLUENCE_SYNC is not None:
+        c.ENABLE_CONFLUENCE_SYNC = form_data.ENABLE_CONFLUENCE_SYNC
+    if form_data.CONFLUENCE_OAUTH_CLIENT_ID is not None:
+        c.CONFLUENCE_OAUTH_CLIENT_ID = form_data.CONFLUENCE_OAUTH_CLIENT_ID.strip()
+    # Only overwrite the secret when a non-empty value is supplied, so the UI
+    # can re-save other fields without round-tripping the secret.
+    if form_data.CONFLUENCE_OAUTH_CLIENT_SECRET:
+        c.CONFLUENCE_OAUTH_CLIENT_SECRET = form_data.CONFLUENCE_OAUTH_CLIENT_SECRET.strip()
+    if form_data.CONFLUENCE_SYNC_INTERVAL_MINUTES is not None:
+        c.CONFLUENCE_SYNC_INTERVAL_MINUTES = form_data.CONFLUENCE_SYNC_INTERVAL_MINUTES
+    if form_data.CONFLUENCE_MAX_PAGES_PER_SYNC is not None:
+        c.CONFLUENCE_MAX_PAGES_PER_SYNC = max(0, form_data.CONFLUENCE_MAX_PAGES_PER_SYNC)
+    if form_data.CONFLUENCE_AUTH_MODE is not None:
+        # Guard against arbitrary values; only the two known modes are valid.
+        mode = form_data.CONFLUENCE_AUTH_MODE.strip()
+        c.CONFLUENCE_AUTH_MODE = mode if mode in ('oauth', 'basic') else 'oauth'
+    if form_data.CONFLUENCE_SITE_URL is not None:
+        c.CONFLUENCE_SITE_URL = form_data.CONFLUENCE_SITE_URL.strip().rstrip('/')
+    if form_data.CONFLUENCE_BASIC_AUTH_USERNAME is not None:
+        c.CONFLUENCE_BASIC_AUTH_USERNAME = form_data.CONFLUENCE_BASIC_AUTH_USERNAME.strip()
+    # Only overwrite the API token when a non-empty value is supplied.
+    if form_data.CONFLUENCE_BASIC_AUTH_API_TOKEN:
+        c.CONFLUENCE_BASIC_AUTH_API_TOKEN = form_data.CONFLUENCE_BASIC_AUTH_API_TOKEN.strip()
+    if form_data.CONFLUENCE_KB_MODE is not None:
+        # Guard against arbitrary values; only the two known modes are valid.
+        mode = form_data.CONFLUENCE_KB_MODE.strip()
+        c.CONFLUENCE_KB_MODE = mode if mode in ('per_user', 'shared') else 'per_user'
+    if form_data.CONFLUENCE_SHARED_KB_OWNER_ID is not None:
+        c.CONFLUENCE_SHARED_KB_OWNER_ID = form_data.CONFLUENCE_SHARED_KB_OWNER_ID.strip()
+    return await get_confluence_config(request, user)
+
+
+####################################
+# Google Drive Config
+####################################
+
+
+class GoogleDriveConfigForm(BaseModel):
+    ENABLE_GOOGLE_DRIVE_INTEGRATION: Optional[bool] = None
+    ENABLE_GOOGLE_DRIVE_SYNC: Optional[bool] = None
+    GOOGLE_DRIVE_CLIENT_ID: Optional[str] = None
+    GOOGLE_DRIVE_API_KEY: Optional[str] = None
+    GOOGLE_DRIVE_SYNC_INTERVAL_MINUTES: Optional[int] = None
+    GOOGLE_DRIVE_MAX_FILES_PER_SYNC: Optional[int] = None  # 0 = unlimited
+
+
+@router.get('/google_drive')
+async def get_google_drive_config(request: Request, user=Depends(get_admin_user)):
+    c = request.app.state.config
+    # Client ID + API key are PKCE-public (used browser-side by the Picker),
+    # so they are returned in full — there is no secret to mask.
+    return {
+        'ENABLE_GOOGLE_DRIVE_INTEGRATION': c.ENABLE_GOOGLE_DRIVE_INTEGRATION,
+        'ENABLE_GOOGLE_DRIVE_SYNC': c.ENABLE_GOOGLE_DRIVE_SYNC,
+        'GOOGLE_DRIVE_CLIENT_ID': c.GOOGLE_DRIVE_CLIENT_ID,
+        'GOOGLE_DRIVE_API_KEY': c.GOOGLE_DRIVE_API_KEY,
+        'GOOGLE_DRIVE_SYNC_INTERVAL_MINUTES': c.GOOGLE_DRIVE_SYNC_INTERVAL_MINUTES,
+        'GOOGLE_DRIVE_MAX_FILES_PER_SYNC': c.GOOGLE_DRIVE_MAX_FILES_PER_SYNC,
+    }
+
+
+@router.post('/google_drive')
+async def set_google_drive_config(
+    request: Request,
+    form_data: GoogleDriveConfigForm,
+    user=Depends(get_admin_user),
+):
+    c = request.app.state.config
+    if form_data.ENABLE_GOOGLE_DRIVE_INTEGRATION is not None:
+        c.ENABLE_GOOGLE_DRIVE_INTEGRATION = form_data.ENABLE_GOOGLE_DRIVE_INTEGRATION
+    if form_data.ENABLE_GOOGLE_DRIVE_SYNC is not None:
+        c.ENABLE_GOOGLE_DRIVE_SYNC = form_data.ENABLE_GOOGLE_DRIVE_SYNC
+    if form_data.GOOGLE_DRIVE_CLIENT_ID is not None:
+        c.GOOGLE_DRIVE_CLIENT_ID = form_data.GOOGLE_DRIVE_CLIENT_ID.strip()
+    if form_data.GOOGLE_DRIVE_API_KEY is not None:
+        c.GOOGLE_DRIVE_API_KEY = form_data.GOOGLE_DRIVE_API_KEY.strip()
+    if form_data.GOOGLE_DRIVE_SYNC_INTERVAL_MINUTES is not None:
+        c.GOOGLE_DRIVE_SYNC_INTERVAL_MINUTES = form_data.GOOGLE_DRIVE_SYNC_INTERVAL_MINUTES
+    if form_data.GOOGLE_DRIVE_MAX_FILES_PER_SYNC is not None:
+        c.GOOGLE_DRIVE_MAX_FILES_PER_SYNC = max(0, form_data.GOOGLE_DRIVE_MAX_FILES_PER_SYNC)
+    return await get_google_drive_config(request, user)
+
+
+####################################
+# OneDrive Config
+####################################
+
+
+class OneDriveConfigForm(BaseModel):
+    ENABLE_ONEDRIVE_INTEGRATION: Optional[bool] = None
+    ENABLE_ONEDRIVE_SYNC: Optional[bool] = None
+    ENABLE_ONEDRIVE_PERSONAL: Optional[bool] = None
+    ENABLE_ONEDRIVE_BUSINESS: Optional[bool] = None
+    ONEDRIVE_CLIENT_ID_PERSONAL: Optional[str] = None
+    ONEDRIVE_CLIENT_ID_BUSINESS: Optional[str] = None
+    ONEDRIVE_SHAREPOINT_URL: Optional[str] = None
+    ONEDRIVE_SHAREPOINT_TENANT_ID: Optional[str] = None
+    ONEDRIVE_SYNC_INTERVAL_MINUTES: Optional[int] = None
+    ONEDRIVE_MAX_FILES_PER_SYNC: Optional[int] = None  # 0 = unlimited
+
+
+@router.get('/onedrive')
+async def get_onedrive_config(request: Request, user=Depends(get_admin_user)):
+    c = request.app.state.config
+    # OneDrive uses public (PKCE) app registrations — client IDs are not
+    # secret and are returned in full.
+    return {
+        'ENABLE_ONEDRIVE_INTEGRATION': c.ENABLE_ONEDRIVE_INTEGRATION,
+        'ENABLE_ONEDRIVE_SYNC': c.ENABLE_ONEDRIVE_SYNC,
+        'ENABLE_ONEDRIVE_PERSONAL': c.ENABLE_ONEDRIVE_PERSONAL,
+        'ENABLE_ONEDRIVE_BUSINESS': c.ENABLE_ONEDRIVE_BUSINESS,
+        'ONEDRIVE_CLIENT_ID_PERSONAL': c.ONEDRIVE_CLIENT_ID_PERSONAL,
+        'ONEDRIVE_CLIENT_ID_BUSINESS': c.ONEDRIVE_CLIENT_ID_BUSINESS,
+        'ONEDRIVE_SHAREPOINT_URL': c.ONEDRIVE_SHAREPOINT_URL,
+        'ONEDRIVE_SHAREPOINT_TENANT_ID': c.ONEDRIVE_SHAREPOINT_TENANT_ID,
+        'ONEDRIVE_SYNC_INTERVAL_MINUTES': c.ONEDRIVE_SYNC_INTERVAL_MINUTES,
+        'ONEDRIVE_MAX_FILES_PER_SYNC': c.ONEDRIVE_MAX_FILES_PER_SYNC,
+    }
+
+
+@router.post('/onedrive')
+async def set_onedrive_config(
+    request: Request,
+    form_data: OneDriveConfigForm,
+    user=Depends(get_admin_user),
+):
+    c = request.app.state.config
+    if form_data.ENABLE_ONEDRIVE_INTEGRATION is not None:
+        c.ENABLE_ONEDRIVE_INTEGRATION = form_data.ENABLE_ONEDRIVE_INTEGRATION
+    if form_data.ENABLE_ONEDRIVE_SYNC is not None:
+        c.ENABLE_ONEDRIVE_SYNC = form_data.ENABLE_ONEDRIVE_SYNC
+    if form_data.ENABLE_ONEDRIVE_PERSONAL is not None:
+        c.ENABLE_ONEDRIVE_PERSONAL = form_data.ENABLE_ONEDRIVE_PERSONAL
+    if form_data.ENABLE_ONEDRIVE_BUSINESS is not None:
+        c.ENABLE_ONEDRIVE_BUSINESS = form_data.ENABLE_ONEDRIVE_BUSINESS
+    if form_data.ONEDRIVE_CLIENT_ID_PERSONAL is not None:
+        c.ONEDRIVE_CLIENT_ID_PERSONAL = form_data.ONEDRIVE_CLIENT_ID_PERSONAL.strip()
+    if form_data.ONEDRIVE_CLIENT_ID_BUSINESS is not None:
+        c.ONEDRIVE_CLIENT_ID_BUSINESS = form_data.ONEDRIVE_CLIENT_ID_BUSINESS.strip()
+    if form_data.ONEDRIVE_SHAREPOINT_URL is not None:
+        c.ONEDRIVE_SHAREPOINT_URL = form_data.ONEDRIVE_SHAREPOINT_URL.strip()
+    if form_data.ONEDRIVE_SHAREPOINT_TENANT_ID is not None:
+        c.ONEDRIVE_SHAREPOINT_TENANT_ID = form_data.ONEDRIVE_SHAREPOINT_TENANT_ID.strip()
+    if form_data.ONEDRIVE_SYNC_INTERVAL_MINUTES is not None:
+        c.ONEDRIVE_SYNC_INTERVAL_MINUTES = form_data.ONEDRIVE_SYNC_INTERVAL_MINUTES
+    if form_data.ONEDRIVE_MAX_FILES_PER_SYNC is not None:
+        c.ONEDRIVE_MAX_FILES_PER_SYNC = max(0, form_data.ONEDRIVE_MAX_FILES_PER_SYNC)
+    return await get_onedrive_config(request, user)
+
+
+####################################
 # External Agents Config
 ####################################
 

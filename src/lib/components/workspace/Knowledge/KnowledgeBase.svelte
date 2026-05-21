@@ -240,6 +240,9 @@
 		files: any[];
 		access_grants?: any[];
 		write_access?: boolean;
+		type?: string;
+		user_id?: string;
+		meta?: Record<string, any>;
 	};
 
 	let id = null;
@@ -2099,17 +2102,25 @@
 					</div>
 
 					<div class="flex w-full">
-						<input
-							type="text"
-							class="text-left text-xs w-full text-gray-500 bg-transparent outline-hidden"
-							bind:value={knowledge.description}
-							aria-label={$i18n.t('Knowledge Description')}
-							placeholder={$i18n.t('Knowledge Description')}
-							disabled={!knowledge?.write_access}
-							on:input={() => {
-								changeDebounceHandler();
-							}}
-						/>
+						{#if knowledge?.meta?.confluence_sync?.shared}
+							<!-- The shared Confluence KB is system-managed — its
+							     description is a fixed, localized string. -->
+							<div class="text-left text-xs w-full text-gray-500">
+								{$i18n.t('Read-only Confluence knowledge base managed by administrators.')}
+							</div>
+						{:else}
+							<input
+								type="text"
+								class="text-left text-xs w-full text-gray-500 bg-transparent outline-hidden"
+								bind:value={knowledge.description}
+								aria-label={$i18n.t('Knowledge Description')}
+								placeholder={$i18n.t('Knowledge Description')}
+								disabled={!knowledge?.write_access}
+								on:input={() => {
+									changeDebounceHandler();
+								}}
+							/>
+						{/if}
 					</div>
 				</div>
 			</div>

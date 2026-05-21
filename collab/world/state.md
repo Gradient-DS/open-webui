@@ -4,6 +4,7 @@
 
 #### Current Work
 
+- **Confluence Cloud Sync admin panel** — implementing `thoughts/shared/plans/2026-05-21-confluence-cloud-sync-admin.md` (3 phases). **Phase 1 done + extended, awaiting manual verification**: new Cloud Sync admin tab with Confluence + Google Drive + OneDrive sections (all OAuth config admin-editable, no Helm/restart needed); `/api/v1/configs/{confluence,google_drive,onedrive}` GET/POST endpoints; all three sync routers mounted unconditionally + scheduler runtime-toggleable; OneDrive/GDrive enable toggles removed from Documents tab (Integration section deleted); env-only creds promoted to PersistentConfig. Scope was expanded mid-Phase-1 at user request to migrate OneDrive/GDrive too (plan amended). Phases 2 (Confluence username+API-token Basic auth) + 3 (shared read-only full-content KB) pending. Driving use case: unblock Intermax (Confluence Cloud, one shared KB for all users).
 - **Vink deployment** — large-scale client deployment (~1300 docs), active on `feat/vink` branch. Core sync worker issues resolved, plans created for next steps (single-collection architecture, batch-wait removal)
 - External agents package — active development and integration
 - New cloud integrations (Google Drive recently completed, exploring more)

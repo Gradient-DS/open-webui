@@ -1024,6 +1024,21 @@ def remove_file_from_knowledge_by_id(
 ############################
 
 
+def _assert_not_managed_shared_kb(knowledge) -> None:
+    """Block destructive mutation of the shared Confluence KB via this router.
+
+    The shared Confluence knowledge base is provisioned, synced and removed
+    entirely from the Cloud Sync admin panel. It must not be deleted or reset
+    through the workspace UI — even by an admin, who would otherwise bypass
+    the ownership checks in these endpoints.
+    """
+    if (knowledge.meta or {}).get('confluence_sync', {}).get('shared'):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail='This knowledge base is managed in the Cloud Sync admin panel.',
+        )
+
+
 @router.delete('/{id}/delete', response_model=bool)
 async def delete_knowledge_by_id(
     id: str,
@@ -1037,6 +1052,8 @@ async def delete_knowledge_by_id(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=ERROR_MESSAGES.NOT_FOUND,
         )
+
+    _assert_not_managed_shared_kb(knowledge)
 
     if (
         knowledge.user_id != user.id
@@ -1081,6 +1098,8 @@ async def reset_knowledge_by_id(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=ERROR_MESSAGES.NOT_FOUND,
         )
+
+    _assert_not_managed_shared_kb(knowledge)
 
     if (
         knowledge.user_id != user.id

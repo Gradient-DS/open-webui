@@ -167,6 +167,17 @@ def _process_expired_suspensions():
     log.info('Processing %d expired suspended KBs for hard-deletion', len(expired_kbs))
 
     for kb in expired_kbs:
+        # The shared Confluence KB must never self-delete — a lost service
+        # credential should raise an admin alert, not silently destroy the
+        # whole corpus. Suspension still hides it from retrieval.
+        if (kb.meta or {}).get('confluence_sync', {}).get('shared'):
+            log.warning(
+                'Shared Confluence KB %s is suspended past the 30-day grace period '
+                'but protected from hard-deletion — restore the credential in the '
+                'Cloud Sync admin tab.',
+                kb.id,
+            )
+            continue
         try:
             kb_files = Knowledges.get_files_by_id(kb.id)
             kb_file_ids = [f.id for f in kb_files]
