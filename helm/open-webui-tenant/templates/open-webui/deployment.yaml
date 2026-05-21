@@ -68,6 +68,19 @@ spec:
             - configMapRef:
                 name: {{ include "open-webui-tenant.openWebui.fullname" . }}-config
           env:
+            # [Gradient] Per-pod OTel identity. Without a unique
+            # service.instance.id each HA replica exports metrics under an
+            # identical series — Mimir commingles them and increase()/rate()
+            # inflate by orders of magnitude. Set here (not the ConfigMap)
+            # because the pod name is only available via the downward API.
+            {{- if .Values.openWebui.config.telemetry.otel.enabled }}
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: OTEL_RESOURCE_ATTRIBUTES
+              value: "service.instance.id=$(POD_NAME){{ with .Values.openWebui.config.telemetry.otel.resourceAttributes }},{{ . }}{{ end }}"
+            {{- end }}
             # Secrets
             - name: WEBUI_SECRET_KEY
               valueFrom:
@@ -127,6 +140,14 @@ spec:
                   name: {{ include "open-webui-tenant.fullname" . }}-secrets
                   key: confluence-oauth-client-secret
             {{- end }}
+            # Confluence basic-auth API token (only if configured)
+            {{- if or .Values.secrets.confluenceBasicAuthApiToken .Values.externalSecrets.onepassword.fields.confluenceBasicAuthApiToken }}
+            - name: CONFLUENCE_BASIC_AUTH_API_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "open-webui-tenant.fullname" . }}-secrets
+                  key: confluence-basic-auth-api-token
+            {{- end }}
             # Email Graph API secret (only if configured)
             {{- if or .Values.secrets.emailGraphClientSecret .Values.externalSecrets.onepassword.fields.emailGraphClientSecret }}
             - name: EMAIL_GRAPH_CLIENT_SECRET
@@ -134,6 +155,14 @@ spec:
                 secretKeyRef:
                   name: {{ include "open-webui-tenant.fullname" . }}-secrets
                   key: email-graph-client-secret
+            {{- end }}
+            # Feedback Reporting Slack webhook (only if configured)
+            {{- if or .Values.secrets.feedbackReportSlackWebhookUrl .Values.externalSecrets.onepassword.fields.feedbackReportSlackWebhookUrl }}
+            - name: FEEDBACK_REPORT_SLACK_WEBHOOK_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "open-webui-tenant.fullname" . }}-secrets
+                  key: feedback-report-slack-webhook-url
             {{- end }}
             # External Services API Keys (only if configured)
             {{- if or .Values.secrets.externalDocumentLoaderApiKey .Values.externalSecrets.onepassword.fields.externalDocumentLoaderApiKey }}

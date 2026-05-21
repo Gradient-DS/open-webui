@@ -166,6 +166,31 @@ def _agent_api_headers() -> dict[str, str]:
     return headers
 
 
+def _resolve_model_vision_capable(model: Optional[dict[str, Any]]) -> bool:
+    """Resolve whether a model can process image input.
+
+    Reads OpenWebUI's per-model vision capability flag
+    (``info.meta.capabilities.vision``, set via the admin panel).
+    Defaults to ``True`` when unset — matching OpenWebUI's own frontend
+    default — so a model without explicit capability config is treated
+    as vision-capable.
+    """
+    info = (model or {}).get('info') or {}
+    capabilities = (info.get('meta') or {}).get('capabilities') or {}
+    return bool(capabilities.get('vision', True))
+
+
+def _error_sse_chunk(message: str) -> str:
+    """Build an SSE data line carrying an error in OpenAI shape.
+
+    Open WebUI renders the inline error banner only for a chunk with an
+    ``error`` object and no ``choices`` (see middleware
+    ``stream_body_handler``); error text placed in ``choices[].delta``
+    is shown as ordinary assistant content instead.
+    """
+    return f'data: {json.dumps({"error": {"message": message}})}\n\n'
+
+
 @dataclass
 class SSEEvent:
     """A parsed SSE event from the agent stream."""
@@ -308,6 +333,11 @@ async def call_agent_api(
     user_language = metadata.get('user_language')
     if user_language:
         agent_metadata['user_language'] = user_language
+
+    # [Gradient] Forward the selected model's vision capability so the
+    # agent service can drop images for a misconfigured non-vision
+    # model instead of crashing on multimodal content.
+    agent_metadata['vision_capable'] = _resolve_model_vision_capable(model_dict)
 
     payload = build_agent_payload(
         model=llm_model,
@@ -476,16 +506,9 @@ def _build_streaming_response(
 
         except Exception as e:
             log.error(f'Agent API streaming error: {e}')
-            # Yield an error as an OpenAI-style chunk so the UI sees it
-            error_chunk = {
-                'choices': [
-                    {
-                        'delta': {'content': f'\n\n[Agent API error: {e}]'},
-                        'finish_reason': 'stop',
-                    }
-                ]
-            }
-            yield f'data: {json.dumps(error_chunk)}\n\n'
+            # Emit an OpenAI-shape error object (no `choices`) so the UI
+            # renders a proper error banner instead of inline text.
+            yield _error_sse_chunk(f'Agent API error: {e}')
 
         yield 'data: [DONE]\n\n'
 

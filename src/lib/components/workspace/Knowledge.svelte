@@ -284,7 +284,7 @@
 								</button>
 							{/if}
 
-							{#if $config?.features?.enable_confluence_integration && $config?.features?.enable_confluence_sync}
+							{#if $config?.features?.enable_confluence_integration && $config?.features?.enable_confluence_sync && ($user?.role === 'admin' || $config?.features?.confluence_kb_mode !== 'shared')}
 								<button
 									class="flex gap-2 w-full items-center px-3 py-1.5 text-sm cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-xl"
 									type="button"
@@ -509,7 +509,13 @@
 									</div>
 
 									<div class=" flex items-center gap-1 justify-between px-1.5">
-										<Tooltip content={item?.description ?? item.name}>
+										<Tooltip
+											content={item?.meta?.confluence_sync?.shared
+												? $i18n.t(
+														'Read-only Confluence knowledge base managed by administrators.'
+													)
+												: (item?.description ?? item.name)}
+										>
 											<div class=" flex items-center gap-2">
 												<div class=" text-sm font-medium line-clamp-1 capitalize">{item.name}</div>
 											</div>
@@ -524,17 +530,21 @@
 											</Tooltip>
 
 											<div class="text-xs text-gray-500 shrink-0">
-												<Tooltip
-													content={item?.user?.email ?? $i18n.t('Deleted User')}
-													className="flex shrink-0"
-													placement="top-start"
-												>
-													{$i18n.t('By {{name}}', {
-														name: capitalizeFirstLetter(
-															item?.user?.name ?? item?.user?.email ?? $i18n.t('Deleted User')
-														)
-													})}
-												</Tooltip>
+												{#if item?.meta?.confluence_sync?.shared}
+													{$i18n.t('Managed by administrators')}
+												{:else}
+													<Tooltip
+														content={item?.user?.email ?? $i18n.t('Deleted User')}
+														className="flex shrink-0"
+														placement="top-start"
+													>
+														{$i18n.t('By {{name}}', {
+															name: capitalizeFirstLetter(
+																item?.user?.name ?? item?.user?.email ?? $i18n.t('Deleted User')
+															)
+														})}
+													</Tooltip>
+												{/if}
 											</div>
 										</div>
 									</div>

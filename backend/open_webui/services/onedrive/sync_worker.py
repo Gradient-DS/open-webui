@@ -58,8 +58,11 @@ class OneDriveSyncWorker(BaseSyncWorker):
         return '/internal/onedrive-sync'
 
     @property
-    def max_files_config(self) -> int:
-        return ONEDRIVE_MAX_FILES_PER_SYNC
+    def max_files_config(self) -> Optional[int]:
+        # ONEDRIVE_MAX_FILES_PER_SYNC is a PersistentConfig (admin-editable).
+        # 0 = "no limit" → return None so base_worker falls back to the
+        # KB-wide KNOWLEDGE_MAX_FILE_COUNT safety net alone.
+        return ONEDRIVE_MAX_FILES_PER_SYNC.value or None
 
     @property
     def source_clear_delta_keys(self) -> list[str]:

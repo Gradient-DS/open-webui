@@ -690,6 +690,26 @@ class KnowledgeTable:
             log.exception(e)
             return None
 
+    def update_knowledge_user_id_by_id(self, id: str, user_id: str) -> Optional[KnowledgeModel]:
+        """Reassign a knowledge base's owner.
+
+        Used by the shared Confluence KB provisioning flow — the standard
+        ``update_knowledge_by_id`` cannot change ``user_id`` (it is not part
+        of ``KnowledgeForm``). ``user_id`` may be '' for a system-owned KB.
+        """
+        try:
+            with get_db() as db:
+                knowledge = db.query(Knowledge).filter_by(id=id).first()
+                if knowledge:
+                    knowledge.user_id = user_id
+                    knowledge.updated_at = int(time.time())
+                    db.commit()
+                    db.refresh(knowledge)
+                    return KnowledgeModel.model_validate(knowledge)
+                return None
+        except Exception:
+            return None
+
     def update_knowledge_meta_by_id(self, id: str, meta: dict) -> Optional[KnowledgeModel]:
         try:
             with get_db() as db:

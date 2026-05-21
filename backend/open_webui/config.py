@@ -1688,6 +1688,41 @@ CONVERSATION_FEEDBACK_PLACEHOLDER = PersistentConfig(
     '',
 )
 
+####################################
+# Feedback Reporting (product feedback)
+####################################
+# Distinct from the evaluation feedback above: this is the in-app channel for
+# product feedback / bug reports / error reports that fan out to a JSON log
+# line (→ Loki) and a Slack card. See routers/feedback_report.py.
+# Opt-in: defaults off so a tenant gets the feature only when it explicitly
+# sets ENABLE_FEEDBACK_REPORTING (via the Helm chart or the admin UI).
+
+ENABLE_FEEDBACK_REPORTING = PersistentConfig(
+    'ENABLE_FEEDBACK_REPORTING',
+    'feedback_report.enable',
+    os.environ.get('ENABLE_FEEDBACK_REPORTING', 'False').lower() == 'true',
+)
+
+FEEDBACK_REPORT_SLACK_WEBHOOK_URL = PersistentConfig(
+    'FEEDBACK_REPORT_SLACK_WEBHOOK_URL',
+    'feedback_report.slack_webhook_url',
+    os.environ.get('FEEDBACK_REPORT_SLACK_WEBHOOK_URL', ''),
+)
+
+FEEDBACK_REPORT_INCLUDE_USER_IDENTITY = PersistentConfig(
+    'FEEDBACK_REPORT_INCLUDE_USER_IDENTITY',
+    'feedback_report.include_user_identity',
+    os.environ.get('FEEDBACK_REPORT_INCLUDE_USER_IDENTITY', 'True').lower() == 'true',
+)
+
+# Grafana/Tempo Explore URL with a `{trace_id}` placeholder. When set, an error
+# report's Slack card renders a "View trace in Tempo" deep link. Set in gitops.
+FEEDBACK_REPORT_TRACE_URL_TEMPLATE = PersistentConfig(
+    'FEEDBACK_REPORT_TRACE_URL_TEMPLATE',
+    'feedback_report.trace_url_template',
+    os.environ.get('FEEDBACK_REPORT_TRACE_URL_TEMPLATE', ''),
+)
+
 DEFAULT_ARENA_MODEL = {
     'id': 'arena-model',
     'name': 'Arena Model',
@@ -2858,7 +2893,13 @@ GOOGLE_DRIVE_SYNC_INTERVAL_MINUTES = PersistentConfig(
     int(os.environ.get('GOOGLE_DRIVE_SYNC_INTERVAL_MINUTES', '60')),
 )
 
-GOOGLE_DRIVE_MAX_FILES_PER_SYNC = int(os.environ.get('GOOGLE_DRIVE_MAX_FILES_PER_SYNC', '500'))
+# Per-sync file cap. 0 = no per-sync limit (KNOWLEDGE_MAX_FILE_COUNT still
+# applies as a KB-wide safety net). Admin-editable via the Cloud Sync tab.
+GOOGLE_DRIVE_MAX_FILES_PER_SYNC = PersistentConfig(
+    'GOOGLE_DRIVE_MAX_FILES_PER_SYNC',
+    'google_drive.max_files_per_sync',
+    int(os.environ.get('GOOGLE_DRIVE_MAX_FILES_PER_SYNC', '500')),
+)
 
 GOOGLE_DRIVE_MAX_FILE_SIZE_MB = int(os.environ.get('GOOGLE_DRIVE_MAX_FILE_SIZE_MB', '100'))
 
@@ -2869,12 +2910,31 @@ ENABLE_ONEDRIVE_INTEGRATION = PersistentConfig(
 )
 
 
-ENABLE_ONEDRIVE_PERSONAL = os.environ.get('ENABLE_ONEDRIVE_PERSONAL', 'True').lower() == 'true'
-ENABLE_ONEDRIVE_BUSINESS = os.environ.get('ENABLE_ONEDRIVE_BUSINESS', 'True').lower() == 'true'
+ENABLE_ONEDRIVE_PERSONAL = PersistentConfig(
+    'ENABLE_ONEDRIVE_PERSONAL',
+    'onedrive.enable_personal',
+    os.environ.get('ENABLE_ONEDRIVE_PERSONAL', 'True').lower() == 'true',
+)
+ENABLE_ONEDRIVE_BUSINESS = PersistentConfig(
+    'ENABLE_ONEDRIVE_BUSINESS',
+    'onedrive.enable_business',
+    os.environ.get('ENABLE_ONEDRIVE_BUSINESS', 'True').lower() == 'true',
+)
 
+# Base client ID — default for the personal/business app registrations below
+# when those are not configured explicitly.
 ONEDRIVE_CLIENT_ID = os.environ.get('ONEDRIVE_CLIENT_ID', '')
-ONEDRIVE_CLIENT_ID_PERSONAL = os.environ.get('ONEDRIVE_CLIENT_ID_PERSONAL', ONEDRIVE_CLIENT_ID)
-ONEDRIVE_CLIENT_ID_BUSINESS = os.environ.get('ONEDRIVE_CLIENT_ID_BUSINESS', ONEDRIVE_CLIENT_ID)
+
+ONEDRIVE_CLIENT_ID_PERSONAL = PersistentConfig(
+    'ONEDRIVE_CLIENT_ID_PERSONAL',
+    'onedrive.client_id_personal',
+    os.environ.get('ONEDRIVE_CLIENT_ID_PERSONAL', ONEDRIVE_CLIENT_ID),
+)
+ONEDRIVE_CLIENT_ID_BUSINESS = PersistentConfig(
+    'ONEDRIVE_CLIENT_ID_BUSINESS',
+    'onedrive.client_id_business',
+    os.environ.get('ONEDRIVE_CLIENT_ID_BUSINESS', ONEDRIVE_CLIENT_ID),
+)
 
 
 ONEDRIVE_SHAREPOINT_URL = PersistentConfig(
@@ -2902,7 +2962,14 @@ ONEDRIVE_SYNC_INTERVAL_MINUTES = PersistentConfig(
     int(os.getenv('ONEDRIVE_SYNC_INTERVAL_MINUTES', '60')),
 )
 
-ONEDRIVE_MAX_FILES_PER_SYNC = int(os.getenv('ONEDRIVE_MAX_FILES_PER_SYNC', '500'))
+# Per-sync file cap. 0 = no per-sync limit (KNOWLEDGE_MAX_FILE_COUNT still
+# applies as a KB-wide safety net). Admin-editable via the Cloud Sync tab.
+ONEDRIVE_MAX_FILES_PER_SYNC = PersistentConfig(
+    'ONEDRIVE_MAX_FILES_PER_SYNC',
+    'onedrive.max_files_per_sync',
+    int(os.getenv('ONEDRIVE_MAX_FILES_PER_SYNC', '500')),
+)
+
 ONEDRIVE_MAX_FILE_SIZE_MB = int(os.getenv('ONEDRIVE_MAX_FILE_SIZE_MB', '100'))
 
 
@@ -2937,8 +3004,65 @@ CONFLUENCE_SYNC_INTERVAL_MINUTES = PersistentConfig(
     int(os.environ.get('CONFLUENCE_SYNC_INTERVAL_MINUTES', '60')),
 )
 
-CONFLUENCE_MAX_PAGES_PER_SYNC = int(os.getenv('CONFLUENCE_MAX_PAGES_PER_SYNC', '500'))
+# Per-sync page cap. 0 = no per-sync limit (KNOWLEDGE_MAX_FILE_COUNT still
+# applies as a KB-wide safety net). Admin-editable via the Cloud Sync tab.
+CONFLUENCE_MAX_PAGES_PER_SYNC = PersistentConfig(
+    'CONFLUENCE_MAX_PAGES_PER_SYNC',
+    'confluence.max_pages_per_sync',
+    int(os.getenv('CONFLUENCE_MAX_PAGES_PER_SYNC', '500')),
+)
+
 CONFLUENCE_MAX_PAGE_SIZE_MB = int(os.getenv('CONFLUENCE_MAX_PAGE_SIZE_MB', '25'))
+
+# Confluence auth mode. 'oauth' = per-user Atlassian 3LO (default, discovers
+# accessible sites from the token). 'basic' = a single service credential
+# (username + API token) used for all Confluence sync against one site.
+CONFLUENCE_AUTH_MODE = PersistentConfig(
+    'CONFLUENCE_AUTH_MODE',
+    'confluence.auth_mode',
+    os.environ.get('CONFLUENCE_AUTH_MODE', 'oauth'),
+)
+
+# Confluence Cloud site URL, e.g. https://your-domain.atlassian.net — required
+# for basic auth. (OAuth discovers accessible sites from the token instead.)
+CONFLUENCE_SITE_URL = PersistentConfig(
+    'CONFLUENCE_SITE_URL',
+    'confluence.site_url',
+    os.environ.get('CONFLUENCE_SITE_URL', ''),
+)
+
+# Basic-auth service credential: an Atlassian account email/username plus an
+# API token. The token is never returned to the browser by the config API.
+CONFLUENCE_BASIC_AUTH_USERNAME = PersistentConfig(
+    'CONFLUENCE_BASIC_AUTH_USERNAME',
+    'confluence.basic_auth_username',
+    os.environ.get('CONFLUENCE_BASIC_AUTH_USERNAME', ''),
+)
+
+CONFLUENCE_BASIC_AUTH_API_TOKEN = PersistentConfig(
+    'CONFLUENCE_BASIC_AUTH_API_TOKEN',
+    'confluence.basic_auth_api_token',
+    os.environ.get('CONFLUENCE_BASIC_AUTH_API_TOKEN', ''),
+)
+
+# Confluence KB sharing mode. 'per_user' = each user creates and owns their
+# own Confluence KBs (default). 'shared' = a single admin-owned, public-read
+# KB syncs the full accessible Confluence content for every user.
+CONFLUENCE_KB_MODE = PersistentConfig(
+    'CONFLUENCE_KB_MODE',
+    'confluence.kb_mode',
+    os.environ.get('CONFLUENCE_KB_MODE', 'per_user'),
+)
+
+# Owner of the shared Confluence KB — a user id, or '' for a system-owned KB
+# with no human owner. A no-owner shared KB is only valid with basic auth
+# (the service credential is global); OAuth needs an owner whose token the
+# scheduler resolves. Enforced by the shared-KB provisioning endpoint.
+CONFLUENCE_SHARED_KB_OWNER_ID = PersistentConfig(
+    'CONFLUENCE_SHARED_KB_OWNER_ID',
+    'confluence.shared_kb_owner_id',
+    os.environ.get('CONFLUENCE_SHARED_KB_OWNER_ID', ''),
+)
 
 
 ####################################

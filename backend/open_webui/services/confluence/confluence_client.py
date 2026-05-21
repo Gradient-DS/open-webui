@@ -1,12 +1,19 @@
 """Confluence Cloud REST API v2 client.
 
-Async httpx wrapper around the Atlassian API gateway
-(`https://api.atlassian.com/ex/confluence/{cloudId}/wiki/api/v2`).
+Async httpx wrapper supporting two auth modes:
+
+- ``oauth`` (default): per-user Atlassian 3LO. Talks to the API gateway
+  (`https://api.atlassian.com/ex/confluence/{cloudId}/wiki/api/v2`) with a
+  Bearer token, refreshed mid-flight via ``token_provider``.
+- ``basic``: a single service credential (username + API token). Talks to the
+  customer site directly (`https://{site}/wiki/api/v2`) with HTTP Basic auth.
+  API tokens do not refresh — a 401 is terminal.
 
 Mirrors the retry/refresh pattern used by the OneDrive GraphClient.
 """
 
 import asyncio
+import base64
 import logging
 from typing import Optional, Callable, Awaitable, Dict, Any, List, Tuple
 
@@ -26,14 +33,26 @@ class ConfluenceClient:
 
     def __init__(
         self,
-        access_token: str,
-        cloud_id: str,
+        access_token: str = '',
+        cloud_id: str = '',
         token_provider: Optional[Callable[[], Awaitable[Optional[str]]]] = None,
+        *,
+        auth_mode: str = 'oauth',
+        site_url: str = '',
+        basic_username: str = '',
+        basic_api_token: str = '',
     ):
         self._access_token = access_token
         self._cloud_id = cloud_id
         self._token_provider = token_provider
+        self._auth_mode = auth_mode
+        self._site_url = (site_url or '').rstrip('/')
         self._client: Optional[httpx.AsyncClient] = None
+        # Basic-auth header is static — precompute it once.
+        self._basic_auth_header: Optional[str] = None
+        if auth_mode == 'basic':
+            encoded = base64.b64encode(f'{basic_username}:{basic_api_token}'.encode('utf-8')).decode('ascii')
+            self._basic_auth_header = f'Basic {encoded}'
 
     @property
     def cloud_id(self) -> str:
@@ -54,11 +73,16 @@ class ConfluenceClient:
     # ------------------------------------------------------------------
 
     def _v2_url(self, path: str) -> str:
-        """Build a full v2 URL for the configured cloud_id.
+        """Build a full v2 URL.
 
         `path` should start without leading '/' (e.g. 'spaces', 'pages/{id}').
+        In ``basic`` mode the customer site is addressed directly; in ``oauth``
+        mode the request goes through the Atlassian API gateway.
         """
-        return f'{_API_BASE}/{self._cloud_id}/wiki/api/v2/{path.lstrip("/")}'
+        leaf = path.lstrip('/')
+        if self._auth_mode == 'basic':
+            return f'{self._site_url}/wiki/api/v2/{leaf}'
+        return f'{_API_BASE}/{self._cloud_id}/wiki/api/v2/{leaf}'
 
     async def _request_with_retry(
         self,
@@ -80,17 +104,28 @@ class ConfluenceClient:
 
         for attempt in range(max_retries):
             try:
+                if self._auth_mode == 'basic':
+                    auth_header = self._basic_auth_header
+                else:
+                    auth_header = f'Bearer {self._access_token}'
                 response = await client.request(
                     method,
                     url,
                     params=params,
                     headers={
-                        'Authorization': f'Bearer {self._access_token}',
+                        'Authorization': auth_header,
                         'Accept': 'application/json',
                     },
                 )
 
-                if response.status_code == 401 and not token_refreshed and self._token_provider:
+                # basic mode uses a static credential — a 401 is terminal,
+                # there is nothing to refresh.
+                if (
+                    response.status_code == 401
+                    and not token_refreshed
+                    and self._token_provider
+                    and self._auth_mode != 'basic'
+                ):
                     log.info('Received 401 from Confluence, attempting token refresh')
                     try:
                         new_token = await self._token_provider()
@@ -172,10 +207,14 @@ class ConfluenceClient:
             next_link = (data.get('_links') or {}).get('next')
             if not next_link:
                 break
-            # v2 returns next as an absolute path like /ex/confluence/{cloud}/...
-            # We hit the gateway host directly.
+            # v2 returns `next` as a host-relative path carrying the cursor.
+            # basic mode → resolve against the customer site; oauth mode →
+            # resolve against the Atlassian gateway host.
             if next_link.startswith('/'):
-                url = f'https://api.atlassian.com{next_link}'
+                if self._auth_mode == 'basic':
+                    url = f'{self._site_url}{next_link}'
+                else:
+                    url = f'https://api.atlassian.com{next_link}'
             else:
                 url = next_link
             params = None  # next link already carries the cursor

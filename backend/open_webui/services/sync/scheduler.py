@@ -43,11 +43,12 @@ class SyncScheduler:
 
         Called from main.py lifespan function. Stores the app reference
         and creates the scheduler asyncio task.
-        """
-        if not self.enable_config.value:
-            log.info('%s sync disabled, scheduler not started', self.provider_type)
-            return
 
+        The loop is always created — even when the provider is currently
+        disabled — so it can be enabled at runtime via the admin panel
+        without a pod restart. `_execute_due_syncs` re-checks
+        `enable_config.value` on every tick and no-ops while disabled.
+        """
         self._app = app
         if self._task is None or self._task.done():
             self._task = asyncio.create_task(self._run())
@@ -61,13 +62,17 @@ class SyncScheduler:
         self._task = None
 
     async def _run(self):
-        """Main scheduler loop."""
-        interval_seconds = self.interval_config.value * 60
+        """Main scheduler loop.
 
-        # Wait one interval before first run (don't sync immediately on startup)
-        await asyncio.sleep(interval_seconds)
-
+        The interval is re-read from config on every iteration, so an admin
+        changing the sync interval in the Cloud Sync panel takes effect on
+        the next cycle without a pod restart. The loop sleeps *before* each
+        run, so it never syncs immediately on startup.
+        """
         while True:
+            interval_seconds = max(1, self.interval_config.value) * 60
+            await asyncio.sleep(interval_seconds)
+
             try:
                 await self._execute_due_syncs()
             except asyncio.CancelledError:
@@ -76,11 +81,14 @@ class SyncScheduler:
             except Exception:
                 log.exception('Error in scheduler loop')
 
-            await asyncio.sleep(interval_seconds)
-
     async def _execute_due_syncs(self):
         """Find and execute syncs for all due knowledge bases."""
         from open_webui.services.sync.provider import get_sync_provider
+
+        # Re-checked every tick so a runtime enable/disable from the admin
+        # panel takes effect without restarting the scheduler loop.
+        if not self.enable_config.value:
+            return
 
         kbs = Knowledges.get_knowledge_bases_by_type(self.provider_type)
         if not kbs:
@@ -137,8 +145,10 @@ class SyncScheduler:
         meta = kb.meta or {}
         sync_info = meta.get(self.meta_key, {})
 
-        # Skip if no sources configured
-        if not sync_info.get('sources'):
+        # Skip if no sources configured. A KB that resolves its sources at
+        # sync time (the Confluence shared KB) is still due even with an
+        # empty stored source list.
+        if not sync_info.get('sources') and not sync_info.get('shared'):
             return False
 
         # Skip if no stored token (per-user DB lookup)

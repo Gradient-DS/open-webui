@@ -2052,8 +2052,14 @@ class BaseSyncWorker(ABC):
                     if file_info:
                         all_files_to_process.append(file_info)
 
-            # Apply file count limit
-            max_files = min(self.max_files_config, KNOWLEDGE_MAX_FILE_COUNT)
+            # Apply file count limit. A falsy max_files_config (0/None) means
+            # the provider sets no per-sync cap — fall back to the KB-wide
+            # KNOWLEDGE_MAX_FILE_COUNT safety net alone.
+            max_files = (
+                min(self.max_files_config, KNOWLEDGE_MAX_FILE_COUNT)
+                if self.max_files_config
+                else KNOWLEDGE_MAX_FILE_COUNT
+            )
             current_files = Knowledges.get_files_by_id(self.knowledge_id) or []
             current_file_count = len(current_files)
             available_slots = max(0, max_files - current_file_count)

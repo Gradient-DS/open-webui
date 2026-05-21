@@ -11,6 +11,7 @@
 	import DocumentPage from '$lib/components/icons/DocumentPage.svelte';
 	import OneDrive from '$lib/components/icons/OneDrive.svelte';
 	import GoogleDrive from '$lib/components/icons/GoogleDrive.svelte';
+	import Confluence from '$lib/components/icons/Confluence.svelte';
 	import Spinner from '$lib/components/common/Spinner.svelte';
 	import Loader from '$lib/components/common/Loader.svelte';
 	import ChevronDown from '$lib/components/icons/ChevronDown.svelte';
@@ -199,6 +200,8 @@
 									<OneDrive className="size-4" />
 								{:else if item.type === 'google_drive'}
 									<GoogleDrive className="size-4" />
+								{:else if item.type === 'confluence'}
+									<Confluence className="size-4" />
 								{:else}
 									<Database className="size-4" />
 								{/if}

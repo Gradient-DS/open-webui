@@ -1,5 +1,6 @@
 """Confluence Sync Router — endpoints for Confluence space/page sync to Knowledge bases."""
 
+import asyncio
 import logging
 from typing import List, Literal, Optional
 
@@ -9,11 +10,26 @@ from fastapi.responses import RedirectResponse
 from starlette.requests import Request
 from pydantic import BaseModel
 
-from open_webui.utils.auth import get_verified_user
-from open_webui.models.users import UserModel
+from open_webui.utils.auth import get_verified_user, get_admin_user
+from open_webui.models.users import UserModel, Users
+from open_webui.models.knowledge import Knowledges, KnowledgeForm
+from open_webui.models.access_grants import AccessGrants
 from open_webui.config import (
     CONFLUENCE_OAUTH_CLIENT_ID,
     CONFLUENCE_OAUTH_CLIENT_SECRET,
+    CONFLUENCE_SITE_URL,
+    CONFLUENCE_BASIC_AUTH_USERNAME,
+    CONFLUENCE_BASIC_AUTH_API_TOKEN,
+    CONFLUENCE_KB_MODE,
+    CONFLUENCE_SHARED_KB_OWNER_ID,
+)
+from open_webui.services.confluence.confluence_client import ConfluenceClient
+from open_webui.services.confluence.basic_auth import (
+    BASIC_AUTH_SENTINEL,
+    basic_auth_configured,
+    build_basic_client,
+    get_basic_site,
+    resolve_auth_mode,
 )
 from open_webui.services.sync.router import (
     SyncStatusResponse,
@@ -67,6 +83,56 @@ class SyncItemsRequest(BaseModel):
     access_token: Optional[str] = None
 
 
+class ConfluenceTestConnectionForm(BaseModel):
+    """Optional credential overrides for the basic-auth test-connection probe.
+
+    Any field left blank falls back to the stored config, so an admin can
+    test typed-but-unsaved values or re-test the saved credential.
+    """
+
+    site_url: Optional[str] = None
+    username: Optional[str] = None
+    api_token: Optional[str] = None
+
+
+class ConfluenceSpaceSelection(BaseModel):
+    """One Confluence space an admin opted into the shared knowledge base."""
+
+    id: str
+    key: Optional[str] = None
+    name: Optional[str] = None
+    cloud_id: Optional[str] = None
+
+
+class ConfluenceProvisionForm(BaseModel):
+    """Shared-KB provisioning request — the admin-selected spaces to sync.
+
+    Selection is opt-in: only the listed spaces are synced into the shared
+    KB. An empty list provisions the KB shell but syncs nothing until the
+    admin picks at least one space.
+    """
+
+    spaces: List[ConfluenceSpaceSelection] = []
+
+
+def _stamp_auth_mode(knowledge_id: str, mode: str) -> None:
+    """Persist the KB's resolved auth mode into its confluence_sync meta.
+
+    A KB keeps the mode it was created under even if the global default
+    later flips — so existing OAuth KBs are unaffected by switching the
+    tenant to basic auth and vice versa.
+    """
+    kb = Knowledges.get_knowledge_by_id(knowledge_id)
+    if not kb:
+        return
+    meta = kb.meta or {}
+    sync_info = meta.get(_META_KEY, {})
+    if sync_info.get('auth_mode') != mode:
+        sync_info['auth_mode'] = mode
+        meta[_META_KEY] = sync_info
+        Knowledges.update_knowledge_meta_by_id(knowledge_id, meta)
+
+
 # ──────────────────────────────────────────────────────────────────────
 # Sync endpoints
 # ──────────────────────────────────────────────────────────────────────
@@ -80,24 +146,38 @@ async def sync_items(
     user: UserModel = Depends(get_verified_user),
 ):
     """Start Confluence sync for multiple items (spaces and/or pages)."""
-    # Reject any cloud_id the user can't actually access — prevents a malformed
-    # body from pointing the worker at an arbitrary Atlassian site.
-    from open_webui.services.confluence.auth import get_stored_sites
+    mode = resolve_auth_mode(request.knowledge_id)
 
-    allowed_cloud_ids = {s.get('cloud_id') for s in get_stored_sites(user.id)}
+    # Reject any cloud_id the caller can't actually access — prevents a
+    # malformed body from pointing the worker at an arbitrary Atlassian site.
+    if mode == 'basic':
+        basic_site = get_basic_site()
+        if not basic_site:
+            raise HTTPException(400, 'Confluence basic auth is not configured.')
+        allowed_cloud_ids = {basic_site['cloud_id']}
+    else:
+        from open_webui.services.confluence.auth import get_stored_sites
+
+        allowed_cloud_ids = {s.get('cloud_id') for s in get_stored_sites(user.id)}
+
     for item in request.items:
         if item.cloud_id not in allowed_cloud_ids:
             raise HTTPException(403, f'Confluence site not accessible: {item.cloud_id}')
 
     access_token = request.access_token
     if not access_token:
-        from open_webui.services.confluence.token_refresh import (
-            get_valid_access_token,
-        )
+        if mode == 'basic':
+            # basic mode has no token — the worker reads the service
+            # credential from config; pass a non-empty placeholder.
+            access_token = BASIC_AUTH_SENTINEL
+        else:
+            from open_webui.services.confluence.token_refresh import (
+                get_valid_access_token,
+            )
 
-        access_token = await get_valid_access_token(user.id, request.knowledge_id)
-        if not access_token:
-            raise HTTPException(401, 'No valid Confluence token. Please re-authorize.')
+            access_token = await get_valid_access_token(user.id, request.knowledge_id)
+            if not access_token:
+                raise HTTPException(401, 'No valid Confluence token. Please re-authorize.')
 
     # base_worker routes type=='folder' → _collect_folder_files, else → _collect_single_file.
     # Spaces and page-subtrees both enumerate many pages → they're "folders".
@@ -133,6 +213,9 @@ async def sync_items(
         user=user,
         clear_delta_keys=_CLEAR_DELTA_KEYS,
     )
+
+    # Stamp the KB's auth mode so it stays stable if the global default flips.
+    _stamp_auth_mode(request.knowledge_id, mode)
 
     background_tasks.add_task(
         _sync_items_background,
@@ -307,10 +390,75 @@ async def get_token_status(
     knowledge_id: str,
     user: UserModel = Depends(get_verified_user),
 ):
-    """Check if a stored token exists and is valid for a KB."""
+    """Check if a stored token exists and is valid for a KB.
+
+    In basic mode there is no per-user OAuth token — report 'connected'
+    whenever the global service credential is configured, so the picker
+    can proceed without an OAuth authorization step.
+    """
+    if resolve_auth_mode(knowledge_id) == 'basic':
+        get_knowledge_or_raise(knowledge_id, user)
+        configured = basic_auth_configured()
+        return {
+            'has_token': configured,
+            'is_expired': False,
+            'needs_reauth': not configured,
+        }
+
     from open_webui.services.confluence.auth import get_stored_token
 
     return handle_get_token_status(knowledge_id, _META_KEY, user, get_stored_token)
+
+
+@router.post('/auth/test')
+async def test_connection(
+    form_data: ConfluenceTestConnectionForm,
+    user: UserModel = Depends(get_admin_user),
+):
+    """Probe a basic-auth Confluence credential by listing one space.
+
+    Admin-only. Builds a basic-mode client from the submitted credentials
+    (falling back to stored config for blank fields) and lists a single
+    space. Returns ``{ok, detail, space_count?}``.
+    """
+    site_url = (form_data.site_url or CONFLUENCE_SITE_URL.value or '').strip()
+    username = (form_data.username or CONFLUENCE_BASIC_AUTH_USERNAME.value or '').strip()
+    api_token = (form_data.api_token or CONFLUENCE_BASIC_AUTH_API_TOKEN.value or '').strip()
+
+    if not site_url or not username or not api_token:
+        return {
+            'ok': False,
+            'detail': 'Site URL, username and API token are all required.',
+        }
+
+    client = ConfluenceClient(
+        auth_mode='basic',
+        site_url=site_url,
+        basic_username=username,
+        basic_api_token=api_token,
+    )
+    try:
+        spaces, _ = await client.list_spaces(limit=1)
+        return {
+            'ok': True,
+            'detail': 'Connection successful.',
+            'space_count': len(spaces),
+        }
+    except httpx.HTTPStatusError as e:
+        code = e.response.status_code
+        detail = {
+            401: 'Authentication failed — check the username and API token.',
+            403: 'Access denied — the account cannot list spaces.',
+            404: 'Not found — check the site URL.',
+        }.get(code, f'Confluence returned HTTP {code}.')
+        return {'ok': False, 'detail': detail}
+    except ConnectionError as e:
+        return {'ok': False, 'detail': str(e)}
+    except Exception as e:
+        log.warning('Confluence test connection failed: %s', e)
+        return {'ok': False, 'detail': f'Connection failed: {e}'}
+    finally:
+        await client.close()
 
 
 @router.post('/auth/revoke/{knowledge_id}')
@@ -351,9 +499,45 @@ def _pick_site(sites: list, cloud_id: str) -> dict:
     raise HTTPException(404, 'Unknown Confluence site (cloud_id)')
 
 
+async def _browse_client(user: UserModel, cloud_id: str) -> tuple[ConfluenceClient, str]:
+    """Build a (ConfluenceClient, site_url) pair for picker browsing.
+
+    Branches on the global auth mode: basic mode validates ``cloud_id``
+    against the one configured site and builds a basic-mode client; oauth
+    mode resolves the per-user token and sites. The caller must close the
+    returned client.
+    """
+    if resolve_auth_mode(None) == 'basic':
+        basic_site = get_basic_site()
+        if not basic_site or cloud_id != basic_site['cloud_id']:
+            raise HTTPException(404, 'Unknown Confluence site (cloud_id)')
+        if not basic_auth_configured():
+            raise HTTPException(400, 'Confluence basic auth is not configured.')
+        return build_basic_client(), basic_site['url']
+
+    from open_webui.services.confluence.token_refresh import get_valid_access_token
+
+    token, sites = await _picker_client(user)
+    site = _pick_site(sites, cloud_id)
+
+    async def _refresh():
+        return await get_valid_access_token(user.id, knowledge_id='__picker__')
+
+    client = ConfluenceClient(access_token=token, cloud_id=cloud_id, token_provider=_refresh)
+    return client, site.get('url')
+
+
 @router.get('/browse/sites')
 async def browse_sites(user: UserModel = Depends(get_verified_user)):
-    """List the Confluence sites accessible to the authenticated user."""
+    """List the Confluence sites available for browsing.
+
+    In basic mode this is the single configured site; in oauth mode it is
+    every site the authenticated user's token can reach.
+    """
+    if resolve_auth_mode(None) == 'basic':
+        site = get_basic_site()
+        return {'sites': [site] if site else []}
+
     _, sites = await _picker_client(user)
     return {
         'sites': [
@@ -374,16 +558,7 @@ async def browse_spaces(
     user: UserModel = Depends(get_verified_user),
 ):
     """List spaces for a given Confluence site."""
-    from open_webui.services.confluence.confluence_client import ConfluenceClient
-    from open_webui.services.confluence.token_refresh import get_valid_access_token
-
-    token, sites = await _picker_client(user)
-    site = _pick_site(sites, cloud_id)
-
-    async def _refresh():
-        return await get_valid_access_token(user.id, knowledge_id='__picker__')
-
-    client = ConfluenceClient(access_token=token, cloud_id=cloud_id, token_provider=_refresh)
+    client, site_url = await _browse_client(user, cloud_id)
     try:
         try:
             results, next_cursor = await client.list_spaces(cursor=cursor)
@@ -391,7 +566,7 @@ async def browse_spaces(
             raise HTTPException(e.response.status_code, f'Confluence error: {e.response.status_code}')
 
         return {
-            'site_url': site.get('url'),
+            'site_url': site_url,
             'spaces': [
                 {
                     'id': s.get('id'),
@@ -422,19 +597,10 @@ async def browse_pages(
     Provide either space_id (to list the space's root pages) or parent_id
     (to expand a page's children).
     """
-    from open_webui.services.confluence.confluence_client import ConfluenceClient
-    from open_webui.services.confluence.token_refresh import get_valid_access_token
-
     if not space_id and not parent_id:
         raise HTTPException(400, 'Provide either space_id or parent_id')
 
-    token, sites = await _picker_client(user)
-    site = _pick_site(sites, cloud_id)
-
-    async def _refresh():
-        return await get_valid_access_token(user.id, knowledge_id='__picker__')
-
-    client = ConfluenceClient(access_token=token, cloud_id=cloud_id, token_provider=_refresh)
+    client, site_url = await _browse_client(user, cloud_id)
     try:
         try:
             if parent_id:
@@ -445,7 +611,7 @@ async def browse_pages(
             raise HTTPException(e.response.status_code, f'Confluence error: {e.response.status_code}')
 
         return {
-            'site_url': site.get('url'),
+            'site_url': site_url,
             'pages': [
                 {
                     'id': p.get('id'),
@@ -460,3 +626,278 @@ async def browse_pages(
         }
     finally:
         await client.close()
+
+
+@router.get('/page/{cloud_id}/{page_id}/content')
+async def get_page_content(
+    cloud_id: str,
+    page_id: str,
+    user: UserModel = Depends(get_verified_user),
+) -> dict:
+    """Fetch one Confluence page rendered as Markdown — for ad-hoc chat attach.
+
+    Used by the chat ``+`` menu Confluence picker: the user picks pages and
+    each is fetched + HTML→Markdown rendered here, then attached to the chat
+    as a one-off file. Reuses the picker's per-user/basic client resolution.
+    """
+    from open_webui.services.confluence.html_renderer import html_to_markdown
+
+    client, _site_url = await _browse_client(user, cloud_id)
+    try:
+        try:
+            page = await client.get_page(page_id, include_body=True)
+        except httpx.HTTPStatusError as e:
+            raise HTTPException(e.response.status_code, f'Confluence error: {e.response.status_code}')
+        if not page:
+            raise HTTPException(404, 'Confluence page not found')
+
+        html = ((page.get('body') or {}).get('view') or {}).get('value') or ''
+        # html_to_markdown is sync + CPU-bound — off-thread so a long page
+        # doesn't stall the event loop.
+        markdown = await asyncio.to_thread(html_to_markdown, html) if html else ''
+        title = page.get('title') or f'page-{page_id}'
+        return {
+            'page_id': page_id,
+            'title': title,
+            'content': f'# {title}\n\n{markdown}',
+        }
+    finally:
+        await client.close()
+
+
+# ──────────────────────────────────────────────────────────────────────
+# Shared full-content KB endpoints (admin-only)
+# ──────────────────────────────────────────────────────────────────────
+
+_SHARED_KB_NAME = 'Confluence'
+_SHARED_KB_DESCRIPTION = 'Read-only Confluence knowledge base managed by administrators.'
+
+
+def _find_shared_kb():
+    """Return the existing (live) shared Confluence KB, or None.
+
+    Discovered by ``type='confluence'`` + ``confluence_sync.shared == True``,
+    not by name, so an admin renaming it does not orphan the link.
+    Soft-deleted KBs are skipped so a deleted-then-reprovisioned KB never
+    shadows the live one (which would make status/sync target the wrong row).
+    """
+    for kb in Knowledges.get_knowledge_bases_by_type(_PROVIDER_TYPE):
+        if getattr(kb, 'deleted_at', None):
+            continue
+        if (kb.meta or {}).get(_META_KEY, {}).get('shared'):
+            return kb
+    return None
+
+
+def _shared_kb_status() -> dict:
+    """Compose the shared-KB status payload for the Cloud Sync admin tab."""
+    kb = _find_shared_kb()
+    status: dict = {
+        'kb_mode': CONFLUENCE_KB_MODE.value,
+        'auth_mode': resolve_auth_mode(None),
+        'configured_owner_id': (CONFLUENCE_SHARED_KB_OWNER_ID.value or '').strip(),
+        'provisioned': kb is not None,
+        'knowledge_id': kb.id if kb else None,
+    }
+    if kb:
+        sync_info = (kb.meta or {}).get(_META_KEY, {})
+        status.update(
+            {
+                'owner_id': kb.user_id,
+                'status': sync_info.get('status', 'idle'),
+                'last_sync_at': sync_info.get('last_sync_at'),
+                'last_result': sync_info.get('last_result'),
+                'suspended_at': sync_info.get('suspended_at'),
+                'file_count': len(Knowledges.get_files_by_id(kb.id) or []),
+                # Live progress (files done / total) — lets the Cloud Sync
+                # tab show a percentage on the Sync button while a sync runs.
+                'progress_current': sync_info.get('progress_current', 0),
+                'progress_total': sync_info.get('progress_total', 0),
+                # The admin-selected spaces — used to pre-fill the Cloud Sync
+                # tab's space checklist on reload.
+                'spaces': sync_info.get('spaces', []),
+            }
+        )
+    return status
+
+
+@router.get('/shared/status')
+async def get_shared_kb_status(user: UserModel = Depends(get_admin_user)) -> dict:
+    """Report shared-KB provisioning state and last sync result (admin)."""
+    return _shared_kb_status()
+
+
+@router.get('/shared/spaces')
+async def list_shared_kb_spaces(user: UserModel = Depends(get_admin_user)) -> dict:
+    """List the Confluence spaces available for the shared KB (admin).
+
+    Company-wide mode only — enumerates every space the basic-auth service
+    account can see, so an admin can opt specific spaces into the shared KB.
+    """
+    if resolve_auth_mode(None) != 'basic':
+        raise HTTPException(
+            400,
+            'Space selection is only available in company-wide (service account) mode.',
+        )
+    if not basic_auth_configured():
+        raise HTTPException(
+            400,
+            'Confluence basic auth is not configured. Save the service account credentials first.',
+        )
+
+    basic_site = get_basic_site()
+    cloud_id = basic_site['cloud_id'] if basic_site else ''
+    client = build_basic_client()
+    try:
+        spaces = await client.list_all_spaces()
+    except httpx.HTTPStatusError as e:
+        raise HTTPException(e.response.status_code, f'Confluence error: {e.response.status_code}')
+    finally:
+        await client.close()
+
+    return {
+        'spaces': [
+            {
+                'id': s.get('id'),
+                'key': s.get('key'),
+                'name': s.get('name'),
+                'type': s.get('type'),
+                'cloud_id': cloud_id,
+            }
+            for s in spaces
+        ],
+    }
+
+
+@router.post('/shared/provision')
+async def provision_shared_kb(
+    form_data: ConfluenceProvisionForm,
+    user: UserModel = Depends(get_admin_user),
+) -> dict:
+    """Create (or update) the single shared, public-read Confluence KB.
+
+    Admin-only. Stamps ``shared`` / ``auth_mode`` and the admin-selected
+    ``spaces`` into the KB meta and grants ``user:*:read`` directly via
+    ``AccessGrants`` — bypassing the non-local-type guards in the user
+    knowledge router by not going through it, leaving those guards intact
+    for normal user KBs.
+    """
+    auth_mode = resolve_auth_mode(None)
+    owner_id = (CONFLUENCE_SHARED_KB_OWNER_ID.value or '').strip()
+
+    # The admin-selected spaces, with the basic-mode cloud_id stamped on so
+    # the sync worker can build a per-space source without re-deriving it.
+    basic_site = get_basic_site()
+    selected_spaces = []
+    for space in form_data.spaces:
+        entry = space.model_dump()
+        if not entry.get('cloud_id') and basic_site:
+            entry['cloud_id'] = basic_site['cloud_id']
+        selected_spaces.append(entry)
+
+    # OAuth resolves the sync token by the KB owner — a no-owner shared KB is
+    # only valid with the global basic-auth service credential.
+    if auth_mode == 'oauth' and not owner_id:
+        raise HTTPException(
+            400,
+            'An owner must be selected for the shared Confluence knowledge base when using OAuth authentication.',
+        )
+    if owner_id and not Users.get_user_by_id(owner_id):
+        raise HTTPException(400, 'The configured shared KB owner is not a valid user.')
+
+    kb = _find_shared_kb()
+    if kb:
+        # Reassign the owner if the admin changed the setting.
+        if kb.user_id != owner_id:
+            Knowledges.update_knowledge_user_id_by_id(kb.id, owner_id)
+        meta = kb.meta or {}
+        sync_info = meta.get(_META_KEY, {})
+        sync_info['shared'] = True
+        sync_info['auth_mode'] = auth_mode
+        sync_info['spaces'] = selected_spaces
+        sync_info.pop('sync_all_spaces', None)  # legacy flag — superseded by `spaces`
+        meta[_META_KEY] = sync_info
+        Knowledges.update_knowledge_meta_by_id(kb.id, meta)
+    else:
+        kb = Knowledges.insert_new_knowledge(
+            owner_id,
+            KnowledgeForm(
+                name=_SHARED_KB_NAME,
+                description=_SHARED_KB_DESCRIPTION,
+                type=_PROVIDER_TYPE,
+                access_grants=[],
+            ),
+        )
+        if not kb:
+            raise HTTPException(500, 'Failed to create the shared Confluence knowledge base.')
+        Knowledges.update_knowledge_meta_by_id(
+            kb.id,
+            {
+                _META_KEY: {
+                    'shared': True,
+                    'auth_mode': auth_mode,
+                    'spaces': selected_spaces,
+                    'sources': [],
+                    'status': 'idle',
+                }
+            },
+        )
+
+    # Public read grant — set directly on the model, not via the user router,
+    # so the non-local-type access guards stay in force for regular KBs.
+    AccessGrants.set_access_grants(
+        'knowledge',
+        kb.id,
+        [{'principal_type': 'user', 'principal_id': '*', 'permission': 'read'}],
+    )
+
+    log.info('Shared Confluence KB provisioned: %s (owner=%r)', kb.id, owner_id or '<system>')
+    return _shared_kb_status()
+
+
+async def _run_shared_sync(knowledge_id: str, user_id: str, app):
+    """Background task: run a full sync of the shared KB via the provider."""
+    from open_webui.services.sync.provider import get_sync_provider
+
+    try:
+        provider = get_sync_provider(_PROVIDER_TYPE)
+        await provider.execute_sync(knowledge_id=knowledge_id, user_id=user_id, app=app)
+    except Exception as e:
+        log.exception('Shared Confluence KB sync failed for %s: %s', knowledge_id, e)
+
+
+@router.post('/shared/sync')
+async def sync_shared_kb(
+    fastapi_request: Request,
+    background_tasks: BackgroundTasks,
+    user: UserModel = Depends(get_admin_user),
+) -> dict:
+    """Trigger an immediate full sync of the shared Confluence KB (admin)."""
+    kb = _find_shared_kb()
+    if not kb:
+        raise HTTPException(404, 'No shared Confluence knowledge base has been provisioned.')
+
+    background_tasks.add_task(
+        _run_shared_sync,
+        knowledge_id=kb.id,
+        user_id=kb.user_id,
+        app=fastapi_request.app,
+    )
+    return {'message': 'Sync started', 'knowledge_id': kb.id}
+
+
+@router.delete('/shared')
+async def delete_shared_kb(user: UserModel = Depends(get_admin_user)) -> dict:
+    """Soft-delete the shared Confluence KB (admin-only).
+
+    The shared KB is blocked from deletion via the workspace Knowledge UI
+    (see ``knowledge.py`` ``_assert_not_managed_shared_kb``) — this admin
+    endpoint is the only managed way to remove it. The cleanup worker purges
+    its files and vectors afterwards.
+    """
+    kb = _find_shared_kb()
+    if not kb:
+        raise HTTPException(404, 'No shared Confluence knowledge base has been provisioned.')
+    Knowledges.soft_delete_by_id(kb.id)
+    log.info('Shared Confluence KB deleted: %s', kb.id)
+    return {'message': 'Shared Confluence knowledge base deleted.', 'knowledge_id': kb.id}

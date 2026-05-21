@@ -3154,18 +3154,20 @@ async def non_streaming_chat_response_handler(response, ctx):
                 else:
                     error = str(error)
 
+                # [Gradient] carry the trace id so an error report deep-links to Tempo
+                error_obj = {'content': error, 'trace_id': metadata.get('trace_id')}
                 Chats.upsert_message_to_chat_by_id_and_message_id(
                     metadata['chat_id'],
                     metadata['message_id'],
                     {
-                        'error': {'content': error},
+                        'error': error_obj,
                     },
                 )
                 if isinstance(error, str) or isinstance(error, dict):
                     await event_emitter(
                         {
                             'type': 'chat:message:error',
-                            'data': {'error': {'content': error}},
+                            'data': {'error': error_obj},
                         }
                     )
 
@@ -3746,6 +3748,10 @@ async def streaming_chat_response_handler(response, ctx):
                                     if not choices:
                                         error = data.get('error', {})
                                         if error:
+                                            # [Gradient] tag the provider error
+                                            # with the trace id for feedback reports
+                                            if isinstance(error, dict):
+                                                error['trace_id'] = metadata.get('trace_id')
                                             await event_emitter(
                                                 {
                                                     'type': 'chat:completion',

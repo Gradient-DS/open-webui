@@ -41,6 +41,7 @@
 	import Sparkles from '$lib/components/icons/Sparkles.svelte';
 	import Knobs from '$lib/components/icons/Knobs.svelte';
 	import OneDrive from '$lib/components/icons/OneDrive.svelte';
+	import Confluence from '$lib/components/icons/Confluence.svelte';
 
 	import Chats from './InputMenu/Chats.svelte';
 	import Notes from './InputMenu/Notes.svelte';
@@ -60,6 +61,7 @@
 
 	export let uploadGoogleDriveHandler: Function;
 	export let uploadOneDriveHandler: Function;
+	export let uploadConfluenceHandler: Function = () => {};
 
 	export let onUpload: Function;
 	export let onClose: Function;
@@ -513,6 +515,22 @@
 										{/if}
 									</button>
 								</Tooltip>
+							</button>
+						{/if}
+
+						<!-- Confluence — per-user page picker. Hidden in company-wide
+						     mode, where the shared KB is the only Confluence surface. -->
+						{#if $config?.features?.enable_confluence_integration && $config?.features?.enable_confluence_sync && $config?.features?.confluence_kb_mode !== 'shared'}
+							<button
+								class="flex gap-2 w-full text-left items-center px-3 py-1.5 text-sm cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800/50 rounded-xl"
+								type="button"
+								on:click={() => {
+									show = false;
+									uploadConfluenceHandler();
+								}}
+							>
+								<Confluence className="size-4" />
+								<div class="flex-1 line-clamp-1">{$i18n.t('Confluence')}</div>
 							</button>
 						{/if}
 					{/if}

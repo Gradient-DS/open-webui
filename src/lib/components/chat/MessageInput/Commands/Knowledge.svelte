@@ -16,6 +16,7 @@
 	import Database from '$lib/components/icons/Database.svelte';
 	import OneDrive from '$lib/components/icons/OneDrive.svelte';
 	import GoogleDrive from '$lib/components/icons/GoogleDrive.svelte';
+	import Confluence from '$lib/components/icons/Confluence.svelte';
 	import GlobeAlt from '$lib/components/icons/GlobeAlt.svelte';
 	import Youtube from '$lib/components/icons/Youtube.svelte';
 	import Folder from '$lib/components/icons/Folder.svelte';
@@ -191,6 +192,8 @@
 								<OneDrive className="size-4" />
 							{:else if item.knowledge_type === 'google_drive'}
 								<GoogleDrive className="size-4" />
+							{:else if item.knowledge_type === 'confluence'}
+								<Confluence className="size-4" />
 							{:else}
 								<Database className="size-4" />
 							{/if}
