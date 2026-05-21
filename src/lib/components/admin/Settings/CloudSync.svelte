@@ -78,6 +78,24 @@
 	let statusPollDeadline = 0;
 	let statusPollCount = 0;
 
+	// Live state for the shared-KB Sync button. `isSharedSyncing` is derived
+	// from the backend status too (not just the local flag) so the button
+	// still shows "syncing" + progress after navigating away and back while
+	// a sync is running. `syncProgress` is null until the worker reports a
+	// total (a no-op sync never gets one — it finishes instantly).
+	$: isSharedSyncing = syncingShared || sharedKbStatus?.status === 'syncing';
+	$: syncProgress =
+		(sharedKbStatus?.progress_total ?? 0) > 0
+			? Math.min(
+					100,
+					Math.round(
+						((sharedKbStatus?.progress_current ?? 0) /
+							(sharedKbStatus?.progress_total ?? 1)) *
+							100
+					)
+				)
+			: null;
+
 	// --- Google Drive ---
 	let ENABLE_GOOGLE_DRIVE_INTEGRATION = false;
 	let ENABLE_GOOGLE_DRIVE_SYNC = false;
@@ -647,13 +665,15 @@
 									{#if sharedKbStatus?.provisioned}
 										<button
 											type="button"
-											class="px-3 py-1.5 text-sm rounded-lg bg-gray-100 hover:bg-gray-200 dark:bg-gray-800 dark:hover:bg-gray-700 flex items-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed"
+											class="px-3 py-1.5 h-8 text-sm rounded-lg bg-gray-100 hover:bg-gray-200 dark:bg-gray-800 dark:hover:bg-gray-700 flex items-center justify-center gap-1.5 min-w-40 disabled:opacity-50 disabled:cursor-not-allowed"
 											on:click={syncSharedHandler}
-											disabled={syncingShared || sharedKbStatus?.status === 'syncing'}
+											disabled={isSharedSyncing}
 										>
-											{$i18n.t('Sync now')}
-											{#if syncingShared || sharedKbStatus?.status === 'syncing'}
+											{#if isSharedSyncing}
+												{#if syncProgress !== null}{syncProgress}%{/if}
 												<Spinner className="size-3" />
+											{:else}
+												{$i18n.t('Sync now')}
 											{/if}
 										</button>
 										<button

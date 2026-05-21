@@ -675,6 +675,64 @@ the oauth-requires-owner helper text), shared-KB status strings, provision/sync 
 
 ---
 
+## Phase 3 (addendum): one-click shared-KB attach in the chat `+` menu
+
+Added 21-05-2026 at the user's request. In `shared` mode the per-user Confluence picker
+is hidden from the chat `+` menu, leaving the shared KB reachable only by drilling into
+`+` → "Knowledge database" → the Confluence-typed KB — confusing for end users. This
+addendum surfaces the shared KB as a top-level `+`-menu entry that attaches it in one
+click. **Implemented 21-05-2026.**
+
+### Changes Required
+
+**Backend — `main.py`**: In `get_app_config` (`/api/config`), resolve the shared KB id
+and add `confluence_shared_kb_id` to the `features` block (next to `confluence_kb_mode`).
+Resolved via `confluence_sync._find_shared_kb()` **only** when `CONFLUENCE_KB_MODE ==
+'shared'`; empty string otherwise or when the KB is not yet provisioned. The id is not
+sensitive — the shared KB carries a `user:*:read` grant, so any user can already
+discover it via `getKnowledgeBases`.
+
+**Frontend — `src/lib/stores/index.ts`**: Add the four Confluence `features` fields to
+the `Config` type (`enable_confluence_integration`, `enable_confluence_sync`,
+`confluence_kb_mode`, `confluence_shared_kb_id`) — the first three were used since
+Phase 3 but never typed.
+
+**Frontend — `InputMenu.svelte`**: Add a top-level "Confluence" entry rendered when
+`enable_confluence_integration && enable_confluence_sync && confluence_kb_mode ===
+'shared' && confluence_shared_kb_id`. Mutually exclusive with the per-user picker (which
+requires `confluence_kb_mode !== 'shared'`). On click, `getKnowledgeById` fetches the
+shared KB and `onSelect` attaches it as a `collection` — identical to picking it from
+the "Knowledge database" submenu. Reuses the existing `"Confluence"` i18n key (no new
+strings). The shared KB **also remains** in the "Knowledge database" submenu — the
+top-level entry is an additional shortcut, not a replacement.
+
+No Helm keys (the id is derived, not configured), no DB change, no new i18n strings,
+per-user mode unchanged.
+
+### Success Criteria
+
+#### Automated Verification
+
+- [x] Backend imports without error: `python -c "import open_webui.main"`
+- [x] Errors-only pylint clean on `main.py` (9.96/10; the one `E` is pre-existing at
+      `:2086`, not in changed hunks)
+- [x] Production build succeeds: `npm run build` (built in 56.68s)
+- [x] Type-check introduces no genuine new errors — the `confluence_shared_kb_id`
+      property error is resolved by the `stores/index.ts` type addition; the only
+      remaining hit is the baseline project-wide `$i18n` store-type pattern
+
+#### Manual Verification
+
+- [ ] In `shared` mode with a provisioned KB, the chat `+` menu shows a top-level
+      "Confluence" entry; clicking it attaches the shared KB as a collection
+- [ ] In `per_user` mode the `+` menu still shows the per-user Confluence picker
+      (unchanged); the shared entry is absent
+- [ ] In `shared` mode before provisioning, no Confluence entry appears in `+`
+- [ ] The shared KB still also appears in the `+` → "Knowledge database" submenu
+- [ ] nl-NL UI renders the entry correctly
+
+---
+
 ## Cross-Repo Workstream: Loader-Worker Confluence Source (genai-utils)
 
 **This section is a spec for the `genai-utils` engineer — it is NOT implemented by Phases 1–3.**

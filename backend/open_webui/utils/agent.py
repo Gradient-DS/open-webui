@@ -91,6 +91,16 @@ class AgentPayload:
     # (model.params.system). Variables are pre-substituted upstream so the
     # agent can use the value as-is.
     system_prompt: Optional[str] = None
+    # [Gradient] Conversation-level system prompt — the merged per-chat /
+    # Chat Controls / folder prompt. Distinct from ``system_prompt`` (the
+    # custom-model prompt). Forwarded so the agent composes it into its
+    # system prompt; OpenWebUI also still inlines it into ``messages``.
+    chat_system_prompt: Optional[str] = None
+    # [Gradient] Resolved Open WebUI skills for this turn. Each entry is
+    # {name, description, content, is_selected}. User-selected skills
+    # carry full content for the agent to render; model-attached skills
+    # form a manifest the agent expands on demand via a tool.
+    skills: Optional[list[dict[str, Any]]] = None
     # [Gradient] Generic metadata forwarded as-is to the agent service.
     # Today used for ``user_language`` (UI locale, BCP-47 like "nl-NL")
     # so the agent can resolve the response language. Open-ended so we
@@ -123,6 +133,8 @@ def build_agent_payload(
     tool_ids: Optional[list[str]] = None,
     rag_filter: Optional[dict[str, Any]] = None,
     system_prompt: Optional[str] = None,
+    chat_system_prompt: Optional[str] = None,
+    skills: Optional[list[dict[str, Any]]] = None,
     metadata: Optional[dict[str, Any]] = None,
     **model_params,
 ) -> dict[str, Any]:
@@ -147,6 +159,8 @@ def build_agent_payload(
         tool_ids=tool_ids,
         rag_filter=rag_filter,
         system_prompt=system_prompt,
+        chat_system_prompt=chat_system_prompt,
+        skills=skills,
         metadata=metadata,
         **{k: v for k, v in model_params.items() if v is not None},
     )
@@ -355,6 +369,8 @@ async def call_agent_api(
         tool_ids=metadata.get('tool_ids'),
         rag_filter=metadata.get('rag_filter'),
         system_prompt=metadata.get('system_prompt'),
+        chat_system_prompt=metadata.get('chat_system_prompt'),
+        skills=metadata.get('skills'),
         metadata=agent_metadata or None,
         **model_params,
     )

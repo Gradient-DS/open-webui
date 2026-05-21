@@ -2687,6 +2687,16 @@ async def get_app_config(request: Request):
     if user is None:
         onboarding = user_count == 0
 
+    # Shared Confluence KB id — surfaced so the chat '+' menu can attach the
+    # shared, public-read KB in one click (shared mode only). Empty string
+    # when not in shared mode or the KB has not been provisioned yet.
+    confluence_shared_kb_id = ''
+    if app.state.config.CONFLUENCE_KB_MODE == 'shared':
+        from open_webui.routers.confluence_sync import _find_shared_kb
+
+        _shared_kb = _find_shared_kb()
+        confluence_shared_kb_id = _shared_kb.id if _shared_kb else ''
+
     return {
         **({'onboarding': True} if onboarding else {}),
         'status': True,
@@ -2805,6 +2815,8 @@ async def get_app_config(request: Request):
                     # KB sharing mode — drives whether non-admins see Confluence
                     # self-service create entry points (hidden in 'shared' mode).
                     'confluence_kb_mode': app.state.config.CONFLUENCE_KB_MODE,
+                    # Shared-KB id for the chat '+' menu one-click attach.
+                    'confluence_shared_kb_id': confluence_shared_kb_id,
                     'enable_email_invites': app.state.config.ENABLE_EMAIL_INVITES,
                     'enable_agent_proxy': app.state.config.ENABLE_AGENT_PROXY,
                     'feature_agent_api_enabled': AGENT_API_ENABLED,

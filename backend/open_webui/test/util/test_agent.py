@@ -40,6 +40,8 @@ def test_minimal_payload_omits_optional_fields():
         'session_id',
         'agent',
         'system_prompt',
+        'chat_system_prompt',
+        'skills',
     ):
         assert absent not in payload, f'expected {absent!r} to be absent'
 
@@ -91,6 +93,42 @@ def test_metadata_none_omitted_from_payload():
     """When no metadata is provided the key must be absent from the payload."""
     payload = build_agent_payload(**_base_kwargs(metadata=None))
     assert 'metadata' not in payload
+
+
+def test_chat_system_prompt_present_when_set():
+    """The merged Chat Controls / folder prompt reaches the wire payload."""
+    payload = build_agent_payload(**_base_kwargs(chat_system_prompt='Answer only in Dutch.'))
+    assert payload['chat_system_prompt'] == 'Answer only in Dutch.'
+
+
+def test_chat_system_prompt_absent_when_none():
+    payload = build_agent_payload(**_base_kwargs(chat_system_prompt=None))
+    assert 'chat_system_prompt' not in payload
+
+
+def test_skills_present_when_set():
+    """Resolved skills reach the wire payload as a top-level list."""
+    skills = [
+        {
+            'name': 'Tone Guide',
+            'description': 'how to phrase answers',
+            'content': 'Always answer formally.',
+            'is_selected': True,
+        },
+        {
+            'name': 'Onboarding',
+            'description': 'onboarding steps',
+            'content': 'Step 1...',
+            'is_selected': False,
+        },
+    ]
+    payload = build_agent_payload(**_base_kwargs(skills=skills))
+    assert payload['skills'] == skills
+
+
+def test_skills_absent_when_none():
+    payload = build_agent_payload(**_base_kwargs(skills=None))
+    assert 'skills' not in payload
 
 
 def test_resolve_vision_capable_reads_capability_flag():

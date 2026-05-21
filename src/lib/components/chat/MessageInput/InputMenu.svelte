@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { getContext, tick } from 'svelte';
 	import { fly } from 'svelte/transition';
+	import { toast } from 'svelte-sonner';
 
 	import {
 		config,
@@ -17,6 +18,7 @@
 	import { updateUserSettings } from '$lib/apis/users';
 	import { getTools } from '$lib/apis/tools';
 	import { getOAuthClientAuthorizationUrl } from '$lib/apis/configs';
+	import { getKnowledgeById } from '$lib/apis/knowledge';
 
 	import Dropdown from '$lib/components/common/Dropdown.svelte';
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
@@ -191,6 +193,32 @@
 		tab = '';
 		directTab = false;
 		show = false;
+	};
+
+	// One-click attach of the shared, read-only Confluence KB (shared mode).
+	// The KB carries a user:*:read grant, so getKnowledgeById works for any
+	// user; the resulting collection is identical to picking it from the
+	// Knowledge submenu.
+	const attachSharedConfluenceKb = async () => {
+		const kbId = $config?.features?.confluence_shared_kb_id;
+		if (!kbId) {
+			return;
+		}
+		show = false;
+
+		const kb = await getKnowledgeById(localStorage.token, kbId).catch((error) => {
+			toast.error(`${error}`);
+			return null;
+		});
+		if (!kb) {
+			return;
+		}
+
+		onSelect({
+			...kb,
+			knowledge_type: kb.type,
+			type: 'collection'
+		});
 	};
 
 	// Expose openTab for external use (pinned items in bottom bar)
@@ -528,6 +556,20 @@
 									show = false;
 									uploadConfluenceHandler();
 								}}
+							>
+								<Confluence className="size-4" />
+								<div class="flex-1 line-clamp-1">{$i18n.t('Confluence')}</div>
+							</button>
+						{/if}
+
+						<!-- Confluence (shared mode) — one-click attach of the shared,
+						     read-only KB. Mutually exclusive with the per-user picker
+						     above via the confluence_kb_mode check. -->
+						{#if $config?.features?.enable_confluence_integration && $config?.features?.enable_confluence_sync && $config?.features?.confluence_kb_mode === 'shared' && $config?.features?.confluence_shared_kb_id}
+							<button
+								class="flex gap-2 w-full text-left items-center px-3 py-1.5 text-sm cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800/50 rounded-xl"
+								type="button"
+								on:click={attachSharedConfluenceKb}
 							>
 								<Confluence className="size-4" />
 								<div class="flex-1 line-clamp-1">{$i18n.t('Confluence')}</div>
