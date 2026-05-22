@@ -41,7 +41,12 @@
 			content,
 			timestamp: now(),
 			...(role === 'assistant'
-				? { model: '', modelName: $i18n.t('Assistant Builder'), modelIdx: 0, done: false }
+				? {
+						model: 'Soev Assistant Builder',
+						modelName: 'Soev Assistant Builder',
+						modelIdx: 0,
+						done: false
+					}
 				: {})
 		};
 		if (parentId && history.messages[parentId]) {
@@ -110,9 +115,11 @@
 </script>
 
 <div class="onboarding-chat flex flex-col h-full w-full">
-	<div class="shrink-0 w-full px-5 pt-3 pb-1">
-		<div class="text-lg font-medium">{$i18n.t('Build your assistant')}</div>
-		<div class="text-xs text-gray-400">
+	<div class="shrink-0 flex flex-col gap-1 px-1 mt-1.5 mb-3">
+		<div class="flex items-center text-xl font-medium px-0.5 shrink-0">
+			{$i18n.t('Build your assistant')}
+		</div>
+		<div class="text-xs text-gray-400 px-0.5">
 			{$i18n.t('Answer a few questions and the assistant will be drafted for you.')}
 		</div>
 	</div>
@@ -159,22 +166,16 @@
 </div>
 
 <style>
-	/* Strip the chat message action rows (copy / download / etc.) — the
+	/* Hide the assistant message action row (copy / download) — the
 	   interview transcript is not a savable chat. */
 	:global(.onboarding-chat .buttons) {
 		display: none !important;
 	}
-	:global(.onboarding-chat .group-hover\:visible) {
-		display: none !important;
-	}
 
-	/* Strip the MessageInput toolbar — the + menu, pinned tools, RAG
-	   filter and web-search controls. The interview input is a plain
-	   text box; only the textarea and send button remain. */
-	:global(.onboarding-chat .max-w-\[80\%\]) {
-		display: none !important;
-	}
-	:global(.onboarding-chat #input-menu-button) {
+	/* Empty the MessageInput toolbar (+ menu, pinned tools, RAG filter,
+	   web search) but keep its flex slot, so the send button stays on
+	   the right — like the chat input with every control turned off. */
+	:global(.onboarding-chat .max-w-\[80\%\] > *) {
 		display: none !important;
 	}
 </style>
