@@ -1,6 +1,8 @@
 <script lang="ts">
 	import { getContext, onMount } from 'svelte';
+	import { user } from '$lib/stores';
 	import { streamOnboarding, type OnboardingMessage } from '$lib/apis/onboarding';
+	import Messages from '$lib/components/chat/Messages.svelte';
 
 	const i18n = getContext('i18n');
 
@@ -10,45 +12,90 @@
 	export let onUnavailable: () => void;
 
 	const chatId = `onb-${crypto.randomUUID()}`;
-	let transcript: OnboardingMessage[] = [];
+
+	// agentTranscript = what we send to the agent (includes the hidden seed
+	// turn so the agent has a user message to react to on turn one).
+	// history = the on-screen chat tree rendered by the real Messages
+	// component. The seed turn is intentionally not added to history.
+	let agentTranscript: OnboardingMessage[] = [];
+	let history: { messages: Record<string, any>; currentId: string | null } = {
+		messages: {},
+		currentId: null
+	};
+	let prompt = '';
 	let input = '';
 	let streaming = false;
-	let liveAnswer = '';
+
+	const now = () => Math.floor(Date.now() / 1000);
+
+	/** Append a message node to the history tree; returns its id. */
+	const appendMessage = (role: 'user' | 'assistant', content: string): string => {
+		const id = crypto.randomUUID();
+		const parentId = history.currentId;
+		history.messages[id] = {
+			id,
+			parentId,
+			childrenIds: [],
+			role,
+			content,
+			timestamp: now(),
+			...(role === 'assistant'
+				? { model: '', modelName: $i18n.t('Assistant Builder'), modelIdx: 0, done: false }
+				: {})
+		};
+		if (parentId && history.messages[parentId]) {
+			history.messages[parentId].childrenIds = [
+				...history.messages[parentId].childrenIds,
+				id
+			];
+		}
+		history.currentId = id;
+		history = history; // trigger Svelte reactivity
+		return id;
+	};
 
 	const runTurn = async () => {
 		streaming = true;
-		liveAnswer = '';
+		const assistantId = appendMessage('assistant', '');
 		try {
-			for await (const event of streamOnboarding(localStorage.token, chatId, transcript)) {
+			let answer = '';
+			for await (const event of streamOnboarding(localStorage.token, chatId, agentTranscript)) {
 				if (event.type === 'content') {
-					liveAnswer += event.text;
+					answer += event.text;
+					history.messages[assistantId].content = answer;
+					history = history;
 				} else if (event.type === 'draft') {
 					onComplete(event.draft);
 					return;
 				}
 			}
-			if (liveAnswer.trim() !== '') {
-				transcript = [...transcript, { role: 'assistant', content: liveAnswer }];
+			history.messages[assistantId].content = answer;
+			history.messages[assistantId].done = true;
+			history = history;
+			if (answer.trim() !== '') {
+				agentTranscript = [...agentTranscript, { role: 'assistant', content: answer }];
 			}
 		} catch (e) {
 			console.error('Onboarding agent error:', e);
 			onUnavailable();
 		} finally {
 			streaming = false;
-			liveAnswer = '';
 		}
 	};
 
 	const sendHandler = async () => {
 		if (input.trim() === '' || streaming) return;
-		transcript = [...transcript, { role: 'user', content: input.trim() }];
+		const text = input.trim();
 		input = '';
+		agentTranscript = [...agentTranscript, { role: 'user', content: text }];
+		appendMessage('user', text);
 		await runTurn();
 	};
 
 	onMount(() => {
-		// Open with a fixed prompt so the first turn has user content.
-		transcript = [
+		// Seed turn — sent to the agent but not shown on screen, so the
+		// agent opens the conversation with its first question.
+		agentTranscript = [
 			{
 				role: 'user',
 				content: $i18n.t('I want to create an assistant. Please help me design it.')
@@ -58,50 +105,72 @@
 	});
 </script>
 
-<div class="flex flex-col gap-3 max-w-3xl mx-auto w-full p-1">
-	<div class="text-lg font-medium">{$i18n.t('Build your assistant')}</div>
-	<div class="text-xs text-gray-400">
-		{$i18n.t('Answer a few questions and the assistant will be drafted for you.')}
+<div class="flex flex-col h-full w-full">
+	<div class="max-w-3xl mx-auto w-full px-3 pt-3">
+		<div class="text-lg font-medium">{$i18n.t('Build your assistant')}</div>
+		<div class="text-xs text-gray-400">
+			{$i18n.t('Answer a few questions and the assistant will be drafted for you.')}
+		</div>
 	</div>
 
-	<div class="flex flex-col gap-3 min-h-[12rem]">
-		{#each transcript.slice(1) as msg}
-			<div class="text-sm {msg.role === 'user' ? 'text-right' : ''}">
-				<span
-					class="inline-block rounded-lg px-3 py-2 {msg.role === 'user'
-						? 'bg-gray-100 dark:bg-gray-800'
-						: 'bg-gray-50 dark:bg-gray-850'}"
-				>
-					{msg.content}
-				</span>
-			</div>
-		{/each}
-		{#if streaming && liveAnswer}
-			<div class="text-sm">
-				<span class="inline-block rounded-lg px-3 py-2 bg-gray-50 dark:bg-gray-850">
-					{liveAnswer}
-				</span>
-			</div>
-		{/if}
-		{#if streaming && !liveAnswer}
-			<div class="text-sm text-gray-400">{$i18n.t('Thinking...')}</div>
-		{/if}
-	</div>
-
-	<div class="flex gap-2">
-		<input
-			class="flex-1 rounded-lg px-3 py-2 text-sm bg-gray-50 dark:bg-gray-850 outline-hidden"
-			bind:value={input}
-			disabled={streaming}
-			placeholder={$i18n.t('Type your answer...')}
-			on:keydown={(e) => e.key === 'Enter' && sendHandler()}
+	<div class="flex-1 overflow-auto">
+		<Messages
+			{chatId}
+			user={$user}
+			bind:history
+			bind:prompt
+			selectedModels={['']}
+			atSelectedModel={undefined}
+			autoScroll={true}
+			readOnly={true}
+			sendMessage={() => {}}
+			continueResponse={() => {}}
+			regenerateResponse={() => {}}
+			mergeResponses={() => {}}
+			chatActionHandler={() => {}}
+			showMessage={() => {}}
+			submitMessage={() => {}}
+			addMessages={() => {}}
+			setInputText={() => {}}
 		/>
-		<button
-			class="px-4 py-2 text-sm rounded-lg bg-black text-white dark:bg-white dark:text-black disabled:opacity-50"
-			disabled={streaming || input.trim() === ''}
-			on:click={sendHandler}
+	</div>
+
+	<div class="max-w-3xl mx-auto w-full px-3 pb-4">
+		<div
+			class="flex gap-1 items-end rounded-3xl border border-gray-100 dark:border-gray-800 bg-gray-50 dark:bg-gray-850 px-2.5 py-1.5"
 		>
-			{$i18n.t('Send')}
-		</button>
+			<textarea
+				class="flex-1 bg-transparent outline-hidden resize-none px-2 py-2 text-sm"
+				rows="1"
+				bind:value={input}
+				disabled={streaming}
+				placeholder={$i18n.t('Type your answer...')}
+				on:keydown={(e) => {
+					if (e.key === 'Enter' && !e.shiftKey) {
+						e.preventDefault();
+						sendHandler();
+					}
+				}}
+			></textarea>
+			<button
+				class="rounded-full p-2 bg-black text-white dark:bg-white dark:text-black transition disabled:opacity-40"
+				disabled={streaming || input.trim() === ''}
+				on:click={sendHandler}
+				aria-label={$i18n.t('Send')}
+			>
+				<svg
+					xmlns="http://www.w3.org/2000/svg"
+					viewBox="0 0 20 20"
+					fill="currentColor"
+					class="size-4"
+				>
+					<path
+						fill-rule="evenodd"
+						d="M10 17a.75.75 0 0 1-.75-.75V5.612L5.29 9.77a.75.75 0 0 1-1.08-1.04l5.25-5.5a.75.75 0 0 1 1.08 0l5.25 5.5a.75.75 0 1 1-1.08 1.04l-3.96-4.158V16.25A.75.75 0 0 1 10 17Z"
+						clip-rule="evenodd"
+					/>
+				</svg>
+			</button>
+		</div>
 	</div>
 </div>
