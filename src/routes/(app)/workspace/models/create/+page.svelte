@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { toast } from 'svelte-sonner';
 	import { goto } from '$app/navigation';
+	import { page } from '$app/stores';
 	import { config, models, settings } from '$lib/stores';
 	import { isFeatureEnabled } from '$lib/utils/features';
 	import { WEBUI_BASE_URL } from '$lib/constants';
@@ -17,8 +18,15 @@
 	import { updateUserSettings } from '$lib/apis/users';
 
 	import ModelEditor from '$lib/components/workspace/Models/ModelEditor.svelte';
+	import AssistantWizard from '$lib/components/workspace/Models/AssistantWizard.svelte';
 
 	const i18n = getContext('i18n');
+
+	$: useSimpleBuilder =
+		isFeatureEnabled('simple_assistant_builder') &&
+		$page.url.searchParams.get('advanced') === null;
+
+	const goToAdvanced = () => goto('/workspace/models/create?advanced=true');
 
 	const onSubmit = async (modelInfo) => {
 		if ($models.find((m) => m.id === modelInfo.id)) {
@@ -116,6 +124,10 @@
 	});
 </script>
 
-{#key model}
-	<ModelEditor {model} {onSubmit} />
-{/key}
+{#if useSimpleBuilder}
+	<AssistantWizard {onSubmit} onAdvanced={goToAdvanced} />
+{:else}
+	{#key model}
+		<ModelEditor {model} {onSubmit} />
+	{/key}
+{/if}
