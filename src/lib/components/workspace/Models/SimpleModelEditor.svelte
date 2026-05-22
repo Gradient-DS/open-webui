@@ -12,6 +12,8 @@
 	import Knowledge from './Knowledge.svelte';
 	import CapabilityToggles from './Simple/CapabilityToggles.svelte';
 	import AccessControlModal from '$lib/components/workspace/common/AccessControlModal.svelte';
+	import LockClosed from '$lib/components/icons/LockClosed.svelte';
+	import Cog6 from '$lib/components/icons/Cog6.svelte';
 
 	const i18n = getContext('i18n');
 
@@ -73,6 +75,7 @@
 				web_search: !!draft.capabilities?.web_search,
 				image_generation: !!draft.capabilities?.image_generation,
 				code_interpreter: !!draft.capabilities?.code_interpreter,
+				document_writer: !!draft.capabilities?.document_writer,
 				vision: !!draft.capabilities?.vision,
 				file_upload: !!draft.capabilities?.file_upload,
 				citations: !!draft.capabilities?.citations
@@ -156,18 +159,22 @@
 			<div class="text-lg font-medium">
 				{edit ? $i18n.t('Edit assistant') : $i18n.t('New assistant')}
 			</div>
-			<div class="flex gap-2">
+			<div class="flex gap-1.5">
 				<button
-					class="px-3 py-1.5 text-sm rounded-lg border border-gray-200 dark:border-gray-700"
+					class="bg-gray-50 shrink-0 hover:bg-gray-100 text-black dark:bg-gray-850 dark:hover:bg-gray-800 dark:text-white transition px-2 py-1 rounded-full flex gap-1 items-center"
+					type="button"
 					on:click={() => (showAccessControlModal = true)}
 				>
-					🔒 {$i18n.t('Sharing')}
+					<LockClosed strokeWidth="2.5" className="size-3.5 shrink-0" />
+					<div class="text-sm font-medium shrink-0">{$i18n.t('Sharing')}</div>
 				</button>
 				<button
-					class="px-3 py-1.5 text-sm rounded-lg border border-gray-200 dark:border-gray-700"
+					class="bg-gray-50 shrink-0 hover:bg-gray-100 text-black dark:bg-gray-850 dark:hover:bg-gray-800 dark:text-white transition px-2 py-1 rounded-full flex gap-1 items-center"
+					type="button"
 					on:click={onAdvanced}
 				>
-					⚙️ {$i18n.t('Advanced')}
+					<Cog6 strokeWidth="2.5" className="size-3.5 shrink-0" />
+					<div class="text-sm font-medium shrink-0">{$i18n.t('Advanced')}</div>
 				</button>
 			</div>
 		</div>
@@ -193,7 +200,7 @@
 		<div>
 			<div class="text-xs font-medium text-gray-500 mb-1">{$i18n.t('Instructions')}</div>
 			<textarea
-				class="w-full rounded-lg px-3 py-2 text-sm bg-gray-50 dark:bg-gray-850 outline-hidden resize-none"
+				class="w-full rounded-lg px-3 py-2 text-sm bg-gray-50 dark:bg-gray-850 outline-hidden resize-y min-h-[7rem]"
 				rows="6"
 				bind:value={system}
 				placeholder={$i18n.t('Tell the assistant how it should behave')}

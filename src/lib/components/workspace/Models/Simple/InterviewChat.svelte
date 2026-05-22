@@ -110,7 +110,7 @@
 </script>
 
 <div class="onboarding-chat flex flex-col h-full w-full">
-	<div class="shrink-0 max-w-3xl mx-auto w-full px-3 pt-3">
+	<div class="shrink-0 w-full px-5 pt-3 pb-1">
 		<div class="text-lg font-medium">{$i18n.t('Build your assistant')}</div>
 		<div class="text-xs text-gray-400">
 			{$i18n.t('Answer a few questions and the assistant will be drafted for you.')}
@@ -165,6 +165,16 @@
 		display: none !important;
 	}
 	:global(.onboarding-chat .group-hover\:visible) {
+		display: none !important;
+	}
+
+	/* Strip the MessageInput toolbar — the + menu, pinned tools, RAG
+	   filter and web-search controls. The interview input is a plain
+	   text box; only the textarea and send button remain. */
+	:global(.onboarding-chat .max-w-\[80\%\]) {
+		display: none !important;
+	}
+	:global(.onboarding-chat #input-menu-button) {
 		display: none !important;
 	}
 </style>
