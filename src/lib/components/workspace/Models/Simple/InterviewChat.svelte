@@ -11,6 +11,8 @@
 	export let onComplete: (draft: any) => void;
 	// Fired if the onboarding agent is unreachable.
 	export let onUnavailable: () => void;
+	// Fired when the user opts to skip the interview and set up manually.
+	export let onSkip: () => void;
 
 	const chatId = `onb-${crypto.randomUUID()}`;
 
@@ -26,6 +28,7 @@
 	let selectedModels: [''] = [''];
 	let messageInput: any;
 	let streaming = false;
+	let autoScroll = true;
 
 	const now = () => Math.floor(Date.now() / 1000);
 
@@ -116,8 +119,17 @@
 
 <div class="onboarding-chat flex flex-col h-full w-full">
 	<div class="shrink-0 flex flex-col gap-1 px-1 mt-1.5 mb-3">
-		<div class="flex items-center text-xl font-medium px-0.5 shrink-0">
-			{$i18n.t('Build your assistant')}
+		<div class="flex justify-between items-center">
+			<div class="flex items-center text-xl font-medium px-0.5 shrink-0">
+				{$i18n.t('Build your assistant')}
+			</div>
+			<button
+				class="flex text-xs items-center px-3 py-1.5 rounded-xl bg-gray-50 hover:bg-gray-100 dark:bg-gray-850 dark:hover:bg-gray-800 dark:text-gray-200 transition font-medium shrink-0"
+				type="button"
+				on:click={onSkip}
+			>
+				{$i18n.t('Set up manually')}
+			</button>
 		</div>
 		<div class="text-xs text-gray-400 px-0.5">
 			{$i18n.t('Answer a few questions and the assistant will be drafted for you.')}
@@ -133,7 +145,7 @@
 			{prompt}
 			{selectedModels}
 			atSelectedModel={undefined}
-			autoScroll={true}
+			bind:autoScroll
 			readOnly={true}
 			sendMessage={() => {}}
 			continueResponse={() => {}}
@@ -152,6 +164,7 @@
 			bind:this={messageInput}
 			bind:prompt
 			bind:files
+			bind:autoScroll
 			{history}
 			{selectedModels}
 			atSelectedModel={undefined}

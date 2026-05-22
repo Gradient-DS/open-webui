@@ -14,15 +14,21 @@
 		step = 'review';
 	};
 
-	// Agent unreachable: skip to a blank simple editor (graceful degradation).
-	const handleUnavailable = () => {
+	// Used both when the user skips the interview ("Set up manually") and
+	// when the onboarding agent is unreachable — either way, drop straight
+	// into a blank simple editor.
+	const goToManualSetup = () => {
 		draft = null;
 		step = 'review';
 	};
 </script>
 
 {#if step === 'interview'}
-	<InterviewChat onComplete={handleComplete} onUnavailable={handleUnavailable} />
+	<InterviewChat
+		onComplete={handleComplete}
+		onUnavailable={goToManualSetup}
+		onSkip={goToManualSetup}
+	/>
 {:else}
 	<SimpleModelEditor {draft} model={null} edit={false} {onSubmit} {onAdvanced} />
 {/if}
