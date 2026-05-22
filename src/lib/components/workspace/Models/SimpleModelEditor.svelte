@@ -19,6 +19,8 @@
 	export let model: any = null;
 	// draft = AssistantDraft from the onboarding agent; null when not from the wizard.
 	export let draft: any = null;
+	// initialKnowledge = KBs/files attached during the interview step.
+	export let initialKnowledge: any[] = [];
 	export let edit = false;
 	export let onSubmit: (info: any) => Promise<void> | void;
 	export let onAdvanced: () => void;
@@ -69,6 +71,7 @@
 			description = draft.description ?? '';
 			system = draft.system_prompt ?? '';
 			knowledgeHint = draft.knowledge_hint ?? '';
+			knowledge = initialKnowledge ?? [];
 			toggles = {
 				web_search: !!draft.capabilities?.web_search,
 				image_generation: !!draft.capabilities?.image_generation,

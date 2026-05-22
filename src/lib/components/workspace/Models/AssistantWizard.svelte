@@ -8,6 +8,8 @@
 	// 'interview' -> chat with the onboarding agent; 'review' -> simple editor.
 	let step: 'interview' | 'review' = 'interview';
 	let draft: any = null;
+	// Knowledge attached during the interview — carried into the draft.
+	let interviewKnowledge: any[] = [];
 
 	const handleComplete = (d: any) => {
 		draft = d;
@@ -22,7 +24,18 @@
 </script>
 
 {#if step === 'interview'}
-	<InterviewChat onComplete={handleComplete} onUnavailable={handleUnavailable} />
+	<InterviewChat
+		bind:knowledge={interviewKnowledge}
+		onComplete={handleComplete}
+		onUnavailable={handleUnavailable}
+	/>
 {:else}
-	<SimpleModelEditor {draft} model={null} edit={false} {onSubmit} {onAdvanced} />
+	<SimpleModelEditor
+		{draft}
+		initialKnowledge={interviewKnowledge}
+		model={null}
+		edit={false}
+		{onSubmit}
+		{onAdvanced}
+	/>
 {/if}

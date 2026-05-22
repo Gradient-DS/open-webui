@@ -3,6 +3,7 @@
 	import { user } from '$lib/stores';
 	import { streamOnboarding, type OnboardingMessage } from '$lib/apis/onboarding';
 	import Messages from '$lib/components/chat/Messages.svelte';
+	import Knowledge from '$lib/components/workspace/Models/Knowledge.svelte';
 
 	const i18n = getContext('i18n');
 
@@ -10,13 +11,14 @@
 	export let onComplete: (draft: any) => void;
 	// Fired if the onboarding agent is unreachable.
 	export let onUnavailable: () => void;
+	// Knowledge (KBs / uploaded files) the user attaches during the
+	// interview — carried straight through to the drafted assistant.
+	export let knowledge: any[] = [];
 
 	const chatId = `onb-${crypto.randomUUID()}`;
 
 	// agentTranscript = what we send to the agent (includes the hidden seed
-	// turn so the agent has a user message to react to on turn one).
-	// history = the on-screen chat tree rendered by the real Messages
-	// component. The seed turn is intentionally not added to history.
+	// turn). history = the on-screen chat tree rendered by Messages.svelte.
 	let agentTranscript: OnboardingMessage[] = [];
 	let history: { messages: Record<string, any>; currentId: string | null } = {
 		messages: {},
@@ -105,37 +107,45 @@
 	});
 </script>
 
-<div class="flex flex-col h-full w-full">
-	<div class="max-w-3xl mx-auto w-full px-3 pt-3">
-		<div class="text-lg font-medium">{$i18n.t('Build your assistant')}</div>
-		<div class="text-xs text-gray-400">
-			{$i18n.t('Answer a few questions and the assistant will be drafted for you.')}
+<div class="onboarding-chat flex flex-col h-full w-full overflow-auto">
+	<div class="m-auto w-full max-w-3xl px-3 py-8 flex flex-col gap-4">
+		<div>
+			<div class="text-lg font-medium">{$i18n.t('Build your assistant')}</div>
+			<div class="text-xs text-gray-400">
+				{$i18n.t('Answer a few questions and the assistant will be drafted for you.')}
+			</div>
 		</div>
-	</div>
 
-	<div class="flex-1 overflow-auto">
-		<Messages
-			{chatId}
-			user={$user}
-			bind:history
-			bind:prompt
-			selectedModels={['']}
-			atSelectedModel={undefined}
-			autoScroll={true}
-			readOnly={true}
-			sendMessage={() => {}}
-			continueResponse={() => {}}
-			regenerateResponse={() => {}}
-			mergeResponses={() => {}}
-			chatActionHandler={() => {}}
-			showMessage={() => {}}
-			submitMessage={() => {}}
-			addMessages={() => {}}
-			setInputText={() => {}}
-		/>
-	</div>
+		<div class="min-h-[6rem]">
+			<Messages
+				{chatId}
+				className="w-full"
+				user={$user}
+				bind:history
+				bind:prompt
+				selectedModels={['']}
+				atSelectedModel={undefined}
+				autoScroll={true}
+				readOnly={true}
+				sendMessage={() => {}}
+				continueResponse={() => {}}
+				regenerateResponse={() => {}}
+				mergeResponses={() => {}}
+				chatActionHandler={() => {}}
+				showMessage={() => {}}
+				submitMessage={() => {}}
+				addMessages={() => {}}
+				setInputText={() => {}}
+			/>
+		</div>
 
-	<div class="max-w-3xl mx-auto w-full px-3 pb-4">
+		<div class="flex flex-col gap-1.5">
+			<div class="text-xs font-medium text-gray-500">
+				{$i18n.t('Knowledge for the assistant')}
+			</div>
+			<Knowledge bind:selectedItems={knowledge} />
+		</div>
+
 		<div
 			class="flex gap-1 items-end rounded-3xl border border-gray-100 dark:border-gray-800 bg-gray-50 dark:bg-gray-850 px-2.5 py-1.5"
 		>
@@ -174,3 +184,14 @@
 		</div>
 	</div>
 </div>
+
+<style>
+	/* Strip the chat message action rows (copy / download / etc.) — the
+	   interview transcript is not a savable chat. */
+	:global(.onboarding-chat .buttons) {
+		display: none !important;
+	}
+	:global(.onboarding-chat .group-hover\:visible) {
+		display: none !important;
+	}
+</style>
