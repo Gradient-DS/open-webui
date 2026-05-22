@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { getContext, onMount, tick } from 'svelte';
 	import { toast } from 'svelte-sonner';
-	import { models, user } from '$lib/stores';
+	import { config, models, user } from '$lib/stores';
 	import { WEBUI_BASE_URL } from '$lib/constants';
 	import {
 		togglesFromMeta,
@@ -115,12 +115,14 @@
 		info.meta = info.meta ?? {};
 		info.params = info.params ?? {};
 
-		// On create, default the base model to the first model the user
-		// can see that is itself a base (non-preset, non-arena). Advanced
-		// lets power users change it.
+		// On create, default the base model to the deployment-configured
+		// SIMPLE_ASSISTANT_BUILDER_BASE_MODEL; if that is unset, fall back
+		// to the first non-preset model the user can see. Advanced lets
+		// power users change it.
 		if (!edit && !info.base_model_id) {
-			const base = $models.find((m: any) => !m?.preset && !(m?.arena ?? false));
-			info.base_model_id = base?.id ?? null;
+			const configured = ($config?.features as any)?.simple_assistant_builder_base_model;
+			const fallback = $models.find((m: any) => !m?.preset && !(m?.arena ?? false));
+			info.base_model_id = configured || fallback?.id || null;
 		}
 
 		info.meta.profile_image_url = profileImageUrl;

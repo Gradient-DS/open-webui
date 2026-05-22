@@ -1883,6 +1883,9 @@ FEATURE_SKILLS = os.environ.get('FEATURE_SKILLS', 'False').lower() == 'true'
 FEATURE_WEBPAGE_URL = os.environ.get('FEATURE_WEBPAGE_URL', 'True').lower() == 'true'
 FEATURE_REFERENCE_CHATS = os.environ.get('FEATURE_REFERENCE_CHATS', 'True').lower() == 'true'
 FEATURE_SIMPLE_ASSISTANT_BUILDER = os.environ.get('FEATURE_SIMPLE_ASSISTANT_BUILDER', 'True').lower() == 'true'
+# Base model new assistants from the simple builder are created on. Empty
+# falls back to the first non-preset model the user can see.
+SIMPLE_ASSISTANT_BUILDER_BASE_MODEL = os.environ.get('SIMPLE_ASSISTANT_BUILDER_BASE_MODEL', '')
 FEATURE_INPUT_MENU = os.environ.get('FEATURE_INPUT_MENU', 'True').lower() == 'true'
 FEATURE_TEMPORARY_CHAT = os.environ.get('FEATURE_TEMPORARY_CHAT', 'True').lower() == 'true'
 FEATURE_TOOL_SERVERS = os.environ.get('FEATURE_TOOL_SERVERS', 'False').lower() == 'true'
