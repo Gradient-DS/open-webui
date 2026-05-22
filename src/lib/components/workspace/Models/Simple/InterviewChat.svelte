@@ -1,6 +1,5 @@
 <script lang="ts">
 	import { getContext, onMount } from 'svelte';
-	import { v4 as uuidv4 } from 'uuid';
 	import { streamOnboarding, type OnboardingMessage } from '$lib/apis/onboarding';
 
 	const i18n = getContext('i18n');
@@ -10,7 +9,7 @@
 	// Fired if the onboarding agent is unreachable.
 	export let onUnavailable: () => void;
 
-	const chatId = `onb-${uuidv4()}`;
+	const chatId = `onb-${crypto.randomUUID()}`;
 	let transcript: OnboardingMessage[] = [];
 	let input = '';
 	let streaming = false;

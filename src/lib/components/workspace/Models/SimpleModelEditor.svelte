@@ -197,7 +197,7 @@
 				rows="6"
 				bind:value={system}
 				placeholder={$i18n.t('Tell the assistant how it should behave')}
-			/>
+			></textarea>
 		</div>
 
 		<div>
