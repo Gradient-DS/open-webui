@@ -221,7 +221,9 @@
 			{#if knowledgeHint}
 				<div class="text-xs text-gray-400 mb-2">💡 {knowledgeHint}</div>
 			{/if}
-			<Knowledge bind:selectedItems={knowledge} />
+			<Knowledge bind:selectedItems={knowledge}>
+				<svelte:fragment slot="label" />
+			</Knowledge>
 		</div>
 
 		<div>

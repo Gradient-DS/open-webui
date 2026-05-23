@@ -159,7 +159,7 @@
 		/>
 	</div>
 
-	<div class="shrink-0 max-w-3xl mx-auto w-full px-3 pb-3">
+	<div class="shrink-0 w-full pb-3">
 		<MessageInput
 			bind:this={messageInput}
 			bind:prompt
