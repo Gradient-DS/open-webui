@@ -220,6 +220,8 @@
 			{selectedModels}
 			atSelectedModel={undefined}
 			bind:autoScroll
+			topPadding={true}
+			bottomPadding={true}
 			readOnly={true}
 			sendMessage={() => {}}
 			continueResponse={() => {}}

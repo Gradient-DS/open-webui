@@ -78,7 +78,13 @@
 				}
 
 				toast.success($i18n.t('Model created successfully!'));
-				await goto('/workspace/models');
+				// Land on the edit page for the just-created assistant
+				// rather than the models list. Pairs with the simple
+				// builder's auto-save on entry — the wizard auto-saves
+				// then we transition into a saved/edit view where the
+				// Share button is visible and the Save button only
+				// reappears after real edits.
+				await goto(`/workspace/models/edit?id=${encodeURIComponent(modelInfo.id)}`);
 			}
 		}
 	};

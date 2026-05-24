@@ -27,6 +27,18 @@
 
 	let loaded = false;
 	let loading = false;
+	// Snapshot of the field values at "saved" baseline. After onMount
+	// it's the just-loaded edit / draft values; after a successful save
+	// it's the values that were just persisted. isDirty diffs the live
+	// snapshot against this baseline to drive the Save button.
+	let savedSnapshot: string | null = null;
+	// Whether the assistant has been saved at least once in this
+	// session — drives Share button visibility (we don't want Share to
+	// appear before there's anything to share).
+	let hasBeenSaved = false;
+	// True from the moment we kick off the auto-save until the parent
+	// navigates away. Prevents the auto-save from firing twice.
+	let autoSaving = false;
 
 	// Edited-in-the-simple-view fields:
 	let id = '';
@@ -93,8 +105,48 @@
 			};
 		}
 		await tick();
+		savedSnapshot = _snapshot();
+		hasBeenSaved = !!model;
 		loaded = true;
+
+		// Auto-save when entering with a fresh interview draft so the
+		// assistant exists immediately. Manual saves only appear after
+		// real edits — see ``isDirty`` and the Save-button conditional
+		// below. The parent's onSubmit handles navigation to the edit
+		// page on success.
+		if (draft && !edit && !model) {
+			autoSaving = true;
+			submitHandler();
+		}
 	});
+
+	/** Serialise the editable fields for dirty-state diffing. */
+	const _snapshot = () =>
+		JSON.stringify({
+			id,
+			name,
+			description,
+			system,
+			profileImageUrl,
+			knowledge,
+			toggles,
+			accessGrants
+		});
+
+	// Reactive dirty state — recomputes whenever any tracked field
+	// changes. When savedSnapshot is null (mid-mount) we treat as not
+	// dirty so the button doesn't flash in.
+	$: liveSnapshot = JSON.stringify({
+		id,
+		name,
+		description,
+		system,
+		profileImageUrl,
+		knowledge,
+		toggles,
+		accessGrants
+	});
+	$: isDirty = savedSnapshot !== null && liveSnapshot !== savedSnapshot;
 
 	const submitHandler = async () => {
 		if (name.trim() === '') {
@@ -151,6 +203,14 @@
 		info.access_grants = accessGrants;
 
 		await onSubmit(info);
+		// Reset the dirty baseline to the values we just persisted, so
+		// the Save button disappears until the user makes a new edit.
+		// The parent's onSubmit typically navigates after creating, so
+		// this often won't be observed for the auto-save path — but it
+		// keeps the dirty model consistent for the manual-save path too.
+		savedSnapshot = _snapshot();
+		hasBeenSaved = true;
+		autoSaving = false;
 		loading = false;
 	};
 </script>
@@ -172,14 +232,16 @@
 				{edit ? $i18n.t('Edit assistant') : $i18n.t('New assistant')}
 			</div>
 			<div class="flex gap-1.5">
-				<button
-					class="bg-gray-50 shrink-0 hover:bg-gray-100 text-black dark:bg-gray-850 dark:hover:bg-gray-800 dark:text-white transition px-2 py-1 rounded-full flex gap-1 items-center"
-					type="button"
-					on:click={() => (showAccessControlModal = true)}
-				>
-					<LockClosed strokeWidth="2.5" className="size-3.5 shrink-0" />
-					<div class="text-sm font-medium shrink-0">{$i18n.t('Sharing')}</div>
-				</button>
+				{#if edit || hasBeenSaved}
+					<button
+						class="bg-gray-50 shrink-0 hover:bg-gray-100 text-black dark:bg-gray-850 dark:hover:bg-gray-800 dark:text-white transition px-2 py-1 rounded-full flex gap-1 items-center"
+						type="button"
+						on:click={() => (showAccessControlModal = true)}
+					>
+						<LockClosed strokeWidth="2.5" className="size-3.5 shrink-0" />
+						<div class="text-sm font-medium shrink-0">{$i18n.t('Sharing')}</div>
+					</button>
+				{/if}
 				<button
 					class="bg-gray-50 shrink-0 hover:bg-gray-100 text-black dark:bg-gray-850 dark:hover:bg-gray-800 dark:text-white transition px-2 py-1 rounded-full flex gap-1 items-center"
 					type="button"
@@ -234,14 +296,16 @@
 			<CapabilityToggles bind:toggles />
 		</div>
 
-		<div class="flex justify-end">
-			<button
-				class="px-4 py-2 text-sm rounded-lg bg-black text-white dark:bg-white dark:text-black disabled:opacity-50"
-				disabled={loading}
-				on:click={submitHandler}
-			>
-				{loading ? $i18n.t('Saving...') : $i18n.t('Save')}
-			</button>
-		</div>
+		{#if isDirty || loading || autoSaving}
+			<div class="flex justify-end">
+				<button
+					class="px-4 py-2 text-sm rounded-lg bg-black text-white dark:bg-white dark:text-black disabled:opacity-50"
+					disabled={loading || autoSaving}
+					on:click={submitHandler}
+				>
+					{loading || autoSaving ? $i18n.t('Saving...') : $i18n.t('Save')}
+				</button>
+			</div>
+		{/if}
 	</div>
 {/if}
