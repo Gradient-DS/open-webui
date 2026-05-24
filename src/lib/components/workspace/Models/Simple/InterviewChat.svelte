@@ -146,7 +146,7 @@
 	});
 </script>
 
-<div class="onboarding-chat flex flex-col h-full w-full">
+<div id="chat-pane" class="onboarding-chat flex flex-col h-full w-full">
 	<div class="shrink-0 flex flex-col gap-1 px-1 mt-1.5 mb-3">
 		<div class="flex justify-between items-center">
 			<div class="flex items-center text-xl font-medium px-0.5 shrink-0">
