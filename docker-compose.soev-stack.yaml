@@ -3,15 +3,18 @@
 # One copy per active feature-branch worktree, brought up by
 # scripts/stack/stack.py alongside the genai-utils per-stack compose.
 #
-# Ports are intentionally NOT published. With OrbStack, host processes
-# (OWUI BE on host, agent on host) reach these containers via DNS:
-#   postgres.stack-N.orb.local:5432
-#   weaviate.stack-N.orb.local:8080
-#   weaviate.stack-N.orb.local:50051  (gRPC)
+# Ports are published to per-stack-allocated host ports so the stack
+# manager works on plain Docker (no OrbStack DNS magic required). Host
+# processes (OWUI BE on host, agent on host) reach these via:
+#   postgres → localhost:${POSTGRES_PORT}
+#   weaviate → localhost:${WEAVIATE_HTTP_PORT}  (HTTP)
+#   weaviate → localhost:${WEAVIATE_GRPC_PORT}  (gRPC)
+# Port values come from .env.stack-N (env_builder writes them, the
+# stack manager passes the file via `docker compose --env-file`).
 #
 # Image versions and credentials match docker-compose.soev-dev.yaml so
 # the OWUI backend running on the host can use identical DATABASE_URL /
-# Weaviate connection settings — just swap host names per stack via
+# Weaviate connection settings — just swap port numbers per stack via
 # the env-builder-generated .env.stack-N.
 #
 # Legacy single-stack flow continues to use docker-compose.soev-dev.yaml.
@@ -29,6 +32,9 @@ services:
       CLUSTER_HOSTNAME: node1
       OBJECTS_TTL_DELETE_SCHEDULE: "@every 5m"
       LOG_LEVEL: info
+    ports:
+      - "${WEAVIATE_HTTP_PORT:?must be set per-stack in .env.stack-N}:8080"
+      - "${WEAVIATE_GRPC_PORT:?must be set per-stack in .env.stack-N}:50051"
     volumes:
       - weaviate-data:/var/lib/weaviate
     healthcheck:
@@ -45,6 +51,8 @@ services:
       POSTGRES_DB: openwebui
       POSTGRES_USER: openwebui
       POSTGRES_PASSWORD: dev_password
+    ports:
+      - "${POSTGRES_PORT:?must be set per-stack in .env.stack-N}:5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U openwebui -d openwebui"]
       interval: 2s
