@@ -25,6 +25,27 @@ describe('interpretOnboardingEvent', () => {
 		expect(result).toEqual({ type: 'draft', draft });
 	});
 
+	it('parses a present_ui event as a ui_block', () => {
+		const props = { id: 'q1', options: ['A', 'B', 'C'], question: 'Pick?' };
+		const result = interpretOnboardingEvent({
+			event: 'present_ui',
+			data: JSON.stringify({ name: 'choice', props })
+		});
+		expect(result).toEqual({ type: 'ui_block', name: 'choice', props });
+	});
+
+	it('returns null for a present_ui event missing name or props', () => {
+		expect(
+			interpretOnboardingEvent({ event: 'present_ui', data: JSON.stringify({ name: 'choice' }) })
+		).toBeNull();
+		expect(
+			interpretOnboardingEvent({
+				event: 'present_ui',
+				data: JSON.stringify({ props: { id: 'x' } })
+			})
+		).toBeNull();
+	});
+
 	it('returns null for an unparseable or empty event', () => {
 		expect(interpretOnboardingEvent({ event: 'message', data: 'not json' })).toBeNull();
 		expect(
