@@ -1,6 +1,6 @@
 <script lang="ts">
-	import { getContext, onMount } from 'svelte';
-	import { user } from '$lib/stores';
+	import { getContext, onDestroy, onMount } from 'svelte';
+	import { submitPromptSignal, user } from '$lib/stores';
 	import { streamOnboarding, type OnboardingMessage } from '$lib/apis/onboarding';
 	import Messages from '$lib/components/chat/Messages.svelte';
 	import MessageInput from '$lib/components/chat/MessageInput.svelte';
@@ -73,6 +73,15 @@
 					answer += event.text;
 					history.messages[assistantId].content = answer;
 					history = history;
+				} else if (event.type === 'ui_block') {
+					const block = {
+						id: crypto.randomUUID(),
+						name: event.name,
+						props: event.props
+					};
+					const existing = history.messages[assistantId].uiBlocks ?? [];
+					history.messages[assistantId].uiBlocks = [...existing, block];
+					history = history;
 				} else if (event.type === 'draft') {
 					onComplete(event.draft);
 					return;
@@ -114,6 +123,26 @@
 			}
 		];
 		runTurn();
+	});
+
+	// Forward ChoiceBlock clicks (which write to the global
+	// submitPromptSignal store) into the interview turn loop.
+	// Stale signals from a previous Chat-route interaction are filtered
+	// with a monotonic timestamp cursor: we only honor signals strictly
+	// newer than this component's mount time.
+	const subscribedAt = Date.now();
+	const unsubscribeChoice = submitPromptSignal.subscribe((signal) => {
+		if (!signal || !signal.text || signal.ts <= subscribedAt) return;
+		if (streaming) return;
+		const text = signal.text;
+		// Reset the store so a re-subscribe (e.g. HMR) doesn't re-fire,
+		// and so subsequent listeners don't see this same click.
+		submitPromptSignal.set(null);
+		handleSubmit(text);
+	});
+
+	onDestroy(() => {
+		unsubscribeChoice();
 	});
 </script>
 
