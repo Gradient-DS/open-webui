@@ -32,6 +32,26 @@
 
 	const now = () => Math.floor(Date.now() / 1000);
 
+	/**
+	 * Handles MessageInput's onUpload callback. Knowledge / Notes /
+	 * Reference Chats picks go through InputMenu's bind:files directly
+	 * — they don't reach onUpload. This handler catches external
+	 * integration callbacks (webpage URL, Google Drive, OneDrive,
+	 * Confluence) and accepts any payload that already looks like a
+	 * chat-files item; full upload pipelines (google-drive file
+	 * download, web-page index) are out of scope for the interview
+	 * MVP and silently no-op.
+	 */
+	const handleOnUpload = (e: { type?: string; data?: any } | any) => {
+		if (!e || !e.type) return;
+		const data = e.data;
+		if (Array.isArray(data)) {
+			files = [...files, ...data];
+		} else if (data && typeof data === 'object' && data.id) {
+			files = [...files, data];
+		}
+	};
+
 	/** Append a message node to the history tree; returns its id. */
 	const appendMessage = (role: 'user' | 'assistant', content: string): string => {
 		const id = crypto.randomUUID();
@@ -199,7 +219,7 @@
 			atSelectedModel={undefined}
 			createMessagePair={() => {}}
 			stopResponse={() => {}}
-			onUpload={() => {}}
+			onUpload={handleOnUpload}
 			onChange={() => {}}
 			placeholder={$i18n.t('Type your answer...')}
 			on:submit={(e) => handleSubmit(e.detail)}
