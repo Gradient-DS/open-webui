@@ -70,6 +70,9 @@
 			id = slugify(name);
 			description = draft.description ?? '';
 			system = draft.system_prompt ?? '';
+			// Interview-time attachments (KBs picked + files uploaded
+			// in the InterviewChat) ride along on draft.knowledge.
+			knowledge = draft.knowledge ?? [];
 			knowledgeHint = draft.knowledge_hint ?? '';
 			toggles = {
 				web_search: !!draft.capabilities?.web_search,
