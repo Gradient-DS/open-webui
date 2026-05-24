@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { getContext, onDestroy, onMount } from 'svelte';
+	import { getContext, onDestroy, onMount, tick } from 'svelte';
 	import { submitPromptSignal, user } from '$lib/stores';
 	import { streamOnboarding, type OnboardingMessage } from '$lib/apis/onboarding';
 	import Messages from '$lib/components/chat/Messages.svelte';
@@ -107,6 +107,13 @@
 					const existing = history.messages[assistantId].uiBlocks ?? [];
 					history.messages[assistantId].uiBlocks = [...existing, block];
 					history = history;
+					// The content-driven triggerScroll in Messages.svelte
+					// won't fire for a ui_block push (no content change),
+					// so we scroll our own container after the next tick.
+					tick().then(() => {
+						const el = document.getElementById('messages-container');
+						if (el) el.scrollTop = el.scrollHeight;
+					});
 				} else if (event.type === 'draft') {
 					// Forward the user's interview-time attachments as
 					// the draft's knowledge list. SimpleModelEditor picks
@@ -198,7 +205,7 @@
 		</div>
 	</div>
 
-	<div class="flex-1 overflow-auto">
+	<div id="messages-container" class="flex-1 overflow-auto">
 		<Messages
 			{chatId}
 			className="w-full"
