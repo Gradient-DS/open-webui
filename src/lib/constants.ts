@@ -3,7 +3,14 @@ import { browser, dev } from '$app/environment';
 
 export const APP_NAME = 'Open WebUI';
 
-export const WEBUI_HOSTNAME = browser ? (dev ? `${location.hostname}:8080` : ``) : '';
+// In dev mode use the page's own host so client-side fetches go
+// same-origin and Vite's proxy handles routing to the BE. Avoids
+// cross-port CORS (which the previous `:8080` hardcode triggered)
+// and lets soev's multi-stack dev workflow work without any
+// FE config knobs — Vite proxy is the single place that knows the
+// per-stack BE port. Prod stays empty (FE and BE share an origin
+// when served from the backend).
+export const WEBUI_HOSTNAME = browser ? (dev ? location.host : ``) : '';
 export const WEBUI_BASE_URL = browser ? (dev ? `http://${WEBUI_HOSTNAME}` : ``) : ``;
 export const WEBUI_API_BASE_URL = `${WEBUI_BASE_URL}/api/v1`;
 

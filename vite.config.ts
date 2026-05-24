@@ -21,13 +21,20 @@ export default defineConfig({
 		APP_BUILD_HASH: JSON.stringify(process.env.APP_BUILD_HASH || 'dev-build')
 	},
 	server: {
-		proxy: {
-			'/api': 'http://localhost:8080',
-			'/ollama': 'http://localhost:8080',
-			'/openai': 'http://localhost:8080',
-			'/oauth': 'http://localhost:8080',
-			'/static': 'http://localhost:8080'
-		}
+		// Proxy target is env-driven so soev's multi-stack dev workflow
+		// (stack-N runs OWUI BE on an allocated port like 18180) works
+		// without a config fork. Defaults to 8080 — the standard
+		// `open-webui dev` port — for non-multi-stack invocations.
+		proxy: (() => {
+			const target = `http://localhost:${process.env.OWUI_BE_PORT || '8080'}`;
+			return {
+				'/api': target,
+				'/ollama': target,
+				'/openai': target,
+				'/oauth': target,
+				'/static': target
+			};
+		})()
 	},
 	build: {
 		sourcemap: true
