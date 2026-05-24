@@ -1,0 +1,59 @@
+# Per-stack OWUI stateful services for soev multi-stack dev mode.
+#
+# One copy per active feature-branch worktree, brought up by
+# scripts/stack/stack.py alongside the genai-utils per-stack compose.
+#
+# Ports are intentionally NOT published. With OrbStack, host processes
+# (OWUI BE on host, agent on host) reach these containers via DNS:
+#   postgres.stack-N.orb.local:5432
+#   weaviate.stack-N.orb.local:8080
+#   weaviate.stack-N.orb.local:50051  (gRPC)
+#
+# Image versions and credentials match docker-compose.soev-dev.yaml so
+# the OWUI backend running on the host can use identical DATABASE_URL /
+# Weaviate connection settings — just swap host names per stack via
+# the env-builder-generated .env.stack-N.
+#
+# Legacy single-stack flow continues to use docker-compose.soev-dev.yaml.
+
+name: stack
+
+services:
+  weaviate:
+    image: semitechnologies/weaviate:1.35.0
+    environment:
+      QUERY_DEFAULTS_LIMIT: 25
+      AUTHENTICATION_ANONYMOUS_ACCESS_ENABLED: "true"
+      PERSISTENCE_DATA_PATH: /var/lib/weaviate
+      DEFAULT_VECTORIZER_MODULE: none
+      CLUSTER_HOSTNAME: node1
+      OBJECTS_TTL_DELETE_SCHEDULE: "@every 5m"
+      LOG_LEVEL: info
+    volumes:
+      - weaviate-data:/var/lib/weaviate
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8080/v1/.well-known/ready"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    restart: unless-stopped
+
+  postgres:
+    image: postgres:15
+    environment:
+      POSTGRES_DB: openwebui
+      POSTGRES_USER: openwebui
+      POSTGRES_PASSWORD: dev_password
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U openwebui -d openwebui"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    restart: unless-stopped
+
+volumes:
+  weaviate-data: {}
+  postgres-data: {}
