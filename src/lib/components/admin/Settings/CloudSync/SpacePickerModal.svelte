@@ -133,7 +133,7 @@
 						<div class="text-xs text-gray-500 py-4 text-center">
 							{availableSpaces.length
 								? $i18n.t('No spaces match your search.')
-								: $i18n.t('No Confluence spaces are visible to the service account.')}
+								: $i18n.t('No Confluence spaces are available.')}
 						</div>
 					{/each}
 				</div>

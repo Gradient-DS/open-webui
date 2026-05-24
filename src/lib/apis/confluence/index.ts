@@ -146,19 +146,34 @@ export function testConfluenceConnection(
 // Shared full-content KB (admin)
 // ─────────────────────────────────────────────────────────────────────
 
-// A Confluence space the admin can opt into the shared knowledge base.
+// One Confluence space, page, or page-subtree opted into the shared knowledge
+// base. The type name is kept for back-compat — entries can be spaces or pages,
+// discriminated by ``type`` (defaults to ``'space'`` for legacy payloads).
+// Shape matches ``SyncItem`` (per-user picker output) so the same picker feeds
+// both flows.
 export interface ConfluenceSharedKbSpace {
-	id: string;
+	type?: 'space' | 'page' | null;
+	// Legacy alias for space items — older payloads sent {id, key, name, cloud_id}.
+	id?: string | null;
 	key?: string | null;
 	name?: string | null;
-	type?: string | null;
 	cloud_id?: string | null;
+	space_id?: string | null;
+	space_key?: string | null;
+	site_url?: string | null;
+	item_id?: string | null;
+	item_path?: string | null;
+	include_descendants?: boolean | null;
 }
 
 export interface ConfluenceSharedKbStatus {
 	kb_mode: string;
 	auth_mode: string;
-	configured_owner_id: string;
+	// Whether the account the shared sync will run with has connected — basic
+	// auth: the service credential is configured; oauth: the effective owner
+	// (``kb.user_id`` if provisioned, else the calling admin) has a stored
+	// token.
+	owner_connected?: boolean;
 	provisioned: boolean;
 	knowledge_id: string | null;
 	owner_id?: string;
@@ -181,8 +196,9 @@ export function getConfluenceSharedKbStatus(token: string): Promise<ConfluenceSh
 	});
 }
 
-// List the Confluence spaces available for the shared KB (company-wide mode).
-// Enumerates every space the basic-auth service account can see.
+// List the Confluence spaces available for the shared KB (pre-synced mode).
+// Basic auth: every space the service account can see. OAuth: every space the
+// configured owner's token can reach.
 export function getConfluenceSharedKbSpaces(
 	token: string
 ): Promise<{ spaces: ConfluenceSharedKbSpace[] }> {
@@ -192,11 +208,15 @@ export function getConfluenceSharedKbSpaces(
 }
 
 // Create (or update) the single shared, public-read Confluence KB. Reads the
-// saved owner / auth_mode config — save the form before calling — and stamps
-// the passed-in space selection (opt-in) into the KB.
+// saved auth_mode config — save the form before calling — and stamps the
+// passed-in item selection (opt-in) into the KB. ``ownerUserId`` carries the
+// basic-mode owner pick ('' = system-owned); ignored in OAuth mode where the
+// calling admin is implicitly the owner (only their stored token can run the
+// sync).
 export function provisionConfluenceSharedKb(
 	token: string,
-	spaces: ConfluenceSharedKbSpace[] = []
+	spaces: ConfluenceSharedKbSpace[] = [],
+	ownerUserId: string | null = null
 ): Promise<ConfluenceSharedKbStatus> {
 	return apiFetch(`${base}/shared/provision`, {
 		method: 'POST',
@@ -204,7 +224,7 @@ export function provisionConfluenceSharedKb(
 			Authorization: `Bearer ${token}`,
 			'Content-Type': 'application/json'
 		},
-		body: JSON.stringify({ spaces })
+		body: JSON.stringify({ spaces, owner_user_id: ownerUserId })
 	});
 }
 

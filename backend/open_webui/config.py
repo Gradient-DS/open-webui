@@ -3055,15 +3055,11 @@ CONFLUENCE_KB_MODE = PersistentConfig(
     os.environ.get('CONFLUENCE_KB_MODE', 'per_user'),
 )
 
-# Owner of the shared Confluence KB — a user id, or '' for a system-owned KB
-# with no human owner. A no-owner shared KB is only valid with basic auth
-# (the service credential is global); OAuth needs an owner whose token the
-# scheduler resolves. Enforced by the shared-KB provisioning endpoint.
-CONFLUENCE_SHARED_KB_OWNER_ID = PersistentConfig(
-    'CONFLUENCE_SHARED_KB_OWNER_ID',
-    'confluence.shared_kb_owner_id',
-    os.environ.get('CONFLUENCE_SHARED_KB_OWNER_ID', ''),
-)
+# Note: The shared Confluence KB owner is intrinsic to the KB row
+# (``kb.user_id``) — there is no separate PersistentConfig. In OAuth the
+# owner is implicitly the admin who provisions; in basic mode the admin
+# picks one (or leaves it system-owned) via the provision form. The
+# scheduler resolves the sync token from ``kb.user_id``.
 
 
 ####################################

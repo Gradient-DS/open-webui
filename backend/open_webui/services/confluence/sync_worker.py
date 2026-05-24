@@ -253,62 +253,78 @@ class ConfluenceSyncWorker(BaseSyncWorker):
         return await super().sync()
 
     async def _resolve_shared_kb_sources(self) -> None:
-        """Rebuild ``self.sources`` from the admin-selected Confluence spaces.
+        """Rebuild ``self.sources`` from the admin-selected Confluence items.
 
-        The shared KB syncs only the spaces an admin explicitly opted into
-        via the Cloud Sync tab (stored in ``confluence_sync.spaces``). Each
-        selected space becomes a ``folder`` source. Delta state (``page_map``
-        / ``last_sync_at``) is carried over from the previously persisted
-        per-space sources so steady-state syncs still only re-process changed
-        pages. A space removed from the selection keeps its old source for
-        one more run, so base_worker's ``_verify_source_access`` →
-        ``_handle_revoked_source`` flow removes its files and then drops it
-        from the persisted set.
+        Each opted-in item — a whole space, a single page, or a page subtree
+        — becomes one source. Delta state (``page_map`` / ``last_sync_at``)
+        is carried over from the previously persisted entry with the same
+        ``(cloud_id, confluence_type, item_id)`` triple so steady-state syncs
+        only re-process changed pages. An item removed from the selection
+        keeps its old source for one more run so base_worker's
+        ``_verify_source_access`` → ``_handle_revoked_source`` flow removes
+        its files and then drops it from the persisted set.
+
+        Back-compat: pre-page-granularity rows have only ``{id, key, name,
+        cloud_id}``; they normalize as ``type='space'`` with ``item_id``
+        falling back to ``id``.
         """
         # Re-read the selection from KB meta — it may have changed since the
         # worker was constructed (e.g. an admin re-provisioned).
         kb = Knowledges.get_knowledge_by_id(self.knowledge_id)
         sync_info = (kb.meta or {}).get(self.meta_key, {}) if kb else {}
-        selected_spaces = sync_info.get('spaces') or []
+        selected_items = sync_info.get('spaces') or []
 
-        # Index previously persisted sources by (cloud_id, space_id) so their
-        # delta state survives the rebuild.
+        # Index previously persisted sources by (cloud_id, type, item_id) so
+        # their delta state survives the rebuild. Pages and spaces with the
+        # same id stay separate (page IDs are scoped to a space).
         old_by_key: Dict[tuple, Dict[str, Any]] = {}
         for src in self.sources:
-            key = (src.get('cloud_id'), src.get('space_id') or src.get('item_id'))
+            src_item_id = src.get('item_id') or src.get('space_id')
+            key = (src.get('cloud_id'), src.get('confluence_type') or 'space', src_item_id)
             old_by_key[key] = src
 
-        # The shared KB is company-wide / basic-auth — one configured site.
+        # Basic-mode default — OAuth-mode items carry their own cloud_id/site_url
+        # from the picker (multi-site OAuth tenants).
         basic_site = get_basic_site()
         default_cloud_id = basic_site['cloud_id'] if basic_site else ''
-        site_url = basic_site['url'] if basic_site else ''
+        default_site_url = basic_site['url'] if basic_site else ''
 
         resolved: List[Dict[str, Any]] = []
         seen_keys: set[tuple] = set()
 
-        for space in selected_spaces:
-            space_id = str(space.get('id') or '')
-            if not space_id:
+        for item in selected_items:
+            confluence_type = item.get('type') or 'space'
+            item_id = str(item.get('item_id') or item.get('id') or '')
+            if not item_id:
                 continue
-            cloud_id = space.get('cloud_id') or default_cloud_id
-            key = (cloud_id, space_id)
+            cloud_id = item.get('cloud_id') or default_cloud_id
+            key = (cloud_id, confluence_type, item_id)
             if key in seen_keys:
                 continue
             seen_keys.add(key)
 
             old = old_by_key.get(key, {})
-            name = space.get('name') or space.get('key') or space_id
+            name = item.get('name') or item.get('key') or item_id
+            item_path = item.get('item_path') or name
+            include_descendants = bool(item.get('include_descendants', True))
+
+            # base_worker dispatches on source['type']: 'folder' enumerates
+            # children, 'file' fetches one. A page without descendants is the
+            # only file-like case; spaces and page-subtrees are folders.
+            source_type = 'file' if confluence_type == 'page' and not include_descendants else 'folder'
+            space_id = item.get('space_id') or (item_id if confluence_type == 'space' else None)
+
             source: Dict[str, Any] = {
-                'type': 'folder',
-                'confluence_type': 'space',
+                'type': source_type,
+                'confluence_type': confluence_type,
                 'cloud_id': cloud_id,
                 'space_id': space_id,
-                'space_key': space.get('key'),
-                'site_url': site_url,
-                'item_id': space_id,
-                'item_path': name,
+                'space_key': item.get('space_key') or item.get('key'),
+                'site_url': item.get('site_url') or default_site_url,
+                'item_id': item_id,
+                'item_path': item_path,
                 'name': name,
-                'include_descendants': True,
+                'include_descendants': include_descendants,
             }
             if old.get('page_map'):
                 source['page_map'] = old['page_map']
@@ -316,7 +332,7 @@ class ConfluenceSyncWorker(BaseSyncWorker):
                 source['last_sync_at'] = old['last_sync_at']
             resolved.append(source)
 
-        # Spaces dropped from the selection: keep their old source one more
+        # Items dropped from the selection: keep their old source one more
         # run so revoked-source handling removes the orphaned files.
         for key, old in old_by_key.items():
             if key not in seen_keys:
@@ -324,7 +340,7 @@ class ConfluenceSyncWorker(BaseSyncWorker):
 
         self.sources = resolved
         log.info(
-            'Confluence shared sync resolved %d space source(s) for KB %s',
+            'Confluence shared sync resolved %d item source(s) for KB %s',
             len(resolved),
             self.knowledge_id,
         )

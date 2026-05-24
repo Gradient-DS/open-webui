@@ -23,6 +23,14 @@
 	const dispatch = createEventDispatcher<{ select: { items: SyncItem[] } }>();
 
 	export let show = false;
+	// Reusable from the admin Cloud Sync shared-KB picker. The defaults
+	// preserve the per-user picker behaviour (KnowledgeBase invocations); the
+	// admin caller overrides them to retitle the modal, relabel the confirm
+	// button, and pre-fill the selection from items already opted into the
+	// shared KB so re-provisioning starts with the current set ticked.
+	export let title: string | null = null;
+	export let confirmLabel: string | null = null;
+	export let currentItems: SyncItem[] = [];
 
 	// ─── state ────────────────────────────────────────────────────────
 	let loading = false;
@@ -89,6 +97,22 @@
 		spaceNodes = [];
 		selection = new Map();
 		await loadSpaces();
+		seedSelectionFromCurrent();
+	}
+
+	// Pre-tick items that are already opted into the KB so re-provisioning
+	// starts with the existing selection visible. Items from other sites are
+	// ignored — only this site's selection is shown while it's active.
+	function seedSelectionFromCurrent() {
+		if (!currentItems || currentItems.length === 0 || !activeSite) return;
+		const seeded = new Map<string, SelectionEntry>();
+		for (const item of currentItems) {
+			if (item.cloud_id !== activeSite.cloud_id) continue;
+			const key =
+				item.type === 'space' ? `space:${item.item_id}` : `page:${item.item_id}`;
+			seeded.set(key, { kind: item.type === 'space' ? 'space' : 'page', item });
+		}
+		selection = seeded;
 	}
 
 	async function loadSpaces() {
@@ -342,7 +366,9 @@
 	<div class="flex flex-col h-[80vh]">
 		<div class="flex items-center gap-2 px-4 pt-4 pb-3">
 			<Confluence className="size-5" />
-			<div class="font-medium text-base">{$i18n.t('Select Confluence spaces or pages')}</div>
+			<div class="font-medium text-base">
+				{title ?? $i18n.t('Select Confluence spaces or pages')}
+			</div>
 			<button
 				class="ml-auto text-sm text-gray-400 hover:text-gray-600 dark:hover:text-gray-200"
 				on:click={() => (show = false)}
@@ -537,7 +563,7 @@
 				disabled={selectedCount === 0}
 				on:click={confirmSelection}
 			>
-				{$i18n.t('Add to Knowledge')}
+				{confirmLabel ?? $i18n.t('Add to Knowledge')}
 			</button>
 		</div>
 	</div>

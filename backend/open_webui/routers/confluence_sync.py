@@ -21,7 +21,6 @@ from open_webui.config import (
     CONFLUENCE_BASIC_AUTH_USERNAME,
     CONFLUENCE_BASIC_AUTH_API_TOKEN,
     CONFLUENCE_KB_MODE,
-    CONFLUENCE_SHARED_KB_OWNER_ID,
 )
 from open_webui.services.confluence.confluence_client import ConfluenceClient
 from open_webui.services.confluence.basic_auth import (
@@ -95,24 +94,47 @@ class ConfluenceTestConnectionForm(BaseModel):
     api_token: Optional[str] = None
 
 
-class ConfluenceSpaceSelection(BaseModel):
-    """One Confluence space an admin opted into the shared knowledge base."""
+class ConfluenceKbItem(BaseModel):
+    """One Confluence space, page, or page-subtree opted into the shared KB.
 
-    id: str
+    Back-compat: rows persisted before page-level granularity carry only
+    ``{id, key, name, cloud_id}`` — ``type`` defaults to ``'space'`` and
+    ``item_id`` / ``space_id`` fall back to ``id`` on normalization.
+    """
+
+    type: Literal['space', 'page'] = 'space'
+    # Legacy aliases — older payloads sent {id, key} for spaces.
+    id: Optional[str] = None
     key: Optional[str] = None
+    # Common fields shared with SyncItem so the per-user picker output drops
+    # straight into the shared KB without translation.
     name: Optional[str] = None
     cloud_id: Optional[str] = None
+    space_id: Optional[str] = None
+    space_key: Optional[str] = None
+    site_url: Optional[str] = None
+    item_id: Optional[str] = None
+    item_path: Optional[str] = None
+    include_descendants: bool = True
 
 
 class ConfluenceProvisionForm(BaseModel):
-    """Shared-KB provisioning request — the admin-selected spaces to sync.
+    """Shared-KB provisioning request — the admin-selected items to sync.
 
-    Selection is opt-in: only the listed spaces are synced into the shared
-    KB. An empty list provisions the KB shell but syncs nothing until the
-    admin picks at least one space.
+    Each entry can be a whole space, a single page, or a page-subtree.
+    Selection is opt-in: only the listed items are synced. An empty list
+    provisions the KB shell but syncs nothing until the admin picks at least
+    one item. The field name stays ``spaces`` for back-compat with deployed
+    frontends and persisted KB meta despite now accepting page items.
+
+    ``owner_user_id`` carries the admin's basic-mode owner pick (empty =
+    system-owned). In OAuth mode the form value is ignored — the calling
+    admin is implicitly the owner, since only their stored token can run the
+    sync.
     """
 
-    spaces: List[ConfluenceSpaceSelection] = []
+    spaces: List[ConfluenceKbItem] = []
+    owner_user_id: Optional[str] = None
 
 
 def _stamp_auth_mode(knowledge_id: str, mode: str) -> None:
@@ -689,13 +711,40 @@ def _find_shared_kb():
     return None
 
 
-def _shared_kb_status() -> dict:
+def _resolve_effective_owner_id(current_user: UserModel) -> str:
+    """Return the user id whose token the shared sync runs (or will run) with.
+
+    Post-provision the KB row carries the owner (``kb.user_id``). Pre-
+    provision there is no KB yet, so the calling admin is the implicit owner
+    — they are the one who'll click Provision and become ``kb.user_id``.
+    """
+    kb = _find_shared_kb()
+    if kb and kb.user_id:
+        return kb.user_id
+    return current_user.id
+
+
+def _shared_kb_status(current_user: UserModel) -> dict:
     """Compose the shared-KB status payload for the Cloud Sync admin tab."""
     kb = _find_shared_kb()
+    auth_mode = resolve_auth_mode(None)
+    effective_owner_id = _resolve_effective_owner_id(current_user)
+
+    # Whether the account the shared sync runs as has connected. Basic auth
+    # has no per-user token — the global service credential stands in for it;
+    # OAuth needs the effective owner (the KB owner, or the calling admin if
+    # no KB exists yet) to have authorized their account.
+    if auth_mode == 'basic':
+        owner_connected = basic_auth_configured()
+    else:
+        from open_webui.services.confluence.auth import get_stored_token
+
+        owner_connected = get_stored_token(effective_owner_id) is not None
+
     status: dict = {
         'kb_mode': CONFLUENCE_KB_MODE.value,
-        'auth_mode': resolve_auth_mode(None),
-        'configured_owner_id': (CONFLUENCE_SHARED_KB_OWNER_ID.value or '').strip(),
+        'auth_mode': auth_mode,
+        'owner_connected': owner_connected,
         'provisioned': kb is not None,
         'knowledge_id': kb.id if kb else None,
     }
@@ -724,39 +773,78 @@ def _shared_kb_status() -> dict:
 @router.get('/shared/status')
 async def get_shared_kb_status(user: UserModel = Depends(get_admin_user)) -> dict:
     """Report shared-KB provisioning state and last sync result (admin)."""
-    return _shared_kb_status()
+    return _shared_kb_status(user)
 
 
 @router.get('/shared/spaces')
 async def list_shared_kb_spaces(user: UserModel = Depends(get_admin_user)) -> dict:
     """List the Confluence spaces available for the shared KB (admin).
 
-    Company-wide mode only — enumerates every space the basic-auth service
-    account can see, so an admin can opt specific spaces into the shared KB.
+    Pre-synced mode. In basic auth, enumerates every space the service
+    account sees. In OAuth, enumerates spaces the configured owner's token
+    can reach — the owner's token is what the scheduler syncs with, so the
+    picker shows exactly what the sync can fetch.
     """
-    if resolve_auth_mode(None) != 'basic':
-        raise HTTPException(
-            400,
-            'Space selection is only available in company-wide (service account) mode.',
-        )
-    if not basic_auth_configured():
-        raise HTTPException(
-            400,
-            'Confluence basic auth is not configured. Save the service account credentials first.',
-        )
+    auth_mode = resolve_auth_mode(None)
 
-    basic_site = get_basic_site()
-    cloud_id = basic_site['cloud_id'] if basic_site else ''
-    client = build_basic_client()
+    if auth_mode == 'basic':
+        if not basic_auth_configured():
+            raise HTTPException(
+                400,
+                'Confluence basic auth is not configured. Save the service account credentials first.',
+            )
+        basic_site = get_basic_site()
+        cloud_id = basic_site['cloud_id'] if basic_site else ''
+        client = build_basic_client()
+        try:
+            spaces = await client.list_all_spaces()
+        except httpx.HTTPStatusError as e:
+            raise HTTPException(e.response.status_code, f'Confluence error: {e.response.status_code}')
+        finally:
+            await client.close()
+        return {
+            'spaces': [
+                {
+                    'id': s.get('id'),
+                    'key': s.get('key'),
+                    'name': s.get('name'),
+                    'type': s.get('type'),
+                    'cloud_id': cloud_id,
+                }
+                for s in spaces
+            ],
+        }
+
+    # OAuth — enumerate via the effective owner's token. Post-provision that
+    # is the KB owner (whose token the scheduler syncs with); pre-provision
+    # it is the calling admin (about to provision and become the KB owner).
+    # Either way the picker shows exactly what the sync can fetch.
+    effective_owner_id = _resolve_effective_owner_id(user)
+    owner = Users.get_user_by_id(effective_owner_id)
+    if not owner:
+        raise HTTPException(400, 'The shared KB owner is not a valid user.')
+
     try:
-        spaces = await client.list_all_spaces()
-    except httpx.HTTPStatusError as e:
-        raise HTTPException(e.response.status_code, f'Confluence error: {e.response.status_code}')
-    finally:
-        await client.close()
+        _, sites = await _picker_client(owner)
+    except HTTPException as e:
+        if e.status_code == 401:
+            raise HTTPException(
+                400,
+                'Connect your Confluence account before picking spaces.',
+            )
+        raise
 
-    return {
-        'spaces': [
+    spaces: list = []
+    for site in sites:
+        cloud_id = site.get('cloud_id')
+        client, _ = await _browse_client(owner, cloud_id)
+        try:
+            site_spaces = await client.list_all_spaces()
+        except httpx.HTTPStatusError as e:
+            raise HTTPException(e.response.status_code, f'Confluence error: {e.response.status_code}')
+        finally:
+            await client.close()
+        spaces.extend(
             {
                 'id': s.get('id'),
                 'key': s.get('key'),
@@ -764,9 +852,9 @@ async def list_shared_kb_spaces(user: UserModel = Depends(get_admin_user)) -> di
                 'type': s.get('type'),
                 'cloud_id': cloud_id,
             }
-            for s in spaces
-        ],
-    }
+            for s in site_spaces
+        )
+    return {'spaces': spaces}
 
 
 @router.post('/shared/provision')
@@ -783,27 +871,44 @@ async def provision_shared_kb(
     for normal user KBs.
     """
     auth_mode = resolve_auth_mode(None)
-    owner_id = (CONFLUENCE_SHARED_KB_OWNER_ID.value or '').strip()
 
-    # The admin-selected spaces, with the basic-mode cloud_id stamped on so
-    # the sync worker can build a per-space source without re-deriving it.
+    # The admin-selected items (spaces and/or pages), normalized so the sync
+    # worker can build per-source entries without re-deriving fields. Legacy
+    # payloads that only carry {id, key, name, cloud_id} resolve to space
+    # items with id → item_id / space_id and key → space_key.
     basic_site = get_basic_site()
-    selected_spaces = []
-    for space in form_data.spaces:
-        entry = space.model_dump()
+    selected_spaces: list = []
+    for item in form_data.spaces:
+        entry = item.model_dump()
+        item_id = entry.get('item_id') or entry.get('id')
+        entry['item_id'] = item_id
+        if not entry.get('space_key'):
+            entry['space_key'] = entry.get('key')
+        if entry.get('type') == 'space' and not entry.get('space_id'):
+            entry['space_id'] = item_id
         if not entry.get('cloud_id') and basic_site:
             entry['cloud_id'] = basic_site['cloud_id']
+        if not entry.get('item_path'):
+            entry['item_path'] = entry.get('name') or item_id or ''
         selected_spaces.append(entry)
 
-    # OAuth resolves the sync token by the KB owner — a no-owner shared KB is
-    # only valid with the global basic-auth service credential.
-    if auth_mode == 'oauth' and not owner_id:
-        raise HTTPException(
-            400,
-            'An owner must be selected for the shared Confluence knowledge base when using OAuth authentication.',
-        )
-    if owner_id and not Users.get_user_by_id(owner_id):
-        raise HTTPException(400, 'The configured shared KB owner is not a valid user.')
+    # Resolve the owner. OAuth: the calling admin — only their stored token
+    # can run the sync, so the form's owner_user_id is ignored. Basic: the
+    # admin's pick (empty = system-owned KB with no human owner; the worker
+    # uses the global service credential).
+    if auth_mode == 'oauth':
+        owner_id = user.id
+        from open_webui.services.confluence.auth import get_stored_token
+
+        if get_stored_token(owner_id) is None:
+            raise HTTPException(
+                400,
+                'Connect your Confluence account before provisioning the shared knowledge base.',
+            )
+    else:
+        owner_id = (form_data.owner_user_id or '').strip()
+        if owner_id and not Users.get_user_by_id(owner_id):
+            raise HTTPException(400, 'The selected shared KB owner is not a valid user.')
 
     kb = _find_shared_kb()
     if kb:
@@ -852,7 +957,7 @@ async def provision_shared_kb(
     )
 
     log.info('Shared Confluence KB provisioned: %s (owner=%r)', kb.id, owner_id or '<system>')
-    return _shared_kb_status()
+    return _shared_kb_status(user)
 
 
 async def _run_shared_sync(knowledge_id: str, user_id: str, app):

@@ -17,14 +17,16 @@
 		syncConfluenceSharedKb,
 		deleteConfluenceSharedKb,
 		type ConfluenceSharedKbStatus,
-		type ConfluenceSharedKbSpace
+		type ConfluenceSharedKbSpace,
+		type SyncItem
 	} from '$lib/apis/confluence';
 	import { getAllUsers } from '$lib/apis/users';
+	import { WEBUI_API_BASE_URL } from '$lib/constants';
 	import Switch from '$lib/components/common/Switch.svelte';
 	import Spinner from '$lib/components/common/Spinner.svelte';
 	import Badge from '$lib/components/common/Badge.svelte';
 	import ConfirmDialog from '$lib/components/common/ConfirmDialog.svelte';
-	import SpacePickerModal from './CloudSync/SpacePickerModal.svelte';
+	import ConfluencePickerModal from '$lib/components/workspace/Knowledge/ConfluencePickerModal.svelte';
 	import Confluence from '$lib/components/icons/Confluence.svelte';
 	import GoogleDrive from '$lib/components/icons/GoogleDrive.svelte';
 	import OneDrive from '$lib/components/icons/OneDrive.svelte';
@@ -42,31 +44,40 @@
 	let CONFLUENCE_OAUTH_CLIENT_ID = '';
 	let CONFLUENCE_SYNC_INTERVAL_MINUTES = 60;
 	let CONFLUENCE_MAX_PAGES_PER_SYNC = 500;
-	// The client secret is never returned by the backend — we only know whether
-	// one is stored. The input stays blank; submitting blank keeps the stored
-	// secret, submitting a value replaces it.
-	let hasClientSecret = false;
+	// The secret + API token round-trip through the form just like the upstream
+	// Connections (API key) field — visible to the admin masked behind a reveal
+	// toggle via SensitiveInput, sent back verbatim on save.
 	let clientSecret = '';
 	let CONFLUENCE_SITE_URL = '';
 	let CONFLUENCE_BASIC_AUTH_USERNAME = '';
-	// API token is never returned — same blank-keeps-stored pattern as the secret.
-	let hasBasicApiToken = false;
 	let basicApiToken = '';
 	let testingConnection = false;
 
-	// Single Mode choice — the admin picks one of two coherent setups; the
-	// backend's auth_mode + kb_mode are derived from it (the two awkward
-	// cross-combinations are not exposed).
-	//   'company_wide' → basic auth + one shared, read-only KB
-	//   'per_user'     → OAuth + each user builds their own KBs
-	let CONFLUENCE_MODE: 'company_wide' | 'per_user' = 'per_user';
-	$: CONFLUENCE_AUTH_MODE = CONFLUENCE_MODE === 'company_wide' ? 'basic' : 'oauth';
-	$: CONFLUENCE_KB_MODE = CONFLUENCE_MODE === 'company_wide' ? 'shared' : 'per_user';
-	let CONFLUENCE_SHARED_KB_OWNER_ID = '';
+	// Auth method and sync mode are independent axes:
+	//   auth — 'oauth' (each user signs in) | 'basic' (one service account)
+	//   kb   — 'per_user' (on-demand picker) | 'shared' (one pre-synced KB)
+	// Every combination is valid except service-account + on-demand, which
+	// flattens permissions for no benefit and is gated below.
+	let CONFLUENCE_AUTH_MODE: 'oauth' | 'basic' = 'oauth';
+	let CONFLUENCE_KB_MODE: 'per_user' | 'shared' = 'per_user';
+
+	// Service account + on-demand has no use case — when auth is the service
+	// account, force the pre-synced shared KB.
+	$: if (CONFLUENCE_AUTH_MODE === 'basic' && CONFLUENCE_KB_MODE === 'per_user') {
+		CONFLUENCE_KB_MODE = 'shared';
+	}
+
+	// Basic-mode owner pick: a transient form field, not a persisted config.
+	// On provision it becomes ``kb.user_id`` (the sole source of truth for KB
+	// ownership). Seeded from the KB row's owner on initial status load so the
+	// dropdown reflects the existing owner when re-provisioning.
+	let sharedKbOwnerId = '';
+	let sharedKbOwnerInitialized = false;
 	let adminUsers: { id: string; name: string; email: string }[] = [];
 	let sharedKbStatus: ConfluenceSharedKbStatus | null = null;
 	let provisioning = false;
 	let syncingShared = false;
+	let connectingAccount = false;
 
 	// Shared-KB space picker modal + delete confirmation.
 	let showSpacePicker = false;
@@ -120,15 +131,14 @@
 		ENABLE_CONFLUENCE_INTEGRATION?: boolean;
 		ENABLE_CONFLUENCE_SYNC?: boolean;
 		CONFLUENCE_OAUTH_CLIENT_ID?: string;
-		HAS_CONFLUENCE_OAUTH_CLIENT_SECRET?: boolean;
+		CONFLUENCE_OAUTH_CLIENT_SECRET?: string;
 		CONFLUENCE_SYNC_INTERVAL_MINUTES?: number;
 		CONFLUENCE_MAX_PAGES_PER_SYNC?: number;
 		CONFLUENCE_AUTH_MODE?: string;
 		CONFLUENCE_SITE_URL?: string;
 		CONFLUENCE_BASIC_AUTH_USERNAME?: string;
-		HAS_CONFLUENCE_BASIC_AUTH_API_TOKEN?: boolean;
+		CONFLUENCE_BASIC_AUTH_API_TOKEN?: string;
 		CONFLUENCE_KB_MODE?: string;
-		CONFLUENCE_SHARED_KB_OWNER_ID?: string;
 	};
 
 	type GoogleDriveConfigResponse = {
@@ -160,16 +170,13 @@
 		CONFLUENCE_OAUTH_CLIENT_ID = config.CONFLUENCE_OAUTH_CLIENT_ID ?? '';
 		CONFLUENCE_SYNC_INTERVAL_MINUTES = config.CONFLUENCE_SYNC_INTERVAL_MINUTES ?? 60;
 		CONFLUENCE_MAX_PAGES_PER_SYNC = config.CONFLUENCE_MAX_PAGES_PER_SYNC ?? 0;
-		hasClientSecret = config.HAS_CONFLUENCE_OAUTH_CLIENT_SECRET ?? false;
-		clientSecret = '';
+		clientSecret = config.CONFLUENCE_OAUTH_CLIENT_SECRET ?? '';
 		CONFLUENCE_SITE_URL = config.CONFLUENCE_SITE_URL ?? '';
 		CONFLUENCE_BASIC_AUTH_USERNAME = config.CONFLUENCE_BASIC_AUTH_USERNAME ?? '';
-		hasBasicApiToken = config.HAS_CONFLUENCE_BASIC_AUTH_API_TOKEN ?? false;
-		basicApiToken = '';
-		// Derive the single Mode selector from the stored kb_mode.
-		CONFLUENCE_MODE =
-			(config.CONFLUENCE_KB_MODE ?? 'per_user') === 'shared' ? 'company_wide' : 'per_user';
-		CONFLUENCE_SHARED_KB_OWNER_ID = config.CONFLUENCE_SHARED_KB_OWNER_ID ?? '';
+		basicApiToken = config.CONFLUENCE_BASIC_AUTH_API_TOKEN ?? '';
+		// Each axis is loaded independently — see the decoupled controls below.
+		CONFLUENCE_AUTH_MODE = config.CONFLUENCE_AUTH_MODE === 'basic' ? 'basic' : 'oauth';
+		CONFLUENCE_KB_MODE = config.CONFLUENCE_KB_MODE === 'shared' ? 'shared' : 'per_user';
 	};
 
 	const applyGoogleDriveConfig = (config: GoogleDriveConfigResponse | null) => {
@@ -258,6 +265,13 @@
 				.filter((u) => u.role === 'admin')
 				.map((u) => ({ id: u.id, name: u.name, email: u.email }));
 			sharedKbStatus = shared;
+			// Seed the basic-mode owner dropdown from the KB row's owner on first
+			// load. Subsequent status reloads (after provisioning, etc.) leave the
+			// dropdown alone so the admin's in-progress pick isn't clobbered.
+			if (!sharedKbOwnerInitialized) {
+				sharedKbOwnerId = sharedKbStatus?.owner_id ?? '';
+				sharedKbOwnerInitialized = true;
+			}
 			if (sharedKbStatus?.status === 'syncing') {
 				startStatusPolling();
 			}
@@ -275,7 +289,6 @@
 				ENABLE_CONFLUENCE_INTEGRATION,
 				ENABLE_CONFLUENCE_SYNC,
 				CONFLUENCE_OAUTH_CLIENT_ID,
-				// Blank = keep the stored secret.
 				CONFLUENCE_OAUTH_CLIENT_SECRET: clientSecret,
 				CONFLUENCE_SYNC_INTERVAL_MINUTES,
 				// Blank/null input → 0 = no per-sync page limit.
@@ -283,10 +296,8 @@
 				CONFLUENCE_AUTH_MODE,
 				CONFLUENCE_SITE_URL,
 				CONFLUENCE_BASIC_AUTH_USERNAME,
-				// Blank = keep the stored API token.
 				CONFLUENCE_BASIC_AUTH_API_TOKEN: basicApiToken,
-				CONFLUENCE_KB_MODE,
-				CONFLUENCE_SHARED_KB_OWNER_ID
+				CONFLUENCE_KB_MODE
 			}),
 			setGoogleDriveConfig(localStorage.token, {
 				ENABLE_GOOGLE_DRIVE_INTEGRATION,
@@ -331,14 +342,59 @@
 	// space selection. It deliberately does NOT dispatch 'save' — that
 	// triggers a full backend-config refetch in the parent; the explicit
 	// Save button is the only place that should.
-	const onSpacePickerConfirm = async (
-		e: CustomEvent<{ spaces: ConfluenceSharedKbSpace[] }>
-	) => {
+	const onSpacePickerConfirm = async (e: CustomEvent<{ items: SyncItem[] }>) => {
 		provisioning = true;
 		try {
 			await persistConfig();
-			sharedKbStatus = await provisionConfluenceSharedKb(localStorage.token, e.detail.spaces);
+			// `provisionConfluenceSharedKb` accepts `ConfluenceSharedKbSpace[]`,
+			// a superset of `SyncItem` — the picker output goes straight in.
+			// Owner pick only matters in basic mode; OAuth ignores it (caller
+			// becomes the owner server-side).
+			const ownerForProvision = CONFLUENCE_AUTH_MODE === 'basic' ? sharedKbOwnerId : null;
+			sharedKbStatus = await provisionConfluenceSharedKb(
+				localStorage.token,
+				e.detail.items as ConfluenceSharedKbSpace[],
+				ownerForProvision
+			);
 			toast.success($i18n.t('Shared Confluence knowledge base provisioned.'));
+		} catch (err) {
+			toast.error(`${err}`);
+		}
+		provisioning = false;
+	};
+
+	// Normalise stored items (which can be the legacy {id, key, name, cloud_id}
+	// space shape or the new SyncItem shape) into SyncItem[] for the picker's
+	// `currentItems` prop — that way re-provisioning starts with the existing
+	// selection ticked.
+	$: currentSharedItems = ((sharedKbStatus?.spaces ?? []) as ConfluenceSharedKbSpace[])
+		.map((s): SyncItem | null => {
+			const type = (s.type === 'page' ? 'page' : 'space') as 'space' | 'page';
+			const item_id = s.item_id ?? s.id ?? null;
+			if (!item_id) return null;
+			const name = s.name ?? s.key ?? item_id;
+			return {
+				type,
+				cloud_id: s.cloud_id ?? '',
+				space_id: s.space_id ?? (type === 'space' ? item_id : undefined),
+				space_key: s.space_key ?? s.key ?? undefined,
+				site_url: s.site_url ?? undefined,
+				item_id,
+				item_path: s.item_path ?? name,
+				name,
+				include_descendants: s.include_descendants ?? true
+			};
+		})
+		.filter((x): x is SyncItem => x !== null);
+
+	// Opens the space picker. The picker calls /shared/spaces on open, which
+	// in OAuth mode reads the saved owner — so persist the form first, or the
+	// picker queries with a stale auth mode / owner.
+	const openSpacePicker = async () => {
+		provisioning = true;
+		try {
+			await persistConfig();
+			showSpacePicker = true;
 		} catch (err) {
 			toast.error(`${err}`);
 		}
@@ -397,6 +453,45 @@
 		}
 		testingConnection = false;
 	};
+
+	// Opens the Atlassian OAuth popup so the signed-in admin connects their
+	// own Confluence account — that token is what the pre-synced shared KB
+	// will sync with. Ownership is intrinsic to the KB row (set at provision
+	// time to whoever clicks Provision), so this handler does not need to
+	// persist any config; ``owner_connected`` resolves against the calling
+	// admin (pre-provision) or ``kb.user_id`` (post-provision) server-side.
+	const connectConfluenceAccount = () => {
+		connectingAccount = true;
+
+		const popup = window.open(
+			`${WEBUI_API_BASE_URL}/confluence/auth/initiate`,
+			'confluence_auth',
+			'width=600,height=700,scrollbars=yes'
+		);
+
+		const handleMessage = (event: MessageEvent) => {
+			if (event.data?.type !== 'confluence_auth_callback') return;
+			window.removeEventListener('message', handleMessage);
+			if (event.data.success) {
+				toast.success($i18n.t('Confluence account connected.'));
+			} else {
+				toast.error($i18n.t('Authorization failed: {{error}}', { error: event.data.error }));
+			}
+		};
+		window.addEventListener('message', handleMessage);
+
+		// The connected badge is driven by /shared/status (it reflects the
+		// saved owner), so always re-fetch it when the popup closes — the
+		// postMessage above only drives the toast and can be missed on an
+		// origin mismatch.
+		const checkClosed = setInterval(async () => {
+			if (!popup?.closed) return;
+			clearInterval(checkClosed);
+			window.removeEventListener('message', handleMessage);
+			connectingAccount = false;
+			await loadSharedKbStatus();
+		}, 500);
+	};
 </script>
 
 <form class="flex flex-col h-full justify-between text-sm" on:submit|preventDefault={submitHandler}>
@@ -422,36 +517,62 @@
 				</div>
 
 				{#if ENABLE_CONFLUENCE_INTEGRATION}
-					<!-- Mode choice. Company-wide = one shared, read-only KB synced
-					     via a service account; Per-user = each user signs in with
-					     OAuth and builds their own KBs. The auth method is implied
-					     by the mode — there is no separate auth toggle. The
+					<!-- Auth method and sync mode are two independent controls.
+					     Auth method picks how Confluence is reached; sync mode
+					     picks whether each user builds their own KBs on-demand or
+					     one pre-synced company KB is served to everyone. The
 					     background-sync toggle lives in the Sync Settings section. -->
 					<div class="flex justify-between items-center">
-						<div class="font-medium">{$i18n.t('Mode')}</div>
+						<div class="font-medium">{$i18n.t('Authentication method')}</div>
 						<select
 							class="w-fit pr-8 rounded-sm px-2 p-1 text-xs bg-transparent outline-hidden text-right"
-							bind:value={CONFLUENCE_MODE}
+							bind:value={CONFLUENCE_AUTH_MODE}
 						>
-							<option value="company_wide"
-								>{$i18n.t('Company-wide shared knowledge base')}</option
-							>
-							<option value="per_user">{$i18n.t('Per-user knowledge bases')}</option>
+							<option value="oauth">{$i18n.t('OAuth')}</option>
+							<option value="basic">{$i18n.t('Service account')}</option>
 						</select>
 					</div>
 					<div class="text-xs text-gray-500">
-						{#if CONFLUENCE_MODE === 'company_wide'}
+						{#if CONFLUENCE_AUTH_MODE === 'oauth'}
 							{$i18n.t(
-								'One read-only knowledge base, synced from selected Confluence spaces with a service account, visible to every user. Users have no Confluence self-service.'
+								'Each user signs in with their own Atlassian account; Confluence is reached with their personal OAuth token.'
 							)}
 						{:else}
 							{$i18n.t(
-								'Each user signs in with their Atlassian account and builds their own Confluence knowledge bases.'
+								'Confluence is reached with one shared service account (username + API token) — no per-user sign-in.'
 							)}
 						{/if}
 					</div>
 
-					{#if CONFLUENCE_MODE === 'company_wide'}
+					<div class="flex justify-between items-center">
+						<div class="font-medium">{$i18n.t('Sync mode')}</div>
+						<select
+							class="w-fit pr-8 rounded-sm px-2 p-1 text-xs bg-transparent outline-hidden text-right"
+							bind:value={CONFLUENCE_KB_MODE}
+						>
+							<option value="per_user" disabled={CONFLUENCE_AUTH_MODE === 'basic'}>
+								{$i18n.t('On-demand')}
+							</option>
+							<option value="shared">{$i18n.t('Pre-synced')}</option>
+						</select>
+					</div>
+					<div class="text-xs text-gray-500">
+						{#if CONFLUENCE_AUTH_MODE === 'basic'}
+							{$i18n.t(
+								'A service account always serves one pre-synced, read-only knowledge base shared with every user.'
+							)}
+						{:else if CONFLUENCE_KB_MODE === 'shared'}
+							{$i18n.t(
+								'One read-only knowledge base, pre-synced from selected Confluence spaces, visible to every user.'
+							)}
+						{:else}
+							{$i18n.t(
+								'Each user picks Confluence spaces and pages on-demand and builds their own knowledge bases.'
+							)}
+						{/if}
+					</div>
+
+					{#if CONFLUENCE_AUTH_MODE === 'basic'}
 						<div class="space-y-3 pt-2">
 							<div class="text-xs font-medium text-gray-500 uppercase tracking-wide">
 								{$i18n.t('Service account')}
@@ -489,9 +610,6 @@
 										bind:value={basicApiToken}
 										required={false}
 										autocomplete="new-password"
-										placeholder={hasBasicApiToken
-											? $i18n.t('Leave blank to keep the saved API token')
-											: ''}
 									/>
 								</div>
 							</div>
@@ -537,9 +655,6 @@
 										bind:value={clientSecret}
 										required={false}
 										autocomplete="new-password"
-										placeholder={hasClientSecret
-											? $i18n.t('Leave blank to keep the saved secret')
-											: ''}
 									/>
 								</div>
 							</div>
@@ -589,31 +704,62 @@
 						</div>
 					</div>
 
-					{#if CONFLUENCE_MODE === 'company_wide'}
+					{#if CONFLUENCE_KB_MODE === 'shared'}
 						<div class="space-y-3 pt-4">
 							<div class="text-xs font-medium text-gray-500 uppercase tracking-wide">
 								{$i18n.t('Shared knowledge base')}
 							</div>
 
-							<div>
-								<div class="mb-1 text-xs text-gray-500">
-									{$i18n.t('Shared knowledge base owner')}
+							{#if CONFLUENCE_AUTH_MODE === 'basic'}
+								<div>
+									<div class="mb-1 text-xs text-gray-500">
+										{$i18n.t('Shared knowledge base owner')}
+									</div>
+									<select
+										class="w-full text-sm bg-transparent outline-hidden rounded-sm py-1"
+										bind:value={sharedKbOwnerId}
+									>
+										<option value="">{$i18n.t('No owner (system)')}</option>
+										{#each adminUsers as admin}
+											<option value={admin.id}>{admin.name} ({admin.email})</option>
+										{/each}
+									</select>
+									<div class="mt-1 text-xs text-gray-500">
+										{$i18n.t(
+											'Optional — pick an admin to own the knowledge base, or leave it system-owned.'
+										)}
+									</div>
 								</div>
-								<select
-									class="w-full text-sm bg-transparent outline-hidden rounded-sm py-1"
-									bind:value={CONFLUENCE_SHARED_KB_OWNER_ID}
-								>
-									<option value="">{$i18n.t('No owner (system)')}</option>
-									{#each adminUsers as admin}
-										<option value={admin.id}>{admin.name} ({admin.email})</option>
-									{/each}
-								</select>
-								<div class="mt-1 text-xs text-gray-500">
-									{$i18n.t(
-										'Optional — pick an admin to own the knowledge base, or leave it system-owned.'
-									)}
+							{:else}
+								<!-- OAuth: the owner is forced to whoever clicks Connect
+								     (their per-user token is what the sync runs with),
+								     so there is nothing to pick — just show connection
+								     state. The Connect handler auto-sets the current
+								     admin as owner and persists. -->
+								<div>
+									<div class="mb-1 flex items-center gap-2">
+										<span class="text-xs text-gray-500">{$i18n.t('Confluence account')}</span>
+										{#if sharedKbStatus?.owner_connected}
+											<Badge type="success" content={$i18n.t('Account connected')} />
+										{:else}
+											<Badge type="muted" content={$i18n.t('No account connected')} />
+										{/if}
+									</div>
+									<button
+										type="button"
+										class="px-3 py-1.5 text-sm rounded-lg bg-gray-50 hover:bg-gray-100 dark:bg-gray-850 dark:hover:bg-gray-800 flex items-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed"
+										on:click={connectConfluenceAccount}
+										disabled={connectingAccount}
+									>
+										{sharedKbStatus?.owner_connected
+											? $i18n.t('Reconnect')
+											: $i18n.t('Connect Confluence account')}
+										{#if connectingAccount}
+											<Spinner className="size-3" />
+										{/if}
+									</button>
 								</div>
-							</div>
+							{/if}
 
 							<div class="rounded-lg bg-gray-50 dark:bg-gray-850 p-3 space-y-2">
 								<div class="flex items-center justify-between">
@@ -642,7 +788,8 @@
 										<div class="truncate">
 											{$i18n.t('Spaces')}:
 											{(sharedKbStatus?.spaces ?? [])
-												.map((s) => s.name || s.key || s.id)
+												.map((s) => s.name ?? s.key ?? s.item_id ?? s.id ?? '')
+												.filter((n) => n)
 												.join(', ') || $i18n.t('None')}
 										</div>
 									</div>
@@ -652,7 +799,7 @@
 									<button
 										type="button"
 										class="px-3 py-1.5 text-sm rounded-lg bg-gray-100 hover:bg-gray-200 dark:bg-gray-800 dark:hover:bg-gray-700 flex items-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed"
-										on:click={() => (showSpacePicker = true)}
+										on:click={openSpacePicker}
 										disabled={provisioning}
 									>
 										{sharedKbStatus?.provisioned
@@ -940,10 +1087,15 @@
 </form>
 
 <!-- Confluence shared-KB space picker — opens from the Provision button. -->
-<SpacePickerModal
+<!-- Confluence shared-KB picker — same tree explorer the per-user picker uses,
+     wired here to pre-select items already opted into the shared KB and to
+     hand the result straight to provisionConfluenceSharedKb. -->
+<ConfluencePickerModal
 	bind:show={showSpacePicker}
-	currentSpaceIds={(sharedKbStatus?.spaces ?? []).map((s) => s.id)}
-	on:confirm={onSpacePickerConfirm}
+	title={$i18n.t('Spaces to sync')}
+	confirmLabel={$i18n.t('Provision')}
+	currentItems={currentSharedItems}
+	on:select={onSpacePickerConfirm}
 />
 
 <ConfirmDialog

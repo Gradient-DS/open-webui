@@ -7,6 +7,8 @@ import os
 import time
 import hashlib
 import uuid
+
+import httpx
 from abc import ABC, abstractmethod
 from dataclasses import asdict, dataclass
 from typing import Optional, Callable, Awaitable, Dict, Any, List, Union
@@ -2437,6 +2439,29 @@ class BaseSyncWorker(ABC):
                 'total_found': total_files,
                 'deleted_count': total_deleted,
                 'failed_files': failed_files_dicts,
+            }
+
+        except (ConnectionError, httpx.TransportError) as e:
+            # Connectivity loss — DNS failure, connection refused, or timeout —
+            # is transient and expected: the host may be offline or the
+            # provider briefly unreachable. Log a single concise line instead
+            # of a full traceback, and return a skipped-cycle result rather
+            # than re-raising as an unexpected error. The `transient` flag lets
+            # the scheduler log a WARNING, and the next tick retries
+            # automatically (last_sync_at is not stamped, so the KB stays due).
+            log.warning(f'Sync skipped for {self.knowledge_id}: {self.provider_slug} unreachable ({e})')
+            await self._update_sync_status(
+                'failed',
+                error='Sync source is temporarily unreachable — the next scheduled sync will retry automatically.',
+            )
+            return {
+                'files_processed': 0,
+                'files_failed': 0,
+                'total_found': 0,
+                'deleted_count': 0,
+                'failed_files': [],
+                'error': f'{self.provider_slug} unreachable',
+                'transient': True,
             }
 
         except Exception as e:

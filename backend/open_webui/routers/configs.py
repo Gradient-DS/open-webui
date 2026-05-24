@@ -899,7 +899,6 @@ class ConfluenceConfigForm(BaseModel):
     ENABLE_CONFLUENCE_INTEGRATION: Optional[bool] = None
     ENABLE_CONFLUENCE_SYNC: Optional[bool] = None
     CONFLUENCE_OAUTH_CLIENT_ID: Optional[str] = None
-    # Blank/None = keep the stored secret; the secret is never returned.
     CONFLUENCE_OAUTH_CLIENT_SECRET: Optional[str] = None
     CONFLUENCE_SYNC_INTERVAL_MINUTES: Optional[int] = None
     CONFLUENCE_MAX_PAGES_PER_SYNC: Optional[int] = None  # 0 = unlimited
@@ -907,12 +906,10 @@ class ConfluenceConfigForm(BaseModel):
     CONFLUENCE_AUTH_MODE: Optional[str] = None
     CONFLUENCE_SITE_URL: Optional[str] = None
     CONFLUENCE_BASIC_AUTH_USERNAME: Optional[str] = None
-    # Blank/None = keep the stored API token; the token is never returned.
     CONFLUENCE_BASIC_AUTH_API_TOKEN: Optional[str] = None
-    # Sharing mode: 'per_user' or 'shared'. shared_kb_owner_id is the user id
-    # owning the shared KB ('' = system-owned, basic auth only).
+    # Sharing mode: 'per_user' or 'shared'. The shared-KB owner lives on the
+    # KB row (``kb.user_id``); the provision form sets it, not this config.
     CONFLUENCE_KB_MODE: Optional[str] = None
-    CONFLUENCE_SHARED_KB_OWNER_ID: Optional[str] = None
 
 
 @router.get('/confluence')
@@ -922,17 +919,17 @@ async def get_confluence_config(request: Request, user=Depends(get_admin_user)):
         'ENABLE_CONFLUENCE_INTEGRATION': c.ENABLE_CONFLUENCE_INTEGRATION,
         'ENABLE_CONFLUENCE_SYNC': c.ENABLE_CONFLUENCE_SYNC,
         'CONFLUENCE_OAUTH_CLIENT_ID': c.CONFLUENCE_OAUTH_CLIENT_ID,
-        # Never expose the secret — only whether one is configured.
-        'HAS_CONFLUENCE_OAUTH_CLIENT_SECRET': bool(c.CONFLUENCE_OAUTH_CLIENT_SECRET),
+        # Admin-only endpoint; same disclosure profile as the upstream
+        # Connections (API key) form, which round-trips the value masked behind
+        # a reveal toggle in the UI.
+        'CONFLUENCE_OAUTH_CLIENT_SECRET': c.CONFLUENCE_OAUTH_CLIENT_SECRET,
         'CONFLUENCE_SYNC_INTERVAL_MINUTES': c.CONFLUENCE_SYNC_INTERVAL_MINUTES,
         'CONFLUENCE_MAX_PAGES_PER_SYNC': c.CONFLUENCE_MAX_PAGES_PER_SYNC,
         'CONFLUENCE_AUTH_MODE': c.CONFLUENCE_AUTH_MODE,
         'CONFLUENCE_SITE_URL': c.CONFLUENCE_SITE_URL,
         'CONFLUENCE_BASIC_AUTH_USERNAME': c.CONFLUENCE_BASIC_AUTH_USERNAME,
-        # Never expose the API token — only whether one is configured.
-        'HAS_CONFLUENCE_BASIC_AUTH_API_TOKEN': bool(c.CONFLUENCE_BASIC_AUTH_API_TOKEN),
+        'CONFLUENCE_BASIC_AUTH_API_TOKEN': c.CONFLUENCE_BASIC_AUTH_API_TOKEN,
         'CONFLUENCE_KB_MODE': c.CONFLUENCE_KB_MODE,
-        'CONFLUENCE_SHARED_KB_OWNER_ID': c.CONFLUENCE_SHARED_KB_OWNER_ID,
     }
 
 
@@ -949,9 +946,7 @@ async def set_confluence_config(
         c.ENABLE_CONFLUENCE_SYNC = form_data.ENABLE_CONFLUENCE_SYNC
     if form_data.CONFLUENCE_OAUTH_CLIENT_ID is not None:
         c.CONFLUENCE_OAUTH_CLIENT_ID = form_data.CONFLUENCE_OAUTH_CLIENT_ID.strip()
-    # Only overwrite the secret when a non-empty value is supplied, so the UI
-    # can re-save other fields without round-tripping the secret.
-    if form_data.CONFLUENCE_OAUTH_CLIENT_SECRET:
+    if form_data.CONFLUENCE_OAUTH_CLIENT_SECRET is not None:
         c.CONFLUENCE_OAUTH_CLIENT_SECRET = form_data.CONFLUENCE_OAUTH_CLIENT_SECRET.strip()
     if form_data.CONFLUENCE_SYNC_INTERVAL_MINUTES is not None:
         c.CONFLUENCE_SYNC_INTERVAL_MINUTES = form_data.CONFLUENCE_SYNC_INTERVAL_MINUTES
@@ -965,15 +960,12 @@ async def set_confluence_config(
         c.CONFLUENCE_SITE_URL = form_data.CONFLUENCE_SITE_URL.strip().rstrip('/')
     if form_data.CONFLUENCE_BASIC_AUTH_USERNAME is not None:
         c.CONFLUENCE_BASIC_AUTH_USERNAME = form_data.CONFLUENCE_BASIC_AUTH_USERNAME.strip()
-    # Only overwrite the API token when a non-empty value is supplied.
-    if form_data.CONFLUENCE_BASIC_AUTH_API_TOKEN:
+    if form_data.CONFLUENCE_BASIC_AUTH_API_TOKEN is not None:
         c.CONFLUENCE_BASIC_AUTH_API_TOKEN = form_data.CONFLUENCE_BASIC_AUTH_API_TOKEN.strip()
     if form_data.CONFLUENCE_KB_MODE is not None:
         # Guard against arbitrary values; only the two known modes are valid.
         mode = form_data.CONFLUENCE_KB_MODE.strip()
         c.CONFLUENCE_KB_MODE = mode if mode in ('per_user', 'shared') else 'per_user'
-    if form_data.CONFLUENCE_SHARED_KB_OWNER_ID is not None:
-        c.CONFLUENCE_SHARED_KB_OWNER_ID = form_data.CONFLUENCE_SHARED_KB_OWNER_ID.strip()
     return await get_confluence_config(request, user)
 
 

@@ -116,6 +116,15 @@ class SyncScheduler:
                 if result.get('error'):
                     if result.get('needs_reauth'):
                         log.warning('KB %s needs re-authorization', kb.id)
+                    elif result.get('transient'):
+                        # Connectivity loss — the worker already recorded a
+                        # friendly status. One WARNING line, no traceback; the
+                        # next scheduled tick retries automatically.
+                        log.warning(
+                            'Scheduled sync for KB %s skipped: %s — will retry next cycle',
+                            kb.id,
+                            result['error'],
+                        )
                     else:
                         log.error(
                             'Scheduled sync failed for KB %s: %s',
