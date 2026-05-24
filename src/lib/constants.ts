@@ -3,7 +3,17 @@ import { browser, dev } from '$app/environment';
 
 export const APP_NAME = 'Open WebUI';
 
-export const WEBUI_HOSTNAME = browser ? (dev ? `${location.hostname}:8080` : ``) : '';
+// In dev mode the FE makes cross-port absolute URLs to the BE
+// (bypassing Vite's proxy). Default to :8080 — the standard
+// `open-webui dev` port — but allow override via VITE_OWUI_BE_PORT so
+// soev's multi-stack dev workflow (per-stack BE on an allocated port
+// like :18180) works without a config fork. Vite exposes VITE_* env
+// vars to client code at build/start time.
+export const WEBUI_HOSTNAME = browser
+	? dev
+		? `${location.hostname}:${import.meta.env.VITE_OWUI_BE_PORT ?? '8080'}`
+		: ``
+	: '';
 export const WEBUI_BASE_URL = browser ? (dev ? `http://${WEBUI_HOSTNAME}` : ``) : ``;
 export const WEBUI_API_BASE_URL = `${WEBUI_BASE_URL}/api/v1`;
 
