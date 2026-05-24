@@ -103,7 +103,15 @@
 					history.messages[assistantId].uiBlocks = [...existing, block];
 					history = history;
 				} else if (event.type === 'draft') {
-					onComplete(event.draft);
+					// Forward the user's interview-time attachments as
+					// the draft's knowledge list. SimpleModelEditor picks
+					// this up on mount and seeds the Knowledge picker.
+					const attached = files.filter(
+						(f) =>
+							(f?.type === 'collection' || f?.type === 'file') &&
+							f?.status !== 'uploading'
+					);
+					onComplete({ ...event.draft, knowledge: attached });
 					return;
 				}
 			}
