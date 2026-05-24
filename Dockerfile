@@ -127,8 +127,11 @@ RUN chown -R $UID:$GID /app $HOME
 # --only-upgrade on libcap2/libsystemd0/libudev1 pulls security-fixed versions
 # already published for bookworm (CVE-2026-4878, CVE-2026-29111) without
 # upgrading unrelated packages from the base image.
+# libgnutls30 added for: CVE-2026-33845 (CRITICAL DTLS DoS), CVE-2026-42010
+# (CRITICAL auth-bypass via NUL), CVE-2026-33846/CVE-2026-3833/CVE-2026-42009
+# (HIGH), all fixed in 3.7.9-2+deb12u7.
 RUN apt-get update && \
-    apt-get install --only-upgrade -y libcap2 libsystemd0 libudev1 && \
+    apt-get install --only-upgrade -y libcap2 libsystemd0 libudev1 libgnutls30 && \
     apt-get install -y --no-install-recommends \
     git build-essential pandoc gcc netcat-openbsd curl jq \
     libmariadb-dev \
