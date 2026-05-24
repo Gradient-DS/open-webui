@@ -42,12 +42,17 @@
 	 * download, web-page index) are out of scope for the interview
 	 * MVP and silently no-op.
 	 */
-	const handleOnUpload = (e: { type?: string; data?: any } | any) => {
+	const handleOnUpload = (e: { type?: string; data?: unknown }) => {
 		if (!e || !e.type) return;
 		const data = e.data;
 		if (Array.isArray(data)) {
 			files = [...files, ...data];
-		} else if (data && typeof data === 'object' && data.id) {
+		} else if (
+			data &&
+			typeof data === 'object' &&
+			'id' in data &&
+			(data as { id?: unknown }).id
+		) {
 			files = [...files, data];
 		}
 	};

@@ -11,7 +11,7 @@ export type OnboardingMessage = { role: 'user' | 'assistant'; content: string };
 
 export type OnboardingEvent =
 	| { type: 'content'; text: string }
-	| { type: 'ui_block'; name: string; props: Record<string, any> }
+	| { type: 'ui_block'; name: string; props: Record<string, unknown> }
 	| { type: 'draft'; draft: any }
 	| { type: 'done' };
 
