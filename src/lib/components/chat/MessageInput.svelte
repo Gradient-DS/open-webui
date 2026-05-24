@@ -1880,7 +1880,7 @@
 
 									<div class="ml-1 flex gap-1.5">
 										<!-- Pinned items -->
-										{#each $settings?.pinnedInputItems ?? [] as itemId}
+										{#each ($settings?.pinnedInputItems ?? []).filter((id) => inputMenuRestrictTo === null || inputMenuRestrictTo.includes(id)) as itemId}
 											{#if itemId === 'upload_files' && fileUploadEnabled}
 												<Tooltip content={$i18n.t('Upload Files')} placement="top">
 													<button
