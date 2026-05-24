@@ -1933,7 +1933,7 @@
 								{:else}
 									<Badge type="muted" content={$i18n.t('Local')} />
 								{/if}
-								{#if activeProvider && $config?.[activeProvider.configKey]?.has_client_secret}
+								{#if activeProvider && $config?.[activeProvider.configKey]?.has_client_secret && knowledge?.write_access}
 									{#if activeState?.bgSyncNeedsReauth}
 										<button
 											class="text-xs text-red-500 hover:text-red-600 flex items-center gap-1"

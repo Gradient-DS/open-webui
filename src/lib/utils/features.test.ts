@@ -58,6 +58,20 @@ describe('isFeatureEnabled', () => {
 		vi.mocked(get).mockReturnValue({});
 		expect(isFeatureEnabled('voice')).toBe(false);
 	});
+
+	it('returns true when simple_assistant_builder is enabled', () => {
+		vi.mocked(get).mockReturnValue({
+			features: { feature_simple_assistant_builder: true }
+		});
+		expect(isFeatureEnabled('simple_assistant_builder')).toBe(true);
+	});
+
+	it('returns false when simple_assistant_builder is disabled', () => {
+		vi.mocked(get).mockReturnValue({
+			features: { feature_simple_assistant_builder: false }
+		});
+		expect(isFeatureEnabled('simple_assistant_builder')).toBe(false);
+	});
 });
 
 describe('hasFeatureAccess', () => {

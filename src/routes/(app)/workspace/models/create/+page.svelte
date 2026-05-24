@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { toast } from 'svelte-sonner';
 	import { goto } from '$app/navigation';
+	import { page } from '$app/stores';
 	import { config, models, settings } from '$lib/stores';
 	import { isFeatureEnabled } from '$lib/utils/features';
 	import { WEBUI_BASE_URL } from '$lib/constants';
@@ -17,8 +18,15 @@
 	import { updateUserSettings } from '$lib/apis/users';
 
 	import ModelEditor from '$lib/components/workspace/Models/ModelEditor.svelte';
+	import AssistantWizard from '$lib/components/workspace/Models/AssistantWizard.svelte';
 
 	const i18n = getContext('i18n');
+
+	$: useSimpleBuilder =
+		isFeatureEnabled('simple_assistant_builder') &&
+		$page.url.searchParams.get('advanced') === null;
+
+	const goToAdvanced = () => goto('/workspace/models/create?advanced=true');
 
 	const onSubmit = async (modelInfo) => {
 		if ($models.find((m) => m.id === modelInfo.id)) {
@@ -70,7 +78,13 @@
 				}
 
 				toast.success($i18n.t('Model created successfully!'));
-				await goto('/workspace/models');
+				// Land on the edit page for the just-created assistant
+				// rather than the models list. Pairs with the simple
+				// builder's auto-save on entry — the wizard auto-saves
+				// then we transition into a saved/edit view where the
+				// Share button is visible and the Save button only
+				// reappears after real edits.
+				await goto(`/workspace/models/edit?id=${encodeURIComponent(modelInfo.id)}`);
 			}
 		}
 	};
@@ -116,6 +130,10 @@
 	});
 </script>
 
-{#key model}
-	<ModelEditor {model} {onSubmit} />
-{/key}
+{#if useSimpleBuilder}
+	<AssistantWizard {onSubmit} onAdvanced={goToAdvanced} />
+{:else}
+	{#key model}
+		<ModelEditor {model} {onSubmit} />
+	{/key}
+{/if}

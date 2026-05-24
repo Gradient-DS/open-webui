@@ -281,6 +281,7 @@ openWebui:
     featureAdminSettingsTabs: "models,tools,interface,db,email,acceptance,security"
     featureWebpageUrl: "True"
     featureReferenceChats: "True"
+    featureSimpleAssistantBuilder: "False"
     featureInputMenu: "True"
     featureTemporaryChat: "True"
     featureToolServers: "False"

@@ -391,7 +391,6 @@ from open_webui.config import (
     CONFLUENCE_BASIC_AUTH_USERNAME,
     CONFLUENCE_BASIC_AUTH_API_TOKEN,
     CONFLUENCE_KB_MODE,
-    CONFLUENCE_SHARED_KB_OWNER_ID,
     ENABLE_EMAIL_INVITES,
     EMAIL_FROM_ADDRESS,
     EMAIL_FROM_NAME,
@@ -565,6 +564,7 @@ from open_webui.config import (
     FEATURE_SKILLS,
     FEATURE_WEBPAGE_URL,
     FEATURE_REFERENCE_CHATS,
+    FEATURE_SIMPLE_ASSISTANT_BUILDER,
     FEATURE_TOOL_SERVERS,
     FEATURE_TERMINAL_SERVERS,
     FEATURE_USER_DEMOGRAPHICS,
@@ -1482,7 +1482,6 @@ app.state.config.CONFLUENCE_SITE_URL = CONFLUENCE_SITE_URL
 app.state.config.CONFLUENCE_BASIC_AUTH_USERNAME = CONFLUENCE_BASIC_AUTH_USERNAME
 app.state.config.CONFLUENCE_BASIC_AUTH_API_TOKEN = CONFLUENCE_BASIC_AUTH_API_TOKEN
 app.state.config.CONFLUENCE_KB_MODE = CONFLUENCE_KB_MODE
-app.state.config.CONFLUENCE_SHARED_KB_OWNER_ID = CONFLUENCE_SHARED_KB_OWNER_ID
 
 app.state.config.ENABLE_EMAIL_INVITES = ENABLE_EMAIL_INVITES
 app.state.config.EMAIL_FROM_ADDRESS = EMAIL_FROM_ADDRESS
@@ -2777,6 +2776,7 @@ async def get_app_config(request: Request):
                     'feature_chat_controls_sections': FEATURE_CHAT_CONTROLS_SECTIONS,
                     'feature_webpage_url': FEATURE_WEBPAGE_URL,
                     'feature_reference_chats': FEATURE_REFERENCE_CHATS,
+                    'feature_simple_assistant_builder': FEATURE_SIMPLE_ASSISTANT_BUILDER,
                     'feature_input_menu': FEATURE_INPUT_MENU,
                     'feature_temporary_chat': FEATURE_TEMPORARY_CHAT,
                     'feature_tool_servers': FEATURE_TOOL_SERVERS,

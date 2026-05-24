@@ -25,7 +25,8 @@ export type Feature =
 	| 'input_menu'
 	| 'temporary_chat'
 	| 'builtin_tools'
-	| 'agent_picker';
+	| 'agent_picker'
+	| 'simple_assistant_builder';
 
 /**
  * Check if a feature is enabled globally.
