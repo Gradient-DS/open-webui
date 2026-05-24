@@ -93,7 +93,12 @@
 		const assistantId = appendMessage('assistant', '');
 		try {
 			let answer = '';
-			for await (const event of streamOnboarding(localStorage.token, chatId, agentTranscript)) {
+			for await (const event of streamOnboarding(
+				localStorage.token,
+				chatId,
+				agentTranscript,
+				files
+			)) {
 				if (event.type === 'content') {
 					answer += event.text;
 					history.messages[assistantId].content = answer;

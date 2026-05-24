@@ -58,8 +58,14 @@ export function interpretOnboardingEvent(parsed: {
 export async function* streamOnboarding(
 	token: string,
 	chatId: string,
-	messages: OnboardingMessage[]
+	messages: OnboardingMessage[],
+	files: Array<Record<string, unknown>> = []
 ): AsyncGenerator<OnboardingEvent> {
+	// Strip placeholders for files still uploading — the server's
+	// _build_attached_sources expects resolved id/type entries. Keep
+	// every shape the OpenWebUI request body uses ('file', 'collection',
+	// 'doc', 'note', …); the route filters to file/collection itself.
+	const payloadFiles = files.filter((f) => f && f['status'] !== 'uploading' && f['id']);
 	const res = await fetch(`${WEBUI_API_BASE_URL}/agent/chat/completions`, {
 		method: 'POST',
 		headers: {
@@ -70,7 +76,8 @@ export async function* streamOnboarding(
 			agent: 'assistant_onboarding',
 			chat_id: chatId,
 			stream: true,
-			messages
+			messages,
+			files: payloadFiles
 		})
 	});
 
