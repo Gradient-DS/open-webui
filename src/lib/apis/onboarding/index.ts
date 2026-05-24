@@ -11,6 +11,7 @@ export type OnboardingMessage = { role: 'user' | 'assistant'; content: string };
 
 export type OnboardingEvent =
 	| { type: 'content'; text: string }
+	| { type: 'ui_block'; name: string; props: Record<string, any> }
 	| { type: 'draft'; draft: any }
 	| { type: 'done' };
 
@@ -22,6 +23,17 @@ export function interpretOnboardingEvent(parsed: {
 	if (parsed.event === 'assistant_draft') {
 		try {
 			return { type: 'draft', draft: JSON.parse(parsed.data) };
+		} catch {
+			return null;
+		}
+	}
+	if (parsed.event === 'present_ui') {
+		try {
+			const payload = JSON.parse(parsed.data);
+			if (payload?.name && payload?.props) {
+				return { type: 'ui_block', name: payload.name, props: payload.props };
+			}
+			return null;
 		} catch {
 			return null;
 		}
