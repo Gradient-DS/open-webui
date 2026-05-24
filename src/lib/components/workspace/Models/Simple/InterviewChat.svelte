@@ -214,10 +214,20 @@
 		display: none !important;
 	}
 
-	/* Empty the MessageInput toolbar (+ menu, pinned tools, RAG filter,
-	   web search) but keep its flex slot, so the send button stays on
-	   the right — like the chat input with every control turned off. */
-	:global(.onboarding-chat .max-w-\[80\%\] > *) {
+	/* Hide MessageInput toolbar controls that don't apply to the
+	   assistant-building flow. The `+` menu (Upload / Knowledge /
+	   Webpage / etc.) stays visible so users can attach files and KBs.
+	   These selectors are a starting point — finalised during smoke
+	   testing if any controls slip through. */
+
+	/* RAG filter button — assistant builder controls its own filters. */
+	:global(.onboarding-chat button[aria-label='RAG Filters']),
+	:global(.onboarding-chat button[aria-label='RAG-filters']) {
+		display: none !important;
+	}
+
+	/* Per-model valves — irrelevant during onboarding. */
+	:global(.onboarding-chat #model-valves-button) {
 		display: none !important;
 	}
 </style>
