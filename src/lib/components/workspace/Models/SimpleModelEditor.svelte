@@ -65,6 +65,20 @@
 			.replace(/[^a-z0-9]+/g, '-')
 			.replace(/^-+|-+$/g, '');
 
+	/**
+	 * Slugify the name and avoid colliding with an existing model id.
+	 * Appends a short random suffix only when a clean slug would clash —
+	 * keeps the URL pretty for first-of-its-kind names. Belt-and-
+	 * suspenders for the wizard auto-save path where the LLM may
+	 * regenerate the same draft name across users.
+	 */
+	const uniqueSlug = (base: string): string => {
+		const slug = slugify(base);
+		if (!slug) return slug;
+		if (!$models.find((m: any) => m?.id === slug)) return slug;
+		return `${slug}-${crypto.randomUUID().slice(0, 6)}`;
+	};
+
 	onMount(async () => {
 		if (model) {
 			mergeBase = JSON.parse(JSON.stringify(model));
@@ -79,7 +93,7 @@
 		} else if (draft) {
 			// Fresh assistant pre-filled by the onboarding agent.
 			name = draft.name ?? '';
-			id = slugify(name);
+			id = uniqueSlug(name);
 			description = draft.description ?? '';
 			system = draft.system_prompt ?? '';
 			// Interview-time attachments (KBs picked + files uploaded
@@ -154,7 +168,7 @@
 			return;
 		}
 		if (id.trim() === '') {
-			id = slugify(name);
+			id = uniqueSlug(name);
 		}
 		if (knowledge.some((item) => item.status === 'uploading')) {
 			toast.error($i18n.t('Please wait until all files are uploaded.'));
