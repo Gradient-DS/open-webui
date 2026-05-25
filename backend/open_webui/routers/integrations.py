@@ -3,7 +3,7 @@ import json
 import logging
 import time
 import uuid
-from typing import Optional
+from typing import NamedTuple, Optional
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
 from langchain_core.documents import Document
@@ -577,19 +577,25 @@ def _process_full_document(
     return {'source_id': doc.source_id, 'file_id': file_id, 'status': status}
 
 
+class PersistResult(NamedTuple):
+    saved: int
+    skipped: int
+
+
 def _persist_attachments(
     *,
     file_id: str,
     manifest: list[IngestAttachmentManifest],
     part_lookup: dict[str, UploadFile],
-) -> tuple[int, int]:
+) -> PersistResult:
     """Persist a document's attachment bytes to Storage + DB.
 
-    Best-effort: missing parts or Storage failures are logged and skipped;
-    the document ingest stays successful. Existing attachments for
-    file_id are deleted first so re-upload regenerates cleanly.
+    Best-effort: missing parts, Storage failures, and DB insert failures
+    are logged + skipped; the document ingest stays successful. Existing
+    attachments for file_id are deleted first so re-upload regenerates
+    cleanly.
 
-    Returns (saved, skipped).
+    Returns (saved, skipped) counts as a NamedTuple.
     """
     FileAttachments.delete_attachments_by_file_id(file_id)
 
@@ -606,14 +612,28 @@ def _persist_attachments(
             )
             skipped += 1
             continue
+
+        # Reset stream: FastAPI leaves the SpooledTemporaryFile at EOF
+        # after reading the multipart body, so without this seek the
+        # subsequent Storage.upload_file would receive an empty stream.
+        part.file.seek(0)
+        storage_filename = f'{uuid.uuid4()}-{entry.part_name}'
         try:
-            part.file.seek(0)
-            storage_filename = f'{uuid.uuid4()}-{entry.part_name}'
             _, path = Storage.upload_file(
                 part.file,
                 storage_filename,
                 tags={'file_id': file_id, 'kind': entry.kind},
             )
+        except Exception:
+            log.exception(
+                'storage upload failed for attachment (file_id=%s, part=%s)',
+                file_id,
+                entry.part_name,
+            )
+            skipped += 1
+            continue
+
+        try:
             FileAttachments.insert_new_attachment(
                 FileAttachmentForm(
                     id=str(uuid.uuid4()),
@@ -626,15 +646,18 @@ def _persist_attachments(
                     path=path,
                 ),
             )
-            saved += 1
         except Exception:
             log.exception(
-                'failed to persist attachment (file_id=%s, part=%s)',
+                'db insert failed after successful upload — leaking storage object at %s (file_id=%s, part=%s)',
+                path,
                 file_id,
                 entry.part_name,
             )
             skipped += 1
-    return saved, skipped
+            continue
+
+        saved += 1
+    return PersistResult(saved=saved, skipped=skipped)
 
 
 # --- Endpoints ---

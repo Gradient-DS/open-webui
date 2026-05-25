@@ -61,7 +61,7 @@ def test_ingest_document_base_attachments_default_empty():
 
 
 from io import BytesIO
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, call, patch
 from fastapi import UploadFile
 
 
@@ -141,7 +141,7 @@ def test_persist_attachments_skips_storage_failure(mock_storage, mock_attachment
         )
 
     assert (saved, skipped) == (0, 1)
-    assert any('failed to persist attachment' in r.message for r in caplog.records)
+    assert any('storage upload failed' in r.message for r in caplog.records)
     mock_attachments.insert_new_attachment.assert_not_called()
 
 
@@ -158,4 +158,4 @@ def test_persist_attachments_replaces_on_reupload(mock_storage, mock_attachments
 
     # The prior-batch deletion must fire BEFORE any new insert so a
     # re-upload never leaves both old and new rows.
-    assert mock_attachments.method_calls[0][0] == 'delete_attachments_by_file_id'
+    assert mock_attachments.method_calls[0] == call.delete_attachments_by_file_id('file-1')
