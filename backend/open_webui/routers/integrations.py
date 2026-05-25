@@ -660,6 +660,19 @@ def _persist_attachments(
     return PersistResult(saved=saved, skipped=skipped)
 
 
+def _typed_document(doc: dict, data_type: str) -> IngestDocumentBase:
+    """Re-validate a raw document dict as its typed subclass."""
+    if data_type == 'parsed_text':
+        return ParsedTextDocument(**doc)
+    if data_type == 'chunked_text':
+        return ChunkedTextDocument(**doc)
+    if data_type == 'full_documents':
+        return FullDocument(**doc)
+    # Fall back to the base — preserves attachments while not crashing
+    # on unknown data_types (the endpoint already validates above).
+    return IngestDocumentBase(**doc)
+
+
 # --- Endpoints ---
 
 
@@ -669,6 +682,7 @@ def ingest_documents(
     data: str = Form(...),
     files: Optional[list[UploadFile]] = File(None),
     original_files: Optional[list[UploadFile]] = File(None),
+    attachments: Optional[list[UploadFile]] = File(None),
     principal=Depends(get_integration_principal),
 ):
     # Parse JSON from form field
@@ -684,6 +698,7 @@ def ingest_documents(
     # lookup once so the dispatch loops below stay O(documents) rather
     # than O(documents * files).
     original_file_lookup = {f.filename: f for f in (original_files or []) if f.filename}
+    attachment_lookup = {f.filename: f for f in (attachments or []) if f.filename}
 
     if isinstance(principal, LoaderPrincipal):
         user = principal.user
@@ -788,6 +803,14 @@ def ingest_documents(
                 user_id=user.id,
                 original_file=original_file_lookup.get(doc.source_id),
             )
+            if result.get('status') != 'error' and doc.attachments:
+                outcome = _persist_attachments(
+                    file_id=result['file_id'],
+                    manifest=doc.attachments,
+                    part_lookup=attachment_lookup,
+                )
+                result['attachments_saved'] = outcome.saved
+                result['attachments_skipped'] = outcome.skipped
             results.append(result)
 
     elif data_type == 'chunked_text':
@@ -808,6 +831,14 @@ def ingest_documents(
                 user_id=user.id,
                 original_file=original_file_lookup.get(doc.source_id),
             )
+            if result.get('status') != 'error' and doc.attachments:
+                outcome = _persist_attachments(
+                    file_id=result['file_id'],
+                    manifest=doc.attachments,
+                    part_lookup=attachment_lookup,
+                )
+                result['attachments_saved'] = outcome.saved
+                result['attachments_skipped'] = outcome.skipped
             results.append(result)
 
     elif data_type == 'full_documents':
@@ -843,6 +874,14 @@ def ingest_documents(
                 upload_file=upload,
                 user_id=user.id,
             )
+            if result.get('status') != 'error' and doc.attachments:
+                outcome = _persist_attachments(
+                    file_id=result['file_id'],
+                    manifest=doc.attachments,
+                    part_lookup=attachment_lookup,
+                )
+                result['attachments_saved'] = outcome.saved
+                result['attachments_skipped'] = outcome.skipped
             results.append(result)
 
         # Check for unmatched uploaded files

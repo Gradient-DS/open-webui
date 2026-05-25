@@ -159,3 +159,127 @@ def test_persist_attachments_replaces_on_reupload(mock_storage, mock_attachments
     # The prior-batch deletion must fire BEFORE any new insert so a
     # re-upload never leaves both old and new rows.
     assert mock_attachments.method_calls[0] == call.delete_attachments_by_file_id('file-1')
+
+
+import json as _json
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
+
+
+@pytest.fixture
+def ingest_app(monkeypatch):
+    """Mount only the integrations router with the dependency overrides
+    needed to exercise the attachment-handling path.
+    """
+    from open_webui.routers import integrations as integrations_router
+    from open_webui.utils.service_auth import LoaderPrincipal, get_integration_principal
+
+    user = MagicMock(
+        id='user-1', email='lex@gradient-ds.com', role='user', name='Lex', info={'integration_provider': 'onedrive'}
+    )
+    principal = LoaderPrincipal(user=user, provider_slug='onedrive')
+
+    app = FastAPI()
+    app.include_router(integrations_router.router, prefix='/api/v1/integrations')
+    app.dependency_overrides[get_integration_principal] = lambda: principal
+
+    # Provide a minimal app.state.config so the endpoint doesn't crash
+    # when reading INTEGRATION_PROVIDERS (LoaderPrincipal branch).
+    app.state.config = MagicMock(INTEGRATION_PROVIDERS={})
+
+    # Knowledge layer + text-save layer are out of scope for these tests.
+    monkeypatch.setattr(
+        integrations_router,
+        '_find_kb_by_source_id',
+        lambda *_a, **_k: MagicMock(id='kb-1', name='kb', meta={}),
+    )
+    monkeypatch.setattr(
+        integrations_router.Knowledges,
+        'get_knowledge_by_id',
+        lambda *_a, **_k: None,
+    )
+    monkeypatch.setattr(
+        integrations_router.Knowledges,
+        'get_files_by_id',
+        lambda *_a, **_k: [],
+    )
+    # Stub the per-data-type document processors so they return a file_id
+    # and status='completed' without touching the real KB / vector DB.
+    for name in ('_process_parsed_text_document', '_process_chunked_text_document', '_process_full_document'):
+        if hasattr(integrations_router, name):
+            monkeypatch.setattr(
+                integrations_router,
+                name,
+                lambda doc, *a, **k: {
+                    'source_id': doc['source_id'] if isinstance(doc, dict) else doc.source_id,
+                    'file_id': f'f-{doc["source_id"] if isinstance(doc, dict) else doc.source_id}',
+                    'status': 'completed',
+                },
+            )
+
+    return app
+
+
+def test_ingest_endpoint_persists_attachments(ingest_app, monkeypatch):
+    from open_webui.routers import integrations as integrations_router
+
+    persisted = []
+
+    def fake_persist(*, file_id, manifest, part_lookup):
+        persisted.append((file_id, [m.part_name for m in manifest], sorted(part_lookup)))
+        return integrations_router.PersistResult(saved=len(manifest), skipped=0)
+
+    monkeypatch.setattr(integrations_router, '_persist_attachments', fake_persist)
+
+    body = {
+        'collection': {
+            'source_id': 'col-1',
+            'name': 'Test',
+            'data_type': 'parsed_text',
+        },
+        'documents': [
+            {
+                'source_id': 'doc-1',
+                'filename': 'S.ifc',
+                'text': 'plain text',
+                'attachments': [
+                    {
+                        'kind': 'plan_png',
+                        'storey': 'L1',
+                        'part_name': 'doc-1__plan_png__L1__0',
+                        'content_type': 'image/png',
+                        'caption': '',
+                    },
+                    {
+                        'kind': 'axon_png',
+                        'storey': None,
+                        'part_name': 'doc-1__axon_png___1',
+                        'content_type': 'image/png',
+                        'caption': '',
+                    },
+                ],
+            }
+        ],
+    }
+    client = TestClient(ingest_app)
+    res = client.post(
+        '/api/v1/integrations/ingest',
+        data={'data': _json.dumps(body)},
+        files=[
+            ('attachments', ('doc-1__plan_png__L1__0', b'fakePNG', 'image/png')),
+            ('attachments', ('doc-1__axon_png___1', b'fakePNG2', 'image/png')),
+        ],
+    )
+
+    assert res.status_code == 200, res.text
+    assert persisted == [
+        (
+            'f-doc-1',
+            ['doc-1__plan_png__L1__0', 'doc-1__axon_png___1'],
+            sorted(['doc-1__plan_png__L1__0', 'doc-1__axon_png___1']),
+        )
+    ]
+    body = res.json()
+    doc_result = body['documents'][0] if 'documents' in body else body[0]
+    assert doc_result['attachments_saved'] == 2
+    assert doc_result['attachments_skipped'] == 0
