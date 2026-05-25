@@ -41,6 +41,22 @@ class IngestCollection(BaseModel):
     access_control: Optional[dict] = {}
 
 
+class IngestAttachmentManifest(BaseModel):
+    """One render artefact attached to a document.
+
+    Manifest entries live inside each document in the ``data`` JSON
+    body; their bytes ride on the multipart envelope under field name
+    ``attachments``. ``part_name`` is the multipart filename the
+    receiver uses to find the matching ``UploadFile``.
+    """
+
+    kind: str
+    content_type: str = 'image/png'
+    storey: Optional[str] = None
+    caption: str = ''
+    part_name: str
+
+
 class IngestDocumentBase(BaseModel):
     source_id: str
     filename: str
@@ -52,6 +68,7 @@ class IngestDocumentBase(BaseModel):
     modified_at: Optional[str] = None
     tags: list[str] = []
     metadata: dict = {}
+    attachments: list[IngestAttachmentManifest] = []
 
 
 class ParsedTextDocument(IngestDocumentBase):
