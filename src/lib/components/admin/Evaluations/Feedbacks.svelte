@@ -297,23 +297,9 @@
 							exportHandler();
 						}}
 					>
-						<svelte:fragment slot="trigger" let:selectedLabel>
-							<span
-								class="inline-flex h-input px-0.5 w-full outline-hidden bg-transparent truncate placeholder-gray-400 focus:outline-hidden"
-							>
-								{selectedLabel}
-							</span>
-							<ChevronDown className="size-3.5" strokeWidth="2.5" />
-						</svelte:fragment>
-
-						<svelte:fragment slot="item" let:item let:selected>
-							{item.label}
-							<div class="ml-auto {selected ? '' : 'invisible'}">
-								<Check />
-							</div>
-						</svelte:fragment>
-					</Select>
-				</div>
+						<Download className="size-3" />
+					</button>
+				</Tooltip>
 			</div>
 		{/if}
 
@@ -441,7 +427,7 @@
 										</div>
 									</Tooltip>
 								</div>
-							</th>
+							</td>
 
 							<td class=" py-1 pl-3 flex flex-col">
 								<div class="flex flex-col items-start gap-0.5 h-full">
@@ -478,31 +464,25 @@
 										{/if}
 									</div>
 								</div>
-							</th>
-
-							<td class="px-3 py-1 text-right font-medium text-gray-900 dark:text-white w-max">
-								<div class=" flex justify-end">
-									{#if feedback?.data?.rating?.toString() === '1'}
-										<Badge type="info" content={$i18n.t('Won')} />
-									{:else if feedback?.data?.rating?.toString() === '0'}
-										<Badge type="muted" content={$i18n.t('Draw')} />
-									{:else if feedback?.data?.rating?.toString() === '-1'}
-										<Badge type="error" content={$i18n.t('Lost')} />
-									{/if}
-								</div>
 							</td>
 
-								<td class=" py-1 pl-3 flex flex-col">
-									<div class="flex flex-col items-start gap-0.5 h-full">
-										<div class="flex flex-col h-full">
-											{#if feedback.data?.sibling_model_ids}
-												<Tooltip content={feedback.data?.model_id} placement="top-start">
-													<div
-														class="font-medium text-gray-600 dark:text-gray-400 flex-1 line-clamp-1"
-													>
-														{feedback.data?.model_id}
-													</div>
-												</Tooltip>
+							{#if feedback?.data?.rating}
+								<td class="px-3 py-1 text-right font-medium text-gray-900 dark:text-white w-max">
+									<div class=" flex justify-end">
+										{#if feedback?.data?.rating?.toString() === '1'}
+											<Badge type="info" content={$i18n.t('Won')} />
+										{:else if feedback?.data?.rating?.toString() === '0'}
+											<Badge type="muted" content={$i18n.t('Draw')} />
+										{:else if feedback?.data?.rating?.toString() === '-1'}
+											<Badge type="error" content={$i18n.t('Lost')} />
+										{/if}
+									</div>
+								</td>
+							{/if}
+
+							<td class=" px-3 py-1 text-right font-medium">
+								{dayjs(feedback.updated_at * 1000).fromNow()}
+							</td>
 
 							<td class=" px-3 py-1 text-right font-medium" on:click={(e) => e.stopPropagation()}>
 								<FeedbackMenu
@@ -513,24 +493,20 @@
 									<button
 										class="self-center w-fit text-sm p-1.5 dark:text-gray-300 dark:hover:text-white hover:bg-black/5 dark:hover:bg-white/5 rounded-xl"
 									>
-										<button
-											class="self-center w-fit text-sm p-1.5 dark:text-gray-300 dark:hover:text-white hover:bg-black/5 dark:hover:bg-white/5 rounded-xl"
-										>
-											<EllipsisHorizontal />
-										</button>
-									</FeedbackMenu>
-								</td>
-							</tr>
+										<EllipsisHorizontal />
+									</button>
+								</FeedbackMenu>
+							</td>
+						</tr>
 						{/each}
 					</tbody>
 				</table>
 			{/if}
 		</div>
 
-		{#if total > 30}
-			<Pagination bind:page count={total} perPage={30} />
+		{#if msgTotal > 30}
+			<Pagination bind:page={msgPage} count={msgTotal} perPage={30} />
 		{/if}
-	</div>
 
 	{#if msgTotal > 0 && $config?.features?.enable_community_sharing}
 		<div class=" flex flex-col justify-end w-full text-right gap-1">
