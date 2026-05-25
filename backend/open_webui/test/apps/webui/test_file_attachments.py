@@ -206,7 +206,7 @@ def test_files_delete_file_by_id_cascades_to_attachments(monkeypatch):
             cascaded_for.append(file_id)
             return 0
 
-    monkeypatch.setattr(files_mod, 'FileAttachments', SpyAttachments, raising=False)
+    monkeypatch.setattr('open_webui.models.file_attachments.FileAttachments', SpyAttachments)
 
     # Don't actually touch a DB; stub the inner query so the method returns True.
     class StubQuery:
@@ -238,18 +238,18 @@ def test_files_delete_file_by_id_cascades_to_attachments(monkeypatch):
     assert cascaded_for == ['file-cascade-1']
 
 
-def test_files_delete_files_by_ids_cascades_per_id(monkeypatch):
+def test_files_delete_files_by_ids_cascades_in_bulk(monkeypatch):
     from open_webui.models import files as files_mod
 
-    cascaded_for: list[str] = []
+    bulk_calls: list[tuple] = []
 
     class SpyAttachments:
         @staticmethod
-        def delete_attachments_by_file_id(file_id, db=None):
-            cascaded_for.append(file_id)
+        def delete_attachments_by_file_ids(file_ids, db=None):
+            bulk_calls.append((file_ids, db))
             return 0
 
-    monkeypatch.setattr(files_mod, 'FileAttachments', SpyAttachments, raising=False)
+    monkeypatch.setattr('open_webui.models.file_attachments.FileAttachments', SpyAttachments)
 
     class StubQuery:
         def filter(self, *_a, **_kw):
@@ -274,7 +274,9 @@ def test_files_delete_files_by_ids_cascades_per_id(monkeypatch):
     monkeypatch.setattr(files_mod, 'get_db_context', lambda _db=None: StubSession())
 
     assert files_mod.Files.delete_files_by_ids(['a', 'b', 'c']) is True
-    assert sorted(cascaded_for) == ['a', 'b', 'c']
+    # Must be called exactly once with all ids — not per-id
+    assert len(bulk_calls) == 1
+    assert sorted(bulk_calls[0][0]) == ['a', 'b', 'c']
 
 
 def test_files_delete_all_files_calls_wipe(monkeypatch):
@@ -292,7 +294,7 @@ def test_files_delete_all_files_calls_wipe(monkeypatch):
         def delete_attachments_by_file_id(file_id, db=None):  # unused on this path
             return 0
 
-    monkeypatch.setattr(files_mod, 'FileAttachments', SpyAttachments, raising=False)
+    monkeypatch.setattr('open_webui.models.file_attachments.FileAttachments', SpyAttachments)
 
     class StubQuery:
         def delete(self, *_a, **_kw):
@@ -315,3 +317,45 @@ def test_files_delete_all_files_calls_wipe(monkeypatch):
 
     assert files_mod.Files.delete_all_files() is True
     assert wiped == [True]
+
+
+def test_files_delete_file_by_id_returns_false_when_cascade_raises(monkeypatch):
+    """If the attachment cascade fails, Files.delete_file_by_id returns False."""
+    from open_webui.models import files as files_mod
+
+    class ExplodingAttachments:
+        @staticmethod
+        def delete_attachments_by_file_id(file_id, db=None):
+            raise RuntimeError('boom')
+
+    monkeypatch.setattr(
+        'open_webui.models.file_attachments.FileAttachments',
+        ExplodingAttachments,
+    )
+
+    class StubQuery:
+        def filter_by(self, **_kw):
+            return self
+
+        def filter(self, *_a, **_kw):
+            return self
+
+        def delete(self, *_a, **_kw):
+            return 0
+
+    class StubSession:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_a):
+            return False
+
+        def query(self, *_a, **_kw):
+            return StubQuery()
+
+        def commit(self):
+            return None
+
+    monkeypatch.setattr(files_mod, 'get_db_context', lambda db=None: StubSession())
+
+    assert files_mod.Files.delete_file_by_id('file-1') is False

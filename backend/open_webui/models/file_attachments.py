@@ -136,15 +136,49 @@ class FileAttachmentsTable:
     ) -> int:
         with get_db_context(db) as session:
             rows = session.query(FileAttachment).filter(FileAttachment.file_id == file_id).all()
+            paths = [r.path for r in rows]
             for r in rows:
-                try:
-                    Storage.delete_file(r.path)
-                except Exception:
-                    log.exception('failed to delete Storage path %s for attachment %s', r.path, r.id)
-                # Storage failure is logged but not fatal: prefer an orphan
-                # storage object over a DB row that can never be cleaned up.
                 session.delete(r)
             session.commit()
+            # Storage cleanup is best-effort and post-commit: if it
+            # fails, we leak storage objects (cheap, gc-able later) but
+            # never DB rows (which nothing else cleans up).
+            for path in paths:
+                try:
+                    Storage.delete_file(path)
+                except Exception:
+                    log.exception(
+                        'failed to delete Storage path %s after attachment row deletion',
+                        path,
+                    )
+            return len(rows)
+
+    def delete_attachments_by_file_ids(
+        self,
+        file_ids: list[str],
+        db: Optional[Session] = None,
+    ) -> int:
+        """Bulk cascade for the multi-file delete path.
+
+        One DB round-trip via .in_(file_ids), one commit. Storage
+        cleanup is best-effort and post-commit, same policy as the
+        single-file variant.
+        """
+        if not file_ids:
+            return 0
+        with get_db_context(db) as session:
+            rows = session.query(FileAttachment).filter(FileAttachment.file_id.in_(file_ids)).all()
+            paths = [r.path for r in rows]
+            session.query(FileAttachment).filter(FileAttachment.file_id.in_(file_ids)).delete(synchronize_session=False)
+            session.commit()
+            for path in paths:
+                try:
+                    Storage.delete_file(path)
+                except Exception:
+                    log.exception(
+                        'failed to delete Storage path %s after attachment row deletion',
+                        path,
+                    )
             return len(rows)
 
     def delete_attachment_by_id(
@@ -156,14 +190,19 @@ class FileAttachmentsTable:
             row = session.query(FileAttachment).filter(FileAttachment.id == id).first()
             if row is None:
                 return False
-            try:
-                Storage.delete_file(row.path)
-            except Exception:
-                log.exception('failed to delete Storage path %s for attachment %s', row.path, row.id)
-            # Storage failure is logged but not fatal: prefer an orphan
-            # storage object over a DB row that can never be cleaned up.
+            path = row.path
             session.delete(row)
             session.commit()
+            # Storage cleanup is best-effort and post-commit: if it
+            # fails, we leak storage objects (cheap, gc-able later) but
+            # never DB rows (which nothing else cleans up).
+            try:
+                Storage.delete_file(path)
+            except Exception:
+                log.exception(
+                    'failed to delete Storage path %s after attachment row deletion',
+                    path,
+                )
             return True
 
     def delete_all_attachments(self, db: Optional[Session] = None) -> int:
@@ -173,21 +212,21 @@ class FileAttachmentsTable:
         Returns the count of rows that were on the way out.
         """
         with get_db_context(db) as session:
-            rows = session.query(FileAttachment).all()
-            for r in rows:
-                try:
-                    Storage.delete_file(r.path)
-                except Exception:
-                    log.exception(
-                        'failed to delete Storage path %s for attachment %s',
-                        r.path,
-                        r.id,
-                    )
-            # Storage failures are logged but not fatal: prefer orphan
-            # storage objects over DB rows that can never be cleaned up.
+            paths = [r.path for r in session.query(FileAttachment).all()]
+            count = len(paths)
             session.query(FileAttachment).delete()
             session.commit()
-            return len(rows)
+            for path in paths:
+                try:
+                    Storage.delete_file(path)
+                except Exception:
+                    # Storage failures are logged but not fatal: prefer orphan
+                    # storage objects over DB rows that can never be cleaned up.
+                    log.exception(
+                        'failed to delete Storage path %s after attachment row deletion',
+                        path,
+                    )
+            return count
 
 
 FileAttachments = FileAttachmentsTable()
