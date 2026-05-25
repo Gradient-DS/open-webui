@@ -5,6 +5,29 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Gradient-DS v1.2.0] - 2026-05-25
+
+### Merged
+
+- Upstream open-webui v0.9.5 — all v0.9.0–v0.9.5 features and security fixes, async DB refactor, psycopg-v3 driver swap, browser security-headers middleware, profile-image MIME allowlist, redirect-based SSRF defenses.
+- Calendar workspace and Scheduled Automations adopted as new modules (env-gated, see overrides below).
+
+### Preserved (Gradient-DS custom)
+
+- TOTP 2FA, GDPR data export + retention + archival, email invites via Microsoft Graph, agent proxy, typed knowledge bases, feature flags, OneDrive/Google Drive/Confluence sync, acceptance modal, sync abstraction layer.
+
+### Gradient-DS default overrides
+
+- `ENABLE_CALENDAR` — Gradient default: `False`. Upstream: `True`. Opt-in per tenant via Helm.
+- `ENABLE_AUTOMATIONS` — Gradient default: `False`. Upstream: `True`. Opt-in per tenant via Helm.
+- `ENABLE_OAUTH_BACKCHANNEL_LOGOUT` — Gradient default: `True`. Upstream: `False`. Most of our tenants use Entra and benefit from IdP-driven session invalidation.
+
+### Notes
+
+- Migration: upstream's `d4e5f6a7b8c9_add_automation_tables` was renamed locally to `d5e6f7a8b9ca` to avoid collision with our existing `d4e5f6a7b8c9_add_soft_delete_columns` revision id. A no-op merge node `0579da7f672f` parents our head (`f9a0b1c2d3e4`) and upstream's chain top (`a0b1c2d3e4f5`).
+- Three upstream files were kept at the Gradient version pending Phase 4 carve-out audit: `backend/open_webui/routers/retrieval.py`, `src/lib/components/chat/MessageInput.svelte`, `src/lib/components/chat/MessageInput/InputMenu.svelte`. Security/bugfix hunks ported as separate `[carveout-port]` commits.
+- `[soev]` extra pins for `weaviate-client` and `playwright` were aligned to upstream's `[all]` pins (4.20.3 and 1.58.0 respectively) to resolve resolver conflicts.
+
 ## [0.9.5] - 2026-05-09
 
 ### Added
