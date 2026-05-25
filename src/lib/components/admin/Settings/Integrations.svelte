@@ -22,7 +22,6 @@
 
 	import AddToolServerModal from '$lib/components/AddToolServerModal.svelte';
 	import AddTerminalServerModal from '$lib/components/AddTerminalServerModal.svelte';
-	import ConfirmDialog from '$lib/components/common/ConfirmDialog.svelte';
 
 	import {
 		getToolServerConnections,
@@ -42,8 +41,6 @@
 	let terminalConnections = [];
 	let showAddTerminalModal = false;
 	let editTerminalIdx: number | null = null;
-	let showDeleteTerminalConfirm = false;
-	let deleteTerminalIdx: number | null = null;
 
 	// Agent Proxy
 	let ENABLE_AGENT_PROXY = false;
@@ -173,8 +170,7 @@
 	}}
 	onDelete={() => {
 		if (editTerminalIdx !== null) {
-			deleteTerminalIdx = editTerminalIdx;
-			showDeleteTerminalConfirm = true;
+			removeTerminalConnection(editTerminalIdx);
 			editTerminalIdx = null;
 		}
 	}}
@@ -190,6 +186,12 @@
 	}}
 />
 
+<!-- Gradient: kept the existing `<div>` wrapper. Upstream switched this to a
+     `<form>` with an `on:submit|preventDefault={updateHandler}` handler in
+     v0.9.5 to enable Enter-to-submit semantics. Adopting that requires
+     verifying `updateHandler` is defined for the page and updating the closing
+     `</div>` at EOF to `</form>` — kept as a follow-up to avoid widening this
+     merge. -->
 <div class="flex flex-col h-full justify-between text-sm">
 	<div class=" overflow-y-scroll scrollbar-hidden h-full">
 		{#if servers !== null}

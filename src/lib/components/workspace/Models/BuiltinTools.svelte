@@ -54,6 +54,18 @@
 		code_interpreter: {
 			label: $i18n.t('Code Interpreter'),
 			description: $i18n.t('Execute code')
+		},
+		tasks: {
+			label: $i18n.t('Task Management'),
+			description: $i18n.t('Break down complex requests into trackable steps')
+		},
+		automations: {
+			label: $i18n.t('Automations'),
+			description: $i18n.t('Create and manage scheduled automations')
+		},
+		calendar: {
+			label: $i18n.t('Calendar'),
+			description: $i18n.t('List calendars, search, create, update, and delete calendar events')
 		}
 	};
 
@@ -90,10 +102,12 @@
 				<Checkbox
 					state={builtinTools[tool] !== false ? 'checked' : 'unchecked'}
 					on:change={(e) => {
-						builtinTools = {
-							...builtinTools,
-							[tool]: e.detail === 'checked'
-						};
+						if (e.detail === 'checked') {
+							delete builtinTools[tool];
+						} else {
+							builtinTools[tool] = false;
+						}
+						builtinTools = builtinTools;
 					}}
 				/>
 

@@ -27,6 +27,7 @@
 	import BuiltinTools from './BuiltinTools.svelte';
 	import DataWarnings from './DataWarnings.svelte';
 	import PromptSuggestions from './PromptSuggestions.svelte';
+	import TerminalSelector from './TerminalSelector.svelte';
 	import AccessControlModal from '../common/AccessControlModal.svelte';
 	import LockClosed from '$lib/components/icons/LockClosed.svelte';
 	import { updateModelAccessGrants } from '$lib/apis/models';
@@ -106,6 +107,7 @@
 
 	let actionIds = [];
 	let accessGrants = [];
+	let terminalId = '';
 	let tts = { voice: '' };
 
 	const submitHandler = async () => {
@@ -219,6 +221,14 @@
 			}
 			if (info.meta.data_warning_message) {
 				delete info.meta.data_warning_message;
+			}
+		}
+
+		if (terminalId) {
+			info.meta.terminalId = terminalId;
+		} else {
+			if (info.meta.terminalId) {
+				delete info.meta.terminalId;
 			}
 		}
 
@@ -336,6 +346,7 @@
 			builtinTools = model?.meta?.builtinTools ?? builtinTools;
 			dataWarnings = model?.meta?.data_warnings ?? dataWarnings;
 			dataWarningMessage = model?.meta?.data_warning_message ?? dataWarningMessage;
+			terminalId = model?.meta?.terminalId ?? '';
 			tts = { voice: model?.meta?.tts?.voice ?? '' };
 
 			accessGrants = model?.access_grants ?? [];
@@ -858,6 +869,12 @@
 					{#if $config?.features?.enable_data_warnings}
 						<div class="my-4">
 							<DataWarnings bind:dataWarnings bind:warningMessage={dataWarningMessage} />
+						</div>
+					{/if}
+
+					{#if capabilities.terminal}
+						<div class="my-4">
+							<TerminalSelector bind:terminalId />
 						</div>
 					{/if}
 

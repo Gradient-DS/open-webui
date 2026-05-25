@@ -45,6 +45,12 @@
 			label: $i18n.t('Document Writer'),
 			description: $i18n.t('Model can write and create downloadable documents')
 		},
+		terminal: {
+			label: $i18n.t('Terminal'),
+			description: $i18n.t(
+				'Model can access Open Terminal for command execution and file management'
+			)
+		},
 		usage: {
 			label: $i18n.t('Usage'),
 			description: $i18n.t(
@@ -75,6 +81,7 @@
 		image_generation?: boolean;
 		code_interpreter?: boolean;
 		document_writer?: boolean;
+		terminal?: boolean;
 		usage?: boolean;
 		citations?: boolean;
 		status_updates?: boolean;
