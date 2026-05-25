@@ -1265,7 +1265,7 @@ class BaseSyncWorker(ABC):
                 if kf.knowledge_id != self.knowledge_id:
                     log.info(f'Propagating vectors for {file_id} to KB {kf.knowledge_id}')
                     try:
-                        VECTOR_DB_CLIENT.delete(
+                        await ASYNC_VECTOR_DB_CLIENT.delete(
                             collection_name=kf.knowledge_id,
                             filter={'file_id': file_id},
                         )
@@ -2132,7 +2132,7 @@ class BaseSyncWorker(ABC):
 
             # Pre-create the KB collection so individual file inserts don't
             # race to create it (avoids N-1 wasted 422 roundtrips).
-            VECTOR_DB_CLIENT.insert(collection_name=self.knowledge_id, items=[])
+            await ASYNC_VECTOR_DB_CLIENT.insert(collection_name=self.knowledge_id, items=[])
 
             # USE_SHARED_LOADER branch: delegate everything to the per-tenant
             # loader-worker pod. The semaphore-bounded fan-out below is bypassed.

@@ -12,7 +12,7 @@ from open_webui.config import KNOWLEDGE_MAX_FILE_COUNT
 from open_webui.models.files import FileForm, Files
 from open_webui.models.knowledge import KnowledgeForm, Knowledges
 from open_webui.retrieval.loaders.main import Loader
-from open_webui.retrieval.vector.factory import VECTOR_DB_CLIENT
+from open_webui.retrieval.vector.async_client import ASYNC_VECTOR_DB_CLIENT
 from open_webui.routers.retrieval import save_docs_to_vector_db
 from open_webui.services.sync.provider import file_id_prefix_for
 from open_webui.storage.provider import Storage
@@ -258,10 +258,10 @@ async def _create_or_update_file_record(
         return 'created'
 
 
-def _delete_old_vectors(knowledge_id: str, file_id: str):
+async def _delete_old_vectors(knowledge_id: str, file_id: str):
     """Delete existing vectors for a file (idempotent update)."""
     try:
-        VECTOR_DB_CLIENT.delete(
+        await ASYNC_VECTOR_DB_CLIENT.delete(
             collection_name=knowledge_id,
             filter={'file_id': file_id},
         )
@@ -358,7 +358,7 @@ async def _process_parsed_text_document(
     )
 
     if status == 'updated':
-        _delete_old_vectors(knowledge_id, file_id)
+        await _delete_old_vectors(knowledge_id, file_id)
 
     text_hash = hashlib.sha256(doc.text.encode()).hexdigest()
     lc_doc = Document(
@@ -425,7 +425,7 @@ async def _process_chunked_text_document(
     )
 
     if status == 'updated':
-        _delete_old_vectors(knowledge_id, file_id)
+        await _delete_old_vectors(knowledge_id, file_id)
 
     text_hash = hashlib.sha256(joined_text.encode()).hexdigest()
     base_metadata = _build_base_metadata(doc, file_id, provider, user_id)
@@ -519,7 +519,7 @@ async def _process_full_document(
     )
 
     if status == 'updated':
-        _delete_old_vectors(knowledge_id, file_id)
+        await _delete_old_vectors(knowledge_id, file_id)
 
     text_hash = hashlib.sha256(extracted_text.encode()).hexdigest()
     base_metadata = _build_base_metadata(doc, file_id, provider, user_id)
@@ -802,7 +802,7 @@ async def delete_collection(
     file_ids = [f.id for f in current_files] if current_files else []
     for file_id in file_ids:
         try:
-            VECTOR_DB_CLIENT.delete(
+            await ASYNC_VECTOR_DB_CLIENT.delete(
                 collection_name=knowledge.id,
                 filter={'file_id': file_id},
             )
@@ -837,7 +837,7 @@ async def delete_document(
         raise HTTPException(404, f"Document '{document_source_id}' not found")
 
     try:
-        VECTOR_DB_CLIENT.delete(
+        await ASYNC_VECTOR_DB_CLIENT.delete(
             collection_name=knowledge.id,
             filter={'file_id': file_id},
         )
