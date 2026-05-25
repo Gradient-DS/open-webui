@@ -50,7 +50,7 @@ def _sanitize_collection_name(raw: str) -> str:
         return raw
 
 
-def _filter_to_accessible_kbs(
+async def _filter_to_accessible_kbs(
     user: UserModel,
     *,
     kb_ids: Optional[list[str]] = None,
@@ -63,8 +63,8 @@ def _filter_to_accessible_kbs(
     (research doc 2026-05-06). Owners must always see their own KBs.
     """
 
-    accessible = Knowledges.get_knowledge_bases_by_user_id(user.id, permission='read')
-    owned = Knowledges.get_knowledge_items_by_user_id(user.id)
+    accessible = await Knowledges.get_knowledge_bases_by_user_id(user.id, permission='read')
+    owned = await Knowledges.get_knowledge_items_by_user_id(user.id)
 
     seen = {kb.id for kb in accessible}
     for kb in owned:
@@ -76,10 +76,14 @@ def _filter_to_accessible_kbs(
         kb_id_set = set(kb_ids)
         accessible = [kb for kb in accessible if kb.id in kb_id_set]
 
-    return [kb for kb in accessible if not Knowledges.is_suspended(kb.id)]
+    filtered = []
+    for kb in accessible:
+        if not await Knowledges.is_suspended(kb.id):
+            filtered.append(kb)
+    return filtered
 
 
-def resolve_accessible_kbs(
+async def resolve_accessible_kbs(
     user: UserModel,
     *,
     kb_ids: Optional[list[str]] = None,
@@ -95,7 +99,7 @@ def resolve_accessible_kbs(
     list) to pick which KBs are worth querying.
     """
 
-    accessible = _filter_to_accessible_kbs(user, kb_ids=kb_ids)
+    accessible = await _filter_to_accessible_kbs(user, kb_ids=kb_ids)
     return {
         'user_id': user.id,
         'kbs': [
@@ -129,7 +133,7 @@ async def run_agent_search(
     whole query.
     """
 
-    accessible_kbs = _filter_to_accessible_kbs(user, kb_ids=kb_ids)
+    accessible_kbs = await _filter_to_accessible_kbs(user, kb_ids=kb_ids)
 
     async def embedding_function(query_text, prefix):
         return await request.app.state.EMBEDDING_FUNCTION(query_text, prefix=prefix, user=user)

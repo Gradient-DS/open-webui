@@ -164,7 +164,7 @@ async def create_session_response(
     }
 
 
-def evaluate_2fa_grace(request: Request, user, auth_record, db) -> dict:
+async def evaluate_2fa_grace(request: Request, user, auth_record, db) -> dict:
     """Evaluate the 2FA enrollment grace period for a user.
 
     When ENABLE_2FA + REQUIRE_2FA are on and the user has not enabled TOTP,
@@ -196,7 +196,7 @@ def evaluate_2fa_grace(request: Request, user, auth_record, db) -> dict:
     if started is None:
         # First time this user is seen under REQUIRE_2FA — start the clock.
         started = now
-        Auths.set_twofa_grace_started(user.id, started, db=db)
+        await Auths.set_twofa_grace_started(user.id, started, db=db)
 
     grace = compute_twofa_grace(started, config.TWO_FA_GRACE_PERIOD_DAYS, now)
     return {'gated': grace['expired'], 'grace_expires_at': grace['deadline']}
@@ -722,7 +722,7 @@ async def signin(
     if user:
         # Check if 2FA is enabled for this user
         if request.app.state.config.ENABLE_2FA:
-            auth_record = Auths.get_auth_by_user_id(user.id, db=db)
+            auth_record = await Auths.get_auth_by_user_id(user.id, db=db)
             if auth_record and auth_record.totp_enabled:
                 partial_token = create_token(
                     data={'id': user.id, 'purpose': '2fa_pending'},
@@ -741,7 +741,7 @@ async def signin(
             # return a short-lived setup token; within the grace window we cap
             # the session so it cannot outlive the deadline.
             if password_login:
-                grace = evaluate_2fa_grace(request, user, auth_record, db)
+                grace = await evaluate_2fa_grace(request, user, auth_record, db)
                 if grace['gated']:
                     setup_token = create_token(
                         data={'id': user.id, 'purpose': '2fa_setup_pending'},
@@ -875,8 +875,8 @@ async def signup(
         # past grace, so it is gated into setup straight away (same as signin).
         grace_cap = None
         if request.app.state.config.ENABLE_2FA:
-            auth_record = Auths.get_auth_by_user_id(user.id, db=db)
-            grace = evaluate_2fa_grace(request, user, auth_record, db)
+            auth_record = await Auths.get_auth_by_user_id(user.id, db=db)
+            grace = await evaluate_2fa_grace(request, user, auth_record, db)
             if grace['gated']:
                 setup_token = create_token(
                     data={'id': user.id, 'purpose': '2fa_setup_pending'},

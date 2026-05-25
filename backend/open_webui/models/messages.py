@@ -534,6 +534,17 @@ class MessageTable:
             await db.commit()
             return True
 
+    async def delete_messages_by_user_id(self, user_id: str, db: Optional[AsyncSession] = None) -> bool:
+        """Delete all messages and reactions authored by a user. Used by user-delete cascade."""
+        try:
+            async with get_async_db_context(db) as db:
+                await db.execute(delete(MessageReaction).filter(MessageReaction.user_id == user_id))
+                await db.execute(delete(Message).filter(Message.user_id == user_id))
+                await db.commit()
+                return True
+        except Exception:
+            return False
+
     async def search_messages_by_channel_ids(
         self,
         channel_ids: list[str],

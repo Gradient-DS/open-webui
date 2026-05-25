@@ -410,21 +410,16 @@ class KnowledgeTable:
             db=db,
         )
 
-    def get_knowledge_bases_by_type(self, type: str) -> list[KnowledgeModel]:
-        """Get all knowledge bases of a specific type (no pagination limit).
-
-        NOTE (Phase 1.5): sync helper used by Gradient sync schedulers; becomes
-        async in the services-async-cascade.
-        """
-        with get_db() as db:
-            return [
-                KnowledgeModel.model_validate(kb)
-                for kb in db.query(Knowledge)
+    async def get_knowledge_bases_by_type(self, type: str, db: Optional[AsyncSession] = None) -> list[KnowledgeModel]:
+        """Get all knowledge bases of a specific type (no pagination limit). Used by Gradient sync schedulers."""
+        async with get_async_db_context(db) as db:
+            result = await db.execute(
+                select(Knowledge)
                 .filter_by(type=type)
                 .filter(Knowledge.deleted_at.is_(None))
                 .order_by(Knowledge.updated_at.desc())
-                .all()
-            ]
+            )
+            return [KnowledgeModel.model_validate(kb) for kb in result.scalars().all()]
 
     async def get_knowledge_bases_by_user_id(
         self, user_id: str, permission: str = 'write', db: Optional[AsyncSession] = None
@@ -448,17 +443,17 @@ class KnowledgeTable:
                 result.append(knowledge_base)
         return result
 
-    def get_knowledge_items_by_user_id(self, user_id: str) -> list[KnowledgeModel]:
-        """Get all knowledge bases owned by a user (for deletion).
-
-        NOTE (Phase 1.5): sync helper consumed by DeletionService; becomes async
-        in the services-async-cascade. `self._to_knowledge_model` is async, so the
-        list comprehension below relies on a Phase 1.5 conversion to also await it.
-        """
+    async def get_knowledge_items_by_user_id(
+        self, user_id: str, db: Optional[AsyncSession] = None
+    ) -> list[KnowledgeModel]:
+        """Get all knowledge bases owned by a user (for deletion). Consumed by DeletionService."""
         try:
-            with get_db() as db:
-                knowledges = db.query(Knowledge).filter_by(user_id=user_id).filter(Knowledge.deleted_at.is_(None)).all()
-                return [self._to_knowledge_model(k, db=db) for k in knowledges]
+            async with get_async_db_context(db) as db:
+                result = await db.execute(
+                    select(Knowledge).filter_by(user_id=user_id).filter(Knowledge.deleted_at.is_(None))
+                )
+                knowledges = result.scalars().all()
+                return [await self._to_knowledge_model(k, db=db) for k in knowledges]
         except Exception:
             return []
 
@@ -520,30 +515,26 @@ class KnowledgeTable:
         except Exception:
             return []
 
-    def get_knowledge_files_by_file_id(self, file_id: str) -> list[KnowledgeFileModel]:
-        """Get all knowledge_file records for a given file_id.
-
-        NOTE (Phase 1.5): sync helper consumed by DeletionService.delete_file;
-        becomes async in the services-async-cascade.
-        """
+    async def get_knowledge_files_by_file_id(
+        self, file_id: str, db: Optional[AsyncSession] = None
+    ) -> list[KnowledgeFileModel]:
+        """Get all knowledge_file records for a given file_id. Consumed by DeletionService.delete_file."""
         try:
-            with get_db() as db:
-                knowledge_files = db.query(KnowledgeFile).filter_by(file_id=file_id).all()
-                return [KnowledgeFileModel.model_validate(kf) for kf in knowledge_files]
+            async with get_async_db_context(db) as db:
+                result = await db.execute(select(KnowledgeFile).filter_by(file_id=file_id))
+                return [KnowledgeFileModel.model_validate(kf) for kf in result.scalars().all()]
         except Exception:
             return []
 
-    def get_referenced_file_ids(self, file_ids: list[str]) -> set[str]:
-        """Return the subset of file_ids that still have knowledge_file references.
-
-        NOTE (Phase 1.5): sync helper consumed by DeletionService; becomes async
-        in the services-async-cascade.
-        """
+    async def get_referenced_file_ids(self, file_ids: list[str], db: Optional[AsyncSession] = None) -> set[str]:
+        """Return the subset of file_ids that still have knowledge_file references. Consumed by DeletionService."""
         if not file_ids:
             return set()
-        with get_db() as db:
-            rows = db.query(KnowledgeFile.file_id).filter(KnowledgeFile.file_id.in_(file_ids)).distinct().all()
-            return {row[0] for row in rows}
+        async with get_async_db_context(db) as db:
+            result = await db.execute(
+                select(KnowledgeFile.file_id).filter(KnowledgeFile.file_id.in_(file_ids)).distinct()
+            )
+            return {row[0] for row in result.all()}
 
     async def search_files_by_id(
         self,
@@ -739,41 +730,41 @@ class KnowledgeTable:
             log.exception(e)
             return None
 
-    def update_knowledge_user_id_by_id(self, id: str, user_id: str) -> Optional[KnowledgeModel]:
-        """Reassign a knowledge base's owner.
+    async def update_knowledge_user_id_by_id(
+        self, id: str, user_id: str, db: Optional[AsyncSession] = None
+    ) -> Optional[KnowledgeModel]:
+        """Reassign a knowledge base's owner. Used by the shared Confluence KB provisioning flow.
 
-        Used by the shared Confluence KB provisioning flow — the standard
-        ``update_knowledge_by_id`` cannot change ``user_id`` (it is not part
+        The standard ``update_knowledge_by_id`` cannot change ``user_id`` (it is not part
         of ``KnowledgeForm``). ``user_id`` may be '' for a system-owned KB.
-
-        NOTE (Phase 1.5): sync helper consumed by the Confluence shared-KB
-        bootstrapper; becomes async in the services-async-cascade.
         """
         try:
-            with get_db() as db:
-                knowledge = db.query(Knowledge).filter_by(id=id).first()
+            async with get_async_db_context(db) as db:
+                result = await db.execute(select(Knowledge).filter_by(id=id))
+                knowledge = result.scalars().first()
                 if knowledge:
                     knowledge.user_id = user_id
                     knowledge.updated_at = int(time.time())
-                    db.commit()
-                    db.refresh(knowledge)
+                    await db.commit()
+                    await db.refresh(knowledge)
                     return KnowledgeModel.model_validate(knowledge)
                 return None
         except Exception:
             return None
 
-    def update_knowledge_meta_by_id(self, id: str, meta: dict) -> Optional[KnowledgeModel]:
-        """NOTE (Phase 1.5): sync helper consumed by cloud-sync workers;
-        becomes async in the services-async-cascade.
-        """
+    async def update_knowledge_meta_by_id(
+        self, id: str, meta: dict, db: Optional[AsyncSession] = None
+    ) -> Optional[KnowledgeModel]:
+        """Update only the meta JSON on a knowledge base. Used by cloud-sync workers."""
         try:
-            with get_db() as db:
-                knowledge = db.query(Knowledge).filter_by(id=id).first()
+            async with get_async_db_context(db) as db:
+                result = await db.execute(select(Knowledge).filter_by(id=id))
+                knowledge = result.scalars().first()
                 if knowledge:
                     knowledge.meta = meta
                     knowledge.updated_at = int(time.time())
-                    db.commit()
-                    db.refresh(knowledge)
+                    await db.commit()
+                    await db.refresh(knowledge)
                     return KnowledgeModel.model_validate(knowledge)
                 return None
         except Exception:
@@ -822,85 +813,89 @@ class KnowledgeTable:
             except Exception:
                 return False
 
-    def get_pending_deletions(self, limit: int = 50) -> list[KnowledgeModel]:
+    async def get_pending_deletions(self, limit: int = 50, db: Optional[AsyncSession] = None) -> list[KnowledgeModel]:
         """Get knowledge bases marked for deletion (for cleanup worker)."""
-        with get_db() as db:
-            return [
-                KnowledgeModel.model_validate(kb)
-                for kb in db.query(Knowledge)
+        async with get_async_db_context(db) as db:
+            result = await db.execute(
+                select(Knowledge)
                 .filter(Knowledge.deleted_at.isnot(None))
                 .order_by(Knowledge.deleted_at.asc())
                 .limit(limit)
-                .all()
-            ]
+            )
+            return [KnowledgeModel.model_validate(kb) for kb in result.scalars().all()]
 
-    def get_stale_knowledge(
+    async def get_stale_knowledge(
         self,
         stale_before: int,
         limit: int = 50,
         exclude_user_ids: Optional[list[str]] = None,
+        db: Optional[AsyncSession] = None,
     ) -> list[KnowledgeModel]:
         """Find non-deleted local KBs whose updated_at is before the given timestamp.
         Only targets 'local' type — cloud KBs have their own suspension lifecycle."""
-        with get_db() as db:
-            query = (
-                db.query(Knowledge)
+        async with get_async_db_context(db) as db:
+            stmt = (
+                select(Knowledge)
                 .filter(Knowledge.deleted_at.is_(None))
                 .filter(Knowledge.updated_at < stale_before)
                 .filter(Knowledge.type == 'local')  # Cloud KBs have suspension TTL
             )
             if exclude_user_ids:
-                query = query.filter(Knowledge.user_id.notin_(exclude_user_ids))
-            return [
-                KnowledgeModel.model_validate(kb)
-                for kb in query.order_by(Knowledge.updated_at.asc()).limit(limit).all()
-            ]
+                stmt = stmt.filter(Knowledge.user_id.notin_(exclude_user_ids))
+            stmt = stmt.order_by(Knowledge.updated_at.asc()).limit(limit)
+            result = await db.execute(stmt)
+            return [KnowledgeModel.model_validate(kb) for kb in result.scalars().all()]
 
-    def soft_delete_by_id(self, id: str) -> bool:
+    async def soft_delete_by_id(self, id: str, db: Optional[AsyncSession] = None) -> bool:
         """Mark a knowledge base as deleted (soft-delete)."""
-        with get_db() as db:
-            result = (
-                db.query(Knowledge)
+        async with get_async_db_context(db) as db:
+            result = await db.execute(
+                update(Knowledge)
                 .filter_by(id=id)
                 .filter(Knowledge.deleted_at.is_(None))
-                .update({'deleted_at': int(time.time())})
+                .values(deleted_at=int(time.time()))
             )
-            db.commit()
-            return result > 0
+            await db.commit()
+            return result.rowcount > 0
 
-    def soft_delete_by_user_id(self, user_id: str) -> int:
+    async def soft_delete_by_user_id(self, user_id: str, db: Optional[AsyncSession] = None) -> int:
         """Soft-delete all knowledge bases for a user. Returns count."""
-        with get_db() as db:
-            result = (
-                db.query(Knowledge)
+        async with get_async_db_context(db) as db:
+            result = await db.execute(
+                update(Knowledge)
                 .filter_by(user_id=user_id)
                 .filter(Knowledge.deleted_at.is_(None))
-                .update({'deleted_at': int(time.time())})
+                .values(deleted_at=int(time.time()))
             )
-            db.commit()
-            return result
+            await db.commit()
+            return result.rowcount
 
-    def get_knowledge_by_id_unfiltered(self, id: str) -> Optional[KnowledgeModel]:
+    async def get_knowledge_by_id_unfiltered(
+        self, id: str, db: Optional[AsyncSession] = None
+    ) -> Optional[KnowledgeModel]:
         """Get a knowledge base by ID, including soft-deleted ones. For internal/cleanup use only."""
         try:
-            with get_db() as db:
-                knowledge = db.query(Knowledge).filter_by(id=id).first()
+            async with get_async_db_context(db) as db:
+                result = await db.execute(select(Knowledge).filter_by(id=id))
+                knowledge = result.scalars().first()
                 return KnowledgeModel.model_validate(knowledge) if knowledge else None
         except Exception:
             return None
 
-    def get_suspended_expired_knowledge(self, limit: int = 50) -> list[KnowledgeModel]:
+    async def get_suspended_expired_knowledge(
+        self, limit: int = 50, db: Optional[AsyncSession] = None
+    ) -> list[KnowledgeModel]:
         """Get cloud KBs suspended for longer than SUSPENSION_TTL_DAYS."""
         cutoff = int(time.time()) - (SUSPENSION_TTL_DAYS * 24 * 60 * 60)
 
-        with get_db() as db:
-            candidates = (
-                db.query(Knowledge)
+        async with get_async_db_context(db) as db:
+            result = await db.execute(
+                select(Knowledge)
                 .filter(Knowledge.deleted_at.is_(None))
                 .filter(Knowledge.type != 'local')
                 .limit(limit * 5)
-                .all()
             )
+            candidates = result.scalars().all()
 
             expired = []
             for kb in candidates:
@@ -909,7 +904,7 @@ class KnowledgeTable:
                     sync_info = meta.get(meta_key, {})
                     suspended_at = sync_info.get('suspended_at')
                     if suspended_at and suspended_at < cutoff:
-                        expired.append(self._to_knowledge_model(kb, db=db))
+                        expired.append(await self._to_knowledge_model(kb, db=db))
                         break
 
                 if len(expired) >= limit:
@@ -917,11 +912,12 @@ class KnowledgeTable:
 
             return expired
 
-    def is_suspended(self, id: str) -> bool:
+    async def is_suspended(self, id: str, db: Optional[AsyncSession] = None) -> bool:
         """Check if a knowledge base is currently suspended."""
         try:
-            with get_db() as db:
-                knowledge = db.query(Knowledge).filter_by(id=id).filter(Knowledge.deleted_at.is_(None)).first()
+            async with get_async_db_context(db) as db:
+                result = await db.execute(select(Knowledge).filter_by(id=id).filter(Knowledge.deleted_at.is_(None)))
+                knowledge = result.scalars().first()
                 if not knowledge:
                     return False
                 meta = knowledge.meta or {}
@@ -933,11 +929,12 @@ class KnowledgeTable:
         except Exception:
             return False
 
-    def get_suspension_info(self, id: str) -> Optional[dict]:
+    async def get_suspension_info(self, id: str, db: Optional[AsyncSession] = None) -> Optional[dict]:
         """Get suspension details for a KB. Returns None if not suspended."""
         try:
-            with get_db() as db:
-                knowledge = db.query(Knowledge).filter_by(id=id).filter(Knowledge.deleted_at.is_(None)).first()
+            async with get_async_db_context(db) as db:
+                result = await db.execute(select(Knowledge).filter_by(id=id).filter(Knowledge.deleted_at.is_(None)))
+                knowledge = result.scalars().first()
                 if not knowledge:
                     return None
                 meta = knowledge.meta or {}

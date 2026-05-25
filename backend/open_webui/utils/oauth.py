@@ -1620,7 +1620,7 @@ class OAuthManager:
             # Lookup an active pending invite once — used both as an explicit
             # allowlist bypass and as the source of truth for role/name when
             # provisioning a new user further down.
-            pending_invite = Invites.get_pending_invite_by_email(email)
+            pending_invite = await Invites.get_pending_invite_by_email(email)
 
             # If allowed domains are configured, check if the email domain is in the list
             # An explicit invite grants access regardless of domain — the invite IS
@@ -1646,7 +1646,7 @@ class OAuthManager:
                         # Housekeeping: if there was a pending invite, mark it
                         # consumed so it stops appearing in the admin invite list.
                         if pending_invite:
-                            Invites.consume_invite_by_email(email)
+                            await Invites.consume_invite_by_email(email)
 
             if user:
                 determined_role = await self.get_user_role(user, user_data)
@@ -1698,7 +1698,7 @@ class OAuthManager:
                 # means a concurrent request (typically the password-accept flow)
                 # already consumed the invite, or it expired between the lookup
                 # and the consume — fall through to the non-invite path.
-                consumed_invite = Invites.consume_invite_by_email(email) if pending_invite else None
+                consumed_invite = await Invites.consume_invite_by_email(email) if pending_invite else None
 
                 if not consumed_invite:
                     if auth_manager_config.OAUTH_INVITE_REQUIRED:
@@ -1719,13 +1719,9 @@ class OAuthManager:
                 # Existing email-uniqueness guard. A concurrent invite-accept on
                 # the password page could have created the user between our
                 # checks; treat that as success and attach the OAuth sub.
-                # NOTE (Phase 1.5): Users.get_user_by_email and
-                # Users.update_user_oauth_by_id are async post-v0.9.0 refactor.
-                # Adding `await` lands with the services-async-cascade audit so
-                # the broader change is reviewed as one unit.
-                existing_user = Users.get_user_by_email(email, db=db)
+                existing_user = await Users.get_user_by_email(email, db=db)
                 if existing_user:
-                    Users.update_user_oauth_by_id(existing_user.id, provider, sub, db=db)
+                    await Users.update_user_oauth_by_id(existing_user.id, provider, sub, db=db)
                     user = existing_user
                 else:
                     picture_claim = auth_manager_config.OAUTH_PICTURE_CLAIM

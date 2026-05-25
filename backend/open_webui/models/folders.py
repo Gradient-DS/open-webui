@@ -372,12 +372,12 @@ class FolderTable:
                     results.append(FolderModel.model_validate(folder))
         return results
 
-    def delete_folders_by_user_id(self, user_id: str) -> bool:
+    async def delete_folders_by_user_id(self, user_id: str, db: Optional[AsyncSession] = None) -> bool:
         """Delete all folders for a user."""
         try:
-            with get_db() as db:
-                db.query(Folder).filter_by(user_id=user_id).delete()
-                db.commit()
+            async with get_async_db_context(db) as db:
+                await db.execute(delete(Folder).filter(Folder.user_id == user_id))
+                await db.commit()
                 return True
         except Exception:
             return False

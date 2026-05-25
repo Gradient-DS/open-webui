@@ -55,7 +55,7 @@ async def list_detected_agents(user=Depends(get_admin_user)):
     sort by, so they always trail.
     """
     env_slugs = set(AGENT_API_AGENTS)
-    configured_models = AgentConfigs.list_all()
+    configured_models = await AgentConfigs.list_all()
     configured = {c.id: c for c in configured_models}
     rows: list[AgentConfigDetectionRow] = [
         AgentConfigDetectionRow(
@@ -88,10 +88,10 @@ async def list_visible_agents(user=Depends(get_verified_user)):
         return []
     env_slugs = set(AGENT_API_AGENTS)
     if user.role == 'admin':
-        rows = [r for r in AgentConfigs.list_all() if r.is_active]
+        rows = [r for r in await AgentConfigs.list_all() if r.is_active]
     else:
-        user_group_ids = {g.id for g in Groups.get_groups_by_member_id(user.id)}
-        rows = AgentConfigs.list_visible_to_user(user.id, user_group_ids)
+        user_group_ids = {g.id for g in await Groups.get_groups_by_member_id(user.id)}
+        rows = await AgentConfigs.list_visible_to_user(user.id, user_group_ids)
     rows = [r for r in rows if r.id in env_slugs]
     return [
         AgentConfigUserResponse(
@@ -122,7 +122,7 @@ async def reorder_agent_configs(body: ReorderRequest, user=Depends(get_admin_use
             status_code=status.HTTP_400_BAD_REQUEST,
             detail='Duplicate slugs in reorder request',
         )
-    return AgentConfigs.set_positions(body.slugs)
+    return await AgentConfigs.set_positions(body.slugs)
 
 
 @router.post('/{slug}', response_model=AgentConfigModel)
@@ -132,12 +132,12 @@ async def create_agent_config(slug: str, form: AgentConfigForm, user=Depends(get
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f'{slug!r} is not in AGENT_API_AGENTS',
         )
-    if AgentConfigs.get_agent_config_by_id(slug):
+    if await AgentConfigs.get_agent_config_by_id(slug):
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail=f'AgentConfig for {slug!r} already exists',
         )
-    return AgentConfigs.insert_new_agent_config(user.id, slug, form)
+    return await AgentConfigs.insert_new_agent_config(user.id, slug, form)
 
 
 @router.post('/{slug}/update', response_model=AgentConfigModel)
@@ -147,7 +147,7 @@ async def update_agent_config(slug: str, form: AgentConfigForm, user=Depends(get
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f'{slug!r} is not in AGENT_API_AGENTS — cannot mark as active',
         )
-    res = AgentConfigs.update_agent_config(slug, form)
+    res = await AgentConfigs.update_agent_config(slug, form)
     if not res:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
     return res
@@ -163,7 +163,7 @@ async def delete_agent_config(slug: str, user=Depends(get_admin_user)):
                 'your environment first, then delete the configuration.'
             ),
         )
-    ok = AgentConfigs.delete_agent_config(slug)
+    ok = await AgentConfigs.delete_agent_config(slug)
     if not ok:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
     return {'ok': True}
@@ -171,7 +171,7 @@ async def delete_agent_config(slug: str, user=Depends(get_admin_user)):
 
 @router.get('/{slug}', response_model=AgentConfigModel)
 async def get_agent_config(slug: str, user=Depends(get_admin_user)):
-    res = AgentConfigs.get_agent_config_by_id(slug)
+    res = await AgentConfigs.get_agent_config_by_id(slug)
     if not res:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
     return res

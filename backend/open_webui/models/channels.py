@@ -915,6 +915,31 @@ class ChannelTable:
             await db.commit()
             return True
 
+    async def delete_channels_by_user_id(self, user_id: str, db: Optional[AsyncSession] = None) -> bool:
+        """Delete all channels owned by a user, revoking grants per channel. Used by user-delete cascade."""
+        try:
+            async with get_async_db_context(db) as db:
+                channel_ids = (await db.execute(select(Channel.id).filter(Channel.user_id == user_id))).scalars().all()
+                for channel_id in channel_ids:
+                    await AccessGrants.revoke_all_access('channel', channel_id, db=db)
+                await db.execute(delete(ChannelMember).filter(ChannelMember.channel_id.in_(channel_ids)))
+                await db.execute(delete(ChannelWebhook).filter(ChannelWebhook.channel_id.in_(channel_ids)))
+                await db.execute(delete(Channel).filter(Channel.user_id == user_id))
+                await db.commit()
+                return True
+        except Exception:
+            return False
+
+    async def delete_member_by_user_id(self, user_id: str, db: Optional[AsyncSession] = None) -> bool:
+        """Remove a user from all channel memberships. Used by user-delete cascade."""
+        try:
+            async with get_async_db_context(db) as db:
+                await db.execute(delete(ChannelMember).filter(ChannelMember.user_id == user_id))
+                await db.commit()
+                return True
+        except Exception:
+            return False
+
     ####################
     # Webhook Methods
     ####################

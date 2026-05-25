@@ -41,7 +41,7 @@ def global_auth_mode() -> str:
     return mode if mode in ('oauth', 'basic') else 'oauth'
 
 
-def resolve_auth_mode(knowledge_id: Optional[str]) -> str:
+async def resolve_auth_mode(knowledge_id: Optional[str]) -> str:
     """Return the effective auth mode ('oauth' | 'basic') for a KB.
 
     A KB stamps its auth_mode into ``confluence_sync`` meta when its first
@@ -50,7 +50,7 @@ def resolve_auth_mode(knowledge_id: Optional[str]) -> str:
     '__general__') and None fall back to the global CONFLUENCE_AUTH_MODE.
     """
     if knowledge_id and not knowledge_id.startswith('__'):
-        kb = Knowledges.get_knowledge_by_id(knowledge_id)
+        kb = await Knowledges.get_knowledge_by_id(knowledge_id)
         if kb:
             stamped = (kb.meta or {}).get(_META_KEY, {}).get('auth_mode')
             if stamped in ('oauth', 'basic'):

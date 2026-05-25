@@ -431,7 +431,7 @@ async def get_knowledge_by_id(id: str, user=Depends(get_verified_user), db: Asyn
             )
         ):
             # Block non-admin access to suspended KBs
-            suspension_info = Knowledges.get_suspension_info(id)
+            suspension_info = await Knowledges.get_suspension_info(id)
             if suspension_info and user.role != 'admin':
                 raise HTTPException(
                     status_code=status.HTTP_403_FORBIDDEN,
@@ -639,7 +639,7 @@ async def get_knowledge_files_by_id(
         )
 
     # Block non-admin access to suspended KBs
-    suspension_info = Knowledges.get_suspension_info(id)
+    suspension_info = await Knowledges.get_suspension_info(id)
     if suspension_info and user.role != 'admin':
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -709,9 +709,7 @@ async def add_file_to_knowledge_by_id(
 
     # Check file count limit for non-local KBs
     if knowledge.type != 'local':
-        # NOTE (Phase 1.5): Knowledges.get_files_by_id is async post-v0.9.0 refactor.
-        # Adding `await` lands with the services-async-cascade audit.
-        current_files = Knowledges.get_files_by_id(id, db=db)
+        current_files = await Knowledges.get_files_by_id(id, db=db)
         if current_files and len(current_files) >= KNOWLEDGE_MAX_FILE_COUNT:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -942,10 +940,7 @@ async def remove_file_from_knowledge_by_id(
 
                 if folder_source:
                     # Get remaining OneDrive files from the same folder source.
-                    # NOTE (Phase 1.5): Knowledges.get_files_by_id / .update_knowledge_meta_by_id /
-                    # Files.update_file_by_id are sync calls to now-async upstream models — flagged
-                    # for the services-async-cascade audit.
-                    remaining_kb_files = Knowledges.get_files_by_id(id, db=db)
+                    remaining_kb_files = await Knowledges.get_files_by_id(id, db=db)
                     individual_sources = []
                     for kb_file in remaining_kb_files or []:
                         if not kb_file.id.startswith('onedrive-'):
@@ -977,7 +972,7 @@ async def remove_file_from_knowledge_by_id(
 
                     sync_info['sources'] = new_sources
                     meta['onedrive_sync'] = sync_info
-                    Knowledges.update_knowledge_meta_by_id(id, meta)
+                    await Knowledges.update_knowledge_meta_by_id(id, meta)
 
                     # Update remaining files' source_item_id to point to their
                     # own item_id (now an individual source, not the folder)
@@ -994,7 +989,7 @@ async def remove_file_from_knowledge_by_id(
                             kb_file.id.removeprefix('onedrive-'),
                         )
                         kb_file_meta['source_item_id'] = new_source_id
-                        Files.update_file_by_id(
+                        await Files.update_file_by_id(
                             kb_file.id,
                             FileUpdateForm(meta=kb_file_meta),
                         )
@@ -1011,20 +1006,17 @@ async def remove_file_from_knowledge_by_id(
     # file. Collaborators with KB write access can unlink a file from the KB
     # but must not be able to destroy files they do not own, as the same file
     # may be referenced by other KBs and chats (upstream v0.9.5 security hunk).
-    # NOTE (Phase 1.5): DeletionService.delete_file is sync; becomes async in
-    # the services-async-cascade. Call should become `await DeletionService.delete_file(...)`.
     if delete_file and (file.user_id == user.id or user.role == 'admin'):
-        file_report = DeletionService.delete_file(form_data.file_id)
+        file_report = await DeletionService.delete_file(form_data.file_id)
         if file_report.has_errors:
             log.warning(f'Errors deleting file {form_data.file_id}: {file_report.errors}')
 
     # For non-local KBs: check if this was the last reference to the file.
-    # NOTE (Phase 1.5): Knowledges.get_knowledge_files_by_file_id is sync — flagged.
     if not delete_file and knowledge.type != 'local':
-        remaining_refs = Knowledges.get_knowledge_files_by_file_id(form_data.file_id)
+        remaining_refs = await Knowledges.get_knowledge_files_by_file_id(form_data.file_id)
         if not remaining_refs:
             log.info(f'Cleaning up orphaned external file {form_data.file_id}')
-            file_report = DeletionService.delete_file(form_data.file_id)
+            file_report = await DeletionService.delete_file(form_data.file_id)
             if file_report.has_errors:
                 log.warning(f'Errors deleting orphaned file {form_data.file_id}: {file_report.errors}')
 
@@ -1103,9 +1095,7 @@ async def delete_knowledge_by_id(
     # Remove knowledge base embedding
     await remove_knowledge_base_metadata_embedding(id)
 
-    # NOTE (Phase 1.5): Knowledges.soft_delete_by_id is sync; becomes async in
-    # the services-async-cascade. Will be `await Knowledges.soft_delete_by_id(id)`.
-    result = Knowledges.soft_delete_by_id(id)
+    result = await Knowledges.soft_delete_by_id(id)
     return result
 
 
@@ -1198,7 +1188,7 @@ async def add_files_to_knowledge_batch(
 
     # Check file count limit for non-local KBs
     if knowledge.type != 'local':
-        current_files = Knowledges.get_files_by_id(id, db=db)
+        current_files = await Knowledges.get_files_by_id(id, db=db)
         current_count = len(current_files) if current_files else 0
         if current_count + len(form_data) > KNOWLEDGE_MAX_FILE_COUNT:
             raise HTTPException(

@@ -361,16 +361,16 @@ class FilesTable:
             except Exception:
                 return None
 
-    def update_file_path_by_id(self, id: str, path: str, db: Optional[Session] = None) -> Optional[FileModel]:
-        """NOTE (Phase 1.5): sync helper used by Gradient cloud-sync workers;
-        becomes async in the services-async-cascade.
-        """
-        with get_db_context(db) as db:
+    async def update_file_path_by_id(
+        self, id: str, path: str, db: Optional[AsyncSession] = None
+    ) -> Optional[FileModel]:
+        async with get_async_db_context(db) as db:
             try:
-                file = db.query(File).filter_by(id=id).first()
+                result = await db.execute(select(File).filter_by(id=id))
+                file = result.scalars().first()
                 file.path = path
                 file.updated_at = int(time.time())
-                db.commit()
+                await db.commit()
                 return FileModel.model_validate(file)
             except Exception:
                 return None
@@ -413,14 +413,11 @@ class FilesTable:
             except Exception:
                 return False
 
-    def delete_files_by_ids(self, ids: list[str], db: Optional[Session] = None) -> bool:
-        """NOTE (Phase 1.5): sync helper consumed by DeletionService.delete_files_batch;
-        becomes async in the services-async-cascade.
-        """
-        with get_db_context(db) as db:
+    async def delete_files_by_ids(self, ids: list[str], db: Optional[AsyncSession] = None) -> bool:
+        async with get_async_db_context(db) as db:
             try:
-                db.query(File).filter(File.id.in_(ids)).delete(synchronize_session=False)
-                db.commit()
+                await db.execute(delete(File).filter(File.id.in_(ids)))
+                await db.commit()
                 return True
             except Exception:
                 return False

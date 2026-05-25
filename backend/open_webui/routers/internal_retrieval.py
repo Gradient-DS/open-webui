@@ -101,7 +101,7 @@ async def list_accessible_kbs(
         'all' if parsed_kb_ids is None else f'{len(parsed_kb_ids)} kbs',
     )
 
-    payload = resolve_accessible_kbs(principal.user, kb_ids=parsed_kb_ids)
+    payload = await resolve_accessible_kbs(principal.user, kb_ids=parsed_kb_ids)
     return AccessibleKBsResponse(
         user_id=payload['user_id'],
         kbs=[AccessibleKB(**kb) for kb in payload['kbs']],
@@ -182,7 +182,7 @@ async def file_content(
             detail='agent search not enabled',
         )
 
-    file = Files.get_file_by_id(file_id)
+    file = await Files.get_file_by_id(file_id)
     if not file:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,

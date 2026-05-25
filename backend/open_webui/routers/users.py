@@ -674,8 +674,6 @@ async def delete_user_by_id(
 
     if user.id != user_id:
         # Archive if requested
-        # NOTE (Phase 1.5): ArchiveService.create_archive is sync; becomes async
-        # in the services-async-cascade.
         if archive_before_delete:
             from open_webui.services.archival import ArchiveService
 
@@ -684,7 +682,7 @@ async def delete_user_by_id(
 
             if request.app.state.config.ENABLE_USER_ARCHIVAL:
                 retention = archive_retention_days or request.app.state.config.DEFAULT_ARCHIVE_RETENTION_DAYS
-                archive_result = ArchiveService.create_archive(
+                archive_result = await ArchiveService.create_archive(
                     user_id=user_id,
                     archived_by=user.id,
                     reason=archive_reason,
@@ -693,11 +691,8 @@ async def delete_user_by_id(
                 if not archive_result.success:
                     log.warning(f'Failed to archive user before deletion: {archive_result.errors}')
 
-        # Proceed with deletion (run in thread pool to avoid blocking the event loop).
-        # NOTE (Phase 1.5): once DeletionService.delete_user is async, replace
-        # `run_in_threadpool(DeletionService.delete_user, user_id)` with the
-        # awaited async form and drop the threadpool wrapper.
-        report = await run_in_threadpool(DeletionService.delete_user, user_id)
+        # Proceed with deletion.
+        report = await DeletionService.delete_user(user_id)
         if report.has_errors:
             log.warning(f'User deletion had errors: {report.errors}')
 
@@ -726,10 +721,10 @@ async def admin_get_user_2fa_status(
     user_id: str,
     request: Request,
     user=Depends(get_admin_user),
-    db: Session = Depends(get_session),
+    db: AsyncSession = Depends(get_async_session),
 ):
     """Admin endpoint to check if a user has 2FA enabled."""
-    auth = Auths.get_auth_by_user_id(user_id, db=db)
+    auth = await Auths.get_auth_by_user_id(user_id, db=db)
     return {'totp_enabled': bool(auth and auth.totp_enabled)}
 
 
@@ -743,19 +738,19 @@ async def admin_disable_user_2fa(
     user_id: str,
     request: Request,
     user=Depends(get_admin_user),
-    db: Session = Depends(get_session),
+    db: AsyncSession = Depends(get_async_session),
 ):
     """Admin endpoint to force-disable 2FA for a locked-out user."""
-    target_user = Users.get_user_by_id(user_id, db=db)
+    target_user = await Users.get_user_by_id(user_id, db=db)
     if not target_user:
         raise HTTPException(status_code=404, detail='User not found')
 
-    auth = Auths.get_auth_by_user_id(user_id, db=db)
+    auth = await Auths.get_auth_by_user_id(user_id, db=db)
     if not auth or not auth.totp_enabled:
         raise HTTPException(status_code=400, detail='2FA is not enabled for this user')
 
-    Auths.update_totp(user_id, None, False, db=db)
-    RecoveryCodes.delete_all(user_id, db=db)
+    await Auths.update_totp(user_id, None, False, db=db)
+    await RecoveryCodes.delete_all(user_id, db=db)
 
     return {'success': True}
 

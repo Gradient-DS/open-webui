@@ -44,7 +44,7 @@ async def get_valid_access_token(
         refresh_fn: Provider-specific async function to refresh a token dict.
                      Receives the current token_data dict, returns updated dict or None.
     """
-    session = OAuthSessions.get_session_by_provider_and_user_id(provider, user_id)
+    session = await OAuthSessions.get_session_by_provider_and_user_id(provider, user_id)
     if not session:
         return None
 
@@ -70,7 +70,7 @@ async def get_valid_access_token(
         return None
 
     # Update stored token
-    OAuthSessions.update_session_by_id(session.id, new_token_data)
+    await OAuthSessions.update_session_by_id(session.id, new_token_data)
     return new_token_data.get('access_token')
 
 
@@ -85,7 +85,7 @@ async def _mark_needs_reauth(provider_type: str, meta_key: str, user_id: str):
     from open_webui.models.knowledge import Knowledges
 
     event_prefix = _PROVIDER_EVENT_PREFIXES.get(provider_type)
-    kbs = Knowledges.get_knowledge_bases_by_type(provider_type)
+    kbs = await Knowledges.get_knowledge_bases_by_type(provider_type)
     for kb in kbs:
         if kb.user_id != user_id:
             continue
@@ -100,7 +100,7 @@ async def _mark_needs_reauth(provider_type: str, meta_key: str, user_id: str):
             sync_info['cancel_reason'] = 'needs_reauth'
 
         meta[meta_key] = sync_info
-        Knowledges.update_knowledge_meta_by_id(kb.id, meta)
+        await Knowledges.update_knowledge_meta_by_id(kb.id, meta)
 
         if was_syncing and event_prefix:
             try:

@@ -217,69 +217,47 @@ class AuthsTable:
         except Exception:
             return False
 
-    def get_auth_by_user_id(self, user_id: str, db: Optional[Session] = None) -> Optional[Auth]:
+    async def get_auth_by_user_id(self, user_id: str, db: Optional[AsyncSession] = None) -> Optional[Auth]:
         try:
-            with get_db_context(db) as db:
-                return db.query(Auth).filter_by(id=user_id).first()
+            async with get_async_db_context(db) as db:
+                result = await db.execute(select(Auth).filter_by(id=user_id))
+                return result.scalars().first()
         except Exception:
             return None
 
-    def update_totp(
+    async def update_totp(
         self,
         user_id: str,
         totp_secret: Optional[str],
         totp_enabled: bool,
-        db: Optional[Session] = None,
+        db: Optional[AsyncSession] = None,
     ) -> bool:
         try:
-            with get_db_context(db) as db:
-                result = (
-                    db.query(Auth)
-                    .filter_by(id=user_id)
-                    .update(
-                        {
-                            'totp_secret': totp_secret,
-                            'totp_enabled': totp_enabled,
-                        }
-                    )
+            async with get_async_db_context(db) as db:
+                result = await db.execute(
+                    update(Auth).filter_by(id=user_id).values(totp_secret=totp_secret, totp_enabled=totp_enabled)
                 )
-                db.commit()
-                return result == 1
+                await db.commit()
+                return result.rowcount == 1
         except Exception:
             return False
 
-    def set_twofa_grace_started(self, user_id: str, started_at: int, db: Optional[Session] = None) -> bool:
+    async def set_twofa_grace_started(self, user_id: str, started_at: int, db: Optional[AsyncSession] = None) -> bool:
         """Anchor the 2FA enrollment grace period for a user (epoch seconds)."""
         try:
-            with get_db_context(db) as db:
-                result = (
-                    db.query(Auth)
-                    .filter_by(id=user_id)
-                    .update(
-                        {
-                            'twofa_grace_started_at': started_at,
-                        }
-                    )
-                )
-                db.commit()
-                return result == 1
+            async with get_async_db_context(db) as db:
+                result = await db.execute(update(Auth).filter_by(id=user_id).values(twofa_grace_started_at=started_at))
+                await db.commit()
+                return result.rowcount == 1
         except Exception:
             return False
 
-    def update_totp_last_used(self, user_id: str, timecode: int, db: Optional[Session] = None) -> bool:
+    async def update_totp_last_used(self, user_id: str, timecode: int, db: Optional[AsyncSession] = None) -> bool:
         try:
-            with get_db_context(db) as db:
-                result = (
-                    db.query(Auth)
-                    .filter_by(id=user_id)
-                    .update(
-                        {
-                            'totp_last_used_at': timecode,
-                        }
-                    )
-                )
-                db.commit()
-                return result == 1
+            async with get_async_db_context(db) as db:
+                result = await db.execute(update(Auth).filter_by(id=user_id).values(totp_last_used_at=timecode))
+                await db.commit()
+                return result.rowcount == 1
         except Exception:
             return False
 

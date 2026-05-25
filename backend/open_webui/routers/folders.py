@@ -304,9 +304,7 @@ async def delete_folder_by_id(
 
                 for folder_id in folder_ids:
                     if delete_contents:
-                        # NOTE (Phase 1.5): Chats.soft_delete_by_user_id_and_folder_id
-                        # is sync; becomes async in the services-async-cascade.
-                        Chats.soft_delete_by_user_id_and_folder_id(user.id, folder_id, db=db)
+                        await Chats.soft_delete_by_user_id_and_folder_id(user.id, folder_id, db=db)
                     else:
                         await Chats.move_chats_by_user_id_and_folder_id(user.id, folder_id, None, db=db)
 

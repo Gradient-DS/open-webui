@@ -1589,21 +1589,19 @@ class ChatTable:
         except Exception:
             return False
 
-    def soft_delete_by_user_id_and_folder_id(self, user_id: str, folder_id: str, db: Optional[Session] = None) -> int:
-        """Soft-delete all chats in a folder for a user. Returns count of affected rows.
-
-        NOTE (Phase 1.5): sync helper consumed by routers/folders.py; becomes
-        async in the services-async-cascade.
-        """
-        with get_db_context(db) as db:
-            result = (
-                db.query(Chat)
+    async def soft_delete_by_user_id_and_folder_id(
+        self, user_id: str, folder_id: str, db: Optional[AsyncSession] = None
+    ) -> int:
+        """Soft-delete all chats in a folder for a user. Returns count of affected rows."""
+        async with get_async_db_context(db) as db:
+            result = await db.execute(
+                update(Chat)
                 .filter_by(user_id=user_id, folder_id=folder_id)
                 .filter(Chat.deleted_at.is_(None))
-                .update({'deleted_at': int(time.time())})
+                .values(deleted_at=int(time.time()))
             )
-            db.commit()
-            return result
+            await db.commit()
+            return result.rowcount
 
     async def delete_chats_by_user_id_and_folder_id(
         self, user_id: str, folder_id: str, db: Optional[AsyncSession] = None
@@ -1757,85 +1755,80 @@ class ChatTable:
                 return []
             return row[0]
 
-    def get_files_by_chat_id(self, chat_id: str, db: Optional[Session] = None) -> list[ChatFileModel]:
+    async def get_files_by_chat_id(self, chat_id: str, db: Optional[AsyncSession] = None) -> list[ChatFileModel]:
         """Get all chat_file records for a given chat_id."""
-        with get_db_context(db) as db:
-            chat_files = db.query(ChatFile).filter_by(chat_id=chat_id).order_by(ChatFile.created_at.asc()).all()
-            return [ChatFileModel.model_validate(cf) for cf in chat_files]
+        async with get_async_db_context(db) as db:
+            result = await db.execute(select(ChatFile).filter_by(chat_id=chat_id).order_by(ChatFile.created_at.asc()))
+            return [ChatFileModel.model_validate(cf) for cf in result.scalars().all()]
 
-    def get_pending_deletions(self, limit: int = 100, db: Optional[Session] = None) -> list[ChatModel]:
+    async def get_pending_deletions(self, limit: int = 100, db: Optional[AsyncSession] = None) -> list[ChatModel]:
         """Get chats marked for deletion (for cleanup worker)."""
-        with get_db_context(db) as db:
-            return [
-                ChatModel.model_validate(chat)
-                for chat in db.query(Chat)
-                .filter(Chat.deleted_at.isnot(None))
-                .order_by(Chat.deleted_at.asc())
-                .limit(limit)
-                .all()
-            ]
+        async with get_async_db_context(db) as db:
+            result = await db.execute(
+                select(Chat).filter(Chat.deleted_at.isnot(None)).order_by(Chat.deleted_at.asc()).limit(limit)
+            )
+            return [ChatModel.model_validate(chat) for chat in result.scalars().all()]
 
-    def get_stale_chats(
+    async def get_stale_chats(
         self,
         stale_before: int,
         limit: int = 100,
         exclude_user_ids: Optional[list[str]] = None,
-        db: Optional[Session] = None,
+        db: Optional[AsyncSession] = None,
     ) -> list[ChatModel]:
         """Find non-deleted chats whose updated_at is before the given timestamp."""
-        with get_db_context(db) as db:
-            query = db.query(Chat).filter(Chat.deleted_at.is_(None)).filter(Chat.updated_at < stale_before)
+        async with get_async_db_context(db) as db:
+            stmt = select(Chat).filter(Chat.deleted_at.is_(None)).filter(Chat.updated_at < stale_before)
             if exclude_user_ids:
-                query = query.filter(Chat.user_id.notin_(exclude_user_ids))
-            return [ChatModel.model_validate(chat) for chat in query.order_by(Chat.updated_at.asc()).limit(limit).all()]
+                stmt = stmt.filter(Chat.user_id.notin_(exclude_user_ids))
+            stmt = stmt.order_by(Chat.updated_at.asc()).limit(limit)
+            result = await db.execute(stmt)
+            return [ChatModel.model_validate(chat) for chat in result.scalars().all()]
 
-    def soft_delete_by_id(self, id: str, db: Optional[Session] = None) -> bool:
+    async def soft_delete_by_id(self, id: str, db: Optional[AsyncSession] = None) -> bool:
         """Mark a chat as deleted (soft-delete)."""
-        with get_db_context(db) as db:
-            result = (
-                db.query(Chat)
-                .filter_by(id=id)
-                .filter(Chat.deleted_at.is_(None))
-                .update({'deleted_at': int(time.time())})
+        async with get_async_db_context(db) as db:
+            result = await db.execute(
+                update(Chat).filter_by(id=id).filter(Chat.deleted_at.is_(None)).values(deleted_at=int(time.time()))
             )
-            db.commit()
-            return result > 0
+            await db.commit()
+            return result.rowcount > 0
 
-    def soft_delete_by_user_id(self, user_id: str, db: Optional[Session] = None) -> int:
+    async def soft_delete_by_user_id(self, user_id: str, db: Optional[AsyncSession] = None) -> int:
         """Soft-delete all chats for a user. Returns count of affected rows."""
-        with get_db_context(db) as db:
-            result = (
-                db.query(Chat)
+        async with get_async_db_context(db) as db:
+            result = await db.execute(
+                update(Chat)
                 .filter_by(user_id=user_id)
                 .filter(Chat.deleted_at.is_(None))
-                .update({'deleted_at': int(time.time())})
+                .values(deleted_at=int(time.time()))
             )
-            db.commit()
-            return result
+            await db.commit()
+            return result.rowcount
 
-    def get_chat_by_id_unfiltered(self, id: str, db: Optional[Session] = None) -> Optional[ChatModel]:
+    async def get_chat_by_id_unfiltered(self, id: str, db: Optional[AsyncSession] = None) -> Optional[ChatModel]:
         """Get a chat by ID, including soft-deleted ones. For internal/cleanup use only."""
         try:
-            with get_db_context(db) as db:
-                chat = db.query(Chat).filter_by(id=id).first()
+            async with get_async_db_context(db) as db:
+                result = await db.execute(select(Chat).filter_by(id=id))
+                chat = result.scalars().first()
                 return ChatModel.model_validate(chat) if chat else None
         except Exception:
             return None
 
-    def get_referenced_file_ids(self, file_ids: list[str], db: Optional[Session] = None) -> set[str]:
+    async def get_referenced_file_ids(self, file_ids: list[str], db: Optional[AsyncSession] = None) -> set[str]:
         """Return the subset of file_ids that are still referenced by active (non-deleted) chats."""
         if not file_ids:
             return set()
-        with get_db_context(db) as db:
-            result = (
-                db.query(ChatFile.file_id)
+        async with get_async_db_context(db) as db:
+            result = await db.execute(
+                select(ChatFile.file_id)
                 .join(Chat, Chat.id == ChatFile.chat_id)
                 .filter(ChatFile.file_id.in_(file_ids))
                 .filter(Chat.deleted_at.is_(None))
                 .distinct()
-                .all()
             )
-            return {row[0] for row in result}
+            return {row[0] for row in result.all()}
 
 
 Chats = ChatTable()

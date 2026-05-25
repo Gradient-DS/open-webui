@@ -566,32 +566,27 @@ class UsersTable:
             )
             return result.scalar()
 
-    def get_inactive_users(
+    async def get_inactive_users(
         self,
         inactive_since: int,
         limit: int = 50,
         exclude_roles: Optional[list[str]] = None,
-        db: Optional[Session] = None,
+        db: Optional[AsyncSession] = None,
     ) -> list[UserModel]:
         """Find users whose last_active_at is before the given timestamp.
-
-        NOTE (Phase 1.5): this sync helper consumed by the retention worker
-        becomes async in the services-async-cascade.
 
         Args:
             inactive_since: epoch timestamp — users active before this are inactive
             limit: max users to return per batch
             exclude_roles: roles to skip (e.g., ['admin'] to protect admin accounts)
         """
-        with get_db_context(db) as db:
-            query = db.query(User).filter(
-                User.last_active_at < inactive_since,
-            )
+        async with get_async_db_context(db) as db:
+            stmt = select(User).filter(User.last_active_at < inactive_since)
             if exclude_roles:
-                query = query.filter(User.role.notin_(exclude_roles))
-            return [
-                UserModel.model_validate(user) for user in query.order_by(User.last_active_at.asc()).limit(limit).all()
-            ]
+                stmt = stmt.filter(User.role.notin_(exclude_roles))
+            stmt = stmt.order_by(User.last_active_at.asc()).limit(limit)
+            result = await db.execute(stmt)
+            return [UserModel.model_validate(user) for user in result.scalars().all()]
 
     async def update_user_role_by_id(
         self, id: str, role: str, db: Optional[AsyncSession] = None

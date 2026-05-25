@@ -78,7 +78,7 @@ async def get_integration_principal(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail='X-Acting-User-Id and X-Acting-Provider are required when authenticating with the loader bearer key',
             )
-        user = Users.get_user_by_id(x_acting_user_id)
+        user = await Users.get_user_by_id(x_acting_user_id)
         if not user:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
@@ -154,7 +154,7 @@ async def get_agent_principal(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail='X-Acting-User-Id header is required',
         )
-    user = Users.get_user_by_id(x_acting_user_id)
+    user = await Users.get_user_by_id(x_acting_user_id)
     if not user:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,

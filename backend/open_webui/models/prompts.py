@@ -656,6 +656,20 @@ class PromptsTable:
         except Exception:
             return False
 
+    async def delete_prompts_by_user_id(self, user_id: str, db: Optional[AsyncSession] = None) -> bool:
+        """Delete all prompts owned by a user, revoking grants and history per prompt. Used by user-delete cascade."""
+        try:
+            async with get_async_db_context(db) as db:
+                prompt_ids = (await db.execute(select(Prompt.id).filter(Prompt.user_id == user_id))).scalars().all()
+                for prompt_id in prompt_ids:
+                    await PromptHistories.delete_history_by_prompt_id(prompt_id, db=db)
+                    await AccessGrants.revoke_all_access('prompt', prompt_id, db=db)
+                await db.execute(delete(Prompt).filter(Prompt.user_id == user_id))
+                await db.commit()
+                return True
+        except Exception:
+            return False
+
     async def get_tags(self, db: Optional[AsyncSession] = None) -> list[str]:
         try:
             async with get_async_db_context(db) as db:

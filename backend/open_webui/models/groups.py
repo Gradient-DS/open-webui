@@ -638,12 +638,12 @@ class GroupTable:
             log.exception(e)
             return None
 
-    def delete_groups_by_user_id(self, user_id: str) -> bool:
+    async def delete_groups_by_user_id(self, user_id: str, db: Optional[AsyncSession] = None) -> bool:
         """Delete all groups owned by a user."""
         try:
-            with get_db() as db:
-                db.query(Group).filter_by(user_id=user_id).delete()
-                db.commit()
+            async with get_async_db_context(db) as db:
+                await db.execute(delete(Group).filter(Group.user_id == user_id))
+                await db.commit()
                 return True
         except Exception:
             return False

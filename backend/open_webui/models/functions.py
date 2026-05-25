@@ -428,12 +428,12 @@ class FunctionsTable:
             except Exception:
                 return False
 
-    def delete_functions_by_user_id(self, user_id: str) -> bool:
+    async def delete_functions_by_user_id(self, user_id: str, db: Optional[AsyncSession] = None) -> bool:
         """Delete all functions for a user."""
         try:
-            with get_db() as db:
-                db.query(Function).filter_by(user_id=user_id).delete()
-                db.commit()
+            async with get_async_db_context(db) as db:
+                await db.execute(delete(Function).filter(Function.user_id == user_id))
+                await db.commit()
                 return True
         except Exception:
             return False

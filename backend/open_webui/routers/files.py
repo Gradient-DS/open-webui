@@ -164,7 +164,7 @@ async def process_uploaded_file(
             # Notify frontend via Socket.IO that processing completed.
             # Dispatch onto uvicorn's main loop — asyncio.run would create a
             # throwaway loop and poison the shared Socket.IO Redis pool.
-            file_data = Files.get_file_by_id(file_item.id)
+            file_data = await Files.get_file_by_id(file_item.id)
             collection_name = file_data.meta.get('collection_name') if file_data and file_data.meta else None
             run_on_main_loop(
                 emit_file_status(

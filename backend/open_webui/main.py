@@ -797,7 +797,7 @@ async def periodic_archive_cleanup():
             # Wait 24 hours before first run and between runs
             await asyncio.sleep(24 * 60 * 60)
 
-            stats = ArchiveService.cleanup_expired_archives()
+            stats = await ArchiveService.cleanup_expired_archives()
             if stats['deleted'] > 0:
                 log.info(f'Archive cleanup: deleted {stats["deleted"]} expired archives')
         except Exception as e:
@@ -917,7 +917,7 @@ async def lifespan(app: FastAPI):
         )
 
         if AGENT_API_AGENTS_CONFIG:
-            inserted, updated, skipped = AgentConfigs.seed_from_env(
+            inserted, updated, skipped = await AgentConfigs.seed_from_env(
                 AGENT_API_AGENTS_CONFIG,
                 AGENT_API_AGENTS,
                 overwrite=AGENT_API_AGENTS_CONFIG_OVERWRITE,
@@ -2702,7 +2702,7 @@ async def chat_completion(
             chat_agent_id: Optional[str] = None
             if chat_id_meta and not chat_id_meta.startswith('local:'):
                 try:
-                    chat_row = Chats.get_chat_by_id(chat_id_meta)
+                    chat_row = await Chats.get_chat_by_id(chat_id_meta)
                     if chat_row and chat_row.meta:
                         chat_agent_id = chat_row.meta.get('agent_id') or None
                 except Exception:
@@ -2712,15 +2712,15 @@ async def chat_completion(
                 # Defense-in-depth: refuse to route to an agent the user no
                 # longer has access to (e.g. admin disabled is_active or
                 # revoked group access mid-chat).
-                cfg = AgentConfigs.get_agent_config_by_id(chat_agent_id)
+                cfg = await AgentConfigs.get_agent_config_by_id(chat_agent_id)
                 if not cfg or not cfg.is_active:
                     raise HTTPException(
                         status_code=status.HTTP_403_FORBIDDEN,
                         detail='This chat is bound to an agent that is no longer available.',
                     )
                 if user.role != 'admin':
-                    user_group_ids = {g.id for g in Groups.get_groups_by_member_id(user.id)}
-                    accessible = AccessGrants.get_accessible_resource_ids(
+                    user_group_ids = {g.id for g in await Groups.get_groups_by_member_id(user.id)}
+                    accessible = await AccessGrants.get_accessible_resource_ids(
                         user_id=user.id,
                         resource_type='agent_config',
                         resource_ids=[chat_agent_id],
@@ -2758,11 +2758,7 @@ async def chat_completion(
             if metadata.get('chat_id') and metadata.get('message_id'):
                 try:
                     if not metadata['chat_id'].startswith('local:'):
-                        # NOTE (Phase 1.5): post-async-refactor this call site is one of
-                        # the un-awaited coroutine producers flagged in the v0.9.5 resume
-                        # handoff. Conversion to `await` lands with the services-async
-                        # cascade so the change is reviewed as one unit.
-                        Chats.upsert_message_to_chat_by_id_and_message_id(
+                        await Chats.upsert_message_to_chat_by_id_and_message_id(
                             metadata['chat_id'],
                             metadata['message_id'],
                             {
@@ -3155,7 +3151,7 @@ async def get_app_config(request: Request):
     if app.state.config.CONFLUENCE_KB_MODE == 'shared':
         from open_webui.routers.confluence_sync import _find_shared_kb
 
-        _shared_kb = _find_shared_kb()
+        _shared_kb = await _find_shared_kb()
         confluence_shared_kb_id = _shared_kb.id if _shared_kb else ''
 
     return {

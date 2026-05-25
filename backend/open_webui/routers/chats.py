@@ -506,9 +506,7 @@ async def delete_all_user_chats(
 
     # Soft-delete so the cleanup worker can remove associated files,
     # vector embeddings, and storage before hard-deleting the records.
-    # NOTE (Phase 1.5): Chats.soft_delete_by_user_id is sync; becomes async in
-    # the services-async-cascade.
-    result = Chats.soft_delete_by_user_id(user.id, db=db)
+    result = await Chats.soft_delete_by_user_id(user.id, db=db)
     return result > 0
 
 
@@ -1121,9 +1119,7 @@ async def delete_chat_by_id(
 
         # Soft-delete so the cleanup worker can remove associated files,
         # vector embeddings, and storage before hard-deleting the record.
-        # NOTE (Phase 1.5): Chats.soft_delete_by_id is sync; becomes async in
-        # the services-async-cascade.
-        result = Chats.soft_delete_by_id(id, db=db)
+        result = await Chats.soft_delete_by_id(id, db=db)
 
         return result
     else:
@@ -1143,9 +1139,7 @@ async def delete_chat_by_id(
 
         # Soft-delete so the cleanup worker can remove associated files,
         # vector embeddings, and storage before hard-deleting the record.
-        # NOTE (Phase 1.5): Chats.soft_delete_by_id is sync; becomes async in
-        # the services-async-cascade.
-        result = Chats.soft_delete_by_id(id, db=db)
+        result = await Chats.soft_delete_by_id(id, db=db)
         return result
 
 
