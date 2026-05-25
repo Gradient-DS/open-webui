@@ -1,6 +1,7 @@
 import hashlib
 import json
 import logging
+import os
 import time
 import uuid
 from typing import NamedTuple, Optional
@@ -617,7 +618,12 @@ def _persist_attachments(
         # after reading the multipart body, so without this seek the
         # subsequent Storage.upload_file would receive an empty stream.
         part.file.seek(0)
-        storage_filename = f'{uuid.uuid4()}-{entry.part_name}'
+        # Defense in depth: even though part_name comes from a trusted
+        # loader-worker today, a path-traversal value (e.g. '../../etc/foo')
+        # would escape UPLOAD_DIR via LocalStorageProvider; strip any
+        # directory component before composing the Storage filename.
+        safe_part_name = os.path.basename(entry.part_name)
+        storage_filename = f'{uuid.uuid4()}-{safe_part_name}'
         try:
             _, path = Storage.upload_file(
                 part.file,

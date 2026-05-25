@@ -382,6 +382,8 @@ class FilesTable:
                 return False
 
     def delete_file_by_id(self, id: str, db: Optional[Session] = None) -> bool:
+        # Function-body import to break the circular: file_attachments →
+        # storage → config → run_migrations → ... → files.py
         from open_webui.models.file_attachments import FileAttachments
 
         with get_db_context(db) as db:
