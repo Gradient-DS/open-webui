@@ -376,3 +376,18 @@ export const deleteAllFiles = async (token: string) => {
 
 	return res;
 };
+
+export const getFileAttachments = async (token: string, fileId: string) => {
+	const res = await fetch(`${WEBUI_API_BASE_URL}/files/${fileId}/attachments`, {
+		method: 'GET',
+		headers: {
+			Accept: 'application/json',
+			authorization: `Bearer ${token}`
+		}
+	});
+	if (!res.ok) {
+		const detail = await res.text();
+		throw new Error(detail || `Failed to load attachments: ${res.status}`);
+	}
+	return await res.json();
+};
