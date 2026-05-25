@@ -176,10 +176,10 @@ all = [
 
 soev = [
     "pytest-asyncio>=1.0.0",
-    "weaviate-client==4.19.0",
+    "weaviate-client==4.20.3",
     "psycopg2-binary==2.9.11",
     "python-dotenv>=1.0.0",
-    "playwright==1.57.0",
+    "playwright==1.58.0",
 ]
 
 [project.scripts]
