@@ -41,6 +41,8 @@
 	let terminalConnections = [];
 	let showAddTerminalModal = false;
 	let editTerminalIdx: number | null = null;
+	let showDeleteTerminalConfirm = false;
+	let deleteTerminalIdx: number | null = null;
 
 	// Agent Proxy
 	let ENABLE_AGENT_PROXY = false;
