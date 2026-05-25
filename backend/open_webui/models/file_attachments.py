@@ -42,9 +42,9 @@ class FileAttachment(Base):
     file_id = Column(String, nullable=False, index=True)
     kind = Column(String, nullable=False)
     storey = Column(String, nullable=True)
-    index = Column(Integer, nullable=False, default=0)
-    content_type = Column(String, nullable=False, default='image/png')
-    caption = Column(Text, nullable=False, default='')
+    index = Column(Integer, nullable=False)
+    content_type = Column(String, nullable=False)
+    caption = Column(Text, nullable=False)
     path = Column(Text, nullable=False)
     created_at = Column(BigInteger, nullable=False)
 
