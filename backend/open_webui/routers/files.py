@@ -98,6 +98,7 @@ def process_uploaded_file(
     file_metadata,
     user,
     db: Optional[Session] = None,
+    knowledge_id: Optional[str] = None,
 ):
     def _process_handler(db_session):
         try:
@@ -108,6 +109,10 @@ def process_uploaded_file(
                 if _is_text_file(file_path):
                     content_type = 'text/plain'
 
+            # If destined for a KB, embed directly into the KB collection so
+            # we never create a redundant `file-<id>` collection.
+            collection_name = knowledge_id
+
             if content_type:
                 stt_supported_content_types = getattr(request.app.state.config, 'STT_SUPPORTED_CONTENT_TYPES', [])
 
@@ -117,7 +122,11 @@ def process_uploaded_file(
 
                     process_file(
                         request,
-                        ProcessFileForm(file_id=file_item.id, content=result.get('text', '')),
+                        ProcessFileForm(
+                            file_id=file_item.id,
+                            content=result.get('text', ''),
+                            collection_name=collection_name,
+                        ),
                         user=user,
                         db=db_session,
                     )
@@ -126,7 +135,10 @@ def process_uploaded_file(
                 ):
                     process_file(
                         request,
-                        ProcessFileForm(file_id=file_item.id),
+                        ProcessFileForm(
+                            file_id=file_item.id,
+                            collection_name=collection_name,
+                        ),
                         user=user,
                         db=db_session,
                     )
@@ -136,8 +148,21 @@ def process_uploaded_file(
                 log.info(f'File type {file.content_type} is not provided, but trying to process anyway')
                 process_file(
                     request,
-                    ProcessFileForm(file_id=file_item.id),
+                    ProcessFileForm(
+                        file_id=file_item.id,
+                        collection_name=collection_name,
+                    ),
                     user=user,
+                    db=db_session,
+                )
+
+            # If this upload was for a KB, link the file → KB so the frontend
+            # doesn't need a separate /knowledge/{id}/file/add round-trip.
+            if knowledge_id:
+                Knowledges.add_file_to_knowledge_by_id(
+                    knowledge_id=knowledge_id,
+                    file_id=file_item.id,
+                    user_id=user.id,
                     db=db_session,
                 )
 
@@ -145,13 +170,13 @@ def process_uploaded_file(
             # Dispatch onto uvicorn's main loop — asyncio.run would create a
             # throwaway loop and poison the shared Socket.IO Redis pool.
             file_data = Files.get_file_by_id(file_item.id)
-            collection_name = file_data.meta.get('collection_name') if file_data and file_data.meta else None
+            emit_collection_name = file_data.meta.get('collection_name') if file_data and file_data.meta else None
             run_on_main_loop(
                 emit_file_status(
                     user_id=user.id,
                     file_id=file_item.id,
                     status='completed',
-                    collection_name=collection_name,
+                    collection_name=emit_collection_name,
                 )
             )
 
@@ -226,6 +251,34 @@ def upload_file_handler(
                 detail=ERROR_MESSAGES.DEFAULT('Invalid metadata format'),
             )
     file_metadata = metadata if metadata else {}
+
+    # Extract knowledge_id from metadata (workspace KB upload signal). When set,
+    # the file embeds directly into the KB collection and auto-links to the KB —
+    # no separate /knowledge/{id}/file/add round-trip needed. Verify the user
+    # can write to that KB before accepting the upload.
+    knowledge_id = file_metadata.get('knowledge_id') if isinstance(file_metadata, dict) else None
+    if knowledge_id:
+        knowledge = Knowledges.get_knowledge_by_id(id=knowledge_id, db=db)
+        if not knowledge:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=ERROR_MESSAGES.NOT_FOUND,
+            )
+        if (
+            knowledge.user_id != user.id
+            and not AccessGrants.has_access(
+                user_id=user.id,
+                resource_type='knowledge',
+                resource_id=knowledge.id,
+                permission='write',
+                db=db,
+            )
+            and user.role != 'admin'
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=ERROR_MESSAGES.ACCESS_PROHIBITED,
+            )
 
     try:
         unsanitized_filename = file.filename
@@ -324,6 +377,8 @@ def upload_file_handler(
                     file_item,
                     file_metadata,
                     user,
+                    None,  # db
+                    knowledge_id,
                 )
                 return {'status': True, **file_item.model_dump()}
             else:
@@ -335,6 +390,7 @@ def upload_file_handler(
                     file_metadata,
                     user,
                     db=db,
+                    knowledge_id=knowledge_id,
                 )
                 return {'status': True, **file_item.model_dump()}
         else:

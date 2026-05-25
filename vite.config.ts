@@ -34,7 +34,16 @@ export default defineConfig({
 				'/oauth': target,
 				'/static': target
 			};
-		})()
+		})(),
+		// soev parallel dev stacks live under `.worktrees/<branch>/` (see
+		// `.claude/commands/kickoff_features.md`). Without this ignore, a
+		// dev server running from the repo root fires HMR for any edit in
+		// any worktree — every stack's UI then reloads spuriously on
+		// unrelated changes. Inside a worktree's own `npm run dev` this
+		// pattern is simply a no-op.
+		watch: {
+			ignored: ['**/.worktrees/**']
+		}
 	},
 	build: {
 		sourcemap: true

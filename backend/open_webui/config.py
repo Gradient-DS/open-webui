@@ -2664,6 +2664,10 @@ WEAVIATE_WEB_SEARCH_TTL_MINUTES = int(os.environ.get('WEAVIATE_WEB_SEARCH_TTL_MI
 WEAVIATE_HTTP_SECURE = os.environ.get('WEAVIATE_HTTP_SECURE', 'false').lower() == 'true'
 WEAVIATE_GRPC_SECURE = os.environ.get('WEAVIATE_GRPC_SECURE', 'false').lower() == 'true'
 WEAVIATE_SKIP_INIT_CHECKS = os.environ.get('WEAVIATE_SKIP_INIT_CHECKS', 'false').lower() == 'true'
+# Enable binary-quantization + flat index for File_*, Web_search_*, User_memory_*
+# collections. Default off: HNSW for every collection. Flip on if Weaviate memory
+# pressure returns; the trade-off is ~8s per collection creation on flip-on.
+ENABLE_WEAVIATE_BQ_QUANTIZATION = os.environ.get('ENABLE_WEAVIATE_BQ_QUANTIZATION', 'false').lower() == 'true'
 
 # OpenSearch
 OPENSEARCH_URI = os.environ.get('OPENSEARCH_URI', 'https://localhost:9200')
