@@ -32,7 +32,8 @@ export default defineConfig({
 				'/ollama': target,
 				'/openai': target,
 				'/oauth': target,
-				'/static': target
+				'/static': target,
+				'/ws': { target, ws: true }
 			};
 		})()
 	},

@@ -2232,6 +2232,10 @@
 	// call sites still invoke `submitPrompt(userPrompt, { _raw })` end-to-end,
 	// so this single function continues to own both responsibilities. Adopting
 	// the split is a follow-up that touches every call site.
+	//
+	// Phase 1 left this comment in but new upstream call sites in the merge
+	// reference `submitHandler` by name (9 of them across this file). Aliasing
+	// keeps both names live without rewriting every call site.
 	const submitPrompt = async (userPrompt, { _raw = false } = {}) => {
 		console.log('submitPrompt', userPrompt, $chatId);
 
@@ -2344,6 +2348,8 @@
 
 		await submitPrompt(userPrompt, _files);
 	};
+
+	const submitHandler = submitPrompt;
 
 	const sendMessage = async (
 		_history,
