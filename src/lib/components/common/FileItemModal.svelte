@@ -439,7 +439,7 @@
 					</div>
 				{/if}
 
-				{#if isAudio || isPDF || isExcel || isCode || isMarkdown || isDocx || isPptx}
+				{#if isAudio || isPDF || isExcel || isCode || isMarkdown || isDocx || isPptx || hasAttachments}
 					<div
 						class="flex mb-2.5 scrollbar-none overflow-x-auto w-full border-b border-gray-50 dark:border-gray-850/30 text-center text-sm font-medium bg-transparent dark:text-gray-200"
 					>
