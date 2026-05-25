@@ -83,7 +83,18 @@
 	import HotkeyHint from '../common/HotkeyHint.svelte';
 
 	const BREAKPOINT = 768;
-	const DEFAULT_PINNED_ITEMS = ['notes', 'workspace'];
+	// [Gradient] Pin-feature removed. Our fork always shows every visible
+	// menu item directly in the sidebar — there's no user-toggleable pinning.
+	// The list below drives the {#each pinnedItems} loop further down; each
+	// entry is independently gated by isMenuItemVisible (feature flag +
+	// permissions), so unused items quietly drop out.
+	const PINNED_ITEMS: string[] = [
+		'notes',
+		'workspace',
+		'automations',
+		'calendar',
+		'playground'
+	];
 
 	let scrollTop = 0;
 
@@ -111,7 +122,7 @@
 
 	let newFolderId = null;
 
-	$: pinnedItems = $settings?.pinnedMenuItems ?? DEFAULT_PINNED_ITEMS;
+	const pinnedItems = PINNED_ITEMS;
 
 	const isMenuItemVisible = (id) => {
 		switch (id) {
@@ -154,25 +165,6 @@
 			playground: { label: 'Playground', href: '/playground', iconType: 'playground' }
 		};
 		return items[id];
-	};
-
-	const initPinnedMenuSortable = () => {
-		const el = document.getElementById('pinned-menu-items-list');
-		if (el && !$mobile) {
-			new Sortable(el, {
-				animation: 150,
-				onUpdate: async (event) => {
-					const itemId = event.item.dataset.id;
-					const newIndex = event.newIndex;
-					const current = [...pinnedItems];
-					const oldIndex = current.indexOf(itemId);
-					current.splice(oldIndex, 1);
-					current.splice(newIndex, 0, itemId);
-					settings.set({ ...$settings, pinnedMenuItems: current });
-					await updateUserSettings(localStorage.token, { ui: $settings });
-				}
-			});
-		}
 	};
 
 	$: if ($selectedFolder) {
@@ -606,7 +598,6 @@
 		socketInstance?.on('events', chatActiveEventHandler);
 
 		await tick();
-		initPinnedMenuSortable();
 
 		return () => {
 			unsubscribers.forEach((unsubscriber) => unsubscriber());

@@ -38,8 +38,6 @@
 	import Emoji from '$lib/components/common/Emoji.svelte';
 	import XMark from '$lib/components/icons/XMark.svelte';
 	import Note from '$lib/components/icons/Note.svelte';
-	import Pin from '$lib/components/icons/Pin.svelte';
-	import PinSlash from '$lib/components/icons/PinSlash.svelte';
 	import { updateUserStatus, updateUserSettings } from '$lib/apis/users';
 	import { toast } from 'svelte-sonner';
 
@@ -57,28 +55,8 @@
 	export let showActiveUsers = true;
 
 	let showUserStatusModal = false;
-	let shiftKey = false;
 
 	const dispatch = createEventDispatcher();
-
-	const DEFAULT_PINNED_ITEMS = ['notes', 'workspace'];
-
-	$: pinnedItems = $settings?.pinnedMenuItems ?? DEFAULT_PINNED_ITEMS;
-
-	const isPinned = (id: string) => {
-		return pinnedItems.includes(id);
-	};
-
-	const togglePin = async (id: string) => {
-		let updated;
-		if (isPinned(id)) {
-			updated = pinnedItems.filter((item) => item !== id);
-		} else {
-			updated = [...pinnedItems, id];
-		}
-		await settings.set({ ...$settings, pinnedMenuItems: updated });
-		await updateUserSettings(localStorage.token, { ui: $settings });
-	};
 
 	let usage = null;
 	const getUsageInfo = async () => {
@@ -102,15 +80,6 @@
 		}
 	};
 </script>
-
-<svelte:window
-	on:keydown={(e) => {
-		if (e.key === 'Shift') shiftKey = true;
-	}}
-	on:keyup={(e) => {
-		if (e.key === 'Shift') shiftKey = false;
-	}}
-/>
 
 <ShortcutsModal bind:show={$showShortcuts} />
 <UserStatusModal
@@ -387,25 +356,6 @@
 						</div>
 						<div class="self-center truncate">{$i18n.t('Workspace')}</div>
 					</a>
-					{#if shiftKey}
-						<Tooltip
-							content={isPinned('workspace')
-								? $i18n.t('Unpin from Sidebar')
-								: $i18n.t('Pin to Sidebar')}
-						>
-							<button
-								type="button"
-								class="p-1 mr-1 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition"
-								on:click|preventDefault|stopPropagation={() => togglePin('workspace')}
-							>
-								{#if isPinned('workspace')}
-									<PinSlash className="size-3.5" strokeWidth="1.5" />
-								{:else}
-									<Pin className="size-3.5" strokeWidth="1.5" />
-								{/if}
-							</button>
-						</Tooltip>
-					{/if}
 				</div>
 			{/if}
 
@@ -431,25 +381,6 @@
 						</div>
 						<div class="self-center truncate">{$i18n.t('Notes')}</div>
 					</a>
-					{#if shiftKey}
-						<Tooltip
-							content={isPinned('notes')
-								? $i18n.t('Unpin from Sidebar')
-								: $i18n.t('Pin to Sidebar')}
-						>
-							<button
-								type="button"
-								class="p-1 mr-1 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition"
-								on:click|preventDefault|stopPropagation={() => togglePin('notes')}
-							>
-								{#if isPinned('notes')}
-									<PinSlash className="size-3.5" strokeWidth="1.5" />
-								{:else}
-									<Pin className="size-3.5" strokeWidth="1.5" />
-								{/if}
-							</button>
-						</Tooltip>
-					{/if}
 				</div>
 			{/if}
 
@@ -484,25 +415,6 @@
 						</div>
 						<div class="self-center truncate">{$i18n.t('Calendar')}</div>
 					</a>
-					{#if shiftKey}
-						<Tooltip
-							content={isPinned('calendar')
-								? $i18n.t('Unpin from Sidebar')
-								: $i18n.t('Pin to Sidebar')}
-						>
-							<button
-								type="button"
-								class="p-1 mr-1 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition"
-								on:click|preventDefault|stopPropagation={() => togglePin('calendar')}
-							>
-								{#if isPinned('calendar')}
-									<PinSlash className="size-3.5" strokeWidth="1.5" />
-								{:else}
-									<Pin className="size-3.5" strokeWidth="1.5" />
-								{/if}
-							</button>
-						</Tooltip>
-					{/if}
 				</div>
 			{/if}
 
@@ -541,25 +453,6 @@
 						</div>
 						<div class="self-center truncate">{$i18n.t('Automations')}</div>
 					</a>
-					{#if shiftKey}
-						<Tooltip
-							content={isPinned('automations')
-								? $i18n.t('Unpin from Sidebar')
-								: $i18n.t('Pin to Sidebar')}
-						>
-							<button
-								type="button"
-								class="p-1 mr-1 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition"
-								on:click|preventDefault|stopPropagation={() => togglePin('automations')}
-							>
-								{#if isPinned('automations')}
-									<PinSlash className="size-3.5" strokeWidth="1.5" />
-								{:else}
-									<Pin className="size-3.5" strokeWidth="1.5" />
-								{/if}
-							</button>
-						</Tooltip>
-					{/if}
 				</div>
 			{/if}
 
@@ -585,25 +478,6 @@
 						</div>
 						<div class="self-center truncate">{$i18n.t('Playground')}</div>
 					</a>
-					{#if shiftKey}
-						<Tooltip
-							content={isPinned('playground')
-								? $i18n.t('Unpin from Sidebar')
-								: $i18n.t('Pin to Sidebar')}
-						>
-							<button
-								type="button"
-								class="p-1 mr-1 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition"
-								on:click|preventDefault|stopPropagation={() => togglePin('playground')}
-							>
-								{#if isPinned('playground')}
-									<PinSlash className="size-3.5" strokeWidth="1.5" />
-								{:else}
-									<Pin className="size-3.5" strokeWidth="1.5" />
-								{/if}
-							</button>
-						</Tooltip>
-					{/if}
 				</div>
 			{/if}
 
