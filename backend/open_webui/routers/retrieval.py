@@ -41,11 +41,12 @@ from open_webui.models.files import FileModel, FileUpdateForm, Files
 from open_webui.utils.access_control.files import has_access_to_file
 from open_webui.models.knowledge import Knowledges
 from open_webui.storage.provider import Storage
-from open_webui.internal.db import get_session, get_db
-from sqlalchemy.orm import Session
+from open_webui.internal.db import get_async_db, get_async_session
+from sqlalchemy.ext.asyncio import AsyncSession
 
 
 from open_webui.retrieval.vector.factory import VECTOR_DB_CLIENT
+from open_webui.retrieval.vector.async_client import ASYNC_VECTOR_DB_CLIENT
 
 # External pipeline integration
 from open_webui.routers.external_retrieval import (
@@ -54,7 +55,6 @@ from open_webui.routers.external_retrieval import (
 )
 
 # Document loaders
-from open_webui.retrieval.loaders.main import Loader
 from open_webui.retrieval.loaders.youtube import YoutubeLoader
 
 # Web search engines
@@ -63,6 +63,7 @@ from open_webui.retrieval.web.utils import get_web_loader
 from open_webui.retrieval.web.ollama import search_ollama_cloud
 from open_webui.retrieval.web.perplexity_search import search_perplexity_search
 from open_webui.retrieval.web.brave import search_brave
+from open_webui.retrieval.web.brave_llm_context import search_brave_llm_context
 from open_webui.retrieval.web.kagi import search_kagi
 from open_webui.retrieval.web.mojeek import search_mojeek
 from open_webui.retrieval.web.bocha import search_bocha
@@ -88,6 +89,8 @@ from open_webui.retrieval.web.yandex import search_yandex
 from open_webui.retrieval.web.ydc import search_youcom
 
 from open_webui.retrieval.utils import (
+    build_loader_from_config,
+    filter_accessible_collections,
     get_content_from_url,
     get_embedding_function,
     get_reranking_function,
@@ -158,7 +161,7 @@ def get_ef(
                 model_kwargs=SENTENCE_TRANSFORMERS_MODEL_KWARGS,
             )
         except Exception as e:
-            log.debug(f'Error loading SentenceTransformer: {e}')
+            log.error(f'Error loading SentenceTransformer: {e}')
 
     return ef
 
@@ -263,22 +266,6 @@ class SearchForm(BaseModel):
     queries: List[str]
 
 
-@router.get('/')
-async def get_status(request: Request):
-    return {
-        'status': True,
-        'CHUNK_SIZE': request.app.state.config.CHUNK_SIZE,
-        'CHUNK_OVERLAP': request.app.state.config.CHUNK_OVERLAP,
-        'RAG_TEMPLATE': request.app.state.config.RAG_TEMPLATE,
-        'RAG_EMBEDDING_ENGINE': request.app.state.config.RAG_EMBEDDING_ENGINE,
-        'RAG_EMBEDDING_MODEL': request.app.state.config.RAG_EMBEDDING_MODEL,
-        'RAG_RERANKING_MODEL': request.app.state.config.RAG_RERANKING_MODEL,
-        'RAG_EMBEDDING_BATCH_SIZE': request.app.state.config.RAG_EMBEDDING_BATCH_SIZE,
-        'ENABLE_ASYNC_EMBEDDING': request.app.state.config.ENABLE_ASYNC_EMBEDDING,
-        'RAG_EMBEDDING_CONCURRENT_REQUESTS': request.app.state.config.RAG_EMBEDDING_CONCURRENT_REQUESTS,
-    }
-
-
 @router.get('/embedding')
 async def get_embedding_config(request: Request, user=Depends(get_admin_user)):
     return {
@@ -354,7 +341,7 @@ async def update_embedding_config(request: Request, form_data: EmbeddingModelUpd
     unload_embedding_model(request)
     try:
         request.app.state.config.RAG_EMBEDDING_ENGINE = form_data.RAG_EMBEDDING_ENGINE
-        request.app.state.config.RAG_EMBEDDING_MODEL = form_data.RAG_EMBEDDING_MODEL
+        request.app.state.config.RAG_EMBEDDING_MODEL = form_data.RAG_EMBEDDING_MODEL.strip()
         request.app.state.config.RAG_EMBEDDING_BATCH_SIZE = form_data.RAG_EMBEDDING_BATCH_SIZE
         request.app.state.config.ENABLE_ASYNC_EMBEDDING = form_data.ENABLE_ASYNC_EMBEDDING
         request.app.state.config.RAG_EMBEDDING_CONCURRENT_REQUESTS = form_data.RAG_EMBEDDING_CONCURRENT_REQUESTS
@@ -484,6 +471,8 @@ async def get_rag_config(request: Request, user=Depends(get_admin_user)):
         'DOCUMENT_INTELLIGENCE_MODEL': request.app.state.config.DOCUMENT_INTELLIGENCE_MODEL,
         'MISTRAL_OCR_API_BASE_URL': request.app.state.config.MISTRAL_OCR_API_BASE_URL,
         'MISTRAL_OCR_API_KEY': request.app.state.config.MISTRAL_OCR_API_KEY,
+        'PADDLEOCR_VL_BASE_URL': request.app.state.config.PADDLEOCR_VL_BASE_URL,
+        'PADDLEOCR_VL_TOKEN': request.app.state.config.PADDLEOCR_VL_TOKEN,
         # MinerU settings
         'MINERU_API_MODE': request.app.state.config.MINERU_API_MODE,
         'MINERU_API_URL': request.app.state.config.MINERU_API_URL,
@@ -493,6 +482,7 @@ async def get_rag_config(request: Request, user=Depends(get_admin_user)):
         # Reranking settings
         'RAG_RERANKING_MODEL': request.app.state.config.RAG_RERANKING_MODEL,
         'RAG_RERANKING_ENGINE': request.app.state.config.RAG_RERANKING_ENGINE,
+        'RAG_RERANKING_BATCH_SIZE': request.app.state.config.RAG_RERANKING_BATCH_SIZE,
         'RAG_EXTERNAL_RERANKER_URL': request.app.state.config.RAG_EXTERNAL_RERANKER_URL,
         'RAG_EXTERNAL_RERANKER_API_KEY': request.app.state.config.RAG_EXTERNAL_RERANKER_API_KEY,
         'RAG_EXTERNAL_RERANKER_TIMEOUT': request.app.state.config.RAG_EXTERNAL_RERANKER_TIMEOUT,
@@ -533,6 +523,7 @@ async def get_rag_config(request: Request, user=Depends(get_admin_user)):
             'GOOGLE_PSE_API_KEY': request.app.state.config.GOOGLE_PSE_API_KEY,
             'GOOGLE_PSE_ENGINE_ID': request.app.state.config.GOOGLE_PSE_ENGINE_ID,
             'BRAVE_SEARCH_API_KEY': request.app.state.config.BRAVE_SEARCH_API_KEY,
+            'BRAVE_SEARCH_CONTEXT_TOKENS': request.app.state.config.BRAVE_SEARCH_CONTEXT_TOKENS,
             'KAGI_SEARCH_API_KEY': request.app.state.config.KAGI_SEARCH_API_KEY,
             'MOJEEK_SEARCH_API_KEY': request.app.state.config.MOJEEK_SEARCH_API_KEY,
             'BOCHA_SEARCH_API_KEY': request.app.state.config.BOCHA_SEARCH_API_KEY,
@@ -601,6 +592,7 @@ class WebConfig(BaseModel):
     GOOGLE_PSE_API_KEY: Optional[str] = None
     GOOGLE_PSE_ENGINE_ID: Optional[str] = None
     BRAVE_SEARCH_API_KEY: Optional[str] = None
+    BRAVE_SEARCH_CONTEXT_TOKENS: Optional[int] = None
     KAGI_SEARCH_API_KEY: Optional[str] = None
     MOJEEK_SEARCH_API_KEY: Optional[str] = None
     BOCHA_SEARCH_API_KEY: Optional[str] = None
@@ -690,6 +682,8 @@ class ConfigForm(BaseModel):
     DOCUMENT_INTELLIGENCE_MODEL: Optional[str] = None
     MISTRAL_OCR_API_BASE_URL: Optional[str] = None
     MISTRAL_OCR_API_KEY: Optional[str] = None
+    PADDLEOCR_VL_BASE_URL: Optional[str] = None
+    PADDLEOCR_VL_TOKEN: Optional[str] = None
 
     # MinerU settings
     MINERU_API_MODE: Optional[str] = None
@@ -701,6 +695,7 @@ class ConfigForm(BaseModel):
     # Reranking settings
     RAG_RERANKING_MODEL: Optional[str] = None
     RAG_RERANKING_ENGINE: Optional[str] = None
+    RAG_RERANKING_BATCH_SIZE: Optional[int] = None
     RAG_EXTERNAL_RERANKER_URL: Optional[str] = None
     RAG_EXTERNAL_RERANKER_API_KEY: Optional[str] = None
     RAG_EXTERNAL_RERANKER_TIMEOUT: Optional[str] = None
@@ -891,6 +886,16 @@ async def update_rag_config(request: Request, form_data: ConfigForm, user=Depend
         if form_data.MISTRAL_OCR_API_KEY is not None
         else request.app.state.config.MISTRAL_OCR_API_KEY
     )
+    request.app.state.config.PADDLEOCR_VL_BASE_URL = (
+        form_data.PADDLEOCR_VL_BASE_URL
+        if form_data.PADDLEOCR_VL_BASE_URL is not None
+        else request.app.state.config.PADDLEOCR_VL_BASE_URL
+    )
+    request.app.state.config.PADDLEOCR_VL_TOKEN = (
+        form_data.PADDLEOCR_VL_TOKEN
+        if form_data.PADDLEOCR_VL_TOKEN is not None
+        else request.app.state.config.PADDLEOCR_VL_TOKEN
+    )
 
     # MinerU settings
     request.app.state.config.MINERU_API_MODE = (
@@ -948,6 +953,12 @@ async def update_rag_config(request: Request, form_data: ConfigForm, user=Depend
         else request.app.state.config.RAG_EXTERNAL_RERANKER_TIMEOUT
     )
 
+    request.app.state.config.RAG_RERANKING_BATCH_SIZE = (
+        form_data.RAG_RERANKING_BATCH_SIZE
+        if form_data.RAG_RERANKING_BATCH_SIZE is not None
+        else request.app.state.config.RAG_RERANKING_BATCH_SIZE
+    )
+
     log.info(
         f'Updating reranking model: {request.app.state.config.RAG_RERANKING_MODEL} to {form_data.RAG_RERANKING_MODEL}'
     )
@@ -975,6 +986,7 @@ async def update_rag_config(request: Request, form_data: ConfigForm, user=Depend
                     request.app.state.config.RAG_RERANKING_ENGINE,
                     request.app.state.config.RAG_RERANKING_MODEL,
                     request.app.state.rf,
+                    reranking_batch_size=request.app.state.config.RAG_RERANKING_BATCH_SIZE,
                 )
         except Exception as e:
             log.error(f'Error loading reranking model: {e}')
@@ -1069,6 +1081,8 @@ async def update_rag_config(request: Request, form_data: ConfigForm, user=Depend
         request.app.state.config.GOOGLE_PSE_API_KEY = form_data.web.GOOGLE_PSE_API_KEY
         request.app.state.config.GOOGLE_PSE_ENGINE_ID = form_data.web.GOOGLE_PSE_ENGINE_ID
         request.app.state.config.BRAVE_SEARCH_API_KEY = form_data.web.BRAVE_SEARCH_API_KEY
+        if form_data.web.BRAVE_SEARCH_CONTEXT_TOKENS is not None:
+            request.app.state.config.BRAVE_SEARCH_CONTEXT_TOKENS = form_data.web.BRAVE_SEARCH_CONTEXT_TOKENS
         request.app.state.config.KAGI_SEARCH_API_KEY = form_data.web.KAGI_SEARCH_API_KEY
         request.app.state.config.MOJEEK_SEARCH_API_KEY = form_data.web.MOJEEK_SEARCH_API_KEY
         request.app.state.config.BOCHA_SEARCH_API_KEY = form_data.web.BOCHA_SEARCH_API_KEY
@@ -1154,6 +1168,8 @@ async def update_rag_config(request: Request, form_data: ConfigForm, user=Depend
         'DOCUMENT_INTELLIGENCE_MODEL': request.app.state.config.DOCUMENT_INTELLIGENCE_MODEL,
         'MISTRAL_OCR_API_BASE_URL': request.app.state.config.MISTRAL_OCR_API_BASE_URL,
         'MISTRAL_OCR_API_KEY': request.app.state.config.MISTRAL_OCR_API_KEY,
+        'PADDLEOCR_VL_BASE_URL': request.app.state.config.PADDLEOCR_VL_BASE_URL,
+        'PADDLEOCR_VL_TOKEN': request.app.state.config.PADDLEOCR_VL_TOKEN,
         # MinerU settings
         'MINERU_API_MODE': request.app.state.config.MINERU_API_MODE,
         'MINERU_API_URL': request.app.state.config.MINERU_API_URL,
@@ -1163,6 +1179,7 @@ async def update_rag_config(request: Request, form_data: ConfigForm, user=Depend
         # Reranking settings
         'RAG_RERANKING_MODEL': request.app.state.config.RAG_RERANKING_MODEL,
         'RAG_RERANKING_ENGINE': request.app.state.config.RAG_RERANKING_ENGINE,
+        'RAG_RERANKING_BATCH_SIZE': request.app.state.config.RAG_RERANKING_BATCH_SIZE,
         'RAG_EXTERNAL_RERANKER_URL': request.app.state.config.RAG_EXTERNAL_RERANKER_URL,
         'RAG_EXTERNAL_RERANKER_API_KEY': request.app.state.config.RAG_EXTERNAL_RERANKER_API_KEY,
         'RAG_EXTERNAL_RERANKER_TIMEOUT': request.app.state.config.RAG_EXTERNAL_RERANKER_TIMEOUT,
@@ -1189,7 +1206,7 @@ async def update_rag_config(request: Request, form_data: ConfigForm, user=Depend
             'WEB_SEARCH_TRUST_ENV': request.app.state.config.WEB_SEARCH_TRUST_ENV,
             'WEB_SEARCH_RESULT_COUNT': request.app.state.config.WEB_SEARCH_RESULT_COUNT,
             'WEB_SEARCH_CONCURRENT_REQUESTS': request.app.state.config.WEB_SEARCH_CONCURRENT_REQUESTS,
-            'FETCH_URL_MAX_CONTENT_LENGTH': request.app.state.config.FETCH_URL_MAX_CONTENT_LENGTH,
+            'WEB_FETCH_MAX_CONTENT_LENGTH': request.app.state.config.WEB_FETCH_MAX_CONTENT_LENGTH,
             'WEB_LOADER_CONCURRENT_REQUESTS': request.app.state.config.WEB_LOADER_CONCURRENT_REQUESTS,
             'WEB_SEARCH_DOMAIN_FILTER_LIST': request.app.state.config.WEB_SEARCH_DOMAIN_FILTER_LIST,
             'BYPASS_WEB_SEARCH_EMBEDDING_AND_RETRIEVAL': request.app.state.config.BYPASS_WEB_SEARCH_EMBEDDING_AND_RETRIEVAL,
@@ -1203,6 +1220,7 @@ async def update_rag_config(request: Request, form_data: ConfigForm, user=Depend
             'GOOGLE_PSE_API_KEY': request.app.state.config.GOOGLE_PSE_API_KEY,
             'GOOGLE_PSE_ENGINE_ID': request.app.state.config.GOOGLE_PSE_ENGINE_ID,
             'BRAVE_SEARCH_API_KEY': request.app.state.config.BRAVE_SEARCH_API_KEY,
+            'BRAVE_SEARCH_CONTEXT_TOKENS': request.app.state.config.BRAVE_SEARCH_CONTEXT_TOKENS,
             'KAGI_SEARCH_API_KEY': request.app.state.config.KAGI_SEARCH_API_KEY,
             'MOJEEK_SEARCH_API_KEY': request.app.state.config.MOJEEK_SEARCH_API_KEY,
             'BOCHA_SEARCH_API_KEY': request.app.state.config.BOCHA_SEARCH_API_KEY,
@@ -1627,11 +1645,11 @@ class ProcessFileForm(BaseModel):
 
 
 @router.post('/process/file')
-def process_file(
+async def process_file(
     request: Request,
     form_data: ProcessFileForm,
     user=Depends(get_verified_user),
-    db: Session = Depends(get_session),
+    db: AsyncSession = Depends(get_async_session),
 ):
     """
     Process a file and save its content to the vector database.
@@ -1640,9 +1658,9 @@ def process_file(
     The session is committed before external API calls, and updates use a fresh session.
     """
     if user.role == 'admin':
-        file = Files.get_file_by_id(form_data.file_id, db=db)
+        file = await Files.get_file_by_id(form_data.file_id, db=db)
     else:
-        file = Files.get_file_by_id_and_user_id(form_data.file_id, user.id, db=db)
+        file = await Files.get_file_by_id_and_user_id(form_data.file_id, user.id, db=db)
 
     if file:
         try:
@@ -1650,6 +1668,8 @@ def process_file(
 
             if collection_name is None:
                 collection_name = f'file-{file.id}'
+            else:
+                await _validate_collection_access([collection_name], user, access_type='write')
 
             if form_data.content:
                 # Update the content in the file
@@ -1657,7 +1677,7 @@ def process_file(
 
                 try:
                     # /files/{file_id}/data/content/update
-                    VECTOR_DB_CLIENT.delete_collection(collection_name=f'file-{file.id}')
+                    await ASYNC_VECTOR_DB_CLIENT.delete_collection(collection_name=f'file-{file.id}')
                 except Exception:
                     # Audio file upload pipeline
                     pass
@@ -1680,7 +1700,9 @@ def process_file(
                 # Check if the file has already been processed and save the content
                 # Usage: /knowledge/{id}/file/add, /knowledge/{id}/file/update
 
-                result = VECTOR_DB_CLIENT.query(collection_name=f'file-{file.id}', filter={'file_id': file.id})
+                result = await ASYNC_VECTOR_DB_CLIENT.query(
+                    collection_name=f'file-{file.id}', filter={'file_id': file.id}
+                )
 
                 if result is not None and len(result.ids[0]) > 0:
                     docs = [
@@ -1710,41 +1732,10 @@ def process_file(
                         # hasn't completed). Load and extract content directly.
                         file_path = file.path
                         if file_path:
-                            file_path = Storage.get_file(file_path)
-                            loader = Loader(
-                                engine=request.app.state.config.CONTENT_EXTRACTION_ENGINE,
-                                user=user,
-                                DATALAB_MARKER_API_KEY=request.app.state.config.DATALAB_MARKER_API_KEY,
-                                DATALAB_MARKER_API_BASE_URL=request.app.state.config.DATALAB_MARKER_API_BASE_URL,
-                                DATALAB_MARKER_ADDITIONAL_CONFIG=request.app.state.config.DATALAB_MARKER_ADDITIONAL_CONFIG,
-                                DATALAB_MARKER_SKIP_CACHE=request.app.state.config.DATALAB_MARKER_SKIP_CACHE,
-                                DATALAB_MARKER_FORCE_OCR=request.app.state.config.DATALAB_MARKER_FORCE_OCR,
-                                DATALAB_MARKER_PAGINATE=request.app.state.config.DATALAB_MARKER_PAGINATE,
-                                DATALAB_MARKER_STRIP_EXISTING_OCR=request.app.state.config.DATALAB_MARKER_STRIP_EXISTING_OCR,
-                                DATALAB_MARKER_DISABLE_IMAGE_EXTRACTION=request.app.state.config.DATALAB_MARKER_DISABLE_IMAGE_EXTRACTION,
-                                DATALAB_MARKER_FORMAT_LINES=request.app.state.config.DATALAB_MARKER_FORMAT_LINES,
-                                DATALAB_MARKER_USE_LLM=request.app.state.config.DATALAB_MARKER_USE_LLM,
-                                DATALAB_MARKER_OUTPUT_FORMAT=request.app.state.config.DATALAB_MARKER_OUTPUT_FORMAT,
-                                EXTERNAL_DOCUMENT_LOADER_URL=request.app.state.config.EXTERNAL_DOCUMENT_LOADER_URL,
-                                EXTERNAL_DOCUMENT_LOADER_API_KEY=request.app.state.config.EXTERNAL_DOCUMENT_LOADER_API_KEY,
-                                TIKA_SERVER_URL=request.app.state.config.TIKA_SERVER_URL,
-                                DOCLING_SERVER_URL=request.app.state.config.DOCLING_SERVER_URL,
-                                DOCLING_API_KEY=request.app.state.config.DOCLING_API_KEY,
-                                DOCLING_PARAMS=request.app.state.config.DOCLING_PARAMS,
-                                PDF_EXTRACT_IMAGES=request.app.state.config.PDF_EXTRACT_IMAGES,
-                                PDF_LOADER_MODE=request.app.state.config.PDF_LOADER_MODE,
-                                DOCUMENT_INTELLIGENCE_ENDPOINT=request.app.state.config.DOCUMENT_INTELLIGENCE_ENDPOINT,
-                                DOCUMENT_INTELLIGENCE_KEY=request.app.state.config.DOCUMENT_INTELLIGENCE_KEY,
-                                DOCUMENT_INTELLIGENCE_MODEL=request.app.state.config.DOCUMENT_INTELLIGENCE_MODEL,
-                                MISTRAL_OCR_API_BASE_URL=request.app.state.config.MISTRAL_OCR_API_BASE_URL,
-                                MISTRAL_OCR_API_KEY=request.app.state.config.MISTRAL_OCR_API_KEY,
-                                MINERU_API_MODE=request.app.state.config.MINERU_API_MODE,
-                                MINERU_API_URL=request.app.state.config.MINERU_API_URL,
-                                MINERU_API_KEY=request.app.state.config.MINERU_API_KEY,
-                                MINERU_API_TIMEOUT=request.app.state.config.MINERU_API_TIMEOUT,
-                                MINERU_PARAMS=request.app.state.config.MINERU_PARAMS,
-                            )
-                            docs = loader.load(file.filename, file.meta.get('content_type'), file_path)
+                            file_path = await asyncio.to_thread(Storage.get_file, file_path)
+                            loader = build_loader_from_config(request)
+                            loader.user = user
+                            docs = await loader.aload(file.filename, file.meta.get('content_type'), file_path)
                             docs = [
                                 Document(
                                     page_content=doc.page_content,
@@ -1767,40 +1758,9 @@ def process_file(
                 # Usage: /files/
                 file_path = file.path
                 if file_path:
-                    file_path = Storage.get_file(file_path)
-                    loader = Loader(
-                        engine=request.app.state.config.CONTENT_EXTRACTION_ENGINE,
-                        user=user,
-                        DATALAB_MARKER_API_KEY=request.app.state.config.DATALAB_MARKER_API_KEY,
-                        DATALAB_MARKER_API_BASE_URL=request.app.state.config.DATALAB_MARKER_API_BASE_URL,
-                        DATALAB_MARKER_ADDITIONAL_CONFIG=request.app.state.config.DATALAB_MARKER_ADDITIONAL_CONFIG,
-                        DATALAB_MARKER_SKIP_CACHE=request.app.state.config.DATALAB_MARKER_SKIP_CACHE,
-                        DATALAB_MARKER_FORCE_OCR=request.app.state.config.DATALAB_MARKER_FORCE_OCR,
-                        DATALAB_MARKER_PAGINATE=request.app.state.config.DATALAB_MARKER_PAGINATE,
-                        DATALAB_MARKER_STRIP_EXISTING_OCR=request.app.state.config.DATALAB_MARKER_STRIP_EXISTING_OCR,
-                        DATALAB_MARKER_DISABLE_IMAGE_EXTRACTION=request.app.state.config.DATALAB_MARKER_DISABLE_IMAGE_EXTRACTION,
-                        DATALAB_MARKER_FORMAT_LINES=request.app.state.config.DATALAB_MARKER_FORMAT_LINES,
-                        DATALAB_MARKER_USE_LLM=request.app.state.config.DATALAB_MARKER_USE_LLM,
-                        DATALAB_MARKER_OUTPUT_FORMAT=request.app.state.config.DATALAB_MARKER_OUTPUT_FORMAT,
-                        EXTERNAL_DOCUMENT_LOADER_URL=request.app.state.config.EXTERNAL_DOCUMENT_LOADER_URL,
-                        EXTERNAL_DOCUMENT_LOADER_API_KEY=request.app.state.config.EXTERNAL_DOCUMENT_LOADER_API_KEY,
-                        TIKA_SERVER_URL=request.app.state.config.TIKA_SERVER_URL,
-                        DOCLING_SERVER_URL=request.app.state.config.DOCLING_SERVER_URL,
-                        DOCLING_API_KEY=request.app.state.config.DOCLING_API_KEY,
-                        DOCLING_PARAMS=request.app.state.config.DOCLING_PARAMS,
-                        PDF_EXTRACT_IMAGES=request.app.state.config.PDF_EXTRACT_IMAGES,
-                        PDF_LOADER_MODE=request.app.state.config.PDF_LOADER_MODE,
-                        DOCUMENT_INTELLIGENCE_ENDPOINT=request.app.state.config.DOCUMENT_INTELLIGENCE_ENDPOINT,
-                        DOCUMENT_INTELLIGENCE_KEY=request.app.state.config.DOCUMENT_INTELLIGENCE_KEY,
-                        DOCUMENT_INTELLIGENCE_MODEL=request.app.state.config.DOCUMENT_INTELLIGENCE_MODEL,
-                        MISTRAL_OCR_API_BASE_URL=request.app.state.config.MISTRAL_OCR_API_BASE_URL,
-                        MISTRAL_OCR_API_KEY=request.app.state.config.MISTRAL_OCR_API_KEY,
-                        MINERU_API_MODE=request.app.state.config.MINERU_API_MODE,
-                        MINERU_API_URL=request.app.state.config.MINERU_API_URL,
-                        MINERU_API_KEY=request.app.state.config.MINERU_API_KEY,
-                        MINERU_API_TIMEOUT=request.app.state.config.MINERU_API_TIMEOUT,
-                        MINERU_PARAMS=request.app.state.config.MINERU_PARAMS,
-                    )
+                    file_path = await asyncio.to_thread(Storage.get_file, file_path)
+                    loader = build_loader_from_config(request)
+                    loader.user = user
 
                     # Try external pipeline first by default
                     external_pipeline_url = getattr(request.app.state.config, 'EXTERNAL_PIPELINE_URL', None)
@@ -1815,7 +1775,7 @@ def process_file(
                         try:
                             # Process file with external pipeline
                             # All logic is in external_retrieval.py for maintainability
-                            return process_file_with_external_pipeline(
+                            return await process_file_with_external_pipeline(
                                 request=request,
                                 file=file,
                                 file_path=file_path,
@@ -1840,7 +1800,7 @@ def process_file(
                         log.info('Using internal pipeline for file')
                         # Internal pipeline: parsing, chunking, embedding
                         # Reuse the loader created above
-                        docs = loader.load(file.filename, file.meta.get('content_type'), file_path)
+                        docs = await loader.aload(file.filename, file.meta.get('content_type'), file_path)
 
                     docs = [
                         Document(
@@ -1871,7 +1831,7 @@ def process_file(
                 text_content = ' '.join([doc.page_content for doc in docs])
 
             log.debug(f'text_content length: {len(text_content)}')
-            Files.update_file_data_by_id(
+            await Files.update_file_data_by_id(
                 file.id,
                 {'content': text_content},
                 db=db,
@@ -1879,8 +1839,8 @@ def process_file(
             hash = calculate_sha256_string(text_content)
 
             if request.app.state.config.BYPASS_EMBEDDING_AND_RETRIEVAL:
-                Files.update_file_data_by_id(file.id, {'status': 'completed'}, db=db)
-                Files.update_file_hash_by_id(file.id, hash, db=db)
+                await Files.update_file_data_by_id(file.id, {'status': 'completed'}, db=db)
+                await Files.update_file_hash_by_id(file.id, hash, db=db)
                 return {
                     'status': True,
                     'collection_name': None,
@@ -1891,28 +1851,28 @@ def process_file(
                 try:
                     # Commit any pending changes before the slow embedding step.
                     # Note: file is already a Pydantic model (not ORM), so no expunge needed.
-                    db.commit()
+                    await db.commit()
 
                     # External embedding API takes time (5-60s+).
-                    # Subsequent updates use fresh sessions via get_db().
+                    # Subsequent updates use fresh async sessions.
                     if not text_content.strip():
                         # File has no extractable text (e.g. image-only PDF).
                         # Still add it to the KB for bookkeeping, but skip embedding.
                         log.warning(
                             'No text content extracted from file, skipping embedding but adding to knowledge base'
                         )
-                        with get_db() as session:
-                            Files.update_file_metadata_by_id(
+                        async with get_async_db() as session:
+                            await Files.update_file_metadata_by_id(
                                 file.id,
                                 {'collection_name': collection_name},
                                 db=session,
                             )
-                            Files.update_file_data_by_id(
+                            await Files.update_file_data_by_id(
                                 file.id,
                                 {'status': 'completed'},
                                 db=session,
                             )
-                            Files.update_file_hash_by_id(file.id, hash, db=session)
+                            await Files.update_file_hash_by_id(file.id, hash, db=session)
 
                         return {
                             'status': True,
@@ -1923,7 +1883,10 @@ def process_file(
                             'It has been added but will not be searchable.',
                         }
 
-                    result = save_docs_to_vector_db(
+                    # save_docs_to_vector_db is sync and blocks on embedding +
+                    # vector-DB I/O. Offload so the event loop stays responsive.
+                    result = await run_in_threadpool(
+                        save_docs_to_vector_db,
                         request,
                         docs=docs,
                         collection_name=collection_name,
@@ -1939,8 +1902,8 @@ def process_file(
 
                     if result:
                         # Fresh session for the final update.
-                        with get_db() as session:
-                            Files.update_file_metadata_by_id(
+                        async with get_async_db() as session:
+                            await Files.update_file_metadata_by_id(
                                 file.id,
                                 {
                                     'collection_name': collection_name,
@@ -1948,12 +1911,12 @@ def process_file(
                                 db=session,
                             )
 
-                            Files.update_file_data_by_id(
+                            await Files.update_file_data_by_id(
                                 file.id,
                                 {'status': 'completed'},
                                 db=session,
                             )
-                            Files.update_file_hash_by_id(file.id, hash, db=session)
+                            await Files.update_file_hash_by_id(file.id, hash, db=session)
 
                             return {
                                 'status': True,
@@ -1969,14 +1932,14 @@ def process_file(
         except Exception as e:
             log.exception(e)
             # Fresh session for error status update.
-            with get_db() as session:
-                Files.update_file_data_by_id(
+            async with get_async_db() as session:
+                await Files.update_file_data_by_id(
                     file.id,
                     {'status': 'failed'},
                     db=session,
                 )
                 # Clear the hash so the file can be re-uploaded after fixing the issue
-                Files.update_file_hash_by_id(file.id, None, db=session)
+                await Files.update_file_hash_by_id(file.id, None, db=session)
 
             if 'No pandoc was found' in str(e):
                 raise HTTPException(
@@ -2008,6 +1971,8 @@ async def process_text(
     collection_name = form_data.collection_name
     if collection_name is None:
         collection_name = calculate_sha256_string(form_data.content)
+    else:
+        await _validate_collection_access([collection_name], user, access_type='write')
 
     docs = [
         Document(
@@ -2049,6 +2014,8 @@ async def process_web(
             collection_name = form_data.collection_name
             if not collection_name:
                 collection_name = calculate_sha256_string(form_data.url)[:63]
+            else:
+                await _validate_collection_access([collection_name], user, access_type='write')
 
             if not request.app.state.config.BYPASS_WEB_SEARCH_EMBEDDING_AND_RETRIEVAL:
                 await run_in_threadpool(
@@ -2177,6 +2144,17 @@ def search_web(request: Request, engine: str, query: str, user=None) -> list[Sea
                 query,
                 request.app.state.config.WEB_SEARCH_RESULT_COUNT,
                 request.app.state.config.WEB_SEARCH_DOMAIN_FILTER_LIST,
+            )
+        else:
+            raise Exception('No BRAVE_SEARCH_API_KEY found in environment variables')
+    elif engine == 'brave_llm_context':
+        if request.app.state.config.BRAVE_SEARCH_API_KEY:
+            return search_brave_llm_context(
+                request.app.state.config.BRAVE_SEARCH_API_KEY,
+                query,
+                request.app.state.config.WEB_SEARCH_RESULT_COUNT,
+                request.app.state.config.WEB_SEARCH_DOMAIN_FILTER_LIST,
+                request.app.state.config.BRAVE_SEARCH_CONTEXT_TOKENS,
             )
         else:
             raise Exception('No BRAVE_SEARCH_API_KEY found in environment variables')
@@ -2400,7 +2378,7 @@ async def process_web_search(request: Request, form_data: SearchForm, user=Depen
             detail=ERROR_MESSAGES.ACCESS_PROHIBITED,
         )
 
-    if user.role != 'admin' and not has_permission(
+    if user.role != 'admin' and not await has_permission(
         user.id, 'features.web_search', request.app.state.config.USER_PERMISSIONS
     ):
         raise HTTPException(
@@ -2552,32 +2530,21 @@ async def process_web_search(request: Request, form_data: SearchForm, user=Depen
         )
 
 
-def _validate_collection_access(collection_names: list[str], user) -> None:
+async def _validate_collection_access(collection_names: list[str], user, access_type: str = 'read') -> None:
     """
-    Prevent users from querying collections they don't own.
-    Enforces ownership on user-memory-* and file-* collections.
-    Admins bypass this check.
+    Raise 403 if the user lacks access to any of the requested collections.
+    Delegates to the shared filter_accessible_collections utility so the
+    access rules (file-*, user-memory-*, web-search-*, KB ownership/grants,
+    legacy collections) stay in one place.
     """
-    if user.role == 'admin':
-        return
-
-    for name in collection_names:
-        if name.startswith('user-memory-') and name != f'user-memory-{user.id}':
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail=ERROR_MESSAGES.ACCESS_PROHIBITED,
-            )
-        elif name.startswith('file-'):
-            file_id = name[len('file-') :]
-            if not has_access_to_file(
-                file_id=file_id,
-                access_type='read',
-                user=user,
-            ):
-                raise HTTPException(
-                    status_code=status.HTTP_403_FORBIDDEN,
-                    detail=ERROR_MESSAGES.ACCESS_PROHIBITED,
-                )
+    requested = set(collection_names)
+    allowed = await filter_accessible_collections(requested, user, access_type=access_type)
+    denied = requested - allowed
+    if denied:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=ERROR_MESSAGES.ACCESS_PROHIBITED,
+        )
 
 
 class QueryDocForm(BaseModel):
@@ -2595,12 +2562,12 @@ async def query_doc_handler(
     form_data: QueryDocForm,
     user=Depends(get_verified_user),
 ):
-    _validate_collection_access([form_data.collection_name], user)
+    await _validate_collection_access([form_data.collection_name], user)
 
     try:
         if request.app.state.config.ENABLE_RAG_HYBRID_SEARCH and (form_data.hybrid is None or form_data.hybrid):
             collection_results = {}
-            collection_results[form_data.collection_name] = VECTOR_DB_CLIENT.get(
+            collection_results[form_data.collection_name] = await ASYNC_VECTOR_DB_CLIENT.get(
                 collection_name=form_data.collection_name
             )
             return await query_doc_with_hybrid_search(
@@ -2629,7 +2596,10 @@ async def query_doc_handler(
             query_embedding = await request.app.state.EMBEDDING_FUNCTION(
                 form_data.query, prefix=RAG_EMBEDDING_QUERY_PREFIX, user=user
             )
-            return query_doc(
+            # query_doc wraps a blocking VECTOR_DB_CLIENT.search call; offload
+            # so the request's event loop stays responsive.
+            return await asyncio.to_thread(
+                query_doc,
                 collection_name=form_data.collection_name,
                 query_embedding=query_embedding,
                 k=form_data.k if form_data.k else request.app.state.config.TOP_K,
@@ -2660,7 +2630,7 @@ async def query_collection_handler(
     form_data: QueryCollectionsForm,
     user=Depends(get_verified_user),
 ):
-    _validate_collection_access(form_data.collection_names, user)
+    await _validate_collection_access(form_data.collection_names, user)
 
     try:
         if request.app.state.config.ENABLE_RAG_HYBRID_SEARCH and (form_data.hybrid is None or form_data.hybrid):
@@ -2721,14 +2691,14 @@ class DeleteForm(BaseModel):
 
 
 @router.post('/delete')
-def delete_entries_from_collection(
+async def delete_entries_from_collection(
     form_data: DeleteForm,
     user=Depends(get_admin_user),
-    db: Session = Depends(get_session),
+    db: AsyncSession = Depends(get_async_session),
 ):
     try:
-        if VECTOR_DB_CLIENT.has_collection(collection_name=form_data.collection_name):
-            file = Files.get_file_by_id(form_data.file_id, db=db)
+        if await ASYNC_VECTOR_DB_CLIENT.has_collection(collection_name=form_data.collection_name):
+            file = await Files.get_file_by_id(form_data.file_id, db=db)
             if not file:
                 raise HTTPException(
                     status_code=status.HTTP_404_NOT_FOUND,
@@ -2736,26 +2706,48 @@ def delete_entries_from_collection(
                 )
             hash = file.hash
 
-            VECTOR_DB_CLIENT.delete(
+            # Refuse to issue a `filter={'hash': None}` query — the match
+            # semantics of a null filter value are backend-dependent (some
+            # backends ignore the key, some match every row whose metadata
+            # lacks `hash`) and risk deleting unrelated entries. Files without
+            # a hash are typically unprocessed / failed / legacy records that
+            # can't be targeted by hash anyway.
+            if hash is None:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=ERROR_MESSAGES.DEFAULT('File has no hash; cannot delete vector entries by hash.'),
+                )
+
+            # Pre-existing bug: this used `metadata=` which is not a parameter
+            # on `VectorDBBase.delete` nor on any backend implementation, so
+            # the call always raised TypeError that was silently swallowed by
+            # the surrounding `except Exception` and the endpoint reported
+            # `{'status': False}` for every request. Use `filter` to actually
+            # do what the endpoint name promises.
+            await ASYNC_VECTOR_DB_CLIENT.delete(
                 collection_name=form_data.collection_name,
-                metadata={'hash': hash},
+                filter={'hash': hash},
             )
             return {'status': True}
         else:
             return {'status': False}
+    except HTTPException:
+        # Caller-meaningful errors (404/400 above) must not be swallowed and
+        # re-shaped as `{'status': False}`.
+        raise
     except Exception as e:
         log.exception(e)
         return {'status': False}
 
 
 @router.post('/reset/db')
-def reset_vector_db(user=Depends(get_admin_user), db: Session = Depends(get_session)):
-    VECTOR_DB_CLIENT.reset()
-    Knowledges.delete_all_knowledge(db=db)
+async def reset_vector_db(user=Depends(get_admin_user), db: AsyncSession = Depends(get_async_session)):
+    await ASYNC_VECTOR_DB_CLIENT.reset()
+    await Knowledges.delete_all_knowledge(db=db)
 
 
 @router.post('/reset/uploads')
-def reset_upload_dir(user=Depends(get_admin_user)) -> bool:
+async def reset_upload_dir(user=Depends(get_admin_user)) -> bool:
     folder = f'{UPLOAD_DIR}'
     try:
         # Check if the directory exists
@@ -2805,17 +2797,21 @@ async def process_files_batch(
     request: Request,
     form_data: BatchProcessFilesForm,
     user=Depends(get_verified_user),
+    db=None,
 ) -> BatchProcessFilesResponse:
     """
     Process a batch of files and save them to the vector database.
 
-    NOTE: We intentionally do NOT use Depends(get_session) here.
+    NOTE: We intentionally do NOT use Depends(get_async_session) here.
     The save_docs_to_vector_db() call makes external embedding API calls which
     can take 5-60+ seconds for batch operations. Database operations after
     embedding (Files.update_file_by_id) manage their own short-lived sessions.
     """
 
     collection_name = form_data.collection_name
+
+    if collection_name:
+        await _validate_collection_access([collection_name], user, access_type='write')
 
     file_results: List[BatchProcessFilesResult] = []
     file_errors: List[BatchProcessFilesResult] = []
@@ -2827,7 +2823,7 @@ async def process_files_batch(
     for file in form_data.files:
         try:
             # Ownership check: verify the requesting user owns the file or is an admin
-            db_file = Files.get_file_by_id(file.id)
+            db_file = await Files.get_file_by_id(file.id, db=db)
             if not db_file:
                 file_errors.append(
                     BatchProcessFilesResult(
@@ -2889,7 +2885,7 @@ async def process_files_batch(
 
             # Update all files with collection name
             for file_update, file_result in zip(file_updates, file_results):
-                Files.update_file_by_id(id=file_result.file_id, form_data=file_update)
+                await Files.update_file_by_id(id=file_result.file_id, form_data=file_update, db=db)
                 file_result.status = 'completed'
 
         except Exception as e:
