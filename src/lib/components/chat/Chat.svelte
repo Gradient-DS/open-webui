@@ -2490,9 +2490,24 @@
 
 		messages = messages
 			.map((message, idx, arr) => {
-				const imageFiles = (message?.files ?? []).filter(
+				const inlineImageFiles = (message?.files ?? []).filter(
 					(file) => file.type === 'image' || (file?.content_type ?? '').startsWith('image/')
 				);
+
+				// BIM-agent attachment images: when the selected model is the BIM
+				// agent and a non-image file has rendered attachments (e.g. IFC plan
+				// PNGs), inline them as image_url content parts on this turn so the
+				// agent can reason about them without first calling ifc_render_view.
+				const isBimAgent = $pendingAgentId === 'bim';
+				const attachmentImages = isBimAgent
+					? (message?.files ?? []).flatMap((file) =>
+							(file?.attachments ?? []).map((att) => ({
+								url: `${WEBUI_API_BASE_URL}/files/${file.id}/attachments/${att.id}`
+							}))
+						)
+					: [];
+
+				const imageFiles = [...inlineImageFiles, ...attachmentImages];
 
 				return {
 					role: message.role,
