@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from unittest.mock import patch
+
 import pytest
 
 
@@ -51,14 +53,9 @@ def test_file_attachment_form_required_fields():
     assert form.content_type == 'image/png'
 
 
-from unittest.mock import patch
-
-
 @pytest.fixture
 def db(tmp_path, monkeypatch):
     """Throwaway SQLite + the file_attachment table only."""
-    import os
-
     from sqlalchemy import create_engine
     from sqlalchemy.orm import sessionmaker
 
@@ -166,3 +163,32 @@ def test_delete_attachments_by_file_id_continues_after_storage_failure(db):
 
     assert count == 2  # both rows dropped even though Storage raised on the first
     assert FileAttachments.get_attachments_by_file_id('fY', db=db) == []
+
+
+def test_delete_attachment_by_id_returns_true_and_calls_storage(db):
+    from open_webui.models.file_attachments import FileAttachmentForm, FileAttachments
+
+    FileAttachments.insert_new_attachment(
+        FileAttachmentForm(
+            id='att-solo',
+            file_id='fS',
+            kind='axon_png',
+            path='uploads/solo.png',
+        ),
+        db=db,
+    )
+
+    with patch('open_webui.models.file_attachments.Storage') as mock_storage:
+        ok = FileAttachments.delete_attachment_by_id('att-solo', db=db)
+
+    assert ok is True
+    mock_storage.delete_file.assert_called_once_with('uploads/solo.png')
+    assert FileAttachments.get_attachment_by_id('att-solo', db=db) is None
+
+
+def test_delete_attachment_by_id_returns_false_when_missing(db):
+    from open_webui.models.file_attachments import FileAttachments
+
+    ok = FileAttachments.delete_attachment_by_id('att-not-here', db=db)
+
+    assert ok is False

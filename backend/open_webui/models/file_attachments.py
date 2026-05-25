@@ -141,6 +141,8 @@ class FileAttachmentsTable:
                     Storage.delete_file(r.path)
                 except Exception:
                     log.exception('failed to delete Storage path %s for attachment %s', r.path, r.id)
+                # Storage failure is logged but not fatal: prefer an orphan
+                # storage object over a DB row that can never be cleaned up.
                 session.delete(r)
             session.commit()
             return len(rows)
@@ -158,6 +160,8 @@ class FileAttachmentsTable:
                 Storage.delete_file(row.path)
             except Exception:
                 log.exception('failed to delete Storage path %s for attachment %s', row.path, row.id)
+            # Storage failure is logged but not fatal: prefer an orphan
+            # storage object over a DB row that can never be cleaned up.
             session.delete(row)
             session.commit()
             return True
