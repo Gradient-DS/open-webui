@@ -53,9 +53,8 @@
 		getWeekday
 	} from '$lib/utils';
 	import { isFeatureEnabled } from '$lib/utils/features';
-	import { uploadFile } from '$lib/apis/files';
+	import { uploadFile, deleteFileById, getFileAttachments } from '$lib/apis/files';
 	import { generateAutoCompletion } from '$lib/apis';
-	import { deleteFileById } from '$lib/apis/files';
 	import { getChatById } from '$lib/apis/chats';
 	import { getSessionUser } from '$lib/apis/auths';
 	import { getTools } from '$lib/apis/tools';
@@ -921,6 +920,19 @@
 					}
 
 					files = files;
+
+					// Pre-load render attachments (e.g. IFC plan PNGs) so the chat-side
+					// image-builder in Chat.svelte can inline them as first-turn vision
+					// for the BIM agent. Non-blocking; on error the file silently has
+					// no attachments.
+					getFileAttachments(localStorage.token, fileItem.id)
+						.then((manifest) => {
+							fileItem.attachments = manifest;
+							files = files; // trigger Svelte reactivity
+						})
+						.catch(() => {
+							fileItem.attachments = [];
+						});
 				} else {
 					files = files.filter((item) => item?.itemId !== tempItemId);
 				}
