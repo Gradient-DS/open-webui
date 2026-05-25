@@ -15,6 +15,7 @@ def test_ingest_attachment_manifest_pydantic_shape():
     assert m.content_type == 'image/png'
     assert m.storey is None
     assert m.caption == ''
+    assert m.part_name == 'doc-1__plan_png__Level_1__0'
 
 
 def test_ingest_attachment_manifest_rejects_missing_kind():
@@ -37,6 +38,19 @@ def test_ingest_document_base_accepts_attachments_list():
         ],
     )
     assert len(doc.attachments) == 2
+    assert isinstance(doc.attachments[0], IngestAttachmentManifest)
+    assert doc.attachments[0].kind == 'plan_png'
+    assert doc.attachments[0].storey == 'L1'
+    assert doc.attachments[1].kind == 'axon_png'
+    assert doc.attachments[1].part_name == 'ax'
+
+
+def test_ingest_attachment_manifest_rejects_missing_part_name():
+    from open_webui.routers.integrations import IngestAttachmentManifest
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError):
+        IngestAttachmentManifest(kind='plan_png')
 
 
 def test_ingest_document_base_attachments_default_empty():
