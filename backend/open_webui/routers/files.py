@@ -45,7 +45,6 @@ from open_webui.models.access_grants import AccessGrants
 from open_webui.routers.retrieval import ProcessFileForm, process_file
 from open_webui.routers.audio import transcribe
 from open_webui.services.files.events import emit_file_status
-from open_webui.utils.loop_bridge import run_on_main_loop
 
 from open_webui.storage.provider import Storage
 
@@ -162,17 +161,19 @@ async def process_uploaded_file(
                 )
 
             # Notify frontend via Socket.IO that processing completed.
-            # Dispatch onto uvicorn's main loop — asyncio.run would create a
-            # throwaway loop and poison the shared Socket.IO Redis pool.
+            # _process_handler is async — we're already on the main loop, so
+            # await the emit directly. (The earlier `run_on_main_loop(...)`
+            # call here deadlocked: that helper schedules a coroutine on the
+            # main loop then blocks the current thread on the result, which
+            # works from a sync worker thread but freezes the loop when the
+            # caller already IS the main loop.)
             file_data = await Files.get_file_by_id(file_item.id)
             collection_name = file_data.meta.get('collection_name') if file_data and file_data.meta else None
-            run_on_main_loop(
-                emit_file_status(
-                    user_id=user.id,
-                    file_id=file_item.id,
-                    status='completed',
-                    collection_name=collection_name,
-                )
+            await emit_file_status(
+                user_id=user.id,
+                file_id=file_item.id,
+                status='completed',
+                collection_name=collection_name,
             )
 
         except Exception as e:
@@ -186,13 +187,11 @@ async def process_uploaded_file(
                 },
                 db=db_session,
             )
-            run_on_main_loop(
-                emit_file_status(
-                    user_id=user.id,
-                    file_id=file_item.id,
-                    status='failed',
-                    error=error_msg,
-                )
+            await emit_file_status(
+                user_id=user.id,
+                file_id=file_item.id,
+                status='failed',
+                error=error_msg,
             )
 
     try:
