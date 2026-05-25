@@ -1,6 +1,10 @@
 x.py
 yarn.lock
 
+# Local-only artifacts (DB schema snapshots, ad-hoc scratch files,
+# anything we want to keep on disk for re-use but never commit).
+.local/
+
 # SearXNG local secrets
 searxng/secrets.yml
 .DS_Store
