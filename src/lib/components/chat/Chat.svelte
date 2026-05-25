@@ -2389,6 +2389,18 @@
 
 		saveSessionSelectedModels();
 
+		// [Gradient] Pre-create the chat record before dispatching the first
+		// message so any pendingAgentId binding lands on the server before the
+		// LLM completion request kicks off. Upstream v0.9.5 moved chat
+		// creation to the /chat/completions code path, but that path has no
+		// hook for `agent_binding`. initChatHandler calls createNewChat with
+		// the binding and sets $chatId; sendMessage then forwards that
+		// chat_id so the backend appends to the existing row instead of
+		// creating a duplicate.
+		if (!$chatId) {
+			await initChatHandler(history);
+		}
+
 		await sendMessage(history, userMessageId, { newChat: true });
 	};
 
