@@ -2,6 +2,7 @@ import hashlib
 import json
 import logging
 import time
+import uuid
 from typing import Optional
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
@@ -9,6 +10,7 @@ from langchain_core.documents import Document
 from pydantic import BaseModel
 
 from open_webui.config import KNOWLEDGE_MAX_FILE_COUNT
+from open_webui.models.file_attachments import FileAttachmentForm, FileAttachments
 from open_webui.models.files import FileForm, Files
 from open_webui.models.knowledge import KnowledgeForm, Knowledges
 from open_webui.retrieval.loaders.main import Loader
@@ -573,6 +575,66 @@ def _process_full_document(
         }
 
     return {'source_id': doc.source_id, 'file_id': file_id, 'status': status}
+
+
+def _persist_attachments(
+    *,
+    file_id: str,
+    manifest: list[IngestAttachmentManifest],
+    part_lookup: dict[str, UploadFile],
+) -> tuple[int, int]:
+    """Persist a document's attachment bytes to Storage + DB.
+
+    Best-effort: missing parts or Storage failures are logged and skipped;
+    the document ingest stays successful. Existing attachments for
+    file_id are deleted first so re-upload regenerates cleanly.
+
+    Returns (saved, skipped).
+    """
+    FileAttachments.delete_attachments_by_file_id(file_id)
+
+    saved, skipped = 0, 0
+    for i, entry in enumerate(manifest):
+        part = part_lookup.get(entry.part_name)
+        if part is None:
+            log.warning(
+                'attachment manifest references missing part %r (file_id=%s, kind=%s, storey=%s); skipping',
+                entry.part_name,
+                file_id,
+                entry.kind,
+                entry.storey,
+            )
+            skipped += 1
+            continue
+        try:
+            part.file.seek(0)
+            storage_filename = f'{uuid.uuid4()}-{entry.part_name}'
+            _, path = Storage.upload_file(
+                part.file,
+                storage_filename,
+                tags={'file_id': file_id, 'kind': entry.kind},
+            )
+            FileAttachments.insert_new_attachment(
+                FileAttachmentForm(
+                    id=str(uuid.uuid4()),
+                    file_id=file_id,
+                    kind=entry.kind,
+                    storey=entry.storey,
+                    index=i,
+                    content_type=entry.content_type,
+                    caption=entry.caption,
+                    path=path,
+                ),
+            )
+            saved += 1
+        except Exception:
+            log.exception(
+                'failed to persist attachment (file_id=%s, part=%s)',
+                file_id,
+                entry.part_name,
+            )
+            skipped += 1
+    return saved, skipped
 
 
 # --- Endpoints ---
