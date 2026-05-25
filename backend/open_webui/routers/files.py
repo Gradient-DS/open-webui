@@ -779,9 +779,9 @@ async def list_file_attachments(
 ):
     file = Files.get_file_by_id(id, db=db)
     if not file:
-        raise HTTPException(status_code=404, detail=ERROR_MESSAGES.NOT_FOUND)
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=ERROR_MESSAGES.NOT_FOUND)
     if not (file.user_id == user.id or user.role == 'admin' or has_access_to_file(id, 'read', user, db=db)):
-        raise HTTPException(status_code=404, detail=ERROR_MESSAGES.NOT_FOUND)
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=ERROR_MESSAGES.NOT_FOUND)
     return FileAttachments.get_attachments_by_file_id(id, db=db)
 
 
@@ -799,22 +799,31 @@ async def get_file_attachment_bytes(
 ):
     file = Files.get_file_by_id(id, db=db)
     if not file:
-        raise HTTPException(status_code=404, detail=ERROR_MESSAGES.NOT_FOUND)
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=ERROR_MESSAGES.NOT_FOUND)
     if not (file.user_id == user.id or user.role == 'admin' or has_access_to_file(id, 'read', user, db=db)):
-        raise HTTPException(status_code=404, detail=ERROR_MESSAGES.NOT_FOUND)
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=ERROR_MESSAGES.NOT_FOUND)
 
     attachment = FileAttachments.get_attachment_by_id(attachment_id, db=db)
     if attachment is None or attachment.file_id != id:
-        raise HTTPException(status_code=404, detail=ERROR_MESSAGES.NOT_FOUND)
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=ERROR_MESSAGES.NOT_FOUND)
 
-    storage_path = Path(Storage.get_file(attachment.path))
+    try:
+        storage_path = Path(Storage.get_file(attachment.path))
+    except Exception:
+        log.exception(
+            'Storage.get_file raised for attachment %s (path=%s)',
+            attachment_id,
+            attachment.path,
+        )
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=ERROR_MESSAGES.NOT_FOUND)
+
     if not storage_path.is_file():
         log.error(
             'attachment row %s points at missing Storage path %s',
             attachment_id,
             attachment.path,
         )
-        raise HTTPException(status_code=404, detail=ERROR_MESSAGES.NOT_FOUND)
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=ERROR_MESSAGES.NOT_FOUND)
 
     return FileResponse(storage_path, media_type=attachment.content_type)
 
