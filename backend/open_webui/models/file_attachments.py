@@ -166,5 +166,28 @@ class FileAttachmentsTable:
             session.commit()
             return True
 
+    def delete_all_attachments(self, db: Optional[Session] = None) -> int:
+        """Wipe all attachments and their Storage paths.
+
+        Best-effort per row on Storage; the DB rows are always dropped.
+        Returns the count of rows that were on the way out.
+        """
+        with get_db_context(db) as session:
+            rows = session.query(FileAttachment).all()
+            for r in rows:
+                try:
+                    Storage.delete_file(r.path)
+                except Exception:
+                    log.exception(
+                        'failed to delete Storage path %s for attachment %s',
+                        r.path,
+                        r.id,
+                    )
+            # Storage failures are logged but not fatal: prefer orphan
+            # storage objects over DB rows that can never be cleaned up.
+            session.query(FileAttachment).delete()
+            session.commit()
+            return len(rows)
+
 
 FileAttachments = FileAttachmentsTable()

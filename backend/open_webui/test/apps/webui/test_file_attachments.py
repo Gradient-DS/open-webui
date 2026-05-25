@@ -192,3 +192,126 @@ def test_delete_attachment_by_id_returns_false_when_missing(db):
     ok = FileAttachments.delete_attachment_by_id('att-not-here', db=db)
 
     assert ok is False
+
+
+def test_files_delete_file_by_id_cascades_to_attachments(monkeypatch):
+    """Deleting a Files row also drops its attachments and Storage paths."""
+    from open_webui.models import files as files_mod
+
+    cascaded_for: list[str] = []
+
+    class SpyAttachments:
+        @staticmethod
+        def delete_attachments_by_file_id(file_id, db=None):
+            cascaded_for.append(file_id)
+            return 0
+
+    monkeypatch.setattr(files_mod, 'FileAttachments', SpyAttachments, raising=False)
+
+    # Don't actually touch a DB; stub the inner query so the method returns True.
+    class StubQuery:
+        def filter_by(self, **_kw):
+            return self
+
+        def filter(self, *_a, **_kw):
+            return self
+
+        def delete(self, *_a, **_kw):
+            return 0
+
+    class StubSession:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_a):
+            return False
+
+        def query(self, *_a, **_kw):
+            return StubQuery()
+
+        def commit(self):
+            return None
+
+    monkeypatch.setattr(files_mod, 'get_db_context', lambda _db=None: StubSession())
+
+    assert files_mod.Files.delete_file_by_id('file-cascade-1') is True
+    assert cascaded_for == ['file-cascade-1']
+
+
+def test_files_delete_files_by_ids_cascades_per_id(monkeypatch):
+    from open_webui.models import files as files_mod
+
+    cascaded_for: list[str] = []
+
+    class SpyAttachments:
+        @staticmethod
+        def delete_attachments_by_file_id(file_id, db=None):
+            cascaded_for.append(file_id)
+            return 0
+
+    monkeypatch.setattr(files_mod, 'FileAttachments', SpyAttachments, raising=False)
+
+    class StubQuery:
+        def filter(self, *_a, **_kw):
+            return self
+
+        def delete(self, *_a, **_kw):
+            return 0
+
+    class StubSession:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_a):
+            return False
+
+        def query(self, *_a, **_kw):
+            return StubQuery()
+
+        def commit(self):
+            return None
+
+    monkeypatch.setattr(files_mod, 'get_db_context', lambda _db=None: StubSession())
+
+    assert files_mod.Files.delete_files_by_ids(['a', 'b', 'c']) is True
+    assert sorted(cascaded_for) == ['a', 'b', 'c']
+
+
+def test_files_delete_all_files_calls_wipe(monkeypatch):
+    from open_webui.models import files as files_mod
+
+    wiped: list[bool] = []
+
+    class SpyAttachments:
+        @staticmethod
+        def delete_all_attachments(db=None):
+            wiped.append(True)
+            return 0
+
+        @staticmethod
+        def delete_attachments_by_file_id(file_id, db=None):  # unused on this path
+            return 0
+
+    monkeypatch.setattr(files_mod, 'FileAttachments', SpyAttachments, raising=False)
+
+    class StubQuery:
+        def delete(self, *_a, **_kw):
+            return 0
+
+    class StubSession:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_a):
+            return False
+
+        def query(self, *_a, **_kw):
+            return StubQuery()
+
+        def commit(self):
+            return None
+
+    monkeypatch.setattr(files_mod, 'get_db_context', lambda _db=None: StubSession())
+
+    assert files_mod.Files.delete_all_files() is True
+    assert wiped == [True]

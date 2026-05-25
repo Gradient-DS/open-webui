@@ -123,6 +123,13 @@ class FileUpdateForm(BaseModel):
     meta: Optional[dict] = None
 
 
+def _get_file_attachments():
+    """Lazy import to avoid circular dependency at module load time."""
+    from open_webui.models.file_attachments import FileAttachments as _fa  # noqa: PLC0415
+
+    return _fa
+
+
 class FilesTable:
     def insert_new_file(self, user_id: str, form_data: FileForm, db: Optional[Session] = None) -> Optional[FileModel]:
         with get_db_context(db) as db:
@@ -384,6 +391,8 @@ class FilesTable:
     def delete_file_by_id(self, id: str, db: Optional[Session] = None) -> bool:
         with get_db_context(db) as db:
             try:
+                _fa = FileAttachments or _get_file_attachments()
+                _fa.delete_attachments_by_file_id(id, db=db)
                 db.query(File).filter_by(id=id).delete()
                 db.commit()
 
@@ -394,6 +403,9 @@ class FilesTable:
     def delete_files_by_ids(self, ids: list[str], db: Optional[Session] = None) -> bool:
         with get_db_context(db) as db:
             try:
+                _fa = FileAttachments or _get_file_attachments()
+                for file_id in ids:
+                    _fa.delete_attachments_by_file_id(file_id, db=db)
                 db.query(File).filter(File.id.in_(ids)).delete(synchronize_session=False)
                 db.commit()
                 return True
@@ -403,6 +415,8 @@ class FilesTable:
     def delete_all_files(self, db: Optional[Session] = None) -> bool:
         with get_db_context(db) as db:
             try:
+                _fa = FileAttachments or _get_file_attachments()
+                _fa.delete_all_attachments(db=db)
                 db.query(File).delete()
                 db.commit()
 
@@ -412,3 +426,8 @@ class FilesTable:
 
 
 Files = FilesTable()
+
+# Placeholder — resolved lazily at call time to break the circular import
+# (file_attachments → Storage → config → run_migrations → alembic env →
+# auths → users → groups → files).  Tests may monkeypatch this name.
+FileAttachments = None
