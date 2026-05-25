@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import pytest
 
 
@@ -161,7 +162,6 @@ def test_persist_attachments_replaces_on_reupload(mock_storage, mock_attachments
     assert mock_attachments.method_calls[0] == call.delete_attachments_by_file_id('file-1')
 
 
-import json as _json
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
@@ -213,7 +213,7 @@ def ingest_app(monkeypatch):
                 lambda doc, *a, **k: {
                     'source_id': doc['source_id'] if isinstance(doc, dict) else doc.source_id,
                     'file_id': f'f-{doc["source_id"] if isinstance(doc, dict) else doc.source_id}',
-                    'status': 'completed',
+                    'status': 'created',
                 },
             )
 
@@ -264,7 +264,7 @@ def test_ingest_endpoint_persists_attachments(ingest_app, monkeypatch):
     client = TestClient(ingest_app)
     res = client.post(
         '/api/v1/integrations/ingest',
-        data={'data': _json.dumps(body)},
+        data={'data': json.dumps(body)},
         files=[
             ('attachments', ('doc-1__plan_png__L1__0', b'fakePNG', 'image/png')),
             ('attachments', ('doc-1__axon_png___1', b'fakePNG2', 'image/png')),

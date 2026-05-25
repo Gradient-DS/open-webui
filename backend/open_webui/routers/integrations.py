@@ -660,17 +660,31 @@ def _persist_attachments(
     return PersistResult(saved=saved, skipped=skipped)
 
 
-def _typed_document(doc: dict, data_type: str) -> IngestDocumentBase:
-    """Re-validate a raw document dict as its typed subclass."""
-    if data_type == 'parsed_text':
-        return ParsedTextDocument(**doc)
-    if data_type == 'chunked_text':
-        return ChunkedTextDocument(**doc)
-    if data_type == 'full_documents':
-        return FullDocument(**doc)
-    # Fall back to the base — preserves attachments while not crashing
-    # on unknown data_types (the endpoint already validates above).
-    return IngestDocumentBase(**doc)
+def _maybe_persist_attachments(
+    *,
+    result: dict,
+    doc: IngestDocumentBase,
+    part_lookup: dict[str, UploadFile],
+) -> None:
+    """If the document's text save succeeded and it carries attachments,
+    persist them and record the counts on the result dict.
+
+    Mutates ``result`` in place; intentional — the dispatch loop already
+    owns the dict and we want the side-channel counts to ride on the
+    existing per-document response without a wrapper layer.
+    """
+    # Only persist attachments when the document text was committed.
+    if result.get('status') not in ('created', 'updated'):
+        return
+    if not doc.attachments:
+        return
+    outcome = _persist_attachments(
+        file_id=result['file_id'],
+        manifest=doc.attachments,
+        part_lookup=part_lookup,
+    )
+    result['attachments_saved'] = outcome.saved
+    result['attachments_skipped'] = outcome.skipped
 
 
 # --- Endpoints ---
@@ -803,14 +817,7 @@ def ingest_documents(
                 user_id=user.id,
                 original_file=original_file_lookup.get(doc.source_id),
             )
-            if result.get('status') != 'error' and doc.attachments:
-                outcome = _persist_attachments(
-                    file_id=result['file_id'],
-                    manifest=doc.attachments,
-                    part_lookup=attachment_lookup,
-                )
-                result['attachments_saved'] = outcome.saved
-                result['attachments_skipped'] = outcome.skipped
+            _maybe_persist_attachments(result=result, doc=doc, part_lookup=attachment_lookup)
             results.append(result)
 
     elif data_type == 'chunked_text':
@@ -831,14 +838,7 @@ def ingest_documents(
                 user_id=user.id,
                 original_file=original_file_lookup.get(doc.source_id),
             )
-            if result.get('status') != 'error' and doc.attachments:
-                outcome = _persist_attachments(
-                    file_id=result['file_id'],
-                    manifest=doc.attachments,
-                    part_lookup=attachment_lookup,
-                )
-                result['attachments_saved'] = outcome.saved
-                result['attachments_skipped'] = outcome.skipped
+            _maybe_persist_attachments(result=result, doc=doc, part_lookup=attachment_lookup)
             results.append(result)
 
     elif data_type == 'full_documents':
@@ -874,14 +874,7 @@ def ingest_documents(
                 upload_file=upload,
                 user_id=user.id,
             )
-            if result.get('status') != 'error' and doc.attachments:
-                outcome = _persist_attachments(
-                    file_id=result['file_id'],
-                    manifest=doc.attachments,
-                    part_lookup=attachment_lookup,
-                )
-                result['attachments_saved'] = outcome.saved
-                result['attachments_skipped'] = outcome.skipped
+            _maybe_persist_attachments(result=result, doc=doc, part_lookup=attachment_lookup)
             results.append(result)
 
         # Check for unmatched uploaded files
