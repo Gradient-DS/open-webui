@@ -31,6 +31,9 @@
 	export let title: string | null = null;
 	export let confirmLabel: string | null = null;
 	export let currentItems: SyncItem[] = [];
+	// Chat-attach mode: hide space checkboxes so users can only pick
+	// individual pages (the chat handler can't aggregate descendants).
+	export let pagesOnly = false;
 
 	// ─── state ────────────────────────────────────────────────────────
 	let loading = false;
@@ -367,7 +370,7 @@
 		<div class="flex items-center gap-2 px-4 pt-4 pb-3">
 			<Confluence className="size-5" />
 			<div class="font-medium text-base">
-				{title ?? $i18n.t('Select Confluence spaces or pages')}
+				{title ?? (pagesOnly ? $i18n.t('Select Confluence pages') : $i18n.t('Select Confluence spaces or pages'))}
 			</div>
 			<button
 				class="ml-auto text-sm text-gray-400 hover:text-gray-600 dark:hover:text-gray-200"
@@ -431,10 +434,14 @@
 									<ChevronRight className="size-3.5" />
 								{/if}
 							</button>
-							<Checkbox
-								state={selection.has(keyForSpace(spaceNode.space)) ? 'checked' : 'unchecked'}
-								on:change={() => toggleSpaceSelection(spaceNode)}
-							/>
+							{#if pagesOnly}
+								<span class="inline-block size-[18px]"></span>
+							{:else}
+								<Checkbox
+									state={selection.has(keyForSpace(spaceNode.space)) ? 'checked' : 'unchecked'}
+									on:change={() => toggleSpaceSelection(spaceNode)}
+								/>
+							{/if}
 							<span class="text-sm font-medium">{spaceNode.space.name}</span>
 							<span class="text-xs text-gray-400">({spaceNode.space.key})</span>
 						</div>
@@ -548,6 +555,8 @@
 			<div class="text-xs text-gray-500">
 				{#if selectedCount > 0}
 					{$i18n.t('{{count}} selected', { count: selectedCount })}
+				{:else if pagesOnly}
+					{$i18n.t('Select pages above.')}
 				{:else}
 					{$i18n.t('Select spaces or pages above.')}
 				{/if}

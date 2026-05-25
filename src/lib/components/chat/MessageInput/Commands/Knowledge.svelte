@@ -8,11 +8,10 @@
 
 	import { folders } from '$lib/stores';
 	import { getFolders } from '$lib/apis/folders';
-	import { searchKnowledgeBases, searchKnowledgeFiles } from '$lib/apis/knowledge';
+	import { searchKnowledgeBases } from '$lib/apis/knowledge';
 	import { removeLastWordFromString, isValidHttpUrl, isYoutubeUrl, decodeString } from '$lib/utils';
 
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
-	import DocumentPage from '$lib/components/icons/DocumentPage.svelte';
 	import Database from '$lib/components/icons/Database.svelte';
 	import OneDrive from '$lib/components/icons/OneDrive.svelte';
 	import GoogleDrive from '$lib/components/icons/GoogleDrive.svelte';
@@ -69,9 +68,8 @@
 
 	let folderItems = [];
 	let knowledgeItems = [];
-	let fileItems = [];
 
-	$: items = [...folderItems, ...knowledgeItems, ...fileItems];
+	$: items = [...folderItems, ...knowledgeItems];
 
 	$: if (query !== undefined) {
 		clearTimeout(searchDebounceTimer);
@@ -87,7 +85,6 @@
 	const getItems = () => {
 		getFolderItems();
 		getKnowledgeItems();
-		getKnowledgeFileItems();
 	};
 
 	const getFolderItems = async () => {
@@ -117,23 +114,6 @@
 		}
 	};
 
-	const getKnowledgeFileItems = async () => {
-		const res = await searchKnowledgeFiles(localStorage.token, query).catch(() => {
-			return null;
-		});
-
-		if (res) {
-			fileItems = res.items.map((item) => {
-				return {
-					...item,
-					type: 'file',
-					name: item.filename,
-					description: item.collection ? item.collection.name : ''
-				};
-			});
-		}
-	};
-
 	onMount(async () => {
 		if ($folders === null) {
 			await folders.set(await getFolders(localStorage.token));
@@ -151,8 +131,6 @@
 					{$i18n.t('Folders')}
 				{:else if item?.type === 'collection'}
 					{$i18n.t('Collections')}
-				{:else if item?.type === 'file'}
-					{$i18n.t('Files')}
 				{/if}
 			</div>
 		{/if}
@@ -180,11 +158,9 @@
 					<Tooltip
 						content={item?.legacy
 							? $i18n.t('Legacy')
-							: item?.type === 'file'
-								? `${item?.collection?.name} > ${$i18n.t('File')}`
-								: item?.type === 'collection'
-									? $i18n.t('Collection')
-									: ''}
+							: item?.type === 'collection'
+								? $i18n.t('Collection')
+								: ''}
 						placement="top"
 					>
 						{#if item?.type === 'collection'}
@@ -199,8 +175,6 @@
 							{/if}
 						{:else if item?.type === 'folder'}
 							<Folder className="size-4" />
-						{:else}
-							<DocumentPage className="size-4" />
 						{/if}
 					</Tooltip>
 
