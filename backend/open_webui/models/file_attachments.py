@@ -16,14 +16,13 @@ from __future__ import annotations
 
 import logging
 import time
-import uuid
 from typing import Optional
 
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy import BigInteger, Column, Integer, String, Text
 from sqlalchemy.orm import Session
 
-from open_webui.internal.db import Base, get_db
+from open_webui.internal.db import Base, get_db_context
 from open_webui.storage.provider import Storage
 
 
@@ -80,7 +79,7 @@ class FileAttachmentForm(BaseModel):
 
 
 ####################
-# CRUD wrapper (stubs — implemented in Task 3)
+# CRUD wrapper
 ####################
 
 
@@ -90,35 +89,78 @@ class FileAttachmentsTable:
         form: FileAttachmentForm,
         db: Optional[Session] = None,
     ) -> Optional[FileAttachmentModel]:
-        raise NotImplementedError
+        with get_db_context(db) as session:
+            row = FileAttachment(
+                id=form.id,
+                file_id=form.file_id,
+                kind=form.kind,
+                storey=form.storey,
+                index=form.index,
+                content_type=form.content_type,
+                caption=form.caption,
+                path=form.path,
+                created_at=int(time.time()),
+            )
+            session.add(row)
+            session.commit()
+            session.refresh(row)
+            return FileAttachmentModel.model_validate(row)
 
     def get_attachments_by_file_id(
         self,
         file_id: str,
         db: Optional[Session] = None,
     ) -> list[FileAttachmentModel]:
-        raise NotImplementedError
+        with get_db_context(db) as session:
+            rows = (
+                session.query(FileAttachment)
+                .filter(FileAttachment.file_id == file_id)
+                .order_by(FileAttachment.kind, FileAttachment.storey, FileAttachment.index)
+                .all()
+            )
+            return [FileAttachmentModel.model_validate(r) for r in rows]
 
     def get_attachment_by_id(
         self,
         id: str,
         db: Optional[Session] = None,
     ) -> Optional[FileAttachmentModel]:
-        raise NotImplementedError
+        with get_db_context(db) as session:
+            row = session.query(FileAttachment).filter(FileAttachment.id == id).first()
+            return FileAttachmentModel.model_validate(row) if row else None
 
     def delete_attachments_by_file_id(
         self,
         file_id: str,
         db: Optional[Session] = None,
     ) -> int:
-        raise NotImplementedError
+        with get_db_context(db) as session:
+            rows = session.query(FileAttachment).filter(FileAttachment.file_id == file_id).all()
+            for r in rows:
+                try:
+                    Storage.delete_file(r.path)
+                except Exception:
+                    log.exception('failed to delete Storage path %s for attachment %s', r.path, r.id)
+                session.delete(r)
+            session.commit()
+            return len(rows)
 
     def delete_attachment_by_id(
         self,
         id: str,
         db: Optional[Session] = None,
     ) -> bool:
-        raise NotImplementedError
+        with get_db_context(db) as session:
+            row = session.query(FileAttachment).filter(FileAttachment.id == id).first()
+            if row is None:
+                return False
+            try:
+                Storage.delete_file(row.path)
+            except Exception:
+                log.exception('failed to delete Storage path %s for attachment %s', row.path, row.id)
+            session.delete(row)
+            session.commit()
+            return True
 
 
 FileAttachments = FileAttachmentsTable()
