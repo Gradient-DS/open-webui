@@ -350,27 +350,6 @@
 				</a>
 			{/if}
 
-			<button
-				class="flex rounded-xl py-1.5 px-3 w-full hover:bg-gray-50 dark:hover:bg-gray-800 transition cursor-pointer select-none"
-				type="button"
-				on:click={async () => {
-					show = false;
-
-					dispatch('show', 'archived-chat');
-
-					if ($mobile) {
-						await tick();
-
-						showSidebar.set(false);
-					}
-				}}
-			>
-				<div class=" self-center mr-3">
-					<ArchiveBox className="size-5" strokeWidth="1.5" />
-				</div>
-				<div class=" self-center truncate">{$i18n.t('Archived Chats')}</div>
-			</button>
-
 			<hr class=" border-gray-50/30 dark:border-gray-800/30 my-1 p-0" />
 
 			{#if $user?.role === 'admin' || $user?.permissions?.workspace?.models || $user?.permissions?.workspace?.knowledge || $user?.permissions?.workspace?.prompts || $user?.permissions?.workspace?.tools}
