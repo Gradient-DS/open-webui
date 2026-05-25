@@ -342,7 +342,7 @@ async def complete_auth_callback(
 
     if result['success']:
         user_id = flow['user_id']
-        all_kbs = Knowledges.get_knowledge_bases_by_type(provider_type)
+        all_kbs = await Knowledges.get_knowledge_bases_by_type(provider_type)
         for kb in all_kbs:
             if kb.user_id != user_id:
                 continue
@@ -352,7 +352,7 @@ async def complete_auth_callback(
             sync_info['token_stored_at'] = int(time.time())
             sync_info['needs_reauth'] = False
             meta[meta_key] = sync_info
-            Knowledges.update_knowledge_meta_by_id(kb.id, meta)
+            await Knowledges.update_knowledge_meta_by_id(kb.id, meta)
 
     return auth_callback_html(
         callback_type=callback_type,

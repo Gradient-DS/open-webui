@@ -341,7 +341,7 @@ async def initiate_auth(
         raise HTTPException(400, 'Confluence client secret not configured')
 
     if knowledge_id:
-        get_knowledge_or_raise(knowledge_id, user)
+        await get_knowledge_or_raise(knowledge_id, user)
 
     redirect_uri = str(request.base_url).rstrip('/') + '/oauth/atlassian/callback'
     log.info('Confluence OAuth initiate: base_url=%s, redirect_uri=%s', request.base_url, redirect_uri)
@@ -419,7 +419,7 @@ async def get_token_status(
     can proceed without an OAuth authorization step.
     """
     if await resolve_auth_mode(knowledge_id) == 'basic':
-        get_knowledge_or_raise(knowledge_id, user)
+        await get_knowledge_or_raise(knowledge_id, user)
         configured = basic_auth_configured()
         return {
             'has_token': configured,

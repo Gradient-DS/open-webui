@@ -231,7 +231,7 @@ async def initiate_auth(
         raise HTTPException(400, 'Google client secret not configured')
 
     if knowledge_id:
-        get_knowledge_or_raise(knowledge_id, user)
+        await get_knowledge_or_raise(knowledge_id, user)
 
     redirect_uri = str(request.base_url).rstrip('/') + '/oauth/google/callback'
     log.info('OAuth initiate: base_url=%s, redirect_uri=%s', request.base_url, redirect_uri)

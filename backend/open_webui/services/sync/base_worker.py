@@ -1027,7 +1027,7 @@ class BaseSyncWorker(ABC):
                     existing_meta['relative_path'] = new_relative_path
                     await Files.update_file_by_id(file_id, FileUpdateForm(meta=existing_meta))
 
-                Knowledges.add_file_to_knowledge_by_id(self.knowledge_id, file_id, self.user_id)
+                await Knowledges.add_file_to_knowledge_by_id(self.knowledge_id, file_id, self.user_id)
 
                 return PreparedFile(
                     file_id=file_id,
@@ -1092,7 +1092,7 @@ class BaseSyncWorker(ABC):
             if updated:
                 await Files.update_file_by_id(file_id, FileUpdateForm(meta=existing_meta))
 
-            Knowledges.add_file_to_knowledge_by_id(self.knowledge_id, file_id, self.user_id)
+            await Knowledges.add_file_to_knowledge_by_id(self.knowledge_id, file_id, self.user_id)
 
             # Return PreparedFile with is_new=False so vector verification
             # runs under the process semaphore (not the download semaphore).
@@ -1256,7 +1256,7 @@ class BaseSyncWorker(ABC):
             )
 
         # KB association
-        Knowledges.add_file_to_knowledge_by_id(self.knowledge_id, file_id, self.user_id)
+        await Knowledges.add_file_to_knowledge_by_id(self.knowledge_id, file_id, self.user_id)
 
         # Cross-KB vector propagation (still uses process_file for other KBs)
         try:
@@ -1421,7 +1421,7 @@ class BaseSyncWorker(ABC):
                 content_type = self._get_content_type(name)
 
                 if await Files.get_file_by_id(file_id) is not None:
-                    Knowledges.add_file_to_knowledge_by_id(self.knowledge_id, file_id, self.user_id)
+                    await Knowledges.add_file_to_knowledge_by_id(self.knowledge_id, file_id, self.user_id)
                     touched.append(file_id)
                 else:
                     # Google Drive returns ``size`` as a string per its v3 API
@@ -1453,7 +1453,7 @@ class BaseSyncWorker(ABC):
                         meta=file_meta,
                     )
                     await Files.insert_new_file(self.user_id, file_form)
-                    Knowledges.add_file_to_knowledge_by_id(self.knowledge_id, file_id, self.user_id)
+                    await Knowledges.add_file_to_knowledge_by_id(self.knowledge_id, file_id, self.user_id)
                     touched.append(file_id)
 
                 await emit_file_processing(
