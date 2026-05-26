@@ -240,6 +240,9 @@
 		files: any[];
 		access_grants?: any[];
 		write_access?: boolean;
+		type?: string;
+		user_id?: string;
+		meta?: Record<string, any>;
 	};
 
 	let id = null;
@@ -1472,7 +1475,11 @@
 
 		if (data.status === 'completed') {
 			fileItems[idx].status = 'uploaded';
-			await addFileHandler(data.file_id, { batch: true });
+			// Backend already linked the file to the KB during upload (see
+			// process_uploaded_file in routers/files.py — Phase 2 of the
+			// 2026-05-25 plan). Re-invoking addFileHandler here would call
+			// /knowledge/{id}/file/add and re-trigger process_file, embedding
+			// the file's chunks a second time into the KB collection.
 			uploadBatch.added++;
 		} else if (data.status === 'failed') {
 			fileItems[idx].status = 'error';
@@ -1930,7 +1937,7 @@
 								{:else}
 									<Badge type="muted" content={$i18n.t('Local')} />
 								{/if}
-								{#if activeProvider && $config?.[activeProvider.configKey]?.has_client_secret}
+								{#if activeProvider && $config?.[activeProvider.configKey]?.has_client_secret && knowledge?.write_access}
 									{#if activeState?.bgSyncNeedsReauth}
 										<button
 											class="text-xs text-red-500 hover:text-red-600 flex items-center gap-1"
@@ -2099,17 +2106,25 @@
 					</div>
 
 					<div class="flex w-full">
-						<input
-							type="text"
-							class="text-left text-xs w-full text-gray-500 bg-transparent outline-hidden"
-							bind:value={knowledge.description}
-							aria-label={$i18n.t('Knowledge Description')}
-							placeholder={$i18n.t('Knowledge Description')}
-							disabled={!knowledge?.write_access}
-							on:input={() => {
-								changeDebounceHandler();
-							}}
-						/>
+						{#if knowledge?.meta?.confluence_sync?.shared}
+							<!-- The shared Confluence KB is system-managed — its
+							     description is a fixed, localized string. -->
+							<div class="text-left text-xs w-full text-gray-500">
+								{$i18n.t('Read-only Confluence knowledge base managed by administrators.')}
+							</div>
+						{:else}
+							<input
+								type="text"
+								class="text-left text-xs w-full text-gray-500 bg-transparent outline-hidden"
+								bind:value={knowledge.description}
+								aria-label={$i18n.t('Knowledge Description')}
+								placeholder={$i18n.t('Knowledge Description')}
+								disabled={!knowledge?.write_access}
+								on:input={() => {
+									changeDebounceHandler();
+								}}
+							/>
+						{/if}
 					</div>
 				</div>
 			</div>

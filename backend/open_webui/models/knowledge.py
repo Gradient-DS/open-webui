@@ -319,6 +319,11 @@ class KnowledgeTable:
         Scalable version: search files across all knowledge bases the user has
         READ access to, without loading all KBs or using large IN() lists.
         """
+        # Phase 3: chat-attach by individual KB file is no longer offered —
+        # KB-uploaded files no longer have per-file vector collections. Whole-KB
+        # attach via search_knowledge_bases is the supported path. Keep the
+        # original implementation below intact for an easy revert if needed.
+        return KnowledgeFileListResponse(items=[], total=0)
         try:
             with get_db_context(db) as db:
                 # Base query: join Knowledge → KnowledgeFile → File
@@ -465,6 +470,27 @@ class KnowledgeTable:
         ):
             return knowledge
         return None
+
+    def get_knowledge_by_file_id(self, file_id: str, db: Optional[Session] = None) -> Optional[KnowledgeModel]:
+        """Return the first KB that has this file linked via KnowledgeFile.
+
+        Used by the built-in knowledge-search tool to resolve a file attached as
+        __model_knowledge__ back to its containing KB when no per-file
+        `file-<id>` collection exists (KB-uploaded files post-Phase-2).
+        """
+        try:
+            with get_db_context(db) as db:
+                row = (
+                    db.query(Knowledge)
+                    .join(KnowledgeFile, Knowledge.id == KnowledgeFile.knowledge_id)
+                    .filter(KnowledgeFile.file_id == file_id)
+                    .filter(Knowledge.deleted_at.is_(None))
+                    .first()
+                )
+                return self._to_knowledge_model(row, db=db) if row else None
+        except Exception as e:
+            print('get_knowledge_by_file_id error:', e)
+            return None
 
     def get_knowledges_by_file_id(self, file_id: str, db: Optional[Session] = None) -> list[KnowledgeModel]:
         try:
@@ -688,6 +714,26 @@ class KnowledgeTable:
                 return self.get_knowledge_by_id(id=id, db=db)
         except Exception as e:
             log.exception(e)
+            return None
+
+    def update_knowledge_user_id_by_id(self, id: str, user_id: str) -> Optional[KnowledgeModel]:
+        """Reassign a knowledge base's owner.
+
+        Used by the shared Confluence KB provisioning flow — the standard
+        ``update_knowledge_by_id`` cannot change ``user_id`` (it is not part
+        of ``KnowledgeForm``). ``user_id`` may be '' for a system-owned KB.
+        """
+        try:
+            with get_db() as db:
+                knowledge = db.query(Knowledge).filter_by(id=id).first()
+                if knowledge:
+                    knowledge.user_id = user_id
+                    knowledge.updated_at = int(time.time())
+                    db.commit()
+                    db.refresh(knowledge)
+                    return KnowledgeModel.model_validate(knowledge)
+                return None
+        except Exception:
             return None
 
     def update_knowledge_meta_by_id(self, id: str, meta: dict) -> Optional[KnowledgeModel]:

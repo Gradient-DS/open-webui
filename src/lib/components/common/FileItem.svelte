@@ -34,6 +34,7 @@
 	import DocumentPage from '../icons/DocumentPage.svelte';
 	import OneDrive from '../icons/OneDrive.svelte';
 	import GoogleDrive from '../icons/GoogleDrive.svelte';
+	import Confluence from '../icons/Confluence.svelte';
 	import PageEdit from '../icons/PageEdit.svelte';
 	import ChatBubble from '../icons/ChatBubble.svelte';
 	import Folder from '../icons/Folder.svelte';
@@ -122,6 +123,8 @@
 						<OneDrive />
 					{:else if type === 'collection' && item?.knowledge_type === 'google_drive'}
 						<GoogleDrive />
+					{:else if type === 'collection' && item?.knowledge_type === 'confluence'}
+						<Confluence />
 					{:else if type === 'collection'}
 						<FolderOpen />
 					{:else if type === 'note'}

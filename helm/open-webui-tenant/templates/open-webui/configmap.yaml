@@ -65,6 +65,7 @@ data:
   WEAVIATE_GRPC_HOST: {{ include "open-webui-tenant.weaviate.fullname" . }}
   WEAVIATE_GRPC_PORT: {{ .Values.openWebui.config.weaviateGrpcPort | quote }}
   WEAVIATE_WEB_SEARCH_TTL_MINUTES: {{ .Values.openWebui.config.weaviateWebSearchTtlMinutes | quote }}
+  ENABLE_WEAVIATE_BQ_QUANTIZATION: {{ .Values.openWebui.config.enableWeaviateBqQuantization | default "false" | quote }}
 
   # Database (PostgreSQL) - local to tenant namespace
   DATABASE_TYPE: {{ .Values.openWebui.config.databaseType | quote }}
@@ -137,10 +138,16 @@ data:
   FEATURE_CHAT_CONTROLS_SECTIONS: {{ .Values.openWebui.config.featureChatControlsSections | quote }}
   FEATURE_WEBPAGE_URL: {{ .Values.openWebui.config.featureWebpageUrl | quote }}
   FEATURE_REFERENCE_CHATS: {{ .Values.openWebui.config.featureReferenceChats | quote }}
+  FEATURE_SIMPLE_ASSISTANT_BUILDER: {{ .Values.openWebui.config.featureSimpleAssistantBuilder | quote }}
   FEATURE_INPUT_MENU: {{ .Values.openWebui.config.featureInputMenu | quote }}
   FEATURE_TEMPORARY_CHAT: {{ .Values.openWebui.config.featureTemporaryChat | quote }}
   FEATURE_TOOL_SERVERS: {{ .Values.openWebui.config.featureToolServers | quote }}
   FEATURE_TERMINAL_SERVERS: {{ .Values.openWebui.config.featureTerminalServers | quote }}
+
+  # Feedback Reporting (PersistentConfig: env seeds initial value; admin UI wins thereafter)
+  ENABLE_FEEDBACK_REPORTING: {{ .Values.openWebui.config.enableFeedbackReporting | quote }}
+  FEEDBACK_REPORT_INCLUDE_USER_IDENTITY: {{ .Values.openWebui.config.feedbackReportIncludeUserIdentity | quote }}
+  FEEDBACK_REPORT_TRACE_URL_TEMPLATE: {{ .Values.openWebui.config.feedbackReportTraceUrlTemplate | quote }}
 
   # Welcome message (PersistentConfig: env seeds initial value; admin UI wins thereafter)
   ENABLE_WELCOME_MESSAGE: {{ .Values.openWebui.config.enableWelcomeMessage | quote }}
@@ -282,6 +289,9 @@ data:
   ENABLE_ONEDRIVE_INTEGRATION: {{ .Values.openWebui.config.enableOnedriveIntegration | quote }}
   ENABLE_ONEDRIVE_PERSONAL: {{ .Values.openWebui.config.enableOnedrivePersonal | quote }}
   ENABLE_ONEDRIVE_BUSINESS: {{ .Values.openWebui.config.enableOnedriveBusiness | quote }}
+  {{- if .Values.openWebui.config.onedriveClientIdPersonal }}
+  ONEDRIVE_CLIENT_ID_PERSONAL: {{ .Values.openWebui.config.onedriveClientIdPersonal | quote }}
+  {{- end }}
   {{- if .Values.openWebui.config.onedriveClientIdBusiness }}
   ONEDRIVE_CLIENT_ID_BUSINESS: {{ .Values.openWebui.config.onedriveClientIdBusiness | quote }}
   {{- end }}
@@ -299,17 +309,33 @@ data:
   ONEDRIVE_MAX_FILE_SIZE_MB: {{ .Values.openWebui.config.onedriveMaxFileSizeMb | quote }}
 
   # Confluence Integration (Atlassian Cloud OAuth)
+  # CONFLUENCE_OAUTH_CLIENT_SECRET is set via the secrets template.
   ENABLE_CONFLUENCE_INTEGRATION: {{ .Values.openWebui.config.enableConfluenceIntegration | quote }}
   {{- if .Values.openWebui.config.confluenceOauthClientId }}
   CONFLUENCE_OAUTH_CLIENT_ID: {{ .Values.openWebui.config.confluenceOauthClientId | quote }}
   {{- end }}
-  {{- /* confluenceOauthClientSecret moved to secrets template */ -}}
+
+  # Confluence Basic Auth (username + API token)
+  # CONFLUENCE_BASIC_AUTH_API_TOKEN is set via the secrets template.
+  CONFLUENCE_AUTH_MODE: {{ .Values.openWebui.config.confluenceAuthMode | quote }}
+  {{- if .Values.openWebui.config.confluenceSiteUrl }}
+  CONFLUENCE_SITE_URL: {{ .Values.openWebui.config.confluenceSiteUrl | quote }}
+  {{- end }}
+  {{- if .Values.openWebui.config.confluenceBasicAuthUsername }}
+  CONFLUENCE_BASIC_AUTH_USERNAME: {{ .Values.openWebui.config.confluenceBasicAuthUsername | quote }}
+  {{- end }}
 
   # Confluence Sync
   ENABLE_CONFLUENCE_SYNC: {{ .Values.openWebui.config.enableConfluenceSync | quote }}
   CONFLUENCE_SYNC_INTERVAL_MINUTES: {{ .Values.openWebui.config.confluenceSyncIntervalMinutes | quote }}
   CONFLUENCE_MAX_PAGES_PER_SYNC: {{ .Values.openWebui.config.confluenceMaxPagesPerSync | quote }}
   CONFLUENCE_MAX_PAGE_SIZE_MB: {{ .Values.openWebui.config.confluenceMaxPageSizeMb | quote }}
+
+  # Confluence shared KB
+  CONFLUENCE_KB_MODE: {{ .Values.openWebui.config.confluenceKbMode | quote }}
+  {{- if .Values.openWebui.config.confluenceSharedKbOwnerId }}
+  CONFLUENCE_SHARED_KB_OWNER_ID: {{ .Values.openWebui.config.confluenceSharedKbOwnerId | quote }}
+  {{- end }}
 
   KNOWLEDGE_MAX_FILE_COUNT: {{ .Values.openWebui.config.knowledgeMaxFileCount | quote }}
 
@@ -450,9 +476,10 @@ data:
   OTEL_EXPORTER_OTLP_INSECURE: {{ .Values.openWebui.config.telemetry.otel.insecure | quote }}
   OTEL_TRACES_SAMPLER: {{ .Values.openWebui.config.telemetry.otel.sampler | quote }}
   OTEL_OTLP_SPAN_EXPORTER: {{ .Values.openWebui.config.telemetry.otel.protocol | quote }}
-  {{- if .Values.openWebui.config.telemetry.otel.resourceAttributes }}
-  OTEL_RESOURCE_ATTRIBUTES: {{ .Values.openWebui.config.telemetry.otel.resourceAttributes | quote }}
-  {{- end }}
+  # OTEL_RESOURCE_ATTRIBUTES is set on the Deployment, not here — it needs the
+  # per-pod name (downward API) to give each HA replica a unique
+  # service.instance.id. Any telemetry.otel.resourceAttributes value is
+  # appended there.
   {{- end }}
 
   # Agent API (internal: routes chat UI to agent service)

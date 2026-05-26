@@ -215,6 +215,10 @@ openWebui:
     weaviateHttpPort: "8080"
     weaviateGrpcPort: "50051"
     weaviateWebSearchTtlMinutes: "1440"  # TTL for web search vector collections (24 hours)
+    # Binary-quantization + flat index for File_*, Web_search_*, User_memory_*
+    # collections. Default off: HNSW for every collection. Flip to "true" if
+    # Weaviate memory pressure returns (~8s per collection creation on flip-on).
+    enableWeaviateBqQuantization: "false"
 
     # Database (PostgreSQL) - uses local PostgreSQL in tenant namespace
     databaseType: "postgresql"
@@ -281,10 +285,21 @@ openWebui:
     featureAdminSettingsTabs: "models,tools,interface,db,email,acceptance,security"
     featureWebpageUrl: "True"
     featureReferenceChats: "True"
+    featureSimpleAssistantBuilder: "False"
     featureInputMenu: "True"
     featureTemporaryChat: "True"
     featureToolServers: "False"
     featureTerminalServers: "False"
+
+    # Feedback Reporting (product feedback — user-menu link + error reports).
+    # Opt-in: off by default; a tenant enables it explicitly. PersistentConfig
+    # seeds the initial value; the admin UI wins thereafter. The Slack webhook
+    # is a credential — see secrets below.
+    enableFeedbackReporting: "False"
+    feedbackReportIncludeUserIdentity: "True"
+    # Grafana/Tempo Explore URL with a {trace_id} placeholder — when set, an
+    # error report's Slack card gets a "View trace in Tempo" deep link.
+    feedbackReportTraceUrlTemplate: ""
 
     # Welcome message (PersistentConfig — seed only; admins can toggle in UI)
     enableWelcomeMessage: "False"
@@ -417,6 +432,7 @@ openWebui:
     enableOnedriveIntegration: "false"
     enableOnedrivePersonal: "false"
     enableOnedriveBusiness: "true"
+    onedriveClientIdPersonal: ""  # Microsoft consumer app Client ID
     onedriveClientIdBusiness: ""  # Azure AD App Client ID
     onedriveSharepointUrl: ""     # e.g., "https://yourorg.sharepoint.com"
     onedriveSharepointTenantId: ""  # Azure AD Tenant ID
@@ -432,11 +448,24 @@ openWebui:
     confluenceOauthClientId: ""   # Atlassian OAuth 2.0 (3LO) Client ID
     # confluenceOauthClientSecret is set via secrets
 
+    # Confluence Basic Auth (username + API token). Set authMode to "basic"
+    # to sync with one service credential instead of per-user OAuth.
+    confluenceAuthMode: "oauth"   # "oauth" or "basic"
+    confluenceSiteUrl: ""         # e.g. https://your-domain.atlassian.net
+    confluenceBasicAuthUsername: ""
+    # confluenceBasicAuthApiToken is set via secrets
+
     # Confluence Sync (for Knowledge Bases)
     enableConfluenceSync: "false"
     confluenceSyncIntervalMinutes: "60"
     confluenceMaxPagesPerSync: "500"
     confluenceMaxPageSizeMb: "25"
+
+    # Confluence shared KB — one read-only KB synced from all spaces, visible
+    # to every user. kbMode "shared" enables it; owner is a user id, or empty
+    # for a system-owned KB (basic auth only).
+    confluenceKbMode: "per_user"      # "per_user" or "shared"
+    confluenceSharedKbOwnerId: ""
 
     # Knowledge Base File Limit
     knowledgeMaxFileCount: "250"
@@ -812,8 +841,15 @@ secrets:
   # Confluence / Atlassian OAuth (leave empty to disable)
   confluenceOauthClientSecret: ""
 
+  # Confluence basic-auth API token (leave empty to disable basic auth)
+  confluenceBasicAuthApiToken: ""
+
   # Email Graph API (leave empty to disable email invites)
   emailGraphClientSecret: ""
+
+  # Feedback Reporting Slack webhook — shared central #feedback channel.
+  # Leave empty to disable Slack delivery (the JSON log line still emits).
+  feedbackReportSlackWebhookUrl: ""
 
   # External Services API Keys (optional)
   externalDocumentLoaderApiKey: ""
@@ -881,10 +917,12 @@ externalSecrets:
     fields:
       s3AccessKeyId: false
       emailGraphClientSecret: false
+      feedbackReportSlackWebhookUrl: false
       microsoftClientSecret: false
       googleClientSecret: false
       googleDriveApiKey: false
       confluenceOauthClientSecret: false
+      confluenceBasicAuthApiToken: false
       externalDocumentLoaderApiKey: false
       ragExternalRerankerApiKey: false
       agentApiKey: false

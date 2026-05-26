@@ -9,10 +9,17 @@ from typing import Optional, Dict, Any, List
 import httpx
 
 from open_webui.services.confluence.confluence_client import ConfluenceClient
+from open_webui.services.confluence.basic_auth import (
+    basic_auth_credential,
+    build_basic_client,
+    get_basic_site,
+    resolve_auth_mode,
+)
 from open_webui.services.confluence.html_renderer import html_to_markdown
 from open_webui.services.sync.base_worker import BaseSyncWorker
 from open_webui.models.knowledge import Knowledges
 from open_webui.models.files import Files
+from open_webui.models.users import Users
 from open_webui.config import (
     CONFLUENCE_MAX_PAGES_PER_SYNC,
     CONFLUENCE_MAX_PAGE_SIZE_MB,
@@ -36,10 +43,15 @@ _PAGE_TYPE_RULES: list[tuple[str, set[str]]] = [
 
 
 def _sanitise_filename(title: str, page_id: str) -> str:
-    """Turn a Confluence page title into a safe `.md` filename."""
+    """Turn a Confluence page title into a safe display filename.
+
+    No extension is appended — a Confluence page is a synthetic document, not
+    a real file, and a bare title reads better in citation pills. The file's
+    content type is pinned to ``text/markdown`` in ``_get_provider_file_meta``
+    regardless of the filename, so the RAG loader and splitter are unaffected.
+    """
     cleaned = re.sub(r'[\\/:*?"<>|\r\n\t]', '_', (title or '').strip())
-    cleaned = cleaned[:120].rstrip(' .') or f'page-{page_id}'
-    return f'{cleaned}.md'
+    return cleaned[:120].rstrip(' .') or f'page-{page_id}'
 
 
 def _derive_page_type(labels: List[str]) -> Optional[str]:
@@ -50,11 +62,62 @@ def _derive_page_type(labels: List[str]) -> Optional[str]:
     return None
 
 
+def _build_front_matter(file_info: Dict[str, Any]) -> str:
+    """Compose the Markdown front-matter block prepended to a Confluence page.
+
+    Reads the enrichment fields stamped onto ``file_info`` (labels, breadcrumb,
+    page_type, author, dates). Used for the loader-worker path's
+    ``content_prefix`` so its document header matches the in-pod render path
+    (the equivalent block is inlined in ``_download_file_content``; the two
+    converge once the legacy in-pod path is removed).
+    """
+    info = file_info or {}
+    item = info.get('item') or {}
+    version = item.get('version') or {}
+    title = info.get('title') or item.get('name') or 'Confluence page'
+    space_id = info.get('space_id') or ''
+    version_number = version.get('number')
+    breadcrumb = info.get('confluence_breadcrumb') or ''
+    labels = info.get('confluence_labels') or []
+    page_type = info.get('confluence_page_type')
+    web_url = info.get('web_url') or ''
+    created_at = info.get('confluence_created_at') or ''
+    version_when = info.get('confluence_last_modified') or ''
+    author_id = info.get('confluence_author_id') or ''
+
+    lines = [
+        f'# {title}',
+        '',
+        f'_Confluence page · space {space_id} · version {version_number}_',
+    ]
+    if breadcrumb:
+        lines.append(f'_Path: {breadcrumb}_')
+    if labels:
+        lines.append(f'_Labels: {", ".join(labels)}_')
+    if page_type:
+        lines.append(f'_Type: {page_type}_')
+    if web_url:
+        lines.append(f'_Source: {web_url}_')
+    if created_at:
+        lines.append(f'_Created: {created_at}_')
+    if version_when:
+        lines.append(f'_Last modified: {version_when}_')
+    if author_id:
+        lines.append(f'_Author: {author_id}_')
+    lines.append('')
+    lines.append('')
+    return '\n'.join(lines)
+
+
 class ConfluenceSyncWorker(BaseSyncWorker):
     """Worker to sync Confluence space/page contents to a Knowledge base."""
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
+        # Resolve the KB's auth mode once. In basic mode the per-source
+        # cloud_id is irrelevant — every client talks to the one configured
+        # site via the global service credential.
+        self._auth_mode = resolve_auth_mode(self.knowledge_id)
         # Migrate legacy-format sources (saved before the type/confluence_type
         # split). base_worker dispatches on source['type'] == 'folder', so
         # space / page-subtree sources must be normalized here.
@@ -75,6 +138,29 @@ class ConfluenceSyncWorker(BaseSyncWorker):
         # race to INSERT the same row. Keyed by cloud_id+page_id since page IDs
         # are not globally unique across Atlassian sites.
         self._seen_page_ids: set[tuple[str, str]] = set()
+
+        # Shared full-content KB state. The shared KB has no fixed source
+        # list — it rebuilds its sources from the admin-selected spaces
+        # (confluence_sync.spaces) on every run (see sync() /
+        # _resolve_shared_kb_sources).
+        kb = Knowledges.get_knowledge_by_id(self.knowledge_id)
+        sync_info = (kb.meta or {}).get(self.meta_key, {}) if kb else {}
+        self._is_shared_kb = bool(sync_info.get('shared'))
+
+        # A system-owned shared KB stores user_id='' on the KB row so it stays
+        # decoupled from any deletable user. The sync mechanics (process_file
+        # access control, file ownership, progress events) still need a real
+        # user, so resolve this run to the instance super-admin when the KB
+        # has no valid owner.
+        if self._is_shared_kb and (not self.user_id or not Users.get_user_by_id(self.user_id)):
+            admin = Users.get_super_admin_user()
+            if admin:
+                self.user_id = admin.id
+            else:
+                log.warning(
+                    'Shared Confluence KB %s has no valid owner and no admin user could be resolved for the sync run',
+                    self.knowledge_id,
+                )
 
     # ------------------------------------------------------------------
     # Abstract properties
@@ -101,8 +187,11 @@ class ConfluenceSyncWorker(BaseSyncWorker):
         return '/internal/confluence-sync'
 
     @property
-    def max_files_config(self) -> int:
-        return CONFLUENCE_MAX_PAGES_PER_SYNC
+    def max_files_config(self) -> Optional[int]:
+        # CONFLUENCE_MAX_PAGES_PER_SYNC is a PersistentConfig (admin-editable).
+        # 0 = "no limit" → return None so base_worker falls back to the
+        # KB-wide KNOWLEDGE_MAX_FILE_COUNT safety net alone.
+        return CONFLUENCE_MAX_PAGES_PER_SYNC.value or None
 
     @property
     def source_clear_delta_keys(self) -> list[str]:
@@ -124,11 +213,17 @@ class ConfluenceSyncWorker(BaseSyncWorker):
     def _client_for(self, cloud_id: str) -> ConfluenceClient:
         cached = self._clients_by_cloud_id.get(cloud_id)
         if cached is None:
-            cached = ConfluenceClient(
-                access_token=self.access_token,
-                cloud_id=cloud_id,
-                token_provider=self._token_provider,
-            )
+            if self._auth_mode == 'basic':
+                # All basic-mode sources hit the same site; cloud_id is only
+                # the cache key. The client reads the service credential and
+                # site URL straight from config.
+                cached = build_basic_client()
+            else:
+                cached = ConfluenceClient(
+                    access_token=self.access_token,
+                    cloud_id=cloud_id,
+                    token_provider=self._token_provider,
+                )
             self._clients_by_cloud_id[cloud_id] = cached
         return cached
 
@@ -140,6 +235,115 @@ class ConfluenceSyncWorker(BaseSyncWorker):
             except Exception as e:  # pragma: no cover
                 log.warning('Error closing Confluence client: %s', e)
         self._clients_by_cloud_id = {}
+
+    # ------------------------------------------------------------------
+    # Shared full-content KB — resolve all spaces at sync time
+    # ------------------------------------------------------------------
+
+    async def sync(self) -> Dict[str, Any]:
+        """Run a sync, resolving the source list first for the shared KB.
+
+        The shared KB has no fixed source list — its sources are rebuilt on
+        every run from the spaces an admin explicitly opted in via the Cloud
+        Sync tab. Deselecting a space drops its files via base_worker's
+        revoked-source handling.
+        """
+        if self._is_shared_kb:
+            await self._resolve_shared_kb_sources()
+        return await super().sync()
+
+    async def _resolve_shared_kb_sources(self) -> None:
+        """Rebuild ``self.sources`` from the admin-selected Confluence items.
+
+        Each opted-in item — a whole space, a single page, or a page subtree
+        — becomes one source. Delta state (``page_map`` / ``last_sync_at``)
+        is carried over from the previously persisted entry with the same
+        ``(cloud_id, confluence_type, item_id)`` triple so steady-state syncs
+        only re-process changed pages. An item removed from the selection
+        keeps its old source for one more run so base_worker's
+        ``_verify_source_access`` → ``_handle_revoked_source`` flow removes
+        its files and then drops it from the persisted set.
+
+        Back-compat: pre-page-granularity rows have only ``{id, key, name,
+        cloud_id}``; they normalize as ``type='space'`` with ``item_id``
+        falling back to ``id``.
+        """
+        # Re-read the selection from KB meta — it may have changed since the
+        # worker was constructed (e.g. an admin re-provisioned).
+        kb = Knowledges.get_knowledge_by_id(self.knowledge_id)
+        sync_info = (kb.meta or {}).get(self.meta_key, {}) if kb else {}
+        selected_items = sync_info.get('spaces') or []
+
+        # Index previously persisted sources by (cloud_id, type, item_id) so
+        # their delta state survives the rebuild. Pages and spaces with the
+        # same id stay separate (page IDs are scoped to a space).
+        old_by_key: Dict[tuple, Dict[str, Any]] = {}
+        for src in self.sources:
+            src_item_id = src.get('item_id') or src.get('space_id')
+            key = (src.get('cloud_id'), src.get('confluence_type') or 'space', src_item_id)
+            old_by_key[key] = src
+
+        # Basic-mode default — OAuth-mode items carry their own cloud_id/site_url
+        # from the picker (multi-site OAuth tenants).
+        basic_site = get_basic_site()
+        default_cloud_id = basic_site['cloud_id'] if basic_site else ''
+        default_site_url = basic_site['url'] if basic_site else ''
+
+        resolved: List[Dict[str, Any]] = []
+        seen_keys: set[tuple] = set()
+
+        for item in selected_items:
+            confluence_type = item.get('type') or 'space'
+            item_id = str(item.get('item_id') or item.get('id') or '')
+            if not item_id:
+                continue
+            cloud_id = item.get('cloud_id') or default_cloud_id
+            key = (cloud_id, confluence_type, item_id)
+            if key in seen_keys:
+                continue
+            seen_keys.add(key)
+
+            old = old_by_key.get(key, {})
+            name = item.get('name') or item.get('key') or item_id
+            item_path = item.get('item_path') or name
+            include_descendants = bool(item.get('include_descendants', True))
+
+            # base_worker dispatches on source['type']: 'folder' enumerates
+            # children, 'file' fetches one. A page without descendants is the
+            # only file-like case; spaces and page-subtrees are folders.
+            source_type = 'file' if confluence_type == 'page' and not include_descendants else 'folder'
+            space_id = item.get('space_id') or (item_id if confluence_type == 'space' else None)
+
+            source: Dict[str, Any] = {
+                'type': source_type,
+                'confluence_type': confluence_type,
+                'cloud_id': cloud_id,
+                'space_id': space_id,
+                'space_key': item.get('space_key') or item.get('key'),
+                'site_url': item.get('site_url') or default_site_url,
+                'item_id': item_id,
+                'item_path': item_path,
+                'name': name,
+                'include_descendants': include_descendants,
+            }
+            if old.get('page_map'):
+                source['page_map'] = old['page_map']
+            if old.get('last_sync_at'):
+                source['last_sync_at'] = old['last_sync_at']
+            resolved.append(source)
+
+        # Items dropped from the selection: keep their old source one more
+        # run so revoked-source handling removes the orphaned files.
+        for key, old in old_by_key.items():
+            if key not in seen_keys:
+                resolved.append(old)
+
+        self.sources = resolved
+        log.info(
+            'Confluence shared sync resolved %d item source(s) for KB %s',
+            len(resolved),
+            self.knowledge_id,
+        )
 
     # ------------------------------------------------------------------
     # Support checks
@@ -223,11 +427,19 @@ class ConfluenceSyncWorker(BaseSyncWorker):
                     'source_item_id': source_item_id,
                     'name': _sanitise_filename(page.get('title') or '', page_id),
                     'relative_path': relative_path,
+                    # Page-level creation date — present on v2 list responses,
+                    # carried for front-matter without an extra get_page call.
+                    'created_at': page.get('createdAt') or '',
                 }
             )
 
         source['page_map'] = new_page_map
         source['last_sync_at'] = int(time.time())
+
+        # Shared-loader mode: the loader-worker fetches only the page body, so
+        # label/ancestor enrichment is computed here at discovery time.
+        if self._use_shared_loader:
+            await self._enrich_files_for_loader(files_to_process)
 
         return files_to_process, deleted_count
 
@@ -265,7 +477,7 @@ class ConfluenceSyncWorker(BaseSyncWorker):
 
         source['last_synced_version'] = current_version
 
-        return {
+        file_info = {
             'item': {
                 'id': page['id'],
                 'name': page.get('title') or source.get('name'),
@@ -281,7 +493,15 @@ class ConfluenceSyncWorker(BaseSyncWorker):
             'source_type': 'page',
             'source_item_id': source['item_id'],
             'name': _sanitise_filename(page.get('title') or '', page['id']),
+            'created_at': page.get('createdAt') or '',
         }
+
+        # Shared-loader mode: enrich here since _download_file_content (which
+        # derives labels/ancestors in-pod) does not run.
+        if self._use_shared_loader:
+            await self._enrich_files_for_loader([file_info])
+
+        return file_info
 
     def _get_cloud_hash(self, file_info: Dict[str, Any]) -> Optional[str]:
         """Confluence change indicator: page version.number (stringified)."""
@@ -433,6 +653,100 @@ class ConfluenceSyncWorker(BaseSyncWorker):
             'relative_path': relative_path,
             'last_synced_at': int(time.time()),
         }
+
+    # ------------------------------------------------------------------
+    # Shared-loader job creation (USE_SHARED_LOADER=true)
+    # ------------------------------------------------------------------
+
+    async def _enrich_files_for_loader(self, files: List[Dict[str, Any]]) -> None:
+        """Stamp label/ancestor enrichment onto each file_info for loader mode.
+
+        The loader-worker fetches only the page body, so the enrichment the
+        in-pod path derives in ``_download_file_content`` (labels, breadcrumb,
+        page_type, ancestor ids) is computed here at discovery time and shipped
+        in the job's ``metadata`` + ``content_prefix``. Bounded concurrency
+        keeps a large first sync from opening hundreds of simultaneous
+        Confluence connections. Failures degrade gracefully — a page that
+        can't be enriched still syncs, just with a reduced front-matter.
+        """
+        if not files:
+            return
+
+        semaphore = asyncio.Semaphore(8)
+
+        async def _bounded(file_info: Dict[str, Any]) -> None:
+            async with semaphore:
+                await self._enrich_one(file_info)
+
+        await asyncio.gather(*(_bounded(f) for f in files), return_exceptions=True)
+
+    async def _enrich_one(self, file_info: Dict[str, Any]) -> None:
+        """Fetch labels + ancestors for one page and stamp enrichment fields."""
+        page_id = file_info.get('page_id')
+        cloud_id = file_info.get('cloud_id')
+        if not page_id or not cloud_id:
+            return
+
+        client = self._client_for(cloud_id)
+        labels_result, ancestors_result = await asyncio.gather(
+            client.list_all_page_labels(page_id),
+            client.list_all_page_ancestors(page_id),
+            return_exceptions=True,
+        )
+        if isinstance(labels_result, BaseException):
+            log.warning('Confluence label fetch failed for page %s: %s', page_id, labels_result)
+            labels_result = []
+        if isinstance(ancestors_result, BaseException):
+            log.warning('Confluence ancestor fetch failed for page %s: %s', page_id, ancestors_result)
+            ancestors_result = []
+
+        labels = [label.get('name') for label in labels_result if label.get('name')]
+        ancestors = ancestors_result
+        title = file_info.get('title') or f'page-{page_id}'
+        ancestor_titles = [a.get('title') for a in ancestors if a.get('title')]
+        version = (file_info.get('item') or {}).get('version') or {}
+
+        file_info['confluence_labels'] = labels
+        file_info['confluence_breadcrumb'] = ' > '.join([*ancestor_titles, title])
+        file_info['confluence_page_type'] = _derive_page_type(labels)
+        file_info['confluence_ancestor_ids'] = [a.get('id') for a in ancestors if a.get('id')]
+        file_info['confluence_author_id'] = version.get('authorId') or ''
+        file_info['confluence_last_modified'] = version.get('createdAt') or ''
+        file_info['confluence_created_at'] = file_info.get('created_at') or ''
+
+    def _item_from_file_info(self, file_info: Dict[str, Any], access_token: str) -> Dict[str, Any]:
+        """Build the loader-worker job item for one Confluence page.
+
+        The loader-worker's ConfluenceSourceClient fetches the page body,
+        renders it HTML→Markdown, and prepends ``content_prefix``. Everything
+        else — delta detection, label/ancestor enrichment, the front-matter —
+        is computed open-webui-side here, so loader-worker output matches the
+        legacy in-pod path.
+        """
+        item = super()._item_from_file_info(file_info, access_token)
+
+        descriptor: Dict[str, Any] = {
+            'page_id': file_info['page_id'],
+            'content_prefix': _build_front_matter(file_info),
+        }
+
+        if self._auth_mode == 'basic':
+            # basic_auth: the loader-worker base64-encodes the raw
+            # email:api_token pair and addresses the site directly.
+            basic_site = get_basic_site()
+            descriptor['site_url'] = basic_site['url'] if basic_site else ''
+            item['credential_type'] = 'basic_auth'
+            item['source_credential'] = basic_auth_credential()
+        else:
+            # user_oauth: the Bearer token (already set as source_credential by
+            # the base implementation) is used against the Atlassian gateway.
+            descriptor['cloud_id'] = file_info.get('cloud_id', '')
+            item['credential_type'] = 'user_oauth'
+
+        item['source_descriptor'] = descriptor
+        # The loader-worker renders HTML→Markdown and returns text/markdown.
+        item['content_type'] = 'text/markdown'
+        return item
 
     # ------------------------------------------------------------------
     # Access / permissions

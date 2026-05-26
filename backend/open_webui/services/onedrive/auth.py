@@ -82,7 +82,7 @@ async def get_authorization_url(
     )
 
     params = {
-        'client_id': ONEDRIVE_CLIENT_ID_BUSINESS,
+        'client_id': ONEDRIVE_CLIENT_ID_BUSINESS.value,
         'response_type': 'code',
         'redirect_uri': redirect_uri,
         'scope': _GRAPH_SCOPE,
@@ -138,7 +138,7 @@ async def exchange_code_for_tokens(
             response = await client.post(
                 token_url,
                 data={
-                    'client_id': ONEDRIVE_CLIENT_ID_BUSINESS,
+                    'client_id': ONEDRIVE_CLIENT_ID_BUSINESS.value,
                     'client_secret': MICROSOFT_CLIENT_SECRET.value,
                     'code': code,
                     'redirect_uri': flow['redirect_uri'],

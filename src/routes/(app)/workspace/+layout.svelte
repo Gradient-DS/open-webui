@@ -82,7 +82,7 @@
 			? 'md:max-w-[calc(100%-var(--sidebar-width))]'
 			: ''} max-w-full"
 	>
-		{#if !$page.url.pathname.includes('/workspace/knowledge') && !$page.url.pathname.includes('/workspace/models') && !$page.url.pathname.includes('/workspace/prompts') && !$page.url.pathname.includes('/workspace/tools')}
+		{#if !$page.url.pathname.includes('/workspace/knowledge') && !$page.url.pathname.includes('/workspace/models') && !$page.url.pathname.includes('/workspace/prompts') && !$page.url.pathname.includes('/workspace/tools') && !$page.url.pathname.includes('/workspace/skills')}
 			<nav class="   px-2.5 pt-1.5 backdrop-blur-xl drag-region">
 				<div class=" flex items-center gap-1">
 					{#if $mobile}
@@ -172,7 +172,8 @@
 					($page.url.pathname.includes('/workspace/knowledge') ||
 					$page.url.pathname.includes('/workspace/models') ||
 					$page.url.pathname.includes('/workspace/prompts') ||
-					$page.url.pathname.includes('/workspace/tools')
+					$page.url.pathname.includes('/workspace/tools') ||
+					$page.url.pathname.includes('/workspace/skills')
 						? 'pt-4'
 						: '')}"
 			id="workspace-container"

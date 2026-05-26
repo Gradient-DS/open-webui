@@ -16,6 +16,8 @@ export function getDefaultCapabilities() {
 			features.enable_image_generation !== false ? DEFAULT_CAPABILITIES.image_generation : false,
 		code_interpreter:
 			features.enable_code_interpreter !== false ? DEFAULT_CAPABILITIES.code_interpreter : false,
+		document_writer:
+			features.enable_document_writer !== false ? DEFAULT_CAPABILITIES.document_writer : false,
 		builtin_tools:
 			features.feature_builtin_tools !== false ? DEFAULT_CAPABILITIES.builtin_tools : false
 	};

@@ -145,7 +145,9 @@
 					<!-- $i18n.t("Searching {{doc_title}} for \"{{query}}\"...") -->
 					<!-- $i18n.t("Finding documents in {{collection_name}} for \"{{query}}\"...") -->
 					<!-- $i18n.t("Listing documents in {{collection_name}}...") -->
+					<!-- $i18n.t("Listing accessible knowledge bases...") -->
 					<!-- $i18n.t("Searching knowledge bases for \"{{query}}\"...") -->
+					<!-- $i18n.t("Searching all knowledge bases for \"{{query}}\"...") -->
 					<!-- $i18n.t("Reading {{doc_title}}...") -->
 					<!-- $i18n.t("Summarizing {{doc_title}}...") -->
 					<!-- $i18n.t("Asking user...") -->

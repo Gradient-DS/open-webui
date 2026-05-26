@@ -1678,88 +1678,82 @@ def process_file(
                 text_content = form_data.content
             elif form_data.collection_name:
                 # Check if the file has already been processed and save the content
-                # Usage: /knowledge/{id}/file/add, /knowledge/{id}/file/update
-
-                result = VECTOR_DB_CLIENT.query(collection_name=f'file-{file.id}', filter={'file_id': file.id})
-
-                if result is not None and len(result.ids[0]) > 0:
+                # Usage: /knowledge/{id}/file/add, /knowledge/{id}/file/update,
+                # and /files/ uploads with knowledge_id (workspace KB upload).
+                #
+                # Previously this branch first queried a per-file `file-{id}`
+                # cache collection. KB-bound uploads no longer create that
+                # collection, so we fall straight through to the existing
+                # content / disk-load path.
+                existing_content = file.data.get('content', '')
+                if existing_content:
                     docs = [
                         Document(
-                            page_content=result.documents[0][idx],
-                            metadata=result.metadatas[0][idx],
+                            page_content=existing_content,
+                            metadata={
+                                **file.meta,
+                                'name': file.filename,
+                                'created_by': file.user_id,
+                                'file_id': file.id,
+                                'source': file.filename,
+                            },
                         )
-                        for idx, id in enumerate(result.ids[0])
                     ]
                 else:
-                    existing_content = file.data.get('content', '')
-                    if existing_content:
+                    # File hasn't been processed yet (e.g. background processing
+                    # hasn't completed). Load and extract content directly.
+                    file_path = file.path
+                    if file_path:
+                        file_path = Storage.get_file(file_path)
+                        loader = Loader(
+                            engine=request.app.state.config.CONTENT_EXTRACTION_ENGINE,
+                            user=user,
+                            DATALAB_MARKER_API_KEY=request.app.state.config.DATALAB_MARKER_API_KEY,
+                            DATALAB_MARKER_API_BASE_URL=request.app.state.config.DATALAB_MARKER_API_BASE_URL,
+                            DATALAB_MARKER_ADDITIONAL_CONFIG=request.app.state.config.DATALAB_MARKER_ADDITIONAL_CONFIG,
+                            DATALAB_MARKER_SKIP_CACHE=request.app.state.config.DATALAB_MARKER_SKIP_CACHE,
+                            DATALAB_MARKER_FORCE_OCR=request.app.state.config.DATALAB_MARKER_FORCE_OCR,
+                            DATALAB_MARKER_PAGINATE=request.app.state.config.DATALAB_MARKER_PAGINATE,
+                            DATALAB_MARKER_STRIP_EXISTING_OCR=request.app.state.config.DATALAB_MARKER_STRIP_EXISTING_OCR,
+                            DATALAB_MARKER_DISABLE_IMAGE_EXTRACTION=request.app.state.config.DATALAB_MARKER_DISABLE_IMAGE_EXTRACTION,
+                            DATALAB_MARKER_FORMAT_LINES=request.app.state.config.DATALAB_MARKER_FORMAT_LINES,
+                            DATALAB_MARKER_USE_LLM=request.app.state.config.DATALAB_MARKER_USE_LLM,
+                            DATALAB_MARKER_OUTPUT_FORMAT=request.app.state.config.DATALAB_MARKER_OUTPUT_FORMAT,
+                            EXTERNAL_DOCUMENT_LOADER_URL=request.app.state.config.EXTERNAL_DOCUMENT_LOADER_URL,
+                            EXTERNAL_DOCUMENT_LOADER_API_KEY=request.app.state.config.EXTERNAL_DOCUMENT_LOADER_API_KEY,
+                            TIKA_SERVER_URL=request.app.state.config.TIKA_SERVER_URL,
+                            DOCLING_SERVER_URL=request.app.state.config.DOCLING_SERVER_URL,
+                            DOCLING_API_KEY=request.app.state.config.DOCLING_API_KEY,
+                            DOCLING_PARAMS=request.app.state.config.DOCLING_PARAMS,
+                            PDF_EXTRACT_IMAGES=request.app.state.config.PDF_EXTRACT_IMAGES,
+                            PDF_LOADER_MODE=request.app.state.config.PDF_LOADER_MODE,
+                            DOCUMENT_INTELLIGENCE_ENDPOINT=request.app.state.config.DOCUMENT_INTELLIGENCE_ENDPOINT,
+                            DOCUMENT_INTELLIGENCE_KEY=request.app.state.config.DOCUMENT_INTELLIGENCE_KEY,
+                            DOCUMENT_INTELLIGENCE_MODEL=request.app.state.config.DOCUMENT_INTELLIGENCE_MODEL,
+                            MISTRAL_OCR_API_BASE_URL=request.app.state.config.MISTRAL_OCR_API_BASE_URL,
+                            MISTRAL_OCR_API_KEY=request.app.state.config.MISTRAL_OCR_API_KEY,
+                            MINERU_API_MODE=request.app.state.config.MINERU_API_MODE,
+                            MINERU_API_URL=request.app.state.config.MINERU_API_URL,
+                            MINERU_API_KEY=request.app.state.config.MINERU_API_KEY,
+                            MINERU_API_TIMEOUT=request.app.state.config.MINERU_API_TIMEOUT,
+                            MINERU_PARAMS=request.app.state.config.MINERU_PARAMS,
+                        )
+                        docs = loader.load(file.filename, file.meta.get('content_type'), file_path)
                         docs = [
                             Document(
-                                page_content=existing_content,
+                                page_content=doc.page_content,
                                 metadata={
-                                    **file.meta,
+                                    **filter_metadata(doc.metadata),
                                     'name': file.filename,
                                     'created_by': file.user_id,
                                     'file_id': file.id,
                                     'source': file.filename,
                                 },
                             )
+                            for doc in docs
                         ]
                     else:
-                        # File hasn't been processed yet (e.g. background processing
-                        # hasn't completed). Load and extract content directly.
-                        file_path = file.path
-                        if file_path:
-                            file_path = Storage.get_file(file_path)
-                            loader = Loader(
-                                engine=request.app.state.config.CONTENT_EXTRACTION_ENGINE,
-                                user=user,
-                                DATALAB_MARKER_API_KEY=request.app.state.config.DATALAB_MARKER_API_KEY,
-                                DATALAB_MARKER_API_BASE_URL=request.app.state.config.DATALAB_MARKER_API_BASE_URL,
-                                DATALAB_MARKER_ADDITIONAL_CONFIG=request.app.state.config.DATALAB_MARKER_ADDITIONAL_CONFIG,
-                                DATALAB_MARKER_SKIP_CACHE=request.app.state.config.DATALAB_MARKER_SKIP_CACHE,
-                                DATALAB_MARKER_FORCE_OCR=request.app.state.config.DATALAB_MARKER_FORCE_OCR,
-                                DATALAB_MARKER_PAGINATE=request.app.state.config.DATALAB_MARKER_PAGINATE,
-                                DATALAB_MARKER_STRIP_EXISTING_OCR=request.app.state.config.DATALAB_MARKER_STRIP_EXISTING_OCR,
-                                DATALAB_MARKER_DISABLE_IMAGE_EXTRACTION=request.app.state.config.DATALAB_MARKER_DISABLE_IMAGE_EXTRACTION,
-                                DATALAB_MARKER_FORMAT_LINES=request.app.state.config.DATALAB_MARKER_FORMAT_LINES,
-                                DATALAB_MARKER_USE_LLM=request.app.state.config.DATALAB_MARKER_USE_LLM,
-                                DATALAB_MARKER_OUTPUT_FORMAT=request.app.state.config.DATALAB_MARKER_OUTPUT_FORMAT,
-                                EXTERNAL_DOCUMENT_LOADER_URL=request.app.state.config.EXTERNAL_DOCUMENT_LOADER_URL,
-                                EXTERNAL_DOCUMENT_LOADER_API_KEY=request.app.state.config.EXTERNAL_DOCUMENT_LOADER_API_KEY,
-                                TIKA_SERVER_URL=request.app.state.config.TIKA_SERVER_URL,
-                                DOCLING_SERVER_URL=request.app.state.config.DOCLING_SERVER_URL,
-                                DOCLING_API_KEY=request.app.state.config.DOCLING_API_KEY,
-                                DOCLING_PARAMS=request.app.state.config.DOCLING_PARAMS,
-                                PDF_EXTRACT_IMAGES=request.app.state.config.PDF_EXTRACT_IMAGES,
-                                PDF_LOADER_MODE=request.app.state.config.PDF_LOADER_MODE,
-                                DOCUMENT_INTELLIGENCE_ENDPOINT=request.app.state.config.DOCUMENT_INTELLIGENCE_ENDPOINT,
-                                DOCUMENT_INTELLIGENCE_KEY=request.app.state.config.DOCUMENT_INTELLIGENCE_KEY,
-                                DOCUMENT_INTELLIGENCE_MODEL=request.app.state.config.DOCUMENT_INTELLIGENCE_MODEL,
-                                MISTRAL_OCR_API_BASE_URL=request.app.state.config.MISTRAL_OCR_API_BASE_URL,
-                                MISTRAL_OCR_API_KEY=request.app.state.config.MISTRAL_OCR_API_KEY,
-                                MINERU_API_MODE=request.app.state.config.MINERU_API_MODE,
-                                MINERU_API_URL=request.app.state.config.MINERU_API_URL,
-                                MINERU_API_KEY=request.app.state.config.MINERU_API_KEY,
-                                MINERU_API_TIMEOUT=request.app.state.config.MINERU_API_TIMEOUT,
-                                MINERU_PARAMS=request.app.state.config.MINERU_PARAMS,
-                            )
-                            docs = loader.load(file.filename, file.meta.get('content_type'), file_path)
-                            docs = [
-                                Document(
-                                    page_content=doc.page_content,
-                                    metadata={
-                                        **filter_metadata(doc.metadata),
-                                        'name': file.filename,
-                                        'created_by': file.user_id,
-                                        'file_id': file.id,
-                                        'source': file.filename,
-                                    },
-                                )
-                                for doc in docs
-                            ]
-                        else:
-                            raise ValueError(ERROR_MESSAGES.EMPTY_CONTENT)
+                        raise ValueError(ERROR_MESSAGES.EMPTY_CONTENT)
 
                 text_content = ' '.join([doc.page_content for doc in docs]) if docs else file.data.get('content', '')
             else:

@@ -108,3 +108,166 @@ export function listPages(
 		headers: { Authorization: `Bearer ${token}` }
 	});
 }
+
+// ─────────────────────────────────────────────────────────────────────
+// Basic-auth connection test (admin)
+// ─────────────────────────────────────────────────────────────────────
+
+export interface ConfluenceTestConnectionPayload {
+	site_url?: string;
+	username?: string;
+	api_token?: string;
+}
+
+export interface ConfluenceTestConnectionResult {
+	ok: boolean;
+	detail: string;
+	space_count?: number;
+}
+
+// Probe a basic-auth Confluence credential. Blank fields fall back to the
+// stored config server-side, so an admin can test before or after saving.
+// The endpoint always returns 200 — `ok` carries the result.
+export function testConfluenceConnection(
+	token: string,
+	payload: ConfluenceTestConnectionPayload = {}
+): Promise<ConfluenceTestConnectionResult> {
+	return apiFetch(`${base}/auth/test`, {
+		method: 'POST',
+		headers: {
+			Authorization: `Bearer ${token}`,
+			'Content-Type': 'application/json'
+		},
+		body: JSON.stringify(payload)
+	});
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// Shared full-content KB (admin)
+// ─────────────────────────────────────────────────────────────────────
+
+// One Confluence space, page, or page-subtree opted into the shared knowledge
+// base. The type name is kept for back-compat — entries can be spaces or pages,
+// discriminated by ``type`` (defaults to ``'space'`` for legacy payloads).
+// Shape matches ``SyncItem`` (per-user picker output) so the same picker feeds
+// both flows.
+export interface ConfluenceSharedKbSpace {
+	type?: 'space' | 'page' | null;
+	// Legacy alias for space items — older payloads sent {id, key, name, cloud_id}.
+	id?: string | null;
+	key?: string | null;
+	name?: string | null;
+	cloud_id?: string | null;
+	space_id?: string | null;
+	space_key?: string | null;
+	site_url?: string | null;
+	item_id?: string | null;
+	item_path?: string | null;
+	include_descendants?: boolean | null;
+}
+
+export interface ConfluenceSharedKbStatus {
+	kb_mode: string;
+	auth_mode: string;
+	// Whether the account the shared sync will run with has connected — basic
+	// auth: the service credential is configured; oauth: the effective owner
+	// (``kb.user_id`` if provisioned, else the calling admin) has a stored
+	// token.
+	owner_connected?: boolean;
+	provisioned: boolean;
+	knowledge_id: string | null;
+	owner_id?: string;
+	status?: string;
+	last_sync_at?: number | null;
+	last_result?: Record<string, unknown> | null;
+	suspended_at?: number | null;
+	file_count?: number;
+	// Live sync progress — files done / total for the current run.
+	progress_current?: number;
+	progress_total?: number;
+	// The spaces currently opted into the shared KB — pre-fills the picker.
+	spaces?: ConfluenceSharedKbSpace[];
+}
+
+// Report shared-KB provisioning state and the last sync result.
+export function getConfluenceSharedKbStatus(token: string): Promise<ConfluenceSharedKbStatus> {
+	return apiFetch(`${base}/shared/status`, {
+		headers: { Authorization: `Bearer ${token}` }
+	});
+}
+
+// List the Confluence spaces available for the shared KB (pre-synced mode).
+// Basic auth: every space the service account can see. OAuth: every space the
+// configured owner's token can reach.
+export function getConfluenceSharedKbSpaces(
+	token: string
+): Promise<{ spaces: ConfluenceSharedKbSpace[] }> {
+	return apiFetch(`${base}/shared/spaces`, {
+		headers: { Authorization: `Bearer ${token}` }
+	});
+}
+
+// Create (or update) the single shared, public-read Confluence KB. Reads the
+// saved auth_mode config — save the form before calling — and stamps the
+// passed-in item selection (opt-in) into the KB. ``ownerUserId`` carries the
+// basic-mode owner pick ('' = system-owned); ignored in OAuth mode where the
+// calling admin is implicitly the owner (only their stored token can run the
+// sync).
+export function provisionConfluenceSharedKb(
+	token: string,
+	spaces: ConfluenceSharedKbSpace[] = [],
+	ownerUserId: string | null = null
+): Promise<ConfluenceSharedKbStatus> {
+	return apiFetch(`${base}/shared/provision`, {
+		method: 'POST',
+		headers: {
+			Authorization: `Bearer ${token}`,
+			'Content-Type': 'application/json'
+		},
+		body: JSON.stringify({ spaces, owner_user_id: ownerUserId })
+	});
+}
+
+// Trigger an immediate full sync of the shared Confluence KB.
+export function syncConfluenceSharedKb(
+	token: string
+): Promise<{ message: string; knowledge_id: string }> {
+	return apiFetch(`${base}/shared/sync`, {
+		method: 'POST',
+		headers: { Authorization: `Bearer ${token}` }
+	});
+}
+
+// Soft-delete the shared Confluence KB. Admin-only — the workspace Knowledge
+// UI cannot delete it; this is the only managed removal path.
+export function deleteConfluenceSharedKb(
+	token: string
+): Promise<{ message: string; knowledge_id: string }> {
+	return apiFetch(`${base}/shared`, {
+		method: 'DELETE',
+		headers: { Authorization: `Bearer ${token}` }
+	});
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// Ad-hoc page content (chat + menu)
+// ─────────────────────────────────────────────────────────────────────
+
+export interface ConfluencePageContent {
+	page_id: string;
+	title: string;
+	content: string;
+}
+
+// Fetch one Confluence page rendered as Markdown — for attaching a page as
+// one-off chat context via the + menu picker.
+export function getConfluencePageContent(
+	token: string,
+	cloudId: string,
+	pageId: string
+): Promise<ConfluencePageContent> {
+	return apiFetch(
+		`${base}/page/${encodeURIComponent(cloudId)}/${encodeURIComponent(pageId)}/content`,
+		{ headers: { Authorization: `Bearer ${token}` } }
+	);
+}

@@ -2301,6 +2301,16 @@ async def process_chat_payload(request, form_data, user, metadata, model):
                     # will read folder knowledge from metadata.
                     metadata['folder_knowledge'] = folder.data['files']
 
+    # [Gradient] Capture the merged conversation-level system prompt
+    # (Chat Controls / per-chat + folder) for the agent service. At this
+    # point messages[0] holds the folder + Chat Controls text but not yet
+    # the <skill> content appended below. Forwarded as a dedicated
+    # ``chat_system_prompt`` payload field by ``call_agent_api``; the
+    # existing messages-inlining is left untouched for non-agent chats.
+    _chat_system_message = get_system_message(form_data.get('messages', []))
+    if _chat_system_message and _chat_system_message.get('content'):
+        metadata['chat_system_prompt'] = _chat_system_message['content']
+
     # Model "Knowledge" handling
     user_message = get_last_user_message(form_data['messages'])
     model_knowledge = model.get('info', {}).get('meta', {}).get('knowledge', False)
@@ -2495,6 +2505,20 @@ async def process_chat_payload(request, form_data, user, metadata, model):
                 form_data['messages'],
                 append=True,
             )
+
+    # [Gradient] Forward the resolved skills to the agent service as a
+    # dedicated payload field. The messages-inlining above is kept for
+    # non-agent chats; the agent reads this structured list instead.
+    if available_skills:
+        metadata['skills'] = [
+            {
+                'name': s.name,
+                'description': s.description or '',
+                'content': s.content,
+                'is_selected': s.id in user_skill_ids,
+            }
+            for s in available_skills
+        ]
 
     prompt = get_last_user_message(form_data['messages'])
     # TODO: re-enable URL extraction from prompt
@@ -3154,18 +3178,20 @@ async def non_streaming_chat_response_handler(response, ctx):
                 else:
                     error = str(error)
 
+                # [Gradient] carry the trace id so an error report deep-links to Tempo
+                error_obj = {'content': error, 'trace_id': metadata.get('trace_id')}
                 Chats.upsert_message_to_chat_by_id_and_message_id(
                     metadata['chat_id'],
                     metadata['message_id'],
                     {
-                        'error': {'content': error},
+                        'error': error_obj,
                     },
                 )
                 if isinstance(error, str) or isinstance(error, dict):
                     await event_emitter(
                         {
                             'type': 'chat:message:error',
-                            'data': {'error': {'content': error}},
+                            'data': {'error': error_obj},
                         }
                     )
 
@@ -3746,6 +3772,10 @@ async def streaming_chat_response_handler(response, ctx):
                                     if not choices:
                                         error = data.get('error', {})
                                         if error:
+                                            # [Gradient] tag the provider error
+                                            # with the trace id for feedback reports
+                                            if isinstance(error, dict):
+                                                error['trace_id'] = metadata.get('trace_id')
                                             await event_emitter(
                                                 {
                                                     'type': 'chat:completion',

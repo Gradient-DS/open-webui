@@ -1021,7 +1021,11 @@
 							{/if}
 
 							{#if message?.error}
-								<Error content={message?.error?.content ?? message.content} />
+								<Error
+									content={message?.error?.content ?? message.content}
+									error={message?.error}
+									model={message?.model ?? null}
+								/>
 							{/if}
 
 							{#if (message?.uiBlocks ?? []).length > 0}
