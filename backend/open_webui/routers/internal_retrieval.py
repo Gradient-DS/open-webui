@@ -246,7 +246,7 @@ async def file_raw(
             detail='agent search not enabled',
         )
 
-    file = Files.get_file_by_id(file_id)
+    file = await Files.get_file_by_id(file_id)
     if not file:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -254,7 +254,7 @@ async def file_raw(
         )
 
     user = principal.user
-    if file.user_id != user.id and not has_access_to_file(file_id=file_id, access_type='read', user=user):
+    if file.user_id != user.id and not await has_access_to_file(file_id=file_id, access_type='read', user=user):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail=f"user '{user.id}' has no read access to file '{file_id}'",

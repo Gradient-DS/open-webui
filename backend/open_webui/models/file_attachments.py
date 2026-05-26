@@ -22,7 +22,22 @@ from pydantic import BaseModel, ConfigDict
 from sqlalchemy import BigInteger, Column, Integer, String, Text
 from sqlalchemy.orm import Session
 
-from open_webui.internal.db import Base, get_db as get_db_context
+from contextlib import contextmanager
+
+from open_webui.internal.db import Base, get_db
+
+
+@contextmanager
+def get_db_context(_db: Optional[Session] = None):
+    """Compat shim. Dev migrated ``get_db_context(db)`` to a zero-arg
+    ``get_db()``; this FileAttachments module is sync-only and always
+    runs via ``asyncio.to_thread`` from async callers, so the historical
+    ``db=`` pass-through is now a noop.
+    """
+    with get_db() as session:
+        yield session
+
+
 from open_webui.storage.provider import Storage
 
 
