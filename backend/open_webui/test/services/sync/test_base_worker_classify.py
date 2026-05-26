@@ -10,7 +10,9 @@ structural fix for the "5 extra" re-sync toast.
 from __future__ import annotations
 
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
+
+import pytest
 
 from open_webui.services.sync.base_worker import BaseSyncWorker
 
@@ -75,58 +77,63 @@ def _file_info(item_id: str = 'item-1', cloud_hash: str | None = 'h1') -> dict:
     }
 
 
-def test_classify_added_no_existing_row():
+@pytest.mark.asyncio
+async def test_classify_added_no_existing_row():
     worker = _make_worker()
     with patch(
         'open_webui.services.sync.base_worker.Files.get_file_by_id',
-        return_value=None,
+        new=AsyncMock(return_value=None),
     ):
-        cat, fid = worker._classify_for_submit(_file_info())
+        cat, fid = await worker._classify_for_submit(_file_info())
     assert cat == 'added'
     assert fid == 'stub-item-1'
 
 
-def test_classify_updated_hash_mismatch():
+@pytest.mark.asyncio
+async def test_classify_updated_hash_mismatch():
     worker = _make_worker()
     existing = SimpleNamespace(meta={'cloud_hash': 'old-hash'}, data={'status': 'completed'})
     with patch(
         'open_webui.services.sync.base_worker.Files.get_file_by_id',
-        return_value=existing,
+        new=AsyncMock(return_value=existing),
     ):
-        cat, fid = worker._classify_for_submit(_file_info(cloud_hash='new-hash'))
+        cat, fid = await worker._classify_for_submit(_file_info(cloud_hash='new-hash'))
     assert cat == 'updated'
     assert fid == 'stub-item-1'
 
 
-def test_classify_updated_status_not_completed():
+@pytest.mark.asyncio
+async def test_classify_updated_status_not_completed():
     worker = _make_worker()
     existing = SimpleNamespace(meta={'cloud_hash': 'h1'}, data={'status': 'pending'})
     with patch(
         'open_webui.services.sync.base_worker.Files.get_file_by_id',
-        return_value=existing,
+        new=AsyncMock(return_value=existing),
     ):
-        cat, _ = worker._classify_for_submit(_file_info(cloud_hash='h1'))
+        cat, _ = await worker._classify_for_submit(_file_info(cloud_hash='h1'))
     assert cat == 'updated'
 
 
-def test_classify_unchanged_full_match():
+@pytest.mark.asyncio
+async def test_classify_unchanged_full_match():
     worker = _make_worker()
     existing = SimpleNamespace(meta={'cloud_hash': 'h1'}, data={'status': 'completed'})
     with patch(
         'open_webui.services.sync.base_worker.Files.get_file_by_id',
-        return_value=existing,
+        new=AsyncMock(return_value=existing),
     ):
-        cat, _ = worker._classify_for_submit(_file_info(cloud_hash='h1'))
+        cat, _ = await worker._classify_for_submit(_file_info(cloud_hash='h1'))
     assert cat == 'unchanged'
 
 
-def test_classify_no_cloud_hash_treated_as_updated():
+@pytest.mark.asyncio
+async def test_classify_no_cloud_hash_treated_as_updated():
     """Conservative fallback when the provider didn't surface a hash."""
     worker = _make_worker()
     existing = SimpleNamespace(meta={'cloud_hash': 'h1'}, data={'status': 'completed'})
     with patch(
         'open_webui.services.sync.base_worker.Files.get_file_by_id',
-        return_value=existing,
+        new=AsyncMock(return_value=existing),
     ):
-        cat, _ = worker._classify_for_submit(_file_info(cloud_hash=None))
+        cat, _ = await worker._classify_for_submit(_file_info(cloud_hash=None))
     assert cat == 'updated'

@@ -1,6 +1,6 @@
 import logging
 from typing import Optional
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
 import base64
 import io
 
@@ -17,7 +17,7 @@ from open_webui.models.oauth_sessions import OAuthSessions
 
 from open_webui.services.deletion import DeletionService
 from open_webui.models.groups import Groups
-from open_webui.models.chats import Chats
+
 from open_webui.models.users import (
     UserModel,
     UserGroupIdsModel,
@@ -32,8 +32,8 @@ from open_webui.models.users import (
 )
 
 from open_webui.constants import ERROR_MESSAGES
-from open_webui.env import STATIC_DIR
-from open_webui.internal.db import get_session
+from open_webui.env import ENABLE_PROFILE_IMAGE_URL_FORWARDING, PROFILE_IMAGE_ALLOWED_MIME_TYPES, STATIC_DIR
+from open_webui.internal.db import get_async_session
 
 
 from open_webui.utils.auth import (
@@ -43,6 +43,7 @@ from open_webui.utils.auth import (
     validate_password,
 )
 from open_webui.utils.access_control import get_permissions, has_permission
+from open_webui.socket.main import disconnect_user_sessions
 
 log = logging.getLogger(__name__)
 
@@ -66,7 +67,7 @@ async def get_users(
     direction: Optional[str] = None,
     page: Optional[int] = 1,
     user=Depends(get_admin_user),
-    db: Session = Depends(get_session),
+    db: AsyncSession = Depends(get_async_session),
 ):
     limit = PAGE_ITEM_COUNT
 
@@ -83,14 +84,14 @@ async def get_users(
 
     filter['direction'] = direction
 
-    result = Users.get_users(filter=filter, skip=skip, limit=limit, db=db)
+    result = await Users.get_users(filter=filter, skip=skip, limit=limit, db=db)
 
     users = result['users']
     total = result['total']
 
     # Fetch groups for all users in a single query to avoid N+1
     user_ids = [user.id for user in users]
-    user_groups = Groups.get_groups_by_member_ids(user_ids, db=db)
+    user_groups = await Groups.get_groups_by_member_ids(user_ids, db=db)
 
     return {
         'users': [
@@ -109,9 +110,9 @@ async def get_users(
 @router.get('/all', response_model=UserInfoListResponse)
 async def get_all_users(
     user=Depends(get_admin_user),
-    db: Session = Depends(get_session),
+    db: AsyncSession = Depends(get_async_session),
 ):
-    return Users.get_users(db=db)
+    return await Users.get_users(db=db)
 
 
 @router.get('/search', response_model=UserInfoListResponse)
@@ -121,7 +122,7 @@ async def search_users(
     direction: Optional[str] = None,
     page: Optional[int] = 1,
     user=Depends(get_verified_user),
-    db: Session = Depends(get_session),
+    db: AsyncSession = Depends(get_async_session),
 ):
     limit = PAGE_ITEM_COUNT
 
@@ -136,7 +137,7 @@ async def search_users(
     if direction:
         filter['direction'] = direction
 
-    return Users.get_users(filter=filter, skip=skip, limit=limit, db=db)
+    return await Users.get_users(filter=filter, skip=skip, limit=limit, db=db)
 
 
 ############################
@@ -145,8 +146,8 @@ async def search_users(
 
 
 @router.get('/groups')
-async def get_user_groups(user=Depends(get_verified_user), db: Session = Depends(get_session)):
-    return Groups.get_groups_by_member_id(user.id, db=db)
+async def get_user_groups(user=Depends(get_verified_user), db: AsyncSession = Depends(get_async_session)):
+    return await Groups.get_groups_by_member_id(user.id, db=db)
 
 
 ############################
@@ -158,9 +159,9 @@ async def get_user_groups(user=Depends(get_verified_user), db: Session = Depends
 async def get_user_permissisions(
     request: Request,
     user=Depends(get_verified_user),
-    db: Session = Depends(get_session),
+    db: AsyncSession = Depends(get_async_session),
 ):
-    user_permissions = get_permissions(user.id, request.app.state.config.USER_PERMISSIONS, db=db)
+    user_permissions = await get_permissions(user.id, request.app.state.config.USER_PERMISSIONS, db=db)
 
     return user_permissions
 
@@ -195,6 +196,8 @@ class SharingPermissions(BaseModel):
     public_skills: bool = False
     notes: bool = False
     public_notes: bool = True
+    public_chats: bool = False
+    public_calendars: bool = False
 
 
 class AccessGrantsPermissions(BaseModel):
@@ -235,6 +238,8 @@ class FeaturesPermissions(BaseModel):
     image_generation: bool = True
     code_interpreter: bool = True
     memories: bool = True
+    automations: bool = False
+    calendar: bool = True
 
 
 class SettingsPermissions(BaseModel):
@@ -274,15 +279,11 @@ async def update_default_user_permissions(request: Request, form_data: UserPermi
 
 
 @router.get('/user/settings', response_model=Optional[UserSettings])
-async def get_user_settings_by_session_user(user=Depends(get_verified_user), db: Session = Depends(get_session)):
-    user = Users.get_user_by_id(user.id, db=db)
-    if user:
-        return user.settings
-    else:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=ERROR_MESSAGES.USER_NOT_FOUND,
-        )
+async def get_user_settings_by_session_user(
+    user=Depends(get_verified_user), db: AsyncSession = Depends(get_async_session)
+):
+    # user already fetched by get_verified_user — no need to refetch
+    return user.settings
 
 
 ############################
@@ -295,7 +296,7 @@ async def update_user_settings_by_session_user(
     request: Request,
     form_data: UserSettings,
     user=Depends(get_verified_user),
-    db: Session = Depends(get_session),
+    db: AsyncSession = Depends(get_async_session),
 ):
     updated_user_settings = form_data.model_dump()
     ui_settings = updated_user_settings.get('ui')
@@ -303,7 +304,7 @@ async def update_user_settings_by_session_user(
         user.role != 'admin'
         and ui_settings is not None
         and 'toolServers' in ui_settings.keys()
-        and not has_permission(
+        and not await has_permission(
             user.id,
             'features.direct_tool_servers',
             request.app.state.config.USER_PERMISSIONS,
@@ -312,7 +313,7 @@ async def update_user_settings_by_session_user(
         # If the user is not an admin and does not have permission to use tool servers, remove the key
         updated_user_settings['ui'].pop('toolServers', None)
 
-    user = Users.update_user_settings_by_id(user.id, updated_user_settings, db=db)
+    user = await Users.update_user_settings_by_id(user.id, updated_user_settings, db=db)
     if user:
         return user.settings
     else:
@@ -331,21 +332,15 @@ async def update_user_settings_by_session_user(
 async def get_user_status_by_session_user(
     request: Request,
     user=Depends(get_verified_user),
-    db: Session = Depends(get_session),
+    db: AsyncSession = Depends(get_async_session),
 ):
     if not request.app.state.config.ENABLE_USER_STATUS:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail=ERROR_MESSAGES.ACTION_PROHIBITED,
         )
-    user = Users.get_user_by_id(user.id, db=db)
-    if user:
-        return user
-    else:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=ERROR_MESSAGES.USER_NOT_FOUND,
-        )
+    # user already fetched by get_verified_user — no need to refetch
+    return user
 
 
 ############################
@@ -358,22 +353,21 @@ async def update_user_status_by_session_user(
     request: Request,
     form_data: UserStatus,
     user=Depends(get_verified_user),
-    db: Session = Depends(get_session),
+    db: AsyncSession = Depends(get_async_session),
 ):
     if not request.app.state.config.ENABLE_USER_STATUS:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail=ERROR_MESSAGES.ACTION_PROHIBITED,
         )
-    user = Users.get_user_by_id(user.id, db=db)
-    if user:
-        user = Users.update_user_status_by_id(user.id, form_data, db=db)
-        return user
-    else:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=ERROR_MESSAGES.USER_NOT_FOUND,
-        )
+    # user already fetched by get_verified_user — no need to refetch
+    updated = await Users.update_user_status_by_id(user.id, form_data, db=db)
+    if updated:
+        return updated
+    raise HTTPException(
+        status_code=status.HTTP_400_BAD_REQUEST,
+        detail=ERROR_MESSAGES.USER_NOT_FOUND,
+    )
 
 
 ############################
@@ -382,15 +376,9 @@ async def update_user_status_by_session_user(
 
 
 @router.get('/user/info', response_model=Optional[dict])
-async def get_user_info_by_session_user(user=Depends(get_verified_user), db: Session = Depends(get_session)):
-    user = Users.get_user_by_id(user.id, db=db)
-    if user:
-        return user.info
-    else:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=ERROR_MESSAGES.USER_NOT_FOUND,
-        )
+async def get_user_info_by_session_user(user=Depends(get_verified_user), db: AsyncSession = Depends(get_async_session)):
+    # user already fetched by get_verified_user — no need to refetch
+    return user.info
 
 
 ############################
@@ -400,21 +388,15 @@ async def get_user_info_by_session_user(user=Depends(get_verified_user), db: Ses
 
 @router.post('/user/info/update', response_model=Optional[dict])
 async def update_user_info_by_session_user(
-    form_data: dict, user=Depends(get_verified_user), db: Session = Depends(get_session)
+    form_data: dict, user=Depends(get_verified_user), db: AsyncSession = Depends(get_async_session)
 ):
-    user = Users.get_user_by_id(user.id, db=db)
-    if user:
-        if user.info is None:
-            user.info = {}
-
-        user = Users.update_user_by_id(user.id, {'info': {**user.info, **form_data}}, db=db)
-        if user:
-            return user.info
-        else:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=ERROR_MESSAGES.USER_NOT_FOUND,
-            )
+    # Merges against the auth-time snapshot of user.info. The previous pre-merge
+    # refetch only narrowed (did not eliminate) the lost-update window on concurrent
+    # same-user writes; real safety needs row locking or a version column.
+    existing_info = user.info or {}
+    updated = await Users.update_user_by_id(user.id, {'info': {**existing_info, **form_data}}, db=db)
+    if updated:
+        return updated.info
     else:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -437,28 +419,16 @@ class UserActiveResponse(UserStatus):
 
 
 @router.get('/{user_id}', response_model=UserActiveResponse)
-async def get_user_by_id(user_id: str, user=Depends(get_admin_user), db: Session = Depends(get_session)):
-    # Check if user_id is a shared chat
-    # If it is, get the user_id from the chat
-    if user_id.startswith('shared-'):
-        chat_id = user_id.replace('shared-', '')
-        chat = Chats.get_chat_by_id(chat_id)
-        if chat:
-            user_id = chat.user_id
-        else:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=ERROR_MESSAGES.USER_NOT_FOUND,
-            )
+async def get_user_by_id(user_id: str, user=Depends(get_admin_user), db: AsyncSession = Depends(get_async_session)):
 
-    user = Users.get_user_by_id(user_id, db=db)
+    user = await Users.get_user_by_id(user_id, db=db)
     if user:
-        groups = Groups.get_groups_by_member_id(user_id, db=db)
+        groups = await Groups.get_groups_by_member_id(user_id, db=db)
         return UserActiveResponse(
             **{
                 **user.model_dump(),
                 'groups': [{'id': group.id, 'name': group.name} for group in groups],
-                'is_active': Users.is_user_active(user_id, db=db),
+                'is_active': await Users.is_user_active(user_id, db=db),
             }
         )
     else:
@@ -469,15 +439,17 @@ async def get_user_by_id(user_id: str, user=Depends(get_admin_user), db: Session
 
 
 @router.get('/{user_id}/info', response_model=UserInfoResponse)
-async def get_user_info_by_id(user_id: str, user=Depends(get_verified_user), db: Session = Depends(get_session)):
-    user = Users.get_user_by_id(user_id, db=db)
+async def get_user_info_by_id(
+    user_id: str, user=Depends(get_verified_user), db: AsyncSession = Depends(get_async_session)
+):
+    user = await Users.get_user_by_id(user_id, db=db)
     if user:
-        groups = Groups.get_groups_by_member_id(user_id, db=db)
+        groups = await Groups.get_groups_by_member_id(user_id, db=db)
         return UserInfoResponse(
             **{
                 **user.model_dump(),
                 'groups': [{'id': group.id, 'name': group.name} for group in groups],
-                'is_active': Users.is_user_active(user_id, db=db),
+                'is_active': await Users.is_user_active(user_id, db=db),
             }
         )
     else:
@@ -488,8 +460,10 @@ async def get_user_info_by_id(user_id: str, user=Depends(get_verified_user), db:
 
 
 @router.get('/{user_id}/oauth/sessions')
-async def get_user_oauth_sessions_by_id(user_id: str, user=Depends(get_admin_user), db: Session = Depends(get_session)):
-    sessions = OAuthSessions.get_sessions_by_user_id(user_id, db=db)
+async def get_user_oauth_sessions_by_id(
+    user_id: str, user=Depends(get_admin_user), db: AsyncSession = Depends(get_async_session)
+):
+    sessions = await OAuthSessions.get_sessions_by_user_id(user_id, db=db)
     if sessions and len(sessions) > 0:
         return sessions
     else:
@@ -505,27 +479,36 @@ async def get_user_oauth_sessions_by_id(user_id: str, user=Depends(get_admin_use
 
 
 @router.get('/{user_id}/profile/image')
-def get_user_profile_image_by_id(user_id: str, user=Depends(get_verified_user)):
-    user = Users.get_user_by_id(user_id)
+async def get_user_profile_image_by_id(user_id: str, user=Depends(get_verified_user)):
+    user = await Users.get_user_by_id(user_id)
     if user:
         if user.profile_image_url:
-            # check if it's url or base64
             if user.profile_image_url.startswith('http'):
-                return Response(
-                    status_code=status.HTTP_302_FOUND,
-                    headers={'Location': user.profile_image_url},
-                )
+                if ENABLE_PROFILE_IMAGE_URL_FORWARDING:
+                    return Response(
+                        status_code=status.HTTP_302_FOUND,
+                        headers={'Location': user.profile_image_url},
+                    )
+                # When forwarding is disabled, fall through to the
+                # default image to prevent client-side IP/UA/Referer
+                # leaks via 302 redirect to external origins.
             elif user.profile_image_url.startswith('data:image'):
                 try:
                     header, base64_data = user.profile_image_url.split(',', 1)
                     image_data = base64.b64decode(base64_data)
                     image_buffer = io.BytesIO(image_data)
-                    media_type = header.split(';')[0].lstrip('data:')
+                    media_type = header.split(';')[0].lstrip('data:').lower()
+
+                    if media_type not in PROFILE_IMAGE_ALLOWED_MIME_TYPES:
+                        return FileResponse(f'{STATIC_DIR}/user.png')
 
                     return StreamingResponse(
                         image_buffer,
                         media_type=media_type,
-                        headers={'Content-Disposition': 'inline'},
+                        headers={
+                            'Content-Disposition': 'inline',
+                            'X-Content-Type-Options': 'nosniff',
+                        },
                     )
                 except Exception as e:
                     pass
@@ -544,10 +527,10 @@ def get_user_profile_image_by_id(user_id: str, user=Depends(get_verified_user)):
 
 @router.get('/{user_id}/active', response_model=dict)
 async def get_user_active_status_by_id(
-    user_id: str, user=Depends(get_verified_user), db: Session = Depends(get_session)
+    user_id: str, user=Depends(get_verified_user), db: AsyncSession = Depends(get_async_session)
 ):
     return {
-        'active': Users.is_user_active(user_id, db=db),
+        'active': await Users.is_user_active(user_id, db=db),
     }
 
 
@@ -561,11 +544,11 @@ async def update_user_by_id(
     user_id: str,
     form_data: UserUpdateForm,
     session_user=Depends(get_admin_user),
-    db: Session = Depends(get_session),
+    db: AsyncSession = Depends(get_async_session),
 ):
     # Prevent modification of the primary admin user by other admins
     try:
-        first_user = Users.get_first_user(db=db)
+        first_user = await Users.get_first_user(db=db)
         if first_user:
             if user_id == first_user.id:
                 if session_user.id != user_id:
@@ -575,13 +558,15 @@ async def update_user_by_id(
                         detail=ERROR_MESSAGES.ACTION_PROHIBITED,
                     )
 
-                if form_data.role != 'admin':
+                if form_data.role is not None and form_data.role != 'admin':
                     # If the primary admin is trying to change their own role, prevent it
                     raise HTTPException(
                         status_code=status.HTTP_403_FORBIDDEN,
                         detail=ERROR_MESSAGES.ACTION_PROHIBITED,
                     )
 
+    except HTTPException:
+        raise
     except Exception as e:
         log.error(f'Error checking primary admin status: {e}')
         raise HTTPException(
@@ -589,11 +574,11 @@ async def update_user_by_id(
             detail='Could not verify primary admin status.',
         )
 
-    user = Users.get_user_by_id(user_id, db=db)
+    user = await Users.get_user_by_id(user_id, db=db)
 
     if user:
-        if form_data.email.lower() != user.email:
-            email_user = Users.get_user_by_email(form_data.email.lower(), db=db)
+        if form_data.email is not None and form_data.email.lower() != user.email:
+            email_user = await Users.get_user_by_email(form_data.email.lower(), db=db)
             if email_user:
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
@@ -607,21 +592,34 @@ async def update_user_by_id(
                 raise HTTPException(400, detail=str(e))
 
             hashed = get_password_hash(form_data.password)
-            Auths.update_user_password_by_id(user_id, hashed, db=db)
+            await Auths.update_user_password_by_id(user_id, hashed, db=db)
 
-        Auths.update_email_by_id(user_id, form_data.email.lower(), db=db)
-        updated_user = Users.update_user_by_id(
-            user_id,
-            {
-                'role': form_data.role,
-                'name': form_data.name,
-                'email': form_data.email.lower(),
-                'profile_image_url': form_data.profile_image_url,
-            },
-            db=db,
-        )
+        # Build update dict from only the provided fields
+        update_data = {}
+        if form_data.role is not None:
+            update_data['role'] = form_data.role
+        if form_data.name is not None:
+            update_data['name'] = form_data.name
+        if form_data.email is not None:
+            update_data['email'] = form_data.email.lower()
+            await Auths.update_email_by_id(user_id, form_data.email.lower(), db=db)
+        if form_data.profile_image_url is not None:
+            update_data['profile_image_url'] = form_data.profile_image_url
+
+        if update_data:
+            updated_user = await Users.update_user_by_id(
+                user_id,
+                update_data,
+                db=db,
+            )
+        else:
+            updated_user = user
 
         if updated_user:
+            # If the role changed, disconnect all socket sessions so stale
+            # privileges cached in SESSION_POOL are invalidated.
+            if updated_user.role != user.role:
+                await disconnect_user_sessions(user_id)
             return updated_user
 
         raise HTTPException(
@@ -648,7 +646,7 @@ async def delete_user_by_id(
     archive_reason: Optional[str] = Query(None),
     archive_retention_days: Optional[int] = Query(None),
     user=Depends(get_admin_user),
-    db: Session = Depends(get_session),
+    db: AsyncSession = Depends(get_async_session),
 ):
     """
     Delete a user and optionally archive their data first.
@@ -659,12 +657,14 @@ async def delete_user_by_id(
     """
     # Prevent deletion of the primary admin user
     try:
-        first_user = Users.get_first_user(db=db)
+        first_user = await Users.get_first_user(db=db)
         if first_user and user_id == first_user.id:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail=ERROR_MESSAGES.ACTION_PROHIBITED,
             )
+    except HTTPException:
+        raise
     except Exception as e:
         log.error(f'Error checking primary admin status: {e}')
         raise HTTPException(
@@ -682,7 +682,7 @@ async def delete_user_by_id(
 
             if request.app.state.config.ENABLE_USER_ARCHIVAL:
                 retention = archive_retention_days or request.app.state.config.DEFAULT_ARCHIVE_RETENTION_DAYS
-                archive_result = ArchiveService.create_archive(
+                archive_result = await ArchiveService.create_archive(
                     user_id=user_id,
                     archived_by=user.id,
                     reason=archive_reason,
@@ -691,8 +691,8 @@ async def delete_user_by_id(
                 if not archive_result.success:
                     log.warning(f'Failed to archive user before deletion: {archive_result.errors}')
 
-        # Proceed with deletion (run in thread pool to avoid blocking the event loop)
-        report = await run_in_threadpool(DeletionService.delete_user, user_id)
+        # Proceed with deletion.
+        report = await DeletionService.delete_user(user_id)
         if report.has_errors:
             log.warning(f'User deletion had errors: {report.errors}')
 
@@ -721,10 +721,10 @@ async def admin_get_user_2fa_status(
     user_id: str,
     request: Request,
     user=Depends(get_admin_user),
-    db: Session = Depends(get_session),
+    db: AsyncSession = Depends(get_async_session),
 ):
     """Admin endpoint to check if a user has 2FA enabled."""
-    auth = Auths.get_auth_by_user_id(user_id, db=db)
+    auth = await Auths.get_auth_by_user_id(user_id, db=db)
     return {'totp_enabled': bool(auth and auth.totp_enabled)}
 
 
@@ -738,19 +738,19 @@ async def admin_disable_user_2fa(
     user_id: str,
     request: Request,
     user=Depends(get_admin_user),
-    db: Session = Depends(get_session),
+    db: AsyncSession = Depends(get_async_session),
 ):
     """Admin endpoint to force-disable 2FA for a locked-out user."""
-    target_user = Users.get_user_by_id(user_id, db=db)
+    target_user = await Users.get_user_by_id(user_id, db=db)
     if not target_user:
         raise HTTPException(status_code=404, detail='User not found')
 
-    auth = Auths.get_auth_by_user_id(user_id, db=db)
+    auth = await Auths.get_auth_by_user_id(user_id, db=db)
     if not auth or not auth.totp_enabled:
         raise HTTPException(status_code=400, detail='2FA is not enabled for this user')
 
-    Auths.update_totp(user_id, None, False, db=db)
-    RecoveryCodes.delete_all(user_id, db=db)
+    await Auths.update_totp(user_id, None, False, db=db)
+    await RecoveryCodes.delete_all(user_id, db=db)
 
     return {'success': True}
 
@@ -761,5 +761,7 @@ async def admin_disable_user_2fa(
 
 
 @router.get('/{user_id}/groups')
-async def get_user_groups_by_id(user_id: str, user=Depends(get_admin_user), db: Session = Depends(get_session)):
-    return Groups.get_groups_by_member_id(user_id, db=db)
+async def get_user_groups_by_id(
+    user_id: str, user=Depends(get_admin_user), db: AsyncSession = Depends(get_async_session)
+):
+    return await Groups.get_groups_by_member_id(user_id, db=db)

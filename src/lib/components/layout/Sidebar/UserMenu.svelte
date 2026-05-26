@@ -14,7 +14,8 @@
 		showSidebar,
 		showShortcuts,
 		user,
-		config
+		config,
+		settings
 	} from '$lib/stores';
 	import { isFeatureEnabled } from '$lib/utils/features';
 
@@ -29,14 +30,13 @@
 	import Keyboard from '$lib/components/icons/Keyboard.svelte';
 	import ShortcutsModal from '$lib/components/chat/ShortcutsModal.svelte';
 	import Settings from '$lib/components/icons/Settings.svelte';
-	import Code from '$lib/components/icons/Code.svelte';
 	import UserGroup from '$lib/components/icons/UserGroup.svelte';
 	import SignOut from '$lib/components/icons/SignOut.svelte';
 	import FaceSmile from '$lib/components/icons/FaceSmile.svelte';
 	import UserStatusModal from './UserStatusModal.svelte';
 	import Emoji from '$lib/components/common/Emoji.svelte';
 	import XMark from '$lib/components/icons/XMark.svelte';
-	import { updateUserStatus } from '$lib/apis/users';
+	import { updateUserStatus, updateUserSettings } from '$lib/apis/users';
 	import { toast } from 'svelte-sonner';
 
 	const i18n = getContext('i18n');
@@ -268,30 +268,6 @@
 				</button>
 			{/if}
 
-			{#if role === 'admin' && isFeatureEnabled('playground')}
-				<a
-					href="/playground"
-					draggable="false"
-					class="flex rounded-xl py-1.5 px-3 w-full hover:bg-gray-50 dark:hover:bg-gray-800 transition cursor-pointer select-none"
-					on:click={async (e) => {
-						if (e.metaKey || e.ctrlKey || e.shiftKey || e.button === 1) {
-							return;
-						}
-						e.preventDefault();
-						show = false;
-						goto('/playground');
-						if ($mobile) {
-							await tick();
-							showSidebar.set(false);
-						}
-					}}
-				>
-					<div class=" self-center mr-3">
-						<Code className="size-5" strokeWidth="1.5" />
-					</div>
-					<div class=" self-center truncate">{$i18n.t('Playground')}</div>
-				</a>
-			{/if}
 			{#if role === 'admin'}
 				<a
 					href="/admin"

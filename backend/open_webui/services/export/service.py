@@ -21,7 +21,6 @@ from open_webui.models.tags import Tags
 from open_webui.models.tools import Tools
 from open_webui.models.users import Users
 from open_webui.services.export.events import emit_export_status
-from open_webui.utils.loop_bridge import run_on_main_loop
 from open_webui.storage.provider import Storage
 
 log = logging.getLogger(__name__)
@@ -66,7 +65,7 @@ class ExportService:
         return obj
 
     @staticmethod
-    def collect_user_data(user_id: str) -> dict:
+    async def collect_user_data(user_id: str) -> dict:
         """
         Collect all exportable data for a user.
         Returns a dict of data category -> list/dict of records.
@@ -74,7 +73,7 @@ class ExportService:
         data = {}
 
         # User profile
-        user = Users.get_user_by_id(user_id)
+        user = await Users.get_user_by_id(user_id)
         if user:
             profile = user.model_dump()
             # Remove sensitive fields
@@ -88,47 +87,47 @@ class ExportService:
                 data['settings'] = settings
 
         # Chats
-        chats = Chats.get_chats_by_user_id(user_id)
+        chats = await Chats.get_chats_by_user_id(user_id)
         data['chats'] = [ExportService._serialize(c) for c in chats]
 
         # Memories
-        memories = Memories.get_memories_by_user_id(user_id)
+        memories = await Memories.get_memories_by_user_id(user_id)
         data['memories'] = [ExportService._serialize(m) for m in memories]
 
         # Notes
-        notes = Notes.get_notes_by_user_id(user_id)
+        notes = await Notes.get_notes_by_user_id(user_id)
         data['notes'] = [ExportService._serialize(n) for n in notes]
 
         # Prompts
-        prompts = Prompts.get_prompts_by_user_id(user_id)
+        prompts = await Prompts.get_prompts_by_user_id(user_id)
         data['prompts'] = [ExportService._serialize(p) for p in prompts]
 
         # Tools
-        tools = Tools.get_tools_by_user_id(user_id)
+        tools = await Tools.get_tools_by_user_id(user_id)
         data['tools'] = [ExportService._serialize(t) for t in tools]
 
         # Custom models
-        models = Models.get_models_by_user_id(user_id)
+        models = await Models.get_models_by_user_id(user_id)
         data['models'] = [ExportService._serialize(m) for m in models]
 
         # Feedbacks
-        feedbacks = Feedbacks.get_feedbacks_by_user_id(user_id)
+        feedbacks = await Feedbacks.get_feedbacks_by_user_id(user_id)
         data['feedbacks'] = [ExportService._serialize(f) for f in feedbacks]
 
         # Tags
-        tags = Tags.get_tags_by_user_id(user_id)
+        tags = await Tags.get_tags_by_user_id(user_id)
         data['tags'] = [ExportService._serialize(t) for t in tags]
 
         # Folders
-        folders = Folders.get_folders_by_user_id(user_id)
+        folders = await Folders.get_folders_by_user_id(user_id)
         data['folders'] = [ExportService._serialize(f) for f in folders]
 
         # Files metadata
-        files = Files.get_files_by_user_id(user_id)
+        files = await Files.get_files_by_user_id(user_id)
         data['files'] = [ExportService._serialize(f) for f in files]
 
         # Knowledge bases metadata
-        knowledge_bases = Knowledges.get_knowledge_bases_by_user_id(user_id)
+        knowledge_bases = await Knowledges.get_knowledge_bases_by_user_id(user_id)
         data['knowledge_bases'] = [ExportService._serialize(kb) for kb in knowledge_bases]
 
         return data
@@ -164,7 +163,7 @@ class ExportService:
         return local_file_ids
 
     @staticmethod
-    def build_export_zip(user_id: str, data: dict) -> Path:
+    async def build_export_zip(user_id: str, data: dict) -> Path:
         """
         Build a ZIP file containing all user data.
         Returns the path to the generated ZIP.
@@ -179,6 +178,16 @@ class ExportService:
         zip_path = export_dir / f'export-{timestamp}.zip'
 
         local_file_ids = ExportService._get_local_file_ids(data)
+
+        # Pre-fetch local file records before opening the ZipFile (no async work
+        # while holding the zip writer is needed, but it keeps the async section
+        # tight and avoids holding the file open during awaits).
+        file_records: dict[str, Any] = {}
+        for file_id in local_file_ids:
+            try:
+                file_records[file_id] = await Files.get_file_by_id(file_id)
+            except Exception as e:
+                log.warning(f'Failed to fetch file record {file_id} for export: {e}')
 
         with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zf:
             # Manifest
@@ -240,7 +249,7 @@ class ExportService:
             # Actual file contents for local (non-cloud) files
             for file_id in local_file_ids:
                 try:
-                    file_record = Files.get_file_by_id(file_id)
+                    file_record = file_records.get(file_id)
                     if file_record and file_record.path:
                         local_path = Storage.get_file(file_record.path)
                         if local_path and Path(local_path).exists():
@@ -253,32 +262,30 @@ class ExportService:
         return zip_path
 
     @staticmethod
-    def generate_export(user_id: str):
+    async def generate_export(user_id: str):
         """
-        Synchronous entry point for background task.
-        Collects data, builds ZIP, notifies user.
+        Async entry point for FastAPI BackgroundTasks.
+        Collects data, builds ZIP, notifies user via Socket.IO.
         """
         try:
-            # Notify: processing. Dispatch onto uvicorn's main loop —
-            # asyncio.run would create a throwaway loop and poison the shared
-            # Socket.IO Redis pool.
-            run_on_main_loop(emit_export_status(user_id, 'processing'))
+            # Notify: processing.
+            await emit_export_status(user_id, 'processing')
 
             # Collect all data
-            data = ExportService.collect_user_data(user_id)
+            data = await ExportService.collect_user_data(user_id)
 
             # Build ZIP
-            zip_path = ExportService.build_export_zip(user_id, data)
+            zip_path = await ExportService.build_export_zip(user_id, data)
 
             # Notify: completed
             relative_path = f'exports/{user_id}/{zip_path.name}'
-            run_on_main_loop(emit_export_status(user_id, 'completed', export_path=relative_path))
+            await emit_export_status(user_id, 'completed', export_path=relative_path)
 
             log.info(f'Data export completed for user {user_id}: {zip_path}')
 
         except Exception as e:
             log.error(f'Data export failed for user {user_id}: {e}')
-            run_on_main_loop(emit_export_status(user_id, 'failed', error=str(e)))
+            await emit_export_status(user_id, 'failed', error=str(e))
 
     @staticmethod
     def cleanup_expired_exports():

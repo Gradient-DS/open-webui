@@ -137,14 +137,14 @@ class ConfluenceProvisionForm(BaseModel):
     owner_user_id: Optional[str] = None
 
 
-def _stamp_auth_mode(knowledge_id: str, mode: str) -> None:
+async def _stamp_auth_mode(knowledge_id: str, mode: str) -> None:
     """Persist the KB's resolved auth mode into its confluence_sync meta.
 
     A KB keeps the mode it was created under even if the global default
     later flips — so existing OAuth KBs are unaffected by switching the
     tenant to basic auth and vice versa.
     """
-    kb = Knowledges.get_knowledge_by_id(knowledge_id)
+    kb = await Knowledges.get_knowledge_by_id(knowledge_id)
     if not kb:
         return
     meta = kb.meta or {}
@@ -152,7 +152,7 @@ def _stamp_auth_mode(knowledge_id: str, mode: str) -> None:
     if sync_info.get('auth_mode') != mode:
         sync_info['auth_mode'] = mode
         meta[_META_KEY] = sync_info
-        Knowledges.update_knowledge_meta_by_id(knowledge_id, meta)
+        await Knowledges.update_knowledge_meta_by_id(knowledge_id, meta)
 
 
 # ──────────────────────────────────────────────────────────────────────
@@ -168,7 +168,7 @@ async def sync_items(
     user: UserModel = Depends(get_verified_user),
 ):
     """Start Confluence sync for multiple items (spaces and/or pages)."""
-    mode = resolve_auth_mode(request.knowledge_id)
+    mode = await resolve_auth_mode(request.knowledge_id)
 
     # Reject any cloud_id the caller can't actually access — prevents a
     # malformed body from pointing the worker at an arbitrary Atlassian site.
@@ -180,7 +180,7 @@ async def sync_items(
     else:
         from open_webui.services.confluence.auth import get_stored_sites
 
-        allowed_cloud_ids = {s.get('cloud_id') for s in get_stored_sites(user.id)}
+        allowed_cloud_ids = {s.get('cloud_id') for s in await get_stored_sites(user.id)}
 
     for item in request.items:
         if item.cloud_id not in allowed_cloud_ids:
@@ -227,7 +227,7 @@ async def sync_items(
         for item in request.items
     ]
 
-    result = handle_sync_items_request(
+    result = await handle_sync_items_request(
         knowledge_id=request.knowledge_id,
         meta_key=_META_KEY,
         new_sources=new_sources,
@@ -237,7 +237,7 @@ async def sync_items(
     )
 
     # Stamp the KB's auth mode so it stays stable if the global default flips.
-    _stamp_auth_mode(request.knowledge_id, mode)
+    await _stamp_auth_mode(request.knowledge_id, mode)
 
     background_tasks.add_task(
         _sync_items_background,
@@ -277,7 +277,7 @@ async def get_sync_status(
     user: UserModel = Depends(get_verified_user),
 ) -> SyncStatusResponse:
     """Get sync status for a Knowledge base."""
-    return handle_get_sync_status(knowledge_id, _META_KEY, user)
+    return await handle_get_sync_status(knowledge_id, _META_KEY, user)
 
 
 @router.post('/sync/{knowledge_id}/cancel')
@@ -286,11 +286,11 @@ async def cancel_sync(
     user: UserModel = Depends(get_verified_user),
 ):
     """Cancel an ongoing Confluence sync for a Knowledge base."""
-    return handle_cancel_sync(knowledge_id, _META_KEY, user)
+    return await handle_cancel_sync(knowledge_id, _META_KEY, user)
 
 
-def _remove_files_for_source(knowledge_id, item_id, source_to_remove):
-    return remove_files_for_source_generic(
+async def _remove_files_for_source(knowledge_id, item_id, source_to_remove):
+    return await remove_files_for_source_generic(
         knowledge_id=knowledge_id,
         source_item_id=item_id,
         file_id_prefix=_FILE_ID_PREFIX,
@@ -304,7 +304,7 @@ async def remove_source(
     user: UserModel = Depends(get_verified_user),
 ):
     """Remove a source from a KB's Confluence sync configuration."""
-    return handle_remove_source(
+    return await handle_remove_source(
         knowledge_id=knowledge_id,
         meta_key=_META_KEY,
         item_id=request.item_id,
@@ -318,7 +318,7 @@ async def list_synced_collections(
     user: UserModel = Depends(get_verified_user),
 ) -> List[dict]:
     """List all Knowledge bases with Confluence sync enabled for current user."""
-    return handle_list_synced_collections(_META_KEY, user)
+    return await handle_list_synced_collections(_META_KEY, user)
 
 
 # ──────────────────────────────────────────────────────────────────────
@@ -341,7 +341,7 @@ async def initiate_auth(
         raise HTTPException(400, 'Confluence client secret not configured')
 
     if knowledge_id:
-        get_knowledge_or_raise(knowledge_id, user)
+        await get_knowledge_or_raise(knowledge_id, user)
 
     redirect_uri = str(request.base_url).rstrip('/') + '/oauth/atlassian/callback'
     log.info('Confluence OAuth initiate: base_url=%s, redirect_uri=%s', request.base_url, redirect_uri)
@@ -418,8 +418,8 @@ async def get_token_status(
     whenever the global service credential is configured, so the picker
     can proceed without an OAuth authorization step.
     """
-    if resolve_auth_mode(knowledge_id) == 'basic':
-        get_knowledge_or_raise(knowledge_id, user)
+    if await resolve_auth_mode(knowledge_id) == 'basic':
+        await get_knowledge_or_raise(knowledge_id, user)
         configured = basic_auth_configured()
         return {
             'has_token': configured,
@@ -429,7 +429,7 @@ async def get_token_status(
 
     from open_webui.services.confluence.auth import get_stored_token
 
-    return handle_get_token_status(knowledge_id, _META_KEY, user, get_stored_token)
+    return await handle_get_token_status(knowledge_id, _META_KEY, user, get_stored_token)
 
 
 @router.post('/auth/test')
@@ -491,7 +491,7 @@ async def revoke_token(
     """Revoke and delete stored Confluence token for a user's KBs."""
     from open_webui.services.confluence.auth import delete_stored_token
 
-    return handle_revoke_token(knowledge_id, _PROVIDER_TYPE, _META_KEY, user, delete_stored_token)
+    return await handle_revoke_token(knowledge_id, _PROVIDER_TYPE, _META_KEY, user, delete_stored_token)
 
 
 # ──────────────────────────────────────────────────────────────────────
@@ -511,7 +511,7 @@ async def _picker_client(user: UserModel):
     if not token:
         raise HTTPException(401, 'No valid Confluence token. Please re-authorize.')
 
-    return token, get_stored_sites(user.id)
+    return token, await get_stored_sites(user.id)
 
 
 def _pick_site(sites: list, cloud_id: str) -> dict:
@@ -529,7 +529,7 @@ async def _browse_client(user: UserModel, cloud_id: str) -> tuple[ConfluenceClie
     mode resolves the per-user token and sites. The caller must close the
     returned client.
     """
-    if resolve_auth_mode(None) == 'basic':
+    if await resolve_auth_mode(None) == 'basic':
         basic_site = get_basic_site()
         if not basic_site or cloud_id != basic_site['cloud_id']:
             raise HTTPException(404, 'Unknown Confluence site (cloud_id)')
@@ -556,7 +556,7 @@ async def browse_sites(user: UserModel = Depends(get_verified_user)):
     In basic mode this is the single configured site; in oauth mode it is
     every site the authenticated user's token can reach.
     """
-    if resolve_auth_mode(None) == 'basic':
+    if await resolve_auth_mode(None) == 'basic':
         site = get_basic_site()
         return {'sites': [site] if site else []}
 
@@ -695,7 +695,7 @@ _SHARED_KB_NAME = 'Confluence'
 _SHARED_KB_DESCRIPTION = 'Read-only Confluence knowledge base managed by administrators.'
 
 
-def _find_shared_kb():
+async def _find_shared_kb():
     """Return the existing (live) shared Confluence KB, or None.
 
     Discovered by ``type='confluence'`` + ``confluence_sync.shared == True``,
@@ -703,7 +703,7 @@ def _find_shared_kb():
     Soft-deleted KBs are skipped so a deleted-then-reprovisioned KB never
     shadows the live one (which would make status/sync target the wrong row).
     """
-    for kb in Knowledges.get_knowledge_bases_by_type(_PROVIDER_TYPE):
+    for kb in await Knowledges.get_knowledge_bases_by_type(_PROVIDER_TYPE):
         if getattr(kb, 'deleted_at', None):
             continue
         if (kb.meta or {}).get(_META_KEY, {}).get('shared'):
@@ -711,24 +711,24 @@ def _find_shared_kb():
     return None
 
 
-def _resolve_effective_owner_id(current_user: UserModel) -> str:
+async def _resolve_effective_owner_id(current_user: UserModel) -> str:
     """Return the user id whose token the shared sync runs (or will run) with.
 
     Post-provision the KB row carries the owner (``kb.user_id``). Pre-
     provision there is no KB yet, so the calling admin is the implicit owner
     — they are the one who'll click Provision and become ``kb.user_id``.
     """
-    kb = _find_shared_kb()
+    kb = await _find_shared_kb()
     if kb and kb.user_id:
         return kb.user_id
     return current_user.id
 
 
-def _shared_kb_status(current_user: UserModel) -> dict:
+async def _shared_kb_status(current_user: UserModel) -> dict:
     """Compose the shared-KB status payload for the Cloud Sync admin tab."""
-    kb = _find_shared_kb()
-    auth_mode = resolve_auth_mode(None)
-    effective_owner_id = _resolve_effective_owner_id(current_user)
+    kb = await _find_shared_kb()
+    auth_mode = await resolve_auth_mode(None)
+    effective_owner_id = await _resolve_effective_owner_id(current_user)
 
     # Whether the account the shared sync runs as has connected. Basic auth
     # has no per-user token — the global service credential stands in for it;
@@ -739,7 +739,7 @@ def _shared_kb_status(current_user: UserModel) -> dict:
     else:
         from open_webui.services.confluence.auth import get_stored_token
 
-        owner_connected = get_stored_token(effective_owner_id) is not None
+        owner_connected = await get_stored_token(effective_owner_id) is not None
 
     status: dict = {
         'kb_mode': CONFLUENCE_KB_MODE.value,
@@ -757,7 +757,7 @@ def _shared_kb_status(current_user: UserModel) -> dict:
                 'last_sync_at': sync_info.get('last_sync_at'),
                 'last_result': sync_info.get('last_result'),
                 'suspended_at': sync_info.get('suspended_at'),
-                'file_count': len(Knowledges.get_files_by_id(kb.id) or []),
+                'file_count': len(await Knowledges.get_files_by_id(kb.id) or []),
                 # Live progress (files done / total) — lets the Cloud Sync
                 # tab show a percentage on the Sync button while a sync runs.
                 'progress_current': sync_info.get('progress_current', 0),
@@ -773,7 +773,7 @@ def _shared_kb_status(current_user: UserModel) -> dict:
 @router.get('/shared/status')
 async def get_shared_kb_status(user: UserModel = Depends(get_admin_user)) -> dict:
     """Report shared-KB provisioning state and last sync result (admin)."""
-    return _shared_kb_status(user)
+    return await _shared_kb_status(user)
 
 
 @router.get('/shared/spaces')
@@ -785,7 +785,7 @@ async def list_shared_kb_spaces(user: UserModel = Depends(get_admin_user)) -> di
     can reach — the owner's token is what the scheduler syncs with, so the
     picker shows exactly what the sync can fetch.
     """
-    auth_mode = resolve_auth_mode(None)
+    auth_mode = await resolve_auth_mode(None)
 
     if auth_mode == 'basic':
         if not basic_auth_configured():
@@ -819,8 +819,8 @@ async def list_shared_kb_spaces(user: UserModel = Depends(get_admin_user)) -> di
     # is the KB owner (whose token the scheduler syncs with); pre-provision
     # it is the calling admin (about to provision and become the KB owner).
     # Either way the picker shows exactly what the sync can fetch.
-    effective_owner_id = _resolve_effective_owner_id(user)
-    owner = Users.get_user_by_id(effective_owner_id)
+    effective_owner_id = await _resolve_effective_owner_id(user)
+    owner = await Users.get_user_by_id(effective_owner_id)
     if not owner:
         raise HTTPException(400, 'The shared KB owner is not a valid user.')
 
@@ -870,7 +870,7 @@ async def provision_shared_kb(
     knowledge router by not going through it, leaving those guards intact
     for normal user KBs.
     """
-    auth_mode = resolve_auth_mode(None)
+    auth_mode = await resolve_auth_mode(None)
 
     # The admin-selected items (spaces and/or pages), normalized so the sync
     # worker can build per-source entries without re-deriving fields. Legacy
@@ -900,21 +900,21 @@ async def provision_shared_kb(
         owner_id = user.id
         from open_webui.services.confluence.auth import get_stored_token
 
-        if get_stored_token(owner_id) is None:
+        if await get_stored_token(owner_id) is None:
             raise HTTPException(
                 400,
                 'Connect your Confluence account before provisioning the shared knowledge base.',
             )
     else:
         owner_id = (form_data.owner_user_id or '').strip()
-        if owner_id and not Users.get_user_by_id(owner_id):
+        if owner_id and not await Users.get_user_by_id(owner_id):
             raise HTTPException(400, 'The selected shared KB owner is not a valid user.')
 
-    kb = _find_shared_kb()
+    kb = await _find_shared_kb()
     if kb:
         # Reassign the owner if the admin changed the setting.
         if kb.user_id != owner_id:
-            Knowledges.update_knowledge_user_id_by_id(kb.id, owner_id)
+            await Knowledges.update_knowledge_user_id_by_id(kb.id, owner_id)
         meta = kb.meta or {}
         sync_info = meta.get(_META_KEY, {})
         sync_info['shared'] = True
@@ -922,9 +922,9 @@ async def provision_shared_kb(
         sync_info['spaces'] = selected_spaces
         sync_info.pop('sync_all_spaces', None)  # legacy flag — superseded by `spaces`
         meta[_META_KEY] = sync_info
-        Knowledges.update_knowledge_meta_by_id(kb.id, meta)
+        await Knowledges.update_knowledge_meta_by_id(kb.id, meta)
     else:
-        kb = Knowledges.insert_new_knowledge(
+        kb = await Knowledges.insert_new_knowledge(
             owner_id,
             KnowledgeForm(
                 name=_SHARED_KB_NAME,
@@ -935,7 +935,7 @@ async def provision_shared_kb(
         )
         if not kb:
             raise HTTPException(500, 'Failed to create the shared Confluence knowledge base.')
-        Knowledges.update_knowledge_meta_by_id(
+        await Knowledges.update_knowledge_meta_by_id(
             kb.id,
             {
                 _META_KEY: {
@@ -950,14 +950,14 @@ async def provision_shared_kb(
 
     # Public read grant — set directly on the model, not via the user router,
     # so the non-local-type access guards stay in force for regular KBs.
-    AccessGrants.set_access_grants(
+    await AccessGrants.set_access_grants(
         'knowledge',
         kb.id,
         [{'principal_type': 'user', 'principal_id': '*', 'permission': 'read'}],
     )
 
     log.info('Shared Confluence KB provisioned: %s (owner=%r)', kb.id, owner_id or '<system>')
-    return _shared_kb_status(user)
+    return await _shared_kb_status(user)
 
 
 async def _run_shared_sync(knowledge_id: str, user_id: str, app):
@@ -978,7 +978,7 @@ async def sync_shared_kb(
     user: UserModel = Depends(get_admin_user),
 ) -> dict:
     """Trigger an immediate full sync of the shared Confluence KB (admin)."""
-    kb = _find_shared_kb()
+    kb = await _find_shared_kb()
     if not kb:
         raise HTTPException(404, 'No shared Confluence knowledge base has been provisioned.')
 
@@ -1000,9 +1000,9 @@ async def delete_shared_kb(user: UserModel = Depends(get_admin_user)) -> dict:
     endpoint is the only managed way to remove it. The cleanup worker purges
     its files and vectors afterwards.
     """
-    kb = _find_shared_kb()
+    kb = await _find_shared_kb()
     if not kb:
         raise HTTPException(404, 'No shared Confluence knowledge base has been provisioned.')
-    Knowledges.soft_delete_by_id(kb.id)
+    await Knowledges.soft_delete_by_id(kb.id)
     log.info('Shared Confluence KB deleted: %s', kb.id)
     return {'message': 'Shared Confluence knowledge base deleted.', 'knowledge_id': kb.id}

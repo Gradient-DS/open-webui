@@ -101,7 +101,7 @@ async def list_accessible_kbs(
         'all' if parsed_kb_ids is None else f'{len(parsed_kb_ids)} kbs',
     )
 
-    payload = resolve_accessible_kbs(principal.user, kb_ids=parsed_kb_ids)
+    payload = await resolve_accessible_kbs(principal.user, kb_ids=parsed_kb_ids)
     return AccessibleKBsResponse(
         user_id=payload['user_id'],
         kbs=[AccessibleKB(**kb) for kb in payload['kbs']],
@@ -139,7 +139,9 @@ async def list_accessible_files(
             detail='file_ids query parameter must contain at least one id',
         )
 
-    accessible = [fid for fid in requested if has_access_to_file(file_id=fid, access_type='read', user=principal.user)]
+    accessible = [
+        fid for fid in requested if await has_access_to_file(file_id=fid, access_type='read', user=principal.user)
+    ]
 
     log.info(
         'agent_accessible_files: agent=%s acting_user=%s requested=%d accessible=%d',
@@ -182,7 +184,7 @@ async def file_content(
             detail='agent search not enabled',
         )
 
-    file = Files.get_file_by_id(file_id)
+    file = await Files.get_file_by_id(file_id)
     if not file:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -192,7 +194,7 @@ async def file_content(
     user = principal.user
     # No admin shortcut here — the agent retrieval path is tenant-isolated by
     # construction; admin's UI-level cross-user reads do not extend to it.
-    if file.user_id != user.id and not has_access_to_file(file_id=file_id, access_type='read', user=user):
+    if file.user_id != user.id and not await has_access_to_file(file_id=file_id, access_type='read', user=user):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail=f"user '{user.id}' has no read access to file '{file_id}'",

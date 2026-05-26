@@ -3,6 +3,8 @@
 	const i18n = getContext('i18n');
 
 	import StatusItem from './StatusHistory/StatusItem.svelte';
+	import equal from 'fast-deep-equal';
+
 	import ReasoningBullet from './StatusHistory/ReasoningBullet.svelte';
 
 	// Heterogeneous list: each entry is either a status update (default) or a
@@ -55,10 +57,7 @@
 		}
 	}
 
-	$: if (
-		statusHistory.length !== history.length ||
-		JSON.stringify(statusHistory) !== JSON.stringify(history)
-	) {
+	$: if (!equal(statusHistory, history)) {
 		history = statusHistory;
 	}
 

@@ -67,19 +67,19 @@ class DataRetentionService:
 
         # Phase 1: Inactive users
         if effective_user_ttl > 0:
-            DataRetentionService._cleanup_inactive_users(
+            await DataRetentionService._cleanup_inactive_users(
                 effective_user_ttl, enable_archival, archive_retention_days, report
             )
 
         # Phase 2: Stale chats (only for still-active users)
         effective_chat_ttl = get_effective_ttl_days(master_ttl, chat_ttl)
         if effective_chat_ttl > 0:
-            DataRetentionService._cleanup_stale_chats(effective_chat_ttl, report)
+            await DataRetentionService._cleanup_stale_chats(effective_chat_ttl, report)
 
         # Phase 3: Stale knowledge bases (only local type, active users)
         effective_kb_ttl = get_effective_ttl_days(master_ttl, knowledge_ttl)
         if effective_kb_ttl > 0:
-            DataRetentionService._cleanup_stale_knowledge(effective_kb_ttl, report)
+            await DataRetentionService._cleanup_stale_knowledge(effective_kb_ttl, report)
 
         return report
 
@@ -112,7 +112,7 @@ class DataRetentionService:
         deletion_cutoff = now - (user_ttl_days * 86400)
 
         # Get users in the warning window
-        users_approaching = Users.get_inactive_users(
+        users_approaching = await Users.get_inactive_users(
             inactive_since=warning_cutoff,
             limit=100,
             exclude_roles=['admin'],
@@ -157,7 +157,7 @@ class DataRetentionService:
 
                 # Mark warning as sent in user info
                 info['retention_warning_sent_at'] = now
-                Users.update_user_by_id(user.id, {'info': info})
+                await Users.update_user_by_id(user.id, {'info': info})
 
                 report.warnings_sent += 1
                 log.info(f'Retention: sent warning email to user {user.id} ({days_remaining} days until deletion)')
@@ -170,7 +170,7 @@ class DataRetentionService:
             log.info(f'Retention: sent {report.warnings_sent} warning emails')
 
     @staticmethod
-    def _cleanup_inactive_users(
+    async def _cleanup_inactive_users(
         ttl_days: int,
         enable_archival: bool,
         archive_retention_days: int,
@@ -181,7 +181,7 @@ class DataRetentionService:
         from open_webui.services.archival.service import ArchiveService
 
         cutoff = get_cutoff_timestamp(ttl_days)
-        users = Users.get_inactive_users(
+        users = await Users.get_inactive_users(
             inactive_since=cutoff,
             limit=50,
             exclude_roles=['admin'],  # Never auto-delete admins
@@ -192,7 +192,7 @@ class DataRetentionService:
                 # Archive before deletion if enabled
                 if enable_archival:
                     try:
-                        result = ArchiveService.create_archive(
+                        result = await ArchiveService.create_archive(
                             user_id=user.id,
                             archived_by='system:retention',
                             reason=f'Automated retention cleanup — user inactive for {ttl_days}+ days',
@@ -208,7 +208,7 @@ class DataRetentionService:
                         log.warning(f'Retention: failed to archive user {user.id}, proceeding with deletion: {e}')
 
                 # Delete user (cascade: soft-delete chats/KBs, hard-delete rest)
-                deletion_report = DeletionService.delete_user(user.id)
+                deletion_report = await DeletionService.delete_user(user.id)
                 if not deletion_report.errors:
                     report.users_deleted += 1
                     log.info(f'Retention: deleted inactive user {user.id} — last active: {user.last_active_at}')
@@ -223,14 +223,14 @@ class DataRetentionService:
                 report.errors.append(error_msg)
 
     @staticmethod
-    def _cleanup_stale_chats(ttl_days: int, report: RetentionReport) -> None:
+    async def _cleanup_stale_chats(ttl_days: int, report: RetentionReport) -> None:
         """Phase 2: Soft-delete stale chats. Cleanup worker handles cascade."""
         cutoff = get_cutoff_timestamp(ttl_days)
-        stale_chats = Chats.get_stale_chats(stale_before=cutoff, limit=500)
+        stale_chats = await Chats.get_stale_chats(stale_before=cutoff, limit=500)
 
         for chat in stale_chats:
             try:
-                Chats.soft_delete_by_id(chat.id)
+                await Chats.soft_delete_by_id(chat.id)
                 report.chats_deleted += 1
             except Exception as e:
                 error_msg = f'Retention: failed to soft-delete chat {chat.id}: {e}'
@@ -241,14 +241,14 @@ class DataRetentionService:
             log.info(f'Retention: soft-deleted {report.chats_deleted} stale chats (older than {ttl_days} days)')
 
     @staticmethod
-    def _cleanup_stale_knowledge(ttl_days: int, report: RetentionReport) -> None:
+    async def _cleanup_stale_knowledge(ttl_days: int, report: RetentionReport) -> None:
         """Phase 3: Soft-delete stale local KBs. Cleanup worker handles cascade."""
         cutoff = get_cutoff_timestamp(ttl_days)
-        stale_kbs = Knowledges.get_stale_knowledge(stale_before=cutoff, limit=50)
+        stale_kbs = await Knowledges.get_stale_knowledge(stale_before=cutoff, limit=50)
 
         for kb in stale_kbs:
             try:
-                Knowledges.soft_delete_by_id(kb.id)
+                await Knowledges.soft_delete_by_id(kb.id)
                 report.knowledge_deleted += 1
             except Exception as e:
                 error_msg = f'Retention: failed to soft-delete KB {kb.id}: {e}'

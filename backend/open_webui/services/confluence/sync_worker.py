@@ -114,10 +114,10 @@ class ConfluenceSyncWorker(BaseSyncWorker):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        # Resolve the KB's auth mode once. In basic mode the per-source
-        # cloud_id is irrelevant — every client talks to the one configured
-        # site via the global service credential.
-        self._auth_mode = resolve_auth_mode(self.knowledge_id)
+        # Resolve the KB's auth mode lazily on first access. In basic mode
+        # the per-source cloud_id is irrelevant — every client talks to the
+        # one configured site via the global service credential.
+        self._auth_mode = None
         # Migrate legacy-format sources (saved before the type/confluence_type
         # split). base_worker dispatches on source['type'] == 'folder', so
         # space / page-subtree sources must be normalized here.
@@ -139,28 +139,10 @@ class ConfluenceSyncWorker(BaseSyncWorker):
         # are not globally unique across Atlassian sites.
         self._seen_page_ids: set[tuple[str, str]] = set()
 
-        # Shared full-content KB state. The shared KB has no fixed source
-        # list — it rebuilds its sources from the admin-selected spaces
-        # (confluence_sync.spaces) on every run (see sync() /
-        # _resolve_shared_kb_sources).
-        kb = Knowledges.get_knowledge_by_id(self.knowledge_id)
-        sync_info = (kb.meta or {}).get(self.meta_key, {}) if kb else {}
-        self._is_shared_kb = bool(sync_info.get('shared'))
-
-        # A system-owned shared KB stores user_id='' on the KB row so it stays
-        # decoupled from any deletable user. The sync mechanics (process_file
-        # access control, file ownership, progress events) still need a real
-        # user, so resolve this run to the instance super-admin when the KB
-        # has no valid owner.
-        if self._is_shared_kb and (not self.user_id or not Users.get_user_by_id(self.user_id)):
-            admin = Users.get_super_admin_user()
-            if admin:
-                self.user_id = admin.id
-            else:
-                log.warning(
-                    'Shared Confluence KB %s has no valid owner and no admin user could be resolved for the sync run',
-                    self.knowledge_id,
-                )
+        # Shared full-content KB state — resolved lazily in sync() because
+        # the lookups below are now async.
+        self._is_shared_kb = False
+        self._shared_kb_init_done = False
 
     # ------------------------------------------------------------------
     # Abstract properties
@@ -240,6 +222,33 @@ class ConfluenceSyncWorker(BaseSyncWorker):
     # Shared full-content KB — resolve all spaces at sync time
     # ------------------------------------------------------------------
 
+    async def _init_shared_kb_state(self) -> None:
+        """Resolve shared-KB flag + system-admin owner once at sync start.
+
+        These DB lookups are now async, so they cannot run in ``__init__``.
+        """
+        if self._shared_kb_init_done:
+            return
+        kb = await Knowledges.get_knowledge_by_id(self.knowledge_id)
+        sync_info = (kb.meta or {}).get(self.meta_key, {}) if kb else {}
+        self._is_shared_kb = bool(sync_info.get('shared'))
+
+        # A system-owned shared KB stores user_id='' on the KB row so it stays
+        # decoupled from any deletable user. The sync mechanics (process_file
+        # access control, file ownership, progress events) still need a real
+        # user, so resolve this run to the instance super-admin when the KB
+        # has no valid owner.
+        if self._is_shared_kb and (not self.user_id or not await Users.get_user_by_id(self.user_id)):
+            admin = await Users.get_super_admin_user()
+            if admin:
+                self.user_id = admin.id
+            else:
+                log.warning(
+                    'Shared Confluence KB %s has no valid owner and no admin user could be resolved for the sync run',
+                    self.knowledge_id,
+                )
+        self._shared_kb_init_done = True
+
     async def sync(self) -> Dict[str, Any]:
         """Run a sync, resolving the source list first for the shared KB.
 
@@ -248,6 +257,9 @@ class ConfluenceSyncWorker(BaseSyncWorker):
         Sync tab. Deselecting a space drops its files via base_worker's
         revoked-source handling.
         """
+        if self._auth_mode is None:
+            self._auth_mode = await resolve_auth_mode(self.knowledge_id)
+        await self._init_shared_kb_state()
         if self._is_shared_kb:
             await self._resolve_shared_kb_sources()
         return await super().sync()
@@ -270,7 +282,7 @@ class ConfluenceSyncWorker(BaseSyncWorker):
         """
         # Re-read the selection from KB meta — it may have changed since the
         # worker was constructed (e.g. an admin re-provisioned).
-        kb = Knowledges.get_knowledge_by_id(self.knowledge_id)
+        kb = await Knowledges.get_knowledge_by_id(self.knowledge_id)
         sync_info = (kb.meta or {}).get(self.meta_key, {}) if kb else {}
         selected_items = sync_info.get('spaces') or []
 
@@ -401,7 +413,7 @@ class ConfluenceSyncWorker(BaseSyncWorker):
 
             if current_version and current_version == stored_version:
                 file_id = f'{_FILE_ID_PREFIX}{page_id}'
-                existing = Files.get_file_by_id(file_id)
+                existing = await Files.get_file_by_id(file_id)
                 if existing and (existing.data or {}).get('status') == 'completed':
                     continue
                 log.info(
@@ -470,7 +482,7 @@ class ConfluenceSyncWorker(BaseSyncWorker):
 
         if current_version and current_version == stored_version:
             file_id = f'{_FILE_ID_PREFIX}{source["item_id"]}'
-            existing = Files.get_file_by_id(file_id)
+            existing = await Files.get_file_by_id(file_id)
             if existing and (existing.data or {}).get('status') == 'completed':
                 return None
             log.info('Confluence page %s version matches but record incomplete — re-syncing', source.get('name'))
@@ -796,7 +808,7 @@ class ConfluenceSyncWorker(BaseSyncWorker):
 
         owner_has_access = any_access
 
-        knowledge = Knowledges.get_knowledge_by_id(self.knowledge_id)
+        knowledge = await Knowledges.get_knowledge_by_id(self.knowledge_id)
         if not knowledge:
             return
 
@@ -809,7 +821,7 @@ class ConfluenceSyncWorker(BaseSyncWorker):
                 sync_info.pop('suspended_at', None)
                 sync_info.pop('suspended_reason', None)
                 meta[self.meta_key] = sync_info
-                Knowledges.update_knowledge_meta_by_id(self.knowledge_id, meta)
+                await Knowledges.update_knowledge_meta_by_id(self.knowledge_id, meta)
         else:
             if not sync_info.get('suspended_at'):
                 log.warning(
@@ -820,7 +832,7 @@ class ConfluenceSyncWorker(BaseSyncWorker):
                 sync_info['suspended_at'] = int(time.time())
                 sync_info['suspended_reason'] = 'owner_access_lost'
                 meta[self.meta_key] = sync_info
-                Knowledges.update_knowledge_meta_by_id(self.knowledge_id, meta)
+                await Knowledges.update_knowledge_meta_by_id(self.knowledge_id, meta)
 
                 await self._update_sync_status(
                     'suspended',
@@ -861,7 +873,7 @@ class ConfluenceSyncWorker(BaseSyncWorker):
         source_item_id = source.get('item_id')
         removed_count = 0
 
-        files = Knowledges.get_files_by_id(self.knowledge_id)
+        files = await Knowledges.get_files_by_id(self.knowledge_id)
         if not files:
             return 0
 
@@ -873,18 +885,20 @@ class ConfluenceSyncWorker(BaseSyncWorker):
             if file_meta.get('source_item_id') != source_item_id:
                 continue
 
-            Knowledges.remove_file_from_knowledge_by_id(self.knowledge_id, file.id)
+            await Knowledges.remove_file_from_knowledge_by_id(self.knowledge_id, file.id)
             try:
-                VECTOR_DB_CLIENT.delete(
+                from open_webui.retrieval.vector.async_client import ASYNC_VECTOR_DB_CLIENT
+
+                await ASYNC_VECTOR_DB_CLIENT.delete(
                     collection_name=self.knowledge_id,
                     filter={'file_id': file.id},
                 )
             except Exception as e:
                 log.warning('Failed to remove vectors for %s: %s', file.id, e)
 
-            remaining = Knowledges.get_knowledge_files_by_file_id(file.id)
+            remaining = await Knowledges.get_knowledge_files_by_file_id(file.id)
             if not remaining:
-                await asyncio.to_thread(DeletionService.delete_file, file.id)
+                await DeletionService.delete_file(file.id)
 
             removed_count += 1
 

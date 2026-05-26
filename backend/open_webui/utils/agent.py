@@ -419,11 +419,13 @@ def _build_streaming_response(
     get_event_emitter. Standard OpenAI data lines are passed through
     to the response body for process_chat_response to consume.
     """
-    event_emitter = get_event_emitter(metadata)
 
     async def body_generator():
         # [Gradient] Source events are emitted individually via Socket.IO
         # as they arrive, so citation chips render while the answer streams.
+        # get_event_emitter is async (Phase 1.5 upstream); await inside the
+        # generator since the enclosing _build_streaming_response is sync.
+        event_emitter = await get_event_emitter(metadata)
         try:
             async for sse_event in stream_agent_response(AGENT_API_BASE_URL, payload):
                 if sse_event.event_type == 'done':
