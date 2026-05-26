@@ -402,14 +402,6 @@ async def files_upload(
             detail='file upload failed',
         )
 
-    await Chats.insert_chat_files(
-        chat_id=chat_id,
-        message_id=message_id,
-        file_ids=[file_item.id],
-        user_id=user.id,
-        db=db,
-    )
-
     url = request.app.url_path_for('get_file_content_by_id', id=file_item.id)
     file_payload = {
         'type': 'image' if (file.content_type or '').startswith('image/') else 'file',
@@ -417,6 +409,13 @@ async def files_upload(
         'name': file.filename or file_item.id,
         'id': file_item.id,
     }
+    # Persist to the chat history JSON so reloads still see the file on
+    # the message. The ChatFile sidetable (insert_chat_files) does not
+    # feed the message's `files` array that the FE renders from.
+    updated_files = await Chats.add_message_files_by_id_and_message_id(chat_id, message_id, [file_payload])
+    # Live update — frontend handler at Chat.svelte replaces message.files
+    # with data.files, so send the full set (or just the new one if
+    # add_message_files returned None for a missing message).
     await sio.emit(
         'events',
         {
@@ -424,7 +423,7 @@ async def files_upload(
             'message_id': message_id,
             'data': {
                 'type': 'chat:message:files',
-                'data': {'files': [file_payload]},
+                'data': {'files': updated_files or [file_payload]},
             },
         },
         room=f'user:{user.id}',

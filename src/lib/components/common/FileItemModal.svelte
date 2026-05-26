@@ -276,7 +276,7 @@
 			enableFullContent = true;
 		}
 
-		if (item?.id) {
+		if (item?.id && item?.type === 'file') {
 			(async () => {
 				try {
 					attachments = await getFileAttachments(localStorage.token, item.id);
@@ -285,10 +285,6 @@
 				}
 			})();
 		}
-
-		return () => {
-			pzInstance?.dispose();
-		};
 	});
 </script>
 
