@@ -636,7 +636,9 @@ async def ingest_documents(
                 f"Collection '{collection.source_id}' was created with data_type '{existing_data_type}'. "
                 f"Cannot push with data_type '{data_type}'.",
             )
-        # Update access_control on existing KB (defaults to {} / private if not specified)
+        # Touch updated_at on the existing KB (KnowledgeForm carries no access_control
+        # field; existing access_grants are preserved by passing access_grants=None,
+        # which short-circuits the grants-update branch in update_knowledge_by_id).
         await Knowledges.update_knowledge_by_id(
             knowledge.id,
             KnowledgeForm(
@@ -831,7 +833,7 @@ async def delete_document(
     if knowledge.type != provider:
         raise HTTPException(403, "Cannot delete documents from another provider's collection")
 
-    file_id = f'{provider}-{document_source_id}'
+    file_id = f'{file_id_prefix_for(provider)}{document_source_id}'
     file = await Files.get_file_by_id(file_id)
     if not file:
         raise HTTPException(404, f"Document '{document_source_id}' not found")
