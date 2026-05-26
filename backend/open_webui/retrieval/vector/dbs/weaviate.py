@@ -26,6 +26,7 @@ from open_webui.config import (
     WEAVIATE_HTTP_SECURE,
     WEAVIATE_GRPC_SECURE,
     WEAVIATE_SKIP_INIT_CHECKS,
+    ENABLE_WEAVIATE_BQ_QUANTIZATION,
 )
 
 log = logging.getLogger(__name__)
@@ -71,17 +72,21 @@ def _sanitize_metadata_keys(metadata: dict) -> dict:
     return result
 
 
-# Class-name prefixes (post-sanitization) for collections that hold at most a
-# few thousand vectors per class. HNSW's per-class memory + insert cost dwarfs
-# any query benefit at this size, so we use flat (brute-force) with binary
-# quantization instead. KB collections (raw UUID class names) fall through to
-# the HNSW default — they can grow large enough for HNSW to pay off.
+# Class-name prefixes (post-sanitization) for collections that opt into the
+# `flat` index with binary quantization when ENABLE_WEAVIATE_BQ_QUANTIZATION is
+# true. When the flag is false (default) every collection falls through to
+# Weaviate's HNSW default — including these prefixes.
 _FLAT_INDEX_PREFIXES = ('File_', 'Web_search_', 'User_memory_')
 
 
 def _build_vector_config(sane_collection_name: str):
-    """Pick the vector-index config for a class based on its name prefix."""
-    if sane_collection_name.startswith(_FLAT_INDEX_PREFIXES):
+    """Pick the vector-index config for a class based on its name prefix.
+
+    When ENABLE_WEAVIATE_BQ_QUANTIZATION is false (default), every collection
+    falls through to the Weaviate HNSW default. When true, File_*, Web_search_*,
+    and User_memory_* collections get the flat index with binary quantization.
+    """
+    if ENABLE_WEAVIATE_BQ_QUANTIZATION and sane_collection_name.startswith(_FLAT_INDEX_PREFIXES):
         return weaviate.classes.config.Configure.Vectors.self_provided(
             vector_index_config=weaviate.classes.config.Configure.VectorIndex.flat(
                 quantizer=weaviate.classes.config.Configure.VectorIndex.Quantizer.bq()

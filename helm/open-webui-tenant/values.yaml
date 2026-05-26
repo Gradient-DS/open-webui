@@ -215,6 +215,10 @@ openWebui:
     weaviateHttpPort: "8080"
     weaviateGrpcPort: "50051"
     weaviateWebSearchTtlMinutes: "1440"  # TTL for web search vector collections (24 hours)
+    # Binary-quantization + flat index for File_*, Web_search_*, User_memory_*
+    # collections. Default off: HNSW for every collection. Flip to "true" if
+    # Weaviate memory pressure returns (~8s per collection creation on flip-on).
+    enableWeaviateBqQuantization: "false"
 
     # Database (PostgreSQL) - uses local PostgreSQL in tenant namespace
     databaseType: "postgresql"

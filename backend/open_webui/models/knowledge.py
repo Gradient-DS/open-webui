@@ -326,6 +326,11 @@ class KnowledgeTable:
         Scalable version: search files across all knowledge bases the user has
         READ access to, without loading all KBs or using large IN() lists.
         """
+        # Phase 3: chat-attach by individual KB file is no longer offered —
+        # KB-uploaded files no longer have per-file vector collections. Whole-KB
+        # attach via search_knowledge_bases is the supported path. Keep the
+        # original implementation below intact for an easy revert if needed.
+        return KnowledgeFileListResponse(items=[], total=0)
         try:
             async with get_async_db_context(db) as db:
                 # Base query: join Knowledge → KnowledgeFile → File
@@ -491,6 +496,29 @@ class KnowledgeTable:
         ):
             return knowledge
         return None
+
+    async def get_knowledge_by_file_id(
+        self, file_id: str, db: Optional[AsyncSession] = None
+    ) -> Optional[KnowledgeModel]:
+        """Return the first KB that has this file linked via KnowledgeFile.
+
+        Used by the built-in knowledge-search tool to resolve a file attached as
+        __model_knowledge__ back to its containing KB when no per-file
+        `file-<id>` collection exists (KB-uploaded files post-Phase-2).
+        """
+        try:
+            async with get_async_db_context(db) as db:
+                result = await db.execute(
+                    select(Knowledge)
+                    .join(KnowledgeFile, Knowledge.id == KnowledgeFile.knowledge_id)
+                    .filter(KnowledgeFile.file_id == file_id)
+                    .filter(Knowledge.deleted_at.is_(None))
+                )
+                row = result.scalars().first()
+                return await self._to_knowledge_model(row, db=db) if row else None
+        except Exception as e:
+            log.exception(e)
+            return None
 
     async def get_knowledges_by_file_id(self, file_id: str, db: Optional[AsyncSession] = None) -> list[KnowledgeModel]:
         try:

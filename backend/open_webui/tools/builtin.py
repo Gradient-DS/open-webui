@@ -2163,10 +2163,34 @@ async def query_knowledge_files(
                         collection_names.append(item_id)
 
                 elif item_type == 'file':
-                    # Individual file - use file-{id} as collection name
+                    # Individual file. One-off chat-uploaded files still have a
+                    # per-file `file-{id}` collection. KB-uploaded files live
+                    # only inside the KB collection (post-Phase-2) — resolve
+                    # to that KB and add its collection here. Searching the
+                    # whole KB is acceptable; similarity ranking surfaces the
+                    # relevant file's chunks at the top.
                     file = await Files.get_file_by_id(item_id)
-                    if file:
-                        collection_names.append(f'file-{item_id}')
+                    if not file:
+                        continue
+
+                    file_collection = f'file-{item_id}'
+                    if await ASYNC_VECTOR_DB_CLIENT.has_collection(collection_name=file_collection):
+                        collection_names.append(file_collection)
+                        continue
+
+                    kb = await Knowledges.get_knowledge_by_file_id(file_id=item_id)
+                    if kb and (
+                        user_role == 'admin'
+                        or kb.user_id == user_id
+                        or await AccessGrants.has_access(
+                            user_id=user_id,
+                            resource_type='knowledge',
+                            resource_id=kb.id,
+                            permission='read',
+                            user_group_ids=set(user_group_ids),
+                        )
+                    ):
+                        collection_names.append(kb.id)
 
                 elif item_type == 'note':
                     # Note - always return full content as context

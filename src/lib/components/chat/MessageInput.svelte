@@ -68,7 +68,7 @@
 
 	import InputMenu from './MessageInput/InputMenu.svelte';
 	import ConfluencePickerModal from '../workspace/Knowledge/ConfluencePickerModal.svelte';
-	import { getConfluencePageContent } from '$lib/apis/confluence';
+	import { getConfluencePageContent, listPages as listConfluencePages } from '$lib/apis/confluence';
 	import VoiceRecording from './MessageInput/VoiceRecording.svelte';
 
 	import ToolServersModal from './ToolServersModal.svelte';
@@ -99,6 +99,7 @@
 	import ClockRotateRight from '../icons/ClockRotateRight.svelte';
 	import GoogleDrive from '../icons/GoogleDrive.svelte';
 	import OneDrive from '../icons/OneDrive.svelte';
+	import Confluence from '../icons/Confluence.svelte';
 	import Dropdown from '../common/Dropdown.svelte';
 
 	import CommandSuggestionList from './MessageInput/CommandSuggestionList.svelte';
@@ -682,6 +683,34 @@
 		showConfluencePicker = true;
 	};
 
+	// Recursive descendant walk — selecting a page in the picker implies its
+	// whole subtree (the picker greys out descendant checkboxes once an
+	// ancestor is checked). Mirror that here so the user gets every page in
+	// the chosen subtree as its own attachment.
+	const walkConfluenceDescendants = async (
+		cloudId: string,
+		parentId: string
+	): Promise<Array<{ id: string; title: string }>> => {
+		const collected: Array<{ id: string; title: string }> = [];
+		let cursor: string | null = null;
+		let pageCount = 0;
+		do {
+			const res = await listConfluencePages(localStorage.token, cloudId, {
+				parentId,
+				cursor: cursor ?? undefined
+			});
+			for (const child of res.pages) {
+				collected.push({ id: child.id, title: child.title });
+				const grandchildren = await walkConfluenceDescendants(cloudId, child.id);
+				collected.push(...grandchildren);
+			}
+			cursor = res.next_cursor;
+			pageCount++;
+			if (pageCount > 20) break; // safety cap — matches picker pagination
+		} while (cursor);
+		return collected;
+	};
+
 	const confluencePagesSelected = async (e) => {
 		const items = (e?.detail?.items ?? []) as Array<{
 			type: string;
@@ -695,7 +724,34 @@
 				$i18n.t('Only individual pages can be attached to a chat — pick pages, not spaces.')
 			);
 		}
+
+		// Resolve the full attachment set (selected pages + their descendants)
+		// before queuing uploads so the user sees an accurate count up front.
+		const flat: Array<{ cloud_id: string; page_id: string; title: string }> = [];
+		const seen = new Set<string>();
 		for (const pg of pages) {
+			const key = `${pg.cloud_id}:${pg.item_id}`;
+			if (seen.has(key)) continue;
+			seen.add(key);
+			flat.push({ cloud_id: pg.cloud_id, page_id: pg.item_id, title: pg.name });
+			try {
+				const descendants = await walkConfluenceDescendants(pg.cloud_id, pg.item_id);
+				for (const d of descendants) {
+					const dKey = `${pg.cloud_id}:${d.id}`;
+					if (seen.has(dKey)) continue;
+					seen.add(dKey);
+					flat.push({ cloud_id: pg.cloud_id, page_id: d.id, title: d.title });
+				}
+			} catch (error) {
+				toast.error(
+					$i18n.t('Error fetching Confluence page: {{error}}', {
+						error: error instanceof Error ? error.message : String(error)
+					})
+				);
+			}
+		}
+
+		for (const pg of flat) {
 			const tempItemId = uuidv4();
 			files = [
 				...files,
@@ -704,7 +760,7 @@
 					file: '',
 					id: null,
 					url: '',
-					name: pg.name,
+					name: pg.title,
 					collection_name: '',
 					status: 'uploading',
 					size: 0,
@@ -713,7 +769,7 @@
 				}
 			];
 			try {
-				const res = await getConfluencePageContent(localStorage.token, pg.cloud_id, pg.item_id);
+				const res = await getConfluencePageContent(localStorage.token, pg.cloud_id, pg.page_id);
 				const file = new File([res.content], `${res.title}.md`, { type: 'text/markdown' });
 				await uploadFileHandler(file, true, {}, tempItemId);
 			} catch (error) {
@@ -1318,7 +1374,12 @@
 
 <ToolServersModal bind:show={showTools} {selectedToolIds} />
 
-<ConfluencePickerModal bind:show={showConfluencePicker} on:select={confluencePagesSelected} />
+<ConfluencePickerModal
+	bind:show={showConfluencePicker}
+	confirmLabel={$i18n.t('Add to chat')}
+	pagesOnly={true}
+	on:select={confluencePagesSelected}
+/>
 
 <InputVariablesModal
 	bind:show={showInputVariablesModal}
@@ -1972,6 +2033,26 @@
 														on:click={() => oneDriveHandler('organizations')}
 													>
 														<OneDrive className="size-4" />
+													</button>
+												</Tooltip>
+											{:else if itemId === 'confluence' && fileUploadEnabled && $config?.features?.enable_confluence_integration && $config?.features?.enable_confluence_sync && $config?.features?.confluence_kb_mode !== 'shared'}
+												<Tooltip content={$i18n.t('Confluence')} placement="top">
+													<button
+														class="p-[7px] rounded-full bg-transparent text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors duration-300 focus:outline-hidden"
+														type="button"
+														on:click={confluenceHandler}
+													>
+														<Confluence className="size-4" />
+													</button>
+												</Tooltip>
+											{:else if itemId === 'confluence' && fileUploadEnabled && $config?.features?.enable_confluence_integration && $config?.features?.enable_confluence_sync && $config?.features?.confluence_kb_mode === 'shared' && $config?.features?.confluence_shared_kb_id}
+												<Tooltip content={$i18n.t('Confluence')} placement="top">
+													<button
+														class="p-[7px] rounded-full bg-transparent text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors duration-300 focus:outline-hidden"
+														type="button"
+														on:click={() => inputMenuRef?.attachSharedConfluenceKb()}
+													>
+														<Confluence className="size-4" />
 													</button>
 												</Tooltip>
 												<!-- Pinned capability items -->

@@ -1475,7 +1475,11 @@
 
 		if (data.status === 'completed') {
 			fileItems[idx].status = 'uploaded';
-			await addFileHandler(data.file_id, { batch: true });
+			// Backend already linked the file to the KB during upload (see
+			// process_uploaded_file in routers/files.py — Phase 2 of the
+			// 2026-05-25 plan). Re-invoking addFileHandler here would call
+			// /knowledge/{id}/file/add and re-trigger process_file, embedding
+			// the file's chunks a second time into the KB collection.
 			uploadBatch.added++;
 		} else if (data.status === 'failed') {
 			fileItems[idx].status = 'error';

@@ -1697,60 +1697,52 @@ async def process_file(
 
                 text_content = form_data.content
             elif form_data.collection_name:
-                # Check if the file has already been processed and save the content
-                # Usage: /knowledge/{id}/file/add, /knowledge/{id}/file/update
-
-                result = await ASYNC_VECTOR_DB_CLIENT.query(
-                    collection_name=f'file-{file.id}', filter={'file_id': file.id}
-                )
-
-                if result is not None and len(result.ids[0]) > 0:
+                # Check if the file has already been processed and save the content.
+                # Usage: /knowledge/{id}/file/add, /knowledge/{id}/file/update,
+                # and /files/ uploads with knowledge_id (workspace KB upload).
+                #
+                # Previously this branch first queried a per-file `file-{id}`
+                # cache collection. KB-bound uploads no longer create that
+                # collection (dev's e64b083b9), so we fall straight through to
+                # the existing content / disk-load path.
+                existing_content = file.data.get('content', '')
+                if existing_content:
                     docs = [
                         Document(
-                            page_content=result.documents[0][idx],
-                            metadata=result.metadatas[0][idx],
+                            page_content=existing_content,
+                            metadata={
+                                **file.meta,
+                                'name': file.filename,
+                                'created_by': file.user_id,
+                                'file_id': file.id,
+                                'source': file.filename,
+                            },
                         )
-                        for idx, id in enumerate(result.ids[0])
                     ]
                 else:
-                    existing_content = file.data.get('content', '')
-                    if existing_content:
+                    # File hasn't been processed yet (e.g. background processing
+                    # hasn't completed). Load and extract content directly.
+                    file_path = file.path
+                    if file_path:
+                        file_path = await asyncio.to_thread(Storage.get_file, file_path)
+                        loader = build_loader_from_config(request)
+                        loader.user = user
+                        docs = await loader.aload(file.filename, file.meta.get('content_type'), file_path)
                         docs = [
                             Document(
-                                page_content=existing_content,
+                                page_content=doc.page_content,
                                 metadata={
-                                    **file.meta,
+                                    **filter_metadata(doc.metadata),
                                     'name': file.filename,
                                     'created_by': file.user_id,
                                     'file_id': file.id,
                                     'source': file.filename,
                                 },
                             )
+                            for doc in docs
                         ]
                     else:
-                        # File hasn't been processed yet (e.g. background processing
-                        # hasn't completed). Load and extract content directly.
-                        file_path = file.path
-                        if file_path:
-                            file_path = await asyncio.to_thread(Storage.get_file, file_path)
-                            loader = build_loader_from_config(request)
-                            loader.user = user
-                            docs = await loader.aload(file.filename, file.meta.get('content_type'), file_path)
-                            docs = [
-                                Document(
-                                    page_content=doc.page_content,
-                                    metadata={
-                                        **filter_metadata(doc.metadata),
-                                        'name': file.filename,
-                                        'created_by': file.user_id,
-                                        'file_id': file.id,
-                                        'source': file.filename,
-                                    },
-                                )
-                                for doc in docs
-                            ]
-                        else:
-                            raise ValueError(ERROR_MESSAGES.EMPTY_CONTENT)
+                        raise ValueError(ERROR_MESSAGES.EMPTY_CONTENT)
 
                 text_content = ' '.join([doc.page_content for doc in docs]) if docs else file.data.get('content', '')
             else:

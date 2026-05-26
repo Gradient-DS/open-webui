@@ -219,8 +219,9 @@
 	// One-click attach of the shared, read-only Confluence KB (shared mode).
 	// The KB carries a user:*:read grant, so getKnowledgeById works for any
 	// user; the resulting collection is identical to picking it from the
-	// Knowledge submenu.
-	const attachSharedConfluenceKb = async () => {
+	// Knowledge submenu. Exported so the pinned bottom-bar Confluence button
+	// in MessageInput can reuse the same attach flow without duplicating it.
+	export const attachSharedConfluenceKb = async () => {
 		const kbId = $config?.features?.confluence_shared_kb_id;
 		if (!kbId) {
 			return;
@@ -584,6 +585,22 @@
 							>
 								<Confluence className="size-4" />
 								<div class="flex-1 line-clamp-1">{$i18n.t('Confluence')}</div>
+								<Tooltip
+									content={pinnedInputItems.includes('confluence')
+										? $i18n.t('Unpin')
+										: $i18n.t('Pin')}
+								>
+									<button
+										class="p-1 rounded-md hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+										on:click|stopPropagation={() => pinItemHandler('confluence')}
+									>
+										{#if pinnedInputItems.includes('confluence')}
+											<PinSlash className="size-3.5" />
+										{:else}
+											<Pin className="size-3.5" />
+										{/if}
+									</button>
+								</Tooltip>
 							</button>
 						{/if}
 
@@ -598,6 +615,22 @@
 							>
 								<Confluence className="size-4" />
 								<div class="flex-1 line-clamp-1">{$i18n.t('Confluence')}</div>
+								<Tooltip
+									content={pinnedInputItems.includes('confluence')
+										? $i18n.t('Unpin')
+										: $i18n.t('Pin')}
+								>
+									<button
+										class="p-1 rounded-md hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+										on:click|stopPropagation={() => pinItemHandler('confluence')}
+									>
+										{#if pinnedInputItems.includes('confluence')}
+											<PinSlash className="size-3.5" />
+										{:else}
+											<Pin className="size-3.5" />
+										{/if}
+									</button>
+								</Tooltip>
 							</button>
 						{/if}
 					{/if}

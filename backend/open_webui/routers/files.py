@@ -111,6 +111,7 @@ async def process_uploaded_file(
     file_metadata,
     user,
     db: Optional[AsyncSession] = None,
+    knowledge_id: Optional[str] = None,
 ):
     async def _process_handler(db_session):
         try:
@@ -120,6 +121,10 @@ async def process_uploaded_file(
             if content_type and content_type.startswith(('image/', 'video/')):
                 if _is_text_file(file_path):
                     content_type = 'text/plain'
+
+            # If destined for a KB, embed directly into the KB collection so
+            # we never create a redundant `file-<id>` collection.
+            collection_name = knowledge_id
 
             if content_type:
                 stt_supported_content_types = getattr(request.app.state.config, 'STT_SUPPORTED_CONTENT_TYPES', [])
@@ -136,7 +141,11 @@ async def process_uploaded_file(
 
                     await process_file(
                         request,
-                        ProcessFileForm(file_id=file_item.id, content=result.get('text', '')),
+                        ProcessFileForm(
+                            file_id=file_item.id,
+                            content=result.get('text', ''),
+                            collection_name=collection_name,
+                        ),
                         user=user,
                         db=db_session,
                     )
@@ -145,7 +154,10 @@ async def process_uploaded_file(
                 ):
                     await process_file(
                         request,
-                        ProcessFileForm(file_id=file_item.id),
+                        ProcessFileForm(
+                            file_id=file_item.id,
+                            collection_name=collection_name,
+                        ),
                         user=user,
                         db=db_session,
                     )
@@ -155,8 +167,21 @@ async def process_uploaded_file(
                 log.info(f'File type {file.content_type} is not provided, but trying to process anyway')
                 await process_file(
                     request,
-                    ProcessFileForm(file_id=file_item.id),
+                    ProcessFileForm(
+                        file_id=file_item.id,
+                        collection_name=collection_name,
+                    ),
                     user=user,
+                    db=db_session,
+                )
+
+            # If this upload was for a KB, link the file → KB so the frontend
+            # doesn't need a separate /knowledge/{id}/file/add round-trip.
+            if knowledge_id:
+                await Knowledges.add_file_to_knowledge_by_id(
+                    knowledge_id=knowledge_id,
+                    file_id=file_item.id,
+                    user_id=user.id,
                     db=db_session,
                 )
 
@@ -248,6 +273,34 @@ async def upload_file_handler(
                 detail=ERROR_MESSAGES.DEFAULT('Invalid metadata format'),
             )
     file_metadata = metadata if metadata else {}
+
+    # Extract knowledge_id from metadata (workspace KB upload signal). When set,
+    # the file embeds directly into the KB collection and auto-links to the KB —
+    # no separate /knowledge/{id}/file/add round-trip needed. Verify the user
+    # can write to that KB before accepting the upload.
+    knowledge_id = file_metadata.get('knowledge_id') if isinstance(file_metadata, dict) else None
+    if knowledge_id:
+        knowledge = await Knowledges.get_knowledge_by_id(id=knowledge_id, db=db)
+        if not knowledge:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=ERROR_MESSAGES.NOT_FOUND,
+            )
+        if (
+            knowledge.user_id != user.id
+            and not await AccessGrants.has_access(
+                user_id=user.id,
+                resource_type='knowledge',
+                resource_id=knowledge.id,
+                permission='write',
+                db=db,
+            )
+            and user.role != 'admin'
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=ERROR_MESSAGES.ACCESS_PROHIBITED,
+            )
 
     try:
         unsanitized_filename = file.filename
@@ -347,6 +400,8 @@ async def upload_file_handler(
                     file_item,
                     file_metadata,
                     user,
+                    None,  # db
+                    knowledge_id,
                 )
                 return {'status': True, **file_item.model_dump()}
             else:
@@ -358,6 +413,7 @@ async def upload_file_handler(
                     file_metadata,
                     user,
                     db=db,
+                    knowledge_id=knowledge_id,
                 )
                 return {'status': True, **file_item.model_dump()}
         else:
