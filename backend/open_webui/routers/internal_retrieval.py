@@ -12,14 +12,23 @@ from __future__ import annotations
 import logging
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
-from pydantic import BaseModel, Field
+from pathlib import Path
 
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, UploadFile, status
+from fastapi.responses import FileResponse
+from pydantic import BaseModel, Field
+from sqlalchemy.orm import Session
+
+from open_webui.internal.db import get_session
+from open_webui.models.chats import Chats
 from open_webui.models.files import Files
+from open_webui.routers.files import upload_file_handler
 from open_webui.services.retrieval.agent_search import (
     resolve_accessible_kbs,
     run_agent_search,
 )
+from open_webui.socket.main import sio
+from open_webui.storage.provider import Storage
 from open_webui.utils.access_control.files import has_access_to_file
 from open_webui.utils.service_auth import AgentPrincipal, get_agent_principal
 
@@ -213,6 +222,89 @@ async def file_content(
     )
 
 
+@router.get('/files/{file_id}/raw')
+async def file_raw(
+    file_id: str,
+    request: Request,
+    principal: AgentPrincipal = Depends(get_agent_principal),
+) -> FileResponse:
+    """Return the raw stored bytes for a file the acting user can read.
+
+    Same auth + ACL as :func:`file_content` (agent bearer +
+    ``X-Acting-User-Id``, ``has_access_to_file(read)``) — the difference
+    is the body: this endpoint streams the original upload from
+    :class:`Storage`, not the extracted text. Used by the BIM agent's
+    raw-IFC bytes fetcher, which needs the original ``.ifc`` blob to
+    open with ``ifcopenshell``.
+    """
+
+    if not getattr(request.app.state.config, 'AGENT_SEARCH_ENABLED', False):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail='agent search not enabled',
+        )
+
+    file = Files.get_file_by_id(file_id)
+    if not file:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"file '{file_id}' not found",
+        )
+
+    user = principal.user
+    if file.user_id != user.id and not has_access_to_file(file_id=file_id, access_type='read', user=user):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"user '{user.id}' has no read access to file '{file_id}'",
+        )
+
+    if not file.path:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"file '{file_id}' has no stored bytes",
+        )
+
+    try:
+        storage_path = Path(Storage.get_file(file.path))
+    except Exception:
+        log.exception(
+            'agent_file_raw: Storage.get_file raised for file=%s (path=%s)',
+            file_id,
+            file.path,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"file '{file_id}' bytes unavailable",
+        )
+
+    if not storage_path.is_file():
+        log.error(
+            'agent_file_raw: file row %s points at missing Storage path %s',
+            file_id,
+            file.path,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"file '{file_id}' bytes unavailable",
+        )
+
+    log.info(
+        'agent_file_raw: agent=%s acting_user=%s file=%s',
+        principal.agent_id,
+        user.id,
+        file_id,
+    )
+
+    media_type = (
+        getattr(file.meta or {}, 'get', lambda *_: None)('content_type') if isinstance(file.meta, dict) else None
+    )
+    return FileResponse(
+        storage_path,
+        media_type=media_type or 'application/octet-stream',
+        filename=file.filename or file_id,
+    )
+
+
 @router.post(
     '/query',
     response_model=AgentSearchResponse,
@@ -256,3 +348,93 @@ async def agent_query(
         kb_ids=body.kb_ids,
     )
     return AgentSearchResponse(results=[AgentSearchResult(**r) for r in results])
+
+
+class FileUploadResponse(BaseModel):
+    file_id: str
+    url: str
+
+
+@router.post('/files/upload', response_model=FileUploadResponse)
+async def files_upload(
+    request: Request,
+    chat_id: str = Form(...),
+    message_id: str = Form(...),
+    file: UploadFile = File(...),
+    principal: AgentPrincipal = Depends(get_agent_principal),
+    db: Session = Depends(get_session),
+) -> FileUploadResponse:
+    """Persist an agent-uploaded blob and attach it to a chat message.
+
+    Multipart body: ``file`` (bytes), ``chat_id`` and ``message_id`` (the
+    chat + assistant-message the file belongs to). Auth: shared agent bearer
+    + ``X-Acting-User-Id`` (the acting user must already exist and own / be
+    able to participate in the target chat).
+
+    Persists the file via :func:`upload_file_handler` with ``process=False``
+    (no extraction pipeline — the blob is opaque to OWUI's RAG path), links
+    it to the message via :meth:`Chats.insert_chat_files`, then emits a
+    ``chat:message:files`` socket event so the live chat view renders the
+    attachment without a refresh. Mirrors the call shape used by
+    ``routers/images.upload_image`` + ``tools/builtin.generate_image``.
+    """
+
+    if not getattr(request.app.state.config, 'AGENT_SEARCH_ENABLED', False):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail='agent search not enabled',
+        )
+
+    user = principal.user
+    file_item = upload_file_handler(
+        request,
+        file=file,
+        metadata={'chat_id': chat_id, 'message_id': message_id},
+        process=False,
+        user=user,
+        db=db,
+    )
+    if file_item is None or not file_item.id:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail='file upload failed',
+        )
+
+    Chats.insert_chat_files(
+        chat_id=chat_id,
+        message_id=message_id,
+        file_ids=[file_item.id],
+        user_id=user.id,
+        db=db,
+    )
+
+    url = request.app.url_path_for('get_file_content_by_id', id=file_item.id)
+    file_payload = {
+        'type': 'image' if (file.content_type or '').startswith('image/') else 'file',
+        'url': url,
+        'name': file.filename or file_item.id,
+        'id': file_item.id,
+    }
+    await sio.emit(
+        'events',
+        {
+            'chat_id': chat_id,
+            'message_id': message_id,
+            'data': {
+                'type': 'chat:message:files',
+                'data': {'files': [file_payload]},
+            },
+        },
+        room=f'user:{user.id}',
+    )
+
+    log.info(
+        'agent_file_upload: agent=%s acting_user=%s chat=%s message=%s file=%s',
+        principal.agent_id,
+        user.id,
+        chat_id,
+        message_id,
+        file_item.id,
+    )
+
+    return FileUploadResponse(file_id=file_item.id, url=url)
