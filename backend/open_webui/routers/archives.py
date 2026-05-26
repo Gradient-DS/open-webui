@@ -130,12 +130,12 @@ async def get_archives(
             detail='User archival is not enabled',
         )
 
-    archives = UserArchives.get_archives(
+    archives = await UserArchives.get_archives(
         skip=skip,
         limit=limit,
         search=search,
     )
-    total = UserArchives.count_archives()
+    total = await UserArchives.count_archives()
 
     return ArchiveListResponse(items=archives, total=total)
 
@@ -158,7 +158,7 @@ async def get_archive(
             detail='User archival is not enabled',
         )
 
-    archive = UserArchives.get_archive_by_id(archive_id)
+    archive = await UserArchives.get_archive_by_id(archive_id)
     if not archive:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -189,7 +189,7 @@ async def export_archive_chats(
             detail='User archival is not enabled',
         )
 
-    chats = ArchiveService.get_exportable_chats(archive_id)
+    chats = await ArchiveService.get_exportable_chats(archive_id)
     if chats is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -225,7 +225,7 @@ async def create_user_archive(
     if retention_days is None and not form_data.never_delete:
         retention_days = request.app.state.config.DEFAULT_ARCHIVE_RETENTION_DAYS
 
-    result = ArchiveService.create_archive(
+    result = await ArchiveService.create_archive(
         user_id=user_id,
         archived_by=user.id,
         reason=form_data.reason,
@@ -265,7 +265,7 @@ async def update_archive(
             detail='User archival is not enabled',
         )
 
-    archive = UserArchives.update_archive(archive_id, form_data)
+    archive = await UserArchives.update_archive(archive_id, form_data)
     if not archive:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -293,7 +293,7 @@ async def delete_archive(
             detail='User archival is not enabled',
         )
 
-    success = UserArchives.delete_archive(archive_id)
+    success = await UserArchives.delete_archive(archive_id)
     if not success:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,

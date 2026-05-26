@@ -146,7 +146,7 @@ def test_accessible_kbs_returns_payload_when_enabled(monkeypatch, fake_principal
 
     captured = {}
 
-    def fake_resolve(user, *, kb_ids=None):
+    async def fake_resolve(user, *, kb_ids=None):
         captured['user_id'] = user.id
         captured['kb_ids'] = kb_ids
         return {
@@ -191,7 +191,7 @@ def test_accessible_kbs_returns_404_when_disabled(monkeypatch, fake_principal):
     monkeypatch.setattr(
         internal_retrieval_router,
         'resolve_accessible_kbs',
-        MagicMock(side_effect=AssertionError('should not run when disabled')),
+        AsyncMock(side_effect=AssertionError('should not run when disabled')),
     )
     client = TestClient(app)
     resp = client.get('/api/v1/internal/retrieval/accessible-kbs')
@@ -202,7 +202,7 @@ def test_accessible_kbs_passes_kb_ids_subset(monkeypatch, fake_principal):
     app = _build_app(fake_principal=fake_principal)
     seen = {}
 
-    def fake_resolve(user, *, kb_ids=None):
+    async def fake_resolve(user, *, kb_ids=None):
         seen['kb_ids'] = kb_ids
         return {'user_id': user.id, 'kbs': [], 'kb_index_collection_name': 'Knowledge_bases'}
 
@@ -219,7 +219,7 @@ def test_accessible_kbs_no_kb_ids_param(monkeypatch, fake_principal):
     app = _build_app(fake_principal=fake_principal)
     seen = {}
 
-    def fake_resolve(user, *, kb_ids=None):
+    async def fake_resolve(user, *, kb_ids=None):
         seen['kb_ids'] = kb_ids
         return {'user_id': user.id, 'kbs': [], 'kb_index_collection_name': 'Knowledge_bases'}
 
@@ -247,7 +247,7 @@ def test_accessible_files_returns_owned(monkeypatch, fake_principal):
     """Owner of a file gets it back."""
     app = _build_app(fake_principal=fake_principal)
 
-    def fake_has_access(*, file_id, access_type, user):
+    async def fake_has_access(*, file_id, access_type, user):
         return file_id == 'file-owned' and user.id == fake_principal.user.id
 
     monkeypatch.setattr(internal_retrieval_router, 'has_access_to_file', fake_has_access)
@@ -269,7 +269,7 @@ def test_accessible_files_filters_inaccessible(monkeypatch, fake_principal):
     monkeypatch.setattr(
         internal_retrieval_router,
         'has_access_to_file',
-        lambda *, file_id, access_type, user: False,
+        AsyncMock(return_value=False),
     )
 
     client = TestClient(app)
@@ -290,7 +290,7 @@ def test_accessible_files_admin_does_not_bypass(monkeypatch):
     monkeypatch.setattr(
         internal_retrieval_router,
         'has_access_to_file',
-        lambda *, file_id, access_type, user: False,
+        AsyncMock(return_value=False),
     )
 
     client = TestClient(app)
@@ -308,11 +308,10 @@ def test_accessible_files_mixed_subset(monkeypatch, fake_principal):
 
     accessible = {'file-owned', 'file-granted'}
 
-    monkeypatch.setattr(
-        internal_retrieval_router,
-        'has_access_to_file',
-        lambda *, file_id, access_type, user: file_id in accessible,
-    )
+    async def fake_has_access(*, file_id, access_type, user):
+        return file_id in accessible
+
+    monkeypatch.setattr(internal_retrieval_router, 'has_access_to_file', fake_has_access)
 
     client = TestClient(app)
     resp = client.get(
@@ -341,7 +340,7 @@ def test_accessible_files_requires_agent_search_enabled(monkeypatch, fake_princi
     monkeypatch.setattr(
         internal_retrieval_router,
         'has_access_to_file',
-        MagicMock(side_effect=AssertionError('should not run when disabled')),
+        AsyncMock(side_effect=AssertionError('should not run when disabled')),
     )
 
     client = TestClient(app)
@@ -370,14 +369,14 @@ def test_files_id_content_admin_no_longer_shortcut(monkeypatch):
 
     class _FakeFiles:
         @staticmethod
-        def get_file_by_id(file_id):
+        async def get_file_by_id(file_id):
             return fake_file if file_id == fake_file.id else None
 
     monkeypatch.setattr(internal_retrieval_router, 'Files', _FakeFiles)
     monkeypatch.setattr(
         internal_retrieval_router,
         'has_access_to_file',
-        lambda *, file_id, access_type, user: False,
+        AsyncMock(return_value=False),
     )
 
     client = TestClient(app)

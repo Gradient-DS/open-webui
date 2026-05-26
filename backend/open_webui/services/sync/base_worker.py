@@ -21,6 +21,7 @@ from open_webui.models.users import Users
 from open_webui.storage.provider import Storage
 from open_webui.config import FILE_PROCESSING_MAX_CONCURRENT, KNOWLEDGE_MAX_FILE_COUNT
 from open_webui.retrieval.vector.factory import VECTOR_DB_CLIENT
+from open_webui.retrieval.vector.async_client import ASYNC_VECTOR_DB_CLIENT
 from open_webui.services.deletion import DeletionService
 from open_webui.services.sync.constants import SyncErrorType, FailedFile, CONTENT_TYPES
 from open_webui.services.sync.events import (
@@ -366,16 +367,16 @@ class BaseSyncWorker(ABC):
             }
         )
 
-    def _get_user(self):
+    async def _get_user(self):
         """Fetch the user object for process_file access control."""
-        user = Users.get_user_by_id(self.user_id)
+        user = await Users.get_user_by_id(self.user_id)
         if not user:
             raise RuntimeError(f'User {self.user_id} not found')
         return user
 
-    def _check_cancelled(self) -> bool:
+    async def _check_cancelled(self) -> bool:
         """Check if sync has been cancelled by user."""
-        knowledge = Knowledges.get_knowledge_by_id(self.knowledge_id)
+        knowledge = await Knowledges.get_knowledge_by_id(self.knowledge_id)
         if knowledge:
             meta = knowledge.meta or {}
             sync_info = meta.get(self.meta_key, {})
@@ -407,7 +408,7 @@ class BaseSyncWorker(ABC):
         omits them they default to 0; ``files_processed`` is preserved for
         backwards compatibility (and equals files_added + files_updated).
         """
-        knowledge = Knowledges.get_knowledge_by_id(self.knowledge_id)
+        knowledge = await Knowledges.get_knowledge_by_id(self.knowledge_id)
         if knowledge:
             meta = knowledge.meta or {}
             sync_info = meta.get(self.meta_key, {})
@@ -424,7 +425,7 @@ class BaseSyncWorker(ABC):
             if error:
                 sync_info['error'] = error
             meta[self.meta_key] = sync_info
-            Knowledges.update_knowledge_meta_by_id(self.knowledge_id, meta)
+            await Knowledges.update_knowledge_meta_by_id(self.knowledge_id, meta)
 
         # Convert failed_files to dicts for serialization
         failed_files_dicts = [asdict(f) for f in failed_files] if failed_files else None
@@ -480,7 +481,7 @@ class BaseSyncWorker(ABC):
 
     async def _save_sources(self):
         """Save updated sources to knowledge metadata."""
-        knowledge = Knowledges.get_knowledge_by_id(self.knowledge_id)
+        knowledge = await Knowledges.get_knowledge_by_id(self.knowledge_id)
         if not knowledge:
             return
 
@@ -489,7 +490,7 @@ class BaseSyncWorker(ABC):
         sync_info['sources'] = self.sources
         meta[self.meta_key] = sync_info
 
-        Knowledges.update_knowledge_meta_by_id(self.knowledge_id, meta)
+        await Knowledges.update_knowledge_meta_by_id(self.knowledge_id, meta)
 
     async def _handle_deleted_item(self, item: Dict[str, Any]):
         """Handle a deleted item from changes query."""
@@ -499,24 +500,24 @@ class BaseSyncWorker(ABC):
 
         file_id = f'{self.file_id_prefix}{item_id}'
 
-        existing = Files.get_file_by_id(file_id)
+        existing = await Files.get_file_by_id(file_id)
         if existing:
             log.info(f'Removing deleted file from KB: {file_id}')
 
-            Knowledges.remove_file_from_knowledge_by_id(self.knowledge_id, file_id)
+            await Knowledges.remove_file_from_knowledge_by_id(self.knowledge_id, file_id)
 
             try:
-                VECTOR_DB_CLIENT.delete(
+                await ASYNC_VECTOR_DB_CLIENT.delete(
                     collection_name=self.knowledge_id,
                     filter={'file_id': file_id},
                 )
             except Exception as e:
                 log.warning(f'Failed to remove vectors for {file_id} from KB: {e}')
 
-            remaining_refs = Knowledges.get_knowledge_files_by_file_id(file_id)
+            remaining_refs = await Knowledges.get_knowledge_files_by_file_id(file_id)
             if not remaining_refs:
                 log.info(f'No remaining references to {file_id}, cleaning up')
-                await asyncio.to_thread(DeletionService.delete_file, file_id)
+                await DeletionService.delete_file(file_id)
             else:
                 log.info(f'File {file_id} still referenced by {len(remaining_refs)} KB(s), preserving')
 
@@ -531,22 +532,22 @@ class BaseSyncWorker(ABC):
         """
         if not file_id or file_id == 'unknown':
             return 0
-        existing = Files.get_file_by_id(file_id)
+        existing = await Files.get_file_by_id(file_id)
         if not existing:
             return 0
         log.info(f'Removing revoked-access file from KB: {file_id}')
-        Knowledges.remove_file_from_knowledge_by_id(self.knowledge_id, file_id)
+        await Knowledges.remove_file_from_knowledge_by_id(self.knowledge_id, file_id)
         try:
-            VECTOR_DB_CLIENT.delete(
+            await ASYNC_VECTOR_DB_CLIENT.delete(
                 collection_name=self.knowledge_id,
                 filter={'file_id': file_id},
             )
         except Exception as e:
             log.warning(f'Failed to remove vectors for {file_id} from KB: {e}')
-        remaining_refs = Knowledges.get_knowledge_files_by_file_id(file_id)
+        remaining_refs = await Knowledges.get_knowledge_files_by_file_id(file_id)
         if not remaining_refs:
             log.info(f'No remaining references to {file_id}, cleaning up')
-            await asyncio.to_thread(DeletionService.delete_file, file_id)
+            await DeletionService.delete_file(file_id)
         else:
             log.info(f'File {file_id} still referenced by {len(remaining_refs)} KB(s), preserving the File row')
         try:
@@ -565,7 +566,7 @@ class BaseSyncWorker(ABC):
             log.debug(f'Failed to emit revoked-access deletion event: {e}')
         return 1
 
-    def _classify_for_submit(self, file_info: Dict[str, Any]) -> tuple[str, str]:
+    async def _classify_for_submit(self, file_info: Dict[str, Any]) -> tuple[str, str]:
         """Decide whether to submit this file_info to the loader-worker.
 
         Returns (category, file_id):
@@ -582,7 +583,7 @@ class BaseSyncWorker(ABC):
         item = file_info['item']
         item_id = item['id']
         file_id = f'{self.file_id_prefix}{item_id}'
-        existing = Files.get_file_by_id(file_id)
+        existing = await Files.get_file_by_id(file_id)
         if existing is None:
             return 'added', file_id
         cloud_hash = self._get_cloud_hash(file_info)
@@ -669,117 +670,118 @@ class BaseSyncWorker(ABC):
         from langchain_core.documents import Document
 
         request = self._make_request()
-        user = self._get_user()
+        user = await self._get_user()
+
+        # Pre-fetch DB data BEFORE the thread — async model calls cannot run
+        # inside asyncio.to_thread (Option B pattern).
+        if user.role == 'admin':
+            file = await Files.get_file_by_id(file_id)
+        else:
+            file = await Files.get_file_by_id_and_user_id(file_id, user.id)
+
+        if not file:
+            raise ValueError(f'File {file_id} not found')
+
+        if not file.path:
+            raise ValueError(f'File {file_id} has no path')
+
+        local_file_path = Storage.get_file(file.path)
 
         def _extract_in_thread():
-            with get_db() as db:
-                if user.role == 'admin':
-                    file = Files.get_file_by_id(file_id, db=db)
-                else:
-                    file = Files.get_file_by_id_and_user_id(file_id, user.id, db=db)
+            loader = Loader(
+                engine=request.app.state.config.CONTENT_EXTRACTION_ENGINE,
+                user=user,
+                EXTERNAL_DOCUMENT_LOADER_URL=request.app.state.config.EXTERNAL_DOCUMENT_LOADER_URL,
+                EXTERNAL_DOCUMENT_LOADER_API_KEY=request.app.state.config.EXTERNAL_DOCUMENT_LOADER_API_KEY,
+                TIKA_SERVER_URL=request.app.state.config.TIKA_SERVER_URL,
+                DOCLING_SERVER_URL=request.app.state.config.DOCLING_SERVER_URL,
+                DOCLING_API_KEY=request.app.state.config.DOCLING_API_KEY,
+                DOCLING_PARAMS=request.app.state.config.DOCLING_PARAMS,
+                PDF_EXTRACT_IMAGES=request.app.state.config.PDF_EXTRACT_IMAGES,
+                PDF_LOADER_MODE=request.app.state.config.PDF_LOADER_MODE,
+                DATALAB_MARKER_API_KEY=request.app.state.config.DATALAB_MARKER_API_KEY,
+                DATALAB_MARKER_API_BASE_URL=request.app.state.config.DATALAB_MARKER_API_BASE_URL,
+                DATALAB_MARKER_ADDITIONAL_CONFIG=request.app.state.config.DATALAB_MARKER_ADDITIONAL_CONFIG,
+                DATALAB_MARKER_SKIP_CACHE=request.app.state.config.DATALAB_MARKER_SKIP_CACHE,
+                DATALAB_MARKER_FORCE_OCR=request.app.state.config.DATALAB_MARKER_FORCE_OCR,
+                DATALAB_MARKER_PAGINATE=request.app.state.config.DATALAB_MARKER_PAGINATE,
+                DATALAB_MARKER_STRIP_EXISTING_OCR=request.app.state.config.DATALAB_MARKER_STRIP_EXISTING_OCR,
+                DATALAB_MARKER_DISABLE_IMAGE_EXTRACTION=request.app.state.config.DATALAB_MARKER_DISABLE_IMAGE_EXTRACTION,
+                DATALAB_MARKER_FORMAT_LINES=request.app.state.config.DATALAB_MARKER_FORMAT_LINES,
+                DATALAB_MARKER_USE_LLM=request.app.state.config.DATALAB_MARKER_USE_LLM,
+                DATALAB_MARKER_OUTPUT_FORMAT=request.app.state.config.DATALAB_MARKER_OUTPUT_FORMAT,
+                DOCUMENT_INTELLIGENCE_ENDPOINT=request.app.state.config.DOCUMENT_INTELLIGENCE_ENDPOINT,
+                DOCUMENT_INTELLIGENCE_KEY=request.app.state.config.DOCUMENT_INTELLIGENCE_KEY,
+                DOCUMENT_INTELLIGENCE_MODEL=request.app.state.config.DOCUMENT_INTELLIGENCE_MODEL,
+                MISTRAL_OCR_API_BASE_URL=request.app.state.config.MISTRAL_OCR_API_BASE_URL,
+                MISTRAL_OCR_API_KEY=request.app.state.config.MISTRAL_OCR_API_KEY,
+                MINERU_API_MODE=request.app.state.config.MINERU_API_MODE,
+                MINERU_API_URL=request.app.state.config.MINERU_API_URL,
+                MINERU_API_KEY=request.app.state.config.MINERU_API_KEY,
+                MINERU_API_TIMEOUT=request.app.state.config.MINERU_API_TIMEOUT,
+                MINERU_PARAMS=request.app.state.config.MINERU_PARAMS,
+            )
 
-                if not file:
-                    raise ValueError(f'File {file_id} not found')
+            # Try external pipeline first
+            external_pipeline_url = getattr(request.app.state.config, 'EXTERNAL_PIPELINE_URL', None)
+            use_external_local = bool(external_pipeline_url and external_pipeline_url.strip() != '')
+            docs_local = None
 
-                file_path = file.path
-                if not file_path:
-                    raise ValueError(f'File {file_id} has no path')
-
-                file_path = Storage.get_file(file_path)
-
-                loader = Loader(
-                    engine=request.app.state.config.CONTENT_EXTRACTION_ENGINE,
-                    user=user,
-                    EXTERNAL_DOCUMENT_LOADER_URL=request.app.state.config.EXTERNAL_DOCUMENT_LOADER_URL,
-                    EXTERNAL_DOCUMENT_LOADER_API_KEY=request.app.state.config.EXTERNAL_DOCUMENT_LOADER_API_KEY,
-                    TIKA_SERVER_URL=request.app.state.config.TIKA_SERVER_URL,
-                    DOCLING_SERVER_URL=request.app.state.config.DOCLING_SERVER_URL,
-                    DOCLING_API_KEY=request.app.state.config.DOCLING_API_KEY,
-                    DOCLING_PARAMS=request.app.state.config.DOCLING_PARAMS,
-                    PDF_EXTRACT_IMAGES=request.app.state.config.PDF_EXTRACT_IMAGES,
-                    PDF_LOADER_MODE=request.app.state.config.PDF_LOADER_MODE,
-                    DATALAB_MARKER_API_KEY=request.app.state.config.DATALAB_MARKER_API_KEY,
-                    DATALAB_MARKER_API_BASE_URL=request.app.state.config.DATALAB_MARKER_API_BASE_URL,
-                    DATALAB_MARKER_ADDITIONAL_CONFIG=request.app.state.config.DATALAB_MARKER_ADDITIONAL_CONFIG,
-                    DATALAB_MARKER_SKIP_CACHE=request.app.state.config.DATALAB_MARKER_SKIP_CACHE,
-                    DATALAB_MARKER_FORCE_OCR=request.app.state.config.DATALAB_MARKER_FORCE_OCR,
-                    DATALAB_MARKER_PAGINATE=request.app.state.config.DATALAB_MARKER_PAGINATE,
-                    DATALAB_MARKER_STRIP_EXISTING_OCR=request.app.state.config.DATALAB_MARKER_STRIP_EXISTING_OCR,
-                    DATALAB_MARKER_DISABLE_IMAGE_EXTRACTION=request.app.state.config.DATALAB_MARKER_DISABLE_IMAGE_EXTRACTION,
-                    DATALAB_MARKER_FORMAT_LINES=request.app.state.config.DATALAB_MARKER_FORMAT_LINES,
-                    DATALAB_MARKER_USE_LLM=request.app.state.config.DATALAB_MARKER_USE_LLM,
-                    DATALAB_MARKER_OUTPUT_FORMAT=request.app.state.config.DATALAB_MARKER_OUTPUT_FORMAT,
-                    DOCUMENT_INTELLIGENCE_ENDPOINT=request.app.state.config.DOCUMENT_INTELLIGENCE_ENDPOINT,
-                    DOCUMENT_INTELLIGENCE_KEY=request.app.state.config.DOCUMENT_INTELLIGENCE_KEY,
-                    DOCUMENT_INTELLIGENCE_MODEL=request.app.state.config.DOCUMENT_INTELLIGENCE_MODEL,
-                    MISTRAL_OCR_API_BASE_URL=request.app.state.config.MISTRAL_OCR_API_BASE_URL,
-                    MISTRAL_OCR_API_KEY=request.app.state.config.MISTRAL_OCR_API_KEY,
-                    MINERU_API_MODE=request.app.state.config.MINERU_API_MODE,
-                    MINERU_API_URL=request.app.state.config.MINERU_API_URL,
-                    MINERU_API_KEY=request.app.state.config.MINERU_API_KEY,
-                    MINERU_API_TIMEOUT=request.app.state.config.MINERU_API_TIMEOUT,
-                    MINERU_PARAMS=request.app.state.config.MINERU_PARAMS,
-                )
-
-                # Try external pipeline first
-                external_pipeline_url = getattr(request.app.state.config, 'EXTERNAL_PIPELINE_URL', None)
-                use_external = external_pipeline_url and external_pipeline_url.strip() != ''
-                docs = None
-
-                if use_external:
-                    try:
-                        result = call_external_pipeline(
-                            file_path=file_path,
-                            filename=file.filename,
-                            content_type=file.meta.get('content_type', ''),
-                            external_pipeline_url=external_pipeline_url,
-                            external_pipeline_api_key=getattr(
-                                request.app.state.config, 'EXTERNAL_PIPELINE_API_KEY', None
-                            ),
-                            loader_instance=loader,
-                        )
-                        if result.get('success') and result.get('chunks'):
-                            docs = [
-                                Document(
-                                    page_content=chunk['text'],
-                                    metadata=chunk.get('metadata', {}),
-                                )
-                                for chunk in result['chunks']
-                            ]
-                    except Exception as e:
-                        log.warning(f'External pipeline failed for {file.filename}: {e}, falling back')
-                        use_external = False
-
-                if docs is None:
-                    use_external = False
-                    docs = loader.load(file.filename, file.meta.get('content_type'), file_path)
-
-                if not docs:
-                    return None
-
-                docs = [
-                    Document(
-                        page_content=doc.page_content,
-                        metadata={
-                            **filter_metadata(doc.metadata),
-                            'name': file.filename,
-                            'created_by': file.user_id,
-                            'file_id': file.id,
-                            'source': file.filename,
-                        },
+            if use_external_local:
+                try:
+                    result = call_external_pipeline(
+                        file_path=local_file_path,
+                        filename=file.filename,
+                        content_type=file.meta.get('content_type', ''),
+                        external_pipeline_url=external_pipeline_url,
+                        external_pipeline_api_key=getattr(request.app.state.config, 'EXTERNAL_PIPELINE_API_KEY', None),
+                        loader_instance=loader,
                     )
-                    for doc in docs
-                ]
+                    if result.get('success') and result.get('chunks'):
+                        docs_local = [
+                            Document(
+                                page_content=chunk['text'],
+                                metadata=chunk.get('metadata', {}),
+                            )
+                            for chunk in result['chunks']
+                        ]
+                except Exception as e:
+                    log.warning(f'External pipeline failed for {file.filename}: {e}, falling back')
+                    use_external_local = False
 
-                text_content = ' '.join([doc.page_content for doc in docs])
+            if docs_local is None:
+                use_external_local = False
+                docs_local = loader.load(file.filename, file.meta.get('content_type'), local_file_path)
 
-                # Save extracted text to file record
-                Files.update_file_data_by_id(file.id, {'content': text_content}, db=db)
-                db.commit()
+            if not docs_local:
+                return None
 
-                return docs, file, not use_external  # needs_split=True for internal pipeline
+            docs_local = [
+                Document(
+                    page_content=doc.page_content,
+                    metadata={
+                        **filter_metadata(doc.metadata),
+                        'name': file.filename,
+                        'created_by': file.user_id,
+                        'file_id': file.id,
+                        'source': file.filename,
+                    },
+                )
+                for doc in docs_local
+            ]
 
-        return await asyncio.to_thread(_extract_in_thread)
+            return docs_local, not use_external_local  # needs_split=True for internal pipeline
+
+        result = await asyncio.to_thread(_extract_in_thread)
+        if result is None:
+            return None
+        docs, needs_split = result
+
+        text_content = ' '.join([doc.page_content for doc in docs])
+        # Save extracted text to file record (async, OUTSIDE the thread).
+        await Files.update_file_data_by_id(file.id, {'content': text_content})
+
+        return docs, file, needs_split
 
     async def _embed_to_collections(
         self,
@@ -804,7 +806,7 @@ class BaseSyncWorker(ABC):
         from langchain_text_splitters import MarkdownHeaderTextSplitter
 
         request = self._make_request()
-        user = self._get_user()
+        user = await self._get_user()
 
         metadata = {
             'file_id': file_id,
@@ -951,23 +953,21 @@ class BaseSyncWorker(ABC):
             t_kb = time.time()
             log.info(f'[sync:{filename}] <<< WEAVIATE KB INSERT END ({t_kb - t_embed:.1f}s)')
 
-            # Update file metadata
-            with get_db() as session:
-                Files.update_file_metadata_by_id(file_id, {'collection_name': self.knowledge_id}, db=session)
-                Files.update_file_data_by_id(file_id, {'status': 'completed'}, db=session)
-                Files.update_file_hash_by_id(file_id, file_hash, db=session)
-
             log.info(f'[sync:{filename}] DONE total={t_kb - t0:.1f}s')
             return True
 
         result = await asyncio.to_thread(_split_embed_and_store)
+        if result:
+            # Persist file metadata AFTER the thread — async ORM cannot run in to_thread.
+            await Files.update_file_metadata_by_id(file_id, {'collection_name': self.knowledge_id})
+            await Files.update_file_data_by_id(file_id, {'status': 'completed'})
+            await Files.update_file_hash_by_id(file_id, file_hash)
 
         if not result:
             log.warning(f'No text content extracted from {filename}')
-            with get_db() as session:
-                Files.update_file_metadata_by_id(file_id, {'collection_name': self.knowledge_id}, db=session)
-                Files.update_file_data_by_id(file_id, {'status': 'completed'}, db=session)
-                Files.update_file_hash_by_id(file_id, file_hash, db=session)
+            await Files.update_file_metadata_by_id(file_id, {'collection_name': self.knowledge_id})
+            await Files.update_file_data_by_id(file_id, {'status': 'completed'})
+            await Files.update_file_hash_by_id(file_id, file_hash)
 
         return True
 
@@ -1003,7 +1003,7 @@ class BaseSyncWorker(ABC):
         relative_path = file_info.get('relative_path', name)
         file_id = f'{self.file_id_prefix}{item_id}'
 
-        if self._check_cancelled():
+        if await self._check_cancelled():
             return FailedFile(
                 filename=name,
                 error_type=SyncErrorType.PROCESSING_ERROR.value,
@@ -1014,7 +1014,7 @@ class BaseSyncWorker(ABC):
         # Existing KBs without cloud_hash in meta will fall through to download,
         # populating cloud_hash for subsequent syncs (backward compatible).
         cloud_hash = self._get_cloud_hash(file_info)
-        existing = Files.get_file_by_id(file_id)
+        existing = await Files.get_file_by_id(file_id)
 
         if cloud_hash and existing:
             existing_meta = existing.meta or {}
@@ -1025,9 +1025,9 @@ class BaseSyncWorker(ABC):
                 new_relative_path = file_info.get('relative_path')
                 if new_relative_path and existing_meta.get('relative_path') != new_relative_path:
                     existing_meta['relative_path'] = new_relative_path
-                    Files.update_file_by_id(file_id, FileUpdateForm(meta=existing_meta))
+                    await Files.update_file_by_id(file_id, FileUpdateForm(meta=existing_meta))
 
-                Knowledges.add_file_to_knowledge_by_id(self.knowledge_id, file_id, self.user_id)
+                await Knowledges.add_file_to_knowledge_by_id(self.knowledge_id, file_id, self.user_id)
 
                 return PreparedFile(
                     file_id=file_id,
@@ -1090,9 +1090,9 @@ class BaseSyncWorker(ABC):
                 updated = True
 
             if updated:
-                Files.update_file_by_id(file_id, FileUpdateForm(meta=existing_meta))
+                await Files.update_file_by_id(file_id, FileUpdateForm(meta=existing_meta))
 
-            Knowledges.add_file_to_knowledge_by_id(self.knowledge_id, file_id, self.user_id)
+            await Knowledges.add_file_to_knowledge_by_id(self.knowledge_id, file_id, self.user_id)
 
             # Return PreparedFile with is_new=False so vector verification
             # runs under the process semaphore (not the download semaphore).
@@ -1143,11 +1143,11 @@ class BaseSyncWorker(ABC):
                 file_meta['cloud_hash'] = cloud_hash
 
             if existing:
-                Files.update_file_by_id(
+                await Files.update_file_by_id(
                     file_id,
                     FileUpdateForm(hash=content_hash, meta=file_meta),
                 )
-                Files.update_file_path_by_id(file_id, file_path)
+                await Files.update_file_path_by_id(file_id, file_path)
             else:
                 file_form = FileForm(
                     id=file_id,
@@ -1157,7 +1157,7 @@ class BaseSyncWorker(ABC):
                     data={},
                     meta=file_meta,
                 )
-                Files.insert_new_file(self.user_id, file_form)
+                await Files.insert_new_file(self.user_id, file_form)
 
             return PreparedFile(
                 file_id=file_id,
@@ -1192,7 +1192,7 @@ class BaseSyncWorker(ABC):
         file_id = prepared.file_id
         name = prepared.name
 
-        if self._check_cancelled():
+        if await self._check_cancelled():
             return FailedFile(
                 filename=name,
                 error_type=SyncErrorType.PROCESSING_ERROR.value,
@@ -1217,7 +1217,7 @@ class BaseSyncWorker(ABC):
                 log.debug(f'File {file_id} has no text content')
                 return None
 
-            if self._check_cancelled():
+            if await self._check_cancelled():
                 return FailedFile(
                     filename=name,
                     error_type=SyncErrorType.PROCESSING_ERROR.value,
@@ -1248,7 +1248,7 @@ class BaseSyncWorker(ABC):
                 error_message=str(e)[:100],
             )
 
-        if self._check_cancelled():
+        if await self._check_cancelled():
             return FailedFile(
                 filename=name,
                 error_type=SyncErrorType.PROCESSING_ERROR.value,
@@ -1256,16 +1256,16 @@ class BaseSyncWorker(ABC):
             )
 
         # KB association
-        Knowledges.add_file_to_knowledge_by_id(self.knowledge_id, file_id, self.user_id)
+        await Knowledges.add_file_to_knowledge_by_id(self.knowledge_id, file_id, self.user_id)
 
         # Cross-KB vector propagation (still uses process_file for other KBs)
         try:
-            knowledge_files = Knowledges.get_knowledge_files_by_file_id(file_id)
+            knowledge_files = await Knowledges.get_knowledge_files_by_file_id(file_id)
             for kf in knowledge_files:
                 if kf.knowledge_id != self.knowledge_id:
                     log.info(f'Propagating vectors for {file_id} to KB {kf.knowledge_id}')
                     try:
-                        VECTOR_DB_CLIENT.delete(
+                        await ASYNC_VECTOR_DB_CLIENT.delete(
                             collection_name=kf.knowledge_id,
                             filter={'file_id': file_id},
                         )
@@ -1274,12 +1274,17 @@ class BaseSyncWorker(ABC):
                     try:
                         from open_webui.routers.retrieval import process_file, ProcessFileForm
 
+                        # Pre-fetch user (now async); pass it into the thread
+                        # so the sync ``process_file`` in the carve-out file
+                        # doesn't try to call an async helper.
+                        propagate_user = await self._get_user()
+
                         def _call_propagate(form_data):
                             with get_db() as db:
                                 return process_file(
                                     self._make_request(),
                                     form_data,
-                                    user=self._get_user(),
+                                    user=propagate_user,
                                     db=db,
                                 )
 
@@ -1296,7 +1301,7 @@ class BaseSyncWorker(ABC):
             log.warning(f'Failed to propagate vector updates for {file_id}: {e}')
 
         # Emit file added event
-        file_record = Files.get_file_by_id(file_id)
+        file_record = await Files.get_file_by_id(file_id)
         if file_record:
             await emit_file_added(
                 self.event_prefix,
@@ -1349,7 +1354,7 @@ class BaseSyncWorker(ABC):
         # with a cryptic httpx exception class.
         _validate_callback_base_url(callback_base_url)
 
-        knowledge = Knowledges.get_knowledge_by_id(self.knowledge_id)
+        knowledge = await Knowledges.get_knowledge_by_id(self.knowledge_id)
         kb_name = knowledge.name if knowledge else self.knowledge_id
 
         # data_type=chunked_text matches the existing /ingest handler:
@@ -1415,8 +1420,8 @@ class BaseSyncWorker(ABC):
                 relative_path = file_info.get('relative_path', name)
                 content_type = self._get_content_type(name)
 
-                if Files.get_file_by_id(file_id) is not None:
-                    Knowledges.add_file_to_knowledge_by_id(self.knowledge_id, file_id, self.user_id)
+                if await Files.get_file_by_id(file_id) is not None:
+                    await Knowledges.add_file_to_knowledge_by_id(self.knowledge_id, file_id, self.user_id)
                     touched.append(file_id)
                 else:
                     # Google Drive returns ``size`` as a string per its v3 API
@@ -1447,8 +1452,8 @@ class BaseSyncWorker(ABC):
                         data={'status': 'pending'},
                         meta=file_meta,
                     )
-                    Files.insert_new_file(self.user_id, file_form)
-                    Knowledges.add_file_to_knowledge_by_id(self.knowledge_id, file_id, self.user_id)
+                    await Files.insert_new_file(self.user_id, file_form)
+                    await Knowledges.add_file_to_knowledge_by_id(self.knowledge_id, file_id, self.user_id)
                     touched.append(file_id)
 
                 await emit_file_processing(
@@ -1490,13 +1495,13 @@ class BaseSyncWorker(ABC):
         changed = 0
         for file_id in file_ids:
             try:
-                existing = Files.get_file_by_id(file_id)
+                existing = await Files.get_file_by_id(file_id)
                 if existing is None:
                     continue
                 current_status = (existing.data or {}).get('status')
                 if current_status in ('completed', 'error'):
                     continue
-                Files.update_file_data_by_id(
+                await Files.update_file_data_by_id(
                     file_id,
                     {'status': error_status, 'error': message},
                 )
@@ -1526,7 +1531,7 @@ class BaseSyncWorker(ABC):
             if not file_id or not stage:
                 continue
             try:
-                existing = Files.get_file_by_id(file_id)
+                existing = await Files.get_file_by_id(file_id)
                 if existing is None:
                     continue
                 current_data = existing.data or {}
@@ -1534,11 +1539,11 @@ class BaseSyncWorker(ABC):
                 # /ingest's terminal writes win — don't churn rows that are
                 # already in their final state.
                 if current_status not in ('completed', 'error') and current_status != stage:
-                    Files.update_file_data_by_id(file_id, {'status': stage})
+                    await Files.update_file_data_by_id(file_id, {'status': stage})
 
                 if stage == 'ok' and file_id not in self._announced_ok_file_ids:
                     self._announced_ok_file_ids.add(file_id)
-                    refreshed = Files.get_file_by_id(file_id)
+                    refreshed = await Files.get_file_by_id(file_id)
                     if refreshed:
                         await emit_file_added(
                             self.event_prefix,
@@ -1616,7 +1621,7 @@ class BaseSyncWorker(ABC):
                 stage_counts=stage_counts,
             )
 
-            if not cancel_requested and self._check_cancelled():
+            if not cancel_requested and await self._check_cancelled():
                 try:
                     await self._pipeline_client.cancel_job(job_id)
                 except Exception as e:
@@ -1770,7 +1775,7 @@ class BaseSyncWorker(ABC):
             display_name = file_id
             if file_id and file_id != 'unknown':
                 try:
-                    existing = Files.get_file_by_id(file_id)
+                    existing = await Files.get_file_by_id(file_id)
                     if existing and existing.filename:
                         display_name = existing.filename
                 except Exception:
@@ -1815,9 +1820,9 @@ class BaseSyncWorker(ABC):
                     # longer exists and re-fail-marking would race a 404.
                     continue
                 try:
-                    existing = Files.get_file_by_id(file_id)
+                    existing = await Files.get_file_by_id(file_id)
                     if existing and (existing.data or {}).get('status') not in ('completed', 'error'):
-                        Files.update_file_data_by_id(
+                        await Files.update_file_data_by_id(
                             file_id,
                             {
                                 'status': 'error',
@@ -1933,7 +1938,7 @@ class BaseSyncWorker(ABC):
             )
 
         failed_files_dicts = [asdict(f) for f in failed_files]
-        knowledge = Knowledges.get_knowledge_by_id(self.knowledge_id)
+        knowledge = await Knowledges.get_knowledge_by_id(self.knowledge_id)
         meta = knowledge.meta or {}
         sync_info = meta.get(self.meta_key, {})
         sync_info['last_sync_at'] = int(time.time())
@@ -1950,7 +1955,7 @@ class BaseSyncWorker(ABC):
             'failed_files': failed_files_dicts,
         }
         meta[self.meta_key] = sync_info
-        Knowledges.update_knowledge_meta_by_id(self.knowledge_id, meta)
+        await Knowledges.update_knowledge_meta_by_id(self.knowledge_id, meta)
 
         await self._update_sync_status(
             sync_info['status'],
@@ -1995,7 +2000,7 @@ class BaseSyncWorker(ABC):
             await self._sync_permissions()
 
             # Check if KB was suspended by _sync_permissions()
-            knowledge = Knowledges.get_knowledge_by_id(self.knowledge_id)
+            knowledge = await Knowledges.get_knowledge_by_id(self.knowledge_id)
             if knowledge:
                 meta = knowledge.meta or {}
                 sync_info = meta.get(self.meta_key, {})
@@ -2062,7 +2067,7 @@ class BaseSyncWorker(ABC):
                 if self.max_files_config
                 else KNOWLEDGE_MAX_FILE_COUNT
             )
-            current_files = Knowledges.get_files_by_id(self.knowledge_id) or []
+            current_files = await Knowledges.get_files_by_id(self.knowledge_id) or []
             current_file_count = len(current_files)
             available_slots = max(0, max_files - current_file_count)
 
@@ -2107,7 +2112,7 @@ class BaseSyncWorker(ABC):
             unchanged_count = 0
             to_submit: List[Dict[str, Any]] = []
             for fi in all_files_to_process:
-                cat, fid = self._classify_for_submit(fi)
+                cat, fid = await self._classify_for_submit(fi)
                 if cat == 'unchanged':
                     unchanged_count += 1
                     continue
@@ -2127,7 +2132,7 @@ class BaseSyncWorker(ABC):
 
             # Pre-create the KB collection so individual file inserts don't
             # race to create it (avoids N-1 wasted 422 roundtrips).
-            VECTOR_DB_CLIENT.insert(collection_name=self.knowledge_id, items=[])
+            await ASYNC_VECTOR_DB_CLIENT.insert(collection_name=self.knowledge_id, items=[])
 
             # USE_SHARED_LOADER branch: delegate everything to the per-tenant
             # loader-worker pod. The semaphore-bounded fan-out below is bypassed.
@@ -2169,7 +2174,7 @@ class BaseSyncWorker(ABC):
             async def _pipeline_inner(file_info: Dict[str, Any], index: int) -> Optional[FailedFile]:
                 nonlocal processed_count, failed_count, cancelled
 
-                if cancelled or self._check_cancelled():
+                if cancelled or await self._check_cancelled():
                     cancelled = True
                     return FailedFile(
                         filename=file_info.get('name', 'unknown'),
@@ -2180,7 +2185,7 @@ class BaseSyncWorker(ABC):
                 try:
                     # Phase 1: Download + store (high concurrency)
                     async with download_semaphore:
-                        if cancelled or self._check_cancelled():
+                        if cancelled or await self._check_cancelled():
                             cancelled = True
                             return FailedFile(
                                 filename=file_info.get('name', 'unknown'),
@@ -2219,7 +2224,7 @@ class BaseSyncWorker(ABC):
 
                     # Phase 2: Process + embed (normal concurrency)
                     async with process_semaphore:
-                        if cancelled or self._check_cancelled():
+                        if cancelled or await self._check_cancelled():
                             cancelled = True
                             return FailedFile(
                                 filename=file_info.get('name', 'unknown'),
@@ -2238,7 +2243,7 @@ class BaseSyncWorker(ABC):
                                     process_result = await self._process_and_embed(result)
                             else:
                                 # Vectors verified, emit file added event
-                                file_record = Files.get_file_by_id(result.file_id)
+                                file_record = await Files.get_file_by_id(result.file_id)
                                 if file_record:
                                     await emit_file_added(
                                         self.event_prefix,
@@ -2315,7 +2320,7 @@ class BaseSyncWorker(ABC):
                 batch_num = batch_start // batch_size + 1
                 batch = all_files_to_process[batch_start : batch_start + batch_size]
 
-                if cancelled or self._check_cancelled():
+                if cancelled or await self._check_cancelled():
                     cancelled = True
                     break
 
@@ -2398,7 +2403,7 @@ class BaseSyncWorker(ABC):
             # all to ``files_added`` (the legacy path is dead-coded behind
             # USE_SHARED_LOADER and doesn't need precise added/updated split).
             legacy_added = max(0, total_processed - unchanged_count)
-            knowledge = Knowledges.get_knowledge_by_id(self.knowledge_id)
+            knowledge = await Knowledges.get_knowledge_by_id(self.knowledge_id)
             meta = knowledge.meta or {}
             sync_info = meta.get(self.meta_key, {})
             sync_info['last_sync_at'] = int(time.time())
@@ -2415,7 +2420,7 @@ class BaseSyncWorker(ABC):
                 'failed_files': failed_files_dicts,
             }
             meta[self.meta_key] = sync_info
-            Knowledges.update_knowledge_meta_by_id(self.knowledge_id, meta)
+            await Knowledges.update_knowledge_meta_by_id(self.knowledge_id, meta)
 
             await self._update_sync_status(
                 sync_info['status'],

@@ -49,7 +49,18 @@
 
 	const resize = () => {
 		if (textareaElement) {
-			const savedScrollTop = scrollableParent?.scrollTop;
+			// Find all ancestors that currently have an active scroll offset.
+			// This is extremely fast because reading `scrollTop` on a clean layout doesn't trigger reflow,
+			// and it makes the fix 100% robust without relying on hardcoded CSS classes.
+			let activeScrollParents = [];
+			let p = textareaElement.parentNode;
+			while (p && p !== document.body) {
+				if (p instanceof HTMLElement && p.scrollTop > 0) {
+					activeScrollParents.push({ el: p, top: p.scrollTop });
+				}
+				p = p.parentNode;
+			}
+			const windowScrollY = window.scrollY;
 
 			textareaElement.style.height = '';
 
@@ -63,8 +74,13 @@
 
 			textareaElement.style.height = `${height}px`;
 
-			if (scrollableParent != null) {
-				scrollableParent.scrollTop = savedScrollTop;
+			// Only restore scroll for elements that were actually scrolled.
+			// This prevents layout thrashing that happens if we blindly set `.scrollTop` on every parent.
+			activeScrollParents.forEach((p) => {
+				if (p.el.scrollTop !== p.top) p.el.scrollTop = p.top;
+			});
+			if (window.scrollY !== windowScrollY) {
+				window.scrollTo(window.scrollX, windowScrollY);
 			}
 		}
 	};

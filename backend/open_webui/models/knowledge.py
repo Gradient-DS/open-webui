@@ -4,8 +4,9 @@ import time
 from typing import Optional
 import uuid
 
-from sqlalchemy.orm import Session
-from open_webui.internal.db import Base, JSONField, get_db, get_db_context
+from sqlalchemy import select, delete, update, or_, func, cast
+from sqlalchemy.ext.asyncio import AsyncSession
+from open_webui.internal.db import Base, JSONField, get_async_db_context
 
 from open_webui.models.files import (
     File,
@@ -27,7 +28,6 @@ from sqlalchemy import (
     Text,
     JSON,
     UniqueConstraint,
-    or_,
 )
 
 log = logging.getLogger(__name__)
@@ -144,25 +144,25 @@ SUSPENSION_TTL_DAYS = 30
 
 
 class KnowledgeTable:
-    def _get_access_grants(self, knowledge_id: str, db: Optional[Session] = None) -> list[AccessGrantModel]:
-        return AccessGrants.get_grants_by_resource('knowledge', knowledge_id, db=db)
+    async def _get_access_grants(self, knowledge_id: str, db: Optional[AsyncSession] = None) -> list[AccessGrantModel]:
+        return await AccessGrants.get_grants_by_resource('knowledge', knowledge_id, db=db)
 
-    def _to_knowledge_model(
+    async def _to_knowledge_model(
         self,
         knowledge: Knowledge,
         access_grants: Optional[list[AccessGrantModel]] = None,
-        db: Optional[Session] = None,
+        db: Optional[AsyncSession] = None,
     ) -> KnowledgeModel:
         knowledge_data = KnowledgeModel.model_validate(knowledge).model_dump(exclude={'access_grants'})
         knowledge_data['access_grants'] = (
-            access_grants if access_grants is not None else self._get_access_grants(knowledge_data['id'], db=db)
+            access_grants if access_grants is not None else await self._get_access_grants(knowledge_data['id'], db=db)
         )
         return KnowledgeModel.model_validate(knowledge_data)
 
-    def insert_new_knowledge(
-        self, user_id: str, form_data: KnowledgeForm, db: Optional[Session] = None
+    async def insert_new_knowledge(
+        self, user_id: str, form_data: KnowledgeForm, db: Optional[AsyncSession] = None
     ) -> Optional[KnowledgeModel]:
-        with get_db_context(db) as db:
+        async with get_async_db_context(db) as db:
             knowledge = KnowledgeModel(
                 **{
                     **form_data.model_dump(exclude={'access_grants'}),
@@ -177,29 +177,30 @@ class KnowledgeTable:
             try:
                 result = Knowledge(**knowledge.model_dump(exclude={'access_grants'}))
                 db.add(result)
-                db.commit()
-                db.refresh(result)
-                AccessGrants.set_access_grants('knowledge', result.id, form_data.access_grants, db=db)
+                await db.commit()
+                await db.refresh(result)
+                await AccessGrants.set_access_grants('knowledge', result.id, form_data.access_grants, db=db)
                 if result:
-                    return self._to_knowledge_model(result, db=db)
+                    return await self._to_knowledge_model(result, db=db)
                 else:
                     return None
             except Exception:
                 return None
 
-    def get_knowledge_bases(
-        self, skip: int = 0, limit: int = 30, db: Optional[Session] = None
+    async def get_knowledge_bases(
+        self, skip: int = 0, limit: int = 30, db: Optional[AsyncSession] = None
     ) -> list[KnowledgeUserModel]:
-        with get_db_context(db) as db:
-            all_knowledge = (
-                db.query(Knowledge).filter(Knowledge.deleted_at.is_(None)).order_by(Knowledge.updated_at.desc()).all()
+        async with get_async_db_context(db) as db:
+            result = await db.execute(
+                select(Knowledge).filter(Knowledge.deleted_at.is_(None)).order_by(Knowledge.updated_at.desc())
             )
+            all_knowledge = result.scalars().all()
             user_ids = list(set(knowledge.user_id for knowledge in all_knowledge))
             knowledge_ids = [knowledge.id for knowledge in all_knowledge]
 
-            users = Users.get_users_by_user_ids(user_ids, db=db) if user_ids else []
+            users = await Users.get_users_by_user_ids(user_ids, db=db) if user_ids else []
             users_dict = {user.id: user for user in users}
-            grants_map = AccessGrants.get_grants_by_resources('knowledge', knowledge_ids, db=db)
+            grants_map = await AccessGrants.get_grants_by_resources('knowledge', knowledge_ids, db=db)
 
             knowledge_bases = []
             for knowledge in all_knowledge:
@@ -207,10 +208,12 @@ class KnowledgeTable:
                 knowledge_bases.append(
                     KnowledgeUserModel.model_validate(
                         {
-                            **self._to_knowledge_model(
-                                knowledge,
-                                access_grants=grants_map.get(knowledge.id, []),
-                                db=db,
+                            **(
+                                await self._to_knowledge_model(
+                                    knowledge,
+                                    access_grants=grants_map.get(knowledge.id, []),
+                                    db=db,
+                                )
                             ).model_dump(),
                             'user': user.model_dump() if user else None,
                         }
@@ -218,18 +221,18 @@ class KnowledgeTable:
                 )
             return knowledge_bases
 
-    def search_knowledge_bases(
+    async def search_knowledge_bases(
         self,
         user_id: str,
         filter: dict,
         skip: int = 0,
         limit: int = 30,
-        db: Optional[Session] = None,
+        db: Optional[AsyncSession] = None,
     ) -> KnowledgeListResponse:
         try:
-            with get_db_context(db) as db:
-                query = (
-                    db.query(Knowledge, User)
+            async with get_async_db_context(db) as db:
+                stmt = (
+                    select(Knowledge, User)
                     .outerjoin(User, User.id == Knowledge.user_id)
                     .filter(Knowledge.deleted_at.is_(None))
                 )
@@ -237,7 +240,7 @@ class KnowledgeTable:
                 if filter:
                     query_key = filter.get('query')
                     if query_key:
-                        query = query.filter(
+                        stmt = stmt.filter(
                             or_(
                                 Knowledge.name.ilike(f'%{query_key}%'),
                                 Knowledge.description.ilike(f'%{query_key}%'),
@@ -249,43 +252,47 @@ class KnowledgeTable:
 
                     view_option = filter.get('view_option')
                     if view_option == 'created':
-                        query = query.filter(Knowledge.user_id == user_id)
+                        stmt = stmt.filter(Knowledge.user_id == user_id)
                     elif view_option == 'shared':
-                        query = query.filter(Knowledge.user_id != user_id)
+                        stmt = stmt.filter(Knowledge.user_id != user_id)
 
                     type_filter = filter.get('type')
                     if type_filter:
-                        query = query.filter(Knowledge.type == type_filter)
+                        stmt = stmt.filter(Knowledge.type == type_filter)
 
-                    query = AccessGrants.has_permission_filter(
+                    stmt = AccessGrants.has_permission_filter(
                         db=db,
-                        query=query,
+                        query=stmt,
                         DocumentModel=Knowledge,
                         filter=filter,
                         resource_type='knowledge',
                         permission='read',
                     )
 
-                query = query.order_by(Knowledge.updated_at.desc(), Knowledge.id.asc())
+                stmt = stmt.order_by(Knowledge.updated_at.desc(), Knowledge.id.asc())
 
-                total = query.count()
+                count_result = await db.execute(select(func.count()).select_from(stmt.subquery()))
+                total = count_result.scalar()
                 if skip:
-                    query = query.offset(skip)
+                    stmt = stmt.offset(skip)
                 if limit:
-                    query = query.limit(limit)
+                    stmt = stmt.limit(limit)
 
-                items = query.all()
+                result = await db.execute(stmt)
+                items = result.all()
 
                 knowledge_ids = [kb.id for kb, _ in items]
-                grants_map = AccessGrants.get_grants_by_resources('knowledge', knowledge_ids, db=db)
+                grants_map = await AccessGrants.get_grants_by_resources('knowledge', knowledge_ids, db=db)
 
                 knowledge_bases = []
                 for knowledge_base, user in items:
                     kb_data = {
-                        **self._to_knowledge_model(
-                            knowledge_base,
-                            access_grants=grants_map.get(knowledge_base.id, []),
-                            db=db,
+                        **(
+                            await self._to_knowledge_model(
+                                knowledge_base,
+                                access_grants=grants_map.get(knowledge_base.id, []),
+                                db=db,
+                            )
                         ).model_dump(),
                         'user': (UserModel.model_validate(user).model_dump() if user else None),
                     }
@@ -312,8 +319,8 @@ class KnowledgeTable:
             print(e)
             return KnowledgeListResponse(items=[], total=0)
 
-    def search_knowledge_files(
-        self, filter: dict, skip: int = 0, limit: int = 30, db: Optional[Session] = None
+    async def search_knowledge_files(
+        self, filter: dict, skip: int = 0, limit: int = 30, db: Optional[AsyncSession] = None
     ) -> KnowledgeFileListResponse:
         """
         Scalable version: search files across all knowledge bases the user has
@@ -325,10 +332,10 @@ class KnowledgeTable:
         # original implementation below intact for an easy revert if needed.
         return KnowledgeFileListResponse(items=[], total=0)
         try:
-            with get_db_context(db) as db:
+            async with get_async_db_context(db) as db:
                 # Base query: join Knowledge → KnowledgeFile → File
-                query = (
-                    db.query(File, User, Knowledge)
+                stmt = (
+                    select(File, User, Knowledge)
                     .join(KnowledgeFile, File.id == KnowledgeFile.file_id)
                     .join(Knowledge, KnowledgeFile.knowledge_id == Knowledge.id)
                     .outerjoin(User, User.id == KnowledgeFile.user_id)
@@ -340,34 +347,40 @@ class KnowledgeTable:
                 query = query.filter(Knowledge.type == 'local')
 
                 # Apply access-control directly to the joined query
-                # This makes the database handle filtering, even with 10k+ KBs
-                query = AccessGrants.has_permission_filter(
+                stmt = AccessGrants.has_permission_filter(
                     db=db,
-                    query=query,
+                    query=stmt,
                     DocumentModel=Knowledge,
                     filter=filter,
                     resource_type='knowledge',
                     permission='read',
                 )
 
-                # Apply filename search
+                # Apply filename / content search
                 if filter:
                     q = filter.get('query')
                     if q:
-                        query = query.filter(File.filename.ilike(f'%{q}%'))
+                        stmt = stmt.filter(
+                            or_(
+                                File.filename.ilike(f'%{q}%'),
+                                cast(File.data['content'], Text).ilike(f'%{q}%'),
+                            )
+                        )
 
                 # Order by file changes
-                query = query.order_by(File.updated_at.desc(), File.id.asc())
+                stmt = stmt.order_by(File.updated_at.desc(), File.id.asc())
 
                 # Count before pagination
-                total = query.count()
+                count_result = await db.execute(select(func.count()).select_from(stmt.subquery()))
+                total = count_result.scalar()
 
                 if skip:
-                    query = query.offset(skip)
+                    stmt = stmt.offset(skip)
                 if limit:
-                    query = query.limit(limit)
+                    stmt = stmt.limit(limit)
 
-                rows = query.all()
+                result = await db.execute(stmt)
+                rows = result.all()
 
                 items = []
                 for file, user, knowledge in rows:
@@ -375,7 +388,7 @@ class KnowledgeTable:
                         FileUserResponse(
                             **FileModel.model_validate(file).model_dump(),
                             user=(UserResponse(**UserModel.model_validate(user).model_dump()) if user else None),
-                            collection=self._to_knowledge_model(knowledge, db=db).model_dump(),
+                            collection=(await self._to_knowledge_model(knowledge, db=db)).model_dump(),
                         )
                     )
 
@@ -385,14 +398,15 @@ class KnowledgeTable:
             print('search_knowledge_files error:', e)
             return KnowledgeFileListResponse(items=[], total=0)
 
-    def check_access_by_user_id(self, id, user_id, permission='write', db: Optional[Session] = None) -> bool:
-        knowledge = self.get_knowledge_by_id(id, db=db)
+    async def check_access_by_user_id(self, id, user_id, permission='write', db: Optional[AsyncSession] = None) -> bool:
+        knowledge = await self.get_knowledge_by_id(id, db=db)
         if not knowledge:
             return False
         if knowledge.user_id == user_id:
             return True
-        user_group_ids = {group.id for group in Groups.get_groups_by_member_id(user_id, db=db)}
-        return AccessGrants.has_access(
+        user_groups = await Groups.get_groups_by_member_id(user_id, db=db)
+        user_group_ids = {group.id for group in user_groups}
+        return await AccessGrants.has_access(
             user_id=user_id,
             resource_type='knowledge',
             resource_id=knowledge.id,
@@ -401,66 +415,78 @@ class KnowledgeTable:
             db=db,
         )
 
-    def get_knowledge_bases_by_type(self, type: str) -> list[KnowledgeModel]:
-        """Get all knowledge bases of a specific type (no pagination limit)."""
-        with get_db() as db:
-            return [
-                KnowledgeModel.model_validate(kb)
-                for kb in db.query(Knowledge)
+    async def get_knowledge_bases_by_type(self, type: str, db: Optional[AsyncSession] = None) -> list[KnowledgeModel]:
+        """Get all knowledge bases of a specific type (no pagination limit). Used by Gradient sync schedulers."""
+        async with get_async_db_context(db) as db:
+            result = await db.execute(
+                select(Knowledge)
                 .filter_by(type=type)
                 .filter(Knowledge.deleted_at.is_(None))
                 .order_by(Knowledge.updated_at.desc())
-                .all()
-            ]
+            )
+            return [KnowledgeModel.model_validate(kb) for kb in result.scalars().all()]
 
-    def get_knowledge_bases_by_user_id(
-        self, user_id: str, permission: str = 'write', db: Optional[Session] = None
+    async def get_knowledge_bases_by_user_id(
+        self, user_id: str, permission: str = 'write', db: Optional[AsyncSession] = None
     ) -> list[KnowledgeUserModel]:
-        knowledge_bases = self.get_knowledge_bases(db=db)
-        user_group_ids = {group.id for group in Groups.get_groups_by_member_id(user_id, db=db)}
-        return [
-            knowledge_base
-            for knowledge_base in knowledge_bases
-            if knowledge_base.user_id == user_id
-            or AccessGrants.has_access(
+        knowledge_bases = await self.get_knowledge_bases(db=db)
+        user_groups = await Groups.get_groups_by_member_id(user_id, db=db)
+        user_group_ids = {group.id for group in user_groups}
+
+        result = []
+        for knowledge_base in knowledge_bases:
+            if knowledge_base.user_id == user_id:
+                result.append(knowledge_base)
+            elif await AccessGrants.has_access(
                 user_id=user_id,
                 resource_type='knowledge',
                 resource_id=knowledge_base.id,
                 permission=permission,
                 user_group_ids=user_group_ids,
                 db=db,
-            )
-        ]
+            ):
+                result.append(knowledge_base)
+        return result
 
-    def get_knowledge_items_by_user_id(self, user_id: str) -> list[KnowledgeModel]:
-        """Get all knowledge bases owned by a user (for deletion)."""
+    async def get_knowledge_items_by_user_id(
+        self, user_id: str, db: Optional[AsyncSession] = None
+    ) -> list[KnowledgeModel]:
+        """Get all knowledge bases owned by a user (for deletion). Consumed by DeletionService."""
         try:
-            with get_db() as db:
-                knowledges = db.query(Knowledge).filter_by(user_id=user_id).filter(Knowledge.deleted_at.is_(None)).all()
-                return [self._to_knowledge_model(k, db=db) for k in knowledges]
+            async with get_async_db_context(db) as db:
+                result = await db.execute(
+                    select(Knowledge).filter_by(user_id=user_id).filter(Knowledge.deleted_at.is_(None))
+                )
+                knowledges = result.scalars().all()
+                return [await self._to_knowledge_model(k, db=db) for k in knowledges]
         except Exception:
             return []
 
-    def get_knowledge_by_id(self, id: str, db: Optional[Session] = None) -> Optional[KnowledgeModel]:
+    async def get_knowledge_by_id(self, id: str, db: Optional[AsyncSession] = None) -> Optional[KnowledgeModel]:
         try:
-            with get_db_context(db) as db:
-                knowledge = db.query(Knowledge).filter_by(id=id).filter(Knowledge.deleted_at.is_(None)).first()
-                return self._to_knowledge_model(knowledge, db=db) if knowledge else None
+            async with get_async_db_context(db) as db:
+                # Preserve our soft-delete filter — soft-deleted KBs are
+                # invisible to all callers until either restored or hard-deleted
+                # by the retention worker.
+                result = await db.execute(select(Knowledge).filter_by(id=id).filter(Knowledge.deleted_at.is_(None)))
+                knowledge = result.scalars().first()
+                return await self._to_knowledge_model(knowledge, db=db) if knowledge else None
         except Exception:
             return None
 
-    def get_knowledge_by_id_and_user_id(
-        self, id: str, user_id: str, db: Optional[Session] = None
+    async def get_knowledge_by_id_and_user_id(
+        self, id: str, user_id: str, db: Optional[AsyncSession] = None
     ) -> Optional[KnowledgeModel]:
-        knowledge = self.get_knowledge_by_id(id, db=db)
+        knowledge = await self.get_knowledge_by_id(id, db=db)
         if not knowledge:
             return None
 
         if knowledge.user_id == user_id:
             return knowledge
 
-        user_group_ids = {group.id for group in Groups.get_groups_by_member_id(user_id, db=db)}
-        if AccessGrants.has_access(
+        user_groups = await Groups.get_groups_by_member_id(user_id, db=db)
+        user_group_ids = {group.id for group in user_groups}
+        if await AccessGrants.has_access(
             user_id=user_id,
             resource_type='knowledge',
             resource_id=knowledge.id,
@@ -471,7 +497,9 @@ class KnowledgeTable:
             return knowledge
         return None
 
-    def get_knowledge_by_file_id(self, file_id: str, db: Optional[Session] = None) -> Optional[KnowledgeModel]:
+    async def get_knowledge_by_file_id(
+        self, file_id: str, db: Optional[AsyncSession] = None
+    ) -> Optional[KnowledgeModel]:
         """Return the first KB that has this file linked via KnowledgeFile.
 
         Used by the built-in knowledge-search tool to resolve a file attached as
@@ -479,33 +507,33 @@ class KnowledgeTable:
         `file-<id>` collection exists (KB-uploaded files post-Phase-2).
         """
         try:
-            with get_db_context(db) as db:
-                row = (
-                    db.query(Knowledge)
+            async with get_async_db_context(db) as db:
+                result = await db.execute(
+                    select(Knowledge)
                     .join(KnowledgeFile, Knowledge.id == KnowledgeFile.knowledge_id)
                     .filter(KnowledgeFile.file_id == file_id)
                     .filter(Knowledge.deleted_at.is_(None))
-                    .first()
                 )
-                return self._to_knowledge_model(row, db=db) if row else None
+                row = result.scalars().first()
+                return await self._to_knowledge_model(row, db=db) if row else None
         except Exception as e:
-            print('get_knowledge_by_file_id error:', e)
+            log.exception(e)
             return None
 
-    def get_knowledges_by_file_id(self, file_id: str, db: Optional[Session] = None) -> list[KnowledgeModel]:
+    async def get_knowledges_by_file_id(self, file_id: str, db: Optional[AsyncSession] = None) -> list[KnowledgeModel]:
         try:
-            with get_db_context(db) as db:
-                knowledges = (
-                    db.query(Knowledge)
+            async with get_async_db_context(db) as db:
+                result = await db.execute(
+                    select(Knowledge)
                     .join(KnowledgeFile, Knowledge.id == KnowledgeFile.knowledge_id)
                     .filter(KnowledgeFile.file_id == file_id)
                     .filter(Knowledge.deleted_at.is_(None))
-                    .all()
                 )
+                knowledges = result.scalars().all()
                 knowledge_ids = [k.id for k in knowledges]
-                grants_map = AccessGrants.get_grants_by_resources('knowledge', knowledge_ids, db=db)
+                grants_map = await AccessGrants.get_grants_by_resources('knowledge', knowledge_ids, db=db)
                 return [
-                    self._to_knowledge_model(
+                    await self._to_knowledge_model(
                         knowledge,
                         access_grants=grants_map.get(knowledge.id, []),
                         db=db,
@@ -515,36 +543,40 @@ class KnowledgeTable:
         except Exception:
             return []
 
-    def get_knowledge_files_by_file_id(self, file_id: str) -> list[KnowledgeFileModel]:
-        """Get all knowledge_file records for a given file_id."""
+    async def get_knowledge_files_by_file_id(
+        self, file_id: str, db: Optional[AsyncSession] = None
+    ) -> list[KnowledgeFileModel]:
+        """Get all knowledge_file records for a given file_id. Consumed by DeletionService.delete_file."""
         try:
-            with get_db() as db:
-                knowledge_files = db.query(KnowledgeFile).filter_by(file_id=file_id).all()
-                return [KnowledgeFileModel.model_validate(kf) for kf in knowledge_files]
+            async with get_async_db_context(db) as db:
+                result = await db.execute(select(KnowledgeFile).filter_by(file_id=file_id))
+                return [KnowledgeFileModel.model_validate(kf) for kf in result.scalars().all()]
         except Exception:
             return []
 
-    def get_referenced_file_ids(self, file_ids: list[str]) -> set[str]:
-        """Return the subset of file_ids that still have knowledge_file references."""
+    async def get_referenced_file_ids(self, file_ids: list[str], db: Optional[AsyncSession] = None) -> set[str]:
+        """Return the subset of file_ids that still have knowledge_file references. Consumed by DeletionService."""
         if not file_ids:
             return set()
-        with get_db() as db:
-            rows = db.query(KnowledgeFile.file_id).filter(KnowledgeFile.file_id.in_(file_ids)).distinct().all()
-            return {row[0] for row in rows}
+        async with get_async_db_context(db) as db:
+            result = await db.execute(
+                select(KnowledgeFile.file_id).filter(KnowledgeFile.file_id.in_(file_ids)).distinct()
+            )
+            return {row[0] for row in result.all()}
 
-    def search_files_by_id(
+    async def search_files_by_id(
         self,
         knowledge_id: str,
         user_id: str,
         filter: dict,
         skip: int = 0,
         limit: int = 30,
-        db: Optional[Session] = None,
+        db: Optional[AsyncSession] = None,
     ) -> KnowledgeFileListResponse:
         try:
-            with get_db_context(db) as db:
-                query = (
-                    db.query(File, User, KnowledgeFile.created_at)
+            async with get_async_db_context(db) as db:
+                stmt = (
+                    select(File, User, KnowledgeFile.created_at)
                     .join(KnowledgeFile, File.id == KnowledgeFile.file_id)
                     .outerjoin(User, User.id == KnowledgeFile.user_id)
                     .filter(KnowledgeFile.knowledge_id == knowledge_id)
@@ -556,13 +588,18 @@ class KnowledgeTable:
                 if filter:
                     query_key = filter.get('query')
                     if query_key:
-                        query = query.filter(or_(File.filename.ilike(f'%{query_key}%')))
+                        stmt = stmt.filter(
+                            or_(
+                                File.filename.ilike(f'%{query_key}%'),
+                                cast(File.data['content'], Text).ilike(f'%{query_key}%'),
+                            )
+                        )
 
                     view_option = filter.get('view_option')
                     if view_option == 'created':
-                        query = query.filter(KnowledgeFile.user_id == user_id)
+                        stmt = stmt.filter(KnowledgeFile.user_id == user_id)
                     elif view_option == 'shared':
-                        query = query.filter(KnowledgeFile.user_id != user_id)
+                        stmt = stmt.filter(KnowledgeFile.user_id != user_id)
 
                     order_by = filter.get('order_by')
                     direction = filter.get('direction')
@@ -576,17 +613,19 @@ class KnowledgeTable:
                         primary_sort = File.updated_at.asc() if is_asc else File.updated_at.desc()
 
                 # Apply sort with secondary key for deterministic pagination
-                query = query.order_by(primary_sort, File.id.asc())
+                stmt = stmt.order_by(primary_sort, File.id.asc())
 
                 # Count BEFORE pagination
-                total = query.count()
+                count_result = await db.execute(select(func.count()).select_from(stmt.subquery()))
+                total = count_result.scalar()
 
                 if skip:
-                    query = query.offset(skip)
+                    stmt = stmt.offset(skip)
                 if limit:
-                    query = query.limit(limit)
+                    stmt = stmt.limit(limit)
 
-                items = query.all()
+                result = await db.execute(stmt)
+                items = result.all()
 
                 files = []
                 for file, user, added_at in items:
@@ -603,35 +642,36 @@ class KnowledgeTable:
             print(e)
             return KnowledgeFileListResponse(items=[], total=0)
 
-    def get_files_by_id(self, knowledge_id: str, db: Optional[Session] = None) -> list[FileModel]:
+    async def get_files_by_id(self, knowledge_id: str, db: Optional[AsyncSession] = None) -> list[FileModel]:
         try:
-            with get_db_context(db) as db:
-                files = (
-                    db.query(File)
+            async with get_async_db_context(db) as db:
+                result = await db.execute(
+                    select(File)
                     .join(KnowledgeFile, File.id == KnowledgeFile.file_id)
                     .filter(KnowledgeFile.knowledge_id == knowledge_id)
-                    .all()
                 )
+                files = result.scalars().all()
                 return [FileModel.model_validate(file) for file in files]
         except Exception:
             return []
 
-    def get_file_metadatas_by_id(self, knowledge_id: str, db: Optional[Session] = None) -> list[FileMetadataResponse]:
+    async def get_file_metadatas_by_id(
+        self, knowledge_id: str, db: Optional[AsyncSession] = None
+    ) -> list[FileMetadataResponse]:
         try:
-            with get_db_context(db) as db:
-                files = self.get_files_by_id(knowledge_id, db=db)
-                return [FileMetadataResponse(**file.model_dump()) for file in files]
+            files = await self.get_files_by_id(knowledge_id, db=db)
+            return [FileMetadataResponse(**file.model_dump()) for file in files]
         except Exception:
             return []
 
-    def add_file_to_knowledge_by_id(
+    async def add_file_to_knowledge_by_id(
         self,
         knowledge_id: str,
         file_id: str,
         user_id: str,
-        db: Optional[Session] = None,
+        db: Optional[AsyncSession] = None,
     ) -> Optional[KnowledgeFileModel]:
-        with get_db_context(db) as db:
+        async with get_async_db_context(db) as db:
             knowledge_file = KnowledgeFileModel(
                 **{
                     'id': str(uuid.uuid4()),
@@ -646,8 +686,8 @@ class KnowledgeTable:
             try:
                 result = KnowledgeFile(**knowledge_file.model_dump())
                 db.add(result)
-                db.commit()
-                db.refresh(result)
+                await db.commit()
+                await db.refresh(result)
                 if result:
                     return KnowledgeFileModel.model_validate(result)
                 else:
@@ -655,221 +695,235 @@ class KnowledgeTable:
             except Exception:
                 return None
 
-    def has_file(self, knowledge_id: str, file_id: str, db: Optional[Session] = None) -> bool:
+    async def has_file(self, knowledge_id: str, file_id: str, db: Optional[AsyncSession] = None) -> bool:
         """Check whether a file belongs to a knowledge base."""
         try:
-            with get_db_context(db) as db:
-                return db.query(KnowledgeFile).filter_by(knowledge_id=knowledge_id, file_id=file_id).first() is not None
+            async with get_async_db_context(db) as db:
+                result = await db.execute(
+                    select(KnowledgeFile).filter_by(knowledge_id=knowledge_id, file_id=file_id).limit(1)
+                )
+                return result.scalars().first() is not None
         except Exception:
             return False
 
-    def remove_file_from_knowledge_by_id(self, knowledge_id: str, file_id: str, db: Optional[Session] = None) -> bool:
+    async def remove_file_from_knowledge_by_id(
+        self, knowledge_id: str, file_id: str, db: Optional[AsyncSession] = None
+    ) -> bool:
         try:
-            with get_db_context(db) as db:
-                db.query(KnowledgeFile).filter_by(knowledge_id=knowledge_id, file_id=file_id).delete()
-                db.commit()
+            async with get_async_db_context(db) as db:
+                await db.execute(delete(KnowledgeFile).filter_by(knowledge_id=knowledge_id, file_id=file_id))
+                await db.commit()
                 return True
         except Exception:
             return False
 
-    def reset_knowledge_by_id(self, id: str, db: Optional[Session] = None) -> Optional[KnowledgeModel]:
+    async def reset_knowledge_by_id(self, id: str, db: Optional[AsyncSession] = None) -> Optional[KnowledgeModel]:
         try:
-            with get_db_context(db) as db:
+            async with get_async_db_context(db) as db:
                 # Delete all knowledge_file entries for this knowledge_id
-                db.query(KnowledgeFile).filter_by(knowledge_id=id).delete()
-                db.commit()
+                await db.execute(delete(KnowledgeFile).filter_by(knowledge_id=id))
+                await db.commit()
 
                 # Update the knowledge entry's updated_at timestamp
-                db.query(Knowledge).filter_by(id=id).update(
-                    {
-                        'updated_at': int(time.time()),
-                    }
-                )
-                db.commit()
+                await db.execute(update(Knowledge).filter_by(id=id).values(updated_at=int(time.time())))
+                await db.commit()
 
-                return self.get_knowledge_by_id(id=id, db=db)
+                return await self.get_knowledge_by_id(id=id, db=db)
         except Exception as e:
             log.exception(e)
             return None
 
-    def update_knowledge_by_id(
+    async def update_knowledge_by_id(
         self,
         id: str,
         form_data: KnowledgeForm,
         overwrite: bool = False,
-        db: Optional[Session] = None,
+        db: Optional[AsyncSession] = None,
     ) -> Optional[KnowledgeModel]:
         try:
-            with get_db_context(db) as db:
-                knowledge = self.get_knowledge_by_id(id=id, db=db)
-                db.query(Knowledge).filter_by(id=id).update(
-                    {
+            async with get_async_db_context(db) as db:
+                await db.execute(
+                    update(Knowledge)
+                    .filter_by(id=id)
+                    .values(
                         **form_data.model_dump(exclude={'access_grants'}, exclude_none=True),
-                        'updated_at': int(time.time()),
-                    }
+                        updated_at=int(time.time()),
+                    )
                 )
-                db.commit()
+                await db.commit()
                 if form_data.access_grants is not None:
-                    AccessGrants.set_access_grants('knowledge', id, form_data.access_grants, db=db)
-                return self.get_knowledge_by_id(id=id, db=db)
+                    await AccessGrants.set_access_grants('knowledge', id, form_data.access_grants, db=db)
+                return await self.get_knowledge_by_id(id=id, db=db)
         except Exception as e:
             log.exception(e)
             return None
 
-    def update_knowledge_user_id_by_id(self, id: str, user_id: str) -> Optional[KnowledgeModel]:
-        """Reassign a knowledge base's owner.
+    async def update_knowledge_user_id_by_id(
+        self, id: str, user_id: str, db: Optional[AsyncSession] = None
+    ) -> Optional[KnowledgeModel]:
+        """Reassign a knowledge base's owner. Used by the shared Confluence KB provisioning flow.
 
-        Used by the shared Confluence KB provisioning flow — the standard
-        ``update_knowledge_by_id`` cannot change ``user_id`` (it is not part
+        The standard ``update_knowledge_by_id`` cannot change ``user_id`` (it is not part
         of ``KnowledgeForm``). ``user_id`` may be '' for a system-owned KB.
         """
         try:
-            with get_db() as db:
-                knowledge = db.query(Knowledge).filter_by(id=id).first()
+            async with get_async_db_context(db) as db:
+                result = await db.execute(select(Knowledge).filter_by(id=id))
+                knowledge = result.scalars().first()
                 if knowledge:
                     knowledge.user_id = user_id
                     knowledge.updated_at = int(time.time())
-                    db.commit()
-                    db.refresh(knowledge)
+                    await db.commit()
+                    await db.refresh(knowledge)
                     return KnowledgeModel.model_validate(knowledge)
                 return None
         except Exception:
             return None
 
-    def update_knowledge_meta_by_id(self, id: str, meta: dict) -> Optional[KnowledgeModel]:
+    async def update_knowledge_meta_by_id(
+        self, id: str, meta: dict, db: Optional[AsyncSession] = None
+    ) -> Optional[KnowledgeModel]:
+        """Update only the meta JSON on a knowledge base. Used by cloud-sync workers."""
         try:
-            with get_db() as db:
-                knowledge = db.query(Knowledge).filter_by(id=id).first()
+            async with get_async_db_context(db) as db:
+                result = await db.execute(select(Knowledge).filter_by(id=id))
+                knowledge = result.scalars().first()
                 if knowledge:
                     knowledge.meta = meta
                     knowledge.updated_at = int(time.time())
-                    db.commit()
-                    db.refresh(knowledge)
+                    await db.commit()
+                    await db.refresh(knowledge)
                     return KnowledgeModel.model_validate(knowledge)
                 return None
         except Exception:
             return None
 
-    def update_knowledge_data_by_id(
-        self, id: str, data: dict, db: Optional[Session] = None
+    async def update_knowledge_data_by_id(
+        self, id: str, data: dict, db: Optional[AsyncSession] = None
     ) -> Optional[KnowledgeModel]:
         try:
-            with get_db_context(db) as db:
-                knowledge = self.get_knowledge_by_id(id=id, db=db)
-                db.query(Knowledge).filter_by(id=id).update(
-                    {
-                        'data': data,
-                        'updated_at': int(time.time()),
-                    }
+            async with get_async_db_context(db) as db:
+                await db.execute(
+                    update(Knowledge)
+                    .filter_by(id=id)
+                    .values(
+                        data=data,
+                        updated_at=int(time.time()),
+                    )
                 )
-                db.commit()
-                return self.get_knowledge_by_id(id=id, db=db)
+                await db.commit()
+                return await self.get_knowledge_by_id(id=id, db=db)
         except Exception as e:
             log.exception(e)
             return None
 
-    def delete_knowledge_by_id(self, id: str, db: Optional[Session] = None) -> bool:
+    async def delete_knowledge_by_id(self, id: str, db: Optional[AsyncSession] = None) -> bool:
         try:
-            with get_db_context(db) as db:
-                AccessGrants.revoke_all_access('knowledge', id, db=db)
-                db.query(Knowledge).filter_by(id=id).delete()
-                db.commit()
+            async with get_async_db_context(db) as db:
+                await AccessGrants.revoke_all_access('knowledge', id, db=db)
+                await db.execute(delete(Knowledge).filter_by(id=id))
+                await db.commit()
                 return True
         except Exception:
             return False
 
-    def delete_all_knowledge(self, db: Optional[Session] = None) -> bool:
-        with get_db_context(db) as db:
+    async def delete_all_knowledge(self, db: Optional[AsyncSession] = None) -> bool:
+        async with get_async_db_context(db) as db:
             try:
-                knowledge_ids = [row[0] for row in db.query(Knowledge.id).all()]
+                result = await db.execute(select(Knowledge.id))
+                knowledge_ids = [row[0] for row in result.all()]
                 for knowledge_id in knowledge_ids:
-                    AccessGrants.revoke_all_access('knowledge', knowledge_id, db=db)
-                db.query(Knowledge).delete()
-                db.commit()
+                    await AccessGrants.revoke_all_access('knowledge', knowledge_id, db=db)
+                await db.execute(delete(Knowledge))
+                await db.commit()
 
                 return True
             except Exception:
                 return False
 
-    def get_pending_deletions(self, limit: int = 50) -> list[KnowledgeModel]:
+    async def get_pending_deletions(self, limit: int = 50, db: Optional[AsyncSession] = None) -> list[KnowledgeModel]:
         """Get knowledge bases marked for deletion (for cleanup worker)."""
-        with get_db() as db:
-            return [
-                KnowledgeModel.model_validate(kb)
-                for kb in db.query(Knowledge)
+        async with get_async_db_context(db) as db:
+            result = await db.execute(
+                select(Knowledge)
                 .filter(Knowledge.deleted_at.isnot(None))
                 .order_by(Knowledge.deleted_at.asc())
                 .limit(limit)
-                .all()
-            ]
+            )
+            return [KnowledgeModel.model_validate(kb) for kb in result.scalars().all()]
 
-    def get_stale_knowledge(
+    async def get_stale_knowledge(
         self,
         stale_before: int,
         limit: int = 50,
         exclude_user_ids: Optional[list[str]] = None,
+        db: Optional[AsyncSession] = None,
     ) -> list[KnowledgeModel]:
         """Find non-deleted local KBs whose updated_at is before the given timestamp.
         Only targets 'local' type — cloud KBs have their own suspension lifecycle."""
-        with get_db() as db:
-            query = (
-                db.query(Knowledge)
+        async with get_async_db_context(db) as db:
+            stmt = (
+                select(Knowledge)
                 .filter(Knowledge.deleted_at.is_(None))
                 .filter(Knowledge.updated_at < stale_before)
                 .filter(Knowledge.type == 'local')  # Cloud KBs have suspension TTL
             )
             if exclude_user_ids:
-                query = query.filter(Knowledge.user_id.notin_(exclude_user_ids))
-            return [
-                KnowledgeModel.model_validate(kb)
-                for kb in query.order_by(Knowledge.updated_at.asc()).limit(limit).all()
-            ]
+                stmt = stmt.filter(Knowledge.user_id.notin_(exclude_user_ids))
+            stmt = stmt.order_by(Knowledge.updated_at.asc()).limit(limit)
+            result = await db.execute(stmt)
+            return [KnowledgeModel.model_validate(kb) for kb in result.scalars().all()]
 
-    def soft_delete_by_id(self, id: str) -> bool:
+    async def soft_delete_by_id(self, id: str, db: Optional[AsyncSession] = None) -> bool:
         """Mark a knowledge base as deleted (soft-delete)."""
-        with get_db() as db:
-            result = (
-                db.query(Knowledge)
+        async with get_async_db_context(db) as db:
+            result = await db.execute(
+                update(Knowledge)
                 .filter_by(id=id)
                 .filter(Knowledge.deleted_at.is_(None))
-                .update({'deleted_at': int(time.time())})
+                .values(deleted_at=int(time.time()))
             )
-            db.commit()
-            return result > 0
+            await db.commit()
+            return result.rowcount > 0
 
-    def soft_delete_by_user_id(self, user_id: str) -> int:
+    async def soft_delete_by_user_id(self, user_id: str, db: Optional[AsyncSession] = None) -> int:
         """Soft-delete all knowledge bases for a user. Returns count."""
-        with get_db() as db:
-            result = (
-                db.query(Knowledge)
+        async with get_async_db_context(db) as db:
+            result = await db.execute(
+                update(Knowledge)
                 .filter_by(user_id=user_id)
                 .filter(Knowledge.deleted_at.is_(None))
-                .update({'deleted_at': int(time.time())})
+                .values(deleted_at=int(time.time()))
             )
-            db.commit()
-            return result
+            await db.commit()
+            return result.rowcount
 
-    def get_knowledge_by_id_unfiltered(self, id: str) -> Optional[KnowledgeModel]:
+    async def get_knowledge_by_id_unfiltered(
+        self, id: str, db: Optional[AsyncSession] = None
+    ) -> Optional[KnowledgeModel]:
         """Get a knowledge base by ID, including soft-deleted ones. For internal/cleanup use only."""
         try:
-            with get_db() as db:
-                knowledge = db.query(Knowledge).filter_by(id=id).first()
+            async with get_async_db_context(db) as db:
+                result = await db.execute(select(Knowledge).filter_by(id=id))
+                knowledge = result.scalars().first()
                 return KnowledgeModel.model_validate(knowledge) if knowledge else None
         except Exception:
             return None
 
-    def get_suspended_expired_knowledge(self, limit: int = 50) -> list[KnowledgeModel]:
+    async def get_suspended_expired_knowledge(
+        self, limit: int = 50, db: Optional[AsyncSession] = None
+    ) -> list[KnowledgeModel]:
         """Get cloud KBs suspended for longer than SUSPENSION_TTL_DAYS."""
         cutoff = int(time.time()) - (SUSPENSION_TTL_DAYS * 24 * 60 * 60)
 
-        with get_db() as db:
-            candidates = (
-                db.query(Knowledge)
+        async with get_async_db_context(db) as db:
+            result = await db.execute(
+                select(Knowledge)
                 .filter(Knowledge.deleted_at.is_(None))
                 .filter(Knowledge.type != 'local')
                 .limit(limit * 5)
-                .all()
             )
+            candidates = result.scalars().all()
 
             expired = []
             for kb in candidates:
@@ -878,7 +932,7 @@ class KnowledgeTable:
                     sync_info = meta.get(meta_key, {})
                     suspended_at = sync_info.get('suspended_at')
                     if suspended_at and suspended_at < cutoff:
-                        expired.append(self._to_knowledge_model(kb, db=db))
+                        expired.append(await self._to_knowledge_model(kb, db=db))
                         break
 
                 if len(expired) >= limit:
@@ -886,11 +940,12 @@ class KnowledgeTable:
 
             return expired
 
-    def is_suspended(self, id: str) -> bool:
+    async def is_suspended(self, id: str, db: Optional[AsyncSession] = None) -> bool:
         """Check if a knowledge base is currently suspended."""
         try:
-            with get_db() as db:
-                knowledge = db.query(Knowledge).filter_by(id=id).filter(Knowledge.deleted_at.is_(None)).first()
+            async with get_async_db_context(db) as db:
+                result = await db.execute(select(Knowledge).filter_by(id=id).filter(Knowledge.deleted_at.is_(None)))
+                knowledge = result.scalars().first()
                 if not knowledge:
                     return False
                 meta = knowledge.meta or {}
@@ -902,11 +957,12 @@ class KnowledgeTable:
         except Exception:
             return False
 
-    def get_suspension_info(self, id: str) -> Optional[dict]:
+    async def get_suspension_info(self, id: str, db: Optional[AsyncSession] = None) -> Optional[dict]:
         """Get suspension details for a KB. Returns None if not suspended."""
         try:
-            with get_db() as db:
-                knowledge = db.query(Knowledge).filter_by(id=id).filter(Knowledge.deleted_at.is_(None)).first()
+            async with get_async_db_context(db) as db:
+                result = await db.execute(select(Knowledge).filter_by(id=id).filter(Knowledge.deleted_at.is_(None)))
+                knowledge = result.scalars().first()
                 if not knowledge:
                     return None
                 meta = knowledge.meta or {}

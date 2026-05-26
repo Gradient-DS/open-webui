@@ -11,10 +11,10 @@ import time
 from typing import Optional
 
 from pydantic import BaseModel, ConfigDict, Field
-from sqlalchemy import BigInteger, Boolean, Column, Integer, JSON, Text, func
-from sqlalchemy.orm import Session
+from sqlalchemy import BigInteger, Boolean, Column, Integer, JSON, Text, func, select, delete
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from open_webui.internal.db import Base, get_db_context
+from open_webui.internal.db import Base, get_async_db_context
 from open_webui.models.access_grants import AccessGrantModel, AccessGrants
 
 log = logging.getLogger(__name__)
@@ -98,8 +98,8 @@ RESOURCE_TYPE = 'agent_config'
 class AgentConfigsTable:
     RESOURCE_TYPE = RESOURCE_TYPE
 
-    def _to_model(self, row: AgentConfig, db: Session) -> AgentConfigModel:
-        grants = AccessGrants.get_grants_by_resource(self.RESOURCE_TYPE, row.id, db=db)
+    async def _to_model(self, row: AgentConfig, db: AsyncSession) -> AgentConfigModel:
+        grants = await AccessGrants.get_grants_by_resource(self.RESOURCE_TYPE, row.id, db=db)
         return AgentConfigModel(
             id=row.id,
             user_id=row.user_id,
@@ -115,16 +115,17 @@ class AgentConfigsTable:
             updated_at=row.updated_at,
         )
 
-    def insert_new_agent_config(
+    async def insert_new_agent_config(
         self,
         user_id: str,
         slug: str,
         form_data: AgentConfigForm,
-        db: Optional[Session] = None,
+        db: Optional[AsyncSession] = None,
     ) -> Optional[AgentConfigModel]:
-        with get_db_context(db) as db:
+        async with get_async_db_context(db) as db:
             now = int(time.time())
-            current_max = db.query(func.max(AgentConfig.position)).scalar()
+            max_result = await db.execute(select(func.max(AgentConfig.position)))
+            current_max = max_result.scalar()
             next_position = (int(current_max) + 1) if current_max is not None else 0
             row = AgentConfig(
                 id=slug,
@@ -140,20 +141,21 @@ class AgentConfigsTable:
                 updated_at=now,
             )
             db.add(row)
-            db.commit()
-            db.refresh(row)
+            await db.commit()
+            await db.refresh(row)
             if form_data.access_grants is not None:
-                AccessGrants.set_access_grants(self.RESOURCE_TYPE, slug, form_data.access_grants, db=db)
-            return self._to_model(row, db)
+                await AccessGrants.set_access_grants(self.RESOURCE_TYPE, slug, form_data.access_grants, db=db)
+            return await self._to_model(row, db)
 
-    def update_agent_config(
+    async def update_agent_config(
         self,
         slug: str,
         form_data: AgentConfigForm,
-        db: Optional[Session] = None,
+        db: Optional[AsyncSession] = None,
     ) -> Optional[AgentConfigModel]:
-        with get_db_context(db) as db:
-            row = db.query(AgentConfig).filter_by(id=slug).first()
+        async with get_async_db_context(db) as db:
+            result = await db.execute(select(AgentConfig).filter_by(id=slug))
+            row = result.scalars().first()
             if not row:
                 return None
             row.name = form_data.name
@@ -164,51 +166,54 @@ class AgentConfigsTable:
             if form_data.meta is not None:
                 row.meta = form_data.meta
             row.updated_at = int(time.time())
-            db.commit()
-            db.refresh(row)
+            await db.commit()
+            await db.refresh(row)
             if form_data.access_grants is not None:
-                AccessGrants.set_access_grants(self.RESOURCE_TYPE, slug, form_data.access_grants, db=db)
-            return self._to_model(row, db)
+                await AccessGrants.set_access_grants(self.RESOURCE_TYPE, slug, form_data.access_grants, db=db)
+            return await self._to_model(row, db)
 
-    def delete_agent_config(self, slug: str, db: Optional[Session] = None) -> bool:
-        with get_db_context(db) as db:
-            row = db.query(AgentConfig).filter_by(id=slug).first()
+    async def delete_agent_config(self, slug: str, db: Optional[AsyncSession] = None) -> bool:
+        async with get_async_db_context(db) as db:
+            result = await db.execute(select(AgentConfig).filter_by(id=slug))
+            row = result.scalars().first()
             if not row:
                 return False
-            db.delete(row)
-            AccessGrants.revoke_all_access(self.RESOURCE_TYPE, slug, db=db)
-            db.commit()
+            await db.delete(row)
+            await AccessGrants.revoke_all_access(self.RESOURCE_TYPE, slug, db=db)
+            await db.commit()
             return True
 
-    def get_agent_config_by_id(self, slug: str, db: Optional[Session] = None) -> Optional[AgentConfigModel]:
-        with get_db_context(db) as db:
-            row = db.query(AgentConfig).filter_by(id=slug).first()
-            return self._to_model(row, db) if row else None
+    async def get_agent_config_by_id(self, slug: str, db: Optional[AsyncSession] = None) -> Optional[AgentConfigModel]:
+        async with get_async_db_context(db) as db:
+            result = await db.execute(select(AgentConfig).filter_by(id=slug))
+            row = result.scalars().first()
+            return await self._to_model(row, db) if row else None
 
-    def list_all(self, db: Optional[Session] = None) -> list[AgentConfigModel]:
+    async def list_all(self, db: Optional[AsyncSession] = None) -> list[AgentConfigModel]:
         """Admin: every row, regardless of access."""
-        with get_db_context(db) as db:
-            rows = db.query(AgentConfig).order_by(AgentConfig.position.asc(), AgentConfig.name.asc()).all()
-            return [self._to_model(r, db) for r in rows]
+        async with get_async_db_context(db) as db:
+            result = await db.execute(select(AgentConfig).order_by(AgentConfig.position.asc(), AgentConfig.name.asc()))
+            rows = result.scalars().all()
+            return [await self._to_model(r, db) for r in rows]
 
-    def list_visible_to_user(
+    async def list_visible_to_user(
         self,
         user_id: str,
         user_group_ids: set[str],
-        db: Optional[Session] = None,
+        db: Optional[AsyncSession] = None,
     ) -> list[AgentConfigModel]:
         """User: rows the user has read access to AND is_active."""
-        with get_db_context(db) as db:
-            active_rows = (
-                db.query(AgentConfig)
+        async with get_async_db_context(db) as db:
+            result = await db.execute(
+                select(AgentConfig)
                 .filter(AgentConfig.is_active.is_(True))
                 .order_by(AgentConfig.position.asc(), AgentConfig.name.asc())
-                .all()
             )
+            active_rows = result.scalars().all()
             if not active_rows:
                 return []
             slug_ids = [r.id for r in active_rows]
-            accessible_ids = AccessGrants.get_accessible_resource_ids(
+            accessible_ids = await AccessGrants.get_accessible_resource_ids(
                 user_id=user_id,
                 resource_type=self.RESOURCE_TYPE,
                 resource_ids=slug_ids,
@@ -216,12 +221,12 @@ class AgentConfigsTable:
                 user_group_ids=user_group_ids,
                 db=db,
             )
-            return [self._to_model(r, db) for r in active_rows if r.id in accessible_ids]
+            return [await self._to_model(r, db) for r in active_rows if r.id in accessible_ids]
 
-    def set_positions(
+    async def set_positions(
         self,
         slugs: list[str],
-        db: Optional[Session] = None,
+        db: Optional[AsyncSession] = None,
     ) -> list[AgentConfigModel]:
         """Persist a new ordering for the given slugs.
 
@@ -235,11 +240,12 @@ class AgentConfigsTable:
         :return: Refreshed admin list (every row, sorted by position).
         """
         if not slugs:
-            with get_db_context(db) as db:
-                return self.list_all(db=db)
+            async with get_async_db_context(db) as db:
+                return await self.list_all(db=db)
 
-        with get_db_context(db) as db:
-            existing = {r.id: r for r in db.query(AgentConfig).filter(AgentConfig.id.in_(slugs)).all()}
+        async with get_async_db_context(db) as db:
+            result = await db.execute(select(AgentConfig).filter(AgentConfig.id.in_(slugs)))
+            existing = {r.id: r for r in result.scalars().all()}
             now = int(time.time())
             for index, slug in enumerate(slugs):
                 row = existing.get(slug)
@@ -247,15 +253,15 @@ class AgentConfigsTable:
                     continue
                 row.position = index
                 row.updated_at = now
-            db.commit()
-            return self.list_all(db=db)
+            await db.commit()
+            return await self.list_all(db=db)
 
-    def seed_from_env(
+    async def seed_from_env(
         self,
         env_configs: list[dict],
         valid_slugs: list[str],
         overwrite: bool = False,
-        db: Optional[Session] = None,
+        db: Optional[AsyncSession] = None,
     ) -> tuple[int, int, int]:
         """Seed agent_config rows from env-supplied defaults.
 
@@ -275,7 +281,7 @@ class AgentConfigsTable:
         """
         inserted = updated = skipped = 0
         valid = set(valid_slugs)
-        with get_db_context(db) as db:
+        async with get_async_db_context(db) as db:
             now = int(time.time())
             for raw in env_configs:
                 if not isinstance(raw, dict):
@@ -299,12 +305,14 @@ class AgentConfigsTable:
                 # config — explicit ``description`` always wins.
                 env_description = raw.get('description') or raw.get('cta_copy')
 
-                row = db.query(AgentConfig).filter_by(id=slug).first()
+                row_result = await db.execute(select(AgentConfig).filter_by(id=slug))
+                row = row_result.scalars().first()
                 if row is None:
                     if 'position' in raw:
                         position = int(raw['position'])
                     else:
-                        current_max = db.query(func.max(AgentConfig.position)).scalar()
+                        max_result = await db.execute(select(func.max(AgentConfig.position)))
+                        current_max = max_result.scalar()
                         position = (int(current_max) + 1) if current_max is not None else 0
                     row = AgentConfig(
                         id=slug,
@@ -333,17 +341,17 @@ class AgentConfigsTable:
                     updated += 1
                 else:
                     skipped += 1
-            db.commit()
+            await db.commit()
         return inserted, updated, skipped
 
-    def user_has_access(
+    async def user_has_access(
         self,
         user_id: str,
         slug: str,
         user_group_ids: Optional[set[str]] = None,
-        db: Optional[Session] = None,
+        db: Optional[AsyncSession] = None,
     ) -> bool:
-        return AccessGrants.has_access(
+        return await AccessGrants.has_access(
             user_id=user_id,
             resource_type=self.RESOURCE_TYPE,
             resource_id=slug,

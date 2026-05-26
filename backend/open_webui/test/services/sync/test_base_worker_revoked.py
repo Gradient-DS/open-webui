@@ -87,25 +87,24 @@ async def test_handle_revoked_item_removes_from_kb():
     with (
         patch(
             'open_webui.services.sync.base_worker.Files.get_file_by_id',
-            return_value=existing,
+            new=AsyncMock(return_value=existing),
         ),
         patch(
             'open_webui.services.sync.base_worker.Knowledges.remove_file_from_knowledge_by_id',
+            new_callable=AsyncMock,
         ) as mock_remove,
         patch(
-            'open_webui.services.sync.base_worker.VECTOR_DB_CLIENT.delete',
+            'open_webui.services.sync.base_worker.ASYNC_VECTOR_DB_CLIENT.delete',
+            new_callable=AsyncMock,
         ) as mock_delete,
         patch(
             'open_webui.services.sync.base_worker.Knowledges.get_knowledge_files_by_file_id',
-            return_value=[],
+            new=AsyncMock(return_value=[]),
         ),
         patch(
             'open_webui.services.sync.base_worker.DeletionService.delete_file',
+            new_callable=AsyncMock,
         ) as mock_delete_file,
-        patch(
-            'open_webui.services.sync.base_worker.asyncio.to_thread',
-            new=AsyncMock(),
-        ) as mock_to_thread,
         patch(
             'open_webui.socket.main.sio',
             sio_mock,
@@ -114,9 +113,9 @@ async def test_handle_revoked_item_removes_from_kb():
         result = await worker._handle_revoked_item('stub-item-1')
 
     assert result == 1
-    mock_remove.assert_called_once_with('kb-test', 'stub-item-1')
-    mock_delete.assert_called_once()
-    mock_to_thread.assert_awaited_once()
+    mock_remove.assert_awaited_once_with('kb-test', 'stub-item-1')
+    mock_delete.assert_awaited_once()
+    mock_delete_file.assert_awaited_once_with('stub-item-1')
     sio_mock.emit.assert_awaited_once()
     args, kwargs = sio_mock.emit.call_args
     assert args[0] == 'stub:file:deleted'
@@ -130,15 +129,16 @@ async def test_handle_revoked_item_no_existing_file():
     with (
         patch(
             'open_webui.services.sync.base_worker.Files.get_file_by_id',
-            return_value=None,
+            new=AsyncMock(return_value=None),
         ),
         patch(
             'open_webui.services.sync.base_worker.Knowledges.remove_file_from_knowledge_by_id',
+            new_callable=AsyncMock,
         ) as mock_remove,
     ):
         result = await worker._handle_revoked_item('stub-missing')
     assert result == 0
-    mock_remove.assert_not_called()
+    mock_remove.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -151,25 +151,24 @@ async def test_handle_revoked_item_other_kb_references_preserve_file():
     with (
         patch(
             'open_webui.services.sync.base_worker.Files.get_file_by_id',
-            return_value=existing,
+            new=AsyncMock(return_value=existing),
         ),
         patch(
             'open_webui.services.sync.base_worker.Knowledges.remove_file_from_knowledge_by_id',
+            new_callable=AsyncMock,
         ),
         patch(
-            'open_webui.services.sync.base_worker.VECTOR_DB_CLIENT.delete',
+            'open_webui.services.sync.base_worker.ASYNC_VECTOR_DB_CLIENT.delete',
+            new_callable=AsyncMock,
         ),
         patch(
             'open_webui.services.sync.base_worker.Knowledges.get_knowledge_files_by_file_id',
-            return_value=[other_ref],
+            new=AsyncMock(return_value=[other_ref]),
         ),
         patch(
             'open_webui.services.sync.base_worker.DeletionService.delete_file',
+            new_callable=AsyncMock,
         ) as mock_delete_file,
-        patch(
-            'open_webui.services.sync.base_worker.asyncio.to_thread',
-            new=AsyncMock(),
-        ) as mock_to_thread,
         patch(
             'open_webui.socket.main.sio',
             AsyncMock(),
@@ -181,8 +180,7 @@ async def test_handle_revoked_item_other_kb_references_preserve_file():
     # KB join row was removed (we don't assert on remove_file_from_knowledge_by_id
     # here — the prior test covers it). Critical assertion: the File row was NOT
     # hard-deleted because another KB still has it.
-    mock_to_thread.assert_not_called()
-    mock_delete_file.assert_not_called()
+    mock_delete_file.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -222,10 +220,11 @@ async def test_sync_via_pipeline_revoked_count_in_total_deleted():
     with (
         patch(
             'open_webui.services.sync.base_worker.Knowledges.get_knowledge_by_id',
-            return_value=fake_kb,
+            new=AsyncMock(return_value=fake_kb),
         ),
         patch(
             'open_webui.services.sync.base_worker.Knowledges.update_knowledge_meta_by_id',
+            new_callable=AsyncMock,
         ),
     ):
         result = await worker._sync_via_pipeline(

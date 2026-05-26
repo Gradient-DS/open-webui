@@ -15,7 +15,7 @@ from open_webui.models.file_attachments import FileAttachmentForm, FileAttachmen
 from open_webui.models.files import FileForm, Files
 from open_webui.models.knowledge import KnowledgeForm, Knowledges
 from open_webui.retrieval.loaders.main import Loader
-from open_webui.retrieval.vector.factory import VECTOR_DB_CLIENT
+from open_webui.retrieval.vector.async_client import ASYNC_VECTOR_DB_CLIENT
 from open_webui.routers.retrieval import save_docs_to_vector_db
 from open_webui.services.sync.provider import file_id_prefix_for
 from open_webui.storage.provider import Storage
@@ -143,9 +143,9 @@ def _validate_custom_metadata(doc: IngestDocumentBase, provider_config: dict):
         )
 
 
-def _find_kb_by_source_id(provider: str, source_id: str):
+async def _find_kb_by_source_id(provider: str, source_id: str):
     """Find a knowledge base by provider slug + external source_id."""
-    kbs = Knowledges.get_knowledge_bases_by_type(provider)
+    kbs = await Knowledges.get_knowledge_bases_by_type(provider)
     for kb in kbs:
         meta = kb.meta or {}
         if meta.get('integration', {}).get('source_id') == source_id:
@@ -153,7 +153,7 @@ def _find_kb_by_source_id(provider: str, source_id: str):
     return None
 
 
-def _create_kb_for_provider(
+async def _create_kb_for_provider(
     provider: str,
     provider_config: dict,
     collection: IngestCollection,
@@ -166,7 +166,7 @@ def _create_kb_for_provider(
         type=provider,
         access_control=collection.access_control,
     )
-    knowledge = Knowledges.insert_new_knowledge(user_id, form)
+    knowledge = await Knowledges.insert_new_knowledge(user_id, form)
     meta = {
         'integration': {
             'provider': provider,
@@ -177,8 +177,8 @@ def _create_kb_for_provider(
             'provider_metadata': collection.metadata,
         }
     }
-    Knowledges.update_knowledge_meta_by_id(knowledge.id, meta)
-    return Knowledges.get_knowledge_by_id(knowledge.id)
+    await Knowledges.update_knowledge_meta_by_id(knowledge.id, meta)
+    return await Knowledges.get_knowledge_by_id(knowledge.id)
 
 
 def _maybe_upload_original_bytes(
@@ -207,7 +207,7 @@ def _maybe_upload_original_bytes(
     return file_path
 
 
-def _create_or_update_file_record(
+async def _create_or_update_file_record(
     file_id: str,
     doc: IngestDocumentBase,
     content_text: str,
@@ -247,10 +247,10 @@ def _create_or_update_file_record(
         if key in doc.metadata:
             meta[key] = doc.metadata[key]
 
-    existing_file = Files.get_file_by_id(file_id)
+    existing_file = await Files.get_file_by_id(file_id)
     if existing_file:
-        Files.update_file_metadata_by_id(file_id, meta)
-        Files.update_file_data_by_id(file_id, {'content': content_text})
+        await Files.update_file_metadata_by_id(file_id, meta)
+        await Files.update_file_data_by_id(file_id, {'content': content_text})
         # Stub File rows created up-front by sync workers
         # (services/sync/base_worker._create_stub_file_rows) carry
         # ``path=''`` until the loader-worker callback arrives with the
@@ -261,7 +261,7 @@ def _create_or_update_file_record(
         # (e.g. push integrations re-syncing a previously-byte-bearing
         # KB).
         if file_path and file_path != (existing_file.path or ''):
-            Files.update_file_path_by_id(file_id, file_path)
+            await Files.update_file_path_by_id(file_id, file_path)
         return 'updated'
     else:
         text_hash = hashlib.sha256(content_text.encode()).hexdigest()
@@ -273,15 +273,15 @@ def _create_or_update_file_record(
             data={'content': content_text},
             meta=meta,
         )
-        Files.insert_new_file(user_id, file_form)
-        Knowledges.add_file_to_knowledge_by_id(knowledge_id, file_id, user_id)
+        await Files.insert_new_file(user_id, file_form)
+        await Knowledges.add_file_to_knowledge_by_id(knowledge_id, file_id, user_id)
         return 'created'
 
 
-def _delete_old_vectors(knowledge_id: str, file_id: str):
+async def _delete_old_vectors(knowledge_id: str, file_id: str):
     """Delete existing vectors for a file (idempotent update)."""
     try:
-        VECTOR_DB_CLIENT.delete(
+        await ASYNC_VECTOR_DB_CLIENT.delete(
             collection_name=knowledge_id,
             filter={'file_id': file_id},
         )
@@ -346,7 +346,7 @@ def _build_base_metadata(doc: IngestDocumentBase, file_id: str, provider: str, u
 # --- Processing Functions ---
 
 
-def _process_parsed_text_document(
+async def _process_parsed_text_document(
     request: Request,
     knowledge_id: str,
     provider: str,
@@ -367,7 +367,7 @@ def _process_parsed_text_document(
 
     file_path = _maybe_upload_original_bytes(file_id, doc, provider, original_file)
 
-    status = _create_or_update_file_record(
+    status = await _create_or_update_file_record(
         file_id=file_id,
         doc=doc,
         content_text=doc.text,
@@ -378,7 +378,7 @@ def _process_parsed_text_document(
     )
 
     if status == 'updated':
-        _delete_old_vectors(knowledge_id, file_id)
+        await _delete_old_vectors(knowledge_id, file_id)
 
     text_hash = hashlib.sha256(doc.text.encode()).hexdigest()
     lc_doc = Document(
@@ -402,10 +402,10 @@ def _process_parsed_text_document(
         # Clear the stale ``error`` field too — update_file_data_by_id is a
         # shallow merge, so without this a row that succeeded after a prior
         # failure would still carry the old error message in data.error.
-        Files.update_file_data_by_id(file_id, {'status': 'completed', 'error': None})
+        await Files.update_file_data_by_id(file_id, {'status': 'completed', 'error': None})
     except Exception as e:
         log.exception(f'Failed to store document {doc.source_id} in vector DB')
-        Files.update_file_data_by_id(file_id, {'status': 'error', 'error': str(e)})
+        await Files.update_file_data_by_id(file_id, {'status': 'error', 'error': str(e)})
         return {
             'source_id': doc.source_id,
             'file_id': file_id,
@@ -416,7 +416,7 @@ def _process_parsed_text_document(
     return {'source_id': doc.source_id, 'file_id': file_id, 'status': status}
 
 
-def _process_chunked_text_document(
+async def _process_chunked_text_document(
     request: Request,
     knowledge_id: str,
     provider: str,
@@ -434,7 +434,7 @@ def _process_chunked_text_document(
 
     file_path = _maybe_upload_original_bytes(file_id, doc, provider, original_file)
 
-    status = _create_or_update_file_record(
+    status = await _create_or_update_file_record(
         file_id=file_id,
         doc=doc,
         content_text=joined_text,
@@ -445,7 +445,7 @@ def _process_chunked_text_document(
     )
 
     if status == 'updated':
-        _delete_old_vectors(knowledge_id, file_id)
+        await _delete_old_vectors(knowledge_id, file_id)
 
     text_hash = hashlib.sha256(joined_text.encode()).hexdigest()
     base_metadata = _build_base_metadata(doc, file_id, provider, user_id)
@@ -468,10 +468,10 @@ def _process_chunked_text_document(
         # Clear the stale ``error`` field too — update_file_data_by_id is a
         # shallow merge, so without this a row that succeeded after a prior
         # failure would still carry the old error message in data.error.
-        Files.update_file_data_by_id(file_id, {'status': 'completed', 'error': None})
+        await Files.update_file_data_by_id(file_id, {'status': 'completed', 'error': None})
     except Exception as e:
         log.exception(f'Failed to store chunked document {doc.source_id} in vector DB')
-        Files.update_file_data_by_id(file_id, {'status': 'error', 'error': str(e)})
+        await Files.update_file_data_by_id(file_id, {'status': 'error', 'error': str(e)})
         return {
             'source_id': doc.source_id,
             'file_id': file_id,
@@ -482,7 +482,7 @@ def _process_chunked_text_document(
     return {'source_id': doc.source_id, 'file_id': file_id, 'status': status}
 
 
-def _process_full_document(
+async def _process_full_document(
     request: Request,
     knowledge_id: str,
     provider: str,
@@ -528,7 +528,7 @@ def _process_full_document(
             'error': str(e),
         }
 
-    status = _create_or_update_file_record(
+    status = await _create_or_update_file_record(
         file_id=file_id,
         doc=doc,
         content_text=extracted_text,
@@ -539,7 +539,7 @@ def _process_full_document(
     )
 
     if status == 'updated':
-        _delete_old_vectors(knowledge_id, file_id)
+        await _delete_old_vectors(knowledge_id, file_id)
 
     text_hash = hashlib.sha256(extracted_text.encode()).hexdigest()
     base_metadata = _build_base_metadata(doc, file_id, provider, user_id)
@@ -564,10 +564,10 @@ def _process_full_document(
         # Clear the stale ``error`` field too — update_file_data_by_id is a
         # shallow merge, so without this a row that succeeded after a prior
         # failure would still carry the old error message in data.error.
-        Files.update_file_data_by_id(file_id, {'status': 'completed', 'error': None})
+        await Files.update_file_data_by_id(file_id, {'status': 'completed', 'error': None})
     except Exception as e:
         log.exception(f'Failed to store full document {doc.source_id} in vector DB')
-        Files.update_file_data_by_id(file_id, {'status': 'error', 'error': str(e)})
+        await Files.update_file_data_by_id(file_id, {'status': 'error', 'error': str(e)})
         return {
             'source_id': doc.source_id,
             'file_id': file_id,
@@ -697,7 +697,7 @@ def _maybe_persist_attachments(
 
 
 @router.post('/ingest')
-def ingest_documents(
+async def ingest_documents(
     request: Request,
     data: str = Form(...),
     files: Optional[list[UploadFile]] = File(None),
@@ -758,11 +758,11 @@ def ingest_documents(
     # lookup since they own KB lifecycle.
     knowledge = None
     if isinstance(principal, LoaderPrincipal):
-        knowledge = Knowledges.get_knowledge_by_id(collection.source_id)
+        knowledge = await Knowledges.get_knowledge_by_id(collection.source_id)
     if knowledge is None:
-        knowledge = _find_kb_by_source_id(provider, collection.source_id)
+        knowledge = await _find_kb_by_source_id(provider, collection.source_id)
     if not knowledge:
-        knowledge = _create_kb_for_provider(provider, provider_config, collection, user.id)
+        knowledge = await _create_kb_for_provider(provider, provider_config, collection, user.id)
     elif not isinstance(principal, LoaderPrincipal):
         # Validate data_type consistency with existing KB (push providers only;
         # cloud-sync KBs found via direct ID lookup don't carry meta.integration).
@@ -773,8 +773,10 @@ def ingest_documents(
                 f"Collection '{collection.source_id}' was created with data_type '{existing_data_type}'. "
                 f"Cannot push with data_type '{data_type}'.",
             )
-        # Update access_control on existing KB (defaults to {} / private if not specified)
-        Knowledges.update_knowledge_by_id(
+        # Touch updated_at on the existing KB (KnowledgeForm carries no access_control
+        # field; existing access_grants are preserved by passing access_grants=None,
+        # which short-circuits the grants-update branch in update_knowledge_by_id).
+        await Knowledges.update_knowledge_by_id(
             knowledge.id,
             KnowledgeForm(
                 name=knowledge.name,
@@ -785,7 +787,7 @@ def ingest_documents(
 
     # Check file limit
     max_files = provider_config.get('max_files_per_kb', KNOWLEDGE_MAX_FILE_COUNT)
-    current_files = Knowledges.get_files_by_id(knowledge.id)
+    current_files = await Knowledges.get_files_by_id(knowledge.id)
     existing_ids = {f.id for f in current_files} if current_files else set()
     _prefix = file_id_prefix_for(provider)
     new_doc_ids = {f'{_prefix}{doc.get("source_id", "")}' for doc in form_data.documents}
@@ -815,7 +817,7 @@ def ingest_documents(
                     f"Document '{raw_doc.get('source_id', '?')}' invalid for parsed_text: {e}",
                 )
             _validate_custom_metadata(doc, provider_config)
-            result = _process_parsed_text_document(
+            result = await _process_parsed_text_document(
                 request=request,
                 knowledge_id=knowledge.id,
                 provider=provider,
@@ -836,7 +838,7 @@ def ingest_documents(
                     f"Document '{raw_doc.get('source_id', '?')}' invalid for chunked_text: {e}",
                 )
             _validate_custom_metadata(doc, provider_config)
-            result = _process_chunked_text_document(
+            result = await _process_chunked_text_document(
                 request=request,
                 knowledge_id=knowledge.id,
                 provider=provider,
@@ -872,7 +874,7 @@ def ingest_documents(
                     f'Available files: {list(file_lookup.keys())}',
                 )
 
-            result = _process_full_document(
+            result = await _process_full_document(
                 request=request,
                 knowledge_id=knowledge.id,
                 provider=provider,
@@ -914,7 +916,7 @@ def ingest_documents(
 
 
 @router.delete('/collections/{source_id}')
-def delete_collection(
+async def delete_collection(
     request: Request,
     source_id: str,
     principal=Depends(get_integration_principal),
@@ -930,7 +932,7 @@ def delete_collection(
     else:
         provider, _ = get_integration_provider(request, principal)
 
-    knowledge = _find_kb_by_source_id(provider, source_id)
+    knowledge = await _find_kb_by_source_id(provider, source_id)
     if not knowledge:
         raise HTTPException(404, f"Collection '{source_id}' not found for provider '{provider}'")
 
@@ -938,25 +940,25 @@ def delete_collection(
         raise HTTPException(403, 'Cannot delete collections belonging to another provider')
 
     # Remove all files and vector data
-    current_files = Knowledges.get_files_by_id(knowledge.id)
+    current_files = await Knowledges.get_files_by_id(knowledge.id)
     file_ids = [f.id for f in current_files] if current_files else []
     for file_id in file_ids:
         try:
-            VECTOR_DB_CLIENT.delete(
+            await ASYNC_VECTOR_DB_CLIENT.delete(
                 collection_name=knowledge.id,
                 filter={'file_id': file_id},
             )
         except Exception:
             pass
-        Files.delete_file_by_id(file_id)
+        await Files.delete_file_by_id(file_id)
 
-    Knowledges.soft_delete_by_id(knowledge.id)
+    await Knowledges.soft_delete_by_id(knowledge.id)
 
     return {'status': 'deleted', 'source_id': source_id, 'provider': provider}
 
 
 @router.delete('/collections/{source_id}/documents/{document_source_id}')
-def delete_document(
+async def delete_document(
     request: Request,
     source_id: str,
     document_source_id: str,
@@ -964,28 +966,28 @@ def delete_document(
 ):
     provider, _ = get_integration_provider(request, user)
 
-    knowledge = _find_kb_by_source_id(provider, source_id)
+    knowledge = await _find_kb_by_source_id(provider, source_id)
     if not knowledge:
         raise HTTPException(404, f"Collection '{source_id}' not found for provider '{provider}'")
 
     if knowledge.type != provider:
         raise HTTPException(403, "Cannot delete documents from another provider's collection")
 
-    file_id = f'{provider}-{document_source_id}'
-    file = Files.get_file_by_id(file_id)
+    file_id = f'{file_id_prefix_for(provider)}{document_source_id}'
+    file = await Files.get_file_by_id(file_id)
     if not file:
         raise HTTPException(404, f"Document '{document_source_id}' not found")
 
     try:
-        VECTOR_DB_CLIENT.delete(
+        await ASYNC_VECTOR_DB_CLIENT.delete(
             collection_name=knowledge.id,
             filter={'file_id': file_id},
         )
     except Exception:
         pass
 
-    Knowledges.remove_file_from_knowledge_by_id(knowledge.id, file_id)
-    Files.delete_file_by_id(file_id)
+    await Knowledges.remove_file_from_knowledge_by_id(knowledge.id, file_id)
+    await Files.delete_file_by_id(file_id)
 
     return {
         'status': 'deleted',

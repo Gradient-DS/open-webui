@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import json
 from types import SimpleNamespace
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from fastapi import FastAPI
@@ -195,7 +195,8 @@ def test_ingest_routes_original_files_to_chunked_text_processor(app, loader_prin
     assert by_source['doc-B']['has_original_file'] is False
 
 
-def test_process_chunked_text_uploads_bytes_and_sets_path(loader_principal, acting_user_id):
+@pytest.mark.asyncio
+async def test_process_chunked_text_uploads_bytes_and_sets_path(loader_principal, acting_user_id):
     """``_process_chunked_text_document`` calls ``Storage.upload_file`` when
     ``original_file`` is provided and forwards the returned path to
     ``_create_or_update_file_record``.
@@ -223,12 +224,16 @@ def test_process_chunked_text_uploads_bytes_and_sets_path(loader_principal, acti
 
     with (
         patch.object(integrations_router.Storage, 'upload_file', side_effect=fake_upload_file),
-        patch.object(integrations_router, '_create_or_update_file_record', side_effect=fake_create_or_update),
+        patch.object(
+            integrations_router,
+            '_create_or_update_file_record',
+            new=AsyncMock(side_effect=fake_create_or_update),
+        ),
         patch.object(integrations_router, '_delete_old_vectors'),
         patch.object(integrations_router, 'save_docs_to_vector_db'),
-        patch.object(integrations_router.Files, 'update_file_data_by_id'),
+        patch.object(integrations_router.Files, 'update_file_data_by_id', new_callable=AsyncMock),
     ):
-        result = integrations_router._process_chunked_text_document(
+        result = await integrations_router._process_chunked_text_document(
             request=fake_request,
             knowledge_id='kb-uuid-1',
             provider='onedrive',
@@ -242,7 +247,8 @@ def test_process_chunked_text_uploads_bytes_and_sets_path(loader_principal, acti
     assert captured['file_id'] == 'onedrive-doc-A'
 
 
-def test_process_chunked_text_without_original_file_keeps_path_empty(acting_user_id):
+@pytest.mark.asyncio
+async def test_process_chunked_text_without_original_file_keeps_path_empty(acting_user_id):
     """Back-compat: callers (push integrations) that don't ship bytes still work."""
     captured: dict = {}
 
@@ -257,12 +263,16 @@ def test_process_chunked_text_without_original_file_keeps_path_empty(acting_user
     )
 
     with (
-        patch.object(integrations_router, '_create_or_update_file_record', side_effect=fake_create_or_update),
+        patch.object(
+            integrations_router,
+            '_create_or_update_file_record',
+            new=AsyncMock(side_effect=fake_create_or_update),
+        ),
         patch.object(integrations_router, '_delete_old_vectors'),
         patch.object(integrations_router, 'save_docs_to_vector_db'),
-        patch.object(integrations_router.Files, 'update_file_data_by_id'),
+        patch.object(integrations_router.Files, 'update_file_data_by_id', new_callable=AsyncMock),
     ):
-        integrations_router._process_chunked_text_document(
+        await integrations_router._process_chunked_text_document(
             request=fake_request,
             knowledge_id='kb-uuid-1',
             provider='onedrive',
@@ -273,7 +283,8 @@ def test_process_chunked_text_without_original_file_keeps_path_empty(acting_user
     assert captured['file_path'] == ''
 
 
-def test_create_or_update_file_record_updates_path_when_stub_row_gets_bytes(acting_user_id):
+@pytest.mark.asyncio
+async def test_create_or_update_file_record_updates_path_when_stub_row_gets_bytes(acting_user_id):
     """The stub File row created by ``services/sync/base_worker._create_stub_file_rows``
     has ``path=''``. When the loader-worker's /ingest callback arrives with
     bytes, ``_create_or_update_file_record`` must call
@@ -294,12 +305,20 @@ def test_create_or_update_file_record_updates_path_when_stub_row_gets_bytes(acti
     )
 
     with (
-        patch.object(integrations_router.Files, 'get_file_by_id', return_value=stub_row),
-        patch.object(integrations_router.Files, 'update_file_metadata_by_id'),
-        patch.object(integrations_router.Files, 'update_file_data_by_id'),
-        patch.object(integrations_router.Files, 'update_file_path_by_id', side_effect=fake_update_path),
+        patch.object(
+            integrations_router.Files,
+            'get_file_by_id',
+            new=AsyncMock(return_value=stub_row),
+        ),
+        patch.object(integrations_router.Files, 'update_file_metadata_by_id', new_callable=AsyncMock),
+        patch.object(integrations_router.Files, 'update_file_data_by_id', new_callable=AsyncMock),
+        patch.object(
+            integrations_router.Files,
+            'update_file_path_by_id',
+            new=AsyncMock(side_effect=fake_update_path),
+        ),
     ):
-        status = integrations_router._create_or_update_file_record(
+        status = await integrations_router._create_or_update_file_record(
             file_id='onedrive-doc-A',
             doc=doc,
             content_text='hi',
@@ -313,7 +332,8 @@ def test_create_or_update_file_record_updates_path_when_stub_row_gets_bytes(acti
     assert update_path_calls == [('onedrive-doc-A', 's3://bucket/onedrive-doc-A_a.pdf')]
 
 
-def test_create_or_update_file_record_does_not_overwrite_path_with_empty(acting_user_id):
+@pytest.mark.asyncio
+async def test_create_or_update_file_record_does_not_overwrite_path_with_empty(acting_user_id):
     """A re-sync that drops the bytes (e.g. kill-switch flipped off) must not
     silently break previews on rows that already had a valid path.
     """
@@ -326,16 +346,20 @@ def test_create_or_update_file_record_does_not_overwrite_path_with_empty(acting_
     )
 
     with (
-        patch.object(integrations_router.Files, 'get_file_by_id', return_value=existing_row),
-        patch.object(integrations_router.Files, 'update_file_metadata_by_id'),
-        patch.object(integrations_router.Files, 'update_file_data_by_id'),
+        patch.object(
+            integrations_router.Files,
+            'get_file_by_id',
+            new=AsyncMock(return_value=existing_row),
+        ),
+        patch.object(integrations_router.Files, 'update_file_metadata_by_id', new_callable=AsyncMock),
+        patch.object(integrations_router.Files, 'update_file_data_by_id', new_callable=AsyncMock),
         patch.object(
             integrations_router.Files,
             'update_file_path_by_id',
-            side_effect=lambda fid, p: update_path_calls.append((fid, p)),
+            new=AsyncMock(side_effect=lambda fid, p: update_path_calls.append((fid, p))),
         ),
     ):
-        integrations_router._create_or_update_file_record(
+        await integrations_router._create_or_update_file_record(
             file_id='onedrive-doc-A',
             doc=doc,
             content_text='hi',
