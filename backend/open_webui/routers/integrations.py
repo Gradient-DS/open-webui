@@ -1,14 +1,17 @@
 import hashlib
 import json
 import logging
+import os
 import time
-from typing import Optional
+import uuid
+from typing import NamedTuple, Optional
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
 from langchain_core.documents import Document
 from pydantic import BaseModel
 
 from open_webui.config import KNOWLEDGE_MAX_FILE_COUNT
+from open_webui.models.file_attachments import FileAttachmentForm, FileAttachments
 from open_webui.models.files import FileForm, Files
 from open_webui.models.knowledge import KnowledgeForm, Knowledges
 from open_webui.retrieval.loaders.main import Loader
@@ -41,6 +44,22 @@ class IngestCollection(BaseModel):
     access_control: Optional[dict] = {}
 
 
+class IngestAttachmentManifest(BaseModel):
+    """One render artefact attached to a document.
+
+    Manifest entries live inside each document in the ``data`` JSON
+    body; their bytes ride on the multipart envelope under field name
+    ``attachments``. ``part_name`` is the multipart filename the
+    receiver uses to find the matching ``UploadFile``.
+    """
+
+    kind: str
+    content_type: str = 'image/png'
+    storey: Optional[str] = None
+    caption: str = ''
+    part_name: str
+
+
 class IngestDocumentBase(BaseModel):
     source_id: str
     filename: str
@@ -52,6 +71,7 @@ class IngestDocumentBase(BaseModel):
     modified_at: Optional[str] = None
     tags: list[str] = []
     metadata: dict = {}
+    attachments: list[IngestAttachmentManifest] = []
 
 
 class ParsedTextDocument(IngestDocumentBase):
@@ -558,6 +578,121 @@ async def _process_full_document(
     return {'source_id': doc.source_id, 'file_id': file_id, 'status': status}
 
 
+class PersistResult(NamedTuple):
+    saved: int
+    skipped: int
+
+
+def _persist_attachments(
+    *,
+    file_id: str,
+    manifest: list[IngestAttachmentManifest],
+    part_lookup: dict[str, UploadFile],
+) -> PersistResult:
+    """Persist a document's attachment bytes to Storage + DB.
+
+    Best-effort: missing parts, Storage failures, and DB insert failures
+    are logged + skipped; the document ingest stays successful. Existing
+    attachments for file_id are deleted first so re-upload regenerates
+    cleanly.
+
+    Returns (saved, skipped) counts as a NamedTuple.
+    """
+    FileAttachments.delete_attachments_by_file_id(file_id)
+
+    saved, skipped = 0, 0
+    for i, entry in enumerate(manifest):
+        part = part_lookup.get(entry.part_name)
+        if part is None:
+            log.warning(
+                'attachment manifest references missing part %r (file_id=%s, kind=%s, storey=%s); skipping',
+                entry.part_name,
+                file_id,
+                entry.kind,
+                entry.storey,
+            )
+            skipped += 1
+            continue
+
+        # Reset stream: FastAPI leaves the SpooledTemporaryFile at EOF
+        # after reading the multipart body, so without this seek the
+        # subsequent Storage.upload_file would receive an empty stream.
+        part.file.seek(0)
+        # Defense in depth: even though part_name comes from a trusted
+        # loader-worker today, a path-traversal value (e.g. '../../etc/foo')
+        # would escape UPLOAD_DIR via LocalStorageProvider; strip any
+        # directory component before composing the Storage filename.
+        safe_part_name = os.path.basename(entry.part_name)
+        storage_filename = f'{uuid.uuid4()}-{safe_part_name}'
+        try:
+            _, path = Storage.upload_file(
+                part.file,
+                storage_filename,
+                tags={'file_id': file_id, 'kind': entry.kind},
+            )
+        except Exception:
+            log.exception(
+                'storage upload failed for attachment (file_id=%s, part=%s)',
+                file_id,
+                entry.part_name,
+            )
+            skipped += 1
+            continue
+
+        try:
+            FileAttachments.insert_new_attachment(
+                FileAttachmentForm(
+                    id=str(uuid.uuid4()),
+                    file_id=file_id,
+                    kind=entry.kind,
+                    storey=entry.storey,
+                    index=i,
+                    content_type=entry.content_type,
+                    caption=entry.caption,
+                    path=path,
+                ),
+            )
+        except Exception:
+            log.exception(
+                'db insert failed after successful upload — leaking storage object at %s (file_id=%s, part=%s)',
+                path,
+                file_id,
+                entry.part_name,
+            )
+            skipped += 1
+            continue
+
+        saved += 1
+    return PersistResult(saved=saved, skipped=skipped)
+
+
+def _maybe_persist_attachments(
+    *,
+    result: dict,
+    doc: IngestDocumentBase,
+    part_lookup: dict[str, UploadFile],
+) -> None:
+    """If the document's text save succeeded and it carries attachments,
+    persist them and record the counts on the result dict.
+
+    Mutates ``result`` in place; intentional — the dispatch loop already
+    owns the dict and we want the side-channel counts to ride on the
+    existing per-document response without a wrapper layer.
+    """
+    # Only persist attachments when the document text was committed.
+    if result.get('status') not in ('created', 'updated'):
+        return
+    if not doc.attachments:
+        return
+    outcome = _persist_attachments(
+        file_id=result['file_id'],
+        manifest=doc.attachments,
+        part_lookup=part_lookup,
+    )
+    result['attachments_saved'] = outcome.saved
+    result['attachments_skipped'] = outcome.skipped
+
+
 # --- Endpoints ---
 
 
@@ -567,6 +702,7 @@ async def ingest_documents(
     data: str = Form(...),
     files: Optional[list[UploadFile]] = File(None),
     original_files: Optional[list[UploadFile]] = File(None),
+    attachments: Optional[list[UploadFile]] = File(None),
     principal=Depends(get_integration_principal),
 ):
     # Parse JSON from form field
@@ -582,6 +718,7 @@ async def ingest_documents(
     # lookup once so the dispatch loops below stay O(documents) rather
     # than O(documents * files).
     original_file_lookup = {f.filename: f for f in (original_files or []) if f.filename}
+    attachment_lookup = {f.filename: f for f in (attachments or []) if f.filename}
 
     if isinstance(principal, LoaderPrincipal):
         user = principal.user
@@ -688,6 +825,7 @@ async def ingest_documents(
                 user_id=user.id,
                 original_file=original_file_lookup.get(doc.source_id),
             )
+            _maybe_persist_attachments(result=result, doc=doc, part_lookup=attachment_lookup)
             results.append(result)
 
     elif data_type == 'chunked_text':
@@ -708,6 +846,7 @@ async def ingest_documents(
                 user_id=user.id,
                 original_file=original_file_lookup.get(doc.source_id),
             )
+            _maybe_persist_attachments(result=result, doc=doc, part_lookup=attachment_lookup)
             results.append(result)
 
     elif data_type == 'full_documents':
@@ -743,6 +882,7 @@ async def ingest_documents(
                 upload_file=upload,
                 user_id=user.id,
             )
+            _maybe_persist_attachments(result=result, doc=doc, part_lookup=attachment_lookup)
             results.append(result)
 
         # Check for unmatched uploaded files

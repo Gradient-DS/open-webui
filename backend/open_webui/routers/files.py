@@ -52,7 +52,8 @@ from open_webui.storage.provider import Storage
 from open_webui.config import BYPASS_ADMIN_ACCESS_CONTROL, STORAGE_LOCAL_CACHE, STORAGE_PROVIDER, UPLOAD_DIR
 from open_webui.utils.auth import get_admin_user, get_verified_user
 from open_webui.utils.misc import strict_match_mime_type
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
+from open_webui.models.file_attachments import FileAttachments
 
 log = logging.getLogger(__name__)
 
@@ -655,6 +656,18 @@ class ContentForm(BaseModel):
     content: str
 
 
+class FileAttachmentManifestResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: str
+    file_id: str
+    kind: str
+    storey: Optional[str] = None
+    index: int
+    content_type: str
+    caption: str
+    created_at: int
+
+
 @router.post('/{id}/data/content/update')
 async def update_file_data_content_by_id(
     request: Request,
@@ -776,6 +789,68 @@ async def get_file_content_by_id(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=ERROR_MESSAGES.NOT_FOUND,
         )
+
+
+############################
+# List File Attachments (manifest — path not exposed)
+############################
+
+
+@router.get('/{id}/attachments', response_model=list[FileAttachmentManifestResponse])
+async def list_file_attachments(
+    id: str,
+    user=Depends(get_verified_user),
+    db: AsyncSession = Depends(get_async_session),
+):
+    file = await Files.get_file_by_id(id, db=db)
+    if not file:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=ERROR_MESSAGES.NOT_FOUND)
+    if not (file.user_id == user.id or user.role == 'admin' or await has_access_to_file(id, 'read', user, db=db)):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=ERROR_MESSAGES.NOT_FOUND)
+    return await asyncio.to_thread(FileAttachments.get_attachments_by_file_id, id)
+
+
+############################
+# Get File Attachment Bytes
+############################
+
+
+@router.get('/{id}/attachments/{attachment_id}')
+async def get_file_attachment_bytes(
+    id: str,
+    attachment_id: str,
+    user=Depends(get_verified_user),
+    db: AsyncSession = Depends(get_async_session),
+):
+    file = await Files.get_file_by_id(id, db=db)
+    if not file:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=ERROR_MESSAGES.NOT_FOUND)
+    if not (file.user_id == user.id or user.role == 'admin' or await has_access_to_file(id, 'read', user, db=db)):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=ERROR_MESSAGES.NOT_FOUND)
+
+    attachment = await asyncio.to_thread(FileAttachments.get_attachment_by_id, attachment_id)
+    if attachment is None or attachment.file_id != id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=ERROR_MESSAGES.NOT_FOUND)
+
+    try:
+        storage_path = Path(Storage.get_file(attachment.path))
+    except Exception:
+        log.exception(
+            'Storage.get_file raised for attachment %s (path=%s)',
+            attachment_id,
+            attachment.path,
+        )
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=ERROR_MESSAGES.NOT_FOUND)
+
+    if not storage_path.is_file():
+        log.error(
+            'attachment row %s points at missing Storage path %s',
+            attachment_id,
+            attachment.path,
+        )
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=ERROR_MESSAGES.NOT_FOUND)
+
+    return FileResponse(storage_path, media_type=attachment.content_type)
 
 
 @router.get('/{id}/content/html')

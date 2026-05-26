@@ -8,7 +8,7 @@
 	import { WEBUI_API_BASE_URL } from '$lib/constants';
 	import { settings } from '$lib/stores';
 	import { getKnowledgeById } from '$lib/apis/knowledge';
-	import { getFileById, getFileContentById } from '$lib/apis/files';
+	import { getFileById, getFileContentById, getFileAttachments } from '$lib/apis/files';
 
 	import CodeBlock from '$lib/components/chat/Messages/CodeBlock.svelte';
 	import Markdown from '$lib/components/chat/Messages/Markdown.svelte';
@@ -43,6 +43,28 @@
 	let isPptx = false;
 
 	let selectedTab = '';
+
+	let attachments: Array<{
+		id: string;
+		kind: string;
+		storey: string | null;
+		index: number;
+		content_type: string;
+		caption: string;
+	}> = [];
+
+	$: hasAttachments = attachments.length > 0;
+	$: planAttachments = attachments
+		.filter((a) => a.kind === 'plan_png')
+		.sort(
+			(a, b) =>
+				(a.storey ?? '').localeCompare(b.storey ?? '') || a.index - b.index
+		);
+	$: axonAttachments = attachments.filter((a) => a.kind === 'axon_png');
+
+	const attachmentUrl = (fileId: string, attachmentId: string): string =>
+		`${WEBUI_API_BASE_URL}/files/${fileId}/attachments/${attachmentId}`;
+
 	let excelWorkbook: WorkBook | null = null;
 	let excelSheetNames: string[] = [];
 	let selectedSheet = '';
@@ -253,6 +275,16 @@
 		if (item?.context === 'full') {
 			enableFullContent = true;
 		}
+
+		if (item?.id && item?.type === 'file') {
+			(async () => {
+				try {
+					attachments = await getFileAttachments(localStorage.token, item.id);
+				} catch (err) {
+					console.warn('Failed to load attachments for file', item.id, err);
+				}
+			})();
+		}
 	});
 </script>
 
@@ -391,7 +423,7 @@
 					</div>
 				{/if}
 
-				{#if isAudio || isPDF || isExcel || isCode || isMarkdown || isDocx || isPptx}
+				{#if isAudio || isPDF || isExcel || isCode || isMarkdown || isDocx || isPptx || hasAttachments}
 					<div
 						class="flex mb-2.5 scrollbar-none overflow-x-auto w-full border-b border-gray-50 dark:border-gray-850/30 text-center text-sm font-medium bg-transparent dark:text-gray-200"
 					>
@@ -414,6 +446,18 @@
 								selectedTab = 'preview';
 							}}>{$i18n.t('Preview')}</button
 						>
+
+						{#if hasAttachments}
+							<button
+								class="min-w-fit py-1.5 px-4 border-b {selectedTab === 'attachments'
+									? ' '
+									: ' border-transparent text-gray-300 dark:text-gray-600 hover:text-gray-700 dark:hover:text-white'} transition"
+								type="button"
+								on:click={() => {
+									selectedTab = 'attachments';
+								}}>{$i18n.t('Renders')}</button
+							>
+						{/if}
 					</div>
 				{/if}
 
@@ -643,6 +687,42 @@
 							{(item?.file?.data?.content ?? '').trim() || 'No content'}
 						</div>
 					{/if}
+				{:else if selectedTab === 'attachments'}
+					<div class="flex flex-col gap-4 p-4">
+						{#if planAttachments.length > 0}
+							<section>
+								<h3 class="text-sm font-medium mb-2">{$i18n.t('Floor plans')}</h3>
+								<div class="grid grid-cols-2 gap-3">
+									{#each planAttachments as a (a.id)}
+										<figure class="flex flex-col gap-1">
+											<img
+												src={attachmentUrl(item.id, a.id)}
+												alt={a.caption || a.storey || a.kind}
+												class="rounded border border-gray-200 dark:border-gray-700"
+												loading="lazy"
+											/>
+											<figcaption class="text-xs text-gray-500">
+												{a.storey ?? a.caption ?? ''}
+											</figcaption>
+										</figure>
+									{/each}
+								</div>
+							</section>
+						{/if}
+						{#if axonAttachments.length > 0}
+							<section>
+								<h3 class="text-sm font-medium mb-2">{$i18n.t('Isometric')}</h3>
+								{#each axonAttachments as a (a.id)}
+									<img
+										src={attachmentUrl(item.id, a.id)}
+										alt={a.caption || a.kind}
+										class="rounded border border-gray-200 dark:border-gray-700 max-w-full"
+										loading="lazy"
+									/>
+								{/each}
+							</section>
+						{/if}
+					</div>
 				{/if}
 			{:else}
 				<div class="flex items-center justify-center py-6">

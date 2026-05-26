@@ -384,3 +384,224 @@ def test_files_id_content_admin_no_longer_shortcut(monkeypatch):
         '/api/v1/internal/retrieval/files/file-private-other-user/content',
     )
     assert resp.status_code == 403
+
+
+# ---------- /files/{id}/raw (raw bytes for BIM agent) -------------------------
+
+
+def _patch_files_and_storage(monkeypatch, *, file, storage_path):
+    """Wire ``Files.get_file_by_id`` + ``Storage.get_file`` to a fake file."""
+
+    class _FakeFiles:
+        @staticmethod
+        def get_file_by_id(file_id):
+            return file if file_id == file.id else None
+
+    monkeypatch.setattr(internal_retrieval_router, 'Files', _FakeFiles)
+    monkeypatch.setattr(
+        internal_retrieval_router.Storage,
+        'get_file',
+        staticmethod(lambda path: str(storage_path)),
+    )
+
+
+def test_files_id_raw_streams_bytes_for_owner(monkeypatch, fake_principal, tmp_path):
+    app = _build_app(fake_principal=fake_principal)
+    blob = tmp_path / 'model.ifc'
+    blob.write_bytes(b'IFC raw bytes \x00\x01')
+
+    fake_file = SimpleNamespace(
+        id='file-1',
+        user_id=fake_principal.user.id,
+        filename='model.ifc',
+        path='backend-side-key',
+        meta={'content_type': 'application/octet-stream'},
+        data={},
+    )
+    _patch_files_and_storage(monkeypatch, file=fake_file, storage_path=blob)
+
+    client = TestClient(app)
+    resp = client.get('/api/v1/internal/retrieval/files/file-1/raw')
+    assert resp.status_code == 200
+    assert resp.content == b'IFC raw bytes \x00\x01'
+
+
+def test_files_id_raw_403_when_no_access(monkeypatch, fake_principal, tmp_path):
+    app = _build_app(fake_principal=fake_principal)
+    fake_file = SimpleNamespace(
+        id='file-2',
+        user_id='other-user',
+        filename='other.ifc',
+        path='backend-side-key',
+        meta={},
+        data={},
+    )
+    _patch_files_and_storage(monkeypatch, file=fake_file, storage_path=tmp_path / 'unused')
+    monkeypatch.setattr(
+        internal_retrieval_router,
+        'has_access_to_file',
+        lambda *, file_id, access_type, user: False,
+    )
+
+    client = TestClient(app)
+    resp = client.get('/api/v1/internal/retrieval/files/file-2/raw')
+    assert resp.status_code == 403
+
+
+def test_files_id_raw_404_when_missing(monkeypatch, fake_principal):
+    app = _build_app(fake_principal=fake_principal)
+
+    class _Empty:
+        @staticmethod
+        def get_file_by_id(file_id):
+            return None
+
+    monkeypatch.setattr(internal_retrieval_router, 'Files', _Empty)
+    client = TestClient(app)
+    resp = client.get('/api/v1/internal/retrieval/files/nope/raw')
+    assert resp.status_code == 404
+
+
+def test_files_id_raw_404_when_storage_raises(monkeypatch, fake_principal, tmp_path):
+    # Cloud-storage backends raise RuntimeError on credential/config errors;
+    # surface as 404 (mirrors the /attachments handling) instead of leaking
+    # the traceback.
+    app = _build_app(fake_principal=fake_principal)
+    fake_file = SimpleNamespace(
+        id='file-3',
+        user_id=fake_principal.user.id,
+        filename='m.ifc',
+        path='backend-side-key',
+        meta={},
+        data={},
+    )
+
+    class _FakeFiles:
+        @staticmethod
+        def get_file_by_id(file_id):
+            return fake_file if file_id == fake_file.id else None
+
+    def _raise(_path):
+        raise RuntimeError('S3 credentials missing')
+
+    monkeypatch.setattr(internal_retrieval_router, 'Files', _FakeFiles)
+    monkeypatch.setattr(
+        internal_retrieval_router.Storage,
+        'get_file',
+        staticmethod(_raise),
+    )
+
+    client = TestClient(app)
+    resp = client.get('/api/v1/internal/retrieval/files/file-3/raw')
+    assert resp.status_code == 404
+
+
+def test_files_id_raw_requires_agent_search_enabled(monkeypatch, fake_principal):
+    app = _build_app(fake_principal=fake_principal, agent_search_enabled=False)
+    client = TestClient(app)
+    resp = client.get('/api/v1/internal/retrieval/files/anything/raw')
+    assert resp.status_code == 404
+
+
+# ---------- /files/upload (agent-pushed message-attached file) ---------------------
+
+
+def _patch_files_upload(monkeypatch, *, file_id='file-render-1'):
+    """Stub the deps used by ``/files/upload`` and return a call recorder.
+
+    Replaces ``upload_file_handler`` (filesystem + DB write),
+    ``Chats.insert_chat_files`` (chat-file link row), and ``sio.emit``
+    (socket fanout) with collaborator-style fakes. Returns the dict the
+    test asserts against.
+    """
+
+    captured: dict = {}
+
+    def fake_upload_file_handler(request, *, file, metadata, process, user, db):
+        captured['filename'] = file.filename
+        captured['content_type'] = file.content_type
+        captured['process'] = process
+        captured['metadata'] = metadata
+        captured['user_id'] = user.id
+        return SimpleNamespace(id=file_id)
+
+    def fake_insert_chat_files(*, chat_id, message_id, file_ids, user_id, db=None):
+        captured['insert'] = {
+            'chat_id': chat_id,
+            'message_id': message_id,
+            'file_ids': list(file_ids),
+            'user_id': user_id,
+        }
+        return None
+
+    async def fake_emit(event, payload, room=None):
+        captured['emit'] = {'event': event, 'payload': payload, 'room': room}
+
+    monkeypatch.setattr(internal_retrieval_router, 'upload_file_handler', fake_upload_file_handler)
+    monkeypatch.setattr(internal_retrieval_router.Chats, 'insert_chat_files', fake_insert_chat_files)
+    monkeypatch.setattr(internal_retrieval_router.sio, 'emit', fake_emit)
+    return captured
+
+
+def test_post_files_upload_persists_and_attaches_to_message(monkeypatch, fake_principal):
+    app = _build_app(fake_principal=fake_principal)
+    # Ensure the route can resolve a URL for the file_id without booting all OWUI routers.
+    app.add_api_route('/api/v1/files/{id}/content', lambda id: None, name='get_file_content_by_id')
+
+    captured = _patch_files_upload(monkeypatch)
+
+    client = TestClient(app)
+    resp = client.post(
+        '/api/v1/internal/retrieval/files/upload',
+        data={'chat_id': 'chat-abc', 'message_id': 'msg-xyz'},
+        files={'file': ('plan.png', b'\x89PNG\r\n\x1a\nfakepng', 'image/png')},
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body == {
+        'file_id': 'file-render-1',
+        'url': '/api/v1/files/file-render-1/content',
+    }
+    assert captured['filename'] == 'plan.png'
+    assert captured['content_type'] == 'image/png'
+    assert captured['process'] is False
+    assert captured['metadata'] == {'chat_id': 'chat-abc', 'message_id': 'msg-xyz'}
+    assert captured['insert'] == {
+        'chat_id': 'chat-abc',
+        'message_id': 'msg-xyz',
+        'file_ids': ['file-render-1'],
+        'user_id': fake_principal.user.id,
+    }
+    assert captured['emit']['event'] == 'events'
+    assert captured['emit']['room'] == f'user:{fake_principal.user.id}'
+    emit_payload = captured['emit']['payload']
+    assert emit_payload['chat_id'] == 'chat-abc'
+    assert emit_payload['message_id'] == 'msg-xyz'
+    inner = emit_payload['data']
+    assert inner['type'] == 'chat:message:files'
+    assert inner['data']['files'] == [
+        {
+            'type': 'image',
+            'url': '/api/v1/files/file-render-1/content',
+            'name': 'plan.png',
+            'id': 'file-render-1',
+        }
+    ]
+
+
+def test_post_files_upload_returns_404_when_feature_flag_disabled(monkeypatch, fake_principal):
+    app = _build_app(fake_principal=fake_principal, agent_search_enabled=False)
+    app.add_api_route('/api/v1/files/{id}/content', lambda id: None, name='get_file_content_by_id')
+
+    def fake_upload_file_handler(*args, **kwargs):
+        raise AssertionError('upload_file_handler should not run when disabled')
+
+    monkeypatch.setattr(internal_retrieval_router, 'upload_file_handler', fake_upload_file_handler)
+
+    client = TestClient(app)
+    resp = client.post(
+        '/api/v1/internal/retrieval/files/upload',
+        data={'chat_id': 'chat-abc', 'message_id': 'msg-xyz'},
+        files={'file': ('plan.png', b'fake', 'image/png')},
+    )
+    assert resp.status_code == 404
