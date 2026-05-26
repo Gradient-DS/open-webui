@@ -11,6 +11,8 @@ Architecture:
 import logging
 import requests
 from typing import Optional, List
+
+from fastapi.concurrency import run_in_threadpool
 from langchain_core.documents import Document
 
 from open_webui.models.files import Files
@@ -304,8 +306,11 @@ async def process_file_with_external_pipeline(
         for chunk in chunks
     ]
 
-    # Use existing function to handle embedding, dedup, and insert
-    result = save_docs_to_vector_db_func(
+    # Use existing function to handle embedding, dedup, and insert.
+    # save_docs_to_vector_db is sync and blocks on embedding + vector-DB I/O;
+    # offload so the event loop stays responsive under large ingest batches.
+    result = await run_in_threadpool(
+        save_docs_to_vector_db_func,
         request,
         docs=docs,
         collection_name=collection_name,

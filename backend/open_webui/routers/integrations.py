@@ -7,6 +7,7 @@ import uuid
 from typing import NamedTuple, Optional
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
+from fastapi.concurrency import run_in_threadpool
 from langchain_core.documents import Document
 from pydantic import BaseModel
 
@@ -387,7 +388,12 @@ async def _process_parsed_text_document(
     )
 
     try:
-        save_docs_to_vector_db(
+        # save_docs_to_vector_db is sync and blocks on embedding + vector-DB
+        # I/O. Offload so the event loop stays responsive — otherwise large
+        # ingest batches from the loader-worker callback freeze the pod and
+        # trip liveness probes.
+        await run_in_threadpool(
+            save_docs_to_vector_db,
             request=request,
             docs=[lc_doc],
             collection_name=knowledge_id,
@@ -453,7 +459,8 @@ async def _process_chunked_text_document(
     lc_docs = [Document(page_content=chunk, metadata=base_metadata) for chunk in doc.chunks]
 
     try:
-        save_docs_to_vector_db(
+        await run_in_threadpool(
+            save_docs_to_vector_db,
             request=request,
             docs=lc_docs,
             collection_name=knowledge_id,
@@ -549,7 +556,8 @@ async def _process_full_document(
         d.metadata.update(base_metadata)
 
     try:
-        save_docs_to_vector_db(
+        await run_in_threadpool(
+            save_docs_to_vector_db,
             request=request,
             docs=extracted_docs,
             collection_name=knowledge_id,
