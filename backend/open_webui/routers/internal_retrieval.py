@@ -17,9 +17,9 @@ from pathlib import Path
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, UploadFile, status
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from open_webui.internal.db import get_session
+from open_webui.internal.db import get_async_session
 from open_webui.models.chats import Chats
 from open_webui.models.files import Files
 from open_webui.routers.files import upload_file_handler
@@ -364,7 +364,7 @@ async def files_upload(
     message_id: str = Form(...),
     file: UploadFile = File(...),
     principal: AgentPrincipal = Depends(get_agent_principal),
-    db: Session = Depends(get_session),
+    db: AsyncSession = Depends(get_async_session),
 ) -> FileUploadResponse:
     """Persist an agent-uploaded blob and attach it to a chat message.
 
@@ -388,7 +388,7 @@ async def files_upload(
         )
 
     user = principal.user
-    file_item = upload_file_handler(
+    file_item = await upload_file_handler(
         request,
         file=file,
         metadata={'chat_id': chat_id, 'message_id': message_id},
@@ -402,7 +402,7 @@ async def files_upload(
             detail='file upload failed',
         )
 
-    Chats.insert_chat_files(
+    await Chats.insert_chat_files(
         chat_id=chat_id,
         message_id=message_id,
         file_ids=[file_item.id],

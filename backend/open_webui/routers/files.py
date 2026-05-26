@@ -800,14 +800,14 @@ async def get_file_content_by_id(
 async def list_file_attachments(
     id: str,
     user=Depends(get_verified_user),
-    db: Session = Depends(get_session),
+    db: AsyncSession = Depends(get_async_session),
 ):
-    file = Files.get_file_by_id(id, db=db)
+    file = await Files.get_file_by_id(id, db=db)
     if not file:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=ERROR_MESSAGES.NOT_FOUND)
-    if not (file.user_id == user.id or user.role == 'admin' or has_access_to_file(id, 'read', user, db=db)):
+    if not (file.user_id == user.id or user.role == 'admin' or await has_access_to_file(id, 'read', user, db=db)):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=ERROR_MESSAGES.NOT_FOUND)
-    return FileAttachments.get_attachments_by_file_id(id, db=db)
+    return await asyncio.to_thread(FileAttachments.get_attachments_by_file_id, id)
 
 
 ############################
@@ -820,15 +820,15 @@ async def get_file_attachment_bytes(
     id: str,
     attachment_id: str,
     user=Depends(get_verified_user),
-    db: Session = Depends(get_session),
+    db: AsyncSession = Depends(get_async_session),
 ):
-    file = Files.get_file_by_id(id, db=db)
+    file = await Files.get_file_by_id(id, db=db)
     if not file:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=ERROR_MESSAGES.NOT_FOUND)
-    if not (file.user_id == user.id or user.role == 'admin' or has_access_to_file(id, 'read', user, db=db)):
+    if not (file.user_id == user.id or user.role == 'admin' or await has_access_to_file(id, 'read', user, db=db)):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=ERROR_MESSAGES.NOT_FOUND)
 
-    attachment = FileAttachments.get_attachment_by_id(attachment_id, db=db)
+    attachment = await asyncio.to_thread(FileAttachments.get_attachment_by_id, attachment_id)
     if attachment is None or attachment.file_id != id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=ERROR_MESSAGES.NOT_FOUND)
 
