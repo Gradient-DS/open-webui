@@ -14,7 +14,7 @@ from dataclasses import asdict, dataclass
 from typing import Optional, Callable, Awaitable, Dict, Any, List, Union
 from pathlib import Path
 
-from open_webui.internal.db import get_db
+from open_webui.internal.db import get_async_db
 from open_webui.models.knowledge import Knowledges
 from open_webui.models.files import Files, FileForm, FileUpdateForm
 from open_webui.models.users import Users
@@ -1274,27 +1274,18 @@ class BaseSyncWorker(ABC):
                     try:
                         from open_webui.routers.retrieval import process_file, ProcessFileForm
 
-                        # Pre-fetch user (now async); pass it into the thread
-                        # so the sync ``process_file`` in the carve-out file
-                        # doesn't try to call an async helper.
                         propagate_user = await self._get_user()
 
-                        def _call_propagate(form_data):
-                            with get_db() as db:
-                                return process_file(
-                                    self._make_request(),
-                                    form_data,
-                                    user=propagate_user,
-                                    db=db,
-                                )
-
-                        await asyncio.to_thread(
-                            _call_propagate,
-                            ProcessFileForm(
-                                file_id=file_id,
-                                collection_name=kf.knowledge_id,
-                            ),
-                        )
+                        async with get_async_db() as db:
+                            await process_file(
+                                self._make_request(),
+                                ProcessFileForm(
+                                    file_id=file_id,
+                                    collection_name=kf.knowledge_id,
+                                ),
+                                user=propagate_user,
+                                db=db,
+                            )
                     except Exception as e:
                         log.warning(f'Failed to propagate vectors to KB {kf.knowledge_id}: {e}')
         except Exception as e:
