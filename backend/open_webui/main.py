@@ -2453,6 +2453,11 @@ async def chat_completion(
             'chat_id': form_data.pop('chat_id', None),
             'user_message': user_message,
             'user_message_id': user_message.get('id') if user_message else None,
+            # [Gradient] Parent of the user message (= previous assistant id, or
+            # null on first turn). Forwarded to the agent service in
+            # utils/agent.py so it can rewind its persisted thread state on
+            # retry/regenerate; set from form_data['parent_id'] popped above.
+            'parent_message_id': parent_id,
             'assistant_message_id': form_data.pop('assistant_message_id', None),
             'session_id': form_data.pop('session_id', None),
             'folder_id': form_data.pop('folder_id', None),
@@ -2762,7 +2767,7 @@ async def chat_completion(
                             metadata['chat_id'],
                             metadata['message_id'],
                             {
-                                'parentId': metadata.get('parent_message_id', None),
+                                'parentId': metadata.get('user_message_id', None),
                                 'model': model_id,
                             },
                         )
@@ -2816,7 +2821,7 @@ async def chat_completion(
                             metadata['chat_id'],
                             metadata['message_id'],
                             {
-                                'parentId': metadata.get('parent_message_id', None),
+                                'parentId': metadata.get('user_message_id', None),
                                 'error': error,
                             },
                         )

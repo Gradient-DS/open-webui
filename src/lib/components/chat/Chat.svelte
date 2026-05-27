@@ -2819,7 +2819,14 @@
 				...(continueResponse ? { assistant_message_id: responseMessageId } : {}),
 
 				background_tasks: {
-					...(!$temporaryChatEnabled && !_chatId && (userMessage?.parentId ?? null) === null
+					// [Gradient] First-message detection: parentId === null is the
+					// authoritative signal. Upstream also required !_chatId, but
+					// our submitPrompt now pre-creates the chat via initChatHandler
+					// (so pendingAgentId binding lands before /chat/completions),
+					// making _chatId truthy on the first send and dropping title +
+					// tag generation. parentId === null still correctly excludes
+					// follow-up messages.
+					...(!$temporaryChatEnabled && (userMessage?.parentId ?? null) === null
 						? {
 								title_generation: $settings?.title?.auto ?? true,
 								tags_generation: $settings?.autoTags ?? true
