@@ -2677,7 +2677,7 @@ async def chat_completion(
             variables = metadata.get('variables', {})
             if variables:
                 operator_system_prompt = prompt_variables_template(operator_system_prompt, variables)
-            operator_system_prompt = prompt_template(operator_system_prompt, user)
+            operator_system_prompt = await prompt_template(operator_system_prompt, user)
         metadata['system_prompt'] = operator_system_prompt
 
         request.state.metadata = metadata
