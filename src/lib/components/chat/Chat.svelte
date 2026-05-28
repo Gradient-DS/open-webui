@@ -742,6 +742,21 @@
 					eventConfirmationInputType = data?.type ?? '';
 				} else if (type.startsWith('terminal:')) {
 					terminalEventHandler(type, data);
+				} else if (type === 'subagent') {
+					// [Gradient] Live SubAgent stream from the agent runner
+					// (Leiden bezwaar parent + capability subagents). The
+					// payload is one of four phases — start / token / step /
+					// done — keyed by agent_id and grouped by
+					// parallel_group_id. SubAgentGroup.svelte folds the flat
+					// list into per-group card view-models via
+					// reduceSubAgents. Non-bezwaar agents never emit these
+					// events so message.subagents stays undefined.
+					if (message?.subagents) {
+						message.subagents.push(data);
+					} else {
+						message.subagents = [data];
+					}
+					message.subagents = message.subagents;
 				} else {
 					console.log('Unknown message type', data);
 				}

@@ -70,6 +70,7 @@
 	import RegenerateMenu from './ResponseMessage/RegenerateMenu.svelte';
 	import StatusHistory from './ResponseMessage/StatusHistory.svelte';
 	import ReasoningBullet from './ResponseMessage/StatusHistory/ReasoningBullet.svelte';
+	import SubAgentGroup from './SubAgents/SubAgentGroup.svelte';
 	import {
 		detectMergeProtocol,
 		mergeStatusAndReasoning,
@@ -887,6 +888,13 @@
 								messageDone={message?.done ?? false}
 							/>
 						{/if}
+
+						<!-- [Gradient] Live SubAgent cards (Leiden bezwaar parent + capability
+						     subagents). Sits between StatusHistory and the main content panel
+						     so users see streaming sub-agent activity above the parent's
+						     answer. Non-bezwaar agents leave message.subagents empty; the
+						     reducer returns [] and SubAgentGroup renders nothing. -->
+						<SubAgentGroup events={message?.subagents ?? []} />
 
 						{#if message?.files && message.files?.filter( (f) => ['image', 'file'].includes(f.type) ).length > 0}
 							<div
