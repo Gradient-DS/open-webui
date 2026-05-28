@@ -478,6 +478,26 @@ def _build_streaming_response(
                             log.warning(f'Error emitting present_ui event: {e}')
                     continue
 
+                if sse_event.event_type == 'subagent':
+                    # [Gradient] SubAgent lifecycle / streaming events for the
+                    # Leiden bezwaar agent (and any future multi-SubAgent flow).
+                    # Payload is the typed event from the agent backend with a
+                    # ``phase`` discriminator: start / token / step / done.
+                    # The frontend's <SubAgentGroup> reducer keys cards by
+                    # parallel_group_id and agent_id; per-token streams append
+                    # to the matching card's text_buffer.
+                    if event_emitter:
+                        try:
+                            await event_emitter(
+                                {
+                                    'type': 'subagent',
+                                    'data': sse_event.data,
+                                }
+                            )
+                        except Exception as e:
+                            log.warning(f'Error emitting subagent event: {e}')
+                    continue
+
                 if sse_event.event_type == 'context_usage':
                     # [Gradient] Post-turn context-budget estimate from the
                     # agent service. Payload shape:
