@@ -101,6 +101,7 @@ export interface SubAgentCardVM {
 	state: SubAgentCardState;
 	text_buffer: string;
 	reasoning_buffer: string;
+	reasoning_total_chars: number;
 	status_history: SubagentStatusEntry[];
 	sources: SubagentSourceEntry[];
 	step_label: string;
