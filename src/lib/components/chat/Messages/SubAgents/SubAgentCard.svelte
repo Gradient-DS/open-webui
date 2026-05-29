@@ -31,6 +31,9 @@
 	let bodyEl: HTMLDivElement | undefined;
 	let autoScroll = true;
 
+	let reasoningBodyEl: HTMLDivElement | undefined;
+	let reasoningAutoScroll = true;
+
 	$: state = card.state;
 
 	// Auto-expand on first transition into running. Reactively cancel any
@@ -89,6 +92,29 @@
 	// triggers the after-update scroll.
 	$: if (card.text_buffer || expanded) {
 		void scheduleScroll();
+	}
+
+	// Same auto-scroll-to-bottom behaviour for the streamed reasoning pane,
+	// which is also capped at a fixed height (``max-h-48``) inside the
+	// expanded card body so the whole card doesn't grow tall every time the
+	// SubAgent's LLM emits another reasoning chunk.
+	$: if (card.reasoning_buffer && reasoningOpen) {
+		void scheduleReasoningScroll();
+	}
+
+	function onReasoningScroll() {
+		if (!reasoningBodyEl) return;
+		const distanceFromBottom =
+			reasoningBodyEl.scrollHeight - reasoningBodyEl.scrollTop - reasoningBodyEl.clientHeight;
+		reasoningAutoScroll = distanceFromBottom <= 32;
+	}
+
+	async function scheduleReasoningScroll() {
+		if (!reasoningAutoScroll) return;
+		await tick();
+		if (reasoningBodyEl && reasoningAutoScroll) {
+			reasoningBodyEl.scrollTop = reasoningBodyEl.scrollHeight;
+		}
 	}
 
 	async function scheduleScroll() {
@@ -161,7 +187,11 @@
 					<summary class="cursor-pointer text-gray-500 dark:text-gray-400 select-none">
 						Thinking ({card.reasoning_buffer.length} chars)
 					</summary>
-					<div class="mt-1 whitespace-pre-wrap break-words text-xs text-gray-500 dark:text-gray-400 font-mono">
+					<div
+						bind:this={reasoningBodyEl}
+						on:scroll={onReasoningScroll}
+						class="mt-1 max-h-48 overflow-y-auto whitespace-pre-wrap break-words text-xs text-gray-500 dark:text-gray-400 font-mono leading-relaxed"
+					>
 						{card.reasoning_buffer}
 					</div>
 				</details>
