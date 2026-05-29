@@ -47,6 +47,7 @@ from starlette.background import BackgroundTask
 from starlette.responses import StreamingResponse
 
 from open_webui.env import AGENT_API_BASE_URL, AGENT_API_KEY
+from open_webui.models.chats import Chats
 from open_webui.socket.main import get_event_emitter
 
 log = logging.getLogger(__name__)
@@ -426,9 +427,27 @@ def _build_streaming_response(
         # get_event_emitter is async (Phase 1.5 upstream); await inside the
         # generator since the enclosing _build_streaming_response is sync.
         event_emitter = await get_event_emitter(metadata)
+        # [Gradient] Accumulate every ``event: subagent`` payload so the
+        # message's persisted ``subagents`` field carries the full lifecycle
+        # for rehydration on reload. The frontend's ``reduceSubAgents``
+        # consumes this same flat list, so persisting verbatim avoids any
+        # FE/BE shape divergence. Empty for non-bezwaar agents.
+        subagent_events: list[dict] = []
         try:
             async for sse_event in stream_agent_response(AGENT_API_BASE_URL, payload):
                 if sse_event.event_type == 'done':
+                    if subagent_events:
+                        chat_id = metadata.get('chat_id')
+                        message_id = metadata.get('message_id')
+                        if chat_id and message_id:
+                            try:
+                                await Chats.upsert_message_to_chat_by_id_and_message_id(
+                                    chat_id,
+                                    message_id,
+                                    {'subagents': subagent_events},
+                                )
+                            except Exception as e:
+                                log.warning(f'Error persisting subagents to message: {e}')
                     break
 
                 if sse_event.event_type == 'status':
@@ -482,10 +501,12 @@ def _build_streaming_response(
                     # [Gradient] SubAgent lifecycle / streaming events for the
                     # Leiden bezwaar agent (and any future multi-SubAgent flow).
                     # Payload is the typed event from the agent backend with a
-                    # ``phase`` discriminator: start / token / step / done.
+                    # ``phase`` discriminator: start / token / reasoning /
+                    # status / source / step / done.
                     # The frontend's <SubAgentGroup> reducer keys cards by
                     # parallel_group_id and agent_id; per-token streams append
                     # to the matching card's text_buffer.
+                    subagent_events.append(sse_event.data)
                     if event_emitter:
                         try:
                             await event_emitter(
