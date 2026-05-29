@@ -314,7 +314,11 @@
 		}
 
 		for (const g of groups) {
-			const ts = Math.min(...g.cards.map((c) => c.started_at));
+			// SubagentStartEvent.started_at is epoch SECONDS (per
+			// agents/core/types.py); reasoning items' started_at attribute is
+			// epoch MILLISECONDS (middleware.py renders it as ms). Normalize
+			// the subagent side to ms so both axes are comparable.
+			const ts = Math.min(...g.cards.map((c) => c.started_at)) * 1000;
 			const filtered = subagentEvents.filter(
 				(e) => agentToGroup.get(e.agent_id) === g.parallel_group_id
 			);
