@@ -219,16 +219,17 @@
 		return attrs;
 	}
 
-	$: reasoningItems = (() => {
-		const content = message?.content ?? '';
+	type ReasoningItem = {
+		kind: 'reasoning';
+		summary: string;
+		body: string;
+		attributes: Record<string, string>;
+		contentOffset: number;
+	};
+
+	function parseReasoningItems(content: string): ReasoningItem[] {
 		if (!content.includes('<details type="reasoning"')) return [];
-		const items: {
-			kind: 'reasoning';
-			summary: string;
-			body: string;
-			attributes: Record<string, string>;
-			contentOffset: number;
-		}[] = [];
+		const items: ReasoningItem[] = [];
 		const re = /<details type="reasoning"[^>]*>([\s\S]*?)<\/details>/g;
 		let match;
 		while ((match = re.exec(content)) !== null) {
@@ -246,7 +247,30 @@
 			});
 		}
 		return items;
-	})();
+	}
+
+	// Memoize content-derived parses on the content string identity so that
+	// reactive cascades from unrelated message-field updates (e.g. each
+	// subagent SSE event triggers a message re-prop) don't re-run the
+	// O(content-length) regex scans and don't churn a new array reference on
+	// every fire. Without this, dependents like ``responseParts`` see
+	// reasoningItems as "changed" on every dispatch even when content is
+	// byte-identical — which propagates into Svelte each-block rekeys and is
+	// a primary source of the end-of-stream flicker.
+	let _memoContent: string | undefined;
+	let _memoReasoningItems: ReasoningItem[] = [];
+	let _memoToolOffsets: number[] = [];
+
+	function memoContentParses(content: string): void {
+		if (content === _memoContent) return;
+		_memoContent = content;
+		_memoReasoningItems = parseReasoningItems(content);
+		_memoToolOffsets = parseToolOffsets(content);
+	}
+
+	$: memoContentParses(message?.content ?? '');
+	$: reasoningItems = _memoReasoningItems;
+	$: toolOffsets = _memoToolOffsets;
 
 	// Merge reasoning items into statusEntries in stream order. The merge
 	// strategy depends on which protocol produced the wire data; see
@@ -254,7 +278,6 @@
 	// once and is the single source of truth for "how do we render this
 	// turn" — the dispatcher inside ``mergeStatusAndReasoning`` reads it,
 	// and Phase 3 will lift the standalone-reasoning mount onto it too.
-	$: toolOffsets = parseToolOffsets(message?.content ?? '');
 	$: protocol = detectMergeProtocol(statusEntries, reasoningItems, toolOffsets);
 	$: mergedHistory = mergeStatusAndReasoning(statusEntries, reasoningItems, toolOffsets);
 
@@ -291,11 +314,15 @@
 	// branch below; non-bezwaar turns (shouldShowStatusHistory path) are
 	// unaffected.
 	type ResponsePart =
-		| { kind: 'reasoning'; ts: number; item: (typeof reasoningItems)[0] }
+		| { kind: 'reasoning'; ts: number; item: ReasoningItem }
 		| { kind: 'subagent-group'; ts: number; group_id: string; events: SubAgentEvent[] };
 
-	$: responseParts = (() => {
-		const subagentEvents: SubAgentEvent[] = message?.subagents ?? [];
+	const _EMPTY_SUBAGENT_EVENTS: SubAgentEvent[] = [];
+
+	function buildResponseParts(
+		items: ReasoningItem[],
+		subagentEvents: SubAgentEvent[]
+	): ResponsePart[] {
 		const groups = reduceSubAgents(subagentEvents);
 
 		// Build a set of agent_ids → parallel_group_id so we can filter events.
@@ -308,7 +335,7 @@
 
 		const parts: ResponsePart[] = [];
 
-		for (const item of reasoningItems) {
+		for (const item of items) {
 			const ts = parseInt(item.attributes?.started_at ?? '0', 10);
 			parts.push({ kind: 'reasoning', ts, item });
 		}
@@ -327,7 +354,35 @@
 
 		parts.sort((a, b) => a.ts - b.ts);
 		return parts;
-	})();
+	}
+
+	// Memoize ``responseParts`` on (reasoningItems-ref, subagentEvents-ref,
+	// subagentEvents.length). Chat.svelte mutates ``message.subagents`` in
+	// place via ``.push`` and then reassigns the same ref to trigger Svelte
+	// reactivity, so a ref-only check misses appended events — the length
+	// snapshot catches the in-place growth. ``reasoningItems`` is already
+	// ref-stable across content-equal cascades thanks to the memo above.
+	let _memoRpItemsRef: ReasoningItem[] | undefined;
+	let _memoRpEventsRef: SubAgentEvent[] | undefined;
+	let _memoRpEventsLen = -1;
+	let _memoResponseParts: ResponsePart[] = [];
+
+	function memoResponseParts(items: ReasoningItem[], events: SubAgentEvent[]): void {
+		if (
+			items === _memoRpItemsRef &&
+			events === _memoRpEventsRef &&
+			events.length === _memoRpEventsLen
+		) {
+			return;
+		}
+		_memoRpItemsRef = items;
+		_memoRpEventsRef = events;
+		_memoRpEventsLen = events.length;
+		_memoResponseParts = buildResponseParts(items, events);
+	}
+
+	$: memoResponseParts(reasoningItems, message?.subagents ?? _EMPTY_SUBAGENT_EVENTS);
+	$: responseParts = _memoResponseParts;
 
 	let edit = false;
 	let editedContent = '';
