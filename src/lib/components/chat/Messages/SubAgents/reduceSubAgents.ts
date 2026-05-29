@@ -35,8 +35,15 @@ import type {
 	SubagentTokenEvent
 } from '$lib/types/subagent';
 
-export const TEXT_BUFFER_LIMIT_BYTES = 8 * 1024;
-export const REASONING_BUFFER_LIMIT_BYTES = 8 * 1024;
+// Bezwaar's Beschikking-SubAgent streams ~10KB visible markdown and
+// can produce 50KB+ of CoT across its 8 section fills (Nemotron reasoning
+// is verbose). The 8KB caps from the original Phase 3 plan were too
+// tight for real demo content — the "Thinking (8192 chars)" counter
+// would stick once the sliding window kicked in, making it look like
+// the model had stopped. ``reasoning_total_chars`` on the VM keeps
+// counting past the cap so the label stays honest.
+export const TEXT_BUFFER_LIMIT_BYTES = 64 * 1024;
+export const REASONING_BUFFER_LIMIT_BYTES = 256 * 1024;
 export const STATUS_HISTORY_LIMIT = 64;
 export const SOURCES_LIMIT = 32;
 
@@ -86,6 +93,7 @@ function handleStart(
 		state: 'pending',
 		text_buffer: '',
 		reasoning_buffer: '',
+		reasoning_total_chars: 0,
 		status_history: [],
 		sources: [],
 		step_label: '',
@@ -132,6 +140,7 @@ function applyDone(card: SubAgentCardVM, event: SubagentDoneEvent): void {
 
 function applyReasoning(card: SubAgentCardVM, event: SubagentReasoningEvent): void {
 	if (event.text_delta.length === 0) return;
+	card.reasoning_total_chars += event.text_delta.length;
 	const next = card.reasoning_buffer + event.text_delta;
 	card.reasoning_buffer =
 		next.length > REASONING_BUFFER_LIMIT_BYTES

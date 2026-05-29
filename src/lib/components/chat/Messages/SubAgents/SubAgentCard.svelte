@@ -185,7 +185,7 @@
 			{#if card.reasoning_buffer}
 				<details class="mt-1 text-xs" bind:open={reasoningOpen}>
 					<summary class="cursor-pointer text-gray-500 dark:text-gray-400 select-none">
-						Thinking ({card.reasoning_buffer.length} chars)
+						Thinking ({card.reasoning_total_chars.toLocaleString()} chars)
 					</summary>
 					<div
 						bind:this={reasoningBodyEl}
