@@ -72,7 +72,7 @@
 	import ReasoningBullet from './ResponseMessage/StatusHistory/ReasoningBullet.svelte';
 	import SubAgentGroup from './SubAgents/SubAgentGroup.svelte';
 	import { reduceSubAgents } from './SubAgents/reduceSubAgents';
-	import type { SubAgentEvent } from '$lib/types/subagent';
+	import type { SubAgentEvent, SubAgentGroupVM } from '$lib/types/subagent';
 	import {
 		detectMergeProtocol,
 		mergeStatusAndReasoning,
@@ -306,16 +306,17 @@
 	$: hasVisibleStatus = shouldShowStatusHistory;
 
 	// Build a time-ordered list of reasoning items and subagent groups for the
-	// reasoning_only protocol path (bezwaar turns). Each subagent group carries
-	// only the events that belong to it so SubAgentGroup can reduce them in
-	// isolation. The list is sorted by `started_at` (unix-ms) ascending.
+	// reasoning_only protocol path (bezwaar turns). Each subagent-group part
+	// carries the already-reduced ``SubAgentGroupVM`` — SubAgentGroup renders
+	// it directly, no second pass over the raw events. List is sorted by
+	// ``started_at`` (unix-ms) ascending.
 	//
 	// This reactive declaration is only consumed by the reasoning_only render
 	// branch below; non-bezwaar turns (shouldShowStatusHistory path) are
 	// unaffected.
 	type ResponsePart =
 		| { kind: 'reasoning'; ts: number; item: ReasoningItem }
-		| { kind: 'subagent-group'; ts: number; group_id: string; events: SubAgentEvent[] };
+		| { kind: 'subagent-group'; ts: number; group_id: string; group: SubAgentGroupVM };
 
 	const _EMPTY_SUBAGENT_EVENTS: SubAgentEvent[] = [];
 
@@ -324,15 +325,6 @@
 		subagentEvents: SubAgentEvent[]
 	): ResponsePart[] {
 		const groups = reduceSubAgents(subagentEvents);
-
-		// Build a set of agent_ids → parallel_group_id so we can filter events.
-		const agentToGroup = new Map<string, string>();
-		for (const g of groups) {
-			for (const card of g.cards) {
-				agentToGroup.set(card.agent_id, g.parallel_group_id);
-			}
-		}
-
 		const parts: ResponsePart[] = [];
 
 		for (const item of items) {
@@ -346,42 +338,74 @@
 			// epoch MILLISECONDS (middleware.py renders it as ms). Normalize
 			// the subagent side to ms so both axes are comparable.
 			const ts = Math.min(...g.cards.map((c) => c.started_at)) * 1000;
-			const filtered = subagentEvents.filter(
-				(e) => agentToGroup.get(e.agent_id) === g.parallel_group_id
-			);
-			parts.push({ kind: 'subagent-group', ts, group_id: g.parallel_group_id, events: filtered });
+			parts.push({ kind: 'subagent-group', ts, group_id: g.parallel_group_id, group: g });
 		}
 
 		parts.sort((a, b) => a.ts - b.ts);
 		return parts;
 	}
 
-	// Memoize ``responseParts`` on (reasoningItems-ref, subagentEvents-ref,
-	// subagentEvents.length). Chat.svelte mutates ``message.subagents`` in
-	// place via ``.push`` and then reassigns the same ref to trigger Svelte
-	// reactivity, so a ref-only check misses appended events — the length
-	// snapshot catches the in-place growth. ``reasoningItems`` is already
-	// ref-stable across content-equal cascades thanks to the memo above.
+	// Throttling strategy for the responseParts rebuild:
+	//
+	// During streaming Chat.svelte pushes onto ``message.subagents`` on every
+	// SSE token (200+/sec on Nemotron CoT). Without throttling, every push
+	// triggers the full ``buildResponseParts`` → ``reduceSubAgents(allEvents)``
+	// pipeline, then SubAgentGroup re-renders, then SubAgentCard fires its
+	// scroll effect — O(N²·K) per turn and visibly janky.
+	//
+	// We collapse multiple pushes within a single animation frame into one
+	// rebuild via ``requestAnimationFrame``: each ``$:`` trigger updates the
+	// "latest args" snapshot; the first trigger schedules an rAF callback
+	// that runs ``buildResponseParts`` against the most recent snapshot when
+	// it fires. End result: at most 60Hz UI updates regardless of token rate,
+	// while the final state always lands within one frame of the last event.
+	//
+	// The internal length-based fast-path stays as a second layer of defense:
+	// it skips the rebuild when the rAF fires but nothing meaningful changed
+	// (e.g. reasoningItems references stayed identical and no new subagent
+	// events arrived since the previous frame).
 	let _memoRpItemsRef: ReasoningItem[] | undefined;
 	let _memoRpEventsRef: SubAgentEvent[] | undefined;
 	let _memoRpEventsLen = -1;
 	let _memoResponseParts: ResponsePart[] = [];
 
-	function memoResponseParts(items: ReasoningItem[], events: SubAgentEvent[]): void {
-		if (
-			items === _memoRpItemsRef &&
-			events === _memoRpEventsRef &&
-			events.length === _memoRpEventsLen
-		) {
-			return;
-		}
-		_memoRpItemsRef = items;
-		_memoRpEventsRef = events;
-		_memoRpEventsLen = events.length;
-		_memoResponseParts = buildResponseParts(items, events);
+	let _rpRafId: number | null = null;
+	let _rpLatestItems: ReasoningItem[] = [];
+	let _rpLatestEvents: SubAgentEvent[] = _EMPTY_SUBAGENT_EVENTS;
+
+	function scheduleResponsePartsRebuild(
+		items: ReasoningItem[],
+		events: SubAgentEvent[]
+	): void {
+		_rpLatestItems = items;
+		_rpLatestEvents = events;
+		if (_rpRafId !== null) return;
+		_rpRafId = requestAnimationFrame(() => {
+			_rpRafId = null;
+			const latestItems = _rpLatestItems;
+			const latestEvents = _rpLatestEvents;
+			if (
+				latestItems === _memoRpItemsRef &&
+				latestEvents === _memoRpEventsRef &&
+				latestEvents.length === _memoRpEventsLen
+			) {
+				return;
+			}
+			_memoRpItemsRef = latestItems;
+			_memoRpEventsRef = latestEvents;
+			_memoRpEventsLen = latestEvents.length;
+			_memoResponseParts = buildResponseParts(latestItems, latestEvents);
+		});
 	}
 
-	$: memoResponseParts(reasoningItems, message?.subagents ?? _EMPTY_SUBAGENT_EVENTS);
+	onDestroy(() => {
+		if (_rpRafId !== null) {
+			cancelAnimationFrame(_rpRafId);
+			_rpRafId = null;
+		}
+	});
+
+	$: scheduleResponsePartsRebuild(reasoningItems, message?.subagents ?? _EMPTY_SUBAGENT_EVENTS);
 	$: responseParts = _memoResponseParts;
 
 	let edit = false;
@@ -985,7 +1009,7 @@
 											attributes={part.item.attributes ?? {}}
 										/>
 									{:else}
-										<SubAgentGroup events={part.events} />
+										<SubAgentGroup group={part.group} />
 									{/if}
 								{/each}
 							</div>
@@ -999,7 +1023,7 @@
 							     started_at. True interleaving inside the StatusHistory
 							     accordion is deferred to a future phase. -->
 							{#each responseParts.filter((p) => p.kind === 'subagent-group') as part (part.group_id)}
-								<SubAgentGroup events={part.events} />
+								<SubAgentGroup group={part.group} />
 							{/each}
 						{/if}
 
