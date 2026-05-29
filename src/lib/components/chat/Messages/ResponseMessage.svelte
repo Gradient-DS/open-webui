@@ -71,6 +71,8 @@
 	import StatusHistory from './ResponseMessage/StatusHistory.svelte';
 	import ReasoningBullet from './ResponseMessage/StatusHistory/ReasoningBullet.svelte';
 	import SubAgentGroup from './SubAgents/SubAgentGroup.svelte';
+	import { reduceSubAgents } from './SubAgents/reduceSubAgents';
+	import type { SubAgentEvent } from '$lib/types/subagent';
 	import {
 		detectMergeProtocol,
 		mergeStatusAndReasoning,
@@ -279,6 +281,49 @@
 		mergedHistory.length > 0;
 
 	$: hasVisibleStatus = shouldShowStatusHistory;
+
+	// Build a time-ordered list of reasoning items and subagent groups for the
+	// reasoning_only protocol path (bezwaar turns). Each subagent group carries
+	// only the events that belong to it so SubAgentGroup can reduce them in
+	// isolation. The list is sorted by `started_at` (unix-ms) ascending.
+	//
+	// This reactive declaration is only consumed by the reasoning_only render
+	// branch below; non-bezwaar turns (shouldShowStatusHistory path) are
+	// unaffected.
+	type ResponsePart =
+		| { kind: 'reasoning'; ts: number; item: (typeof reasoningItems)[0] }
+		| { kind: 'subagent-group'; ts: number; group_id: string; events: SubAgentEvent[] };
+
+	$: responseParts = (() => {
+		const subagentEvents: SubAgentEvent[] = message?.subagents ?? [];
+		const groups = reduceSubAgents(subagentEvents);
+
+		// Build a set of agent_ids → parallel_group_id so we can filter events.
+		const agentToGroup = new Map<string, string>();
+		for (const g of groups) {
+			for (const card of g.cards) {
+				agentToGroup.set(card.agent_id, g.parallel_group_id);
+			}
+		}
+
+		const parts: ResponsePart[] = [];
+
+		for (const item of reasoningItems) {
+			const ts = parseInt(item.attributes?.started_at ?? '0', 10);
+			parts.push({ kind: 'reasoning', ts, item });
+		}
+
+		for (const g of groups) {
+			const ts = Math.min(...g.cards.map((c) => c.started_at));
+			const filtered = subagentEvents.filter(
+				(e) => agentToGroup.get(e.agent_id) === g.parallel_group_id
+			);
+			parts.push({ kind: 'subagent-group', ts, group_id: g.parallel_group_id, events: filtered });
+		}
+
+		parts.sort((a, b) => a.ts - b.ts);
+		return parts;
+	})();
 
 	let edit = false;
 	let editedContent = '';
@@ -863,23 +908,26 @@
 				<div class="chat-{message.role} w-full min-w-full markdown-prose">
 					<div>
 						{#if protocol === 'reasoning_only' && (model?.info?.meta?.capabilities?.status_updates ?? true)}
-							<!-- No-tool turn (vanilla OWUI native LLM flow OR an agent
-							     turn that chose to answer without tool calls): the
-							     StatusHistory dropdown is hidden, but we still want the
-							     model's reasoning to be visible and inspectable.
-							     Renders the reasoning blocks as standalone expanders —
-							     same ReasoningBullet component the dropdown uses
-							     internally, so chevron + slide body + i18n labels are
-							     preserved. Stays clickable mid-stream (Bug #3) and
-							     persists after streaming (Bug #2). -->
+							<!-- No-tool / bezwaar turn: render parent reasoning blocks and
+							     subagent groups interleaved by their `started_at` timestamp.
+							     Each entry in `responseParts` is either a reasoning item
+							     (rendered as a standalone ReasoningBullet) or a subagent
+							     group (rendered via SubAgentGroup with pre-filtered events).
+							     Turns with no subagents degrade gracefully — responseParts
+							     contains only reasoning items and SubAgentGroup is never
+							     mounted. Turns with no reasoning similarly degrade. -->
 							<div class="flex flex-col gap-1 my-1">
-								{#each reasoningItems as item, idx (item.contentOffset)}
-									<ReasoningBullet
-										id={`standalone-reasoning-${idx}`}
-										summary={item.summary}
-										body={item.body}
-										attributes={item.attributes ?? {}}
-									/>
+								{#each responseParts as part (part.kind === 'reasoning' ? `r-${part.item.contentOffset}` : `g-${part.group_id}`)}
+									{#if part.kind === 'reasoning'}
+										<ReasoningBullet
+											id={`standalone-reasoning-${part.item.contentOffset}`}
+											summary={part.item.summary}
+											body={part.item.body}
+											attributes={part.item.attributes ?? {}}
+										/>
+									{:else}
+										<SubAgentGroup events={part.events} />
+									{/if}
 								{/each}
 							</div>
 						{:else if shouldShowStatusHistory}
@@ -887,14 +935,14 @@
 								statusHistory={mergedHistory}
 								messageDone={message?.done ?? false}
 							/>
+							<!-- [Gradient] For tool-call turns (StatusHistory path), subagent
+							     groups render below the dropdown sorted by their own
+							     started_at. True interleaving inside the StatusHistory
+							     accordion is deferred to a future phase. -->
+							{#each responseParts.filter((p) => p.kind === 'subagent-group') as part (part.group_id)}
+								<SubAgentGroup events={part.events} />
+							{/each}
 						{/if}
-
-						<!-- [Gradient] Live SubAgent cards (Leiden bezwaar parent + capability
-						     subagents). Sits between StatusHistory and the main content panel
-						     so users see streaming sub-agent activity above the parent's
-						     answer. Non-bezwaar agents leave message.subagents empty; the
-						     reducer returns [] and SubAgentGroup renders nothing. -->
-						<SubAgentGroup events={message?.subagents ?? []} />
 
 						{#if message?.files && message.files?.filter( (f) => ['image', 'file'].includes(f.type) ).length > 0}
 							<div

@@ -541,13 +541,18 @@ def serialize_output(output: list) -> str:
                 )
             )
 
+            # Timestamp: item.started_at is Unix seconds (set during item creation).
+            # Convert to milliseconds for frontend interleaving by time.
+            started_at_unix_s = item.get('started_at', time.time())
+            started_at_ms = int(started_at_unix_s * 1000)
+
             if status == 'completed' or duration is not None or not is_last_item:
                 parts.append(
-                    f'<details type="reasoning" done="true" duration="{duration or 0}">\n<summary>Thought for {duration or 0} seconds</summary>\n{display}\n</details>'
+                    f'<details type="reasoning" done="true" duration="{duration or 0}" started_at="{started_at_ms}">\n<summary>Thought for {duration or 0} seconds</summary>\n{display}\n</details>'
                 )
             else:
                 parts.append(
-                    f'<details type="reasoning" done="false">\n<summary>Thinking…</summary>\n{display}\n</details>'
+                    f'<details type="reasoning" done="false" started_at="{started_at_ms}">\n<summary>Thinking…</summary>\n{display}\n</details>'
                 )
 
         elif item_type == 'open_webui:code_interpreter':

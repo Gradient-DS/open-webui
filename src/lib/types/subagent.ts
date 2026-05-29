@@ -3,11 +3,11 @@
  * agent runner when a parent agent (e.g. the Leiden bezwaar parent) spawns
  * one or more SubAgents in parallel.
  *
- * The agent service emits four phases per SubAgent — `start`, `token`,
- * `step`, `done` — keyed by `agent_id` and grouped by `parallel_group_id`.
- * `Chat.svelte` appends every payload onto `message.subagents` verbatim;
- * `reduceSubAgents` folds the flat stream into per-group card view-models
- * for `SubAgentGroup.svelte` to render.
+ * The agent service emits seven phases per SubAgent — `start`, `token`,
+ * `reasoning`, `status`, `source`, `step`, `done` — keyed by `agent_id` and
+ * grouped by `parallel_group_id`. `Chat.svelte` appends every payload onto
+ * `message.subagents` verbatim; `reduceSubAgents` folds the flat stream into
+ * per-group card view-models for `SubAgentGroup.svelte` to render.
  */
 
 export interface SubagentStartEvent {
@@ -32,6 +32,47 @@ export interface SubagentStepEvent {
 	step_status: 'running' | 'done';
 }
 
+export interface SubagentReasoningEvent {
+	phase: 'reasoning';
+	agent_id: string;
+	text_delta: string;
+}
+
+export interface SubagentStatusEntry {
+	description: string;
+	done: boolean;
+	action?: string;
+	queries?: string[];
+	count?: number;
+	source?: string;
+	urls?: string[];
+	collection_name?: string;
+	query?: string;
+	doc_title?: string;
+	article_number?: string;
+	doc_description?: string;
+	hidden?: boolean;
+}
+
+export interface SubagentStatusEvent {
+	phase: 'status';
+	agent_id: string;
+	status: SubagentStatusEntry;
+}
+
+export interface SubagentSourceEntry {
+	source: { name: string; type: string; id?: string; url?: string };
+	document: string[];
+	metadata: Array<Record<string, unknown>>;
+	distances?: number[];
+}
+
+export interface SubagentSourceEvent {
+	phase: 'source';
+	agent_id: string;
+	source: SubagentSourceEntry;
+}
+
 export interface SubagentDoneEvent {
 	phase: 'done';
 	agent_id: string;
@@ -44,6 +85,9 @@ export interface SubagentDoneEvent {
 export type SubAgentEvent =
 	| SubagentStartEvent
 	| SubagentTokenEvent
+	| SubagentReasoningEvent
+	| SubagentStatusEvent
+	| SubagentSourceEvent
 	| SubagentStepEvent
 	| SubagentDoneEvent;
 
@@ -56,6 +100,9 @@ export interface SubAgentCardVM {
 	parallel_group_id: string;
 	state: SubAgentCardState;
 	text_buffer: string;
+	reasoning_buffer: string;
+	status_history: SubagentStatusEntry[];
+	sources: SubagentSourceEntry[];
 	step_label: string;
 	summary: string;
 	started_at: number;

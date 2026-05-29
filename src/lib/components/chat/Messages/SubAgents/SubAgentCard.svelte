@@ -5,6 +5,8 @@
 	import Spinner from '$lib/components/common/Spinner.svelte';
 	import ChevronDown from '$lib/components/icons/ChevronDown.svelte';
 	import ChevronUp from '$lib/components/icons/ChevronUp.svelte';
+	import StatusHistory from '$lib/components/chat/Messages/ResponseMessage/StatusHistory.svelte';
+	import Citations from '$lib/components/chat/Messages/Citations.svelte';
 
 	import type { SubAgentCardVM } from '$lib/types/subagent';
 
@@ -23,6 +25,8 @@
 	let expanded = false;
 	let userOverrideExpanded: boolean | null = null;
 	let collapseTimer: ReturnType<typeof setTimeout> | null = null;
+
+	let reasoningOpen = false;
 
 	let bodyEl: HTMLDivElement | undefined;
 	let autoScroll = true;
@@ -149,6 +153,39 @@
 			{#if state === 'error'}
 				<div class="rounded-lg bg-red-50 dark:bg-red-950/40 px-2 py-1.5 text-xs text-red-700 dark:text-red-300">
 					{card.error ?? 'SubAgent failed'}
+				</div>
+			{/if}
+
+			{#if card.reasoning_buffer}
+				<details class="mt-1 text-xs" bind:open={reasoningOpen}>
+					<summary class="cursor-pointer text-gray-500 dark:text-gray-400 select-none">
+						Thinking ({card.reasoning_buffer.length} chars)
+					</summary>
+					<div class="mt-1 whitespace-pre-wrap break-words text-xs text-gray-500 dark:text-gray-400 font-mono">
+						{card.reasoning_buffer}
+					</div>
+				</details>
+			{/if}
+
+			{#if card.status_history.length > 0}
+				<div class="mt-1 text-xs">
+					<StatusHistory
+						statusHistory={card.status_history}
+						expand={true}
+						messageDone={state === 'done' || state === 'error'}
+					/>
+				</div>
+			{/if}
+
+			{#if card.sources.length > 0}
+				<div class="mt-1 text-xs">
+					<Citations
+						id={card.agent_id}
+						chatId=""
+						sources={card.sources}
+						readOnly={true}
+						messageDone={state === 'done' || state === 'error'}
+					/>
 				</div>
 			{/if}
 
