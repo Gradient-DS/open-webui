@@ -5,7 +5,10 @@ import type {
 	SubagentStartEvent,
 	SubagentTokenEvent,
 	SubagentStepEvent,
-	SubagentDoneEvent
+	SubagentDoneEvent,
+	SubagentReasoningEvent,
+	SubagentStatusEvent,
+	SubagentSourceEvent
 } from '$lib/types/subagent';
 
 const start = (
@@ -190,5 +193,45 @@ describe('reduceSubAgents', () => {
 		];
 
 		expect(reduceSubAgents(events)).toEqual([]);
+	});
+
+	it('accumulates reasoning into reasoning_buffer', () => {
+		const events: SubAgentEvent[] = [
+			start('aid-1', 'gid-1'),
+			{ phase: 'reasoning', agent_id: 'aid-1', text_delta: 'Thinking…' } as SubagentReasoningEvent,
+			{ phase: 'reasoning', agent_id: 'aid-1', text_delta: ' continuing…' } as SubagentReasoningEvent
+		];
+		const [group] = reduceSubAgents(events);
+		expect(group.cards[0].reasoning_buffer).toBe('Thinking… continuing…');
+	});
+
+	it('appends status entries in arrival order', () => {
+		const events: SubAgentEvent[] = [
+			start('aid-1', 'gid-1'),
+			{ phase: 'status', agent_id: 'aid-1', status: { description: 'Zoekt…', done: false } } as SubagentStatusEvent,
+			{ phase: 'status', agent_id: 'aid-1', status: { description: 'Vond 3 hits', done: true } } as SubagentStatusEvent
+		];
+		const [group] = reduceSubAgents(events);
+		expect(group.cards[0].status_history).toHaveLength(2);
+		expect(group.cards[0].status_history[0].description).toBe('Zoekt…');
+		expect(group.cards[0].status_history[1].description).toBe('Vond 3 hits');
+	});
+
+	it('appends source events into sources list', () => {
+		const events: SubAgentEvent[] = [
+			start('aid-1', 'gid-1'),
+			{
+				phase: 'source',
+				agent_id: 'aid-1',
+				source: {
+					source: { name: 'CVDR620068', type: 'document' },
+					document: ['…'],
+					metadata: []
+				}
+			} as SubagentSourceEvent
+		];
+		const [group] = reduceSubAgents(events);
+		expect(group.cards[0].sources).toHaveLength(1);
+		expect(group.cards[0].sources[0].source.name).toBe('CVDR620068');
 	});
 });
