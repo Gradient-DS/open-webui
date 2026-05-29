@@ -27,12 +27,18 @@ import type {
 	SubAgentEvent,
 	SubAgentGroupVM,
 	SubagentDoneEvent,
+	SubagentReasoningEvent,
+	SubagentSourceEvent,
 	SubagentStartEvent,
+	SubagentStatusEvent,
 	SubagentStepEvent,
 	SubagentTokenEvent
 } from '$lib/types/subagent';
 
 export const TEXT_BUFFER_LIMIT_BYTES = 8 * 1024;
+export const REASONING_BUFFER_LIMIT_BYTES = 8 * 1024;
+export const STATUS_HISTORY_LIMIT = 64;
+export const SOURCES_LIMIT = 32;
 
 export function reduceSubAgents(events: SubAgentEvent[]): SubAgentGroupVM[] {
 	const groups: SubAgentGroupVM[] = [];
@@ -54,6 +60,12 @@ export function reduceSubAgents(events: SubAgentEvent[]): SubAgentGroupVM[] {
 			applyStep(card, event);
 		} else if (event.phase === 'done') {
 			applyDone(card, event);
+		} else if (event.phase === 'reasoning') {
+			applyReasoning(card, event);
+		} else if (event.phase === 'status') {
+			applyStatus(card, event);
+		} else if (event.phase === 'source') {
+			applySource(card, event);
 		}
 	}
 
@@ -73,6 +85,9 @@ function handleStart(
 		parallel_group_id: event.parallel_group_id,
 		state: 'pending',
 		text_buffer: '',
+		reasoning_buffer: '',
+		status_history: [],
+		sources: [],
 		step_label: '',
 		summary: '',
 		started_at: event.started_at,
@@ -113,4 +128,27 @@ function applyDone(card: SubAgentCardVM, event: SubagentDoneEvent): void {
 	card.summary = event.summary;
 	card.ended_at = event.ended_at;
 	card.error = event.error;
+}
+
+function applyReasoning(card: SubAgentCardVM, event: SubagentReasoningEvent): void {
+	if (event.text_delta.length === 0) return;
+	const next = card.reasoning_buffer + event.text_delta;
+	card.reasoning_buffer =
+		next.length > REASONING_BUFFER_LIMIT_BYTES
+			? next.slice(next.length - REASONING_BUFFER_LIMIT_BYTES)
+			: next;
+}
+
+function applyStatus(card: SubAgentCardVM, event: SubagentStatusEvent): void {
+	card.status_history.push(event.status);
+	if (card.status_history.length > STATUS_HISTORY_LIMIT) {
+		card.status_history = card.status_history.slice(-STATUS_HISTORY_LIMIT);
+	}
+}
+
+function applySource(card: SubAgentCardVM, event: SubagentSourceEvent): void {
+	card.sources.push(event.source);
+	if (card.sources.length > SOURCES_LIMIT) {
+		card.sources = card.sources.slice(-SOURCES_LIMIT);
+	}
 }
