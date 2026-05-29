@@ -1,31 +1,28 @@
 <script lang="ts">
-	import { reduceSubAgents } from './reduceSubAgents';
 	import SubAgentCard from './SubAgentCard.svelte';
 
-	import type { SubAgentEvent } from '$lib/types/subagent';
+	import type { SubAgentGroupVM } from '$lib/types/subagent';
 
-	// Flat list of `event: subagent` SSE payloads accumulated by Chat.svelte
-	// onto `message.subagents`. Non-bezwaar agents leave this empty / undefined,
-	// in which case the reducer returns `[]` and the component renders nothing.
-	export let events: SubAgentEvent[] = [];
-
-	$: groups = reduceSubAgents(events ?? []);
+	// Pre-reduced group view-model — the parent (ResponseMessage) runs the
+	// reducer once per animation frame and passes the result down. This
+	// component used to accept raw ``SubAgentEvent[]`` and re-run the reducer
+	// itself; that doubled the per-token cost during streaming for every
+	// rendered group. Layout-only now.
+	export let group: SubAgentGroupVM;
 </script>
 
-{#if groups.length > 0}
+{#if group.cards.length > 0}
 	<div class="my-2 flex flex-col gap-2">
-		{#each groups as group (group.parallel_group_id)}
-			{#if group.cards.length > 1}
-				<div class="flex flex-col sm:flex-row gap-2">
-					{#each group.cards as card (card.agent_id)}
-						<div class="flex-1 min-w-0">
-							<SubAgentCard {card} />
-						</div>
-					{/each}
-				</div>
-			{:else}
-				<SubAgentCard card={group.cards[0]} />
-			{/if}
-		{/each}
+		{#if group.cards.length > 1}
+			<div class="flex flex-col sm:flex-row gap-2">
+				{#each group.cards as card (card.agent_id)}
+					<div class="flex-1 min-w-0">
+						<SubAgentCard {card} />
+					</div>
+				{/each}
+			</div>
+		{:else}
+			<SubAgentCard card={group.cards[0]} />
+		{/if}
 	</div>
 {/if}
