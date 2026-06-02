@@ -78,6 +78,7 @@ from open_webui.utils.groups import apply_default_group_assignment
 
 from open_webui.utils.redis import get_redis_client
 from open_webui.utils.rate_limit import RateLimiter
+from open_webui.utils.totp import compute_twofa_grace
 
 
 from typing import Optional, List
@@ -96,7 +97,14 @@ log = logging.getLogger(__name__)
 signin_rate_limiter = RateLimiter(redis_client=get_redis_client(), limit=5 * 3, window=60 * 3)
 
 
-def create_session_response(request: Request, user, db, response: Response = None, set_cookie: bool = False) -> dict:
+def create_session_response(
+    request: Request,
+    user,
+    db,
+    response: Response = None,
+    set_cookie: bool = False,
+    expires_at_cap: Optional[int] = None,
+) -> dict:
     """
     Create JWT token and build session response for a user.
     Shared helper for signin, signup, ldap_auth, add_user, and token_exchange endpoints.
@@ -107,11 +115,20 @@ def create_session_response(request: Request, user, db, response: Response = Non
         db: Database session
         response: FastAPI response object (required if set_cookie is True)
         set_cookie: Whether to set the auth cookie on the response
+        expires_at_cap: Optional epoch second to cap the session lifetime at
+            (e.g. the 2FA grace deadline) so the token cannot outlive it.
     """
     expires_delta = parse_duration(request.app.state.config.JWT_EXPIRES_IN)
     expires_at = None
     if expires_delta:
         expires_at = int(time.time()) + int(expires_delta.total_seconds())
+
+    # Cap the session lifetime when requested — a token issued during the 2FA
+    # grace window must not stay valid past the enrollment deadline, otherwise
+    # the deadline could be bypassed by simply not logging in again.
+    if expires_at_cap is not None and (expires_at is None or expires_at > expires_at_cap):
+        expires_at = expires_at_cap
+        expires_delta = datetime.timedelta(seconds=max(1, expires_at_cap - int(time.time())))
 
     token = create_token(
         data={'id': user.id},
@@ -144,6 +161,44 @@ def create_session_response(request: Request, user, db, response: Response = Non
         'profile_image_url': f'/api/v1/users/{user.id}/profile/image',
         'permissions': user_permissions,
     }
+
+
+def evaluate_2fa_grace(request: Request, user, auth_record, db) -> dict:
+    """Evaluate the 2FA enrollment grace period for a user.
+
+    When ENABLE_2FA + REQUIRE_2FA are on and the user has not enabled TOTP,
+    this lazily anchors the grace period (``auth.twofa_grace_started_at``) on
+    first observation and computes the deadline. The anchor is persisted, so
+    the deadline is stable across app restarts.
+
+    Returns ``{'gated': bool, 'grace_expires_at': Optional[int]}``:
+      - ``gated=True``  -> the grace period has expired; the caller must
+                           withhold a full session and require 2FA setup.
+      - ``gated=False`` with ``grace_expires_at`` set -> within grace; the
+                           caller should cap the session token at that epoch.
+      - ``gated=False`` with ``grace_expires_at=None`` -> 2FA enforcement does
+                           not apply to this user (e.g. SSO account, TOTP
+                           already enabled, or REQUIRE_2FA disabled).
+    """
+    config = request.app.state.config
+    if not (config.ENABLE_2FA and config.REQUIRE_2FA):
+        return {'gated': False, 'grace_expires_at': None}
+
+    # TOTP enrollment only applies to local password accounts without 2FA.
+    if user.oauth or not auth_record or not auth_record.password:
+        return {'gated': False, 'grace_expires_at': None}
+    if auth_record.totp_enabled:
+        return {'gated': False, 'grace_expires_at': None}
+
+    now = int(time.time())
+    started = auth_record.twofa_grace_started_at
+    if started is None:
+        # First time this user is seen under REQUIRE_2FA — start the clock.
+        started = now
+        Auths.set_twofa_grace_started(user.id, started, db=db)
+
+    grace = compute_twofa_grace(started, config.TWO_FA_GRACE_PERIOD_DAYS, now)
+    return {'gated': grace['expired'], 'grace_expires_at': grace['deadline']}
 
 
 ############################
@@ -535,6 +590,10 @@ async def signin(
             detail=ERROR_MESSAGES.ACTION_PROHIBITED,
         )
 
+    # 2FA grace enforcement only applies to interactive email+password logins,
+    # not to trusted-header / no-auth infrastructure modes.
+    password_login = False
+
     if WEBUI_AUTH_TRUSTED_EMAIL_HEADER:
         if WEBUI_AUTH_TRUSTED_EMAIL_HEADER not in request.headers:
             raise HTTPException(400, detail=ERROR_MESSAGES.INVALID_TRUSTED_HEADER)
@@ -603,6 +662,8 @@ async def signin(
                 db=db,
             )
     else:
+        password_login = True
+
         if signin_rate_limiter.is_limited(form_data.email.lower()):
             raise HTTPException(
                 status_code=status.HTTP_429_TOO_MANY_REQUESTS,
@@ -639,6 +700,32 @@ async def signin(
                         'partial_token': partial_token,
                         'methods': ['totp', 'recovery'],
                     }
+                )
+
+            # 2FA is required but this user has not enrolled yet — enforce the
+            # grace period. Past the deadline we withhold a full session and
+            # return a short-lived setup token; within the grace window we cap
+            # the session so it cannot outlive the deadline.
+            if password_login:
+                grace = evaluate_2fa_grace(request, user, auth_record, db)
+                if grace['gated']:
+                    setup_token = create_token(
+                        data={'id': user.id, 'purpose': '2fa_setup_pending'},
+                        expires_delta=datetime.timedelta(minutes=15),
+                    )
+                    return JSONResponse(
+                        content={
+                            'requires_2fa_setup': True,
+                            'partial_token': setup_token,
+                        }
+                    )
+                return create_session_response(
+                    request,
+                    user,
+                    db,
+                    response,
+                    set_cookie=True,
+                    expires_at_cap=grace['grace_expires_at'],
                 )
 
         return create_session_response(request, user, db, response, set_cookie=True)
@@ -748,7 +835,28 @@ async def signup(
             form_data.profile_image_url,
             db=db,
         )
-        return create_session_response(request, user, db, response, set_cookie=True)
+
+        # Start the 2FA grace clock for the new account and cap its session at
+        # the deadline. With a zero-day grace period a fresh account is already
+        # past grace, so it is gated into setup straight away (same as signin).
+        grace_cap = None
+        if request.app.state.config.ENABLE_2FA:
+            auth_record = Auths.get_auth_by_user_id(user.id, db=db)
+            grace = evaluate_2fa_grace(request, user, auth_record, db)
+            if grace['gated']:
+                setup_token = create_token(
+                    data={'id': user.id, 'purpose': '2fa_setup_pending'},
+                    expires_delta=datetime.timedelta(minutes=15),
+                )
+                return JSONResponse(
+                    content={
+                        'requires_2fa_setup': True,
+                        'partial_token': setup_token,
+                    }
+                )
+            grace_cap = grace['grace_expires_at']
+
+        return create_session_response(request, user, db, response, set_cookie=True, expires_at_cap=grace_cap)
     except HTTPException:
         raise
     except Exception as err:

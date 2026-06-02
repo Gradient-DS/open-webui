@@ -89,6 +89,14 @@ def dev(
         host=host,
         port=port,
         reload=reload,
+        # soev parallel dev stacks live under `.worktrees/<branch>/` (see
+        # `.claude/commands/kickoff_features.md`). Without this exclude,
+        # a backend dev server running from the repo root reloads on any
+        # edit in any worktree — every stack's BE then bounces on
+        # unrelated changes. Mirrors the Vite-side `server.watch.ignored`
+        # in vite.config.ts. Inside a worktree's own `open-webui dev`,
+        # this pattern is simply a no-op.
+        reload_excludes=['**/.worktrees/**'],
         forwarded_allow_ips='*',
         access_log=False,
     )

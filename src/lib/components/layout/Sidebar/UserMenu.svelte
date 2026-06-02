@@ -7,7 +7,15 @@
 	import { getUsage } from '$lib/apis';
 	import { getSessionUser, userSignOut } from '$lib/apis/auths';
 
-	import { showSettings, mobile, showSidebar, showShortcuts, user, config } from '$lib/stores';
+	import {
+		showSettings,
+		showFeedbackModal,
+		mobile,
+		showSidebar,
+		showShortcuts,
+		user,
+		config
+	} from '$lib/stores';
 	import { isFeatureEnabled } from '$lib/utils/features';
 
 	import { WEBUI_API_BASE_URL } from '$lib/constants';
@@ -15,6 +23,7 @@
 	import Dropdown from '$lib/components/common/Dropdown.svelte';
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
 	import ArchiveBox from '$lib/components/icons/ArchiveBox.svelte';
+	import ChatBubbleOval from '$lib/components/icons/ChatBubbleOval.svelte';
 	import QuestionMarkCircle from '$lib/components/icons/QuestionMarkCircle.svelte';
 	import Map from '$lib/components/icons/Map.svelte';
 	import Keyboard from '$lib/components/icons/Keyboard.svelte';
@@ -235,6 +244,29 @@
 				</div>
 				<div class=" self-center truncate">{$i18n.t('Archived Chats')}</div>
 			</button>
+
+			{#if $config?.features?.enable_feedback_report}
+				<button
+					class="flex rounded-xl py-1.5 px-3 w-full hover:bg-gray-50 dark:hover:bg-gray-800 transition cursor-pointer select-none"
+					type="button"
+					on:click={async () => {
+						show = false;
+
+						showFeedbackModal.set(true);
+
+						if ($mobile) {
+							await tick();
+
+							showSidebar.set(false);
+						}
+					}}
+				>
+					<div class=" self-center mr-3">
+						<ChatBubbleOval className="size-5" strokeWidth="1.5" />
+					</div>
+					<div class=" self-center truncate">{$i18n.t('Send feedback')}</div>
+				</button>
+			{/if}
 
 			{#if role === 'admin' && isFeatureEnabled('playground')}
 				<a

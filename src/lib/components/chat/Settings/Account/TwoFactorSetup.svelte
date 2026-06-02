@@ -14,6 +14,13 @@
 	const i18n = getContext('i18n');
 	const dispatch = createEventDispatcher();
 
+	// Optional token override. When set (the grace-expired enrollment flow on
+	// the login page), this short-lived '2fa_setup_pending' token is used
+	// instead of a full session — the user holds no session yet.
+	export let token: string | null = null;
+
+	$: authToken = token ?? localStorage.token;
+
 	// States: 'loading' | 'not_enrolled' | 'setup_scan' | 'setup_verify' | 'recovery_codes' | 'enrolled'
 	let state: string = 'loading';
 
@@ -31,6 +38,10 @@
 	let recoveryCodes: string[] = [];
 	let savedCodesConfirmed = false;
 
+	// Session returned by /totp/enable when enrolling via a setup token —
+	// dispatched on 'Done' so the login page can complete sign-in.
+	let enabledSession: any = null;
+
 	// Disable flow
 	let disablePassword = '';
 	let showDisable = false;
@@ -42,7 +53,7 @@
 	let loading = false;
 
 	const loadStatus = async () => {
-		const res = await get2FAStatus(localStorage.token).catch(() => null);
+		const res = await get2FAStatus(authToken).catch(() => null);
 		if (res) {
 			totpEnabled = res.totp_enabled;
 			recoveryCodesRemaining = res.recovery_codes_remaining;
@@ -54,7 +65,7 @@
 
 	const startSetup = async () => {
 		loading = true;
-		const res = await setup2FATOTP(localStorage.token).catch((error) => {
+		const res = await setup2FATOTP(authToken).catch((error) => {
 			toast.error(`${error}`);
 			return null;
 		});
@@ -72,7 +83,7 @@
 
 		loading = true;
 		const res = await enable2FATOTP(
-			localStorage.token,
+			authToken,
 			setupPassword,
 			secret,
 			verificationCode
@@ -86,6 +97,8 @@
 			toast.success($i18n.t('Two-Factor Authentication Enabled'));
 			recoveryCodes = res.recovery_codes;
 			totpEnabled = true;
+			// The enrollment-via-setup-token flow returns a fresh session.
+			enabledSession = res.token ? res : null;
 			state = 'recovery_codes';
 		}
 	};
@@ -94,7 +107,7 @@
 		if (!disablePassword) return;
 
 		loading = true;
-		const res = await disable2FATOTP(localStorage.token, disablePassword).catch((error) => {
+		const res = await disable2FATOTP(authToken, disablePassword).catch((error) => {
 			toast.error(`${error}`);
 			return null;
 		});
@@ -113,7 +126,7 @@
 		if (!regenPassword) return;
 
 		loading = true;
-		const res = await regenerateRecoveryCodes(localStorage.token, regenPassword).catch((error) => {
+		const res = await regenerateRecoveryCodes(authToken, regenPassword).catch((error) => {
 			toast.error(`${error}`);
 			return null;
 		});
@@ -139,7 +152,13 @@
 	};
 
 	onMount(() => {
-		loadStatus();
+		if (token) {
+			// Grace-expired enrollment flow: the setup token only authorizes
+			// enrollment, so skip the status probe and go straight to setup.
+			state = 'not_enrolled';
+		} else {
+			loadStatus();
+		}
 	});
 </script>
 
@@ -321,10 +340,14 @@
 					type="button"
 					disabled={!savedCodesConfirmed}
 					on:click={() => {
+						const session = enabledSession;
 						recoveryCodes = [];
 						savedCodesConfirmed = false;
-						loadStatus();
-						dispatch('enabled');
+						enabledSession = null;
+						if (!session) {
+							loadStatus();
+						}
+						dispatch('enabled', session);
 					}}
 				>
 					{$i18n.t('Done')}

@@ -12,6 +12,7 @@
 		web_search: 'enable_web_search',
 		image_generation: 'enable_image_generation',
 		code_interpreter: 'enable_code_interpreter',
+		document_writer: 'enable_document_writer',
 		builtin_tools: 'feature_builtin_tools'
 	};
 
@@ -39,6 +40,10 @@
 		code_interpreter: {
 			label: $i18n.t('Code Interpreter'),
 			description: $i18n.t('Model can execute code and perform calculations')
+		},
+		document_writer: {
+			label: $i18n.t('Document Writer'),
+			description: $i18n.t('Model can write and create downloadable documents')
 		},
 		usage: {
 			label: $i18n.t('Usage'),
@@ -69,6 +74,7 @@
 		web_search?: boolean;
 		image_generation?: boolean;
 		code_interpreter?: boolean;
+		document_writer?: boolean;
 		usage?: boolean;
 		citations?: boolean;
 		status_updates?: boolean;

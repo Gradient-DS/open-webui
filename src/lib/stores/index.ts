@@ -96,6 +96,11 @@ export const showShortcuts = writable(false);
 export const showArchivedChats = writable(false);
 export const showChangelog = writable(false);
 
+// Product feedback modal — `showFeedbackModal` toggles the dialog;
+// `feedbackModalContext` optionally pre-fills it (e.g. error reports).
+export const showFeedbackModal = writable(false);
+export const feedbackModalContext: Writable<Record<string, unknown> | null> = writable(null);
+
 export const showControls = writable(false);
 export const showEmbeds = writable(false);
 export const showOverview = writable(false);
@@ -342,6 +347,10 @@ type Config = {
 		enable_google_drive_integration: boolean;
 		enable_google_drive_sync?: boolean;
 		enable_onedrive_integration: boolean;
+		enable_confluence_integration?: boolean;
+		enable_confluence_sync?: boolean;
+		confluence_kb_mode?: string;
+		confluence_shared_kb_id?: string;
 		enable_image_generation: boolean;
 		enable_admin_export: boolean;
 		enable_data_export: boolean;
@@ -385,6 +394,7 @@ type Config = {
 		enable_code_interpreter?: boolean;
 		enable_code_execution?: boolean;
 		enable_data_warnings?: boolean;
+		enable_feedback_report?: boolean;
 	};
 	oauth: {
 		providers: {

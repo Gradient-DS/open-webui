@@ -91,6 +91,16 @@ class AgentPayload:
     # (model.params.system). Variables are pre-substituted upstream so the
     # agent can use the value as-is.
     system_prompt: Optional[str] = None
+    # [Gradient] Conversation-level system prompt — the merged per-chat /
+    # Chat Controls / folder prompt. Distinct from ``system_prompt`` (the
+    # custom-model prompt). Forwarded so the agent composes it into its
+    # system prompt; OpenWebUI also still inlines it into ``messages``.
+    chat_system_prompt: Optional[str] = None
+    # [Gradient] Resolved Open WebUI skills for this turn. Each entry is
+    # {name, description, content, is_selected}. User-selected skills
+    # carry full content for the agent to render; model-attached skills
+    # form a manifest the agent expands on demand via a tool.
+    skills: Optional[list[dict[str, Any]]] = None
     # [Gradient] Generic metadata forwarded as-is to the agent service.
     # Today used for ``user_language`` (UI locale, BCP-47 like "nl-NL")
     # so the agent can resolve the response language. Open-ended so we
@@ -123,6 +133,8 @@ def build_agent_payload(
     tool_ids: Optional[list[str]] = None,
     rag_filter: Optional[dict[str, Any]] = None,
     system_prompt: Optional[str] = None,
+    chat_system_prompt: Optional[str] = None,
+    skills: Optional[list[dict[str, Any]]] = None,
     metadata: Optional[dict[str, Any]] = None,
     **model_params,
 ) -> dict[str, Any]:
@@ -147,6 +159,8 @@ def build_agent_payload(
         tool_ids=tool_ids,
         rag_filter=rag_filter,
         system_prompt=system_prompt,
+        chat_system_prompt=chat_system_prompt,
+        skills=skills,
         metadata=metadata,
         **{k: v for k, v in model_params.items() if v is not None},
     )
@@ -164,6 +178,31 @@ def _agent_api_headers() -> dict[str, str]:
     if AGENT_API_KEY:
         headers['X-API-Key'] = AGENT_API_KEY
     return headers
+
+
+def _resolve_model_vision_capable(model: Optional[dict[str, Any]]) -> bool:
+    """Resolve whether a model can process image input.
+
+    Reads OpenWebUI's per-model vision capability flag
+    (``info.meta.capabilities.vision``, set via the admin panel).
+    Defaults to ``True`` when unset — matching OpenWebUI's own frontend
+    default — so a model without explicit capability config is treated
+    as vision-capable.
+    """
+    info = (model or {}).get('info') or {}
+    capabilities = (info.get('meta') or {}).get('capabilities') or {}
+    return bool(capabilities.get('vision', True))
+
+
+def _error_sse_chunk(message: str) -> str:
+    """Build an SSE data line carrying an error in OpenAI shape.
+
+    Open WebUI renders the inline error banner only for a chunk with an
+    ``error`` object and no ``choices`` (see middleware
+    ``stream_body_handler``); error text placed in ``choices[].delta``
+    is shown as ordinary assistant content instead.
+    """
+    return f'data: {json.dumps({"error": {"message": message}})}\n\n'
 
 
 @dataclass
@@ -309,6 +348,11 @@ async def call_agent_api(
     if user_language:
         agent_metadata['user_language'] = user_language
 
+    # [Gradient] Forward the selected model's vision capability so the
+    # agent service can drop images for a misconfigured non-vision
+    # model instead of crashing on multimodal content.
+    agent_metadata['vision_capable'] = _resolve_model_vision_capable(model_dict)
+
     payload = build_agent_payload(
         model=llm_model,
         agent=selected_agent,
@@ -325,6 +369,8 @@ async def call_agent_api(
         tool_ids=metadata.get('tool_ids'),
         rag_filter=metadata.get('rag_filter'),
         system_prompt=metadata.get('system_prompt'),
+        chat_system_prompt=metadata.get('chat_system_prompt'),
+        skills=metadata.get('skills'),
         metadata=agent_metadata or None,
         **model_params,
     )
@@ -476,16 +522,9 @@ def _build_streaming_response(
 
         except Exception as e:
             log.error(f'Agent API streaming error: {e}')
-            # Yield an error as an OpenAI-style chunk so the UI sees it
-            error_chunk = {
-                'choices': [
-                    {
-                        'delta': {'content': f'\n\n[Agent API error: {e}]'},
-                        'finish_reason': 'stop',
-                    }
-                ]
-            }
-            yield f'data: {json.dumps(error_chunk)}\n\n'
+            # Emit an OpenAI-shape error object (no `choices`) so the UI
+            # renders a proper error banner instead of inline text.
+            yield _error_sse_chunk(f'Agent API error: {e}')
 
         yield 'data: [DONE]\n\n'
 

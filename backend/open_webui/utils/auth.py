@@ -325,7 +325,10 @@ async def get_current_user(
                 detail='Invalid token',
             )
 
-        if data is not None and data.get('purpose') == '2fa_pending':
+        # Partial tokens (pending 2FA verification or pending 2FA enrollment)
+        # must never grant a normal session — only the dedicated 2FA endpoints
+        # may accept them.
+        if data is not None and data.get('purpose') in ('2fa_pending', '2fa_setup_pending'):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail='2FA verification required',

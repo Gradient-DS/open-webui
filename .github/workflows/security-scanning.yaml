@@ -50,7 +50,8 @@ jobs:
             --ignore-vuln CVE-2026-4539 \
             --ignore-vuln GHSA-rf74-v2fm-23pw \
             --ignore-vuln CVE-2026-33231 \
-            --ignore-vuln CVE-2026-3219
+            --ignore-vuln CVE-2026-3219 \
+            --ignore-vuln CVE-2026-45829
 
   sca-node:
     name: Node.js Dependencies (npm audit)

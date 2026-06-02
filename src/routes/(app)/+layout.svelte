@@ -50,6 +50,7 @@
 	import AcceptanceModal from '$lib/components/layout/Overlay/AcceptanceModal.svelte';
 	import TwoFactorRequired from '$lib/components/layout/Overlay/TwoFactorRequired.svelte';
 	import UpdateInfoToast from '$lib/components/layout/UpdateInfoToast.svelte';
+	import FeedbackModal from '$lib/components/feedback/FeedbackModal.svelte';
 	import Spinner from '$lib/components/common/Spinner.svelte';
 	import { Shortcut, shortcuts } from '$lib/shortcuts';
 
@@ -60,6 +61,7 @@
 	let localDBChats = [];
 
 	let show2FAOverlay = false;
+	let grace2FAExpiresAt: number | null = null;
 
 	let version;
 	let showAcceptanceModal = false;
@@ -239,6 +241,7 @@
 				) {
 					const status = await get2FAStatus(localStorage.token).catch(() => null);
 					if (status && !status.totp_enabled && !status.is_sso_user) {
+						grace2FAExpiresAt = status.grace_period_expires_at ?? null;
 						show2FAOverlay = true;
 					}
 				}
@@ -437,6 +440,10 @@
 	</div>
 {/if}
 
+{#if $user && $config?.features?.enable_feedback_report}
+	<FeedbackModal />
+{/if}
+
 {#if $user}
 	<div class="app relative">
 		<div
@@ -502,7 +509,7 @@
 					</div>
 				{/if}
 
-				<TwoFactorRequired bind:show={show2FAOverlay} />
+				<TwoFactorRequired bind:show={show2FAOverlay} gracePeriodExpiresAt={grace2FAExpiresAt} />
 
 				<Sidebar />
 

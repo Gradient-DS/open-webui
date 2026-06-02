@@ -120,3 +120,31 @@ def is_recovery_code_format(code: str) -> bool:
 def is_totp_code_format(code: str) -> bool:
     """Check if a code matches the 6-digit TOTP format."""
     return bool(re.match(r'^\d{6}$', code))
+
+
+# --- 2FA enrollment grace period ---
+
+
+def compute_twofa_grace(
+    grace_started_at: int | None,
+    grace_period_days: int,
+    now: int,
+) -> dict:
+    """Compute the 2FA enrollment grace deadline and whether it has expired.
+
+    ``grace_started_at`` is the epoch-second anchor recorded the first time a
+    user is seen under REQUIRE_2FA without TOTP enabled. When ``None`` the
+    window has not been anchored yet, so ``now`` is used and a fresh window
+    starts. The deadline depends only on this stored anchor -- never on the
+    process/app start time -- so restarts cannot reset the countdown.
+
+    A non-positive ``grace_period_days`` means no grace at all: the deadline
+    equals the anchor and the period is immediately expired.
+
+    Returns ``{'deadline': int, 'expired': bool}`` where ``deadline`` is the
+    epoch second at which the user must have 2FA enabled.
+    """
+    anchor = grace_started_at if grace_started_at is not None else now
+    days = max(0, int(grace_period_days or 0))
+    deadline = anchor + days * 86400
+    return {'deadline': deadline, 'expired': now >= deadline}

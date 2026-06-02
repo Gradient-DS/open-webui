@@ -36,12 +36,20 @@
 
 <script lang="ts">
 	import { onMount, getContext } from 'svelte';
+	import type { Writable } from 'svelte/store';
 
+	import { pendingAgentId } from '$lib/stores';
 	import Dropdown from '$lib/components/common/Dropdown.svelte';
 
-	const i18n = getContext('i18n');
+	const i18n: Writable<any> = getContext('i18n');
 
 	export let agentId: string | null | undefined;
+
+	// [Gradient] Editable mode turns the read-only badge into an agent
+	// switcher. It is set by Navbar on empty states (no chat yet) — the
+	// only moment switching agents is valid. In an existing chat the badge
+	// stays read-only ("Start a new chat to switch agents.").
+	export let editable = false;
 
 	let show = false;
 
@@ -60,9 +68,28 @@
 	// back to the slug, dimmed, so the user still sees something.
 	$: cacheLoaded = $agentsCache !== null;
 	$: showOrphanFallback = cacheLoaded && !!agentId && !agent;
+
+	// In editable mode the pill is always present so it can be clicked to
+	// switch agents — even before anything is picked. It renders only once
+	// the agent list has loaded and is non-empty (nothing to switch to
+	// otherwise). Read-only mode keeps the original behaviour: render only
+	// when bound to a resolvable agent.
+	$: agents = $agentsCache ?? [];
+	$: showEditable = editable && cacheLoaded && agents.length > 0;
+	$: showReadOnly = !editable && !!agentId && (!!agent || showOrphanFallback);
+	$: visible = showEditable || showReadOnly;
+
+	const selectAgent = (id: string | null): void => {
+		// Mirrors AgentCards: the pending pick is sticky and shared via the
+		// store, so the cards picker (when present) stays in sync. No
+		// navigation — the badge only renders on the empty state, which is
+		// already at '/', so $selectedFolder is preserved.
+		pendingAgentId.set(id);
+		show = false;
+	};
 </script>
 
-{#if agentId && (agent || showOrphanFallback)}
+{#if visible}
 	<Dropdown
 		bind:show
 		side="bottom"
@@ -98,42 +125,112 @@
 					<span class="opacity-70">·</span>
 					<span>{$i18n.t('Beta')}</span>
 				{/if}
-			{:else}
+			{:else if showOrphanFallback}
 				<!-- Cache loaded but slug missing — orphaned binding. Show
 				     the slug muted so it's clear this chat references an
 				     agent the admin no longer exposes. -->
 				<span class="opacity-70">{agentId}</span>
+			{:else}
+				<!-- Editable mode, nothing picked yet — neutral prompt. -->
+				<span>{$i18n.t('Choose agent')}</span>
+			{/if}
+			{#if editable}
+				<svg
+					xmlns="http://www.w3.org/2000/svg"
+					viewBox="0 0 20 20"
+					fill="currentColor"
+					class="w-3 h-3 opacity-70"
+				>
+					<path
+						fill-rule="evenodd"
+						d="M5.22 8.22a.75.75 0 0 1 1.06 0L10 11.94l3.72-3.72a.75.75 0 1 1 1.06 1.06l-4.25 4.25a.75.75 0 0 1-1.06 0L5.22 9.28a.75.75 0 0 1 0-1.06Z"
+						clip-rule="evenodd"
+					/>
+				</svg>
 			{/if}
 		</button>
 
 		<div slot="content">
-			<div class="flex items-center gap-2 mb-2">
-				{#if agent?.profile_image_url}
-					<img
-						src={agent.profile_image_url}
-						alt=""
-						class="w-5 h-5 rounded-full object-cover shrink-0"
-					/>
-				{/if}
-				<span class="font-medium text-sm truncate">
-					{agent?.name ?? agentId}
-				</span>
-				{#if agent?.is_beta}
-					<span
-						class="text-[10px] px-1.5 py-0.5 rounded-full bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-300 shrink-0"
+			{#if editable}
+				<!-- Switcher: pick any visible agent, or clear the selection.
+				     Writes to the shared pendingAgentId store. -->
+				<div class="font-medium text-sm mb-2 px-1">
+					{$i18n.t('Switch agent')}
+				</div>
+				<div class="flex flex-col gap-1 max-h-72 overflow-y-auto -mx-1 px-1">
+					{#each agents as a (a.id)}
+						<button
+							type="button"
+							class="flex flex-col text-left p-2 rounded-lg border transition {agentId === a.id
+								? 'border-yellow-400 bg-yellow-50/40 dark:bg-yellow-900/10'
+								: 'border-transparent hover:bg-gray-50 dark:hover:bg-gray-800'}"
+							on:click={() => selectAgent(a.id)}
+						>
+							<div class="flex items-center gap-2">
+								{#if a.profile_image_url}
+									<img
+										src={a.profile_image_url}
+										alt=""
+										class="w-5 h-5 rounded-full object-cover shrink-0"
+									/>
+								{/if}
+								<span class="font-medium text-xs truncate">{a.name}</span>
+								{#if a.is_beta}
+									<span
+										class="text-[10px] px-1.5 py-0.5 rounded-full bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-300 shrink-0"
+									>
+										{$i18n.t('Beta')}
+									</span>
+								{/if}
+							</div>
+							{#if a.description}
+								<p class="text-[11px] text-gray-500 dark:text-gray-400 line-clamp-2 mt-0.5">
+									{a.description}
+								</p>
+							{/if}
+						</button>
+					{/each}
+					<button
+						type="button"
+						class="flex items-center gap-2 p-2 rounded-lg border transition {!agentId
+							? 'border-yellow-400 bg-yellow-50/40 dark:bg-yellow-900/10'
+							: 'border-transparent hover:bg-gray-50 dark:hover:bg-gray-800'}"
+						on:click={() => selectAgent(null)}
 					>
-						{$i18n.t('Beta')}
+						<span class="font-medium text-xs">{$i18n.t('No agent')}</span>
+					</button>
+				</div>
+			{:else}
+				<div class="flex items-center gap-2 mb-2">
+					{#if agent?.profile_image_url}
+						<img
+							src={agent.profile_image_url}
+							alt=""
+							class="w-5 h-5 rounded-full object-cover shrink-0"
+						/>
+					{/if}
+					<span class="font-medium text-sm truncate">
+						{agent?.name ?? agentId}
 					</span>
+					{#if agent?.is_beta}
+						<span
+							class="text-[10px] px-1.5 py-0.5 rounded-full bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-300 shrink-0"
+						>
+							{$i18n.t('Beta')}
+						</span>
+					{/if}
+				</div>
+				{#if agent?.description}
+					<p class="text-xs text-gray-600 dark:text-gray-400 mb-2 whitespace-pre-wrap">
+						{agent.description}
+					</p>
 				{/if}
-			</div>
-			{#if agent?.description}
-				<p class="text-xs text-gray-600 dark:text-gray-400 mb-2 whitespace-pre-wrap">
-					{agent.description}
-				</p>
+				<div
+					class="text-[11px] text-gray-500 dark:text-gray-500 border-t border-gray-100 dark:border-gray-800 pt-2 mt-1"
+				>
+					{$i18n.t('Start a new chat to switch agents.')}
+				</div>
 			{/if}
-			<div class="text-[11px] text-gray-500 dark:text-gray-500 border-t border-gray-100 dark:border-gray-800 pt-2 mt-1">
-				{$i18n.t('Start a new chat to switch agents.')}
-			</div>
 		</div>
 	</Dropdown>
 {/if}

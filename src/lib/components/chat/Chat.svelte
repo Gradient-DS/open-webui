@@ -188,8 +188,7 @@
 	// [Gradient] Post-turn context-budget estimate from the agent service.
 	// Emitted once per turn over Socket.IO (see backend/utils/agent.py).
 	// Drives the banner above the chat input. Reset on chat switch / new chat.
-	let contextUsage: { tokens_used: number; tokens_budget: number; fraction: number } | null =
-		null;
+	let contextUsage: { tokens_used: number; tokens_budget: number; fraction: number } | null = null;
 
 	// Chat Input
 	let prompt = '';
@@ -2658,7 +2657,7 @@
 			}
 
 			if (typeof errorMessage === 'object') {
-				errorMessage = $i18n.t(`Uh-oh! There was an issue with the response.`);
+				errorMessage = $i18n.t(`There was a problem generating a response.`);
 			}
 
 			toast.error(`${errorMessage}`);
@@ -2719,7 +2718,12 @@
 		}
 
 		responseMessage.error = {
-			content: $i18n.t(`Uh-oh! There was an issue with the response.`) + '\n' + errorMessage
+			// The professional headline is rendered by the Error component;
+			// `content` carries only the raw error, shown collapsed under a
+			// "Technical details" disclosure.
+			content: errorMessage,
+			// Carry the trace id forward so an error report can deep-link to Tempo.
+			trace_id: innerError?.trace_id ?? innerError?.error?.trace_id ?? null
 		};
 		responseMessage.done = true;
 
@@ -2926,9 +2930,7 @@
 			// The pendingAgentId store is sticky — we do NOT clear it after
 			// use, so the next "New Chat" defaults to the same agent until
 			// the user changes or clears the pick.
-			const agentBinding = $pendingAgentId
-				? { agent_id: $pendingAgentId }
-				: null;
+			const agentBinding = $pendingAgentId ? { agent_id: $pendingAgentId } : null;
 
 			chat = await createNewChat(
 				localStorage.token,
@@ -3164,7 +3166,9 @@
 							},
 							meta: $chatId
 								? (chat?.meta ?? {})
-								: ($pendingAgentId ? { agent_id: $pendingAgentId } : {})
+								: $pendingAgentId
+									? { agent_id: $pendingAgentId }
+									: {}
 						}}
 						{history}
 						title={$chatTitle}

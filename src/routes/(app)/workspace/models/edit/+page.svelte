@@ -5,6 +5,15 @@
 	import { onMount, getContext } from 'svelte';
 	const i18n = getContext('i18n');
 
+	$: useSimpleBuilder =
+		isFeatureEnabled('simple_assistant_builder') &&
+		$page.url.searchParams.get('advanced') === null;
+
+	const goToAdvanced = () => {
+		const _id = $page.url.searchParams.get('id');
+		goto(`/workspace/models/edit?id=${_id}&advanced=true`);
+	};
+
 	import { page } from '$app/stores';
 	import { config, models, settings } from '$lib/stores';
 	import { isFeatureEnabled } from '$lib/utils/features';
@@ -13,6 +22,7 @@
 
 	import { getModels } from '$lib/apis';
 	import ModelEditor from '$lib/components/workspace/Models/ModelEditor.svelte';
+	import SimpleModelEditor from '$lib/components/workspace/Models/SimpleModelEditor.svelte';
 
 	let model = null;
 
@@ -57,5 +67,9 @@
 </script>
 
 {#if model}
-	<ModelEditor edit={true} {model} {onSubmit} />
+	{#if useSimpleBuilder}
+		<SimpleModelEditor edit={true} {model} draft={null} {onSubmit} onAdvanced={goToAdvanced} />
+	{:else}
+		<ModelEditor edit={true} {model} {onSubmit} />
+	{/if}
 {/if}

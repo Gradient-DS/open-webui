@@ -64,7 +64,7 @@ async def _refresh_token(token_data: dict) -> Optional[dict]:
             response = await client.post(
                 token_url,
                 data={
-                    'client_id': ONEDRIVE_CLIENT_ID_BUSINESS,
+                    'client_id': ONEDRIVE_CLIENT_ID_BUSINESS.value,
                     'client_secret': MICROSOFT_CLIENT_SECRET.value,
                     'refresh_token': refresh_token,
                     'grant_type': 'refresh_token',

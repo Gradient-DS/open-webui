@@ -3,10 +3,10 @@
 
 	import { goto } from '$app/navigation';
 	import { page } from '$app/stores';
-	import { getContext } from 'svelte';
+	import { getContext, onMount } from 'svelte';
 	const i18n = getContext('i18n');
 
-	import { user } from '$lib/stores';
+	import { user, config } from '$lib/stores';
 	import { createNewKnowledge } from '$lib/apis/knowledge';
 
 	import AccessControl from '../common/AccessControl.svelte';
@@ -15,6 +15,19 @@
 	let loading = false;
 
 	let type = $page.url.searchParams.get('type') || 'local';
+
+	onMount(() => {
+		// In shared Confluence mode, the single shared KB is managed by admins
+		// only — non-admins have no Confluence self-service create path.
+		if (
+			type === 'confluence' &&
+			$config?.features?.confluence_kb_mode === 'shared' &&
+			$user?.role !== 'admin'
+		) {
+			toast.error($i18n.t('Confluence knowledge bases are managed by administrators.'));
+			goto('/workspace/knowledge');
+		}
+	});
 
 	let name = '';
 	let description = '';

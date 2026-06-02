@@ -9,7 +9,13 @@ absent so the agent does not attempt to rewind to a non-existent point.
 
 from __future__ import annotations
 
-from open_webui.utils.agent import build_agent_payload
+import json
+
+from open_webui.utils.agent import (
+    _error_sse_chunk,
+    _resolve_model_vision_capable,
+    build_agent_payload,
+)
 
 
 def _base_kwargs(**overrides):
@@ -34,6 +40,8 @@ def test_minimal_payload_omits_optional_fields():
         'session_id',
         'agent',
         'system_prompt',
+        'chat_system_prompt',
+        'skills',
     ):
         assert absent not in payload, f'expected {absent!r} to be absent'
 
@@ -85,3 +93,69 @@ def test_metadata_none_omitted_from_payload():
     """When no metadata is provided the key must be absent from the payload."""
     payload = build_agent_payload(**_base_kwargs(metadata=None))
     assert 'metadata' not in payload
+
+
+def test_chat_system_prompt_present_when_set():
+    """The merged Chat Controls / folder prompt reaches the wire payload."""
+    payload = build_agent_payload(**_base_kwargs(chat_system_prompt='Answer only in Dutch.'))
+    assert payload['chat_system_prompt'] == 'Answer only in Dutch.'
+
+
+def test_chat_system_prompt_absent_when_none():
+    payload = build_agent_payload(**_base_kwargs(chat_system_prompt=None))
+    assert 'chat_system_prompt' not in payload
+
+
+def test_skills_present_when_set():
+    """Resolved skills reach the wire payload as a top-level list."""
+    skills = [
+        {
+            'name': 'Tone Guide',
+            'description': 'how to phrase answers',
+            'content': 'Always answer formally.',
+            'is_selected': True,
+        },
+        {
+            'name': 'Onboarding',
+            'description': 'onboarding steps',
+            'content': 'Step 1...',
+            'is_selected': False,
+        },
+    ]
+    payload = build_agent_payload(**_base_kwargs(skills=skills))
+    assert payload['skills'] == skills
+
+
+def test_skills_absent_when_none():
+    payload = build_agent_payload(**_base_kwargs(skills=None))
+    assert 'skills' not in payload
+
+
+def test_resolve_vision_capable_reads_capability_flag():
+    model = {'info': {'meta': {'capabilities': {'vision': False}}}}
+    assert _resolve_model_vision_capable(model) is False
+
+
+def test_resolve_vision_capable_true_when_flag_true():
+    model = {'info': {'meta': {'capabilities': {'vision': True}}}}
+    assert _resolve_model_vision_capable(model) is True
+
+
+def test_resolve_vision_capable_defaults_true_when_unset():
+    assert _resolve_model_vision_capable({'info': {'meta': {}}}) is True
+
+
+def test_resolve_vision_capable_defaults_true_when_no_model():
+    assert _resolve_model_vision_capable(None) is True
+    assert _resolve_model_vision_capable({}) is True
+
+
+def test_error_sse_chunk_is_openai_error_shape_without_choices():
+    """The error chunk must be {error:{message}} with no `choices` so
+    Open WebUI's middleware renders a proper error banner."""
+    chunk = _error_sse_chunk('boom')
+    assert chunk.startswith('data: ')
+    assert chunk.endswith('\n\n')
+    payload = json.loads(chunk[len('data: ') :].strip())
+    assert payload == {'error': {'message': 'boom'}}
+    assert 'choices' not in payload

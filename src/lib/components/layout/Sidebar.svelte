@@ -70,6 +70,7 @@
 	import Sparkles from '../icons/Sparkles.svelte';
 	import CommandLine from '../icons/CommandLine.svelte';
 	import Wrench from '../icons/Wrench.svelte';
+	import Bolt from '../icons/Bolt.svelte';
 	import { slide } from 'svelte/transition';
 	import HotkeyHint from '../common/HotkeyHint.svelte';
 
@@ -904,6 +905,30 @@
 						</Tooltip>
 					</div>
 				{/if}
+
+				{#if isFeatureEnabled('skills') && ($user?.role === 'admin' || $user?.permissions?.workspace?.skills)}
+					<div class="">
+						<Tooltip content={$i18n.t('Skills')} placement="right">
+							<a
+								class=" cursor-pointer flex rounded-xl hover:bg-gray-100 dark:hover:bg-gray-850 transition group"
+								href="/workspace/skills"
+								on:click={async (e) => {
+									e.stopImmediatePropagation();
+									e.preventDefault();
+
+									goto('/workspace/skills');
+									itemClickHandler();
+								}}
+								draggable="false"
+								aria-label={$i18n.t('Skills')}
+							>
+								<div class=" self-center flex items-center justify-center size-9">
+									<Bolt className="size-4.5" strokeWidth="2" />
+								</div>
+							</a>
+						</Tooltip>
+					</div>
+				{/if}
 			</div>
 		</button>
 
@@ -1190,6 +1215,27 @@
 
 								<div class="flex self-center translate-y-[0.5px]">
 									<div class=" self-center text-sm font-primary">{$i18n.t('Tools')}</div>
+								</div>
+							</a>
+						</div>
+					{/if}
+
+					{#if isFeatureEnabled('skills') && ($user?.role === 'admin' || $user?.permissions?.workspace?.skills)}
+						<div class="px-[0.4375rem] flex justify-center text-gray-800 dark:text-gray-200">
+							<a
+								id="sidebar-skills-button"
+								class="grow flex items-center space-x-3 rounded-2xl px-2.5 py-2 hover:bg-gray-100 dark:hover:bg-gray-900 transition"
+								href="/workspace/skills"
+								on:click={itemClickHandler}
+								draggable="false"
+								aria-label={$i18n.t('Skills')}
+							>
+								<div class="self-center">
+									<Bolt className="size-4.5" strokeWidth="2" />
+								</div>
+
+								<div class="flex self-center translate-y-[0.5px]">
+									<div class=" self-center text-sm font-primary">{$i18n.t('Skills')}</div>
 								</div>
 							</a>
 						</div>

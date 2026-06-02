@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { getContext, tick } from 'svelte';
 	import { fly } from 'svelte/transition';
+	import { toast } from 'svelte-sonner';
 
 	import {
 		config,
@@ -17,6 +18,7 @@
 	import { updateUserSettings } from '$lib/apis/users';
 	import { getTools } from '$lib/apis/tools';
 	import { getOAuthClientAuthorizationUrl } from '$lib/apis/configs';
+	import { getKnowledgeById } from '$lib/apis/knowledge';
 
 	import Dropdown from '$lib/components/common/Dropdown.svelte';
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
@@ -41,6 +43,7 @@
 	import Sparkles from '$lib/components/icons/Sparkles.svelte';
 	import Knobs from '$lib/components/icons/Knobs.svelte';
 	import OneDrive from '$lib/components/icons/OneDrive.svelte';
+	import Confluence from '$lib/components/icons/Confluence.svelte';
 
 	import Chats from './InputMenu/Chats.svelte';
 	import Notes from './InputMenu/Notes.svelte';
@@ -60,6 +63,7 @@
 
 	export let uploadGoogleDriveHandler: Function;
 	export let uploadOneDriveHandler: Function;
+	export let uploadConfluenceHandler: Function = () => {};
 
 	export let onUpload: Function;
 	export let onClose: Function;
@@ -89,6 +93,27 @@
 	// Valve handling
 	export let onShowValves: Function = (e) => {};
 	export let closeOnOutsideClick = true;
+	// When non-null, restricts the menu to only the listed item keys.
+	// Item keys match the strings passed to ``pinItemHandler`` —
+	// 'upload_files', 'capture', 'attach_webpage', 'attach_notes',
+	// 'google_drive', 'onedrive', 'confluence', 'knowledge',
+	// 'reference_chats', 'tools', 'filters'. Default null = upstream
+	// behavior, every globally-enabled item shows.
+	export let restrictTo: string[] | null = null;
+	$: itemAllowed = (key: string) => restrictTo === null || restrictTo.includes(key);
+	// Section visibility — hide the header when no items in the section
+	// are allowed (otherwise the menu shows a lonely caption).
+	$: anyContextAllowed = [
+		'upload_files',
+		'capture',
+		'attach_webpage',
+		'attach_notes',
+		'google_drive',
+		'onedrive',
+		'confluence'
+	].some((k) => itemAllowed(k));
+	$: anyDatabaseAllowed = ['knowledge', 'reference_chats'].some((k) => itemAllowed(k));
+	$: anyCapabilityAllowed = ['tools', 'filters'].some((k) => itemAllowed(k));
 
 	let show = false;
 	let tab = '';
@@ -191,6 +216,33 @@
 		show = false;
 	};
 
+	// One-click attach of the shared, read-only Confluence KB (shared mode).
+	// The KB carries a user:*:read grant, so getKnowledgeById works for any
+	// user; the resulting collection is identical to picking it from the
+	// Knowledge submenu. Exported so the pinned bottom-bar Confluence button
+	// in MessageInput can reuse the same attach flow without duplicating it.
+	export const attachSharedConfluenceKb = async () => {
+		const kbId = $config?.features?.confluence_shared_kb_id;
+		if (!kbId) {
+			return;
+		}
+		show = false;
+
+		const kb = await getKnowledgeById(localStorage.token, kbId).catch((error) => {
+			toast.error(`${error}`);
+			return null;
+		});
+		if (!kb) {
+			return;
+		}
+
+		onSelect({
+			...kb,
+			knowledge_type: kb.type,
+			type: 'collection'
+		});
+	};
+
 	// Expose openTab for external use (pinned items in bottom bar)
 	export const openTab = (tabName) => {
 		tab = tabName;
@@ -242,56 +294,60 @@
 			{#if tab === ''}
 				<div in:fly={{ x: -20, duration: 150 }}>
 					<!-- ═══ ATTACH CONTEXT ═══ -->
-					<div
-						class="text-xs font-medium text-gray-400 dark:text-gray-500 uppercase tracking-wide px-3 py-1.5"
-					>
-						{$i18n.t('Attach context')}
-					</div>
+					{#if anyContextAllowed}
+						<div
+							class="text-xs font-medium text-gray-400 dark:text-gray-500 uppercase tracking-wide px-3 py-1.5"
+						>
+							{$i18n.t('Attach context')}
+						</div>
+					{/if}
 
 					<!-- Upload Files -->
-					<Tooltip
-						content={fileUploadCapableModels.length !== selectedModels.length
-							? $i18n.t('Model(s) do not support file upload')
-							: !fileUploadEnabled
-								? $i18n.t('You do not have permission to upload files.')
-								: ''}
-						className="w-full"
-					>
-						<button
-							class="flex gap-2 w-full text-left items-center px-3 py-1.5 text-sm cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800/50 rounded-xl {!fileUploadEnabled
-								? 'opacity-50'
-								: ''}"
-							type="button"
-							on:click={() => {
-								if (fileUploadEnabled) {
-									show = false;
-									uploadFilesHandler();
-								}
-							}}
+					{#if itemAllowed('upload_files')}
+						<Tooltip
+							content={fileUploadCapableModels.length !== selectedModels.length
+								? $i18n.t('Model(s) do not support file upload')
+								: !fileUploadEnabled
+									? $i18n.t('You do not have permission to upload files.')
+									: ''}
+							className="w-full"
 						>
-							<Clip />
-							<div class="flex-1 line-clamp-1">{$i18n.t('Files')}</div>
-							<Tooltip
-								content={pinnedInputItems.includes('upload_files')
-									? $i18n.t('Unpin')
-									: $i18n.t('Pin')}
+							<button
+								class="flex gap-2 w-full text-left items-center px-3 py-1.5 text-sm cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800/50 rounded-xl {!fileUploadEnabled
+									? 'opacity-50'
+									: ''}"
+								type="button"
+								on:click={() => {
+									if (fileUploadEnabled) {
+										show = false;
+										uploadFilesHandler();
+									}
+								}}
 							>
-								<button
-									class="p-1 rounded-md hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
-									on:click|stopPropagation={() => pinItemHandler('upload_files')}
+								<Clip />
+								<div class="flex-1 line-clamp-1">{$i18n.t('Files')}</div>
+								<Tooltip
+									content={pinnedInputItems.includes('upload_files')
+										? $i18n.t('Unpin')
+										: $i18n.t('Pin')}
 								>
-									{#if pinnedInputItems.includes('upload_files')}
-										<PinSlash className="size-3.5" />
-									{:else}
-										<Pin className="size-3.5" />
-									{/if}
-								</button>
-							</Tooltip>
-						</button>
-					</Tooltip>
+									<button
+										class="p-1 rounded-md hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+										on:click|stopPropagation={() => pinItemHandler('upload_files')}
+									>
+										{#if pinnedInputItems.includes('upload_files')}
+											<PinSlash className="size-3.5" />
+										{:else}
+											<Pin className="size-3.5" />
+										{/if}
+									</button>
+								</Tooltip>
+							</button>
+						</Tooltip>
+					{/if}
 
 					<!-- Capture -->
-					{#if isFeatureEnabled('capture')}
+					{#if isFeatureEnabled('capture') && itemAllowed('capture')}
 						<Tooltip
 							content={fileUploadCapableModels.length !== selectedModels.length
 								? $i18n.t('Model(s) do not support file upload')
@@ -340,7 +396,7 @@
 					{/if}
 
 					<!-- Attach Webpage (Link icon) -->
-					{#if isFeatureEnabled('webpage_url')}
+					{#if isFeatureEnabled('webpage_url') && itemAllowed('attach_webpage')}
 						<Tooltip
 							content={fileUploadCapableModels.length !== selectedModels.length
 								? $i18n.t('Model(s) do not support file upload')
@@ -384,7 +440,7 @@
 					{/if}
 
 					<!-- Attach Notes -->
-					{#if $config?.features?.enable_notes ?? false}
+					{#if ($config?.features?.enable_notes ?? false) && itemAllowed('attach_notes')}
 						<Tooltip
 							content={fileUploadCapableModels.length !== selectedModels.length
 								? $i18n.t('Model(s) do not support file upload')
@@ -430,7 +486,7 @@
 
 					<!-- Google Drive -->
 					{#if fileUploadEnabled}
-						{#if $config?.features?.enable_google_drive_integration}
+						{#if $config?.features?.enable_google_drive_integration && itemAllowed('google_drive')}
 							<button
 								class="flex gap-2 w-full text-left items-center px-3 py-1.5 text-sm cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800/50 rounded-xl"
 								type="button"
@@ -486,7 +542,7 @@
 						{/if}
 
 						<!-- Microsoft OneDrive (simplified — work only) -->
-						{#if $config?.features?.enable_onedrive_integration && $config?.features?.enable_onedrive_business}
+						{#if $config?.features?.enable_onedrive_integration && $config?.features?.enable_onedrive_business && itemAllowed('onedrive')}
 							<button
 								class="flex gap-2 w-full text-left items-center px-3 py-1.5 text-sm cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800/50 rounded-xl"
 								type="button"
@@ -515,10 +571,72 @@
 								</Tooltip>
 							</button>
 						{/if}
+
+						<!-- Confluence — per-user page picker. Hidden in company-wide
+						     mode, where the shared KB is the only Confluence surface. -->
+						{#if $config?.features?.enable_confluence_integration && $config?.features?.enable_confluence_sync && $config?.features?.confluence_kb_mode !== 'shared' && itemAllowed('confluence')}
+							<button
+								class="flex gap-2 w-full text-left items-center px-3 py-1.5 text-sm cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800/50 rounded-xl"
+								type="button"
+								on:click={() => {
+									show = false;
+									uploadConfluenceHandler();
+								}}
+							>
+								<Confluence className="size-4" />
+								<div class="flex-1 line-clamp-1">{$i18n.t('Confluence')}</div>
+								<Tooltip
+									content={pinnedInputItems.includes('confluence')
+										? $i18n.t('Unpin')
+										: $i18n.t('Pin')}
+								>
+									<button
+										class="p-1 rounded-md hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+										on:click|stopPropagation={() => pinItemHandler('confluence')}
+									>
+										{#if pinnedInputItems.includes('confluence')}
+											<PinSlash className="size-3.5" />
+										{:else}
+											<Pin className="size-3.5" />
+										{/if}
+									</button>
+								</Tooltip>
+							</button>
+						{/if}
+
+						<!-- Confluence (shared mode) — one-click attach of the shared,
+						     read-only KB. Mutually exclusive with the per-user picker
+						     above via the confluence_kb_mode check. -->
+						{#if $config?.features?.enable_confluence_integration && $config?.features?.enable_confluence_sync && $config?.features?.confluence_kb_mode === 'shared' && $config?.features?.confluence_shared_kb_id && itemAllowed('confluence')}
+							<button
+								class="flex gap-2 w-full text-left items-center px-3 py-1.5 text-sm cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800/50 rounded-xl"
+								type="button"
+								on:click={attachSharedConfluenceKb}
+							>
+								<Confluence className="size-4" />
+								<div class="flex-1 line-clamp-1">{$i18n.t('Confluence')}</div>
+								<Tooltip
+									content={pinnedInputItems.includes('confluence')
+										? $i18n.t('Unpin')
+										: $i18n.t('Pin')}
+								>
+									<button
+										class="p-1 rounded-md hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+										on:click|stopPropagation={() => pinItemHandler('confluence')}
+									>
+										{#if pinnedInputItems.includes('confluence')}
+											<PinSlash className="size-3.5" />
+										{:else}
+											<Pin className="size-3.5" />
+										{/if}
+									</button>
+								</Tooltip>
+							</button>
+						{/if}
 					{/if}
 
 					<!-- ═══ ATTACH DATABASE ═══ -->
-					{#if isFeatureEnabled('knowledge')}
+					{#if isFeatureEnabled('knowledge') && anyDatabaseAllowed && itemAllowed('knowledge')}
 						<div class="my-1 border-t border-gray-100 dark:border-gray-800" />
 						<div
 							class="text-xs font-medium text-gray-400 dark:text-gray-500 uppercase tracking-wide px-3 py-1.5"
@@ -569,7 +687,7 @@
 						</Tooltip>
 
 						<!-- Reference Chats -->
-						{#if isFeatureEnabled('reference_chats') && ($chats ?? []).length > 0}
+						{#if isFeatureEnabled('reference_chats') && ($chats ?? []).length > 0 && itemAllowed('reference_chats')}
 							<Tooltip
 								content={fileUploadCapableModels.length !== selectedModels.length
 									? $i18n.t('Model(s) do not support file upload')
@@ -615,6 +733,7 @@
 					{/if}
 
 					<!-- ═══ ATTACH CAPABILITY ═══ -->
+					{#if anyCapabilityAllowed}
 					{#if showWebSearchButton || showImageGenerationButton || showCodeInterpreterButton || showDocumentWriterButton || showToolsButton || (toggleFilters && toggleFilters.length > 0)}
 						<div class="my-1 border-t border-gray-100 dark:border-gray-800" />
 						<div
@@ -624,7 +743,7 @@
 						</div>
 
 						<!-- Tools -->
-						{#if isFeatureEnabled('tools')}
+						{#if isFeatureEnabled('tools') && itemAllowed('tools')}
 							{#if tools}
 								{#if Object.keys(tools).length > 0}
 									<button
@@ -669,7 +788,7 @@
 						{/if}
 
 						<!-- Filters -->
-						{#if toggleFilters && toggleFilters.length > 0}
+						{#if toggleFilters && toggleFilters.length > 0 && itemAllowed('filters')}
 							{#each toggleFilters.sort( (a, b) => a.name.localeCompare( b.name, undefined, { sensitivity: 'base' } ) ) as filter, filterIdx (filter.id)}
 								<Tooltip content={filter?.description} placement="top-start">
 									<button
@@ -971,6 +1090,7 @@
 								</button>
 							</Tooltip>
 						{/if}
+					{/if}
 					{/if}
 				</div>
 			{:else if tab === 'knowledge' && isFeatureEnabled('knowledge')}

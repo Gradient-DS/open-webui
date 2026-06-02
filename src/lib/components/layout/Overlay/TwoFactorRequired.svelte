@@ -1,16 +1,25 @@
 <script lang="ts">
 	import { getContext } from 'svelte';
-	import { config } from '$lib/stores';
 	import TwoFactorSetup from '$lib/components/chat/Settings/Account/TwoFactorSetup.svelte';
 
 	const i18n = getContext('i18n');
 
 	export let show = false;
+	// Epoch second at which the 2FA enrollment grace period ends. When null or
+	// in the past the grace period has expired and the overlay cannot be
+	// dismissed — the user must enroll to continue.
+	export let gracePeriodExpiresAt: number | null = null;
 
 	let setupComplete = false;
 
-	$: gracePeriodDays = $config?.features?.two_fa_grace_period_days ?? 0;
-	$: canDismiss = gracePeriodDays > 0;
+	const nowSeconds = Math.floor(Date.now() / 1000);
+
+	$: graceExpired = gracePeriodExpiresAt == null || nowSeconds >= gracePeriodExpiresAt;
+	$: canDismiss = !graceExpired;
+	$: daysRemaining =
+		gracePeriodExpiresAt != null
+			? Math.max(0, Math.ceil((gracePeriodExpiresAt - nowSeconds) / 86400))
+			: 0;
 </script>
 
 {#if show && !setupComplete}
@@ -26,6 +35,16 @@
 				<div class="text-center text-sm text-gray-500 dark:text-gray-400 mb-6">
 					{$i18n.t('Your administrator requires two-factor authentication for all accounts.')}
 				</div>
+
+				{#if graceExpired}
+					<div
+						class="text-center text-sm text-red-600 dark:text-red-400 mb-4 -mt-2"
+					>
+						{$i18n.t(
+							'Your grace period has expired. You must set up two-factor authentication to continue.'
+						)}
+					</div>
+				{/if}
 
 				<div
 					class="bg-white dark:bg-gray-900 rounded-2xl p-6 shadow-lg border border-gray-100 dark:border-gray-800"
@@ -48,7 +67,7 @@
 						>
 							{$i18n.t('Set up later')}
 							<span class="text-gray-400">
-								({$i18n.t('{{days}} days remaining', { days: gracePeriodDays })})
+								({$i18n.t('{{days}} days remaining', { days: daysRemaining })})
 							</span>
 						</button>
 					</div>

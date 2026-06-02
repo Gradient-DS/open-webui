@@ -61,13 +61,13 @@ chromadb==1.5.2
 weaviate-client==4.20.3
 opensearch-py==3.1.0
 
-pyarrow==20.0.0 # fix: pin pyarrow version to 20 for rpi compatibility #15897
+pyarrow==23.0.1 # security: PYSEC-2026-113 (Apache Arrow C++ use-after-free) fixed in 23.0.1; was pinned to 20 for rpi #15897 — verify rpi build before backporting
 
 ftfy==6.3.1
 chardet==5.2.0
 pypdf==6.10.2
 fpdf2==2.8.7
-pymdown-extensions==10.21
+pymdown-extensions==10.21.3 # security: CVE-2026-46338 (snippets path traversal regression of CVE-2023-32309) fixed in 10.21.3
 docx2txt==0.9
 python-pptx==1.0.2
 msoffcrypto-tool==6.0.0

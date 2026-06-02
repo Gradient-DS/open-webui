@@ -20,6 +20,7 @@ To add a new managed-sync datasource:
 """
 
 import logging
+import time
 from abc import ABC, abstractmethod
 from typing import Optional, Dict, Any
 
@@ -146,7 +147,10 @@ class SyncProvider(ABC):
         sync_info = meta.get(self.get_meta_key(), {})
         sources = sync_info.get('sources', [])
 
-        if not sources:
+        # A provider may resolve its source list dynamically at sync time —
+        # the Confluence shared KB has no stored sources but flags `shared`
+        # in its meta and resolves the selected spaces on each run.
+        if not sources and not sync_info.get('shared'):
             return {'error': 'No sync sources configured'}
 
         # Determine token source
@@ -179,7 +183,28 @@ class SyncProvider(ABC):
             use_shared_loader=use_shared_loader,
         )
 
-        return await worker.sync()
+        result = await worker.sync()
+
+        # Stamp the completion time so the admin UI reflects every run —
+        # including no-op syncs where 0 files changed. base_worker records
+        # this on its normal completion path; doing it here guarantees the
+        # timestamp advances for every provider and every non-error exit,
+        # and clears a status left stuck on 'syncing'.
+        if isinstance(result, dict) and not result.get('error') and not result.get('suspended'):
+            try:
+                kb = Knowledges.get_knowledge_by_id(id=knowledge_id)
+                if kb:
+                    meta = kb.meta or {}
+                    sync_info = meta.get(self.get_meta_key(), {})
+                    sync_info['last_sync_at'] = int(time.time())
+                    if sync_info.get('status') in (None, 'idle', 'syncing'):
+                        sync_info['status'] = 'completed'
+                    meta[self.get_meta_key()] = sync_info
+                    Knowledges.update_knowledge_meta_by_id(knowledge_id, meta)
+            except Exception:
+                log.exception('Failed to stamp sync completion for KB %s', knowledge_id)
+
+        return result
 
 
 def get_sync_provider(provider_type: str) -> SyncProvider:

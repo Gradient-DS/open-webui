@@ -127,8 +127,15 @@ RUN chown -R $UID:$GID /app $HOME
 # --only-upgrade on libcap2/libsystemd0/libudev1 pulls security-fixed versions
 # already published for bookworm (CVE-2026-4878, CVE-2026-29111) without
 # upgrading unrelated packages from the base image.
+# libgnutls30 added for: CVE-2026-33845 (CRITICAL DTLS DoS), CVE-2026-42010
+# (CRITICAL auth-bypass via NUL), CVE-2026-33846/CVE-2026-3833/CVE-2026-42009
+# (HIGH), all fixed in 3.7.9-2+deb12u7.
+# krb5 packages (libgssapi-krb5-2/libk5crypto3/libkrb5-3/libkrb5support0) added
+# for CVE-2026-40356 (HIGH krb5 DoS via integer underflow), fixed in
+# 1.20.1-2+deb12u5.
 RUN apt-get update && \
-    apt-get install --only-upgrade -y libcap2 libsystemd0 libudev1 && \
+    apt-get install --only-upgrade -y libcap2 libsystemd0 libudev1 libgnutls30 \
+    libgssapi-krb5-2 libk5crypto3 libkrb5-3 libkrb5support0 && \
     apt-get install -y --no-install-recommends \
     git build-essential pandoc gcc netcat-openbsd curl jq \
     libmariadb-dev \

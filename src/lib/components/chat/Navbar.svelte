@@ -119,15 +119,17 @@
 				</div>
 
 				<div class="self-start flex flex-none items-center text-gray-600 dark:text-gray-400">
-					{#if chat?.meta?.agent_id}
+					{#if isFeatureEnabled('agent_picker') && Boolean($config?.features?.feature_agent_api_enabled) && (!chat?.id || chat?.meta?.agent_id)}
 						<!-- [Gradient] Inline with the right-side menu icons so
 						     the badge sits on the same row and never grows the
-						     navbar height. Shown both on real chats (binding
-						     comes from chat.meta.agent_id) and on the empty
-						     state when the user has picked an agent (binding
-						     comes from $pendingAgentId, threaded in via Chat.svelte). -->
+						     navbar height. On real chats it's a read-only badge
+						     bound to chat.meta.agent_id. On the empty state (no
+						     chat yet) it's an interactive switcher — editable —
+						     and chat.meta.agent_id is threaded from
+						     $pendingAgentId via Chat.svelte, so the picked agent
+						     flows straight back into the badge. -->
 						<div class="hidden sm:flex items-center mr-1 self-center">
-							<AgentBadge agentId={chat.meta.agent_id} />
+							<AgentBadge agentId={chat?.meta?.agent_id} editable={!chat?.id} />
 						</div>
 					{/if}
 					<!-- <div class="md:hidden flex self-center w-[1px] h-5 mx-2 bg-gray-300 dark:bg-stone-700" /> -->
