@@ -894,6 +894,22 @@
 				</div>
 			{/if}
 		</div>
+
+		<div class="flex flex-col w-full">
+			<div class="flex w-full justify-between my-1">
+				<div class=" self-center text-xs font-medium">
+					{$i18n.t('Document Writer')}
+				</div>
+				<Switch bind:state={permissions.features.document_writer} />
+			</div>
+			{#if defaultPermissions?.features?.document_writer && !permissions.features.document_writer}
+				<div>
+					<div class="text-xs text-gray-500">
+						{$i18n.t('This is a default user permission and will remain enabled.')}
+					</div>
+				</div>
+			{/if}
+		</div>
 	</div>
 
 	<hr class=" border-gray-100/30 dark:border-gray-850/30" />
