@@ -64,5 +64,8 @@ export default defineConfig({
 	},
 	esbuild: {
 		pure: process.env.ENV === 'dev' ? [] : ['console.log', 'console.debug', 'console.error']
+	},
+	test: {
+		exclude: ['**/node_modules/**', '**/.worktrees/**']
 	}
 });
