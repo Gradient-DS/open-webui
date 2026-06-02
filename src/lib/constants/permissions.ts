@@ -60,6 +60,7 @@ export const DEFAULT_PERMISSIONS = {
 		web_search: true,
 		image_generation: true,
 		code_interpreter: true,
+		document_writer: true,
 		memories: true
 	},
 	settings: {

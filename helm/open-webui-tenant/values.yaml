@@ -307,9 +307,9 @@ openWebui:
     enableCodeExecution: "false"
     userPermissionsFeaturesCodeInterpreter: "false"
 
-    # Document Writer (disabled)
-    enableDocumentWriter: "false"
-    userPermissionsFeaturesDocumentWriter: "false"
+    # Document Writer
+    enableDocumentWriter: "true"
+    userPermissionsFeaturesDocumentWriter: "true"
 
     # DOCX export (chat / message / document Word downloads) — enabled by default;
     # set "false" per tenant to hide all .docx download buttons AND return 403
