@@ -396,3 +396,27 @@
 - Production-scale testing reveals issues that unit/integration tests miss — Vink was the first real stress test of the concurrent sync worker
 
 **Related:** Plans `thoughts/shared/plans/2026-04-06-cloud-kb-single-collection.md`, `thoughts/shared/plans/2026-04-06-sync-remove-batch-wait.md`, research `thoughts/shared/research/2026-04-06-cloud-kb-single-collection.md`
+
+---
+
+### [03-06-2026] Weaviate Native Multi-Tenancy — Phase 1 (open-webui MT connector, flag OFF)
+
+**With:** @lexlubbers
+
+**Context:** Phase 1 of the cross-repo refactor replacing "one Weaviate **class** per KB/file/web-search/memory" (3440 classes on haute-equipe) with native **multi-tenancy**: five fixed collections (`Knowledge`/`File`/`WebSearch`/`UserMemory`/`HashBased`) + the standalone non-MT `Knowledge_bases` meta-collection, each logical OWUI unit becoming a **tenant**. Executed via subagent-driven-development (implementer → spec review → quality review per task). Phase 2 (genai-utils agents adapter) is recorded in the shared-knowledge genai-utils memory, same date. Phases 3–6 (gitops: 1.37.7 upgrade, migration Job, cutover, rollout) are NOT done — out of scope this pass.
+
+**What We Did:**
+- `_weaviate_mt_mapping.py` — canonical pure `map_collection(name) -> (collection, tenant)` + 28 tests (`454297498`). Tenant key = the **raw** collection_name (mirrors qdrant/milvus); `knowledge-bases` → `(Knowledge_bases, None)`; hash collections are 63 **or** 64 lowercase-hex (broadened from qdrant's 63-only).
+- `weaviate_multitenancy.py` MT connector + `ENABLE_WEAVIATE_MULTITENANCY_MODE` (default false) / `WEAVIATE_MT_LEGACY_FALLBACK` (default true) flags (`ddd3b36a2`); delete-failure logging fix (`e4635e0bb`).
+- Factory branch (lazy-imports MT vs legacy by flag) + flag-selection test + MT index-policy tests (`bf880504a`).
+- Branch `feat/weaviate-tenancy` (open-webui primary checkout). 59 targeted tests green; flag default OFF = zero behavior change.
+
+**Key Learnings / Decisions:**
+- The entire MT mapping lives **inside the connector** — `VectorDBBase` passes a single `collection_name` per call, so **no router changes** were needed.
+- **Dual-read is "MT-first, else legacy", never merged.** Fallback fires only when the MT tenant returns empty. Consequence: a KB holding *both* legacy and MT data returns **only** the MT portion — so migration must precede heavy new writes. (Matters for local testing: adding a new file to a legacy KB under MT makes its old chunks invisible until migrated.)
+- **Deliberate deviations from the plan** (flagged in review): (1) `delete`/`delete_collection` **also purge the legacy class** when fallback is on and it exists (with warning logs) — beyond the plan's "tenant-scoped only", else dual-read resurrects deleted data; (2) `reset()` drops **all** collections (legacy parity), not just the named six; (3) the full 9-property schema is applied to **all five** MT collections uniformly.
+- **Cross-repo `map_collection` parity is THE invariant** — OWUI writes/reads and genai-utils reads must agree on `(collection, tenant)` or data routes to the wrong tenant. Final review proved the two copies identical across a 20-input matrix; the genai-utils parity test locks them.
+- Index config under MT: flat+BQ for File/WebSearch/UserMemory (when `ENABLE_WEAVIATE_BQ_QUANTIZATION`), HNSW for Knowledge/HashBased — keyed on the fixed MT names, not legacy class-name prefixes.
+- **Local test recipe**: `docker-compose.soev-dev.yaml` runs only weaviate(1.35.0)+postgres; OWUI runs as a host process, so flip `ENABLE_WEAVIATE_MULTITENANCY_MODE` on the backend env (not the compose). 1.35.0 supports MT fine; 1.37.7 only needed for prod scale. Verify via `GET :8082/v1/schema` (≤6 classes for new MT data) and `/v1/schema/Knowledge/tenants`.
+
+**Related:** Plan `thoughts/shared/plans/2026-06-03-weaviate-native-multitenancy-refactor.md`; research `thoughts/shared/research/2026-06-03-weaviate-collections-vs-tenants-refactor.md`; genai-utils Phase 2 note (shared-knowledge, 03-06-2026); branch `feat/weaviate-tenancy`; commits `454297498`, `ddd3b36a2`, `e4635e0bb`, `bf880504a`. Mirrors `qdrant_multitenancy.py`/`milvus_multitenancy.py`.
