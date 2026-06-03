@@ -340,6 +340,8 @@ class WeaviateClient(VectorDBBase):
         if result is None:
             return True
         docs = result.documents or []
+        # Emptiness is judged on the presence of result groups, not document text content.
+        # An inner group like [''] (a real doc with empty text) correctly counts as non-empty.
         return not any(group for group in docs)
 
     def _tenant_exists(self, coll_name: str, tenant: Optional[str]) -> bool:
@@ -478,8 +480,8 @@ class WeaviateClient(VectorDBBase):
                 weaviate_filter = self._build_delete_filter(filter)
                 if weaviate_filter:
                     queryable.data.delete_many(where=weaviate_filter)
-        except Exception:
-            pass
+        except Exception as e:
+            log.warning('Weaviate MT delete failed (data may resurrect via dual-read): %s', e)
 
     def delete(
         self,
@@ -513,8 +515,8 @@ class WeaviateClient(VectorDBBase):
             if self.client.collections.exists(coll_name):
                 try:
                     self.client.collections.get(coll_name).tenants.remove([tenant])
-                except Exception:
-                    pass
+                except Exception as e:
+                    log.warning('Weaviate MT tenants.remove failed (data may resurrect via dual-read): %s', e)
 
         # Anti-resurrection: also delete the legacy class so dropped KBs/files
         # don't reappear via dual-read.
@@ -522,8 +524,8 @@ class WeaviateClient(VectorDBBase):
         if legacy_class is not None:
             try:
                 self.client.collections.delete(legacy_class)
-            except Exception:
-                pass
+            except Exception as e:
+                log.warning('Weaviate legacy-class delete failed (data may resurrect via dual-read): %s', e)
 
     def reset(self) -> None:
         # Wipe everything: the five MT collections, the meta collection, and any
