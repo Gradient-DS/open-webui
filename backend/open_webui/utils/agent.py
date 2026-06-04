@@ -194,6 +194,21 @@ def _resolve_model_vision_capable(model: Optional[dict[str, Any]]) -> bool:
     return bool(capabilities.get('vision', True))
 
 
+def _resolve_model_citations_enabled(model: Optional[dict[str, Any]]) -> bool:
+    """Resolve whether inline source citations are enabled for a model.
+
+    Reads OpenWebUI's per-model citations capability flag
+    (``info.meta.capabilities.citations``, the "Show sources" toggle in
+    the admin panel). Defaults to ``True`` when unset — matching
+    OpenWebUI's own frontend default — so a model without explicit
+    capability config keeps citing. Forwarded to the agent so it can
+    suppress citation pills for assistants configured citation-free.
+    """
+    info = (model or {}).get('info') or {}
+    capabilities = (info.get('meta') or {}).get('capabilities') or {}
+    return bool(capabilities.get('citations', True))
+
+
 def _error_sse_chunk(message: str) -> str:
     """Build an SSE data line carrying an error in OpenAI shape.
 
@@ -352,6 +367,14 @@ async def call_agent_api(
     # agent service can drop images for a misconfigured non-vision
     # model instead of crashing on multimodal content.
     agent_metadata['vision_capable'] = _resolve_model_vision_capable(model_dict)
+
+    # [Gradient] Forward the selected model's citations capability ("Show
+    # sources" toggle) as a feature flag so the agent service can suppress
+    # inline [N] source pills for assistants configured citation-free
+    # (e.g. the Offertemachine, whose offer document must not carry
+    # citations). Model capability is the source of truth, so it wins over
+    # any inbound features value.
+    features = {**(features or {}), 'citations': _resolve_model_citations_enabled(model_dict)}
 
     payload = build_agent_payload(
         model=llm_model,
