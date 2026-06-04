@@ -509,6 +509,77 @@ def test_knowledge_files_admin_does_not_bypass(monkeypatch):
     assert resp.status_code == 404
 
 
+def test_knowledge_files_403_when_suspended(monkeypatch, fake_principal):
+    """Suspended KB → 403 even for an accessible user; no admin bypass on this surface."""
+    app = _build_app(fake_principal=fake_principal)
+
+    async def fake_resolve(user, *, kb_id):
+        return _accessible_kb_stub(kb_id)
+
+    async def fake_get_suspension_info(kb_id, db=None):
+        return {'days_remaining': 7}
+
+    async def fake_search_files(*args, **kwargs):
+        raise AssertionError('suspended KB must not be queried')
+
+    monkeypatch.setattr(internal_retrieval_router, 'resolve_accessible_kb', fake_resolve)
+    monkeypatch.setattr(
+        internal_retrieval_router.Knowledges,
+        'get_suspension_info',
+        fake_get_suspension_info,
+    )
+    monkeypatch.setattr(
+        internal_retrieval_router.Knowledges,
+        'search_files_by_id',
+        fake_search_files,
+    )
+
+    client = TestClient(app)
+    resp = client.get('/api/v1/internal/retrieval/knowledge/kb-1/files')
+    assert resp.status_code == 403
+    assert '7 days' in resp.json()['detail']
+
+
+def test_knowledge_files_401_when_bearer_missing(monkeypatch):
+    """End-to-end auth: no/wrong bearer → 401 via the real ``get_agent_principal``.
+
+    Wires the real dependency (not the test-only override) so the route's
+    auth gate is verified for this surface specifically. The dependency's
+    underlying behavior is exhaustively tested in ``test_service_auth.py``.
+    """
+    from open_webui.utils import service_auth
+
+    monkeypatch.setenv('AGENT_API_KEY', 'correct-horse-' + 'b' * 24)
+
+    app = FastAPI()
+    app.include_router(internal_retrieval_router.router, prefix='/api/v1/internal/retrieval')
+    app.state.config = SimpleNamespace(AGENT_SEARCH_ENABLED=True)
+
+    # Stub Users.get_user_by_id so a valid bearer + acting user could resolve;
+    # we still verify the 401 path here, but this keeps the fixture realistic.
+    async def fake_get_user_by_id(user_id, db=None):
+        return None
+
+    monkeypatch.setattr(service_auth.Users, 'get_user_by_id', fake_get_user_by_id)
+
+    client = TestClient(app, raise_server_exceptions=False)
+    # No Authorization header at all.
+    resp = client.get(
+        '/api/v1/internal/retrieval/knowledge/kb-1/files',
+        headers={'X-Acting-User-Id': 'user-uuid-1'},
+    )
+    assert resp.status_code == 401
+    # Wrong bearer.
+    resp = client.get(
+        '/api/v1/internal/retrieval/knowledge/kb-1/files',
+        headers={
+            'Authorization': 'Bearer not-the-configured-key',
+            'X-Acting-User-Id': 'user-uuid-1',
+        },
+    )
+    assert resp.status_code == 401
+
+
 # ---------- /files/{id}/content tightening ------------------------------------------
 
 
