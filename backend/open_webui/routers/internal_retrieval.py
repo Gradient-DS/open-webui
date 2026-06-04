@@ -10,7 +10,7 @@ endpoint and any future caller.
 from __future__ import annotations
 
 import logging
-from typing import Optional
+from typing import Any, Optional
 
 from pathlib import Path
 
@@ -19,9 +19,12 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from open_webui.constants import ERROR_MESSAGES
 from open_webui.internal.db import get_async_session
+from open_webui.models.access_grants import AccessGrants
 from open_webui.models.chats import Chats
 from open_webui.models.files import Files
+from open_webui.models.knowledge import KnowledgeFileListResponse, Knowledges
 from open_webui.routers.files import upload_file_handler
 from open_webui.services.retrieval.agent_search import (
     resolve_accessible_kbs,
@@ -163,6 +166,100 @@ async def list_accessible_files(
     return AccessibleFilesResponse(
         user_id=principal.user.id,
         file_ids=accessible,
+    )
+
+
+@router.get(
+    '/knowledge/{knowledge_id}/files',
+    response_model=KnowledgeFileListResponse,
+)
+async def list_knowledge_files(
+    knowledge_id: str,
+    request: Request,
+    principal: AgentPrincipal = Depends(get_agent_principal),
+    query: Optional[str] = None,
+    page: Optional[int] = 1,
+    limit: Optional[int] = 30,
+    db: AsyncSession = Depends(get_async_session),
+) -> KnowledgeFileListResponse:
+    """List files in a KB the acting user can read.
+
+    Machine-auth equivalent of ``GET /api/v1/knowledge/{id}/files``. The
+    user-facing route gates on ``get_verified_user`` (a real session);
+    this surface gates on the agent bearer + ``X-Acting-User-Id`` so
+    agents can drive ``list_documents`` / ``find_documents`` /
+    ``build_knowledge_graph`` without a user session.
+
+    No admin shortcut: tenant-isolated agent reads must respect owner /
+    grant ACL exactly. A suspended KB returns 403 for everyone (no admin
+    bypass).
+    """
+
+    if not getattr(request.app.state.config, 'AGENT_SEARCH_ENABLED', False):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail='agent search not enabled',
+        )
+
+    knowledge = await Knowledges.get_knowledge_by_id(id=knowledge_id, db=db)
+    if knowledge is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=ERROR_MESSAGES.NOT_FOUND,
+        )
+
+    user = principal.user
+    if not (
+        knowledge.user_id == user.id
+        or await AccessGrants.has_access(
+            user_id=user.id,
+            resource_type='knowledge',
+            resource_id=knowledge.id,
+            permission='read',
+            db=db,
+        )
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=ERROR_MESSAGES.ACCESS_PROHIBITED,
+        )
+
+    suspension_info = await Knowledges.get_suspension_info(knowledge.id)
+    if suspension_info:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=(
+                'This knowledge base is suspended. '
+                f'It will be permanently deleted in '
+                f'{suspension_info["days_remaining"]} days unless the '
+                'owner restores access.'
+            ),
+        )
+
+    page = max(page or 1, 1)
+    limit = min(max(limit or 30, 1), 2000)
+    skip = (page - 1) * limit
+    filter: dict[str, Any] = {}
+    if query:
+        filter['query'] = query
+
+    log.info(
+        'agent_list_knowledge_files: agent=%s acting_user=%s kb=%s query=%s page=%d limit=%d',
+        principal.agent_id,
+        user.id,
+        knowledge.id,
+        bool(query),
+        page,
+        limit,
+    )
+
+    return await Knowledges.search_files_by_id(
+        knowledge.id,
+        user.id,
+        filter=filter,
+        skip=skip,
+        limit=limit,
+        db=db,
     )
 
 

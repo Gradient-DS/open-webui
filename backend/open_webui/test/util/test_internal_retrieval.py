@@ -351,6 +351,288 @@ def test_accessible_files_requires_agent_search_enabled(monkeypatch, fake_princi
     assert resp.status_code == 404
 
 
+# ---------- /knowledge/{id}/files ---------------------------------------------------
+
+
+def _fake_knowledge(*, user_id, knowledge_id='kb-1'):
+    return SimpleNamespace(id=knowledge_id, user_id=user_id)
+
+
+def test_knowledge_files_happy_path_owner(monkeypatch, fake_principal, caplog):
+    """Owner of a KB gets the file list back; agent_id is logged."""
+    app = _build_app(fake_principal=fake_principal)
+
+    knowledge = _fake_knowledge(user_id=fake_principal.user.id)
+    captured = {}
+
+    class _FakeKnowledges:
+        @staticmethod
+        async def get_knowledge_by_id(*, id, db=None):
+            captured['get_knowledge_id'] = id
+            return knowledge
+
+        @staticmethod
+        async def get_suspension_info(kb_id, db=None):
+            captured['suspension_check_id'] = kb_id
+            return None
+
+        @staticmethod
+        async def search_files_by_id(kb_id, user_id, *, filter, skip, limit, db=None):
+            captured['search'] = {
+                'kb_id': kb_id,
+                'user_id': user_id,
+                'filter': dict(filter),
+                'skip': skip,
+                'limit': limit,
+            }
+            return {
+                'items': [
+                    {
+                        'id': 'file-a',
+                        'filename': 'a.pdf',
+                        'user_id': fake_principal.user.id,
+                        'created_at': 1,
+                        'updated_at': 1,
+                        'meta': {'content_type': 'application/pdf'},
+                    }
+                ],
+                'total': 1,
+            }
+
+    class _FakeAccessGrants:
+        @staticmethod
+        async def has_access(*, user_id, resource_type, resource_id, permission, db=None):
+            captured['access_check'] = {
+                'user_id': user_id,
+                'resource_type': resource_type,
+                'resource_id': resource_id,
+                'permission': permission,
+            }
+            return False  # not used: owner short-circuits
+
+    monkeypatch.setattr(internal_retrieval_router, 'Knowledges', _FakeKnowledges)
+    monkeypatch.setattr(internal_retrieval_router, 'AccessGrants', _FakeAccessGrants)
+
+    with caplog.at_level('INFO', logger=internal_retrieval_router.log.name):
+        client = TestClient(app)
+        resp = client.get(
+            '/api/v1/internal/retrieval/knowledge/kb-1/files',
+            params={'query': 'budget', 'limit': 50, 'page': 2},
+        )
+
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body['total'] == 1
+    assert body['items'][0]['id'] == 'file-a'
+    assert captured['get_knowledge_id'] == 'kb-1'
+    assert captured['suspension_check_id'] == knowledge.id
+    assert captured['search'] == {
+        'kb_id': knowledge.id,
+        'user_id': fake_principal.user.id,
+        'filter': {'query': 'budget'},
+        'skip': 50,  # (page=2 - 1) * limit=50
+        'limit': 50,
+    }
+    # Owner short-circuits — has_access never consulted.
+    assert 'access_check' not in captured
+    assert any(
+        'agent_list_knowledge_files' in rec.getMessage() and fake_principal.agent_id in rec.getMessage()
+        for rec in caplog.records
+    )
+
+
+def test_knowledge_files_happy_path_grant(monkeypatch, fake_principal):
+    """Non-owner with a read grant gets the file list back."""
+    app = _build_app(fake_principal=fake_principal)
+    knowledge = _fake_knowledge(user_id='someone-else')
+
+    class _FakeKnowledges:
+        @staticmethod
+        async def get_knowledge_by_id(*, id, db=None):
+            return knowledge
+
+        @staticmethod
+        async def get_suspension_info(kb_id, db=None):
+            return None
+
+        @staticmethod
+        async def search_files_by_id(kb_id, user_id, *, filter, skip, limit, db=None):
+            return {'items': [], 'total': 0}
+
+    class _FakeAccessGrants:
+        @staticmethod
+        async def has_access(*, user_id, resource_type, resource_id, permission, db=None):
+            return True
+
+    monkeypatch.setattr(internal_retrieval_router, 'Knowledges', _FakeKnowledges)
+    monkeypatch.setattr(internal_retrieval_router, 'AccessGrants', _FakeAccessGrants)
+
+    client = TestClient(app)
+    resp = client.get('/api/v1/internal/retrieval/knowledge/kb-1/files')
+    assert resp.status_code == 200
+    assert resp.json() == {'items': [], 'total': 0}
+
+
+def test_knowledge_files_403_when_no_grant_and_not_owner(monkeypatch, fake_principal):
+    """Non-owner without a read grant → 403."""
+    app = _build_app(fake_principal=fake_principal)
+
+    class _FakeKnowledges:
+        @staticmethod
+        async def get_knowledge_by_id(*, id, db=None):
+            return _fake_knowledge(user_id='someone-else')
+
+        @staticmethod
+        async def get_suspension_info(kb_id, db=None):
+            raise AssertionError('should not check suspension when ACL fails')
+
+        @staticmethod
+        async def search_files_by_id(*args, **kwargs):
+            raise AssertionError('should not search when ACL fails')
+
+    class _FakeAccessGrants:
+        @staticmethod
+        async def has_access(*, user_id, resource_type, resource_id, permission, db=None):
+            return False
+
+    monkeypatch.setattr(internal_retrieval_router, 'Knowledges', _FakeKnowledges)
+    monkeypatch.setattr(internal_retrieval_router, 'AccessGrants', _FakeAccessGrants)
+
+    client = TestClient(app)
+    resp = client.get('/api/v1/internal/retrieval/knowledge/kb-1/files')
+    assert resp.status_code == 403
+
+
+def test_knowledge_files_403_when_admin_role_but_no_grant(monkeypatch):
+    """Admin role does NOT bypass the agent-side ACL (mirrors /accessible-files)."""
+    admin_principal = _admin_principal()
+    app = _build_app(fake_principal=admin_principal)
+
+    class _FakeKnowledges:
+        @staticmethod
+        async def get_knowledge_by_id(*, id, db=None):
+            return _fake_knowledge(user_id='someone-else')
+
+        @staticmethod
+        async def get_suspension_info(kb_id, db=None):
+            return None
+
+        @staticmethod
+        async def search_files_by_id(*args, **kwargs):
+            raise AssertionError('admin must not bypass agent ACL')
+
+    class _FakeAccessGrants:
+        @staticmethod
+        async def has_access(*, user_id, resource_type, resource_id, permission, db=None):
+            return False
+
+    monkeypatch.setattr(internal_retrieval_router, 'Knowledges', _FakeKnowledges)
+    monkeypatch.setattr(internal_retrieval_router, 'AccessGrants', _FakeAccessGrants)
+
+    client = TestClient(app)
+    resp = client.get('/api/v1/internal/retrieval/knowledge/kb-1/files')
+    assert resp.status_code == 403
+
+
+def test_knowledge_files_403_when_suspended(monkeypatch, fake_principal):
+    """Suspended KB → 403 even for the owner (no admin bypass on this surface)."""
+    app = _build_app(fake_principal=fake_principal)
+    knowledge = _fake_knowledge(user_id=fake_principal.user.id)
+
+    class _FakeKnowledges:
+        @staticmethod
+        async def get_knowledge_by_id(*, id, db=None):
+            return knowledge
+
+        @staticmethod
+        async def get_suspension_info(kb_id, db=None):
+            return {'days_remaining': 7}
+
+        @staticmethod
+        async def search_files_by_id(*args, **kwargs):
+            raise AssertionError('suspended KB must not be queried')
+
+    monkeypatch.setattr(internal_retrieval_router, 'Knowledges', _FakeKnowledges)
+    monkeypatch.setattr(
+        internal_retrieval_router,
+        'AccessGrants',
+        SimpleNamespace(has_access=AsyncMock(return_value=True)),
+    )
+
+    client = TestClient(app)
+    resp = client.get('/api/v1/internal/retrieval/knowledge/kb-1/files')
+    assert resp.status_code == 403
+    assert '7 days' in resp.json()['detail']
+
+
+def test_knowledge_files_404_when_feature_flag_disabled(monkeypatch, fake_principal):
+    """AGENT_SEARCH_ENABLED=False → 404 before any DB hit."""
+    app = _build_app(fake_principal=fake_principal, agent_search_enabled=False)
+    monkeypatch.setattr(
+        internal_retrieval_router,
+        'Knowledges',
+        SimpleNamespace(
+            get_knowledge_by_id=AsyncMock(side_effect=AssertionError('should not run when disabled')),
+        ),
+    )
+    client = TestClient(app)
+    resp = client.get('/api/v1/internal/retrieval/knowledge/kb-1/files')
+    assert resp.status_code == 404
+
+
+def test_knowledge_files_404_when_kb_not_found(monkeypatch, fake_principal):
+    """Unknown KB id → 404 (semantic match, not the 400 the user-facing route returns)."""
+    app = _build_app(fake_principal=fake_principal)
+    monkeypatch.setattr(
+        internal_retrieval_router,
+        'Knowledges',
+        SimpleNamespace(get_knowledge_by_id=AsyncMock(return_value=None)),
+    )
+    client = TestClient(app)
+    resp = client.get('/api/v1/internal/retrieval/knowledge/missing/files')
+    assert resp.status_code == 404
+
+
+def test_knowledge_files_401_when_bearer_missing(monkeypatch):
+    """End-to-end auth: no/wrong bearer → 401 via the real ``get_agent_principal``.
+
+    Wires the real dependency (not the test-only override) so the route's
+    auth gate is verified for this surface specifically. The dependency's
+    underlying behavior is exhaustively tested in ``test_service_auth.py``.
+    """
+    from open_webui.utils import service_auth
+
+    monkeypatch.setenv('AGENT_API_KEY', 'correct-horse-' + 'b' * 24)
+
+    app = FastAPI()
+    app.include_router(internal_retrieval_router.router, prefix='/api/v1/internal/retrieval')
+    app.state.config = SimpleNamespace(AGENT_SEARCH_ENABLED=True)
+
+    # Stub Users.get_user_by_id so a valid bearer + acting user could resolve;
+    # we still verify the 401 path here, but this keeps the fixture realistic.
+    async def fake_get_user_by_id(user_id, db=None):
+        return None
+
+    monkeypatch.setattr(service_auth.Users, 'get_user_by_id', fake_get_user_by_id)
+
+    client = TestClient(app, raise_server_exceptions=False)
+    # No Authorization header at all.
+    resp = client.get(
+        '/api/v1/internal/retrieval/knowledge/kb-1/files',
+        headers={'X-Acting-User-Id': 'user-uuid-1'},
+    )
+    assert resp.status_code == 401
+    # Wrong bearer.
+    resp = client.get(
+        '/api/v1/internal/retrieval/knowledge/kb-1/files',
+        headers={
+            'Authorization': 'Bearer not-the-configured-key',
+            'X-Acting-User-Id': 'user-uuid-1',
+        },
+    )
+    assert resp.status_code == 401
+
+
 # ---------- /files/{id}/content tightening ------------------------------------------
 
 

@@ -230,9 +230,15 @@ async def stream_agent_response(
     - Custom events (status, source) have an explicit event type
     - Standard OpenAI chunks have no event type (defaults to "data")
     """
+    # aiohttp caps a single readline() at 2 * read_bufsize (default 128 KiB).
+    # Agent tool deltas can ship a whole HTML artifact in one `delta.content`
+    # — e.g. build_knowledge_graph inlines vis-network.min.js (~640 KiB raw,
+    # ~750 KiB JSON-escaped). Bump the buffer so the consumer tolerates lines
+    # well into the megabytes.
     session = aiohttp.ClientSession(
         trust_env=True,
         timeout=aiohttp.ClientTimeout(total=timeout),
+        read_bufsize=8 * 1024 * 1024,
     )
 
     try:
