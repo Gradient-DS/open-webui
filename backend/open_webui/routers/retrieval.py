@@ -48,12 +48,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from open_webui.retrieval.vector.factory import VECTOR_DB_CLIENT
 from open_webui.retrieval.vector.async_client import ASYNC_VECTOR_DB_CLIENT
 
-# External pipeline integration
-from open_webui.routers.external_retrieval import (
-    check_external_pipeline_health,
-    process_file_with_external_pipeline,
-)
-
 # Document loaders
 from open_webui.retrieval.loaders.youtube import YoutubeLoader
 
@@ -1754,45 +1748,7 @@ async def process_file(
                     loader = build_loader_from_config(request)
                     loader.user = user
 
-                    # Try external pipeline first by default
-                    external_pipeline_url = getattr(request.app.state.config, 'EXTERNAL_PIPELINE_URL', None)
-
-                    # Check if external pipeline is enabled (not empty string)
-                    use_external_pipeline = external_pipeline_url and external_pipeline_url.strip() != ''
-
-                    if use_external_pipeline:
-                        # Try external pipeline first (default behavior)
-                        log.info('Attempting to use external pipeline for file')
-
-                        try:
-                            # Process file with external pipeline
-                            # All logic is in external_retrieval.py for maintainability
-                            return await process_file_with_external_pipeline(
-                                request=request,
-                                file=file,
-                                file_path=file_path,
-                                collection_name=collection_name,
-                                form_data=form_data,
-                                loader_instance=loader,
-                                save_docs_to_vector_db_func=save_docs_to_vector_db,
-                                user=user,
-                            )
-                        except Exception as e:
-                            # External pipeline failed - fall back to internal pipeline with warning
-                            log.warning(f'External pipeline failed for file: {e}. Falling back to internal pipeline.')
-                            log.warning(
-                                f'To disable external pipeline, set EXTERNAL_PIPELINE_URL to empty string. '
-                                f"To fix external pipeline, ensure it's running at {external_pipeline_url} and accessible."
-                            )
-                            # Continue to internal pipeline fallback below
-                            use_external_pipeline = False
-
-                    # Use internal pipeline if external is disabled or failed
-                    if not use_external_pipeline:
-                        log.info('Using internal pipeline for file')
-                        # Internal pipeline: parsing, chunking, embedding
-                        # Reuse the loader created above
-                        docs = await loader.aload(file.filename, file.meta.get('content_type'), file_path)
+                    docs = await loader.aload(file.filename, file.meta.get('content_type'), file_path)
 
                     docs = [
                         Document(

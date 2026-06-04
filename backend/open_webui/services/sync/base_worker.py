@@ -656,17 +656,14 @@ class BaseSyncWorker(ABC):
     async def _extract_content(self, file_id: str) -> Optional[tuple]:
         """Extract text content from a file, returning Documents for embedding.
 
-        Uses the same extraction pipeline as process_file (external pipeline with
-        internal fallback), but returns the documents instead of embedding them.
+        Uses the same extraction pipeline as process_file, but returns the
+        documents instead of embedding them.
 
         Returns:
             Tuple of (docs, file, needs_split) or None if no content could be extracted.
-            needs_split is True for internal pipeline (needs chunking), False for external
-            pipeline (already chunked).
         """
         from open_webui.retrieval.loaders.main import Loader
         from open_webui.retrieval.vector.utils import filter_metadata
-        from open_webui.routers.external_retrieval import call_external_pipeline
         from langchain_core.documents import Document
 
         request = self._make_request()
@@ -722,36 +719,7 @@ class BaseSyncWorker(ABC):
                 MINERU_PARAMS=request.app.state.config.MINERU_PARAMS,
             )
 
-            # Try external pipeline first
-            external_pipeline_url = getattr(request.app.state.config, 'EXTERNAL_PIPELINE_URL', None)
-            use_external_local = bool(external_pipeline_url and external_pipeline_url.strip() != '')
-            docs_local = None
-
-            if use_external_local:
-                try:
-                    result = call_external_pipeline(
-                        file_path=local_file_path,
-                        filename=file.filename,
-                        content_type=file.meta.get('content_type', ''),
-                        external_pipeline_url=external_pipeline_url,
-                        external_pipeline_api_key=getattr(request.app.state.config, 'EXTERNAL_PIPELINE_API_KEY', None),
-                        loader_instance=loader,
-                    )
-                    if result.get('success') and result.get('chunks'):
-                        docs_local = [
-                            Document(
-                                page_content=chunk['text'],
-                                metadata=chunk.get('metadata', {}),
-                            )
-                            for chunk in result['chunks']
-                        ]
-                except Exception as e:
-                    log.warning(f'External pipeline failed for {file.filename}: {e}, falling back')
-                    use_external_local = False
-
-            if docs_local is None:
-                use_external_local = False
-                docs_local = loader.load(file.filename, file.meta.get('content_type'), local_file_path)
+            docs_local = loader.load(file.filename, file.meta.get('content_type'), local_file_path)
 
             if not docs_local:
                 return None
@@ -770,7 +738,7 @@ class BaseSyncWorker(ABC):
                 for doc in docs_local
             ]
 
-            return docs_local, not use_external_local  # needs_split=True for internal pipeline
+            return docs_local, True  # needs_split=True for internal pipeline
 
         result = await asyncio.to_thread(_extract_in_thread)
         if result is None:
