@@ -128,7 +128,42 @@
 		{/if}
 	{:else if token.text.trim().match(/^<br\s*\/?>$/i)}
 		<br />
+	{:else if html && html.includes('<table')}
+		<!-- [Gradient] Render raw HTML <table> blocks (e.g. agent-generated
+		     documents that copy a table verbatim from a source) instead of
+		     falling through to escaped text. ``html`` is already
+		     DOMPurify-sanitized above, so {@html} is XSS-safe. -->
+		<div class="markdown-html-table scrollbar-hidden relative overflow-x-auto max-w-full my-2">
+			<!-- eslint-disable-next-line svelte/no-at-html-tags — `html` is DOMPurify-sanitized above -->
+			{@html html}
+		</div>
 	{:else}
 		{token.text}
 	{/if}
 {/if}
+
+<style>
+	:global(.markdown-html-table table) {
+		width: 100%;
+		border-collapse: collapse;
+		font-size: 0.875rem;
+		line-height: 1.25rem;
+	}
+	:global(.markdown-html-table th),
+	:global(.markdown-html-table td) {
+		border: 1px solid rgb(229 231 235);
+		padding: 0.375rem 0.625rem;
+		text-align: left;
+		vertical-align: top;
+	}
+	:global(.dark .markdown-html-table th),
+	:global(.dark .markdown-html-table td) {
+		border-color: rgb(55 65 81);
+	}
+	:global(.markdown-html-table th) {
+		font-weight: 600;
+	}
+	:global(.markdown-html-table p) {
+		margin: 0;
+	}
+</style>
