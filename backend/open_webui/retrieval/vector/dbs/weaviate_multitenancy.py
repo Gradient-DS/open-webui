@@ -134,6 +134,12 @@ def _mt_properties() -> list:
             name='onedrive_drive_id',
             data_type=weaviate.classes.config.DataType.TEXT,
         ),
+        # Chunk/splitter metadata — declared as NUMBER (float64) to match Weaviate's
+        # auto-schema inference and prevent first-writer type races on fresh tenants.
+        # OWUI writes these as int; Weaviate stores and returns them as float64.
+        weaviate.classes.config.Property(name='start_index', data_type=weaviate.classes.config.DataType.NUMBER),
+        weaviate.classes.config.Property(name='page', data_type=weaviate.classes.config.DataType.NUMBER),
+        weaviate.classes.config.Property(name='total_pages', data_type=weaviate.classes.config.DataType.NUMBER),
     ]
 
 
