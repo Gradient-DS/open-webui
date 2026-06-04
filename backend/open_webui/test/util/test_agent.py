@@ -13,6 +13,7 @@ import json
 
 from open_webui.utils.agent import (
     _error_sse_chunk,
+    _resolve_model_citations_enabled,
     _resolve_model_vision_capable,
     build_agent_payload,
 )
@@ -148,6 +149,25 @@ def test_resolve_vision_capable_defaults_true_when_unset():
 def test_resolve_vision_capable_defaults_true_when_no_model():
     assert _resolve_model_vision_capable(None) is True
     assert _resolve_model_vision_capable({}) is True
+
+
+def test_resolve_citations_reads_capability_flag():
+    model = {'info': {'meta': {'capabilities': {'citations': False}}}}
+    assert _resolve_model_citations_enabled(model) is False
+
+
+def test_resolve_citations_true_when_flag_true():
+    model = {'info': {'meta': {'capabilities': {'citations': True}}}}
+    assert _resolve_model_citations_enabled(model) is True
+
+
+def test_resolve_citations_defaults_true_when_unset():
+    assert _resolve_model_citations_enabled({'info': {'meta': {}}}) is True
+
+
+def test_resolve_citations_defaults_true_when_no_model():
+    assert _resolve_model_citations_enabled(None) is True
+    assert _resolve_model_citations_enabled({}) is True
 
 
 def test_error_sse_chunk_is_openai_error_shape_without_choices():

@@ -19,7 +19,7 @@ This repo is a fork of Open WebUI, customized for soev.ai. Key additions beyond 
 - GDPR-compliant user archival
 - Email invites via Microsoft Graph
 - External agent API (proxy + internal routing)
-- External pipeline/integration providers for RAG processing
+- Integration providers (`/ingest`) for cloud-sync RAG ingestion (the standalone `EXTERNAL_PIPELINE_URL` chunking path was removed 04-06-2026, PR #148; parsing offload uses the upstream `EXTERNAL_DOCUMENT_LOADER_URL` → `gradient-doc-processor`)
 - Typed knowledge bases (local, onedrive, google_drive, custom)
 - Acceptance modal and feedback configuration
 

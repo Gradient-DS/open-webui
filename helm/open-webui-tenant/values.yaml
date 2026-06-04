@@ -219,6 +219,15 @@ openWebui:
     # collections. Default off: HNSW for every collection. Flip to "true" if
     # Weaviate memory pressure returns (~8s per collection creation on flip-on).
     enableWeaviateBqQuantization: "false"
+    # Native multi-tenancy: route each KB/file/web-search/memory to a tenant in
+    # 5 fixed collections instead of one class each. Default off (legacy per-class
+    # connector). Flip to "true" per tenant AFTER its data is migrated (or with
+    # the legacy fallback on to cover the migration window).
+    enableWeaviateMultitenancyMode: "false"
+    # Dual-read fallback: when MT is on, read legacy per-class data if the tenant
+    # is empty. Keep "true" through migration; set "false" once migration is
+    # complete and verified for the tenant.
+    weaviateMtLegacyFallback: "true"
 
     # Database (PostgreSQL) - uses local PostgreSQL in tenant namespace
     databaseType: "postgresql"
@@ -322,9 +331,9 @@ openWebui:
     enableCodeExecution: "false"
     userPermissionsFeaturesCodeInterpreter: "false"
 
-    # Document Writer (disabled)
-    enableDocumentWriter: "false"
-    userPermissionsFeaturesDocumentWriter: "false"
+    # Document Writer
+    enableDocumentWriter: "true"
+    userPermissionsFeaturesDocumentWriter: "true"
 
     # DOCX export (chat / message / document Word downloads) — enabled by default;
     # set "false" per tenant to hide all .docx download buttons AND return 403

@@ -4,6 +4,7 @@ from open_webui.config import (
     VECTOR_DB,
     ENABLE_QDRANT_MULTITENANCY_MODE,
     ENABLE_MILVUS_MULTITENANCY_MODE,
+    ENABLE_WEAVIATE_MULTITENANCY_MODE,
 )
 
 
@@ -77,7 +78,12 @@ class Vector:
 
                 return Oracle23aiClient()
             case VectorType.WEAVIATE:
-                from open_webui.retrieval.vector.dbs.weaviate import WeaviateClient
+                if ENABLE_WEAVIATE_MULTITENANCY_MODE:
+                    from open_webui.retrieval.vector.dbs.weaviate_multitenancy import (
+                        WeaviateClient,
+                    )
+                else:
+                    from open_webui.retrieval.vector.dbs.weaviate import WeaviateClient
 
                 return WeaviateClient()
             case _:
