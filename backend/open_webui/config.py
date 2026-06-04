@@ -2668,6 +2668,14 @@ WEAVIATE_SKIP_INIT_CHECKS = os.environ.get('WEAVIATE_SKIP_INIT_CHECKS', 'false')
 # collections. Default off: HNSW for every collection. Flip on if Weaviate memory
 # pressure returns; the trade-off is ~8s per collection creation on flip-on.
 ENABLE_WEAVIATE_BQ_QUANTIZATION = os.environ.get('ENABLE_WEAVIATE_BQ_QUANTIZATION', 'false').lower() == 'true'
+# Native Weaviate multi-tenancy: route every OWUI logical collection into one of
+# five fixed schema collections as a tenant (one shard + vector index per tenant),
+# instead of one class per KB/file/web-search/memory. Default off — no behaviour
+# change until flipped. Wiring lives in the connector factory (Task P1-3).
+ENABLE_WEAVIATE_MULTITENANCY_MODE = os.environ.get('ENABLE_WEAVIATE_MULTITENANCY_MODE', 'false').lower() == 'true'
+# Dual-read fallback during the MT migration window: reads (and has_collection)
+# fall back to the legacy per-class data when the MT tenant is empty/absent.
+WEAVIATE_MT_LEGACY_FALLBACK = os.environ.get('WEAVIATE_MT_LEGACY_FALLBACK', 'true').lower() == 'true'
 
 # OpenSearch
 OPENSEARCH_URI = os.environ.get('OPENSEARCH_URI', 'https://localhost:9200')
