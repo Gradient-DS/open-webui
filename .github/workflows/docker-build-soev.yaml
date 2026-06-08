@@ -37,6 +37,12 @@ jobs:
         run: |
           echo "IMAGE_NAME=${IMAGE_NAME,,}" >>${GITHUB_ENV}
           echo "FULL_IMAGE_NAME=ghcr.io/${IMAGE_NAME,,}" >>${GITHUB_ENV}
+          if [ -n "${{ vars.HARBOR_REGISTRY }}" ]; then
+            echo "HARBOR_FULL_IMAGE_NAME=${{ vars.HARBOR_REGISTRY }}/${IMAGE_NAME,,}" >>${GITHUB_ENV}
+            echo "BUILD_OUTPUT_NAMES=ghcr.io/${IMAGE_NAME,,},${{ vars.HARBOR_REGISTRY }}/${IMAGE_NAME,,}" >>${GITHUB_ENV}
+          else
+            echo "BUILD_OUTPUT_NAMES=ghcr.io/${IMAGE_NAME,,}" >>${GITHUB_ENV}
+          fi
         env:
           IMAGE_NAME: '${{ github.repository }}'
 
@@ -60,6 +66,14 @@ jobs:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Log in to Harbor
+        if: vars.HARBOR_REGISTRY != ''
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ vars.HARBOR_REGISTRY }}
+          username: ${{ secrets.HARBOR_ROBOT_USER }}
+          password: ${{ secrets.HARBOR_ROBOT_TOKEN }}
 
       - name: Extract metadata for Docker images
         id: meta
@@ -95,7 +109,7 @@ jobs:
           push: true
           platforms: ${{ matrix.platform }}
           labels: ${{ steps.meta.outputs.labels }}
-          outputs: type=image,name=${{ env.FULL_IMAGE_NAME }},push-by-digest=true,name-canonical=true,push=true
+          outputs: type=image,"name=${{ env.BUILD_OUTPUT_NAMES }}",push-by-digest=true,name-canonical=true,push=true
           cache-from: type=registry,ref=${{ steps.cache-meta.outputs.tags }}
           cache-to: type=registry,ref=${{ steps.cache-meta.outputs.tags }},mode=max
           build-args: |
@@ -130,6 +144,9 @@ jobs:
         run: |
           echo "IMAGE_NAME=${IMAGE_NAME,,}" >>${GITHUB_ENV}
           echo "FULL_IMAGE_NAME=ghcr.io/${IMAGE_NAME,,}" >>${GITHUB_ENV}
+          if [ -n "${{ vars.HARBOR_REGISTRY }}" ]; then
+            echo "HARBOR_FULL_IMAGE_NAME=${{ vars.HARBOR_REGISTRY }}/${IMAGE_NAME,,}" >>${GITHUB_ENV}
+          fi
         env:
           IMAGE_NAME: '${{ github.repository }}'
 
@@ -150,11 +167,21 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Log in to Harbor
+        if: vars.HARBOR_REGISTRY != ''
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ vars.HARBOR_REGISTRY }}
+          username: ${{ secrets.HARBOR_ROBOT_USER }}
+          password: ${{ secrets.HARBOR_ROBOT_TOKEN }}
+
       - name: Extract metadata for Docker images
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ${{ env.FULL_IMAGE_NAME }}
+          images: |
+            ${{ env.FULL_IMAGE_NAME }}
+            ${{ env.HARBOR_FULL_IMAGE_NAME }}
           tags: |
             type=ref,event=branch
             type=sha,prefix=git-
@@ -164,11 +191,18 @@ jobs:
           flavor: |
             latest=false
 
-      - name: Create manifest list and push
+      - name: Create manifest list and push (GHCR)
         working-directory: /tmp/digests
         run: |
-          docker buildx imagetools create $(jq -cr '.tags | map("-t " + .) | join(" ")' <<< "$DOCKER_METADATA_OUTPUT_JSON") \
+          docker buildx imagetools create $(jq -cr '.tags | map(select(startswith("ghcr.io"))) | map("-t " + .) | join(" ")' <<< "$DOCKER_METADATA_OUTPUT_JSON") \
             $(printf '${{ env.FULL_IMAGE_NAME }}@sha256:%s ' *)
+
+      - name: Create manifest list and push (Harbor)
+        if: vars.HARBOR_REGISTRY != ''
+        working-directory: /tmp/digests
+        run: |
+          docker buildx imagetools create $(jq -cr --arg h "${{ vars.HARBOR_REGISTRY }}/" '.tags | map(select(startswith($h))) | map("-t " + .) | join(" ")' <<< "$DOCKER_METADATA_OUTPUT_JSON") \
+            $(printf '${{ env.HARBOR_FULL_IMAGE_NAME }}@sha256:%s ' *)
 
       - name: Inspect image
         run: |
@@ -193,6 +227,10 @@ jobs:
 
       - name: Login to GHCR
         run: echo "${{ secrets.GITHUB_TOKEN }}" | helm registry login ghcr.io -u ${{ github.actor }} --password-stdin
+
+      - name: Login to Harbor
+        if: vars.HARBOR_REGISTRY != ''
+        run: echo "${{ secrets.HARBOR_ROBOT_TOKEN }}" | helm registry login ${{ vars.HARBOR_REGISTRY }} -u "${{ secrets.HARBOR_ROBOT_USER }}" --password-stdin
 
       - name: Compute chart version
         id: version
@@ -230,3 +268,9 @@ jobs:
 
       - name: Push chart to GHCR
         run: helm push open-webui-tenant-${{ steps.version.outputs.version }}.tgz oci://ghcr.io/gradient-ds/charts
+
+      - name: Push chart to Harbor
+        if: vars.HARBOR_REGISTRY != ''
+        run: |
+          OWNER_LC=$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
+          helm push open-webui-tenant-${{ steps.version.outputs.version }}.tgz oci://${{ vars.HARBOR_REGISTRY }}/$OWNER_LC/charts
