@@ -3958,6 +3958,13 @@ async def streaming_chat_response_handler(response, ctx):
             message = await Chats.get_message_by_id_and_message_id(metadata['chat_id'], metadata['message_id'])
 
             tool_calls = []
+            # [Gradient] Track the final non-null finish_reason from the
+            # upstream stream. Used to skip the post-stream tool-execution
+            # loop when the upstream signaled completion ('stop') despite
+            # emitting intermediate delta.tool_calls chunks — e.g. agents
+            # that handle tools internally and emit tool_call chunks only
+            # to drive the inline <details type="tool_calls"> display.
+            last_finish_reason = None
 
             last_assistant_message = None
             try:
@@ -4032,6 +4039,7 @@ async def streaming_chat_response_handler(response, ctx):
                     nonlocal output
                     nonlocal prior_output
                     nonlocal last_response_id
+                    nonlocal last_finish_reason
 
                     response_tool_calls = []
 
@@ -4219,6 +4227,13 @@ async def streaming_chat_response_handler(response, ctx):
                                         continue
 
                                     delta = choices[0].get('delta', {})
+
+                                    # [Gradient] Capture finish_reason as it
+                                    # arrives so we can guard the post-stream
+                                    # tool-execution loop below.
+                                    chunk_finish_reason = choices[0].get('finish_reason')
+                                    if chunk_finish_reason:
+                                        last_finish_reason = chunk_finish_reason
 
                                     # Handle delta annotations
                                     annotations = delta.get('annotations')
@@ -4650,6 +4665,16 @@ async def streaming_chat_response_handler(response, ctx):
                     original_system_content = (
                         get_content_from_message(original_system_message) if original_system_message else None
                     )
+
+                # [Gradient] If the upstream stream ended with finish_reason='stop',
+                # the model has signaled it's done — do not run the tool loop even
+                # if intermediate delta.tool_calls chunks were accumulated. This
+                # matches the OpenAI Chat Completions spec (tools only run when the
+                # final finish_reason is 'tool_calls') and prevents the doubling
+                # bug where agents that handle tools internally still emit tool_call
+                # chunks for the inline display marker and OWUI re-runs them.
+                if last_finish_reason == 'stop' and tool_calls:
+                    tool_calls = []
 
                 while len(tool_calls) > 0 and tool_call_retries < CHAT_RESPONSE_MAX_TOOL_CALL_RETRIES:
                     tool_call_retries += 1
