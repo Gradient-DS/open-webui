@@ -253,7 +253,7 @@ jobs:
             # SemVer 2.0.0 prerelease IDs only allow [0-9A-Za-z-]; branch
             # names like feat/neo-filter would otherwise fail helm package.
             SAFE_REF=$(echo "${GITHUB_REF_NAME}" | tr '/' '-')
-            VERSION="${MAJOR_MINOR}.${{ github.run_number }}-${SAFE_REF}.${SHORT_SHA}"
+            VERSION="${MAJOR_MINOR}.${{ github.run_number }}-${SAFE_REF}.g${SHORT_SHA}"
           fi
           echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
           echo "Publishing chart version: ${VERSION}"
