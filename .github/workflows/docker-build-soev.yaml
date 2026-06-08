@@ -230,7 +230,10 @@ jobs:
 
       - name: Login to Harbor
         if: vars.HARBOR_REGISTRY != ''
-        run: echo "${{ secrets.HARBOR_ROBOT_TOKEN }}" | helm registry login ${{ vars.HARBOR_REGISTRY }} -u "${{ secrets.HARBOR_ROBOT_USER }}" --password-stdin
+        env:
+          HARBOR_ROBOT_USER: ${{ secrets.HARBOR_ROBOT_USER }}
+          HARBOR_ROBOT_TOKEN: ${{ secrets.HARBOR_ROBOT_TOKEN }}
+        run: echo "$HARBOR_ROBOT_TOKEN" | helm registry login ${{ vars.HARBOR_REGISTRY }} -u "$HARBOR_ROBOT_USER" --password-stdin
 
       - name: Compute chart version
         id: version
