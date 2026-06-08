@@ -139,7 +139,7 @@ RUN apt-get update && \
     apt-get install -y --no-install-recommends \
     git build-essential pandoc gcc netcat-openbsd curl jq \
     libmariadb-dev \
-    python3-dev \
+    python3-dev linux-libc-dev \
     ffmpeg libsm6 libxext6 zstd \
     libpango-1.0-0 libpangocairo-1.0-0 libgdk-pixbuf-2.0-0 libcairo2 libffi-dev \
     && rm -rf /var/lib/apt/lists/*
@@ -153,6 +153,7 @@ ENV UV_LINK_MODE=copy
 
 RUN set -e; \
     pip3 install --no-cache-dir uv; \
+    pip3 install --no-cache-dir --upgrade pip setuptools wheel; \
     if [ "$USE_SLIM" = "true" ]; then \
     # Slim build: no torch, no local ML models — uses external APIs only
     uv pip install --system -r requirements-slim.txt --no-cache-dir; \
