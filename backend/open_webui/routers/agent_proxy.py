@@ -238,6 +238,90 @@ async def _proxy_get_json(base_url: str, path: str) -> Any:
         await session.close()
 
 
+async def _proxy_post_sse(
+    base_url: str,
+    upstream_path: str,
+    payload: bytes,
+) -> StreamingResponse:
+    """POST ``payload`` to ``{base_url}{upstream_path}`` and stream the SSE body.
+
+    Common error envelopes (502 on connect/timeout/client error, upstream
+    status pass-through on >=400, JSON fallback when upstream is non-SSE).
+
+    Ownership: on the SSE path the open ``session`` and ``response`` are
+    handed to ``stream_wrapper``, which closes them when the client
+    disconnects. On every other exit path this helper closes the session
+    itself.
+    """
+    session = aiohttp.ClientSession(trust_env=True, timeout=AIOHTTP_CLIENT_TIMEOUT)
+    try:
+        try:
+            response = await session.request(
+                method='POST',
+                url=f'{base_url}{upstream_path}',
+                data=payload,
+                headers=_auth_headers({'Content-Type': 'application/json'}),
+            )
+        except aiohttp.ClientConnectorError as e:
+            await session.close()
+            raise HTTPException(
+                status_code=502,
+                detail=(
+                    f'Cannot reach the agent service at {base_url}{upstream_path}: {e}. '
+                    'Check AGENT_API_BASE_URL and that the agents-api pod is Running.'
+                ),
+            )
+        except asyncio.TimeoutError:
+            await session.close()
+            raise HTTPException(
+                status_code=502,
+                detail=(
+                    f'Timed out calling the agent service at {base_url}{upstream_path} '
+                    f'(>{int(AIOHTTP_CLIENT_TIMEOUT.total or 0)}s). The agent pod may be '
+                    'overloaded or unresponsive — check `kubectl logs` and pod readiness.'
+                ),
+            )
+        except aiohttp.ClientError as e:
+            await session.close()
+            raise HTTPException(
+                status_code=502,
+                detail=(f'Upstream agent service error on POST {upstream_path}: {type(e).__name__}: {e}'),
+            )
+
+        if response.status >= 400:
+            error_body = await response.text()
+            await session.close()
+            raise HTTPException(
+                status_code=response.status,
+                detail=(
+                    f'Agent service returned {response.status} on {upstream_path}. '
+                    f'Upstream body: {error_body[:1000] or "<empty>"}'
+                ),
+            )
+
+        content_type = response.headers.get('Content-Type', '')
+
+        if 'text/event-stream' in content_type:
+            return StreamingResponse(
+                stream_wrapper(response, session),
+                media_type='text/event-stream',
+            )
+
+        data = await response.json()
+        await session.close()
+        return data
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        await session.close()
+        log.exception('Agent proxy unexpected error on POST %s', upstream_path)
+        raise HTTPException(
+            status_code=502,
+            detail=f'Agent proxy unexpected error: {type(e).__name__}: {e}',
+        )
+
+
 @router.get('/models')
 async def list_models(request: Request, user=Depends(get_verified_user)):
     """Proxy GET /v1/models from the agent service."""
@@ -272,74 +356,7 @@ async def chat_completions(
     payload_dict.setdefault('user_id', user.id)
     payload = json.dumps(payload_dict).encode()
 
-    session = aiohttp.ClientSession(trust_env=True, timeout=AIOHTTP_CLIENT_TIMEOUT)
-    try:
-        try:
-            response = await session.request(
-                method='POST',
-                url=f'{base_url}/v1/chat/completions',
-                data=payload,
-                headers=_auth_headers({'Content-Type': 'application/json'}),
-            )
-        except aiohttp.ClientConnectorError as e:
-            await session.close()
-            raise HTTPException(
-                status_code=502,
-                detail=(
-                    f'Cannot reach the agent service at {base_url}/v1/chat/completions: {e}. '
-                    'Check AGENT_API_BASE_URL and that the agents-api pod is Running.'
-                ),
-            )
-        except asyncio.TimeoutError:
-            await session.close()
-            raise HTTPException(
-                status_code=502,
-                detail=(
-                    f'Timed out calling the agent service at {base_url}/v1/chat/completions '
-                    f'(>{int(AIOHTTP_CLIENT_TIMEOUT.total or 0)}s). Long agent runs '
-                    '(kb_summary on big collections) can exceed the proxy timeout — re-run '
-                    'with a smaller scope or raise the proxy timeout.'
-                ),
-            )
-        except aiohttp.ClientError as e:
-            await session.close()
-            raise HTTPException(
-                status_code=502,
-                detail=(f'Upstream agent service error on POST /v1/chat/completions: {type(e).__name__}: {e}'),
-            )
-
-        if response.status >= 400:
-            error_body = await response.text()
-            await session.close()
-            raise HTTPException(
-                status_code=response.status,
-                detail=(
-                    f'Agent service returned {response.status} on /v1/chat/completions. '
-                    f'Upstream body: {error_body[:1000] or "<empty>"}'
-                ),
-            )
-
-        content_type = response.headers.get('Content-Type', '')
-
-        if 'text/event-stream' in content_type:
-            return StreamingResponse(
-                stream_wrapper(response, session),
-                media_type='text/event-stream',
-            )
-        else:
-            data = await response.json()
-            await session.close()
-            return data
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        await session.close()
-        log.exception('Agent proxy unexpected error on /v1/chat/completions')
-        raise HTTPException(
-            status_code=502,
-            detail=f'Agent proxy unexpected error: {type(e).__name__}: {e}',
-        )
+    return await _proxy_post_sse(base_url, '/v1/chat/completions', payload)
 
 
 @router.get('/gradient_agent_meta')
