@@ -117,6 +117,22 @@ async def resolve_accessible_kbs(
     }
 
 
+async def resolve_accessible_kb(
+    user: UserModel,
+    *,
+    kb_id: str,
+) -> Optional[KnowledgeUserModel]:
+    """Single-KB form of :func:`resolve_accessible_kbs`; shares the same ACL.
+
+    Returns ``None`` if the KB does not exist, the user has no read access,
+    or the KB is suspended. Reusing ``_filter_to_accessible_kbs`` keeps the
+    file-listing endpoint's ACL from drifting away from the KB-listing one.
+    """
+
+    accessible = await _filter_to_accessible_kbs(user, kb_ids=[kb_id])
+    return accessible[0] if accessible else None
+
+
 async def run_agent_search(
     *,
     request,
