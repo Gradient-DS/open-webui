@@ -8,6 +8,7 @@ OWUI owns auth, the agent service owns inference.
 Endpoints:
     GET  /models           → agent /v1/models
     POST /chat/completions → agent /v1/chat/completions (streaming SSE)
+    POST /responses        → agent /v1/responses (streaming SSE)
     GET  /openapi.json     → agent /openapi.json
 """
 
@@ -78,6 +79,33 @@ class ChatCompletionsRequest(BaseModel):
     agent: Optional[str] = None
     chat_id: Optional[str] = None
     stream: Optional[bool] = None
+
+
+class ResponsesRequest(BaseModel):
+    """Body for ``POST /api/v1/agent/responses``.
+
+    [Gradient] Mirrors the upstream Responses spec (``soev_agents.service.routes.responses.ResponsesRequest``).
+    Fields are intentionally permissive: ``extra='allow'`` so spec
+    additions upstream don't require an OWUI release. Stays a lean
+    wrapper — no business logic; routing/auth only.
+    """
+
+    model_config = ConfigDict(extra='allow')
+
+    input: list[dict[str, Any]] | str
+    instructions: Optional[str] = None
+    model: Optional[str] = None
+    previous_response_id: Optional[str] = None
+    store: Optional[bool] = None
+    stream: Optional[bool] = None
+    tools: Optional[list[dict[str, Any]]] = None
+    tool_choice: Optional[str | dict[str, Any]] = None
+    temperature: Optional[float] = None
+    top_p: Optional[float] = None
+    max_output_tokens: Optional[int] = None
+    seed: Optional[int] = None
+    metadata: Optional[dict[str, Any]] = None
+    user: Optional[str] = None
 
 
 async def _find_kb_by_integration_source_id(provider: str, source_id: str):
@@ -357,6 +385,31 @@ async def chat_completions(
     payload = json.dumps(payload_dict).encode()
 
     return await _proxy_post_sse(base_url, '/v1/chat/completions', payload)
+
+
+@router.post('/responses')
+async def responses(
+    request: Request,
+    body: ResponsesRequest,
+    user=Depends(get_verified_user),
+):
+    """Proxy POST /v1/responses to the agent service with SSE pass-through.
+
+    [Gradient] Injects the verified user's UUID into ``body.user`` so the
+    agent service can set its acting-user ContextVar — same purpose as
+    the ``user_id`` injection on /chat/completions, just under the
+    Responses-spec field name.
+
+    No ``files[]`` translation: the Responses API has no ``files[]``
+    field. KB attachment in Responses is via the ``tools[]`` surface
+    (e.g. ``{"type": "file_search", "vector_store_ids": [...]}``) and
+    passes through unchanged.
+    """
+    base_url = _get_base_url(request)
+    payload_dict = body.model_dump(exclude_none=True)
+    payload_dict.setdefault('user', user.id)
+    payload = json.dumps(payload_dict).encode()
+    return await _proxy_post_sse(base_url, '/v1/responses', payload)
 
 
 @router.get('/gradient_agent_meta')
