@@ -471,6 +471,34 @@
 													})}' \
   {window.location.origin}/api/v1/agent/chat/completions</pre>
 											</div>
+
+											<div class="text-gray-500 text-xs whitespace-normal leading-relaxed">
+												<div class="mb-1">
+													{$i18n.t(
+														'Use /chat/completions for existing OpenAI-compatible integrations and files[]-based knowledge base attachment.'
+													)}
+												</div>
+												<div>
+													{$i18n.t(
+														'Use /responses for new integrations, multi-turn continuity via previous_response_id, and the broader Responses tool surface.'
+													)}
+												</div>
+											</div>
+
+											<div>
+												<div class="text-gray-500 mb-2">
+													{$i18n.t('Responses (streaming)')}
+												</div>
+												<pre class="whitespace-pre-wrap">curl -H "Authorization: Bearer sk-..." \
+  -H "Content-Type: application/json" \
+  -d '{JSON.stringify({
+														model: 'agent-name',
+														metadata: { agent: 'agent-name' },
+														input: 'Hello',
+														stream: true
+													})}' \
+  {window.location.origin}/api/v1/agent/responses</pre>
+											</div>
 										</div>
 									{/if}
 								</div>
