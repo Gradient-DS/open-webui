@@ -22,8 +22,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from open_webui.internal.db import get_async_session
 from open_webui.models.chats import Chats
 from open_webui.models.files import Files
+from open_webui.models.knowledge import Knowledges, KnowledgeFileListResponse
 from open_webui.routers.files import upload_file_handler
 from open_webui.services.retrieval.agent_search import (
+    resolve_accessible_kb,
     resolve_accessible_kbs,
     run_agent_search,
 )
@@ -163,6 +165,69 @@ async def list_accessible_files(
     return AccessibleFilesResponse(
         user_id=principal.user.id,
         file_ids=accessible,
+    )
+
+
+@router.get('/knowledge/{knowledge_id}/files', response_model=KnowledgeFileListResponse)
+async def list_knowledge_files(
+    knowledge_id: str,
+    request: Request,
+    query: Optional[str] = None,
+    limit: int = Query(1000, ge=1, le=2000),
+    offset: int = Query(0, ge=0),
+    principal: AgentPrincipal = Depends(get_agent_principal),
+    db: AsyncSession = Depends(get_async_session),
+) -> KnowledgeFileListResponse:
+    """List files in a knowledge base for the acting user.
+
+    Agent-bearer counterpart to ``GET /api/v1/knowledge/{id}/files`` (which
+    is session-cookie-gated and therefore unreachable from external agents
+    that only hold the shared agent bearer). Same listing payload — both
+    routes ultimately go through :meth:`Knowledges.search_files_by_id` — but
+    auth is agent bearer + ``X-Acting-User-Id`` and the ACL skips the admin
+    cross-user shortcut (tenant-isolated agents do not get that cone).
+
+    Used by soev-agents' ``OwuiKnowledgeFilesClient`` (the source of truth
+    for ``list_documents`` / ``find_documents`` in the OpenWebUI retrieval
+    provider). Returns the same ``{items, total}`` shape that client expects.
+    """
+
+    if not getattr(request.app.state.config, 'AGENT_SEARCH_ENABLED', False):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail='agent search not enabled',
+        )
+
+    kb = await resolve_accessible_kb(principal.user, kb_id=knowledge_id)
+    if kb is None:
+        # 404 (not 403): does not leak existence of a forbidden KB to a
+        # caller acting on behalf of a user who cannot see it.
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"knowledge '{knowledge_id}' not found or not accessible",
+        )
+
+    filter_dict: dict = {}
+    if query:
+        filter_dict['query'] = query
+
+    log.info(
+        'agent_knowledge_files: agent=%s acting_user=%s kb=%s has_query=%s limit=%d offset=%d',
+        principal.agent_id,
+        principal.user.id,
+        knowledge_id,
+        bool(query),
+        limit,
+        offset,
+    )
+
+    return await Knowledges.search_files_by_id(
+        knowledge_id,
+        principal.user.id,
+        filter=filter_dict,
+        skip=offset,
+        limit=limit,
+        db=db,
     )
 
 
