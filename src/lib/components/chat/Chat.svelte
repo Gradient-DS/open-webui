@@ -327,7 +327,6 @@
 			return;
 		}
 		sessionStorage.selectedModels = selectedModelsString;
-		console.log('saveSessionSelectedModels', selectedModels, sessionStorage.selectedModels);
 	};
 
 	let oldSelectedModelIds = [''];
@@ -536,8 +535,6 @@
 	};
 
 	const chatEventHandler = async (event, cb) => {
-		console.log(event);
-
 		if (event.chat_id === $chatId) {
 			await tick();
 			let message = history.messages[event.message_id];
@@ -742,8 +739,6 @@
 					eventConfirmationInputType = data?.type ?? '';
 				} else if (type.startsWith('terminal:')) {
 					terminalEventHandler(type, data);
-				} else {
-					console.log('Unknown message type', data);
 				}
 
 				history.messages[event.message_id] = message;
@@ -842,7 +837,6 @@
 
 	onMount(() => {
 		loading = true;
-		console.log('mounted');
 		window.addEventListener('message', onMessageHandler);
 		$socket?.on('events', chatEventHandler);
 		$socket?.on('file:status', fileStatusHandler);
@@ -909,8 +903,6 @@
 			await tick();
 			if (folder?.data?.model_ids && !equal(selectedModels, folder.data.model_ids)) {
 				selectedModels = folder.data.model_ids;
-
-				console.log('Set selectedModels from folder data:', selectedModels);
 			}
 		});
 
@@ -989,15 +981,6 @@
 	// File upload functions
 
 	const uploadGoogleDriveFile = async (fileData) => {
-		console.log('Starting uploadGoogleDriveFile with:', {
-			id: fileData.id,
-			name: fileData.name,
-			url: fileData.url,
-			headers: {
-				Authorization: `Bearer ${token}`
-			}
-		});
-
 		// Validate input
 		if (!fileData?.id || !fileData?.name || !fileData?.url || !fileData?.headers?.Authorization) {
 			throw new Error('Invalid file data provided');
@@ -1019,7 +1002,6 @@
 
 		try {
 			files = [...files, fileItem];
-			console.log('Processing web file with URL:', fileData.url);
 
 			// Configure fetch options with proper headers
 			const fetchOptions = {
@@ -1031,7 +1013,6 @@
 			};
 
 			// Attempt to fetch the file
-			console.log('Fetching file content from Google Drive...');
 			const fileResponse = await fetch(fileData.url, fetchOptions);
 
 			if (!fileResponse.ok) {
@@ -1041,30 +1022,17 @@
 
 			// Get content type from response
 			const contentType = fileResponse.headers.get('content-type') || 'application/octet-stream';
-			console.log('Response received with content-type:', contentType);
 
 			// Convert response to blob
-			console.log('Converting response to blob...');
 			const fileBlob = await fileResponse.blob();
 
 			if (fileBlob.size === 0) {
 				throw new Error('Retrieved file is empty');
 			}
 
-			console.log('Blob created:', {
-				size: fileBlob.size,
-				type: fileBlob.type || contentType
-			});
-
 			// Create File object with proper MIME type
 			const file = new File([fileBlob], fileData.name, {
 				type: fileBlob.type || contentType
-			});
-
-			console.log('File object created:', {
-				name: file.name,
-				size: file.size,
-				type: file.type
 			});
 
 			if (file.size === 0) {
@@ -1083,14 +1051,11 @@
 			}
 
 			// Upload file to server
-			console.log('Uploading file to server...');
 			const uploadedFile = await uploadFile(localStorage.token, file, metadata);
 
 			if (!uploadedFile) {
 				throw new Error('Server returned null response for file upload');
 			}
-
-			console.log('File uploaded successfully:', uploadedFile);
 
 			// Update file item with upload results
 			fileItem.status = 'uploaded';
@@ -1310,7 +1275,6 @@
 	//////////////////////////
 
 	const initNewChat = async () => {
-		console.log('initNewChat');
 		// [Gradient] Reset the loaded chat so stale meta (e.g. agent_id from
 		// the previous chat) doesn't bleed into the empty-state Navbar.
 		chat = null;
@@ -1574,8 +1538,6 @@
 			const chatContent = chat.chat;
 
 			if (chatContent) {
-				console.log(chatContent);
-
 				selectedModels =
 					(chatContent?.models ?? undefined) !== undefined
 						? chatContent.models
@@ -1972,7 +1934,7 @@
 				// Stream response
 				let value = choices[0]?.delta?.content ?? '';
 				if (message.content == '' && value == '\n') {
-					console.log('Empty response');
+					// Ignore a bare leading newline so an empty response stays empty
 				} else {
 					message.content += value;
 
@@ -2110,7 +2072,6 @@
 			await processNextInQueue(chatId);
 		}
 
-		console.log(data);
 		await tick();
 
 		if (autoScroll) {
@@ -2132,7 +2093,6 @@
 			dataWarningCallback = null;
 		}
 
-		console.log('[DataWarnings] config features:', $config?.features);
 		if (!$config?.features?.enable_data_warnings) return true;
 
 		// Collect all unacknowledged warnings across selected models
@@ -2147,7 +2107,6 @@
 			const model = $models.find((m) => m.id === modelId);
 			if (!model) continue;
 
-			console.log('[DataWarnings] model info:', modelId, model.info?.meta);
 			const warnings = model.info?.meta?.data_warnings;
 			if (!warnings) continue;
 
@@ -2237,8 +2196,6 @@
 	// reference `submitHandler` by name (9 of them across this file). Aliasing
 	// keeps both names live without rewriting every call site.
 	const submitPrompt = async (userPrompt, { _raw = false } = {}) => {
-		console.log('submitPrompt', userPrompt, $chatId);
-
 		const _selectedModels = selectedModels.map((modelId) =>
 			$models.map((m) => m.id).includes(modelId) ? modelId : ''
 		);
@@ -2845,7 +2802,7 @@
 			},
 			`${WEBUI_BASE_URL}/api`
 		).catch(async (error) => {
-			console.log(error);
+			console.error(error);
 
 			let errorMessage = error;
 			if (error?.error?.message) {
@@ -3037,8 +2994,6 @@
 	};
 
 	const regenerateResponse = async (message, suggestionPrompt = null) => {
-		console.log('regenerateResponse');
-
 		if (history.currentId) {
 			let userMessage = history.messages[message.parentId];
 
@@ -3070,7 +3025,6 @@
 	};
 
 	const continueResponse = async () => {
-		console.log('continueResponse');
 		const _chatId = JSON.parse(JSON.stringify($chatId));
 
 		if (history.currentId && history.messages[history.currentId].done == true) {
@@ -3096,7 +3050,6 @@
 	};
 
 	const mergeResponses = async (messageId, responses, _chatId) => {
-		console.log('mergeResponses', messageId, responses);
 		const message = history.messages[messageId];
 		const mergedResponse = {
 			status: true,
@@ -3184,8 +3137,8 @@
 
 			await tick();
 
-			await chats.set(await getChatList(localStorage.token, $currentChatPage));
 			currentChatPage.set(1);
+			await chats.set(await getChatList(localStorage.token, $currentChatPage));
 
 			selectedFolder.set(null);
 		} else {
@@ -3480,6 +3433,7 @@
 								if (savedChat) {
 									temporaryChatEnabled.set(false);
 									chatId.set(savedChat.id);
+									currentChatPage.set(1);
 									chats.set(await getChatList(localStorage.token, $currentChatPage));
 
 									await goto(`/c/${savedChat.id}`);
