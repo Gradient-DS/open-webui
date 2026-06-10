@@ -41,6 +41,7 @@
 		removeAllDetails
 	} from '$lib/utils';
 	import { isFeatureEnabled } from '$lib/utils/features';
+	import { extractCitedNs } from '$lib/utils/citations';
 	import { WEBUI_API_BASE_URL, WEBUI_BASE_URL } from '$lib/constants';
 	import equal from 'fast-deep-equal';
 
@@ -1080,7 +1081,7 @@
 									id={message?.id}
 									{chatId}
 									sources={message?.sources ?? message?.citations}
-									panelFilter={message?.panel_filter ?? null}
+									citedNs={extractCitedNs(message?.content ?? '')}
 									messageDone={message?.done ?? false}
 									{readOnly}
 								/>

@@ -14,6 +14,7 @@
 		showEmbeds
 	} from '$lib/stores';
 	import { isFeatureEnabled } from '$lib/utils/features';
+	import { buildTaggedSourceNames, hasTaggedSources } from '$lib/utils/citations';
 	import FloatingButtons from '../ContentRenderer/FloatingButtons.svelte';
 	import { createMessagesList } from '$lib/utils';
 
@@ -126,6 +127,15 @@
 	}
 
 	const getSourceIds = (sources) => {
+		// [Gradient] Identity-tagged sources (agent service): the chip
+		// renderer resolves `sourceIds[N - 1]`, so an array indexed by the
+		// cumulative id `n` keys that lookup by identity instead of by the
+		// deduped append order — chips stay correct across re-dispatches
+		// and cross-turn cites.
+		if (model?.info?.meta?.capabilities?.citations != false && hasTaggedSources(sources ?? [])) {
+			sourceIds = buildTaggedSourceNames(sources ?? []);
+			return;
+		}
 		const result = [];
 		for (const source of sources ?? []) {
 			for (let index = 0; index < (source.document ?? []).length; index++) {

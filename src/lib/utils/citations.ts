@@ -166,6 +166,94 @@ export function buildFullSourceList(sources: any[]): SourceInfo[] {
 }
 
 /**
+ * [Gradient] Citation-identity helpers for the derived source panel.
+ *
+ * The agent service tags every `event: source` payload with its
+ * cumulative `[N]` id (`n`) and turn provenance (`current_turn`). The
+ * frontend derives the per-message panel from those fields plus the
+ * `[N]` markers in the message content — chips and panel read the same
+ * markers and the same source identities, so they cannot disagree.
+ * Sources without `n` (vanilla OWUI RAG, third-party providers) keep
+ * the legacy append/show-all path.
+ */
+
+/** A source payload is "tagged" when it carries a positive cumulative id. */
+function isTaggedSource(source: any): boolean {
+	return typeof source?.n === 'number' && source.n > 0;
+}
+
+/** Whether any source in the message carries citation identity. */
+export function hasTaggedSources(sources: any[]): boolean {
+	return (sources ?? []).some(isTaggedSource);
+}
+
+/**
+ * Extract the set of cumulative `[N]` ids cited inline in `content`.
+ *
+ * Recognizes the same marker forms the chip renderer parses (see
+ * CITATION_RE / citation-extension.ts): `[1]`, `[1, 2]`, `[4#suffix]`,
+ * `【3】`, `【3†L1-L4】`.
+ */
+export function extractCitedNs(content: string): Set<number> {
+	const cited = new Set<number>();
+	if (!content) return cited;
+	const scanRe = new RegExp(CITATION_RE.source, 'g');
+	let m: RegExpExecArray | null;
+	while ((m = scanRe.exec(content))) {
+		const group = m[1] ?? m[2];
+		if (!group) continue;
+		for (const n of parseCitationGroup(group)) {
+			cited.add(n);
+		}
+	}
+	return cited;
+}
+
+/**
+ * Derive the sources that belong in this message's bottom panel.
+ *
+ * Tagged sources show when retrieved by a tool this turn
+ * (`current_turn`) or cited inline (`n` ∈ `citedNs`). Untagged sources
+ * always show: when the whole message is untagged this is the legacy
+ * show-all behavior, and in a mixed message they sit outside the
+ * identity scheme so hiding them would silently drop citations.
+ */
+export function deriveVisibleSources(sources: any[], citedNs: Set<number>): any[] {
+	return (sources ?? []).filter(
+		(s) => !isTaggedSource(s) || s.current_turn === true || citedNs.has(s.n)
+	);
+}
+
+/**
+ * Build the chip display-name array for a tagged message, indexed by
+ * cumulative id: position `n - 1` holds the source's display name.
+ *
+ * The inline chip renderer resolves `sourceIds[N - 1]`; for tagged
+ * sources this array keys that lookup by identity instead of by the
+ * deduped append order, so chips stay correct across re-dispatches and
+ * cross-turn cites. Naming mirrors the legacy dense path: chunk
+ * metadata name, else URL id, else the source object's name.
+ */
+export function buildTaggedSourceNames(sources: any[]): string[] {
+	const names: string[] = [];
+	for (const source of sources ?? []) {
+		if (!isTaggedSource(source)) continue;
+		const metadata = source?.metadata?.[0];
+		const id: string = String(metadata?.source ?? source?.source?.id ?? 'N/A');
+		let name: string;
+		if (metadata?.name) {
+			name = metadata.name;
+		} else if (id.startsWith('http://') || id.startsWith('https://')) {
+			name = id;
+		} else {
+			name = source?.source?.name ?? id;
+		}
+		names[source.n - 1] = name;
+	}
+	return names;
+}
+
+/**
  * Format source list as markdown for plain text clipboard.
  */
 export function formatSourcesAsMarkdown(sources: SourceInfo[]): string {

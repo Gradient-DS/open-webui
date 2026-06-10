@@ -4,6 +4,7 @@
 
 	import CitationModal from './Citations/CitationModal.svelte';
 	import { reduceSources } from './Citations/reduceSources';
+	import { deriveVisibleSources, hasTaggedSources } from '$lib/utils/citations';
 
 	const i18n = getContext('i18n');
 
@@ -13,27 +14,19 @@
 	export let sources = [];
 	export let readOnly = false;
 	/**
-	 * [Gradient] Cumulative `[N]` ids that should appear in the bottom panel
-	 * for this message. The agent service dispatches this alongside the
-	 * cumulative `sources` list so the panel can scope per-message while the
-	 * inline `[N]` lookup keeps working across cross-turn cites.
-	 *
-	 * `null` (the default) means "show everything" — keeps back-compat for
-	 * older messages and for upstream providers that don't dispatch the
-	 * `panel_filter` event.
+	 * [Gradient] Cumulative `[N]` ids cited inline in this message's content,
+	 * computed by the parent (which owns the content) via `extractCitedNs`.
+	 * For identity-tagged sources the bottom panel derives as
+	 * "retrieved this turn (`current_turn`) ∪ cited inline (`n` ∈ citedNs)" —
+	 * the same markers the chips read, so panel and chips cannot disagree.
+	 * Ignored for untagged sources (vanilla show-all path).
 	 */
-	export let panelFilter: number[] | null = null;
+	export let citedNs: Set<number> | null = null;
 	/**
-	 * [Gradient] Whether the parent message has finished streaming. Used to
-	 * suppress the bottom pill until the agent's final `panel_filter` is
-	 * in. Intermediate dispatches (one after every tool iteration) carry
-	 * the full "retrieved so far" set, so a web-search turn briefly shows
-	 * the entire result corpus (e.g. 19 hits) before the post-answer
-	 * dispatch narrows it to what the LLM actually cited (e.g. 7). The
-	 * final panel_filter arrives right after the answer text finishes
-	 * streaming — effectively the same moment as `done` flipping true —
-	 * so gating on done avoids the flash without delaying anything that
-	 * was stable mid-stream.
+	 * [Gradient] Whether the parent message has finished streaming. Gates the
+	 * bottom pill for UNTAGGED sources only (vanilla path, where mid-stream
+	 * source sets can be unstable). Tagged sources render progressively —
+	 * `current_turn` provenance makes mid-stream panels already correct.
 	 *
 	 * Defaults to `true` so non-streaming callers (e.g. `Document.svelte`)
 	 * keep their previous behavior without opting in.
@@ -132,21 +125,16 @@
 		showPercentage = shouldShowPercentage(citations);
 	}
 
-	// [Gradient] Filter to the per-message panel scope. `idx + 1` is the
-	// citation's cumulative `[N]` (its 1-based position in the dense
-	// `sources` array the inline render uses). When `panelFilter` is set
-	// we keep only those positions; when it's `null` we show everything.
-	// The filter does NOT touch the underlying `citations` array — inline
-	// `[N]` clicks still resolve via `showSourceModal(N)` against the
-	// cumulative list.
-	$: {
-		if (panelFilter == null) {
-			visibleCitations = citations;
-		} else {
-			const allowed = new Set(panelFilter);
-			visibleCitations = citations.filter((_, idx) => allowed.has(idx + 1));
-		}
-	}
+	// [Gradient] Derive the per-message panel scope from citation identity.
+	// Tagged sources (agent service, `n` > 0) show when retrieved this turn
+	// or cited inline; untagged sources show unconditionally (vanilla
+	// show-all path). The derivation does NOT touch the underlying
+	// `citations` array — inline `[N]` clicks still resolve via
+	// `showSourceModal(N)` against the cumulative list.
+	$: tagged = hasTaggedSources(sources);
+	$: visibleCitations = tagged
+		? reduceSources(deriveVisibleSources(sources, citedNs ?? new Set()))
+		: citations;
 
 	const decodeString = (str: string) => {
 		try {
@@ -164,7 +152,7 @@
 	showRelevance={citationRelevanceEnabled && showRelevance}
 />
 
-{#if visibleCitations.length > 0 && messageDone}
+{#if visibleCitations.length > 0 && (messageDone || tagged)}
 	{@const urlCitations = visibleCitations.filter((c) =>
 		c?.source?.name?.startsWith('http')
 	)}
