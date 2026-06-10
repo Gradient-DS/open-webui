@@ -9,6 +9,19 @@ const INNER_GROUP_SOURCE = '(?:\\[([^\\]]+)\\]|【([\\d,\\s]+)(?:†[^】]*)?】
 function parseCitationGroups(raw: string): { ids: number[]; citationIdentifiers: string[] } {
 	const ids: number[] = [];
 	const citationIdentifiers: string[] = [];
+	// [Gradient] Dedupe repeated identifiers within one run. Models cite
+	// the same source several times with per-chunk metadata (e.g.
+	// 【4†L1-L4】【4†L83-L86】); the metadata is dropped here, so without
+	// dedup the duplicates render as a misleading "+N more sources" group
+	// pointing at a single document. Distinct `#suffix` identifiers are
+	// kept — they target different anchors in the same source.
+	const seenIdentifiers = new Set<string>();
+	const push = (index: number, identifier: string) => {
+		if (seenIdentifiers.has(identifier)) return;
+		seenIdentifiers.add(identifier);
+		ids.push(index);
+		citationIdentifiers.push(identifier);
+	};
 	const groupRegex = new RegExp(INNER_GROUP_SOURCE, 'g');
 	let m: RegExpExecArray | null;
 
@@ -21,8 +34,7 @@ function parseCitationGroups(raw: string): { ids: number[]; citationIdentifiers:
 				if (match) {
 					const index = parseInt(match[1], 10);
 					if (!isNaN(index)) {
-						ids.push(index);
-						citationIdentifiers.push(part);
+						push(index, part);
 					}
 				}
 			});
@@ -33,8 +45,7 @@ function parseCitationGroups(raw: string): { ids: number[]; citationIdentifiers:
 				.map((n) => parseInt(n.trim(), 10))
 				.filter((n) => !isNaN(n));
 			parsed.forEach((index) => {
-				ids.push(index);
-				citationIdentifiers.push(String(index));
+				push(index, String(index));
 			});
 		}
 	}
