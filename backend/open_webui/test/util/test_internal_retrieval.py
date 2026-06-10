@@ -351,6 +351,164 @@ def test_accessible_files_requires_agent_search_enabled(monkeypatch, fake_princi
     assert resp.status_code == 404
 
 
+# ---------- /knowledge/{id}/files ---------------------------------------------------
+
+
+def _accessible_kb_stub(kb_id: str):
+    return SimpleNamespace(
+        id=kb_id,
+        user_id='user-uuid-1',
+        name='Test KB',
+        description='',
+    )
+
+
+def test_knowledge_files_returns_payload_when_accessible(monkeypatch, fake_principal):
+    app = _build_app(fake_principal=fake_principal)
+
+    seen = {}
+
+    async def fake_resolve(user, *, kb_id):
+        seen['resolve_user_id'] = user.id
+        seen['resolve_kb_id'] = kb_id
+        return _accessible_kb_stub(kb_id)
+
+    async def fake_search_files(knowledge_id, user_id, *, filter, skip, limit, db=None):
+        seen['search_kb_id'] = knowledge_id
+        seen['search_user_id'] = user_id
+        seen['search_filter'] = filter
+        seen['search_skip'] = skip
+        seen['search_limit'] = limit
+        return SimpleNamespace(
+            items=[
+                {
+                    'id': 'file-1',
+                    'filename': 'hello.md',
+                    'meta': {'content_type': 'text/markdown'},
+                    'created_at': 1700000000,
+                    'user_id': user_id,
+                    'updated_at': 1700000000,
+                    'hash': 'h',
+                    'data': None,
+                    'path': None,
+                    'access_control': None,
+                }
+            ],
+            total=1,
+        )
+
+    monkeypatch.setattr(internal_retrieval_router, 'resolve_accessible_kb', fake_resolve)
+    monkeypatch.setattr(
+        internal_retrieval_router.Knowledges,
+        'search_files_by_id',
+        fake_search_files,
+    )
+
+    client = TestClient(app)
+    resp = client.get('/api/v1/internal/retrieval/knowledge/kb-shared/files')
+
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body['total'] == 1
+    assert body['items'][0]['id'] == 'file-1'
+    assert body['items'][0]['filename'] == 'hello.md'
+    assert seen == {
+        'resolve_user_id': fake_principal.user.id,
+        'resolve_kb_id': 'kb-shared',
+        'search_kb_id': 'kb-shared',
+        'search_user_id': fake_principal.user.id,
+        'search_filter': {},
+        'search_skip': 0,
+        'search_limit': 1000,
+    }
+
+
+def test_knowledge_files_passes_query_and_pagination(monkeypatch, fake_principal):
+    app = _build_app(fake_principal=fake_principal)
+
+    seen = {}
+
+    async def fake_resolve(user, *, kb_id):
+        return _accessible_kb_stub(kb_id)
+
+    async def fake_search_files(knowledge_id, user_id, *, filter, skip, limit, db=None):
+        seen['filter'] = filter
+        seen['skip'] = skip
+        seen['limit'] = limit
+        return SimpleNamespace(items=[], total=0)
+
+    monkeypatch.setattr(internal_retrieval_router, 'resolve_accessible_kb', fake_resolve)
+    monkeypatch.setattr(
+        internal_retrieval_router.Knowledges,
+        'search_files_by_id',
+        fake_search_files,
+    )
+
+    client = TestClient(app)
+    resp = client.get(
+        '/api/v1/internal/retrieval/knowledge/kb-shared/files',
+        params={'query': 'invoice', 'limit': 50, 'offset': 100},
+    )
+
+    assert resp.status_code == 200
+    assert seen == {'filter': {'query': 'invoice'}, 'skip': 100, 'limit': 50}
+
+
+def test_knowledge_files_returns_404_when_inaccessible(monkeypatch, fake_principal):
+    app = _build_app(fake_principal=fake_principal)
+
+    async def fake_resolve(user, *, kb_id):
+        return None
+
+    monkeypatch.setattr(internal_retrieval_router, 'resolve_accessible_kb', fake_resolve)
+    monkeypatch.setattr(
+        internal_retrieval_router.Knowledges,
+        'search_files_by_id',
+        AsyncMock(side_effect=AssertionError('should not run when ACL fails')),
+    )
+
+    client = TestClient(app)
+    resp = client.get('/api/v1/internal/retrieval/knowledge/kb-forbidden/files')
+
+    assert resp.status_code == 404
+    assert 'not found or not accessible' in resp.json()['detail']
+
+
+def test_knowledge_files_returns_404_when_feature_flag_disabled(monkeypatch, fake_principal):
+    app = _build_app(fake_principal=fake_principal, agent_search_enabled=False)
+
+    monkeypatch.setattr(
+        internal_retrieval_router,
+        'resolve_accessible_kb',
+        AsyncMock(side_effect=AssertionError('should not run when disabled')),
+    )
+
+    client = TestClient(app)
+    resp = client.get('/api/v1/internal/retrieval/knowledge/kb-shared/files')
+    assert resp.status_code == 404
+
+
+def test_knowledge_files_admin_does_not_bypass(monkeypatch):
+    """Admin role does NOT grant access via this route; resolve_accessible_kb is
+    the only check, mirroring the no-admin-shortcut posture on /accessible-files."""
+    admin_principal = _admin_principal()
+    app = _build_app(fake_principal=admin_principal)
+
+    async def fake_resolve(user, *, kb_id):
+        return None
+
+    monkeypatch.setattr(internal_retrieval_router, 'resolve_accessible_kb', fake_resolve)
+    monkeypatch.setattr(
+        internal_retrieval_router.Knowledges,
+        'search_files_by_id',
+        AsyncMock(side_effect=AssertionError('should not run when ACL fails')),
+    )
+
+    client = TestClient(app)
+    resp = client.get('/api/v1/internal/retrieval/knowledge/kb-private/files')
+    assert resp.status_code == 404
+
+
 # ---------- /files/{id}/content tightening ------------------------------------------
 
 
