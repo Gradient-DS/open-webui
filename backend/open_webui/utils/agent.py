@@ -22,7 +22,12 @@ SSE protocol from agent:
         data: {"description": "Searching...", "done": false}
 
         event: source
-        data: {"name": "doc.pdf", "url": "..."}
+        data: {"source": {...}, "document": [...], "metadata": [...],
+               "n": 7, "current_turn": true}
+        (``n`` / ``current_turn`` are citation-identity fields present
+        for tagged agent citations; the payload is forwarded verbatim
+        and the frontend derives the per-message source panel from
+        them. Vanilla sources without ``n`` use the legacy path.)
 
         event: present_ui
         data: {"name": "choice", "props": {...}}
@@ -517,26 +522,6 @@ def _build_streaming_response(
                             )
                         except Exception as e:
                             log.warning(f'Error emitting context_usage event: {e}')
-                    continue
-
-                if sse_event.event_type == 'panel_filter':
-                    # [Gradient] Per-message citation-panel scope. Payload
-                    # shape: {"ns": [int, ...]} naming the cumulative source
-                    # ids that should appear in the chip list for THIS
-                    # message. The backend keeps dispatching `source` events
-                    # cumulatively so inline `[N]` tokens resolve via the
-                    # dense-array lookup across cross-turn cites; this event
-                    # prevents the rendered chip list from accumulating.
-                    if event_emitter:
-                        try:
-                            await event_emitter(
-                                {
-                                    'type': 'panel_filter',
-                                    'data': sse_event.data,
-                                }
-                            )
-                        except Exception as e:
-                            log.warning(f'Error emitting panel_filter event: {e}')
                     continue
 
                 # Standard OpenAI chunk — pass through as SSE data line
