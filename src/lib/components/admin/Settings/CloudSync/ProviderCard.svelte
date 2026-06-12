@@ -93,9 +93,11 @@
 		/>
 	</button>
 
-	{#if expanded}
-		<div class="px-3.5 pb-4 pt-1">
-			<slot />
-		</div>
-	{/if}
+	<!-- Body is always mounted (gated with `hidden`, not `{#if}`) so slotted
+	     section components keep their instance bindings and any open modals
+	     while the card is collapsed — the orchestrator drives every section's
+	     load/persist regardless of which card is expanded. -->
+	<div class="px-3.5 pb-4 pt-1 {expanded ? '' : 'hidden'}">
+		<slot />
+	</div>
 </div>

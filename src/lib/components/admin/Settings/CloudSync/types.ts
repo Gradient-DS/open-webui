@@ -1,10 +1,10 @@
 // Shared types for the descriptor-driven Cloud Sync admin panel.
 //
-// Phase 1.2: the building blocks (ProviderCard, SyncSettingsSection,
-// SharedKbSection) and the orchestrator (Phase 1.3) consume these. The
-// monolith `CloudSync.svelte` keeps its own inline copies of the config
-// response shapes for now — these are the canonical versions the new
-// components import.
+// The building blocks (ProviderCard, SyncSettingsSection, SharedKbSection),
+// the per-provider section components (Confluence/GoogleDrive/OneDrive) and the
+// CloudSync.svelte orchestrator all consume these. These are the canonical
+// config-response shapes — the former monolith's inline copies were removed in
+// the Phase 1.3 rewrite.
 
 import type { ComponentType, SvelteComponent } from 'svelte';
 
@@ -64,8 +64,8 @@ export interface CloudSyncProviderStatus {
 export type CloudSyncStatusResponse = Record<string, CloudSyncProviderStatus>;
 
 // ─────────────────────────────────────────────────────────────────────
-// Provider config response shapes — mirror the inline copies in the
-// monolith `CloudSync.svelte` and the `/configs/{provider}` GET payloads.
+// Provider config response shapes — mirror the `/configs/{provider}` GET
+// payloads. Consumed by the per-provider section components.
 // ─────────────────────────────────────────────────────────────────────
 
 export interface ConfluenceConfigResponse {
