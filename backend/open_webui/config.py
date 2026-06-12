@@ -3267,8 +3267,9 @@ TOPDESK_URL = PersistentConfig(
 #   - username set   → HTTP Basic, ``Authorization: Basic base64(username:app_password)``
 #   - username empty → person-token form, ``Authorization: TOKEN id="<app_password>"``
 # The recommended setup is an operator + application password (so a username is
-# present and Basic auth is used). The app password is never returned masked by
-# the config API — same disclosure profile as the Confluence basic-auth token.
+# present and Basic auth is used). The app password is returned in full
+# (unmasked) by the admin-only config API and masked client-side via
+# SensitiveInput — same disclosure profile as the Confluence basic-auth token.
 TOPDESK_USERNAME = PersistentConfig(
     'TOPDESK_USERNAME',
     'topdesk.username',
