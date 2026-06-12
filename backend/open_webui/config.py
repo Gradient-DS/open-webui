@@ -3241,6 +3241,69 @@ CONFLUENCE_KB_MODE = PersistentConfig(
 # scheduler resolves the sync token from ``kb.user_id``.
 
 
+# If configured, TOPdesk will be available as a knowledge-base sync source
+# (Knowledge Base GraphQL API). A single service credential is used for all
+# TOPdesk sync against one tenant; admin-editable via the Cloud Sync tab.
+ENABLE_TOPDESK_INTEGRATION = PersistentConfig(
+    'ENABLE_TOPDESK_INTEGRATION',
+    'topdesk.enable',
+    os.getenv('ENABLE_TOPDESK_INTEGRATION', 'False').lower() == 'true',
+)
+
+ENABLE_TOPDESK_SYNC = PersistentConfig(
+    'ENABLE_TOPDESK_SYNC',
+    'topdesk.enable_sync',
+    os.getenv('ENABLE_TOPDESK_SYNC', 'False').lower() == 'true',
+)
+
+# TOPdesk tenant base URL, e.g. https://your-tenant.topdesk.net — required.
+TOPDESK_URL = PersistentConfig(
+    'TOPDESK_URL',
+    'topdesk.url',
+    os.environ.get('TOPDESK_URL', ''),
+)
+
+# Service credential. Auth-header semantics depend on whether a username is set:
+#   - username set   → HTTP Basic, ``Authorization: Basic base64(username:app_password)``
+#   - username empty → person-token form, ``Authorization: TOKEN id="<app_password>"``
+# The recommended setup is an operator + application password (so a username is
+# present and Basic auth is used). The app password is never returned masked by
+# the config API — same disclosure profile as the Confluence basic-auth token.
+TOPDESK_USERNAME = PersistentConfig(
+    'TOPDESK_USERNAME',
+    'topdesk.username',
+    os.environ.get('TOPDESK_USERNAME', ''),
+)
+
+TOPDESK_APP_PASSWORD = PersistentConfig(
+    'TOPDESK_APP_PASSWORD',
+    'topdesk.app_password',
+    os.environ.get('TOPDESK_APP_PASSWORD', ''),
+)
+
+TOPDESK_SYNC_INTERVAL_MINUTES = PersistentConfig(
+    'TOPDESK_SYNC_INTERVAL_MINUTES',
+    'topdesk.sync_interval_minutes',
+    int(os.environ.get('TOPDESK_SYNC_INTERVAL_MINUTES', '60')),
+)
+
+# Per-sync item cap. 0 = no per-sync limit (KNOWLEDGE_MAX_FILE_COUNT still
+# applies as a KB-wide safety net). Admin-editable via the Cloud Sync tab.
+TOPDESK_MAX_ITEMS_PER_SYNC = PersistentConfig(
+    'TOPDESK_MAX_ITEMS_PER_SYNC',
+    'topdesk.max_items_per_sync',
+    int(os.getenv('TOPDESK_MAX_ITEMS_PER_SYNC', '500')),
+)
+
+TOPDESK_MAX_ITEM_SIZE_MB = int(os.getenv('TOPDESK_MAX_ITEM_SIZE_MB', '25'))
+
+# Knowledge Base GraphQL endpoint path, appended to TOPDESK_URL. The exact path
+# could not be confirmed from public docs (three candidates); this is the most
+# likely, so it is config-overridable without a code change. See
+# thoughts/shared/research/2026-06-topdesk-api-verification.md §3.
+TOPDESK_GRAPHQL_PATH = os.getenv('TOPDESK_GRAPHQL_PATH', '/tas/api/knowledgeBase/graphql')
+
+
 ####################################
 # Email Service (Microsoft Graph API)
 ####################################

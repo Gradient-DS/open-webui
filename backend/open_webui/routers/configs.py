@@ -995,6 +995,63 @@ async def set_confluence_config(
 
 
 ####################################
+# TOPdesk Config
+####################################
+
+
+class TopdeskConfigForm(BaseModel):
+    ENABLE_TOPDESK_INTEGRATION: Optional[bool] = None
+    ENABLE_TOPDESK_SYNC: Optional[bool] = None
+    TOPDESK_URL: Optional[str] = None
+    # Service credential. Username set → HTTP Basic; username empty → person-token.
+    TOPDESK_USERNAME: Optional[str] = None
+    TOPDESK_APP_PASSWORD: Optional[str] = None
+    TOPDESK_SYNC_INTERVAL_MINUTES: Optional[int] = None
+    TOPDESK_MAX_ITEMS_PER_SYNC: Optional[int] = None  # 0 = unlimited
+
+
+@router.get('/topdesk')
+async def get_topdesk_config(request: Request, user=Depends(get_admin_user)):
+    c = request.app.state.config
+    return {
+        'ENABLE_TOPDESK_INTEGRATION': c.ENABLE_TOPDESK_INTEGRATION,
+        'ENABLE_TOPDESK_SYNC': c.ENABLE_TOPDESK_SYNC,
+        'TOPDESK_URL': c.TOPDESK_URL,
+        'TOPDESK_USERNAME': c.TOPDESK_USERNAME,
+        # Admin-only endpoint; same disclosure profile as the Confluence
+        # basic-auth token, which round-trips the value masked behind a reveal
+        # toggle in the UI.
+        'TOPDESK_APP_PASSWORD': c.TOPDESK_APP_PASSWORD,
+        'TOPDESK_SYNC_INTERVAL_MINUTES': c.TOPDESK_SYNC_INTERVAL_MINUTES,
+        'TOPDESK_MAX_ITEMS_PER_SYNC': c.TOPDESK_MAX_ITEMS_PER_SYNC,
+    }
+
+
+@router.post('/topdesk')
+async def set_topdesk_config(
+    request: Request,
+    form_data: TopdeskConfigForm,
+    user=Depends(get_admin_user),
+):
+    c = request.app.state.config
+    if form_data.ENABLE_TOPDESK_INTEGRATION is not None:
+        c.ENABLE_TOPDESK_INTEGRATION = form_data.ENABLE_TOPDESK_INTEGRATION
+    if form_data.ENABLE_TOPDESK_SYNC is not None:
+        c.ENABLE_TOPDESK_SYNC = form_data.ENABLE_TOPDESK_SYNC
+    if form_data.TOPDESK_URL is not None:
+        c.TOPDESK_URL = form_data.TOPDESK_URL.strip().rstrip('/')
+    if form_data.TOPDESK_USERNAME is not None:
+        c.TOPDESK_USERNAME = form_data.TOPDESK_USERNAME.strip()
+    if form_data.TOPDESK_APP_PASSWORD is not None:
+        c.TOPDESK_APP_PASSWORD = form_data.TOPDESK_APP_PASSWORD.strip()
+    if form_data.TOPDESK_SYNC_INTERVAL_MINUTES is not None:
+        c.TOPDESK_SYNC_INTERVAL_MINUTES = form_data.TOPDESK_SYNC_INTERVAL_MINUTES
+    if form_data.TOPDESK_MAX_ITEMS_PER_SYNC is not None:
+        c.TOPDESK_MAX_ITEMS_PER_SYNC = max(0, form_data.TOPDESK_MAX_ITEMS_PER_SYNC)
+    return await get_topdesk_config(request, user)
+
+
+####################################
 # Google Drive Config
 ####################################
 
@@ -1126,6 +1183,7 @@ CLOUD_SYNC_PROVIDERS: list[dict] = [
     {'slug': 'confluence', 'type': 'confluence', 'meta_key': 'confluence_sync'},
     {'slug': 'google_drive', 'type': 'google_drive', 'meta_key': 'google_drive_sync'},
     {'slug': 'onedrive', 'type': 'onedrive', 'meta_key': 'onedrive_sync'},
+    {'slug': 'topdesk', 'type': 'topdesk', 'meta_key': 'topdesk_sync'},
 ]
 
 # Sync-worker status values (see base_worker / per-provider workers) that mean

@@ -82,13 +82,14 @@ def test_status_aggregates_per_provider():
         ),
     ]
     onedrive_kbs = [_kb('kb-o1', {'onedrive_sync': {'status': 'completed', 'last_sync_at': 500}})]
-    # google_drive: zero-state (no KBs).
+    # google_drive and topdesk: zero-state (no KBs).
 
     async def fake_get_by_type(provider_type, *a, **k):
         return {
             'confluence': confluence_kbs,
             'onedrive': onedrive_kbs,
             'google_drive': [],
+            'topdesk': [],
         }[provider_type]
 
     async def fake_file_counts(ids, *a, **k):
@@ -102,7 +103,7 @@ def test_status_aggregates_per_provider():
     assert res.status_code == 200
     body = res.json()
 
-    assert set(body.keys()) == {'confluence', 'google_drive', 'onedrive'}
+    assert set(body.keys()) == {'confluence', 'google_drive', 'onedrive', 'topdesk'}
 
     conf = body['confluence']
     assert conf['kb_count'] == 2
@@ -121,8 +122,7 @@ def test_status_aggregates_per_provider():
     assert one['suspended_count'] == 0
     assert one['shared'] is False
 
-    gdrive = body['google_drive']
-    assert gdrive == {
+    zero_state = {
         'kb_count': 0,
         'file_count': 0,
         'last_sync_at': None,
@@ -131,6 +131,90 @@ def test_status_aggregates_per_provider():
         'suspended_count': 0,
         'shared': False,
     }
+    assert body['google_drive'] == zero_state
+    # topdesk has no KBs → zero-state entry present in the payload.
+    assert body['topdesk'] == zero_state
+
+
+# --- /configs/topdesk admin-gating + normalization --------------------------
+
+
+def _config_client(app, **config_values):
+    """Admin client with a stub ``app.state.config`` for the topdesk endpoints."""
+    app.dependency_overrides[get_admin_user] = lambda: SimpleNamespace(
+        id='admin-1', role='admin', email='admin@example.com'
+    )
+    app.state.config = SimpleNamespace(**config_values)
+    return TestClient(app)
+
+
+_TOPDESK_DEFAULTS = {
+    'ENABLE_TOPDESK_INTEGRATION': False,
+    'ENABLE_TOPDESK_SYNC': False,
+    'TOPDESK_URL': '',
+    'TOPDESK_USERNAME': '',
+    'TOPDESK_APP_PASSWORD': '',
+    'TOPDESK_SYNC_INTERVAL_MINUTES': 60,
+    'TOPDESK_MAX_ITEMS_PER_SYNC': 500,
+}
+
+
+def test_topdesk_get_rejects_non_admin():
+    app = _make_app()
+    app.dependency_overrides[get_current_user] = lambda: SimpleNamespace(
+        id='user-1', role='user', email='user@example.com'
+    )
+    res = TestClient(app).get('/api/v1/configs/topdesk')
+    assert res.status_code == 401
+
+
+def test_topdesk_post_rejects_non_admin():
+    app = _make_app()
+    app.dependency_overrides[get_current_user] = lambda: SimpleNamespace(
+        id='user-1', role='user', email='user@example.com'
+    )
+    res = TestClient(app).post('/api/v1/configs/topdesk', json={})
+    assert res.status_code == 401
+
+
+def test_topdesk_get_returns_all_values():
+    app = _make_app()
+    client = _config_client(app, **dict(_TOPDESK_DEFAULTS))
+    res = client.get('/api/v1/configs/topdesk')
+    assert res.status_code == 200
+    assert set(res.json().keys()) == set(_TOPDESK_DEFAULTS.keys())
+
+
+def test_topdesk_post_normalizes_url_and_clamps_max():
+    app = _make_app()
+    c = SimpleNamespace(**dict(_TOPDESK_DEFAULTS))
+    app.dependency_overrides[get_admin_user] = lambda: SimpleNamespace(
+        id='admin-1', role='admin', email='admin@example.com'
+    )
+    app.state.config = c
+    client = TestClient(app)
+
+    res = client.post(
+        '/api/v1/configs/topdesk',
+        json={
+            'ENABLE_TOPDESK_INTEGRATION': True,
+            'TOPDESK_URL': '  https://tenant.topdesk.net/  ',
+            'TOPDESK_USERNAME': '  operator  ',
+            'TOPDESK_APP_PASSWORD': '  secret  ',
+            'TOPDESK_MAX_ITEMS_PER_SYNC': -5,
+        },
+    )
+    assert res.status_code == 200
+    body = res.json()
+    # URL stripped + trailing slash removed.
+    assert body['TOPDESK_URL'] == 'https://tenant.topdesk.net'
+    assert c.TOPDESK_URL == 'https://tenant.topdesk.net'
+    # Credentials stripped and round-tripped in full (Confluence disclosure profile).
+    assert body['TOPDESK_USERNAME'] == 'operator'
+    assert body['TOPDESK_APP_PASSWORD'] == 'secret'
+    # Negative max clamped to 0 (unlimited).
+    assert body['TOPDESK_MAX_ITEMS_PER_SYNC'] == 0
+    assert body['ENABLE_TOPDESK_INTEGRATION'] is True
 
 
 # --- pure helper ------------------------------------------------------------
