@@ -32,12 +32,19 @@ export interface ProviderDescriptor {
 	name: string;
 	// Provider icon component (rendered `size-5` in the card header).
 	icon: ComponentType<SvelteComponent<{ className?: string }>>;
+	// What a single synced unit is called — drives sync-settings labels.
+	itemNoun: ItemNoun;
+	// ── Informational capability matrix ─────────────────────────────────
+	// The fields below document each provider's capabilities; they are NOT
+	// behavioral switches. The section components own the actual behavior
+	// (test-connection affordance, shared-KB flow, auth-mode UI) — setting a
+	// flag here does not toggle any feature. Kept as the planned capability
+	// model (a later TOPdesk task references them).
+	//
 	// Whether the provider exposes a "Test connection" affordance.
 	hasTestConnection: boolean;
 	// Whether the provider can serve one pre-synced shared knowledge base.
 	supportsSharedKb: boolean;
-	// What a single synced unit is called — drives sync-settings labels.
-	itemNoun: ItemNoun;
 	// Supported authentication modes, when the provider offers a choice.
 	authModes?: AuthMode[];
 }
@@ -62,6 +69,18 @@ export interface CloudSyncProviderStatus {
 
 // Whole-endpoint payload: status keyed by provider slug.
 export type CloudSyncStatusResponse = Record<string, CloudSyncProviderStatus>;
+
+// ─────────────────────────────────────────────────────────────────────
+// Section instance contract — the orchestrator drives every provider
+// section through these two methods (via `bind:this`), regardless of
+// provider. Each section component exports `load()`/`persist()`; this is
+// the structural shape the slug-keyed `sectionRefs` map holds.
+// ─────────────────────────────────────────────────────────────────────
+
+export interface CloudSyncSection {
+	load: () => Promise<void>;
+	persist: () => Promise<void>;
+}
 
 // ─────────────────────────────────────────────────────────────────────
 // Provider config response shapes — mirror the `/configs/{provider}` GET

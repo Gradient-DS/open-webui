@@ -14,7 +14,11 @@
 	import ConfluenceSection from './CloudSync/ConfluenceSection.svelte';
 	import GoogleDriveSection from './CloudSync/GoogleDriveSection.svelte';
 	import OneDriveSection from './CloudSync/OneDriveSection.svelte';
-	import type { ProviderDescriptor, CloudSyncStatusResponse } from './CloudSync/types';
+	import type {
+		ProviderDescriptor,
+		CloudSyncStatusResponse,
+		CloudSyncSection
+	} from './CloudSync/types';
 
 	const i18n = getContext<Writable<i18nType>>('i18n');
 	const dispatch = createEventDispatcher();
@@ -56,25 +60,20 @@
 	// Single-open accordion — only one card expanded at a time. '' = all closed.
 	let expandedSlug = '';
 
-	// Section component instance bindings — the orchestrator drives each
-	// provider's load/persist through these. Each section also surfaces its
-	// `enabled` flag for the card header badge.
-	let confluenceSection: ConfluenceSection;
-	let googleDriveSection: GoogleDriveSection;
-	let oneDriveSection: OneDriveSection;
-	let confluenceEnabled = false;
-	let googleDriveEnabled = false;
-	let oneDriveEnabled = false;
+	// Slug-keyed section state, populated generically inside the `{#each}` loop.
+	// Adding a provider needs no orchestrator state here — only an icon+section
+	// import, a descriptor entry and one `{#if}` branch.
+	//
+	// `sectionRefs` holds each mounted section's instance (bind:this) so the
+	// orchestrator can drive its load()/persist(). `enabledBySlug` holds each
+	// section's `enabled` flag (bind:enabled) for the card header badge — the
+	// object-property bind reassigns the map, so the template read stays live.
+	let sectionRefs: Record<string, CloudSyncSection> = {};
+	let enabledBySlug: Record<string, boolean> = {};
 
 	// Cross-provider status (KB count / file count / last sync / syncing),
 	// keyed by provider slug. Drives the card header status lines.
 	let status: CloudSyncStatusResponse = {};
-
-	$: enabledBySlug = {
-		confluence: confluenceEnabled,
-		google_drive: googleDriveEnabled,
-		onedrive: oneDriveEnabled
-	} as Record<string, boolean>;
 
 	// ── Cross-provider status polling ──────────────────────────────────
 	// Refresh on mount and whenever a shared-KB lifecycle event fires
@@ -117,11 +116,11 @@
 	onDestroy(stopStatusPolling);
 
 	onMount(async () => {
+		// Child sections mount before the parent's onMount fires (bottom-up
+		// mount order), so `sectionRefs` is already populated here.
 		try {
 			await Promise.all([
-				confluenceSection?.load(),
-				googleDriveSection?.load(),
-				oneDriveSection?.load(),
+				...Object.values(sectionRefs).map((s) => s?.load?.()),
 				refreshStatus()
 			]);
 		} catch (err) {
@@ -140,11 +139,7 @@
 	// the shared-KB `beforeAction` so a provision/sync saves the whole form
 	// first — matching the monolith — and reused by Save below.
 	const persistAll = async () => {
-		await Promise.all([
-			confluenceSection?.persist(),
-			googleDriveSection?.persist(),
-			oneDriveSection?.persist()
-		]);
+		await Promise.all(Object.values(sectionRefs).map((s) => s?.persist?.()));
 	};
 
 	const submitHandler = async () => {
@@ -185,8 +180,8 @@
 				>
 					{#if descriptor.slug === 'confluence'}
 						<ConfluenceSection
-							bind:this={confluenceSection}
-							bind:enabled={confluenceEnabled}
+							bind:this={sectionRefs[descriptor.slug]}
+							bind:enabled={enabledBySlug[descriptor.slug]}
 							beforeSharedKbAction={persistAll}
 							on:provisioned={refreshStatus}
 							on:synced={refreshStatus}
@@ -194,11 +189,14 @@
 						/>
 					{:else if descriptor.slug === 'google_drive'}
 						<GoogleDriveSection
-							bind:this={googleDriveSection}
-							bind:enabled={googleDriveEnabled}
+							bind:this={sectionRefs[descriptor.slug]}
+							bind:enabled={enabledBySlug[descriptor.slug]}
 						/>
 					{:else if descriptor.slug === 'onedrive'}
-						<OneDriveSection bind:this={oneDriveSection} bind:enabled={oneDriveEnabled} />
+						<OneDriveSection
+							bind:this={sectionRefs[descriptor.slug]}
+							bind:enabled={enabledBySlug[descriptor.slug]}
+						/>
 					{/if}
 				</ProviderCard>
 			{/each}
