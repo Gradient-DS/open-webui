@@ -900,7 +900,7 @@ async def provision_shared_kb(
             raise HTTPException(400, 'The selected shared KB owner is not a valid user.')
 
     # Delegate the create/update + public-read grant to the shared helper.
-    # ``auth_mode`` is Confluence-specific meta; ``_items_key='spaces'`` keeps
+    # ``auth_mode`` is Confluence-specific meta; ``items_key='spaces'`` keeps
     # the persisted selection under the ``spaces`` key for back-compat.
     try:
         await provision_shared_kb_generic(
@@ -910,10 +910,11 @@ async def provision_shared_kb(
             description=_SHARED_KB_DESCRIPTION,
             owner_id=owner_id,
             selected_items=selected_spaces,
-            extra_meta={'auth_mode': auth_mode, '_items_key': 'spaces'},
+            extra_meta={'auth_mode': auth_mode},
+            items_key='spaces',
         )
-    except RuntimeError:
-        raise HTTPException(500, 'Failed to create the shared Confluence knowledge base.')
+    except RuntimeError as err:
+        raise HTTPException(500, 'Failed to create the shared Confluence knowledge base.') from err
 
     return await _shared_kb_status(user)
 

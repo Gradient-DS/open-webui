@@ -65,6 +65,18 @@ def test_find_shared_kb_returns_none_when_no_shared_flag():
     assert result is None
 
 
+def test_find_shared_kb_skips_non_dict_meta_without_raising():
+    # Legacy/corrupt row where meta[meta_key] is a string, not a dict.
+    corrupt = _kb('kb-corrupt', meta={'confluence_sync': 'corrupt-string'})
+    with mock.patch.object(
+        shared_kb.Knowledges,
+        'get_knowledge_bases_by_type',
+        new=mock.AsyncMock(return_value=[corrupt]),
+    ):
+        result = asyncio.run(shared_kb.find_shared_kb('confluence', 'confluence_sync'))
+    assert result is None
+
+
 # ── provision_shared_kb ─────────────────────────────────────────────────────
 
 
@@ -159,9 +171,9 @@ def test_provision_empty_owner_is_system_owned():
     assert owner_arg == ''
 
 
-def test_provision_honours_items_key_override_and_drops_internal_key():
-    """``extra_meta['_items_key']`` selects the meta key the selection is stored
-    under (Confluence uses 'spaces') and must not leak into the persisted meta."""
+def test_provision_honours_items_key_kwarg():
+    """The ``items_key`` kwarg selects the meta key the selection is stored under
+    (Confluence passes 'spaces'); the selection lands under that key only."""
     created = _kb('kb-c', user_id='admin-1', meta=None)
 
     update_meta = mock.AsyncMock()
@@ -183,7 +195,8 @@ def test_provision_honours_items_key_override_and_drops_internal_key():
                 description='desc',
                 owner_id='admin-1',
                 selected_items=[{'id': 'S1'}],
-                extra_meta={'auth_mode': 'basic', '_items_key': 'spaces'},
+                extra_meta={'auth_mode': 'basic'},
+                items_key='spaces',
             )
         )
 
@@ -223,7 +236,8 @@ def test_provision_updates_existing_kb_in_place_and_reassigns_owner():
                 description='desc',
                 owner_id='new-owner',
                 selected_items=[{'id': 'S2'}],
-                extra_meta={'auth_mode': 'oauth', '_items_key': 'spaces'},
+                extra_meta={'auth_mode': 'oauth'},
+                items_key='spaces',
             )
         )
 
@@ -235,6 +249,75 @@ def test_provision_updates_existing_kb_in_place_and_reassigns_owner():
     assert sync_info['spaces'] == [{'id': 'S2'}]
     # Legacy flag is dropped.
     assert 'sync_all_spaces' not in sync_info
+
+
+def test_provision_does_not_reassign_owner_when_unchanged():
+    """Update path must not touch the owner when kb.user_id already equals
+    owner_id — update_knowledge_user_id_by_id is not awaited."""
+    existing = _kb('kb-old', user_id='owner-1', meta={'confluence_sync': {'shared': True}})
+
+    update_user = mock.AsyncMock()
+    with (
+        mock.patch.object(
+            shared_kb.Knowledges,
+            'get_knowledge_bases_by_type',
+            new=mock.AsyncMock(return_value=[existing]),
+        ),
+        mock.patch.object(shared_kb.Knowledges, 'insert_new_knowledge', new=mock.AsyncMock()),
+        mock.patch.object(shared_kb.Knowledges, 'update_knowledge_user_id_by_id', new=update_user),
+        mock.patch.object(shared_kb.Knowledges, 'update_knowledge_meta_by_id', new=mock.AsyncMock()),
+        mock.patch.object(shared_kb.AccessGrants, 'set_access_grants', new=mock.AsyncMock()),
+    ):
+        asyncio.run(
+            shared_kb.provision_shared_kb(
+                provider_type='confluence',
+                meta_key='confluence_sync',
+                name='Confluence',
+                description='desc',
+                owner_id='owner-1',
+                selected_items=[{'id': 'S1'}],
+                extra_meta={'auth_mode': 'oauth'},
+                items_key='spaces',
+            )
+        )
+
+    update_user.assert_not_awaited()
+
+
+def test_provision_create_reserved_keys_win_over_extra_meta():
+    """On the create path, reserved keys (shared, items, sources, status) must
+    win over any same-named keys a provider passes in extra_meta."""
+    created = _kb('kb-new', user_id='admin-1', meta=None)
+    update_meta = mock.AsyncMock()
+
+    with (
+        mock.patch.object(
+            shared_kb.Knowledges,
+            'get_knowledge_bases_by_type',
+            new=mock.AsyncMock(return_value=[]),
+        ),
+        mock.patch.object(shared_kb.Knowledges, 'insert_new_knowledge', new=mock.AsyncMock(return_value=created)),
+        mock.patch.object(shared_kb.Knowledges, 'update_knowledge_meta_by_id', new=update_meta),
+        mock.patch.object(shared_kb.AccessGrants, 'set_access_grants', new=mock.AsyncMock()),
+    ):
+        asyncio.run(
+            shared_kb.provision_shared_kb(
+                provider_type='topdesk',
+                meta_key='topdesk_sync',
+                name='TOPdesk',
+                description='desc',
+                owner_id='admin-1',
+                selected_items=[{'item_id': 'KI-1'}],
+                extra_meta={'sources': ['x'], 'status': 'weird'},
+            )
+        )
+
+    sync_info = update_meta.await_args.args[1]['topdesk_sync']
+    # Reserved keys keep their managed defaults despite the extra_meta clash.
+    assert sync_info['sources'] == []
+    assert sync_info['status'] == 'idle'
+    assert sync_info['shared'] is True
+    assert sync_info['items'] == [{'item_id': 'KI-1'}]
 
 
 # ── shared_kb_status ────────────────────────────────────────────────────────
@@ -367,6 +450,12 @@ def test_is_managed_false_for_per_user_synced_kb():
     assert shared_kb.is_managed_shared_kb(kb) is False
     kb2 = _kb(meta={'topdesk_sync': {'sources': [{'item_id': 'y'}]}})
     assert shared_kb.is_managed_shared_kb(kb2) is False
+
+
+def test_is_managed_false_for_non_dict_meta_without_raising():
+    # Legacy/corrupt row where meta[meta_key] is a string, not a dict.
+    kb = _kb(meta={'confluence_sync': 'corrupt-string'})
+    assert shared_kb.is_managed_shared_kb(kb) is False
 
 
 def test_is_managed_covers_all_meta_keys():

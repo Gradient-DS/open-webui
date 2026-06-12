@@ -23,7 +23,7 @@ that syncs with a global service credential.
 from __future__ import annotations
 
 import logging
-from typing import Optional
+from typing import Any, Optional
 
 from open_webui.models.access_grants import AccessGrants
 from open_webui.models.knowledge import KnowledgeForm, KnowledgeModel, Knowledges
@@ -47,7 +47,10 @@ async def find_shared_kb(provider_type: str, meta_key: str) -> Optional[Knowledg
     for kb in await Knowledges.get_knowledge_bases_by_type(provider_type):
         if getattr(kb, 'deleted_at', None):
             continue
-        if (kb.meta or {}).get(meta_key, {}).get('shared'):
+        # Guard against legacy/corrupt rows where meta[meta_key] is not a dict
+        # (e.g. a stray string/list) — calling .get on it would raise.
+        sync_info = (kb.meta or {}).get(meta_key)
+        if isinstance(sync_info, dict) and sync_info.get('shared'):
             return kb
     return None
 
@@ -58,28 +61,33 @@ async def provision_shared_kb(
     name: str,
     description: str,
     owner_id: str,
-    selected_items: list,
-    extra_meta: Optional[dict] = None,
+    selected_items: list[dict],
+    extra_meta: Optional[dict[str, Any]] = None,
+    items_key: str = 'items',
 ) -> KnowledgeModel:
     """Create or update the single shared, public-read KB for a provider.
 
-    Stamps ``shared`` plus ``selected_items`` (under the ``items_key``, see
-    below) and any ``extra_meta`` into the KB meta, then grants ``user:*:read``
-    directly via ``AccessGrants`` — bypassing the non-local-type guards in the
-    user knowledge router by not going through it, leaving those guards intact
-    for normal user KBs.
+    Stamps ``shared`` plus ``selected_items`` (under ``items_key``) and any
+    ``extra_meta`` into the KB meta, then grants ``user:*:read`` directly via
+    ``AccessGrants`` — bypassing the non-local-type guards in the user
+    knowledge router by not going through it, leaving those guards intact for
+    normal user KBs.
 
     ``owner_id`` empty → system-owned KB (``user_id=''``); the worker then uses
     a global service credential. ``extra_meta`` carries provider-specific meta
     (e.g. Confluence's ``auth_mode``); ``selected_items`` is the admin's opt-in
     selection persisted for the picker to re-render on reload.
 
-    The selection is stored under the meta key named by
-    ``extra_meta['_items_key']`` if present, else ``'items'``. Confluence passes
-    ``'spaces'`` to keep its persisted meta byte-identical.
+    The selection is stored under ``items_key`` (default ``'items'``).
+    Confluence passes ``items_key='spaces'`` to keep its persisted meta
+    byte-identical with the pre-extraction implementation.
+
+    Reserved keys (``shared``, ``items_key``, ``sources``, ``status``) always
+    win over ``extra_meta`` on both the create and update paths: ``extra_meta``
+    is applied first, then the reserved keys are stamped on top, so a provider
+    accidentally passing a reserved key cannot clobber the managed defaults.
     """
     extra_meta = dict(extra_meta or {})
-    items_key = extra_meta.pop('_items_key', 'items')
 
     kb = await find_shared_kb(provider_type, meta_key)
     if kb:
@@ -88,8 +96,8 @@ async def provision_shared_kb(
             await Knowledges.update_knowledge_user_id_by_id(kb.id, owner_id)
         meta = kb.meta or {}
         sync_info = meta.get(meta_key, {})
-        sync_info['shared'] = True
         sync_info.update(extra_meta)
+        sync_info['shared'] = True
         sync_info[items_key] = selected_items
         sync_info.pop('sync_all_spaces', None)  # legacy flag — superseded by explicit selection
         meta[meta_key] = sync_info
@@ -107,12 +115,12 @@ async def provision_shared_kb(
         if not kb:
             raise RuntimeError(f'Failed to create the shared {provider_type} knowledge base.')
         sync_info = {
+            **extra_meta,
             'shared': True,
             items_key: selected_items,
             'sources': [],
             'status': 'idle',
         }
-        sync_info.update(extra_meta)
         await Knowledges.update_knowledge_meta_by_id(kb.id, {meta_key: sync_info})
 
     # Public read grant — set directly on the model, not via the user router, so
@@ -177,12 +185,17 @@ async def delete_shared_kb(provider_type: str, meta_key: str) -> Optional[str]:
     return kb.id
 
 
-def is_managed_shared_kb(kb) -> bool:
+def is_managed_shared_kb(kb: KnowledgeModel) -> bool:
     """True if ``kb`` is an admin-managed shared KB of any sync provider.
 
     Checks every key in ``SHARED_SYNC_META_KEYS`` for a ``shared == True`` flag,
     so the knowledge-router deletion guard and the cleanup worker's hard-delete
     skip cover Confluence, TOPdesk, and any future shared-KB provider uniformly.
+
+    Both call sites (``routers/knowledge.py``, ``cleanup_worker.py``) pass a
+    ``KnowledgeModel``. Legacy/corrupt rows may carry a non-dict ``meta[key]``
+    (e.g. a stray string), so each value is isinstance-checked before ``.get``
+    to avoid raising on such rows.
     """
     meta = getattr(kb, 'meta', None) or {}
-    return any(meta.get(key, {}).get('shared') for key in SHARED_SYNC_META_KEYS)
+    return any(isinstance(meta.get(key), dict) and meta[key].get('shared') for key in SHARED_SYNC_META_KEYS)
