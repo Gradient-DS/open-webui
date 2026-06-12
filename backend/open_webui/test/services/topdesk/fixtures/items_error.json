@@ -1,0 +1,19 @@
+{
+  "data": null,
+  "errors": [
+    {
+      "message": "Field 'modificationDate' is not defined by type 'KnowledgeItemFilter'.",
+      "path": ["knowledgeItems"],
+      "locations": [
+        {
+          "line": 2,
+          "column": 3
+        }
+      ],
+      "extensions": {
+        "code": "GRAPHQL_VALIDATION_FAILED",
+        "classification": "ValidationError"
+      }
+    }
+  ]
+}

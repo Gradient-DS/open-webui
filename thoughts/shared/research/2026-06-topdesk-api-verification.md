@@ -117,6 +117,13 @@ confirmation.**
   1. `POST https://{tenant}.topdesk.net/tas/api/knowledgeBase/graphql`
   2. `POST https://{tenant}.topdesk.net/services/knowledge-base/api/graphql`
   3. `POST https://{tenant}.topdesk.net/tas/api/graphql`
+- **How to disambiguate them mechanically:** POST a trivial `{ __typename }` query to
+  each candidate (Basic auth, `Content-Type: application/json`). A **404 or an HTML
+  body** (e.g. a login/redirect page) rules a path out — it is not a GraphQL endpoint.
+  A **GraphQL-shaped JSON response confirms the path**: either HTTP 200 with a
+  `data` object (`{"data": {"__typename": "Query"}}`), or HTTP 400 carrying a top-level
+  GraphQL `errors` array (a 400 with `errors` still means a GraphQL server is answering —
+  see §4.0). Pick the first candidate that responds GraphQL-shaped.
 - The request body is the standard GraphQL envelope:
   `{"query": "...", "variables": {...}}`, `Content-Type: application/json`, with the
   Basic auth header from §2.1.
@@ -137,6 +144,38 @@ confirmation.**
 > `backend/open_webui/test/services/topdesk/fixtures/` follow this exact shape so the
 > client can be written against it; if live introspection differs, fixtures + client
 > adapt together.
+
+### 4.0 GraphQL error envelope
+
+Unlike the success-schema fixtures (whose *field shape* is inferred from product
+vocabulary), the GraphQL **error envelope** is **documented-confirmed** by the GraphQL
+spec itself — its shape is not guessed. Query-level failures (validation errors,
+unknown fields, resolver exceptions, partial-result failures) are **not** signalled by
+an HTTP status code. They arrive as **HTTP 200** with a top-level `errors` array in the
+response body:
+
+```json
+{
+  "data": null,
+  "errors": [
+    { "message": "...", "path": ["knowledgeItems"], "extensions": { "code": "..." } }
+  ]
+}
+```
+
+- `errors` is a top-level array of error objects; each carries at least `message`, and
+  commonly `path`, `locations`, and an `extensions` object (where TOPdesk/most servers
+  put a machine-readable `code`).
+- `data` is `null` (total failure) **or partially populated** (some fields resolved,
+  others errored) — a successful field and an `errors` entry can coexist in one 200
+  response.
+- **This is a distinct failure mode from HTTP-status errors** (4xx/5xx, which the §2
+  auth/transport layer handles). The Phase-2 client **must inspect the response body for
+  a top-level `errors` key even on HTTP 200** and **must not treat a 200-with-`errors`
+  response as success** — surface it as a query failure (and, for partial data, decide
+  per-field whether to use or discard). The `items_error.json` fixture models this
+  envelope; its shape is GraphQL-spec-defined (**documented-confirmed**), in contrast to
+  the inferred success-schema fixtures below.
 
 ### 4.1 Assumed schema excerpt (inferred SDL)
 
@@ -247,8 +286,11 @@ query ListKnowledgeItems($first: Int!, $after: String, $filter: KnowledgeItemFil
         id
         number
         title
+        description
         language
         status
+        visibility
+        creationDate
         modificationDate
       }
     }
@@ -395,8 +437,10 @@ Run these against the client's TOPdesk 2025 R2+ tenant once the API key is avail
 - [ ] **Probe:** `GET /tas/api/operators/current` returns 200 with the operator record
       (confirms auth + operator identity class). Fallback `GET /tas/api/version` returns
       the version (confirm tenant is ≥ 2025 R2).
-- [ ] **GraphQL endpoint path:** confirm the exact POST path (test the three candidates
-      in §3); record the working one.
+- [ ] **GraphQL endpoint path:** confirm the exact POST path by POSTing a trivial
+      `{ __typename }` query to each of the three §3 candidates. A 404/HTML response
+      rules a path out; a GraphQL-shaped JSON response (200 with `data`, or 400 with a
+      top-level GraphQL `errors` array) confirms it. Record the working one.
 - [ ] **Introspection:** run a standard GraphQL introspection query; capture the real
       SDL for `Query`, the knowledge-item connection type, `KnowledgeItem`, and the
       filter input. Diff against §4.1 and update fixtures + client to match.
