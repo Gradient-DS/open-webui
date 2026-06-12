@@ -18,6 +18,11 @@ export type ItemNoun = 'pages' | 'files' | 'items';
 
 export type AuthMode = 'oauth' | 'basic';
 
+// Sync run status. 'idle' | 'syncing' are the known values; `(string & {})`
+// keeps the type open to server-added values while preserving literal
+// autocomplete.
+export type SyncRunStatus = 'idle' | 'syncing' | (string & {});
+
 export interface ProviderDescriptor {
 	// Stable provider key — matches the cloud-sync status endpoint slug
 	// (confluence, google_drive, onedrive, topdesk, ...).
@@ -48,7 +53,7 @@ export interface CloudSyncProviderStatus {
 	file_count: number;
 	last_sync_at: number | null;
 	// Aggregate status — 'idle' | 'syncing' (more may be added server-side).
-	status: string;
+	status: SyncRunStatus;
 	syncing: boolean;
 	suspended_count: number;
 	// True when any KB of this provider is a shared (org-wide) KB.
@@ -119,7 +124,8 @@ export interface SharedKbApi<Status, ProvisionPayload> {
 // structurally satisfy this.
 export interface SharedKbStatusLike {
 	provisioned: boolean;
-	status?: string;
+	// 'idle' | 'syncing' (more may be added server-side).
+	status?: SyncRunStatus;
 	last_sync_at?: number | null;
 	suspended_at?: number | null;
 	file_count?: number;

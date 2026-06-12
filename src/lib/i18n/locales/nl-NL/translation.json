@@ -2886,6 +2886,8 @@
     "{{count}} selected_one": "{{count}} geselecteerd",
     "{{count}} selected_other": "{{count}} geselecteerd",
     "{{count}} suspended": "{{count}} opgeschort",
+    "{{count}} suspended_one": "{{count}} opgeschort",
+    "{{count}} suspended_other": "{{count}} opgeschort",
     "{{days}} days remaining": "{{days}} dagen resterend",
     "{{label}} sync cancelled": "{{label}} synchronisatie geannuleerd",
     "{{label}} sync failed: {{error}}": "{{label}} synchronisatie mislukt: {{error}}",

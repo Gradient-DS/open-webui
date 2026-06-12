@@ -2879,6 +2879,8 @@
     "{{count}} selected_one": "",
     "{{count}} selected_other": "",
     "{{count}} suspended": "",
+    "{{count}} suspended_one": "{{count}} suspended",
+    "{{count}} suspended_other": "{{count}} suspended",
     "{{days}} days remaining": "",
     "{{label}} sync cancelled": "",
     "{{label}} sync failed: {{error}}": "",
