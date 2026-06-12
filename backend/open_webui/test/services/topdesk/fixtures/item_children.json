@@ -1,0 +1,35 @@
+{
+  "data": {
+    "knowledgeItem": {
+      "id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      "number": "KI 0100",
+      "title": "Account and access",
+      "children": [
+        {
+          "id": "11111111-1111-4111-8111-111111111111",
+          "number": "KI 0001",
+          "title": "How to reset your password",
+          "language": "en",
+          "status": "PUBLISHED",
+          "modificationDate": "2026-05-21T14:30:00Z"
+        },
+        {
+          "id": "66666666-6666-4666-8666-666666666666",
+          "number": "KI 0006",
+          "title": "Enabling two-factor authentication",
+          "language": "en",
+          "status": "PUBLISHED",
+          "modificationDate": "2026-04-28T09:05:00Z"
+        },
+        {
+          "id": "77777777-7777-4777-8777-777777777777",
+          "number": "KI 0007",
+          "title": "Unlocking a locked account",
+          "language": "en",
+          "status": "PUBLISHED",
+          "modificationDate": "2026-06-02T12:20:00Z"
+        }
+      ]
+    }
+  }
+}
