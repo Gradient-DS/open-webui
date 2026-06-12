@@ -12,8 +12,7 @@ from pydantic import BaseModel
 
 from open_webui.utils.auth import get_verified_user, get_admin_user
 from open_webui.models.users import UserModel, Users
-from open_webui.models.knowledge import Knowledges, KnowledgeForm
-from open_webui.models.access_grants import AccessGrants
+from open_webui.models.knowledge import Knowledges
 from open_webui.config import (
     CONFLUENCE_OAUTH_CLIENT_ID,
     CONFLUENCE_OAUTH_CLIENT_SECRET,
@@ -44,6 +43,12 @@ from open_webui.services.sync.router import (
     auth_callback_html,
     remove_files_for_source_generic,
     get_knowledge_or_raise,
+)
+from open_webui.services.sync.shared_kb import (
+    find_shared_kb,
+    provision_shared_kb as provision_shared_kb_generic,
+    shared_kb_status as shared_kb_status_generic,
+    delete_shared_kb as delete_shared_kb_generic,
 )
 
 log = logging.getLogger(__name__)
@@ -702,13 +707,11 @@ async def _find_shared_kb():
     not by name, so an admin renaming it does not orphan the link.
     Soft-deleted KBs are skipped so a deleted-then-reprovisioned KB never
     shadows the live one (which would make status/sync target the wrong row).
+
+    Delegates to the provider-agnostic helper; the discovery contract is
+    identical (type + ``shared`` meta flag, skip soft-deleted).
     """
-    for kb in await Knowledges.get_knowledge_bases_by_type(_PROVIDER_TYPE):
-        if getattr(kb, 'deleted_at', None):
-            continue
-        if (kb.meta or {}).get(_META_KEY, {}).get('shared'):
-            return kb
-    return None
+    return await find_shared_kb(_PROVIDER_TYPE, _META_KEY)
 
 
 async def _resolve_effective_owner_id(current_user: UserModel) -> str:
@@ -725,8 +728,14 @@ async def _resolve_effective_owner_id(current_user: UserModel) -> str:
 
 
 async def _shared_kb_status(current_user: UserModel) -> dict:
-    """Compose the shared-KB status payload for the Cloud Sync admin tab."""
-    kb = await _find_shared_kb()
+    """Compose the shared-KB status payload for the Cloud Sync admin tab.
+
+    The provider-neutral core (provisioned flag, knowledge_id, owner, status,
+    progress, file_count, persisted selection) comes from the shared helper;
+    the Confluence-specific fields (kb_mode, auth_mode, owner-connected) are
+    resolved here. ``items_key='spaces'`` keeps the persisted/returned key as
+    ``spaces`` for back-compat with the deployed frontend.
+    """
     auth_mode = await resolve_auth_mode(None)
     effective_owner_id = await _resolve_effective_owner_id(current_user)
 
@@ -745,28 +754,8 @@ async def _shared_kb_status(current_user: UserModel) -> dict:
         'kb_mode': CONFLUENCE_KB_MODE.value,
         'auth_mode': auth_mode,
         'owner_connected': owner_connected,
-        'provisioned': kb is not None,
-        'knowledge_id': kb.id if kb else None,
     }
-    if kb:
-        sync_info = (kb.meta or {}).get(_META_KEY, {})
-        status.update(
-            {
-                'owner_id': kb.user_id,
-                'status': sync_info.get('status', 'idle'),
-                'last_sync_at': sync_info.get('last_sync_at'),
-                'last_result': sync_info.get('last_result'),
-                'suspended_at': sync_info.get('suspended_at'),
-                'file_count': len(await Knowledges.get_files_by_id(kb.id) or []),
-                # Live progress (files done / total) — lets the Cloud Sync
-                # tab show a percentage on the Sync button while a sync runs.
-                'progress_current': sync_info.get('progress_current', 0),
-                'progress_total': sync_info.get('progress_total', 0),
-                # The admin-selected spaces — used to pre-fill the Cloud Sync
-                # tab's space checklist on reload.
-                'spaces': sync_info.get('spaces', []),
-            }
-        )
+    status.update(await shared_kb_status_generic(_PROVIDER_TYPE, _META_KEY, items_key='spaces'))
     return status
 
 
@@ -910,53 +899,22 @@ async def provision_shared_kb(
         if owner_id and not await Users.get_user_by_id(owner_id):
             raise HTTPException(400, 'The selected shared KB owner is not a valid user.')
 
-    kb = await _find_shared_kb()
-    if kb:
-        # Reassign the owner if the admin changed the setting.
-        if kb.user_id != owner_id:
-            await Knowledges.update_knowledge_user_id_by_id(kb.id, owner_id)
-        meta = kb.meta or {}
-        sync_info = meta.get(_META_KEY, {})
-        sync_info['shared'] = True
-        sync_info['auth_mode'] = auth_mode
-        sync_info['spaces'] = selected_spaces
-        sync_info.pop('sync_all_spaces', None)  # legacy flag — superseded by `spaces`
-        meta[_META_KEY] = sync_info
-        await Knowledges.update_knowledge_meta_by_id(kb.id, meta)
-    else:
-        kb = await Knowledges.insert_new_knowledge(
-            owner_id,
-            KnowledgeForm(
-                name=_SHARED_KB_NAME,
-                description=_SHARED_KB_DESCRIPTION,
-                type=_PROVIDER_TYPE,
-                access_grants=[],
-            ),
+    # Delegate the create/update + public-read grant to the shared helper.
+    # ``auth_mode`` is Confluence-specific meta; ``_items_key='spaces'`` keeps
+    # the persisted selection under the ``spaces`` key for back-compat.
+    try:
+        await provision_shared_kb_generic(
+            provider_type=_PROVIDER_TYPE,
+            meta_key=_META_KEY,
+            name=_SHARED_KB_NAME,
+            description=_SHARED_KB_DESCRIPTION,
+            owner_id=owner_id,
+            selected_items=selected_spaces,
+            extra_meta={'auth_mode': auth_mode, '_items_key': 'spaces'},
         )
-        if not kb:
-            raise HTTPException(500, 'Failed to create the shared Confluence knowledge base.')
-        await Knowledges.update_knowledge_meta_by_id(
-            kb.id,
-            {
-                _META_KEY: {
-                    'shared': True,
-                    'auth_mode': auth_mode,
-                    'spaces': selected_spaces,
-                    'sources': [],
-                    'status': 'idle',
-                }
-            },
-        )
+    except RuntimeError:
+        raise HTTPException(500, 'Failed to create the shared Confluence knowledge base.')
 
-    # Public read grant — set directly on the model, not via the user router,
-    # so the non-local-type access guards stay in force for regular KBs.
-    await AccessGrants.set_access_grants(
-        'knowledge',
-        kb.id,
-        [{'principal_type': 'user', 'principal_id': '*', 'permission': 'read'}],
-    )
-
-    log.info('Shared Confluence KB provisioned: %s (owner=%r)', kb.id, owner_id or '<system>')
     return await _shared_kb_status(user)
 
 
@@ -1000,9 +958,7 @@ async def delete_shared_kb(user: UserModel = Depends(get_admin_user)) -> dict:
     endpoint is the only managed way to remove it. The cleanup worker purges
     its files and vectors afterwards.
     """
-    kb = await _find_shared_kb()
-    if not kb:
+    kb_id = await delete_shared_kb_generic(_PROVIDER_TYPE, _META_KEY)
+    if not kb_id:
         raise HTTPException(404, 'No shared Confluence knowledge base has been provisioned.')
-    await Knowledges.soft_delete_by_id(kb.id)
-    log.info('Shared Confluence KB deleted: %s', kb.id)
-    return {'message': 'Shared Confluence knowledge base deleted.', 'knowledge_id': kb.id}
+    return {'message': 'Shared Confluence knowledge base deleted.', 'knowledge_id': kb_id}
