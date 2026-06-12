@@ -113,6 +113,21 @@
 
 	onDestroy(stopStatusPolling);
 
+	// Restore the monolith's reload-during-sync resume behaviour: if the page is
+	// reloaded while a shared sync is in flight, the parent's `load()` populates
+	// `status` asynchronously with `status: 'syncing'`. The cross-provider 5s poll
+	// only feeds the card header, so without this the progress % would freeze.
+	// A one-shot reactive guard kicks off the poll loop once the first non-null
+	// status lands (a plain `onMount` check would race the async `load()`).
+	let initialResumeChecked = false;
+	$: if (!initialResumeChecked && status) {
+		initialResumeChecked = true;
+		if (status.status === 'syncing' && !statusPollTimer) {
+			syncingShared = true;
+			startStatusPolling();
+		}
+	}
+
 	// Live sync state — derived from the backend status too (not just the
 	// local flag) so progress shows after navigating away and back while a
 	// sync runs. `syncProgress` is null until the worker reports a total.
