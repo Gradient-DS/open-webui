@@ -1113,6 +1113,93 @@ async def set_onedrive_config(
 
 
 ####################################
+# Cloud Sync — cross-provider status
+####################################
+
+
+# Provider registry for the status endpoint. Each entry maps a provider slug
+# to its Knowledge ``type`` value and the meta key its sync worker writes
+# under (see the workers' ``meta_key`` property — onedrive: 'onedrive_sync',
+# google_drive: 'google_drive_sync', confluence: 'confluence_sync'). Adding a
+# new provider (e.g. topdesk) is a one-line entry here.
+CLOUD_SYNC_PROVIDERS: list[dict] = [
+    {'slug': 'confluence', 'type': 'confluence', 'meta_key': 'confluence_sync'},
+    {'slug': 'google_drive', 'type': 'google_drive', 'meta_key': 'google_drive_sync'},
+    {'slug': 'onedrive', 'type': 'onedrive', 'meta_key': 'onedrive_sync'},
+]
+
+# Sync-worker status values (see base_worker / per-provider workers) that mean
+# "a sync is currently in flight". Everything else (completed*, failed,
+# cancelled, suspended, or absent) is treated as idle.
+_CLOUD_SYNC_IN_PROGRESS_STATUSES: frozenset[str] = frozenset({'syncing'})
+
+
+def _aggregate_provider_status(sync_infos: list[dict]) -> dict:
+    """Aggregate per-KB sync meta into a single provider status summary.
+
+    ``sync_infos`` is the list of ``meta[<meta_key>]`` dicts for every KB of
+    one provider, each annotated with the KB's file count under ``_file_count``
+    (see caller). Pure function so it can be unit-tested without a database.
+    """
+    kb_count = len(sync_infos)
+    file_count = sum(int(info.get('_file_count', 0) or 0) for info in sync_infos)
+    last_sync_at = None
+    suspended_count = 0
+    syncing = False
+    shared = False
+
+    for info in sync_infos:
+        ts = info.get('last_sync_at')
+        if isinstance(ts, int) and (last_sync_at is None or ts > last_sync_at):
+            last_sync_at = ts
+        if info.get('suspended_at'):
+            suspended_count += 1
+        if info.get('status') in _CLOUD_SYNC_IN_PROGRESS_STATUSES:
+            syncing = True
+        if info.get('shared'):
+            shared = True
+
+    return {
+        'kb_count': kb_count,
+        'file_count': file_count,
+        'last_sync_at': last_sync_at,
+        'status': 'syncing' if syncing else 'idle',
+        'syncing': syncing,
+        'suspended_count': suspended_count,
+        'shared': shared,
+    }
+
+
+@router.get('/cloud-sync/status')
+async def get_cloud_sync_status(request: Request, user=Depends(get_admin_user)):
+    """Per-provider cloud-sync status summary for the admin Cloud Sync panel.
+
+    Cheap (one KB query per provider + one grouped file-count query) so it can
+    be polled while syncs run. Providers with no KBs return zero-state entries.
+    """
+    from open_webui.models.knowledge import Knowledges
+
+    status: dict[str, dict] = {}
+
+    for provider in CLOUD_SYNC_PROVIDERS:
+        slug = provider['slug']
+        meta_key = provider['meta_key']
+
+        knowledge_bases = await Knowledges.get_knowledge_bases_by_type(provider['type'])
+        file_counts = await Knowledges.get_file_counts_by_knowledge_ids([kb.id for kb in knowledge_bases])
+
+        sync_infos: list[dict] = []
+        for kb in knowledge_bases:
+            info = dict((kb.meta or {}).get(meta_key, {}) or {})
+            info['_file_count'] = file_counts.get(kb.id, 0)
+            sync_infos.append(info)
+
+        status[slug] = _aggregate_provider_status(sync_infos)
+
+    return status
+
+
+####################################
 # External Agents Config
 ####################################
 

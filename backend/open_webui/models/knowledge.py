@@ -564,6 +564,25 @@ class KnowledgeTable:
             )
             return {row[0] for row in result.all()}
 
+    async def get_file_counts_by_knowledge_ids(
+        self, knowledge_ids: list[str], db: Optional[AsyncSession] = None
+    ) -> dict[str, int]:
+        """Return ``{knowledge_id: file_count}`` for the given KBs in one grouped query.
+
+        Used by the cloud-sync status endpoint to size each provider's KBs
+        without an N+1 fan-out over ``get_knowledge_files_*``. KBs with no
+        files are omitted from the result; callers default missing ids to 0.
+        """
+        if not knowledge_ids:
+            return {}
+        async with get_async_db_context(db) as db:
+            result = await db.execute(
+                select(KnowledgeFile.knowledge_id, func.count(KnowledgeFile.file_id))
+                .filter(KnowledgeFile.knowledge_id.in_(knowledge_ids))
+                .group_by(KnowledgeFile.knowledge_id)
+            )
+            return {row[0]: row[1] for row in result.all()}
+
     async def search_files_by_id(
         self,
         knowledge_id: str,
