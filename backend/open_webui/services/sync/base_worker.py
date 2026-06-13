@@ -29,7 +29,7 @@ from open_webui.services.sync.events import (
     emit_file_processing,
     emit_file_added,
 )
-from open_webui.services.sync.pipeline_client import PipelineClient
+from open_webui.services.sync.pipeline_client import PipelineClient, PipelineUnreachableError
 
 log = logging.getLogger(__name__)
 
@@ -1653,6 +1653,20 @@ class BaseSyncWorker(ABC):
             await self._fail_mark_outstanding_stubs(str(e))
             await self._update_sync_status('failed', error=str(e))
             raise
+        except PipelineUnreachableError as e:
+            # Loader-worker / ingestion pipeline could not be reached. This is
+            # transient (the pod may be restarting): fail-mark the stubs so the
+            # KB UI doesn't leave spinners, log a single concise line (no
+            # traceback), and re-raise so sync()'s top-level handler attributes
+            # the failure to the ingestion service and skips the cycle (no
+            # last_sync_at stamp, retry next tick). We intentionally do NOT
+            # stamp a generic 'pipeline submit failed' status here — the
+            # top-level handler sets the accurate loader-worker message.
+            log.warning(
+                f'Failed to submit loader-worker job for {self.knowledge_id}: ingestion service unreachable ({e})'
+            )
+            await self._fail_mark_outstanding_stubs('Document ingestion service temporarily unreachable')
+            raise
         except Exception as e:
             log.exception(f'Failed to submit loader-worker job: {e}')
             await self._fail_mark_outstanding_stubs(f'pipeline submit failed: {e}')
@@ -2413,18 +2427,39 @@ class BaseSyncWorker(ABC):
             # than re-raising as an unexpected error. The `transient` flag lets
             # the scheduler log a WARNING, and the next tick retries
             # automatically (last_sync_at is not stamped, so the KB stays due).
-            log.warning(f'Sync skipped for {self.knowledge_id}: {self.provider_slug} unreachable ({e})')
-            await self._update_sync_status(
-                'failed',
-                error='Sync source is temporarily unreachable — the next scheduled sync will retry automatically.',
-            )
+            #
+            # Two distinct failure modes share this handler; only the attributed
+            # message and log line differ — control flow (skip cycle, no
+            # last_sync_at stamp, retry next tick) is identical:
+            #   * PipelineUnreachableError → the loader-worker / ingestion
+            #     pipeline is down. The sync source (e.g. Confluence) was
+            #     reached fine; mis-attributing this to the source sends
+            #     operators debugging the wrong system.
+            #   * everything else → the sync source itself is unreachable.
+            if isinstance(e, PipelineUnreachableError):
+                log.warning(
+                    f'Sync skipped for {self.knowledge_id}: document ingestion service (loader-worker) unreachable ({e})'
+                )
+                error_message = (
+                    'Document ingestion service is temporarily unreachable — '
+                    'the next scheduled sync will retry automatically.'
+                )
+                result_error = 'document ingestion service (loader-worker) unreachable'
+            else:
+                log.warning(f'Sync skipped for {self.knowledge_id}: {self.provider_slug} unreachable ({e})')
+                error_message = (
+                    'Sync source is temporarily unreachable — the next scheduled sync will retry automatically.'
+                )
+                result_error = f'{self.provider_slug} unreachable'
+
+            await self._update_sync_status('failed', error=error_message)
             return {
                 'files_processed': 0,
                 'files_failed': 0,
                 'total_found': 0,
                 'deleted_count': 0,
                 'failed_files': [],
-                'error': f'{self.provider_slug} unreachable',
+                'error': result_error,
                 'transient': True,
             }
 
