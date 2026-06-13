@@ -9,11 +9,13 @@
 	import Confluence from '$lib/components/icons/Confluence.svelte';
 	import GoogleDrive from '$lib/components/icons/GoogleDrive.svelte';
 	import OneDrive from '$lib/components/icons/OneDrive.svelte';
+	import Topdesk from '$lib/components/icons/Topdesk.svelte';
 
 	import ProviderCard from './CloudSync/ProviderCard.svelte';
 	import ConfluenceSection from './CloudSync/ConfluenceSection.svelte';
 	import GoogleDriveSection from './CloudSync/GoogleDriveSection.svelte';
 	import OneDriveSection from './CloudSync/OneDriveSection.svelte';
+	import TopdeskSection from './CloudSync/TopdeskSection.svelte';
 	import type {
 		ProviderDescriptor,
 		CloudSyncStatusResponse,
@@ -54,6 +56,14 @@
 			hasTestConnection: false,
 			supportsSharedKb: false,
 			itemNoun: 'files'
+		},
+		{
+			slug: 'topdesk',
+			name: 'TOPdesk',
+			icon: Topdesk,
+			hasTestConnection: true,
+			supportsSharedKb: true,
+			itemNoun: 'items'
 		}
 	];
 
@@ -196,6 +206,15 @@
 						<OneDriveSection
 							bind:this={sectionRefs[descriptor.slug]}
 							bind:enabled={enabledBySlug[descriptor.slug]}
+						/>
+					{:else if descriptor.slug === 'topdesk'}
+						<TopdeskSection
+							bind:this={sectionRefs[descriptor.slug]}
+							bind:enabled={enabledBySlug[descriptor.slug]}
+							beforeSharedKbAction={persistAll}
+							on:provisioned={refreshStatus}
+							on:synced={refreshStatus}
+							on:deleted={refreshStatus}
 						/>
 					{/if}
 				</ProviderCard>

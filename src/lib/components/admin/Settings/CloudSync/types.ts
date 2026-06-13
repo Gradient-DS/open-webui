@@ -101,6 +101,17 @@ export interface ConfluenceConfigResponse {
 	CONFLUENCE_KB_MODE?: string;
 }
 
+export interface TopdeskConfigResponse {
+	ENABLE_TOPDESK_INTEGRATION?: boolean;
+	ENABLE_TOPDESK_SYNC?: boolean;
+	TOPDESK_URL?: string;
+	TOPDESK_USERNAME?: string;
+	TOPDESK_APP_PASSWORD?: string;
+	TOPDESK_SYNC_INTERVAL_MINUTES?: number;
+	// 0 = unlimited.
+	TOPDESK_MAX_ITEMS_PER_SYNC?: number;
+}
+
 export interface GoogleDriveConfigResponse {
 	ENABLE_GOOGLE_DRIVE_INTEGRATION?: boolean;
 	ENABLE_GOOGLE_DRIVE_SYNC?: boolean;
