@@ -93,22 +93,6 @@ def _short(text: str, limit: int = 600) -> str:
     return text if len(text) <= limit else text[:limit] + " …[truncated]"
 
 
-def _auth_diag(r: "httpx.Response") -> str:
-    """Diagnostic headers that reveal the expected auth scheme / what served the
-    response. `WWW-Authenticate: Basic realm=…` confirms TOPdesk wants operator
-    + application-password Basic auth (not the person-token form)."""
-    parts = []
-    wa = r.headers.get("www-authenticate")
-    if wa:
-        parts.append(f"WWW-Authenticate: {wa}")
-    server = r.headers.get("server")
-    if server:
-        parts.append(f"Server: {server}")
-    return ("  " + _DIM + " | ".join(parts) + _RST) if parts else (
-        f"  {_DIM}(no WWW-Authenticate header — likely a proxy/SPA page, not the API){_RST}"
-    )
-
-
 # ── candidate paths (from research §2/§3) ────────────────────────────────────
 REST_PROBES = [
     "/tas/api/version",
@@ -195,8 +179,9 @@ def rest_probes(client: httpx.Client, base: str) -> None:
             body = _short(r.text, 300) if "json" in ctype or len(r.text) < 300 else f"<{len(r.text)} bytes {ctype}>"
             _ok(f"GET {path} → 200  {_DIM}{body}{_RST}")
         elif r.status_code in (401, 403):
-            _bad(f"GET {path} → {r.status_code} (auth rejected / not permitted)")
-            print(_auth_diag(r))
+            chal = r.headers.get("www-authenticate")
+            extra = f'  {_DIM}WWW-Authenticate: {chal}{_RST}' if chal else ""
+            _bad(f"GET {path} → {r.status_code} (auth rejected / not permitted){extra}")
         elif r.status_code == 404:
             _info(f"GET {path} → 404 (endpoint not present on this tenant)")
         else:
@@ -239,8 +224,6 @@ def discover_graphql(client: httpx.Client, base: str, forced_path: Optional[str]
             _info(f"POST {path} → 404 (not here)")
         else:
             _bad(f"POST {path} → {r.status_code} {ctype} (not GraphQL: {_short(r.text, 120)})")
-            if r.status_code in (401, 403):
-                print(_auth_diag(r))
         time.sleep(0.3)
     _bad("No candidate responded GraphQL-shaped. Pass the real path with --graphql-path.")
     return None
