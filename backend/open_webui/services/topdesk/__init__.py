@@ -1,8 +1,8 @@
 """TOPdesk Knowledge Base sync services.
 
-Phase 2.3 ships the auth helpers and the GraphQL client. Later phases extend
-this package (sync worker, provider, scheduler, sync events) and re-export them
-here, mirroring ``services/confluence/__init__.py``.
+Ships the auth helpers, the GraphQL client, the sync worker, the sync provider /
+token manager, the background scheduler, and the Socket.IO sync-event forwarder,
+mirroring ``services/confluence/__init__.py``.
 """
 
 from open_webui.services.topdesk.topdesk_client import (
@@ -19,6 +19,16 @@ from open_webui.services.topdesk.auth import (
     get_service_site,
     build_client,
 )
+from open_webui.services.topdesk.sync_worker import TopdeskSyncWorker
+from open_webui.services.topdesk.provider import (
+    TopdeskSyncProvider,
+    TopdeskTokenManager,
+)
+from open_webui.services.topdesk.sync_events import emit_sync_progress
+from open_webui.services.topdesk.scheduler import (
+    start_scheduler,
+    stop_scheduler,
+)
 
 __all__ = [
     'TopdeskClient',
@@ -31,4 +41,10 @@ __all__ = [
     'build_auth_header',
     'get_service_site',
     'build_client',
+    'TopdeskSyncWorker',
+    'TopdeskSyncProvider',
+    'TopdeskTokenManager',
+    'emit_sync_progress',
+    'start_scheduler',
+    'stop_scheduler',
 ]
