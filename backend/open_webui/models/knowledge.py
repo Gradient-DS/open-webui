@@ -142,6 +142,14 @@ class KnowledgeFileListResponse(BaseModel):
 
 SUSPENSION_TTL_DAYS = 30
 
+# Knowledge ``meta`` keys written by every cloud-sync worker (one per provider —
+# see each worker's ``meta_key`` property). Used by the suspension lookups below
+# to answer "is this KB synced by ANY provider?". Keep this in sync with the
+# providers registered in the sync factory. NOTE: this is the FULL set including
+# per-user providers; it is intentionally broader than
+# ``services.sync.shared_kb.SHARED_SYNC_META_KEYS`` (shared providers only).
+SYNC_PROVIDER_META_KEYS = ('onedrive_sync', 'google_drive_sync', 'confluence_sync', 'topdesk_sync')
+
 
 class KnowledgeTable:
     async def _get_access_grants(self, knowledge_id: str, db: Optional[AsyncSession] = None) -> list[AccessGrantModel]:
@@ -299,7 +307,7 @@ class KnowledgeTable:
 
                     # Annotate suspension info for cloud KBs
                     if knowledge_base.type not in ('local',) and knowledge_base.meta:
-                        for meta_key in ('onedrive_sync', 'google_drive_sync', 'confluence_sync'):
+                        for meta_key in SYNC_PROVIDER_META_KEYS:
                             sync_info = (knowledge_base.meta or {}).get(meta_key, {})
                             suspended_at = sync_info.get('suspended_at')
                             if suspended_at:
@@ -947,7 +955,7 @@ class KnowledgeTable:
             expired = []
             for kb in candidates:
                 meta = kb.meta or {}
-                for meta_key in ('onedrive_sync', 'google_drive_sync', 'confluence_sync'):
+                for meta_key in SYNC_PROVIDER_META_KEYS:
                     sync_info = meta.get(meta_key, {})
                     suspended_at = sync_info.get('suspended_at')
                     if suspended_at and suspended_at < cutoff:
@@ -968,7 +976,7 @@ class KnowledgeTable:
                 if not knowledge:
                     return False
                 meta = knowledge.meta or {}
-                for meta_key in ('onedrive_sync', 'google_drive_sync', 'confluence_sync'):
+                for meta_key in SYNC_PROVIDER_META_KEYS:
                     sync_info = meta.get(meta_key, {})
                     if sync_info.get('suspended_at'):
                         return True
@@ -985,7 +993,7 @@ class KnowledgeTable:
                 if not knowledge:
                     return None
                 meta = knowledge.meta or {}
-                for meta_key in ('onedrive_sync', 'google_drive_sync', 'confluence_sync'):
+                for meta_key in SYNC_PROVIDER_META_KEYS:
                     sync_info = meta.get(meta_key, {})
                     suspended_at = sync_info.get('suspended_at')
                     if suspended_at:
