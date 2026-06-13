@@ -209,8 +209,9 @@ async def browse_items(
             'TOPdesk is not configured. Save the TOPdesk URL and application password first.',
         )
 
-    client = build_client()
+    client = None
     try:
+        client = build_client()
         if parent_id:
             nodes = await client.list_item_children(parent_id)
         else:
@@ -225,8 +226,18 @@ async def browse_items(
         raise HTTPException(502, f'TOPdesk query failed: {e}')
     except ConnectionError as e:
         raise HTTPException(502, str(e))
+    except HTTPException:
+        # Never let the catch-all below remap an HTTPException we raised on purpose.
+        raise
+    except Exception as e:
+        # Catch-all so an unexpected error (malformed GraphQL not wrapped in
+        # TopdeskGraphQLError, a _picker_item bug on an odd node, etc.) surfaces
+        # as a clean 502 instead of a raw 500 + stacktrace to the admin.
+        log.exception('TOPdesk browse_items failed unexpectedly: %s', e)
+        raise HTTPException(502, 'TOPdesk request failed.')
     finally:
-        await client.close()
+        if client is not None:
+            await client.close()
 
 
 # ──────────────────────────────────────────────────────────────────────
