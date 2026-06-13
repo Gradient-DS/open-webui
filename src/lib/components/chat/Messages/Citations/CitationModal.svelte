@@ -27,7 +27,6 @@
 	export let showRelevance = true;
 
 	let mergedDocuments = [];
-	let selectedTab = 'preview';
 	let previewAvailable = true;
 
 	// Active snippet (left rail) — drives the highlight in the right viewer.
@@ -71,7 +70,6 @@
 
 	$: if (citation) {
 		expandedDocs = new Set();
-		selectedTab = 'preview';
 		activeSnippetIdx = 0;
 		mergedDocuments = citation.document?.map((c, i) => {
 			return {
@@ -129,16 +127,22 @@
 	// Check if file is still available when modal opens
 	$: if (show && fileId) {
 		previewAvailable = true;
-		fetch(`${WEBUI_API_BASE_URL}/files/${fileId}/content`, { method: 'HEAD' })
+		// Authenticate the availability probe with the Bearer token (same as the
+		// rest of the app). Cookie-only auth 401s when the cookie isn't sent,
+		// which would wrongly flag the file as unavailable and drop to the
+		// content fallback instead of the preview.
+		const headAuthToken = localStorage.getItem('token');
+		fetch(`${WEBUI_API_BASE_URL}/files/${fileId}/content`, {
+			method: 'HEAD',
+			headers: headAuthToken ? { authorization: `Bearer ${headAuthToken}` } : {}
+		})
 			.then((res) => {
 				if (!res.ok) {
 					previewAvailable = false;
-					selectedTab = 'content';
 				}
 			})
 			.catch(() => {
 				previewAvailable = false;
-				selectedTab = 'content';
 			});
 	}
 
@@ -335,30 +339,10 @@
 		</div>
 
 		<div class="flex flex-col w-full px-5 pb-5">
-			<!-- Tab switcher: only shown for previewable file types with available files -->
+			<!-- Split-view preview when a document preview is available; the
+			     single-column content view below is the fallback (no file_id,
+			     missing file, or web source) — there is no Content toggle. -->
 			{#if isPreviewable && previewAvailable}
-				<div class="flex gap-1 mb-3">
-					<button
-						class="px-3 py-1 text-xs font-medium rounded-lg transition {selectedTab === 'preview'
-							? 'bg-gray-100 dark:bg-gray-800 text-gray-900 dark:text-gray-100'
-							: 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300'}"
-						on:click={() => (selectedTab = 'preview')}
-					>
-						{$i18n.t('Preview')}
-					</button>
-					<button
-						class="px-3 py-1 text-xs font-medium rounded-lg transition {selectedTab === 'content'
-							? 'bg-gray-100 dark:bg-gray-800 text-gray-900 dark:text-gray-100'
-							: 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300'}"
-						on:click={() => (selectedTab = 'content')}
-					>
-						{$i18n.t('Content')}
-					</button>
-				</div>
-			{/if}
-
-			<!-- Preview tab -->
-			{#if isPreviewable && previewAvailable && selectedTab === 'preview'}
 				{#if showSnippetRail}
 					<!-- Split view: cited snippets (left) + rendered document (right) -->
 					<div class="flex flex-col md:flex-row w-full gap-3 h-[70vh]">

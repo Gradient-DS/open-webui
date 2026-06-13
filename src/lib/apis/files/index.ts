@@ -290,10 +290,16 @@ export const updateFileDataContentById = async (token: string, id: string, conte
 export const getFileContentById = async (id: string) => {
 	let error = null;
 
+	// Authenticate with the Bearer token like the rest of the app. Relying on
+	// the cookie alone (credentials:'include') 401s whenever the cookie isn't
+	// sent (OAuth login, non-localhost host, SameSite/expiry), which surfaced
+	// as failed DOCX/XLSX previews. credentials kept as a fallback.
+	const authToken = localStorage.getItem('token');
 	const res = await fetch(`${WEBUI_API_BASE_URL}/files/${id}/content`, {
 		method: 'GET',
 		headers: {
-			Accept: 'application/json'
+			Accept: 'application/json',
+			...(authToken ? { authorization: `Bearer ${authToken}` } : {})
 		},
 		credentials: 'include'
 	})

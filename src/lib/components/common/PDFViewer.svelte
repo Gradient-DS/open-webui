@@ -368,8 +368,16 @@
 			if (data) {
 				pdfData = data;
 			} else {
-				// Fetch with credentials so auth cookies are sent
-				const res = await fetch(url!, { credentials: 'include' });
+				// Authenticate like the rest of the app: send the Bearer token from
+				// localStorage. The /files/{id}/content endpoint needs auth; relying
+				// on the cookie alone (credentials:'include') 401s whenever the cookie
+				// isn't sent (OAuth login, non-localhost host, SameSite/expiry) —
+				// which surfaces as "Failed to load PDF". credentials kept as a fallback.
+				const authToken = localStorage.getItem('token');
+				const res = await fetch(url!, {
+					credentials: 'include',
+					headers: authToken ? { authorization: `Bearer ${authToken}` } : {}
+				});
 				if (!res.ok) throw new Error(`HTTP ${res.status}`);
 				pdfData = await res.arrayBuffer();
 			}
