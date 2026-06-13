@@ -165,28 +165,44 @@
 		xlsxHtml = '';
 		try {
 			const buffer = await getFileContentById(id);
+			// Stale-load guard: the `citation` prop may switch files mid-flight.
+			// `loadedOfficeFileId` always holds the latest requested id, so if it no
+			// longer equals `id` a newer load has started — discard this one's results
+			// without touching shared state (no render, no highlight). The latest load
+			// owns the final write.
+			if (id !== loadedOfficeFileId) return;
 			if (!buffer) {
 				officeError = true;
 				return;
 			}
 			if (asDocx) {
-				docxHtml = await renderDocxHtml(buffer);
+				const html = await renderDocxHtml(buffer);
+				if (id !== loadedOfficeFileId) return;
+				docxHtml = html;
 				// Stop loading first so the container renders, then highlight it.
 				officeLoading = false;
 				await tick();
+				if (id !== loadedOfficeFileId) return;
 				highlightActiveDocx();
 				return;
 			}
-			xlsxWorkbook = await readWorkbook(buffer);
-			xlsxSheetNames = xlsxWorkbook.SheetNames;
+			const workbook = await readWorkbook(buffer);
+			if (id !== loadedOfficeFileId) return;
+			xlsxWorkbook = workbook;
+			xlsxSheetNames = workbook.SheetNames;
 			if (xlsxSheetNames.length > 0) {
 				await selectSheet(xlsxSheetNames[0]);
 			}
 		} catch (error) {
 			console.error('Office preview load error:', error);
+			if (id !== loadedOfficeFileId) return;
 			officeError = true;
 		} finally {
-			officeLoading = false;
+			// Only the latest load may clear the spinner; a superseded load must not
+			// flip `officeLoading` for the file that replaced it.
+			if (id === loadedOfficeFileId) {
+				officeLoading = false;
+			}
 		}
 	};
 
