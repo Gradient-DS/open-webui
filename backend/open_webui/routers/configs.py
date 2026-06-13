@@ -966,21 +966,40 @@ async def set_confluence_config(
 ):
     c = request.app.state.config
 
+    # Compute the effective auth/KB modes up front, applying the coupling
+    # ``basic ⇒ shared``: basic (service-account) auth has no per-user OAuth
+    # tokens, so it can only drive the pre-synced shared KB. The admin form
+    # enforces this too, but a stored ``basic + per_user`` state would otherwise
+    # leak through to /api/config and mislead the chat '+' menu. Both the
+    # orphan-guard below and the persisted values use these effective modes.
+    # (Only Confluence has a per-user mode; TOPdesk is always shared.)
+    if form_data.CONFLUENCE_AUTH_MODE is not None:
+        # Guard against arbitrary values; only the two known modes are valid.
+        _auth = form_data.CONFLUENCE_AUTH_MODE.strip()
+        effective_auth = _auth if _auth in ('oauth', 'basic') else 'oauth'
+    else:
+        effective_auth = c.CONFLUENCE_AUTH_MODE
+    if form_data.CONFLUENCE_KB_MODE is not None:
+        # Guard against arbitrary values; only the two known modes are valid.
+        _kb = form_data.CONFLUENCE_KB_MODE.strip()
+        requested_kb = _kb if _kb in ('per_user', 'shared') else 'per_user'
+    else:
+        requested_kb = c.CONFLUENCE_KB_MODE
+    effective_kb = 'shared' if effective_auth == 'basic' else requested_kb
+
     # Block switching away from the pre-synced shared mode while a shared KB is
     # still provisioned — otherwise the toggle (a pure config write with no KB
     # lifecycle) would orphan it. The admin must delete the shared KB first.
-    # Only Confluence has a per-user mode; TOPdesk is always shared, so it needs
-    # no equivalent guard.
-    if form_data.CONFLUENCE_KB_MODE is not None:
-        incoming_mode = form_data.CONFLUENCE_KB_MODE.strip()
-        if incoming_mode != 'shared':
-            from open_webui.services.sync.shared_kb import find_shared_kb
+    # Uses the effective mode, so a basic-auth save (forced to shared) never
+    # trips it.
+    if effective_kb != 'shared':
+        from open_webui.services.sync.shared_kb import find_shared_kb
 
-            if await find_shared_kb('confluence', 'confluence_sync') is not None:
-                raise HTTPException(
-                    status_code=400,
-                    detail='Delete the shared Confluence knowledge base before switching to on-request (per-user) mode.',
-                )
+        if await find_shared_kb('confluence', 'confluence_sync') is not None:
+            raise HTTPException(
+                status_code=400,
+                detail='Delete the shared Confluence knowledge base before switching to on-request (per-user) mode.',
+            )
 
     if form_data.ENABLE_CONFLUENCE_INTEGRATION is not None:
         c.ENABLE_CONFLUENCE_INTEGRATION = form_data.ENABLE_CONFLUENCE_INTEGRATION
@@ -994,20 +1013,15 @@ async def set_confluence_config(
         c.CONFLUENCE_SYNC_INTERVAL_MINUTES = form_data.CONFLUENCE_SYNC_INTERVAL_MINUTES
     if form_data.CONFLUENCE_MAX_PAGES_PER_SYNC is not None:
         c.CONFLUENCE_MAX_PAGES_PER_SYNC = max(0, form_data.CONFLUENCE_MAX_PAGES_PER_SYNC)
-    if form_data.CONFLUENCE_AUTH_MODE is not None:
-        # Guard against arbitrary values; only the two known modes are valid.
-        mode = form_data.CONFLUENCE_AUTH_MODE.strip()
-        c.CONFLUENCE_AUTH_MODE = mode if mode in ('oauth', 'basic') else 'oauth'
     if form_data.CONFLUENCE_SITE_URL is not None:
         c.CONFLUENCE_SITE_URL = form_data.CONFLUENCE_SITE_URL.strip().rstrip('/')
     if form_data.CONFLUENCE_BASIC_AUTH_USERNAME is not None:
         c.CONFLUENCE_BASIC_AUTH_USERNAME = form_data.CONFLUENCE_BASIC_AUTH_USERNAME.strip()
     if form_data.CONFLUENCE_BASIC_AUTH_API_TOKEN is not None:
         c.CONFLUENCE_BASIC_AUTH_API_TOKEN = form_data.CONFLUENCE_BASIC_AUTH_API_TOKEN.strip()
-    if form_data.CONFLUENCE_KB_MODE is not None:
-        # Guard against arbitrary values; only the two known modes are valid.
-        mode = form_data.CONFLUENCE_KB_MODE.strip()
-        c.CONFLUENCE_KB_MODE = mode if mode in ('per_user', 'shared') else 'per_user'
+    # Persist the coupled effective modes so the stored state is self-consistent.
+    c.CONFLUENCE_AUTH_MODE = effective_auth
+    c.CONFLUENCE_KB_MODE = effective_kb
     return await get_confluence_config(request, user)
 
 

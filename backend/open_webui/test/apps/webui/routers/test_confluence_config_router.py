@@ -111,3 +111,73 @@ def test_switch_to_per_user_allowed_when_no_shared_kb():
     assert res.json()['CONFLUENCE_KB_MODE'] == 'per_user'
     assert app.state.config.CONFLUENCE_KB_MODE == 'per_user'
     find_mock.assert_awaited_once_with('confluence', 'confluence_sync')
+
+
+def test_basic_auth_coerces_per_user_to_shared():
+    # Coupling ``basic ⇒ shared``: a basic-auth save with kb_mode='per_user' must
+    # be coerced to 'shared' on write, and must NOT 400 even when a shared KB
+    # exists (the effective mode is shared, so the orphan guard never fires).
+    app = _make_app()
+    client = TestClient(app)
+    fake_kb = SimpleNamespace(id='kb-1', user_id='owner-1', meta={'confluence_sync': {'shared': True}})
+
+    with patch(
+        'open_webui.services.sync.shared_kb.find_shared_kb',
+        AsyncMock(return_value=fake_kb),
+    ):
+        res = client.post(
+            '/api/v1/configs/confluence',
+            json={'CONFLUENCE_AUTH_MODE': 'basic', 'CONFLUENCE_KB_MODE': 'per_user'},
+        )
+
+    assert res.status_code == 200
+    assert res.json()['CONFLUENCE_AUTH_MODE'] == 'basic'
+    assert res.json()['CONFLUENCE_KB_MODE'] == 'shared'
+    assert app.state.config.CONFLUENCE_AUTH_MODE == 'basic'
+    assert app.state.config.CONFLUENCE_KB_MODE == 'shared'
+
+
+def test_oauth_per_user_still_blocked_when_shared_kb_exists():
+    # The orphan guard stays intact for oauth: switching to per_user while a
+    # shared KB exists must still 400 (coupling only forces shared for basic).
+    app = _make_app()
+    client = TestClient(app)
+    fake_kb = SimpleNamespace(id='kb-1', user_id='owner-1', meta={'confluence_sync': {'shared': True}})
+
+    with patch(
+        'open_webui.services.sync.shared_kb.find_shared_kb',
+        AsyncMock(return_value=fake_kb),
+    ) as find_mock:
+        res = client.post(
+            '/api/v1/configs/confluence',
+            json={'CONFLUENCE_AUTH_MODE': 'oauth', 'CONFLUENCE_KB_MODE': 'per_user'},
+        )
+
+    assert res.status_code == 400
+    assert res.json()['detail'] == _DETAIL
+    find_mock.assert_awaited_once_with('confluence', 'confluence_sync')
+    # Nothing persisted — the guard raised before any write.
+    assert app.state.config.CONFLUENCE_KB_MODE == 'shared'
+
+
+def test_oauth_per_user_allowed_when_no_shared_kb():
+    # oauth + per_user with no shared KB is unaffected by the coupling: it
+    # persists as per_user.
+    app = _make_app()
+    client = TestClient(app)
+
+    with patch(
+        'open_webui.services.sync.shared_kb.find_shared_kb',
+        AsyncMock(return_value=None),
+    ) as find_mock:
+        res = client.post(
+            '/api/v1/configs/confluence',
+            json={'CONFLUENCE_AUTH_MODE': 'oauth', 'CONFLUENCE_KB_MODE': 'per_user'},
+        )
+
+    assert res.status_code == 200
+    assert res.json()['CONFLUENCE_AUTH_MODE'] == 'oauth'
+    assert res.json()['CONFLUENCE_KB_MODE'] == 'per_user'
+    assert app.state.config.CONFLUENCE_AUTH_MODE == 'oauth'
+    assert app.state.config.CONFLUENCE_KB_MODE == 'per_user'
+    find_mock.assert_awaited_once_with('confluence', 'confluence_sync')

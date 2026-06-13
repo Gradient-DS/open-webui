@@ -3152,11 +3152,19 @@ async def get_app_config(request: Request):
     if user is None:
         onboarding = user_count == 0
 
+    # Coupling ``basic ⇒ shared``: basic (service-account) auth has no per-user
+    # OAuth tokens, so it can only drive the pre-synced shared KB. Coerce a
+    # stored ``basic + per_user`` state to shared at read time so an already-
+    # inconsistent config is corrected without requiring a re-save.
+    _confluence_kb_mode = (
+        'shared' if app.state.config.CONFLUENCE_AUTH_MODE == 'basic' else app.state.config.CONFLUENCE_KB_MODE
+    )
+
     # Shared Confluence KB id — surfaced so the chat '+' menu can attach the
     # shared, public-read KB in one click (shared mode only). Empty string
     # when not in shared mode or the KB has not been provisioned yet.
     confluence_shared_kb_id = ''
-    if app.state.config.CONFLUENCE_KB_MODE == 'shared':
+    if _confluence_kb_mode == 'shared':
         from open_webui.routers.confluence_sync import _find_shared_kb
 
         _shared_kb = await _find_shared_kb()
@@ -3294,7 +3302,8 @@ async def get_app_config(request: Request):
                     ),
                     # KB sharing mode — drives whether non-admins see Confluence
                     # self-service create entry points (hidden in 'shared' mode).
-                    'confluence_kb_mode': app.state.config.CONFLUENCE_KB_MODE,
+                    # Coerced via the ``basic ⇒ shared`` coupling above.
+                    'confluence_kb_mode': _confluence_kb_mode,
                     # Shared-KB id for the chat '+' menu one-click attach.
                     'confluence_shared_kb_id': confluence_shared_kb_id,
                     'enable_topdesk_integration': app.state.config.ENABLE_TOPDESK_INTEGRATION,
