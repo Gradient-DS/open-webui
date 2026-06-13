@@ -113,12 +113,14 @@
 		applyConfluenceConfig(config);
 		// Owner dropdown is limited to admins — they are the only valid owners of
 		// a shared, org-wide knowledge base.
-		adminUsers = ((users?.users ?? []) as {
-			id: string;
-			name: string;
-			email: string;
-			role: string;
-		}[])
+		adminUsers = (
+			(users?.users ?? []) as {
+				id: string;
+				name: string;
+				email: string;
+				role: string;
+			}[]
+		)
 			.filter((u) => u.role === 'admin')
 			.map((u) => ({ id: u.id, name: u.name, email: u.email }));
 		sharedKbStatus = shared;
@@ -135,6 +137,19 @@
 	// orchestrator's Save, the shared-KB `beforeAction`) can decide whether to
 	// continue. Payload shape is identical to the monolith's.
 	export async function persist() {
+		// Block switching away from the pre-synced shared mode while a shared KB is
+		// still provisioned — otherwise the toggle would orphan it. The admin must
+		// delete the now-visible shared KB first. The backend 400 is the
+		// authoritative backstop; this gives immediate feedback before the round-trip.
+		// Thrown so the orchestrator's persistAll (Promise.all over persist()) aborts the Save.
+		if (CONFLUENCE_KB_MODE !== 'shared' && sharedKbStatus?.provisioned) {
+			const message = $i18n.t(
+				'Delete the shared Confluence knowledge base before switching to on-request (per-user) mode.'
+			);
+			toast.error(message);
+			throw new Error(message);
+		}
+
 		const config = await setConfluenceConfig(localStorage.token, {
 			ENABLE_CONFLUENCE_INTEGRATION,
 			ENABLE_CONFLUENCE_SYNC,
@@ -384,7 +399,11 @@
 				<div>
 					<div class="mb-1 text-xs text-gray-500">{$i18n.t('API token')}</div>
 					<div class="flex gap-2">
-						<SensitiveInput bind:value={basicApiToken} required={false} autocomplete="new-password" />
+						<SensitiveInput
+							bind:value={basicApiToken}
+							required={false}
+							autocomplete="new-password"
+						/>
 					</div>
 				</div>
 
@@ -425,7 +444,11 @@
 						{$i18n.t('Confluence OAuth Client Secret')}
 					</div>
 					<div class="flex gap-2">
-						<SensitiveInput bind:value={clientSecret} required={false} autocomplete="new-password" />
+						<SensitiveInput
+							bind:value={clientSecret}
+							required={false}
+							autocomplete="new-password"
+						/>
 					</div>
 				</div>
 			</div>
@@ -440,7 +463,7 @@
 			/>
 		</div>
 
-		{#if CONFLUENCE_KB_MODE === 'shared'}
+		{#if CONFLUENCE_KB_MODE === 'shared' || sharedKbStatus?.provisioned}
 			<div class="pt-4">
 				<SharedKbSection
 					api={sharedKbApi}

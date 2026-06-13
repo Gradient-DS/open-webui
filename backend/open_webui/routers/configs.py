@@ -965,6 +965,23 @@ async def set_confluence_config(
     user=Depends(get_admin_user),
 ):
     c = request.app.state.config
+
+    # Block switching away from the pre-synced shared mode while a shared KB is
+    # still provisioned — otherwise the toggle (a pure config write with no KB
+    # lifecycle) would orphan it. The admin must delete the shared KB first.
+    # Only Confluence has a per-user mode; TOPdesk is always shared, so it needs
+    # no equivalent guard.
+    if form_data.CONFLUENCE_KB_MODE is not None:
+        incoming_mode = form_data.CONFLUENCE_KB_MODE.strip()
+        if incoming_mode != 'shared':
+            from open_webui.services.sync.shared_kb import find_shared_kb
+
+            if await find_shared_kb('confluence', 'confluence_sync') is not None:
+                raise HTTPException(
+                    status_code=400,
+                    detail='Delete the shared Confluence knowledge base before switching to on-request (per-user) mode.',
+                )
+
     if form_data.ENABLE_CONFLUENCE_INTEGRATION is not None:
         c.ENABLE_CONFLUENCE_INTEGRATION = form_data.ENABLE_CONFLUENCE_INTEGRATION
     if form_data.ENABLE_CONFLUENCE_SYNC is not None:
