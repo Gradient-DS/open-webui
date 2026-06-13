@@ -462,6 +462,12 @@ Run these against the client's TOPdesk 2025 R2+ tenant once the API key is avail
       confirm it resolves to that item (validates `id == unid`).
 - [ ] **Permissions/visibility:** confirm a read-only operator sees the intended items
       and that `visibility`/`status` let us exclude operator-internal/draft items.
+- [ ] **Intermediate-node `status`:** confirm whether non-leaf "folder"/parent
+      knowledge items carry a `status` field at all. The sync worker
+      (`services/topdesk/sync_worker.py:_walk_descendants`) deliberately descends
+      through every node regardless of status — so a draft/status-less parent does
+      not hide its published descendants — and only emits published nodes. Verify
+      this matches real tree shape (and that descending draft parents is desired).
 
 ---
 

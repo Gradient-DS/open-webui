@@ -392,6 +392,12 @@ class TopdeskSyncWorker(BaseSyncWorker):
                 if not child_id or child_id in visited:
                     continue
                 visited.add(child_id)
+                # Always descend, regardless of the node's own status: a draft
+                # (or status-less) intermediate node may still have published
+                # descendants we want to sync. Only published nodes are emitted.
+                # NOTE (inferred schema): whether intermediate "folder" nodes
+                # even carry a `status` is unconfirmed — see the live-verification
+                # checklist in thoughts/shared/research/2026-06-topdesk-api-verification.md.
                 frontier.append(child_id)
                 if _is_published(child):
                     out.append(child)
