@@ -44,6 +44,7 @@
 	import Knobs from '$lib/components/icons/Knobs.svelte';
 	import OneDrive from '$lib/components/icons/OneDrive.svelte';
 	import Confluence from '$lib/components/icons/Confluence.svelte';
+	import Topdesk from '$lib/components/icons/Topdesk.svelte';
 
 	import Chats from './InputMenu/Chats.svelte';
 	import Notes from './InputMenu/Notes.svelte';
@@ -96,7 +97,7 @@
 	// When non-null, restricts the menu to only the listed item keys.
 	// Item keys match the strings passed to ``pinItemHandler`` —
 	// 'upload_files', 'capture', 'attach_webpage', 'attach_notes',
-	// 'google_drive', 'onedrive', 'confluence', 'knowledge',
+	// 'google_drive', 'onedrive', 'confluence', 'topdesk', 'knowledge',
 	// 'reference_chats', 'tools', 'filters'. Default null = upstream
 	// behavior, every globally-enabled item shows.
 	export let restrictTo: string[] | null = null;
@@ -110,7 +111,8 @@
 		'attach_notes',
 		'google_drive',
 		'onedrive',
-		'confluence'
+		'confluence',
+		'topdesk'
 	].some((k) => itemAllowed(k));
 	$: anyDatabaseAllowed = ['knowledge', 'reference_chats'].some((k) => itemAllowed(k));
 	$: anyCapabilityAllowed = ['tools', 'filters'].some((k) => itemAllowed(k));
@@ -223,6 +225,34 @@
 	// in MessageInput can reuse the same attach flow without duplicating it.
 	export const attachSharedConfluenceKb = async () => {
 		const kbId = $config?.features?.confluence_shared_kb_id;
+		if (!kbId) {
+			return;
+		}
+		show = false;
+
+		const kb = await getKnowledgeById(localStorage.token, kbId).catch((error) => {
+			toast.error(`${error}`);
+			return null;
+		});
+		if (!kb) {
+			return;
+		}
+
+		onSelect({
+			...kb,
+			knowledge_type: kb.type,
+			type: 'collection'
+		});
+	};
+
+	// One-click attach of the shared, read-only TOPdesk KB. TOPdesk has only this
+	// shared surface (no per-user picker), so the entry is gated purely on the
+	// integration flag + a provisioned shared-KB id. Mirrors the Confluence
+	// shared-mode attach: the KB carries a user:*:read grant, so getKnowledgeById
+	// resolves for any user and the resulting collection matches picking it from
+	// the Knowledge submenu.
+	export const attachSharedTopdeskKb = async () => {
+		const kbId = $config?.features?.topdesk_shared_kb_id;
 		if (!kbId) {
 			return;
 		}
@@ -625,6 +655,35 @@
 										on:click|stopPropagation={() => pinItemHandler('confluence')}
 									>
 										{#if pinnedInputItems.includes('confluence')}
+											<PinSlash className="size-3.5" />
+										{:else}
+											<Pin className="size-3.5" />
+										{/if}
+									</button>
+								</Tooltip>
+							</button>
+						{/if}
+
+						<!-- TOPdesk — one-click attach of the shared, read-only KB.
+						     TOPdesk has no per-user picker, so the only surface is this
+						     shared shortcut, gated on the integration flag + a
+						     provisioned shared-KB id. -->
+						{#if $config?.features?.enable_topdesk_integration && $config?.features?.topdesk_shared_kb_id && itemAllowed('topdesk')}
+							<button
+								class="flex gap-2 w-full text-left items-center px-3 py-1.5 text-sm cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800/50 rounded-xl"
+								type="button"
+								on:click={attachSharedTopdeskKb}
+							>
+								<Topdesk className="size-4" />
+								<div class="flex-1 line-clamp-1">{$i18n.t('TOPdesk knowledge base')}</div>
+								<Tooltip
+									content={pinnedInputItems.includes('topdesk') ? $i18n.t('Unpin') : $i18n.t('Pin')}
+								>
+									<button
+										class="p-1 rounded-md hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+										on:click|stopPropagation={() => pinItemHandler('topdesk')}
+									>
+										{#if pinnedInputItems.includes('topdesk')}
 											<PinSlash className="size-3.5" />
 										{:else}
 											<Pin className="size-3.5" />
