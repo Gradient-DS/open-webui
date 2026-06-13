@@ -1,10 +1,10 @@
 <script lang="ts">
 	import type { WorkBook } from 'xlsx';
-	import DOMPurify from 'dompurify';
 
 	import { getContext, onMount, tick } from 'svelte';
 
 	import { formatFileSize, getLineCount } from '$lib/utils';
+	import { renderDocxHtml, readWorkbook, renderSheetHtml } from '$lib/utils/officePreview';
 	import { WEBUI_API_BASE_URL } from '$lib/constants';
 	import { settings } from '$lib/stores';
 	import { getKnowledgeById } from '$lib/apis/knowledge';
@@ -161,11 +161,9 @@
 	const loadExcelContent = async () => {
 		try {
 			excelError = '';
-			const [arrayBuffer, { read }] = await Promise.all([
-				getFileContentById(item.id),
-				import('xlsx')
-			]);
-			excelWorkbook = read(arrayBuffer, { type: 'array' });
+			const arrayBuffer = await getFileContentById(item.id);
+			if (!arrayBuffer) throw new Error('Empty file content');
+			excelWorkbook = await readWorkbook(arrayBuffer);
 			excelSheetNames = excelWorkbook.SheetNames;
 
 			if (excelSheetNames.length > 0) {
@@ -180,10 +178,8 @@
 
 	const renderExcelSheet = async () => {
 		if (!excelWorkbook || !selectedSheet) return;
-		const { excelToTable } = await import('$lib/utils/excelToTable');
-		const worksheet = excelWorkbook.Sheets[selectedSheet];
-		const result = await excelToTable(worksheet);
-		excelHtml = DOMPurify.sanitize(result.html);
+		const result = await renderSheetHtml(excelWorkbook, selectedSheet);
+		excelHtml = result.html;
 		rowCount = result.rowCount;
 	};
 
@@ -194,12 +190,9 @@
 	const loadDocxContent = async () => {
 		try {
 			docxError = '';
-			const [arrayBuffer, mammoth] = await Promise.all([
-				getFileContentById(item.id),
-				import('mammoth')
-			]);
-			const result = await mammoth.convertToHtml({ arrayBuffer });
-			docxHtml = DOMPurify.sanitize(result.value);
+			const arrayBuffer = await getFileContentById(item.id);
+			if (!arrayBuffer) throw new Error('Empty file content');
+			docxHtml = await renderDocxHtml(arrayBuffer);
 		} catch (error) {
 			console.error('Error loading DOCX file:', error);
 			docxError = $i18n.t('Failed to load DOCX file. Please try downloading it instead.');

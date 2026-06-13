@@ -28,6 +28,7 @@
 		type FileEntry
 	} from '$lib/apis/terminal';
 	import { isCodeFile } from '$lib/utils/codeHighlight';
+	import { renderDocxHtml, readWorkbook, renderSheetHtml } from '$lib/utils/officePreview';
 	import Folder from '../icons/Folder.svelte';
 	import Document from '../icons/Document.svelte';
 	import PenAlt from '../icons/PenAlt.svelte';
@@ -442,21 +443,15 @@
 				const arrayBuffer = await result.blob.arrayBuffer();
 				try {
 					if (ext === 'docx') {
-						const mammoth = await import('mammoth');
-						const res = await mammoth.convertToHtml({ arrayBuffer });
-						const DOMPurify = (await import('dompurify')).default;
-						fileOfficeHtml = DOMPurify.sanitize(res.value);
+						fileOfficeHtml = await renderDocxHtml(arrayBuffer);
 					} else if (ext === 'xlsx') {
-						const XLSX = await import('xlsx');
-						const wb = XLSX.read(new Uint8Array(arrayBuffer), { type: 'array' });
+						const wb = await readWorkbook(arrayBuffer);
 						excelWorkbook = wb;
 						excelSheetNames = wb.SheetNames;
 						if (excelSheetNames.length > 0) {
 							selectedExcelSheet = excelSheetNames[0];
-							const { excelToTable } = await import('$lib/utils/excelToTable');
-							const result = await excelToTable(wb.Sheets[selectedExcelSheet]);
-							const DOMPurify = (await import('dompurify')).default;
-							fileOfficeHtml = DOMPurify.sanitize(result.html);
+							const { html } = await renderSheetHtml(wb, selectedExcelSheet);
+							fileOfficeHtml = html;
 						}
 					} else if (ext === 'pptx') {
 						const { pptxToImages } = await import('$lib/utils/pptxToHtml');
@@ -1281,10 +1276,8 @@
 					onSheetChange={async (sheet) => {
 						if (!excelWorkbook) return;
 						selectedExcelSheet = sheet;
-						const { excelToTable } = await import('$lib/utils/excelToTable');
-						const result = await excelToTable(excelWorkbook.Sheets[sheet]);
-						const DOMPurify = (await import('dompurify')).default;
-						fileOfficeHtml = DOMPurify.sanitize(result.html);
+						const { html } = await renderSheetHtml(excelWorkbook, sheet);
+						fileOfficeHtml = html;
 					}}
 					baseUrl={selectedTerminal?.url ?? ''}
 					apiKey={selectedTerminal?.key ?? ''}
