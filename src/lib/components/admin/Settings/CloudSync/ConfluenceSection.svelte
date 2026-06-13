@@ -140,14 +140,13 @@
 		// Block switching away from the pre-synced shared mode while a shared KB is
 		// still provisioned — otherwise the toggle would orphan it. The admin must
 		// delete the now-visible shared KB first. The backend 400 is the
-		// authoritative backstop; this gives immediate feedback before the round-trip.
-		// Thrown so the orchestrator's persistAll (Promise.all over persist()) aborts the Save.
+		// authoritative backstop; this aborts the Save before the round-trip. We
+		// throw the bare message (not toast + throw) so the orchestrator's persistAll
+		// catch surfaces it as a single clean toast, matching the backend-error path.
 		if (CONFLUENCE_KB_MODE !== 'shared' && sharedKbStatus?.provisioned) {
-			const message = $i18n.t(
+			throw $i18n.t(
 				'Delete the shared Confluence knowledge base before switching to on-request (per-user) mode.'
 			);
-			toast.error(message);
-			throw new Error(message);
 		}
 
 		const config = await setConfluenceConfig(localStorage.token, {
