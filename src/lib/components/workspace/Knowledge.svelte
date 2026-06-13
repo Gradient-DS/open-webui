@@ -285,7 +285,7 @@
 								</button>
 							{/if}
 
-							{#if $config?.features?.enable_confluence_integration && $config?.features?.enable_confluence_sync && ($user?.role === 'admin' || $config?.features?.confluence_kb_mode !== 'shared')}
+							{#if $config?.features?.enable_confluence_integration && $config?.features?.enable_confluence_sync && $config?.features?.confluence_kb_mode === 'per_user'}
 								<button
 									class="flex gap-2 w-full items-center px-3 py-1.5 text-sm cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-xl"
 									type="button"
