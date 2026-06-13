@@ -424,16 +424,6 @@
 						class="flex mb-2.5 scrollbar-none overflow-x-auto w-full border-b border-gray-50 dark:border-gray-850/30 text-center text-sm font-medium bg-transparent dark:text-gray-200"
 					>
 						<button
-							class="min-w-fit py-1.5 px-4 border-b {selectedTab === ''
-								? ' '
-								: ' border-transparent text-gray-300 dark:text-gray-600 hover:text-gray-700 dark:hover:text-white'} transition"
-							type="button"
-							on:click={() => {
-								selectedTab = '';
-							}}>{$i18n.t('Content')}</button
-						>
-
-						<button
 							class="min-w-fit py-1.5 px-4 border-b {selectedTab === 'preview'
 								? ' '
 								: ' border-transparent text-gray-300 dark:text-gray-600 hover:text-gray-700 dark:hover:text-white'} transition"
@@ -441,6 +431,16 @@
 							on:click={() => {
 								selectedTab = 'preview';
 							}}>{$i18n.t('Preview')}</button
+						>
+
+						<button
+							class="min-w-fit py-1.5 px-4 border-b {selectedTab === ''
+								? ' '
+								: ' border-transparent text-gray-300 dark:text-gray-600 hover:text-gray-700 dark:hover:text-white'} transition"
+							type="button"
+							on:click={() => {
+								selectedTab = '';
+							}}>{$i18n.t('Content')}</button
 						>
 
 						{#if hasAttachments}
