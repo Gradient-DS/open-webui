@@ -8,6 +8,9 @@
 	export let url: string | null = null;
 	export let data: ArrayBuffer | Uint8Array | null = null;
 	export let className = 'w-full h-[70vh]';
+	// `highlightText` / `initialPage` are read at render time, not watched
+	// reactively. To change the highlight after the PDF has loaded (e.g. on
+	// snippet switch) call setHighlight(...) rather than mutating these props.
 	// Cited passage to highlight in the text layer (null/empty = no highlight).
 	export let highlightText: string | null = null;
 	// 1-indexed page to jump to when nothing matches the highlight text.
@@ -123,6 +126,8 @@
 	/**
 	 * Update the highlighted passage on the already-rendered text layers without
 	 * re-rendering the PDF canvases, then re-scroll. Cheap snippet switching.
+	 * Safe to call before the first render completes: the new values are stored
+	 * on the props and honored when render runs.
 	 */
 	export function setHighlight(text: string | null, page: number | null) {
 		highlightText = text;
