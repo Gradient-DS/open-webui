@@ -360,6 +360,20 @@ class TopdeskSyncWorker(BaseSyncWorker):
         Bounded by ``_seen_item_ids``-independent local visited set so a
         cyclic/duplicated tree cannot loop forever; the cross-source
         ``_seen_item_ids`` dedupe still applies later in ``_collect_folder_files``.
+
+        FAIL-SAFE ENUMERATION (matches Confluence's ``_list_pages_for_source``):
+        a child-fetch error is NOT swallowed. If it were, a transient TOPdesk
+        hiccup mid-walk would silently truncate the freshly-enumerated set, and
+        ``_collect_folder_files``'s set-difference deletion would treat the
+        still-published-but-unenumerated subtree as deleted — yanking File rows +
+        vectors out of the KB until the next clean sync re-adds them. Letting the
+        error propagate aborts the cycle in ``BaseSyncWorker.sync`` BEFORE any
+        deletion runs (``ConnectionError`` → transient skip path; everything else
+        → status='failed' + re-raise), so a partial enumeration can never drive a
+        deletion. A genuinely empty subtree is fine: ``list_item_children``
+        returns ``[]`` for a leaf (and for a missing/absent item, since GraphQL
+        resolves it to null), so absence is data, not an error — only a real fetch
+        failure aborts.
         """
         client = self._client_handle()
         out: List[Dict[str, Any]] = []
@@ -368,11 +382,11 @@ class TopdeskSyncWorker(BaseSyncWorker):
 
         while frontier:
             parent_id = frontier.pop()
-            try:
-                children = await client.list_item_children(parent_id)
-            except Exception as e:
-                log.warning('TOPdesk child fetch failed for item %s: %s', parent_id, e)
-                continue
+            # No try/except: any error here (TopdeskTransientError,
+            # ConnectionError, TopdeskAuthError, TopdeskGraphQLError, …) must
+            # propagate so the base worker aborts the cycle without running the
+            # set-difference deletion against a partial enumeration.
+            children = await client.list_item_children(parent_id)
             for child in children:
                 child_id = child.get('id')
                 if not child_id or child_id in visited:

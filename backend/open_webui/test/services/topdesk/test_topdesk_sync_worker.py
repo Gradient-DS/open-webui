@@ -274,6 +274,140 @@ def test_walk_descendants_filters_unpublished_children():
 
 
 # ---------------------------------------------------------------------
+# Fail-safe enumeration — a transient child-fetch error must NOT drive deletion
+# ---------------------------------------------------------------------
+
+
+def _children_then_raise(first_children, error):
+    """Child-fetch side-effect: yield ``first_children`` for the root, then raise.
+
+    Simulates a transient hiccup mid-walk: the root's children are returned, but
+    listing a deeper parent's children fails. With the fail-safe walk this must
+    propagate (aborting the cycle) rather than silently truncate the enumeration.
+    """
+    calls = {'n': 0}
+
+    async def _children(_item_id):
+        calls['n'] += 1
+        if calls['n'] == 1:
+            return first_children
+        raise error
+
+    return AsyncMock(side_effect=_children)
+
+
+def test_walk_descendants_propagates_transient_error():
+    """A mid-walk TopdeskTransientError propagates instead of being swallowed."""
+    from open_webui.services.topdesk.topdesk_client import TopdeskTransientError
+
+    children_node = _fixture('item_children.json')['data']['knowledgeItem']
+    client = _stub_client()
+    client.list_item_children = _children_then_raise(
+        children_node['children'], TopdeskTransientError('5xx exhausted', status_code=503)
+    )
+    worker = _make_worker(client)
+
+    try:
+        _run(worker._walk_descendants('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'))
+        raised = False
+    except TopdeskTransientError:
+        raised = True
+    assert raised, 'transient child-fetch error must propagate, not be swallowed'
+
+
+def test_walk_descendants_propagates_connection_error():
+    """A mid-walk ConnectionError propagates (base worker maps it to a transient skip)."""
+    children_node = _fixture('item_children.json')['data']['knowledgeItem']
+    client = _stub_client()
+    client.list_item_children = _children_then_raise(children_node['children'], ConnectionError('down'))
+    worker = _make_worker(client)
+
+    try:
+        _run(worker._walk_descendants('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'))
+        raised = False
+    except ConnectionError:
+        raised = True
+    assert raised
+
+
+def test_collect_folder_transient_walk_error_does_not_delete():
+    """A transient error while walking a subtree aborts collection without deleting.
+
+    The previously-tracked items in ``item_map`` must NOT be handed to
+    ``_handle_deleted_item``: the enumeration never completed, so a partial
+    ``current_ids`` must never drive the set-difference deletion. The error
+    propagates so ``BaseSyncWorker.sync`` aborts the cycle before any deletion.
+    """
+    from open_webui.services.topdesk.topdesk_client import TopdeskTransientError
+
+    children_node = _fixture('item_children.json')['data']['knowledgeItem']
+    root = _knowledge_item('item_with_content.json')
+    client = _stub_client(get_knowledge_item=root)
+    client.list_item_children = _children_then_raise(
+        children_node['children'], TopdeskTransientError('5xx exhausted', status_code=503)
+    )
+    worker = _make_worker(client)
+    source = {
+        'type': 'folder',
+        'item_id': root['id'],
+        'include_descendants': True,
+        # Several items tracked last run — none must be deleted on a transient blip.
+        'item_map': {root['id']: root['modificationDate'], 'tracked-a': 't', 'tracked-b': 't'},
+    }
+    deleted_calls: list = []
+
+    async def _record_delete(it):
+        deleted_calls.append(it['id'])
+
+    with (
+        patch.object(worker, '_handle_deleted_item', new=AsyncMock(side_effect=_record_delete)),
+        patch('open_webui.services.topdesk.sync_worker.Files.get_file_by_id', new=AsyncMock(return_value=None)),
+    ):
+        try:
+            _run(worker._collect_folder_files(source))
+            raised = False
+        except TopdeskTransientError:
+            raised = True
+
+    assert raised, 'collection must abort by propagating the transient error'
+    assert deleted_calls == [], 'no item may be deleted from a partial enumeration'
+    # item_map must be left intact — collection never reached the rewrite.
+    assert source['item_map'] == {root['id']: root['modificationDate'], 'tracked-a': 't', 'tracked-b': 't'}
+
+
+def test_collect_folder_connection_error_does_not_delete():
+    """A ConnectionError while walking a subtree aborts collection without deleting."""
+    children_node = _fixture('item_children.json')['data']['knowledgeItem']
+    root = _knowledge_item('item_with_content.json')
+    client = _stub_client(get_knowledge_item=root)
+    client.list_item_children = _children_then_raise(children_node['children'], ConnectionError('down'))
+    worker = _make_worker(client)
+    source = {
+        'type': 'folder',
+        'item_id': root['id'],
+        'include_descendants': True,
+        'item_map': {root['id']: root['modificationDate'], 'tracked-a': 't'},
+    }
+    deleted_calls: list = []
+
+    async def _record_delete(it):
+        deleted_calls.append(it['id'])
+
+    with (
+        patch.object(worker, '_handle_deleted_item', new=AsyncMock(side_effect=_record_delete)),
+        patch('open_webui.services.topdesk.sync_worker.Files.get_file_by_id', new=AsyncMock(return_value=None)),
+    ):
+        try:
+            _run(worker._collect_folder_files(source))
+            raised = False
+        except ConnectionError:
+            raised = True
+
+    assert raised
+    assert deleted_calls == []
+
+
+# ---------------------------------------------------------------------
 # Document build — front-matter + markdown + byte cap
 # ---------------------------------------------------------------------
 
