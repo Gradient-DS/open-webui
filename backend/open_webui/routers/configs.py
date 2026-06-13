@@ -1003,10 +1003,11 @@ class TopdeskConfigForm(BaseModel):
     ENABLE_TOPDESK_INTEGRATION: Optional[bool] = None
     ENABLE_TOPDESK_SYNC: Optional[bool] = None
     TOPDESK_URL: Optional[str] = None
-    # Operator login (optional) → HTTP Basic; login empty → person-token. The
-    # API token is the secret used in either header form.
+    # Operator login name + application password → HTTP Basic; login empty →
+    # person-token. The application password is the secret used in either header
+    # form.
     TOPDESK_USERNAME: Optional[str] = None
-    TOPDESK_API_TOKEN: Optional[str] = None
+    TOPDESK_APP_PASSWORD: Optional[str] = None
     TOPDESK_SYNC_INTERVAL_MINUTES: Optional[int] = None
     TOPDESK_MAX_ITEMS_PER_SYNC: Optional[int] = None  # 0 = unlimited
 
@@ -1022,7 +1023,7 @@ async def get_topdesk_config(request: Request, user=Depends(get_admin_user)):
         # Admin-only endpoint; same disclosure profile as the Confluence
         # basic-auth token, which round-trips the value masked behind a reveal
         # toggle in the UI.
-        'TOPDESK_API_TOKEN': c.TOPDESK_API_TOKEN,
+        'TOPDESK_APP_PASSWORD': c.TOPDESK_APP_PASSWORD,
         'TOPDESK_SYNC_INTERVAL_MINUTES': c.TOPDESK_SYNC_INTERVAL_MINUTES,
         'TOPDESK_MAX_ITEMS_PER_SYNC': c.TOPDESK_MAX_ITEMS_PER_SYNC,
     }
@@ -1043,8 +1044,8 @@ async def set_topdesk_config(
         c.TOPDESK_URL = form_data.TOPDESK_URL.strip().rstrip('/')
     if form_data.TOPDESK_USERNAME is not None:
         c.TOPDESK_USERNAME = form_data.TOPDESK_USERNAME.strip()
-    if form_data.TOPDESK_API_TOKEN is not None:
-        c.TOPDESK_API_TOKEN = form_data.TOPDESK_API_TOKEN.strip()
+    if form_data.TOPDESK_APP_PASSWORD is not None:
+        c.TOPDESK_APP_PASSWORD = form_data.TOPDESK_APP_PASSWORD.strip()
     if form_data.TOPDESK_SYNC_INTERVAL_MINUTES is not None:
         c.TOPDESK_SYNC_INTERVAL_MINUTES = form_data.TOPDESK_SYNC_INTERVAL_MINUTES
     if form_data.TOPDESK_MAX_ITEMS_PER_SYNC is not None:

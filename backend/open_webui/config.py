@@ -3263,24 +3263,25 @@ TOPDESK_URL = PersistentConfig(
     os.environ.get('TOPDESK_URL', ''),
 )
 
-# Service credential. The same secret (API token) feeds either auth-header form;
-# which form is used depends on whether an operator login (username) is set:
-#   - login set   → HTTP Basic, ``Authorization: Basic base64(login:api_token)``
-#   - login empty → person-token form, ``Authorization: TOKEN id="<api_token>"``
-# The operator login is optional — leave it empty to authenticate with the API
-# token directly. The token is returned in full (unmasked) by the admin-only
-# config API and masked client-side via SensitiveInput — same disclosure profile
-# as the Confluence basic-auth token.
+# Service credential. The standard form is the operator login name + application
+# password sent as HTTP Basic, ``Authorization: Basic base64(login:app_password)``.
+# The same application password feeds either auth-header form; which form is used
+# depends on whether an operator login (username) is set:
+#   - login set   → HTTP Basic, ``Authorization: Basic base64(login:app_password)``
+#   - login empty → person-token form, ``Authorization: TOKEN id="<app_password>"``
+# The application password is returned in full (unmasked) by the admin-only config
+# API and masked client-side via SensitiveInput — same disclosure profile as the
+# Confluence basic-auth token.
 TOPDESK_USERNAME = PersistentConfig(
     'TOPDESK_USERNAME',
     'topdesk.username',
     os.environ.get('TOPDESK_USERNAME', ''),
 )
 
-TOPDESK_API_TOKEN = PersistentConfig(
-    'TOPDESK_API_TOKEN',
-    'topdesk.api_token',
-    os.environ.get('TOPDESK_API_TOKEN', ''),
+TOPDESK_APP_PASSWORD = PersistentConfig(
+    'TOPDESK_APP_PASSWORD',
+    'topdesk.app_password',
+    os.environ.get('TOPDESK_APP_PASSWORD', ''),
 )
 
 TOPDESK_SYNC_INTERVAL_MINUTES = PersistentConfig(

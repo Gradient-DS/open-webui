@@ -46,12 +46,12 @@
 	let ENABLE_TOPDESK_SYNC = false;
 	let TOPDESK_URL = '';
 	let TOPDESK_USERNAME = '';
-	// The API token round-trips through the form like the upstream Connections
-	// (API key) field — visible to the admin masked behind a reveal toggle via
-	// SensitiveInput, sent back verbatim on save. It is the primary credential
-	// and feeds either auth-header form (Basic when an operator login is set,
-	// TOKEN id="..." otherwise).
-	let apiToken = '';
+	// The application password round-trips through the form like the upstream
+	// Connections (API key) field — visible to the admin masked behind a reveal
+	// toggle via SensitiveInput, sent back verbatim on save. It is the operator
+	// credential and feeds either auth-header form (Basic with the operator login
+	// name when set, TOKEN id="..." otherwise).
+	let appPassword = '';
 	let TOPDESK_SYNC_INTERVAL_MINUTES = 60;
 	let TOPDESK_MAX_ITEMS_PER_SYNC: number | null = 500;
 	let testingConnection = false;
@@ -74,7 +74,7 @@
 		ENABLE_TOPDESK_SYNC = config.ENABLE_TOPDESK_SYNC ?? false;
 		TOPDESK_URL = config.TOPDESK_URL ?? '';
 		TOPDESK_USERNAME = config.TOPDESK_USERNAME ?? '';
-		apiToken = config.TOPDESK_API_TOKEN ?? '';
+		appPassword = config.TOPDESK_APP_PASSWORD ?? '';
 		TOPDESK_SYNC_INTERVAL_MINUTES = config.TOPDESK_SYNC_INTERVAL_MINUTES ?? 60;
 		TOPDESK_MAX_ITEMS_PER_SYNC = config.TOPDESK_MAX_ITEMS_PER_SYNC ?? 0;
 	};
@@ -88,12 +88,14 @@
 		applyTopdeskConfig(config);
 		// Owner dropdown is limited to admins — they are the only valid owners of
 		// a shared, org-wide knowledge base.
-		adminUsers = ((users?.users ?? []) as {
-			id: string;
-			name: string;
-			email: string;
-			role: string;
-		}[])
+		adminUsers = (
+			(users?.users ?? []) as {
+				id: string;
+				name: string;
+				email: string;
+				role: string;
+			}[]
+		)
 			.filter((u) => u.role === 'admin')
 			.map((u) => ({ id: u.id, name: u.name, email: u.email }));
 		sharedKbStatus = shared;
@@ -114,7 +116,7 @@
 			ENABLE_TOPDESK_SYNC,
 			TOPDESK_URL,
 			TOPDESK_USERNAME,
-			TOPDESK_API_TOKEN: apiToken,
+			TOPDESK_APP_PASSWORD: appPassword,
 			TOPDESK_SYNC_INTERVAL_MINUTES,
 			// Blank/null input → 0 = no per-sync item limit.
 			TOPDESK_MAX_ITEMS_PER_SYNC: TOPDESK_MAX_ITEMS_PER_SYNC ?? 0
@@ -160,15 +162,15 @@
 			.filter((n) => n)
 			.join(', ') || $i18n.t('None');
 
-	// Probe the service credential currently in the form. A blank API-token
-	// field falls back server-side to the saved token.
+	// Probe the service credential currently in the form. A blank
+	// application-password field falls back server-side to the saved credential.
 	const testConnection = async () => {
 		testingConnection = true;
 		try {
 			const result = await testTopdeskConnection(localStorage.token, {
 				url: TOPDESK_URL,
 				username: TOPDESK_USERNAME,
-				api_token: apiToken
+				app_password: appPassword
 			});
 			if (result.ok) {
 				toast.success($i18n.t('TOPdesk connection successful.'));
@@ -217,14 +219,7 @@
 			</div>
 
 			<div>
-				<div class="mb-1 text-xs text-gray-500">{$i18n.t('API token')}</div>
-				<div class="flex gap-2">
-					<SensitiveInput bind:value={apiToken} required={false} autocomplete="new-password" />
-				</div>
-			</div>
-
-			<div>
-				<div class="mb-1 text-xs text-gray-500">{$i18n.t('Operator login (optional)')}</div>
+				<div class="mb-1 text-xs text-gray-500">{$i18n.t('Login name')}</div>
 				<input
 					class="w-full text-sm bg-transparent outline-hidden"
 					type="text"
@@ -232,8 +227,18 @@
 					autocomplete="off"
 				/>
 				<div class="mt-1 text-xs text-gray-500">
+					{$i18n.t('The login name of the TOPdesk operator (API account).')}
+				</div>
+			</div>
+
+			<div>
+				<div class="mb-1 text-xs text-gray-500">{$i18n.t('Application password')}</div>
+				<div class="flex gap-2">
+					<SensitiveInput bind:value={appPassword} required={false} autocomplete="new-password" />
+				</div>
+				<div class="mt-1 text-xs text-gray-500">
 					{$i18n.t(
-						'Optional — only for operator (Basic) auth; leave empty to authenticate with the API token.'
+						"The application password created in TOPdesk under the operator's User menu → Application passwords."
 					)}
 				</div>
 			</div>

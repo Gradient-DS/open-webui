@@ -17,7 +17,7 @@ from typing import Literal
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 from open_webui.config import (
-    TOPDESK_API_TOKEN,
+    TOPDESK_APP_PASSWORD,
     TOPDESK_URL,
     TOPDESK_USERNAME,
 )
@@ -72,7 +72,7 @@ class TopdeskTestConnectionForm(BaseModel):
 
     url: str | None = None
     username: str | None = None
-    api_token: str | None = None
+    app_password: str | None = None
 
 
 class TopdeskKbItem(BaseModel):
@@ -119,20 +119,20 @@ async def test_connection(
     Admin-only. Builds a client from the submitted credentials (falling back to
     stored config for blank fields) and runs ``probe()`` (operators/current with
     a version fallback). Returns ``{ok, detail, item_count?}``. A blank
-    ``api_token`` reuses the stored credential. The operator login is optional.
+    ``app_password`` reuses the stored credential. The operator login is optional.
     """
     url = (form_data.url or TOPDESK_URL.value or '').strip().rstrip('/')
     username = (form_data.username or TOPDESK_USERNAME.value or '').strip()
-    # Blank token → fall back to the stored credential.
-    api_token = form_data.api_token if form_data.api_token else (TOPDESK_API_TOKEN.value or '')
+    # Blank application password → fall back to the stored credential.
+    app_password = form_data.app_password if form_data.app_password else (TOPDESK_APP_PASSWORD.value or '')
 
-    if not url or not api_token:
+    if not url or not app_password:
         return {
             'ok': False,
-            'detail': 'TOPdesk URL and API token are required.',
+            'detail': 'TOPdesk URL and application password are required.',
         }
 
-    client = TopdeskClient(base_url=url, username=username, api_token=api_token)
+    client = TopdeskClient(base_url=url, username=username, app_password=app_password)
     try:
         result = await client.probe()
         return {
@@ -142,7 +142,7 @@ async def test_connection(
     except TopdeskAuthError:
         return {
             'ok': False,
-            'detail': 'Authentication failed — check the API token (and operator login, if set).',
+            'detail': 'Authentication failed — check the application password (and operator login, if set).',
         }
     except TopdeskTransientError as e:
         code = e.status_code

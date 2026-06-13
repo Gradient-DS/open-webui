@@ -481,7 +481,7 @@ openWebui:
     enableTopdeskIntegration: "false"
     topdeskUrl: ""                    # e.g. https://your-tenant.topdesk.net
     topdeskUsername: ""
-    # topdeskApiToken is set via secrets
+    # topdeskAppPassword is set via secrets
 
     # TOPdesk Sync (for Knowledge Bases)
     enableTopdeskSync: "false"
@@ -868,9 +868,10 @@ secrets:
   # Confluence basic-auth API token (leave empty to disable basic auth)
   confluenceBasicAuthApiToken: ""
 
-  # TOPdesk API token (the secret; leave empty to disable). Used as HTTP Basic
-  # secret when an operator login is set, else as the TOKEN id value.
-  topdeskApiToken: ""
+  # TOPdesk application password (the secret; leave empty to disable). Used as
+  # the HTTP Basic secret with the operator login name, else as the TOKEN id
+  # value when no login is set.
+  topdeskAppPassword: ""
 
   # Email Graph API (leave empty to disable email invites)
   emailGraphClientSecret: ""
@@ -951,7 +952,7 @@ externalSecrets:
       googleDriveApiKey: false
       confluenceOauthClientSecret: false
       confluenceBasicAuthApiToken: false
-      topdeskApiToken: false
+      topdeskAppPassword: false
       externalDocumentLoaderApiKey: false
       ragExternalRerankerApiKey: false
       agentApiKey: false

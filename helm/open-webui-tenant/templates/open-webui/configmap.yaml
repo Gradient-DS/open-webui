@@ -340,7 +340,7 @@ data:
   {{- end }}
 
   # TOPdesk Integration (GraphQL + basic auth)
-  # TOPDESK_API_TOKEN is set via the secrets template.
+  # TOPDESK_APP_PASSWORD is set via the secrets template.
   ENABLE_TOPDESK_INTEGRATION: {{ .Values.openWebui.config.enableTopdeskIntegration | quote }}
   {{- if .Values.openWebui.config.topdeskUrl }}
   TOPDESK_URL: {{ .Values.openWebui.config.topdeskUrl | quote }}

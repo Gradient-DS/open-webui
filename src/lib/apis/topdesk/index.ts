@@ -28,7 +28,7 @@ async function apiFetch<T>(url: string, init?: RequestInit): Promise<T> {
 export interface TopdeskTestConnectionPayload {
 	url?: string;
 	username?: string;
-	api_token?: string;
+	app_password?: string;
 }
 
 export interface TopdeskTestConnectionResult {

@@ -107,7 +107,7 @@ export interface TopdeskConfigResponse {
 	ENABLE_TOPDESK_SYNC?: boolean;
 	TOPDESK_URL?: string;
 	TOPDESK_USERNAME?: string;
-	TOPDESK_API_TOKEN?: string;
+	TOPDESK_APP_PASSWORD?: string;
 	TOPDESK_SYNC_INTERVAL_MINUTES?: number;
 	// 0 = unlimited.
 	TOPDESK_MAX_ITEMS_PER_SYNC?: number;
