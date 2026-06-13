@@ -494,7 +494,14 @@
 											{/if}
 										</div>
 
-										{#if item?.write_access || $user?.role === 'admin'}
+										<!-- Managed pre-synced shared KBs (Confluence/TOPdesk) are read-only
+										     and admin-managed: their lifecycle (delete / re-provision) lives in
+										     the Cloud Sync admin panel, and the backend blocks delete/reset via
+										     _assert_not_managed_shared_kb. So suppress the per-KB Export/Delete
+										     menu here for EVERYONE, including admins — otherwise it offers
+										     actions that are either inappropriate (export of a synced mirror)
+										     or backend-blocked (delete). -->
+										{#if (item?.write_access || $user?.role === 'admin') && !(item?.meta?.confluence_sync?.shared || item?.meta?.topdesk_sync?.shared)}
 											<div class="flex items-center gap-2">
 												<div class=" flex self-center">
 													<ItemMenu
