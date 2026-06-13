@@ -22,13 +22,12 @@
 	import { toast } from 'svelte-sonner';
 
 	import Modal from '$lib/components/common/Modal.svelte';
-	import Checkbox from '$lib/components/common/Checkbox.svelte';
 	import Spinner from '$lib/components/common/Spinner.svelte';
-	import ChevronRight from '$lib/components/icons/ChevronRight.svelte';
-	import ChevronDown from '$lib/components/icons/ChevronDown.svelte';
 	import Topdesk from '$lib/components/icons/Topdesk.svelte';
+	import TopdeskPickerNode from './TopdeskPickerNode.svelte';
 
 	import { browseTopdeskItems, type TopdeskBrowseItem, type TopdeskKbItem } from '$lib/apis/topdesk';
+	import type { ItemNode } from './types';
 
 	const i18n = getContext<Writable<i18nType>>('i18n');
 	const dispatch = createEventDispatcher<{ select: { items: TopdeskKbItem[] } }>();
@@ -44,14 +43,8 @@
 	// `has_children` is a best-effort flag (defaults true server-side when
 	// unknown). A node flagged expandable that yields zero children on expand is
 	// marked `loaded` with an empty `children` list and collapses gracefully — the
-	// chevron then renders as a leaf spacer on the next pass.
-	type ItemNode = {
-		item: TopdeskBrowseItem;
-		expanded: boolean;
-		loaded: boolean;
-		loadingChildren: boolean;
-		children: ItemNode[];
-	};
+	// chevron then renders as a leaf spacer on the next pass. The `ItemNode` shape
+	// lives in `./types` so the recursive `TopdeskPickerNode` shares it.
 
 	let loading = false;
 	let rootNodes: ItemNode[] = [];
@@ -210,126 +203,14 @@
 			{:else}
 				<div class="flex flex-col gap-0.5">
 					{#each rootNodes as node (node.item.id)}
-						{@const isLeaf = node.loaded && node.children.length === 0}
-						<div class="flex items-center gap-2 py-1">
-							{#if isLeaf}
-								<span class="inline-block size-[18px]"></span>
-							{:else}
-								<button
-									class="p-0.5 rounded hover:bg-gray-100 dark:hover:bg-gray-800"
-									on:click={() => toggleExpand(node)}
-									aria-label={node.expanded ? $i18n.t('Collapse') : $i18n.t('Expand')}
-								>
-									{#if node.expanded}
-										<ChevronDown className="size-3.5" />
-									{:else}
-										<ChevronRight className="size-3.5" />
-									{/if}
-								</button>
-							{/if}
-							<Checkbox
-								state={selection.has(node.item.id) ? 'checked' : 'unchecked'}
-								on:change={() => toggleSelection(node)}
-							/>
-							<span class="text-sm font-medium">{node.item.name}</span>
-							{#if node.item.number}
-								<span class="text-xs text-gray-400">({node.item.number})</span>
-							{/if}
-						</div>
-
-						{#if node.expanded}
-							<div class="ml-7">
-								{#if node.loadingChildren}
-									<div class="py-2 pl-1"><Spinner className="size-4" /></div>
-								{:else if node.children.length === 0}
-									<div class="py-1 pl-1 text-xs text-gray-400">
-										{$i18n.t('No children.')}
-									</div>
-								{:else}
-									{#each node.children as child (child.item.id)}
-										{@const ancestorCovers = selection.has(node.item.id)}
-										{@const childIsLeaf = child.loaded && child.children.length === 0}
-										<div class="flex items-center gap-2 py-1">
-											{#if childIsLeaf}
-												<span class="inline-block size-[18px]"></span>
-											{:else}
-												<button
-													class="p-0.5 rounded hover:bg-gray-100 dark:hover:bg-gray-800"
-													on:click={() => toggleExpand(child)}
-													aria-label={child.expanded ? $i18n.t('Collapse') : $i18n.t('Expand')}
-												>
-													{#if child.expanded}
-														<ChevronDown className="size-3.5" />
-													{:else}
-														<ChevronRight className="size-3.5" />
-													{/if}
-												</button>
-											{/if}
-											<Checkbox
-												state={ancestorCovers || selection.has(child.item.id)
-													? 'checked'
-													: 'unchecked'}
-												disabled={ancestorCovers}
-												on:change={() => toggleSelection(child)}
-											/>
-											<span class="text-sm">{child.item.name}</span>
-											{#if child.item.number}
-												<span class="text-xs text-gray-400">({child.item.number})</span>
-											{/if}
-										</div>
-
-										{#if child.expanded}
-											<div class="ml-7">
-												{#if child.loadingChildren}
-													<div class="py-2 pl-1"><Spinner className="size-4" /></div>
-												{:else if child.children.length === 0}
-													<div class="py-1 pl-1 text-xs text-gray-400">
-														{$i18n.t('No children.')}
-													</div>
-												{:else}
-													{#each child.children as grandChild (grandChild.item.id)}
-														{@const grandAncestorCovers =
-															selection.has(node.item.id) || selection.has(child.item.id)}
-														{@const grandIsLeaf =
-															grandChild.loaded && grandChild.children.length === 0}
-														<div class="flex items-center gap-2 py-1">
-															{#if grandIsLeaf}
-																<span class="inline-block size-[18px]"></span>
-															{:else}
-																<button
-																	class="p-0.5 rounded hover:bg-gray-100 dark:hover:bg-gray-800"
-																	on:click={() => toggleExpand(grandChild)}
-																	aria-label={grandChild.expanded
-																		? $i18n.t('Collapse')
-																		: $i18n.t('Expand')}
-																>
-																	{#if grandChild.expanded}
-																		<ChevronDown className="size-3.5" />
-																	{:else}
-																		<ChevronRight className="size-3.5" />
-																	{/if}
-																</button>
-															{/if}
-															<Checkbox
-																state={grandAncestorCovers || selection.has(grandChild.item.id)
-																	? 'checked'
-																	: 'unchecked'}
-																disabled={grandAncestorCovers}
-																on:change={() => toggleSelection(grandChild)}
-															/>
-															<span class="text-sm">{grandChild.item.name}</span>
-															{#if grandChild.item.number}
-																<span class="text-xs text-gray-400">({grandChild.item.number})</span>
-															{/if}
-														</div>
-													{/each}
-												{/if}
-											</div>
-										{/if}
-									{/each}
-								{/if}
-							</div>
-						{/if}
+						<TopdeskPickerNode
+							{node}
+							depth={0}
+							ancestorCovers={false}
+							{selection}
+							onToggleSelect={toggleSelection}
+							onToggleExpand={toggleExpand}
+						/>
 					{/each}
 				</div>
 			{/if}

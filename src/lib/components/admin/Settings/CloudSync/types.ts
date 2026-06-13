@@ -7,6 +7,7 @@
 // the Phase 1.3 rewrite.
 
 import type { ComponentType, SvelteComponent } from 'svelte';
+import type { TopdeskBrowseItem } from '$lib/apis/topdesk';
 
 // ─────────────────────────────────────────────────────────────────────
 // Provider descriptor — one entry per cloud-sync provider. The accordion
@@ -161,4 +162,19 @@ export interface SharedKbStatusLike {
 	file_count?: number;
 	progress_current?: number;
 	progress_total?: number;
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// TOPdesk picker tree — UI state for one lazily-expanded knowledge-item
+// node. Shared by `TopdeskPickerModal` (owns the tree + selection) and the
+// recursive `TopdeskPickerNode` (renders a row + its children via
+// `<svelte:self>`, supporting arbitrary nesting depth).
+// ─────────────────────────────────────────────────────────────────────
+
+export interface ItemNode {
+	item: TopdeskBrowseItem;
+	expanded: boolean;
+	loaded: boolean;
+	loadingChildren: boolean;
+	children: ItemNode[];
 }
