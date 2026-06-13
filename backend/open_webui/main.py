@@ -117,6 +117,7 @@ from open_webui.routers import (
     onedrive_sync,
     google_drive_sync,
     confluence_sync,
+    topdesk_sync,
     invites,
     data_warnings,
     terminals,
@@ -987,6 +988,13 @@ async def lifespan(app: FastAPI):
 
     start_confluence_scheduler(app)
 
+    # Start TOPdesk background sync scheduler
+    from open_webui.services.topdesk.scheduler import (
+        start_scheduler as start_topdesk_scheduler,
+    )
+
+    start_topdesk_scheduler(app)
+
     # Start deletion cleanup worker
     from open_webui.services.deletion.cleanup_worker import start_cleanup_worker
 
@@ -1081,6 +1089,13 @@ async def lifespan(app: FastAPI):
     )
 
     stop_confluence_scheduler()
+
+    # Stop TOPdesk background sync scheduler
+    from open_webui.services.topdesk.scheduler import (
+        stop_scheduler as stop_topdesk_scheduler,
+    )
+
+    stop_topdesk_scheduler()
 
     # Shutdown: clean up shared resources (after our schedulers so they release pool slots first)
     from open_webui.utils.session_pool import close_session
@@ -2118,6 +2133,12 @@ app.include_router(google_drive_sync.router, prefix='/api/v1/google-drive', tags
 # runtime via the Cloud Sync admin tab without a pod restart.
 app.include_router(confluence_sync.router, prefix='/api/v1/confluence', tags=['confluence'])
 
+# TOPdesk Sync API for collection synchronization.
+# Mounted unconditionally — endpoints are admin-gated and no-op without config.
+# The router must always be available so TOPdesk can be enabled at runtime via
+# the Cloud Sync admin tab without a pod restart.
+app.include_router(topdesk_sync.router, prefix='/api/v1/topdesk', tags=['topdesk'])
+
 # Invites API (always mounted - Copy Link works without Graph API)
 app.include_router(invites.router, prefix='/api/v1/invites', tags=['invites'])
 app.include_router(data_warnings.router, prefix='/api/v1/data-warnings', tags=['data-warnings'])
@@ -3141,6 +3162,17 @@ async def get_app_config(request: Request):
         _shared_kb = await _find_shared_kb()
         confluence_shared_kb_id = _shared_kb.id if _shared_kb else ''
 
+    # Shared TOPdesk KB id — surfaced so the chat '+' menu can attach the
+    # shared, public-read KB in one click. Resolved only when the integration
+    # is enabled (TOPdesk has a single shared-KB mode, so no kb_mode gate);
+    # empty string otherwise.
+    topdesk_shared_kb_id = ''
+    if app.state.config.ENABLE_TOPDESK_INTEGRATION:
+        from open_webui.services.sync.shared_kb import find_shared_kb as _find_topdesk_shared_kb
+
+        _topdesk_shared_kb = await _find_topdesk_shared_kb('topdesk', 'topdesk_sync')
+        topdesk_shared_kb_id = _topdesk_shared_kb.id if _topdesk_shared_kb else ''
+
     return {
         **({'onboarding': True} if onboarding else {}),
         'status': True,
@@ -3265,6 +3297,16 @@ async def get_app_config(request: Request):
                     'confluence_kb_mode': app.state.config.CONFLUENCE_KB_MODE,
                     # Shared-KB id for the chat '+' menu one-click attach.
                     'confluence_shared_kb_id': confluence_shared_kb_id,
+                    'enable_topdesk_integration': app.state.config.ENABLE_TOPDESK_INTEGRATION,
+                    **(
+                        {
+                            'enable_topdesk_sync': app.state.config.ENABLE_TOPDESK_SYNC,
+                        }
+                        if app.state.config.ENABLE_TOPDESK_INTEGRATION
+                        else {}
+                    ),
+                    # Shared-KB id for the chat '+' menu one-click attach.
+                    'topdesk_shared_kb_id': topdesk_shared_kb_id,
                     'enable_email_invites': app.state.config.ENABLE_EMAIL_INVITES,
                     'enable_agent_proxy': app.state.config.ENABLE_AGENT_PROXY,
                     'feature_agent_api_enabled': AGENT_API_ENABLED,
