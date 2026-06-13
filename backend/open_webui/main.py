@@ -480,6 +480,7 @@ from open_webui.config import (
     ENABLE_USER_STATUS,
     ENABLE_COMMUNITY_SHARING,
     ENABLE_CITATION_RELEVANCE,
+    ENABLE_CITATION_TEXT_HIGHLIGHT,
     ENABLE_MESSAGE_RATING,
     ENABLE_USER_WEBHOOKS,
     ENABLE_EVALUATION_ARENA_MODELS,
@@ -1272,6 +1273,7 @@ app.state.config.ENABLE_CALENDAR = ENABLE_CALENDAR
 app.state.config.ENABLE_NOTES = ENABLE_NOTES
 app.state.config.ENABLE_COMMUNITY_SHARING = ENABLE_COMMUNITY_SHARING
 app.state.config.ENABLE_CITATION_RELEVANCE = ENABLE_CITATION_RELEVANCE
+app.state.config.ENABLE_CITATION_TEXT_HIGHLIGHT = ENABLE_CITATION_TEXT_HIGHLIGHT
 app.state.config.ENABLE_MESSAGE_RATING = ENABLE_MESSAGE_RATING
 app.state.config.ENABLE_USER_WEBHOOKS = ENABLE_USER_WEBHOOKS
 app.state.config.ENABLE_USER_STATUS = ENABLE_USER_STATUS
@@ -3169,6 +3171,7 @@ async def get_app_config(request: Request):
                     'enable_autocomplete_generation': app.state.config.ENABLE_AUTOCOMPLETE_GENERATION,
                     'enable_community_sharing': app.state.config.ENABLE_COMMUNITY_SHARING,
                     'enable_citation_relevance': app.state.config.ENABLE_CITATION_RELEVANCE,
+                    'enable_citation_text_highlight': app.state.config.ENABLE_CITATION_TEXT_HIGHLIGHT,
                     'enable_message_rating': app.state.config.ENABLE_MESSAGE_RATING,
                     'enable_feedback_layer2': app.state.config.ENABLE_FEEDBACK_LAYER2,
                     'feedback_layer2_positive_tags': app.state.config.FEEDBACK_LAYER2_POSITIVE_TAGS,

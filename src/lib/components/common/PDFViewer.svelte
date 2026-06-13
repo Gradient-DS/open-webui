@@ -3,10 +3,25 @@
 	import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.mjs?url';
 	import panzoom, { type PanZoom } from 'panzoom';
 	import Spinner from './Spinner.svelte';
+	import { matchItemsToNeedle, type PageTextItem } from '$lib/utils/citationMatch';
 
 	export let url: string | null = null;
 	export let data: ArrayBuffer | Uint8Array | null = null;
 	export let className = 'w-full h-[70vh]';
+	// `highlightText` / `initialPage` are read at render time, not watched
+	// reactively. To change the highlight after the PDF has loaded (e.g. on
+	// snippet switch) call setHighlight(...) rather than mutating these props.
+	// Cited passage to highlight in the text layer (null/empty = no highlight).
+	export let highlightText: string | null = null;
+	// 1-indexed page to jump to when nothing matches the highlight text.
+	export let initialPage: number | null = null;
+
+	const HIGHLIGHT_CLASS = 'citation-highlight';
+	// A page must accumulate at least this many matched characters to be
+	// treated as the citation's location. Guards against latching onto a short
+	// coincidental phrase (e.g. a title) when the cited text isn't really in
+	// the PDF text layer (scanned pages) — in that case we page-jump instead.
+	const MIN_MATCH_CHARS = 25;
 
 	let outerContainer: HTMLDivElement;
 	let sceneElement: HTMLDivElement;
@@ -20,6 +35,133 @@
 
 	// Keep a reference to TextLayer instances so we can update/cancel them
 	let textLayerInstances: any[] = [];
+	// Per-page text-layer container divs (index 0 == page 1). Lets us re-match
+	// highlights against already-rendered spans without re-rendering canvases.
+	let pageTextLayerDivs: HTMLElement[] = [];
+
+	// --- Citation highlighting -------------------------------------------------
+	//
+	// pdf.js 5.x TextLayer (see node_modules/pdfjs-dist/build/pdf.mjs #appendText)
+	// renders one <span role="presentation"> per text item that has a non-empty
+	// string, optionally wrapped in <span class="markedContent"> grouping spans
+	// (display:contents) and interleaved with <br role="presentation"> for EOLs.
+	// We therefore select leaf text spans only — `span:not(.markedContent)` —
+	// which excludes the marked-content wrappers (selecting plain `span` would
+	// double-count them) and the <br> elements (excluded by tag). Building the
+	// matcher's PageTextItem[] directly from these rendered spans guarantees the
+	// returned indices map exactly onto the spans we highlight: alignment is
+	// correct by construction, independent of marked-content / EOL artefacts.
+
+	const _leafTextSpans = (textLayerDiv: HTMLElement): HTMLSpanElement[] =>
+		Array.from(textLayerDiv.querySelectorAll<HTMLSpanElement>('span:not(.markedContent)'));
+
+	const _itemsFromSpans = (spans: HTMLSpanElement[]): PageTextItem[] =>
+		spans.map((el, index) => ({ str: el.textContent ?? '', index }));
+
+	interface PageMatch {
+		spans: HTMLSpanElement[];
+		hits: number[];
+		/** Total matched characters — used to pick the strongest-matching page. */
+		score: number;
+	}
+
+	/** Score a page's match against `needle` without mutating the DOM. */
+	const _scorePage = (textLayerDiv: HTMLElement, needle: string): PageMatch => {
+		const spans = _leafTextSpans(textLayerDiv);
+		const hits = matchItemsToNeedle(_itemsFromSpans(spans), needle);
+		const score = hits.reduce((sum, i) => sum + (spans[i]?.textContent?.length ?? 0), 0);
+		return { spans, hits, score };
+	};
+
+	/** Remove every citation highlight from all rendered text layers. */
+	const _clearHighlights = () => {
+		for (const textLayerDiv of pageTextLayerDivs) {
+			for (const span of textLayerDiv.querySelectorAll(`span.${HIGHLIGHT_CLASS}`)) {
+				span.classList.remove(HIGHLIGHT_CLASS);
+			}
+		}
+	};
+
+	/**
+	 * Scroll the viewer's scroll container so the target element is centered.
+	 * Scoped to `outerContainer` (computed scrollTop), not the window, so it
+	 * cooperates with panzoom and does not move the whole page.
+	 */
+	// `align`: 'center' keeps the target mid-viewport; 'top' brings it near the
+	// top with a small margin. Citations use 'top' so the START of the matched
+	// passage (or the cited page) is at the top and reads downward, instead of
+	// centering on the first matched line and pushing the rest below the fold.
+	const _scrollContainerTo = (target: HTMLElement, align: 'center' | 'top' = 'center') => {
+		if (!outerContainer) return;
+		const containerRect = outerContainer.getBoundingClientRect();
+		const targetRect = target.getBoundingClientRect();
+		const margin =
+			align === 'top'
+				? Math.min(56, outerContainer.clientHeight * 0.12)
+				: (outerContainer.clientHeight - targetRect.height) / 2;
+		const delta = targetRect.top - containerRect.top - margin;
+		outerContainer.scrollTop += delta;
+	};
+
+	const _scrollToFirstHighlight = (): boolean => {
+		const first = sceneElement?.querySelector<HTMLElement>(`span.${HIGHLIGHT_CLASS}`);
+		if (!first) return false;
+		_scrollContainerTo(first, 'top');
+		return true;
+	};
+
+	const _scrollToPage = (page: number) => {
+		if (!page || page < 1) return;
+		const wrapper = sceneElement?.querySelectorAll<HTMLElement>('.pdf-page-wrapper')[page - 1];
+		if (wrapper) {
+			_scrollContainerTo(wrapper, 'top');
+		}
+	};
+
+	/**
+	 * Highlight only the STRONGEST-matching page and scroll to it. Chunk text
+	 * fragments (titles, headers, repeated phrases) often appear on several
+	 * pages; highlighting every match and scrolling to the first latched onto
+	 * coincidental matches on unrelated pages. Scoring by matched characters and
+	 * keeping only the best page lands on the cited passage's real location.
+	 * Fallback chain: best-page highlight+scroll -> cited-page jump -> nothing.
+	 * Clears prior highlights first.
+	 */
+	const _applyBestMatchHighlight = () => {
+		_clearHighlights();
+		const needle = highlightText?.trim();
+		if (needle) {
+			let best: PageMatch | null = null;
+			for (const textLayerDiv of pageTextLayerDivs) {
+				const page = _scorePage(textLayerDiv, needle);
+				if (page.score > (best?.score ?? 0)) {
+					best = page;
+				}
+			}
+			if (best && best.score >= MIN_MATCH_CHARS) {
+				for (const i of best.hits) {
+					best.spans[i]?.classList.add(HIGHLIGHT_CLASS);
+				}
+				_scrollToFirstHighlight();
+				return;
+			}
+		}
+		if (initialPage) {
+			_scrollToPage(initialPage);
+		}
+	};
+
+	/**
+	 * Update the highlighted passage on the already-rendered text layers without
+	 * re-rendering the PDF canvases, then re-scroll. Cheap snippet switching.
+	 * Safe to call before the first render completes: the new values are stored
+	 * on the props and honored when render runs.
+	 */
+	export function setHighlight(text: string | null, page: number | null) {
+		highlightText = text;
+		initialPage = page;
+		_applyBestMatchHighlight();
+	}
 
 	const initPanzoom = () => {
 		if (pzInstance) {
@@ -100,6 +242,7 @@
 			} catch (_) {}
 		}
 		textLayerInstances = [];
+		pageTextLayerDivs = [];
 
 		for (let i = 0; i < pageWrappers.length; i++) {
 			const page = await pdfDoc.getPage(i + 1);
@@ -135,9 +278,11 @@
 				});
 				await textLayer.render();
 				textLayerInstances.push(textLayer);
+				pageTextLayerDivs.push(textLayerDiv);
 			}
 		}
 		lastRenderedZoom = forZoom;
+		_applyBestMatchHighlight();
 	};
 
 	const renderAllPages = async () => {
@@ -153,10 +298,10 @@
 			} catch (_) {}
 		}
 		textLayerInstances = [];
+		pageTextLayerDivs = [];
 
 		const pdfjs = await import('pdfjs-dist');
 		const dpr = window.devicePixelRatio || 1;
-
 		for (let i = 1; i <= pdfDoc.numPages; i++) {
 			const page = await pdfDoc.getPage(i);
 			const viewport = page.getViewport({ scale: 1 });
@@ -212,12 +357,14 @@
 			});
 			await textLayer.render();
 			textLayerInstances.push(textLayer);
+			pageTextLayerDivs.push(textLayerDiv);
 
 			sceneElement.appendChild(wrapper);
 		}
 
 		lastRenderedZoom = 1;
 		initPanzoom();
+		_applyBestMatchHighlight();
 	};
 
 	const loadPdf = async () => {
@@ -234,8 +381,16 @@
 			if (data) {
 				pdfData = data;
 			} else {
-				// Fetch with credentials so auth cookies are sent
-				const res = await fetch(url!, { credentials: 'include' });
+				// Authenticate like the rest of the app: send the Bearer token from
+				// localStorage. The /files/{id}/content endpoint needs auth; relying
+				// on the cookie alone (credentials:'include') 401s whenever the cookie
+				// isn't sent (OAuth login, non-localhost host, SameSite/expiry) —
+				// which surfaces as "Failed to load PDF". credentials kept as a fallback.
+				const authToken = localStorage.getItem('token');
+				const res = await fetch(url!, {
+					credentials: 'include',
+					headers: authToken ? { authorization: `Bearer ${authToken}` } : {}
+				});
 				if (!res.ok) throw new Error(`HTTP ${res.status}`);
 				pdfData = await res.arrayBuffer();
 			}
@@ -425,5 +580,17 @@
 
 	:global(.textLayer.selecting .endOfContent) {
 		top: 0;
+	}
+
+	/* Citation highlight — applied to leaf text spans by setHighlight().
+	   :global is required because pdf.js (not Svelte) creates these spans. */
+	:global(.textLayer span.citation-highlight) {
+		background: rgba(250, 204, 21, 0.45); /* amber-300 */
+		border-radius: 2px;
+		mix-blend-mode: multiply;
+	}
+	:global(.dark .textLayer span.citation-highlight) {
+		mix-blend-mode: screen;
+		background: rgba(250, 204, 21, 0.35);
 	}
 </style>
