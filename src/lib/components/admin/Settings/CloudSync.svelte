@@ -129,10 +129,7 @@
 		// Child sections mount before the parent's onMount fires (bottom-up
 		// mount order), so `sectionRefs` is already populated here.
 		try {
-			await Promise.all([
-				...Object.values(sectionRefs).map((s) => s?.load?.()),
-				refreshStatus()
-			]);
+			await Promise.all([...Object.values(sectionRefs).map((s) => s?.load?.()), refreshStatus()]);
 		} catch (err) {
 			toast.error(`${err}`);
 		}
@@ -165,7 +162,7 @@
 </script>
 
 <form class="flex flex-col h-full justify-between text-sm" on:submit|preventDefault={submitHandler}>
-	<div class="overflow-y-scroll scrollbar-hidden h-full pr-1.5">
+	<div class="overflow-y-scroll scrollbar-hidden h-full pr-1.5 pt-2">
 		{#if loading}
 			<div class="flex justify-center py-8">
 				<Spinner />
