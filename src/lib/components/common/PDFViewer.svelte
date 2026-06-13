@@ -3,10 +3,17 @@
 	import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.mjs?url';
 	import panzoom, { type PanZoom } from 'panzoom';
 	import Spinner from './Spinner.svelte';
+	import { matchItemsToNeedle, type PageTextItem } from '$lib/utils/citationMatch';
 
 	export let url: string | null = null;
 	export let data: ArrayBuffer | Uint8Array | null = null;
 	export let className = 'w-full h-[70vh]';
+	// Cited passage to highlight in the text layer (null/empty = no highlight).
+	export let highlightText: string | null = null;
+	// 1-indexed page to jump to when nothing matches the highlight text.
+	export let initialPage: number | null = null;
+
+	const HIGHLIGHT_CLASS = 'citation-highlight';
 
 	let outerContainer: HTMLDivElement;
 	let sceneElement: HTMLDivElement;
@@ -20,6 +27,109 @@
 
 	// Keep a reference to TextLayer instances so we can update/cancel them
 	let textLayerInstances: any[] = [];
+	// Per-page text-layer container divs (index 0 == page 1). Lets us re-match
+	// highlights against already-rendered spans without re-rendering canvases.
+	let pageTextLayerDivs: HTMLElement[] = [];
+
+	// --- Citation highlighting -------------------------------------------------
+	//
+	// pdf.js 5.x TextLayer (see node_modules/pdfjs-dist/build/pdf.mjs #appendText)
+	// renders one <span role="presentation"> per text item that has a non-empty
+	// string, optionally wrapped in <span class="markedContent"> grouping spans
+	// (display:contents) and interleaved with <br role="presentation"> for EOLs.
+	// We therefore select leaf text spans only — `span:not(.markedContent)` —
+	// which excludes the marked-content wrappers (selecting plain `span` would
+	// double-count them) and the <br> elements (excluded by tag). Building the
+	// matcher's PageTextItem[] directly from these rendered spans guarantees the
+	// returned indices map exactly onto the spans we highlight: alignment is
+	// correct by construction, independent of marked-content / EOL artefacts.
+
+	const _leafTextSpans = (textLayerDiv: HTMLElement): HTMLSpanElement[] =>
+		Array.from(textLayerDiv.querySelectorAll<HTMLSpanElement>('span:not(.markedContent)'));
+
+	const _itemsFromSpans = (spans: HTMLSpanElement[]): PageTextItem[] =>
+		spans.map((el, index) => ({ str: el.textContent ?? '', index }));
+
+	/** Add the highlight class to the spans matching `needle`; return hit count. */
+	const _highlightPage = (textLayerDiv: HTMLElement, needle: string): number => {
+		const spans = _leafTextSpans(textLayerDiv);
+		const hits = matchItemsToNeedle(_itemsFromSpans(spans), needle);
+		for (const index of hits) {
+			spans[index]?.classList.add(HIGHLIGHT_CLASS);
+		}
+		return hits.length;
+	};
+
+	/** Remove every citation highlight from all rendered text layers. */
+	const _clearHighlights = () => {
+		for (const textLayerDiv of pageTextLayerDivs) {
+			for (const span of textLayerDiv.querySelectorAll(`span.${HIGHLIGHT_CLASS}`)) {
+				span.classList.remove(HIGHLIGHT_CLASS);
+			}
+		}
+	};
+
+	/**
+	 * Scroll the viewer's scroll container so the target element is centered.
+	 * Scoped to `outerContainer` (computed scrollTop), not the window, so it
+	 * cooperates with panzoom and does not move the whole page.
+	 */
+	const _scrollContainerTo = (target: HTMLElement) => {
+		if (!outerContainer) return;
+		const containerRect = outerContainer.getBoundingClientRect();
+		const targetRect = target.getBoundingClientRect();
+		const delta = targetRect.top - containerRect.top - (outerContainer.clientHeight - targetRect.height) / 2;
+		outerContainer.scrollTop += delta;
+	};
+
+	const _scrollToFirstHighlight = (): boolean => {
+		const first = sceneElement?.querySelector<HTMLElement>(`span.${HIGHLIGHT_CLASS}`);
+		if (!first) return false;
+		_scrollContainerTo(first);
+		return true;
+	};
+
+	const _scrollToPage = (page: number) => {
+		if (!page || page < 1) return;
+		const wrapper = sceneElement?.querySelectorAll<HTMLElement>('.pdf-page-wrapper')[page - 1];
+		if (wrapper) {
+			_scrollContainerTo(wrapper);
+		}
+	};
+
+	/**
+	 * Re-match the current `highlightText` across all rendered text layers and
+	 * scroll to the result. Fallback chain: highlight+scroll -> page-jump ->
+	 * nothing. Assumes highlights have already been cleared by the caller.
+	 */
+	const _applyHighlightsAndScroll = () => {
+		const needle = highlightText?.trim();
+		let matched = false;
+		if (needle) {
+			for (const textLayerDiv of pageTextLayerDivs) {
+				if (_highlightPage(textLayerDiv, needle) > 0) {
+					matched = true;
+				}
+			}
+		}
+		if (matched && _scrollToFirstHighlight()) {
+			return;
+		}
+		if (initialPage) {
+			_scrollToPage(initialPage);
+		}
+	};
+
+	/**
+	 * Update the highlighted passage on the already-rendered text layers without
+	 * re-rendering the PDF canvases, then re-scroll. Cheap snippet switching.
+	 */
+	export function setHighlight(text: string | null, page: number | null) {
+		highlightText = text;
+		initialPage = page;
+		_clearHighlights();
+		_applyHighlightsAndScroll();
+	}
 
 	const initPanzoom = () => {
 		if (pzInstance) {
@@ -100,6 +210,9 @@
 			} catch (_) {}
 		}
 		textLayerInstances = [];
+		pageTextLayerDivs = [];
+
+		const needle = highlightText?.trim();
 
 		for (let i = 0; i < pageWrappers.length; i++) {
 			const page = await pdfDoc.getPage(i + 1);
@@ -135,9 +248,16 @@
 				});
 				await textLayer.render();
 				textLayerInstances.push(textLayer);
+				pageTextLayerDivs.push(textLayerDiv);
+				if (needle) {
+					_highlightPage(textLayerDiv, needle);
+				}
 			}
 		}
 		lastRenderedZoom = forZoom;
+		if (!_scrollToFirstHighlight() && initialPage) {
+			_scrollToPage(initialPage);
+		}
 	};
 
 	const renderAllPages = async () => {
@@ -153,9 +273,11 @@
 			} catch (_) {}
 		}
 		textLayerInstances = [];
+		pageTextLayerDivs = [];
 
 		const pdfjs = await import('pdfjs-dist');
 		const dpr = window.devicePixelRatio || 1;
+		const needle = highlightText?.trim();
 
 		for (let i = 1; i <= pdfDoc.numPages; i++) {
 			const page = await pdfDoc.getPage(i);
@@ -212,12 +334,19 @@
 			});
 			await textLayer.render();
 			textLayerInstances.push(textLayer);
+			pageTextLayerDivs.push(textLayerDiv);
+			if (needle) {
+				_highlightPage(textLayerDiv, needle);
+			}
 
 			sceneElement.appendChild(wrapper);
 		}
 
 		lastRenderedZoom = 1;
 		initPanzoom();
+		if (!_scrollToFirstHighlight() && initialPage) {
+			_scrollToPage(initialPage);
+		}
 	};
 
 	const loadPdf = async () => {
@@ -425,5 +554,17 @@
 
 	:global(.textLayer.selecting .endOfContent) {
 		top: 0;
+	}
+
+	/* Citation highlight — applied to leaf text spans by setHighlight().
+	   :global is required because pdf.js (not Svelte) creates these spans. */
+	:global(.textLayer span.citation-highlight) {
+		background: rgba(250, 204, 21, 0.45); /* amber-300 */
+		border-radius: 2px;
+		mix-blend-mode: multiply;
+	}
+	:global(.dark .textLayer span.citation-highlight) {
+		mix-blend-mode: screen;
+		background: rgba(250, 204, 21, 0.35);
 	}
 </style>
