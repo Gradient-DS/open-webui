@@ -172,6 +172,11 @@
 			status = await api.provision({ items: e.detail.items, ownerUserId: ownerForProvision });
 			toast.success($i18n.t('Shared knowledge base provisioned.'));
 			dispatch('provisioned', { status });
+			// Auto-start the first sync: the admin just chose what to sync, so kick
+			// it off immediately rather than requiring a separate "Sync now" click.
+			// syncHandler swallows its own errors (toasts + clears state), so a sync
+			// failure won't mask the successful provision above.
+			await syncHandler();
 		} catch (err) {
 			toast.error(`${err}`);
 		}
