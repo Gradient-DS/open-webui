@@ -46,10 +46,12 @@
 	let ENABLE_TOPDESK_SYNC = false;
 	let TOPDESK_URL = '';
 	let TOPDESK_USERNAME = '';
-	// The application password round-trips through the form like the upstream
-	// Connections (API key) field — visible to the admin masked behind a reveal
-	// toggle via SensitiveInput, sent back verbatim on save.
-	let appPassword = '';
+	// The API token round-trips through the form like the upstream Connections
+	// (API key) field — visible to the admin masked behind a reveal toggle via
+	// SensitiveInput, sent back verbatim on save. It is the primary credential
+	// and feeds either auth-header form (Basic when an operator login is set,
+	// TOKEN id="..." otherwise).
+	let apiToken = '';
 	let TOPDESK_SYNC_INTERVAL_MINUTES = 60;
 	let TOPDESK_MAX_ITEMS_PER_SYNC: number | null = 500;
 	let testingConnection = false;
@@ -72,7 +74,7 @@
 		ENABLE_TOPDESK_SYNC = config.ENABLE_TOPDESK_SYNC ?? false;
 		TOPDESK_URL = config.TOPDESK_URL ?? '';
 		TOPDESK_USERNAME = config.TOPDESK_USERNAME ?? '';
-		appPassword = config.TOPDESK_APP_PASSWORD ?? '';
+		apiToken = config.TOPDESK_API_TOKEN ?? '';
 		TOPDESK_SYNC_INTERVAL_MINUTES = config.TOPDESK_SYNC_INTERVAL_MINUTES ?? 60;
 		TOPDESK_MAX_ITEMS_PER_SYNC = config.TOPDESK_MAX_ITEMS_PER_SYNC ?? 0;
 	};
@@ -112,7 +114,7 @@
 			ENABLE_TOPDESK_SYNC,
 			TOPDESK_URL,
 			TOPDESK_USERNAME,
-			TOPDESK_APP_PASSWORD: appPassword,
+			TOPDESK_API_TOKEN: apiToken,
 			TOPDESK_SYNC_INTERVAL_MINUTES,
 			// Blank/null input → 0 = no per-sync item limit.
 			TOPDESK_MAX_ITEMS_PER_SYNC: TOPDESK_MAX_ITEMS_PER_SYNC ?? 0
@@ -158,15 +160,15 @@
 			.filter((n) => n)
 			.join(', ') || $i18n.t('None');
 
-	// Probe the service credential currently in the form. A blank app-password
-	// field falls back server-side to the saved password.
+	// Probe the service credential currently in the form. A blank API-token
+	// field falls back server-side to the saved token.
 	const testConnection = async () => {
 		testingConnection = true;
 		try {
 			const result = await testTopdeskConnection(localStorage.token, {
 				url: TOPDESK_URL,
 				username: TOPDESK_USERNAME,
-				app_password: appPassword
+				api_token: apiToken
 			});
 			if (result.ok) {
 				toast.success($i18n.t('TOPdesk connection successful.'));
@@ -215,7 +217,14 @@
 			</div>
 
 			<div>
-				<div class="mb-1 text-xs text-gray-500">{$i18n.t('Username')}</div>
+				<div class="mb-1 text-xs text-gray-500">{$i18n.t('API token')}</div>
+				<div class="flex gap-2">
+					<SensitiveInput bind:value={apiToken} required={false} autocomplete="new-password" />
+				</div>
+			</div>
+
+			<div>
+				<div class="mb-1 text-xs text-gray-500">{$i18n.t('Operator login (optional)')}</div>
 				<input
 					class="w-full text-sm bg-transparent outline-hidden"
 					type="text"
@@ -223,14 +232,9 @@
 					autocomplete="off"
 				/>
 				<div class="mt-1 text-xs text-gray-500">
-					{$i18n.t('Optional — leave empty for person-token auth.')}
-				</div>
-			</div>
-
-			<div>
-				<div class="mb-1 text-xs text-gray-500">{$i18n.t('Application password')}</div>
-				<div class="flex gap-2">
-					<SensitiveInput bind:value={appPassword} required={false} autocomplete="new-password" />
+					{$i18n.t(
+						'Optional — only for operator (Basic) auth; leave empty to authenticate with the API token.'
+					)}
 				</div>
 			</div>
 

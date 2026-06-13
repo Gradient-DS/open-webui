@@ -153,7 +153,7 @@ _TOPDESK_DEFAULTS = {
     'ENABLE_TOPDESK_SYNC': False,
     'TOPDESK_URL': '',
     'TOPDESK_USERNAME': '',
-    'TOPDESK_APP_PASSWORD': '',
+    'TOPDESK_API_TOKEN': '',
     'TOPDESK_SYNC_INTERVAL_MINUTES': 60,
     'TOPDESK_MAX_ITEMS_PER_SYNC': 500,
 }
@@ -200,7 +200,7 @@ def test_topdesk_post_normalizes_url_and_clamps_max():
             'ENABLE_TOPDESK_INTEGRATION': True,
             'TOPDESK_URL': '  https://tenant.topdesk.net/  ',
             'TOPDESK_USERNAME': '  operator  ',
-            'TOPDESK_APP_PASSWORD': '  secret  ',
+            'TOPDESK_API_TOKEN': '  secret  ',
             'TOPDESK_MAX_ITEMS_PER_SYNC': -5,
         },
     )
@@ -211,7 +211,7 @@ def test_topdesk_post_normalizes_url_and_clamps_max():
     assert c.TOPDESK_URL == 'https://tenant.topdesk.net'
     # Credentials stripped and round-tripped in full (Confluence disclosure profile).
     assert body['TOPDESK_USERNAME'] == 'operator'
-    assert body['TOPDESK_APP_PASSWORD'] == 'secret'
+    assert body['TOPDESK_API_TOKEN'] == 'secret'
     # Negative max clamped to 0 (unlimited).
     assert body['TOPDESK_MAX_ITEMS_PER_SYNC'] == 0
     assert body['ENABLE_TOPDESK_INTEGRATION'] is True

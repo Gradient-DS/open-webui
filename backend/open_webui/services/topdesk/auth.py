@@ -1,17 +1,18 @@
 """TOPdesk service-account auth helpers.
 
 TOPdesk has a single auth mode for sync: a service credential read from global
-config (TOPDESK_URL + TOPDESK_USERNAME + TOPDESK_APP_PASSWORD). There is no
+config (TOPDESK_URL + TOPDESK_USERNAME + TOPDESK_API_TOKEN). There is no
 per-user OAuth flow — every sync against the configured tenant uses the same
-operator + application password. This module centralises the config reads and
-auth-header construction shared by the provider, the sync worker and the router
-so none of them duplicate the auth-mode rule.
+API token (with an optional operator login). This module centralises the config
+reads and auth-header construction shared by the provider, the sync worker and
+the router so none of them duplicate the auth-mode rule.
 
-Auth-header form depends on whether a username is set (findings §2.1):
+Auth-header form depends on whether an operator login (username) is set
+(findings §2.1):
 
-- username set   → HTTP Basic, ``Authorization: Basic base64(username:app_password)``
-  (operator login + application password — the recommended/secure setup).
-- username empty → person-token form, ``Authorization: TOKEN id="<app_password>"``.
+- login set   → HTTP Basic, ``Authorization: Basic base64(login:api_token)``
+  (operator login + API token — the operator/Basic auth path).
+- login empty → person-token form, ``Authorization: TOKEN id="<api_token>"``.
 
 This mirrors ``services/confluence/basic_auth.py`` (sentinel + config helpers +
 client builder), but TOPdesk has no oauth mode, so there is no auth-mode
@@ -25,7 +26,7 @@ from urllib.parse import urlparse
 from open_webui.config import (
     TOPDESK_URL,
     TOPDESK_USERNAME,
-    TOPDESK_APP_PASSWORD,
+    TOPDESK_API_TOKEN,
 )
 from open_webui.services.topdesk.topdesk_client import TopdeskClient
 
@@ -44,29 +45,29 @@ _META_KEY = 'topdesk_sync'
 def service_auth_configured() -> bool:
     """True when the TOPdesk service credential is usable.
 
-    URL + app_password are required; the username is optional. An empty username
+    URL + api_token are required; the operator login is optional. An empty login
     selects the ``TOKEN id="..."`` person-token header form (findings §2.1) — a
-    valid (if non-recommended) configuration — so it must NOT gate readiness.
+    valid configuration — so it must NOT gate readiness.
     """
-    return bool((TOPDESK_URL.value or '').strip() and (TOPDESK_APP_PASSWORD.value or '').strip())
+    return bool((TOPDESK_URL.value or '').strip() and (TOPDESK_API_TOKEN.value or '').strip())
 
 
 def auth_headers() -> Dict[str, str]:
     """Build the Authorization header for the configured TOPdesk credential.
 
-    - username set   → ``Authorization: Basic base64(username:app_password)``
-    - username empty → ``Authorization: TOKEN id="<app_password>"``
+    - login set   → ``Authorization: Basic base64(login:api_token)``
+    - login empty → ``Authorization: TOKEN id="<api_token>"``
 
     See findings §2.1. The header is static (the credential never refreshes), so
     callers may precompute it once.
     """
     return build_auth_header(
         username=(TOPDESK_USERNAME.value or '').strip(),
-        app_password=(TOPDESK_APP_PASSWORD.value or ''),
+        api_token=(TOPDESK_API_TOKEN.value or ''),
     )
 
 
-def build_auth_header(username: str, app_password: str) -> Dict[str, str]:
+def build_auth_header(username: str, api_token: str) -> Dict[str, str]:
     """Pure helper: construct the Authorization header from raw credentials.
 
     Separated from ``auth_headers`` so the client and tests can build a header
@@ -76,9 +77,9 @@ def build_auth_header(username: str, app_password: str) -> Dict[str, str]:
 
     username = (username or '').strip()
     if username:
-        encoded = base64.b64encode(f'{username}:{app_password}'.encode('utf-8')).decode('ascii')
+        encoded = base64.b64encode(f'{username}:{api_token}'.encode('utf-8')).decode('ascii')
         return {'Authorization': f'Basic {encoded}'}
-    return {'Authorization': f'TOKEN id="{app_password}"'}
+    return {'Authorization': f'TOKEN id="{api_token}"'}
 
 
 def get_service_site() -> Optional[Dict[str, Any]]:
@@ -101,5 +102,5 @@ def build_client() -> TopdeskClient:
     return TopdeskClient(
         base_url=(TOPDESK_URL.value or '').strip(),
         username=(TOPDESK_USERNAME.value or '').strip(),
-        app_password=(TOPDESK_APP_PASSWORD.value or ''),
+        api_token=(TOPDESK_API_TOKEN.value or ''),
     )

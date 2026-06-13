@@ -35,47 +35,47 @@ class _Cfg:
         self.value = value
 
 
-def _patch_config(monkeypatch, url='', username='', app_password=''):
+def _patch_config(monkeypatch, url='', username='', api_token=''):
     monkeypatch.setattr(topdesk_auth, 'TOPDESK_URL', _Cfg(url))
     monkeypatch.setattr(topdesk_auth, 'TOPDESK_USERNAME', _Cfg(username))
-    monkeypatch.setattr(topdesk_auth, 'TOPDESK_APP_PASSWORD', _Cfg(app_password))
+    monkeypatch.setattr(topdesk_auth, 'TOPDESK_API_TOKEN', _Cfg(api_token))
 
 
 def test_service_auth_configured_truth_table(monkeypatch):
-    # URL + app_password set, username present → configured.
-    _patch_config(monkeypatch, url='https://t.topdesk.net', username='op', app_password='pw')
+    # URL + api_token set, username present → configured.
+    _patch_config(monkeypatch, url='https://t.topdesk.net', username='op', api_token='pw')
     assert topdesk_auth.service_auth_configured() is True
 
-    # URL + app_password set, username empty (TOKEN form) → still configured.
-    _patch_config(monkeypatch, url='https://t.topdesk.net', username='', app_password='pw')
+    # URL + api_token set, username empty (TOKEN form) → still configured.
+    _patch_config(monkeypatch, url='https://t.topdesk.net', username='', api_token='pw')
     assert topdesk_auth.service_auth_configured() is True
 
     # Missing URL → not configured.
-    _patch_config(monkeypatch, url='', username='op', app_password='pw')
+    _patch_config(monkeypatch, url='', username='op', api_token='pw')
     assert topdesk_auth.service_auth_configured() is False
 
-    # Missing app_password → not configured.
-    _patch_config(monkeypatch, url='https://t.topdesk.net', username='op', app_password='')
+    # Missing api_token → not configured.
+    _patch_config(monkeypatch, url='https://t.topdesk.net', username='op', api_token='')
     assert topdesk_auth.service_auth_configured() is False
 
     # Whitespace-only values → not configured.
-    _patch_config(monkeypatch, url='   ', username='op', app_password='   ')
+    _patch_config(monkeypatch, url='   ', username='op', api_token='   ')
     assert topdesk_auth.service_auth_configured() is False
 
 
 def test_auth_headers_reads_config_basic_form(monkeypatch):
-    _patch_config(monkeypatch, url='https://t.topdesk.net', username=' op ', app_password='pw')
+    _patch_config(monkeypatch, url='https://t.topdesk.net', username=' op ', api_token='pw')
     header = topdesk_auth.auth_headers()
     assert header == {'Authorization': 'Basic ' + base64.b64encode(b'op:pw').decode('ascii')}
 
 
 def test_auth_headers_reads_config_token_form(monkeypatch):
-    _patch_config(monkeypatch, url='https://t.topdesk.net', username='', app_password='pw')
+    _patch_config(monkeypatch, url='https://t.topdesk.net', username='', api_token='pw')
     assert topdesk_auth.auth_headers() == {'Authorization': 'TOKEN id="pw"'}
 
 
 def test_get_service_site_derives_host(monkeypatch):
-    _patch_config(monkeypatch, url='https://tenant.topdesk.net/', username='op', app_password='pw')
+    _patch_config(monkeypatch, url='https://tenant.topdesk.net/', username='op', api_token='pw')
     site = topdesk_auth.get_service_site()
     assert site == {
         'cloud_id': 'tenant.topdesk.net',
@@ -85,12 +85,12 @@ def test_get_service_site_derives_host(monkeypatch):
 
 
 def test_get_service_site_none_when_url_missing(monkeypatch):
-    _patch_config(monkeypatch, url='', username='op', app_password='pw')
+    _patch_config(monkeypatch, url='', username='op', api_token='pw')
     assert topdesk_auth.get_service_site() is None
 
 
 def test_build_client_uses_config(monkeypatch):
-    _patch_config(monkeypatch, url='https://tenant.topdesk.net/', username='op', app_password='pw')
+    _patch_config(monkeypatch, url='https://tenant.topdesk.net/', username='op', api_token='pw')
     client = topdesk_auth.build_client()
     assert client.base_url == 'https://tenant.topdesk.net'
     # GraphQL path comes from config default; header is Basic since username is set.

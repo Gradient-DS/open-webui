@@ -228,14 +228,14 @@ class TopdeskClient:
         self,
         base_url: str = '',
         username: str = '',
-        app_password: str = '',
+        api_token: str = '',
         *,
         graphql_path: Optional[str] = None,
         page_size: int = _DEFAULT_PAGE_SIZE,
     ):
         self._base_url = (base_url or '').rstrip('/')
         self._username = (username or '').strip()
-        self._app_password = app_password or ''
+        self._api_token = api_token or ''
         self._page_size = page_size
         # Resolve the GraphQL path lazily-but-once; config is the default source.
         if graphql_path is None:
@@ -248,7 +248,7 @@ class TopdeskClient:
         # the Basic-vs-TOKEN rule lives in one place.
         from open_webui.services.topdesk.auth import build_auth_header
 
-        self._auth_header = build_auth_header(self._username, self._app_password)
+        self._auth_header = build_auth_header(self._username, self._api_token)
 
     @property
     def base_url(self) -> str:
@@ -311,7 +311,7 @@ class TopdeskClient:
                 if response.status_code == 401:
                     raise TopdeskAuthError(
                         'TOPdesk rejected the service credential (401). Check the '
-                        'TOPdesk URL, operator login name and application password.'
+                        'TOPdesk URL, API token and operator login (if set).'
                     )
 
                 if response.status_code == 429:

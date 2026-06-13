@@ -70,15 +70,15 @@ def test_every_endpoint_rejects_non_admin():
 def _patch_test_creds():
     """Patch the stored-config reads so a blank submitted credential resolves.
 
-    The router reads ``TOPDESK_URL``/``TOPDESK_USERNAME``/``TOPDESK_APP_PASSWORD``
+    The router reads ``TOPDESK_URL``/``TOPDESK_USERNAME``/``TOPDESK_API_TOKEN``
     ``.value`` for fallback; give them usable defaults so a body with only the
-    password (or nothing) still has a URL.
+    token (or nothing) still has a URL.
     """
     return patch.multiple(
         'open_webui.routers.topdesk_sync',
         TOPDESK_URL=SimpleNamespace(value='https://tenant.topdesk.net'),
         TOPDESK_USERNAME=SimpleNamespace(value='operator'),
-        TOPDESK_APP_PASSWORD=SimpleNamespace(value='stored-secret'),
+        TOPDESK_API_TOKEN=SimpleNamespace(value='stored-secret'),
     )
 
 
@@ -91,7 +91,7 @@ def test_auth_test_probe_success():
     fake_client.close = AsyncMock()
 
     with _patch_test_creds(), patch('open_webui.routers.topdesk_sync.TopdeskClient', return_value=fake_client):
-        res = client.post('/api/v1/topdesk/auth/test', json={'app_password': 'typed-secret'})
+        res = client.post('/api/v1/topdesk/auth/test', json={'api_token': 'typed-secret'})
 
     assert res.status_code == 200
     body = res.json()
@@ -143,7 +143,7 @@ def test_auth_test_missing_creds_returns_ok_false():
         'open_webui.routers.topdesk_sync',
         TOPDESK_URL=SimpleNamespace(value=''),
         TOPDESK_USERNAME=SimpleNamespace(value=''),
-        TOPDESK_APP_PASSWORD=SimpleNamespace(value=''),
+        TOPDESK_API_TOKEN=SimpleNamespace(value=''),
     ):
         res = client.post('/api/v1/topdesk/auth/test', json={})
 

@@ -37,7 +37,7 @@ def _client(handler) -> TopdeskClient:
     client = TopdeskClient(
         base_url=_BASE_URL,
         username='operator',
-        app_password='s3cr3t',
+        api_token='s3cr3t',
         graphql_path=_GQL_PATH,
         page_size=3,
     )
