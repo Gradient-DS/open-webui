@@ -17,6 +17,11 @@
 	export let initialPage: number | null = null;
 
 	const HIGHLIGHT_CLASS = 'citation-highlight';
+	// A page must accumulate at least this many matched characters to be
+	// treated as the citation's location. Guards against latching onto a short
+	// coincidental phrase (e.g. a title) when the cited text isn't really in
+	// the PDF text layer (scanned pages) — in that case we page-jump instead.
+	const MIN_MATCH_CHARS = 25;
 
 	let outerContainer: HTMLDivElement;
 	let sceneElement: HTMLDivElement;
@@ -53,14 +58,19 @@
 	const _itemsFromSpans = (spans: HTMLSpanElement[]): PageTextItem[] =>
 		spans.map((el, index) => ({ str: el.textContent ?? '', index }));
 
-	/** Add the highlight class to the spans matching `needle`; return hit count. */
-	const _highlightPage = (textLayerDiv: HTMLElement, needle: string): number => {
+	interface PageMatch {
+		spans: HTMLSpanElement[];
+		hits: number[];
+		/** Total matched characters — used to pick the strongest-matching page. */
+		score: number;
+	}
+
+	/** Score a page's match against `needle` without mutating the DOM. */
+	const _scorePage = (textLayerDiv: HTMLElement, needle: string): PageMatch => {
 		const spans = _leafTextSpans(textLayerDiv);
 		const hits = matchItemsToNeedle(_itemsFromSpans(spans), needle);
-		for (const index of hits) {
-			spans[index]?.classList.add(HIGHLIGHT_CLASS);
-		}
-		return hits.length;
+		const score = hits.reduce((sum, i) => sum + (spans[i]?.textContent?.length ?? 0), 0);
+		return { spans, hits, score };
 	};
 
 	/** Remove every citation highlight from all rendered text layers. */
@@ -101,22 +111,32 @@
 	};
 
 	/**
-	 * Re-match the current `highlightText` across all rendered text layers and
-	 * scroll to the result. Fallback chain: highlight+scroll -> page-jump ->
-	 * nothing. Assumes highlights have already been cleared by the caller.
+	 * Highlight only the STRONGEST-matching page and scroll to it. Chunk text
+	 * fragments (titles, headers, repeated phrases) often appear on several
+	 * pages; highlighting every match and scrolling to the first latched onto
+	 * coincidental matches on unrelated pages. Scoring by matched characters and
+	 * keeping only the best page lands on the cited passage's real location.
+	 * Fallback chain: best-page highlight+scroll -> cited-page jump -> nothing.
+	 * Clears prior highlights first.
 	 */
-	const _applyHighlightsAndScroll = () => {
+	const _applyBestMatchHighlight = () => {
+		_clearHighlights();
 		const needle = highlightText?.trim();
-		let matched = false;
 		if (needle) {
+			let best: PageMatch | null = null;
 			for (const textLayerDiv of pageTextLayerDivs) {
-				if (_highlightPage(textLayerDiv, needle) > 0) {
-					matched = true;
+				const page = _scorePage(textLayerDiv, needle);
+				if (page.score > (best?.score ?? 0)) {
+					best = page;
 				}
 			}
-		}
-		if (matched && _scrollToFirstHighlight()) {
-			return;
+			if (best && best.score >= MIN_MATCH_CHARS) {
+				for (const i of best.hits) {
+					best.spans[i]?.classList.add(HIGHLIGHT_CLASS);
+				}
+				_scrollToFirstHighlight();
+				return;
+			}
 		}
 		if (initialPage) {
 			_scrollToPage(initialPage);
@@ -132,8 +152,7 @@
 	export function setHighlight(text: string | null, page: number | null) {
 		highlightText = text;
 		initialPage = page;
-		_clearHighlights();
-		_applyHighlightsAndScroll();
+		_applyBestMatchHighlight();
 	}
 
 	const initPanzoom = () => {
@@ -217,8 +236,6 @@
 		textLayerInstances = [];
 		pageTextLayerDivs = [];
 
-		const needle = highlightText?.trim();
-
 		for (let i = 0; i < pageWrappers.length; i++) {
 			const page = await pdfDoc.getPage(i + 1);
 			const viewport = page.getViewport({ scale: 1 });
@@ -254,15 +271,10 @@
 				await textLayer.render();
 				textLayerInstances.push(textLayer);
 				pageTextLayerDivs.push(textLayerDiv);
-				if (needle) {
-					_highlightPage(textLayerDiv, needle);
-				}
 			}
 		}
 		lastRenderedZoom = forZoom;
-		if (!_scrollToFirstHighlight() && initialPage) {
-			_scrollToPage(initialPage);
-		}
+		_applyBestMatchHighlight();
 	};
 
 	const renderAllPages = async () => {
@@ -282,8 +294,6 @@
 
 		const pdfjs = await import('pdfjs-dist');
 		const dpr = window.devicePixelRatio || 1;
-		const needle = highlightText?.trim();
-
 		for (let i = 1; i <= pdfDoc.numPages; i++) {
 			const page = await pdfDoc.getPage(i);
 			const viewport = page.getViewport({ scale: 1 });
@@ -340,18 +350,13 @@
 			await textLayer.render();
 			textLayerInstances.push(textLayer);
 			pageTextLayerDivs.push(textLayerDiv);
-			if (needle) {
-				_highlightPage(textLayerDiv, needle);
-			}
 
 			sceneElement.appendChild(wrapper);
 		}
 
 		lastRenderedZoom = 1;
 		initPanzoom();
-		if (!_scrollToFirstHighlight() && initialPage) {
-			_scrollToPage(initialPage);
-		}
+		_applyBestMatchHighlight();
 	};
 
 	const loadPdf = async () => {
