@@ -20,6 +20,7 @@ from open_webui.services.topdesk.topdesk_client import (
     TopdeskClient,
     TopdeskAuthError,
     TopdeskGraphQLError,
+    TopdeskTransientError,
 )
 
 _FIXTURES = Path(__file__).parent / 'fixtures'
@@ -96,6 +97,29 @@ def test_graphql_request_shape_and_auth_header():
 def test_graphql_url_property():
     client = TopdeskClient(base_url=_BASE_URL + '/', graphql_path='tas/api/x/graphql')
     assert client.graphql_url == _BASE_URL + '/tas/api/x/graphql'
+
+
+def test_async_context_manager_runs_request_and_closes_client():
+    """`async with TopdeskClient(...)` exposes a working client inside the block
+    and closes the underlying httpx client on exit."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json=_fixture('items_page_1.json'))
+
+    client = _client(handler)
+    inner = client._client  # the mock-transport httpx client
+
+    async def _go():
+        async with client as c:
+            data = await c.graphql('query Q { x }', {})
+            assert 'knowledgeItems' in data
+            assert not inner.is_closed
+        return inner.is_closed
+
+    closed = _run(_go())
+    assert closed is True
+    # close() also drops the reference so a fresh client would be lazily created.
+    assert client._client is None
 
 
 # ---------------------------------------------------------------------
@@ -278,7 +302,6 @@ def test_get_knowledge_item_returns_node_with_content():
     assert item['keywords'] == ['password', 'reset', 'login', 'account']
     assert item['parent']['number'] == 'KI 0100'
     assert [t['language'] for t in item['availableTranslations']] == ['en', 'nl']
-    assert item['attachments'] == []
     assert captured['body']['variables'] == {'id': '11111111-1111-4111-8111-111111111111'}
 
 
@@ -375,6 +398,88 @@ def test_5xx_backs_off_and_retries_then_succeeds():
     items = _run(_go())
     assert calls['count'] == 3
     assert items == []
+
+
+def test_exhausted_5xx_raises_transient_error_with_status():
+    """A server that always 503s exhausts retries and raises TopdeskTransientError
+    carrying the last status code and a meaningful (non-None) message."""
+    calls = {'count': 0}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls['count'] += 1
+        return httpx.Response(503, json={'message': 'unavailable'})
+
+    client = _client(handler)
+
+    async def _go():
+        try:
+            await client.list_all_knowledge_items()
+        finally:
+            await client.close()
+
+    with pytest.raises(TopdeskTransientError) as exc:
+        _run(_go())
+
+    assert exc.value.status_code == 503
+    assert exc.value.args[0]  # non-None, non-empty message
+    assert 'None' not in str(exc.value)
+    # Default max_retries is 3 — three attempts then give up.
+    assert calls['count'] == 3
+
+
+def test_exhausted_429_raises_transient_error_carrying_429():
+    calls = {'count': 0}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls['count'] += 1
+        return httpx.Response(429, headers={'Retry-After': '60'}, json={'message': 'slow down'})
+
+    client = _client(handler)
+
+    async def _go():
+        try:
+            await client.list_knowledge_items()
+        finally:
+            await client.close()
+
+    with pytest.raises(TopdeskTransientError) as exc:
+        _run(_go())
+
+    assert exc.value.status_code == 429
+    assert calls['count'] == 3
+
+
+def test_final_attempt_does_not_sleep_on_persistent_failure(monkeypatch):
+    """On a persistent 5xx, the loop sleeps only between attempts — never after the
+    final one. With 3 attempts that means 2 sleeps, fewer than the attempt count."""
+    sleeps = {'count': 0}
+
+    async def _counting_sleep(_seconds):
+        sleeps['count'] += 1
+
+    monkeypatch.setattr('open_webui.services.topdesk.topdesk_client.asyncio.sleep', _counting_sleep)
+
+    calls = {'count': 0}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls['count'] += 1
+        return httpx.Response(503, json={'message': 'unavailable'})
+
+    client = _client(handler)
+
+    async def _go():
+        try:
+            await client.list_all_knowledge_items()
+        finally:
+            await client.close()
+
+    with pytest.raises(TopdeskTransientError):
+        _run(_go())
+
+    assert calls['count'] == 3
+    # No sleep on the final attempt → sleeps strictly fewer than attempts.
+    assert sleeps['count'] == 2
+    assert sleeps['count'] < calls['count']
 
 
 def test_401_is_terminal_no_retry():

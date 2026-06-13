@@ -9,6 +9,7 @@ from open_webui.services.topdesk.topdesk_client import (
     TopdeskClient,
     TopdeskAuthError,
     TopdeskGraphQLError,
+    TopdeskTransientError,
 )
 from open_webui.services.topdesk.auth import (
     TOPDESK_AUTH_SENTINEL,
@@ -23,6 +24,7 @@ __all__ = [
     'TopdeskClient',
     'TopdeskAuthError',
     'TopdeskGraphQLError',
+    'TopdeskTransientError',
     'TOPDESK_AUTH_SENTINEL',
     'service_auth_configured',
     'auth_headers',

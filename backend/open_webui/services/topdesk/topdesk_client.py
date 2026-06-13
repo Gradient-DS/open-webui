@@ -202,6 +202,20 @@ class TopdeskGraphQLError(Exception):
         self.errors = errors
 
 
+class TopdeskTransientError(Exception):
+    """Raised when transient 429/5xx retries are exhausted.
+
+    Carries the last observed HTTP ``status_code`` so a caller (e.g. the router)
+    can map it to a clean 502/503 without string-matching the message. Distinct
+    from non-retryable 4xx, which still surface as ``httpx.HTTPStatusError`` via
+    ``raise_for_status()``.
+    """
+
+    def __init__(self, message: str, status_code: Optional[int] = None):
+        super().__init__(message)
+        self.status_code = status_code
+
+
 # =====================================================================
 # Client
 # =====================================================================
@@ -254,6 +268,13 @@ class TopdeskClient:
             await self._client.aclose()
             self._client = None
 
+    async def __aenter__(self) -> 'TopdeskClient':
+        await self._get_client()
+        return self
+
+    async def __aexit__(self, *_exc: Any) -> None:
+        await self.close()
+
     # ------------------------------------------------------------------
     # Low-level request helper (shared by GraphQL POST + REST probe GETs)
     # ------------------------------------------------------------------
@@ -276,8 +297,10 @@ class TopdeskClient:
         """
         client = await self._get_client()
         last_exception: Optional[Exception] = None
+        last_status: Optional[int] = None
 
         for attempt in range(max_retries):
+            is_final_attempt = attempt == max_retries - 1
             try:
                 headers = {**self._auth_header, 'Accept': 'application/json'}
                 if json_body is not None:
@@ -292,12 +315,20 @@ class TopdeskClient:
                     )
 
                 if response.status_code == 429:
+                    last_status = 429
+                    if is_final_attempt:
+                        # About to give up — don't burn the Retry-After window.
+                        continue
                     retry_after = int(response.headers.get('Retry-After', '60'))
                     log.warning('TOPdesk rate limited, waiting %d seconds', retry_after)
                     await asyncio.sleep(retry_after)
                     continue
 
                 if response.status_code >= 500:
+                    last_status = response.status_code
+                    if is_final_attempt:
+                        # About to give up — skip the backoff sleep.
+                        continue
                     wait_time = min(2**attempt, 60)
                     log.warning(
                         'TOPdesk server error %d, retrying in %d seconds',
@@ -331,7 +362,12 @@ class TopdeskClient:
                         ) from e
                     raise
 
-        raise RuntimeError(f'TOPdesk request failed after {max_retries} retries: {last_exception}')
+        # Retries exhausted on a transient 429/5xx — surface a typed error carrying
+        # the last HTTP status so the router can map it to a clean 502/503.
+        raise TopdeskTransientError(
+            f'TOPdesk request failed after {max_retries} retries (last status {last_status})',
+            status_code=last_status,
+        )
 
     # ------------------------------------------------------------------
     # GraphQL
