@@ -35,6 +35,5 @@ export interface SheetRender {
 export const renderSheetHtml = async (wb: WorkBook, sheet: string): Promise<SheetRender> => {
 	const { excelToTable } = await import('$lib/utils/excelToTable');
 	const result = await excelToTable(wb.Sheets[sheet]);
-	const DOMPurify = (await import('dompurify')).default;
-	return { html: DOMPurify.sanitize(result.html), rowCount: result.rowCount };
+	return { html: result.html, rowCount: result.rowCount };
 };
