@@ -87,18 +87,26 @@
 	 * Scoped to `outerContainer` (computed scrollTop), not the window, so it
 	 * cooperates with panzoom and does not move the whole page.
 	 */
-	const _scrollContainerTo = (target: HTMLElement) => {
+	// `align`: 'center' keeps the target mid-viewport; 'top' brings it near the
+	// top with a small margin. Citations use 'top' so the START of the matched
+	// passage (or the cited page) is at the top and reads downward, instead of
+	// centering on the first matched line and pushing the rest below the fold.
+	const _scrollContainerTo = (target: HTMLElement, align: 'center' | 'top' = 'center') => {
 		if (!outerContainer) return;
 		const containerRect = outerContainer.getBoundingClientRect();
 		const targetRect = target.getBoundingClientRect();
-		const delta = targetRect.top - containerRect.top - (outerContainer.clientHeight - targetRect.height) / 2;
+		const margin =
+			align === 'top'
+				? Math.min(56, outerContainer.clientHeight * 0.12)
+				: (outerContainer.clientHeight - targetRect.height) / 2;
+		const delta = targetRect.top - containerRect.top - margin;
 		outerContainer.scrollTop += delta;
 	};
 
 	const _scrollToFirstHighlight = (): boolean => {
 		const first = sceneElement?.querySelector<HTMLElement>(`span.${HIGHLIGHT_CLASS}`);
 		if (!first) return false;
-		_scrollContainerTo(first);
+		_scrollContainerTo(first, 'top');
 		return true;
 	};
 
@@ -106,7 +114,7 @@
 		if (!page || page < 1) return;
 		const wrapper = sceneElement?.querySelectorAll<HTMLElement>('.pdf-page-wrapper')[page - 1];
 		if (wrapper) {
-			_scrollContainerTo(wrapper);
+			_scrollContainerTo(wrapper, 'top');
 		}
 	};
 

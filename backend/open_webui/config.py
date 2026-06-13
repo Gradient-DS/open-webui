@@ -2088,6 +2088,16 @@ ENABLE_CITATION_RELEVANCE = PersistentConfig(
     os.environ.get('ENABLE_CITATION_RELEVANCE', 'True').lower() == 'true',
 )
 
+# Client-side text-match highlighting of cited passages in the citation viewer.
+# Off by default: matching against the PDF/DOCX text layer is approximate and
+# can mis-highlight; the split-view + page jump works without it. Enable once
+# per-chunk page metadata / matching is reliable.
+ENABLE_CITATION_TEXT_HIGHLIGHT = PersistentConfig(
+    'ENABLE_CITATION_TEXT_HIGHLIGHT',
+    'ui.enable_citation_text_highlight',
+    os.environ.get('ENABLE_CITATION_TEXT_HIGHLIGHT', 'False').lower() == 'true',
+)
+
 ENABLE_MESSAGE_RATING = PersistentConfig(
     'ENABLE_MESSAGE_RATING',
     'ui.enable_message_rating',

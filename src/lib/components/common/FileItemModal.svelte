@@ -216,7 +216,10 @@
 	};
 
 	const loadContent = async () => {
-		selectedTab = '';
+		// Default to the Preview tab whenever a preview exists, regardless of how
+		// the viewer was opened; '' (Content) is the default only for files with
+		// no preview pane. (Images render without tabs.)
+		selectedTab = isPDF || isAudio || isExcel || isDocx || isPptx ? 'preview' : '';
 		expandedContent = false;
 		if (item?.type === 'collection') {
 			loading = true;

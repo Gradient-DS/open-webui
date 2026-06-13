@@ -7,7 +7,7 @@
 	import Markdown from '$lib/components/chat/Messages/Markdown.svelte';
 	import PDFViewer from '$lib/components/common/PDFViewer.svelte';
 	import { WEBUI_API_BASE_URL } from '$lib/constants';
-	import { settings } from '$lib/stores';
+	import { settings, config } from '$lib/stores';
 	import { getFileContentById } from '$lib/apis/files';
 	import { renderDocxHtml, readWorkbook, renderSheetHtml } from '$lib/utils/officePreview';
 	import { highlightDocx, scrollToFirstDocxHighlight } from '$lib/utils/citationDomHighlight';
@@ -109,6 +109,9 @@
 	// Active snippet drives the highlight in the viewer pane.
 	$: activeSnippet = mergedDocuments?.[activeSnippetIdx];
 	$: activeSnippetText = activeSnippet?.document ?? '';
+	// Text-match highlighting is gated by a config flag (off by default). The
+	// split view + page jump work without it; see ENABLE_CITATION_TEXT_HIGHLIGHT.
+	$: citationTextHighlightEnabled = $config?.features?.enable_citation_text_highlight ?? false;
 	$: activePage = Number.isInteger(activeSnippet?.metadata?.page)
 		? activeSnippet.metadata.page
 		: undefined;
@@ -223,8 +226,9 @@
 	};
 
 	// Re-highlight the rendered DOCX for the active snippet (no-op without match).
+	// Skipped entirely when text-match highlighting is disabled.
 	const highlightDocxFor = (text: string) => {
-		if (!docxContainer) return;
+		if (!citationTextHighlightEnabled || !docxContainer) return;
 		highlightDocx(docxContainer, text);
 		scrollToFirstDocxHighlight(docxContainer);
 	};
@@ -239,7 +243,7 @@
 		const text = snippet?.document ?? '';
 		const page = Number.isInteger(snippet?.metadata?.page) ? snippet.metadata.page : undefined;
 		if (isPDF) {
-			pdfViewerRef?.setHighlight(text, (page ?? 0) + 1);
+			pdfViewerRef?.setHighlight(citationTextHighlightEnabled ? text : null, (page ?? 0) + 1);
 			return;
 		}
 		if (isDocx) {
@@ -422,7 +426,7 @@
 									bind:this={pdfViewerRef}
 									url={previewUrlNoHash}
 									className="w-full h-full"
-									highlightText={activeSnippetText}
+									highlightText={citationTextHighlightEnabled ? activeSnippetText : null}
 									initialPage={(activePage ?? 0) + 1}
 								/>
 							{:else if isDocx}

@@ -383,6 +383,11 @@ openWebui:
     userPermissionsFeaturesChannels: "false"
     enableCommunitySharing: "false"
     enableCitationRelevance: "true"
+    # Client-side text-match highlighting of cited passages in the citation
+    # viewer. Off by default — the split view + page jump works without it;
+    # text matching against the PDF/DOCX layer is approximate. Enable per tenant
+    # once per-chunk page metadata / matching is reliable.
+    enableCitationTextHighlight: "false"
     enableMessageRating: "true"
     enableUserWebhooks: "false"
     enableAutocompleteGeneration: "false"
