@@ -604,7 +604,7 @@
 
 						<!-- Confluence — per-user page picker. Hidden in company-wide
 						     mode, where the shared KB is the only Confluence surface. -->
-						{#if $config?.features?.enable_confluence_integration && $config?.features?.enable_confluence_sync && $config?.features?.confluence_kb_mode !== 'shared' && itemAllowed('confluence')}
+						{#if $config?.features?.enable_confluence_integration && $config?.features?.enable_confluence_sync && $config?.features?.confluence_kb_mode !== 'shared' && $config?.features?.confluence_oauth_configured && itemAllowed('confluence')}
 							<button
 								class="flex gap-2 w-full text-left items-center px-3 py-1.5 text-sm cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800/50 rounded-xl"
 								type="button"

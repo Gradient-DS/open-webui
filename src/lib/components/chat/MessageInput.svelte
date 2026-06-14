@@ -2048,7 +2048,7 @@
 														<OneDrive className="size-4" />
 													</button>
 												</Tooltip>
-											{:else if itemId === 'confluence' && fileUploadEnabled && $config?.features?.enable_confluence_integration && $config?.features?.enable_confluence_sync && $config?.features?.confluence_kb_mode !== 'shared'}
+											{:else if itemId === 'confluence' && fileUploadEnabled && $config?.features?.enable_confluence_integration && $config?.features?.enable_confluence_sync && $config?.features?.confluence_kb_mode !== 'shared' && $config?.features?.confluence_oauth_configured}
 												<Tooltip content={$i18n.t('Confluence')} placement="top">
 													<button
 														class="p-[7px] rounded-full bg-transparent text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors duration-300 focus:outline-hidden"

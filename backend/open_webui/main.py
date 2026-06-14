@@ -3306,6 +3306,10 @@ async def get_app_config(request: Request):
                     'confluence_kb_mode': _confluence_kb_mode,
                     # Shared-KB id for the chat '+' menu one-click attach.
                     'confluence_shared_kb_id': confluence_shared_kb_id,
+                    # Whether admin configured OAuth client creds — gates per-user (OAuth) entry points.
+                    'confluence_oauth_configured': bool(
+                        app.state.config.CONFLUENCE_OAUTH_CLIENT_ID and app.state.config.CONFLUENCE_OAUTH_CLIENT_SECRET
+                    ),
                     'enable_topdesk_integration': app.state.config.ENABLE_TOPDESK_INTEGRATION,
                     **(
                         {
