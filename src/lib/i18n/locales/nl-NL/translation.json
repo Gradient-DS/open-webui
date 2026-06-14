@@ -488,6 +488,7 @@
     "Connect to an AI provider to start chatting": "Verbind met een AI-provider om te beginnen met chatten",
     "Connect to your own OpenAI compatible API endpoints.": "Verbind met je eigen OpenAI-compatibele API-endpoints",
     "Connect to your own OpenAPI compatible external tool servers.": "Verbind met je eigen OpenAPI-compatibele externe gereedschapservers",
+    "Connect your Confluence account in Settings, then reopen this picker.": "Verbind je Confluence-account in Instellingen en open deze kiezer opnieuw.",
     "Connected ({{type}})": "Verbonden ({{type}})",
     "Connection Type": "Connectie type",
     "Connection failed": "Connectie mislukt",

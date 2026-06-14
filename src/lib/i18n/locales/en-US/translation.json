@@ -488,6 +488,7 @@
     "Connect to an AI provider to start chatting": "",
     "Connect to your own OpenAI compatible API endpoints.": "",
     "Connect to your own OpenAPI compatible external tool servers.": "",
+    "Connect your Confluence account in Settings, then reopen this picker.": "",
     "Connected ({{type}})": "",
     "Connection Type": "",
     "Connection failed": "",

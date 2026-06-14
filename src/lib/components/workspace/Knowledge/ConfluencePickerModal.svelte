@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { onMount, getContext, createEventDispatcher } from 'svelte';
+	import { getContext, createEventDispatcher } from 'svelte';
 	import { toast } from 'svelte-sonner';
 
 	import Modal from '$lib/components/common/Modal.svelte';
@@ -37,6 +37,9 @@
 
 	// ─── state ────────────────────────────────────────────────────────
 	let loading = false;
+	// Set when the initial site load fails (e.g. OAuth not connected → 401).
+	// Rendered as a single in-modal message instead of an endless toast storm.
+	let loadError = '';
 	let sites: ConfluenceSite[] = [];
 	let activeSite: ConfluenceSite | null = null;
 	let siteUrl: string = '';
@@ -74,21 +77,24 @@
 	// ─── boot ─────────────────────────────────────────────────────────
 	async function bootstrap() {
 		loading = true;
+		loadError = '';
 		try {
 			const res = await listSites(localStorage.token);
 			sites = res.sites ?? [];
 			if (sites.length === 0) {
-				toast.error($i18n.t('No Confluence sites are accessible for this account.'));
+				loadError = $i18n.t('No Confluence sites are accessible for this account.');
 				return;
 			}
 			if (sites.length === 1) {
 				await selectSite(sites[0]);
 			}
 		} catch (e) {
-			toast.error(
+			// One message, shown in the modal — do NOT retry. The reactive boot
+			// guard latches `booted` so a 401 (OAuth not connected) can't re-fire
+			// this in a tight loop and hammer /browse/sites.
+			loadError =
 				$i18n.t('Failed to load Confluence sites: ') +
-					(e instanceof Error ? e.message : String(e))
-			);
+				(e instanceof Error ? e.message : String(e));
 		} finally {
 			loading = false;
 		}
@@ -356,12 +362,19 @@
 		show = false;
 	}
 
-	onMount(() => {
-		if (show) bootstrap();
-	});
-
-	$: if (show && !loading && sites.length === 0 && !activeSite) {
+	// Boot exactly once per open. The previous guard re-fired bootstrap() on
+	// every failed attempt (sites stays empty after a 401), hammering
+	// /browse/sites hundreds of times a second and stacking toasts. `booted`
+	// latches when the modal opens and resets on close, so reopening retries
+	// once. (No onMount needed — this reactive runs on initial render too.)
+	let booted = false;
+	$: if (show && !booted) {
+		booted = true;
 		bootstrap();
+	}
+	$: if (!show) {
+		booted = false;
+		loadError = '';
 	}
 </script>
 
@@ -403,6 +416,15 @@
 			{#if loading}
 				<div class="flex items-center justify-center h-full">
 					<Spinner className="size-5" />
+				</div>
+			{:else if loadError}
+				<div
+					class="flex flex-col items-center justify-center h-full gap-2 text-sm text-gray-500 text-center px-6"
+				>
+					<div class="text-gray-700 dark:text-gray-300 font-medium">{loadError}</div>
+					<div class="text-xs">
+						{$i18n.t('Connect your Confluence account in Settings, then reopen this picker.')}
+					</div>
 				</div>
 			{:else if !activeSite}
 				<div class="flex flex-col items-center justify-center h-full gap-3 text-sm text-gray-500">
