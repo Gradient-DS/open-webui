@@ -23,10 +23,11 @@ that syncs with a global service credential.
 from __future__ import annotations
 
 import logging
+import time
 from typing import Any, Optional
 
 from open_webui.models.access_grants import AccessGrants
-from open_webui.models.knowledge import KnowledgeForm, KnowledgeModel, Knowledges
+from open_webui.models.knowledge import SUSPENSION_TTL_DAYS, KnowledgeForm, KnowledgeModel, Knowledges
 
 log = logging.getLogger(__name__)
 
@@ -140,9 +141,14 @@ async def shared_kb_status(provider_type: str, meta_key: str, items_key: str = '
 
     Returns ``provisioned`` and ``knowledge_id`` always; when a KB exists, also
     its ``status``/progress/``file_count``/``last_sync_at``/``last_result``/
-    ``suspended_at``/``owner_id`` and the persisted selection under
-    ``items_key``. The provider router merges this with its own fields
-    (auth mode, owner-connected, etc.).
+    ``suspended_at``/``suspended_reason``/``days_remaining``/``owner_id`` and the
+    persisted selection under ``items_key``. The provider router merges this
+    with its own fields (auth mode, owner-connected, etc.).
+
+    ``suspended_reason`` / ``days_remaining`` let the Cloud Sync tab explain a
+    suspended KB (why + how long before auto-delete) and that managed shared
+    KBs are never auto-deleted. ``days_remaining`` is computed from
+    ``suspended_at`` + the 30-day TTL.
     """
     kb = await find_shared_kb(provider_type, meta_key)
     status: dict = {
@@ -151,13 +157,21 @@ async def shared_kb_status(provider_type: str, meta_key: str, items_key: str = '
     }
     if kb:
         sync_info = (kb.meta or {}).get(meta_key, {})
+        suspended_at = sync_info.get('suspended_at')
+        days_remaining = (
+            max(0, SUSPENSION_TTL_DAYS - ((int(time.time()) - suspended_at) // 86400))
+            if suspended_at
+            else None
+        )
         status.update(
             {
                 'owner_id': kb.user_id,
                 'status': sync_info.get('status', 'idle'),
                 'last_sync_at': sync_info.get('last_sync_at'),
                 'last_result': sync_info.get('last_result'),
-                'suspended_at': sync_info.get('suspended_at'),
+                'suspended_at': suspended_at,
+                'suspended_reason': sync_info.get('suspended_reason') if suspended_at else None,
+                'days_remaining': days_remaining,
                 'file_count': len(await Knowledges.get_files_by_id(kb.id) or []),
                 # Live progress (files done / total) — lets the Cloud Sync tab
                 # show a percentage on the Sync button while a sync runs.

@@ -520,12 +520,38 @@ def test_build_item_url_ssp_format():
 # ---------------------------------------------------------------------
 
 
-def test_sync_permissions_suspends_on_auth_error():
+def test_sync_permissions_single_auth_error_does_not_suspend():
+    """One 401 increments the counter but must NOT suspend (threshold is 2)."""
     from open_webui.services.topdesk.topdesk_client import TopdeskAuthError
 
     client = SimpleNamespace(probe=AsyncMock(side_effect=TopdeskAuthError('401')))
     worker = _make_worker(client)
     kb = SimpleNamespace(meta={'topdesk_sync': {}})
+    update_meta = AsyncMock()
+    suspend_status = AsyncMock()
+    with (
+        patch('open_webui.services.topdesk.sync_worker.service_auth_configured', return_value=True),
+        patch('open_webui.services.topdesk.sync_worker.Knowledges.get_knowledge_by_id', new=AsyncMock(return_value=kb)),
+        patch('open_webui.services.topdesk.sync_worker.Knowledges.update_knowledge_meta_by_id', new=update_meta),
+        patch.object(worker, '_update_sync_status', new=suspend_status),
+    ):
+        _run(worker._sync_permissions())
+
+    update_meta.assert_awaited()
+    _kb_id, meta_arg = update_meta.await_args.args
+    assert meta_arg['topdesk_sync'].get('suspended_at') is None
+    assert meta_arg['topdesk_sync']['auth_fail_count'] == 1
+    suspend_status.assert_not_awaited()
+
+
+def test_sync_permissions_second_consecutive_auth_error_suspends():
+    """The second consecutive 401 reaches the threshold and suspends."""
+    from open_webui.services.topdesk.topdesk_client import TopdeskAuthError
+
+    client = SimpleNamespace(probe=AsyncMock(side_effect=TopdeskAuthError('401')))
+    worker = _make_worker(client)
+    # Counter already at 1 from a prior cycle.
+    kb = SimpleNamespace(meta={'topdesk_sync': {'auth_fail_count': 1}})
     update_meta = AsyncMock()
     with (
         patch('open_webui.services.topdesk.sync_worker.service_auth_configured', return_value=True),
@@ -539,12 +565,15 @@ def test_sync_permissions_suspends_on_auth_error():
     _kb_id, meta_arg = update_meta.await_args.args
     assert meta_arg['topdesk_sync']['suspended_at'] is not None
     assert meta_arg['topdesk_sync']['suspended_reason'] == 'service_credential_invalid'
+    assert meta_arg['topdesk_sync']['auth_fail_count'] == 2
 
 
 def test_sync_permissions_unsuspends_on_recovered_access():
     client = SimpleNamespace(probe=AsyncMock(return_value={'ok': True}))
     worker = _make_worker(client)
-    kb = SimpleNamespace(meta={'topdesk_sync': {'suspended_at': 123, 'suspended_reason': 'x'}})
+    kb = SimpleNamespace(
+        meta={'topdesk_sync': {'suspended_at': 123, 'suspended_reason': 'x', 'auth_fail_count': 2}}
+    )
     update_meta = AsyncMock()
     with (
         patch('open_webui.services.topdesk.sync_worker.service_auth_configured', return_value=True),
@@ -555,6 +584,27 @@ def test_sync_permissions_unsuspends_on_recovered_access():
 
     update_meta.assert_awaited()
     _kb_id, meta_arg = update_meta.await_args.args
+    assert 'suspended_at' not in meta_arg['topdesk_sync']
+    # Any success resets the consecutive-failure streak.
+    assert 'auth_fail_count' not in meta_arg['topdesk_sync']
+
+
+def test_sync_permissions_success_resets_failure_counter_without_suspension():
+    """A success after a single failure clears the counter (no suspension)."""
+    client = SimpleNamespace(probe=AsyncMock(return_value={'ok': True}))
+    worker = _make_worker(client)
+    kb = SimpleNamespace(meta={'topdesk_sync': {'auth_fail_count': 1}})
+    update_meta = AsyncMock()
+    with (
+        patch('open_webui.services.topdesk.sync_worker.service_auth_configured', return_value=True),
+        patch('open_webui.services.topdesk.sync_worker.Knowledges.get_knowledge_by_id', new=AsyncMock(return_value=kb)),
+        patch('open_webui.services.topdesk.sync_worker.Knowledges.update_knowledge_meta_by_id', new=update_meta),
+    ):
+        _run(worker._sync_permissions())
+
+    update_meta.assert_awaited()
+    _kb_id, meta_arg = update_meta.await_args.args
+    assert 'auth_fail_count' not in meta_arg['topdesk_sync']
     assert 'suspended_at' not in meta_arg['topdesk_sync']
 
 
@@ -572,8 +622,10 @@ def test_sync_permissions_transient_error_leaves_state_untouched():
 
 
 def test_sync_permissions_suspends_when_credential_missing():
+    """Missing credential is an auth failure; suspends on the 2nd consecutive cycle."""
     worker = _make_worker()
-    kb = SimpleNamespace(meta={'topdesk_sync': {}})
+    # Counter already at 1 from a prior missing-credential cycle.
+    kb = SimpleNamespace(meta={'topdesk_sync': {'auth_fail_count': 1}})
     update_meta = AsyncMock()
     with (
         patch('open_webui.services.topdesk.sync_worker.service_auth_configured', return_value=False),
@@ -584,6 +636,7 @@ def test_sync_permissions_suspends_when_credential_missing():
         _run(worker._sync_permissions())
     update_meta.assert_awaited()
     _kb_id, meta_arg = update_meta.await_args.args
+    assert meta_arg['topdesk_sync']['suspended_at'] is not None
     assert meta_arg['topdesk_sync']['suspended_reason'] == 'service_credential_missing'
 
 

@@ -159,6 +159,11 @@ export interface SharedKbStatusLike {
 	status?: SyncRunStatus;
 	last_sync_at?: number | null;
 	suspended_at?: number | null;
+	// Why the KB was suspended (e.g. 'service_credential_invalid',
+	// 'owner_access_lost') and how many days until the managed-shared-KB
+	// auto-delete window — both surfaced in the suspended-state explanation.
+	suspended_reason?: string | null;
+	days_remaining?: number | null;
 	file_count?: number;
 	progress_current?: number;
 	progress_total?: number;

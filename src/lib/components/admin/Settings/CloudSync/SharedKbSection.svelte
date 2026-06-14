@@ -140,6 +140,21 @@
 				)
 			: null;
 
+	// Suspended state — the KB hit a terminal credential/access failure. The
+	// "Sync now" button doubles as the recovery path: it re-checks access and
+	// resumes if the credential is restored, so we relabel it (not disable it)
+	// and explain what suspension means.
+	$: isSuspended = status?.suspended_at != null || status?.status === 'suspended';
+	// Human-readable reason for the suspended badge explanation.
+	$: suspendedReasonText =
+		status?.suspended_reason === 'service_credential_invalid'
+			? $i18n.t('The service credential is no longer valid.')
+			: status?.suspended_reason === 'service_credential_missing'
+				? $i18n.t('No service credential is configured.')
+				: status?.suspended_reason === 'owner_access_lost'
+					? $i18n.t('The owner no longer has access to the source.')
+					: $i18n.t('Access to the source could not be verified.');
+
 	// Picker modal title — noun-aware so the same component reads naturally
 	// for every provider ("Pages to sync" / "Files to sync" / "Items to sync").
 	$: pickerTitle =
@@ -272,6 +287,21 @@
 			</div>
 		{/if}
 
+		{#if status?.provisioned && isSuspended}
+			<!-- Suspended explanation: why it happened, that it will NOT be
+			     auto-deleted (managed shared KB), and how to recover. -->
+			<div
+				class="rounded-md bg-yellow-50 dark:bg-yellow-900/20 text-yellow-800 dark:text-yellow-200 text-xs p-2 space-y-0.5"
+			>
+				<div>{suspendedReasonText}</div>
+				<div>
+					{$i18n.t(
+						'This shared knowledge base is not auto-deleted — its files are kept. Use Retry sync to resume once access is restored.'
+					)}
+				</div>
+			</div>
+		{/if}
+
 		<div class="flex gap-2 pt-1 items-center">
 			<button
 				type="button"
@@ -290,10 +320,15 @@
 					class="px-3 py-1.5 h-8 text-sm rounded-lg bg-gray-100 hover:bg-gray-200 dark:bg-gray-800 dark:hover:bg-gray-700 flex items-center justify-center gap-1.5 min-w-40 disabled:opacity-50 disabled:cursor-not-allowed"
 					on:click={syncHandler}
 					disabled={isSharedSyncing}
+					title={isSuspended
+						? $i18n.t('Re-checks access and resumes syncing if the credential or access has been restored.')
+						: ''}
 				>
 					{#if isSharedSyncing}
 						{#if syncProgress !== null}{syncProgress}%{/if}
 						<Spinner className="size-3" />
+					{:else if isSuspended}
+						{$i18n.t('Retry sync')}
 					{:else}
 						{$i18n.t('Sync now')}
 					{/if}

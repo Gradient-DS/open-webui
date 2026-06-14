@@ -674,6 +674,11 @@ class TopdeskSyncWorker(BaseSyncWorker):
         elif definite_denial:
             await self._suspend_kb('service_credential_invalid')
 
+    # Suspend only after this many *consecutive* cycles report a terminal auth
+    # failure. A single bad cycle (e.g. a momentary 401 from an edge/proxy)
+    # must not take the single shared KB offline. Mirrors the Confluence gate.
+    _AUTH_FAIL_SUSPEND_THRESHOLD = 2
+
     async def _suspend_kb(self, reason: str) -> None:
         knowledge = await Knowledges.get_knowledge_by_id(self.knowledge_id)
         if not knowledge:
@@ -682,6 +687,24 @@ class TopdeskSyncWorker(BaseSyncWorker):
         sync_info = meta.get(self.meta_key, {})
         if sync_info.get('suspended_at'):
             return
+
+        # Consecutive-failure gate: a single auth failure increments the
+        # counter but does not suspend; only the threshold-th consecutive
+        # failure stamps suspended_at. Persisted in meta so it spans cycles.
+        fail_count = int(sync_info.get('auth_fail_count', 0)) + 1
+        sync_info['auth_fail_count'] = fail_count
+        if fail_count < self._AUTH_FAIL_SUSPEND_THRESHOLD:
+            log.warning(
+                'TOPdesk service credential unusable (%s) for KB %s — failure %d/%d, not suspending yet',
+                reason,
+                self.knowledge_id,
+                fail_count,
+                self._AUTH_FAIL_SUSPEND_THRESHOLD,
+            )
+            meta[self.meta_key] = sync_info
+            await Knowledges.update_knowledge_meta_by_id(self.knowledge_id, meta)
+            return
+
         log.warning('TOPdesk service credential unusable (%s), suspending KB %s', reason, self.knowledge_id)
         sync_info['suspended_at'] = int(time.time())
         sync_info['suspended_reason'] = reason
@@ -699,12 +722,20 @@ class TopdeskSyncWorker(BaseSyncWorker):
             return
         meta = knowledge.meta or {}
         sync_info = meta.get(self.meta_key, {})
-        if sync_info.get('suspended_at'):
+
+        was_suspended = bool(sync_info.get('suspended_at'))
+        had_failures = bool(sync_info.get('auth_fail_count'))
+        if not was_suspended and not had_failures:
+            return  # nothing to clear — avoid a needless meta write
+
+        if was_suspended:
             log.info('TOPdesk service credential restored, unsuspending KB %s', self.knowledge_id)
-            sync_info.pop('suspended_at', None)
-            sync_info.pop('suspended_reason', None)
-            meta[self.meta_key] = sync_info
-            await Knowledges.update_knowledge_meta_by_id(self.knowledge_id, meta)
+        sync_info.pop('suspended_at', None)
+        sync_info.pop('suspended_reason', None)
+        # Any success resets the consecutive-failure streak.
+        sync_info.pop('auth_fail_count', None)
+        meta[self.meta_key] = sync_info
+        await Knowledges.update_knowledge_meta_by_id(self.knowledge_id, meta)
 
     async def _verify_source_access(self, source: Dict[str, Any]) -> bool:
         """Verify a source still resolves under the service credential.
