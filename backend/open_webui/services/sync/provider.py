@@ -44,6 +44,7 @@ PROVIDER_FILE_ID_PREFIXES: dict[str, str] = {
     'onedrive': 'onedrive-',
     'google_drive': 'googledrive-',
     'confluence': 'confluence-',
+    'topdesk': 'topdesk-',
 }
 
 
@@ -225,6 +226,10 @@ def get_sync_provider(provider_type: str) -> SyncProvider:
         from open_webui.services.confluence.provider import ConfluenceSyncProvider
 
         return ConfluenceSyncProvider()
+    elif provider_type == 'topdesk':
+        from open_webui.services.topdesk.provider import TopdeskSyncProvider
+
+        return TopdeskSyncProvider()
     else:
         raise ValueError(f'Unsupported sync provider: {provider_type}')
 
@@ -243,5 +248,9 @@ def get_token_manager(provider_type: str) -> TokenManager:
         from open_webui.services.confluence.provider import ConfluenceTokenManager
 
         return ConfluenceTokenManager()
+    elif provider_type == 'topdesk':
+        from open_webui.services.topdesk.provider import TopdeskTokenManager
+
+        return TopdeskTokenManager()
     else:
         raise ValueError(f'Unsupported token manager: {provider_type}')

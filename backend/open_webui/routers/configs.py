@@ -965,6 +965,53 @@ async def set_confluence_config(
     user=Depends(get_admin_user),
 ):
     c = request.app.state.config
+
+    # Compute the effective auth/KB modes up front, applying the coupling
+    # ``basic ⇒ shared``: basic (service-account) auth has no per-user OAuth
+    # tokens, so it can only drive the pre-synced shared KB. The admin form
+    # enforces this too, but a stored ``basic + per_user`` state would otherwise
+    # leak through to /api/config and mislead the chat '+' menu. Both the
+    # orphan-guard below and the persisted values use these effective modes.
+    # (Only Confluence has a per-user mode; TOPdesk is always shared.)
+    if form_data.CONFLUENCE_AUTH_MODE is not None:
+        # Guard against arbitrary values; only the two known modes are valid.
+        _auth = form_data.CONFLUENCE_AUTH_MODE.strip()
+        effective_auth = _auth if _auth in ('oauth', 'basic') else 'oauth'
+    else:
+        effective_auth = c.CONFLUENCE_AUTH_MODE
+    if form_data.CONFLUENCE_KB_MODE is not None:
+        # Guard against arbitrary values; only the two known modes are valid.
+        _kb = form_data.CONFLUENCE_KB_MODE.strip()
+        requested_kb = _kb if _kb in ('per_user', 'shared') else 'per_user'
+    else:
+        requested_kb = c.CONFLUENCE_KB_MODE
+    effective_kb = 'shared' if effective_auth == 'basic' else requested_kb
+
+    # Two switches must not silently strand or corrupt an existing shared KB; both
+    # require the admin to delete it first (a config write has no KB lifecycle of
+    # its own). Look the KB up once and gate on it:
+    #   1. Switching the AUTH METHOD (basic ↔ oauth): the KB's pages were gathered
+    #      under one identity's permissions; re-syncing under a different identity
+    #      would silently change/leak content (mixing auth identities). Block it.
+    #   2. Switching the SYNC MODE away from shared (→ per_user): the toggle would
+    #      orphan the KB. Uses the effective mode, so a basic-auth save (forced to
+    #      shared) never trips it.
+    auth_changing = effective_auth != c.CONFLUENCE_AUTH_MODE
+    if auth_changing or effective_kb != 'shared':
+        from open_webui.services.sync.shared_kb import find_shared_kb
+
+        shared_kb = await find_shared_kb('confluence', 'confluence_sync')
+        if shared_kb is not None:
+            if auth_changing:
+                raise HTTPException(
+                    status_code=400,
+                    detail='Delete the shared Confluence knowledge base before switching authentication method.',
+                )
+            raise HTTPException(
+                status_code=400,
+                detail='Delete the shared Confluence knowledge base before switching to on-request (per-user) mode.',
+            )
+
     if form_data.ENABLE_CONFLUENCE_INTEGRATION is not None:
         c.ENABLE_CONFLUENCE_INTEGRATION = form_data.ENABLE_CONFLUENCE_INTEGRATION
     if form_data.ENABLE_CONFLUENCE_SYNC is not None:
@@ -977,21 +1024,83 @@ async def set_confluence_config(
         c.CONFLUENCE_SYNC_INTERVAL_MINUTES = form_data.CONFLUENCE_SYNC_INTERVAL_MINUTES
     if form_data.CONFLUENCE_MAX_PAGES_PER_SYNC is not None:
         c.CONFLUENCE_MAX_PAGES_PER_SYNC = max(0, form_data.CONFLUENCE_MAX_PAGES_PER_SYNC)
-    if form_data.CONFLUENCE_AUTH_MODE is not None:
-        # Guard against arbitrary values; only the two known modes are valid.
-        mode = form_data.CONFLUENCE_AUTH_MODE.strip()
-        c.CONFLUENCE_AUTH_MODE = mode if mode in ('oauth', 'basic') else 'oauth'
     if form_data.CONFLUENCE_SITE_URL is not None:
         c.CONFLUENCE_SITE_URL = form_data.CONFLUENCE_SITE_URL.strip().rstrip('/')
     if form_data.CONFLUENCE_BASIC_AUTH_USERNAME is not None:
         c.CONFLUENCE_BASIC_AUTH_USERNAME = form_data.CONFLUENCE_BASIC_AUTH_USERNAME.strip()
     if form_data.CONFLUENCE_BASIC_AUTH_API_TOKEN is not None:
         c.CONFLUENCE_BASIC_AUTH_API_TOKEN = form_data.CONFLUENCE_BASIC_AUTH_API_TOKEN.strip()
-    if form_data.CONFLUENCE_KB_MODE is not None:
-        # Guard against arbitrary values; only the two known modes are valid.
-        mode = form_data.CONFLUENCE_KB_MODE.strip()
-        c.CONFLUENCE_KB_MODE = mode if mode in ('per_user', 'shared') else 'per_user'
+    # Persist the coupled effective modes so the stored state is self-consistent.
+    c.CONFLUENCE_AUTH_MODE = effective_auth
+    c.CONFLUENCE_KB_MODE = effective_kb
     return await get_confluence_config(request, user)
+
+
+####################################
+# TOPdesk Config
+####################################
+
+
+class TopdeskConfigForm(BaseModel):
+    ENABLE_TOPDESK_INTEGRATION: Optional[bool] = None
+    ENABLE_TOPDESK_SYNC: Optional[bool] = None
+    TOPDESK_URL: Optional[str] = None
+    # Operator login name + application password → HTTP Basic; login empty →
+    # person-token. The application password is the secret used in either header
+    # form.
+    TOPDESK_USERNAME: Optional[str] = None
+    TOPDESK_APP_PASSWORD: Optional[str] = None
+    TOPDESK_SYNC_INTERVAL_MINUTES: Optional[int] = None
+    TOPDESK_MAX_ITEMS_PER_SYNC: Optional[int] = None  # 0 = unlimited
+    # Which knowledge items to sync: 'ssp' | 'public' | 'all'.
+    TOPDESK_SYNC_SCOPE: Optional[str] = None
+
+
+@router.get('/topdesk')
+async def get_topdesk_config(request: Request, user=Depends(get_admin_user)):
+    c = request.app.state.config
+    return {
+        'ENABLE_TOPDESK_INTEGRATION': c.ENABLE_TOPDESK_INTEGRATION,
+        'ENABLE_TOPDESK_SYNC': c.ENABLE_TOPDESK_SYNC,
+        'TOPDESK_URL': c.TOPDESK_URL,
+        'TOPDESK_USERNAME': c.TOPDESK_USERNAME,
+        # Admin-only endpoint; same disclosure profile as the Confluence
+        # basic-auth token, which round-trips the value masked behind a reveal
+        # toggle in the UI.
+        'TOPDESK_APP_PASSWORD': c.TOPDESK_APP_PASSWORD,
+        'TOPDESK_SYNC_INTERVAL_MINUTES': c.TOPDESK_SYNC_INTERVAL_MINUTES,
+        'TOPDESK_MAX_ITEMS_PER_SYNC': c.TOPDESK_MAX_ITEMS_PER_SYNC,
+        'TOPDESK_SYNC_SCOPE': c.TOPDESK_SYNC_SCOPE,
+    }
+
+
+@router.post('/topdesk')
+async def set_topdesk_config(
+    request: Request,
+    form_data: TopdeskConfigForm,
+    user=Depends(get_admin_user),
+):
+    c = request.app.state.config
+    if form_data.ENABLE_TOPDESK_INTEGRATION is not None:
+        c.ENABLE_TOPDESK_INTEGRATION = form_data.ENABLE_TOPDESK_INTEGRATION
+    if form_data.ENABLE_TOPDESK_SYNC is not None:
+        c.ENABLE_TOPDESK_SYNC = form_data.ENABLE_TOPDESK_SYNC
+    if form_data.TOPDESK_URL is not None:
+        c.TOPDESK_URL = form_data.TOPDESK_URL.strip().rstrip('/')
+    if form_data.TOPDESK_USERNAME is not None:
+        c.TOPDESK_USERNAME = form_data.TOPDESK_USERNAME.strip()
+    if form_data.TOPDESK_APP_PASSWORD is not None:
+        c.TOPDESK_APP_PASSWORD = form_data.TOPDESK_APP_PASSWORD.strip()
+    if form_data.TOPDESK_SYNC_INTERVAL_MINUTES is not None:
+        c.TOPDESK_SYNC_INTERVAL_MINUTES = form_data.TOPDESK_SYNC_INTERVAL_MINUTES
+    if form_data.TOPDESK_MAX_ITEMS_PER_SYNC is not None:
+        c.TOPDESK_MAX_ITEMS_PER_SYNC = max(0, form_data.TOPDESK_MAX_ITEMS_PER_SYNC)
+    if form_data.TOPDESK_SYNC_SCOPE is not None:
+        scope = form_data.TOPDESK_SYNC_SCOPE.strip().lower()
+        if scope not in ('ssp', 'public', 'all'):
+            raise HTTPException(400, 'TOPDESK_SYNC_SCOPE must be one of: ssp, public, all')
+        c.TOPDESK_SYNC_SCOPE = scope
+    return await get_topdesk_config(request, user)
 
 
 ####################################
@@ -1110,6 +1219,94 @@ async def set_onedrive_config(
     if form_data.ONEDRIVE_MAX_FILES_PER_SYNC is not None:
         c.ONEDRIVE_MAX_FILES_PER_SYNC = max(0, form_data.ONEDRIVE_MAX_FILES_PER_SYNC)
     return await get_onedrive_config(request, user)
+
+
+####################################
+# Cloud Sync — cross-provider status
+####################################
+
+
+# Provider registry for the status endpoint. Each entry maps a provider slug
+# to its Knowledge ``type`` value and the meta key its sync worker writes
+# under (see the workers' ``meta_key`` property — onedrive: 'onedrive_sync',
+# google_drive: 'google_drive_sync', confluence: 'confluence_sync'). Adding a
+# new provider (e.g. topdesk) is a one-line entry here.
+CLOUD_SYNC_PROVIDERS: list[dict] = [
+    {'slug': 'confluence', 'type': 'confluence', 'meta_key': 'confluence_sync'},
+    {'slug': 'google_drive', 'type': 'google_drive', 'meta_key': 'google_drive_sync'},
+    {'slug': 'onedrive', 'type': 'onedrive', 'meta_key': 'onedrive_sync'},
+    {'slug': 'topdesk', 'type': 'topdesk', 'meta_key': 'topdesk_sync'},
+]
+
+# Sync-worker status values (see base_worker / per-provider workers) that mean
+# "a sync is currently in flight". Everything else (completed*, failed,
+# cancelled, suspended, or absent) is treated as idle.
+_CLOUD_SYNC_IN_PROGRESS_STATUSES: frozenset[str] = frozenset({'syncing'})
+
+
+def _aggregate_provider_status(sync_infos: list[dict]) -> dict:
+    """Aggregate per-KB sync meta into a single provider status summary.
+
+    ``sync_infos`` is the list of ``meta[<meta_key>]`` dicts for every KB of
+    one provider, each annotated with the KB's file count under ``_file_count``
+    (see caller). Pure function so it can be unit-tested without a database.
+    """
+    kb_count = len(sync_infos)
+    file_count = sum(int(info.get('_file_count', 0) or 0) for info in sync_infos)
+    last_sync_at = None
+    suspended_count = 0
+    syncing = False
+    shared = False
+
+    for info in sync_infos:
+        ts = info.get('last_sync_at')
+        if isinstance(ts, int) and (last_sync_at is None or ts > last_sync_at):
+            last_sync_at = ts
+        if info.get('suspended_at'):
+            suspended_count += 1
+        if info.get('status') in _CLOUD_SYNC_IN_PROGRESS_STATUSES:
+            syncing = True
+        if info.get('shared'):
+            shared = True
+
+    return {
+        'kb_count': kb_count,
+        'file_count': file_count,
+        'last_sync_at': last_sync_at,
+        'status': 'syncing' if syncing else 'idle',
+        'syncing': syncing,
+        'suspended_count': suspended_count,
+        'shared': shared,
+    }
+
+
+@router.get('/cloud-sync/status')
+async def get_cloud_sync_status(request: Request, user=Depends(get_admin_user)):
+    """Per-provider cloud-sync status summary for the admin Cloud Sync panel.
+
+    Cheap (one KB query per provider + one grouped file-count query) so it can
+    be polled while syncs run. Providers with no KBs return zero-state entries.
+    """
+    from open_webui.models.knowledge import Knowledges
+
+    status: dict[str, dict] = {}
+
+    for provider in CLOUD_SYNC_PROVIDERS:
+        slug = provider['slug']
+        meta_key = provider['meta_key']
+
+        knowledge_bases = await Knowledges.get_knowledge_bases_by_type(provider['type'])
+        file_counts = await Knowledges.get_file_counts_by_knowledge_ids([kb.id for kb in knowledge_bases])
+
+        sync_infos: list[dict] = []
+        for kb in knowledge_bases:
+            info = dict((kb.meta or {}).get(meta_key, {}) or {})
+            info['_file_count'] = file_counts.get(kb.id, 0)
+            sync_infos.append(info)
+
+        status[slug] = _aggregate_provider_status(sync_infos)
+
+    return status
 
 
 ####################################

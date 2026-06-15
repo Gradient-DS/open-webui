@@ -99,6 +99,7 @@
 	import GoogleDrive from '../icons/GoogleDrive.svelte';
 	import OneDrive from '../icons/OneDrive.svelte';
 	import Confluence from '../icons/Confluence.svelte';
+	import Topdesk from '../icons/Topdesk.svelte';
 	import Dropdown from '../common/Dropdown.svelte';
 
 	import CommandSuggestionList from './MessageInput/CommandSuggestionList.svelte';
@@ -2047,7 +2048,7 @@
 														<OneDrive className="size-4" />
 													</button>
 												</Tooltip>
-											{:else if itemId === 'confluence' && fileUploadEnabled && $config?.features?.enable_confluence_integration && $config?.features?.enable_confluence_sync && $config?.features?.confluence_kb_mode !== 'shared'}
+											{:else if itemId === 'confluence' && fileUploadEnabled && $config?.features?.enable_confluence_integration && $config?.features?.enable_confluence_sync && $config?.features?.confluence_kb_mode !== 'shared' && $config?.features?.confluence_oauth_configured}
 												<Tooltip content={$i18n.t('Confluence')} placement="top">
 													<button
 														class="p-[7px] rounded-full bg-transparent text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors duration-300 focus:outline-hidden"
@@ -2065,6 +2066,16 @@
 														on:click={() => inputMenuRef?.attachSharedConfluenceKb()}
 													>
 														<Confluence className="size-4" />
+													</button>
+												</Tooltip>
+											{:else if itemId === 'topdesk' && fileUploadEnabled && $config?.features?.enable_topdesk_integration && $config?.features?.topdesk_shared_kb_id}
+												<Tooltip content={$i18n.t('TOPdesk knowledge base')} placement="top">
+													<button
+														class="p-[7px] rounded-full bg-transparent text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors duration-300 focus:outline-hidden"
+														type="button"
+														on:click={() => inputMenuRef?.attachSharedTopdeskKb()}
+													>
+														<Topdesk className="size-4" />
 													</button>
 												</Tooltip>
 												<!-- Pinned capability items -->

@@ -158,6 +158,7 @@ async def _process_expired_suspensions():
     """Hard-delete cloud KBs that have been suspended for 30+ days."""
     from open_webui.models.knowledge import Knowledges
     from open_webui.services.deletion import DeletionService
+    from open_webui.services.sync.shared_kb import is_managed_shared_kb
 
     expired_kbs = await Knowledges.get_suspended_expired_knowledge(limit=10)
     if not expired_kbs:
@@ -166,12 +167,12 @@ async def _process_expired_suspensions():
     log.info('Processing %d expired suspended KBs for hard-deletion', len(expired_kbs))
 
     for kb in expired_kbs:
-        # The shared Confluence KB must never self-delete — a lost service
-        # credential should raise an admin alert, not silently destroy the
-        # whole corpus. Suspension still hides it from retrieval.
-        if (kb.meta or {}).get('confluence_sync', {}).get('shared'):
+        # A managed shared KB (Confluence, TOPdesk, …) must never self-delete —
+        # a lost service credential should raise an admin alert, not silently
+        # destroy the whole corpus. Suspension still hides it from retrieval.
+        if is_managed_shared_kb(kb):
             log.warning(
-                'Shared Confluence KB %s is suspended past the 30-day grace period '
+                'Shared KB %s is suspended past the 30-day grace period '
                 'but protected from hard-deletion — restore the credential in the '
                 'Cloud Sync admin tab.',
                 kb.id,

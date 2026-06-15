@@ -340,6 +340,24 @@ data:
   CONFLUENCE_SHARED_KB_OWNER_ID: {{ .Values.openWebui.config.confluenceSharedKbOwnerId | quote }}
   {{- end }}
 
+  # TOPdesk Integration (REST Knowledge Base API + basic auth)
+  # TOPDESK_APP_PASSWORD is set via the secrets template.
+  ENABLE_TOPDESK_INTEGRATION: {{ .Values.openWebui.config.enableTopdeskIntegration | quote }}
+  {{- if .Values.openWebui.config.topdeskUrl }}
+  TOPDESK_URL: {{ .Values.openWebui.config.topdeskUrl | quote }}
+  {{- end }}
+  {{- if .Values.openWebui.config.topdeskUsername }}
+  TOPDESK_USERNAME: {{ .Values.openWebui.config.topdeskUsername | quote }}
+  {{- end }}
+
+  # TOPdesk Sync
+  ENABLE_TOPDESK_SYNC: {{ .Values.openWebui.config.enableTopdeskSync | quote }}
+  TOPDESK_SYNC_INTERVAL_MINUTES: {{ .Values.openWebui.config.topdeskSyncIntervalMinutes | quote }}
+  TOPDESK_MAX_ITEMS_PER_SYNC: {{ .Values.openWebui.config.topdeskMaxItemsPerSync | quote }}
+  TOPDESK_MAX_ITEM_SIZE_MB: {{ .Values.openWebui.config.topdeskMaxItemSizeMb | quote }}
+  TOPDESK_SYNC_SCOPE: {{ .Values.openWebui.config.topdeskSyncScope | quote }}
+  TOPDESK_KB_API_PATH: {{ .Values.openWebui.config.topdeskKbApiPath | quote }}
+
   KNOWLEDGE_MAX_FILE_COUNT: {{ .Values.openWebui.config.knowledgeMaxFileCount | quote }}
 
   # Shared-services loader-worker (per-tenant). When useSharedLoader=true,

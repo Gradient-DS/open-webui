@@ -142,6 +142,14 @@ class KnowledgeFileListResponse(BaseModel):
 
 SUSPENSION_TTL_DAYS = 30
 
+# Knowledge ``meta`` keys written by every cloud-sync worker (one per provider —
+# see each worker's ``meta_key`` property). Used by the suspension lookups below
+# to answer "is this KB synced by ANY provider?". Keep this in sync with the
+# providers registered in the sync factory. NOTE: this is the FULL set including
+# per-user providers; it is intentionally broader than
+# ``services.sync.shared_kb.SHARED_SYNC_META_KEYS`` (shared providers only).
+SYNC_PROVIDER_META_KEYS = ('onedrive_sync', 'google_drive_sync', 'confluence_sync', 'topdesk_sync')
+
 
 class KnowledgeTable:
     async def _get_access_grants(self, knowledge_id: str, db: Optional[AsyncSession] = None) -> list[AccessGrantModel]:
@@ -299,7 +307,7 @@ class KnowledgeTable:
 
                     # Annotate suspension info for cloud KBs
                     if knowledge_base.type not in ('local',) and knowledge_base.meta:
-                        for meta_key in ('onedrive_sync', 'google_drive_sync', 'confluence_sync'):
+                        for meta_key in SYNC_PROVIDER_META_KEYS:
                             sync_info = (knowledge_base.meta or {}).get(meta_key, {})
                             suspended_at = sync_info.get('suspended_at')
                             if suspended_at:
@@ -563,6 +571,25 @@ class KnowledgeTable:
                 select(KnowledgeFile.file_id).filter(KnowledgeFile.file_id.in_(file_ids)).distinct()
             )
             return {row[0] for row in result.all()}
+
+    async def get_file_counts_by_knowledge_ids(
+        self, knowledge_ids: list[str], db: Optional[AsyncSession] = None
+    ) -> dict[str, int]:
+        """Return ``{knowledge_id: file_count}`` for the given KBs in one grouped query.
+
+        Used by the cloud-sync status endpoint to size each provider's KBs
+        without an N+1 fan-out over ``get_knowledge_files_*``. KBs with no
+        files are omitted from the result; callers default missing ids to 0.
+        """
+        if not knowledge_ids:
+            return {}
+        async with get_async_db_context(db) as db:
+            result = await db.execute(
+                select(KnowledgeFile.knowledge_id, func.count(KnowledgeFile.file_id))
+                .filter(KnowledgeFile.knowledge_id.in_(knowledge_ids))
+                .group_by(KnowledgeFile.knowledge_id)
+            )
+            return {row[0]: row[1] for row in result.all()}
 
     async def search_files_by_id(
         self,
@@ -928,7 +955,7 @@ class KnowledgeTable:
             expired = []
             for kb in candidates:
                 meta = kb.meta or {}
-                for meta_key in ('onedrive_sync', 'google_drive_sync', 'confluence_sync'):
+                for meta_key in SYNC_PROVIDER_META_KEYS:
                     sync_info = meta.get(meta_key, {})
                     suspended_at = sync_info.get('suspended_at')
                     if suspended_at and suspended_at < cutoff:
@@ -949,7 +976,7 @@ class KnowledgeTable:
                 if not knowledge:
                     return False
                 meta = knowledge.meta or {}
-                for meta_key in ('onedrive_sync', 'google_drive_sync', 'confluence_sync'):
+                for meta_key in SYNC_PROVIDER_META_KEYS:
                     sync_info = meta.get(meta_key, {})
                     if sync_info.get('suspended_at'):
                         return True
@@ -966,7 +993,7 @@ class KnowledgeTable:
                 if not knowledge:
                     return None
                 meta = knowledge.meta or {}
-                for meta_key in ('onedrive_sync', 'google_drive_sync', 'confluence_sync'):
+                for meta_key in SYNC_PROVIDER_META_KEYS:
                     sync_info = meta.get(meta_key, {})
                     suspended_at = sync_info.get('suspended_at')
                     if suspended_at:

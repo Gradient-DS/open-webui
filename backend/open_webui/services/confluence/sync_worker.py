@@ -764,18 +764,35 @@ class ConfluenceSyncWorker(BaseSyncWorker):
     # Access / permissions
     # ------------------------------------------------------------------
 
-    async def _sync_permissions(self) -> None:
-        """Verify the KB owner still has access to at least one source.
+    # Suspend only after this many *consecutive* cycles report a terminal auth
+    # denial (401). A single transient 401 blip must not take a whole shared
+    # corpus offline — this is a "one shared KB for everyone" deployment.
+    _AUTH_FAIL_SUSPEND_THRESHOLD = 2
 
-        Probes every source: only suspend the KB if every probe reports a
-        permanent access denial (401/403/404). A single revoked source among
-        many should not suspend the whole KB.
+    async def _sync_permissions(self) -> None:
+        """Verify the credential can still reach at least one source.
+
+        Probes every source. Classification:
+
+        * A ``None`` result (HTTP 404 — space/page not found) is NOT a
+          credential denial. It is a content/revoked-source signal handled
+          separately by ``_verify_source_access`` / ``_handle_revoked_source``.
+          It counts only as "no positive access signal from this source".
+        * Only HTTP **401** is a terminal auth denial (Confluence API tokens
+          don't refresh and a revoked OAuth token won't recover mid-run).
+          A **403** or **404** ``HTTPStatusError`` is treated as transient /
+          non-auth and never suspends.
+        * Timeouts / connect / 5xx raise and are swallowed as transient.
+
+        So the KB suspends only when a probe yields a genuine 401, and only
+        after ``_AUTH_FAIL_SUSPEND_THRESHOLD`` consecutive such cycles. A space
+        going missing (404) or a one-off 403/timeout never suspends.
         """
         if not self.sources:
             return
 
         any_access = False
-        any_definite_denial = False
+        any_auth_denial = False  # a genuine 401 was observed this cycle
 
         for source in self.sources:
             cloud_id = source.get('cloud_id')
@@ -791,23 +808,30 @@ class ConfluenceSyncWorker(BaseSyncWorker):
                 if result is not None:
                     any_access = True
                     break
-                any_definite_denial = True  # 404 returned as None
+                # result is None == HTTP 404 (source not found). This is NOT a
+                # credential denial — just no positive access signal here. The
+                # revoked-source handling deals with a permanently-gone source.
             except httpx.HTTPStatusError as e:
-                if e.response.status_code in (401, 403, 404):
-                    any_definite_denial = True
+                if e.response.status_code == 401:
+                    any_auth_denial = True
                 else:
-                    log.warning('Transient error checking Confluence access: %s', e)
-                    return  # Don't change suspension state on transient failures
+                    # 403 / 404 / other 4xx → transient or non-auth; do not
+                    # change suspension state on this cycle.
+                    log.warning('Non-auth error checking Confluence access: %s', e)
+                    return
             except Exception as e:
-                log.warning('Error checking Confluence access: %s', e)
+                log.warning('Transient error checking Confluence access: %s', e)
                 return
 
-        if not any_access and not any_definite_denial:
-            # No probes ran (e.g. all sources missing cloud_id) — treat as transient.
-            return
+        if any_access:
+            await self._unsuspend_kb_if_needed()
+        elif any_auth_denial:
+            await self._record_auth_failure_and_maybe_suspend()
+        # else: no positive access and no 401 (e.g. only 404s / no probes ran)
+        # → leave suspension state untouched; this is not a credential denial.
 
-        owner_has_access = any_access
-
+    async def _unsuspend_kb_if_needed(self) -> None:
+        """Clear any suspension and reset the consecutive-auth-failure counter."""
         knowledge = await Knowledges.get_knowledge_by_id(self.knowledge_id)
         if not knowledge:
             return
@@ -815,30 +839,75 @@ class ConfluenceSyncWorker(BaseSyncWorker):
         meta = knowledge.meta or {}
         sync_info = meta.get(self.meta_key, {})
 
-        if owner_has_access:
-            if sync_info.get('suspended_at'):
-                log.info('Owner regained Confluence access, unsuspending KB %s', self.knowledge_id)
-                sync_info.pop('suspended_at', None)
-                sync_info.pop('suspended_reason', None)
-                meta[self.meta_key] = sync_info
-                await Knowledges.update_knowledge_meta_by_id(self.knowledge_id, meta)
-        else:
-            if not sync_info.get('suspended_at'):
-                log.warning(
-                    'Owner %s lost Confluence access, suspending KB %s',
-                    self.user_id,
-                    self.knowledge_id,
-                )
-                sync_info['suspended_at'] = int(time.time())
-                sync_info['suspended_reason'] = 'owner_access_lost'
-                meta[self.meta_key] = sync_info
-                await Knowledges.update_knowledge_meta_by_id(self.knowledge_id, meta)
+        was_suspended = bool(sync_info.get('suspended_at'))
+        had_failures = bool(sync_info.get('auth_fail_count'))
+        if not was_suspended and not had_failures:
+            return  # nothing to clear — avoid a needless meta write
 
-                await self._update_sync_status(
-                    'suspended',
-                    error='Owner no longer has access to the Confluence source. '
-                    'KB suspended — will be deleted after 30 days if access is not restored.',
-                )
+        if was_suspended:
+            log.info('Confluence access restored, unsuspending KB %s', self.knowledge_id)
+        sync_info.pop('suspended_at', None)
+        sync_info.pop('suspended_reason', None)
+        # Any success resets the consecutive-failure streak.
+        sync_info.pop('auth_fail_count', None)
+        meta[self.meta_key] = sync_info
+        await Knowledges.update_knowledge_meta_by_id(self.knowledge_id, meta)
+
+    async def _record_auth_failure_and_maybe_suspend(self) -> None:
+        """Increment the consecutive-401 counter; suspend at the threshold."""
+        knowledge = await Knowledges.get_knowledge_by_id(self.knowledge_id)
+        if not knowledge:
+            return
+
+        meta = knowledge.meta or {}
+        sync_info = meta.get(self.meta_key, {})
+
+        if sync_info.get('suspended_at'):
+            return  # already suspended — nothing more to do
+
+        # Persist the streak in meta so it survives across sync cycles.
+        fail_count = int(sync_info.get('auth_fail_count', 0)) + 1
+        sync_info['auth_fail_count'] = fail_count
+
+        if fail_count < self._AUTH_FAIL_SUSPEND_THRESHOLD:
+            log.warning(
+                'Confluence auth denial (401) for KB %s — failure %d/%d, not suspending yet',
+                self.knowledge_id,
+                fail_count,
+                self._AUTH_FAIL_SUSPEND_THRESHOLD,
+            )
+            meta[self.meta_key] = sync_info
+            await Knowledges.update_knowledge_meta_by_id(self.knowledge_id, meta)
+            return
+
+        # Threshold reached — suspend. The reason/message depends on auth mode:
+        # in basic/service-account mode there is no per-user owner, so the
+        # owner-centric copy would be misleading.
+        if self._auth_mode == 'basic':
+            suspended_reason = 'service_credential_invalid'
+            error_message = (
+                'The Confluence service credential is no longer valid (401). '
+                'KB suspended — restore the credential to resume.'
+            )
+        else:
+            suspended_reason = 'owner_access_lost'
+            error_message = (
+                'Owner no longer has access to the Confluence source. '
+                'KB suspended — will be deleted after 30 days if access is not restored.'
+            )
+
+        log.warning(
+            'Confluence auth denied for KB %s after %d consecutive failures, suspending (%s)',
+            self.knowledge_id,
+            fail_count,
+            suspended_reason,
+        )
+        sync_info['suspended_at'] = int(time.time())
+        sync_info['suspended_reason'] = suspended_reason
+        meta[self.meta_key] = sync_info
+        await Knowledges.update_knowledge_meta_by_id(self.knowledge_id, meta)
+
+        await self._update_sync_status('suspended', error=error_message)
 
     async def _verify_source_access(self, source: Dict[str, Any]) -> bool:
         cloud_id = source.get('cloud_id')

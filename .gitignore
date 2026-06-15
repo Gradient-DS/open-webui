@@ -5,6 +5,10 @@ yarn.lock
 # anything we want to keep on disk for re-use but never commit).
 .local/
 
+# E2E browser-automation working dir (Playwright MCP persistent Chromium
+# profile + screenshot/trace output — see .claude/agents/owui-e2e.md).
+.e2e/
+
 # SearXNG local secrets
 searxng/secrets.yml
 .DS_Store
