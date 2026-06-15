@@ -1,12 +1,3 @@
 {
-  "data": {
-    "knowledgeItems": {
-      "totalCount": 0,
-      "edges": [],
-      "pageInfo": {
-        "hasNextPage": false,
-        "endCursor": null
-      }
-    }
-  }
+  "item": []
 }

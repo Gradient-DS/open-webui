@@ -1,5 +1,11 @@
 # TOPdesk: reconcile the integration to the real REST Knowledge Base API
 
+> **✅ Implemented 2026-06-15 (Phases 1–6).** Code reconciled to REST; 83 TOPdesk
+> tests green; `import open_webui.main` OK; svelte-check + prettier clean for changed
+> FE files. **Only the live gate + manual verification remain — both blocked on the
+> operator login from Intermax** (run `scripts/topdesk_discover.py --login "<op>"`).
+> New shared module `services/topdesk/mapping.py` centralises the nested-shape reads.
+
 ## Status / why this plan
 
 The TOPdesk client + worker were built against an **inferred GraphQL schema** (Phase 0 was

@@ -987,15 +987,26 @@ async def set_confluence_config(
         requested_kb = c.CONFLUENCE_KB_MODE
     effective_kb = 'shared' if effective_auth == 'basic' else requested_kb
 
-    # Block switching away from the pre-synced shared mode while a shared KB is
-    # still provisioned — otherwise the toggle (a pure config write with no KB
-    # lifecycle) would orphan it. The admin must delete the shared KB first.
-    # Uses the effective mode, so a basic-auth save (forced to shared) never
-    # trips it.
-    if effective_kb != 'shared':
+    # Two switches must not silently strand or corrupt an existing shared KB; both
+    # require the admin to delete it first (a config write has no KB lifecycle of
+    # its own). Look the KB up once and gate on it:
+    #   1. Switching the AUTH METHOD (basic ↔ oauth): the KB's pages were gathered
+    #      under one identity's permissions; re-syncing under a different identity
+    #      would silently change/leak content (mixing auth identities). Block it.
+    #   2. Switching the SYNC MODE away from shared (→ per_user): the toggle would
+    #      orphan the KB. Uses the effective mode, so a basic-auth save (forced to
+    #      shared) never trips it.
+    auth_changing = effective_auth != c.CONFLUENCE_AUTH_MODE
+    if auth_changing or effective_kb != 'shared':
         from open_webui.services.sync.shared_kb import find_shared_kb
 
-        if await find_shared_kb('confluence', 'confluence_sync') is not None:
+        shared_kb = await find_shared_kb('confluence', 'confluence_sync')
+        if shared_kb is not None:
+            if auth_changing:
+                raise HTTPException(
+                    status_code=400,
+                    detail='Delete the shared Confluence knowledge base before switching authentication method.',
+                )
             raise HTTPException(
                 status_code=400,
                 detail='Delete the shared Confluence knowledge base before switching to on-request (per-user) mode.',
@@ -1041,6 +1052,8 @@ class TopdeskConfigForm(BaseModel):
     TOPDESK_APP_PASSWORD: Optional[str] = None
     TOPDESK_SYNC_INTERVAL_MINUTES: Optional[int] = None
     TOPDESK_MAX_ITEMS_PER_SYNC: Optional[int] = None  # 0 = unlimited
+    # Which knowledge items to sync: 'ssp' | 'public' | 'all'.
+    TOPDESK_SYNC_SCOPE: Optional[str] = None
 
 
 @router.get('/topdesk')
@@ -1057,6 +1070,7 @@ async def get_topdesk_config(request: Request, user=Depends(get_admin_user)):
         'TOPDESK_APP_PASSWORD': c.TOPDESK_APP_PASSWORD,
         'TOPDESK_SYNC_INTERVAL_MINUTES': c.TOPDESK_SYNC_INTERVAL_MINUTES,
         'TOPDESK_MAX_ITEMS_PER_SYNC': c.TOPDESK_MAX_ITEMS_PER_SYNC,
+        'TOPDESK_SYNC_SCOPE': c.TOPDESK_SYNC_SCOPE,
     }
 
 
@@ -1081,6 +1095,11 @@ async def set_topdesk_config(
         c.TOPDESK_SYNC_INTERVAL_MINUTES = form_data.TOPDESK_SYNC_INTERVAL_MINUTES
     if form_data.TOPDESK_MAX_ITEMS_PER_SYNC is not None:
         c.TOPDESK_MAX_ITEMS_PER_SYNC = max(0, form_data.TOPDESK_MAX_ITEMS_PER_SYNC)
+    if form_data.TOPDESK_SYNC_SCOPE is not None:
+        scope = form_data.TOPDESK_SYNC_SCOPE.strip().lower()
+        if scope not in ('ssp', 'public', 'all'):
+            raise HTTPException(400, 'TOPDESK_SYNC_SCOPE must be one of: ssp, public, all')
+        c.TOPDESK_SYNC_SCOPE = scope
     return await get_topdesk_config(request, user)
 
 

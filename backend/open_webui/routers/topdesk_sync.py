@@ -34,11 +34,12 @@ from open_webui.services.sync.shared_kb import (
 from open_webui.services.sync.shared_kb import (
     shared_kb_status as shared_kb_status_generic,
 )
+from open_webui.services.topdesk import mapping
 from open_webui.services.topdesk.auth import build_client, service_auth_configured
 from open_webui.services.topdesk.topdesk_client import (
+    TopdeskApiError,
     TopdeskAuthError,
     TopdeskClient,
-    TopdeskGraphQLError,
     TopdeskTransientError,
 )
 from open_webui.utils.auth import get_admin_user
@@ -54,6 +55,11 @@ _ITEMS_KEY = 'items'
 
 _SHARED_KB_NAME = 'TOPdesk'
 _SHARED_KB_DESCRIPTION = 'Read-only TOPdesk knowledge base managed by administrators.'
+
+# Lean field set for the tree picker — title (for the label), number, status.
+# (``list_root_items`` adds ``parent`` itself for the no-parent filter.) The full
+# content/visibility/urls set is only fetched at sync time, not for browsing.
+_BROWSE_FIELDS = 'number,title,status'
 
 
 # ──────────────────────────────────────────────────────────────────────
@@ -117,44 +123,47 @@ async def test_connection(
     """Probe a TOPdesk service credential with a lightweight REST call.
 
     Admin-only. Builds a client from the submitted credentials (falling back to
-    stored config for blank fields) and runs ``probe()`` (operators/current with
-    a version fallback). Returns ``{ok, detail, item_count?}``. A blank
-    ``app_password`` reuses the stored credential. The operator login is optional.
+    stored config for blank fields) and runs ``probe()`` (version, with a KB-list
+    fallback). Returns ``{ok, reason, detail}`` — ``reason`` is a stable machine
+    code the frontend localizes; ``detail`` is an English debug fallback. A blank
+    ``app_password`` reuses the stored credential.
     """
     url = (form_data.url or TOPDESK_URL.value or '').strip().rstrip('/')
     username = (form_data.username or TOPDESK_USERNAME.value or '').strip()
     # Blank application password → fall back to the stored credential.
     app_password = form_data.app_password if form_data.app_password else (TOPDESK_APP_PASSWORD.value or '')
 
-    if not url or not app_password:
+    # ``reason`` is a stable machine code the frontend maps to a localized message
+    # (the ``detail`` strings stay English as a console/debug fallback). The KB REST
+    # API is Basic-only, so the operator login is required alongside URL + password.
+    if not url or not username or not app_password:
         return {
             'ok': False,
-            'detail': 'TOPdesk URL and application password are required.',
+            'reason': 'missing_config',
+            'detail': 'TOPdesk URL, operator login and application password are required.',
         }
 
     client = TopdeskClient(base_url=url, username=username, app_password=app_password)
     try:
         result = await client.probe()
-        return {
-            'ok': bool(result.get('ok')),
-            'detail': 'Connection successful.' if result.get('ok') else 'TOPdesk probe did not succeed.',
-        }
+        if result.get('ok'):
+            return {'ok': True, 'reason': 'ok', 'detail': 'Connection successful.'}
+        return {'ok': False, 'reason': 'probe_failed', 'detail': 'TOPdesk probe did not succeed.'}
     except TopdeskAuthError:
         return {
             'ok': False,
-            'detail': 'Authentication failed — check the application password (and operator login, if set).',
+            'reason': 'auth_failed',
+            'detail': 'Authentication failed — check the application password and operator login.',
         }
     except TopdeskTransientError as e:
-        code = e.status_code
-        detail = 'TOPdesk is temporarily unavailable. Please try again shortly.'
-        if code == 429:
-            detail = 'TOPdesk rate-limited the request. Please try again shortly.'
-        return {'ok': False, 'detail': detail}
+        if e.status_code == 429:
+            return {'ok': False, 'reason': 'rate_limited', 'detail': 'TOPdesk rate-limited the request.'}
+        return {'ok': False, 'reason': 'unavailable', 'detail': 'TOPdesk is temporarily unavailable.'}
     except ConnectionError as e:
-        return {'ok': False, 'detail': str(e)}
+        return {'ok': False, 'reason': 'unreachable', 'detail': str(e)}
     except Exception as e:
         log.warning('TOPdesk test connection failed: %s', e)
-        return {'ok': False, 'detail': f'Connection failed: {e}'}
+        return {'ok': False, 'reason': 'error', 'detail': f'Connection failed: {e}'}
     finally:
         await client.close()
 
@@ -165,16 +174,14 @@ async def test_connection(
 
 
 def _picker_item(node: dict) -> dict:
-    """Normalize a TOPdesk knowledge-item node into the picker shape.
+    """Normalize a TOPdesk REST knowledge-item node into the picker shape.
 
-    ``has_children`` is a best-effort flag. The list/child node selections
-    (``services/topdesk/topdesk_client.py``) do NOT carry a child count or a
-    ``hasChildren`` field, and we deliberately avoid an N+1 child-fetch per
-    item (one extra GraphQL round-trip per node would be punishing on large
-    KBs). When the node happens to carry a ``children`` array (e.g. a parent
-    node hydrated elsewhere) we honour it; otherwise we report ``True`` so the
-    picker offers an expand affordance — expanding then resolves the real
-    children via ``list_item_children`` and an empty result collapses the node.
+    Reads the nested REST shape via ``mapping`` (``translation.content.title``,
+    ``status.name``). ``has_children`` is a best-effort flag: the REST list result
+    carries no child count, and we deliberately avoid an N+1 child-count query per
+    item (punishing on large KBs). We report ``True`` so the picker offers an
+    expand affordance — expanding then resolves the real children via
+    ``list_item_children`` and an empty result collapses the node.
     """
     children = node.get('children')
     if isinstance(children, list):
@@ -185,10 +192,10 @@ def _picker_item(node: dict) -> dict:
         has_children = True
     return {
         'id': node.get('id'),
-        'name': node.get('title') or node.get('number') or node.get('id'),
+        'name': mapping.item_title(node) or node.get('id'),
         'number': node.get('number'),
         'has_children': has_children,
-        'status': node.get('status'),
+        'status': mapping.item_status_name(node) or None,
     }
 
 
@@ -213,26 +220,26 @@ async def browse_items(
     try:
         client = build_client()
         if parent_id:
-            nodes = await client.list_item_children(parent_id)
+            nodes = await client.list_item_children(parent_id, fields=_BROWSE_FIELDS)
         else:
-            nodes = await client.list_root_items()
+            nodes = await client.list_root_items(fields=_BROWSE_FIELDS)
         return {'items': [_picker_item(node) for node in nodes]}
     except TopdeskAuthError:
         raise HTTPException(401, 'TOPdesk rejected the service credential.')
     except TopdeskTransientError as e:
         # Map a TOPdesk outage to a clean upstream-failure status.
         raise HTTPException(503 if e.status_code != 429 else 502, 'TOPdesk is temporarily unavailable.')
-    except TopdeskGraphQLError as e:
-        raise HTTPException(502, f'TOPdesk query failed: {e}')
+    except TopdeskApiError as e:
+        raise HTTPException(502, f'TOPdesk request failed: {e}')
     except ConnectionError as e:
         raise HTTPException(502, str(e))
     except HTTPException:
         # Never let the catch-all below remap an HTTPException we raised on purpose.
         raise
     except Exception as e:
-        # Catch-all so an unexpected error (malformed GraphQL not wrapped in
-        # TopdeskGraphQLError, a _picker_item bug on an odd node, etc.) surfaces
-        # as a clean 502 instead of a raw 500 + stacktrace to the admin.
+        # Catch-all so an unexpected error (a malformed body, a _picker_item bug on
+        # an odd node, etc.) surfaces as a clean 502 instead of a raw 500 +
+        # stacktrace to the admin.
         log.exception('TOPdesk browse_items failed unexpectedly: %s', e)
         raise HTTPException(502, 'TOPdesk request failed.')
     finally:

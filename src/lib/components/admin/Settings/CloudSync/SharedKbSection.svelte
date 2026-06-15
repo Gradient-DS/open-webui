@@ -172,7 +172,8 @@
 			if (beforeAction) await beforeAction();
 			showPicker = true;
 		} catch (err) {
-			toast.error(`${err}`);
+			console.error(err);
+			toast.error($i18n.t('Could not save the configuration.'));
 		}
 		provisioning = false;
 	};
@@ -193,7 +194,8 @@
 			// failure won't mask the successful provision above.
 			await syncHandler();
 		} catch (err) {
-			toast.error(`${err}`);
+			console.error(err);
+			toast.error($i18n.t('Could not provision the shared knowledge base.'));
 		}
 		provisioning = false;
 	};
@@ -210,7 +212,8 @@
 			startStatusPolling();
 			dispatch('synced');
 		} catch (err) {
-			toast.error(`${err}`);
+			console.error(err);
+			toast.error($i18n.t('Could not start synchronization.'));
 			syncingShared = false;
 		}
 	};
@@ -223,7 +226,8 @@
 			await refreshStatus();
 			dispatch('deleted');
 		} catch (err) {
-			toast.error(`${err}`);
+			console.error(err);
+			toast.error($i18n.t('Could not delete the shared knowledge base.'));
 		}
 		deletingShared = false;
 	};
@@ -321,7 +325,9 @@
 					on:click={syncHandler}
 					disabled={isSharedSyncing}
 					title={isSuspended
-						? $i18n.t('Re-checks access and resumes syncing if the credential or access has been restored.')
+						? $i18n.t(
+								'Re-checks access and resumes syncing if the credential or access has been restored.'
+							)
 						: ''}
 				>
 					{#if isSharedSyncing}

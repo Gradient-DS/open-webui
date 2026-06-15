@@ -111,6 +111,8 @@ export interface TopdeskConfigResponse {
 	TOPDESK_SYNC_INTERVAL_MINUTES?: number;
 	// 0 = unlimited.
 	TOPDESK_MAX_ITEMS_PER_SYNC?: number;
+	// Which items to sync: 'ssp' | 'public' | 'all'.
+	TOPDESK_SYNC_SCOPE?: string;
 }
 
 export interface GoogleDriveConfigResponse {

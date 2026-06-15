@@ -1,38 +1,36 @@
-"""TOPdesk Knowledge Base GraphQL API client.
+"""TOPdesk Knowledge Base REST API client.
 
-Async httpx wrapper for the TOPdesk Knowledge Base GraphQL endpoint, used by the
-service-account sync. Talks to the customer tenant directly
-(`{TOPDESK_URL}{TOPDESK_GRAPHQL_PATH}`) with a static auth header (Basic or
-person-token — see ``services/topdesk/auth.py``). The credential never
-refreshes, so a 401 is terminal.
+Async httpx wrapper for the TOPdesk SaaS Knowledge Base REST API
+(``knowledge-base-v1``), used by the service-account sync. Talks to the customer
+tenant directly (``{TOPDESK_URL}{TOPDESK_KB_API_PATH}``) with a static HTTP Basic
+auth header (operator login + application token — see ``services/topdesk/auth.py``).
+The credential never refreshes, so a 401 is terminal.
 
 Modelled on ``services/confluence/confluence_client.py`` (async httpx,
-retry/backoff, 401-terminal). Two key differences from the Confluence client:
+retry/backoff, 401-terminal). The KB API is plain REST:
 
-1. The data surface is a **POST GraphQL** body (`{query, variables}`), not REST
-   GETs. A GraphQL query-level failure arrives as **HTTP 200 with a top-level
-   `errors` array** (findings §4.0) — this client treats that as a FAILURE and
-   raises ``TopdeskGraphQLError`` (it never returns a 200-with-errors body as
-   success).
-2. Pagination is the Relay `first`/`after` + `pageInfo{hasNextPage,endCursor}`
-   cursor model carried in the query body, not a `_links.next` URL.
+- ``GET /knowledgeItems`` — list, with ``start``/``page_size`` offset paging,
+  a FIQL ``query`` filter, a ``fields`` selector, and an optional ``language``.
+  Returns ``{"item": [...], "prev"?, "next"?}`` (HTTP 200 = full, 206 = partial).
+- ``GET /knowledgeItems/{id|number}`` — a single item (returned directly).
 
-The lightweight connection probe (``probe``) uses the REST surface
-(`/tas/api/operators/current`, falling back to `/tas/api/version`).
+The lightweight connection probe (``probe``) uses ``GET /tas/api/version`` (auth +
+reachability), falling back to a minimal KB list (which also confirms the KB-v1
+feature is enabled on the tenant).
 
-SCHEMA-UNCERTAINTY DESIGN RULE
-------------------------------
-The GraphQL schema is **inferred** — live verification is pending (see
-thoughts/shared/research/2026-06-topdesk-api-verification.md §4/§5 and its
-"REQUIRES LIVE VERIFICATION" checklist). ALL GraphQL query strings and
-field-name constants are centralised in the "GraphQL schema (INFERRED)" section
-below so a live-verification correction is a one-place edit. Parsing helpers
-reference these constants rather than hard-coding field names inline.
+FIELD SELECTION
+---------------
+The REST API does NOT return content/title/status/etc. unless they are named in
+the ``fields`` param (the spec warns: omit ``translation.content.*`` and the
+content block comes back empty). All KB calls therefore request ``_KI_FIELDS`` by
+default; callers that need a lean payload (the tree picker) pass a narrower set.
+``_KI_FIELDS`` is the single source of truth for the synced field set — a schema
+correction is a one-line edit here.
 """
 
 import asyncio
 import logging
-from typing import Any, AsyncIterator, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 
 import httpx
 
@@ -40,142 +38,31 @@ log = logging.getLogger(__name__)
 
 
 # =====================================================================
-# GraphQL schema (INFERRED — single source of truth for field names)
+# REST field set + Accept headers (single source of truth)
 # =====================================================================
-# Every TOPdesk-specific query string and GraphQL field name lives in this
-# section. If live introspection reveals different names (different query name,
-# pagination args, filter comparator, or node fields), edit ONLY this block —
-# the request/parse code below references these constants. See findings §4–§5.
 
-# --- Top-level query / connection / node field names -----------------
-FIELD_KNOWLEDGE_ITEMS = 'knowledgeItems'  # Query.knowledgeItems (the connection)
-FIELD_KNOWLEDGE_ITEM = 'knowledgeItem'  # Query.knowledgeItem(id) (single item)
-FIELD_EDGES = 'edges'
-FIELD_NODE = 'node'
-FIELD_CURSOR = 'cursor'
-FIELD_PAGE_INFO = 'pageInfo'
-FIELD_HAS_NEXT_PAGE = 'hasNextPage'
-FIELD_END_CURSOR = 'endCursor'
-FIELD_TOTAL_COUNT = 'totalCount'
-FIELD_CHILDREN = 'children'
+# Field selector requested on every list/get for sync. Content title/body/etc.
+# live under ``translation.content`` — requesting them populates the nested block
+# (a bare list otherwise returns it empty). Centralised so a schema correction is
+# one edit; ``services/topdesk/mapping.py`` reads the resulting nested shape.
+_KI_FIELDS = (
+    'parent,status,visibility,urls,language,title,description,content,keywords,'
+    'creationDate,modificationDate,availableTranslations'
+)
 
-# --- modificationDate filter comparator key (guessed — findings §5.2) ---
-# The comparator key (gte / since / modifiedAfter / after) is unconfirmed; isolate
-# it here so a live-verification correction is one line.
-FILTER_MODIFICATION_DATE = 'modificationDate'
-FILTER_MODIFICATION_DATE_COMPARATOR = 'gte'
-FILTER_STATUS = 'status'
+# Vendor media types from the OpenAPI spec.
+_ACCEPT_LIST = 'application/x.topdesk-kb-ki-list-v1+json'
+_ACCEPT_ITEM = 'application/x.topdesk-kb-ki-v1+json'
+_ACCEPT_JSON = 'application/json'
 
-# Default page size for list pagination.
-_DEFAULT_PAGE_SIZE = 50
+# Default page size for a single list page. The spec allows 1–1000; sync paging
+# uses the max (1000) for fewer round-trips.
+_DEFAULT_PAGE_SIZE = 100
+_PAGE_SIZE_MAX = 1000
 
 # Hard safety cap on the number of pages the pagination loop will walk, so a
-# misbehaving server (e.g. a cursor that never advances) cannot spin forever.
+# misbehaving server (e.g. a ``next`` that never clears) cannot spin forever.
 _MAX_PAGES = 200
-
-# KnowledgeItem node selection set used for the list query. Kept lean for
-# pagination; full content is hydrated per-item via get_knowledge_item.
-_NODE_SUMMARY_FIELDS = """
-  id
-  number
-  title
-  description
-  keywords
-  language
-  status
-  visibility
-  availableTranslations { language title status }
-  creationDate
-  modificationDate
-"""
-
-# Full node selection including the HTML body + parent breadcrumb. Used by
-# get_knowledge_item for content hydration. (Attachments are read but ignored in
-# v1 — findings §6; the selection omits them to keep payloads small.)
-_NODE_FULL_FIELDS = (
-    _NODE_SUMMARY_FIELDS
-    + """
-  content
-  parent { id number title }
-"""
-)
-
-# Child-node selection for tree traversal (findings §5.3).
-_CHILD_FIELDS = """
-  id
-  number
-  title
-  language
-  status
-  modificationDate
-"""
-
-QUERY_LIST_KNOWLEDGE_ITEMS = """
-query ListKnowledgeItems($first: Int!, $after: String, $filter: KnowledgeItemFilter) {
-  %s(first: $first, after: $after, filter: $filter) {
-    %s
-    %s {
-      %s
-      %s { %s }
-    }
-    %s { %s %s }
-  }
-}
-""" % (
-    FIELD_KNOWLEDGE_ITEMS,
-    FIELD_TOTAL_COUNT,
-    FIELD_EDGES,
-    FIELD_CURSOR,
-    FIELD_NODE,
-    _NODE_SUMMARY_FIELDS,
-    FIELD_PAGE_INFO,
-    FIELD_HAS_NEXT_PAGE,
-    FIELD_END_CURSOR,
-)
-
-QUERY_GET_KNOWLEDGE_ITEM = """
-query GetKnowledgeItem($id: ID!) {
-  %s(id: $id) {
-    %s
-  }
-}
-""" % (FIELD_KNOWLEDGE_ITEM, _NODE_FULL_FIELDS)
-
-# Variant without the heavy `content` field (metadata-only hydration).
-QUERY_GET_KNOWLEDGE_ITEM_NO_CONTENT = """
-query GetKnowledgeItem($id: ID!) {
-  %s(id: $id) {
-    %s
-    parent { id number title }
-  }
-}
-""" % (FIELD_KNOWLEDGE_ITEM, _NODE_SUMMARY_FIELDS)
-
-QUERY_LIST_ITEM_CHILDREN = """
-query ListItemChildren($id: ID!) {
-  %s(id: $id) {
-    id
-    number
-    title
-    %s { %s }
-  }
-}
-""" % (FIELD_KNOWLEDGE_ITEM, FIELD_CHILDREN, _CHILD_FIELDS)
-
-
-def _build_filter(status: Optional[str], modified_since: Optional[str]) -> Optional[Dict[str, Any]]:
-    """Compose the GraphQL `filter` input object from the supported predicates.
-
-    Returns None when no predicate is set (so the query omits filtering entirely).
-    See findings §5.2 — the modificationDate comparator key is unconfirmed and
-    centralised in FILTER_MODIFICATION_DATE_COMPARATOR.
-    """
-    flt: Dict[str, Any] = {}
-    if status:
-        flt[FILTER_STATUS] = status
-    if modified_since:
-        flt[FILTER_MODIFICATION_DATE] = {FILTER_MODIFICATION_DATE_COMPARATOR: modified_since}
-    return flt or None
 
 
 # =====================================================================
@@ -190,16 +77,19 @@ class TopdeskAuthError(Exception):
     """
 
 
-class TopdeskGraphQLError(Exception):
-    """Raised when a GraphQL response carries a top-level `errors` array.
+class TopdeskApiError(Exception):
+    """Raised when the REST API returns a structured error body.
 
-    GraphQL query-level failures arrive as HTTP 200 with `errors` (findings
-    §4.0); they are FAILURES, never success. The first error message is surfaced.
+    The KB API surfaces validation/business errors as
+    ``{"errors": [{"errorCode", "appliesTo", "errorMessage"}]}`` (typically with a
+    400). The first ``errorMessage`` is surfaced as the exception message; the raw
+    list is preserved on ``.errors``. (Replaces the old GraphQL error type; the
+    router maps it to a clean HTTP status.)
     """
 
-    def __init__(self, message: str, errors: List[Dict[str, Any]]):
+    def __init__(self, message: str, errors: Optional[List[Dict[str, Any]]] = None):
         super().__init__(message)
-        self.errors = errors
+        self.errors = errors or []
 
 
 class TopdeskTransientError(Exception):
@@ -222,7 +112,7 @@ class TopdeskTransientError(Exception):
 
 
 class TopdeskClient:
-    """Async client for the TOPdesk Knowledge Base GraphQL API with retry logic."""
+    """Async client for the TOPdesk Knowledge Base REST API with retry logic."""
 
     def __init__(
         self,
@@ -230,22 +120,22 @@ class TopdeskClient:
         username: str = '',
         app_password: str = '',
         *,
-        graphql_path: Optional[str] = None,
+        kb_api_path: Optional[str] = None,
         page_size: int = _DEFAULT_PAGE_SIZE,
     ):
         self._base_url = (base_url or '').rstrip('/')
         self._username = (username or '').strip()
         self._app_password = app_password or ''
         self._page_size = page_size
-        # Resolve the GraphQL path lazily-but-once; config is the default source.
-        if graphql_path is None:
-            from open_webui.config import TOPDESK_GRAPHQL_PATH
+        # Resolve the KB API base path lazily-but-once; config is the default source.
+        if kb_api_path is None:
+            from open_webui.config import TOPDESK_KB_API_PATH
 
-            graphql_path = TOPDESK_GRAPHQL_PATH
-        self._graphql_path = '/' + (graphql_path or '').lstrip('/')
+            kb_api_path = TOPDESK_KB_API_PATH
+        self._kb_api_path = '/' + (kb_api_path or '').strip('/')
         self._client: Optional[httpx.AsyncClient] = None
         # Auth header is static — precompute it once. Built via the auth helper so
-        # the Basic-vs-TOKEN rule lives in one place.
+        # the Basic-only rule lives in one place.
         from open_webui.services.topdesk.auth import build_auth_header
 
         self._auth_header = build_auth_header(self._username, self._app_password)
@@ -255,8 +145,11 @@ class TopdeskClient:
         return self._base_url
 
     @property
-    def graphql_url(self) -> str:
-        return f'{self._base_url}{self._graphql_path}'
+    def kb_api_url(self) -> str:
+        return f'{self._base_url}{self._kb_api_path}'
+
+    def _kb_url(self, path: str) -> str:
+        return f'{self._base_url}{self._kb_api_path}/{path.lstrip("/")}'
 
     async def _get_client(self) -> httpx.AsyncClient:
         if self._client is None:
@@ -276,7 +169,7 @@ class TopdeskClient:
         await self.close()
 
     # ------------------------------------------------------------------
-    # Low-level request helper (shared by GraphQL POST + REST probe GETs)
+    # Low-level request helper (shared by all KB GETs + the probe)
     # ------------------------------------------------------------------
 
     async def _request_with_retry(
@@ -284,7 +177,9 @@ class TopdeskClient:
         method: str,
         url: str,
         *,
+        params: Optional[Dict[str, Any]] = None,
         json_body: Optional[Dict[str, Any]] = None,
+        accept: str = _ACCEPT_JSON,
         max_retries: int = 3,
     ) -> httpx.Response:
         """Make an authenticated request with retry logic.
@@ -294,6 +189,9 @@ class TopdeskClient:
         - 429: respects Retry-After header, then retries.
         - 5xx: exponential backoff (capped), then retries.
         - httpx.ConnectError: surfaced as a friendly ConnectionError.
+
+        Any other status (2xx/206, 400, 404, …) is returned for the caller to
+        interpret.
         """
         client = await self._get_client()
         last_exception: Optional[Exception] = None
@@ -302,16 +200,16 @@ class TopdeskClient:
         for attempt in range(max_retries):
             is_final_attempt = attempt == max_retries - 1
             try:
-                headers = {**self._auth_header, 'Accept': 'application/json'}
+                headers = {**self._auth_header, 'Accept': accept}
                 if json_body is not None:
                     headers['Content-Type'] = 'application/json'
-                response = await client.request(method, url, json=json_body, headers=headers)
+                response = await client.request(method, url, params=params, json=json_body, headers=headers)
 
                 # Static credential — a 401 is terminal, nothing to refresh.
                 if response.status_code == 401:
                     raise TopdeskAuthError(
                         'TOPdesk rejected the service credential (401). Check the '
-                        'TOPdesk URL, application password and operator login (if set).'
+                        'TOPdesk URL, operator login and application password.'
                     )
 
                 if response.status_code == 429:
@@ -369,205 +267,192 @@ class TopdeskClient:
             status_code=last_status,
         )
 
-    # ------------------------------------------------------------------
-    # GraphQL
-    # ------------------------------------------------------------------
+    def _raise_api_error(self, response: httpx.Response) -> None:
+        """Parse a ``{errors:[...]}`` body and raise TopdeskApiError.
 
-    async def graphql(self, query: str, variables: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
-        """POST a GraphQL query and return the ``data`` value.
-
-        CRITICAL (findings §4.0): an HTTP 200 whose body carries a top-level
-        ``errors`` array is a FAILURE — this raises TopdeskGraphQLError (with the
-        first error's message). A 200-with-errors response is never treated as
-        success. Returns the ``data`` object on success.
+        Surfaces the first ``errorMessage``; falls back to a status-based message
+        when the body is not the expected error envelope.
         """
-        body: Dict[str, Any] = {'query': query, 'variables': variables or {}}
-        response = await self._request_with_retry('POST', self.graphql_url, json_body=body)
-        # Non-200/4xx (other than the 401 already handled above) — surface clearly.
-        response.raise_for_status()
-        payload = response.json()
-
-        errors = payload.get('errors')
-        if errors:
-            first = errors[0] if isinstance(errors, list) and errors else {}
-            message = (first.get('message') if isinstance(first, dict) else None) or 'TOPdesk GraphQL query failed'
-            raise TopdeskGraphQLError(message, errors if isinstance(errors, list) else [])
-
-        return payload.get('data') or {}
+        payload = _safe_json(response)
+        errors = payload.get('errors') if isinstance(payload, dict) else None
+        message: Optional[str] = None
+        if isinstance(errors, list) and errors:
+            first = errors[0]
+            if isinstance(first, dict):
+                message = first.get('errorMessage')
+        raise TopdeskApiError(
+            message or f'TOPdesk API error (HTTP {response.status_code})',
+            errors if isinstance(errors, list) else [],
+        )
 
     # ------------------------------------------------------------------
-    # Knowledge items — listing + pagination
+    # Knowledge items — listing + offset pagination
     # ------------------------------------------------------------------
 
     async def list_knowledge_items(
         self,
-        modified_since: Optional[str] = None,
-        page_cursor: Optional[str] = None,
-        page_size: Optional[int] = None,
-        status: Optional[str] = None,
-    ) -> Tuple[List[Dict[str, Any]], Optional[str], bool]:
-        """Fetch one page of knowledge items (Relay `first`/`after`).
+        *,
+        start: int = 0,
+        page_size: int = _DEFAULT_PAGE_SIZE,
+        query: Optional[str] = None,
+        language: Optional[str] = None,
+        fields: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Fetch one page of knowledge items.
 
-        Returns ``(nodes, end_cursor, has_next_page)``. ``modified_since`` (ISO-8601
-        string) applies the incremental `modificationDate` filter; ``status`` applies
-        the published/status filter (findings §5). The cursor for the next page is
-        ``end_cursor`` when ``has_next_page`` is True.
+        ``query`` is a FIQL expression (e.g. ``parent.id==<id>``);
+        ``page_size`` is clamped to the API max (1000); ``fields`` overrides the
+        default ``_KI_FIELDS`` selector. Returns the raw ``{item, prev?, next?}``
+        page object (200 = complete, 206 = partial).
         """
-        variables: Dict[str, Any] = {
-            'first': page_size or self._page_size,
-            'after': page_cursor,
+        params: Dict[str, Any] = {
+            'start': max(0, start),
+            'page_size': max(1, min(page_size, _PAGE_SIZE_MAX)),
+            'fields': fields or _KI_FIELDS,
         }
-        flt = _build_filter(status, modified_since)
-        if flt is not None:
-            variables['filter'] = flt
+        if query:
+            params['query'] = query
+        if language:
+            params['language'] = language
 
-        data = await self.graphql(QUERY_LIST_KNOWLEDGE_ITEMS, variables)
-        connection = data.get(FIELD_KNOWLEDGE_ITEMS) or {}
-        nodes = _nodes_from_connection(connection)
-        page_info = connection.get(FIELD_PAGE_INFO) or {}
-        end_cursor = page_info.get(FIELD_END_CURSOR)
-        has_next = bool(page_info.get(FIELD_HAS_NEXT_PAGE))
-        return nodes, end_cursor, has_next
+        response = await self._request_with_retry(
+            'GET', self._kb_url('knowledgeItems'), params=params, accept=_ACCEPT_LIST
+        )
+        if response.status_code == 400:
+            self._raise_api_error(response)
+        response.raise_for_status()
+        payload = response.json()
+        return payload if isinstance(payload, dict) else {'item': []}
 
-    async def iter_knowledge_items(
+    async def iter_all_knowledge_items(
         self,
-        modified_since: Optional[str] = None,
-        page_size: Optional[int] = None,
-        status: Optional[str] = None,
-        max_pages: int = _MAX_PAGES,
-    ) -> AsyncIterator[Dict[str, Any]]:
-        """Yield every knowledge item across all pages, sequentially.
-
-        Bounded sequential pagination — no parallel fan-out (ITSM politeness).
-        Terminates when ``hasNextPage`` is False, when a page yields no
-        advancing cursor, or when the ``max_pages`` safety cap is hit (logged).
-        """
-        cursor: Optional[str] = None
-        for page in range(max_pages):
-            nodes, end_cursor, has_next = await self.list_knowledge_items(
-                modified_since=modified_since,
-                page_cursor=cursor,
-                page_size=page_size,
-                status=status,
-            )
-            for node in nodes:
-                yield node
-
-            if not has_next:
-                return
-            if not end_cursor or end_cursor == cursor:
-                # Cursor did not advance — stop rather than loop forever.
-                log.warning('TOPdesk pagination cursor did not advance; stopping at page %d', page)
-                return
-            cursor = end_cursor
-
-        log.warning('TOPdesk pagination hit the %d-page safety cap; results may be truncated', max_pages)
-
-    async def list_all_knowledge_items(
-        self,
-        modified_since: Optional[str] = None,
-        page_size: Optional[int] = None,
-        status: Optional[str] = None,
+        *,
+        query: Optional[str] = None,
+        language: Optional[str] = None,
+        fields: Optional[str] = None,
+        page_size: int = _PAGE_SIZE_MAX,
         max_pages: int = _MAX_PAGES,
     ) -> List[Dict[str, Any]]:
-        """Eagerly collect every knowledge item across all pages into a list."""
-        return [
-            node
-            async for node in self.iter_knowledge_items(
-                modified_since=modified_since,
-                page_size=page_size,
-                status=status,
-                max_pages=max_pages,
+        """Eagerly collect every knowledge item across all pages, sequentially.
+
+        Bounded sequential offset paging — no parallel fan-out (ITSM politeness).
+        Terminates when the server reports no ``next``, a short/empty page, or the
+        ``max_pages`` safety cap (logged).
+        """
+        out: List[Dict[str, Any]] = []
+        start = 0
+        for page in range(max_pages):
+            data = await self.list_knowledge_items(
+                start=start, page_size=page_size, query=query, language=language, fields=fields
             )
-        ]
+            items = data.get('item') or []
+            out.extend(items)
+            # Stop on the server's end-of-list signal or a short/empty page.
+            if not data.get('next') or len(items) < page_size:
+                return out
+            start += page_size
+
+        log.warning('TOPdesk pagination hit the %d-page safety cap; results may be truncated', max_pages)
+        return out
 
     # ------------------------------------------------------------------
     # Knowledge items — single item + tree traversal
     # ------------------------------------------------------------------
 
-    async def get_knowledge_item(self, item_id: str, include_content: bool = True) -> Optional[Dict[str, Any]]:
-        """Fetch a single knowledge item by id.
+    async def get_knowledge_item(
+        self,
+        identifier: str,
+        *,
+        language: Optional[str] = None,
+        fields: Optional[str] = None,
+    ) -> Optional[Dict[str, Any]]:
+        """Fetch a single knowledge item by id or number (e.g. ``KI 0211``).
 
-        ``include_content=True`` hydrates the HTML ``content`` body; False fetches
-        metadata only. Returns the node dict, or None if the item does not exist
-        (GraphQL resolves an absent item to ``null``).
+        Always requests ``_KI_FIELDS`` (incl. the HTML content) so the content
+        block is populated. Returns the item dict, or None if it does not exist
+        (404).
         """
-        query = QUERY_GET_KNOWLEDGE_ITEM if include_content else QUERY_GET_KNOWLEDGE_ITEM_NO_CONTENT
-        data = await self.graphql(query, {'id': item_id})
-        return data.get(FIELD_KNOWLEDGE_ITEM)
+        params: Dict[str, Any] = {'fields': fields or _KI_FIELDS}
+        if language:
+            params['language'] = language
 
-    async def list_item_children(self, item_id: str) -> List[Dict[str, Any]]:
-        """Return the direct child items of a knowledge item (findings §5.3)."""
-        data = await self.graphql(QUERY_LIST_ITEM_CHILDREN, {'id': item_id})
-        item = data.get(FIELD_KNOWLEDGE_ITEM) or {}
-        return list(item.get(FIELD_CHILDREN) or [])
+        response = await self._request_with_retry(
+            'GET', self._kb_url(f'knowledgeItems/{identifier}'), params=params, accept=_ACCEPT_ITEM
+        )
+        if response.status_code == 404:
+            return None
+        if response.status_code == 400:
+            self._raise_api_error(response)
+        response.raise_for_status()
+        payload = response.json()
+        return payload if isinstance(payload, dict) else None
 
-    async def list_root_items(self, status: Optional[str] = None) -> List[Dict[str, Any]]:
-        """Return all knowledge items (flat).
+    async def list_item_children(
+        self,
+        parent_id: str,
+        *,
+        language: Optional[str] = None,
+        fields: Optional[str] = None,
+    ) -> List[Dict[str, Any]]:
+        """Return the direct child items of a knowledge item via FIQL parent.id."""
+        return await self.iter_all_knowledge_items(query=f'parent.id=={parent_id}', language=language, fields=fields)
 
-        v1 (Intermax: a single flat shared KB) treats the KB as flat, so this is an
-        alias for the full paginated listing. Subtree traversal, when needed, walks
-        from these via ``list_item_children``.
+    async def list_root_items(
+        self,
+        *,
+        language: Optional[str] = None,
+        fields: Optional[str] = None,
+    ) -> List[Dict[str, Any]]:
+        """Return the top-level (parent-less) knowledge items.
+
+        FIQL for "no parent" (``parent.id==null``) is unconfirmed against the live
+        API, so this fail-safes: enumerate all items and filter on the absence of a
+        ``parent`` client-side. ``parent`` is forced into the field set regardless
+        of the caller's ``fields`` so the filter always has the data it needs. For a
+        flat KB (the Intermax v1 case) every item is a root, matching the old
+        flat-listing behaviour.
         """
-        return await self.list_all_knowledge_items(status=status)
+        fset = fields or _KI_FIELDS
+        if 'parent' not in fset:
+            fset = f'{fset},parent'
+        items = await self.iter_all_knowledge_items(language=language, fields=fset)
+        return [i for i in items if not i.get('parent')]
 
     # ------------------------------------------------------------------
-    # Connection probe (REST surface — findings §2.2)
+    # Connection probe
     # ------------------------------------------------------------------
 
     async def probe(self) -> Dict[str, Any]:
         """Lightweight authenticated connection probe.
 
-        Tries ``GET /tas/api/operators/current`` (confirms auth + operator identity
-        class); on 404 falls back to ``GET /tas/api/version``. Returns a dict the
-        router can use to report ok/detail:
-        ``{'ok': bool, 'probe': '<endpoint>', 'detail': <body or message>}``.
+        Tries ``GET /tas/api/version`` (confirms auth + reachability); if that is
+        unavailable, falls back to a minimal KB list (which also confirms the
+        KB-v1 feature is enabled). Returns a dict the router can use to report
+        ok/detail: ``{'ok': bool, 'probe': '<endpoint>', 'detail': <body or message>}``.
         Raises TopdeskAuthError on 401 (terminal).
         """
-        operators_url = f'{self._base_url}/tas/api/operators/current'
-        response = await self._request_with_retry('GET', operators_url)
-        if response.status_code == 404:
-            # Endpoint not present on this tenant — fall back to version.
-            version_url = f'{self._base_url}/tas/api/version'
-            version_resp = await self._request_with_retry('GET', version_url)
-            if version_resp.is_success:
-                return {
-                    'ok': True,
-                    'probe': 'version',
-                    'detail': _safe_json(version_resp),
-                }
-            return {
-                'ok': False,
-                'probe': 'version',
-                'detail': f'TOPdesk version probe returned HTTP {version_resp.status_code}',
-            }
+        version_url = f'{self._base_url}/tas/api/version'
+        response = await self._request_with_retry('GET', version_url, accept=_ACCEPT_JSON)
         if response.is_success:
-            return {
-                'ok': True,
-                'probe': 'operators/current',
-                'detail': _safe_json(response),
-            }
+            return {'ok': True, 'probe': 'version', 'detail': _safe_json(response)}
+
+        # Version endpoint unavailable (e.g. 404 on this tenant) — fall back to a
+        # one-item KB list. A 401 already raised above; a KB API error here means
+        # auth worked but the KB-v1 feature is off / unreachable.
+        try:
+            data = await self.list_knowledge_items(page_size=1)
+        except TopdeskApiError as e:
+            return {'ok': False, 'probe': 'knowledgeItems', 'detail': str(e)}
         return {
-            'ok': False,
-            'probe': 'operators/current',
-            'detail': f'TOPdesk operator probe returned HTTP {response.status_code}',
+            'ok': True,
+            'probe': 'knowledgeItems',
+            'detail': {'returned': len(data.get('item') or [])},
         }
 
 
 # =====================================================================
-# Parsing helpers (reference the centralised field constants above)
+# Parsing helpers
 # =====================================================================
-
-
-def _nodes_from_connection(connection: Dict[str, Any]) -> List[Dict[str, Any]]:
-    """Extract the node dicts from a Relay connection's ``edges``."""
-    edges = connection.get(FIELD_EDGES) or []
-    nodes: List[Dict[str, Any]] = []
-    for edge in edges:
-        node = (edge or {}).get(FIELD_NODE)
-        if node is not None:
-            nodes.append(node)
-    return nodes
 
 
 def _safe_json(response: httpx.Response) -> Any:

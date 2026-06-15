@@ -159,9 +159,7 @@ async def shared_kb_status(provider_type: str, meta_key: str, items_key: str = '
         sync_info = (kb.meta or {}).get(meta_key, {})
         suspended_at = sync_info.get('suspended_at')
         days_remaining = (
-            max(0, SUSPENSION_TTL_DAYS - ((int(time.time()) - suspended_at) // 86400))
-            if suspended_at
-            else None
+            max(0, SUSPENSION_TTL_DAYS - ((int(time.time()) - suspended_at) // 86400)) if suspended_at else None
         )
         status.update(
             {

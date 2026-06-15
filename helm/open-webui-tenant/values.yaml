@@ -476,7 +476,7 @@ openWebui:
     confluenceKbMode: "per_user"      # "per_user" or "shared"
     confluenceSharedKbOwnerId: ""
 
-    # TOPdesk Integration (Knowledge Base sync via GraphQL + basic auth)
+    # TOPdesk Integration (Knowledge Base sync via the REST KB API + basic auth)
     # Admin-editable via the Cloud Sync tab; these seed the initial values.
     enableTopdeskIntegration: "false"
     topdeskUrl: ""                    # e.g. https://your-tenant.topdesk.net
@@ -488,8 +488,12 @@ openWebui:
     topdeskSyncIntervalMinutes: "60"
     topdeskMaxItemsPerSync: "500"
     topdeskMaxItemSizeMb: "25"
-    # GraphQL endpoint path appended to topdeskUrl (deploy-time only override).
-    topdeskGraphqlPath: "/tas/api/knowledgeBase/graphql"
+    # Which knowledge items to sync: "ssp" (Self-Service Portal visible, default) |
+    # "public" (public items only) | "all" (every operator-readable item).
+    topdeskSyncScope: "ssp"
+    # REST Knowledge Base API base path appended to topdeskUrl (deploy-time only
+    # override). Confirmed default: /services/knowledge-base-v1.
+    topdeskKbApiPath: "/services/knowledge-base-v1"
 
     # Knowledge Base File Limit
     knowledgeMaxFileCount: "250"

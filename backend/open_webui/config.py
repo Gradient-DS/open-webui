@@ -3263,12 +3263,13 @@ TOPDESK_URL = PersistentConfig(
     os.environ.get('TOPDESK_URL', ''),
 )
 
-# Service credential. The standard form is the operator login name + application
-# password sent as HTTP Basic, ``Authorization: Basic base64(login:app_password)``.
-# The same application password feeds either auth-header form; which form is used
-# depends on whether an operator login (username) is set:
-#   - login set   → HTTP Basic, ``Authorization: Basic base64(login:app_password)``
-#   - login empty → person-token form, ``Authorization: TOKEN id="<app_password>"``
+# Service credential. The KB REST API (knowledge-base-v1) is operator-only and
+# authenticates with HTTP Basic: ``Authorization: Basic base64(login:app_password)``,
+# where the username is the operator login name and the password is the application
+# token (a.k.a. application password) created for that operator. This is the only
+# supported form — the legacy person-token (``TOKEN id="..."``) form was dropped
+# because the REST KB API does not accept it (plan decision 4). The operator login
+# is therefore required, not optional.
 # The application password is returned in full (unmasked) by the admin-only config
 # API and masked client-side via SensitiveInput — same disclosure profile as the
 # Confluence basic-auth token.
@@ -3300,11 +3301,26 @@ TOPDESK_MAX_ITEMS_PER_SYNC = PersistentConfig(
 
 TOPDESK_MAX_ITEM_SIZE_MB = int(os.getenv('TOPDESK_MAX_ITEM_SIZE_MB', '25'))
 
-# Knowledge Base GraphQL endpoint path, appended to TOPDESK_URL. The exact path
-# could not be confirmed from public docs (three candidates); this is the most
-# likely, so it is config-overridable without a code change. See
-# thoughts/shared/research/2026-06-topdesk-api-verification.md §3.
-TOPDESK_GRAPHQL_PATH = os.getenv('TOPDESK_GRAPHQL_PATH', '/tas/api/knowledgeBase/graphql')
+# Which knowledge items to sync into the shared KB. Admin-editable via the Cloud
+# Sync tab (plan decision 1). One of:
+#   - 'ssp'    : items visible in the Self-Service Portal (sspVisibility VISIBLE,
+#                or VISIBLE_IN_PERIOD while within the window). Default.
+#   - 'public' : only items flagged publicKnowledgeItem.
+#   - 'all'    : every operator-readable item (no visibility gate).
+# Archived items are always excluded regardless of scope. Drives ``_should_sync``
+# in the sync worker.
+TOPDESK_SYNC_SCOPE = PersistentConfig(
+    'TOPDESK_SYNC_SCOPE',
+    'topdesk.sync_scope',
+    (os.getenv('TOPDESK_SYNC_SCOPE', 'ssp').strip().lower() or 'ssp'),
+)
+
+# Knowledge Base REST API base path, appended to TOPDESK_URL. Confirmed from the
+# OpenAPI spec: the SaaS REST KB API lives under ``/services/knowledge-base-v1``
+# (knowledge-base_SaaS.json). Config-overridable without a code change so a tenant
+# on a non-default mount can be pointed at the right path. See
+# thoughts/shared/research/2026-06-topdesk-api-verification.md.
+TOPDESK_KB_API_PATH = os.getenv('TOPDESK_KB_API_PATH', '/services/knowledge-base-v1')
 
 
 ####################################

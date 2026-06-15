@@ -33,6 +33,9 @@ export interface TopdeskTestConnectionPayload {
 
 export interface TopdeskTestConnectionResult {
 	ok: boolean;
+	// Stable machine code (auth_failed, unreachable, …) the UI localizes; see
+	// `CloudSync/errors.ts`. `detail` is an English debug fallback.
+	reason?: string;
 	detail: string;
 }
 

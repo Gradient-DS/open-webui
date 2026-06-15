@@ -1,41 +1,45 @@
 {
-  "data": {
-    "knowledgeItems": {
-      "totalCount": 5,
-      "edges": [
-        {
-          "cursor": "Y3Vyc29yOjQ=",
-          "node": {
-            "id": "44444444-4444-4444-8444-444444444444",
-            "number": "KI 0004",
-            "title": "Setting up email on a mobile device",
-            "description": "Configure the mail client on iOS and Android.",
-            "language": "en",
-            "status": "PUBLISHED",
-            "visibility": "SELF_SERVICE_PORTAL",
-            "creationDate": "2026-02-20T13:22:00Z",
-            "modificationDate": "2026-06-05T16:00:00Z"
-          }
-        },
-        {
-          "cursor": "Y3Vyc29yOjU=",
-          "node": {
-            "id": "55555555-5555-4555-8555-555555555555",
-            "number": "KI 0005",
-            "title": "Booking a meeting room",
-            "description": "Reserve a room through the reservations module.",
-            "language": "en",
-            "status": "PUBLISHED",
-            "visibility": "EVERYONE",
-            "creationDate": "2026-03-11T09:00:00Z",
-            "modificationDate": "2026-06-09T11:48:00Z"
-          }
+  "item": [
+    {
+      "id": "44444444-4444-4444-8444-444444444444",
+      "number": "KI 0004",
+      "creationDate": "2026-02-20T13:22:00Z",
+      "modificationDate": "2026-06-05T16:00:00Z",
+      "translation": {
+        "language": "en",
+        "content": {
+          "title": "Setting up email on a mobile device",
+          "description": "Configure the mail client on iOS and Android.",
+          "keywords": "email, mobile, ios, android"
         }
-      ],
-      "pageInfo": {
-        "hasNextPage": false,
-        "endCursor": "Y3Vyc29yOjU="
+      },
+      "status": { "id": "st-published", "name": "PUBLISHED" },
+      "visibility": { "sspVisibility": "VISIBLE", "publicKnowledgeItem": false },
+      "urls": {
+        "operator": "/tas/secure/knowledgeitem/44444444-4444-4444-8444-444444444444",
+        "ssp": "/tas/public/ssp/content/detail/knowledgeitem?unid=44444444-4444-4444-8444-444444444444"
+      }
+    },
+    {
+      "id": "55555555-5555-4555-8555-555555555555",
+      "number": "KI 0005",
+      "creationDate": "2026-03-11T09:00:00Z",
+      "modificationDate": "2026-06-09T11:48:00Z",
+      "translation": {
+        "language": "en",
+        "content": {
+          "title": "Booking a meeting room",
+          "description": "Reserve a room through the reservations module.",
+          "keywords": "meeting, room, reservation"
+        }
+      },
+      "status": { "id": "st-published", "name": "PUBLISHED" },
+      "visibility": { "sspVisibility": "VISIBLE", "publicKnowledgeItem": true },
+      "urls": {
+        "operator": "/tas/secure/knowledgeitem/55555555-5555-4555-8555-555555555555",
+        "ssp": "/tas/public/ssp/content/detail/knowledgeitem?unid=55555555-5555-4555-8555-555555555555",
+        "public": "/tas/public/ssp/content/detail/knowledgeitem?unid=55555555-5555-4555-8555-555555555555"
       }
     }
-  }
+  ]
 }

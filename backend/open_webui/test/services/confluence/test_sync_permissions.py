@@ -172,9 +172,7 @@ def test_access_success_resets_counter_and_unsuspends():
     worker = _make_worker()
     client = SimpleNamespace(get_page=AsyncMock(return_value={'id': 'page-1'}))
     worker._client_for = lambda _cloud_id: client
-    kb = SimpleNamespace(
-        meta={'confluence_sync': {'suspended_at': 123, 'suspended_reason': 'x', 'auth_fail_count': 2}}
-    )
+    kb = SimpleNamespace(meta={'confluence_sync': {'suspended_at': 123, 'suspended_reason': 'x', 'auth_fail_count': 2}})
     update_meta = AsyncMock()
     p_get, p_update = _patch_models(kb, update_meta)
     with p_get, p_update, patch.object(worker, '_update_sync_status', new=AsyncMock()):

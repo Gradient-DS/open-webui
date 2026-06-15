@@ -446,7 +446,8 @@ async def test_connection(
 
     Admin-only. Builds a basic-mode client from the submitted credentials
     (falling back to stored config for blank fields) and lists a single
-    space. Returns ``{ok, detail, space_count?}``.
+    space. Returns ``{ok, reason, detail, space_count?}`` — ``reason`` is a stable
+    machine code the frontend localizes; ``detail`` is an English debug fallback.
     """
     site_url = (form_data.site_url or CONFLUENCE_SITE_URL.value or '').strip()
     username = (form_data.username or CONFLUENCE_BASIC_AUTH_USERNAME.value or '').strip()
@@ -455,6 +456,7 @@ async def test_connection(
     if not site_url or not username or not api_token:
         return {
             'ok': False,
+            'reason': 'missing_config',
             'detail': 'Site URL, username and API token are all required.',
         }
 
@@ -468,22 +470,23 @@ async def test_connection(
         spaces, _ = await client.list_spaces(limit=1)
         return {
             'ok': True,
+            'reason': 'ok',
             'detail': 'Connection successful.',
             'space_count': len(spaces),
         }
     except httpx.HTTPStatusError as e:
         code = e.response.status_code
-        detail = {
-            401: 'Authentication failed — check the username and API token.',
-            403: 'Access denied — the account cannot list spaces.',
-            404: 'Not found — check the site URL.',
-        }.get(code, f'Confluence returned HTTP {code}.')
-        return {'ok': False, 'detail': detail}
+        reason, detail = {
+            401: ('auth_failed', 'Authentication failed — check the username and API token.'),
+            403: ('forbidden', 'Access denied — the account cannot list spaces.'),
+            404: ('not_found', 'Not found — check the site URL.'),
+        }.get(code, ('error', f'Confluence returned HTTP {code}.'))
+        return {'ok': False, 'reason': reason, 'detail': detail}
     except ConnectionError as e:
-        return {'ok': False, 'detail': str(e)}
+        return {'ok': False, 'reason': 'unreachable', 'detail': str(e)}
     except Exception as e:
         log.warning('Confluence test connection failed: %s', e)
-        return {'ok': False, 'detail': f'Connection failed: {e}'}
+        return {'ok': False, 'reason': 'error', 'detail': f'Connection failed: {e}'}
     finally:
         await client.close()
 

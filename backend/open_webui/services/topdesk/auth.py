@@ -3,16 +3,16 @@
 TOPdesk has a single auth mode for sync: a service credential read from global
 config (TOPDESK_URL + TOPDESK_USERNAME + TOPDESK_APP_PASSWORD). There is no
 per-user OAuth flow — every sync against the configured tenant uses the same
-application password (with an optional operator login). This module centralises
-the config reads and auth-header construction shared by the provider, the sync
-worker and the router so none of them duplicate the auth-mode rule.
+operator login + application password. This module centralises the config reads
+and auth-header construction shared by the provider, the sync worker and the
+router so none of them duplicate the auth rule.
 
-Auth-header form depends on whether an operator login (username) is set
-(findings §2.1):
-
-- login set   → HTTP Basic, ``Authorization: Basic base64(login:app_password)``
-  (operator login name + application password — the operator/Basic auth path).
-- login empty → person-token form, ``Authorization: TOKEN id="<app_password>"``.
+Auth is HTTP **Basic** only (plan decision 4): the Knowledge Base REST API
+(knowledge-base-v1) is operator-only and accepts only
+``Authorization: Basic base64(login:app_password)`` — the operator login name
+plus the application token. The legacy person-token (``TOKEN id="..."``) form was
+removed because the REST KB API does not accept it, so the operator login is
+required (not optional).
 
 This mirrors ``services/confluence/basic_auth.py`` (sentinel + config helpers +
 client builder), but TOPdesk has no oauth mode, so there is no auth-mode
@@ -45,20 +45,22 @@ _META_KEY = 'topdesk_sync'
 def service_auth_configured() -> bool:
     """True when the TOPdesk service credential is usable.
 
-    URL + app_password are required; the operator login is optional. An empty
-    login selects the ``TOKEN id="..."`` person-token header form (findings §2.1)
-    — a valid configuration — so it must NOT gate readiness.
+    URL + operator login (username) + app_password are ALL required: the REST KB
+    API is operator-Basic-only (plan decision 4), so an empty login can never
+    authenticate and must gate readiness.
     """
-    return bool((TOPDESK_URL.value or '').strip() and (TOPDESK_APP_PASSWORD.value or '').strip())
+    return bool(
+        (TOPDESK_URL.value or '').strip()
+        and (TOPDESK_USERNAME.value or '').strip()
+        and (TOPDESK_APP_PASSWORD.value or '').strip()
+    )
 
 
 def auth_headers() -> Dict[str, str]:
     """Build the Authorization header for the configured TOPdesk credential.
 
-    - login set   → ``Authorization: Basic base64(login:app_password)``
-    - login empty → ``Authorization: TOKEN id="<app_password>"``
-
-    See findings §2.1. The header is static (the credential never refreshes), so
+    Always ``Authorization: Basic base64(login:app_password)`` (operator login +
+    application token). The header is static (the credential never refreshes), so
     callers may precompute it once.
     """
     return build_auth_header(
@@ -68,18 +70,18 @@ def auth_headers() -> Dict[str, str]:
 
 
 def build_auth_header(username: str, app_password: str) -> Dict[str, str]:
-    """Pure helper: construct the Authorization header from raw credentials.
+    """Pure helper: construct the HTTP Basic Authorization header.
 
-    Separated from ``auth_headers`` so the client and tests can build a header
-    without touching global config.
+    Always emits ``Basic base64(username:app_password)`` (plan decision 4 — the
+    REST KB API is operator-Basic-only; the legacy ``TOKEN id="..."`` form was
+    dropped). Separated from ``auth_headers`` so the client and tests can build a
+    header without touching global config.
     """
     import base64
 
     username = (username or '').strip()
-    if username:
-        encoded = base64.b64encode(f'{username}:{app_password}'.encode('utf-8')).decode('ascii')
-        return {'Authorization': f'Basic {encoded}'}
-    return {'Authorization': f'TOKEN id="{app_password}"'}
+    encoded = base64.b64encode(f'{username}:{app_password}'.encode('utf-8')).decode('ascii')
+    return {'Authorization': f'Basic {encoded}'}
 
 
 def get_service_site() -> Optional[Dict[str, Any]]:

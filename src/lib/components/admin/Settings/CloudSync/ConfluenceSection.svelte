@@ -24,6 +24,7 @@
 	import ConfluencePickerModal from '$lib/components/workspace/Knowledge/ConfluencePickerModal.svelte';
 	import SyncSettingsSection from './SyncSettingsSection.svelte';
 	import SharedKbSection from './SharedKbSection.svelte';
+	import { connectionErrorMessage } from './errors';
 	import type { ConfluenceConfigResponse, SharedKbApi, SharedKbStatusLike } from './types';
 
 	const i18n = getContext<Writable<i18nType>>('i18n');
@@ -68,6 +69,10 @@
 	// flattens permissions for no benefit and is gated below.
 	let CONFLUENCE_AUTH_MODE: 'oauth' | 'basic' = 'oauth';
 	let CONFLUENCE_KB_MODE: 'per_user' | 'shared' = 'per_user';
+	// The auth method as last loaded/saved — the baseline used to detect a switch
+	// in `persist()` (switching auth while a shared KB exists is blocked, since the
+	// KB was built under the old identity's permissions).
+	let loadedAuthMode: 'oauth' | 'basic' = 'oauth';
 
 	// Service account + on-demand has no use case — when auth is the service
 	// account, force the pre-synced shared KB.
@@ -102,6 +107,9 @@
 		// Each axis is loaded independently — see the decoupled controls below.
 		CONFLUENCE_AUTH_MODE = config.CONFLUENCE_AUTH_MODE === 'basic' ? 'basic' : 'oauth';
 		CONFLUENCE_KB_MODE = config.CONFLUENCE_KB_MODE === 'shared' ? 'shared' : 'per_user';
+		// Reset the switch-detection baseline to the persisted value (also runs after
+		// a successful save, so the next switch is measured from the new state).
+		loadedAuthMode = CONFLUENCE_AUTH_MODE;
 	};
 
 	export async function load() {
@@ -137,12 +145,20 @@
 	// orchestrator's Save, the shared-KB `beforeAction`) can decide whether to
 	// continue. Payload shape is identical to the monolith's.
 	export async function persist() {
-		// Block switching away from the pre-synced shared mode while a shared KB is
-		// still provisioned — otherwise the toggle would orphan it. The admin must
-		// delete the now-visible shared KB first. The backend 400 is the
-		// authoritative backstop; this aborts the Save before the round-trip. We
-		// throw the bare message (not toast + throw) so the orchestrator's persistAll
-		// catch surfaces it as a single clean toast, matching the backend-error path.
+		// Two guards mirror the backend's: a provisioned shared KB must be deleted
+		// before either switch, so neither silently strands nor corrupts it. We throw
+		// the bare message (not toast + throw) so the orchestrator's persistAll catch
+		// surfaces it as a single clean toast, matching the backend-error path.
+		//
+		// 1. Switching the auth method while a shared KB exists — the KB's pages were
+		//    gathered under the old identity's permissions; re-syncing under a
+		//    different identity would mix auth identities and silently change content.
+		if (CONFLUENCE_AUTH_MODE !== loadedAuthMode && sharedKbStatus?.provisioned) {
+			throw $i18n.t(
+				'Delete the shared Confluence knowledge base before switching authentication method.'
+			);
+		}
+		// 2. Switching away from the pre-synced shared mode would orphan the KB.
 		if (CONFLUENCE_KB_MODE !== 'shared' && sharedKbStatus?.provisioned) {
 			throw $i18n.t(
 				'Delete the shared Confluence knowledge base before switching to on-request (per-user) mode.'
@@ -247,10 +263,20 @@
 					})
 				);
 			} else {
-				toast.error($i18n.t('Confluence connection failed: {{error}}', { error: result.detail }));
+				console.error('Confluence connection failed:', result.reason, result.detail);
+				toast.error(
+					$i18n.t('Confluence connection failed: {{error}}', {
+						error: connectionErrorMessage($i18n, result.reason, result.detail)
+					})
+				);
 			}
 		} catch (err) {
-			toast.error(`${err}`);
+			console.error(err);
+			toast.error(
+				$i18n.t('Confluence connection failed: {{error}}', {
+					error: connectionErrorMessage($i18n, 'unreachable')
+				})
+			);
 		}
 		testingConnection = false;
 	};

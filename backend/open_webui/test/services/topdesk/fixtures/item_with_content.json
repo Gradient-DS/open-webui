@@ -1,35 +1,31 @@
 {
-  "data": {
-    "knowledgeItem": {
-      "id": "11111111-1111-4111-8111-111111111111",
-      "number": "KI 0001",
+  "id": "11111111-1111-4111-8111-111111111111",
+  "number": "KI 0001",
+  "creationDate": "2026-01-04T09:12:00Z",
+  "modificationDate": "2026-05-21T14:30:00Z",
+  "translation": {
+    "language": "en",
+    "content": {
       "title": "How to reset your password",
       "description": "Step-by-step guide for resetting your account password.",
       "content": "<h1>How to reset your password</h1><p>If you have forgotten your password, follow the steps below.</p><ol><li>Go to the <a href=\"https://example-portal.invalid/login\">login page</a>.</li><li>Click <strong>Forgot password</strong>.</li><li>Enter your work email address and submit.</li><li>Open the reset email and click the link.</li><li>Choose a new password that meets the <em>complexity requirements</em>.</li></ol><p>If you do not receive the email within 10 minutes, check your spam folder or contact the service desk.</p>",
-      "keywords": ["password", "reset", "login", "account"],
-      "language": "en",
-      "status": "PUBLISHED",
-      "visibility": "SELF_SERVICE_PORTAL",
-      "creationDate": "2026-01-04T09:12:00Z",
-      "modificationDate": "2026-05-21T14:30:00Z",
-      "parent": {
-        "id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
-        "number": "KI 0100",
-        "title": "Account and access"
-      },
-      "availableTranslations": [
-        {
-          "language": "en",
-          "title": "How to reset your password",
-          "status": "PUBLISHED"
-        },
-        {
-          "language": "nl",
-          "title": "Hoe u uw wachtwoord opnieuw instelt",
-          "status": "PUBLISHED"
-        }
-      ],
-      "attachments": []
+      "keywords": "password, reset, login, account"
     }
-  }
+  },
+  "status": { "id": "st-published", "name": "PUBLISHED" },
+  "visibility": {
+    "sspVisibility": "VISIBLE",
+    "publicKnowledgeItem": false,
+    "sspVisibleFrom": null,
+    "sspVisibleUntil": null
+  },
+  "urls": {
+    "operator": "/tas/secure/knowledgeitem/11111111-1111-4111-8111-111111111111",
+    "ssp": "/tas/public/ssp/content/detail/knowledgeitem?unid=11111111-1111-4111-8111-111111111111"
+  },
+  "parent": {
+    "id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+    "name": "Account and access"
+  },
+  "availableTranslations": ["en", "nl"]
 }

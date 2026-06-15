@@ -1,4 +1,4 @@
-"""TOPdesk sync worker — pulls published knowledge items into a shared KB.
+"""TOPdesk sync worker — pulls in-scope knowledge items into a shared KB.
 
 Mirrors ``services/confluence/sync_worker.py`` with the OAuth machinery removed:
 TOPdesk has a single service-account credential read from global config (see
@@ -34,6 +34,7 @@ from typing import Any, Dict, List, Optional
 from open_webui.config import (
     TOPDESK_MAX_ITEMS_PER_SYNC,
     TOPDESK_MAX_ITEM_SIZE_MB,
+    TOPDESK_SYNC_SCOPE,
 )
 from open_webui.models.files import Files
 from open_webui.models.knowledge import Knowledges
@@ -41,6 +42,7 @@ from open_webui.models.users import Users
 from open_webui.services.deletion import DeletionService
 from open_webui.services.sync.base_worker import BaseSyncWorker
 from open_webui.services.sync.html_renderer import html_to_markdown
+from open_webui.services.topdesk import mapping
 from open_webui.services.topdesk.auth import build_client, get_service_site, service_auth_configured
 from open_webui.services.topdesk.topdesk_client import (
     TopdeskAuthError,
@@ -52,9 +54,14 @@ log = logging.getLogger(__name__)
 _FILE_ID_PREFIX = 'topdesk-'
 _META_KEY = 'topdesk_sync'
 
-# Only published items ever sync — drafts/archived are never enumerated. The
-# inferred status enum (findings §4.1) is PUBLISHED/DRAFT/ARCHIVED.
-_PUBLISHED_STATUS = 'PUBLISHED'
+
+def _sync_scope() -> str:
+    """Resolve the configured sync scope ('ssp' | 'public' | 'all').
+
+    Read at use-time (not cached) so an admin scope change via the Cloud Sync tab
+    takes effect on the next sync without a restart.
+    """
+    return getattr(TOPDESK_SYNC_SCOPE, 'value', None) or 'ssp'
 
 
 def _sanitise_filename(title: str, item_id: str) -> str:
@@ -68,10 +75,15 @@ def _sanitise_filename(title: str, item_id: str) -> str:
     return cleaned[:120].rstrip(' .') or f'item-{item_id}'
 
 
-def _is_published(item: Dict[str, Any]) -> bool:
-    """True when an item's status is PUBLISHED (case-insensitive)."""
-    status = (item.get('status') or '').strip().upper()
-    return status == _PUBLISHED_STATUS
+def _should_sync(item: Dict[str, Any]) -> bool:
+    """Whether a REST KnowledgeItem should be ingested, per TOPDESK_SYNC_SCOPE.
+
+    Delegates to ``mapping.should_sync`` (archived always excluded; ssp/public/all
+    gate on ``visibility``). Replaces the old status-enum publish check — ``status``
+    is a customer searchlist with no guaranteed "PUBLISHED" value, so visibility is
+    the structured signal.
+    """
+    return mapping.should_sync(item, _sync_scope())
 
 
 def _build_front_matter(file_info: Dict[str, Any]) -> str:
@@ -313,11 +325,11 @@ class TopdeskSyncWorker(BaseSyncWorker):
     # ------------------------------------------------------------------
 
     def _is_supported_file(self, item: Dict[str, Any]) -> bool:
-        """All published knowledge items are supported in v1.
+        """All in-scope knowledge items are supported in v1.
 
-        The published-only filter is applied at enumeration time
-        (``_collect_*``); by the time an item reaches here it is already
-        published, so this returns True.
+        The scope/visibility filter is applied at enumeration time
+        (``_collect_*`` via ``_should_sync``); by the time an item reaches here it
+        is already includable, so this returns True.
         """
         return True
 
@@ -326,27 +338,28 @@ class TopdeskSyncWorker(BaseSyncWorker):
     # ------------------------------------------------------------------
 
     async def _enumerate_source_items(self, source: Dict[str, Any]) -> List[Dict[str, Any]]:
-        """Return the published knowledge items covered by a source.
+        """Return the in-scope knowledge items covered by a source.
 
         For a flat selection (the whole KB) ``item_id`` may be the special
         ``__all__`` token written by the picker; that lists every item. For a
-        subtree, walk the item + descendants. Drafts/archived are filtered out.
+        subtree, walk the item + descendants. Items outside ``TOPDESK_SYNC_SCOPE``
+        (or archived) are filtered out via ``_should_sync``.
         """
         client = self._client_handle()
         item_id = source.get('item_id')
 
         if item_id in (None, '', '__all__', '*'):
-            # Whole-KB flat selection (v1 Intermax). Filter to published only.
-            items = await client.list_all_knowledge_items(status=_PUBLISHED_STATUS)
-            return [i for i in items if _is_published(i)]
+            # Whole-KB flat selection (v1 Intermax). Filter to the configured scope.
+            items = await client.iter_all_knowledge_items()
+            return [i for i in items if _should_sync(i)]
 
-        root = await client.get_knowledge_item(item_id, include_content=False)
+        root = await client.get_knowledge_item(item_id)
         if not root:
             return []
 
         include_descendants = bool(source.get('include_descendants', True))
         collected: List[Dict[str, Any]] = []
-        if _is_published(root):
+        if _should_sync(root):
             collected.append(root)
 
         if include_descendants:
@@ -355,7 +368,7 @@ class TopdeskSyncWorker(BaseSyncWorker):
         return collected
 
     async def _walk_descendants(self, root_id: str) -> List[Dict[str, Any]]:
-        """Breadth-first walk of an item's descendant tree (published only).
+        """Breadth-first walk of an item's descendant tree (in-scope only).
 
         Bounded by ``_seen_item_ids``-independent local visited set so a
         cyclic/duplicated tree cannot loop forever; the cross-source
@@ -365,15 +378,14 @@ class TopdeskSyncWorker(BaseSyncWorker):
         a child-fetch error is NOT swallowed. If it were, a transient TOPdesk
         hiccup mid-walk would silently truncate the freshly-enumerated set, and
         ``_collect_folder_files``'s set-difference deletion would treat the
-        still-published-but-unenumerated subtree as deleted — yanking File rows +
+        still-present-but-unenumerated subtree as deleted — yanking File rows +
         vectors out of the KB until the next clean sync re-adds them. Letting the
         error propagate aborts the cycle in ``BaseSyncWorker.sync`` BEFORE any
         deletion runs (``ConnectionError`` → transient skip path; everything else
         → status='failed' + re-raise), so a partial enumeration can never drive a
         deletion. A genuinely empty subtree is fine: ``list_item_children``
-        returns ``[]`` for a leaf (and for a missing/absent item, since GraphQL
-        resolves it to null), so absence is data, not an error — only a real fetch
-        failure aborts.
+        returns ``[]`` for a leaf (a FIQL ``parent.id==`` query with no matches),
+        so absence is data, not an error — only a real fetch failure aborts.
         """
         client = self._client_handle()
         out: List[Dict[str, Any]] = []
@@ -383,7 +395,7 @@ class TopdeskSyncWorker(BaseSyncWorker):
         while frontier:
             parent_id = frontier.pop()
             # No try/except: any error here (TopdeskTransientError,
-            # ConnectionError, TopdeskAuthError, TopdeskGraphQLError, …) must
+            # ConnectionError, TopdeskAuthError, TopdeskApiError, …) must
             # propagate so the base worker aborts the cycle without running the
             # set-difference deletion against a partial enumeration.
             children = await client.list_item_children(parent_id)
@@ -392,21 +404,26 @@ class TopdeskSyncWorker(BaseSyncWorker):
                 if not child_id or child_id in visited:
                     continue
                 visited.add(child_id)
-                # Always descend, regardless of the node's own status: a draft
-                # (or status-less) intermediate node may still have published
-                # descendants we want to sync. Only published nodes are emitted.
-                # NOTE (inferred schema): whether intermediate "folder" nodes
-                # even carry a `status` is unconfirmed — see the live-verification
-                # checklist in thoughts/shared/research/2026-06-topdesk-api-verification.md.
+                # Always descend, regardless of the node's own visibility: a
+                # not-visible intermediate node may still have in-scope descendants
+                # we want to sync. Only in-scope nodes are emitted.
                 frontier.append(child_id)
-                if _is_published(child):
+                if _should_sync(child):
                     out.append(child)
         return out
 
     def _file_info_for(self, source: Dict[str, Any], item: Dict[str, Any]) -> Dict[str, Any]:
-        """Build a base_worker file_info dict from an enumerated item node."""
+        """Build a base_worker file_info dict from an enumerated REST item node.
+
+        Reads the nested REST shape via ``mapping`` (translation.content.*,
+        status.name, visibility.sspVisibility, urls.*). The web link comes straight
+        from ``urls`` (relative → prefixed with the tenant URL); there is no SSP
+        URL construction.
+        """
         item_id = item['id']
-        title = item.get('title') or f'item-{item_id}'
+        title = mapping.item_title(item) or f'item-{item_id}'
+        site = get_service_site()
+        base_url = site['url'] if site else ''
         return {
             'item': {
                 'id': item_id,
@@ -416,21 +433,21 @@ class TopdeskSyncWorker(BaseSyncWorker):
             },
             'item_id': item_id,
             'title': title,
-            'web_url': self._build_item_url(item_id),
+            'web_url': mapping.item_web_url(item, base_url),
             'source_type': source['type'],
             'source_item_id': source['item_id'],
             'name': _sanitise_filename(title, item_id),
             'relative_path': (title or f'item-{item_id}').strip(),
-            # Summary fields present on list/child nodes — carried for the
-            # front-matter without an extra get_knowledge_item call. Full
-            # hydration (keywords, dates, content) happens in _download_file_content.
+            # Fields available on list/child/get nodes — carried for the
+            # front-matter. Full hydration (content) happens in _download_file_content.
             'topdesk_number': item.get('number') or '',
-            'topdesk_language': item.get('language') or '',
-            'topdesk_status': item.get('status') or '',
-            'topdesk_visibility': item.get('visibility') or '',
-            'topdesk_keywords': item.get('keywords') or [],
+            'topdesk_language': mapping.item_language(item),
+            'topdesk_status': mapping.item_status_name(item),
+            'topdesk_visibility': mapping.item_ssp_visibility(item),
+            'topdesk_keywords': mapping.item_keywords(item),
             'topdesk_created_at': item.get('creationDate') or '',
             'topdesk_modified_at': item.get('modificationDate') or '',
+            'topdesk_available_translations': item.get('availableTranslations') or [],
         }
 
     async def _collect_folder_files(self, source: Dict[str, Any]) -> tuple[List[Dict[str, Any]], int]:
@@ -496,7 +513,7 @@ class TopdeskSyncWorker(BaseSyncWorker):
             return None
 
         try:
-            item = await client.get_knowledge_item(item_id, include_content=False)
+            item = await client.get_knowledge_item(item_id)
         except Exception as e:
             log.error('Failed to fetch TOPdesk item %s: %s', source.get('name'), e)
             return None
@@ -505,9 +522,14 @@ class TopdeskSyncWorker(BaseSyncWorker):
             log.warning('TOPdesk item not found: %s', source.get('name'))
             return None
 
-        # Drafts/archived never sync.
-        if not _is_published(item):
-            log.info('TOPdesk item %s is not published (%s) — skipping', item_id, item.get('status'))
+        # Out-of-scope / archived items never sync.
+        if not _should_sync(item):
+            log.info(
+                'TOPdesk item %s is out of sync scope (visibility=%s, archived=%s) — skipping',
+                item_id,
+                mapping.item_ssp_visibility(item),
+                bool(item.get('archived')),
+            )
             return None
 
         self._seen_item_ids.add(item_id)
@@ -542,27 +564,29 @@ class TopdeskSyncWorker(BaseSyncWorker):
         item_id = file_info['item_id']
         client = self._client_handle()
 
-        item = await client.get_knowledge_item(item_id, include_content=True)
+        item = await client.get_knowledge_item(item_id)
         if not item:
             raise RuntimeError(f'TOPdesk item {item_id} disappeared during sync')
 
-        html = item.get('content') or ''
+        html = mapping.item_body_html(item)
         # html_to_markdown is sync + CPU-bound (BeautifulSoup parse); off-thread
         # to avoid stalling the event loop on long items.
         markdown_body = await asyncio.to_thread(html_to_markdown, html) if html else ''
 
-        # Hydrate enrichment from the full node, falling back to the summary
-        # fields already on file_info.
-        file_info['title'] = item.get('title') or file_info.get('title') or f'item-{item_id}'
+        # Hydrate enrichment from the full node (nested REST shape), falling back to
+        # the fields already on file_info.
+        file_info['title'] = mapping.item_title(item) or file_info.get('title') or f'item-{item_id}'
         file_info['topdesk_number'] = item.get('number') or file_info.get('topdesk_number') or ''
-        file_info['topdesk_keywords'] = item.get('keywords') or file_info.get('topdesk_keywords') or []
-        file_info['topdesk_language'] = item.get('language') or file_info.get('topdesk_language') or ''
-        file_info['topdesk_status'] = item.get('status') or file_info.get('topdesk_status') or ''
-        file_info['topdesk_visibility'] = item.get('visibility') or file_info.get('topdesk_visibility') or ''
+        file_info['topdesk_keywords'] = mapping.item_keywords(item) or file_info.get('topdesk_keywords') or []
+        file_info['topdesk_language'] = mapping.item_language(item) or file_info.get('topdesk_language') or ''
+        file_info['topdesk_status'] = mapping.item_status_name(item) or file_info.get('topdesk_status') or ''
+        file_info['topdesk_visibility'] = mapping.item_ssp_visibility(item) or file_info.get('topdesk_visibility') or ''
         file_info['topdesk_created_at'] = item.get('creationDate') or file_info.get('topdesk_created_at') or ''
         file_info['topdesk_modified_at'] = item.get('modificationDate') or file_info.get('topdesk_modified_at') or ''
-        parent = item.get('parent') or {}
-        file_info['topdesk_parent_id'] = parent.get('id') or ''
+        file_info['topdesk_available_translations'] = (
+            item.get('availableTranslations') or file_info.get('topdesk_available_translations') or []
+        )
+        file_info['topdesk_parent_id'] = mapping.item_parent_id(item)
 
         rendered = _build_front_matter(file_info) + markdown_body + '\n'
 
@@ -611,9 +635,12 @@ class TopdeskSyncWorker(BaseSyncWorker):
             # Visibility is recorded as metadata only — the service account's
             # TOPdesk-side permission filter IS the visibility boundary in v1.
             'topdesk_visibility': info.get('topdesk_visibility', ''),
-            # Keywords populated either at collection (summary node) or download
-            # (full node). Carried so they propagate to vector-chunk metadata.
+            # Keywords populated either at collection or download. Carried so they
+            # propagate to vector-chunk metadata.
             'topdesk_keywords': info.get('topdesk_keywords') or [],
+            # BCP-47 tags of every translation available for the item (v1 syncs the
+            # tenant default language only; this records what else exists).
+            'topdesk_available_translations': info.get('topdesk_available_translations') or [],
             'topdesk_parent_id': info.get('topdesk_parent_id', ''),
             'topdesk_created_at': info.get('topdesk_created_at', ''),
             'topdesk_modified_at': info.get('topdesk_modified_at', ''),
@@ -621,18 +648,6 @@ class TopdeskSyncWorker(BaseSyncWorker):
             'relative_path': relative_path,
             'last_synced_at': int(time.time()),
         }
-
-    def _build_item_url(self, item_id: str) -> str:
-        """Compose the SSP detail link for a knowledge item (findings §7).
-
-        ``{TOPDESK_URL}/tas/public/ssp/content/detail/knowledgeitem?unid={id}`` —
-        the GraphQL ``id`` UUID doubles as the SSP ``unid``.
-        """
-        site = get_service_site()
-        site_url = (site['url'] if site else '').rstrip('/')
-        if not site_url or not item_id:
-            return site_url
-        return f'{site_url}/tas/public/ssp/content/detail/knowledgeitem?unid={item_id}'
 
     # ------------------------------------------------------------------
     # Access / permissions (shared-KB rules only — no per-user mode)
@@ -751,7 +766,7 @@ class TopdeskSyncWorker(BaseSyncWorker):
 
         client = self._client_handle()
         try:
-            result = await client.get_knowledge_item(item_id, include_content=False)
+            result = await client.get_knowledge_item(item_id)
             return result is not None
         except TopdeskAuthError:
             # Credential revoked — _sync_permissions already suspends the KB.

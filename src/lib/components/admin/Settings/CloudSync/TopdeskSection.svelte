@@ -21,6 +21,7 @@
 	import SyncSettingsSection from './SyncSettingsSection.svelte';
 	import SharedKbSection from './SharedKbSection.svelte';
 	import TopdeskPickerModal from './TopdeskPickerModal.svelte';
+	import { connectionErrorMessage } from './errors';
 	import type { TopdeskConfigResponse, SharedKbApi, SharedKbStatusLike } from './types';
 
 	const i18n = getContext<Writable<i18nType>>('i18n');
@@ -54,6 +55,9 @@
 	let appPassword = '';
 	let TOPDESK_SYNC_INTERVAL_MINUTES = 60;
 	let TOPDESK_MAX_ITEMS_PER_SYNC: number | null = 500;
+	// Which knowledge items to sync into the shared KB: 'ssp' (Self-Service Portal
+	// visible, default) | 'public' (public items only) | 'all' (every readable item).
+	let TOPDESK_SYNC_SCOPE = 'ssp';
 	let testingConnection = false;
 
 	// Mirror the enable flag out so the card header badge stays in sync.
@@ -77,6 +81,7 @@
 		appPassword = config.TOPDESK_APP_PASSWORD ?? '';
 		TOPDESK_SYNC_INTERVAL_MINUTES = config.TOPDESK_SYNC_INTERVAL_MINUTES ?? 60;
 		TOPDESK_MAX_ITEMS_PER_SYNC = config.TOPDESK_MAX_ITEMS_PER_SYNC ?? 0;
+		TOPDESK_SYNC_SCOPE = config.TOPDESK_SYNC_SCOPE ?? 'ssp';
 	};
 
 	export async function load() {
@@ -119,7 +124,8 @@
 			TOPDESK_APP_PASSWORD: appPassword,
 			TOPDESK_SYNC_INTERVAL_MINUTES,
 			// Blank/null input → 0 = no per-sync item limit.
-			TOPDESK_MAX_ITEMS_PER_SYNC: TOPDESK_MAX_ITEMS_PER_SYNC ?? 0
+			TOPDESK_MAX_ITEMS_PER_SYNC: TOPDESK_MAX_ITEMS_PER_SYNC ?? 0,
+			TOPDESK_SYNC_SCOPE
 		});
 		applyTopdeskConfig(config);
 	}
@@ -164,6 +170,8 @@
 
 	// Probe the service credential currently in the form. A blank
 	// application-password field falls back server-side to the saved credential.
+	// Failures are reported with a fully-localized message derived from the
+	// backend `reason` code (the English `detail` is logged for debugging only).
 	const testConnection = async () => {
 		testingConnection = true;
 		try {
@@ -175,10 +183,20 @@
 			if (result.ok) {
 				toast.success($i18n.t('TOPdesk connection successful.'));
 			} else {
-				toast.error($i18n.t('TOPdesk connection failed: {{error}}', { error: result.detail }));
+				console.error('TOPdesk connection failed:', result.reason, result.detail);
+				toast.error(
+					$i18n.t('TOPdesk connection failed: {{error}}', {
+						error: connectionErrorMessage($i18n, result.reason, result.detail)
+					})
+				);
 			}
 		} catch (err) {
-			toast.error(`${err}`);
+			console.error(err);
+			toast.error(
+				$i18n.t('TOPdesk connection failed: {{error}}', {
+					error: connectionErrorMessage($i18n, 'unreachable')
+				})
+			);
 		}
 		testingConnection = false;
 	};
@@ -265,6 +283,23 @@
 				bind:maxPerSync={TOPDESK_MAX_ITEMS_PER_SYNC}
 				itemNoun="items"
 			/>
+		</div>
+
+		<div class="pt-4">
+			<div class="mb-1 text-xs text-gray-500">{$i18n.t('Knowledge items to sync')}</div>
+			<select
+				class="w-full text-sm bg-transparent outline-hidden dark:text-gray-100"
+				bind:value={TOPDESK_SYNC_SCOPE}
+			>
+				<option value="ssp" class="dark:bg-gray-900"
+					>{$i18n.t('Visible in Self-Service Portal')}</option
+				>
+				<option value="public" class="dark:bg-gray-900">{$i18n.t('Public only')}</option>
+				<option value="all" class="dark:bg-gray-900">{$i18n.t('All readable')}</option>
+			</select>
+			<div class="mt-1 text-xs text-gray-500">
+				{$i18n.t('Which TOPdesk knowledge items are pulled into the shared knowledge base.')}
+			</div>
 		</div>
 
 		<div class="pt-4">

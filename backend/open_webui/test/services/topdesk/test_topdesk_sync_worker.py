@@ -1,6 +1,6 @@
-"""TopdeskSyncWorker — classification, subtree dedup, document build, metadata.
+"""TopdeskSyncWorker — REST field mapping, scope filter, dedup, document build.
 
-Runs against the committed fixtures with a mocked TopdeskClient (zero network)
+Runs against the committed REST fixtures with a mocked TopdeskClient (zero network)
 and the model layer (Files/Knowledges) patched. Uses ``asyncio.run`` (no
 pytest-asyncio dependency), matching ``test_topdesk_client.py``.
 
@@ -22,14 +22,27 @@ from open_webui.services.topdesk.sync_worker import TopdeskSyncWorker
 
 _FIXTURES = Path(__file__).parent / 'fixtures'
 
+# Patch target for the sync-scope PersistentConfig so visibility-sensitive tests
+# are deterministic regardless of any persisted/env value.
+_SCOPE = 'open_webui.services.topdesk.sync_worker.TOPDESK_SYNC_SCOPE'
+
 
 def _fixture(name: str) -> dict:
     return json.loads((_FIXTURES / name).read_text())
 
 
-def _knowledge_item(name: str) -> dict:
-    """Return the ``knowledgeItem`` node from a single-item fixture."""
-    return _fixture(name)['data']['knowledgeItem']
+def _item(name: str) -> dict:
+    """A single REST KnowledgeItem fixture (bare object — no envelope)."""
+    return _fixture(name)
+
+
+def _children(name: str = 'item_children.json') -> list:
+    """The child-item list from a children fixture (REST list page → ``item``)."""
+    return _fixture(name)['item']
+
+
+def _scope(value: str = 'ssp') -> SimpleNamespace:
+    return SimpleNamespace(value=value)
 
 
 def _run(coro):
@@ -103,10 +116,9 @@ def test_get_cloud_hash_none_when_missing():
 
 def test_collect_folder_changed_modification_date_queues_update():
     """An item whose modificationDate differs from the stored item_map is queued."""
-    item = _knowledge_item('item_with_content.json')  # modificationDate 2026-05-21T14:30:00Z
+    item = _item('item_with_content.json')  # modificationDate 2026-05-21T14:30:00Z
     client = _stub_client()
     worker = _make_worker(client)
-    # Whole-item subtree source: enumerate returns just this published item.
     source = {
         'type': 'folder',
         'item_id': item['id'],
@@ -127,7 +139,7 @@ def test_collect_folder_changed_modification_date_queues_update():
 
 def test_collect_folder_unchanged_completed_skips():
     """Same modificationDate + a completed File row → skipped (not re-queued)."""
-    item = _knowledge_item('item_with_content.json')
+    item = _item('item_with_content.json')
     worker = _make_worker(_stub_client())
     source = {
         'type': 'folder',
@@ -148,7 +160,7 @@ def test_collect_folder_unchanged_completed_skips():
 
 def test_collect_folder_unchanged_but_incomplete_re_syncs():
     """Same modificationDate but the File row is missing/incomplete → re-queued."""
-    item = _knowledge_item('item_with_content.json')
+    item = _item('item_with_content.json')
     worker = _make_worker(_stub_client())
     source = {
         'type': 'folder',
@@ -167,7 +179,7 @@ def test_collect_folder_unchanged_but_incomplete_re_syncs():
 
 def test_collect_folder_missing_item_is_deleted_by_set_difference():
     """An item in the old item_map but absent from the fresh enumeration is deleted."""
-    item = _knowledge_item('item_with_content.json')
+    item = _item('item_with_content.json')
     worker = _make_worker(_stub_client())
     source = {
         'type': 'folder',
@@ -201,7 +213,7 @@ def test_collect_folder_missing_item_is_deleted_by_set_difference():
 
 def test_subtree_dedup_processes_item_once_across_two_sources():
     """An item present under two selected subtrees is queued only once."""
-    item = _knowledge_item('item_with_content.json')
+    item = _item('item_with_content.json')
     worker = _make_worker(_stub_client())
     src_a = {'type': 'folder', 'item_id': 'A', 'include_descendants': True, 'item_map': {}}
     src_b = {'type': 'folder', 'item_id': 'B', 'include_descendants': True, 'item_map': {}}
@@ -221,7 +233,7 @@ def test_subtree_dedup_processes_item_once_across_two_sources():
 
 
 def test_collect_single_file_skips_when_already_seen():
-    item = _knowledge_item('item_with_content.json')
+    item = _item('item_with_content.json')
     client = _stub_client(get_knowledge_item=item)
     worker = _make_worker(client)
     worker._seen_item_ids.add(item['id'])
@@ -232,45 +244,66 @@ def test_collect_single_file_skips_when_already_seen():
 
 
 # ---------------------------------------------------------------------
-# Published-only filter
+# Scope / visibility filter (ssp scope: VISIBLE in, NOT_VISIBLE out)
 # ---------------------------------------------------------------------
 
 
-def test_enumerate_subtree_filters_unpublished_root():
-    """A non-published root item is excluded from enumeration."""
-    draft = {**_knowledge_item('item_with_content.json'), 'status': 'DRAFT'}
-    client = _stub_client(get_knowledge_item=draft, list_item_children=[])
+def _not_visible(item: dict) -> dict:
+    clone = json.loads(json.dumps(item))
+    clone['visibility'] = {'sspVisibility': 'NOT_VISIBLE', 'publicKnowledgeItem': False}
+    return clone
+
+
+def test_enumerate_subtree_filters_not_visible_root():
+    """A not-SSP-visible root item is excluded from enumeration (ssp scope)."""
+    hidden = _not_visible(_item('item_with_content.json'))
+    client = _stub_client(get_knowledge_item=hidden, list_item_children=[])
     worker = _make_worker(client)
-    source = {'type': 'folder', 'item_id': draft['id'], 'include_descendants': False}
-    items = _run(worker._enumerate_source_items(source))
+    source = {'type': 'folder', 'item_id': hidden['id'], 'include_descendants': False}
+    with patch(_SCOPE, _scope('ssp')):
+        items = _run(worker._enumerate_source_items(source))
     assert items == []
 
 
-def test_collect_single_file_skips_draft():
-    draft = {**_knowledge_item('item_with_content.json'), 'status': 'DRAFT'}
-    client = _stub_client(get_knowledge_item=draft)
+def test_collect_single_file_skips_not_visible():
+    hidden = _not_visible(_item('item_with_content.json'))
+    client = _stub_client(get_knowledge_item=hidden)
     worker = _make_worker(client)
-    source = {'type': 'file', 'item_id': draft['id'], 'include_descendants': False}
-    assert _run(worker._collect_single_file(source)) is None
+    source = {'type': 'file', 'item_id': hidden['id'], 'include_descendants': False}
+    with patch(_SCOPE, _scope('ssp')):
+        assert _run(worker._collect_single_file(source)) is None
 
 
-def test_walk_descendants_filters_unpublished_children():
-    """Children walk includes only published children (item_children.json all PUBLISHED)."""
-    children_node = _fixture('item_children.json')['data']['knowledgeItem']
-    # First call returns the 3 published children; deeper calls return none.
+def test_collect_single_file_public_scope_allows_public_item():
+    """Under 'public' scope a publicKnowledgeItem syncs even if not SSP-visible."""
+    item = json.loads(json.dumps(_item('item_with_content.json')))
+    item['visibility'] = {'sspVisibility': 'NOT_VISIBLE', 'publicKnowledgeItem': True}
+    client = _stub_client(get_knowledge_item=item)
+    worker = _make_worker(client)
+    source = {'type': 'file', 'item_id': item['id'], 'include_descendants': False}
+    with patch(_SCOPE, _scope('public')):
+        result = _run(worker._collect_single_file(source))
+    assert result is not None
+    assert result['item_id'] == item['id']
+
+
+def test_walk_descendants_filters_out_of_scope_children():
+    """Children walk includes only in-scope children (KI 0007 is NOT_VISIBLE)."""
+    children = _children()
     calls = {'n': 0}
 
-    async def _children(_item_id):
+    async def _list_children(_item_id):
         calls['n'] += 1
         if calls['n'] == 1:
-            return children_node['children']
+            return children
         return []
 
     client = _stub_client()
-    client.list_item_children = AsyncMock(side_effect=_children)
+    client.list_item_children = AsyncMock(side_effect=_list_children)
     worker = _make_worker(client)
-    out = _run(worker._walk_descendants('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'))
-    assert sorted(c['number'] for c in out) == ['KI 0001', 'KI 0006', 'KI 0007']
+    with patch(_SCOPE, _scope('ssp')):
+        out = _run(worker._walk_descendants('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'))
+    assert sorted(c['number'] for c in out) == ['KI 0001', 'KI 0006']
 
 
 # ---------------------------------------------------------------------
@@ -287,28 +320,28 @@ def _children_then_raise(first_children, error):
     """
     calls = {'n': 0}
 
-    async def _children(_item_id):
+    async def _list(_item_id):
         calls['n'] += 1
         if calls['n'] == 1:
             return first_children
         raise error
 
-    return AsyncMock(side_effect=_children)
+    return AsyncMock(side_effect=_list)
 
 
 def test_walk_descendants_propagates_transient_error():
     """A mid-walk TopdeskTransientError propagates instead of being swallowed."""
     from open_webui.services.topdesk.topdesk_client import TopdeskTransientError
 
-    children_node = _fixture('item_children.json')['data']['knowledgeItem']
     client = _stub_client()
     client.list_item_children = _children_then_raise(
-        children_node['children'], TopdeskTransientError('5xx exhausted', status_code=503)
+        _children(), TopdeskTransientError('5xx exhausted', status_code=503)
     )
     worker = _make_worker(client)
 
     try:
-        _run(worker._walk_descendants('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'))
+        with patch(_SCOPE, _scope('ssp')):
+            _run(worker._walk_descendants('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'))
         raised = False
     except TopdeskTransientError:
         raised = True
@@ -317,13 +350,13 @@ def test_walk_descendants_propagates_transient_error():
 
 def test_walk_descendants_propagates_connection_error():
     """A mid-walk ConnectionError propagates (base worker maps it to a transient skip)."""
-    children_node = _fixture('item_children.json')['data']['knowledgeItem']
     client = _stub_client()
-    client.list_item_children = _children_then_raise(children_node['children'], ConnectionError('down'))
+    client.list_item_children = _children_then_raise(_children(), ConnectionError('down'))
     worker = _make_worker(client)
 
     try:
-        _run(worker._walk_descendants('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'))
+        with patch(_SCOPE, _scope('ssp')):
+            _run(worker._walk_descendants('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'))
         raised = False
     except ConnectionError:
         raised = True
@@ -340,11 +373,10 @@ def test_collect_folder_transient_walk_error_does_not_delete():
     """
     from open_webui.services.topdesk.topdesk_client import TopdeskTransientError
 
-    children_node = _fixture('item_children.json')['data']['knowledgeItem']
-    root = _knowledge_item('item_with_content.json')
+    root = _item('item_with_content.json')
     client = _stub_client(get_knowledge_item=root)
     client.list_item_children = _children_then_raise(
-        children_node['children'], TopdeskTransientError('5xx exhausted', status_code=503)
+        _children(), TopdeskTransientError('5xx exhausted', status_code=503)
     )
     worker = _make_worker(client)
     source = {
@@ -360,6 +392,7 @@ def test_collect_folder_transient_walk_error_does_not_delete():
         deleted_calls.append(it['id'])
 
     with (
+        patch(_SCOPE, _scope('ssp')),
         patch.object(worker, '_handle_deleted_item', new=AsyncMock(side_effect=_record_delete)),
         patch('open_webui.services.topdesk.sync_worker.Files.get_file_by_id', new=AsyncMock(return_value=None)),
     ):
@@ -377,10 +410,9 @@ def test_collect_folder_transient_walk_error_does_not_delete():
 
 def test_collect_folder_connection_error_does_not_delete():
     """A ConnectionError while walking a subtree aborts collection without deleting."""
-    children_node = _fixture('item_children.json')['data']['knowledgeItem']
-    root = _knowledge_item('item_with_content.json')
+    root = _item('item_with_content.json')
     client = _stub_client(get_knowledge_item=root)
-    client.list_item_children = _children_then_raise(children_node['children'], ConnectionError('down'))
+    client.list_item_children = _children_then_raise(_children(), ConnectionError('down'))
     worker = _make_worker(client)
     source = {
         'type': 'folder',
@@ -394,6 +426,7 @@ def test_collect_folder_connection_error_does_not_delete():
         deleted_calls.append(it['id'])
 
     with (
+        patch(_SCOPE, _scope('ssp')),
         patch.object(worker, '_handle_deleted_item', new=AsyncMock(side_effect=_record_delete)),
         patch('open_webui.services.topdesk.sync_worker.Files.get_file_by_id', new=AsyncMock(return_value=None)),
     ):
@@ -413,18 +446,18 @@ def test_collect_folder_connection_error_does_not_delete():
 
 
 def test_download_file_content_builds_front_matter_and_markdown():
-    item = _knowledge_item('item_with_content.json')
+    item = _item('item_with_content.json')
     client = _stub_client(get_knowledge_item=item)
     worker = _make_worker(client)
     file_info = {
         'item_id': item['id'],
-        'title': item['title'],
+        'title': 'How to reset your password',
         'web_url': 'https://t.topdesk.net/tas/public/ssp/content/detail/knowledgeitem?unid=' + item['id'],
     }
     content = _run(worker._download_file_content(file_info))
     text = content.decode('utf-8')
 
-    # Front-matter fields.
+    # Front-matter fields (mapped from the nested REST shape).
     assert text.startswith('# How to reset your password')
     assert 'KI 0001' in text
     assert '_Keywords: password, reset, login, account_' in text
@@ -439,15 +472,16 @@ def test_download_file_content_builds_front_matter_and_markdown():
     # file_info enriched for _get_provider_file_meta.
     assert file_info['topdesk_keywords'] == ['password', 'reset', 'login', 'account']
     assert file_info['topdesk_parent_id'] == 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'
+    assert file_info['topdesk_available_translations'] == ['en', 'nl']
 
 
 def test_download_file_content_byte_cap_enforced():
-    item = _knowledge_item('item_with_content.json')
+    item = json.loads(json.dumps(_item('item_with_content.json')))
     # Content larger than a 1 MB cap → output must be truncated to <= max_bytes.
-    big = {**item, 'content': '<p>' + ('A' * (2 * 1024 * 1024)) + '</p>'}
-    client = _stub_client(get_knowledge_item=big)
+    item['translation']['content']['content'] = '<p>' + ('A' * (2 * 1024 * 1024)) + '</p>'
+    client = _stub_client(get_knowledge_item=item)
     worker = _make_worker(client)
-    file_info = {'item_id': item['id'], 'title': item['title'], 'web_url': ''}
+    file_info = {'item_id': item['id'], 'title': item['translation']['content']['title'], 'web_url': ''}
     with patch('open_webui.services.topdesk.sync_worker.TOPDESK_MAX_ITEM_SIZE_MB', 1):
         content = _run(worker._download_file_content(file_info))
     assert len(content) <= 1 * 1024 * 1024
@@ -465,6 +499,35 @@ def test_download_file_content_raises_when_item_disappears():
 
 
 # ---------------------------------------------------------------------
+# _file_info_for — maps the nested REST shape (incl. urls → web_url)
+# ---------------------------------------------------------------------
+
+
+def test_file_info_for_maps_nested_rest_fields():
+    item = _item('item_with_content.json')
+    worker = _make_worker()
+    source = {'type': 'folder', 'item_id': 'src-1'}
+    with patch(
+        'open_webui.services.topdesk.sync_worker.get_service_site',
+        return_value={'url': 'https://tenant.topdesk.net', 'cloud_id': 't', 'name': 't'},
+    ):
+        fi = worker._file_info_for(source, item)
+
+    assert fi['item_id'] == item['id']
+    assert fi['title'] == 'How to reset your password'
+    assert fi['topdesk_number'] == 'KI 0001'
+    assert fi['topdesk_language'] == 'en'
+    assert fi['topdesk_status'] == 'PUBLISHED'
+    assert fi['topdesk_visibility'] == 'VISIBLE'
+    assert fi['topdesk_keywords'] == ['password', 'reset', 'login', 'account']
+    # web_url comes from urls.ssp (no public url present), prefixed with the tenant.
+    assert fi['web_url'] == (
+        'https://tenant.topdesk.net/tas/public/ssp/content/detail/knowledgeitem?unid=' + item['id']
+    )
+    assert fi['item']['modificationDate'] == '2026-05-21T14:30:00Z'
+
+
+# ---------------------------------------------------------------------
 # _get_provider_file_meta — carries id/number/web_url/language/keywords
 # ---------------------------------------------------------------------
 
@@ -477,8 +540,9 @@ def test_provider_file_meta_carries_topdesk_fields():
         'topdesk_number': 'KI 0001',
         'topdesk_language': 'en',
         'topdesk_status': 'PUBLISHED',
-        'topdesk_visibility': 'SELF_SERVICE_PORTAL',
+        'topdesk_visibility': 'VISIBLE',
         'topdesk_keywords': ['password', 'reset'],
+        'topdesk_available_translations': ['en', 'nl'],
         'topdesk_created_at': '2026-01-04T09:12:00Z',
         'topdesk_modified_at': '2026-05-21T14:30:00Z',
     }
@@ -498,21 +562,9 @@ def test_provider_file_meta_carries_topdesk_fields():
     assert meta['topdesk_url'].endswith('unid=KI1')
     assert meta['topdesk_language'] == 'en'
     assert meta['topdesk_keywords'] == ['password', 'reset']
-    assert meta['topdesk_visibility'] == 'SELF_SERVICE_PORTAL'
+    assert meta['topdesk_visibility'] == 'VISIBLE'
+    assert meta['topdesk_available_translations'] == ['en', 'nl']
     assert meta['source_item_id'] == 'src-1'
-
-
-def test_build_item_url_ssp_format():
-    worker = _make_worker()
-    with patch(
-        'open_webui.services.topdesk.sync_worker.get_service_site',
-        return_value={'url': 'https://tenant.topdesk.net', 'cloud_id': 'tenant.topdesk.net', 'name': 'x'},
-    ):
-        url = worker._build_item_url('e2a64a28-c0b8-4df2-9029-241fbecfbf72')
-    assert url == (
-        'https://tenant.topdesk.net/tas/public/ssp/content/detail/knowledgeitem'
-        '?unid=e2a64a28-c0b8-4df2-9029-241fbecfbf72'
-    )
 
 
 # ---------------------------------------------------------------------
@@ -571,9 +623,7 @@ def test_sync_permissions_second_consecutive_auth_error_suspends():
 def test_sync_permissions_unsuspends_on_recovered_access():
     client = SimpleNamespace(probe=AsyncMock(return_value={'ok': True}))
     worker = _make_worker(client)
-    kb = SimpleNamespace(
-        meta={'topdesk_sync': {'suspended_at': 123, 'suspended_reason': 'x', 'auth_fail_count': 2}}
-    )
+    kb = SimpleNamespace(meta={'topdesk_sync': {'suspended_at': 123, 'suspended_reason': 'x', 'auth_fail_count': 2}})
     update_meta = AsyncMock()
     with (
         patch('open_webui.services.topdesk.sync_worker.service_auth_configured', return_value=True),

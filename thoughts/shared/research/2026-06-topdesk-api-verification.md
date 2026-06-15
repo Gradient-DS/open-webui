@@ -1,30 +1,108 @@
-# TOPdesk API Verification — Phase 0 (docs-based)
+# TOPdesk API Verification — Phase 0 (docs-based) + Reconciled to REST (2026-06-15)
 
-**Date:** 2026-06-12
-**Author:** @lexlubbers (with Claude Fable 5)
+**Date:** 2026-06-12 (Phase 0) · **Reconciled:** 2026-06-15
+**Author:** @lexlubbers (with Claude Fable 5; reconciliation with Claude Opus 4.8)
 **Branch:** `feat/topdesk`
-**Plan phase:** Phase 0 — API verification for the TOPdesk Knowledge Base integration.
+**Plan phase:** Phase 0 — API verification → reconciled against the real OpenAPI specs.
 
 ---
 
-## STATUS BANNER
+## STATUS BANNER (updated 2026-06-15)
 
-> **This is a DOCUMENTATION-BASED verification only.** No live API calls were made
-> against any `*.topdesk.net` tenant — the client's production API key is **not**
-> available on this machine. Several findings below (especially the GraphQL schema:
-> query/type names, exact field structure, pagination argument names, and filtering
-> syntax) **could not be extracted verbatim** because TOPdesk's developer portal
-> serves its entire API reference from a client-rendered JavaScript (Vue) single-page
-> app behind Cloudflare. The schema is therefore documented here at the **inferred**
-> confidence level, modelled on the standard GraphQL Relay connection pattern, and
-> **must be confirmed by live introspection** against the client tenant before the
-> client code (Phase 2) is finalised. The "Requires live verification" checklist at
-> the bottom is the gating list for that later pass.
+> **The GraphQL hypothesis was WRONG. The integration now targets the SaaS REST
+> Knowledge Base API (`knowledge-base-v1`).** Phase 0 (below, §1–§12) was a
+> documentation-only pass that — because TOPdesk's developer portal is a JS SPA —
+> inferred a GraphQL schema. We have since obtained the **real OpenAPI specs**
+> (`knowledge-base_SaaS.json`) and **confirmed the auth model**, and reconciled the
+> implementation to them. The authoritative current truth is **§0 (REST — CONFIRMED)**
+> immediately below; the original GraphQL sections **§3–§6 are SUPERSEDED** and kept
+> only as the historical Phase-0 record.
 >
-> **Overall Phase 0 signal: DONE_WITH_CONCERNS** — not BLOCKED. No public source
-> indicates the GraphQL API *lacks* pagination, `modificationDate` filtering, or
-> parent/child traversal; these capabilities simply could not be positively confirmed
-> from docs. See "Go/No-Go" at the end.
+> **What changed:** transport is REST (`GET /knowledgeItems`, offset paging,
+> FIQL `query`, `fields` selector), not GraphQL; the item shape is **nested**
+> (`translation.content.*`, `status.name`, `visibility.sspVisibility`, `urls.*`);
+> the publish filter is **visibility-driven** (scope `ssp`/`public`/`all`), not a
+> status enum; auth is **HTTP Basic only** (operator login + application token — the
+> `TOKEN id="…"` person form was dropped).
+>
+> **Only one thing remains live-unverified:** that the tenant serves KB-v1 **and our
+> operator login authenticates**. Run `scripts/topdesk_discover.py --login "<op>"`
+> once Intermax provides the operator login; a 2xx on the `KB-v1` row closes the gate.
+
+---
+
+## 0. REST Knowledge Base API (`knowledge-base-v1`) — CONFIRMED (2026-06-15)
+
+Source: the tenant's OpenAPI spec `knowledge-base_SaaS.json` (OAS 3.0), plus the
+TOPdesk API Tutorial for auth. This section supersedes §3–§6.
+
+### 0.1 Auth — HTTP Basic, operator-only (CONFIRMED)
+
+```
+Authorization: Basic base64(operatorLoginName:applicationToken)
+```
+
+Verbatim (TOPdesk API Tutorial → "Create an application token"): *"select the 'Basic
+Auth' option … Fill the login name of your TOPdesk user into the 'Username' field and
+the application token you just created for this user in the 'Password' field." … "This
+is currently only possible for operators."* The legacy `TOKEN id="…"` person-token form
+is **not** accepted by the KB REST API and was removed from our client
+(`services/topdesk/auth.py` — Basic only; operator login is **required**).
+
+### 0.2 Endpoints
+
+- Base: `https://{tenant}.topdesk.net/services/knowledge-base-v1` (config:
+  `TOPDESK_KB_API_PATH`). Auth/version probe stays under `/tas/api/version`.
+- `GET /knowledgeItems` — list. Params: `start` (offset, default 0), `page_size`
+  (1–1000, default 100), `fields` (comma list — content/title/status/etc. are **NOT**
+  returned unless requested), `query` (FIQL: `parent.id`, `status.id/name`,
+  `modificationDate`, `archived`, `news`, `visibility.*`), `language` (BCP-47).
+  Response `{ "item": [KnowledgeItem], "prev"?, "next"? }`; HTTP **200** (complete) or
+  **206** (partial). Accept `application/x.topdesk-kb-ki-list-v1+json`.
+- `GET /knowledgeItems/{id|number}` — single item (returned directly). Accept
+  `application/x.topdesk-kb-ki-v1+json`. Spec warning: if no `translation.content.*`
+  field is requested the content block returns empty — so always request content
+  subfields (our `_KI_FIELDS` does).
+- Errors: `400` → `{ "errors": [{ "errorCode", "appliesTo", "errorMessage" }] }`;
+  `404` not found.
+
+### 0.3 KnowledgeItem shape (nested)
+
+```jsonc
+{
+  "id": "uuid", "number": "KI 0211",
+  "parent": { "id": "uuid", "name": "..." },
+  "translation": {
+    "language": "nl",
+    "content": { "title": "...", "description": "<html>", "content": "<html>",
+                 "commentsForOperators": "...", "keywords": "comma, space string" }
+  },
+  "visibility": { "sspVisibility": "VISIBLE|NOT_VISIBLE|VISIBLE_IN_PERIOD",
+                  "sspVisibleFrom": "...", "sspVisibleUntil": "...",
+                  "publicKnowledgeItem": true },
+  "urls": { "operator": "/...", "ssp": "/...", "public": "/..." },   // relative
+  "status": { "id": "...", "name": "..." },                          // searchlist, NOT an enum
+  "modificationDate": "ISO-8601Z", "creationDate": "ISO-8601Z",
+  "availableTranslations": ["nl", "en"], "news": false,
+  "manager": {...}, "externalLink": "..."
+}
+```
+
+Content is **HTML** (run through `html_to_markdown`). `keywords` is a single
+comma/space string (split to a list). The flat field reads live in one place —
+`services/topdesk/mapping.py`.
+
+### 0.4 Mapping to our integration (what survived)
+
+The worker *design* survived intact — the REST API has everything it assumed:
+**parent** (tree via FIQL `parent.id==<id>`), **modificationDate** (client-side
+incremental hashing — unchanged), **HTML content**, **visibility** (publish filter),
+**urls** (front-matter web link), **keywords/availableTranslations/number**. The real
+work was swapping the client transport (GraphQL→REST) and remapping field reads
+(flat→nested). Publish/inclusion is now **`_should_sync`** driven by
+`TOPDESK_SYNC_SCOPE` (`ssp` default / `public` / `all`; archived always excluded),
+replacing the status-enum `_is_published`. Language: v1 syncs the **tenant default
+language only**. Attachments/images: **deferred** (text only).
 
 ---
 
@@ -108,6 +186,11 @@ confirmation.**
 ---
 
 ## 3. GraphQL endpoint path
+
+> **⚠️ SUPERSEDED (2026-06-15) — §3–§6 below describe the INFERRED GraphQL API, which
+> turned out to be the wrong API. The integration targets the REST KB API; see §0 for
+> the confirmed schema, endpoints, auth, pagination, filtering, and field shape. The
+> text below is retained only as the historical Phase-0 record.**
 
 - **Inferred.** The exact POST path for the Knowledge Base GraphQL endpoint could not
   be extracted from public docs (it lives only inside the JS-rendered explorer at
@@ -429,45 +512,42 @@ The only finding that would genuinely block is if the GraphQL API turned out to 
 
 ---
 
-## 10. REQUIRES LIVE VERIFICATION (checklist for the prod pass)
+## 10. REQUIRES LIVE VERIFICATION (checklist) — reconciled 2026-06-15
 
-Run these against the client's TOPdesk 2025 R2+ tenant once the API key is available
-(use a read-only operator + application password; never write):
+The OpenAPI specs answer almost everything that was inferred. **Items the specs now
+resolve are checked off.** The single remaining gate is operational — the tenant
+serving KB-v1 and our operator login authenticating — and is run with
+`scripts/topdesk_discover.py --login "<operatorLogin>"` once Intermax provides the login.
 
-- [ ] **Probe:** `GET /tas/api/operators/current` returns 200 with the operator record
-      (confirms auth + operator identity class). Fallback `GET /tas/api/version` returns
-      the version (confirm tenant is ≥ 2025 R2).
-- [ ] **GraphQL endpoint path:** confirm the exact POST path by POSTing a trivial
-      `{ __typename }` query to each of the three §3 candidates. A 404/HTML response
-      rules a path out; a GraphQL-shaped JSON response (200 with `data`, or 400 with a
-      top-level GraphQL `errors` array) confirms it. Record the working one.
-- [ ] **Introspection:** run a standard GraphQL introspection query; capture the real
-      SDL for `Query`, the knowledge-item connection type, `KnowledgeItem`, and the
-      filter input. Diff against §4.1 and update fixtures + client to match.
-- [ ] **Field names:** confirm real names for `number`, `description`, `content`,
-      `keywords`, `language`, `status`, `visibility`, `parent`/`children`,
-      `availableTranslations`, `creationDate`, `modificationDate`.
-- [ ] **`content` is HTML:** fetch one item; confirm `content` is an HTML string.
-- [ ] **Pagination:** confirm `first`/`after` + `pageInfo{hasNextPage,endCursor}`
-      (or capture the real argument/field names).
-- [ ] **Status filter:** confirm the value/enum for "published" and that it filters.
-- [ ] **modificationDate filter:** confirm server-side filtering works and capture the
-      real comparator key (`gte`/`since`/`modifiedAfter`/…). If absent, flag client-side
-      fallback.
-- [ ] **Tree traversal:** confirm whether `parent`/`children` are embedded fields or a
-      separate query.
-- [ ] **Attachments:** confirm the `attachments` field shape + `downloadUrl` (for the
-      future-work note; not ingested in v1).
-- [ ] **Web URL:** take one item's `id`, build `…/ssp/content/detail/knowledgeitem?unid={id}`,
-      confirm it resolves to that item (validates `id == unid`).
-- [ ] **Permissions/visibility:** confirm a read-only operator sees the intended items
-      and that `visibility`/`status` let us exclude operator-internal/draft items.
-- [ ] **Intermediate-node `status`:** confirm whether non-leaf "folder"/parent
-      knowledge items carry a `status` field at all. The sync worker
-      (`services/topdesk/sync_worker.py:_walk_descendants`) deliberately descends
-      through every node regardless of status — so a draft/status-less parent does
-      not hide its published descendants — and only emits published nodes. Verify
-      this matches real tree shape (and that descending draft parents is desired).
+- [ ] **GATE — auth + KB-v1 reachability:** `scripts/topdesk_discover.py --login "<op>"`
+      → the `KB-v1 (REST SaaS)` row returns 2xx. (Blocked only on getting the operator
+      login from Intermax; every guess so far 401'd.) If KB-v1 404s but identity 200s →
+      the Knowledge Base API feature flag is off on the tenant (TOS < 14.07.019) — ask
+      the application manager. If only GraphQL answers, this reconciliation is wrong.
+- [x] **API surface:** REST `knowledge-base-v1`, not GraphQL — confirmed from the
+      OpenAPI spec (`knowledge-base_SaaS.json`). Endpoint base `/services/knowledge-base-v1`.
+- [x] **Auth form:** HTTP Basic, operator login + application token (operator-only) —
+      confirmed from the API Tutorial. Person-token form dropped.
+- [x] **Field names + shape:** nested `translation.content.{title,description,content,
+      keywords}`, `status.name`, `visibility.sspVisibility`, `urls.*`,
+      `modificationDate`, `availableTranslations` — confirmed from the spec (see §0.3).
+- [x] **`content` is HTML:** confirmed (spec documents HTML body).
+- [x] **Pagination:** offset `start`/`page_size` with `{item, prev, next}` (200/206) —
+      confirmed (replaces the inferred Relay cursor model).
+- [x] **Filtering:** FIQL `query` (`parent.id`, `status.*`, `modificationDate`,
+      `archived`, `visibility.*`) — confirmed. v1 uses client-side `modificationDate`
+      hashing; server-side FIQL `modificationDate=gt=` is a later optimization.
+- [x] **Tree traversal:** children via FIQL `query=parent.id==<id>` (a list query, not
+      embedded children) — confirmed.
+- [x] **Publish/visibility filter:** driven by `visibility.sspVisibility` +
+      `publicKnowledgeItem` + `archived` (not a status enum), scoped by
+      `TOPDESK_SYNC_SCOPE` — confirmed; `status` is a customer searchlist with no
+      guaranteed "PUBLISHED" value.
+- [x] **Attachments:** REST exposes `…/attachments` + `…/images` download endpoints —
+      confirmed; deferred (text only in v1).
+- [ ] **Web URL spot-check:** with real creds, confirm `urls.public`/`urls.ssp` resolve
+      to the item (we now use the server-provided relative URLs, not a constructed SSP
+      link, so this is low-risk).
 
 ---
 

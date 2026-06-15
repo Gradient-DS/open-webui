@@ -1,14 +1,14 @@
 """TOPdesk Knowledge Base sync services.
 
-Ships the auth helpers, the GraphQL client, the sync worker, the sync provider /
+Ships the auth helpers, the REST KB client, the sync worker, the sync provider /
 token manager, the background scheduler, and the Socket.IO sync-event forwarder,
 mirroring ``services/confluence/__init__.py``.
 """
 
 from open_webui.services.topdesk.topdesk_client import (
     TopdeskClient,
+    TopdeskApiError,
     TopdeskAuthError,
-    TopdeskGraphQLError,
     TopdeskTransientError,
 )
 from open_webui.services.topdesk.auth import (
@@ -32,8 +32,8 @@ from open_webui.services.topdesk.scheduler import (
 
 __all__ = [
     'TopdeskClient',
+    'TopdeskApiError',
     'TopdeskAuthError',
-    'TopdeskGraphQLError',
     'TopdeskTransientError',
     'TOPDESK_AUTH_SENTINEL',
     'service_auth_configured',
