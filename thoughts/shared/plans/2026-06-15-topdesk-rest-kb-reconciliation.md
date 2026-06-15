@@ -80,15 +80,24 @@ real nested shape.
 
 ---
 
-## Phase 1 — Config + endpoint
+## Phase 1 — Config + endpoint + auth tightening
 
-- **`config.py`**: replace `TOPDESK_GRAPHQL_PATH` with `TOPDESK_KB_API_PATH`
-  (default `/services/knowledge-base-v1`, plain env, comment → confirmed REST). Keep `TOPDESK_URL`
-  etc. Optionally add `TOPDESK_SYNC_LANGUAGE` (BCP 47, default empty = tenant default) — see
-  decision Q2. Optionally `TOPDESK_SYNC_VISIBILITY` (see Q1).
-- **Helm**: `topdeskGraphqlPath` → `topdeskKbApiPath` (or drop and hardcode); mirror the existing
-  Confluence/topdesk additive pattern.
-- No `/api/config` change (these are deploy-time/admin config, already exposed via `/configs/topdesk`).
+- **`config.py`**:
+  - Replace `TOPDESK_GRAPHQL_PATH` with `TOPDESK_KB_API_PATH` (default
+    `/services/knowledge-base-v1`, plain env, comment → confirmed REST). Keep `TOPDESK_URL` etc.
+  - **Add `TOPDESK_SYNC_SCOPE`** (PersistentConfig — **admin-editable at setup**, decision 1):
+    `ssp` (default; SSP-visible items) | `public` (publicKnowledgeItem only) | `all` (every
+    operator-readable item). Drives `_should_sync` in Phase 3.
+  - No language config — **v1 syncs the tenant default language only** (decision 2).
+- **Auth (`auth.py`) — drop the person-token fallback (decision 4).** The KB REST API is
+  operator-Basic-only, so: `build_auth_header(username, app_password)` always emits
+  `Basic base64(username:app_password)` (no `TOKEN id=` branch); `service_auth_configured()` now
+  requires **URL + username (login) + app_password** (login no longer optional). The admin form's
+  "Login name" field becomes effectively required (already labelled as such).
+- **Helm**: `topdeskGraphqlPath` → `topdeskKbApiPath`; add `topdeskSyncScope`; mirror the existing
+  additive pattern.
+- **`/configs/topdesk` + status feature**: add `TOPDESK_SYNC_SCOPE` to the config GET/POST
+  (enum-validated). No `/api/config` change.
 
 ## Phase 2 — Client rewrite (`topdesk_client.py`): GraphQL → REST
 
@@ -130,22 +139,26 @@ real nested shape.
     since urls are relative) — **drop `_build_item_url` construction**; parent `← parent.id`.
 - **Publish/inclusion filter** (replaces `_is_published` status-enum). `status` is a customer
   searchlist (no guaranteed "PUBLISHED"); the structured signal is **`visibility`** +
-  **`archived`**. Implement `_should_sync(item)`:
-  - always exclude `archived` (FIQL `archived==false` on enumerations + guard).
-  - include per the configured audience (decision Q1): default = **SSP-visible** (`sspVisibility ==
-    VISIBLE`, or `VISIBLE_IN_PERIOD` within `sspVisibleFrom/Until`); option for `publicKnowledgeItem`
-    only; option for "all operator-readable". Record `status.name`/`sspVisibility` as metadata.
+  **`archived`**. Implement `_should_sync(item)` **driven by `TOPDESK_SYNC_SCOPE`** (decision 1):
+  - always exclude `archived`.
+  - `ssp` (default): `sspVisibility == VISIBLE`, or `VISIBLE_IN_PERIOD` within
+    `sspVisibleFrom/Until`.
+  - `public`: `visibility.publicKnowledgeItem == true`.
+  - `all`: every operator-readable item (no visibility gate).
+  - Record `status.name`/`sspVisibility` as metadata regardless.
   - Keep the existing "descend through any node, emit only includable" tree behaviour.
-- **Change detection** — keep `modificationDate` item_map logic as-is (now reads the real field).
-  Optional optimization (Q3): server-side FIQL `modificationDate=gt=<last>` to fetch only changed
-  items — verify FIQL date operator support; keep client-side hashing as the robust default.
+- **Change detection (decision 3)** — keep `modificationDate` item_map logic as-is (now reads the
+  real field). Client-side hashing is the v1 path; server-side FIQL `modificationDate=gt=<last>` is
+  a later optimization (not v1).
 - **Tree** — `_walk_descendants` unchanged (now `list_item_children` = FIQL parent.id). `folder` =
   subtree, `file` = single item — unchanged.
 - **Render** — `html_to_markdown` off-thread unchanged (content is HTML). Front-matter unchanged
   (fields now sourced from the mapping above). Byte-cap unchanged.
-- **Multi-language (Q2)** — list/get return one `translation` (requested/default language). v1:
-  sync the tenant default (or `TOPDESK_SYNC_LANGUAGE` if set); store `availableTranslations` in
-  metadata. Per-language fan-out is a follow-up.
+- **Language (decision 2)** — v1 syncs the **tenant default language** only: call list/get without a
+  `language` param (TOPdesk returns the default-language translation). Store `availableTranslations`
+  as metadata. Per-language fan-out is an explicit follow-up.
+- **Attachments/images (decision 5) — deferred.** REST exposes `…/attachments` + `…/images`
+  download endpoints; v1 ingests text content only. Not fetched.
 
 ## Phase 4 — Router + frontend
 
@@ -156,9 +169,12 @@ real nested shape.
   count. Document the choice.
 - **`/auth/test`** — `probe()` (version). Friendly 401/403/404 mapping (now from REST errors).
 - **`/shared/*`** — unchanged (delegate to shared_kb helpers + `execute_sync`).
-- **Frontend** — `TopdeskPickerModal` / `TopdeskSection` / `apis/topdesk` unchanged given the browse
-  contract is preserved. (Apply the same boot-once / error-state hardening we did for the Confluence
-  picker if the TOPdesk picker shares the retry-loop pattern — verify.)
+- **Frontend** — `TopdeskPickerModal` / `apis/topdesk` browse contract unchanged. **`TopdeskSection`
+  gains a "Knowledge items to sync" dropdown** (decision 1) bound to `TOPDESK_SYNC_SCOPE`: *Visible
+  in Self-Service Portal* (`ssp`, default) / *Public only* (`public`) / *All readable* (`all`), with
+  a one-line helper. `apis/configs` get/setTopdeskConfig carry the new field; en-US + nl-NL i18n for
+  the label/options. (Apply the boot-once / error-state hardening we did for the Confluence picker if
+  the TOPdesk picker shares the retry-loop pattern — verify.)
 
 ## Phase 5 — Fixtures + tests
 
@@ -191,15 +207,12 @@ real nested shape.
   small subtree; sync; items render with HTML→Markdown + front-matter (`urls.public` link);
   re-sync skips unchanged (modificationDate); a not-visible/archived item is excluded.
 
-## Open decisions (need your call)
+## Decisions (resolved 2026-06-15)
 
-1. **Which items to sync?** SSP-visible (recommended for a shared org KB), public-only, or all
-   operator-readable. Drives `_should_sync` + an optional `TOPDESK_SYNC_VISIBILITY` config.
-2. **Language:** v1 = tenant default (or a single configured `TOPDESK_SYNC_LANGUAGE`)? Or per-language
-   documents (follow-up)?
-3. **Incremental:** rely on client-side `modificationDate` hashing (already built, robust) and add
-   server-side FIQL `modificationDate=gt=` only as an optimization later?
-4. **Auth `TOKEN id=` fallback:** keep it (harmless) or drop it now that we know the KB REST API is
-   operator-Basic-only?
-5. **Attachments/images:** REST exposes `…/attachments` + `…/images` (download endpoints). Still
-   out of scope for v1 (text only), or fold in now that they're confirmed?
+1. **Which items to sync?** **Configurable at setup** via `TOPDESK_SYNC_SCOPE` (admin dropdown):
+   `ssp` (default) / `public` / `all`. Drives `_should_sync`.
+2. **Language:** **tenant default only for v1** (no language param, no config). Per-language = follow-up.
+3. **Incremental:** **client-side `modificationDate` hashing** for v1 (already built). Server-side
+   FIQL filter = later optimization.
+4. **Auth `TOKEN id=` fallback:** **dropped** — Basic-only, operator login required.
+5. **Attachments/images:** **deferred** — text content only in v1.
