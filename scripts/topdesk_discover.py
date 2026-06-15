@@ -183,8 +183,11 @@ def main() -> int:
     ap = argparse.ArgumentParser(description='Read-only TOPdesk auth × KB-API discovery matrix.')
     ap.add_argument('--url', default=os.environ.get('TOPDESK_URL', ''))
     ap.add_argument('--token', default=os.environ.get('TOPDESK_APP_PASSWORD', ''), help='the secret value')
-    ap.add_argument('--login', default=os.environ.get('TOPDESK_LOGIN', ''),
-                    help='operator login name(s) for Basic / legacy auth; comma-separated. Never guessed.')
+    ap.add_argument(
+        '--login',
+        default=os.environ.get('TOPDESK_LOGIN', ''),
+        help='operator login name(s) for Basic / legacy auth; comma-separated. Never guessed.',
+    )
     ap.add_argument('--timeout', type=float, default=20.0)
     args = ap.parse_args()
 
