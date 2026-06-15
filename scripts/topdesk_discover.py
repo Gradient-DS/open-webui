@@ -44,6 +44,7 @@ import argparse
 import base64
 import json
 import os
+import re
 import sys
 import time
 from typing import Optional
@@ -68,6 +69,18 @@ _RST = '\033[0m'
 def _short(text: str, limit: int = 150) -> str:
     text = ' '.join((text or '').split())
     return text if len(text) <= limit else text[:limit] + '…'
+
+
+def _body_summary(ctype: str, text: str) -> str:
+    """Surface a useful snippet. For HTML, pull the <title> + de-tagged text so a
+    WAF / IP-block / login page is distinguishable from a JSON API auth error."""
+    if 'json' in ctype:
+        return _short(text, 140)
+    kind = (ctype.split(';')[0] or '?').strip()
+    m = re.search(r'<title[^>]*>(.*?)</title>', text, re.I | re.S)
+    title = f'title="{m.group(1).strip()}" ' if m else ''
+    detagged = _short(re.sub(r'<[^>]+>', ' ', text), 110)
+    return f'[{len(text)}B {kind}] {title}{detagged}'
 
 
 def _basic(login: str, secret: str) -> str:
@@ -131,8 +144,7 @@ def request(client, base, headers, method, path, query, accept):
     except httpx.HTTPError as e:
         return (None, '', f'{type(e).__name__}: {e}')
     ctype = r.headers.get('content-type', '')
-    body = r.text if 'json' in ctype or len(r.text) < 400 else f'<{len(r.text)} bytes {ctype}>'
-    return (r.status_code, ctype, body)
+    return (r.status_code, ctype, _body_summary(ctype, r.text))
 
 
 def legacy_login(client, base, login: str, secret: str, kind: str) -> tuple[Optional[str], str]:
@@ -146,7 +158,7 @@ def legacy_login(client, base, login: str, secret: str, kind: str) -> tuple[Opti
     if r.status_code == 200 and r.text.strip():
         token = r.text.strip().strip('"')
         return (token, f'200 → token {token[:8]}…')
-    return (None, f'{r.status_code} {_short(r.text, 60)}')
+    return (None, f'{r.status_code} {_body_summary(r.headers.get("content-type", ""), r.text)}')
 
 
 def build_strategies(client, base, secret: str, logins: list[str]) -> list[tuple[str, dict]]:
@@ -205,7 +217,7 @@ def main() -> int:
                     time.sleep(0.3)
                     continue
                 colour, verdict = classify(status, ctype, body)
-                print(f'  {colour}{verdict:<11}{_RST} {ep_label:<38} {_DIM}{_short(body, 110)}{_RST}')
+                print(f'  {colour}{verdict:<11}{_RST} {ep_label:<38} {_DIM}{_short(body, 170)}{_RST}')
                 if status in (200, 206):
                     findings.append(f'{strat_label}  →  {ep_label}')
                 time.sleep(0.3)
