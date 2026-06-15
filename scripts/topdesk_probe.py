@@ -99,7 +99,11 @@ REST_PROBES = [
     '/tas/api/operators/current',
     '/tas/api/persons/current',
 ]
+# Confirmed real endpoint (TOPdesk KB GraphQL OAS 2.0 spec): base
+# /tas/api/knowledgeBase, GraphQL POST at /public (public/SSP realm). Older
+# guesses kept as fallback in case a tenant differs.
 GRAPHQL_CANDIDATES = [
+    '/tas/api/knowledgeBase/public',
     '/tas/api/knowledgeBase/graphql',
     '/services/knowledge-base/api/graphql',
     '/tas/api/graphql',
@@ -127,14 +131,19 @@ fragment TypeRef on __Type {
 }
 """
 
-# Our inferred KB query (research §5) — may fail; the errors are informative.
+# Real KB query shape from the OAS 2.0 spec example. NOTE: the response is
+# wrapped as {"results": {"knowledgeItems": [...], "languages": [...]}} — NOT the
+# standard GraphQL {"data": ...} envelope. There is no Relay pagination; filtering
+# is via the `search: {term}` argument. Content lives under per-language
+# `translations` and is plain text (not HTML).
 INFERRED_LIST_QUERY = """
-query ProbeList {
-  knowledgeItems(first: 3) {
-    totalCount
-    pageInfo { hasNextPage endCursor }
-    edges { cursor node { id number title status language modificationDate } }
+query {
+  knowledgeItems(search: {term: ""}) {
+    id
+    number
+    translations { id languageId knowledgeItemId title description content }
   }
+  languages { id name languageCode }
 }
 """
 
@@ -284,8 +293,8 @@ def introspect(client: httpx.Client, endpoint: str, out_path: str) -> Optional[d
 
 
 def try_inferred_query(client: httpx.Client, endpoint: str) -> None:
-    _section('4. Attempt the inferred knowledgeItems query (research §5)')
-    _info('This is our GUESS; failures here are useful — the GraphQL errors reveal the real names.')
+    _section('4. Attempt the real knowledgeItems query (OAS spec shape)')
+    _info('Expects the {"results": {...}} envelope (NOT GraphQL {"data": ...}); search-filtered, no pagination.')
     try:
         r = graphql_post(client, endpoint, INFERRED_LIST_QUERY)
         payload = r.json()
@@ -293,22 +302,21 @@ def try_inferred_query(client: httpx.Client, endpoint: str) -> None:
         _bad(f'request/parse error: {type(e).__name__}: {e}')
         return
     if payload.get('errors'):
-        _bad('GraphQL errors (expected if the inferred schema is wrong):')
+        _bad('Query errors (the messages reveal the real arg/field names):')
         for err in payload['errors'][:6]:
             print(f'      {_RED}- {_short(err.get("message", json.dumps(err)), 300)}{_RST}')
         return
-    data = payload.get('data', {}).get('knowledgeItems')
-    if data is None:
-        _warn(f'no knowledgeItems in data: {_short(json.dumps(payload), 300)}')
+    # Real API wraps in `results`; tolerate `data` too in case a tenant differs.
+    envelope = payload.get('results') or payload.get('data') or {}
+    items = envelope.get('knowledgeItems')
+    if items is None:
+        _warn(f'no knowledgeItems in response — raw shape: {_short(json.dumps(payload), 400)}')
         return
-    total = data.get('totalCount')
-    edges = data.get('edges', [])
-    _ok(f'knowledgeItems worked! totalCount={total}, returned {len(edges)} item(s)')
-    for e in edges[:3]:
-        node = e.get('node', {})
-        print(f'      · {_short(json.dumps(node), 300)}')
-    pi = data.get('pageInfo', {})
-    _info(f'pageInfo: {json.dumps(pi)}')
+    _ok(f'knowledgeItems worked! returned {len(items)} item(s)')
+    for it in items[:3]:
+        print(f'      · {_short(json.dumps(it), 400)}')
+    langs = envelope.get('languages') or []
+    _info(f'languages: {_short(json.dumps(langs), 200)}')
 
 
 def main() -> int:
