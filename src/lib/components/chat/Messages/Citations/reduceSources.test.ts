@@ -114,4 +114,33 @@ describe('reduceSources', () => {
 		expect(out[0].source.name).toBe('https://example.com/page');
 		expect(out[0].source.url).toBe('https://example.com/page');
 	});
+
+	it('carries the agent provenance flags (n / current_turn / cited_this_turn) onto the merged entry', () => {
+		const tagged: RawSource = {
+			...sourceA('chunk1', 0),
+			n: 7,
+			current_turn: true,
+			cited_this_turn: false
+		};
+		const out = reduceSources([tagged]);
+		expect(out[0].n).toBe(7);
+		expect(out[0].current_turn).toBe(true);
+		expect(out[0].cited_this_turn).toBe(false);
+	});
+
+	it("uses the latest dispatch's flags when the same source is re-sent (cited flips on the post-answer dispatch)", () => {
+		const before: RawSource = { ...sourceA('chunk1', 0), n: 3, current_turn: false, cited_this_turn: false };
+		const after: RawSource = { ...sourceA('chunk2', 1), n: 3, current_turn: false, cited_this_turn: true };
+		const out = reduceSources([before, after]);
+		expect(out).toHaveLength(1);
+		expect(out[0].cited_this_turn).toBe(true);
+		expect(out[0].current_turn).toBe(false);
+	});
+
+	it('leaves the flags undefined for legacy/untagged sources', () => {
+		const out = reduceSources([sourceA('chunk1', 0)]);
+		expect(out[0].n).toBeUndefined();
+		expect(out[0].current_turn).toBeUndefined();
+		expect(out[0].cited_this_turn).toBeUndefined();
+	});
 });

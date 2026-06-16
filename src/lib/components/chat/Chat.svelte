@@ -637,29 +637,22 @@
 					}
 				} else if (type === 'context_usage') {
 					// [Gradient] Post-turn context-budget estimate from the agent
-					// service. Overwrites the per-conversation value; the banner
-					// above the chat input renders when fraction >= 0.7.
+					// service. Drives the banner above the chat input. Also
+					// stamped onto the message so a frontend-driven history save
+					// preserves it (the backend persists it on `done`; this keeps
+					// the in-memory blob in sync). Mirrors the subagents handler.
 					if (
 						typeof data?.tokens_used === 'number' &&
 						typeof data?.tokens_budget === 'number' &&
 						typeof data?.fraction === 'number'
 					) {
-						contextUsage = {
+						const usage = {
 							tokens_used: data.tokens_used,
 							tokens_budget: data.tokens_budget,
 							fraction: data.fraction
 						};
-					}
-				} else if (type === 'panel_filter') {
-					// [Gradient] Per-message bottom-panel scope from the agent service.
-					// Backend dispatches `message.sources` cumulatively (so inline `[N]`
-					// resolves via dense-array lookup across cross-turn cites), and this
-					// event names the cumulative ids that should actually appear in the
-					// chip list for THIS message. Latest dispatch wins — mid-iteration
-					// calls send the growing "retrieved this turn" set, the final call
-					// adds cross-turn cited ids.
-					if (Array.isArray(data?.ns)) {
-						message.panel_filter = data.ns.filter((n) => typeof n === 'number');
+						contextUsage = usage;
+						message.contextUsage = usage;
 					}
 				} else if (type === 'source' || type === 'citation') {
 					if (data?.type === 'code_execution') {
@@ -1277,8 +1270,7 @@
 				const found = extractDocumentsFromMessage(message.content);
 				if (found.length > 0) {
 					const sources = message?.sources ?? [];
-					const panel_filter = message?.panel_filter ?? null;
-					docs = [...docs, ...found.map((doc) => ({ ...doc, sources, panel_filter }))];
+					docs = [...docs, ...found.map((doc) => ({ ...doc, sources }))];
 				}
 			}
 		});
@@ -1621,6 +1613,18 @@
 						) {
 							message.done = true;
 						}
+					}
+				}
+
+				// [Gradient] Rehydrate the context-usage banner from the
+				// persisted message field (set by the agent backend on `done`).
+				// Reflects the active branch's most recent turn; stays null when
+				// no agent turn recorded one (navigateHandler reset it first).
+				const usageBranch = createMessagesList(history, history.currentId);
+				for (let i = usageBranch.length - 1; i >= 0; i--) {
+					if (usageBranch[i]?.contextUsage) {
+						contextUsage = usageBranch[i].contextUsage;
+						break;
 					}
 				}
 
