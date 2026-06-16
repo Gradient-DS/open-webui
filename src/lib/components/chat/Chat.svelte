@@ -240,7 +240,13 @@
 			`chat-input${chatIdProp ? `-${chatIdProp}` : ''}`
 		);
 
-		if (chatIdProp && (await loadChat())) {
+		const loadResult = chatIdProp ? await loadChat() : 'not_found';
+
+		if (loadResult === 'aborted') {
+			return; // a newer navigateHandler is in charge; don't reset loading or redirect
+		}
+
+		if (loadResult === 'loaded') {
 			await tick();
 			loading = false;
 			window.setTimeout(() => scrollToBottom(), 0);
@@ -304,7 +310,7 @@
 	}
 
 	let lastSavedFeatures = '';
-	$: if ($chatId && !$temporaryChatEnabled && history?.currentId) {
+	$: if ($chatId && !loading && !$temporaryChatEnabled && history?.currentId) {
 		const current = JSON.stringify({
 			webSearchEnabled,
 			imageGenerationEnabled,
@@ -1526,134 +1532,140 @@
 	};
 
 	const loadChat = async () => {
-		chatId.set(chatIdProp);
+		const targetId = chatIdProp; // the chat this load is responsible for
+		chatId.set(targetId);
 
 		if ($temporaryChatEnabled) {
 			temporaryChatEnabled.set(false);
 		}
 
-		chat = await getChatById(localStorage.token, $chatId).catch(async (error) => {
-			await goto('/');
-			return null;
-		});
+		chat = await getChatById(localStorage.token, targetId).catch(() => null);
 
-		if (chat) {
-			tags = await getTagsById(localStorage.token, $chatId).catch(async (error) => {
-				return [];
-			});
+		// A newer navigation took over while we were fetching — leave its state alone.
+		if (chatIdProp !== targetId) return 'aborted';
+		if (!chat) return 'not_found';
 
-			const chatContent = chat.chat;
+		tags = await getTagsById(localStorage.token, targetId).catch(() => []);
+		if (chatIdProp !== targetId) return 'aborted';
 
-			if (chatContent) {
-				selectedModels =
-					(chatContent?.models ?? undefined) !== undefined
-						? chatContent.models
-						: [chatContent.models ?? ''];
+		const chatContent = chat.chat;
+		if (!chatContent) return 'not_found';
 
-				if (!($user?.role === 'admin' || ($user?.permissions?.chat?.multiple_models ?? true))) {
-					selectedModels = selectedModels.length > 0 ? [selectedModels[0]] : [''];
-				}
+		selectedModels =
+			(chatContent?.models ?? undefined) !== undefined
+				? chatContent.models
+				: [chatContent.models ?? ''];
 
-				oldSelectedModelIds = structuredClone(selectedModels);
+		if (!($user?.role === 'admin' || ($user?.permissions?.chat?.multiple_models ?? true))) {
+			selectedModels = selectedModels.length > 0 ? [selectedModels[0]] : [''];
+		}
 
-				history =
-					(chatContent?.history ?? undefined) !== undefined
-						? chatContent.history
-						: convertMessagesToHistory(chatContent.messages);
+		oldSelectedModelIds = structuredClone(selectedModels);
 
-				// Sanitize history: repair orphaned references from failed regenerations (#24424)
-				for (const message of Object.values(history.messages)) {
-					if (message.childrenIds) {
-						message.childrenIds = message.childrenIds.filter(
-							(childId) => history.messages[childId]
-						);
-					}
-				}
-				if (history.currentId && !history.messages[history.currentId]) {
-					const messageIds = Object.keys(history.messages);
-					let lastMessageId = null;
-					for (const messageId of messageIds) {
-						const message = history.messages[messageId];
-						if (
-							(message.childrenIds ?? []).length === 0 &&
-							(!lastMessageId ||
-								(message.timestamp ?? 0) > (history.messages[lastMessageId].timestamp ?? 0))
-						) {
-							lastMessageId = messageId;
-						}
-					}
-					history.currentId = lastMessageId ?? messageIds[0] ?? null;
-				}
+		history =
+			(chatContent?.history ?? undefined) !== undefined
+				? chatContent.history
+				: convertMessagesToHistory(chatContent.messages);
 
-				chatTitle.set(chatContent.title);
-
-				params = chatContent?.params ?? {};
-				chatFiles = chatContent?.files ?? [];
-
-				const chatFeatures = chatContent?.features ?? {};
-				webSearchEnabled = chatFeatures.web_search ?? false;
-				imageGenerationEnabled = chatFeatures.image_generation ?? false;
-				codeInterpreterEnabled = chatFeatures.code_interpreter ?? false;
-				documentWriterEnabled = chatFeatures.document_writer ?? false;
-
-				// Load tasks from chat-level DB field
-				chatTasks = chat?.tasks ?? [];
-
-				autoScroll = true;
-				await tick();
-
-				// Mark all non-current assistant messages as done
-				if (history.currentId) {
-					for (const message of Object.values(history.messages)) {
-						if (
-							message &&
-							message.role === 'assistant' &&
-							message.id !== history.currentId &&
-							message.done !== false
-						) {
-							message.done = true;
-						}
-					}
-				}
-
-				// [Gradient] Rehydrate the context-usage banner from the
-				// persisted message field (set by the agent backend on `done`).
-				// Reflects the active branch's most recent turn; stays null when
-				// no agent turn recorded one (navigateHandler reset it first).
-				const usageBranch = createMessagesList(history, history.currentId);
-				for (let i = usageBranch.length - 1; i >= 0; i--) {
-					if (usageBranch[i]?.contextUsage) {
-						contextUsage = usageBranch[i].contextUsage;
-						break;
-					}
-				}
-
-				// Reconcile active tasks with message state:
-				// If the response is already done, remaining tasks are just background
-				// work (follow-ups, title gen) that shouldn't block the input.
-				const pendingTaskIds = await getTaskIdsByChatId(localStorage.token, $chatId)
-					.then((res) => res?.task_ids ?? [])
-					.catch(() => []);
-				const currentMessage = history.currentId ? history.messages[history.currentId] : null;
-				const responseComplete = currentMessage?.role === 'assistant' && currentMessage?.done;
-
-				if (pendingTaskIds.length > 0 && !responseComplete) {
-					taskIds = pendingTaskIds;
-				} else {
-					taskIds = null;
-					// No active tasks and message incomplete → generation was interrupted
-					if (currentMessage?.role === 'assistant' && !currentMessage.done) {
-						currentMessage.done = true;
-					}
-				}
-
-				await tick();
-
-				return true;
-			} else {
-				return null;
+		// Sanitize history: repair orphaned references from failed regenerations (#24424)
+		for (const message of Object.values(history.messages)) {
+			if (message.childrenIds) {
+				message.childrenIds = message.childrenIds.filter(
+					(childId) => history.messages[childId]
+				);
 			}
 		}
+		if (history.currentId && !history.messages[history.currentId]) {
+			const messageIds = Object.keys(history.messages);
+			let lastMessageId = null;
+			for (const messageId of messageIds) {
+				const message = history.messages[messageId];
+				if (
+					(message.childrenIds ?? []).length === 0 &&
+					(!lastMessageId ||
+						(message.timestamp ?? 0) > (history.messages[lastMessageId].timestamp ?? 0))
+				) {
+					lastMessageId = messageId;
+				}
+			}
+			history.currentId = lastMessageId ?? messageIds[0] ?? null;
+		}
+
+		chatTitle.set(chatContent.title);
+
+		params = chatContent?.params ?? {};
+		chatFiles = chatContent?.files ?? [];
+
+		const chatFeatures = chatContent?.features ?? {};
+		webSearchEnabled = chatFeatures.web_search ?? false;
+		imageGenerationEnabled = chatFeatures.image_generation ?? false;
+		codeInterpreterEnabled = chatFeatures.code_interpreter ?? false;
+		documentWriterEnabled = chatFeatures.document_writer ?? false;
+
+		// [Gradient] Keep the feature-autosave baseline in sync with the chat we just
+		// loaded, so the reactive at the feature-persist block does not emit a
+		// redundant full-history save right after load. Key order must match that block.
+		lastSavedFeatures = JSON.stringify({
+			webSearchEnabled,
+			imageGenerationEnabled,
+			codeInterpreterEnabled,
+			documentWriterEnabled
+		});
+
+		// Load tasks from chat-level DB field
+		chatTasks = chat?.tasks ?? [];
+
+		autoScroll = true;
+		await tick();
+
+		// Mark all non-current assistant messages as done
+		if (history.currentId) {
+			for (const message of Object.values(history.messages)) {
+				if (
+					message &&
+					message.role === 'assistant' &&
+					message.id !== history.currentId &&
+					message.done !== false
+				) {
+					message.done = true;
+				}
+			}
+		}
+
+		// [Gradient] Rehydrate the context-usage banner from the
+		// persisted message field (set by the agent backend on `done`).
+		// Reflects the active branch's most recent turn; stays null when
+		// no agent turn recorded one (navigateHandler reset it first).
+		const usageBranch = createMessagesList(history, history.currentId);
+		for (let i = usageBranch.length - 1; i >= 0; i--) {
+			if (usageBranch[i]?.contextUsage) {
+				contextUsage = usageBranch[i].contextUsage;
+				break;
+			}
+		}
+
+		// Reconcile active tasks with message state:
+		// If the response is already done, remaining tasks are just background
+		// work (follow-ups, title gen) that shouldn't block the input.
+		const pendingTaskIds = await getTaskIdsByChatId(localStorage.token, targetId)
+			.then((res) => res?.task_ids ?? [])
+			.catch(() => []);
+		if (chatIdProp !== targetId) return 'aborted';
+		const currentMessage = history.currentId ? history.messages[history.currentId] : null;
+		const responseComplete = currentMessage?.role === 'assistant' && currentMessage?.done;
+
+		if (pendingTaskIds.length > 0 && !responseComplete) {
+			taskIds = pendingTaskIds;
+		} else {
+			taskIds = null;
+			// No active tasks and message incomplete → generation was interrupted
+			if (currentMessage?.role === 'assistant' && !currentMessage.done) {
+				currentMessage.done = true;
+			}
+		}
+
+		await tick();
+		return 'loaded';
 	};
 
 	const scrollToBottom = async (behavior = 'auto') => {
