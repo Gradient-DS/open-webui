@@ -116,6 +116,7 @@ from open_webui.utils.code_interpreter import execute_code_jupyter
 from open_webui.utils.payload import apply_system_prompt_to_body
 from open_webui.utils.response import normalize_usage
 from open_webui.utils.mcp.client import MCPClient
+from open_webui.utils.agent_routing import agent_owns_tool_execution  # [Gradient]
 
 
 from open_webui.config import (
@@ -4656,7 +4657,15 @@ async def streaming_chat_response_handler(response, ctx):
                         get_content_from_message(original_system_message) if original_system_message else None
                     )
 
-                while len(tool_calls) > 0 and tool_call_retries < CHAT_RESPONSE_MAX_TOOL_CALL_RETRIES:
+                # [Gradient] The agent service executes its own tools and emits
+                # delta.tool_calls only for display; running OWUI's native
+                # resolution loop here re-invokes the model after the agent's
+                # turn (the post-summary "extra reasoning + answer" loop).
+                while (
+                    len(tool_calls) > 0
+                    and tool_call_retries < CHAT_RESPONSE_MAX_TOOL_CALL_RETRIES
+                    and not agent_owns_tool_execution(metadata)
+                ):
                     tool_call_retries += 1
 
                     response_tool_calls = tool_calls.pop(0)

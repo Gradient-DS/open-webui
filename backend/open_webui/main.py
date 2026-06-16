@@ -708,6 +708,7 @@ from open_webui.utils.middleware import (
     process_chat_response,
 )
 from open_webui.utils.agent import call_agent_api  # [Gradient] Agent API client
+from open_webui.utils.agent_routing import resolve_agent_route  # [Gradient]
 from open_webui.utils.feedback_report import (  # [Gradient] Feedback Reporting
     build_http_error_body,
     get_current_trace_id,
@@ -2744,14 +2745,13 @@ async def chat_completion(
                             status_code=status.HTTP_403_FORBIDDEN,
                             detail='You no longer have access to this agent.',
                         )
-                route_to_agent = True
-            elif AGENT_API_ENABLED and not FEATURE_AGENT_PICKER:
-                # Legacy global bypass — agent service handles every chat
-                # with the admin-selected default agent.
-                route_to_agent = True
-            else:
-                route_to_agent = False
-
+            # [Gradient] Access-control checks above stay inline (DB/group I/O);
+            # the pure routing decision lives in utils/agent_routing.
+            route_to_agent = resolve_agent_route(
+                chat_agent_id=chat_agent_id,
+                agent_api_enabled=AGENT_API_ENABLED,
+                feature_agent_picker=FEATURE_AGENT_PICKER,
+            )
             metadata['route_to_agent'] = route_to_agent
             metadata['chat_agent_id'] = chat_agent_id
 
