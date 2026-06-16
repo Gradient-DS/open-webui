@@ -549,6 +549,12 @@ async def email_document(
     ``get_agent_principal``); the acting user's email is the recipient.
     The document is attached as ``concept-beschikking.md`` and sent via
     Microsoft Graph (``send_mail``) from ``EMAIL_FROM_ADDRESS``.
+
+    Deliberately NOT gated on ``AGENT_SEARCH_ENABLED`` (unlike the
+    retrieval endpoints in this router): emailing the acting user their
+    own document is not a search/retrieval surface, and the security
+    boundary here is the agent bearer plus the recipient being pinned to
+    ``principal.user.email`` (never request-controlled).
     """
     user = principal.user
     if not user.email:
