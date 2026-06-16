@@ -12,17 +12,22 @@ async def send_mail(
     to_address: str,
     subject: str,
     html_body: str,
+    attachments: list[dict] | None = None,
 ) -> bool:
     """Send email via Microsoft Graph API. Returns True on success."""
     token = await get_mail_access_token(app)
     from_address = str(app.state.config.EMAIL_FROM_ADDRESS)
 
+    message = {
+        'subject': subject,
+        'body': {'contentType': 'HTML', 'content': html_body},
+        'toRecipients': [{'emailAddress': {'address': to_address}}],
+    }
+    if attachments:
+        message['attachments'] = attachments
+
     payload = {
-        'message': {
-            'subject': subject,
-            'body': {'contentType': 'HTML', 'content': html_body},
-            'toRecipients': [{'emailAddress': {'address': to_address}}],
-        },
+        'message': message,
         'saveToSentItems': False,
     }
 
