@@ -99,6 +99,7 @@ class ChatMessage(Base):
     # Status
     done = Column(Boolean, default=True)
     status_history = Column(JSON, nullable=True)
+    subagents = Column(JSON, nullable=True)
     error = Column(JSON, nullable=True)
 
     # Usage (tokens, timing, etc.)
@@ -136,6 +137,7 @@ class ChatMessageModel(BaseModel):
     embeds: Optional[list] = None
     done: bool = True
     status_history: Optional[list] = None
+    subagents: Optional[list] = None
     error: Optional[dict | str] = None
     usage: Optional[dict] = None
     created_at: int
@@ -187,6 +189,8 @@ class ChatMessageTable:
                     existing.done = data.get('done', True)
                 if 'status_history' in data or 'statusHistory' in data:
                     existing.status_history = data.get('status_history') or data.get('statusHistory')
+                if 'subagents' in data:
+                    existing.subagents = data.get('subagents')
                 if 'error' in data:
                     existing.error = data.get('error')
                 # Extract and normalize usage
@@ -218,6 +222,7 @@ class ChatMessageTable:
                     embeds=data.get('embeds'),
                     done=data.get('done', True),
                     status_history=data.get('status_history') or data.get('statusHistory'),
+                    subagents=data.get('subagents'),
                     error=data.get('error'),
                     usage=usage,
                     created_at=timestamp,

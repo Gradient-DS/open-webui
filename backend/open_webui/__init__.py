@@ -96,14 +96,15 @@ def dev(
         host=host,
         port=port,
         reload=reload,
-        # soev parallel dev stacks live under `.worktrees/<branch>/` (see
-        # `.claude/commands/kickoff_features.md`). Without this exclude,
-        # a backend dev server running from the repo root reloads on any
-        # edit in any worktree — every stack's BE then bounces on
-        # unrelated changes. Mirrors the Vite-side `server.watch.ignored`
-        # in vite.config.ts. Inside a worktree's own `open-webui dev`,
-        # this pattern is simply a no-op.
-        reload_excludes=['**/.worktrees/**'],
+        # NOTE: a previous `reload_excludes=['**/.worktrees/**']` was removed.
+        # The intent was to suppress auto-reload for sibling worktrees when a
+        # dev server runs from the repo root, but watchfiles matches the
+        # absolute path — so inside a worktree the pattern matches every own
+        # file too and silently disables reload (any edit to middleware/models
+        # requires a manual restart). The kickoff_features workflow already
+        # runs one BE dev server per worktree from its own cwd, so the
+        # cross-worktree noise this was guarding against is not a real
+        # concern.
         forwarded_allow_ips='*',
         access_log=False,
     )

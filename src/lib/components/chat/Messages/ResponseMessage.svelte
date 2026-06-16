@@ -70,6 +70,9 @@
 	import RegenerateMenu from './ResponseMessage/RegenerateMenu.svelte';
 	import StatusHistory from './ResponseMessage/StatusHistory.svelte';
 	import ReasoningBullet from './ResponseMessage/StatusHistory/ReasoningBullet.svelte';
+	import SubAgentGroup from './SubAgents/SubAgentGroup.svelte';
+	import { reduceSubAgents } from './SubAgents/reduceSubAgents';
+	import type { SubAgentEvent, SubAgentGroupVM } from '$lib/types/subagent';
 	import {
 		detectMergeProtocol,
 		mergeStatusAndReasoning,
@@ -216,16 +219,17 @@
 		return attrs;
 	}
 
-	$: reasoningItems = (() => {
-		const content = message?.content ?? '';
+	type ReasoningItem = {
+		kind: 'reasoning';
+		summary: string;
+		body: string;
+		attributes: Record<string, string>;
+		contentOffset: number;
+	};
+
+	function parseReasoningItems(content: string): ReasoningItem[] {
 		if (!content.includes('<details type="reasoning"')) return [];
-		const items: {
-			kind: 'reasoning';
-			summary: string;
-			body: string;
-			attributes: Record<string, string>;
-			contentOffset: number;
-		}[] = [];
+		const items: ReasoningItem[] = [];
 		const re = /<details type="reasoning"[^>]*>([\s\S]*?)<\/details>/g;
 		let match;
 		while ((match = re.exec(content)) !== null) {
@@ -243,7 +247,30 @@
 			});
 		}
 		return items;
-	})();
+	}
+
+	// Memoize content-derived parses on the content string identity so that
+	// reactive cascades from unrelated message-field updates (e.g. each
+	// subagent SSE event triggers a message re-prop) don't re-run the
+	// O(content-length) regex scans and don't churn a new array reference on
+	// every fire. Without this, dependents like ``responseParts`` see
+	// reasoningItems as "changed" on every dispatch even when content is
+	// byte-identical — which propagates into Svelte each-block rekeys and is
+	// a primary source of the end-of-stream flicker.
+	let _memoContent: string | undefined;
+	let _memoReasoningItems: ReasoningItem[] = [];
+	let _memoToolOffsets: number[] = [];
+
+	function memoContentParses(content: string): void {
+		if (content === _memoContent) return;
+		_memoContent = content;
+		_memoReasoningItems = parseReasoningItems(content);
+		_memoToolOffsets = parseToolOffsets(content);
+	}
+
+	$: memoContentParses(message?.content ?? '');
+	$: reasoningItems = _memoReasoningItems;
+	$: toolOffsets = _memoToolOffsets;
 
 	// Merge reasoning items into statusEntries in stream order. The merge
 	// strategy depends on which protocol produced the wire data; see
@@ -251,7 +278,6 @@
 	// once and is the single source of truth for "how do we render this
 	// turn" — the dispatcher inside ``mergeStatusAndReasoning`` reads it,
 	// and Phase 3 will lift the standalone-reasoning mount onto it too.
-	$: toolOffsets = parseToolOffsets(message?.content ?? '');
 	$: protocol = detectMergeProtocol(statusEntries, reasoningItems, toolOffsets);
 	$: mergedHistory = mergeStatusAndReasoning(statusEntries, reasoningItems, toolOffsets);
 
@@ -278,6 +304,109 @@
 		mergedHistory.length > 0;
 
 	$: hasVisibleStatus = shouldShowStatusHistory;
+
+	// Build a time-ordered list of reasoning items and subagent groups for the
+	// reasoning_only protocol path (bezwaar turns). Each subagent-group part
+	// carries the already-reduced ``SubAgentGroupVM`` — SubAgentGroup renders
+	// it directly, no second pass over the raw events. List is sorted by
+	// ``started_at`` (unix-ms) ascending.
+	//
+	// This reactive declaration is only consumed by the reasoning_only render
+	// branch below; non-bezwaar turns (shouldShowStatusHistory path) are
+	// unaffected.
+	type ResponsePart =
+		| { kind: 'reasoning'; ts: number; item: ReasoningItem }
+		| { kind: 'subagent-group'; ts: number; group_id: string; group: SubAgentGroupVM };
+
+	const _EMPTY_SUBAGENT_EVENTS: SubAgentEvent[] = [];
+
+	function buildResponseParts(
+		items: ReasoningItem[],
+		subagentEvents: SubAgentEvent[]
+	): ResponsePart[] {
+		const groups = reduceSubAgents(subagentEvents);
+		const parts: ResponsePart[] = [];
+
+		for (const item of items) {
+			const ts = parseInt(item.attributes?.started_at ?? '0', 10);
+			parts.push({ kind: 'reasoning', ts, item });
+		}
+
+		for (const g of groups) {
+			// SubagentStartEvent.started_at is epoch SECONDS (per
+			// agents/core/types.py); reasoning items' started_at attribute is
+			// epoch MILLISECONDS (middleware.py renders it as ms). Normalize
+			// the subagent side to ms so both axes are comparable.
+			const ts = Math.min(...g.cards.map((c) => c.started_at)) * 1000;
+			parts.push({ kind: 'subagent-group', ts, group_id: g.parallel_group_id, group: g });
+		}
+
+		parts.sort((a, b) => a.ts - b.ts);
+		return parts;
+	}
+
+	// Throttling strategy for the responseParts rebuild:
+	//
+	// During streaming Chat.svelte pushes onto ``message.subagents`` on every
+	// SSE token (200+/sec on Nemotron CoT). Without throttling, every push
+	// triggers the full ``buildResponseParts`` → ``reduceSubAgents(allEvents)``
+	// pipeline, then SubAgentGroup re-renders, then SubAgentCard fires its
+	// scroll effect — O(N²·K) per turn and visibly janky.
+	//
+	// We collapse multiple pushes within a single animation frame into one
+	// rebuild via ``requestAnimationFrame``: each ``$:`` trigger updates the
+	// "latest args" snapshot; the first trigger schedules an rAF callback
+	// that runs ``buildResponseParts`` against the most recent snapshot when
+	// it fires. End result: at most 60Hz UI updates regardless of token rate,
+	// while the final state always lands within one frame of the last event.
+	//
+	// The internal length-based fast-path stays as a second layer of defense:
+	// it skips the rebuild when the rAF fires but nothing meaningful changed
+	// (e.g. reasoningItems references stayed identical and no new subagent
+	// events arrived since the previous frame).
+	let _memoRpItemsRef: ReasoningItem[] | undefined;
+	let _memoRpEventsRef: SubAgentEvent[] | undefined;
+	let _memoRpEventsLen = -1;
+	let _memoResponseParts: ResponsePart[] = [];
+
+	let _rpRafId: number | null = null;
+	let _rpLatestItems: ReasoningItem[] = [];
+	let _rpLatestEvents: SubAgentEvent[] = _EMPTY_SUBAGENT_EVENTS;
+
+	function scheduleResponsePartsRebuild(
+		items: ReasoningItem[],
+		events: SubAgentEvent[]
+	): void {
+		_rpLatestItems = items;
+		_rpLatestEvents = events;
+		if (_rpRafId !== null) return;
+		_rpRafId = requestAnimationFrame(() => {
+			_rpRafId = null;
+			const latestItems = _rpLatestItems;
+			const latestEvents = _rpLatestEvents;
+			if (
+				latestItems === _memoRpItemsRef &&
+				latestEvents === _memoRpEventsRef &&
+				latestEvents.length === _memoRpEventsLen
+			) {
+				return;
+			}
+			_memoRpItemsRef = latestItems;
+			_memoRpEventsRef = latestEvents;
+			_memoRpEventsLen = latestEvents.length;
+			_memoResponseParts = buildResponseParts(latestItems, latestEvents);
+		});
+	}
+
+	onDestroy(() => {
+		if (_rpRafId !== null) {
+			cancelAnimationFrame(_rpRafId);
+			_rpRafId = null;
+		}
+	});
+
+	$: scheduleResponsePartsRebuild(reasoningItems, message?.subagents ?? _EMPTY_SUBAGENT_EVENTS);
+	$: responseParts = _memoResponseParts;
 
 	let edit = false;
 	let editedContent = '';
@@ -862,23 +991,26 @@
 				<div class="chat-{message.role} w-full min-w-full markdown-prose">
 					<div>
 						{#if protocol === 'reasoning_only' && (model?.info?.meta?.capabilities?.status_updates ?? true)}
-							<!-- No-tool turn (vanilla OWUI native LLM flow OR an agent
-							     turn that chose to answer without tool calls): the
-							     StatusHistory dropdown is hidden, but we still want the
-							     model's reasoning to be visible and inspectable.
-							     Renders the reasoning blocks as standalone expanders —
-							     same ReasoningBullet component the dropdown uses
-							     internally, so chevron + slide body + i18n labels are
-							     preserved. Stays clickable mid-stream (Bug #3) and
-							     persists after streaming (Bug #2). -->
+							<!-- No-tool / bezwaar turn: render parent reasoning blocks and
+							     subagent groups interleaved by their `started_at` timestamp.
+							     Each entry in `responseParts` is either a reasoning item
+							     (rendered as a standalone ReasoningBullet) or a subagent
+							     group (rendered via SubAgentGroup with pre-filtered events).
+							     Turns with no subagents degrade gracefully — responseParts
+							     contains only reasoning items and SubAgentGroup is never
+							     mounted. Turns with no reasoning similarly degrade. -->
 							<div class="flex flex-col gap-1 my-1">
-								{#each reasoningItems as item, idx (item.contentOffset)}
-									<ReasoningBullet
-										id={`standalone-reasoning-${idx}`}
-										summary={item.summary}
-										body={item.body}
-										attributes={item.attributes ?? {}}
-									/>
+								{#each responseParts as part (part.kind === 'reasoning' ? `r-${part.item.contentOffset}` : `g-${part.group_id}`)}
+									{#if part.kind === 'reasoning'}
+										<ReasoningBullet
+											id={`standalone-reasoning-${part.item.contentOffset}`}
+											summary={part.item.summary}
+											body={part.item.body}
+											attributes={part.item.attributes ?? {}}
+										/>
+									{:else}
+										<SubAgentGroup group={part.group} />
+									{/if}
 								{/each}
 							</div>
 						{:else if shouldShowStatusHistory}
@@ -886,6 +1018,13 @@
 								statusHistory={mergedHistory}
 								messageDone={message?.done ?? false}
 							/>
+							<!-- [Gradient] For tool-call turns (StatusHistory path), subagent
+							     groups render below the dropdown sorted by their own
+							     started_at. True interleaving inside the StatusHistory
+							     accordion is deferred to a future phase. -->
+							{#each responseParts.filter((p) => p.kind === 'subagent-group') as part (part.group_id)}
+								<SubAgentGroup group={part.group} />
+							{/each}
 						{/if}
 
 						{#if message?.files && message.files?.filter( (f) => ['image', 'file'].includes(f.type) ).length > 0}

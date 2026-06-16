@@ -47,6 +47,7 @@ from starlette.background import BackgroundTask
 from starlette.responses import StreamingResponse
 
 from open_webui.env import AGENT_API_BASE_URL, AGENT_API_KEY
+from open_webui.models.chats import Chats
 from open_webui.socket.main import get_event_emitter
 
 log = logging.getLogger(__name__)
@@ -244,9 +245,15 @@ async def stream_agent_response(
     - Custom events (status, source) have an explicit event type
     - Standard OpenAI chunks have no event type (defaults to "data")
     """
+    # aiohttp caps a single readline() at 2 * read_bufsize (default 128 KiB).
+    # Agent tool deltas can ship a whole HTML artifact in one `delta.content`
+    # — e.g. build_knowledge_graph inlines vis-network.min.js (~640 KiB raw,
+    # ~750 KiB JSON-escaped). Bump the buffer so the consumer tolerates lines
+    # well into the megabytes.
     session = aiohttp.ClientSession(
         trust_env=True,
         timeout=aiohttp.ClientTimeout(total=timeout),
+        read_bufsize=8 * 1024 * 1024,
     )
 
     try:
@@ -350,10 +357,17 @@ async def call_agent_api(
     # ``default_agent``.
     selected_agent = override_agent or request.app.state.config.AGENT_API_SELECTED_AGENT or None
 
-    # [Gradient] Forward parent_message_id so the agent service can rewind
-    # its persisted thread state on retry/regenerate. Without this, the
-    # agent's stateful thread store leaks the prior assistant turn into
-    # the model's context and tools don't re-fire on re-runs.
+    # [Gradient] Forward the turn anchor so the agent service can rewind its
+    # persisted thread state on retry/regenerate. The agents side forks its
+    # checkpoint on the payload's ``parent_message_id`` field, which it defines
+    # as "the user-message id this assistant turn replies to" (= the assistant
+    # message's parent). That is ``user_message_id`` here — NOT
+    # ``metadata['parent_message_id']`` (which OWUI sets to the *user* message's
+    # parent: null on a new chat's first turn, so the rewind never fired and
+    # regenerate replayed the prior turn's accumulated tool state). The anchor
+    # must be stable across regenerations and present on turn 1; user_message_id
+    # is both. Without it the agent's thread store leaks the prior assistant
+    # turn into context and tools don't re-fire on re-runs.
 
     # [Gradient] Build agent-side metadata from the OWUI metadata dict.
     # user_language carries the frontend UI locale (BCP-47, e.g. "nl-NL")
@@ -384,7 +398,7 @@ async def call_agent_api(
         chat_id=metadata.get('chat_id'),
         user_id=metadata.get('user_id'),
         message_id=metadata.get('message_id'),
-        parent_message_id=metadata.get('parent_message_id'),
+        parent_message_id=metadata.get('user_message_id'),
         session_id=metadata.get('session_id'),
         features=features,
         files=metadata.get('files'),
@@ -449,9 +463,27 @@ def _build_streaming_response(
         # get_event_emitter is async (Phase 1.5 upstream); await inside the
         # generator since the enclosing _build_streaming_response is sync.
         event_emitter = await get_event_emitter(metadata)
+        # [Gradient] Accumulate every ``event: subagent`` payload so the
+        # message's persisted ``subagents`` field carries the full lifecycle
+        # for rehydration on reload. The frontend's ``reduceSubAgents``
+        # consumes this same flat list, so persisting verbatim avoids any
+        # FE/BE shape divergence. Empty for non-bezwaar agents.
+        subagent_events: list[dict] = []
         try:
             async for sse_event in stream_agent_response(AGENT_API_BASE_URL, payload):
                 if sse_event.event_type == 'done':
+                    if subagent_events:
+                        chat_id = metadata.get('chat_id')
+                        message_id = metadata.get('message_id')
+                        if chat_id and message_id:
+                            try:
+                                await Chats.upsert_message_to_chat_by_id_and_message_id(
+                                    chat_id,
+                                    message_id,
+                                    {'subagents': subagent_events},
+                                )
+                            except Exception as e:
+                                log.warning(f'Error persisting subagents to message: {e}')
                     break
 
                 if sse_event.event_type == 'status':
@@ -499,6 +531,28 @@ def _build_streaming_response(
                             )
                         except Exception as e:
                             log.warning(f'Error emitting present_ui event: {e}')
+                    continue
+
+                if sse_event.event_type == 'subagent':
+                    # [Gradient] SubAgent lifecycle / streaming events for the
+                    # Leiden bezwaar agent (and any future multi-SubAgent flow).
+                    # Payload is the typed event from the agent backend with a
+                    # ``phase`` discriminator: start / token / reasoning /
+                    # status / source / step / done.
+                    # The frontend's <SubAgentGroup> reducer keys cards by
+                    # parallel_group_id and agent_id; per-token streams append
+                    # to the matching card's text_buffer.
+                    subagent_events.append(sse_event.data)
+                    if event_emitter:
+                        try:
+                            await event_emitter(
+                                {
+                                    'type': 'subagent',
+                                    'data': sse_event.data,
+                                }
+                            )
+                        except Exception as e:
+                            log.warning(f'Error emitting subagent event: {e}')
                     continue
 
                 if sse_event.event_type == 'context_usage':

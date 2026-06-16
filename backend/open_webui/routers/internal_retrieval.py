@@ -22,7 +22,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from open_webui.internal.db import get_async_session
 from open_webui.models.chats import Chats
 from open_webui.models.files import Files
-from open_webui.models.knowledge import Knowledges, KnowledgeFileListResponse
+from open_webui.models.knowledge import KnowledgeFileListResponse, Knowledges
 from open_webui.routers.files import upload_file_handler
 from open_webui.services.retrieval.agent_search import (
     resolve_accessible_kb,
@@ -168,7 +168,10 @@ async def list_accessible_files(
     )
 
 
-@router.get('/knowledge/{knowledge_id}/files', response_model=KnowledgeFileListResponse)
+@router.get(
+    '/knowledge/{knowledge_id}/files',
+    response_model=KnowledgeFileListResponse,
+)
 async def list_knowledge_files(
     knowledge_id: str,
     request: Request,
@@ -190,6 +193,9 @@ async def list_knowledge_files(
     Used by soev-agents' ``OwuiKnowledgeFilesClient`` (the source of truth
     for ``list_documents`` / ``find_documents`` in the OpenWebUI retrieval
     provider). Returns the same ``{items, total}`` shape that client expects.
+
+    A suspended KB returns HTTP 403 for everyone; there is no admin bypass
+    on this surface — tenant-isolated agents must not circumvent suspension.
     """
 
     if not getattr(request.app.state.config, 'AGENT_SEARCH_ENABLED', False):
@@ -205,6 +211,19 @@ async def list_knowledge_files(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"knowledge '{knowledge_id}' not found or not accessible",
+        )
+
+    # [Gradient] Suspended KB → 403 for everyone; no admin bypass on this surface.
+    suspension_info = await Knowledges.get_suspension_info(kb.id)
+    if suspension_info:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=(
+                'This knowledge base is suspended. '
+                f'It will be permanently deleted in '
+                f'{suspension_info["days_remaining"]} days unless the '
+                'owner restores access.'
+            ),
         )
 
     filter_dict: dict = {}
