@@ -469,10 +469,24 @@ def _build_streaming_response(
         # consumes this same flat list, so persisting verbatim avoids any
         # FE/BE shape divergence. Empty for non-bezwaar agents.
         subagent_events: list[dict] = []
+        # [Gradient] Latest post-turn context-budget estimate. Persisted onto
+        # the message on `done` so the banner rehydrates on reload (mirrors
+        # subagents). Latest wins across multi-iteration turns.
+        last_context_usage: dict | None = None
         try:
             async for sse_event in stream_agent_response(AGENT_API_BASE_URL, payload):
                 if sse_event.event_type == 'done':
+                    # [Gradient] Persist accumulated per-turn message state in a
+                    # single upsert: the subagent lifecycle and the latest
+                    # context-budget estimate. Both rehydrate the message on
+                    # reload. Upsert merges into the existing message, so writing
+                    # them together never clobbers either field.
+                    updates: dict[str, Any] = {}
                     if subagent_events:
+                        updates['subagents'] = subagent_events
+                    if last_context_usage is not None:
+                        updates['contextUsage'] = last_context_usage
+                    if updates:
                         chat_id = metadata.get('chat_id')
                         message_id = metadata.get('message_id')
                         if chat_id and message_id:
@@ -480,10 +494,10 @@ def _build_streaming_response(
                                 await Chats.upsert_message_to_chat_by_id_and_message_id(
                                     chat_id,
                                     message_id,
-                                    {'subagents': subagent_events},
+                                    updates,
                                 )
                             except Exception as e:
-                                log.warning(f'Error persisting subagents to message: {e}')
+                                log.warning(f'Error persisting message updates: {e}')
                     break
 
                 if sse_event.event_type == 'status':
@@ -560,7 +574,9 @@ def _build_streaming_response(
                     # agent service. Payload shape:
                     # {"tokens_used": int, "tokens_budget": int, "fraction": float}.
                     # The frontend renders a banner above the chat input when
-                    # fraction crosses a threshold.
+                    # fraction crosses a threshold. Retain the latest payload so
+                    # it persists onto the message on `done` (banner rehydration).
+                    last_context_usage = sse_event.data
                     if event_emitter:
                         try:
                             await event_emitter(
