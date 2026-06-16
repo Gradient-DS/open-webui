@@ -9,6 +9,7 @@ endpoint and any future caller.
 
 from __future__ import annotations
 
+import base64
 import logging
 from typing import Optional
 
@@ -31,6 +32,7 @@ from open_webui.services.retrieval.agent_search import (
 )
 from open_webui.socket.main import sio
 from open_webui.storage.provider import Storage
+from open_webui.services.email.graph_mail_client import send_mail
 from open_webui.utils.access_control.files import has_access_to_file
 from open_webui.utils.service_auth import AgentPrincipal, get_agent_principal
 
@@ -523,3 +525,51 @@ async def files_upload(
     )
 
     return FileUploadResponse(file_id=file_item.id, url=url)
+
+
+class EmailDocumentRequest(BaseModel):
+    subject: str
+    document_markdown: str
+
+
+class EmailDocumentResponse(BaseModel):
+    ok: bool
+    to: str
+
+
+@router.post('/email-document', response_model=EmailDocumentResponse)
+async def email_document(
+    request: Request,
+    body: EmailDocumentRequest,
+    principal: AgentPrincipal = Depends(get_agent_principal),
+) -> EmailDocumentResponse:
+    """Email a markdown document to the acting user as a .md attachment.
+
+    Auth is the agent bearer + ``X-Acting-User-Id`` (via
+    ``get_agent_principal``); the acting user's email is the recipient.
+    The document is attached as ``concept-beschikking.md`` and sent via
+    Microsoft Graph (``send_mail``) from ``EMAIL_FROM_ADDRESS``.
+    """
+    user = principal.user
+    if not user.email:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail='acting user has no email address',
+        )
+
+    content_bytes = base64.b64encode(body.document_markdown.encode('utf-8')).decode('ascii')
+    attachment = {
+        '@odata.type': '#microsoft.graph.fileAttachment',
+        'name': 'concept-beschikking.md',
+        'contentType': 'text/markdown',
+        'contentBytes': content_bytes,
+    }
+    html_body = '<p>Hierbij ontvang je de concept-beschikking als bijlage (Markdown).</p>'
+    await send_mail(
+        app=request.app,
+        to_address=user.email,
+        subject=body.subject,
+        html_body=html_body,
+        attachments=[attachment],
+    )
+    return EmailDocumentResponse(ok=True, to=user.email)
