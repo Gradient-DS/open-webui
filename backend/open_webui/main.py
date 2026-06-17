@@ -3835,7 +3835,17 @@ async def get_opensearch_xml():
 
 
 def _sync_db_ping() -> None:
-    ScopedSession.execute(text('SELECT 1;')).all()
+    # Check out a fresh pooled connection so ``pool_pre_ping`` can detect and
+    # transparently replace a connection the server has closed. We must NOT
+    # reuse ``ScopedSession`` here: it is a thread-local session and this runs
+    # inside an ``asyncio.to_thread`` worker thread that CommitSessionMiddleware
+    # (which runs on the request thread) never ``remove()``s. Reusing it would
+    # hold a dead connection across pings and never recover, because pre-ping
+    # only fires on pool checkout — not on a connection already held by an open
+    # session. ``engine.connect()`` forces a checkout (pre-ping reconnects), and
+    # the ``with`` block returns the connection to the pool (no leak).
+    with engine.connect() as conn:
+        conn.execute(text('SELECT 1;'))
 
 
 async def async_db_ping() -> None:
