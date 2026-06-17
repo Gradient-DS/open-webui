@@ -1,0 +1,197 @@
+[
+	{
+		"_comment": "Default model profiles used as a fallback when an admin has not set meta.profile on a model. Rules are matched against the model id (and name) top-to-bottom; LATER matches override EARLIER ones field-by-field, so keep broad patterns first and more specific patterns below. A `match` of '*' matches everything; otherwise it is a case-insensitive substring match, or a glob when it contains '*'. Axes (speed/quality/compliance) are 1-3. `eco` shows the green leaf badge.",
+		"match": "*",
+		"profile": {
+			"bestFor": "Algemeen gebruik",
+			"speed": 2,
+			"quality": 2,
+			"compliance": 2,
+			"eco": false
+		}
+	},
+	{
+		"match": "gpt-4o-mini",
+		"profile": {
+			"bestFor": "Snel, alledaagse taken",
+			"speed": 3,
+			"quality": 2,
+			"compliance": 1,
+			"eco": false
+		}
+	},
+	{
+		"match": "gemma-4-31B-it",
+		"profile": {
+			"bestFor": "Snel, alledaagse taken",
+			"speed": 3,
+			"quality": 2,
+			"compliance": 2,
+			"eco": true,
+			"info": "Nieuw, snel open source model van Google. Geschikt voor alledaagse taken."
+		}
+	},
+	{
+		"match": "DeepSeek-V3",
+		"profile": {
+			"bestFor": "Alledaagse taken & coding",
+			"speed": 2,
+			"quality": 3,
+			"compliance": 1,
+			"eco": false,
+			"info": "Sterk open source model uit China. Goed voor alledaagse taken en programmeren."
+		}
+	},
+	{
+		"match": "DeepSeek-V4",
+		"profile": {
+			"bestFor": "Diep redeneren & analyse",
+			"speed": 1,
+			"quality": 3,
+			"compliance": 1,
+			"eco": false,
+			"info": "Nieuwste vlaggenschip van DeepSeek (China). Krachtig redeneermodel voor complexe analyse."
+		}
+	},
+	{
+		"match": "gemma-4-26B",
+		"profile": {
+			"bestFor": "Snel, alledaagse taken",
+			"speed": 3,
+			"quality": 2,
+			"compliance": 2,
+			"eco": true,
+			"info": "Compact en zuinig open source model van Google (4B actieve parameters). Snel voor alledaagse taken."
+		}
+	},
+	{
+		"match": "Llama-3-70B",
+		"profile": {
+			"bestFor": "Alledaagse taken (lokaal)",
+			"speed": 2,
+			"quality": 2,
+			"compliance": 2,
+			"eco": false,
+			"info": "Beproefd open source model van Meta. Betrouwbaar voor algemeen gebruik."
+		}
+	},
+	{
+		"match": "MiniMax-M3",
+		"profile": {
+			"bestFor": "Complex redeneren",
+			"speed": 2,
+			"quality": 3,
+			"compliance": 1,
+			"eco": false,
+			"info": "Groot open source model uit China met zeer lange context. Geschikt voor complexe taken over veel tekst."
+		}
+	},
+	{
+		"match": "Kimi-K2-Thinking",
+		"profile": {
+			"bestFor": "Diep redeneren & analyse",
+			"speed": 1,
+			"quality": 3,
+			"compliance": 1,
+			"eco": false,
+			"info": "Redeneermodel van Moonshot AI (China). Sterk in stap-voor-stap denken en analyse."
+		}
+	},
+	{
+		"match": "Kimi-K2.6",
+		"profile": {
+			"bestFor": "Complex redeneren",
+			"speed": 2,
+			"quality": 3,
+			"compliance": 1,
+			"eco": false,
+			"info": "Krachtig open source vlaggenschip van Moonshot AI (China). Geschikt voor complexe taken."
+		}
+	},
+	{
+		"match": "Kimi-K2.7",
+		"profile": {
+			"bestFor": "Programmeren & code",
+			"speed": 2,
+			"quality": 3,
+			"compliance": 1,
+			"eco": false,
+			"info": "Op coding gericht model van Moonshot AI (China). Sterk in programmeren en software-taken."
+		}
+	},
+	{
+		"match": "gpt-oss-120b",
+		"profile": {
+			"bestFor": "Complex redeneren",
+			"speed": 3,
+			"quality": 3,
+			"compliance": 2,
+			"eco": false,
+			"info": "Open source model van OpenAI (5B actieve parameters). Snel en capabel voor complex redeneren."
+		}
+	},
+	{
+		"match": "Qwen2.5-72B",
+		"profile": {
+			"bestFor": "Alledaagse taken & meertaligheid",
+			"speed": 2,
+			"quality": 2,
+			"compliance": 1,
+			"eco": false,
+			"info": "Veelzijdig open source model van Alibaba (China). Sterk meertalig voor alledaagse taken."
+		}
+	},
+	{
+		"match": "Qwen3-32B",
+		"profile": {
+			"bestFor": "Redeneren, compact",
+			"speed": 3,
+			"quality": 2,
+			"compliance": 1,
+			"eco": true,
+			"info": "Compact redeneermodel van Alibaba (China). Goede balans tussen snelheid en kwaliteit."
+		}
+	},
+	{
+		"match": "gpt-4o",
+		"profile": {
+			"bestFor": "Complex redeneren",
+			"info": "Krachtig model van OpenAI. Draait op externe infrastructuur (VS); niet geschikt voor gevoelige gegevens.",
+			"speed": 2,
+			"quality": 3,
+			"compliance": 1,
+			"eco": false
+		}
+	},
+	{
+		"match": "o1",
+		"profile": {
+			"bestFor": "Diep redeneren & analyse",
+			"speed": 1,
+			"quality": 3,
+			"compliance": 1,
+			"eco": false
+		}
+	},
+	{
+		"match": "llama3",
+		"profile": {
+			"bestFor": "Alledaagse taken (lokaal)",
+			"info": "Beproefd open source model van Meta voor alledaagse taken.",
+			"speed": 3,
+			"quality": 2,
+			"compliance": 3,
+			"eco": true
+		}
+	},
+	{
+		"match": "mistral",
+		"profile": {
+			"bestFor": "Snel & lokaal",
+			"speed": 3,
+			"quality": 2,
+			"compliance": 3,
+			"eco": true
+		}
+	}
+]

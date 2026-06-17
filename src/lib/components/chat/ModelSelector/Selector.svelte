@@ -37,6 +37,7 @@
 	import ChatBubbleOval from '$lib/components/icons/ChatBubbleOval.svelte';
 
 	import ModelItem from './ModelItem.svelte';
+	import ModelProfileLegend from './ModelProfileLegend.svelte';
 
 	const i18n = getContext('i18n');
 	const dispatch = createEventDispatcher();
@@ -472,7 +473,7 @@
 		deleteModelTarget = null;
 	};
 
-	const ITEM_HEIGHT = 42;
+	const ITEM_HEIGHT = 56;
 	const OVERSCAN = 10;
 
 	let listScrollTop = 0;
@@ -731,6 +732,9 @@
 									listScrollTop = listContainer.scrollTop;
 								}}
 							>
+								<div class="sticky top-0 z-10 bg-white dark:bg-gray-850">
+									<ModelProfileLegend />
+								</div>
 								<div style="height: {visibleStart * ITEM_HEIGHT}px;" />
 								{#each filteredItems.slice(visibleStart, visibleEnd) as item, i (item.value)}
 									{@const index = visibleStart + i}
