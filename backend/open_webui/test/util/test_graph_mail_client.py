@@ -65,3 +65,13 @@ async def test_send_mail_without_attachments_has_no_key(monkeypatch):
 
     await graph_mail_client.send_mail(_app(), 'to@x.nl', 'subj', '<p>body</p>')
     assert 'attachments' not in _FakeClient.last_json['message']
+
+
+def test_render_document_email_includes_subject_and_branding():
+    html_body = graph_mail_client.render_document_email('Concept-beschikking — Parkeren <PB1>')
+    # Branded heading + soev.ai footer (anti-autolink word-joiner form).
+    assert 'Je concept-beschikking staat klaar' in html_body
+    assert graph_mail_client.APP_NAME_HTML in html_body
+    # Agent-supplied subject is shown but HTML-escaped (no raw angle brackets).
+    assert 'Concept-beschikking — Parkeren &lt;PB1&gt;' in html_body
+    assert '<PB1>' not in html_body

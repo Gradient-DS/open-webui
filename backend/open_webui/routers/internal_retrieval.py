@@ -32,7 +32,7 @@ from open_webui.services.retrieval.agent_search import (
 )
 from open_webui.socket.main import sio
 from open_webui.storage.provider import Storage
-from open_webui.services.email.graph_mail_client import send_mail
+from open_webui.services.email.graph_mail_client import render_document_email, send_mail
 from open_webui.utils.access_control.files import has_access_to_file
 from open_webui.utils.service_auth import AgentPrincipal, get_agent_principal
 
@@ -570,7 +570,7 @@ async def email_document(
         'contentType': 'text/markdown',
         'contentBytes': content_bytes,
     }
-    html_body = '<p>Hierbij ontvang je de concept-beschikking als bijlage (Markdown).</p>'
+    html_body = render_document_email(body.subject)
     await send_mail(
         app=request.app,
         to_address=user.email,

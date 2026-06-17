@@ -571,6 +571,26 @@
 		codeInterpreterEnabled = false;
 	}
 
+	// Auto-disable capability toggles when the selected model(s) no longer support them
+	// (e.g. switching from a web-search-capable model to one without). Mirrors the terminal
+	// guard above and keeps both the active-capability badge and the getFeatures() payload
+	// from carrying a stale capability. A feature stays on only if every selected model
+	// supports it; the `?? true` fallback in the *CapableModels derivations means models that
+	// are still loading (or omit the capability) are treated as capable, so we never flicker.
+	$: selectedModelCount = (atSelectedModel?.id ? [atSelectedModel.id] : selectedModels).length;
+	$: if (webSearchEnabled && webSearchCapableModels.length !== selectedModelCount) {
+		webSearchEnabled = false;
+	}
+	$: if (imageGenerationEnabled && imageGenerationCapableModels.length !== selectedModelCount) {
+		imageGenerationEnabled = false;
+	}
+	$: if (codeInterpreterEnabled && codeInterpreterCapableModels.length !== selectedModelCount) {
+		codeInterpreterEnabled = false;
+	}
+	$: if (documentWriterEnabled && documentWriterCapableModels.length !== selectedModelCount) {
+		documentWriterEnabled = false;
+	}
+
 	let inputMenuRef;
 
 	const googleDriveHandler = async () => {

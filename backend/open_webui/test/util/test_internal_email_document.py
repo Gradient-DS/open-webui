@@ -50,6 +50,8 @@ def test_email_document_sends_attachment(monkeypatch):
     assert att['name'] == 'concept-beschikking.md'
     assert att['contentType'] == 'text/markdown'
     assert base64.b64decode(att['contentBytes']).decode('utf-8') == '# Beschikking\nHallo'
+    # Endpoint sends the branded HTML template (not the old one-liner).
+    assert 'Je concept-beschikking staat klaar' in kwargs['html_body']
 
 
 def test_email_document_no_email_is_400(monkeypatch):
