@@ -18,6 +18,7 @@
 	import Label from '$lib/components/icons/Label.svelte';
 	import Leaf from '$lib/components/icons/Leaf.svelte';
 	import InfoCircle from '$lib/components/icons/InfoCircle.svelte';
+	import ExclamationTriangle from '$lib/components/icons/ExclamationTriangle.svelte';
 	import { resolveModelProfile } from '$lib/utils/models/profile';
 
 	const i18n = getContext('i18n');
@@ -76,6 +77,19 @@
 			</div>
 
 			<div class=" shrink-0 flex items-center gap-2">
+				{#if profile.local === false}
+					<Tooltip
+						content={$i18n.t(
+							'This model does not run on our own servers. Be careful when sharing sensitive data.'
+						)}
+					>
+						<ExclamationTriangle
+							className="size-3.5 text-amber-500 dark:text-amber-400"
+							strokeWidth="2"
+						/>
+					</Tooltip>
+				{/if}
+
 				{#if profile.eco}
 					<Tooltip content={$i18n.t('Energy efficient')}>
 						<Leaf className="size-3.5 text-green-600 dark:text-green-500" strokeWidth="1.75" />

@@ -12,9 +12,13 @@ export type ModelProfile = {
 	info?: string; // free-text shown on hover behind the (i) icon
 	speed?: number; // 1-3
 	quality?: number; // 1-3
-	compliance?: number; // 1-3
+	origin?: ModelOrigin; // where the model comes from, shown as a flag
+	local?: boolean; // hosted locally; when false a data-warning sign is shown
 	eco?: boolean; // show the green leaf badge
 };
+
+/** Region a model originates from. Shown as a flag in the dropdown. */
+export type ModelOrigin = 'EU' | 'US' | 'CN';
 
 type ProfileRule = {
 	match: string;
@@ -41,14 +45,19 @@ export const PROFILE_AXES = [
 		labelKey: 'Speed',
 		descKey: 'how fast it responds',
 		color: 'text-amber-500'
-	},
-	{
-		key: 'compliance',
-		labelKey: 'Compliance',
-		descKey: 'how well it fits data sovereignty requirements',
-		color: 'text-emerald-500'
 	}
 ] as const;
+
+/**
+ * Display label for each model origin. The flag artwork lives in
+ * Flag.svelte (inline SVG); this just maps the origin to its i18n label,
+ * used for the tooltip and accessible name.
+ */
+export const ORIGIN_META: Record<ModelOrigin, { labelKey: string }> = {
+	EU: { labelKey: 'Europe (EU)' },
+	US: { labelKey: 'United States' },
+	CN: { labelKey: 'China' }
+};
 
 export type ProfileAxisKey = (typeof PROFILE_AXES)[number]['key'];
 
