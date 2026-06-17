@@ -35,18 +35,18 @@ class ConfluenceTokenManager(TokenManager):
     """
 
     async def get_valid_access_token(self, user_id: str, knowledge_id: str) -> Optional[str]:
-        if resolve_auth_mode(knowledge_id) == 'basic':
+        if await resolve_auth_mode(knowledge_id) == 'basic':
             return BASIC_AUTH_SENTINEL if basic_auth_configured() else None
         return await _get_valid_access_token(user_id, knowledge_id)
 
-    def has_stored_token(self, user_id: str, knowledge_id: str) -> bool:
-        if resolve_auth_mode(knowledge_id) == 'basic':
+    async def has_stored_token(self, user_id: str, knowledge_id: str) -> bool:
+        if await resolve_auth_mode(knowledge_id) == 'basic':
             return basic_auth_configured()
-        return get_stored_token(user_id) is not None
+        return await get_stored_token(user_id) is not None
 
-    def delete_token(self, user_id: str, knowledge_id: str) -> bool:
+    async def delete_token(self, user_id: str, knowledge_id: str) -> bool:
         # basic mode has no per-user token to delete; this no-ops harmlessly.
-        return delete_stored_token(user_id)
+        return await delete_stored_token(user_id)
 
 
 class ConfluenceSyncProvider(SyncProvider):

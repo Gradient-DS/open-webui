@@ -8,6 +8,7 @@
 
 	import { marked } from 'marked';
 	import { toast } from 'svelte-sonner';
+	import equal from 'fast-deep-equal';
 
 	import { goto } from '$app/navigation';
 
@@ -36,7 +37,8 @@
 		showSidebar,
 		socket,
 		user,
-		WEBUI_NAME
+		WEBUI_NAME,
+		pinnedNotes
 	} from '$lib/stores';
 
 	import { downloadPdf } from './utils';
@@ -65,7 +67,9 @@
 		deleteNoteById,
 		getNoteById,
 		updateNoteById,
-		updateNoteAccessGrants
+		updateNoteAccessGrants,
+		toggleNotePinnedStatusById,
+		getPinnedNoteList
 	} from '$lib/apis/notes';
 
 	import RichTextInput from '../common/RichTextInput.svelte';
@@ -227,7 +231,7 @@
 	}
 
 	function areContentsEqual(a, b) {
-		return JSON.stringify(a) === JSON.stringify(b);
+		return equal(a, b);
 	}
 
 	function insertNoteVersion(note) {
@@ -1099,6 +1103,12 @@ Provide the enhanced notes in markdown format. Use markdown syntax for headings,
 									}}
 									onDelete={() => {
 										showDeleteConfirm = true;
+									}}
+									isPinned={note.is_pinned ?? false}
+									onPin={async () => {
+										await toggleNotePinnedStatusById(localStorage.token, note.id);
+										note = await getNoteById(localStorage.token, note.id);
+										pinnedNotes.set(await getPinnedNoteList(localStorage.token).catch(() => []));
 									}}
 								>
 									<div class="p-1 bg-transparent hover:bg-white/5 transition rounded-lg">

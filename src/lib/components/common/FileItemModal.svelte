@@ -1,14 +1,14 @@
 <script lang="ts">
 	import type { WorkBook } from 'xlsx';
-	import DOMPurify from 'dompurify';
 
 	import { getContext, onMount, tick } from 'svelte';
 
 	import { formatFileSize, getLineCount } from '$lib/utils';
+	import { renderDocxHtml, readWorkbook, renderSheetHtml } from '$lib/utils/officePreview';
 	import { WEBUI_API_BASE_URL } from '$lib/constants';
 	import { settings } from '$lib/stores';
 	import { getKnowledgeById } from '$lib/apis/knowledge';
-	import { getFileById, getFileContentById } from '$lib/apis/files';
+	import { getFileById, getFileContentById, getFileAttachments } from '$lib/apis/files';
 
 	import CodeBlock from '$lib/components/chat/Messages/CodeBlock.svelte';
 	import Markdown from '$lib/components/chat/Messages/Markdown.svelte';
@@ -25,9 +25,8 @@
 	import dayjs from 'dayjs';
 	import Spinner from './Spinner.svelte';
 	import PDFViewer from './PDFViewer.svelte';
+	import PanzoomContainer from './PanzoomContainer.svelte';
 	import Reset from '../icons/Reset.svelte';
-
-	import panzoom, { type PanZoom } from 'panzoom';
 
 	export let item;
 	export let show = false;
@@ -44,6 +43,28 @@
 	let isPptx = false;
 
 	let selectedTab = '';
+
+	let attachments: Array<{
+		id: string;
+		kind: string;
+		storey: string | null;
+		index: number;
+		content_type: string;
+		caption: string;
+	}> = [];
+
+	$: hasAttachments = attachments.length > 0;
+	$: planAttachments = attachments
+		.filter((a) => a.kind === 'plan_png')
+		.sort(
+			(a, b) =>
+				(a.storey ?? '').localeCompare(b.storey ?? '') || a.index - b.index
+		);
+	$: axonAttachments = attachments.filter((a) => a.kind === 'axon_png');
+
+	const attachmentUrl = (fileId: string, attachmentId: string): string =>
+		`${WEBUI_API_BASE_URL}/files/${fileId}/attachments/${attachmentId}`;
+
 	let excelWorkbook: WorkBook | null = null;
 	let excelSheetNames: string[] = [];
 	let selectedSheet = '';
@@ -60,21 +81,9 @@
 	let pptxCurrentSlide = 0;
 	let pptxError = '';
 
-	let pzInstance: PanZoom | null = null;
-
-	const initImagePanzoom = (node: HTMLElement) => {
-		pzInstance = panzoom(node, {
-			bounds: true,
-			boundsPadding: 0.1,
-			zoomSpeed: 0.065
-		});
-	};
-
+	let panzoomRef: PanzoomContainer;
 	const resetImageView = () => {
-		if (pzInstance) {
-			pzInstance.moveTo(0, 0);
-			pzInstance.zoomAbs(0, 0, 1);
-		}
+		panzoomRef?.reset();
 	};
 
 	$: isPDF =
@@ -152,11 +161,9 @@
 	const loadExcelContent = async () => {
 		try {
 			excelError = '';
-			const [arrayBuffer, { read }] = await Promise.all([
-				getFileContentById(item.id),
-				import('xlsx')
-			]);
-			excelWorkbook = read(arrayBuffer, { type: 'array' });
+			const arrayBuffer = await getFileContentById(item.id);
+			if (!arrayBuffer) throw new Error('Empty file content');
+			excelWorkbook = await readWorkbook(arrayBuffer);
 			excelSheetNames = excelWorkbook.SheetNames;
 
 			if (excelSheetNames.length > 0) {
@@ -171,9 +178,7 @@
 
 	const renderExcelSheet = async () => {
 		if (!excelWorkbook || !selectedSheet) return;
-		const { excelToTable } = await import('$lib/utils/excelToTable');
-		const worksheet = excelWorkbook.Sheets[selectedSheet];
-		const result = await excelToTable(worksheet);
+		const result = await renderSheetHtml(excelWorkbook, selectedSheet);
 		excelHtml = result.html;
 		rowCount = result.rowCount;
 	};
@@ -185,12 +190,9 @@
 	const loadDocxContent = async () => {
 		try {
 			docxError = '';
-			const [arrayBuffer, mammoth] = await Promise.all([
-				getFileContentById(item.id),
-				import('mammoth')
-			]);
-			const result = await mammoth.convertToHtml({ arrayBuffer });
-			docxHtml = DOMPurify.sanitize(result.value);
+			const arrayBuffer = await getFileContentById(item.id);
+			if (!arrayBuffer) throw new Error('Empty file content');
+			docxHtml = await renderDocxHtml(arrayBuffer);
 		} catch (error) {
 			console.error('Error loading DOCX file:', error);
 			docxError = $i18n.t('Failed to load DOCX file. Please try downloading it instead.');
@@ -214,7 +216,10 @@
 	};
 
 	const loadContent = async () => {
-		selectedTab = '';
+		// Default to the Preview tab whenever a preview exists, regardless of how
+		// the viewer was opened; '' (Content) is the default only for files with
+		// no preview pane. (Images render without tabs.)
+		selectedTab = isPDF || isAudio || isExcel || isDocx || isPptx ? 'preview' : '';
 		expandedContent = false;
 		if (item?.type === 'collection') {
 			loading = true;
@@ -267,9 +272,15 @@
 			enableFullContent = true;
 		}
 
-		return () => {
-			pzInstance?.dispose();
-		};
+		if (item?.id && item?.type === 'file') {
+			(async () => {
+				try {
+					attachments = await getFileAttachments(localStorage.token, item.id);
+				} catch (err) {
+					console.warn('Failed to load attachments for file', item.id, err);
+				}
+			})();
+		}
 	});
 </script>
 
@@ -283,12 +294,13 @@
 							href="#"
 							class="hover:underline line-clamp-1"
 							on:click|preventDefault={() => {
-								if (!isPDF && item.url) {
+								if (item.type === 'file' || item.url) {
+									let fileId = item?.id ?? item?.tempId;
 									window.open(
 										item.type === 'file'
 											? item?.url?.startsWith('http')
 												? item.url
-												: `${WEBUI_API_BASE_URL}/files/${item.url}/content`
+												: `${WEBUI_API_BASE_URL}/files/${fileId}/content`
 											: item.url,
 										'_blank'
 									);
@@ -407,10 +419,20 @@
 					</div>
 				{/if}
 
-				{#if isAudio || isPDF || isExcel || isCode || isMarkdown || isDocx || isPptx}
+				{#if isAudio || isPDF || isExcel || isCode || isMarkdown || isDocx || isPptx || hasAttachments}
 					<div
 						class="flex mb-2.5 scrollbar-none overflow-x-auto w-full border-b border-gray-50 dark:border-gray-850/30 text-center text-sm font-medium bg-transparent dark:text-gray-200"
 					>
+						<button
+							class="min-w-fit py-1.5 px-4 border-b {selectedTab === 'preview'
+								? ' '
+								: ' border-transparent text-gray-300 dark:text-gray-600 hover:text-gray-700 dark:hover:text-white'} transition"
+							type="button"
+							on:click={() => {
+								selectedTab = 'preview';
+							}}>{$i18n.t('Preview')}</button
+						>
+
 						<button
 							class="min-w-fit py-1.5 px-4 border-b {selectedTab === ''
 								? ' '
@@ -421,15 +443,17 @@
 							}}>{$i18n.t('Content')}</button
 						>
 
-						<button
-							class="min-w-fit py-1.5 px-4 border-b {selectedTab === 'preview'
-								? ' '
-								: ' border-transparent text-gray-300 dark:text-gray-600 hover:text-gray-700 dark:hover:text-white'} transition"
-							type="button"
-							on:click={() => {
-								selectedTab = 'preview';
-							}}>{$i18n.t('Preview')}</button
-						>
+						{#if hasAttachments}
+							<button
+								class="min-w-fit py-1.5 px-4 border-b {selectedTab === 'attachments'
+									? ' '
+									: ' border-transparent text-gray-300 dark:text-gray-600 hover:text-gray-700 dark:hover:text-white'} transition"
+								type="button"
+								on:click={() => {
+									selectedTab = 'attachments';
+								}}>{$i18n.t('Renders')}</button
+							>
+						{/if}
 					</div>
 				{/if}
 
@@ -445,7 +469,7 @@
 								</button>
 							</Tooltip>
 						</div>
-						<div use:initImagePanzoom>
+						<PanzoomContainer bind:this={panzoomRef}>
 							<img
 								src={`${WEBUI_API_BASE_URL}/files/${item.id}/content`}
 								alt={item?.name ?? 'Image'}
@@ -453,7 +477,7 @@
 								loading="lazy"
 								draggable="false"
 							/>
-						</div>
+						</PanzoomContainer>
 					</div>
 				{:else if selectedTab === ''}
 					{#if item?.file?.data}
@@ -659,6 +683,42 @@
 							{(item?.file?.data?.content ?? '').trim() || 'No content'}
 						</div>
 					{/if}
+				{:else if selectedTab === 'attachments'}
+					<div class="flex flex-col gap-4 p-4">
+						{#if planAttachments.length > 0}
+							<section>
+								<h3 class="text-sm font-medium mb-2">{$i18n.t('Floor plans')}</h3>
+								<div class="grid grid-cols-2 gap-3">
+									{#each planAttachments as a (a.id)}
+										<figure class="flex flex-col gap-1">
+											<img
+												src={attachmentUrl(item.id, a.id)}
+												alt={a.caption || a.storey || a.kind}
+												class="rounded border border-gray-200 dark:border-gray-700"
+												loading="lazy"
+											/>
+											<figcaption class="text-xs text-gray-500">
+												{a.storey ?? a.caption ?? ''}
+											</figcaption>
+										</figure>
+									{/each}
+								</div>
+							</section>
+						{/if}
+						{#if axonAttachments.length > 0}
+							<section>
+								<h3 class="text-sm font-medium mb-2">{$i18n.t('Isometric')}</h3>
+								{#each axonAttachments as a (a.id)}
+									<img
+										src={attachmentUrl(item.id, a.id)}
+										alt={a.caption || a.kind}
+										class="rounded border border-gray-200 dark:border-gray-700 max-w-full"
+										loading="lazy"
+									/>
+								{/each}
+							</section>
+						{/if}
+					</div>
 				{/if}
 			{:else}
 				<div class="flex items-center justify-center py-6">

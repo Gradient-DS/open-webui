@@ -42,6 +42,7 @@
 	} from '$lib/utils';
 	import { isFeatureEnabled } from '$lib/utils/features';
 	import { WEBUI_API_BASE_URL, WEBUI_BASE_URL } from '$lib/constants';
+	import equal from 'fast-deep-equal';
 
 	import Name from './Name.svelte';
 	import ProfileImage from './ProfileImage.svelte';
@@ -69,12 +70,16 @@
 	import RegenerateMenu from './ResponseMessage/RegenerateMenu.svelte';
 	import StatusHistory from './ResponseMessage/StatusHistory.svelte';
 	import ReasoningBullet from './ResponseMessage/StatusHistory/ReasoningBullet.svelte';
+	import SubAgentGroup from './SubAgents/SubAgentGroup.svelte';
+	import { reduceSubAgents } from './SubAgents/reduceSubAgents';
+	import type { SubAgentEvent, SubAgentGroupVM } from '$lib/types/subagent';
 	import {
 		detectMergeProtocol,
 		mergeStatusAndReasoning,
 		parseToolOffsets
 	} from './ResponseMessage/mergeHistory';
 	import FullHeightIframe from '$lib/components/common/FullHeightIframe.svelte';
+	import OutputEditView from './OutputEditView.svelte';
 
 	interface MessageType {
 		id: string;
@@ -141,7 +146,7 @@
 			// Avoids 2x O(n) JSON.stringify calls that are always true during streaming anyway
 			if (message.content !== source.content || message.done !== source.done) {
 				message = structuredClone(source);
-			} else if (JSON.stringify(message) !== JSON.stringify(source)) {
+			} else if (!equal(message, source)) {
 				// Slow path: full comparison for infrequent changes (sources, annotations, status, etc.)
 				message = structuredClone(source);
 			}
@@ -214,16 +219,17 @@
 		return attrs;
 	}
 
-	$: reasoningItems = (() => {
-		const content = message?.content ?? '';
+	type ReasoningItem = {
+		kind: 'reasoning';
+		summary: string;
+		body: string;
+		attributes: Record<string, string>;
+		contentOffset: number;
+	};
+
+	function parseReasoningItems(content: string): ReasoningItem[] {
 		if (!content.includes('<details type="reasoning"')) return [];
-		const items: {
-			kind: 'reasoning';
-			summary: string;
-			body: string;
-			attributes: Record<string, string>;
-			contentOffset: number;
-		}[] = [];
+		const items: ReasoningItem[] = [];
 		const re = /<details type="reasoning"[^>]*>([\s\S]*?)<\/details>/g;
 		let match;
 		while ((match = re.exec(content)) !== null) {
@@ -241,7 +247,30 @@
 			});
 		}
 		return items;
-	})();
+	}
+
+	// Memoize content-derived parses on the content string identity so that
+	// reactive cascades from unrelated message-field updates (e.g. each
+	// subagent SSE event triggers a message re-prop) don't re-run the
+	// O(content-length) regex scans and don't churn a new array reference on
+	// every fire. Without this, dependents like ``responseParts`` see
+	// reasoningItems as "changed" on every dispatch even when content is
+	// byte-identical — which propagates into Svelte each-block rekeys and is
+	// a primary source of the end-of-stream flicker.
+	let _memoContent: string | undefined;
+	let _memoReasoningItems: ReasoningItem[] = [];
+	let _memoToolOffsets: number[] = [];
+
+	function memoContentParses(content: string): void {
+		if (content === _memoContent) return;
+		_memoContent = content;
+		_memoReasoningItems = parseReasoningItems(content);
+		_memoToolOffsets = parseToolOffsets(content);
+	}
+
+	$: memoContentParses(message?.content ?? '');
+	$: reasoningItems = _memoReasoningItems;
+	$: toolOffsets = _memoToolOffsets;
 
 	// Merge reasoning items into statusEntries in stream order. The merge
 	// strategy depends on which protocol produced the wire data; see
@@ -249,7 +278,6 @@
 	// once and is the single source of truth for "how do we render this
 	// turn" — the dispatcher inside ``mergeStatusAndReasoning`` reads it,
 	// and Phase 3 will lift the standalone-reasoning mount onto it too.
-	$: toolOffsets = parseToolOffsets(message?.content ?? '');
 	$: protocol = detectMergeProtocol(statusEntries, reasoningItems, toolOffsets);
 	$: mergedHistory = mergeStatusAndReasoning(statusEntries, reasoningItems, toolOffsets);
 
@@ -277,8 +305,112 @@
 
 	$: hasVisibleStatus = shouldShowStatusHistory;
 
+	// Build a time-ordered list of reasoning items and subagent groups for the
+	// reasoning_only protocol path (bezwaar turns). Each subagent-group part
+	// carries the already-reduced ``SubAgentGroupVM`` — SubAgentGroup renders
+	// it directly, no second pass over the raw events. List is sorted by
+	// ``started_at`` (unix-ms) ascending.
+	//
+	// This reactive declaration is only consumed by the reasoning_only render
+	// branch below; non-bezwaar turns (shouldShowStatusHistory path) are
+	// unaffected.
+	type ResponsePart =
+		| { kind: 'reasoning'; ts: number; item: ReasoningItem }
+		| { kind: 'subagent-group'; ts: number; group_id: string; group: SubAgentGroupVM };
+
+	const _EMPTY_SUBAGENT_EVENTS: SubAgentEvent[] = [];
+
+	function buildResponseParts(
+		items: ReasoningItem[],
+		subagentEvents: SubAgentEvent[]
+	): ResponsePart[] {
+		const groups = reduceSubAgents(subagentEvents);
+		const parts: ResponsePart[] = [];
+
+		for (const item of items) {
+			const ts = parseInt(item.attributes?.started_at ?? '0', 10);
+			parts.push({ kind: 'reasoning', ts, item });
+		}
+
+		for (const g of groups) {
+			// SubagentStartEvent.started_at is epoch SECONDS (per
+			// agents/core/types.py); reasoning items' started_at attribute is
+			// epoch MILLISECONDS (middleware.py renders it as ms). Normalize
+			// the subagent side to ms so both axes are comparable.
+			const ts = Math.min(...g.cards.map((c) => c.started_at)) * 1000;
+			parts.push({ kind: 'subagent-group', ts, group_id: g.parallel_group_id, group: g });
+		}
+
+		parts.sort((a, b) => a.ts - b.ts);
+		return parts;
+	}
+
+	// Throttling strategy for the responseParts rebuild:
+	//
+	// During streaming Chat.svelte pushes onto ``message.subagents`` on every
+	// SSE token (200+/sec on Nemotron CoT). Without throttling, every push
+	// triggers the full ``buildResponseParts`` → ``reduceSubAgents(allEvents)``
+	// pipeline, then SubAgentGroup re-renders, then SubAgentCard fires its
+	// scroll effect — O(N²·K) per turn and visibly janky.
+	//
+	// We collapse multiple pushes within a single animation frame into one
+	// rebuild via ``requestAnimationFrame``: each ``$:`` trigger updates the
+	// "latest args" snapshot; the first trigger schedules an rAF callback
+	// that runs ``buildResponseParts`` against the most recent snapshot when
+	// it fires. End result: at most 60Hz UI updates regardless of token rate,
+	// while the final state always lands within one frame of the last event.
+	//
+	// The internal length-based fast-path stays as a second layer of defense:
+	// it skips the rebuild when the rAF fires but nothing meaningful changed
+	// (e.g. reasoningItems references stayed identical and no new subagent
+	// events arrived since the previous frame).
+	let _memoRpItemsRef: ReasoningItem[] | undefined;
+	let _memoRpEventsRef: SubAgentEvent[] | undefined;
+	let _memoRpEventsLen = -1;
+	let _memoResponseParts: ResponsePart[] = [];
+
+	let _rpRafId: number | null = null;
+	let _rpLatestItems: ReasoningItem[] = [];
+	let _rpLatestEvents: SubAgentEvent[] = _EMPTY_SUBAGENT_EVENTS;
+
+	function scheduleResponsePartsRebuild(
+		items: ReasoningItem[],
+		events: SubAgentEvent[]
+	): void {
+		_rpLatestItems = items;
+		_rpLatestEvents = events;
+		if (_rpRafId !== null) return;
+		_rpRafId = requestAnimationFrame(() => {
+			_rpRafId = null;
+			const latestItems = _rpLatestItems;
+			const latestEvents = _rpLatestEvents;
+			if (
+				latestItems === _memoRpItemsRef &&
+				latestEvents === _memoRpEventsRef &&
+				latestEvents.length === _memoRpEventsLen
+			) {
+				return;
+			}
+			_memoRpItemsRef = latestItems;
+			_memoRpEventsRef = latestEvents;
+			_memoRpEventsLen = latestEvents.length;
+			_memoResponseParts = buildResponseParts(latestItems, latestEvents);
+		});
+	}
+
+	onDestroy(() => {
+		if (_rpRafId !== null) {
+			cancelAnimationFrame(_rpRafId);
+			_rpRafId = null;
+		}
+	});
+
+	$: scheduleResponsePartsRebuild(reasoningItems, message?.subagents ?? _EMPTY_SUBAGENT_EVENTS);
+	$: responseParts = _memoResponseParts;
+
 	let edit = false;
 	let editedContent = '';
+	let editedOutput: any[] | null = null;
 	let editTextAreaElement: HTMLTextAreaElement;
 
 	let messageIndexEdit = false;
@@ -287,6 +419,7 @@
 	let speakingIdx: number | undefined;
 
 	let loadingSpeech = false;
+	let speakAbort: AbortController | null = null;
 
 	let showRateComment = false;
 
@@ -367,16 +500,25 @@
 	};
 
 	const stopAudio = () => {
+		speakAbort?.abort();
+		speakAbort = null;
+
 		try {
 			speechSynthesis.cancel();
 			$audioQueue?.stop();
 		} catch {}
 
-		if (speaking) {
-			speaking = false;
-			speakingIdx = undefined;
-		}
+		speaking = false;
+		speakingIdx = undefined;
+		loadingSpeech = false;
 	};
+
+	// Resolve voice: model-specific > user settings > config default
+	const getVoiceId = () =>
+		model?.info?.meta?.tts?.voice ??
+		($settings?.audio?.tts?.defaultVoice === $config.audio.tts.voice
+			? ($settings?.audio?.tts?.voice ?? $config?.audio?.tts?.voice)
+			: $config?.audio?.tts?.voice);
 
 	const speak = async () => {
 		if (!(message?.content ?? '').trim().length) {
@@ -384,21 +526,12 @@
 			return;
 		}
 
+		stopAudio();
+		speakAbort = new AbortController();
+		const { signal } = speakAbort;
+
 		speaking = true;
 		const content = removeAllDetails(message.content);
-
-		// Get voice: model-specific > user settings > config default
-		const getVoiceId = () => {
-			// Check for model-specific TTS voice first
-			if (model?.info?.meta?.tts?.voice) {
-				return model.info.meta.tts.voice;
-			}
-			// Fall back to user settings or config default
-			if ($settings?.audio?.tts?.defaultVoice === $config.audio.tts.voice) {
-				return $settings?.audio?.tts?.voice ?? $config?.audio?.tts?.voice;
-			}
-			return $config?.audio?.tts?.voice;
-		};
 
 		if ($config.audio.tts.engine === '') {
 			let voices = [];
@@ -407,15 +540,9 @@
 				if (voices.length > 0) {
 					clearInterval(getVoicesLoop);
 
-					const voiceId = getVoiceId();
-					const voice = voices?.filter((v) => v.voiceURI === voiceId)?.at(0) ?? undefined;
-
-					console.log(voice);
-
+					const voice = voices.find((v) => v.voiceURI === getVoiceId());
 					const speech = new SpeechSynthesisUtterance(content);
 					speech.rate = $settings.audio?.tts?.playbackRate ?? 1;
-
-					console.log(speech);
 
 					speech.onend = () => {
 						speaking = false;
@@ -446,9 +573,7 @@
 			);
 
 			if (!messageContentParts.length) {
-				console.log('No content to speak');
 				toast.info($i18n.t('No content to speak'));
-
 				speaking = false;
 				loadingSpeech = false;
 				return;
@@ -468,19 +593,19 @@
 					await $TTSWorker.init();
 				}
 
-				for (const [idx, sentence] of messageContentParts.entries()) {
+				for (const [, sentence] of messageContentParts.entries()) {
+					if (signal.aborted) return;
+
 					const url = await $TTSWorker
-						.generate({
-							text: sentence,
-							voice: voiceId
-						})
+						.generate({ text: sentence, voice: voiceId })
 						.catch((error) => {
 							console.error(error);
 							toast.error(`${error}`);
-
 							speaking = false;
 							loadingSpeech = false;
 						});
+
+					if (signal.aborted) return;
 
 					if (url && speaking) {
 						$audioQueue.enqueue(url);
@@ -488,21 +613,23 @@
 					}
 				}
 			} else {
-				for (const [idx, sentence] of messageContentParts.entries()) {
+				for (const [, sentence] of messageContentParts.entries()) {
+					if (signal.aborted) return;
+
 					const res = await synthesizeOpenAISpeech(localStorage.token, voiceId, sentence).catch(
 						(error) => {
 							console.error(error);
 							toast.error(`${error}`);
-
 							speaking = false;
 							loadingSpeech = false;
 						}
 					);
 
+					if (signal.aborted) return;
+
 					if (res && speaking) {
 						const blob = await res.blob();
 						const url = URL.createObjectURL(blob);
-
 						$audioQueue.enqueue(url);
 						loadingSpeech = false;
 					}
@@ -538,39 +665,70 @@
 		return restoredContent;
 	}
 
+	/** Extract plain text from output items for immediate display after edit.
+	 *  NOT a serialize_output port — just grabs text parts. Backend re-serializes
+	 *  the full rich content (with <details> blocks) on save. */
+	function extractTextFromOutput(output: any[]): string {
+		return output
+			.filter((item) => item.type === 'message')
+			.flatMap((item) => (item.content ?? []).map((p: any) => p.text ?? ''))
+			.join('\n')
+			.trim();
+	}
+
 	const editMessageHandler = async () => {
 		edit = true;
 
-		editedContent = preprocessForEditing(message.content);
+		if (message.output?.length) {
+			// Structured edit: use the block editor
+			editedOutput = structuredClone(message.output);
+		} else {
+			// Legacy text edit: use the textarea
+			editedContent = preprocessForEditing(message.content);
+		}
 
 		await tick();
 
-		const messagesContainer = document.getElementById('messages-container');
-		const savedScrollTop = messagesContainer?.scrollTop;
+		if (!editedOutput && editTextAreaElement) {
+			const messagesContainer = document.getElementById('messages-container');
+			const savedScrollTop = messagesContainer?.scrollTop;
 
-		editTextAreaElement.style.height = '';
-		editTextAreaElement.style.height = `${editTextAreaElement.scrollHeight}px`;
+			editTextAreaElement.style.height = '';
+			editTextAreaElement.style.height = `${editTextAreaElement.scrollHeight}px`;
 
-		if (messagesContainer) messagesContainer.scrollTop = savedScrollTop;
+			if (messagesContainer) messagesContainer.scrollTop = savedScrollTop;
+		}
 	};
 
 	const editMessageConfirmHandler = async () => {
-		const messageContent = postprocessAfterEditing(editedContent ? editedContent : '');
-		editMessage(message.id, { content: messageContent }, false);
+		if (editedOutput) {
+			// Structured edit: keep original rich content for immediate display;
+			// backend will re-derive content from output on save.
+			editMessage(message.id, { content: message.content, output: editedOutput }, false);
+		} else {
+			// Legacy text edit
+			const messageContent = postprocessAfterEditing(editedContent ?? '');
+			editMessage(message.id, { content: messageContent }, false);
+		}
 
 		edit = false;
 		editedContent = '';
+		editedOutput = null;
 
 		await tick();
 	};
 
 	const saveAsCopyHandler = async () => {
-		const messageContent = postprocessAfterEditing(editedContent ? editedContent : '');
-
-		editMessage(message.id, { content: messageContent });
+		if (editedOutput) {
+			editMessage(message.id, { content: message.content, output: editedOutput });
+		} else {
+			const messageContent = postprocessAfterEditing(editedContent ?? '');
+			editMessage(message.id, { content: messageContent });
+		}
 
 		edit = false;
 		editedContent = '';
+		editedOutput = null;
 
 		await tick();
 	};
@@ -578,6 +736,7 @@
 	const cancelEditMessage = async () => {
 		edit = false;
 		editedContent = '';
+		editedOutput = null;
 		await tick();
 	};
 
@@ -832,23 +991,26 @@
 				<div class="chat-{message.role} w-full min-w-full markdown-prose">
 					<div>
 						{#if protocol === 'reasoning_only' && (model?.info?.meta?.capabilities?.status_updates ?? true)}
-							<!-- No-tool turn (vanilla OWUI native LLM flow OR an agent
-							     turn that chose to answer without tool calls): the
-							     StatusHistory dropdown is hidden, but we still want the
-							     model's reasoning to be visible and inspectable.
-							     Renders the reasoning blocks as standalone expanders —
-							     same ReasoningBullet component the dropdown uses
-							     internally, so chevron + slide body + i18n labels are
-							     preserved. Stays clickable mid-stream (Bug #3) and
-							     persists after streaming (Bug #2). -->
+							<!-- No-tool / bezwaar turn: render parent reasoning blocks and
+							     subagent groups interleaved by their `started_at` timestamp.
+							     Each entry in `responseParts` is either a reasoning item
+							     (rendered as a standalone ReasoningBullet) or a subagent
+							     group (rendered via SubAgentGroup with pre-filtered events).
+							     Turns with no subagents degrade gracefully — responseParts
+							     contains only reasoning items and SubAgentGroup is never
+							     mounted. Turns with no reasoning similarly degrade. -->
 							<div class="flex flex-col gap-1 my-1">
-								{#each reasoningItems as item, idx (item.contentOffset)}
-									<ReasoningBullet
-										id={`standalone-reasoning-${idx}`}
-										summary={item.summary}
-										body={item.body}
-										attributes={item.attributes ?? {}}
-									/>
+								{#each responseParts as part (part.kind === 'reasoning' ? `r-${part.item.contentOffset}` : `g-${part.group_id}`)}
+									{#if part.kind === 'reasoning'}
+										<ReasoningBullet
+											id={`standalone-reasoning-${part.item.contentOffset}`}
+											summary={part.item.summary}
+											body={part.item.body}
+											attributes={part.item.attributes ?? {}}
+										/>
+									{:else}
+										<SubAgentGroup group={part.group} />
+									{/if}
 								{/each}
 							</div>
 						{:else if shouldShowStatusHistory}
@@ -856,14 +1018,21 @@
 								statusHistory={mergedHistory}
 								messageDone={message?.done ?? false}
 							/>
+							<!-- [Gradient] For tool-call turns (StatusHistory path), subagent
+							     groups render below the dropdown sorted by their own
+							     started_at. True interleaving inside the StatusHistory
+							     accordion is deferred to a future phase. -->
+							{#each responseParts.filter((p) => p.kind === 'subagent-group') as part (part.group_id)}
+								<SubAgentGroup group={part.group} />
+							{/each}
 						{/if}
 
-						{#if message?.files && message.files?.filter((f) => f.type === 'image').length > 0}
+						{#if message?.files && message.files?.filter( (f) => ['image', 'file'].includes(f.type) ).length > 0}
 							<div
 								class="my-1 w-full flex overflow-x-auto gap-2 flex-wrap"
 								dir={$settings?.chatDirection ?? 'auto'}
 							>
-								{#each message.files as file}
+								{#each message.files.filter((f) => ['image', 'file'].includes(f.type)) as file}
 									<div>
 										{#if file.type === 'image' || (file?.content_type ?? '').startsWith('image/')}
 											<Image src={file.url} alt={message.content} />
@@ -902,34 +1071,45 @@
 						{/if}
 
 						{#if edit === true}
-							<div class="w-full bg-gray-50 dark:bg-gray-800 rounded-3xl px-5 py-3 my-2">
-								<textarea
-									id="message-edit-{message.id}"
-									bind:this={editTextAreaElement}
-									class=" bg-transparent outline-hidden w-full resize-none"
-									bind:value={editedContent}
-									on:input={(e) => {
-										const messagesContainer = document.getElementById('messages-container');
-										const savedScrollTop = messagesContainer?.scrollTop;
+							<div class="w-full bg-gray-50 dark:bg-gray-800 rounded-3xl px-3 py-3 my-2">
+								{#if editedOutput}
+									<!-- Structured output editor (visual + JSON toggle) -->
+									<OutputEditView
+										output={editedOutput}
+										onChange={(updated) => {
+											editedOutput = updated;
+										}}
+									/>
+								{:else}
+									<!-- Legacy textarea for messages without output -->
+									<textarea
+										id="message-edit-{message.id}"
+										bind:this={editTextAreaElement}
+										class=" bg-transparent outline-hidden w-full resize-none"
+										bind:value={editedContent}
+										on:input={(e) => {
+											const messagesContainer = document.getElementById('messages-container');
+											const savedScrollTop = messagesContainer?.scrollTop;
 
-										e.target.style.height = '';
-										e.target.style.height = `${e.target.scrollHeight}px`;
+											e.target.style.height = '';
+											e.target.style.height = `${e.target.scrollHeight}px`;
 
-										if (messagesContainer) messagesContainer.scrollTop = savedScrollTop;
-									}}
-									on:keydown={(e) => {
-										if (e.key === 'Escape') {
-											document.getElementById('close-edit-message-button')?.click();
-										}
+											if (messagesContainer) messagesContainer.scrollTop = savedScrollTop;
+										}}
+										on:keydown={(e) => {
+											if (e.key === 'Escape') {
+												document.getElementById('close-edit-message-button')?.click();
+											}
 
-										const isCmdOrCtrlPressed = e.metaKey || e.ctrlKey;
-										const isEnterPressed = e.key === 'Enter';
+											const isCmdOrCtrlPressed = e.metaKey || e.ctrlKey;
+											const isEnterPressed = e.key === 'Enter';
 
-										if (isCmdOrCtrlPressed && isEnterPressed) {
-											document.getElementById('confirm-edit-message-button')?.click();
-										}
-									}}
-								/>
+											if (isCmdOrCtrlPressed && isEnterPressed) {
+												document.getElementById('confirm-edit-message-button')?.click();
+											}
+										}}
+									/>
+								{/if}
 
 								<div class=" mt-2 mb-1 flex justify-between text-sm font-medium">
 									<div>
@@ -981,9 +1161,6 @@
 								<!-- unless message.error === true which is legacy error handling, where the error message is stored in message.content -->
 								<ContentRenderer
 									id={`${chatId}-${message.id}`}
-									messageId={message.id}
-									{history}
-									{selectedModels}
 									content={message.content}
 									sources={message.sources}
 									floatingButtons={message?.done &&
@@ -1007,8 +1184,8 @@
 											citationsElement?.showSourceModal(id);
 										}
 									}}
-									onAddMessages={({ modelId, parentId, messages }) => {
-										addMessages({ modelId, parentId, messages });
+									onSetInputText={(text) => {
+										setInputText(text);
 									}}
 									onSave={({ raw, oldContent, newContent }) => {
 										history.messages[message.id].content = history.messages[
@@ -1042,7 +1219,6 @@
 									id={message?.id}
 									{chatId}
 									sources={message?.sources ?? message?.citations}
-									panelFilter={message?.panel_filter ?? null}
 									messageDone={message?.done ?? false}
 									{readOnly}
 								/>
@@ -1668,8 +1844,12 @@
 													class="{isLastMessage || ($settings?.highContrastMode ?? false)
 														? 'visible'
 														: 'invisible group-hover:visible'} p-1.5 hover:bg-black/5 dark:hover:bg-white/5 rounded-lg dark:hover:text-white hover:text-black transition"
-													on:click={() => {
-														showDeleteConfirm = true;
+													on:click={(e) => {
+														if (e.shiftKey) {
+															deleteMessageHandler();
+														} else {
+															showDeleteConfirm = true;
+														}
 													}}
 												>
 													<svg
@@ -1713,6 +1893,7 @@
 																: ''}"
 															style="fill: currentColor;"
 															alt={action.name}
+															draggable="false"
 														/>
 													</div>
 												{:else}

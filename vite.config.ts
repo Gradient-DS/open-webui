@@ -46,15 +46,16 @@ export default defineConfig({
 				'/ws': { target, ws: true }
 			};
 		})(),
-		// soev parallel dev stacks live under `.worktrees/<branch>/` (see
-		// `.claude/commands/kickoff_features.md`). Without this ignore, a
-		// dev server running from the repo root fires HMR for any edit in
-		// any worktree — every stack's UI then reloads spuriously on
-		// unrelated changes. Inside a worktree's own `npm run dev` this
-		// pattern is simply a no-op.
-		watch: {
-			ignored: ['**/.worktrees/**']
-		}
+		// NOTE: a previous `watch.ignored: ['**/.worktrees/**']` was removed
+		// here. The intent was to suppress HMR for sibling worktrees when a
+		// dev server runs from the repo root, but chokidar matches the
+		// absolute file path — so inside a worktree the pattern matches every
+		// own file too and silently kills HMR (vite serves the cached transform
+		// indefinitely). The kickoff_features workflow already runs one dev
+		// server per worktree from its own cwd, so cross-worktree noise is not
+		// a real concern. If you ever run a single dev server from the parent
+		// repo root with multiple worktrees underneath, re-introduce a
+		// per-invocation guard rather than a blanket glob.
 	},
 	build: {
 		sourcemap: true

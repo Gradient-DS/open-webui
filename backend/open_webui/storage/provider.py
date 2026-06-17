@@ -74,7 +74,7 @@ class LocalStorageProvider(StorageProvider):
         contents = file.read()
         if not contents:
             raise ValueError(ERROR_MESSAGES.EMPTY_CONTENT)
-        file_path = f'{UPLOAD_DIR}/{filename}'
+        file_path = os.path.join(UPLOAD_DIR, filename)
         with open(file_path, 'wb') as f:
             f.write(contents)
         return contents, file_path
@@ -87,8 +87,8 @@ class LocalStorageProvider(StorageProvider):
     @staticmethod
     def delete_file(file_path: str) -> None:
         """Handles deletion of the file from local storage."""
-        filename = file_path.split('/')[-1]
-        file_path = f'{UPLOAD_DIR}/{filename}'
+        filename = os.path.basename(file_path)
+        file_path = os.path.join(UPLOAD_DIR, filename)
         if os.path.isfile(file_path):
             os.remove(file_path)
         else:
@@ -155,7 +155,7 @@ class S3StorageProvider(StorageProvider):
 
     def upload_file(self, file: BinaryIO, filename: str, tags: Dict[str, str]) -> Tuple[bytes, str]:
         """Handles uploading of the file to S3 storage."""
-        _, file_path = LocalStorageProvider.upload_file(file, filename, tags)
+        contents, file_path = LocalStorageProvider.upload_file(file, filename, tags)
         s3_key = os.path.join(self.key_prefix, filename)
         try:
             self.s3_client.upload_file(file_path, self.bucket_name, s3_key)
@@ -168,7 +168,7 @@ class S3StorageProvider(StorageProvider):
                     Tagging=tagging,
                 )
             return (
-                open(file_path, 'rb').read(),
+                contents,
                 f's3://{self.bucket_name}/{s3_key}',
             )
         except ClientError as e:
@@ -248,7 +248,7 @@ class S3StorageProvider(StorageProvider):
         return '/'.join(full_file_path.split('//')[1].split('/')[1:])
 
     def _get_local_file_path(self, s3_key: str) -> str:
-        return f'{UPLOAD_DIR}/{s3_key.split("/")[-1]}'
+        return os.path.join(UPLOAD_DIR, s3_key.split('/')[-1])
 
 
 class GCSStorageProvider(StorageProvider):
@@ -280,7 +280,7 @@ class GCSStorageProvider(StorageProvider):
         """Handles downloading of the file from GCS storage."""
         try:
             filename = file_path.removeprefix('gs://').split('/')[1]
-            local_file_path = f'{UPLOAD_DIR}/{filename}'
+            local_file_path = os.path.join(UPLOAD_DIR, filename)
             blob = self.bucket.get_blob(filename)
             blob.download_to_filename(local_file_path)
 
@@ -370,7 +370,7 @@ class AzureStorageProvider(StorageProvider):
         """Handles downloading of the file from Azure Blob Storage."""
         try:
             filename = file_path.split('/')[-1]
-            local_file_path = f'{UPLOAD_DIR}/{filename}'
+            local_file_path = os.path.join(UPLOAD_DIR, filename)
             blob_client = self.container_client.get_blob_client(filename)
             with open(local_file_path, 'wb') as download_file:
                 download_file.write(blob_client.download_blob().readall())

@@ -17,13 +17,12 @@
 	let type = $page.url.searchParams.get('type') || 'local';
 
 	onMount(() => {
-		// In shared Confluence mode, the single shared KB is managed by admins
-		// only — non-admins have no Confluence self-service create path.
-		if (
-			type === 'confluence' &&
-			$config?.features?.confluence_kb_mode === 'shared' &&
-			$user?.role !== 'admin'
-		) {
+		// The Confluence self-service create flow exists ONLY in per-user
+		// ("on request", OAuth) mode. In pre-synced/shared mode the single shared
+		// KB is admin-managed and there is no create path for anyone (including
+		// admins — they provision it from the Cloud Sync admin panel). Block the
+		// route for any non-per_user mode regardless of role.
+		if (type === 'confluence' && $config?.features?.confluence_kb_mode !== 'per_user') {
 			toast.error($i18n.t('Confluence knowledge bases are managed by administrators.'));
 			goto('/workspace/knowledge');
 		}

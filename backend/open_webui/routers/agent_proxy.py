@@ -80,7 +80,7 @@ class ChatCompletionsRequest(BaseModel):
     stream: Optional[bool] = None
 
 
-def _find_kb_by_integration_source_id(provider: str, source_id: str):
+async def _find_kb_by_integration_source_id(provider: str, source_id: str):
     """Return the KB whose ``meta.integration.source_id`` matches ``source_id``.
 
     Mirrors ``routers/integrations._find_kb_by_source_id`` but kept inline
@@ -88,14 +88,14 @@ def _find_kb_by_integration_source_id(provider: str, source_id: str):
     holds the canonical writer; this is the read-side lookup the proxy
     needs to translate caller-supplied source ids to KB UUIDs.
     """
-    for kb in Knowledges.get_knowledge_bases_by_type(provider):
+    for kb in await Knowledges.get_knowledge_bases_by_type(provider):
         meta = kb.meta or {}
         if meta.get('integration', {}).get('source_id') == source_id:
             return kb
     return None
 
 
-def _resolve_collection_refs(files: list[dict[str, Any]]) -> None:
+async def _resolve_collection_refs(files: list[dict[str, Any]]) -> None:
     """Rewrite ``source_id``-addressed collection refs to UUIDs in place.
 
     UUID precedence: when ``id`` is set, ``source_id`` / ``provider`` are
@@ -122,7 +122,7 @@ def _resolve_collection_refs(files: list[dict[str, Any]]) -> None:
                     'files[].provider (the integration provider slug from /api/v1/configs).'
                 ),
             )
-        kb = _find_kb_by_integration_source_id(provider, source_id)
+        kb = await _find_kb_by_integration_source_id(provider, source_id)
         if kb is None:
             raise HTTPException(
                 status_code=404,
@@ -268,7 +268,7 @@ async def chat_completions(
 
     payload_dict = body.model_dump(exclude_none=True)
     if payload_dict.get('files'):
-        _resolve_collection_refs(payload_dict['files'])
+        await _resolve_collection_refs(payload_dict['files'])
     payload_dict.setdefault('user_id', user.id)
     payload = json.dumps(payload_dict).encode()
 

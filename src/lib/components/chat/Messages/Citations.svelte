@@ -3,7 +3,7 @@
 	import { config, embed, showControls, showEmbeds } from '$lib/stores';
 
 	import CitationModal from './Citations/CitationModal.svelte';
-	import { reduceSources } from './Citations/reduceSources';
+	import { reduceSources, type DisplayCitation } from './Citations/reduceSources';
 
 	const i18n = getContext('i18n');
 
@@ -13,27 +13,16 @@
 	export let sources = [];
 	export let readOnly = false;
 	/**
-	 * [Gradient] Cumulative `[N]` ids that should appear in the bottom panel
-	 * for this message. The agent service dispatches this alongside the
-	 * cumulative `sources` list so the panel can scope per-message while the
-	 * inline `[N]` lookup keeps working across cross-turn cites.
-	 *
-	 * `null` (the default) means "show everything" — keeps back-compat for
-	 * older messages and for upstream providers that don't dispatch the
-	 * `panel_filter` event.
-	 */
-	export let panelFilter: number[] | null = null;
-	/**
 	 * [Gradient] Whether the parent message has finished streaming. Used to
-	 * suppress the bottom pill until the agent's final `panel_filter` is
-	 * in. Intermediate dispatches (one after every tool iteration) carry
-	 * the full "retrieved so far" set, so a web-search turn briefly shows
-	 * the entire result corpus (e.g. 19 hits) before the post-answer
-	 * dispatch narrows it to what the LLM actually cited (e.g. 7). The
-	 * final panel_filter arrives right after the answer text finishes
-	 * streaming — effectively the same moment as `done` flipping true —
-	 * so gating on done avoids the flash without delaying anything that
-	 * was stable mid-stream.
+	 * suppress the bottom pill until the agent's final source dispatch is
+	 * in. Intermediate dispatches (one after every tool iteration) carry the
+	 * full "retrieved so far" set with `current_turn` true, so a web-search
+	 * turn briefly shows the entire result corpus (e.g. 19 hits) before the
+	 * post-answer dispatch settles the `cited_this_turn` flags. The final
+	 * dispatch arrives right after the answer text finishes streaming —
+	 * effectively the same moment as `done` flipping true — so gating on
+	 * done avoids the flash without delaying anything that was stable
+	 * mid-stream.
 	 *
 	 * Defaults to `true` so non-streaming callers (e.g. `Document.svelte`)
 	 * keep their previous behavior without opting in.
@@ -132,20 +121,20 @@
 		showPercentage = shouldShowPercentage(citations);
 	}
 
-	// [Gradient] Filter to the per-message panel scope. `idx + 1` is the
-	// citation's cumulative `[N]` (its 1-based position in the dense
-	// `sources` array the inline render uses). When `panelFilter` is set
-	// we keep only those positions; when it's `null` we show everything.
-	// The filter does NOT touch the underlying `citations` array — inline
-	// `[N]` clicks still resolve via `showSourceModal(N)` against the
-	// cumulative list.
+	// [Gradient] Per-message panel scope from the agent's provenance flags:
+	// `current_turn` (a tool retrieved the source this turn) ∪ `cited_this_turn`
+	// (the model wrote its `[N]` in this turn's answer, incl. cross-turn cites).
+	// Prior-turn sources neither retrieved nor cited this turn stay out of the
+	// panel. Falls back to show-all when no citation carries provenance flags
+	// (legacy chats / upstream providers). The filter does NOT touch the
+	// underlying `citations` array — inline `[N]` clicks still resolve via
+	// `showSourceModal(N)` against the cumulative list.
 	$: {
-		if (panelFilter == null) {
-			visibleCitations = citations;
-		} else {
-			const allowed = new Set(panelFilter);
-			visibleCitations = citations.filter((_, idx) => allowed.has(idx + 1));
-		}
+		const all = citations as DisplayCitation[];
+		const hasProvenance = all.some(
+			(c) => c.current_turn !== undefined || c.cited_this_turn !== undefined
+		);
+		visibleCitations = hasProvenance ? all.filter((c) => c.current_turn || c.cited_this_turn) : all;
 	}
 
 	const decodeString = (str: string) => {
@@ -191,6 +180,14 @@
 							}}
 						/>
 					{/each}
+					{#if citations.length > 3}
+						<div
+							class="size-4 rounded-full shrink-0 border border-white dark:border-gray-850 bg-gray-100 dark:bg-gray-800 flex items-center justify-center text-[8px] font-semibold text-gray-500 dark:text-gray-400 whitespace-nowrap tracking-tighter"
+							aria-hidden="true"
+						>
+							+{citations.length - Math.min(urlCitations.length, 3)}
+						</div>
+					{/if}
 				</div>
 			{/if}
 			<div>

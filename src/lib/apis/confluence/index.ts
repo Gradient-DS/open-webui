@@ -121,6 +121,9 @@ export interface ConfluenceTestConnectionPayload {
 
 export interface ConfluenceTestConnectionResult {
 	ok: boolean;
+	// Stable machine code (auth_failed, not_found, …) the UI localizes; see
+	// `CloudSync/errors.ts`. `detail` is an English debug fallback.
+	reason?: string;
 	detail: string;
 	space_count?: number;
 }

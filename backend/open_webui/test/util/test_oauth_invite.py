@@ -3,8 +3,9 @@
 These tests mock just enough of the OAuth/authlib stack to drive
 ``OAuthManager.handle_callback`` end-to-end on the *new-user* branch
 (which is where invite consumption + ``OAUTH_INVITE_REQUIRED`` decisions
-live). The DB layer is in-memory SQLite; the remote OAuth client is
-mocked to return canned ``authorize_access_token`` / ``userinfo`` data.
+live). The DB layer is in-memory async SQLite; the remote OAuth client
+is mocked to return canned ``authorize_access_token`` / ``userinfo``
+data.
 
 We don't try to exercise every branch of the upstream callback —
 just the new behaviours wired in by the SSO-invite work:
@@ -18,14 +19,14 @@ from __future__ import annotations
 
 import time
 import uuid
-from contextlib import contextmanager
+from contextlib import asynccontextmanager
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-from fastapi import HTTPException
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
+import pytest_asyncio
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.pool import StaticPool
 
 from open_webui.models import invites as invites_module
 from open_webui.models.invites import Invite, Invites
@@ -33,32 +34,35 @@ from open_webui.utils import oauth as oauth_module
 from open_webui.utils.oauth import OAuthManager, auth_manager_config
 
 
-@pytest.fixture
-def db_session(monkeypatch):
-    """Sharded in-memory SQLite for the Invite table only.
+@pytest_asyncio.fixture
+async def db_session(monkeypatch):
+    """Async in-memory SQLite session for the Invite table only.
 
     The OAuth callback also touches ``Users``, ``Auths``, ``OAuthSessions``,
-    and ``Groups``; we don't want them hitting a real DB so we mock those
-    callsites instead of binding all the metadata.
+    and ``Groups``; we mock those callsites instead of binding all the
+    metadata to this throwaway engine.
     """
-    engine = create_engine('sqlite://', connect_args={'check_same_thread': False})
-    Invite.__table__.create(bind=engine)
-    Session = sessionmaker(bind=engine, autoflush=False, autocommit=False, expire_on_commit=False)
+    engine = create_async_engine(
+        'sqlite+aiosqlite:///:memory:',
+        connect_args={'check_same_thread': False},
+        poolclass=StaticPool,
+    )
+    async with engine.begin() as conn:
+        await conn.run_sync(Invite.__table__.create)
 
-    @contextmanager
-    def _get_db():
-        s = Session()
-        try:
+    Session = async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
+
+    @asynccontextmanager
+    async def _get_async_db_context(db=None):
+        async with Session() as s:
             yield s
-        finally:
-            s.close()
 
-    monkeypatch.setattr(invites_module, 'get_db', _get_db)
+    monkeypatch.setattr(invites_module, 'get_async_db_context', _get_async_db_context)
     yield Session
-    engine.dispose()
+    await engine.dispose()
 
 
-def _make_invite(
+async def _make_invite(
     Session,
     *,
     email: str,
@@ -70,7 +74,7 @@ def _make_invite(
 ) -> str:
     invite_id = str(uuid.uuid4())
     now = int(time.time())
-    with Session() as s:
+    async with Session() as s:
         invite = Invite(
             id=invite_id,
             email=email.lower(),
@@ -84,7 +88,7 @@ def _make_invite(
             created_at=now,
         )
         s.add(invite)
-        s.commit()
+        await s.commit()
     return invite_id
 
 
@@ -92,9 +96,9 @@ def _make_invite(
 def oauth_manager_with_mocks(monkeypatch):
     """Construct an ``OAuthManager`` with the heavy dependencies mocked.
 
-    Yields a tuple of ``(manager, fake_user_holder, set_userinfo)``:
+    Yields a tuple of ``(manager, provisioned, set_userinfo)``:
       * manager: the OAuthManager instance
-      * fake_user_holder: a list that the mocked ``Auths.insert_new_auth``
+      * provisioned: a list that the mocked ``Auths.insert_new_auth``
         appends provisioned users to (so tests can assert role/name)
       * set_userinfo: callable to seed the userinfo claims for a test
     """
@@ -146,7 +150,7 @@ def oauth_manager_with_mocks(monkeypatch):
     # Mock all the DB-touching helpers handle_callback uses except Invites.
     provisioned: list = []
 
-    def fake_insert_new_auth(*, email, password, name, profile_image_url, role, oauth, db=None):
+    async def fake_insert_new_auth(*, email, password, name, profile_image_url, role, oauth, db=None):
         u = SimpleNamespace(
             id=str(uuid.uuid4()),
             email=email,
@@ -158,15 +162,18 @@ def oauth_manager_with_mocks(monkeypatch):
         u.model_dump_json = MagicMock(return_value='{}')
         return u
 
-    monkeypatch.setattr(oauth_module.Users, 'get_user_by_oauth_sub', MagicMock(return_value=None))
-    monkeypatch.setattr(oauth_module.Users, 'get_user_by_email', MagicMock(return_value=None))
-    monkeypatch.setattr(oauth_module.Users, 'update_user_oauth_by_id', MagicMock())
-    monkeypatch.setattr(oauth_module.Auths, 'insert_new_auth', MagicMock(side_effect=fake_insert_new_auth))
-    monkeypatch.setattr(oauth_module, 'apply_default_group_assignment', MagicMock())
+    monkeypatch.setattr(oauth_module.Users, 'get_user_by_oauth_sub', AsyncMock(return_value=None))
+    monkeypatch.setattr(oauth_module.Users, 'get_user_by_email', AsyncMock(return_value=None))
+    monkeypatch.setattr(oauth_module.Users, 'update_user_oauth_by_id', AsyncMock())
+    # Return >1 so the "if user_count == 1 -> admin" override never fires —
+    # we want the invite role to survive untouched in the provisioning path.
+    monkeypatch.setattr(oauth_module.Users, 'get_num_users', AsyncMock(return_value=2))
+    monkeypatch.setattr(oauth_module.Auths, 'insert_new_auth', AsyncMock(side_effect=fake_insert_new_auth))
+    monkeypatch.setattr(oauth_module, 'apply_default_group_assignment', AsyncMock())
     monkeypatch.setattr(oauth_module, 'create_token', MagicMock(return_value='jwt-token'))
-    monkeypatch.setattr(oauth_module.OAuthSessions, 'get_sessions_by_user_id', MagicMock(return_value=[]))
-    monkeypatch.setattr(oauth_module.OAuthSessions, 'create_session', MagicMock(return_value=None))
-    monkeypatch.setattr(oauth_module.OAuthSessions, 'delete_session_by_id', MagicMock())
+    monkeypatch.setattr(oauth_module.OAuthSessions, 'get_sessions_by_user_id', AsyncMock(return_value=[]))
+    monkeypatch.setattr(oauth_module.OAuthSessions, 'create_session', AsyncMock(return_value=None))
+    monkeypatch.setattr(oauth_module.OAuthSessions, 'delete_session_by_id', AsyncMock())
 
     return manager, provisioned, set_userinfo
 
@@ -190,7 +197,7 @@ def _fake_response():
 async def test_oauth_signup_consumes_pending_invite_and_uses_invite_role(db_session, oauth_manager_with_mocks):
     manager, provisioned, set_userinfo = oauth_manager_with_mocks
 
-    _make_invite(db_session, email='alice@example.com', role='admin', name='Alice')
+    await _make_invite(db_session, email='alice@example.com', role='admin', name='Alice')
 
     set_userinfo(sub='oauth-sub-1', email='Alice@Example.com', name='')
 
@@ -203,7 +210,7 @@ async def test_oauth_signup_consumes_pending_invite_and_uses_invite_role(db_sess
     assert provisioned[0]['name'] == 'Alice'
 
     # The invite should be marked accepted.
-    assert Invites.get_pending_invite_by_email('alice@example.com') is None
+    assert await Invites.get_pending_invite_by_email('alice@example.com') is None
 
 
 @pytest.mark.asyncio
@@ -225,7 +232,7 @@ async def test_invite_bypasses_domain_allowlist(db_session, oauth_manager_with_m
     manager, provisioned, set_userinfo = oauth_manager_with_mocks
     auth_manager_config.OAUTH_ALLOWED_DOMAINS = ['soev.ai']
 
-    _make_invite(db_session, email='external@other.com', role='user')
+    await _make_invite(db_session, email='external@other.com', role='user')
     set_userinfo(sub='oauth-sub-1', email='external@other.com', name='External')
 
     await manager.handle_callback(_fake_request(), 'microsoft', _fake_response())
@@ -254,7 +261,7 @@ async def test_expired_invite_falls_through_to_domain_check(db_session, oauth_ma
     manager, provisioned, set_userinfo = oauth_manager_with_mocks
     auth_manager_config.OAUTH_INVITE_REQUIRED = True
 
-    _make_invite(
+    await _make_invite(
         db_session,
         email='expired@example.com',
         role='admin',
@@ -273,7 +280,7 @@ async def test_oauth_role_invite_takes_precedence_over_default(db_session, oauth
     manager, provisioned, set_userinfo = oauth_manager_with_mocks
     auth_manager_config.DEFAULT_USER_ROLE = 'user'
 
-    _make_invite(db_session, email='admin@example.com', role='admin')
+    await _make_invite(db_session, email='admin@example.com', role='admin')
     set_userinfo(sub='oauth-sub-1', email='admin@example.com', name='Admin User')
 
     await manager.handle_callback(_fake_request(), 'microsoft', _fake_response())

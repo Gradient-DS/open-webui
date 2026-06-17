@@ -114,10 +114,10 @@ class ConfluenceSyncWorker(BaseSyncWorker):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        # Resolve the KB's auth mode once. In basic mode the per-source
-        # cloud_id is irrelevant — every client talks to the one configured
-        # site via the global service credential.
-        self._auth_mode = resolve_auth_mode(self.knowledge_id)
+        # Resolve the KB's auth mode lazily on first access. In basic mode
+        # the per-source cloud_id is irrelevant — every client talks to the
+        # one configured site via the global service credential.
+        self._auth_mode = None
         # Migrate legacy-format sources (saved before the type/confluence_type
         # split). base_worker dispatches on source['type'] == 'folder', so
         # space / page-subtree sources must be normalized here.
@@ -139,28 +139,10 @@ class ConfluenceSyncWorker(BaseSyncWorker):
         # are not globally unique across Atlassian sites.
         self._seen_page_ids: set[tuple[str, str]] = set()
 
-        # Shared full-content KB state. The shared KB has no fixed source
-        # list — it rebuilds its sources from the admin-selected spaces
-        # (confluence_sync.spaces) on every run (see sync() /
-        # _resolve_shared_kb_sources).
-        kb = Knowledges.get_knowledge_by_id(self.knowledge_id)
-        sync_info = (kb.meta or {}).get(self.meta_key, {}) if kb else {}
-        self._is_shared_kb = bool(sync_info.get('shared'))
-
-        # A system-owned shared KB stores user_id='' on the KB row so it stays
-        # decoupled from any deletable user. The sync mechanics (process_file
-        # access control, file ownership, progress events) still need a real
-        # user, so resolve this run to the instance super-admin when the KB
-        # has no valid owner.
-        if self._is_shared_kb and (not self.user_id or not Users.get_user_by_id(self.user_id)):
-            admin = Users.get_super_admin_user()
-            if admin:
-                self.user_id = admin.id
-            else:
-                log.warning(
-                    'Shared Confluence KB %s has no valid owner and no admin user could be resolved for the sync run',
-                    self.knowledge_id,
-                )
+        # Shared full-content KB state — resolved lazily in sync() because
+        # the lookups below are now async.
+        self._is_shared_kb = False
+        self._shared_kb_init_done = False
 
     # ------------------------------------------------------------------
     # Abstract properties
@@ -240,6 +222,33 @@ class ConfluenceSyncWorker(BaseSyncWorker):
     # Shared full-content KB — resolve all spaces at sync time
     # ------------------------------------------------------------------
 
+    async def _init_shared_kb_state(self) -> None:
+        """Resolve shared-KB flag + system-admin owner once at sync start.
+
+        These DB lookups are now async, so they cannot run in ``__init__``.
+        """
+        if self._shared_kb_init_done:
+            return
+        kb = await Knowledges.get_knowledge_by_id(self.knowledge_id)
+        sync_info = (kb.meta or {}).get(self.meta_key, {}) if kb else {}
+        self._is_shared_kb = bool(sync_info.get('shared'))
+
+        # A system-owned shared KB stores user_id='' on the KB row so it stays
+        # decoupled from any deletable user. The sync mechanics (process_file
+        # access control, file ownership, progress events) still need a real
+        # user, so resolve this run to the instance super-admin when the KB
+        # has no valid owner.
+        if self._is_shared_kb and (not self.user_id or not await Users.get_user_by_id(self.user_id)):
+            admin = await Users.get_super_admin_user()
+            if admin:
+                self.user_id = admin.id
+            else:
+                log.warning(
+                    'Shared Confluence KB %s has no valid owner and no admin user could be resolved for the sync run',
+                    self.knowledge_id,
+                )
+        self._shared_kb_init_done = True
+
     async def sync(self) -> Dict[str, Any]:
         """Run a sync, resolving the source list first for the shared KB.
 
@@ -248,6 +257,9 @@ class ConfluenceSyncWorker(BaseSyncWorker):
         Sync tab. Deselecting a space drops its files via base_worker's
         revoked-source handling.
         """
+        if self._auth_mode is None:
+            self._auth_mode = await resolve_auth_mode(self.knowledge_id)
+        await self._init_shared_kb_state()
         if self._is_shared_kb:
             await self._resolve_shared_kb_sources()
         return await super().sync()
@@ -270,7 +282,7 @@ class ConfluenceSyncWorker(BaseSyncWorker):
         """
         # Re-read the selection from KB meta — it may have changed since the
         # worker was constructed (e.g. an admin re-provisioned).
-        kb = Knowledges.get_knowledge_by_id(self.knowledge_id)
+        kb = await Knowledges.get_knowledge_by_id(self.knowledge_id)
         sync_info = (kb.meta or {}).get(self.meta_key, {}) if kb else {}
         selected_items = sync_info.get('spaces') or []
 
@@ -401,7 +413,7 @@ class ConfluenceSyncWorker(BaseSyncWorker):
 
             if current_version and current_version == stored_version:
                 file_id = f'{_FILE_ID_PREFIX}{page_id}'
-                existing = Files.get_file_by_id(file_id)
+                existing = await Files.get_file_by_id(file_id)
                 if existing and (existing.data or {}).get('status') == 'completed':
                     continue
                 log.info(
@@ -470,7 +482,7 @@ class ConfluenceSyncWorker(BaseSyncWorker):
 
         if current_version and current_version == stored_version:
             file_id = f'{_FILE_ID_PREFIX}{source["item_id"]}'
-            existing = Files.get_file_by_id(file_id)
+            existing = await Files.get_file_by_id(file_id)
             if existing and (existing.data or {}).get('status') == 'completed':
                 return None
             log.info('Confluence page %s version matches but record incomplete — re-syncing', source.get('name'))
@@ -752,18 +764,35 @@ class ConfluenceSyncWorker(BaseSyncWorker):
     # Access / permissions
     # ------------------------------------------------------------------
 
-    async def _sync_permissions(self) -> None:
-        """Verify the KB owner still has access to at least one source.
+    # Suspend only after this many *consecutive* cycles report a terminal auth
+    # denial (401). A single transient 401 blip must not take a whole shared
+    # corpus offline — this is a "one shared KB for everyone" deployment.
+    _AUTH_FAIL_SUSPEND_THRESHOLD = 2
 
-        Probes every source: only suspend the KB if every probe reports a
-        permanent access denial (401/403/404). A single revoked source among
-        many should not suspend the whole KB.
+    async def _sync_permissions(self) -> None:
+        """Verify the credential can still reach at least one source.
+
+        Probes every source. Classification:
+
+        * A ``None`` result (HTTP 404 — space/page not found) is NOT a
+          credential denial. It is a content/revoked-source signal handled
+          separately by ``_verify_source_access`` / ``_handle_revoked_source``.
+          It counts only as "no positive access signal from this source".
+        * Only HTTP **401** is a terminal auth denial (Confluence API tokens
+          don't refresh and a revoked OAuth token won't recover mid-run).
+          A **403** or **404** ``HTTPStatusError`` is treated as transient /
+          non-auth and never suspends.
+        * Timeouts / connect / 5xx raise and are swallowed as transient.
+
+        So the KB suspends only when a probe yields a genuine 401, and only
+        after ``_AUTH_FAIL_SUSPEND_THRESHOLD`` consecutive such cycles. A space
+        going missing (404) or a one-off 403/timeout never suspends.
         """
         if not self.sources:
             return
 
         any_access = False
-        any_definite_denial = False
+        any_auth_denial = False  # a genuine 401 was observed this cycle
 
         for source in self.sources:
             cloud_id = source.get('cloud_id')
@@ -779,54 +808,106 @@ class ConfluenceSyncWorker(BaseSyncWorker):
                 if result is not None:
                     any_access = True
                     break
-                any_definite_denial = True  # 404 returned as None
+                # result is None == HTTP 404 (source not found). This is NOT a
+                # credential denial — just no positive access signal here. The
+                # revoked-source handling deals with a permanently-gone source.
             except httpx.HTTPStatusError as e:
-                if e.response.status_code in (401, 403, 404):
-                    any_definite_denial = True
+                if e.response.status_code == 401:
+                    any_auth_denial = True
                 else:
-                    log.warning('Transient error checking Confluence access: %s', e)
-                    return  # Don't change suspension state on transient failures
+                    # 403 / 404 / other 4xx → transient or non-auth; do not
+                    # change suspension state on this cycle.
+                    log.warning('Non-auth error checking Confluence access: %s', e)
+                    return
             except Exception as e:
-                log.warning('Error checking Confluence access: %s', e)
+                log.warning('Transient error checking Confluence access: %s', e)
                 return
 
-        if not any_access and not any_definite_denial:
-            # No probes ran (e.g. all sources missing cloud_id) — treat as transient.
-            return
+        if any_access:
+            await self._unsuspend_kb_if_needed()
+        elif any_auth_denial:
+            await self._record_auth_failure_and_maybe_suspend()
+        # else: no positive access and no 401 (e.g. only 404s / no probes ran)
+        # → leave suspension state untouched; this is not a credential denial.
 
-        owner_has_access = any_access
-
-        knowledge = Knowledges.get_knowledge_by_id(self.knowledge_id)
+    async def _unsuspend_kb_if_needed(self) -> None:
+        """Clear any suspension and reset the consecutive-auth-failure counter."""
+        knowledge = await Knowledges.get_knowledge_by_id(self.knowledge_id)
         if not knowledge:
             return
 
         meta = knowledge.meta or {}
         sync_info = meta.get(self.meta_key, {})
 
-        if owner_has_access:
-            if sync_info.get('suspended_at'):
-                log.info('Owner regained Confluence access, unsuspending KB %s', self.knowledge_id)
-                sync_info.pop('suspended_at', None)
-                sync_info.pop('suspended_reason', None)
-                meta[self.meta_key] = sync_info
-                Knowledges.update_knowledge_meta_by_id(self.knowledge_id, meta)
-        else:
-            if not sync_info.get('suspended_at'):
-                log.warning(
-                    'Owner %s lost Confluence access, suspending KB %s',
-                    self.user_id,
-                    self.knowledge_id,
-                )
-                sync_info['suspended_at'] = int(time.time())
-                sync_info['suspended_reason'] = 'owner_access_lost'
-                meta[self.meta_key] = sync_info
-                Knowledges.update_knowledge_meta_by_id(self.knowledge_id, meta)
+        was_suspended = bool(sync_info.get('suspended_at'))
+        had_failures = bool(sync_info.get('auth_fail_count'))
+        if not was_suspended and not had_failures:
+            return  # nothing to clear — avoid a needless meta write
 
-                await self._update_sync_status(
-                    'suspended',
-                    error='Owner no longer has access to the Confluence source. '
-                    'KB suspended — will be deleted after 30 days if access is not restored.',
-                )
+        if was_suspended:
+            log.info('Confluence access restored, unsuspending KB %s', self.knowledge_id)
+        sync_info.pop('suspended_at', None)
+        sync_info.pop('suspended_reason', None)
+        # Any success resets the consecutive-failure streak.
+        sync_info.pop('auth_fail_count', None)
+        meta[self.meta_key] = sync_info
+        await Knowledges.update_knowledge_meta_by_id(self.knowledge_id, meta)
+
+    async def _record_auth_failure_and_maybe_suspend(self) -> None:
+        """Increment the consecutive-401 counter; suspend at the threshold."""
+        knowledge = await Knowledges.get_knowledge_by_id(self.knowledge_id)
+        if not knowledge:
+            return
+
+        meta = knowledge.meta or {}
+        sync_info = meta.get(self.meta_key, {})
+
+        if sync_info.get('suspended_at'):
+            return  # already suspended — nothing more to do
+
+        # Persist the streak in meta so it survives across sync cycles.
+        fail_count = int(sync_info.get('auth_fail_count', 0)) + 1
+        sync_info['auth_fail_count'] = fail_count
+
+        if fail_count < self._AUTH_FAIL_SUSPEND_THRESHOLD:
+            log.warning(
+                'Confluence auth denial (401) for KB %s — failure %d/%d, not suspending yet',
+                self.knowledge_id,
+                fail_count,
+                self._AUTH_FAIL_SUSPEND_THRESHOLD,
+            )
+            meta[self.meta_key] = sync_info
+            await Knowledges.update_knowledge_meta_by_id(self.knowledge_id, meta)
+            return
+
+        # Threshold reached — suspend. The reason/message depends on auth mode:
+        # in basic/service-account mode there is no per-user owner, so the
+        # owner-centric copy would be misleading.
+        if self._auth_mode == 'basic':
+            suspended_reason = 'service_credential_invalid'
+            error_message = (
+                'The Confluence service credential is no longer valid (401). '
+                'KB suspended — restore the credential to resume.'
+            )
+        else:
+            suspended_reason = 'owner_access_lost'
+            error_message = (
+                'Owner no longer has access to the Confluence source. '
+                'KB suspended — will be deleted after 30 days if access is not restored.'
+            )
+
+        log.warning(
+            'Confluence auth denied for KB %s after %d consecutive failures, suspending (%s)',
+            self.knowledge_id,
+            fail_count,
+            suspended_reason,
+        )
+        sync_info['suspended_at'] = int(time.time())
+        sync_info['suspended_reason'] = suspended_reason
+        meta[self.meta_key] = sync_info
+        await Knowledges.update_knowledge_meta_by_id(self.knowledge_id, meta)
+
+        await self._update_sync_status('suspended', error=error_message)
 
     async def _verify_source_access(self, source: Dict[str, Any]) -> bool:
         cloud_id = source.get('cloud_id')
@@ -861,7 +942,7 @@ class ConfluenceSyncWorker(BaseSyncWorker):
         source_item_id = source.get('item_id')
         removed_count = 0
 
-        files = Knowledges.get_files_by_id(self.knowledge_id)
+        files = await Knowledges.get_files_by_id(self.knowledge_id)
         if not files:
             return 0
 
@@ -873,18 +954,20 @@ class ConfluenceSyncWorker(BaseSyncWorker):
             if file_meta.get('source_item_id') != source_item_id:
                 continue
 
-            Knowledges.remove_file_from_knowledge_by_id(self.knowledge_id, file.id)
+            await Knowledges.remove_file_from_knowledge_by_id(self.knowledge_id, file.id)
             try:
-                VECTOR_DB_CLIENT.delete(
+                from open_webui.retrieval.vector.async_client import ASYNC_VECTOR_DB_CLIENT
+
+                await ASYNC_VECTOR_DB_CLIENT.delete(
                     collection_name=self.knowledge_id,
                     filter={'file_id': file.id},
                 )
             except Exception as e:
                 log.warning('Failed to remove vectors for %s: %s', file.id, e)
 
-            remaining = Knowledges.get_knowledge_files_by_file_id(file.id)
+            remaining = await Knowledges.get_knowledge_files_by_file_id(file.id)
             if not remaining:
-                await asyncio.to_thread(DeletionService.delete_file, file.id)
+                await DeletionService.delete_file(file.id)
 
             removed_count += 1
 

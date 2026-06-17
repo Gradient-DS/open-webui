@@ -25,4 +25,4 @@ async def log_data_warning_acceptance(
             warning_message=form.warning_message,
             created_at=0,
         )
-    return DataWarningLogs.insert_log(user_id=user.id, form=form)
+    return await DataWarningLogs.insert_log(user_id=user.id, form=form)

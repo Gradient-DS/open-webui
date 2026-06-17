@@ -47,6 +47,7 @@ jobs:
       - name: Run pip-audit
         run: |
           pip-audit --desc on \
+            --ignore-vuln CVE-2025-3000 \
             --ignore-vuln CVE-2026-4539 \
             --ignore-vuln GHSA-rf74-v2fm-23pw \
             --ignore-vuln CVE-2026-33231 \

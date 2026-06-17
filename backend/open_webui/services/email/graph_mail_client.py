@@ -1,3 +1,4 @@
+import html
 import re
 
 import httpx
@@ -12,17 +13,22 @@ async def send_mail(
     to_address: str,
     subject: str,
     html_body: str,
+    attachments: list[dict] | None = None,
 ) -> bool:
     """Send email via Microsoft Graph API. Returns True on success."""
     token = await get_mail_access_token(app)
     from_address = str(app.state.config.EMAIL_FROM_ADDRESS)
 
+    message = {
+        'subject': subject,
+        'body': {'contentType': 'HTML', 'content': html_body},
+        'toRecipients': [{'emailAddress': {'address': to_address}}],
+    }
+    if attachments:
+        message['attachments'] = attachments
+
     payload = {
-        'message': {
-            'subject': subject,
-            'body': {'contentType': 'HTML', 'content': html_body},
-            'toRecipients': [{'emailAddress': {'address': to_address}}],
-        },
+        'message': message,
         'saveToSentItems': False,
     }
 
@@ -256,6 +262,75 @@ u + #body a {{
               font-weight: 500; margin: 24px 0;">
         <span style="color: #ffffff;">{button}</span>
     </a>
+    <p style="color: #9a9a9a; font-size: 13px; margin-top: 32px;">
+        {footer}
+    </p>
+</div>
+</body>
+</html>"""
+
+
+def render_document_email(subject: str) -> str:
+    """Branded HTML body for an agent-delivered concept-beschikking e-mail.
+
+    Mirrors the invite / retention templates (soev.ai house style: a
+    centered 560px card with heading, body and footer). Dutch-only — the
+    bezwaar pipeline that triggers this is a gemeente-Leiden flow and the
+    triggering ``/email-document`` endpoint was already Dutch-only, so a
+    locale dict would be dead weight here.
+
+    :param subject: The document title (also the e-mail subject). Rendered
+        in a highlighted line so the recipient sees which beschikking this
+        is. HTML-escaped because the title is agent (LLM) generated.
+    """
+    title = html.escape(subject)
+    heading = 'Je concept-beschikking staat klaar'
+    intro = 'Hierbij ontvang je de opgestelde concept-beschikking als bijlage.'
+    note = (
+        'Dit is een automatisch gegenereerd concept. Controleer de inhoud '
+        'zorgvuldig en pas waar nodig aan voordat je de beschikking '
+        'definitief vaststelt en ondertekent.'
+    )
+    footer = f'Verstuurd via {APP_NAME_HTML}'
+
+    return f"""\
+<!DOCTYPE html>
+<html>
+<head>
+<meta name="format-detection" content="telephone=no, date=no, address=no, email=no, url=no">
+<style type="text/css">
+u + #body a {{
+    color: inherit !important;
+    text-decoration: none !important;
+    font-size: inherit !important;
+    font-weight: inherit !important;
+}}
+</style>
+</head>
+<body id="body">
+<div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            max-width: 560px; margin: 0 auto; padding: 40px 20px;">
+    <h2 style="color: #1a1a1a; margin-bottom: 8px;">
+        {heading}
+    </h2>
+    <p style="color: #4a4a4a; font-size: 16px; line-height: 1.5;">
+        {intro}
+    </p>
+    <div style="border: 1px solid #e5e7eb; border-left: 3px solid #0f172a;
+                background: #f8fafc; border-radius: 8px; padding: 16px 20px;
+                margin: 24px 0;">
+        <p style="color: #9a9a9a; font-size: 12px; text-transform: uppercase;
+                  letter-spacing: 0.04em; margin: 0 0 4px;">
+            Document
+        </p>
+        <p style="color: #1a1a1a; font-size: 15px; font-weight: 600;
+                  line-height: 1.4; margin: 0;">
+            {title}
+        </p>
+    </div>
+    <p style="color: #4a4a4a; font-size: 15px; line-height: 1.5;">
+        {note}
+    </p>
     <p style="color: #9a9a9a; font-size: 13px; margin-top: 32px;">
         {footer}
     </p>

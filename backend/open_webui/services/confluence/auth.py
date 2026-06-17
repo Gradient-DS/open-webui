@@ -247,11 +247,11 @@ async def exchange_code_for_tokens(
     knowledge_id = flow['knowledge_id']
     provider = 'confluence'
 
-    existing = OAuthSessions.get_session_by_provider_and_user_id(provider, user_id)
+    existing = await OAuthSessions.get_session_by_provider_and_user_id(provider, user_id)
     if existing:
-        OAuthSessions.delete_session_by_id(existing.id)
+        await OAuthSessions.delete_session_by_id(existing.id)
 
-    session = OAuthSessions.create_session(
+    session = await OAuthSessions.create_session(
         user_id=user_id,
         provider=provider,
         token=token_data,
@@ -269,25 +269,25 @@ async def exchange_code_for_tokens(
     return {'success': True, 'knowledge_id': knowledge_id}
 
 
-def get_stored_token(user_id: str) -> Optional[Dict[str, Any]]:
+async def get_stored_token(user_id: str) -> Optional[Dict[str, Any]]:
     """Get the stored Confluence token for a user, or None."""
-    session = OAuthSessions.get_session_by_provider_and_user_id('confluence', user_id)
+    session = await OAuthSessions.get_session_by_provider_and_user_id('confluence', user_id)
     if session:
         return session.token
     return None
 
 
-def get_stored_sites(user_id: str) -> List[Dict[str, Any]]:
+async def get_stored_sites(user_id: str) -> List[Dict[str, Any]]:
     """Return the list of accessible Confluence sites for a user."""
-    token = get_stored_token(user_id)
+    token = await get_stored_token(user_id)
     if not token:
         return []
     return token.get('sites', []) or []
 
 
-def delete_stored_token(user_id: str) -> bool:
+async def delete_stored_token(user_id: str) -> bool:
     """Delete the stored Confluence token for a user."""
-    session = OAuthSessions.get_session_by_provider_and_user_id('confluence', user_id)
+    session = await OAuthSessions.get_session_by_provider_and_user_id('confluence', user_id)
     if session:
-        return OAuthSessions.delete_session_by_id(session.id)
+        return await OAuthSessions.delete_session_by_id(session.id)
     return False

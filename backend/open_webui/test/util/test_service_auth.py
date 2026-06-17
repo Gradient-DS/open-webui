@@ -52,7 +52,7 @@ def fake_user():
 def app_with_principal(monkeypatch, fake_user):
     """FastAPI app with one endpoint that echoes the resolved principal."""
 
-    def fake_get_user_by_id(user_id: str, db=None):
+    async def fake_get_user_by_id(user_id: str, db=None):
         if user_id == fake_user.id:
             return fake_user
         return None
@@ -254,7 +254,7 @@ def agent_user():
 def agent_app(monkeypatch, agent_user):
     """FastAPI app that exercises ``get_agent_principal`` end-to-end."""
 
-    def fake_get_user_by_id(user_id: str, db=None):
+    async def fake_get_user_by_id(user_id: str, db=None):
         if user_id == agent_user.id:
             return agent_user
         return None

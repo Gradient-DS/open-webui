@@ -26,6 +26,7 @@
 	import OneDrive from '../icons/OneDrive.svelte';
 	import GoogleDrive from '../icons/GoogleDrive.svelte';
 	import Confluence from '../icons/Confluence.svelte';
+	import Topdesk from '../icons/Topdesk.svelte';
 	import Spinner from '../common/Spinner.svelte';
 	import Tooltip from '../common/Tooltip.svelte';
 	import Dropdown from '../common/Dropdown.svelte';
@@ -284,7 +285,7 @@
 								</button>
 							{/if}
 
-							{#if $config?.features?.enable_confluence_integration && $config?.features?.enable_confluence_sync && ($user?.role === 'admin' || $config?.features?.confluence_kb_mode !== 'shared')}
+							{#if $config?.features?.enable_confluence_integration && $config?.features?.enable_confluence_sync && $config?.features?.confluence_kb_mode === 'per_user' && $config?.features?.confluence_oauth_configured}
 								<button
 									class="flex gap-2 w-full items-center px-3 py-1.5 text-sm cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-xl"
 									type="button"
@@ -461,6 +462,10 @@
 													{:else if item.meta?.confluence_sync?.status === 'syncing'}
 														<SyncProgressBadge sync={item.meta.confluence_sync} />
 													{/if}
+												{:else if item?.type === 'topdesk'}
+													<!-- Service-account managed: no per-KB reauth/sync badges. -->
+													<Topdesk className="size-4" />
+													<Badge type="info" content={$i18n.t('TOPdesk')} />
 												{:else if $config?.integration_providers?.[item?.type]}
 													<Badge
 														type={$config.integration_providers[item.type].badge_type}
@@ -489,7 +494,14 @@
 											{/if}
 										</div>
 
-										{#if item?.write_access || $user?.role === 'admin'}
+										<!-- Managed pre-synced shared KBs (Confluence/TOPdesk) are read-only
+										     and admin-managed: their lifecycle (delete / re-provision) lives in
+										     the Cloud Sync admin panel, and the backend blocks delete/reset via
+										     _assert_not_managed_shared_kb. So suppress the per-KB Export/Delete
+										     menu here for EVERYONE, including admins — otherwise it offers
+										     actions that are either inappropriate (export of a synced mirror)
+										     or backend-blocked (delete). -->
+										{#if (item?.write_access || $user?.role === 'admin') && !(item?.meta?.confluence_sync?.shared || item?.meta?.topdesk_sync?.shared)}
 											<div class="flex items-center gap-2">
 												<div class=" flex self-center">
 													<ItemMenu
@@ -514,7 +526,11 @@
 												? $i18n.t(
 														'Read-only Confluence knowledge base managed by administrators.'
 													)
-												: (item?.description ?? item.name)}
+												: item?.meta?.topdesk_sync?.shared
+													? $i18n.t(
+															'Read-only TOPdesk knowledge base managed by administrators.'
+														)
+													: (item?.description ?? item.name)}
 										>
 											<div class=" flex items-center gap-2">
 												<div class=" text-sm font-medium line-clamp-1 capitalize">{item.name}</div>
@@ -530,7 +546,7 @@
 											</Tooltip>
 
 											<div class="text-xs text-gray-500 shrink-0">
-												{#if item?.meta?.confluence_sync?.shared}
+												{#if item?.meta?.confluence_sync?.shared || item?.meta?.topdesk_sync?.shared}
 													{$i18n.t('Managed by administrators')}
 												{:else}
 													<Tooltip

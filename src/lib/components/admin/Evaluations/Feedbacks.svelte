@@ -10,7 +10,12 @@
 	import { onMount, getContext } from 'svelte';
 	const i18n = getContext('i18n');
 
-	import { deleteFeedbackById, exportAllFeedbacks, getFeedbackItems } from '$lib/apis/evaluations';
+	import {
+		deleteFeedbackById,
+		exportAllFeedbacks,
+		getFeedbackItems,
+		getFeedbackModelIds
+	} from '$lib/apis/evaluations';
 
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
 	import Download from '$lib/components/icons/Download.svelte';
@@ -20,12 +25,15 @@
 	import FeedbackMenu from './FeedbackMenu.svelte';
 	import FeedbackModal from './FeedbackModal.svelte';
 	import EllipsisHorizontal from '$lib/components/icons/EllipsisHorizontal.svelte';
+	import Dropdown from '$lib/components/common/Dropdown.svelte';
 
 	import ChevronUp from '$lib/components/icons/ChevronUp.svelte';
 	import ChevronDown from '$lib/components/icons/ChevronDown.svelte';
 	import { WEBUI_API_BASE_URL, WEBUI_BASE_URL } from '$lib/constants';
 	import { config } from '$lib/stores';
 	import Spinner from '$lib/components/common/Spinner.svelte';
+	import Select from '$lib/components/common/Select.svelte';
+	import Check from '$lib/components/icons/Check.svelte';
 
 	// Message-level feedback state
 	let msgPage = 1;
@@ -40,6 +48,25 @@
 	let convTotal = null;
 	let convOrderBy: string = 'updated_at';
 	let convDirection: 'asc' | 'desc' = 'desc';
+
+	// Upstream-added model filtering vars (used by post-conflict code that was
+	// auto-merged in). Kept here so the file compiles even though the rest of
+	// the admin Feedbacks UI keeps our msg/conv split rather than upstream's
+	// single-list-with-model-filter pattern. Adopting upstream's full model
+	// filter UI is a follow-up.
+	let orderBy: string = 'updated_at';
+	let direction: 'asc' | 'desc' = 'desc';
+	let selectedModelId: string = '';
+	let modelIds: string[] = [];
+
+	const setSortKey = (key) => {
+		if (orderBy === key) {
+			direction = direction === 'asc' ? 'desc' : 'asc';
+		} else {
+			orderBy = key;
+			direction = 'asc';
+		}
+	};
 
 	let showFeedbackModal = false;
 	let selectedFeedback = null;
@@ -180,19 +207,63 @@
 		window.addEventListener('message', messageHandler, false);
 	};
 
-	const exportHandler = async () => {
-		const _feedbacks = await exportAllFeedbacks(localStorage.token).catch((err) => {
-			toast.error(err);
-			return null;
+	const feedbacksToCsv = (feedbacks) => {
+		const rows = feedbacks.map((f) => {
+			const { data, ...rest } = f;
+			return {
+				id: rest.id,
+				user_id: rest.user_id,
+				chat_id: data?.chat_id ?? '',
+				model_id: data?.model_id ?? '',
+				sibling_model_ids: (data?.sibling_model_ids ?? []).join(';'),
+				rating: data?.rating ?? '',
+				reason: data?.reason ?? '',
+				comment: data?.comment ?? '',
+				created_at: rest.created_at,
+				updated_at: rest.updated_at
+			};
 		});
 
+		if (rows.length === 0) return '';
+
+		const headers = Object.keys(rows[0]);
+		const escape = (val) => {
+			const s = String(val ?? '');
+			return s.includes(',') || s.includes('"') || s.includes('\n')
+				? `"${s.replace(/"/g, '""')}"`
+				: s;
+		};
+
+		return [headers.join(','), ...rows.map((r) => headers.map((h) => escape(r[h])).join(','))].join(
+			'\n'
+		);
+	};
+
+	const exportHandler = async (format: 'json' | 'csv' = 'json') => {
+		const _feedbacks = await exportAllFeedbacks(localStorage.token, selectedModelId).catch(
+			(err) => {
+				toast.error(err);
+				return null;
+			}
+		);
+
 		if (_feedbacks) {
-			let blob = new Blob([JSON.stringify(_feedbacks)], {
-				type: 'application/json'
-			});
-			saveAs(blob, `feedback-history-export-${Date.now()}.json`);
+			if (format === 'csv') {
+				const csv = feedbacksToCsv(_feedbacks);
+				let blob = new Blob([csv], { type: 'text/csv' });
+				saveAs(blob, `feedback-history-export-${Date.now()}.csv`);
+			} else {
+				let blob = new Blob([JSON.stringify(_feedbacks)], {
+					type: 'application/json'
+				});
+				saveAs(blob, `feedback-history-export-${Date.now()}.json`);
+			}
 		}
 	};
+
+	onMount(() => {
+		loadModelIds();
+	});
 </script>
 
 <FeedbackModal bind:show={showFeedbackModal} {selectedFeedback} onClose={closeFeedbackModal} />
@@ -215,6 +286,7 @@
 				{msgTotal}
 			</div>
 		</div>
+	</div>
 
 		{#if msgTotal > 0}
 			<div>
@@ -230,7 +302,6 @@
 				</Tooltip>
 			</div>
 		{/if}
-	</div>
 
 	<div class="scrollbar-hidden relative whitespace-nowrap overflow-x-auto max-w-full">
 		{#if (msgItems ?? []).length === 0}
@@ -395,17 +466,19 @@
 								</div>
 							</td>
 
-							<td class="px-3 py-1 text-right font-medium text-gray-900 dark:text-white w-max">
-								<div class=" flex justify-end">
-									{#if feedback?.data?.rating?.toString() === '1'}
-										<Badge type="info" content={$i18n.t('Won')} />
-									{:else if feedback?.data?.rating?.toString() === '0'}
-										<Badge type="muted" content={$i18n.t('Draw')} />
-									{:else if feedback?.data?.rating?.toString() === '-1'}
-										<Badge type="error" content={$i18n.t('Lost')} />
-									{/if}
-								</div>
-							</td>
+							{#if feedback?.data?.rating}
+								<td class="px-3 py-1 text-right font-medium text-gray-900 dark:text-white w-max">
+									<div class=" flex justify-end">
+										{#if feedback?.data?.rating?.toString() === '1'}
+											<Badge type="info" content={$i18n.t('Won')} />
+										{:else if feedback?.data?.rating?.toString() === '0'}
+											<Badge type="muted" content={$i18n.t('Draw')} />
+										{:else if feedback?.data?.rating?.toString() === '-1'}
+											<Badge type="error" content={$i18n.t('Lost')} />
+										{/if}
+									</div>
+								</td>
+							{/if}
 
 							<td class=" px-3 py-1 text-right font-medium">
 								{dayjs(feedback.updated_at * 1000).fromNow()}
@@ -425,11 +498,15 @@
 								</FeedbackMenu>
 							</td>
 						</tr>
-					{/each}
-				</tbody>
-			</table>
+						{/each}
+					</tbody>
+				</table>
+			{/if}
+		</div>
+
+		{#if msgTotal > 30}
+			<Pagination bind:page={msgPage} count={msgTotal} perPage={30} />
 		{/if}
-	</div>
 
 	{#if msgTotal > 0 && $config?.features?.enable_community_sharing}
 		<div class=" flex flex-col justify-end w-full text-right gap-1">
