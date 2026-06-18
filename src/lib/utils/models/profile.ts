@@ -13,13 +13,13 @@ export type ModelProfile = {
 	info?: string; // free-text shown on hover behind the (i) icon
 	speed?: number; // 1-3
 	quality?: number; // 1-3
-	origin?: ModelOrigin; // where the model comes from, shown as a flag
-	hosting?: string; // who/where the model is hosted, e.g. "Nebule (NL)"; shown in the info tooltip
-	local?: boolean; // hosted locally; when false a data-warning sign is shown
+	origin?: ModelOrigin; // where the model comes from (not rendered; mention it in `info` instead)
+	hosting?: string; // who/where the model is hosted, e.g. "Nebul (NL)"; shown in the info tooltip.
+	// A data-sovereignty warning is shown automatically when the hosting flag is not NL/EU.
 	eco?: boolean; // show the green leaf badge
 };
 
-/** Region a model originates from. Shown as a flag in the dropdown. */
+/** Region a model originates from. Not rendered; kept for data/back-compat. */
 export type ModelOrigin = 'EU' | 'US' | 'CN';
 
 /** Country/region codes that have flag artwork in Flag.svelte. */
@@ -102,17 +102,6 @@ export const PROFILE_AXES = [
 		color: 'text-amber-500'
 	}
 ] as const;
-
-/**
- * Display label for each model origin. The flag artwork lives in
- * Flag.svelte (inline SVG); this just maps the origin to its i18n label,
- * used for the tooltip and accessible name.
- */
-export const ORIGIN_META: Record<ModelOrigin, { labelKey: string }> = {
-	EU: { labelKey: 'Europe (EU)' },
-	US: { labelKey: 'United States' },
-	CN: { labelKey: 'China' }
-};
 
 export type ProfileAxisKey = (typeof PROFILE_AXES)[number]['key'];
 

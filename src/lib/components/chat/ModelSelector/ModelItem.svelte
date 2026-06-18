@@ -20,12 +20,7 @@
 	import InfoCircle from '$lib/components/icons/InfoCircle.svelte';
 	import ExclamationTriangle from '$lib/components/icons/ExclamationTriangle.svelte';
 	import Flag from '$lib/components/icons/Flag.svelte';
-	import {
-		resolveModelProfile,
-		ORIGIN_META,
-		parseHosting,
-		hostingFromHost
-	} from '$lib/utils/models/profile';
+	import { resolveModelProfile, parseHosting, hostingFromHost } from '$lib/utils/models/profile';
 
 	const i18n = getContext('i18n');
 
@@ -37,10 +32,12 @@
 	$: profile = resolveModelProfile(item?.model ?? {});
 	$: displayName = item?.label || item?.value || '';
 	$: infoTooltip = (profile.info ?? '').replaceAll('\n', '<br>');
-	$: originMeta = profile.origin ? ORIGIN_META[profile.origin] : undefined;
 	// Prefer the live hosting derived from the upstream connection host (LiteLLM/OpenAI
 	// api_base), falling back to the static hosting value from the model profile.
 	$: hosting = parseHosting(hostingFromHost(item?.model?.connection_host) ?? profile.hosting);
+	// Warn when the model is hosted outside NL/EU (data sovereignty). Inferred from the
+	// hosting country flag; unknown hosting (no flag) shows no warning.
+	$: dataWarning = !!hosting?.flag && hosting.flag !== 'NL' && hosting.flag !== 'EU';
 
 	export let unloadModelHandler: (modelValue: string) => void = () => {};
 	export let pinModelHandler: (modelId: string) => void = () => {};
@@ -87,7 +84,7 @@
 			</div>
 
 			<div class=" shrink-0 flex items-center gap-2">
-				{#if profile.info || originMeta || hosting}
+				{#if profile.info || hosting}
 					{#key item.model.id}
 						<Tooltip elementId="model-info-{item.model.id}">
 							<InfoCircle className="size-3.5 text-gray-400 dark:text-gray-500" />
@@ -96,33 +93,19 @@
 								{#if profile.info}
 									<div>{@html infoTooltip}</div>
 								{/if}
-								{#if originMeta || hosting}
+								{#if hosting}
 									<div
-										class="flex flex-col gap-1 {profile.info
+										class="flex items-center gap-1.5 {profile.info
 											? 'mt-1.5 pt-1.5 border-t border-white/15'
 											: ''}"
 									>
-										{#if originMeta}
-											<div class="flex items-center gap-1.5">
-												<span>{$i18n.t('Developed in')}: {$i18n.t(originMeta.labelKey)}</span>
-												<Flag
-													origin={profile.origin}
-													className="w-[18px] h-[13px] rounded-[2px]"
-													ariaLabel={$i18n.t(originMeta.labelKey)}
-												/>
-											</div>
-										{/if}
-										{#if hosting}
-											<div class="flex items-center gap-1.5">
-												<span>{$i18n.t('Hosting location')}: {hosting.label}</span>
-												{#if hosting.flag}
-													<Flag
-														origin={hosting.flag}
-														className="w-[18px] h-[13px] rounded-[2px]"
-														ariaLabel={hosting.flag}
-													/>
-												{/if}
-											</div>
+										<span>{$i18n.t('Hosting location')}: {hosting.label}</span>
+										{#if hosting.flag}
+											<Flag
+												origin={hosting.flag}
+												className="w-[18px] h-[13px] rounded-[2px]"
+												ariaLabel={hosting.flag}
+											/>
 										{/if}
 									</div>
 								{/if}
@@ -254,10 +237,10 @@
 
 	<div class="ml-auto pl-2 pr-1 flex items-center gap-2 shrink-0">
 		<div class="w-9 shrink-0 flex items-center justify-end gap-1.5">
-			{#if profile.local === false}
+			{#if dataWarning}
 				<Tooltip
 					content={$i18n.t(
-						'This model does not run on our own servers. Be careful when sharing sensitive data.'
+						'This model is not hosted on Dutch private cloud. Be careful when sharing sensitive data.'
 					)}
 				>
 					<ExclamationTriangle
