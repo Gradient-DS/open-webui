@@ -3206,7 +3206,10 @@ CONFLUENCE_MAX_PAGE_SIZE_MB = int(os.getenv('CONFLUENCE_MAX_PAGE_SIZE_MB', '25')
 
 # Confluence auth mode. 'oauth' = per-user Atlassian 3LO (default, discovers
 # accessible sites from the token). 'basic' = a single service credential
-# (username + API token) used for all Confluence sync against one site.
+# (username + classic API token) talking directly to the site. 'scoped' = a
+# single service credential using an Atlassian *scoped* API token: same Basic
+# header as 'basic' but it only works against the Atlassian gateway
+# (api.atlassian.com/ex/confluence/{cloudId}), so it reuses the oauth transport.
 CONFLUENCE_AUTH_MODE = PersistentConfig(
     'CONFLUENCE_AUTH_MODE',
     'confluence.auth_mode',
@@ -3233,6 +3236,25 @@ CONFLUENCE_BASIC_AUTH_API_TOKEN = PersistentConfig(
     'CONFLUENCE_BASIC_AUTH_API_TOKEN',
     'confluence.basic_auth_api_token',
     os.environ.get('CONFLUENCE_BASIC_AUTH_API_TOKEN', ''),
+)
+
+# Scoped-auth service credential: an Atlassian *scoped* API token paired with
+# the service-account email in CONFLUENCE_BASIC_AUTH_USERNAME. Used only when
+# auth_mode == 'scoped'. Round-tripped by the admin-only config API behind a
+# reveal toggle (SensitiveInput), same disclosure profile as the basic token.
+CONFLUENCE_SCOPED_API_TOKEN = PersistentConfig(
+    'CONFLUENCE_SCOPED_API_TOKEN',
+    'confluence.scoped_api_token',
+    os.environ.get('CONFLUENCE_SCOPED_API_TOKEN', ''),
+)
+
+# Optional manual override / cache of the resolved Atlassian cloudId for the
+# scoped-token gateway path. Empty → resolve from CONFLUENCE_SITE_URL via
+# _edge/tenant_info at config-save / client-build time.
+CONFLUENCE_CLOUD_ID = PersistentConfig(
+    'CONFLUENCE_CLOUD_ID',
+    'confluence.cloud_id',
+    os.environ.get('CONFLUENCE_CLOUD_ID', ''),
 )
 
 # Confluence KB sharing mode. 'per_user' = each user creates and owns their

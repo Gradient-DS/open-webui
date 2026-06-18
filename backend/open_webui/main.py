@@ -406,6 +406,8 @@ from open_webui.config import (
     CONFLUENCE_SITE_URL,
     CONFLUENCE_BASIC_AUTH_USERNAME,
     CONFLUENCE_BASIC_AUTH_API_TOKEN,
+    CONFLUENCE_SCOPED_API_TOKEN,
+    CONFLUENCE_CLOUD_ID,
     CONFLUENCE_KB_MODE,
     ENABLE_TOPDESK_INTEGRATION,
     ENABLE_TOPDESK_SYNC,
@@ -1533,6 +1535,8 @@ app.state.config.CONFLUENCE_AUTH_MODE = CONFLUENCE_AUTH_MODE
 app.state.config.CONFLUENCE_SITE_URL = CONFLUENCE_SITE_URL
 app.state.config.CONFLUENCE_BASIC_AUTH_USERNAME = CONFLUENCE_BASIC_AUTH_USERNAME
 app.state.config.CONFLUENCE_BASIC_AUTH_API_TOKEN = CONFLUENCE_BASIC_AUTH_API_TOKEN
+app.state.config.CONFLUENCE_SCOPED_API_TOKEN = CONFLUENCE_SCOPED_API_TOKEN
+app.state.config.CONFLUENCE_CLOUD_ID = CONFLUENCE_CLOUD_ID
 app.state.config.CONFLUENCE_KB_MODE = CONFLUENCE_KB_MODE
 app.state.config.ENABLE_TOPDESK_INTEGRATION = ENABLE_TOPDESK_INTEGRATION
 app.state.config.ENABLE_TOPDESK_SYNC = ENABLE_TOPDESK_SYNC
@@ -3156,12 +3160,14 @@ async def get_app_config(request: Request):
     if user is None:
         onboarding = user_count == 0
 
-    # Coupling ``basic ⇒ shared``: basic (service-account) auth has no per-user
-    # OAuth tokens, so it can only drive the pre-synced shared KB. Coerce a
-    # stored ``basic + per_user`` state to shared at read time so an already-
-    # inconsistent config is corrected without requiring a re-save.
+    # Coupling ``(basic|scoped) ⇒ shared``: the service-account auth modes have
+    # no per-user OAuth tokens, so they can only drive the pre-synced shared KB.
+    # Coerce a stored ``service-mode + per_user`` state to shared at read time so
+    # an already-inconsistent config is corrected without requiring a re-save.
+    from open_webui.services.confluence.basic_auth import is_service_mode
+
     _confluence_kb_mode = (
-        'shared' if app.state.config.CONFLUENCE_AUTH_MODE == 'basic' else app.state.config.CONFLUENCE_KB_MODE
+        'shared' if is_service_mode(app.state.config.CONFLUENCE_AUTH_MODE) else app.state.config.CONFLUENCE_KB_MODE
     )
 
     # Shared Confluence KB id — surfaced so the chat '+' menu can attach the

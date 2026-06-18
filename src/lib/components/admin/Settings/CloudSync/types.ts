@@ -17,7 +17,7 @@ import type { TopdeskBrowseItem } from '$lib/apis/topdesk';
 
 export type ItemNoun = 'pages' | 'files' | 'items';
 
-export type AuthMode = 'oauth' | 'basic';
+export type AuthMode = 'oauth' | 'basic' | 'scoped';
 
 // Sync run status. 'idle' | 'syncing' are the known values; `(string & {})`
 // keeps the type open to server-added values while preserving literal
@@ -99,6 +99,8 @@ export interface ConfluenceConfigResponse {
 	CONFLUENCE_SITE_URL?: string;
 	CONFLUENCE_BASIC_AUTH_USERNAME?: string;
 	CONFLUENCE_BASIC_AUTH_API_TOKEN?: string;
+	CONFLUENCE_SCOPED_API_TOKEN?: string;
+	CONFLUENCE_CLOUD_ID?: string;
 	CONFLUENCE_KB_MODE?: string;
 }
 

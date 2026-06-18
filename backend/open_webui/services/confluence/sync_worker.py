@@ -12,7 +12,11 @@ from open_webui.services.confluence.confluence_client import ConfluenceClient
 from open_webui.services.confluence.basic_auth import (
     basic_auth_credential,
     build_basic_client,
+    build_scoped_client_for,
     get_basic_site,
+    is_service_mode,
+    scoped_auth_credential,
+    service_site,
     resolve_auth_mode,
 )
 from open_webui.services.confluence.html_renderer import html_to_markdown
@@ -112,6 +116,13 @@ def _build_front_matter(file_info: Dict[str, Any]) -> str:
 class ConfluenceSyncWorker(BaseSyncWorker):
     """Worker to sync Confluence space/page contents to a Knowledge base."""
 
+    # Every page renders at least a ``# {title}`` heading + a metadata line in
+    # ``_download_file_content`` (front-matter), so a successful download is
+    # never empty. An empty ``data['content']`` row is therefore always a
+    # failed/partial ingest — opt into the empty-content guard so the cloud-hash
+    # short-circuits re-ingest it instead of freezing it empty forever.
+    expect_nonempty_content = True
+
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         # Resolve the KB's auth mode lazily on first access. In basic mode
@@ -200,6 +211,11 @@ class ConfluenceSyncWorker(BaseSyncWorker):
                 # the cache key. The client reads the service credential and
                 # site URL straight from config.
                 cached = build_basic_client()
+            elif self._auth_mode == 'scoped':
+                # Scoped sources carry the real Atlassian cloudId (resolved
+                # open-webui side), so build directly from config + that id —
+                # no _edge/tenant_info round-trip needed here.
+                cached = build_scoped_client_for(cloud_id)
             else:
                 cached = ConfluenceClient(
                     access_token=self.access_token,
@@ -295,11 +311,12 @@ class ConfluenceSyncWorker(BaseSyncWorker):
             key = (src.get('cloud_id'), src.get('confluence_type') or 'space', src_item_id)
             old_by_key[key] = src
 
-        # Basic-mode default — OAuth-mode items carry their own cloud_id/site_url
-        # from the picker (multi-site OAuth tenants).
-        basic_site = get_basic_site()
-        default_cloud_id = basic_site['cloud_id'] if basic_site else ''
-        default_site_url = basic_site['url'] if basic_site else ''
+        # Service-mode default — OAuth-mode items carry their own cloud_id/
+        # site_url from the picker (multi-site OAuth tenants). For scoped the
+        # cloud_id is the real Atlassian cloudId; for basic it is the site host.
+        service_site_info = await service_site(self._auth_mode) if is_service_mode(self._auth_mode) else None
+        default_cloud_id = service_site_info['cloud_id'] if service_site_info else ''
+        default_site_url = service_site_info['url'] if service_site_info else ''
 
         resolved: List[Dict[str, Any]] = []
         seen_keys: set[tuple] = set()
@@ -749,6 +766,13 @@ class ConfluenceSyncWorker(BaseSyncWorker):
             descriptor['site_url'] = basic_site['url'] if basic_site else ''
             item['credential_type'] = 'basic_auth'
             item['source_credential'] = basic_auth_credential()
+        elif self._auth_mode == 'scoped':
+            # scoped_token: same email:token Basic header as basic_auth, but the
+            # loader-worker addresses the Atlassian gateway by cloudId (resolved
+            # open-webui side and carried on every source).
+            descriptor['cloud_id'] = file_info.get('cloud_id', '')
+            item['credential_type'] = 'scoped_token'
+            item['source_credential'] = scoped_auth_credential()
         else:
             # user_oauth: the Bearer token (already set as source_credential by
             # the base implementation) is used against the Atlassian gateway.
