@@ -4,8 +4,8 @@
 		"match": "*",
 		"profile": {
 			"bestFor": "Algemene vragen",
-			"speed": 2,
-			"quality": 2,
+			"speed": 0,
+			"quality": 0,
 			"eco": false
 		}
 	},
