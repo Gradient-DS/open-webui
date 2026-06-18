@@ -285,6 +285,7 @@ type Settings = {
 	notificationEnabled?: boolean;
 	highContrastMode?: boolean;
 	advancedMode?: boolean;
+	modePromptSeen?: boolean;
 	title?: TitleSettings;
 	showChatTitleInTab?: boolean;
 	splitLargeDeltas?: boolean;

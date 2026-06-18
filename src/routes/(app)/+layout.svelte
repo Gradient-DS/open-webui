@@ -14,7 +14,7 @@
 	import { getBanners } from '$lib/apis/configs';
 	import { get2FAStatus } from '$lib/apis/auths';
 	import { getTerminalServers } from '$lib/apis/terminal';
-	import { getUserSettings } from '$lib/apis/users';
+	import { getUserSettings, updateUserSettings } from '$lib/apis/users';
 
 	import { WEBUI_VERSION, WEBUI_API_BASE_URL } from '$lib/constants';
 	import { compareVersion } from '$lib/utils';
@@ -46,6 +46,7 @@
 	import Sidebar from '$lib/components/layout/Sidebar.svelte';
 	import SettingsModal from '$lib/components/chat/SettingsModal.svelte';
 	import ChangelogModal from '$lib/components/ChangelogModal.svelte';
+	import ModeSelectModal from '$lib/components/layout/ModeSelectModal.svelte';
 	import AccountPending from '$lib/components/layout/Overlay/AccountPending.svelte';
 	import AcceptanceModal from '$lib/components/layout/Overlay/AcceptanceModal.svelte';
 	import TwoFactorRequired from '$lib/components/layout/Overlay/TwoFactorRequired.svelte';
@@ -58,6 +59,8 @@
 
 	let loaded = false;
 	let DB = null;
+
+	let showModeSelect = false;
 	let localDBChats = [];
 
 	let show2FAOverlay = false;
@@ -364,6 +367,14 @@
 			showChangelog.set($settings?.version !== $config.version);
 		}
 
+		// One-time prompt: let users pick basic vs advanced mode on first launch.
+		// Mark seen immediately so it never nags again (dismissing keeps basic).
+		if (!($settings?.modePromptSeen ?? false)) {
+			showModeSelect = true;
+			settings.set({ ...$settings, modePromptSeen: true });
+			updateUserSettings(localStorage.token, { ui: $settings });
+		}
+
 		if ($user?.role === 'admin' || ($user?.permissions?.chat?.temporary ?? true)) {
 			if ($page.url.searchParams.get('temporary-chat') === 'true') {
 				temporaryChatEnabled.set(true);
@@ -427,6 +438,7 @@
 
 <SettingsModal bind:show={$showSettings} />
 <ChangelogModal bind:show={$showChangelog} />
+<ModeSelectModal bind:show={showModeSelect} />
 
 {#if isFeatureEnabled('changelog') && version && compareVersion(version.latest, version.current) && ($settings?.showUpdateToast ?? true)}
 	<div class=" absolute bottom-8 right-8 z-50" in:fade={{ duration: 100 }}>
