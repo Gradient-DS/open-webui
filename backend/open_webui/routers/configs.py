@@ -927,11 +927,17 @@ class ConfluenceConfigForm(BaseModel):
     CONFLUENCE_OAUTH_CLIENT_SECRET: Optional[str] = None
     CONFLUENCE_SYNC_INTERVAL_MINUTES: Optional[int] = None
     CONFLUENCE_MAX_PAGES_PER_SYNC: Optional[int] = None  # 0 = unlimited
-    # Basic auth (username + API token). auth_mode is 'oauth' or 'basic'.
+    # auth_mode is 'oauth', 'basic' (classic API token → site) or 'scoped'
+    # (scoped API token → Atlassian gateway). 'basic' and 'scoped' share the
+    # site URL + username fields; only the token field differs.
     CONFLUENCE_AUTH_MODE: Optional[str] = None
     CONFLUENCE_SITE_URL: Optional[str] = None
     CONFLUENCE_BASIC_AUTH_USERNAME: Optional[str] = None
     CONFLUENCE_BASIC_AUTH_API_TOKEN: Optional[str] = None
+    # Scoped-mode credential + the gateway cloudId (optional; auto-resolved from
+    # the site URL when blank).
+    CONFLUENCE_SCOPED_API_TOKEN: Optional[str] = None
+    CONFLUENCE_CLOUD_ID: Optional[str] = None
     # Sharing mode: 'per_user' or 'shared'. The shared-KB owner lives on the
     # KB row (``kb.user_id``); the provision form sets it, not this config.
     CONFLUENCE_KB_MODE: Optional[str] = None
@@ -954,6 +960,9 @@ async def get_confluence_config(request: Request, user=Depends(get_admin_user)):
         'CONFLUENCE_SITE_URL': c.CONFLUENCE_SITE_URL,
         'CONFLUENCE_BASIC_AUTH_USERNAME': c.CONFLUENCE_BASIC_AUTH_USERNAME,
         'CONFLUENCE_BASIC_AUTH_API_TOKEN': c.CONFLUENCE_BASIC_AUTH_API_TOKEN,
+        # Scoped token round-trips masked in the UI, like the basic token / OAuth secret.
+        'CONFLUENCE_SCOPED_API_TOKEN': c.CONFLUENCE_SCOPED_API_TOKEN,
+        'CONFLUENCE_CLOUD_ID': c.CONFLUENCE_CLOUD_ID,
         'CONFLUENCE_KB_MODE': c.CONFLUENCE_KB_MODE,
     }
 
@@ -967,16 +976,16 @@ async def set_confluence_config(
     c = request.app.state.config
 
     # Compute the effective auth/KB modes up front, applying the coupling
-    # ``basic ⇒ shared``: basic (service-account) auth has no per-user OAuth
-    # tokens, so it can only drive the pre-synced shared KB. The admin form
-    # enforces this too, but a stored ``basic + per_user`` state would otherwise
-    # leak through to /api/config and mislead the chat '+' menu. Both the
-    # orphan-guard below and the persisted values use these effective modes.
+    # ``(basic|scoped) ⇒ shared``: the service-account modes have no per-user
+    # OAuth tokens, so they can only drive the pre-synced shared KB. The admin
+    # form enforces this too, but a stored ``basic + per_user`` state would
+    # otherwise leak through to /api/config and mislead the chat '+' menu. Both
+    # the orphan-guard below and the persisted values use these effective modes.
     # (Only Confluence has a per-user mode; TOPdesk is always shared.)
     if form_data.CONFLUENCE_AUTH_MODE is not None:
-        # Guard against arbitrary values; only the two known modes are valid.
+        # Guard against arbitrary values; only the three known modes are valid.
         _auth = form_data.CONFLUENCE_AUTH_MODE.strip()
-        effective_auth = _auth if _auth in ('oauth', 'basic') else 'oauth'
+        effective_auth = _auth if _auth in ('oauth', 'basic', 'scoped') else 'oauth'
     else:
         effective_auth = c.CONFLUENCE_AUTH_MODE
     if form_data.CONFLUENCE_KB_MODE is not None:
@@ -985,7 +994,7 @@ async def set_confluence_config(
         requested_kb = _kb if _kb in ('per_user', 'shared') else 'per_user'
     else:
         requested_kb = c.CONFLUENCE_KB_MODE
-    effective_kb = 'shared' if effective_auth == 'basic' else requested_kb
+    effective_kb = 'shared' if effective_auth in ('basic', 'scoped') else requested_kb
 
     # Two switches must not silently strand or corrupt an existing shared KB; both
     # require the admin to delete it first (a config write has no KB lifecycle of
@@ -1030,6 +1039,10 @@ async def set_confluence_config(
         c.CONFLUENCE_BASIC_AUTH_USERNAME = form_data.CONFLUENCE_BASIC_AUTH_USERNAME.strip()
     if form_data.CONFLUENCE_BASIC_AUTH_API_TOKEN is not None:
         c.CONFLUENCE_BASIC_AUTH_API_TOKEN = form_data.CONFLUENCE_BASIC_AUTH_API_TOKEN.strip()
+    if form_data.CONFLUENCE_SCOPED_API_TOKEN is not None:
+        c.CONFLUENCE_SCOPED_API_TOKEN = form_data.CONFLUENCE_SCOPED_API_TOKEN.strip()
+    if form_data.CONFLUENCE_CLOUD_ID is not None:
+        c.CONFLUENCE_CLOUD_ID = form_data.CONFLUENCE_CLOUD_ID.strip()
     # Persist the coupled effective modes so the stored state is self-consistent.
     c.CONFLUENCE_AUTH_MODE = effective_auth
     c.CONFLUENCE_KB_MODE = effective_kb

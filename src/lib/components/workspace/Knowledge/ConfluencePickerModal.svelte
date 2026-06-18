@@ -13,6 +13,8 @@
 		listSites,
 		listSpaces,
 		listPages,
+		authorizeConfluencePopup,
+		isConfluenceAuthError,
 		type SyncItem,
 		type ConfluenceSite,
 		type ConfluenceSpaceSummary,
@@ -40,6 +42,9 @@
 	// Set when the initial site load fails (e.g. OAuth not connected → 401).
 	// Rendered as a single in-modal message instead of an endless toast storm.
 	let loadError = '';
+	// Set when the user has no Confluence token and the auto-popup couldn't
+	// complete it (blocked or cancelled) — render a click-to-connect affordance.
+	let needsAuth = false;
 	let sites: ConfluenceSite[] = [];
 	let activeSite: ConfluenceSite | null = null;
 	let siteUrl: string = '';
@@ -75,29 +80,70 @@
 	$: selectedCount = selection.size;
 
 	// ─── boot ─────────────────────────────────────────────────────────
+	// Loads accessible sites; throws on failure (incl. 401 when the user has no
+	// Confluence token). Split out so the auth-retry path can reuse it.
+	async function loadSites() {
+		const res = await listSites(localStorage.token);
+		sites = res.sites ?? [];
+		if (sites.length === 0) {
+			loadError = $i18n.t('No Confluence sites are accessible for this account.');
+			return;
+		}
+		if (sites.length === 1) {
+			await selectSite(sites[0]);
+		}
+	}
+
 	async function bootstrap() {
 		loading = true;
 		loadError = '';
+		needsAuth = false;
 		try {
-			const res = await listSites(localStorage.token);
-			sites = res.sites ?? [];
-			if (sites.length === 0) {
-				loadError = $i18n.t('No Confluence sites are accessible for this account.');
-				return;
-			}
-			if (sites.length === 1) {
-				await selectSite(sites[0]);
-			}
+			await loadSites();
 		} catch (e) {
-			// One message, shown in the modal — do NOT retry. The reactive boot
-			// guard latches `booted` so a 401 (OAuth not connected) can't re-fire
-			// this in a tight loop and hammer /browse/sites.
-			loadError =
-				$i18n.t('Failed to load Confluence sites: ') +
-				(e instanceof Error ? e.message : String(e));
+			// 401 → user hasn't connected Confluence. Auto-open the consent popup
+			// (mirrors the Google Drive picker), then retry once. The per-user token
+			// the popup stores is immediately readable by /browse/sites. The reactive
+			// boot guard latches `booted` so this can't re-fire in a tight loop.
+			if (isConfluenceAuthError(e)) {
+				const result = await authorizeConfluencePopup();
+				if (result === 'blocked') {
+					// window.open after the await loses the user gesture and some
+					// browsers block it — fall back to a click-to-connect button.
+					needsAuth = true;
+					return;
+				}
+				try {
+					await loadSites();
+				} catch (e2) {
+					if (isConfluenceAuthError(e2)) {
+						needsAuth = true; // cancelled or still no token
+					} else {
+						loadError =
+							$i18n.t('Failed to load Confluence sites: ') +
+							(e2 instanceof Error ? e2.message : String(e2));
+					}
+				}
+			} else {
+				loadError =
+					$i18n.t('Failed to load Confluence sites: ') +
+					(e instanceof Error ? e.message : String(e));
+			}
 		} finally {
 			loading = false;
 		}
+	}
+
+	// Click-to-connect fallback. Opening the popup directly from the click keeps
+	// the user gesture, so it isn't blocked.
+	async function connectConfluence() {
+		const result = await authorizeConfluencePopup();
+		if (result === 'blocked') {
+			toast.error($i18n.t('Please allow popups to connect Confluence.'));
+			return;
+		}
+		booted = true; // keep the open-guard latched while we retry
+		await bootstrap();
 	}
 
 	async function selectSite(site: ConfluenceSite) {
@@ -375,6 +421,7 @@
 	$: if (!show) {
 		booted = false;
 		loadError = '';
+		needsAuth = false;
 	}
 </script>
 
@@ -416,6 +463,21 @@
 			{#if loading}
 				<div class="flex items-center justify-center h-full">
 					<Spinner className="size-5" />
+				</div>
+			{:else if needsAuth}
+				<div
+					class="flex flex-col items-center justify-center h-full gap-3 text-sm text-gray-500 text-center px-6"
+				>
+					<Confluence className="size-8 opacity-60" />
+					<div class="text-gray-700 dark:text-gray-300 font-medium">
+						{$i18n.t('Connect your Confluence account to browse spaces and pages.')}
+					</div>
+					<button
+						class="px-3 py-1.5 rounded-lg bg-gray-800 text-white hover:bg-gray-700 dark:bg-gray-100 dark:text-gray-900 dark:hover:bg-white"
+						on:click={connectConfluence}
+					>
+						{$i18n.t('Connect Confluence')}
+					</button>
 				</div>
 			{:else if loadError}
 				<div
