@@ -122,6 +122,7 @@
     "Admin accounts are never automatically deleted.": "Beheerdersaccounts worden nooit automatisch verwijderd.",
     "Admins have access to all tools at all times; users need tools assigned per model in the workspace.": "Beheerders hebben altijd toegang tot alle gereedschappen; gebruikers moeten gereedschap toegewezen krijgen per model in de werkruimte.",
     "Advanced": "Geavanceerd",
+    "Advanced Mode": "Geavanceerde modus",
     "Advanced Parameters": "Geavanceerde parameters",
     "Advanced Params": "Geavanceerde params",
     "Advanced parameters for MinerU parsing (enable_ocr, enable_formula, enable_table, language, model_version, page_ranges)": "Geavanceerde parameters voor MinerU-parsing (enable_ocr, enable_formula, enable_table, language, model_version, page_ranges)",

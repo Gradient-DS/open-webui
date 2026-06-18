@@ -9,7 +9,8 @@
 		models,
 		prompts,
 		knowledge,
-		tools
+		tools,
+		settings
 	} from '$lib/stores';
 	import { page } from '$app/stores';
 	import { goto } from '$app/navigation';
@@ -110,7 +111,7 @@
 						<div
 							class="flex gap-1 scrollbar-none overflow-x-auto w-fit text-center text-sm font-medium bg-transparent py-1 touch-auto pointer-events-auto"
 						>
-							{#if isFeatureEnabled('models') && ($user?.role === 'admin' || $user?.permissions?.workspace?.models)}
+							{#if isFeatureEnabled('models') && ($user?.role === 'admin' || $user?.permissions?.workspace?.models) && ($settings?.advancedMode ?? false)}
 								<a
 									class="min-w-fit p-1.5 rounded-lg {$page.url.pathname.includes(
 										'/workspace/models'
@@ -121,7 +122,7 @@
 								>
 							{/if}
 
-							{#if isFeatureEnabled('prompts') && ($user?.role === 'admin' || $user?.permissions?.workspace?.prompts)}
+							{#if isFeatureEnabled('prompts') && ($user?.role === 'admin' || $user?.permissions?.workspace?.prompts) && ($settings?.advancedMode ?? false)}
 								<a
 									class="min-w-fit p-1.5 rounded-lg {$page.url.pathname.includes(
 										'/workspace/prompts'
@@ -132,7 +133,7 @@
 								>
 							{/if}
 
-							{#if isFeatureEnabled('tools') && ($user?.role === 'admin' || $user?.permissions?.workspace?.tools)}
+							{#if isFeatureEnabled('tools') && ($user?.role === 'admin' || $user?.permissions?.workspace?.tools) && ($settings?.advancedMode ?? false)}
 								<a
 									class="min-w-fit p-1.5 rounded-lg {$page.url.pathname.includes('/workspace/tools')
 										? 'bg-gray-100 dark:bg-gray-800'
@@ -143,7 +144,7 @@
 								</a>
 							{/if}
 
-							{#if isFeatureEnabled('skills') && ($user?.role === 'admin' || $user?.permissions?.workspace?.skills)}
+							{#if isFeatureEnabled('skills') && ($user?.role === 'admin' || $user?.permissions?.workspace?.skills) && ($settings?.advancedMode ?? false)}
 								<a
 									class="min-w-fit p-1.5 rounded-lg {$page.url.pathname.includes(
 										'/workspace/skills'

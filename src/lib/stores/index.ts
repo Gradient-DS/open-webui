@@ -284,6 +284,7 @@ type Settings = {
 	showUsername?: boolean;
 	notificationEnabled?: boolean;
 	highContrastMode?: boolean;
+	advancedMode?: boolean;
 	title?: TitleSettings;
 	showChatTitleInTab?: boolean;
 	splitLargeDeltas?: boolean;

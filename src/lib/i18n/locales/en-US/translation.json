@@ -122,6 +122,7 @@
     "Admin accounts are never automatically deleted.": "",
     "Admins have access to all tools at all times; users need tools assigned per model in the workspace.": "",
     "Advanced": "",
+    "Advanced Mode": "",
     "Advanced Parameters": "",
     "Advanced Params": "",
     "Advanced parameters for MinerU parsing (enable_ocr, enable_formula, enable_table, language, model_version, page_ranges)": "",

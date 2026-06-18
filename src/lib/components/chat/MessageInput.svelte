@@ -2477,7 +2477,7 @@
 												<TerminalMenu bind:show={showTerminalMenu} />
 											{/if}
 
-											{#if isFeatureEnabled('voice') && ($_user?.role === 'admin' || ($_user?.permissions?.chat?.stt ?? true))}
+											{#if isFeatureEnabled('voice') && ($_user?.role === 'admin' || ($_user?.permissions?.chat?.stt ?? true)) && ($settings?.advancedMode ?? false)}
 												<!-- {$i18n.t('Record voice')} -->
 												<Tooltip content={$i18n.t('Dictate')}>
 													<button
@@ -2528,7 +2528,7 @@
 											{/if}
 										{/if}
 
-										{#if isFeatureEnabled('voice') && prompt === '' && files.length === 0 && ($_user?.role === 'admin' || ($_user?.permissions?.chat?.call ?? true))}
+										{#if isFeatureEnabled('voice') && prompt === '' && files.length === 0 && ($_user?.role === 'admin' || ($_user?.permissions?.chat?.call ?? true)) && ($settings?.advancedMode ?? false)}
 											<div class=" flex items-center">
 												<!-- {$i18n.t('Call')} -->
 												<Tooltip content={$i18n.t('Voice mode')}>

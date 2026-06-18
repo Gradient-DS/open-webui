@@ -22,7 +22,9 @@
 	import { WEBUI_API_BASE_URL } from '$lib/constants';
 
 	import Dropdown from '$lib/components/common/Dropdown.svelte';
+	import Switch from '$lib/components/common/Switch.svelte';
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
+	import AdjustmentsHorizontal from '$lib/components/icons/AdjustmentsHorizontal.svelte';
 	import ArchiveBox from '$lib/components/icons/ArchiveBox.svelte';
 	import ChatBubbleOval from '$lib/components/icons/ChatBubbleOval.svelte';
 	import QuestionMarkCircle from '$lib/components/icons/QuestionMarkCircle.svelte';
@@ -47,7 +49,7 @@
 	export let profile = false;
 	export let help = false;
 
-	export let className = 'w-[240px]';
+	export let className = 'w-[500px]';
 	export let align = 'end';
 
 	export let showActiveUsers = true;
@@ -67,6 +69,11 @@
 		} else {
 			usage = null;
 		}
+	};
+
+	const toggleAdvancedMode = async (value) => {
+		settings.set({ ...$settings, advancedMode: value });
+		await updateUserSettings(localStorage.token, { ui: $settings });
 	};
 
 	const handleDropdownChange = (state) => {
@@ -223,6 +230,29 @@
 				</div>
 				<div class=" self-center truncate">{$i18n.t('Settings')}</div>
 			</button>
+
+			<div
+				class="flex items-center justify-between gap-3 rounded-xl py-2 px-3 w-full select-none"
+				id="advanced-mode-row"
+			>
+				<div class=" flex items-center min-w-0">
+					<div class=" self-center mr-3 shrink-0">
+						<AdjustmentsHorizontal className="size-5" strokeWidth="1.5" />
+					</div>
+					<div id="advanced-mode-label" class=" self-center truncate">
+						{$i18n.t('Advanced Mode')}
+					</div>
+				</div>
+				<div class=" shrink-0 pr-0.5">
+					<Switch
+						ariaLabelledbyId="advanced-mode-label"
+						state={$settings?.advancedMode ?? false}
+						on:change={(e) => {
+							toggleAdvancedMode(e.detail);
+						}}
+					/>
+				</div>
+			</div>
 
 			<button
 				class="flex rounded-xl py-1.5 px-3 w-full hover:bg-gray-50 dark:hover:bg-gray-800 transition cursor-pointer select-none"

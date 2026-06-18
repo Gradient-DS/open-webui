@@ -8,6 +8,7 @@
 		chatId,
 		config,
 		mobile,
+		models,
 		settings,
 		showArchivedChats,
 		showControls,
@@ -115,8 +116,18 @@
 			{$showSidebar ? 'ml-1' : ''}
 			"
 				>
-					{#if showModelSelector}
+					{#if showModelSelector && ($settings?.advancedMode ?? false)}
 						<ModelSelector bind:selectedModels showSetDefault={!shareEnabled} />
+					{:else if showModelSelector}
+						<div
+							class="flex items-center text-lg font-medium px-1 py-0.5 text-gray-800 dark:text-gray-100"
+						>
+							<span class="line-clamp-1">
+								{$models.find((m) => m.id === selectedModels?.[0])?.name ??
+									selectedModels?.[0] ??
+									''}
+							</span>
+						</div>
 					{/if}
 				</div>
 

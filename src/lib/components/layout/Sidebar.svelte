@@ -848,7 +848,7 @@
 					</div>
 				{/if}
 
-				{#if isFeatureEnabled('models') && ($user?.role === 'admin' || $user?.permissions?.workspace?.models)}
+				{#if isFeatureEnabled('models') && ($user?.role === 'admin' || $user?.permissions?.workspace?.models) && ($settings?.advancedMode ?? false)}
 					<div class="">
 						<Tooltip content={$i18n.t('Agents')} placement="right">
 							<a
@@ -876,7 +876,7 @@
 					</div>
 				{/if}
 
-				{#if isFeatureEnabled('prompts') && ($user?.role === 'admin' || $user?.permissions?.workspace?.prompts)}
+				{#if isFeatureEnabled('prompts') && ($user?.role === 'admin' || $user?.permissions?.workspace?.prompts) && ($settings?.advancedMode ?? false)}
 					<div class="">
 						<Tooltip content={$i18n.t('Prompts')} placement="right">
 							<a
@@ -904,7 +904,7 @@
 					</div>
 				{/if}
 
-				{#if isFeatureEnabled('tools') && ($user?.role === 'admin' || $user?.permissions?.workspace?.tools)}
+				{#if isFeatureEnabled('tools') && ($user?.role === 'admin' || $user?.permissions?.workspace?.tools) && ($settings?.advancedMode ?? false)}
 					<div class="">
 						<Tooltip content={$i18n.t('Tools')} placement="right">
 							<a
@@ -928,7 +928,7 @@
 					</div>
 				{/if}
 
-				{#if isFeatureEnabled('skills') && ($user?.role === 'admin' || $user?.permissions?.workspace?.skills)}
+				{#if isFeatureEnabled('skills') && ($user?.role === 'admin' || $user?.permissions?.workspace?.skills) && ($settings?.advancedMode ?? false)}
 					<div class="">
 						<Tooltip content={$i18n.t('Skills')} placement="right">
 							<a
@@ -1178,7 +1178,7 @@
 						</div>
 					{/if}
 
-					{#if isFeatureEnabled('models') && ($user?.role === 'admin' || $user?.permissions?.workspace?.models)}
+					{#if isFeatureEnabled('models') && ($user?.role === 'admin' || $user?.permissions?.workspace?.models) && ($settings?.advancedMode ?? false)}
 						<div class="px-[0.4375rem] flex justify-center text-gray-800 dark:text-gray-200">
 							<a
 								id="sidebar-agents-button"
@@ -1202,7 +1202,7 @@
 						</div>
 					{/if}
 
-					{#if isFeatureEnabled('prompts') && ($user?.role === 'admin' || $user?.permissions?.workspace?.prompts)}
+					{#if isFeatureEnabled('prompts') && ($user?.role === 'admin' || $user?.permissions?.workspace?.prompts) && ($settings?.advancedMode ?? false)}
 						<div class="px-[0.4375rem] flex justify-center text-gray-800 dark:text-gray-200">
 							<a
 								id="sidebar-prompts-button"
@@ -1226,7 +1226,7 @@
 						</div>
 					{/if}
 
-					{#if isFeatureEnabled('tools') && ($user?.role === 'admin' || $user?.permissions?.workspace?.tools)}
+					{#if isFeatureEnabled('tools') && ($user?.role === 'admin' || $user?.permissions?.workspace?.tools) && ($settings?.advancedMode ?? false)}
 						<div class="px-[0.4375rem] flex justify-center text-gray-800 dark:text-gray-200">
 							<a
 								id="sidebar-tools-button"
@@ -1246,7 +1246,7 @@
 						</div>
 					{/if}
 
-					{#if isFeatureEnabled('skills') && ($user?.role === 'admin' || $user?.permissions?.workspace?.skills)}
+					{#if isFeatureEnabled('skills') && ($user?.role === 'admin' || $user?.permissions?.workspace?.skills) && ($settings?.advancedMode ?? false)}
 						<div class="px-[0.4375rem] flex justify-center text-gray-800 dark:text-gray-200">
 							<a
 								id="sidebar-skills-button"
@@ -1332,7 +1332,7 @@
 						</div>
 					{/if}
 
-					{#if isFeatureEnabled('playground') && $user?.role === 'admin'}
+					{#if isFeatureEnabled('playground') && $user?.role === 'admin' && ($settings?.advancedMode ?? false)}
 						<div class="px-[0.4375rem] flex justify-center text-gray-800 dark:text-gray-200">
 							<a
 								id="sidebar-playground-button"
@@ -1771,7 +1771,7 @@
 							role={$user?.role}
 							profile={$config?.features?.enable_user_status ?? true}
 							showActiveUsers={false}
-							className="w-[calc(var(--sidebar-width)-1rem)]"
+							className="w-[300px]"
 							on:show={(e) => {
 								if (e.detail === 'archived-chat') {
 									showArchivedChats.set(true);
