@@ -19,7 +19,13 @@
 	import Leaf from '$lib/components/icons/Leaf.svelte';
 	import InfoCircle from '$lib/components/icons/InfoCircle.svelte';
 	import ExclamationTriangle from '$lib/components/icons/ExclamationTriangle.svelte';
-	import { resolveModelProfile } from '$lib/utils/models/profile';
+	import Flag from '$lib/components/icons/Flag.svelte';
+	import {
+		resolveModelProfile,
+		ORIGIN_META,
+		parseHosting,
+		hostingFromHost
+	} from '$lib/utils/models/profile';
 
 	const i18n = getContext('i18n');
 
@@ -31,6 +37,10 @@
 	$: profile = resolveModelProfile(item?.model ?? {});
 	$: displayName = item?.label || item?.value || '';
 	$: infoTooltip = (profile.info ?? '').replaceAll('\n', '<br>');
+	$: originMeta = profile.origin ? ORIGIN_META[profile.origin] : undefined;
+	// Prefer the live hosting derived from the upstream connection host (LiteLLM/OpenAI
+	// api_base), falling back to the static hosting value from the model profile.
+	$: hosting = parseHosting(hostingFromHost(item?.model?.connection_host) ?? profile.hosting);
 
 	export let unloadModelHandler: (modelValue: string) => void = () => {};
 	export let pinModelHandler: (modelId: string) => void = () => {};
@@ -77,29 +87,48 @@
 			</div>
 
 			<div class=" shrink-0 flex items-center gap-2">
-				{#if profile.local === false}
-					<Tooltip
-						content={$i18n.t(
-							'This model does not run on our own servers. Be careful when sharing sensitive data.'
-						)}
-					>
-						<ExclamationTriangle
-							className="size-3.5 text-amber-500 dark:text-amber-400"
-							strokeWidth="2"
-						/>
-					</Tooltip>
-				{/if}
+				{#if profile.info || originMeta || hosting}
+					{#key item.model.id}
+						<Tooltip elementId="model-info-{item.model.id}">
+							<InfoCircle className="size-3.5 text-gray-400 dark:text-gray-500" />
 
-				{#if profile.eco}
-					<Tooltip content={$i18n.t('Energy efficient')}>
-						<Leaf className="size-3.5 text-green-600 dark:text-green-500" strokeWidth="1.75" />
-					</Tooltip>
-				{/if}
-
-				{#if profile.info}
-					<Tooltip content={infoTooltip}>
-						<InfoCircle className="size-3.5 text-gray-400 dark:text-gray-500" />
-					</Tooltip>
+							<div slot="tooltip" id="model-info-{item.model.id}" class="text-left">
+								{#if profile.info}
+									<div>{@html infoTooltip}</div>
+								{/if}
+								{#if originMeta || hosting}
+									<div
+										class="flex flex-col gap-1 {profile.info
+											? 'mt-1.5 pt-1.5 border-t border-white/15'
+											: ''}"
+									>
+										{#if originMeta}
+											<div class="flex items-center gap-1.5">
+												<span>{$i18n.t('Developed in')}: {$i18n.t(originMeta.labelKey)}</span>
+												<Flag
+													origin={profile.origin}
+													className="w-[18px] h-[13px] rounded-[2px]"
+													ariaLabel={$i18n.t(originMeta.labelKey)}
+												/>
+											</div>
+										{/if}
+										{#if hosting}
+											<div class="flex items-center gap-1.5">
+												<span>{$i18n.t('Hosting location')}: {hosting.label}</span>
+												{#if hosting.flag}
+													<Flag
+														origin={hosting.flag}
+														className="w-[18px] h-[13px] rounded-[2px]"
+														ariaLabel={hosting.flag}
+													/>
+												{/if}
+											</div>
+										{/if}
+									</div>
+								{/if}
+							</div>
+						</Tooltip>
+					{/key}
 				{/if}
 
 				{#if item.model.owned_by === 'ollama'}
@@ -224,8 +253,29 @@
 	</div>
 
 	<div class="ml-auto pl-2 pr-1 flex items-center gap-2 shrink-0">
+		<div class="w-9 shrink-0 flex items-center justify-end gap-1.5">
+			{#if profile.local === false}
+				<Tooltip
+					content={$i18n.t(
+						'This model does not run on our own servers. Be careful when sharing sensitive data.'
+					)}
+				>
+					<ExclamationTriangle
+						className="size-3.5 text-amber-500 dark:text-amber-400"
+						strokeWidth="2"
+					/>
+				</Tooltip>
+			{/if}
+
+			{#if profile.eco}
+				<Tooltip content={$i18n.t('Energy efficient')}>
+					<Leaf className="size-3.5 text-green-600 dark:text-green-500" strokeWidth="1.75" />
+				</Tooltip>
+			{/if}
+		</div>
+
 		<ModelProfile {profile} />
-		<div class="flex items-center justify-end gap-1.5 w-12 shrink-0">
+		<div class="flex items-center justify-end gap-1.5 w-8 shrink-0">
 		{#if $user?.role === 'admin' && item.model.loaded}
 			<Tooltip
 				content={`${$i18n.t('Eject')}`}

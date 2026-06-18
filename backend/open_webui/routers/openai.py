@@ -587,6 +587,7 @@ async def get_all_models(request: Request, user: UserModel) -> dict[str, list]:
                             'openai': model,
                             'connection_type': model.get('connection_type', 'external'),
                             'provider': model.get('provider', ''),
+                            'connection_host': hostname,
                             'urlIdx': idx,
                         }
 

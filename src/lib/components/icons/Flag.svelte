@@ -1,7 +1,7 @@
 <script lang="ts">
-	import type { ModelOrigin } from '$lib/utils/models/profile';
+	import type { FlagCode } from '$lib/utils/models/profile';
 
-	export let origin: ModelOrigin = 'EU';
+	export let origin: FlagCode = 'EU';
 	export let className = 'w-[18px] h-[13px]';
 	export let ariaLabel = '';
 
@@ -88,6 +88,11 @@
 			{#each cnSmall as s}
 				<polygon points={star(s.cx, s.cy, 2.4, s.rot)} fill="#FFDE00" />
 			{/each}
+		{:else if origin === 'NL'}
+			<!-- Three equal horizontal bands: red, white, blue -->
+			<rect x="0" y="0" width="60" height="13.34" fill="#AE1C28" />
+			<rect x="0" y="13.34" width="60" height="13.33" fill="#FFFFFF" />
+			<rect x="0" y="26.67" width="60" height="13.33" fill="#21468B" />
 		{/if}
 	</g>
 	<rect

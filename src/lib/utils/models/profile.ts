@@ -1,4 +1,5 @@
 import modelProfiles from '$lib/data/model-profiles.json';
+import hostingProviders from '$lib/data/hosting-providers.json';
 
 /**
  * Plain-language profile shown in the model dropdown to help users understand a
@@ -13,12 +14,66 @@ export type ModelProfile = {
 	speed?: number; // 1-3
 	quality?: number; // 1-3
 	origin?: ModelOrigin; // where the model comes from, shown as a flag
+	hosting?: string; // who/where the model is hosted, e.g. "Nebule (NL)"; shown in the info tooltip
 	local?: boolean; // hosted locally; when false a data-warning sign is shown
 	eco?: boolean; // show the green leaf badge
 };
 
 /** Region a model originates from. Shown as a flag in the dropdown. */
 export type ModelOrigin = 'EU' | 'US' | 'CN';
+
+/** Country/region codes that have flag artwork in Flag.svelte. */
+export type FlagCode = 'EU' | 'US' | 'CN' | 'NL';
+
+export const FLAG_CODES: FlagCode[] = ['EU', 'US', 'CN', 'NL'];
+
+/**
+ * Parse a free-text hosting value like "Nebule (NL)" into a display label and an
+ * optional flag code. The label is the text before the parentheses ("Nebule");
+ * the parenthetical is treated as a country code and rendered as a flag when it
+ * matches one we have artwork for (see FLAG_CODES). If there are no parentheses
+ * the whole string is the label and no flag is shown.
+ */
+type HostingRule = {
+	match: string;
+	hosting: string;
+	_comment?: string;
+};
+
+const hostingRules = hostingProviders as HostingRule[];
+
+/**
+ * Map an upstream connection hostname (the model's `connection_host`, derived from
+ * the LiteLLM/OpenAI api_base on the backend) to a clean hosting label such as
+ * "Nebul (NL)". Rules in hosting-providers.json are matched top-to-bottom by
+ * case-insensitive substring of the hostname; the first match wins. Returns
+ * undefined when there's no host or no rule matches, so callers fall back to the
+ * static `hosting` value from model-profiles.json.
+ */
+export function hostingFromHost(host?: string): string | undefined {
+	const h = (host ?? '').toLowerCase().trim();
+	if (!h) return undefined;
+
+	for (const rule of hostingRules) {
+		if (rule.match && h.includes(rule.match.toLowerCase())) {
+			return rule.hosting || undefined;
+		}
+	}
+	return undefined;
+}
+
+export function parseHosting(hosting?: string): { label: string; flag?: FlagCode } | undefined {
+	const raw = (hosting ?? '').trim();
+	if (!raw) return undefined;
+
+	const m = raw.match(/^(.*?)\s*\(([^)]+)\)\s*$/);
+	if (!m) return { label: raw };
+
+	const label = m[1].trim();
+	const code = m[2].trim().toUpperCase() as FlagCode;
+	const flag = FLAG_CODES.includes(code) ? code : undefined;
+	return { label: label || raw, flag };
+}
 
 type ProfileRule = {
 	match: string;

@@ -1,6 +1,6 @@
 [
 	{
-		"_comment": "Default model profiles used as a fallback when an admin has not set meta.profile on a model. Rules are matched against the model id (and name) top-to-bottom; LATER matches override EARLIER ones field-by-field, so keep broad patterns first and more specific patterns below. A `match` of '*' matches everything; otherwise it is a case-insensitive substring match, or a glob when it contains '*'. Axes (speed/quality) are 1-3. `origin` is the region the model comes from ('EU', 'US' or 'CN'), shown as a flag. `local` is whether the model runs on our own infrastructure; when false a data-warning sign is shown. `eco` shows the green leaf badge.",
+		"_comment": "Default model profiles used as a fallback when an admin has not set meta.profile on a model. Rules are matched against the model id (and name) top-to-bottom; LATER matches override EARLIER ones field-by-field, so keep broad patterns first and more specific patterns below. A `match` of '*' matches everything; otherwise it is a case-insensitive substring match, or a glob when it contains '*'. Axes (speed/quality) are 1-3. `origin` is the region the model comes from ('EU', 'US' or 'CN'), shown as a flag. `hosting` is free text naming who/where the model is hosted, shown in the info tooltip; put a country code in parentheses to add a flag, e.g. 'Nebul (NL)', 'OpenAI (US)', 'Google (US)' — supported flag codes are NL, EU, US, CN (anything else, or no parentheses, shows the text without a flag). `local` is whether the model runs on our own infrastructure; when false a data-warning sign is shown. `eco` shows the green leaf badge.",
 		"match": "*",
 		"profile": {
 			"bestFor": "Algemeen gebruik",
@@ -16,6 +16,7 @@
 			"speed": 3,
 			"quality": 2,
 			"origin": "US",
+			"hosting": "OpenAI (US)",
 			"local": false,
 			"eco": false
 		}
@@ -27,6 +28,7 @@
 			"speed": 3,
 			"quality": 2,
 			"origin": "US",
+			"hosting": "Nebul (NL)",
 			"local": true,
 			"eco": true,
 			"info": "Nieuw, snel open source model van Google. Geschikt voor alledaagse taken."
@@ -39,6 +41,7 @@
 			"speed": 2,
 			"quality": 3,
 			"origin": "CN",
+			"hosting": "Nebul (NL)",
 			"local": true,
 			"eco": false,
 			"info": "Sterk open source model uit China. Goed voor alledaagse taken en programmeren."
@@ -52,6 +55,7 @@
 			"quality": 3,
 			"origin": "CN",
 			"local": false,
+			"hosting": "Google (US)",
 			"eco": false,
 			"info": "Nieuwste vlaggenschip van DeepSeek (China). Krachtig redeneermodel voor complexe analyse."
 		}
@@ -63,6 +67,7 @@
 			"speed": 3,
 			"quality": 2,
 			"origin": "US",
+			"hosting": "Nebul (NL)",
 			"local": true,
 			"eco": true,
 			"info": "Compact en zuinig open source model van Google (4B actieve parameters). Snel voor alledaagse taken."
@@ -75,6 +80,7 @@
 			"speed": 2,
 			"quality": 2,
 			"origin": "US",
+			"hosting": "Nebul (NL)",
 			"local": true,
 			"eco": false,
 			"info": "Beproefd open source model van Meta. Betrouwbaar voor algemeen gebruik."
@@ -88,6 +94,7 @@
 			"quality": 3,
 			"origin": "CN",
 			"local": true,
+			"hosting": "Nebul (NL)",
 			"eco": false,
 			"info": "Groot open source model uit China met zeer lange context. Geschikt voor complexe taken over veel tekst."
 		}
@@ -99,6 +106,7 @@
 			"speed": 1,
 			"quality": 3,
 			"origin": "CN",
+			"hosting": "Nebul (NL)",
 			"local": true,
 			"eco": false,
 			"info": "Redeneermodel van Moonshot AI (China). Sterk in stap-voor-stap denken en analyse."
@@ -112,6 +120,7 @@
 			"quality": 3,
 			"origin": "CN",
 			"local": true,
+			"hosting": "Nebul (NL)",
 			"eco": false,
 			"info": "Krachtig open source vlaggenschip van Moonshot AI (China). Geschikt voor complexe taken."
 		}
@@ -124,6 +133,7 @@
 			"quality": 3,
 			"origin": "CN",
 			"local": true,
+			"hosting": "Nebul (NL)",
 			"eco": false,
 			"info": "Op coding gericht model van Moonshot AI (China). Sterk in programmeren en software-taken."
 		}
@@ -136,8 +146,9 @@
 			"quality": 3,
 			"origin": "US",
 			"local": true,
+			"hosting": "Nebul (NL)",
 			"eco": false,
-			"info": "Open source model van OpenAI (5B actieve parameters). Snel en capabel voor complex redeneren."
+			"info": "Open source model van OpenAI. Snel en capabel voor complex redeneren."
 		}
 	},
 	{
@@ -148,6 +159,7 @@
 			"quality": 2,
 			"origin": "CN",
 			"local": true,
+			"hosting": "Nebul (NL)",
 			"eco": false,
 			"info": "Veelzijdig open source model van Alibaba (China). Sterk meertalig voor alledaagse taken."
 		}
@@ -160,6 +172,7 @@
 			"quality": 2,
 			"origin": "CN",
 			"local": true,
+			"hosting": "Nebul (NL)",
 			"eco": true,
 			"info": "Compact redeneermodel van Alibaba (China). Goede balans tussen snelheid en kwaliteit."
 		}
@@ -173,6 +186,7 @@
 			"quality": 3,
 			"origin": "US",
 			"local": false,
+			"hosting": "OpenAI (US)",
 			"eco": false
 		}
 	},
@@ -184,6 +198,7 @@
 			"quality": 3,
 			"origin": "US",
 			"local": false,
+			"hosting": "OpenAI (US)",
 			"eco": false
 		}
 	},
@@ -196,6 +211,7 @@
 			"quality": 2,
 			"origin": "US",
 			"local": true,
+			"hosting": "Nebul (NL)",
 			"eco": true
 		}
 	},
@@ -207,7 +223,9 @@
 			"quality": 2,
 			"origin": "EU",
 			"local": true,
-			"eco": true
+			"hosting": "Nebul (NL)",
+			"eco": true,
+			"info": "Snel open source model van Mistral AI (Frankrijk). Geschikt voor alledaagse taken."
 		}
 	}
 ]
