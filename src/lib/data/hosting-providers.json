@@ -11,5 +11,9 @@
 	{
 		"match": "api.openai.com",
 		"hosting": "OpenAI (US)"
+	},
+	{
+		"match": "googleapis.com",
+		"hosting": "Google (US)"
 	}
 ]
