@@ -3,29 +3,17 @@
 		"_comment": "Default model profiles used as a fallback when an admin has not set meta.profile on a model. Rules are matched against the model id (and name) top-to-bottom; LATER matches override EARLIER ones field-by-field, so keep broad patterns first and more specific patterns below. A `match` of '*' matches everything; otherwise it is a case-insensitive substring match, or a glob when it contains '*'. Axes (speed/quality) are 1-3. `origin` is the region the model comes from ('EU', 'US' or 'CN'); it is not rendered, so mention origin in `info` instead. `hosting` is free text naming who/where the model is hosted, shown in the info tooltip; put a country code in parentheses to add a flag, e.g. 'Nebul (NL)', 'OpenAI (US)', 'Google (US)' — supported flag codes are NL, EU, US, CN (anything else, or no parentheses, shows the text without a flag). A data-sovereignty warning sign is shown automatically when the hosting country code is anything other than NL or EU (e.g. US or CN). `eco` shows the green leaf badge.",
 		"match": "*",
 		"profile": {
-			"bestFor": "Algemene vragen en korte teksten",
+			"bestFor": "Algemene vragen",
 			"speed": 2,
 			"quality": 2,
 			"eco": false
 		}
 	},
 	{
-		"match": "gpt-4o-mini",
+		"match": "gemma-4-31B-it (Meertalen)",
 		"profile": {
-			"bestFor": "Snelle antwoorden en korte teksten",
-			"speed": 3,
-			"quality": 2,
-			"origin": "US",
-			"hosting": "OpenAI (US)",
-			"eco": false,
-			"info": "Licht model van OpenAI (US). Geschikt voor snelle vragen, samenvattingen en eenvoudige schrijftaken."
-		}
-	},
-	{
-		"match": "gemma-4-31B-it",
-		"profile": {
-			"bestFor": "Snelle hulp bij dagelijkse taken",
-			"speed": 3,
+			"bestFor": "Complexere taken (Meertalig)",
+			"speed": 2,
 			"quality": 2,
 			"origin": "US",
 			"hosting": "Nebul (NL)",
@@ -34,34 +22,10 @@
 		}
 	},
 	{
-		"match": "DeepSeek-V3",
-		"profile": {
-			"bestFor": "Dagelijkse taken en codehulp",
-			"speed": 2,
-			"quality": 3,
-			"origin": "CN",
-			"hosting": "Nebul (NL)",
-			"eco": false,
-			"info": "Sterk open source model uit China. Geschikt voor dagelijkse vragen, analyse en praktische ondersteuning bij programmeren."
-		}
-	},
-	{
-		"match": "DeepSeek-V4",
-		"profile": {
-			"bestFor": "Moeilijke vragen stap voor stap",
-			"speed": 1,
-			"quality": 3,
-			"origin": "CN",
-			"hosting": "Google (US)",
-			"eco": false,
-			"info": "Nieuwste vlaggenschip van DeepSeek (China). Krachtig redeneermodel voor complexe analyse, strategische vragen en lastige probleemoplossing."
-		}
-	},
-	{
 		"match": "gemma-4-26B",
 		"profile": {
-			"bestFor": "Snelle vragen en lichte taken",
-			"speed": 3,
+			"bestFor": "Dagelijkse taken (Meertalig)",
+			"speed": 2,
 			"quality": 2,
 			"origin": "US",
 			"hosting": "Nebul (NL)",
@@ -70,141 +34,21 @@
 		}
 	},
 	{
-		"match": "Llama-3-70B",
-		"profile": {
-			"bestFor": "Betrouwbare algemene hulp",
-			"speed": 2,
-			"quality": 2,
-			"origin": "US",
-			"hosting": "Nebul (NL)",
-			"eco": false,
-			"info": "Beproefd open source model van Meta (US). Betrouwbaar voor algemene vragen, schrijven en samenvatten."
-		}
-	},
-	{
-		"match": "MiniMax-M3",
-		"profile": {
-			"bestFor": "Veel tekst tegelijk begrijpen",
-			"speed": 2,
-			"quality": 3,
-			"origin": "CN",
-			"hosting": "Nebul (NL)",
-			"eco": false,
-			"info": "Groot open source model uit China met zeer lange context. Geschikt voor complexe vragen, documentanalyse en taken over veel tekst."
-		}
-	},
-	{
-		"match": "Kimi-K2-Thinking",
-		"profile": {
-			"bestFor": "Moeilijke vragen rustig uitwerken",
-			"speed": 1,
-			"quality": 3,
-			"origin": "CN",
-			"hosting": "Nebul (NL)",
-			"eco": false,
-			"info": "Redeneermodel van Moonshot AI (China). Sterk in stap-voor-stap denken, complexe analyse en zorgvuldig onderbouwde antwoorden."
-		}
-	},
-	{
-		"match": "Kimi-K2.6",
-		"profile": {
-			"bestFor": "Moeilijke vragen en uitleg",
-			"speed": 2,
-			"quality": 3,
-			"origin": "CN",
-			"hosting": "Nebul (NL)",
-			"eco": false,
-			"info": "Krachtig open source vlaggenschip van Moonshot AI (China). Geschikt voor complexe vragen, analyse en inhoudelijke uitwerking."
-		}
-	},
-	{
-		"match": "Kimi-K2.7",
-		"profile": {
-			"bestFor": "Code schrijven en verbeteren",
-			"speed": 2,
-			"quality": 3,
-			"origin": "CN",
-			"hosting": "Nebul (NL)",
-			"eco": false,
-			"info": "Op code gericht model van Moonshot AI (China). Sterk in programmeren, debugging, refactoring en technische uitleg."
-		}
-	},
-	{
 		"match": "gpt-oss-120b",
 		"profile": {
-			"bestFor": "Complexe vragen snel uitwerken",
-			"speed": 3,
-			"quality": 3,
-			"origin": "US",
-			"hosting": "Nebul (NL)",
-			"eco": false,
-			"info": "Open source model van OpenAI (US). Geschikt om lastige vragen snel uit te werken, samen te vatten en inhoudelijk mee te denken."
-		}
-	},
-	{
-		"match": "Qwen2.5-72B",
-		"profile": {
-			"bestFor": "Vragen in meerdere talen",
+			"bestFor": "Complexere taken (Engels)",
 			"speed": 2,
 			"quality": 2,
-			"origin": "CN",
+			"origin": "US",
 			"hosting": "Nebul (NL)",
 			"eco": false,
-			"info": "Veelzijdig open source model van Alibaba (China). Sterk in meertalige vragen, vertalen, samenvatten en algemene assistentie."
-		}
-	},
-	{
-		"match": "Qwen3-32B",
-		"profile": {
-			"bestFor": "Snelle uitleg bij vragen",
-			"speed": 3,
-			"quality": 2,
-			"origin": "CN",
-			"hosting": "Nebul (NL)",
-			"eco": true,
-			"info": "Compact redeneermodel van Alibaba (China). Goede balans tussen snelheid en kwaliteit voor uitleg, analyse en dagelijkse taken."
-		}
-	},
-	{
-		"match": "gpt-4o",
-		"profile": {
-			"bestFor": "Schrijven, samenvatten en uitleg",
-			"info": "Krachtig model van OpenAI (US). Geschikt voor analyse, schrijven, samenvatten en brede algemene ondersteuning.",
-			"speed": 2,
-			"quality": 3,
-			"origin": "US",
-			"hosting": "OpenAI (US)",
-			"eco": false
-		}
-	},
-	{
-		"match": "o1",
-		"profile": {
-			"bestFor": "Moeilijke problemen oplossen",
-			"speed": 1,
-			"quality": 3,
-			"origin": "US",
-			"hosting": "OpenAI (US)",
-			"eco": false,
-			"info": "Redeneermodel van OpenAI (US). Sterk voor complexe problemen, technische analyse en zorgvuldig onderbouwde beslissingen."
-		}
-	},
-	{
-		"match": "llama3",
-		"profile": {
-			"bestFor": "Snelle algemene hulp",
-			"info": "Beproefd open source model van Meta (US). Snel inzetbaar voor dagelijkse vragen, schrijven en samenvatten.",
-			"speed": 3,
-			"quality": 2,
-			"origin": "US",
-			"hosting": "Nebul (NL)",
-			"eco": true
+			"info": "Open source model van OpenAI (US). Snel voor eenvoudige vragen, tekstbewerking en korte samenvattingen."
 		}
 	},
 	{
 		"match": "mistral",
 		"profile": {
-			"bestFor": "Snelle hulp bij dagelijkse vragen",
+			"bestFor": "Dagelijkse vragen",
 			"speed": 3,
 			"quality": 2,
 			"origin": "EU",
@@ -216,7 +60,7 @@
 	{
 		"match": "mistral-small",
 		"profile": {
-			"bestFor": "Snelle dagelijkse vragen",
+			"bestFor": "Snelle vragen",
 			"speed": 3,
 			"quality": 2,
 			"origin": "EU",
@@ -228,7 +72,7 @@
 	{
 		"match": "ministral",
 		"profile": {
-			"bestFor": "Zeer snelle eenvoudige taken",
+			"bestFor": "Eenvoudige taken",
 			"speed": 3,
 			"quality": 2,
 			"origin": "EU",
@@ -240,7 +84,7 @@
 	{
 		"match": "mistral-nemo",
 		"profile": {
-			"bestFor": "Vragen in meerdere talen",
+			"bestFor": "Meerdere talen",
 			"speed": 3,
 			"quality": 2,
 			"origin": "EU",
@@ -252,7 +96,7 @@
 	{
 		"match": "mistral-large",
 		"profile": {
-			"bestFor": "Moeilijke vragen in meerdere talen",
+			"bestFor": "Meertalige vragen",
 			"speed": 2,
 			"quality": 3,
 			"origin": "EU",
@@ -264,8 +108,8 @@
 	{
 		"match": "gemini*pro*",
 		"profile": {
-			"bestFor": "Complexe vragen over tekst en beeld",
-			"speed": 2,
+			"bestFor": "Complex redeneren",
+			"speed": 1,
 			"quality": 3,
 			"origin": "US",
 			"hosting": "Google (US)",
