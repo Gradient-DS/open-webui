@@ -60,23 +60,34 @@
 	let CONFLUENCE_SITE_URL = '';
 	let CONFLUENCE_BASIC_AUTH_USERNAME = '';
 	let basicApiToken = '';
+	// Scoped-mode credential + the optional gateway cloudId. The scoped token
+	// round-trips masked via SensitiveInput like the basic token; the cloudId is
+	// auto-resolved from the site URL server-side when left blank.
+	let scopedApiToken = '';
+	let CONFLUENCE_CLOUD_ID = '';
 	let testingConnection = false;
 
 	// Auth method and sync mode are independent axes:
-	//   auth — 'oauth' (each user signs in) | 'basic' (one service account)
+	//   auth — 'oauth' (each user signs in) | 'basic' (service account, classic
+	//          API token) | 'scoped' (service account, scoped read-only token)
 	//   kb   — 'per_user' (on-demand picker) | 'shared' (one pre-synced KB)
 	// Every combination is valid except service-account + on-demand, which
 	// flattens permissions for no benefit and is gated below.
-	let CONFLUENCE_AUTH_MODE: 'oauth' | 'basic' = 'oauth';
+	let CONFLUENCE_AUTH_MODE: 'oauth' | 'basic' | 'scoped' = 'oauth';
 	let CONFLUENCE_KB_MODE: 'per_user' | 'shared' = 'per_user';
 	// The auth method as last loaded/saved — the baseline used to detect a switch
 	// in `persist()` (switching auth while a shared KB exists is blocked, since the
 	// KB was built under the old identity's permissions).
-	let loadedAuthMode: 'oauth' | 'basic' = 'oauth';
+	let loadedAuthMode: 'oauth' | 'basic' | 'scoped' = 'oauth';
 
-	// Service account + on-demand has no use case — when auth is the service
-	// account, force the pre-synced shared KB.
-	$: if (CONFLUENCE_AUTH_MODE === 'basic' && CONFLUENCE_KB_MODE === 'per_user') {
+	// 'basic' and 'scoped' are the two service-account modes — both reach
+	// Confluence with one shared credential (no per-user OAuth token) and force
+	// the pre-synced shared KB.
+	$: isServiceMode = CONFLUENCE_AUTH_MODE !== 'oauth';
+
+	// Service account + on-demand has no use case — when auth is a service mode,
+	// force the pre-synced shared KB.
+	$: if (isServiceMode && CONFLUENCE_KB_MODE === 'per_user') {
 		CONFLUENCE_KB_MODE = 'shared';
 	}
 
@@ -104,8 +115,13 @@
 		CONFLUENCE_SITE_URL = config.CONFLUENCE_SITE_URL ?? '';
 		CONFLUENCE_BASIC_AUTH_USERNAME = config.CONFLUENCE_BASIC_AUTH_USERNAME ?? '';
 		basicApiToken = config.CONFLUENCE_BASIC_AUTH_API_TOKEN ?? '';
+		scopedApiToken = config.CONFLUENCE_SCOPED_API_TOKEN ?? '';
+		CONFLUENCE_CLOUD_ID = config.CONFLUENCE_CLOUD_ID ?? '';
 		// Each axis is loaded independently — see the decoupled controls below.
-		CONFLUENCE_AUTH_MODE = config.CONFLUENCE_AUTH_MODE === 'basic' ? 'basic' : 'oauth';
+		CONFLUENCE_AUTH_MODE =
+			config.CONFLUENCE_AUTH_MODE === 'basic' || config.CONFLUENCE_AUTH_MODE === 'scoped'
+				? config.CONFLUENCE_AUTH_MODE
+				: 'oauth';
 		CONFLUENCE_KB_MODE = config.CONFLUENCE_KB_MODE === 'shared' ? 'shared' : 'per_user';
 		// Reset the switch-detection baseline to the persisted value (also runs after
 		// a successful save, so the next switch is measured from the new state).
@@ -177,6 +193,8 @@
 			CONFLUENCE_SITE_URL,
 			CONFLUENCE_BASIC_AUTH_USERNAME,
 			CONFLUENCE_BASIC_AUTH_API_TOKEN: basicApiToken,
+			CONFLUENCE_SCOPED_API_TOKEN: scopedApiToken,
+			CONFLUENCE_CLOUD_ID,
 			CONFLUENCE_KB_MODE
 		});
 		applyConfluenceConfig(config);
@@ -246,15 +264,20 @@
 			.filter((n) => n)
 			.join(', ') || $i18n.t('None');
 
-	// Probe the basic-auth credentials currently in the form. A blank API token
-	// field falls back server-side to the saved token.
+	// Probe the service-account credentials currently in the form. A blank token
+	// field falls back server-side to the saved token. The probe targets the
+	// active service mode: 'basic' (token → site) or 'scoped' (token + cloudId →
+	// gateway). Only reachable from a service-mode block, so the mode is never
+	// 'oauth' here.
 	const testConnection = async () => {
 		testingConnection = true;
 		try {
 			const result = await testConfluenceConnection(localStorage.token, {
+				mode: CONFLUENCE_AUTH_MODE === 'scoped' ? 'scoped' : 'basic',
 				site_url: CONFLUENCE_SITE_URL,
 				username: CONFLUENCE_BASIC_AUTH_USERNAME,
-				api_token: basicApiToken
+				api_token: CONFLUENCE_AUTH_MODE === 'scoped' ? scopedApiToken : basicApiToken,
+				cloud_id: CONFLUENCE_CLOUD_ID
 			});
 			if (result.ok) {
 				toast.success(
@@ -348,12 +371,17 @@
 			>
 				<option value="oauth">{$i18n.t('OAuth')}</option>
 				<option value="basic">{$i18n.t('Service account')}</option>
+				<option value="scoped">{$i18n.t('Service account (scoped token)')}</option>
 			</select>
 		</div>
 		<div class="text-xs text-gray-500">
 			{#if CONFLUENCE_AUTH_MODE === 'oauth'}
 				{$i18n.t(
 					'Each user signs in with their own Atlassian account; Confluence is reached with their personal OAuth token.'
+				)}
+			{:else if CONFLUENCE_AUTH_MODE === 'scoped'}
+				{$i18n.t(
+					'Confluence is reached with one service account using a scoped, read-only API token — no per-user sign-in and no OAuth app.'
 				)}
 			{:else}
 				{$i18n.t(
@@ -368,14 +396,14 @@
 				class="w-fit pr-8 rounded-sm px-2 p-1 text-xs bg-transparent outline-hidden text-right"
 				bind:value={CONFLUENCE_KB_MODE}
 			>
-				<option value="per_user" disabled={CONFLUENCE_AUTH_MODE === 'basic'}>
+				<option value="per_user" disabled={isServiceMode}>
 					{$i18n.t('On-demand')}
 				</option>
 				<option value="shared">{$i18n.t('Pre-synced')}</option>
 			</select>
 		</div>
 		<div class="text-xs text-gray-500">
-			{#if CONFLUENCE_AUTH_MODE === 'basic'}
+			{#if isServiceMode}
 				{$i18n.t(
 					'A service account always serves one pre-synced, read-only knowledge base shared with every user.'
 				)}
@@ -390,13 +418,19 @@
 			{/if}
 		</div>
 
-		{#if CONFLUENCE_AUTH_MODE === 'basic'}
+		{#if isServiceMode}
 			<div class="space-y-3 pt-2">
 				<div class="text-xs font-medium text-gray-500 uppercase tracking-wide">
 					{$i18n.t('Service account')}
 				</div>
 				<div class="text-xs text-gray-500">
-					{$i18n.t('Authenticate with a Confluence username and API token.')}
+					{#if CONFLUENCE_AUTH_MODE === 'scoped'}
+						{$i18n.t(
+							'Authenticate with a service-account email and a scoped (read-only) API token.'
+						)}
+					{:else}
+						{$i18n.t('Authenticate with a Confluence username and API token.')}
+					{/if}
 				</div>
 
 				<div>
@@ -421,16 +455,51 @@
 					/>
 				</div>
 
-				<div>
-					<div class="mb-1 text-xs text-gray-500">{$i18n.t('API token')}</div>
-					<div class="flex gap-2">
-						<SensitiveInput
-							bind:value={basicApiToken}
-							required={false}
-							autocomplete="new-password"
-						/>
+				{#if CONFLUENCE_AUTH_MODE === 'scoped'}
+					<div>
+						<div class="mb-1 text-xs text-gray-500">{$i18n.t('Scoped API token')}</div>
+						<div class="flex gap-2">
+							<SensitiveInput
+								bind:value={scopedApiToken}
+								required={false}
+								autocomplete="new-password"
+							/>
+						</div>
 					</div>
-				</div>
+
+					<div>
+						<div class="mb-1 text-xs text-gray-500">{$i18n.t('Cloud ID')}</div>
+						<input
+							class="w-full text-sm bg-transparent outline-hidden"
+							type="text"
+							bind:value={CONFLUENCE_CLOUD_ID}
+							autocomplete="off"
+							placeholder=""
+						/>
+						<div class="mt-1 text-xs text-gray-500">
+							{$i18n.t(
+								'Auto-detected from the site URL; set it manually only if detection fails.'
+							)}
+						</div>
+					</div>
+
+					<div class="text-xs text-gray-500">
+						{$i18n.t(
+							'Create the token via "Create API token with scopes", set Scope type to "Granular", and grant these Confluence read scopes: read:space:confluence, read:page:confluence, read:hierarchical-content:confluence, read:content-details:confluence, read:label:confluence.'
+						)}
+					</div>
+				{:else}
+					<div>
+						<div class="mb-1 text-xs text-gray-500">{$i18n.t('API token')}</div>
+						<div class="flex gap-2">
+							<SensitiveInput
+								bind:value={basicApiToken}
+								required={false}
+								autocomplete="new-password"
+							/>
+						</div>
+					</div>
+				{/if}
 
 				<div>
 					<button
@@ -494,7 +563,7 @@
 					api={sharedKbApi}
 					pickerComponent={ConfluencePickerModal}
 					currentItems={currentSharedItems}
-					showOwnerPick={CONFLUENCE_AUTH_MODE === 'basic'}
+					showOwnerPick={isServiceMode}
 					bind:ownerId={sharedKbOwnerId}
 					owners={adminUsers}
 					itemNoun="pages"
@@ -508,9 +577,10 @@
 					<!-- OAuth: the owner is forced to whoever clicks Connect (their
 					     per-user token is what the sync runs with), so there is
 					     nothing to pick — just show connection state and a Connect
-					     button. -->
+					     button. The service modes (basic/scoped) use the SharedKbSection
+					     owner dropdown instead (showOwnerPick), so this is oauth-only. -->
 					<svelte:fragment slot="owner">
-						{#if CONFLUENCE_AUTH_MODE !== 'basic'}
+						{#if CONFLUENCE_AUTH_MODE === 'oauth'}
 							<div>
 								<div class="mb-1 flex items-center gap-2">
 									<span class="text-xs text-gray-500">{$i18n.t('Confluence account')}</span>

@@ -325,6 +325,17 @@ class BaseSyncWorker(ABC):
     # Shared implementation
     # ------------------------------------------------------------------
 
+    # Providers whose successful download ALWAYS yields non-empty extractable
+    # text should override this to True. When True, a row that is 'completed'
+    # but has empty ``data['content']`` is treated as NOT fully ingested — the
+    # residue of an empty/failed extraction (see ``_process_and_embed``'s
+    # "no text content" branch, which still marks the row 'completed') — so the
+    # cloud-hash short-circuits re-download and re-ingest it instead of freezing
+    # it empty forever. Binary-file providers (OneDrive/Google Drive) MUST leave
+    # this False: image-only files legitimately extract to empty content, and
+    # re-submitting them every sync would defeat the cloud-hash skip.
+    expect_nonempty_content: bool = False
+
     def __init__(
         self,
         knowledge_id: str,
@@ -593,10 +604,28 @@ class BaseSyncWorker(ABC):
             # only fires on a positive hash match.
             return 'updated', file_id
         stored = (existing.meta or {}).get('cloud_hash')
-        status = (existing.data or {}).get('status')
-        if stored == cloud_hash and status == 'completed':
+        if stored == cloud_hash and self._is_fully_ingested(existing):
             return 'unchanged', file_id
         return 'updated', file_id
+
+    def _is_fully_ingested(self, existing) -> bool:
+        """Whether an existing File row represents a genuinely complete ingest.
+
+        Both cloud-hash short-circuits (``_classify_for_submit`` and the
+        pre-download check in ``_download_and_store_legacy``) gate on this so a
+        prior empty/failed ingest self-heals instead of being frozen by a
+        matching cloud_hash. ``status == 'completed'`` alone is not proof of a
+        real ingest: the empty-extraction branch marks a row 'completed' even
+        when no text was captured. For providers that guarantee non-empty
+        content (``expect_nonempty_content``), an empty ``data['content']``
+        therefore signals a failed ingest that must be re-run.
+        """
+        data = existing.data or {}
+        if data.get('status') != 'completed':
+            return False
+        if self.expect_nonempty_content and not (data.get('content') or '').strip():
+            return False
+        return True
 
     async def _ensure_vectors_in_kb(self, file_id: str) -> Optional[FailedFile]:
         """Verify vectors for this file exist in the KB collection.
@@ -987,7 +1016,11 @@ class BaseSyncWorker(ABC):
         if cloud_hash and existing:
             existing_meta = existing.meta or {}
             stored_cloud_hash = existing_meta.get('cloud_hash')
-            if stored_cloud_hash and stored_cloud_hash == cloud_hash:
+            # Skip re-download only when the row is genuinely fully ingested.
+            # A 'completed' row with empty content (for providers that always
+            # render non-empty text) is a failed-ingest residue — fall through
+            # to a fresh download so the content/vectors actually get rebuilt.
+            if stored_cloud_hash and stored_cloud_hash == cloud_hash and self._is_fully_ingested(existing):
                 log.info(f'File {file_id} unchanged (cloud hash match), skipping download')
 
                 new_relative_path = file_info.get('relative_path')

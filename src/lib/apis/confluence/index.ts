@@ -68,13 +68,63 @@ export const revokeToken = api.revokeToken;
 
 const base = `${WEBUI_API_BASE_URL}/confluence`;
 
+export class ConfluenceApiError extends Error {
+	status: number;
+	constructor(message: string, status: number) {
+		super(message);
+		this.name = 'ConfluenceApiError';
+		this.status = status;
+	}
+}
+
 async function apiFetch<T>(url: string, init?: RequestInit): Promise<T> {
 	const res = await fetch(url, init);
 	if (!res.ok) {
 		const error = await res.json().catch(() => ({ detail: res.statusText }));
-		throw new Error(error.detail || `Request failed: ${res.status}`);
+		throw new ConfluenceApiError(error.detail || `Request failed: ${res.status}`, res.status);
 	}
 	return res.json();
+}
+
+// 401 from the picker proxy = the user has no valid Confluence token yet.
+export function isConfluenceAuthError(e: unknown): boolean {
+	return e instanceof ConfluenceApiError && e.status === 401;
+}
+
+export type ConfluenceAuthResult = 'authorized' | 'cancelled' | 'blocked';
+
+// Open the Atlassian OAuth consent popup for per-user Confluence access and
+// resolve once it closes. `knowledge_id` is deliberately omitted: the backend
+// defaults it to '__general__', and the token is stored per-user
+// (oauth_session keyed by user_id+provider), so it is immediately usable by the
+// picker's /browse/sites lookup. Passing knowledge_id=__picker__ would 404 —
+// /auth/initiate validates real KB ids and __picker__ is a pseudo-id.
+export function authorizeConfluencePopup(): Promise<ConfluenceAuthResult> {
+	return new Promise((resolve) => {
+		const popup = window.open(
+			`${base}/auth/initiate`,
+			'confluence_auth',
+			'width=600,height=700,scrollbars=yes'
+		);
+		if (!popup) {
+			resolve('blocked');
+			return;
+		}
+		let result: ConfluenceAuthResult = 'cancelled';
+		const onMessage = (event: MessageEvent) => {
+			if (event.data?.type !== 'confluence_auth_callback') return;
+			result = event.data.success ? 'authorized' : 'cancelled';
+		};
+		window.addEventListener('message', onMessage);
+		// Source of truth is whether the popup closed; postMessage can be missed
+		// on origin mismatch, so the caller re-checks by retrying listSites().
+		const timer = setInterval(() => {
+			if (!popup.closed) return;
+			clearInterval(timer);
+			window.removeEventListener('message', onMessage);
+			resolve(result);
+		}, 500);
+	});
 }
 
 export function listSites(token: string): Promise<{ sites: ConfluenceSite[] }> {
@@ -114,9 +164,15 @@ export function listPages(
 // ─────────────────────────────────────────────────────────────────────
 
 export interface ConfluenceTestConnectionPayload {
+	// 'basic' (classic token → site) or 'scoped' (scoped token → gateway).
+	// Omitted defaults to 'basic' server-side.
+	mode?: 'basic' | 'scoped';
 	site_url?: string;
 	username?: string;
 	api_token?: string;
+	// Scoped mode only: optional manual cloudId override (blank → auto-resolve
+	// from the site URL server-side).
+	cloud_id?: string;
 }
 
 export interface ConfluenceTestConnectionResult {

@@ -18,6 +18,8 @@ export type ConnectionReason =
 	| 'auth_failed'
 	| 'forbidden'
 	| 'not_found'
+	| 'scope_mismatch'
+	| 'missing_cloud_id'
 	| 'rate_limited'
 	| 'unavailable'
 	| 'unreachable'
@@ -42,6 +44,10 @@ export function connectionErrorMessage(
 		auth_failed: 'Authentication failed. Check the credentials.',
 		forbidden: 'Access denied — the account lacks permission.',
 		not_found: 'Not found — check the URL.',
+		scope_mismatch:
+			'The scoped token is missing a required read scope. Re-create it with the granular Confluence read scopes (set Scope type to "Granular", e.g. read:space:confluence).',
+		missing_cloud_id:
+			'Could not determine the Atlassian cloud ID from the site URL. Enter the Cloud ID manually.',
 		rate_limited: 'The service is rate-limiting requests. Please try again shortly.',
 		unavailable: 'The service is temporarily unavailable. Please try again shortly.',
 		unreachable: 'The service could not be reached. Check the URL and network connectivity.',

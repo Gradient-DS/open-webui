@@ -18,7 +18,8 @@ from open_webui.services.confluence.auth import (
 )
 from open_webui.services.confluence.basic_auth import (
     BASIC_AUTH_SENTINEL,
-    basic_auth_configured,
+    is_service_mode,
+    service_auth_configured,
     resolve_auth_mode,
 )
 
@@ -28,24 +29,26 @@ log = logging.getLogger(__name__)
 class ConfluenceTokenManager(TokenManager):
     """Token manager for Confluence.
 
-    In ``oauth`` mode it resolves per-user Atlassian 3LO tokens. In ``basic``
-    mode there is no per-user token — the worker reads the global service
-    credential directly — so it reports a sentinel "token" whenever the basic
-    credential is configured.
+    In ``oauth`` mode it resolves per-user Atlassian 3LO tokens. In the service
+    modes (``basic`` / ``scoped``) there is no per-user token — the worker reads
+    the global service credential directly — so it reports a sentinel "token"
+    whenever that credential is configured.
     """
 
     async def get_valid_access_token(self, user_id: str, knowledge_id: str) -> Optional[str]:
-        if await resolve_auth_mode(knowledge_id) == 'basic':
-            return BASIC_AUTH_SENTINEL if basic_auth_configured() else None
+        mode = await resolve_auth_mode(knowledge_id)
+        if is_service_mode(mode):
+            return BASIC_AUTH_SENTINEL if service_auth_configured(mode) else None
         return await _get_valid_access_token(user_id, knowledge_id)
 
     async def has_stored_token(self, user_id: str, knowledge_id: str) -> bool:
-        if await resolve_auth_mode(knowledge_id) == 'basic':
-            return basic_auth_configured()
+        mode = await resolve_auth_mode(knowledge_id)
+        if is_service_mode(mode):
+            return service_auth_configured(mode)
         return await get_stored_token(user_id) is not None
 
     async def delete_token(self, user_id: str, knowledge_id: str) -> bool:
-        # basic mode has no per-user token to delete; this no-ops harmlessly.
+        # service modes have no per-user token to delete; this no-ops harmlessly.
         return await delete_stored_token(user_id)
 
 

@@ -1,13 +1,19 @@
 """Confluence Cloud REST API v2 client.
 
-Async httpx wrapper supporting two auth modes:
+Async httpx wrapper supporting three auth modes:
 
 - ``oauth`` (default): per-user Atlassian 3LO. Talks to the API gateway
   (`https://api.atlassian.com/ex/confluence/{cloudId}/wiki/api/v2`) with a
   Bearer token, refreshed mid-flight via ``token_provider``.
-- ``basic``: a single service credential (username + API token). Talks to the
-  customer site directly (`https://{site}/wiki/api/v2`) with HTTP Basic auth.
-  API tokens do not refresh — a 401 is terminal.
+- ``basic``: a single service credential (username + classic API token). Talks
+  to the customer site directly (`https://{site}/wiki/api/v2`) with HTTP Basic
+  auth. API tokens do not refresh — a 401 is terminal.
+- ``scoped``: a single service credential (email + Atlassian *scoped* API
+  token). Uses the same HTTP Basic header as ``basic`` but the token only works
+  against the gateway (`https://api.atlassian.com/ex/confluence/{cloudId}/...`),
+  so it reuses the oauth transport. Not refreshable — a 401 is terminal; a 401
+  whose body contains "scope does not match" means the token is missing a
+  granular read scope.
 
 Mirrors the retry/refresh pattern used by the OneDrive GraphClient.
 """
@@ -48,9 +54,11 @@ class ConfluenceClient:
         self._auth_mode = auth_mode
         self._site_url = (site_url or '').rstrip('/')
         self._client: Optional[httpx.AsyncClient] = None
-        # Basic-auth header is static — precompute it once.
+        # Basic-auth header is static — precompute it once. Both service modes
+        # ('basic' and 'scoped') authenticate with the same email:token Basic
+        # header; only the transport (site vs gateway) differs between them.
         self._basic_auth_header: Optional[str] = None
-        if auth_mode == 'basic':
+        if auth_mode in ('basic', 'scoped'):
             encoded = base64.b64encode(f'{basic_username}:{basic_api_token}'.encode('utf-8')).decode('ascii')
             self._basic_auth_header = f'Basic {encoded}'
 
@@ -77,12 +85,13 @@ class ConfluenceClient:
 
         `path` should start without leading '/' (e.g. 'spaces', 'pages/{id}').
         In ``basic`` mode the customer site is addressed directly; in ``oauth``
-        mode the request goes through the Atlassian API gateway.
+        and ``scoped`` modes the request goes through the Atlassian API gateway
+        keyed by cloudId.
         """
         leaf = path.lstrip('/')
         if self._auth_mode == 'basic':
             return f'{self._site_url}/wiki/api/v2/{leaf}'
-        return f'{_API_BASE}/{self._cloud_id}/wiki/api/v2/{leaf}'
+        return f'{_API_BASE}/{self._cloud_id}/wiki/api/v2/{leaf}'  # oauth + scoped
 
     async def _request_with_retry(
         self,
@@ -104,7 +113,9 @@ class ConfluenceClient:
 
         for attempt in range(max_retries):
             try:
-                if self._auth_mode == 'basic':
+                # Service modes ('basic', 'scoped') use the static Basic header;
+                # oauth uses a refreshable Bearer token.
+                if self._auth_mode in ('basic', 'scoped'):
                     auth_header = self._basic_auth_header
                 else:
                     auth_header = f'Bearer {self._access_token}'
@@ -118,13 +129,28 @@ class ConfluenceClient:
                     },
                 )
 
-                # basic mode uses a static credential — a 401 is terminal,
-                # there is nothing to refresh.
+                # A scoped token that is missing a granular read scope surfaces
+                # as a 401 (not 403) with "scope does not match" in the body.
+                # Log it distinctly so the cause is actionable (add the scope at
+                # token creation) rather than looking like a bad credential.
+                if (
+                    response.status_code == 401
+                    and self._auth_mode == 'scoped'
+                    and 'scope does not match' in (response.text or '').lower()
+                ):
+                    log.debug(
+                        'Confluence scoped token returned 401 "scope does not match" — '
+                        'the token is missing a required read scope (e.g. read:page:confluence)'
+                    )
+
+                # Only oauth has a refreshable token. The service modes use a
+                # static credential — a 401 is terminal, there is nothing to
+                # refresh.
                 if (
                     response.status_code == 401
                     and not token_refreshed
                     and self._token_provider
-                    and self._auth_mode != 'basic'
+                    and self._auth_mode == 'oauth'
                 ):
                     log.info('Received 401 from Confluence, attempting token refresh')
                     try:
@@ -208,8 +234,8 @@ class ConfluenceClient:
             if not next_link:
                 break
             # v2 returns `next` as a host-relative path carrying the cursor.
-            # basic mode → resolve against the customer site; oauth mode →
-            # resolve against the Atlassian gateway host.
+            # basic mode → resolve against the customer site; oauth and scoped
+            # modes → resolve against the Atlassian gateway host.
             if next_link.startswith('/'):
                 if self._auth_mode == 'basic':
                     url = f'{self._site_url}{next_link}'
