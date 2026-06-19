@@ -121,6 +121,15 @@ class SkillFilesTable:
         except Exception:
             return False
 
+    async def get_files_by_skill_id(self, skill_id: str, db: AsyncSession | None = None) -> list[SkillFileModel]:
+        """Return all SkillFile rows attached to the given skill."""
+        try:
+            async with get_async_db_context(db) as db:
+                result = await db.execute(select(SkillFile).filter_by(skill_id=skill_id))
+                return [SkillFileModel.model_validate(row) for row in result.scalars().all()]
+        except Exception:
+            return []
+
     async def get_file_counts_by_skill_ids(
         self, skill_ids: list[str], db: AsyncSession | None = None
     ) -> dict[str, int]:

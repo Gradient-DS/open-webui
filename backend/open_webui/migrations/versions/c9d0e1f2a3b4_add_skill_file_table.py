@@ -1,6 +1,6 @@
 """Add skill_file table
 
-Revision ID: b3c4d5e6f7a8
+Revision ID: c9d0e1f2a3b4
 Revises: 785970dd32b7
 Create Date: 2026-06-19 15:00:00.000000
 
@@ -13,7 +13,7 @@ from alembic import op
 from open_webui.migrations.util import get_existing_tables
 
 # revision identifiers, used by Alembic.
-revision: str = 'b3c4d5e6f7a8'
+revision: str = 'c9d0e1f2a3b4'
 down_revision: str | None = '785970dd32b7'
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None

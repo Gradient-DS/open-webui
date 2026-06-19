@@ -15,16 +15,14 @@ from contextlib import asynccontextmanager
 
 import pytest
 import pytest_asyncio
-from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
-from sqlalchemy.pool import StaticPool
-
-from open_webui.models import skill_files as skill_files_module
-from open_webui.models.skill_files import SkillFile, SkillFiles
 from open_webui.models import files as files_module
-from open_webui.models.files import File, Files
+from open_webui.models import skill_files as skill_files_module
+from open_webui.models.files import File
+from open_webui.models.skill_files import SkillFile, SkillFiles
 from open_webui.models.skills import Skill
 from open_webui.models.users import User
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.pool import StaticPool
 
 
 @pytest_asyncio.fixture
@@ -136,6 +134,41 @@ class TestRemoveFile:
         # mirror knowledge.py — delete is idempotent
         result = await SkillFiles.remove_file_from_skill_by_id('skill-z', 'file-z')
         assert result is True
+
+
+class TestGetFilesBySkillId:
+    @pytest.mark.asyncio
+    async def test_returns_all_rows_for_skill(self, db_session):
+        skill_id = 'skill-gf'
+        fid1 = await _insert_file(db_session, filename='x.md')
+        fid2 = await _insert_file(db_session, filename='y.md')
+        await SkillFiles.add_file_to_skill_by_id(skill_id, fid1, 'user-1')
+        await SkillFiles.add_file_to_skill_by_id(skill_id, fid2, 'user-1')
+
+        rows = await SkillFiles.get_files_by_skill_id(skill_id)
+
+        assert len(rows) == 2
+        returned_file_ids = {r.file_id for r in rows}
+        assert fid1 in returned_file_ids
+        assert fid2 in returned_file_ids
+        for row in rows:
+            assert row.skill_id == skill_id
+
+    @pytest.mark.asyncio
+    async def test_returns_empty_list_for_unknown_skill(self, db_session):
+        rows = await SkillFiles.get_files_by_skill_id('skill-unknown')
+        assert rows == []
+
+    @pytest.mark.asyncio
+    async def test_does_not_cross_contaminate_skills(self, db_session):
+        fid1 = await _insert_file(db_session, filename='a.md')
+        fid2 = await _insert_file(db_session, filename='b.md')
+        await SkillFiles.add_file_to_skill_by_id('skill-A', fid1, 'user-1')
+        await SkillFiles.add_file_to_skill_by_id('skill-B', fid2, 'user-1')
+
+        rows_a = await SkillFiles.get_files_by_skill_id('skill-A')
+        assert len(rows_a) == 1
+        assert rows_a[0].file_id == fid1
 
 
 class TestSearchFilesById:

@@ -12,15 +12,12 @@ Auth patterns:
 from __future__ import annotations
 
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
-import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-
 from open_webui.routers import skill_files as skill_files_router_module
 from open_webui.utils.auth import get_verified_user
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -45,12 +42,13 @@ def _make_file(
     file_id: str = 'file-1',
     content_type: str = 'text/markdown',
     filename: str = 'notes.md',
+    path: str | None = None,
 ) -> SimpleNamespace:
     return SimpleNamespace(
         id=file_id,
         user_id='user-1',
         filename=filename,
-        path=f'uploads/{file_id}',
+        path=path if path is not None else f'uploads/{file_id}',
         data=None,
         meta={'content_type': content_type, 'size': 10},
         created_at=1000,
@@ -133,6 +131,26 @@ def test_add_markdown_by_filename_extension(monkeypatch):
 # ---------------------------------------------------------------------------
 # Non-markdown rejection
 # ---------------------------------------------------------------------------
+
+
+def test_add_markdown_file_without_path_returns_400(monkeypatch):
+    """Attaching a markdown file whose file.path is falsy must return 400 and must
+    NOT create a skill_file row (fail-fast content invariant)."""
+    skill = _make_skill()
+    # A markdown file with no stored path
+    no_path_file = _make_file(content_type='text/markdown', filename='guide.md', path='')
+    add_mock = AsyncMock(return_value=_make_skill_file_record())
+
+    monkeypatch.setattr(skill_files_router_module.Skills, 'get_skill_by_id', AsyncMock(return_value=skill))
+    monkeypatch.setattr(skill_files_router_module.Files, 'get_file_by_id', AsyncMock(return_value=no_path_file))
+    monkeypatch.setattr(skill_files_router_module.SkillFiles, 'add_file_to_skill_by_id', add_mock)
+
+    app = _make_app()
+    res = TestClient(app).post('/api/v1/skills/id/skill-1/files/add', json={'file_id': 'file-1'})
+
+    assert res.status_code == 400
+    # Critically, the skill_file row must NOT have been created
+    add_mock.assert_not_called()
 
 
 def test_add_non_markdown_file_returns_400(monkeypatch):

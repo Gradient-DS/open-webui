@@ -94,19 +94,30 @@ async def add_file_to_skill(
             detail=ERROR_MESSAGES.DEFAULT('Only markdown (.md / .markdown) files may be attached to a skill.'),
         )
 
-    # Read the file content once and store it in File.data['content']
-    if file.path:
-        try:
-            from open_webui.storage.provider import Storage  # deferred to avoid config-table at import time
+    # Read the file content once and store it in File.data['content'].
+    # Fail fast: a file without a stored path or whose content cannot be decoded
+    # must never be attached (later phases read content from the DB).
+    if not file.path:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=ERROR_MESSAGES.DEFAULT('File has no stored content to attach.'),
+        )
+    try:
+        from open_webui.storage.provider import Storage  # deferred to avoid config-table at import time
 
-            raw = await asyncio.to_thread(Storage.get_file, file.path)
-            if isinstance(raw, (bytes, bytearray)):
-                content = raw.decode('utf-8', errors='replace')
-            else:
-                content = raw
-            await Files.update_file_data_by_id(form_data.file_id, {'content': content}, db=db)
-        except Exception as e:
-            log.warning(f'Could not read file content for skill attachment ({form_data.file_id}): {e}')
+        raw = await asyncio.to_thread(Storage.get_file, file.path)
+        if isinstance(raw, (bytes, bytearray)):
+            content = raw.decode('utf-8')
+        else:
+            content = raw
+        await Files.update_file_data_by_id(form_data.file_id, {'content': content}, db=db)
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=ERROR_MESSAGES.DEFAULT(f'Could not read file content for skill attachment: {e}'),
+        ) from e
 
     result = await SkillFiles.add_file_to_skill_by_id(id, form_data.file_id, user.id, db=db)
     if not result:
