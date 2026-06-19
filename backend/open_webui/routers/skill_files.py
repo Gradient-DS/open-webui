@@ -107,7 +107,15 @@ async def add_file_to_skill(
 
         raw = await asyncio.to_thread(Storage.get_file, file.path)
         if isinstance(raw, (bytes, bytearray)):
-            content = raw.decode('utf-8')
+            try:
+                content = raw.decode('utf-8')
+            except (UnicodeDecodeError, ValueError):
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=ERROR_MESSAGES.DEFAULT(
+                        'File content is not valid UTF-8 text and cannot be attached to a skill.'
+                    ),
+                )
         else:
             content = raw
         await Files.update_file_data_by_id(form_data.file_id, {'content': content}, db=db)
