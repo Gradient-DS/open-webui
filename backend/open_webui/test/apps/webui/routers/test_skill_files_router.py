@@ -83,21 +83,42 @@ def _make_app(user: SimpleNamespace | None = None):
 # ---------------------------------------------------------------------------
 
 
-def test_add_markdown_file_returns_200(monkeypatch):
+def test_add_markdown_file_returns_200(monkeypatch, tmp_path):
+    """Happy path: Storage.get_file returns a local path; router reads that file
+    and stores its TEXT as File.data['content'] (not the path string)."""
+    md_text = '# Guide\n\nStep 1: do the thing.'
+    tmp_file = tmp_path / 'guide.md'
+    tmp_file.write_text(md_text, encoding='utf-8')
+
     skill = _make_skill()
     md_file = _make_file(content_type='text/markdown', filename='guide.md')
     sf_record = _make_skill_file_record()
 
+    stored_content = {}
+
+    async def _capture_update(file_id, data, db=None):
+        stored_content['content'] = data.get('content')
+        return md_file
+
     monkeypatch.setattr(skill_files_router_module.Skills, 'get_skill_by_id', AsyncMock(return_value=skill))
     monkeypatch.setattr(skill_files_router_module.Files, 'get_file_by_id', AsyncMock(return_value=md_file))
-    monkeypatch.setattr(skill_files_router_module.Files, 'update_file_data_by_id', AsyncMock(return_value=md_file))
+    monkeypatch.setattr(skill_files_router_module.Files, 'update_file_data_by_id', _capture_update)
     monkeypatch.setattr(
         skill_files_router_module.SkillFiles, 'add_file_to_skill_by_id', AsyncMock(return_value=sf_record)
     )
 
-    # Patch asyncio.to_thread since Storage.get_file is called via to_thread
-    with patch('open_webui.routers.skill_files.asyncio.to_thread', new=AsyncMock(return_value=b'# Hello')):
-        with patch('open_webui.storage.provider.Storage'):
+    # Storage.get_file returns a PATH (str) — the correct contract.
+    # asyncio.to_thread is called twice: once for Storage.get_file (returns path),
+    # once for Path.read_bytes (returns file bytes). We use a real tmp file so
+    # the second call actually reads it from disk.
+    async def _to_thread(fn, *args, **kwargs):
+        import asyncio as _asyncio
+
+        return await _asyncio.get_event_loop().run_in_executor(None, fn, *args, **kwargs)
+
+    with patch('open_webui.routers.skill_files.asyncio.to_thread', side_effect=_to_thread):
+        with patch('open_webui.storage.provider.Storage') as mock_storage:
+            mock_storage.get_file = lambda path: str(tmp_file)
             app = _make_app()
             res = TestClient(app).post('/api/v1/skills/id/skill-1/files/add', json={'file_id': 'file-1'})
 
@@ -105,10 +126,17 @@ def test_add_markdown_file_returns_200(monkeypatch):
     body = res.json()
     assert body['skill_id'] == 'skill-1'
     assert body['file_id'] == 'file-1'
+    # The stored content must be the FILE'S TEXT, not the path string.
+    assert stored_content['content'] == md_text
+    assert stored_content['content'] != str(tmp_file)
 
 
-def test_add_markdown_by_filename_extension(monkeypatch):
+def test_add_markdown_by_filename_extension(monkeypatch, tmp_path):
     """Accept .md file even when content_type is generic."""
+    md_text = '# Notes\n\nSome content.'
+    tmp_file = tmp_path / 'notes.md'
+    tmp_file.write_text(md_text, encoding='utf-8')
+
     skill = _make_skill()
     md_file = _make_file(content_type='application/octet-stream', filename='notes.md')
     sf_record = _make_skill_file_record()
@@ -120,8 +148,14 @@ def test_add_markdown_by_filename_extension(monkeypatch):
         skill_files_router_module.SkillFiles, 'add_file_to_skill_by_id', AsyncMock(return_value=sf_record)
     )
 
-    with patch('open_webui.routers.skill_files.asyncio.to_thread', new=AsyncMock(return_value=b'# Hello')):
-        with patch('open_webui.storage.provider.Storage'):
+    async def _to_thread(fn, *args, **kwargs):
+        import asyncio as _asyncio
+
+        return await _asyncio.get_event_loop().run_in_executor(None, fn, *args, **kwargs)
+
+    with patch('open_webui.routers.skill_files.asyncio.to_thread', side_effect=_to_thread):
+        with patch('open_webui.storage.provider.Storage') as mock_storage:
+            mock_storage.get_file = lambda path: str(tmp_file)
             app = _make_app()
             res = TestClient(app).post('/api/v1/skills/id/skill-1/files/add', json={'file_id': 'file-1'})
 

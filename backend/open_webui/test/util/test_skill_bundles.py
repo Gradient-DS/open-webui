@@ -104,8 +104,17 @@ class TestResolveSkillBundleFiles:
         mock_files.get_files_by_ids.assert_not_called()
 
     @pytest.mark.asyncio
-    async def test_storage_fallback_used_when_no_cached_content(self):
-        """When data['content'] is absent, falls back to Storage.get_file."""
+    async def test_storage_fallback_used_when_no_cached_content(self, tmp_path):
+        """When data['content'] is absent, falls back to Storage.get_file.
+
+        Storage.get_file returns a LOCAL PATH (str), not bytes.  The fallback
+        must READ the file at that path and return its text content — not the
+        path string itself.
+        """
+        md_text = 'Legacy markdown content'
+        tmp_file = tmp_path / 'legacy.md'
+        tmp_file.write_text(md_text, encoding='utf-8')
+
         skill = _make_skill('skill-legacy')
         sf_rows = [_make_skill_file_row('flegacy')]
         # File has no cached content but has a path
@@ -119,11 +128,28 @@ class TestResolveSkillBundleFiles:
             skill_bundles_mod.SkillFiles = mock_sf
             skill_bundles_mod.Files = mock_files
 
+            # to_thread is called twice:
+            #   1st call: Storage.get_file('uploads/flegacy') → returns tmp_file path (str)
+            #   2nd call: Path(local_path).read_bytes() → reads the real file
+            # We let the 2nd call execute for real via run_in_executor so the
+            # actual file is read, while the 1st call is intercepted to return the
+            # tmp_file path instead of hitting real storage.
+            import asyncio as _asyncio
+
+            call_count = {'n': 0}
+
+            async def _to_thread(fn, *args, **kwargs):
+                call_count['n'] += 1
+                if call_count['n'] == 1:
+                    # First call: Storage.get_file → return the tmp file path
+                    return str(tmp_file)
+                # Subsequent calls: execute for real (Path.read_bytes)
+                return await _asyncio.get_event_loop().run_in_executor(None, fn, *args, **kwargs)
+
             with (
-                patch('open_webui.utils.skill_bundles.asyncio.to_thread', new_callable=AsyncMock) as mock_thread,
+                patch('open_webui.utils.skill_bundles.asyncio.to_thread', side_effect=_to_thread),
                 patch.dict('sys.modules', {'open_webui.storage.provider': MagicMock()}),
             ):
-                mock_thread.return_value = b'Legacy markdown content'
                 result = await resolve_skill_bundle_files([skill])
         finally:
             skill_bundles_mod.SkillFiles = orig_sf
@@ -131,7 +157,9 @@ class TestResolveSkillBundleFiles:
 
         bundle = result['skill-legacy']
         assert len(bundle) == 1
-        assert bundle[0] == {'filename': 'legacy.md', 'content': 'Legacy markdown content'}
+        # Content must be the FILE'S TEXT, not the path string.
+        assert bundle[0] == {'filename': 'legacy.md', 'content': md_text}
+        assert bundle[0]['content'] != str(tmp_file)
 
     @pytest.mark.asyncio
     async def test_storage_fallback_failure_skips_file_gracefully(self):

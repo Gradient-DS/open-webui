@@ -6,6 +6,7 @@ Auth follows routers/skills.py: ownership-or-AccessGrants write check + has_perm
 
 import asyncio
 import logging
+from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from open_webui.constants import ERROR_MESSAGES
@@ -105,19 +106,23 @@ async def add_file_to_skill(
     try:
         from open_webui.storage.provider import Storage  # deferred to avoid config-table at import time
 
-        raw = await asyncio.to_thread(Storage.get_file, file.path)
-        if isinstance(raw, (bytes, bytearray)):
-            try:
-                content = raw.decode('utf-8')
-            except (UnicodeDecodeError, ValueError):
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=ERROR_MESSAGES.DEFAULT(
-                        'File content is not valid UTF-8 text and cannot be attached to a skill.'
-                    ),
-                )
-        else:
-            content = raw
+        local_path = await asyncio.to_thread(Storage.get_file, file.path)
+        try:
+            raw_bytes = await asyncio.to_thread(Path(local_path).read_bytes)
+        except Exception as read_err:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=ERROR_MESSAGES.DEFAULT(f'Could not read file content for skill attachment: {read_err}'),
+            ) from read_err
+        try:
+            content = raw_bytes.decode('utf-8')
+        except (UnicodeDecodeError, ValueError) as dec_err:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=ERROR_MESSAGES.DEFAULT(
+                    'File content is not valid UTF-8 text and cannot be attached to a skill.'
+                ),
+            ) from dec_err
         await Files.update_file_data_by_id(form_data.file_id, {'content': content}, db=db)
     except HTTPException:
         raise

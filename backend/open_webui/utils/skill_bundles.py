@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from pathlib import Path
 
 log = logging.getLogger(__name__)
 
@@ -67,7 +68,7 @@ async def _read_file_content(f) -> str | None:  # type: ignore[return]
     """
     # Fast path: content already in the DB row.
     cached = (f.data or {}).get('content')
-    if cached:
+    if cached is not None:
         return cached
 
     # Fallback: read from object storage (legacy rows, defensive path).
@@ -78,10 +79,9 @@ async def _read_file_content(f) -> str | None:  # type: ignore[return]
     try:
         from open_webui.storage.provider import Storage  # deferred to avoid config-table at import time
 
-        raw = await asyncio.to_thread(Storage.get_file, f.path)
-        if isinstance(raw, (bytes, bytearray)):
-            return raw.decode('utf-8')
-        return raw  # type: ignore[return-value]
+        local_path = await asyncio.to_thread(Storage.get_file, f.path)
+        raw_bytes = await asyncio.to_thread(Path(local_path).read_bytes)
+        return raw_bytes.decode('utf-8')
     except Exception as exc:
         log.warning(
             'Skill file %s: Storage fallback failed — skipping content. Error: %s',
