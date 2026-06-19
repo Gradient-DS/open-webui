@@ -110,6 +110,7 @@ from open_webui.routers import (
     prompts,
     evaluations,
     skills,
+    skill_files,
     tools,
     users,
     utils,
@@ -2115,6 +2116,7 @@ app.include_router(discovery.router, prefix='/api/v1/discovery', tags=['discover
 app.include_router(prompts.router, prefix='/api/v1/prompts', tags=['prompts'])
 app.include_router(tools.router, prefix='/api/v1/tools', tags=['tools'])
 app.include_router(skills.router, prefix='/api/v1/skills', tags=['skills'])
+app.include_router(skill_files.router, prefix='/api/v1/skills', tags=['skills'])
 
 app.include_router(memories.router, prefix='/api/v1/memories', tags=['memories'])
 app.include_router(folders.router, prefix='/api/v1/folders', tags=['folders'])
