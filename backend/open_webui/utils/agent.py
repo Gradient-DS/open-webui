@@ -101,6 +101,10 @@ class AgentPayload:
     # {name, description, content, is_selected}. User-selected skills
     # carry full content for the agent to render; model-attached skills
     # form a manifest the agent expands on demand via a tool.
+    # Skills with bundled markdown files also carry an optional
+    # ``files: [{filename, content}, ...]`` list (present only when
+    # non-empty) so the agent can render a <bundled_files> manifest and
+    # serve file content via its ``read_skill_file`` tool.
     skills: Optional[list[dict[str, Any]]] = None
     # [Gradient] Generic metadata forwarded as-is to the agent service.
     # Today used for ``user_language`` (UI locale, BCP-47 like "nl-NL")

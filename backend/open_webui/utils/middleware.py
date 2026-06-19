@@ -117,6 +117,7 @@ from open_webui.utils.payload import apply_system_prompt_to_body
 from open_webui.utils.response import normalize_usage
 from open_webui.utils.mcp.client import MCPClient
 from open_webui.utils.agent_routing import agent_owns_tool_execution  # [Gradient]
+from open_webui.utils.skill_bundles import resolve_skill_bundle_files  # [Gradient]
 
 
 from open_webui.config import (
@@ -2720,12 +2721,20 @@ async def process_chat_payload(request, form_data, user, metadata, model):
     # dedicated payload field. The messages-inlining above is kept for
     # non-agent chats; the agent reads this structured list instead.
     if available_skills:
+        # Pre-compute bundled markdown files per skill.  Building the 'files'
+        # list requires async DB calls, so we resolve all bundles up-front
+        # before the comprehension below.  Skills with no files produce an
+        # empty list; the 'files' key is only included when non-empty so
+        # that skills without files are forwarded byte-identically to today.
+        skill_bundle_files = await resolve_skill_bundle_files(available_skills)
+
         metadata['skills'] = [
             {
                 'name': s.name,
                 'description': s.description or '',
                 'content': s.content,
                 'is_selected': s.id in user_skill_ids,
+                **({'files': skill_bundle_files[s.id]} if skill_bundle_files.get(s.id) else {}),
             }
             for s in available_skills
         ]
