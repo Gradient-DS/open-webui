@@ -699,7 +699,9 @@
 						{:else}
 							<div class="flex-1"></div>
 						{/if}
-						<ModelProfileLegend />
+						{#if $config?.features?.feature_model_meters !== false}
+							<ModelProfileLegend />
+						{/if}
 					</div>
 
 					<div class="px-2.5 group relative">

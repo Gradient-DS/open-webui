@@ -2034,6 +2034,10 @@ FEATURE_VOICE = os.environ.get('FEATURE_VOICE', 'True').lower() == 'true'
 FEATURE_CHANGELOG = os.environ.get('FEATURE_CHANGELOG', 'True').lower() == 'true'
 FEATURE_SYSTEM_PROMPT = os.environ.get('FEATURE_SYSTEM_PROMPT', 'True').lower() == 'true'
 FEATURE_MODELS = os.environ.get('FEATURE_MODELS', 'True').lower() == 'true'
+# Show the per-model Quality/Speed meters (and their legend) in the model picker.
+# Disabled per-deployment where overlapping model names make the baked 1-3 ratings
+# unreliable; descriptions, the eco badge and the datacenter flag are unaffected.
+FEATURE_MODEL_METERS = os.environ.get('FEATURE_MODEL_METERS', 'True').lower() == 'true'
 FEATURE_KNOWLEDGE = os.environ.get('FEATURE_KNOWLEDGE', 'True').lower() == 'true'
 FEATURE_PROMPTS = os.environ.get('FEATURE_PROMPTS', 'True').lower() == 'true'
 FEATURE_TOOLS = os.environ.get('FEATURE_TOOLS', 'True').lower() == 'true'
@@ -2073,6 +2077,15 @@ FEATURE_CHAT_CONTROLS_SECTIONS = [
 
 # Model Whitelist (empty = show all models)
 MODEL_WHITELIST = [model.strip() for model in os.environ.get('MODEL_WHITELIST', '').split(',') if model.strip()]
+
+# Per-deployment model -> datacenter/hosting mapping, surfaced on /api/config as
+# `model_hosting` and consumed by the model picker (hostingFromDeployment). A JSON
+# string of [{"match": <pattern>, "hosting": <label>}, ...]; kept as a plain env
+# (NOT PersistentConfig) because it is infra-set per deployment, not user-editable —
+# the same model id can live in a different datacenter for a different client. Parsed
+# defensively in main.py (_parse_model_hosting -> [] on any error), so a malformed
+# value can never crash boot. Empty string = no mapping (neutral, no flags).
+MODEL_HOSTING = os.environ.get('MODEL_HOSTING', '')
 
 ENABLE_ADMIN_ANALYTICS = os.environ.get('ENABLE_ADMIN_ANALYTICS', 'True').lower() == 'true'
 

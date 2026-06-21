@@ -589,6 +589,7 @@ from open_webui.config import (
     FEATURE_CHANGELOG,
     FEATURE_SYSTEM_PROMPT,
     FEATURE_MODELS,
+    FEATURE_MODEL_METERS,
     FEATURE_KNOWLEDGE,
     FEATURE_PROMPTS,
     FEATURE_TOOLS,
@@ -635,6 +636,8 @@ from open_webui.config import (
     SOEV_LOGIN_FOOTER,
     # Model Whitelist
     MODEL_WHITELIST,
+    # Per-deployment model -> datacenter/hosting mapping (model picker)
+    MODEL_HOSTING,
 )
 from open_webui.env import (
     ENABLE_CUSTOM_MODEL_FALLBACK,
@@ -3124,6 +3127,27 @@ async def stop_tasks_by_chat_id_endpoint(request: Request, chat_id: str, user=De
 ##################################
 
 
+def _parse_model_hosting(raw: str) -> list[dict]:
+    """Parse the MODEL_HOSTING env (a JSON list of {match, hosting} rules) for the
+    model picker. Defensive by design: any malformed / non-list / wrong-shaped value
+    degrades to [] (no datacenter flags) with a warning rather than crashing boot, so
+    a bad deployment value can never take the app down."""
+    if not raw or not raw.strip():
+        return []
+    try:
+        parsed = json.loads(raw)
+        if not isinstance(parsed, list):
+            raise ValueError('MODEL_HOSTING must be a JSON list')
+        return [
+            {'match': str(rule['match']), 'hosting': str(rule['hosting'])}
+            for rule in parsed
+            if isinstance(rule, dict) and rule.get('match') and rule.get('hosting')
+        ]
+    except Exception as e:
+        log.warning(f'Ignoring invalid MODEL_HOSTING ({e}); falling back to no datacenter mapping')
+        return []
+
+
 @app.get('/api/config')
 async def get_app_config(request: Request):
     user = None
@@ -3258,6 +3282,7 @@ async def get_app_config(request: Request):
                     'feature_changelog': FEATURE_CHANGELOG,
                     'feature_system_prompt': FEATURE_SYSTEM_PROMPT,
                     'feature_models': FEATURE_MODELS,
+                    'feature_model_meters': FEATURE_MODEL_METERS,
                     'feature_knowledge': FEATURE_KNOWLEDGE,
                     'feature_prompts': FEATURE_PROMPTS,
                     'feature_tools': FEATURE_TOOLS,
@@ -3348,6 +3373,10 @@ async def get_app_config(request: Request):
             }
             for slug, p in (app.state.config.INTEGRATION_PROVIDERS or {}).items()
         },
+        # Per-deployment model -> datacenter/hosting mapping for the model picker
+        # (Helm MODEL_HOSTING env). Top-level + always present so the picker can read
+        # it; defaults to [] (no flags) when unset or malformed.
+        'model_hosting': _parse_model_hosting(MODEL_HOSTING),
         **(
             {
                 'default_models': app.state.config.DEFAULT_MODELS,

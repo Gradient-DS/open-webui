@@ -127,6 +127,34 @@ function matchesPattern(pattern: string, id: string, name: string): boolean {
 }
 
 /**
+ * Resolve the per-deployment hosting/datacenter label for a model from the
+ * MODEL_HOSTING rules supplied by the backend (Helm env, surfaced on /api/config
+ * as `model_hosting`). Rules use the SAME matching convention as the model
+ * profiles (matchesPattern): case-insensitive substring, or an anchored glob when
+ * the pattern contains '*', against the model id OR display name; later rules win.
+ * This is intentionally deployment-specific — the same model id can be hosted in a
+ * different datacenter for a different client — so it is authoritative over both the
+ * baked profile `hosting` and the live connection host. Returns the last matching
+ * rule's (non-empty) hosting label, or undefined when nothing matches / no rules are
+ * configured, so callers fall back gracefully.
+ */
+export function hostingFromDeployment(
+	rules: { match: string; hosting: string }[] | undefined,
+	id: string,
+	name: string
+): string | undefined {
+	if (!rules?.length) return undefined;
+
+	let hosting: string | undefined;
+	for (const rule of rules) {
+		if (rule?.match && rule?.hosting && matchesPattern(rule.match, id, name)) {
+			hosting = rule.hosting; // later-wins: keep the last matching label
+		}
+	}
+	return hosting;
+}
+
+/**
  * Resolve the effective profile for a model: start from every matching defaults
  * rule (later rules in the file override earlier ones, so specific beats
  * generic), then apply the admin's per-model overrides field-by-field. Blank

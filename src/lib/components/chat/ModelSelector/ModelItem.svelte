@@ -4,7 +4,7 @@
 	import { getContext, tick } from 'svelte';
 	import dayjs from '$lib/dayjs';
 
-	import { mobile, settings, user } from '$lib/stores';
+	import { config, mobile, settings, user } from '$lib/stores';
 
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
 	import { copyToClipboard, sanitizeResponseContent } from '$lib/utils';
@@ -20,7 +20,12 @@
 	import InfoCircle from '$lib/components/icons/InfoCircle.svelte';
 	import ExclamationTriangle from '$lib/components/icons/ExclamationTriangle.svelte';
 	import Flag from '$lib/components/icons/Flag.svelte';
-	import { resolveModelProfile, parseHosting, hostingFromHost } from '$lib/utils/models/profile';
+	import {
+		resolveModelProfile,
+		parseHosting,
+		hostingFromHost,
+		hostingFromDeployment
+	} from '$lib/utils/models/profile';
 
 	const i18n = getContext('i18n');
 
@@ -32,9 +37,21 @@
 	$: profile = resolveModelProfile(item?.model ?? {});
 	$: displayName = item?.label || item?.value || '';
 	$: infoTooltip = (profile.info ?? '').replaceAll('\n', '<br>');
-	// Prefer the live hosting derived from the upstream connection host (LiteLLM/OpenAI
-	// api_base), falling back to the static hosting value from the model profile.
-	$: hosting = parseHosting(hostingFromHost(item?.model?.connection_host) ?? profile.hosting);
+	// Hosting/datacenter precedence (first non-empty wins):
+	//   1. per-deployment MODEL_HOSTING rules ($config.model_hosting) — authoritative,
+	//      because the same model id can live in a different datacenter per client;
+	//   2. the live upstream connection host (only resolves when connected direct, not
+	//      via the shared gateway where every model reports the same host);
+	//   3. the baked profile `hosting` (usually empty now that hosting is deployment-set).
+	$: hosting = parseHosting(
+		hostingFromDeployment($config?.model_hosting, item?.model?.id ?? '', item?.model?.name ?? '') ??
+			hostingFromHost(item?.model?.connection_host) ??
+			profile.hosting
+	);
+	// Whether to show the baked Quality/Speed meters. Disabled per-deployment via
+	// FEATURE_MODEL_METERS when overlapping model names make the baked ratings
+	// unreliable; descriptions, eco badge and the datacenter flag are unaffected.
+	$: showMeters = $config?.features?.feature_model_meters !== false;
 	// Warn when the model is hosted outside NL/EU (data sovereignty). Inferred from the
 	// hosting country flag; unknown hosting (no flag) shows no warning.
 	$: dataWarning = !!hosting?.flag && hosting.flag !== 'NL' && hosting.flag !== 'EU';
@@ -245,7 +262,9 @@
 			{/if}
 		</div>
 
-		<ModelProfile {profile} />
+		{#if showMeters}
+			<ModelProfile {profile} />
+		{/if}
 		<div class="flex items-center justify-end gap-1.5 w-8 shrink-0">
 		{#if $user?.role === 'admin' && item.model.loaded}
 			<Tooltip
