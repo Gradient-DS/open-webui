@@ -122,6 +122,7 @@
 	import ConversationFeedback from '$lib/components/chat/ConversationFeedback.svelte';
 	import ContextUsageBanner from '$lib/components/chat/ContextUsageBanner.svelte';
 	import RagFilterPanel from './RagFilterPanel.svelte';
+	import FeedbackButton from './FeedbackButton.svelte';
 
 	export let chatIdProp = '';
 
@@ -3479,42 +3480,46 @@
 
 					<div id="chat-pane" class="flex flex-col flex-auto z-10 w-full @container overflow-auto">
 						{#if ($settings?.landingPageMode === 'chat' && !$selectedFolder) || createMessagesList(history, history.currentId).length > 0}
-							<div
-								class=" pb-2.5 flex flex-col justify-between w-full flex-auto overflow-auto h-0 max-w-full z-10 scrollbar-hidden"
-								id="messages-container"
-								bind:this={messagesContainerElement}
-								on:scroll={(e) => {
-									autoScroll =
-										messagesContainerElement.scrollHeight - messagesContainerElement.scrollTop <=
-										messagesContainerElement.clientHeight + 5;
-									isNearTop = messagesContainerElement.scrollTop <= 100;
-								}}
-							>
-								<div class=" h-full w-full flex flex-col">
-									<Messages
-										bind:this={messagesRef}
-										chatId={$chatId}
-										bind:history
-										bind:autoScroll
-										bind:prompt
-										setInputText={(text) => {
-											messageInput?.setText(text);
-										}}
-										{selectedModels}
-										{atSelectedModel}
-										{sendMessage}
-										{showMessage}
-										{submitMessage}
-										{continueResponse}
-										{regenerateResponse}
-										{mergeResponses}
-										{chatActionHandler}
-										{addMessages}
-										topPadding={true}
-										bottomPadding={files.length > 0}
-										{onSelect}
-									/>
+							<div class="relative flex flex-col flex-auto h-0 min-h-0 w-full max-w-full">
+								<div
+									class=" pb-2.5 flex flex-col justify-between w-full flex-auto overflow-auto h-0 max-w-full z-10 scrollbar-hidden"
+									id="messages-container"
+									bind:this={messagesContainerElement}
+									on:scroll={(e) => {
+										autoScroll =
+											messagesContainerElement.scrollHeight - messagesContainerElement.scrollTop <=
+											messagesContainerElement.clientHeight + 5;
+										isNearTop = messagesContainerElement.scrollTop <= 100;
+									}}
+								>
+									<div class=" h-full w-full flex flex-col">
+										<Messages
+											bind:this={messagesRef}
+											chatId={$chatId}
+											bind:history
+											bind:autoScroll
+											bind:prompt
+											setInputText={(text) => {
+												messageInput?.setText(text);
+											}}
+											{selectedModels}
+											{atSelectedModel}
+											{sendMessage}
+											{showMessage}
+											{submitMessage}
+											{continueResponse}
+											{regenerateResponse}
+											{mergeResponses}
+											{chatActionHandler}
+											{addMessages}
+											topPadding={true}
+											bottomPadding={files.length > 0}
+											{onSelect}
+										/>
+									</div>
 								</div>
+
+								<FeedbackButton />
 							</div>
 
 							<ConversationFeedback
@@ -3609,7 +3614,7 @@
 								</div>
 							</div>
 						{:else}
-							<div class="flex items-center h-full">
+							<div class="relative flex items-center h-full">
 								<Placeholder
 									{history}
 									{selectedModels}
@@ -3645,6 +3650,8 @@
 										}
 									}}
 								/>
+
+								<FeedbackButton />
 							</div>
 						{/if}
 					</div>
