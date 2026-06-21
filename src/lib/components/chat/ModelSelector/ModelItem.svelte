@@ -38,6 +38,12 @@
 	// Warn when the model is hosted outside NL/EU (data sovereignty). Inferred from the
 	// hosting country flag; unknown hosting (no flag) shows no warning.
 	$: dataWarning = !!hosting?.flag && hosting.flag !== 'NL' && hosting.flag !== 'EU';
+	// Admin-set model description (custom/workspace models). Folded into the single (i)
+	// tooltip below so a row never shows two separate info icons.
+	$: description = item?.model?.info?.meta?.description ?? '';
+	$: descriptionHtml = description
+		? marked.parse(sanitizeResponseContent(description).replaceAll('\n', '<br>'))
+		: '';
 
 	export let unloadModelHandler: (modelValue: string) => void = () => {};
 	export let pinModelHandler: (modelId: string) => void = () => {};
@@ -63,7 +69,7 @@
 	role="option"
 	aria-selected={value === item.value}
 	aria-label={$i18n.t('Select {{modelName}} model', { modelName: item.label })}
-	class="flex group/item w-full h-14 text-left font-medium select-none items-center rounded-button pl-3 pr-1.5 text-sm text-gray-700 dark:text-gray-100 outline-hidden transition-all duration-75 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-xl cursor-pointer data-highlighted:bg-muted {index ===
+	class="flex group/item w-full h-14 text-left font-medium select-none items-center rounded-button pl-3 pr-1.5 text-xs sm:text-sm text-gray-700 dark:text-gray-100 outline-hidden transition-all duration-75 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-xl cursor-pointer data-highlighted:bg-muted {index ===
 	selectedModelIdx
 		? 'bg-gray-100 dark:bg-gray-800 group-hover:bg-transparent'
 		: ''}"
@@ -84,7 +90,7 @@
 			</div>
 
 			<div class=" shrink-0 flex items-center gap-2">
-				{#if profile.info || hosting}
+				{#if profile.info || description || hosting}
 					{#key item.model.id}
 						<Tooltip elementId="model-info-{item.model.id}">
 							<InfoCircle className="size-3.5 text-gray-400 dark:text-gray-500" />
@@ -93,9 +99,16 @@
 								{#if profile.info}
 									<div>{@html infoTooltip}</div>
 								{/if}
+								{#if description}
+									<div
+										class={profile.info ? 'mt-1.5 pt-1.5 border-t border-white/15' : ''}
+									>
+										{@html descriptionHtml}
+									</div>
+								{/if}
 								{#if hosting}
 									<div
-										class="flex items-center gap-1.5 {profile.info
+										class="flex items-center gap-1.5 {profile.info || description
 											? 'mt-1.5 pt-1.5 border-t border-white/15'
 											: ''}"
 									>
@@ -200,36 +213,11 @@
 						</div>
 					</Tooltip>
 				{/if}
-
-				{#if item.model?.info?.meta?.description}
-					<Tooltip
-						content={`${marked.parse(
-							sanitizeResponseContent(item.model?.info?.meta?.description).replaceAll('\n', '<br>')
-						)}`}
-					>
-						<div class=" translate-y-[1px]">
-							<svg
-								xmlns="http://www.w3.org/2000/svg"
-								fill="none"
-								viewBox="0 0 24 24"
-								stroke-width="1.5"
-								stroke="currentColor"
-								class="w-4 h-4"
-							>
-								<path
-									stroke-linecap="round"
-									stroke-linejoin="round"
-									d="m11.25 11.25.041-.02a.75.75 0 0 1 1.063.852l-.708 2.836a.75.75 0 0 0 1.063.853l.041-.021M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Zm-9-3.75h.008v.008H12V8.25Z"
-								/>
-							</svg>
-						</div>
-					</Tooltip>
-				{/if}
 			</div>
 		</div>
 
-		{#if displayName && displayName !== profile.bestFor}
-			<div class="text-xs text-gray-500 dark:text-gray-400 line-clamp-1">
+		{#if profile.bestFor && displayName && displayName !== profile.bestFor}
+			<div class="text-[11px] sm:text-xs text-gray-500 dark:text-gray-400 line-clamp-1">
 				{displayName}
 			</div>
 		{/if}

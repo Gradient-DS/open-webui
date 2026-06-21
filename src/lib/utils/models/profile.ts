@@ -77,7 +77,7 @@ export function parseHosting(hosting?: string): { label: string; flag?: FlagCode
 
 type ProfileRule = {
 	match: string;
-	profile: ModelProfile;
+	profile?: ModelProfile;
 	_comment?: string;
 };
 
@@ -142,6 +142,7 @@ export function resolveModelProfile(model: {
 
 	let base: ModelProfile = {};
 	for (const rule of rules) {
+		if (!rule.profile) continue; // skip comment-only entries (e.g. the leading docs entry)
 		if (matchesPattern(rule.match, id, name)) {
 			base = { ...base, ...rule.profile };
 		}

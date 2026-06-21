@@ -1,13 +1,6 @@
 [
 	{
-		"_comment": "Default model profiles used as a fallback when an admin has not set meta.profile on a model. Rules are matched against the model id (and name) top-to-bottom; LATER matches override EARLIER ones field-by-field, so keep broad patterns first and more specific patterns below. A `match` of '*' matches everything; otherwise it is a case-insensitive substring match, or a glob when it contains '*'. Axes (speed/quality) are 1-3. `origin` is the region the model comes from ('EU', 'US' or 'CN'); it is not rendered, so mention origin in `info` instead. `hosting` is free text naming who/where the model is hosted, shown in the info tooltip; put a country code in parentheses to add a flag, e.g. 'Nebul (NL)', 'OpenAI (US)', 'Google (US)' — supported flag codes are NL, EU, US, CN (anything else, or no parentheses, shows the text without a flag). A data-sovereignty warning sign is shown automatically when the hosting country code is anything other than NL or EU (e.g. US or CN). `eco` shows the green leaf badge.",
-		"match": "*",
-		"profile": {
-			"bestFor": "Algemene vragen",
-			"speed": 0,
-			"quality": 0,
-			"eco": false
-		}
+		"_comment": "Default model profiles used as a fallback when an admin has not set meta.profile on a model. Rules are matched against the model id (and name) top-to-bottom; LATER matches override EARLIER ones field-by-field, so keep broad patterns first and more specific patterns below. A `match` of '*' matches everything; otherwise it is a case-insensitive substring match, or a glob when it contains '*'. Axes (speed/quality) are 1-3. `origin` is the region the model comes from ('EU', 'US' or 'CN'); it is not rendered, so mention origin in `info` instead. `hosting` is free text naming who/where the model is hosted, shown in the info tooltip; put a country code in parentheses to add a flag, e.g. 'Nebul (NL)', 'OpenAI (US)', 'Google (US)' — supported flag codes are NL, EU, US, CN (anything else, or no parentheses, shows the text without a flag). A data-sovereignty warning sign is shown automatically when the hosting country code is anything other than NL or EU (e.g. US or CN). `eco` shows the green leaf badge. There is intentionally NO catch-all '*' default — a model matching no rule (and with no admin meta.profile override) resolves to an empty profile and renders with no decoration (just its name, no meters), so custom/workspace models and not-yet-profiled models look unchanged from upstream. This first entry is comment-only (no `profile`) and is skipped by the resolver."
 	},
 	{
 		"match": "gemma-4-31B-it (Meertalen)",
