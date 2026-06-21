@@ -89,6 +89,7 @@ function handleStart(
 		agent_id: event.agent_id,
 		agent_label: event.agent_label,
 		capability_name: event.capability_name,
+		model_name: event.model_name ?? null,
 		parallel_group_id: event.parallel_group_id,
 		state: 'pending',
 		text_buffer: '',
