@@ -20,6 +20,7 @@ const start = (
 	agent_id,
 	agent_label: overrides.agent_label ?? `Label ${agent_id}`,
 	capability_name: overrides.capability_name ?? `capability_${agent_id}`,
+	model_name: overrides.model_name,
 	parallel_group_id,
 	started_at: overrides.started_at ?? 1000
 });
@@ -215,6 +216,16 @@ describe('reduceSubAgents', () => {
 		expect(group.cards[0].status_history).toHaveLength(2);
 		expect(group.cards[0].status_history[0].description).toBe('Zoekt…');
 		expect(group.cards[0].status_history[1].description).toBe('Vond 3 hits');
+	});
+
+	it('copies model_name from the start event onto the card', () => {
+		const groups = reduceSubAgents([start('a1', 'g1', { model_name: 'openai/gpt-oss-120b' })]);
+		expect(groups[0].cards[0].model_name).toBe('openai/gpt-oss-120b');
+	});
+
+	it('defaults card model_name to null when the start event omits it', () => {
+		const groups = reduceSubAgents([start('a1', 'g1')]);
+		expect(groups[0].cards[0].model_name).toBeNull();
 	});
 
 	it('appends source events into sources list', () => {

@@ -283,6 +283,11 @@ openWebui:
     featureChangelog: "False"
     featureSystemPrompt: "False"
     featureModels: "True"
+    # Show the per-model Quality/Speed meters + legend in the model picker.
+    # Override to "False" per-deployment where overlapping model names make the
+    # baked 1-3 ratings unreliable; descriptions, eco badge and the datacenter
+    # flag are unaffected. Rendered unconditionally, so "False" turns it off.
+    featureModelMeters: "True"
     featureKnowledge: "True"
     featurePrompts: "True"
     featureTools: "False"
@@ -299,6 +304,10 @@ openWebui:
     featureTemporaryChat: "True"
     featureToolServers: "False"
     featureTerminalServers: "False"
+    # Strict data separation (data-sovereignty): a conversation may use EITHER the
+    # open internet (web search / webpage URLs) OR internal documents (files / KBs /
+    # notes), never both. Off by default = both allowed together (current behavior).
+    featureStrictDataSeparation: "False"
 
     # Feedback Reporting (product feedback — user-menu link + error reports).
     # Opt-in: off by default; a tenant enables it explicitly. PersistentConfig
@@ -377,6 +386,17 @@ openWebui:
     greetingTemplate: ""
     defaultPromptSuggestions: "[]"
     defaultModels: ""              # Comma-separated model IDs for new users (e.g., "model-a,model-b")
+    # Per-deployment model -> datacenter/hosting mapping for the model picker,
+    # rendered to the MODEL_HOSTING env as a JSON string (only when non-empty).
+    # A list of {match, hosting}; same matching convention as model-profiles
+    # (case-insensitive substring, or an anchored glob when the pattern has '*';
+    # later rules win). A parenthetical country code (NL/EU/US/CN) renders a flag
+    # and US/CN trigger the data-sovereignty warning. Empty list = no flags.
+    # Set per tenant (the litellm gateway differs per cluster). Example:
+    #   modelHosting:
+    #     - { match: "*",      hosting: "Nebul (NL)" }
+    #     - { match: "claude", hosting: "Anthropic (US)" }
+    modelHosting: []
     enableFolders: "true"
     userPermissionsFeaturesFolders: "true"
     enableChannels: "false"

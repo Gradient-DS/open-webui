@@ -128,7 +128,9 @@ from open_webui.config import (
     CODE_INTERPRETER_BLOCKED_MODULES,
     DEFAULT_DOCUMENT_WRITER_PROMPT,
     FEATURE_BUILTIN_TOOLS,
+    FEATURE_STRICT_DATA_SEPARATION,
 )
+from open_webui.utils.data_separation import request_mixes_data_sources
 from open_webui.env import (
     GLOBAL_LOG_LEVEL,
     ENABLE_CHAT_RESPONSE_BASE64_IMAGE_URL_CONVERSION,
@@ -2562,6 +2564,23 @@ async def process_chat_payload(request, form_data, user, metadata, model):
 
     features = form_data.pop('features', None) or {}
     extra_params['__features__'] = features
+
+    # Strict data separation (data-sovereignty): a conversation may use the open
+    # internet (web search / webpage URLs) OR internal documents (files / KBs),
+    # never both. No-op unless the feature flag is enabled. The frontend grays
+    # out the unavailable side; this is the server-side hard guard.
+    if FEATURE_STRICT_DATA_SEPARATION and request_mixes_data_sources(
+        form_data.get('files'),
+        form_data.get('messages'),
+        features.get('web_search'),
+    ):
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                'This conversation cannot combine internal documents with the open '
+                'internet. Start a new chat to use the other.'
+            ),
+        )
 
     # [Gradient] Capture raw knowledge base references before they are
     # flattened into file items. The agent API needs these to know which

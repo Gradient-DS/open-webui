@@ -740,7 +740,7 @@
 					terminalEventHandler(type, data);
 				} else if (type === 'subagent') {
 					// [Gradient] Live SubAgent stream from the agent runner
-					// (Leiden bezwaar parent + capability subagents). The
+					// (bezwaar parent + capability subagents). The
 					// payload is one of four phases — start / token / step /
 					// done — keyed by agent_id and grouped by
 					// parallel_group_id. SubAgentGroup.svelte folds the flat
