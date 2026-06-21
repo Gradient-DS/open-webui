@@ -403,6 +403,7 @@ type Config = {
 		feature_chat_controls_sections?: string[];
 		feature_skills?: boolean;
 		feature_builtin_tools?: boolean;
+		feature_strict_data_separation?: boolean;
 		feature_tool_servers?: boolean;
 		feature_terminal_servers?: boolean;
 		feature_user_demographics?: boolean;

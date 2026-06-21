@@ -299,6 +299,10 @@ openWebui:
     featureTemporaryChat: "True"
     featureToolServers: "False"
     featureTerminalServers: "False"
+    # Strict data separation (data-sovereignty): a conversation may use EITHER the
+    # open internet (web search / webpage URLs) OR internal documents (files / KBs /
+    # notes), never both. Off by default = both allowed together (current behavior).
+    featureStrictDataSeparation: "False"
 
     # Feedback Reporting (product feedback — user-menu link + error reports).
     # Opt-in: off by default; a tenant enables it explicitly. PersistentConfig

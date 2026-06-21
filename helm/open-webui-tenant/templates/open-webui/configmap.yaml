@@ -145,6 +145,7 @@ data:
   FEATURE_TEMPORARY_CHAT: {{ .Values.openWebui.config.featureTemporaryChat | quote }}
   FEATURE_TOOL_SERVERS: {{ .Values.openWebui.config.featureToolServers | quote }}
   FEATURE_TERMINAL_SERVERS: {{ .Values.openWebui.config.featureTerminalServers | quote }}
+  FEATURE_STRICT_DATA_SEPARATION: {{ .Values.openWebui.config.featureStrictDataSeparation | quote }}
 
   # Feedback Reporting (PersistentConfig: env seeds initial value; admin UI wins thereafter)
   ENABLE_FEEDBACK_REPORTING: {{ .Values.openWebui.config.enableFeedbackReporting | quote }}
