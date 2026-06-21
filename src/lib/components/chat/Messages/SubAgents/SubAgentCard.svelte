@@ -17,6 +17,10 @@
 	//   done(ok=false)     → error    (stays expanded, no auto-collapse)
 	export let card: SubAgentCardVM;
 
+	// Strip the org/ prefix for display (e.g. "mistralai/Mistral-Large-3…"
+	// → "Mistral-Large-3…"). The full id is kept in the title attribute.
+	$: modelLabel = card.model_name ? (card.model_name.split('/').pop() ?? card.model_name) : '';
+
 	const AUTO_COLLAPSE_DELAY_MS = 2000;
 
 	// `expanded` is driven by state + user action. Pending: collapsed
@@ -154,6 +158,15 @@
 		<span class="flex-1 truncate font-medium text-gray-700 dark:text-gray-200">
 			{card.agent_label}
 		</span>
+
+		{#if modelLabel}
+			<span
+				class="shrink-0 rounded bg-gray-100 px-1.5 py-0.5 text-xs font-medium text-gray-500 dark:bg-gray-800 dark:text-gray-400"
+				title={card.model_name}
+			>
+				{modelLabel}
+			</span>
+		{/if}
 
 		{#if card.step_label && (state === 'running' || state === 'pending')}
 			<span class="hidden sm:inline truncate text-xs text-gray-500 dark:text-gray-400 max-w-[40%]">

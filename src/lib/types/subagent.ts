@@ -1,6 +1,6 @@
 /**
  * TypeScript types for the `event: subagent` SSE family dispatched by the
- * agent runner when a parent agent (e.g. the Leiden bezwaar parent) spawns
+ * agent runner when a parent agent (e.g. the bezwaar parent) spawns
  * one or more SubAgents in parallel.
  *
  * The agent service emits seven phases per SubAgent — `start`, `token`,
@@ -15,6 +15,7 @@ export interface SubagentStartEvent {
 	agent_id: string;
 	agent_label: string;
 	capability_name: string;
+	model_name?: string;
 	parallel_group_id: string;
 	started_at: number;
 }
@@ -97,6 +98,7 @@ export interface SubAgentCardVM {
 	agent_id: string;
 	agent_label: string;
 	capability_name: string;
+	model_name: string | null;
 	parallel_group_id: string;
 	state: SubAgentCardState;
 	text_buffer: string;
