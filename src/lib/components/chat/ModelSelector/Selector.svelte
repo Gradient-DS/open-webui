@@ -37,6 +37,7 @@
 	import ChatBubbleOval from '$lib/components/icons/ChatBubbleOval.svelte';
 
 	import ModelItem from './ModelItem.svelte';
+	import ModelProfileLegend from './ModelProfileLegend.svelte';
 
 	const i18n = getContext('i18n');
 	const dispatch = createEventDispatcher();
@@ -55,7 +56,7 @@
 		[key: string]: any;
 	}[] = [];
 
-	export let className = 'w-[32rem]';
+	export let className = 'w-[28rem]';
 	export let triggerClassName = 'text-lg';
 
 	export let pinModelHandler: (modelId: string) => void = () => {};
@@ -472,7 +473,7 @@
 		deleteModelTarget = null;
 	};
 
-	const ITEM_HEIGHT = 42;
+	const ITEM_HEIGHT = 56;
 	const OVERSCAN = 10;
 
 	let listScrollTop = 0;
@@ -593,10 +594,15 @@
 						</div>
 					{/if}
 
-					<div class="px-2">
+					<!-- Tabs (left) + Quality/Speed legend (right). The legend must line up above the
+						row meters, but the rows live in a px-2.5 wrapper + a scroll container that
+						reserves a 0.45rem scrollbar gutter (scrollbar-gutter:stable on the list below),
+						while this header sits outside both. pr-[1.45rem] = px-2.5 (0.625) + gutter (0.45)
+						+ the row button's pr-1.5 (0.375), so the meter columns align in every scroll state. -->
+					<div class="pl-3 pr-[1.45rem] py-1 flex items-center w-full">
 						{#if tags && items.filter((item) => !(item.model?.info?.meta?.hidden ?? false)).length > 0}
 							<div
-								class=" flex w-full bg-white dark:bg-gray-850 overflow-x-auto scrollbar-none font-[450] mb-0.5"
+								class="flex-1 min-w-0 flex bg-white dark:bg-gray-850 overflow-x-auto scrollbar-none font-[450]"
 								on:wheel={(e) => {
 									if (e.deltaY !== 0) {
 										e.preventDefault();
@@ -605,7 +611,7 @@
 								}}
 							>
 								<div
-									class="flex gap-1 w-fit text-center text-sm rounded-full bg-transparent px-1.5 whitespace-nowrap"
+									class="flex gap-1 w-fit text-center text-xs sm:text-sm rounded-full bg-transparent whitespace-nowrap"
 									bind:this={tagsContainerElement}
 								>
 									{#if items.find((item) => item.model?.connection_type === 'local') || items.find((item) => item.model?.connection_type === 'external') || items.find((item) => item.model?.direct) || tags.length > 0}
@@ -690,6 +696,11 @@
 									{/each}
 								</div>
 							</div>
+						{:else}
+							<div class="flex-1"></div>
+						{/if}
+						{#if $config?.features?.feature_model_meters !== false}
+							<ModelProfileLegend />
 						{/if}
 					</div>
 
@@ -723,7 +734,7 @@
 						{:else}
 							<!-- svelte-ignore a11y-no-static-element-interactions -->
 							<div
-								class="max-h-64 overflow-y-auto"
+								class="max-h-64 overflow-y-auto [scrollbar-gutter:stable]"
 								role="listbox"
 								aria-label={$i18n.t('Available models')}
 								bind:this={listContainer}

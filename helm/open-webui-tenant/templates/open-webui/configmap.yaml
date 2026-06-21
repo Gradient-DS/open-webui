@@ -128,6 +128,7 @@ data:
   FEATURE_CHANGELOG: {{ .Values.openWebui.config.featureChangelog | quote }}
   FEATURE_SYSTEM_PROMPT: {{ .Values.openWebui.config.featureSystemPrompt | quote }}
   FEATURE_MODELS: {{ .Values.openWebui.config.featureModels | quote }}
+  FEATURE_MODEL_METERS: {{ .Values.openWebui.config.featureModelMeters | quote }}
   FEATURE_KNOWLEDGE: {{ .Values.openWebui.config.featureKnowledge | quote }}
   FEATURE_PROMPTS: {{ .Values.openWebui.config.featurePrompts | quote }}
   FEATURE_TOOLS: {{ .Values.openWebui.config.featureTools | quote }}
@@ -220,6 +221,9 @@ data:
   DEFAULT_PROMPT_SUGGESTIONS: {{ .Values.openWebui.config.defaultPromptSuggestions | quote }}
   {{- if .Values.openWebui.config.defaultModels }}
   DEFAULT_MODELS: {{ .Values.openWebui.config.defaultModels | quote }}
+  {{- end }}
+  {{- if .Values.openWebui.config.modelHosting }}
+  MODEL_HOSTING: {{ .Values.openWebui.config.modelHosting | toJson | quote }}
   {{- end }}
   ENABLE_FOLDERS: {{ .Values.openWebui.config.enableFolders | quote }}
   USER_PERMISSIONS_FEATURES_FOLDERS: {{ .Values.openWebui.config.userPermissionsFeaturesFolders | quote }}

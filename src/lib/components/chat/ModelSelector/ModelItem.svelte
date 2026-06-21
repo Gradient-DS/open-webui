@@ -4,18 +4,28 @@
 	import { getContext, tick } from 'svelte';
 	import dayjs from '$lib/dayjs';
 
-	import { mobile, settings, user } from '$lib/stores';
-	import { WEBUI_API_BASE_URL, WEBUI_BASE_URL } from '$lib/constants';
+	import { config, mobile, settings, user } from '$lib/stores';
 
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
 	import { copyToClipboard, sanitizeResponseContent } from '$lib/utils';
 	import ArrowUpTray from '$lib/components/icons/ArrowUpTray.svelte';
 	import Check from '$lib/components/icons/Check.svelte';
 	import ModelItemMenu from './ModelItemMenu.svelte';
+	import ModelProfile from './ModelProfile.svelte';
 	import EllipsisHorizontal from '$lib/components/icons/EllipsisHorizontal.svelte';
 	import { toast } from 'svelte-sonner';
 	import Tag from '$lib/components/icons/Tag.svelte';
 	import Label from '$lib/components/icons/Label.svelte';
+	import Leaf from '$lib/components/icons/Leaf.svelte';
+	import InfoCircle from '$lib/components/icons/InfoCircle.svelte';
+	import ExclamationTriangle from '$lib/components/icons/ExclamationTriangle.svelte';
+	import Flag from '$lib/components/icons/Flag.svelte';
+	import {
+		resolveModelProfile,
+		parseHosting,
+		hostingFromHost,
+		hostingFromDeployment
+	} from '$lib/utils/models/profile';
 
 	const i18n = getContext('i18n');
 
@@ -23,6 +33,34 @@
 	export let item: any = {};
 	export let index: number = -1;
 	export let value: string = '';
+
+	$: profile = resolveModelProfile(item?.model ?? {});
+	$: displayName = item?.label || item?.value || '';
+	$: infoTooltip = (profile.info ?? '').replaceAll('\n', '<br>');
+	// Hosting/datacenter precedence (first non-empty wins):
+	//   1. per-deployment MODEL_HOSTING rules ($config.model_hosting) — authoritative,
+	//      because the same model id can live in a different datacenter per client;
+	//   2. the live upstream connection host (only resolves when connected direct, not
+	//      via the shared gateway where every model reports the same host);
+	//   3. the baked profile `hosting` (usually empty now that hosting is deployment-set).
+	$: hosting = parseHosting(
+		hostingFromDeployment($config?.model_hosting, item?.model?.id ?? '', item?.model?.name ?? '') ??
+			hostingFromHost(item?.model?.connection_host) ??
+			profile.hosting
+	);
+	// Whether to show the baked Quality/Speed meters. Disabled per-deployment via
+	// FEATURE_MODEL_METERS when overlapping model names make the baked ratings
+	// unreliable; descriptions, eco badge and the datacenter flag are unaffected.
+	$: showMeters = $config?.features?.feature_model_meters !== false;
+	// Warn when the model is hosted outside NL/EU (data sovereignty). Inferred from the
+	// hosting country flag; unknown hosting (no flag) shows no warning.
+	$: dataWarning = !!hosting?.flag && hosting.flag !== 'NL' && hosting.flag !== 'EU';
+	// Admin-set model description (custom/workspace models). Folded into the single (i)
+	// tooltip below so a row never shows two separate info icons.
+	$: description = item?.model?.info?.meta?.description ?? '';
+	$: descriptionHtml = description
+		? marked.parse(sanitizeResponseContent(description).replaceAll('\n', '<br>'))
+		: '';
 
 	export let unloadModelHandler: (modelValue: string) => void = () => {};
 	export let pinModelHandler: (modelId: string) => void = () => {};
@@ -48,7 +86,7 @@
 	role="option"
 	aria-selected={value === item.value}
 	aria-label={$i18n.t('Select {{modelName}} model', { modelName: item.label })}
-	class="flex group/item w-full text-left font-medium line-clamp-1 select-none items-center rounded-button py-2 pl-3 pr-1.5 text-sm text-gray-700 dark:text-gray-100 outline-hidden transition-all duration-75 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-xl cursor-pointer data-highlighted:bg-muted {index ===
+	class="flex group/item w-full h-14 text-left font-medium select-none items-center rounded-button pl-3 pr-1.5 text-xs sm:text-sm text-gray-700 dark:text-gray-100 outline-hidden transition-all duration-75 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-xl cursor-pointer data-highlighted:bg-muted {index ===
 	selectedModelIdx
 		? 'bg-gray-100 dark:bg-gray-800 group-hover:bg-transparent'
 		: ''}"
@@ -58,47 +96,54 @@
 		onClick();
 	}}
 >
-	<div class="flex flex-col flex-1 gap-1.5">
-		<!-- {#if (item?.model?.tags ?? []).length > 0}
-			<div
-				class="flex gap-0.5 self-center items-start h-full w-full translate-y-[0.5px] overflow-x-auto scrollbar-none"
-			>
-				{#each item.model?.tags.sort((a, b) => a.name.localeCompare(b.name)) as tag}
-					<Tooltip content={tag.name} className="flex-shrink-0">
-						<div
-							class=" text-xs font-semibold px-1 rounded-sm uppercase bg-gray-500/20 text-gray-700 dark:text-gray-200"
-						>
-							{tag.name}
-						</div>
-					</Tooltip>
-				{/each}
-			</div>
-		{/if} -->
-
-		<div class="flex items-center gap-2">
-			<div class="flex items-center min-w-fit">
-				<Tooltip content={$user?.role === 'admin' ? (item?.value ?? '') : ''} placement="top-start">
-					<img
-						src={`${WEBUI_API_BASE_URL}/models/model/profile/image?id=${item.model.id}&lang=${$i18n.language}`}
-						alt={$i18n.t('{{modelName}} profile image', { modelName: item.label })}
-						class="rounded-full size-5 flex items-center"
-						loading="lazy"
-						on:error={(e) => {
-							e.currentTarget.src = '/favicon.png';
-						}}
-					/>
-				</Tooltip>
-			</div>
-
-			<div class="flex items-center">
+	<div class="flex flex-col flex-1 gap-0.5 min-w-0">
+		<div class="flex items-center gap-2 min-w-0">
+			<div class="flex items-center min-w-0">
 				<Tooltip content={`${item.label} (${item.value})`} placement="top-start">
-					<div class="line-clamp-1">
-						{item.label}
+					<div class="line-clamp-1 font-medium">
+						{profile.bestFor || displayName}
 					</div>
 				</Tooltip>
 			</div>
 
 			<div class=" shrink-0 flex items-center gap-2">
+				{#if profile.info || description || hosting}
+					{#key item.model.id}
+						<Tooltip elementId="model-info-{item.model.id}">
+							<InfoCircle className="size-3.5 text-gray-400 dark:text-gray-500" />
+
+							<div slot="tooltip" id="model-info-{item.model.id}" class="text-left">
+								{#if profile.info}
+									<div>{@html infoTooltip}</div>
+								{/if}
+								{#if description}
+									<div
+										class={profile.info ? 'mt-1.5 pt-1.5 border-t border-white/15' : ''}
+									>
+										{@html descriptionHtml}
+									</div>
+								{/if}
+								{#if hosting}
+									<div
+										class="flex items-center gap-1.5 {profile.info || description
+											? 'mt-1.5 pt-1.5 border-t border-white/15'
+											: ''}"
+									>
+										<span>{$i18n.t('Hosting location')}: {hosting.label}</span>
+										{#if hosting.flag}
+											<Flag
+												origin={hosting.flag}
+												className="w-[18px] h-[13px] rounded-[2px]"
+												ariaLabel={hosting.flag}
+											/>
+										{/if}
+									</div>
+								{/if}
+							</div>
+						</Tooltip>
+					{/key}
+				{/if}
+
 				{#if item.model.owned_by === 'ollama'}
 					{#if (item.model.ollama?.details?.parameter_size ?? '') !== ''}
 						<div class="flex items-center translate-y-[0.5px]">
@@ -184,59 +229,43 @@
 							</svg>
 						</div>
 					</Tooltip>
-				{:else if item.model.connection_type === 'external'}
-					<Tooltip content={`${$i18n.t('External')}`}>
-						<div class="translate-y-[1px]">
-							<svg
-								xmlns="http://www.w3.org/2000/svg"
-								viewBox="0 0 16 16"
-								fill="currentColor"
-								class="size-3"
-							>
-								<path
-									fill-rule="evenodd"
-									d="M8.914 6.025a.75.75 0 0 1 1.06 0 3.5 3.5 0 0 1 0 4.95l-2 2a3.5 3.5 0 0 1-5.396-4.402.75.75 0 0 1 1.251.827 2 2 0 0 0 3.085 2.514l2-2a2 2 0 0 0 0-2.828.75.75 0 0 1 0-1.06Z"
-									clip-rule="evenodd"
-								/>
-								<path
-									fill-rule="evenodd"
-									d="M7.086 9.975a.75.75 0 0 1-1.06 0 3.5 3.5 0 0 1 0-4.95l2-2a3.5 3.5 0 0 1 5.396 4.402.75.75 0 0 1-1.251-.827 2 2 0 0 0-3.085-2.514l-2 2a2 2 0 0 0 0 2.828.75.75 0 0 1 0 1.06Z"
-									clip-rule="evenodd"
-								/>
-							</svg>
-						</div>
-					</Tooltip>
-				{/if}
-
-				{#if item.model?.info?.meta?.description}
-					<Tooltip
-						content={`${marked.parse(
-							sanitizeResponseContent(item.model?.info?.meta?.description).replaceAll('\n', '<br>')
-						)}`}
-					>
-						<div class=" translate-y-[1px]">
-							<svg
-								xmlns="http://www.w3.org/2000/svg"
-								fill="none"
-								viewBox="0 0 24 24"
-								stroke-width="1.5"
-								stroke="currentColor"
-								class="w-4 h-4"
-							>
-								<path
-									stroke-linecap="round"
-									stroke-linejoin="round"
-									d="m11.25 11.25.041-.02a.75.75 0 0 1 1.063.852l-.708 2.836a.75.75 0 0 0 1.063.853l.041-.021M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Zm-9-3.75h.008v.008H12V8.25Z"
-								/>
-							</svg>
-						</div>
-					</Tooltip>
 				{/if}
 			</div>
 		</div>
+
+		{#if profile.bestFor && displayName && displayName !== profile.bestFor}
+			<div class="text-[11px] sm:text-xs text-gray-500 dark:text-gray-400 line-clamp-1">
+				{displayName}
+			</div>
+		{/if}
 	</div>
 
-	<div class="ml-auto pl-2 pr-1 flex items-center gap-1.5 shrink-0">
+	<div class="ml-auto pl-2 pr-1 flex items-center gap-2 shrink-0">
+		<div class="w-9 shrink-0 flex items-center justify-end gap-1.5">
+			{#if dataWarning}
+				<Tooltip
+					content={$i18n.t(
+						'This model is not hosted on Dutch private cloud. Be careful when sharing sensitive data.'
+					)}
+				>
+					<ExclamationTriangle
+						className="size-3.5 text-amber-500 dark:text-amber-400"
+						strokeWidth="2"
+					/>
+				</Tooltip>
+			{/if}
+
+			{#if profile.eco}
+				<Tooltip content={$i18n.t('Energy efficient')}>
+					<Leaf className="size-3.5 text-green-600 dark:text-green-500" strokeWidth="1.75" />
+				</Tooltip>
+			{/if}
+		</div>
+
+		{#if showMeters}
+			<ModelProfile {profile} />
+		{/if}
+		<div class="flex items-center justify-end gap-1.5 w-8 shrink-0">
 		{#if $user?.role === 'admin' && item.model.loaded}
 			<Tooltip
 				content={`${$i18n.t('Eject')}`}
@@ -278,10 +307,12 @@
 			</button>
 		</ModelItemMenu>
 
-		{#if value === item.value}
-			<div>
-				<Check className="size-3" />
+			<!-- Always reserve the checkmark slot so the selected row's meters stay aligned with the rest -->
+			<div class="size-3 flex items-center justify-center shrink-0">
+				{#if value === item.value}
+					<Check className="size-3" />
+				{/if}
 			</div>
-		{/if}
+		</div>
 	</div>
 </button>

@@ -350,6 +350,10 @@ type Config = {
 	invite_heading?: string;
 	default_models: string;
 	default_prompt_suggestions: PromptSuggestion[];
+	// Per-deployment model → datacenter/hosting mapping (Helm MODEL_HOSTING env).
+	// Same matching convention as model-profiles; see hostingFromDeployment in
+	// $lib/utils/models/profile.ts. Empty/absent when the deployment doesn't set it.
+	model_hosting?: { match: string; hosting: string }[];
 	features: {
 		auth: boolean;
 		auth_trusted_header: boolean;
@@ -392,6 +396,7 @@ type Config = {
 		feature_changelog?: boolean;
 		feature_system_prompt?: boolean;
 		feature_models?: boolean;
+		feature_model_meters?: boolean;
 		feature_knowledge?: boolean;
 		feature_prompts?: boolean;
 		feature_tools?: boolean;
