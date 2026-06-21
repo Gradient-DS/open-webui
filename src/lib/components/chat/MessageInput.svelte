@@ -74,6 +74,7 @@
 
 	import RichTextInput from '../common/RichTextInput.svelte';
 	import Tooltip from '../common/Tooltip.svelte';
+	import { getActiveSide, getHistorySide } from '$lib/utils/dataSeparation';
 	import FileItem from '../common/FileItem.svelte';
 	import Image from '../common/Image.svelte';
 	import Spinner from '../common/Spinner.svelte';
@@ -589,6 +590,55 @@
 	}
 	$: if (documentWriterEnabled && documentWriterCapableModels.length !== selectedModelCount) {
 		documentWriterEnabled = false;
+	}
+
+	// Strict data separation (data-sovereignty): a conversation may use the open internet
+	// (web search / webpage URLs) OR internal documents (files / KBs / notes), never both.
+	// The first side used locks the conversation; the unavailable side is grayed out with a
+	// tooltip. All no-ops unless the feature flag is enabled.
+	$: strictDataSeparation = $config?.features?.feature_strict_data_separation ?? false;
+	$: dataSeparationMessages =
+		strictDataSeparation && history ? createMessagesList(history, history.currentId) : [];
+	// Side the conversation is already locked to by prior messages (history only — does NOT
+	// depend on webSearchEnabled, so the defensive guard below can't form a reactive cycle).
+	$: dataSeparationHistorySide = strictDataSeparation
+		? getHistorySide(dataSeparationMessages)
+		: null;
+	$: dataSeparationSide = strictDataSeparation
+		? getActiveSide({ messages: dataSeparationMessages, files, webSearchEnabled })
+		: null;
+	$: openInternetBlocked = strictDataSeparation && dataSeparationSide === 'internal';
+	$: internalBlocked = strictDataSeparation && dataSeparationSide === 'open_internet';
+	$: dataSeparationMessage = $i18n.t(
+		'Internal documents and the open internet cannot be used in the same conversation.'
+	);
+	// Pinned-bar quick buttons for the blocked side are hidden (the always-present "+" menu
+	// still shows them grayed out with the explanatory tooltip).
+	$: dataSeparationBlockedItems = new Set(
+		strictDataSeparation
+			? [
+					...(openInternetBlocked ? ['attach_webpage', 'web_search'] : []),
+					...(internalBlocked
+						? [
+								'upload_files',
+								'capture',
+								'attach_notes',
+								'knowledge',
+								'reference_chats',
+								'google_drive',
+								'onedrive',
+								'confluence',
+								'topdesk'
+							]
+						: [])
+				]
+			: []
+	);
+
+	// Defensive: a model's defaultFeatureIds could re-enable web search in a conversation already
+	// locked to internal documents. Keyed on the history-only side to avoid a reactive cycle.
+	$: if (dataSeparationHistorySide === 'internal' && webSearchEnabled) {
+		webSearchEnabled = false;
 	}
 
 	let inputMenuRef;
@@ -1929,7 +1979,10 @@
 											{showCodeInterpreterButton}
 											{showDocumentWriterButton}
 											closeOnOutsideClick={integrationsMenuCloseOnOutsideClick}
-										restrictTo={inputMenuRestrictTo}
+											{openInternetBlocked}
+											{internalBlocked}
+											{dataSeparationMessage}
+											restrictTo={inputMenuRestrictTo}
 											onShowValves={(e) => {
 												const { type, id } = e;
 												selectedValvesType = type;
@@ -1981,7 +2034,7 @@
 
 									<div class="ml-1 flex gap-1.5">
 										<!-- Pinned items -->
-										{#each ($settings?.pinnedInputItems ?? []).filter((id) => inputMenuRestrictTo === null || inputMenuRestrictTo.includes(id)) as itemId}
+										{#each ($settings?.pinnedInputItems ?? []).filter((id) => (inputMenuRestrictTo === null || inputMenuRestrictTo.includes(id)) && !dataSeparationBlockedItems.has(id)) as itemId}
 											{#if itemId === 'upload_files' && fileUploadEnabled}
 												<Tooltip content={$i18n.t('Upload Files')} placement="top">
 													<button
@@ -2102,9 +2155,7 @@
 											{:else if itemId === 'web_search' && showWebSearchButton}
 												<Tooltip
 													content={imageGenerationEnabled
-														? $i18n.t(
-																'Web search and image generation cannot run in the same turn'
-															)
+														? $i18n.t('Web search and image generation cannot run in the same turn')
 														: $i18n.t('Web Search')}
 													placement="top"
 												>
@@ -2126,9 +2177,7 @@
 											{:else if itemId === 'image_generation' && showImageGenerationButton}
 												<Tooltip
 													content={webSearchEnabled
-														? $i18n.t(
-																'Web search and image generation cannot run in the same turn'
-															)
+														? $i18n.t('Web search and image generation cannot run in the same turn')
 														: $i18n.t('Image')}
 													placement="top"
 												>

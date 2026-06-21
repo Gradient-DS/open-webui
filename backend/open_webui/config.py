@@ -2049,6 +2049,11 @@ FEATURE_USER_DEMOGRAPHICS = os.environ.get('FEATURE_USER_DEMOGRAPHICS', 'False')
 
 FEATURE_BUILTIN_TOOLS = os.environ.get('FEATURE_BUILTIN_TOOLS', 'True').lower() == 'true'
 
+# Strict data separation (data-sovereignty): a conversation may use EITHER the open
+# internet (web search / webpage URLs) OR internal documents (files / KBs / notes),
+# never both. Off by default. Enforced in the chat UI and server-side.
+FEATURE_STRICT_DATA_SEPARATION = os.environ.get('FEATURE_STRICT_DATA_SEPARATION', 'False').lower() == 'true'
+
 # PDF export: set to True to use old screenshot-based (stylized) PDF export
 USE_STYLIZED_PDF_EXPORT = os.environ.get('USE_STYLIZED_PDF_EXPORT', 'False').lower() == 'true'
 
