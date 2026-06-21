@@ -2042,6 +2042,8 @@ FEATURE_KNOWLEDGE = os.environ.get('FEATURE_KNOWLEDGE', 'True').lower() == 'true
 FEATURE_PROMPTS = os.environ.get('FEATURE_PROMPTS', 'True').lower() == 'true'
 FEATURE_TOOLS = os.environ.get('FEATURE_TOOLS', 'True').lower() == 'true'
 FEATURE_SKILLS = os.environ.get('FEATURE_SKILLS', 'False').lower() == 'true'
+# FEATURE_SKILL_FILES gates the bundled reference-files extension; only meaningful when FEATURE_SKILLS is on.
+FEATURE_SKILL_FILES = os.environ.get('FEATURE_SKILL_FILES', 'False').lower() == 'true'
 FEATURE_WEBPAGE_URL = os.environ.get('FEATURE_WEBPAGE_URL', 'True').lower() == 'true'
 FEATURE_REFERENCE_CHATS = os.environ.get('FEATURE_REFERENCE_CHATS', 'True').lower() == 'true'
 FEATURE_SIMPLE_ASSISTANT_BUILDER = os.environ.get('FEATURE_SIMPLE_ASSISTANT_BUILDER', 'False').lower() == 'true'

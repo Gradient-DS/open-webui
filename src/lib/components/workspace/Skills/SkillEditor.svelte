@@ -7,7 +7,7 @@
 	import LockClosed from '$lib/components/icons/LockClosed.svelte';
 	import ChevronLeft from '$lib/components/icons/ChevronLeft.svelte';
 	import AccessControlModal from '../common/AccessControlModal.svelte';
-	import { user } from '$lib/stores';
+	import { user, config } from '$lib/stores';
 	import { slugify, parseFrontmatter, formatSkillName } from '$lib/utils';
 	import Spinner from '$lib/components/common/Spinner.svelte';
 	import { updateSkillAccessGrants } from '$lib/apis/skills';
@@ -250,12 +250,14 @@
 					</div>
 				</div>
 
-				{#if edit && id}
-					<SkillFileUploader skillId={id} {disabled} />
-				{:else if !edit}
-					<div class="mt-2 text-xs text-gray-500">
-						{$i18n.t('Save the skill to add reference files.')}
-					</div>
+				{#if $config?.features?.feature_skill_files}
+					{#if edit && id}
+						<SkillFileUploader skillId={id} {disabled} />
+					{:else if !edit}
+						<div class="mt-2 text-xs text-gray-500">
+							{$i18n.t('Save the skill to add reference files.')}
+						</div>
+					{/if}
 				{/if}
 
 				<div class="pb-3 flex justify-end">

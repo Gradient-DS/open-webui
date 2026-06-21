@@ -130,6 +130,7 @@ from open_webui.config import (
     DEFAULT_DOCUMENT_WRITER_PROMPT,
     FEATURE_BUILTIN_TOOLS,
     FEATURE_STRICT_DATA_SEPARATION,
+    FEATURE_SKILL_FILES,
 )
 from open_webui.utils.data_separation import request_mixes_data_sources
 from open_webui.env import (
@@ -2726,7 +2727,8 @@ async def process_chat_payload(request, form_data, user, metadata, model):
         # before the comprehension below.  Skills with no files produce an
         # empty list; the 'files' key is only included when non-empty so
         # that skills without files are forwarded byte-identically to today.
-        skill_bundle_files = await resolve_skill_bundle_files(available_skills)
+        # Resolve bundled files only when the skill-files extension is enabled.
+        skill_bundle_files = await resolve_skill_bundle_files(available_skills) if FEATURE_SKILL_FILES else {}
 
         metadata['skills'] = [
             {
