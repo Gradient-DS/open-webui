@@ -36,8 +36,18 @@
 	}
 
 	const onOpen = async () => {
-		errorContext = $feedbackModalContext ?? null;
-		category = errorContext?.error_message ? 'error' : 'bug';
+		const ctx = $feedbackModalContext ?? null;
+		if (ctx?.error_message) {
+			// Opened from a chat error — lock the report to the "error" category.
+			errorContext = ctx;
+			category = 'error';
+		} else {
+			// Opened from a normal entry point (e.g. the chat feedback button,
+			// which hints `default_category`). The hint only seeds the initial
+			// category — it is never spread into the submitted context.
+			errorContext = null;
+			category = typeof ctx?.default_category === 'string' ? ctx.default_category : 'bug';
+		}
 		description = '';
 		loading = false;
 

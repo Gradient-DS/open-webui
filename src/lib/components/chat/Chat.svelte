@@ -3519,11 +3519,7 @@
 									</div>
 								</div>
 
-								{#if ($config?.features?.enable_feedback_report ?? false) && !$showRagFilter}
-									<div class="absolute bottom-3 right-3 z-20">
-										<FeedbackButton />
-									</div>
-								{/if}
+								<FeedbackButton />
 							</div>
 
 							<ConversationFeedback
@@ -3618,7 +3614,7 @@
 								</div>
 							</div>
 						{:else}
-							<div class="flex items-center h-full">
+							<div class="relative flex items-center h-full">
 								<Placeholder
 									{history}
 									{selectedModels}
@@ -3654,6 +3650,8 @@
 										}
 									}}
 								/>
+
+								<FeedbackButton />
 							</div>
 						{/if}
 					</div>
