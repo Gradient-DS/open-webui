@@ -320,10 +320,14 @@ export const deleteSkillById = async (token: string, id: string) => {
 	return res;
 };
 
-export const addFileToSkillById = async (token: string, id: string, fileId: string) => {
+export const createSkillFile = async (
+	token: string,
+	id: string,
+	{ path, file_id }: { path: string; file_id: string }
+) => {
 	let error = null;
 
-	const res = await fetch(`${WEBUI_API_BASE_URL}/skills/id/${id}/files/add`, {
+	const res = await fetch(`${WEBUI_API_BASE_URL}/skills/id/${id}/files`, {
 		method: 'POST',
 		headers: {
 			Accept: 'application/json',
@@ -331,7 +335,8 @@ export const addFileToSkillById = async (token: string, id: string, fileId: stri
 			authorization: `Bearer ${token}`
 		},
 		body: JSON.stringify({
-			file_id: fileId
+			path,
+			file_id
 		})
 	})
 		.then(async (res) => {
@@ -351,7 +356,115 @@ export const addFileToSkillById = async (token: string, id: string, fileId: stri
 	return res;
 };
 
-export const removeFileFromSkillById = async (token: string, id: string, fileId: string) => {
+export const createSkillFileInline = async (
+	token: string,
+	id: string,
+	{ path, content }: { path: string; content: string }
+) => {
+	let error = null;
+
+	const res = await fetch(`${WEBUI_API_BASE_URL}/skills/id/${id}/files`, {
+		method: 'POST',
+		headers: {
+			Accept: 'application/json',
+			'Content-Type': 'application/json',
+			authorization: `Bearer ${token}`
+		},
+		body: JSON.stringify({
+			path,
+			content
+		})
+	})
+		.then(async (res) => {
+			if (!res.ok) throw await res.json();
+			return res.json();
+		})
+		.catch((err) => {
+			error = err.detail;
+			console.error(err);
+			return null;
+		});
+
+	if (error) {
+		throw error;
+	}
+
+	return res;
+};
+
+export const updateSkillFileContent = async (
+	token: string,
+	id: string,
+	{ path, content }: { path: string; content: string }
+) => {
+	let error = null;
+
+	const res = await fetch(`${WEBUI_API_BASE_URL}/skills/id/${id}/files`, {
+		method: 'PUT',
+		headers: {
+			Accept: 'application/json',
+			'Content-Type': 'application/json',
+			authorization: `Bearer ${token}`
+		},
+		body: JSON.stringify({
+			path,
+			content
+		})
+	})
+		.then(async (res) => {
+			if (!res.ok) throw await res.json();
+			return res.json();
+		})
+		.catch((err) => {
+			error = err.detail;
+			console.error(err);
+			return null;
+		});
+
+	if (error) {
+		throw error;
+	}
+
+	return res;
+};
+
+export const moveSkillFile = async (
+	token: string,
+	id: string,
+	{ from_path, to_path }: { from_path: string; to_path: string }
+) => {
+	let error = null;
+
+	const res = await fetch(`${WEBUI_API_BASE_URL}/skills/id/${id}/files/move`, {
+		method: 'POST',
+		headers: {
+			Accept: 'application/json',
+			'Content-Type': 'application/json',
+			authorization: `Bearer ${token}`
+		},
+		body: JSON.stringify({
+			from_path,
+			to_path
+		})
+	})
+		.then(async (res) => {
+			if (!res.ok) throw await res.json();
+			return res.json();
+		})
+		.catch((err) => {
+			error = err.detail;
+			console.error(err);
+			return null;
+		});
+
+	if (error) {
+		throw error;
+	}
+
+	return res;
+};
+
+export const removeSkillFilePath = async (token: string, id: string, path: string) => {
 	let error = null;
 
 	const res = await fetch(`${WEBUI_API_BASE_URL}/skills/id/${id}/files/remove`, {
@@ -362,7 +475,7 @@ export const removeFileFromSkillById = async (token: string, id: string, fileId:
 			authorization: `Bearer ${token}`
 		},
 		body: JSON.stringify({
-			file_id: fileId
+			path
 		})
 	})
 		.then(async (res) => {
