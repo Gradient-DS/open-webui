@@ -34,7 +34,7 @@
 	export let index: number = -1;
 	export let value: string = '';
 
-	$: profile = resolveModelProfile(item?.model ?? {}, $config?.model_profiles ?? []);
+	$: profile = resolveModelProfile(item?.model ?? {}, $config?.model_profiles ?? [], $i18n.language);
 	$: displayName = item?.label || item?.value || '';
 	$: infoTooltip = (profile.info ?? '').replaceAll('\n', '<br>');
 	// Hosting/datacenter precedence (first non-empty wins):
