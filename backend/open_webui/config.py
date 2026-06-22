@@ -2092,6 +2092,14 @@ MODEL_WHITELIST = [model.strip() for model in os.environ.get('MODEL_WHITELIST', 
 # value can never crash boot. Empty string = no mapping (neutral, no flags).
 MODEL_HOSTING = os.environ.get('MODEL_HOSTING', '')
 
+# Per-deployment model -> profile mapping for the model picker (description, bestFor,
+# speed/quality meters, eco badge). A JSON list of {match, profile}; same matching
+# convention as MODEL_HOSTING. Replaces the former frontend-baked model-profiles.json
+# so descriptions can differ per client tenant. Parsed defensively in main.py
+# (_parse_model_profiles -> [] on any error), so a malformed value can never crash
+# boot. Empty string = no profiles (models render plain, just their name).
+MODEL_PROFILES = os.environ.get('MODEL_PROFILES', '')
+
 ENABLE_ADMIN_ANALYTICS = os.environ.get('ENABLE_ADMIN_ANALYTICS', 'True').lower() == 'true'
 
 ENABLE_COMMUNITY_SHARING = PersistentConfig(

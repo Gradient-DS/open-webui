@@ -40,6 +40,17 @@
 
 	$: state = card.state;
 
+	// One-line status shown under the header: the live step label while the
+	// SubAgent works, or its summary once done. Rendered on its own row when
+	// the card is narrow (see header layout below) so the agent name and model
+	// badge no longer have to compete for horizontal space.
+	$: description =
+		card.step_label && (state === 'running' || state === 'pending')
+			? card.step_label
+			: state === 'done' && card.summary
+				? card.summary
+				: '';
+
 	// Auto-expand on first transition into running. Reactively cancel any
 	// pending auto-collapse if state regresses out of done (defensive).
 	$: handleStateChange(state);
@@ -135,17 +146,17 @@
 </script>
 
 <div
-	class="w-full rounded-2xl border border-gray-100 dark:border-gray-800 bg-gray-50/60 dark:bg-gray-900/40 px-3 py-2 text-sm"
+	class="@container w-full rounded-2xl border border-gray-100 dark:border-gray-800 bg-gray-50/60 dark:bg-gray-900/40 px-3 py-2 text-sm"
 	data-state={state}
 	data-agent-id={card.agent_id}
 >
 	<button
 		type="button"
-		class="w-full flex items-center gap-2 text-left"
+		class="w-full flex items-start @lg:items-center gap-2 text-left"
 		on:click={toggleExpanded}
 		aria-expanded={expanded}
 	>
-		<span class="shrink-0">
+		<span class="shrink-0 mt-0.5 @lg:mt-0">
 			{#if state === 'pending' || state === 'running'}
 				<Spinner className="size-3.5" />
 			{:else if state === 'error'}
@@ -155,30 +166,39 @@
 			{/if}
 		</span>
 
-		<span class="flex-1 truncate font-medium text-gray-700 dark:text-gray-200">
-			{card.agent_label}
-		</span>
-
-		{#if modelLabel}
-			<span
-				class="shrink-0 rounded bg-gray-100 px-1.5 py-0.5 text-xs font-medium text-gray-500 dark:bg-gray-800 dark:text-gray-400"
-				title={card.model_name}
-			>
-				{modelLabel}
+		<!--
+			Header content stacks vertically on a narrow card (e.g. two parallel
+			SubAgents rendered side-by-side) so the agent name gets a full line
+			and the model badge + status drop to a second line. Once the card is
+			wide enough (@lg container query), everything collapses back onto a
+			single row — identical to the original single-card layout.
+		-->
+		<div class="flex-1 min-w-0 flex flex-col @lg:flex-row @lg:items-center gap-1 @lg:gap-2">
+			<span class="@lg:flex-1 truncate font-medium text-gray-700 dark:text-gray-200">
+				{card.agent_label}
 			</span>
-		{/if}
 
-		{#if card.step_label && (state === 'running' || state === 'pending')}
-			<span class="hidden sm:inline truncate text-xs text-gray-500 dark:text-gray-400 max-w-[40%]">
-				{card.step_label}
-			</span>
-		{:else if state === 'done' && card.summary}
-			<span class="hidden sm:inline truncate text-xs text-gray-500 dark:text-gray-400 max-w-[40%]">
-				{card.summary}
-			</span>
-		{/if}
+			{#if modelLabel || description}
+				<div class="flex items-center gap-2 min-w-0">
+					{#if modelLabel}
+						<span
+							class="shrink-0 rounded bg-gray-100 px-1.5 py-0.5 text-xs font-medium text-gray-500 dark:bg-gray-800 dark:text-gray-400"
+							title={card.model_name}
+						>
+							{modelLabel}
+						</span>
+					{/if}
 
-		<span class="shrink-0 text-gray-400 dark:text-gray-500">
+					{#if description}
+						<span class="truncate min-w-0 text-xs text-gray-500 dark:text-gray-400 @lg:max-w-[16rem]">
+							{description}
+						</span>
+					{/if}
+				</div>
+			{/if}
+		</div>
+
+		<span class="shrink-0 mt-0.5 @lg:mt-0 text-gray-400 dark:text-gray-500">
 			{#if expanded}
 				<ChevronUp className="size-3.5" />
 			{:else}

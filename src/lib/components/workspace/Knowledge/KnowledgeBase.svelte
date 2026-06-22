@@ -855,9 +855,17 @@
 			pollCloudSyncStatus(provider);
 		} catch (error) {
 			console.error(`${provider.label} sync error:`, error);
+			const rawError = error instanceof Error ? error.message : String(error);
+			// Translate known OneDrive host-derivation errors via static keys (so they
+			// stay i18n-discoverable); fall back to the raw message for everything else.
+			const errorDetail =
+				rawError === 'No OneDrive found for your account.'
+					? $i18n.t('No OneDrive found for your account.')
+					: rawError === 'Could not connect to OneDrive to determine your location.'
+						? $i18n.t('Could not connect to OneDrive to determine your location.')
+						: rawError;
 			toast.error(
-				$i18n.t('Failed to sync from {{label}}: ', { label: provider.label }) +
-					(error instanceof Error ? error.message : String(error))
+				$i18n.t('Failed to sync from {{label}}: ', { label: provider.label }) + errorDetail
 			);
 			state.isSyncing = false;
 			cloudSyncState = cloudSyncState;
