@@ -179,8 +179,8 @@
 		showNewFolderModal = true;
 	};
 
-	const createPendingFolder = async () => {
-		const name = newFolderName.trim();
+	const createPendingFolder = async (inputName?: string) => {
+		const name = (inputName ?? newFolderName).trim();
 		if (!name) {
 			toast.error($i18n.t('Folder name cannot be empty.'));
 			return;
@@ -248,8 +248,8 @@
 		showRenameModal = true;
 	};
 
-	const confirmRename = async () => {
-		const value = renameValue.trim();
+	const confirmRename = async (inputValue?: string) => {
+		const value = (inputValue ?? renameValue).trim();
 		if (!value) return;
 
 		const parent = renameFrom.includes('/') ? renameFrom.slice(0, renameFrom.lastIndexOf('/')) : '';
@@ -452,8 +452,8 @@
 	confirmLabel={$i18n.t('New folder')}
 	input={true}
 	inputPlaceholder={$i18n.t('Folder name')}
-	bind:inputValue={newFolderName}
-	on:confirm={createPendingFolder}
+	inputValue={newFolderName}
+	on:confirm={(e) => createPendingFolder(e.detail)}
 />
 
 <!-- Rename / move prompt -->
@@ -463,8 +463,8 @@
 	confirmLabel={$i18n.t('Rename')}
 	input={true}
 	inputPlaceholder={renameIsFolder ? $i18n.t('Folder name') : $i18n.t('File name (.md)')}
-	bind:inputValue={renameValue}
-	on:confirm={confirmRename}
+	inputValue={renameValue}
+	on:confirm={(e) => confirmRename(e.detail)}
 />
 
 <!-- Delete confirm -->
