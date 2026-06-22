@@ -92,19 +92,24 @@ async def _read_file_content(f) -> str | None:  # type: ignore[return]
 
 
 async def resolve_skill_bundle_files(available_skills) -> dict[str, list[dict]]:
-    """Return a mapping of skill_id → [{'filename', 'content'}, ...].
+    """Return a mapping of skill_id → [{'path', 'content'}, ...].
 
     For skills with no attached files the value is an empty list.  The
     middleware uses this to add ``'files'`` to the skill dict forwarded to
     the agent service — ONLY when the list is non-empty, so skills without
     files are forwarded byte-identically to today (no ``'files'`` key).
 
+    The bundle is keyed by the virtual ``path`` (not the backing filename), so
+    the same File mapped to two paths yields two entries.  Phase 1 (soev-agents)
+    keys files by ``path`` and normalizes legacy ``filename`` → ``path`` — this
+    helper emitting ``path`` completes that contract.
+
     Args:
         available_skills: Iterable of skill model objects (have ``.id``).
 
     Returns:
         Dict mapping each skill's id to a (possibly empty) list of
-        ``{'filename': str, 'content': str}`` dicts.  Files whose content
+        ``{'path': str, 'content': str}`` dicts.  Files whose content
         cannot be resolved are silently omitted.
     """
     skill_files = _get_skill_files()
@@ -117,14 +122,20 @@ async def resolve_skill_bundle_files(available_skills) -> dict[str, list[dict]]:
             result[skill.id] = []
             continue
 
-        file_ids = [row.file_id for row in skill_file_rows]
+        # One DB round-trip for the distinct backing Files, then resolve each
+        # row's content by its file_id (a File may back several paths).
+        file_ids = list({row.file_id for row in skill_file_rows})
         file_models = await files.get_files_by_ids(file_ids)
+        files_by_id = {f.id: f for f in file_models}
 
         bundle: list[dict] = []
-        for f in file_models:
+        for row in skill_file_rows:
+            f = files_by_id.get(row.file_id)
+            if f is None:
+                continue
             content = await _read_file_content(f)
             if content is not None:
-                bundle.append({'filename': f.filename, 'content': content})
+                bundle.append({'path': row.path, 'content': content})
 
         result[skill.id] = bundle
 

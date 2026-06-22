@@ -1,10 +1,11 @@
 """Unit tests for the skill-bundle file resolution helper.
 
 Tests cover:
-- A skill with two attached markdown files yields [{'filename', 'content'}, ...]
+- A skill with two attached markdown files yields [{'path', 'content'}, ...]
 - A skill with no files yields [] (and middleware therefore omits the 'files' key)
 - A file whose data['content'] is missing falls back to Storage.get_file
 - Storage fallback failure is handled gracefully (file skipped, no crash)
+- The same backing File at two paths yields two entries (path-keyed, not file-keyed)
 
 These tests set ``open_webui.utils.skill_bundles.SkillFiles`` and
 ``open_webui.utils.skill_bundles.Files`` directly (they are ``None`` until
@@ -26,8 +27,8 @@ def _make_skill(skill_id: str):
     return SimpleNamespace(id=skill_id)
 
 
-def _make_skill_file_row(file_id: str):
-    return SimpleNamespace(file_id=file_id)
+def _make_skill_file_row(file_id: str, path: str | None = None):
+    return SimpleNamespace(file_id=file_id, path=path or f'{file_id}.md')
 
 
 def _make_file_model(file_id: str, filename: str, content: str | None = None, path: str | None = None):
@@ -56,7 +57,10 @@ class TestResolveSkillBundleFiles:
     async def test_skill_with_two_files_returns_bundle(self):
         """A skill with two attached markdown files returns both entries."""
         skill = _make_skill('skill-1')
-        sf_rows = [_make_skill_file_row('f1'), _make_skill_file_row('f2')]
+        sf_rows = [
+            _make_skill_file_row('f1', path='docs/guide.md'),
+            _make_skill_file_row('f2', path='tone.md'),
+        ]
         file_f1 = _make_file_model('f1', 'guide.md', content='# Guide\nStep 1')
         file_f2 = _make_file_model('f2', 'tone.md', content='Always formal.')
 
@@ -75,8 +79,10 @@ class TestResolveSkillBundleFiles:
         assert 'skill-1' in result
         bundle = result['skill-1']
         assert len(bundle) == 2
-        assert bundle[0] == {'filename': 'guide.md', 'content': '# Guide\nStep 1'}
-        assert bundle[1] == {'filename': 'tone.md', 'content': 'Always formal.'}
+        by_path = {entry['path']: entry['content'] for entry in bundle}
+        assert by_path == {'docs/guide.md': '# Guide\nStep 1', 'tone.md': 'Always formal.'}
+        # No 'filename' key — the contract is now path-keyed.
+        assert all('filename' not in entry for entry in bundle)
 
     @pytest.mark.asyncio
     async def test_skill_with_no_files_returns_empty_list(self):
@@ -116,7 +122,7 @@ class TestResolveSkillBundleFiles:
         tmp_file.write_text(md_text, encoding='utf-8')
 
         skill = _make_skill('skill-legacy')
-        sf_rows = [_make_skill_file_row('flegacy')]
+        sf_rows = [_make_skill_file_row('flegacy', path='legacy.md')]
         # File has no cached content but has a path
         file_legacy = _make_file_model('flegacy', 'legacy.md', content=None, path='uploads/flegacy')
 
@@ -158,14 +164,14 @@ class TestResolveSkillBundleFiles:
         bundle = result['skill-legacy']
         assert len(bundle) == 1
         # Content must be the FILE'S TEXT, not the path string.
-        assert bundle[0] == {'filename': 'legacy.md', 'content': md_text}
+        assert bundle[0] == {'path': 'legacy.md', 'content': md_text}
         assert bundle[0]['content'] != str(tmp_file)
 
     @pytest.mark.asyncio
     async def test_storage_fallback_failure_skips_file_gracefully(self):
         """If Storage fallback fails, the file is skipped — request does not crash."""
         skill = _make_skill('skill-err')
-        sf_rows = [_make_skill_file_row('ferr')]
+        sf_rows = [_make_skill_file_row('ferr', path='broken.md')]
         file_err = _make_file_model('ferr', 'broken.md', content=None, path='uploads/ferr')
 
         mock_sf = _make_mock_sf({'skill-err': sf_rows})
@@ -197,7 +203,7 @@ class TestResolveSkillBundleFiles:
 
         file_a = _make_file_model('fa', 'a.md', content='Content A')
 
-        mock_sf = _make_mock_sf({'skill-A': [_make_skill_file_row('fa')], 'skill-B': []})
+        mock_sf = _make_mock_sf({'skill-A': [_make_skill_file_row('fa', path='a.md')], 'skill-B': []})
         mock_files = _make_mock_files({'fa': file_a})
 
         orig_sf, orig_files = skill_bundles_mod.SkillFiles, skill_bundles_mod.Files
@@ -209,5 +215,32 @@ class TestResolveSkillBundleFiles:
             skill_bundles_mod.SkillFiles = orig_sf
             skill_bundles_mod.Files = orig_files
 
-        assert result['skill-A'] == [{'filename': 'a.md', 'content': 'Content A'}]
+        assert result['skill-A'] == [{'path': 'a.md', 'content': 'Content A'}]
         assert result['skill-B'] == []
+
+    @pytest.mark.asyncio
+    async def test_same_file_at_two_paths_yields_two_entries(self):
+        """One backing File mapped to two paths must produce two bundle entries
+        (the contract is path-keyed, not file-keyed)."""
+        skill = _make_skill('skill-dup')
+        sf_rows = [
+            _make_skill_file_row('shared', path='a.md'),
+            _make_skill_file_row('shared', path='docs/b.md'),
+        ]
+        shared = _make_file_model('shared', 'shared.md', content='shared content')
+
+        mock_sf = _make_mock_sf({'skill-dup': sf_rows})
+        mock_files = _make_mock_files({'shared': shared})
+
+        orig_sf, orig_files = skill_bundles_mod.SkillFiles, skill_bundles_mod.Files
+        try:
+            skill_bundles_mod.SkillFiles = mock_sf
+            skill_bundles_mod.Files = mock_files
+            result = await resolve_skill_bundle_files([skill])
+        finally:
+            skill_bundles_mod.SkillFiles = orig_sf
+            skill_bundles_mod.Files = orig_files
+
+        bundle = result['skill-dup']
+        by_path = {entry['path']: entry['content'] for entry in bundle}
+        assert by_path == {'a.md': 'shared content', 'docs/b.md': 'shared content'}
