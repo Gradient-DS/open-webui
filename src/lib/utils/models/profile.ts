@@ -1,4 +1,3 @@
-import modelProfiles from '$lib/data/model-profiles.json';
 import hostingProviders from '$lib/data/hosting-providers.json';
 
 /**
@@ -105,8 +104,6 @@ export const PROFILE_AXES = [
 
 export type ProfileAxisKey = (typeof PROFILE_AXES)[number]['key'];
 
-const rules = modelProfiles as ProfileRule[];
-
 function escapeRegExp(s: string): string {
 	return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
@@ -155,22 +152,27 @@ export function hostingFromDeployment(
 }
 
 /**
- * Resolve the effective profile for a model: start from every matching defaults
- * rule (later rules in the file override earlier ones, so specific beats
- * generic), then apply the admin's per-model overrides field-by-field. Blank
- * admin values (undefined / null / '') fall through to the default.
+ * Resolve the effective profile for a model from the deployment-supplied rules
+ * (Helm MODEL_PROFILES, surfaced on /api/config as `model_profiles`). Start from
+ * every matching rule (later rules override earlier ones field-by-field, so specific
+ * beats generic), then apply the admin's per-model override (model.info.meta.profile)
+ * field-by-field. Blank values (undefined / null / '') fall through. No rules, or a
+ * model matching no rule, yields {} — the model renders plain (just its name).
  */
-export function resolveModelProfile(model: {
-	id?: string;
-	name?: string;
-	info?: { meta?: { profile?: ModelProfile } };
-}): ModelProfile {
+export function resolveModelProfile(
+	model: {
+		id?: string;
+		name?: string;
+		info?: { meta?: { profile?: ModelProfile } };
+	},
+	profileRules: ProfileRule[] | undefined
+): ModelProfile {
 	const id = model?.id ?? '';
 	const name = model?.name ?? '';
 
 	let base: ModelProfile = {};
-	for (const rule of rules) {
-		if (!rule.profile) continue; // skip comment-only entries (e.g. the leading docs entry)
+	for (const rule of profileRules ?? []) {
+		if (!rule.profile) continue; // skip comment-only entries
 		if (matchesPattern(rule.match, id, name)) {
 			base = { ...base, ...rule.profile };
 		}

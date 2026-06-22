@@ -57,47 +57,66 @@ describe('hostingFromDeployment — matching convention', () => {
 	});
 });
 
-describe('resolveModelProfile — baked profiles', () => {
+describe('resolveModelProfile — deployment-supplied rules', () => {
+	// Mirrors the shape delivered by /api/config.model_profiles (Helm MODEL_PROFILES).
+	const RULES = [
+		{
+			match: 'gpt-oss',
+			profile: { bestFor: 'Redeneren (Engels sterk)', speed: 2, quality: 3 }
+		},
+		{ match: 'gpt-4*', profile: { bestFor: 'Veelzijdig & code', speed: 2, quality: 3 } },
+		{ match: 'gemini*', profile: { bestFor: 'Snelle vragen (multimodaal)', speed: 3, quality: 2 } },
+		{
+			match: 'gemini*pro*',
+			profile: { bestFor: 'Complex redeneren (multimodaal)', speed: 1, quality: 3 }
+		},
+		{ match: 'gemma-4-31', profile: { bestFor: 'Veelzijdig & meertalig', speed: 2, quality: 3 } }
+	];
+
 	it('resolves gpt-oss to its reasoning profile, not the gpt-4 profile (collision check)', () => {
-		const p = resolveModelProfile({ id: 'openai/gpt-oss-120b', name: 'gpt-oss-120b' });
+		const p = resolveModelProfile({ id: 'openai/gpt-oss-120b', name: 'gpt-oss-120b' }, RULES);
 		expect(p.bestFor).toBe('Redeneren (Engels sterk)');
 		expect(p.quality).toBe(3);
 	});
 
 	it('resolves gpt-4.1 to the gpt-4 profile via the gpt-4* glob', () => {
-		const p = resolveModelProfile({ id: 'gpt-4.1', name: 'gpt-4.1' });
+		const p = resolveModelProfile({ id: 'gpt-4.1', name: 'gpt-4.1' }, RULES);
 		expect(p.bestFor).toBe('Veelzijdig & code');
 	});
 
 	it('applies later-wins so gemini *pro* overrides the generic gemini profile', () => {
-		const flash = resolveModelProfile({ id: 'gemini-2.5-flash', name: 'gemini-2.5-flash' });
+		const flash = resolveModelProfile({ id: 'gemini-2.5-flash', name: 'gemini-2.5-flash' }, RULES);
 		expect(flash.quality).toBe(2);
 		expect(flash.speed).toBe(3);
 
-		const pro = resolveModelProfile({ id: 'gemini-2.5-pro', name: 'gemini-2.5-pro' });
+		const pro = resolveModelProfile({ id: 'gemini-2.5-pro', name: 'gemini-2.5-pro' }, RULES);
 		expect(pro.quality).toBe(3);
 		expect(pro.speed).toBe(1);
 	});
 
-	it('no longer bakes a hosting value (hosting now comes from the deployment)', () => {
-		const p = resolveModelProfile({ id: 'gemma-4-31B-it', name: 'Gemma' });
-		expect(p.hosting).toBeUndefined();
-		expect(p.bestFor).toBe('Veelzijdig & meertalig');
+	it('returns an empty profile when no rules are supplied (deployment unset)', () => {
+		expect(resolveModelProfile({ id: 'gemma-4-31B-it', name: 'Gemma' }, [])).toEqual({});
+		expect(resolveModelProfile({ id: 'gemma-4-31B-it', name: 'Gemma' }, undefined)).toEqual({});
 	});
 
-	it('returns an empty profile for an unprofiled custom model (no catch-all)', () => {
-		expect(resolveModelProfile({ id: 'my-custom-model', name: 'My Custom Model' })).toEqual({});
+	it('returns an empty profile for a model matching no rule (no catch-all)', () => {
+		expect(resolveModelProfile({ id: 'my-custom-model', name: 'My Custom Model' }, RULES)).toEqual(
+			{}
+		);
 	});
 
-	it('lets an admin meta.profile override the baked default field-by-field', () => {
-		const p = resolveModelProfile({
-			id: 'gemma-4-31B-it',
-			name: 'Gemma',
-			info: { meta: { profile: { bestFor: 'Custom label', quality: 1 } } }
-		});
+	it('lets an admin meta.profile override the deployment rule field-by-field', () => {
+		const p = resolveModelProfile(
+			{
+				id: 'gemma-4-31B-it',
+				name: 'Gemma',
+				info: { meta: { profile: { bestFor: 'Custom label', quality: 1 } } }
+			},
+			RULES
+		);
 		expect(p.bestFor).toBe('Custom label');
 		expect(p.quality).toBe(1);
-		// fields the admin left blank still fall through to the baked default
+		// fields the admin left blank still fall through to the deployment rule
 		expect(p.speed).toBe(2);
 	});
 });
