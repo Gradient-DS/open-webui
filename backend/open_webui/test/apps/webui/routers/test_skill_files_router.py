@@ -344,6 +344,46 @@ def test_create_requires_file_id_or_content(monkeypatch):
     assert res.status_code == 400
 
 
+def test_inline_create_empty_content_returns_400(monkeypatch):
+    """Inline-create with empty string content must 400 before Storage is called."""
+    skill = _make_skill()
+    insert_mock = AsyncMock(return_value=_make_file())
+    add_mock = AsyncMock(return_value=_make_skill_file_record())
+
+    monkeypatch.setattr(skill_files_router_module.Skills, 'get_skill_by_id', AsyncMock(return_value=skill))
+    monkeypatch.setattr(skill_files_router_module.SkillFiles, 'path_exists', AsyncMock(return_value=False))
+    monkeypatch.setattr(skill_files_router_module.Files, 'insert_new_file', insert_mock)
+    monkeypatch.setattr(skill_files_router_module.SkillFiles, 'add_file_to_skill_by_id', add_mock)
+
+    app = _make_app()
+    res = TestClient(app).post('/api/v1/skills/id/skill-1/files', json={'path': 'guide.md', 'content': ''})
+
+    assert res.status_code == 400
+    insert_mock.assert_not_called()
+    add_mock.assert_not_called()
+
+
+def test_edit_empty_content_returns_400(monkeypatch):
+    """PUT with empty string content must 400 before Storage is called."""
+    skill = _make_skill()
+    sf_record = _make_skill_file_record(path='guide.md')
+    update_data_mock = AsyncMock(return_value=_make_file())
+    update_path_mock = AsyncMock(return_value=_make_file())
+
+    monkeypatch.setattr(skill_files_router_module.Skills, 'get_skill_by_id', AsyncMock(return_value=skill))
+    monkeypatch.setattr(skill_files_router_module.SkillFiles, 'get_file_by_path', AsyncMock(return_value=sf_record))
+    monkeypatch.setattr(skill_files_router_module.Files, 'get_file_by_id', AsyncMock(return_value=_make_file()))
+    monkeypatch.setattr(skill_files_router_module.Files, 'update_file_data_by_id', update_data_mock)
+    monkeypatch.setattr(skill_files_router_module.Files, 'update_file_path_by_id', update_path_mock)
+
+    app = _make_app()
+    res = TestClient(app).put('/api/v1/skills/id/skill-1/files', json={'path': 'guide.md', 'content': ''})
+
+    assert res.status_code == 400
+    update_data_mock.assert_not_called()
+    update_path_mock.assert_not_called()
+
+
 # ===========================================================================
 # PUT /id/{id}/files — inline edit
 # ===========================================================================

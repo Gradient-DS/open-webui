@@ -121,6 +121,39 @@ class TestAddFileToSkill:
         assert second is not None
 
 
+class TestPathExists:
+    @pytest.mark.asyncio
+    async def test_case_insensitive_match(self, db_session):
+        """path_exists must match 'Foo.md' against stored 'foo.md' (and vice-versa)."""
+        fid = await _insert_file(db_session, filename='foo.md')
+        skill_id = 'skill-pe'
+        await SkillFiles.add_file_to_skill_by_id(skill_id, fid, 'foo.md', 'user-1')
+
+        # Exact match
+        assert await SkillFiles.path_exists(skill_id, 'foo.md') is True
+        # Upper-case variant
+        assert await SkillFiles.path_exists(skill_id, 'Foo.md') is True
+        # All-caps variant
+        assert await SkillFiles.path_exists(skill_id, 'FOO.MD') is True
+
+    @pytest.mark.asyncio
+    async def test_non_colliding_path_returns_false(self, db_session):
+        """A completely different path must not match."""
+        fid = await _insert_file(db_session, filename='foo.md')
+        skill_id = 'skill-pe2'
+        await SkillFiles.add_file_to_skill_by_id(skill_id, fid, 'foo.md', 'user-1')
+
+        assert await SkillFiles.path_exists(skill_id, 'bar.md') is False
+
+    @pytest.mark.asyncio
+    async def test_different_skill_returns_false(self, db_session):
+        """path_exists is scoped to skill_id — another skill's path must not match."""
+        fid = await _insert_file(db_session, filename='foo.md')
+        await SkillFiles.add_file_to_skill_by_id('skill-A', fid, 'foo.md', 'user-1')
+
+        assert await SkillFiles.path_exists('skill-B', 'foo.md') is False
+
+
 class TestHasFile:
     @pytest.mark.asyncio
     async def test_has_file_true_after_add(self, db_session):

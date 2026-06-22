@@ -267,6 +267,14 @@ async def create_skill_file(
             detail=ERROR_MESSAGES.DEFAULT('Provide exactly one of "file_id" (upload) or "content" (inline create).'),
         )
 
+    # Explicit empty-content guard for the inline-create branch: an empty file is
+    # not a valid markdown document and Storage.upload_file would 500 on empty bytes.
+    if form_data.content is not None and not form_data.content:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=ERROR_MESSAGES.DEFAULT('Inline-create content must not be empty.'),
+        )
+
     # Case-insensitive collision check (DB unique is exact (skill_id, path)).
     if await SkillFiles.path_exists(id, form_data.path, db=db):
         raise HTTPException(
@@ -318,6 +326,14 @@ async def edit_skill_file(
     await _assert_write_access(skill, user, db)
 
     _validate_skill_path(form_data.path)
+
+    # Explicit empty-content guard: an empty edit is not a valid markdown document
+    # and Storage.upload_file would 500 on empty bytes.
+    if not form_data.content:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=ERROR_MESSAGES.DEFAULT('Edit content must not be empty.'),
+        )
 
     row = await SkillFiles.get_file_by_path(id, form_data.path, db=db)
     if not row:
