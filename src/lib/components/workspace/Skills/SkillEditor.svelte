@@ -12,7 +12,7 @@
 	import Spinner from '$lib/components/common/Spinner.svelte';
 	import { updateSkillAccessGrants } from '$lib/apis/skills';
 	import { goto } from '$app/navigation';
-	import SkillFileUploader from './SkillFileUploader.svelte';
+	import SkillFileTree from './SkillFileTree.svelte';
 
 	export let onSubmit: Function;
 	export let edit = false;
@@ -252,7 +252,7 @@
 
 				{#if $config?.features?.feature_skill_files}
 					{#if edit && id}
-						<SkillFileUploader skillId={id} {disabled} />
+						<SkillFileTree skillId={id} {disabled} />
 					{:else if !edit}
 						<div class="mt-2 text-xs text-gray-500">
 							{$i18n.t('Save the skill to add reference files.')}
