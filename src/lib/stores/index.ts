@@ -4,6 +4,7 @@ import type { ModelConfig } from '$lib/apis';
 import type { Banner } from '$lib/types';
 import type { Socket } from 'socket.io-client';
 import type { AudioQueue } from '$lib/utils/audio';
+import type { ProfileRule } from '$lib/utils/models/profile';
 
 import emojiShortCodes from '$lib/emoji-shortcodes.json';
 
@@ -351,9 +352,13 @@ type Config = {
 	default_models: string;
 	default_prompt_suggestions: PromptSuggestion[];
 	// Per-deployment model → datacenter/hosting mapping (Helm MODEL_HOSTING env).
-	// Same matching convention as model-profiles; see hostingFromDeployment in
+	// Same matching convention as model_profiles; see hostingFromDeployment in
 	// $lib/utils/models/profile.ts. Empty/absent when the deployment doesn't set it.
 	model_hosting?: { match: string; hosting: string }[];
+	// Per-deployment model → profile mapping (Helm MODEL_PROFILES env): description,
+	// bestFor, speed/quality meters, eco badge. Consumed by resolveModelProfile in
+	// $lib/utils/models/profile.ts. Empty/absent when the deployment doesn't set it.
+	model_profiles?: ProfileRule[];
 	features: {
 		auth: boolean;
 		auth_trusted_header: boolean;

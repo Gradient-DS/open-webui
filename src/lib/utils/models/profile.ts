@@ -74,7 +74,7 @@ export function parseHosting(hosting?: string): { label: string; flag?: FlagCode
 	return { label: label || raw, flag };
 }
 
-type ProfileRule = {
+export type ProfileRule = {
 	match: string;
 	profile?: ModelProfile;
 	_comment?: string;
