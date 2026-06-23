@@ -239,3 +239,29 @@ def test_oauth_per_user_allowed_when_no_shared_kb():
     assert app.state.config.CONFLUENCE_AUTH_MODE == 'oauth'
     assert app.state.config.CONFLUENCE_KB_MODE == 'per_user'
     find_mock.assert_awaited_once_with('confluence', 'confluence_sync')
+
+
+def test_site_url_with_wiki_suffix_is_normalized_on_save():
+    # An admin-pasted URL that includes the /wiki context path must be stored as
+    # scheme://host so the client does not double up into .../wiki/wiki/... → 404.
+    app = _make_app()
+    client = TestClient(app)
+    res = client.post(
+        '/api/v1/configs/confluence',
+        json={'CONFLUENCE_SITE_URL': 'https://tenant.atlassian.net/wiki'},
+    )
+    assert res.status_code == 200
+    assert app.state.config.CONFLUENCE_SITE_URL == 'https://tenant.atlassian.net'
+    assert res.json()['CONFLUENCE_SITE_URL'] == 'https://tenant.atlassian.net'
+
+
+def test_site_url_deep_link_is_normalized_on_save():
+    # A deep link copied from the browser must also collapse to scheme://host.
+    app = _make_app()
+    client = TestClient(app)
+    res = client.post(
+        '/api/v1/configs/confluence',
+        json={'CONFLUENCE_SITE_URL': 'https://tenant.atlassian.net/wiki/spaces/ENG/overview'},
+    )
+    assert res.status_code == 200
+    assert app.state.config.CONFLUENCE_SITE_URL == 'https://tenant.atlassian.net'

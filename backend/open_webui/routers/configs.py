@@ -1034,7 +1034,11 @@ async def set_confluence_config(
     if form_data.CONFLUENCE_MAX_PAGES_PER_SYNC is not None:
         c.CONFLUENCE_MAX_PAGES_PER_SYNC = max(0, form_data.CONFLUENCE_MAX_PAGES_PER_SYNC)
     if form_data.CONFLUENCE_SITE_URL is not None:
-        c.CONFLUENCE_SITE_URL = form_data.CONFLUENCE_SITE_URL.strip().rstrip('/')
+        # Normalize to scheme://host so an admin-pasted '/wiki' suffix or deep
+        # link can't double up into '.../wiki/wiki/api/v2/...' and 404.
+        from open_webui.services.confluence.confluence_client import normalize_site_url
+
+        c.CONFLUENCE_SITE_URL = normalize_site_url(form_data.CONFLUENCE_SITE_URL)
     if form_data.CONFLUENCE_BASIC_AUTH_USERNAME is not None:
         c.CONFLUENCE_BASIC_AUTH_USERNAME = form_data.CONFLUENCE_BASIC_AUTH_USERNAME.strip()
     if form_data.CONFLUENCE_BASIC_AUTH_API_TOKEN is not None:
