@@ -1,16 +1,124 @@
 // Pure helpers for the skill-bundle folder tree. Kept free of Svelte/DOM
 // dependencies so they can be unit-tested in isolation.
 
-const MARKDOWN_EXTENSIONS = ['.md', '.markdown'];
+/**
+ * Extensions we treat as editable text in the right-hand pane. This set is kept
+ * in lockstep with the backend's `_TEXT_EXTENSIONS`
+ * (backend/open_webui/routers/skill_files.py + utils/skill_bundles.py) so the
+ * client's editor-vs-preview decision matches the server's inline-vs-metadata
+ * forwarding classification.
+ */
+const TEXT_EXTENSIONS = new Set<string>([
+	'md',
+	'markdown',
+	'txt',
+	'py',
+	'js',
+	'ts',
+	'jsx',
+	'tsx',
+	'json',
+	'yaml',
+	'yml',
+	'toml',
+	'ini',
+	'cfg',
+	'conf',
+	'sh',
+	'bash',
+	'zsh',
+	'html',
+	'htm',
+	'css',
+	'scss',
+	'sass',
+	'xml',
+	'csv',
+	'rst',
+	'tex',
+	'sql',
+	'r',
+	'rb',
+	'java',
+	'c',
+	'cpp',
+	'h',
+	'hpp',
+	'cs',
+	'go',
+	'rs',
+	'swift',
+	'kt',
+	'php',
+	'lua',
+	'tf',
+	'hcl'
+]);
 
 /**
- * Return true if `name` (a filename or path) has a markdown extension.
- * Mirrors the server-side rule in routers/skill_files.py (.md / .markdown).
+ * Map a text extension to a CodeMirror `@codemirror/language-data` alias that
+ * CodeEditor resolves via `languages.find((l) => l.alias.includes(lang))`. An
+ * empty string falls back to plaintext (no language). Extensions absent here
+ * (e.g. plain `.txt`, `.csv`) deliberately resolve to plaintext.
  */
-export const isMarkdownPath = (name: string): boolean => {
-	const lower = (name ?? '').toLowerCase();
-	return MARKDOWN_EXTENSIONS.some((ext) => lower.endsWith(ext));
+const LANGUAGE_BY_EXTENSION: Record<string, string> = {
+	py: 'python',
+	js: 'javascript',
+	jsx: 'javascript',
+	ts: 'typescript',
+	tsx: 'typescript',
+	json: 'json',
+	yaml: 'yaml',
+	yml: 'yaml',
+	toml: 'toml',
+	md: 'markdown',
+	markdown: 'markdown',
+	html: 'html',
+	htm: 'html',
+	css: 'css',
+	scss: 'css',
+	sass: 'css',
+	xml: 'xml',
+	sh: 'shell',
+	bash: 'shell',
+	zsh: 'shell',
+	sql: 'sql',
+	java: 'java',
+	c: 'c',
+	cpp: 'cpp',
+	h: 'c',
+	hpp: 'cpp',
+	cs: 'c#',
+	go: 'go',
+	rs: 'rust',
+	rb: 'ruby',
+	php: 'php',
+	swift: 'swift',
+	kt: 'kotlin',
+	lua: 'lua',
+	r: 'r'
 };
+
+/** Lower-cased extension (without the dot) of a filename or path, or '' if none. */
+const extensionOf = (name: string): string => {
+	const base = (name ?? '').toLowerCase().split('/').pop() ?? '';
+	const dot = base.lastIndexOf('.');
+	return dot > 0 ? base.slice(dot + 1) : '';
+};
+
+/**
+ * Return true if `name` (a filename or path) should be edited as text rather
+ * than previewed/downloaded as a binary. Aligned with the backend text
+ * classification.
+ */
+export const isTextPath = (name: string): boolean => TEXT_EXTENSIONS.has(extensionOf(name));
+
+/**
+ * Map `name` to a CodeMirror language alias for the editor, or '' (plaintext)
+ * when the extension is unknown or absent.
+ */
+export const languageForPath = (name: string): string =>
+	LANGUAGE_BY_EXTENSION[extensionOf(name)] ?? '';
 
 export interface SkillFileItem {
 	id?: string;
@@ -18,6 +126,8 @@ export interface SkillFileItem {
 	updated_at?: number;
 	data?: { content?: string; [key: string]: unknown };
 	meta?: { size?: number; [key: string]: unknown };
+	media_type?: string;
+	size?: number;
 	[key: string]: unknown;
 }
 
@@ -102,21 +212,4 @@ export const buildTree = (items: SkillFileItem[], pendingFolders: string[] = [])
 
 	sortNode(root);
 	return root;
-};
-
-/**
- * Partition a list of files into the markdown ones we keep and a count of the
- * non-markdown ones we skip. Used by the upload + drag-drop paths.
- */
-export const filterMarkdownFiles = (files: File[]): { kept: File[]; skipped: number } => {
-	const kept: File[] = [];
-	let skipped = 0;
-	for (const file of files ?? []) {
-		if (isMarkdownPath(file.name)) {
-			kept.push(file);
-		} else {
-			skipped += 1;
-		}
-	}
-	return { kept, skipped };
 };

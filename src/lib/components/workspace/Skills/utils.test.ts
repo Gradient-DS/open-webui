@@ -1,29 +1,76 @@
 import { describe, it, expect } from 'vitest';
-import { buildTree, isMarkdownPath, filterMarkdownFiles } from './utils';
+import { buildTree, isTextPath, languageForPath } from './utils';
 
-describe('isMarkdownPath', () => {
-	it('accepts .md (case-insensitive)', () => {
-		expect(isMarkdownPath('guide.md')).toBe(true);
-		expect(isMarkdownPath('GUIDE.MD')).toBe(true);
-		expect(isMarkdownPath('docs/sub/guide.md')).toBe(true);
+describe('isTextPath', () => {
+	it('treats common text/code extensions as text (case-insensitive)', () => {
+		expect(isTextPath('guide.md')).toBe(true);
+		expect(isTextPath('README.MARKDOWN')).toBe(true);
+		expect(isTextPath('notes.txt')).toBe(true);
+		expect(isTextPath('script.py')).toBe(true);
+		expect(isTextPath('app.JS')).toBe(true);
+		expect(isTextPath('types.ts')).toBe(true);
+		expect(isTextPath('data.json')).toBe(true);
+		expect(isTextPath('config.yaml')).toBe(true);
+		expect(isTextPath('config.yml')).toBe(true);
+		expect(isTextPath('table.csv')).toBe(true);
+		expect(isTextPath('page.html')).toBe(true);
+		expect(isTextPath('style.css')).toBe(true);
+		expect(isTextPath('doc.xml')).toBe(true);
+		expect(isTextPath('run.sh')).toBe(true);
+		expect(isTextPath('query.sql')).toBe(true);
+		expect(isTextPath('analysis.r')).toBe(true);
 	});
 
-	it('accepts .markdown (case-insensitive)', () => {
-		expect(isMarkdownPath('readme.markdown')).toBe(true);
-		expect(isMarkdownPath('README.MARKDOWN')).toBe(true);
+	it('resolves the extension from a nested path', () => {
+		expect(isTextPath('docs/sub/guide.md')).toBe(true);
+		expect(isTextPath('assets/logo.png')).toBe(false);
 	});
 
-	it('rejects non-markdown extensions', () => {
-		expect(isMarkdownPath('image.png')).toBe(false);
-		expect(isMarkdownPath('notes.txt')).toBe(false);
-		expect(isMarkdownPath('archive.md.zip')).toBe(false);
-		expect(isMarkdownPath('script.js')).toBe(false);
+	it('treats binary extensions as non-text', () => {
+		expect(isTextPath('image.png')).toBe(false);
+		expect(isTextPath('photo.jpg')).toBe(false);
+		expect(isTextPath('archive.zip')).toBe(false);
+		expect(isTextPath('doc.pdf')).toBe(false);
+		expect(isTextPath('model.ifc')).toBe(false);
 	});
 
-	it('rejects names with no extension or empty', () => {
-		expect(isMarkdownPath('README')).toBe(false);
-		expect(isMarkdownPath('')).toBe(false);
-		expect(isMarkdownPath('md')).toBe(false);
+	it('treats names with no extension or empty as non-text', () => {
+		expect(isTextPath('README')).toBe(false);
+		expect(isTextPath('')).toBe(false);
+		expect(isTextPath('md')).toBe(false);
+	});
+});
+
+describe('languageForPath', () => {
+	it('maps known extensions to CodeMirror language aliases', () => {
+		expect(languageForPath('script.py')).toBe('python');
+		expect(languageForPath('app.js')).toBe('javascript');
+		expect(languageForPath('app.jsx')).toBe('javascript');
+		expect(languageForPath('types.ts')).toBe('typescript');
+		expect(languageForPath('types.tsx')).toBe('typescript');
+		expect(languageForPath('data.json')).toBe('json');
+		expect(languageForPath('config.yaml')).toBe('yaml');
+		expect(languageForPath('config.yml')).toBe('yaml');
+		expect(languageForPath('guide.md')).toBe('markdown');
+		expect(languageForPath('readme.markdown')).toBe('markdown');
+		expect(languageForPath('page.html')).toBe('html');
+		expect(languageForPath('style.css')).toBe('css');
+		expect(languageForPath('run.sh')).toBe('shell');
+		expect(languageForPath('query.sql')).toBe('sql');
+		expect(languageForPath('Main.java')).toBe('java');
+		expect(languageForPath('doc.xml')).toBe('xml');
+	});
+
+	it('is case-insensitive and resolves nested paths', () => {
+		expect(languageForPath('SCRIPT.PY')).toBe('python');
+		expect(languageForPath('docs/sub/config.YAML')).toBe('yaml');
+	});
+
+	it('falls back to plaintext for unknown or extensionless names', () => {
+		expect(languageForPath('notes.txt')).toBe('');
+		expect(languageForPath('image.png')).toBe('');
+		expect(languageForPath('README')).toBe('');
+		expect(languageForPath('')).toBe('');
 	});
 });
 
@@ -112,36 +159,5 @@ describe('buildTree', () => {
 		// real folder wins; it is not marked pending
 		expect(docs[0].pending).toBeFalsy();
 		expect(docs[0].files).toHaveLength(1);
-	});
-});
-
-describe('filterMarkdownFiles', () => {
-	const f = (name: string) => ({ name }) as File;
-
-	it('keeps only markdown files and counts the skipped rest', () => {
-		const files = [f('a.md'), f('b.png'), f('c.markdown'), f('d.txt')];
-		const { kept, skipped } = filterMarkdownFiles(files);
-		expect(kept.map((x) => x.name)).toEqual(['a.md', 'c.markdown']);
-		expect(skipped).toBe(2);
-	});
-
-	it('keeps all when every file is markdown', () => {
-		const files = [f('a.md'), f('b.markdown')];
-		const { kept, skipped } = filterMarkdownFiles(files);
-		expect(kept).toHaveLength(2);
-		expect(skipped).toBe(0);
-	});
-
-	it('skips all when none are markdown', () => {
-		const files = [f('a.png'), f('b.txt')];
-		const { kept, skipped } = filterMarkdownFiles(files);
-		expect(kept).toHaveLength(0);
-		expect(skipped).toBe(2);
-	});
-
-	it('handles an empty list', () => {
-		const { kept, skipped } = filterMarkdownFiles([]);
-		expect(kept).toHaveLength(0);
-		expect(skipped).toBe(0);
 	});
 });
