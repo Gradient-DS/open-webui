@@ -277,7 +277,11 @@ class ConfluenceClient:
                 if self._auth_mode == 'basic':
                     url = f'{self._site_url}{next_link}'
                 else:
-                    url = f'https://api.atlassian.com{next_link}'
+                    # oauth + scoped go through the cloudId-keyed gateway. The v2
+                    # `next` path is site-relative (/wiki/api/v2/...), so it must be
+                    # re-prefixed with /ex/confluence/{cloudId}; resolving it against
+                    # the bare api.atlassian.com host drops the gateway route → 404.
+                    url = f'{_API_BASE}/{self._cloud_id}{next_link}'
             else:
                 url = next_link
             params = None  # next link already carries the cursor
