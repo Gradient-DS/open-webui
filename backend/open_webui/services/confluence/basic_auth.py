@@ -32,7 +32,10 @@ from open_webui.config import (
     CONFLUENCE_CLOUD_ID,
 )
 from open_webui.models.knowledge import Knowledges
-from open_webui.services.confluence.confluence_client import ConfluenceClient
+from open_webui.services.confluence.confluence_client import (
+    ConfluenceClient,
+    normalize_site_url,
+)
 
 log = logging.getLogger(__name__)
 
@@ -95,7 +98,7 @@ def get_basic_site() -> Optional[Dict[str, Any]]:
     ``cloud_id`` so the rest of the sync pipeline — which keys sources by
     cloud_id — needs no special-casing for basic mode.
     """
-    site_url = (CONFLUENCE_SITE_URL.value or '').strip().rstrip('/')
+    site_url = normalize_site_url(CONFLUENCE_SITE_URL.value or '')
     if not site_url:
         return None
     host = urlparse(site_url).netloc or site_url
@@ -156,7 +159,7 @@ async def resolve_cloud_id(site_url: Optional[str] = None) -> Optional[str]:
     if override:
         return override
 
-    site = (site_url if site_url is not None else CONFLUENCE_SITE_URL.value or '').strip().rstrip('/')
+    site = normalize_site_url(site_url if site_url is not None else CONFLUENCE_SITE_URL.value or '')
     if not site:
         return None
 
@@ -207,7 +210,7 @@ async def get_scoped_site() -> Optional[Dict[str, Any]]:
     transport addresses the gateway by cloudId. Returns None when no site URL is
     configured; ``cloud_id`` may be None when it cannot be resolved.
     """
-    site_url = (CONFLUENCE_SITE_URL.value or '').strip().rstrip('/')
+    site_url = normalize_site_url(CONFLUENCE_SITE_URL.value or '')
     if not site_url:
         return None
     host = urlparse(site_url).netloc or site_url

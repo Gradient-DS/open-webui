@@ -94,6 +94,37 @@
 	// Mirror the enable flag out so the card header badge stays in sync.
 	$: enabled = ENABLE_CONFLUENCE_INTEGRATION;
 
+	// Autosave: notify the orchestrator whenever a persisted field changes (incl.
+	// the programmatic basic⇒shared coupling above). The baseline is re-established
+	// on every applyConfluenceConfig() (load/save) and the first run only seeds it,
+	// so neither load nor save triggers a spurious save. A blocked switch still
+	// throws in persist() → the orchestrator shows it inline.
+	export let onChange: (() => void) | null = null;
+	let savedBaseline: string | null = null;
+	$: changeSnapshot = JSON.stringify([
+		ENABLE_CONFLUENCE_INTEGRATION,
+		ENABLE_CONFLUENCE_SYNC,
+		CONFLUENCE_OAUTH_CLIENT_ID,
+		CONFLUENCE_SYNC_INTERVAL_MINUTES,
+		CONFLUENCE_MAX_PAGES_PER_SYNC,
+		clientSecret,
+		CONFLUENCE_SITE_URL,
+		CONFLUENCE_BASIC_AUTH_USERNAME,
+		basicApiToken,
+		scopedApiToken,
+		CONFLUENCE_CLOUD_ID,
+		CONFLUENCE_AUTH_MODE,
+		CONFLUENCE_KB_MODE
+	]);
+	$: {
+		if (savedBaseline === null) {
+			savedBaseline = changeSnapshot;
+		} else if (changeSnapshot !== savedBaseline) {
+			savedBaseline = changeSnapshot;
+			onChange?.();
+		}
+	}
+
 	// Basic-mode owner pick: a transient form field, not a persisted config.
 	// On provision it becomes ``kb.user_id`` (the sole source of truth for KB
 	// ownership). Seeded from the KB row's owner on initial status load so the
@@ -126,6 +157,8 @@
 		// Reset the switch-detection baseline to the persisted value (also runs after
 		// a successful save, so the next switch is measured from the new state).
 		loadedAuthMode = CONFLUENCE_AUTH_MODE;
+		// Re-baseline the autosave snapshot against the freshly-loaded/saved values.
+		savedBaseline = null;
 	};
 
 	export async function load() {

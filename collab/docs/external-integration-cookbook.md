@@ -871,8 +871,9 @@ By default the OneDrive picker uses a single, per-deployment `ONEDRIVE_SHAREPOIN
 
 ### Azure app prerequisites (required for derive mode)
 
-1. **Multi-tenant app registration** — and `ONEDRIVE_SHAREPOINT_TENANT_ID` set to `common`/`organizations` (or blank → `common`), so users from any org can consent.
-2. **SharePoint/Office365 delegated permissions** — e.g. `MyFiles.Read` / `AllSites.Read`, **in addition to** Graph `Files.Read.All`. The `{host}/.default` picker-token scope is only grantable if the app holds SharePoint delegated perms; without them, derivation succeeds but the subsequent picker token acquisition fails with a visible error.
+1. **SPA redirect URI per deployment origin** — the MSAL picker sends `redirectUri: window.location.origin` (e.g. `https://afk.soev.ai`). Each deployment domain that uses the app **must** be registered under the app's **Single-page application (SPA)** platform (Azure Portal → App registrations → [app] → Authentication → Single-page application → Add URI → `https://<domain>`). Missing → `AADSTS50011: The redirect URI '…' does not match…` at login, before any derivation. Must be SPA platform (MSAL.js v2 PKCE), **not** Web. (The Web-platform `https://<domain>/oauth/microsoft/callback` is the separate *backend* sync OAuth redirect.) This is independent of multi-tenancy: the redirect URI is about the app's **host**, not the user's org — one entry per deployment domain covers all orgs' users on that deployment.
+2. **Multi-tenant app registration** — and `ONEDRIVE_SHAREPOINT_TENANT_ID` set to `common`/`organizations` (or blank → `common`), so users from any org can consent.
+3. **SharePoint/Office365 delegated permissions** — e.g. `MyFiles.Read` / `AllSites.Read`, **in addition to** Graph `Files.Read.All`. The `{host}/.default` picker-token scope is only grantable if the app holds SharePoint delegated perms; without them, login + derivation succeed but the subsequent picker token acquisition fails with a visible error.
 
 The live driver is the AFK tenant (multi-tenant app, `ONEDRIVE_SHAREPOINT_TENANT_ID: common`, blank URL) — see the inline rationale in `soev-gitops/tenants/previder-prod/afk/helmrelease.yaml`.
 

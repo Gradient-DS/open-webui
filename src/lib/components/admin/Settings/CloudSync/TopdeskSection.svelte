@@ -63,6 +63,30 @@
 	// Mirror the enable flag out so the card header badge stays in sync.
 	$: enabled = ENABLE_TOPDESK_INTEGRATION;
 
+	// Autosave: notify the orchestrator whenever a persisted field changes. The
+	// baseline is re-established on every applyTopdeskConfig() (load/save), and the
+	// first run only seeds it — so neither load nor save triggers a spurious save.
+	export let onChange: (() => void) | null = null;
+	let savedBaseline: string | null = null;
+	$: changeSnapshot = JSON.stringify([
+		ENABLE_TOPDESK_INTEGRATION,
+		ENABLE_TOPDESK_SYNC,
+		TOPDESK_URL,
+		TOPDESK_USERNAME,
+		appPassword,
+		TOPDESK_SYNC_INTERVAL_MINUTES,
+		TOPDESK_MAX_ITEMS_PER_SYNC,
+		TOPDESK_SYNC_SCOPE
+	]);
+	$: {
+		if (savedBaseline === null) {
+			savedBaseline = changeSnapshot;
+		} else if (changeSnapshot !== savedBaseline) {
+			savedBaseline = changeSnapshot;
+			onChange?.();
+		}
+	}
+
 	// Shared-KB owner pick: a transient form field, not a persisted config. On
 	// provision it becomes ``kb.user_id``. Seeded from the KB row's owner on
 	// initial status load so the dropdown reflects the existing owner when
@@ -82,6 +106,9 @@
 		TOPDESK_SYNC_INTERVAL_MINUTES = config.TOPDESK_SYNC_INTERVAL_MINUTES ?? 60;
 		TOPDESK_MAX_ITEMS_PER_SYNC = config.TOPDESK_MAX_ITEMS_PER_SYNC ?? 0;
 		TOPDESK_SYNC_SCOPE = config.TOPDESK_SYNC_SCOPE ?? 'ssp';
+		// Re-baseline against the freshly-loaded/saved values so the snapshot
+		// watcher treats them as the new "clean" state.
+		savedBaseline = null;
 	};
 
 	export async function load() {
