@@ -495,6 +495,39 @@ export const removeSkillFilePath = async (token: string, id: string, path: strin
 	return res;
 };
 
+export const getSkillFileContentBlob = async (
+	token: string,
+	id: string,
+	path: string
+): Promise<Blob> => {
+	let error = null;
+
+	const res = await fetch(
+		`${WEBUI_API_BASE_URL}/skills/id/${id}/files/content?path=${encodeURIComponent(path)}`,
+		{
+			method: 'GET',
+			headers: {
+				authorization: `Bearer ${token}`
+			}
+		}
+	)
+		.then(async (res) => {
+			if (!res.ok) throw await res.json();
+			return res.blob();
+		})
+		.catch((err) => {
+			error = err.detail ?? err;
+			console.error(err);
+			return null;
+		});
+
+	if (error || !res) {
+		throw error ?? new Error('Failed to fetch skill file content.');
+	}
+
+	return res;
+};
+
 export const getSkillFileList = async (token: string, id: string, page: number = 1) => {
 	let error = null;
 
