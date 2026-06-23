@@ -83,6 +83,8 @@ class TestResolveSkillBundleFiles:
         assert by_path == {'docs/guide.md': '# Guide\nStep 1', 'tone.md': 'Always formal.'}
         # No 'filename' key — the contract is now path-keyed.
         assert all('filename' not in entry for entry in bundle)
+        # v3: is_binary must be present and False for text files
+        assert all(entry['is_binary'] is False for entry in bundle)
 
     @pytest.mark.asyncio
     async def test_skill_with_no_files_returns_empty_list(self):
@@ -164,8 +166,11 @@ class TestResolveSkillBundleFiles:
         bundle = result['skill-legacy']
         assert len(bundle) == 1
         # Content must be the FILE'S TEXT, not the path string.
-        assert bundle[0] == {'path': 'legacy.md', 'content': md_text}
-        assert bundle[0]['content'] != str(tmp_file)
+        entry = bundle[0]
+        assert entry['path'] == 'legacy.md'
+        assert entry['content'] == md_text
+        assert entry['content'] != str(tmp_file)
+        assert entry['is_binary'] is False
 
     @pytest.mark.asyncio
     async def test_storage_fallback_failure_skips_file_gracefully(self):
@@ -215,8 +220,13 @@ class TestResolveSkillBundleFiles:
             skill_bundles_mod.SkillFiles = orig_sf
             skill_bundles_mod.Files = orig_files
 
-        assert result['skill-A'] == [{'path': 'a.md', 'content': 'Content A'}]
         assert result['skill-B'] == []
+        # v3: forwarding shape includes is_binary, media_type, size
+        bundle_a = result['skill-A']
+        assert len(bundle_a) == 1
+        assert bundle_a[0]['path'] == 'a.md'
+        assert bundle_a[0]['content'] == 'Content A'
+        assert bundle_a[0]['is_binary'] is False
 
     @pytest.mark.asyncio
     async def test_same_file_at_two_paths_yields_two_entries(self):
@@ -244,3 +254,160 @@ class TestResolveSkillBundleFiles:
         bundle = result['skill-dup']
         by_path = {entry['path']: entry['content'] for entry in bundle}
         assert by_path == {'a.md': 'shared content', 'docs/b.md': 'shared content'}
+        assert all(entry['is_binary'] is False for entry in bundle)
+
+
+# ===========================================================================
+# v3: text/binary classification + forwarding shape
+# ===========================================================================
+
+
+def _make_file_model_with_content_type(
+    file_id: str,
+    filename: str,
+    content_type: str,
+    content: str | None = None,
+    path: str | None = None,
+):
+    """Build a FileModel-like SimpleNamespace with meta.content_type and size."""
+    data = {'content': content} if content is not None else {}
+    meta = {'content_type': content_type, 'size': len(content.encode()) if content else 32}
+    return SimpleNamespace(
+        id=file_id,
+        filename=filename,
+        data=data,
+        meta=meta,
+        path=path or f'uploads/{file_id}',
+    )
+
+
+class TestForwardingClassification:
+    """v3: resolve_skill_bundle_files must classify text vs binary and emit the
+    correct forwarding shape for each.
+
+    Text: {path, content, media_type, is_binary: False, size}
+    Binary: {path, media_type, is_binary: True, size}  (no 'content' key)
+    """
+
+    @pytest.mark.asyncio
+    async def test_text_py_file_inline(self):
+        """A .py file with text/x-python content_type → content inline."""
+        skill = _make_skill('skill-py')
+        sf_rows = [_make_skill_file_row('fpy', path='script.py')]
+        file_py = _make_file_model_with_content_type('fpy', 'script.py', 'text/x-python', content='print("hi")')
+
+        mock_sf = _make_mock_sf({'skill-py': sf_rows})
+        mock_files = _make_mock_files({'fpy': file_py})
+
+        orig_sf, orig_files = skill_bundles_mod.SkillFiles, skill_bundles_mod.Files
+        try:
+            skill_bundles_mod.SkillFiles = mock_sf
+            skill_bundles_mod.Files = mock_files
+            result = await resolve_skill_bundle_files([skill])
+        finally:
+            skill_bundles_mod.SkillFiles = orig_sf
+            skill_bundles_mod.Files = orig_files
+
+        bundle = result['skill-py']
+        assert len(bundle) == 1
+        entry = bundle[0]
+        assert entry['path'] == 'script.py'
+        assert entry['is_binary'] is False
+        assert entry['content'] == 'print("hi")'
+        assert entry['media_type'] == 'text/x-python'
+        assert 'size' in entry
+
+    @pytest.mark.asyncio
+    async def test_json_file_inline(self):
+        """application/json → content inline (known-text set)."""
+        skill = _make_skill('skill-json')
+        sf_rows = [_make_skill_file_row('fjson', path='config.json')]
+        file_json = _make_file_model_with_content_type('fjson', 'config.json', 'application/json', content='{"k":"v"}')
+
+        mock_sf = _make_mock_sf({'skill-json': sf_rows})
+        mock_files = _make_mock_files({'fjson': file_json})
+
+        orig_sf, orig_files = skill_bundles_mod.SkillFiles, skill_bundles_mod.Files
+        try:
+            skill_bundles_mod.SkillFiles = mock_sf
+            skill_bundles_mod.Files = mock_files
+            result = await resolve_skill_bundle_files([skill])
+        finally:
+            skill_bundles_mod.SkillFiles = orig_sf
+            skill_bundles_mod.Files = orig_files
+
+        entry = result['skill-json'][0]
+        assert entry['is_binary'] is False
+        assert entry['content'] == '{"k":"v"}'
+        assert entry['media_type'] == 'application/json'
+
+    @pytest.mark.asyncio
+    async def test_png_file_metadata_only(self):
+        """image/png → metadata only, no 'content' key in the entry."""
+        skill = _make_skill('skill-png')
+        sf_rows = [_make_skill_file_row('fpng', path='assets/logo.png')]
+        file_png = _make_file_model_with_content_type('fpng', 'logo.png', 'image/png')
+        # binary file has no cached content
+        file_png.data = {}
+
+        mock_sf = _make_mock_sf({'skill-png': sf_rows})
+        mock_files = _make_mock_files({'fpng': file_png})
+
+        orig_sf, orig_files = skill_bundles_mod.SkillFiles, skill_bundles_mod.Files
+        try:
+            skill_bundles_mod.SkillFiles = mock_sf
+            skill_bundles_mod.Files = mock_files
+            result = await resolve_skill_bundle_files([skill])
+        finally:
+            skill_bundles_mod.SkillFiles = orig_sf
+            skill_bundles_mod.Files = orig_files
+
+        bundle = result['skill-png']
+        assert len(bundle) == 1
+        entry = bundle[0]
+        assert entry['path'] == 'assets/logo.png'
+        assert entry['is_binary'] is True
+        assert 'content' not in entry
+        assert entry['media_type'] == 'image/png'
+        assert 'size' in entry
+
+    @pytest.mark.asyncio
+    async def test_no_files_no_files_key_in_result(self):
+        """Skill with no files → empty list (middleware omits the 'files' key)."""
+        skill = _make_skill('skill-empty')
+        mock_sf = _make_mock_sf({'skill-empty': []})
+        mock_files = _make_mock_files({})
+
+        orig_sf, orig_files = skill_bundles_mod.SkillFiles, skill_bundles_mod.Files
+        try:
+            skill_bundles_mod.SkillFiles = mock_sf
+            skill_bundles_mod.Files = mock_files
+            result = await resolve_skill_bundle_files([skill])
+        finally:
+            skill_bundles_mod.SkillFiles = orig_sf
+            skill_bundles_mod.Files = orig_files
+
+        assert result['skill-empty'] == []
+
+    @pytest.mark.asyncio
+    async def test_markdown_file_inline(self):
+        """text/markdown → inline (is_binary False), backward compat."""
+        skill = _make_skill('skill-md')
+        sf_rows = [_make_skill_file_row('fmd', path='guide.md')]
+        file_md = _make_file_model_with_content_type('fmd', 'guide.md', 'text/markdown', content='# Hello')
+
+        mock_sf = _make_mock_sf({'skill-md': sf_rows})
+        mock_files = _make_mock_files({'fmd': file_md})
+
+        orig_sf, orig_files = skill_bundles_mod.SkillFiles, skill_bundles_mod.Files
+        try:
+            skill_bundles_mod.SkillFiles = mock_sf
+            skill_bundles_mod.Files = mock_files
+            result = await resolve_skill_bundle_files([skill])
+        finally:
+            skill_bundles_mod.SkillFiles = orig_sf
+            skill_bundles_mod.Files = orig_files
+
+        entry = result['skill-md'][0]
+        assert entry['is_binary'] is False
+        assert entry['content'] == '# Hello'

@@ -5,13 +5,15 @@ Endpoints under test (all under /api/v1/skills):
   - PUT    /id/{id}/files          (inline-edit)
   - POST   /id/{id}/files/move     (rename / folder-prefix rename)
   - POST   /id/{id}/files/remove   (single path OR folder prefix)
-  - GET    /id/{id}/files          (flat list, items include path)
+  - GET    /id/{id}/files          (flat list, items include path + media_type + size)
+  - GET    /id/{id}/files/content  (raw-bytes route)
 
 Uses a minimal FastAPI app + TestClient (no live DB). All model methods and
 Storage are monkeypatched to avoid real DB / filesystem access.
 
-Markdown-only validation is LOAD-BEARING: each bad-path / non-md test asserts
-the 400 actually FIRES and that no write happened.
+Path-safety validation is LOAD-BEARING: each bad-path test asserts the 400
+actually FIRES and that no write happened. (v3: the markdown-extension rule is
+removed — any-extension uploads are accepted.)
 """
 
 from __future__ import annotations
@@ -104,11 +106,16 @@ class TestValidateSkillPath:
         skill_files_router_module._validate_skill_path('guide.md')
         skill_files_router_module._validate_skill_path('docs/sub/guide.markdown')
 
+    def test_accepts_any_extension_v3(self):
+        """v3: non-md extensions are valid — the path-safety rules remain, but not the ext rule."""
+        skill_files_router_module._validate_skill_path('notes.txt')
+        skill_files_router_module._validate_skill_path('script.py')
+        skill_files_router_module._validate_skill_path('assets/logo.png')
+
     @pytest.mark.parametrize(
         'bad_path',
         [
-            'notes.txt',  # non-md extension
-            'notes',  # no extension
+            # Non-md extension and no extension are now VALID in v3; removed from bad-path list.
             '../escape.md',  # traversal
             'docs/../secret.md',  # traversal mid-path
             '/abs/guide.md',  # leading slash
@@ -191,37 +198,62 @@ def test_upload_existing_markdown_file_returns_200(monkeypatch, tmp_path):
     assert stored_content['content'] != str(tmp_file)
 
 
-def test_upload_non_markdown_path_returns_400_no_write(monkeypatch):
-    """A non-md PATH (regardless of File type) must 400 before any write."""
+def test_upload_non_markdown_path_accepted_v3(monkeypatch, tmp_path):
+    """v3: a non-md PATH is now valid — any extension is accepted."""
+    txt_text = 'Some plain text content.'
+    tmp_file = tmp_path / 'guide.txt'
+    tmp_file.write_text(txt_text, encoding='utf-8')
+
     skill = _make_skill()
-    add_mock = AsyncMock(return_value=_make_skill_file_record())
+    txt_file = _make_file(content_type='text/plain', filename='guide.txt')
+    sf_record = _make_skill_file_record(path='docs/guide.txt')
+    add_mock = AsyncMock(return_value=sf_record)
 
     monkeypatch.setattr(skill_files_router_module.Skills, 'get_skill_by_id', AsyncMock(return_value=skill))
-    monkeypatch.setattr(skill_files_router_module.Files, 'get_file_by_id', AsyncMock(return_value=_make_file()))
+    monkeypatch.setattr(skill_files_router_module.Files, 'get_file_by_id', AsyncMock(return_value=txt_file))
+    monkeypatch.setattr(skill_files_router_module.Files, 'update_file_data_by_id', AsyncMock(return_value=txt_file))
+    monkeypatch.setattr(skill_files_router_module.SkillFiles, 'path_exists', AsyncMock(return_value=False))
     monkeypatch.setattr(skill_files_router_module.SkillFiles, 'add_file_to_skill_by_id', add_mock)
 
-    app = _make_app()
-    res = TestClient(app).post('/api/v1/skills/id/skill-1/files', json={'path': 'docs/guide.txt', 'file_id': 'file-1'})
+    with patch('open_webui.routers.skill_files.asyncio.to_thread', side_effect=_passthrough_to_thread):
+        with patch('open_webui.storage.provider.Storage') as mock_storage:
+            mock_storage.get_file = lambda path: str(tmp_file)
+            app = _make_app()
+            res = TestClient(app).post(
+                '/api/v1/skills/id/skill-1/files', json={'path': 'docs/guide.txt', 'file_id': 'file-1'}
+            )
 
-    assert res.status_code == 400
-    add_mock.assert_not_called()
+    assert res.status_code == 200
+    add_mock.assert_called_once()
 
 
-def test_upload_non_markdown_file_returns_400(monkeypatch):
-    """A valid md PATH but a non-md backing File must still 400."""
+def test_upload_binary_file_accepted_v3(monkeypatch, tmp_path):
+    """v3: a binary file (e.g. PDF) with a valid path is now accepted."""
+    pdf_bytes = b'%PDF-1.4 fake'
+    tmp_file = tmp_path / 'report.pdf'
+    tmp_file.write_bytes(pdf_bytes)
+
     skill = _make_skill()
     pdf_file = _make_file(content_type='application/pdf', filename='report.pdf')
-    add_mock = AsyncMock(return_value=_make_skill_file_record())
+    sf_record = _make_skill_file_record(path='docs/report.pdf')
+    add_mock = AsyncMock(return_value=sf_record)
 
     monkeypatch.setattr(skill_files_router_module.Skills, 'get_skill_by_id', AsyncMock(return_value=skill))
     monkeypatch.setattr(skill_files_router_module.Files, 'get_file_by_id', AsyncMock(return_value=pdf_file))
+    monkeypatch.setattr(skill_files_router_module.Files, 'update_file_data_by_id', AsyncMock(return_value=pdf_file))
+    monkeypatch.setattr(skill_files_router_module.SkillFiles, 'path_exists', AsyncMock(return_value=False))
     monkeypatch.setattr(skill_files_router_module.SkillFiles, 'add_file_to_skill_by_id', add_mock)
 
-    app = _make_app()
-    res = TestClient(app).post('/api/v1/skills/id/skill-1/files', json={'path': 'report.md', 'file_id': 'file-1'})
+    with patch('open_webui.routers.skill_files.asyncio.to_thread', side_effect=_passthrough_to_thread):
+        with patch('open_webui.storage.provider.Storage') as mock_storage:
+            mock_storage.get_file = lambda path: str(tmp_file)
+            app = _make_app()
+            res = TestClient(app).post(
+                '/api/v1/skills/id/skill-1/files', json={'path': 'docs/report.pdf', 'file_id': 'file-1'}
+            )
 
-    assert res.status_code == 400
-    add_mock.assert_not_called()
+    assert res.status_code == 200
+    add_mock.assert_called_once()
 
 
 def test_upload_traversal_path_returns_400(monkeypatch):
@@ -318,21 +350,37 @@ def test_inline_create_writes_file_and_join(monkeypatch, tmp_path):
     assert form.data.get('content') == '# Hello\n\nworld'
 
 
-def test_inline_create_non_markdown_path_returns_400(monkeypatch):
-    """Inline-create with a non-md path must 400 — md-only enforced server-side."""
+def test_inline_create_non_markdown_path_accepted_v3(monkeypatch, tmp_path):
+    """v3: inline-create with a non-md path is now accepted (any extension)."""
     skill = _make_skill()
-    insert_mock = AsyncMock(return_value=_make_file())
-    add_mock = AsyncMock(return_value=_make_skill_file_record())
+    created_file = _make_file(file_id='new-file', filename='notes.txt')
+    sf_record = _make_skill_file_record(file_id='new-file', path='notes.txt')
+
+    uploaded = {}
+
+    def _fake_upload(fileobj, filename, tags):
+        contents = fileobj.read()
+        uploaded['contents'] = contents
+        return contents, str(tmp_path / filename)
+
+    insert_mock = AsyncMock(return_value=created_file)
+    add_mock = AsyncMock(return_value=sf_record)
 
     monkeypatch.setattr(skill_files_router_module.Skills, 'get_skill_by_id', AsyncMock(return_value=skill))
+    monkeypatch.setattr(skill_files_router_module.SkillFiles, 'path_exists', AsyncMock(return_value=False))
     monkeypatch.setattr(skill_files_router_module.Files, 'insert_new_file', insert_mock)
     monkeypatch.setattr(skill_files_router_module.SkillFiles, 'add_file_to_skill_by_id', add_mock)
 
-    app = _make_app()
-    res = TestClient(app).post('/api/v1/skills/id/skill-1/files', json={'path': 'notes.txt', 'content': 'hi'})
-    assert res.status_code == 400
-    insert_mock.assert_not_called()
-    add_mock.assert_not_called()
+    with patch('open_webui.routers.skill_files.asyncio.to_thread', side_effect=_passthrough_to_thread):
+        with patch('open_webui.storage.provider.Storage') as mock_storage:
+            mock_storage.upload_file = _fake_upload
+            app = _make_app()
+            res = TestClient(app).post('/api/v1/skills/id/skill-1/files', json={'path': 'notes.txt', 'content': 'hi'})
+
+    assert res.status_code == 200
+    insert_mock.assert_called_once()
+    add_mock.assert_called_once()
+    assert uploaded['contents'] == b'hi'
 
 
 def test_create_requires_file_id_or_content(monkeypatch):
@@ -440,16 +488,41 @@ def test_edit_unknown_path_returns_404(monkeypatch):
     assert res.status_code == 404
 
 
-def test_edit_non_markdown_path_returns_400(monkeypatch):
+def test_edit_any_extension_path_accepted_v3(monkeypatch, tmp_path):
+    """v3: PUT edit with a non-md path is now valid."""
     skill = _make_skill()
-    get_mock = AsyncMock(return_value=_make_skill_file_record())
-    monkeypatch.setattr(skill_files_router_module.Skills, 'get_skill_by_id', AsyncMock(return_value=skill))
-    monkeypatch.setattr(skill_files_router_module.SkillFiles, 'get_file_by_path', get_mock)
+    existing_file = _make_file(file_id='file-1', filename='script.py')
+    sf_record = _make_skill_file_record(path='script.py')
 
-    app = _make_app()
-    res = TestClient(app).put('/api/v1/skills/id/skill-1/files', json={'path': 'guide.txt', 'content': 'x'})
-    assert res.status_code == 400
-    get_mock.assert_not_called()
+    uploaded = {}
+
+    def _fake_upload(fileobj, filename, tags):
+        contents = fileobj.read()
+        uploaded['contents'] = contents
+        return contents, str(tmp_path / filename)
+
+    update_data = {}
+
+    async def _capture_update(file_id, data, db=None):
+        update_data['content'] = data.get('content')
+        return existing_file
+
+    monkeypatch.setattr(skill_files_router_module.Skills, 'get_skill_by_id', AsyncMock(return_value=skill))
+    monkeypatch.setattr(skill_files_router_module.SkillFiles, 'get_file_by_path', AsyncMock(return_value=sf_record))
+    monkeypatch.setattr(skill_files_router_module.Files, 'get_file_by_id', AsyncMock(return_value=existing_file))
+    monkeypatch.setattr(skill_files_router_module.Files, 'update_file_data_by_id', _capture_update)
+    monkeypatch.setattr(
+        skill_files_router_module.Files, 'update_file_path_by_id', AsyncMock(return_value=existing_file)
+    )
+
+    with patch('open_webui.routers.skill_files.asyncio.to_thread', side_effect=_passthrough_to_thread):
+        with patch('open_webui.storage.provider.Storage') as mock_storage:
+            mock_storage.upload_file = _fake_upload
+            app = _make_app()
+            res = TestClient(app).put('/api/v1/skills/id/skill-1/files', json={'path': 'script.py', 'content': 'x'})
+
+    assert res.status_code == 200
+    assert update_data['content'] == 'x'
 
 
 # ===========================================================================
@@ -502,8 +575,8 @@ def test_move_folder_prefix(monkeypatch):
     move_prefix_mock.assert_called_once()
 
 
-def test_move_non_markdown_to_path_returns_400(monkeypatch):
-    """Renaming a file to a non-md to_path must 400."""
+def test_move_any_extension_to_path_accepted_v3(monkeypatch):
+    """v3: renaming a file to a non-md to_path is now valid."""
     skill = _make_skill()
     move_mock = AsyncMock(return_value=True)
     monkeypatch.setattr(skill_files_router_module.Skills, 'get_skill_by_id', AsyncMock(return_value=skill))
@@ -520,8 +593,8 @@ def test_move_non_markdown_to_path_returns_400(monkeypatch):
         '/api/v1/skills/id/skill-1/files/move',
         json={'from_path': 'old.md', 'to_path': 'new.txt'},
     )
-    assert res.status_code == 400
-    move_mock.assert_not_called()
+    assert res.status_code == 200
+    move_mock.assert_called_once()
 
 
 def test_move_to_existing_path_returns_400(monkeypatch):
@@ -654,3 +727,242 @@ def test_list_files_skill_not_found(monkeypatch):
     app = _make_app()
     res = TestClient(app).get('/api/v1/skills/id/missing/files')
     assert res.status_code == 404
+
+
+# ===========================================================================
+# v3: any-extension upload accepted (drop of md-only gate)
+# ===========================================================================
+
+
+def test_upload_any_extension_file_returns_200(monkeypatch, tmp_path):
+    """v3: a .py file (non-markdown) must be accepted — markdown-only gate removed."""
+    py_text = 'def hello():\n    return "world"\n'
+    tmp_file = tmp_path / 'hello.py'
+    tmp_file.write_text(py_text, encoding='utf-8')
+
+    skill = _make_skill()
+    py_file = _make_file(content_type='text/x-python', filename='hello.py')
+    sf_record = _make_skill_file_record(path='src/hello.py')
+
+    stored_content = {}
+
+    async def _capture_update(file_id, data, db=None):
+        stored_content['content'] = data.get('content')
+        return py_file
+
+    monkeypatch.setattr(skill_files_router_module.Skills, 'get_skill_by_id', AsyncMock(return_value=skill))
+    monkeypatch.setattr(skill_files_router_module.Files, 'get_file_by_id', AsyncMock(return_value=py_file))
+    monkeypatch.setattr(skill_files_router_module.Files, 'update_file_data_by_id', _capture_update)
+    monkeypatch.setattr(skill_files_router_module.SkillFiles, 'path_exists', AsyncMock(return_value=False))
+    monkeypatch.setattr(
+        skill_files_router_module.SkillFiles, 'add_file_to_skill_by_id', AsyncMock(return_value=sf_record)
+    )
+
+    with patch('open_webui.routers.skill_files.asyncio.to_thread', side_effect=_passthrough_to_thread):
+        with patch('open_webui.storage.provider.Storage') as mock_storage:
+            mock_storage.get_file = lambda path: str(tmp_file)
+            app = _make_app()
+            res = TestClient(app).post(
+                '/api/v1/skills/id/skill-1/files', json={'path': 'src/hello.py', 'file_id': 'file-1'}
+            )
+
+    assert res.status_code == 200
+    body = res.json()
+    assert body['path'] == 'src/hello.py'
+
+
+def test_upload_png_binary_file_returns_200(monkeypatch, tmp_path):
+    """v3: a binary .png must be accepted — path-safety passes, no UTF-8 decode required for upload."""
+    png_bytes = b'\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x02\x00\x00\x00\x90wS\xde'
+    tmp_file = tmp_path / 'icon.png'
+    tmp_file.write_bytes(png_bytes)
+
+    skill = _make_skill()
+    png_file = _make_file(content_type='image/png', filename='icon.png')
+    sf_record = _make_skill_file_record(path='assets/icon.png')
+
+    monkeypatch.setattr(skill_files_router_module.Skills, 'get_skill_by_id', AsyncMock(return_value=skill))
+    monkeypatch.setattr(skill_files_router_module.Files, 'get_file_by_id', AsyncMock(return_value=png_file))
+    monkeypatch.setattr(skill_files_router_module.Files, 'update_file_data_by_id', AsyncMock(return_value=png_file))
+    monkeypatch.setattr(skill_files_router_module.SkillFiles, 'path_exists', AsyncMock(return_value=False))
+    monkeypatch.setattr(
+        skill_files_router_module.SkillFiles, 'add_file_to_skill_by_id', AsyncMock(return_value=sf_record)
+    )
+
+    with patch('open_webui.routers.skill_files.asyncio.to_thread', side_effect=_passthrough_to_thread):
+        with patch('open_webui.storage.provider.Storage') as mock_storage:
+            mock_storage.get_file = lambda path: str(tmp_file)
+            app = _make_app()
+            res = TestClient(app).post(
+                '/api/v1/skills/id/skill-1/files', json={'path': 'assets/icon.png', 'file_id': 'file-1'}
+            )
+
+    assert res.status_code == 200
+
+
+# ===========================================================================
+# v3: path-safety still 400s (traversal, depth, length, dupe) - LOAD-BEARING
+# ===========================================================================
+
+
+class TestValidateSkillPathV3:
+    """v3: markdown-extension rule is REMOVED but all other safety rules must still 400."""
+
+    def test_accepts_any_extension(self):
+        """v3: non-md extensions are now valid paths."""
+        skill_files_router_module._validate_skill_path('script.py')
+        skill_files_router_module._validate_skill_path('data/config.json')
+        skill_files_router_module._validate_skill_path('assets/logo.png')
+        skill_files_router_module._validate_skill_path('README.md')
+
+    @pytest.mark.parametrize(
+        'bad_path',
+        [
+            '../escape.py',  # traversal
+            'docs/../secret.json',  # traversal mid-path
+            '/abs/script.py',  # leading slash
+            './script.py',  # '.' segment
+            'docs//script.py',  # empty segment
+            'docs/script.py/',  # trailing slash → empty trailing segment
+            'docs/sp ace.py',  # space not in [A-Za-z0-9._-]
+            'docs/gu?.py',  # illegal char
+            'a/b/c/d/e/f/g/h/i.py',  # depth 9 > 8
+        ],
+    )
+    def test_path_safety_rules_still_400(self, bad_path):
+        """All non-extension safety rules still fire a 400 in v3."""
+        from fastapi import HTTPException
+
+        with pytest.raises(HTTPException) as exc:
+            skill_files_router_module._validate_skill_path(bad_path)
+        assert exc.value.status_code == 400
+
+    def test_depth_8_ok_depth_9_rejected_any_ext(self):
+        """Depth check still works for non-md extensions."""
+        from fastapi import HTTPException
+
+        skill_files_router_module._validate_skill_path('a/b/c/d/e/f/g/h.py')  # depth 8 ok
+        with pytest.raises(HTTPException) as exc:
+            skill_files_router_module._validate_skill_path('a/b/c/d/e/f/g/h/i.py')  # depth 9 -> 400
+        assert exc.value.status_code == 400
+
+    def test_over_length_still_400(self):
+        from fastapi import HTTPException
+
+        long_path = ('a' * 260) + '.py'  # 263 chars > 255 limit
+        with pytest.raises(HTTPException) as exc:
+            skill_files_router_module._validate_skill_path(long_path)
+        assert exc.value.status_code == 400
+
+
+# ===========================================================================
+# v3: GET /id/{id}/files — returns media_type and size
+# ===========================================================================
+
+
+def test_list_files_returns_media_type_and_size(monkeypatch):
+    """v3: each item in the list must include media_type and size from the backing File.
+
+    search_files_by_id populates media_type/size from the backing File.meta;
+    the router returns the result directly. The mock simulates this populated response.
+    """
+    skill = _make_skill()
+    list_response = SimpleNamespace(
+        items=[
+            SimpleNamespace(
+                id='file-1',
+                user_id='user-1',
+                filename='script.py',
+                path='src/script.py',
+                data={},
+                meta={'content_type': 'text/x-python', 'size': 128},
+                hash=None,
+                created_at=1000,
+                updated_at=1000,
+                user=None,
+                added_at=1000,
+                # v3 fields populated by search_files_by_id from backing File.meta
+                media_type='text/x-python',
+                size=128,
+            )
+        ],
+        total=1,
+    )
+
+    monkeypatch.setattr(skill_files_router_module.Skills, 'get_skill_by_id', AsyncMock(return_value=skill))
+    monkeypatch.setattr(
+        skill_files_router_module.SkillFiles, 'search_files_by_id', AsyncMock(return_value=list_response)
+    )
+
+    app = _make_app()
+    res = TestClient(app).get('/api/v1/skills/id/skill-1/files')
+
+    assert res.status_code == 200
+    body = res.json()
+    assert body['total'] == 1
+    item = body['items'][0]
+    assert item['path'] == 'src/script.py'
+    assert item['media_type'] == 'text/x-python'
+    assert item['size'] == 128
+
+
+# ===========================================================================
+# v3: GET /id/{id}/files/content — raw-bytes route
+# ===========================================================================
+
+
+def test_raw_bytes_route_returns_file_content(monkeypatch, tmp_path):
+    """GET /files/content?path=... returns the raw bytes of the backing file."""
+    png_bytes = b'\x89PNG\r\n\x1a\n' + b'\x00' * 16
+    tmp_file = tmp_path / 'icon.png'
+    tmp_file.write_bytes(png_bytes)
+
+    skill = _make_skill()
+    sf_record = _make_skill_file_record(path='assets/icon.png')
+    backing_file = _make_file(content_type='image/png', filename='icon.png')
+
+    monkeypatch.setattr(skill_files_router_module.Skills, 'get_skill_by_id', AsyncMock(return_value=skill))
+    monkeypatch.setattr(skill_files_router_module.SkillFiles, 'get_file_by_path', AsyncMock(return_value=sf_record))
+    monkeypatch.setattr(skill_files_router_module.Files, 'get_file_by_id', AsyncMock(return_value=backing_file))
+
+    with patch('open_webui.routers.skill_files.asyncio.to_thread', side_effect=_passthrough_to_thread):
+        with patch('open_webui.storage.provider.Storage') as mock_storage:
+            mock_storage.get_file = lambda path: str(tmp_file)
+            app = _make_app()
+            res = TestClient(app).get('/api/v1/skills/id/skill-1/files/content?path=assets%2Ficon.png')
+
+    assert res.status_code == 200
+    assert res.content == png_bytes
+
+
+def test_raw_bytes_route_404_on_unknown_path(monkeypatch):
+    """GET /files/content?path=missing.png → 404 when no skill_file row exists."""
+    skill = _make_skill()
+    monkeypatch.setattr(skill_files_router_module.Skills, 'get_skill_by_id', AsyncMock(return_value=skill))
+    monkeypatch.setattr(skill_files_router_module.SkillFiles, 'get_file_by_path', AsyncMock(return_value=None))
+
+    app = _make_app()
+    res = TestClient(app).get('/api/v1/skills/id/skill-1/files/content?path=missing.png')
+    assert res.status_code == 404
+
+
+def test_raw_bytes_route_401_for_no_read_access(monkeypatch):
+    """GET /files/content requires read access; non-owner without grant → 401."""
+    skill = _make_skill(owner_id='other-user')
+    monkeypatch.setattr(skill_files_router_module.Skills, 'get_skill_by_id', AsyncMock(return_value=skill))
+    monkeypatch.setattr(skill_files_router_module.AccessGrants, 'has_access', AsyncMock(return_value=False))
+
+    non_owner = SimpleNamespace(id='user-1', role='user', email='user@example.com', name='U')
+    app = _make_app(user=non_owner)
+    res = TestClient(app).get('/api/v1/skills/id/skill-1/files/content?path=guide.md')
+    assert res.status_code == 401
+
+
+def test_raw_bytes_route_400_on_traversal_path(monkeypatch):
+    """GET /files/content?path=../escape.py → 400 (path-safety check)."""
+    skill = _make_skill()
+    monkeypatch.setattr(skill_files_router_module.Skills, 'get_skill_by_id', AsyncMock(return_value=skill))
+
+    app = _make_app()
+    res = TestClient(app).get('/api/v1/skills/id/skill-1/files/content?path=..%2Fescape.py')
+    assert res.status_code == 400
