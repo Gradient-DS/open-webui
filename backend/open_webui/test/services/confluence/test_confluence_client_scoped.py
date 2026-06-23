@@ -59,6 +59,49 @@ def test_scoped_mode_sends_basic_auth_header_against_gateway():
     assert captured['url'] == 'https://api.atlassian.com/ex/confluence/cloud-9/wiki/api/v2/spaces?limit=1'
 
 
+def test_scoped_mode_pagination_re_prefixes_gateway_next_link():
+    """v2 ``_links.next`` is site-relative (``/wiki/api/v2/...``); in the gateway
+    modes (oauth/scoped) it must be re-prefixed with ``/ex/confluence/{cloudId}``.
+
+    Regression: resolving it against the bare ``api.atlassian.com`` host dropped
+    the gateway route, so page 2+ of any space with >1 page 404'd and aborted the
+    whole sync at 0 files (max.soev.ai, 2026-06-23).
+    """
+    urls: list = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        urls.append(str(request.url))
+        if 'cursor' in request.url.params:
+            return httpx.Response(200, json={'results': [{'id': '2'}], '_links': {}})
+        return httpx.Response(
+            200,
+            json={
+                'results': [{'id': '1'}],
+                '_links': {'next': '/wiki/api/v2/spaces/77/pages?limit=100&cursor=abc'},
+            },
+        )
+
+    client = ConfluenceClient(
+        auth_mode='scoped',
+        cloud_id='cloud-9',
+        basic_username='svc@acme.com',
+        basic_api_token='s3cr3t',
+    )
+    client._client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+
+    async def _run():
+        pages = await client.list_all_pages_in_space('77')
+        await client.close()
+        return pages
+
+    pages = asyncio.run(_run())
+
+    assert [p['id'] for p in pages] == ['1', '2']
+    assert urls[1] == (
+        'https://api.atlassian.com/ex/confluence/cloud-9/wiki/api/v2/spaces/77/pages?limit=100&cursor=abc'
+    )
+
+
 def test_scoped_mode_401_is_terminal_no_refresh():
     """A scoped token cannot refresh — a 401 must not trigger a refresh retry."""
     calls = {'count': 0}

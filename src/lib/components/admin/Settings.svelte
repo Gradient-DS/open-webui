@@ -170,7 +170,15 @@
 			id: 'cloud-sync',
 			title: 'Cloud Sync',
 			route: '/admin/settings/cloud-sync',
-			keywords: ['cloud', 'sync', 'confluence', 'onedrive', 'google drive', 'topdesk', 'integration']
+			keywords: [
+				'cloud',
+				'sync',
+				'confluence',
+				'onedrive',
+				'google drive',
+				'topdesk',
+				'integration'
+			]
 		},
 		{
 			id: 'web',
