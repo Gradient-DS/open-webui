@@ -344,3 +344,117 @@ class TestSearchFilesById:
         response = await SkillFiles.search_files_by_id('skill-empty', 'user-1', {})
         assert response.total == 0
         assert response.items == []
+
+
+async def _insert_file_with_meta(
+    Session,
+    *,
+    filename: str = 'test.md',
+    storage_path: str | None = None,
+    meta: dict | None = None,
+) -> str:
+    """Insert a File row with an explicit meta dict; returns its id."""
+    fid = str(uuid.uuid4())
+    now = int(time.time())
+    async with Session() as s:
+        row = File(
+            id=fid,
+            user_id='user-1',
+            filename=filename,
+            path=storage_path or f'uploads/{fid}',
+            data=None,
+            meta=meta,
+            created_at=now,
+            updated_at=now,
+        )
+        s.add(row)
+        await s.commit()
+    return fid
+
+
+class TestSearchFilesByIdMediaTypeDerivation:
+    """Direct model-level coverage of the media_type/size fallback chain in
+    search_files_by_id.
+
+    Derivation order (from skill_files.py):
+      1. File.meta['content_type']  — highest priority
+      2. mimetypes.guess_type(virtual_path)  — extension fallback
+      3. 'application/octet-stream'  — last resort
+    """
+
+    @pytest.mark.asyncio
+    async def test_meta_content_type_wins(self, db_session):
+        """When File.meta has content_type set, media_type equals it and size
+        equals File.meta['size']."""
+        skill_id = 'skill-mt-1'
+        fid = await _insert_file_with_meta(
+            db_session,
+            filename='script.py',
+            meta={'content_type': 'text/x-python', 'size': 1234},
+        )
+        await SkillFiles.add_file_to_skill_by_id(skill_id, fid, 'script.py', 'user-1')
+
+        response = await SkillFiles.search_files_by_id(skill_id, 'user-1', {})
+
+        assert response.total == 1
+        item = response.items[0]
+        assert item.media_type == 'text/x-python'
+        assert item.size == 1234
+
+    @pytest.mark.asyncio
+    async def test_extension_fallback_when_no_content_type(self, db_session):
+        """When File.meta has NO content_type, media_type falls back to
+        mimetypes.guess_type of the virtual path (the SkillFile.path, not the
+        storage path).  Two known extensions are exercised."""
+        import mimetypes
+
+        skill_id = 'skill-mt-2'
+
+        fid_csv = await _insert_file_with_meta(
+            db_session,
+            filename='data.csv',
+            meta={'size': 500},  # no content_type key
+        )
+        fid_md = await _insert_file_with_meta(
+            db_session,
+            filename='notes.md',
+            meta={},  # empty meta — no content_type
+        )
+        await SkillFiles.add_file_to_skill_by_id(skill_id, fid_csv, 'data.csv', 'user-1')
+        await SkillFiles.add_file_to_skill_by_id(skill_id, fid_md, 'notes.md', 'user-1')
+
+        response = await SkillFiles.search_files_by_id(skill_id, 'user-1', {})
+
+        assert response.total == 2
+        by_path = {item.path: item for item in response.items}
+
+        csv_item = by_path['data.csv']
+        expected_csv, _ = mimetypes.guess_type('data.csv')
+        assert expected_csv is not None, 'test pre-condition: mimetypes must know .csv'
+        assert csv_item.media_type == expected_csv
+
+        md_item = by_path['notes.md']
+        expected_md, _ = mimetypes.guess_type('notes.md')
+        assert expected_md is not None, 'test pre-condition: mimetypes must know .md'
+        assert md_item.media_type == expected_md
+
+    @pytest.mark.asyncio
+    async def test_octet_stream_fallback_for_unknown_extension(self, db_session):
+        """When File.meta has no content_type AND the virtual path has no
+        recognisable extension, media_type falls back to
+        'application/octet-stream'."""
+        skill_id = 'skill-mt-3'
+        fid = await _insert_file_with_meta(
+            db_session,
+            filename='binaryblob',
+            meta=None,  # no meta at all
+        )
+        await SkillFiles.add_file_to_skill_by_id(skill_id, fid, 'binaryblob', 'user-1')
+
+        response = await SkillFiles.search_files_by_id(skill_id, 'user-1', {})
+
+        assert response.total == 1
+        item = response.items[0]
+        assert item.media_type == 'application/octet-stream'
+        # size should be None when not set in meta
+        assert item.size is None
