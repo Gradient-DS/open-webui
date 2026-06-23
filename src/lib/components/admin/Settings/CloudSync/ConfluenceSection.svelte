@@ -339,18 +339,26 @@
 
 	// Opens the Atlassian OAuth popup so the signed-in admin connects their own
 	// Confluence account — that token is what the pre-synced shared KB will sync
-	// with. Ownership is intrinsic to the KB row (set at provision time to
-	// whoever clicks Provision), so this handler does not need to persist any
-	// config; ``owner_connected`` resolves against the calling admin
-	// (pre-provision) or ``kb.user_id`` (post-provision) server-side.
+	// with. Ownership is intrinsic to the KB row (set at provision time to whoever
+	// clicks Provision), so ownership needs no persisting here. But /auth/initiate
+	// builds the authorization URL from the stored OAuth client credentials, so we
+	// must flush the form first: under debounced autosave a just-entered client
+	// ID/secret may not have been written yet. The popup is opened synchronously
+	// to a blank page (a window.open after an await loses the user gesture and is
+	// blocked), then navigated to /auth/initiate once the save lands.
 	const connectConfluenceAccount = () => {
 		connectingAccount = true;
 
 		const popup = window.open(
-			`${WEBUI_API_BASE_URL}/confluence/auth/initiate`,
+			'about:blank',
 			'confluence_auth',
 			'width=600,height=700,scrollbars=yes'
 		);
+		if (!popup) {
+			connectingAccount = false;
+			toast.error($i18n.t('Please allow popups to connect Confluence.'));
+			return;
+		}
 
 		const handleMessage = (event: MessageEvent) => {
 			if (event.data?.type !== 'confluence_auth_callback') return;
@@ -367,7 +375,7 @@
 		// owner), so always re-fetch it when the popup closes — the postMessage
 		// above only drives the toast and can be missed on an origin mismatch.
 		const checkClosed = setInterval(async () => {
-			if (!popup?.closed) return;
+			if (!popup.closed) return;
 			clearInterval(checkClosed);
 			window.removeEventListener('message', handleMessage);
 			connectingAccount = false;
@@ -377,6 +385,23 @@
 				console.error(err);
 			}
 		}, 500);
+
+		// Flush the form so the OAuth client credentials are persisted, then point
+		// the already-open popup at the initiate endpoint. On a persist failure
+		// (e.g. a blocked auth-mode switch) close the popup and surface the error.
+		(async () => {
+			try {
+				await persist();
+			} catch (err) {
+				clearInterval(checkClosed);
+				window.removeEventListener('message', handleMessage);
+				connectingAccount = false;
+				popup.close();
+				toast.error(`${err}`);
+				return;
+			}
+			popup.location.href = `${WEBUI_API_BASE_URL}/confluence/auth/initiate`;
+		})();
 	};
 </script>
 
@@ -510,9 +535,7 @@
 							placeholder=""
 						/>
 						<div class="mt-1 text-xs text-gray-500">
-							{$i18n.t(
-								'Auto-detected from the site URL; set it manually only if detection fails.'
-							)}
+							{$i18n.t('Auto-detected from the site URL; set it manually only if detection fails.')}
 						</div>
 					</div>
 
