@@ -348,7 +348,7 @@
 				selectedFileContent = full?.data?.content || '';
 				selectedFile = { ...file, data: { ...(file.data || {}), content: selectedFileContent } };
 			}
-		} catch (e) {
+		} catch {
 			toast.error($i18n.t('Failed to load file content.'));
 		}
 	};

@@ -33,6 +33,7 @@ from open_webui.models.files import File
 from open_webui.models.knowledge import (
     Knowledge,
     KnowledgeFile,
+    KnowledgeFileListResponse,
     Knowledges,
 )
 from open_webui.models.users import User
@@ -336,3 +337,61 @@ async def test_metadata_mode_exposes_error_field(db_session):
     item_dict = result.items[0].model_dump()
     assert item_dict.get('status') == 'error'
     assert item_dict.get('error') == 'parse failed: unsupported format'
+
+
+def test_knowledge_file_list_response_union_serialization():
+    """Pin union-resolution behavior of KnowledgeFileListResponse.
+
+    FastAPI re-validates the response through the response_model, which must
+    pick the correct union member (FileUserMetadataResponse, not FileUserResponse)
+    when the item carries ``status`` but no ``data``.
+
+    Asserts:
+    - The serialized item has NO ``data`` key.
+    - ``status`` is preserved ('completed').
+    - ``error`` is preserved when present.
+
+    This test exercises the worst-case path: model_validate from a plain dict
+    forces Pydantic to discriminate the union from raw data, the same way
+    FastAPI's response_model re-validation does.
+    """
+    import time
+
+    now = int(time.time())
+
+    raw = {
+        'items': [
+            {
+                'id': 'file-abc-123',
+                'user_id': 'user-1',
+                'hash': 'deadbeef',
+                'filename': 'report.pdf',
+                'meta': {'name': 'report.pdf', 'content_type': 'application/pdf', 'size': 2048},
+                'status': 'completed',
+                'error': None,
+                'created_at': now,
+                'updated_at': now,
+                'user': None,
+                'added_at': now,
+            }
+        ],
+        'total': 1,
+    }
+
+    response = KnowledgeFileListResponse.model_validate(raw)
+    assert response.total == 1
+
+    item = response.items[0]
+    item_dict = item.model_dump()
+
+    # Must not have a ``data`` key — that would indicate FileUserResponse was
+    # selected instead of FileUserMetadataResponse, which would leak content in
+    # production responses and break the metadata-only contract.
+    assert 'data' not in item_dict, (
+        f"Union resolved to FileUserResponse (has 'data'); expected FileUserMetadataResponse. "
+        f'item_dict keys: {list(item_dict.keys())}'
+    )
+
+    # Status and error must survive the round-trip.
+    assert item_dict.get('status') == 'completed'
+    assert item_dict.get('error') is None
