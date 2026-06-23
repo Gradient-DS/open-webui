@@ -206,7 +206,8 @@ export const searchKnowledgeFilesById = async (
 	orderBy?: string | null = null,
 	direction?: string | null = null,
 	page: number = 1,
-	limit?: number | null = null
+	limit?: number | null = null,
+	metadataOnly: boolean = false
 ) => {
 	let error = null;
 
@@ -217,6 +218,7 @@ export const searchKnowledgeFilesById = async (
 	if (direction) searchParams.append('direction', direction);
 	searchParams.append('page', page.toString());
 	if (limit) searchParams.append('limit', limit.toString());
+	if (metadataOnly) searchParams.append('metadata_only', 'true');
 
 	const res = await fetch(
 		`${WEBUI_API_BASE_URL}/knowledge/${id}/files?${searchParams.toString()}`,
