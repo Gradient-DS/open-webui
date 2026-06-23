@@ -1,6 +1,8 @@
 <script lang="ts">
 	import dayjs from '$lib/dayjs';
 	import { getContext } from 'svelte';
+	import type { Writable } from 'svelte/store';
+	import type { i18n as i18nType } from 'i18next';
 	import { slide } from 'svelte/transition';
 	import { quintOut } from 'svelte/easing';
 
@@ -20,12 +22,13 @@
 	import Pencil from '$lib/components/icons/Pencil.svelte';
 	import GarbageBin from '$lib/components/icons/GarbageBin.svelte';
 
-	const i18n = getContext('i18n');
+	const i18n = getContext<Writable<i18nType>>('i18n');
 
 	export let node: SkillTreeNode;
 	export let expandedKey: string;
 	export let expandedSources: Record<string, boolean>;
 	export let disabled = false;
+	export let activePath = ''; // currently-selected file path (for highlight)
 
 	// Action callbacks (path here is the folder prefix the action targets, '' = root)
 	export let onOpenFile: (file: { path: string }) => void;
@@ -151,6 +154,7 @@
 					{expandedKey}
 					bind:expandedSources
 					{disabled}
+					{activePath}
 					{onOpenFile}
 					{onNewFile}
 					{onNewFolder}
@@ -171,7 +175,10 @@
 
 			{#each node.files as file (file.path)}
 				<div
-					class="group flex items-center w-full px-1.5 py-0.5 hover:bg-gray-50 dark:hover:bg-gray-850/50 rounded-xl transition"
+					class="group flex items-center w-full px-1.5 py-0.5 rounded-xl transition {activePath ===
+					file.path
+						? 'bg-gray-100 dark:bg-gray-850'
+						: 'hover:bg-gray-50 dark:hover:bg-gray-850/50'}"
 				>
 					<button
 						class="flex items-center gap-1.5 flex-1 p-1.5 text-left text-gray-500 min-w-0"

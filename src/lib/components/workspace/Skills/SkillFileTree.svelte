@@ -1,10 +1,13 @@
 <script lang="ts">
-	import { getContext, onMount, tick } from 'svelte';
+	import { getContext, onMount, onDestroy, tick } from 'svelte';
+	import type { Writable } from 'svelte/store';
+	import type { i18n as i18nType } from 'i18next';
 	import { toast } from 'svelte-sonner';
 
 	import { uploadFile } from '$lib/apis/files';
 	import {
 		getSkillFileList,
+		getSkillFileContentBlob,
 		createSkillFile,
 		createSkillFileInline,
 		updateSkillFileContent,
@@ -12,15 +15,15 @@
 		removeSkillFilePath
 	} from '$lib/apis/skills';
 
+	import { formatFileSize } from '$lib/utils';
 	import {
 		buildTree,
-		isMarkdownPath,
-		filterMarkdownFiles,
+		isTextPath,
+		languageForPath,
 		type SkillFileItem,
 		type SkillTreeNode
 	} from './utils';
 
-	import Modal from '$lib/components/common/Modal.svelte';
 	import ConfirmDialog from '$lib/components/common/ConfirmDialog.svelte';
 	import CodeEditor from '$lib/components/common/CodeEditor.svelte';
 	import Spinner from '$lib/components/common/Spinner.svelte';
@@ -28,11 +31,13 @@
 	import PagePlus from '$lib/components/icons/PagePlus.svelte';
 	import NewFolderAlt from '$lib/components/icons/NewFolderAlt.svelte';
 	import ArrowUpTray from '$lib/components/icons/ArrowUpTray.svelte';
+	import ArrowDownTray from '$lib/components/icons/ArrowDownTray.svelte';
+	import DocumentPage from '$lib/components/icons/DocumentPage.svelte';
 
 	export let skillId: string;
 	export let disabled = false;
 
-	const i18n = getContext('i18n');
+	const i18n = getContext<Writable<i18nType>>('i18n');
 
 	let fileItems: SkillFileItem[] = [];
 	let pendingFolders: string[] = [];
@@ -90,20 +95,145 @@
 			console.error('Failed to load skill files:', e);
 		}
 		loading = false;
+		// Keep the right pane consistent with whatever the server now reports.
+		await syncActivePane();
 	};
 
-	// ===== upload (button / menu / drop) =====
-	const uploadFilesToFolder = async (files: File[], folderPrefix: string) => {
-		const { kept, skipped } = filterMarkdownFiles(files);
-		if (skipped > 0) {
-			toast.error(
-				$i18n.t('{{count}} files skipped — only markdown is supported.', { count: skipped })
-			);
+	// ===== active file (right pane) =====
+	// `activeKind`: 'text' (CodeEditor) | 'image' | 'binary' | '' (no selection)
+	let activePath = '';
+	let activeName = '';
+	let activeKind: 'text' | 'image' | 'binary' | '' = '';
+	let activeMediaType = '';
+	let activeSize: number | undefined;
+	let activeContent = ''; // text editor buffer
+	let activeImageUrl = ''; // object URL for image preview
+	let paneLoading = false;
+	let saving = false;
+
+	const revokeImageUrl = () => {
+		if (activeImageUrl) {
+			URL.revokeObjectURL(activeImageUrl);
+			activeImageUrl = '';
 		}
-		if (kept.length === 0) return;
+	};
+
+	const itemFor = (path: string): SkillFileItem | undefined =>
+		fileItems.find((f) => f.path === path);
+
+	const mediaTypeFor = (item: SkillFileItem | undefined): string =>
+		(item?.media_type as string) ?? (item?.meta?.content_type as string) ?? '';
+
+	const sizeFor = (item: SkillFileItem | undefined): number | undefined =>
+		(item?.size as number) ?? (item?.meta?.size as number) ?? undefined;
+
+	// Re-derive the right pane after a list refresh: keep selection if the file
+	// still exists, otherwise clear it.
+	const syncActivePane = async () => {
+		if (!activePath) return;
+		const item = itemFor(activePath);
+		if (!item) {
+			clearActive();
+			return;
+		}
+		// A text file's buffer follows the server only when the user has no
+		// pending in-editor change against it; for simplicity we leave the
+		// editor buffer alone (the user may be mid-edit) and only refresh
+		// non-text panes' metadata.
+		activeMediaType = mediaTypeFor(item);
+		activeSize = sizeFor(item);
+	};
+
+	const clearActive = () => {
+		revokeImageUrl();
+		activePath = '';
+		activeName = '';
+		activeKind = '';
+		activeMediaType = '';
+		activeSize = undefined;
+		activeContent = '';
+	};
+
+	const selectFile = async (file: { path: string }) => {
+		const item = itemFor(file.path);
+		if (!item) return;
+
+		revokeImageUrl();
+		activePath = file.path;
+		activeName = file.path.split('/').pop() ?? file.path;
+		activeMediaType = mediaTypeFor(item);
+		activeSize = sizeFor(item);
+
+		if (isTextPath(file.path)) {
+			activeKind = 'text';
+			activeContent = (item.data?.content as string) ?? '';
+			return;
+		}
+
+		if (activeMediaType.startsWith('image/')) {
+			activeKind = 'image';
+			activeContent = '';
+			paneLoading = true;
+			try {
+				const blob = await getSkillFileContentBlob(localStorage.token, skillId, file.path);
+				// Guard against a race: a newer selection may have superseded this one.
+				if (activePath === file.path) {
+					activeImageUrl = URL.createObjectURL(blob);
+				}
+			} catch (e) {
+				toast.error(`${e}`);
+			}
+			paneLoading = false;
+			return;
+		}
+
+		activeKind = 'binary';
+		activeContent = '';
+	};
+
+	const saveActiveFile = async () => {
+		if (activeKind !== 'text' || !activePath) return;
+		saving = true;
+		try {
+			await updateSkillFileContent(localStorage.token, skillId, {
+				path: activePath,
+				content: activeContent
+			});
+			toast.success($i18n.t('Saved'));
+			await refreshFileList();
+		} catch (e) {
+			toast.error(`${e}`);
+		}
+		saving = false;
+	};
+
+	const triggerSaveContent = (blob: Blob, filename: string) => {
+		const url = URL.createObjectURL(blob);
+		const a = document.createElement('a');
+		a.href = url;
+		a.download = filename;
+		document.body.appendChild(a);
+		a.click();
+		a.remove();
+		URL.revokeObjectURL(url);
+	};
+
+	const downloadActiveFile = async () => {
+		if (!activePath) return;
+		try {
+			const blob = await getSkillFileContentBlob(localStorage.token, skillId, activePath);
+			triggerSaveContent(blob, activeName);
+		} catch (e) {
+			toast.error(`${e}`);
+		}
+	};
+
+	// ===== upload (button / menu / drop / replace) =====
+	const uploadFilesToFolder = async (files: File[], folderPrefix: string) => {
+		if (files.length === 0) return;
 
 		uploading = true;
-		for (const file of kept) {
+		for (const file of files) {
 			try {
 				const uploaded = await uploadFile(localStorage.token, file, null, false);
 				if (!uploaded) {
@@ -131,38 +261,63 @@
 		uploadInput?.click();
 	};
 
-	// ===== new file (name + CodeEditor in one modal) =====
+	// Replace the active file in place (re-upload to the same path).
+	let replaceInput: HTMLInputElement;
+	const triggerReplace = () => {
+		if (!activePath) return;
+		replaceInput?.click();
+	};
+
+	const replaceActiveFile = async (file: File) => {
+		if (!activePath) return;
+		uploading = true;
+		try {
+			const uploaded = await uploadFile(localStorage.token, file, null, false);
+			if (!uploaded) {
+				toast.error($i18n.t('Failed to upload file.'));
+			} else {
+				await createSkillFile(localStorage.token, skillId, {
+					path: activePath,
+					file_id: uploaded.id
+				});
+				toast.success($i18n.t('Saved'));
+			}
+		} catch (e) {
+			toast.error(`${e}`);
+		}
+		uploading = false;
+		// Refresh and re-render the pane (metadata + any new image bytes).
+		await refreshFileList();
+		const reselect = activePath;
+		clearActive();
+		await selectFile({ path: reselect });
+	};
+
+	// ===== new file (name prompt -> create empty -> edit in right pane) =====
 	let showNewFileModal = false;
 	let newFileFolder = '';
 	let newFileName = '';
-	let newFileContent = '';
 
 	const openNewFile = (folderPrefix: string) => {
 		newFileFolder = folderPrefix;
 		newFileName = '';
-		newFileContent = '';
 		showNewFileModal = true;
 	};
 
-	const saveNewFile = async () => {
-		const name = newFileName.trim();
-		// An empty name fails the markdown check, surfacing the same clear message.
-		if (!isMarkdownPath(name)) {
-			toast.error($i18n.t('Only markdown files are supported.'));
+	const createNewFile = async (inputName?: string) => {
+		const name = (inputName ?? newFileName).trim();
+		if (!name) {
+			toast.error($i18n.t('File name cannot be empty.'));
 			return;
 		}
-		if (!newFileContent) {
-			toast.error($i18n.t('Edit content must not be empty.'));
-			return;
-		}
+		const path = joinPath(newFileFolder, name);
 		try {
-			await createSkillFileInline(localStorage.token, skillId, {
-				path: joinPath(newFileFolder, name),
-				content: newFileContent
-			});
-			showNewFileModal = false;
+			await createSkillFileInline(localStorage.token, skillId, { path, content: '' });
 			pendingFolders = pendingFolders.filter((p) => p !== newFileFolder);
 			await refreshFileList();
+			// Open the freshly created file for editing in the right pane.
+			clearActive();
+			await selectFile({ path });
 		} catch (e) {
 			toast.error(`${e}`);
 		}
@@ -197,37 +352,6 @@
 		}
 	};
 
-	// ===== inline edit (open existing file in CodeEditor) =====
-	let showEditModal = false;
-	let editPath = '';
-	let editName = '';
-	let editContent = '';
-
-	const openFile = async (file: { path: string }) => {
-		const item = fileItems.find((f) => f.path === file.path);
-		editPath = file.path;
-		editName = file.path.split('/').pop() ?? file.path;
-		editContent = item?.data?.content ?? '';
-		showEditModal = true;
-	};
-
-	const saveEditedFile = async () => {
-		if (!editContent) {
-			toast.error($i18n.t('Edit content must not be empty.'));
-			return;
-		}
-		try {
-			await updateSkillFileContent(localStorage.token, skillId, {
-				path: editPath,
-				content: editContent
-			});
-			showEditModal = false;
-			await refreshFileList();
-		} catch (e) {
-			toast.error(`${e}`);
-		}
-	};
-
 	// ===== rename / move (file or folder) =====
 	let showRenameModal = false;
 	let renameIsFolder = false;
@@ -256,11 +380,6 @@
 		const toPath = joinPath(parent, value);
 		if (toPath === renameFrom) return;
 
-		if (!renameIsFolder && !isMarkdownPath(value)) {
-			toast.error($i18n.t('Only markdown files are supported.'));
-			return;
-		}
-
 		// A pending (not-yet-persisted) folder is renamed purely client-side.
 		if (renameIsFolder && pendingFolders.includes(renameFrom)) {
 			pendingFolders = pendingFolders.map((p) => (p === renameFrom ? toPath : p));
@@ -269,7 +388,14 @@
 
 		try {
 			await moveSkillFile(localStorage.token, skillId, { from_path: renameFrom, to_path: toPath });
-			await refreshFileList();
+			// Follow the rename in the right pane when the active file moved.
+			if (!renameIsFolder && activePath === renameFrom) {
+				clearActive();
+				await refreshFileList();
+				await selectFile({ path: toPath });
+			} else {
+				await refreshFileList();
+			}
 		} catch (e) {
 			toast.error(`${e}`);
 		}
@@ -301,10 +427,16 @@
 			pendingFolders = pendingFolders.filter((p) => p !== deletePath);
 			return;
 		}
+		// If the active file is being removed, clear the right pane.
+		const removingActive =
+			activePath === deletePath || (deleteIsFolder && activePath.startsWith(`${deletePath}/`));
 		try {
 			// The backend cascade-deletes the backing File(s); no separate
 			// deleteFileById call is needed (and it would 404 on a removed file).
 			await removeSkillFilePath(localStorage.token, skillId, deletePath);
+			if (removingActive) {
+				clearActive();
+			}
 			await refreshFileList();
 		} catch (e) {
 			toast.error(`${e}`);
@@ -353,12 +485,15 @@
 		loadExpanded();
 		refreshFileList();
 	});
+
+	onDestroy(() => {
+		revokeImageUrl();
+	});
 </script>
 
 <input
 	bind:this={uploadInput}
 	type="file"
-	accept=".md,.markdown"
 	multiple
 	hidden
 	on:change={async (e) => {
@@ -370,80 +505,29 @@
 	}}
 />
 
-<!-- New file modal: name + content -->
-<Modal bind:show={showNewFileModal} size="lg">
-	<div class="px-5 py-4 flex flex-col h-[70vh]">
-		<div class="text-lg font-medium dark:text-gray-200 mb-2">{$i18n.t('New file')}</div>
-		<input
-			class="w-full mb-2 rounded-lg px-3 py-2 text-sm bg-gray-50 dark:bg-gray-900 outline-hidden"
-			type="text"
-			placeholder={$i18n.t('File name (.md)')}
-			aria-label={$i18n.t('File name (.md)')}
-			bind:value={newFileName}
-		/>
-		<div
-			class="flex-1 min-h-0 overflow-hidden rounded-lg border border-gray-100 dark:border-gray-850"
-		>
-			{#if showNewFileModal}
-				<CodeEditor
-					id={`skill-new-file-${skillId}`}
-					lang="markdown"
-					value={newFileContent}
-					onChange={(e?: string) => {
-						newFileContent = e ?? '';
-					}}
-					onSave={saveNewFile}
-				/>
-			{/if}
-		</div>
-		<div class="mt-3 flex justify-end gap-2">
-			<button
-				class="px-3.5 py-1.5 text-sm font-medium bg-gray-100 hover:bg-gray-200 dark:bg-gray-850 dark:hover:bg-gray-800 rounded-full transition"
-				type="button"
-				on:click={() => (showNewFileModal = false)}>{$i18n.t('Cancel')}</button
-			>
-			<button
-				class="px-3.5 py-1.5 text-sm font-medium bg-black hover:bg-gray-900 text-white dark:bg-white dark:text-black dark:hover:bg-gray-100 rounded-full transition"
-				type="button"
-				on:click={saveNewFile}>{$i18n.t('Save file')}</button
-			>
-		</div>
-	</div>
-</Modal>
+<input
+	bind:this={replaceInput}
+	type="file"
+	hidden
+	on:change={async (e) => {
+		const target = e.target as HTMLInputElement;
+		if (target.files && target.files.length > 0) {
+			await replaceActiveFile(target.files[0]);
+			target.value = '';
+		}
+	}}
+/>
 
-<!-- Inline edit modal -->
-<Modal bind:show={showEditModal} size="lg">
-	<div class="px-5 py-4 flex flex-col h-[70vh]">
-		<div class="text-lg font-medium dark:text-gray-200 mb-2 line-clamp-1">{editName}</div>
-		<div
-			class="flex-1 min-h-0 overflow-hidden rounded-lg border border-gray-100 dark:border-gray-850"
-		>
-			{#if showEditModal}
-				<CodeEditor
-					id={`skill-edit-file-${skillId}`}
-					lang="markdown"
-					value={editContent}
-					onChange={(e?: string) => {
-						editContent = e ?? '';
-					}}
-					onSave={saveEditedFile}
-				/>
-			{/if}
-		</div>
-		<div class="mt-3 flex justify-end gap-2">
-			<button
-				class="px-3.5 py-1.5 text-sm font-medium bg-gray-100 hover:bg-gray-200 dark:bg-gray-850 dark:hover:bg-gray-800 rounded-full transition"
-				type="button"
-				on:click={() => (showEditModal = false)}>{$i18n.t('Cancel')}</button
-			>
-			<button
-				class="px-3.5 py-1.5 text-sm font-medium bg-black hover:bg-gray-900 text-white dark:bg-white dark:text-black dark:hover:bg-gray-100 rounded-full transition"
-				type="button"
-				on:click={saveEditedFile}>{$i18n.t('Save file')}</button
-			>
-		</div>
-	</div>
-</Modal>
+<!-- New file name prompt -->
+<ConfirmDialog
+	bind:show={showNewFileModal}
+	title={$i18n.t('New file')}
+	confirmLabel={$i18n.t('New file')}
+	input={true}
+	inputPlaceholder={$i18n.t('File name')}
+	inputValue={newFileName}
+	on:confirm={(e) => createNewFile(e.detail)}
+/>
 
 <!-- New folder name prompt -->
 <ConfirmDialog
@@ -462,7 +546,7 @@
 	title={$i18n.t('Rename')}
 	confirmLabel={$i18n.t('Rename')}
 	input={true}
-	inputPlaceholder={renameIsFolder ? $i18n.t('Folder name') : $i18n.t('File name (.md)')}
+	inputPlaceholder={renameIsFolder ? $i18n.t('Folder name') : $i18n.t('File name')}
 	inputValue={renameValue}
 	on:confirm={(e) => confirmRename(e.detail)}
 />
@@ -517,39 +601,140 @@
 		{/if}
 	</div>
 
+	<!-- Vertical split: tree (left) | active-file pane (right) -->
 	<div
-		class="rounded-xl border transition {dragged
+		class="flex gap-2 rounded-xl border transition {dragged
 			? 'border-gray-300 dark:border-gray-600 bg-gray-50/50 dark:bg-gray-900/50'
-			: 'border-gray-100/50 dark:border-gray-850/50'} p-1.5 min-h-[3rem]"
-		role="group"
-		on:dragover={onDragOver}
-		on:dragleave={onDragLeave}
-		on:drop={onDrop}
+			: 'border-gray-100/50 dark:border-gray-850/50'} h-[28rem]"
 	>
-		{#if loading}
-			<div class="flex items-center justify-center py-3">
-				<Spinner className="size-4" />
-			</div>
-		{:else if tree.children.length === 0 && tree.files.length === 0}
-			<div class="px-2 py-3 text-xs text-gray-400 dark:text-gray-500 italic">
-				{$i18n.t('No reference files attached.')}
-			</div>
-		{:else}
-			<SkillFileTreeNode
-				node={tree}
-				{expandedKey}
-				bind:expandedSources
-				{disabled}
-				onOpenFile={openFile}
-				onNewFile={openNewFile}
-				onNewFolder={openNewFolder}
-				onUpload={triggerUpload}
-				onRenameFile={openRenameFile}
-				onDeleteFile={openDeleteFile}
-				onRenameFolder={openRenameFolder}
-				onDeleteFolder={openDeleteFolder}
-				bind:dragOverPrefix
-			/>
-		{/if}
+		<!-- LEFT: folder tree -->
+		<div
+			class="w-2/5 min-w-[12rem] overflow-y-auto p-1.5 border-e border-gray-100/50 dark:border-gray-850/50"
+			role="group"
+			on:dragover={onDragOver}
+			on:dragleave={onDragLeave}
+			on:drop={onDrop}
+		>
+			{#if loading}
+				<div class="flex items-center justify-center py-3">
+					<Spinner className="size-4" />
+				</div>
+			{:else if tree.children.length === 0 && tree.files.length === 0}
+				<div class="px-2 py-3 text-xs text-gray-400 dark:text-gray-500 italic">
+					{$i18n.t('No reference files attached.')}
+				</div>
+			{:else}
+				<SkillFileTreeNode
+					node={tree}
+					{expandedKey}
+					bind:expandedSources
+					{disabled}
+					activePath={activePath}
+					onOpenFile={selectFile}
+					onNewFile={openNewFile}
+					onNewFolder={openNewFolder}
+					onUpload={triggerUpload}
+					onRenameFile={openRenameFile}
+					onDeleteFile={openDeleteFile}
+					onRenameFolder={openRenameFolder}
+					onDeleteFolder={openDeleteFolder}
+					bind:dragOverPrefix
+				/>
+			{/if}
+		</div>
+
+		<!-- RIGHT: active-file pane -->
+		<div class="flex-1 min-w-0 flex flex-col">
+			{#if activeKind === ''}
+				<div class="flex-1 flex items-center justify-center text-xs text-gray-400 dark:text-gray-500 italic">
+					{$i18n.t('Select a file to edit')}
+				</div>
+			{:else}
+				<!-- Pane header -->
+				<div class="flex items-center justify-between gap-2 px-2 py-1.5 border-b border-gray-100/50 dark:border-gray-850/50">
+					<div class="flex items-center gap-1.5 min-w-0 text-gray-600 dark:text-gray-300">
+						<DocumentPage className="size-3.5 shrink-0" />
+						<span class="line-clamp-1 text-xs font-medium">{activeName}</span>
+					</div>
+					<div class="flex items-center gap-1 shrink-0">
+						{#if activeKind === 'text' && !disabled}
+							<button
+								type="button"
+								class="px-2.5 py-1 text-xs font-medium bg-black hover:bg-gray-900 text-white dark:bg-white dark:text-black dark:hover:bg-gray-100 rounded-full transition flex items-center gap-1"
+								on:click={saveActiveFile}
+								disabled={saving}
+							>
+								{#if saving}
+									<Spinner className="size-3" />
+								{/if}
+								{$i18n.t('Save')}
+							</button>
+						{/if}
+						<button
+							type="button"
+							class="px-2.5 py-1 text-xs font-medium bg-gray-100 hover:bg-gray-200 dark:bg-gray-800 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-300 rounded-full transition flex items-center gap-1"
+							on:click={downloadActiveFile}
+						>
+							<ArrowDownTray className="size-3" />
+							{$i18n.t('Download')}
+						</button>
+						{#if activeKind !== 'text' && !disabled}
+							<button
+								type="button"
+								class="px-2.5 py-1 text-xs font-medium bg-gray-100 hover:bg-gray-200 dark:bg-gray-800 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-300 rounded-full transition flex items-center gap-1"
+								on:click={triggerReplace}
+								disabled={uploading}
+							>
+								{#if uploading}
+									<Spinner className="size-3" />
+								{:else}
+									<ArrowUpTray className="size-3" />
+								{/if}
+								{$i18n.t('Replace file')}
+							</button>
+						{/if}
+					</div>
+				</div>
+
+				<!-- Pane body -->
+				<div class="flex-1 min-h-0 overflow-hidden">
+					{#if activeKind === 'text'}
+						{#key activePath}
+							<CodeEditor
+								id={`skill-file-${skillId}`}
+								lang={languageForPath(activePath)}
+								value={activeContent}
+								onChange={(e?: string) => {
+									activeContent = e ?? '';
+								}}
+								onSave={saveActiveFile}
+							/>
+						{/key}
+					{:else if activeKind === 'image'}
+						<div class="h-full overflow-auto flex items-center justify-center p-3 bg-gray-50/50 dark:bg-gray-900/50">
+							{#if paneLoading}
+								<Spinner className="size-5" />
+							{:else if activeImageUrl}
+								<img src={activeImageUrl} alt={activeName} class="max-w-full max-h-full object-contain" />
+							{:else}
+								<div class="text-xs text-gray-400 dark:text-gray-500 italic">
+									{$i18n.t('Preview')}
+								</div>
+							{/if}
+						</div>
+					{:else}
+						<div class="h-full overflow-auto flex flex-col items-center justify-center gap-1 p-4 text-center">
+							<div class="text-xs text-gray-500 dark:text-gray-400">
+								{$i18n.t('Binary file — preview not available')}
+							</div>
+							<div class="text-xs text-gray-400 dark:text-gray-500">
+								{activeMediaType || $i18n.t('Type')}{#if activeSize}
+									· {formatFileSize(activeSize)}{/if}
+							</div>
+						</div>
+					{/if}
+				</div>
+			{/if}
+		</div>
 	</div>
 </div>
