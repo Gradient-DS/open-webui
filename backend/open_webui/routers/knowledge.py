@@ -613,6 +613,7 @@ async def get_knowledge_files_by_id(
     direction: Optional[str] = None,
     page: Optional[int] = 1,
     limit: Optional[int] = 30,
+    metadata_only: Optional[bool] = False,
     user=Depends(get_verified_user),
     db: AsyncSession = Depends(get_async_session),
 ):
@@ -651,7 +652,8 @@ async def get_knowledge_files_by_id(
 
     page = max(page, 1)
 
-    limit = min(max(limit, 1), 2000)
+    max_limit = 10000 if metadata_only else 2000
+    limit = min(max(limit, 1), max_limit)
     skip = (page - 1) * limit
 
     filter = {}
@@ -664,7 +666,9 @@ async def get_knowledge_files_by_id(
     if direction:
         filter['direction'] = direction
 
-    return await Knowledges.search_files_by_id(id, user.id, filter=filter, skip=skip, limit=limit, db=db)
+    return await Knowledges.search_files_by_id(
+        id, user.id, filter=filter, skip=skip, limit=limit, metadata_only=metadata_only, db=db
+    )
 
 
 ############################
