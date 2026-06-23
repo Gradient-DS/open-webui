@@ -1,8 +1,12 @@
 """Skill-bundle file resolution — lightweight helper imported by middleware.
 
-Fetches the markdown files attached to each skill and returns their content
-so the agent service can render a ``<bundled_files>`` manifest without an
-extra round-trip.
+Fetches the files attached to each skill and returns their content (for text
+files) or metadata (for binary files) so the agent service can render a
+``<bundled_files>`` manifest without an extra round-trip.
+
+Text files are forwarded inline as ``{path, content, media_type, is_binary:
+False, size}``. Binary files are forwarded as metadata-only ``{path,
+media_type, is_binary: True, size}`` (no ``content`` key).
 
 Design note on imports
 ~~~~~~~~~~~~~~~~~~~~~~
@@ -24,6 +28,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import mimetypes
 from pathlib import Path
 
 log = logging.getLogger(__name__)
@@ -33,6 +38,93 @@ log = logging.getLogger(__name__)
 # ``unittest.mock.patch`` to replace them at the module attribute level.
 SkillFiles = None  # type: ignore[assignment]
 Files = None  # type: ignore[assignment]
+
+# ---------------------------------------------------------------------------
+# Text / binary classification
+# ---------------------------------------------------------------------------
+
+# application/* MIME types treated as text (forwarded inline to the agent).
+_KNOWN_TEXT_MIME_TYPES = frozenset(
+    {
+        'application/json',
+        'application/x-yaml',
+        'text/yaml',
+        'application/yaml',
+        'application/javascript',
+        'application/x-javascript',
+        'application/xml',
+        'application/x-sh',
+        'application/x-python',
+    }
+)
+
+# File extensions we classify as text even when the MIME type is unknown.
+_TEXT_EXTENSIONS = frozenset(
+    {
+        '.md',
+        '.markdown',
+        '.txt',
+        '.py',
+        '.js',
+        '.ts',
+        '.jsx',
+        '.tsx',
+        '.json',
+        '.yaml',
+        '.yml',
+        '.toml',
+        '.ini',
+        '.cfg',
+        '.conf',
+        '.sh',
+        '.bash',
+        '.zsh',
+        '.html',
+        '.htm',
+        '.css',
+        '.scss',
+        '.sass',
+        '.xml',
+        '.csv',
+        '.rst',
+        '.tex',
+        '.sql',
+        '.r',
+        '.rb',
+        '.java',
+        '.c',
+        '.cpp',
+        '.h',
+        '.hpp',
+        '.cs',
+        '.go',
+        '.rs',
+        '.swift',
+        '.kt',
+        '.php',
+        '.lua',
+        '.tf',
+        '.hcl',
+    }
+)
+
+
+def _classify_text(content_type: str, filename: str) -> bool:
+    """Return True if the file should be treated as text (content forwarded inline).
+
+    Hierarchy:
+    1. content_type starts with 'text/' → text
+    2. content_type in _KNOWN_TEXT_MIME_TYPES → text
+    3. file extension in _TEXT_EXTENSIONS → text
+    4. Otherwise → binary
+    """
+    ct = (content_type or '').split(';')[0].strip().lower()
+    if ct.startswith('text/'):
+        return True
+    if ct in _KNOWN_TEXT_MIME_TYPES:
+        return True
+    ext = Path(filename).suffix.lower() if filename else ''
+    return ext in _TEXT_EXTENSIONS
 
 
 def _get_skill_files():
@@ -55,8 +147,8 @@ def _get_files():
     return Files
 
 
-async def _read_file_content(f) -> str | None:  # type: ignore[return]
-    """Return the markdown text for a single FileModel.
+async def _read_text_content(f) -> str | None:  # type: ignore[return]
+    """Return the text content for a single text FileModel.
 
     Preference order:
     1. ``f.data['content']`` — populated at attach time (Phase 3 guarantee).
@@ -91,8 +183,28 @@ async def _read_file_content(f) -> str | None:  # type: ignore[return]
         return None
 
 
+def _get_file_media_type(f, virtual_path: str) -> str:
+    """Derive the media_type for a FileModel.
+
+    Preference: File.meta['content_type'] → mimetypes.guess_type(virtual_path)
+    → 'application/octet-stream'.
+    """
+    meta = getattr(f, 'meta', None) or {}
+    ct = meta.get('content_type') or ''
+    if ct:
+        return ct.split(';')[0].strip()
+    guessed, _ = mimetypes.guess_type(virtual_path)
+    return guessed or 'application/octet-stream'
+
+
+def _get_file_size(f) -> int | None:
+    """Derive the size for a FileModel from meta."""
+    meta = getattr(f, 'meta', None) or {}
+    return meta.get('size') or None
+
+
 async def resolve_skill_bundle_files(available_skills) -> dict[str, list[dict]]:
-    """Return a mapping of skill_id → [{'path', 'content'}, ...].
+    """Return a mapping of skill_id → [{forwarding entry}, ...].
 
     For skills with no attached files the value is an empty list.  The
     middleware uses this to add ``'files'`` to the skill dict forwarded to
@@ -100,17 +212,19 @@ async def resolve_skill_bundle_files(available_skills) -> dict[str, list[dict]]:
     files are forwarded byte-identically to today (no ``'files'`` key).
 
     The bundle is keyed by the virtual ``path`` (not the backing filename), so
-    the same File mapped to two paths yields two entries.  Phase 1 (soev-agents)
-    keys files by ``path`` and normalizes legacy ``filename`` → ``path`` — this
-    helper emitting ``path`` completes that contract.
+    the same File mapped to two paths yields two entries.
+
+    Forwarding shape (matches soev-agents SkillFile):
+    - text: ``{path, content, media_type, is_binary: False, size}``
+    - binary: ``{path, media_type, is_binary: True, size}``  (no 'content' key)
 
     Args:
         available_skills: Iterable of skill model objects (have ``.id``).
 
     Returns:
-        Dict mapping each skill's id to a (possibly empty) list of
-        ``{'path': str, 'content': str}`` dicts.  Files whose content
-        cannot be resolved are silently omitted.
+        Dict mapping each skill's id to a (possibly empty) list of forwarding
+        entry dicts.  Files whose content cannot be resolved (text) or that
+        cannot be classified are silently omitted.
     """
     skill_files = _get_skill_files()
     files = _get_files()
@@ -133,9 +247,35 @@ async def resolve_skill_bundle_files(available_skills) -> dict[str, list[dict]]:
             f = files_by_id.get(row.file_id)
             if f is None:
                 continue
-            content = await _read_file_content(f)
-            if content is not None:
-                bundle.append({'path': row.path, 'content': content})
+
+            meta = getattr(f, 'meta', None) or {}
+            raw_ct = meta.get('content_type') or ''
+            media_type = _get_file_media_type(f, row.path)
+            size = _get_file_size(f)
+            filename = getattr(f, 'filename', '') or ''
+
+            if _classify_text(raw_ct, filename or row.path):
+                # Text file: forward content inline.
+                content = await _read_text_content(f)
+                if content is None:
+                    # Could not resolve — skip gracefully.
+                    continue
+                entry: dict = {
+                    'path': row.path,
+                    'content': content,
+                    'media_type': media_type,
+                    'is_binary': False,
+                    'size': size,
+                }
+            else:
+                # Binary file: metadata-only (agent fetches via raw-bytes route).
+                entry = {
+                    'path': row.path,
+                    'media_type': media_type,
+                    'is_binary': True,
+                    'size': size,
+                }
+            bundle.append(entry)
 
         result[skill.id] = bundle
 

@@ -14,6 +14,7 @@ All new code; upstream ``models/skills.py`` is NOT modified.
 """
 
 import logging
+import mimetypes
 import time
 import uuid
 
@@ -73,6 +74,9 @@ class SkillFileUserResponse(FileModelResponse):
     user: UserResponse | None = None
     added_at: int | None = None
     path: str | None = None
+    # v3: derived from the backing File.meta at list time (no DB migration).
+    media_type: str | None = None
+    size: int | None = None
 
 
 class SkillFileListResponse(BaseModel):
@@ -312,12 +316,23 @@ class SkillFilesTable:
                     # Drop the File's *storage* path; the virtual skill-bundle
                     # path (from SkillFile) is the one the client cares about.
                     file_dump.pop('path', None)
+
+                    # Derive media_type and size from the backing File.meta (no migration).
+                    meta = file.meta or {}
+                    media_type: str | None = meta.get('content_type') or None
+                    if not media_type:
+                        guessed, _ = mimetypes.guess_type(path or '')
+                        media_type = guessed or 'application/octet-stream'
+                    size: int | None = meta.get('size') or None
+
                     files.append(
                         SkillFileUserResponse(
                             **file_dump,
                             user=(UserResponse(**UserModel.model_validate(user).model_dump()) if user else None),
                             added_at=added_at,
                             path=path,
+                            media_type=media_type,
+                            size=size,
                         )
                     )
 
