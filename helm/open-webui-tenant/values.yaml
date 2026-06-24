@@ -535,6 +535,11 @@ openWebui:
     # Knowledge Base File Limit
     knowledgeMaxFileCount: "250"
 
+    # Cloud-sync loader-worker job wall-clock timeout (seconds). 1800 = 30 min
+    # (backend default). Raise for tenants with very large initial syncs that
+    # would otherwise hit the cap and mark the KB sync "failed".
+    syncMaxJobWallClockSeconds: "1800"
+
     # Shared-services loader-worker (per-tenant). When true, cloud-source sync
     # workers submit jobs to the loader-worker pod (loaderWorker.enabled=true)
     # instead of downloading + embedding in-process. See
