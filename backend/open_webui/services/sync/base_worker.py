@@ -961,13 +961,13 @@ class BaseSyncWorker(ABC):
         if result:
             # Persist file metadata AFTER the thread — async ORM cannot run in to_thread.
             await Files.update_file_metadata_by_id(file_id, {'collection_name': self.knowledge_id})
-            await Files.update_file_data_by_id(file_id, {'status': 'completed'})
+            await Files.set_status(file_id, 'completed')
             await Files.update_file_hash_by_id(file_id, file_hash)
 
         if not result:
             log.warning(f'No text content extracted from {filename}')
             await Files.update_file_metadata_by_id(file_id, {'collection_name': self.knowledge_id})
-            await Files.update_file_data_by_id(file_id, {'status': 'completed'})
+            await Files.set_status(file_id, 'completed')
             await Files.update_file_hash_by_id(file_id, file_hash)
 
         return True
@@ -1439,6 +1439,10 @@ class BaseSyncWorker(ABC):
                         size=size,
                         file_info=file_info,
                     )
+                    # Mirror pending status into meta at stub-creation time so
+                    # the KB file-list query (Task 3) can read status from the
+                    # cheap meta column without de-TOASTing data.content.
+                    file_meta['status'] = 'pending'
 
                     file_form = FileForm(
                         id=file_id,
@@ -1497,10 +1501,7 @@ class BaseSyncWorker(ABC):
                 current_status = (existing.data or {}).get('status')
                 if current_status in ('completed', 'error'):
                     continue
-                await Files.update_file_data_by_id(
-                    file_id,
-                    {'status': error_status, 'error': message},
-                )
+                await Files.set_status(file_id, error_status, error=message)
                 changed += 1
             except Exception:
                 log.warning(f'Failed to fail-mark stub {file_id}', exc_info=True)
@@ -1535,7 +1536,7 @@ class BaseSyncWorker(ABC):
                 # /ingest's terminal writes win — don't churn rows that are
                 # already in their final state.
                 if current_status not in ('completed', 'error') and current_status != stage:
-                    await Files.update_file_data_by_id(file_id, {'status': stage})
+                    await Files.set_status(file_id, stage)
 
                 if stage == 'ok' and file_id not in self._announced_ok_file_ids:
                     self._announced_ok_file_ids.add(file_id)
@@ -1833,12 +1834,10 @@ class BaseSyncWorker(ABC):
                 try:
                     existing = await Files.get_file_by_id(file_id)
                     if existing and (existing.data or {}).get('status') not in ('completed', 'error'):
-                        await Files.update_file_data_by_id(
+                        await Files.set_status(
                             file_id,
-                            {
-                                'status': 'error',
-                                'error': (f'sync ended with item still in stage={orphan.get("stage")}'),
-                            },
+                            'error',
+                            error=f'sync ended with item still in stage={orphan.get("stage")}',
                         )
                 except Exception:
                     log.warning(f'Failed to fail-mark orphan-stage stub {file_id}', exc_info=True)

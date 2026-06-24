@@ -89,10 +89,12 @@ async def test_fail_mark_transitions_pending_stub_to_error():
     worker._current_job_stub_file_ids = ['stub-pending']
     pending = SimpleNamespace(data={'status': 'pending'})
 
-    updates: list[tuple[str, dict]] = []
+    # set_status is now the write path (dual-writes data + meta).
+    # Capture (file_id, status, error) tuples.
+    set_status_calls: list[tuple] = []
 
-    def fake_update(file_id, data):
-        updates.append((file_id, data))
+    async def fake_set_status(file_id, status, error=None, db=None):
+        set_status_calls.append((file_id, status, error))
         return None
 
     with (
@@ -101,14 +103,14 @@ async def test_fail_mark_transitions_pending_stub_to_error():
             return_value=pending,
         ),
         patch(
-            'open_webui.services.sync.base_worker.Files.update_file_data_by_id',
-            side_effect=fake_update,
+            'open_webui.services.sync.base_worker.Files.set_status',
+            side_effect=fake_set_status,
         ),
     ):
         changed = await worker._fail_mark_outstanding_stubs('boom')
 
     assert changed == 1
-    assert updates == [('stub-pending', {'status': 'error', 'error': 'boom'})]
+    assert set_status_calls == [('stub-pending', 'error', 'boom')]
 
 
 @pytest.mark.asyncio
@@ -123,13 +125,13 @@ async def test_fail_mark_skips_completed_stubs():
             return_value=completed,
         ),
         patch(
-            'open_webui.services.sync.base_worker.Files.update_file_data_by_id',
-        ) as mock_update,
+            'open_webui.services.sync.base_worker.Files.set_status',
+        ) as mock_set_status,
     ):
         changed = await worker._fail_mark_outstanding_stubs('ignored')
 
     assert changed == 0
-    mock_update.assert_not_called()
+    mock_set_status.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -144,13 +146,13 @@ async def test_fail_mark_skips_already_errored_stubs():
             return_value=errored,
         ),
         patch(
-            'open_webui.services.sync.base_worker.Files.update_file_data_by_id',
-        ) as mock_update,
+            'open_webui.services.sync.base_worker.Files.set_status',
+        ) as mock_set_status,
     ):
         changed = await worker._fail_mark_outstanding_stubs('ignored')
 
     assert changed == 0
-    mock_update.assert_not_called()
+    mock_set_status.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -163,14 +165,14 @@ async def test_fail_mark_no_op_when_attr_missing():
             'open_webui.services.sync.base_worker.Files.get_file_by_id',
         ) as mock_get,
         patch(
-            'open_webui.services.sync.base_worker.Files.update_file_data_by_id',
-        ) as mock_update,
+            'open_webui.services.sync.base_worker.Files.set_status',
+        ) as mock_set_status,
     ):
         changed = await worker._fail_mark_outstanding_stubs('nothing-to-do')
 
     assert changed == 0
     mock_get.assert_not_called()
-    mock_update.assert_not_called()
+    mock_set_status.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -178,7 +180,11 @@ async def test_fail_mark_uses_custom_error_status_for_cancellation():
     worker = _make_worker()
     worker._current_job_stub_file_ids = ['stub-cancelled']
     pending = SimpleNamespace(data={'status': 'downloading'})
-    updates: list[tuple[str, dict]] = []
+    set_status_calls: list[tuple] = []
+
+    async def fake_set_status(file_id, status, error=None, db=None):
+        set_status_calls.append((file_id, status, error))
+        return None
 
     with (
         patch(
@@ -186,8 +192,8 @@ async def test_fail_mark_uses_custom_error_status_for_cancellation():
             return_value=pending,
         ),
         patch(
-            'open_webui.services.sync.base_worker.Files.update_file_data_by_id',
-            side_effect=lambda fid, d: updates.append((fid, d)),
+            'open_webui.services.sync.base_worker.Files.set_status',
+            side_effect=fake_set_status,
         ),
     ):
         changed = await worker._fail_mark_outstanding_stubs(
@@ -196,4 +202,4 @@ async def test_fail_mark_uses_custom_error_status_for_cancellation():
         )
 
     assert changed == 1
-    assert updates[0][1]['status'] == 'cancelled'
+    assert set_status_calls[0][1] == 'cancelled'
