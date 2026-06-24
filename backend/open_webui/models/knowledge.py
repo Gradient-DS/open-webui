@@ -145,8 +145,8 @@ class FileUserMetadataResponse(BaseModel):
     hash: Optional[str] = None
     filename: str
     meta: Optional[FileMeta] = None
-    status: Optional[str] = None  # from data['status']
-    error: Optional[str] = None  # from data['error']
+    status: Optional[str] = None  # from meta['status']
+    error: Optional[str] = None  # from meta['error']
     created_at: int
     updated_at: Optional[int] = None
     user: Optional[UserResponse] = None

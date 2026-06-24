@@ -110,18 +110,6 @@ def _run_upgrade(engine):
     deserialises TEXT columns via SQLAlchemy's TypeDecorator, matching the
     behaviour the migration sees on PostgreSQL.
     """
-    # Wrap the engine with a JSON-deserialising event so sa.JSON() columns are
-    # returned as Python objects, replicating what PostgreSQL does natively.
-    from sqlalchemy import event as sa_event
-    from sqlalchemy.engine import Engine
-
-    @sa_event.listens_for(engine, 'connect')
-    def _set_sqlite_json(dbapi_conn, connection_record):
-        # SQLite does not natively decode JSON; we apply no-op here — the
-        # real deserialisation is done in the engine-level result processor
-        # below.
-        pass
-
     # Use a TypeDecorator-aware column override: re-declare the table with
     # a custom JSON type that round-trips through json.loads on SQLite.
     import json as _json

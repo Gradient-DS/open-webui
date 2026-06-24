@@ -29,7 +29,7 @@ def _make_files_table() -> FilesTable:
 
 
 def _file(data: dict | None, meta: dict | None) -> SimpleNamespace:
-    """Build a minimal FileModel-like namespace for patching get_file_by_id."""
+    """Build a minimal FileModel-like namespace."""
     return SimpleNamespace(data=data, meta=meta)
 
 
@@ -51,9 +51,6 @@ async def test_set_status_writes_to_both_data_and_meta_on_completed():
     data_updates: list[tuple[str, dict]] = []
     meta_updates: list[tuple[str, dict]] = []
 
-    async def fake_get(file_id, db=None):
-        return existing
-
     async def fake_update_data(file_id, data, db=None):
         data_updates.append((file_id, data))
         return existing
@@ -63,7 +60,6 @@ async def test_set_status_writes_to_both_data_and_meta_on_completed():
         return existing
 
     with (
-        patch.object(table, 'get_file_by_id', side_effect=fake_get),
         patch.object(table, 'update_file_data_by_id', side_effect=fake_update_data),
         patch.object(table, 'update_file_metadata_by_id', side_effect=fake_update_meta),
     ):
@@ -90,9 +86,6 @@ async def test_set_status_writes_error_into_both_columns():
     data_updates: list[tuple[str, dict]] = []
     meta_updates: list[tuple[str, dict]] = []
 
-    async def fake_get(file_id, db=None):
-        return existing
-
     async def fake_update_data(file_id, data, db=None):
         data_updates.append((file_id, data))
         return existing
@@ -102,7 +95,6 @@ async def test_set_status_writes_error_into_both_columns():
         return existing
 
     with (
-        patch.object(table, 'get_file_by_id', side_effect=fake_get),
         patch.object(table, 'update_file_data_by_id', side_effect=fake_update_data),
         patch.object(table, 'update_file_metadata_by_id', side_effect=fake_update_meta),
     ):
@@ -126,9 +118,6 @@ async def test_set_status_does_not_clobber_existing_data_keys():
     data_updates: list[tuple[str, dict]] = []
     meta_updates: list[tuple[str, dict]] = []
 
-    async def fake_get(file_id, db=None):
-        return existing
-
     async def fake_update_data(file_id, data, db=None):
         data_updates.append((file_id, data))
         return existing
@@ -138,7 +127,6 @@ async def test_set_status_does_not_clobber_existing_data_keys():
         return existing
 
     with (
-        patch.object(table, 'get_file_by_id', side_effect=fake_get),
         patch.object(table, 'update_file_data_by_id', side_effect=fake_update_data),
         patch.object(table, 'update_file_metadata_by_id', side_effect=fake_update_meta),
     ):
@@ -165,9 +153,6 @@ async def test_set_status_pending_writes_to_both_columns():
     data_updates: list[tuple[str, dict]] = []
     meta_updates: list[tuple[str, dict]] = []
 
-    async def fake_get(file_id, db=None):
-        return existing
-
     async def fake_update_data(file_id, data, db=None):
         data_updates.append((file_id, data))
         return existing
@@ -177,7 +162,6 @@ async def test_set_status_pending_writes_to_both_columns():
         return existing
 
     with (
-        patch.object(table, 'get_file_by_id', side_effect=fake_get),
         patch.object(table, 'update_file_data_by_id', side_effect=fake_update_data),
         patch.object(table, 'update_file_metadata_by_id', side_effect=fake_update_meta),
     ):
@@ -194,9 +178,6 @@ async def test_set_status_returns_file_model():
 
     expected = _file(data={'status': 'completed'}, meta={'status': 'completed'})
 
-    async def fake_get(file_id, db=None):
-        return _file(data={'status': 'pending'}, meta={})
-
     async def fake_update_data(file_id, data, db=None):
         return expected
 
@@ -204,7 +185,6 @@ async def test_set_status_returns_file_model():
         return expected
 
     with (
-        patch.object(table, 'get_file_by_id', side_effect=fake_get),
         patch.object(table, 'update_file_data_by_id', side_effect=fake_update_data),
         patch.object(table, 'update_file_metadata_by_id', side_effect=fake_update_meta),
     ):

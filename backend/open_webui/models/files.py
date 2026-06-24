@@ -404,8 +404,6 @@ class FilesTable:
             except Exception:
                 return None
 
-                return False
-
     async def set_status(
         self,
         id: str,
