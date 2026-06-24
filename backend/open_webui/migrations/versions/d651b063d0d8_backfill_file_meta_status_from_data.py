@@ -24,9 +24,12 @@ PostgreSQL.
 Batching
 --------
 Rows are processed in windowed batches of 200, ordered by ``id``.  Only rows
-whose ``data`` dict contains a ``status`` key are touched; each batch emits
-targeted ``UPDATE`` statements so only affected rows are written.  The
-windowed SELECT pattern avoids loading the entire table into memory at once.
+whose ``data`` dict contains a ``status`` key are touched; rows without
+``data.status`` are intentionally left unchanged — this is a correctness
+property, not just a performance optimisation (those rows were never synced
+and have no status to backfill).  Each batch emits targeted ``UPDATE``
+statements so only affected rows are written.  The windowed SELECT pattern
+avoids loading the entire table into memory at once.
 (Note: Alembic wraps the upgrade in a single DDL transaction; the batching
 here is a memory / row-fetch guard, not per-batch commit isolation.  For the
 file table sizes in production this is the right trade-off.)
@@ -64,13 +67,20 @@ _file = table(
 )
 
 
-def upgrade():
-    conn = op.get_bind()
+def _backfill(bind):
+    """Backfill ``meta.status`` / ``meta.error`` from ``data`` for all rows.
+
+    Extracted from ``upgrade()`` so tests can import and call this function
+    directly against a plain SQLAlchemy connection, exercising the real
+    ``sa.select`` / ``sa.update`` path rather than a reimplementation.
+
+    ``bind`` must be an open SQLAlchemy ``Connection``.
+    """
     offset = 0
 
     while True:
         # Fetch the next window of rows, ordered by PK so pagination is stable.
-        rows = conn.execute(
+        rows = bind.execute(
             sa.select(_file.c.id, _file.c.data, _file.c.meta).order_by(_file.c.id).limit(_BATCH_SIZE).offset(offset)
         ).fetchall()
 
@@ -93,12 +103,16 @@ def upgrade():
             if 'error' in data:
                 new_meta['error'] = data['error']
 
-            conn.execute(sa.update(_file).where(_file.c.id == row.id).values(meta=new_meta))
+            bind.execute(sa.update(_file).where(_file.c.id == row.id).values(meta=new_meta))
 
         offset += _BATCH_SIZE
 
         if len(rows) < _BATCH_SIZE:
             break
+
+
+def upgrade():
+    _backfill(op.get_bind())
 
 
 def downgrade():
