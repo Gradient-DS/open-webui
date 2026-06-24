@@ -643,8 +643,8 @@ class KnowledgeTable:
                             File.meta,
                             File.created_at,
                             File.updated_at,
-                            cast(File.data['status'], Text).label('status'),
-                            cast(File.data['error'], Text).label('error'),
+                            cast(File.meta['status'], Text).label('status'),
+                            cast(File.meta['error'], Text).label('error'),
                             User,
                             KnowledgeFile.created_at.label('added_at'),
                         )
@@ -663,21 +663,41 @@ class KnowledgeTable:
                 # Default sort: filename ascending (alphabetical)
                 primary_sort = File.filename.asc()
 
+                # For the metadata path: build a cheap count stmt in parallel.
+                # It starts with the same join + knowledge_id filter but projects
+                # no JSON columns and applies no ORDER BY — the two most expensive
+                # parts of the full stmt subquery.
+                if metadata_only:
+                    count_stmt = (
+                        select(func.count())
+                        .select_from(KnowledgeFile)
+                        .join(File, File.id == KnowledgeFile.file_id)
+                        .filter(KnowledgeFile.knowledge_id == knowledge_id)
+                    )
+
                 if filter:
                     query_key = filter.get('query')
                     if query_key:
-                        stmt = stmt.filter(
-                            or_(
-                                File.filename.ilike(f'%{query_key}%'),
-                                cast(File.data['content'], Text).ilike(f'%{query_key}%'),
-                            )
+                        content_filter = or_(
+                            File.filename.ilike(f'%{query_key}%'),
+                            cast(File.data['content'], Text).ilike(f'%{query_key}%'),
                         )
+                        stmt = stmt.filter(content_filter)
+                        # Content search still needs the File join + data filter
+                        # on the count — this is the one case where touching data
+                        # is unavoidable.  All other count paths avoid data entirely.
+                        if metadata_only:
+                            count_stmt = count_stmt.filter(content_filter)
 
                     view_option = filter.get('view_option')
                     if view_option == 'created':
                         stmt = stmt.filter(KnowledgeFile.user_id == user_id)
+                        if metadata_only:
+                            count_stmt = count_stmt.filter(KnowledgeFile.user_id == user_id)
                     elif view_option == 'shared':
                         stmt = stmt.filter(KnowledgeFile.user_id != user_id)
+                        if metadata_only:
+                            count_stmt = count_stmt.filter(KnowledgeFile.user_id != user_id)
 
                     order_by = filter.get('order_by')
                     direction = filter.get('direction')
@@ -693,8 +713,13 @@ class KnowledgeTable:
                 # Apply sort with secondary key for deterministic pagination
                 stmt = stmt.order_by(primary_sort, File.id.asc())
 
-                # Count BEFORE pagination
-                count_result = await db.execute(select(func.count()).select_from(stmt.subquery()))
+                # Count BEFORE pagination.
+                # metadata_only path: cheap count (no JSON projection, no ORDER BY).
+                # full-content path: existing subquery approach (unchanged).
+                if metadata_only:
+                    count_result = await db.execute(count_stmt)
+                else:
+                    count_result = await db.execute(select(func.count()).select_from(stmt.subquery()))
                 total = count_result.scalar()
 
                 if skip:
