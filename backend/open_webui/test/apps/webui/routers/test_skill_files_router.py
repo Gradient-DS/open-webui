@@ -25,7 +25,7 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from open_webui.routers import skill_files as skill_files_router_module
-from open_webui.utils.auth import get_verified_user
+from open_webui.utils.auth import get_optional_verified_user, get_verified_user
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -86,6 +86,9 @@ def _make_app(user: SimpleNamespace | None = None):
     app = FastAPI()
     app.include_router(skill_files_router_module.router, prefix='/api/v1/skills')
     app.dependency_overrides[get_verified_user] = lambda: user
+    # The content route uses get_optional_verified_user; override it so normal-user
+    # test cases inject the user without requiring a real auth stack.
+    app.dependency_overrides[get_optional_verified_user] = lambda: user
     return app
 
 

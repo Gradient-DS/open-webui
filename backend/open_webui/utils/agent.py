@@ -39,16 +39,18 @@ SSE protocol from agent:
 
 import json
 import logging
-from dataclasses import dataclass, field, asdict
-from typing import Any, AsyncIterator, Optional
+from collections.abc import AsyncIterator
+from dataclasses import asdict, dataclass, field
+from datetime import timedelta
+from typing import Any
 
 import aiohttp
-from starlette.background import BackgroundTask
-from starlette.responses import StreamingResponse
-
+from open_webui.config import FEATURE_SKILL_FILES
 from open_webui.env import AGENT_API_BASE_URL, AGENT_API_KEY
 from open_webui.models.chats import Chats
 from open_webui.socket.main import get_event_emitter
+from open_webui.utils.auth import create_token
+from starlette.responses import StreamingResponse
 
 log = logging.getLogger(__name__)
 
@@ -70,33 +72,33 @@ class AgentPayload:
 
     model: str
     messages: list[dict[str, Any]]
-    agent: Optional[str] = None
+    agent: str | None = None
     stream: bool = True
-    chat_id: Optional[str] = None
-    user_id: Optional[str] = None
-    message_id: Optional[str] = None
+    chat_id: str | None = None
+    user_id: str | None = None
+    message_id: str | None = None
     # [Gradient] Parent of ``message_id`` in the chat's branching tree
     # (the user message that prompted this response). The agent service
     # uses this to rewind its persisted thread state on retry/regenerate,
     # so re-runs replay from the pre-answer point and tools fire again
     # instead of the model recapping cached output. Omitted on the first
     # turn of a new chat (no parent exists).
-    parent_message_id: Optional[str] = None
-    session_id: Optional[str] = None
+    parent_message_id: str | None = None
+    session_id: str | None = None
     features: dict[str, Any] = field(default_factory=dict)
-    files: Optional[list[dict[str, Any]]] = None
-    knowledge: Optional[list[dict[str, Any]]] = None
-    tool_ids: Optional[list[str]] = None
-    rag_filter: Optional[dict[str, Any]] = None
+    files: list[dict[str, Any]] | None = None
+    knowledge: list[dict[str, Any]] | None = None
+    tool_ids: list[str] | None = None
+    rag_filter: dict[str, Any] | None = None
     # Operator-supplied system prompt from the custom-model definition
     # (model.params.system). Variables are pre-substituted upstream so the
     # agent can use the value as-is.
-    system_prompt: Optional[str] = None
+    system_prompt: str | None = None
     # [Gradient] Conversation-level system prompt — the merged per-chat /
     # Chat Controls / folder prompt. Distinct from ``system_prompt`` (the
     # custom-model prompt). Forwarded so the agent composes it into its
     # system prompt; OpenWebUI also still inlines it into ``messages``.
-    chat_system_prompt: Optional[str] = None
+    chat_system_prompt: str | None = None
     # [Gradient] Resolved Open WebUI skills for this turn. Each entry is
     # {name, description, content, is_selected}. User-selected skills
     # carry full content for the agent to render; model-attached skills
@@ -105,42 +107,63 @@ class AgentPayload:
     # ``files: [{filename, content}, ...]`` list (present only when
     # non-empty) so the agent can render a <bundled_files> manifest and
     # serve file content via its ``read_skill_file`` tool.
-    skills: Optional[list[dict[str, Any]]] = None
+    skills: list[dict[str, Any]] | None = None
     # [Gradient] Generic metadata forwarded as-is to the agent service.
     # Today used for ``user_language`` (UI locale, BCP-47 like "nl-NL")
     # so the agent can resolve the response language. Open-ended so we
     # can extend it without changing the contract.
-    metadata: Optional[dict[str, Any]] = None
+    metadata: dict[str, Any] | None = None
     # Model params forwarded directly
-    temperature: Optional[float] = None
-    top_p: Optional[float] = None
-    max_tokens: Optional[int] = None
-    frequency_penalty: Optional[float] = None
-    presence_penalty: Optional[float] = None
-    seed: Optional[int] = None
-    stop: Optional[list[str]] = None
+    temperature: float | None = None
+    top_p: float | None = None
+    max_tokens: int | None = None
+    frequency_penalty: float | None = None
+    presence_penalty: float | None = None
+    seed: int | None = None
+    stop: list[str] | None = None
+
+
+def _maybe_attach_fetch_token(skill_entry: dict[str, Any], user_id: str) -> dict[str, Any]:
+    """Return skill_entry with a fetch_token added iff it has binary files.
+
+    The token is scoped to {user_id, skill_id, purpose: "skill_file_read"} with
+    a 120-second TTL.  It is accepted ONLY by the raw-bytes route for the
+    matching skill_id; all other routes reject it.
+    """
+    skill_id = skill_entry.get('id')
+    if not skill_id:
+        return skill_entry
+    files = skill_entry.get('files') or []
+    has_binary = any(f.get('is_binary') for f in files)
+    if not has_binary:
+        return skill_entry
+    token = create_token(
+        data={'id': user_id, 'skill_id': skill_id, 'purpose': 'skill_file_read'},
+        expires_delta=timedelta(seconds=120),
+    )
+    return {**skill_entry, 'fetch_token': token}
 
 
 def build_agent_payload(
     *,
     model: str,
     messages: list[dict[str, Any]],
-    agent: Optional[str] = None,
+    agent: str | None = None,
     stream: bool = True,
-    chat_id: Optional[str] = None,
-    user_id: Optional[str] = None,
-    message_id: Optional[str] = None,
-    parent_message_id: Optional[str] = None,
-    session_id: Optional[str] = None,
-    features: Optional[dict[str, Any]] = None,
-    files: Optional[list[dict[str, Any]]] = None,
-    knowledge: Optional[list[dict[str, Any]]] = None,
-    tool_ids: Optional[list[str]] = None,
-    rag_filter: Optional[dict[str, Any]] = None,
-    system_prompt: Optional[str] = None,
-    chat_system_prompt: Optional[str] = None,
-    skills: Optional[list[dict[str, Any]]] = None,
-    metadata: Optional[dict[str, Any]] = None,
+    chat_id: str | None = None,
+    user_id: str | None = None,
+    message_id: str | None = None,
+    parent_message_id: str | None = None,
+    session_id: str | None = None,
+    features: dict[str, Any] | None = None,
+    files: list[dict[str, Any]] | None = None,
+    knowledge: list[dict[str, Any]] | None = None,
+    tool_ids: list[str] | None = None,
+    rag_filter: dict[str, Any] | None = None,
+    system_prompt: str | None = None,
+    chat_system_prompt: str | None = None,
+    skills: list[dict[str, Any]] | None = None,
+    metadata: dict[str, Any] | None = None,
     **model_params,
 ) -> dict[str, Any]:
     """Build a JSON-serialisable payload for the agent API.
@@ -169,7 +192,19 @@ def build_agent_payload(
         metadata=metadata,
         **{k: v for k, v in model_params.items() if v is not None},
     )
-    return {k: v for k, v in asdict(payload).items() if v is not None}
+    result = {k: v for k, v in asdict(payload).items() if v is not None}
+
+    # [Gradient] Phase 8b: mint a short-lived, skill-scoped token for each
+    # forwarded skill that carries binary files.  The agent uses it to fetch
+    # binary asset bytes from GET /api/v1/skills/id/{skill_id}/files/content
+    # with Authorization: Bearer <fetch_token>.  Only minted when
+    # FEATURE_SKILL_FILES is on, the skill has a known id, the request has a
+    # user_id, and at least one file in the bundle is binary (is_binary=True).
+    # Text-only skills and skills without ids never get a token.
+    if FEATURE_SKILL_FILES and user_id and result.get('skills'):
+        result['skills'] = [_maybe_attach_fetch_token(skill_entry, user_id) for skill_entry in result['skills']]
+
+    return result
 
 
 def _agent_api_headers() -> dict[str, str]:
@@ -185,7 +220,7 @@ def _agent_api_headers() -> dict[str, str]:
     return headers
 
 
-def _resolve_model_vision_capable(model: Optional[dict[str, Any]]) -> bool:
+def _resolve_model_vision_capable(model: dict[str, Any] | None) -> bool:
     """Resolve whether a model can process image input.
 
     Reads OpenWebUI's per-model vision capability flag
@@ -199,7 +234,7 @@ def _resolve_model_vision_capable(model: Optional[dict[str, Any]]) -> bool:
     return bool(capabilities.get('vision', True))
 
 
-def _resolve_model_citations_enabled(model: Optional[dict[str, Any]]) -> bool:
+def _resolve_model_citations_enabled(model: dict[str, Any] | None) -> bool:
     """Resolve whether inline source citations are enabled for a model.
 
     Reads OpenWebUI's per-model citations capability flag
@@ -316,7 +351,7 @@ async def call_agent_api(
     form_data: dict[str, Any],
     metadata: dict[str, Any],
     features: dict[str, Any],
-    override_agent: Optional[str] = None,
+    override_agent: str | None = None,
 ):
     """Route a chat completion to the external agent API.
 

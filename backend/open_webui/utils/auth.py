@@ -355,6 +355,15 @@ async def get_current_user(
                 detail='2FA verification required',
             )
 
+        # Skill-file fetch tokens (Phase 8b) are single-purpose and must not
+        # authenticate any session route — only the raw-bytes content endpoint
+        # accepts them via its own scoped-auth branch.
+        if data is not None and data.get('purpose') == 'skill_file_read':
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail=ERROR_MESSAGES.UNAUTHORIZED,
+            )
+
         if data is not None and 'id' in data:
             if data.get('jti') and not await is_valid_token(request, data):
                 raise HTTPException(
@@ -471,6 +480,27 @@ def get_verified_user(user=Depends(get_current_user)):
             detail=ERROR_MESSAGES.ACCESS_PROHIBITED,
         )
     return user
+
+
+async def get_optional_verified_user(
+    request: Request,
+    response: Response,
+    background_tasks: BackgroundTasks,
+    auth_token: HTTPAuthorizationCredentials = Depends(bearer_security),
+):
+    """Like get_verified_user but returns None instead of raising on auth failure.
+
+    Used by the skill-file raw-bytes route (Phase 8b) so a scoped fetch token
+    can be checked before falling back to session auth.  When this returns None
+    the route must verify the request via an alternative auth path or 401.
+    """
+    try:
+        user = await get_current_user(request, response, background_tasks, auth_token)
+        if user.role not in {'user', 'admin'}:
+            return None
+        return user
+    except HTTPException:
+        return None
 
 
 def get_admin_user(user=Depends(get_current_user)):

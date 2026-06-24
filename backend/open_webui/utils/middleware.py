@@ -2732,6 +2732,7 @@ async def process_chat_payload(request, form_data, user, metadata, model):
 
         metadata['skills'] = [
             {
+                'id': s.id,
                 'name': s.name,
                 'description': s.description or '',
                 'content': s.content,

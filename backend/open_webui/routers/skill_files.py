@@ -28,7 +28,7 @@ import re
 import uuid
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import FileResponse
 from open_webui.constants import ERROR_MESSAGES
 from open_webui.internal.db import get_async_session
@@ -36,7 +36,8 @@ from open_webui.models.access_grants import AccessGrants
 from open_webui.models.files import FileForm, Files
 from open_webui.models.skill_files import SkillFileListResponse, SkillFiles
 from open_webui.models.skills import Skills
-from open_webui.utils.auth import get_verified_user
+from open_webui.models.users import Users
+from open_webui.utils.auth import decode_token, get_optional_verified_user, get_verified_user
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -542,54 +543,38 @@ async def remove_skill_file(
 ############################
 
 
-@router.get('/id/{id}/files/content')
-async def get_skill_file_content(
-    id: str,
-    path: str = Query(..., description='Virtual skill-bundle path, e.g. "assets/logo.png"'),
-    user=Depends(get_verified_user),
-    db: AsyncSession = Depends(get_async_session),
-):
-    """Stream the raw bytes of a skill-bundle file with the correct Content-Type.
+async def _resolve_scoped_user(request: Request, skill_id: str) -> object | None:
+    """Extract user from a skill_file_read scoped token, or return None.
 
-    Auth: same read-access check as GET /id/{id}/files (skill owner, admin, or
-    any AccessGrant read permission). Mirrors routers/files.py get_file_content_by_id.
+    Returns the user object if the Authorization header carries a valid
+    Phase 8b token scoped to skill_id.  Returns None if no scoped token is
+    present or the token is invalid/expired.  Raises 401 if a scoped token is
+    present but fails the skill_id or user checks.
     """
-    skill = await _get_skill_or_404(id, db)
+    auth_header = request.headers.get('authorization', '')
+    if not auth_header.lower().startswith('bearer '):
+        return None
+    raw_token = auth_header[7:]
+    decoded = decode_token(raw_token)
+    if decoded is None or decoded.get('purpose') != 'skill_file_read':
+        return None
+    if decoded.get('skill_id') != skill_id:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=ERROR_MESSAGES.UNAUTHORIZED)
+    uid = decoded.get('id')
+    user = await Users.get_user_by_id(uid) if uid else None
+    if user is None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=ERROR_MESSAGES.UNAUTHORIZED)
+    return user
 
-    # Read auth: owner, admin, or any AccessGrant read
-    if (
-        user.role != 'admin'
-        and skill.user_id != user.id
-        and not await AccessGrants.has_access(
-            user_id=user.id,
-            resource_type='skill',
-            resource_id=skill.id,
-            permission='read',
-            db=db,
-        )
-    ):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail=ERROR_MESSAGES.UNAUTHORIZED,
-        )
 
-    # Validate the path (path-safety check — load-bearing 400).
-    _validate_skill_path(path)
-
-    # Resolve the skill_file row by (skill_id, path).
-    row = await SkillFiles.get_file_by_path(id, path, db=db)
+async def _stream_skill_file(skill_id: str, path: str, db: AsyncSession) -> FileResponse:
+    """Resolve and stream the backing file for a skill-bundle path."""
+    row = await SkillFiles.get_file_by_path(skill_id, path, db=db)
     if not row:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=ERROR_MESSAGES.NOT_FOUND)
-
     file = await Files.get_file_by_id(row.file_id, db=db)
-    if not file:
+    if not file or not file.path:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=ERROR_MESSAGES.NOT_FOUND)
-
-    if not file.path:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=ERROR_MESSAGES.NOT_FOUND,
-        )
 
     from open_webui.storage.provider import Storage  # deferred to avoid config-table at import time
 
@@ -602,14 +587,58 @@ async def get_skill_file_content(
             detail=ERROR_MESSAGES.DEFAULT('Error retrieving skill file content.'),
         ) from exc
 
-    # Determine content-type (from meta, then extension, then octet-stream).
     meta = file.meta or {}
     media_type: str = meta.get('content_type') or ''
     if not media_type:
         guessed, _ = mimetypes.guess_type(path)
         media_type = guessed or 'application/octet-stream'
-
     return FileResponse(local_path, media_type=media_type)
+
+
+@router.get('/id/{id}/files/content')
+async def get_skill_file_content(
+    id: str,
+    request: Request,
+    path: str = Query(..., description='Virtual skill-bundle path, e.g. "assets/logo.png"'),
+    session_user=Depends(get_optional_verified_user),
+    db: AsyncSession = Depends(get_async_session),
+):
+    """Stream the raw bytes of a skill-bundle file with the correct Content-Type.
+
+    Auth (two paths — both enforce the same read-access check):
+
+    A. Normal session: owner / admin / read AccessGrant via get_optional_verified_user
+       (cookie, sk- api key, or normal Bearer JWT without a purpose claim).
+
+    B. Phase 8b scoped fetch token: Authorization: Bearer <token> where the JWT
+       has purpose="skill_file_read", skill_id=id, exp≤120s, minted by
+       build_agent_payload.  Accepted ONLY here; get_current_user in auth.py
+       blocks it on every other route.
+    """
+    # Phase 8b: check for a scoped token when session auth returned None.
+    user = session_user
+    if user is None:
+        user = await _resolve_scoped_user(request, id)
+    if user is None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=ERROR_MESSAGES.UNAUTHORIZED)
+
+    skill = await _get_skill_or_404(id, db)
+
+    if (
+        user.role != 'admin'
+        and skill.user_id != user.id
+        and not await AccessGrants.has_access(
+            user_id=user.id,
+            resource_type='skill',
+            resource_id=skill.id,
+            permission='read',
+            db=db,
+        )
+    ):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=ERROR_MESSAGES.UNAUTHORIZED)
+
+    _validate_skill_path(path)
+    return await _stream_skill_file(id, path, db)
 
 
 ############################
