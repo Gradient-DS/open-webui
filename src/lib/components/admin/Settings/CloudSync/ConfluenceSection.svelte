@@ -15,7 +15,6 @@
 		type ConfluenceSharedKbSpace,
 		type SyncItem
 	} from '$lib/apis/confluence';
-	import { getAllUsers } from '$lib/apis/users';
 	import { WEBUI_API_BASE_URL } from '$lib/constants';
 	import Switch from '$lib/components/common/Switch.svelte';
 	import Spinner from '$lib/components/common/Spinner.svelte';
@@ -131,7 +130,8 @@
 	// dropdown reflects the existing owner when re-provisioning.
 	let sharedKbOwnerId = '';
 	let sharedKbOwnerInitialized = false;
-	let adminUsers: { id: string; name: string; email: string }[] = [];
+	// Passed in from CloudSync.svelte (fetched once there, shared with TOPdesk).
+	export let adminUsers: { id: string; name: string; email: string }[] = [];
 	let sharedKbStatus: ConfluenceSharedKbStatus | null = null;
 	let connectingAccount = false;
 
@@ -162,24 +162,11 @@
 	};
 
 	export async function load() {
-		const [config, users, shared] = await Promise.all([
+		const [config, shared] = await Promise.all([
 			getConfluenceConfig(localStorage.token),
-			getAllUsers(localStorage.token).catch(() => null),
 			getConfluenceSharedKbStatus(localStorage.token).catch(() => null)
 		]);
 		applyConfluenceConfig(config);
-		// Owner dropdown is limited to admins — they are the only valid owners of
-		// a shared, org-wide knowledge base.
-		adminUsers = (
-			(users?.users ?? []) as {
-				id: string;
-				name: string;
-				email: string;
-				role: string;
-			}[]
-		)
-			.filter((u) => u.role === 'admin')
-			.map((u) => ({ id: u.id, name: u.name, email: u.email }));
 		sharedKbStatus = shared;
 		// Seed the basic-mode owner dropdown from the KB row's owner on first load.
 		// Subsequent status reloads (after provisioning, etc.) leave the dropdown

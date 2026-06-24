@@ -17,6 +17,7 @@
 	import DocumentPage from '$lib/components/icons/DocumentPage.svelte';
 	import XMark from '$lib/components/icons/XMark.svelte';
 	import Spinner from '$lib/components/common/Spinner.svelte';
+	import VirtualList from '@sveltejs/svelte-virtual-list';
 
 	export let knowledge = null;
 	export let selectedFileId = null;
@@ -26,8 +27,14 @@
 	export let onDelete = (fileId) => {};
 </script>
 
-<div class=" max-h-full flex flex-col w-full gap-[0.5px]">
-	{#each files as file (file?.id ?? file?.itemId ?? file?.tempId)}
+<!--
+	VirtualList fills the height of the parent scroll container (KnowledgeBase.svelte provides
+	overflow-y-auto h-full). For short lists every row is visible so it behaves identically to a
+	plain {#each}; for large lists only on-screen rows mount.
+-->
+<div class="h-full w-full">
+	<VirtualList items={files} height="100%" let:item>
+		{@const file = item}
 		<div
 			class=" flex cursor-pointer w-full px-1.5 py-0.5 bg-transparent dark:hover:bg-gray-850/50 hover:bg-white rounded-xl transition {selectedFileId
 				? ''
@@ -114,5 +121,5 @@
 				</div>
 			{/if}
 		</div>
-	{/each}
+	</VirtualList>
 </div>

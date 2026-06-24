@@ -311,7 +311,7 @@
 		const cloudLimit = isCloudKb
 			? $config?.integration_providers?.[knowledge.type]?.max_files_per_kb ||
 				$config?.features?.knowledge_max_file_count ||
-				2000
+				10000
 			: null;
 		const res = await searchKnowledgeFilesById(
 			localStorage.token,
@@ -321,7 +321,8 @@
 			sortKey,
 			direction,
 			currentPage,
-			cloudLimit
+			cloudLimit,
+			true
 		).catch(() => {
 			return null;
 		});
@@ -339,8 +340,15 @@
 	const fileSelectHandler = async (file) => {
 		try {
 			selectedFile = file;
-			selectedFileContent = selectedFile?.data?.content || '';
-		} catch (e) {
+			if (file?.data?.content != null) {
+				selectedFileContent = file.data.content;
+			} else {
+				selectedFileContent = '';
+				const full = await getFileById(localStorage.token, file.id);
+				selectedFileContent = full?.data?.content || '';
+				selectedFile = { ...file, data: { ...(file.data || {}), content: selectedFileContent } };
+			}
+		} catch {
 			toast.error($i18n.t('Failed to load file content.'));
 		}
 	};
