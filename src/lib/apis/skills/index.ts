@@ -319,3 +319,248 @@ export const deleteSkillById = async (token: string, id: string) => {
 
 	return res;
 };
+
+export const createSkillFile = async (
+	token: string,
+	id: string,
+	{ path, file_id }: { path: string; file_id: string }
+) => {
+	let error = null;
+
+	const res = await fetch(`${WEBUI_API_BASE_URL}/skills/id/${id}/files`, {
+		method: 'POST',
+		headers: {
+			Accept: 'application/json',
+			'Content-Type': 'application/json',
+			authorization: `Bearer ${token}`
+		},
+		body: JSON.stringify({
+			path,
+			file_id
+		})
+	})
+		.then(async (res) => {
+			if (!res.ok) throw await res.json();
+			return res.json();
+		})
+		.catch((err) => {
+			error = err.detail;
+			console.error(err);
+			return null;
+		});
+
+	if (error) {
+		throw error;
+	}
+
+	return res;
+};
+
+export const createSkillFileInline = async (
+	token: string,
+	id: string,
+	{ path, content }: { path: string; content: string }
+) => {
+	let error = null;
+
+	const res = await fetch(`${WEBUI_API_BASE_URL}/skills/id/${id}/files`, {
+		method: 'POST',
+		headers: {
+			Accept: 'application/json',
+			'Content-Type': 'application/json',
+			authorization: `Bearer ${token}`
+		},
+		body: JSON.stringify({
+			path,
+			content
+		})
+	})
+		.then(async (res) => {
+			if (!res.ok) throw await res.json();
+			return res.json();
+		})
+		.catch((err) => {
+			error = err.detail;
+			console.error(err);
+			return null;
+		});
+
+	if (error) {
+		throw error;
+	}
+
+	return res;
+};
+
+export const updateSkillFileContent = async (
+	token: string,
+	id: string,
+	{ path, content }: { path: string; content: string }
+) => {
+	let error = null;
+
+	const res = await fetch(`${WEBUI_API_BASE_URL}/skills/id/${id}/files`, {
+		method: 'PUT',
+		headers: {
+			Accept: 'application/json',
+			'Content-Type': 'application/json',
+			authorization: `Bearer ${token}`
+		},
+		body: JSON.stringify({
+			path,
+			content
+		})
+	})
+		.then(async (res) => {
+			if (!res.ok) throw await res.json();
+			return res.json();
+		})
+		.catch((err) => {
+			error = err.detail;
+			console.error(err);
+			return null;
+		});
+
+	if (error) {
+		throw error;
+	}
+
+	return res;
+};
+
+export const moveSkillFile = async (
+	token: string,
+	id: string,
+	{ from_path, to_path }: { from_path: string; to_path: string }
+) => {
+	let error = null;
+
+	const res = await fetch(`${WEBUI_API_BASE_URL}/skills/id/${id}/files/move`, {
+		method: 'POST',
+		headers: {
+			Accept: 'application/json',
+			'Content-Type': 'application/json',
+			authorization: `Bearer ${token}`
+		},
+		body: JSON.stringify({
+			from_path,
+			to_path
+		})
+	})
+		.then(async (res) => {
+			if (!res.ok) throw await res.json();
+			return res.json();
+		})
+		.catch((err) => {
+			error = err.detail;
+			console.error(err);
+			return null;
+		});
+
+	if (error) {
+		throw error;
+	}
+
+	return res;
+};
+
+export const removeSkillFilePath = async (token: string, id: string, path: string) => {
+	let error = null;
+
+	const res = await fetch(`${WEBUI_API_BASE_URL}/skills/id/${id}/files/remove`, {
+		method: 'POST',
+		headers: {
+			Accept: 'application/json',
+			'Content-Type': 'application/json',
+			authorization: `Bearer ${token}`
+		},
+		body: JSON.stringify({
+			path
+		})
+	})
+		.then(async (res) => {
+			if (!res.ok) throw await res.json();
+			return res.json();
+		})
+		.catch((err) => {
+			error = err.detail;
+			console.error(err);
+			return null;
+		});
+
+	if (error) {
+		throw error;
+	}
+
+	return res;
+};
+
+export const getSkillFileContentBlob = async (
+	token: string,
+	id: string,
+	path: string
+): Promise<Blob> => {
+	let error = null;
+
+	const res = await fetch(
+		`${WEBUI_API_BASE_URL}/skills/id/${id}/files/content?path=${encodeURIComponent(path)}`,
+		{
+			method: 'GET',
+			headers: {
+				authorization: `Bearer ${token}`
+			}
+		}
+	)
+		.then(async (res) => {
+			if (!res.ok) throw await res.json();
+			return res.blob();
+		})
+		.catch((err) => {
+			error = err.detail ?? err;
+			console.error(err);
+			return null;
+		});
+
+	if (error || !res) {
+		throw error ?? new Error('Failed to fetch skill file content.');
+	}
+
+	return res;
+};
+
+export const getSkillFileList = async (token: string, id: string, page: number = 1) => {
+	let error = null;
+
+	const searchParams = new URLSearchParams();
+	searchParams.append('page', page.toString());
+
+	const res = await fetch(
+		`${WEBUI_API_BASE_URL}/skills/id/${id}/files?${searchParams.toString()}`,
+		{
+			method: 'GET',
+			headers: {
+				Accept: 'application/json',
+				'Content-Type': 'application/json',
+				authorization: `Bearer ${token}`
+			}
+		}
+	)
+		.then(async (res) => {
+			if (!res.ok) throw await res.json();
+			return res.json();
+		})
+		.then((json) => {
+			return json;
+		})
+		.catch((err) => {
+			error = err.detail;
+			console.error(err);
+			return null;
+		});
+
+	if (error) {
+		throw error;
+	}
+
+	return res;
+};

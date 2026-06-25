@@ -292,6 +292,10 @@ openWebui:
     featurePrompts: "True"
     featureTools: "False"
     featureSkills: "False"
+    # Soev skill-bundles: simple skills (files only) and full execution.
+    # Both off by default; staging sets them "True" for the execution rollout.
+    featureSkillFiles: "False"
+    enableSkillExecution: "False"
     featureBuiltinTools: "False"
     featureAdminEvaluations: "True"
     featureAdminFunctions: "False"

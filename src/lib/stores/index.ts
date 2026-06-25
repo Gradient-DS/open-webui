@@ -412,6 +412,7 @@ type Config = {
 		feature_agent_api_enabled?: boolean;
 		feature_chat_controls_sections?: string[];
 		feature_skills?: boolean;
+		feature_skill_files?: boolean;
 		feature_builtin_tools?: boolean;
 		feature_strict_data_separation?: boolean;
 		feature_tool_servers?: boolean;

@@ -110,6 +110,7 @@ from open_webui.routers import (
     prompts,
     evaluations,
     skills,
+    skill_files,
     tools,
     users,
     utils,
@@ -596,6 +597,8 @@ from open_webui.config import (
     FEATURE_PROMPTS,
     FEATURE_TOOLS,
     FEATURE_SKILLS,
+    FEATURE_SKILL_FILES,
+    ENABLE_SKILL_EXECUTION,
     FEATURE_WEBPAGE_URL,
     FEATURE_REFERENCE_CHATS,
     FEATURE_SIMPLE_ASSISTANT_BUILDER,
@@ -2117,6 +2120,8 @@ app.include_router(discovery.router, prefix='/api/v1/discovery', tags=['discover
 app.include_router(prompts.router, prefix='/api/v1/prompts', tags=['prompts'])
 app.include_router(tools.router, prefix='/api/v1/tools', tags=['tools'])
 app.include_router(skills.router, prefix='/api/v1/skills', tags=['skills'])
+if FEATURE_SKILL_FILES:
+    app.include_router(skill_files.router, prefix='/api/v1/skills', tags=['skills'])
 
 app.include_router(memories.router, prefix='/api/v1/memories', tags=['memories'])
 app.include_router(folders.router, prefix='/api/v1/folders', tags=['folders'])
@@ -3318,6 +3323,8 @@ async def get_app_config(request: Request):
                     'feature_prompts': FEATURE_PROMPTS,
                     'feature_tools': FEATURE_TOOLS,
                     'feature_skills': FEATURE_SKILLS,
+                    'feature_skill_files': FEATURE_SKILL_FILES,
+                    'enable_skill_execution': ENABLE_SKILL_EXECUTION,
                     'feature_admin_evaluations': FEATURE_ADMIN_EVALUATIONS,
                     'feature_admin_functions': FEATURE_ADMIN_FUNCTIONS,
                     'feature_admin_settings': FEATURE_ADMIN_SETTINGS,
