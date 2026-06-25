@@ -16,12 +16,14 @@
 		createNewSkill,
 		createSkillFile,
 		createSkillFileInline,
+		getSkillFileList,
+		getSkillFileContentBlob,
 		deleteSkillById,
 		toggleSkillById
 	} from '$lib/apis/skills';
 	import { capitalizeFirstLetter, parseFrontmatter, formatSkillName, slugify } from '$lib/utils';
 	import { uploadFile } from '$lib/apis/files';
-	import { parseSkillBundle, isTextPath } from '$lib/utils/skills/bundle';
+	import { parseSkillBundle, buildSkillBundle, isTextPath } from '$lib/utils/skills/bundle';
 	import TagInput from '$lib/components/common/Tags/TagInput.svelte';
 
 	import Tooltip from '../common/Tooltip.svelte';
@@ -186,6 +188,42 @@
 		page = 1;
 		loadSkillItems();
 		_skills.set(await getSkills(localStorage.token));
+	};
+
+	const exportBundleHandler = async (skill) => {
+		const _skill = await getSkillById(localStorage.token, skill.id).catch((error) => {
+			toast.error(`${error}`);
+			return null;
+		});
+		if (!_skill) return;
+
+		// The file-list route returns at most the first page (no pagination param),
+		// so a skill with more files than that can only be partially exported. Warn
+		// loudly rather than silently dropping the remainder.
+		const res = await getSkillFileList(localStorage.token, _skill.id).catch(() => null);
+		const items = res?.items ?? [];
+		const total = res?.total ?? items.length;
+		if (total > items.length) {
+			toast.warning(
+				$i18n.t('Only the first {{count}} of {{total}} files were exported.', {
+					count: items.length,
+					total
+				})
+			);
+		}
+
+		const bundleFiles = [];
+		for (const item of items) {
+			try {
+				const blob = await getSkillFileContentBlob(localStorage.token, _skill.id, item.path);
+				bundleFiles.push({ path: item.path, blob });
+			} catch (e) {
+				toast.error($i18n.t('Failed to export file: {{path}}', { path: item.path }));
+			}
+		}
+
+		const blob = await buildSkillBundle(_skill.content || '', bundleFiles);
+		saveAs(blob, `${_skill.name}.skill`);
 	};
 
 	const deleteHandler = async (skill) => {
@@ -540,6 +578,9 @@
 											}}
 											exportHandler={() => {
 												exportHandler(skill);
+											}}
+											exportBundleHandler={() => {
+												exportBundleHandler(skill);
 											}}
 											deleteHandler={async () => {
 												selectedSkill = skill;
