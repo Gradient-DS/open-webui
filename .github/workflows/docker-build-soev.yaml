@@ -52,16 +52,16 @@ jobs:
           echo "PLATFORM_PAIR=${platform//\//-}" >> $GITHUB_ENV
 
       - name: Checkout repository
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6
 
       - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
+        uses: docker/setup-qemu-action@v4
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@v4
 
       - name: Log in to the Container registry
-        uses: docker/login-action@v3
+        uses: docker/login-action@v4
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
@@ -69,7 +69,7 @@ jobs:
 
       - name: Log in to Harbor
         if: vars.HARBOR_REGISTRY != ''
-        uses: docker/login-action@v3
+        uses: docker/login-action@v4
         with:
           registry: ${{ vars.HARBOR_REGISTRY }}
           username: ${{ secrets.HARBOR_ROBOT_USER }}
@@ -77,7 +77,7 @@ jobs:
 
       - name: Extract metadata for Docker images
         id: meta
-        uses: docker/metadata-action@v5
+        uses: docker/metadata-action@v6
         with:
           images: ${{ env.FULL_IMAGE_NAME }}
           tags: |
@@ -91,7 +91,7 @@ jobs:
 
       - name: Extract metadata for Docker cache
         id: cache-meta
-        uses: docker/metadata-action@v5
+        uses: docker/metadata-action@v6
         with:
           images: ${{ env.FULL_IMAGE_NAME }}
           tags: |
@@ -102,7 +102,7 @@ jobs:
             latest=false
 
       - name: Build Docker image (slim)
-        uses: docker/build-push-action@v5
+        uses: docker/build-push-action@v7
         id: build
         with:
           context: .
@@ -125,7 +125,7 @@ jobs:
           touch "/tmp/digests/${digest#sha256:}"
 
       - name: Upload digest
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: digests-slim-${{ env.PLATFORM_PAIR }}
           path: /tmp/digests/*
@@ -151,17 +151,17 @@ jobs:
           IMAGE_NAME: '${{ github.repository }}'
 
       - name: Download digests
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           pattern: digests-slim-*
           path: /tmp/digests
           merge-multiple: true
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@v4
 
       - name: Log in to the Container registry
-        uses: docker/login-action@v3
+        uses: docker/login-action@v4
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
@@ -169,7 +169,7 @@ jobs:
 
       - name: Log in to Harbor
         if: vars.HARBOR_REGISTRY != ''
-        uses: docker/login-action@v3
+        uses: docker/login-action@v4
         with:
           registry: ${{ vars.HARBOR_REGISTRY }}
           username: ${{ secrets.HARBOR_ROBOT_USER }}
@@ -177,7 +177,7 @@ jobs:
 
       - name: Extract metadata for Docker images
         id: meta
-        uses: docker/metadata-action@v5
+        uses: docker/metadata-action@v6
         with:
           images: |
             ${{ env.FULL_IMAGE_NAME }}
@@ -218,7 +218,7 @@ jobs:
       packages: write
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6
 
       - name: Set up Helm
         uses: azure/setup-helm@v4
