@@ -1787,7 +1787,7 @@ async def process_file(
             hash = calculate_sha256_string(text_content)
 
             if request.app.state.config.BYPASS_EMBEDDING_AND_RETRIEVAL:
-                await Files.update_file_data_by_id(file.id, {'status': 'completed'}, db=db)
+                await Files.set_status(file.id, 'completed', db=db)
                 await Files.update_file_hash_by_id(file.id, hash, db=db)
                 return {
                     'status': True,
@@ -1815,11 +1815,7 @@ async def process_file(
                                 {'collection_name': collection_name},
                                 db=session,
                             )
-                            await Files.update_file_data_by_id(
-                                file.id,
-                                {'status': 'completed'},
-                                db=session,
-                            )
+                            await Files.set_status(file.id, 'completed', db=session)
                             await Files.update_file_hash_by_id(file.id, hash, db=session)
 
                         return {
@@ -1859,11 +1855,7 @@ async def process_file(
                                 db=session,
                             )
 
-                            await Files.update_file_data_by_id(
-                                file.id,
-                                {'status': 'completed'},
-                                db=session,
-                            )
+                            await Files.set_status(file.id, 'completed', db=session)
                             await Files.update_file_hash_by_id(file.id, hash, db=session)
 
                             return {
@@ -1881,11 +1873,7 @@ async def process_file(
             log.exception(e)
             # Fresh session for error status update.
             async with get_async_db() as session:
-                await Files.update_file_data_by_id(
-                    file.id,
-                    {'status': 'failed'},
-                    db=session,
-                )
+                await Files.set_status(file.id, 'failed', error=str(e), db=session)
                 # Clear the hash so the file can be re-uploaded after fixing the issue
                 await Files.update_file_hash_by_id(file.id, None, db=session)
 

@@ -205,14 +205,7 @@ async def process_uploaded_file(
         except Exception as e:
             log.error(f'Error processing file: {file_item.id}')
             error_msg = str(e.detail) if hasattr(e, 'detail') else str(e)
-            await Files.update_file_data_by_id(
-                file_item.id,
-                {
-                    'status': 'failed',
-                    'error': error_msg,
-                },
-                db=db_session,
-            )
+            await Files.set_status(file_item.id, 'failed', error=error_msg, db=db_session)
             await emit_file_status(
                 user_id=user.id,
                 file_id=file_item.id,
@@ -380,6 +373,7 @@ async def upload_file_handler(
                         'content_type': (file.content_type if isinstance(file.content_type, str) else None),
                         'size': len(contents),
                         'data': file_metadata,
+                        **({'status': 'pending'} if process else {}),
                     },
                 }
             ),

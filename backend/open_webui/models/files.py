@@ -404,7 +404,29 @@ class FilesTable:
             except Exception:
                 return None
 
-                return False
+    async def set_status(
+        self,
+        id: str,
+        status: str,
+        error: Optional[str] = None,
+        db: Optional[AsyncSession] = None,
+    ) -> Optional['FileModel']:
+        """Set per-file sync status in BOTH data and meta.
+
+        Dual-write: data is the source of truth for existing readers
+        (sync dedup ``_is_fully_ingested``, the full-content list path,
+        the frontend ``data.status`` fallback).  meta is the cheap column
+        read by the KB file-list query (Task 3) to avoid de-TOASTing the
+        large content field.
+
+        Only status/error keys are sent to each update so the underlying
+        merge in ``update_file_data_by_id`` / ``update_file_metadata_by_id``
+        preserves all other existing keys (e.g. ``data.content``,
+        ``meta.relative_path``, ``meta.confluence_*``).
+        """
+        payload: dict = {'status': status, 'error': error}
+        await self.update_file_metadata_by_id(id, payload, db=db)
+        return await self.update_file_data_by_id(id, payload, db=db)
 
     async def delete_file_by_id(self, id: str, db: Optional[AsyncSession] = None) -> bool:
         # FileAttachments has no FK CASCADE — cascade-clean orphan rows

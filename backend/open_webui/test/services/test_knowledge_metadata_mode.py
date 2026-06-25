@@ -131,11 +131,20 @@ async def _insert_file(
     content: str = 'hello world content',
     error: str | None = None,
 ) -> str:
+    """Insert a file with status/error dual-written to both ``data`` and ``meta``.
+
+    Task 1 ensures all new writes go to both columns; Task 2 backfills existing
+    rows.  Tests that seed with this helper mirror real post-backfill data.
+    """
     file_id = file_id or str(uuid.uuid4())
     now = int(time.time())
     data: dict = {'status': status, 'content': content}
     if error is not None:
         data['error'] = error
+    # Dual-write status/error to meta (mirrors Task 1 write path)
+    meta: dict = {'name': filename, 'content_type': 'application/pdf', 'size': 1024, 'status': status}
+    if error is not None:
+        meta['error'] = error
     async with Session() as s:
         s.add(
             File(
@@ -145,7 +154,7 @@ async def _insert_file(
                 filename=filename,
                 path=f'/files/{filename}',
                 data=data,
-                meta={'name': filename, 'content_type': 'application/pdf', 'size': 1024},
+                meta=meta,
                 created_at=now,
                 updated_at=now,
             )
@@ -337,6 +346,277 @@ async def test_metadata_mode_exposes_error_field(db_session):
     item_dict = result.items[0].model_dump()
     assert item_dict.get('status') == 'error'
     assert item_dict.get('error') == 'parse failed: unsupported format'
+
+
+async def _insert_file_with_meta_status(
+    Session,
+    *,
+    file_id: str | None = None,
+    user_id: str = 'user-1',
+    filename: str = 'doc.pdf',
+    data_status: str = 'processing',
+    meta_status: str = 'completed',
+    content: str = 'file content body',
+    meta_error: str | None = None,
+    data_error: str | None = None,
+) -> str:
+    """Insert a file where ``meta.status`` and ``data.status`` differ.
+
+    This lets tests prove that the metadata path sources status from ``meta``
+    (the small column) and NOT from ``data`` (which holds content and would
+    cause a de-TOAST on Postgres).
+    """
+    file_id = file_id or str(uuid.uuid4())
+    now = int(time.time())
+    data: dict = {'status': data_status, 'content': content}
+    if data_error is not None:
+        data['error'] = data_error
+    meta: dict = {
+        'name': filename,
+        'content_type': 'application/pdf',
+        'size': 1024,
+        'status': meta_status,
+    }
+    if meta_error is not None:
+        meta['error'] = meta_error
+    async with Session() as s:
+        s.add(
+            File(
+                id=file_id,
+                user_id=user_id,
+                hash='abc123',
+                filename=filename,
+                path=f'/files/{filename}',
+                data=data,
+                meta=meta,
+                created_at=now,
+                updated_at=now,
+            )
+        )
+        await s.commit()
+    return file_id
+
+
+# ---------------------------------------------------------------------------
+# TDD Tests — Task 3: status/error sourced from meta (RED before impl)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_metadata_mode_sources_status_from_meta_not_data(db_session):
+    """Metadata path must return ``meta.status``, NOT ``data.status``.
+
+    The whole point of Task 3: ``data`` holds markdown content and causes a
+    Postgres de-TOAST (~1 s for 2500 files); ``meta`` is tiny and avoids it.
+    We set ``meta.status='completed'`` and ``data.status='processing'`` so
+    that a wrong implementation (reading data) would return 'processing' and
+    fail this assertion.
+    """
+    user_id = 'user-1'
+    await _insert_user(db_session, user_id=user_id)
+    kb_id = await _insert_kb(db_session, user_id=user_id)
+    file_id = await _insert_file_with_meta_status(
+        db_session,
+        user_id=user_id,
+        filename='check.pdf',
+        data_status='processing',  # stale / wrong value — must NOT appear
+        meta_status='completed',  # correct value — must appear in response
+    )
+    await _link_file_to_kb(db_session, kb_id=kb_id, file_id=file_id, user_id=user_id)
+
+    result = await Knowledges.search_files_by_id(
+        kb_id,
+        user_id,
+        filter={},
+        skip=0,
+        limit=30,
+        metadata_only=True,
+    )
+
+    assert result.total == 1
+    item_dict = result.items[0].model_dump()
+    assert item_dict.get('status') == 'completed', (
+        f"Expected status='completed' (from meta), got {item_dict.get('status')!r}. "
+        'Implementation must read from File.meta, not File.data.'
+    )
+
+
+@pytest.mark.asyncio
+async def test_metadata_mode_sources_error_from_meta_not_data(db_session):
+    """Metadata path must return ``meta.error``, NOT ``data.error``."""
+    user_id = 'user-1'
+    await _insert_user(db_session, user_id=user_id)
+    kb_id = await _insert_kb(db_session, user_id=user_id)
+    file_id = await _insert_file_with_meta_status(
+        db_session,
+        user_id=user_id,
+        filename='broken.pdf',
+        data_status='error',
+        meta_status='error',
+        data_error='old error from data',
+        meta_error='real error from meta',  # must be in response
+    )
+    await _link_file_to_kb(db_session, kb_id=kb_id, file_id=file_id, user_id=user_id)
+
+    result = await Knowledges.search_files_by_id(
+        kb_id,
+        user_id,
+        filter={},
+        skip=0,
+        limit=30,
+        metadata_only=True,
+    )
+
+    assert result.total == 1
+    item_dict = result.items[0].model_dump()
+    assert item_dict.get('error') == 'real error from meta', (
+        f'Expected error from meta, got {item_dict.get("error")!r}. '
+        'Implementation must read from File.meta, not File.data.'
+    )
+
+
+@pytest.mark.asyncio
+async def test_metadata_mode_status_none_when_meta_key_absent(db_session):
+    """When ``meta`` has no ``status`` key, result status should be None (not error).
+
+    This covers a pre-backfill edge case (rows created before Task 1).
+    The implementation must NOT fall back to ``data`` — it must return None.
+    We insert a file manually with status only in ``data`` (no ``status`` in ``meta``).
+    """
+    user_id = 'user-1'
+    await _insert_user(db_session, user_id=user_id)
+    kb_id = await _insert_kb(db_session, user_id=user_id)
+
+    # Insert a file with status ONLY in data, meta has no 'status' key.
+    # This simulates a pre-backfill row that Task 2 hasn't touched yet.
+    file_id = str(uuid.uuid4())
+    now = int(time.time())
+    async with db_session() as s:
+        s.add(
+            File(
+                id=file_id,
+                user_id=user_id,
+                hash='abc123',
+                filename='no-meta-status.pdf',
+                path='/files/no-meta-status.pdf',
+                data={'status': 'completed', 'content': 'some content'},
+                # Deliberately no 'status' key in meta
+                meta={'name': 'no-meta-status.pdf', 'content_type': 'application/pdf', 'size': 1024},
+                created_at=now,
+                updated_at=now,
+            )
+        )
+        await s.commit()
+    await _link_file_to_kb(db_session, kb_id=kb_id, file_id=file_id, user_id=user_id)
+
+    result = await Knowledges.search_files_by_id(
+        kb_id,
+        user_id,
+        filter={},
+        skip=0,
+        limit=30,
+        metadata_only=True,
+    )
+
+    assert result.total == 1
+    item_dict = result.items[0].model_dump()
+    # meta has no status key → status must be None (no fallback to data)
+    assert item_dict.get('status') is None, (
+        f'Expected status=None (meta key absent, no fallback to data), got {item_dict.get("status")!r}.'
+    )
+
+
+@pytest.mark.asyncio
+async def test_metadata_mode_total_correct_no_filter(db_session):
+    """``total`` must equal the number of files linked to the KB (no filter)."""
+    user_id = 'user-1'
+    await _insert_user(db_session, user_id=user_id)
+    kb_id = await _insert_kb(db_session, user_id=user_id)
+    for i in range(3):
+        fid = await _insert_file(
+            db_session,
+            file_id=str(uuid.uuid4()),
+            user_id=user_id,
+            filename=f'file-{i}.pdf',
+        )
+        await _link_file_to_kb(db_session, kb_id=kb_id, file_id=fid, user_id=user_id)
+
+    result = await Knowledges.search_files_by_id(
+        kb_id,
+        user_id,
+        filter={},
+        skip=0,
+        limit=1,  # only page 1 — total must still be 3
+        metadata_only=True,
+    )
+
+    assert result.total == 3, f'Expected total=3, got {result.total}'
+    assert len(result.items) == 1  # pagination respected
+
+
+@pytest.mark.asyncio
+async def test_metadata_mode_total_correct_with_query_filter(db_session):
+    """``total`` must reflect only matched files when a content ``query`` is active."""
+    user_id = 'user-1'
+    await _insert_user(db_session, user_id=user_id)
+    kb_id = await _insert_kb(db_session, user_id=user_id)
+
+    match_id = await _insert_file(
+        db_session,
+        file_id=str(uuid.uuid4()),
+        user_id=user_id,
+        filename='match.pdf',
+        content='needle in haystack',
+    )
+    for i in range(2):
+        fid = await _insert_file(
+            db_session,
+            file_id=str(uuid.uuid4()),
+            user_id=user_id,
+            filename=f'nomatch-{i}.pdf',
+            content='irrelevant content',
+        )
+        await _link_file_to_kb(db_session, kb_id=kb_id, file_id=fid, user_id=user_id)
+    await _link_file_to_kb(db_session, kb_id=kb_id, file_id=match_id, user_id=user_id)
+
+    result = await Knowledges.search_files_by_id(
+        kb_id,
+        user_id,
+        filter={'query': 'needle'},
+        skip=0,
+        limit=30,
+        metadata_only=True,
+    )
+
+    assert result.total == 1, f'Expected total=1 (query matched 1), got {result.total}'
+    assert result.items[0].filename == 'match.pdf'
+
+
+@pytest.mark.asyncio
+async def test_metadata_mode_total_correct_with_view_option(db_session):
+    """``total`` must reflect only the user's own files when view_option='created'."""
+    owner_id = 'user-owner'
+    other_id = 'user-other'
+    await _insert_user(db_session, user_id=owner_id)
+    await _insert_user(db_session, user_id=other_id)
+    kb_id = await _insert_kb(db_session, user_id=owner_id)
+
+    own_file = await _insert_file(db_session, file_id=str(uuid.uuid4()), user_id=owner_id, filename='own.pdf')
+    shared_file = await _insert_file(db_session, file_id=str(uuid.uuid4()), user_id=other_id, filename='shared.pdf')
+    await _link_file_to_kb(db_session, kb_id=kb_id, file_id=own_file, user_id=owner_id)
+    await _link_file_to_kb(db_session, kb_id=kb_id, file_id=shared_file, user_id=other_id)
+
+    result = await Knowledges.search_files_by_id(
+        kb_id,
+        owner_id,
+        filter={'view_option': 'created'},
+        skip=0,
+        limit=30,
+        metadata_only=True,
+    )
+
+    assert result.total == 1, f"Expected total=1 (owner's own file only), got {result.total}"
+    assert result.items[0].filename == 'own.pdf'
 
 
 def test_knowledge_file_list_response_union_serialization():
