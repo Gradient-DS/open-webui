@@ -14,10 +14,14 @@
 		getSkillItems,
 		exportSkills,
 		createNewSkill,
+		createSkillFile,
+		createSkillFileInline,
 		deleteSkillById,
 		toggleSkillById
 	} from '$lib/apis/skills';
-	import { capitalizeFirstLetter, parseFrontmatter, formatSkillName } from '$lib/utils';
+	import { capitalizeFirstLetter, parseFrontmatter, formatSkillName, slugify } from '$lib/utils';
+	import { uploadFile } from '$lib/apis/files';
+	import { parseSkillBundle, isTextPath } from '$lib/utils/skills/bundle';
 	import TagInput from '$lib/components/common/Tags/TagInput.svelte';
 
 	import Tooltip from '../common/Tooltip.svelte';
@@ -123,6 +127,67 @@
 		}
 	};
 
+	const importSkillBundle = async (file: File) => {
+		let parsed;
+		try {
+			parsed = await parseSkillBundle(file);
+		} catch (e) {
+			toast.error($i18n.t('Not a valid skill bundle (no SKILL.md).'));
+			return;
+		}
+
+		const fm = parseFrontmatter(parsed.skillMd) as { name?: string; description?: string };
+		const baseName = file.name.replace(/\.skill$/, '');
+		const name = formatSkillName(fm.name || baseName);
+
+		let created;
+		try {
+			created = await createNewSkill(localStorage.token, {
+				id: slugify(name),
+				name,
+				description: fm.description || '',
+				content: parsed.skillMd,
+				is_active: false,
+				meta: { tags: [] },
+				access_grants: []
+			});
+		} catch (e) {
+			toast.error(`${e}`);
+			return;
+		}
+
+		for (const bf of parsed.files) {
+			try {
+				if (isTextPath(bf.path)) {
+					const text = await bf.blob.text();
+					await createSkillFileInline(localStorage.token, created.id, {
+						path: bf.path,
+						content: text
+					});
+				} else {
+					const filename = bf.path.split('/').pop() || bf.path;
+					const uploaded = await uploadFile(
+						localStorage.token,
+						new File([bf.blob], filename),
+						null,
+						false
+					);
+					await createSkillFile(localStorage.token, created.id, {
+						path: bf.path,
+						file_id: uploaded.id
+					});
+				}
+			} catch (e) {
+				toast.error($i18n.t('Failed to import file: {{path}}', { path: bf.path }));
+			}
+		}
+
+		toast.success($i18n.t('Skill imported successfully'));
+		page = 1;
+		loadSkillItems();
+		_skills.set(await getSkills(localStorage.token));
+	};
+
 	const deleteHandler = async (skill) => {
 		const res = await deleteSkillById(localStorage.token, skill.id).catch((error) => {
 			toast.error(`${error}`);
@@ -199,7 +264,7 @@
 					bind:this={importInputElement}
 					bind:files={importFiles}
 					type="file"
-					accept=".md,.json"
+					accept=".md,.json,.skill"
 					hidden
 					on:change={() => {
 						if (importFiles && importFiles.length > 0) {
@@ -232,6 +297,8 @@
 									}
 								};
 								reader.readAsText(file);
+							} else if (ext === 'skill') {
+								importSkillBundle(file);
 							} else {
 								// Markdown import: parse frontmatter and open in editor
 								const reader = new FileReader();
