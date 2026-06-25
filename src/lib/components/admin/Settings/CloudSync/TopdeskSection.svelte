@@ -14,7 +14,6 @@
 		type TopdeskSharedKbStatus,
 		type TopdeskKbItem
 	} from '$lib/apis/topdesk';
-	import { getAllUsers } from '$lib/apis/users';
 	import Switch from '$lib/components/common/Switch.svelte';
 	import Spinner from '$lib/components/common/Spinner.svelte';
 	import SensitiveInput from '$lib/components/common/SensitiveInput.svelte';
@@ -63,13 +62,38 @@
 	// Mirror the enable flag out so the card header badge stays in sync.
 	$: enabled = ENABLE_TOPDESK_INTEGRATION;
 
+	// Autosave: notify the orchestrator whenever a persisted field changes. The
+	// baseline is re-established on every applyTopdeskConfig() (load/save), and the
+	// first run only seeds it — so neither load nor save triggers a spurious save.
+	export let onChange: (() => void) | null = null;
+	let savedBaseline: string | null = null;
+	$: changeSnapshot = JSON.stringify([
+		ENABLE_TOPDESK_INTEGRATION,
+		ENABLE_TOPDESK_SYNC,
+		TOPDESK_URL,
+		TOPDESK_USERNAME,
+		appPassword,
+		TOPDESK_SYNC_INTERVAL_MINUTES,
+		TOPDESK_MAX_ITEMS_PER_SYNC,
+		TOPDESK_SYNC_SCOPE
+	]);
+	$: {
+		if (savedBaseline === null) {
+			savedBaseline = changeSnapshot;
+		} else if (changeSnapshot !== savedBaseline) {
+			savedBaseline = changeSnapshot;
+			onChange?.();
+		}
+	}
+
 	// Shared-KB owner pick: a transient form field, not a persisted config. On
 	// provision it becomes ``kb.user_id``. Seeded from the KB row's owner on
 	// initial status load so the dropdown reflects the existing owner when
 	// re-provisioning.
 	let sharedKbOwnerId = '';
 	let sharedKbOwnerInitialized = false;
-	let adminUsers: { id: string; name: string; email: string }[] = [];
+	// Passed in from CloudSync.svelte (fetched once there, shared with Confluence).
+	export let adminUsers: { id: string; name: string; email: string }[] = [];
 	let sharedKbStatus: TopdeskSharedKbStatus | null = null;
 
 	const applyTopdeskConfig = (config: TopdeskConfigResponse | null) => {
@@ -82,27 +106,17 @@
 		TOPDESK_SYNC_INTERVAL_MINUTES = config.TOPDESK_SYNC_INTERVAL_MINUTES ?? 60;
 		TOPDESK_MAX_ITEMS_PER_SYNC = config.TOPDESK_MAX_ITEMS_PER_SYNC ?? 0;
 		TOPDESK_SYNC_SCOPE = config.TOPDESK_SYNC_SCOPE ?? 'ssp';
+		// Re-baseline against the freshly-loaded/saved values so the snapshot
+		// watcher treats them as the new "clean" state.
+		savedBaseline = null;
 	};
 
 	export async function load() {
-		const [config, users, shared] = await Promise.all([
+		const [config, shared] = await Promise.all([
 			getTopdeskConfig(localStorage.token),
-			getAllUsers(localStorage.token).catch(() => null),
 			getTopdeskSharedKbStatus(localStorage.token).catch(() => null)
 		]);
 		applyTopdeskConfig(config);
-		// Owner dropdown is limited to admins — they are the only valid owners of
-		// a shared, org-wide knowledge base.
-		adminUsers = (
-			(users?.users ?? []) as {
-				id: string;
-				name: string;
-				email: string;
-				role: string;
-			}[]
-		)
-			.filter((u) => u.role === 'admin')
-			.map((u) => ({ id: u.id, name: u.name, email: u.email }));
 		sharedKbStatus = shared;
 		// Seed the owner dropdown from the KB row's owner on first load only;
 		// subsequent reloads leave the admin's in-progress pick alone.

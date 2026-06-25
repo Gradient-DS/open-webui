@@ -644,6 +644,8 @@ from open_webui.config import (
     MODEL_WHITELIST,
     # Per-deployment model -> datacenter/hosting mapping (model picker)
     MODEL_HOSTING,
+    # Per-deployment model -> profile mapping (model picker descriptions/meters)
+    MODEL_PROFILES,
 )
 from open_webui.env import (
     ENABLE_CUSTOM_MODEL_FALLBACK,
@@ -3158,6 +3160,28 @@ def _parse_model_hosting(raw: str) -> list[dict]:
         return []
 
 
+def _parse_model_profiles(raw: str) -> list[dict]:
+    """Parse the MODEL_PROFILES env (a JSON list of {match, profile} rules) for the
+    model picker. Defensive by design: any malformed / non-list / wrong-shaped value
+    degrades to [] (models render plain) with a warning rather than crashing boot, so
+    a bad deployment value can never take the app down. `profile` is passed through
+    as-is (a free-form dict: info / bestFor / speed / quality / eco)."""
+    if not raw or not raw.strip():
+        return []
+    try:
+        parsed = json.loads(raw)
+        if not isinstance(parsed, list):
+            raise ValueError('MODEL_PROFILES must be a JSON list')
+        return [
+            {'match': str(rule['match']), 'profile': rule['profile']}
+            for rule in parsed
+            if isinstance(rule, dict) and rule.get('match') and isinstance(rule.get('profile'), dict)
+        ]
+    except Exception as e:
+        log.warning(f'Ignoring invalid MODEL_PROFILES ({e}); falling back to no model profiles')
+        return []
+
+
 @app.get('/api/config')
 async def get_app_config(request: Request):
     user = None
@@ -3392,6 +3416,10 @@ async def get_app_config(request: Request):
         # (Helm MODEL_HOSTING env). Top-level + always present so the picker can read
         # it; defaults to [] (no flags) when unset or malformed.
         'model_hosting': _parse_model_hosting(MODEL_HOSTING),
+        # Per-deployment model -> profile mapping for the model picker (Helm
+        # MODEL_PROFILES env). Top-level + always present so the picker can read it;
+        # defaults to [] (plain rendering) when unset or malformed.
+        'model_profiles': _parse_model_profiles(MODEL_PROFILES),
         **(
             {
                 'default_models': app.state.config.DEFAULT_MODELS,

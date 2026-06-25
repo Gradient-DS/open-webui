@@ -26,6 +26,28 @@
 	// Mirror the enable flag out so the card header badge stays in sync.
 	$: enabled = ENABLE_GOOGLE_DRIVE_INTEGRATION;
 
+	// Autosave: notify the orchestrator whenever a persisted field changes. The
+	// baseline is re-established on every apply() (load/save), and the very first
+	// run only seeds it — so neither load nor save ever triggers a spurious save.
+	export let onChange: (() => void) | null = null;
+	let savedBaseline: string | null = null;
+	$: changeSnapshot = JSON.stringify([
+		ENABLE_GOOGLE_DRIVE_INTEGRATION,
+		ENABLE_GOOGLE_DRIVE_SYNC,
+		GOOGLE_DRIVE_CLIENT_ID,
+		GOOGLE_DRIVE_API_KEY,
+		GOOGLE_DRIVE_SYNC_INTERVAL_MINUTES,
+		GOOGLE_DRIVE_MAX_FILES_PER_SYNC
+	]);
+	$: {
+		if (savedBaseline === null) {
+			savedBaseline = changeSnapshot;
+		} else if (changeSnapshot !== savedBaseline) {
+			savedBaseline = changeSnapshot;
+			onChange?.();
+		}
+	}
+
 	const apply = (config: GoogleDriveConfigResponse | null) => {
 		if (!config) return;
 		ENABLE_GOOGLE_DRIVE_INTEGRATION = config.ENABLE_GOOGLE_DRIVE_INTEGRATION ?? false;
@@ -34,6 +56,9 @@
 		GOOGLE_DRIVE_API_KEY = config.GOOGLE_DRIVE_API_KEY ?? '';
 		GOOGLE_DRIVE_SYNC_INTERVAL_MINUTES = config.GOOGLE_DRIVE_SYNC_INTERVAL_MINUTES ?? 60;
 		GOOGLE_DRIVE_MAX_FILES_PER_SYNC = config.GOOGLE_DRIVE_MAX_FILES_PER_SYNC ?? 0;
+		// Re-baseline against the freshly-loaded/saved values so the snapshot
+		// watcher treats them as the new "clean" state.
+		savedBaseline = null;
 	};
 
 	export async function load() {

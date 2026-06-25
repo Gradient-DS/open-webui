@@ -1,7 +1,7 @@
 import json
 import logging
 import time
-from typing import Optional
+from typing import Optional, Union
 import uuid
 
 from sqlalchemy import select, delete, update, or_, func, cast
@@ -10,6 +10,7 @@ from open_webui.internal.db import Base, JSONField, get_async_db_context
 
 from open_webui.models.files import (
     File,
+    FileMeta,
     FileModel,
     FileMetadataResponse,
     FileModelResponse,
@@ -130,13 +131,35 @@ class FileUserResponse(FileModelResponse):
     added_at: Optional[int] = None
 
 
+class FileUserMetadataResponse(BaseModel):
+    """Slim response item for metadata_only mode.
+
+    Contains only the fields the file-list UI needs.  The heavy
+    ``data.content`` blob is intentionally absent — it is never loaded
+    into Python in this path.  ``status`` and ``error`` are projected
+    directly from the JSON column at the database level.
+    """
+
+    id: str
+    user_id: str
+    hash: Optional[str] = None
+    filename: str
+    meta: Optional[FileMeta] = None
+    status: Optional[str] = None  # from meta['status']
+    error: Optional[str] = None  # from meta['error']
+    created_at: int
+    updated_at: Optional[int] = None
+    user: Optional[UserResponse] = None
+    added_at: Optional[int] = None
+
+
 class KnowledgeListResponse(BaseModel):
     items: list[KnowledgeUserModel]
     total: int
 
 
 class KnowledgeFileListResponse(BaseModel):
-    items: list[FileUserResponse]
+    items: list[Union[FileUserResponse, FileUserMetadataResponse]]
     total: int
 
 
@@ -598,35 +621,83 @@ class KnowledgeTable:
         filter: dict,
         skip: int = 0,
         limit: int = 30,
+        metadata_only: bool = False,
         db: Optional[AsyncSession] = None,
     ) -> KnowledgeFileListResponse:
         try:
             async with get_async_db_context(db) as db:
-                stmt = (
-                    select(File, User, KnowledgeFile.created_at)
-                    .join(KnowledgeFile, File.id == KnowledgeFile.file_id)
-                    .outerjoin(User, User.id == KnowledgeFile.user_id)
-                    .filter(KnowledgeFile.knowledge_id == knowledge_id)
-                )
+                if metadata_only:
+                    # Project only the columns we need — the heavy data.content
+                    # blob is NEVER loaded into Python.
+                    # cast(File.data['key'], Text) is the cross-DB JSON text
+                    # extraction idiom already proven in this file (line 621
+                    # uses it for the content WHERE filter).  .astext is
+                    # Postgres-only; cast(..., Text) works on both SQLite and
+                    # Postgres.
+                    stmt = (
+                        select(
+                            File.id,
+                            File.user_id,
+                            File.hash,
+                            File.filename,
+                            File.meta,
+                            File.created_at,
+                            File.updated_at,
+                            cast(File.meta['status'], Text).label('status'),
+                            cast(File.meta['error'], Text).label('error'),
+                            User,
+                            KnowledgeFile.created_at.label('added_at'),
+                        )
+                        .join(KnowledgeFile, File.id == KnowledgeFile.file_id)
+                        .outerjoin(User, User.id == KnowledgeFile.user_id)
+                        .filter(KnowledgeFile.knowledge_id == knowledge_id)
+                    )
+                else:
+                    stmt = (
+                        select(File, User, KnowledgeFile.created_at)
+                        .join(KnowledgeFile, File.id == KnowledgeFile.file_id)
+                        .outerjoin(User, User.id == KnowledgeFile.user_id)
+                        .filter(KnowledgeFile.knowledge_id == knowledge_id)
+                    )
 
                 # Default sort: filename ascending (alphabetical)
                 primary_sort = File.filename.asc()
 
+                # For the metadata path: build a cheap count stmt in parallel.
+                # It starts with the same join + knowledge_id filter but projects
+                # no JSON columns and applies no ORDER BY — the two most expensive
+                # parts of the full stmt subquery.
+                if metadata_only:
+                    count_stmt = (
+                        select(func.count())
+                        .select_from(KnowledgeFile)
+                        .join(File, File.id == KnowledgeFile.file_id)
+                        .filter(KnowledgeFile.knowledge_id == knowledge_id)
+                    )
+
                 if filter:
                     query_key = filter.get('query')
                     if query_key:
-                        stmt = stmt.filter(
-                            or_(
-                                File.filename.ilike(f'%{query_key}%'),
-                                cast(File.data['content'], Text).ilike(f'%{query_key}%'),
-                            )
+                        content_filter = or_(
+                            File.filename.ilike(f'%{query_key}%'),
+                            cast(File.data['content'], Text).ilike(f'%{query_key}%'),
                         )
+                        stmt = stmt.filter(content_filter)
+                        # Content search still needs the File join + data filter
+                        # on the count — this is the one case where touching data
+                        # is unavoidable.  All other count paths avoid data entirely.
+                        if metadata_only:
+                            count_stmt = count_stmt.filter(content_filter)
 
                     view_option = filter.get('view_option')
                     if view_option == 'created':
                         stmt = stmt.filter(KnowledgeFile.user_id == user_id)
+                        if metadata_only:
+                            count_stmt = count_stmt.filter(KnowledgeFile.user_id == user_id)
                     elif view_option == 'shared':
                         stmt = stmt.filter(KnowledgeFile.user_id != user_id)
+                        if metadata_only:
+                            count_stmt = count_stmt.filter(KnowledgeFile.user_id != user_id)
 
                     order_by = filter.get('order_by')
                     direction = filter.get('direction')
@@ -642,8 +713,13 @@ class KnowledgeTable:
                 # Apply sort with secondary key for deterministic pagination
                 stmt = stmt.order_by(primary_sort, File.id.asc())
 
-                # Count BEFORE pagination
-                count_result = await db.execute(select(func.count()).select_from(stmt.subquery()))
+                # Count BEFORE pagination.
+                # metadata_only path: cheap count (no JSON projection, no ORDER BY).
+                # full-content path: existing subquery approach (unchanged).
+                if metadata_only:
+                    count_result = await db.execute(count_stmt)
+                else:
+                    count_result = await db.execute(select(func.count()).select_from(stmt.subquery()))
                 total = count_result.scalar()
 
                 if skip:
@@ -654,15 +730,53 @@ class KnowledgeTable:
                 result = await db.execute(stmt)
                 items = result.all()
 
-                files = []
-                for file, user, added_at in items:
-                    files.append(
-                        FileUserResponse(
-                            **FileModel.model_validate(file).model_dump(),
-                            user=(UserResponse(**UserModel.model_validate(user).model_dump()) if user else None),
-                            added_at=added_at,
+                files: list[Union[FileUserResponse, FileUserMetadataResponse]] = []
+                if metadata_only:
+                    for row in items:
+                        row_map = row._mapping
+                        user_obj = row_map.get('User')
+                        # cast(JSON_col['key'], Text) returns raw JSON text:
+                        # on SQLite that is `"value"` (with surrounding quotes)
+                        # for string fields; on Postgres it is also JSON-encoded.
+                        # Use json.loads() to unwrap consistently on both.
+                        raw_status = row_map.get('status')
+                        raw_error = row_map.get('error')
+                        try:
+                            status_val = json.loads(raw_status) if raw_status is not None else None
+                        except (json.JSONDecodeError, TypeError):
+                            status_val = raw_status
+                        try:
+                            error_val = json.loads(raw_error) if raw_error is not None else None
+                        except (json.JSONDecodeError, TypeError):
+                            error_val = raw_error
+                        files.append(
+                            FileUserMetadataResponse(
+                                id=row_map['id'],
+                                user_id=row_map['user_id'],
+                                hash=row_map.get('hash'),
+                                filename=row_map['filename'],
+                                meta=row_map.get('meta'),
+                                created_at=row_map['created_at'],
+                                updated_at=row_map.get('updated_at'),
+                                status=status_val,
+                                error=error_val,
+                                user=(
+                                    UserResponse(**UserModel.model_validate(user_obj).model_dump())
+                                    if user_obj
+                                    else None
+                                ),
+                                added_at=row_map.get('added_at'),
+                            )
                         )
-                    )
+                else:
+                    for file, user, added_at in items:
+                        files.append(
+                            FileUserResponse(
+                                **FileModel.model_validate(file).model_dump(),
+                                user=(UserResponse(**UserModel.model_validate(user).model_dump()) if user else None),
+                                added_at=added_at,
+                            )
+                        )
 
                 return KnowledgeFileListResponse(items=files, total=total)
         except Exception as e:

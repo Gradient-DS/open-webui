@@ -1,6 +1,7 @@
 import type { PopupRequest, PublicClientApplication } from '@azure/msal-browser';
 import { v4 as uuidv4 } from 'uuid';
 import { WEBUI_BASE_URL } from '$lib/constants';
+import { fetchOneDriveHost } from './onedrive-host';
 
 class OneDriveConfig {
 	private static instance: OneDriveConfig;
@@ -8,6 +9,7 @@ class OneDriveConfig {
 	private clientIdBusiness: string = '';
 	private sharepointUrl: string = '';
 	private sharepointTenantId: string = '';
+	private derivedHost: string | null = null;
 	private msalInstance: PublicClientApplication | null = null;
 	private currentAuthorityType: 'personal' | 'organizations' = 'personal';
 
@@ -106,14 +108,36 @@ class OneDriveConfig {
 		return this.sharepointTenantId;
 	}
 
+	/**
+	 * Ensure an effective SharePoint host is available for `organizations` mode.
+	 * - Static mode (sharepoint_url set): no-op, getBaseUrl() uses it.
+	 * - Derive mode (sharepoint_url blank): derive once per session from the
+	 *   signed-in user's Graph /me/drive webUrl (true per-user multi-tenant).
+	 * - Personal mode: no-op (getBaseUrl returns the fixed consumer picker host).
+	 *
+	 * Must be awaited after initialize() and before any getBaseUrl()/getToken()
+	 * use. The derived value is memoized on `derivedHost`, which deliberately
+	 * survives the per-call getCredentials() reset of `sharepointUrl`.
+	 */
+	public async resolveHost(authorityType?: 'personal' | 'organizations'): Promise<void> {
+		await this.ensureInitialized(authorityType);
+
+		if (this.currentAuthorityType !== 'organizations') return; // personal unaffected
+		if (this.sharepointUrl && this.sharepointUrl !== '') return; // static mode
+		if (this.derivedHost) return; // memoized for the session
+
+		const graphToken = await getGraphApiToken(authorityType); // host-independent
+		this.derivedHost = await fetchOneDriveHost(graphToken);
+	}
+
 	public getBaseUrl(): string {
 		if (this.currentAuthorityType === 'organizations') {
-			if (!this.sharepointUrl || this.sharepointUrl === '') {
+			const host = this.sharepointUrl || this.derivedHost;
+			if (!host || host === '') {
 				throw new Error('Sharepoint URL not configured');
 			}
 
-			let sharePointBaseUrl = this.sharepointUrl.replace(/^https?:\/\//, '');
-			sharePointBaseUrl = sharePointBaseUrl.replace(/\/$/, '');
+			const sharePointBaseUrl = host.replace(/^https?:\/\//, '').replace(/\/$/, '');
 
 			return `https://${sharePointBaseUrl}`;
 		} else {
@@ -450,6 +474,7 @@ export async function openOneDrivePicker(
 	// Initialize OneDrive config with the specified authority type
 	const config = OneDriveConfig.getInstance();
 	await config.initialize(authorityType);
+	await config.resolveHost(authorityType);
 
 	return new Promise((resolve, reject) => {
 		let pickerWindow: Window | null = null;
@@ -659,6 +684,7 @@ export async function openOneDriveFilePickerModal(
 	// Initialize OneDrive config with the specified authority type
 	const config = OneDriveConfig.getInstance();
 	await config.initialize(authorityType);
+	await config.resolveHost(authorityType);
 
 	const channelId = uuidv4();
 	const params = getFilePickerParams(channelId);
@@ -1018,6 +1044,7 @@ export async function openOneDriveFolderPicker(
 	// Initialize OneDrive config with the specified authority type
 	const config = OneDriveConfig.getInstance();
 	await config.initialize(authorityType);
+	await config.resolveHost(authorityType);
 
 	const channelId = uuidv4();
 	const params = getFolderPickerParams(channelId);
@@ -1341,6 +1368,7 @@ export async function openOneDriveItemPicker(
 	// Initialize OneDrive config with the specified authority type
 	const config = OneDriveConfig.getInstance();
 	await config.initialize(authorityType);
+	await config.resolveHost(authorityType);
 
 	const channelId = uuidv4();
 	const params = getItemPickerParams(channelId);
@@ -1700,4 +1728,4 @@ export async function getGraphApiToken(
 	return accessToken;
 }
 
-export { downloadOneDriveFile, getToken };
+export { downloadOneDriveFile, getToken, OneDriveConfig };

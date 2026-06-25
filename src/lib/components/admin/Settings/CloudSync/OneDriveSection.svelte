@@ -29,6 +29,32 @@
 	// Mirror the enable flag out so the card header badge stays in sync.
 	$: enabled = ENABLE_ONEDRIVE_INTEGRATION;
 
+	// Autosave: notify the orchestrator whenever a persisted field changes. The
+	// baseline is re-established on every apply() (load/save), and the very first
+	// run only seeds it — so neither load nor save ever triggers a spurious save.
+	export let onChange: (() => void) | null = null;
+	let savedBaseline: string | null = null;
+	$: changeSnapshot = JSON.stringify([
+		ENABLE_ONEDRIVE_INTEGRATION,
+		ENABLE_ONEDRIVE_SYNC,
+		ENABLE_ONEDRIVE_PERSONAL,
+		ENABLE_ONEDRIVE_BUSINESS,
+		ONEDRIVE_CLIENT_ID_PERSONAL,
+		ONEDRIVE_CLIENT_ID_BUSINESS,
+		ONEDRIVE_SHAREPOINT_URL,
+		ONEDRIVE_SHAREPOINT_TENANT_ID,
+		ONEDRIVE_SYNC_INTERVAL_MINUTES,
+		ONEDRIVE_MAX_FILES_PER_SYNC
+	]);
+	$: {
+		if (savedBaseline === null) {
+			savedBaseline = changeSnapshot;
+		} else if (changeSnapshot !== savedBaseline) {
+			savedBaseline = changeSnapshot;
+			onChange?.();
+		}
+	}
+
 	const apply = (config: OneDriveConfigResponse | null) => {
 		if (!config) return;
 		ENABLE_ONEDRIVE_INTEGRATION = config.ENABLE_ONEDRIVE_INTEGRATION ?? false;
@@ -41,6 +67,9 @@
 		ONEDRIVE_SHAREPOINT_TENANT_ID = config.ONEDRIVE_SHAREPOINT_TENANT_ID ?? '';
 		ONEDRIVE_SYNC_INTERVAL_MINUTES = config.ONEDRIVE_SYNC_INTERVAL_MINUTES ?? 60;
 		ONEDRIVE_MAX_FILES_PER_SYNC = config.ONEDRIVE_MAX_FILES_PER_SYNC ?? 0;
+		// Re-baseline against the freshly-loaded/saved values so the snapshot
+		// watcher treats them as the new "clean" state.
+		savedBaseline = null;
 	};
 
 	export async function load() {

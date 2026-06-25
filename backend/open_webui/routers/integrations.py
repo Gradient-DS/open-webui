@@ -405,13 +405,14 @@ async def _process_parsed_text_document(
             add=True,
             split=True,
         )
-        # Clear the stale ``error`` field too — update_file_data_by_id is a
-        # shallow merge, so without this a row that succeeded after a prior
-        # failure would still carry the old error message in data.error.
-        await Files.update_file_data_by_id(file_id, {'status': 'completed', 'error': None})
+        # Dual-write status into data (existing readers) and meta (cheap
+        # KB file-list read path).  set_status clears the stale ``error``
+        # field in both columns so a re-run after a prior failure does not
+        # leave a stale error message in data.error.
+        await Files.set_status(file_id, 'completed', error=None)
     except Exception as e:
         log.exception(f'Failed to store document {doc.source_id} in vector DB')
-        await Files.update_file_data_by_id(file_id, {'status': 'error', 'error': str(e)})
+        await Files.set_status(file_id, 'error', error=str(e))
         return {
             'source_id': doc.source_id,
             'file_id': file_id,
@@ -472,13 +473,14 @@ async def _process_chunked_text_document(
             add=True,
             split=False,
         )
-        # Clear the stale ``error`` field too — update_file_data_by_id is a
-        # shallow merge, so without this a row that succeeded after a prior
-        # failure would still carry the old error message in data.error.
-        await Files.update_file_data_by_id(file_id, {'status': 'completed', 'error': None})
+        # Dual-write status into data (existing readers) and meta (cheap
+        # KB file-list read path).  set_status clears the stale ``error``
+        # field in both columns so a re-run after a prior failure does not
+        # leave a stale error message in data.error.
+        await Files.set_status(file_id, 'completed', error=None)
     except Exception as e:
         log.exception(f'Failed to store chunked document {doc.source_id} in vector DB')
-        await Files.update_file_data_by_id(file_id, {'status': 'error', 'error': str(e)})
+        await Files.set_status(file_id, 'error', error=str(e))
         return {
             'source_id': doc.source_id,
             'file_id': file_id,
@@ -569,13 +571,14 @@ async def _process_full_document(
             add=True,
             split=True,
         )
-        # Clear the stale ``error`` field too — update_file_data_by_id is a
-        # shallow merge, so without this a row that succeeded after a prior
-        # failure would still carry the old error message in data.error.
-        await Files.update_file_data_by_id(file_id, {'status': 'completed', 'error': None})
+        # Dual-write status into data (existing readers) and meta (cheap
+        # KB file-list read path).  set_status clears the stale ``error``
+        # field in both columns so a re-run after a prior failure does not
+        # leave a stale error message in data.error.
+        await Files.set_status(file_id, 'completed', error=None)
     except Exception as e:
         log.exception(f'Failed to store full document {doc.source_id} in vector DB')
-        await Files.update_file_data_by_id(file_id, {'status': 'error', 'error': str(e)})
+        await Files.set_status(file_id, 'error', error=str(e))
         return {
             'source_id': doc.source_id,
             'file_id': file_id,

@@ -1,4 +1,3 @@
-import modelProfiles from '$lib/data/model-profiles.json';
 import hostingProviders from '$lib/data/hosting-providers.json';
 
 /**
@@ -21,6 +20,30 @@ export type ModelProfile = {
 
 /** Region a model originates from. Not rendered; kept for data/back-compat. */
 export type ModelOrigin = 'EU' | 'US' | 'CN';
+
+/**
+ * A user-facing string that may be localized per UI locale. A plain string is
+ * locale-agnostic (shown as-is in every language). An object is keyed by locale
+ * code (e.g. "en-US", "nl-NL"); resolveLocalizedText picks the active locale with
+ * fallbacks. Used for the free-text profile fields supplied by the deployment.
+ */
+export type LocalizedText = string | Record<string, string>;
+
+/**
+ * Profile as supplied by the deployment (Helm MODEL_PROFILES). Same as ModelProfile
+ * except the free-text fields (info, bestFor, name) may be localized. Flattened to a
+ * ModelProfile (plain strings for the active locale) by resolveModelProfile.
+ */
+export type RawModelProfile = {
+	name?: LocalizedText;
+	bestFor?: LocalizedText;
+	info?: LocalizedText;
+	speed?: number;
+	quality?: number;
+	origin?: ModelOrigin;
+	hosting?: string;
+	eco?: boolean;
+};
 
 /** Country/region codes that have flag artwork in Flag.svelte. */
 export type FlagCode = 'EU' | 'US' | 'CN' | 'NL';
@@ -75,9 +98,9 @@ export function parseHosting(hosting?: string): { label: string; flag?: FlagCode
 	return { label: label || raw, flag };
 }
 
-type ProfileRule = {
+export type ProfileRule = {
 	match: string;
-	profile?: ModelProfile;
+	profile?: RawModelProfile;
 	_comment?: string;
 };
 
@@ -104,8 +127,6 @@ export const PROFILE_AXES = [
 ] as const;
 
 export type ProfileAxisKey = (typeof PROFILE_AXES)[number]['key'];
-
-const rules = modelProfiles as ProfileRule[];
 
 function escapeRegExp(s: string): string {
 	return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -155,25 +176,82 @@ export function hostingFromDeployment(
 }
 
 /**
- * Resolve the effective profile for a model: start from every matching defaults
- * rule (later rules in the file override earlier ones, so specific beats
- * generic), then apply the admin's per-model overrides field-by-field. Blank
- * admin values (undefined / null / '') fall through to the default.
+ * Pick the string for the active locale from a LocalizedText. Plain strings pass
+ * through unchanged. For an object: exact locale match (e.g. "nl-NL") → any key
+ * sharing the language prefix (e.g. "nl") → "en-US"/"en" → the first value.
+ * Returns undefined for a nullish value or an empty object.
  */
-export function resolveModelProfile(model: {
-	id?: string;
-	name?: string;
-	info?: { meta?: { profile?: ModelProfile } };
-}): ModelProfile {
+export function resolveLocalizedText(
+	value: LocalizedText | undefined,
+	locale: string
+): string | undefined {
+	if (value === undefined || value === null) return undefined;
+	if (typeof value === 'string') return value;
+
+	const keys = Object.keys(value);
+	if (!keys.length) return undefined;
+
+	const loc = (locale ?? '').toLowerCase();
+	const lang = loc.split('-')[0];
+
+	const exact = keys.find((k) => k.toLowerCase() === loc);
+	if (exact) return value[exact];
+
+	const byLang = keys.find((k) => k.toLowerCase().split('-')[0] === lang && lang !== '');
+	if (byLang) return value[byLang];
+
+	const en =
+		keys.find((k) => k.toLowerCase() === 'en-us') ??
+		keys.find((k) => k.toLowerCase().split('-')[0] === 'en');
+	if (en) return value[en];
+
+	return value[keys[0]];
+}
+
+/**
+ * Resolve the effective profile for a model from the deployment-supplied rules
+ * (Helm MODEL_PROFILES, surfaced on /api/config as `model_profiles`). Start from
+ * every matching rule (later rules override earlier ones field-by-field, so specific
+ * beats generic), flattening localized free-text (info/bestFor/name) to the active
+ * `locale`, then apply the admin's per-model override (model.info.meta.profile)
+ * field-by-field. Blank values (undefined / null / '') fall through. No rules, or a
+ * model matching no rule, yields {} — the model renders plain (just its name).
+ */
+export function resolveModelProfile(
+	model: {
+		id?: string;
+		name?: string;
+		info?: { meta?: { profile?: ModelProfile } };
+	},
+	profileRules: ProfileRule[] | undefined,
+	locale: string
+): ModelProfile {
 	const id = model?.id ?? '';
 	const name = model?.name ?? '';
 
 	let base: ModelProfile = {};
-	for (const rule of rules) {
-		if (!rule.profile) continue; // skip comment-only entries (e.g. the leading docs entry)
-		if (matchesPattern(rule.match, id, name)) {
-			base = { ...base, ...rule.profile };
-		}
+	for (const rule of profileRules ?? []) {
+		if (!rule.profile) continue; // skip comment-only entries
+		if (!matchesPattern(rule.match, id, name)) continue;
+
+		// Flatten this rule onto the base, copying only the keys it actually sets so
+		// later-wins stays field-by-field (an absent key must not clobber an earlier
+		// match). Localized free-text is resolved to the active locale here.
+		const p = rule.profile;
+		const flat: ModelProfile = {};
+		if (p.speed !== undefined) flat.speed = p.speed;
+		if (p.quality !== undefined) flat.quality = p.quality;
+		if (p.origin !== undefined) flat.origin = p.origin;
+		if (p.hosting !== undefined) flat.hosting = p.hosting;
+		if (p.eco !== undefined) flat.eco = p.eco;
+		const name_ = resolveLocalizedText(p.name, locale);
+		if (name_ !== undefined) flat.name = name_;
+		const bestFor = resolveLocalizedText(p.bestFor, locale);
+		if (bestFor !== undefined) flat.bestFor = bestFor;
+		const info = resolveLocalizedText(p.info, locale);
+		if (info !== undefined) flat.info = info;
+
+		base = { ...base, ...flat };
 	}
 
 	const override = model?.info?.meta?.profile ?? {};

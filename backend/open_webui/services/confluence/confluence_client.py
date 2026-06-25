@@ -22,6 +22,7 @@ import asyncio
 import base64
 import logging
 from typing import Optional, Callable, Awaitable, Dict, Any, List, Tuple
+from urllib.parse import urlparse, parse_qs
 
 import httpx
 
@@ -32,6 +33,42 @@ _API_BASE = 'https://api.atlassian.com/ex/confluence'
 # v2 endpoints accept a cursor in a `cursor` query param; responses carry a
 # `_links.next` string (absolute URL with cursor) when more pages exist.
 _DEFAULT_LIMIT = 100
+
+
+def normalize_site_url(site_url: str) -> str:
+    """Reduce a Confluence site URL to ``scheme://host``.
+
+    Admins often paste a value that includes the ``/wiki`` context path, a
+    trailing slash, or a deep link copied from the browser. Every request
+    appends ``/wiki/api/v2/...``, so a stored ``.../wiki`` would double up into
+    ``.../wiki/wiki/api/v2/...`` and 404. Stripping to ``scheme://host`` (and
+    defaulting a missing scheme to https) makes the stored value robust to those
+    mistakes. Returns '' for blank input.
+    """
+    raw = (site_url or '').strip()
+    if not raw:
+        return ''
+    parsed = urlparse(raw if '://' in raw else f'https://{raw}')
+    netloc = parsed.netloc or parsed.path.split('/', 1)[0]
+    if not netloc:
+        return ''
+    return f'{parsed.scheme or "https"}://{netloc}'
+
+
+def _cursor_from_next_link(next_link: Optional[str]) -> Optional[str]:
+    """Extract the opaque ``cursor`` token from a v2 ``_links.next`` value.
+
+    v2 returns ``next`` as a host-relative path with the cursor embedded as a
+    query param (``/wiki/api/v2/spaces?limit=100&cursor=<token>``). Callers that
+    page via the one-shot ``list_*`` methods re-pass the returned value as the
+    bare ``cursor=`` param, so it must be just the opaque token — not the whole
+    path, which Confluence rejects with a 400. (``_paginated_get`` follows the
+    full URL instead, so it is unaffected and keeps using ``_links.next`` raw.)
+    """
+    if not next_link:
+        return None
+    values = parse_qs(urlparse(next_link).query).get('cursor')
+    return values[0] if values else None
 
 
 class ConfluenceClient:
@@ -52,7 +89,7 @@ class ConfluenceClient:
         self._cloud_id = cloud_id
         self._token_provider = token_provider
         self._auth_mode = auth_mode
-        self._site_url = (site_url or '').rstrip('/')
+        self._site_url = normalize_site_url(site_url)
         self._client: Optional[httpx.AsyncClient] = None
         # Basic-auth header is static — precompute it once. Both service modes
         # ('basic' and 'scoped') authenticate with the same email:token Basic
@@ -240,7 +277,11 @@ class ConfluenceClient:
                 if self._auth_mode == 'basic':
                     url = f'{self._site_url}{next_link}'
                 else:
-                    url = f'https://api.atlassian.com{next_link}'
+                    # oauth + scoped go through the cloudId-keyed gateway. The v2
+                    # `next` path is site-relative (/wiki/api/v2/...), so it must be
+                    # re-prefixed with /ex/confluence/{cloudId}; resolving it against
+                    # the bare api.atlassian.com host drops the gateway route → 404.
+                    url = f'{_API_BASE}/{self._cloud_id}{next_link}'
             else:
                 url = next_link
             params = None  # next link already carries the cursor
@@ -259,8 +300,9 @@ class ConfluenceClient:
     ) -> Tuple[List[Dict[str, Any]], Optional[str]]:
         """List spaces the user can access (one page).
 
-        Returns (results, next_cursor). next_cursor is a pre-signed URL for the
-        next page or None when there are no more results.
+        Returns (results, next_cursor). next_cursor is the opaque cursor token
+        for the next page (re-pass it as the ``cursor`` argument) or None when
+        there are no more results.
         """
         params: Dict[str, Any] = {'limit': limit}
         if cursor:
@@ -269,7 +311,7 @@ class ConfluenceClient:
         data = await self._get_json(self._v2_url('spaces'), params=params)
         results = data.get('results', [])
         next_link = (data.get('_links') or {}).get('next')
-        return results, next_link
+        return results, _cursor_from_next_link(next_link)
 
     async def list_all_spaces(self) -> List[Dict[str, Any]]:
         """Iterate all pages of the spaces endpoint."""
@@ -287,7 +329,7 @@ class ConfluenceClient:
             params['cursor'] = cursor
 
         data = await self._get_json(self._v2_url(f'spaces/{space_id}/pages'), params=params)
-        return data.get('results', []), (data.get('_links') or {}).get('next')
+        return data.get('results', []), _cursor_from_next_link((data.get('_links') or {}).get('next'))
 
     async def list_all_pages_in_space(self, space_id: str) -> List[Dict[str, Any]]:
         """Iterate every page in a space."""
@@ -305,7 +347,7 @@ class ConfluenceClient:
             params['cursor'] = cursor
 
         data = await self._get_json(self._v2_url(f'pages/{page_id}/children'), params=params)
-        return data.get('results', []), (data.get('_links') or {}).get('next')
+        return data.get('results', []), _cursor_from_next_link((data.get('_links') or {}).get('next'))
 
     async def list_all_page_descendants(self, page_id: str) -> List[Dict[str, Any]]:
         """Return all descendant pages of the given page (BFS)."""

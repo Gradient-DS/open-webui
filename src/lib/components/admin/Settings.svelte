@@ -170,7 +170,15 @@
 			id: 'cloud-sync',
 			title: 'Cloud Sync',
 			route: '/admin/settings/cloud-sync',
-			keywords: ['cloud', 'sync', 'confluence', 'onedrive', 'google drive', 'topdesk', 'integration']
+			keywords: [
+				'cloud',
+				'sync',
+				'confluence',
+				'onedrive',
+				'google drive',
+				'topdesk',
+				'integration'
+			]
 		},
 		{
 			id: 'web',
@@ -679,8 +687,9 @@
 		{:else if selectedTab === 'cloud-sync'}
 			<CloudSync
 				on:save={async () => {
-					toast.success($i18n.t('Settings saved successfully!'));
-
+					// Cloud Sync autosaves and shows its own inline status, so no toast
+					// here — just refresh the backend config (integration-enabled flags
+					// feed the chat '+' menu).
 					await tick();
 					await config.set(await getBackendConfig());
 				}}

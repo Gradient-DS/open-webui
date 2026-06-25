@@ -311,7 +311,7 @@
 		const cloudLimit = isCloudKb
 			? $config?.integration_providers?.[knowledge.type]?.max_files_per_kb ||
 				$config?.features?.knowledge_max_file_count ||
-				2000
+				10000
 			: null;
 		const res = await searchKnowledgeFilesById(
 			localStorage.token,
@@ -321,7 +321,8 @@
 			sortKey,
 			direction,
 			currentPage,
-			cloudLimit
+			cloudLimit,
+			true
 		).catch(() => {
 			return null;
 		});
@@ -339,8 +340,15 @@
 	const fileSelectHandler = async (file) => {
 		try {
 			selectedFile = file;
-			selectedFileContent = selectedFile?.data?.content || '';
-		} catch (e) {
+			if (file?.data?.content != null) {
+				selectedFileContent = file.data.content;
+			} else {
+				selectedFileContent = '';
+				const full = await getFileById(localStorage.token, file.id);
+				selectedFileContent = full?.data?.content || '';
+				selectedFile = { ...file, data: { ...(file.data || {}), content: selectedFileContent } };
+			}
+		} catch {
 			toast.error($i18n.t('Failed to load file content.'));
 		}
 	};
@@ -855,9 +863,17 @@
 			pollCloudSyncStatus(provider);
 		} catch (error) {
 			console.error(`${provider.label} sync error:`, error);
+			const rawError = error instanceof Error ? error.message : String(error);
+			// Translate known OneDrive host-derivation errors via static keys (so they
+			// stay i18n-discoverable); fall back to the raw message for everything else.
+			const errorDetail =
+				rawError === 'No OneDrive found for your account.'
+					? $i18n.t('No OneDrive found for your account.')
+					: rawError === 'Could not connect to OneDrive to determine your location.'
+						? $i18n.t('Could not connect to OneDrive to determine your location.')
+						: rawError;
 			toast.error(
-				$i18n.t('Failed to sync from {{label}}: ', { label: provider.label }) +
-					(error instanceof Error ? error.message : String(error))
+				$i18n.t('Failed to sync from {{label}}: ', { label: provider.label }) + errorDetail
 			);
 			state.isSyncing = false;
 			cloudSyncState = cloudSyncState;

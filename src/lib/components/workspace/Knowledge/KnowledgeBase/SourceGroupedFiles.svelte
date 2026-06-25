@@ -24,6 +24,8 @@
 	import Spinner from '$lib/components/common/Spinner.svelte';
 	import FolderTreeNode from './FolderTreeNode.svelte';
 
+	import { computeInitialExpansion } from '../utils/treeHelpers';
+
 	export let sources: any[] = [];
 	export let files: any[] = [];
 	export let knowledge: any = null;
@@ -36,7 +38,9 @@
 	export let onRemoveSource: (itemId: string, sourceName: string) => void = () => {};
 	export let onDelete: (fileId: string) => void = () => {};
 
-	// Track expanded state per source and subfolder
+	// Track expanded state per source and subfolder.
+	// Seeded reactively so small KBs auto-expand top-level sources while
+	// large KBs (>= LARGE_TREE_THRESHOLD files) start fully collapsed.
 	let expandedSources: Record<string, boolean> = {};
 
 	const toggleSource = (itemId: string) => {
@@ -95,6 +99,20 @@
 
 	$: folderSources = (sources || []).filter(isFolderLikeSource);
 	$: fileSources = (sources || []).filter((s) => !isFolderLikeSource(s));
+
+	// Seed expandedSources whenever the source list or total file count changes.
+	// Only adds new keys — never overwrites a manual toggle the user has already made.
+	$: {
+		const initial = computeInitialExpansion(
+			folderSources.map((s: any) => s.item_id as string),
+			totalFiles
+		);
+		for (const [id, expanded] of Object.entries(initial)) {
+			if (!(id in expandedSources)) {
+				expandedSources[id] = expanded;
+			}
+		}
+	}
 
 	// Files grouped by their source_item_id
 	$: filesBySource = (() => {

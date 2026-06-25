@@ -5,6 +5,7 @@
 	import { toast } from 'svelte-sonner';
 
 	import { getCloudSyncStatus } from '$lib/apis/configs';
+	import { getAllUsers } from '$lib/apis/users';
 	import Spinner from '$lib/components/common/Spinner.svelte';
 	import Confluence from '$lib/components/icons/Confluence.svelte';
 	import GoogleDrive from '$lib/components/icons/GoogleDrive.svelte';
@@ -26,7 +27,13 @@
 	const dispatch = createEventDispatcher();
 
 	let loading = true;
-	let saving = false;
+
+	// Autosave status surfaced in the footer (replaces the old manual Save button).
+	let saveState: 'idle' | 'saving' | 'saved' | 'error' = 'idle';
+	let saveError = '';
+	// Per-provider debounce timers + the "Saved" auto-clear timer.
+	const autosaveTimers: Record<string, ReturnType<typeof setTimeout>> = {};
+	let savedResetTimer: ReturnType<typeof setTimeout> | null = null;
 
 	// Descriptor-driven accordion: one card per provider. The matching section
 	// component is rendered in the card body (bound below). `name` is resolved
@@ -85,6 +92,11 @@
 	// keyed by provider slug. Drives the card header status lines.
 	let status: CloudSyncStatusResponse = {};
 
+	// Admin user list fetched once on mount and passed to child sections that
+	// need an owner-selector dropdown (Confluence, TOPdesk). Avoids each section
+	// independently fetching the same endpoint on mount.
+	let adminUsers: { id: string; name: string; email: string }[] = [];
+
 	// ── Cross-provider status polling ──────────────────────────────────
 	// Refresh on mount and whenever a shared-KB lifecycle event fires
 	// (provisioned / synced / deleted). On top of that, poll continuously
@@ -123,12 +135,30 @@
 		statusPollTimer = setTimeout(pollStatus, 5000);
 	}
 
-	onDestroy(stopStatusPolling);
+	onDestroy(() => {
+		stopStatusPolling();
+		Object.values(autosaveTimers).forEach((t) => clearTimeout(t));
+		if (savedResetTimer) clearTimeout(savedResetTimer);
+	});
 
 	onMount(async () => {
 		// Child sections mount before the parent's onMount fires (bottom-up
 		// mount order), so `sectionRefs` is already populated here.
+		// Fetch the admin user list once here so both ConfluenceSection and
+		// TopdeskSection can share it via the `adminUsers` prop — avoids two
+		// identical fetches on mount.
 		try {
+			const usersResponse = await getAllUsers(localStorage.token).catch(() => null);
+			adminUsers = (
+				(usersResponse?.users ?? []) as {
+					id: string;
+					name: string;
+					email: string;
+					role: string;
+				}[]
+			)
+				.filter((u) => u.role === 'admin')
+				.map((u) => ({ id: u.id, name: u.name, email: u.email }));
 			await Promise.all([...Object.values(sectionRefs).map((s) => s?.load?.()), refreshStatus()]);
 		} catch (err) {
 			toast.error(`${err}`);
@@ -149,19 +179,50 @@
 		await Promise.all(Object.values(sectionRefs).map((s) => s?.persist?.()));
 	};
 
-	const submitHandler = async () => {
-		saving = true;
-		try {
-			await persistAll();
-			dispatch('save');
-		} catch (err) {
-			toast.error(`${err}`);
-		}
-		saving = false;
+	// Briefly show "All changes saved", then fade back to idle.
+	const markSaved = () => {
+		saveState = 'saved';
+		if (savedResetTimer) clearTimeout(savedResetTimer);
+		savedResetTimer = setTimeout(() => {
+			if (saveState === 'saved') saveState = 'idle';
+		}, 2500);
 	};
+
+	// Run a persist (one section or all), driving the footer status. Errors —
+	// including the Confluence switch-guards that throw — surface inline rather
+	// than as a toast per keystroke. On success the parent refreshes the backend
+	// config (integration-enabled flags feed the chat '+' menu) without a toast.
+	const runPersist = async (fn: () => Promise<void>) => {
+		saveState = 'saving';
+		saveError = '';
+		try {
+			await fn();
+			dispatch('save');
+			markSaved();
+		} catch (err) {
+			saveState = 'error';
+			saveError = `${err}`;
+		}
+	};
+
+	const persistSection = (slug: string) => {
+		const section = sectionRefs[slug];
+		if (!section?.persist) return;
+		runPersist(() => section.persist());
+	};
+
+	// Debounced autosave: a section reports a field change, we save just that
+	// provider ~0.8s after the last edit so rapid typing collapses to one write.
+	const scheduleAutosave = (slug: string) => {
+		if (autosaveTimers[slug]) clearTimeout(autosaveTimers[slug]);
+		autosaveTimers[slug] = setTimeout(() => persistSection(slug), 800);
+	};
+
+	// Enter inside a field (or any form submit) flushes a full save immediately.
+	const saveAllNow = () => runPersist(persistAll);
 </script>
 
-<form class="flex flex-col h-full justify-between text-sm" on:submit|preventDefault={submitHandler}>
+<form class="flex flex-col h-full justify-between text-sm" on:submit|preventDefault={saveAllNow}>
 	<div class="overflow-y-scroll scrollbar-hidden h-full pr-1.5 pt-2">
 		{#if loading}
 			<div class="flex justify-center py-8">
@@ -189,7 +250,9 @@
 						<ConfluenceSection
 							bind:this={sectionRefs[descriptor.slug]}
 							bind:enabled={enabledBySlug[descriptor.slug]}
+							{adminUsers}
 							beforeSharedKbAction={persistAll}
+							onChange={() => scheduleAutosave(descriptor.slug)}
 							on:provisioned={refreshStatus}
 							on:synced={refreshStatus}
 							on:deleted={refreshStatus}
@@ -198,17 +261,21 @@
 						<GoogleDriveSection
 							bind:this={sectionRefs[descriptor.slug]}
 							bind:enabled={enabledBySlug[descriptor.slug]}
+							onChange={() => scheduleAutosave(descriptor.slug)}
 						/>
 					{:else if descriptor.slug === 'onedrive'}
 						<OneDriveSection
 							bind:this={sectionRefs[descriptor.slug]}
 							bind:enabled={enabledBySlug[descriptor.slug]}
+							onChange={() => scheduleAutosave(descriptor.slug)}
 						/>
 					{:else if descriptor.slug === 'topdesk'}
 						<TopdeskSection
 							bind:this={sectionRefs[descriptor.slug]}
 							bind:enabled={enabledBySlug[descriptor.slug]}
+							{adminUsers}
 							beforeSharedKbAction={persistAll}
+							onChange={() => scheduleAutosave(descriptor.slug)}
 							on:provisioned={refreshStatus}
 							on:synced={refreshStatus}
 							on:deleted={refreshStatus}
@@ -219,18 +286,17 @@
 		</div>
 	</div>
 
-	<div class="flex justify-end pt-3 text-sm font-medium">
-		<button
-			class="px-3.5 py-1.5 text-sm font-medium bg-black hover:bg-gray-900 text-white dark:bg-white dark:text-black dark:hover:bg-gray-100 transition rounded-full flex items-center gap-1.5 {saving
-				? 'cursor-not-allowed'
-				: ''}"
-			type="submit"
-			disabled={saving}
-		>
-			{$i18n.t('Save')}
-			{#if saving}
+	<!-- No Save button: every field autosaves. This footer just reflects status. -->
+	<div class="flex justify-end items-center pt-3 text-sm min-h-[1.75rem]">
+		{#if saveState === 'saving'}
+			<span class="flex items-center gap-1.5 text-gray-500">
 				<Spinner className="size-3" />
-			{/if}
-		</button>
+				{$i18n.t('Saving...')}
+			</span>
+		{:else if saveState === 'saved'}
+			<span class="text-emerald-600 dark:text-emerald-500">{$i18n.t('All changes saved')}</span>
+		{:else if saveState === 'error'}
+			<span class="text-red-500">{saveError || $i18n.t('Save failed')}</span>
+		{/if}
 	</div>
 </form>
