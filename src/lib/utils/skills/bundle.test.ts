@@ -39,6 +39,25 @@ describe('parseSkillBundle', () => {
 	});
 });
 
+describe('parseSkillBundle nested (Anthropic layout)', () => {
+	it('strips the top-level skill directory and returns root-relative paths', async () => {
+		const file = await makeSkillFile({
+			'intermax-docx/SKILL.md': '---\nname: intermax-docx\n---\nbody',
+			'intermax-docx/assets/template.docx': new Uint8Array([1, 2, 3]),
+			'intermax-docx/assets/background.png': new Uint8Array([4, 5, 6]),
+			'intermax-docx/.DS_Store': new Uint8Array([0]),
+			'__MACOSX/intermax-docx/._SKILL.md': new Uint8Array([0])
+		});
+		const result = await parseSkillBundle(file);
+		expect(result.skillMd).toContain('name: intermax-docx');
+		// Prefix stripped; macOS junk (.DS_Store, __MACOSX) skipped.
+		expect(result.files.map((f) => f.path).sort()).toEqual([
+			'assets/background.png',
+			'assets/template.docx'
+		]);
+	});
+});
+
 describe('buildSkillBundle round-trip', () => {
 	it('parse(build(x)) preserves SKILL.md and file paths', async () => {
 		const blob = await buildSkillBundle('---\nname: rt\n---\nbody', [
@@ -47,5 +66,23 @@ describe('buildSkillBundle round-trip', () => {
 		const parsed = await parseSkillBundle(new File([blob], 'rt.skill'));
 		expect(parsed.skillMd).toContain('name: rt');
 		expect(parsed.files.map((f) => f.path)).toEqual(['scripts/run.py']);
+	});
+});
+
+describe('buildSkillBundle nested (Anthropic layout)', () => {
+	it('wraps entries under rootDir and parse() strips it back to root-relative', async () => {
+		const blob = await buildSkillBundle(
+			'---\nname: intermax-docx\n---\nbody',
+			[{ path: 'assets/template.docx', blob: new Blob([new Uint8Array([1, 2, 3])]) }],
+			'intermax-docx'
+		);
+		// Raw zip carries the wrapping <skill-name>/ directory (what Claude expects).
+		const zip = await JSZip.loadAsync(await blob.arrayBuffer());
+		expect(Object.keys(zip.files)).toContain('intermax-docx/SKILL.md');
+		expect(Object.keys(zip.files)).toContain('intermax-docx/assets/template.docx');
+		// And our own parser strips it back to root-relative on re-import.
+		const parsed = await parseSkillBundle(new File([blob], 'intermax-docx.skill'));
+		expect(parsed.skillMd).toContain('name: intermax-docx');
+		expect(parsed.files.map((f) => f.path)).toEqual(['assets/template.docx']);
 	});
 });
