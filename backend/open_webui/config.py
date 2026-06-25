@@ -2044,6 +2044,12 @@ FEATURE_TOOLS = os.environ.get('FEATURE_TOOLS', 'True').lower() == 'true'
 FEATURE_SKILLS = os.environ.get('FEATURE_SKILLS', 'False').lower() == 'true'
 # FEATURE_SKILL_FILES gates the bundled reference-files extension; only meaningful when FEATURE_SKILLS is on.
 FEATURE_SKILL_FILES = os.environ.get('FEATURE_SKILL_FILES', 'False').lower() == 'true'
+# Skill capability model (two levels):
+#   Simple skills  (FEATURE_SKILL_FILES on):  skills may carry text + binary reference files that are
+#     forwarded to the agent and browsable in the file tree — no privileged token minting.
+#   Full execution  (ENABLE_SKILL_EXECUTION on):  adds Phase-8b scoped-token minting so the agent can
+#     fetch binary asset bytes from GET /api/v1/skills/id/{id}/files/content.  Requires FEATURE_SKILL_FILES.
+ENABLE_SKILL_EXECUTION = os.environ.get('ENABLE_SKILL_EXECUTION', 'False').lower() == 'true'
 FEATURE_WEBPAGE_URL = os.environ.get('FEATURE_WEBPAGE_URL', 'True').lower() == 'true'
 FEATURE_REFERENCE_CHATS = os.environ.get('FEATURE_REFERENCE_CHATS', 'True').lower() == 'true'
 FEATURE_SIMPLE_ASSISTANT_BUILDER = os.environ.get('FEATURE_SIMPLE_ASSISTANT_BUILDER', 'False').lower() == 'true'

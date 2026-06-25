@@ -45,7 +45,7 @@ from datetime import timedelta
 from typing import Any
 
 import aiohttp
-from open_webui.config import FEATURE_SKILL_FILES
+from open_webui.config import ENABLE_SKILL_EXECUTION, FEATURE_SKILL_FILES
 from open_webui.env import AGENT_API_BASE_URL, AGENT_API_KEY
 from open_webui.models.chats import Chats
 from open_webui.socket.main import get_event_emitter
@@ -198,10 +198,12 @@ def build_agent_payload(
     # forwarded skill that carries binary files.  The agent uses it to fetch
     # binary asset bytes from GET /api/v1/skills/id/{skill_id}/files/content
     # with Authorization: Bearer <fetch_token>.  Only minted when
-    # FEATURE_SKILL_FILES is on, the skill has a known id, the request has a
-    # user_id, and at least one file in the bundle is binary (is_binary=True).
+    # ENABLE_SKILL_EXECUTION is on (full execution mode), FEATURE_SKILL_FILES is
+    # on, the skill has a known id, the request has a user_id, and at least one
+    # file in the bundle is binary (is_binary=True).
     # Text-only skills and skills without ids never get a token.
-    if FEATURE_SKILL_FILES and user_id and result.get('skills'):
+    # With ENABLE_SKILL_EXECUTION off (simple-skills mode), no token is ever minted.
+    if ENABLE_SKILL_EXECUTION and FEATURE_SKILL_FILES and user_id and result.get('skills'):
         result['skills'] = [_maybe_attach_fetch_token(skill_entry, user_id) for skill_entry in result['skills']]
 
     return result

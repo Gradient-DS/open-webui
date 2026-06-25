@@ -7,7 +7,8 @@ Invariants proven here:
 4. purpose must match — token without purpose="skill_file_read" rejected on scoped path;
    scoped token rejected on non-content routes.
 5. Read-access check still enforced via the token's user_id.
-6. Token minted only when FEATURE_SKILL_FILES on + skill has binary files.
+6. Token minted only when ENABLE_SKILL_EXECUTION on + FEATURE_SKILL_FILES on + skill has binary files.
+7. Simple-skills forwarding (FEATURE_SKILL_FILES on, ENABLE_SKILL_EXECUTION off) never mints a token.
 """
 
 from __future__ import annotations
@@ -122,7 +123,7 @@ async def _passthrough_to_thread(fn, *args, **kwargs):
 
 
 class TestMintConditions:
-    """Invariant 6: token minted iff FEATURE_SKILL_FILES on + skill has binary file."""
+    """Invariant 6+7: token minted iff ENABLE_SKILL_EXECUTION on + FEATURE_SKILL_FILES on + binary file present."""
 
     def _make_skill_entry(self, has_binary: bool, skill_id: str = 'skill-abc') -> dict:
         files = []
@@ -182,11 +183,15 @@ class TestMintConditions:
         result = _maybe_attach_fetch_token(entry, 'user-1')
         assert 'fetch_token' not in result
 
-    def test_build_agent_payload_mints_token_when_feature_on(self):
+    def test_build_agent_payload_mints_token_when_both_flags_on(self):
+        """Both ENABLE_SKILL_EXECUTION and FEATURE_SKILL_FILES must be on to mint."""
         from open_webui.utils.agent import build_agent_payload
 
         skills = [self._make_skill_entry(has_binary=True, skill_id='sk-1')]
-        with patch('open_webui.utils.agent.FEATURE_SKILL_FILES', True):
+        with (
+            patch('open_webui.utils.agent.ENABLE_SKILL_EXECUTION', True),
+            patch('open_webui.utils.agent.FEATURE_SKILL_FILES', True),
+        ):
             payload = build_agent_payload(
                 model='gpt-4',
                 messages=[{'role': 'user', 'content': 'hi'}],
@@ -195,11 +200,32 @@ class TestMintConditions:
             )
         assert 'fetch_token' in payload['skills'][0]
 
-    def test_build_agent_payload_no_token_when_feature_off(self):
+    def test_build_agent_payload_no_token_when_execution_flag_off(self):
+        """ENABLE_SKILL_EXECUTION=False (default) suppresses token minting even if FEATURE_SKILL_FILES is on."""
         from open_webui.utils.agent import build_agent_payload
 
         skills = [self._make_skill_entry(has_binary=True, skill_id='sk-1')]
-        with patch('open_webui.utils.agent.FEATURE_SKILL_FILES', False):
+        with (
+            patch('open_webui.utils.agent.ENABLE_SKILL_EXECUTION', False),
+            patch('open_webui.utils.agent.FEATURE_SKILL_FILES', True),
+        ):
+            payload = build_agent_payload(
+                model='gpt-4',
+                messages=[{'role': 'user', 'content': 'hi'}],
+                skills=skills,
+                user_id='user-1',
+            )
+        assert 'fetch_token' not in payload['skills'][0]
+
+    def test_build_agent_payload_no_token_when_skill_files_flag_off(self):
+        """FEATURE_SKILL_FILES=False suppresses token minting even if ENABLE_SKILL_EXECUTION is on."""
+        from open_webui.utils.agent import build_agent_payload
+
+        skills = [self._make_skill_entry(has_binary=True, skill_id='sk-1')]
+        with (
+            patch('open_webui.utils.agent.ENABLE_SKILL_EXECUTION', True),
+            patch('open_webui.utils.agent.FEATURE_SKILL_FILES', False),
+        ):
             payload = build_agent_payload(
                 model='gpt-4',
                 messages=[{'role': 'user', 'content': 'hi'}],
@@ -212,7 +238,10 @@ class TestMintConditions:
         from open_webui.utils.agent import build_agent_payload
 
         skills = [self._make_skill_entry(has_binary=True, skill_id='sk-1')]
-        with patch('open_webui.utils.agent.FEATURE_SKILL_FILES', True):
+        with (
+            patch('open_webui.utils.agent.ENABLE_SKILL_EXECUTION', True),
+            patch('open_webui.utils.agent.FEATURE_SKILL_FILES', True),
+        ):
             payload = build_agent_payload(
                 model='gpt-4',
                 messages=[{'role': 'user', 'content': 'hi'}],
@@ -222,16 +251,47 @@ class TestMintConditions:
         assert 'fetch_token' not in payload['skills'][0]
 
     def test_build_agent_payload_text_only_skill_no_token(self):
+        """Text-only skills never get a token even when both flags are on."""
         from open_webui.utils.agent import build_agent_payload
 
         skills = [self._make_skill_entry(has_binary=False, skill_id='sk-1')]
-        with patch('open_webui.utils.agent.FEATURE_SKILL_FILES', True):
+        with (
+            patch('open_webui.utils.agent.ENABLE_SKILL_EXECUTION', True),
+            patch('open_webui.utils.agent.FEATURE_SKILL_FILES', True),
+        ):
             payload = build_agent_payload(
                 model='gpt-4',
                 messages=[{'role': 'user', 'content': 'hi'}],
                 skills=skills,
                 user_id='user-1',
             )
+        assert 'fetch_token' not in payload['skills'][0]
+
+    def test_simple_skills_forwarding_unaffected_by_execution_flag(self):
+        """Simple-skills mode: FEATURE_SKILL_FILES on, ENABLE_SKILL_EXECUTION off.
+
+        Skills are forwarded in the payload (simple files extension still works),
+        but no fetch_token is minted — invariant 7.
+        """
+        from open_webui.utils.agent import build_agent_payload
+
+        # Mix of binary + text files: a binary file would trigger minting if execution were on.
+        skills = [self._make_skill_entry(has_binary=True, skill_id='sk-simple')]
+        with (
+            patch('open_webui.utils.agent.ENABLE_SKILL_EXECUTION', False),
+            patch('open_webui.utils.agent.FEATURE_SKILL_FILES', True),
+        ):
+            payload = build_agent_payload(
+                model='gpt-4',
+                messages=[{'role': 'user', 'content': 'hi'}],
+                skills=skills,
+                user_id='user-1',
+            )
+        # Skills are still forwarded (simple-files forwarding untouched)
+        assert 'skills' in payload
+        assert len(payload['skills']) == 1
+        assert payload['skills'][0]['id'] == 'sk-simple'
+        # But no fetch_token — execution is off
         assert 'fetch_token' not in payload['skills'][0]
 
 
