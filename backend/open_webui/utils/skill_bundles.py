@@ -231,7 +231,17 @@ async def resolve_skill_bundle_files(available_skills) -> dict[str, list[dict]]:
 
     result: dict[str, list[dict]] = {}
     for skill in available_skills:
-        skill_file_rows = await skill_files.get_files_by_skill_id(skill.id)
+        try:
+            skill_file_rows = await skill_files.get_files_by_skill_id(skill.id)
+        except Exception:
+            # Degrade gracefully: forward this skill without files rather than
+            # failing the whole chat request — but make the failure visible.
+            log.exception(
+                '[skills] resolve_skill_bundle_files: failed to load files for skill=%s — forwarding without files',
+                skill.id,
+            )
+            result[skill.id] = []
+            continue
         if not skill_file_rows:
             result[skill.id] = []
             continue
@@ -246,6 +256,12 @@ async def resolve_skill_bundle_files(available_skills) -> dict[str, list[dict]]:
         for row in skill_file_rows:
             f = files_by_id.get(row.file_id)
             if f is None:
+                log.warning(
+                    '[skills] resolve_skill_bundle_files: skill=%s path=%s backing file %s missing — skipping',
+                    skill.id,
+                    row.path,
+                    row.file_id,
+                )
                 continue
 
             meta = getattr(f, 'meta', None) or {}
@@ -278,5 +294,11 @@ async def resolve_skill_bundle_files(available_skills) -> dict[str, list[dict]]:
             bundle.append(entry)
 
         result[skill.id] = bundle
+        log.debug(
+            '[skills] resolve_skill_bundle_files: skill=%s rows=%d resolved=%d',
+            skill.id,
+            len(skill_file_rows),
+            len(bundle),
+        )
 
     return result

@@ -249,13 +249,20 @@ class SkillFilesTable:
             return []
 
     async def get_files_by_skill_id(self, skill_id: str, db: AsyncSession | None = None) -> list[SkillFileModel]:
-        """Return all SkillFile rows attached to the given skill."""
+        """Return all SkillFile rows attached to the given skill.
+
+        Raises on query/validation failure instead of swallowing it: an empty
+        list must mean "this skill has no files", never "the lookup errored".
+        Callers that need resilience (e.g. ``resolve_skill_bundle_files``)
+        catch per-skill so one bad skill can't fail the whole request.
+        """
         try:
             async with get_async_db_context(db) as db:
                 result = await db.execute(select(SkillFile).filter_by(skill_id=skill_id))
                 return [SkillFileModel.model_validate(row) for row in result.scalars().all()]
         except Exception:
-            return []
+            log.exception('[skills] get_files_by_skill_id failed for skill_id=%s', skill_id)
+            raise
 
     async def get_file_counts_by_skill_ids(
         self, skill_ids: list[str], db: AsyncSession | None = None
