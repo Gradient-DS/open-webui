@@ -2742,6 +2742,24 @@ async def process_chat_payload(request, form_data, user, metadata, model):
             for s in available_skills
         ]
 
+        # [Gradient] Observability: make the forwarded skill bundle explicit so a
+        # misconfiguration (e.g. FEATURE_SKILL_FILES off on the serving process)
+        # or an empty file manifest is visible in logs instead of silently
+        # surfacing as "agent only has view_skill, no read_skill_file/run_script".
+        log.info(
+            '[skills] forwarding %d skill(s) to agent (FEATURE_SKILL_FILES=%s): %s',
+            len(metadata['skills']),
+            FEATURE_SKILL_FILES,
+            [
+                {
+                    'name': s['name'],
+                    'is_selected': s['is_selected'],
+                    'files': len(s.get('files', [])),
+                }
+                for s in metadata['skills']
+            ],
+        )
+
     # Strip <$skillId|label> mention tags so the model doesn't see raw markup.
     strip_skill_mentions(form_data.get('messages', []))
 
