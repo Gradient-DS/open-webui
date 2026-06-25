@@ -252,6 +252,91 @@ export const searchKnowledgeFilesById = async (
 	return res;
 };
 
+export const getKnowledgeTree = async (
+	token: string,
+	id: string,
+	path: string = '',
+	cursor: string | null = null,
+	limit: number | null = null
+) => {
+	let error = null;
+
+	const searchParams = new URLSearchParams();
+	if (path) searchParams.append('path', path);
+	if (cursor) searchParams.append('cursor', cursor);
+	if (limit) searchParams.append('limit', limit.toString());
+
+	const res = await fetch(`${WEBUI_API_BASE_URL}/knowledge/${id}/tree?${searchParams.toString()}`, {
+		method: 'GET',
+		headers: {
+			Accept: 'application/json',
+			'Content-Type': 'application/json',
+			authorization: `Bearer ${token}`
+		}
+	})
+		.then(async (res) => {
+			if (!res.ok) throw await res.json();
+			return res.json();
+		})
+		.catch((err) => {
+			error = err.detail;
+			console.error(err);
+			return null;
+		});
+
+	if (error) {
+		throw error;
+	}
+
+	return res;
+};
+
+export const searchKnowledgeTree = async (
+	token: string,
+	id: string,
+	q: string = '',
+	cursor: string | null = null,
+	limit: number | null = null,
+	filetype: string | null = null,
+	status: string | null = null
+) => {
+	let error = null;
+
+	const searchParams = new URLSearchParams();
+	if (q) searchParams.append('q', q);
+	if (cursor) searchParams.append('cursor', cursor);
+	if (limit) searchParams.append('limit', limit.toString());
+	if (filetype) searchParams.append('filetype', filetype);
+	if (status) searchParams.append('status', status);
+
+	const res = await fetch(
+		`${WEBUI_API_BASE_URL}/knowledge/${id}/search?${searchParams.toString()}`,
+		{
+			method: 'GET',
+			headers: {
+				Accept: 'application/json',
+				'Content-Type': 'application/json',
+				authorization: `Bearer ${token}`
+			}
+		}
+	)
+		.then(async (res) => {
+			if (!res.ok) throw await res.json();
+			return res.json();
+		})
+		.catch((err) => {
+			error = err.detail;
+			console.error(err);
+			return null;
+		});
+
+	if (error) {
+		throw error;
+	}
+
+	return res;
+};
+
 type KnowledgeUpdateForm = {
 	name?: string;
 	description?: string;

@@ -65,6 +65,8 @@
 	import Spinner from '$lib/components/common/Spinner.svelte';
 	import Files from './KnowledgeBase/Files.svelte';
 	import SourceGroupedFiles from './KnowledgeBase/SourceGroupedFiles.svelte';
+	import LazyKnowledgeTree from './KnowledgeBase/LazyKnowledgeTree.svelte';
+	import LazyKnowledgeSearch from './KnowledgeBase/LazyKnowledgeSearch.svelte';
 	import SyncProgress from './KnowledgeBase/SyncProgress.svelte';
 	import AddFilesPlaceholder from '$lib/components/AddFilesPlaceholder.svelte';
 	import { buildSyncToast } from './utils/syncToast';
@@ -217,6 +219,19 @@
 	$: activeProvider = knowledge?.type ? (CLOUD_PROVIDERS[knowledge.type] ?? null) : null;
 	$: activeState = activeProvider ? cloudSyncState[activeProvider.type] : null;
 
+	// Lazy per-folder tree (Tier 2): render cloud-KB folders from the paginated
+	// /tree endpoint instead of eagerly loading every file. On by default for
+	// cloud KBs that expose folder sources; set localStorage.lazyKnowledgeTree
+	// ='false' to fall back to the load-all SourceGroupedFiles tree (no redeploy).
+	const lazyTreeFlag =
+		typeof localStorage !== 'undefined'
+			? localStorage.getItem('lazyKnowledgeTree') !== 'false'
+			: true;
+	$: lazyTreeActive =
+		lazyTreeFlag &&
+		!!activeProvider &&
+		(knowledge?.meta?.[activeProvider.metaKey]?.sources?.length ?? 0) > 0;
+
 	let largeScreen = true;
 
 	let pane;
@@ -249,7 +264,7 @@
 	let knowledge: Knowledge | null = null;
 	let knowledgeId = null;
 
-	let selectedFileId = null;
+	let selectedFileId: string | null = null;
 	let selectedFile = null;
 	let selectedFileContent = '';
 
@@ -270,12 +285,17 @@
 	let queryDebounceActive = false;
 	let fetchId = 0;
 
+	// Bumped on every mutation that init() handles (delete / remove-source /
+	// sync completion / content edit) so LazyKnowledgeTree re-fetches what's open.
+	let treeRefresh = 0;
+
 	const reset = () => {
 		currentPage = 1;
 	};
 
 	const init = async () => {
 		reset();
+		treeRefresh += 1;
 		await getItemsPage();
 	};
 
@@ -313,24 +333,40 @@
 				$config?.features?.knowledge_max_file_count ||
 				10000
 			: null;
-		const res = await searchKnowledgeFilesById(
-			localStorage.token,
-			knowledge.id,
-			query,
-			viewOption,
-			sortKey,
-			direction,
-			currentPage,
-			cloudLimit,
-			true
-		).catch(() => {
-			return null;
-		});
+		// In lazy mode the tree (no query) and the flat search (query) components
+		// both self-fetch — so here we only need a cheap, query-independent KB
+		// total (limit=1, metadata-only, no de-TOAST) to keep the quota header
+		// (fileItemsTotal) accurate. Skips the eager full-file load entirely.
+		const res = lazyTreeActive
+			? await searchKnowledgeFilesById(
+					localStorage.token,
+					knowledge.id,
+					'',
+					null,
+					null,
+					null,
+					1,
+					1,
+					true
+				).catch(() => null)
+			: await searchKnowledgeFilesById(
+					localStorage.token,
+					knowledge.id,
+					query,
+					viewOption,
+					sortKey,
+					direction,
+					currentPage,
+					cloudLimit,
+					true
+				).catch(() => null);
 
 		if (currentFetchId !== fetchId) return; // Stale response, discard
 
 		if (res) {
-			fileItems = res.items;
+			// In lazy mode keep fileItems non-null (so the render guard passes) but
+			// empty — the tree/search components own rendering and ignore this array.
+			fileItems = lazyTreeActive ? [] : res.items;
 			fileItemsTotal = res.total;
 		}
 		queryDebounceActive = false;
@@ -1084,9 +1120,7 @@
 		// translatable, so we omit it from the toast. The full text is
 		// preserved server-side in ``last_result.failed_files`` for
 		// operator debugging.
-		const lines = filesToShow.map(
-			(f) => `- ${f.filename}: ${getErrorTypeMessage(f.error_type)}`
-		);
+		const lines = filesToShow.map((f) => `- ${f.filename}: ${getErrorTypeMessage(f.error_type)}`);
 
 		if (remaining > 0) {
 			lines.push($i18n.t('and {{COUNT}} more', { COUNT: remaining }));
@@ -2282,7 +2316,53 @@
 					<div class="flex-1 flex">
 						<div class=" flex flex-col w-full space-x-2 rounded-lg h-full">
 							<div class="w-full h-full flex flex-col min-h-0">
-								{#if fileItems.length > 0}
+								{#if lazyTreeActive && !query}
+									<div class=" flex overflow-y-auto h-full w-full scrollbar-hidden text-xs">
+										<LazyKnowledgeTree
+											{knowledge}
+											{selectedFileId}
+											isSyncing={activeState?.isSyncing ?? false}
+											refreshSignal={treeRefresh}
+											onClick={(file) => {
+												selectedFileId = file.id;
+												fileSelectHandler({
+													id: file.id,
+													name: file.name,
+													meta: { name: file.name, size: file.size }
+												});
+											}}
+											onRemoveSource={(itemId, sourceName) => {
+												selectedFileId = null;
+												selectedFile = null;
+												// lazyTreeActive guarantees activeProvider is set; guard keeps TS happy.
+												if (activeProvider) {
+													removeCloudSourceHandler(activeProvider, itemId, sourceName);
+												}
+											}}
+											onDelete={(fileId) => {
+												selectedFileId = null;
+												selectedFile = null;
+												deleteFileHandler(fileId);
+											}}
+										/>
+									</div>
+								{:else if lazyTreeActive && query}
+									<div class=" flex overflow-y-auto h-full w-full scrollbar-hidden text-xs">
+										<LazyKnowledgeSearch
+											{knowledge}
+											{query}
+											{selectedFileId}
+											onClick={(file) => {
+												selectedFileId = file.id;
+												fileSelectHandler({
+													id: file.id,
+													name: file.name,
+													meta: { name: file.name, size: file.size }
+												});
+											}}
+										/>
+									</div>
+								{:else if fileItems.length > 0}
 									<div class=" flex overflow-y-auto h-full w-full scrollbar-hidden text-xs">
 										{#if activeProvider && knowledge?.meta?.[activeProvider.metaKey]?.sources?.length}
 											<SourceGroupedFiles
