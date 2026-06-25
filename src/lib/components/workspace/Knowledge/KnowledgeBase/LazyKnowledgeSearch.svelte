@@ -127,7 +127,9 @@
 								{#if fb === 'spinner'}
 									<Spinner className="size-3.5" />
 								{:else if fb === 'error'}
-									<ExclamationTriangle className="size-3.5 text-red-500" />
+									<Tooltip content={file.error || $i18n.t('Processing error')}>
+										<ExclamationTriangle className="size-3.5 text-red-500" />
+									</Tooltip>
 								{:else}
 									<DocumentPage className="size-3.5" />
 								{/if}

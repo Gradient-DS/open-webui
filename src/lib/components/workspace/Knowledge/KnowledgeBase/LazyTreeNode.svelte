@@ -34,6 +34,7 @@
 	// Shared state owned by LazyKnowledgeTree (reassigned there to drive reactivity).
 	export let expanded: Record<string, boolean> = {};
 	export let nodeCache: Record<string, any> = {};
+	export let loadingPaths: Record<string, boolean> = {};
 
 	export let toggle: (path: string) => void = () => {};
 	export let loadMore: (path: string) => void = () => {};
@@ -57,7 +58,9 @@
 			on:click={() => toggle(node.path)}
 		>
 			<div class="shrink-0 {isSource ? 'text-gray-500' : ''}">
-				{#if expanded[node.path]}
+				{#if loadingPaths[node.path]}
+					<Spinner className="size-3" />
+				{:else if expanded[node.path]}
 					<ChevronDown className="size-3" strokeWidth="2.5" />
 				{:else}
 					<ChevronRight className="size-3" strokeWidth="2.5" />
@@ -118,6 +121,7 @@
 							{knowledge}
 							{expanded}
 							{nodeCache}
+							{loadingPaths}
 							{toggle}
 							{loadMore}
 							{onClick}
@@ -142,7 +146,9 @@
 											{#if fb === 'spinner'}
 												<Spinner className="size-3" />
 											{:else if fb === 'error'}
-												<ExclamationTriangle className="size-3 text-red-500" />
+												<Tooltip content={file.error || $i18n.t('Processing error')}>
+													<ExclamationTriangle className="size-3 text-red-500" />
+												</Tooltip>
 											{:else}
 												<DocumentPage className="size-3" />
 											{/if}
