@@ -15,6 +15,8 @@ from open_webui.internal.db import get_async_session
 from open_webui.models.groups import Groups
 from open_webui.models.knowledge import (
     KnowledgeFileListResponse,
+    KnowledgeTreeResponse,
+    KnowledgeSearchResponse,
     Knowledges,
     KnowledgeForm,
     KnowledgeResponse,
@@ -668,6 +670,125 @@ async def get_knowledge_files_by_id(
 
     return await Knowledges.search_files_by_id(
         id, user.id, filter=filter, skip=skip, limit=limit, metadata_only=metadata_only, db=db
+    )
+
+
+############################
+# GetKnowledgeTree (lazy per-folder browser)
+############################
+
+
+@router.get('/{id}/tree', response_model=KnowledgeTreeResponse)
+async def get_knowledge_tree(
+    id: str,
+    path: str = '',
+    cursor: Optional[str] = None,
+    limit: Optional[int] = 200,
+    user=Depends(get_verified_user),
+    db: AsyncSession = Depends(get_async_session),
+):
+    """Lazily list one level of a KB's folder tree.
+
+    ``path=""`` returns the sources + root loose files; ``path="<source_item_id>"``
+    or ``"<source_item_id>/<sub>/…/"`` returns that folder's immediate children
+    (subfolders with counts + a cursor-paginated page of direct files). Access
+    control + suspension handling mirror ``GET /{id}/files``.
+    """
+    knowledge = await Knowledges.get_knowledge_by_id(id=id, db=db)
+    if not knowledge:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=ERROR_MESSAGES.NOT_FOUND,
+        )
+
+    if not (
+        user.role == 'admin'
+        or knowledge.user_id == user.id
+        or await AccessGrants.has_access(
+            user_id=user.id,
+            resource_type='knowledge',
+            resource_id=knowledge.id,
+            permission='read',
+            db=db,
+        )
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=ERROR_MESSAGES.ACCESS_PROHIBITED,
+        )
+
+    # Block non-admin access to suspended KBs
+    suspension_info = await Knowledges.get_suspension_info(id)
+    if suspension_info and user.role != 'admin':
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f'This knowledge base is suspended because the owner lost access to the cloud folder. '
+            f'It will be permanently deleted in {suspension_info["days_remaining"]} days '
+            f'unless the owner restores access.',
+        )
+
+    limit = min(max(limit or 200, 1), 1000)
+    return await Knowledges.list_tree_level(id, path=path, cursor=cursor, limit=limit, db=db)
+
+
+############################
+# SearchKnowledgeTree (flat search mode)
+############################
+
+
+@router.get('/{id}/search', response_model=KnowledgeSearchResponse)
+async def search_knowledge_tree(
+    id: str,
+    q: str = '',
+    filetype: Optional[str] = None,
+    status_filter: Optional[str] = Query(None, alias='status'),
+    cursor: Optional[str] = None,
+    limit: Optional[int] = 100,
+    user=Depends(get_verified_user),
+    db: AsyncSession = Depends(get_async_session),
+):
+    """Flat, keyset-paginated search across a KB (the tree browser's search mode).
+
+    Matches filename OR content, optionally narrowed by ``filetype`` (extension)
+    and ``status`` (coarse bucket). Access control + suspension mirror
+    ``GET /{id}/files``. (``status_filter`` is the ``?status=`` query param —
+    aliased so it doesn't shadow the imported ``status`` codes module.)
+    """
+    knowledge = await Knowledges.get_knowledge_by_id(id=id, db=db)
+    if not knowledge:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=ERROR_MESSAGES.NOT_FOUND,
+        )
+
+    if not (
+        user.role == 'admin'
+        or knowledge.user_id == user.id
+        or await AccessGrants.has_access(
+            user_id=user.id,
+            resource_type='knowledge',
+            resource_id=knowledge.id,
+            permission='read',
+            db=db,
+        )
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=ERROR_MESSAGES.ACCESS_PROHIBITED,
+        )
+
+    suspension_info = await Knowledges.get_suspension_info(id)
+    if suspension_info and user.role != 'admin':
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f'This knowledge base is suspended because the owner lost access to the cloud folder. '
+            f'It will be permanently deleted in {suspension_info["days_remaining"]} days '
+            f'unless the owner restores access.',
+        )
+
+    limit = min(max(limit or 100, 1), 1000)
+    return await Knowledges.search_tree(
+        id, q=q, filetype=filetype, status=status_filter, cursor=cursor, limit=limit, db=db
     )
 
 

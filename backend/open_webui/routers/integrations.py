@@ -252,6 +252,12 @@ async def _create_or_update_file_record(
     if existing_file:
         await Files.update_file_metadata_by_id(file_id, meta)
         await Files.update_file_data_by_id(file_id, {'content': content_text})
+        # This branch updates file.meta but never calls
+        # add_file_to_knowledge_by_id (the KB link already exists from the
+        # sync stub), so mirror the freshly-promoted relative_path /
+        # source_item_id onto the knowledge_file rows here. Captures files that
+        # moved folders between stub discovery and the loader-worker callback.
+        await Knowledges.set_path_fields_by_file_id(file_id, {**(existing_file.meta or {}), **meta})
         # Stub File rows created up-front by sync workers
         # (services/sync/base_worker._create_stub_file_rows) carry
         # ``path=''`` until the loader-worker callback arrives with the
