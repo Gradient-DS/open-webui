@@ -69,12 +69,17 @@ export const parseSkillBundle = async (file: File | Blob): Promise<ParsedSkillBu
 
 export const buildSkillBundle = async (
 	skillMd: string,
-	files: SkillBundleFile[]
+	files: SkillBundleFile[],
+	rootDir = ''
 ): Promise<Blob> => {
 	const zip = new JSZip();
-	zip.file(SKILL_MD, skillMd);
+	// Anthropic .skill bundles wrap their contents in a top-level <skill-name>/
+	// directory. Pass rootDir to produce that layout so the bundle re-imports into
+	// Claude; omit it (or pass '') for a flat bundle.
+	const prefix = rootDir ? `${rootDir.replace(/\/+$/, '')}/` : '';
+	zip.file(`${prefix}${SKILL_MD}`, skillMd);
 	// Convert each Blob to an ArrayBuffer first (see parseSkillBundle): JSZip reads
 	// Blob inputs via FileReader, which is browser-only.
-	for (const f of files) zip.file(f.path, await f.blob.arrayBuffer());
+	for (const f of files) zip.file(`${prefix}${f.path}`, await f.blob.arrayBuffer());
 	return zip.generateAsync({ type: 'blob' });
 };

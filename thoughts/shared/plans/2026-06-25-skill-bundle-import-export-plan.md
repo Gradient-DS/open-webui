@@ -348,7 +348,7 @@ In `Skills.svelte`, add `getSkillFileList` and `getSkillFileContentBlob` to the 
 	import { parseSkillBundle, buildSkillBundle, isTextPath } from '$lib/utils/skills/bundle';
 ```
 
-- [x] **Step 2: Add the `exportBundleHandler` function** _(DEVIATION — frontend-only, no page loop. The `GET /id/{id}/files` route has no pagination param and is hard-capped at 30 files; the page loop would refetch page 1 (duplicating + missing files). Per user decision, fetch once, export the returned files, and `toast.warning` when `total > items.length` instead of silently truncating.)_
+- [x] **Step 2: Add the `exportBundleHandler` function** _(DEVIATION — frontend-only, no page loop. The `GET /id/{id}/files` route has no pagination param and is hard-capped at 30 files; the page loop would refetch page 1 (duplicating + missing files). Per user decision, fetch once, export the returned files, and `toast.warning` when `total > items.length` instead of silently truncating. Also: export wraps the bundle in a `<slug>/` top-level directory (Anthropic layout) via `buildSkillBundle(content, files, _skill.id)` and names the file `<slug>.skill`, so soev→Claude re-import works.)_
 
 In `Skills.svelte`, immediately after `importSkillBundle` (from Task 2), add:
 

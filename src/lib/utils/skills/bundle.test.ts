@@ -68,3 +68,21 @@ describe('buildSkillBundle round-trip', () => {
 		expect(parsed.files.map((f) => f.path)).toEqual(['scripts/run.py']);
 	});
 });
+
+describe('buildSkillBundle nested (Anthropic layout)', () => {
+	it('wraps entries under rootDir and parse() strips it back to root-relative', async () => {
+		const blob = await buildSkillBundle(
+			'---\nname: intermax-docx\n---\nbody',
+			[{ path: 'assets/template.docx', blob: new Blob([new Uint8Array([1, 2, 3])]) }],
+			'intermax-docx'
+		);
+		// Raw zip carries the wrapping <skill-name>/ directory (what Claude expects).
+		const zip = await JSZip.loadAsync(await blob.arrayBuffer());
+		expect(Object.keys(zip.files)).toContain('intermax-docx/SKILL.md');
+		expect(Object.keys(zip.files)).toContain('intermax-docx/assets/template.docx');
+		// And our own parser strips it back to root-relative on re-import.
+		const parsed = await parseSkillBundle(new File([blob], 'intermax-docx.skill'));
+		expect(parsed.skillMd).toContain('name: intermax-docx');
+		expect(parsed.files.map((f) => f.path)).toEqual(['assets/template.docx']);
+	});
+});

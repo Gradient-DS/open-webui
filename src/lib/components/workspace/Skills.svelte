@@ -222,8 +222,10 @@
 			}
 		}
 
-		const blob = await buildSkillBundle(_skill.content || '', bundleFiles);
-		saveAs(blob, `${_skill.name}.skill`);
+		// Wrap the bundle in a <slug>/ directory (the layout Claude produces and
+		// expects), and name the file by slug so it has no spaces/capitals.
+		const blob = await buildSkillBundle(_skill.content || '', bundleFiles, _skill.id);
+		saveAs(blob, `${_skill.id}.skill`);
 	};
 
 	const deleteHandler = async (skill) => {
