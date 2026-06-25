@@ -5,6 +5,8 @@
 **Branch:** `feat/skill-bundle-import-export` (off `dev`)
 **Status:** Approved design — ready for implementation plan
 
+> **Amendment (2026-06-25):** Frontmatter is preserved via `content` (the verbatim `SKILL.md` is stored as the skill's `content` and re-exported as-is), **not** via `meta`. `SkillForm.meta` validates against `SkillMeta` (only `tags`; pydantic drops unknown keys), so `meta.frontmatter` would be silently discarded — and is redundant given `content`-verbatim. Decision **Option B**: drop `meta.frontmatter`, stay 100% frontend-only. All three "open items" below are now resolved: (1) attach via `createSkillFileInline` (text) / `uploadFile`+`createSkillFile` (binary); (2) no frontmatter serializer needed (content-verbatim); (3) `content` is persisted verbatim, `id = slugify(name)`.
+
 ## Goal
 
 Let users import an Anthropic/Claude **Agent Skill** bundle (`.skill`) into OWUI and export an OWUI skill back out as a `.skill`, so skills are portable between Claude and soev. Purely additive on the existing (custom-fork) skills feature: **frontend-only (JSZip), no backend routes, no new dependency, no new feature flag.**
