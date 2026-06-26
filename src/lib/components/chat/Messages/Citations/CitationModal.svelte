@@ -13,6 +13,7 @@
 	import { highlightDocx, scrollToFirstDocxHighlight } from '$lib/utils/citationDomHighlight';
 
 	import XMark from '$lib/components/icons/XMark.svelte';
+	import ArrowTopRightOnSquare from '$lib/components/icons/ArrowTopRightOnSquare.svelte';
 	import Textarea from '$lib/components/common/Textarea.svelte';
 
 	const i18n = getContext('i18n');
@@ -94,6 +95,23 @@
 	// File type detection from first document's metadata
 	$: fileName = mergedDocuments?.[0]?.metadata?.name ?? citation?.source?.name ?? '';
 	$: fileId = mergedDocuments?.[0]?.metadata?.file_id;
+
+	// External/source URL for the cited document. Prefers the agent-provided
+	// source.url (set by soev-agents from confluence_url / source_url /
+	// topdesk_url); falls back to the provider metadata keys the native RAG
+	// path leaves on the chunk (the agent path allow-lists chunk metadata, so
+	// there the URL only arrives as source.url). Drives the "open original
+	// page" affordance shown alongside the existing file download.
+	$: externalUrl = (() => {
+		const u = citation?.source?.url;
+		if (typeof u === 'string' && u.includes('http')) return u;
+		const m = mergedDocuments?.[0]?.metadata ?? {};
+		for (const k of ['confluence_url', 'source_url', 'topdesk_url']) {
+			const v = m?.[k];
+			if (typeof v === 'string' && v.includes('http')) return v;
+		}
+		return null;
+	})();
 
 	$: isPDF = fileName?.toLowerCase().endsWith('.pdf');
 	$: isDocx = fileName?.toLowerCase().endsWith('.docx');
@@ -293,23 +311,24 @@
 <Modal size="xl" bind:show>
 	<div>
 		<div class=" flex justify-between dark:text-gray-300 px-4.5 pt-3 pb-2">
-			<div class=" text-lg font-medium self-center flex items-center">
+			<div class=" text-lg font-medium self-center flex items-center gap-1.5 min-w-0">
 				{#if citation?.source?.name}
 					{@const document = mergedDocuments?.[0]}
-					{#if document?.metadata?.file_id || document.source?.url?.includes('http')}
-						{@const isFileMissing =
-							!!document?.metadata?.file_id && !previewAvailable}
+					{@const docFileId = document?.metadata?.file_id}
+					{#if docFileId || externalUrl}
+						{@const isFileMissing = !!docFileId && !previewAvailable}
+						{@const linksToFile = !!docFileId && !isFileMissing}
 						<Tooltip
-							className="w-fit"
-							content={isFileMissing
+							className="w-fit min-w-0"
+							content={isFileMissing && !externalUrl
 								? $i18n.t('File no longer available')
-								: document.source?.url?.includes('http')
-									? $i18n.t('Open link')
-									: $i18n.t('Open file')}
+								: linksToFile
+									? $i18n.t('Open file')
+									: $i18n.t('Open link')}
 							placement="top-start"
 							tippyOptions={{ duration: [500, 0] }}
 						>
-							{#if isFileMissing}
+							{#if isFileMissing && !externalUrl}
 								<span
 									class="grow line-clamp-1 text-gray-500 dark:text-gray-400 cursor-not-allowed"
 								>
@@ -318,17 +337,38 @@
 							{:else}
 								<a
 									class="hover:text-gray-500 dark:hover:text-gray-100 underline grow line-clamp-1"
-									href={document?.metadata?.file_id
-										? `${WEBUI_API_BASE_URL}/files/${document?.metadata?.file_id}/content${document?.metadata?.page !== undefined ? `#page=${document.metadata.page + 1}` : ''}`
-										: document.source?.url?.includes('http')
-											? document.source.url
-											: `#`}
+									href={linksToFile
+										? `${WEBUI_API_BASE_URL}/files/${docFileId}/content${document?.metadata?.page !== undefined ? `#page=${document.metadata.page + 1}` : ''}`
+										: externalUrl ?? `#`}
 									target="_blank"
+									rel="noreferrer"
 								>
 									{decodeString(citation?.source?.name)}
 								</a>
 							{/if}
 						</Tooltip>
+						{#if externalUrl && linksToFile}
+							<!-- Original-page link, shown alongside the file download only
+							     when the title already points at the file (avoids a
+							     redundant icon for plain web/fetch citations, where the
+							     title itself links to the external URL). -->
+							<Tooltip
+								className="w-fit shrink-0"
+								content={$i18n.t('Open original page')}
+								placement="top-start"
+								tippyOptions={{ duration: [500, 0] }}
+							>
+								<a
+									class="shrink-0 text-gray-400 hover:text-gray-700 dark:text-gray-500 dark:hover:text-gray-200"
+									href={externalUrl}
+									target="_blank"
+									rel="noreferrer"
+									aria-label={$i18n.t('Open original page')}
+								>
+									<ArrowTopRightOnSquare className="size-4" />
+								</a>
+							</Tooltip>
+						{/if}
 					{:else}
 						{decodeString(citation?.source?.name)}
 					{/if}
