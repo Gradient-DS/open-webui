@@ -132,6 +132,41 @@ def test_skills_absent_when_none():
     assert 'skills' not in payload
 
 
+def test_skills_with_files_passthrough():
+    """A skills entry carrying a 'files' list survives payload serialization.
+
+    The agent service consumes ``skills[i]['files']`` to render a
+    <bundled_files> manifest.  This test ensures that the extra key is
+    forwarded byte-identically through ``build_agent_payload`` — no
+    ``AgentPayload`` type change is needed because the field is
+    ``list[dict[str, Any]]``.
+    """
+    skills = [
+        {
+            'name': 'Reference Guide',
+            'description': 'A guide with attached files.',
+            'content': '# Reference',
+            'is_selected': True,
+            'files': [
+                {'filename': 'guide.md', 'content': '# Guide\nStep 1'},
+                {'filename': 'tone.md', 'content': 'Always formal.'},
+            ],
+        },
+        {
+            # Skill without files must NOT carry a 'files' key.
+            'name': 'No Files Skill',
+            'description': 'no bundled files',
+            'content': 'Some content.',
+            'is_selected': False,
+        },
+    ]
+    payload = build_agent_payload(**_base_kwargs(skills=skills))
+    assert payload['skills'] == skills
+    assert 'files' in payload['skills'][0]
+    assert len(payload['skills'][0]['files']) == 2
+    assert 'files' not in payload['skills'][1]
+
+
 def test_resolve_vision_capable_reads_capability_flag():
     model = {'info': {'meta': {'capabilities': {'vision': False}}}}
     assert _resolve_model_vision_capable(model) is False

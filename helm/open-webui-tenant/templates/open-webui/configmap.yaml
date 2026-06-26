@@ -133,6 +133,12 @@ data:
   FEATURE_PROMPTS: {{ .Values.openWebui.config.featurePrompts | quote }}
   FEATURE_TOOLS: {{ .Values.openWebui.config.featureTools | quote }}
   FEATURE_SKILLS: {{ .Values.openWebui.config.featureSkills | quote }}
+  # Soev skill-bundles feature. FEATURE_SKILL_FILES = simple skills (files/tree/
+  # editing forwarded to the agent). ENABLE_SKILL_EXECUTION = full mode (adds the
+  # scoped-token mint so the agent can run bundled scripts via the skill-exec
+  # sandbox). Pair ENABLE_SKILL_EXECUTION with the agent's skill_execution_enabled.
+  FEATURE_SKILL_FILES: {{ .Values.openWebui.config.featureSkillFiles | quote }}
+  ENABLE_SKILL_EXECUTION: {{ .Values.openWebui.config.enableSkillExecution | quote }}
   FEATURE_BUILTIN_TOOLS: {{ .Values.openWebui.config.featureBuiltinTools | quote }}
   FEATURE_ADMIN_EVALUATIONS: {{ .Values.openWebui.config.featureAdminEvaluations | quote }}
   FEATURE_ADMIN_FUNCTIONS: {{ .Values.openWebui.config.featureAdminFunctions | quote }}
@@ -367,6 +373,7 @@ data:
   TOPDESK_KB_API_PATH: {{ .Values.openWebui.config.topdeskKbApiPath | quote }}
 
   KNOWLEDGE_MAX_FILE_COUNT: {{ .Values.openWebui.config.knowledgeMaxFileCount | quote }}
+  SYNC_MAX_JOB_WALL_CLOCK_SECONDS: {{ .Values.openWebui.config.syncMaxJobWallClockSeconds | quote }}
 
   # Shared-services loader-worker (per-tenant). When useSharedLoader=true,
   # cloud-source sync workers submit jobs to the loader-worker pod instead of

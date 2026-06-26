@@ -357,7 +357,9 @@ def test_status_provisioned_reports_meta_and_file_count():
             new=mock.AsyncMock(return_value=[kb]),
         ),
         mock.patch.object(
-            shared_kb.Knowledges, 'get_files_by_id', new=mock.AsyncMock(return_value=[object(), object()])
+            shared_kb.Knowledges,
+            'get_file_counts_by_knowledge_ids',
+            new=mock.AsyncMock(return_value={'kb-1': 2}),
         ),
     ):
         status = asyncio.run(shared_kb.shared_kb_status('topdesk', 'topdesk_sync'))
@@ -375,6 +377,28 @@ def test_status_provisioned_reports_meta_and_file_count():
     assert status['items'] == [{'item_id': 'KI-1'}]
 
 
+def test_status_file_count_zero_when_kb_has_no_files():
+    """get_file_counts_by_knowledge_ids omits KBs with no files (GROUP BY); status
+    must default to 0 rather than KeyError."""
+    kb = _kb('kb-empty', meta={'topdesk_sync': {'shared': True}})
+    with (
+        mock.patch.object(
+            shared_kb.Knowledges,
+            'get_knowledge_bases_by_type',
+            new=mock.AsyncMock(return_value=[kb]),
+        ),
+        mock.patch.object(
+            shared_kb.Knowledges,
+            'get_file_counts_by_knowledge_ids',
+            # KB with no files is omitted from the result dict.
+            new=mock.AsyncMock(return_value={}),
+        ),
+    ):
+        status = asyncio.run(shared_kb.shared_kb_status('topdesk', 'topdesk_sync'))
+
+    assert status['file_count'] == 0
+
+
 def test_status_items_key_override():
     kb = _kb('kb-1', meta={'confluence_sync': {'shared': True, 'spaces': [{'id': 'S1'}]}})
     with (
@@ -383,7 +407,11 @@ def test_status_items_key_override():
             'get_knowledge_bases_by_type',
             new=mock.AsyncMock(return_value=[kb]),
         ),
-        mock.patch.object(shared_kb.Knowledges, 'get_files_by_id', new=mock.AsyncMock(return_value=[])),
+        mock.patch.object(
+            shared_kb.Knowledges,
+            'get_file_counts_by_knowledge_ids',
+            new=mock.AsyncMock(return_value={}),
+        ),
     ):
         status = asyncio.run(shared_kb.shared_kb_status('confluence', 'confluence_sync', items_key='spaces'))
     assert status['spaces'] == [{'id': 'S1'}]

@@ -292,6 +292,10 @@ openWebui:
     featurePrompts: "True"
     featureTools: "False"
     featureSkills: "False"
+    # Soev skill-bundles: simple skills (files only) and full execution.
+    # Both off by default; staging sets them "True" for the execution rollout.
+    featureSkillFiles: "False"
+    enableSkillExecution: "False"
     featureBuiltinTools: "False"
     featureAdminEvaluations: "True"
     featureAdminFunctions: "False"
@@ -534,6 +538,11 @@ openWebui:
 
     # Knowledge Base File Limit
     knowledgeMaxFileCount: "250"
+
+    # Cloud-sync loader-worker job wall-clock timeout (seconds). 1800 = 30 min
+    # (backend default). Raise for tenants with very large initial syncs that
+    # would otherwise hit the cap and mark the KB sync "failed".
+    syncMaxJobWallClockSeconds: "1800"
 
     # Shared-services loader-worker (per-tenant). When true, cloud-source sync
     # workers submit jobs to the loader-worker pod (loaderWorker.enabled=true)

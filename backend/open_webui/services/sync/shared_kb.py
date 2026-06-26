@@ -170,7 +170,7 @@ async def shared_kb_status(provider_type: str, meta_key: str, items_key: str = '
                 'suspended_at': suspended_at,
                 'suspended_reason': sync_info.get('suspended_reason') if suspended_at else None,
                 'days_remaining': days_remaining,
-                'file_count': len(await Knowledges.get_files_by_id(kb.id) or []),
+                'file_count': (await Knowledges.get_file_counts_by_knowledge_ids([kb.id])).get(kb.id, 0),
                 # Live progress (files done / total) — lets the Cloud Sync tab
                 # show a percentage on the Sync button while a sync runs.
                 'progress_current': sync_info.get('progress_current', 0),

@@ -102,13 +102,17 @@ def _validate_callback_base_url(url: str) -> None:
         )
 
 
-# Bound on how long _track_job_progress will poll the loader-worker before
-# giving up and fail-marking the still-pending stub File rows. Without this,
-# a stuck loader-worker (the 2026-04-29 staging incident) leaves spinners
-# spinning indefinitely and blocks user-initiated re-syncs. Defaults to 30
-# minutes — well above any realistic batch — and overridable via env for
-# tenants with very large initial syncs.
-MAX_JOB_WALL_CLOCK_SECONDS = int(os.environ.get('SYNC_MAX_JOB_WALL_CLOCK_SECONDS', '1800'))
+def _max_job_wall_clock_seconds() -> int:
+    """Wall-clock cap for polling a single loader-worker job.
+
+    Read at call time (not import) so a tenant with a very large initial
+    sync can raise SYNC_MAX_JOB_WALL_CLOCK_SECONDS via deployment config
+    without a code change. Default 30 min.
+
+    Without this guard a stuck loader-worker (the 2026-04-29 staging incident)
+    leaves spinners spinning indefinitely and blocks user-initiated re-syncs.
+    """
+    return int(os.environ.get('SYNC_MAX_JOB_WALL_CLOCK_SECONDS', '1800'))
 
 
 @dataclass
@@ -957,13 +961,13 @@ class BaseSyncWorker(ABC):
         if result:
             # Persist file metadata AFTER the thread — async ORM cannot run in to_thread.
             await Files.update_file_metadata_by_id(file_id, {'collection_name': self.knowledge_id})
-            await Files.update_file_data_by_id(file_id, {'status': 'completed'})
+            await Files.set_status(file_id, 'completed')
             await Files.update_file_hash_by_id(file_id, file_hash)
 
         if not result:
             log.warning(f'No text content extracted from {filename}')
             await Files.update_file_metadata_by_id(file_id, {'collection_name': self.knowledge_id})
-            await Files.update_file_data_by_id(file_id, {'status': 'completed'})
+            await Files.set_status(file_id, 'completed')
             await Files.update_file_hash_by_id(file_id, file_hash)
 
         return True
@@ -1435,6 +1439,10 @@ class BaseSyncWorker(ABC):
                         size=size,
                         file_info=file_info,
                     )
+                    # Mirror pending status into meta at stub-creation time so
+                    # the KB file-list query (Task 3) can read status from the
+                    # cheap meta column without de-TOASTing data.content.
+                    file_meta['status'] = 'pending'
 
                     file_form = FileForm(
                         id=file_id,
@@ -1493,10 +1501,7 @@ class BaseSyncWorker(ABC):
                 current_status = (existing.data or {}).get('status')
                 if current_status in ('completed', 'error'):
                     continue
-                await Files.update_file_data_by_id(
-                    file_id,
-                    {'status': error_status, 'error': message},
-                )
+                await Files.set_status(file_id, error_status, error=message)
                 changed += 1
             except Exception:
                 log.warning(f'Failed to fail-mark stub {file_id}', exc_info=True)
@@ -1531,7 +1536,7 @@ class BaseSyncWorker(ABC):
                 # /ingest's terminal writes win — don't churn rows that are
                 # already in their final state.
                 if current_status not in ('completed', 'error') and current_status != stage:
-                    await Files.update_file_data_by_id(file_id, {'status': stage})
+                    await Files.set_status(file_id, stage)
 
                 if stage == 'ok' and file_id not in self._announced_ok_file_ids:
                     self._announced_ok_file_ids.add(file_id)
@@ -1557,7 +1562,7 @@ class BaseSyncWorker(ABC):
 
         Terminal states: ``completed``, ``partial``, ``failed``, ``cancelled``.
         Synthesises a ``timed_out`` terminal when the loader-worker hasn't
-        reported a real terminal within ``MAX_JOB_WALL_CLOCK_SECONDS`` —
+        reported a real terminal within ``_max_job_wall_clock_seconds()`` —
         without this guard a stuck pod (the 2026-04-29 staging incident)
         keeps OWUI polling forever and stubs remain in 'pending'.
 
@@ -1572,13 +1577,14 @@ class BaseSyncWorker(ABC):
         last_status = ''
         cancel_requested = False
         started_at = time.monotonic()
+        wall_clock_cap = _max_job_wall_clock_seconds()
 
         while True:
             elapsed = time.monotonic() - started_at
-            if elapsed > MAX_JOB_WALL_CLOCK_SECONDS:
+            if elapsed > wall_clock_cap:
                 log.error(
                     f'Loader-worker job {job_id} exceeded '
-                    f'MAX_JOB_WALL_CLOCK_SECONDS={MAX_JOB_WALL_CLOCK_SECONDS}; '
+                    f'SYNC_MAX_JOB_WALL_CLOCK_SECONDS={wall_clock_cap}; '
                     f'returning synthetic timed_out status so caller can fail-mark stubs.'
                 )
                 return {
@@ -1828,12 +1834,10 @@ class BaseSyncWorker(ABC):
                 try:
                     existing = await Files.get_file_by_id(file_id)
                     if existing and (existing.data or {}).get('status') not in ('completed', 'error'):
-                        await Files.update_file_data_by_id(
+                        await Files.set_status(
                             file_id,
-                            {
-                                'status': 'error',
-                                'error': (f'sync ended with item still in stage={orphan.get("stage")}'),
-                            },
+                            'error',
+                            error=f'sync ended with item still in stage={orphan.get("stage")}',
                         )
                 except Exception:
                     log.warning(f'Failed to fail-mark orphan-stage stub {file_id}', exc_info=True)
@@ -1844,7 +1848,7 @@ class BaseSyncWorker(ABC):
             changed = await self._fail_mark_outstanding_stubs('Sync timed out')
             log.warning(
                 f'Sync timed out for KB {self.knowledge_id}: fail-marked {changed} stub(s) '
-                f'(MAX_JOB_WALL_CLOCK_SECONDS={MAX_JOB_WALL_CLOCK_SECONDS})'
+                f'(SYNC_MAX_JOB_WALL_CLOCK_SECONDS={_max_job_wall_clock_seconds()})'
             )
             for source in self.sources:
                 for key in self.source_clear_delta_keys:

@@ -5,6 +5,7 @@
 	import { toast } from 'svelte-sonner';
 
 	import { getCloudSyncStatus } from '$lib/apis/configs';
+	import { getAllUsers } from '$lib/apis/users';
 	import Spinner from '$lib/components/common/Spinner.svelte';
 	import Confluence from '$lib/components/icons/Confluence.svelte';
 	import GoogleDrive from '$lib/components/icons/GoogleDrive.svelte';
@@ -91,6 +92,11 @@
 	// keyed by provider slug. Drives the card header status lines.
 	let status: CloudSyncStatusResponse = {};
 
+	// Admin user list fetched once on mount and passed to child sections that
+	// need an owner-selector dropdown (Confluence, TOPdesk). Avoids each section
+	// independently fetching the same endpoint on mount.
+	let adminUsers: { id: string; name: string; email: string }[] = [];
+
 	// ── Cross-provider status polling ──────────────────────────────────
 	// Refresh on mount and whenever a shared-KB lifecycle event fires
 	// (provisioned / synced / deleted). On top of that, poll continuously
@@ -138,7 +144,21 @@
 	onMount(async () => {
 		// Child sections mount before the parent's onMount fires (bottom-up
 		// mount order), so `sectionRefs` is already populated here.
+		// Fetch the admin user list once here so both ConfluenceSection and
+		// TopdeskSection can share it via the `adminUsers` prop — avoids two
+		// identical fetches on mount.
 		try {
+			const usersResponse = await getAllUsers(localStorage.token).catch(() => null);
+			adminUsers = (
+				(usersResponse?.users ?? []) as {
+					id: string;
+					name: string;
+					email: string;
+					role: string;
+				}[]
+			)
+				.filter((u) => u.role === 'admin')
+				.map((u) => ({ id: u.id, name: u.name, email: u.email }));
 			await Promise.all([...Object.values(sectionRefs).map((s) => s?.load?.()), refreshStatus()]);
 		} catch (err) {
 			toast.error(`${err}`);
@@ -230,6 +250,7 @@
 						<ConfluenceSection
 							bind:this={sectionRefs[descriptor.slug]}
 							bind:enabled={enabledBySlug[descriptor.slug]}
+							{adminUsers}
 							beforeSharedKbAction={persistAll}
 							onChange={() => scheduleAutosave(descriptor.slug)}
 							on:provisioned={refreshStatus}
@@ -252,6 +273,7 @@
 						<TopdeskSection
 							bind:this={sectionRefs[descriptor.slug]}
 							bind:enabled={enabledBySlug[descriptor.slug]}
+							{adminUsers}
 							beforeSharedKbAction={persistAll}
 							onChange={() => scheduleAutosave(descriptor.slug)}
 							on:provisioned={refreshStatus}

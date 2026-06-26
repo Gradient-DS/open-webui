@@ -14,7 +14,6 @@
 		type TopdeskSharedKbStatus,
 		type TopdeskKbItem
 	} from '$lib/apis/topdesk';
-	import { getAllUsers } from '$lib/apis/users';
 	import Switch from '$lib/components/common/Switch.svelte';
 	import Spinner from '$lib/components/common/Spinner.svelte';
 	import SensitiveInput from '$lib/components/common/SensitiveInput.svelte';
@@ -93,7 +92,8 @@
 	// re-provisioning.
 	let sharedKbOwnerId = '';
 	let sharedKbOwnerInitialized = false;
-	let adminUsers: { id: string; name: string; email: string }[] = [];
+	// Passed in from CloudSync.svelte (fetched once there, shared with Confluence).
+	export let adminUsers: { id: string; name: string; email: string }[] = [];
 	let sharedKbStatus: TopdeskSharedKbStatus | null = null;
 
 	const applyTopdeskConfig = (config: TopdeskConfigResponse | null) => {
@@ -112,24 +112,11 @@
 	};
 
 	export async function load() {
-		const [config, users, shared] = await Promise.all([
+		const [config, shared] = await Promise.all([
 			getTopdeskConfig(localStorage.token),
-			getAllUsers(localStorage.token).catch(() => null),
 			getTopdeskSharedKbStatus(localStorage.token).catch(() => null)
 		]);
 		applyTopdeskConfig(config);
-		// Owner dropdown is limited to admins — they are the only valid owners of
-		// a shared, org-wide knowledge base.
-		adminUsers = (
-			(users?.users ?? []) as {
-				id: string;
-				name: string;
-				email: string;
-				role: string;
-			}[]
-		)
-			.filter((u) => u.role === 'admin')
-			.map((u) => ({ id: u.id, name: u.name, email: u.email }));
 		sharedKbStatus = shared;
 		// Seed the owner dropdown from the KB row's owner on first load only;
 		// subsequent reloads leave the admin's in-progress pick alone.
