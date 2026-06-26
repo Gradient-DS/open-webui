@@ -97,19 +97,16 @@
 	$: fileId = mergedDocuments?.[0]?.metadata?.file_id;
 
 	// External/source URL for the cited document. Prefers the agent-provided
-	// source.url (set by soev-agents from confluence_url / source_url /
-	// topdesk_url); falls back to the provider metadata keys the native RAG
-	// path leaves on the chunk (the agent path allow-lists chunk metadata, so
-	// there the URL only arrives as source.url). Drives the "open original
-	// page" affordance shown alongside the existing file download.
+	// source.url (set by soev-agents from the generic source_url); falls back
+	// to the source_url the native RAG path leaves on the chunk (the agent
+	// path allow-lists chunk metadata, so there the URL only arrives as
+	// source.url). One generic key — every cloud-sync worker writes source_url.
+	// Drives the "open original page" affordance shown alongside the download.
 	$: externalUrl = (() => {
 		const u = citation?.source?.url;
 		if (typeof u === 'string' && u.includes('http')) return u;
-		const m = mergedDocuments?.[0]?.metadata ?? {};
-		for (const k of ['confluence_url', 'source_url', 'topdesk_url']) {
-			const v = m?.[k];
-			if (typeof v === 'string' && v.includes('http')) return v;
-		}
+		const v = mergedDocuments?.[0]?.metadata?.source_url;
+		if (typeof v === 'string' && v.includes('http')) return v;
 		return null;
 	})();
 

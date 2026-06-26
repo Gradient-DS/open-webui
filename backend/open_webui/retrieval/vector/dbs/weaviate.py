@@ -119,6 +119,12 @@ class WeaviateClient(VectorDBBase):
         except Exception as e:
             raise ConnectionError(f'Failed to connect to Weaviate: {e}') from e
 
+        # Collections whose `source_url` property has been verified/added this
+        # process. Auto-schema is off (see _create_collection), so the generic
+        # `source_url` provenance key must be an explicit property; this set
+        # avoids re-checking the schema on every insert batch.
+        self._source_url_ensured: set[str] = set()
+
     def _sanitize_collection_name(self, collection_name: str) -> str:
         """Sanitize collection name to be a valid Weaviate class name."""
         if not isinstance(collection_name, str) or not collection_name.strip():
@@ -165,6 +171,12 @@ class WeaviateClient(VectorDBBase):
                 weaviate.classes.config.Property(name='file_id', data_type=weaviate.classes.config.DataType.TEXT),
                 weaviate.classes.config.Property(name='name', data_type=weaviate.classes.config.DataType.TEXT),
                 weaviate.classes.config.Property(name='source', data_type=weaviate.classes.config.DataType.TEXT),
+                # Generic external/source URL of the original document, written
+                # by every cloud-sync worker (Confluence, TOPdesk, Google Drive,
+                # OneDrive, generic ingest). Must be declared explicitly because
+                # auto-schema is off; consumed by soev-agents' citation policy
+                # (-> SourceCitation.url) and the OWUI citation modal.
+                weaviate.classes.config.Property(name='source_url', data_type=weaviate.classes.config.DataType.TEXT),
                 weaviate.classes.config.Property(name='created_by', data_type=weaviate.classes.config.DataType.TEXT),
                 # PDF metadata - dates come in non-RFC3339 format
                 weaviate.classes.config.Property(name='moddate', data_type=weaviate.classes.config.DataType.TEXT),
@@ -191,6 +203,37 @@ class WeaviateClient(VectorDBBase):
                     log.debug('Collection %s created by another thread', sane_collection_name)
                 else:
                     raise
+        else:
+            # Collection predates the `source_url` property: add it in place so a
+            # re-sync repopulates the original-page link without reprovisioning.
+            self._ensure_source_url_property(sane_collection_name)
+
+    def _ensure_source_url_property(self, sane_collection_name: str) -> None:
+        """Idempotently add the `source_url` property to an existing collection.
+
+        Auto-schema is off, so inserts silently drop undeclared properties. New
+        collections get `source_url` from `_create_collection`; collections
+        created before this change need it added once. Cached per process.
+        """
+        if sane_collection_name in self._source_url_ensured:
+            return
+        try:
+            collection = self.client.collections.get(sane_collection_name)
+            existing = {p.name for p in collection.config.get().properties}
+            if 'source_url' not in existing:
+                collection.config.add_property(
+                    weaviate.classes.config.Property(
+                        name='source_url',
+                        data_type=weaviate.classes.config.DataType.TEXT,
+                    )
+                )
+                log.info('Added source_url property to existing collection %s', sane_collection_name)
+        except Exception as e:
+            # Non-fatal: a concurrent add or a transient error must not block the
+            # insert. The property either already exists or will be retried next call.
+            log.debug('Could not ensure source_url on %s: %s', sane_collection_name, e)
+            return
+        self._source_url_ensured.add(sane_collection_name)
 
     def insert(self, collection_name: str, items: List[VectorItem]) -> None:
         sane_collection_name = self._sanitize_collection_name(collection_name)
