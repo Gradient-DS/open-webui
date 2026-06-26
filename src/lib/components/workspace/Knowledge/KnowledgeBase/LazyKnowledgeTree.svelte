@@ -6,7 +6,7 @@
 	dayjs.extend(duration);
 	dayjs.extend(relativeTime);
 
-	import { getContext } from 'svelte';
+	import { getContext, onDestroy } from 'svelte';
 
 	const i18n = getContext<any>('i18n');
 
@@ -84,12 +84,27 @@
 		nodeCache = nodeCache;
 	};
 
-	const toggle = (path: string) => {
-		expanded[path] = !expanded[path];
-		expanded = expanded;
-		if (expanded[path] && !nodeCache[path]) {
-			loadNode(path);
+	// Folders mid-fetch for their first expand — drives a spinner on the chevron.
+	let loadingPaths: Record<string, boolean> = {};
+
+	const toggle = async (path: string) => {
+		if (expanded[path]) {
+			// Collapse immediately — no fetch needed.
+			expanded[path] = false;
+			expanded = expanded;
+			return;
 		}
+		// Load BEFORE opening so the folder never flashes empty then pops its
+		// contents in (the flicker). The chevron shows a spinner meanwhile.
+		if (!nodeCache[path]) {
+			loadingPaths[path] = true;
+			loadingPaths = loadingPaths;
+			await loadNode(path);
+			delete loadingPaths[path];
+			loadingPaths = loadingPaths;
+		}
+		expanded[path] = true;
+		expanded = expanded;
 	};
 
 	const loadMore = async (path: string) => {
@@ -118,20 +133,45 @@
 		loadingMoreRoot = false;
 	};
 
-	// Refresh: keep the user's expansion, drop cached contents, reload root and
-	// re-fetch every open folder. Runs on mount (refreshSignal starts at 0,
-	// lastRefresh undefined) and on every parent bump.
+	// Refresh: keep the user's expansion, reload the root and every OPEN folder
+	// in place (loadNode preserves the old folders/files until the new data
+	// lands, so nothing flashes empty — important for the 4 s sync poll). Cache
+	// for collapsed folders is dropped so they re-fetch fresh when next opened.
+	// Runs on mount (refreshSignal starts at 0, lastRefresh undefined) and on
+	// every parent bump.
 	let lastRefresh: number | undefined;
 	const refresh = async () => {
-		const reopen = Object.keys(expanded).filter((p) => expanded[p]);
-		nodeCache = {};
+		const open = Object.keys(expanded).filter((p) => expanded[p]);
+		const openSet = new Set(open);
+		for (const p of Object.keys(nodeCache)) {
+			if (!openSet.has(p)) delete nodeCache[p];
+		}
+		nodeCache = nodeCache;
 		await loadRoot();
-		await Promise.all(reopen.map((p) => loadNode(p)));
+		await Promise.all(open.map((p) => loadNode(p)));
 	};
 	$: if (refreshSignal !== lastRefresh) {
 		lastRefresh = refreshSignal;
 		refresh();
 	}
+
+	// While a sync is running, the source/folder counts the root was fetched with
+	// go stale (files are still being linked). Poll a refresh so they tick up
+	// live instead of sitting at 0 until the sync finishes. Stops on completion
+	// (the parent's refreshSignal bump does the final refresh).
+	const SYNC_POLL_MS = 4000;
+	let syncPoll: ReturnType<typeof setInterval> | null = null;
+	$: {
+		if (isSyncing && !syncPoll) {
+			syncPoll = setInterval(() => refresh(), SYNC_POLL_MS);
+		} else if (!isSyncing && syncPoll) {
+			clearInterval(syncPoll);
+			syncPoll = null;
+		}
+	}
+	onDestroy(() => {
+		if (syncPoll) clearInterval(syncPoll);
+	});
 </script>
 
 <div class="max-h-full flex flex-col w-full gap-[0.5px]">
@@ -153,6 +193,7 @@
 				{knowledge}
 				{expanded}
 				{nodeCache}
+				{loadingPaths}
 				{toggle}
 				{loadMore}
 				{onClick}
@@ -179,7 +220,9 @@
 								{#if fb === 'spinner'}
 									<Spinner className="size-3.5" />
 								{:else if fb === 'error'}
-									<ExclamationTriangle className="size-3.5 text-red-500" />
+									<Tooltip content={file.error || $i18n.t('Processing error')}>
+										<ExclamationTriangle className="size-3.5 text-red-500" />
+									</Tooltip>
 								{:else}
 									<DocumentPage className="size-3.5" />
 								{/if}
