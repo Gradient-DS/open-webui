@@ -666,7 +666,10 @@ class ConfluenceSyncWorker(BaseSyncWorker):
             'confluence_cloud_id': info.get('cloud_id', ''),
             'confluence_space_id': info.get('space_id', ''),
             'confluence_space_key': info.get('space_key', ''),
-            'confluence_url': info.get('web_url', ''),
+            # Generic provenance URL consumed by the citation layer (agent +
+            # modal). Kept connector-agnostic: one `source_url` for every
+            # cloud-sync provider, not a `confluence_url`.
+            'source_url': info.get('web_url', ''),
             'confluence_title': info.get('title', ''),
             # Enrichment fields populated by _download_file_content. Empty when
             # this method is called before download (e.g. cloud-hash skip path

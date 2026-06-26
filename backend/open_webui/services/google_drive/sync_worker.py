@@ -261,6 +261,9 @@ class GoogleDriveSyncWorker(BaseSyncWorker):
             'size': size,
             'source': 'google_drive',
             'google_drive_item_id': item_id,
+            # Generic provenance URL (Drive webViewLink) — same `source_url` key
+            # every cloud-sync provider writes, consumed by the citation layer.
+            'source_url': (file_info or {}).get('item', {}).get('webViewLink', ''),
             'source_item_id': source_item_id,
             'relative_path': relative_path,
             'last_synced_at': int(time.time()),

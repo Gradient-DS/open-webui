@@ -559,7 +559,7 @@ def test_provider_file_meta_carries_topdesk_fields():
     assert meta['source'] == 'topdesk'
     assert meta['topdesk_item_id'] == 'item-uuid-1'
     assert meta['topdesk_number'] == 'KI 0001'
-    assert meta['topdesk_url'].endswith('unid=KI1')
+    assert meta['source_url'].endswith('unid=KI1')
     assert meta['topdesk_language'] == 'en'
     assert meta['topdesk_keywords'] == ['password', 'reset']
     assert meta['topdesk_visibility'] == 'VISIBLE'
