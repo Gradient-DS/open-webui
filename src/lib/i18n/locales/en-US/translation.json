@@ -2096,6 +2096,7 @@
     "Running": "",
     "Running...": "",
     "Runs embedding tasks concurrently to speed up processing. Turn off if rate limits become an issue.": "",
+    "SKILL.md references files not in the bundle: {{paths}}": "",
     "STDOUT/STDERR": "",
     "STT Model": "",
     "STT Settings": "",
