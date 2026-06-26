@@ -28,6 +28,29 @@ export const isTextPath = (path: string): boolean => {
 	return TEXT_EXTENSIONS.has(ext);
 };
 
+// A bundle-relative path under a conventional skill subdir, e.g.
+// "assets/template.docx". The negative lookbehind for \w / / keeps the match from
+// firing inside a longer absolute path such as
+// "/mnt/skills/public/docx/scripts/office/replace_text.py" (the "scripts/.." there
+// is preceded by "/", so it is skipped) or an in-.docx path like "word/document.xml"
+// (not under a skill subdir). Mirrors the genai-utils check
+// (deploy/skills/check_bundle_paths.py) so import-time and CI checks agree.
+const REFERENCED_PATH_RE =
+	/(?<![\w/])((?:assets|scripts|references|reference)\/[A-Za-z0-9_./-]+\.[A-Za-z0-9]+)/g;
+
+// Return the bundle-relative paths a SKILL.md references that are NOT present in the
+// bundle's files. Catches the flat-packaging bug where SKILL.md says
+// "assets/template.docx" but the file was uploaded at the skill root. Heuristic and
+// non-authoritative — intended to drive a non-blocking import warning.
+export const findMissingSkillFiles = (skillMd: string, files: SkillBundleFile[]): string[] => {
+	const present = new Set(files.map((f) => f.path));
+	const referenced = new Set<string>();
+	for (const match of skillMd.matchAll(REFERENCED_PATH_RE)) {
+		referenced.add(match[1]);
+	}
+	return [...referenced].filter((path) => !present.has(path)).sort();
+};
+
 // Archive cruft we never want to import: macOS resource forks and Finder metadata.
 const isMacJunk = (name: string): boolean =>
 	name.startsWith('__MACOSX/') || name.split('/').pop() === '.DS_Store';
