@@ -23,7 +23,12 @@
 	} from '$lib/apis/skills';
 	import { capitalizeFirstLetter, parseFrontmatter, formatSkillName, slugify } from '$lib/utils';
 	import { uploadFile } from '$lib/apis/files';
-	import { parseSkillBundle, buildSkillBundle, isTextPath } from '$lib/utils/skills/bundle';
+	import {
+		parseSkillBundle,
+		buildSkillBundle,
+		isTextPath,
+		findMissingSkillFiles
+	} from '$lib/utils/skills/bundle';
 	import TagInput from '$lib/components/common/Tags/TagInput.svelte';
 
 	import Tooltip from '../common/Tooltip.svelte';
@@ -136,6 +141,18 @@
 		} catch (e) {
 			toast.error($i18n.t('Not a valid skill bundle (no SKILL.md).'));
 			return;
+		}
+
+		// Non-blocking guardrail: if the SKILL.md references bundle files (e.g.
+		// assets/template.docx) that aren't in the bundle, the skill will fail at
+		// run time with "cannot stat ...". Warn but still import.
+		const missingFiles = findMissingSkillFiles(parsed.skillMd, parsed.files);
+		if (missingFiles.length) {
+			toast.warning(
+				$i18n.t('SKILL.md references files not in the bundle: {{paths}}', {
+					paths: missingFiles.join(', ')
+				})
+			);
 		}
 
 		const fm = parseFrontmatter(parsed.skillMd) as { name?: string; description?: string };

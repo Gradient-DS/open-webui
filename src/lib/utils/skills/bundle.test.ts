@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import JSZip from 'jszip';
-import { parseSkillBundle, buildSkillBundle, isTextPath } from './bundle';
+import { parseSkillBundle, buildSkillBundle, isTextPath, findMissingSkillFiles } from './bundle';
 
 async function makeSkillFile(entries: Record<string, string | Uint8Array>): Promise<File> {
 	const zip = new JSZip();
@@ -52,6 +52,45 @@ describe('parseSkillBundle nested (Anthropic layout)', () => {
 		expect(result.skillMd).toContain('name: intermax-docx');
 		// Prefix stripped; macOS junk (.DS_Store, __MACOSX) skipped.
 		expect(result.files.map((f) => f.path).sort()).toEqual([
+			'assets/background.png',
+			'assets/template.docx'
+		]);
+	});
+});
+
+describe('findMissingSkillFiles', () => {
+	const SKILL_MD = [
+		'---',
+		'name: intermax-docx',
+		'---',
+		'Fill the template at `assets/template.docx` with the cover `assets/background.png`.',
+		'Run `python /mnt/skills/public/docx/scripts/office/replace_text.py assets/template.docx`.',
+		'It edits `word/document.xml` internally.'
+	].join('\n');
+
+	it('returns nothing when every referenced path is present', () => {
+		const files = [
+			{ path: 'assets/template.docx', blob: new Blob([]) },
+			{ path: 'assets/background.png', blob: new Blob([]) }
+		];
+		expect(findMissingSkillFiles(SKILL_MD, files)).toEqual([]);
+	});
+
+	it('flags a flat-packaged bundle (files at root, SKILL.md says assets/)', () => {
+		const files = [
+			{ path: 'template.docx', blob: new Blob([]) },
+			{ path: 'background.png', blob: new Blob([]) }
+		];
+		expect(findMissingSkillFiles(SKILL_MD, files)).toEqual([
+			'assets/background.png',
+			'assets/template.docx'
+		]);
+	});
+
+	it('ignores absolute /mnt/skills/public tooling and in-.docx word/ paths', () => {
+		// Even with NO bundle files, the public tooling path and word/document.xml
+		// must not be reported — only the two assets/ references are.
+		expect(findMissingSkillFiles(SKILL_MD, [])).toEqual([
 			'assets/background.png',
 			'assets/template.docx'
 		]);
