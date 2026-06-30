@@ -2402,7 +2402,7 @@
 						<div class=" flex flex-col w-full space-x-2 rounded-lg h-full">
 							<div class="w-full h-full flex flex-col min-h-0">
 								{#if knowledge?.write_access && !(lazyTreeActive && query) && (lazyTreeActive || (fileItems && fileItems.length > 0))}
-									<div class="px-1 pb-1.5 shrink-0">
+									<div class="pb-1.5 shrink-0">
 										<KbSelectionHeader
 											count={$bulkCount}
 											allSelected={$bulkAllSelected}
