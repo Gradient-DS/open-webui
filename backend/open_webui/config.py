@@ -3849,6 +3849,89 @@ LOADER_WORKER_URL = os.environ.get('LOADER_WORKER_URL', '')
 TENANT_NAME = os.environ.get('TENANT_NAME', '')
 
 ####################################
+# Distributed Document Pipeline (warren)
+####################################
+
+# When enabled, KB ingestion (direct upload, add-file, reindex, batch) is
+# handed to the external distributed doc-pipeline (warren) instead of being
+# parsed + embedded natively. Warren fetches the file from a short-lived
+# presigned S3 GET, parses + chunks it, and POSTs chunked_text back to this
+# server's /ingest endpoint, which embeds + inserts exactly as today. Flag
+# off → native ingestion runs byte-for-byte unchanged.
+# See thoughts/shared/plans/2026-06-30-doc-pipeline-previder-staging-tierb.md.
+
+DISTRIBUTED_DOC_PIPELINE_ENABLED = PersistentConfig(
+    'DISTRIBUTED_DOC_PIPELINE_ENABLED',
+    'doc_pipeline.enabled',
+    os.environ.get('DISTRIBUTED_DOC_PIPELINE_ENABLED', 'False').lower() == 'true',
+)
+
+# pipeline-api base URL (this server submits jobs here), e.g.
+# http://doc-pipeline-pipeline-api.<ns>.svc.cluster.local:8080
+PIPELINE_API_BASE_URL = PersistentConfig(
+    'PIPELINE_API_BASE_URL',
+    'doc_pipeline.api_base_url',
+    os.environ.get('PIPELINE_API_BASE_URL', ''),
+)
+
+# Bearer for pipeline-api (must match the pipeline's inbound PIPELINE_API_KEY).
+PIPELINE_API_KEY = PersistentConfig(
+    'PIPELINE_API_KEY',
+    'doc_pipeline.api_key',
+    os.environ.get('PIPELINE_API_KEY', ''),
+)
+
+# This server's own in-cluster base URL that warren POSTs chunked_text back
+# to (the owui.ingest_url job parameter), e.g.
+# http://staging-open-webui.<ns>.svc.cluster.local:8080. Warren appends
+# /api/v1/integrations/ingest. Kept separate from the public WEBUI_URL so the
+# callback stays in-cluster (and Phase-7 NetworkPolicies can scope it).
+PIPELINE_INGEST_CALLBACK_URL = PersistentConfig(
+    'PIPELINE_INGEST_CALLBACK_URL',
+    'doc_pipeline.ingest_callback_url',
+    os.environ.get('PIPELINE_INGEST_CALLBACK_URL', ''),
+)
+
+# TTL (seconds) for the presigned GET handed to warren. Must exceed the
+# worst-case job pickup + fetch latency.
+PIPELINE_PRESIGN_TTL_SECONDS = PersistentConfig(
+    'PIPELINE_PRESIGN_TTL_SECONDS',
+    'doc_pipeline.presign_ttl_seconds',
+    int(os.environ.get('PIPELINE_PRESIGN_TTL_SECONDS', '3600')),
+)
+
+# Chunking parameters passed to warren via job_parameters.
+PIPELINE_CHUNK_SIZE = PersistentConfig(
+    'PIPELINE_CHUNK_SIZE',
+    'doc_pipeline.chunk_size',
+    int(os.environ.get('PIPELINE_CHUNK_SIZE', '1000')),
+)
+
+PIPELINE_CHUNK_OVERLAP = PersistentConfig(
+    'PIPELINE_CHUNK_OVERLAP',
+    'doc_pipeline.chunk_overlap',
+    int(os.environ.get('PIPELINE_CHUNK_OVERLAP', '100')),
+)
+
+# How often the reconciler sweeps files stuck in 'processing' with a pipeline
+# job id. Success is handled instantly by the /ingest callback; this sweep only
+# catches failed/hung jobs (restart-safe: derived from DB state each tick).
+PIPELINE_RECONCILE_INTERVAL_SECONDS = PersistentConfig(
+    'PIPELINE_RECONCILE_INTERVAL_SECONDS',
+    'doc_pipeline.reconcile_interval_seconds',
+    int(os.environ.get('PIPELINE_RECONCILE_INTERVAL_SECONDS', '120')),
+)
+
+# Generous backstop: a file whose pipeline job never reports a terminal status
+# within this window is marked 'error'. NOT a duration limit on healthy jobs —
+# the reconciler keeps waiting while a job is genuinely running. Default 6h.
+PIPELINE_JOB_MAX_WALL_CLOCK_SECONDS = PersistentConfig(
+    'PIPELINE_JOB_MAX_WALL_CLOCK_SECONDS',
+    'doc_pipeline.job_max_wall_clock_seconds',
+    int(os.environ.get('PIPELINE_JOB_MAX_WALL_CLOCK_SECONDS', '21600')),
+)
+
+####################################
 # Agent Proxy
 ####################################
 

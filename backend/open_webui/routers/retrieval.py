@@ -4,6 +4,7 @@ import mimetypes
 import os
 import shutil
 import asyncio
+import time
 
 import re
 import uuid
@@ -42,6 +43,7 @@ from open_webui.utils.access_control.files import has_access_to_file
 from open_webui.models.knowledge import Knowledges
 from open_webui.storage.provider import Storage
 from open_webui.internal.db import get_async_db, get_async_session
+from open_webui.utils import doc_pipeline
 from sqlalchemy.ext.asyncio import AsyncSession
 
 
@@ -1638,6 +1640,66 @@ class ProcessFileForm(BaseModel):
     collection_name: Optional[str] = None
 
 
+async def route_file_to_pipeline(request: Request, file, knowledge_id: str, user) -> dict:
+    """Hand a KB-bound file to the distributed doc-pipeline (warren).
+
+    Presigns the file's stored object, submits one warren job, links the file
+    to the KB, and marks it 'processing'. Warren parses + chunks the file and
+    POSTs chunked_text back to /ingest, which embeds + inserts via the native
+    path and sets the file 'completed'. No native parse/embed runs here; the
+    file's original bytes are untouched. Raises if the KB is missing or the
+    submit fails (the caller marks the file 'error')."""
+    config = request.app.state.config
+    knowledge = await Knowledges.get_knowledge_by_id(knowledge_id)
+    if knowledge is None:
+        raise ValueError(f'Knowledge base {knowledge_id!r} not found')
+
+    presigned_url = await asyncio.to_thread(Storage.get_presigned_url, file.path, config.PIPELINE_PRESIGN_TTL_SECONDS)
+    submission = doc_pipeline.build_job_submission(
+        file_id=file.id,
+        filename=file.filename,
+        content_type=(file.meta or {}).get('content_type') or 'application/octet-stream',
+        file_format=doc_pipeline.format_from_filename(file.filename),
+        presigned_url=presigned_url,
+        kb_id=knowledge_id,
+        kb_name=knowledge.name,
+        acting_user_id=user.id,
+        ingest_url=config.PIPELINE_INGEST_CALLBACK_URL,
+        chunk_size=config.PIPELINE_CHUNK_SIZE,
+        chunk_overlap=config.PIPELINE_CHUNK_OVERLAP,
+    )
+    job_id = await doc_pipeline.submit_job(
+        base_url=config.PIPELINE_API_BASE_URL,
+        api_key=config.PIPELINE_API_KEY,
+        submission=submission,
+    )
+
+    # Link (idempotent upsert) + mark processing only after a successful submit.
+    # pipeline_submitted_at lets the restart-safe reconciler apply its wall-clock
+    # backstop purely from persisted state.
+    await Knowledges.add_file_to_knowledge_by_id(knowledge_id, file.id, user.id)
+    async with get_async_db() as session:
+        await Files.update_file_metadata_by_id(
+            file.id,
+            {
+                'collection_name': knowledge_id,
+                'pipeline_job_id': job_id,
+                'pipeline_submitted_at': int(time.time()),
+            },
+            db=session,
+        )
+        await Files.set_status(file.id, 'processing', db=session)
+
+    log.info(f'Routed file {file.id} to doc-pipeline job {job_id} (kb={knowledge_id})')
+    return {
+        'status': True,
+        'collection_name': knowledge_id,
+        'filename': file.filename,
+        'content': '',
+        'pipeline_job_id': job_id,
+    }
+
+
 @router.post('/process/file')
 async def process_file(
     request: Request,
@@ -1664,6 +1726,17 @@ async def process_file(
                 collection_name = f'file-{file.id}'
             else:
                 await _validate_collection_access([collection_name], user, access_type='write')
+
+            # Distributed doc-pipeline gate: when enabled, hand a KB-bound
+            # uploaded file to warren instead of parsing + embedding it here.
+            # Skipped when the caller supplies inline content (nothing to fetch
+            # + parse). Flag off → the native path below runs unchanged.
+            if not form_data.content and doc_pipeline.should_route_to_pipeline(
+                enabled=request.app.state.config.DISTRIBUTED_DOC_PIPELINE_ENABLED,
+                collection_name=form_data.collection_name,
+                file_path=file.path,
+            ):
+                return await route_file_to_pipeline(request, file, form_data.collection_name, user)
 
             if form_data.content:
                 # Update the content in the file
@@ -2777,6 +2850,20 @@ async def process_files_batch(
                         error='Permission denied: not file owner',
                     )
                 )
+                continue
+
+            # Distributed doc-pipeline gate (per file): hand KB-bound files to
+            # warren instead of the native batch embed. One warren job per file
+            # (the OwuiIngestWorker targets a single document). The file is
+            # linked + marked 'processing' here, so it is excluded from the
+            # native all_docs batch below.
+            if doc_pipeline.should_route_to_pipeline(
+                enabled=request.app.state.config.DISTRIBUTED_DOC_PIPELINE_ENABLED,
+                collection_name=collection_name,
+                file_path=db_file.path,
+            ):
+                await route_file_to_pipeline(request, db_file, collection_name, user)
+                file_results.append(BatchProcessFilesResult(file_id=file.id, status='processing'))
                 continue
 
             text_content = file.data.get('content', '')
