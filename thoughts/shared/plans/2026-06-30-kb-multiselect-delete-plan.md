@@ -35,7 +35,7 @@ git checkout -b feat/kb-multiselect-delete
 ```
 Expected: `Switched to a new branch 'feat/kb-multiselect-delete'`.
 
-- [ ] **Step 2: Commit the design + plan docs (already on disk)**
+- [x] **Step 2: Commit the design + plan docs (already on disk)**
 
 ```bash
 git add thoughts/shared/plans/2026-06-30-kb-multiselect-delete-design.md thoughts/shared/plans/2026-06-30-kb-multiselect-delete-plan.md
@@ -59,7 +59,7 @@ The reusable, testable core. Keyed by `file:<id>` / `source:<itemId>` so it work
   - `sourceItem(itemId: string, label: string): SelectableItem`
   - `createKbSelection(): KbSelection` where `KbSelection` exposes stores `selected: Readable<Map<string, SelectableItem>>`, `count: Readable<number>`, `breakdown: Readable<{ files: number; sources: number }>`, `selectionMode: Readable<boolean>`, and methods `toggle(item)`, `select(item, orderedItems, e)`, `selectAll(items)`, `clear()`, `enterSelectionMode()`.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Create `src/lib/components/workspace/Knowledge/KnowledgeBase/selection.test.ts`:
 
@@ -140,12 +140,12 @@ describe('createKbSelection', () => {
 });
 ```
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [x] **Step 2: Run the test to verify it fails**
 
 Run: `npm run test:frontend -- src/lib/components/workspace/Knowledge/KnowledgeBase/selection.test.ts`
 Expected: FAIL — cannot resolve `./selection` (module does not exist yet).
 
-- [ ] **Step 3: Write the implementation**
+- [x] **Step 3: Write the implementation**
 
 Create `src/lib/components/workspace/Knowledge/KnowledgeBase/selection.ts`:
 
@@ -263,12 +263,12 @@ export function createKbSelection(): KbSelection {
 }
 ```
 
-- [ ] **Step 4: Run the test to verify it passes**
+- [x] **Step 4: Run the test to verify it passes**
 
 Run: `npm run test:frontend -- src/lib/components/workspace/Knowledge/KnowledgeBase/selection.test.ts`
 Expected: PASS (8 tests).
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/lib/components/workspace/Knowledge/KnowledgeBase/selection.ts src/lib/components/workspace/Knowledge/KnowledgeBase/selection.test.ts
@@ -290,7 +290,7 @@ Two small, dependency-light components reused by every view and the parent. No u
   - `SelectCheckbox` props: `selected: boolean`, `visible: boolean` (force-visible in selection mode), `onToggle: () => void`.
   - `KbBulkActionBar` props: `count: number`, `onDelete: () => void`, `onClear: () => void`, `onSelectAll: (() => void) | null` (Select-All button rendered only when non-null).
 
-- [ ] **Step 1: Create `SelectCheckbox.svelte`**
+- [x] **Step 1: Create `SelectCheckbox.svelte`**
 
 The checkbox cell. Hover-reveal via `group-hover` (the row container must have the `group` class — added in later tasks); always visible when selected or in selection mode. Check glyph copied from `FileNav/FileEntryRow.svelte`.
 
@@ -334,7 +334,7 @@ The checkbox cell. Hover-reveal via `group-hover` (the row container must have t
 </div>
 ```
 
-- [ ] **Step 2: Create `KbBulkActionBar.svelte`**
+- [x] **Step 2: Create `KbBulkActionBar.svelte`**
 
 Copy of `chat/FileNav/BulkActionBar.svelte` with the Download button removed and Select-All made optional. Reuses existing i18n keys `'{{count}} selected'`, `'Select All'`, `'Delete'`, `'Deselect'`.
 
@@ -401,12 +401,12 @@ Copy of `chat/FileNav/BulkActionBar.svelte` with the Download button removed and
 </div>
 ```
 
-- [ ] **Step 3: Verify it builds**
+- [x] **Step 3: Verify it builds**
 
 Run: `npm run build`
 Expected: build completes (exit 0). The two new components compile.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add src/lib/components/workspace/Knowledge/KnowledgeBase/SelectCheckbox.svelte src/lib/components/workspace/Knowledge/KnowledgeBase/KbBulkActionBar.svelte
@@ -425,7 +425,7 @@ Add an optional `selection` prop. When set, render a `SelectCheckbox` on each re
 **Interfaces:**
 - Consumes: `KbSelection`, `fileItem` from `./selection`; `SelectCheckbox` from `./SelectCheckbox.svelte`.
 
-- [ ] **Step 1: Extend the `<script>` block**
+- [x] **Step 1: Extend the `<script>` block**
 
 In `Files.svelte`, after the existing imports/exports (current lines 20–27), add the new import lines and selection props/helpers. Replace the block:
 
@@ -482,7 +482,7 @@ with:
 </script>
 ```
 
-- [ ] **Step 2: Add the `group` class + selected tint to the row container, and insert the checkbox**
+- [x] **Step 2: Add the `group` class + selected tint to the row container, and insert the checkbox**
 
 Replace the row container opening + the "Open file" block start (current lines 38–43):
 
@@ -517,7 +517,7 @@ with (adds `group`, a selected-row tint, and the `SelectCheckbox` as the first c
 			<div class="flex items-center">
 ```
 
-- [ ] **Step 3: Route the row-body click through `onRowClick`**
+- [x] **Step 3: Route the row-body click through `onRowClick`**
 
 Replace the row-body button's handler (current lines 62–69):
 
@@ -542,12 +542,12 @@ with:
 			>
 ```
 
-- [ ] **Step 4: Verify it builds**
+- [x] **Step 4: Verify it builds**
 
 Run: `npm run build`
 Expected: build completes (exit 0).
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/lib/components/workspace/Knowledge/KnowledgeBase/Files.svelte
@@ -566,7 +566,7 @@ Selectable rows here: **loose files** (which route to file-remove OR source-remo
 **Interfaces:**
 - Consumes: `KbSelection`, `fileItem`, `sourceItem` from `./selection`; `SelectCheckbox`.
 
-- [ ] **Step 1: Extend the `<script>` block**
+- [x] **Step 1: Extend the `<script>` block**
 
 After the existing imports (current line 25 `import FolderTreeNode ...`) add:
 
@@ -623,7 +623,7 @@ After the existing `export let onDelete` (current line 39), add the selection pr
 
 > Note: `looseFiles`, `sources`, and `isFolderLikeSource` already exist in this component (see the `isFolderLikeSource` helper at ~lines 94-98 and the `looseFiles` `{#each}` at ~line 273). If `looseFiles` is a derived `$:` already, reuse it; do not redeclare.
 
-- [ ] **Step 2: Source-header rows — add `group`, checkbox, selected tint**
+- [x] **Step 2: Source-header rows — add `group`, checkbox, selected tint**
 
 Open the file and find the source-header row block (the `{#each sources ...}` header that renders the Remove-Source `✕` calling `onRemoveSource(source.item_id, source.name)`, around lines 163-204). On that header row's outer container `<div>`: add the `group` class, and as its first child insert:
 
@@ -641,7 +641,7 @@ Open the file and find the source-header row block (the `{#each sources ...}` he
 
 Add the selected tint to that header container by appending `{srcSel ? 'bg-blue-50 dark:bg-blue-900/20' : ''}` to its class list, and ensure the container has `group`. (The header's expand/collapse click handler is unchanged — selection of a source is via its checkbox or, optionally, modifier-click; for v1 the header checkbox is sufficient and we do NOT intercept the header's expand click.)
 
-- [ ] **Step 3: Loose-file rows — add `group`, checkbox, modifier click, tint**
+- [x] **Step 3: Loose-file rows — add `group`, checkbox, modifier click, tint**
 
 Replace the loose-file row container open + body button (current lines 275–283):
 
@@ -684,12 +684,12 @@ with:
 		>
 ```
 
-- [ ] **Step 4: Verify it builds**
+- [x] **Step 4: Verify it builds**
 
 Run: `npm run build`
 Expected: build completes (exit 0).
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/lib/components/workspace/Knowledge/KnowledgeBase/SourceGroupedFiles.svelte
@@ -709,7 +709,7 @@ Selectable rows: **root-level loose files** (in `LazyKnowledgeTree`, → file-re
 **Interfaces:**
 - Consumes: `KbSelection`, `fileItem`, `sourceItem`, `SelectCheckbox`.
 
-- [ ] **Step 1: `LazyKnowledgeTree.svelte` — add `selection` prop + helpers**
+- [x] **Step 1: `LazyKnowledgeTree.svelte` — add `selection` prop + helpers**
 
 After the existing `export let onRemoveSource` (current line 33) add:
 
@@ -744,7 +744,7 @@ After the existing `export let onRemoveSource` (current line 33) add:
 
 > Place the `import` lines with the component's other imports at the top of the `<script>` if the linter prefers; functionally Svelte hoists imports. `rootFiles` already exists in this component (the root-files `{#each rootFiles ...}`).
 
-- [ ] **Step 2: `LazyKnowledgeTree.svelte` — root file rows: `group`, checkbox, click, tint**
+- [x] **Step 2: `LazyKnowledgeTree.svelte` — root file rows: `group`, checkbox, click, tint**
 
 Replace the root-file row container + body button (current lines 207–216):
 
@@ -787,7 +787,7 @@ with:
 			>
 ```
 
-- [ ] **Step 3: `LazyKnowledgeTree.svelte` — thread `selection` into `LazyTreeNode`**
+- [x] **Step 3: `LazyKnowledgeTree.svelte` — thread `selection` into `LazyTreeNode`**
 
 Replace the `LazyTreeNode` mount (current lines 189–201) to also pass `{selection}`:
 
@@ -808,7 +808,7 @@ Replace the `LazyTreeNode` mount (current lines 189–201) to also pass `{select
 		/>
 ```
 
-- [ ] **Step 4: `LazyTreeNode.svelte` — add `selection` prop + source-node helper**
+- [x] **Step 4: `LazyTreeNode.svelte` — add `selection` prop + source-node helper**
 
 After the existing `export let onRemoveSource` (current line 42) add:
 
@@ -826,7 +826,7 @@ After the existing `export let onRemoveSource` (current line 42) add:
 
 > Keep the `import` near the file's other imports if the linter complains about import placement.
 
-- [ ] **Step 5: `LazyTreeNode.svelte` — source-node checkbox**
+- [x] **Step 5: `LazyTreeNode.svelte` — source-node checkbox**
 
 The source/folder header row is gated by `isSource`. Add a checkbox for source nodes. Immediately inside the source row's flex container (the same row that holds the Remove-Source `✕` at lines 92-104), as the FIRST child, insert:
 
@@ -844,7 +844,7 @@ The source/folder header row is gated by `isSource`. Add a checkbox for source n
 
 Ensure the source row's container `<div>` has the `group` class (so the checkbox hover-reveal works) and append the selected tint `{nodeSel ? 'bg-blue-50 dark:bg-blue-900/20' : ''}` to its class list. Do NOT intercept the folder's expand/collapse click — source selection is via the checkbox.
 
-- [ ] **Step 6: `LazyTreeNode.svelte` — forward `selection` in the recursive `<svelte:self>`**
+- [x] **Step 6: `LazyTreeNode.svelte` — forward `selection` in the recursive `<svelte:self>`**
 
 Replace the recursive mount (current lines 118–129) to pass `{selection}`:
 
@@ -866,12 +866,12 @@ Replace the recursive mount (current lines 118–129) to pass `{selection}`:
 
 (Nested nodes have `isSource={false}`, so they render no checkbox — forwarding `selection` is harmless and keeps the recursion uniform.)
 
-- [ ] **Step 7: Verify it builds**
+- [x] **Step 7: Verify it builds**
 
 Run: `npm run build`
 Expected: build completes (exit 0).
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add src/lib/components/workspace/Knowledge/KnowledgeBase/LazyKnowledgeTree.svelte src/lib/components/workspace/Knowledge/KnowledgeBase/LazyTreeNode.svelte
@@ -892,7 +892,7 @@ Instantiate the model, pass it to the three editable views, render the bulk bar 
 **Interfaces:**
 - Consumes: `createKbSelection` from `./KnowledgeBase/selection`; `KbBulkActionBar` from `./KnowledgeBase/KbBulkActionBar.svelte`; existing `removeFileFromKnowledgeById` (already imported, line 35), `getKnowledgeById` (already imported, line 34), `activeProvider.api.removeSource`, `init()`.
 
-- [ ] **Step 1: Imports + model instance**
+- [x] **Step 1: Imports + model instance**
 
 Add imports next to the existing list-view imports (after line 69):
 
@@ -910,7 +910,7 @@ Near the other state declarations (after line 290 `let treeRefresh = 0;`), add:
 	let showBulkRemoveConfirm = false;
 ```
 
-- [ ] **Step 2: The dispatch handler `bulkRemoveHandler`**
+- [x] **Step 2: The dispatch handler `bulkRemoveHandler`**
 
 Add next to `deleteFileHandler` (after line 1589). It reads the selected items, replays each removal without per-item toast/init, refreshes `knowledge` meta once if any source was removed, then one `init()`:
 
@@ -955,7 +955,7 @@ Add next to `deleteFileHandler` (after line 1589). It reads the selected items, 
 
 > Prefer a top-of-file `import { get } from 'svelte/store';` if one is not already present, and use `get(...)` directly instead of the dynamic `await import`. Check the existing imports first; many Svelte files here already import `get`. If not present, add it to the `svelte/store` import line.
 
-- [ ] **Step 3: Pass `selection` to the three editable views**
+- [x] **Step 3: Pass `selection` to the three editable views**
 
 In the template, add `{selection}` to each of these mounts (do NOT add it to `LazyKnowledgeSearch`, which is read-only):
 - `LazyKnowledgeTree` mount (after `onDelete={...}`, before the closing `/>` at line 2347)
@@ -975,7 +975,7 @@ Each becomes, e.g. for `Files`:
 						/>
 ```
 
-- [ ] **Step 4: Render the bulk bar above the list**
+- [x] **Step 4: Render the bulk bar above the list**
 
 Insert directly after `<div class="w-full h-full flex flex-col min-h-0">` (line 2318), before the `{#if lazyTreeActive && !query}` branch:
 
@@ -1002,7 +1002,7 @@ Insert directly after `<div class="w-full h-full flex flex-col min-h-0">` (line 
 
 > `onSelectAll` is non-null only when the flat `Files` view is active (`!activeProvider`), where `fileItems` is the complete selectable set. In cloud/lazy views it is `null`, so the Select-All button is hidden (selection there is via checkbox + Shift-range + Cmd/Ctrl-click). This is the documented v1 scope line.
 
-- [ ] **Step 5: Add the confirm dialog**
+- [x] **Step 5: Add the confirm dialog**
 
 Next to the existing `SyncConfirmDialog` usages (after line 1885), add a bulk-remove confirm. Its copy adapts to whether sources are included:
 
@@ -1025,7 +1025,7 @@ Next to the existing `SyncConfirmDialog` usages (after line 1885), add a bulk-re
 />
 ```
 
-- [ ] **Step 6: Add i18n keys (en-US + nl-NL)**
+- [x] **Step 6: Add i18n keys (en-US + nl-NL)**
 
 First check which keys already exist:
 
@@ -1055,7 +1055,7 @@ nl-NL (`src/lib/i18n/locales/nl-NL/translation.json`) — add any missing with t
 - `"Removing a source stops its sync and deletes all of its files.": "Een bron verwijderen stopt de synchronisatie en verwijdert al zijn bestanden."`
 - `"This will remove the selected files from this knowledge base.": "Hiermee worden de geselecteerde bestanden uit deze kennisbank verwijderd."`
 
-- [ ] **Step 7: Verify it builds and i18n is valid JSON**
+- [x] **Step 7: Verify it builds and i18n is valid JSON**
 
 Run: `npm run build`
 Expected: build completes (exit 0).
@@ -1063,7 +1063,7 @@ Expected: build completes (exit 0).
 Run: `node -e "JSON.parse(require('fs').readFileSync('src/lib/i18n/locales/nl-NL/translation.json','utf8')); JSON.parse(require('fs').readFileSync('src/lib/i18n/locales/en-US/translation.json','utf8')); console.log('JSON OK')"`
 Expected: `JSON OK`.
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add src/lib/components/workspace/Knowledge/KnowledgeBase.svelte src/lib/i18n/locales/en-US/translation.json src/lib/i18n/locales/nl-NL/translation.json
@@ -1076,7 +1076,7 @@ git commit -m "feat(kb): wire bulk multiselect delete + confirm + i18n in Knowle
 
 **Files:** none (verification only).
 
-- [ ] **Step 1: Full unit test + build**
+- [x] **Step 1: Full unit test + build**
 
 Run: `npm run test:frontend -- src/lib/components/workspace/Knowledge/KnowledgeBase/selection.test.ts`
 Expected: PASS (8 tests).
@@ -1084,7 +1084,7 @@ Expected: PASS (8 tests).
 Run: `npm run build`
 Expected: exit 0.
 
-- [ ] **Step 2: Type-check the touched files only (no NEW errors)**
+- [x] **Step 2: Type-check the touched files only (no NEW errors)**
 
 Run: `npx svelte-check --tsconfig ./tsconfig.json 2>&1 | grep -E 'KnowledgeBase/(selection|SelectCheckbox|KbBulkActionBar|Files|SourceGroupedFiles|LazyKnowledgeTree|LazyTreeNode)|KnowledgeBase.svelte' | head -50`
 Expected: no errors referencing the new selection logic (pre-existing implicit-`any` warnings in these large files are acceptable; a NEW error you introduced is not).

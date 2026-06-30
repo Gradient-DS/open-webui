@@ -53,6 +53,7 @@ from open_webui.config import (
     ENABLE_PASSWORD_AUTH,
     OAUTH_PROVIDERS,
     OAUTH_MERGE_ACCOUNTS_BY_EMAIL,
+    DEFAULT_LOCALE,
 )
 from open_webui.utils.oauth import auth_manager_config
 from pydantic import BaseModel
@@ -80,6 +81,13 @@ from open_webui.utils.groups import apply_default_group_assignment
 from open_webui.utils.redis import get_redis_client
 from open_webui.utils.rate_limit import RateLimiter
 from open_webui.utils.totp import compute_twofa_grace
+from open_webui.models.password_reset import PasswordResetTokens
+from open_webui.utils.password_reset import (
+    generate_reset_token,
+    hash_reset_token,
+    is_reset_token_usable,
+)
+from open_webui.services.email.auth import is_mail_configured
 
 
 from typing import Optional, List
@@ -96,6 +104,19 @@ log = logging.getLogger(__name__)
 # Forgive us our failed attempts, as we forgive those
 # who exceed their allotted rate against this gate.
 signin_rate_limiter = RateLimiter(redis_client=get_redis_client(), limit=5 * 3, window=60 * 3)
+
+password_reset_rate_limiter = RateLimiter(redis_client=get_redis_client(), limit=5, window=60 * 15)
+
+GENERIC_PASSWORD_RESET_MESSAGE = 'If an account with that email exists, a password reset link has been sent.'
+
+
+class ForgotPasswordForm(BaseModel):
+    email: str
+
+
+class ResetPasswordForm(BaseModel):
+    token: str
+    new_password: str
 
 
 async def create_session_response(
@@ -363,6 +384,113 @@ async def update_password(
             raise HTTPException(400, detail=ERROR_MESSAGES.INCORRECT_PASSWORD)
     else:
         raise HTTPException(400, detail=ERROR_MESSAGES.INVALID_CRED)
+
+
+############################
+# Forgot / Reset Password
+############################
+
+
+@router.post('/password/forgot')
+async def forgot_password(
+    request: Request,
+    form_data: ForgotPasswordForm,
+    db: AsyncSession = Depends(get_async_session),
+):
+    """Self-service password reset request. Always returns the same generic
+    response (no account enumeration). Sends a reset email only when the
+    feature is enabled and the email maps to an active local password user."""
+    email = form_data.email.lower().strip()
+    try:
+        eligible = (
+            request.app.state.config.ENABLE_FORGOT_PASSWORD
+            and is_mail_configured()
+            and ENABLE_PASSWORD_AUTH
+            and not WEBUI_AUTH_TRUSTED_EMAIL_HEADER
+            and validate_email_format(email)
+            and not password_reset_rate_limiter.is_limited(email)
+        )
+        if eligible:
+            user = await Users.get_user_by_email(email, db=db)
+            if user:
+                auth = await Auths.get_auth_by_user_id(user.id, db=db)
+                if auth and auth.active:
+                    raw_token, token_hash = generate_reset_token()
+                    expiry_minutes = int(request.app.state.config.PASSWORD_RESET_EXPIRY_MINUTES)
+                    expires_at = int(time.time()) + expiry_minutes * 60
+
+                    # Only the newest link should work.
+                    await PasswordResetTokens.invalidate_unused_for_user(user.id, db=db)
+                    await PasswordResetTokens.create(
+                        user_id=user.id, token_hash=token_hash, expires_at=expires_at, db=db
+                    )
+
+                    base_url = str(request.base_url).rstrip('/')
+                    reset_url = f'{base_url}/auth/reset-password/{raw_token}'
+
+                    from open_webui.services.email.graph_mail_client import (
+                        render_password_reset_email,
+                        render_password_reset_subject,
+                        send_mail,
+                    )
+
+                    locale = str(DEFAULT_LOCALE) or 'en'
+                    html_body = render_password_reset_email(
+                        reset_url=reset_url, locale=locale, expiry_minutes=expiry_minutes
+                    )
+                    await send_mail(
+                        app=request.app,
+                        to_address=email,
+                        subject=render_password_reset_subject(locale=locale),
+                        html_body=html_body,
+                    )
+    except Exception as e:
+        # Never reveal failure detail to the caller; log and return the generic message.
+        log.error(f'Password reset request failed for {email}: {e}')
+
+    return {'detail': GENERIC_PASSWORD_RESET_MESSAGE}
+
+
+@router.get('/password/reset/{token}/validate')
+async def validate_password_reset_token(
+    token: str,
+    db: AsyncSession = Depends(get_async_session),
+):
+    record = await PasswordResetTokens.get_by_token_hash(hash_reset_token(token), db=db)
+    return {'valid': is_reset_token_usable(record, int(time.time()))}
+
+
+@router.post('/password/reset', response_model=bool)
+async def reset_password(
+    request: Request,
+    form_data: ResetPasswordForm,
+    db: AsyncSession = Depends(get_async_session),
+):
+    if not request.app.state.config.ENABLE_FORGOT_PASSWORD:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail=ERROR_MESSAGES.NOT_FOUND)
+
+    record = await PasswordResetTokens.get_by_token_hash(hash_reset_token(form_data.token), db=db)
+    if not is_reset_token_usable(record, int(time.time())):
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            detail='This password reset link is invalid or has expired.',
+        )
+
+    try:
+        validate_password(form_data.new_password)
+    except Exception as e:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail=str(e))
+
+    hashed = get_password_hash(form_data.new_password)
+    updated = await Auths.update_user_password_by_id(record.user_id, hashed, db=db)
+    if not updated:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            detail='Could not update password. Please request a new reset link.',
+        )
+
+    await PasswordResetTokens.mark_used(record.id, db=db)
+    return True
 
 
 ############################

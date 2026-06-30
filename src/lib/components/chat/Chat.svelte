@@ -3513,6 +3513,7 @@
 											{chatActionHandler}
 											{addMessages}
 											topPadding={true}
+											topSpacing={true}
 											bottomPadding={files.length > 0}
 											{onSelect}
 										/>

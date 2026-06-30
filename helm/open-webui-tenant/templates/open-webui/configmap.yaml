@@ -431,6 +431,10 @@ data:
   EMAIL_INVITE_HEADING: {{ .Values.openWebui.config.emailInviteHeading | quote }}
   {{- end }}
 
+  # Forgot Password (self-service reset)
+  ENABLE_FORGOT_PASSWORD: {{ .Values.openWebui.config.enableForgotPassword | quote }}
+  PASSWORD_RESET_EXPIRY_MINUTES: {{ .Values.openWebui.config.passwordResetExpiryMinutes | quote }}
+
   BYPASS_MODEL_ACCESS_CONTROL: {{ .Values.openWebui.config.bypassModelAccessControl | quote }}
 
   # Security Headers

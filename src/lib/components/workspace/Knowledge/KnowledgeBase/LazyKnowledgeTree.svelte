@@ -17,9 +17,11 @@
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
 	import DocumentPage from '$lib/components/icons/DocumentPage.svelte';
 	import ExclamationTriangle from '$lib/components/icons/ExclamationTriangle.svelte';
-	import XMark from '$lib/components/icons/XMark.svelte';
+	import GarbageBin from '$lib/components/icons/GarbageBin.svelte';
 	import Spinner from '$lib/components/common/Spinner.svelte';
 	import LazyTreeNode from './LazyTreeNode.svelte';
+	import SelectCheckbox from './SelectCheckbox.svelte';
+	import { fileItem, sourceItem, type KbSelection, type SelectableItem } from './selection';
 
 	export let knowledge: any = null;
 	export let selectedFileId: string | null = null;
@@ -31,6 +33,45 @@
 	export let onClick: (file: TreeFile) => void = () => {};
 	export let onDelete: (fileId: string) => void = () => {};
 	export let onRemoveSource: (itemId: string, name: string) => void = () => {};
+
+	// Optional multiselect model injected by KnowledgeBase. Null = no selection UI.
+	export let selection: KbSelection | null = null;
+
+	$: selectedStore = selection?.selected;
+	$: selectionModeStore = selection?.selectionMode;
+
+	const isFileSelectable = (file: any) => !!file?.id && file?.status !== 'uploading';
+	const buildFileItem = (file: any): SelectableItem => fileItem(file.id, file?.name ?? '');
+
+	// Unified, visual-order selectable list: top-level source folders first, then
+	// root loose files. Drives Shift-range, drag, and select-all; threaded into
+	// LazyTreeNode so source rows join the same gesture space.
+	$: orderedItems = [
+		...(rootFolders ?? []).map((s) => sourceItem(s.path, s.name, s.child_count ?? 0)),
+		...(rootFiles ?? []).filter(isFileSelectable).map(buildFileItem)
+	];
+	$: if (selection) selection.setAvailable(orderedItems);
+	onDestroy(() => selection?.setAvailable([]));
+
+	const onRootFileClick = (file: any, e: MouseEvent) => {
+		if (selection && selection.consumeDidDrag()) return;
+		if (selection && isFileSelectable(file) && (e.metaKey || e.ctrlKey || e.shiftKey)) {
+			e.preventDefault();
+			selection.select(buildFileItem(file), orderedItems, e);
+			return;
+		}
+		if (selection && isFileSelectable(file) && $selectionModeStore) {
+			selection.select(buildFileItem(file), orderedItems, e);
+			return;
+		}
+		onClick(file);
+	};
+	const onRootFilePointerDown = (file: any) => {
+		if (selection && isFileSelectable(file)) selection.pointerDown(buildFileItem(file), orderedItems);
+	};
+	const onRootFilePointerEnter = (file: any) => {
+		if (selection && isFileSelectable(file)) selection.pointerEnter(buildFileItem(file));
+	};
 
 	const PAGE_LIMIT = 100;
 
@@ -198,21 +239,40 @@
 				{loadMore}
 				{onClick}
 				{onRemoveSource}
+				{selection}
+				{orderedItems}
 			/>
 		{/each}
 
 		<!-- Root loose files (local uploads) -->
 		{#each rootFiles as file (file.id)}
 			{@const fb = fileBadge(file.status)}
+			{@const rfKey = `file:${file?.id}`}
+			{@const rfSel = (selection && isFileSelectable(file) && $selectedStore?.has(rfKey)) ?? false}
+			<!-- svelte-ignore a11y_no_static_element_interactions -->
 			<div
-				class="flex cursor-pointer w-full px-1.5 py-0.5 bg-transparent dark:hover:bg-gray-850/50 hover:bg-white rounded-xl transition {selectedFileId
-					? ''
-					: 'hover:bg-gray-100 dark:hover:bg-gray-850'}"
+				class="group flex cursor-pointer w-full px-1.5 py-0.5 bg-transparent dark:hover:bg-gray-850/50 hover:bg-white rounded-xl transition {selection
+					? 'select-none'
+					: ''} {rfSel
+					? 'bg-blue-50 dark:bg-blue-900/20'
+					: selectedFileId
+						? ''
+						: 'hover:bg-gray-100 dark:hover:bg-gray-850'}"
+				on:pointerdown={() => onRootFilePointerDown(file)}
+				on:pointerenter={() => onRootFilePointerEnter(file)}
 			>
+				{#if selection}
+					<SelectCheckbox
+						selectable={isFileSelectable(file)}
+						selected={rfSel}
+						visible={!!$selectionModeStore}
+						onToggle={() => selection.toggle(buildFileItem(file))}
+					/>
+				{/if}
 				<button
 					class="relative group flex items-center gap-1 rounded-xl p-2 text-left flex-1 justify-between"
 					type="button"
-					on:click={() => onClick(file)}
+					on:click={(e) => onRootFileClick(file, e)}
 				>
 					<div>
 						<div class="flex gap-2 items-center line-clamp-1">
@@ -253,7 +313,7 @@
 								type="button"
 								on:click={() => onDelete(file.id)}
 							>
-								<XMark />
+								<GarbageBin className="size-3.5" />
 							</button>
 						</Tooltip>
 					</div>
