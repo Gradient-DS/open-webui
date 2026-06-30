@@ -151,13 +151,21 @@
 					history.messages[assistantId].statusHistory = [...sh, event.status];
 					history = history;
 				} else if (event.type === 'draft') {
-					// Auto-attach: carry the interview's attachments (uploaded files
-					// + picked KBs) into the draft so SimpleModelEditor seeds the
-					// Kennis picker with them. The user can remove any before saving;
-					// SimpleModelEditor drops still-uploading items at save time.
-					const attached = interviewFiles.filter(
-						(f) => f?.type === 'collection' || f?.type === 'file'
+					// Auto-attach: knowledge bases the user picked are always kept;
+					// uploaded files only when the agent flagged them as standing
+					// reference (draft.files_to_attach) — one-off example inputs the
+					// user uploads per-use are left out. SimpleModelEditor seeds the
+					// Kennis picker with the result; the user can still add/remove.
+					const filesToAttach = (event.draft.files_to_attach ?? []).map((n) =>
+						String(n).trim().toLowerCase()
 					);
+					const attached = interviewFiles.filter((f) => {
+						if (f?.type === 'collection') return true;
+						if (f?.type === 'file') {
+							return filesToAttach.includes(String(f.name ?? '').trim().toLowerCase());
+						}
+						return false;
+					});
 					onComplete({ ...event.draft, knowledge: attached });
 					return;
 				}
