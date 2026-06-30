@@ -5,6 +5,8 @@
 	import { page } from '$app/stores';
 
 	import { validatePasswordResetToken, resetPassword } from '$lib/apis/auths';
+	import { WEBUI_BASE_URL } from '$lib/constants';
+	import { WEBUI_NAME } from '$lib/stores';
 	import Spinner from '$lib/components/common/Spinner.svelte';
 	import SensitiveInput from '$lib/components/common/SensitiveInput.svelte';
 
@@ -41,43 +43,103 @@
 	};
 </script>
 
-<div class="w-full h-screen flex items-center justify-center">
-	<div class="w-full max-w-sm px-6">
-		{#if state === 'loading'}
-			<div class="flex justify-center"><Spinner /></div>
-		{:else if state === 'invalid'}
-			<h2 class="text-lg font-medium mb-2">{$i18n.t('Reset link invalid or expired')}</h2>
-			<p class="text-sm text-gray-500 mb-4">
-				{$i18n.t('This password reset link is invalid or has expired. Please request a new one.')}
-			</p>
-			<button class="font-medium underline text-sm" type="button" on:click={() => goto('/auth')}>
-				{$i18n.t('Back to sign in')}
-			</button>
-		{:else if state === 'done'}
-			<p class="text-sm text-gray-500">
-				{$i18n.t('Your password has been reset. You can now sign in.')}
-			</p>
-		{:else}
-			<h2 class="text-lg font-medium mb-4">{$i18n.t('Reset password')}</h2>
-			<form on:submit|preventDefault={submitHandler} class="flex flex-col gap-3">
-				<div>
-					<label class="text-sm mb-1 block" for="new-password">{$i18n.t('New password')}</label>
-					<SensitiveInput id="new-password" bind:value={password} required />
+<svelte:head>
+	<title>{$i18n.t('Reset password')} | {$WEBUI_NAME}</title>
+</svelte:head>
+
+<div class="w-full h-screen max-h-[100dvh] text-white relative">
+	<div class="w-full h-full absolute top-0 left-0 bg-white dark:bg-black"></div>
+
+	<div
+		class="fixed bg-transparent min-h-screen w-full flex justify-center font-primary z-50 text-black dark:text-white"
+	>
+		<div class="w-full px-10 min-h-screen flex flex-col text-center">
+			<div class="my-auto flex flex-col justify-center items-center">
+				<div class="sm:max-w-md my-auto pb-10 w-full dark:text-gray-100">
+					<div class="flex justify-center mb-6">
+						<img
+							crossorigin="anonymous"
+							src="{WEBUI_BASE_URL}/static/favicon.png"
+							class="size-24 rounded-full"
+							alt=""
+						/>
+					</div>
+
+					{#if state === 'loading'}
+						<div class="flex items-center justify-center gap-3 text-xl">
+							<div>{$i18n.t('Loading...')}</div>
+							<Spinner className="size-5" />
+						</div>
+					{:else if state === 'valid'}
+						<form class="flex flex-col justify-center" on:submit|preventDefault={submitHandler}>
+							<div class="mb-1">
+								<div class="text-2xl font-medium">
+									{$i18n.t('Reset password')}
+								</div>
+							</div>
+
+							<div class="flex flex-col mt-4">
+								<div class="mb-2">
+									<label for="new-password" class="text-sm font-medium text-left mb-1 block">
+										{$i18n.t('New password')}
+									</label>
+									<SensitiveInput
+										id="new-password"
+										bind:value={password}
+										placeholder={$i18n.t('New password')}
+										required={true}
+									/>
+								</div>
+
+								<div class="mb-2">
+									<label for="confirm-password" class="text-sm font-medium text-left mb-1 block">
+										{$i18n.t('Confirm password')}
+									</label>
+									<SensitiveInput
+										id="confirm-password"
+										bind:value={confirmPassword}
+										placeholder={$i18n.t('Confirm password')}
+										required={true}
+									/>
+								</div>
+							</div>
+
+							<div class="mt-5">
+								<button
+									type="submit"
+									class="w-full text-sm font-medium text-center text-white bg-gray-900 dark:bg-white dark:text-gray-900 rounded-lg py-2.5 hover:bg-gray-800 dark:hover:bg-gray-100 transition disabled:opacity-50 disabled:cursor-not-allowed"
+									disabled={submitting}
+								>
+									{#if submitting}
+										<Spinner className="size-4 inline mr-1" />
+									{/if}
+									{$i18n.t('Reset password')}
+								</button>
+							</div>
+						</form>
+					{:else if state === 'done'}
+						<div class="text-xl font-medium mb-2">
+							{$i18n.t('Reset password')}
+						</div>
+						<p class="text-gray-500 dark:text-gray-400 mb-4">
+							{$i18n.t('Your password has been reset. You can now sign in.')}
+						</p>
+						<a href="/auth" class="text-sm text-blue-600 dark:text-blue-400 hover:underline">
+							{$i18n.t('Back to sign in')}
+						</a>
+					{:else}
+						<div class="text-xl font-medium mb-2">
+							{$i18n.t('Reset link invalid or expired')}
+						</div>
+						<p class="text-gray-500 dark:text-gray-400 mb-4">
+							{$i18n.t('This password reset link is invalid or has expired. Please request a new one.')}
+						</p>
+						<a href="/auth" class="text-sm text-blue-600 dark:text-blue-400 hover:underline">
+							{$i18n.t('Back to sign in')}
+						</a>
+					{/if}
 				</div>
-				<div>
-					<label class="text-sm mb-1 block" for="confirm-password"
-						>{$i18n.t('Confirm password')}</label
-					>
-					<SensitiveInput id="confirm-password" bind:value={confirmPassword} required />
-				</div>
-				<button
-					type="submit"
-					disabled={submitting}
-					class="bg-gray-900 text-white rounded-lg px-4 py-2 mt-2 disabled:opacity-50"
-				>
-					{$i18n.t('Reset password')}
-				</button>
-			</form>
-		{/if}
+			</div>
+		</div>
 	</div>
 </div>
