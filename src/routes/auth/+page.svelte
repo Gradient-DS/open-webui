@@ -15,7 +15,8 @@
 		userSignIn,
 		userSignUp,
 		updateUserTimezone,
-		verify2FA
+		verify2FA,
+		requestPasswordReset
 	} from '$lib/apis/auths';
 	import TwoFactorChallenge from '$lib/components/auth/TwoFactorChallenge.svelte';
 	import TwoFactorSetup from '$lib/components/chat/Settings/Account/TwoFactorSetup.svelte';
@@ -98,6 +99,21 @@
 		await setSessionUser(response);
 	};
 
+	let forgotSubmitted = false;
+
+	const forgotPasswordHandler = async () => {
+		const res = await requestPasswordReset(email).catch((error) => {
+			toast.error(`${error}`);
+			return null;
+		});
+		if (res) {
+			forgotSubmitted = true;
+			toast.success(
+				$i18n.t('If an account with that email exists, a password reset link has been sent.')
+			);
+		}
+	};
+
 	const signUpHandler = async () => {
 		if ($config?.features?.enable_signup_password_confirmation) {
 			if (password !== confirmPassword) {
@@ -136,6 +152,8 @@
 			await ldapSignInHandler();
 		} else if (mode === 'signin') {
 			await signInHandler();
+		} else if (mode === 'forgot') {
+			await forgotPasswordHandler();
 		} else {
 			await signUpHandler();
 		}
@@ -326,6 +344,8 @@
 												})}
 											{:else if mode === 'signin'}
 												{$i18n.t(`Sign in to {{WEBUI_NAME}}`, { WEBUI_NAME: $WEBUI_NAME })}
+											{:else if mode === 'forgot'}
+												{$i18n.t('Forgot password?')}
 											{:else}
 												{$i18n.t(`Sign up to {{WEBUI_NAME}}`, { WEBUI_NAME: $WEBUI_NAME })}
 											{/if}
@@ -394,23 +414,25 @@
 												</div>
 											{/if}
 
-											<div>
-												<label for="password" class="text-sm font-medium text-left mb-1 block"
-													>{$i18n.t('Password')}</label
-												>
-												<SensitiveInput
-													bind:value={password}
-													type="password"
-													id="password"
-													class="my-0.5 w-full text-sm outline-hidden bg-transparent placeholder:text-gray-300 dark:placeholder:text-gray-600"
-													placeholder={$i18n.t('Enter Your Password')}
-													autocomplete={mode === 'signup' ? 'new-password' : 'current-password'}
-													name="password"
-													screenReader={true}
-													required
-													aria-required="true"
-												/>
-											</div>
+											{#if mode !== 'forgot'}
+												<div>
+													<label for="password" class="text-sm font-medium text-left mb-1 block"
+														>{$i18n.t('Password')}</label
+													>
+													<SensitiveInput
+														bind:value={password}
+														type="password"
+														id="password"
+														class="my-0.5 w-full text-sm outline-hidden bg-transparent placeholder:text-gray-300 dark:placeholder:text-gray-600"
+														placeholder={$i18n.t('Enter Your Password')}
+														autocomplete={mode === 'signup' ? 'new-password' : 'current-password'}
+														name="password"
+														screenReader={true}
+														required
+														aria-required="true"
+													/>
+												</div>
+											{/if}
 
 											{#if mode === 'signup' && $config?.features?.enable_signup_password_confirmation}
 												<div class="mt-2">
@@ -449,12 +471,50 @@
 												>
 													{mode === 'signin'
 														? $i18n.t('Sign in')
-														: ($config?.onboarding ?? false)
-															? $i18n.t('Create Admin Account')
-															: $i18n.t('Create Account')}
+														: mode === 'forgot'
+															? $i18n.t('Reset password')
+															: ($config?.onboarding ?? false)
+																? $i18n.t('Create Admin Account')
+																: $i18n.t('Create Account')}
 												</button>
 
-												{#if $config?.features.enable_signup && !($config?.onboarding ?? false)}
+												{#if mode === 'signin' && $config?.features?.enable_login_form && $config?.features?.enable_forgot_password}
+													<div class="mt-2 text-sm text-center">
+														<button
+															class="font-medium underline"
+															type="button"
+															on:click={() => {
+																forgotSubmitted = false;
+																mode = 'forgot';
+															}}
+														>
+															{$i18n.t('Forgot password?')}
+														</button>
+													</div>
+												{/if}
+
+												{#if mode === 'forgot'}
+													<div class="mt-4 text-sm text-center">
+														{#if forgotSubmitted}
+															<p class="text-gray-500">
+																{$i18n.t(
+																	'If an account with that email exists, a password reset link has been sent.'
+																)}
+															</p>
+														{/if}
+														<button
+															class="font-medium underline mt-2"
+															type="button"
+															on:click={() => {
+																mode = 'signin';
+															}}
+														>
+															{$i18n.t('Back to sign in')}
+														</button>
+													</div>
+												{/if}
+
+												{#if mode !== 'forgot' && $config?.features.enable_signup && !($config?.onboarding ?? false)}
 													<div class=" mt-4 text-sm text-center">
 														{mode === 'signin'
 															? $i18n.t("Don't have an account?")
