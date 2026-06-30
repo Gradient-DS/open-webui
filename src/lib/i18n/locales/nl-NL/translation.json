@@ -1218,6 +1218,7 @@
     "Functions": "Functies",
     "Functions allow arbitrary code execution.": "Functies staan willekeurige code-uitvoering toe",
     "Functions imported successfully": "Functies succesvol geïmporteerd",
+    "Gathered context from {{count}} sources in {{seconds}}s": "Context verzameld uit {{count}} bronnen in {{seconds}}s",
     "Gemini": "Gemini",
     "Gemini API Key": "Gemini API Key",
     "Gemini API Key is required.": "Gemini API-sleutel is vereisd",

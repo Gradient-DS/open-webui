@@ -1218,6 +1218,7 @@
     "Functions": "",
     "Functions allow arbitrary code execution.": "",
     "Functions imported successfully": "",
+    "Gathered context from {{count}} sources in {{seconds}}s": "",
     "Gemini": "",
     "Gemini API Key": "",
     "Gemini API Key is required.": "",
