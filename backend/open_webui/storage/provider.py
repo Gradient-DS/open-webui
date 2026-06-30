@@ -67,6 +67,15 @@ class StorageProvider(ABC):
                 log.warning(f'Failed to delete {path}: {e}')
         return deleted
 
+    def get_presigned_url(self, file_path: str, expires_in: int) -> str:
+        """Return a short-lived presigned GET URL for ``file_path``.
+
+        Only providers that support out-of-band fetch (S3) implement this;
+        it lets an external service (the distributed doc-pipeline) download
+        the object directly without holding storage credentials. Providers
+        without that capability raise NotImplementedError."""
+        raise NotImplementedError('get_presigned_url is not supported by this storage provider')
+
 
 class LocalStorageProvider(StorageProvider):
     @staticmethod
@@ -183,6 +192,23 @@ class S3StorageProvider(StorageProvider):
             return local_file_path
         except ClientError as e:
             raise RuntimeError(f'Error downloading file from S3: {e}')
+
+    def get_presigned_url(self, file_path: str, expires_in: int) -> str:
+        """Return a presigned GET URL for the stored S3 object.
+
+        Presigns the same bucket + key the object was uploaded under (the
+        key is recovered from the ``s3://bucket/key`` path), so an external
+        fetcher can download the bytes over plain HTTPS without any S3
+        credentials of its own."""
+        s3_key = self._extract_s3_key(file_path)
+        try:
+            return self.s3_client.generate_presigned_url(
+                'get_object',
+                Params={'Bucket': self.bucket_name, 'Key': s3_key},
+                ExpiresIn=expires_in,
+            )
+        except ClientError as e:
+            raise RuntimeError(f'Error generating presigned URL for S3 object: {e}')
 
     def delete_file(self, file_path: str) -> None:
         """Handles deletion of the file from S3 storage."""

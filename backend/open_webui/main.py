@@ -430,6 +430,16 @@ from open_webui.config import (
     INTEGRATION_PROVIDERS,
     # Shared-services loader worker
     USE_SHARED_LOADER,
+    # Distributed document pipeline (warren)
+    DISTRIBUTED_DOC_PIPELINE_ENABLED,
+    PIPELINE_API_BASE_URL,
+    PIPELINE_API_KEY,
+    PIPELINE_INGEST_CALLBACK_URL,
+    PIPELINE_PRESIGN_TTL_SECONDS,
+    PIPELINE_CHUNK_SIZE,
+    PIPELINE_CHUNK_OVERLAP,
+    PIPELINE_RECONCILE_INTERVAL_SECONDS,
+    PIPELINE_JOB_MAX_WALL_CLOCK_SECONDS,
     # Agent Proxy
     ENABLE_AGENT_PROXY,
     # Agent Search (machine-auth retrieval endpoint)
@@ -1012,6 +1022,14 @@ async def lifespan(app: FastAPI):
 
     start_topdesk_scheduler(app)
 
+    # Start the distributed doc-pipeline reconciler (restart-safe sweep that
+    # marks files 'error' when their warren job fails/hangs; success is handled
+    # by the /ingest callback). Reads its enable flag per-tick, so starting it
+    # unconditionally is fine.
+    from open_webui.services.doc_pipeline_reconciler import start_pipeline_reconciler
+
+    start_pipeline_reconciler(app)
+
     # Start deletion cleanup worker
     from open_webui.services.deletion.cleanup_worker import start_cleanup_worker
 
@@ -1571,6 +1589,16 @@ app.state.config.PASSWORD_RESET_EXPIRY_MINUTES = PASSWORD_RESET_EXPIRY_MINUTES
 app.state.config.INTEGRATION_PROVIDERS = INTEGRATION_PROVIDERS
 
 app.state.config.USE_SHARED_LOADER = USE_SHARED_LOADER
+
+app.state.config.DISTRIBUTED_DOC_PIPELINE_ENABLED = DISTRIBUTED_DOC_PIPELINE_ENABLED
+app.state.config.PIPELINE_API_BASE_URL = PIPELINE_API_BASE_URL
+app.state.config.PIPELINE_API_KEY = PIPELINE_API_KEY
+app.state.config.PIPELINE_INGEST_CALLBACK_URL = PIPELINE_INGEST_CALLBACK_URL
+app.state.config.PIPELINE_PRESIGN_TTL_SECONDS = PIPELINE_PRESIGN_TTL_SECONDS
+app.state.config.PIPELINE_CHUNK_SIZE = PIPELINE_CHUNK_SIZE
+app.state.config.PIPELINE_CHUNK_OVERLAP = PIPELINE_CHUNK_OVERLAP
+app.state.config.PIPELINE_RECONCILE_INTERVAL_SECONDS = PIPELINE_RECONCILE_INTERVAL_SECONDS
+app.state.config.PIPELINE_JOB_MAX_WALL_CLOCK_SECONDS = PIPELINE_JOB_MAX_WALL_CLOCK_SECONDS
 
 app.state.config.ENABLE_AGENT_PROXY = ENABLE_AGENT_PROXY
 

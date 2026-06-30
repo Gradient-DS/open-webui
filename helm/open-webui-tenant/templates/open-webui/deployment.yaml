@@ -218,6 +218,14 @@ spec:
                   name: {{ include "open-webui-tenant.fullname" . }}-secrets
                   key: loader-ingest-api-key
             {{- end }}
+            # Distributed doc-pipeline submit bearer (matches pipeline-api inbound PIPELINE_API_KEY)
+            {{- if or .Values.secrets.pipelineApiKey .Values.externalSecrets.onepassword.fields.pipelineApiKey }}
+            - name: PIPELINE_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "open-webui-tenant.fullname" . }}-secrets
+                  key: pipeline-api-key
+            {{- end }}
             # S3 Storage credentials (only if configured)
             {{- if or .Values.secrets.s3AccessKeyId .Values.externalSecrets.onepassword.fields.s3AccessKeyId }}
             - name: S3_ACCESS_KEY_ID

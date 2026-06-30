@@ -1,24 +1,5 @@
 # KB Multiselect Delete Implementation Plan
 
-## ⚠️ Worktree layout — READ FIRST (kickoff context)
-
-Implemented in an isolated git worktree on branch `feat/kb-multiselect-delete`.
-Edit ONLY the worktree — never the main checkout.
-
-| Repo (as written in this plan) | Worktree to edit |
-|---|---|
-| `genai-utils/…` | `/Users/lexlubbers/Code/soev/genai-utils/.worktrees/feat/kb-multiselect-delete/…` |
-| `open-webui/…` | `/Users/lexlubbers/Code/soev/open-webui/.worktrees/feat/kb-multiselect-delete/…` |
-
-This plan is OWUI-frontend only; do all work in the open-webui worktree above.
-Absolute `cd` commands already target the worktree; repo-relative `Files:` paths
-mean the open-webui worktree. The design spec referenced in Global Constraints
-lives alongside this file at `thoughts/shared/plans/` in the worktree.
-
-**Node/build:** run `npm install` / `npm run build` / `npm run test:frontend` /
-`npm run dev` from the open-webui worktree root. The stack backend is already up
-(`stack-3`): OWUI FE http://localhost:18373, OWUI BE http://localhost:18380.
-
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Let users select multiple rows in a Knowledge Base (local + cloud) and remove them in one confirmed action, batching each row's existing removal (file-remove or remove-source).
@@ -44,11 +25,11 @@ lives alongside this file at `thoughts/shared/plans/` in the worktree.
 
 **Files:** none (git only).
 
-- [x] **Step 1: Create the feature branch off `dev`**
+- [ ] **Step 1: Create the feature branch off `dev`**
 
 Run:
 ```bash
-cd /Users/lexlubbers/Code/soev/open-webui/.worktrees/feat/kb-multiselect-delete
+cd /Users/lexlubbers/Code/soev/open-webui
 git checkout dev && git pull --ff-only
 git checkout -b feat/kb-multiselect-delete
 ```
