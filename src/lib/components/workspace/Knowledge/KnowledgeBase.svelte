@@ -24,12 +24,7 @@
 		socket
 	} from '$lib/stores';
 
-	import {
-		updateFileDataContentById,
-		uploadFile,
-		deleteFileById,
-		getFileById
-	} from '$lib/apis/files';
+	import { uploadFile, deleteFileById } from '$lib/apis/files';
 	import {
 		addFileToKnowledgeById,
 		getKnowledgeById,
@@ -80,7 +75,7 @@
 	import Badge from '$lib/components/common/Badge.svelte';
 
 	import SyncConfirmDialog from '../../common/ConfirmDialog.svelte';
-	import Drawer from '$lib/components/common/Drawer.svelte';
+	import FileItemModal from '$lib/components/common/FileItemModal.svelte';
 	import ChevronLeft from '$lib/components/icons/ChevronLeft.svelte';
 	import LockClosed from '$lib/components/icons/LockClosed.svelte';
 	import OneDrive from '$lib/components/icons/OneDrive.svelte';
@@ -269,7 +264,7 @@
 
 	let selectedFileId: string | null = null;
 	let selectedFile = null;
-	let selectedFileContent = '';
+	let showFilePreview = false;
 
 	let inputFiles = null;
 
@@ -394,21 +389,32 @@
 		return res;
 	};
 
-	const fileSelectHandler = async (file) => {
-		try {
-			selectedFile = file;
-			if (file?.data?.content != null) {
-				selectedFileContent = file.data.content;
-			} else {
-				selectedFileContent = '';
-				const full = await getFileById(localStorage.token, file.id);
-				selectedFileContent = full?.data?.content || '';
-				selectedFile = { ...file, data: { ...(file.data || {}), content: selectedFileContent } };
-			}
-		} catch {
-			toast.error($i18n.t('Failed to load file content.'));
+	// Open the read-only file preview popup. FileItemModal fetches its own
+	// content; `file` may come from the flat list (top-level name/size + meta)
+	// or the lazy tree ({ id, name, meta: { name, size } }).
+	const openFilePreview = (file) => {
+		if (!file) {
+			selectedFile = null;
+			showFilePreview = false;
+			return;
 		}
+
+		selectedFile = {
+			id: file.id,
+			name: file?.meta?.name ?? file?.name,
+			type: 'file',
+			size: file?.meta?.size ?? file?.size,
+			meta: file?.meta ?? { name: file?.name, size: file?.size }
+		};
+		showFilePreview = true;
 	};
+
+	// Closing the preview (via the modal's own close button) also clears the
+	// row selection highlight in the file list.
+	$: if (!showFilePreview && selectedFileId !== null) {
+		selectedFileId = null;
+		selectedFile = null;
+	}
 
 	const createFileFromText = (name, content) => {
 		const blob = new Blob([content], { type: 'text/plain' });
@@ -1650,39 +1656,6 @@
 	let debounceTimeout = null;
 	let mediaQuery;
 	let dragged = false;
-	let isSaving = false;
-
-	const updateFileContentHandler = async () => {
-		if (isSaving) {
-			console.log('Save operation already in progress, skipping...');
-			return;
-		}
-
-		isSaving = true;
-
-		try {
-			const res = await updateFileDataContentById(
-				localStorage.token,
-				selectedFile.id,
-				selectedFileContent
-			).catch((e) => {
-				toast.error(`${e}`);
-				return null;
-			});
-
-			if (res) {
-				toast.success($i18n.t('File content updated successfully.'));
-
-				selectedFileId = null;
-				selectedFile = null;
-				selectedFileContent = '';
-
-				await init();
-			}
-		} finally {
-			isSaving = false;
-		}
-	};
 
 	const changeDebounceHandler = () => {
 		console.log('debounce');
@@ -2421,7 +2394,7 @@
 											refreshSignal={treeRefresh}
 											onClick={(file) => {
 												selectedFileId = file.id;
-												fileSelectHandler({
+												openFilePreview({
 													id: file.id,
 													name: file.name,
 													meta: { name: file.name, size: file.size }
@@ -2451,7 +2424,7 @@
 											{selectedFileId}
 											onClick={(file) => {
 												selectedFileId = file.id;
-												fileSelectHandler({
+												openFilePreview({
 													id: file.id,
 													name: file.name,
 													meta: { name: file.name, size: file.size }
@@ -2475,7 +2448,7 @@
 													if (fileItems) {
 														const file = fileItems.find((file) => file.id === selectedFileId);
 														if (file) {
-															fileSelectHandler(file);
+															openFilePreview(file);
 														} else {
 															selectedFile = null;
 														}
@@ -2504,7 +2477,7 @@
 													if (fileItems) {
 														const file = fileItems.find((file) => file.id === selectedFileId);
 														if (file) {
-															fileSelectHandler(file);
+															openFilePreview(file);
 														} else {
 															selectedFile = null;
 														}
@@ -2568,67 +2541,7 @@
 						</div>
 					</div>
 
-					{#if selectedFileId !== null}
-						<Drawer
-							className="h-full"
-							show={selectedFileId !== null}
-							onClose={() => {
-								selectedFileId = null;
-								selectedFile = null;
-							}}
-						>
-							<div class="flex flex-col justify-start h-full max-h-full">
-								<div class=" flex flex-col w-full h-full max-h-full">
-									<div class="shrink-0 flex items-center p-2">
-										<div class="mr-2">
-											<button
-												class="w-full text-left text-sm p-1.5 rounded-lg dark:text-gray-300 dark:hover:text-white hover:bg-black/5 dark:hover:bg-gray-850"
-												aria-label={$i18n.t('Close')}
-												on:click={() => {
-													selectedFileId = null;
-													selectedFile = null;
-												}}
-											>
-												<ChevronLeft strokeWidth="2.5" />
-											</button>
-										</div>
-										<div class=" flex-1 text-lg line-clamp-1">
-											{selectedFile?.meta?.name}
-										</div>
-
-										{#if knowledge?.write_access}
-											<div>
-												<button
-													class="flex self-center w-fit text-sm py-1 px-2.5 dark:text-gray-300 dark:hover:text-white hover:bg-black/5 dark:hover:bg-white/5 rounded-lg disabled:opacity-50 disabled:cursor-not-allowed"
-													disabled={isSaving}
-													on:click={() => {
-														updateFileContentHandler();
-													}}
-												>
-													{$i18n.t('Save')}
-													{#if isSaving}
-														<div class="ml-2 self-center">
-															<Spinner />
-														</div>
-													{/if}
-												</button>
-											</div>
-										{/if}
-									</div>
-
-									{#key selectedFile.id}
-										<textarea
-											class="w-full h-full text-sm outline-none resize-none px-3 py-2"
-											bind:value={selectedFileContent}
-											disabled={!knowledge?.write_access}
-											aria-label={$i18n.t('File content')}
-											placeholder={$i18n.t('Add content here')}
-										/>
-									{/key}
-								</div>
-							</div>
-						</Drawer>
-					{/if}
+					<FileItemModal bind:show={showFilePreview} item={selectedFile} edit={false} />
 				</div>
 			{/if}
 		</div>
