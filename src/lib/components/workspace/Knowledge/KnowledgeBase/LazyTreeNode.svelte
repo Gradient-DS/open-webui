@@ -23,6 +23,8 @@
 	import ChevronDown from '$lib/components/icons/ChevronDown.svelte';
 	import ChevronRight from '$lib/components/icons/ChevronRight.svelte';
 	import Spinner from '$lib/components/common/Spinner.svelte';
+	import SelectCheckbox from './SelectCheckbox.svelte';
+	import { sourceItem, type KbSelection } from './selection';
 
 	export let node: TreeFolder;
 	// True only for the top-level source nodes (which can be removed and show a
@@ -41,6 +43,16 @@
 	export let onClick: (file: TreeFile) => void = () => {};
 	export let onRemoveSource: (itemId: string, name: string) => void = () => {};
 
+	// Optional multiselect model injected by LazyKnowledgeTree. Null = no selection UI.
+	export let selection: KbSelection | null = null;
+
+	$: selectedStore = selection?.selected;
+	$: selectionModeStore = selection?.selectionMode;
+
+	// Source nodes are selectable (→ remove-source via node.path); nested folders are not.
+	$: nodeKey = `source:${node.path}`;
+	$: nodeSel = (selection && isSource && $selectedStore?.has(nodeKey)) ?? false;
+
 	$: cache = nodeCache[node.path];
 	$: badge = folderBadge(node.status_counts);
 </script>
@@ -48,8 +60,17 @@
 <div class="w-full">
 	<!-- Folder header -->
 	<div
-		class="group flex items-center w-full px-1.5 py-0.5 hover:bg-gray-50 dark:hover:bg-gray-850/50 rounded-xl transition"
+		class="group flex items-center w-full px-1.5 py-0.5 hover:bg-gray-50 dark:hover:bg-gray-850/50 rounded-xl transition {nodeSel
+			? 'bg-blue-50 dark:bg-blue-900/20'
+			: ''}"
 	>
+		{#if selection && isSource && knowledge?.write_access}
+			<SelectCheckbox
+				selected={nodeSel}
+				visible={!!$selectionModeStore}
+				onToggle={() => selection.toggle(sourceItem(node.path, node.name))}
+			/>
+		{/if}
 		<button
 			class="flex items-center gap-1.5 flex-1 {isSource
 				? 'p-2 text-sm'
@@ -126,6 +147,7 @@
 							{loadMore}
 							{onClick}
 							{onRemoveSource}
+							{selection}
 						/>
 					{/each}
 

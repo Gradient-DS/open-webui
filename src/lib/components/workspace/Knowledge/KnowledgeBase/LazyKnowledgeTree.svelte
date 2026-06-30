@@ -20,6 +20,8 @@
 	import XMark from '$lib/components/icons/XMark.svelte';
 	import Spinner from '$lib/components/common/Spinner.svelte';
 	import LazyTreeNode from './LazyTreeNode.svelte';
+	import SelectCheckbox from './SelectCheckbox.svelte';
+	import { fileItem, type KbSelection, type SelectableItem } from './selection';
 
 	export let knowledge: any = null;
 	export let selectedFileId: string | null = null;
@@ -31,6 +33,29 @@
 	export let onClick: (file: TreeFile) => void = () => {};
 	export let onDelete: (fileId: string) => void = () => {};
 	export let onRemoveSource: (itemId: string, name: string) => void = () => {};
+
+	// Optional multiselect model injected by KnowledgeBase. Null = no selection UI.
+	export let selection: KbSelection | null = null;
+
+	$: selectedStore = selection?.selected;
+	$: selectionModeStore = selection?.selectionMode;
+
+	const isFileSelectable = (file: any) => !!file?.id && file?.status !== 'uploading';
+	const buildFileItem = (file: any): SelectableItem => fileItem(file.id, file?.name ?? '');
+	$: rootFileOrdered = (rootFiles ?? []).filter(isFileSelectable).map(buildFileItem);
+
+	const onRootFileClick = (file: any, e: MouseEvent) => {
+		if (selection && isFileSelectable(file) && (e.metaKey || e.ctrlKey || e.shiftKey)) {
+			e.preventDefault();
+			selection.select(buildFileItem(file), rootFileOrdered, e);
+			return;
+		}
+		if (selection && isFileSelectable(file) && $selectionModeStore) {
+			selection.select(buildFileItem(file), rootFileOrdered, e);
+			return;
+		}
+		onClick(file);
+	};
 
 	const PAGE_LIMIT = 100;
 
@@ -198,21 +223,33 @@
 				{loadMore}
 				{onClick}
 				{onRemoveSource}
+				{selection}
 			/>
 		{/each}
 
 		<!-- Root loose files (local uploads) -->
 		{#each rootFiles as file (file.id)}
 			{@const fb = fileBadge(file.status)}
+			{@const rfKey = `file:${file?.id}`}
+			{@const rfSel = (selection && isFileSelectable(file) && $selectedStore?.has(rfKey)) ?? false}
 			<div
-				class="flex cursor-pointer w-full px-1.5 py-0.5 bg-transparent dark:hover:bg-gray-850/50 hover:bg-white rounded-xl transition {selectedFileId
-					? ''
-					: 'hover:bg-gray-100 dark:hover:bg-gray-850'}"
+				class="group flex cursor-pointer w-full px-1.5 py-0.5 bg-transparent dark:hover:bg-gray-850/50 hover:bg-white rounded-xl transition {rfSel
+					? 'bg-blue-50 dark:bg-blue-900/20'
+					: selectedFileId
+						? ''
+						: 'hover:bg-gray-100 dark:hover:bg-gray-850'}"
 			>
+				{#if selection && isFileSelectable(file)}
+					<SelectCheckbox
+						selected={rfSel}
+						visible={!!$selectionModeStore}
+						onToggle={() => selection.toggle(buildFileItem(file))}
+					/>
+				{/if}
 				<button
 					class="relative group flex items-center gap-1 rounded-xl p-2 text-left flex-1 justify-between"
 					type="button"
-					on:click={() => onClick(file)}
+					on:click={(e) => onRootFileClick(file, e)}
 				>
 					<div>
 						<div class="flex gap-2 items-center line-clamp-1">
