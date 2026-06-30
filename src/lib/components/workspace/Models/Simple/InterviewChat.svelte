@@ -26,6 +26,10 @@
 	};
 	let prompt = '';
 	let files: any[] = [];
+	// Files attached during the interview, accumulated across turns. Sent to
+	// the agent on every turn as context and used for auto-attach at draft
+	// time. Distinct from `files`, which is only the live input binding.
+	let interviewFiles: Record<string, unknown>[] = [];
 	let selectedModels: [''] = [''];
 	let messageInput: any;
 	let streaming = false;
@@ -89,7 +93,11 @@
 	};
 
 	/** Append a message node to the history tree; returns its id. */
-	const appendMessage = (role: 'user' | 'assistant', content: string): string => {
+	const appendMessage = (
+		role: 'user' | 'assistant',
+		content: string,
+		messageFiles: Record<string, unknown>[] = []
+	): string => {
 		const id = crypto.randomUUID();
 		const parentId = history.currentId;
 		history.messages[id] = {
@@ -99,6 +107,7 @@
 			role,
 			content,
 			timestamp: now(),
+			...(messageFiles.length > 0 ? { files: messageFiles } : {}),
 			...(role === 'assistant'
 				? {
 						model: 'Soev Assistant Builder',
@@ -128,7 +137,7 @@
 				localStorage.token,
 				chatId,
 				agentTranscript,
-				files
+				interviewFiles
 			)) {
 				if (event.type === 'content') {
 					answer += event.text;
@@ -162,11 +171,20 @@
 		if (!text || text.trim() === '' || streaming) return;
 		const t = text.trim();
 		prompt = '';
-		// Keep `files` across turns: interview attachments are context for
-		// the whole session — sent on every turn and auto-attached at draft.
+		// Move resolved attachments (an id means upload + content extraction
+		// finished) onto this message and into the interview accumulator, then
+		// clear them from the input — same feel as normal chat. Files still
+		// uploading stay in the input and ride along on a later turn.
+		const turnFiles = files.filter((f) => f && f.id);
+		for (const f of turnFiles) {
+			if (!interviewFiles.some((existing) => existing.id === f.id)) {
+				interviewFiles = [...interviewFiles, f];
+			}
+		}
+		files = files.filter((f) => !(f && f.id));
 		messageInput?.setText?.('');
 		agentTranscript = [...agentTranscript, { role: 'user', content: t }];
-		appendMessage('user', t);
+		appendMessage('user', t, turnFiles);
 		await runTurn();
 	};
 
