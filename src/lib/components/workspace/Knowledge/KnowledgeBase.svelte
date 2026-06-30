@@ -264,6 +264,11 @@
 	let knowledge: Knowledge | null = null;
 	let knowledgeId = null;
 
+	// Present only in the "+ Add knowledge" builder flow: a path back to
+	// the assistant being edited. When set, a "Back to assistant" button
+	// returns there with ?selectKb=<this KB id> so it gets attached.
+	$: returnTo = $page.url.searchParams.get('returnTo');
+
 	let selectedFileId: string | null = null;
 	let selectedFile = null;
 	let selectedFileContent = '';
@@ -1977,6 +1982,18 @@
 							/>
 
 							<div class="shrink-0 mr-2.5 flex items-center gap-2">
+								{#if returnTo}
+									<button
+										class="px-3 py-1 text-sm rounded-full bg-black text-white dark:bg-white dark:text-black font-medium shrink-0"
+										type="button"
+										on:click={() =>
+											goto(
+												`${returnTo}${returnTo.includes('?') ? '&' : '?'}selectKb=${knowledge?.id}`
+											)}
+									>
+										{$i18n.t('Back to assistant')}
+									</button>
+								{/if}
 								{#if activeProvider}
 									<Badge type="info" content={$i18n.t(activeProvider.label)} />
 								{:else if $config?.integration_providers?.[knowledge?.type]}

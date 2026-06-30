@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { getContext, onDestroy, onMount, tick } from 'svelte';
+	import { getContext, onDestroy, onMount } from 'svelte';
 	import { submitPromptSignal, user } from '$lib/stores';
 	import { streamOnboarding, type OnboardingMessage } from '$lib/apis/onboarding';
 	import Messages from '$lib/components/chat/Messages.svelte';
@@ -31,31 +31,6 @@
 	let autoScroll = true;
 
 	const now = () => Math.floor(Date.now() / 1000);
-
-	/**
-	 * Handles MessageInput's onUpload callback. Knowledge / Notes /
-	 * Reference Chats picks go through InputMenu's bind:files directly
-	 * — they don't reach onUpload. This handler catches external
-	 * integration callbacks (webpage URL, Google Drive, OneDrive,
-	 * Confluence) and accepts any payload that already looks like a
-	 * chat-files item; full upload pipelines (google-drive file
-	 * download, web-page index) are out of scope for the interview
-	 * MVP and silently no-op.
-	 */
-	const handleOnUpload = (e: { type?: string; data?: unknown }) => {
-		if (!e || !e.type) return;
-		const data = e.data;
-		if (Array.isArray(data)) {
-			files = [...files, ...data];
-		} else if (
-			data &&
-			typeof data === 'object' &&
-			'id' in data &&
-			(data as { id?: unknown }).id
-		) {
-			files = [...files, data];
-		}
-	};
 
 	/** Append a message node to the history tree; returns its id. */
 	const appendMessage = (role: 'user' | 'assistant', content: string): string => {
@@ -103,32 +78,12 @@
 					answer += event.text;
 					history.messages[assistantId].content = answer;
 					history = history;
-				} else if (event.type === 'ui_block') {
-					const block = {
-						id: crypto.randomUUID(),
-						name: event.name,
-						props: event.props
-					};
-					const existing = history.messages[assistantId].uiBlocks ?? [];
-					history.messages[assistantId].uiBlocks = [...existing, block];
-					history = history;
-					// The content-driven triggerScroll in Messages.svelte
-					// won't fire for a ui_block push (no content change),
-					// so we scroll our own container after the next tick.
-					tick().then(() => {
-						const el = document.getElementById('messages-container');
-						if (el) el.scrollTop = el.scrollHeight;
-					});
 				} else if (event.type === 'draft') {
-					// Forward the user's interview-time attachments as
-					// the draft's knowledge list. SimpleModelEditor picks
-					// this up on mount and seeds the Knowledge picker.
-					const attached = files.filter(
-						(f) =>
-							(f?.type === 'collection' || f?.type === 'file') &&
-							f?.status !== 'uploading'
-					);
-					onComplete({ ...event.draft, knowledge: attached });
+					// The interview offers no attachment affordance — knowledge
+					// is attached later, in the builder. The draft therefore
+					// carries an empty knowledge list; SimpleModelEditor seeds
+					// its picker from the user's choices in the builder.
+					onComplete({ ...event.draft, knowledge: [] });
 					return;
 				}
 			}
@@ -191,7 +146,10 @@
 	});
 </script>
 
-<div id="chat-pane" class="onboarding-chat flex flex-col h-full w-full">
+<!-- Intentionally NOT id="chat-pane": MessageInput wires its drag-drop
+     dropzone to #chat-pane, and the interview must accept no attachments.
+     Using a different id means MessageInput finds no dropzone here. -->
+<div id="onboarding-chat-pane" class="onboarding-chat flex flex-col h-full w-full">
 	<div class="shrink-0 flex flex-col gap-1 px-1 mt-1.5 mb-3">
 		<div class="flex justify-between items-center">
 			<div class="flex items-center text-xl font-medium px-0.5 shrink-0">
@@ -246,10 +204,9 @@
 			atSelectedModel={undefined}
 			createMessagePair={() => {}}
 			stopResponse={() => {}}
-			onUpload={handleOnUpload}
 			onChange={() => {}}
 			placeholder={$i18n.t('Type your answer...')}
-			inputMenuRestrictTo={['upload_files', 'knowledge']}
+			inputMenuRestrictTo={[]}
 			on:submit={(e) => handleSubmit(e.detail)}
 		/>
 	</div>
@@ -263,10 +220,16 @@
 	}
 
 	/* Hide MessageInput toolbar controls that don't apply to the
-	   assistant-building flow. The `+` menu (Upload / Knowledge /
-	   Webpage / etc.) stays visible so users can attach files and KBs.
-	   These selectors are a starting point — finalised during smoke
-	   testing if any controls slip through. */
+	   assistant-building flow. The interview attaches nothing —
+	   knowledge is added later, in the builder — so the `+` menu is
+	   hidden entirely. (inputMenuRestrictTo={[]} also empties the menu
+	   as a belt-and-braces guard, and the container is not #chat-pane so
+	   MessageInput wires no drag-drop dropzone here.) */
+
+	/* The `+` (Upload / Knowledge / Webpage / etc.) menu trigger. */
+	:global(.onboarding-chat #input-menu-button) {
+		display: none !important;
+	}
 
 	/* RAG filter button — assistant builder controls its own filters. */
 	:global(.onboarding-chat button[aria-label='RAG Filters']),

@@ -15,6 +15,9 @@
 	let loading = false;
 
 	let type = $page.url.searchParams.get('type') || 'local';
+	// When set (the "+ Add knowledge" builder flow), carry it through to
+	// the KB detail page so it can offer a "Back to assistant" return.
+	const returnTo = $page.url.searchParams.get('returnTo');
 
 	onMount(() => {
 		// The Confluence self-service create flow exists ONLY in per-user
@@ -55,15 +58,22 @@
 
 		if (res) {
 			toast.success($i18n.t('Knowledge created successfully.'));
+			// Preserve returnTo (the builder's "New Knowledge" flow) for
+			// every type, alongside any provider auto-sync trigger, so the
+			// KB detail page can offer a "Back to assistant" return.
+			const params = new URLSearchParams();
 			if (type === 'onedrive') {
-				goto(`/workspace/knowledge/${res.id}?start_onedrive_sync=true`);
+				params.set('start_onedrive_sync', 'true');
 			} else if (type === 'google_drive') {
-				goto(`/workspace/knowledge/${res.id}?start_google_drive_sync=true`);
+				params.set('start_google_drive_sync', 'true');
 			} else if (type === 'confluence') {
-				goto(`/workspace/knowledge/${res.id}?start_confluence_sync=true`);
-			} else {
-				goto(`/workspace/knowledge/${res.id}`);
+				params.set('start_confluence_sync', 'true');
 			}
+			if (returnTo) {
+				params.set('returnTo', returnTo);
+			}
+			const qs = params.toString();
+			goto(`/workspace/knowledge/${res.id}${qs ? `?${qs}` : ''}`);
 		}
 
 		loading = false;
