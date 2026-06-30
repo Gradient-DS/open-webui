@@ -4,7 +4,7 @@ pydantic==2.12.5
 python-multipart==0.0.31 # security: CVE-2026-53538/53539/53540 (form-parsing DoS + param smuggling) fixed in 0.0.31
 itsdangerous==2.2.0
 
-python-socketio==5.16.1
+python-socketio==5.16.2 # security: CVE-2026-48804 (binary attachment accumulation memory exhaustion) fixed in 5.16.2
 python-jose==3.5.0
 cryptography==48.0.1 # security: GHSA-537c-gmf6-5ccf (vulnerable OpenSSL bundled in wheels) fixed in 48.0.1
 bcrypt==5.0.0
