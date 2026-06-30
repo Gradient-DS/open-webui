@@ -23,6 +23,8 @@
 	import ChevronRight from '$lib/components/icons/ChevronRight.svelte';
 	import Spinner from '$lib/components/common/Spinner.svelte';
 	import FolderTreeNode from './FolderTreeNode.svelte';
+	import SelectCheckbox from './SelectCheckbox.svelte';
+	import { fileItem, sourceItem, type KbSelection, type SelectableItem } from './selection';
 
 	import { computeInitialExpansion } from '../utils/treeHelpers';
 
@@ -37,6 +39,42 @@
 	export let onClick: (fileId: string) => void = () => {};
 	export let onRemoveSource: (itemId: string, sourceName: string) => void = () => {};
 	export let onDelete: (fileId: string) => void = () => {};
+
+	// Optional multiselect model injected by KnowledgeBase. Null = no selection UI.
+	export let selection: KbSelection | null = null;
+
+	$: selectedStore = selection?.selected;
+	$: selectionModeStore = selection?.selectionMode;
+
+	// Mirror the per-row ✕ routing (the loose-file delete button below): cloud-provider
+	// loose files remove via their source; everything else is a plain file delete.
+	const looseItem = (file: any): SelectableItem => {
+		const cloudSource =
+			file?.meta?.source === 'onedrive' ||
+			file?.meta?.source === 'google_drive' ||
+			file?.meta?.source === 'confluence';
+		if (cloudSource && file?.meta?.source_item_id) {
+			return sourceItem(file.meta.source_item_id, file?.name ?? file?.meta?.name ?? '');
+		}
+		return fileItem(file?.id ?? file?.tempId, file?.name ?? file?.meta?.name ?? '');
+	};
+	const isLooseSelectable = (file: any) =>
+		(!!file?.id || !!file?.meta?.source_item_id) && file?.status !== 'uploading';
+
+	$: looseOrdered = (looseFiles ?? []).filter(isLooseSelectable).map(looseItem);
+
+	const onLooseClick = (file: any, e: MouseEvent) => {
+		if (selection && isLooseSelectable(file) && (e.metaKey || e.ctrlKey || e.shiftKey)) {
+			e.preventDefault();
+			selection.select(looseItem(file), looseOrdered, e);
+			return;
+		}
+		if (selection && isLooseSelectable(file) && $selectionModeStore) {
+			selection.select(looseItem(file), looseOrdered, e);
+			return;
+		}
+		onClick(file?.id ?? file?.tempId);
+	};
 
 	// Track expanded state per source and subfolder.
 	// Seeded reactively so small KBs auto-expand top-level sources while
@@ -158,11 +196,22 @@
 				: tree
 					? countAllFiles(tree)
 					: 0}
+		{@const srcKey = `source:${source.item_id}`}
+		{@const srcSel = (selection && $selectedStore?.has(srcKey)) ?? false}
 		<div class="w-full">
 			<!-- Folder header -->
 			<div
-				class="group flex items-center w-full px-1.5 py-0.5 hover:bg-gray-50 dark:hover:bg-gray-850/50 rounded-xl transition"
+				class="group flex items-center w-full px-1.5 py-0.5 hover:bg-gray-50 dark:hover:bg-gray-850/50 rounded-xl transition {srcSel
+					? 'bg-blue-50 dark:bg-blue-900/20'
+					: ''}"
 			>
+				{#if selection && knowledge?.write_access && isFolderLikeSource(source)}
+					<SelectCheckbox
+						selected={srcSel}
+						visible={!!$selectionModeStore}
+						onToggle={() => selection.toggle(sourceItem(source.item_id, source.name))}
+					/>
+				{/if}
 				<button
 					class="flex items-center gap-1.5 flex-1 p-2 text-left text-sm"
 					type="button"
@@ -272,15 +321,26 @@
 	<!-- Loose files (individual OneDrive sources + local uploads) -->
 	{#each looseFiles as file (file?.id ?? file?.itemId ?? file?.tempId)}
 		{@const fileStatus = file?.status ?? file?.data?.status}
+		{@const looseKey = looseItem(file).key}
+		{@const looseSel = (selection && isLooseSelectable(file) && $selectedStore?.has(looseKey)) ?? false}
 		<div
-			class="flex cursor-pointer w-full px-1.5 py-0.5 bg-transparent dark:hover:bg-gray-850/50 hover:bg-white rounded-xl transition {selectedFileId
-				? ''
-				: 'hover:bg-gray-100 dark:hover:bg-gray-850'}"
+			class="group flex cursor-pointer w-full px-1.5 py-0.5 bg-transparent dark:hover:bg-gray-850/50 hover:bg-white rounded-xl transition {looseSel
+				? 'bg-blue-50 dark:bg-blue-900/20'
+				: selectedFileId
+					? ''
+					: 'hover:bg-gray-100 dark:hover:bg-gray-850'}"
 		>
+			{#if selection && isLooseSelectable(file)}
+				<SelectCheckbox
+					selected={looseSel}
+					visible={!!$selectionModeStore}
+					onToggle={() => selection.toggle(looseItem(file))}
+				/>
+			{/if}
 			<button
 				class="relative group flex items-center gap-1 rounded-xl p-2 text-left flex-1 justify-between"
 				type="button"
-				on:click={() => onClick(file?.id ?? file?.tempId)}
+				on:click={(e) => onLooseClick(file, e)}
 			>
 				<div>
 					<div class="flex gap-2 items-center line-clamp-1">
