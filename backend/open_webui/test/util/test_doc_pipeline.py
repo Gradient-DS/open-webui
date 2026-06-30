@@ -83,19 +83,29 @@ def test_format_from_filename(filename, expected):
 
 
 @pytest.mark.parametrize(
-    'enabled,collection_name,file_path,expected',
+    'enabled,collection_name,file_path,file_format,expected',
     [
-        (True, 'kb-1', 's3://b/k', True),  # flag on, KB-bound, has a path → route
-        (False, 'kb-1', 's3://b/k', False),  # flag off → native
-        (True, None, 's3://b/k', False),  # per-file cache (no KB) → native
-        (True, '', 's3://b/k', False),  # no KB → native
-        (True, 'kb-1', '', False),  # no storage path to presign → native
-        (True, 'kb-1', None, False),  # no storage path → native
+        (True, 'kb-1', 's3://b/k', 'pdf', True),  # flag on, KB-bound, path, supported → route
+        (True, 'kb-1', 's3://b/k', 'docx', True),  # another supported format
+        (False, 'kb-1', 's3://b/k', 'pdf', False),  # flag off → native
+        (True, None, 's3://b/k', 'pdf', False),  # per-file cache (no KB) → native
+        (True, '', 's3://b/k', 'pdf', False),  # no KB → native
+        (True, 'kb-1', '', 'pdf', False),  # no storage path to presign → native
+        (True, 'kb-1', None, 'pdf', False),  # no storage path → native
+        (True, 'kb-1', 's3://b/k', 'svg', False),  # unsupported (image) → native, not warren
+        (True, 'kb-1', 's3://b/k', 'png', False),  # unsupported → native
+        (True, 'kb-1', 's3://b/k', 'dmg', False),  # unsupported binary → native
+        (True, 'kb-1', 's3://b/k', '', False),  # no extension → native
     ],
 )
-def test_should_route_to_pipeline(enabled, collection_name, file_path, expected):
+def test_should_route_to_pipeline(enabled, collection_name, file_path, file_format, expected):
     assert (
-        doc_pipeline.should_route_to_pipeline(enabled=enabled, collection_name=collection_name, file_path=file_path)
+        doc_pipeline.should_route_to_pipeline(
+            enabled=enabled,
+            collection_name=collection_name,
+            file_path=file_path,
+            file_format=file_format,
+        )
         is expected
     )
 
