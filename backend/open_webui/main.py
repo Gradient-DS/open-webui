@@ -424,10 +424,22 @@ from open_webui.config import (
     INVITE_EXPIRY_HOURS,
     EMAIL_INVITE_SUBJECT,
     EMAIL_INVITE_HEADING,
+    ENABLE_FORGOT_PASSWORD,
+    PASSWORD_RESET_EXPIRY_MINUTES,
     # Integrations
     INTEGRATION_PROVIDERS,
     # Shared-services loader worker
     USE_SHARED_LOADER,
+    # Distributed document pipeline (warren)
+    DISTRIBUTED_DOC_PIPELINE_ENABLED,
+    PIPELINE_API_BASE_URL,
+    PIPELINE_API_KEY,
+    PIPELINE_INGEST_CALLBACK_URL,
+    PIPELINE_PRESIGN_TTL_SECONDS,
+    PIPELINE_CHUNK_SIZE,
+    PIPELINE_CHUNK_OVERLAP,
+    PIPELINE_RECONCILE_INTERVAL_SECONDS,
+    PIPELINE_JOB_MAX_WALL_CLOCK_SECONDS,
     # Agent Proxy
     ENABLE_AGENT_PROXY,
     # Agent Search (machine-auth retrieval endpoint)
@@ -750,6 +762,7 @@ from open_webui.utils.oauth import (
 from open_webui.utils.security_headers import SecurityHeadersMiddleware
 from open_webui.utils.lazy_resource import lazy
 from open_webui.utils.redis import clear_connection_cache, get_redis_connection
+from open_webui.services.email.auth import is_mail_configured
 
 from open_webui.tasks import (
     redis_task_command_listener,
@@ -1008,6 +1021,14 @@ async def lifespan(app: FastAPI):
     )
 
     start_topdesk_scheduler(app)
+
+    # Start the distributed doc-pipeline reconciler (restart-safe sweep that
+    # marks files 'error' when their warren job fails/hangs; success is handled
+    # by the /ingest callback). Reads its enable flag per-tick, so starting it
+    # unconditionally is fine.
+    from open_webui.services.doc_pipeline_reconciler import start_pipeline_reconciler
+
+    start_pipeline_reconciler(app)
 
     # Start deletion cleanup worker
     from open_webui.services.deletion.cleanup_worker import start_cleanup_worker
@@ -1562,10 +1583,22 @@ app.state.config.EMAIL_FROM_NAME = EMAIL_FROM_NAME
 app.state.config.INVITE_EXPIRY_HOURS = INVITE_EXPIRY_HOURS
 app.state.config.EMAIL_INVITE_SUBJECT = EMAIL_INVITE_SUBJECT
 app.state.config.EMAIL_INVITE_HEADING = EMAIL_INVITE_HEADING
+app.state.config.ENABLE_FORGOT_PASSWORD = ENABLE_FORGOT_PASSWORD
+app.state.config.PASSWORD_RESET_EXPIRY_MINUTES = PASSWORD_RESET_EXPIRY_MINUTES
 
 app.state.config.INTEGRATION_PROVIDERS = INTEGRATION_PROVIDERS
 
 app.state.config.USE_SHARED_LOADER = USE_SHARED_LOADER
+
+app.state.config.DISTRIBUTED_DOC_PIPELINE_ENABLED = DISTRIBUTED_DOC_PIPELINE_ENABLED
+app.state.config.PIPELINE_API_BASE_URL = PIPELINE_API_BASE_URL
+app.state.config.PIPELINE_API_KEY = PIPELINE_API_KEY
+app.state.config.PIPELINE_INGEST_CALLBACK_URL = PIPELINE_INGEST_CALLBACK_URL
+app.state.config.PIPELINE_PRESIGN_TTL_SECONDS = PIPELINE_PRESIGN_TTL_SECONDS
+app.state.config.PIPELINE_CHUNK_SIZE = PIPELINE_CHUNK_SIZE
+app.state.config.PIPELINE_CHUNK_OVERLAP = PIPELINE_CHUNK_OVERLAP
+app.state.config.PIPELINE_RECONCILE_INTERVAL_SECONDS = PIPELINE_RECONCILE_INTERVAL_SECONDS
+app.state.config.PIPELINE_JOB_MAX_WALL_CLOCK_SECONDS = PIPELINE_JOB_MAX_WALL_CLOCK_SECONDS
 
 app.state.config.ENABLE_AGENT_PROXY = ENABLE_AGENT_PROXY
 
@@ -3263,6 +3296,7 @@ async def get_app_config(request: Request):
             'enable_api_keys': app.state.config.ENABLE_API_KEYS,
             'enable_signup': app.state.config.ENABLE_SIGNUP,
             'enable_login_form': app.state.config.ENABLE_LOGIN_FORM,
+            'enable_forgot_password': app.state.config.ENABLE_FORGOT_PASSWORD and is_mail_configured(),
             'enable_password_change_form': app.state.config.ENABLE_PASSWORD_CHANGE_FORM,
             'enable_websocket': ENABLE_WEBSOCKET_SUPPORT,
             'enable_version_update_check': ENABLE_VERSION_UPDATE_CHECK,

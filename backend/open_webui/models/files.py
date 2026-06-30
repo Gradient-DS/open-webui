@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from open_webui.internal.db import Base, JSONField, get_async_db_context
 from open_webui.utils.misc import sanitize_metadata
 from pydantic import BaseModel, ConfigDict, model_validator
-from sqlalchemy import BigInteger, Column, String, Text, JSON
+from sqlalchemy import BigInteger, Column, String, Text, JSON, cast
 
 log = logging.getLogger(__name__)
 
@@ -220,6 +220,20 @@ class FilesTable:
         async with get_async_db_context(db) as db:
             result = await db.execute(select(File).filter(File.id.in_(ids)).order_by(File.updated_at.desc()))
             return [FileModel.model_validate(file) for file in result.scalars().all()]
+
+    async def get_processing_files_with_pipeline_job(self, db: Optional[AsyncSession] = None) -> list[FileModel]:
+        """Files still 'processing' that carry a distributed-pipeline job id.
+
+        Drives the restart-safe reconciler. Filters on the cheap ``meta.status``
+        JSON column (the same one the KB file-list reads); the cast yields
+        JSON-encoded text on both SQLite and Postgres, so match quoted + bare.
+        The pipeline-job-id narrowing is done in Python — the 'processing' set is
+        small, and this dodges JSON-key-presence dialect quirks."""
+        async with get_async_db_context(db) as db:
+            raw_status = cast(File.meta['status'], Text)
+            result = await db.execute(select(File).filter(raw_status.in_(['"processing"', 'processing'])))
+            files = [FileModel.model_validate(file) for file in result.scalars().all()]
+        return [f for f in files if (f.meta or {}).get('pipeline_job_id')]
 
     async def get_file_metadatas_by_ids(
         self, ids: list[str], db: Optional[AsyncSession] = None

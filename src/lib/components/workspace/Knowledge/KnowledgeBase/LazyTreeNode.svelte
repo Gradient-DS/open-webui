@@ -19,10 +19,12 @@
 	import DocumentPage from '$lib/components/icons/DocumentPage.svelte';
 	import ExclamationTriangle from '$lib/components/icons/ExclamationTriangle.svelte';
 	import Folder from '$lib/components/icons/Folder.svelte';
-	import XMark from '$lib/components/icons/XMark.svelte';
+	import GarbageBin from '$lib/components/icons/GarbageBin.svelte';
 	import ChevronDown from '$lib/components/icons/ChevronDown.svelte';
 	import ChevronRight from '$lib/components/icons/ChevronRight.svelte';
 	import Spinner from '$lib/components/common/Spinner.svelte';
+	import SelectCheckbox from './SelectCheckbox.svelte';
+	import { sourceItem, type KbSelection, type SelectableItem } from './selection';
 
 	export let node: TreeFolder;
 	// True only for the top-level source nodes (which can be removed and show a
@@ -41,21 +43,65 @@
 	export let onClick: (file: TreeFile) => void = () => {};
 	export let onRemoveSource: (itemId: string, name: string) => void = () => {};
 
+	// Optional multiselect model injected by LazyKnowledgeTree. Null = no selection UI.
+	export let selection: KbSelection | null = null;
+	// Unified ordered selectable list (sources + root files) for Shift-range / drag.
+	export let orderedItems: SelectableItem[] = [];
+
+	$: selectedStore = selection?.selected;
+	$: selectionModeStore = selection?.selectionMode;
+
+	// Source nodes are selectable (→ remove-source via node.path); nested folders are not.
+	$: nodeKey = `source:${node.path}`;
+	$: nodeSel = (selection && isSource && $selectedStore?.has(nodeKey)) ?? false;
+	$: nodeItem = sourceItem(node.path, node.name, node.child_count ?? 0);
+
+	// Source header: plain click expands (preserve nav); modifier-click + drag select.
+	const onSourceHeaderClick = (e: MouseEvent) => {
+		if (selection && selection.consumeDidDrag()) return;
+		if (selection && isSource && (e.metaKey || e.ctrlKey || e.shiftKey)) {
+			e.preventDefault();
+			selection.select(nodeItem, orderedItems, e);
+			return;
+		}
+		toggle(node.path);
+	};
+	const onSourcePointerDown = () => {
+		if (selection && isSource) selection.pointerDown(nodeItem, orderedItems);
+	};
+	const onSourcePointerEnter = () => {
+		if (selection && isSource) selection.pointerEnter(nodeItem);
+	};
+
 	$: cache = nodeCache[node.path];
 	$: badge = folderBadge(node.status_counts);
 </script>
 
 <div class="w-full">
 	<!-- Folder header -->
+	<!-- svelte-ignore a11y_no_static_element_interactions -->
 	<div
-		class="group flex items-center w-full px-1.5 py-0.5 hover:bg-gray-50 dark:hover:bg-gray-850/50 rounded-xl transition"
+		class="group flex items-center w-full px-1.5 py-0.5 hover:bg-gray-50 dark:hover:bg-gray-850/50 rounded-xl transition {selection
+			? 'select-none'
+			: ''} {nodeSel
+			? 'bg-blue-50 dark:bg-blue-900/20'
+			: ''}"
+		on:pointerdown={onSourcePointerDown}
+		on:pointerenter={onSourcePointerEnter}
 	>
+		{#if selection && isSource && knowledge?.write_access}
+			<SelectCheckbox
+				selected={nodeSel}
+				visible={!!$selectionModeStore}
+				onToggle={() => selection.toggle(nodeItem)}
+			/>
+		{/if}
 		<button
 			class="flex items-center gap-1.5 flex-1 {isSource
 				? 'p-2 text-sm'
 				: 'p-1.5 text-xs text-gray-500'} text-left"
 			type="button"
-			on:click={() => toggle(node.path)}
+			on:click={onSourceHeaderClick}
 		>
 			<div class="shrink-0 {isSource ? 'text-gray-500' : ''}">
 				{#if loadingPaths[node.path]}
@@ -97,7 +143,7 @@
 						type="button"
 						on:click={() => onRemoveSource(node.path, node.name)}
 					>
-						<XMark />
+						<GarbageBin className="size-3.5" />
 					</button>
 				</Tooltip>
 			</div>
@@ -126,6 +172,8 @@
 							{loadMore}
 							{onClick}
 							{onRemoveSource}
+							{selection}
+							{orderedItems}
 						/>
 					{/each}
 

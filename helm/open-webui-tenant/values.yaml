@@ -554,6 +554,20 @@ openWebui:
     # the in-namespace service.
     loaderWorkerUrl: ""
 
+    # Distributed document pipeline (warren). When enabled, KB ingestion is
+    # delegated to the external pipeline (presigned-URL fetch → parse+chunk →
+    # /ingest callback) instead of native parse+embed. PIPELINE_API_KEY is a
+    # secret (secrets.pipelineApiKey / externalSecrets field). Empty numeric
+    # keys fall back to the backend defaults shown.
+    distributedDocPipelineEnabled: "false"
+    pipelineApiBaseUrl: ""               # e.g. http://doc-pipeline-pipeline-api.<ns>.svc.cluster.local:8080
+    pipelineIngestCallbackUrl: ""        # this server's in-cluster URL warren POSTs /ingest back to
+    pipelinePresignTtlSeconds: ""        # default 3600
+    pipelineChunkSize: ""                # default 1000
+    pipelineChunkOverlap: ""             # default 100
+    pipelineReconcileIntervalSeconds: "" # default 120
+    pipelineJobMaxWallClockSeconds: ""   # default 21600 (6h backstop)
+
     # Email Invites (Microsoft Graph API)
     enableEmailInvites: "false"
     emailGraphTenantId: ""       # Azure AD Tenant ID for email app
@@ -564,6 +578,10 @@ openWebui:
     inviteExpiryHours: "168"     # 7 days
     emailInviteSubject: ""       # Custom email subject (empty = default)
     emailInviteHeading: ""       # Custom email + invite page heading (empty = default)
+
+    # Forgot Password (self-service password reset; reuses Email Graph config)
+    enableForgotPassword: "true"
+    passwordResetExpiryMinutes: "30"
 
     bypassModelAccessControl: "false"
 
@@ -944,6 +962,10 @@ secrets:
   # outbound; open-webui validates inbound). Same value, both pods.
   loaderIngestApiKey: ""
 
+  # Distributed doc-pipeline submit bearer (matches pipeline-api inbound
+  # PIPELINE_API_KEY). open-webui presents this outbound to pipeline-api.
+  pipelineApiKey: ""
+
   # Loader-worker job DB role password (Postgres role provisioned by the
   # post-install bootstrap Job).
   loaderWorkerDbPassword: ""
@@ -1008,6 +1030,7 @@ externalSecrets:
       agentApiKey: false
       searchApiKey: false
       loaderIngestApiKey: false
+      pipelineApiKey: false
       loaderWorkerDbPassword: false
 
 # -----------------------------------------------------------------------------

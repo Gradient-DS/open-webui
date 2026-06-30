@@ -9,6 +9,7 @@
 	dayjs.extend(relativeTime);
 
 	import { onMount, getContext, onDestroy, tick } from 'svelte';
+	import { get } from 'svelte/store';
 	const i18n = getContext('i18n');
 
 	import { goto } from '$app/navigation';
@@ -23,12 +24,7 @@
 		socket
 	} from '$lib/stores';
 
-	import {
-		updateFileDataContentById,
-		uploadFile,
-		deleteFileById,
-		getFileById
-	} from '$lib/apis/files';
+	import { uploadFile, deleteFileById } from '$lib/apis/files';
 	import {
 		addFileToKnowledgeById,
 		getKnowledgeById,
@@ -67,6 +63,8 @@
 	import SourceGroupedFiles from './KnowledgeBase/SourceGroupedFiles.svelte';
 	import LazyKnowledgeTree from './KnowledgeBase/LazyKnowledgeTree.svelte';
 	import LazyKnowledgeSearch from './KnowledgeBase/LazyKnowledgeSearch.svelte';
+	import KbSelectionHeader from './KnowledgeBase/KbSelectionHeader.svelte';
+	import { createKbSelection } from './KnowledgeBase/selection';
 	import SyncProgress from './KnowledgeBase/SyncProgress.svelte';
 	import AddFilesPlaceholder from '$lib/components/AddFilesPlaceholder.svelte';
 	import { buildSyncToast } from './utils/syncToast';
@@ -77,7 +75,7 @@
 	import Badge from '$lib/components/common/Badge.svelte';
 
 	import SyncConfirmDialog from '../../common/ConfirmDialog.svelte';
-	import Drawer from '$lib/components/common/Drawer.svelte';
+	import FileItemModal from '$lib/components/common/FileItemModal.svelte';
 	import ChevronLeft from '$lib/components/icons/ChevronLeft.svelte';
 	import LockClosed from '$lib/components/icons/LockClosed.svelte';
 	import OneDrive from '$lib/components/icons/OneDrive.svelte';
@@ -271,7 +269,7 @@
 
 	let selectedFileId: string | null = null;
 	let selectedFile = null;
-	let selectedFileContent = '';
+	let showFilePreview = false;
 
 	let inputFiles = null;
 
@@ -293,6 +291,24 @@
 	// Bumped on every mutation that init() handles (delete / remove-source /
 	// sync completion / content edit) so LazyKnowledgeTree re-fetches what's open.
 	let treeRefresh = 0;
+
+	// Multiselect (bulk delete) model — shared across all three list views.
+	const selection = createKbSelection();
+	const {
+		count: bulkCount,
+		breakdown: bulkBreakdown,
+		allSelected: bulkAllSelected,
+		indeterminate: bulkIndeterminate
+	} = selection;
+	let showBulkRemoveConfirm = false;
+
+	// Clear the selection when the search query changes — the filtered / lazy-search
+	// view has no checkboxes, so a lingering selection would strand there.
+	let lastSelQuery = '';
+	$: if (query !== lastSelQuery) {
+		lastSelQuery = query;
+		selection.clear();
+	}
 
 	const reset = () => {
 		currentPage = 1;
@@ -378,21 +394,32 @@
 		return res;
 	};
 
-	const fileSelectHandler = async (file) => {
-		try {
-			selectedFile = file;
-			if (file?.data?.content != null) {
-				selectedFileContent = file.data.content;
-			} else {
-				selectedFileContent = '';
-				const full = await getFileById(localStorage.token, file.id);
-				selectedFileContent = full?.data?.content || '';
-				selectedFile = { ...file, data: { ...(file.data || {}), content: selectedFileContent } };
-			}
-		} catch {
-			toast.error($i18n.t('Failed to load file content.'));
+	// Open the read-only file preview popup. FileItemModal fetches its own
+	// content; `file` may come from the flat list (top-level name/size + meta)
+	// or the lazy tree ({ id, name, meta: { name, size } }).
+	const openFilePreview = (file) => {
+		if (!file) {
+			selectedFile = null;
+			showFilePreview = false;
+			return;
 		}
+
+		selectedFile = {
+			id: file.id,
+			name: file?.meta?.name ?? file?.name,
+			type: 'file',
+			size: file?.meta?.size ?? file?.size,
+			meta: file?.meta ?? { name: file?.name, size: file?.size }
+		};
+		showFilePreview = true;
 	};
+
+	// Closing the preview (via the modal's own close button) also clears the
+	// row selection highlight in the file list.
+	$: if (!showFilePreview && selectedFileId !== null) {
+		selectedFileId = null;
+		selectedFile = null;
+	}
 
 	const createFileFromText = (name, content) => {
 		const blob = new Blob([content], { type: 'text/plain' });
@@ -1593,42 +1620,47 @@
 		}
 	};
 
+	// Bulk remove: replays each selected item's own removal (file-remove or
+	// remove-source) without per-item toast/init, then refreshes once.
+	const bulkRemoveHandler = async () => {
+		const items = [...get(selection.selected).values()];
+		if (items.length === 0) return;
+
+		let ok = 0;
+		let removedSource = false;
+		for (const item of items) {
+			try {
+				if (item.kind === 'file') {
+					await removeFileFromKnowledgeById(localStorage.token, id, item.fileId);
+					ok++;
+				} else if (activeProvider) {
+					await activeProvider.api.removeSource(localStorage.token, knowledge.id, item.itemId);
+					removedSource = true;
+					ok++;
+				}
+			} catch (e) {
+				console.error('Bulk remove failed for', item.key, e);
+			}
+		}
+
+		toast[ok > 0 ? 'success' : 'error'](
+			$i18n.t('Removed {{ok}} of {{total}} items', { ok, total: items.length })
+		);
+
+		selection.clear();
+
+		if (removedSource) {
+			const res = await getKnowledgeById(localStorage.token, id);
+			if (res) {
+				knowledge = res;
+			}
+		}
+		await init();
+	};
+
 	let debounceTimeout = null;
 	let mediaQuery;
 	let dragged = false;
-	let isSaving = false;
-
-	const updateFileContentHandler = async () => {
-		if (isSaving) {
-			console.log('Save operation already in progress, skipping...');
-			return;
-		}
-
-		isSaving = true;
-
-		try {
-			const res = await updateFileDataContentById(
-				localStorage.token,
-				selectedFile.id,
-				selectedFileContent
-			).catch((e) => {
-				toast.error(`${e}`);
-				return null;
-			});
-
-			if (res) {
-				toast.success($i18n.t('File content updated successfully.'));
-
-				selectedFileId = null;
-				selectedFile = null;
-				selectedFileContent = '';
-
-				await init();
-			}
-		} finally {
-			isSaving = false;
-		}
-	};
 
 	const changeDebounceHandler = () => {
 		console.log('debounce');
@@ -1864,6 +1896,15 @@
 	};
 </script>
 
+<svelte:window
+	on:keydown={(e) => {
+		if (e.key === 'Escape' && $bulkCount > 0) {
+			selection.clear();
+		}
+	}}
+	on:pointerup={() => selection.endDrag()}
+/>
+
 <FilesOverlay show={dragged} />
 <SyncConfirmDialog
 	bind:show={showSyncConfirmModal}
@@ -1886,6 +1927,23 @@
 		if (activeProvider) {
 			cancelCloudSyncHandler(activeProvider);
 		}
+	}}
+/>
+
+<SyncConfirmDialog
+	bind:show={showBulkRemoveConfirm}
+	title={$bulkBreakdown.sources > 0
+		? $i18n.t('Delete {{fileCount}} file(s) and {{sourceCount}} source(s)?', {
+				fileCount: $bulkBreakdown.totalFiles,
+				sourceCount: $bulkBreakdown.sources
+			})
+		: $i18n.t('Delete {{count}} files?', { count: $bulkBreakdown.totalFiles })}
+	message={$bulkBreakdown.sources > 0
+		? $i18n.t('Removing a source stops its sync and deletes all of its files.')
+		: $i18n.t('This will remove the selected files from this knowledge base.')}
+	confirmLabel={$i18n.t('Delete')}
+	on:confirm={() => {
+		bulkRemoveHandler();
 	}}
 />
 
@@ -2333,6 +2391,17 @@
 					<div class="flex-1 flex">
 						<div class=" flex flex-col w-full space-x-2 rounded-lg h-full">
 							<div class="w-full h-full flex flex-col min-h-0">
+								{#if knowledge?.write_access && !(lazyTreeActive && query) && (lazyTreeActive || (fileItems && fileItems.length > 0))}
+									<div class="pb-1.5 shrink-0">
+										<KbSelectionHeader
+											count={$bulkCount}
+											allSelected={$bulkAllSelected}
+											indeterminate={$bulkIndeterminate}
+											onToggleSelectAll={() => selection.toggleSelectAll()}
+											onDelete={() => (showBulkRemoveConfirm = true)}
+										/>
+									</div>
+								{/if}
 								{#if lazyTreeActive && !query}
 									<div class=" flex overflow-y-auto h-full w-full scrollbar-hidden text-xs">
 										<LazyKnowledgeTree
@@ -2342,7 +2411,7 @@
 											refreshSignal={treeRefresh}
 											onClick={(file) => {
 												selectedFileId = file.id;
-												fileSelectHandler({
+												openFilePreview({
 													id: file.id,
 													name: file.name,
 													meta: { name: file.name, size: file.size }
@@ -2361,6 +2430,7 @@
 												selectedFile = null;
 												deleteFileHandler(fileId);
 											}}
+											selection={knowledge?.write_access ? selection : null}
 										/>
 									</div>
 								{:else if lazyTreeActive && query}
@@ -2371,7 +2441,7 @@
 											{selectedFileId}
 											onClick={(file) => {
 												selectedFileId = file.id;
-												fileSelectHandler({
+												openFilePreview({
 													id: file.id,
 													name: file.name,
 													meta: { name: file.name, size: file.size }
@@ -2395,7 +2465,7 @@
 													if (fileItems) {
 														const file = fileItems.find((file) => file.id === selectedFileId);
 														if (file) {
-															fileSelectHandler(file);
+															openFilePreview(file);
 														} else {
 															selectedFile = null;
 														}
@@ -2411,6 +2481,7 @@
 													selectedFile = null;
 													deleteFileHandler(fileId);
 												}}
+												selection={knowledge?.write_access ? selection : null}
 											/>
 										{:else}
 											<Files
@@ -2423,7 +2494,7 @@
 													if (fileItems) {
 														const file = fileItems.find((file) => file.id === selectedFileId);
 														if (file) {
-															fileSelectHandler(file);
+															openFilePreview(file);
 														} else {
 															selectedFile = null;
 														}
@@ -2435,6 +2506,7 @@
 
 													deleteFileHandler(fileId);
 												}}
+												selection={knowledge?.write_access ? selection : null}
 											/>
 										{/if}
 									</div>
@@ -2486,67 +2558,7 @@
 						</div>
 					</div>
 
-					{#if selectedFileId !== null}
-						<Drawer
-							className="h-full"
-							show={selectedFileId !== null}
-							onClose={() => {
-								selectedFileId = null;
-								selectedFile = null;
-							}}
-						>
-							<div class="flex flex-col justify-start h-full max-h-full">
-								<div class=" flex flex-col w-full h-full max-h-full">
-									<div class="shrink-0 flex items-center p-2">
-										<div class="mr-2">
-											<button
-												class="w-full text-left text-sm p-1.5 rounded-lg dark:text-gray-300 dark:hover:text-white hover:bg-black/5 dark:hover:bg-gray-850"
-												aria-label={$i18n.t('Close')}
-												on:click={() => {
-													selectedFileId = null;
-													selectedFile = null;
-												}}
-											>
-												<ChevronLeft strokeWidth="2.5" />
-											</button>
-										</div>
-										<div class=" flex-1 text-lg line-clamp-1">
-											{selectedFile?.meta?.name}
-										</div>
-
-										{#if knowledge?.write_access}
-											<div>
-												<button
-													class="flex self-center w-fit text-sm py-1 px-2.5 dark:text-gray-300 dark:hover:text-white hover:bg-black/5 dark:hover:bg-white/5 rounded-lg disabled:opacity-50 disabled:cursor-not-allowed"
-													disabled={isSaving}
-													on:click={() => {
-														updateFileContentHandler();
-													}}
-												>
-													{$i18n.t('Save')}
-													{#if isSaving}
-														<div class="ml-2 self-center">
-															<Spinner />
-														</div>
-													{/if}
-												</button>
-											</div>
-										{/if}
-									</div>
-
-									{#key selectedFile.id}
-										<textarea
-											class="w-full h-full text-sm outline-none resize-none px-3 py-2"
-											bind:value={selectedFileContent}
-											disabled={!knowledge?.write_access}
-											aria-label={$i18n.t('File content')}
-											placeholder={$i18n.t('Add content here')}
-										/>
-									{/key}
-								</div>
-							</div>
-						</Drawer>
-					{/if}
+					<FileItemModal bind:show={showFilePreview} item={selectedFile} edit={false} />
 				</div>
 			{/if}
 		</div>

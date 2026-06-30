@@ -53,6 +53,12 @@
 
 	export let topPadding = false;
 	export let bottomPadding = false;
+	// [Gradient] Opt-in extra top spacing for the conversation list so the
+	// first message clears the sticky navbar's fade gradient when scrolled
+	// fully to the top. Only the main chat view (Chat.svelte) sets this; other
+	// callers (search/menu previews, channels, shared chats) keep the default
+	// compact spacing, and the empty-state placeholder is unaffected.
+	export let topSpacing = false;
 	export let autoScroll;
 
 	export let onSelect = (e) => {};
@@ -481,7 +487,7 @@
 	{#if Object.keys(history?.messages ?? {}).length == 0}
 		<ChatPlaceholder modelIds={selectedModels} {atSelectedModel} {onSelect} />
 	{:else}
-		<div class="w-full pt-2">
+		<div class="w-full {topSpacing ? 'pt-18' : 'pt-2'}">
 			{#key chatId}
 				<section class="w-full" aria-labelledby="chat-conversation">
 					<h2 class="sr-only" id="chat-conversation">{$i18n.t('Chat Conversation')}</h2>
