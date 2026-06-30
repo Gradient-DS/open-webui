@@ -565,6 +565,10 @@ openWebui:
     emailInviteSubject: ""       # Custom email subject (empty = default)
     emailInviteHeading: ""       # Custom email + invite page heading (empty = default)
 
+    # Forgot Password (self-service password reset; reuses Email Graph config)
+    enableForgotPassword: "false"
+    passwordResetExpiryMinutes: "30"
+
     bypassModelAccessControl: "false"
 
     # Agent API (internal: routes chat UI to external agent service)
