@@ -2441,7 +2441,7 @@
 												selectedFile = null;
 												deleteFileHandler(fileId);
 											}}
-											{selection}
+											selection={knowledge?.write_access ? selection : null}
 										/>
 									</div>
 								{:else if lazyTreeActive && query}
@@ -2492,7 +2492,7 @@
 													selectedFile = null;
 													deleteFileHandler(fileId);
 												}}
-												{selection}
+												selection={knowledge?.write_access ? selection : null}
 											/>
 										{:else}
 											<Files
@@ -2517,7 +2517,7 @@
 
 													deleteFileHandler(fileId);
 												}}
-												{selection}
+												selection={knowledge?.write_access ? selection : null}
 											/>
 										{/if}
 									</div>
