@@ -3433,6 +3433,18 @@ EMAIL_INVITE_HEADING = PersistentConfig(
     os.environ.get('EMAIL_INVITE_HEADING', ''),
 )
 
+ENABLE_FORGOT_PASSWORD = PersistentConfig(
+    'ENABLE_FORGOT_PASSWORD',
+    'email.enable_forgot_password',
+    os.environ.get('ENABLE_FORGOT_PASSWORD', 'False').lower() == 'true',
+)
+
+PASSWORD_RESET_EXPIRY_MINUTES = PersistentConfig(
+    'PASSWORD_RESET_EXPIRY_MINUTES',
+    'email.password_reset_expiry_minutes',
+    int(os.environ.get('PASSWORD_RESET_EXPIRY_MINUTES', '30')),
+)
+
 # RAG Content Extraction
 CONTENT_EXTRACTION_ENGINE = PersistentConfig(
     'CONTENT_EXTRACTION_ENGINE',
