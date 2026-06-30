@@ -566,7 +566,7 @@ openWebui:
     emailInviteHeading: ""       # Custom email + invite page heading (empty = default)
 
     # Forgot Password (self-service password reset; reuses Email Graph config)
-    enableForgotPassword: "false"
+    enableForgotPassword: "true"
     passwordResetExpiryMinutes: "30"
 
     bypassModelAccessControl: "false"
