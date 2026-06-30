@@ -1735,6 +1735,7 @@ async def process_file(
                 enabled=request.app.state.config.DISTRIBUTED_DOC_PIPELINE_ENABLED,
                 collection_name=form_data.collection_name,
                 file_path=file.path,
+                file_format=doc_pipeline.format_from_filename(file.filename),
             ):
                 return await route_file_to_pipeline(request, file, form_data.collection_name, user)
 
@@ -2861,6 +2862,7 @@ async def process_files_batch(
                 enabled=request.app.state.config.DISTRIBUTED_DOC_PIPELINE_ENABLED,
                 collection_name=collection_name,
                 file_path=db_file.path,
+                file_format=doc_pipeline.format_from_filename(db_file.filename),
             ):
                 await route_file_to_pipeline(request, db_file, collection_name, user)
                 file_results.append(BatchProcessFilesResult(file_id=file.id, status='processing'))

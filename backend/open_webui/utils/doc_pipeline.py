@@ -30,6 +30,16 @@ ACTING_PROVIDER = 'owui_upload'
 _JOBS_PATH = '/jobs'
 _DEFAULT_TIMEOUT_SECONDS = 30.0
 
+# Formats the warren parser can handle — mirrors the distributed pipeline's
+# parser registry (pdf / office / text / html / xml). Files outside this set
+# (images, binaries, …) must fall through to OWUI's native path: warren's
+# ParserWorker silently does not consume an unsupported format, so the job would
+# sit 'pending' and the file would hang until the reconciler's wall-clock
+# backstop instead of failing fast.
+PIPELINE_SUPPORTED_FORMATS = frozenset(
+    {'pdf', 'docx', 'xlsx', 'pptx', 'csv', 'html', 'xml', 'txt', 'md', 'markdown', 'text'}
+)
+
 
 def format_from_filename(filename: str) -> str:
     """Return the lowercase file extension without the dot.
@@ -44,13 +54,15 @@ def should_route_to_pipeline(
     enabled: bool,
     collection_name: Optional[str],
     file_path: Optional[str],
+    file_format: Optional[str],
 ) -> bool:
     """Whether this file should be handed to the distributed pipeline.
 
     Requires the feature flag on, a **KB-bound** ingestion (``collection_name``
-    set — not the per-file ``file-{id}`` chat-with-file cache), and a storage
-    ``file_path`` to presign. Any miss → caller runs the native path."""
-    return bool(enabled and collection_name and file_path)
+    set — not the per-file ``file-{id}`` chat-with-file cache), a storage
+    ``file_path`` to presign, and a ``file_format`` warren can parse
+    (``PIPELINE_SUPPORTED_FORMATS``). Any miss → caller runs the native path."""
+    return bool(enabled and collection_name and file_path and file_format in PIPELINE_SUPPORTED_FORMATS)
 
 
 def reconcile_action(
