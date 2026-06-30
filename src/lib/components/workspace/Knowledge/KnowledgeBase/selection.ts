@@ -101,12 +101,11 @@ export function createKbSelection(): KbSelection {
 		lastKey = null;
 	};
 
+	// Header checkbox: anything selected → clear (one-click deselect-all, since the
+	// explicit deselect button was removed); nothing selected → select all available.
 	const toggleSelectAll = () => {
-		const av = get(_available);
-		const sel = get(_selected);
-		const all = av.length > 0 && av.every((it) => sel.has(it.key));
-		if (all) clear();
-		else selectAll(av);
+		if (get(_selected).size > 0) clear();
+		else selectAll(get(_available));
 	};
 
 	// ── Drag-paint ────────────────────────────────────────────────────────

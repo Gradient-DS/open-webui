@@ -18,7 +18,7 @@
 	import DocumentPage from '$lib/components/icons/DocumentPage.svelte';
 	import ExclamationTriangle from '$lib/components/icons/ExclamationTriangle.svelte';
 	import Folder from '$lib/components/icons/Folder.svelte';
-	import XMark from '$lib/components/icons/XMark.svelte';
+	import GarbageBin from '$lib/components/icons/GarbageBin.svelte';
 	import ChevronDown from '$lib/components/icons/ChevronDown.svelte';
 	import ChevronRight from '$lib/components/icons/ChevronRight.svelte';
 	import Spinner from '$lib/components/common/Spinner.svelte';
@@ -293,7 +293,7 @@
 								type="button"
 								on:click={() => onRemoveSource(source.item_id, source.name)}
 							>
-								<XMark />
+								<GarbageBin className="size-3.5" />
 							</button>
 						</Tooltip>
 					</div>
@@ -464,7 +464,7 @@
 								}
 							}}
 						>
-							<XMark />
+							<GarbageBin className="size-3.5" />
 						</button>
 					</Tooltip>
 				</div>

@@ -17,7 +17,7 @@
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
 	import DocumentPage from '$lib/components/icons/DocumentPage.svelte';
 	import ExclamationTriangle from '$lib/components/icons/ExclamationTriangle.svelte';
-	import XMark from '$lib/components/icons/XMark.svelte';
+	import GarbageBin from '$lib/components/icons/GarbageBin.svelte';
 	import Spinner from '$lib/components/common/Spinner.svelte';
 	import LazyTreeNode from './LazyTreeNode.svelte';
 	import SelectCheckbox from './SelectCheckbox.svelte';
@@ -313,7 +313,7 @@
 								type="button"
 								on:click={() => onDelete(file.id)}
 							>
-								<XMark />
+								<GarbageBin className="size-3.5" />
 							</button>
 						</Tooltip>
 					</div>

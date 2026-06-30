@@ -79,12 +79,15 @@ describe('createKbSelection', () => {
 		expect(get(sel.allSelected)).toBe(false);
 		expect(get(sel.indeterminate)).toBe(true);
 
-		sel.toggleSelectAll(); // not all → select all
+		sel.toggleSelectAll(); // anything selected → clear
+		expect(get(sel.count)).toBe(0);
+
+		sel.toggleSelectAll(); // nothing selected → select all
 		expect(get(sel.count)).toBe(3);
 		expect(get(sel.allSelected)).toBe(true);
 		expect(get(sel.indeterminate)).toBe(false);
 
-		sel.toggleSelectAll(); // all → clear
+		sel.toggleSelectAll(); // all selected → clear
 		expect(get(sel.count)).toBe(0);
 	});
 

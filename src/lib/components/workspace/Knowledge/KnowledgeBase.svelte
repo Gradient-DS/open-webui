@@ -2409,7 +2409,6 @@
 											indeterminate={$bulkIndeterminate}
 											onToggleSelectAll={() => selection.toggleSelectAll()}
 											onDelete={() => (showBulkRemoveConfirm = true)}
-											onClear={() => selection.clear()}
 										/>
 									</div>
 								{/if}

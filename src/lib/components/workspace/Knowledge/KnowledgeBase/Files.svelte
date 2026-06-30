@@ -15,7 +15,7 @@
 
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
 	import DocumentPage from '$lib/components/icons/DocumentPage.svelte';
-	import XMark from '$lib/components/icons/XMark.svelte';
+	import GarbageBin from '$lib/components/icons/GarbageBin.svelte';
 	import Spinner from '$lib/components/common/Spinner.svelte';
 	import VirtualList from '@sveltejs/svelte-virtual-list';
 	import SelectCheckbox from './SelectCheckbox.svelte';
@@ -168,7 +168,7 @@
 								onDelete(file?.id ?? file?.tempId);
 							}}
 						>
-							<XMark />
+							<GarbageBin className="size-3.5" />
 						</button>
 					</Tooltip>
 				</div>

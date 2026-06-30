@@ -5,25 +5,26 @@
 
 	const i18n = getContext('i18n');
 
-	// Always-present selection header. Reserving its height means selecting the
-	// first row never shifts the list (no UI jump).
+	// Always-present selection header. Fixed height (h-8) so toggling between the
+	// empty and selected states never changes its size → the list never jumps.
 	export let count: number = 0;
 	export let allSelected: boolean = false;
 	export let indeterminate: boolean = false;
 	export let onToggleSelectAll: () => void = () => {};
 	export let onDelete: () => void = () => {};
-	export let onClear: () => void = () => {};
 </script>
 
-<div class="flex items-center gap-2 px-3 py-1.5 rounded-lg {count > 0
+<div
+	class="flex items-center gap-2 px-3 h-8 rounded-lg {count > 0
 		? 'bg-gray-50 dark:bg-gray-800/50'
-		: ''}">
-	<Tooltip content={allSelected ? $i18n.t('Deselect') : $i18n.t('Select All')}>
+		: ''}"
+>
+	<Tooltip content={count > 0 ? $i18n.t('Deselect') : $i18n.t('Select All')}>
 		<button
 			type="button"
 			class="flex items-center"
 			on:click={onToggleSelectAll}
-			aria-label={allSelected ? $i18n.t('Deselect') : $i18n.t('Select All')}
+			aria-label={count > 0 ? $i18n.t('Deselect') : $i18n.t('Select All')}
 		>
 			<div
 				class="size-4 shrink-0 rounded border flex items-center justify-center transition-colors {allSelected ||
@@ -64,20 +65,6 @@
 				aria-label={$i18n.t('Delete')}
 			>
 				<GarbageBin className="size-3.5" />
-			</button>
-		</Tooltip>
-
-		<Tooltip content={$i18n.t('Deselect')}>
-			<button
-				class="p-1 rounded transition text-gray-400 dark:text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-800 hover:text-gray-600 dark:hover:text-gray-400"
-				on:click={onClear}
-				aria-label={$i18n.t('Deselect')}
-			>
-				<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="size-3.5">
-					<path
-						d="M6.28 5.22a.75.75 0 0 0-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 1 0 1.06 1.06L10 11.06l3.72 3.72a.75.75 0 1 0 1.06-1.06L11.06 10l3.72-3.72a.75.75 0 0 0-1.06-1.06L10 8.94 6.28 5.22Z"
-					/>
-				</svg>
 			</button>
 		</Tooltip>
 	{:else}
