@@ -144,11 +144,14 @@
 					history.messages[assistantId].content = answer;
 					history = history;
 				} else if (event.type === 'draft') {
-					// The interview offers no attachment affordance — knowledge
-					// is attached later, in the builder. The draft therefore
-					// carries an empty knowledge list; SimpleModelEditor seeds
-					// its picker from the user's choices in the builder.
-					onComplete({ ...event.draft, knowledge: [] });
+					// Auto-attach: carry the interview's attachments (uploaded files
+					// + picked KBs) into the draft so SimpleModelEditor seeds the
+					// Kennis picker with them. The user can remove any before saving;
+					// SimpleModelEditor drops still-uploading items at save time.
+					const attached = interviewFiles.filter(
+						(f) => f?.type === 'collection' || f?.type === 'file'
+					);
+					onComplete({ ...event.draft, knowledge: attached });
 					return;
 				}
 			}
