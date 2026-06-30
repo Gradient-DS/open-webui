@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { getContext, onDestroy, onMount } from 'svelte';
-	import { submitPromptSignal, user } from '$lib/stores';
+	import { toast } from 'svelte-sonner';
+	import { socket, submitPromptSignal, user } from '$lib/stores';
 	import { streamOnboarding, type OnboardingMessage } from '$lib/apis/onboarding';
 	import Messages from '$lib/components/chat/Messages.svelte';
 	import MessageInput from '$lib/components/chat/MessageInput.svelte';
@@ -54,6 +55,37 @@
 		) {
 			files = [...files, data];
 		}
+	};
+
+	/**
+	 * Transition an uploaded file from 'uploading' to 'uploaded' once the
+	 * backend finishes parsing/embedding. process=true uploads stay
+	 * 'uploading' until this Socket.IO event arrives (mirrors Chat.svelte);
+	 * without it the chip spins forever and streamOnboarding's status
+	 * filter drops the attachment.
+	 */
+	const fileStatusHandler = (data: {
+		file_id: string;
+		status: string;
+		error?: string;
+		collection_name?: string;
+	}) => {
+		const idx = files.findIndex((f) => f.id === data.file_id);
+		if (idx < 0) return;
+		if (data.status === 'completed') {
+			files[idx].status = 'uploaded';
+			if (data.collection_name) {
+				files[idx].collection_name = data.collection_name;
+			}
+		} else if (data.status === 'failed') {
+			toast.error(
+				$i18n.t('File processing failed: {{error}}', {
+					error: data.error || 'Unknown error'
+				})
+			);
+			files = files.filter((f) => f.id !== data.file_id);
+		}
+		files = files;
 	};
 
 	/** Append a message node to the history tree; returns its id. */
@@ -130,7 +162,8 @@
 		if (!text || text.trim() === '' || streaming) return;
 		const t = text.trim();
 		prompt = '';
-		files = [];
+		// Keep `files` across turns: interview attachments are context for
+		// the whole session — sent on every turn and auto-attached at draft.
 		messageInput?.setText?.('');
 		agentTranscript = [...agentTranscript, { role: 'user', content: t }];
 		appendMessage('user', t);
@@ -138,6 +171,7 @@
 	};
 
 	onMount(() => {
+		$socket?.on('file:status', fileStatusHandler);
 		// Seed turn — sent to the agent but not shown on screen, so the
 		// agent opens the conversation with its first question.
 		agentTranscript = [
@@ -167,6 +201,7 @@
 
 	onDestroy(() => {
 		unsubscribeChoice();
+		$socket?.off('file:status', fileStatusHandler);
 	});
 </script>
 
