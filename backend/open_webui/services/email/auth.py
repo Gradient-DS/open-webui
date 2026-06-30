@@ -11,6 +11,13 @@ from open_webui.config import (
 _token_cache: dict = {'access_token': None, 'expires_at': 0}
 
 
+def is_mail_configured() -> bool:
+    """True when Microsoft Graph mail credentials are present, so transactional
+    email (invites, password reset) can actually be sent. Mirrors the credential
+    check in get_mail_access_token."""
+    return all([EMAIL_GRAPH_TENANT_ID, EMAIL_GRAPH_CLIENT_ID, EMAIL_GRAPH_CLIENT_SECRET])
+
+
 async def get_mail_access_token(app) -> str:
     """Get Graph API token using client_credentials flow. Caches until expiry."""
     if _token_cache['access_token'] and time.time() < _token_cache['expires_at'] - 300:
