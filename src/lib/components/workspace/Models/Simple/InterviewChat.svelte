@@ -32,6 +32,30 @@
 
 	const now = () => Math.floor(Date.now() / 1000);
 
+	/**
+	 * Handles MessageInput's onUpload callback. Knowledge / Notes /
+	 * Reference Chats picks go through InputMenu's bind:files directly
+	 * — they don't reach onUpload. This handler catches external
+	 * integration callbacks (webpage URL, Google Drive, OneDrive,
+	 * Confluence) and accepts any payload that already looks like a
+	 * chat-files item; full upload pipelines are out of scope for the
+	 * interview MVP and silently no-op.
+	 */
+	const handleOnUpload = (e: { type?: string; data?: unknown }) => {
+		if (!e || !e.type) return;
+		const data = e.data;
+		if (Array.isArray(data)) {
+			files = [...files, ...data];
+		} else if (
+			data &&
+			typeof data === 'object' &&
+			'id' in data &&
+			(data as { id?: unknown }).id
+		) {
+			files = [...files, data];
+		}
+	};
+
 	/** Append a message node to the history tree; returns its id. */
 	const appendMessage = (role: 'user' | 'assistant', content: string): string => {
 		const id = crypto.randomUUID();
@@ -146,10 +170,9 @@
 	});
 </script>
 
-<!-- Intentionally NOT id="chat-pane": MessageInput wires its drag-drop
-     dropzone to #chat-pane, and the interview must accept no attachments.
-     Using a different id means MessageInput finds no dropzone here. -->
-<div id="onboarding-chat-pane" class="onboarding-chat flex flex-col h-full w-full">
+<!-- id="chat-pane" so MessageInput wires its drag-drop dropzone here,
+     letting the user drop a supporting file into the interview. -->
+<div id="chat-pane" class="onboarding-chat flex flex-col h-full w-full">
 	<div class="shrink-0 flex flex-col gap-1 px-1 mt-1.5 mb-3">
 		<div class="flex justify-between items-center">
 			<div class="flex items-center text-xl font-medium px-0.5 shrink-0">
@@ -205,8 +228,9 @@
 			createMessagePair={() => {}}
 			stopResponse={() => {}}
 			onChange={() => {}}
+			onUpload={handleOnUpload}
 			placeholder={$i18n.t('Type your answer...')}
-			inputMenuRestrictTo={[]}
+			inputMenuRestrictTo={['upload_files']}
 			on:submit={(e) => handleSubmit(e.detail)}
 		/>
 	</div>
@@ -216,18 +240,6 @@
 	/* Hide the assistant message action row (copy / download) — the
 	   interview transcript is not a savable chat. */
 	:global(.onboarding-chat .buttons) {
-		display: none !important;
-	}
-
-	/* Hide MessageInput toolbar controls that don't apply to the
-	   assistant-building flow. The interview attaches nothing —
-	   knowledge is added later, in the builder — so the `+` menu is
-	   hidden entirely. (inputMenuRestrictTo={[]} also empties the menu
-	   as a belt-and-braces guard, and the container is not #chat-pane so
-	   MessageInput wires no drag-drop dropzone here.) */
-
-	/* The `+` (Upload / Knowledge / Webpage / etc.) menu trigger. */
-	:global(.onboarding-chat #input-menu-button) {
 		display: none !important;
 	}
 
