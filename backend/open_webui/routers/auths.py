@@ -87,6 +87,7 @@ from open_webui.utils.password_reset import (
     hash_reset_token,
     is_reset_token_usable,
 )
+from open_webui.services.email.auth import is_mail_configured
 
 
 from typing import Optional, List
@@ -403,6 +404,7 @@ async def forgot_password(
     try:
         eligible = (
             request.app.state.config.ENABLE_FORGOT_PASSWORD
+            and is_mail_configured()
             and ENABLE_PASSWORD_AUTH
             and not WEBUI_AUTH_TRUSTED_EMAIL_HEADER
             and validate_email_format(email)

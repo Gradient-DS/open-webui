@@ -752,6 +752,7 @@ from open_webui.utils.oauth import (
 from open_webui.utils.security_headers import SecurityHeadersMiddleware
 from open_webui.utils.lazy_resource import lazy
 from open_webui.utils.redis import clear_connection_cache, get_redis_connection
+from open_webui.services.email.auth import is_mail_configured
 
 from open_webui.tasks import (
     redis_task_command_listener,
@@ -3267,7 +3268,7 @@ async def get_app_config(request: Request):
             'enable_api_keys': app.state.config.ENABLE_API_KEYS,
             'enable_signup': app.state.config.ENABLE_SIGNUP,
             'enable_login_form': app.state.config.ENABLE_LOGIN_FORM,
-            'enable_forgot_password': app.state.config.ENABLE_FORGOT_PASSWORD,
+            'enable_forgot_password': app.state.config.ENABLE_FORGOT_PASSWORD and is_mail_configured(),
             'enable_password_change_form': app.state.config.ENABLE_PASSWORD_CHANGE_FORM,
             'enable_websocket': ENABLE_WEBSOCKET_SUPPORT,
             'enable_version_update_check': ENABLE_VERSION_UPDATE_CHECK,
