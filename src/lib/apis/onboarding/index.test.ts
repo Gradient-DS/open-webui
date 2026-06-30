@@ -25,6 +25,15 @@ describe('interpretOnboardingEvent', () => {
 		expect(result).toEqual({ type: 'draft', draft });
 	});
 
+	it('parses a status event', () => {
+		const status = { description: 'Reading {{doc_title}}...', doc_title: 'a.pdf', done: false };
+		const result = interpretOnboardingEvent({
+			event: 'status',
+			data: JSON.stringify(status)
+		});
+		expect(result).toEqual({ type: 'status', status });
+	});
+
 	it('parses a present_ui event as a ui_block', () => {
 		const props = { id: 'q1', options: ['A', 'B', 'C'], question: 'Pick?' };
 		const result = interpretOnboardingEvent({

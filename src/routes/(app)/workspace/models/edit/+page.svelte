@@ -19,6 +19,7 @@
 	import { isFeatureEnabled } from '$lib/utils/features';
 
 	import { getModelById, updateModelById } from '$lib/apis/models';
+	import { getKnowledgeById } from '$lib/apis/knowledge';
 
 	import { getModels } from '$lib/apis';
 	import ModelEditor from '$lib/components/workspace/Models/ModelEditor.svelte';
@@ -26,31 +27,66 @@
 
 	let model = null;
 
+	// Attach a knowledge base to the model and persist. Returns the model
+	// with the KB folded into meta.knowledge (or the original on failure /
+	// when already attached). Keeps the existing meta/knowledge intact.
+	const attachKnowledgeBase = async (m, kbId) => {
+		const kb = await getKnowledgeById(localStorage.token, kbId).catch((e) => {
+			toast.error(`${e}`);
+			return null;
+		});
+		if (!kb) return m;
+		const item = { ...kb, type: 'collection' };
+		const meta = m.meta ?? {};
+		const existing = meta.knowledge ?? [];
+		if (existing.some((k) => k.id === item.id)) return m;
+		const updated = { ...m, meta: { ...meta, knowledge: [...existing, item] } };
+		const res = await updateModelById(localStorage.token, updated.id, updated).catch((e) => {
+			toast.error(`${e}`);
+			return null;
+		});
+		return res ? updated : m;
+	};
+
 	onMount(async () => {
 		if (!isFeatureEnabled('models')) {
 			goto('/');
 			return;
 		}
 		const _id = $page.url.searchParams.get('id');
-		if (_id) {
-			model = await getModelById(localStorage.token, _id).catch((e) => {
-				return null;
-			});
-
-			if (!model) {
-				goto('/workspace/models');
-			}
-
-			if (!model?.write_access) {
-				toast.error($i18n.t('You do not have permission to edit this model'));
-				goto('/workspace/models');
-			}
-		} else {
+		if (!_id) {
 			goto('/workspace/models');
+			return;
 		}
+
+		let loaded = await getModelById(localStorage.token, _id).catch(() => null);
+		if (!loaded) {
+			goto('/workspace/models');
+			return;
+		}
+		if (!loaded?.write_access) {
+			toast.error($i18n.t('You do not have permission to edit this model'));
+			goto('/workspace/models');
+			return;
+		}
+
+		// Return leg of the "+ Add knowledge" builder flow: attach the
+		// newly created KB and persist, then strip the param so a refresh
+		// doesn't re-attach. Assign `model` once — with the KB already in
+		// place — so SimpleModelEditor seeds its Knowledge picker correctly
+		// (its onMount reads model.meta.knowledge a single time).
+		const selectKb = $page.url.searchParams.get('selectKb');
+		if (selectKb) {
+			loaded = await attachKnowledgeBase(loaded, selectKb);
+			const url = new URL(window.location.href);
+			url.searchParams.delete('selectKb');
+			history.replaceState({}, '', url.toString());
+		}
+
+		model = loaded;
 	});
 
-	const onSubmit = async (modelInfo) => {
+	const onSubmit = async (modelInfo, { skipNavigate = false } = {}) => {
 		const res = await updateModelById(localStorage.token, modelInfo.id, modelInfo);
 
 		if (res) {
@@ -60,8 +96,14 @@
 					$config?.features?.enable_direct_connections && ($settings?.directConnections ?? null)
 				)
 			);
-			toast.success($i18n.t('Model updated successfully'));
-			await goto('/workspace/models');
+			toast.success(
+				useSimpleBuilder
+					? $i18n.t('Assistant updated successfully')
+					: $i18n.t('Model updated successfully')
+			);
+			if (!skipNavigate) {
+				await goto('/workspace/models');
+			}
 		}
 	};
 </script>
