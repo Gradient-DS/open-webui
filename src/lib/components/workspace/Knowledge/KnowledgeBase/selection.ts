@@ -1,8 +1,8 @@
-import { writable, derived, type Readable } from 'svelte/store';
+import { writable, derived, get, type Readable } from 'svelte/store';
 
 export type SelectableItem =
 	| { key: string; label: string; kind: 'file'; fileId: string }
-	| { key: string; label: string; kind: 'source'; itemId: string; sourceName: string };
+	| { key: string; label: string; kind: 'source'; itemId: string; sourceName: string; fileCount: number };
 
 export const fileItem = (fileId: string, label: string): SelectableItem => ({
 	key: `file:${fileId}`,
@@ -11,12 +11,13 @@ export const fileItem = (fileId: string, label: string): SelectableItem => ({
 	fileId
 });
 
-export const sourceItem = (itemId: string, label: string): SelectableItem => ({
+export const sourceItem = (itemId: string, label: string, fileCount = 1): SelectableItem => ({
 	key: `source:${itemId}`,
 	label,
 	kind: 'source',
 	itemId,
-	sourceName: label
+	sourceName: label,
+	fileCount
 });
 
 type ClickModifiers = { shiftKey?: boolean; metaKey?: boolean; ctrlKey?: boolean };
@@ -24,13 +25,21 @@ type ClickModifiers = { shiftKey?: boolean; metaKey?: boolean; ctrlKey?: boolean
 export interface KbSelection {
 	selected: Readable<Map<string, SelectableItem>>;
 	count: Readable<number>;
-	breakdown: Readable<{ files: number; sources: number }>;
+	breakdown: Readable<{ files: number; sources: number; totalFiles: number }>;
+	available: Readable<SelectableItem[]>;
+	allSelected: Readable<boolean>;
+	indeterminate: Readable<boolean>;
 	selectionMode: Readable<boolean>;
 	toggle: (item: SelectableItem) => void;
 	select: (item: SelectableItem, orderedItems: SelectableItem[], e: ClickModifiers) => void;
 	selectAll: (items: SelectableItem[]) => void;
+	setAvailable: (items: SelectableItem[]) => void;
+	toggleSelectAll: () => void;
 	clear: () => void;
-	enterSelectionMode: () => void;
+	pointerDown: (item: SelectableItem, orderedItems: SelectableItem[]) => void;
+	pointerEnter: (item: SelectableItem) => void;
+	endDrag: () => void;
+	consumeDidDrag: () => boolean;
 }
 
 const rangeBetween = (
@@ -47,8 +56,15 @@ const rangeBetween = (
 
 export function createKbSelection(): KbSelection {
 	const _selected = writable<Map<string, SelectableItem>>(new Map());
-	const _mode = writable(false);
+	const _available = writable<SelectableItem[]>([]);
 	let lastKey: string | null = null;
+
+	// Drag-paint state (plain locals — not reactive).
+	let dragging = false;
+	let dragAnchorKey: string | null = null;
+	let dragOrdered: SelectableItem[] = [];
+	let dragBaseline = new Map<string, SelectableItem>();
+	let didDrag = false;
 
 	const toggle = (item: SelectableItem) => {
 		_selected.update((map) => {
@@ -78,34 +94,90 @@ export function createKbSelection(): KbSelection {
 		lastKey = items.length ? items[items.length - 1].key : null;
 	};
 
+	const setAvailable = (items: SelectableItem[]) => _available.set(items);
+
 	const clear = () => {
 		_selected.set(new Map());
 		lastKey = null;
-		_mode.set(false);
 	};
 
-	const enterSelectionMode = () => _mode.set(true);
+	const toggleSelectAll = () => {
+		const av = get(_available);
+		const sel = get(_selected);
+		const all = av.length > 0 && av.every((it) => sel.has(it.key));
+		if (all) clear();
+		else selectAll(av);
+	};
+
+	// ── Drag-paint ────────────────────────────────────────────────────────
+	const pointerDown = (item: SelectableItem, orderedItems: SelectableItem[]) => {
+		dragging = true;
+		dragAnchorKey = item.key;
+		dragOrdered = orderedItems;
+		dragBaseline = new Map(get(_selected));
+		didDrag = false;
+	};
+
+	const pointerEnter = (item: SelectableItem) => {
+		if (!dragging || dragAnchorKey === null) return;
+		if (item.key !== dragAnchorKey) didDrag = true;
+		const range = rangeBetween(dragOrdered, dragAnchorKey, item.key);
+		const m = new Map(dragBaseline);
+		for (const it of range) m.set(it.key, it);
+		_selected.set(m);
+		lastKey = item.key;
+	};
+
+	const endDrag = () => {
+		dragging = false;
+		dragAnchorKey = null;
+	};
+
+	const consumeDidDrag = () => {
+		const d = didDrag;
+		didDrag = false;
+		return d;
+	};
 
 	const count = derived(_selected, (m) => m.size);
+	const selectionMode = derived(_selected, (m) => m.size > 0);
 	const breakdown = derived(_selected, (m) => {
 		let files = 0;
 		let sources = 0;
+		let totalFiles = 0;
 		for (const it of m.values()) {
-			if (it.kind === 'file') files++;
-			else sources++;
+			if (it.kind === 'file') {
+				files++;
+				totalFiles++;
+			} else {
+				sources++;
+				totalFiles += it.fileCount ?? 0;
+			}
 		}
-		return { files, sources };
+		return { files, sources, totalFiles };
 	});
+	const allSelected = derived([_selected, _available], ([m, av]) => {
+		return av.length > 0 && av.every((it) => m.has(it.key));
+	});
+	const indeterminate = derived([_selected, allSelected], ([m, all]) => m.size > 0 && !all);
 
 	return {
 		selected: { subscribe: _selected.subscribe },
 		count,
 		breakdown,
-		selectionMode: { subscribe: _mode.subscribe },
+		available: { subscribe: _available.subscribe },
+		allSelected,
+		indeterminate,
+		selectionMode,
 		toggle,
 		select,
 		selectAll,
+		setAvailable,
+		toggleSelectAll,
 		clear,
-		enterSelectionMode
+		pointerDown,
+		pointerEnter,
+		endDrag,
+		consumeDidDrag
 	};
 }

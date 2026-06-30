@@ -6,7 +6,7 @@
 	dayjs.extend(duration);
 	dayjs.extend(relativeTime);
 
-	import { getContext } from 'svelte';
+	import { getContext, onDestroy } from 'svelte';
 	import { slide } from 'svelte/transition';
 	import { quintOut } from 'svelte/easing';
 
@@ -61,19 +61,61 @@
 	const isLooseSelectable = (file: any) =>
 		(!!file?.id || !!file?.meta?.source_item_id) && file?.status !== 'uploading';
 
-	$: looseOrdered = (looseFiles ?? []).filter(isLooseSelectable).map(looseItem);
+	// How many files a folder source removes (mirrors the count shown in its header).
+	const sourceFileCount = (source: any): number => {
+		const tree = folderTrees?.[source.item_id];
+		if (folderSources.length === 1 && totalFiles != null) return totalFiles;
+		return tree ? countAllFiles(tree) : 0;
+	};
+	const sourceToItem = (source: any): SelectableItem =>
+		sourceItem(source.item_id, source.name, sourceFileCount(source));
+
+	// Unified, visual-order selectable list: folder sources first, then loose files.
+	// Drives Shift-range, drag, and select-all across both row kinds.
+	$: orderedItems = [
+		...(folderSources ?? []).map(sourceToItem),
+		...(looseFiles ?? []).filter(isLooseSelectable).map(looseItem)
+	];
+	$: if (selection) selection.setAvailable(orderedItems);
+	onDestroy(() => selection?.setAvailable([]));
 
 	const onLooseClick = (file: any, e: MouseEvent) => {
+		if (selection && selection.consumeDidDrag()) return;
 		if (selection && isLooseSelectable(file) && (e.metaKey || e.ctrlKey || e.shiftKey)) {
 			e.preventDefault();
-			selection.select(looseItem(file), looseOrdered, e);
+			selection.select(looseItem(file), orderedItems, e);
 			return;
 		}
 		if (selection && isLooseSelectable(file) && $selectionModeStore) {
-			selection.select(looseItem(file), looseOrdered, e);
+			selection.select(looseItem(file), orderedItems, e);
 			return;
 		}
 		onClick(file?.id ?? file?.tempId);
+	};
+	const onLoosePointerDown = (file: any) => {
+		if (selection && isLooseSelectable(file)) selection.pointerDown(looseItem(file), orderedItems);
+	};
+	const onLoosePointerEnter = (file: any) => {
+		if (selection && isLooseSelectable(file)) selection.pointerEnter(looseItem(file));
+	};
+
+	// Source/folder header: plain click expands (preserve nav); modifier-click selects;
+	// drag selects. Checkbox toggles directly.
+	const onSourceHeaderClick = (source: any, e: MouseEvent) => {
+		if (selection && selection.consumeDidDrag()) return;
+		if (selection && isFolderLikeSource(source) && (e.metaKey || e.ctrlKey || e.shiftKey)) {
+			e.preventDefault();
+			selection.select(sourceToItem(source), orderedItems, e);
+			return;
+		}
+		toggleSource(source.item_id);
+	};
+	const onSourcePointerDown = (source: any) => {
+		if (selection && isFolderLikeSource(source))
+			selection.pointerDown(sourceToItem(source), orderedItems);
+	};
+	const onSourcePointerEnter = (source: any) => {
+		if (selection && isFolderLikeSource(source)) selection.pointerEnter(sourceToItem(source));
 	};
 
 	// Track expanded state per source and subfolder.
@@ -200,22 +242,28 @@
 		{@const srcSel = (selection && $selectedStore?.has(srcKey)) ?? false}
 		<div class="w-full">
 			<!-- Folder header -->
+			<!-- svelte-ignore a11y_no_static_element_interactions -->
 			<div
-				class="group flex items-center w-full px-1.5 py-0.5 hover:bg-gray-50 dark:hover:bg-gray-850/50 rounded-xl transition {srcSel
+				class="group flex items-center w-full px-1.5 py-0.5 hover:bg-gray-50 dark:hover:bg-gray-850/50 rounded-xl transition {selection
+					? 'select-none'
+					: ''} {srcSel
 					? 'bg-blue-50 dark:bg-blue-900/20'
 					: ''}"
+				on:pointerdown={() => onSourcePointerDown(source)}
+				on:pointerenter={() => onSourcePointerEnter(source)}
 			>
-				{#if selection && knowledge?.write_access && isFolderLikeSource(source)}
+				{#if selection && knowledge?.write_access}
 					<SelectCheckbox
+						selectable={isFolderLikeSource(source)}
 						selected={srcSel}
 						visible={!!$selectionModeStore}
-						onToggle={() => selection.toggle(sourceItem(source.item_id, source.name))}
+						onToggle={() => selection.toggle(sourceToItem(source))}
 					/>
 				{/if}
 				<button
 					class="flex items-center gap-1.5 flex-1 p-2 text-left text-sm"
 					type="button"
-					on:click={() => toggleSource(source.item_id)}
+					on:click={(e) => onSourceHeaderClick(source, e)}
 				>
 					<div class="shrink-0 text-gray-500">
 						{#if expandedSources[source.item_id]}
@@ -323,15 +371,21 @@
 		{@const fileStatus = file?.status ?? file?.data?.status}
 		{@const looseKey = looseItem(file).key}
 		{@const looseSel = (selection && isLooseSelectable(file) && $selectedStore?.has(looseKey)) ?? false}
+		<!-- svelte-ignore a11y_no_static_element_interactions -->
 		<div
-			class="group flex cursor-pointer w-full px-1.5 py-0.5 bg-transparent dark:hover:bg-gray-850/50 hover:bg-white rounded-xl transition {looseSel
+			class="group flex cursor-pointer w-full px-1.5 py-0.5 bg-transparent dark:hover:bg-gray-850/50 hover:bg-white rounded-xl transition {selection
+				? 'select-none'
+				: ''} {looseSel
 				? 'bg-blue-50 dark:bg-blue-900/20'
 				: selectedFileId
 					? ''
 					: 'hover:bg-gray-100 dark:hover:bg-gray-850'}"
+			on:pointerdown={() => onLoosePointerDown(file)}
+			on:pointerenter={() => onLoosePointerEnter(file)}
 		>
-			{#if selection && isLooseSelectable(file)}
+			{#if selection}
 				<SelectCheckbox
+					selectable={isLooseSelectable(file)}
 					selected={looseSel}
 					visible={!!$selectionModeStore}
 					onToggle={() => selection.toggle(looseItem(file))}

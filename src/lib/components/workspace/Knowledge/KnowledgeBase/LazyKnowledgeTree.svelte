@@ -21,7 +21,7 @@
 	import Spinner from '$lib/components/common/Spinner.svelte';
 	import LazyTreeNode from './LazyTreeNode.svelte';
 	import SelectCheckbox from './SelectCheckbox.svelte';
-	import { fileItem, type KbSelection, type SelectableItem } from './selection';
+	import { fileItem, sourceItem, type KbSelection, type SelectableItem } from './selection';
 
 	export let knowledge: any = null;
 	export let selectedFileId: string | null = null;
@@ -42,19 +42,35 @@
 
 	const isFileSelectable = (file: any) => !!file?.id && file?.status !== 'uploading';
 	const buildFileItem = (file: any): SelectableItem => fileItem(file.id, file?.name ?? '');
-	$: rootFileOrdered = (rootFiles ?? []).filter(isFileSelectable).map(buildFileItem);
+
+	// Unified, visual-order selectable list: top-level source folders first, then
+	// root loose files. Drives Shift-range, drag, and select-all; threaded into
+	// LazyTreeNode so source rows join the same gesture space.
+	$: orderedItems = [
+		...(rootFolders ?? []).map((s) => sourceItem(s.path, s.name, s.child_count ?? 0)),
+		...(rootFiles ?? []).filter(isFileSelectable).map(buildFileItem)
+	];
+	$: if (selection) selection.setAvailable(orderedItems);
+	onDestroy(() => selection?.setAvailable([]));
 
 	const onRootFileClick = (file: any, e: MouseEvent) => {
+		if (selection && selection.consumeDidDrag()) return;
 		if (selection && isFileSelectable(file) && (e.metaKey || e.ctrlKey || e.shiftKey)) {
 			e.preventDefault();
-			selection.select(buildFileItem(file), rootFileOrdered, e);
+			selection.select(buildFileItem(file), orderedItems, e);
 			return;
 		}
 		if (selection && isFileSelectable(file) && $selectionModeStore) {
-			selection.select(buildFileItem(file), rootFileOrdered, e);
+			selection.select(buildFileItem(file), orderedItems, e);
 			return;
 		}
 		onClick(file);
+	};
+	const onRootFilePointerDown = (file: any) => {
+		if (selection && isFileSelectable(file)) selection.pointerDown(buildFileItem(file), orderedItems);
+	};
+	const onRootFilePointerEnter = (file: any) => {
+		if (selection && isFileSelectable(file)) selection.pointerEnter(buildFileItem(file));
 	};
 
 	const PAGE_LIMIT = 100;
@@ -224,6 +240,7 @@
 				{onClick}
 				{onRemoveSource}
 				{selection}
+				{orderedItems}
 			/>
 		{/each}
 
@@ -232,15 +249,21 @@
 			{@const fb = fileBadge(file.status)}
 			{@const rfKey = `file:${file?.id}`}
 			{@const rfSel = (selection && isFileSelectable(file) && $selectedStore?.has(rfKey)) ?? false}
+			<!-- svelte-ignore a11y_no_static_element_interactions -->
 			<div
-				class="group flex cursor-pointer w-full px-1.5 py-0.5 bg-transparent dark:hover:bg-gray-850/50 hover:bg-white rounded-xl transition {rfSel
+				class="group flex cursor-pointer w-full px-1.5 py-0.5 bg-transparent dark:hover:bg-gray-850/50 hover:bg-white rounded-xl transition {selection
+					? 'select-none'
+					: ''} {rfSel
 					? 'bg-blue-50 dark:bg-blue-900/20'
 					: selectedFileId
 						? ''
 						: 'hover:bg-gray-100 dark:hover:bg-gray-850'}"
+				on:pointerdown={() => onRootFilePointerDown(file)}
+				on:pointerenter={() => onRootFilePointerEnter(file)}
 			>
-				{#if selection && isFileSelectable(file)}
+				{#if selection}
 					<SelectCheckbox
+						selectable={isFileSelectable(file)}
 						selected={rfSel}
 						visible={!!$selectionModeStore}
 						onToggle={() => selection.toggle(buildFileItem(file))}

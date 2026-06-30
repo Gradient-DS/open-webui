@@ -68,8 +68,8 @@
 	import SourceGroupedFiles from './KnowledgeBase/SourceGroupedFiles.svelte';
 	import LazyKnowledgeTree from './KnowledgeBase/LazyKnowledgeTree.svelte';
 	import LazyKnowledgeSearch from './KnowledgeBase/LazyKnowledgeSearch.svelte';
-	import KbBulkActionBar from './KnowledgeBase/KbBulkActionBar.svelte';
-	import { createKbSelection, fileItem } from './KnowledgeBase/selection';
+	import KbSelectionHeader from './KnowledgeBase/KbSelectionHeader.svelte';
+	import { createKbSelection } from './KnowledgeBase/selection';
 	import SyncProgress from './KnowledgeBase/SyncProgress.svelte';
 	import AddFilesPlaceholder from '$lib/components/AddFilesPlaceholder.svelte';
 	import { buildSyncToast } from './utils/syncToast';
@@ -294,8 +294,21 @@
 
 	// Multiselect (bulk delete) model — shared across all three list views.
 	const selection = createKbSelection();
-	const { count: bulkCount, breakdown: bulkBreakdown } = selection;
+	const {
+		count: bulkCount,
+		breakdown: bulkBreakdown,
+		allSelected: bulkAllSelected,
+		indeterminate: bulkIndeterminate
+	} = selection;
 	let showBulkRemoveConfirm = false;
+
+	// Clear the selection when the search query changes — the filtered / lazy-search
+	// view has no checkboxes, so a lingering selection would strand there.
+	let lastSelQuery = '';
+	$: if (query !== lastSelQuery) {
+		lastSelQuery = query;
+		selection.clear();
+	}
 
 	const reset = () => {
 		currentPage = 1;
@@ -1911,6 +1924,7 @@
 			selection.clear();
 		}
 	}}
+	on:pointerup={() => selection.endDrag()}
 />
 
 <FilesOverlay show={dragged} />
@@ -1942,10 +1956,10 @@
 	bind:show={showBulkRemoveConfirm}
 	title={$bulkBreakdown.sources > 0
 		? $i18n.t('Delete {{fileCount}} file(s) and {{sourceCount}} source(s)?', {
-				fileCount: $bulkBreakdown.files,
+				fileCount: $bulkBreakdown.totalFiles,
 				sourceCount: $bulkBreakdown.sources
 			})
-		: $i18n.t('Delete {{count}} files?', { count: $bulkBreakdown.files })}
+		: $i18n.t('Delete {{count}} files?', { count: $bulkBreakdown.totalFiles })}
 	message={$bulkBreakdown.sources > 0
 		? $i18n.t('Removing a source stops its sync and deletes all of its files.')
 		: $i18n.t('This will remove the selected files from this knowledge base.')}
@@ -2387,20 +2401,15 @@
 					<div class="flex-1 flex">
 						<div class=" flex flex-col w-full space-x-2 rounded-lg h-full">
 							<div class="w-full h-full flex flex-col min-h-0">
-								{#if $bulkCount > 0}
-									<div class="px-1 pb-1.5">
-										<KbBulkActionBar
+								{#if knowledge?.write_access && !(lazyTreeActive && query) && (lazyTreeActive || (fileItems && fileItems.length > 0))}
+									<div class="px-1 pb-1.5 shrink-0">
+										<KbSelectionHeader
 											count={$bulkCount}
+											allSelected={$bulkAllSelected}
+											indeterminate={$bulkIndeterminate}
+											onToggleSelectAll={() => selection.toggleSelectAll()}
 											onDelete={() => (showBulkRemoveConfirm = true)}
 											onClear={() => selection.clear()}
-											onSelectAll={!activeProvider && fileItems
-												? () =>
-														selection.selectAll(
-															(fileItems ?? [])
-																.filter((f) => f?.id && f?.status !== 'uploading')
-																.map((f) => fileItem(f.id, f?.name ?? f?.meta?.name ?? ''))
-														)
-												: null}
 										/>
 									</div>
 								{/if}

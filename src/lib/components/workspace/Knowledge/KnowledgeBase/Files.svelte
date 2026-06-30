@@ -6,7 +6,7 @@
 	dayjs.extend(duration);
 	dayjs.extend(relativeTime);
 
-	import { getContext } from 'svelte';
+	import { getContext, onDestroy } from 'svelte';
 	const i18n = getContext('i18n');
 
 	import { capitalizeFirstLetter, formatFileSize } from '$lib/utils';
@@ -39,18 +39,30 @@
 		fileItem(file.id, file?.name ?? file?.meta?.name ?? '');
 
 	$: orderedItems = (files ?? []).filter(isSelectable).map(buildItem);
+	// Register this view's selectable rows so the header's select-all works.
+	$: if (selection) selection.setAvailable(orderedItems);
+	onDestroy(() => selection?.setAvailable([]));
 
 	const onRowClick = (file: any, e: MouseEvent) => {
+		if (selection && selection.consumeDidDrag()) return; // a drag just ended on this row
 		if (selection && isSelectable(file) && (e.metaKey || e.ctrlKey || e.shiftKey)) {
 			e.preventDefault();
 			selection.select(buildItem(file), orderedItems, e);
 			return;
 		}
+		// In selection mode (anything selected), a plain click toggles the row.
 		if (selection && isSelectable(file) && selectionModeStore && $selectionModeStore) {
 			selection.select(buildItem(file), orderedItems, e);
 			return;
 		}
 		onClick(file?.id ?? file?.tempId);
+	};
+
+	const onRowPointerDown = (file: any) => {
+		if (selection && isSelectable(file)) selection.pointerDown(buildItem(file), orderedItems);
+	};
+	const onRowPointerEnter = (file: any) => {
+		if (selection && isSelectable(file)) selection.pointerEnter(buildItem(file));
 	};
 </script>
 
@@ -64,15 +76,21 @@
 		{@const file = item}
 		{@const selKey = `file:${file?.id}`}
 		{@const isSel = (selection && isSelectable(file) && $selectedStore?.has(selKey)) ?? false}
+		<!-- svelte-ignore a11y_no_static_element_interactions -->
 		<div
-			class=" group flex cursor-pointer w-full px-1.5 py-0.5 bg-transparent dark:hover:bg-gray-850/50 hover:bg-white rounded-xl transition {isSel
+			class=" group flex cursor-pointer w-full px-1.5 py-0.5 bg-transparent dark:hover:bg-gray-850/50 hover:bg-white rounded-xl transition {selection
+				? 'select-none'
+				: ''} {isSel
 				? 'bg-blue-50 dark:bg-blue-900/20'
 				: selectedFileId
 					? ''
 					: 'hover:bg-gray-100 dark:hover:bg-gray-850'}"
+			on:pointerdown={() => onRowPointerDown(file)}
+			on:pointerenter={() => onRowPointerEnter(file)}
 		>
-			{#if selection && isSelectable(file)}
+			{#if selection}
 				<SelectCheckbox
+					selectable={isSelectable(file)}
 					selected={isSel}
 					visible={!!$selectionModeStore}
 					onToggle={() => selection.toggle(buildItem(file))}
