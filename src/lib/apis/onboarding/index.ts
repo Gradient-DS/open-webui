@@ -61,11 +61,14 @@ export async function* streamOnboarding(
 	messages: OnboardingMessage[],
 	files: Array<Record<string, unknown>> = []
 ): AsyncGenerator<OnboardingEvent> {
-	// Strip placeholders for files still uploading — the server's
-	// _build_attached_sources expects resolved id/type entries. Keep
-	// every shape the OpenWebUI request body uses ('file', 'collection',
-	// 'doc', 'note', …); the route filters to file/collection itself.
-	const payloadFiles = files.filter((f) => f && f['status'] !== 'uploading' && f['id']);
+	// Keep every resolved file (has an id). The onboarding agent reads full
+	// content via get_document_content, which is available the moment the
+	// upload assigns an id (content is extracted during upload). We do NOT
+	// gate on the 'uploading' status — that tracks background embedding only
+	// and would drop a just-attached file in the race before the file:status
+	// socket event flips it to 'uploaded'. The server's _build_attached_sources
+	// expects resolved id/type entries and filters to file/collection itself.
+	const payloadFiles = files.filter((f) => f && f['id']);
 	const res = await fetch(`${WEBUI_API_BASE_URL}/agent/chat/completions`, {
 		method: 'POST',
 		headers: {
