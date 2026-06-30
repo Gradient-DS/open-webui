@@ -98,7 +98,7 @@
 			{/if}
 			<div class="flex items-center">
 				{#if file?.status !== 'uploading'}
-					<Tooltip content={$i18n.t('Open file')}>
+					<Tooltip content={$i18n.t('Download')}>
 						<button
 							class="p-1 rounded-full hover:bg-gray-100 dark:hover:bg-gray-850 transition"
 							type="button"
