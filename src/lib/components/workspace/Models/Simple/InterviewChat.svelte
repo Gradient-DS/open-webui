@@ -283,7 +283,7 @@
 			onChange={() => {}}
 			onUpload={handleOnUpload}
 			placeholder={$i18n.t('Type your answer...')}
-			inputMenuRestrictTo={['upload_files']}
+			inputMenuRestrictTo={['upload_files', 'knowledge']}
 			on:submit={(e) => handleSubmit(e.detail)}
 		/>
 	</div>
