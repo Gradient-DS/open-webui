@@ -12,6 +12,7 @@ export type OnboardingMessage = { role: 'user' | 'assistant'; content: string };
 export type OnboardingEvent =
 	| { type: 'content'; text: string }
 	| { type: 'ui_block'; name: string; props: Record<string, unknown> }
+	| { type: 'status'; status: Record<string, unknown> }
 	| { type: 'draft'; draft: any }
 	| { type: 'done' };
 
@@ -34,6 +35,13 @@ export function interpretOnboardingEvent(parsed: {
 				return { type: 'ui_block', name: payload.name, props: payload.props };
 			}
 			return null;
+		} catch {
+			return null;
+		}
+	}
+	if (parsed.event === 'status') {
+		try {
+			return { type: 'status', status: JSON.parse(parsed.data) };
 		} catch {
 			return null;
 		}

@@ -113,7 +113,8 @@
 						model: 'Soev Assistant Builder',
 						modelName: 'Soev Assistant Builder',
 						modelIdx: 0,
-						done: false
+						done: false,
+						statusHistory: []
 					}
 				: {})
 		};
@@ -142,6 +143,12 @@
 				if (event.type === 'content') {
 					answer += event.text;
 					history.messages[assistantId].content = answer;
+					history = history;
+				} else if (event.type === 'status') {
+					// Live progress ("Searching … / Reading … / Drafting …") rendered
+					// by the shared ResponseMessage/StatusHistory on the bubble.
+					const sh = history.messages[assistantId].statusHistory ?? [];
+					history.messages[assistantId].statusHistory = [...sh, event.status];
 					history = history;
 				} else if (event.type === 'draft') {
 					// Auto-attach: carry the interview's attachments (uploaded files
