@@ -9,6 +9,7 @@
 	dayjs.extend(relativeTime);
 
 	import { onMount, getContext, onDestroy, tick } from 'svelte';
+	import { get } from 'svelte/store';
 	const i18n = getContext('i18n');
 
 	import { goto } from '$app/navigation';
@@ -67,6 +68,8 @@
 	import SourceGroupedFiles from './KnowledgeBase/SourceGroupedFiles.svelte';
 	import LazyKnowledgeTree from './KnowledgeBase/LazyKnowledgeTree.svelte';
 	import LazyKnowledgeSearch from './KnowledgeBase/LazyKnowledgeSearch.svelte';
+	import KbBulkActionBar from './KnowledgeBase/KbBulkActionBar.svelte';
+	import { createKbSelection, fileItem } from './KnowledgeBase/selection';
 	import SyncProgress from './KnowledgeBase/SyncProgress.svelte';
 	import AddFilesPlaceholder from '$lib/components/AddFilesPlaceholder.svelte';
 	import { buildSyncToast } from './utils/syncToast';
@@ -288,6 +291,11 @@
 	// Bumped on every mutation that init() handles (delete / remove-source /
 	// sync completion / content edit) so LazyKnowledgeTree re-fetches what's open.
 	let treeRefresh = 0;
+
+	// Multiselect (bulk delete) model — shared across all three list views.
+	const selection = createKbSelection();
+	const { count: bulkCount, breakdown: bulkBreakdown } = selection;
+	let showBulkRemoveConfirm = false;
 
 	const reset = () => {
 		currentPage = 1;
@@ -1588,6 +1596,44 @@
 		}
 	};
 
+	// Bulk remove: replays each selected item's own removal (file-remove or
+	// remove-source) without per-item toast/init, then refreshes once.
+	const bulkRemoveHandler = async () => {
+		const items = [...get(selection.selected).values()];
+		if (items.length === 0) return;
+
+		let ok = 0;
+		let removedSource = false;
+		for (const item of items) {
+			try {
+				if (item.kind === 'file') {
+					await removeFileFromKnowledgeById(localStorage.token, id, item.fileId);
+					ok++;
+				} else if (activeProvider) {
+					await activeProvider.api.removeSource(localStorage.token, knowledge.id, item.itemId);
+					removedSource = true;
+					ok++;
+				}
+			} catch (e) {
+				console.error('Bulk remove failed for', item.key, e);
+			}
+		}
+
+		toast[ok > 0 ? 'success' : 'error'](
+			$i18n.t('Removed {{ok}} of {{total}} items', { ok, total: items.length })
+		);
+
+		selection.clear();
+
+		if (removedSource) {
+			const res = await getKnowledgeById(localStorage.token, id);
+			if (res) {
+				knowledge = res;
+			}
+		}
+		await init();
+	};
+
 	let debounceTimeout = null;
 	let mediaQuery;
 	let dragged = false;
@@ -1859,6 +1905,14 @@
 	};
 </script>
 
+<svelte:window
+	on:keydown={(e) => {
+		if (e.key === 'Escape' && $bulkCount > 0) {
+			selection.clear();
+		}
+	}}
+/>
+
 <FilesOverlay show={dragged} />
 <SyncConfirmDialog
 	bind:show={showSyncConfirmModal}
@@ -1881,6 +1935,23 @@
 		if (activeProvider) {
 			cancelCloudSyncHandler(activeProvider);
 		}
+	}}
+/>
+
+<SyncConfirmDialog
+	bind:show={showBulkRemoveConfirm}
+	title={$bulkBreakdown.sources > 0
+		? $i18n.t('Delete {{fileCount}} file(s) and {{sourceCount}} source(s)?', {
+				fileCount: $bulkBreakdown.files,
+				sourceCount: $bulkBreakdown.sources
+			})
+		: $i18n.t('Delete {{count}} files?', { count: $bulkBreakdown.files })}
+	message={$bulkBreakdown.sources > 0
+		? $i18n.t('Removing a source stops its sync and deletes all of its files.')
+		: $i18n.t('This will remove the selected files from this knowledge base.')}
+	confirmLabel={$i18n.t('Delete')}
+	on:confirm={() => {
+		bulkRemoveHandler();
 	}}
 />
 
@@ -2316,6 +2387,23 @@
 					<div class="flex-1 flex">
 						<div class=" flex flex-col w-full space-x-2 rounded-lg h-full">
 							<div class="w-full h-full flex flex-col min-h-0">
+								{#if $bulkCount > 0}
+									<div class="px-1 pb-1.5">
+										<KbBulkActionBar
+											count={$bulkCount}
+											onDelete={() => (showBulkRemoveConfirm = true)}
+											onClear={() => selection.clear()}
+											onSelectAll={!activeProvider && fileItems
+												? () =>
+														selection.selectAll(
+															(fileItems ?? [])
+																.filter((f) => f?.id && f?.status !== 'uploading')
+																.map((f) => fileItem(f.id, f?.name ?? f?.meta?.name ?? ''))
+														)
+												: null}
+										/>
+									</div>
+								{/if}
 								{#if lazyTreeActive && !query}
 									<div class=" flex overflow-y-auto h-full w-full scrollbar-hidden text-xs">
 										<LazyKnowledgeTree
@@ -2344,6 +2432,7 @@
 												selectedFile = null;
 												deleteFileHandler(fileId);
 											}}
+											{selection}
 										/>
 									</div>
 								{:else if lazyTreeActive && query}
@@ -2394,6 +2483,7 @@
 													selectedFile = null;
 													deleteFileHandler(fileId);
 												}}
+												{selection}
 											/>
 										{:else}
 											<Files
@@ -2418,6 +2508,7 @@
 
 													deleteFileHandler(fileId);
 												}}
+												{selection}
 											/>
 										{/if}
 									</div>
