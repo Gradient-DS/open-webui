@@ -4,7 +4,7 @@ researcher: Claude Opus 4.7 (with @lexlubbers)
 git_commit: 077331e5d5d8eb4fe186feba4c8bfe7e880a0569
 branch: feat/octobox-agent
 repository: Gradient-DS/open-webui
-topic: "Fork divergence from upstream Open WebUI — strategy, scoping, and high-value upstream changes (incl. async DB)"
+topic: 'Fork divergence from upstream Open WebUI — strategy, scoping, and high-value upstream changes (incl. async DB)'
 tags: [research, upstream-merge, fork-strategy, async-db, divergence, merge-policy]
 status: complete
 last_updated: 2026-05-04
@@ -20,7 +20,7 @@ last_updated_by: Claude Opus 4.7
 1. **Web research:** What proven strategies exist for managing a fork that has heavily diverged from upstream?
 2. **Measurement:** How far have we actually diverged from `open-webui/open-webui:main`?
 3. **Distribution:** What modules should we keep merging vs freeze, while still tracking the upstream version number?
-4. **Follow-up:** What are the *big upstream changes* that might be worth taking despite conflicts? Specifically, the **sync→async DB migration** — what would that bring us?
+4. **Follow-up:** What are the _big upstream changes_ that might be worth taking despite conflicts? Specifically, the **sync→async DB migration** — what would that bring us?
 
 ---
 
@@ -42,52 +42,52 @@ last_updated_by: Claude Opus 4.7
 
 ## 1. Divergence by the numbers
 
-| Metric | Value |
-|---|---|
-| Last upstream merge | `9bd84258` (2026-03-27, at v0.8.12) |
-| Upstream now | `8dae237a` (2026-04-24, v0.9.2) |
-| Time elapsed | ~5 weeks |
-| Our commits ahead | 339 |
-| Upstream commits behind | 410 |
-| Our files changed | 546 (+102,236 / −6,005) |
-| Upstream files changed | 319 (+35,546 / −11,936) |
-| Both-touched files | 150 (60 are i18n) |
+| Metric                  | Value                               |
+| ----------------------- | ----------------------------------- |
+| Last upstream merge     | `9bd84258` (2026-03-27, at v0.8.12) |
+| Upstream now            | `8dae237a` (2026-04-24, v0.9.2)     |
+| Time elapsed            | ~5 weeks                            |
+| Our commits ahead       | 339                                 |
+| Upstream commits behind | 410                                 |
+| Our files changed       | 546 (+102,236 / −6,005)             |
+| Upstream files changed  | 319 (+35,546 / −11,936)             |
+| Both-touched files      | 150 (60 are i18n)                   |
 
 ### Per-directory heat map (top 2nd-level dirs by combined volume)
 
-| Directory | Our F | Our +/− | Up F | Up +/− | Overlap | Heat |
-|---|---:|---:|---:|---:|---:|---|
-| `src/lib/i18n/` | 60 | 19,967 / 2,635 | 62 | 11,568 / 2,767 | 60 | **HOT** (mechanical) |
-| `thoughts/shared/` | 90 | 35,849 / 0 | 0 | 0 / 0 | 0 | CUSTOM |
-| `src/lib/components/` | 96 | 11,958 / 2,224 | 94 | 6,372 / 2,186 | 31 | **HOT** |
-| `backend/open_webui/services/` | 43 | 7,103 / 0 | 0 | 0 / 0 | 0 | CUSTOM |
-| `backend/open_webui/routers/` | 21 | 4,261 / 119 | 30 | 3,722 / 2,344 | 11 | **HOT** |
-| `backend/open_webui/models/` | 15 | 1,097 / 38 | 25 | 4,654 / 2,696 | 11 | **HOT** (upstream-dominated) |
-| `backend/open_webui/utils/` | 14 | 1,433 / 57 | 34 | 3,056 / 676 | 9 | **HOT** (upstream-dominated) |
-| `helm/open-webui-tenant/` | 22 | 2,283 / 0 | 0 | 0 / 0 | 0 | CUSTOM |
-| `backend/open_webui/retrieval/` | 17 | 125 / 64 | 10 | 752 / 147 | 3 | UPSTREAM |
-| `backend/open_webui/tools/` | 1 | 39 / 0 | 1 | 1,106 / 125 | 1 | **UPSTREAM** (take wholesale + reapply 39 lines) |
+| Directory                       | Our F |        Our +/− | Up F |         Up +/− | Overlap | Heat                                             |
+| ------------------------------- | ----: | -------------: | ---: | -------------: | ------: | ------------------------------------------------ |
+| `src/lib/i18n/`                 |    60 | 19,967 / 2,635 |   62 | 11,568 / 2,767 |      60 | **HOT** (mechanical)                             |
+| `thoughts/shared/`              |    90 |     35,849 / 0 |    0 |          0 / 0 |       0 | CUSTOM                                           |
+| `src/lib/components/`           |    96 | 11,958 / 2,224 |   94 |  6,372 / 2,186 |      31 | **HOT**                                          |
+| `backend/open_webui/services/`  |    43 |      7,103 / 0 |    0 |          0 / 0 |       0 | CUSTOM                                           |
+| `backend/open_webui/routers/`   |    21 |    4,261 / 119 |   30 |  3,722 / 2,344 |      11 | **HOT**                                          |
+| `backend/open_webui/models/`    |    15 |     1,097 / 38 |   25 |  4,654 / 2,696 |      11 | **HOT** (upstream-dominated)                     |
+| `backend/open_webui/utils/`     |    14 |     1,433 / 57 |   34 |    3,056 / 676 |       9 | **HOT** (upstream-dominated)                     |
+| `helm/open-webui-tenant/`       |    22 |      2,283 / 0 |    0 |          0 / 0 |       0 | CUSTOM                                           |
+| `backend/open_webui/retrieval/` |    17 |       125 / 64 |   10 |      752 / 147 |       3 | UPSTREAM                                         |
+| `backend/open_webui/tools/`     |     1 |         39 / 0 |    1 |    1,106 / 125 |       1 | **UPSTREAM** (take wholesale + reapply 39 lines) |
 
 ### Top non-i18n conflict-zone files (combined edit volume)
 
-| File | Ours +/− | Upstream +/− | Total |
-|---|---:|---:|---:|
-| `backend/open_webui/main.py` | 601/81 | 474/265 | 1,421 |
-| `backend/open_webui/models/chats.py` | 126/15 | 556/487 | 1,184 |
-| `src/lib/components/chat/MessageInput/InputMenu.svelte` | 819/268 | 58/0 | 1,145 |
-| `src/lib/components/admin/Evaluations/Feedbacks.svelte` | 320/63 | 377/225 | 985 |
-| `src/lib/components/chat/Chat.svelte` | 318/4 | 354/258 | 934 |
-| `backend/open_webui/utils/middleware.py` | 103/9 | 522/140 | 774 |
-| `src/lib/components/chat/MessageInput.svelte` | 505/147 | 78/6 | 736 |
-| `src/lib/components/layout/Sidebar.svelte` | 178/39 | 309/115 | 641 |
-| `backend/open_webui/models/knowledge.py` | 246/20 | 189/168 | 623 |
-| `backend/open_webui/config.py` | 454/4 | 156/9 | 623 |
-| `backend/open_webui/utils/oauth.py` | 8/10 | 402/119 | 539 |
-| `backend/open_webui/routers/chats.py` | 10/4 | 340/177 | 531 |
-| `backend/open_webui/routers/knowledge.py` | 218/54 | 114/116 | 502 |
-| `backend/open_webui/routers/retrieval.py` | 244/27 | 126/102 | 499 |
+| File                                                    | Ours +/− | Upstream +/− | Total |
+| ------------------------------------------------------- | -------: | -----------: | ----: |
+| `backend/open_webui/main.py`                            |   601/81 |      474/265 | 1,421 |
+| `backend/open_webui/models/chats.py`                    |   126/15 |      556/487 | 1,184 |
+| `src/lib/components/chat/MessageInput/InputMenu.svelte` |  819/268 |         58/0 | 1,145 |
+| `src/lib/components/admin/Evaluations/Feedbacks.svelte` |   320/63 |      377/225 |   985 |
+| `src/lib/components/chat/Chat.svelte`                   |    318/4 |      354/258 |   934 |
+| `backend/open_webui/utils/middleware.py`                |    103/9 |      522/140 |   774 |
+| `src/lib/components/chat/MessageInput.svelte`           |  505/147 |         78/6 |   736 |
+| `src/lib/components/layout/Sidebar.svelte`              |   178/39 |      309/115 |   641 |
+| `backend/open_webui/models/knowledge.py`                |   246/20 |      189/168 |   623 |
+| `backend/open_webui/config.py`                          |    454/4 |        156/9 |   623 |
+| `backend/open_webui/utils/oauth.py`                     |     8/10 |      402/119 |   539 |
+| `backend/open_webui/routers/chats.py`                   |     10/4 |      340/177 |   531 |
+| `backend/open_webui/routers/knowledge.py`               |   218/54 |      114/116 |   502 |
+| `backend/open_webui/routers/retrieval.py`               |   244/27 |      126/102 |   499 |
 
-**Key observation:** several of these are *not* truly bilateral. `MessageInput.svelte` and `MessageInput/InputMenu.svelte` are effectively ours — upstream barely touched them. Conversely, `oauth.py` and `routers/chats.py` are upstream-dominated — easy "take upstream, lose nothing." The middle tier (`main.py`, `models/chats.py`, `models/knowledge.py`, `utils/middleware.py`) is where 80% of merge time is spent.
+**Key observation:** several of these are _not_ truly bilateral. `MessageInput.svelte` and `MessageInput/InputMenu.svelte` are effectively ours — upstream barely touched them. Conversely, `oauth.py` and `routers/chats.py` are upstream-dominated — easy "take upstream, lose nothing." The middle tier (`main.py`, `models/chats.py`, `models/knowledge.py`, `utils/middleware.py`) is where 80% of merge time is spent.
 
 ---
 
@@ -95,16 +95,16 @@ last_updated_by: Claude Opus 4.7
 
 Eight named patterns exist for forks like ours. The full table:
 
-| Strategy | Fit for us | Notes |
-|---|---|---|
-| **Vendor branch / subtree merge** | Poor | Customizations are scattered, not relocatable to a subdirectory. |
-| **Patch queue (Quilt, StGit, TopGit, Git Patch Stack)** | Poor | Requires re-flattening 339 commits to atomic patches first. Heavy tooling. |
-| **Plugin/extension architecture (GitLab CE/EE pattern)** | **Best long-term** | We already partially do this (services/, custom routers, helm/). 73% of our diff already lives outside upstream files. |
-| **Shim/dual-stack (Meta WebRTC pattern)** | Overkill | Solves "escape from a fork" by running both versions side-by-side. Massive engineering cost. |
-| **Cherry-pick whitelist** | Tactical | Good for security patches and isolated fixes; bad for keeping up with feature releases. |
-| **Path-scoped merges (the "frozen modules" pattern)** | **Best transitional** | Exactly what @lexlubbers proposed. Native Git doesn't have it, but `git merge --no-commit` + `git checkout HEAD -- <frozen paths>` approximates it. |
-| **Vendoring upstream as a dependency** | Doesn't fit | Open WebUI doesn't ship as a library. |
-| **Hard fork** | Not yet | Reserve for "upstream's roadmap diverges from ours" scenario, not "merges are tedious." |
+| Strategy                                                 | Fit for us            | Notes                                                                                                                                               |
+| -------------------------------------------------------- | --------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Vendor branch / subtree merge**                        | Poor                  | Customizations are scattered, not relocatable to a subdirectory.                                                                                    |
+| **Patch queue (Quilt, StGit, TopGit, Git Patch Stack)**  | Poor                  | Requires re-flattening 339 commits to atomic patches first. Heavy tooling.                                                                          |
+| **Plugin/extension architecture (GitLab CE/EE pattern)** | **Best long-term**    | We already partially do this (services/, custom routers, helm/). 73% of our diff already lives outside upstream files.                              |
+| **Shim/dual-stack (Meta WebRTC pattern)**                | Overkill              | Solves "escape from a fork" by running both versions side-by-side. Massive engineering cost.                                                        |
+| **Cherry-pick whitelist**                                | Tactical              | Good for security patches and isolated fixes; bad for keeping up with feature releases.                                                             |
+| **Path-scoped merges (the "frozen modules" pattern)**    | **Best transitional** | Exactly what @lexlubbers proposed. Native Git doesn't have it, but `git merge --no-commit` + `git checkout HEAD -- <frozen paths>` approximates it. |
+| **Vendoring upstream as a dependency**                   | Doesn't fit           | Open WebUI doesn't ship as a library.                                                                                                               |
+| **Hard fork**                                            | Not yet               | Reserve for "upstream's roadmap diverges from ours" scenario, not "merges are tedious."                                                             |
 
 ### Real-world case studies
 
@@ -112,19 +112,19 @@ Eight named patterns exist for forks like ours. The full table:
 - **AOSP Common Kernel.** Tagged commit prefixes (`UPSTREAM:`, `BACKPORT:`, `FROMGIT:`, `ANDROID:`) make every patch's relationship to upstream explicit. Multi-level fork hierarchy works because metadata is rigorous.
 - **Shopify's LibreChat fork** (Tobi Lütke on X): "we merge most everything back" — feasible only because they enforced merge-back discipline early.
 - **MariaDB ↔ MySQL.** Started as drop-in replacement, deliberately diverged from version 10 (2014); now effectively independent. Took years and dedicated headcount.
-- **io.js → Node.js.** Reunified after 9 months because divergence was bounded *and* both sides wanted reunification.
+- **io.js → Node.js.** Reunified after 9 months because divergence was bounded _and_ both sides wanted reunification.
 - **LibreOffice ↔ OpenOffice.** A fork can become the de-facto upstream, but both sides need community vitality.
 - **Meta WebRTC (Apr 2026).** Renamespaced symbols (`webrtc::` → `webrtc_legacy::` and `webrtc_latest::`) to migrate off a 5-year-old fork. Demonstrates that "escape from a fork trap" is technically possible but expensive.
 
 ### Key tooling
 
-| Tool | Role |
-|---|---|
-| **`git rerere`** | Records and replays conflict resolutions. **Enable this immediately** — `git config rerere.enabled true; git config rerere.autoupdate true`. Costs nothing, every conflict resolved is reusable. |
-| **`git-imerge`** | Pairwise incremental merge. For 410 × 339 commits, this surfaces ~1 conflict per commit-pair instead of one giant ball. |
-| **Mergiraf** | Tree-sitter-based syntax-aware merge driver (Python, TS, Svelte, JSON, TOML). Eliminates noise conflicts caused by reordering/moves. Worth registering for the next merge. |
-| **`git range-diff`** | Find commits that have already been upstreamed independently. |
-| **`git checkout <ref> -- <paths>`** | The path-scoped merge primitive — take a specific path from one side mid-merge. |
+| Tool                                | Role                                                                                                                                                                                             |
+| ----------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **`git rerere`**                    | Records and replays conflict resolutions. **Enable this immediately** — `git config rerere.enabled true; git config rerere.autoupdate true`. Costs nothing, every conflict resolved is reusable. |
+| **`git-imerge`**                    | Pairwise incremental merge. For 410 × 339 commits, this surfaces ~1 conflict per commit-pair instead of one giant ball.                                                                          |
+| **Mergiraf**                        | Tree-sitter-based syntax-aware merge driver (Python, TS, Svelte, JSON, TOML). Eliminates noise conflicts caused by reordering/moves. Worth registering for the next merge.                       |
+| **`git range-diff`**                | Find commits that have already been upstreamed independently.                                                                                                                                    |
+| **`git checkout <ref> -- <paths>`** | The path-scoped merge primitive — take a specific path from one side mid-merge.                                                                                                                  |
 
 ---
 
@@ -149,21 +149,21 @@ These modules are upstream-dominated, low-volume on our side, or contain core sh
 
 #### B. FREEZE (stop merging — these are effectively forked subsystems)
 
-| Path | Why |
-|---|---|
-| `backend/open_webui/services/` | 43 files, +7,103 lines, **zero overlap with upstream**. Pure CUSTOM. |
-| `backend/open_webui/routers/{agent_proxy,archives,data_warnings,export,external_retrieval,google_drive_sync,integrations,invites,onedrive_sync,totp}.py` | 10 routers that don't exist upstream. |
-| `src/lib/components/admin/Settings/` | Most files are pure-custom (Acceptance, Database, Email, IntegrationProviders, Integrations, Interface, ManageModelsModal, ModelSettingsModal, Security). Only `Evaluations/Feedbacks.svelte` is contested — handle that one surgically. |
-| `src/lib/components/workspace/` | 16 files we own (+2,487 / −377) vs upstream's 99/37. Effectively CUSTOM. |
-| `src/lib/components/chat/MessageInput.svelte` | 505/147 ours vs 78/6 upstream. Effectively ours. |
-| `src/lib/components/chat/MessageInput/InputMenu.svelte` | 819/268 ours vs 58/0 upstream. Effectively ours. |
-| `src/lib/components/chat/Messages/Citations/CitationModal.svelte` | 188/107 ours vs 3/1 upstream. |
-| `src/lib/components/notes/NoteEditor.svelte` | 172/154 ours vs 13/3 upstream. |
-| `src/lib/utils/onedrive-file-picker.ts` | Effectively ours. |
-| `src/lib/apis/{agent_proxy,archives,data_warnings,evaluations,export,feedbacks,googleDrive,integrations,invites,onedrive,totp}.ts` | Custom API clients. |
-| `backend/open_webui/routers/configs.py` | 360/5 ours vs 17/10 upstream. |
-| `helm/`, `.github/workflows/`, `.claude/`, `collab/`, `thoughts/`, `scripts/`, `backend/open_webui/test/`, `backend/open_webui/templates/` | Pure-ours infrastructure. |
-| `src/lib/i18n/locales/nl-NL/translation.json` | We own this locale's content. Upstream additions should be unioned in, but never overwritten. (See union-merge driver suggestion below.) |
+| Path                                                                                                                                                     | Why                                                                                                                                                                                                                                      |
+| -------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `backend/open_webui/services/`                                                                                                                           | 43 files, +7,103 lines, **zero overlap with upstream**. Pure CUSTOM.                                                                                                                                                                     |
+| `backend/open_webui/routers/{agent_proxy,archives,data_warnings,export,external_retrieval,google_drive_sync,integrations,invites,onedrive_sync,totp}.py` | 10 routers that don't exist upstream.                                                                                                                                                                                                    |
+| `src/lib/components/admin/Settings/`                                                                                                                     | Most files are pure-custom (Acceptance, Database, Email, IntegrationProviders, Integrations, Interface, ManageModelsModal, ModelSettingsModal, Security). Only `Evaluations/Feedbacks.svelte` is contested — handle that one surgically. |
+| `src/lib/components/workspace/`                                                                                                                          | 16 files we own (+2,487 / −377) vs upstream's 99/37. Effectively CUSTOM.                                                                                                                                                                 |
+| `src/lib/components/chat/MessageInput.svelte`                                                                                                            | 505/147 ours vs 78/6 upstream. Effectively ours.                                                                                                                                                                                         |
+| `src/lib/components/chat/MessageInput/InputMenu.svelte`                                                                                                  | 819/268 ours vs 58/0 upstream. Effectively ours.                                                                                                                                                                                         |
+| `src/lib/components/chat/Messages/Citations/CitationModal.svelte`                                                                                        | 188/107 ours vs 3/1 upstream.                                                                                                                                                                                                            |
+| `src/lib/components/notes/NoteEditor.svelte`                                                                                                             | 172/154 ours vs 13/3 upstream.                                                                                                                                                                                                           |
+| `src/lib/utils/onedrive-file-picker.ts`                                                                                                                  | Effectively ours.                                                                                                                                                                                                                        |
+| `src/lib/apis/{agent_proxy,archives,data_warnings,evaluations,export,feedbacks,googleDrive,integrations,invites,onedrive,totp}.ts`                       | Custom API clients.                                                                                                                                                                                                                      |
+| `backend/open_webui/routers/configs.py`                                                                                                                  | 360/5 ours vs 17/10 upstream.                                                                                                                                                                                                            |
+| `helm/`, `.github/workflows/`, `.claude/`, `collab/`, `thoughts/`, `scripts/`, `backend/open_webui/test/`, `backend/open_webui/templates/`               | Pure-ours infrastructure.                                                                                                                                                                                                                |
+| `src/lib/i18n/locales/nl-NL/translation.json`                                                                                                            | We own this locale's content. Upstream additions should be unioned in, but never overwritten. (See union-merge driver suggestion below.)                                                                                                 |
 
 #### C. EASY WINS (take wholesale on next merge)
 
@@ -183,12 +183,12 @@ Once you adopt path-scoped merges, your version label needs two parts:
 
 ```yaml
 # UPSTREAM_VERSION.md
-last_full_merge: v0.9.2          # version we tracked for B (frozen) paths is older
-frozen_paths_baseline: v0.8.12   # last version where frozen paths were rebased
-last_security_sync: 2026-04-19   # date of last security-only cherry-pick across all paths
+last_full_merge: v0.9.2 # version we tracked for B (frozen) paths is older
+frozen_paths_baseline: v0.8.12 # last version where frozen paths were rebased
+last_security_sync: 2026-04-19 # date of last security-only cherry-pick across all paths
 ```
 
-This is the AOSP/RHEL pattern: be explicit that "we are at upstream v0.9.2 *for the parts we merge* and at v0.8.12 *for the parts we've frozen*." Do not pretend a single version label covers the whole repo once you start freezing modules.
+This is the AOSP/RHEL pattern: be explicit that "we are at upstream v0.9.2 _for the parts we merge_ and at v0.8.12 _for the parts we've frozen_." Do not pretend a single version label covers the whole repo once you start freezing modules.
 
 ### A `MERGE_POLICY.md` proposal
 
@@ -232,7 +232,7 @@ Note: the i18n merge driver is non-trivial — JSON files don't union-merge clea
 Single commit `27169124f` (Timothy Jaeryang Baek, 2026-04-12, "refac: async db"):
 
 - **74 files changed, +4829 / −4477 lines.**
-- Adds an `AsyncSession` engine + sessionmaker in `backend/open_webui/internal/db.py` (sync engine kept *only* for startup config, Alembic, healthcheck).
+- Adds an `AsyncSession` engine + sessionmaker in `backend/open_webui/internal/db.py` (sync engine kept _only_ for startup config, Alembic, healthcheck).
 - Rewrites every model class (~25 files) and every standard router (~25 files) from `def`/`Session` to `async def`/`AsyncSession`.
 - The pattern is mechanical: `db.commit()` → `await db.commit()`, `db.query(X).filter(...)` → `await db.execute(select(X).filter(...))`, `with get_db_context(db)` → `async with get_async_db_context(db)`.
 
@@ -262,11 +262,11 @@ async def get_session_user_chat_list(..., db: AsyncSession = Depends(get_async_s
 
 **Performance: not as much as it sounds, but real where it matters.**
 
-- The "FastAPI is async, so async DB is faster" claim is *only* true under specific conditions: high concurrency, remote DB with non-trivial RTT, full-async stack, no lazy-load patterns. Per-query, async ORM is consistently *slower* than sync (greenlet overhead, result pre-buffering).
+- The "FastAPI is async, so async DB is faster" claim is _only_ true under specific conditions: high concurrency, remote DB with non-trivial RTT, full-async stack, no lazy-load patterns. Per-query, async ORM is consistently _slower_ than sync (greenlet overhead, result pre-buffering).
 - Shippo's [production case study](https://goshippo.com/blog/why-is-my-fastapi-throughput-so-low) is instructive — they got 195 RPS by going **sync**, beating their async-with-blocking-calls hybrid by 4.6×.
 - Mike Bayer (SQLAlchemy author): "For stereotypical database logic, there are no advantages to using async versus a traditional threaded approach, and you can likely expect a small to moderate decrease in performance."
 - **For Open WebUI's workload — LLM streaming, vector DB, Graph API roundtrips, file uploads — the database is rarely the bottleneck.** Chat metadata writes happen before/after the streaming token loop, not inside it. The expensive work is `await openai_client.chat.completions.create(stream=True)`.
-- **Where async DB *does* help us specifically:**
+- **Where async DB _does_ help us specifically:**
   - `services/sync/base_worker.py` (54 sync DB calls inside an async coroutine — every Vink-scale doc load currently blocks the event loop).
   - Streaming endpoints that do touch the DB inside the stream.
   - Future fan-out workloads we don't have today.
@@ -274,7 +274,7 @@ async def get_session_user_chat_list(..., db: AsyncSession = Depends(get_async_s
 **Maintainability: this is the actual reason to do it.**
 
 - Diverging from upstream on 74 files of model/router code is permanent merge pain. Every future upstream release builds on the async base — `asyncpg`→`psycopg` swap, AsyncVectorDBClient (already in v0.9.2), automation worker async DB handling.
-- Our `services/sync/base_worker.py` already mixes `async def` (HTTP/file I/O) with sync DB calls — we've been writing patches around this exact bottleneck (chunked gather, document timeout). The upstream refactor *is* the principled fix.
+- Our `services/sync/base_worker.py` already mixes `async def` (HTTP/file I/O) with sync DB calls — we've been writing patches around this exact bottleneck (chunked gather, document timeout). The upstream refactor _is_ the principled fix.
 - The pattern is mechanical, so the migration is a grep-and-prefix exercise, not a redesign.
 
 ### What it would cost us
@@ -298,14 +298,14 @@ async def get_session_user_chat_list(..., db: AsyncSession = Depends(get_async_s
   - Other custom routers: ~9 combined
 - **Effort estimate: 5–8 dev-days for the await-ification itself**, plus the upstream merge conflict resolution (the real cost).
 
-**This is an all-or-nothing merge.** Upstream did *not* keep sync model methods alive — the moment `models/chats.py` lands, every caller must `await`. You can't merge the engine + a single router/model and leave the rest. So you either merge it cleanly all at once, or you freeze around it (and pay a permanent merge cost on every future model/router change upstream makes).
+**This is an all-or-nothing merge.** Upstream did _not_ keep sync model methods alive — the moment `models/chats.py` lands, every caller must `await`. You can't merge the engine + a single router/model and leave the rest. So you either merge it cleanly all at once, or you freeze around it (and pay a permanent merge cost on every future model/router change upstream makes).
 
 ### Pitfalls to plan for
 
 1. **Silent type drift.** Forgetting an `await` on a model call returns a coroutine where you expected a `KnowledgeModel`. Fails at attribute access, looks fine to linters. Need `RuntimeWarning: coroutine was never awaited` enabled in dev.
 2. **Connection pool sizing.** Async `gather`-chunked workers (which we already have for Vink) compete for the shared pool. Tune `DATABASE_POOL_SIZE` post-merge.
 3. **AsyncSession is not concurrent-safe.** `gather(*[Knowledges.x(db=db), Knowledges.y(db=db)])` against the same session raises `MissingGreenlet`. Audit our `db=db` parameter passing inside gathers.
-4. **Lazy loading dies.** Every `chat.messages`, `user.workspaces` access in async needs `selectinload`/`joinedload` in the query *or* the `AsyncAttrs` mixin. N+1 bugs that were silent become runtime crashes.
+4. **Lazy loading dies.** Every `chat.messages`, `user.workspaces` access in async needs `selectinload`/`joinedload` in the query _or_ the `AsyncAttrs` mixin. N+1 bugs that were silent become runtime crashes.
 5. **Sync workers staying sync.** Our `BaseSyncWorker`, retention service, archival cleanup are called from coroutines but use sync sessions today. Best path: **two engines** — async for routes, sync for workers — both pointing at the same DB. SQLAlchemy supports this cleanly. Document the pattern in `external-integration-cookbook.md`.
 6. **psycopg v3 driver flip.** Upstream flipped `asyncpg` → `psycopg` in a later commit (post-`27169124f`) to fix SSL parameter brittleness. **Don't merge `27169124f` without also pulling the psycopg fix.**
 7. **SQLCipher unsupported async.** Not a concern today — we don't ship it — but flag for any future deployment.
@@ -384,10 +384,12 @@ These are all small fixes that should be cherry-picked even if we freeze the sur
 ### Immediate (this week, before any merge attempt)
 
 1. **Enable `git rerere`** globally for the repo:
+
    ```bash
    git config rerere.enabled true
    git config rerere.autoupdate true
    ```
+
    Costs nothing, captures conflict resolutions for replay on subsequent merges.
 
 2. **Install Mergiraf as a merge driver** for `.py`, `.ts`, `.svelte`, `.json`. Many of our 90 non-i18n bilateral conflicts are syntactic noise that Mergiraf resolves automatically.
@@ -400,7 +402,7 @@ These are all small fixes that should be cherry-picked even if we freeze the sur
 
 5. **Write a small JSON union-merge driver** for `nl-NL/translation.json`. Eliminates a recurring pain point.
 
-6. **Cherry-pick the security fixes (§5)** *before* the next big merge — they apply cleanly, they're small, they shouldn't wait.
+6. **Cherry-pick the security fixes (§5)** _before_ the next big merge — they apply cleanly, they're small, they shouldn't wait.
 
 7. **Run `git range-diff main upstream/main`** to identify any of our 339 commits that have been upstreamed independently. Skip those during the merge.
 
@@ -424,6 +426,7 @@ Two viable long-term paths:
 ## Appendix A: Sources
 
 **Engineering / case studies:**
+
 - [Engineering at Meta: Escaping the Fork (WebRTC)](https://engineering.fb.com/2026/04/09/developer-tools/escaping-the-fork-how-meta-modernized-webrtc-across-50-use-cases/)
 - [GitLab: Guidelines for implementing EE features](https://docs.gitlab.com/development/ee_features/)
 - [Android Common Kernels (AOSP)](https://source.android.com/docs/core/architecture/kernel/android-common)
@@ -435,6 +438,7 @@ Two viable long-term paths:
 - [Reuse and maintenance practices among divergent forks (2021)](https://link.springer.com/article/10.1007/s10664-021-10078-2)
 
 **Git tooling:**
+
 - [Pro Git: Subtree Merging](https://yeeon.github.io/book/ch6-7.html)
 - [git-rerere documentation](https://git-scm.com/book/en/v2/Git-Tools-Rerere)
 - [git-imerge: Incremental merge for git](https://github.com/mhagger/git-imerge)
@@ -442,6 +446,7 @@ Two viable long-term paths:
 - [Stacked Git (StGit)](https://stacked-git.github.io/), [TopGit](https://github.com/mackyle/topgit), [Git Patch Stack](https://git-ps.sh/)
 
 **FastAPI / SQLAlchemy async:**
+
 - [FastAPI: Concurrency and async / await](https://fastapi.tiangolo.com/async/)
 - [SQLAlchemy 2.0 Asynchronous I/O docs](https://docs.sqlalchemy.org/en/20/orm/extensions/asyncio.html)
 - [SQLAlchemy Discussion #7898 (Should I use async?)](https://github.com/sqlalchemy/sqlalchemy/discussions/7898)
@@ -454,15 +459,15 @@ Two viable long-term paths:
 
 ## Appendix B: Key commits referenced
 
-| Commit | Date | Subject |
-|---|---|---|
-| `9bd84258` | 2026-03-27 | Merge base — last successful sync from upstream/main (v0.8.12) |
-| `27169124f` | 2026-04-12 | refac: async db (74 files, +4829/−4477) |
-| `a3ea7bf04` | 2026-04 | fix(retrieval): offload Loader.load to worker thread |
-| `804f9f315` | 2026-04 | fix(retrieval): AsyncVectorDBClient |
-| `ee28032fb` | 2026-04 | fix(middleware): pure ASGI HTTP middlewares |
-| `8dae237a` | 2026-04-24 | 0.9.2 release |
-| `077331e5` (ours) | 2026-04-19 | feat: fixed the file path in loading (current branch HEAD) |
+| Commit            | Date       | Subject                                                        |
+| ----------------- | ---------- | -------------------------------------------------------------- |
+| `9bd84258`        | 2026-03-27 | Merge base — last successful sync from upstream/main (v0.8.12) |
+| `27169124f`       | 2026-04-12 | refac: async db (74 files, +4829/−4477)                        |
+| `a3ea7bf04`       | 2026-04    | fix(retrieval): offload Loader.load to worker thread           |
+| `804f9f315`       | 2026-04    | fix(retrieval): AsyncVectorDBClient                            |
+| `ee28032fb`       | 2026-04    | fix(middleware): pure ASGI HTTP middlewares                    |
+| `8dae237a`        | 2026-04-24 | 0.9.2 release                                                  |
+| `077331e5` (ours) | 2026-04-19 | feat: fixed the file path in loading (current branch HEAD)     |
 
 ## Related
 
