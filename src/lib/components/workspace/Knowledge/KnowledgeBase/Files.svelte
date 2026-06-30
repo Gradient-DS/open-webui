@@ -18,6 +18,8 @@
 	import XMark from '$lib/components/icons/XMark.svelte';
 	import Spinner from '$lib/components/common/Spinner.svelte';
 	import VirtualList from '@sveltejs/svelte-virtual-list';
+	import SelectCheckbox from './SelectCheckbox.svelte';
+	import { fileItem, type KbSelection, type SelectableItem } from './selection';
 
 	export let knowledge = null;
 	export let selectedFileId = null;
@@ -25,6 +27,31 @@
 
 	export let onClick = (fileId) => {};
 	export let onDelete = (fileId) => {};
+
+	// Optional multiselect model injected by KnowledgeBase. Null = no selection UI.
+	export let selection: KbSelection | null = null;
+
+	$: selectedStore = selection?.selected;
+	$: selectionModeStore = selection?.selectionMode;
+
+	const isSelectable = (file: any) => !!file?.id && file?.status !== 'uploading';
+	const buildItem = (file: any): SelectableItem =>
+		fileItem(file.id, file?.name ?? file?.meta?.name ?? '');
+
+	$: orderedItems = (files ?? []).filter(isSelectable).map(buildItem);
+
+	const onRowClick = (file: any, e: MouseEvent) => {
+		if (selection && isSelectable(file) && (e.metaKey || e.ctrlKey || e.shiftKey)) {
+			e.preventDefault();
+			selection.select(buildItem(file), orderedItems, e);
+			return;
+		}
+		if (selection && isSelectable(file) && selectionModeStore && $selectionModeStore) {
+			selection.select(buildItem(file), orderedItems, e);
+			return;
+		}
+		onClick(file?.id ?? file?.tempId);
+	};
 </script>
 
 <!--
@@ -35,11 +62,22 @@
 <div class="h-full w-full">
 	<VirtualList items={files} height="100%" let:item>
 		{@const file = item}
+		{@const selKey = `file:${file?.id}`}
+		{@const isSel = (selection && isSelectable(file) && $selectedStore?.has(selKey)) ?? false}
 		<div
-			class=" flex cursor-pointer w-full px-1.5 py-0.5 bg-transparent dark:hover:bg-gray-850/50 hover:bg-white rounded-xl transition {selectedFileId
-				? ''
-				: 'hover:bg-gray-100 dark:hover:bg-gray-850'}"
+			class=" group flex cursor-pointer w-full px-1.5 py-0.5 bg-transparent dark:hover:bg-gray-850/50 hover:bg-white rounded-xl transition {isSel
+				? 'bg-blue-50 dark:bg-blue-900/20'
+				: selectedFileId
+					? ''
+					: 'hover:bg-gray-100 dark:hover:bg-gray-850'}"
 		>
+			{#if selection && isSelectable(file)}
+				<SelectCheckbox
+					selected={isSel}
+					visible={!!$selectionModeStore}
+					onToggle={() => selection.toggle(buildItem(file))}
+				/>
+			{/if}
 			<div class="flex items-center">
 				{#if file?.status !== 'uploading'}
 					<Tooltip content={$i18n.t('Open file')}>
@@ -62,10 +100,7 @@
 			<button
 				class="relative group flex items-center gap-1 rounded-xl p-2 text-left flex-1 justify-between"
 				type="button"
-				on:click={async () => {
-					console.log(file);
-					onClick(file?.id ?? file?.tempId);
-				}}
+				on:click={(e) => onRowClick(file, e)}
 			>
 				<div class="">
 					<div class="flex gap-2 items-center line-clamp-1">
