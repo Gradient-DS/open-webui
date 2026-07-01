@@ -85,6 +85,17 @@ class StorageProvider(ABC):
         raise NotImplementedError."""
         raise NotImplementedError('get_presigned_put_url is not supported by this storage provider')
 
+    def get_object_path(self, filename: str) -> str:
+        """Return the canonical stored path (as recorded in ``File.path``) for an
+        object uploaded under ``filename`` — WITHOUT uploading anything.
+
+        Single source of truth that mirrors :meth:`upload_file`'s key
+        derivation, so a caller can presign a PUT for the exact key a later
+        :meth:`upload_file` (or an out-of-band stager) would write and that
+        :meth:`get_presigned_url` reads back. Only providers with out-of-band
+        write (S3) implement this; others raise NotImplementedError."""
+        raise NotImplementedError('get_object_path is not supported by this storage provider')
+
 
 class LocalStorageProvider(StorageProvider):
     @staticmethod
@@ -131,6 +142,10 @@ class LocalStorageProvider(StorageProvider):
     @staticmethod
     def get_presigned_put_url(file_path: str, expires_in: int, content_type: str) -> str:
         raise NotImplementedError('presigned PUT requires S3 storage')
+
+    @staticmethod
+    def get_object_path(filename: str) -> str:
+        raise NotImplementedError('canonical object path requires S3 storage')
 
 
 class S3StorageProvider(StorageProvider):
@@ -195,6 +210,19 @@ class S3StorageProvider(StorageProvider):
             )
         except ClientError as e:
             raise RuntimeError(f'Error uploading file to S3: {e}')
+
+    def get_object_path(self, filename: str) -> str:
+        """Canonical ``s3://bucket/key`` path for an object stored under
+        ``filename`` — without uploading.
+
+        Derives the key with the SAME ``os.path.join(self.key_prefix,
+        filename)`` expression :meth:`upload_file` uses, so a presigned PUT
+        issued for this path lands the bytes at the exact key ``File.path``
+        records and :meth:`get_presigned_url` (via :meth:`_extract_s3_key`)
+        later reads. Keeping this next to ``upload_file`` is deliberate: the
+        two must never drift."""
+        s3_key = os.path.join(self.key_prefix, filename)
+        return f's3://{self.bucket_name}/{s3_key}'
 
     def get_file(self, file_path: str) -> str:
         """Handles downloading of the file from S3 storage."""
