@@ -561,6 +561,7 @@ openWebui:
     # keys fall back to the backend defaults shown.
     distributedDocPipelineEnabled: "false"
     distributedDocPipelineChatEnabled: "false"  # also route chat attachments (non-KB) through warren; independent of the KB flag
+    distributedDocPipelineSyncEnabled: "false"  # route cloud sync (bulk) through warren; independent of the KB/chat flags
     pipelineApiBaseUrl: ""               # e.g. http://doc-pipeline-pipeline-api.<ns>.svc.cluster.local:8080
     pipelineIngestCallbackUrl: ""        # this server's in-cluster URL warren POSTs /ingest back to
     pipelinePresignTtlSeconds: ""        # default 3600
