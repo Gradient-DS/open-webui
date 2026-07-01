@@ -109,15 +109,25 @@ def reconcile_action(
     is waited on for as long as it runs. Returns:
     - ``'fail'``  — the job reported failure (``failed``/``partial``); mark the
       file 'error' now.
+    - ``'empty'`` — the job is ``completed`` but the file is still 'processing'.
+      warren's owui-ingest worker calls /ingest (which flips the file to
+      'completed') BEFORE the job reaches 'completed', so a still-'processing'
+      file under a 'completed' job means /ingest was skipped — the document
+      parsed to zero chunks (empty / scanned / no-text, e.g. a mostly
+      merge-field DOCX template). Fail it now instead of waiting out the 6h
+      wall-clock backstop. The caller re-reads the file's status before acting,
+      so a file whose /ingest is landing concurrently is not clobbered.
     - ``'timeout'`` — the job never reached a usable terminal within the
-      generous wall-clock backstop (hung worker, or ``/ingest`` never landed);
-      mark 'error'.
-    - ``'wait'``  — still running/pending, or just completed (give ``/ingest`` a
-      moment); leave the file as-is.
+      generous wall-clock backstop (hung worker never even completed); mark
+      'error'.
+    - ``'wait'``  — still running/pending; leave the file as-is.
 
-    Failure takes precedence over timeout so the error message is accurate."""
+    Failure takes precedence, then the zero-chunk 'empty' terminal, then the
+    wall-clock timeout, so the error message is always the most accurate one."""
     if job_status in ('failed', 'partial'):
         return 'fail'
+    if job_status == 'completed':
+        return 'empty'
     if age_seconds > max_wall_clock_seconds:
         return 'timeout'
     return 'wait'

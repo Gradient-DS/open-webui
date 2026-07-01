@@ -54,11 +54,22 @@ async def reconcile_pipeline_jobs(config, *, now: int) -> int:
         if action == 'wait':
             continue
 
-        reason = (
-            'distributed doc-pipeline job reported failure'
-            if action == 'fail'
-            else f'distributed doc-pipeline job did not complete within {cap}s'
-        )
+        if action == 'empty':
+            # 'empty' == the warren job is 'completed' but this file is still
+            # 'processing' (its /ingest was skipped — zero chunks). A file can
+            # also flip to 'completed' between the processing-files query above
+            # and this per-file poll (its /ingest just landed). Re-read and skip
+            # so a fresh success is never clobbered with a false 'error'.
+            fresh = await Files.get_file_by_id(file.id)
+            if fresh and (fresh.meta or {}).get('status') == 'completed':
+                continue
+
+        if action == 'fail':
+            reason = 'distributed doc-pipeline job reported failure'
+        elif action == 'empty':
+            reason = 'document produced no searchable content (empty, scanned, or non-text file)'
+        else:
+            reason = f'distributed doc-pipeline job did not complete within {cap}s'
         await Files.set_status(file.id, 'error', error=reason)
         # Resolve the frontend's loading state: emit the honest 'failed' so the
         # spinner ends (toast + removal) instead of hanging until a page reload.
