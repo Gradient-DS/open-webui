@@ -172,25 +172,36 @@ async def test_kb_path_unchanged_regression(monkeypatch):
 # --- /ingest endpoint: target routing --------------------------------------
 
 
-@pytest.fixture
-def perfile_ingest_app():
-    """Mount the integrations router with a LoaderPrincipal (warren callback)."""
+def _loader_principal_app(provider_slug: str, monkeypatch):
+    """Mount the integrations router with a LoaderPrincipal (warren callback).
+
+    Patches emit_file_status with an AsyncMock so tests stay hermetic (never
+    touch the real Socket.IO server) and can assert the honest completion emit.
+    """
     from open_webui.utils.service_auth import LoaderPrincipal, get_integration_principal
+
+    monkeypatch.setattr(integrations_router, 'emit_file_status', AsyncMock())
 
     user = MagicMock(
         id='user-1',
         email='lex@gradient-ds.com',
         role='user',
         name='Lex',
-        info={'integration_provider': 'owui_upload'},
+        info={'integration_provider': provider_slug},
     )
-    principal = LoaderPrincipal(user=user, provider_slug='owui_upload')
+    principal = LoaderPrincipal(user=user, provider_slug=provider_slug)
 
     app = FastAPI()
     app.include_router(integrations_router.router, prefix='/api/v1/integrations')
     app.dependency_overrides[get_integration_principal] = lambda: principal
     app.state.config = MagicMock(INTEGRATION_PROVIDERS={}, BYPASS_EMBEDDING_AND_RETRIEVAL=False)
     return app
+
+
+@pytest.fixture
+def perfile_ingest_app(monkeypatch):
+    """owui_upload LoaderPrincipal — chat attachment + direct-KB warren callbacks."""
+    return _loader_principal_app('owui_upload', monkeypatch)
 
 
 def test_ingest_target_file_dispatches_perfile_and_skips_kb(perfile_ingest_app, monkeypatch):
@@ -290,3 +301,109 @@ def test_ingest_default_target_uses_kb_path(perfile_ingest_app, monkeypatch):
     assert captured['knowledge_id'] == 'kb-1'  # KB caller passes the real KB id
     assert captured.get('collection_name') is None  # and does NOT override the embed target
     assert captured.get('add', True) is True
+
+
+# --- /ingest endpoint: honest file:status completion emit ------------------
+
+
+def test_ingest_target_file_emits_completed(perfile_ingest_app, monkeypatch):
+    """Per-file (chat) dispatch emits file:status='completed' with the per-file
+    cache collection once the vectors land — the signal that ends the spinner."""
+
+    async def fake_process(**kwargs):
+        return {'source_id': kwargs['doc'].source_id, 'file_id': 'file-abc', 'status': 'created'}
+
+    monkeypatch.setattr(integrations_router, '_process_chunked_text_document', fake_process)
+    monkeypatch.setattr(integrations_router.Files, 'update_file_metadata_by_id', AsyncMock())
+
+    body = {
+        'collection': {'source_id': 'file-abc', 'name': 'report.pdf', 'target': 'file', 'data_type': 'chunked_text'},
+        'documents': [{'source_id': 'file-abc', 'filename': 'report.pdf', 'chunks': ['a', 'b']}],
+    }
+    res = TestClient(perfile_ingest_app).post('/api/v1/integrations/ingest', data={'data': json.dumps(body)})
+
+    assert res.status_code == 200, res.text
+    integrations_router.emit_file_status.assert_awaited_once()
+    assert integrations_router.emit_file_status.await_args.kwargs == {
+        'user_id': 'user-1',
+        'file_id': 'file-abc',
+        'status': 'completed',
+        'error': None,
+        'collection_name': 'file-file-abc',  # per-file cache collection
+    }
+
+
+def test_ingest_target_file_emits_failed_on_error(perfile_ingest_app, monkeypatch):
+    """A failed embed on the per-file path emits file:status='failed' so the
+    frontend resolves to error (toast + removal), not a stuck spinner."""
+
+    async def fake_process(**kwargs):
+        return {'source_id': kwargs['doc'].source_id, 'file_id': 'file-abc', 'status': 'error', 'error': 'boom'}
+
+    monkeypatch.setattr(integrations_router, '_process_chunked_text_document', fake_process)
+    monkeypatch.setattr(integrations_router.Files, 'update_file_metadata_by_id', AsyncMock())
+
+    body = {
+        'collection': {'source_id': 'file-abc', 'name': 'report.pdf', 'target': 'file', 'data_type': 'chunked_text'},
+        'documents': [{'source_id': 'file-abc', 'filename': 'report.pdf', 'chunks': ['a']}],
+    }
+    res = TestClient(perfile_ingest_app).post('/api/v1/integrations/ingest', data={'data': json.dumps(body)})
+
+    assert res.status_code == 200, res.text
+    kwargs = integrations_router.emit_file_status.await_args.kwargs
+    assert kwargs['status'] == 'failed'
+    assert kwargs['error'] == 'boom'
+    assert kwargs['file_id'] == 'file-abc'
+
+
+def test_ingest_direct_kb_owui_upload_emits_completed(perfile_ingest_app, monkeypatch):
+    """Direct-KB upload routed through warren (provider owui_upload, default
+    target) emits file:status='completed' with the KB id as collection_name."""
+
+    async def fake_process(**kwargs):
+        return {'source_id': kwargs['doc'].source_id, 'file_id': 'doc-1', 'status': 'created'}
+
+    monkeypatch.setattr(integrations_router, '_process_chunked_text_document', fake_process)
+    kb = MagicMock(id='kb-1', name='KB', meta={})
+    monkeypatch.setattr(integrations_router.Knowledges, 'get_knowledge_by_id', AsyncMock(return_value=kb))
+    monkeypatch.setattr(integrations_router.Knowledges, 'get_files_by_id', AsyncMock(return_value=[]))
+
+    body = {
+        'collection': {'source_id': 'kb-1', 'name': 'KB', 'data_type': 'chunked_text'},
+        'documents': [{'source_id': 'doc-1', 'filename': 'r.pdf', 'chunks': ['a']}],
+    }
+    res = TestClient(perfile_ingest_app).post('/api/v1/integrations/ingest', data={'data': json.dumps(body)})
+
+    assert res.status_code == 200, res.text
+    integrations_router.emit_file_status.assert_awaited_once()
+    assert integrations_router.emit_file_status.await_args.kwargs == {
+        'user_id': 'user-1',
+        'file_id': 'doc-1',
+        'status': 'completed',
+        'error': None,
+        'collection_name': 'kb-1',
+    }
+
+
+def test_ingest_cloud_sync_provider_does_not_emit_file_status(monkeypatch):
+    """Regression guard: a cloud-sync provider (onedrive) must NOT emit
+    file:status — it emits its own honest {provider}:file:added, and a redundant
+    file:status would double-count uploadBatch.added in KnowledgeBase.svelte."""
+    app = _loader_principal_app('onedrive', monkeypatch)
+
+    async def fake_process(**kwargs):
+        return {'source_id': kwargs['doc'].source_id, 'file_id': 'onedrive-doc-1', 'status': 'created'}
+
+    monkeypatch.setattr(integrations_router, '_process_chunked_text_document', fake_process)
+    kb = MagicMock(id='kb-1', name='KB', meta={})
+    monkeypatch.setattr(integrations_router.Knowledges, 'get_knowledge_by_id', AsyncMock(return_value=kb))
+    monkeypatch.setattr(integrations_router.Knowledges, 'get_files_by_id', AsyncMock(return_value=[]))
+
+    body = {
+        'collection': {'source_id': 'kb-1', 'name': 'KB', 'data_type': 'chunked_text'},
+        'documents': [{'source_id': 'doc-1', 'filename': 'r.pdf', 'chunks': ['a']}],
+    }
+    res = TestClient(app).post('/api/v1/integrations/ingest', data={'data': json.dumps(body)})
+
+    assert res.status_code == 200, res.text
+    integrations_router.emit_file_status.assert_not_awaited()

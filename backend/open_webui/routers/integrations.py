@@ -18,9 +18,11 @@ from open_webui.models.knowledge import KnowledgeForm, Knowledges
 from open_webui.retrieval.loaders.main import Loader
 from open_webui.retrieval.vector.async_client import ASYNC_VECTOR_DB_CLIENT
 from open_webui.routers.retrieval import save_docs_to_vector_db
+from open_webui.services.files.events import emit_file_status
 from open_webui.services.sync.provider import file_id_prefix_for
 from open_webui.storage.provider import Storage
 from open_webui.utils.auth import get_verified_user
+from open_webui.utils.doc_pipeline import ACTING_PROVIDER
 from open_webui.utils.service_auth import LoaderPrincipal, get_integration_principal
 
 router = APIRouter()
@@ -844,7 +846,11 @@ async def ingest_documents(
                 provider=provider,
                 doc=doc,
                 user_id=user.id,
-                original_file=original_file_lookup.get(doc.source_id),
+                # The direct upload already stored the source bytes at file.path;
+                # warren re-shipping them (original_files) would be a redundant
+                # Storage round-trip inside the /ingest critical path — drop it.
+                # None is a no-op when warren ships nothing, so this is always safe.
+                original_file=None,
                 collection_name=f'file-{file_id}',  # per-file cache collection
                 add=False,  # native chat parity: create fresh, don't append
                 skip_embed=bypass,  # BYPASS: store content only, no vectors
@@ -854,6 +860,20 @@ async def ingest_documents(
             # restart-safe reconciler stops tracking this file. Status is already
             # 'completed'/'error' from _process_chunked_text_document.
             await Files.update_file_metadata_by_id(file_id, {'pipeline_job_id': None, 'pipeline_submitted_at': None})
+            # Emit the honest completion: the vectors just landed (or the embed
+            # failed). Phase 1 suppressed _process_handler's submit-time emit to
+            # 'processing', so THIS is the signal that ends the frontend's
+            # loading state. The target='file' path is only ever reached for
+            # direct chat attachments (provider owui_upload), so no cloud-sync
+            # guard is needed here. emit_file_status swallows socket errors, so a
+            # hiccup never fails ingestion.
+            await emit_file_status(
+                user_id=user.id,
+                file_id=file_id,
+                status='completed' if result['status'] in ('created', 'updated') else 'failed',
+                error=result.get('error'),
+                collection_name=f'file-{file_id}',
+            )
             results.append(result)
 
         created = sum(1 for r in results if r['status'] == 'created')
@@ -1022,6 +1042,22 @@ async def ingest_documents(
             updated += 1
         elif result['status'] == 'error':
             errors += 1
+
+        # Direct KB uploads routed through warren (provider owui_upload) need an
+        # honest file:status once their vectors land here — Phase 1 suppressed
+        # _process_handler's submit-time emit to 'processing'. Cloud-sync
+        # providers (onedrive/confluence/google_drive/topdesk) are deliberately
+        # skipped: they emit their own honest {provider}:file:added, and a
+        # redundant file:status here would double-count uploadBatch.added in
+        # KnowledgeBase.svelte (which listens to BOTH events).
+        if provider == ACTING_PROVIDER:
+            await emit_file_status(
+                user_id=user.id,
+                file_id=result['file_id'],
+                status='completed' if result['status'] in ('created', 'updated') else 'failed',
+                error=result.get('error'),
+                collection_name=knowledge.id,
+            )
 
     return {
         'knowledge_id': knowledge.id,
