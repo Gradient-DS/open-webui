@@ -53,7 +53,13 @@ def loader_principal():
 def _make_app(principal) -> FastAPI:
     app = FastAPI()
     app.include_router(integrations_router.router, prefix='/api/v1/integrations')
-    app.state.config = SimpleNamespace(PIPELINE_PRESIGN_TTL_SECONDS=PRESIGN_TTL)
+    # DISTRIBUTED_DOC_PIPELINE_SYNC_ENABLED defaults on here so the existing
+    # stage/submit/file-status tests keep exercising the happy path; the
+    # flag-off 403 gate is proven separately below.
+    app.state.config = SimpleNamespace(
+        PIPELINE_PRESIGN_TTL_SECONDS=PRESIGN_TTL,
+        DISTRIBUTED_DOC_PIPELINE_SYNC_ENABLED=True,
+    )
     app.dependency_overrides[get_integration_principal] = lambda: principal
     return app
 
@@ -325,6 +331,38 @@ def test_submit_rejects_non_loader(non_loader_app):
 def test_file_status_rejects_non_loader(non_loader_app):
     resp = TestClient(non_loader_app).get('/api/v1/integrations/file-status/onedrive-doc-A')
     assert resp.status_code == 403
+
+
+# --- sync flag gate: stage/submit 403 when DISTRIBUTED_DOC_PIPELINE_SYNC_ENABLED
+# is off (auth is satisfied — a valid loader principal — so these prove the flag
+# gate specifically, not the auth check covered above). get_file_status is
+# deliberately not gated (read-only poll) and has no test here.
+
+
+def test_stage_403_when_sync_flag_disabled(loader_principal):
+    app = _make_app(loader_principal)
+    app.state.config.DISTRIBUTED_DOC_PIPELINE_SYNC_ENABLED = False
+
+    resp = TestClient(app).post(
+        '/api/v1/integrations/stage',
+        json={'knowledge_id': 'kb-1', 'source_id': 's', 'filename': 'f.pdf', 'content_type': 'application/pdf'},
+    )
+
+    assert resp.status_code == 403
+    assert 'DISTRIBUTED_DOC_PIPELINE_SYNC_ENABLED' in resp.json()['detail']
+
+
+def test_submit_403_when_sync_flag_disabled(loader_principal):
+    app = _make_app(loader_principal)
+    app.state.config.DISTRIBUTED_DOC_PIPELINE_SYNC_ENABLED = False
+
+    resp = TestClient(app).post(
+        '/api/v1/integrations/submit',
+        json={'file_id': 'onedrive-doc-A', 'knowledge_id': 'kb-1'},
+    )
+
+    assert resp.status_code == 403
+    assert 'DISTRIBUTED_DOC_PIPELINE_SYNC_ENABLED' in resp.json()['detail']
 
 
 # --- canonical-key convention proof (storage layer) -------------------------

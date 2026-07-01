@@ -1113,6 +1113,11 @@ async def stage_file(
     inverse live in the storage provider (``get_object_path`` mirrors
     ``upload_file``), so the path is never string-assembled here."""
     principal = _require_loader(principal)
+    if not request.app.state.config.DISTRIBUTED_DOC_PIPELINE_SYNC_ENABLED:
+        raise HTTPException(
+            status_code=403,
+            detail='warren cloud-sync pipeline is disabled (DISTRIBUTED_DOC_PIPELINE_SYNC_ENABLED)',
+        )
     provider = principal.provider_slug
     user_id = principal.user.id
 
@@ -1164,6 +1169,11 @@ async def submit_file(
     ``submit_existing_file_to_pipeline`` body (presign GET + submit job + link +
     mark 'processing'). The acting user is the loader-resolved principal user."""
     principal = _require_loader(principal)
+    if not request.app.state.config.DISTRIBUTED_DOC_PIPELINE_SYNC_ENABLED:
+        raise HTTPException(
+            status_code=403,
+            detail='warren cloud-sync pipeline is disabled (DISTRIBUTED_DOC_PIPELINE_SYNC_ENABLED)',
+        )
 
     file = await Files.get_file_by_id(body.file_id)
     if not file:
