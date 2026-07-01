@@ -1150,6 +1150,7 @@
     "File processing failed: {{error}}": "",
     "File removed successfully.": "Bestand succesvol verwijderd.",
     "File size should not exceed {{maxSize}} MB.": "Bestandsgrootte mag niet groter zijn dan {{maxSize}} MB.",
+    "File type {{extension}} is not allowed.": "Bestandstype {{extension}} is niet toegestaan.",
     "File uploaded successfully": "Bestand succesvol geüpload",
     "File uploaded!": "Bestand geüpload!",
     "Filename": "Bestandsnaam",

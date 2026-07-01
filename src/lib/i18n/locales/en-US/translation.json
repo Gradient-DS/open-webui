@@ -1150,6 +1150,7 @@
     "File processing failed: {{error}}": "",
     "File removed successfully.": "",
     "File size should not exceed {{maxSize}} MB.": "",
+    "File type {{extension}} is not allowed.": "",
     "File uploaded successfully": "",
     "File uploaded!": "",
     "Filename": "",
