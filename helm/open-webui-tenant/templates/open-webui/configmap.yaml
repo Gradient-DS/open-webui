@@ -391,6 +391,9 @@ data:
   # native parse+embed; warren POSTs chunked_text back to this server's /ingest.
   # PIPELINE_API_KEY is a secret (see deployment.yaml + external-secrets.yaml).
   DISTRIBUTED_DOC_PIPELINE_ENABLED: {{ .Values.openWebui.config.distributedDocPipelineEnabled | default "false" | quote }}
+  # Also route chat attachments (non-KB uploads → the file-{id} cache) through
+  # warren. Independent of the KB flag above; reuses all the PIPELINE_* config.
+  DISTRIBUTED_DOC_PIPELINE_CHAT_ENABLED: {{ .Values.openWebui.config.distributedDocPipelineChatEnabled | default "false" | quote }}
   {{- if .Values.openWebui.config.pipelineApiBaseUrl }}
   PIPELINE_API_BASE_URL: {{ .Values.openWebui.config.pipelineApiBaseUrl | quote }}
   {{- end }}

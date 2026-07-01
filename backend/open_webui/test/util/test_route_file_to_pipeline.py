@@ -78,7 +78,8 @@ async def test_route_file_to_pipeline_submits_links_and_marks_processing(monkeyp
     assert captured['submit']['api_key'] == 'secret'
     sub = captured['submit']['submission']
     owui = sub['parameters']['owui']
-    assert owui['collection'] == {'source_id': 'kb-9', 'name': 'My KB'}
+    # target defaults to 'knowledge' (KB path); worker echoes the key through.
+    assert owui['collection'] == {'source_id': 'kb-9', 'name': 'My KB', 'target': 'knowledge'}
     assert owui['document']['source_id'] == 'file-1'
     assert owui['ingest_url'] == 'http://owui:8080'
     assert sub['metadata']['items'][0]['format'] == 'pdf'

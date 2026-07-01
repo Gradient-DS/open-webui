@@ -44,10 +44,34 @@ def test_build_job_submission_targets_existing_file_row():
     assert owui['ingest_url'] == 'http://owui:8080'
     assert owui['acting_user_id'] == 'user-7'
     assert owui['acting_provider'] == 'owui_upload'
-    assert owui['collection'] == {'source_id': 'kb-uuid-9', 'name': 'My KB'}
+    # target defaults to 'knowledge' (KB path); the worker echoes the key through.
+    assert owui['collection'] == {'source_id': 'kb-uuid-9', 'name': 'My KB', 'target': 'knowledge'}
     assert owui['document']['source_id'] == 'file-uuid-1'  # identity reconstruction
     assert owui['document']['filename'] == 'report.pdf'
     assert owui['document']['content_type'] == 'application/pdf'
+
+
+def test_build_job_submission_collection_target_file():
+    """collection_target='file' → per-file chat-attachment target in the owui block."""
+    body = doc_pipeline.build_job_submission(
+        file_id='file-uuid-1',
+        filename='report.pdf',
+        content_type='application/pdf',
+        file_format='pdf',
+        presigned_url='https://s3.example/report.pdf?sig=abc',
+        kb_id='file-uuid-1',
+        kb_name='report.pdf',
+        acting_user_id='user-7',
+        ingest_url='http://owui:8080',
+        chunk_size=1000,
+        chunk_overlap=100,
+        collection_target='file',
+    )
+    collection = body['parameters']['owui']['collection']
+    assert collection['target'] == 'file'
+    # document.source_id stays the file_id so /ingest's per-file branch derives
+    # file-{file_id} and updates the existing row (owui_upload identity).
+    assert body['parameters']['owui']['document']['source_id'] == 'file-uuid-1'
 
 
 def test_build_job_submission_omits_final_data_type():
@@ -106,6 +130,34 @@ def test_should_route_to_pipeline(enabled, collection_name, file_path, file_form
             file_path=file_path,
             file_format=file_format,
         )
+        is expected
+    )
+
+
+@pytest.mark.parametrize('fmt', sorted(doc_pipeline.PIPELINE_SUPPORTED_FORMATS))
+def test_should_route_chat_to_pipeline_true_for_every_supported_format(fmt):
+    """Every warren-parseable format routes a chat attachment (flag on, path set)."""
+    assert doc_pipeline.should_route_chat_to_pipeline(enabled=True, file_path='s3://b/k', file_format=fmt) is True
+
+
+@pytest.mark.parametrize(
+    'enabled,file_path,file_format,expected',
+    [
+        (True, 's3://b/k', 'pdf', True),  # supported format, flag on, path → route
+        (True, 's3://b/k', 'docx', True),
+        (False, 's3://b/k', 'pdf', False),  # flag off → native (independent of KB flag)
+        (True, 's3://b/k', 'png', False),  # image → native
+        (True, 's3://b/k', 'jpg', False),  # image → native
+        (True, 's3://b/k', 'mp3', False),  # audio → native (STT path)
+        (True, 's3://b/k', 'dmg', False),  # unknown binary → native
+        (True, 's3://b/k', '', False),  # no extension → native
+        (True, '', 'pdf', False),  # no storage path to presign → native
+        (True, None, 'pdf', False),  # no storage path → native
+    ],
+)
+def test_should_route_chat_to_pipeline(enabled, file_path, file_format, expected):
+    assert (
+        doc_pipeline.should_route_chat_to_pipeline(enabled=enabled, file_path=file_path, file_format=file_format)
         is expected
     )
 

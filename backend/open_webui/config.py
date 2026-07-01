@@ -3878,6 +3878,17 @@ DISTRIBUTED_DOC_PIPELINE_ENABLED = PersistentConfig(
     os.environ.get('DISTRIBUTED_DOC_PIPELINE_ENABLED', 'False').lower() == 'true',
 )
 
+# Route *chat attachments* (non-KB uploads, the per-file file-{id} cache) through
+# warren too, instead of native in-process parse+embed. Independent of the KB
+# flag above so chat routing can be toggled on its own. Reuses all the other
+# PIPELINE_* config. Off → chat attachments run the native path byte-for-byte.
+# See thoughts/shared/plans/2026-07-01-track1-chat-attachments-warren-implementation.md.
+DISTRIBUTED_DOC_PIPELINE_CHAT_ENABLED = PersistentConfig(
+    'DISTRIBUTED_DOC_PIPELINE_CHAT_ENABLED',
+    'doc_pipeline.chat_enabled',
+    os.environ.get('DISTRIBUTED_DOC_PIPELINE_CHAT_ENABLED', 'False').lower() == 'true',
+)
+
 # pipeline-api base URL (this server submits jobs here), e.g.
 # http://doc-pipeline-pipeline-api.<ns>.svc.cluster.local:8080
 PIPELINE_API_BASE_URL = PersistentConfig(
