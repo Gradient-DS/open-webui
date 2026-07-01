@@ -186,7 +186,16 @@ async def process_uploaded_file(
                     db=db_session,
                 )
 
-            # Notify frontend via Socket.IO that processing completed.
+            # Notify frontend via Socket.IO of the file's ACTUAL persisted
+            # status. For the native path process_file has already embedded +
+            # set 'completed' synchronously, so this stays 'completed'. For a
+            # warren-routed file process_file returns right after submitting the
+            # job (status still 'processing', vectors not yet in Weaviate);
+            # emitting 'completed' here would be premature — the real 'completed'
+            # is emitted from /ingest once the vectors land. Both file:status
+            # listeners (Chat.svelte, KnowledgeBase.svelte) act only on
+            # completed/failed and ignore 'processing', so the spinner persists.
+            #
             # _process_handler is async — we're already on the main loop, so
             # await the emit directly. (The earlier `run_on_main_loop(...)`
             # call here deadlocked: that helper schedules a coroutine on the
@@ -194,11 +203,13 @@ async def process_uploaded_file(
             # works from a sync worker thread but freezes the loop when the
             # caller already IS the main loop.)
             file_data = await Files.get_file_by_id(file_item.id)
-            collection_name = file_data.meta.get('collection_name') if file_data and file_data.meta else None
+            meta = (file_data.meta or {}) if file_data else {}
+            current_status = meta.get('status') or 'completed'
+            collection_name = meta.get('collection_name')
             await emit_file_status(
                 user_id=user.id,
                 file_id=file_item.id,
-                status='completed',
+                status=current_status,
                 collection_name=collection_name,
             )
 

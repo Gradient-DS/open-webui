@@ -16,13 +16,22 @@ async def test_reconcile_marks_failed_and_timed_out_only(monkeypatch):
     )
     now = 1_000_000
     files = [
-        SimpleNamespace(id='f-fail', meta={'pipeline_job_id': 'j1', 'pipeline_submitted_at': now - 100}),
-        SimpleNamespace(id='f-run', meta={'pipeline_job_id': 'j2', 'pipeline_submitted_at': now - 100}),
-        SimpleNamespace(id='f-old', meta={'pipeline_job_id': 'j3', 'pipeline_submitted_at': now - 99999}),
-        SimpleNamespace(id='f-net', meta={'pipeline_job_id': 'j4', 'pipeline_submitted_at': now - 100}),
+        SimpleNamespace(
+            id='f-fail', user_id='u-fail', meta={'pipeline_job_id': 'j1', 'pipeline_submitted_at': now - 100}
+        ),
+        SimpleNamespace(
+            id='f-run', user_id='u-run', meta={'pipeline_job_id': 'j2', 'pipeline_submitted_at': now - 100}
+        ),
+        SimpleNamespace(
+            id='f-old', user_id='u-old', meta={'pipeline_job_id': 'j3', 'pipeline_submitted_at': now - 99999}
+        ),
+        SimpleNamespace(
+            id='f-net', user_id='u-net', meta={'pipeline_job_id': 'j4', 'pipeline_submitted_at': now - 100}
+        ),
     ]
     status_by_job = {'j1': 'failed', 'j2': 'running', 'j3': 'running', 'j4': 'boom'}
     set_calls = []
+    emit_calls = []
 
     async def fake_get_files():
         return files
@@ -36,9 +45,13 @@ async def test_reconcile_marks_failed_and_timed_out_only(monkeypatch):
     async def fake_set_status(file_id, status, error=None, db=None):
         set_calls.append((file_id, status, error))
 
+    async def fake_emit(*, user_id, file_id, status, error=None, collection_name=None):
+        emit_calls.append((user_id, file_id, status, error))
+
     monkeypatch.setattr(reconciler.Files, 'get_processing_files_with_pipeline_job', fake_get_files, raising=False)
     monkeypatch.setattr(reconciler.doc_pipeline, 'get_job_status', fake_get_job_status)
     monkeypatch.setattr(reconciler.Files, 'set_status', fake_set_status, raising=False)
+    monkeypatch.setattr(reconciler, 'emit_file_status', fake_emit)
 
     errored = await reconciler.reconcile_pipeline_jobs(config, now=now)
 
@@ -47,6 +60,10 @@ async def test_reconcile_marks_failed_and_timed_out_only(monkeypatch):
     assert {c[0] for c in set_calls} == {'f-fail', 'f-old'}
     assert all(c[1] == 'error' for c in set_calls)
     assert errored == 2
+    # Every errored file also gets a 'failed' file:status emit to its OWNER, so
+    # the spinner resolves. Waited (f-run) and transiently-skipped (f-net) don't.
+    assert {(u, f) for (u, f, s, e) in emit_calls} == {('u-fail', 'f-fail'), ('u-old', 'f-old')}
+    assert all(s == 'failed' and e for (_, _, s, e) in emit_calls)
 
 
 @pytest.mark.asyncio
@@ -62,12 +79,19 @@ async def test_reconcile_covers_kb_less_chat_files(monkeypatch):
     now = 1_000_000
     # No 'collection_name' key ⇒ these are chat attachments, not KB files.
     files = [
-        SimpleNamespace(id='chat-fail', meta={'pipeline_job_id': 'j1', 'pipeline_submitted_at': now - 100}),
-        SimpleNamespace(id='chat-hung', meta={'pipeline_job_id': 'j2', 'pipeline_submitted_at': now - 99999}),
-        SimpleNamespace(id='chat-run', meta={'pipeline_job_id': 'j3', 'pipeline_submitted_at': now - 100}),
+        SimpleNamespace(
+            id='chat-fail', user_id='owner-1', meta={'pipeline_job_id': 'j1', 'pipeline_submitted_at': now - 100}
+        ),
+        SimpleNamespace(
+            id='chat-hung', user_id='owner-1', meta={'pipeline_job_id': 'j2', 'pipeline_submitted_at': now - 99999}
+        ),
+        SimpleNamespace(
+            id='chat-run', user_id='owner-1', meta={'pipeline_job_id': 'j3', 'pipeline_submitted_at': now - 100}
+        ),
     ]
     status_by_job = {'j1': 'failed', 'j2': 'running', 'j3': 'running'}
     set_calls = []
+    emit_calls = []
 
     async def fake_get_files():
         return files
@@ -78,12 +102,19 @@ async def test_reconcile_covers_kb_less_chat_files(monkeypatch):
     async def fake_set_status(file_id, status, error=None, db=None):
         set_calls.append((file_id, status))
 
+    async def fake_emit(*, user_id, file_id, status, error=None, collection_name=None):
+        emit_calls.append((user_id, file_id, status))
+
     monkeypatch.setattr(reconciler.Files, 'get_processing_files_with_pipeline_job', fake_get_files, raising=False)
     monkeypatch.setattr(reconciler.doc_pipeline, 'get_job_status', fake_get_job_status)
     monkeypatch.setattr(reconciler.Files, 'set_status', fake_set_status, raising=False)
+    monkeypatch.setattr(reconciler, 'emit_file_status', fake_emit)
 
     errored = await reconciler.reconcile_pipeline_jobs(config, now=now)
 
     # fail → error, timeout (past cap) → error, running within cap → wait (untouched).
     assert set_calls == [('chat-fail', 'error'), ('chat-hung', 'error')]
     assert errored == 2
+    # Each errored KB-less chat file also emits file:status='failed' to its owner
+    # so the spinner resolves (toast + removal); the waited file emits nothing.
+    assert emit_calls == [('owner-1', 'chat-fail', 'failed'), ('owner-1', 'chat-hung', 'failed')]

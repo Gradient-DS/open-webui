@@ -18,6 +18,7 @@ import logging
 import time
 
 from open_webui.models.files import Files
+from open_webui.services.files.events import emit_file_status
 from open_webui.utils import doc_pipeline
 
 log = logging.getLogger(__name__)
@@ -59,6 +60,13 @@ async def reconcile_pipeline_jobs(config, *, now: int) -> int:
             else f'distributed doc-pipeline job did not complete within {cap}s'
         )
         await Files.set_status(file.id, 'error', error=reason)
+        # Resolve the frontend's loading state: emit the honest 'failed' so the
+        # spinner ends (toast + removal) instead of hanging until a page reload.
+        # Naturally scoped to direct uploads — only files submitted via
+        # route_file_to_pipeline / route_chat_file_to_pipeline carry a
+        # pipeline_job_id, so get_processing_files_with_pipeline_job never
+        # returns cloud-sync files.
+        await emit_file_status(user_id=file.user_id, file_id=file.id, status='failed', error=reason)
         log.info(f'doc-pipeline reconcile: marked file {file.id} error ({action}, job {job_id})')
         errored += 1
     return errored
