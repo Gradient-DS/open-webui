@@ -566,6 +566,7 @@ openWebui:
     # keys fall back to the backend defaults shown.
     distributedDocPipelineEnabled: "false"
     distributedDocPipelineChatEnabled: "false"  # also route chat attachments (non-KB) through warren; independent of the KB flag
+    distributedDocPipelineSyncEnabled: "false"  # route cloud sync (bulk) through warren; independent of the KB/chat flags
     pipelineApiBaseUrl: ""               # e.g. http://doc-pipeline-pipeline-api.<ns>.svc.cluster.local:8080
     pipelineIngestCallbackUrl: ""        # this server's in-cluster URL warren POSTs /ingest back to
     pipelinePresignTtlSeconds: ""        # default 3600
@@ -898,6 +899,10 @@ loaderWorker:
     perJobItemConcurrency: 5
     jobLeaseTimeoutSeconds: 900
     embedderBatchSize: 100
+    # Pipeline mode: "doc_processor" (default) or "warren".
+    pipelineMode: "doc_processor"
+    # OWUI base URL for warren mode; empty falls back to the in-cluster Open WebUI service URL.
+    owuiBaseUrl: ""
 
   # Postgres lives on the existing tenant Postgres pod; create a new database
   # via the bootstrap Job (templates/loader-worker/postgres-bootstrap-job.yaml).

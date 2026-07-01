@@ -394,6 +394,9 @@ data:
   # Also route chat attachments (non-KB uploads → the file-{id} cache) through
   # warren. Independent of the KB flag above; reuses all the PIPELINE_* config.
   DISTRIBUTED_DOC_PIPELINE_CHAT_ENABLED: {{ .Values.openWebui.config.distributedDocPipelineChatEnabled | default "false" | quote }}
+  # Also route cloud sync (bulk) through warren. Independent of the KB/chat flags
+  # above; reuses all the PIPELINE_* config.
+  DISTRIBUTED_DOC_PIPELINE_SYNC_ENABLED: {{ .Values.openWebui.config.distributedDocPipelineSyncEnabled | default "false" | quote }}
   {{- if .Values.openWebui.config.pipelineApiBaseUrl }}
   PIPELINE_API_BASE_URL: {{ .Values.openWebui.config.pipelineApiBaseUrl | quote }}
   {{- end }}

@@ -17,7 +17,7 @@ from open_webui.models.files import FileForm, Files
 from open_webui.models.knowledge import KnowledgeForm, Knowledges
 from open_webui.retrieval.loaders.main import Loader
 from open_webui.retrieval.vector.async_client import ASYNC_VECTOR_DB_CLIENT
-from open_webui.routers.retrieval import save_docs_to_vector_db
+from open_webui.routers.retrieval import save_docs_to_vector_db, submit_existing_file_to_pipeline
 from open_webui.services.files.events import emit_file_status
 from open_webui.services.sync.provider import file_id_prefix_for
 from open_webui.storage.provider import Storage
@@ -98,6 +98,21 @@ class FullDocument(IngestDocumentBase):
 class IngestForm(BaseModel):
     collection: IngestCollection
     documents: list[dict]
+
+
+# Warren cloud-sync (Option 1b) — loader-worker staging + submit + poll.
+
+
+class StageRequest(BaseModel):
+    knowledge_id: str
+    source_id: str
+    filename: str
+    content_type: str = 'application/octet-stream'
+
+
+class SubmitRequest(BaseModel):
+    file_id: str
+    knowledge_id: str
 
 
 # --- Helper Functions ---
@@ -1070,6 +1085,121 @@ async def ingest_documents(
         'errors': errors,
         'documents': results,
     }
+
+
+def _require_loader(principal) -> LoaderPrincipal:
+    """The warren cloud-sync routes are machine-only: the loader bearer is the
+    trust signal. A human/cookie caller falls through as a plain ``UserModel``
+    from :func:`get_integration_principal`; reject it with 403 so these
+    staging/submit/poll endpoints are never reachable from a browser session."""
+    if not isinstance(principal, LoaderPrincipal):
+        raise HTTPException(status_code=403, detail='This endpoint requires the loader service credential')
+    return principal
+
+
+@router.post('/stage')
+async def stage_file(
+    request: Request,
+    body: StageRequest,
+    principal=Depends(get_integration_principal),
+):
+    """Find-or-create the ``File`` row for a cloud-synced file at its canonical
+    S3 key and hand back a presigned PUT the loader-worker uses to upload the
+    original bytes over plain HTTPS.
+
+    The canonical key is the one wiring invariant: the PUT MUST target the same
+    key ``File.path`` records and warren's later presigned GET (issued in
+    ``submit_existing_file_to_pipeline``) reads. Both the key derivation and its
+    inverse live in the storage provider (``get_object_path`` mirrors
+    ``upload_file``), so the path is never string-assembled here."""
+    principal = _require_loader(principal)
+    if not request.app.state.config.DISTRIBUTED_DOC_PIPELINE_SYNC_ENABLED:
+        raise HTTPException(
+            status_code=403,
+            detail='warren cloud-sync pipeline is disabled (DISTRIBUTED_DOC_PIPELINE_SYNC_ENABLED)',
+        )
+    provider = principal.provider_slug
+    user_id = principal.user.id
+
+    file_id = f'{file_id_prefix_for(provider)}{body.source_id}'
+    object_name = f'{file_id}_{body.filename}'
+    path = Storage.get_object_path(object_name)
+
+    existing_file = await Files.get_file_by_id(file_id)
+    if existing_file:
+        # base_worker._create_stub_file_rows may have created a stub (path='')
+        # for this file_id; promote it to the canonical path. Never overwrite a
+        # populated path with a different one silently unless it actually
+        # changed (idempotent re-stage is a no-op on the path).
+        if path and path != (existing_file.path or ''):
+            await Files.update_file_path_by_id(file_id, path)
+        await Files.update_file_metadata_by_id(
+            file_id,
+            {'content_type': body.content_type, 'collection_name': body.knowledge_id},
+        )
+    else:
+        file_form = FileForm(
+            id=file_id,
+            filename=body.filename,
+            path=path,
+            meta={
+                'name': body.filename,
+                'content_type': body.content_type,
+                'collection_name': body.knowledge_id,
+                'source': provider,
+                'source_id': body.source_id,
+            },
+        )
+        await Files.insert_new_file(user_id, file_form)
+        await Knowledges.add_file_to_knowledge_by_id(body.knowledge_id, file_id, user_id)
+
+    ttl = request.app.state.config.PIPELINE_PRESIGN_TTL_SECONDS
+    presigned_put_url = await run_in_threadpool(Storage.get_presigned_put_url, path, ttl, body.content_type)
+
+    return {'file_id': file_id, 'presigned_put_url': presigned_put_url}
+
+
+@router.post('/submit')
+async def submit_file(
+    request: Request,
+    body: SubmitRequest,
+    principal=Depends(get_integration_principal),
+):
+    """Submit an already-staged ``File`` to warren via the shared
+    ``submit_existing_file_to_pipeline`` body (presign GET + submit job + link +
+    mark 'processing'). The acting user is the loader-resolved principal user."""
+    principal = _require_loader(principal)
+    if not request.app.state.config.DISTRIBUTED_DOC_PIPELINE_SYNC_ENABLED:
+        raise HTTPException(
+            status_code=403,
+            detail='warren cloud-sync pipeline is disabled (DISTRIBUTED_DOC_PIPELINE_SYNC_ENABLED)',
+        )
+
+    file = await Files.get_file_by_id(body.file_id)
+    if not file:
+        raise HTTPException(status_code=404, detail=f"file '{body.file_id}' not found")
+
+    result = await submit_existing_file_to_pipeline(request, file, body.knowledge_id, principal.user)
+    return {'pipeline_job_id': result['pipeline_job_id']}
+
+
+@router.get('/file-status/{file_id}')
+async def get_file_status(
+    request: Request,
+    file_id: str,
+    principal=Depends(get_integration_principal),
+):
+    """Return the File's current processing status for the loader poll
+    (``processing`` → ``completed`` / ``error``). Status is dual-written by
+    ``Files.set_status`` into both meta and data; meta is the cheap read."""
+    _require_loader(principal)
+
+    file = await Files.get_file_by_id(file_id)
+    if not file:
+        raise HTTPException(status_code=404, detail=f"file '{file_id}' not found")
+
+    status = (file.meta or {}).get('status') or (file.data or {}).get('status')
+    return {'status': status}
 
 
 @router.delete('/collections/{source_id}')
