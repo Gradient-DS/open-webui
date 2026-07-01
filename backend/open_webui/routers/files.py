@@ -329,7 +329,13 @@ async def upload_file_handler(
                 ext for ext in request.app.state.config.ALLOWED_FILE_EXTENSIONS if ext
             ]
 
-            if file_extension not in request.app.state.config.ALLOWED_FILE_EXTENSIONS:
+            # An empty extension always passes: legitimate documents can arrive
+            # without a filename extension and with an unknown/octet-stream
+            # content type (e.g. "ASB - Microsoft Entra admin center", exported
+            # pages). We want those ingested — the native/external loader handles
+            # them. Junk types (svg/png/zip/dmg) resolve to a real, non-allowed
+            # extension and still fast-reject here.
+            if file_extension and file_extension not in request.app.state.config.ALLOWED_FILE_EXTENSIONS:
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
                     detail=ERROR_MESSAGES.DEFAULT(f'File type {file_extension} is not allowed'),
