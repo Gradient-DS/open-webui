@@ -541,6 +541,19 @@
 			return;
 		}
 
+		// Reject disallowed file types client-side, before uploading. The server
+		// allow-list only rejects after the whole file has been received, so a
+		// large disallowed file (e.g. a .dmg) would otherwise upload in full
+		// before failing. An empty extension passes through, matching the backend
+		// gate (extension-less docs are decided server-side by content type).
+		const allowedExtensions = ($config?.file?.allowed_extensions ?? []).filter((ext) => ext);
+		const dotIndex = file.name.lastIndexOf('.');
+		const extension = dotIndex > 0 ? file.name.slice(dotIndex + 1).toLowerCase() : '';
+		if (extension && allowedExtensions.length > 0 && !allowedExtensions.includes(extension)) {
+			toast.error($i18n.t('File type {{extension}} is not allowed.', { extension }));
+			return;
+		}
+
 		fileItems = [fileItem, ...(fileItems ?? [])];
 		try {
 			let metadata = {

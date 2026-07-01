@@ -246,7 +246,12 @@ openWebui:
     chunkOverlap: "200"
     ragHybridBm25Weight: "0.5"
     enableRagHybridSearch: "true"
-    ragAllowedFileExtensions: "pdf,txt,md,docx,csv,json,xlsx"
+    # Document formats we can process (warren + the external doc-processor).
+    # Deliberately excludes images, archives, disk images, video and other
+    # binaries so large junk (e.g. a .dmg) is rejected instead of ingested.
+    # Extension-less files always pass the gate (decided server-side by content
+    # type) — see the empty-extension allowance in routers/files.py.
+    ragAllowedFileExtensions: "pdf,doc,docx,dotx,xls,xlsx,xltx,ppt,pptx,potx,csv,tsv,txt,md,markdown,rtf,odt,ods,odp,html,htm,xml,json,epub"
 
     # File Processing
     fileProcessingMaxConcurrent: "10"  # Max concurrent file processing tasks
