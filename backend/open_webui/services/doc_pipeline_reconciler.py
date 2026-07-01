@@ -54,11 +54,12 @@ async def reconcile_pipeline_jobs(config, *, now: int) -> int:
         if action == 'wait':
             continue
 
-        reason = (
-            'distributed doc-pipeline job reported failure'
-            if action == 'fail'
-            else f'distributed doc-pipeline job did not complete within {cap}s'
-        )
+        if action == 'fail':
+            reason = 'distributed doc-pipeline job reported failure'
+        elif action == 'empty':
+            reason = 'document produced no searchable content (empty, scanned, or non-text file)'
+        else:
+            reason = f'distributed doc-pipeline job did not complete within {cap}s'
         await Files.set_status(file.id, 'error', error=reason)
         # Resolve the frontend's loading state: emit the honest 'failed' so the
         # spinner ends (toast + removal) instead of hanging until a page reload.

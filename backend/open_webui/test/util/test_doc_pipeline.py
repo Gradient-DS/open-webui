@@ -169,9 +169,9 @@ def test_should_route_chat_to_pipeline(enabled, file_path, file_format, expected
         ('partial', 10, 21600, 'fail'),  # 1-doc job 'partial' == failure
         ('running', 10, 21600, 'wait'),  # in progress → keep waiting
         ('pending', 10, 21600, 'wait'),  # queued → keep waiting
-        ('completed', 10, 21600, 'wait'),  # done on warren; give /ingest a moment
+        ('completed', 10, 21600, 'empty'),  # done on warren, file still processing → zero-chunk (no /ingest)
         ('running', 21601, 21600, 'timeout'),  # hung past the generous backstop → error
-        ('completed', 99999, 21600, 'timeout'),  # /ingest never landed within cap → error
+        ('completed', 99999, 21600, 'empty'),  # completed-but-empty wins over the wall-clock backstop
         ('failed', 99999, 21600, 'fail'),  # failure reason wins over timeout
     ],
 )

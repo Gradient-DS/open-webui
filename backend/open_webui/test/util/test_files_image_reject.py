@@ -111,3 +111,43 @@ async def test_unsupported_content_type_with_process_false_skips_check():
         await upload_file_handler(request, file=file, process=False, process_in_background=False, user=_user())
 
     assert exc_info.value.status_code != status.HTTP_415_UNSUPPORTED_MEDIA_TYPE
+
+
+def _request_allowlist(allowed: list[str], engine: str = 'external') -> MagicMock:
+    """Request stand-in with a configured upload allow-list."""
+    cfg = SimpleNamespace(
+        CONTENT_EXTRACTION_ENGINE=engine,
+        STT_SUPPORTED_CONTENT_TYPES=[],
+        ALLOWED_FILE_EXTENSIONS=allowed,
+    )
+    request = MagicMock()
+    request.app.state.config = cfg
+    return request
+
+
+@pytest.mark.asyncio
+async def test_disallowed_extension_rejected_by_allowlist():
+    """A file with a real, non-allowed extension fast-rejects with a 400."""
+    request = _request_allowlist(['pdf'])
+    file = _upload_file('logo.svg', 'image/svg+xml')
+
+    with pytest.raises(HTTPException) as exc_info:
+        await upload_file_handler(request, file=file, process=True, process_in_background=False, user=_user())
+
+    assert exc_info.value.status_code == status.HTTP_400_BAD_REQUEST
+    assert 'svg is not allowed' in str(exc_info.value.detail)
+
+
+@pytest.mark.asyncio
+async def test_empty_extension_passes_allowlist():
+    """A genuinely extension-less document (unknown content type → no derived
+    extension) must NOT be rejected by the allow-list — legit no-extension docs
+    (e.g. exported pages) have to be ingestable. It fails downstream here
+    (Storage/DB unmocked); we only assert the allow-list 400 did not fire."""
+    request = _request_allowlist(['pdf'])
+    file = _upload_file('ASB - Microsoft Entra admin center', 'application/x-unknowntype')
+
+    with pytest.raises(HTTPException) as exc_info:
+        await upload_file_handler(request, file=file, process=True, process_in_background=False, user=_user())
+
+    assert 'is not allowed' not in str(exc_info.value.detail)
