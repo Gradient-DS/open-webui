@@ -76,7 +76,7 @@
 	<!-- Subfolder contents (collapsible) -->
 	{#if expandedSources[folderKey]}
 		<div transition:slide={{ duration: 300, easing: quintOut, axis: 'y' }}>
-			<div class="ml-3 pl-1 border-s border-gray-100 dark:border-gray-900">
+			<div class="ml-6 pl-1 border-s border-gray-100 dark:border-gray-900">
 				<!-- Child subfolders -->
 				{#each node.children as child (child.path)}
 					<svelte:self node={child} {expandedKey} bind:expandedSources {onClick} />

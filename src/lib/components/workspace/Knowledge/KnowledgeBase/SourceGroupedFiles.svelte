@@ -303,7 +303,7 @@
 			<!-- Folder contents (collapsible) -->
 			{#if expandedSources[source.item_id] && tree}
 				<div transition:slide={{ duration: 300, easing: quintOut, axis: 'y' }}>
-					<div class="ml-3 pl-1 border-s border-gray-100 dark:border-gray-900">
+					<div class="ml-6 pl-1 border-s border-gray-100 dark:border-gray-900">
 						<!-- Child subfolders -->
 						{#each tree.children as child (child.path)}
 							<FolderTreeNode
