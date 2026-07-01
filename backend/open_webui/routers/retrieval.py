@@ -1700,6 +1700,67 @@ async def route_file_to_pipeline(request: Request, file, knowledge_id: str, user
     }
 
 
+async def route_chat_file_to_pipeline(request: Request, file, user) -> dict:
+    """Hand a non-KB chat attachment to warren, preserving the file-{id} cache.
+
+    Mirrors :func:`route_file_to_pipeline` but with NO KB: warren parses + chunks
+    the file and POSTs chunked_text back to /ingest with ``collection.target=
+    'file'``, which embeds into ``file-{file.id}`` and updates this same File row
+    without linking it to any KB. The file's original bytes are untouched, and
+    retrieval already resolves the attachment to ``file-{id}`` via
+    ``get_sources_from_items`` (native) and ``/accessible-files`` (agent). Raises
+    on submit failure (the caller marks the file 'error')."""
+    config = request.app.state.config
+
+    presigned_url = await asyncio.to_thread(Storage.get_presigned_url, file.path, config.PIPELINE_PRESIGN_TTL_SECONDS)
+    submission = doc_pipeline.build_job_submission(
+        file_id=file.id,
+        filename=file.filename,
+        content_type=(file.meta or {}).get('content_type') or 'application/octet-stream',
+        file_format=doc_pipeline.format_from_filename(file.filename),
+        presigned_url=presigned_url,
+        # Per-file: echoed as collection.source_id but ignored by the /ingest
+        # per-file branch (which derives file-{file_id} from doc.source_id).
+        kb_id=file.id,
+        kb_name=file.filename,
+        acting_user_id=user.id,
+        ingest_url=config.PIPELINE_INGEST_CALLBACK_URL,
+        chunk_size=config.PIPELINE_CHUNK_SIZE,
+        chunk_overlap=config.PIPELINE_CHUNK_OVERLAP,
+        collection_target='file',
+    )
+    job_id = await doc_pipeline.submit_job(
+        base_url=config.PIPELINE_API_BASE_URL,
+        api_key=config.PIPELINE_API_KEY,
+        submission=submission,
+    )
+
+    # Mark processing only after a successful submit. Deliberately NO
+    # add_file_to_knowledge_by_id and NO collection_name on the File metadata —
+    # the attachment's retrieval already resolves to file-{id}. pipeline_job_id /
+    # pipeline_submitted_at let the restart-safe reconciler apply its wall-clock
+    # backstop purely from persisted state (identical to the KB path).
+    async with get_async_db() as session:
+        await Files.update_file_metadata_by_id(
+            file.id,
+            {
+                'pipeline_job_id': job_id,
+                'pipeline_submitted_at': int(time.time()),
+            },
+            db=session,
+        )
+        await Files.set_status(file.id, 'processing', db=session)
+
+    log.info(f'Routed chat file {file.id} to doc-pipeline job {job_id} (per-file)')
+    return {
+        'status': True,
+        'collection_name': None,
+        'filename': file.filename,
+        'content': '',
+        'pipeline_job_id': job_id,
+    }
+
+
 @router.post('/process/file')
 async def process_file(
     request: Request,
@@ -1727,17 +1788,29 @@ async def process_file(
             else:
                 await _validate_collection_access([collection_name], user, access_type='write')
 
-            # Distributed doc-pipeline gate: when enabled, hand a KB-bound
-            # uploaded file to warren instead of parsing + embedding it here.
-            # Skipped when the caller supplies inline content (nothing to fetch
-            # + parse). Flag off → the native path below runs unchanged.
-            if not form_data.content and doc_pipeline.should_route_to_pipeline(
-                enabled=request.app.state.config.DISTRIBUTED_DOC_PIPELINE_ENABLED,
-                collection_name=form_data.collection_name,
-                file_path=file.path,
-                file_format=doc_pipeline.format_from_filename(file.filename),
-            ):
-                return await route_file_to_pipeline(request, file, form_data.collection_name, user)
+            # Distributed doc-pipeline gate: when enabled, hand the uploaded file
+            # to warren instead of parsing + embedding it here. Skipped when the
+            # caller supplies inline content (STT transcript / manual content
+            # update — nothing to fetch + parse). Flag off → native path below.
+            #   - KB-bound upload (collection_name set)  → route_file_to_pipeline.
+            #   - Chat attachment (collection_name None) → route_chat_file_to_pipeline
+            #     (its own flag; lands chunks in the file-{id} cache, no KB).
+            if not form_data.content:
+                config = request.app.state.config
+                file_format = doc_pipeline.format_from_filename(file.filename)
+                if form_data.collection_name and doc_pipeline.should_route_to_pipeline(
+                    enabled=config.DISTRIBUTED_DOC_PIPELINE_ENABLED,
+                    collection_name=form_data.collection_name,
+                    file_path=file.path,
+                    file_format=file_format,
+                ):
+                    return await route_file_to_pipeline(request, file, form_data.collection_name, user)
+                if form_data.collection_name is None and doc_pipeline.should_route_chat_to_pipeline(
+                    enabled=config.DISTRIBUTED_DOC_PIPELINE_CHAT_ENABLED,
+                    file_path=file.path,
+                    file_format=file_format,
+                ):
+                    return await route_chat_file_to_pipeline(request, file, user)
 
             if form_data.content:
                 # Update the content in the file

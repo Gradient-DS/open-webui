@@ -38,6 +38,12 @@ class IngestCollection(BaseModel):
     name: str
     description: str = ''
     data_type: str = 'parsed_text'
+    # 'knowledge' → embed into the KB collection + link the file to the KB
+    # (default; unchanged behavior). 'file' → per-file chat attachment: embed
+    # into file-{doc.source_id}, update the existing File row, link to NO KB.
+    # warren echoes this key back opaquely (it never inspects collection), so
+    # the per-file target is enforced entirely here on the OWUI side.
+    target: str = 'knowledge'
     language: Optional[str] = None
     tags: list[str] = []
     metadata: dict = {}
@@ -214,10 +220,16 @@ async def _create_or_update_file_record(
     content_text: str,
     file_path: str,
     provider: str,
-    knowledge_id: str,
+    knowledge_id: Optional[str],
     user_id: str,
 ) -> str:
-    """Create or update a File record. Returns 'created' or 'updated'."""
+    """Create or update a File record. Returns 'created' or 'updated'.
+
+    ``knowledge_id=None`` is the per-file (non-KB) chat-attachment target: the
+    File row is created/updated exactly as for the KB path, but it is NOT linked
+    to any KB (no ``add_file_to_knowledge_by_id``) and the KB path-field write
+    (``set_path_fields_by_file_id``) is skipped. The ``data={'content': ...}``
+    write stays either way — it is what BYPASS full-content injection reads."""
     meta = {
         'name': doc.title or doc.filename,
         'content_type': doc.content_type,
@@ -257,7 +269,10 @@ async def _create_or_update_file_record(
         # sync stub), so mirror the freshly-promoted relative_path /
         # source_item_id onto the knowledge_file rows here. Captures files that
         # moved folders between stub discovery and the loader-worker callback.
-        await Knowledges.set_path_fields_by_file_id(file_id, {**(existing_file.meta or {}), **meta})
+        # Skipped for per-file chat attachments (knowledge_id=None): there are
+        # no knowledge_file rows to keep in sync.
+        if knowledge_id is not None:
+            await Knowledges.set_path_fields_by_file_id(file_id, {**(existing_file.meta or {}), **meta})
         # Stub File rows created up-front by sync workers
         # (services/sync/base_worker._create_stub_file_rows) carry
         # ``path=''`` until the loader-worker callback arrives with the
@@ -281,7 +296,11 @@ async def _create_or_update_file_record(
             meta=meta,
         )
         await Files.insert_new_file(user_id, file_form)
-        await Knowledges.add_file_to_knowledge_by_id(knowledge_id, file_id, user_id)
+        # Per-file chat attachments (knowledge_id=None) are deliberately KB-less:
+        # retrieval already resolves them via the file-{id} cache collection, so
+        # no KB membership row is created.
+        if knowledge_id is not None:
+            await Knowledges.add_file_to_knowledge_by_id(knowledge_id, file_id, user_id)
         return 'created'
 
 
@@ -431,16 +450,32 @@ async def _process_parsed_text_document(
 
 async def _process_chunked_text_document(
     request: Request,
-    knowledge_id: str,
+    knowledge_id: Optional[str],
     provider: str,
     doc: ChunkedTextDocument,
     user_id: str,
     original_file: Optional[UploadFile] = None,
+    *,
+    collection_name: Optional[str] = None,
+    add: bool = True,
+    skip_embed: bool = False,
 ) -> dict:
     """Process a chunked_text document: create file record, embed pre-chunked text, store.
 
     See :func:`_process_parsed_text_document` for the ``original_file``
     contract — same semantics here.
+
+    Embed target vs KB link are decoupled so the same helper serves both the KB
+    push and the per-file chat-attachment path:
+    - ``collection_name`` is the vector-DB collection to embed into. Defaults to
+      ``knowledge_id`` (KB path); the per-file path passes ``f'file-{file_id}'``.
+    - ``add`` mirrors ``save_docs_to_vector_db``'s append semantics: ``True`` for
+      the KB collection (dedup-then-append), ``False`` for the per-file cache
+      (created fresh, native chat parity).
+    - ``knowledge_id`` still drives the KB link inside
+      :func:`_create_or_update_file_record`; pass ``None`` for the per-file path.
+    - ``skip_embed`` (BYPASS_EMBEDDING_AND_RETRIEVAL): store the File-row content
+      only and write no vectors, mirroring native BYPASS.
     """
     file_id = f'{file_id_prefix_for(provider)}{doc.source_id}'
     joined_text = '\n\n'.join(doc.chunks)
@@ -457,8 +492,20 @@ async def _process_chunked_text_document(
         user_id=user_id,
     )
 
-    if status == 'updated':
-        await _delete_old_vectors(knowledge_id, file_id)
+    embed_collection = collection_name if collection_name is not None else knowledge_id
+
+    if skip_embed:
+        # BYPASS_EMBEDDING_AND_RETRIEVAL: the File-row content is already written
+        # by _create_or_update_file_record; full-content injection reads that. No
+        # vectors are written and no collection is touched.
+        await Files.set_status(file_id, 'completed', error=None)
+        return {'source_id': doc.source_id, 'file_id': file_id, 'status': status}
+
+    # Dedup-then-append only makes sense on the KB append path (add=True). The
+    # per-file cache uses add=False (fresh collection, native chat parity), where
+    # deleting first would drop vectors the no-op re-insert never restores.
+    if add and status == 'updated':
+        await _delete_old_vectors(embed_collection, file_id)
 
     text_hash = hashlib.sha256(joined_text.encode()).hexdigest()
     base_metadata = _build_base_metadata(doc, file_id, provider, user_id)
@@ -470,13 +517,13 @@ async def _process_chunked_text_document(
             save_docs_to_vector_db,
             request=request,
             docs=lc_docs,
-            collection_name=knowledge_id,
+            collection_name=embed_collection,
             metadata={
                 'file_id': file_id,
                 'name': doc.title or doc.filename,
                 'hash': text_hash,
             },
-            add=True,
+            add=add,
             split=False,
         )
         # Dual-write status into data (existing readers) and meta (cheap
@@ -767,6 +814,63 @@ async def ingest_documents(
             400,
             f"Invalid data_type '{data_type}'. Must be one of: {', '.join(sorted(VALID_DATA_TYPES))}",
         )
+
+    # Per-file (non-KB) chat-attachment dispatch. warren echoes collection.target
+    # back opaquely; when it is 'file' this push targets a chat attachment's
+    # per-file cache collection (file-{id}) with NO KB — skip KB find/create, the
+    # KB file-limit check, and the KB membership write entirely. The File row is
+    # the one created up-front by the direct upload; owui_upload's empty prefix
+    # makes f'{prefix}{source_id}' an identity so we update it in place.
+    if isinstance(principal, LoaderPrincipal) and collection.target == 'file':
+        if data_type != 'chunked_text':
+            raise HTTPException(
+                400,
+                f"target='file' requires data_type 'chunked_text', got '{data_type}'.",
+            )
+        bypass = request.app.state.config.BYPASS_EMBEDDING_AND_RETRIEVAL
+        results = []
+        for raw_doc in form_data.documents:
+            try:
+                doc = ChunkedTextDocument(**raw_doc)
+            except Exception as e:
+                raise HTTPException(
+                    400,
+                    f"Document '{raw_doc.get('source_id', '?')}' invalid for chunked_text: {e}",
+                )
+            file_id = f'{file_id_prefix_for(provider)}{doc.source_id}'
+            result = await _process_chunked_text_document(
+                request=request,
+                knowledge_id=None,  # no KB link
+                provider=provider,
+                doc=doc,
+                user_id=user.id,
+                original_file=original_file_lookup.get(doc.source_id),
+                collection_name=f'file-{file_id}',  # per-file cache collection
+                add=False,  # native chat parity: create fresh, don't append
+                skip_embed=bypass,  # BYPASS: store content only, no vectors
+            )
+            _maybe_persist_attachments(result=result, doc=doc, part_lookup=attachment_lookup)
+            # The callback has landed — clear the pipeline bookkeeping so the
+            # restart-safe reconciler stops tracking this file. Status is already
+            # 'completed'/'error' from _process_chunked_text_document.
+            await Files.update_file_metadata_by_id(file_id, {'pipeline_job_id': None, 'pipeline_submitted_at': None})
+            results.append(result)
+
+        created = sum(1 for r in results if r['status'] == 'created')
+        updated = sum(1 for r in results if r['status'] == 'updated')
+        errors = sum(1 for r in results if r['status'] == 'error')
+        return {
+            'knowledge_id': None,
+            'collection_source_id': collection.source_id,
+            'provider': provider,
+            'data_type': data_type,
+            'target': 'file',
+            'total': len(form_data.documents),
+            'created': created,
+            'updated': updated,
+            'errors': errors,
+            'documents': results,
+        }
 
     # Find or create KB. For LoaderPrincipal callers (loader-worker pushing
     # the result of a cloud sync), ``collection.source_id`` is the existing

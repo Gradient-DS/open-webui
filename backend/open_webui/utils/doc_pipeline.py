@@ -65,6 +65,22 @@ def should_route_to_pipeline(
     return bool(enabled and collection_name and file_path and file_format in PIPELINE_SUPPORTED_FORMATS)
 
 
+def should_route_chat_to_pipeline(
+    *,
+    enabled: bool,
+    file_path: Optional[str],
+    file_format: Optional[str],
+) -> bool:
+    """Whether a non-KB **chat attachment** should be handed to warren.
+
+    Same format gate as KB routing (``PIPELINE_SUPPORTED_FORMATS``) and the same
+    storage-``file_path`` requirement, but WITHOUT the ``collection_name`` term —
+    a chat attachment has no KB; its chunks land in the per-file ``file-{id}``
+    cache. Gated by its own flag (``DISTRIBUTED_DOC_PIPELINE_CHAT_ENABLED``) so
+    chat routing toggles independently of KB routing. Any miss → native path."""
+    return bool(enabled and file_path and file_format in PIPELINE_SUPPORTED_FORMATS)
+
+
 def reconcile_action(
     *,
     job_status: str,
@@ -105,13 +121,19 @@ def build_job_submission(
     chunk_size: int,
     chunk_overlap: int,
     acting_provider: str = ACTING_PROVIDER,
+    collection_target: str = 'knowledge',
 ) -> dict[str, Any]:
     """Build the ``POST /jobs`` body for one uploaded file.
 
     ``final_data_type`` is intentionally omitted so the pipeline's configured
     default (``owui_ingested``) applies. ``item.uuid`` and
     ``owui.document.source_id`` are both the OWUI ``file_id`` so the /ingest
-    callback reconstructs the existing file row."""
+    callback reconstructs the existing file row.
+
+    ``collection_target`` is echoed opaquely by warren into the /ingest
+    ``collection`` block: ``'knowledge'`` (default) is the KB path; ``'file'`` is
+    the per-file chat-attachment path that lands chunks in ``file-{file_id}``
+    with no KB link (see IngestCollection.target)."""
     return {
         'metadata': {
             'metadata': {},
@@ -133,7 +155,7 @@ def build_job_submission(
                 'ingest_url': ingest_url,
                 'acting_user_id': acting_user_id,
                 'acting_provider': acting_provider,
-                'collection': {'source_id': kb_id, 'name': kb_name},
+                'collection': {'source_id': kb_id, 'name': kb_name, 'target': collection_target},
                 'document': {
                     'source_id': file_id,
                     'filename': filename,
