@@ -261,7 +261,7 @@
 					/>
 				{/if}
 				<button
-					class="flex items-center gap-1.5 flex-1 p-2 text-left text-sm"
+					class="flex items-center gap-1.5 flex-1 px-1.5 py-2 text-left text-sm"
 					type="button"
 					on:click={(e) => onSourceHeaderClick(source, e)}
 				>
