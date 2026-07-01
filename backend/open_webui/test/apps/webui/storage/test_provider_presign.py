@@ -36,3 +36,18 @@ def test_local_get_presigned_url_not_implemented():
     storage = provider.LocalStorageProvider()
     with pytest.raises(NotImplementedError):
         storage.get_presigned_url('s3://x/y.txt', expires_in=900)
+
+
+def test_s3_get_presigned_put_url(monkeypatch):
+    provider_ = provider.S3StorageProvider()
+    called = {}
+
+    def fake_generate(op, Params, ExpiresIn):
+        called.update(op=op, Params=Params, ExpiresIn=ExpiresIn)
+        return 'https://s3/put?sig=1'
+
+    monkeypatch.setattr(provider_.s3_client, 'generate_presigned_url', fake_generate)
+    url = provider_.get_presigned_put_url('s3://bucket/key.pdf', 3600, 'application/pdf')
+    assert url == 'https://s3/put?sig=1'
+    assert called['op'] == 'put_object'
+    assert called['Params']['Key'].endswith('key.pdf')

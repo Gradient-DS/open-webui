@@ -76,6 +76,15 @@ class StorageProvider(ABC):
         without that capability raise NotImplementedError."""
         raise NotImplementedError('get_presigned_url is not supported by this storage provider')
 
+    def get_presigned_put_url(self, file_path: str, expires_in: int, content_type: str) -> str:
+        """Return a short-lived presigned PUT URL for ``file_path``.
+
+        Only providers that support out-of-band write (S3) implement this;
+        it lets an external stager upload object bytes directly without
+        holding storage credentials. Providers without that capability
+        raise NotImplementedError."""
+        raise NotImplementedError('get_presigned_put_url is not supported by this storage provider')
+
 
 class LocalStorageProvider(StorageProvider):
     @staticmethod
@@ -118,6 +127,10 @@ class LocalStorageProvider(StorageProvider):
                     log.exception(f'Failed to delete {file_path}. Reason: {e}')
         else:
             log.warning(f'Directory {UPLOAD_DIR} not found in local storage.')
+
+    @staticmethod
+    def get_presigned_put_url(file_path: str, expires_in: int, content_type: str) -> str:
+        raise NotImplementedError('presigned PUT requires S3 storage')
 
 
 class S3StorageProvider(StorageProvider):
@@ -209,6 +222,23 @@ class S3StorageProvider(StorageProvider):
             )
         except ClientError as e:
             raise RuntimeError(f'Error generating presigned URL for S3 object: {e}')
+
+    def get_presigned_put_url(self, file_path: str, expires_in: int, content_type: str) -> str:
+        """Return a presigned PUT URL an external uploader can use to write the
+        object over plain HTTPS without S3 credentials of its own."""
+        s3_key = self._extract_s3_key(file_path)
+        try:
+            return self.s3_client.generate_presigned_url(
+                'put_object',
+                Params={
+                    'Bucket': self.bucket_name,
+                    'Key': s3_key,
+                    'ContentType': content_type,
+                },
+                ExpiresIn=expires_in,
+            )
+        except ClientError as e:
+            raise RuntimeError(f'Error generating presigned PUT URL for S3 object: {e}')
 
     def delete_file(self, file_path: str) -> None:
         """Handles deletion of the file from S3 storage."""
