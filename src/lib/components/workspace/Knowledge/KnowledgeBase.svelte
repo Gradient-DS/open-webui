@@ -1577,6 +1577,12 @@
 
 		if (data.status === 'completed') {
 			fileItems[idx].status = 'uploaded';
+			// A completed file can still carry a warning (e.g. warren parsed zero
+			// chunks — a scanned/no-text PDF). It's kept as a member but flagged so
+			// the list shows a warning triangle; mirrors meta.warning on reload.
+			if (data.error) {
+				fileItems[idx].warning = data.error;
+			}
 			// Backend already linked the file to the KB during upload (see
 			// process_uploaded_file in routers/files.py — Phase 2 of the
 			// 2026-05-25 plan). Re-invoking addFileHandler here would call
