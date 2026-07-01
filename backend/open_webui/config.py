@@ -3878,6 +3878,12 @@ DISTRIBUTED_DOC_PIPELINE_ENABLED = PersistentConfig(
     os.environ.get('DISTRIBUTED_DOC_PIPELINE_ENABLED', 'False').lower() == 'true',
 )
 
+DISTRIBUTED_DOC_PIPELINE_SYNC_ENABLED = PersistentConfig(
+    'DISTRIBUTED_DOC_PIPELINE_SYNC_ENABLED',
+    'rag.distributed_doc_pipeline_sync_enabled',
+    os.environ.get('DISTRIBUTED_DOC_PIPELINE_SYNC_ENABLED', 'False').lower() == 'true',
+)
+
 # Route *chat attachments* (non-KB uploads, the per-file file-{id} cache) through
 # warren too, instead of native in-process parse+embed. Independent of the KB
 # flag above so chat routing can be toggled on its own. Reuses all the other
