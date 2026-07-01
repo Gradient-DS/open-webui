@@ -1640,15 +1640,19 @@ class ProcessFileForm(BaseModel):
     collection_name: Optional[str] = None
 
 
-async def route_file_to_pipeline(request: Request, file, knowledge_id: str, user) -> dict:
-    """Hand a KB-bound file to the distributed doc-pipeline (warren).
+async def submit_existing_file_to_pipeline(request: Request, file, knowledge_id: str, user) -> dict:
+    """Submit an already-stored File to the distributed doc-pipeline (warren).
 
     Presigns the file's stored object, submits one warren job, links the file
     to the KB, and marks it 'processing'. Warren parses + chunks the file and
     POSTs chunked_text back to /ingest, which embeds + inserts via the native
     path and sets the file 'completed'. No native parse/embed runs here; the
     file's original bytes are untouched. Raises if the KB is missing or the
-    submit fails (the caller marks the file 'error')."""
+    submit fails (the caller marks the file 'error').
+
+    Reusable body extracted out of :func:`route_file_to_pipeline` so callers
+    other than the upload route (e.g. the cloud-sync integrations submit
+    endpoint) can submit an existing File the same way."""
     config = request.app.state.config
     knowledge = await Knowledges.get_knowledge_by_id(knowledge_id)
     if knowledge is None:
@@ -1698,6 +1702,16 @@ async def route_file_to_pipeline(request: Request, file, knowledge_id: str, user
         'content': '',
         'pipeline_job_id': job_id,
     }
+
+
+async def route_file_to_pipeline(request: Request, file, knowledge_id: str, user) -> dict:
+    """Hand a KB-bound file to the distributed doc-pipeline (warren).
+
+    Thin wrapper kept for the upload route's call sites; delegates the actual
+    submit body to :func:`submit_existing_file_to_pipeline` (see that
+    docstring for behavior). Raises if the KB is missing or the submit fails
+    (the caller marks the file 'error')."""
+    return await submit_existing_file_to_pipeline(request, file, knowledge_id, user)
 
 
 async def route_chat_file_to_pipeline(request: Request, file, user) -> dict:
