@@ -54,12 +54,25 @@ async def reconcile_pipeline_jobs(config, *, now: int) -> int:
         if action == 'wait':
             continue
 
-        if action == 'fail':
-            reason = 'distributed doc-pipeline job reported failure'
-        elif action == 'empty':
-            reason = 'document produced no searchable content (empty, scanned, or non-text file)'
-        else:
-            reason = f'distributed doc-pipeline job did not complete within {cap}s'
+        # 'empty' is a *successful* parse that produced no chunks (e.g. a scanned
+        # image-only PDF, or one where even OCR yields nothing). Keep it as a
+        # completed KB member — matching the native zero-text path — but record a
+        # warning in meta so the file list can flag it (and it can be
+        # re-processed later) instead of hard-failing and vanishing. fail/timeout
+        # stay hard errors below.
+        if action == 'empty':
+            warning = 'No searchable content could be extracted.'
+            await Files.set_status(file.id, 'completed')
+            await Files.update_file_metadata_by_id(file.id, {'warning': warning})
+            await emit_file_status(user_id=file.user_id, file_id=file.id, status='completed', error=warning)
+            log.info(f'doc-pipeline reconcile: marked file {file.id} completed-empty (job {job_id})')
+            continue
+
+        reason = (
+            'distributed doc-pipeline job reported failure'
+            if action == 'fail'
+            else f'distributed doc-pipeline job did not complete within {cap}s'
+        )
         await Files.set_status(file.id, 'error', error=reason)
         # Resolve the frontend's loading state: emit the honest 'failed' so the
         # spinner ends (toast + removal) instead of hanging until a page reload.

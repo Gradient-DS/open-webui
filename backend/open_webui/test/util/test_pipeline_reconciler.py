@@ -121,12 +121,12 @@ async def test_reconcile_covers_kb_less_chat_files(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_reconcile_marks_completed_but_empty_as_error(monkeypatch):
+async def test_reconcile_marks_completed_but_empty_as_completed_with_warning(monkeypatch):
     """A warren job that reports 'completed' while its file is still 'processing'
     means /ingest was never called — warren parsed zero chunks (scanned/no-text
-    doc). The reconciler marks it 'error' with the empty-content reason and emits
-    'failed' immediately (well within the wall-clock cap) so the spinner clears
-    fast instead of hanging until the 6h backstop."""
+    doc). Option C: keep it as a *completed* KB member but record a meta
+    'warning' so the file list can flag it (and it can be re-processed later),
+    rather than hard-failing and vanishing. Not counted as an error."""
     config = SimpleNamespace(
         PIPELINE_API_BASE_URL='http://pipe:8080',
         PIPELINE_API_KEY='secret',
@@ -139,6 +139,7 @@ async def test_reconcile_marks_completed_but_empty_as_error(monkeypatch):
         ),
     ]
     set_calls = []
+    meta_calls = []
     emit_calls = []
 
     async def fake_get_files():
@@ -150,20 +151,27 @@ async def test_reconcile_marks_completed_but_empty_as_error(monkeypatch):
     async def fake_set_status(file_id, status, error=None, db=None):
         set_calls.append((file_id, status, error))
 
+    async def fake_update_meta(file_id, data, db=None):
+        meta_calls.append((file_id, data))
+
     async def fake_emit(*, user_id, file_id, status, error=None, collection_name=None):
         emit_calls.append((user_id, file_id, status, error))
 
     monkeypatch.setattr(reconciler.Files, 'get_processing_files_with_pipeline_job', fake_get_files, raising=False)
     monkeypatch.setattr(reconciler.doc_pipeline, 'get_job_status', fake_get_job_status)
     monkeypatch.setattr(reconciler.Files, 'set_status', fake_set_status, raising=False)
+    monkeypatch.setattr(reconciler.Files, 'update_file_metadata_by_id', fake_update_meta, raising=False)
     monkeypatch.setattr(reconciler, 'emit_file_status', fake_emit)
 
     errored = await reconciler.reconcile_pipeline_jobs(config, now=now)
 
-    assert errored == 1
-    assert len(set_calls) == 1
-    file_id, file_status, error = set_calls[0]
-    assert (file_id, file_status) == ('f-empty', 'error')
-    assert 'no searchable content' in error
-    # The honest 'failed' emit lands so the frontend spinner resolves.
-    assert emit_calls == [('owner-1', 'f-empty', 'failed', error)]
+    # Empty is a success, not an error → not counted; kept as 'completed'.
+    assert errored == 0
+    assert set_calls == [('f-empty', 'completed', None)]
+    # A meta 'warning' is recorded so the file list can show the triangle.
+    assert len(meta_calls) == 1
+    file_id, meta_update = meta_calls[0]
+    assert file_id == 'f-empty'
+    assert 'warning' in meta_update and 'searchable content' in meta_update['warning']
+    # The emit keeps the file ('completed') and carries the warning for the live view.
+    assert emit_calls == [('owner-1', 'f-empty', 'completed', meta_update['warning'])]

@@ -15,6 +15,7 @@
 
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
 	import DocumentPage from '$lib/components/icons/DocumentPage.svelte';
+	import ExclamationTriangle from '$lib/components/icons/ExclamationTriangle.svelte';
 	import GarbageBin from '$lib/components/icons/GarbageBin.svelte';
 	import Spinner from '$lib/components/common/Spinner.svelte';
 	import VirtualList from '@sveltejs/svelte-virtual-list';
@@ -122,6 +123,13 @@
 			>
 				<div class="">
 					<div class="flex gap-2 items-center line-clamp-1">
+						{#if file?.status !== 'uploading' && (file?.warning ?? file?.meta?.warning)}
+							<Tooltip
+								content={$i18n.t('No searchable content could be extracted.')}
+							>
+								<ExclamationTriangle className="size-3.5 text-red-500 shrink-0" />
+							</Tooltip>
+						{/if}
 						<div class="line-clamp-1 text-sm">
 							{file?.name ?? file?.meta?.name}
 							{#if file?.meta?.size}
