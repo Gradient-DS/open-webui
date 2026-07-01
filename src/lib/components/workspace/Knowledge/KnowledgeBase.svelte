@@ -580,9 +580,16 @@
 				}
 			} else {
 				toast.error($i18n.t('Failed to upload file.'));
+				// The upload call errored (e.g. allow-list 400) so no real file id
+				// was assigned and no status poller was armed. Remove the optimistic
+				// 'uploading' row (keyed by itemId — it never got an id) or it spins
+				// forever until a page reload. Mirrors the uploadedFile.error branch
+				// above and uploadWeb's cleanup.
+				fileItems = fileItems.filter((item) => item.itemId !== fileItem.itemId);
 			}
 		} catch (e) {
 			toast.error(`${e}`);
+			fileItems = fileItems.filter((item) => item.itemId !== fileItem.itemId);
 		}
 	};
 
