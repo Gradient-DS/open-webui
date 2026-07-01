@@ -109,15 +109,24 @@ def reconcile_action(
     is waited on for as long as it runs. Returns:
     - ``'fail'``  — the job reported failure (``failed``/``partial``); mark the
       file 'error' now.
-    - ``'timeout'`` — the job never reached a usable terminal within the
-      generous wall-clock backstop (hung worker, or ``/ingest`` never landed);
-      mark 'error'.
-    - ``'wait'``  — still running/pending, or just completed (give ``/ingest`` a
-      moment); leave the file as-is.
+    - ``'empty'`` — the job ``completed`` yet the file is still 'processing',
+      meaning ``/ingest`` was never called: warren parsed zero chunks (scanned
+      / no-text document). One warren job carries exactly one document, and a
+      document that produced chunks commits the file to 'completed' via the
+      synchronous ``/ingest`` call *before* the job finishes — so a completed
+      job whose file is still 'processing' can only be the zero-chunk case.
+      Mark it terminal now instead of waiting out the wall-clock backstop.
+    - ``'timeout'`` — the job never reached a terminal within the generous
+      wall-clock backstop (hung worker); mark 'error'.
+    - ``'wait'``  — still running/pending; leave the file as-is.
 
-    Failure takes precedence over timeout so the error message is accurate."""
+    Failure takes precedence, then the completed-but-empty terminal, then the
+    wall-clock backstop. The caller (the reconciler) only ever passes files
+    still in 'processing', which is what makes the 'empty' inference sound."""
     if job_status in ('failed', 'partial'):
         return 'fail'
+    if job_status == 'completed':
+        return 'empty'
     if age_seconds > max_wall_clock_seconds:
         return 'timeout'
     return 'wait'
