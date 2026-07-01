@@ -26,7 +26,7 @@ GOOGLE_WORKSPACE_EXPORT_MAP = {
 }
 
 # Standard fields to request from the Files API
-_FILE_FIELDS = 'id,name,mimeType,size,md5Checksum,modifiedTime,parents,trashed,shortcutDetails'
+_FILE_FIELDS = 'id,name,mimeType,size,md5Checksum,modifiedTime,parents,trashed,shortcutDetails,webViewLink'
 
 # Shared drive params required for accessing shared drive content
 _SHARED_DRIVE_PARAMS = {

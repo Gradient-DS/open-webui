@@ -67,6 +67,25 @@ def test_file_id_prefix_for_unknown_falls_back_to_slug_dash():
     assert file_id_prefix_for('') == '-'
 
 
+def test_owui_upload_slug_has_empty_prefix():
+    """The direct-upload provider slug maps to an EMPTY prefix.
+
+    Direct-upload File rows already exist with a bare UUID id (no provider
+    prefix). The distributed-doc-pipeline path POSTs the parsed chunks back
+    through the same /ingest endpoint with acting_provider='owui_upload' and
+    document.source_id=<file_id>. The empty prefix makes the ingest-side
+    reconstruction f'{prefix}{source_id}' an identity, so warren updates the
+    existing upload row instead of creating a twin (the 2026-04-29 failure
+    mode, inverted)."""
+    assert file_id_prefix_for('owui_upload') == ''
+
+
+def test_owui_upload_reconstruction_is_identity():
+    """f'{prefix}{file_id}' == file_id for the direct-upload slug."""
+    file_id = 'a1b2c3d4-0000-0000-0000-abcdef012345'
+    assert f'{file_id_prefix_for("owui_upload")}{file_id}' == file_id
+
+
 def test_round_trip_stub_vs_ingest_file_id():
     """Stub-side f'{prefix}{item_id}' must equal ingest-side reconstruction.
 

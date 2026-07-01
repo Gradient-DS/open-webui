@@ -246,7 +246,12 @@ openWebui:
     chunkOverlap: "200"
     ragHybridBm25Weight: "0.5"
     enableRagHybridSearch: "true"
-    ragAllowedFileExtensions: "pdf,txt,md,docx,csv,json,xlsx"
+    # Document formats we can process (warren + the external doc-processor).
+    # Deliberately excludes images, archives, disk images, video and other
+    # binaries so large junk (e.g. a .dmg) is rejected instead of ingested.
+    # Extension-less files always pass the gate (decided server-side by content
+    # type) — see the empty-extension allowance in routers/files.py.
+    ragAllowedFileExtensions: "pdf,doc,docx,dotx,xls,xlsx,xltx,ppt,pptx,potx,csv,tsv,txt,md,markdown,rtf,odt,ods,odp,html,htm,xml,json,epub"
 
     # File Processing
     fileProcessingMaxConcurrent: "10"  # Max concurrent file processing tasks
@@ -554,6 +559,22 @@ openWebui:
     # the in-namespace service.
     loaderWorkerUrl: ""
 
+    # Distributed document pipeline (warren). When enabled, KB ingestion is
+    # delegated to the external pipeline (presigned-URL fetch → parse+chunk →
+    # /ingest callback) instead of native parse+embed. PIPELINE_API_KEY is a
+    # secret (secrets.pipelineApiKey / externalSecrets field). Empty numeric
+    # keys fall back to the backend defaults shown.
+    distributedDocPipelineEnabled: "false"
+    distributedDocPipelineChatEnabled: "false"  # also route chat attachments (non-KB) through warren; independent of the KB flag
+    distributedDocPipelineSyncEnabled: "false"  # route cloud sync (bulk) through warren; independent of the KB/chat flags
+    pipelineApiBaseUrl: ""               # e.g. http://doc-pipeline-pipeline-api.<ns>.svc.cluster.local:8080
+    pipelineIngestCallbackUrl: ""        # this server's in-cluster URL warren POSTs /ingest back to
+    pipelinePresignTtlSeconds: ""        # default 3600
+    pipelineChunkSize: ""                # default 1000
+    pipelineChunkOverlap: ""             # default 100
+    pipelineReconcileIntervalSeconds: "" # default 120
+    pipelineJobMaxWallClockSeconds: ""   # default 21600 (6h backstop)
+
     # Email Invites (Microsoft Graph API)
     enableEmailInvites: "false"
     emailGraphTenantId: ""       # Azure AD Tenant ID for email app
@@ -564,6 +585,10 @@ openWebui:
     inviteExpiryHours: "168"     # 7 days
     emailInviteSubject: ""       # Custom email subject (empty = default)
     emailInviteHeading: ""       # Custom email + invite page heading (empty = default)
+
+    # Forgot Password (self-service password reset; reuses Email Graph config)
+    enableForgotPassword: "true"
+    passwordResetExpiryMinutes: "30"
 
     bypassModelAccessControl: "false"
 
@@ -872,8 +897,16 @@ loaderWorker:
     litellmBaseUrl: "http://litellm-proxy.shared-services.svc:4000/v1"
     maxConcurrentJobsPerReplica: 4
     perJobItemConcurrency: 5
+    # Max concurrent OWUI file-status polls per job in warren mode; decoupled from
+    # download concurrency (perJobItemConcurrency), so it can be much higher — a
+    # polling item holds only a lightweight status loop (bytes freed after PUT).
+    perJobPollConcurrency: 100
     jobLeaseTimeoutSeconds: 900
     embedderBatchSize: 100
+    # Pipeline mode: "doc_processor" (default) or "warren".
+    pipelineMode: "doc_processor"
+    # OWUI base URL for warren mode; empty falls back to the in-cluster Open WebUI service URL.
+    owuiBaseUrl: ""
 
   # Postgres lives on the existing tenant Postgres pod; create a new database
   # via the bootstrap Job (templates/loader-worker/postgres-bootstrap-job.yaml).
@@ -944,6 +977,10 @@ secrets:
   # outbound; open-webui validates inbound). Same value, both pods.
   loaderIngestApiKey: ""
 
+  # Distributed doc-pipeline submit bearer (matches pipeline-api inbound
+  # PIPELINE_API_KEY). open-webui presents this outbound to pipeline-api.
+  pipelineApiKey: ""
+
   # Loader-worker job DB role password (Postgres role provisioned by the
   # post-install bootstrap Job).
   loaderWorkerDbPassword: ""
@@ -1008,6 +1045,7 @@ externalSecrets:
       agentApiKey: false
       searchApiKey: false
       loaderIngestApiKey: false
+      pipelineApiKey: false
       loaderWorkerDbPassword: false
 
 # -----------------------------------------------------------------------------

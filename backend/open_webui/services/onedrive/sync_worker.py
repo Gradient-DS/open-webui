@@ -310,6 +310,9 @@ class OneDriveSyncWorker(BaseSyncWorker):
             'source': 'onedrive',
             'onedrive_item_id': item_id,
             'onedrive_drive_id': drive_id,
+            # Generic provenance URL (Graph driveItem webUrl) — same `source_url`
+            # key every cloud-sync provider writes, consumed by the citation layer.
+            'source_url': (file_info or {}).get('item', {}).get('webUrl', ''),
             'source_item_id': source_item_id,
             'relative_path': relative_path,
             'last_synced_at': int(time.time()),

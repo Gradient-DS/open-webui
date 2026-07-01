@@ -628,7 +628,9 @@ class TopdeskSyncWorker(BaseSyncWorker):
             'source': 'topdesk',
             'topdesk_item_id': item_id,
             'topdesk_number': info.get('topdesk_number', ''),
-            'topdesk_url': info.get('web_url', ''),
+            # Generic provenance URL (see Confluence worker) — one `source_url`
+            # for every cloud-sync provider, consumed by the citation layer.
+            'source_url': info.get('web_url', ''),
             'topdesk_title': info.get('title', ''),
             'topdesk_language': info.get('topdesk_language', ''),
             'topdesk_status': info.get('topdesk_status', ''),

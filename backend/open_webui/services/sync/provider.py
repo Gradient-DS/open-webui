@@ -45,6 +45,14 @@ PROVIDER_FILE_ID_PREFIXES: dict[str, str] = {
     'google_drive': 'googledrive-',
     'confluence': 'confluence-',
     'topdesk': 'topdesk-',
+    # Direct-upload via the distributed doc-pipeline. NOT a managed-sync
+    # provider (no worker class) — the empty prefix is deliberate. A
+    # direct-upload File row already exists with a bare UUID id; the
+    # pipeline POSTs the parsed chunks back through /ingest with
+    # acting_provider='owui_upload' and document.source_id=<file_id>, so an
+    # empty prefix makes the reconstruction f'{prefix}{source_id}' an
+    # identity and warren updates the existing row instead of creating a twin.
+    'owui_upload': '',
 }
 
 

@@ -17,10 +17,12 @@ from open_webui.models.files import FileForm, Files
 from open_webui.models.knowledge import KnowledgeForm, Knowledges
 from open_webui.retrieval.loaders.main import Loader
 from open_webui.retrieval.vector.async_client import ASYNC_VECTOR_DB_CLIENT
-from open_webui.routers.retrieval import save_docs_to_vector_db
+from open_webui.routers.retrieval import save_docs_to_vector_db, submit_existing_file_to_pipeline
+from open_webui.services.files.events import emit_file_status
 from open_webui.services.sync.provider import file_id_prefix_for
 from open_webui.storage.provider import Storage
 from open_webui.utils.auth import get_verified_user
+from open_webui.utils.doc_pipeline import ACTING_PROVIDER
 from open_webui.utils.service_auth import LoaderPrincipal, get_integration_principal
 
 router = APIRouter()
@@ -38,6 +40,12 @@ class IngestCollection(BaseModel):
     name: str
     description: str = ''
     data_type: str = 'parsed_text'
+    # 'knowledge' → embed into the KB collection + link the file to the KB
+    # (default; unchanged behavior). 'file' → per-file chat attachment: embed
+    # into file-{doc.source_id}, update the existing File row, link to NO KB.
+    # warren echoes this key back opaquely (it never inspects collection), so
+    # the per-file target is enforced entirely here on the OWUI side.
+    target: str = 'knowledge'
     language: Optional[str] = None
     tags: list[str] = []
     metadata: dict = {}
@@ -90,6 +98,21 @@ class FullDocument(IngestDocumentBase):
 class IngestForm(BaseModel):
     collection: IngestCollection
     documents: list[dict]
+
+
+# Warren cloud-sync (Option 1b) — loader-worker staging + submit + poll.
+
+
+class StageRequest(BaseModel):
+    knowledge_id: str
+    source_id: str
+    filename: str
+    content_type: str = 'application/octet-stream'
+
+
+class SubmitRequest(BaseModel):
+    file_id: str
+    knowledge_id: str
 
 
 # --- Helper Functions ---
@@ -214,10 +237,16 @@ async def _create_or_update_file_record(
     content_text: str,
     file_path: str,
     provider: str,
-    knowledge_id: str,
+    knowledge_id: Optional[str],
     user_id: str,
 ) -> str:
-    """Create or update a File record. Returns 'created' or 'updated'."""
+    """Create or update a File record. Returns 'created' or 'updated'.
+
+    ``knowledge_id=None`` is the per-file (non-KB) chat-attachment target: the
+    File row is created/updated exactly as for the KB path, but it is NOT linked
+    to any KB (no ``add_file_to_knowledge_by_id``) and the KB path-field write
+    (``set_path_fields_by_file_id``) is skipped. The ``data={'content': ...}``
+    write stays either way — it is what BYPASS full-content injection reads."""
     meta = {
         'name': doc.title or doc.filename,
         'content_type': doc.content_type,
@@ -257,7 +286,10 @@ async def _create_or_update_file_record(
         # sync stub), so mirror the freshly-promoted relative_path /
         # source_item_id onto the knowledge_file rows here. Captures files that
         # moved folders between stub discovery and the loader-worker callback.
-        await Knowledges.set_path_fields_by_file_id(file_id, {**(existing_file.meta or {}), **meta})
+        # Skipped for per-file chat attachments (knowledge_id=None): there are
+        # no knowledge_file rows to keep in sync.
+        if knowledge_id is not None:
+            await Knowledges.set_path_fields_by_file_id(file_id, {**(existing_file.meta or {}), **meta})
         # Stub File rows created up-front by sync workers
         # (services/sync/base_worker._create_stub_file_rows) carry
         # ``path=''`` until the loader-worker callback arrives with the
@@ -281,7 +313,11 @@ async def _create_or_update_file_record(
             meta=meta,
         )
         await Files.insert_new_file(user_id, file_form)
-        await Knowledges.add_file_to_knowledge_by_id(knowledge_id, file_id, user_id)
+        # Per-file chat attachments (knowledge_id=None) are deliberately KB-less:
+        # retrieval already resolves them via the file-{id} cache collection, so
+        # no KB membership row is created.
+        if knowledge_id is not None:
+            await Knowledges.add_file_to_knowledge_by_id(knowledge_id, file_id, user_id)
         return 'created'
 
 
@@ -431,16 +467,32 @@ async def _process_parsed_text_document(
 
 async def _process_chunked_text_document(
     request: Request,
-    knowledge_id: str,
+    knowledge_id: Optional[str],
     provider: str,
     doc: ChunkedTextDocument,
     user_id: str,
     original_file: Optional[UploadFile] = None,
+    *,
+    collection_name: Optional[str] = None,
+    add: bool = True,
+    skip_embed: bool = False,
 ) -> dict:
     """Process a chunked_text document: create file record, embed pre-chunked text, store.
 
     See :func:`_process_parsed_text_document` for the ``original_file``
     contract — same semantics here.
+
+    Embed target vs KB link are decoupled so the same helper serves both the KB
+    push and the per-file chat-attachment path:
+    - ``collection_name`` is the vector-DB collection to embed into. Defaults to
+      ``knowledge_id`` (KB path); the per-file path passes ``f'file-{file_id}'``.
+    - ``add`` mirrors ``save_docs_to_vector_db``'s append semantics: ``True`` for
+      the KB collection (dedup-then-append), ``False`` for the per-file cache
+      (created fresh, native chat parity).
+    - ``knowledge_id`` still drives the KB link inside
+      :func:`_create_or_update_file_record`; pass ``None`` for the per-file path.
+    - ``skip_embed`` (BYPASS_EMBEDDING_AND_RETRIEVAL): store the File-row content
+      only and write no vectors, mirroring native BYPASS.
     """
     file_id = f'{file_id_prefix_for(provider)}{doc.source_id}'
     joined_text = '\n\n'.join(doc.chunks)
@@ -457,8 +509,20 @@ async def _process_chunked_text_document(
         user_id=user_id,
     )
 
-    if status == 'updated':
-        await _delete_old_vectors(knowledge_id, file_id)
+    embed_collection = collection_name if collection_name is not None else knowledge_id
+
+    if skip_embed:
+        # BYPASS_EMBEDDING_AND_RETRIEVAL: the File-row content is already written
+        # by _create_or_update_file_record; full-content injection reads that. No
+        # vectors are written and no collection is touched.
+        await Files.set_status(file_id, 'completed', error=None)
+        return {'source_id': doc.source_id, 'file_id': file_id, 'status': status}
+
+    # Dedup-then-append only makes sense on the KB append path (add=True). The
+    # per-file cache uses add=False (fresh collection, native chat parity), where
+    # deleting first would drop vectors the no-op re-insert never restores.
+    if add and status == 'updated':
+        await _delete_old_vectors(embed_collection, file_id)
 
     text_hash = hashlib.sha256(joined_text.encode()).hexdigest()
     base_metadata = _build_base_metadata(doc, file_id, provider, user_id)
@@ -470,13 +534,13 @@ async def _process_chunked_text_document(
             save_docs_to_vector_db,
             request=request,
             docs=lc_docs,
-            collection_name=knowledge_id,
+            collection_name=embed_collection,
             metadata={
                 'file_id': file_id,
                 'name': doc.title or doc.filename,
                 'hash': text_hash,
             },
-            add=True,
+            add=add,
             split=False,
         )
         # Dual-write status into data (existing readers) and meta (cheap
@@ -768,6 +832,81 @@ async def ingest_documents(
             f"Invalid data_type '{data_type}'. Must be one of: {', '.join(sorted(VALID_DATA_TYPES))}",
         )
 
+    # Per-file (non-KB) chat-attachment dispatch. warren echoes collection.target
+    # back opaquely; when it is 'file' this push targets a chat attachment's
+    # per-file cache collection (file-{id}) with NO KB — skip KB find/create, the
+    # KB file-limit check, and the KB membership write entirely. The File row is
+    # the one created up-front by the direct upload; owui_upload's empty prefix
+    # makes f'{prefix}{source_id}' an identity so we update it in place.
+    if isinstance(principal, LoaderPrincipal) and collection.target == 'file':
+        if data_type != 'chunked_text':
+            raise HTTPException(
+                400,
+                f"target='file' requires data_type 'chunked_text', got '{data_type}'.",
+            )
+        bypass = request.app.state.config.BYPASS_EMBEDDING_AND_RETRIEVAL
+        results = []
+        for raw_doc in form_data.documents:
+            try:
+                doc = ChunkedTextDocument(**raw_doc)
+            except Exception as e:
+                raise HTTPException(
+                    400,
+                    f"Document '{raw_doc.get('source_id', '?')}' invalid for chunked_text: {e}",
+                )
+            file_id = f'{file_id_prefix_for(provider)}{doc.source_id}'
+            result = await _process_chunked_text_document(
+                request=request,
+                knowledge_id=None,  # no KB link
+                provider=provider,
+                doc=doc,
+                user_id=user.id,
+                # The direct upload already stored the source bytes at file.path;
+                # warren re-shipping them (original_files) would be a redundant
+                # Storage round-trip inside the /ingest critical path — drop it.
+                # None is a no-op when warren ships nothing, so this is always safe.
+                original_file=None,
+                collection_name=f'file-{file_id}',  # per-file cache collection
+                add=False,  # native chat parity: create fresh, don't append
+                skip_embed=bypass,  # BYPASS: store content only, no vectors
+            )
+            _maybe_persist_attachments(result=result, doc=doc, part_lookup=attachment_lookup)
+            # The callback has landed — clear the pipeline bookkeeping so the
+            # restart-safe reconciler stops tracking this file. Status is already
+            # 'completed'/'error' from _process_chunked_text_document.
+            await Files.update_file_metadata_by_id(file_id, {'pipeline_job_id': None, 'pipeline_submitted_at': None})
+            # Emit the honest completion: the vectors just landed (or the embed
+            # failed). Phase 1 suppressed _process_handler's submit-time emit to
+            # 'processing', so THIS is the signal that ends the frontend's
+            # loading state. The target='file' path is only ever reached for
+            # direct chat attachments (provider owui_upload), so no cloud-sync
+            # guard is needed here. emit_file_status swallows socket errors, so a
+            # hiccup never fails ingestion.
+            await emit_file_status(
+                user_id=user.id,
+                file_id=file_id,
+                status='completed' if result['status'] in ('created', 'updated') else 'failed',
+                error=result.get('error'),
+                collection_name=f'file-{file_id}',
+            )
+            results.append(result)
+
+        created = sum(1 for r in results if r['status'] == 'created')
+        updated = sum(1 for r in results if r['status'] == 'updated')
+        errors = sum(1 for r in results if r['status'] == 'error')
+        return {
+            'knowledge_id': None,
+            'collection_source_id': collection.source_id,
+            'provider': provider,
+            'data_type': data_type,
+            'target': 'file',
+            'total': len(form_data.documents),
+            'created': created,
+            'updated': updated,
+            'errors': errors,
+            'documents': results,
+        }
+
     # Find or create KB. For LoaderPrincipal callers (loader-worker pushing
     # the result of a cloud sync), ``collection.source_id`` is the existing
     # open-webui KB UUID — look that up directly so we don't double-create.
@@ -919,6 +1058,22 @@ async def ingest_documents(
         elif result['status'] == 'error':
             errors += 1
 
+        # Direct KB uploads routed through warren (provider owui_upload) need an
+        # honest file:status once their vectors land here — Phase 1 suppressed
+        # _process_handler's submit-time emit to 'processing'. Cloud-sync
+        # providers (onedrive/confluence/google_drive/topdesk) are deliberately
+        # skipped: they emit their own honest {provider}:file:added, and a
+        # redundant file:status here would double-count uploadBatch.added in
+        # KnowledgeBase.svelte (which listens to BOTH events).
+        if provider == ACTING_PROVIDER:
+            await emit_file_status(
+                user_id=user.id,
+                file_id=result['file_id'],
+                status='completed' if result['status'] in ('created', 'updated') else 'failed',
+                error=result.get('error'),
+                collection_name=knowledge.id,
+            )
+
     return {
         'knowledge_id': knowledge.id,
         'collection_source_id': collection.source_id,
@@ -930,6 +1085,121 @@ async def ingest_documents(
         'errors': errors,
         'documents': results,
     }
+
+
+def _require_loader(principal) -> LoaderPrincipal:
+    """The warren cloud-sync routes are machine-only: the loader bearer is the
+    trust signal. A human/cookie caller falls through as a plain ``UserModel``
+    from :func:`get_integration_principal`; reject it with 403 so these
+    staging/submit/poll endpoints are never reachable from a browser session."""
+    if not isinstance(principal, LoaderPrincipal):
+        raise HTTPException(status_code=403, detail='This endpoint requires the loader service credential')
+    return principal
+
+
+@router.post('/stage')
+async def stage_file(
+    request: Request,
+    body: StageRequest,
+    principal=Depends(get_integration_principal),
+):
+    """Find-or-create the ``File`` row for a cloud-synced file at its canonical
+    S3 key and hand back a presigned PUT the loader-worker uses to upload the
+    original bytes over plain HTTPS.
+
+    The canonical key is the one wiring invariant: the PUT MUST target the same
+    key ``File.path`` records and warren's later presigned GET (issued in
+    ``submit_existing_file_to_pipeline``) reads. Both the key derivation and its
+    inverse live in the storage provider (``get_object_path`` mirrors
+    ``upload_file``), so the path is never string-assembled here."""
+    principal = _require_loader(principal)
+    if not request.app.state.config.DISTRIBUTED_DOC_PIPELINE_SYNC_ENABLED:
+        raise HTTPException(
+            status_code=403,
+            detail='warren cloud-sync pipeline is disabled (DISTRIBUTED_DOC_PIPELINE_SYNC_ENABLED)',
+        )
+    provider = principal.provider_slug
+    user_id = principal.user.id
+
+    file_id = f'{file_id_prefix_for(provider)}{body.source_id}'
+    object_name = f'{file_id}_{body.filename}'
+    path = Storage.get_object_path(object_name)
+
+    existing_file = await Files.get_file_by_id(file_id)
+    if existing_file:
+        # base_worker._create_stub_file_rows may have created a stub (path='')
+        # for this file_id; promote it to the canonical path. Never overwrite a
+        # populated path with a different one silently unless it actually
+        # changed (idempotent re-stage is a no-op on the path).
+        if path and path != (existing_file.path or ''):
+            await Files.update_file_path_by_id(file_id, path)
+        await Files.update_file_metadata_by_id(
+            file_id,
+            {'content_type': body.content_type, 'collection_name': body.knowledge_id},
+        )
+    else:
+        file_form = FileForm(
+            id=file_id,
+            filename=body.filename,
+            path=path,
+            meta={
+                'name': body.filename,
+                'content_type': body.content_type,
+                'collection_name': body.knowledge_id,
+                'source': provider,
+                'source_id': body.source_id,
+            },
+        )
+        await Files.insert_new_file(user_id, file_form)
+        await Knowledges.add_file_to_knowledge_by_id(body.knowledge_id, file_id, user_id)
+
+    ttl = request.app.state.config.PIPELINE_PRESIGN_TTL_SECONDS
+    presigned_put_url = await run_in_threadpool(Storage.get_presigned_put_url, path, ttl, body.content_type)
+
+    return {'file_id': file_id, 'presigned_put_url': presigned_put_url}
+
+
+@router.post('/submit')
+async def submit_file(
+    request: Request,
+    body: SubmitRequest,
+    principal=Depends(get_integration_principal),
+):
+    """Submit an already-staged ``File`` to warren via the shared
+    ``submit_existing_file_to_pipeline`` body (presign GET + submit job + link +
+    mark 'processing'). The acting user is the loader-resolved principal user."""
+    principal = _require_loader(principal)
+    if not request.app.state.config.DISTRIBUTED_DOC_PIPELINE_SYNC_ENABLED:
+        raise HTTPException(
+            status_code=403,
+            detail='warren cloud-sync pipeline is disabled (DISTRIBUTED_DOC_PIPELINE_SYNC_ENABLED)',
+        )
+
+    file = await Files.get_file_by_id(body.file_id)
+    if not file:
+        raise HTTPException(status_code=404, detail=f"file '{body.file_id}' not found")
+
+    result = await submit_existing_file_to_pipeline(request, file, body.knowledge_id, principal.user)
+    return {'pipeline_job_id': result['pipeline_job_id']}
+
+
+@router.get('/file-status/{file_id}')
+async def get_file_status(
+    request: Request,
+    file_id: str,
+    principal=Depends(get_integration_principal),
+):
+    """Return the File's current processing status for the loader poll
+    (``processing`` → ``completed`` / ``error``). Status is dual-written by
+    ``Files.set_status`` into both meta and data; meta is the cheap read."""
+    _require_loader(principal)
+
+    file = await Files.get_file_by_id(file_id)
+    if not file:
+        raise HTTPException(status_code=404, detail=f"file '{file_id}' not found")
+
+    status = (file.meta or {}).get('status') or (file.data or {}).get('status')
+    return {'status': status}
 
 
 @router.delete('/collections/{source_id}')

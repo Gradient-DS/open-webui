@@ -386,6 +386,39 @@ data:
   {{- end }}
   TENANT_NAME: {{ .Values.tenant.name | default .Release.Namespace | quote }}
 
+  # Distributed document pipeline (warren). When enabled, KB ingestion (upload +
+  # add-file + reindex + batch) is delegated to the external pipeline instead of
+  # native parse+embed; warren POSTs chunked_text back to this server's /ingest.
+  # PIPELINE_API_KEY is a secret (see deployment.yaml + external-secrets.yaml).
+  DISTRIBUTED_DOC_PIPELINE_ENABLED: {{ .Values.openWebui.config.distributedDocPipelineEnabled | default "false" | quote }}
+  # Also route chat attachments (non-KB uploads → the file-{id} cache) through
+  # warren. Independent of the KB flag above; reuses all the PIPELINE_* config.
+  DISTRIBUTED_DOC_PIPELINE_CHAT_ENABLED: {{ .Values.openWebui.config.distributedDocPipelineChatEnabled | default "false" | quote }}
+  # Also route cloud sync (bulk) through warren. Independent of the KB/chat flags
+  # above; reuses all the PIPELINE_* config.
+  DISTRIBUTED_DOC_PIPELINE_SYNC_ENABLED: {{ .Values.openWebui.config.distributedDocPipelineSyncEnabled | default "false" | quote }}
+  {{- if .Values.openWebui.config.pipelineApiBaseUrl }}
+  PIPELINE_API_BASE_URL: {{ .Values.openWebui.config.pipelineApiBaseUrl | quote }}
+  {{- end }}
+  {{- if .Values.openWebui.config.pipelineIngestCallbackUrl }}
+  PIPELINE_INGEST_CALLBACK_URL: {{ .Values.openWebui.config.pipelineIngestCallbackUrl | quote }}
+  {{- end }}
+  {{- if .Values.openWebui.config.pipelinePresignTtlSeconds }}
+  PIPELINE_PRESIGN_TTL_SECONDS: {{ .Values.openWebui.config.pipelinePresignTtlSeconds | quote }}
+  {{- end }}
+  {{- if .Values.openWebui.config.pipelineChunkSize }}
+  PIPELINE_CHUNK_SIZE: {{ .Values.openWebui.config.pipelineChunkSize | quote }}
+  {{- end }}
+  {{- if .Values.openWebui.config.pipelineChunkOverlap }}
+  PIPELINE_CHUNK_OVERLAP: {{ .Values.openWebui.config.pipelineChunkOverlap | quote }}
+  {{- end }}
+  {{- if .Values.openWebui.config.pipelineReconcileIntervalSeconds }}
+  PIPELINE_RECONCILE_INTERVAL_SECONDS: {{ .Values.openWebui.config.pipelineReconcileIntervalSeconds | quote }}
+  {{- end }}
+  {{- if .Values.openWebui.config.pipelineJobMaxWallClockSeconds }}
+  PIPELINE_JOB_MAX_WALL_CLOCK_SECONDS: {{ .Values.openWebui.config.pipelineJobMaxWallClockSeconds | quote }}
+  {{- end }}
+
   # Email Invites (Microsoft Graph API)
   ENABLE_EMAIL_INVITES: {{ .Values.openWebui.config.enableEmailInvites | quote }}
   {{- if .Values.openWebui.config.emailGraphTenantId }}
@@ -403,6 +436,10 @@ data:
   {{- if .Values.openWebui.config.emailInviteHeading }}
   EMAIL_INVITE_HEADING: {{ .Values.openWebui.config.emailInviteHeading | quote }}
   {{- end }}
+
+  # Forgot Password (self-service reset)
+  ENABLE_FORGOT_PASSWORD: {{ .Values.openWebui.config.enableForgotPassword | quote }}
+  PASSWORD_RESET_EXPIRY_MINUTES: {{ .Values.openWebui.config.passwordResetExpiryMinutes | quote }}
 
   BYPASS_MODEL_ACCESS_CONTROL: {{ .Values.openWebui.config.bypassModelAccessControl | quote }}
 

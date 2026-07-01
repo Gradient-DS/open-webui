@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from open_webui.internal.db import Base, JSONField, get_async_db_context
 from open_webui.utils.misc import sanitize_metadata
 from pydantic import BaseModel, ConfigDict, model_validator
-from sqlalchemy import BigInteger, Column, String, Text, JSON
+from sqlalchemy import BigInteger, Column, String, Text, JSON, cast
 
 log = logging.getLogger(__name__)
 
@@ -220,6 +220,33 @@ class FilesTable:
         async with get_async_db_context(db) as db:
             result = await db.execute(select(File).filter(File.id.in_(ids)).order_by(File.updated_at.desc()))
             return [FileModel.model_validate(file) for file in result.scalars().all()]
+
+    # Non-terminal statuses a warren-submitted file can sit at. Direct KB/chat
+    # uploads use 'processing'; cloud-sync mirrors the loader-worker's per-item
+    # stage onto meta.status (see services/sync/base_worker._track_job_progress),
+    # so a cloud-sync warren file waiting on /ingest is parked at 'ingesting'
+    # (and can pass through 'downloading'/'parsing'). All of these must be swept
+    # or the reconciler can never rescue a cloud-sync file whose warren job
+    # failed / produced zero chunks — it would deadlock the loader-worker's
+    # file-status poll and hang the whole sync until the wall-clock backstop.
+    _RECONCILABLE_STATUSES = ('processing', 'ingesting', 'parsing', 'downloading')
+
+    async def get_processing_files_with_pipeline_job(self, db: Optional[AsyncSession] = None) -> list[FileModel]:
+        """Non-terminal files that carry a distributed-pipeline job id.
+
+        Drives the restart-safe reconciler. Filters on the cheap ``meta.status``
+        JSON column (the same one the KB file-list reads); the cast yields
+        JSON-encoded text on both SQLite and Postgres, so match quoted + bare.
+        The pipeline-job-id narrowing is done in Python — the non-terminal set is
+        small, and this dodges JSON-key-presence dialect quirks. The job-id
+        narrowing also means the extra cloud-sync stages are safe: a file with no
+        job id (e.g. still downloading pre-submit) is never returned."""
+        statuses = [q for s in self._RECONCILABLE_STATUSES for q in (f'"{s}"', s)]
+        async with get_async_db_context(db) as db:
+            raw_status = cast(File.meta['status'], Text)
+            result = await db.execute(select(File).filter(raw_status.in_(statuses)))
+            files = [FileModel.model_validate(file) for file in result.scalars().all()]
+        return [f for f in files if (f.meta or {}).get('pipeline_job_id')]
 
     async def get_file_metadatas_by_ids(
         self, ids: list[str], db: Optional[AsyncSession] = None
