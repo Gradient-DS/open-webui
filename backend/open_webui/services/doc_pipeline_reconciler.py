@@ -76,10 +76,10 @@ async def reconcile_pipeline_jobs(config, *, now: int) -> int:
         await Files.set_status(file.id, 'error', error=reason)
         # Resolve the frontend's loading state: emit the honest 'failed' so the
         # spinner ends (toast + removal) instead of hanging until a page reload.
-        # Naturally scoped to direct uploads — only files submitted via
-        # route_file_to_pipeline / route_chat_file_to_pipeline carry a
-        # pipeline_job_id, so get_processing_files_with_pipeline_job never
-        # returns cloud-sync files.
+        # Covers both direct uploads (status 'processing') and cloud-sync warren
+        # files (parked at 'ingesting' while the loader-worker polls file-status
+        # for a terminal); marking the file terminal here is what unblocks that
+        # poll so the whole sync can finish instead of hanging on a bad file.
         await emit_file_status(user_id=file.user_id, file_id=file.id, status='failed', error=reason)
         log.info(f'doc-pipeline reconcile: marked file {file.id} error ({action}, job {job_id})')
         errored += 1
