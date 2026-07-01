@@ -897,6 +897,10 @@ loaderWorker:
     litellmBaseUrl: "http://litellm-proxy.shared-services.svc:4000/v1"
     maxConcurrentJobsPerReplica: 4
     perJobItemConcurrency: 5
+    # Max concurrent OWUI file-status polls per job in warren mode; decoupled from
+    # download concurrency (perJobItemConcurrency), so it can be much higher — a
+    # polling item holds only a lightweight status loop (bytes freed after PUT).
+    perJobPollConcurrency: 100
     jobLeaseTimeoutSeconds: 900
     embedderBatchSize: 100
     # Pipeline mode: "doc_processor" (default) or "warren".

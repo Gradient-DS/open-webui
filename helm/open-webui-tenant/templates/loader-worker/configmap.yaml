@@ -11,6 +11,7 @@ data:
   LOADER_DOC_PROCESSOR_URL: {{ .Values.loaderWorker.config.docProcessorUrl | quote }}
   LOADER_MAX_CONCURRENT_JOBS_PER_REPLICA: {{ .Values.loaderWorker.config.maxConcurrentJobsPerReplica | default 4 | quote }}
   LOADER_PER_JOB_ITEM_CONCURRENCY: {{ .Values.loaderWorker.config.perJobItemConcurrency | default 5 | quote }}
+  LOADER_PER_JOB_POLL_CONCURRENCY: {{ .Values.loaderWorker.config.perJobPollConcurrency | default 100 | quote }}
   LOADER_JOB_LEASE_TIMEOUT_SECONDS: {{ .Values.loaderWorker.config.jobLeaseTimeoutSeconds | default 900 | quote }}
   LOADER_EMBEDDER_BATCH_SIZE: {{ .Values.loaderWorker.config.embedderBatchSize | default 100 | quote }}
   LOADER_DB_HOST: {{ include "open-webui-tenant.postgres.fullname" . | quote }}
