@@ -253,6 +253,7 @@ async def _create_or_update_file_record(
     for key in (
         'relative_path',
         'source_item_id',
+        'source_name',
         'onedrive_item_id',
         'onedrive_drive_id',
         'google_drive_item_id',

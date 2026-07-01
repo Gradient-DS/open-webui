@@ -1077,6 +1077,34 @@ class KnowledgeTable:
             log.exception(e)
             return False
 
+    async def get_linked_source_item_ids(
+        self,
+        knowledge_id: str,
+        db: Optional[AsyncSession] = None,
+    ) -> set[str]:
+        """Distinct non-null ``source_item_id`` values across this KB's link rows.
+
+        The sync worker's ``_save_sources`` uses this to avoid dropping a source
+        from ``meta.sources`` while its files are still linked — which would
+        orphan them into raw-ID "phantom" folders in the tree browser. On error
+        returns an empty set (callers then fall back to persisting only the
+        current run's sources — no worse than the pre-fix blind replace).
+        """
+        try:
+            async with get_async_db_context(db) as db:
+                rows = await db.execute(
+                    select(KnowledgeFile.source_item_id)
+                    .where(
+                        KnowledgeFile.knowledge_id == knowledge_id,
+                        KnowledgeFile.source_item_id.isnot(None),
+                    )
+                    .distinct()
+                )
+                return {r[0] for r in rows.all() if r[0]}
+        except Exception as e:
+            log.exception(e)
+            return set()
+
     # ------------------------------------------------------------------ #
     # Lazy per-folder tree browser (Tier 2)
     # ------------------------------------------------------------------ #
@@ -1151,8 +1179,14 @@ class KnowledgeTable:
             # One grouped pass: per (source, raw status) counts. No split_part —
             # grouping is on the indexed source_item_id column directly.
             raw_status = cast(File.meta['status'], Text)
+            raw_source_name = cast(File.meta['source_name'], Text)
             stmt = (
-                select(KnowledgeFile.source_item_id, raw_status.label('raw_status'), func.count().label('cnt'))
+                select(
+                    KnowledgeFile.source_item_id,
+                    raw_status.label('raw_status'),
+                    func.max(raw_source_name).label('raw_source_name'),
+                    func.count().label('cnt'),
+                )
                 .join(File, File.id == KnowledgeFile.file_id)
                 .where(
                     KnowledgeFile.knowledge_id == knowledge_id,
@@ -1161,18 +1195,30 @@ class KnowledgeTable:
                 .group_by(KnowledgeFile.source_item_id, raw_status)
             )
             rollup: dict[str, dict] = {}
-            for source_id, raw, cnt in (await db.execute(stmt)).all():
-                entry = rollup.setdefault(source_id, {'total': 0, 'status_counts': _empty_status_counts()})
+            for source_id, raw, raw_name, cnt in (await db.execute(stmt)).all():
+                entry = rollup.setdefault(
+                    source_id, {'total': 0, 'status_counts': _empty_status_counts(), 'source_name': None}
+                )
                 entry['total'] += cnt
                 entry['status_counts'][_status_bucket(_unwrap_json_text(raw))] += cnt
+                if entry['source_name'] is None:
+                    entry['source_name'] = _unwrap_json_text(raw_name) or None
 
             display = self._source_display_map(knowledge_meta)
             for source_id in set(rollup) | set(display):
                 meta_entry = display.get(source_id, {})
                 counts = rollup.get(source_id, {})
+                # Folder-name resolution order: the KB's declared source name
+                # (authoritative) → the ``source_name`` denormalised onto the
+                # files at sync time (survives a drifted / cleared meta.sources
+                # list — see base_worker._save_sources) → the raw
+                # source_item_id as a last resort. The middle fallback keeps an
+                # orphaned source rendering with a human name instead of an
+                # opaque provider ID.
+                name = meta_entry.get('name') or counts.get('source_name') or source_id
                 folders.append(
                     TreeFolder(
-                        name=meta_entry.get('name') or source_id,
+                        name=name,
                         path=source_id,
                         child_count=counts.get('total', 0),
                         status_counts=counts.get('status_counts', _empty_status_counts()),

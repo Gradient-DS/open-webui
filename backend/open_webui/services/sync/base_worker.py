@@ -255,6 +255,12 @@ class BaseSyncWorker(ABC):
             size=size,
             file_info=file_info,
         )
+        # Carry the source name to the loader-worker so the /ingest callback can
+        # promote it back onto the File row (covers the stub-missing path, where
+        # /ingest creates the row from scratch).
+        source_name = file_info.get('source_name')
+        if source_name:
+            metadata['source_name'] = source_name
 
         return {
             'source': self.provider_slug,
@@ -495,14 +501,38 @@ class BaseSyncWorker(ABC):
         return CONTENT_TYPES.get(ext, 'application/octet-stream')
 
     async def _save_sources(self):
-        """Save updated sources to knowledge metadata."""
+        """Persist the current source list to knowledge metadata.
+
+        Upserts this run's ``self.sources`` over the stored list AND keeps any
+        previously-stored source that still has linked files but is absent from
+        this run. A blind replace was the root cause of the "phantom folder"
+        bug: a run carrying only a subset of the KB's sources (a targeted,
+        cancelled, partial, or concurrent sync) would drop the other sources
+        from ``meta.sources`` while their ``knowledge_file`` rows stayed linked,
+        orphaning them into raw-ID folders in the tree browser. Source
+        *removal* is the only path allowed to drop a source, and it deletes the
+        files first — so a stored source with zero linked files (revoked or
+        removed) is intentionally NOT preserved here.
+        """
         knowledge = await Knowledges.get_knowledge_by_id(self.knowledge_id)
         if not knowledge:
             return
 
         meta = knowledge.meta or {}
         sync_info = meta.get(self.meta_key, {})
-        sync_info['sources'] = self.sources
+
+        current_ids = {s['item_id'] for s in self.sources if isinstance(s, dict) and s.get('item_id')}
+        linked_ids = await Knowledges.get_linked_source_item_ids(self.knowledge_id)
+        preserved = [
+            s
+            for s in (sync_info.get('sources') or [])
+            if isinstance(s, dict)
+            and s.get('item_id')
+            and s['item_id'] not in current_ids
+            and s['item_id'] in linked_ids
+        ]
+
+        sync_info['sources'] = list(self.sources) + preserved
         meta[self.meta_key] = sync_info
 
         await Knowledges.update_knowledge_meta_by_id(self.knowledge_id, meta)
@@ -1443,6 +1473,11 @@ class BaseSyncWorker(ABC):
                     # the KB file-list query (Task 3) can read status from the
                     # cheap meta column without de-TOASTing data.content.
                     file_meta['status'] = 'pending'
+                    # Denormalise the source name so the tree browser can label
+                    # this file's folder even if meta.sources later drifts.
+                    source_name = file_info.get('source_name')
+                    if source_name:
+                        file_meta['source_name'] = source_name
 
                     file_form = FileForm(
                         id=file_id,
@@ -2060,13 +2095,24 @@ class BaseSyncWorker(ABC):
             log.info(f'Starting multi-source sync for knowledge {self.knowledge_id}, {len(self.sources)} sources')
 
             for source in self.sources:
+                # Denormalise the source's human name onto every discovered file
+                # so the KB tree can still label the file's folder even if
+                # meta.sources later drifts (see _save_sources / the tree
+                # browser's source-name fallback). setdefault keeps any
+                # provider-supplied value.
+                source_name = source.get('name')
                 if source.get('type') == 'folder':
                     files, deleted = await self._collect_folder_files(source)
+                    for file_info in files:
+                        if source_name:
+                            file_info.setdefault('source_name', source_name)
                     all_files_to_process.extend(files)
                     total_deleted += deleted
                 else:
                     file_info = await self._collect_single_file(source)
                     if file_info:
+                        if source_name:
+                            file_info.setdefault('source_name', source_name)
                         all_files_to_process.append(file_info)
 
             # Apply file count limit. A falsy max_files_config (0/None) means

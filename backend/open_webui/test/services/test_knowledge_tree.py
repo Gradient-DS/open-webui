@@ -82,7 +82,17 @@ async def _insert_kb(Session, *, kb_id: str, meta: dict | None) -> None:
         await s.commit()
 
 
-async def _add_file(Session, *, kb_id, name, relative_path=None, source_item_id=None, status='completed', size=100):
+async def _add_file(
+    Session,
+    *,
+    kb_id,
+    name,
+    relative_path=None,
+    source_item_id=None,
+    status='completed',
+    size=100,
+    source_name=None,
+):
     """Insert a file with the given meta, then link it (populating path columns)."""
     file_id = f'f-{uuid.uuid4().hex[:8]}'
     now = int(time.time())
@@ -91,6 +101,8 @@ async def _add_file(Session, *, kb_id, name, relative_path=None, source_item_id=
         meta['relative_path'] = relative_path
     if source_item_id is not None:
         meta['source_item_id'] = source_item_id
+    if source_name is not None:
+        meta['source_name'] = source_name
     if status is not None:
         meta['status'] = status
     async with Session() as s:
@@ -180,6 +192,60 @@ async def test_sources_level_lists_sources_and_loose_files(db_session):
     # Root loose files, sorted by filename.
     assert [f.name for f in resp.files] == ['loose-a.txt', 'loose-b.txt']
     assert resp.has_more is False
+
+
+@pytest.mark.asyncio
+async def test_orphaned_source_falls_back_to_denormalised_source_name(db_session):
+    """A source_item_id absent from meta.sources renders under the file-level
+    ``source_name`` fallback (suspenders), not the raw provider ID."""
+    kb_id = 'kb-orphan'
+    await _insert_kb(db_session, kb_id=kb_id, meta={'google_drive_sync': {'sources': []}})
+    # Orphaned source WITH a denormalised source_name → renders by that name.
+    await _add_file(
+        db_session,
+        kb_id=kb_id,
+        name='x.pdf',
+        relative_path='sub/x.pdf',
+        source_item_id='ORPHAN1',
+        status='completed',
+        source_name='Recovered Folder',
+    )
+    # Orphaned source WITHOUT a source_name → falls through to the raw ID.
+    await _add_file(
+        db_session,
+        kb_id=kb_id,
+        name='y.pdf',
+        relative_path='y.pdf',
+        source_item_id='ORPHAN2',
+        status='completed',
+    )
+
+    resp = await Knowledges.list_tree_level(kb_id, path='')
+    names = {f.path: f.name for f in resp.folders}
+    assert names['ORPHAN1'] == 'Recovered Folder'
+    assert names['ORPHAN2'] == 'ORPHAN2'
+
+
+@pytest.mark.asyncio
+async def test_declared_source_name_wins_over_denormalised_name(db_session):
+    """When a source IS in meta.sources, its declared name takes precedence over
+    any (possibly stale) ``source_name`` denormalised onto the files."""
+    kb_id = 'kb-precedence'
+    meta = {'google_drive_sync': {'sources': [{'item_id': 'S1', 'name': 'Declared Name', 'type': 'folder'}]}}
+    await _insert_kb(db_session, kb_id=kb_id, meta=meta)
+    await _add_file(
+        db_session,
+        kb_id=kb_id,
+        name='x.pdf',
+        relative_path='x.pdf',
+        source_item_id='S1',
+        status='completed',
+        source_name='Stale Denormalised Name',
+    )
+
+    resp = await Knowledges.list_tree_level(kb_id, path='')
+    assert _folder(resp, 'Declared Name').path == 'S1'
+    assert [f.name for f in resp.folders] == ['Declared Name']
 
 
 # ---------------------------------------------------------------------------
