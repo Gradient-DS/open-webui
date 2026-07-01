@@ -30,14 +30,30 @@ ACTING_PROVIDER = 'owui_upload'
 _JOBS_PATH = '/jobs'
 _DEFAULT_TIMEOUT_SECONDS = 30.0
 
-# Formats the warren parser can handle — mirrors the distributed pipeline's
-# parser registry (pdf / office / text / html / xml). Files outside this set
-# (images, binaries, …) must fall through to OWUI's native path: warren's
-# ParserWorker silently does not consume an unsupported format, so the job would
-# sit 'pending' and the file would hang until the reconciler's wall-clock
-# backstop instead of failing fast.
+# Extensions the warren parser can actually parse — mirrors the distributed
+# pipeline's parser registry (pdf / OOXML office incl. dotx/xltx/potx templates
+# via the ZIP-magic sniffer / text / html / xml). Formats warren can't parse
+# (OpenDocument odt/ods/odp, epub, legacy .doc, .msg) stay on OWUI's native
+# path, which has real loaders for them. Anything routed here that warren still
+# can't handle now hard-fails fast (parser raises -> job FAILED, reconciler
+# marks the file 'error') instead of the old silent-'pending' hang.
 PIPELINE_SUPPORTED_FORMATS = frozenset(
-    {'pdf', 'docx', 'xlsx', 'pptx', 'csv', 'html', 'xml', 'txt', 'md', 'markdown', 'text'}
+    {
+        'pdf',
+        'docx',
+        'dotx',
+        'xlsx',
+        'xltx',
+        'pptx',
+        'potx',
+        'csv',
+        'html',
+        'xml',
+        'txt',
+        'md',
+        'markdown',
+        'text',
+    }
 )
 
 
