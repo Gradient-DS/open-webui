@@ -113,7 +113,7 @@ def test_ingest_with_loader_bearer_attributes_files_to_acting_user(app, loader_p
         client = TestClient(app)
         resp = client.post(
             '/api/v1/integrations/ingest',
-            data={'data': json.dumps(payload)},
+            files={'data': ('data.json', json.dumps(payload).encode(), 'application/json')},
         )
 
     assert resp.status_code == 200, resp.text
@@ -177,13 +177,13 @@ def test_ingest_routes_original_files_to_chunked_text_processor(app, loader_prin
         patch.object(integrations_router.Knowledges, 'update_knowledge_by_id', return_value=fake_kb),
     ):
         client = TestClient(app)
-        # Multipart with one ``data`` field carrying JSON and one
+        # Multipart with the JSON payload as a ``data`` file part and one
         # ``original_files`` part for doc-A only. doc-B intentionally
         # has no companion blob — we expect original_file=None for it.
         resp = client.post(
             '/api/v1/integrations/ingest',
-            data={'data': json.dumps(payload)},
             files=[
+                ('data', ('data.json', json.dumps(payload).encode(), 'application/json')),
                 ('original_files', ('doc-A', b'%PDF-1.7\nfake', 'application/pdf')),
             ],
         )

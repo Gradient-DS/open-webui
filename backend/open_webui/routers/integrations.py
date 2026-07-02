@@ -6,7 +6,7 @@ import time
 import uuid
 from typing import NamedTuple, Optional
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
 from fastapi.concurrency import run_in_threadpool
 from langchain_core.documents import Document
 from pydantic import BaseModel
@@ -780,17 +780,24 @@ def _maybe_persist_attachments(
 @router.post('/ingest')
 async def ingest_documents(
     request: Request,
-    data: str = Form(...),
+    data: UploadFile = File(...),
     files: Optional[list[UploadFile]] = File(None),
     original_files: Optional[list[UploadFile]] = File(None),
     attachments: Optional[list[UploadFile]] = File(None),
     principal=Depends(get_integration_principal),
 ):
-    # Parse JSON from form field
+    # Parse the JSON payload from the ``data`` *file part* (not a form field).
+    # Starlette caps non-file multipart form fields at 1MB
+    # (formparsers.max_part_size); large-KB syncs push thousands of chunks well
+    # past that, so the JSON rides as a file part instead — file parts spool to
+    # a SpooledTemporaryFile with no size check, removing the ceiling entirely.
+    # Senders: genai-utils api/gateway/loader_worker/ingest_client.py and
+    # document_processing/distributed/pipeline/clients/owui_ingest_client.py.
     try:
-        form_data = IngestForm(**json.loads(data))
+        raw = (await data.read()).decode('utf-8')
+        form_data = IngestForm(**json.loads(raw))
     except (json.JSONDecodeError, Exception) as e:
-        raise HTTPException(400, f"Invalid JSON in 'data' field: {e}")
+        raise HTTPException(400, f"Invalid JSON in 'data' file part: {e}")
 
     # ``original_files`` carries the source bytes for parsed_text /
     # chunked_text documents, keyed by ``filename == source_id`` (the
@@ -948,7 +955,11 @@ async def ingest_documents(
     _prefix = file_id_prefix_for(provider)
     new_doc_ids = {f'{_prefix}{doc.get("source_id", "")}' for doc in form_data.documents}
     net_new = len(new_doc_ids - existing_ids)
-    if len(existing_ids) + net_new > max_files:
+    # Guard on net_new > 0: a KB already at/over a (lowered) cap must still
+    # accept updates to files it already holds — only requests that would *add*
+    # files beyond the cap are rejected. Without this, a pure-update push to a
+    # KB sitting above max_files (net_new == 0) 400s every sync.
+    if net_new > 0 and len(existing_ids) + net_new > max_files:
         raise HTTPException(
             400,
             (

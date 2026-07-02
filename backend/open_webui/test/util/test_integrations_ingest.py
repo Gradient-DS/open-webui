@@ -228,7 +228,9 @@ def test_ingest_target_file_dispatches_perfile_and_skips_kb(perfile_ingest_app, 
         'collection': {'source_id': 'file-abc', 'name': 'report.pdf', 'target': 'file', 'data_type': 'chunked_text'},
         'documents': [{'source_id': 'file-abc', 'filename': 'report.pdf', 'chunks': ['a', 'b']}],
     }
-    res = TestClient(perfile_ingest_app).post('/api/v1/integrations/ingest', data={'data': json.dumps(body)})
+    res = TestClient(perfile_ingest_app).post(
+        '/api/v1/integrations/ingest', files={'data': ('data.json', json.dumps(body).encode(), 'application/json')}
+    )
 
     assert res.status_code == 200, res.text
     out = res.json()
@@ -258,7 +260,9 @@ def test_ingest_target_file_clears_pipeline_bookkeeping(perfile_ingest_app, monk
         'collection': {'source_id': 'file-abc', 'name': 'report.pdf', 'target': 'file', 'data_type': 'chunked_text'},
         'documents': [{'source_id': 'file-abc', 'filename': 'report.pdf', 'chunks': ['a']}],
     }
-    res = TestClient(perfile_ingest_app).post('/api/v1/integrations/ingest', data={'data': json.dumps(body)})
+    res = TestClient(perfile_ingest_app).post(
+        '/api/v1/integrations/ingest', files={'data': ('data.json', json.dumps(body).encode(), 'application/json')}
+    )
 
     assert res.status_code == 200, res.text
     update_meta.assert_awaited_once_with('file-abc', {'pipeline_job_id': None, 'pipeline_submitted_at': None})
@@ -269,7 +273,9 @@ def test_ingest_target_file_rejects_non_chunked_data_type(perfile_ingest_app):
         'collection': {'source_id': 'file-abc', 'name': 'report.pdf', 'target': 'file', 'data_type': 'parsed_text'},
         'documents': [{'source_id': 'file-abc', 'filename': 'report.pdf', 'text': 'x'}],
     }
-    res = TestClient(perfile_ingest_app).post('/api/v1/integrations/ingest', data={'data': json.dumps(body)})
+    res = TestClient(perfile_ingest_app).post(
+        '/api/v1/integrations/ingest', files={'data': ('data.json', json.dumps(body).encode(), 'application/json')}
+    )
 
     assert res.status_code == 400
     assert "target='file'" in res.text
@@ -293,7 +299,9 @@ def test_ingest_default_target_uses_kb_path(perfile_ingest_app, monkeypatch):
         'collection': {'source_id': 'kb-1', 'name': 'KB', 'data_type': 'chunked_text'},
         'documents': [{'source_id': 'doc-1', 'filename': 'r.pdf', 'chunks': ['a']}],
     }
-    res = TestClient(perfile_ingest_app).post('/api/v1/integrations/ingest', data={'data': json.dumps(body)})
+    res = TestClient(perfile_ingest_app).post(
+        '/api/v1/integrations/ingest', files={'data': ('data.json', json.dumps(body).encode(), 'application/json')}
+    )
 
     assert res.status_code == 200, res.text
     out = res.json()
@@ -320,7 +328,9 @@ def test_ingest_target_file_emits_completed(perfile_ingest_app, monkeypatch):
         'collection': {'source_id': 'file-abc', 'name': 'report.pdf', 'target': 'file', 'data_type': 'chunked_text'},
         'documents': [{'source_id': 'file-abc', 'filename': 'report.pdf', 'chunks': ['a', 'b']}],
     }
-    res = TestClient(perfile_ingest_app).post('/api/v1/integrations/ingest', data={'data': json.dumps(body)})
+    res = TestClient(perfile_ingest_app).post(
+        '/api/v1/integrations/ingest', files={'data': ('data.json', json.dumps(body).encode(), 'application/json')}
+    )
 
     assert res.status_code == 200, res.text
     integrations_router.emit_file_status.assert_awaited_once()
@@ -347,7 +357,9 @@ def test_ingest_target_file_emits_failed_on_error(perfile_ingest_app, monkeypatc
         'collection': {'source_id': 'file-abc', 'name': 'report.pdf', 'target': 'file', 'data_type': 'chunked_text'},
         'documents': [{'source_id': 'file-abc', 'filename': 'report.pdf', 'chunks': ['a']}],
     }
-    res = TestClient(perfile_ingest_app).post('/api/v1/integrations/ingest', data={'data': json.dumps(body)})
+    res = TestClient(perfile_ingest_app).post(
+        '/api/v1/integrations/ingest', files={'data': ('data.json', json.dumps(body).encode(), 'application/json')}
+    )
 
     assert res.status_code == 200, res.text
     kwargs = integrations_router.emit_file_status.await_args.kwargs
@@ -372,7 +384,9 @@ def test_ingest_direct_kb_owui_upload_emits_completed(perfile_ingest_app, monkey
         'collection': {'source_id': 'kb-1', 'name': 'KB', 'data_type': 'chunked_text'},
         'documents': [{'source_id': 'doc-1', 'filename': 'r.pdf', 'chunks': ['a']}],
     }
-    res = TestClient(perfile_ingest_app).post('/api/v1/integrations/ingest', data={'data': json.dumps(body)})
+    res = TestClient(perfile_ingest_app).post(
+        '/api/v1/integrations/ingest', files={'data': ('data.json', json.dumps(body).encode(), 'application/json')}
+    )
 
     assert res.status_code == 200, res.text
     integrations_router.emit_file_status.assert_awaited_once()
@@ -403,7 +417,132 @@ def test_ingest_cloud_sync_provider_does_not_emit_file_status(monkeypatch):
         'collection': {'source_id': 'kb-1', 'name': 'KB', 'data_type': 'chunked_text'},
         'documents': [{'source_id': 'doc-1', 'filename': 'r.pdf', 'chunks': ['a']}],
     }
-    res = TestClient(app).post('/api/v1/integrations/ingest', data={'data': json.dumps(body)})
+    res = TestClient(app).post(
+        '/api/v1/integrations/ingest', files={'data': ('data.json', json.dumps(body).encode(), 'application/json')}
+    )
 
     assert res.status_code == 200, res.text
     integrations_router.emit_file_status.assert_not_awaited()
+
+
+# --- /ingest transport: >1MB payload rides the uncapped file part ----------
+
+
+def test_ingest_accepts_data_file_part_over_1mb(perfile_ingest_app, monkeypatch):
+    """Regression for the large-KB sync failure: the JSON payload rides as a
+    multipart *file* part, which Starlette does not size-cap (non-file form
+    fields are capped at 1MB by formparsers.max_part_size). A >1MB ``data`` part
+    must parse and return 200 — previously it 400'd at body-parse before any
+    route code ran."""
+
+    async def fake_process(**kwargs):
+        return {'source_id': kwargs['doc'].source_id, 'file_id': 'file-abc', 'status': 'created'}
+
+    monkeypatch.setattr(integrations_router, '_process_chunked_text_document', fake_process)
+    monkeypatch.setattr(integrations_router.Files, 'update_file_metadata_by_id', AsyncMock())
+
+    # ~1.2MB of chunk text — comfortably over the old 1MB form-field ceiling.
+    big_chunk = 'x' * (1200 * 1024)
+    body = {
+        'collection': {'source_id': 'file-abc', 'name': 'report.pdf', 'target': 'file', 'data_type': 'chunked_text'},
+        'documents': [{'source_id': 'file-abc', 'filename': 'report.pdf', 'chunks': [big_chunk]}],
+    }
+    payload = json.dumps(body).encode()
+    assert len(payload) > 1024 * 1024  # the part genuinely exceeds the old cap
+
+    res = TestClient(perfile_ingest_app).post(
+        '/api/v1/integrations/ingest',
+        files={'data': ('data.json', payload, 'application/json')},
+    )
+
+    assert res.status_code == 200, res.text
+    assert res.json()['created'] == 1
+
+
+# --- KB file-limit guard: updates at cap pass, net-new at cap 400 -----------
+
+
+def _kb_loader_app(monkeypatch, *, max_files_per_kb: int):
+    """LoaderPrincipal app for a managed-sync provider (onedrive) with a
+    registered ``max_files_per_kb`` so the KB file-limit guard is exercised."""
+    from open_webui.utils.service_auth import LoaderPrincipal, get_integration_principal
+
+    monkeypatch.setattr(integrations_router, 'emit_file_status', AsyncMock())
+
+    user = MagicMock(
+        id='user-1',
+        email='lex@gradient-ds.com',
+        role='user',
+        name='Lex',
+        info={'integration_provider': 'onedrive'},
+    )
+    principal = LoaderPrincipal(user=user, provider_slug='onedrive')
+
+    app = FastAPI()
+    app.include_router(integrations_router.router, prefix='/api/v1/integrations')
+    app.dependency_overrides[get_integration_principal] = lambda: principal
+    app.state.config = MagicMock(
+        INTEGRATION_PROVIDERS={
+            'onedrive': {
+                'max_files_per_kb': max_files_per_kb,
+                'max_documents_per_request': 50,
+                'custom_metadata_fields': [],
+            }
+        },
+        BYPASS_EMBEDDING_AND_RETRIEVAL=False,
+    )
+    return app
+
+
+def _patch_kb_at_cap(monkeypatch, *, existing_source_ids):
+    """Patch KB resolution + a no-op chunked-text processor. Existing file ids
+    carry the ``onedrive-`` prefix so net_new is computed against them."""
+    kb = MagicMock(id='kb-1', name='KB', meta={})
+    existing = [MagicMock(id=f'onedrive-{sid}') for sid in existing_source_ids]
+    monkeypatch.setattr(integrations_router.Knowledges, 'get_knowledge_by_id', AsyncMock(return_value=kb))
+    monkeypatch.setattr(integrations_router.Knowledges, 'get_files_by_id', AsyncMock(return_value=existing))
+
+    async def fake_process(**kwargs):
+        return {
+            'source_id': kwargs['doc'].source_id,
+            'file_id': f'onedrive-{kwargs["doc"].source_id}',
+            'status': 'updated',
+        }
+
+    monkeypatch.setattr(integrations_router, '_process_chunked_text_document', fake_process)
+
+
+def test_ingest_update_at_cap_is_allowed(monkeypatch):
+    """KB already at its file cap: a pure update (net_new == 0) must pass."""
+    app = _kb_loader_app(monkeypatch, max_files_per_kb=2)
+    _patch_kb_at_cap(monkeypatch, existing_source_ids=['a', 'b'])
+
+    body = {
+        'collection': {'source_id': 'kb-1', 'name': 'KB', 'data_type': 'chunked_text'},
+        'documents': [{'source_id': 'a', 'filename': 'a.pdf', 'chunks': ['x']}],
+    }
+    res = TestClient(app).post(
+        '/api/v1/integrations/ingest',
+        files={'data': ('data.json', json.dumps(body).encode(), 'application/json')},
+    )
+
+    assert res.status_code == 200, res.text
+    assert res.json()['updated'] == 1
+
+
+def test_ingest_net_new_at_cap_is_rejected(monkeypatch):
+    """KB already at its file cap: adding a net-new file (net_new > 0) 400s."""
+    app = _kb_loader_app(monkeypatch, max_files_per_kb=2)
+    _patch_kb_at_cap(monkeypatch, existing_source_ids=['a', 'b'])
+
+    body = {
+        'collection': {'source_id': 'kb-1', 'name': 'KB', 'data_type': 'chunked_text'},
+        'documents': [{'source_id': 'c', 'filename': 'c.pdf', 'chunks': ['x']}],
+    }
+    res = TestClient(app).post(
+        '/api/v1/integrations/ingest',
+        files={'data': ('data.json', json.dumps(body).encode(), 'application/json')},
+    )
+
+    assert res.status_code == 400
+    assert 'file limit' in res.text
