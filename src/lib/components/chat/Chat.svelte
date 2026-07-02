@@ -1747,6 +1747,18 @@
 		if ($chatId == _chatId && !$temporaryChatEnabled) {
 			currentChatPage.set(1);
 			await chats.set(await getChatList(localStorage.token, $currentChatPage));
+
+			// [Gradient] Persist generative-UI widgets across reloads. uiBlocks
+			// are derived in the frontend from `present_ui` SSE events, so the
+			// backend's inline persistence has no concept of them and the
+			// rendered map / 3D widgets would vanish on reload. Re-save the
+			// history blob (which carries `message.uiBlocks`) once the turn
+			// completes — this runs after the backend's inline save, so it wins.
+			// `messages` is the active branch up to the response, so its last
+			// entry is the just-completed assistant message.
+			if ((messages?.at(-1)?.uiBlocks ?? []).length > 0) {
+				await saveChatHandler(_chatId, history);
+			}
 		}
 		taskIds = null;
 	};
