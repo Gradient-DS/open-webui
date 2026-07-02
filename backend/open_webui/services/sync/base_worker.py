@@ -107,12 +107,19 @@ def _max_job_wall_clock_seconds() -> int:
 
     Read at call time (not import) so a tenant with a very large initial
     sync can raise SYNC_MAX_JOB_WALL_CLOCK_SECONDS via deployment config
-    without a code change. Default 30 min.
+    without a code change. Default 4h.
+
+    The previous 30-min default was too short for large KBs: a multi-thousand-
+    file sync cannot finish in 30 min on the current stack, so it hit the
+    timeout path — which fail-marks in-flight items AND clears the cloud delta
+    tokens, forcing a full re-enumeration next run and an infinite ~30-min
+    re-sync loop. 4h covers ~10x the observed 2526-file duration; the env
+    override remains for even larger installs.
 
     Without this guard a stuck loader-worker (the 2026-04-29 staging incident)
     leaves spinners spinning indefinitely and blocks user-initiated re-syncs.
     """
-    return int(os.environ.get('SYNC_MAX_JOB_WALL_CLOCK_SECONDS', '1800'))
+    return int(os.environ.get('SYNC_MAX_JOB_WALL_CLOCK_SECONDS', '14400'))
 
 
 @dataclass

@@ -264,8 +264,8 @@ def test_ingest_endpoint_persists_attachments(ingest_app, monkeypatch):
     client = TestClient(ingest_app)
     res = client.post(
         '/api/v1/integrations/ingest',
-        data={'data': json.dumps(body)},
         files=[
+            ('data', ('data.json', json.dumps(body).encode(), 'application/json')),
             ('attachments', ('doc-1__plan_png__L1__0', b'fakePNG', 'image/png')),
             ('attachments', ('doc-1__axon_png___1', b'fakePNG2', 'image/png')),
         ],
