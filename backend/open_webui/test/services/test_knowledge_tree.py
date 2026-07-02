@@ -336,6 +336,96 @@ async def test_missing_kb_returns_empty(db_session):
 
 
 # ---------------------------------------------------------------------------
+# Sources-level id-mismatch reconciliation. Pre-canonicalization OneDrive KBs
+# hold the *picker* id in the registry while file rows carry the Graph
+# *canonical* id — without the merge heuristic that renders a raw-id node
+# plus an empty registry twin.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_single_source_id_mismatch_merges_into_one_node(db_session):
+    """Exactly one unknown rollup id + exactly one file-less folder source →
+    one node: registry name/type, rollup counts, rollup path."""
+    kb_id = 'kb-merge'
+    await _insert_kb(
+        db_session,
+        kb_id=kb_id,
+        meta={'onedrive_sync': {'sources': [{'item_id': 'PICKER', 'name': 'Papers', 'type': 'folder'}]}},
+    )
+    await _add_file(
+        db_session, kb_id=kb_id, name='a.pdf', relative_path='a.pdf', source_item_id='CANON', status='completed'
+    )
+    await _add_file(
+        db_session, kb_id=kb_id, name='b.pdf', relative_path='b.pdf', source_item_id='CANON', status='pending'
+    )
+
+    resp = await Knowledges.list_tree_level(kb_id, path='')
+
+    assert [f.name for f in resp.folders] == ['Papers']
+    merged = resp.folders[0]
+    assert merged.path == 'CANON'  # counts/path from the rollup id
+    assert merged.type == 'folder'
+    assert merged.child_count == 2
+    assert merged.status_counts == {'pending': 1, 'completed': 1, 'failed': 0, 'unknown': 0}
+
+
+@pytest.mark.asyncio
+async def test_multi_source_ambiguity_keeps_plain_union(db_session):
+    """Two file-less folder sources + one unknown rollup id: ambiguous — no
+    merge, the union renders unchanged (worst case: the raw id)."""
+    kb_id = 'kb-ambiguous'
+    await _insert_kb(
+        db_session,
+        kb_id=kb_id,
+        meta={
+            'onedrive_sync': {
+                'sources': [
+                    {'item_id': 'P1', 'name': 'Alpha', 'type': 'folder'},
+                    {'item_id': 'P2', 'name': 'Beta', 'type': 'folder'},
+                ]
+            }
+        },
+    )
+    await _add_file(
+        db_session, kb_id=kb_id, name='a.pdf', relative_path='a.pdf', source_item_id='ORPHAN', status='completed'
+    )
+
+    resp = await Knowledges.list_tree_level(kb_id, path='')
+
+    assert [f.name for f in resp.folders] == ['Alpha', 'Beta', 'ORPHAN']
+    orphan = _folder(resp, 'ORPHAN')
+    assert orphan.child_count == 1
+    assert _folder(resp, 'Alpha').child_count == 0
+    assert _folder(resp, 'Beta').child_count == 0
+
+
+@pytest.mark.asyncio
+async def test_orphan_rollup_falls_back_to_single_source_name(db_session):
+    """No merge candidate (the registry source has its own files), but the KB
+    has a single registry source — the orphan renders under its name rather
+    than a bare provider id."""
+    kb_id = 'kb-fallback'
+    await _insert_kb(
+        db_session,
+        kb_id=kb_id,
+        meta={'onedrive_sync': {'sources': [{'item_id': 'S1', 'name': 'Papers', 'type': 'folder'}]}},
+    )
+    await _add_file(
+        db_session, kb_id=kb_id, name='a.pdf', relative_path='a.pdf', source_item_id='S1', status='completed'
+    )
+    await _add_file(
+        db_session, kb_id=kb_id, name='b.pdf', relative_path='b.pdf', source_item_id='ORPHAN', status='completed'
+    )
+
+    resp = await Knowledges.list_tree_level(kb_id, path='')
+
+    # Two nodes (distinct paths), both labeled with the registry name.
+    assert [f.name for f in resp.folders] == ['Papers', 'Papers']
+    assert sorted(f.path for f in resp.folders) == ['ORPHAN', 'S1']
+
+
+# ---------------------------------------------------------------------------
 # Route-level access control (GET /{id}/tree). Calls the handler directly with
 # mocked Knowledges/AccessGrants so we test the access gates + delegation
 # without mounting the full router. The gates are a verbatim copy of the proven

@@ -231,6 +231,14 @@ def _maybe_upload_original_bytes(
     return file_path
 
 
+# Identity keys the sync worker owns: source_item_id is the picked source's
+# canonical id and relative_path is computed from the provider delta's folder
+# map. Loader-supplied values are derived and historically wrong (picker-vs-
+# canonical id namespaces split the folder tree) — /ingest only accepts them
+# when the sync worker never stamped a value (set-if-absent).
+_OWUI_OWNED_IDENTITY_KEYS = ('source_item_id', 'relative_path')
+
+
 async def _create_or_update_file_record(
     file_id: str,
     doc: IngestDocumentBase,
@@ -259,12 +267,16 @@ async def _create_or_update_file_record(
         'provider_metadata': doc.metadata,
     }
 
+    existing_file = await Files.get_file_by_id(file_id)
+    existing_meta = (existing_file.meta or {}) if existing_file else {}
+
     # Promote folder-rendering / change-detection keys to top-level so the KB
     # UI's SourceGroupedFiles tree (reads file.meta.relative_path) and the next
     # sync cycle's cloud-hash short-circuit (reads file.meta.cloud_hash) keep
     # working. Legacy in-pod sync wrote these at top level; the loader-worker
     # path nests them under provider_metadata, which silently broke the folder
-    # tree until promoted back.
+    # tree until promoted back. Identity keys are set-if-absent: the sync
+    # worker's stub values are authoritative (see _OWUI_OWNED_IDENTITY_KEYS).
     for key in (
         'relative_path',
         'source_item_id',
@@ -275,9 +287,9 @@ async def _create_or_update_file_record(
         'last_synced_at',
     ):
         if key in doc.metadata:
+            if key in _OWUI_OWNED_IDENTITY_KEYS and existing_meta.get(key):
+                continue  # sync worker already stamped identity; loader value is derived, possibly stale
             meta[key] = doc.metadata[key]
-
-    existing_file = await Files.get_file_by_id(file_id)
     if existing_file:
         await Files.update_file_metadata_by_id(file_id, meta)
         await Files.update_file_data_by_id(file_id, {'content': content_text})
@@ -548,6 +560,11 @@ async def _process_chunked_text_document(
         # field in both columns so a re-run after a prior failure does not
         # leave a stale error message in data.error.
         await Files.set_status(file_id, 'completed', error=None)
+        # The callback landed — clear the pipeline bookkeeping so completed
+        # rows drop out of the reconciler's candidate query and stale job
+        # ids stop confusing later debugging (mirrors the per-file
+        # chat-attachment dispatch in ingest_documents).
+        await Files.update_file_metadata_by_id(file_id, {'pipeline_job_id': None, 'pipeline_submitted_at': None})
     except Exception as e:
         log.exception(f'Failed to store chunked document {doc.source_id} in vector DB')
         await Files.set_status(file_id, 'error', error=str(e))

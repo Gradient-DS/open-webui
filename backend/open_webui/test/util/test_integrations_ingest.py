@@ -169,6 +169,48 @@ async def test_kb_path_unchanged_regression(monkeypatch):
     knowledges.add_file_to_knowledge_by_id.assert_awaited_once_with('kb-1', 'confluence-doc-1', 'user-1')
 
 
+@pytest.mark.asyncio
+async def test_kb_path_chunked_success_clears_pipeline_bookkeeping(monkeypatch):
+    """KB-path chunked ingest mirrors the per-file path: a completed row must
+    drop out of the reconciler's candidate query, and stale pipeline job ids
+    must not linger on completed rows."""
+    save_mock, files, knowledges = _patch_persistence(monkeypatch)
+
+    result = await integrations_router._process_chunked_text_document(
+        request=MagicMock(),
+        knowledge_id='kb-1',
+        provider='onedrive',
+        doc=_chunked_doc(source_id='item-1'),
+        user_id='user-1',
+    )
+
+    assert result['status'] == 'created'
+    files.set_status.assert_awaited_once_with('onedrive-item-1', 'completed', error=None)
+    files.update_file_metadata_by_id.assert_any_await(
+        'onedrive-item-1', {'pipeline_job_id': None, 'pipeline_submitted_at': None}
+    )
+
+
+@pytest.mark.asyncio
+async def test_kb_path_chunked_failure_keeps_pipeline_bookkeeping(monkeypatch):
+    """On embed failure the row goes 'error' and bookkeeping stays — only the
+    success path clears it."""
+    save_mock, files, knowledges = _patch_persistence(monkeypatch)
+    save_mock.side_effect = RuntimeError('boom')
+
+    result = await integrations_router._process_chunked_text_document(
+        request=MagicMock(),
+        knowledge_id='kb-1',
+        provider='onedrive',
+        doc=_chunked_doc(source_id='item-1'),
+        user_id='user-1',
+    )
+
+    assert result['status'] == 'error'
+    for call in files.update_file_metadata_by_id.await_args_list:
+        assert call.args[1] != {'pipeline_job_id': None, 'pipeline_submitted_at': None}
+
+
 # --- /ingest endpoint: target routing --------------------------------------
 
 

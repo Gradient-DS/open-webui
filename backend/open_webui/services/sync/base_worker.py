@@ -347,6 +347,12 @@ class BaseSyncWorker(ABC):
     # re-submitting them every sync would defeat the cloud-hash skip.
     expect_nonempty_content: bool = False
 
+    # Snapshot of file_ids linked to this KB BEFORE the current sync run
+    # created any stubs. Set by sync(); None means "no gate" (call paths
+    # that never snapshot keep the legacy global-status behavior). Drives
+    # the KB-membership gate in _classify_for_submit.
+    _kb_member_file_ids: Optional[set] = None
+
     def __init__(
         self,
         knowledge_id: str,
@@ -607,6 +613,17 @@ class BaseSyncWorker(ABC):
         file_id = f'{self.file_id_prefix}{item_id}'
         existing = await Files.get_file_by_id(file_id)
         if existing is None:
+            return 'added', file_id
+        # 'unchanged' (skip submit) additionally requires that THIS KB already
+        # held the file before this sync run. The global data.status ==
+        # 'completed' on a shared row proves *some* KB ingested it — not that
+        # this KB's collection has vectors. Files net-new to the KB are always
+        # submitted; overlapping KBs process the same file once each (accepted
+        # double-work, decision 2026-07-02). Known residual race: two
+        # overlapping KBs syncing *concurrently* can still interleave on the
+        # shared row's global status — transiently dishonest, self-correcting
+        # when each KB's own /ingest lands.
+        if self._kb_member_file_ids is not None and file_id not in self._kb_member_file_ids:
             return 'added', file_id
         cloud_hash = self._get_cloud_hash(file_info)
         if not cloud_hash:
@@ -1423,7 +1440,23 @@ class BaseSyncWorker(ABC):
                 relative_path = file_info.get('relative_path', name)
                 content_type = self._get_content_type(name)
 
-                if await Files.get_file_by_id(file_id) is not None:
+                existing = await Files.get_file_by_id(file_id)
+                if existing is not None:
+                    # Self-heal identity drift: stored source_item_id /
+                    # relative_path can be stale (pre-canonicalization picker
+                    # ids, "Papers/"-prefixed paths from the folder_map bug, or
+                    # loader-era overwrites). Refresh file.meta from this
+                    # sync's computed identity BEFORE re-linking, so the
+                    # add_file_to_knowledge_by_id upsert mirrors the healed
+                    # values onto the join row's denormalized path columns.
+                    existing_meta = existing.meta or {}
+                    stale = {
+                        key: value
+                        for key, value in (('source_item_id', source_item_id), ('relative_path', relative_path))
+                        if value and existing_meta.get(key) != value
+                    }
+                    if stale:
+                        await Files.update_file_metadata_by_id(file_id, stale)
                     await Knowledges.add_file_to_knowledge_by_id(self.knowledge_id, file_id, self.user_id)
                     touched.append(file_id)
                 else:
@@ -2086,6 +2119,10 @@ class BaseSyncWorker(ABC):
             )
             current_files = await Knowledges.get_files_by_id(self.knowledge_id) or []
             current_file_count = len(current_files)
+            # Snapshot the KB's membership BEFORE classification and before
+            # _create_stub_file_rows links this sync's files — the gate in
+            # _classify_for_submit needs pre-sync membership, not post-stub.
+            self._kb_member_file_ids = {f.id for f in current_files}
             available_slots = max(0, max_files - current_file_count)
 
             if len(all_files_to_process) > available_slots:

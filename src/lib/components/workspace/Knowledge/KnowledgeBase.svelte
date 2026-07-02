@@ -292,6 +292,20 @@
 	// sync completion / content edit) so LazyKnowledgeTree re-fetches what's open.
 	let treeRefresh = 0;
 
+	// Coalesced tree refresh for per-file events. In lazy mode the per-file
+	// socket handlers mutate fileItems, which the tree ignores — the only way
+	// spinners resolve live is a tree re-fetch. Each burst of events triggers
+	// at most one refresh per 2s, independent of isSyncing, so late
+	// completions (files queued behind another KB's pipeline job) still flip.
+	let treeRefreshTimer: ReturnType<typeof setTimeout> | null = null;
+	const scheduleTreeRefresh = () => {
+		if (!lazyTreeActive || treeRefreshTimer) return;
+		treeRefreshTimer = setTimeout(() => {
+			treeRefreshTimer = null;
+			treeRefresh += 1;
+		}, 2000);
+	};
+
 	// Multiselect (bulk delete) model — shared across all three list views.
 	const selection = createKbSelection();
 	const {
@@ -1097,6 +1111,13 @@
 					state.isSyncing = false;
 					cloudSyncState = cloudSyncState;
 				}
+				// Failed files carry status 'error' in meta — refresh so the
+				// tree shows error badges instead of eternal spinners.
+				if (!state.refreshDone) {
+					state.refreshDone = true;
+					cloudSyncState = cloudSyncState;
+					await init();
+				}
 			} else if (state.syncStatus.status === 'cancelled') {
 				state.isSyncing = false;
 				state.isCancelling = false;
@@ -1202,6 +1223,10 @@
 		// Only process events for the current knowledge base
 		if (data.knowledge_id !== knowledge?.id) return;
 
+		// Lazy tree: the fileItems mutation below has no tree effect — nudge
+		// the tree itself so the new file's spinner appears without a reload.
+		scheduleTreeRefresh();
+
 		// Ignore new file events when cancellation is in progress
 		if (state.isCancelling) return;
 
@@ -1261,6 +1286,10 @@
 
 		// Only process events for the current knowledge base
 		if (data.knowledge_id !== knowledge?.id) return;
+
+		// Lazy tree: this file just reached 'ok' server-side — nudge the tree
+		// so its spinner flips to done within the throttle window.
+		scheduleTreeRefresh();
 
 		// Ignore new file events when cancellation is in progress
 		if (state.isCancelling) return;
@@ -1338,6 +1367,18 @@
 		};
 		cloudSyncState = cloudSyncState;
 
+		// A 'syncing' event while we're not tracking a sync means it was
+		// started elsewhere (scheduler, another tab). Adopt it — mirrors the
+		// resume-on-load path in onMount: flags the progress banner + the
+		// tree's 4s poll active, and arms the HTTP status fallback so the
+		// terminal is caught even if the terminal socket event is missed.
+		if (data.status === 'syncing' && !state.isSyncing) {
+			state.isSyncing = true;
+			state.refreshDone = false;
+			cloudSyncState = cloudSyncState;
+			pollCloudSyncStatus(provider);
+		}
+
 		// Handle access revoked
 		if (data.status === 'access_revoked') {
 			toast.warning(
@@ -1387,6 +1428,13 @@
 			);
 			state.isSyncing = false;
 			cloudSyncState = cloudSyncState;
+			// Failed files carry status 'error' in meta — refresh so the tree
+			// shows error badges instead of eternal spinners.
+			if (!state.refreshDone) {
+				state.refreshDone = true;
+				cloudSyncState = cloudSyncState;
+				await init();
+			}
 		} else if (data.status === 'cancelled') {
 			toast.info($i18n.t('{{label}} sync cancelled', { label: provider.label }));
 			state.isSyncing = false;
@@ -1562,6 +1610,11 @@
 		error?: string;
 		collection_name?: string;
 	}) => {
+		// Lazy tree: file rows render from the server-side tree, and the
+		// fileItems lookup below misses (the array is kept empty in lazy
+		// mode) — nudge the tree so a direct upload's spinner resolves.
+		scheduleTreeRefresh();
+
 		if (!fileItems) return;
 
 		const idx = fileItems.findIndex((f) => f.id === data.file_id);
@@ -1892,6 +1945,10 @@
 
 	onDestroy(() => {
 		clearTimeout(searchDebounceTimer);
+		if (treeRefreshTimer) {
+			clearTimeout(treeRefreshTimer);
+			treeRefreshTimer = null;
+		}
 		mediaQuery?.removeEventListener('change', handleMediaQuery);
 		const dropZone = document.querySelector('body');
 		dropZone?.removeEventListener('dragover', onDragOver);
