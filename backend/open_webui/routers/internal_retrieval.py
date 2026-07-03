@@ -9,17 +9,30 @@ endpoint and any future caller.
 
 from __future__ import annotations
 
+import base64
 import logging
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
-from pydantic import BaseModel, Field
+from pathlib import Path
 
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, UploadFile, status
+from fastapi.responses import FileResponse
+from pydantic import BaseModel, Field
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from open_webui.internal.db import get_async_session
+from open_webui.models.chats import Chats
 from open_webui.models.files import Files
+from open_webui.models.knowledge import KnowledgeFileListResponse, Knowledges
+from open_webui.routers.files import upload_file_handler
 from open_webui.services.retrieval.agent_search import (
+    resolve_accessible_kb,
     resolve_accessible_kbs,
     run_agent_search,
 )
+from open_webui.socket.main import sio
+from open_webui.storage.provider import Storage
+from open_webui.services.email.graph_mail_client import render_document_email, send_mail
 from open_webui.utils.access_control.files import has_access_to_file
 from open_webui.utils.service_auth import AgentPrincipal, get_agent_principal
 
@@ -101,7 +114,7 @@ async def list_accessible_kbs(
         'all' if parsed_kb_ids is None else f'{len(parsed_kb_ids)} kbs',
     )
 
-    payload = resolve_accessible_kbs(principal.user, kb_ids=parsed_kb_ids)
+    payload = await resolve_accessible_kbs(principal.user, kb_ids=parsed_kb_ids)
     return AccessibleKBsResponse(
         user_id=payload['user_id'],
         kbs=[AccessibleKB(**kb) for kb in payload['kbs']],
@@ -139,7 +152,9 @@ async def list_accessible_files(
             detail='file_ids query parameter must contain at least one id',
         )
 
-    accessible = [fid for fid in requested if has_access_to_file(file_id=fid, access_type='read', user=principal.user)]
+    accessible = [
+        fid for fid in requested if await has_access_to_file(file_id=fid, access_type='read', user=principal.user)
+    ]
 
     log.info(
         'agent_accessible_files: agent=%s acting_user=%s requested=%d accessible=%d',
@@ -152,6 +167,88 @@ async def list_accessible_files(
     return AccessibleFilesResponse(
         user_id=principal.user.id,
         file_ids=accessible,
+    )
+
+
+@router.get(
+    '/knowledge/{knowledge_id}/files',
+    response_model=KnowledgeFileListResponse,
+)
+async def list_knowledge_files(
+    knowledge_id: str,
+    request: Request,
+    query: Optional[str] = None,
+    limit: int = Query(1000, ge=1, le=2000),
+    offset: int = Query(0, ge=0),
+    principal: AgentPrincipal = Depends(get_agent_principal),
+    db: AsyncSession = Depends(get_async_session),
+) -> KnowledgeFileListResponse:
+    """List files in a knowledge base for the acting user.
+
+    Agent-bearer counterpart to ``GET /api/v1/knowledge/{id}/files`` (which
+    is session-cookie-gated and therefore unreachable from external agents
+    that only hold the shared agent bearer). Same listing payload — both
+    routes ultimately go through :meth:`Knowledges.search_files_by_id` — but
+    auth is agent bearer + ``X-Acting-User-Id`` and the ACL skips the admin
+    cross-user shortcut (tenant-isolated agents do not get that cone).
+
+    Used by soev-agents' ``OwuiKnowledgeFilesClient`` (the source of truth
+    for ``list_documents`` / ``find_documents`` in the OpenWebUI retrieval
+    provider). Returns the same ``{items, total}`` shape that client expects.
+
+    A suspended KB returns HTTP 403 for everyone; there is no admin bypass
+    on this surface — tenant-isolated agents must not circumvent suspension.
+    """
+
+    if not getattr(request.app.state.config, 'AGENT_SEARCH_ENABLED', False):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail='agent search not enabled',
+        )
+
+    kb = await resolve_accessible_kb(principal.user, kb_id=knowledge_id)
+    if kb is None:
+        # 404 (not 403): does not leak existence of a forbidden KB to a
+        # caller acting on behalf of a user who cannot see it.
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"knowledge '{knowledge_id}' not found or not accessible",
+        )
+
+    # [Gradient] Suspended KB → 403 for everyone; no admin bypass on this surface.
+    suspension_info = await Knowledges.get_suspension_info(kb.id)
+    if suspension_info:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=(
+                'This knowledge base is suspended. '
+                f'It will be permanently deleted in '
+                f'{suspension_info["days_remaining"]} days unless the '
+                'owner restores access.'
+            ),
+        )
+
+    filter_dict: dict = {}
+    if query:
+        filter_dict['query'] = query
+
+    log.info(
+        'agent_knowledge_files: agent=%s acting_user=%s kb=%s has_query=%s limit=%d offset=%d',
+        principal.agent_id,
+        principal.user.id,
+        knowledge_id,
+        bool(query),
+        limit,
+        offset,
+    )
+
+    return await Knowledges.search_files_by_id(
+        knowledge_id,
+        principal.user.id,
+        filter=filter_dict,
+        skip=offset,
+        limit=limit,
+        db=db,
     )
 
 
@@ -182,7 +279,7 @@ async def file_content(
             detail='agent search not enabled',
         )
 
-    file = Files.get_file_by_id(file_id)
+    file = await Files.get_file_by_id(file_id)
     if not file:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -192,7 +289,7 @@ async def file_content(
     user = principal.user
     # No admin shortcut here — the agent retrieval path is tenant-isolated by
     # construction; admin's UI-level cross-user reads do not extend to it.
-    if file.user_id != user.id and not has_access_to_file(file_id=file_id, access_type='read', user=user):
+    if file.user_id != user.id and not await has_access_to_file(file_id=file_id, access_type='read', user=user):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail=f"user '{user.id}' has no read access to file '{file_id}'",
@@ -210,6 +307,89 @@ async def file_content(
         doc_id=file_id,
         title=file.filename or '',
         content=content,
+    )
+
+
+@router.get('/files/{file_id}/raw')
+async def file_raw(
+    file_id: str,
+    request: Request,
+    principal: AgentPrincipal = Depends(get_agent_principal),
+) -> FileResponse:
+    """Return the raw stored bytes for a file the acting user can read.
+
+    Same auth + ACL as :func:`file_content` (agent bearer +
+    ``X-Acting-User-Id``, ``has_access_to_file(read)``) — the difference
+    is the body: this endpoint streams the original upload from
+    :class:`Storage`, not the extracted text. Used by the BIM agent's
+    raw-IFC bytes fetcher, which needs the original ``.ifc`` blob to
+    open with ``ifcopenshell``.
+    """
+
+    if not getattr(request.app.state.config, 'AGENT_SEARCH_ENABLED', False):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail='agent search not enabled',
+        )
+
+    file = await Files.get_file_by_id(file_id)
+    if not file:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"file '{file_id}' not found",
+        )
+
+    user = principal.user
+    if file.user_id != user.id and not await has_access_to_file(file_id=file_id, access_type='read', user=user):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"user '{user.id}' has no read access to file '{file_id}'",
+        )
+
+    if not file.path:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"file '{file_id}' has no stored bytes",
+        )
+
+    try:
+        storage_path = Path(Storage.get_file(file.path))
+    except Exception:
+        log.exception(
+            'agent_file_raw: Storage.get_file raised for file=%s (path=%s)',
+            file_id,
+            file.path,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"file '{file_id}' bytes unavailable",
+        )
+
+    if not storage_path.is_file():
+        log.error(
+            'agent_file_raw: file row %s points at missing Storage path %s',
+            file_id,
+            file.path,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"file '{file_id}' bytes unavailable",
+        )
+
+    log.info(
+        'agent_file_raw: agent=%s acting_user=%s file=%s',
+        principal.agent_id,
+        user.id,
+        file_id,
+    )
+
+    media_type = (
+        getattr(file.meta or {}, 'get', lambda *_: None)('content_type') if isinstance(file.meta, dict) else None
+    )
+    return FileResponse(
+        storage_path,
+        media_type=media_type or 'application/octet-stream',
+        filename=file.filename or file_id,
     )
 
 
@@ -256,3 +436,146 @@ async def agent_query(
         kb_ids=body.kb_ids,
     )
     return AgentSearchResponse(results=[AgentSearchResult(**r) for r in results])
+
+
+class FileUploadResponse(BaseModel):
+    file_id: str
+    url: str
+
+
+@router.post('/files/upload', response_model=FileUploadResponse)
+async def files_upload(
+    request: Request,
+    chat_id: str = Form(...),
+    message_id: str = Form(...),
+    file: UploadFile = File(...),
+    principal: AgentPrincipal = Depends(get_agent_principal),
+    db: AsyncSession = Depends(get_async_session),
+) -> FileUploadResponse:
+    """Persist an agent-uploaded blob and attach it to a chat message.
+
+    Multipart body: ``file`` (bytes), ``chat_id`` and ``message_id`` (the
+    chat + assistant-message the file belongs to). Auth: shared agent bearer
+    + ``X-Acting-User-Id`` (the acting user must already exist and own / be
+    able to participate in the target chat).
+
+    Persists the file via :func:`upload_file_handler` with ``process=False``
+    (no extraction pipeline — the blob is opaque to OWUI's RAG path), links
+    it to the message via :meth:`Chats.insert_chat_files`, then emits a
+    ``chat:message:files`` socket event so the live chat view renders the
+    attachment without a refresh. Mirrors the call shape used by
+    ``routers/images.upload_image`` + ``tools/builtin.generate_image``.
+    """
+
+    if not getattr(request.app.state.config, 'AGENT_SEARCH_ENABLED', False):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail='agent search not enabled',
+        )
+
+    user = principal.user
+    file_item = await upload_file_handler(
+        request,
+        file=file,
+        metadata={'chat_id': chat_id, 'message_id': message_id},
+        process=False,
+        user=user,
+        db=db,
+    )
+    if file_item is None or not file_item.id:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail='file upload failed',
+        )
+
+    url = request.app.url_path_for('get_file_content_by_id', id=file_item.id)
+    file_payload = {
+        'type': 'image' if (file.content_type or '').startswith('image/') else 'file',
+        'url': url,
+        'name': file.filename or file_item.id,
+        'id': file_item.id,
+    }
+    # Persist to the chat history JSON so reloads still see the file on
+    # the message. The ChatFile sidetable (insert_chat_files) does not
+    # feed the message's `files` array that the FE renders from.
+    updated_files = await Chats.add_message_files_by_id_and_message_id(chat_id, message_id, [file_payload])
+    # Live update — frontend handler at Chat.svelte replaces message.files
+    # with data.files, so send the full set (or just the new one if
+    # add_message_files returned None for a missing message).
+    await sio.emit(
+        'events',
+        {
+            'chat_id': chat_id,
+            'message_id': message_id,
+            'data': {
+                'type': 'chat:message:files',
+                'data': {'files': updated_files or [file_payload]},
+            },
+        },
+        room=f'user:{user.id}',
+    )
+
+    log.info(
+        'agent_file_upload: agent=%s acting_user=%s chat=%s message=%s file=%s',
+        principal.agent_id,
+        user.id,
+        chat_id,
+        message_id,
+        file_item.id,
+    )
+
+    return FileUploadResponse(file_id=file_item.id, url=url)
+
+
+class EmailDocumentRequest(BaseModel):
+    subject: str
+    document_markdown: str
+
+
+class EmailDocumentResponse(BaseModel):
+    ok: bool
+    to: str
+
+
+@router.post('/email-document', response_model=EmailDocumentResponse)
+async def email_document(
+    request: Request,
+    body: EmailDocumentRequest,
+    principal: AgentPrincipal = Depends(get_agent_principal),
+) -> EmailDocumentResponse:
+    """Email a markdown document to the acting user as a .md attachment.
+
+    Auth is the agent bearer + ``X-Acting-User-Id`` (via
+    ``get_agent_principal``); the acting user's email is the recipient.
+    The document is attached as ``concept-beschikking.md`` and sent via
+    Microsoft Graph (``send_mail``) from ``EMAIL_FROM_ADDRESS``.
+
+    Deliberately NOT gated on ``AGENT_SEARCH_ENABLED`` (unlike the
+    retrieval endpoints in this router): emailing the acting user their
+    own document is not a search/retrieval surface, and the security
+    boundary here is the agent bearer plus the recipient being pinned to
+    ``principal.user.email`` (never request-controlled).
+    """
+    user = principal.user
+    if not user.email:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail='acting user has no email address',
+        )
+
+    content_bytes = base64.b64encode(body.document_markdown.encode('utf-8')).decode('ascii')
+    attachment = {
+        '@odata.type': '#microsoft.graph.fileAttachment',
+        'name': 'concept-beschikking.md',
+        'contentType': 'text/markdown',
+        'contentBytes': content_bytes,
+    }
+    html_body = render_document_email(body.subject)
+    await send_mail(
+        app=request.app,
+        to_address=user.email,
+        subject=body.subject,
+        html_body=html_body,
+        attachments=[attachment],
+    )
+    return EmailDocumentResponse(ok=True, to=user.email)

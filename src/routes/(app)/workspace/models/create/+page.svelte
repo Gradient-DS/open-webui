@@ -6,14 +6,14 @@
 	import { isFeatureEnabled } from '$lib/utils/features';
 	import { WEBUI_BASE_URL } from '$lib/constants';
 
-	import { onMount, tick, getContext } from 'svelte';
+	import { onMount, getContext } from 'svelte';
 
 	onMount(() => {
 		if (!isFeatureEnabled('models')) {
 			goto('/');
 		}
 	});
-	import { createNewModel, getModelById } from '$lib/apis/models';
+	import { createNewModel } from '$lib/apis/models';
 	import { getModels } from '$lib/apis';
 	import { updateUserSettings } from '$lib/apis/users';
 
@@ -28,7 +28,7 @@
 
 	const goToAdvanced = () => goto('/workspace/models/create?advanced=true');
 
-	const onSubmit = async (modelInfo) => {
+	const onSubmit = async (modelInfo, { skipNavigate = false } = {}) => {
 		if ($models.find((m) => m.id === modelInfo.id)) {
 			toast.error(
 				$i18n.t(
@@ -77,14 +77,22 @@
 					await updateUserSettings(localStorage.token, { ui: $settings });
 				}
 
-				toast.success($i18n.t('Model created successfully!'));
+				toast.success(
+					useSimpleBuilder
+						? $i18n.t('Assistant created successfully!')
+						: $i18n.t('Model created successfully!')
+				);
 				// Land on the edit page for the just-created assistant
 				// rather than the models list. Pairs with the simple
 				// builder's auto-save on entry — the wizard auto-saves
 				// then we transition into a saved/edit view where the
 				// Share button is visible and the Save button only
-				// reappears after real edits.
-				await goto(`/workspace/models/edit?id=${encodeURIComponent(modelInfo.id)}`);
+				// reappears after real edits. The "+ Add knowledge" flow
+				// passes skipNavigate so it can route to the KB-create flow
+				// itself (the model is saved either way).
+				if (!skipNavigate) {
+					await goto(`/workspace/models/edit?id=${encodeURIComponent(modelInfo.id)}`);
+				}
 			}
 		}
 	};

@@ -39,15 +39,18 @@ SSE protocol from agent:
 
 import json
 import logging
-from dataclasses import dataclass, field, asdict
-from typing import Any, AsyncIterator, Optional
+from collections.abc import AsyncIterator
+from dataclasses import asdict, dataclass, field
+from datetime import timedelta
+from typing import Any
 
 import aiohttp
-from starlette.background import BackgroundTask
-from starlette.responses import StreamingResponse
-
+from open_webui.config import ENABLE_SKILL_EXECUTION, FEATURE_SKILL_FILES
 from open_webui.env import AGENT_API_BASE_URL, AGENT_API_KEY
+from open_webui.models.chats import Chats
 from open_webui.socket.main import get_event_emitter
+from open_webui.utils.auth import create_token
+from starlette.responses import StreamingResponse
 
 log = logging.getLogger(__name__)
 
@@ -69,73 +72,98 @@ class AgentPayload:
 
     model: str
     messages: list[dict[str, Any]]
-    agent: Optional[str] = None
+    agent: str | None = None
     stream: bool = True
-    chat_id: Optional[str] = None
-    user_id: Optional[str] = None
-    message_id: Optional[str] = None
+    chat_id: str | None = None
+    user_id: str | None = None
+    message_id: str | None = None
     # [Gradient] Parent of ``message_id`` in the chat's branching tree
     # (the user message that prompted this response). The agent service
     # uses this to rewind its persisted thread state on retry/regenerate,
     # so re-runs replay from the pre-answer point and tools fire again
     # instead of the model recapping cached output. Omitted on the first
     # turn of a new chat (no parent exists).
-    parent_message_id: Optional[str] = None
-    session_id: Optional[str] = None
+    parent_message_id: str | None = None
+    session_id: str | None = None
     features: dict[str, Any] = field(default_factory=dict)
-    files: Optional[list[dict[str, Any]]] = None
-    knowledge: Optional[list[dict[str, Any]]] = None
-    tool_ids: Optional[list[str]] = None
-    rag_filter: Optional[dict[str, Any]] = None
+    files: list[dict[str, Any]] | None = None
+    knowledge: list[dict[str, Any]] | None = None
+    tool_ids: list[str] | None = None
+    rag_filter: dict[str, Any] | None = None
     # Operator-supplied system prompt from the custom-model definition
     # (model.params.system). Variables are pre-substituted upstream so the
     # agent can use the value as-is.
-    system_prompt: Optional[str] = None
+    system_prompt: str | None = None
     # [Gradient] Conversation-level system prompt — the merged per-chat /
     # Chat Controls / folder prompt. Distinct from ``system_prompt`` (the
     # custom-model prompt). Forwarded so the agent composes it into its
     # system prompt; OpenWebUI also still inlines it into ``messages``.
-    chat_system_prompt: Optional[str] = None
+    chat_system_prompt: str | None = None
     # [Gradient] Resolved Open WebUI skills for this turn. Each entry is
     # {name, description, content, is_selected}. User-selected skills
     # carry full content for the agent to render; model-attached skills
     # form a manifest the agent expands on demand via a tool.
-    skills: Optional[list[dict[str, Any]]] = None
+    # Skills with bundled markdown files also carry an optional
+    # ``files: [{filename, content}, ...]`` list (present only when
+    # non-empty) so the agent can render a <bundled_files> manifest and
+    # serve file content via its ``read_skill_file`` tool.
+    skills: list[dict[str, Any]] | None = None
     # [Gradient] Generic metadata forwarded as-is to the agent service.
     # Today used for ``user_language`` (UI locale, BCP-47 like "nl-NL")
     # so the agent can resolve the response language. Open-ended so we
     # can extend it without changing the contract.
-    metadata: Optional[dict[str, Any]] = None
+    metadata: dict[str, Any] | None = None
     # Model params forwarded directly
-    temperature: Optional[float] = None
-    top_p: Optional[float] = None
-    max_tokens: Optional[int] = None
-    frequency_penalty: Optional[float] = None
-    presence_penalty: Optional[float] = None
-    seed: Optional[int] = None
-    stop: Optional[list[str]] = None
+    temperature: float | None = None
+    top_p: float | None = None
+    max_tokens: int | None = None
+    frequency_penalty: float | None = None
+    presence_penalty: float | None = None
+    seed: int | None = None
+    stop: list[str] | None = None
+
+
+def _maybe_attach_fetch_token(skill_entry: dict[str, Any], user_id: str) -> dict[str, Any]:
+    """Return skill_entry with a fetch_token added iff it has binary files.
+
+    The token is scoped to {user_id, skill_id, purpose: "skill_file_read"} with
+    a 120-second TTL.  It is accepted ONLY by the raw-bytes route for the
+    matching skill_id; all other routes reject it.
+    """
+    skill_id = skill_entry.get('id')
+    if not skill_id:
+        return skill_entry
+    files = skill_entry.get('files') or []
+    has_binary = any(f.get('is_binary') for f in files)
+    if not has_binary:
+        return skill_entry
+    token = create_token(
+        data={'id': user_id, 'skill_id': skill_id, 'purpose': 'skill_file_read'},
+        expires_delta=timedelta(seconds=120),
+    )
+    return {**skill_entry, 'fetch_token': token}
 
 
 def build_agent_payload(
     *,
     model: str,
     messages: list[dict[str, Any]],
-    agent: Optional[str] = None,
+    agent: str | None = None,
     stream: bool = True,
-    chat_id: Optional[str] = None,
-    user_id: Optional[str] = None,
-    message_id: Optional[str] = None,
-    parent_message_id: Optional[str] = None,
-    session_id: Optional[str] = None,
-    features: Optional[dict[str, Any]] = None,
-    files: Optional[list[dict[str, Any]]] = None,
-    knowledge: Optional[list[dict[str, Any]]] = None,
-    tool_ids: Optional[list[str]] = None,
-    rag_filter: Optional[dict[str, Any]] = None,
-    system_prompt: Optional[str] = None,
-    chat_system_prompt: Optional[str] = None,
-    skills: Optional[list[dict[str, Any]]] = None,
-    metadata: Optional[dict[str, Any]] = None,
+    chat_id: str | None = None,
+    user_id: str | None = None,
+    message_id: str | None = None,
+    parent_message_id: str | None = None,
+    session_id: str | None = None,
+    features: dict[str, Any] | None = None,
+    files: list[dict[str, Any]] | None = None,
+    knowledge: list[dict[str, Any]] | None = None,
+    tool_ids: list[str] | None = None,
+    rag_filter: dict[str, Any] | None = None,
+    system_prompt: str | None = None,
+    chat_system_prompt: str | None = None,
+    skills: list[dict[str, Any]] | None = None,
+    metadata: dict[str, Any] | None = None,
     **model_params,
 ) -> dict[str, Any]:
     """Build a JSON-serialisable payload for the agent API.
@@ -164,7 +192,21 @@ def build_agent_payload(
         metadata=metadata,
         **{k: v for k, v in model_params.items() if v is not None},
     )
-    return {k: v for k, v in asdict(payload).items() if v is not None}
+    result = {k: v for k, v in asdict(payload).items() if v is not None}
+
+    # [Gradient] Phase 8b: mint a short-lived, skill-scoped token for each
+    # forwarded skill that carries binary files.  The agent uses it to fetch
+    # binary asset bytes from GET /api/v1/skills/id/{skill_id}/files/content
+    # with Authorization: Bearer <fetch_token>.  Only minted when
+    # ENABLE_SKILL_EXECUTION is on (full execution mode), FEATURE_SKILL_FILES is
+    # on, the skill has a known id, the request has a user_id, and at least one
+    # file in the bundle is binary (is_binary=True).
+    # Text-only skills and skills without ids never get a token.
+    # With ENABLE_SKILL_EXECUTION off (simple-skills mode), no token is ever minted.
+    if ENABLE_SKILL_EXECUTION and FEATURE_SKILL_FILES and user_id and result.get('skills'):
+        result['skills'] = [_maybe_attach_fetch_token(skill_entry, user_id) for skill_entry in result['skills']]
+
+    return result
 
 
 def _agent_api_headers() -> dict[str, str]:
@@ -180,7 +222,7 @@ def _agent_api_headers() -> dict[str, str]:
     return headers
 
 
-def _resolve_model_vision_capable(model: Optional[dict[str, Any]]) -> bool:
+def _resolve_model_vision_capable(model: dict[str, Any] | None) -> bool:
     """Resolve whether a model can process image input.
 
     Reads OpenWebUI's per-model vision capability flag
@@ -194,7 +236,7 @@ def _resolve_model_vision_capable(model: Optional[dict[str, Any]]) -> bool:
     return bool(capabilities.get('vision', True))
 
 
-def _resolve_model_citations_enabled(model: Optional[dict[str, Any]]) -> bool:
+def _resolve_model_citations_enabled(model: dict[str, Any] | None) -> bool:
     """Resolve whether inline source citations are enabled for a model.
 
     Reads OpenWebUI's per-model citations capability flag
@@ -244,9 +286,15 @@ async def stream_agent_response(
     - Custom events (status, source) have an explicit event type
     - Standard OpenAI chunks have no event type (defaults to "data")
     """
+    # aiohttp caps a single readline() at 2 * read_bufsize (default 128 KiB).
+    # Agent tool deltas can ship a whole HTML artifact in one `delta.content`
+    # — e.g. build_knowledge_graph inlines vis-network.min.js (~640 KiB raw,
+    # ~750 KiB JSON-escaped). Bump the buffer so the consumer tolerates lines
+    # well into the megabytes.
     session = aiohttp.ClientSession(
         trust_env=True,
         timeout=aiohttp.ClientTimeout(total=timeout),
+        read_bufsize=8 * 1024 * 1024,
     )
 
     try:
@@ -305,7 +353,7 @@ async def call_agent_api(
     form_data: dict[str, Any],
     metadata: dict[str, Any],
     features: dict[str, Any],
-    override_agent: Optional[str] = None,
+    override_agent: str | None = None,
 ):
     """Route a chat completion to the external agent API.
 
@@ -350,10 +398,17 @@ async def call_agent_api(
     # ``default_agent``.
     selected_agent = override_agent or request.app.state.config.AGENT_API_SELECTED_AGENT or None
 
-    # [Gradient] Forward parent_message_id so the agent service can rewind
-    # its persisted thread state on retry/regenerate. Without this, the
-    # agent's stateful thread store leaks the prior assistant turn into
-    # the model's context and tools don't re-fire on re-runs.
+    # [Gradient] Forward the turn anchor so the agent service can rewind its
+    # persisted thread state on retry/regenerate. The agents side forks its
+    # checkpoint on the payload's ``parent_message_id`` field, which it defines
+    # as "the user-message id this assistant turn replies to" (= the assistant
+    # message's parent). That is ``user_message_id`` here — NOT
+    # ``metadata['parent_message_id']`` (which OWUI sets to the *user* message's
+    # parent: null on a new chat's first turn, so the rewind never fired and
+    # regenerate replayed the prior turn's accumulated tool state). The anchor
+    # must be stable across regenerations and present on turn 1; user_message_id
+    # is both. Without it the agent's thread store leaks the prior assistant
+    # turn into context and tools don't re-fire on re-runs.
 
     # [Gradient] Build agent-side metadata from the OWUI metadata dict.
     # user_language carries the frontend UI locale (BCP-47, e.g. "nl-NL")
@@ -384,7 +439,7 @@ async def call_agent_api(
         chat_id=metadata.get('chat_id'),
         user_id=metadata.get('user_id'),
         message_id=metadata.get('message_id'),
-        parent_message_id=metadata.get('parent_message_id'),
+        parent_message_id=metadata.get('user_message_id'),
         session_id=metadata.get('session_id'),
         features=features,
         files=metadata.get('files'),
@@ -442,14 +497,48 @@ def _build_streaming_response(
     get_event_emitter. Standard OpenAI data lines are passed through
     to the response body for process_chat_response to consume.
     """
-    event_emitter = get_event_emitter(metadata)
 
     async def body_generator():
         # [Gradient] Source events are emitted individually via Socket.IO
         # as they arrive, so citation chips render while the answer streams.
+        # get_event_emitter is async (Phase 1.5 upstream); await inside the
+        # generator since the enclosing _build_streaming_response is sync.
+        event_emitter = await get_event_emitter(metadata)
+        # [Gradient] Accumulate every ``event: subagent`` payload so the
+        # message's persisted ``subagents`` field carries the full lifecycle
+        # for rehydration on reload. The frontend's ``reduceSubAgents``
+        # consumes this same flat list, so persisting verbatim avoids any
+        # FE/BE shape divergence. Empty for non-bezwaar agents.
+        subagent_events: list[dict] = []
+        # [Gradient] Latest post-turn context-budget estimate. Persisted onto
+        # the message on `done` so the banner rehydrates on reload (mirrors
+        # subagents). Latest wins across multi-iteration turns.
+        last_context_usage: dict | None = None
         try:
             async for sse_event in stream_agent_response(AGENT_API_BASE_URL, payload):
                 if sse_event.event_type == 'done':
+                    # [Gradient] Persist accumulated per-turn message state in a
+                    # single upsert: the subagent lifecycle and the latest
+                    # context-budget estimate. Both rehydrate the message on
+                    # reload. Upsert merges into the existing message, so writing
+                    # them together never clobbers either field.
+                    updates: dict[str, Any] = {}
+                    if subagent_events:
+                        updates['subagents'] = subagent_events
+                    if last_context_usage is not None:
+                        updates['contextUsage'] = last_context_usage
+                    if updates:
+                        chat_id = metadata.get('chat_id')
+                        message_id = metadata.get('message_id')
+                        if chat_id and message_id:
+                            try:
+                                await Chats.upsert_message_to_chat_by_id_and_message_id(
+                                    chat_id,
+                                    message_id,
+                                    updates,
+                                )
+                            except Exception as e:
+                                log.warning(f'Error persisting message updates: {e}')
                     break
 
                 if sse_event.event_type == 'status':
@@ -499,12 +588,36 @@ def _build_streaming_response(
                             log.warning(f'Error emitting present_ui event: {e}')
                     continue
 
+                if sse_event.event_type == 'subagent':
+                    # [Gradient] SubAgent lifecycle / streaming events for the
+                    # Leiden bezwaar agent (and any future multi-SubAgent flow).
+                    # Payload is the typed event from the agent backend with a
+                    # ``phase`` discriminator: start / token / reasoning /
+                    # status / source / step / done.
+                    # The frontend's <SubAgentGroup> reducer keys cards by
+                    # parallel_group_id and agent_id; per-token streams append
+                    # to the matching card's text_buffer.
+                    subagent_events.append(sse_event.data)
+                    if event_emitter:
+                        try:
+                            await event_emitter(
+                                {
+                                    'type': 'subagent',
+                                    'data': sse_event.data,
+                                }
+                            )
+                        except Exception as e:
+                            log.warning(f'Error emitting subagent event: {e}')
+                    continue
+
                 if sse_event.event_type == 'context_usage':
                     # [Gradient] Post-turn context-budget estimate from the
                     # agent service. Payload shape:
                     # {"tokens_used": int, "tokens_budget": int, "fraction": float}.
                     # The frontend renders a banner above the chat input when
-                    # fraction crosses a threshold.
+                    # fraction crosses a threshold. Retain the latest payload so
+                    # it persists onto the message on `done` (banner rehydration).
+                    last_context_usage = sse_event.data
                     if event_emitter:
                         try:
                             await event_emitter(

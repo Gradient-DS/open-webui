@@ -46,29 +46,32 @@ def _user() -> SimpleNamespace:
     return SimpleNamespace(id='u1', email='u@example.com', name='User', role='user')
 
 
-def test_image_upload_rejected_when_engine_does_not_support():
+@pytest.mark.asyncio
+async def test_image_upload_rejected_when_engine_does_not_support():
     request = _request(engine='tika')
     file = _upload_file('photo.png', 'image/png')
 
     with pytest.raises(HTTPException) as exc_info:
-        upload_file_handler(request, file=file, process=True, process_in_background=False, user=_user())
+        await upload_file_handler(request, file=file, process=True, process_in_background=False, user=_user())
 
     assert exc_info.value.status_code == status.HTTP_415_UNSUPPORTED_MEDIA_TYPE
     assert 'image/png' in str(exc_info.value.detail)
 
 
-def test_video_upload_rejected_when_engine_does_not_support():
+@pytest.mark.asyncio
+async def test_video_upload_rejected_when_engine_does_not_support():
     request = _request(engine='tika')
     file = _upload_file('clip.mp4', 'video/mp4')
 
     with pytest.raises(HTTPException) as exc_info:
-        upload_file_handler(request, file=file, process=True, process_in_background=False, user=_user())
+        await upload_file_handler(request, file=file, process=True, process_in_background=False, user=_user())
 
     assert exc_info.value.status_code == status.HTTP_415_UNSUPPORTED_MEDIA_TYPE
 
 
 @pytest.mark.parametrize('engine', ['external', 'datalab_marker', 'mistral_ocr'])
-def test_image_upload_passes_415_check_for_image_capable_engines(engine):
+@pytest.mark.asyncio
+async def test_image_upload_passes_415_check_for_image_capable_engines(engine):
     """The 415 guard returns control to the rest of the handler for engines
     that DO process images. The handler then fails downstream because we
     haven't mocked Storage/DB — that's fine; this test only asserts the
@@ -77,12 +80,13 @@ def test_image_upload_passes_415_check_for_image_capable_engines(engine):
     file = _upload_file('photo.png', 'image/png')
 
     with pytest.raises(HTTPException) as exc_info:
-        upload_file_handler(request, file=file, process=True, process_in_background=False, user=_user())
+        await upload_file_handler(request, file=file, process=True, process_in_background=False, user=_user())
 
     assert exc_info.value.status_code != status.HTTP_415_UNSUPPORTED_MEDIA_TYPE
 
 
-def test_audio_upload_passes_415_check_when_stt_handles_it():
+@pytest.mark.asyncio
+async def test_audio_upload_passes_415_check_when_stt_handles_it():
     """STT-supported content types skip the 415 (transcribe path takes over)."""
     request = _request(engine='tika', stt=['audio/mpeg'])
     file = _upload_file('clip.mp3', 'audio/mpeg')
@@ -91,18 +95,59 @@ def test_audio_upload_passes_415_check_when_stt_handles_it():
     # hits the 415 branch in the first place — this test guards against a
     # future regression where audio gets bundled into the same filter.
     with pytest.raises(HTTPException) as exc_info:
-        upload_file_handler(request, file=file, process=True, process_in_background=False, user=_user())
+        await upload_file_handler(request, file=file, process=True, process_in_background=False, user=_user())
 
     assert exc_info.value.status_code != status.HTTP_415_UNSUPPORTED_MEDIA_TYPE
 
 
-def test_unsupported_content_type_with_process_false_skips_check():
+@pytest.mark.asyncio
+async def test_unsupported_content_type_with_process_false_skips_check():
     """process=False means the file is stored but not parsed; the 415 only
     fires when processing is requested."""
     request = _request(engine='tika')
     file = _upload_file('photo.png', 'image/png')
 
     with pytest.raises(HTTPException) as exc_info:
-        upload_file_handler(request, file=file, process=False, process_in_background=False, user=_user())
+        await upload_file_handler(request, file=file, process=False, process_in_background=False, user=_user())
 
     assert exc_info.value.status_code != status.HTTP_415_UNSUPPORTED_MEDIA_TYPE
+
+
+def _request_allowlist(allowed: list[str], engine: str = 'external') -> MagicMock:
+    """Request stand-in with a configured upload allow-list."""
+    cfg = SimpleNamespace(
+        CONTENT_EXTRACTION_ENGINE=engine,
+        STT_SUPPORTED_CONTENT_TYPES=[],
+        ALLOWED_FILE_EXTENSIONS=allowed,
+    )
+    request = MagicMock()
+    request.app.state.config = cfg
+    return request
+
+
+@pytest.mark.asyncio
+async def test_disallowed_extension_rejected_by_allowlist():
+    """A file with a real, non-allowed extension fast-rejects with a 400."""
+    request = _request_allowlist(['pdf'])
+    file = _upload_file('logo.svg', 'image/svg+xml')
+
+    with pytest.raises(HTTPException) as exc_info:
+        await upload_file_handler(request, file=file, process=True, process_in_background=False, user=_user())
+
+    assert exc_info.value.status_code == status.HTTP_400_BAD_REQUEST
+    assert 'svg is not allowed' in str(exc_info.value.detail)
+
+
+@pytest.mark.asyncio
+async def test_empty_extension_passes_allowlist():
+    """A genuinely extension-less document (unknown content type → no derived
+    extension) must NOT be rejected by the allow-list — legit no-extension docs
+    (e.g. exported pages) have to be ingestable. It fails downstream here
+    (Storage/DB unmocked); we only assert the allow-list 400 did not fire."""
+    request = _request_allowlist(['pdf'])
+    file = _upload_file('ASB - Microsoft Entra admin center', 'application/x-unknowntype')
+
+    with pytest.raises(HTTPException) as exc_info:
+        await upload_file_handler(request, file=file, process=True, process_in_background=False, user=_user())
+
+    assert 'is not allowed' not in str(exc_info.value.detail)

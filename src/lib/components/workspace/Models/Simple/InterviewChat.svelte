@@ -1,6 +1,7 @@
 <script lang="ts">
-	import { getContext, onDestroy, onMount, tick } from 'svelte';
-	import { submitPromptSignal, user } from '$lib/stores';
+	import { getContext, onDestroy, onMount } from 'svelte';
+	import { toast } from 'svelte-sonner';
+	import { socket, submitPromptSignal, user } from '$lib/stores';
 	import { streamOnboarding, type OnboardingMessage } from '$lib/apis/onboarding';
 	import Messages from '$lib/components/chat/Messages.svelte';
 	import MessageInput from '$lib/components/chat/MessageInput.svelte';
@@ -25,6 +26,10 @@
 	};
 	let prompt = '';
 	let files: any[] = [];
+	// Files attached during the interview, accumulated across turns. Sent to
+	// the agent on every turn as context and used for auto-attach at draft
+	// time. Distinct from `files`, which is only the live input binding.
+	let interviewFiles: Record<string, unknown>[] = [];
 	let selectedModels: [''] = [''];
 	let messageInput: any;
 	let streaming = false;
@@ -38,9 +43,8 @@
 	 * — they don't reach onUpload. This handler catches external
 	 * integration callbacks (webpage URL, Google Drive, OneDrive,
 	 * Confluence) and accepts any payload that already looks like a
-	 * chat-files item; full upload pipelines (google-drive file
-	 * download, web-page index) are out of scope for the interview
-	 * MVP and silently no-op.
+	 * chat-files item; full upload pipelines are out of scope for the
+	 * interview MVP and silently no-op.
 	 */
 	const handleOnUpload = (e: { type?: string; data?: unknown }) => {
 		if (!e || !e.type) return;
@@ -57,8 +61,43 @@
 		}
 	};
 
+	/**
+	 * Transition an uploaded file from 'uploading' to 'uploaded' once the
+	 * backend finishes parsing/embedding. process=true uploads stay
+	 * 'uploading' until this Socket.IO event arrives (mirrors Chat.svelte);
+	 * without it the chip spins forever and streamOnboarding's status
+	 * filter drops the attachment.
+	 */
+	const fileStatusHandler = (data: {
+		file_id: string;
+		status: string;
+		error?: string;
+		collection_name?: string;
+	}) => {
+		const idx = files.findIndex((f) => f.id === data.file_id);
+		if (idx < 0) return;
+		if (data.status === 'completed') {
+			files[idx].status = 'uploaded';
+			if (data.collection_name) {
+				files[idx].collection_name = data.collection_name;
+			}
+		} else if (data.status === 'failed') {
+			toast.error(
+				$i18n.t('File processing failed: {{error}}', {
+					error: data.error || 'Unknown error'
+				})
+			);
+			files = files.filter((f) => f.id !== data.file_id);
+		}
+		files = files;
+	};
+
 	/** Append a message node to the history tree; returns its id. */
-	const appendMessage = (role: 'user' | 'assistant', content: string): string => {
+	const appendMessage = (
+		role: 'user' | 'assistant',
+		content: string,
+		messageFiles: Record<string, unknown>[] = []
+	): string => {
 		const id = crypto.randomUUID();
 		const parentId = history.currentId;
 		history.messages[id] = {
@@ -68,12 +107,14 @@
 			role,
 			content,
 			timestamp: now(),
+			...(messageFiles.length > 0 ? { files: messageFiles } : {}),
 			...(role === 'assistant'
 				? {
 						model: 'Soev Assistant Builder',
 						modelName: 'Soev Assistant Builder',
 						modelIdx: 0,
-						done: false
+						done: false,
+						statusHistory: []
 					}
 				: {})
 		};
@@ -97,37 +138,34 @@
 				localStorage.token,
 				chatId,
 				agentTranscript,
-				files
+				interviewFiles
 			)) {
 				if (event.type === 'content') {
 					answer += event.text;
 					history.messages[assistantId].content = answer;
 					history = history;
-				} else if (event.type === 'ui_block') {
-					const block = {
-						id: crypto.randomUUID(),
-						name: event.name,
-						props: event.props
-					};
-					const existing = history.messages[assistantId].uiBlocks ?? [];
-					history.messages[assistantId].uiBlocks = [...existing, block];
+				} else if (event.type === 'status') {
+					// Live progress ("Searching … / Reading … / Drafting …") rendered
+					// by the shared ResponseMessage/StatusHistory on the bubble.
+					const sh = history.messages[assistantId].statusHistory ?? [];
+					history.messages[assistantId].statusHistory = [...sh, event.status];
 					history = history;
-					// The content-driven triggerScroll in Messages.svelte
-					// won't fire for a ui_block push (no content change),
-					// so we scroll our own container after the next tick.
-					tick().then(() => {
-						const el = document.getElementById('messages-container');
-						if (el) el.scrollTop = el.scrollHeight;
-					});
 				} else if (event.type === 'draft') {
-					// Forward the user's interview-time attachments as
-					// the draft's knowledge list. SimpleModelEditor picks
-					// this up on mount and seeds the Knowledge picker.
-					const attached = files.filter(
-						(f) =>
-							(f?.type === 'collection' || f?.type === 'file') &&
-							f?.status !== 'uploading'
+					// Auto-attach: knowledge bases the user picked are always kept;
+					// uploaded files only when the agent flagged them as standing
+					// reference (draft.files_to_attach) — one-off example inputs the
+					// user uploads per-use are left out. SimpleModelEditor seeds the
+					// Kennis picker with the result; the user can still add/remove.
+					const filesToAttach = (event.draft.files_to_attach ?? []).map((n) =>
+						String(n).trim().toLowerCase()
 					);
+					const attached = interviewFiles.filter((f) => {
+						if (f?.type === 'collection') return true;
+						if (f?.type === 'file') {
+							return filesToAttach.includes(String(f.name ?? '').trim().toLowerCase());
+						}
+						return false;
+					});
 					onComplete({ ...event.draft, knowledge: attached });
 					return;
 				}
@@ -151,14 +189,25 @@
 		if (!text || text.trim() === '' || streaming) return;
 		const t = text.trim();
 		prompt = '';
-		files = [];
+		// Move resolved attachments (an id means upload + content extraction
+		// finished) onto this message and into the interview accumulator, then
+		// clear them from the input — same feel as normal chat. Files still
+		// uploading stay in the input and ride along on a later turn.
+		const turnFiles = files.filter((f) => f && f.id);
+		for (const f of turnFiles) {
+			if (!interviewFiles.some((existing) => existing.id === f.id)) {
+				interviewFiles = [...interviewFiles, f];
+			}
+		}
+		files = files.filter((f) => !(f && f.id));
 		messageInput?.setText?.('');
 		agentTranscript = [...agentTranscript, { role: 'user', content: t }];
-		appendMessage('user', t);
+		appendMessage('user', t, turnFiles);
 		await runTurn();
 	};
 
 	onMount(() => {
+		$socket?.on('file:status', fileStatusHandler);
 		// Seed turn — sent to the agent but not shown on screen, so the
 		// agent opens the conversation with its first question.
 		agentTranscript = [
@@ -188,9 +237,12 @@
 
 	onDestroy(() => {
 		unsubscribeChoice();
+		$socket?.off('file:status', fileStatusHandler);
 	});
 </script>
 
+<!-- id="chat-pane" so MessageInput wires its drag-drop dropzone here,
+     letting the user drop a supporting file into the interview. -->
 <div id="chat-pane" class="onboarding-chat flex flex-col h-full w-full">
 	<div class="shrink-0 flex flex-col gap-1 px-1 mt-1.5 mb-3">
 		<div class="flex justify-between items-center">
@@ -246,8 +298,8 @@
 			atSelectedModel={undefined}
 			createMessagePair={() => {}}
 			stopResponse={() => {}}
-			onUpload={handleOnUpload}
 			onChange={() => {}}
+			onUpload={handleOnUpload}
 			placeholder={$i18n.t('Type your answer...')}
 			inputMenuRestrictTo={['upload_files', 'knowledge']}
 			on:submit={(e) => handleSubmit(e.detail)}
@@ -261,12 +313,6 @@
 	:global(.onboarding-chat .buttons) {
 		display: none !important;
 	}
-
-	/* Hide MessageInput toolbar controls that don't apply to the
-	   assistant-building flow. The `+` menu (Upload / Knowledge /
-	   Webpage / etc.) stays visible so users can attach files and KBs.
-	   These selectors are a starting point — finalised during smoke
-	   testing if any controls slip through. */
 
 	/* RAG filter button — assistant builder controls its own filters. */
 	:global(.onboarding-chat button[aria-label='RAG Filters']),

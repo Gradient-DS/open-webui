@@ -13,6 +13,10 @@
 	import { WEBUI_API_BASE_URL } from '$lib/constants';
 
 	export let selectedItems = [];
+	// When true, the KB selector dropdown shows a "New Knowledge" footer
+	// (with cloud-sync type choices) so a KB can be created in-flow —
+	// simple assistant builder only. Its `create` event is forwarded up.
+	export let allowCreate = false;
 	const i18n = getContext('i18n');
 
 	let loaded = false;
@@ -192,6 +196,8 @@
 		{#if loaded}
 			<div class="flex flex-wrap flex-row text-sm gap-1">
 				<KnowledgeSelector
+					{allowCreate}
+					on:create
 					on:select={(e) => {
 						const item = e.detail;
 
@@ -226,7 +232,9 @@
 		<!-- {knowledge} -->
 	</div>
 
-	<div class=" text-xs dark:text-gray-700">
-		{$i18n.t('To attach knowledge base here, add them to the "Knowledge" workspace first.')}
-	</div>
+	{#if !allowCreate}
+		<div class=" text-xs dark:text-gray-700">
+			{$i18n.t('To attach knowledge base here, add them to the "Knowledge" workspace first.')}
+		</div>
+	{/if}
 </div>

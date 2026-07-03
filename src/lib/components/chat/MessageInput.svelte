@@ -53,9 +53,8 @@
 		getWeekday
 	} from '$lib/utils';
 	import { isFeatureEnabled } from '$lib/utils/features';
-	import { uploadFile } from '$lib/apis/files';
+	import { uploadFile, deleteFileById, getFileAttachments } from '$lib/apis/files';
 	import { generateAutoCompletion } from '$lib/apis';
-	import { deleteFileById } from '$lib/apis/files';
 	import { getChatById } from '$lib/apis/chats';
 	import { getSessionUser } from '$lib/apis/auths';
 	import { getTools } from '$lib/apis/tools';
@@ -75,6 +74,7 @@
 
 	import RichTextInput from '../common/RichTextInput.svelte';
 	import Tooltip from '../common/Tooltip.svelte';
+	import { getActiveSide, getHistorySide } from '$lib/utils/dataSeparation';
 	import FileItem from '../common/FileItem.svelte';
 	import Image from '../common/Image.svelte';
 	import Spinner from '../common/Spinner.svelte';
@@ -100,6 +100,7 @@
 	import GoogleDrive from '../icons/GoogleDrive.svelte';
 	import OneDrive from '../icons/OneDrive.svelte';
 	import Confluence from '../icons/Confluence.svelte';
+	import Topdesk from '../icons/Topdesk.svelte';
 	import Dropdown from '../common/Dropdown.svelte';
 
 	import CommandSuggestionList from './MessageInput/CommandSuggestionList.svelte';
@@ -354,7 +355,9 @@
 			}
 
 			chatInputElement?.setText(text);
-			chatInputElement?.focus();
+			if (!$showCallOverlay) {
+				chatInputElement?.focus();
+			}
 
 			if (text !== '') {
 				text = await inputVariableHandler(text);
@@ -522,6 +525,11 @@
 			$models.find((m) => m.id === model)?.info?.meta?.capabilities?.document_writer ?? true
 	);
 
+	let terminalCapableModels = [];
+	$: terminalCapableModels = (atSelectedModel?.id ? [atSelectedModel.id] : selectedModels).filter(
+		(model) => $models.find((m) => m.id === model)?.info?.meta?.capabilities?.terminal ?? true
+	);
+
 	let toggleFilters = [];
 	$: toggleFilters = (atSelectedModel?.id ? [atSelectedModel.id] : selectedModels)
 		.map((id) => ($models.find((model) => model.id === id) || {})?.filters ?? [])
@@ -562,6 +570,75 @@
 	// Disable code interpreter when terminal is active (mutually exclusive)
 	$: if ($selectedTerminalId && codeInterpreterEnabled) {
 		codeInterpreterEnabled = false;
+	}
+
+	// Auto-disable capability toggles when the selected model(s) no longer support them
+	// (e.g. switching from a web-search-capable model to one without). Mirrors the terminal
+	// guard above and keeps both the active-capability badge and the getFeatures() payload
+	// from carrying a stale capability. A feature stays on only if every selected model
+	// supports it; the `?? true` fallback in the *CapableModels derivations means models that
+	// are still loading (or omit the capability) are treated as capable, so we never flicker.
+	$: selectedModelCount = (atSelectedModel?.id ? [atSelectedModel.id] : selectedModels).length;
+	$: if (webSearchEnabled && webSearchCapableModels.length !== selectedModelCount) {
+		webSearchEnabled = false;
+	}
+	$: if (imageGenerationEnabled && imageGenerationCapableModels.length !== selectedModelCount) {
+		imageGenerationEnabled = false;
+	}
+	$: if (codeInterpreterEnabled && codeInterpreterCapableModels.length !== selectedModelCount) {
+		codeInterpreterEnabled = false;
+	}
+	$: if (documentWriterEnabled && documentWriterCapableModels.length !== selectedModelCount) {
+		documentWriterEnabled = false;
+	}
+
+	// Strict data separation (data-sovereignty): a conversation may use the open internet
+	// (web search / webpage URLs) OR internal documents (files / KBs / notes), never both.
+	// The first side used locks the conversation; the unavailable side is grayed out with a
+	// tooltip. All no-ops unless the feature flag is enabled.
+	$: strictDataSeparation = $config?.features?.feature_strict_data_separation ?? false;
+	$: dataSeparationMessages =
+		strictDataSeparation && history ? createMessagesList(history, history.currentId) : [];
+	// Side the conversation is already locked to by prior messages (history only — does NOT
+	// depend on webSearchEnabled, so the defensive guard below can't form a reactive cycle).
+	$: dataSeparationHistorySide = strictDataSeparation
+		? getHistorySide(dataSeparationMessages)
+		: null;
+	$: dataSeparationSide = strictDataSeparation
+		? getActiveSide({ messages: dataSeparationMessages, files, webSearchEnabled })
+		: null;
+	$: openInternetBlocked = strictDataSeparation && dataSeparationSide === 'internal';
+	$: internalBlocked = strictDataSeparation && dataSeparationSide === 'open_internet';
+	$: dataSeparationMessage = $i18n.t(
+		'Internal documents and the open internet cannot be used in the same conversation.'
+	);
+	// Pinned-bar quick buttons for the blocked side are hidden (the always-present "+" menu
+	// still shows them grayed out with the explanatory tooltip).
+	$: dataSeparationBlockedItems = new Set(
+		strictDataSeparation
+			? [
+					...(openInternetBlocked ? ['attach_webpage', 'web_search'] : []),
+					...(internalBlocked
+						? [
+								'upload_files',
+								'capture',
+								'attach_notes',
+								'knowledge',
+								'reference_chats',
+								'google_drive',
+								'onedrive',
+								'confluence',
+								'topdesk'
+							]
+						: [])
+				]
+			: []
+	);
+
+	// Defensive: a model's defaultFeatureIds could re-enable web search in a conversation already
+	// locked to internal documents. Keyed on the history-only side to avoid a reactive cycle.
+	$: if (dataSeparationHistorySide === 'internal' && webSearchEnabled) {
+		webSearchEnabled = false;
 	}
 
 	let inputMenuRef;
@@ -921,6 +998,19 @@
 					}
 
 					files = files;
+
+					// Pre-load render attachments (e.g. IFC plan PNGs) so the chat-side
+					// image-builder in Chat.svelte can inline them as first-turn vision
+					// for the BIM agent. Non-blocking; on error the file silently has
+					// no attachments.
+					getFileAttachments(localStorage.token, fileItem.id)
+						.then((manifest) => {
+							fileItem.attachments = manifest;
+							files = files; // trigger Svelte reactivity
+						})
+						.catch(() => {
+							fileItem.attachments = [];
+						});
 				} else {
 					files = files.filter((item) => item?.itemId !== tempItemId);
 				}
@@ -1889,7 +1979,10 @@
 											{showCodeInterpreterButton}
 											{showDocumentWriterButton}
 											closeOnOutsideClick={integrationsMenuCloseOnOutsideClick}
-										restrictTo={inputMenuRestrictTo}
+											{openInternetBlocked}
+											{internalBlocked}
+											{dataSeparationMessage}
+											restrictTo={inputMenuRestrictTo}
 											onShowValves={(e) => {
 												const { type, id } = e;
 												selectedValvesType = type;
@@ -1941,7 +2034,7 @@
 
 									<div class="ml-1 flex gap-1.5">
 										<!-- Pinned items -->
-										{#each ($settings?.pinnedInputItems ?? []).filter((id) => inputMenuRestrictTo === null || inputMenuRestrictTo.includes(id)) as itemId}
+										{#each ($settings?.pinnedInputItems ?? []).filter((id) => (inputMenuRestrictTo === null || inputMenuRestrictTo.includes(id)) && !dataSeparationBlockedItems.has(id)) as itemId}
 											{#if itemId === 'upload_files' && fileUploadEnabled}
 												<Tooltip content={$i18n.t('Upload Files')} placement="top">
 													<button
@@ -2028,7 +2121,7 @@
 														<OneDrive className="size-4" />
 													</button>
 												</Tooltip>
-											{:else if itemId === 'confluence' && fileUploadEnabled && $config?.features?.enable_confluence_integration && $config?.features?.enable_confluence_sync && $config?.features?.confluence_kb_mode !== 'shared'}
+											{:else if itemId === 'confluence' && fileUploadEnabled && $config?.features?.enable_confluence_integration && $config?.features?.enable_confluence_sync && $config?.features?.confluence_kb_mode !== 'shared' && $config?.features?.confluence_oauth_configured}
 												<Tooltip content={$i18n.t('Confluence')} placement="top">
 													<button
 														class="p-[7px] rounded-full bg-transparent text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors duration-300 focus:outline-hidden"
@@ -2048,13 +2141,21 @@
 														<Confluence className="size-4" />
 													</button>
 												</Tooltip>
+											{:else if itemId === 'topdesk' && fileUploadEnabled && $config?.features?.enable_topdesk_integration && $config?.features?.topdesk_shared_kb_id}
+												<Tooltip content={$i18n.t('TOPdesk knowledge base')} placement="top">
+													<button
+														class="p-[7px] rounded-full bg-transparent text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors duration-300 focus:outline-hidden"
+														type="button"
+														on:click={() => inputMenuRef?.attachSharedTopdeskKb()}
+													>
+														<Topdesk className="size-4" />
+													</button>
+												</Tooltip>
 												<!-- Pinned capability items -->
 											{:else if itemId === 'web_search' && showWebSearchButton}
 												<Tooltip
 													content={imageGenerationEnabled
-														? $i18n.t(
-																'Web search and image generation cannot run in the same turn'
-															)
+														? $i18n.t('Web search and image generation cannot run in the same turn')
 														: $i18n.t('Web Search')}
 													placement="top"
 												>
@@ -2076,9 +2177,7 @@
 											{:else if itemId === 'image_generation' && showImageGenerationButton}
 												<Tooltip
 													content={webSearchEnabled
-														? $i18n.t(
-																'Web search and image generation cannot run in the same turn'
-															)
+														? $i18n.t('Web search and image generation cannot run in the same turn')
 														: $i18n.t('Image')}
 													placement="top"
 												>
@@ -2420,7 +2519,10 @@
 
 										{#if !history?.currentId || history.messages[history.currentId]?.done == true}
 											<!-- Terminal Server Selector -->
-											{#if ($terminalServers ?? []).length > 0 || ($settings?.terminalServers ?? []).some((s) => s.url)}
+											{@const hasDirectToolServerAccess =
+												$_user?.role === 'admin' ||
+												($_user?.permissions?.features?.direct_tool_servers ?? true)}
+											{#if terminalCapableModels.length > 0 && (($terminalServers ?? []).some((t) => t.id) || (hasDirectToolServerAccess && (($terminalServers ?? []).some((t) => !t.id) || ($settings?.terminalServers ?? []).some((s) => s.url))))}
 												<TerminalMenu bind:show={showTerminalMenu} />
 											{/if}
 

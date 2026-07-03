@@ -5,6 +5,7 @@
 	import { searchNotes } from '$lib/apis/notes';
 	import { searchKnowledgeBases, searchKnowledgeFiles } from '$lib/apis/knowledge';
 
+	import { config } from '$lib/stores';
 	import { decodeString } from '$lib/utils';
 
 	import Dropdown from '$lib/components/common/Dropdown.svelte';
@@ -15,11 +16,18 @@
 	import ChevronRight from '$lib/components/icons/ChevronRight.svelte';
 	import PageEdit from '$lib/components/icons/PageEdit.svelte';
 	import DocumentPage from '$lib/components/icons/DocumentPage.svelte';
+	import FolderOpen from '$lib/components/icons/FolderOpen.svelte';
+	import OneDrive from '$lib/components/icons/OneDrive.svelte';
+	import GoogleDrive from '$lib/components/icons/GoogleDrive.svelte';
+	import Confluence from '$lib/components/icons/Confluence.svelte';
 
 	const i18n = getContext('i18n');
 	const dispatch = createEventDispatcher();
 
 	export let onClose: Function = () => {};
+	// When true, show a "New Knowledge" footer that creates a KB in-flow,
+	// offering the same type/cloud-sync choices as the workspace flow.
+	export let allowCreate = false;
 
 	let show = false;
 
@@ -205,6 +213,65 @@
 					{/each}
 				{/if}
 			</div>
+
+			{#if allowCreate}
+				<div class="border-t border-gray-100 dark:border-gray-800 mt-1 pt-1">
+					<div class="px-2 text-xs text-gray-500 py-1">{$i18n.t('New Knowledge')}</div>
+					<button
+						class="px-2.5 py-1 rounded-xl w-full text-left flex items-center gap-2 text-sm hover:bg-gray-50 hover:dark:bg-gray-800 hover:dark:text-gray-100"
+						type="button"
+						on:click={() => {
+							dispatch('create', 'local');
+							show = false;
+						}}
+					>
+						<FolderOpen className="size-4" strokeWidth="2" />
+						<div class="line-clamp-1">{$i18n.t('Local Knowledge Base')}</div>
+					</button>
+
+					{#if $config?.features?.enable_onedrive_integration}
+						<button
+							class="px-2.5 py-1 rounded-xl w-full text-left flex items-center gap-2 text-sm hover:bg-gray-50 hover:dark:bg-gray-800 hover:dark:text-gray-100"
+							type="button"
+							on:click={() => {
+								dispatch('create', 'onedrive');
+								show = false;
+							}}
+						>
+							<OneDrive className="size-4" />
+							<div class="line-clamp-1">{$i18n.t('From OneDrive')}</div>
+						</button>
+					{/if}
+
+					{#if $config?.features?.enable_google_drive_integration && $config?.features?.enable_google_drive_sync}
+						<button
+							class="px-2.5 py-1 rounded-xl w-full text-left flex items-center gap-2 text-sm hover:bg-gray-50 hover:dark:bg-gray-800 hover:dark:text-gray-100"
+							type="button"
+							on:click={() => {
+								dispatch('create', 'google_drive');
+								show = false;
+							}}
+						>
+							<GoogleDrive className="size-4" />
+							<div class="line-clamp-1">{$i18n.t('From Google Drive')}</div>
+						</button>
+					{/if}
+
+					{#if $config?.features?.enable_confluence_integration && $config?.features?.enable_confluence_sync && $config?.features?.confluence_kb_mode === 'per_user' && $config?.features?.confluence_oauth_configured}
+						<button
+							class="px-2.5 py-1 rounded-xl w-full text-left flex items-center gap-2 text-sm hover:bg-gray-50 hover:dark:bg-gray-800 hover:dark:text-gray-100"
+							type="button"
+							on:click={() => {
+								dispatch('create', 'confluence');
+								show = false;
+							}}
+						>
+							<Confluence className="size-4" />
+							<div class="line-clamp-1">{$i18n.t('From Confluence')}</div>
+						</button>
+					{/if}
+				</div>
+			{/if}
 		</div>
 	</div>
 </Dropdown>

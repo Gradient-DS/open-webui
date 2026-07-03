@@ -6,7 +6,7 @@
 	dayjs.extend(duration);
 	dayjs.extend(relativeTime);
 
-	import { getContext } from 'svelte';
+	import { getContext, onDestroy } from 'svelte';
 	import { slide } from 'svelte/transition';
 	import { quintOut } from 'svelte/easing';
 
@@ -18,11 +18,15 @@
 	import DocumentPage from '$lib/components/icons/DocumentPage.svelte';
 	import ExclamationTriangle from '$lib/components/icons/ExclamationTriangle.svelte';
 	import Folder from '$lib/components/icons/Folder.svelte';
-	import XMark from '$lib/components/icons/XMark.svelte';
+	import GarbageBin from '$lib/components/icons/GarbageBin.svelte';
 	import ChevronDown from '$lib/components/icons/ChevronDown.svelte';
 	import ChevronRight from '$lib/components/icons/ChevronRight.svelte';
 	import Spinner from '$lib/components/common/Spinner.svelte';
 	import FolderTreeNode from './FolderTreeNode.svelte';
+	import SelectCheckbox from './SelectCheckbox.svelte';
+	import { fileItem, sourceItem, type KbSelection, type SelectableItem } from './selection';
+
+	import { computeInitialExpansion } from '../utils/treeHelpers';
 
 	export let sources: any[] = [];
 	export let files: any[] = [];
@@ -36,7 +40,87 @@
 	export let onRemoveSource: (itemId: string, sourceName: string) => void = () => {};
 	export let onDelete: (fileId: string) => void = () => {};
 
-	// Track expanded state per source and subfolder
+	// Optional multiselect model injected by KnowledgeBase. Null = no selection UI.
+	export let selection: KbSelection | null = null;
+
+	$: selectedStore = selection?.selected;
+	$: selectionModeStore = selection?.selectionMode;
+
+	// Mirror the per-row ✕ routing (the loose-file delete button below): cloud-provider
+	// loose files remove via their source; everything else is a plain file delete.
+	const looseItem = (file: any): SelectableItem => {
+		const cloudSource =
+			file?.meta?.source === 'onedrive' ||
+			file?.meta?.source === 'google_drive' ||
+			file?.meta?.source === 'confluence';
+		if (cloudSource && file?.meta?.source_item_id) {
+			return sourceItem(file.meta.source_item_id, file?.name ?? file?.meta?.name ?? '');
+		}
+		return fileItem(file?.id ?? file?.tempId, file?.name ?? file?.meta?.name ?? '');
+	};
+	const isLooseSelectable = (file: any) =>
+		(!!file?.id || !!file?.meta?.source_item_id) && file?.status !== 'uploading';
+
+	// How many files a folder source removes (mirrors the count shown in its header).
+	const sourceFileCount = (source: any): number => {
+		const tree = folderTrees?.[source.item_id];
+		if (folderSources.length === 1 && totalFiles != null) return totalFiles;
+		return tree ? countAllFiles(tree) : 0;
+	};
+	const sourceToItem = (source: any): SelectableItem =>
+		sourceItem(source.item_id, source.name, sourceFileCount(source));
+
+	// Unified, visual-order selectable list: folder sources first, then loose files.
+	// Drives Shift-range, drag, and select-all across both row kinds.
+	$: orderedItems = [
+		...(folderSources ?? []).map(sourceToItem),
+		...(looseFiles ?? []).filter(isLooseSelectable).map(looseItem)
+	];
+	$: if (selection) selection.setAvailable(orderedItems);
+	onDestroy(() => selection?.setAvailable([]));
+
+	const onLooseClick = (file: any, e: MouseEvent) => {
+		if (selection && selection.consumeDidDrag()) return;
+		if (selection && isLooseSelectable(file) && (e.metaKey || e.ctrlKey || e.shiftKey)) {
+			e.preventDefault();
+			selection.select(looseItem(file), orderedItems, e);
+			return;
+		}
+		if (selection && isLooseSelectable(file) && $selectionModeStore) {
+			selection.select(looseItem(file), orderedItems, e);
+			return;
+		}
+		onClick(file?.id ?? file?.tempId);
+	};
+	const onLoosePointerDown = (file: any) => {
+		if (selection && isLooseSelectable(file)) selection.pointerDown(looseItem(file), orderedItems);
+	};
+	const onLoosePointerEnter = (file: any) => {
+		if (selection && isLooseSelectable(file)) selection.pointerEnter(looseItem(file));
+	};
+
+	// Source/folder header: plain click expands (preserve nav); modifier-click selects;
+	// drag selects. Checkbox toggles directly.
+	const onSourceHeaderClick = (source: any, e: MouseEvent) => {
+		if (selection && selection.consumeDidDrag()) return;
+		if (selection && isFolderLikeSource(source) && (e.metaKey || e.ctrlKey || e.shiftKey)) {
+			e.preventDefault();
+			selection.select(sourceToItem(source), orderedItems, e);
+			return;
+		}
+		toggleSource(source.item_id);
+	};
+	const onSourcePointerDown = (source: any) => {
+		if (selection && isFolderLikeSource(source))
+			selection.pointerDown(sourceToItem(source), orderedItems);
+	};
+	const onSourcePointerEnter = (source: any) => {
+		if (selection && isFolderLikeSource(source)) selection.pointerEnter(sourceToItem(source));
+	};
+
+	// Track expanded state per source and subfolder.
+	// Seeded reactively so small KBs auto-expand top-level sources while
+	// large KBs (>= LARGE_TREE_THRESHOLD files) start fully collapsed.
 	let expandedSources: Record<string, boolean> = {};
 
 	const toggleSource = (itemId: string) => {
@@ -96,6 +180,20 @@
 	$: folderSources = (sources || []).filter(isFolderLikeSource);
 	$: fileSources = (sources || []).filter((s) => !isFolderLikeSource(s));
 
+	// Seed expandedSources whenever the source list or total file count changes.
+	// Only adds new keys — never overwrites a manual toggle the user has already made.
+	$: {
+		const initial = computeInitialExpansion(
+			folderSources.map((s: any) => s.item_id as string),
+			totalFiles
+		);
+		for (const [id, expanded] of Object.entries(initial)) {
+			if (!(id in expandedSources)) {
+				expandedSources[id] = expanded;
+			}
+		}
+	}
+
 	// Files grouped by their source_item_id
 	$: filesBySource = (() => {
 		const map: Record<string, any[]> = {};
@@ -140,15 +238,32 @@
 				: tree
 					? countAllFiles(tree)
 					: 0}
+		{@const srcKey = `source:${source.item_id}`}
+		{@const srcSel = (selection && $selectedStore?.has(srcKey)) ?? false}
 		<div class="w-full">
 			<!-- Folder header -->
+			<!-- svelte-ignore a11y_no_static_element_interactions -->
 			<div
-				class="group flex items-center w-full px-1.5 py-0.5 hover:bg-gray-50 dark:hover:bg-gray-850/50 rounded-xl transition"
+				class="group flex items-center w-full px-1.5 py-0.5 hover:bg-gray-50 dark:hover:bg-gray-850/50 rounded-xl transition {selection
+					? 'select-none'
+					: ''} {srcSel
+					? 'bg-blue-50 dark:bg-blue-900/20'
+					: ''}"
+				on:pointerdown={() => onSourcePointerDown(source)}
+				on:pointerenter={() => onSourcePointerEnter(source)}
 			>
+				{#if selection && knowledge?.write_access}
+					<SelectCheckbox
+						selectable={isFolderLikeSource(source)}
+						selected={srcSel}
+						visible={!!$selectionModeStore}
+						onToggle={() => selection.toggle(sourceToItem(source))}
+					/>
+				{/if}
 				<button
-					class="flex items-center gap-1.5 flex-1 p-2 text-left text-sm"
+					class="flex items-center gap-1.5 flex-1 px-1.5 py-2 text-left text-sm"
 					type="button"
-					on:click={() => toggleSource(source.item_id)}
+					on:click={(e) => onSourceHeaderClick(source, e)}
 				>
 					<div class="shrink-0 text-gray-500">
 						{#if expandedSources[source.item_id]}
@@ -178,7 +293,7 @@
 								type="button"
 								on:click={() => onRemoveSource(source.item_id, source.name)}
 							>
-								<XMark />
+								<GarbageBin className="size-3.5" />
 							</button>
 						</Tooltip>
 					</div>
@@ -188,7 +303,7 @@
 			<!-- Folder contents (collapsible) -->
 			{#if expandedSources[source.item_id] && tree}
 				<div transition:slide={{ duration: 300, easing: quintOut, axis: 'y' }}>
-					<div class="ml-3 pl-1 border-s border-gray-100 dark:border-gray-900">
+					<div class="ml-6 pl-1 border-s border-gray-100 dark:border-gray-900">
 						<!-- Child subfolders -->
 						{#each tree.children as child (child.path)}
 							<FolderTreeNode
@@ -254,15 +369,32 @@
 	<!-- Loose files (individual OneDrive sources + local uploads) -->
 	{#each looseFiles as file (file?.id ?? file?.itemId ?? file?.tempId)}
 		{@const fileStatus = file?.status ?? file?.data?.status}
+		{@const looseKey = looseItem(file).key}
+		{@const looseSel = (selection && isLooseSelectable(file) && $selectedStore?.has(looseKey)) ?? false}
+		<!-- svelte-ignore a11y_no_static_element_interactions -->
 		<div
-			class="flex cursor-pointer w-full px-1.5 py-0.5 bg-transparent dark:hover:bg-gray-850/50 hover:bg-white rounded-xl transition {selectedFileId
-				? ''
-				: 'hover:bg-gray-100 dark:hover:bg-gray-850'}"
+			class="group flex cursor-pointer w-full px-1.5 py-0.5 bg-transparent dark:hover:bg-gray-850/50 hover:bg-white rounded-xl transition {selection
+				? 'select-none'
+				: ''} {looseSel
+				? 'bg-blue-50 dark:bg-blue-900/20'
+				: selectedFileId
+					? ''
+					: 'hover:bg-gray-100 dark:hover:bg-gray-850'}"
+			on:pointerdown={() => onLoosePointerDown(file)}
+			on:pointerenter={() => onLoosePointerEnter(file)}
 		>
+			{#if selection}
+				<SelectCheckbox
+					selectable={isLooseSelectable(file)}
+					selected={looseSel}
+					visible={!!$selectionModeStore}
+					onToggle={() => selection.toggle(looseItem(file))}
+				/>
+			{/if}
 			<button
 				class="relative group flex items-center gap-1 rounded-xl p-2 text-left flex-1 justify-between"
 				type="button"
-				on:click={() => onClick(file?.id ?? file?.tempId)}
+				on:click={(e) => onLooseClick(file, e)}
 			>
 				<div>
 					<div class="flex gap-2 items-center line-clamp-1">
@@ -332,7 +464,7 @@
 								}
 							}}
 						>
-							<XMark />
+							<GarbageBin className="size-3.5" />
 						</button>
 					</Tooltip>
 				</div>

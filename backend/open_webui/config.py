@@ -1,3 +1,4 @@
+import asyncio
 import json
 import logging
 import os
@@ -36,7 +37,7 @@ from open_webui.env import (
     WEBUI_NAME,
     log,
 )
-from open_webui.internal.db import Base, get_db
+from open_webui.internal.db import Base, get_db, get_async_db
 from open_webui.utils.redis import get_redis_connection
 
 
@@ -93,6 +94,7 @@ def load_json_config():
 
 
 def save_to_db(data):
+    """Sync save — used ONLY at startup/import time."""
     with get_db() as db:
         existing_config = db.query(Config).first()
         if not existing_config:
@@ -105,10 +107,37 @@ def save_to_db(data):
         db.commit()
 
 
+async def async_save_to_db(data):
+    """Async save — used for ALL runtime config persistence."""
+    from sqlalchemy import select
+
+    async with get_async_db() as db:
+        result = await db.execute(select(Config).limit(1))
+        existing_config = result.scalars().first()
+        if not existing_config:
+            new_config = Config(data=data, version=0)
+            db.add(new_config)
+        else:
+            existing_config.data = data
+            existing_config.updated_at = datetime.now()
+            db.add(existing_config)
+        await db.commit()
+
+
 def reset_config():
+    """Sync reset — used ONLY at startup."""
     with get_db() as db:
         db.query(Config).delete()
         db.commit()
+
+
+async def async_reset_config():
+    """Async reset — used at runtime."""
+    from sqlalchemy import delete as sa_delete
+
+    async with get_async_db() as db:
+        await db.execute(sa_delete(Config))
+        await db.commit()
 
 
 # When initializing, check if config.json exists and migrate it to the database
@@ -147,10 +176,28 @@ PERSISTENT_CONFIG_REGISTRY = []
 
 
 def save_config(config):
+    """Sync save — used ONLY at startup/import time."""
     global CONFIG_DATA
     global PERSISTENT_CONFIG_REGISTRY
     try:
         save_to_db(config)
+        CONFIG_DATA = config
+
+        # Trigger updates on all registered PersistentConfig entries
+        for config_item in PERSISTENT_CONFIG_REGISTRY:
+            config_item.update()
+    except Exception as e:
+        log.exception(e)
+        return False
+    return True
+
+
+async def async_save_config(config):
+    """Async save — used for ALL runtime config persistence."""
+    global CONFIG_DATA
+    global PERSISTENT_CONFIG_REGISTRY
+    try:
+        await async_save_to_db(config)
         CONFIG_DATA = config
 
         # Trigger updates on all registered PersistentConfig entries
@@ -205,6 +252,7 @@ class PersistentConfig(Generic[T]):
             log.info(f'Updated {self.env_name} to new value {self.value}')
 
     def save(self):
+        """Sync save — used ONLY at startup/import time."""
         log.info(f"Saving '{self.env_name}' to the database")
         path_parts = self.config_path.split('.')
         sub_config = CONFIG_DATA
@@ -214,6 +262,19 @@ class PersistentConfig(Generic[T]):
             sub_config = sub_config[key]
         sub_config[path_parts[-1]] = self.value
         save_to_db(CONFIG_DATA)
+        self.config_value = self.value
+
+    async def async_save(self):
+        """Async save — used for ALL runtime config persistence."""
+        log.info(f"Saving '{self.env_name}' to the database")
+        path_parts = self.config_path.split('.')
+        sub_config = CONFIG_DATA
+        for key in path_parts[:-1]:
+            if key not in sub_config:
+                sub_config[key] = {}
+            sub_config = sub_config[key]
+        sub_config[path_parts[-1]] = self.value
+        await async_save_to_db(CONFIG_DATA)
         self.config_value = self.value
 
 
@@ -249,11 +310,37 @@ class AppConfig:
             self._state[key] = value
         else:
             self._state[key].value = value
-            self._state[key].save()
+
+            # At runtime (inside the event loop) persist via the async engine
+            # to avoid blocking the loop and contending with the async DB pool.
+            # At startup/import time, fall back to sync.
+            try:
+                loop = asyncio.get_running_loop()
+                loop.create_task(self._async_persist(key))
+            except RuntimeError:
+                self._state[key].save()
 
             if self._redis and ENABLE_PERSISTENT_CONFIG:
                 redis_key = f'{self._redis_key_prefix}:config:{key}'
                 self._redis.set(redis_key, json.dumps(self._state[key].value))
+
+    async def _async_persist(self, key):
+        """Persist a single config key via the async engine."""
+        try:
+            await self._state[key].async_save()
+        except Exception as e:
+            log.error(f'Failed to async-persist config key {key}: {e}')
+
+    def _sync_to_redis(self):
+        """Push all in-memory config values to Redis, e.g. after a bulk import."""
+        if not self._redis or not ENABLE_PERSISTENT_CONFIG:
+            return
+        for key, pc in self._state.items():
+            redis_key = f'{self._redis_key_prefix}:config:{key}'
+            try:
+                self._redis.set(redis_key, json.dumps(pc.value))
+            except Exception as e:
+                log.error(f'Failed to sync config key {key} to Redis: {e}')
 
     def __getattr__(self, key):
         if key not in self._state:
@@ -696,7 +783,6 @@ def load_oauth_providers():
             return client
 
         OAUTH_PROVIDERS['google'] = {
-            'redirect_uri': GOOGLE_REDIRECT_URI.value,
             'register': google_oauth_register,
         }
 
@@ -717,7 +803,6 @@ def load_oauth_providers():
             return client
 
         OAUTH_PROVIDERS['microsoft'] = {
-            'redirect_uri': MICROSOFT_REDIRECT_URI.value,
             'picture_url': MICROSOFT_CLIENT_PICTURE_URL.value,
             'register': microsoft_oauth_register,
         }
@@ -742,7 +827,6 @@ def load_oauth_providers():
             return client
 
         OAUTH_PROVIDERS['github'] = {
-            'redirect_uri': GITHUB_CLIENT_REDIRECT_URI.value,
             'register': github_oauth_register,
             'sub_claim': 'id',
         }
@@ -784,7 +868,6 @@ def load_oauth_providers():
 
         OAUTH_PROVIDERS['oidc'] = {
             'name': OAUTH_PROVIDER_NAME.value,
-            'redirect_uri': OPENID_REDIRECT_URI.value,
             'register': oidc_oauth_register,
         }
 
@@ -928,6 +1011,7 @@ if CUSTOM_NAME:
 ####################################
 
 STORAGE_PROVIDER = os.environ.get('STORAGE_PROVIDER', 'local')  # defaults to local, s3
+STORAGE_LOCAL_CACHE = os.environ.get('STORAGE_LOCAL_CACHE', 'true').lower() == 'true'
 
 S3_ACCESS_KEY_ID = os.environ.get('S3_ACCESS_KEY_ID', None)
 S3_SECRET_ACCESS_KEY = os.environ.get('S3_SECRET_ACCESS_KEY', None)
@@ -1145,6 +1229,12 @@ TOOL_SERVER_CONNECTIONS = PersistentConfig(
     tool_server_connections,
 )
 
+OAUTH_CLIENT_TIMEOUT = PersistentConfig(
+    'OAUTH_CLIENT_TIMEOUT',
+    'oauth.client.timeout',
+    os.environ.get('OAUTH_CLIENT_TIMEOUT', ''),
+)
+
 ####################################
 # TERMINAL_SERVER
 ####################################
@@ -1156,6 +1246,11 @@ TERMINAL_SERVER_CONNECTIONS = PersistentConfig(
     'terminal_server.connections',
     terminal_server_connections,
 )
+
+try:
+    TERMINAL_PROXY_HEADERS = json.loads(os.environ.get('TERMINAL_PROXY_HEADERS', '{}'))
+except Exception:
+    TERMINAL_PROXY_HEADERS = {}
 
 ####################################
 # WEBUI
@@ -1173,8 +1268,14 @@ ENABLE_SIGNUP = PersistentConfig(
 
 ENABLE_LOGIN_FORM = PersistentConfig(
     'ENABLE_LOGIN_FORM',
-    'ui.ENABLE_LOGIN_FORM',
+    'ui.enable_login_form',
     os.environ.get('ENABLE_LOGIN_FORM', 'True').lower() == 'true',
+)
+
+ENABLE_PASSWORD_CHANGE_FORM = PersistentConfig(
+    'ENABLE_PASSWORD_CHANGE_FORM',
+    'ui.enable_password_change_form',
+    os.environ.get('ENABLE_PASSWORD_CHANGE_FORM', 'True').lower() == 'true',
 )
 
 ENABLE_PASSWORD_AUTH = os.environ.get('ENABLE_PASSWORD_AUTH', 'True').lower() == 'true'
@@ -1244,16 +1345,28 @@ MODEL_ORDER_LIST = PersistentConfig(
     [],
 )
 
+try:
+    default_model_metadata = json.loads(os.environ.get('DEFAULT_MODEL_METADATA', '{}'))
+except Exception as e:
+    log.exception(f'Error loading DEFAULT_MODEL_METADATA: {e}')
+    default_model_metadata = {}
+
 DEFAULT_MODEL_METADATA = PersistentConfig(
     'DEFAULT_MODEL_METADATA',
     'models.default_metadata',
-    {},
+    default_model_metadata,
 )
+
+try:
+    default_model_params = json.loads(os.environ.get('DEFAULT_MODEL_PARAMS', '{}'))
+except Exception as e:
+    log.exception(f'Error loading DEFAULT_MODEL_PARAMS: {e}')
+    default_model_params = {}
 
 DEFAULT_MODEL_PARAMS = PersistentConfig(
     'DEFAULT_MODEL_PARAMS',
     'models.default_params',
-    {},
+    default_model_params,
 )
 
 DEFAULT_USER_ROLE = PersistentConfig(
@@ -1323,6 +1436,7 @@ ENABLE_WELCOME_MESSAGE = PersistentConfig(
     os.environ.get('ENABLE_WELCOME_MESSAGE', 'False').lower() == 'true',
 )
 
+IFRAME_CSP = os.environ.get('IFRAME_CSP', '')
 
 USER_PERMISSIONS_WORKSPACE_MODELS_ACCESS = (
     os.environ.get('USER_PERMISSIONS_WORKSPACE_MODELS_ACCESS', 'False').lower() == 'true'
@@ -1417,6 +1531,10 @@ USER_PERMISSIONS_NOTES_ALLOW_PUBLIC_SHARING = (
     os.environ.get('USER_PERMISSIONS_NOTES_ALLOW_PUBLIC_SHARING', 'False').lower() == 'true'
 )
 
+USER_PERMISSIONS_CALENDAR_ALLOW_PUBLIC_SHARING = (
+    os.environ.get('USER_PERMISSIONS_CALENDAR_ALLOW_PUBLIC_SHARING', 'False').lower() == 'true'
+)
+
 USER_PERMISSIONS_ACCESS_GRANTS_ALLOW_USERS = (
     os.environ.get('USER_PERMISSIONS_ACCESS_GRANTS_ALLOW_USERS', 'True').lower() == 'true'
 )
@@ -1451,6 +1569,10 @@ USER_PERMISSIONS_CHAT_RATE_RESPONSE = os.environ.get('USER_PERMISSIONS_CHAT_RATE
 USER_PERMISSIONS_CHAT_EDIT = os.environ.get('USER_PERMISSIONS_CHAT_EDIT', 'True').lower() == 'true'
 
 USER_PERMISSIONS_CHAT_SHARE = os.environ.get('USER_PERMISSIONS_CHAT_SHARE', 'True').lower() == 'true'
+
+USER_PERMISSIONS_CHAT_ALLOW_PUBLIC_SHARING = (
+    os.environ.get('USER_PERMISSIONS_CHAT_ALLOW_PUBLIC_SHARING', 'False').lower() == 'true'
+)
 
 USER_PERMISSIONS_CHAT_EXPORT = os.environ.get('USER_PERMISSIONS_CHAT_EXPORT', 'True').lower() == 'true'
 
@@ -1499,6 +1621,12 @@ USER_PERMISSIONS_FEATURES_API_KEYS = os.environ.get('USER_PERMISSIONS_FEATURES_A
 
 USER_PERMISSIONS_FEATURES_MEMORIES = os.environ.get('USER_PERMISSIONS_FEATURES_MEMORIES', 'True').lower() == 'true'
 
+USER_PERMISSIONS_FEATURES_AUTOMATIONS = (
+    os.environ.get('USER_PERMISSIONS_FEATURES_AUTOMATIONS', 'False').lower() == 'true'
+)
+
+USER_PERMISSIONS_FEATURES_CALENDAR = os.environ.get('USER_PERMISSIONS_FEATURES_CALENDAR', 'True').lower() == 'true'
+
 
 USER_PERMISSIONS_SETTINGS_INTERFACE = os.environ.get('USER_PERMISSIONS_SETTINGS_INTERFACE', 'True').lower() == 'true'
 
@@ -1530,6 +1658,8 @@ DEFAULT_USER_PERMISSIONS = {
         'public_skills': USER_PERMISSIONS_WORKSPACE_SKILLS_ALLOW_PUBLIC_SHARING,
         'notes': USER_PERMISSIONS_NOTES_ALLOW_SHARING,
         'public_notes': USER_PERMISSIONS_NOTES_ALLOW_PUBLIC_SHARING,
+        'public_chats': USER_PERMISSIONS_CHAT_ALLOW_PUBLIC_SHARING,
+        'public_calendars': USER_PERMISSIONS_CALENDAR_ALLOW_PUBLIC_SHARING,
     },
     'access_grants': {
         'allow_users': USER_PERMISSIONS_ACCESS_GRANTS_ALLOW_USERS,
@@ -1569,6 +1699,8 @@ DEFAULT_USER_PERMISSIONS = {
         'code_interpreter': USER_PERMISSIONS_FEATURES_CODE_INTERPRETER,
         'document_writer': USER_PERMISSIONS_FEATURES_DOCUMENT_WRITER,
         'memories': USER_PERMISSIONS_FEATURES_MEMORIES,
+        'automations': USER_PERMISSIONS_FEATURES_AUTOMATIONS,
+        'calendar': USER_PERMISSIONS_FEATURES_CALENDAR,
     },
     'settings': {
         'interface': USER_PERMISSIONS_SETTINGS_INTERFACE,
@@ -1599,6 +1731,32 @@ ENABLE_CHANNELS = PersistentConfig(
     'ENABLE_CHANNELS',
     'channels.enable',
     os.environ.get('ENABLE_CHANNELS', 'False').lower() == 'true',
+)
+
+ENABLE_CALENDAR = PersistentConfig(
+    'ENABLE_CALENDAR',
+    'calendar.enable',
+    # Gradient default: False (upstream: True) — opt-in via Helm per env-defaults.md §G
+    os.environ.get('ENABLE_CALENDAR', 'False').lower() == 'true',
+)
+
+ENABLE_AUTOMATIONS = PersistentConfig(
+    'ENABLE_AUTOMATIONS',
+    'automations.enable',
+    # Gradient default: False (upstream: True) — opt-in via Helm per env-defaults.md §G
+    os.environ.get('ENABLE_AUTOMATIONS', 'False').lower() == 'true',
+)
+
+AUTOMATION_MAX_COUNT = PersistentConfig(
+    'AUTOMATION_MAX_COUNT',
+    'automations.max_count',
+    os.environ.get('AUTOMATION_MAX_COUNT', ''),
+)
+
+AUTOMATION_MIN_INTERVAL = PersistentConfig(
+    'AUTOMATION_MIN_INTERVAL',
+    'automations.min_interval',
+    os.environ.get('AUTOMATION_MIN_INTERVAL', ''),
 )
 
 ENABLE_NOTES = PersistentConfig(
@@ -1876,10 +2034,22 @@ FEATURE_VOICE = os.environ.get('FEATURE_VOICE', 'True').lower() == 'true'
 FEATURE_CHANGELOG = os.environ.get('FEATURE_CHANGELOG', 'True').lower() == 'true'
 FEATURE_SYSTEM_PROMPT = os.environ.get('FEATURE_SYSTEM_PROMPT', 'True').lower() == 'true'
 FEATURE_MODELS = os.environ.get('FEATURE_MODELS', 'True').lower() == 'true'
+# Show the per-model Quality/Speed meters (and their legend) in the model picker.
+# Disabled per-deployment where overlapping model names make the baked 1-3 ratings
+# unreliable; descriptions, the eco badge and the datacenter flag are unaffected.
+FEATURE_MODEL_METERS = os.environ.get('FEATURE_MODEL_METERS', 'True').lower() == 'true'
 FEATURE_KNOWLEDGE = os.environ.get('FEATURE_KNOWLEDGE', 'True').lower() == 'true'
 FEATURE_PROMPTS = os.environ.get('FEATURE_PROMPTS', 'True').lower() == 'true'
 FEATURE_TOOLS = os.environ.get('FEATURE_TOOLS', 'True').lower() == 'true'
 FEATURE_SKILLS = os.environ.get('FEATURE_SKILLS', 'False').lower() == 'true'
+# FEATURE_SKILL_FILES gates the bundled reference-files extension; only meaningful when FEATURE_SKILLS is on.
+FEATURE_SKILL_FILES = os.environ.get('FEATURE_SKILL_FILES', 'False').lower() == 'true'
+# Skill capability model (two levels):
+#   Simple skills  (FEATURE_SKILL_FILES on):  skills may carry text + binary reference files that are
+#     forwarded to the agent and browsable in the file tree — no privileged token minting.
+#   Full execution  (ENABLE_SKILL_EXECUTION on):  adds Phase-8b scoped-token minting so the agent can
+#     fetch binary asset bytes from GET /api/v1/skills/id/{id}/files/content.  Requires FEATURE_SKILL_FILES.
+ENABLE_SKILL_EXECUTION = os.environ.get('ENABLE_SKILL_EXECUTION', 'False').lower() == 'true'
 FEATURE_WEBPAGE_URL = os.environ.get('FEATURE_WEBPAGE_URL', 'True').lower() == 'true'
 FEATURE_REFERENCE_CHATS = os.environ.get('FEATURE_REFERENCE_CHATS', 'True').lower() == 'true'
 FEATURE_SIMPLE_ASSISTANT_BUILDER = os.environ.get('FEATURE_SIMPLE_ASSISTANT_BUILDER', 'False').lower() == 'true'
@@ -1890,6 +2060,11 @@ FEATURE_TERMINAL_SERVERS = os.environ.get('FEATURE_TERMINAL_SERVERS', 'False').l
 FEATURE_USER_DEMOGRAPHICS = os.environ.get('FEATURE_USER_DEMOGRAPHICS', 'False').lower() == 'true'
 
 FEATURE_BUILTIN_TOOLS = os.environ.get('FEATURE_BUILTIN_TOOLS', 'True').lower() == 'true'
+
+# Strict data separation (data-sovereignty): a conversation may use EITHER the open
+# internet (web search / webpage URLs) OR internal documents (files / KBs / notes),
+# never both. Off by default. Enforced in the chat UI and server-side.
+FEATURE_STRICT_DATA_SEPARATION = os.environ.get('FEATURE_STRICT_DATA_SEPARATION', 'False').lower() == 'true'
 
 # PDF export: set to True to use old screenshot-based (stylized) PDF export
 USE_STYLIZED_PDF_EXPORT = os.environ.get('USE_STYLIZED_PDF_EXPORT', 'False').lower() == 'true'
@@ -1916,6 +2091,23 @@ FEATURE_CHAT_CONTROLS_SECTIONS = [
 # Model Whitelist (empty = show all models)
 MODEL_WHITELIST = [model.strip() for model in os.environ.get('MODEL_WHITELIST', '').split(',') if model.strip()]
 
+# Per-deployment model -> datacenter/hosting mapping, surfaced on /api/config as
+# `model_hosting` and consumed by the model picker (hostingFromDeployment). A JSON
+# string of [{"match": <pattern>, "hosting": <label>}, ...]; kept as a plain env
+# (NOT PersistentConfig) because it is infra-set per deployment, not user-editable —
+# the same model id can live in a different datacenter for a different client. Parsed
+# defensively in main.py (_parse_model_hosting -> [] on any error), so a malformed
+# value can never crash boot. Empty string = no mapping (neutral, no flags).
+MODEL_HOSTING = os.environ.get('MODEL_HOSTING', '')
+
+# Per-deployment model -> profile mapping for the model picker (description, bestFor,
+# speed/quality meters, eco badge). A JSON list of {match, profile}; same matching
+# convention as MODEL_HOSTING. Replaces the former frontend-baked model-profiles.json
+# so descriptions can differ per client tenant. Parsed defensively in main.py
+# (_parse_model_profiles -> [] on any error), so a malformed value can never crash
+# boot. Empty string = no profiles (models render plain, just their name).
+MODEL_PROFILES = os.environ.get('MODEL_PROFILES', '')
+
 ENABLE_ADMIN_ANALYTICS = os.environ.get('ENABLE_ADMIN_ANALYTICS', 'True').lower() == 'true'
 
 ENABLE_COMMUNITY_SHARING = PersistentConfig(
@@ -1928,6 +2120,16 @@ ENABLE_CITATION_RELEVANCE = PersistentConfig(
     'ENABLE_CITATION_RELEVANCE',
     'ui.enable_citation_relevance',
     os.environ.get('ENABLE_CITATION_RELEVANCE', 'True').lower() == 'true',
+)
+
+# Client-side text-match highlighting of cited passages in the citation viewer.
+# Off by default: matching against the PDF/DOCX text layer is approximate and
+# can mis-highlight; the split-view + page jump works without it. Enable once
+# per-chunk page metadata / matching is reliable.
+ENABLE_CITATION_TEXT_HIGHLIGHT = PersistentConfig(
+    'ENABLE_CITATION_TEXT_HIGHLIGHT',
+    'ui.enable_citation_text_highlight',
+    os.environ.get('ENABLE_CITATION_TEXT_HIGHLIGHT', 'False').lower() == 'true',
 )
 
 ENABLE_MESSAGE_RATING = PersistentConfig(
@@ -2279,6 +2481,12 @@ VOICE_MODE_PROMPT_TEMPLATE = PersistentConfig(
     'VOICE_MODE_PROMPT_TEMPLATE',
     'task.voice.prompt_template',
     os.environ.get('VOICE_MODE_PROMPT_TEMPLATE', ''),
+)
+
+ENABLE_VOICE_MODE_PROMPT = PersistentConfig(
+    'ENABLE_VOICE_MODE_PROMPT',
+    'task.voice.prompt.enable',
+    os.environ.get('ENABLE_VOICE_MODE_PROMPT', 'True').lower() == 'true',
 )
 
 DEFAULT_VOICE_MODE_PROMPT_TEMPLATE = """You are a friendly, concise voice assistant.
@@ -2926,11 +3134,15 @@ ENABLE_ONEDRIVE_INTEGRATION = PersistentConfig(
 ENABLE_ONEDRIVE_PERSONAL = PersistentConfig(
     'ENABLE_ONEDRIVE_PERSONAL',
     'onedrive.enable_personal',
+    # Per env-defaults.md §A/§G: keep our PersistentConfig wrapper (admin-editable
+    # from the Cloud Sync tab). Skip upstream's `and bool(ONEDRIVE_CLIENT_ID_PERSONAL)`
+    # guard — the admin UI already prevents flipping this on without a client id.
     os.environ.get('ENABLE_ONEDRIVE_PERSONAL', 'True').lower() == 'true',
 )
 ENABLE_ONEDRIVE_BUSINESS = PersistentConfig(
     'ENABLE_ONEDRIVE_BUSINESS',
     'onedrive.enable_business',
+    # See ENABLE_ONEDRIVE_PERSONAL above.
     os.environ.get('ENABLE_ONEDRIVE_BUSINESS', 'True').lower() == 'true',
 )
 
@@ -2948,7 +3160,6 @@ ONEDRIVE_CLIENT_ID_BUSINESS = PersistentConfig(
     'onedrive.client_id_business',
     os.environ.get('ONEDRIVE_CLIENT_ID_BUSINESS', ONEDRIVE_CLIENT_ID),
 )
-
 
 ONEDRIVE_SHAREPOINT_URL = PersistentConfig(
     'ONEDRIVE_SHAREPOINT_URL',
@@ -3029,7 +3240,10 @@ CONFLUENCE_MAX_PAGE_SIZE_MB = int(os.getenv('CONFLUENCE_MAX_PAGE_SIZE_MB', '25')
 
 # Confluence auth mode. 'oauth' = per-user Atlassian 3LO (default, discovers
 # accessible sites from the token). 'basic' = a single service credential
-# (username + API token) used for all Confluence sync against one site.
+# (username + classic API token) talking directly to the site. 'scoped' = a
+# single service credential using an Atlassian *scoped* API token: same Basic
+# header as 'basic' but it only works against the Atlassian gateway
+# (api.atlassian.com/ex/confluence/{cloudId}), so it reuses the oauth transport.
 CONFLUENCE_AUTH_MODE = PersistentConfig(
     'CONFLUENCE_AUTH_MODE',
     'confluence.auth_mode',
@@ -3058,6 +3272,25 @@ CONFLUENCE_BASIC_AUTH_API_TOKEN = PersistentConfig(
     os.environ.get('CONFLUENCE_BASIC_AUTH_API_TOKEN', ''),
 )
 
+# Scoped-auth service credential: an Atlassian *scoped* API token paired with
+# the service-account email in CONFLUENCE_BASIC_AUTH_USERNAME. Used only when
+# auth_mode == 'scoped'. Round-tripped by the admin-only config API behind a
+# reveal toggle (SensitiveInput), same disclosure profile as the basic token.
+CONFLUENCE_SCOPED_API_TOKEN = PersistentConfig(
+    'CONFLUENCE_SCOPED_API_TOKEN',
+    'confluence.scoped_api_token',
+    os.environ.get('CONFLUENCE_SCOPED_API_TOKEN', ''),
+)
+
+# Optional manual override / cache of the resolved Atlassian cloudId for the
+# scoped-token gateway path. Empty → resolve from CONFLUENCE_SITE_URL via
+# _edge/tenant_info at config-save / client-build time.
+CONFLUENCE_CLOUD_ID = PersistentConfig(
+    'CONFLUENCE_CLOUD_ID',
+    'confluence.cloud_id',
+    os.environ.get('CONFLUENCE_CLOUD_ID', ''),
+)
+
 # Confluence KB sharing mode. 'per_user' = each user creates and owns their
 # own Confluence KBs (default). 'shared' = a single admin-owned, public-read
 # KB syncs the full accessible Confluence content for every user.
@@ -3072,6 +3305,88 @@ CONFLUENCE_KB_MODE = PersistentConfig(
 # owner is implicitly the admin who provisions; in basic mode the admin
 # picks one (or leaves it system-owned) via the provision form. The
 # scheduler resolves the sync token from ``kb.user_id``.
+
+
+# If configured, TOPdesk will be available as a knowledge-base sync source
+# (Knowledge Base GraphQL API). A single service credential is used for all
+# TOPdesk sync against one tenant; admin-editable via the Cloud Sync tab.
+ENABLE_TOPDESK_INTEGRATION = PersistentConfig(
+    'ENABLE_TOPDESK_INTEGRATION',
+    'topdesk.enable',
+    os.getenv('ENABLE_TOPDESK_INTEGRATION', 'False').lower() == 'true',
+)
+
+ENABLE_TOPDESK_SYNC = PersistentConfig(
+    'ENABLE_TOPDESK_SYNC',
+    'topdesk.enable_sync',
+    os.getenv('ENABLE_TOPDESK_SYNC', 'False').lower() == 'true',
+)
+
+# TOPdesk tenant base URL, e.g. https://your-tenant.topdesk.net — required.
+TOPDESK_URL = PersistentConfig(
+    'TOPDESK_URL',
+    'topdesk.url',
+    os.environ.get('TOPDESK_URL', ''),
+)
+
+# Service credential. The KB REST API (knowledge-base-v1) is operator-only and
+# authenticates with HTTP Basic: ``Authorization: Basic base64(login:app_password)``,
+# where the username is the operator login name and the password is the application
+# token (a.k.a. application password) created for that operator. This is the only
+# supported form — the legacy person-token (``TOKEN id="..."``) form was dropped
+# because the REST KB API does not accept it (plan decision 4). The operator login
+# is therefore required, not optional.
+# The application password is returned in full (unmasked) by the admin-only config
+# API and masked client-side via SensitiveInput — same disclosure profile as the
+# Confluence basic-auth token.
+TOPDESK_USERNAME = PersistentConfig(
+    'TOPDESK_USERNAME',
+    'topdesk.username',
+    os.environ.get('TOPDESK_USERNAME', ''),
+)
+
+TOPDESK_APP_PASSWORD = PersistentConfig(
+    'TOPDESK_APP_PASSWORD',
+    'topdesk.app_password',
+    os.environ.get('TOPDESK_APP_PASSWORD', ''),
+)
+
+TOPDESK_SYNC_INTERVAL_MINUTES = PersistentConfig(
+    'TOPDESK_SYNC_INTERVAL_MINUTES',
+    'topdesk.sync_interval_minutes',
+    int(os.environ.get('TOPDESK_SYNC_INTERVAL_MINUTES', '60')),
+)
+
+# Per-sync item cap. 0 = no per-sync limit (KNOWLEDGE_MAX_FILE_COUNT still
+# applies as a KB-wide safety net). Admin-editable via the Cloud Sync tab.
+TOPDESK_MAX_ITEMS_PER_SYNC = PersistentConfig(
+    'TOPDESK_MAX_ITEMS_PER_SYNC',
+    'topdesk.max_items_per_sync',
+    int(os.getenv('TOPDESK_MAX_ITEMS_PER_SYNC', '500')),
+)
+
+TOPDESK_MAX_ITEM_SIZE_MB = int(os.getenv('TOPDESK_MAX_ITEM_SIZE_MB', '25'))
+
+# Which knowledge items to sync into the shared KB. Admin-editable via the Cloud
+# Sync tab (plan decision 1). One of:
+#   - 'ssp'    : items visible in the Self-Service Portal (sspVisibility VISIBLE,
+#                or VISIBLE_IN_PERIOD while within the window). Default.
+#   - 'public' : only items flagged publicKnowledgeItem.
+#   - 'all'    : every operator-readable item (no visibility gate).
+# Archived items are always excluded regardless of scope. Drives ``_should_sync``
+# in the sync worker.
+TOPDESK_SYNC_SCOPE = PersistentConfig(
+    'TOPDESK_SYNC_SCOPE',
+    'topdesk.sync_scope',
+    (os.getenv('TOPDESK_SYNC_SCOPE', 'ssp').strip().lower() or 'ssp'),
+)
+
+# Knowledge Base REST API base path, appended to TOPDESK_URL. Confirmed from the
+# OpenAPI spec: the SaaS REST KB API lives under ``/services/knowledge-base-v1``
+# (knowledge-base_SaaS.json). Config-overridable without a code change so a tenant
+# on a non-default mount can be pointed at the right path. See
+# thoughts/shared/research/2026-06-topdesk-api-verification.md.
+TOPDESK_KB_API_PATH = os.getenv('TOPDESK_KB_API_PATH', '/services/knowledge-base-v1')
 
 
 ####################################
@@ -3116,6 +3431,18 @@ EMAIL_INVITE_HEADING = PersistentConfig(
     'EMAIL_INVITE_HEADING',
     'email.invite_heading',
     os.environ.get('EMAIL_INVITE_HEADING', ''),
+)
+
+ENABLE_FORGOT_PASSWORD = PersistentConfig(
+    'ENABLE_FORGOT_PASSWORD',
+    'email.enable_forgot_password',
+    os.environ.get('ENABLE_FORGOT_PASSWORD', 'False').lower() == 'true',
+)
+
+PASSWORD_RESET_EXPIRY_MINUTES = PersistentConfig(
+    'PASSWORD_RESET_EXPIRY_MINUTES',
+    'email.password_reset_expiry_minutes',
+    int(os.environ.get('PASSWORD_RESET_EXPIRY_MINUTES', '30')),
 )
 
 # RAG Content Extraction
@@ -3299,6 +3626,18 @@ MISTRAL_OCR_API_KEY = PersistentConfig(
     os.getenv('MISTRAL_OCR_API_KEY', ''),
 )
 
+PADDLEOCR_VL_BASE_URL = PersistentConfig(
+    'PADDLEOCR_VL_BASE_URL',
+    'rag.paddleocr_vl_base_url',
+    os.getenv('PADDLEOCR_VL_BASE_URL', 'http://localhost:8080'),
+)
+
+PADDLEOCR_VL_TOKEN = PersistentConfig(
+    'PADDLEOCR_VL_TOKEN',
+    'rag.paddleocr_vl_token',
+    os.getenv('PADDLEOCR_VL_TOKEN', ''),
+)
+
 BYPASS_EMBEDDING_AND_RETRIEVAL = PersistentConfig(
     'BYPASS_EMBEDDING_AND_RETRIEVAL',
     'rag.bypass_embedding_and_retrieval',
@@ -3466,6 +3805,12 @@ RAG_RERANKING_MODEL_TRUST_REMOTE_CODE = (
     os.environ.get('RAG_RERANKING_MODEL_TRUST_REMOTE_CODE', 'True').lower() == 'true'
 )
 
+RAG_RERANKING_BATCH_SIZE = PersistentConfig(
+    'RAG_RERANKING_BATCH_SIZE',
+    'rag.reranking_batch_size',
+    int(os.environ.get('RAG_RERANKING_BATCH_SIZE', '32')),
+)
+
 RAG_EXTERNAL_RERANKER_URL = PersistentConfig(
     'RAG_EXTERNAL_RERANKER_URL',
     'rag.external_reranker_url',
@@ -3482,27 +3827,6 @@ RAG_EXTERNAL_RERANKER_TIMEOUT = PersistentConfig(
     'RAG_EXTERNAL_RERANKER_TIMEOUT',
     'rag.external_reranker_timeout',
     os.environ.get('RAG_EXTERNAL_RERANKER_TIMEOUT', ''),
-)
-
-# External Pipeline Configuration
-# Default: http://localhost:6006 (external pipeline is default)
-# Set to empty string to disable external pipeline and use internal processing
-EXTERNAL_PIPELINE_URL = PersistentConfig(
-    'EXTERNAL_PIPELINE_URL',
-    'rag.external_pipeline_url',
-    os.environ.get('EXTERNAL_PIPELINE_URL', ''),
-)
-
-EXTERNAL_PIPELINE_API_KEY = PersistentConfig(
-    'EXTERNAL_PIPELINE_API_KEY',
-    'rag.external_pipeline_api_key',
-    os.environ.get('EXTERNAL_PIPELINE_API_KEY', ''),
-)
-
-EXTERNAL_PIPELINE_TIMEOUT = PersistentConfig(
-    'EXTERNAL_PIPELINE_TIMEOUT',
-    'rag.external_pipeline_timeout',
-    int(os.environ.get('EXTERNAL_PIPELINE_TIMEOUT', '120')),
 )
 
 ####################################
@@ -3535,6 +3859,106 @@ LOADER_WORKER_URL = os.environ.get('LOADER_WORKER_URL', '')
 
 # Tenant slug used in the /tenants/{tenant}/jobs path on the loader-worker.
 TENANT_NAME = os.environ.get('TENANT_NAME', '')
+
+####################################
+# Distributed Document Pipeline (warren)
+####################################
+
+# When enabled, KB ingestion (direct upload, add-file, reindex, batch) is
+# handed to the external distributed doc-pipeline (warren) instead of being
+# parsed + embedded natively. Warren fetches the file from a short-lived
+# presigned S3 GET, parses + chunks it, and POSTs chunked_text back to this
+# server's /ingest endpoint, which embeds + inserts exactly as today. Flag
+# off → native ingestion runs byte-for-byte unchanged.
+# See thoughts/shared/plans/2026-06-30-doc-pipeline-previder-staging-tierb.md.
+
+DISTRIBUTED_DOC_PIPELINE_ENABLED = PersistentConfig(
+    'DISTRIBUTED_DOC_PIPELINE_ENABLED',
+    'doc_pipeline.enabled',
+    os.environ.get('DISTRIBUTED_DOC_PIPELINE_ENABLED', 'False').lower() == 'true',
+)
+
+DISTRIBUTED_DOC_PIPELINE_SYNC_ENABLED = PersistentConfig(
+    'DISTRIBUTED_DOC_PIPELINE_SYNC_ENABLED',
+    'rag.distributed_doc_pipeline_sync_enabled',
+    os.environ.get('DISTRIBUTED_DOC_PIPELINE_SYNC_ENABLED', 'False').lower() == 'true',
+)
+
+# Route *chat attachments* (non-KB uploads, the per-file file-{id} cache) through
+# warren too, instead of native in-process parse+embed. Independent of the KB
+# flag above so chat routing can be toggled on its own. Reuses all the other
+# PIPELINE_* config. Off → chat attachments run the native path byte-for-byte.
+# See thoughts/shared/plans/2026-07-01-track1-chat-attachments-warren-implementation.md.
+DISTRIBUTED_DOC_PIPELINE_CHAT_ENABLED = PersistentConfig(
+    'DISTRIBUTED_DOC_PIPELINE_CHAT_ENABLED',
+    'doc_pipeline.chat_enabled',
+    os.environ.get('DISTRIBUTED_DOC_PIPELINE_CHAT_ENABLED', 'False').lower() == 'true',
+)
+
+# pipeline-api base URL (this server submits jobs here), e.g.
+# http://doc-pipeline-pipeline-api.<ns>.svc.cluster.local:8080
+PIPELINE_API_BASE_URL = PersistentConfig(
+    'PIPELINE_API_BASE_URL',
+    'doc_pipeline.api_base_url',
+    os.environ.get('PIPELINE_API_BASE_URL', ''),
+)
+
+# Bearer for pipeline-api (must match the pipeline's inbound PIPELINE_API_KEY).
+PIPELINE_API_KEY = PersistentConfig(
+    'PIPELINE_API_KEY',
+    'doc_pipeline.api_key',
+    os.environ.get('PIPELINE_API_KEY', ''),
+)
+
+# This server's own in-cluster base URL that warren POSTs chunked_text back
+# to (the owui.ingest_url job parameter), e.g.
+# http://staging-open-webui.<ns>.svc.cluster.local:8080. Warren appends
+# /api/v1/integrations/ingest. Kept separate from the public WEBUI_URL so the
+# callback stays in-cluster (and Phase-7 NetworkPolicies can scope it).
+PIPELINE_INGEST_CALLBACK_URL = PersistentConfig(
+    'PIPELINE_INGEST_CALLBACK_URL',
+    'doc_pipeline.ingest_callback_url',
+    os.environ.get('PIPELINE_INGEST_CALLBACK_URL', ''),
+)
+
+# TTL (seconds) for the presigned GET handed to warren. Must exceed the
+# worst-case job pickup + fetch latency.
+PIPELINE_PRESIGN_TTL_SECONDS = PersistentConfig(
+    'PIPELINE_PRESIGN_TTL_SECONDS',
+    'doc_pipeline.presign_ttl_seconds',
+    int(os.environ.get('PIPELINE_PRESIGN_TTL_SECONDS', '3600')),
+)
+
+# Chunking parameters passed to warren via job_parameters.
+PIPELINE_CHUNK_SIZE = PersistentConfig(
+    'PIPELINE_CHUNK_SIZE',
+    'doc_pipeline.chunk_size',
+    int(os.environ.get('PIPELINE_CHUNK_SIZE', '1000')),
+)
+
+PIPELINE_CHUNK_OVERLAP = PersistentConfig(
+    'PIPELINE_CHUNK_OVERLAP',
+    'doc_pipeline.chunk_overlap',
+    int(os.environ.get('PIPELINE_CHUNK_OVERLAP', '100')),
+)
+
+# How often the reconciler sweeps files stuck in 'processing' with a pipeline
+# job id. Success is handled instantly by the /ingest callback; this sweep only
+# catches failed/hung jobs (restart-safe: derived from DB state each tick).
+PIPELINE_RECONCILE_INTERVAL_SECONDS = PersistentConfig(
+    'PIPELINE_RECONCILE_INTERVAL_SECONDS',
+    'doc_pipeline.reconcile_interval_seconds',
+    int(os.environ.get('PIPELINE_RECONCILE_INTERVAL_SECONDS', '120')),
+)
+
+# Generous backstop: a file whose pipeline job never reports a terminal status
+# within this window is marked 'error'. NOT a duration limit on healthy jobs —
+# the reconciler keeps waiting while a job is genuinely running. Default 6h.
+PIPELINE_JOB_MAX_WALL_CLOCK_SECONDS = PersistentConfig(
+    'PIPELINE_JOB_MAX_WALL_CLOCK_SECONDS',
+    'doc_pipeline.job_max_wall_clock_seconds',
+    int(os.environ.get('PIPELINE_JOB_MAX_WALL_CLOCK_SECONDS', '21600')),
+)
 
 ####################################
 # Agent Proxy
@@ -3791,7 +4215,7 @@ WEB_SEARCH_CONCURRENT_REQUESTS = PersistentConfig(
 
 WEB_FETCH_MAX_CONTENT_LENGTH = PersistentConfig(
     'WEB_FETCH_MAX_CONTENT_LENGTH',
-    'rag.web.search.fetch_url_max_content_length',
+    'rag.web.fetch.max_content_length',
     (int(os.environ.get('WEB_FETCH_MAX_CONTENT_LENGTH')) if os.environ.get('WEB_FETCH_MAX_CONTENT_LENGTH') else None),
 )
 
@@ -3824,7 +4248,7 @@ ENABLE_WEB_LOADER_SSL_VERIFICATION = PersistentConfig(
 WEB_SEARCH_TRUST_ENV = PersistentConfig(
     'WEB_SEARCH_TRUST_ENV',
     'rag.web.search.trust_env',
-    os.getenv('WEB_SEARCH_TRUST_ENV', 'False').lower() == 'true',
+    os.getenv('WEB_SEARCH_TRUST_ENV', 'True').lower() == 'true',
 )
 
 
@@ -3880,6 +4304,12 @@ BRAVE_SEARCH_API_KEY = PersistentConfig(
     'BRAVE_SEARCH_API_KEY',
     'rag.web.search.brave_search_api_key',
     os.getenv('BRAVE_SEARCH_API_KEY', ''),
+)
+
+BRAVE_SEARCH_CONTEXT_TOKENS = PersistentConfig(
+    'BRAVE_SEARCH_CONTEXT_TOKENS',
+    'rag.web.search.brave_search_context_tokens',
+    int(os.getenv('BRAVE_SEARCH_CONTEXT_TOKENS', '8192')),
 )
 
 KAGI_SEARCH_API_KEY = PersistentConfig(
@@ -4519,6 +4949,19 @@ AUDIO_STT_SUPPORTED_CONTENT_TYPES = PersistentConfig(
     ],
 )
 
+AUDIO_STT_ALLOWED_EXTENSIONS = PersistentConfig(
+    'AUDIO_STT_ALLOWED_EXTENSIONS',
+    'audio.stt.allowed_extensions',
+    [
+        ext.strip()
+        for ext in os.environ.get(
+            'AUDIO_STT_ALLOWED_EXTENSIONS',
+            'mp3,wav,m4a,webm,ogg,flac,mp4,mpga,mpeg',
+        ).split(',')
+        if ext.strip()
+    ],
+)
+
 AUDIO_STT_AZURE_API_KEY = PersistentConfig(
     'AUDIO_STT_AZURE_API_KEY',
     'audio.stt.azure.api_key',
@@ -4638,6 +5081,18 @@ AUDIO_TTS_AZURE_SPEECH_OUTPUT_FORMAT = PersistentConfig(
     'AUDIO_TTS_AZURE_SPEECH_OUTPUT_FORMAT',
     'audio.tts.azure.speech_output_format',
     os.getenv('AUDIO_TTS_AZURE_SPEECH_OUTPUT_FORMAT', 'audio-24khz-160kbitrate-mono-mp3'),
+)
+
+AUDIO_TTS_MISTRAL_API_KEY = PersistentConfig(
+    'AUDIO_TTS_MISTRAL_API_KEY',
+    'audio.tts.mistral.api_key',
+    os.getenv('AUDIO_TTS_MISTRAL_API_KEY', ''),
+)
+
+AUDIO_TTS_MISTRAL_API_BASE_URL = PersistentConfig(
+    'AUDIO_TTS_MISTRAL_API_BASE_URL',
+    'audio.tts.mistral.api_base_url',
+    os.getenv('AUDIO_TTS_MISTRAL_API_BASE_URL', 'https://api.mistral.ai/v1'),
 )
 
 

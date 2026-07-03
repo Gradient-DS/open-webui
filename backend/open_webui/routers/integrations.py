@@ -1,22 +1,28 @@
 import hashlib
 import json
 import logging
+import os
 import time
-from typing import Optional
+import uuid
+from typing import NamedTuple, Optional
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
+from fastapi.concurrency import run_in_threadpool
 from langchain_core.documents import Document
 from pydantic import BaseModel
 
 from open_webui.config import KNOWLEDGE_MAX_FILE_COUNT
+from open_webui.models.file_attachments import FileAttachmentForm, FileAttachments
 from open_webui.models.files import FileForm, Files
 from open_webui.models.knowledge import KnowledgeForm, Knowledges
 from open_webui.retrieval.loaders.main import Loader
-from open_webui.retrieval.vector.factory import VECTOR_DB_CLIENT
-from open_webui.routers.retrieval import save_docs_to_vector_db
+from open_webui.retrieval.vector.async_client import ASYNC_VECTOR_DB_CLIENT
+from open_webui.routers.retrieval import save_docs_to_vector_db, submit_existing_file_to_pipeline
+from open_webui.services.files.events import emit_file_status
 from open_webui.services.sync.provider import file_id_prefix_for
 from open_webui.storage.provider import Storage
 from open_webui.utils.auth import get_verified_user
+from open_webui.utils.doc_pipeline import ACTING_PROVIDER
 from open_webui.utils.service_auth import LoaderPrincipal, get_integration_principal
 
 router = APIRouter()
@@ -34,11 +40,33 @@ class IngestCollection(BaseModel):
     name: str
     description: str = ''
     data_type: str = 'parsed_text'
+    # 'knowledge' → embed into the KB collection + link the file to the KB
+    # (default; unchanged behavior). 'file' → per-file chat attachment: embed
+    # into file-{doc.source_id}, update the existing File row, link to NO KB.
+    # warren echoes this key back opaquely (it never inspects collection), so
+    # the per-file target is enforced entirely here on the OWUI side.
+    target: str = 'knowledge'
     language: Optional[str] = None
     tags: list[str] = []
     metadata: dict = {}
     # None = public, {} = private (default), {"read": {"group_ids": [], "user_ids": []}, ...} = custom
     access_control: Optional[dict] = {}
+
+
+class IngestAttachmentManifest(BaseModel):
+    """One render artefact attached to a document.
+
+    Manifest entries live inside each document in the ``data`` JSON
+    body; their bytes ride on the multipart envelope under field name
+    ``attachments``. ``part_name`` is the multipart filename the
+    receiver uses to find the matching ``UploadFile``.
+    """
+
+    kind: str
+    content_type: str = 'image/png'
+    storey: Optional[str] = None
+    caption: str = ''
+    part_name: str
 
 
 class IngestDocumentBase(BaseModel):
@@ -52,6 +80,7 @@ class IngestDocumentBase(BaseModel):
     modified_at: Optional[str] = None
     tags: list[str] = []
     metadata: dict = {}
+    attachments: list[IngestAttachmentManifest] = []
 
 
 class ParsedTextDocument(IngestDocumentBase):
@@ -69,6 +98,21 @@ class FullDocument(IngestDocumentBase):
 class IngestForm(BaseModel):
     collection: IngestCollection
     documents: list[dict]
+
+
+# Warren cloud-sync (Option 1b) — loader-worker staging + submit + poll.
+
+
+class StageRequest(BaseModel):
+    knowledge_id: str
+    source_id: str
+    filename: str
+    content_type: str = 'application/octet-stream'
+
+
+class SubmitRequest(BaseModel):
+    file_id: str
+    knowledge_id: str
 
 
 # --- Helper Functions ---
@@ -123,9 +167,9 @@ def _validate_custom_metadata(doc: IngestDocumentBase, provider_config: dict):
         )
 
 
-def _find_kb_by_source_id(provider: str, source_id: str):
+async def _find_kb_by_source_id(provider: str, source_id: str):
     """Find a knowledge base by provider slug + external source_id."""
-    kbs = Knowledges.get_knowledge_bases_by_type(provider)
+    kbs = await Knowledges.get_knowledge_bases_by_type(provider)
     for kb in kbs:
         meta = kb.meta or {}
         if meta.get('integration', {}).get('source_id') == source_id:
@@ -133,7 +177,7 @@ def _find_kb_by_source_id(provider: str, source_id: str):
     return None
 
 
-def _create_kb_for_provider(
+async def _create_kb_for_provider(
     provider: str,
     provider_config: dict,
     collection: IngestCollection,
@@ -146,7 +190,7 @@ def _create_kb_for_provider(
         type=provider,
         access_control=collection.access_control,
     )
-    knowledge = Knowledges.insert_new_knowledge(user_id, form)
+    knowledge = await Knowledges.insert_new_knowledge(user_id, form)
     meta = {
         'integration': {
             'provider': provider,
@@ -157,8 +201,8 @@ def _create_kb_for_provider(
             'provider_metadata': collection.metadata,
         }
     }
-    Knowledges.update_knowledge_meta_by_id(knowledge.id, meta)
-    return Knowledges.get_knowledge_by_id(knowledge.id)
+    await Knowledges.update_knowledge_meta_by_id(knowledge.id, meta)
+    return await Knowledges.get_knowledge_by_id(knowledge.id)
 
 
 def _maybe_upload_original_bytes(
@@ -187,16 +231,22 @@ def _maybe_upload_original_bytes(
     return file_path
 
 
-def _create_or_update_file_record(
+async def _create_or_update_file_record(
     file_id: str,
     doc: IngestDocumentBase,
     content_text: str,
     file_path: str,
     provider: str,
-    knowledge_id: str,
+    knowledge_id: Optional[str],
     user_id: str,
 ) -> str:
-    """Create or update a File record. Returns 'created' or 'updated'."""
+    """Create or update a File record. Returns 'created' or 'updated'.
+
+    ``knowledge_id=None`` is the per-file (non-KB) chat-attachment target: the
+    File row is created/updated exactly as for the KB path, but it is NOT linked
+    to any KB (no ``add_file_to_knowledge_by_id``) and the KB path-field write
+    (``set_path_fields_by_file_id``) is skipped. The ``data={'content': ...}``
+    write stays either way — it is what BYPASS full-content injection reads."""
     meta = {
         'name': doc.title or doc.filename,
         'content_type': doc.content_type,
@@ -227,10 +277,19 @@ def _create_or_update_file_record(
         if key in doc.metadata:
             meta[key] = doc.metadata[key]
 
-    existing_file = Files.get_file_by_id(file_id)
+    existing_file = await Files.get_file_by_id(file_id)
     if existing_file:
-        Files.update_file_metadata_by_id(file_id, meta)
-        Files.update_file_data_by_id(file_id, {'content': content_text})
+        await Files.update_file_metadata_by_id(file_id, meta)
+        await Files.update_file_data_by_id(file_id, {'content': content_text})
+        # This branch updates file.meta but never calls
+        # add_file_to_knowledge_by_id (the KB link already exists from the
+        # sync stub), so mirror the freshly-promoted relative_path /
+        # source_item_id onto the knowledge_file rows here. Captures files that
+        # moved folders between stub discovery and the loader-worker callback.
+        # Skipped for per-file chat attachments (knowledge_id=None): there are
+        # no knowledge_file rows to keep in sync.
+        if knowledge_id is not None:
+            await Knowledges.set_path_fields_by_file_id(file_id, {**(existing_file.meta or {}), **meta})
         # Stub File rows created up-front by sync workers
         # (services/sync/base_worker._create_stub_file_rows) carry
         # ``path=''`` until the loader-worker callback arrives with the
@@ -241,7 +300,7 @@ def _create_or_update_file_record(
         # (e.g. push integrations re-syncing a previously-byte-bearing
         # KB).
         if file_path and file_path != (existing_file.path or ''):
-            Files.update_file_path_by_id(file_id, file_path)
+            await Files.update_file_path_by_id(file_id, file_path)
         return 'updated'
     else:
         text_hash = hashlib.sha256(content_text.encode()).hexdigest()
@@ -253,15 +312,19 @@ def _create_or_update_file_record(
             data={'content': content_text},
             meta=meta,
         )
-        Files.insert_new_file(user_id, file_form)
-        Knowledges.add_file_to_knowledge_by_id(knowledge_id, file_id, user_id)
+        await Files.insert_new_file(user_id, file_form)
+        # Per-file chat attachments (knowledge_id=None) are deliberately KB-less:
+        # retrieval already resolves them via the file-{id} cache collection, so
+        # no KB membership row is created.
+        if knowledge_id is not None:
+            await Knowledges.add_file_to_knowledge_by_id(knowledge_id, file_id, user_id)
         return 'created'
 
 
-def _delete_old_vectors(knowledge_id: str, file_id: str):
+async def _delete_old_vectors(knowledge_id: str, file_id: str):
     """Delete existing vectors for a file (idempotent update)."""
     try:
-        VECTOR_DB_CLIENT.delete(
+        await ASYNC_VECTOR_DB_CLIENT.delete(
             collection_name=knowledge_id,
             filter={'file_id': file_id},
         )
@@ -326,7 +389,7 @@ def _build_base_metadata(doc: IngestDocumentBase, file_id: str, provider: str, u
 # --- Processing Functions ---
 
 
-def _process_parsed_text_document(
+async def _process_parsed_text_document(
     request: Request,
     knowledge_id: str,
     provider: str,
@@ -347,7 +410,7 @@ def _process_parsed_text_document(
 
     file_path = _maybe_upload_original_bytes(file_id, doc, provider, original_file)
 
-    status = _create_or_update_file_record(
+    status = await _create_or_update_file_record(
         file_id=file_id,
         doc=doc,
         content_text=doc.text,
@@ -358,7 +421,7 @@ def _process_parsed_text_document(
     )
 
     if status == 'updated':
-        _delete_old_vectors(knowledge_id, file_id)
+        await _delete_old_vectors(knowledge_id, file_id)
 
     text_hash = hashlib.sha256(doc.text.encode()).hexdigest()
     lc_doc = Document(
@@ -367,7 +430,12 @@ def _process_parsed_text_document(
     )
 
     try:
-        save_docs_to_vector_db(
+        # save_docs_to_vector_db is sync and blocks on embedding + vector-DB
+        # I/O. Offload so the event loop stays responsive — otherwise large
+        # ingest batches from the loader-worker callback freeze the pod and
+        # trip liveness probes.
+        await run_in_threadpool(
+            save_docs_to_vector_db,
             request=request,
             docs=[lc_doc],
             collection_name=knowledge_id,
@@ -379,13 +447,14 @@ def _process_parsed_text_document(
             add=True,
             split=True,
         )
-        # Clear the stale ``error`` field too — update_file_data_by_id is a
-        # shallow merge, so without this a row that succeeded after a prior
-        # failure would still carry the old error message in data.error.
-        Files.update_file_data_by_id(file_id, {'status': 'completed', 'error': None})
+        # Dual-write status into data (existing readers) and meta (cheap
+        # KB file-list read path).  set_status clears the stale ``error``
+        # field in both columns so a re-run after a prior failure does not
+        # leave a stale error message in data.error.
+        await Files.set_status(file_id, 'completed', error=None)
     except Exception as e:
         log.exception(f'Failed to store document {doc.source_id} in vector DB')
-        Files.update_file_data_by_id(file_id, {'status': 'error', 'error': str(e)})
+        await Files.set_status(file_id, 'error', error=str(e))
         return {
             'source_id': doc.source_id,
             'file_id': file_id,
@@ -396,25 +465,41 @@ def _process_parsed_text_document(
     return {'source_id': doc.source_id, 'file_id': file_id, 'status': status}
 
 
-def _process_chunked_text_document(
+async def _process_chunked_text_document(
     request: Request,
-    knowledge_id: str,
+    knowledge_id: Optional[str],
     provider: str,
     doc: ChunkedTextDocument,
     user_id: str,
     original_file: Optional[UploadFile] = None,
+    *,
+    collection_name: Optional[str] = None,
+    add: bool = True,
+    skip_embed: bool = False,
 ) -> dict:
     """Process a chunked_text document: create file record, embed pre-chunked text, store.
 
     See :func:`_process_parsed_text_document` for the ``original_file``
     contract — same semantics here.
+
+    Embed target vs KB link are decoupled so the same helper serves both the KB
+    push and the per-file chat-attachment path:
+    - ``collection_name`` is the vector-DB collection to embed into. Defaults to
+      ``knowledge_id`` (KB path); the per-file path passes ``f'file-{file_id}'``.
+    - ``add`` mirrors ``save_docs_to_vector_db``'s append semantics: ``True`` for
+      the KB collection (dedup-then-append), ``False`` for the per-file cache
+      (created fresh, native chat parity).
+    - ``knowledge_id`` still drives the KB link inside
+      :func:`_create_or_update_file_record`; pass ``None`` for the per-file path.
+    - ``skip_embed`` (BYPASS_EMBEDDING_AND_RETRIEVAL): store the File-row content
+      only and write no vectors, mirroring native BYPASS.
     """
     file_id = f'{file_id_prefix_for(provider)}{doc.source_id}'
     joined_text = '\n\n'.join(doc.chunks)
 
     file_path = _maybe_upload_original_bytes(file_id, doc, provider, original_file)
 
-    status = _create_or_update_file_record(
+    status = await _create_or_update_file_record(
         file_id=file_id,
         doc=doc,
         content_text=joined_text,
@@ -424,8 +509,20 @@ def _process_chunked_text_document(
         user_id=user_id,
     )
 
-    if status == 'updated':
-        _delete_old_vectors(knowledge_id, file_id)
+    embed_collection = collection_name if collection_name is not None else knowledge_id
+
+    if skip_embed:
+        # BYPASS_EMBEDDING_AND_RETRIEVAL: the File-row content is already written
+        # by _create_or_update_file_record; full-content injection reads that. No
+        # vectors are written and no collection is touched.
+        await Files.set_status(file_id, 'completed', error=None)
+        return {'source_id': doc.source_id, 'file_id': file_id, 'status': status}
+
+    # Dedup-then-append only makes sense on the KB append path (add=True). The
+    # per-file cache uses add=False (fresh collection, native chat parity), where
+    # deleting first would drop vectors the no-op re-insert never restores.
+    if add and status == 'updated':
+        await _delete_old_vectors(embed_collection, file_id)
 
     text_hash = hashlib.sha256(joined_text.encode()).hexdigest()
     base_metadata = _build_base_metadata(doc, file_id, provider, user_id)
@@ -433,25 +530,27 @@ def _process_chunked_text_document(
     lc_docs = [Document(page_content=chunk, metadata=base_metadata) for chunk in doc.chunks]
 
     try:
-        save_docs_to_vector_db(
+        await run_in_threadpool(
+            save_docs_to_vector_db,
             request=request,
             docs=lc_docs,
-            collection_name=knowledge_id,
+            collection_name=embed_collection,
             metadata={
                 'file_id': file_id,
                 'name': doc.title or doc.filename,
                 'hash': text_hash,
             },
-            add=True,
+            add=add,
             split=False,
         )
-        # Clear the stale ``error`` field too — update_file_data_by_id is a
-        # shallow merge, so without this a row that succeeded after a prior
-        # failure would still carry the old error message in data.error.
-        Files.update_file_data_by_id(file_id, {'status': 'completed', 'error': None})
+        # Dual-write status into data (existing readers) and meta (cheap
+        # KB file-list read path).  set_status clears the stale ``error``
+        # field in both columns so a re-run after a prior failure does not
+        # leave a stale error message in data.error.
+        await Files.set_status(file_id, 'completed', error=None)
     except Exception as e:
         log.exception(f'Failed to store chunked document {doc.source_id} in vector DB')
-        Files.update_file_data_by_id(file_id, {'status': 'error', 'error': str(e)})
+        await Files.set_status(file_id, 'error', error=str(e))
         return {
             'source_id': doc.source_id,
             'file_id': file_id,
@@ -462,7 +561,7 @@ def _process_chunked_text_document(
     return {'source_id': doc.source_id, 'file_id': file_id, 'status': status}
 
 
-def _process_full_document(
+async def _process_full_document(
     request: Request,
     knowledge_id: str,
     provider: str,
@@ -508,7 +607,7 @@ def _process_full_document(
             'error': str(e),
         }
 
-    status = _create_or_update_file_record(
+    status = await _create_or_update_file_record(
         file_id=file_id,
         doc=doc,
         content_text=extracted_text,
@@ -519,7 +618,7 @@ def _process_full_document(
     )
 
     if status == 'updated':
-        _delete_old_vectors(knowledge_id, file_id)
+        await _delete_old_vectors(knowledge_id, file_id)
 
     text_hash = hashlib.sha256(extracted_text.encode()).hexdigest()
     base_metadata = _build_base_metadata(doc, file_id, provider, user_id)
@@ -529,7 +628,8 @@ def _process_full_document(
         d.metadata.update(base_metadata)
 
     try:
-        save_docs_to_vector_db(
+        await run_in_threadpool(
+            save_docs_to_vector_db,
             request=request,
             docs=extracted_docs,
             collection_name=knowledge_id,
@@ -541,13 +641,14 @@ def _process_full_document(
             add=True,
             split=True,
         )
-        # Clear the stale ``error`` field too — update_file_data_by_id is a
-        # shallow merge, so without this a row that succeeded after a prior
-        # failure would still carry the old error message in data.error.
-        Files.update_file_data_by_id(file_id, {'status': 'completed', 'error': None})
+        # Dual-write status into data (existing readers) and meta (cheap
+        # KB file-list read path).  set_status clears the stale ``error``
+        # field in both columns so a re-run after a prior failure does not
+        # leave a stale error message in data.error.
+        await Files.set_status(file_id, 'completed', error=None)
     except Exception as e:
         log.exception(f'Failed to store full document {doc.source_id} in vector DB')
-        Files.update_file_data_by_id(file_id, {'status': 'error', 'error': str(e)})
+        await Files.set_status(file_id, 'error', error=str(e))
         return {
             'source_id': doc.source_id,
             'file_id': file_id,
@@ -558,15 +659,131 @@ def _process_full_document(
     return {'source_id': doc.source_id, 'file_id': file_id, 'status': status}
 
 
+class PersistResult(NamedTuple):
+    saved: int
+    skipped: int
+
+
+def _persist_attachments(
+    *,
+    file_id: str,
+    manifest: list[IngestAttachmentManifest],
+    part_lookup: dict[str, UploadFile],
+) -> PersistResult:
+    """Persist a document's attachment bytes to Storage + DB.
+
+    Best-effort: missing parts, Storage failures, and DB insert failures
+    are logged + skipped; the document ingest stays successful. Existing
+    attachments for file_id are deleted first so re-upload regenerates
+    cleanly.
+
+    Returns (saved, skipped) counts as a NamedTuple.
+    """
+    FileAttachments.delete_attachments_by_file_id(file_id)
+
+    saved, skipped = 0, 0
+    for i, entry in enumerate(manifest):
+        part = part_lookup.get(entry.part_name)
+        if part is None:
+            log.warning(
+                'attachment manifest references missing part %r (file_id=%s, kind=%s, storey=%s); skipping',
+                entry.part_name,
+                file_id,
+                entry.kind,
+                entry.storey,
+            )
+            skipped += 1
+            continue
+
+        # Reset stream: FastAPI leaves the SpooledTemporaryFile at EOF
+        # after reading the multipart body, so without this seek the
+        # subsequent Storage.upload_file would receive an empty stream.
+        part.file.seek(0)
+        # Defense in depth: even though part_name comes from a trusted
+        # loader-worker today, a path-traversal value (e.g. '../../etc/foo')
+        # would escape UPLOAD_DIR via LocalStorageProvider; strip any
+        # directory component before composing the Storage filename.
+        safe_part_name = os.path.basename(entry.part_name)
+        storage_filename = f'{uuid.uuid4()}-{safe_part_name}'
+        try:
+            _, path = Storage.upload_file(
+                part.file,
+                storage_filename,
+                tags={'file_id': file_id, 'kind': entry.kind},
+            )
+        except Exception:
+            log.exception(
+                'storage upload failed for attachment (file_id=%s, part=%s)',
+                file_id,
+                entry.part_name,
+            )
+            skipped += 1
+            continue
+
+        try:
+            FileAttachments.insert_new_attachment(
+                FileAttachmentForm(
+                    id=str(uuid.uuid4()),
+                    file_id=file_id,
+                    kind=entry.kind,
+                    storey=entry.storey,
+                    index=i,
+                    content_type=entry.content_type,
+                    caption=entry.caption,
+                    path=path,
+                ),
+            )
+        except Exception:
+            log.exception(
+                'db insert failed after successful upload — leaking storage object at %s (file_id=%s, part=%s)',
+                path,
+                file_id,
+                entry.part_name,
+            )
+            skipped += 1
+            continue
+
+        saved += 1
+    return PersistResult(saved=saved, skipped=skipped)
+
+
+def _maybe_persist_attachments(
+    *,
+    result: dict,
+    doc: IngestDocumentBase,
+    part_lookup: dict[str, UploadFile],
+) -> None:
+    """If the document's text save succeeded and it carries attachments,
+    persist them and record the counts on the result dict.
+
+    Mutates ``result`` in place; intentional — the dispatch loop already
+    owns the dict and we want the side-channel counts to ride on the
+    existing per-document response without a wrapper layer.
+    """
+    # Only persist attachments when the document text was committed.
+    if result.get('status') not in ('created', 'updated'):
+        return
+    if not doc.attachments:
+        return
+    outcome = _persist_attachments(
+        file_id=result['file_id'],
+        manifest=doc.attachments,
+        part_lookup=part_lookup,
+    )
+    result['attachments_saved'] = outcome.saved
+    result['attachments_skipped'] = outcome.skipped
+
+
 # --- Endpoints ---
 
 
 @router.post('/ingest')
-def ingest_documents(
+async def ingest_documents(
     request: Request,
     data: str = Form(...),
     files: Optional[list[UploadFile]] = File(None),
     original_files: Optional[list[UploadFile]] = File(None),
+    attachments: Optional[list[UploadFile]] = File(None),
     principal=Depends(get_integration_principal),
 ):
     # Parse JSON from form field
@@ -582,6 +799,7 @@ def ingest_documents(
     # lookup once so the dispatch loops below stay O(documents) rather
     # than O(documents * files).
     original_file_lookup = {f.filename: f for f in (original_files or []) if f.filename}
+    attachment_lookup = {f.filename: f for f in (attachments or []) if f.filename}
 
     if isinstance(principal, LoaderPrincipal):
         user = principal.user
@@ -614,6 +832,81 @@ def ingest_documents(
             f"Invalid data_type '{data_type}'. Must be one of: {', '.join(sorted(VALID_DATA_TYPES))}",
         )
 
+    # Per-file (non-KB) chat-attachment dispatch. warren echoes collection.target
+    # back opaquely; when it is 'file' this push targets a chat attachment's
+    # per-file cache collection (file-{id}) with NO KB — skip KB find/create, the
+    # KB file-limit check, and the KB membership write entirely. The File row is
+    # the one created up-front by the direct upload; owui_upload's empty prefix
+    # makes f'{prefix}{source_id}' an identity so we update it in place.
+    if isinstance(principal, LoaderPrincipal) and collection.target == 'file':
+        if data_type != 'chunked_text':
+            raise HTTPException(
+                400,
+                f"target='file' requires data_type 'chunked_text', got '{data_type}'.",
+            )
+        bypass = request.app.state.config.BYPASS_EMBEDDING_AND_RETRIEVAL
+        results = []
+        for raw_doc in form_data.documents:
+            try:
+                doc = ChunkedTextDocument(**raw_doc)
+            except Exception as e:
+                raise HTTPException(
+                    400,
+                    f"Document '{raw_doc.get('source_id', '?')}' invalid for chunked_text: {e}",
+                )
+            file_id = f'{file_id_prefix_for(provider)}{doc.source_id}'
+            result = await _process_chunked_text_document(
+                request=request,
+                knowledge_id=None,  # no KB link
+                provider=provider,
+                doc=doc,
+                user_id=user.id,
+                # The direct upload already stored the source bytes at file.path;
+                # warren re-shipping them (original_files) would be a redundant
+                # Storage round-trip inside the /ingest critical path — drop it.
+                # None is a no-op when warren ships nothing, so this is always safe.
+                original_file=None,
+                collection_name=f'file-{file_id}',  # per-file cache collection
+                add=False,  # native chat parity: create fresh, don't append
+                skip_embed=bypass,  # BYPASS: store content only, no vectors
+            )
+            _maybe_persist_attachments(result=result, doc=doc, part_lookup=attachment_lookup)
+            # The callback has landed — clear the pipeline bookkeeping so the
+            # restart-safe reconciler stops tracking this file. Status is already
+            # 'completed'/'error' from _process_chunked_text_document.
+            await Files.update_file_metadata_by_id(file_id, {'pipeline_job_id': None, 'pipeline_submitted_at': None})
+            # Emit the honest completion: the vectors just landed (or the embed
+            # failed). Phase 1 suppressed _process_handler's submit-time emit to
+            # 'processing', so THIS is the signal that ends the frontend's
+            # loading state. The target='file' path is only ever reached for
+            # direct chat attachments (provider owui_upload), so no cloud-sync
+            # guard is needed here. emit_file_status swallows socket errors, so a
+            # hiccup never fails ingestion.
+            await emit_file_status(
+                user_id=user.id,
+                file_id=file_id,
+                status='completed' if result['status'] in ('created', 'updated') else 'failed',
+                error=result.get('error'),
+                collection_name=f'file-{file_id}',
+            )
+            results.append(result)
+
+        created = sum(1 for r in results if r['status'] == 'created')
+        updated = sum(1 for r in results if r['status'] == 'updated')
+        errors = sum(1 for r in results if r['status'] == 'error')
+        return {
+            'knowledge_id': None,
+            'collection_source_id': collection.source_id,
+            'provider': provider,
+            'data_type': data_type,
+            'target': 'file',
+            'total': len(form_data.documents),
+            'created': created,
+            'updated': updated,
+            'errors': errors,
+            'documents': results,
+        }
+
     # Find or create KB. For LoaderPrincipal callers (loader-worker pushing
     # the result of a cloud sync), ``collection.source_id`` is the existing
     # open-webui KB UUID — look that up directly so we don't double-create.
@@ -621,11 +914,11 @@ def ingest_documents(
     # lookup since they own KB lifecycle.
     knowledge = None
     if isinstance(principal, LoaderPrincipal):
-        knowledge = Knowledges.get_knowledge_by_id(collection.source_id)
+        knowledge = await Knowledges.get_knowledge_by_id(collection.source_id)
     if knowledge is None:
-        knowledge = _find_kb_by_source_id(provider, collection.source_id)
+        knowledge = await _find_kb_by_source_id(provider, collection.source_id)
     if not knowledge:
-        knowledge = _create_kb_for_provider(provider, provider_config, collection, user.id)
+        knowledge = await _create_kb_for_provider(provider, provider_config, collection, user.id)
     elif not isinstance(principal, LoaderPrincipal):
         # Validate data_type consistency with existing KB (push providers only;
         # cloud-sync KBs found via direct ID lookup don't carry meta.integration).
@@ -636,8 +929,10 @@ def ingest_documents(
                 f"Collection '{collection.source_id}' was created with data_type '{existing_data_type}'. "
                 f"Cannot push with data_type '{data_type}'.",
             )
-        # Update access_control on existing KB (defaults to {} / private if not specified)
-        Knowledges.update_knowledge_by_id(
+        # Touch updated_at on the existing KB (KnowledgeForm carries no access_control
+        # field; existing access_grants are preserved by passing access_grants=None,
+        # which short-circuits the grants-update branch in update_knowledge_by_id).
+        await Knowledges.update_knowledge_by_id(
             knowledge.id,
             KnowledgeForm(
                 name=knowledge.name,
@@ -648,7 +943,7 @@ def ingest_documents(
 
     # Check file limit
     max_files = provider_config.get('max_files_per_kb', KNOWLEDGE_MAX_FILE_COUNT)
-    current_files = Knowledges.get_files_by_id(knowledge.id)
+    current_files = await Knowledges.get_files_by_id(knowledge.id)
     existing_ids = {f.id for f in current_files} if current_files else set()
     _prefix = file_id_prefix_for(provider)
     new_doc_ids = {f'{_prefix}{doc.get("source_id", "")}' for doc in form_data.documents}
@@ -678,7 +973,7 @@ def ingest_documents(
                     f"Document '{raw_doc.get('source_id', '?')}' invalid for parsed_text: {e}",
                 )
             _validate_custom_metadata(doc, provider_config)
-            result = _process_parsed_text_document(
+            result = await _process_parsed_text_document(
                 request=request,
                 knowledge_id=knowledge.id,
                 provider=provider,
@@ -686,6 +981,7 @@ def ingest_documents(
                 user_id=user.id,
                 original_file=original_file_lookup.get(doc.source_id),
             )
+            _maybe_persist_attachments(result=result, doc=doc, part_lookup=attachment_lookup)
             results.append(result)
 
     elif data_type == 'chunked_text':
@@ -698,7 +994,7 @@ def ingest_documents(
                     f"Document '{raw_doc.get('source_id', '?')}' invalid for chunked_text: {e}",
                 )
             _validate_custom_metadata(doc, provider_config)
-            result = _process_chunked_text_document(
+            result = await _process_chunked_text_document(
                 request=request,
                 knowledge_id=knowledge.id,
                 provider=provider,
@@ -706,6 +1002,7 @@ def ingest_documents(
                 user_id=user.id,
                 original_file=original_file_lookup.get(doc.source_id),
             )
+            _maybe_persist_attachments(result=result, doc=doc, part_lookup=attachment_lookup)
             results.append(result)
 
     elif data_type == 'full_documents':
@@ -733,7 +1030,7 @@ def ingest_documents(
                     f'Available files: {list(file_lookup.keys())}',
                 )
 
-            result = _process_full_document(
+            result = await _process_full_document(
                 request=request,
                 knowledge_id=knowledge.id,
                 provider=provider,
@@ -741,6 +1038,7 @@ def ingest_documents(
                 upload_file=upload,
                 user_id=user.id,
             )
+            _maybe_persist_attachments(result=result, doc=doc, part_lookup=attachment_lookup)
             results.append(result)
 
         # Check for unmatched uploaded files
@@ -760,6 +1058,22 @@ def ingest_documents(
         elif result['status'] == 'error':
             errors += 1
 
+        # Direct KB uploads routed through warren (provider owui_upload) need an
+        # honest file:status once their vectors land here — Phase 1 suppressed
+        # _process_handler's submit-time emit to 'processing'. Cloud-sync
+        # providers (onedrive/confluence/google_drive/topdesk) are deliberately
+        # skipped: they emit their own honest {provider}:file:added, and a
+        # redundant file:status here would double-count uploadBatch.added in
+        # KnowledgeBase.svelte (which listens to BOTH events).
+        if provider == ACTING_PROVIDER:
+            await emit_file_status(
+                user_id=user.id,
+                file_id=result['file_id'],
+                status='completed' if result['status'] in ('created', 'updated') else 'failed',
+                error=result.get('error'),
+                collection_name=knowledge.id,
+            )
+
     return {
         'knowledge_id': knowledge.id,
         'collection_source_id': collection.source_id,
@@ -773,8 +1087,123 @@ def ingest_documents(
     }
 
 
+def _require_loader(principal) -> LoaderPrincipal:
+    """The warren cloud-sync routes are machine-only: the loader bearer is the
+    trust signal. A human/cookie caller falls through as a plain ``UserModel``
+    from :func:`get_integration_principal`; reject it with 403 so these
+    staging/submit/poll endpoints are never reachable from a browser session."""
+    if not isinstance(principal, LoaderPrincipal):
+        raise HTTPException(status_code=403, detail='This endpoint requires the loader service credential')
+    return principal
+
+
+@router.post('/stage')
+async def stage_file(
+    request: Request,
+    body: StageRequest,
+    principal=Depends(get_integration_principal),
+):
+    """Find-or-create the ``File`` row for a cloud-synced file at its canonical
+    S3 key and hand back a presigned PUT the loader-worker uses to upload the
+    original bytes over plain HTTPS.
+
+    The canonical key is the one wiring invariant: the PUT MUST target the same
+    key ``File.path`` records and warren's later presigned GET (issued in
+    ``submit_existing_file_to_pipeline``) reads. Both the key derivation and its
+    inverse live in the storage provider (``get_object_path`` mirrors
+    ``upload_file``), so the path is never string-assembled here."""
+    principal = _require_loader(principal)
+    if not request.app.state.config.DISTRIBUTED_DOC_PIPELINE_SYNC_ENABLED:
+        raise HTTPException(
+            status_code=403,
+            detail='warren cloud-sync pipeline is disabled (DISTRIBUTED_DOC_PIPELINE_SYNC_ENABLED)',
+        )
+    provider = principal.provider_slug
+    user_id = principal.user.id
+
+    file_id = f'{file_id_prefix_for(provider)}{body.source_id}'
+    object_name = f'{file_id}_{body.filename}'
+    path = Storage.get_object_path(object_name)
+
+    existing_file = await Files.get_file_by_id(file_id)
+    if existing_file:
+        # base_worker._create_stub_file_rows may have created a stub (path='')
+        # for this file_id; promote it to the canonical path. Never overwrite a
+        # populated path with a different one silently unless it actually
+        # changed (idempotent re-stage is a no-op on the path).
+        if path and path != (existing_file.path or ''):
+            await Files.update_file_path_by_id(file_id, path)
+        await Files.update_file_metadata_by_id(
+            file_id,
+            {'content_type': body.content_type, 'collection_name': body.knowledge_id},
+        )
+    else:
+        file_form = FileForm(
+            id=file_id,
+            filename=body.filename,
+            path=path,
+            meta={
+                'name': body.filename,
+                'content_type': body.content_type,
+                'collection_name': body.knowledge_id,
+                'source': provider,
+                'source_id': body.source_id,
+            },
+        )
+        await Files.insert_new_file(user_id, file_form)
+        await Knowledges.add_file_to_knowledge_by_id(body.knowledge_id, file_id, user_id)
+
+    ttl = request.app.state.config.PIPELINE_PRESIGN_TTL_SECONDS
+    presigned_put_url = await run_in_threadpool(Storage.get_presigned_put_url, path, ttl, body.content_type)
+
+    return {'file_id': file_id, 'presigned_put_url': presigned_put_url}
+
+
+@router.post('/submit')
+async def submit_file(
+    request: Request,
+    body: SubmitRequest,
+    principal=Depends(get_integration_principal),
+):
+    """Submit an already-staged ``File`` to warren via the shared
+    ``submit_existing_file_to_pipeline`` body (presign GET + submit job + link +
+    mark 'processing'). The acting user is the loader-resolved principal user."""
+    principal = _require_loader(principal)
+    if not request.app.state.config.DISTRIBUTED_DOC_PIPELINE_SYNC_ENABLED:
+        raise HTTPException(
+            status_code=403,
+            detail='warren cloud-sync pipeline is disabled (DISTRIBUTED_DOC_PIPELINE_SYNC_ENABLED)',
+        )
+
+    file = await Files.get_file_by_id(body.file_id)
+    if not file:
+        raise HTTPException(status_code=404, detail=f"file '{body.file_id}' not found")
+
+    result = await submit_existing_file_to_pipeline(request, file, body.knowledge_id, principal.user)
+    return {'pipeline_job_id': result['pipeline_job_id']}
+
+
+@router.get('/file-status/{file_id}')
+async def get_file_status(
+    request: Request,
+    file_id: str,
+    principal=Depends(get_integration_principal),
+):
+    """Return the File's current processing status for the loader poll
+    (``processing`` → ``completed`` / ``error``). Status is dual-written by
+    ``Files.set_status`` into both meta and data; meta is the cheap read."""
+    _require_loader(principal)
+
+    file = await Files.get_file_by_id(file_id)
+    if not file:
+        raise HTTPException(status_code=404, detail=f"file '{file_id}' not found")
+
+    status = (file.meta or {}).get('status') or (file.data or {}).get('status')
+    return {'status': status}
+
+
 @router.delete('/collections/{source_id}')
-def delete_collection(
+async def delete_collection(
     request: Request,
     source_id: str,
     principal=Depends(get_integration_principal),
@@ -790,7 +1219,7 @@ def delete_collection(
     else:
         provider, _ = get_integration_provider(request, principal)
 
-    knowledge = _find_kb_by_source_id(provider, source_id)
+    knowledge = await _find_kb_by_source_id(provider, source_id)
     if not knowledge:
         raise HTTPException(404, f"Collection '{source_id}' not found for provider '{provider}'")
 
@@ -798,25 +1227,25 @@ def delete_collection(
         raise HTTPException(403, 'Cannot delete collections belonging to another provider')
 
     # Remove all files and vector data
-    current_files = Knowledges.get_files_by_id(knowledge.id)
+    current_files = await Knowledges.get_files_by_id(knowledge.id)
     file_ids = [f.id for f in current_files] if current_files else []
     for file_id in file_ids:
         try:
-            VECTOR_DB_CLIENT.delete(
+            await ASYNC_VECTOR_DB_CLIENT.delete(
                 collection_name=knowledge.id,
                 filter={'file_id': file_id},
             )
         except Exception:
             pass
-        Files.delete_file_by_id(file_id)
+        await Files.delete_file_by_id(file_id)
 
-    Knowledges.soft_delete_by_id(knowledge.id)
+    await Knowledges.soft_delete_by_id(knowledge.id)
 
     return {'status': 'deleted', 'source_id': source_id, 'provider': provider}
 
 
 @router.delete('/collections/{source_id}/documents/{document_source_id}')
-def delete_document(
+async def delete_document(
     request: Request,
     source_id: str,
     document_source_id: str,
@@ -824,28 +1253,28 @@ def delete_document(
 ):
     provider, _ = get_integration_provider(request, user)
 
-    knowledge = _find_kb_by_source_id(provider, source_id)
+    knowledge = await _find_kb_by_source_id(provider, source_id)
     if not knowledge:
         raise HTTPException(404, f"Collection '{source_id}' not found for provider '{provider}'")
 
     if knowledge.type != provider:
         raise HTTPException(403, "Cannot delete documents from another provider's collection")
 
-    file_id = f'{provider}-{document_source_id}'
-    file = Files.get_file_by_id(file_id)
+    file_id = f'{file_id_prefix_for(provider)}{document_source_id}'
+    file = await Files.get_file_by_id(file_id)
     if not file:
         raise HTTPException(404, f"Document '{document_source_id}' not found")
 
     try:
-        VECTOR_DB_CLIENT.delete(
+        await ASYNC_VECTOR_DB_CLIENT.delete(
             collection_name=knowledge.id,
             filter={'file_id': file_id},
         )
     except Exception:
         pass
 
-    Knowledges.remove_file_from_knowledge_by_id(knowledge.id, file_id)
-    Files.delete_file_by_id(file_id)
+    await Knowledges.remove_file_from_knowledge_by_id(knowledge.id, file_id)
+    await Files.delete_file_by_id(file_id)
 
     return {
         'status': 'deleted',

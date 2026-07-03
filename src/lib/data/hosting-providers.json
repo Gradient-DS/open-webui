@@ -1,0 +1,19 @@
+[
+	{
+		"_comment": "Maps an upstream connection hostname (the model's `connection_host`, derived from the LiteLLM/OpenAI api_base on the backend) to a clean hosting label shown in the model info tooltip. Used first; the static `hosting` value in model-profiles.json is the fallback when there is no host or no rule matches. Rules are matched top-to-bottom by case-insensitive substring of the hostname; the FIRST match wins, so keep more specific patterns above broader ones. The label format is the same as model-profiles' `hosting`: free text with an optional country code in parentheses to add a flag, e.g. 'Nebul (NL)' (supported flag codes: NL, EU, US, CN).",
+		"match": "",
+		"hosting": ""
+	},
+	{
+		"match": "nebul",
+		"hosting": "Nebul (NL)"
+	},
+	{
+		"match": "api.openai.com",
+		"hosting": "OpenAI (US)"
+	},
+	{
+		"match": "googleapis.com",
+		"hosting": "Google (US)"
+	}
+]

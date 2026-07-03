@@ -4,6 +4,7 @@ import type { ModelConfig } from '$lib/apis';
 import type { Banner } from '$lib/types';
 import type { Socket } from 'socket.io-client';
 import type { AudioQueue } from '$lib/utils/audio';
+import type { ProfileRule } from '$lib/utils/models/profile';
 
 import emojiShortCodes from '$lib/emoji-shortcodes.json';
 
@@ -29,6 +30,7 @@ export const MODEL_DOWNLOAD_POOL = writable({});
 export const mobile = writable(false);
 
 export const socket: Writable<null | Socket> = writable(null);
+export const socketConnected: Writable<boolean> = writable(true);
 export const activeUserIds: Writable<null | string[]> = writable(null);
 export const activeChatIds: Writable<Set<string>> = writable(new Set());
 export const USAGE_POOL: Writable<null | string[]> = writable(null);
@@ -59,6 +61,7 @@ export const channelId = writable(null);
 
 export const chats = writable(null);
 export const pinnedChats = writable([]);
+export const pinnedNotes = writable([]);
 export const tags = writable([]);
 export const folders = writable([]);
 
@@ -136,6 +139,15 @@ export const documentContents: Writable<Array<{
 export const embed = writable(null);
 
 export const temporaryChatEnabled = writable(false);
+
+// Transient one-shot event from the desktop shell (Spotlight, drag-and-drop, etc.).
+// Set by +layout.svelte, consumed and cleared by Chat.svelte.
+export type DesktopEventFile = { name: string; mimeType: string; dataUrl: string };
+export type DesktopEvent = {
+	type: string;
+	data?: any;
+};
+export const desktopEvent: Writable<DesktopEvent | null> = writable(null);
 export const scrollPaginationEnabled = writable(false);
 export const currentChatPage = writable(1);
 
@@ -279,6 +291,8 @@ type Settings = {
 	chatDirection?: 'LTR' | 'RTL' | 'auto';
 	ctrlEnterToSend?: boolean;
 	renderMarkdownInPreviews?: boolean;
+	recentEmojis?: string[];
+	pinnedMenuItems?: string[];
 
 	system?: string;
 	seed?: number;
@@ -337,6 +351,14 @@ type Config = {
 	invite_heading?: string;
 	default_models: string;
 	default_prompt_suggestions: PromptSuggestion[];
+	// Per-deployment model → datacenter/hosting mapping (Helm MODEL_HOSTING env).
+	// Same matching convention as model_profiles; see hostingFromDeployment in
+	// $lib/utils/models/profile.ts. Empty/absent when the deployment doesn't set it.
+	model_hosting?: { match: string; hosting: string }[];
+	// Per-deployment model → profile mapping (Helm MODEL_PROFILES env): description,
+	// bestFor, speed/quality meters, eco badge. Consumed by resolveModelProfile in
+	// $lib/utils/models/profile.ts. Empty/absent when the deployment doesn't set it.
+	model_profiles?: ProfileRule[];
 	features: {
 		auth: boolean;
 		auth_trusted_header: boolean;
@@ -351,6 +373,10 @@ type Config = {
 		enable_confluence_sync?: boolean;
 		confluence_kb_mode?: string;
 		confluence_shared_kb_id?: string;
+		confluence_oauth_configured?: boolean;
+		enable_topdesk_integration?: boolean;
+		enable_topdesk_sync?: boolean;
+		topdesk_shared_kb_id?: string;
 		enable_image_generation: boolean;
 		enable_admin_export: boolean;
 		enable_data_export: boolean;
@@ -375,6 +401,7 @@ type Config = {
 		feature_changelog?: boolean;
 		feature_system_prompt?: boolean;
 		feature_models?: boolean;
+		feature_model_meters?: boolean;
 		feature_knowledge?: boolean;
 		feature_prompts?: boolean;
 		feature_tools?: boolean;
@@ -385,7 +412,9 @@ type Config = {
 		feature_agent_api_enabled?: boolean;
 		feature_chat_controls_sections?: string[];
 		feature_skills?: boolean;
+		feature_skill_files?: boolean;
 		feature_builtin_tools?: boolean;
+		feature_strict_data_separation?: boolean;
 		feature_tool_servers?: boolean;
 		feature_terminal_servers?: boolean;
 		feature_user_demographics?: boolean;
@@ -406,6 +435,7 @@ type Config = {
 		pending_user_overlay_content?: string;
 		pending_user_overlay_description?: string;
 		greeting_template?: string | Record<string, string>;
+		iframe_csp?: string;
 	};
 };
 

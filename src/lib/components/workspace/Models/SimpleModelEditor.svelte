@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { getContext, onMount, tick } from 'svelte';
+	import { goto } from '$app/navigation';
 	import { toast } from 'svelte-sonner';
 	import { config, models, user } from '$lib/stores';
 	import { WEBUI_BASE_URL } from '$lib/constants';
@@ -11,6 +12,7 @@
 
 	import Knowledge from './Knowledge.svelte';
 	import CapabilityToggles from './Simple/CapabilityToggles.svelte';
+	import Selector from '$lib/components/chat/ModelSelector/Selector.svelte';
 	import AccessControlModal from '$lib/components/workspace/common/AccessControlModal.svelte';
 	import LockClosed from '$lib/components/icons/LockClosed.svelte';
 	import Cog6 from '$lib/components/icons/Cog6.svelte';
@@ -22,7 +24,13 @@
 	// draft = AssistantDraft from the onboarding agent; null when not from the wizard.
 	export let draft: any = null;
 	export let edit = false;
-	export let onSubmit: (info: any) => Promise<void> | void;
+	// options.skipNavigate lets callers persist without the parent route
+	// navigating away — used by the "+ Add knowledge" flow, which saves
+	// the assistant then navigates to the KB-create flow itself.
+	export let onSubmit: (
+		info: any,
+		options?: { skipNavigate?: boolean }
+	) => Promise<void> | void;
 	export let onAdvanced: () => void;
 
 	let loaded = false;
@@ -50,6 +58,9 @@
 	let toggles: AssistantToggles = togglesFromMeta({});
 	let accessGrants: any[] = [];
 	let knowledgeHint = '';
+	// The selected base model id. Bound to the Model picker; seeded at
+	// mount from DEFAULT_MODELS (create) or the saved base model (edit).
+	let baseModelId = '';
 
 	// The full original model — the merge base. Advanced-only fields
 	// (params, base_model_id, toolIds, data_warnings, ...) live here
@@ -77,6 +88,21 @@
 		if (!slug) return slug;
 		if (!$models.find((m: any) => m?.id === slug)) return slug;
 		return `${slug}-${crypto.randomUUID().slice(0, 6)}`;
+	};
+
+	/**
+	 * The base model a fresh assistant starts on: the admin-configured
+	 * default (first DEFAULT_MODELS id that resolves to a visible model),
+	 * else the first non-preset, non-arena model. Returns '' if none.
+	 */
+	const computeDefaultBaseModelId = (): string => {
+		const configuredDefault = ($config?.default_models || '')
+			.split(',')
+			.map((s: string) => s.trim())
+			.find((mid: string) => mid && $models.some((m: any) => m?.id === mid));
+		if (configuredDefault) return configuredDefault;
+		const base = $models.find((m: any) => !m?.preset && !(m?.arena ?? false));
+		return base?.id ?? '';
 	};
 
 	onMount(async () => {
@@ -118,6 +144,9 @@
 				params: {}
 			};
 		}
+		// Seed the Model picker: the saved base model when editing, the
+		// DEFAULT_MODELS default when creating (fresh or from a draft).
+		baseModelId = model ? (model.base_model_id ?? '') : computeDefaultBaseModelId();
 		await tick();
 		savedSnapshot = _snapshot();
 		hasBeenSaved = !!model;
@@ -141,6 +170,7 @@
 			name,
 			description,
 			system,
+			baseModelId,
 			profileImageUrl,
 			knowledge,
 			toggles,
@@ -155,6 +185,7 @@
 		name,
 		description,
 		system,
+		baseModelId,
 		profileImageUrl,
 		knowledge,
 		toggles,
@@ -162,17 +193,19 @@
 	});
 	$: isDirty = savedSnapshot !== null && liveSnapshot !== savedSnapshot;
 
-	const submitHandler = async () => {
+	const submitHandler = async (
+		options: { skipNavigate?: boolean } = {}
+	): Promise<boolean> => {
 		if (name.trim() === '') {
 			toast.error($i18n.t('Name is required.'));
-			return;
+			return false;
 		}
 		if (id.trim() === '') {
 			id = uniqueSlug(name);
 		}
 		if (knowledge.some((item) => item.status === 'uploading')) {
 			toast.error($i18n.t('Please wait until all files are uploaded.'));
-			return;
+			return false;
 		}
 
 		loading = true;
@@ -184,22 +217,11 @@
 		info.meta = info.meta ?? {};
 		info.params = info.params ?? {};
 
-		// On create, prefer the admin-configured DEFAULT_MODELS (first id
-		// that actually resolves to a model the user can see). Falls back
-		// to the first non-preset, non-arena model. Advanced lets power
-		// users override the base model.
-		if (!edit && !info.base_model_id) {
-			const configuredDefault = ($config?.default_models || '')
-				.split(',')
-				.map((s: string) => s.trim())
-				.find((id: string) => id && $models.some((m: any) => m?.id === id));
-			if (configuredDefault) {
-				info.base_model_id = configuredDefault;
-			} else {
-				const base = $models.find((m: any) => !m?.preset && !(m?.arena ?? false));
-				info.base_model_id = base?.id ?? null;
-			}
-		}
+		// The Model picker is the source of truth for the base model
+		// (seeded at mount from DEFAULT_MODELS on create, or the saved base
+		// on edit). Advanced can still override other base fields via the
+		// carried-through mergeBase.
+		info.base_model_id = baseModelId || null;
 
 		info.meta.profile_image_url = profileImageUrl;
 		info.meta.description = description.trim() === '' ? null : description;
@@ -216,7 +238,7 @@
 		info.meta = applyToggles(info.meta, toggles);
 		info.access_grants = accessGrants;
 
-		await onSubmit(info);
+		await onSubmit(info, options);
 		// Reset the dirty baseline to the values we just persisted, so
 		// the Save button disappears until the user makes a new edit.
 		// The parent's onSubmit typically navigates after creating, so
@@ -226,6 +248,28 @@
 		hasBeenSaved = true;
 		autoSaving = false;
 		loading = false;
+		return true;
+	};
+
+	/**
+	 * "New Knowledge" in the Knowledge dropdown: persist the assistant (so
+	 * it has a stable id and keeps any unsaved edits), then navigate to the
+	 * normal KB-create flow for the chosen ``type`` (local or a cloud-sync
+	 * provider) with a returnTo back to this assistant's edit page. The KB
+	 * detail page surfaces a "Back to assistant" affordance that returns
+	 * here with ``?selectKb=<id>``, which the edit route attaches.
+	 */
+	const createKnowledgeFlow = async (type: string = 'local') => {
+		if (name.trim() === '') {
+			toast.error($i18n.t('Name your assistant first'));
+			return;
+		}
+		const saved = await submitHandler({ skipNavigate: true });
+		if (!saved) return;
+		const returnTo = `/workspace/models/edit?id=${encodeURIComponent(id)}`;
+		goto(
+			`/workspace/knowledge/create?type=${encodeURIComponent(type)}&returnTo=${encodeURIComponent(returnTo)}`
+		);
 	};
 </script>
 
@@ -296,11 +340,27 @@
 		</div>
 
 		<div>
+			<div class="text-xs font-medium text-gray-500 mb-1">{$i18n.t('Model')}</div>
+			<Selector
+				id="assistant-base-model"
+				placeholder={$i18n.t('Select a model')}
+				className="w-full"
+				triggerClassName="text-sm"
+				items={$models.map((m) => ({ value: m.id, label: m.name, model: m }))}
+				bind:value={baseModelId}
+			/>
+		</div>
+
+		<div>
 			<div class="text-xs font-medium text-gray-500 mb-1">{$i18n.t('Knowledge')}</div>
 			{#if knowledgeHint}
 				<div class="text-xs text-gray-400 mb-2">💡 {knowledgeHint}</div>
 			{/if}
-			<Knowledge bind:selectedItems={knowledge}>
+			<Knowledge
+				bind:selectedItems={knowledge}
+				allowCreate
+				on:create={(e) => createKnowledgeFlow(e.detail)}
+			>
 				<span slot="label"></span>
 			</Knowledge>
 		</div>
@@ -315,7 +375,7 @@
 				<button
 					class="px-4 py-2 text-sm rounded-lg bg-black text-white dark:bg-white dark:text-black disabled:opacity-50"
 					disabled={loading || autoSaving}
-					on:click={submitHandler}
+					on:click={() => submitHandler()}
 				>
 					{loading || autoSaving ? $i18n.t('Saving...') : $i18n.t('Save')}
 				</button>

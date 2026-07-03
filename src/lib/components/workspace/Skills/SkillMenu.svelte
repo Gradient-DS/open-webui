@@ -13,6 +13,7 @@
 	export let editHandler: Function;
 	export let cloneHandler: Function;
 	export let exportHandler: Function;
+	export let exportBundleHandler: Function;
 	export let deleteHandler: Function;
 	export let onClose: Function;
 
@@ -78,6 +79,16 @@
 				>
 					<Download />
 					<div class="flex items-center">{$i18n.t('Export')}</div>
+				</button>
+
+				<button
+					class="select-none flex gap-2 items-center px-3 py-1.5 text-sm cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-xl w-full"
+					on:click={() => {
+						exportBundleHandler();
+					}}
+				>
+					<Download />
+					<div class="flex items-center">{$i18n.t('Export bundle')}</div>
 				</button>
 			{/if}
 

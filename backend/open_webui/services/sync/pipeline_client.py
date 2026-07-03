@@ -20,6 +20,24 @@ from typing import Any, Dict, List, Optional
 import httpx
 
 
+class PipelineUnreachableError(ConnectionError):
+    """Raised when the loader-worker / ingestion pipeline cannot be reached.
+
+    Subclasses ``ConnectionError`` so the existing top-level
+    ``except (ConnectionError, httpx.TransportError)`` handler in
+    ``BaseSyncWorker.sync()`` still catches it (transient → skip cycle,
+    don't stamp ``last_sync_at``, retry next tick). The distinct type lets
+    that handler attribute the failure to the loader-worker rather than the
+    sync source (e.g. Confluence), which has typically already been reached
+    successfully by the time we POST to the loader-worker.
+
+    Only connect/transport-level failures (``httpx.ConnectError`` /
+    ``httpx.TransportError``) are reclassified as this — an
+    ``httpx.HTTPStatusError`` (server reachable, returns 4xx/5xx) is NOT
+    "unreachable" and is left untouched.
+    """
+
+
 class PipelineClient:
     """Thin wrapper around ``httpx.AsyncClient`` for loader-worker RPCs.
 
@@ -67,11 +85,14 @@ class PipelineClient:
             'items': items,
         }
 
+        url = f'{self._base}/tenants/{self._tenant}/jobs'
         async with httpx.AsyncClient(timeout=self._timeout) as client:
-            resp = await client.post(
-                f'{self._base}/tenants/{self._tenant}/jobs',
-                json=payload,
-            )
+            try:
+                resp = await client.post(url, json=payload)
+            except (httpx.ConnectError, httpx.TransportError) as e:
+                raise PipelineUnreachableError(f'loader-worker unreachable at {url}: {e}') from e
+            # raise_for_status() raises HTTPStatusError — server was reached but
+            # erroring; deliberately NOT reclassified as unreachable.
             resp.raise_for_status()
             return resp.json()['job_id']
 
@@ -79,8 +100,12 @@ class PipelineClient:
         if not self._base:
             raise RuntimeError('PipelineClient requires LOADER_WORKER_URL env var')
 
+        url = f'{self._base}/jobs/{job_id}'
         async with httpx.AsyncClient(timeout=self._timeout) as client:
-            resp = await client.get(f'{self._base}/jobs/{job_id}')
+            try:
+                resp = await client.get(url)
+            except (httpx.ConnectError, httpx.TransportError) as e:
+                raise PipelineUnreachableError(f'loader-worker unreachable at {url}: {e}') from e
             resp.raise_for_status()
             return resp.json()
 
@@ -88,7 +113,11 @@ class PipelineClient:
         if not self._base:
             raise RuntimeError('PipelineClient requires LOADER_WORKER_URL env var')
 
+        url = f'{self._base}/jobs/{job_id}/cancel'
         async with httpx.AsyncClient(timeout=self._timeout) as client:
-            resp = await client.post(f'{self._base}/jobs/{job_id}/cancel')
+            try:
+                resp = await client.post(url)
+            except (httpx.ConnectError, httpx.TransportError) as e:
+                raise PipelineUnreachableError(f'loader-worker unreachable at {url}: {e}') from e
             resp.raise_for_status()
             return resp.json()

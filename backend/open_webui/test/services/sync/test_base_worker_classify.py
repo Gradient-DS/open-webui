@@ -10,7 +10,9 @@ structural fix for the "5 extra" re-sync toast.
 from __future__ import annotations
 
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
+
+import pytest
 
 from open_webui.services.sync.base_worker import BaseSyncWorker
 
@@ -75,58 +77,156 @@ def _file_info(item_id: str = 'item-1', cloud_hash: str | None = 'h1') -> dict:
     }
 
 
-def test_classify_added_no_existing_row():
+@pytest.mark.asyncio
+async def test_classify_added_no_existing_row():
     worker = _make_worker()
     with patch(
         'open_webui.services.sync.base_worker.Files.get_file_by_id',
-        return_value=None,
+        new=AsyncMock(return_value=None),
     ):
-        cat, fid = worker._classify_for_submit(_file_info())
+        cat, fid = await worker._classify_for_submit(_file_info())
     assert cat == 'added'
     assert fid == 'stub-item-1'
 
 
-def test_classify_updated_hash_mismatch():
+@pytest.mark.asyncio
+async def test_classify_updated_hash_mismatch():
     worker = _make_worker()
     existing = SimpleNamespace(meta={'cloud_hash': 'old-hash'}, data={'status': 'completed'})
     with patch(
         'open_webui.services.sync.base_worker.Files.get_file_by_id',
-        return_value=existing,
+        new=AsyncMock(return_value=existing),
     ):
-        cat, fid = worker._classify_for_submit(_file_info(cloud_hash='new-hash'))
+        cat, fid = await worker._classify_for_submit(_file_info(cloud_hash='new-hash'))
     assert cat == 'updated'
     assert fid == 'stub-item-1'
 
 
-def test_classify_updated_status_not_completed():
+@pytest.mark.asyncio
+async def test_classify_updated_status_not_completed():
     worker = _make_worker()
     existing = SimpleNamespace(meta={'cloud_hash': 'h1'}, data={'status': 'pending'})
     with patch(
         'open_webui.services.sync.base_worker.Files.get_file_by_id',
-        return_value=existing,
+        new=AsyncMock(return_value=existing),
     ):
-        cat, _ = worker._classify_for_submit(_file_info(cloud_hash='h1'))
+        cat, _ = await worker._classify_for_submit(_file_info(cloud_hash='h1'))
     assert cat == 'updated'
 
 
-def test_classify_unchanged_full_match():
+@pytest.mark.asyncio
+async def test_classify_unchanged_full_match():
     worker = _make_worker()
     existing = SimpleNamespace(meta={'cloud_hash': 'h1'}, data={'status': 'completed'})
     with patch(
         'open_webui.services.sync.base_worker.Files.get_file_by_id',
-        return_value=existing,
+        new=AsyncMock(return_value=existing),
     ):
-        cat, _ = worker._classify_for_submit(_file_info(cloud_hash='h1'))
+        cat, _ = await worker._classify_for_submit(_file_info(cloud_hash='h1'))
     assert cat == 'unchanged'
 
 
-def test_classify_no_cloud_hash_treated_as_updated():
+@pytest.mark.asyncio
+async def test_classify_no_cloud_hash_treated_as_updated():
     """Conservative fallback when the provider didn't surface a hash."""
     worker = _make_worker()
     existing = SimpleNamespace(meta={'cloud_hash': 'h1'}, data={'status': 'completed'})
     with patch(
         'open_webui.services.sync.base_worker.Files.get_file_by_id',
-        return_value=existing,
+        new=AsyncMock(return_value=existing),
     ):
-        cat, _ = worker._classify_for_submit(_file_info(cloud_hash=None))
+        cat, _ = await worker._classify_for_submit(_file_info(cloud_hash=None))
     assert cat == 'updated'
+
+
+# ---------- empty-content guard (expect_nonempty_content) ----------------------------
+#
+# A 'completed' row with empty data['content'] is the residue of base_worker's
+# empty-extraction branch (it marks completed even when no text was extracted).
+# The cloud-hash short-circuit otherwise freezes such a row empty forever. For
+# providers that always render non-empty content (Confluence: title + metadata
+# front-matter for every page), an empty row must re-ingest instead of skip.
+
+
+@pytest.mark.asyncio
+async def test_classify_empty_content_resubmitted_when_nonempty_expected():
+    """expect_nonempty_content=True: completed-but-empty row re-ingests."""
+    worker = _make_worker()
+    worker.expect_nonempty_content = True
+    existing = SimpleNamespace(meta={'cloud_hash': 'h1'}, data={'status': 'completed', 'content': ''})
+    with patch(
+        'open_webui.services.sync.base_worker.Files.get_file_by_id',
+        new=AsyncMock(return_value=existing),
+    ):
+        cat, _ = await worker._classify_for_submit(_file_info(cloud_hash='h1'))
+    assert cat == 'updated'
+
+
+@pytest.mark.asyncio
+async def test_classify_whitespace_content_resubmitted_when_nonempty_expected():
+    """Whitespace-only content is treated the same as empty."""
+    worker = _make_worker()
+    worker.expect_nonempty_content = True
+    existing = SimpleNamespace(meta={'cloud_hash': 'h1'}, data={'status': 'completed', 'content': '   \n'})
+    with patch(
+        'open_webui.services.sync.base_worker.Files.get_file_by_id',
+        new=AsyncMock(return_value=existing),
+    ):
+        cat, _ = await worker._classify_for_submit(_file_info(cloud_hash='h1'))
+    assert cat == 'updated'
+
+
+@pytest.mark.asyncio
+async def test_classify_empty_content_unchanged_when_empty_is_legitimate():
+    """Default (expect_nonempty_content=False): binary-file providers legitimately
+    extract image-only files to empty content — they must stay 'unchanged' so the
+    cloud-hash skip keeps working. Guards against a regression for OneDrive/GDrive."""
+    worker = _make_worker()  # flag defaults False
+    existing = SimpleNamespace(meta={'cloud_hash': 'h1'}, data={'status': 'completed', 'content': ''})
+    with patch(
+        'open_webui.services.sync.base_worker.Files.get_file_by_id',
+        new=AsyncMock(return_value=existing),
+    ):
+        cat, _ = await worker._classify_for_submit(_file_info(cloud_hash='h1'))
+    assert cat == 'unchanged'
+
+
+@pytest.mark.asyncio
+async def test_classify_nonempty_content_unchanged_even_when_nonempty_expected():
+    """The guard only re-submits empty rows — a populated 'completed' row with a
+    matching hash still short-circuits, so the fast path stays fast."""
+    worker = _make_worker()
+    worker.expect_nonempty_content = True
+    existing = SimpleNamespace(
+        meta={'cloud_hash': 'h1'},
+        data={'status': 'completed', 'content': '# Title\n\nbody'},
+    )
+    with patch(
+        'open_webui.services.sync.base_worker.Files.get_file_by_id',
+        new=AsyncMock(return_value=existing),
+    ):
+        cat, _ = await worker._classify_for_submit(_file_info(cloud_hash='h1'))
+    assert cat == 'unchanged'
+
+
+def test_is_fully_ingested_contract():
+    """The shared helper both cloud-hash short-circuits gate on."""
+    worker = _make_worker()
+    # Non-terminal status is never fully ingested.
+    assert worker._is_fully_ingested(SimpleNamespace(data={'status': 'pending'})) is False
+    # completed + flag off → trusted regardless of content (current behavior).
+    assert worker._is_fully_ingested(SimpleNamespace(data={'status': 'completed'})) is True
+    # completed + flag on → empty/whitespace content means not ingested.
+    worker.expect_nonempty_content = True
+    assert worker._is_fully_ingested(SimpleNamespace(data={'status': 'completed', 'content': '  '})) is False
+    assert worker._is_fully_ingested(SimpleNamespace(data={'status': 'completed', 'content': 'x'})) is True
+
+
+def test_confluence_worker_opts_into_nonempty_content_guard():
+    """Confluence renders title + metadata front-matter for every page, so an
+    empty content row is always a failed ingest — it opts into the guard.
+    The base default stays off so binary-file providers are unaffected."""
+    from open_webui.services.confluence.sync_worker import ConfluenceSyncWorker
+
+    assert ConfluenceSyncWorker.expect_nonempty_content is True
+    assert BaseSyncWorker.expect_nonempty_content is False

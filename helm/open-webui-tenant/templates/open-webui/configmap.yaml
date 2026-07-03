@@ -128,10 +128,17 @@ data:
   FEATURE_CHANGELOG: {{ .Values.openWebui.config.featureChangelog | quote }}
   FEATURE_SYSTEM_PROMPT: {{ .Values.openWebui.config.featureSystemPrompt | quote }}
   FEATURE_MODELS: {{ .Values.openWebui.config.featureModels | quote }}
+  FEATURE_MODEL_METERS: {{ .Values.openWebui.config.featureModelMeters | quote }}
   FEATURE_KNOWLEDGE: {{ .Values.openWebui.config.featureKnowledge | quote }}
   FEATURE_PROMPTS: {{ .Values.openWebui.config.featurePrompts | quote }}
   FEATURE_TOOLS: {{ .Values.openWebui.config.featureTools | quote }}
   FEATURE_SKILLS: {{ .Values.openWebui.config.featureSkills | quote }}
+  # Soev skill-bundles feature. FEATURE_SKILL_FILES = simple skills (files/tree/
+  # editing forwarded to the agent). ENABLE_SKILL_EXECUTION = full mode (adds the
+  # scoped-token mint so the agent can run bundled scripts via the skill-exec
+  # sandbox). Pair ENABLE_SKILL_EXECUTION with the agent's skill_execution_enabled.
+  FEATURE_SKILL_FILES: {{ .Values.openWebui.config.featureSkillFiles | quote }}
+  ENABLE_SKILL_EXECUTION: {{ .Values.openWebui.config.enableSkillExecution | quote }}
   FEATURE_BUILTIN_TOOLS: {{ .Values.openWebui.config.featureBuiltinTools | quote }}
   FEATURE_ADMIN_EVALUATIONS: {{ .Values.openWebui.config.featureAdminEvaluations | quote }}
   FEATURE_ADMIN_FUNCTIONS: {{ .Values.openWebui.config.featureAdminFunctions | quote }}
@@ -145,6 +152,7 @@ data:
   FEATURE_TEMPORARY_CHAT: {{ .Values.openWebui.config.featureTemporaryChat | quote }}
   FEATURE_TOOL_SERVERS: {{ .Values.openWebui.config.featureToolServers | quote }}
   FEATURE_TERMINAL_SERVERS: {{ .Values.openWebui.config.featureTerminalServers | quote }}
+  FEATURE_STRICT_DATA_SEPARATION: {{ .Values.openWebui.config.featureStrictDataSeparation | quote }}
 
   # Feedback Reporting (PersistentConfig: env seeds initial value; admin UI wins thereafter)
   ENABLE_FEEDBACK_REPORTING: {{ .Values.openWebui.config.enableFeedbackReporting | quote }}
@@ -220,12 +228,19 @@ data:
   {{- if .Values.openWebui.config.defaultModels }}
   DEFAULT_MODELS: {{ .Values.openWebui.config.defaultModels | quote }}
   {{- end }}
+  {{- if .Values.openWebui.config.modelHosting }}
+  MODEL_HOSTING: {{ .Values.openWebui.config.modelHosting | toJson | quote }}
+  {{- end }}
+  {{- if .Values.openWebui.config.modelProfiles }}
+  MODEL_PROFILES: {{ .Values.openWebui.config.modelProfiles | toJson | quote }}
+  {{- end }}
   ENABLE_FOLDERS: {{ .Values.openWebui.config.enableFolders | quote }}
   USER_PERMISSIONS_FEATURES_FOLDERS: {{ .Values.openWebui.config.userPermissionsFeaturesFolders | quote }}
   ENABLE_CHANNELS: {{ .Values.openWebui.config.enableChannels | quote }}
   USER_PERMISSIONS_FEATURES_CHANNELS: {{ .Values.openWebui.config.userPermissionsFeaturesChannels | quote }}
   ENABLE_COMMUNITY_SHARING: {{ .Values.openWebui.config.enableCommunitySharing | quote }}
   ENABLE_CITATION_RELEVANCE: {{ .Values.openWebui.config.enableCitationRelevance | quote }}
+  ENABLE_CITATION_TEXT_HIGHLIGHT: {{ .Values.openWebui.config.enableCitationTextHighlight | quote }}
   ENABLE_MESSAGE_RATING: {{ .Values.openWebui.config.enableMessageRating | quote }}
   ENABLE_USER_WEBHOOKS: {{ .Values.openWebui.config.enableUserWebhooks | quote }}
   ENABLE_AUTOCOMPLETE_GENERATION: {{ .Values.openWebui.config.enableAutocompleteGeneration | quote }}
@@ -339,7 +354,26 @@ data:
   CONFLUENCE_SHARED_KB_OWNER_ID: {{ .Values.openWebui.config.confluenceSharedKbOwnerId | quote }}
   {{- end }}
 
+  # TOPdesk Integration (REST Knowledge Base API + basic auth)
+  # TOPDESK_APP_PASSWORD is set via the secrets template.
+  ENABLE_TOPDESK_INTEGRATION: {{ .Values.openWebui.config.enableTopdeskIntegration | quote }}
+  {{- if .Values.openWebui.config.topdeskUrl }}
+  TOPDESK_URL: {{ .Values.openWebui.config.topdeskUrl | quote }}
+  {{- end }}
+  {{- if .Values.openWebui.config.topdeskUsername }}
+  TOPDESK_USERNAME: {{ .Values.openWebui.config.topdeskUsername | quote }}
+  {{- end }}
+
+  # TOPdesk Sync
+  ENABLE_TOPDESK_SYNC: {{ .Values.openWebui.config.enableTopdeskSync | quote }}
+  TOPDESK_SYNC_INTERVAL_MINUTES: {{ .Values.openWebui.config.topdeskSyncIntervalMinutes | quote }}
+  TOPDESK_MAX_ITEMS_PER_SYNC: {{ .Values.openWebui.config.topdeskMaxItemsPerSync | quote }}
+  TOPDESK_MAX_ITEM_SIZE_MB: {{ .Values.openWebui.config.topdeskMaxItemSizeMb | quote }}
+  TOPDESK_SYNC_SCOPE: {{ .Values.openWebui.config.topdeskSyncScope | quote }}
+  TOPDESK_KB_API_PATH: {{ .Values.openWebui.config.topdeskKbApiPath | quote }}
+
   KNOWLEDGE_MAX_FILE_COUNT: {{ .Values.openWebui.config.knowledgeMaxFileCount | quote }}
+  SYNC_MAX_JOB_WALL_CLOCK_SECONDS: {{ .Values.openWebui.config.syncMaxJobWallClockSeconds | quote }}
 
   # Shared-services loader-worker (per-tenant). When useSharedLoader=true,
   # cloud-source sync workers submit jobs to the loader-worker pod instead of
@@ -351,6 +385,39 @@ data:
   LOADER_WORKER_URL: {{ .Values.openWebui.config.loaderWorkerUrl | quote }}
   {{- end }}
   TENANT_NAME: {{ .Values.tenant.name | default .Release.Namespace | quote }}
+
+  # Distributed document pipeline (warren). When enabled, KB ingestion (upload +
+  # add-file + reindex + batch) is delegated to the external pipeline instead of
+  # native parse+embed; warren POSTs chunked_text back to this server's /ingest.
+  # PIPELINE_API_KEY is a secret (see deployment.yaml + external-secrets.yaml).
+  DISTRIBUTED_DOC_PIPELINE_ENABLED: {{ .Values.openWebui.config.distributedDocPipelineEnabled | default "false" | quote }}
+  # Also route chat attachments (non-KB uploads → the file-{id} cache) through
+  # warren. Independent of the KB flag above; reuses all the PIPELINE_* config.
+  DISTRIBUTED_DOC_PIPELINE_CHAT_ENABLED: {{ .Values.openWebui.config.distributedDocPipelineChatEnabled | default "false" | quote }}
+  # Also route cloud sync (bulk) through warren. Independent of the KB/chat flags
+  # above; reuses all the PIPELINE_* config.
+  DISTRIBUTED_DOC_PIPELINE_SYNC_ENABLED: {{ .Values.openWebui.config.distributedDocPipelineSyncEnabled | default "false" | quote }}
+  {{- if .Values.openWebui.config.pipelineApiBaseUrl }}
+  PIPELINE_API_BASE_URL: {{ .Values.openWebui.config.pipelineApiBaseUrl | quote }}
+  {{- end }}
+  {{- if .Values.openWebui.config.pipelineIngestCallbackUrl }}
+  PIPELINE_INGEST_CALLBACK_URL: {{ .Values.openWebui.config.pipelineIngestCallbackUrl | quote }}
+  {{- end }}
+  {{- if .Values.openWebui.config.pipelinePresignTtlSeconds }}
+  PIPELINE_PRESIGN_TTL_SECONDS: {{ .Values.openWebui.config.pipelinePresignTtlSeconds | quote }}
+  {{- end }}
+  {{- if .Values.openWebui.config.pipelineChunkSize }}
+  PIPELINE_CHUNK_SIZE: {{ .Values.openWebui.config.pipelineChunkSize | quote }}
+  {{- end }}
+  {{- if .Values.openWebui.config.pipelineChunkOverlap }}
+  PIPELINE_CHUNK_OVERLAP: {{ .Values.openWebui.config.pipelineChunkOverlap | quote }}
+  {{- end }}
+  {{- if .Values.openWebui.config.pipelineReconcileIntervalSeconds }}
+  PIPELINE_RECONCILE_INTERVAL_SECONDS: {{ .Values.openWebui.config.pipelineReconcileIntervalSeconds | quote }}
+  {{- end }}
+  {{- if .Values.openWebui.config.pipelineJobMaxWallClockSeconds }}
+  PIPELINE_JOB_MAX_WALL_CLOCK_SECONDS: {{ .Values.openWebui.config.pipelineJobMaxWallClockSeconds | quote }}
+  {{- end }}
 
   # Email Invites (Microsoft Graph API)
   ENABLE_EMAIL_INVITES: {{ .Values.openWebui.config.enableEmailInvites | quote }}
@@ -369,6 +436,10 @@ data:
   {{- if .Values.openWebui.config.emailInviteHeading }}
   EMAIL_INVITE_HEADING: {{ .Values.openWebui.config.emailInviteHeading | quote }}
   {{- end }}
+
+  # Forgot Password (self-service reset)
+  ENABLE_FORGOT_PASSWORD: {{ .Values.openWebui.config.enableForgotPassword | quote }}
+  PASSWORD_RESET_EXPIRY_MINUTES: {{ .Values.openWebui.config.passwordResetExpiryMinutes | quote }}
 
   BYPASS_MODEL_ACCESS_CONTROL: {{ .Values.openWebui.config.bypassModelAccessControl | quote }}
 

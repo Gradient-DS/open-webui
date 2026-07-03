@@ -9,6 +9,7 @@
 	dayjs.extend(relativeTime);
 
 	import { onMount, getContext, onDestroy, tick } from 'svelte';
+	import { get } from 'svelte/store';
 	const i18n = getContext('i18n');
 
 	import { goto } from '$app/navigation';
@@ -23,12 +24,7 @@
 		socket
 	} from '$lib/stores';
 
-	import {
-		updateFileDataContentById,
-		uploadFile,
-		deleteFileById,
-		getFileById
-	} from '$lib/apis/files';
+	import { uploadFile, deleteFileById } from '$lib/apis/files';
 	import {
 		addFileToKnowledgeById,
 		getKnowledgeById,
@@ -65,6 +61,10 @@
 	import Spinner from '$lib/components/common/Spinner.svelte';
 	import Files from './KnowledgeBase/Files.svelte';
 	import SourceGroupedFiles from './KnowledgeBase/SourceGroupedFiles.svelte';
+	import LazyKnowledgeTree from './KnowledgeBase/LazyKnowledgeTree.svelte';
+	import LazyKnowledgeSearch from './KnowledgeBase/LazyKnowledgeSearch.svelte';
+	import KbSelectionHeader from './KnowledgeBase/KbSelectionHeader.svelte';
+	import { createKbSelection } from './KnowledgeBase/selection';
 	import SyncProgress from './KnowledgeBase/SyncProgress.svelte';
 	import AddFilesPlaceholder from '$lib/components/AddFilesPlaceholder.svelte';
 	import { buildSyncToast } from './utils/syncToast';
@@ -75,7 +75,7 @@
 	import Badge from '$lib/components/common/Badge.svelte';
 
 	import SyncConfirmDialog from '../../common/ConfirmDialog.svelte';
-	import Drawer from '$lib/components/common/Drawer.svelte';
+	import FileItemModal from '$lib/components/common/FileItemModal.svelte';
 	import ChevronLeft from '$lib/components/icons/ChevronLeft.svelte';
 	import LockClosed from '$lib/components/icons/LockClosed.svelte';
 	import OneDrive from '$lib/components/icons/OneDrive.svelte';
@@ -217,6 +217,19 @@
 	$: activeProvider = knowledge?.type ? (CLOUD_PROVIDERS[knowledge.type] ?? null) : null;
 	$: activeState = activeProvider ? cloudSyncState[activeProvider.type] : null;
 
+	// Lazy per-folder tree (Tier 2): render cloud-KB folders from the paginated
+	// /tree endpoint instead of eagerly loading every file. On by default for
+	// cloud KBs that expose folder sources; set localStorage.lazyKnowledgeTree
+	// ='false' to fall back to the load-all SourceGroupedFiles tree (no redeploy).
+	const lazyTreeFlag =
+		typeof localStorage !== 'undefined'
+			? localStorage.getItem('lazyKnowledgeTree') !== 'false'
+			: true;
+	$: lazyTreeActive =
+		lazyTreeFlag &&
+		!!activeProvider &&
+		(knowledge?.meta?.[activeProvider.metaKey]?.sources?.length ?? 0) > 0;
+
 	let largeScreen = true;
 
 	let pane;
@@ -249,9 +262,14 @@
 	let knowledge: Knowledge | null = null;
 	let knowledgeId = null;
 
-	let selectedFileId = null;
+	// Present only in the "+ Add knowledge" builder flow: a path back to
+	// the assistant being edited. When set, a "Back to assistant" button
+	// returns there with ?selectKb=<this KB id> so it gets attached.
+	$: returnTo = $page.url.searchParams.get('returnTo');
+
+	let selectedFileId: string | null = null;
 	let selectedFile = null;
-	let selectedFileContent = '';
+	let showFilePreview = false;
 
 	let inputFiles = null;
 
@@ -270,12 +288,35 @@
 	let queryDebounceActive = false;
 	let fetchId = 0;
 
+	// Bumped on every mutation that init() handles (delete / remove-source /
+	// sync completion / content edit) so LazyKnowledgeTree re-fetches what's open.
+	let treeRefresh = 0;
+
+	// Multiselect (bulk delete) model — shared across all three list views.
+	const selection = createKbSelection();
+	const {
+		count: bulkCount,
+		breakdown: bulkBreakdown,
+		allSelected: bulkAllSelected,
+		indeterminate: bulkIndeterminate
+	} = selection;
+	let showBulkRemoveConfirm = false;
+
+	// Clear the selection when the search query changes — the filtered / lazy-search
+	// view has no checkboxes, so a lingering selection would strand there.
+	let lastSelQuery = '';
+	$: if (query !== lastSelQuery) {
+		lastSelQuery = query;
+		selection.clear();
+	}
+
 	const reset = () => {
 		currentPage = 1;
 	};
 
 	const init = async () => {
 		reset();
+		treeRefresh += 1;
 		await getItemsPage();
 	};
 
@@ -311,39 +352,74 @@
 		const cloudLimit = isCloudKb
 			? $config?.integration_providers?.[knowledge.type]?.max_files_per_kb ||
 				$config?.features?.knowledge_max_file_count ||
-				2000
+				10000
 			: null;
-		const res = await searchKnowledgeFilesById(
-			localStorage.token,
-			knowledge.id,
-			query,
-			viewOption,
-			sortKey,
-			direction,
-			currentPage,
-			cloudLimit
-		).catch(() => {
-			return null;
-		});
+		// In lazy mode the tree (no query) and the flat search (query) components
+		// both self-fetch — so here we only need a cheap, query-independent KB
+		// total (limit=1, metadata-only, no de-TOAST) to keep the quota header
+		// (fileItemsTotal) accurate. Skips the eager full-file load entirely.
+		const res = lazyTreeActive
+			? await searchKnowledgeFilesById(
+					localStorage.token,
+					knowledge.id,
+					'',
+					null,
+					null,
+					null,
+					1,
+					1,
+					true
+				).catch(() => null)
+			: await searchKnowledgeFilesById(
+					localStorage.token,
+					knowledge.id,
+					query,
+					viewOption,
+					sortKey,
+					direction,
+					currentPage,
+					cloudLimit,
+					true
+				).catch(() => null);
 
 		if (currentFetchId !== fetchId) return; // Stale response, discard
 
 		if (res) {
-			fileItems = res.items;
+			// In lazy mode keep fileItems non-null (so the render guard passes) but
+			// empty — the tree/search components own rendering and ignore this array.
+			fileItems = lazyTreeActive ? [] : res.items;
 			fileItemsTotal = res.total;
 		}
 		queryDebounceActive = false;
 		return res;
 	};
 
-	const fileSelectHandler = async (file) => {
-		try {
-			selectedFile = file;
-			selectedFileContent = selectedFile?.data?.content || '';
-		} catch (e) {
-			toast.error($i18n.t('Failed to load file content.'));
+	// Open the read-only file preview popup. FileItemModal fetches its own
+	// content; `file` may come from the flat list (top-level name/size + meta)
+	// or the lazy tree ({ id, name, meta: { name, size } }).
+	const openFilePreview = (file) => {
+		if (!file) {
+			selectedFile = null;
+			showFilePreview = false;
+			return;
 		}
+
+		selectedFile = {
+			id: file.id,
+			name: file?.meta?.name ?? file?.name,
+			type: 'file',
+			size: file?.meta?.size ?? file?.size,
+			meta: file?.meta ?? { name: file?.name, size: file?.size }
+		};
+		showFilePreview = true;
 	};
+
+	// Closing the preview (via the modal's own close button) also clears the
+	// row selection highlight in the file list.
+	$: if (!showFilePreview && selectedFileId !== null) {
+		selectedFileId = null;
+		selectedFile = null;
+	}
 
 	const createFileFromText = (name, content) => {
 		const blob = new Blob([content], { type: 'text/plain' });
@@ -465,6 +541,19 @@
 			return;
 		}
 
+		// Reject disallowed file types client-side, before uploading. The server
+		// allow-list only rejects after the whole file has been received, so a
+		// large disallowed file (e.g. a .dmg) would otherwise upload in full
+		// before failing. An empty extension passes through, matching the backend
+		// gate (extension-less docs are decided server-side by content type).
+		const allowedExtensions = ($config?.file?.allowed_extensions ?? []).filter((ext) => ext);
+		const dotIndex = file.name.lastIndexOf('.');
+		const extension = dotIndex > 0 ? file.name.slice(dotIndex + 1).toLowerCase() : '';
+		if (extension && allowedExtensions.length > 0 && !allowedExtensions.includes(extension)) {
+			toast.error($i18n.t('File type {{extension}} is not allowed.', { extension }));
+			return;
+		}
+
 		fileItems = [fileItem, ...(fileItems ?? [])];
 		try {
 			let metadata = {
@@ -504,9 +593,16 @@
 				}
 			} else {
 				toast.error($i18n.t('Failed to upload file.'));
+				// The upload call errored (e.g. allow-list 400) so no real file id
+				// was assigned and no status poller was armed. Remove the optimistic
+				// 'uploading' row (keyed by itemId — it never got an id) or it spins
+				// forever until a page reload. Mirrors the uploadedFile.error branch
+				// above and uploadWeb's cleanup.
+				fileItems = fileItems.filter((item) => item.itemId !== fileItem.itemId);
 			}
 		} catch (e) {
 			toast.error(`${e}`);
+			fileItems = fileItems.filter((item) => item.itemId !== fileItem.itemId);
 		}
 	};
 
@@ -855,9 +951,17 @@
 			pollCloudSyncStatus(provider);
 		} catch (error) {
 			console.error(`${provider.label} sync error:`, error);
+			const rawError = error instanceof Error ? error.message : String(error);
+			// Translate known OneDrive host-derivation errors via static keys (so they
+			// stay i18n-discoverable); fall back to the raw message for everything else.
+			const errorDetail =
+				rawError === 'No OneDrive found for your account.'
+					? $i18n.t('No OneDrive found for your account.')
+					: rawError === 'Could not connect to OneDrive to determine your location.'
+						? $i18n.t('Could not connect to OneDrive to determine your location.')
+						: rawError;
 			toast.error(
-				$i18n.t('Failed to sync from {{label}}: ', { label: provider.label }) +
-					(error instanceof Error ? error.message : String(error))
+				$i18n.t('Failed to sync from {{label}}: ', { label: provider.label }) + errorDetail
 			);
 			state.isSyncing = false;
 			cloudSyncState = cloudSyncState;
@@ -1068,9 +1172,7 @@
 		// translatable, so we omit it from the toast. The full text is
 		// preserved server-side in ``last_result.failed_files`` for
 		// operator debugging.
-		const lines = filesToShow.map(
-			(f) => `- ${f.filename}: ${getErrorTypeMessage(f.error_type)}`
-		);
+		const lines = filesToShow.map((f) => `- ${f.filename}: ${getErrorTypeMessage(f.error_type)}`);
 
 		if (remaining > 0) {
 			lines.push($i18n.t('and {{COUNT}} more', { COUNT: remaining }));
@@ -1475,6 +1577,12 @@
 
 		if (data.status === 'completed') {
 			fileItems[idx].status = 'uploaded';
+			// A completed file can still carry a warning (e.g. warren parsed zero
+			// chunks — a scanned/no-text PDF). It's kept as a member but flagged so
+			// the list shows a warning triangle; mirrors meta.warning on reload.
+			if (data.error) {
+				fileItems[idx].warning = data.error;
+			}
 			// Backend already linked the file to the KB during upload (see
 			// process_uploaded_file in routers/files.py — Phase 2 of the
 			// 2026-05-25 plan). Re-invoking addFileHandler here would call
@@ -1538,42 +1646,47 @@
 		}
 	};
 
+	// Bulk remove: replays each selected item's own removal (file-remove or
+	// remove-source) without per-item toast/init, then refreshes once.
+	const bulkRemoveHandler = async () => {
+		const items = [...get(selection.selected).values()];
+		if (items.length === 0) return;
+
+		let ok = 0;
+		let removedSource = false;
+		for (const item of items) {
+			try {
+				if (item.kind === 'file') {
+					await removeFileFromKnowledgeById(localStorage.token, id, item.fileId);
+					ok++;
+				} else if (activeProvider) {
+					await activeProvider.api.removeSource(localStorage.token, knowledge.id, item.itemId);
+					removedSource = true;
+					ok++;
+				}
+			} catch (e) {
+				console.error('Bulk remove failed for', item.key, e);
+			}
+		}
+
+		toast[ok > 0 ? 'success' : 'error'](
+			$i18n.t('Removed {{ok}} of {{total}} items', { ok, total: items.length })
+		);
+
+		selection.clear();
+
+		if (removedSource) {
+			const res = await getKnowledgeById(localStorage.token, id);
+			if (res) {
+				knowledge = res;
+			}
+		}
+		await init();
+	};
+
 	let debounceTimeout = null;
 	let mediaQuery;
 	let dragged = false;
-	let isSaving = false;
-
-	const updateFileContentHandler = async () => {
-		if (isSaving) {
-			console.log('Save operation already in progress, skipping...');
-			return;
-		}
-
-		isSaving = true;
-
-		try {
-			const res = await updateFileDataContentById(
-				localStorage.token,
-				selectedFile.id,
-				selectedFileContent
-			).catch((e) => {
-				toast.error(`${e}`);
-				return null;
-			});
-
-			if (res) {
-				toast.success($i18n.t('File content updated successfully.'));
-
-				selectedFileId = null;
-				selectedFile = null;
-				selectedFileContent = '';
-
-				await init();
-			}
-		} finally {
-			isSaving = false;
-		}
-	};
 
 	const changeDebounceHandler = () => {
 		console.log('debounce');
@@ -1809,6 +1922,15 @@
 	};
 </script>
 
+<svelte:window
+	on:keydown={(e) => {
+		if (e.key === 'Escape' && $bulkCount > 0) {
+			selection.clear();
+		}
+	}}
+	on:pointerup={() => selection.endDrag()}
+/>
+
 <FilesOverlay show={dragged} />
 <SyncConfirmDialog
 	bind:show={showSyncConfirmModal}
@@ -1831,6 +1953,23 @@
 		if (activeProvider) {
 			cancelCloudSyncHandler(activeProvider);
 		}
+	}}
+/>
+
+<SyncConfirmDialog
+	bind:show={showBulkRemoveConfirm}
+	title={$bulkBreakdown.sources > 0
+		? $i18n.t('Delete {{fileCount}} file(s) and {{sourceCount}} source(s)?', {
+				fileCount: $bulkBreakdown.totalFiles,
+				sourceCount: $bulkBreakdown.sources
+			})
+		: $i18n.t('Delete {{count}} files?', { count: $bulkBreakdown.totalFiles })}
+	message={$bulkBreakdown.sources > 0
+		? $i18n.t('Removing a source stops its sync and deletes all of its files.')
+		: $i18n.t('This will remove the selected files from this knowledge base.')}
+	confirmLabel={$i18n.t('Delete')}
+	on:confirm={() => {
+		bulkRemoveHandler();
 	}}
 />
 
@@ -1927,6 +2066,18 @@
 							/>
 
 							<div class="shrink-0 mr-2.5 flex items-center gap-2">
+								{#if returnTo}
+									<button
+										class="px-3 py-1 text-sm rounded-full bg-black text-white dark:bg-white dark:text-black font-medium shrink-0"
+										type="button"
+										on:click={() =>
+											goto(
+												`${returnTo}${returnTo.includes('?') ? '&' : '?'}selectKb=${knowledge?.id}`
+											)}
+									>
+										{$i18n.t('Back to assistant')}
+									</button>
+								{/if}
 								{#if activeProvider}
 									<Badge type="info" content={$i18n.t(activeProvider.label)} />
 								{:else if $config?.integration_providers?.[knowledge?.type]}
@@ -2112,6 +2263,12 @@
 							<div class="text-left text-xs w-full text-gray-500">
 								{$i18n.t('Read-only Confluence knowledge base managed by administrators.')}
 							</div>
+						{:else if knowledge?.meta?.topdesk_sync?.shared}
+							<!-- The shared TOPdesk KB is system-managed — same fixed,
+							     localized description treatment as Confluence. -->
+							<div class="text-left text-xs w-full text-gray-500">
+								{$i18n.t('Read-only TOPdesk knowledge base managed by administrators.')}
+							</div>
 						{:else}
 							<input
 								type="text"
@@ -2260,7 +2417,65 @@
 					<div class="flex-1 flex">
 						<div class=" flex flex-col w-full space-x-2 rounded-lg h-full">
 							<div class="w-full h-full flex flex-col min-h-0">
-								{#if fileItems.length > 0}
+								{#if knowledge?.write_access && !(lazyTreeActive && query) && (lazyTreeActive || (fileItems && fileItems.length > 0))}
+									<div class="pb-1.5 shrink-0">
+										<KbSelectionHeader
+											count={$bulkCount}
+											allSelected={$bulkAllSelected}
+											indeterminate={$bulkIndeterminate}
+											onToggleSelectAll={() => selection.toggleSelectAll()}
+											onDelete={() => (showBulkRemoveConfirm = true)}
+										/>
+									</div>
+								{/if}
+								{#if lazyTreeActive && !query}
+									<div class=" flex overflow-y-auto h-full w-full scrollbar-hidden text-xs">
+										<LazyKnowledgeTree
+											{knowledge}
+											{selectedFileId}
+											isSyncing={activeState?.isSyncing ?? false}
+											refreshSignal={treeRefresh}
+											onClick={(file) => {
+												selectedFileId = file.id;
+												openFilePreview({
+													id: file.id,
+													name: file.name,
+													meta: { name: file.name, size: file.size }
+												});
+											}}
+											onRemoveSource={(itemId, sourceName) => {
+												selectedFileId = null;
+												selectedFile = null;
+												// lazyTreeActive guarantees activeProvider is set; guard keeps TS happy.
+												if (activeProvider) {
+													removeCloudSourceHandler(activeProvider, itemId, sourceName);
+												}
+											}}
+											onDelete={(fileId) => {
+												selectedFileId = null;
+												selectedFile = null;
+												deleteFileHandler(fileId);
+											}}
+											selection={knowledge?.write_access ? selection : null}
+										/>
+									</div>
+								{:else if lazyTreeActive && query}
+									<div class=" flex overflow-y-auto h-full w-full scrollbar-hidden text-xs">
+										<LazyKnowledgeSearch
+											{knowledge}
+											{query}
+											{selectedFileId}
+											onClick={(file) => {
+												selectedFileId = file.id;
+												openFilePreview({
+													id: file.id,
+													name: file.name,
+													meta: { name: file.name, size: file.size }
+												});
+											}}
+										/>
+									</div>
+								{:else if fileItems.length > 0}
 									<div class=" flex overflow-y-auto h-full w-full scrollbar-hidden text-xs">
 										{#if activeProvider && knowledge?.meta?.[activeProvider.metaKey]?.sources?.length}
 											<SourceGroupedFiles
@@ -2276,7 +2491,7 @@
 													if (fileItems) {
 														const file = fileItems.find((file) => file.id === selectedFileId);
 														if (file) {
-															fileSelectHandler(file);
+															openFilePreview(file);
 														} else {
 															selectedFile = null;
 														}
@@ -2292,6 +2507,7 @@
 													selectedFile = null;
 													deleteFileHandler(fileId);
 												}}
+												selection={knowledge?.write_access ? selection : null}
 											/>
 										{:else}
 											<Files
@@ -2304,7 +2520,7 @@
 													if (fileItems) {
 														const file = fileItems.find((file) => file.id === selectedFileId);
 														if (file) {
-															fileSelectHandler(file);
+															openFilePreview(file);
 														} else {
 															selectedFile = null;
 														}
@@ -2316,6 +2532,7 @@
 
 													deleteFileHandler(fileId);
 												}}
+												selection={knowledge?.write_access ? selection : null}
 											/>
 										{/if}
 									</div>
@@ -2367,67 +2584,7 @@
 						</div>
 					</div>
 
-					{#if selectedFileId !== null}
-						<Drawer
-							className="h-full"
-							show={selectedFileId !== null}
-							onClose={() => {
-								selectedFileId = null;
-								selectedFile = null;
-							}}
-						>
-							<div class="flex flex-col justify-start h-full max-h-full">
-								<div class=" flex flex-col w-full h-full max-h-full">
-									<div class="shrink-0 flex items-center p-2">
-										<div class="mr-2">
-											<button
-												class="w-full text-left text-sm p-1.5 rounded-lg dark:text-gray-300 dark:hover:text-white hover:bg-black/5 dark:hover:bg-gray-850"
-												aria-label={$i18n.t('Close')}
-												on:click={() => {
-													selectedFileId = null;
-													selectedFile = null;
-												}}
-											>
-												<ChevronLeft strokeWidth="2.5" />
-											</button>
-										</div>
-										<div class=" flex-1 text-lg line-clamp-1">
-											{selectedFile?.meta?.name}
-										</div>
-
-										{#if knowledge?.write_access}
-											<div>
-												<button
-													class="flex self-center w-fit text-sm py-1 px-2.5 dark:text-gray-300 dark:hover:text-white hover:bg-black/5 dark:hover:bg-white/5 rounded-lg disabled:opacity-50 disabled:cursor-not-allowed"
-													disabled={isSaving}
-													on:click={() => {
-														updateFileContentHandler();
-													}}
-												>
-													{$i18n.t('Save')}
-													{#if isSaving}
-														<div class="ml-2 self-center">
-															<Spinner />
-														</div>
-													{/if}
-												</button>
-											</div>
-										{/if}
-									</div>
-
-									{#key selectedFile.id}
-										<textarea
-											class="w-full h-full text-sm outline-none resize-none px-3 py-2"
-											bind:value={selectedFileContent}
-											disabled={!knowledge?.write_access}
-											aria-label={$i18n.t('File content')}
-											placeholder={$i18n.t('Add content here')}
-										/>
-									{/key}
-								</div>
-							</div>
-						</Drawer>
-					{/if}
+					<FileItemModal bind:show={showFilePreview} item={selectedFile} edit={false} />
 				</div>
 			{/if}
 		</div>

@@ -14,10 +14,21 @@
 		getSkillItems,
 		exportSkills,
 		createNewSkill,
+		createSkillFile,
+		createSkillFileInline,
+		getSkillFileList,
+		getSkillFileContentBlob,
 		deleteSkillById,
 		toggleSkillById
 	} from '$lib/apis/skills';
-	import { capitalizeFirstLetter, parseFrontmatter, formatSkillName } from '$lib/utils';
+	import { capitalizeFirstLetter, parseFrontmatter, formatSkillName, slugify } from '$lib/utils';
+	import { uploadFile } from '$lib/apis/files';
+	import {
+		parseSkillBundle,
+		buildSkillBundle,
+		isTextPath,
+		findMissingSkillFiles
+	} from '$lib/utils/skills/bundle';
 	import TagInput from '$lib/components/common/Tags/TagInput.svelte';
 
 	import Tooltip from '../common/Tooltip.svelte';
@@ -123,6 +134,117 @@
 		}
 	};
 
+	const importSkillBundle = async (file: File) => {
+		let parsed;
+		try {
+			parsed = await parseSkillBundle(file);
+		} catch (e) {
+			toast.error($i18n.t('Not a valid skill bundle (no SKILL.md).'));
+			return;
+		}
+
+		// Non-blocking guardrail: if the SKILL.md references bundle files (e.g.
+		// assets/template.docx) that aren't in the bundle, the skill will fail at
+		// run time with "cannot stat ...". Warn but still import.
+		const missingFiles = findMissingSkillFiles(parsed.skillMd, parsed.files);
+		if (missingFiles.length) {
+			toast.warning(
+				$i18n.t('SKILL.md references files not in the bundle: {{paths}}', {
+					paths: missingFiles.join(', ')
+				})
+			);
+		}
+
+		const fm = parseFrontmatter(parsed.skillMd) as { name?: string; description?: string };
+		const baseName = file.name.replace(/\.skill$/, '');
+		const name = formatSkillName(fm.name || baseName);
+
+		let created;
+		try {
+			created = await createNewSkill(localStorage.token, {
+				id: slugify(name),
+				name,
+				description: fm.description || '',
+				content: parsed.skillMd,
+				is_active: false,
+				meta: { tags: [] },
+				access_grants: []
+			});
+		} catch (e) {
+			toast.error(`${e}`);
+			return;
+		}
+
+		for (const bf of parsed.files) {
+			try {
+				if (isTextPath(bf.path)) {
+					const text = await bf.blob.text();
+					await createSkillFileInline(localStorage.token, created.id, {
+						path: bf.path,
+						content: text
+					});
+				} else {
+					const filename = bf.path.split('/').pop() || bf.path;
+					const uploaded = await uploadFile(
+						localStorage.token,
+						new File([bf.blob], filename),
+						null,
+						false
+					);
+					await createSkillFile(localStorage.token, created.id, {
+						path: bf.path,
+						file_id: uploaded.id
+					});
+				}
+			} catch (e) {
+				toast.error($i18n.t('Failed to import file: {{path}}', { path: bf.path }));
+			}
+		}
+
+		toast.success($i18n.t('Skill imported successfully'));
+		page = 1;
+		loadSkillItems();
+		_skills.set(await getSkills(localStorage.token));
+	};
+
+	const exportBundleHandler = async (skill) => {
+		const _skill = await getSkillById(localStorage.token, skill.id).catch((error) => {
+			toast.error(`${error}`);
+			return null;
+		});
+		if (!_skill) return;
+
+		// The file-list route returns at most the first page (no pagination param),
+		// so a skill with more files than that can only be partially exported. Warn
+		// loudly rather than silently dropping the remainder.
+		const res = await getSkillFileList(localStorage.token, _skill.id).catch(() => null);
+		const items = res?.items ?? [];
+		const total = res?.total ?? items.length;
+		if (total > items.length) {
+			toast.warning(
+				$i18n.t('Only the first {{count}} of {{total}} files were exported.', {
+					count: items.length,
+					total
+				})
+			);
+		}
+
+		const bundleFiles = [];
+		for (const item of items) {
+			try {
+				const blob = await getSkillFileContentBlob(localStorage.token, _skill.id, item.path);
+				bundleFiles.push({ path: item.path, blob });
+			} catch (e) {
+				toast.error($i18n.t('Failed to export file: {{path}}', { path: item.path }));
+			}
+		}
+
+		// Wrap the bundle in a <slug>/ directory (the layout Claude produces and
+		// expects), and name the file by slug so it has no spaces/capitals.
+		const blob = await buildSkillBundle(_skill.content || '', bundleFiles, _skill.id);
+		saveAs(blob, `${_skill.id}.skill`);
+	};
+
 	const deleteHandler = async (skill) => {
 		const res = await deleteSkillById(localStorage.token, skill.id).catch((error) => {
 			toast.error(`${error}`);
@@ -199,7 +321,7 @@
 					bind:this={importInputElement}
 					bind:files={importFiles}
 					type="file"
-					accept=".md,.json"
+					accept=".md,.json,.skill"
 					hidden
 					on:change={() => {
 						if (importFiles && importFiles.length > 0) {
@@ -232,6 +354,8 @@
 									}
 								};
 								reader.readAsText(file);
+							} else if (ext === 'skill') {
+								importSkillBundle(file);
 							} else {
 								// Markdown import: parse frontmatter and open in editor
 								const reader = new FileReader();
@@ -473,6 +597,9 @@
 											}}
 											exportHandler={() => {
 												exportHandler(skill);
+											}}
+											exportBundleHandler={() => {
+												exportBundleHandler(skill);
 											}}
 											deleteHandler={async () => {
 												selectedSkill = skill;

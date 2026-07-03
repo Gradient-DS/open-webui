@@ -43,21 +43,19 @@ def fake_request():
 def _patch_knowledges(monkeypatch, *, kbs, suspended_ids=None, owned_kbs=None):
     suspended = set(suspended_ids or [])
     owned = list(owned_kbs) if owned_kbs is not None else []
-    monkeypatch.setattr(
-        agent_search.Knowledges,
-        'get_knowledge_bases_by_user_id',
-        lambda user_id, permission='read', db=None: kbs,
-    )
-    monkeypatch.setattr(
-        agent_search.Knowledges,
-        'get_knowledge_items_by_user_id',
-        lambda user_id, db=None: owned,
-    )
-    monkeypatch.setattr(
-        agent_search.Knowledges,
-        'is_suspended',
-        lambda kb_id: kb_id in suspended,
-    )
+
+    async def _get_kbs(user_id, permission='read', db=None):
+        return kbs
+
+    async def _get_owned(user_id, db=None):
+        return owned
+
+    async def _is_suspended(kb_id):
+        return kb_id in suspended
+
+    monkeypatch.setattr(agent_search.Knowledges, 'get_knowledge_bases_by_user_id', _get_kbs)
+    monkeypatch.setattr(agent_search.Knowledges, 'get_knowledge_items_by_user_id', _get_owned)
+    monkeypatch.setattr(agent_search.Knowledges, 'is_suspended', _is_suspended)
 
 
 def _qr(distances, documents, metadatas):
@@ -226,7 +224,8 @@ def _kb_with_meta(kb_id: str, *, name: str, description: str = '', owner_id: str
     return kb
 
 
-def test_resolve_accessible_kbs_returns_sanitised_collection_names(monkeypatch, fake_user):
+@pytest.mark.asyncio
+async def test_resolve_accessible_kbs_returns_sanitised_collection_names(monkeypatch, fake_user):
     _patch_knowledges(
         monkeypatch,
         kbs=[
@@ -236,7 +235,7 @@ def test_resolve_accessible_kbs_returns_sanitised_collection_names(monkeypatch, 
     )
     _patch_sanitiser(monkeypatch)
 
-    payload = agent_search.resolve_accessible_kbs(fake_user)
+    payload = await agent_search.resolve_accessible_kbs(fake_user)
 
     assert payload['user_id'] == fake_user.id
     assert payload['kb_index_collection_name'] == 'Knowledge_bases'
@@ -247,7 +246,8 @@ def test_resolve_accessible_kbs_returns_sanitised_collection_names(monkeypatch, 
     assert payload['kbs'][1]['description'] == ''
 
 
-def test_resolve_accessible_kbs_drops_suspended(monkeypatch, fake_user):
+@pytest.mark.asyncio
+async def test_resolve_accessible_kbs_drops_suspended(monkeypatch, fake_user):
     _patch_knowledges(
         monkeypatch,
         kbs=[
@@ -258,11 +258,12 @@ def test_resolve_accessible_kbs_drops_suspended(monkeypatch, fake_user):
     )
     _patch_sanitiser(monkeypatch)
 
-    payload = agent_search.resolve_accessible_kbs(fake_user)
+    payload = await agent_search.resolve_accessible_kbs(fake_user)
     assert [kb['id'] for kb in payload['kbs']] == ['kb-active']
 
 
-def test_resolve_accessible_kbs_filters_by_kb_ids_subset(monkeypatch, fake_user):
+@pytest.mark.asyncio
+async def test_resolve_accessible_kbs_filters_by_kb_ids_subset(monkeypatch, fake_user):
     _patch_knowledges(
         monkeypatch,
         kbs=[
@@ -273,11 +274,12 @@ def test_resolve_accessible_kbs_filters_by_kb_ids_subset(monkeypatch, fake_user)
     )
     _patch_sanitiser(monkeypatch)
 
-    payload = agent_search.resolve_accessible_kbs(fake_user, kb_ids=['kb-1', 'kb-3'])
+    payload = await agent_search.resolve_accessible_kbs(fake_user, kb_ids=['kb-1', 'kb-3'])
     assert [kb['id'] for kb in payload['kbs']] == ['kb-1', 'kb-3']
 
 
-def test_resolve_accessible_kbs_falls_back_when_sanitiser_missing(monkeypatch, fake_user):
+@pytest.mark.asyncio
+async def test_resolve_accessible_kbs_falls_back_when_sanitiser_missing(monkeypatch, fake_user):
     _patch_knowledges(monkeypatch, kbs=[_kb_with_meta('abc-123', name='X')])
 
     class _NoSanitise:
@@ -285,13 +287,14 @@ def test_resolve_accessible_kbs_falls_back_when_sanitiser_missing(monkeypatch, f
 
     monkeypatch.setattr(agent_search, 'VECTOR_DB_CLIENT', _NoSanitise())
 
-    payload = agent_search.resolve_accessible_kbs(fake_user)
+    payload = await agent_search.resolve_accessible_kbs(fake_user)
     # No sanitiser → pass-through.
     assert payload['kbs'][0]['collection_name'] == 'abc-123'
     assert payload['kb_index_collection_name'] == 'knowledge-bases'
 
 
-def test_owner_sees_owned_kb_even_when_grants_path_returns_empty(monkeypatch, fake_user):
+@pytest.mark.asyncio
+async def test_owner_sees_owned_kb_even_when_grants_path_returns_empty(monkeypatch, fake_user):
     """Defensive ownership union: regression for the kbs:null observation
     where ``get_knowledge_bases_by_user_id`` returned empty for a KB owner.
     Ownership must always be visible regardless of grant-path state.
@@ -300,13 +303,14 @@ def test_owner_sees_owned_kb_even_when_grants_path_returns_empty(monkeypatch, fa
     _patch_knowledges(monkeypatch, kbs=[], owned_kbs=[owned])
     _patch_sanitiser(monkeypatch)
 
-    payload = agent_search.resolve_accessible_kbs(fake_user)
+    payload = await agent_search.resolve_accessible_kbs(fake_user)
 
     ids = [kb['id'] for kb in payload['kbs']]
     assert 'kb-owned' in ids
 
 
-def test_owner_kb_present_via_both_paths_is_not_duplicated(monkeypatch, fake_user):
+@pytest.mark.asyncio
+async def test_owner_kb_present_via_both_paths_is_not_duplicated(monkeypatch, fake_user):
     """Dedup: a KB returned by both the grant pass and the ownership pass
     appears exactly once in the resolved set.
     """
@@ -314,7 +318,7 @@ def test_owner_kb_present_via_both_paths_is_not_duplicated(monkeypatch, fake_use
     _patch_knowledges(monkeypatch, kbs=[owned], owned_kbs=[owned])
     _patch_sanitiser(monkeypatch)
 
-    payload = agent_search.resolve_accessible_kbs(fake_user)
+    payload = await agent_search.resolve_accessible_kbs(fake_user)
 
     ids = [kb['id'] for kb in payload['kbs']]
     assert ids.count('kb-owned') == 1

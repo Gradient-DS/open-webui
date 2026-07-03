@@ -53,12 +53,22 @@
 
 	export let topPadding = false;
 	export let bottomPadding = false;
+	// [Gradient] Opt-in extra top spacing for the conversation list so the
+	// first message clears the sticky navbar's fade gradient when scrolled
+	// fully to the top. Only the main chat view (Chat.svelte) sets this; other
+	// callers (search/menu previews, channels, shared chats) keep the default
+	// compact spacing, and the empty-state placeholder is unaffected.
+	export let topSpacing = false;
 	export let autoScroll;
 
 	export let onSelect = (e) => {};
 
-	export let messagesCount: number | null = 20;
+	export let messagesCount: number | null = 8;
 	let messagesLoading = false;
+
+	onDestroy(() => {
+		cancelAnimationFrame(pendingRebuild);
+	});
 
 	const loadMoreMessages = async () => {
 		// scroll slightly down to disable continuous loading
@@ -66,7 +76,8 @@
 		element.scrollTop = element.scrollTop + 100;
 
 		messagesLoading = true;
-		messagesCount += 20;
+		messagesCount += 8;
+
 		buildMessages();
 
 		await tick();
@@ -135,17 +146,48 @@
 
 	const scrollToBottom = () => {
 		const element = document.getElementById('messages-container');
-		element.scrollTop = element.scrollHeight;
+		if (element) {
+			element.scrollTop = element.scrollHeight;
+
+			// Follow-up scroll to account for content-visibility: auto re-layouts
+			requestAnimationFrame(() => {
+				if (element) {
+					element.scrollTop = element.scrollHeight;
+				}
+			});
+		}
+	};
+
+	export const scrollToTop = async () => {
+		messagesCount = null;
+		buildMessages();
+		await tick();
+		if (messages.length > 0) {
+			const firstMessageEl = document.getElementById(`message-${messages[0].id}`);
+			if (firstMessageEl) {
+				firstMessageEl.scrollIntoView({ behavior: 'smooth', block: 'start' });
+			}
+		}
 	};
 
 	const updateChat = async () => {
 		if (!$temporaryChatEnabled) {
 			history = history;
 			await tick();
-			await updateChatById(localStorage.token, chatId, {
+			const res = await updateChatById(localStorage.token, chatId, {
 				history: history,
 				messages: messages
 			});
+
+			// Refresh local message content from backend (e.g. re-derived via serialize_output)
+			if (res?.chat?.history?.messages) {
+				for (const [id, msg] of Object.entries(res.chat.history.messages)) {
+					if (history.messages[id] && (msg as any).content) {
+						history.messages[id].content = (msg as any).content;
+					}
+				}
+				history = history;
+			}
 
 			currentChatPage.set(1);
 			await chats.set(await getChatList(localStorage.token, $currentChatPage));
@@ -300,7 +342,7 @@
 		await updateChat();
 	};
 
-	const editMessage = async (messageId, { content, files }, submit = true) => {
+	const editMessage = async (messageId, { content, files, output = undefined }, submit = true) => {
 		if ((selectedModels ?? []).filter((id) => id).length === 0) {
 			toast.error($i18n.t('Model not selected'));
 			return;
@@ -344,7 +386,7 @@
 			}
 		} else {
 			if (submit) {
-				// New response message
+				// New response message (Save As Copy)
 				const responseMessageId = uuidv4();
 				const message = history.messages[messageId];
 				const parentId = message.parentId;
@@ -356,6 +398,7 @@
 					childrenIds: [],
 					files: undefined,
 					content: content,
+					output: output ?? undefined,
 					timestamp: Math.floor(Date.now() / 1000) // Unix epoch
 				};
 
@@ -375,6 +418,9 @@
 				// Edit response message
 				history.messages[messageId].originalContent = history.messages[messageId].content;
 				history.messages[messageId].content = content;
+				if (output !== undefined) {
+					history.messages[messageId].output = output;
+				}
 				await updateChat();
 			}
 		}
@@ -426,10 +472,6 @@
 		showMessage({ id: parentMessageId }, false);
 	};
 
-	onDestroy(() => {
-		cancelAnimationFrame(pendingRebuild);
-	});
-
 	const triggerScroll = () => {
 		if (autoScroll) {
 			const element = document.getElementById('messages-container');
@@ -445,7 +487,7 @@
 	{#if Object.keys(history?.messages ?? {}).length == 0}
 		<ChatPlaceholder modelIds={selectedModels} {atSelectedModel} {onSelect} />
 	{:else}
-		<div class="w-full pt-2">
+		<div class="w-full {topSpacing ? 'pt-18' : 'pt-2'}">
 			{#key chatId}
 				<section class="w-full" aria-labelledby="chat-conversation">
 					<h2 class="sr-only" id="chat-conversation">{$i18n.t('Chat Conversation')}</h2>

@@ -90,7 +90,7 @@ class SyncScheduler:
         if not self.enable_config.value:
             return
 
-        kbs = Knowledges.get_knowledge_bases_by_type(self.provider_type)
+        kbs = await Knowledges.get_knowledge_bases_by_type(self.provider_type)
         if not kbs:
             return
 
@@ -99,13 +99,13 @@ class SyncScheduler:
         provider = get_sync_provider(self.provider_type)
 
         for kb in kbs:
-            if not self._is_sync_due(kb, now, interval_seconds, provider):
+            if not await self._is_sync_due(kb, now, interval_seconds, provider):
                 continue
 
             log.info('Starting scheduled sync for KB %s (%s)', kb.id, kb.name)
 
             try:
-                self._update_sync_status(kb.id, 'syncing')
+                await self._update_sync_status(kb.id, 'syncing')
 
                 result = await provider.execute_sync(
                     knowledge_id=kb.id,
@@ -131,7 +131,7 @@ class SyncScheduler:
                             kb.id,
                             result['error'],
                         )
-                        self._update_sync_status(kb.id, 'failed', error=result['error'])
+                        await self._update_sync_status(kb.id, 'failed', error=result['error'])
                 else:
                     log.info(
                         'Scheduled sync completed for KB %s: %d files processed',
@@ -141,9 +141,9 @@ class SyncScheduler:
 
             except Exception:
                 log.exception('Unexpected error during scheduled sync of KB %s', kb.id)
-                self._update_sync_status(kb.id, 'failed', error='Unexpected scheduler error')
+                await self._update_sync_status(kb.id, 'failed', error='Unexpected scheduler error')
 
-    def _is_sync_due(
+    async def _is_sync_due(
         self,
         kb: KnowledgeModel,
         now: float,
@@ -161,7 +161,7 @@ class SyncScheduler:
             return False
 
         # Skip if no stored token (per-user DB lookup)
-        if sync_provider and not sync_provider.get_token_manager().has_stored_token(kb.user_id, kb.id):
+        if sync_provider and not await sync_provider.get_token_manager().has_stored_token(kb.user_id, kb.id):
             return False
 
         # Skip if needs re-authorization
@@ -191,9 +191,9 @@ class SyncScheduler:
         last_sync = sync_info.get('last_sync_at', 0)
         return (now - last_sync) >= interval_seconds
 
-    def _update_sync_status(self, knowledge_id: str, status: str, error: str = None):
+    async def _update_sync_status(self, knowledge_id: str, status: str, error: str = None):
         """Update the sync status in knowledge meta."""
-        knowledge = Knowledges.get_knowledge_by_id(id=knowledge_id)
+        knowledge = await Knowledges.get_knowledge_by_id(id=knowledge_id)
         if not knowledge:
             return
 
@@ -205,4 +205,4 @@ class SyncScheduler:
         if error:
             sync_info['error'] = error
         meta[self.meta_key] = sync_info
-        Knowledges.update_knowledge_meta_by_id(knowledge_id, meta)
+        await Knowledges.update_knowledge_meta_by_id(knowledge_id, meta)

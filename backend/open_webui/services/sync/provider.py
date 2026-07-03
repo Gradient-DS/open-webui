@@ -44,6 +44,15 @@ PROVIDER_FILE_ID_PREFIXES: dict[str, str] = {
     'onedrive': 'onedrive-',
     'google_drive': 'googledrive-',
     'confluence': 'confluence-',
+    'topdesk': 'topdesk-',
+    # Direct-upload via the distributed doc-pipeline. NOT a managed-sync
+    # provider (no worker class) — the empty prefix is deliberate. A
+    # direct-upload File row already exists with a bare UUID id; the
+    # pipeline POSTs the parsed chunks back through /ingest with
+    # acting_provider='owui_upload' and document.source_id=<file_id>, so an
+    # empty prefix makes the reconstruction f'{prefix}{source_id}' an
+    # identity and warren updates the existing row instead of creating a twin.
+    'owui_upload': '',
 }
 
 
@@ -77,12 +86,12 @@ class TokenManager(ABC):
         ...
 
     @abstractmethod
-    def has_stored_token(self, user_id: str, knowledge_id: str) -> bool:
+    async def has_stored_token(self, user_id: str, knowledge_id: str) -> bool:
         """Check if a stored token exists (may be expired)."""
         ...
 
     @abstractmethod
-    def delete_token(self, user_id: str, knowledge_id: str) -> bool:
+    async def delete_token(self, user_id: str, knowledge_id: str) -> bool:
         """Delete stored token. Returns True if deleted."""
         ...
 
@@ -139,7 +148,7 @@ class SyncProvider(ABC):
         If access_token is provided (manual sync), uses it directly.
         Otherwise, obtains a token from the token manager (background sync).
         """
-        knowledge = Knowledges.get_knowledge_by_id(id=knowledge_id)
+        knowledge = await Knowledges.get_knowledge_by_id(id=knowledge_id)
         if not knowledge:
             return {'error': 'Knowledge base not found'}
 
@@ -192,7 +201,7 @@ class SyncProvider(ABC):
         # and clears a status left stuck on 'syncing'.
         if isinstance(result, dict) and not result.get('error') and not result.get('suspended'):
             try:
-                kb = Knowledges.get_knowledge_by_id(id=knowledge_id)
+                kb = await Knowledges.get_knowledge_by_id(id=knowledge_id)
                 if kb:
                     meta = kb.meta or {}
                     sync_info = meta.get(self.get_meta_key(), {})
@@ -200,7 +209,7 @@ class SyncProvider(ABC):
                     if sync_info.get('status') in (None, 'idle', 'syncing'):
                         sync_info['status'] = 'completed'
                     meta[self.get_meta_key()] = sync_info
-                    Knowledges.update_knowledge_meta_by_id(knowledge_id, meta)
+                    await Knowledges.update_knowledge_meta_by_id(knowledge_id, meta)
             except Exception:
                 log.exception('Failed to stamp sync completion for KB %s', knowledge_id)
 
@@ -225,6 +234,10 @@ def get_sync_provider(provider_type: str) -> SyncProvider:
         from open_webui.services.confluence.provider import ConfluenceSyncProvider
 
         return ConfluenceSyncProvider()
+    elif provider_type == 'topdesk':
+        from open_webui.services.topdesk.provider import TopdeskSyncProvider
+
+        return TopdeskSyncProvider()
     else:
         raise ValueError(f'Unsupported sync provider: {provider_type}')
 
@@ -243,5 +256,9 @@ def get_token_manager(provider_type: str) -> TokenManager:
         from open_webui.services.confluence.provider import ConfluenceTokenManager
 
         return ConfluenceTokenManager()
+    elif provider_type == 'topdesk':
+        from open_webui.services.topdesk.provider import TopdeskTokenManager
+
+        return TopdeskTokenManager()
     else:
         raise ValueError(f'Unsupported token manager: {provider_type}')

@@ -406,14 +406,16 @@
 **Context:** Phase 1 of the cross-repo refactor replacing "one Weaviate **class** per KB/file/web-search/memory" (3440 classes on haute-equipe) with native **multi-tenancy**: five fixed collections (`Knowledge`/`File`/`WebSearch`/`UserMemory`/`HashBased`) + the standalone non-MT `Knowledge_bases` meta-collection, each logical OWUI unit becoming a **tenant**. Executed via subagent-driven-development (implementer → spec review → quality review per task). Phase 2 (genai-utils agents adapter) is recorded in the shared-knowledge genai-utils memory, same date. Phases 3–6 (gitops: 1.37.7 upgrade, migration Job, cutover, rollout) are NOT done — out of scope this pass.
 
 **What We Did:**
+
 - `_weaviate_mt_mapping.py` — canonical pure `map_collection(name) -> (collection, tenant)` + 28 tests (`454297498`). Tenant key = the **raw** collection_name (mirrors qdrant/milvus); `knowledge-bases` → `(Knowledge_bases, None)`; hash collections are 63 **or** 64 lowercase-hex (broadened from qdrant's 63-only).
 - `weaviate_multitenancy.py` MT connector + `ENABLE_WEAVIATE_MULTITENANCY_MODE` (default false) / `WEAVIATE_MT_LEGACY_FALLBACK` (default true) flags (`ddd3b36a2`); delete-failure logging fix (`e4635e0bb`).
 - Factory branch (lazy-imports MT vs legacy by flag) + flag-selection test + MT index-policy tests (`bf880504a`).
 - Branch `feat/weaviate-tenancy` (open-webui primary checkout). 59 targeted tests green; flag default OFF = zero behavior change.
 
 **Key Learnings / Decisions:**
+
 - The entire MT mapping lives **inside the connector** — `VectorDBBase` passes a single `collection_name` per call, so **no router changes** were needed.
-- **Dual-read is "MT-first, else legacy", never merged.** Fallback fires only when the MT tenant returns empty. Consequence: a KB holding *both* legacy and MT data returns **only** the MT portion — so migration must precede heavy new writes. (Matters for local testing: adding a new file to a legacy KB under MT makes its old chunks invisible until migrated.)
+- **Dual-read is "MT-first, else legacy", never merged.** Fallback fires only when the MT tenant returns empty. Consequence: a KB holding _both_ legacy and MT data returns **only** the MT portion — so migration must precede heavy new writes. (Matters for local testing: adding a new file to a legacy KB under MT makes its old chunks invisible until migrated.)
 - **Deliberate deviations from the plan** (flagged in review): (1) `delete`/`delete_collection` **also purge the legacy class** when fallback is on and it exists (with warning logs) — beyond the plan's "tenant-scoped only", else dual-read resurrects deleted data; (2) `reset()` drops **all** collections (legacy parity), not just the named six; (3) the full 9-property schema is applied to **all five** MT collections uniformly.
 - **Cross-repo `map_collection` parity is THE invariant** — OWUI writes/reads and genai-utils reads must agree on `(collection, tenant)` or data routes to the wrong tenant. Final review proved the two copies identical across a 20-input matrix; the genai-utils parity test locks them.
 - Index config under MT: flat+BQ for File/WebSearch/UserMemory (when `ENABLE_WEAVIATE_BQ_QUANTIZATION`), HNSW for Knowledge/HashBased — keyed on the fixed MT names, not legacy class-name prefixes.
@@ -430,12 +432,14 @@
 **Context:** Investigating why local document uploads felt slow, and whether to consolidate cloud-sync + direct-upload processing into the loader-worker job pipeline ahead of the warren (distributed doc-processing) cutover. Started from a confusing startup log about the "external pipeline" being disabled.
 
 **What We Did:**
+
 - Traced both ingestion paths. Direct uploads (`files.py` → `process_uploaded_file` BackgroundTask → `retrieval.py:process_file`) are already async via `file:status` Socket.IO + polling fallback — not synchronous. Cloud sync goes `base_worker` → loader-worker queue → `gradient-doc-processor` → `/ingest`, where OWUI re-embeds + writes Weaviate.
 - Discovered the parser offload is ALREADY ON by chart default: `CONTENT_EXTRACTION_ENGINE=external` + `EXTERNAL_DOCUMENT_LOADER_URL` defaulting to the shared-services gateway. Verified live on the gradient pod: `external` + `http://gradient-gateway.shared-services.svc:8000` (gateway proxies `/process` → `gradient-doc-processor:8001`).
 - Confirmed `gradient-doc-processor`'s `PUT /process` (parse→text) and `POST /chunk` (text→chunks) are purpose-built to OWUI's `ExternalDocumentLoader` / `EXTERNAL_PIPELINE` contracts — zero adapter.
 - Confirmed `EXTERNAL_PIPELINE_URL` is soev-custom (absent from upstream, authored by marijn@gradient-ds.com), unset in every gitops tenant, and only ever offloaded CHUNKING (parsing stayed in-pod). Removed it: PR #148 → dev (config + `external_retrieval.py` + startup health-check + dead branches in `retrieval.py` and the `base_worker` legacy path; −479 LOC).
 
 **Key Learnings:**
+
 - The slowness premise ("local uploads parse in-pod") is FALSE on tenants using the chart default — parsing is already offloaded to `gradient-doc-processor`. Any remaining slowness is doc-processor capacity (shared, ~4 parse slots/pod, HPA off by chart default — prod runs 2–8), in-pod embedding, or large files — not the request model.
 - Two distinct knobs, easily confused: `EXTERNAL_DOCUMENT_LOADER_URL` = PARSING offload (`/process`, bytes→text, **upstream**, in use — KEEP). `EXTERNAL_PIPELINE_URL` = CHUNKING offload (`/chunk`, text→chunks, **soev-custom**, dead — REMOVED). Only the former addresses slowness.
 - A distributed job queue (loader-worker OR warren) adds ~2–4s polling latency (worker lease poll 2s + OWUI status poll 2s) — structurally WRONG for interactive single-file uploads. Right end-state: **one parser engine, two orchestration modes** — synchronous (`gradient-doc-processor /process`) for interactive uploads, async queue (warren) for bulk/cloud sync. "Consolidate to one method" is best realized at the PARSER layer, not by forcing one queue.
