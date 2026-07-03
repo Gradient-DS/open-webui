@@ -23,6 +23,7 @@
 	} from '$lib/apis/chats';
 	import { chats, config, folders, settings, theme, user } from '$lib/stores';
 	import { createMessagesList } from '$lib/utils';
+	import { getOutputText } from '$lib/components/chat/Messages/structuredOutput';
 	import { downloadChatAsPDF, exportChatAsPdf, exportChatAsDocx } from '$lib/apis/utils';
 	import { copyFormattedChat } from '$lib/utils/copy';
 	import Download from '$lib/components/icons/Download.svelte';
@@ -64,7 +65,8 @@
 		const history = chat.chat.history;
 		const messages = createMessagesList(history, history.currentId);
 		const chatText = messages.reduce((a, message, i, arr) => {
-			return `${a}### ${message.role.toUpperCase()}\n${message.content}\n\n`;
+			const content = getOutputText(message.output) || message.content || '';
+			return `${a}### ${message.role.toUpperCase()}\n${content}\n\n`;
 		}, '');
 
 		return chatText.trim();
@@ -286,19 +288,19 @@
 				</button>
 			{/if}
 
-			<DropdownSub
-				contentClass="select-none rounded-2xl p-1 z-50 bg-white dark:bg-gray-850 dark:text-white shadow-lg border border-gray-100 dark:border-gray-800"
-			>
-				<button
-					slot="trigger"
-					draggable="false"
-					class="flex gap-2 items-center px-3 py-1.5 text-sm cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-xl w-full"
+			{#if $user?.role === 'admin' || ($user.permissions?.chat?.export ?? true)}
+				<DropdownSub
+					contentClass="select-none rounded-2xl p-1 z-50 bg-white dark:bg-gray-850 dark:text-white shadow-lg border border-gray-100 dark:border-gray-800"
 				>
-					<Download strokeWidth="1.5" />
-					<div class="flex items-center">{$i18n.t('Download')}</div>
-				</button>
+					<button
+						slot="trigger"
+						draggable="false"
+						class="flex gap-2 items-center px-3 py-1.5 text-sm cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-xl w-full"
+					>
+						<Download strokeWidth="1.5" />
+						<div class="flex items-center">{$i18n.t('Download')}</div>
+					</button>
 
-				{#if $user?.role === 'admin' || ($user.permissions?.chat?.export ?? true)}
 					<button
 						draggable="false"
 						class="flex gap-2 items-center px-3 py-1.5 text-sm cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-xl w-full"
@@ -308,40 +310,40 @@
 					>
 						<div class="flex items-center line-clamp-1">{$i18n.t('Export chat (.json)')}</div>
 					</button>
-				{/if}
 
-				<button
-					draggable="false"
-					class="flex gap-2 items-center px-3 py-1.5 text-sm cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-xl w-full"
-					on:click={() => {
-						downloadTxt();
-					}}
-				>
-					<div class="flex items-center line-clamp-1">{$i18n.t('Plain text (.txt)')}</div>
-				</button>
+					<button
+						draggable="false"
+						class="flex gap-2 items-center px-3 py-1.5 text-sm cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-xl w-full"
+						on:click={() => {
+							downloadTxt();
+						}}
+					>
+						<div class="flex items-center line-clamp-1">{$i18n.t('Plain text (.txt)')}</div>
+					</button>
 
-				<button
-					draggable="false"
-					class="flex gap-2 items-center px-3 py-1.5 text-sm cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-xl select-none w-full"
-					on:click={() => {
-						downloadPdf();
-					}}
-				>
-					<div class="flex items-center line-clamp-1">{$i18n.t('PDF document (.pdf)')}</div>
-				</button>
-
-				{#if $config?.features?.enable_docx_export ?? true}
 					<button
 						draggable="false"
 						class="flex gap-2 items-center px-3 py-1.5 text-sm cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-xl select-none w-full"
 						on:click={() => {
-							downloadDocx();
+							downloadPdf();
 						}}
 					>
-						<div class="flex items-center line-clamp-1">{$i18n.t('Word document (.docx)')}</div>
+						<div class="flex items-center line-clamp-1">{$i18n.t('PDF document (.pdf)')}</div>
 					</button>
-				{/if}
-			</DropdownSub>
+
+					{#if $config?.features?.enable_docx_export ?? true}
+						<button
+							draggable="false"
+							class="flex gap-2 items-center px-3 py-1.5 text-sm cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-xl select-none w-full"
+							on:click={() => {
+								downloadDocx();
+							}}
+						>
+							<div class="flex items-center line-clamp-1">{$i18n.t('Word document (.docx)')}</div>
+						</button>
+					{/if}
+				</DropdownSub>
+			{/if}
 
 			<button
 				draggable="false"
@@ -364,6 +366,7 @@
 				draggable="false"
 				class="flex gap-2 items-center px-3 py-1.5 text-sm cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-xl w-full"
 				on:click={() => {
+					show = false;
 					renameHandler();
 				}}
 			>
@@ -377,6 +380,7 @@
 				draggable="false"
 				class="flex gap-2 items-center px-3 py-1.5 text-sm cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-xl w-full"
 				on:click={() => {
+					show = false;
 					pinHandler();
 				}}
 			>
@@ -389,17 +393,19 @@
 				{/if}
 			</button>
 
-			<button
-				draggable="false"
-				class="flex gap-2 items-center px-3 py-1.5 text-sm cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-xl w-full"
-				on:click={() => {
-					show = false;
-					cloneChatHandler();
-				}}
-			>
-				<DocumentDuplicate strokeWidth="1.5" />
-				<div class="flex items-center">{$i18n.t('Clone')}</div>
-			</button>
+			{#if $user?.role === 'admin' || ($user?.permissions?.chat?.import ?? true)}
+				<button
+					draggable="false"
+					class="flex gap-2 items-center px-3 py-1.5 text-sm cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-xl w-full"
+					on:click={() => {
+						show = false;
+						cloneChatHandler();
+					}}
+				>
+					<DocumentDuplicate strokeWidth="1.5" />
+					<div class="flex items-center">{$i18n.t('Clone')}</div>
+				</button>
+			{/if}
 
 			{#if chatId && $folders.length > 0}
 				<DropdownSub

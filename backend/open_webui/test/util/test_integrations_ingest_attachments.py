@@ -62,7 +62,7 @@ def test_ingest_document_base_attachments_default_empty():
 
 
 from io import BytesIO
-from unittest.mock import MagicMock, call, patch
+from unittest.mock import AsyncMock, MagicMock, call, patch
 from fastapi import UploadFile
 
 
@@ -183,39 +183,39 @@ def ingest_app(monkeypatch):
     app.include_router(integrations_router.router, prefix='/api/v1/integrations')
     app.dependency_overrides[get_integration_principal] = lambda: principal
 
-    # Provide a minimal app.state.config so the endpoint doesn't crash
-    # when reading INTEGRATION_PROVIDERS (LoaderPrincipal branch).
-    app.state.config = MagicMock(INTEGRATION_PROVIDERS={})
+    # The endpoint reads INTEGRATION_PROVIDERS via
+    # ``await Config.get('integrations.providers')`` (LoaderPrincipal branch);
+    # patch the per-key read so the tests stay hermetic — no config DB involved.
+    async def fake_config_get(key, default=None):
+        return {'integrations.providers': {}}.get(key, default)
+
+    monkeypatch.setattr(integrations_router.Config, 'get', staticmethod(fake_config_get))
 
     # Knowledge layer + text-save layer are out of scope for these tests.
-    monkeypatch.setattr(
-        integrations_router,
-        '_find_kb_by_source_id',
-        lambda *_a, **_k: MagicMock(id='kb-1', name='kb', meta={}),
-    )
+    async def fake_find_kb(*_a, **_k):
+        return MagicMock(id='kb-1', name='kb', meta={})
+
+    monkeypatch.setattr(integrations_router, '_find_kb_by_source_id', fake_find_kb)
     monkeypatch.setattr(
         integrations_router.Knowledges,
         'get_knowledge_by_id',
-        lambda *_a, **_k: None,
+        AsyncMock(return_value=None),
     )
     monkeypatch.setattr(
         integrations_router.Knowledges,
         'get_files_by_id',
-        lambda *_a, **_k: [],
+        AsyncMock(return_value=[]),
     )
+
     # Stub the per-data-type document processors so they return a file_id
-    # and status='completed' without touching the real KB / vector DB.
+    # and status='created' without touching the real KB / vector DB.
+    async def fake_process(*a, doc, **k):
+        source_id = doc['source_id'] if isinstance(doc, dict) else doc.source_id
+        return {'source_id': source_id, 'file_id': f'f-{source_id}', 'status': 'created'}
+
     for name in ('_process_parsed_text_document', '_process_chunked_text_document', '_process_full_document'):
         if hasattr(integrations_router, name):
-            monkeypatch.setattr(
-                integrations_router,
-                name,
-                lambda doc, *a, **k: {
-                    'source_id': doc['source_id'] if isinstance(doc, dict) else doc.source_id,
-                    'file_id': f'f-{doc["source_id"] if isinstance(doc, dict) else doc.source_id}',
-                    'status': 'created',
-                },
-            )
+            monkeypatch.setattr(integrations_router, name, fake_process)
 
     return app
 

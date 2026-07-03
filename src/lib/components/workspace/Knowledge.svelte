@@ -73,11 +73,6 @@
 		}
 	}
 
-	onDestroy(() => {
-		clearTimeout(searchDebounceTimer);
-		$socket?.off('onedrive:sync:progress', handleSyncProgress);
-	});
-
 	const loadMoreItems = async () => {
 		if (allItemsLoaded) return;
 		page += 1;
@@ -203,6 +198,7 @@
 	});
 
 	onDestroy(() => {
+		clearTimeout(searchDebounceTimer);
 		$socket?.off('onedrive:sync:progress', handleSyncProgress);
 		$socket?.off('googledrive:sync:progress', handleGoogleDriveSyncProgress);
 		$socket?.off('confluence:sync:progress', handleConfluenceSyncProgress);
@@ -471,6 +467,12 @@
 														type={$config.integration_providers[item.type].badge_type}
 														content={$config.integration_providers[item.type].name}
 													/>
+												{:else if item?.meta?.source === 'external'}
+													<Badge
+														type="muted"
+														content={item?.meta?.external?.provider ?? $i18n.t('Connected')}
+													/>
+													<Badge type="muted" content={$i18n.t('Read Only')} />
 												{:else}
 													<Badge type="muted" content={$i18n.t('Local')} />
 												{/if}

@@ -324,3 +324,4 @@ cypress/screenshots
 .vscode/settings.json
 .claude/worktrees/
 .worktrees/
+.cptr

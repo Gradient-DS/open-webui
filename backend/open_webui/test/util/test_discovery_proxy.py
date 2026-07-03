@@ -30,14 +30,22 @@ from open_webui.routers import discovery
 from open_webui.utils.auth import get_verified_user
 
 
-def _build_app(*, flag: bool, base_url: str) -> FastAPI:
-    """Mount the discovery router with the feature flag set on app.state.
+def _patch_flag(monkeypatch, flag: bool) -> None:
+    """Route the per-key Config read for the feature flag to a test value.
 
-    The router reads ``request.app.state.config.ENABLE_RAG_FILTER_UI``
-    at request time, mirroring the production wiring in main.py.
+    The router reads ``await Config.get('rag.enable_filter_ui')`` at request
+    time (ENABLE_RAG_FILTER_UI's storage key); patching ``Config.get`` keeps
+    the test hermetic — no config DB involved.
     """
+
+    async def fake_get(key, default=None):
+        return {'rag.enable_filter_ui': flag}.get(key, default)
+
+    monkeypatch.setattr(discovery.Config, 'get', staticmethod(fake_get))
+
+
+def _build_app() -> FastAPI:
     app = FastAPI()
-    app.state.config = SimpleNamespace(ENABLE_RAG_FILTER_UI=flag)
     app.include_router(discovery.router, prefix='/api/v1/discovery')
     return app
 
@@ -108,7 +116,8 @@ def test_503_when_feature_flag_disabled(monkeypatch):
     monkeypatch.setattr(discovery, 'SEARCH_API_BASE_URL', 'http://upstream:3535')
     monkeypatch.setattr(discovery, 'SEARCH_API_KEY', 'secret')
 
-    app = _build_app(flag=False, base_url='http://upstream:3535')
+    _patch_flag(monkeypatch, False)
+    app = _build_app()
     _override_user(app)
 
     client = TestClient(app)
@@ -122,7 +131,8 @@ def test_503_when_base_url_empty(monkeypatch):
     monkeypatch.setattr(discovery, 'SEARCH_API_BASE_URL', '')
     monkeypatch.setattr(discovery, 'SEARCH_API_KEY', 'secret')
 
-    app = _build_app(flag=True, base_url='')
+    _patch_flag(monkeypatch, True)
+    app = _build_app()
     _override_user(app)
 
     client = TestClient(app)
@@ -140,7 +150,8 @@ def test_unauthenticated_request_rejected(monkeypatch):
     monkeypatch.setattr(discovery, 'SEARCH_API_BASE_URL', 'http://upstream:3535')
     monkeypatch.setattr(discovery, 'SEARCH_API_KEY', 'secret')
 
-    app = _build_app(flag=True, base_url='http://upstream:3535')
+    _patch_flag(monkeypatch, True)
+    app = _build_app()
     # Note: deliberately do not override get_verified_user so the real
     # dependency runs; with no session cookie / Authorization header it
     # rejects the request before the proxy code ever runs.
@@ -161,7 +172,8 @@ def test_x_api_key_injected_on_outbound_call(monkeypatch):
     fake = _FakeSession(_FakeResponse(status=200, json_body={'collections': []}))
     _patch_session(monkeypatch, fake)
 
-    app = _build_app(flag=True, base_url='http://upstream:3535')
+    _patch_flag(monkeypatch, True)
+    app = _build_app()
     _override_user(app)
 
     client = TestClient(app)
@@ -186,7 +198,8 @@ def test_no_x_api_key_when_unset(monkeypatch):
     fake = _FakeSession(_FakeResponse(status=200, json_body={'ok': True}))
     _patch_session(monkeypatch, fake)
 
-    app = _build_app(flag=True, base_url='http://upstream:3535')
+    _patch_flag(monkeypatch, True)
+    app = _build_app()
     _override_user(app)
 
     client = TestClient(app)
@@ -207,7 +220,8 @@ def test_upstream_401_mapped_to_502_with_operator_message(monkeypatch):
     fake = _FakeSession(_FakeResponse(status=401, text_body='unauthorized'))
     _patch_session(monkeypatch, fake)
 
-    app = _build_app(flag=True, base_url='http://upstream:3535')
+    _patch_flag(monkeypatch, True)
+    app = _build_app()
     _override_user(app)
 
     client = TestClient(app)
@@ -225,7 +239,8 @@ def test_upstream_non_json_mapped_to_502(monkeypatch):
     fake = _FakeSession(_FakeResponse(status=200, text_body='<html>not json</html>', json_raises=True))
     _patch_session(monkeypatch, fake)
 
-    app = _build_app(flag=True, base_url='http://upstream:3535')
+    _patch_flag(monkeypatch, True)
+    app = _build_app()
     _override_user(app)
 
     client = TestClient(app)
@@ -243,7 +258,8 @@ def test_upstream_connection_error_mapped_to_502(monkeypatch):
     fake = _FakeSession(aiohttp.ClientConnectorError(connection_key=MagicMock(), os_error=OSError('refused')))
     _patch_session(monkeypatch, fake)
 
-    app = _build_app(flag=True, base_url='http://upstream:3535')
+    _patch_flag(monkeypatch, True)
+    app = _build_app()
     _override_user(app)
 
     client = TestClient(app)

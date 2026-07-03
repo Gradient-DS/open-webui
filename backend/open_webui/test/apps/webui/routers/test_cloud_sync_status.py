@@ -16,6 +16,7 @@ from unittest.mock import AsyncMock, patch
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from open_webui.routers import configs
 from open_webui.routers.configs import router, _aggregate_provider_status
 from open_webui.utils.auth import get_admin_user, get_current_user
 
@@ -139,23 +140,55 @@ def test_status_aggregates_per_provider():
 # --- /configs/topdesk admin-gating + normalization --------------------------
 
 
-def _config_client(app, **config_values):
-    """Admin client with a stub ``app.state.config`` for the topdesk endpoints."""
+def _patch_topdesk_store(monkeypatch) -> dict:
+    """In-memory per-key Config store for the topdesk endpoints.
+
+    The router reads/writes via ``Config.get_many``/``Config.upsert`` on the
+    ``topdesk.*`` storage keys (TOPDESK_CONFIG_KEYS in routers/configs.py);
+    reads and upserts land in this dict, never in a DB.
+    """
+    values = dict(_TOPDESK_STORE_SEED)
+
+    async def fake_get_many(*keys):
+        return {key: values[key] for key in keys if key in values}
+
+    async def fake_upsert(updates):
+        values.update(updates)
+
+    monkeypatch.setattr(configs.Config, 'get_many', staticmethod(fake_get_many))
+    monkeypatch.setattr(configs.Config, 'upsert', staticmethod(fake_upsert))
+    return values
+
+
+def _admin_override(app) -> TestClient:
     app.dependency_overrides[get_admin_user] = lambda: SimpleNamespace(
         id='admin-1', role='admin', email='admin@example.com'
     )
-    app.state.config = SimpleNamespace(**config_values)
     return TestClient(app)
 
 
-_TOPDESK_DEFAULTS = {
-    'ENABLE_TOPDESK_INTEGRATION': False,
-    'ENABLE_TOPDESK_SYNC': False,
-    'TOPDESK_URL': '',
-    'TOPDESK_USERNAME': '',
-    'TOPDESK_APP_PASSWORD': '',
-    'TOPDESK_SYNC_INTERVAL_MINUTES': 60,
-    'TOPDESK_MAX_ITEMS_PER_SYNC': 500,
+# Dotted storage-key seed mirroring the old TOPDESK_* namespace defaults.
+_TOPDESK_STORE_SEED = {
+    'topdesk.enable': False,
+    'topdesk.enable_sync': False,
+    'topdesk.url': '',
+    'topdesk.username': '',
+    'topdesk.app_password': '',
+    'topdesk.sync_interval_minutes': 60,
+    'topdesk.max_items_per_sync': 500,
+    'topdesk.sync_scope': 'ssp',
+}
+
+# Friendly field names the GET endpoint returns for the seeded keys.
+_TOPDESK_FIELDS = {
+    'ENABLE_TOPDESK_INTEGRATION',
+    'ENABLE_TOPDESK_SYNC',
+    'TOPDESK_URL',
+    'TOPDESK_USERNAME',
+    'TOPDESK_APP_PASSWORD',
+    'TOPDESK_SYNC_INTERVAL_MINUTES',
+    'TOPDESK_MAX_ITEMS_PER_SYNC',
+    'TOPDESK_SYNC_SCOPE',
 }
 
 
@@ -177,22 +210,19 @@ def test_topdesk_post_rejects_non_admin():
     assert res.status_code == 401
 
 
-def test_topdesk_get_returns_all_values():
+def test_topdesk_get_returns_all_values(monkeypatch):
     app = _make_app()
-    client = _config_client(app, **dict(_TOPDESK_DEFAULTS))
+    _patch_topdesk_store(monkeypatch)
+    client = _admin_override(app)
     res = client.get('/api/v1/configs/topdesk')
     assert res.status_code == 200
-    assert set(res.json().keys()) == set(_TOPDESK_DEFAULTS.keys())
+    assert set(res.json().keys()) == _TOPDESK_FIELDS
 
 
-def test_topdesk_post_normalizes_url_and_clamps_max():
+def test_topdesk_post_normalizes_url_and_clamps_max(monkeypatch):
     app = _make_app()
-    c = SimpleNamespace(**dict(_TOPDESK_DEFAULTS))
-    app.dependency_overrides[get_admin_user] = lambda: SimpleNamespace(
-        id='admin-1', role='admin', email='admin@example.com'
-    )
-    app.state.config = c
-    client = TestClient(app)
+    store = _patch_topdesk_store(monkeypatch)
+    client = _admin_override(app)
 
     res = client.post(
         '/api/v1/configs/topdesk',
@@ -208,7 +238,7 @@ def test_topdesk_post_normalizes_url_and_clamps_max():
     body = res.json()
     # URL stripped + trailing slash removed.
     assert body['TOPDESK_URL'] == 'https://tenant.topdesk.net'
-    assert c.TOPDESK_URL == 'https://tenant.topdesk.net'
+    assert store['topdesk.url'] == 'https://tenant.topdesk.net'
     # Credentials stripped and round-tripped in full (Confluence disclosure profile).
     assert body['TOPDESK_USERNAME'] == 'operator'
     assert body['TOPDESK_APP_PASSWORD'] == 'secret'

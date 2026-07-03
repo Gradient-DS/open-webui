@@ -10,6 +10,7 @@ from typing import Optional, List
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 from fastapi.responses import JSONResponse
 
+from open_webui.models.config import Config
 from open_webui.models.user_archives import (
     UserArchives,
     UserArchiveModel,
@@ -69,11 +70,17 @@ async def get_archive_config(
     user=Depends(get_admin_user),
 ):
     """Get archive configuration settings."""
+    config = await Config.get_many(
+        'admin.enable_user_archival',
+        'admin.default_archive_retention_days',
+        'admin.enable_auto_archive_on_self_delete',
+        'admin.auto_archive_retention_days',
+    )
     return ArchiveConfigResponse(
-        enable_user_archival=request.app.state.config.ENABLE_USER_ARCHIVAL,
-        default_archive_retention_days=request.app.state.config.DEFAULT_ARCHIVE_RETENTION_DAYS,
-        enable_auto_archive_on_self_delete=request.app.state.config.ENABLE_AUTO_ARCHIVE_ON_SELF_DELETE,
-        auto_archive_retention_days=request.app.state.config.AUTO_ARCHIVE_RETENTION_DAYS,
+        enable_user_archival=config.get('admin.enable_user_archival'),
+        default_archive_retention_days=config.get('admin.default_archive_retention_days'),
+        enable_auto_archive_on_self_delete=config.get('admin.enable_auto_archive_on_self_delete'),
+        auto_archive_retention_days=config.get('admin.auto_archive_retention_days'),
     )
 
 
@@ -84,20 +91,29 @@ async def update_archive_config(
     user=Depends(get_admin_user),
 ):
     """Update archive configuration settings."""
+    updates = {}
     if form_data.enable_user_archival is not None:
-        request.app.state.config.ENABLE_USER_ARCHIVAL = form_data.enable_user_archival
+        updates['admin.enable_user_archival'] = form_data.enable_user_archival
     if form_data.default_archive_retention_days is not None:
-        request.app.state.config.DEFAULT_ARCHIVE_RETENTION_DAYS = form_data.default_archive_retention_days
+        updates['admin.default_archive_retention_days'] = form_data.default_archive_retention_days
     if form_data.enable_auto_archive_on_self_delete is not None:
-        request.app.state.config.ENABLE_AUTO_ARCHIVE_ON_SELF_DELETE = form_data.enable_auto_archive_on_self_delete
+        updates['admin.enable_auto_archive_on_self_delete'] = form_data.enable_auto_archive_on_self_delete
     if form_data.auto_archive_retention_days is not None:
-        request.app.state.config.AUTO_ARCHIVE_RETENTION_DAYS = form_data.auto_archive_retention_days
+        updates['admin.auto_archive_retention_days'] = form_data.auto_archive_retention_days
+    if updates:
+        await Config.upsert(updates)
 
+    config = await Config.get_many(
+        'admin.enable_user_archival',
+        'admin.default_archive_retention_days',
+        'admin.enable_auto_archive_on_self_delete',
+        'admin.auto_archive_retention_days',
+    )
     return ArchiveConfigResponse(
-        enable_user_archival=request.app.state.config.ENABLE_USER_ARCHIVAL,
-        default_archive_retention_days=request.app.state.config.DEFAULT_ARCHIVE_RETENTION_DAYS,
-        enable_auto_archive_on_self_delete=request.app.state.config.ENABLE_AUTO_ARCHIVE_ON_SELF_DELETE,
-        auto_archive_retention_days=request.app.state.config.AUTO_ARCHIVE_RETENTION_DAYS,
+        enable_user_archival=config.get('admin.enable_user_archival'),
+        default_archive_retention_days=config.get('admin.default_archive_retention_days'),
+        enable_auto_archive_on_self_delete=config.get('admin.enable_auto_archive_on_self_delete'),
+        auto_archive_retention_days=config.get('admin.auto_archive_retention_days'),
     )
 
 
@@ -124,7 +140,7 @@ async def get_archives(
     # Prevent caching to ensure fresh data
     response.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate'
 
-    if not request.app.state.config.ENABLE_USER_ARCHIVAL:
+    if not await Config.get('admin.enable_user_archival'):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail='User archival is not enabled',
@@ -152,7 +168,7 @@ async def get_archive(
     - Requires admin role
     - Returns complete chat history in data field
     """
-    if not request.app.state.config.ENABLE_USER_ARCHIVAL:
+    if not await Config.get('admin.enable_user_archival'):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail='User archival is not enabled',
@@ -183,7 +199,7 @@ async def export_archive_chats(
     This export can be directly imported by any user using
     Settings > Data Controls > Import Chats.
     """
-    if not request.app.state.config.ENABLE_USER_ARCHIVAL:
+    if not await Config.get('admin.enable_user_archival'):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail='User archival is not enabled',
@@ -214,7 +230,7 @@ async def create_user_archive(
     - Does NOT delete the user (use DELETE /users/{id} separately)
     - Archives chats in native export format (can be imported by new user)
     """
-    if not request.app.state.config.ENABLE_USER_ARCHIVAL:
+    if not await Config.get('admin.enable_user_archival'):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail='User archival is not enabled',
@@ -223,7 +239,7 @@ async def create_user_archive(
     # Use default retention if not specified
     retention_days = form_data.retention_days
     if retention_days is None and not form_data.never_delete:
-        retention_days = request.app.state.config.DEFAULT_ARCHIVE_RETENTION_DAYS
+        retention_days = await Config.get('admin.default_archive_retention_days')
 
     result = await ArchiveService.create_archive(
         user_id=user_id,
@@ -259,7 +275,7 @@ async def update_archive(
 
     - Can update: reason, retention_days, never_delete
     """
-    if not request.app.state.config.ENABLE_USER_ARCHIVAL:
+    if not await Config.get('admin.enable_user_archival'):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail='User archival is not enabled',
@@ -287,7 +303,7 @@ async def delete_archive(
     - This action cannot be undone
     - Use for early cleanup before retention expires
     """
-    if not request.app.state.config.ENABLE_USER_ARCHIVAL:
+    if not await Config.get('admin.enable_user_archival'):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail='User archival is not enabled',

@@ -50,16 +50,31 @@ def loader_principal():
     return LoaderPrincipal(user=user, provider_slug=PROVIDER)
 
 
+@pytest.fixture(autouse=True)
+def config_values(monkeypatch):
+    """Per-key Config store for the routes' reads.
+
+    stage/submit read ``rag.distributed_doc_pipeline_sync_enabled``
+    (DISTRIBUTED_DOC_PIPELINE_SYNC_ENABLED) and ``doc_pipeline.presign_ttl_seconds``
+    (PIPELINE_PRESIGN_TTL_SECONDS) via ``await Config.get(...)``. The sync flag
+    defaults on here so the stage/submit/file-status tests keep exercising the
+    happy path; the flag-off 403 gate mutates this dict (proven separately below).
+    """
+    values = {
+        'rag.distributed_doc_pipeline_sync_enabled': True,
+        'doc_pipeline.presign_ttl_seconds': PRESIGN_TTL,
+    }
+
+    async def fake_get(key, default=None):
+        return values.get(key, default)
+
+    monkeypatch.setattr(integrations_router.Config, 'get', staticmethod(fake_get))
+    return values
+
+
 def _make_app(principal) -> FastAPI:
     app = FastAPI()
     app.include_router(integrations_router.router, prefix='/api/v1/integrations')
-    # DISTRIBUTED_DOC_PIPELINE_SYNC_ENABLED defaults on here so the existing
-    # stage/submit/file-status tests keep exercising the happy path; the
-    # flag-off 403 gate is proven separately below.
-    app.state.config = SimpleNamespace(
-        PIPELINE_PRESIGN_TTL_SECONDS=PRESIGN_TTL,
-        DISTRIBUTED_DOC_PIPELINE_SYNC_ENABLED=True,
-    )
     app.dependency_overrides[get_integration_principal] = lambda: principal
     return app
 
@@ -339,9 +354,9 @@ def test_file_status_rejects_non_loader(non_loader_app):
 # deliberately not gated (read-only poll) and has no test here.
 
 
-def test_stage_403_when_sync_flag_disabled(loader_principal):
+def test_stage_403_when_sync_flag_disabled(loader_principal, config_values):
     app = _make_app(loader_principal)
-    app.state.config.DISTRIBUTED_DOC_PIPELINE_SYNC_ENABLED = False
+    config_values['rag.distributed_doc_pipeline_sync_enabled'] = False
 
     resp = TestClient(app).post(
         '/api/v1/integrations/stage',
@@ -352,9 +367,9 @@ def test_stage_403_when_sync_flag_disabled(loader_principal):
     assert 'DISTRIBUTED_DOC_PIPELINE_SYNC_ENABLED' in resp.json()['detail']
 
 
-def test_submit_403_when_sync_flag_disabled(loader_principal):
+def test_submit_403_when_sync_flag_disabled(loader_principal, config_values):
     app = _make_app(loader_principal)
-    app.state.config.DISTRIBUTED_DOC_PIPELINE_SYNC_ENABLED = False
+    config_values['rag.distributed_doc_pipeline_sync_enabled'] = False
 
     resp = TestClient(app).post(
         '/api/v1/integrations/submit',

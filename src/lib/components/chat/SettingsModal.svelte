@@ -108,7 +108,6 @@
 				'autochattags',
 				'autocopyresponsetoclipboard',
 				'autotitle',
-				'beta',
 				'call',
 				'chat background image',
 				'chat bubble ui',

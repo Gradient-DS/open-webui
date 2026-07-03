@@ -27,6 +27,7 @@
 		config,
 		showCallOverlay,
 		tools,
+		skills,
 		toolServers,
 		terminalServers,
 		user as _user,
@@ -56,11 +57,12 @@
 	import { uploadFile, deleteFileById, getFileAttachments } from '$lib/apis/files';
 	import { generateAutoCompletion } from '$lib/apis';
 	import { getChatById } from '$lib/apis/chats';
+	import { getFolderById } from '$lib/apis/folders';
+	import { getNoteById } from '$lib/apis/notes';
 	import { getSessionUser } from '$lib/apis/auths';
-	import { getTools } from '$lib/apis/tools';
 
 	import { WEBUI_BASE_URL, WEBUI_API_BASE_URL, PASTED_TEXT_CHARACTER_LIMIT } from '$lib/constants';
-	import { getOAuthClientAuthorizationUrl } from '$lib/apis/configs';
+	import { initiateOAuthRedirect } from '$lib/apis/configs';
 
 	import { createNoteHandler } from '../notes/utils';
 	import { getSuggestionRenderer } from '../common/RichTextInput/suggestions';
@@ -71,6 +73,7 @@
 	import VoiceRecording from './MessageInput/VoiceRecording.svelte';
 
 	import ToolServersModal from './ToolServersModal.svelte';
+	import SkillsModal from './SkillsModal.svelte';
 
 	import RichTextInput from '../common/RichTextInput.svelte';
 	import Tooltip from '../common/Tooltip.svelte';
@@ -83,6 +86,7 @@
 	import GlobeAlt from '../icons/GlobeAlt.svelte';
 	import Photo from '../icons/Photo.svelte';
 	import Wrench from '../icons/Wrench.svelte';
+	import Keyframes from '../icons/Keyframes.svelte';
 	import Sparkles from '../icons/Sparkles.svelte';
 
 	import InputVariablesModal from './MessageInput/InputVariablesModal.svelte';
@@ -96,6 +100,7 @@
 	import Camera from '../icons/Camera.svelte';
 	import Clip from '../icons/Clip.svelte';
 	import FolderOpen from '../icons/FolderOpen.svelte';
+	import PageEdit from '../icons/PageEdit.svelte';
 	import ClockRotateRight from '../icons/ClockRotateRight.svelte';
 	import GoogleDrive from '../icons/GoogleDrive.svelte';
 	import OneDrive from '../icons/OneDrive.svelte';
@@ -122,6 +127,7 @@
 	// only the listed item keys. Forwarded to InputMenu unchanged.
 	// Default null preserves upstream behavior.
 	export let inputMenuRestrictTo: string[] | null = null;
+	export let onWebSearchToggle: Function = () => {};
 
 	export let createMessagePair: Function;
 	export let stopResponse: Function;
@@ -143,6 +149,7 @@
 	export let files = [];
 
 	export let selectedToolIds = [];
+	export let selectedSkillIds = [];
 	export let selectedFilterIds = [];
 
 	export let imageGenerationEnabled = false;
@@ -187,6 +194,7 @@
 				};
 			}),
 		selectedToolIds,
+		selectedSkillIds,
 		selectedFilterIds,
 		imageGenerationEnabled,
 		webSearchEnabled,
@@ -434,6 +442,7 @@
 	let suggestions = null;
 
 	let showTools = false;
+	let showSkills = false;
 
 	let loaded = false;
 	let recording = false;
@@ -480,14 +489,34 @@
 	let user = null;
 	export let placeholder = '';
 
-	let visionCapableModels = [];
-	$: visionCapableModels = (atSelectedModel?.id ? [atSelectedModel.id] : selectedModels).filter(
-		(model) => $models.find((m) => m.id === model)?.info?.meta?.capabilities?.vision ?? true
+	type ModelCapability =
+		| 'vision'
+		| 'file_upload'
+		| 'web_search'
+		| 'image_generation'
+		| 'code_interpreter'
+		| 'terminal';
+	type ModelCapabilitiesById = Record<string, Partial<Record<ModelCapability, boolean>>>;
+
+	let modelCapabilitiesById: ModelCapabilitiesById = {};
+	$: modelCapabilitiesById = Object.fromEntries(
+		($models ?? []).map((model) => [model.id, model.info?.meta?.capabilities ?? {}])
 	);
 
+	const getCapableModelIds = (
+		modelIds: string[],
+		capability: ModelCapability,
+		capabilitiesById: ModelCapabilitiesById
+	) => modelIds.filter((id) => capabilitiesById[id]?.[capability] ?? true);
+
+	let visionCapableModels = [];
+	$: visionCapableModels = getCapableModelIds(selectedModelIds, 'vision', modelCapabilitiesById);
+
 	let fileUploadCapableModels = [];
-	$: fileUploadCapableModels = (atSelectedModel?.id ? [atSelectedModel.id] : selectedModels).filter(
-		(model) => $models.find((m) => m.id === model)?.info?.meta?.capabilities?.file_upload ?? true
+	$: fileUploadCapableModels = getCapableModelIds(
+		selectedModelIds,
+		'file_upload',
+		modelCapabilitiesById
 	);
 
 	let fileUploadEnabled = true;
@@ -497,24 +526,24 @@
 		($_user?.role === 'admin' || $_user?.permissions?.chat?.file_upload);
 
 	let webSearchCapableModels = [];
-	$: webSearchCapableModels = (atSelectedModel?.id ? [atSelectedModel.id] : selectedModels).filter(
-		(model) => $models.find((m) => m.id === model)?.info?.meta?.capabilities?.web_search ?? true
+	$: webSearchCapableModels = getCapableModelIds(
+		selectedModelIds,
+		'web_search',
+		modelCapabilitiesById
 	);
 
 	let imageGenerationCapableModels = [];
-	$: imageGenerationCapableModels = (
-		atSelectedModel?.id ? [atSelectedModel.id] : selectedModels
-	).filter(
-		(model) =>
-			$models.find((m) => m.id === model)?.info?.meta?.capabilities?.image_generation ?? true
+	$: imageGenerationCapableModels = getCapableModelIds(
+		selectedModelIds,
+		'image_generation',
+		modelCapabilitiesById
 	);
 
 	let codeInterpreterCapableModels = [];
-	$: codeInterpreterCapableModels = (
-		atSelectedModel?.id ? [atSelectedModel.id] : selectedModels
-	).filter(
-		(model) =>
-			$models.find((m) => m.id === model)?.info?.meta?.capabilities?.code_interpreter ?? true
+	$: codeInterpreterCapableModels = getCapableModelIds(
+		selectedModelIds,
+		'code_interpreter',
+		modelCapabilitiesById
 	);
 
 	let documentWriterCapableModels = [];
@@ -526,8 +555,10 @@
 	);
 
 	let terminalCapableModels = [];
-	$: terminalCapableModels = (atSelectedModel?.id ? [atSelectedModel.id] : selectedModels).filter(
-		(model) => $models.find((m) => m.id === model)?.info?.meta?.capabilities?.terminal ?? true
+	$: terminalCapableModels = getCapableModelIds(
+		selectedModelIds,
+		'terminal',
+		modelCapabilitiesById
 	);
 
 	let toggleFilters = [];
@@ -538,25 +569,25 @@
 	let showToolsButton = false;
 	$: showToolsButton = ($tools ?? []).length > 0 || ($toolServers ?? []).length > 0;
 
+	let showSkillsButton = false;
+	$: showSkillsButton = ($skills ?? []).some((skill) => skill.is_active);
+
 	let showWebSearchButton = false;
 	$: showWebSearchButton =
-		(atSelectedModel?.id ? [atSelectedModel.id] : selectedModels).length ===
-			webSearchCapableModels.length &&
+		selectedModelIds.length === webSearchCapableModels.length &&
 		$config?.features?.enable_web_search &&
 		($_user.role === 'admin' || $_user?.permissions?.features?.web_search);
 
 	let showImageGenerationButton = false;
 	$: showImageGenerationButton =
-		(atSelectedModel?.id ? [atSelectedModel.id] : selectedModels).length ===
-			imageGenerationCapableModels.length &&
+		selectedModelIds.length === imageGenerationCapableModels.length &&
 		$config?.features?.enable_image_generation &&
 		($_user.role === 'admin' || $_user?.permissions?.features?.image_generation);
 
 	let showCodeInterpreterButton = false;
 	$: showCodeInterpreterButton =
 		!$selectedTerminalId &&
-		(atSelectedModel?.id ? [atSelectedModel.id] : selectedModels).length ===
-			codeInterpreterCapableModels.length &&
+		selectedModelIds.length === codeInterpreterCapableModels.length &&
 		$config?.features?.enable_code_interpreter &&
 		($_user.role === 'admin' || $_user?.permissions?.features?.code_interpreter);
 
@@ -908,7 +939,7 @@
 			return null;
 		}
 
-		if (fileUploadCapableModels.length !== selectedModels.length) {
+		if (fileUploadCapableModels.length !== selectedModelIds.length) {
 			toast.error($i18n.t('Model(s) do not support file upload'));
 			if (existingItemId) {
 				files = files.filter((item) => item?.itemId !== existingItemId);
@@ -1183,8 +1214,13 @@
 	const onDragOver = (e: DragEvent) => {
 		e.preventDefault();
 
-		// Check if a file or a sidebar chat item is being dragged.
-		if (e.dataTransfer?.types?.includes('Files') || e.dataTransfer?.types?.includes('text/plain')) {
+		// Check if a file or a sidebar chat/folder item is being dragged.
+		// Use a custom MIME type to distinguish intentional drags from SortableJS reorder drags
+		// (e.g. Notes, Workspace, pinned Models), which also set 'text/plain'.
+		if (
+			e.dataTransfer?.types?.includes('Files') ||
+			e.dataTransfer?.types?.includes('application/x-open-webui-drag')
+		) {
 			dragged = true;
 		} else {
 			dragged = false;
@@ -1202,7 +1238,7 @@
 		e.preventDefault();
 		console.log(e);
 
-		// Check if the dropped data is a sidebar chat item
+		// Check if the dropped data is a sidebar chat, folder, note, or model item
 		const textData = e.dataTransfer?.getData('text/plain');
 		if (textData) {
 			try {
@@ -1221,6 +1257,49 @@
 						if (!files.find((f) => f.id === chatItem.id)) {
 							files = [...files, chatItem];
 						}
+					}
+					dragged = false;
+					e.stopPropagation();
+					return;
+				} else if (data.type === 'folder' && data.id) {
+					// Fetch the folder to get its name, then add as a reference folder
+					const folder = await getFolderById(localStorage.token, data.id);
+					if (folder) {
+						const folderItem = {
+							type: 'folder',
+							id: folder.id,
+							name: folder.name,
+							status: 'processed'
+						};
+						if (!files.find((f) => f.id === folderItem.id)) {
+							files = [...files, folderItem];
+						}
+					}
+					dragged = false;
+					e.stopPropagation();
+					return;
+				} else if (data.type === 'note' && data.id) {
+					// Fetch the note to get its title, then add as a reference note
+					const note = await getNoteById(localStorage.token, data.id);
+					if (note) {
+						const noteItem = {
+							type: 'note',
+							id: note.id,
+							name: note.title,
+							status: 'processed'
+						};
+						if (!files.find((f) => f.id === noteItem.id)) {
+							files = [...files, noteItem];
+						}
+					}
+					dragged = false;
+					e.stopPropagation();
+					return;
+				} else if (data.type === 'model' && data.id) {
+					// Find the model from the store and set as @-selected model
+					const model = $models.find((m) => m.id === data.id);
+					if (model) {
+						atSelectedModel = model;
 					}
 					dragged = false;
 					e.stopPropagation();
@@ -1432,8 +1511,6 @@
 				dropzoneElement.addEventListener('drop', onDrop, true);
 				dropzoneElement.addEventListener('dragleave', onDragLeave);
 			}
-
-			tools.set(await getTools(localStorage.token));
 		};
 		initialize();
 
@@ -1456,6 +1533,7 @@
 </script>
 
 <ToolServersModal bind:show={showTools} {selectedToolIds} />
+<SkillsModal bind:show={showSkills} {selectedSkillIds} />
 
 <ConfluencePickerModal
 	bind:show={showConfluencePicker}
@@ -1669,11 +1747,11 @@
 														alt=""
 														imageClassName=" size-10 rounded-xl object-cover"
 													/>
-													{#if atSelectedModel ? visionCapableModels.length === 0 : selectedModels.length !== visionCapableModels.length}
+													{#if selectedModelIds.length !== visionCapableModels.length}
 														<Tooltip
 															className=" absolute top-1 left-1"
 															content={$i18n.t('{{ models }}', {
-																models: [...(atSelectedModel ? [atSelectedModel] : selectedModels)]
+																models: selectedModelIds
 																	.filter((id) => !visionCapableModels.includes(id))
 																	.join(', ')
 															})}
@@ -1804,7 +1882,7 @@
 														($settings?.promptAutocomplete ?? false)}
 													generateAutoCompletion={async (text) => {
 														if (selectedModelIds.length === 0 || !selectedModelIds.at(0)) {
-															toast.error($i18n.t('Please select a model first.'));
+															return null;
 														}
 
 														const res = await generateAutoCompletion(
@@ -2455,12 +2533,7 @@
 											<Tooltip content={$i18n.t('Click to connect')} placement="top">
 												<button
 													on:click|preventDefault={() => {
-														sessionStorage.setItem('pendingOAuthToolId', pendingTool.id);
-														const authUrl = getOAuthClientAuthorizationUrl(
-															pendingTool.serverId,
-															pendingTool.authType ?? 'mcp'
-														);
-														window.open(authUrl, '_self', 'noopener');
+														initiateOAuthRedirect(pendingTool);
 													}}
 													type="button"
 													class="group px-2 py-[5px] flex gap-1.5 items-center text-xs rounded-full transition-colors duration-300 focus:outline-hidden max-w-full overflow-hidden

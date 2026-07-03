@@ -24,6 +24,7 @@ import time
 from abc import ABC, abstractmethod
 from typing import Optional, Dict, Any
 
+from open_webui.models.config import Config
 from open_webui.models.knowledge import Knowledges
 
 log = logging.getLogger(__name__)
@@ -180,7 +181,7 @@ class SyncProvider(ABC):
             token_provider = _refresh
 
         # Read shared-loader flag from app config (set by main.py at startup).
-        use_shared_loader = bool(getattr(app.state.config, 'USE_SHARED_LOADER', False))
+        use_shared_loader = bool(await Config.get('sync.use_shared_loader', False))
 
         worker = self.create_worker(
             knowledge_id=knowledge_id,

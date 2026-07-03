@@ -137,7 +137,7 @@ RUN apt-get update && \
     apt-get install --only-upgrade -y libcap2 libsystemd0 libudev1 libgnutls30 \
     libgssapi-krb5-2 libk5crypto3 libkrb5-3 libkrb5support0 && \
     apt-get install -y --no-install-recommends \
-    git build-essential pandoc gcc netcat-openbsd curl jq \
+    git build-essential pandoc gcc netcat-openbsd curl jq ca-certificates \
     libmariadb-dev \
     python3-dev linux-libc-dev \
     ffmpeg libsm6 libxext6 zstd \

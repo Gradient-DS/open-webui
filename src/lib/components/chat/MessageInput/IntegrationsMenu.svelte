@@ -12,7 +12,7 @@
 		terminalServers
 	} from '$lib/stores';
 
-	import { getOAuthClientAuthorizationUrl } from '$lib/apis/configs';
+	import { initiateOAuthRedirect } from '$lib/apis/configs';
 	import { deleteOAuthSession } from '$lib/apis/auths';
 	import { getTools } from '$lib/apis/tools';
 	import { isFeatureEnabled } from '$lib/utils/features';
@@ -36,6 +36,7 @@
 	const i18n = getContext('i18n');
 
 	export let selectedToolIds: string[] = [];
+	export let selectedSkillIds: string[] = [];
 
 	export let selectedModels: string[] = [];
 	export let fileUploadCapableModels: string[] = [];
@@ -53,6 +54,7 @@
 
 	export let onShowValves: Function;
 	export let onClose: Function;
+	export let onWebSearchToggle: Function = () => {};
 	export let closeOnOutsideClick = true;
 
 	let show = false;
@@ -230,11 +232,16 @@
 						>
 							<button
 								class="flex w-full justify-between gap-2 items-center px-3 py-1.5 text-sm cursor-pointer rounded-xl hover:bg-gray-50 dark:hover:bg-gray-800/50"
+								aria-pressed={webSearchEnabled}
+								aria-label={webSearchEnabled
+									? $i18n.t('Disable Web Search')
+									: $i18n.t('Enable Web Search')}
 								on:click={() => {
 									webSearchEnabled = !webSearchEnabled;
 									if (webSearchEnabled) {
 										imageGenerationEnabled = false;
 									}
+									onWebSearchToggle(webSearchEnabled);
 								}}
 							>
 								<div class="flex-1 truncate">
@@ -269,6 +276,10 @@
 						>
 							<button
 								class="flex w-full justify-between gap-2 items-center px-3 py-1.5 text-sm cursor-pointer rounded-xl hover:bg-gray-50 dark:hover:bg-gray-800/50"
+								aria-pressed={imageGenerationEnabled}
+								aria-label={imageGenerationEnabled
+									? $i18n.t('Disable Image Generation')
+									: $i18n.t('Enable Image Generation')}
 								on:click={() => {
 									imageGenerationEnabled = !imageGenerationEnabled;
 									if (imageGenerationEnabled) {
@@ -359,14 +370,13 @@
 								if (!(tools[toolId]?.authenticated ?? true)) {
 									e.preventDefault();
 
-									let parts = toolId.split(':');
-									let serverId = parts?.at(-1) ?? toolId;
-
-									// Persist the tool ID so we can re-enable it after OAuth redirect
-									sessionStorage.setItem('pendingOAuthToolId', toolId);
-
-									const authUrl = getOAuthClientAuthorizationUrl(serverId, 'mcp');
-									window.open(authUrl, '_self', 'noopener');
+									const parts = toolId.split(':');
+									initiateOAuthRedirect({
+										id: toolId,
+										serverId: parts.at(-1) ?? toolId,
+										authType:
+											parts.length > 1 ? (parts[0] === 'server' ? parts[1] : parts[0]) : null
+									});
 								} else {
 									tools[toolId].enabled = !tools[toolId].enabled;
 

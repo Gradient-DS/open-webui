@@ -23,6 +23,21 @@ def _chunked_doc(source_id: str = 'file-abc', filename: str = 'report.pdf') -> C
     return ChunkedTextDocument(source_id=source_id, filename=filename, chunks=['chunk one', 'chunk two'])
 
 
+def _patch_config(monkeypatch, values: dict) -> None:
+    """Route the endpoint's per-key Config reads to a test-local dict.
+
+    /ingest reads ``integrations.providers`` (INTEGRATION_PROVIDERS) and, on the
+    target='file' path, ``rag.bypass_embedding_and_retrieval``
+    (BYPASS_EMBEDDING_AND_RETRIEVAL) via ``await Config.get(...)``; patching
+    ``Config.get`` keeps the tests hermetic — no config DB involved.
+    """
+
+    async def fake_get(key, default=None):
+        return values.get(key, default)
+
+    monkeypatch.setattr(integrations_router.Config, 'get', staticmethod(fake_get))
+
+
 # --- IngestCollection.target discriminator ---------------------------------
 
 
@@ -194,7 +209,7 @@ def _loader_principal_app(provider_slug: str, monkeypatch):
     app = FastAPI()
     app.include_router(integrations_router.router, prefix='/api/v1/integrations')
     app.dependency_overrides[get_integration_principal] = lambda: principal
-    app.state.config = MagicMock(INTEGRATION_PROVIDERS={}, BYPASS_EMBEDDING_AND_RETRIEVAL=False)
+    _patch_config(monkeypatch, {'integrations.providers': {}, 'rag.bypass_embedding_and_retrieval': False})
     return app
 
 
@@ -481,15 +496,18 @@ def _kb_loader_app(monkeypatch, *, max_files_per_kb: int):
     app = FastAPI()
     app.include_router(integrations_router.router, prefix='/api/v1/integrations')
     app.dependency_overrides[get_integration_principal] = lambda: principal
-    app.state.config = MagicMock(
-        INTEGRATION_PROVIDERS={
-            'onedrive': {
-                'max_files_per_kb': max_files_per_kb,
-                'max_documents_per_request': 50,
-                'custom_metadata_fields': [],
-            }
+    _patch_config(
+        monkeypatch,
+        {
+            'integrations.providers': {
+                'onedrive': {
+                    'max_files_per_kb': max_files_per_kb,
+                    'max_documents_per_request': 50,
+                    'custom_metadata_fields': [],
+                }
+            },
+            'rag.bypass_embedding_and_retrieval': False,
         },
-        BYPASS_EMBEDDING_AND_RETRIEVAL=False,
     )
     return app
 

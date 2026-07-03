@@ -9,25 +9,25 @@ import uuid
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Union
 
-from open_webui.retrieval.vector.main import (
-    VectorDBBase,
-    VectorItem,
-    SearchResult,
-    GetResult,
-)
-from open_webui.retrieval.vector.utils import process_metadata
 from weaviate.exceptions import UnexpectedStatusCodeError
 from open_webui.config import (
-    WEAVIATE_HTTP_HOST,
-    WEAVIATE_GRPC_HOST,
-    WEAVIATE_HTTP_PORT,
-    WEAVIATE_GRPC_PORT,
     WEAVIATE_API_KEY,
-    WEAVIATE_HTTP_SECURE,
+    WEAVIATE_GRPC_HOST,
+    WEAVIATE_GRPC_PORT,
     WEAVIATE_GRPC_SECURE,
+    WEAVIATE_HTTP_HOST,
+    WEAVIATE_HTTP_PORT,
+    WEAVIATE_HTTP_SECURE,
     WEAVIATE_SKIP_INIT_CHECKS,
     ENABLE_WEAVIATE_BQ_QUANTIZATION,
 )
+from open_webui.retrieval.vector.main import (
+    GetResult,
+    SearchResult,
+    VectorDBBase,
+    VectorItem,
+)
+from open_webui.retrieval.vector.utils import process_metadata
 
 log = logging.getLogger(__name__)
 

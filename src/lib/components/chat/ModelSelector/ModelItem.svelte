@@ -32,7 +32,7 @@
 	export let selectedModelIdx: number = -1;
 	export let item: any = {};
 	export let index: number = -1;
-	export let value: string = '';
+	export let value: string | null = '';
 
 	$: profile = resolveModelProfile(item?.model ?? {}, $config?.model_profiles ?? [], $i18n.language);
 	$: displayName = item?.label || item?.value || '';
@@ -65,6 +65,7 @@
 	export let unloadModelHandler: (modelValue: string) => void = () => {};
 	export let pinModelHandler: (modelId: string) => void = () => {};
 	export let deleteModelHandler: (model: any) => void = () => {};
+	export let selectionOnly = false;
 
 	export let onClick: () => void = () => {};
 
@@ -266,7 +267,7 @@
 			<ModelProfile {profile} />
 		{/if}
 		<div class="flex items-center justify-end gap-1.5 w-8 shrink-0">
-		{#if $user?.role === 'admin' && item.model.loaded}
+		{#if !selectionOnly && $user?.role === 'admin' && item.model.loaded}
 			<Tooltip
 				content={`${$i18n.t('Eject')}`}
 				className="flex-shrink-0 group-hover/item:opacity-100 opacity-0 "
@@ -285,27 +286,29 @@
 			</Tooltip>
 		{/if}
 
-		<ModelItemMenu
-			bind:show={showMenu}
-			model={item.model}
-			{pinModelHandler}
-			{deleteModelHandler}
-			copyLinkHandler={() => {
-				copyLinkHandler(item.model);
-			}}
-		>
-			<button
-				aria-label={`${$i18n.t('More Options')}`}
-				class="flex"
-				on:click={(e) => {
-					e.preventDefault();
-					e.stopPropagation();
-					showMenu = !showMenu;
+		{#if !selectionOnly}
+			<ModelItemMenu
+				bind:show={showMenu}
+				model={item.model}
+				{pinModelHandler}
+				{deleteModelHandler}
+				copyLinkHandler={() => {
+					copyLinkHandler(item.model);
 				}}
 			>
-				<EllipsisHorizontal />
-			</button>
-		</ModelItemMenu>
+				<button
+					aria-label={`${$i18n.t('More Options')}`}
+					class="flex"
+					on:click={(e) => {
+						e.preventDefault();
+						e.stopPropagation();
+						showMenu = !showMenu;
+					}}
+				>
+					<EllipsisHorizontal />
+				</button>
+			</ModelItemMenu>
+		{/if}
 
 			<!-- Always reserve the checkmark slot so the selected row's meters stay aligned with the rest -->
 			<div class="size-3 flex items-center justify-center shrink-0">

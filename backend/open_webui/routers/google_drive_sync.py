@@ -8,6 +8,7 @@ from typing import List, Literal, Optional
 import logging
 
 from open_webui.utils.auth import get_verified_user
+from open_webui.models.config import Config
 from open_webui.models.users import UserModel
 from open_webui.config import GOOGLE_CLIENT_SECRET
 from open_webui.services.sync.router import (
@@ -122,7 +123,7 @@ async def _sync_items_background(
     """Background task to sync multiple Google Drive items."""
     from open_webui.services.google_drive.sync_worker import GoogleDriveSyncWorker
 
-    use_shared_loader = bool(getattr(app.state.config, 'USE_SHARED_LOADER', False))
+    use_shared_loader = bool(await Config.get('sync.use_shared_loader', False))
 
     worker = GoogleDriveSyncWorker(
         knowledge_id=knowledge_id,

@@ -19,23 +19,36 @@ import pytest
 from fastapi import HTTPException, status
 from fastapi import UploadFile
 
+from open_webui.routers import files as files_router
 from open_webui.routers.files import upload_file_handler
 
 
-def _request(engine: str, stt: list | None = None) -> MagicMock:
-    """Build a minimal FastAPI Request stand-in.
+def _patch_config(monkeypatch, *, engine: str, stt: list | None = None, allowed: list | None = None) -> None:
+    """Route the handler's per-key Config reads to test values.
 
-    The handler only touches ``request.app.state.config`` for these checks,
-    so we don't need a real ASGI scope.
+    upload_file_handler reads ``rag.content_extraction_engine``
+    (CONTENT_EXTRACTION_ENGINE), ``audio.stt.supported_content_types``
+    (STT_SUPPORTED_CONTENT_TYPES) and ``rag.file.allowed_extensions``
+    (ALLOWED_FILE_EXTENSIONS) via ``await Config.get(...)``; patching
+    ``Config.get`` keeps the tests hermetic — no config DB involved.
+    ``rag.file.max_size`` intentionally resolves to None (no size cap).
     """
-    cfg = SimpleNamespace(
-        CONTENT_EXTRACTION_ENGINE=engine,
-        STT_SUPPORTED_CONTENT_TYPES=stt or [],
-        ALLOWED_FILE_EXTENSIONS=None,
-    )
-    request = MagicMock()
-    request.app.state.config = cfg
-    return request
+    values = {
+        'rag.content_extraction_engine': engine,
+        'audio.stt.supported_content_types': stt or [],
+        'rag.file.allowed_extensions': allowed,
+    }
+
+    async def fake_get(key, default=None):
+        return values.get(key, default)
+
+    monkeypatch.setattr(files_router.Config, 'get', staticmethod(fake_get))
+
+
+def _request() -> MagicMock:
+    """Minimal FastAPI Request stand-in — config now comes from the per-key
+    store (see ``_patch_config``), so no real ASGI scope is needed."""
+    return MagicMock()
 
 
 def _upload_file(filename: str, content_type: str) -> UploadFile:
@@ -47,8 +60,9 @@ def _user() -> SimpleNamespace:
 
 
 @pytest.mark.asyncio
-async def test_image_upload_rejected_when_engine_does_not_support():
-    request = _request(engine='tika')
+async def test_image_upload_rejected_when_engine_does_not_support(monkeypatch):
+    _patch_config(monkeypatch, engine='tika')
+    request = _request()
     file = _upload_file('photo.png', 'image/png')
 
     with pytest.raises(HTTPException) as exc_info:
@@ -59,8 +73,9 @@ async def test_image_upload_rejected_when_engine_does_not_support():
 
 
 @pytest.mark.asyncio
-async def test_video_upload_rejected_when_engine_does_not_support():
-    request = _request(engine='tika')
+async def test_video_upload_rejected_when_engine_does_not_support(monkeypatch):
+    _patch_config(monkeypatch, engine='tika')
+    request = _request()
     file = _upload_file('clip.mp4', 'video/mp4')
 
     with pytest.raises(HTTPException) as exc_info:
@@ -71,12 +86,13 @@ async def test_video_upload_rejected_when_engine_does_not_support():
 
 @pytest.mark.parametrize('engine', ['external', 'datalab_marker', 'mistral_ocr'])
 @pytest.mark.asyncio
-async def test_image_upload_passes_415_check_for_image_capable_engines(engine):
+async def test_image_upload_passes_415_check_for_image_capable_engines(engine, monkeypatch):
     """The 415 guard returns control to the rest of the handler for engines
     that DO process images. The handler then fails downstream because we
     haven't mocked Storage/DB — that's fine; this test only asserts the
     415 didn't fire."""
-    request = _request(engine=engine)
+    _patch_config(monkeypatch, engine=engine)
+    request = _request()
     file = _upload_file('photo.png', 'image/png')
 
     with pytest.raises(HTTPException) as exc_info:
@@ -86,9 +102,10 @@ async def test_image_upload_passes_415_check_for_image_capable_engines(engine):
 
 
 @pytest.mark.asyncio
-async def test_audio_upload_passes_415_check_when_stt_handles_it():
+async def test_audio_upload_passes_415_check_when_stt_handles_it(monkeypatch):
     """STT-supported content types skip the 415 (transcribe path takes over)."""
-    request = _request(engine='tika', stt=['audio/mpeg'])
+    _patch_config(monkeypatch, engine='tika', stt=['audio/mpeg'])
+    request = _request()
     file = _upload_file('clip.mp3', 'audio/mpeg')
 
     # audio/* doesn't match the image/video startswith filter, so it never
@@ -101,10 +118,11 @@ async def test_audio_upload_passes_415_check_when_stt_handles_it():
 
 
 @pytest.mark.asyncio
-async def test_unsupported_content_type_with_process_false_skips_check():
+async def test_unsupported_content_type_with_process_false_skips_check(monkeypatch):
     """process=False means the file is stored but not parsed; the 415 only
     fires when processing is requested."""
-    request = _request(engine='tika')
+    _patch_config(monkeypatch, engine='tika')
+    request = _request()
     file = _upload_file('photo.png', 'image/png')
 
     with pytest.raises(HTTPException) as exc_info:
@@ -113,22 +131,11 @@ async def test_unsupported_content_type_with_process_false_skips_check():
     assert exc_info.value.status_code != status.HTTP_415_UNSUPPORTED_MEDIA_TYPE
 
 
-def _request_allowlist(allowed: list[str], engine: str = 'external') -> MagicMock:
-    """Request stand-in with a configured upload allow-list."""
-    cfg = SimpleNamespace(
-        CONTENT_EXTRACTION_ENGINE=engine,
-        STT_SUPPORTED_CONTENT_TYPES=[],
-        ALLOWED_FILE_EXTENSIONS=allowed,
-    )
-    request = MagicMock()
-    request.app.state.config = cfg
-    return request
-
-
 @pytest.mark.asyncio
-async def test_disallowed_extension_rejected_by_allowlist():
+async def test_disallowed_extension_rejected_by_allowlist(monkeypatch):
     """A file with a real, non-allowed extension fast-rejects with a 400."""
-    request = _request_allowlist(['pdf'])
+    _patch_config(monkeypatch, engine='external', allowed=['pdf'])
+    request = _request()
     file = _upload_file('logo.svg', 'image/svg+xml')
 
     with pytest.raises(HTTPException) as exc_info:
@@ -139,12 +146,13 @@ async def test_disallowed_extension_rejected_by_allowlist():
 
 
 @pytest.mark.asyncio
-async def test_empty_extension_passes_allowlist():
+async def test_empty_extension_passes_allowlist(monkeypatch):
     """A genuinely extension-less document (unknown content type → no derived
     extension) must NOT be rejected by the allow-list — legit no-extension docs
     (e.g. exported pages) have to be ingestable. It fails downstream here
     (Storage/DB unmocked); we only assert the allow-list 400 did not fire."""
-    request = _request_allowlist(['pdf'])
+    _patch_config(monkeypatch, engine='external', allowed=['pdf'])
+    request = _request()
     file = _upload_file('ASB - Microsoft Entra admin center', 'application/x-unknowntype')
 
     with pytest.raises(HTTPException) as exc_info:

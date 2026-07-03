@@ -28,16 +28,30 @@ def fake_principal():
     return AgentPrincipal(agent_id='langgraph_dev', user=user)
 
 
-def _build_app(*, fake_principal, agent_search_enabled=True):
+def _patch_agent_search(monkeypatch, enabled: bool) -> None:
+    """Route the per-key Config read for the feature flag to a test value.
+
+    The router gates every endpoint on ``await Config.get('agent_search.enabled')``
+    (AGENT_SEARCH_ENABLED's storage key); patching ``Config.get`` keeps the
+    tests hermetic — no config DB involved.
+    """
+
+    async def fake_get(key, default=None):
+        return {'agent_search.enabled': enabled}.get(key, default)
+
+    monkeypatch.setattr(internal_retrieval_router.Config, 'get', staticmethod(fake_get))
+
+
+def _build_app(monkeypatch, *, fake_principal, agent_search_enabled=True):
+    _patch_agent_search(monkeypatch, agent_search_enabled)
     app = FastAPI()
     app.include_router(internal_retrieval_router.router, prefix='/api/v1/internal/retrieval')
-    app.state.config = SimpleNamespace(AGENT_SEARCH_ENABLED=agent_search_enabled)
     app.dependency_overrides[get_agent_principal] = lambda: fake_principal
     return app
 
 
 def test_query_returns_results_when_enabled(monkeypatch, fake_principal):
-    app = _build_app(fake_principal=fake_principal)
+    app = _build_app(monkeypatch, fake_principal=fake_principal)
 
     captured = {}
 
@@ -86,7 +100,7 @@ def test_query_returns_results_when_enabled(monkeypatch, fake_principal):
 
 
 def test_query_returns_404_when_feature_flag_disabled(monkeypatch, fake_principal):
-    app = _build_app(fake_principal=fake_principal, agent_search_enabled=False)
+    app = _build_app(monkeypatch, fake_principal=fake_principal, agent_search_enabled=False)
 
     monkeypatch.setattr(
         internal_retrieval_router,
@@ -99,8 +113,8 @@ def test_query_returns_404_when_feature_flag_disabled(monkeypatch, fake_principa
     assert resp.status_code == 404
 
 
-def test_query_validates_request_body(fake_principal):
-    app = _build_app(fake_principal=fake_principal)
+def test_query_validates_request_body(monkeypatch, fake_principal):
+    app = _build_app(monkeypatch, fake_principal=fake_principal)
     client = TestClient(app)
 
     # Empty query is rejected by Field(min_length=1).
@@ -122,7 +136,7 @@ def test_query_validates_request_body(fake_principal):
 
 
 def test_query_defaults_top_k_when_omitted(monkeypatch, fake_principal):
-    app = _build_app(fake_principal=fake_principal)
+    app = _build_app(monkeypatch, fake_principal=fake_principal)
     seen = {}
 
     async def fake_run_agent_search(*, request, user, query, top_k, kb_ids):
@@ -142,7 +156,7 @@ def test_query_defaults_top_k_when_omitted(monkeypatch, fake_principal):
 
 
 def test_accessible_kbs_returns_payload_when_enabled(monkeypatch, fake_principal):
-    app = _build_app(fake_principal=fake_principal)
+    app = _build_app(monkeypatch, fake_principal=fake_principal)
 
     captured = {}
 
@@ -187,7 +201,7 @@ def test_accessible_kbs_returns_payload_when_enabled(monkeypatch, fake_principal
 
 
 def test_accessible_kbs_returns_404_when_disabled(monkeypatch, fake_principal):
-    app = _build_app(fake_principal=fake_principal, agent_search_enabled=False)
+    app = _build_app(monkeypatch, fake_principal=fake_principal, agent_search_enabled=False)
     monkeypatch.setattr(
         internal_retrieval_router,
         'resolve_accessible_kbs',
@@ -199,7 +213,7 @@ def test_accessible_kbs_returns_404_when_disabled(monkeypatch, fake_principal):
 
 
 def test_accessible_kbs_passes_kb_ids_subset(monkeypatch, fake_principal):
-    app = _build_app(fake_principal=fake_principal)
+    app = _build_app(monkeypatch, fake_principal=fake_principal)
     seen = {}
 
     async def fake_resolve(user, *, kb_ids=None):
@@ -216,7 +230,7 @@ def test_accessible_kbs_passes_kb_ids_subset(monkeypatch, fake_principal):
 
 
 def test_accessible_kbs_no_kb_ids_param(monkeypatch, fake_principal):
-    app = _build_app(fake_principal=fake_principal)
+    app = _build_app(monkeypatch, fake_principal=fake_principal)
     seen = {}
 
     async def fake_resolve(user, *, kb_ids=None):
@@ -245,7 +259,7 @@ def _admin_principal():
 
 def test_accessible_files_returns_owned(monkeypatch, fake_principal):
     """Owner of a file gets it back."""
-    app = _build_app(fake_principal=fake_principal)
+    app = _build_app(monkeypatch, fake_principal=fake_principal)
 
     async def fake_has_access(*, file_id, access_type, user):
         return file_id == 'file-owned' and user.id == fake_principal.user.id
@@ -264,7 +278,7 @@ def test_accessible_files_returns_owned(monkeypatch, fake_principal):
 
 def test_accessible_files_filters_inaccessible(monkeypatch, fake_principal):
     """A file the user has no access to is dropped from the response."""
-    app = _build_app(fake_principal=fake_principal)
+    app = _build_app(monkeypatch, fake_principal=fake_principal)
 
     monkeypatch.setattr(
         internal_retrieval_router,
@@ -284,7 +298,7 @@ def test_accessible_files_filters_inaccessible(monkeypatch, fake_principal):
 def test_accessible_files_admin_does_not_bypass(monkeypatch):
     """Admin role does NOT grant access to files they don't own/have grants on."""
     admin_principal = _admin_principal()
-    app = _build_app(fake_principal=admin_principal)
+    app = _build_app(monkeypatch, fake_principal=admin_principal)
 
     # has_access_to_file is the only check — no admin shortcut.
     monkeypatch.setattr(
@@ -304,7 +318,7 @@ def test_accessible_files_admin_does_not_bypass(monkeypatch):
 
 def test_accessible_files_mixed_subset(monkeypatch, fake_principal):
     """Returns only the owned/accessible subset, drops the rest."""
-    app = _build_app(fake_principal=fake_principal)
+    app = _build_app(monkeypatch, fake_principal=fake_principal)
 
     accessible = {'file-owned', 'file-granted'}
 
@@ -322,9 +336,9 @@ def test_accessible_files_mixed_subset(monkeypatch, fake_principal):
     assert sorted(resp.json()['file_ids']) == ['file-granted', 'file-owned']
 
 
-def test_accessible_files_requires_query_param(fake_principal):
+def test_accessible_files_requires_query_param(monkeypatch, fake_principal):
     """Empty file_ids → 400."""
-    app = _build_app(fake_principal=fake_principal)
+    app = _build_app(monkeypatch, fake_principal=fake_principal)
     client = TestClient(app)
     resp = client.get(
         '/api/v1/internal/retrieval/accessible-files',
@@ -335,7 +349,7 @@ def test_accessible_files_requires_query_param(fake_principal):
 
 def test_accessible_files_requires_agent_search_enabled(monkeypatch, fake_principal):
     """Feature-flag gate matches /accessible-kbs behavior."""
-    app = _build_app(fake_principal=fake_principal, agent_search_enabled=False)
+    app = _build_app(monkeypatch, fake_principal=fake_principal, agent_search_enabled=False)
 
     monkeypatch.setattr(
         internal_retrieval_router,
@@ -364,7 +378,7 @@ def _accessible_kb_stub(kb_id: str):
 
 
 def test_knowledge_files_returns_payload_when_accessible(monkeypatch, fake_principal):
-    app = _build_app(fake_principal=fake_principal)
+    app = _build_app(monkeypatch, fake_principal=fake_principal)
 
     seen = {}
 
@@ -424,7 +438,7 @@ def test_knowledge_files_returns_payload_when_accessible(monkeypatch, fake_princ
 
 
 def test_knowledge_files_passes_query_and_pagination(monkeypatch, fake_principal):
-    app = _build_app(fake_principal=fake_principal)
+    app = _build_app(monkeypatch, fake_principal=fake_principal)
 
     seen = {}
 
@@ -455,7 +469,7 @@ def test_knowledge_files_passes_query_and_pagination(monkeypatch, fake_principal
 
 
 def test_knowledge_files_returns_404_when_inaccessible(monkeypatch, fake_principal):
-    app = _build_app(fake_principal=fake_principal)
+    app = _build_app(monkeypatch, fake_principal=fake_principal)
 
     async def fake_resolve(user, *, kb_id):
         return None
@@ -475,7 +489,7 @@ def test_knowledge_files_returns_404_when_inaccessible(monkeypatch, fake_princip
 
 
 def test_knowledge_files_returns_404_when_feature_flag_disabled(monkeypatch, fake_principal):
-    app = _build_app(fake_principal=fake_principal, agent_search_enabled=False)
+    app = _build_app(monkeypatch, fake_principal=fake_principal, agent_search_enabled=False)
 
     monkeypatch.setattr(
         internal_retrieval_router,
@@ -492,7 +506,7 @@ def test_knowledge_files_admin_does_not_bypass(monkeypatch):
     """Admin role does NOT grant access via this route; resolve_accessible_kb is
     the only check, mirroring the no-admin-shortcut posture on /accessible-files."""
     admin_principal = _admin_principal()
-    app = _build_app(fake_principal=admin_principal)
+    app = _build_app(monkeypatch, fake_principal=admin_principal)
 
     async def fake_resolve(user, *, kb_id):
         return None
@@ -511,7 +525,7 @@ def test_knowledge_files_admin_does_not_bypass(monkeypatch):
 
 def test_knowledge_files_403_when_suspended(monkeypatch, fake_principal):
     """Suspended KB → 403 even for an accessible user; no admin bypass on this surface."""
-    app = _build_app(fake_principal=fake_principal)
+    app = _build_app(monkeypatch, fake_principal=fake_principal)
 
     async def fake_resolve(user, *, kb_id):
         return _accessible_kb_stub(kb_id)
@@ -551,9 +565,9 @@ def test_knowledge_files_401_when_bearer_missing(monkeypatch):
 
     monkeypatch.setenv('AGENT_API_KEY', 'correct-horse-' + 'b' * 24)
 
+    _patch_agent_search(monkeypatch, True)
     app = FastAPI()
     app.include_router(internal_retrieval_router.router, prefix='/api/v1/internal/retrieval')
-    app.state.config = SimpleNamespace(AGENT_SEARCH_ENABLED=True)
 
     # Stub Users.get_user_by_id so a valid bearer + acting user could resolve;
     # we still verify the 401 path here, but this keeps the fixture realistic.
@@ -587,7 +601,7 @@ def test_files_id_content_admin_no_longer_shortcut(monkeypatch):
     """Admin role does not grant /files/{id}/content access on files the admin
     doesn't own and has no grant on."""
     admin_principal = _admin_principal()
-    app = _build_app(fake_principal=admin_principal)
+    app = _build_app(monkeypatch, fake_principal=admin_principal)
 
     fake_file = SimpleNamespace(
         id='file-private-other-user',
@@ -623,7 +637,7 @@ def _patch_files_and_storage(monkeypatch, *, file, storage_path):
 
     class _FakeFiles:
         @staticmethod
-        def get_file_by_id(file_id):
+        async def get_file_by_id(file_id):
             return file if file_id == file.id else None
 
     monkeypatch.setattr(internal_retrieval_router, 'Files', _FakeFiles)
@@ -635,7 +649,7 @@ def _patch_files_and_storage(monkeypatch, *, file, storage_path):
 
 
 def test_files_id_raw_streams_bytes_for_owner(monkeypatch, fake_principal, tmp_path):
-    app = _build_app(fake_principal=fake_principal)
+    app = _build_app(monkeypatch, fake_principal=fake_principal)
     blob = tmp_path / 'model.ifc'
     blob.write_bytes(b'IFC raw bytes \x00\x01')
 
@@ -656,7 +670,7 @@ def test_files_id_raw_streams_bytes_for_owner(monkeypatch, fake_principal, tmp_p
 
 
 def test_files_id_raw_403_when_no_access(monkeypatch, fake_principal, tmp_path):
-    app = _build_app(fake_principal=fake_principal)
+    app = _build_app(monkeypatch, fake_principal=fake_principal)
     fake_file = SimpleNamespace(
         id='file-2',
         user_id='other-user',
@@ -669,7 +683,7 @@ def test_files_id_raw_403_when_no_access(monkeypatch, fake_principal, tmp_path):
     monkeypatch.setattr(
         internal_retrieval_router,
         'has_access_to_file',
-        lambda *, file_id, access_type, user: False,
+        AsyncMock(return_value=False),
     )
 
     client = TestClient(app)
@@ -678,11 +692,11 @@ def test_files_id_raw_403_when_no_access(monkeypatch, fake_principal, tmp_path):
 
 
 def test_files_id_raw_404_when_missing(monkeypatch, fake_principal):
-    app = _build_app(fake_principal=fake_principal)
+    app = _build_app(monkeypatch, fake_principal=fake_principal)
 
     class _Empty:
         @staticmethod
-        def get_file_by_id(file_id):
+        async def get_file_by_id(file_id):
             return None
 
     monkeypatch.setattr(internal_retrieval_router, 'Files', _Empty)
@@ -695,7 +709,7 @@ def test_files_id_raw_404_when_storage_raises(monkeypatch, fake_principal, tmp_p
     # Cloud-storage backends raise RuntimeError on credential/config errors;
     # surface as 404 (mirrors the /attachments handling) instead of leaking
     # the traceback.
-    app = _build_app(fake_principal=fake_principal)
+    app = _build_app(monkeypatch, fake_principal=fake_principal)
     fake_file = SimpleNamespace(
         id='file-3',
         user_id=fake_principal.user.id,
@@ -707,7 +721,7 @@ def test_files_id_raw_404_when_storage_raises(monkeypatch, fake_principal, tmp_p
 
     class _FakeFiles:
         @staticmethod
-        def get_file_by_id(file_id):
+        async def get_file_by_id(file_id):
             return fake_file if file_id == fake_file.id else None
 
     def _raise(_path):
@@ -726,7 +740,7 @@ def test_files_id_raw_404_when_storage_raises(monkeypatch, fake_principal, tmp_p
 
 
 def test_files_id_raw_requires_agent_search_enabled(monkeypatch, fake_principal):
-    app = _build_app(fake_principal=fake_principal, agent_search_enabled=False)
+    app = _build_app(monkeypatch, fake_principal=fake_principal, agent_search_enabled=False)
     client = TestClient(app)
     resp = client.get('/api/v1/internal/retrieval/files/anything/raw')
     assert resp.status_code == 404
@@ -739,14 +753,14 @@ def _patch_files_upload(monkeypatch, *, file_id='file-render-1'):
     """Stub the deps used by ``/files/upload`` and return a call recorder.
 
     Replaces ``upload_file_handler`` (filesystem + DB write),
-    ``Chats.insert_chat_files`` (chat-file link row), and ``sio.emit``
-    (socket fanout) with collaborator-style fakes. Returns the dict the
-    test asserts against.
+    ``Chats.add_message_files_by_id_and_message_id`` (chat-history JSON
+    persistence), and ``sio.emit`` (socket fanout) with collaborator-style
+    fakes. Returns the dict the test asserts against.
     """
 
     captured: dict = {}
 
-    def fake_upload_file_handler(request, *, file, metadata, process, user, db):
+    async def fake_upload_file_handler(request, *, file, metadata, process, user, db):
         captured['filename'] = file.filename
         captured['content_type'] = file.content_type
         captured['process'] = process
@@ -754,26 +768,29 @@ def _patch_files_upload(monkeypatch, *, file_id='file-render-1'):
         captured['user_id'] = user.id
         return SimpleNamespace(id=file_id)
 
-    def fake_insert_chat_files(*, chat_id, message_id, file_ids, user_id, db=None):
-        captured['insert'] = {
+    async def fake_add_message_files(chat_id, message_id, files):
+        captured['message_files'] = {
             'chat_id': chat_id,
             'message_id': message_id,
-            'file_ids': list(file_ids),
-            'user_id': user_id,
+            'files': list(files),
         }
+        # None → the handler emits just the newly-added payload (its
+        # missing-message fallback), matching a fresh message's render.
         return None
 
     async def fake_emit(event, payload, room=None):
         captured['emit'] = {'event': event, 'payload': payload, 'room': room}
 
     monkeypatch.setattr(internal_retrieval_router, 'upload_file_handler', fake_upload_file_handler)
-    monkeypatch.setattr(internal_retrieval_router.Chats, 'insert_chat_files', fake_insert_chat_files)
+    monkeypatch.setattr(
+        internal_retrieval_router.Chats, 'add_message_files_by_id_and_message_id', fake_add_message_files
+    )
     monkeypatch.setattr(internal_retrieval_router.sio, 'emit', fake_emit)
     return captured
 
 
 def test_post_files_upload_persists_and_attaches_to_message(monkeypatch, fake_principal):
-    app = _build_app(fake_principal=fake_principal)
+    app = _build_app(monkeypatch, fake_principal=fake_principal)
     # Ensure the route can resolve a URL for the file_id without booting all OWUI routers.
     app.add_api_route('/api/v1/files/{id}/content', lambda id: None, name='get_file_content_by_id')
 
@@ -795,11 +812,17 @@ def test_post_files_upload_persists_and_attaches_to_message(monkeypatch, fake_pr
     assert captured['content_type'] == 'image/png'
     assert captured['process'] is False
     assert captured['metadata'] == {'chat_id': 'chat-abc', 'message_id': 'msg-xyz'}
-    assert captured['insert'] == {
+    assert captured['message_files'] == {
         'chat_id': 'chat-abc',
         'message_id': 'msg-xyz',
-        'file_ids': ['file-render-1'],
-        'user_id': fake_principal.user.id,
+        'files': [
+            {
+                'type': 'image',
+                'url': '/api/v1/files/file-render-1/content',
+                'name': 'plan.png',
+                'id': 'file-render-1',
+            }
+        ],
     }
     assert captured['emit']['event'] == 'events'
     assert captured['emit']['room'] == f'user:{fake_principal.user.id}'
@@ -819,7 +842,7 @@ def test_post_files_upload_persists_and_attaches_to_message(monkeypatch, fake_pr
 
 
 def test_post_files_upload_returns_404_when_feature_flag_disabled(monkeypatch, fake_principal):
-    app = _build_app(fake_principal=fake_principal, agent_search_enabled=False)
+    app = _build_app(monkeypatch, fake_principal=fake_principal, agent_search_enabled=False)
     app.add_api_route('/api/v1/files/{id}/content', lambda id: None, name='get_file_content_by_id')
 
     def fake_upload_file_handler(*args, **kwargs):

@@ -18,6 +18,7 @@ from open_webui.internal.db import get_async_db
 from open_webui.models.knowledge import Knowledges
 from open_webui.models.files import Files, FileForm, FileUpdateForm
 from open_webui.models.users import Users
+from open_webui.models.config import Config
 from open_webui.storage.provider import Storage
 from open_webui.config import FILE_PROCESSING_MAX_CONCURRENT, KNOWLEDGE_MAX_FILE_COUNT
 from open_webui.retrieval.vector.factory import VECTOR_DB_CLIENT
@@ -724,39 +725,72 @@ class BaseSyncWorker(ABC):
 
         local_file_path = Storage.get_file(file.path)
 
+        cfg = await Config.get_many(
+            'rag.content_extraction_engine',
+            'rag.external_document_loader_url',
+            'rag.external_document_loader_api_key',
+            'rag.tika_server_url',
+            'rag.docling_server_url',
+            'rag.docling_api_key',
+            'rag.docling_params',
+            'rag.pdf_extract_images',
+            'rag.pdf_loader_mode',
+            'rag.datalab_marker_api_key',
+            'rag.datalab_marker_api_base_url',
+            'rag.datalab_marker_additional_config',
+            'rag.datalab_marker_skip_cache',
+            'rag.datalab_marker_force_ocr',
+            'rag.datalab_marker_paginate',
+            'rag.datalab_marker_strip_existing_ocr',
+            'rag.datalab_marker_disable_image_extraction',
+            'rag.datalab_marker_format_lines',
+            'rag.datalab_marker_use_llm',
+            'rag.datalab_marker_output_format',
+            'rag.document_intelligence_endpoint',
+            'rag.document_intelligence_key',
+            'rag.document_intelligence_model',
+            'rag.mistral_ocr_api_base_url',
+            'rag.mistral_ocr_api_key',
+            'rag.mineru_api_mode',
+            'rag.mineru_api_url',
+            'rag.mineru_api_key',
+            'rag.mineru_api_timeout',
+            'rag.mineru_params',
+        )
+
         def _extract_in_thread():
             loader = Loader(
-                engine=request.app.state.config.CONTENT_EXTRACTION_ENGINE,
+                engine=cfg['rag.content_extraction_engine'],
                 user=user,
-                EXTERNAL_DOCUMENT_LOADER_URL=request.app.state.config.EXTERNAL_DOCUMENT_LOADER_URL,
-                EXTERNAL_DOCUMENT_LOADER_API_KEY=request.app.state.config.EXTERNAL_DOCUMENT_LOADER_API_KEY,
-                TIKA_SERVER_URL=request.app.state.config.TIKA_SERVER_URL,
-                DOCLING_SERVER_URL=request.app.state.config.DOCLING_SERVER_URL,
-                DOCLING_API_KEY=request.app.state.config.DOCLING_API_KEY,
-                DOCLING_PARAMS=request.app.state.config.DOCLING_PARAMS,
-                PDF_EXTRACT_IMAGES=request.app.state.config.PDF_EXTRACT_IMAGES,
-                PDF_LOADER_MODE=request.app.state.config.PDF_LOADER_MODE,
-                DATALAB_MARKER_API_KEY=request.app.state.config.DATALAB_MARKER_API_KEY,
-                DATALAB_MARKER_API_BASE_URL=request.app.state.config.DATALAB_MARKER_API_BASE_URL,
-                DATALAB_MARKER_ADDITIONAL_CONFIG=request.app.state.config.DATALAB_MARKER_ADDITIONAL_CONFIG,
-                DATALAB_MARKER_SKIP_CACHE=request.app.state.config.DATALAB_MARKER_SKIP_CACHE,
-                DATALAB_MARKER_FORCE_OCR=request.app.state.config.DATALAB_MARKER_FORCE_OCR,
-                DATALAB_MARKER_PAGINATE=request.app.state.config.DATALAB_MARKER_PAGINATE,
-                DATALAB_MARKER_STRIP_EXISTING_OCR=request.app.state.config.DATALAB_MARKER_STRIP_EXISTING_OCR,
-                DATALAB_MARKER_DISABLE_IMAGE_EXTRACTION=request.app.state.config.DATALAB_MARKER_DISABLE_IMAGE_EXTRACTION,
-                DATALAB_MARKER_FORMAT_LINES=request.app.state.config.DATALAB_MARKER_FORMAT_LINES,
-                DATALAB_MARKER_USE_LLM=request.app.state.config.DATALAB_MARKER_USE_LLM,
-                DATALAB_MARKER_OUTPUT_FORMAT=request.app.state.config.DATALAB_MARKER_OUTPUT_FORMAT,
-                DOCUMENT_INTELLIGENCE_ENDPOINT=request.app.state.config.DOCUMENT_INTELLIGENCE_ENDPOINT,
-                DOCUMENT_INTELLIGENCE_KEY=request.app.state.config.DOCUMENT_INTELLIGENCE_KEY,
-                DOCUMENT_INTELLIGENCE_MODEL=request.app.state.config.DOCUMENT_INTELLIGENCE_MODEL,
-                MISTRAL_OCR_API_BASE_URL=request.app.state.config.MISTRAL_OCR_API_BASE_URL,
-                MISTRAL_OCR_API_KEY=request.app.state.config.MISTRAL_OCR_API_KEY,
-                MINERU_API_MODE=request.app.state.config.MINERU_API_MODE,
-                MINERU_API_URL=request.app.state.config.MINERU_API_URL,
-                MINERU_API_KEY=request.app.state.config.MINERU_API_KEY,
-                MINERU_API_TIMEOUT=request.app.state.config.MINERU_API_TIMEOUT,
-                MINERU_PARAMS=request.app.state.config.MINERU_PARAMS,
+                EXTERNAL_DOCUMENT_LOADER_URL=cfg['rag.external_document_loader_url'],
+                EXTERNAL_DOCUMENT_LOADER_API_KEY=cfg['rag.external_document_loader_api_key'],
+                TIKA_SERVER_URL=cfg['rag.tika_server_url'],
+                DOCLING_SERVER_URL=cfg['rag.docling_server_url'],
+                DOCLING_API_KEY=cfg['rag.docling_api_key'],
+                DOCLING_PARAMS=cfg['rag.docling_params'],
+                PDF_EXTRACT_IMAGES=cfg['rag.pdf_extract_images'],
+                PDF_LOADER_MODE=cfg['rag.pdf_loader_mode'],
+                DATALAB_MARKER_API_KEY=cfg['rag.datalab_marker_api_key'],
+                DATALAB_MARKER_API_BASE_URL=cfg['rag.datalab_marker_api_base_url'],
+                DATALAB_MARKER_ADDITIONAL_CONFIG=cfg['rag.datalab_marker_additional_config'],
+                DATALAB_MARKER_SKIP_CACHE=cfg['rag.datalab_marker_skip_cache'],
+                DATALAB_MARKER_FORCE_OCR=cfg['rag.datalab_marker_force_ocr'],
+                DATALAB_MARKER_PAGINATE=cfg['rag.datalab_marker_paginate'],
+                DATALAB_MARKER_STRIP_EXISTING_OCR=cfg['rag.datalab_marker_strip_existing_ocr'],
+                DATALAB_MARKER_DISABLE_IMAGE_EXTRACTION=cfg['rag.datalab_marker_disable_image_extraction'],
+                DATALAB_MARKER_FORMAT_LINES=cfg['rag.datalab_marker_format_lines'],
+                DATALAB_MARKER_USE_LLM=cfg['rag.datalab_marker_use_llm'],
+                DATALAB_MARKER_OUTPUT_FORMAT=cfg['rag.datalab_marker_output_format'],
+                DOCUMENT_INTELLIGENCE_ENDPOINT=cfg['rag.document_intelligence_endpoint'],
+                DOCUMENT_INTELLIGENCE_KEY=cfg['rag.document_intelligence_key'],
+                DOCUMENT_INTELLIGENCE_MODEL=cfg['rag.document_intelligence_model'],
+                MISTRAL_OCR_API_BASE_URL=cfg['rag.mistral_ocr_api_base_url'],
+                MISTRAL_OCR_API_KEY=cfg['rag.mistral_ocr_api_key'],
+                MINERU_API_MODE=cfg['rag.mineru_api_mode'],
+                MINERU_API_URL=cfg['rag.mineru_api_url'],
+                MINERU_API_KEY=cfg['rag.mineru_api_key'],
+                MINERU_API_TIMEOUT=cfg['rag.mineru_api_timeout'],
+                MINERU_PARAMS=cfg['rag.mineru_params'],
             )
 
             docs_local = loader.load(file.filename, file.meta.get('content_type'), local_file_path)
@@ -822,6 +856,27 @@ class BaseSyncWorker(ABC):
             'hash': file_hash,
         }
 
+        cfg = await Config.get_many(
+            'rag.enable_markdown_header_text_splitter',
+            'rag.chunk_min_size_target',
+            'rag.text_splitter',
+            'rag.chunk_size',
+            'rag.chunk_overlap',
+            'rag.tiktoken_encoding_name',
+            'rag.embedding_engine',
+            'rag.embedding_model',
+            'rag.openai.api_base_url',
+            'rag.ollama.base_url',
+            'rag.azure_openai.base_url',
+            'rag.openai.api_key',
+            'rag.ollama.api_key',
+            'rag.azure_openai.api_key',
+            'rag.embedding_batch_size',
+            'rag.azure_openai.api_version',
+            'rag.enable_async_embedding',
+            'rag.embedding_concurrent_requests',
+        )
+
         def _split_embed_and_store():
             """Split, embed, and store vectors (all in thread to avoid blocking event loop)."""
             t0 = time.time()
@@ -830,7 +885,7 @@ class BaseSyncWorker(ABC):
             # Split if needed (internal pipeline; external pipeline pre-chunks)
             if needs_split:
                 # Markdown header splitting (if enabled)
-                if request.app.state.config.ENABLE_MARKDOWN_HEADER_TEXT_SPLITTER:
+                if cfg['rag.enable_markdown_header_text_splitter']:
                     markdown_splitter = MarkdownHeaderTextSplitter(
                         headers_to_split_on=[
                             ('#', 'Header 1'),
@@ -855,25 +910,25 @@ class BaseSyncWorker(ABC):
                         )
                     working_docs = split_docs
 
-                    if request.app.state.config.CHUNK_MIN_SIZE_TARGET > 0:
+                    if cfg['rag.chunk_min_size_target'] > 0:
                         from open_webui.routers.retrieval import merge_docs_to_target_size
 
                         working_docs = merge_docs_to_target_size(request, working_docs)
 
                 # Text splitting
-                if request.app.state.config.TEXT_SPLITTER in ['', 'character']:
+                if cfg['rag.text_splitter'] in ['', 'character']:
                     splitter = RecursiveCharacterTextSplitter(
-                        chunk_size=request.app.state.config.CHUNK_SIZE,
-                        chunk_overlap=request.app.state.config.CHUNK_OVERLAP,
+                        chunk_size=cfg['rag.chunk_size'],
+                        chunk_overlap=cfg['rag.chunk_overlap'],
                         add_start_index=True,
                     )
                     working_docs = splitter.split_documents(working_docs)
-                elif request.app.state.config.TEXT_SPLITTER == 'token':
-                    tiktoken.get_encoding(str(request.app.state.config.TIKTOKEN_ENCODING_NAME))
+                elif cfg['rag.text_splitter'] == 'token':
+                    tiktoken.get_encoding(str(cfg['rag.tiktoken_encoding_name']))
                     splitter = TokenTextSplitter(
-                        encoding_name=str(request.app.state.config.TIKTOKEN_ENCODING_NAME),
-                        chunk_size=request.app.state.config.CHUNK_SIZE,
-                        chunk_overlap=request.app.state.config.CHUNK_OVERLAP,
+                        encoding_name=str(cfg['rag.tiktoken_encoding_name']),
+                        chunk_size=cfg['rag.chunk_size'],
+                        chunk_overlap=cfg['rag.chunk_overlap'],
                         add_start_index=True,
                     )
                     working_docs = splitter.split_documents(working_docs)
@@ -890,8 +945,8 @@ class BaseSyncWorker(ABC):
                     **doc.metadata,
                     **metadata,
                     'embedding_config': {
-                        'engine': request.app.state.config.RAG_EMBEDDING_ENGINE,
-                        'model': request.app.state.config.RAG_EMBEDDING_MODEL,
+                        'engine': cfg['rag.embedding_engine'],
+                        'model': cfg['rag.embedding_model'],
                     },
                 }
                 for doc in working_docs
@@ -899,35 +954,33 @@ class BaseSyncWorker(ABC):
 
             # Generate embeddings
             embedding_function = get_embedding_function(
-                request.app.state.config.RAG_EMBEDDING_ENGINE,
-                request.app.state.config.RAG_EMBEDDING_MODEL,
+                cfg['rag.embedding_engine'],
+                cfg['rag.embedding_model'],
                 request.app.state.ef,
                 (
-                    request.app.state.config.RAG_OPENAI_API_BASE_URL
-                    if request.app.state.config.RAG_EMBEDDING_ENGINE == 'openai'
+                    cfg['rag.openai.api_base_url']
+                    if cfg['rag.embedding_engine'] == 'openai'
                     else (
-                        request.app.state.config.RAG_OLLAMA_BASE_URL
-                        if request.app.state.config.RAG_EMBEDDING_ENGINE == 'ollama'
-                        else request.app.state.config.RAG_AZURE_OPENAI_BASE_URL
+                        cfg['rag.ollama.base_url']
+                        if cfg['rag.embedding_engine'] == 'ollama'
+                        else cfg['rag.azure_openai.base_url']
                     )
                 ),
                 (
-                    request.app.state.config.RAG_OPENAI_API_KEY
-                    if request.app.state.config.RAG_EMBEDDING_ENGINE == 'openai'
+                    cfg['rag.openai.api_key']
+                    if cfg['rag.embedding_engine'] == 'openai'
                     else (
-                        request.app.state.config.RAG_OLLAMA_API_KEY
-                        if request.app.state.config.RAG_EMBEDDING_ENGINE == 'ollama'
-                        else request.app.state.config.RAG_AZURE_OPENAI_API_KEY
+                        cfg['rag.ollama.api_key']
+                        if cfg['rag.embedding_engine'] == 'ollama'
+                        else cfg['rag.azure_openai.api_key']
                     )
                 ),
-                request.app.state.config.RAG_EMBEDDING_BATCH_SIZE,
+                cfg['rag.embedding_batch_size'],
                 azure_api_version=(
-                    request.app.state.config.RAG_AZURE_OPENAI_API_VERSION
-                    if request.app.state.config.RAG_EMBEDDING_ENGINE == 'azure_openai'
-                    else None
+                    cfg['rag.azure_openai.api_version'] if cfg['rag.embedding_engine'] == 'azure_openai' else None
                 ),
-                enable_async=request.app.state.config.ENABLE_ASYNC_EMBEDDING,
-                concurrent_requests=request.app.state.config.RAG_EMBEDDING_CONCURRENT_REQUESTS,
+                enable_async=cfg['rag.enable_async_embedding'],
+                concurrent_requests=cfg['rag.embedding_concurrent_requests'],
             )
 
             log.info(f'[sync:{filename}] >>> EMBED START ({len(texts)} texts)')

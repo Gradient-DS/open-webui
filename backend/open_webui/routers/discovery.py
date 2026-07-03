@@ -15,6 +15,7 @@ import aiohttp
 from fastapi import APIRouter, Depends, HTTPException, Request
 
 from open_webui.env import SEARCH_API_BASE_URL, SEARCH_API_KEY
+from open_webui.models.config import Config
 from open_webui.utils.auth import get_verified_user
 
 log = logging.getLogger(__name__)
@@ -24,7 +25,7 @@ router = APIRouter()
 AIOHTTP_CLIENT_TIMEOUT = aiohttp.ClientTimeout(total=30)
 
 
-def _get_base_url(request: Request) -> str:
+async def _get_base_url(request: Request) -> str:
     """Return the configured search-api URL or raise 503.
 
     Reuses ENABLE_RAG_FILTER_UI — the same flag that controls panel
@@ -32,7 +33,7 @@ def _get_base_url(request: Request) -> str:
     feature. SEARCH_API_BASE_URL must also be set; an empty string is a
     misconfig, not a runtime toggle.
     """
-    if not request.app.state.config.ENABLE_RAG_FILTER_UI:
+    if not await Config.get('rag.enable_filter_ui'):
         raise HTTPException(
             status_code=503,
             detail=(
@@ -132,5 +133,5 @@ async def _proxy_get_json(base_url: str, path: str):
 @router.get('/documents')
 async def list_documents(request: Request, user=Depends(get_verified_user)):
     """Proxy GET /discovery/documents from the upstream search-api."""
-    base_url = _get_base_url(request)
+    base_url = await _get_base_url(request)
     return await _proxy_get_json(base_url, '/discovery/documents')

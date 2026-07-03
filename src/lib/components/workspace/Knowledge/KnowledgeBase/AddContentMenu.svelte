@@ -9,6 +9,7 @@
 	import FolderOpen from '$lib/components/icons/FolderOpen.svelte';
 	import GlobeAlt from '$lib/components/icons/GlobeAlt.svelte';
 	import CloudArrowUp from '$lib/components/icons/CloudArrowUp.svelte';
+	import ArrowUturnLeft from '$lib/components/icons/ArrowUturnLeft.svelte';
 
 	const i18n = getContext('i18n');
 
@@ -16,6 +17,7 @@
 
 	export let onOneDriveSync: Function | null = null;
 	export let onUpload: Function = (data) => {};
+	export let onReset: Function | null = null;
 
 	let show = false;
 </script>
@@ -106,6 +108,21 @@
 				<BarsArrowUp strokeWidth="2" />
 				<div class="flex items-center">{$i18n.t('Add text content')}</div>
 			</button>
+
+			{#if onReset}
+				<hr class="my-1 border-gray-100 dark:border-gray-800" />
+
+				<button
+					class="select-none flex gap-2 items-center px-3 py-1.5 text-sm cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-xl w-full"
+					on:click={() => {
+						onReset();
+						show = false;
+					}}
+				>
+					<ArrowUturnLeft strokeWidth="2" />
+					<div class="flex items-center">{$i18n.t('Reset')}</div>
+				</button>
+			{/if}
 		</div>
 	</div>
 </Dropdown>

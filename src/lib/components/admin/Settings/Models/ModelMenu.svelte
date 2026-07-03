@@ -50,7 +50,7 @@
 			class="min-w-[170px] rounded-xl p-1 border border-gray-100 dark:border-gray-800 z-50 bg-white dark:bg-gray-850 dark:text-white shadow-sm"
 		>
 			<button
-				class="select-none flex gap-2 items-center px-3 py-1.5 text-sm font-medium cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-md"
+				class="select-none flex w-full gap-2 items-center px-3 py-1.5 text-sm font-medium cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-md"
 				on:click={() => {
 					hideHandler();
 				}}
@@ -101,31 +101,29 @@
 				</div>
 			</button>
 
-			{#if model?.info?.base_model_id}
-				<button
-					class="select-none flex gap-2 items-center px-3 py-1.5 text-sm font-medium cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-md"
-					on:click={() => {
-						pinModelHandler(model?.id);
-					}}
-				>
-					{#if ($settings?.pinnedModels ?? []).includes(model?.id)}
-						<PinSlash />
-					{:else}
-						<Pin />
-					{/if}
+			<button
+				class="select-none flex w-full gap-2 items-center px-3 py-1.5 text-sm font-medium cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-md"
+				on:click={() => {
+					pinModelHandler(model?.id);
+				}}
+			>
+				{#if ($settings?.pinnedModels ?? []).includes(model?.id)}
+					<PinSlash />
+				{:else}
+					<Pin />
+				{/if}
 
-					<div class="flex items-center">
-						{#if ($settings?.pinnedModels ?? []).includes(model?.id)}
-							{$i18n.t('Hide from Sidebar')}
-						{:else}
-							{$i18n.t('Keep in Sidebar')}
-						{/if}
-					</div>
-				</button>
-			{/if}
+				<div class="flex items-center">
+					{#if ($settings?.pinnedModels ?? []).includes(model?.id)}
+						{$i18n.t('Hide from Sidebar')}
+					{:else}
+						{$i18n.t('Keep in Sidebar')}
+					{/if}
+				</div>
+			</button>
 
 			<button
-				class="select-none flex gap-2 items-center px-3 py-1.5 text-sm font-medium cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-md"
+				class="select-none flex w-full gap-2 items-center px-3 py-1.5 text-sm font-medium cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-md"
 				on:click={() => {
 					copyLinkHandler();
 				}}
@@ -137,7 +135,7 @@
 
 			{#if model?.is_active ?? true}
 				<button
-					class="select-none flex gap-2 items-center px-3 py-1.5 text-sm font-medium cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-md"
+					class="select-none flex w-full gap-2 items-center px-3 py-1.5 text-sm font-medium cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-md"
 					on:click={() => {
 						cloneHandler();
 					}}
@@ -149,7 +147,7 @@
 			{/if}
 
 			<button
-				class="select-none flex gap-2 items-center px-3 py-1.5 text-sm font-medium cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-md"
+				class="select-none flex w-full gap-2 items-center px-3 py-1.5 text-sm font-medium cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-md"
 				on:click={() => {
 					exportHandler();
 				}}
