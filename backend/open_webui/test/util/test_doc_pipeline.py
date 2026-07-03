@@ -111,6 +111,7 @@ def test_format_from_filename(filename, expected):
     [
         (True, 'kb-1', 's3://b/k', 'pdf', True),  # flag on, KB-bound, path, supported → route
         (True, 'kb-1', 's3://b/k', 'docx', True),  # another supported format
+        (True, 'kb-1', 's3://b/k', 'htm', True),  # htm parses via warren's HtmlProcessor, same as html
         (False, 'kb-1', 's3://b/k', 'pdf', False),  # flag off → native
         (True, None, 's3://b/k', 'pdf', False),  # per-file cache (no KB) → native
         (True, '', 's3://b/k', 'pdf', False),  # no KB → native
@@ -145,6 +146,7 @@ def test_should_route_chat_to_pipeline_true_for_every_supported_format(fmt):
     [
         (True, 's3://b/k', 'pdf', True),  # supported format, flag on, path → route
         (True, 's3://b/k', 'docx', True),
+        (True, 's3://b/k', 'htm', True),  # htm parses via warren's HtmlProcessor, same as html
         (False, 's3://b/k', 'pdf', False),  # flag off → native (independent of KB flag)
         (True, 's3://b/k', 'png', False),  # image → native
         (True, 's3://b/k', 'jpg', False),  # image → native

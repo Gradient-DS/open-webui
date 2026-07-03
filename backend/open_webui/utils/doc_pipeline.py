@@ -48,6 +48,7 @@ PIPELINE_SUPPORTED_FORMATS = frozenset(
         'potx',
         'csv',
         'html',
+        'htm',
         'xml',
         'txt',
         'md',
