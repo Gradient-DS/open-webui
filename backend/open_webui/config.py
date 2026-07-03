@@ -3017,13 +3017,7 @@ PASSWORD_RESET_EXPIRY_MINUTES = int(os.environ.get('PASSWORD_RESET_EXPIRY_MINUTE
 
 ENABLE_RAG_FILTER_UI = os.environ.get('ENABLE_RAG_FILTER_UI', 'False').lower() == 'true'
 
-FILE_PROCESSING_MAX_CONCURRENT = int(os.environ.get('FILE_PROCESSING_MAX_CONCURRENT', '5'))
-
-FILE_DOWNLOAD_CONCURRENCY_MULTIPLIER = int(os.environ.get('FILE_DOWNLOAD_CONCURRENCY_MULTIPLIER', '3'))
-
 INTEGRATION_PROVIDERS = {}
-
-USE_SHARED_LOADER = os.environ.get('USE_SHARED_LOADER', 'False').lower() == 'true'
 
 LOADER_WORKER_URL = os.environ.get('LOADER_WORKER_URL', '')
 
@@ -3513,7 +3507,6 @@ DEFAULT_CONFIG = {
     'feedback_report.include_user_identity': FEEDBACK_REPORT_INCLUDE_USER_IDENTITY,
     'feedback_report.slack_webhook_url': FEEDBACK_REPORT_SLACK_WEBHOOK_URL,
     'feedback_report.trace_url_template': FEEDBACK_REPORT_TRACE_URL_TEMPLATE,
-    'file.processing_max_concurrent': FILE_PROCESSING_MAX_CONCURRENT,
     'google_drive.enable_sync': ENABLE_GOOGLE_DRIVE_SYNC,
     'google_drive.max_files_per_sync': GOOGLE_DRIVE_MAX_FILES_PER_SYNC,
     'google_drive.sync_interval_minutes': GOOGLE_DRIVE_SYNC_INTERVAL_MINUTES,
@@ -3528,7 +3521,6 @@ DEFAULT_CONFIG = {
     'onedrive.sync_interval_minutes': ONEDRIVE_SYNC_INTERVAL_MINUTES,
     'rag.distributed_doc_pipeline_sync_enabled': DISTRIBUTED_DOC_PIPELINE_SYNC_ENABLED,
     'rag.enable_filter_ui': ENABLE_RAG_FILTER_UI,
-    'sync.use_shared_loader': USE_SHARED_LOADER,
     'ui.acceptance_modal_button_text': ACCEPTANCE_MODAL_BUTTON_TEXT,
     'ui.acceptance_modal_content': ACCEPTANCE_MODAL_CONTENT,
     'ui.acceptance_modal_title': ACCEPTANCE_MODAL_TITLE,

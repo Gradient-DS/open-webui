@@ -274,7 +274,7 @@ async def _create_or_update_file_record(
     # Promote folder-rendering / change-detection keys to top-level so the KB
     # UI's SourceGroupedFiles tree (reads file.meta.relative_path) and the next
     # sync cycle's cloud-hash short-circuit (reads file.meta.cloud_hash) keep
-    # working. Legacy in-pod sync wrote these at top level; the loader-worker
+    # working. Consumers read these at top level; the loader-worker
     # path nests them under provider_metadata, which silently broke the folder
     # tree until promoted back. Identity keys are set-if-absent: the sync
     # worker's stub values are authoritative (see _OWUI_OWNED_IDENTITY_KEYS).
@@ -596,11 +596,10 @@ async def _process_chunked_text_document(
         # chat-attachment dispatch in ingest_documents).
         await Files.update_file_metadata_by_id(file_id, {'pipeline_job_id': None, 'pipeline_submitted_at': None})
         # Promote the sync worker's staged provider hash now that the ingest
-        # actually succeeded. This is the ONLY writer of cloud_hash on the
-        # shared-loader path (the legacy in-pod writer is dead code), so the
+        # actually succeeded. This is the ONLY writer of cloud_hash, so the
         # unchanged-classification in _classify_for_submit only ever trusts a
         # hash whose content reached the vector DB. No-op for rows without a
-        # staged hash (chat attachments, push integrations, legacy rows).
+        # staged hash (chat attachments, push integrations, pre-existing rows).
         refreshed = await Files.get_file_by_id(file_id)
         pending = ((refreshed.meta if refreshed else None) or {}).get('pending_cloud_hash')
         if pending:

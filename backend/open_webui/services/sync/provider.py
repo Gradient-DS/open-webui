@@ -130,7 +130,6 @@ class SyncProvider(ABC):
         user_id: str,
         app,
         token_provider=None,
-        use_shared_loader: bool = False,
     ):
         """Create the provider-specific sync worker instance."""
         ...
@@ -179,9 +178,6 @@ class SyncProvider(ABC):
 
             token_provider = _refresh
 
-        # Read shared-loader flag from app config (set by main.py at startup).
-        use_shared_loader = bool(await Config.get('sync.use_shared_loader', False))
-
         worker = self.create_worker(
             knowledge_id=knowledge_id,
             sources=sources,
@@ -189,7 +185,6 @@ class SyncProvider(ABC):
             user_id=user_id,
             app=app,
             token_provider=token_provider,
-            use_shared_loader=use_shared_loader,
         )
 
         result = await worker.sync()

@@ -41,12 +41,6 @@ class _StubWorker(BaseSyncWorker):
     async def _collect_single_file(self, source):
         return None
 
-    async def _download_file_content(self, file_info):
-        return b''
-
-    def _get_provider_storage_headers(self, item_id):
-        return {}
-
     def _get_provider_file_meta(self, **kwargs):
         return {}
 
@@ -274,8 +268,8 @@ async def test_classify_prior_member_changed_hash_updated():
 
 @pytest.mark.asyncio
 async def test_classify_gate_inactive_without_snapshot():
-    """None snapshot (legacy call paths / class default) keeps the old
-    global-status behavior — the gate only fires when sync() snapshotted."""
+    """None snapshot (class default, call paths that never snapshot) keeps
+    the global-status behavior — the gate only fires when sync() snapshotted."""
     worker = _make_worker()
     assert worker._kb_member_file_ids is None
     existing = SimpleNamespace(meta={'cloud_hash': 'h1'}, data={'status': 'completed'})

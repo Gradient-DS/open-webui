@@ -521,11 +521,6 @@ openWebui:
     # would otherwise hit the cap and mark the KB sync "failed".
     syncMaxJobWallClockSeconds: "1800"
 
-    # Shared-services loader-worker (per-tenant). When true, cloud-source sync
-    # workers submit jobs to the loader-worker pod (loaderWorker.enabled=true)
-    # instead of downloading + embedding in-process. See
-    # thoughts/shared/plans/2026-04-25-shared-services-loader-worker.md.
-    useSharedLoader: "false"
     # Override LOADER_WORKER_URL when loaderWorker.enabled=false (e.g. pointing
     # at a dev stack). When loaderWorker.enabled=true the URL is derived from
     # the in-namespace service.

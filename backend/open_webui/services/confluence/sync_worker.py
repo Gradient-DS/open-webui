@@ -1,4 +1,4 @@
-"""Confluence sync worker — downloads pages, converts HTML→Markdown, embeds, stores."""
+"""Confluence sync worker — discovers pages and submits loader-worker sync jobs."""
 
 import asyncio
 import logging
@@ -19,15 +19,11 @@ from open_webui.services.confluence.basic_auth import (
     service_site,
     resolve_auth_mode,
 )
-from open_webui.services.confluence.html_renderer import html_to_markdown
 from open_webui.services.sync.base_worker import BaseSyncWorker
 from open_webui.models.knowledge import Knowledges
 from open_webui.models.files import Files
 from open_webui.models.users import Users
-from open_webui.config import (
-    CONFLUENCE_MAX_PAGES_PER_SYNC,
-    CONFLUENCE_MAX_PAGE_SIZE_MB,
-)
+from open_webui.config import CONFLUENCE_MAX_PAGES_PER_SYNC
 from open_webui.retrieval.vector.factory import VECTOR_DB_CLIENT
 from open_webui.services.deletion import DeletionService
 
@@ -70,10 +66,8 @@ def _build_front_matter(file_info: Dict[str, Any]) -> str:
     """Compose the Markdown front-matter block prepended to a Confluence page.
 
     Reads the enrichment fields stamped onto ``file_info`` (labels, breadcrumb,
-    page_type, author, dates). Used for the loader-worker path's
-    ``content_prefix`` so its document header matches the in-pod render path
-    (the equivalent block is inlined in ``_download_file_content``; the two
-    converge once the legacy in-pod path is removed).
+    page_type, author, dates). Shipped as the loader-worker job's
+    ``content_prefix`` so every synced page carries the same document header.
     """
     info = file_info or {}
     item = info.get('item') or {}
@@ -116,11 +110,11 @@ def _build_front_matter(file_info: Dict[str, Any]) -> str:
 class ConfluenceSyncWorker(BaseSyncWorker):
     """Worker to sync Confluence space/page contents to a Knowledge base."""
 
-    # Every page renders at least a ``# {title}`` heading + a metadata line in
-    # ``_download_file_content`` (front-matter), so a successful download is
+    # Every page renders at least a ``# {title}`` heading + a metadata line
+    # (the ``_build_front_matter`` content_prefix), so a successful ingest is
     # never empty. An empty ``data['content']`` row is therefore always a
     # failed/partial ingest — opt into the empty-content guard so the cloud-hash
-    # short-circuits re-ingest it instead of freezing it empty forever.
+    # short-circuit re-ingests it instead of freezing it empty forever.
     expect_nonempty_content = True
 
     def __init__(self, *args, **kwargs):
@@ -466,10 +460,9 @@ class ConfluenceSyncWorker(BaseSyncWorker):
         source['page_map'] = new_page_map
         source['last_sync_at'] = int(time.time())
 
-        # Shared-loader mode: the loader-worker fetches only the page body, so
-        # label/ancestor enrichment is computed here at discovery time.
-        if self._use_shared_loader:
-            await self._enrich_files_for_loader(files_to_process)
+        # The loader-worker fetches only the page body, so label/ancestor
+        # enrichment is computed here at discovery time.
+        await self._enrich_files_for_loader(files_to_process)
 
         return files_to_process, deleted_count
 
@@ -526,10 +519,9 @@ class ConfluenceSyncWorker(BaseSyncWorker):
             'created_at': page.get('createdAt') or '',
         }
 
-        # Shared-loader mode: enrich here since _download_file_content (which
-        # derives labels/ancestors in-pod) does not run.
-        if self._use_shared_loader:
-            await self._enrich_files_for_loader([file_info])
+        # The loader-worker fetches only the page body, so label/ancestor
+        # enrichment is computed here at discovery time.
+        await self._enrich_files_for_loader([file_info])
 
         return file_info
 
@@ -538,114 +530,6 @@ class ConfluenceSyncWorker(BaseSyncWorker):
         version = (file_info.get('item') or {}).get('version') or {}
         number = version.get('number')
         return str(number) if number is not None else None
-
-    async def _download_file_content(self, file_info: Dict[str, Any]) -> bytes:
-        """Fetch the page + labels + ancestors; render Markdown with front-matter.
-
-        Side-effect: enriches ``file_info`` with structured Confluence metadata
-        (labels, breadcrumb, page_type, author, last_modified, created_at,
-        ancestor_ids). base_worker calls ``_get_provider_file_meta`` AFTER this
-        method, passing the same ``file_info``, so the enrichment surfaces on
-        ``file.meta`` and propagates to vector-DB chunk metadata.
-        """
-        cloud_id = file_info['cloud_id']
-        page_id = file_info['page_id']
-        client = await self._client_for(cloud_id)
-
-        # Fetch page body, labels, and ancestor chain in parallel — the labels
-        # and ancestor calls are cheap, so they hide behind the body fetch.
-        page_result, labels_result, ancestors_result = await asyncio.gather(
-            client.get_page(page_id, include_body=True),
-            client.list_all_page_labels(page_id),
-            client.list_all_page_ancestors(page_id),
-            return_exceptions=True,
-        )
-
-        if isinstance(page_result, BaseException) or not page_result:
-            if isinstance(page_result, BaseException):
-                raise page_result
-            raise RuntimeError(f'Confluence page {page_id} disappeared during sync')
-        page = page_result
-
-        labels = [
-            label.get('name')
-            for label in (labels_result if isinstance(labels_result, list) else [])
-            if label.get('name')
-        ]
-        ancestors = ancestors_result if isinstance(ancestors_result, list) else []
-
-        body = (page.get('body') or {}).get('view') or {}
-        html = body.get('value') or ''
-        # html_to_markdown is sync + CPU-bound (BeautifulSoup parse); off-thread
-        # to avoid stalling the event loop on long pages.
-        markdown_body = await asyncio.to_thread(html_to_markdown, html) if html else ''
-
-        title = page.get('title') or file_info.get('title') or f'page-{page_id}'
-        version_number = (page.get('version') or {}).get('number')
-        version_when = (page.get('version') or {}).get('createdAt') or ''
-        author_id = (page.get('version') or {}).get('authorId') or ''
-        created_at = page.get('createdAt') or ''
-        space_id = page.get('spaceId') or file_info.get('space_id') or ''
-        web_url = file_info.get('web_url') or ''
-
-        ancestor_titles = [a.get('title') for a in ancestors if a.get('title')]
-        breadcrumb = ' > '.join([*ancestor_titles, title])
-        page_type = _derive_page_type(labels)
-
-        front_matter = [
-            f'# {title}',
-            '',
-            f'_Confluence page · space {space_id} · version {version_number}_',
-        ]
-        if breadcrumb:
-            front_matter.append(f'_Path: {breadcrumb}_')
-        if labels:
-            front_matter.append(f'_Labels: {", ".join(labels)}_')
-        if page_type:
-            front_matter.append(f'_Type: {page_type}_')
-        if web_url:
-            front_matter.append(f'_Source: {web_url}_')
-        if created_at:
-            front_matter.append(f'_Created: {created_at}_')
-        if version_when:
-            front_matter.append(f'_Last modified: {version_when}_')
-        if author_id:
-            front_matter.append(f'_Author: {author_id}_')
-        front_matter.append('')
-        front_matter.append('')
-
-        # Enrich file_info so _get_provider_file_meta can promote these onto
-        # the File row's meta (and from there onto every chunk's metadata via
-        # retrieval.py's `**file.meta` spread).
-        file_info['confluence_labels'] = labels
-        file_info['confluence_breadcrumb'] = breadcrumb
-        file_info['confluence_page_type'] = page_type
-        file_info['confluence_ancestor_ids'] = [a.get('id') for a in ancestors if a.get('id')]
-        file_info['confluence_author_id'] = author_id
-        file_info['confluence_last_modified'] = version_when
-        file_info['confluence_created_at'] = created_at
-
-        rendered = '\n'.join(front_matter) + markdown_body + '\n'
-
-        max_bytes = CONFLUENCE_MAX_PAGE_SIZE_MB * 1024 * 1024
-        encoded = rendered.encode('utf-8')
-        if len(encoded) > max_bytes:
-            log.warning(
-                'Confluence page %s exceeds max size (%d bytes > %d), truncating',
-                page_id,
-                len(encoded),
-                max_bytes,
-            )
-            # Decode-then-reencode trims any incomplete UTF-8 sequence at the cut.
-            encoded = encoded[:max_bytes].decode('utf-8', errors='ignore').encode('utf-8')
-
-        return encoded
-
-    def _get_provider_storage_headers(self, item_id: str) -> dict:
-        return {
-            'OpenWebUI-Source': 'confluence',
-            'OpenWebUI-Confluence-Page-Id': item_id,
-        }
 
     def _get_provider_file_meta(
         self,
@@ -672,9 +556,9 @@ class ConfluenceSyncWorker(BaseSyncWorker):
             # cloud-sync provider, not a `confluence_url`.
             'source_url': info.get('web_url', ''),
             'confluence_title': info.get('title', ''),
-            # Enrichment fields populated by _download_file_content. Empty when
-            # this method is called before download (e.g. cloud-hash skip path
-            # or shared-loader job-creation path).
+            # Enrichment fields populated by _enrich_files_for_loader at
+            # discovery time. Empty when enrichment failed for the page
+            # (graceful degradation — the page still syncs).
             'confluence_labels': info.get('confluence_labels') or [],
             'confluence_page_type': info.get('confluence_page_type'),
             'confluence_breadcrumb': info.get('confluence_breadcrumb', ''),
@@ -688,19 +572,19 @@ class ConfluenceSyncWorker(BaseSyncWorker):
         }
 
     # ------------------------------------------------------------------
-    # Shared-loader job creation (USE_SHARED_LOADER=true)
+    # Loader-worker job creation
     # ------------------------------------------------------------------
 
     async def _enrich_files_for_loader(self, files: List[Dict[str, Any]]) -> None:
-        """Stamp label/ancestor enrichment onto each file_info for loader mode.
+        """Stamp label/ancestor enrichment onto each file_info.
 
-        The loader-worker fetches only the page body, so the enrichment the
-        in-pod path derives in ``_download_file_content`` (labels, breadcrumb,
-        page_type, ancestor ids) is computed here at discovery time and shipped
-        in the job's ``metadata`` + ``content_prefix``. Bounded concurrency
-        keeps a large first sync from opening hundreds of simultaneous
-        Confluence connections. Failures degrade gracefully — a page that
-        can't be enriched still syncs, just with a reduced front-matter.
+        The loader-worker fetches only the page body, so the enrichment
+        (labels, breadcrumb, page_type, ancestor ids) is computed here at
+        discovery time and shipped in the job's ``metadata`` +
+        ``content_prefix``. Bounded concurrency keeps a large first sync from
+        opening hundreds of simultaneous Confluence connections. Failures
+        degrade gracefully — a page that can't be enriched still syncs, just
+        with a reduced front-matter.
         """
         if not files:
             return
