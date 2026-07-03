@@ -287,6 +287,45 @@ async def test_classify_gate_inactive_without_snapshot():
     assert cat == 'unchanged'
 
 
+# ---------- staged hash is invisible to classification (promote-on-success) ----------
+#
+# The stub write stages the provider hash under meta.pending_cloud_hash;
+# classification must keep reading ONLY meta.cloud_hash so a staged-but-never-
+# ingested hash can never satisfy the unchanged skip.
+
+
+@pytest.mark.asyncio
+async def test_classify_ignores_staged_pending_hash_when_stored_matches():
+    worker = _make_worker()
+    worker._kb_member_file_ids = {'stub-item-1'}
+    existing = SimpleNamespace(
+        meta={'cloud_hash': 'h1', 'pending_cloud_hash': 'h2'},
+        data={'status': 'completed'},
+    )
+    with patch(
+        'open_webui.services.sync.base_worker.Files.get_file_by_id',
+        new=AsyncMock(return_value=existing),
+    ):
+        cat, _ = await worker._classify_for_submit(_file_info(cloud_hash='h1'))
+    assert cat == 'unchanged'
+
+
+@pytest.mark.asyncio
+async def test_classify_pending_hash_alone_never_satisfies_skip():
+    worker = _make_worker()
+    worker._kb_member_file_ids = {'stub-item-1'}
+    existing = SimpleNamespace(
+        meta={'cloud_hash': 'h1', 'pending_cloud_hash': 'h2'},
+        data={'status': 'completed'},
+    )
+    with patch(
+        'open_webui.services.sync.base_worker.Files.get_file_by_id',
+        new=AsyncMock(return_value=existing),
+    ):
+        cat, _ = await worker._classify_for_submit(_file_info(cloud_hash='h2'))
+    assert cat == 'updated'
+
+
 def test_confluence_worker_opts_into_nonempty_content_guard():
     """Confluence renders title + metadata front-matter for every page, so an
     empty content row is always a failed ingest — it opts into the guard.

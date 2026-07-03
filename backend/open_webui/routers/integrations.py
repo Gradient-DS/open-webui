@@ -565,6 +565,19 @@ async def _process_chunked_text_document(
         # ids stop confusing later debugging (mirrors the per-file
         # chat-attachment dispatch in ingest_documents).
         await Files.update_file_metadata_by_id(file_id, {'pipeline_job_id': None, 'pipeline_submitted_at': None})
+        # Promote the sync worker's staged provider hash now that the ingest
+        # actually succeeded. This is the ONLY writer of cloud_hash on the
+        # shared-loader path (the legacy in-pod writer is dead code), so the
+        # unchanged-classification in _classify_for_submit only ever trusts a
+        # hash whose content reached the vector DB. No-op for rows without a
+        # staged hash (chat attachments, push integrations, legacy rows).
+        refreshed = await Files.get_file_by_id(file_id)
+        pending = ((refreshed.meta if refreshed else None) or {}).get('pending_cloud_hash')
+        if pending:
+            await Files.update_file_metadata_by_id(
+                file_id,
+                {'cloud_hash': pending, 'pending_cloud_hash': None},
+            )
     except Exception as e:
         log.exception(f'Failed to store chunked document {doc.source_id} in vector DB')
         await Files.set_status(file_id, 'error', error=str(e))

@@ -594,6 +594,21 @@ class BaseSyncWorker(ABC):
             log.debug(f'Failed to emit revoked-access deletion event: {e}')
         return 1
 
+    @staticmethod
+    def _dedup_discovered_files(files: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """Collapse duplicate feed emissions to one entry per provider item id.
+
+        Graph's /delta (and Drive's changes API) may emit the same item more
+        than once in a single enumeration; per the API contract the LAST
+        occurrence is authoritative (newest metadata/hash). Also collapses a
+        single-file source that overlaps a picked folder. First-seen order is
+        preserved so progress remains stable.
+        """
+        by_id: Dict[str, Dict[str, Any]] = {}
+        for file_info in files:
+            by_id[file_info['item']['id']] = file_info
+        return list(by_id.values())
+
     async def _classify_for_submit(self, file_info: Dict[str, Any]) -> tuple[str, str]:
         """Decide whether to submit this file_info to the loader-worker.
 
@@ -1439,6 +1454,13 @@ class BaseSyncWorker(ABC):
                 source_item_id = file_info.get('source_item_id')
                 relative_path = file_info.get('relative_path', name)
                 content_type = self._get_content_type(name)
+                # Provider content hash at discovery time, staged on the row
+                # as pending_cloud_hash. /ingest promotes it to cloud_hash
+                # ONLY on a successful ingest — a failed download/parse/embed
+                # keeps the old cloud_hash so the next sync retries the file
+                # as 'updated' instead of freezing it 'unchanged' under a
+                # hash it never ingested.
+                cloud_hash = self._get_cloud_hash(file_info)
 
                 existing = await Files.get_file_by_id(file_id)
                 if existing is not None:
@@ -1452,7 +1474,11 @@ class BaseSyncWorker(ABC):
                     existing_meta = existing.meta or {}
                     stale = {
                         key: value
-                        for key, value in (('source_item_id', source_item_id), ('relative_path', relative_path))
+                        for key, value in (
+                            ('source_item_id', source_item_id),
+                            ('relative_path', relative_path),
+                            ('pending_cloud_hash', cloud_hash),
+                        )
                         if value and existing_meta.get(key) != value
                     }
                     if stale:
@@ -1483,6 +1509,8 @@ class BaseSyncWorker(ABC):
                     # the KB file-list query (Task 3) can read status from the
                     # cheap meta column without de-TOASTing data.content.
                     file_meta['status'] = 'pending'
+                    if cloud_hash:
+                        file_meta['pending_cloud_hash'] = cloud_hash
 
                     file_form = FileForm(
                         id=file_id,
@@ -2108,6 +2136,20 @@ class BaseSyncWorker(ABC):
                     file_info = await self._collect_single_file(source)
                     if file_info:
                         all_files_to_process.append(file_info)
+
+            # Collapse duplicate feed emissions before anything counts or
+            # consumes slots: every downstream per-occurrence counter
+            # (progress total, the Classified log, loader items_total) must
+            # equal the distinct file count, and the loader must never
+            # process the same item twice.
+            discovered_count = len(all_files_to_process)
+            all_files_to_process = self._dedup_discovered_files(all_files_to_process)
+            if len(all_files_to_process) != discovered_count:
+                log.info(
+                    f'Collapsed {discovered_count - len(all_files_to_process)} duplicate '
+                    f'feed emission(s) for {self.knowledge_id}: {discovered_count} -> '
+                    f'{len(all_files_to_process)} distinct files'
+                )
 
             # Apply file count limit. A falsy max_files_config (0/None) means
             # the provider sets no per-sync cap — fall back to the KB-wide
