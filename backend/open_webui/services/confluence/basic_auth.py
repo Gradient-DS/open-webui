@@ -23,14 +23,7 @@ from urllib.parse import urlparse
 
 import httpx
 
-from open_webui.config import (
-    CONFLUENCE_AUTH_MODE,
-    CONFLUENCE_SITE_URL,
-    CONFLUENCE_BASIC_AUTH_USERNAME,
-    CONFLUENCE_BASIC_AUTH_API_TOKEN,
-    CONFLUENCE_SCOPED_API_TOKEN,
-    CONFLUENCE_CLOUD_ID,
-)
+from open_webui.models.config import Config
 from open_webui.models.knowledge import Knowledges
 from open_webui.services.confluence.confluence_client import (
     ConfluenceClient,
@@ -59,9 +52,13 @@ BASIC_AUTH_SENTINEL = '__confluence_basic_auth__'
 _META_KEY = 'confluence_sync'
 
 
-def global_auth_mode() -> str:
-    """The configured global default auth mode ('oauth' | 'basic' | 'scoped')."""
-    mode = CONFLUENCE_AUTH_MODE.value
+async def global_auth_mode() -> str:
+    """The configured global default auth mode ('oauth' | 'basic' | 'scoped').
+
+    Read live from the per-key Config store so an admin switching the mode in the
+    Cloud Sync tab takes effect without a pod restart.
+    """
+    mode = await Config.get('confluence.auth_mode', 'oauth')
     return mode if mode in ('oauth', 'basic', 'scoped') else 'oauth'
 
 
@@ -79,51 +76,58 @@ async def resolve_auth_mode(knowledge_id: Optional[str]) -> str:
             stamped = (kb.meta or {}).get(_META_KEY, {}).get('auth_mode')
             if stamped in ('oauth', 'basic', 'scoped'):
                 return stamped
-    return global_auth_mode()
+    return await global_auth_mode()
 
 
-def basic_auth_configured() -> bool:
+async def basic_auth_configured() -> bool:
     """True when all three basic-auth settings (site, username, token) are set."""
+    values = await Config.get_many(
+        'confluence.site_url', 'confluence.basic_auth_username', 'confluence.basic_auth_api_token'
+    )
     return bool(
-        (CONFLUENCE_SITE_URL.value or '').strip()
-        and (CONFLUENCE_BASIC_AUTH_USERNAME.value or '').strip()
-        and (CONFLUENCE_BASIC_AUTH_API_TOKEN.value or '').strip()
+        (values.get('confluence.site_url') or '').strip()
+        and (values.get('confluence.basic_auth_username') or '').strip()
+        and (values.get('confluence.basic_auth_api_token') or '').strip()
     )
 
 
-def get_basic_site() -> Optional[Dict[str, Any]]:
+async def get_basic_site() -> Optional[Dict[str, Any]]:
     """The single Confluence site for basic auth, derived from CONFLUENCE_SITE_URL.
 
     Returns None when no site URL is configured. The site host doubles as the
     ``cloud_id`` so the rest of the sync pipeline — which keys sources by
     cloud_id — needs no special-casing for basic mode.
     """
-    site_url = normalize_site_url(CONFLUENCE_SITE_URL.value or '')
+    site_url = normalize_site_url(await Config.get('confluence.site_url', '') or '')
     if not site_url:
         return None
     host = urlparse(site_url).netloc or site_url
     return {'cloud_id': host, 'url': site_url, 'name': host}
 
 
-def build_basic_client() -> ConfluenceClient:
+async def build_basic_client() -> ConfluenceClient:
     """Build a basic-mode ConfluenceClient from the global service credential."""
+    values = await Config.get_many(
+        'confluence.site_url', 'confluence.basic_auth_username', 'confluence.basic_auth_api_token'
+    )
     return ConfluenceClient(
         auth_mode='basic',
-        site_url=(CONFLUENCE_SITE_URL.value or '').strip(),
-        basic_username=(CONFLUENCE_BASIC_AUTH_USERNAME.value or '').strip(),
-        basic_api_token=(CONFLUENCE_BASIC_AUTH_API_TOKEN.value or ''),
+        site_url=(values.get('confluence.site_url') or '').strip(),
+        basic_username=(values.get('confluence.basic_auth_username') or '').strip(),
+        basic_api_token=(values.get('confluence.basic_auth_api_token') or ''),
     )
 
 
-def basic_auth_credential() -> str:
+async def basic_auth_credential() -> str:
     """The ``username:api_token`` pair shipped to the loader-worker.
 
     The loader-worker base64-encodes this into an ``Authorization: Basic``
     header. Returned as the raw pair (not encoded) — matching the loader-worker
     ConfluenceSourceClient's ``basic_auth`` contract.
     """
-    username = (CONFLUENCE_BASIC_AUTH_USERNAME.value or '').strip()
-    api_token = (CONFLUENCE_BASIC_AUTH_API_TOKEN.value or '').strip()
+    values = await Config.get_many('confluence.basic_auth_username', 'confluence.basic_auth_api_token')
+    username = (values.get('confluence.basic_auth_username') or '').strip()
+    api_token = (values.get('confluence.basic_auth_api_token') or '').strip()
     return f'{username}:{api_token}'
 
 
@@ -137,12 +141,15 @@ def basic_auth_credential() -> str:
 # ----------------------------------------------------------------------------
 
 
-def scoped_auth_configured() -> bool:
+async def scoped_auth_configured() -> bool:
     """True when site, service-account email, and scoped token are all set."""
+    values = await Config.get_many(
+        'confluence.site_url', 'confluence.basic_auth_username', 'confluence.scoped_api_token'
+    )
     return bool(
-        (CONFLUENCE_SITE_URL.value or '').strip()
-        and (CONFLUENCE_BASIC_AUTH_USERNAME.value or '').strip()
-        and (CONFLUENCE_SCOPED_API_TOKEN.value or '').strip()
+        (values.get('confluence.site_url') or '').strip()
+        and (values.get('confluence.basic_auth_username') or '').strip()
+        and (values.get('confluence.scoped_api_token') or '').strip()
     )
 
 
@@ -155,11 +162,11 @@ async def resolve_cloud_id(site_url: Optional[str] = None) -> Optional[str]:
     caller can surface an actionable "set cloud id" error rather than firing a
     request at a malformed gateway URL.
     """
-    override = (CONFLUENCE_CLOUD_ID.value or '').strip()
+    override = (await Config.get('confluence.cloud_id', '') or '').strip()
     if override:
         return override
 
-    site = normalize_site_url(site_url if site_url is not None else CONFLUENCE_SITE_URL.value or '')
+    site = normalize_site_url(site_url if site_url is not None else (await Config.get('confluence.site_url', '') or ''))
     if not site:
         return None
 
@@ -174,19 +181,21 @@ async def resolve_cloud_id(site_url: Optional[str] = None) -> Optional[str]:
         return None
 
 
-def build_scoped_client_for(cloud_id: str) -> ConfluenceClient:
+async def build_scoped_client_for(cloud_id: str) -> ConfluenceClient:
     """Build a scoped-mode ConfluenceClient for an already-resolved cloudId.
 
-    Synchronous: use where the cloudId is already known (e.g. the sync worker's
-    per-source clients, which carry the resolved cloudId on every source), so no
+    Use where the cloudId is already known (e.g. the sync worker's per-source
+    clients, which carry the resolved cloudId on every source), so no
     ``_edge/tenant_info`` round-trip is needed. :func:`build_scoped_client` is the
-    async variant that resolves the cloudId first.
+    variant that resolves the cloudId first. The credential is read live from the
+    per-key Config store.
     """
+    values = await Config.get_many('confluence.basic_auth_username', 'confluence.scoped_api_token')
     return ConfluenceClient(
         auth_mode='scoped',
         cloud_id=cloud_id or '',
-        basic_username=(CONFLUENCE_BASIC_AUTH_USERNAME.value or '').strip(),
-        basic_api_token=(CONFLUENCE_SCOPED_API_TOKEN.value or ''),
+        basic_username=(values.get('confluence.basic_auth_username') or '').strip(),
+        basic_api_token=(values.get('confluence.scoped_api_token') or ''),
     )
 
 
@@ -199,7 +208,7 @@ async def build_scoped_client() -> ConfluenceClient:
     request at a malformed gateway URL.
     """
     cloud_id = await resolve_cloud_id()
-    return build_scoped_client_for(cloud_id or '')
+    return await build_scoped_client_for(cloud_id or '')
 
 
 async def get_scoped_site() -> Optional[Dict[str, Any]]:
@@ -210,7 +219,7 @@ async def get_scoped_site() -> Optional[Dict[str, Any]]:
     transport addresses the gateway by cloudId. Returns None when no site URL is
     configured; ``cloud_id`` may be None when it cannot be resolved.
     """
-    site_url = normalize_site_url(CONFLUENCE_SITE_URL.value or '')
+    site_url = normalize_site_url(await Config.get('confluence.site_url', '') or '')
     if not site_url:
         return None
     host = urlparse(site_url).netloc or site_url
@@ -218,14 +227,15 @@ async def get_scoped_site() -> Optional[Dict[str, Any]]:
     return {'cloud_id': cloud_id, 'url': site_url, 'name': host}
 
 
-def scoped_auth_credential() -> str:
+async def scoped_auth_credential() -> str:
     """The ``email:scoped_token`` pair shipped to the loader-worker.
 
     Same raw-pair contract as :func:`basic_auth_credential`; the loader-worker
     base64-encodes it into an ``Authorization: Basic`` header.
     """
-    username = (CONFLUENCE_BASIC_AUTH_USERNAME.value or '').strip()
-    api_token = (CONFLUENCE_SCOPED_API_TOKEN.value or '').strip()
+    values = await Config.get_many('confluence.basic_auth_username', 'confluence.scoped_api_token')
+    username = (values.get('confluence.basic_auth_username') or '').strip()
+    api_token = (values.get('confluence.scoped_api_token') or '').strip()
     return f'{username}:{api_token}'
 
 
@@ -238,22 +248,22 @@ def scoped_auth_credential() -> str:
 # ----------------------------------------------------------------------------
 
 
-def service_auth_configured(mode: str) -> bool:
+async def service_auth_configured(mode: str) -> bool:
     """True when the credential for the given service mode is fully configured."""
     if mode == 'scoped':
-        return scoped_auth_configured()
-    return basic_auth_configured()
+        return await scoped_auth_configured()
+    return await basic_auth_configured()
 
 
 async def build_service_client(mode: str) -> ConfluenceClient:
     """Build the ConfluenceClient for the given service mode ('basic'|'scoped')."""
     if mode == 'scoped':
         return await build_scoped_client()
-    return build_basic_client()
+    return await build_basic_client()
 
 
 async def service_site(mode: str) -> Optional[Dict[str, Any]]:
     """The single configured site for the given service mode ('basic'|'scoped')."""
     if mode == 'scoped':
         return await get_scoped_site()
-    return get_basic_site()
+    return await get_basic_site()

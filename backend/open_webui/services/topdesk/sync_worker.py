@@ -34,8 +34,8 @@ from typing import Any, Dict, List, Optional
 from open_webui.config import (
     TOPDESK_MAX_ITEMS_PER_SYNC,
     TOPDESK_MAX_ITEM_SIZE_MB,
-    TOPDESK_SYNC_SCOPE,
 )
+from open_webui.models.config import Config
 from open_webui.models.files import Files
 from open_webui.models.knowledge import Knowledges
 from open_webui.models.users import Users
@@ -55,13 +55,14 @@ _FILE_ID_PREFIX = 'topdesk-'
 _META_KEY = 'topdesk_sync'
 
 
-def _sync_scope() -> str:
+async def _sync_scope() -> str:
     """Resolve the configured sync scope ('ssp' | 'public' | 'all').
 
-    Read at use-time (not cached) so an admin scope change via the Cloud Sync tab
-    takes effect on the next sync without a restart.
+    Read live from the per-key Config store (not the import-time module var) so an
+    admin scope change via the Cloud Sync tab takes effect on the next sync
+    without a restart.
     """
-    return getattr(TOPDESK_SYNC_SCOPE, 'value', None) or 'ssp'
+    return await Config.get('topdesk.sync_scope', 'ssp') or 'ssp'
 
 
 def _sanitise_filename(title: str, item_id: str) -> str:
@@ -75,15 +76,15 @@ def _sanitise_filename(title: str, item_id: str) -> str:
     return cleaned[:120].rstrip(' .') or f'item-{item_id}'
 
 
-def _should_sync(item: Dict[str, Any]) -> bool:
-    """Whether a REST KnowledgeItem should be ingested, per TOPDESK_SYNC_SCOPE.
+def _should_sync(item: Dict[str, Any], scope: str) -> bool:
+    """Whether a REST KnowledgeItem should be ingested, for the given sync scope.
 
     Delegates to ``mapping.should_sync`` (archived always excluded; ssp/public/all
     gate on ``visibility``). Replaces the old status-enum publish check — ``status``
     is a customer searchlist with no guaranteed "PUBLISHED" value, so visibility is
     the structured signal.
     """
-    return mapping.should_sync(item, _sync_scope())
+    return mapping.should_sync(item, scope)
 
 
 def _build_front_matter(file_info: Dict[str, Any]) -> str:
@@ -169,10 +170,11 @@ class TopdeskSyncWorker(BaseSyncWorker):
 
     @property
     def max_files_config(self) -> Optional[int]:
-        # TOPDESK_MAX_ITEMS_PER_SYNC is a PersistentConfig (admin-editable).
         # 0 = "no limit" → return None so base_worker falls back to the KB-wide
-        # KNOWLEDGE_MAX_FILE_COUNT safety net alone.
-        return TOPDESK_MAX_ITEMS_PER_SYNC.value or None
+        # KNOWLEDGE_MAX_FILE_COUNT safety net alone. Sync @property, so this reads
+        # the import-time default rather than a live Config value (limits, unlike
+        # credentials, don't need per-tick liveness).
+        return TOPDESK_MAX_ITEMS_PER_SYNC or None
 
     @property
     def source_clear_delta_keys(self) -> list[str]:
@@ -183,18 +185,19 @@ class TopdeskSyncWorker(BaseSyncWorker):
     # ------------------------------------------------------------------
 
     def _create_client(self):
-        """Build the single service client for the configured TOPdesk tenant.
+        """Defer client construction to the async ``_client_handle``.
 
-        Returns the client so base_worker can stash it on ``self._client``; the
-        worker uses ``_client_handle`` internally so the tree-walk helpers don't
-        depend on base_worker's attribute.
+        base_worker calls this synchronously from ``sync()`` and only stashes the
+        result on ``self._client`` (which it never reads). The real client reads
+        the service credential live from the per-key Config store, which requires
+        an async call, so it is built lazily on first use by ``_client_handle``.
         """
-        self._service_client = build_client()
-        return self._service_client
+        self._service_client = None
+        return None
 
-    def _client_handle(self) -> TopdeskClient:
+    async def _client_handle(self) -> TopdeskClient:
         if self._service_client is None:
-            self._service_client = build_client()
+            self._service_client = await build_client()
         return self._service_client
 
     async def _close_client(self):
@@ -271,7 +274,7 @@ class TopdeskSyncWorker(BaseSyncWorker):
             if src_item_id:
                 old_by_id[str(src_item_id)] = src
 
-        site = get_service_site()
+        site = await get_service_site()
         site_url = site['url'] if site else ''
 
         resolved: List[Dict[str, Any]] = []
@@ -345,13 +348,14 @@ class TopdeskSyncWorker(BaseSyncWorker):
         subtree, walk the item + descendants. Items outside ``TOPDESK_SYNC_SCOPE``
         (or archived) are filtered out via ``_should_sync``.
         """
-        client = self._client_handle()
+        client = await self._client_handle()
         item_id = source.get('item_id')
+        scope = await _sync_scope()
 
         if item_id in (None, '', '__all__', '*'):
             # Whole-KB flat selection (v1 Intermax). Filter to the configured scope.
             items = await client.iter_all_knowledge_items()
-            return [i for i in items if _should_sync(i)]
+            return [i for i in items if _should_sync(i, scope)]
 
         root = await client.get_knowledge_item(item_id)
         if not root:
@@ -359,15 +363,15 @@ class TopdeskSyncWorker(BaseSyncWorker):
 
         include_descendants = bool(source.get('include_descendants', True))
         collected: List[Dict[str, Any]] = []
-        if _should_sync(root):
+        if _should_sync(root, scope):
             collected.append(root)
 
         if include_descendants:
-            collected.extend(await self._walk_descendants(item_id))
+            collected.extend(await self._walk_descendants(item_id, scope))
 
         return collected
 
-    async def _walk_descendants(self, root_id: str) -> List[Dict[str, Any]]:
+    async def _walk_descendants(self, root_id: str, scope: str) -> List[Dict[str, Any]]:
         """Breadth-first walk of an item's descendant tree (in-scope only).
 
         Bounded by ``_seen_item_ids``-independent local visited set so a
@@ -387,7 +391,7 @@ class TopdeskSyncWorker(BaseSyncWorker):
         returns ``[]`` for a leaf (a FIQL ``parent.id==`` query with no matches),
         so absence is data, not an error — only a real fetch failure aborts.
         """
-        client = self._client_handle()
+        client = await self._client_handle()
         out: List[Dict[str, Any]] = []
         visited: set[str] = {root_id}
         frontier: List[str] = [root_id]
@@ -408,11 +412,11 @@ class TopdeskSyncWorker(BaseSyncWorker):
                 # not-visible intermediate node may still have in-scope descendants
                 # we want to sync. Only in-scope nodes are emitted.
                 frontier.append(child_id)
-                if _should_sync(child):
+                if _should_sync(child, scope):
                     out.append(child)
         return out
 
-    def _file_info_for(self, source: Dict[str, Any], item: Dict[str, Any]) -> Dict[str, Any]:
+    async def _file_info_for(self, source: Dict[str, Any], item: Dict[str, Any]) -> Dict[str, Any]:
         """Build a base_worker file_info dict from an enumerated REST item node.
 
         Reads the nested REST shape via ``mapping`` (translation.content.*,
@@ -422,7 +426,7 @@ class TopdeskSyncWorker(BaseSyncWorker):
         """
         item_id = item['id']
         title = mapping.item_title(item) or f'item-{item_id}'
-        site = get_service_site()
+        site = await get_service_site()
         base_url = site['url'] if site else ''
         return {
             'item': {
@@ -496,7 +500,7 @@ class TopdeskSyncWorker(BaseSyncWorker):
                     item_id,
                 )
 
-            files_to_process.append(self._file_info_for(source, item))
+            files_to_process.append(await self._file_info_for(source, item))
 
         source['item_map'] = new_item_map
         source['last_sync_at'] = int(time.time())
@@ -505,7 +509,7 @@ class TopdeskSyncWorker(BaseSyncWorker):
 
     async def _collect_single_file(self, source: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         """Single-item source without descendants. Uses modificationDate for change."""
-        client = self._client_handle()
+        client = await self._client_handle()
         item_id = source['item_id']
 
         # Skip if this item was already queued by a subtree source.
@@ -523,7 +527,7 @@ class TopdeskSyncWorker(BaseSyncWorker):
             return None
 
         # Out-of-scope / archived items never sync.
-        if not _should_sync(item):
+        if not _should_sync(item, await _sync_scope()):
             log.info(
                 'TOPdesk item %s is out of sync scope (visibility=%s, archived=%s) — skipping',
                 item_id,
@@ -546,7 +550,7 @@ class TopdeskSyncWorker(BaseSyncWorker):
 
         source['last_synced_modified'] = current_modified
 
-        return self._file_info_for(source, item)
+        return await self._file_info_for(source, item)
 
     def _get_cloud_hash(self, file_info: Dict[str, Any]) -> Optional[str]:
         """TOPdesk change indicator: the item's modificationDate string."""
@@ -562,7 +566,7 @@ class TopdeskSyncWorker(BaseSyncWorker):
         and propagates them to vector-DB chunk metadata.
         """
         item_id = file_info['item_id']
-        client = self._client_handle()
+        client = await self._client_handle()
 
         item = await client.get_knowledge_item(item_id)
         if not item:
@@ -664,12 +668,12 @@ class TopdeskSyncWorker(BaseSyncWorker):
         A transient/connection error leaves the suspension state untouched so a
         blip doesn't suspend a healthy KB.
         """
-        if not service_auth_configured():
+        if not await service_auth_configured():
             # No usable credential configured — treat as access lost.
             await self._suspend_kb('service_credential_missing')
             return
 
-        client = self._client_handle()
+        client = await self._client_handle()
         owner_has_access = False
         definite_denial = False
         try:
@@ -766,7 +770,7 @@ class TopdeskSyncWorker(BaseSyncWorker):
         if item_id in (None, '', '__all__', '*'):
             return True
 
-        client = self._client_handle()
+        client = await self._client_handle()
         try:
             result = await client.get_knowledge_item(item_id)
             return result is not None

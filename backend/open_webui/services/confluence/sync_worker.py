@@ -181,10 +181,11 @@ class ConfluenceSyncWorker(BaseSyncWorker):
 
     @property
     def max_files_config(self) -> Optional[int]:
-        # CONFLUENCE_MAX_PAGES_PER_SYNC is a PersistentConfig (admin-editable).
         # 0 = "no limit" → return None so base_worker falls back to the
-        # KB-wide KNOWLEDGE_MAX_FILE_COUNT safety net alone.
-        return CONFLUENCE_MAX_PAGES_PER_SYNC.value or None
+        # KB-wide KNOWLEDGE_MAX_FILE_COUNT safety net alone. Sync @property, so
+        # this reads the import-time default rather than a live Config value
+        # (limits, unlike credentials, don't need per-tick liveness).
+        return CONFLUENCE_MAX_PAGES_PER_SYNC or None
 
     @property
     def source_clear_delta_keys(self) -> list[str]:
@@ -203,19 +204,19 @@ class ConfluenceSyncWorker(BaseSyncWorker):
         self._clients_by_cloud_id: Dict[str, ConfluenceClient] = {}
         return self._clients_by_cloud_id
 
-    def _client_for(self, cloud_id: str) -> ConfluenceClient:
+    async def _client_for(self, cloud_id: str) -> ConfluenceClient:
         cached = self._clients_by_cloud_id.get(cloud_id)
         if cached is None:
             if self._auth_mode == 'basic':
                 # All basic-mode sources hit the same site; cloud_id is only
                 # the cache key. The client reads the service credential and
-                # site URL straight from config.
-                cached = build_basic_client()
+                # site URL live from the per-key Config store.
+                cached = await build_basic_client()
             elif self._auth_mode == 'scoped':
                 # Scoped sources carry the real Atlassian cloudId (resolved
                 # open-webui side), so build directly from config + that id —
                 # no _edge/tenant_info round-trip needed here.
-                cached = build_scoped_client_for(cloud_id)
+                cached = await build_scoped_client_for(cloud_id)
             else:
                 cached = ConfluenceClient(
                     access_token=self.access_token,
@@ -393,7 +394,7 @@ class ConfluenceSyncWorker(BaseSyncWorker):
         page_map has the same version for a page, it is skipped.
         """
         cloud_id = source['cloud_id']
-        client = self._client_for(cloud_id)
+        client = await self._client_for(cloud_id)
 
         pages = await self._list_pages_for_source(source, client)
 
@@ -475,7 +476,7 @@ class ConfluenceSyncWorker(BaseSyncWorker):
     async def _collect_single_file(self, source: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         """Single-page source without descendants. Uses version.number for change."""
         cloud_id = source['cloud_id']
-        client = self._client_for(cloud_id)
+        client = await self._client_for(cloud_id)
 
         # Skip if this page was already queued by a space / subtree source.
         seen_key = (cloud_id, source['item_id'])
@@ -549,7 +550,7 @@ class ConfluenceSyncWorker(BaseSyncWorker):
         """
         cloud_id = file_info['cloud_id']
         page_id = file_info['page_id']
-        client = self._client_for(cloud_id)
+        client = await self._client_for(cloud_id)
 
         # Fetch page body, labels, and ancestor chain in parallel — the labels
         # and ancestor calls are cheap, so they hide behind the body fetch.
@@ -719,7 +720,7 @@ class ConfluenceSyncWorker(BaseSyncWorker):
         if not page_id or not cloud_id:
             return
 
-        client = self._client_for(cloud_id)
+        client = await self._client_for(cloud_id)
         labels_result, ancestors_result = await asyncio.gather(
             client.list_all_page_labels(page_id),
             client.list_all_page_ancestors(page_id),
@@ -746,7 +747,7 @@ class ConfluenceSyncWorker(BaseSyncWorker):
         file_info['confluence_last_modified'] = version.get('createdAt') or ''
         file_info['confluence_created_at'] = file_info.get('created_at') or ''
 
-    def _item_from_file_info(self, file_info: Dict[str, Any], access_token: str) -> Dict[str, Any]:
+    async def _item_from_file_info(self, file_info: Dict[str, Any], access_token: str) -> Dict[str, Any]:
         """Build the loader-worker job item for one Confluence page.
 
         The loader-worker's ConfluenceSourceClient fetches the page body,
@@ -755,7 +756,7 @@ class ConfluenceSyncWorker(BaseSyncWorker):
         is computed open-webui-side here, so loader-worker output matches the
         legacy in-pod path.
         """
-        item = super()._item_from_file_info(file_info, access_token)
+        item = await super()._item_from_file_info(file_info, access_token)
 
         descriptor: Dict[str, Any] = {
             'page_id': file_info['page_id'],
@@ -764,18 +765,20 @@ class ConfluenceSyncWorker(BaseSyncWorker):
 
         if self._auth_mode == 'basic':
             # basic_auth: the loader-worker base64-encodes the raw
-            # email:api_token pair and addresses the site directly.
-            basic_site = get_basic_site()
+            # email:api_token pair and addresses the site directly. Credential
+            # read live from the per-key Config store so an admin token rotation
+            # is picked up on the next sync.
+            basic_site = await get_basic_site()
             descriptor['site_url'] = basic_site['url'] if basic_site else ''
             item['credential_type'] = 'basic_auth'
-            item['source_credential'] = basic_auth_credential()
+            item['source_credential'] = await basic_auth_credential()
         elif self._auth_mode == 'scoped':
             # scoped_token: same email:token Basic header as basic_auth, but the
             # loader-worker addresses the Atlassian gateway by cloudId (resolved
             # open-webui side and carried on every source).
             descriptor['cloud_id'] = file_info.get('cloud_id', '')
             item['credential_type'] = 'scoped_token'
-            item['source_credential'] = scoped_auth_credential()
+            item['source_credential'] = await scoped_auth_credential()
         else:
             # user_oauth: the Bearer token (already set as source_credential by
             # the base implementation) is used against the Atlassian gateway.
@@ -826,7 +829,7 @@ class ConfluenceSyncWorker(BaseSyncWorker):
             if not cloud_id:
                 continue
 
-            client = self._client_for(cloud_id)
+            client = await self._client_for(cloud_id)
             try:
                 if self._is_space_source(source) and source.get('space_id'):
                     result = await client.get_space(source['space_id'])
@@ -941,7 +944,7 @@ class ConfluenceSyncWorker(BaseSyncWorker):
         if not cloud_id:
             return False
 
-        client = self._client_for(cloud_id)
+        client = await self._client_for(cloud_id)
         try:
             if self._is_space_source(source) and source.get('space_id'):
                 result = await client.get_space(source['space_id'])

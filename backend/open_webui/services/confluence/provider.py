@@ -38,13 +38,13 @@ class ConfluenceTokenManager(TokenManager):
     async def get_valid_access_token(self, user_id: str, knowledge_id: str) -> Optional[str]:
         mode = await resolve_auth_mode(knowledge_id)
         if is_service_mode(mode):
-            return BASIC_AUTH_SENTINEL if service_auth_configured(mode) else None
+            return BASIC_AUTH_SENTINEL if await service_auth_configured(mode) else None
         return await _get_valid_access_token(user_id, knowledge_id)
 
     async def has_stored_token(self, user_id: str, knowledge_id: str) -> bool:
         mode = await resolve_auth_mode(knowledge_id)
         if is_service_mode(mode):
-            return service_auth_configured(mode)
+            return await service_auth_configured(mode)
         return await get_stored_token(user_id) is not None
 
     async def delete_token(self, user_id: str, knowledge_id: str) -> bool:

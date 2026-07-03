@@ -11,10 +11,7 @@ from typing import Optional
 
 import httpx
 
-from open_webui.config import (
-    GOOGLE_DRIVE_CLIENT_ID,
-    GOOGLE_CLIENT_SECRET,
-)
+from open_webui.models.config import Config
 from open_webui.services.sync.token_refresh import (
     get_valid_access_token as _generic_get_valid_access_token,
 )
@@ -59,8 +56,8 @@ async def _refresh_token(token_data: dict) -> Optional[dict]:
             response = await client.post(
                 _TOKEN_URL,
                 data={
-                    'client_id': GOOGLE_DRIVE_CLIENT_ID.value,
-                    'client_secret': GOOGLE_CLIENT_SECRET.value,
+                    'client_id': await Config.get('google_drive.client_id', ''),
+                    'client_secret': await Config.get('oauth.google.client_secret', ''),
                     'refresh_token': refresh_token,
                     'grant_type': 'refresh_token',
                 },

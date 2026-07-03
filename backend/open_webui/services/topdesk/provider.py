@@ -25,10 +25,10 @@ class TopdeskTokenManager(TokenManager):
     """
 
     async def get_valid_access_token(self, user_id: str, knowledge_id: str) -> Optional[str]:
-        return TOPDESK_AUTH_SENTINEL if service_auth_configured() else None
+        return TOPDESK_AUTH_SENTINEL if await service_auth_configured() else None
 
     async def has_stored_token(self, user_id: str, knowledge_id: str) -> bool:
-        return service_auth_configured()
+        return await service_auth_configured()
 
     async def delete_token(self, user_id: str, knowledge_id: str) -> bool:
         # No per-user token to delete; this no-ops harmlessly.

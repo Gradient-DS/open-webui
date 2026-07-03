@@ -22,9 +22,9 @@ from open_webui.services.topdesk.sync_worker import TopdeskSyncWorker
 
 _FIXTURES = Path(__file__).parent / 'fixtures'
 
-# Patch target for the sync-scope PersistentConfig so visibility-sensitive tests
+# Patch target for the (async) sync-scope resolver so visibility-sensitive tests
 # are deterministic regardless of any persisted/env value.
-_SCOPE = 'open_webui.services.topdesk.sync_worker.TOPDESK_SYNC_SCOPE'
+_SCOPE = 'open_webui.services.topdesk.sync_worker._sync_scope'
 
 
 def _fixture(name: str) -> dict:
@@ -41,8 +41,10 @@ def _children(name: str = 'item_children.json') -> list:
     return _fixture(name)['item']
 
 
-def _scope(value: str = 'ssp') -> SimpleNamespace:
-    return SimpleNamespace(value=value)
+def _scope(value: str = 'ssp') -> AsyncMock:
+    # _sync_scope is now async (reads live from Config); an AsyncMock returning
+    # the desired scope stands in for it deterministically.
+    return AsyncMock(return_value=value)
 
 
 def _run(coro):
@@ -84,11 +86,11 @@ def test_worker_properties():
     assert worker.source_clear_delta_keys == ['item_map', 'last_synced_modified']
 
 
-def test_max_files_config_reads_persistent_config():
+def test_max_files_config_reads_config_default():
     worker = _make_worker()
-    with patch('open_webui.services.topdesk.sync_worker.TOPDESK_MAX_ITEMS_PER_SYNC', SimpleNamespace(value=500)):
+    with patch('open_webui.services.topdesk.sync_worker.TOPDESK_MAX_ITEMS_PER_SYNC', 500):
         assert worker.max_files_config == 500
-    with patch('open_webui.services.topdesk.sync_worker.TOPDESK_MAX_ITEMS_PER_SYNC', SimpleNamespace(value=0)):
+    with patch('open_webui.services.topdesk.sync_worker.TOPDESK_MAX_ITEMS_PER_SYNC', 0):
         # 0 → None (no per-sync cap; KB-wide safety net applies).
         assert worker.max_files_config is None
 
@@ -302,7 +304,7 @@ def test_walk_descendants_filters_out_of_scope_children():
     client.list_item_children = AsyncMock(side_effect=_list_children)
     worker = _make_worker(client)
     with patch(_SCOPE, _scope('ssp')):
-        out = _run(worker._walk_descendants('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'))
+        out = _run(worker._walk_descendants('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', 'ssp'))
     assert sorted(c['number'] for c in out) == ['KI 0001', 'KI 0006']
 
 
@@ -341,7 +343,7 @@ def test_walk_descendants_propagates_transient_error():
 
     try:
         with patch(_SCOPE, _scope('ssp')):
-            _run(worker._walk_descendants('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'))
+            _run(worker._walk_descendants('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', 'ssp'))
         raised = False
     except TopdeskTransientError:
         raised = True
@@ -356,7 +358,7 @@ def test_walk_descendants_propagates_connection_error():
 
     try:
         with patch(_SCOPE, _scope('ssp')):
-            _run(worker._walk_descendants('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'))
+            _run(worker._walk_descendants('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', 'ssp'))
         raised = False
     except ConnectionError:
         raised = True
@@ -509,9 +511,10 @@ def test_file_info_for_maps_nested_rest_fields():
     source = {'type': 'folder', 'item_id': 'src-1'}
     with patch(
         'open_webui.services.topdesk.sync_worker.get_service_site',
+        new_callable=AsyncMock,
         return_value={'url': 'https://tenant.topdesk.net', 'cloud_id': 't', 'name': 't'},
     ):
-        fi = worker._file_info_for(source, item)
+        fi = _run(worker._file_info_for(source, item))
 
     assert fi['item_id'] == item['id']
     assert fi['title'] == 'How to reset your password'
@@ -582,7 +585,9 @@ def test_sync_permissions_single_auth_error_does_not_suspend():
     update_meta = AsyncMock()
     suspend_status = AsyncMock()
     with (
-        patch('open_webui.services.topdesk.sync_worker.service_auth_configured', return_value=True),
+        patch(
+            'open_webui.services.topdesk.sync_worker.service_auth_configured', new_callable=AsyncMock, return_value=True
+        ),
         patch('open_webui.services.topdesk.sync_worker.Knowledges.get_knowledge_by_id', new=AsyncMock(return_value=kb)),
         patch('open_webui.services.topdesk.sync_worker.Knowledges.update_knowledge_meta_by_id', new=update_meta),
         patch.object(worker, '_update_sync_status', new=suspend_status),
@@ -606,7 +611,9 @@ def test_sync_permissions_second_consecutive_auth_error_suspends():
     kb = SimpleNamespace(meta={'topdesk_sync': {'auth_fail_count': 1}})
     update_meta = AsyncMock()
     with (
-        patch('open_webui.services.topdesk.sync_worker.service_auth_configured', return_value=True),
+        patch(
+            'open_webui.services.topdesk.sync_worker.service_auth_configured', new_callable=AsyncMock, return_value=True
+        ),
         patch('open_webui.services.topdesk.sync_worker.Knowledges.get_knowledge_by_id', new=AsyncMock(return_value=kb)),
         patch('open_webui.services.topdesk.sync_worker.Knowledges.update_knowledge_meta_by_id', new=update_meta),
         patch.object(worker, '_update_sync_status', new=AsyncMock()),
@@ -626,7 +633,9 @@ def test_sync_permissions_unsuspends_on_recovered_access():
     kb = SimpleNamespace(meta={'topdesk_sync': {'suspended_at': 123, 'suspended_reason': 'x', 'auth_fail_count': 2}})
     update_meta = AsyncMock()
     with (
-        patch('open_webui.services.topdesk.sync_worker.service_auth_configured', return_value=True),
+        patch(
+            'open_webui.services.topdesk.sync_worker.service_auth_configured', new_callable=AsyncMock, return_value=True
+        ),
         patch('open_webui.services.topdesk.sync_worker.Knowledges.get_knowledge_by_id', new=AsyncMock(return_value=kb)),
         patch('open_webui.services.topdesk.sync_worker.Knowledges.update_knowledge_meta_by_id', new=update_meta),
     ):
@@ -646,7 +655,9 @@ def test_sync_permissions_success_resets_failure_counter_without_suspension():
     kb = SimpleNamespace(meta={'topdesk_sync': {'auth_fail_count': 1}})
     update_meta = AsyncMock()
     with (
-        patch('open_webui.services.topdesk.sync_worker.service_auth_configured', return_value=True),
+        patch(
+            'open_webui.services.topdesk.sync_worker.service_auth_configured', new_callable=AsyncMock, return_value=True
+        ),
         patch('open_webui.services.topdesk.sync_worker.Knowledges.get_knowledge_by_id', new=AsyncMock(return_value=kb)),
         patch('open_webui.services.topdesk.sync_worker.Knowledges.update_knowledge_meta_by_id', new=update_meta),
     ):
@@ -663,7 +674,9 @@ def test_sync_permissions_transient_error_leaves_state_untouched():
     worker = _make_worker(client)
     update_meta = AsyncMock()
     with (
-        patch('open_webui.services.topdesk.sync_worker.service_auth_configured', return_value=True),
+        patch(
+            'open_webui.services.topdesk.sync_worker.service_auth_configured', new_callable=AsyncMock, return_value=True
+        ),
         patch('open_webui.services.topdesk.sync_worker.Knowledges.update_knowledge_meta_by_id', new=update_meta),
     ):
         _run(worker._sync_permissions())
@@ -678,7 +691,11 @@ def test_sync_permissions_suspends_when_credential_missing():
     kb = SimpleNamespace(meta={'topdesk_sync': {'auth_fail_count': 1}})
     update_meta = AsyncMock()
     with (
-        patch('open_webui.services.topdesk.sync_worker.service_auth_configured', return_value=False),
+        patch(
+            'open_webui.services.topdesk.sync_worker.service_auth_configured',
+            new_callable=AsyncMock,
+            return_value=False,
+        ),
         patch('open_webui.services.topdesk.sync_worker.Knowledges.get_knowledge_by_id', new=AsyncMock(return_value=kb)),
         patch('open_webui.services.topdesk.sync_worker.Knowledges.update_knowledge_meta_by_id', new=update_meta),
         patch.object(worker, '_update_sync_status', new=AsyncMock()),
@@ -713,6 +730,7 @@ def test_resolve_shared_kb_sources_builds_folder_and_file_sources():
         patch('open_webui.services.topdesk.sync_worker.Knowledges.get_knowledge_by_id', new=AsyncMock(return_value=kb)),
         patch(
             'open_webui.services.topdesk.sync_worker.get_service_site',
+            new_callable=AsyncMock,
             return_value={'url': 'https://t.topdesk.net', 'cloud_id': 't', 'name': 't'},
         ),
     ):
@@ -734,7 +752,7 @@ def test_resolve_shared_kb_sources_carries_delta_and_keeps_dropped():
     kb = SimpleNamespace(meta={'topdesk_sync': {'shared': True, 'items': [{'item_id': 'sub-1'}]}})
     with (
         patch('open_webui.services.topdesk.sync_worker.Knowledges.get_knowledge_by_id', new=AsyncMock(return_value=kb)),
-        patch('open_webui.services.topdesk.sync_worker.get_service_site', return_value=None),
+        patch('open_webui.services.topdesk.sync_worker.get_service_site', new_callable=AsyncMock, return_value=None),
     ):
         _run(worker._resolve_shared_kb_sources())
 

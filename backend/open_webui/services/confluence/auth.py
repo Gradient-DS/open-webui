@@ -21,10 +21,7 @@ import httpx
 from fastapi import Request
 
 from open_webui.models.oauth_sessions import OAuthSessions
-from open_webui.config import (
-    CONFLUENCE_OAUTH_CLIENT_ID,
-    CONFLUENCE_OAUTH_CLIENT_SECRET,
-)
+from open_webui.models.config import Config
 from open_webui.services.sync import pending_flows as _pending
 
 log = logging.getLogger(__name__)
@@ -106,7 +103,7 @@ async def get_authorization_url(
 
     params = {
         'audience': _AUDIENCE,
-        'client_id': CONFLUENCE_OAUTH_CLIENT_ID.value,
+        'client_id': await Config.get('confluence.client_id', ''),
         'scope': _SCOPE,
         'redirect_uri': redirect_uri,
         'state': state,
@@ -191,8 +188,8 @@ async def exchange_code_for_tokens(
                 _TOKEN_URL,
                 json={
                     'grant_type': 'authorization_code',
-                    'client_id': CONFLUENCE_OAUTH_CLIENT_ID.value,
-                    'client_secret': CONFLUENCE_OAUTH_CLIENT_SECRET.value,
+                    'client_id': await Config.get('confluence.client_id', ''),
+                    'client_secret': await Config.get('confluence.client_secret', ''),
                     'code': code,
                     'redirect_uri': flow['redirect_uri'],
                     'code_verifier': flow['code_verifier'],

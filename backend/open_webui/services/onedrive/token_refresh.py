@@ -11,11 +11,7 @@ from typing import Optional
 
 import httpx
 
-from open_webui.config import (
-    ONEDRIVE_CLIENT_ID_BUSINESS,
-    MICROSOFT_CLIENT_SECRET,
-    ONEDRIVE_SHAREPOINT_TENANT_ID,
-)
+from open_webui.models.config import Config
 from open_webui.services.sync.token_refresh import (
     get_valid_access_token as _generic_get_valid_access_token,
 )
@@ -56,7 +52,7 @@ async def _refresh_token(token_data: dict) -> Optional[dict]:
         log.error('No refresh_token in stored token data')
         return None
 
-    tenant_id = ONEDRIVE_SHAREPOINT_TENANT_ID.value or 'common'
+    tenant_id = await Config.get('onedrive.sharepoint_tenant_id', '') or 'common'
     token_url = f'{_AUTHORITY_BASE}/{tenant_id}/oauth2/v2.0/token'
 
     try:
@@ -64,8 +60,8 @@ async def _refresh_token(token_data: dict) -> Optional[dict]:
             response = await client.post(
                 token_url,
                 data={
-                    'client_id': ONEDRIVE_CLIENT_ID_BUSINESS.value,
-                    'client_secret': MICROSOFT_CLIENT_SECRET.value,
+                    'client_id': await Config.get('onedrive.client_id_business', ''),
+                    'client_secret': await Config.get('oauth.microsoft.client_secret', ''),
                     'refresh_token': refresh_token,
                     'grant_type': 'refresh_token',
                     'scope': _GRAPH_SCOPE,

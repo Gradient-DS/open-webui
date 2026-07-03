@@ -16,10 +16,7 @@ from urllib.parse import urlencode
 from fastapi import Request
 
 from open_webui.models.oauth_sessions import OAuthSessions
-from open_webui.config import (
-    GOOGLE_DRIVE_CLIENT_ID,
-    GOOGLE_CLIENT_SECRET,
-)
+from open_webui.models.config import Config
 from open_webui.services.sync import pending_flows as _pending
 
 log = logging.getLogger(__name__)
@@ -81,7 +78,7 @@ async def get_authorization_url(
     )
 
     params = {
-        'client_id': GOOGLE_DRIVE_CLIENT_ID.value,
+        'client_id': await Config.get('google_drive.client_id', ''),
         'response_type': 'code',
         'redirect_uri': redirect_uri,
         'scope': _SCOPE,
@@ -134,8 +131,8 @@ async def exchange_code_for_tokens(
             response = await client.post(
                 _TOKEN_URL,
                 data={
-                    'client_id': GOOGLE_DRIVE_CLIENT_ID.value,
-                    'client_secret': GOOGLE_CLIENT_SECRET.value,
+                    'client_id': await Config.get('google_drive.client_id', ''),
+                    'client_secret': await Config.get('oauth.google.client_secret', ''),
                     'code': code,
                     'redirect_uri': flow['redirect_uri'],
                     'grant_type': 'authorization_code',

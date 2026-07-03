@@ -10,15 +10,16 @@ Confluence-specific descriptor logic is exercised.
 
 from __future__ import annotations
 
-from unittest.mock import patch
+import asyncio
+from unittest.mock import AsyncMock, patch
 
 from open_webui.services.confluence.sync_worker import ConfluenceSyncWorker
 from open_webui.services.sync.base_worker import BaseSyncWorker
 
 
-def _base_item(self, file_info, access_token):
-    # Minimal stand-in for BaseSyncWorker._item_from_file_info — the confluence
-    # override mutates this dict in place.
+async def _base_item(self, file_info, access_token):
+    # Minimal stand-in for BaseSyncWorker._item_from_file_info (now async) — the
+    # confluence override mutates this dict in place.
     return {
         'source': 'confluence',
         'source_credential': access_token,
@@ -36,13 +37,14 @@ def _worker(auth_mode: str) -> ConfluenceSyncWorker:
 def _item_for(auth_mode: str, file_info: dict):
     worker = _worker(auth_mode)
     with patch.object(BaseSyncWorker, '_item_from_file_info', new=_base_item):
-        return worker._item_from_file_info(file_info, 'sentinel-token')
+        return asyncio.run(worker._item_from_file_info(file_info, 'sentinel-token'))
 
 
 def test_scoped_emits_scoped_token_descriptor():
     file_info = {'page_id': 'p1', 'cloud_id': 'cloud-9', 'item': {}}
     with patch(
         'open_webui.services.confluence.sync_worker.scoped_auth_credential',
+        new_callable=AsyncMock,
         return_value='svc@acme.com:scoped-secret',
     ):
         item = _item_for('scoped', file_info)
@@ -61,10 +63,12 @@ def test_basic_still_emits_basic_auth_descriptor():
     with (
         patch(
             'open_webui.services.confluence.sync_worker.basic_auth_credential',
+            new_callable=AsyncMock,
             return_value='svc@acme.com:classic-token',
         ),
         patch(
             'open_webui.services.confluence.sync_worker.get_basic_site',
+            new_callable=AsyncMock,
             return_value={'url': 'https://acme.atlassian.net', 'cloud_id': 'acme.atlassian.net'},
         ),
     ):

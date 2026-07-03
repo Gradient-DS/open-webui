@@ -26,7 +26,7 @@ from open_webui.env import (
     WEBUI_AUTH_COOKIE_SAME_SITE,
     WEBUI_AUTH_COOKIE_SECURE,
 )
-from open_webui.config import DEFAULT_LOCALE, ENABLE_OAUTH_SIGNUP
+from open_webui.config import DEFAULT_LOCALE
 
 log = logging.getLogger(__name__)
 
@@ -145,7 +145,7 @@ async def create_invite(
                 expiry_hours=expiry_hours,
                 client_name=CLIENT_NAME,
                 custom_heading=custom_heading,
-                oauth_signup_enabled=bool(ENABLE_OAUTH_SIGNUP.value),
+                oauth_signup_enabled=bool(await Config.get('oauth.enable_signup', False)),
             )
             await send_mail(
                 app=request.app,
@@ -422,7 +422,7 @@ async def resend_invite(
                 expiry_hours=expiry_hours,
                 client_name=CLIENT_NAME,
                 custom_heading=custom_heading,
-                oauth_signup_enabled=bool(ENABLE_OAUTH_SIGNUP.value),
+                oauth_signup_enabled=bool(await Config.get('oauth.enable_signup', False)),
             )
             await send_mail(
                 app=request.app,

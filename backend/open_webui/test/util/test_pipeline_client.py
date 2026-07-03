@@ -277,7 +277,8 @@ async def test_process_and_embed_skips_legacy_in_shared_mode(monkeypatch):
     assert result is None
 
 
-def test_item_from_file_info_default_shape():
+@pytest.mark.asyncio
+async def test_item_from_file_info_default_shape():
     """Default item builder produces the loader-worker contract shape."""
     worker = _make_worker(use_shared_loader=True)
     file_info = {
@@ -289,7 +290,7 @@ def test_item_from_file_info_default_shape():
         'relative_path': 'sub/doc.pdf',
     }
 
-    item = worker._item_from_file_info(file_info, access_token='oauth-token')
+    item = await worker._item_from_file_info(file_info, access_token='oauth-token')
 
     assert item['source'] == 'onedrive'
     assert item['credential_type'] == 'user_oauth'

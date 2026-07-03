@@ -1,12 +1,15 @@
 """TOPdesk auth helpers — header construction + readiness truth table.
 
 These exercise the pure header builder (no config) plus the config-driven
-helpers via monkeypatched PersistentConfig ``.value``. They run without
-pytest-asyncio (no async here).
+helpers, which now read live from the per-key Config store (``Config.get`` /
+``Config.get_many``) instead of PersistentConfig ``.value``. The config-driven
+helpers are async, so a stub Config is injected and the coroutines are driven
+with ``asyncio.run``.
 """
 
 from __future__ import annotations
 
+import asyncio
 import base64
 
 from open_webui.services.topdesk import auth as topdesk_auth
@@ -33,50 +36,64 @@ def test_build_auth_header_trims_username_whitespace():
     assert header == {'Authorization': expected}
 
 
-class _Cfg:
-    """Minimal stand-in for a PersistentConfig exposing ``.value``."""
+class _FakeConfig:
+    """Async stand-in for the per-key Config store, backed by a dotted-key dict."""
 
-    def __init__(self, value):
-        self.value = value
+    def __init__(self, mapping):
+        self._m = mapping
+
+    async def get(self, key, default=None):
+        return self._m.get(key, default)
+
+    async def get_many(self, *keys):
+        return {k: self._m.get(k) for k in keys}
 
 
 def _patch_config(monkeypatch, url='', username='', app_password=''):
-    monkeypatch.setattr(topdesk_auth, 'TOPDESK_URL', _Cfg(url))
-    monkeypatch.setattr(topdesk_auth, 'TOPDESK_USERNAME', _Cfg(username))
-    monkeypatch.setattr(topdesk_auth, 'TOPDESK_APP_PASSWORD', _Cfg(app_password))
+    monkeypatch.setattr(
+        topdesk_auth,
+        'Config',
+        _FakeConfig(
+            {
+                'topdesk.url': url,
+                'topdesk.username': username,
+                'topdesk.app_password': app_password,
+            }
+        ),
+    )
 
 
 def test_service_auth_configured_truth_table(monkeypatch):
     # URL + username + app_password all set → configured.
     _patch_config(monkeypatch, url='https://t.topdesk.net', username='op', app_password='pw')
-    assert topdesk_auth.service_auth_configured() is True
+    assert asyncio.run(topdesk_auth.service_auth_configured()) is True
 
     # Missing operator login → NOT configured (Basic-only requires the login).
     _patch_config(monkeypatch, url='https://t.topdesk.net', username='', app_password='pw')
-    assert topdesk_auth.service_auth_configured() is False
+    assert asyncio.run(topdesk_auth.service_auth_configured()) is False
 
     # Missing URL → not configured.
     _patch_config(monkeypatch, url='', username='op', app_password='pw')
-    assert topdesk_auth.service_auth_configured() is False
+    assert asyncio.run(topdesk_auth.service_auth_configured()) is False
 
     # Missing app_password → not configured.
     _patch_config(monkeypatch, url='https://t.topdesk.net', username='op', app_password='')
-    assert topdesk_auth.service_auth_configured() is False
+    assert asyncio.run(topdesk_auth.service_auth_configured()) is False
 
     # Whitespace-only values → not configured.
     _patch_config(monkeypatch, url='   ', username='   ', app_password='   ')
-    assert topdesk_auth.service_auth_configured() is False
+    assert asyncio.run(topdesk_auth.service_auth_configured()) is False
 
 
 def test_auth_headers_reads_config_basic_form(monkeypatch):
     _patch_config(monkeypatch, url='https://t.topdesk.net', username=' op ', app_password='pw')
-    header = topdesk_auth.auth_headers()
+    header = asyncio.run(topdesk_auth.auth_headers())
     assert header == {'Authorization': 'Basic ' + base64.b64encode(b'op:pw').decode('ascii')}
 
 
 def test_get_service_site_derives_host(monkeypatch):
     _patch_config(monkeypatch, url='https://tenant.topdesk.net/', username='op', app_password='pw')
-    site = topdesk_auth.get_service_site()
+    site = asyncio.run(topdesk_auth.get_service_site())
     assert site == {
         'cloud_id': 'tenant.topdesk.net',
         'url': 'https://tenant.topdesk.net',
@@ -86,12 +103,12 @@ def test_get_service_site_derives_host(monkeypatch):
 
 def test_get_service_site_none_when_url_missing(monkeypatch):
     _patch_config(monkeypatch, url='', username='op', app_password='pw')
-    assert topdesk_auth.get_service_site() is None
+    assert asyncio.run(topdesk_auth.get_service_site()) is None
 
 
 def test_build_client_uses_config(monkeypatch):
     _patch_config(monkeypatch, url='https://tenant.topdesk.net/', username='op', app_password='pw')
-    client = topdesk_auth.build_client()
+    client = asyncio.run(topdesk_auth.build_client())
     assert client.base_url == 'https://tenant.topdesk.net'
     # KB API path comes from config default; header is always Basic.
     assert client._auth_header == {'Authorization': 'Basic ' + base64.b64encode(b'op:pw').decode('ascii')}

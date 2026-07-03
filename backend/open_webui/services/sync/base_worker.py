@@ -20,7 +20,7 @@ from open_webui.models.files import Files, FileForm, FileUpdateForm
 from open_webui.models.users import Users
 from open_webui.models.config import Config
 from open_webui.storage.provider import Storage
-from open_webui.config import FILE_PROCESSING_MAX_CONCURRENT, KNOWLEDGE_MAX_FILE_COUNT
+from open_webui.config import KNOWLEDGE_MAX_FILE_COUNT
 from open_webui.retrieval.vector.factory import VECTOR_DB_CLIENT
 from open_webui.retrieval.vector.async_client import ASYNC_VECTOR_DB_CLIENT
 from open_webui.services.deletion import DeletionService
@@ -238,13 +238,15 @@ class BaseSyncWorker(ABC):
         """
         ...
 
-    def _item_from_file_info(self, file_info: Dict[str, Any], access_token: str) -> Dict[str, Any]:
+    async def _item_from_file_info(self, file_info: Dict[str, Any], access_token: str) -> Dict[str, Any]:
         """Build a loader-worker job item dict from a discovered file_info.
 
         Used in shared-loader mode (USE_SHARED_LOADER=true). Providers
         override to supply provider-specific ``source_descriptor`` fields the
         loader-worker's ``SourceClient`` knows how to interpret. Default
-        implementation produces a generic item shape.
+        implementation produces a generic item shape. Async so service-mode
+        overrides (e.g. Confluence basic/scoped) can read credentials live from
+        the per-key Config store.
         """
         item = file_info['item']
         item_id = item['id']
@@ -1397,7 +1399,7 @@ class BaseSyncWorker(ABC):
             if refreshed:
                 access_token = refreshed
 
-        items = [self._item_from_file_info(f, access_token) for f in files]
+        items = [await self._item_from_file_info(f, access_token) for f in files]
 
         callback_base_url = os.environ.get('WEBUI_PUBLIC_BASE_URL', '')
         if not callback_base_url:
@@ -2227,7 +2229,7 @@ class BaseSyncWorker(ABC):
 
             thread_pool_size = min(32, (os.cpu_count() or 1) + 4)
             max_process_concurrent = min(
-                FILE_PROCESSING_MAX_CONCURRENT.value,
+                await Config.get('file.processing_max_concurrent', 5),
                 max(1, thread_pool_size - 2),  # leave 2 slots for embeddings / other work
             )
             max_download_concurrent = max_process_concurrent * FILE_DOWNLOAD_CONCURRENCY_MULTIPLIER
