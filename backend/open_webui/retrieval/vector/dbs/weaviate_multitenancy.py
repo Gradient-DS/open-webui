@@ -1,22 +1,20 @@
 """
 NOTE: This vector database integration is community-supported and maintained on a best-effort basis.
 
-Native Weaviate multi-tenancy connector. Routes every OWUI logical collection into
-one of five fixed schema collections (Knowledge, File, WebSearch, UserMemory,
-HashBased) as a native Weaviate TENANT (one shard + dedicated vector index per
-tenant), plus a standalone non-multi-tenant meta collection (Knowledge_bases).
+Native Weaviate multi-tenancy connector — the sole Weaviate connector. Routes
+every OWUI logical collection into one of five fixed schema collections
+(Knowledge, File, WebSearch, UserMemory, HashBased) as a native Weaviate TENANT
+(one shard + dedicated vector index per tenant), plus a standalone
+non-multi-tenant meta collection (Knowledge_bases).
 
-This mirrors the legacy ``weaviate.py`` connector for connection setup, property
-schema, batching and read/serialize/normalize logic, but uses native tenants
-(``.with_tenant(...)``) instead of one class per logical collection.
-
-A dual-read shim lets reads/has_collection fall back to the legacy per-class data
-during the migration window (controlled by WEAVIATE_MT_LEGACY_FALLBACK).
+The legacy per-class connector (``weaviate.py``) and its dual-read fallback shim
+were removed after the fleet-wide MT migration completed (2026-07).
 """
 
 import logging
 import re
 import uuid
+from datetime import datetime
 from typing import Any, Dict, List, Optional, Union
 
 import weaviate
@@ -29,20 +27,11 @@ from open_webui.retrieval.vector.main import (
     GetResult,
 )
 from open_webui.retrieval.vector.utils import process_metadata
-
-# Reuse the legacy helpers verbatim — do not duplicate.
-from open_webui.retrieval.vector.dbs.weaviate import (
-    _make_json_serializable,
-    _sanitize_property_name,  # noqa: F401 (re-exported for parity/tests)
-    _sanitize_metadata_keys,
-)
 from open_webui.retrieval.vector.dbs._weaviate_mt_mapping import (
     map_collection,
-    KNOWLEDGE,
     FILE,
     WEB_SEARCH,
     USER_MEMORY,
-    HASH_BASED,
     KNOWLEDGE_BASES_META,
 )
 from open_webui.config import (
@@ -55,11 +44,49 @@ from open_webui.config import (
     WEAVIATE_GRPC_SECURE,
     WEAVIATE_SKIP_INIT_CHECKS,
     ENABLE_WEAVIATE_BQ_QUANTIZATION,
-    ENABLE_WEAVIATE_MULTITENANCY_MODE,  # noqa: F401 (read at module level for monkeypatch)
-    WEAVIATE_MT_LEGACY_FALLBACK,
 )
 
 log = logging.getLogger(__name__)
+
+
+def _make_json_serializable(obj: Any) -> Any:
+    """Recursively convert non-JSON-serializable objects (UUID, datetime) to strings."""
+    if isinstance(obj, uuid.UUID):
+        return str(obj)
+    elif isinstance(obj, datetime):
+        return obj.isoformat()
+    elif isinstance(obj, dict):
+        return {key: _make_json_serializable(value) for key, value in obj.items()}
+    elif isinstance(obj, (list, tuple)):
+        return type(obj)(_make_json_serializable(item) for item in obj)
+    else:
+        return obj
+
+
+def _sanitize_property_name(name: str) -> str:
+    """Sanitize property name to be a valid Weaviate/GraphQL identifier.
+
+    Weaviate property names must match /[_A-Za-z][_0-9A-Za-z]{0,230}/.
+    PDF metadata can contain hyphens (e.g. 'pdfsettings-inchmargins') which
+    cause silent batch insert failures.
+    """
+    sanitized = re.sub(r'[^a-zA-Z0-9_]', '_', name)
+    sanitized = sanitized.strip('_')
+    if not sanitized:
+        return None
+    if not sanitized[0].isalpha() and sanitized[0] != '_':
+        sanitized = '_' + sanitized
+    return sanitized
+
+
+def _sanitize_metadata_keys(metadata: dict) -> dict:
+    """Sanitize all metadata keys to be valid Weaviate property names."""
+    result = {}
+    for key, value in metadata.items():
+        sanitized_key = _sanitize_property_name(key)
+        if sanitized_key:
+            result[sanitized_key] = value
+    return result
 
 
 # The MT schema collections that opt into the `flat` index with binary
@@ -87,33 +114,11 @@ def _build_vector_config(mt_collection_name: str):
     return weaviate.classes.config.Configure.Vectors.self_provided()
 
 
-def _legacy_sanitize_collection_name(collection_name: str) -> str:
-    """Replicate the legacy ``_sanitize_collection_name`` regex EXACTLY.
-
-    Gives the legacy Weaviate class name for a given logical collection_name, so
-    the dual-read shim can locate (and, on delete, purge) the legacy class.
-    """
-    if not isinstance(collection_name, str) or not collection_name.strip():
-        raise ValueError('Collection name must be a non-empty string')
-
-    # Replace hyphens with underscores and keep only alphanumeric + underscore.
-    name = re.sub(r'[^a-zA-Z0-9_]', '', collection_name.replace('-', '_'))
-    name = name.strip('_')
-
-    if not name:
-        raise ValueError('Could not sanitize collection name to be a valid Weaviate class name')
-
-    # Ensure it starts with a letter and is capitalized.
-    if not name[0].isalpha():
-        name = 'C' + name
-
-    return name[0].upper() + name[1:]
-
-
-# Full property list copied from legacy `_create_collection` (weaviate.py). Applied
-# uniformly to all five MT collections and the meta collection: cloud-sync metadata
-# on Knowledge/File requires it and it is harmless on the others. Explicitly typed
-# as TEXT to prevent Weaviate auto-schema from inferring wrong types.
+# Canonical property list, applied uniformly to all five MT collections and the
+# meta collection: cloud-sync metadata on Knowledge/File requires it and it is
+# harmless on the others. Explicitly typed to prevent Weaviate auto-schema from
+# inferring wrong types. Auto-schema is off, so any retrievable chunk-metadata
+# key MUST be declared here (undeclared keys are silently dropped at insert).
 def _mt_properties() -> list:
     return [
         weaviate.classes.config.Property(name='text', data_type=weaviate.classes.config.DataType.TEXT),
@@ -121,6 +126,8 @@ def _mt_properties() -> list:
         weaviate.classes.config.Property(name='file_id', data_type=weaviate.classes.config.DataType.TEXT),
         weaviate.classes.config.Property(name='name', data_type=weaviate.classes.config.DataType.TEXT),
         weaviate.classes.config.Property(name='source', data_type=weaviate.classes.config.DataType.TEXT),
+        # Cloud-sync provenance: original page/document URL for citations (PR #195).
+        weaviate.classes.config.Property(name='source_url', data_type=weaviate.classes.config.DataType.TEXT),
         weaviate.classes.config.Property(name='created_by', data_type=weaviate.classes.config.DataType.TEXT),
         # PDF metadata - dates come in non-RFC3339 format
         weaviate.classes.config.Property(name='moddate', data_type=weaviate.classes.config.DataType.TEXT),
@@ -146,9 +153,6 @@ def _mt_properties() -> list:
 class WeaviateClient(VectorDBBase):
     def __init__(self):
         self.url = WEAVIATE_HTTP_HOST
-        # Read flags as instance attributes so tests can also monkeypatch the
-        # module attribute (imported above) and so behaviour is explicit.
-        self.legacy_fallback = WEAVIATE_MT_LEGACY_FALLBACK
         try:
             # Build connection parameters
             connection_params = {
@@ -169,6 +173,12 @@ class WeaviateClient(VectorDBBase):
             self.client.connect()
         except Exception as e:
             raise ConnectionError(f'Failed to connect to Weaviate: {e}') from e
+
+        # Collections whose `source_url` property has been verified/added this
+        # process. Auto-schema is off (see _create_collection), so the generic
+        # `source_url` provenance key must be an explicit property; this set
+        # avoids re-checking the schema on every insert batch.
+        self._source_url_ensured: set[str] = set()
 
     # ------------------------------------------------------------------
     # Schema / collection lifecycle
@@ -204,18 +214,39 @@ class WeaviateClient(VectorDBBase):
                     log.debug('Collection %s created by another thread', coll_name)
                 else:
                     raise
+        else:
+            # Collection predates the `source_url` property: add it in place so a
+            # re-sync repopulates the original-page link without reprovisioning.
+            self._ensure_source_url_property(coll_name)
 
-    def _legacy_class_exists(self, collection_name: str) -> Optional[str]:
-        """Return the legacy class name if it exists (and fallback is on), else None."""
-        if not self.legacy_fallback:
-            return None
+    def _ensure_source_url_property(self, coll_name: str) -> None:
+        """Idempotently add the `source_url` property to an existing collection.
+
+        Auto-schema is off, so inserts silently drop undeclared properties. New
+        collections get `source_url` from `_mt_properties`; collections created
+        before this property existed need it added once. The schema is
+        collection-level (tenant-agnostic), so one call covers all tenants.
+        Cached per process.
+        """
+        if coll_name in self._source_url_ensured:
+            return
         try:
-            legacy_class = _legacy_sanitize_collection_name(collection_name)
-        except ValueError:
-            return None
-        if self.client.collections.exists(legacy_class):
-            return legacy_class
-        return None
+            collection = self.client.collections.get(coll_name)
+            existing = {p.name for p in collection.config.get().properties}
+            if 'source_url' not in existing:
+                collection.config.add_property(
+                    weaviate.classes.config.Property(
+                        name='source_url',
+                        data_type=weaviate.classes.config.DataType.TEXT,
+                    )
+                )
+                log.info('Added source_url property to existing collection %s', coll_name)
+        except Exception as e:
+            # Non-fatal: a concurrent add or a transient error must not block the
+            # insert. The property either already exists or will be retried next call.
+            log.debug('Could not ensure source_url on %s: %s', coll_name, e)
+            return
+        self._source_url_ensured.add(coll_name)
 
     def _queryable(self, coll_name: str, tenant: Optional[str]):
         """Return the queryable collection object (tenant-scoped if applicable).
@@ -229,7 +260,7 @@ class WeaviateClient(VectorDBBase):
         return coll.with_tenant(tenant)
 
     # ------------------------------------------------------------------
-    # Read helpers (written ONCE, used by both MT and legacy-fallback paths)
+    # Read helpers
     # ------------------------------------------------------------------
 
     @staticmethod
@@ -340,16 +371,6 @@ class WeaviateClient(VectorDBBase):
         except Exception:
             return None
 
-    @staticmethod
-    def _result_is_empty(result: Optional[GetResult]) -> bool:
-        """True when a Get/SearchResult carries no documents."""
-        if result is None:
-            return True
-        docs = result.documents or []
-        # Emptiness is judged on the presence of result groups, not document text content.
-        # An inner group like [''] (a real doc with empty text) correctly counts as non-empty.
-        return not any(group for group in docs)
-
     def _tenant_exists(self, coll_name: str, tenant: Optional[str]) -> bool:
         """True if the MT tenant exists (collection may not exist yet -> False)."""
         if tenant is None:
@@ -367,12 +388,7 @@ class WeaviateClient(VectorDBBase):
 
     def has_collection(self, collection_name: str) -> bool:
         coll_name, tenant = map_collection(collection_name)
-        if self._tenant_exists(coll_name, tenant):
-            return True
-        # Dual-read: also true if the legacy class exists.
-        if self._legacy_class_exists(collection_name) is not None:
-            return True
-        return False
+        return self._tenant_exists(coll_name, tenant)
 
     def insert(self, collection_name: str, items: List[VectorItem]) -> None:
         coll_name, tenant = map_collection(collection_name)
@@ -424,46 +440,21 @@ class WeaviateClient(VectorDBBase):
         limit: int = 10,
     ) -> Optional[SearchResult]:
         coll_name, tenant = map_collection(collection_name)
-
-        result = None
-        if self._tenant_exists(coll_name, tenant):
-            result = self._search_objects(self._queryable(coll_name, tenant), vectors, limit)
-
-        # Dual-read: MT tenant absent or empty -> fall back to legacy class.
-        if self._result_is_empty(result):
-            legacy_class = self._legacy_class_exists(collection_name)
-            if legacy_class is not None:
-                return self._search_objects(self.client.collections.get(legacy_class), vectors, limit)
-
-        return result
+        if not self._tenant_exists(coll_name, tenant):
+            return None
+        return self._search_objects(self._queryable(coll_name, tenant), vectors, limit)
 
     def query(self, collection_name: str, filter: Dict, limit: Optional[int] = None) -> Optional[GetResult]:
         coll_name, tenant = map_collection(collection_name)
-
-        result = None
-        if self._tenant_exists(coll_name, tenant):
-            result = self._query_objects(self._queryable(coll_name, tenant), filter, limit)
-
-        if self._result_is_empty(result):
-            legacy_class = self._legacy_class_exists(collection_name)
-            if legacy_class is not None:
-                return self._query_objects(self.client.collections.get(legacy_class), filter, limit)
-
-        return result
+        if not self._tenant_exists(coll_name, tenant):
+            return None
+        return self._query_objects(self._queryable(coll_name, tenant), filter, limit)
 
     def get(self, collection_name: str) -> Optional[GetResult]:
         coll_name, tenant = map_collection(collection_name)
-
-        result = None
-        if self._tenant_exists(coll_name, tenant):
-            result = self._get_objects(self._queryable(coll_name, tenant))
-
-        if self._result_is_empty(result):
-            legacy_class = self._legacy_class_exists(collection_name)
-            if legacy_class is not None:
-                return self._get_objects(self.client.collections.get(legacy_class))
-
-        return result
+        if not self._tenant_exists(coll_name, tenant):
+            return None
+        return self._get_objects(self._queryable(coll_name, tenant))
 
     @staticmethod
     def _build_delete_filter(filter: Dict):
@@ -487,7 +478,7 @@ class WeaviateClient(VectorDBBase):
                 if weaviate_filter:
                     queryable.data.delete_many(where=weaviate_filter)
         except Exception as e:
-            log.warning('Weaviate MT delete failed (data may resurrect via dual-read): %s', e)
+            log.warning('Weaviate MT delete failed: %s', e)
 
     def delete(
         self,
@@ -501,17 +492,11 @@ class WeaviateClient(VectorDBBase):
         if self._tenant_exists(coll_name, tenant):
             self._apply_delete(self._queryable(coll_name, tenant), ids, filter)
 
-        # Anti-resurrection: also delete from the legacy class so the dual-read
-        # shim cannot resurrect this data during the migration window.
-        legacy_class = self._legacy_class_exists(collection_name)
-        if legacy_class is not None:
-            self._apply_delete(self.client.collections.get(legacy_class), ids, filter)
-
     def delete_collection(self, collection_name: str) -> None:
         coll_name, tenant = map_collection(collection_name)
 
         if tenant is None:
-            # Standalone meta collection — drop the whole collection (legacy parity).
+            # Standalone meta collection — drop the whole collection.
             try:
                 self.client.collections.delete(coll_name)
             except Exception:
@@ -522,20 +507,11 @@ class WeaviateClient(VectorDBBase):
                 try:
                     self.client.collections.get(coll_name).tenants.remove([tenant])
                 except Exception as e:
-                    log.warning('Weaviate MT tenants.remove failed (data may resurrect via dual-read): %s', e)
-
-        # Anti-resurrection: also delete the legacy class so dropped KBs/files
-        # don't reappear via dual-read.
-        legacy_class = self._legacy_class_exists(collection_name)
-        if legacy_class is not None:
-            try:
-                self.client.collections.delete(legacy_class)
-            except Exception as e:
-                log.warning('Weaviate legacy-class delete failed (data may resurrect via dual-read): %s', e)
+                    log.warning('Weaviate MT tenants.remove failed: %s', e)
 
     def reset(self) -> None:
         # Wipe everything: the five MT collections, the meta collection, and any
-        # remaining legacy classes. Mirrors legacy reset (delete all collections).
+        # other remaining classes (delete all collections).
         try:
             for coll_name in self.client.collections.list_all().keys():
                 self.client.collections.delete(coll_name)
