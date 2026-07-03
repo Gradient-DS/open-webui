@@ -211,6 +211,74 @@ async def test_kb_path_chunked_failure_keeps_pipeline_bookkeeping(monkeypatch):
         assert call.args[1] != {'pipeline_job_id': None, 'pipeline_submitted_at': None}
 
 
+# --- KB-path chunked success: staged cloud-hash promotion -------------------
+#
+# The sync worker stages the provider hash on the stub row as
+# meta.pending_cloud_hash (base_worker._create_stub_file_rows); the chunked
+# success path promotes it to cloud_hash so _classify_for_submit's unchanged
+# short-circuit only ever trusts a hash whose content actually reached the
+# vector DB. Failure paths never promote — the file retries as 'updated'.
+
+
+@pytest.mark.asyncio
+async def test_kb_path_chunked_success_promotes_pending_cloud_hash(monkeypatch):
+    existing = MagicMock(meta={'pending_cloud_hash': 'h1'}, path='')
+    save_mock, files, knowledges = _patch_persistence(monkeypatch, existing_file=existing)
+    monkeypatch.setattr(integrations_router, '_delete_old_vectors', AsyncMock())
+
+    result = await integrations_router._process_chunked_text_document(
+        request=MagicMock(),
+        knowledge_id='kb-1',
+        provider='onedrive',
+        doc=_chunked_doc(source_id='item-1'),
+        user_id='user-1',
+    )
+
+    assert result['status'] == 'updated'
+    files.update_file_metadata_by_id.assert_any_await(
+        'onedrive-item-1', {'cloud_hash': 'h1', 'pending_cloud_hash': None}
+    )
+
+
+@pytest.mark.asyncio
+async def test_kb_path_chunked_failure_does_not_promote(monkeypatch):
+    existing = MagicMock(meta={'pending_cloud_hash': 'h1'}, path='')
+    save_mock, files, knowledges = _patch_persistence(monkeypatch, existing_file=existing)
+    monkeypatch.setattr(integrations_router, '_delete_old_vectors', AsyncMock())
+    save_mock.side_effect = RuntimeError('boom')
+
+    result = await integrations_router._process_chunked_text_document(
+        request=MagicMock(),
+        knowledge_id='kb-1',
+        provider='onedrive',
+        doc=_chunked_doc(source_id='item-1'),
+        user_id='user-1',
+    )
+
+    assert result['status'] == 'error'
+    for call in files.update_file_metadata_by_id.await_args_list:
+        assert 'cloud_hash' not in call.args[1]
+
+
+@pytest.mark.asyncio
+async def test_kb_path_chunked_success_without_staged_hash_no_promotion(monkeypatch):
+    """Rows without a staged hash (chat attachments, push integrations, legacy
+    rows) must never get a cloud_hash write from the promotion seam."""
+    save_mock, files, knowledges = _patch_persistence(monkeypatch)
+
+    result = await integrations_router._process_chunked_text_document(
+        request=MagicMock(),
+        knowledge_id='kb-1',
+        provider='onedrive',
+        doc=_chunked_doc(source_id='item-1'),
+        user_id='user-1',
+    )
+
+    assert result['status'] == 'created'
+    for call in files.update_file_metadata_by_id.await_args_list:
+        assert 'cloud_hash' not in call.args[1]
+
+
 # --- /ingest endpoint: target routing --------------------------------------
 
 
