@@ -1102,7 +1102,7 @@ async def ingest_documents(
         # Direct KB uploads routed through warren (provider owui_upload) need an
         # honest file:status once their vectors land here — Phase 1 suppressed
         # _process_handler's submit-time emit to 'processing'. Cloud-sync
-        # providers (onedrive/confluence/google_drive/topdesk) are deliberately
+        # providers (onedrive/confluence/google_drive) are deliberately
         # skipped: they emit their own honest {provider}:file:added, and a
         # redundant file:status here would double-count uploadBatch.added in
         # KnowledgeBase.svelte (which listens to BOTH events).

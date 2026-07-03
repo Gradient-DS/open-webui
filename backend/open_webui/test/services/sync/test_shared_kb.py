@@ -1,7 +1,7 @@
 """Provider-agnostic shared-KB lifecycle helpers (services.sync.shared_kb).
 
-These pin the contract extracted out of the Confluence implementation so a
-TOPdesk (or any future) provider can reuse it without re-deriving the
+These pin the contract extracted out of the Confluence implementation so any
+future provider can reuse it without re-deriving the
 data-corruption-critical bits: the public-read grant is set directly (bypassing
 the user knowledge router's non-local-type guards), an empty owner yields a
 system-owned KB (``user_id=''``), and ``is_managed_shared_kb`` recognises a
@@ -101,9 +101,9 @@ def test_provision_creates_kb_with_empty_grants_then_public_read_grant():
     ):
         result = asyncio.run(
             shared_kb.provision_shared_kb(
-                provider_type='topdesk',
-                meta_key='topdesk_sync',
-                name='TOPdesk',
+                provider_type='confluence',
+                meta_key='confluence_sync',
+                name='Confluence',
                 description='desc',
                 owner_id='admin-1',
                 selected_items=[{'item_id': 'KI-1'}],
@@ -117,14 +117,15 @@ def test_provision_creates_kb_with_empty_grants_then_public_read_grant():
     insert.assert_awaited_once()
     owner_arg, form_arg = insert.await_args.args
     assert owner_arg == 'admin-1'
-    assert form_arg.type == 'topdesk'
+    assert form_arg.type == 'confluence'
     assert form_arg.access_grants == []
 
-    # Meta written under the provider's meta key with the shared flag + items.
+    # Meta written under the provider's meta key with the shared flag + items
+    # (default items_key when the provider doesn't override it).
     update_meta.assert_awaited_once()
     kb_id_arg, meta_arg = update_meta.await_args.args
     assert kb_id_arg == 'kb-new'
-    sync_info = meta_arg['topdesk_sync']
+    sync_info = meta_arg['confluence_sync']
     assert sync_info['shared'] is True
     assert sync_info['auth_mode'] == 'oauth'
     assert sync_info['items'] == [{'item_id': 'KI-1'}]
@@ -157,9 +158,9 @@ def test_provision_empty_owner_is_system_owned():
     ):
         asyncio.run(
             shared_kb.provision_shared_kb(
-                provider_type='topdesk',
-                meta_key='topdesk_sync',
-                name='TOPdesk',
+                provider_type='confluence',
+                meta_key='confluence_sync',
+                name='Confluence',
                 description='desc',
                 owner_id='',
                 selected_items=[],
@@ -302,9 +303,9 @@ def test_provision_create_reserved_keys_win_over_extra_meta():
     ):
         asyncio.run(
             shared_kb.provision_shared_kb(
-                provider_type='topdesk',
-                meta_key='topdesk_sync',
-                name='TOPdesk',
+                provider_type='confluence',
+                meta_key='confluence_sync',
+                name='Confluence',
                 description='desc',
                 owner_id='admin-1',
                 selected_items=[{'item_id': 'KI-1'}],
@@ -312,7 +313,7 @@ def test_provision_create_reserved_keys_win_over_extra_meta():
             )
         )
 
-    sync_info = update_meta.await_args.args[1]['topdesk_sync']
+    sync_info = update_meta.await_args.args[1]['confluence_sync']
     # Reserved keys keep their managed defaults despite the extra_meta clash.
     assert sync_info['sources'] == []
     assert sync_info['status'] == 'idle'
@@ -329,7 +330,7 @@ def test_status_unprovisioned():
         'get_knowledge_bases_by_type',
         new=mock.AsyncMock(return_value=[]),
     ):
-        status = asyncio.run(shared_kb.shared_kb_status('topdesk', 'topdesk_sync'))
+        status = asyncio.run(shared_kb.shared_kb_status('confluence', 'confluence_sync'))
     assert status == {'provisioned': False, 'knowledge_id': None}
 
 
@@ -338,7 +339,7 @@ def test_status_provisioned_reports_meta_and_file_count():
         'kb-1',
         user_id='owner-1',
         meta={
-            'topdesk_sync': {
+            'confluence_sync': {
                 'shared': True,
                 'status': 'syncing',
                 'last_sync_at': 1000,
@@ -362,7 +363,7 @@ def test_status_provisioned_reports_meta_and_file_count():
             new=mock.AsyncMock(return_value={'kb-1': 2}),
         ),
     ):
-        status = asyncio.run(shared_kb.shared_kb_status('topdesk', 'topdesk_sync'))
+        status = asyncio.run(shared_kb.shared_kb_status('confluence', 'confluence_sync'))
 
     assert status['provisioned'] is True
     assert status['knowledge_id'] == 'kb-1'
@@ -380,7 +381,7 @@ def test_status_provisioned_reports_meta_and_file_count():
 def test_status_file_count_zero_when_kb_has_no_files():
     """get_file_counts_by_knowledge_ids omits KBs with no files (GROUP BY); status
     must default to 0 rather than KeyError."""
-    kb = _kb('kb-empty', meta={'topdesk_sync': {'shared': True}})
+    kb = _kb('kb-empty', meta={'confluence_sync': {'shared': True}})
     with (
         mock.patch.object(
             shared_kb.Knowledges,
@@ -394,7 +395,7 @@ def test_status_file_count_zero_when_kb_has_no_files():
             new=mock.AsyncMock(return_value={}),
         ),
     ):
-        status = asyncio.run(shared_kb.shared_kb_status('topdesk', 'topdesk_sync'))
+        status = asyncio.run(shared_kb.shared_kb_status('confluence', 'confluence_sync'))
 
     assert status['file_count'] == 0
 
@@ -462,11 +463,6 @@ def test_is_managed_true_for_confluence_shaped_shared_kb():
     assert shared_kb.is_managed_shared_kb(kb) is True
 
 
-def test_is_managed_true_for_topdesk_shaped_shared_kb():
-    kb = _kb(meta={'topdesk_sync': {'shared': True}})
-    assert shared_kb.is_managed_shared_kb(kb) is True
-
-
 def test_is_managed_false_for_plain_kb():
     assert shared_kb.is_managed_shared_kb(_kb(meta={})) is False
     assert shared_kb.is_managed_shared_kb(_kb(meta=None)) is False
@@ -476,8 +472,6 @@ def test_is_managed_false_for_per_user_synced_kb():
     # A per-user synced KB carries the meta key but is NOT flagged shared.
     kb = _kb(meta={'confluence_sync': {'sources': [{'item_id': 'x'}]}})
     assert shared_kb.is_managed_shared_kb(kb) is False
-    kb2 = _kb(meta={'topdesk_sync': {'sources': [{'item_id': 'y'}]}})
-    assert shared_kb.is_managed_shared_kb(kb2) is False
 
 
 def test_is_managed_false_for_non_dict_meta_without_raising():
@@ -487,6 +481,6 @@ def test_is_managed_false_for_non_dict_meta_without_raising():
 
 
 def test_is_managed_covers_all_meta_keys():
-    # Regression guard: the set of recognised keys must include both providers
+    # Regression guard: the set of recognised keys must include every provider
     # the knowledge.py guard + cleanup_worker skip rely on.
-    assert set(shared_kb.SHARED_SYNC_META_KEYS) >= {'confluence_sync', 'topdesk_sync'}
+    assert set(shared_kb.SHARED_SYNC_META_KEYS) >= {'confluence_sync'}

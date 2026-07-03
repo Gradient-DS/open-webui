@@ -1,9 +1,9 @@
 """Tests for ``ExportService._get_local_file_ids`` cloud-KB exclusion.
 
 The GDPR export zip only embeds the *content* of local KBs; cloud-synced KBs
-(onedrive/google_drive/confluence/topdesk) are re-syncable, so their file bytes
-are excluded (metadata is still exported elsewhere). ``topdesk`` was missing
-from the exclusion set; these tests pin every cloud type plus the local case.
+(onedrive/google_drive/confluence) are re-syncable, so their file bytes
+are excluded (metadata is still exported elsewhere). These tests pin every
+cloud type plus the local case.
 
 ``_get_local_file_ids`` is a pure static method over a plain dict, so no DB or
 app is needed.
@@ -28,7 +28,7 @@ def _data(kb_type: str):
     }
 
 
-@pytest.mark.parametrize('kb_type', ['onedrive', 'google_drive', 'confluence', 'topdesk'])
+@pytest.mark.parametrize('kb_type', ['onedrive', 'google_drive', 'confluence'])
 def test_cloud_kb_files_excluded_from_local(kb_type):
     local_ids = ExportService._get_local_file_ids(_data(kb_type))
     # Cloud KB file is excluded; the unrelated local file remains.

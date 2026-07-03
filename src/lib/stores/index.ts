@@ -374,9 +374,6 @@ type Config = {
 		confluence_kb_mode?: string;
 		confluence_shared_kb_id?: string;
 		confluence_oauth_configured?: boolean;
-		enable_topdesk_integration?: boolean;
-		enable_topdesk_sync?: boolean;
-		topdesk_shared_kb_id?: string;
 		enable_image_generation: boolean;
 		enable_admin_export: boolean;
 		enable_data_export: boolean;

@@ -44,7 +44,6 @@ PROVIDER_FILE_ID_PREFIXES: dict[str, str] = {
     'onedrive': 'onedrive-',
     'google_drive': 'googledrive-',
     'confluence': 'confluence-',
-    'topdesk': 'topdesk-',
     # Direct-upload via the distributed doc-pipeline. NOT a managed-sync
     # provider (no worker class) — the empty prefix is deliberate. A
     # direct-upload File row already exists with a bare UUID id; the
@@ -234,10 +233,6 @@ def get_sync_provider(provider_type: str) -> SyncProvider:
         from open_webui.services.confluence.provider import ConfluenceSyncProvider
 
         return ConfluenceSyncProvider()
-    elif provider_type == 'topdesk':
-        from open_webui.services.topdesk.provider import TopdeskSyncProvider
-
-        return TopdeskSyncProvider()
     else:
         raise ValueError(f'Unsupported sync provider: {provider_type}')
 
@@ -256,9 +251,5 @@ def get_token_manager(provider_type: str) -> TokenManager:
         from open_webui.services.confluence.provider import ConfluenceTokenManager
 
         return ConfluenceTokenManager()
-    elif provider_type == 'topdesk':
-        from open_webui.services.topdesk.provider import TopdeskTokenManager
-
-        return TopdeskTokenManager()
     else:
         raise ValueError(f'Unsupported token manager: {provider_type}')

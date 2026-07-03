@@ -254,7 +254,7 @@ SUSPENSION_TTL_DAYS = 30
 # providers registered in the sync factory. NOTE: this is the FULL set including
 # per-user providers; it is intentionally broader than
 # ``services.sync.shared_kb.SHARED_SYNC_META_KEYS`` (shared providers only).
-SYNC_PROVIDER_META_KEYS = ('onedrive_sync', 'google_drive_sync', 'confluence_sync', 'topdesk_sync')
+SYNC_PROVIDER_META_KEYS = ('onedrive_sync', 'google_drive_sync', 'confluence_sync')
 
 
 def _path_fields_from_meta(meta: Optional[dict]) -> tuple[Optional[str], Optional[str]]:
