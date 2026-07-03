@@ -114,10 +114,11 @@ def _build_vector_config(mt_collection_name: str):
     return weaviate.classes.config.Configure.Vectors.self_provided()
 
 
-# Full property list copied from legacy `_create_collection` (weaviate.py). Applied
-# uniformly to all five MT collections and the meta collection: cloud-sync metadata
-# on Knowledge/File requires it and it is harmless on the others. Explicitly typed
-# as TEXT to prevent Weaviate auto-schema from inferring wrong types.
+# Canonical property list, applied uniformly to all five MT collections and the
+# meta collection: cloud-sync metadata on Knowledge/File requires it and it is
+# harmless on the others. Explicitly typed to prevent Weaviate auto-schema from
+# inferring wrong types. Auto-schema is off, so any retrievable chunk-metadata
+# key MUST be declared here (undeclared keys are silently dropped at insert).
 def _mt_properties() -> list:
     return [
         weaviate.classes.config.Property(name='text', data_type=weaviate.classes.config.DataType.TEXT),
@@ -125,6 +126,8 @@ def _mt_properties() -> list:
         weaviate.classes.config.Property(name='file_id', data_type=weaviate.classes.config.DataType.TEXT),
         weaviate.classes.config.Property(name='name', data_type=weaviate.classes.config.DataType.TEXT),
         weaviate.classes.config.Property(name='source', data_type=weaviate.classes.config.DataType.TEXT),
+        # Cloud-sync provenance: original page/document URL for citations (PR #195).
+        weaviate.classes.config.Property(name='source_url', data_type=weaviate.classes.config.DataType.TEXT),
         weaviate.classes.config.Property(name='created_by', data_type=weaviate.classes.config.DataType.TEXT),
         # PDF metadata - dates come in non-RFC3339 format
         weaviate.classes.config.Property(name='moddate', data_type=weaviate.classes.config.DataType.TEXT),
@@ -171,6 +174,12 @@ class WeaviateClient(VectorDBBase):
         except Exception as e:
             raise ConnectionError(f'Failed to connect to Weaviate: {e}') from e
 
+        # Collections whose `source_url` property has been verified/added this
+        # process. Auto-schema is off (see _create_collection), so the generic
+        # `source_url` provenance key must be an explicit property; this set
+        # avoids re-checking the schema on every insert batch.
+        self._source_url_ensured: set[str] = set()
+
     # ------------------------------------------------------------------
     # Schema / collection lifecycle
     # ------------------------------------------------------------------
@@ -205,6 +214,39 @@ class WeaviateClient(VectorDBBase):
                     log.debug('Collection %s created by another thread', coll_name)
                 else:
                     raise
+        else:
+            # Collection predates the `source_url` property: add it in place so a
+            # re-sync repopulates the original-page link without reprovisioning.
+            self._ensure_source_url_property(coll_name)
+
+    def _ensure_source_url_property(self, coll_name: str) -> None:
+        """Idempotently add the `source_url` property to an existing collection.
+
+        Auto-schema is off, so inserts silently drop undeclared properties. New
+        collections get `source_url` from `_mt_properties`; collections created
+        before this property existed need it added once. The schema is
+        collection-level (tenant-agnostic), so one call covers all tenants.
+        Cached per process.
+        """
+        if coll_name in self._source_url_ensured:
+            return
+        try:
+            collection = self.client.collections.get(coll_name)
+            existing = {p.name for p in collection.config.get().properties}
+            if 'source_url' not in existing:
+                collection.config.add_property(
+                    weaviate.classes.config.Property(
+                        name='source_url',
+                        data_type=weaviate.classes.config.DataType.TEXT,
+                    )
+                )
+                log.info('Added source_url property to existing collection %s', coll_name)
+        except Exception as e:
+            # Non-fatal: a concurrent add or a transient error must not block the
+            # insert. The property either already exists or will be retried next call.
+            log.debug('Could not ensure source_url on %s: %s', coll_name, e)
+            return
+        self._source_url_ensured.add(coll_name)
 
     def _queryable(self, coll_name: str, tenant: Optional[str]):
         """Return the queryable collection object (tenant-scoped if applicable).
