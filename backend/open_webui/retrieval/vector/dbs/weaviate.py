@@ -172,7 +172,7 @@ class WeaviateClient(VectorDBBase):
                 weaviate.classes.config.Property(name='name', data_type=weaviate.classes.config.DataType.TEXT),
                 weaviate.classes.config.Property(name='source', data_type=weaviate.classes.config.DataType.TEXT),
                 # Generic external/source URL of the original document, written
-                # by every cloud-sync worker (Confluence, TOPdesk, Google Drive,
+                # by every cloud-sync worker (Confluence, Google Drive,
                 # OneDrive, generic ingest). Must be declared explicitly because
                 # auto-schema is off; consumed by soev-agents' citation policy
                 # (-> SourceCitation.url) and the OWUI citation modal.

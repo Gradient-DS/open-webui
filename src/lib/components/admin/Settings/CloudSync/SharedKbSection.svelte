@@ -21,8 +21,8 @@
 	// behaviour from the CloudSync monolith — provision / re-provision /
 	// sync-now / delete, status badges, progress %, optional owner dropdown,
 	// and 2.5s polling while a sync runs — with every provider-specific
-	// concern injected via props so TOPdesk (or any future shared-KB
-	// provider) reuses it unchanged.
+	// concern injected via props so any future shared-KB provider reuses it
+	// unchanged.
 
 	// ── Injected provider API ──────────────────────────────────────────
 	// `provision` receives the generic payload built below; the caller's

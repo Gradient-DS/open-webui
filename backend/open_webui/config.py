@@ -3307,88 +3307,6 @@ CONFLUENCE_KB_MODE = PersistentConfig(
 # scheduler resolves the sync token from ``kb.user_id``.
 
 
-# If configured, TOPdesk will be available as a knowledge-base sync source
-# (Knowledge Base GraphQL API). A single service credential is used for all
-# TOPdesk sync against one tenant; admin-editable via the Cloud Sync tab.
-ENABLE_TOPDESK_INTEGRATION = PersistentConfig(
-    'ENABLE_TOPDESK_INTEGRATION',
-    'topdesk.enable',
-    os.getenv('ENABLE_TOPDESK_INTEGRATION', 'False').lower() == 'true',
-)
-
-ENABLE_TOPDESK_SYNC = PersistentConfig(
-    'ENABLE_TOPDESK_SYNC',
-    'topdesk.enable_sync',
-    os.getenv('ENABLE_TOPDESK_SYNC', 'False').lower() == 'true',
-)
-
-# TOPdesk tenant base URL, e.g. https://your-tenant.topdesk.net — required.
-TOPDESK_URL = PersistentConfig(
-    'TOPDESK_URL',
-    'topdesk.url',
-    os.environ.get('TOPDESK_URL', ''),
-)
-
-# Service credential. The KB REST API (knowledge-base-v1) is operator-only and
-# authenticates with HTTP Basic: ``Authorization: Basic base64(login:app_password)``,
-# where the username is the operator login name and the password is the application
-# token (a.k.a. application password) created for that operator. This is the only
-# supported form — the legacy person-token (``TOKEN id="..."``) form was dropped
-# because the REST KB API does not accept it (plan decision 4). The operator login
-# is therefore required, not optional.
-# The application password is returned in full (unmasked) by the admin-only config
-# API and masked client-side via SensitiveInput — same disclosure profile as the
-# Confluence basic-auth token.
-TOPDESK_USERNAME = PersistentConfig(
-    'TOPDESK_USERNAME',
-    'topdesk.username',
-    os.environ.get('TOPDESK_USERNAME', ''),
-)
-
-TOPDESK_APP_PASSWORD = PersistentConfig(
-    'TOPDESK_APP_PASSWORD',
-    'topdesk.app_password',
-    os.environ.get('TOPDESK_APP_PASSWORD', ''),
-)
-
-TOPDESK_SYNC_INTERVAL_MINUTES = PersistentConfig(
-    'TOPDESK_SYNC_INTERVAL_MINUTES',
-    'topdesk.sync_interval_minutes',
-    int(os.environ.get('TOPDESK_SYNC_INTERVAL_MINUTES', '60')),
-)
-
-# Per-sync item cap. 0 = no per-sync limit (KNOWLEDGE_MAX_FILE_COUNT still
-# applies as a KB-wide safety net). Admin-editable via the Cloud Sync tab.
-TOPDESK_MAX_ITEMS_PER_SYNC = PersistentConfig(
-    'TOPDESK_MAX_ITEMS_PER_SYNC',
-    'topdesk.max_items_per_sync',
-    int(os.getenv('TOPDESK_MAX_ITEMS_PER_SYNC', '500')),
-)
-
-TOPDESK_MAX_ITEM_SIZE_MB = int(os.getenv('TOPDESK_MAX_ITEM_SIZE_MB', '25'))
-
-# Which knowledge items to sync into the shared KB. Admin-editable via the Cloud
-# Sync tab (plan decision 1). One of:
-#   - 'ssp'    : items visible in the Self-Service Portal (sspVisibility VISIBLE,
-#                or VISIBLE_IN_PERIOD while within the window). Default.
-#   - 'public' : only items flagged publicKnowledgeItem.
-#   - 'all'    : every operator-readable item (no visibility gate).
-# Archived items are always excluded regardless of scope. Drives ``_should_sync``
-# in the sync worker.
-TOPDESK_SYNC_SCOPE = PersistentConfig(
-    'TOPDESK_SYNC_SCOPE',
-    'topdesk.sync_scope',
-    (os.getenv('TOPDESK_SYNC_SCOPE', 'ssp').strip().lower() or 'ssp'),
-)
-
-# Knowledge Base REST API base path, appended to TOPDESK_URL. Confirmed from the
-# OpenAPI spec: the SaaS REST KB API lives under ``/services/knowledge-base-v1``
-# (knowledge-base_SaaS.json). Config-overridable without a code change so a tenant
-# on a non-default mount can be pointed at the right path. See
-# thoughts/shared/research/2026-06-topdesk-api-verification.md.
-TOPDESK_KB_API_PATH = os.getenv('TOPDESK_KB_API_PATH', '/services/knowledge-base-v1')
-
-
 ####################################
 # Email Service (Microsoft Graph API)
 ####################################
@@ -3710,15 +3628,6 @@ FILE_IMAGE_COMPRESSION_HEIGHT = PersistentConfig(
     (int(os.environ.get('FILE_IMAGE_COMPRESSION_HEIGHT')) if os.environ.get('FILE_IMAGE_COMPRESSION_HEIGHT') else None),
 )
 
-FILE_PROCESSING_MAX_CONCURRENT = PersistentConfig(
-    'FILE_PROCESSING_MAX_CONCURRENT',
-    'file.processing_max_concurrent',
-    int(os.environ.get('FILE_PROCESSING_MAX_CONCURRENT', '5')),
-)
-
-FILE_DOWNLOAD_CONCURRENCY_MULTIPLIER = int(os.environ.get('FILE_DOWNLOAD_CONCURRENCY_MULTIPLIER', '3'))
-
-
 RAG_ALLOWED_FILE_EXTENSIONS = PersistentConfig(
     'RAG_ALLOWED_FILE_EXTENSIONS',
     'rag.file.allowed_extensions',
@@ -3842,17 +3751,11 @@ INTEGRATION_PROVIDERS = PersistentConfig(
 ####################################
 # Shared-Services Loader Worker
 ####################################
-# When enabled, cloud-source sync workers (OneDrive, Google Drive) submit jobs
-# to the per-tenant gradient-loader-worker pod instead of downloading and
-# embedding files in-process. Loader-worker handles download → parse+chunk
-# (via shared doc-processor) → embed (via LiteLLM) → push to /ingest.
+# Cloud-source sync workers (OneDrive, Google Drive, Confluence) submit jobs
+# to the per-tenant gradient-loader-worker pod. Loader-worker handles
+# download → parse+chunk (via shared doc-processor) → embed (via LiteLLM) →
+# push to /ingest.
 # See thoughts/shared/plans/2026-04-25-shared-services-loader-worker.md.
-
-USE_SHARED_LOADER = PersistentConfig(
-    'USE_SHARED_LOADER',
-    'sync.use_shared_loader',
-    os.environ.get('USE_SHARED_LOADER', 'False').lower() == 'true',
-)
 
 # Loader-worker service DNS, e.g. http://gradient-loader-worker.<ns>.svc:8002
 LOADER_WORKER_URL = os.environ.get('LOADER_WORKER_URL', '')

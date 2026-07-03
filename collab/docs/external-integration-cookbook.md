@@ -1,6 +1,6 @@
 # External Integration Cookbook: Adding a New Cloud Sync Provider
 
-This cookbook walks you through adding a new cloud sync provider (e.g., Dropbox, Confluence, Topdesk, Salesforce) to the Open WebUI sync abstraction layer. The architecture follows a **Template Method + Factory** pattern where ~65% of sync logic is shared and each provider implements a thin adapter layer.
+This cookbook walks you through adding a new cloud sync provider (e.g., Dropbox, Confluence, Salesforce) to the Open WebUI sync abstraction layer. The architecture follows a **Template Method + Factory** pattern where ~65% of sync logic is shared and each provider implements a thin adapter layer.
 
 ## Architecture Overview
 
@@ -424,17 +424,6 @@ class ProviderSyncWorker(BaseSyncWorker):
             "content_type": metadata.get("mimeType", "application/octet-stream"),
             "source_item_id": source["item_id"],
             "relative_path": metadata["name"],
-        }
-
-    async def _download_file_content(self, file_info: Dict) -> bytes:
-        """Download raw file content from the provider."""
-        return await self._client.download_file(file_info["id"])
-
-    def _get_provider_storage_headers(self, item_id: str) -> dict:
-        """Headers for the internal storage upload request."""
-        return {
-            "OpenWebUI-Source": "provider_name",
-            "OpenWebUI-Provider-Item-Id": item_id,
         }
 
     def _get_provider_file_meta(

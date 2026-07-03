@@ -354,31 +354,12 @@ data:
   CONFLUENCE_SHARED_KB_OWNER_ID: {{ .Values.openWebui.config.confluenceSharedKbOwnerId | quote }}
   {{- end }}
 
-  # TOPdesk Integration (REST Knowledge Base API + basic auth)
-  # TOPDESK_APP_PASSWORD is set via the secrets template.
-  ENABLE_TOPDESK_INTEGRATION: {{ .Values.openWebui.config.enableTopdeskIntegration | quote }}
-  {{- if .Values.openWebui.config.topdeskUrl }}
-  TOPDESK_URL: {{ .Values.openWebui.config.topdeskUrl | quote }}
-  {{- end }}
-  {{- if .Values.openWebui.config.topdeskUsername }}
-  TOPDESK_USERNAME: {{ .Values.openWebui.config.topdeskUsername | quote }}
-  {{- end }}
-
-  # TOPdesk Sync
-  ENABLE_TOPDESK_SYNC: {{ .Values.openWebui.config.enableTopdeskSync | quote }}
-  TOPDESK_SYNC_INTERVAL_MINUTES: {{ .Values.openWebui.config.topdeskSyncIntervalMinutes | quote }}
-  TOPDESK_MAX_ITEMS_PER_SYNC: {{ .Values.openWebui.config.topdeskMaxItemsPerSync | quote }}
-  TOPDESK_MAX_ITEM_SIZE_MB: {{ .Values.openWebui.config.topdeskMaxItemSizeMb | quote }}
-  TOPDESK_SYNC_SCOPE: {{ .Values.openWebui.config.topdeskSyncScope | quote }}
-  TOPDESK_KB_API_PATH: {{ .Values.openWebui.config.topdeskKbApiPath | quote }}
-
   KNOWLEDGE_MAX_FILE_COUNT: {{ .Values.openWebui.config.knowledgeMaxFileCount | quote }}
   SYNC_MAX_JOB_WALL_CLOCK_SECONDS: {{ .Values.openWebui.config.syncMaxJobWallClockSeconds | quote }}
 
-  # Shared-services loader-worker (per-tenant). When useSharedLoader=true,
-  # cloud-source sync workers submit jobs to the loader-worker pod instead of
-  # downloading + embedding in-process. See helm/open-webui-tenant/templates/loader-worker/.
-  USE_SHARED_LOADER: {{ .Values.openWebui.config.useSharedLoader | default "false" | quote }}
+  # Shared-services loader-worker (per-tenant). Cloud-source sync workers
+  # submit jobs to the loader-worker pod.
+  # See helm/open-webui-tenant/templates/loader-worker/.
   {{- if .Values.loaderWorker.enabled }}
   LOADER_WORKER_URL: "http://{{ include "open-webui-tenant.loaderWorker.fullname" . }}.{{ .Release.Namespace }}.svc:{{ .Values.loaderWorker.service.port | default 8002 }}"
   {{- else if .Values.openWebui.config.loaderWorkerUrl }}

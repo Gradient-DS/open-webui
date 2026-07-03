@@ -7,7 +7,6 @@
 // the Phase 1.3 rewrite.
 
 import type { ComponentType, SvelteComponent } from 'svelte';
-import type { TopdeskBrowseItem } from '$lib/apis/topdesk';
 
 // ─────────────────────────────────────────────────────────────────────
 // Provider descriptor — one entry per cloud-sync provider. The accordion
@@ -26,7 +25,7 @@ export type SyncRunStatus = 'idle' | 'syncing' | (string & {});
 
 export interface ProviderDescriptor {
 	// Stable provider key — matches the cloud-sync status endpoint slug
-	// (confluence, google_drive, onedrive, topdesk, ...).
+	// (confluence, google_drive, onedrive, ...).
 	slug: string;
 	// Human-readable name (already translated or an i18n key the caller
 	// resolves).
@@ -40,7 +39,7 @@ export interface ProviderDescriptor {
 	// behavioral switches. The section components own the actual behavior
 	// (test-connection affordance, shared-KB flow, auth-mode UI) — setting a
 	// flag here does not toggle any feature. Kept as the planned capability
-	// model (a later TOPdesk task references them).
+	// model for future providers.
 	//
 	// Whether the provider exposes a "Test connection" affordance.
 	hasTestConnection: boolean;
@@ -104,19 +103,6 @@ export interface ConfluenceConfigResponse {
 	CONFLUENCE_KB_MODE?: string;
 }
 
-export interface TopdeskConfigResponse {
-	ENABLE_TOPDESK_INTEGRATION?: boolean;
-	ENABLE_TOPDESK_SYNC?: boolean;
-	TOPDESK_URL?: string;
-	TOPDESK_USERNAME?: string;
-	TOPDESK_APP_PASSWORD?: string;
-	TOPDESK_SYNC_INTERVAL_MINUTES?: number;
-	// 0 = unlimited.
-	TOPDESK_MAX_ITEMS_PER_SYNC?: number;
-	// Which items to sync: 'ssp' | 'public' | 'all'.
-	TOPDESK_SYNC_SCOPE?: string;
-}
-
 export interface GoogleDriveConfigResponse {
 	ENABLE_GOOGLE_DRIVE_INTEGRATION?: boolean;
 	ENABLE_GOOGLE_DRIVE_SYNC?: boolean;
@@ -141,10 +127,10 @@ export interface OneDriveConfigResponse {
 
 // ─────────────────────────────────────────────────────────────────────
 // SharedKbSection injected API — the provider-specific async functions
-// the section drives. The orchestrator (Phase 1.3) passes Confluence's or
-// TOPdesk's client functions. `Status` is the provider's shared-KB status
-// shape (e.g. `ConfluenceSharedKbStatus`); kept generic so the section
-// does not hardcode any provider.
+// the section drives. The orchestrator (Phase 1.3) passes the provider's
+// client functions (e.g. Confluence's). `Status` is the provider's
+// shared-KB status shape (e.g. `ConfluenceSharedKbStatus`); kept generic
+// so the section does not hardcode any provider.
 // ─────────────────────────────────────────────────────────────────────
 
 export interface SharedKbApi<Status, ProvisionPayload> {
@@ -171,19 +157,4 @@ export interface SharedKbStatusLike {
 	file_count?: number;
 	progress_current?: number;
 	progress_total?: number;
-}
-
-// ─────────────────────────────────────────────────────────────────────
-// TOPdesk picker tree — UI state for one lazily-expanded knowledge-item
-// node. Shared by `TopdeskPickerModal` (owns the tree + selection) and the
-// recursive `TopdeskPickerNode` (renders a row + its children via
-// `<svelte:self>`, supporting arbitrary nesting depth).
-// ─────────────────────────────────────────────────────────────────────
-
-export interface ItemNode {
-	item: TopdeskBrowseItem;
-	expanded: boolean;
-	loaded: boolean;
-	loadingChildren: boolean;
-	children: ItemNode[];
 }

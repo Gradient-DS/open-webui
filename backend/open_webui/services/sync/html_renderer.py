@@ -1,7 +1,7 @@
 """HTML → Markdown converter for synced page/article bodies.
 
-Shared across cloud-sync providers (Confluence page bodies, TOPdesk knowledge
-items, …). Uses BeautifulSoup (already a project dep) instead of markdownify so
+Shared across cloud-sync providers (Confluence page bodies, …). Uses
+BeautifulSoup (already a project dep) instead of markdownify so
 we don't carry an extra package just for this. Handles the elements that show
 up in rendered ``view`` HTML output: headings, paragraphs, links, lists, code
 blocks, inline emphasis, blockquotes, line breaks. Other tags fall through to

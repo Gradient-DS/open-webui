@@ -202,19 +202,6 @@ class GraphClient:
 
         return items, new_delta_link
 
-    async def download_file(self, drive_id: str, item_id: str) -> bytes:
-        """Download file content.
-
-        Removed in cleanup commit after USE_SHARED_LOADER rollout completes —
-        the per-tenant loader-worker pod owns the download path; the same
-        method is reimplemented in
-        ``genai-utils/api/gateway/loader_worker/sources/onedrive.py``.
-        """
-        url = f'{GRAPH_BASE_URL}/drives/{drive_id}/items/{item_id}/content'
-        response = await self._request_with_retry('GET', url, follow_redirects=True)
-        response.raise_for_status()
-        return response.content
-
     async def get_item_metadata(self, drive_id: str, item_id: str) -> Dict[str, Any]:
         """Get metadata for a specific item."""
         url = f'{GRAPH_BASE_URL}/drives/{drive_id}/items/{item_id}'

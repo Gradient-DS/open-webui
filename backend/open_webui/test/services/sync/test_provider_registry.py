@@ -11,7 +11,6 @@ import pytest
 from open_webui.services.confluence.sync_worker import ConfluenceSyncWorker
 from open_webui.services.google_drive.sync_worker import GoogleDriveSyncWorker
 from open_webui.services.onedrive.sync_worker import OneDriveSyncWorker
-from open_webui.services.topdesk.sync_worker import TopdeskSyncWorker
 from open_webui.services.sync.provider import (
     PROVIDER_FILE_ID_PREFIXES,
     file_id_prefix_for,
@@ -21,7 +20,6 @@ _WORKERS_BY_SLUG = {
     'onedrive': OneDriveSyncWorker,
     'google_drive': GoogleDriveSyncWorker,
     'confluence': ConfluenceSyncWorker,
-    'topdesk': TopdeskSyncWorker,
 }
 
 

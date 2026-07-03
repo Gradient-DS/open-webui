@@ -1,7 +1,7 @@
 """Provider-agnostic shared-KB lifecycle helpers.
 
 A *shared* KB is a single, admin-provisioned, public-read knowledge base that a
-cloud-sync provider keeps in sync (Confluence today, TOPdesk next). Exactly one
+cloud-sync provider keeps in sync (Confluence today). Exactly one
 live shared KB exists per provider; it is discovered by ``type`` +
 ``meta[<meta_key>].shared == True`` rather than by name, so an admin renaming it
 does not orphan the link.
@@ -34,7 +34,7 @@ log = logging.getLogger(__name__)
 # Meta keys under which a managed shared KB stores its sync state. Any KB whose
 # meta carries one of these with ``shared == True`` is admin-managed and must
 # not be deleted/reset/hard-cleaned through the generic knowledge code paths.
-SHARED_SYNC_META_KEYS = ['confluence_sync', 'topdesk_sync']
+SHARED_SYNC_META_KEYS = ['confluence_sync']
 
 
 async def find_shared_kb(provider_type: str, meta_key: str) -> Optional[KnowledgeModel]:
@@ -202,7 +202,7 @@ def is_managed_shared_kb(kb: KnowledgeModel) -> bool:
 
     Checks every key in ``SHARED_SYNC_META_KEYS`` for a ``shared == True`` flag,
     so the knowledge-router deletion guard and the cleanup worker's hard-delete
-    skip cover Confluence, TOPdesk, and any future shared-KB provider uniformly.
+    skip cover Confluence and any future shared-KB provider uniformly.
 
     Both call sites (``routers/knowledge.py``, ``cleanup_worker.py``) pass a
     ``KnowledgeModel``. Legacy/corrupt rows may carry a non-dict ``meta[key]``

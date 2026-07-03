@@ -1166,7 +1166,7 @@ async def remove_file_from_knowledge_by_id(
 def _assert_not_managed_shared_kb(knowledge) -> None:
     """Block destructive mutation of a managed shared KB via this router.
 
-    A managed shared knowledge base (Confluence, TOPdesk, …) is provisioned,
+    A managed shared knowledge base (Confluence, …) is provisioned,
     synced and removed entirely from the Cloud Sync admin panel. It must not be
     deleted or reset through the workspace UI — even by an admin, who would
     otherwise bypass the ownership checks in these endpoints.

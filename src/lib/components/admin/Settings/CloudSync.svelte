@@ -10,13 +10,11 @@
 	import Confluence from '$lib/components/icons/Confluence.svelte';
 	import GoogleDrive from '$lib/components/icons/GoogleDrive.svelte';
 	import OneDrive from '$lib/components/icons/OneDrive.svelte';
-	import Topdesk from '$lib/components/icons/Topdesk.svelte';
 
 	import ProviderCard from './CloudSync/ProviderCard.svelte';
 	import ConfluenceSection from './CloudSync/ConfluenceSection.svelte';
 	import GoogleDriveSection from './CloudSync/GoogleDriveSection.svelte';
 	import OneDriveSection from './CloudSync/OneDriveSection.svelte';
-	import TopdeskSection from './CloudSync/TopdeskSection.svelte';
 	import type {
 		ProviderDescriptor,
 		CloudSyncStatusResponse,
@@ -63,14 +61,6 @@
 			hasTestConnection: false,
 			supportsSharedKb: false,
 			itemNoun: 'files'
-		},
-		{
-			slug: 'topdesk',
-			name: 'TOPdesk',
-			icon: Topdesk,
-			hasTestConnection: true,
-			supportsSharedKb: true,
-			itemNoun: 'items'
 		}
 	];
 
@@ -93,7 +83,7 @@
 	let status: CloudSyncStatusResponse = {};
 
 	// Admin user list fetched once on mount and passed to child sections that
-	// need an owner-selector dropdown (Confluence, TOPdesk). Avoids each section
+	// need an owner-selector dropdown (Confluence). Avoids each section
 	// independently fetching the same endpoint on mount.
 	let adminUsers: { id: string; name: string; email: string }[] = [];
 
@@ -144,9 +134,8 @@
 	onMount(async () => {
 		// Child sections mount before the parent's onMount fires (bottom-up
 		// mount order), so `sectionRefs` is already populated here.
-		// Fetch the admin user list once here so both ConfluenceSection and
-		// TopdeskSection can share it via the `adminUsers` prop — avoids two
-		// identical fetches on mount.
+		// Fetch the admin user list once here and pass it to sections that
+		// need it via the `adminUsers` prop.
 		try {
 			const usersResponse = await getAllUsers(localStorage.token).catch(() => null);
 			adminUsers = (
@@ -268,17 +257,6 @@
 							bind:this={sectionRefs[descriptor.slug]}
 							bind:enabled={enabledBySlug[descriptor.slug]}
 							onChange={() => scheduleAutosave(descriptor.slug)}
-						/>
-					{:else if descriptor.slug === 'topdesk'}
-						<TopdeskSection
-							bind:this={sectionRefs[descriptor.slug]}
-							bind:enabled={enabledBySlug[descriptor.slug]}
-							{adminUsers}
-							beforeSharedKbAction={persistAll}
-							onChange={() => scheduleAutosave(descriptor.slug)}
-							on:provisioned={refreshStatus}
-							on:synced={refreshStatus}
-							on:deleted={refreshStatus}
 						/>
 					{/if}
 				</ProviderCard>
