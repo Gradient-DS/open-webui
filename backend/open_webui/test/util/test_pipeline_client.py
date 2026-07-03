@@ -1,4 +1,4 @@
-"""Unit tests for the loader-worker HTTP client and BaseSyncWorker branches.
+"""Unit tests for the loader-worker HTTP client and BaseSyncWorker wiring.
 
 Exercises:
 
@@ -6,16 +6,14 @@ Exercises:
   ``provider_slug`` in the request body, addresses the right
   ``/tenants/{tenant}/jobs`` path, and returns the loader-worker's ``job_id``.
 * ``PipelineClient.get_status`` / ``cancel_job`` hit the right URLs.
-* ``BaseSyncWorker.__init__`` constructs (or skips) the pipeline client based
-  on ``use_shared_loader``, and the legacy/shared branches in
-  ``_download_and_store`` / ``_process_and_embed`` route correctly.
+* ``BaseSyncWorker.__init__`` always constructs the pipeline client.
 """
 
 from __future__ import annotations
 
 import json
 from typing import Any, Dict, List
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import MagicMock
 
 import httpx
 import pytest
@@ -199,11 +197,11 @@ async def test_cancel_job_uses_correct_url(monkeypatch):
     assert cancel_recorder.requests[0].method == 'POST'
 
 
-# ---------- BaseSyncWorker branches --------------------------------------------------
+# ---------- BaseSyncWorker wiring ----------------------------------------------------
 
 
-def _make_worker(use_shared_loader: bool):
-    """Construct an OneDriveSyncWorker with minimal state for branch testing."""
+def _make_worker():
+    """Construct an OneDriveSyncWorker with minimal state."""
     from open_webui.services.onedrive.sync_worker import OneDriveSyncWorker
 
     return OneDriveSyncWorker(
@@ -212,74 +210,20 @@ def _make_worker(use_shared_loader: bool):
         access_token='token-abc',
         user_id='user-uuid-1',
         app=MagicMock(),
-        use_shared_loader=use_shared_loader,
     )
 
 
-def test_init_constructs_pipeline_client_only_when_shared():
-    legacy = _make_worker(use_shared_loader=False)
-    shared = _make_worker(use_shared_loader=True)
+def test_init_always_constructs_pipeline_client():
+    worker = _make_worker()
 
-    assert legacy._use_shared_loader is False
-    assert legacy._pipeline_client is None
-
-    assert shared._use_shared_loader is True
-    assert shared._pipeline_client is not None
-    # The shared worker exposes the provider slug on the loader-worker contract.
-    assert shared.provider_slug == 'onedrive'
-
-
-@pytest.mark.asyncio
-async def test_download_and_store_branches_to_legacy_when_not_shared(monkeypatch):
-    worker = _make_worker(use_shared_loader=False)
-    legacy_mock = AsyncMock(return_value=None)
-    monkeypatch.setattr(worker, '_download_and_store_legacy', legacy_mock)
-
-    await worker._download_and_store({'item': {'id': 'x'}, 'name': 'x.pdf'})
-    legacy_mock.assert_awaited_once()
-
-
-@pytest.mark.asyncio
-async def test_download_and_store_skips_legacy_in_shared_mode(monkeypatch):
-    worker = _make_worker(use_shared_loader=True)
-    legacy_mock = AsyncMock(return_value=None)
-    monkeypatch.setattr(worker, '_download_and_store_legacy', legacy_mock)
-
-    result = await worker._download_and_store({'item': {'id': 'x'}, 'name': 'x.pdf'})
-    legacy_mock.assert_not_awaited()
-    assert result is None
-
-
-@pytest.mark.asyncio
-async def test_process_and_embed_branches_to_legacy_when_not_shared(monkeypatch):
-    from open_webui.services.sync.base_worker import PreparedFile
-
-    worker = _make_worker(use_shared_loader=False)
-    legacy_mock = AsyncMock(return_value=None)
-    monkeypatch.setattr(worker, '_process_and_embed_legacy', legacy_mock)
-
-    prepared = PreparedFile(file_id='onedrive-1', file_info={}, name='x.pdf', content_hash='h', is_new=True)
-    await worker._process_and_embed(prepared)
-    legacy_mock.assert_awaited_once()
-
-
-@pytest.mark.asyncio
-async def test_process_and_embed_skips_legacy_in_shared_mode(monkeypatch):
-    from open_webui.services.sync.base_worker import PreparedFile
-
-    worker = _make_worker(use_shared_loader=True)
-    legacy_mock = AsyncMock(return_value=None)
-    monkeypatch.setattr(worker, '_process_and_embed_legacy', legacy_mock)
-
-    prepared = PreparedFile(file_id='onedrive-1', file_info={}, name='x.pdf', content_hash='h', is_new=True)
-    result = await worker._process_and_embed(prepared)
-    legacy_mock.assert_not_awaited()
-    assert result is None
+    assert isinstance(worker._pipeline_client, PipelineClient)
+    # The worker exposes the provider slug on the loader-worker contract.
+    assert worker.provider_slug == 'onedrive'
 
 
 def test_item_from_file_info_default_shape():
     """Default item builder produces the loader-worker contract shape."""
-    worker = _make_worker(use_shared_loader=True)
+    worker = _make_worker()
     file_info = {
         'item': {'id': 'item-1', 'size': 12345},
         'drive_id': 'drive-a',

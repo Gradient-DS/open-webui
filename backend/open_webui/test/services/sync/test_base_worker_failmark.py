@@ -53,12 +53,6 @@ class _StubWorker(BaseSyncWorker):
     async def _collect_single_file(self, source):
         return None
 
-    async def _download_file_content(self, file_info):
-        return b''
-
-    def _get_provider_storage_headers(self, item_id):
-        return {}
-
     def _get_provider_file_meta(self, **kwargs):
         return {}
 

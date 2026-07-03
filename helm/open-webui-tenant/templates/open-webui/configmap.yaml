@@ -357,10 +357,9 @@ data:
   KNOWLEDGE_MAX_FILE_COUNT: {{ .Values.openWebui.config.knowledgeMaxFileCount | quote }}
   SYNC_MAX_JOB_WALL_CLOCK_SECONDS: {{ .Values.openWebui.config.syncMaxJobWallClockSeconds | quote }}
 
-  # Shared-services loader-worker (per-tenant). When useSharedLoader=true,
-  # cloud-source sync workers submit jobs to the loader-worker pod instead of
-  # downloading + embedding in-process. See helm/open-webui-tenant/templates/loader-worker/.
-  USE_SHARED_LOADER: {{ .Values.openWebui.config.useSharedLoader | default "false" | quote }}
+  # Shared-services loader-worker (per-tenant). Cloud-source sync workers
+  # submit jobs to the loader-worker pod.
+  # See helm/open-webui-tenant/templates/loader-worker/.
   {{- if .Values.loaderWorker.enabled }}
   LOADER_WORKER_URL: "http://{{ include "open-webui-tenant.loaderWorker.fullname" . }}.{{ .Release.Namespace }}.svc:{{ .Values.loaderWorker.service.port | default 8002 }}"
   {{- else if .Values.openWebui.config.loaderWorkerUrl }}

@@ -3628,15 +3628,6 @@ FILE_IMAGE_COMPRESSION_HEIGHT = PersistentConfig(
     (int(os.environ.get('FILE_IMAGE_COMPRESSION_HEIGHT')) if os.environ.get('FILE_IMAGE_COMPRESSION_HEIGHT') else None),
 )
 
-FILE_PROCESSING_MAX_CONCURRENT = PersistentConfig(
-    'FILE_PROCESSING_MAX_CONCURRENT',
-    'file.processing_max_concurrent',
-    int(os.environ.get('FILE_PROCESSING_MAX_CONCURRENT', '5')),
-)
-
-FILE_DOWNLOAD_CONCURRENCY_MULTIPLIER = int(os.environ.get('FILE_DOWNLOAD_CONCURRENCY_MULTIPLIER', '3'))
-
-
 RAG_ALLOWED_FILE_EXTENSIONS = PersistentConfig(
     'RAG_ALLOWED_FILE_EXTENSIONS',
     'rag.file.allowed_extensions',
@@ -3760,17 +3751,11 @@ INTEGRATION_PROVIDERS = PersistentConfig(
 ####################################
 # Shared-Services Loader Worker
 ####################################
-# When enabled, cloud-source sync workers (OneDrive, Google Drive) submit jobs
-# to the per-tenant gradient-loader-worker pod instead of downloading and
-# embedding files in-process. Loader-worker handles download → parse+chunk
-# (via shared doc-processor) → embed (via LiteLLM) → push to /ingest.
+# Cloud-source sync workers (OneDrive, Google Drive, Confluence) submit jobs
+# to the per-tenant gradient-loader-worker pod. Loader-worker handles
+# download → parse+chunk (via shared doc-processor) → embed (via LiteLLM) →
+# push to /ingest.
 # See thoughts/shared/plans/2026-04-25-shared-services-loader-worker.md.
-
-USE_SHARED_LOADER = PersistentConfig(
-    'USE_SHARED_LOADER',
-    'sync.use_shared_loader',
-    os.environ.get('USE_SHARED_LOADER', 'False').lower() == 'true',
-)
 
 # Loader-worker service DNS, e.g. http://gradient-loader-worker.<ns>.svc:8002
 LOADER_WORKER_URL = os.environ.get('LOADER_WORKER_URL', '')
