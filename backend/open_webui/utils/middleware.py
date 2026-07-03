@@ -2,6 +2,7 @@ import ast
 import asyncio
 import base64
 import copy
+import html
 import inspect
 import json
 import logging
@@ -18,6 +19,7 @@ from uuid import uuid4
 from aiocache import cached
 from fastapi import HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse
+from starlette.responses import StreamingResponse
 from open_webui.config import (
     CACHE_DIR,
     CODE_INTERPRETER_BLOCKED_MODULES,
@@ -126,6 +128,7 @@ from open_webui.utils.tools import (
     get_tools,
     get_updated_tool_function,
 )
+from open_webui.utils.webhook import post_webhook
 
 # [Gradient] Fork-only imports (upstream equivalents already imported above).
 from open_webui.utils.agent_routing import agent_owns_tool_execution
@@ -2834,12 +2837,11 @@ async def process_chat_payload(request, form_data, user, metadata, model):
     inlet_filter_tools = None if payload_tools is not None else form_data.get('tools', None)
 
     # Mentioned skills get full content; selected/default skills can be loaded through view_skill.
+    # user_skill_ids (user-selected or message-mentioned, vs model-attached) feeds
+    # metadata['skills'][*].is_selected for the agent payload.
     mentioned_skill_ids = extract_skill_ids_from_messages(form_data.get('messages', []))
-    skill_ids = (
-        set(form_data.pop('skill_ids', None) or [])
-        | set(model.get('info', {}).get('meta', {}).get('skillIds', []))
-        | mentioned_skill_ids
-    )
+    user_skill_ids = set(form_data.pop('skill_ids', None) or []) | mentioned_skill_ids
+    skill_ids = user_skill_ids | set(model.get('info', {}).get('meta', {}).get('skillIds', []))
     available_skills = []
     view_skill_ids = []
     use_builtin_tools = (
