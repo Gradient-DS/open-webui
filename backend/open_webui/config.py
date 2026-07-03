@@ -2993,26 +2993,6 @@ CONFLUENCE_CLOUD_ID = os.environ.get('CONFLUENCE_CLOUD_ID', '')
 
 CONFLUENCE_KB_MODE = os.environ.get('CONFLUENCE_KB_MODE', 'per_user')
 
-ENABLE_TOPDESK_INTEGRATION = os.getenv('ENABLE_TOPDESK_INTEGRATION', 'False').lower() == 'true'
-
-ENABLE_TOPDESK_SYNC = os.getenv('ENABLE_TOPDESK_SYNC', 'False').lower() == 'true'
-
-TOPDESK_URL = os.environ.get('TOPDESK_URL', '')
-
-TOPDESK_USERNAME = os.environ.get('TOPDESK_USERNAME', '')
-
-TOPDESK_APP_PASSWORD = os.environ.get('TOPDESK_APP_PASSWORD', '')
-
-TOPDESK_SYNC_INTERVAL_MINUTES = int(os.environ.get('TOPDESK_SYNC_INTERVAL_MINUTES', '60'))
-
-TOPDESK_MAX_ITEMS_PER_SYNC = int(os.getenv('TOPDESK_MAX_ITEMS_PER_SYNC', '500'))
-
-TOPDESK_MAX_ITEM_SIZE_MB = int(os.getenv('TOPDESK_MAX_ITEM_SIZE_MB', '25'))
-
-TOPDESK_SYNC_SCOPE = os.getenv('TOPDESK_SYNC_SCOPE', 'ssp').strip().lower() or 'ssp'
-
-TOPDESK_KB_API_PATH = os.getenv('TOPDESK_KB_API_PATH', '/services/knowledge-base-v1')
-
 ENABLE_EMAIL_INVITES = os.environ.get('ENABLE_EMAIL_INVITES', 'False').lower() == 'true'
 
 EMAIL_GRAPH_TENANT_ID = os.environ.get('EMAIL_GRAPH_TENANT_ID', '')
@@ -3549,14 +3529,6 @@ DEFAULT_CONFIG = {
     'rag.distributed_doc_pipeline_sync_enabled': DISTRIBUTED_DOC_PIPELINE_SYNC_ENABLED,
     'rag.enable_filter_ui': ENABLE_RAG_FILTER_UI,
     'sync.use_shared_loader': USE_SHARED_LOADER,
-    'topdesk.app_password': TOPDESK_APP_PASSWORD,
-    'topdesk.enable': ENABLE_TOPDESK_INTEGRATION,
-    'topdesk.enable_sync': ENABLE_TOPDESK_SYNC,
-    'topdesk.max_items_per_sync': TOPDESK_MAX_ITEMS_PER_SYNC,
-    'topdesk.sync_interval_minutes': TOPDESK_SYNC_INTERVAL_MINUTES,
-    'topdesk.sync_scope': TOPDESK_SYNC_SCOPE,
-    'topdesk.url': TOPDESK_URL,
-    'topdesk.username': TOPDESK_USERNAME,
     'ui.acceptance_modal_button_text': ACCEPTANCE_MODAL_BUTTON_TEXT,
     'ui.acceptance_modal_content': ACCEPTANCE_MODAL_CONTENT,
     'ui.acceptance_modal_title': ACCEPTANCE_MODAL_TITLE,

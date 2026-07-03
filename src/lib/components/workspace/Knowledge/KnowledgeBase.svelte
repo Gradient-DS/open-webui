@@ -2320,12 +2320,6 @@
 							<div class="text-left text-xs w-full text-gray-500">
 								{$i18n.t('Read-only Confluence knowledge base managed by administrators.')}
 							</div>
-						{:else if knowledge?.meta?.topdesk_sync?.shared}
-							<!-- The shared TOPdesk KB is system-managed — same fixed,
-							     localized description treatment as Confluence. -->
-							<div class="text-left text-xs w-full text-gray-500">
-								{$i18n.t('Read-only TOPdesk knowledge base managed by administrators.')}
-							</div>
 						{:else}
 							<input
 								type="text"

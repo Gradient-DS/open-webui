@@ -130,7 +130,7 @@
 	// dropdown reflects the existing owner when re-provisioning.
 	let sharedKbOwnerId = '';
 	let sharedKbOwnerInitialized = false;
-	// Passed in from CloudSync.svelte (fetched once there, shared with TOPdesk).
+	// Passed in from CloudSync.svelte (fetched once there).
 	export let adminUsers: { id: string; name: string; email: string }[] = [];
 	let sharedKbStatus: ConfluenceSharedKbStatus | null = null;
 	let connectingAccount = false;

@@ -225,7 +225,6 @@ from open_webui.routers import (
     tasks,
     terminals,
     tools,
-    topdesk_sync,
     totp,
     users,
     utils,
@@ -585,13 +584,6 @@ async def lifespan(app: FastAPI):
 
     start_confluence_scheduler(app)
 
-    # [Gradient] Start TOPdesk background sync scheduler
-    from open_webui.services.topdesk.scheduler import (
-        start_scheduler as start_topdesk_scheduler,
-    )
-
-    start_topdesk_scheduler(app)
-
     # [Gradient] Start the distributed doc-pipeline reconciler (restart-safe sweep that
     # marks files 'error' when their warren job fails/hangs; success is handled
     # by the /ingest callback). Reads its enable flag per-tick, so starting it
@@ -697,13 +689,6 @@ async def lifespan(app: FastAPI):
     )
 
     stop_confluence_scheduler()
-
-    # [Gradient] Stop TOPdesk background sync scheduler
-    from open_webui.services.topdesk.scheduler import (
-        stop_scheduler as stop_topdesk_scheduler,
-    )
-
-    stop_topdesk_scheduler()
 
     # Shutdown: clean up shared resources (after our schedulers so they release pool slots first)
     from open_webui.utils.session_pool import close_session
@@ -1152,12 +1137,6 @@ app.include_router(google_drive_sync.router, prefix='/api/v1/google-drive', tags
 # config. The router must always be available so Confluence can be enabled at
 # runtime via the Cloud Sync admin tab without a pod restart.
 app.include_router(confluence_sync.router, prefix='/api/v1/confluence', tags=['confluence'])
-
-# [Gradient] TOPdesk Sync API for collection synchronization.
-# Mounted unconditionally — endpoints are admin-gated and no-op without config.
-# The router must always be available so TOPdesk can be enabled at runtime via
-# the Cloud Sync admin tab without a pod restart.
-app.include_router(topdesk_sync.router, prefix='/api/v1/topdesk', tags=['topdesk'])
 
 # [Gradient] Invites API (always mounted - Copy Link works without Graph API)
 app.include_router(invites.router, prefix='/api/v1/invites', tags=['invites'])
@@ -2490,8 +2469,6 @@ async def get_app_config(request: Request):
         'confluence.kb_mode',
         'confluence.client_id',
         'confluence.client_secret',
-        'topdesk.enable',
-        'topdesk.enable_sync',
         'agent_proxy.enable',
         'agent_api.picker_default_slug',
         'features.enable_data_warnings',
@@ -2526,17 +2503,6 @@ async def get_app_config(request: Request):
 
         _shared_kb = await _find_shared_kb()
         confluence_shared_kb_id = _shared_kb.id if _shared_kb else ''
-
-    # [Gradient] Shared TOPdesk KB id — surfaced so the chat '+' menu can attach
-    # the shared, public-read KB in one click. Resolved only when the integration
-    # is enabled (TOPdesk has a single shared-KB mode, so no kb_mode gate);
-    # empty string otherwise.
-    topdesk_shared_kb_id = ''
-    if config.get('topdesk.enable'):
-        from open_webui.services.sync.shared_kb import find_shared_kb as _find_topdesk_shared_kb
-
-        _topdesk_shared_kb = await _find_topdesk_shared_kb('topdesk', 'topdesk_sync')
-        topdesk_shared_kb_id = _topdesk_shared_kb.id if _topdesk_shared_kb else ''
 
     return {
         **({'onboarding': True} if onboarding else {}),
@@ -2684,17 +2650,6 @@ async def get_app_config(request: Request):
                     'confluence_oauth_configured': bool(
                         config.get('confluence.client_id') and config.get('confluence.client_secret')
                     ),
-                    # [Gradient] TOPdesk integration
-                    'enable_topdesk_integration': config.get('topdesk.enable'),
-                    **(
-                        {
-                            'enable_topdesk_sync': config.get('topdesk.enable_sync'),
-                        }
-                        if config.get('topdesk.enable')
-                        else {}
-                    ),
-                    # [Gradient] Shared-KB id for the chat '+' menu one-click attach.
-                    'topdesk_shared_kb_id': topdesk_shared_kb_id,
                     'enable_email_invites': config.get('email.enable_invites'),  # [Gradient]
                     'enable_agent_proxy': config.get('agent_proxy.enable'),  # [Gradient]
                     'feature_agent_api_enabled': AGENT_API_ENABLED,  # [Gradient]
