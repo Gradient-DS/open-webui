@@ -9,6 +9,7 @@ import time
 import logging
 from typing import Optional
 
+from open_webui.models.config import Config
 from open_webui.models.knowledge import Knowledges, KnowledgeModel
 
 log = logging.getLogger(__name__)
@@ -28,15 +29,36 @@ class SyncScheduler:
         self,
         provider_type: str,
         meta_key: str,
-        enable_config,
-        interval_config,
+        enable_key: str,
+        interval_key: str,
+        default_interval_minutes: int = 60,
     ):
         self.provider_type = provider_type
         self.meta_key = meta_key
-        self.enable_config = enable_config
-        self.interval_config = interval_config
+        # Dotted Config keys (e.g. 'onedrive.enable_sync'). Re-read from the
+        # per-key Config store on every tick so runtime admin changes take
+        # effect without a pod restart.
+        self.enable_key = enable_key
+        self.interval_key = interval_key
+        self._default_interval_minutes = default_interval_minutes
         self._task: Optional[asyncio.Task] = None
         self._app = None
+
+    async def _read_enabled(self) -> bool:
+        """Read the enable flag from Config. Missing/None ⇒ disabled."""
+        return bool(await Config.get(self.enable_key, False))
+
+    async def _read_interval_minutes(self) -> int:
+        """Read the sync interval (minutes) from Config.
+
+        Missing/None/unparseable ⇒ the default interval. Coerced to int so a
+        JSON-stored string never breaks the arithmetic.
+        """
+        raw = await Config.get(self.interval_key, self._default_interval_minutes)
+        try:
+            return int(raw)
+        except (TypeError, ValueError):
+            return self._default_interval_minutes
 
     def start(self, app):
         """Start the background sync scheduler.
@@ -46,8 +68,8 @@ class SyncScheduler:
 
         The loop is always created — even when the provider is currently
         disabled — so it can be enabled at runtime via the admin panel
-        without a pod restart. `_execute_due_syncs` re-checks
-        `enable_config.value` on every tick and no-ops while disabled.
+        without a pod restart. `_execute_due_syncs` re-reads the enable flag
+        from Config on every tick and no-ops while disabled.
         """
         self._app = app
         if self._task is None or self._task.done():
@@ -70,7 +92,7 @@ class SyncScheduler:
         run, so it never syncs immediately on startup.
         """
         while True:
-            interval_seconds = max(1, self.interval_config.value) * 60
+            interval_seconds = max(1, await self._read_interval_minutes()) * 60
             await asyncio.sleep(interval_seconds)
 
             try:
@@ -85,9 +107,9 @@ class SyncScheduler:
         """Find and execute syncs for all due knowledge bases."""
         from open_webui.services.sync.provider import get_sync_provider
 
-        # Re-checked every tick so a runtime enable/disable from the admin
+        # Re-read every tick so a runtime enable/disable from the admin
         # panel takes effect without restarting the scheduler loop.
-        if not self.enable_config.value:
+        if not await self._read_enabled():
             return
 
         kbs = await Knowledges.get_knowledge_bases_by_type(self.provider_type)
@@ -95,7 +117,7 @@ class SyncScheduler:
             return
 
         now = time.time()
-        interval_seconds = self.interval_config.value * 60
+        interval_seconds = await self._read_interval_minutes() * 60
         provider = get_sync_provider(self.provider_type)
 
         for kb in kbs:
