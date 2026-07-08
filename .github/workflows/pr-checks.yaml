@@ -76,6 +76,7 @@ jobs:
           cd backend
           PYTHONPATH=. pytest \
             open_webui/test/util/test_features.py \
+            open_webui/test/util/test_chat_message_analytics.py \
             -v --tb=short
 
   helm-lint:
