@@ -38,8 +38,10 @@ for _var in ('DATABASE_TYPE', 'DATABASE_USER', 'DATABASE_PASSWORD', 'DATABASE_HO
 # Build the schema through the REAL migration chain (peewee via
 # internal.db + alembic via config's import-time run_migrations), not
 # metadata.create_all. Deliberate: a model column that lacks its alembic
-# migration now breaks these tests the same way it breaks a production
-# tenant — that gap (chat_message.subagents) is how the July 2026
-# analytics outage started. Import order also stops being test-file
-# dependent: the schema exists before any test module imports.
+# migration now breaks these tests the same way it would break a
+# production tenant. (This schema-drift class was a *suspected* cause of
+# the July 2026 analytics incident but turned out NOT to be it — the
+# migration was applied; guarding it is still worthwhile.) Import order
+# also stops being test-file dependent: the schema exists before any
+# test module imports.
 import open_webui.config  # noqa: E402, F401

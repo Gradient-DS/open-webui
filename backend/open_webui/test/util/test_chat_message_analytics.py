@@ -2,12 +2,18 @@
 
 Background (haute-equipe incident, July 2026): the admin analytics read
 exclusively from the ``chat_message`` table, populated by a dual-write
-in ``Chats.upsert_message_to_chat_by_id_and_message_id``. The write
-path failed silently for weeks (schema drift on one tenant) and the
-agent route persisted messages without token usage — both invisible
-because nothing exercised the chain persist → aggregate.
+in ``Chats.upsert_message_to_chat_by_id_and_message_id``. The confirmed
+root cause of the client's "0 tokens" was that the agent route
+persisted messages with NULL ``usage`` (the agents-api never requested
+token usage on the streaming wire) — so the token columns aggregated to
+zero. (The investigation also ruled OUT two things people feared: no
+silent write outage occurred — rows were present every day — and the
+schema was current; those hypotheses were wrong. See
+soev-gitops ``thoughts/shared/commands/2026-07-07-haute-equipe-analytics-empty.md``.)
 
-These tests run the REAL code against a real (sqlite) database:
+Nothing exercised the persist → aggregate chain before, which is why
+the token regression slipped through. These tests close that gap and
+run the REAL code against a real (sqlite) database:
 
 - the middleware's persistence funnel stores role / model / usage /
   timestamp faithfully (including the OpenAI ``usage`` key shape the
