@@ -427,6 +427,8 @@
 
 ### [04-06-2026] External Pipeline (EXTERNAL_PIPELINE_URL) Removal + Doc-Processing Architecture
 
+> **Amended [02-07-2026]:** the "warren has only local-path + `gs://` resolvers" learning is outdated — warren 0.2.2 resolves `path`, `cloud` (s3+gcs), and `url` (plain http GET, used for OWUI presigned S3 GETs); embedding also moved back to OWUI in the Track-1 work — see [02-07-2026] Upstream v0.10.2 Merge Initiated + Plan; Sync-Daemon Sequencing.
+
 **With:** @lexlubbers
 
 **Context:** Investigating why local document uploads felt slow, and whether to consolidate cloud-sync + direct-upload processing into the loader-worker job pipeline ahead of the warren (distributed doc-processing) cutover. Started from a confusing startup log about the "external pipeline" being disabled.
@@ -447,3 +449,29 @@
 - All tenants use `storageProvider: s3`, so every uploaded file is already in S3 (cloud-synced files too, via `/ingest` `original_files` → `Storage.upload_file`, default on). Future-extension idea (noted, not pursued): direct byte-streaming INTO warren to avoid the S3 round-trip — a nice framework feature, but it doesn't solve the async-poll latency, so it's not needed if interactive uploads stay synchronous.
 
 **Related:** PR #148 (Gradient-DS/open-webui, branch `chore/remove-external-pipeline`); research `thoughts/shared/research/2026-04-25-cross-repo-document-ingestion-architecture.md`, `thoughts/shared/research/2026-03-31-file-upload-processing-pipeline.md`; plan `thoughts/shared/plans/2026-04-25-shared-services-loader-worker.md` (its "keep EXTERNAL_PIPELINE_URL" note is now superseded). Supersedes the External-Pipeline item of the 20-03-2026 custom-features list.
+
+---
+
+### [02-07-2026] Upstream v0.10.2 Merge Initiated + Plan; Sync-Daemon Sequencing
+
+**With:** @lexlubbers
+
+**Context:** Gauge merge-conflict surface of upstream OWUI main vs our dev; then initiate the merge and plan full conflict resolution (hard constraint: zero custom-functionality loss). Expanded mid-session into sequencing vs the planned stateless sync-daemon rework.
+
+**What We Did:**
+
+- Dry-run merge in a throwaway worktree: **148 conflicted files** (60 i18n mechanical, 4 workflow UD, ~84 substantive). dev is 639 commits behind upstream/main (v0.10.2), 906 ahead.
+- **Corrected stale state**: the v0.9.5 merge is DONE — landed in dev 26-05-2026 via PR #140 (branch `fix/merge-0.9.5`); merge-base of dev↔upstream/main is exactly the `v0.9.5` tag. This merge is cleanly v0.9.5→v0.10.2.
+- Initiated the real merge on `feat/upstream-v0.10.2-merge` (worktree `.worktrees/feat/upstream-v0.10.2-merge`, merge left in progress, MERGE_HEAD=`ecd48e2f7`).
+- 10 parallel analysis agents (upstream scope/API radar, fork delta since v0.9.5, 7 conflict clusters, genai-utils loader-worker inspection) → plan **`thoughts/shared/plans/2026-07-02-upstream-v0.10.2-merge.md`** (9 phases, locked decisions D1–D12, per-file recipes, per-phase kickoff sessions).
+
+**Key Learnings:**
+
+- **Config subsystem rewrite is this merge's async-cascade**: upstream deleted `PersistentConfig`/`AppConfig`/`app.state.config` → per-key `config` rows + async `Config.get/upsert` (migration `3ff2c63645b8`). ~100 custom entries, ~200+ fork read/write sites (~111 in NON-conflicted fork-only files, runtime-break only). Traps: dict-valued keys (`integrations.providers`) get shredded by the migration unless aliased; `oauth.*` keys silently lose admin persistence (→ re-home `OAUTH_INVITE_REQUIRED` to `auth.invite_required`); upstream's `ADMIN_CONFIG_KEYS`/`EVALUATION_CONFIG_KEYS` key-maps silently drop unmapped custom toggles; tenant `psql jsonb_set` runbooks break post-reshape. Helm env-var compat is a hard requirement (names unchanged; env→DEFAULT_CONFIG seed→per-key row).
+- **KB folders collision**: upstream `knowledge_directory` table vs our `relative_path`/`source_item_id` path-tree. Merge keeps both working (ours = UX); **decided direction: FULLY adopt upstream's directory model asap post-merge** (backfill + UI convergence fast-follow; `source_item_id` stays for provider mapping). Positional-arg trap: both sides' new params occupy the same slots in `searchKnowledgeFilesById`/`addFileToKnowledgeById` — canonical union signature pinned (ours-first, theirs appended).
+- **Sequencing decided: merge FIRST, sync-daemon after** — the merge natively ships upstream's sync protocol (`/sync/diff`, `/sync/cleanup`, `file_hash`) which IS daemon-plan Phase 1; hand-building it pre-merge would triple-implement. Old sync code gets a strictly mechanical config migration (slated for deletion by the daemon).
+- **Carve-outs again**: `routers/retrieval.py` (+2 shims: `build_loader_from_config` arity, async `get_content_from_url`), `KnowledgeBase.svelte`; `socket/main.py` + `utils/redis.py` (HA loop-safety). `MessageInput.svelte` can NOT be wholesale carved out this time (script region already auto-merged with upstream props).
+- **Loader-worker verdicts (genai-utils inspection)**: single-purpose (only OWUI cloud-sync jobs — safe to retire); warren already fetches presigned S3 GETs itself via `resolve_http` (needs `warren[http]==0.2.2`; 0.2.1 hard-fails; expired presign 403 = hard fail); 3 behaviors must re-home into the daemon (OAuth token-refresh retries, Workspace MIME export, `SourceAccessRevoked`→KB delete).
+- **Warren-only parse route decided** + format parity vs the 27 tenant `allowed_extensions`: 14/27 supported, `htm` = one-word allowlist gap, 12 need new warren parsers (plan Phase 9; legacy doc/xls/ppt = build-vs-drop decision).
+
+**Related:** Plan `thoughts/shared/plans/2026-07-02-upstream-v0.10.2-merge.md`; prior methodology `thoughts/shared/research/2026-03-20-upstream-merge-strategy.md`, `v0.9.5-fork-additions-audit.md`; amends the 04-06-2026 doc-processing note (warren resolvers). Branch `feat/upstream-v0.10.2-merge`.
