@@ -50,9 +50,20 @@ from open_webui.env import AGENT_API_BASE_URL, AGENT_API_KEY
 from open_webui.models.chats import Chats
 from open_webui.socket.main import get_event_emitter
 from open_webui.utils.auth import create_token
+from open_webui.utils.upstream_errors import safe_error_text
 from starlette.responses import StreamingResponse
 
 log = logging.getLogger(__name__)
+
+
+def _upstream_error(status: int, body: str) -> Exception:
+    """Exception for a non-2xx agent response, carrying classification only.
+
+    The body is deliberately dropped: this message reaches the chat error
+    banner, and from there the feedback report and its Slack card. Callers log
+    the raw body at DEBUG when they need it.
+    """
+    return Exception(safe_error_text(body, status=status, source='Agent API'))
 
 
 # ============================================================================
@@ -308,7 +319,8 @@ async def stream_agent_response(
         if response.status >= 400:
             body = await response.text()
             await session.close()
-            raise Exception(f'Agent API returned {response.status}: {body}')
+            log.debug('Agent API raw error body (HTTP %d): %s', response.status, body)
+            raise _upstream_error(response.status, body)
 
         current_event_type = 'data'
 
@@ -479,7 +491,8 @@ async def _call_agent_api_non_streaming(
 
         if response.status >= 400:
             body = await response.text()
-            raise Exception(f'Agent API returned {response.status}: {body}')
+            log.debug('Agent API raw error body (HTTP %d): %s', response.status, body)
+            raise _upstream_error(response.status, body)
 
         return await response.json()
     finally:
