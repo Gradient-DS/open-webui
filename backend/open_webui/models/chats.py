@@ -7,6 +7,12 @@ import logging
 import time
 import uuid
 
+# Keep Optional imported: with future-annotations pydantic resolves field
+# annotations lazily, so pydantic models using Optional[...] (ChatModel.deleted_at,
+# ChatForm.meta, …) don't fail at import — they 500 on their FIRST live
+# validation ("`ChatForm` is not fully defined") if this import is missing.
+from typing import Optional
+
 # local imports
 from open_webui.internal.db import Base, JSONField, get_async_db_context
 from open_webui.models.automations import AutomationRun
