@@ -631,7 +631,7 @@ class KnowledgeTable:
 
                 # Only return files from local KBs — cloud KB files don't have
                 # per-file vector collections and can't be attached individually
-                query = query.filter(Knowledge.type == 'local')
+                stmt = stmt.filter(Knowledge.type == 'local')
 
                 # Apply access-control directly to the joined query
                 stmt = AccessGrants.has_permission_filter(
