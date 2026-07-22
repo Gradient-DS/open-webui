@@ -79,6 +79,9 @@ class _Seams:
         self.update_file_metadata = stack.enter_context(
             patch.object(integrations_router.Files, 'update_file_metadata_by_id', new_callable=AsyncMock)
         )
+        self.update_file_name = stack.enter_context(
+            patch.object(integrations_router.Files, 'update_file_name_by_id', new_callable=AsyncMock)
+        )
         self.add_file = stack.enter_context(
             patch.object(integrations_router.Knowledges, 'add_file_to_knowledge_by_id', new_callable=AsyncMock)
         )
@@ -147,6 +150,7 @@ def test_file_hash_staged_on_new_row_branch(app, seams_factory):
 def test_file_hash_staged_on_existing_row_branch(app, seams_factory):
     existing = MagicMock()
     existing.path = _fake_get_object_path(f'{FILE_ID}_report.pdf')
+    existing.filename = 'report.pdf'
     stack, seams = seams_factory(existing_file=existing)
     with stack:
         resp = _stage(app, file_hash='provider-hash-2')
@@ -240,6 +244,7 @@ def test_no_fields_new_row_meta_has_no_pending_cloud_hash(app, seams_factory):
 def test_no_fields_existing_row_meta_update_unchanged(app, seams_factory):
     existing = MagicMock()
     existing.path = _fake_get_object_path(f'{FILE_ID}_report.pdf')
+    existing.filename = 'report.pdf'
     stack, seams = seams_factory(existing_file=existing)
     with stack:
         resp = _stage(app)
@@ -250,3 +255,46 @@ def test_no_fields_existing_row_meta_update_unchanged(app, seams_factory):
         {'content_type': 'application/pdf', 'collection_name': KB_ID},
     )
     seams.move_file.assert_not_awaited()
+    # No relative_path sent → no join-row refresh, no rename touch (R12).
+    seams.add_file.assert_not_awaited()
+    seams.update_file_name.assert_not_awaited()
+
+
+# --- relative_path (D-8 bridge) + rename refresh -------------------------------
+
+
+def test_relative_path_staged_on_new_row(app, seams_factory):
+    stack, seams = seams_factory(existing_file=None)
+    with stack:
+        resp = _stage(app, relative_path='docs/api/report.pdf')
+
+    assert resp.status_code == 200, resp.text
+    _, form = seams.insert_new_file.await_args.args
+    assert form.meta['relative_path'] == 'docs/api/report.pdf'
+
+
+def test_relative_path_updates_meta_and_refreshes_join_row(app, seams_factory):
+    existing = MagicMock()
+    existing.path = _fake_get_object_path(f'{FILE_ID}_report.pdf')
+    existing.filename = 'report.pdf'
+    stack, seams = seams_factory(existing_file=existing)
+    with stack:
+        resp = _stage(app, relative_path='moved/report.pdf')
+
+    assert resp.status_code == 200, resp.text
+    meta_update = seams.update_file_metadata.await_args.args[1]
+    assert meta_update['relative_path'] == 'moved/report.pdf'
+    # The upsert refreshes knowledge_file.relative_path from the meta above.
+    seams.add_file.assert_awaited_once_with(KB_ID, FILE_ID, ACTING_USER_ID)
+
+
+def test_provider_rename_refreshes_filename(app, seams_factory):
+    existing = MagicMock()
+    existing.path = _fake_get_object_path(f'{FILE_ID}_report.pdf')
+    existing.filename = 'Old title'
+    stack, seams = seams_factory(existing_file=existing)
+    with stack:
+        resp = _stage(app)
+
+    assert resp.status_code == 200, resp.text
+    seams.update_file_name.assert_awaited_once_with(FILE_ID, 'report.pdf')

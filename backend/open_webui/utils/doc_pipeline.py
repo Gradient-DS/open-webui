@@ -66,6 +66,36 @@ def format_from_filename(filename: str) -> str:
     return os.path.splitext(filename)[1].lstrip('.').lower()
 
 
+# Content types that map to a warren format token when the filename carries no
+# extension. Sync-daemon-staged files use human display names (e.g. a
+# Confluence page title) as the filename; the format then rides content_type.
+CONTENT_TYPE_FORMATS: dict[str, str] = {
+    'application/pdf': 'pdf',
+    'application/vnd.openxmlformats-officedocument.presentationml.presentation': 'pptx',
+    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': 'xlsx',
+    'application/vnd.openxmlformats-officedocument.wordprocessingml.document': 'docx',
+    'application/xml': 'xml',
+    'text/csv': 'csv',
+    'text/html': 'html',
+    'text/markdown': 'md',
+    'text/plain': 'txt',
+    'text/xml': 'xml',
+}
+
+
+def resolve_format(filename: Optional[str], content_type: Optional[str]) -> str:
+    """Warren format token from the extension, falling back to content_type.
+
+    The extension wins when present (authoritative for real files); an
+    extension-less filename resolves via ``CONTENT_TYPE_FORMATS`` so display
+    names without extensions still route to the pipeline. Unknown → ''."""
+    from_name = format_from_filename(filename or '')
+    if from_name:
+        return from_name
+    normalized = (content_type or '').split(';')[0].strip().lower()
+    return CONTENT_TYPE_FORMATS.get(normalized, '')
+
+
 def should_route_to_pipeline(
     *,
     enabled: bool,
