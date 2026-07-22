@@ -222,6 +222,110 @@ def test_is_fully_ingested_contract():
     assert worker._is_fully_ingested(SimpleNamespace(data={'status': 'completed', 'content': 'x'})) is True
 
 
+# ---------- KB-membership gate (cross-KB crosstalk fix, 2026-07-02) ------------------
+#
+# The global data.status=='completed' on a shared File row proves *some* KB
+# ingested it — not that THIS KB's collection has vectors. Two KBs syncing
+# overlapping OneDrive folders share file rows (file.id = onedrive-<item_id>),
+# so KB B used to classify KB A's completed files 'unchanged' and never embed
+# them into its own collection. Files net-new to the KB are now always
+# submitted; the unchanged/updated logic applies only to prior members.
+
+
+@pytest.mark.asyncio
+async def test_classify_net_new_to_kb_added_despite_global_completed():
+    worker = _make_worker()
+    worker._kb_member_file_ids = set()  # this KB held nothing before this sync
+    existing = SimpleNamespace(meta={'cloud_hash': 'h1'}, data={'status': 'completed'})
+    with patch(
+        'open_webui.services.sync.base_worker.Files.get_file_by_id',
+        new=AsyncMock(return_value=existing),
+    ):
+        cat, fid = await worker._classify_for_submit(_file_info(cloud_hash='h1'))
+    assert cat == 'added'
+    assert fid == 'stub-item-1'
+
+
+@pytest.mark.asyncio
+async def test_classify_prior_member_full_match_still_unchanged():
+    worker = _make_worker()
+    worker._kb_member_file_ids = {'stub-item-1'}
+    existing = SimpleNamespace(meta={'cloud_hash': 'h1'}, data={'status': 'completed'})
+    with patch(
+        'open_webui.services.sync.base_worker.Files.get_file_by_id',
+        new=AsyncMock(return_value=existing),
+    ):
+        cat, _ = await worker._classify_for_submit(_file_info(cloud_hash='h1'))
+    assert cat == 'unchanged'
+
+
+@pytest.mark.asyncio
+async def test_classify_prior_member_changed_hash_updated():
+    worker = _make_worker()
+    worker._kb_member_file_ids = {'stub-item-1'}
+    existing = SimpleNamespace(meta={'cloud_hash': 'old'}, data={'status': 'completed'})
+    with patch(
+        'open_webui.services.sync.base_worker.Files.get_file_by_id',
+        new=AsyncMock(return_value=existing),
+    ):
+        cat, _ = await worker._classify_for_submit(_file_info(cloud_hash='new'))
+    assert cat == 'updated'
+
+
+@pytest.mark.asyncio
+async def test_classify_gate_inactive_without_snapshot():
+    """None snapshot (legacy call paths / class default) keeps the old
+    global-status behavior — the gate only fires when sync() snapshotted."""
+    worker = _make_worker()
+    assert worker._kb_member_file_ids is None
+    existing = SimpleNamespace(meta={'cloud_hash': 'h1'}, data={'status': 'completed'})
+    with patch(
+        'open_webui.services.sync.base_worker.Files.get_file_by_id',
+        new=AsyncMock(return_value=existing),
+    ):
+        cat, _ = await worker._classify_for_submit(_file_info(cloud_hash='h1'))
+    assert cat == 'unchanged'
+
+
+# ---------- staged hash is invisible to classification (promote-on-success) ----------
+#
+# The stub write stages the provider hash under meta.pending_cloud_hash;
+# classification must keep reading ONLY meta.cloud_hash so a staged-but-never-
+# ingested hash can never satisfy the unchanged skip.
+
+
+@pytest.mark.asyncio
+async def test_classify_ignores_staged_pending_hash_when_stored_matches():
+    worker = _make_worker()
+    worker._kb_member_file_ids = {'stub-item-1'}
+    existing = SimpleNamespace(
+        meta={'cloud_hash': 'h1', 'pending_cloud_hash': 'h2'},
+        data={'status': 'completed'},
+    )
+    with patch(
+        'open_webui.services.sync.base_worker.Files.get_file_by_id',
+        new=AsyncMock(return_value=existing),
+    ):
+        cat, _ = await worker._classify_for_submit(_file_info(cloud_hash='h1'))
+    assert cat == 'unchanged'
+
+
+@pytest.mark.asyncio
+async def test_classify_pending_hash_alone_never_satisfies_skip():
+    worker = _make_worker()
+    worker._kb_member_file_ids = {'stub-item-1'}
+    existing = SimpleNamespace(
+        meta={'cloud_hash': 'h1', 'pending_cloud_hash': 'h2'},
+        data={'status': 'completed'},
+    )
+    with patch(
+        'open_webui.services.sync.base_worker.Files.get_file_by_id',
+        new=AsyncMock(return_value=existing),
+    ):
+        cat, _ = await worker._classify_for_submit(_file_info(cloud_hash='h2'))
+    assert cat == 'updated'
+
+
 def test_confluence_worker_opts_into_nonempty_content_guard():
     """Confluence renders title + metadata front-matter for every page, so an
     empty content row is always a failed ingest — it opts into the guard.

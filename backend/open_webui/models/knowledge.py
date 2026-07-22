@@ -1298,12 +1298,37 @@ class KnowledgeTable:
                 entry['status_counts'][_status_bucket(_unwrap_json_text(raw))] += cnt
 
             display = self._source_display_map(knowledge_meta)
+
+            # Reconcile a stored-vs-computed id mismatch (e.g. a OneDrive
+            # picker id in the registry vs the canonical id stamped on file
+            # rows, before the sync-time self-heal has run): when exactly one
+            # rollup id is unknown to the registry AND exactly one folder-type
+            # registry source has no files, they are the same folder — render
+            # ONE node (registry name/type, rollup counts/path) instead of a
+            # raw-id node plus an empty twin. Multi-source ambiguity keeps the
+            # plain union.
+            orphan_rollup_ids = [sid for sid in rollup if sid not in display]
+            orphan_display_ids = [
+                sid for sid, entry in display.items() if sid not in rollup and entry.get('type') == 'folder'
+            ]
+            if len(orphan_rollup_ids) == 1 and len(orphan_display_ids) == 1:
+                display[orphan_rollup_ids[0]] = display.pop(orphan_display_ids[0])
+
             for source_id in set(rollup) | set(display):
                 meta_entry = display.get(source_id, {})
                 counts = rollup.get(source_id, {})
+                name = meta_entry.get('name')
+                if not name:
+                    # Rollup id with no registry entry: a bare provider id is
+                    # meaningless to users — for a single-source KB the
+                    # registry name is the only plausible label. The raw id
+                    # stays the last resort under multi-source ambiguity.
+                    if len(display) == 1:
+                        name = next(iter(display.values())).get('name')
+                    name = name or source_id
                 folders.append(
                     TreeFolder(
-                        name=meta_entry.get('name') or source_id,
+                        name=name,
                         path=source_id,
                         child_count=counts.get('total', 0),
                         status_counts=counts.get('status_counts', _empty_status_counts()),

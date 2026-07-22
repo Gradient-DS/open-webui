@@ -2946,9 +2946,8 @@ WEAVIATE_WEB_SEARCH_TTL_MINUTES = int(os.environ.get('WEAVIATE_WEB_SEARCH_TTL_MI
 
 ENABLE_WEAVIATE_BQ_QUANTIZATION = os.environ.get('ENABLE_WEAVIATE_BQ_QUANTIZATION', 'false').lower() == 'true'
 
-ENABLE_WEAVIATE_MULTITENANCY_MODE = os.environ.get('ENABLE_WEAVIATE_MULTITENANCY_MODE', 'false').lower() == 'true'
-
-WEAVIATE_MT_LEGACY_FALLBACK = os.environ.get('WEAVIATE_MT_LEGACY_FALLBACK', 'true').lower() == 'true'
+# ENABLE_WEAVIATE_MULTITENANCY_MODE / WEAVIATE_MT_LEGACY_FALLBACK removed after
+# the fleet-wide MT migration (dev PR #223) — MT is the only Weaviate path.
 
 ENABLE_GOOGLE_DRIVE_SYNC = os.getenv('ENABLE_GOOGLE_DRIVE_SYNC', 'False').lower() == 'true'
 

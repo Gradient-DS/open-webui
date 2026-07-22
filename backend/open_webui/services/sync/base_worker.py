@@ -350,6 +350,12 @@ class BaseSyncWorker(ABC):
     # re-submitting them every sync would defeat the cloud-hash skip.
     expect_nonempty_content: bool = False
 
+    # Snapshot of file_ids linked to this KB BEFORE the current sync run
+    # created any stubs. Set by sync(); None means "no gate" (call paths
+    # that never snapshot keep the legacy global-status behavior). Drives
+    # the KB-membership gate in _classify_for_submit.
+    _kb_member_file_ids: Optional[set] = None
+
     def __init__(
         self,
         knowledge_id: str,
@@ -591,6 +597,21 @@ class BaseSyncWorker(ABC):
             log.debug(f'Failed to emit revoked-access deletion event: {e}')
         return 1
 
+    @staticmethod
+    def _dedup_discovered_files(files: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """Collapse duplicate feed emissions to one entry per provider item id.
+
+        Graph's /delta (and Drive's changes API) may emit the same item more
+        than once in a single enumeration; per the API contract the LAST
+        occurrence is authoritative (newest metadata/hash). Also collapses a
+        single-file source that overlaps a picked folder. First-seen order is
+        preserved so progress remains stable.
+        """
+        by_id: Dict[str, Dict[str, Any]] = {}
+        for file_info in files:
+            by_id[file_info['item']['id']] = file_info
+        return list(by_id.values())
+
     async def _classify_for_submit(self, file_info: Dict[str, Any]) -> tuple[str, str]:
         """Decide whether to submit this file_info to the loader-worker.
 
@@ -610,6 +631,17 @@ class BaseSyncWorker(ABC):
         file_id = f'{self.file_id_prefix}{item_id}'
         existing = await Files.get_file_by_id(file_id)
         if existing is None:
+            return 'added', file_id
+        # 'unchanged' (skip submit) additionally requires that THIS KB already
+        # held the file before this sync run. The global data.status ==
+        # 'completed' on a shared row proves *some* KB ingested it — not that
+        # this KB's collection has vectors. Files net-new to the KB are always
+        # submitted; overlapping KBs process the same file once each (accepted
+        # double-work, decision 2026-07-02). Known residual race: two
+        # overlapping KBs syncing *concurrently* can still interleave on the
+        # shared row's global status — transiently dishonest, self-correcting
+        # when each KB's own /ingest lands.
+        if self._kb_member_file_ids is not None and file_id not in self._kb_member_file_ids:
             return 'added', file_id
         cloud_hash = self._get_cloud_hash(file_info)
         if not cloud_hash:
@@ -1477,8 +1509,35 @@ class BaseSyncWorker(ABC):
                 source_item_id = file_info.get('source_item_id')
                 relative_path = file_info.get('relative_path', name)
                 content_type = self._get_content_type(name)
+                # Provider content hash at discovery time, staged on the row
+                # as pending_cloud_hash. /ingest promotes it to cloud_hash
+                # ONLY on a successful ingest — a failed download/parse/embed
+                # keeps the old cloud_hash so the next sync retries the file
+                # as 'updated' instead of freezing it 'unchanged' under a
+                # hash it never ingested.
+                cloud_hash = self._get_cloud_hash(file_info)
 
-                if await Files.get_file_by_id(file_id) is not None:
+                existing = await Files.get_file_by_id(file_id)
+                if existing is not None:
+                    # Self-heal identity drift: stored source_item_id /
+                    # relative_path can be stale (pre-canonicalization picker
+                    # ids, "Papers/"-prefixed paths from the folder_map bug, or
+                    # loader-era overwrites). Refresh file.meta from this
+                    # sync's computed identity BEFORE re-linking, so the
+                    # add_file_to_knowledge_by_id upsert mirrors the healed
+                    # values onto the join row's denormalized path columns.
+                    existing_meta = existing.meta or {}
+                    stale = {
+                        key: value
+                        for key, value in (
+                            ('source_item_id', source_item_id),
+                            ('relative_path', relative_path),
+                            ('pending_cloud_hash', cloud_hash),
+                        )
+                        if value and existing_meta.get(key) != value
+                    }
+                    if stale:
+                        await Files.update_file_metadata_by_id(file_id, stale)
                     await Knowledges.add_file_to_knowledge_by_id(self.knowledge_id, file_id, self.user_id)
                     touched.append(file_id)
                 else:
@@ -1505,6 +1564,8 @@ class BaseSyncWorker(ABC):
                     # the KB file-list query (Task 3) can read status from the
                     # cheap meta column without de-TOASTing data.content.
                     file_meta['status'] = 'pending'
+                    if cloud_hash:
+                        file_meta['pending_cloud_hash'] = cloud_hash
 
                     file_form = FileForm(
                         id=file_id,
@@ -2131,6 +2192,20 @@ class BaseSyncWorker(ABC):
                     if file_info:
                         all_files_to_process.append(file_info)
 
+            # Collapse duplicate feed emissions before anything counts or
+            # consumes slots: every downstream per-occurrence counter
+            # (progress total, the Classified log, loader items_total) must
+            # equal the distinct file count, and the loader must never
+            # process the same item twice.
+            discovered_count = len(all_files_to_process)
+            all_files_to_process = self._dedup_discovered_files(all_files_to_process)
+            if len(all_files_to_process) != discovered_count:
+                log.info(
+                    f'Collapsed {discovered_count - len(all_files_to_process)} duplicate '
+                    f'feed emission(s) for {self.knowledge_id}: {discovered_count} -> '
+                    f'{len(all_files_to_process)} distinct files'
+                )
+
             # Apply file count limit. A falsy max_files_config (0/None) means
             # the provider sets no per-sync cap — fall back to the KB-wide
             # KNOWLEDGE_MAX_FILE_COUNT safety net alone.
@@ -2141,6 +2216,10 @@ class BaseSyncWorker(ABC):
             )
             current_files = await Knowledges.get_files_by_id(self.knowledge_id) or []
             current_file_count = len(current_files)
+            # Snapshot the KB's membership BEFORE classification and before
+            # _create_stub_file_rows links this sync's files — the gate in
+            # _classify_for_submit needs pre-sync membership, not post-stub.
+            self._kb_member_file_ids = {f.id for f in current_files}
             available_slots = max(0, max_files - current_file_count)
 
             if len(all_files_to_process) > available_slots:

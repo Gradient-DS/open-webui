@@ -27,7 +27,11 @@ log = logging.getLogger(__name__)
 
 # Version tracking for folder_map schema. Bump this to force a full
 # re-enumeration of all folder sources on next sync (clears delta_link).
-FOLDER_MAP_VERSION = 1
+# v2: source ids are canonicalized at sync start (picker id -> Graph /delta
+# canonical id) and the source folder is pinned to the root of the map.
+# Maps persisted before that fix can hold entries prefixed with the source
+# folder's own name (the "Papers/" double-nesting bug) — rebuild them once.
+FOLDER_MAP_VERSION = 2
 
 
 class OneDriveSyncWorker(BaseSyncWorker):
@@ -103,6 +107,24 @@ class OneDriveSyncWorker(BaseSyncWorker):
 
     async def _collect_folder_files(self, source: Dict[str, Any]) -> tuple[List[Dict[str, Any]], int]:
         """Collect files from a folder using delta query."""
+        # Canonicalize: the picker's driveItem id and the id Graph uses in
+        # /delta responses can differ for the same folder (picker/list-scoped
+        # vs drive-relative). Resolve once and rewrite the source in place —
+        # the same pattern google_drive/sync_worker.py uses for shortcuts —
+        # so registry, folder_map and file rows all share one id namespace.
+        # Persistence rides the normal end-of-sync _save_sources() write.
+        picker_id = source['item_id']
+        resolved = await self._client.get_item(source['drive_id'], source['item_id'])
+        canonical_id = (resolved or {}).get('id')
+        if canonical_id and canonical_id != source['item_id']:
+            log.info(
+                'Source "%s" id canonicalized: %s -> %s',
+                source.get('name'),
+                source['item_id'],
+                canonical_id,
+            )
+            source['item_id'] = canonical_id
+
         delta_link = source.get('delta_link')
 
         # Force full re-enumeration if folder_map is outdated or missing
@@ -139,14 +161,24 @@ class OneDriveSyncWorker(BaseSyncWorker):
         # Load persisted map from previous syncs (incremental deltas may omit
         # unchanged folders, so we need the historical mapping).
         folder_map: Dict[str, str] = source.get('folder_map', {})
-        # The source folder itself is always the root (empty relative path)
-        folder_map[source['item_id']] = ''
+        # The source folder itself is always the root (empty relative path).
+        # Seed BOTH id forms: delta streams minted under the picker id can
+        # still reference it as a parent, and overwriting any stale non-root
+        # mapping (the pre-canonicalization "Papers" entry) self-heals the map.
+        root_ids = {source['item_id'], picker_id}
+        for root_id in root_ids:
+            folder_map[root_id] = ''
 
         # First pass: update folder_map with any folder items from delta.
         # Delta items may arrive in any order, so we loop until no new folders
         # can be resolved (handles nested folders whose parent appears later).
+        # The source folder itself is excluded: /delta re-emits it (under its
+        # canonical id, parented on the picker id), and mapping it via its
+        # parent would rebuild the phantom "<source name>/" path prefix.
         changed = True
-        folder_items = [item for item in items if 'folder' in item and '@removed' not in item]
+        folder_items = [
+            item for item in items if 'folder' in item and '@removed' not in item and item.get('id') not in root_ids
+        ]
         while changed:
             changed = False
             for item in folder_items:
