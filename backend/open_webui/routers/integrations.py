@@ -109,6 +109,18 @@ class StageRequest(BaseModel):
     source_id: str
     filename: str
     content_type: str = 'application/octet-stream'
+    # Sync-daemon additive fields — absent for loader-worker callers, so
+    # omitting them is byte-identical to the pre-daemon behavior (R12).
+    # file_hash stages the provider change token as meta.pending_cloud_hash
+    # (R4 staged-promote); directory_id places the KB link in an upstream
+    # knowledge_directory row (D-8); relative_path + source_item_id stamp the
+    # interim path identity the fork's tree UI renders from (the rollup keys
+    # on knowledge_file.source_item_id; relative_path is source-relative,
+    # convention '{dir/path}/{filename}').
+    file_hash: Optional[str] = None
+    directory_id: Optional[str] = None
+    relative_path: Optional[str] = None
+    source_item_id: Optional[str] = None
 
 
 class SubmitRequest(BaseModel):
@@ -274,7 +286,7 @@ async def _create_or_update_file_record(
     # Promote folder-rendering / change-detection keys to top-level so the KB
     # UI's SourceGroupedFiles tree (reads file.meta.relative_path) and the next
     # sync cycle's cloud-hash short-circuit (reads file.meta.cloud_hash) keep
-    # working. Legacy in-pod sync wrote these at top level; the loader-worker
+    # working. Consumers read these at top level; the loader-worker
     # path nests them under provider_metadata, which silently broke the folder
     # tree until promoted back. Identity keys are set-if-absent: the sync
     # worker's stub values are authoritative (see _OWUI_OWNED_IDENTITY_KEYS).
@@ -596,17 +608,19 @@ async def _process_chunked_text_document(
         # chat-attachment dispatch in ingest_documents).
         await Files.update_file_metadata_by_id(file_id, {'pipeline_job_id': None, 'pipeline_submitted_at': None})
         # Promote the sync worker's staged provider hash now that the ingest
-        # actually succeeded. This is the ONLY writer of cloud_hash on the
-        # shared-loader path (the legacy in-pod writer is dead code), so the
+        # actually succeeded. This is the ONLY writer of cloud_hash, so the
         # unchanged-classification in _classify_for_submit only ever trusts a
-        # hash whose content reached the vector DB. No-op for rows without a
-        # staged hash (chat attachments, push integrations, legacy rows).
+        # hash whose content reached the vector DB. The same promoted value is
+        # written as meta.file_hash — the key upstream /sync/diff compares
+        # against — so the daemon-era diff converges to the same verdicts
+        # (D-6 bridge). No-op for rows without a staged hash (chat
+        # attachments, push integrations, pre-existing rows).
         refreshed = await Files.get_file_by_id(file_id)
         pending = ((refreshed.meta if refreshed else None) or {}).get('pending_cloud_hash')
         if pending:
             await Files.update_file_metadata_by_id(
                 file_id,
-                {'cloud_hash': pending, 'pending_cloud_hash': None},
+                {'cloud_hash': pending, 'pending_cloud_hash': None, 'file_hash': pending},
             )
     except Exception as e:
         log.exception(f'Failed to store chunked document {doc.source_id} in vector DB')
@@ -1132,7 +1146,7 @@ async def ingest_documents(
         # Direct KB uploads routed through warren (provider owui_upload) need an
         # honest file:status once their vectors land here — Phase 1 suppressed
         # _process_handler's submit-time emit to 'processing'. Cloud-sync
-        # providers (onedrive/confluence/google_drive/topdesk) are deliberately
+        # providers (onedrive/confluence/google_drive) are deliberately
         # skipped: they emit their own honest {provider}:file:added, and a
         # redundant file:status here would double-count uploadBatch.added in
         # KnowledgeBase.svelte (which listens to BOTH events).
@@ -1196,6 +1210,14 @@ async def stage_file(
     object_name = f'{file_id}_{body.filename}'
     path = Storage.get_object_path(object_name)
 
+    if body.directory_id:
+        directory = await Knowledges.get_directory_by_id(body.directory_id)
+        if not directory or directory.knowledge_id != body.knowledge_id:
+            raise HTTPException(
+                status_code=400,
+                detail=f"directory '{body.directory_id}' does not belong to knowledge base '{body.knowledge_id}'",
+            )
+
     existing_file = await Files.get_file_by_id(file_id)
     if existing_file:
         # base_worker._create_stub_file_rows may have created a stub (path='')
@@ -1204,25 +1226,60 @@ async def stage_file(
         # changed (idempotent re-stage is a no-op on the path).
         if path and path != (existing_file.path or ''):
             await Files.update_file_path_by_id(file_id, path)
-        await Files.update_file_metadata_by_id(
-            file_id,
-            {'content_type': body.content_type, 'collection_name': body.knowledge_id},
-        )
+        if body.filename != existing_file.filename:
+            # Provider-side rename: refresh the display name so the diff's
+            # delete+add pair for a rename converges on one honest row.
+            await Files.update_file_name_by_id(file_id, body.filename)
+        meta_updates = {'content_type': body.content_type, 'collection_name': body.knowledge_id}
+        if body.file_hash:
+            # Staged provider hash (R4): only /ingest's chunked-success path
+            # promotes it to cloud_hash + file_hash.
+            meta_updates['pending_cloud_hash'] = body.file_hash
+        if body.relative_path is not None:
+            # D-8 bridge: the sync-daemon stamps the interim path identity it
+            # owns (R7) — the fork's tree UI renders from relative_path +
+            # source_item_id until the P2-8 knowledge_directory convergence.
+            # The loader-worker never sends these fields, so worker-stamped
+            # identity is untouched during the D-10 co-existence window.
+            meta_updates['relative_path'] = body.relative_path
+        if body.source_item_id is not None:
+            meta_updates['source_item_id'] = body.source_item_id
+        await Files.update_file_metadata_by_id(file_id, meta_updates)
+        if body.relative_path is not None or body.source_item_id is not None:
+            # Idempotent upsert: links a shared row into this KB when needed
+            # (R6) and refreshes the denormalized path columns from the meta
+            # just written (self-heal during an active sync).
+            await Knowledges.add_file_to_knowledge_by_id(body.knowledge_id, file_id, user_id)
     else:
+        meta = {
+            'name': body.filename,
+            'content_type': body.content_type,
+            'collection_name': body.knowledge_id,
+            'source': provider,
+            'source_id': body.source_id,
+        }
+        if body.file_hash:
+            meta['pending_cloud_hash'] = body.file_hash
+        if body.relative_path is not None:
+            meta['relative_path'] = body.relative_path
+        if body.source_item_id is not None:
+            meta['source_item_id'] = body.source_item_id
         file_form = FileForm(
             id=file_id,
             filename=body.filename,
             path=path,
-            meta={
-                'name': body.filename,
-                'content_type': body.content_type,
-                'collection_name': body.knowledge_id,
-                'source': provider,
-                'source_id': body.source_id,
-            },
+            meta=meta,
         )
         await Files.insert_new_file(user_id, file_form)
         await Knowledges.add_file_to_knowledge_by_id(body.knowledge_id, file_id, user_id)
+
+    if body.directory_id:
+        # Directory placement needs a KnowledgeFile join row: a shared File
+        # row reached here for a KB it isn't linked to yet (R6 net-new-to-
+        # this-KB) gets its link now instead of waiting for /submit.
+        if not await Knowledges.has_file(body.knowledge_id, file_id):
+            await Knowledges.add_file_to_knowledge_by_id(body.knowledge_id, file_id, user_id)
+        await Knowledges.move_file_to_directory(body.knowledge_id, file_id, body.directory_id)
 
     ttl = await Config.get('doc_pipeline.presign_ttl_seconds')
     presigned_put_url = await run_in_threadpool(Storage.get_presigned_put_url, path, ttl, body.content_type)

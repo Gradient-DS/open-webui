@@ -232,7 +232,9 @@ async def test_kb_path_chunked_failure_keeps_pipeline_bookkeeping(monkeypatch):
 # meta.pending_cloud_hash (base_worker._create_stub_file_rows); the chunked
 # success path promotes it to cloud_hash so _classify_for_submit's unchanged
 # short-circuit only ever trusts a hash whose content actually reached the
-# vector DB. Failure paths never promote — the file retries as 'updated'.
+# vector DB. The same promoted value is written as meta.file_hash — the key
+# upstream /sync/diff compares against (D-6 bridge) — in the same meta update.
+# Failure paths never promote either key — the file retries as 'updated'.
 
 
 @pytest.mark.asyncio
@@ -251,8 +253,31 @@ async def test_kb_path_chunked_success_promotes_pending_cloud_hash(monkeypatch):
 
     assert result['status'] == 'updated'
     files.update_file_metadata_by_id.assert_any_await(
-        'onedrive-item-1', {'cloud_hash': 'h1', 'pending_cloud_hash': None}
+        'onedrive-item-1', {'cloud_hash': 'h1', 'pending_cloud_hash': None, 'file_hash': 'h1'}
     )
+
+
+@pytest.mark.asyncio
+async def test_kb_path_chunked_success_writes_file_hash_alongside_cloud_hash(monkeypatch):
+    """The D-6 bridge: /sync/diff compares meta.file_hash, so the promote
+    write must carry it with the same value, in the same update dict."""
+    existing = MagicMock(meta={'pending_cloud_hash': 'provider-token-9'}, path='')
+    save_mock, files, knowledges = _patch_persistence(monkeypatch, existing_file=existing)
+    monkeypatch.setattr(integrations_router, '_delete_old_vectors', AsyncMock())
+
+    await integrations_router._process_chunked_text_document(
+        request=MagicMock(),
+        knowledge_id='kb-1',
+        provider='onedrive',
+        doc=_chunked_doc(source_id='item-1'),
+        user_id='user-1',
+    )
+
+    promote_calls = [
+        call.args[1] for call in files.update_file_metadata_by_id.await_args_list if 'cloud_hash' in call.args[1]
+    ]
+    assert len(promote_calls) == 1
+    assert promote_calls[0]['file_hash'] == promote_calls[0]['cloud_hash'] == 'provider-token-9'
 
 
 @pytest.mark.asyncio
@@ -273,12 +298,13 @@ async def test_kb_path_chunked_failure_does_not_promote(monkeypatch):
     assert result['status'] == 'error'
     for call in files.update_file_metadata_by_id.await_args_list:
         assert 'cloud_hash' not in call.args[1]
+        assert 'file_hash' not in call.args[1]
 
 
 @pytest.mark.asyncio
 async def test_kb_path_chunked_success_without_staged_hash_no_promotion(monkeypatch):
     """Rows without a staged hash (chat attachments, push integrations, legacy
-    rows) must never get a cloud_hash write from the promotion seam."""
+    rows) must never get a cloud_hash/file_hash write from the promotion seam."""
     save_mock, files, knowledges = _patch_persistence(monkeypatch)
 
     result = await integrations_router._process_chunked_text_document(
@@ -292,6 +318,7 @@ async def test_kb_path_chunked_success_without_staged_hash_no_promotion(monkeypa
     assert result['status'] == 'created'
     for call in files.update_file_metadata_by_id.await_args_list:
         assert 'cloud_hash' not in call.args[1]
+        assert 'file_hash' not in call.args[1]
 
 
 # --- /ingest endpoint: target routing --------------------------------------

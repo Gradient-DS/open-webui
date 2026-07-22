@@ -190,7 +190,6 @@
 				'confluence',
 				'onedrive',
 				'google drive',
-				'topdesk',
 				'integration'
 			]
 		},

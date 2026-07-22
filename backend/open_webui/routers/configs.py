@@ -1132,7 +1132,6 @@ async def set_confluence_config(
     # form enforces this too, but a stored ``basic + per_user`` state would
     # otherwise leak through to /api/config and mislead the chat '+' menu. Both
     # the orphan-guard below and the persisted values use these effective modes.
-    # (Only Confluence has a per-user mode; TOPdesk is always shared.)
     if form_data.CONFLUENCE_AUTH_MODE is not None:
         # Guard against arbitrary values; only the three known modes are valid.
         _auth = form_data.CONFLUENCE_AUTH_MODE.strip()
@@ -1205,75 +1204,6 @@ async def set_confluence_config(
 
     await Config.upsert(updates)
     return await get_confluence_config(request, user)
-
-
-####################################
-# TOPdesk Config
-####################################
-
-
-TOPDESK_CONFIG_KEYS = {
-    'ENABLE_TOPDESK_INTEGRATION': 'topdesk.enable',
-    'ENABLE_TOPDESK_SYNC': 'topdesk.enable_sync',
-    'TOPDESK_URL': 'topdesk.url',
-    'TOPDESK_USERNAME': 'topdesk.username',
-    'TOPDESK_APP_PASSWORD': 'topdesk.app_password',
-    'TOPDESK_SYNC_INTERVAL_MINUTES': 'topdesk.sync_interval_minutes',
-    'TOPDESK_MAX_ITEMS_PER_SYNC': 'topdesk.max_items_per_sync',
-    'TOPDESK_SYNC_SCOPE': 'topdesk.sync_scope',
-}
-
-
-class TopdeskConfigForm(BaseModel):
-    ENABLE_TOPDESK_INTEGRATION: Optional[bool] = None
-    ENABLE_TOPDESK_SYNC: Optional[bool] = None
-    TOPDESK_URL: Optional[str] = None
-    # Operator login name + application password → HTTP Basic; login empty →
-    # person-token. The application password is the secret used in either header
-    # form.
-    TOPDESK_USERNAME: Optional[str] = None
-    TOPDESK_APP_PASSWORD: Optional[str] = None
-    TOPDESK_SYNC_INTERVAL_MINUTES: Optional[int] = None
-    TOPDESK_MAX_ITEMS_PER_SYNC: Optional[int] = None  # 0 = unlimited
-    # Which knowledge items to sync: 'ssp' | 'public' | 'all'.
-    TOPDESK_SYNC_SCOPE: Optional[str] = None
-
-
-@router.get('/topdesk')
-async def get_topdesk_config(request: Request, user=Depends(get_admin_user)):
-    # Admin-only endpoint; the app password round-trips masked behind a reveal
-    # toggle in the UI, same disclosure profile as the Confluence basic-auth token.
-    return await get_config_values(TOPDESK_CONFIG_KEYS)
-
-
-@router.post('/topdesk')
-async def set_topdesk_config(
-    request: Request,
-    form_data: TopdeskConfigForm,
-    user=Depends(get_admin_user),
-):
-    updates: dict = {}
-    if form_data.ENABLE_TOPDESK_INTEGRATION is not None:
-        updates['topdesk.enable'] = form_data.ENABLE_TOPDESK_INTEGRATION
-    if form_data.ENABLE_TOPDESK_SYNC is not None:
-        updates['topdesk.enable_sync'] = form_data.ENABLE_TOPDESK_SYNC
-    if form_data.TOPDESK_URL is not None:
-        updates['topdesk.url'] = form_data.TOPDESK_URL.strip().rstrip('/')
-    if form_data.TOPDESK_USERNAME is not None:
-        updates['topdesk.username'] = form_data.TOPDESK_USERNAME.strip()
-    if form_data.TOPDESK_APP_PASSWORD is not None:
-        updates['topdesk.app_password'] = form_data.TOPDESK_APP_PASSWORD.strip()
-    if form_data.TOPDESK_SYNC_INTERVAL_MINUTES is not None:
-        updates['topdesk.sync_interval_minutes'] = form_data.TOPDESK_SYNC_INTERVAL_MINUTES
-    if form_data.TOPDESK_MAX_ITEMS_PER_SYNC is not None:
-        updates['topdesk.max_items_per_sync'] = max(0, form_data.TOPDESK_MAX_ITEMS_PER_SYNC)
-    if form_data.TOPDESK_SYNC_SCOPE is not None:
-        scope = form_data.TOPDESK_SYNC_SCOPE.strip().lower()
-        if scope not in ('ssp', 'public', 'all'):
-            raise HTTPException(400, 'TOPDESK_SYNC_SCOPE must be one of: ssp, public, all')
-        updates['topdesk.sync_scope'] = scope
-    await Config.upsert(updates)
-    return await get_topdesk_config(request, user)
 
 
 ####################################
@@ -1409,12 +1339,11 @@ async def set_onedrive_config(
 # to its Knowledge ``type`` value and the meta key its sync worker writes
 # under (see the workers' ``meta_key`` property — onedrive: 'onedrive_sync',
 # google_drive: 'google_drive_sync', confluence: 'confluence_sync'). Adding a
-# new provider (e.g. topdesk) is a one-line entry here.
+# new provider is a one-line entry here.
 CLOUD_SYNC_PROVIDERS: list[dict] = [
     {'slug': 'confluence', 'type': 'confluence', 'meta_key': 'confluence_sync'},
     {'slug': 'google_drive', 'type': 'google_drive', 'meta_key': 'google_drive_sync'},
     {'slug': 'onedrive', 'type': 'onedrive', 'meta_key': 'onedrive_sync'},
-    {'slug': 'topdesk', 'type': 'topdesk', 'meta_key': 'topdesk_sync'},
 ]
 
 # Sync-worker status values (see base_worker / per-provider workers) that mean

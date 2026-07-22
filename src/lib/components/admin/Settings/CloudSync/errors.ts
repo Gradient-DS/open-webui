@@ -5,7 +5,7 @@
 // frontend maps the `reason` to a fully-localized message so the toast a Dutch
 // admin sees is fully Dutch — instead of a translated prefix wrapped around an
 // English backend `detail` string. Used by every provider section (Confluence,
-// TOPdesk, …) so the reason→message mapping lives in exactly one place.
+// …) so the reason→message mapping lives in exactly one place.
 
 import type { i18n as i18nType } from 'i18next';
 

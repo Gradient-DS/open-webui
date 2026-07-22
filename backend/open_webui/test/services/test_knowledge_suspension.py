@@ -1,15 +1,15 @@
 """Tests for cloud-sync suspension detection in ``models.knowledge``.
 
 A revoked credential makes a sync worker stamp ``suspended_at`` into the KB's
-provider-specific sync meta (e.g. ``topdesk_sync``). Four ``KnowledgeTable``
+provider-specific sync meta (e.g. ``confluence_sync``). Four ``KnowledgeTable``
 lookups must then treat the KB as suspended so retrieval/agent-search skip it,
 the router returns 403, the workspace list shows a badge, and the cleanup
 worker eventually auto-deletes it.
 
-These methods previously hardcoded the provider meta-key tuple and omitted
-``topdesk_sync``, so TOPdesk KBs were never suspended. The tuple is now the
+These methods previously hardcoded the provider meta-key tuple and missed a
+newly added provider, so its KBs were never suspended. The tuple is now the
 module-level ``SYNC_PROVIDER_META_KEYS`` constant; these tests parametrize over
-every provider (including topdesk) to lock the full set in.
+every provider to lock the full set in.
 
 We use an in-memory SQLite DB and monkeypatch the module's
 ``get_async_db_context`` (mirrors ``test_invites_model``). The ``access_grant``
@@ -37,19 +37,17 @@ from open_webui.models.knowledge import (
     Knowledges,
 )
 
-# (knowledge type, sync meta key) for every cloud-sync provider. TOPdesk is the
-# regression case this file exists for.
+# (knowledge type, sync meta key) for every cloud-sync provider.
 PROVIDER_CASES = [
     ('onedrive', 'onedrive_sync'),
     ('google_drive', 'google_drive_sync'),
     ('confluence', 'confluence_sync'),
-    ('topdesk', 'topdesk_sync'),
 ]
 
 
 def test_constant_covers_all_providers():
-    """The constant must list every provider's meta key — the bug was a
-    missing ``topdesk_sync``."""
+    """The constant must list every provider's meta key — the historical bug
+    was a newly added provider missing from the tuple."""
     assert set(SYNC_PROVIDER_META_KEYS) == {meta_key for _, meta_key in PROVIDER_CASES}
 
 

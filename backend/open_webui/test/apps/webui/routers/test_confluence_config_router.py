@@ -4,10 +4,10 @@ Focused on the *mode-switch guard*: switching Confluence away from the pre-synce
 ``shared`` mode to ``per_user`` must be blocked with a 400 while a shared KB is
 still provisioned (otherwise the pure config write orphans it). The router is
 mounted on a minimal FastAPI app; ``get_admin_user`` is overridden and
-``find_shared_kb`` is patched, so these run without a database or the full app
-(mirrors ``test_topdesk_sync_router``). The router reads/writes settings through
-the per-key Config API (``Config.get_many``/``Config.upsert`` on ``confluence.*``
-storage keys), so the ``store`` fixture swaps those for an in-memory dict.
+``find_shared_kb`` is patched, so these run without a database or the full app.
+The router reads/writes settings through the per-key Config API
+(``Config.get_many``/``Config.upsert`` on ``confluence.*`` storage keys), so the
+``store`` fixture swaps those for an in-memory dict.
 """
 
 from types import SimpleNamespace

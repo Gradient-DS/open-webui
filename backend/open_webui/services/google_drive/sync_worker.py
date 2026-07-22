@@ -207,22 +207,6 @@ class GoogleDriveSyncWorker(BaseSyncWorker):
             return item.get('modifiedTime')
         return item.get('md5Checksum')
 
-    async def _download_file_content(self, file_info: Dict[str, Any]) -> bytes:
-        """Download file content, using export for Workspace files.
-
-        Removed in cleanup commit after USE_SHARED_LOADER rollout completes —
-        loader-worker handles the download path (legacy fallback only).
-        """
-        item = file_info['item']
-        file_id = item['id']
-        mime_type = item.get('mimeType', '')
-
-        if mime_type in GOOGLE_WORKSPACE_EXPORT_MAP:
-            export_mime, _ = GOOGLE_WORKSPACE_EXPORT_MAP[mime_type]
-            return await self._client.export_file(file_id, export_mime)
-        else:
-            return await self._client.download_file(file_id)
-
     async def _item_from_file_info(self, file_info: Dict[str, Any], access_token: str) -> Dict[str, Any]:
         item = await super()._item_from_file_info(file_info, access_token)
         drive_item = file_info['item']
@@ -239,12 +223,6 @@ class GoogleDriveSyncWorker(BaseSyncWorker):
         if raw_mime:
             item['content_type'] = raw_mime
         return item
-
-    def _get_provider_storage_headers(self, item_id: str) -> dict:
-        return {
-            'OpenWebUI-Source': 'google_drive',
-            'OpenWebUI-GoogleDrive-Item-Id': item_id,
-        }
 
     def _get_provider_file_meta(
         self,

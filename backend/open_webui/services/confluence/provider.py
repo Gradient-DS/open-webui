@@ -75,17 +75,15 @@ class ConfluenceSyncProvider(SyncProvider):
         user_id,
         app,
         token_provider=None,
-        use_shared_loader=False,
     ):
         from open_webui.services.confluence.sync_worker import ConfluenceSyncWorker
 
         # Confluence offloads to the per-tenant loader-worker like OneDrive and
-        # Google Drive when USE_SHARED_LOADER is enabled — the genai-utils
-        # loader-worker ships a Confluence source client (sources/confluence.py)
-        # supporting both user_oauth and basic_auth credentials. Discovery (page
-        # enumeration, version-delta detection, label/ancestor enrichment)
-        # always stays in-pod; only body fetch + parse + embed + ingest
-        # offloads. With USE_SHARED_LOADER off it runs the legacy in-pod path.
+        # Google Drive — the genai-utils loader-worker ships a Confluence
+        # source client (sources/confluence.py) supporting both user_oauth and
+        # basic_auth credentials. Discovery (page enumeration, version-delta
+        # detection, label/ancestor enrichment) always stays in-pod; only body
+        # fetch + parse + embed + ingest offloads.
         return ConfluenceSyncWorker(
             knowledge_id=knowledge_id,
             sources=sources,
@@ -93,5 +91,4 @@ class ConfluenceSyncProvider(SyncProvider):
             user_id=user_id,
             app=app,
             token_provider=token_provider,
-            use_shared_loader=use_shared_loader,
         )

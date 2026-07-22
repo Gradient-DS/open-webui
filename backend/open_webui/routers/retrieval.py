@@ -1797,7 +1797,7 @@ async def submit_existing_file_to_pipeline(request: Request, file, knowledge_id:
         file_id=file.id,
         filename=file.filename,
         content_type=(file.meta or {}).get('content_type') or 'application/octet-stream',
-        file_format=doc_pipeline.format_from_filename(file.filename),
+        file_format=doc_pipeline.resolve_format(file.filename, (file.meta or {}).get('content_type')),
         presigned_url=presigned_url,
         kb_id=knowledge_id,
         kb_name=knowledge.name,
@@ -1865,7 +1865,7 @@ async def route_chat_file_to_pipeline(request: Request, file, user) -> dict:
         file_id=file.id,
         filename=file.filename,
         content_type=(file.meta or {}).get('content_type') or 'application/octet-stream',
-        file_format=doc_pipeline.format_from_filename(file.filename),
+        file_format=doc_pipeline.resolve_format(file.filename, (file.meta or {}).get('content_type')),
         presigned_url=presigned_url,
         # Per-file: echoed as collection.source_id but ignored by the /ingest
         # per-file branch (which derives file-{file_id} from doc.source_id).
@@ -1946,7 +1946,7 @@ async def process_file(
             #     (its own flag; lands chunks in the file-{id} cache, no KB).
             if not form_data.content:
                 config = await get_rag_config_state()
-                file_format = doc_pipeline.format_from_filename(file.filename)
+                file_format = doc_pipeline.resolve_format(file.filename, (file.meta or {}).get('content_type'))
                 if form_data.collection_name and doc_pipeline.should_route_to_pipeline(
                     enabled=config.DISTRIBUTED_DOC_PIPELINE_ENABLED,
                     collection_name=form_data.collection_name,
@@ -3081,7 +3081,7 @@ async def process_files_batch(
                 enabled=config.DISTRIBUTED_DOC_PIPELINE_ENABLED,
                 collection_name=collection_name,
                 file_path=db_file.path,
-                file_format=doc_pipeline.format_from_filename(db_file.filename),
+                file_format=doc_pipeline.resolve_format(db_file.filename, (db_file.meta or {}).get('content_type')),
             ):
                 await route_file_to_pipeline(request, db_file, collection_name, user)
                 file_results.append(BatchProcessFilesResult(file_id=file.id, status='processing'))

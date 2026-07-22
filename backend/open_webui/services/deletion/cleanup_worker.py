@@ -167,7 +167,7 @@ async def _process_expired_suspensions():
     log.info('Processing %d expired suspended KBs for hard-deletion', len(expired_kbs))
 
     for kb in expired_kbs:
-        # A managed shared KB (Confluence, TOPdesk, …) must never self-delete —
+        # A managed shared KB (Confluence, …) must never self-delete —
         # a lost service credential should raise an admin alert, not silently
         # destroy the whole corpus. Suspension still hides it from retrieval.
         if is_managed_shared_kb(kb):

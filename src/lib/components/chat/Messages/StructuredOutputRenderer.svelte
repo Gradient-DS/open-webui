@@ -32,7 +32,15 @@
 	const getDetailTitle = (detailToken: OutputDetailToken): any => detailToken.summary;
 	const getDetailAttributes = (detailToken: OutputDetailToken): any => detailToken.attributes;
 
-	$: displayItems = buildOutputDisplayItems(output) as OutputDisplayItem[];
+	// [Gradient] Reasoning output items are consumed by StatusHistory /
+	// ReasoningBullet in ResponseMessage — the fork's canonical display
+	// surface for reasoning — mirroring the MarkdownTokens carve-out for
+	// <details type="reasoning"> blocks. Rendering them here too would show
+	// duplicate "Thought for N seconds" collapsibles detached from their
+	// chronological position between the tool statuses they separated.
+	$: displayItems = buildOutputDisplayItems(
+		output.filter((item) => item?.type !== 'reasoning')
+	) as OutputDisplayItem[];
 </script>
 
 {#each displayItems as displayItem (displayItem.id)}

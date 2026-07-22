@@ -1,27 +1,20 @@
 """Base sync worker - shared logic for cloud storage sync workers."""
 
 import asyncio
-import io
 import logging
 import os
 import time
-import hashlib
-import uuid
 
 import httpx
 from abc import ABC, abstractmethod
-from dataclasses import asdict, dataclass
-from typing import Optional, Callable, Awaitable, Dict, Any, List, Union
+from dataclasses import asdict
+from typing import Optional, Callable, Awaitable, Dict, Any, List
 from pathlib import Path
 
-from open_webui.internal.db import get_async_db
 from open_webui.models.knowledge import Knowledges
-from open_webui.models.files import Files, FileForm, FileUpdateForm
+from open_webui.models.files import Files, FileForm
 from open_webui.models.users import Users
-from open_webui.models.config import Config
-from open_webui.storage.provider import Storage
 from open_webui.config import KNOWLEDGE_MAX_FILE_COUNT
-from open_webui.retrieval.vector.factory import VECTOR_DB_CLIENT
 from open_webui.retrieval.vector.async_client import ASYNC_VECTOR_DB_CLIENT
 from open_webui.services.deletion import DeletionService
 from open_webui.services.sync.constants import SyncErrorType, FailedFile, CONTENT_TYPES
@@ -123,17 +116,6 @@ def _max_job_wall_clock_seconds() -> int:
     return int(os.environ.get('SYNC_MAX_JOB_WALL_CLOCK_SECONDS', '14400'))
 
 
-@dataclass
-class PreparedFile:
-    """File that has been downloaded and stored, ready for content extraction."""
-
-    file_id: str
-    file_info: Dict[str, Any]
-    name: str
-    content_hash: str
-    is_new: bool  # True if newly downloaded, False if hash-matched
-
-
 class BaseSyncWorker(ABC):
     """Abstract base class for cloud storage sync workers.
 
@@ -229,24 +211,14 @@ class BaseSyncWorker(ABC):
         """
         ...
 
-    @abstractmethod
-    async def _download_file_content(self, file_info: Dict[str, Any]) -> bytes:
-        """Download file content from the provider.
-
-        Removed in cleanup commit after USE_SHARED_LOADER rollout completes —
-        the per-tenant loader-worker pod owns the download path.
-        """
-        ...
-
     async def _item_from_file_info(self, file_info: Dict[str, Any], access_token: str) -> Dict[str, Any]:
         """Build a loader-worker job item dict from a discovered file_info.
 
-        Used in shared-loader mode (USE_SHARED_LOADER=true). Providers
-        override to supply provider-specific ``source_descriptor`` fields the
-        loader-worker's ``SourceClient`` knows how to interpret. Default
-        implementation produces a generic item shape. Async so service-mode
-        overrides (e.g. Confluence basic/scoped) can read credentials live from
-        the per-key Config store.
+        Providers override to supply provider-specific ``source_descriptor``
+        fields the loader-worker's ``SourceClient`` knows how to interpret.
+        Default implementation produces a generic item shape. Async so
+        service-mode overrides (e.g. Confluence basic/scoped) can read
+        credentials live from the per-key Config store.
         """
         item = file_info['item']
         item_id = item['id']
@@ -281,11 +253,6 @@ class BaseSyncWorker(ABC):
             'content_type': content_type,
             'metadata': metadata,
         }
-
-    @abstractmethod
-    def _get_provider_storage_headers(self, item_id: str) -> dict:
-        """Return provider-specific headers for storage upload."""
-        ...
 
     @abstractmethod
     def _get_provider_file_meta(
@@ -342,12 +309,11 @@ class BaseSyncWorker(ABC):
     # Providers whose successful download ALWAYS yields non-empty extractable
     # text should override this to True. When True, a row that is 'completed'
     # but has empty ``data['content']`` is treated as NOT fully ingested — the
-    # residue of an empty/failed extraction (see ``_process_and_embed``'s
-    # "no text content" branch, which still marks the row 'completed') — so the
-    # cloud-hash short-circuits re-download and re-ingest it instead of freezing
-    # it empty forever. Binary-file providers (OneDrive/Google Drive) MUST leave
-    # this False: image-only files legitimately extract to empty content, and
-    # re-submitting them every sync would defeat the cloud-hash skip.
+    # residue of an empty/failed extraction — so the cloud-hash short-circuit
+    # re-submits it instead of freezing it empty forever. Binary-file
+    # providers (OneDrive/Google Drive) MUST leave this False: image-only
+    # files legitimately extract to empty content, and re-submitting them
+    # every sync would defeat the cloud-hash skip.
     expect_nonempty_content: bool = False
 
     # Snapshot of file_ids linked to this KB BEFORE the current sync run
@@ -365,7 +331,6 @@ class BaseSyncWorker(ABC):
         app,
         event_emitter: Optional[Callable[[Dict[str, Any]], Awaitable[None]]] = None,
         token_provider: Optional[Callable[[], Awaitable[Optional[str]]]] = None,
-        use_shared_loader: bool = False,
     ):
         self.knowledge_id = knowledge_id
         self.sources = sources
@@ -375,12 +340,9 @@ class BaseSyncWorker(ABC):
         self.event_emitter = event_emitter
         self._token_provider = token_provider
         self._client = None
-        # When True, file ingestion is delegated to the per-tenant loader-worker
-        # pod (see thoughts/shared/plans/2026-04-25-shared-services-loader-worker.md).
-        # The legacy in-pod download/embed pipeline stays available behind this
-        # flag for instant rollback until the cleanup commit removes it.
-        self._use_shared_loader = use_shared_loader
-        self._pipeline_client: Optional[PipelineClient] = PipelineClient() if use_shared_loader else None
+        # File ingestion is delegated to the per-tenant loader-worker pod
+        # (see thoughts/shared/plans/2026-04-25-shared-services-loader-worker.md).
+        self._pipeline_client: PipelineClient = PipelineClient()
 
     def _make_request(self):
         """Construct a minimal Request for calling retrieval functions directly."""
@@ -620,11 +582,9 @@ class BaseSyncWorker(ABC):
           - ('updated', file_id)   — existing row but hash mismatch or non-completed; SUBMIT
           - ('added', file_id)     — no existing row; SUBMIT
 
-        Mirrors the legacy short-circuit at ``_download_and_store_legacy``
-        (the cloud-hash check around line 912-921) so the shared-loader path
-        stops re-processing files that haven't changed — the structural cause
-        of the "5 extra" toast where a re-sync of an unchanged folder showed
-        N "synced" instead of "no changes".
+        Stops the loader-worker path from re-processing files that haven't
+        changed — the structural cause of the "5 extra" toast where a re-sync
+        of an unchanged folder showed N "synced" instead of "no changes".
         """
         item = file_info['item']
         item_id = item['id']
@@ -657,9 +617,8 @@ class BaseSyncWorker(ABC):
     def _is_fully_ingested(self, existing) -> bool:
         """Whether an existing File row represents a genuinely complete ingest.
 
-        Both cloud-hash short-circuits (``_classify_for_submit`` and the
-        pre-download check in ``_download_and_store_legacy``) gate on this so a
-        prior empty/failed ingest self-heals instead of being frozen by a
+        The cloud-hash short-circuit (``_classify_for_submit``) gates on this
+        so a prior empty/failed ingest self-heals instead of being frozen by a
         matching cloud_hash. ``status == 'completed'`` alone is not proof of a
         real ingest: the empty-extraction branch marks a row 'completed' even
         when no text was captured. For providers that guarantee non-empty
@@ -673,751 +632,16 @@ class BaseSyncWorker(ABC):
             return False
         return True
 
-    async def _ensure_vectors_in_kb(self, file_id: str) -> Optional[FailedFile]:
-        """Verify vectors for this file exist in the KB collection.
-
-        Queries the KB collection filtered by file_id. If vectors are found,
-        the file is already indexed — no work needed. If not found, returns a
-        FailedFile so the orchestrator falls back to full re-processing.
-
-        Also performs gradual cleanup: if a legacy per-file collection
-        (file-{file_id}) exists, delete it.
-        """
-        try:
-
-            def _check():
-                log.info(f'[sync:ensure:{file_id}] >>> KB QUERY START')
-                t0 = time.time()
-
-                # Check if vectors already exist in KB collection
-                result = VECTOR_DB_CLIENT.query(
-                    collection_name=self.knowledge_id,
-                    filter={'file_id': file_id},
-                    limit=1,
-                )
-
-                has_vectors = result is not None and len(result.ids) > 0 and len(result.ids[0]) > 0
-
-                # Gradual cleanup: remove legacy per-file collection if it exists
-                file_collection = f'file-{file_id}'
-                if VECTOR_DB_CLIENT.has_collection(collection_name=file_collection):
-                    log.info(f'[sync:ensure:{file_id}] Cleaning up legacy per-file collection')
-                    VECTOR_DB_CLIENT.delete_collection(collection_name=file_collection)
-
-                log.info(
-                    f'[sync:ensure:{file_id}] <<< KB QUERY END ({time.time() - t0:.1f}s) has_vectors={has_vectors}'
-                )
-                return has_vectors
-
-            has_vectors = await asyncio.to_thread(_check)
-
-            if has_vectors:
-                return None  # Success — vectors already in KB collection
-
-            # No vectors found — signal for re-processing
-            return FailedFile(
-                filename=file_id,
-                error_type=SyncErrorType.PROCESSING_ERROR.value,
-                error_message='Vectors not found in KB collection',
-            )
-
-        except Exception as e:
-            return FailedFile(
-                filename=file_id,
-                error_type=SyncErrorType.PROCESSING_ERROR.value,
-                error_message=f'Error checking vectors: {str(e)}'[:80],
-            )
-
-    async def _extract_content(self, file_id: str) -> Optional[tuple]:
-        """Extract text content from a file, returning Documents for embedding.
-
-        Uses the same extraction pipeline as process_file, but returns the
-        documents instead of embedding them.
-
-        Returns:
-            Tuple of (docs, file, needs_split) or None if no content could be extracted.
-        """
-        from open_webui.retrieval.loaders.main import Loader
-        from open_webui.retrieval.vector.utils import filter_metadata
-        from langchain_core.documents import Document
-
-        request = self._make_request()
-        user = await self._get_user()
-
-        # Pre-fetch DB data BEFORE the thread — async model calls cannot run
-        # inside asyncio.to_thread (Option B pattern).
-        if user.role == 'admin':
-            file = await Files.get_file_by_id(file_id)
-        else:
-            file = await Files.get_file_by_id_and_user_id(file_id, user.id)
-
-        if not file:
-            raise ValueError(f'File {file_id} not found')
-
-        if not file.path:
-            raise ValueError(f'File {file_id} has no path')
-
-        local_file_path = Storage.get_file(file.path)
-
-        cfg = await Config.get_many(
-            'rag.content_extraction_engine',
-            'rag.external_document_loader_url',
-            'rag.external_document_loader_api_key',
-            'rag.tika_server_url',
-            'rag.docling_server_url',
-            'rag.docling_api_key',
-            'rag.docling_params',
-            'rag.pdf_extract_images',
-            'rag.pdf_loader_mode',
-            'rag.datalab_marker_api_key',
-            'rag.datalab_marker_api_base_url',
-            'rag.datalab_marker_additional_config',
-            'rag.datalab_marker_skip_cache',
-            'rag.datalab_marker_force_ocr',
-            'rag.datalab_marker_paginate',
-            'rag.datalab_marker_strip_existing_ocr',
-            'rag.datalab_marker_disable_image_extraction',
-            'rag.datalab_marker_format_lines',
-            'rag.datalab_marker_use_llm',
-            'rag.datalab_marker_output_format',
-            'rag.document_intelligence_endpoint',
-            'rag.document_intelligence_key',
-            'rag.document_intelligence_model',
-            'rag.mistral_ocr_api_base_url',
-            'rag.mistral_ocr_api_key',
-            'rag.mineru_api_mode',
-            'rag.mineru_api_url',
-            'rag.mineru_api_key',
-            'rag.mineru_api_timeout',
-            'rag.mineru_params',
-        )
-
-        def _extract_in_thread():
-            loader = Loader(
-                engine=cfg['rag.content_extraction_engine'],
-                user=user,
-                EXTERNAL_DOCUMENT_LOADER_URL=cfg['rag.external_document_loader_url'],
-                EXTERNAL_DOCUMENT_LOADER_API_KEY=cfg['rag.external_document_loader_api_key'],
-                TIKA_SERVER_URL=cfg['rag.tika_server_url'],
-                DOCLING_SERVER_URL=cfg['rag.docling_server_url'],
-                DOCLING_API_KEY=cfg['rag.docling_api_key'],
-                DOCLING_PARAMS=cfg['rag.docling_params'],
-                PDF_EXTRACT_IMAGES=cfg['rag.pdf_extract_images'],
-                PDF_LOADER_MODE=cfg['rag.pdf_loader_mode'],
-                DATALAB_MARKER_API_KEY=cfg['rag.datalab_marker_api_key'],
-                DATALAB_MARKER_API_BASE_URL=cfg['rag.datalab_marker_api_base_url'],
-                DATALAB_MARKER_ADDITIONAL_CONFIG=cfg['rag.datalab_marker_additional_config'],
-                DATALAB_MARKER_SKIP_CACHE=cfg['rag.datalab_marker_skip_cache'],
-                DATALAB_MARKER_FORCE_OCR=cfg['rag.datalab_marker_force_ocr'],
-                DATALAB_MARKER_PAGINATE=cfg['rag.datalab_marker_paginate'],
-                DATALAB_MARKER_STRIP_EXISTING_OCR=cfg['rag.datalab_marker_strip_existing_ocr'],
-                DATALAB_MARKER_DISABLE_IMAGE_EXTRACTION=cfg['rag.datalab_marker_disable_image_extraction'],
-                DATALAB_MARKER_FORMAT_LINES=cfg['rag.datalab_marker_format_lines'],
-                DATALAB_MARKER_USE_LLM=cfg['rag.datalab_marker_use_llm'],
-                DATALAB_MARKER_OUTPUT_FORMAT=cfg['rag.datalab_marker_output_format'],
-                DOCUMENT_INTELLIGENCE_ENDPOINT=cfg['rag.document_intelligence_endpoint'],
-                DOCUMENT_INTELLIGENCE_KEY=cfg['rag.document_intelligence_key'],
-                DOCUMENT_INTELLIGENCE_MODEL=cfg['rag.document_intelligence_model'],
-                MISTRAL_OCR_API_BASE_URL=cfg['rag.mistral_ocr_api_base_url'],
-                MISTRAL_OCR_API_KEY=cfg['rag.mistral_ocr_api_key'],
-                MINERU_API_MODE=cfg['rag.mineru_api_mode'],
-                MINERU_API_URL=cfg['rag.mineru_api_url'],
-                MINERU_API_KEY=cfg['rag.mineru_api_key'],
-                MINERU_API_TIMEOUT=cfg['rag.mineru_api_timeout'],
-                MINERU_PARAMS=cfg['rag.mineru_params'],
-            )
-
-            docs_local = loader.load(file.filename, file.meta.get('content_type'), local_file_path)
-
-            if not docs_local:
-                return None
-
-            docs_local = [
-                Document(
-                    page_content=doc.page_content,
-                    metadata={
-                        **filter_metadata(doc.metadata),
-                        'name': file.filename,
-                        'created_by': file.user_id,
-                        'file_id': file.id,
-                        'source': file.filename,
-                    },
-                )
-                for doc in docs_local
-            ]
-
-            return docs_local, True  # needs_split=True for internal pipeline
-
-        result = await asyncio.to_thread(_extract_in_thread)
-        if result is None:
-            return None
-        docs, needs_split = result
-
-        text_content = ' '.join([doc.page_content for doc in docs])
-        # Save extracted text to file record (async, OUTSIDE the thread).
-        await Files.update_file_data_by_id(file.id, {'content': text_content})
-
-        return docs, file, needs_split
-
-    async def _embed_to_collections(
-        self,
-        docs: list,
-        file_id: str,
-        file_hash: str,
-        filename: str,
-        needs_split: bool = True,
-    ) -> bool:
-        """Embed documents once and insert vectors into both KB and per-file collections.
-
-        This replaces the double process_file call by generating embeddings once
-        and writing the resulting vectors to both collections.
-        """
-        import tiktoken
-        from open_webui.retrieval.utils import get_embedding_function
-        from open_webui.utils.misc import sanitize_text_for_db
-        from open_webui.config import RAG_EMBEDDING_CONTENT_PREFIX
-        from open_webui.env import RAG_EMBEDDING_TIMEOUT
-        from langchain_core.documents import Document
-        from langchain_text_splitters import RecursiveCharacterTextSplitter, TokenTextSplitter
-        from langchain_text_splitters import MarkdownHeaderTextSplitter
-
-        request = self._make_request()
-        user = await self._get_user()
-
-        metadata = {
-            'file_id': file_id,
-            'name': filename,
-            'hash': file_hash,
-        }
-
-        cfg = await Config.get_many(
-            'rag.enable_markdown_header_text_splitter',
-            'rag.chunk_min_size_target',
-            'rag.text_splitter',
-            'rag.chunk_size',
-            'rag.chunk_overlap',
-            'rag.tiktoken_encoding_name',
-            'rag.embedding_engine',
-            'rag.embedding_model',
-            'rag.openai.api_base_url',
-            'rag.ollama.base_url',
-            'rag.azure_openai.base_url',
-            'rag.openai.api_key',
-            'rag.ollama.api_key',
-            'rag.azure_openai.api_key',
-            'rag.embedding_batch_size',
-            'rag.azure_openai.api_version',
-            'rag.enable_async_embedding',
-            'rag.embedding_concurrent_requests',
-        )
-
-        def _split_embed_and_store():
-            """Split, embed, and store vectors (all in thread to avoid blocking event loop)."""
-            t0 = time.time()
-            working_docs = list(docs)
-
-            # Split if needed (internal pipeline; external pipeline pre-chunks)
-            if needs_split:
-                # Markdown header splitting (if enabled)
-                if cfg['rag.enable_markdown_header_text_splitter']:
-                    markdown_splitter = MarkdownHeaderTextSplitter(
-                        headers_to_split_on=[
-                            ('#', 'Header 1'),
-                            ('##', 'Header 2'),
-                            ('###', 'Header 3'),
-                            ('####', 'Header 4'),
-                            ('#####', 'Header 5'),
-                            ('######', 'Header 6'),
-                        ],
-                        strip_headers=False,
-                    )
-                    split_docs = []
-                    for doc in working_docs:
-                        split_docs.extend(
-                            [
-                                Document(
-                                    page_content=split_chunk.page_content,
-                                    metadata={**doc.metadata},
-                                )
-                                for split_chunk in markdown_splitter.split_text(doc.page_content)
-                            ]
-                        )
-                    working_docs = split_docs
-
-                    if cfg['rag.chunk_min_size_target'] > 0:
-                        from open_webui.routers.retrieval import merge_docs_to_target_size
-
-                        working_docs = merge_docs_to_target_size(request, working_docs)
-
-                # Text splitting
-                if cfg['rag.text_splitter'] in ['', 'character']:
-                    splitter = RecursiveCharacterTextSplitter(
-                        chunk_size=cfg['rag.chunk_size'],
-                        chunk_overlap=cfg['rag.chunk_overlap'],
-                        add_start_index=True,
-                    )
-                    working_docs = splitter.split_documents(working_docs)
-                elif cfg['rag.text_splitter'] == 'token':
-                    tiktoken.get_encoding(str(cfg['rag.tiktoken_encoding_name']))
-                    splitter = TokenTextSplitter(
-                        encoding_name=str(cfg['rag.tiktoken_encoding_name']),
-                        chunk_size=cfg['rag.chunk_size'],
-                        chunk_overlap=cfg['rag.chunk_overlap'],
-                        add_start_index=True,
-                    )
-                    working_docs = splitter.split_documents(working_docs)
-
-            if not working_docs:
-                return False
-
-            t_split = time.time()
-            log.info(f'[sync:{filename}] split: {len(working_docs)} chunks in {t_split - t0:.1f}s')
-
-            texts = [sanitize_text_for_db(doc.page_content) for doc in working_docs]
-            metadatas = [
-                {
-                    **doc.metadata,
-                    **metadata,
-                    'embedding_config': {
-                        'engine': cfg['rag.embedding_engine'],
-                        'model': cfg['rag.embedding_model'],
-                    },
-                }
-                for doc in working_docs
-            ]
-
-            # Generate embeddings
-            embedding_function = get_embedding_function(
-                cfg['rag.embedding_engine'],
-                cfg['rag.embedding_model'],
-                request.app.state.ef,
-                (
-                    cfg['rag.openai.api_base_url']
-                    if cfg['rag.embedding_engine'] == 'openai'
-                    else (
-                        cfg['rag.ollama.base_url']
-                        if cfg['rag.embedding_engine'] == 'ollama'
-                        else cfg['rag.azure_openai.base_url']
-                    )
-                ),
-                (
-                    cfg['rag.openai.api_key']
-                    if cfg['rag.embedding_engine'] == 'openai'
-                    else (
-                        cfg['rag.ollama.api_key']
-                        if cfg['rag.embedding_engine'] == 'ollama'
-                        else cfg['rag.azure_openai.api_key']
-                    )
-                ),
-                cfg['rag.embedding_batch_size'],
-                azure_api_version=(
-                    cfg['rag.azure_openai.api_version'] if cfg['rag.embedding_engine'] == 'azure_openai' else None
-                ),
-                enable_async=cfg['rag.enable_async_embedding'],
-                concurrent_requests=cfg['rag.embedding_concurrent_requests'],
-            )
-
-            log.info(f'[sync:{filename}] >>> EMBED START ({len(texts)} texts)')
-            future = asyncio.run_coroutine_threadsafe(
-                embedding_function(
-                    list(map(lambda x: x.replace('\n', ' '), texts)),
-                    prefix=RAG_EMBEDDING_CONTENT_PREFIX,
-                    user=user,
-                ),
-                request.app.state.main_loop,
-            )
-            embeddings = future.result(timeout=RAG_EMBEDDING_TIMEOUT)
-            t_embed = time.time()
-            log.info(f'[sync:{filename}] <<< EMBED END ({t_embed - t_split:.1f}s)')
-
-            # Build vector items with separate UUIDs per collection
-            items_kb = [
-                {
-                    'id': str(uuid.uuid4()),
-                    'text': text,
-                    'vector': embeddings[idx],
-                    'metadata': metadatas[idx],
-                }
-                for idx, text in enumerate(texts)
-            ]
-
-            # Insert into KB collection (sync Weaviate calls — kept in thread
-            # to avoid blocking the event loop)
-            log.info(f'[sync:{filename}] >>> WEAVIATE KB INSERT START ({len(items_kb)} vectors)')
-            VECTOR_DB_CLIENT.insert(collection_name=self.knowledge_id, items=items_kb)
-            t_kb = time.time()
-            log.info(f'[sync:{filename}] <<< WEAVIATE KB INSERT END ({t_kb - t_embed:.1f}s)')
-
-            log.info(f'[sync:{filename}] DONE total={t_kb - t0:.1f}s')
-            return True
-
-        result = await asyncio.to_thread(_split_embed_and_store)
-        if result:
-            # Persist file metadata AFTER the thread — async ORM cannot run in to_thread.
-            await Files.update_file_metadata_by_id(file_id, {'collection_name': self.knowledge_id})
-            await Files.set_status(file_id, 'completed')
-            await Files.update_file_hash_by_id(file_id, file_hash)
-
-        if not result:
-            log.warning(f'No text content extracted from {filename}')
-            await Files.update_file_metadata_by_id(file_id, {'collection_name': self.knowledge_id})
-            await Files.set_status(file_id, 'completed')
-            await Files.update_file_hash_by_id(file_id, file_hash)
-
-        return True
-
-    async def _download_and_store(self, file_info: Dict[str, Any]) -> Union[PreparedFile, FailedFile, None]:
-        """Phase 1 entrypoint. Branches on USE_SHARED_LOADER.
-
-        In shared-loader mode, the per-tenant loader-worker pod handles
-        download → parse+chunk → embed → push to /ingest. The pod itself
-        creates File records on its callback, so this method returns None
-        and the orchestration in ``sync()`` skips the per-item fan-out.
-
-        Legacy mode preserves the in-pod download path verbatim under
-        ``_download_and_store_legacy`` for instant rollback. Both methods
-        are deleted in the cleanup commit after USE_SHARED_LOADER rollout.
-        """
-        if self._use_shared_loader:
-            # sync() bypasses the per-item pipeline in shared mode; defensive.
-            return None
-        return await self._download_and_store_legacy(file_info)
-
-    async def _download_and_store_legacy(self, file_info: Dict[str, Any]) -> Union[PreparedFile, FailedFile, None]:
-        """Phase 1: Download from cloud, check hash, upload to S3, create file record.
-
-        Returns:
-            PreparedFile if file needs processing
-            None if file is unchanged (hash match, vectors verified)
-            FailedFile on error
-        """
-        item = file_info['item']
-        item_id = item['id']
-        name = file_info['name']
-        source_item_id = file_info.get('source_item_id')
-        relative_path = file_info.get('relative_path', name)
-        file_id = f'{self.file_id_prefix}{item_id}'
-
-        if await self._check_cancelled():
-            return FailedFile(
-                filename=name,
-                error_type=SyncErrorType.PROCESSING_ERROR.value,
-                error_message='Sync cancelled by user',
-            )
-
-        # Pre-download cloud hash check — skip download if cloud reports no change.
-        # Existing KBs without cloud_hash in meta will fall through to download,
-        # populating cloud_hash for subsequent syncs (backward compatible).
-        cloud_hash = self._get_cloud_hash(file_info)
-        existing = await Files.get_file_by_id(file_id)
-
-        if cloud_hash and existing:
-            existing_meta = existing.meta or {}
-            stored_cloud_hash = existing_meta.get('cloud_hash')
-            # Skip re-download only when the row is genuinely fully ingested.
-            # A 'completed' row with empty content (for providers that always
-            # render non-empty text) is a failed-ingest residue — fall through
-            # to a fresh download so the content/vectors actually get rebuilt.
-            if stored_cloud_hash and stored_cloud_hash == cloud_hash and self._is_fully_ingested(existing):
-                log.info(f'File {file_id} unchanged (cloud hash match), skipping download')
-
-                new_relative_path = file_info.get('relative_path')
-                if new_relative_path and existing_meta.get('relative_path') != new_relative_path:
-                    existing_meta['relative_path'] = new_relative_path
-                    await Files.update_file_by_id(file_id, FileUpdateForm(meta=existing_meta))
-
-                await Knowledges.add_file_to_knowledge_by_id(self.knowledge_id, file_id, self.user_id)
-
-                return PreparedFile(
-                    file_id=file_id,
-                    file_info=file_info,
-                    name=name,
-                    content_hash=existing.hash,
-                    is_new=False,
-                )
-
-        log.info(f'Downloading file: {name} (id: {item_id})')
-
-        await emit_file_processing(
-            self.event_prefix,
-            user_id=self.user_id,
-            knowledge_id=self.knowledge_id,
-            file_info={
-                'item_id': item_id,
-                'name': name,
-                'size': item.get('size', 0),
-                'source_item_id': source_item_id,
-                'relative_path': relative_path,
-            },
-        )
-
-        # Download file content
-        try:
-            content = await self._download_file_content(file_info)
-        except Exception as e:
-            log.warning(f'Failed to download file {name}: {e}')
-            return FailedFile(
-                filename=name,
-                error_type=SyncErrorType.DOWNLOAD_ERROR.value,
-                error_message=f'Download failed: {str(e)[:80]}',
-            )
-
-        if not content or len(content) == 0:
-            return FailedFile(
-                filename=name,
-                error_type=SyncErrorType.EMPTY_CONTENT.value,
-                error_message='File is empty',
-            )
-
-        # Post-download content hash check
-        content_hash = hashlib.sha256(content).hexdigest()
-
-        if existing and existing.hash == content_hash:
-            log.info(f'File {file_id} unchanged (content hash match)')
-
-            existing_meta = existing.meta or {}
-            updated = False
-
-            new_relative_path = file_info.get('relative_path')
-            if new_relative_path and existing_meta.get('relative_path') != new_relative_path:
-                existing_meta['relative_path'] = new_relative_path
-                updated = True
-
-            # Store cloud hash so next sync can skip the download
-            if cloud_hash and existing_meta.get('cloud_hash') != cloud_hash:
-                existing_meta['cloud_hash'] = cloud_hash
-                updated = True
-
-            if updated:
-                await Files.update_file_by_id(file_id, FileUpdateForm(meta=existing_meta))
-
-            await Knowledges.add_file_to_knowledge_by_id(self.knowledge_id, file_id, self.user_id)
-
-            # Return PreparedFile with is_new=False so vector verification
-            # runs under the process semaphore (not the download semaphore).
-            return PreparedFile(
-                file_id=file_id,
-                file_info=file_info,
-                name=name,
-                content_hash=content_hash,
-                is_new=False,
-            )
-
-        # Upload to storage
-        temp_filename = f'{file_id}_{name}'
-        try:
-            storage_headers = {
-                'OpenWebUI-User-Id': self.user_id,
-                'OpenWebUI-File-Id': file_id,
-            }
-            storage_headers.update(self._get_provider_storage_headers(item_id))
-
-            contents, file_path = Storage.upload_file(
-                io.BytesIO(content),
-                temp_filename,
-                storage_headers,
-            )
-        except Exception as e:
-            return FailedFile(
-                filename=name,
-                error_type=SyncErrorType.PROCESSING_ERROR.value,
-                error_message=f'Storage upload failed: {str(e)[:80]}',
-            )
-
-        # Create/update file record
-        try:
-            content_type = self._get_content_type(name)
-            file_meta = self._get_provider_file_meta(
-                item_id=item_id,
-                source_item_id=source_item_id,
-                relative_path=relative_path,
-                name=name,
-                content_type=content_type,
-                size=len(content),
-                file_info=file_info,
-            )
-
-            # Store cloud hash for pre-download skip on next sync
-            if cloud_hash:
-                file_meta['cloud_hash'] = cloud_hash
-
-            if existing:
-                await Files.update_file_by_id(
-                    file_id,
-                    FileUpdateForm(hash=content_hash, meta=file_meta),
-                )
-                await Files.update_file_path_by_id(file_id, file_path)
-            else:
-                file_form = FileForm(
-                    id=file_id,
-                    filename=name,
-                    path=file_path,
-                    hash=content_hash,
-                    data={},
-                    meta=file_meta,
-                )
-                await Files.insert_new_file(self.user_id, file_form)
-
-            return PreparedFile(
-                file_id=file_id,
-                file_info=file_info,
-                name=name,
-                content_hash=content_hash,
-                is_new=not existing,
-            )
-        except Exception as e:
-            return FailedFile(
-                filename=name,
-                error_type=SyncErrorType.PROCESSING_ERROR.value,
-                error_message=str(e)[:100],
-            )
-
-    async def _process_and_embed(self, prepared: PreparedFile) -> Optional[FailedFile]:
-        """Phase 2 entrypoint. Branches on USE_SHARED_LOADER.
-
-        In shared-loader mode, processing + embedding happen in the
-        loader-worker pod. The legacy in-pod implementation is preserved
-        under ``_process_and_embed_legacy`` for instant rollback.
-        """
-        if self._use_shared_loader:
-            return None
-        return await self._process_and_embed_legacy(prepared)
-
-    async def _process_and_embed_legacy(self, prepared: PreparedFile) -> Optional[FailedFile]:
-        """Phase 2: Extract content, embed once, insert into KB + per-file collections.
-
-        Returns None on success, FailedFile on error.
-        """
-        file_id = prepared.file_id
-        name = prepared.name
-
-        if await self._check_cancelled():
-            return FailedFile(
-                filename=name,
-                error_type=SyncErrorType.PROCESSING_ERROR.value,
-                error_message='Sync cancelled by user',
-            )
-
-        try:
-            # Extract content (loader / external pipeline)
-            log.info(f'[sync:{name}] >>> EXTRACT START')
-            t_start = time.time()
-            result = await self._extract_content(file_id)
-            t_extract = time.time()
-
-            if result is None:
-                log.debug(f'File {file_id} has no extractable content')
-                return None
-
-            docs, file_record, needs_split = result
-            log.info(f'[sync:{name}] <<< EXTRACT END ({len(docs)} docs, {t_extract - t_start:.1f}s)')
-
-            if not docs or not any(doc.page_content.strip() for doc in docs):
-                log.debug(f'File {file_id} has no text content')
-                return None
-
-            if await self._check_cancelled():
-                return FailedFile(
-                    filename=name,
-                    error_type=SyncErrorType.PROCESSING_ERROR.value,
-                    error_message='Sync cancelled by user',
-                )
-
-            # Embed once → insert into both KB and per-file collections
-            success = await self._embed_to_collections(
-                docs=docs,
-                file_id=file_id,
-                file_hash=prepared.content_hash,
-                filename=name,
-                needs_split=needs_split,
-            )
-
-            if not success:
-                return FailedFile(
-                    filename=name,
-                    error_type=SyncErrorType.PROCESSING_ERROR.value,
-                    error_message='Failed to save vectors',
-                )
-
-        except Exception as e:
-            log.warning(f'Error processing file {file_id} ({name}): {e}')
-            return FailedFile(
-                filename=name,
-                error_type=SyncErrorType.PROCESSING_ERROR.value,
-                error_message=str(e)[:100],
-            )
-
-        if await self._check_cancelled():
-            return FailedFile(
-                filename=name,
-                error_type=SyncErrorType.PROCESSING_ERROR.value,
-                error_message='Sync cancelled by user',
-            )
-
-        # KB association
-        await Knowledges.add_file_to_knowledge_by_id(self.knowledge_id, file_id, self.user_id)
-
-        # Cross-KB vector propagation (still uses process_file for other KBs)
-        try:
-            knowledge_files = await Knowledges.get_knowledge_files_by_file_id(file_id)
-            for kf in knowledge_files:
-                if kf.knowledge_id != self.knowledge_id:
-                    log.info(f'Propagating vectors for {file_id} to KB {kf.knowledge_id}')
-                    try:
-                        await ASYNC_VECTOR_DB_CLIENT.delete(
-                            collection_name=kf.knowledge_id,
-                            filter={'file_id': file_id},
-                        )
-                    except Exception as e:
-                        log.warning(f'Failed to remove old vectors from KB {kf.knowledge_id}: {e}')
-                    try:
-                        from open_webui.routers.retrieval import process_file, ProcessFileForm
-
-                        propagate_user = await self._get_user()
-
-                        async with get_async_db() as db:
-                            await process_file(
-                                self._make_request(),
-                                ProcessFileForm(
-                                    file_id=file_id,
-                                    collection_name=kf.knowledge_id,
-                                ),
-                                user=propagate_user,
-                                db=db,
-                            )
-                    except Exception as e:
-                        log.warning(f'Failed to propagate vectors to KB {kf.knowledge_id}: {e}')
-        except Exception as e:
-            log.warning(f'Failed to propagate vector updates for {file_id}: {e}')
-
-        # Emit file added event
-        file_record = await Files.get_file_by_id(file_id)
-        if file_record:
-            await emit_file_added(
-                self.event_prefix,
-                user_id=self.user_id,
-                knowledge_id=self.knowledge_id,
-                file_data={
-                    'id': file_record.id,
-                    'filename': file_record.filename,
-                    'meta': file_record.meta,
-                    'created_at': file_record.created_at,
-                    'updated_at': file_record.updated_at,
-                },
-            )
-
-        return None
-
     # ------------------------------------------------------------------
-    # Shared-loader orchestration (USE_SHARED_LOADER=true)
+    # Loader-worker orchestration
     # ------------------------------------------------------------------
 
     async def _submit_pipeline_job(self, files: List[Dict[str, Any]]) -> Optional[str]:
         """Submit a single loader-worker job carrying every discovered file.
 
-        Returns the job_id. The legacy in-pod fan-out is bypassed; the
-        loader-worker is responsible for download → parse+chunk → embed →
-        push to /ingest, and tracks its own concurrency.
+        Returns the job_id. The loader-worker is responsible for
+        download → parse+chunk → embed → push to /ingest, and tracks its
+        own concurrency.
         """
         if not files:
             return None
@@ -1492,7 +716,7 @@ class BaseSyncWorker(ABC):
 
         Also fires ``:file:processing`` per stub so the existing frontend
         cloud-event handler adds the file to its in-memory list with a
-        spinner, matching legacy ``_download_and_store`` UX.
+        spinner.
 
         Returns the list of file_ids touched by this sync (both newly
         inserted and re-attached to the KB). The caller stashes this on
@@ -1697,7 +921,6 @@ class BaseSyncWorker(ABC):
         the user cancels via the UI.
         """
         terminal = {'completed', 'partial', 'failed', 'cancelled'}
-        last_status = ''
         cancel_requested = False
         started_at = time.monotonic()
         wall_clock_cap = _max_job_wall_clock_seconds()
@@ -1750,10 +973,8 @@ class BaseSyncWorker(ABC):
                 cancel_requested = True
 
             if current_status in terminal:
-                last_status = current_status
                 return status
 
-            last_status = current_status
             await asyncio.sleep(2)
 
     async def _sync_via_pipeline(  # noqa: C901 — terminal-state branching is irreducible (completed/partial/failed/cancelled/timed_out + orphan sweep)
@@ -1768,8 +989,8 @@ class BaseSyncWorker(ABC):
         """Drive a sync via the per-tenant loader-worker.
 
         Submits one job carrying every discovered file, polls for terminal
-        status, persists ``last_result`` in KB meta, and returns a result
-        dict shape-compatible with the legacy in-pod path.
+        status, persists ``last_result`` in KB meta, and returns the sync
+        result dict.
 
         ``added_file_ids`` / ``updated_file_ids`` are the pre-classified
         partition of the submit batch; intersecting them with the loader-
@@ -2173,10 +1394,7 @@ class BaseSyncWorker(ABC):
             self.sources = verified_sources
 
             # Aggregate counters
-            total_processed = 0
-            total_failed = 0
             total_deleted = 0
-            failed_files: List[FailedFile] = []
 
             all_files_to_process = []
 
@@ -2254,10 +1472,7 @@ class BaseSyncWorker(ABC):
 
             # Categorize discovered files before submission so the toast can
             # report what actually changed (added/updated/unchanged), not just
-            # what passed through the loader-worker. The legacy in-pod path
-            # had a per-file short-circuit at `_download_and_store_legacy`;
-            # the shared-loader path lacked one, which is the structural
-            # cause of the "5 extra" re-sync toast.
+            # what passed through the loader-worker.
             added_file_ids: set[str] = set()
             updated_file_ids: set[str] = set()
             unchanged_count = 0
@@ -2285,317 +1500,15 @@ class BaseSyncWorker(ABC):
             # race to create it (avoids N-1 wasted 422 roundtrips).
             await ASYNC_VECTOR_DB_CLIENT.insert(collection_name=self.knowledge_id, items=[])
 
-            # USE_SHARED_LOADER branch: delegate everything to the per-tenant
-            # loader-worker pod. The semaphore-bounded fan-out below is bypassed.
-            if self._use_shared_loader and self._pipeline_client:
-                return await self._sync_via_pipeline(
-                    all_files_to_process=all_files_to_process,
-                    total_files=total_files,
-                    added_file_ids=added_file_ids,
-                    updated_file_ids=updated_file_ids,
-                    unchanged_count=unchanged_count,
-                    total_deleted=total_deleted,
-                )
-
-            # Process all files with two-phase pipeline
-            from open_webui.config import FILE_DOWNLOAD_CONCURRENCY_MULTIPLIER
-
-            # Cap process concurrency to the default thread pool size
-            # (min(32, os.cpu_count() + 4)) minus headroom for embedding
-            # callbacks. On a 1-CPU pod the pool is only 5 threads; allowing
-            # more concurrent process tasks than pool slots causes starvation.
-            import os
-
-            thread_pool_size = min(32, (os.cpu_count() or 1) + 4)
-            max_process_concurrent = min(
-                await Config.get('file.processing_max_concurrent', 5),
-                max(1, thread_pool_size - 2),  # leave 2 slots for embeddings / other work
+            # Delegate everything to the per-tenant loader-worker pod.
+            return await self._sync_via_pipeline(
+                all_files_to_process=all_files_to_process,
+                total_files=total_files,
+                added_file_ids=added_file_ids,
+                updated_file_ids=updated_file_ids,
+                unchanged_count=unchanged_count,
+                total_deleted=total_deleted,
             )
-            max_download_concurrent = max_process_concurrent * FILE_DOWNLOAD_CONCURRENCY_MULTIPLIER
-            download_semaphore = asyncio.Semaphore(max_download_concurrent)
-            process_semaphore = asyncio.Semaphore(max_process_concurrent)
-            processed_count = unchanged_count
-            failed_count = 0
-            results_lock = asyncio.Lock()
-            cancelled = False
-
-            # Per-file timeout: extraction (120s) + chunking (120s) + embedding (300s) + overhead
-            FILE_PIPELINE_TIMEOUT = 600  # 10 minutes
-
-            async def _pipeline_inner(file_info: Dict[str, Any], index: int) -> Optional[FailedFile]:
-                nonlocal processed_count, failed_count, cancelled
-
-                if cancelled or await self._check_cancelled():
-                    cancelled = True
-                    return FailedFile(
-                        filename=file_info.get('name', 'unknown'),
-                        error_type=SyncErrorType.PROCESSING_ERROR.value,
-                        error_message='Sync cancelled by user',
-                    )
-
-                try:
-                    # Phase 1: Download + store (high concurrency)
-                    async with download_semaphore:
-                        if cancelled or await self._check_cancelled():
-                            cancelled = True
-                            return FailedFile(
-                                filename=file_info.get('name', 'unknown'),
-                                error_type=SyncErrorType.PROCESSING_ERROR.value,
-                                error_message='Sync cancelled by user',
-                            )
-                        result = await self._download_and_store(file_info)
-
-                    # Handle download phase results
-                    if isinstance(result, FailedFile):
-                        async with results_lock:
-                            failed_count += 1
-                            await self._update_sync_status(
-                                'syncing',
-                                processed_count + failed_count,
-                                total_files,
-                                file_info.get('name', ''),
-                                files_processed=processed_count,
-                                files_failed=failed_count,
-                            )
-                        return result
-
-                    if result is None:
-                        # Hash match — already handled, count as success
-                        async with results_lock:
-                            processed_count += 1
-                            await self._update_sync_status(
-                                'syncing',
-                                processed_count + failed_count,
-                                total_files,
-                                file_info.get('name', ''),
-                                files_processed=processed_count,
-                                files_failed=failed_count,
-                            )
-                        return None
-
-                    # Phase 2: Process + embed (normal concurrency)
-                    async with process_semaphore:
-                        if cancelled or await self._check_cancelled():
-                            cancelled = True
-                            return FailedFile(
-                                filename=file_info.get('name', 'unknown'),
-                                error_type=SyncErrorType.PROCESSING_ERROR.value,
-                                error_message='Sync cancelled by user',
-                            )
-
-                        if not result.is_new:
-                            # Hash-matched file: just verify vectors are in KB
-                            verify_result = await self._ensure_vectors_in_kb(result.file_id)
-                            if verify_result:
-                                if verify_result.error_type == SyncErrorType.EMPTY_CONTENT.value:
-                                    process_result = None  # Skip, not failure
-                                else:
-                                    log.warning(f'File {result.file_id} vectors missing, re-processing')
-                                    process_result = await self._process_and_embed(result)
-                            else:
-                                # Vectors verified, emit file added event
-                                file_record = await Files.get_file_by_id(result.file_id)
-                                if file_record:
-                                    await emit_file_added(
-                                        self.event_prefix,
-                                        user_id=self.user_id,
-                                        knowledge_id=self.knowledge_id,
-                                        file_data={
-                                            'id': file_record.id,
-                                            'filename': file_record.filename,
-                                            'meta': file_record.meta,
-                                            'created_at': file_record.created_at,
-                                            'updated_at': file_record.updated_at,
-                                        },
-                                    )
-                                process_result = None
-                        else:
-                            process_result = await self._process_and_embed(result)
-
-                    async with results_lock:
-                        if process_result is None:
-                            processed_count += 1
-                        else:
-                            failed_count += 1
-                        await self._update_sync_status(
-                            'syncing',
-                            processed_count + failed_count,
-                            total_files,
-                            file_info.get('name', ''),
-                            files_processed=processed_count,
-                            files_failed=failed_count,
-                        )
-                    return process_result
-
-                except Exception as e:
-                    log.error(f'Error in pipeline for {file_info.get("name")}: {e}')
-                    async with results_lock:
-                        failed_count += 1
-                    return FailedFile(
-                        filename=file_info.get('name', 'unknown'),
-                        error_type=SyncErrorType.PROCESSING_ERROR.value,
-                        error_message=str(e)[:100],
-                    )
-
-            async def pipeline(file_info: Dict[str, Any], index: int) -> Optional[FailedFile]:
-                """Wrapper that enforces a per-file timeout to prevent indefinite hangs."""
-                nonlocal failed_count
-                try:
-                    return await asyncio.wait_for(
-                        _pipeline_inner(file_info, index),
-                        timeout=FILE_PIPELINE_TIMEOUT,
-                    )
-                except asyncio.TimeoutError:
-                    log.error(f'File {file_info.get("name")} timed out after {FILE_PIPELINE_TIMEOUT}s')
-                    async with results_lock:
-                        failed_count += 1
-                    return FailedFile(
-                        filename=file_info.get('name', 'unknown'),
-                        error_type=SyncErrorType.PROCESSING_ERROR.value,
-                        error_message=f'Timed out after {FILE_PIPELINE_TIMEOUT}s',
-                    )
-
-            log.info(
-                f'Starting pipeline processing of {len(all_files_to_process)} files '
-                f'(thread pool: {thread_pool_size}, '
-                f'download concurrency: {max_download_concurrent}, '
-                f'process concurrency: {max_process_concurrent})'
-            )
-            start_time = time.time()
-
-            batch_size = max_download_concurrent + max_process_concurrent
-            total_batches = -(-len(all_files_to_process) // batch_size)  # ceil division
-            all_results = []
-
-            for batch_start in range(0, len(all_files_to_process), batch_size):
-                batch_num = batch_start // batch_size + 1
-                batch = all_files_to_process[batch_start : batch_start + batch_size]
-
-                if cancelled or await self._check_cancelled():
-                    cancelled = True
-                    break
-
-                log.info(f'Batch {batch_num}/{total_batches}: processing {len(batch)} files (offset {batch_start})')
-                batch_t0 = time.time()
-
-                batch_tasks = [pipeline(file_info, batch_start + i) for i, file_info in enumerate(batch)]
-                batch_results = await asyncio.gather(*batch_tasks, return_exceptions=True)
-                all_results.extend(batch_results)
-
-                log.info(
-                    f'Batch {batch_num}/{total_batches} done in {time.time() - batch_t0:.1f}s '
-                    f'(processed={processed_count}, failed={failed_count})'
-                )
-
-            for result in all_results:
-                if isinstance(result, Exception):
-                    log.error(f'Unexpected error during file processing: {result}')
-                    total_failed += 1
-                    failed_files.append(
-                        FailedFile(
-                            filename='unknown',
-                            error_type=SyncErrorType.PROCESSING_ERROR.value,
-                            error_message=str(result)[:100],
-                        )
-                    )
-                elif result is not None:
-                    failed_files.append(result)
-
-            total_processed = processed_count
-            total_failed = failed_count
-
-            processing_time = time.time() - start_time
-            log.info(
-                f'Pipeline processing completed in {processing_time:.2f}s: '
-                f'{total_processed} succeeded, {total_failed} failed'
-            )
-
-            # Check if cancelled during processing
-            if cancelled:
-                log.info(f'Sync cancelled by user for knowledge {self.knowledge_id}')
-
-                for source in self.sources:
-                    for key in self.source_clear_delta_keys:
-                        source.pop(key, None)
-                await self._save_sources()
-
-                await self._update_sync_status(
-                    'cancelled',
-                    current=total_processed + total_failed,
-                    total=total_files,
-                    error='Sync cancelled by user',
-                    files_processed=total_processed,
-                    files_failed=total_failed,
-                    deleted_count=total_deleted,
-                    files_unchanged=unchanged_count,
-                    files_removed=total_deleted,
-                    failed_files=failed_files,
-                )
-                return {
-                    'files_processed': total_processed,
-                    'files_failed': total_failed,
-                    'total_found': total_files,
-                    'deleted_count': total_deleted,
-                    'files_unchanged': unchanged_count,
-                    'files_removed': total_deleted,
-                    'cancelled': True,
-                    'failed_files': [asdict(f) for f in failed_files],
-                }
-
-            # Save updated sources
-            await self._save_sources()
-
-            failed_files_dicts = [asdict(f) for f in failed_files]
-
-            # Update final sync status. The legacy in-pod path doesn't track
-            # per-file outcomes by classification bucket, so we approximate
-            # the new toast counts: items that ran through the pipeline are
-            # ``files_processed - unchanged_count``, and we attribute them
-            # all to ``files_added`` (the legacy path is dead-coded behind
-            # USE_SHARED_LOADER and doesn't need precise added/updated split).
-            legacy_added = max(0, total_processed - unchanged_count)
-            knowledge = await Knowledges.get_knowledge_by_id(self.knowledge_id)
-            meta = knowledge.meta or {}
-            sync_info = meta.get(self.meta_key, {})
-            sync_info['last_sync_at'] = int(time.time())
-            sync_info['status'] = 'completed' if total_failed == 0 else 'completed_with_errors'
-            sync_info['last_result'] = {
-                'files_processed': total_processed,
-                'files_failed': total_failed,
-                'total_found': total_files,
-                'deleted_count': total_deleted,
-                'files_added': legacy_added,
-                'files_updated': 0,
-                'files_unchanged': unchanged_count,
-                'files_removed': total_deleted,
-                'failed_files': failed_files_dicts,
-            }
-            meta[self.meta_key] = sync_info
-            await Knowledges.update_knowledge_meta_by_id(self.knowledge_id, meta)
-
-            await self._update_sync_status(
-                sync_info['status'],
-                current=total_files,
-                total=total_files,
-                files_processed=total_processed,
-                files_failed=total_failed,
-                deleted_count=total_deleted,
-                files_added=legacy_added,
-                files_updated=0,
-                files_unchanged=unchanged_count,
-                files_removed=total_deleted,
-                failed_files=failed_files,
-            )
-
-            log.info(f'Sync completed for {self.knowledge_id}: {total_processed} processed, {total_failed} failed')
-
-            return {
-                'files_processed': total_processed,
-                'files_failed': total_failed,
-                'total_found': total_files,
-                'deleted_count': total_deleted,
-                'failed_files': failed_files_dicts,
-            }
 
         except (ConnectionError, httpx.TransportError) as e:
             # Connectivity loss — DNS failure, connection refused, or timeout —

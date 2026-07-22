@@ -83,14 +83,13 @@ def test_status_aggregates_per_provider():
         ),
     ]
     onedrive_kbs = [_kb('kb-o1', {'onedrive_sync': {'status': 'completed', 'last_sync_at': 500}})]
-    # google_drive and topdesk: zero-state (no KBs).
+    # google_drive: zero-state (no KBs).
 
     async def fake_get_by_type(provider_type, *a, **k):
         return {
             'confluence': confluence_kbs,
             'onedrive': onedrive_kbs,
             'google_drive': [],
-            'topdesk': [],
         }[provider_type]
 
     async def fake_file_counts(ids, *a, **k):
@@ -104,7 +103,7 @@ def test_status_aggregates_per_provider():
     assert res.status_code == 200
     body = res.json()
 
-    assert set(body.keys()) == {'confluence', 'google_drive', 'onedrive', 'topdesk'}
+    assert set(body.keys()) == {'confluence', 'google_drive', 'onedrive'}
 
     conf = body['confluence']
     assert conf['kb_count'] == 2
@@ -132,119 +131,8 @@ def test_status_aggregates_per_provider():
         'suspended_count': 0,
         'shared': False,
     }
+    # google_drive has no KBs → zero-state entry present in the payload.
     assert body['google_drive'] == zero_state
-    # topdesk has no KBs → zero-state entry present in the payload.
-    assert body['topdesk'] == zero_state
-
-
-# --- /configs/topdesk admin-gating + normalization --------------------------
-
-
-def _patch_topdesk_store(monkeypatch) -> dict:
-    """In-memory per-key Config store for the topdesk endpoints.
-
-    The router reads/writes via ``Config.get_many``/``Config.upsert`` on the
-    ``topdesk.*`` storage keys (TOPDESK_CONFIG_KEYS in routers/configs.py);
-    reads and upserts land in this dict, never in a DB.
-    """
-    values = dict(_TOPDESK_STORE_SEED)
-
-    async def fake_get_many(*keys):
-        return {key: values[key] for key in keys if key in values}
-
-    async def fake_upsert(updates):
-        values.update(updates)
-
-    monkeypatch.setattr(configs.Config, 'get_many', staticmethod(fake_get_many))
-    monkeypatch.setattr(configs.Config, 'upsert', staticmethod(fake_upsert))
-    return values
-
-
-def _admin_override(app) -> TestClient:
-    app.dependency_overrides[get_admin_user] = lambda: SimpleNamespace(
-        id='admin-1', role='admin', email='admin@example.com'
-    )
-    return TestClient(app)
-
-
-# Dotted storage-key seed mirroring the old TOPDESK_* namespace defaults.
-_TOPDESK_STORE_SEED = {
-    'topdesk.enable': False,
-    'topdesk.enable_sync': False,
-    'topdesk.url': '',
-    'topdesk.username': '',
-    'topdesk.app_password': '',
-    'topdesk.sync_interval_minutes': 60,
-    'topdesk.max_items_per_sync': 500,
-    'topdesk.sync_scope': 'ssp',
-}
-
-# Friendly field names the GET endpoint returns for the seeded keys.
-_TOPDESK_FIELDS = {
-    'ENABLE_TOPDESK_INTEGRATION',
-    'ENABLE_TOPDESK_SYNC',
-    'TOPDESK_URL',
-    'TOPDESK_USERNAME',
-    'TOPDESK_APP_PASSWORD',
-    'TOPDESK_SYNC_INTERVAL_MINUTES',
-    'TOPDESK_MAX_ITEMS_PER_SYNC',
-    'TOPDESK_SYNC_SCOPE',
-}
-
-
-def test_topdesk_get_rejects_non_admin():
-    app = _make_app()
-    app.dependency_overrides[get_current_user] = lambda: SimpleNamespace(
-        id='user-1', role='user', email='user@example.com'
-    )
-    res = TestClient(app).get('/api/v1/configs/topdesk')
-    assert res.status_code == 401
-
-
-def test_topdesk_post_rejects_non_admin():
-    app = _make_app()
-    app.dependency_overrides[get_current_user] = lambda: SimpleNamespace(
-        id='user-1', role='user', email='user@example.com'
-    )
-    res = TestClient(app).post('/api/v1/configs/topdesk', json={})
-    assert res.status_code == 401
-
-
-def test_topdesk_get_returns_all_values(monkeypatch):
-    app = _make_app()
-    _patch_topdesk_store(monkeypatch)
-    client = _admin_override(app)
-    res = client.get('/api/v1/configs/topdesk')
-    assert res.status_code == 200
-    assert set(res.json().keys()) == _TOPDESK_FIELDS
-
-
-def test_topdesk_post_normalizes_url_and_clamps_max(monkeypatch):
-    app = _make_app()
-    store = _patch_topdesk_store(monkeypatch)
-    client = _admin_override(app)
-
-    res = client.post(
-        '/api/v1/configs/topdesk',
-        json={
-            'ENABLE_TOPDESK_INTEGRATION': True,
-            'TOPDESK_URL': '  https://tenant.topdesk.net/  ',
-            'TOPDESK_USERNAME': '  operator  ',
-            'TOPDESK_APP_PASSWORD': '  secret  ',
-            'TOPDESK_MAX_ITEMS_PER_SYNC': -5,
-        },
-    )
-    assert res.status_code == 200
-    body = res.json()
-    # URL stripped + trailing slash removed.
-    assert body['TOPDESK_URL'] == 'https://tenant.topdesk.net'
-    assert store['topdesk.url'] == 'https://tenant.topdesk.net'
-    # Credentials stripped and round-tripped in full (Confluence disclosure profile).
-    assert body['TOPDESK_USERNAME'] == 'operator'
-    assert body['TOPDESK_APP_PASSWORD'] == 'secret'
-    # Negative max clamped to 0 (unlimited).
-    assert body['TOPDESK_MAX_ITEMS_PER_SYNC'] == 0
-    assert body['ENABLE_TOPDESK_INTEGRATION'] is True
 
 
 # --- pure helper ------------------------------------------------------------

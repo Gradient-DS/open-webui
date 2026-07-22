@@ -172,3 +172,27 @@ async def test_submit_existing_file_to_pipeline_submits_links_and_marks_processi
     # Links the file to the KB and marks it processing (job id recorded).
     assert captured['link'] == ('kb-9', 'file-1', 'user-7')
     assert captured['status'] == ('file-1', 'processing')
+
+
+# --- resolve_format: extension first, content_type fallback -------------------
+
+
+def test_resolve_format_extension_wins():
+    from open_webui.utils.doc_pipeline import resolve_format
+
+    assert resolve_format('Report.PDF', 'text/html') == 'pdf'
+
+
+def test_resolve_format_falls_back_to_content_type_when_no_extension():
+    from open_webui.utils.doc_pipeline import resolve_format
+
+    # Sync-daemon display-name files: a Confluence page title with no extension.
+    assert resolve_format('My first space', 'text/html') == 'html'
+    assert resolve_format('Notulen Q3', 'text/markdown; charset=utf-8') == 'md'
+
+
+def test_resolve_format_unknown_yields_empty():
+    from open_webui.utils.doc_pipeline import resolve_format
+
+    assert resolve_format('noext', 'application/x-unknown') == ''
+    assert resolve_format('', None) == ''

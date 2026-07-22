@@ -56,7 +56,6 @@ class GoogleDriveSyncProvider(SyncProvider):
         user_id,
         app,
         token_provider=None,
-        use_shared_loader: bool = False,
     ):
         from open_webui.services.google_drive.sync_worker import GoogleDriveSyncWorker
 
@@ -67,5 +66,4 @@ class GoogleDriveSyncProvider(SyncProvider):
             user_id=user_id,
             app=app,
             token_provider=token_provider,
-            use_shared_loader=use_shared_loader,
         )

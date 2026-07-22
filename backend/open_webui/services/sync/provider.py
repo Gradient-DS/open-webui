@@ -45,7 +45,6 @@ PROVIDER_FILE_ID_PREFIXES: dict[str, str] = {
     'onedrive': 'onedrive-',
     'google_drive': 'googledrive-',
     'confluence': 'confluence-',
-    'topdesk': 'topdesk-',
     # Direct-upload via the distributed doc-pipeline. NOT a managed-sync
     # provider (no worker class) — the empty prefix is deliberate. A
     # direct-upload File row already exists with a bare UUID id; the
@@ -131,7 +130,6 @@ class SyncProvider(ABC):
         user_id: str,
         app,
         token_provider=None,
-        use_shared_loader: bool = False,
     ):
         """Create the provider-specific sync worker instance."""
         ...
@@ -180,9 +178,6 @@ class SyncProvider(ABC):
 
             token_provider = _refresh
 
-        # Read shared-loader flag from app config (set by main.py at startup).
-        use_shared_loader = bool(await Config.get('sync.use_shared_loader', False))
-
         worker = self.create_worker(
             knowledge_id=knowledge_id,
             sources=sources,
@@ -190,7 +185,6 @@ class SyncProvider(ABC):
             user_id=user_id,
             app=app,
             token_provider=token_provider,
-            use_shared_loader=use_shared_loader,
         )
 
         result = await worker.sync()
@@ -235,10 +229,6 @@ def get_sync_provider(provider_type: str) -> SyncProvider:
         from open_webui.services.confluence.provider import ConfluenceSyncProvider
 
         return ConfluenceSyncProvider()
-    elif provider_type == 'topdesk':
-        from open_webui.services.topdesk.provider import TopdeskSyncProvider
-
-        return TopdeskSyncProvider()
     else:
         raise ValueError(f'Unsupported sync provider: {provider_type}')
 
@@ -257,9 +247,5 @@ def get_token_manager(provider_type: str) -> TokenManager:
         from open_webui.services.confluence.provider import ConfluenceTokenManager
 
         return ConfluenceTokenManager()
-    elif provider_type == 'topdesk':
-        from open_webui.services.topdesk.provider import TopdeskTokenManager
-
-        return TopdeskTokenManager()
     else:
         raise ValueError(f'Unsupported token manager: {provider_type}')

@@ -2993,26 +2993,6 @@ CONFLUENCE_CLOUD_ID = os.environ.get('CONFLUENCE_CLOUD_ID', '')
 
 CONFLUENCE_KB_MODE = os.environ.get('CONFLUENCE_KB_MODE', 'per_user')
 
-ENABLE_TOPDESK_INTEGRATION = os.getenv('ENABLE_TOPDESK_INTEGRATION', 'False').lower() == 'true'
-
-ENABLE_TOPDESK_SYNC = os.getenv('ENABLE_TOPDESK_SYNC', 'False').lower() == 'true'
-
-TOPDESK_URL = os.environ.get('TOPDESK_URL', '')
-
-TOPDESK_USERNAME = os.environ.get('TOPDESK_USERNAME', '')
-
-TOPDESK_APP_PASSWORD = os.environ.get('TOPDESK_APP_PASSWORD', '')
-
-TOPDESK_SYNC_INTERVAL_MINUTES = int(os.environ.get('TOPDESK_SYNC_INTERVAL_MINUTES', '60'))
-
-TOPDESK_MAX_ITEMS_PER_SYNC = int(os.getenv('TOPDESK_MAX_ITEMS_PER_SYNC', '500'))
-
-TOPDESK_MAX_ITEM_SIZE_MB = int(os.getenv('TOPDESK_MAX_ITEM_SIZE_MB', '25'))
-
-TOPDESK_SYNC_SCOPE = os.getenv('TOPDESK_SYNC_SCOPE', 'ssp').strip().lower() or 'ssp'
-
-TOPDESK_KB_API_PATH = os.getenv('TOPDESK_KB_API_PATH', '/services/knowledge-base-v1')
-
 ENABLE_EMAIL_INVITES = os.environ.get('ENABLE_EMAIL_INVITES', 'False').lower() == 'true'
 
 EMAIL_GRAPH_TENANT_ID = os.environ.get('EMAIL_GRAPH_TENANT_ID', '')
@@ -3037,13 +3017,7 @@ PASSWORD_RESET_EXPIRY_MINUTES = int(os.environ.get('PASSWORD_RESET_EXPIRY_MINUTE
 
 ENABLE_RAG_FILTER_UI = os.environ.get('ENABLE_RAG_FILTER_UI', 'False').lower() == 'true'
 
-FILE_PROCESSING_MAX_CONCURRENT = int(os.environ.get('FILE_PROCESSING_MAX_CONCURRENT', '5'))
-
-FILE_DOWNLOAD_CONCURRENCY_MULTIPLIER = int(os.environ.get('FILE_DOWNLOAD_CONCURRENCY_MULTIPLIER', '3'))
-
 INTEGRATION_PROVIDERS = {}
-
-USE_SHARED_LOADER = os.environ.get('USE_SHARED_LOADER', 'False').lower() == 'true'
 
 LOADER_WORKER_URL = os.environ.get('LOADER_WORKER_URL', '')
 
@@ -3058,6 +3032,13 @@ DISTRIBUTED_DOC_PIPELINE_SYNC_ENABLED = (
 DISTRIBUTED_DOC_PIPELINE_CHAT_ENABLED = (
     os.environ.get('DISTRIBUTED_DOC_PIPELINE_CHAT_ENABLED', 'False').lower() == 'true'
 )
+
+# Per-tenant switch for the external sync-daemon (genai-utils
+# services/sync_daemon). Gates the daemon-facing endpoints
+# (/api/v1/sync-daemon/*) and the machine-auth acceptance on the knowledge
+# sync-protocol endpoints. The companion machine key is the plain env var
+# SYNC_API_KEY (read in utils/service_auth.py, never stored in config).
+SYNC_DAEMON_ENABLED = os.environ.get('SYNC_DAEMON_ENABLED', 'False').lower() == 'true'
 
 PIPELINE_API_BASE_URL = os.environ.get('PIPELINE_API_BASE_URL', '')
 
@@ -3533,7 +3514,6 @@ DEFAULT_CONFIG = {
     'feedback_report.include_user_identity': FEEDBACK_REPORT_INCLUDE_USER_IDENTITY,
     'feedback_report.slack_webhook_url': FEEDBACK_REPORT_SLACK_WEBHOOK_URL,
     'feedback_report.trace_url_template': FEEDBACK_REPORT_TRACE_URL_TEMPLATE,
-    'file.processing_max_concurrent': FILE_PROCESSING_MAX_CONCURRENT,
     'google_drive.enable_sync': ENABLE_GOOGLE_DRIVE_SYNC,
     'google_drive.max_files_per_sync': GOOGLE_DRIVE_MAX_FILES_PER_SYNC,
     'google_drive.sync_interval_minutes': GOOGLE_DRIVE_SYNC_INTERVAL_MINUTES,
@@ -3548,15 +3528,7 @@ DEFAULT_CONFIG = {
     'onedrive.sync_interval_minutes': ONEDRIVE_SYNC_INTERVAL_MINUTES,
     'rag.distributed_doc_pipeline_sync_enabled': DISTRIBUTED_DOC_PIPELINE_SYNC_ENABLED,
     'rag.enable_filter_ui': ENABLE_RAG_FILTER_UI,
-    'sync.use_shared_loader': USE_SHARED_LOADER,
-    'topdesk.app_password': TOPDESK_APP_PASSWORD,
-    'topdesk.enable': ENABLE_TOPDESK_INTEGRATION,
-    'topdesk.enable_sync': ENABLE_TOPDESK_SYNC,
-    'topdesk.max_items_per_sync': TOPDESK_MAX_ITEMS_PER_SYNC,
-    'topdesk.sync_interval_minutes': TOPDESK_SYNC_INTERVAL_MINUTES,
-    'topdesk.sync_scope': TOPDESK_SYNC_SCOPE,
-    'topdesk.url': TOPDESK_URL,
-    'topdesk.username': TOPDESK_USERNAME,
+    'sync_daemon.enabled': SYNC_DAEMON_ENABLED,
     'ui.acceptance_modal_button_text': ACCEPTANCE_MODAL_BUTTON_TEXT,
     'ui.acceptance_modal_content': ACCEPTANCE_MODAL_CONTENT,
     'ui.acceptance_modal_title': ACCEPTANCE_MODAL_TITLE,

@@ -293,16 +293,6 @@ class OneDriveSyncWorker(BaseSyncWorker):
         hashes = item.get('file', {}).get('hashes', {})
         return hashes.get('sha256Hash') or hashes.get('quickXorHash')
 
-    async def _download_file_content(self, file_info: Dict[str, Any]) -> bytes:
-        """Download file content from OneDrive.
-
-        Removed in cleanup commit after USE_SHARED_LOADER rollout completes —
-        loader-worker handles the download path (legacy fallback only).
-        """
-        drive_id = file_info['drive_id']
-        item_id = file_info['item']['id']
-        return await self._client.download_file(drive_id, item_id)
-
     async def _item_from_file_info(self, file_info: Dict[str, Any], access_token: str) -> Dict[str, Any]:
         item = await super()._item_from_file_info(file_info, access_token)
         item['source_descriptor'] = {
@@ -318,12 +308,6 @@ class OneDriveSyncWorker(BaseSyncWorker):
         if raw_mime:
             item['content_type'] = raw_mime
         return item
-
-    def _get_provider_storage_headers(self, item_id: str) -> dict:
-        return {
-            'OpenWebUI-Source': 'onedrive',
-            'OpenWebUI-OneDrive-Item-Id': item_id,
-        }
 
     def _get_provider_file_meta(
         self,

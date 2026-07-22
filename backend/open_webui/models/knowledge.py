@@ -308,7 +308,7 @@ SUSPENSION_TTL_DAYS = 30
 # providers registered in the sync factory. NOTE: this is the FULL set including
 # per-user providers; it is intentionally broader than
 # ``services.sync.shared_kb.SHARED_SYNC_META_KEYS`` (shared providers only).
-SYNC_PROVIDER_META_KEYS = ('onedrive_sync', 'google_drive_sync', 'confluence_sync', 'topdesk_sync')
+SYNC_PROVIDER_META_KEYS = ('onedrive_sync', 'google_drive_sync', 'confluence_sync')
 
 
 def _path_fields_from_meta(meta: Optional[dict]) -> tuple[Optional[str], Optional[str]]:
@@ -1140,7 +1140,10 @@ class KnowledgeTable:
         ``directory_id`` is the upstream directory model's placement (D2,
         adopted additively). It coexists with the fork path columns; the
         endpoint-level ``directory_id``→``relative_path`` bridge lives in the
-        routers task.
+        routers task. On re-link it is refreshed only when the caller provides
+        one: idempotent ensure-linked callers (``/integrations/submit``,
+        ``/integrations/ingest``) pass ``None`` and must not clear stage-time
+        placement — clearing or moving is ``move_file_to_directory``'s job.
         """
         async with get_async_db_context(db) as db:
             try:
@@ -1156,7 +1159,8 @@ class KnowledgeTable:
                 if existing:
                     existing.relative_path = relative_path
                     existing.source_item_id = source_item_id
-                    existing.directory_id = directory_id
+                    if directory_id is not None:
+                        existing.directory_id = directory_id
                     existing.updated_at = int(time.time())
                     await db.commit()
                     await db.refresh(existing)
