@@ -25,7 +25,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from open_webui.internal.db import get_async_session
 from open_webui.routers import sync_daemon as sync_daemon_router
-from open_webui.utils.service_auth import SyncPrincipal, get_sync_principal
+from open_webui.utils.service_auth import SyncPrincipal, get_sync_principal, get_sync_service_principal
 
 ACTING_USER_ID = 'owner-uuid-1'
 KB_ID = 'kb-uuid-1'
@@ -57,6 +57,9 @@ def client(principal, config_values):
     app = FastAPI()
     app.include_router(sync_daemon_router.router, prefix='/api/v1/sync-daemon')
     app.dependency_overrides[get_sync_principal] = lambda: principal
+    # Config reads use the service-level dependency (bearer only, no acting
+    # user) — the real bearer check is covered in test_sync_service_auth.py.
+    app.dependency_overrides[get_sync_service_principal] = lambda: None
     app.dependency_overrides[get_async_session] = lambda: None
     return TestClient(app, raise_server_exceptions=False)
 

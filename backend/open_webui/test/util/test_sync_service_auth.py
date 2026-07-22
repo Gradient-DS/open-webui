@@ -329,3 +329,37 @@ def test_knowledge_dep_no_auth_returns_401(knowledge_dep_app):
     client, _ = knowledge_dep_app
     resp = client.get('/test/sync-or-user')
     assert resp.status_code == 401
+
+
+# --- get_sync_service_principal (bearer-only, tenant-scope reads) ------------
+
+
+@pytest.fixture
+def service_app():
+    from fastapi import Depends, FastAPI
+    from fastapi.testclient import TestClient
+    from open_webui.utils.service_auth import get_sync_service_principal
+
+    app = FastAPI()
+
+    @app.get('/test/service')
+    async def _ep(_: None = Depends(get_sync_service_principal)):
+        return {'ok': True}
+
+    return TestClient(app, raise_server_exceptions=False)
+
+
+def test_service_principal_valid_bearer_no_acting_headers(service_app, sync_key):
+    """The scheduler's config fetch has no acting user — bearer alone passes."""
+    resp = service_app.get('/test/service', headers={'Authorization': f'Bearer {sync_key}'})
+    assert resp.status_code == 200
+
+
+def test_service_principal_wrong_bearer_401(service_app, sync_key):
+    resp = service_app.get('/test/service', headers={'Authorization': 'Bearer nope'})
+    assert resp.status_code == 401
+
+
+def test_service_principal_missing_bearer_401(service_app, sync_key):
+    resp = service_app.get('/test/service')
+    assert resp.status_code == 401

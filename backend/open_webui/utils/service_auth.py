@@ -253,3 +253,27 @@ async def get_sync_principal(
             detail='invalid sync bearer',
         )
     return principal
+
+
+async def get_sync_service_principal(
+    request: Request,
+    auth_token: Optional[HTTPAuthorizationCredentials] = Depends(bearer_security),
+) -> None:
+    """Authenticate the sync-daemon for tenant-scoped reads (no acting user).
+
+    The scheduler fetches provider config *before* it knows any KB owner, so
+    this dependency checks only the ``SYNC_API_KEY`` bearer. Endpoints that
+    act on a user's behalf (token broker, run summary, sync protocol) keep
+    the strict :func:`get_sync_principal` with its required acting headers.
+    """
+
+    if auth_token is None or not auth_token.credentials:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail='missing bearer token',
+        )
+    if not _sync_key_matches(auth_token.credentials):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail='invalid sync bearer',
+        )

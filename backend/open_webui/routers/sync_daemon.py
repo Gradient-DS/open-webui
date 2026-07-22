@@ -37,7 +37,7 @@ from open_webui.routers.knowledge import _verify_knowledge_write_access
 from open_webui.services.sync.events import emit_sync_progress
 from open_webui.services.sync.provider import file_id_prefix_for, get_token_manager
 from open_webui.services.sync.token_refresh import _PROVIDER_EVENT_PREFIXES
-from open_webui.utils.service_auth import SyncPrincipal, get_sync_principal
+from open_webui.utils.service_auth import SyncPrincipal, get_sync_principal, get_sync_service_principal
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -174,9 +174,13 @@ async def issue_provider_token(
 @router.get('/config/{provider}')
 async def get_provider_sync_config(
     provider: str,
-    principal: SyncPrincipal = Depends(get_sync_principal),
+    _: None = Depends(get_sync_service_principal),
 ):
-    """Per-provider admin sync config + the KB registry (D-2 scheduler feed)."""
+    """Per-provider admin sync config + the KB registry (D-2 scheduler feed).
+
+    Service-level auth (bearer only): the scheduler reads config before it
+    knows any KB owner, so there is no acting user to require here.
+    """
 
     await _require_sync_daemon_enabled()
     entry = _PROVIDERS.get(provider)
