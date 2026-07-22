@@ -1,0 +1,65 @@
+{{- if and .Values.syncDaemon.enabled .Values.networkPolicy.enabled }}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "open-webui-tenant.syncDaemon.fullname" . }}-policy
+  labels:
+    {{- include "open-webui-tenant.syncDaemon.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "open-webui-tenant.syncDaemon.selectorLabels" . | nindent 6 }}
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    # Only the tenant open-webui pod may trigger Sync-now / cancel.
+    - from:
+        - podSelector:
+            matchLabels:
+              {{- include "open-webui-tenant.openWebui.selectorLabels" . | nindent 14 }}
+      ports:
+        - protocol: TCP
+          port: {{ .Values.syncDaemon.service.port | default 8010 }}
+    # Allow scraping from the observability namespace if/when metrics are added.
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Values.observability.namespace | default "observability" }}
+      ports:
+        - protocol: TCP
+          port: {{ .Values.syncDaemon.service.port | default 8010 }}
+  egress:
+    # Tenant open-webui: the daemon's entire OWUI-facing protocol
+    # (/sync/diff, /stage, /submit, /file-status, /api/v1/sync-daemon/*).
+    - to:
+        - podSelector:
+            matchLabels:
+              {{- include "open-webui-tenant.openWebui.selectorLabels" . | nindent 14 }}
+    {{- range .Values.networkPolicy.extraEgressNamespaces }}
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ . }}
+    {{- end }}
+    # DNS
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+    # External: cloud provider APIs (Graph / Google Drive / Atlassian) and the
+    # S3 endpoint for presigned PUTs — public internet only. NO Weaviate, NO
+    # LiteLLM, NO Postgres egress (R1/§8: the daemon never embeds or writes DB).
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except:
+              - 10.0.0.0/8
+              - 172.16.0.0/12
+              - 192.168.0.0/16
+{{- end }}

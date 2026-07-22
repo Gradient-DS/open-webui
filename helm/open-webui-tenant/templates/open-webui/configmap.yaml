@@ -369,6 +369,18 @@ data:
   {{- end }}
   TENANT_NAME: {{ .Values.tenant.name | default .Release.Namespace | quote }}
 
+  # Sync-daemon (stateless per-tenant cloud sync — replaces the loader-worker).
+  # SYNC_DAEMON_ENABLED is the per-tenant switch (D-2): false → OWUI's own sync
+  # schedulers run (loader path); true → OWUI accepts the daemon principal and
+  # the daemon owns scheduling. SYNC_API_KEY is a secret (see deployment.yaml).
+  # See helm/open-webui-tenant/templates/sync-daemon/.
+  SYNC_DAEMON_ENABLED: {{ .Values.syncDaemon.owuiFlagEnabled | quote }}
+  {{- if .Values.syncDaemon.enabled }}
+  SYNC_DAEMON_URL: "http://{{ include "open-webui-tenant.syncDaemon.fullname" . }}.{{ .Release.Namespace }}.svc:{{ .Values.syncDaemon.service.port | default 8010 }}"
+  {{- else if .Values.openWebui.config.syncDaemonUrl }}
+  SYNC_DAEMON_URL: {{ .Values.openWebui.config.syncDaemonUrl | quote }}
+  {{- end }}
+
   # Distributed document pipeline (warren). When enabled, KB ingestion (upload +
   # add-file + reindex + batch) is delegated to the external pipeline instead of
   # native parse+embed; warren POSTs chunked_text back to this server's /ingest.

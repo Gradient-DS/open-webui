@@ -859,6 +859,66 @@ loaderWorker:
   securityContext: {}
 
 # -----------------------------------------------------------------------------
+# Sync-daemon (stateless per-tenant cloud sync — replaces the loader-worker)
+# -----------------------------------------------------------------------------
+# Speaks Open WebUI's /sync/diff + /sync/cleanup protocol, stages originals to
+# S3 via OWUI-presigned PUT, and drives warren. No DB, no PVC; never embeds or
+# touches Weaviate (§8 / D-4). Defaults OFF. A *dormant* deploy sets
+# `enabled: true` with `config.schedulerEnabled: false` + `owuiFlagEnabled:
+# false` (workload present + healthy, but no scheduling and OWUI still on the
+# loader path); activation flips schedulerEnabled + owuiFlagEnabled true.
+syncDaemon:
+  enabled: false          # render the daemon workload (Deployment/Service/CNP)
+  owuiFlagEnabled: false  # OWUI SYNC_DAEMON_ENABLED — the per-tenant sync switch (D-2)
+
+  image:
+    repository: ghcr.io/gradient-ds/sync-daemon
+    tag: ""
+    pullPolicy: Always
+
+  replicaCount: 1
+
+  service:
+    port: 8010
+
+  # Modest — the daemon only orchestrates (fetch → presigned PUT → submit →
+  # poll); no parsing or embedding happens here.
+  resources:
+    requests:
+      memory: "128Mi"
+      cpu: "50m"
+    limits:
+      memory: "512Mi"
+      cpu: "500m"
+
+  podSecurityContext:
+    runAsNonRoot: true
+    runAsUser: 1000
+  securityContext:
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: true
+    runAsNonRoot: true
+    runAsUser: 1000
+    capabilities:
+      drop:
+        - ALL
+
+  config:
+    logLevel: "INFO"
+    # Provider scheduler loops (SYNC_DAEMON_SCHEDULER_ENABLED). Dormant deploys
+    # set this false — the configmap references it without a Helm `default`
+    # filter, so an explicit false is honored (default would coerce it to true).
+    schedulerEnabled: true
+    itemConcurrency: 15
+    pollConcurrency: 100
+    pollIntervalSeconds: 3
+    pollMaxWaitSeconds: 1800
+    runWallClockSeconds: 14400
+    maxConcurrentRuns: 2
+    cloudDownloadTimeoutSeconds: 120
+    owuiTimeoutSeconds: 120
+
+# -----------------------------------------------------------------------------
 # Ingress
 # -----------------------------------------------------------------------------
 ingress:
@@ -916,6 +976,14 @@ secrets:
   # Distributed doc-pipeline submit bearer (matches pipeline-api inbound
   # PIPELINE_API_KEY). open-webui presents this outbound to pipeline-api.
   pipelineApiKey: ""
+
+  # Sync-daemon inbound bearer — OWUI presents this to the daemon (Sync-now /
+  # cancel). Consumed by the daemon pod only.
+  syncDaemonApiKey: ""
+
+  # Sync machine key — the daemon presents this to OWUI, and OWUI validates it
+  # inbound (SyncPrincipal). Same value, both pods.
+  syncApiKey: ""
 
   # Loader-worker job DB role password (Postgres role provisioned by the
   # post-install bootstrap Job).
@@ -982,6 +1050,8 @@ externalSecrets:
       loaderIngestApiKey: false
       pipelineApiKey: false
       loaderWorkerDbPassword: false
+      syncDaemonApiKey: false
+      syncApiKey: false
 
 # -----------------------------------------------------------------------------
 # Network Policy

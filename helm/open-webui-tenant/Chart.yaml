@@ -2,7 +2,7 @@ apiVersion: v2
 name: open-webui-tenant
 description: Open WebUI tenant deployment with PostgreSQL, Weaviate, and optional Redis (for multi-replica state coordination)
 type: application
-version: 1.0.7
+version: 1.1.0
 appVersion: "main"
 
 keywords:
