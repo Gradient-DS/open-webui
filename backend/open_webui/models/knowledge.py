@@ -7,8 +7,10 @@ import uuid
 
 from sqlalchemy import select, delete, update, or_, and_, func, cast
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import defer
 from open_webui.internal.db import Base, JSONField, get_async_db_context
 
+from open_webui.config import RAG_FILE_CONTENT_SEARCH_MAX_CHARS
 from open_webui.models.files import (
     File,
     FileMeta,
@@ -26,6 +28,7 @@ from sqlalchemy import (
     BigInteger,
     Column,
     ForeignKey,
+    Index,
     String,
     Text,
     JSON,
@@ -77,6 +80,29 @@ class KnowledgeModel(BaseModel):
     deleted_at: Optional[int] = None
 
 
+class KnowledgeDirectory(Base):
+    # Upstream directory model (v0.10.2). Adopted additively per D2: the
+    # fork's path-based subfolder system (relative_path/source_item_id on
+    # knowledge_file) keeps driving the product tree UI during the merge; this
+    # table + directory_id FK are the future convergence target.
+    __tablename__ = 'knowledge_directory'
+
+    id = Column(Text, unique=True, primary_key=True)
+    knowledge_id = Column(Text, ForeignKey('knowledge.id', ondelete='CASCADE'), nullable=False)
+    parent_id = Column(Text, ForeignKey('knowledge_directory.id', ondelete='CASCADE'), nullable=True)
+    name = Column(Text, nullable=False)
+    user_id = Column(Text, nullable=False)
+
+    created_at = Column(BigInteger, nullable=False)
+    updated_at = Column(BigInteger, nullable=False)
+
+    __table_args__ = (
+        UniqueConstraint('knowledge_id', 'parent_id', 'name', name='uq_knowledge_directory_knowledge_parent_name'),
+        Index('ix_knowledge_directory_knowledge_id', 'knowledge_id'),
+        Index('ix_knowledge_directory_parent_id', 'parent_id'),
+    )
+
+
 class KnowledgeFile(Base):
     __tablename__ = 'knowledge_file'
 
@@ -84,6 +110,10 @@ class KnowledgeFile(Base):
 
     knowledge_id = Column(Text, ForeignKey('knowledge.id', ondelete='CASCADE'), nullable=False)
     file_id = Column(Text, ForeignKey('file.id', ondelete='CASCADE'), nullable=False)
+    # Upstream directory FK — adopted additively (D2). Coexists with the fork's
+    # denormalized path columns below; SET NULL so deleting a directory leaves
+    # the file linked at the KB root.
+    directory_id = Column(Text, ForeignKey('knowledge_directory.id', ondelete='SET NULL'), nullable=True)
     user_id = Column(Text, nullable=False)
 
     # Denormalized path columns mirrored from ``file.meta`` (see
@@ -100,13 +130,17 @@ class KnowledgeFile(Base):
     created_at = Column(BigInteger, nullable=False)
     updated_at = Column(BigInteger, nullable=False)
 
-    __table_args__ = (UniqueConstraint('knowledge_id', 'file_id', name='uq_knowledge_file_knowledge_file'),)
+    __table_args__ = (
+        UniqueConstraint('knowledge_id', 'file_id', name='uq_knowledge_file_knowledge_file'),
+        Index('ix_knowledge_file_directory_id', 'directory_id'),
+    )
 
 
 class KnowledgeFileModel(BaseModel):
     id: str
     knowledge_id: str
     file_id: str
+    directory_id: Optional[str] = None
     user_id: str
 
     relative_path: Optional[str] = None
@@ -116,6 +150,24 @@ class KnowledgeFileModel(BaseModel):
     updated_at: int  # timestamp in epoch
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class KnowledgeDirectoryModel(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    knowledge_id: str
+    parent_id: Optional[str] = None
+    name: str
+    user_id: str
+
+    created_at: int  # timestamp in epoch
+    updated_at: int  # timestamp in epoch
+
+
+class KnowledgeDirectoryForm(BaseModel):
+    name: str
+    parent_id: Optional[str] = None
 
 
 ####################
@@ -175,6 +227,8 @@ class KnowledgeListResponse(BaseModel):
 
 class KnowledgeFileListResponse(BaseModel):
     items: list[Union[FileUserResponse, FileUserMetadataResponse]]
+    directories: list[KnowledgeDirectoryModel] = Field(default_factory=list)
+    breadcrumbs: list[KnowledgeDirectoryModel] = Field(default_factory=list)
     total: int
 
 
@@ -481,6 +535,18 @@ class KnowledgeTable:
                     if type_filter:
                         stmt = stmt.filter(Knowledge.type == type_filter)
 
+                    # Upstream external-knowledge source filter (adopted additively).
+                    source = filter.get('source')
+                    if source == 'external':
+                        stmt = stmt.filter(Knowledge.meta['source'].as_string() == 'external')
+                    elif source == 'local':
+                        stmt = stmt.filter(
+                            or_(
+                                Knowledge.meta.is_(None),
+                                Knowledge.meta['source'].as_string() != 'external',
+                            )
+                        )
+
                     stmt = AccessGrants.has_permission_filter(
                         db=db,
                         query=stmt,
@@ -565,7 +631,7 @@ class KnowledgeTable:
 
                 # Only return files from local KBs — cloud KB files don't have
                 # per-file vector collections and can't be attached individually
-                query = query.filter(Knowledge.type == 'local')
+                stmt = stmt.filter(Knowledge.type == 'local')
 
                 # Apply access-control directly to the joined query
                 stmt = AccessGrants.has_permission_filter(
@@ -814,14 +880,23 @@ class KnowledgeTable:
         metadata_only: bool = False,
         db: Optional[AsyncSession] = None,
     ) -> KnowledgeFileListResponse:
+        """Paginated per-KB file search.
+
+        Union of the fork's ``metadata_only`` slim path (projects only the
+        columns the file-list UI needs; ``added_at`` from the join row) and
+        upstream's directory model + perf trio (``directory_id`` scoping,
+        ``include_content`` substr search that dodges the Postgres large-content
+        memory blowup #24670, and ``defer(File.data)`` on the full path so the
+        heavy content blob is never de-TOASTed). ``directory_id`` /
+        ``include_content`` ride inside ``filter`` (D3 API union).
+        """
         try:
             async with get_async_db_context(db) as db:
                 if metadata_only:
                     # Project only the columns we need — the heavy data.content
                     # blob is NEVER loaded into Python.
                     # cast(File.data['key'], Text) is the cross-DB JSON text
-                    # extraction idiom already proven in this file (line 621
-                    # uses it for the content WHERE filter).  .astext is
+                    # extraction idiom already proven in this file. .astext is
                     # Postgres-only; cast(..., Text) works on both SQLite and
                     # Postgres.
                     stmt = (
@@ -850,6 +925,16 @@ class KnowledgeTable:
                         .filter(KnowledgeFile.knowledge_id == knowledge_id)
                     )
 
+                # Upstream directory scoping (adopted additively). A truthy
+                # directory_id scopes to that directory; an explicit None key
+                # scopes to the KB root; an absent key = no directory filter.
+                directory_id = filter.get('directory_id') if filter else None
+                has_directory_filter = bool(filter) and 'directory_id' in filter
+                if directory_id:
+                    stmt = stmt.filter(KnowledgeFile.directory_id == directory_id)
+                elif has_directory_filter:
+                    stmt = stmt.filter(KnowledgeFile.directory_id.is_(None))
+
                 # Default sort: filename ascending (alphabetical)
                 primary_sort = File.filename.asc()
 
@@ -864,14 +949,27 @@ class KnowledgeTable:
                         .join(File, File.id == KnowledgeFile.file_id)
                         .filter(KnowledgeFile.knowledge_id == knowledge_id)
                     )
+                    if directory_id:
+                        count_stmt = count_stmt.filter(KnowledgeFile.directory_id == directory_id)
+                    elif has_directory_filter:
+                        count_stmt = count_stmt.filter(KnowledgeFile.directory_id.is_(None))
 
                 if filter:
                     query_key = filter.get('query')
                     if query_key:
-                        content_filter = or_(
-                            File.filename.ilike(f'%{query_key}%'),
-                            cast(File.data['content'], Text).ilike(f'%{query_key}%'),
-                        )
+                        if filter.get('include_content'):
+                            # Use ->> (as_string) + substr instead of
+                            # CAST(-> AS TEXT) to avoid PostgreSQL "invalid memory
+                            # alloc request size" on large extracted-content rows
+                            # (#24670).
+                            content_text = File.data['content'].as_string()
+                            content_text = func.substr(content_text, 1, RAG_FILE_CONTENT_SEARCH_MAX_CHARS)
+                            content_filter = or_(
+                                File.filename.ilike(f'%{query_key}%'),
+                                content_text.ilike(f'%{query_key}%'),
+                            )
+                        else:
+                            content_filter = File.filename.ilike(f'%{query_key}%')
                         stmt = stmt.filter(content_filter)
                         # Content search still needs the File join + data filter
                         # on the count — this is the one case where touching data
@@ -917,6 +1015,11 @@ class KnowledgeTable:
                 if limit:
                     stmt = stmt.limit(limit)
 
+                if not metadata_only:
+                    # Perf: never de-TOAST the heavy data.content blob on the
+                    # full path — no consumer of this method reads File.data.
+                    stmt = stmt.options(defer(File.data))
+
                 result = await db.execute(stmt)
                 items = result.all()
 
@@ -960,15 +1063,35 @@ class KnowledgeTable:
                         )
                 else:
                     for file, user, added_at in items:
+                        # File.data is deferred — construct explicitly so we never
+                        # touch (and lazy-load) the deferred column in async.
                         files.append(
                             FileUserResponse(
-                                **FileModel.model_validate(file).model_dump(),
+                                id=file.id,
+                                user_id=file.user_id,
+                                hash=file.hash,
+                                filename=file.filename,
+                                meta=file.meta,
+                                created_at=file.created_at,
+                                updated_at=file.updated_at,
                                 user=(UserResponse(**UserModel.model_validate(user).model_dump()) if user else None),
                                 added_at=added_at,
                             )
                         )
 
-                return KnowledgeFileListResponse(items=files, total=total)
+                return KnowledgeFileListResponse(
+                    items=files,
+                    directories=await self.get_directories(
+                        knowledge_id,
+                        parent_id=filter.get('directory_id') if filter else None,
+                        db=db,
+                    ),
+                    breadcrumbs=await self.get_directory_breadcrumbs(
+                        filter.get('directory_id') if filter else None,
+                        db=db,
+                    ),
+                    total=total,
+                )
         except Exception as e:
             print(e)
             return KnowledgeFileListResponse(items=[], total=0)
@@ -1000,6 +1123,7 @@ class KnowledgeTable:
         knowledge_id: str,
         file_id: str,
         user_id: str,
+        directory_id: Optional[str] = None,
         db: Optional[AsyncSession] = None,
     ) -> Optional[KnowledgeFileModel]:
         """Link a file to a KB, mirroring its path fields onto the join row.
@@ -1012,6 +1136,11 @@ class KnowledgeTable:
         from the ``file`` row here so every caller (router add-file, cloud-sync
         stub + legacy paths, ``/ingest`` create) populates them consistently
         without threading ``meta`` through their call sites.
+
+        ``directory_id`` is the upstream directory model's placement (D2,
+        adopted additively). It coexists with the fork path columns; the
+        endpoint-level ``directory_id``→``relative_path`` bridge lives in the
+        routers task.
         """
         async with get_async_db_context(db) as db:
             try:
@@ -1027,6 +1156,7 @@ class KnowledgeTable:
                 if existing:
                     existing.relative_path = relative_path
                     existing.source_item_id = source_item_id
+                    existing.directory_id = directory_id
                     existing.updated_at = int(time.time())
                     await db.commit()
                     await db.refresh(existing)
@@ -1036,6 +1166,7 @@ class KnowledgeTable:
                     id=str(uuid.uuid4()),
                     knowledge_id=knowledge_id,
                     file_id=file_id,
+                    directory_id=directory_id,
                     user_id=user_id,
                     relative_path=relative_path,
                     source_item_id=source_item_id,
@@ -1504,11 +1635,18 @@ class KnowledgeTable:
         except Exception:
             return False
 
-    async def reset_knowledge_by_id(self, id: str, db: Optional[AsyncSession] = None) -> Optional[KnowledgeModel]:
+    async def reset_knowledge_by_id(
+        self, id: str, include_directories: bool = True, db: Optional[AsyncSession] = None
+    ) -> Optional[KnowledgeModel]:
         try:
             async with get_async_db_context(db) as db:
                 # Delete all knowledge_file entries for this knowledge_id
                 await db.execute(delete(KnowledgeFile).filter_by(knowledge_id=id))
+
+                # Delete all directories if requested (upstream directory model)
+                if include_directories:
+                    await db.execute(delete(KnowledgeDirectory).filter_by(knowledge_id=id))
+
                 await db.commit()
 
                 # Update the knowledge entry's updated_at timestamp
@@ -1767,6 +1905,278 @@ class KnowledgeTable:
                 return None
         except Exception:
             return None
+
+    # ── Directory CRUD (upstream v0.10.2 directory model, adopted additively) ──
+
+    async def create_directory(
+        self,
+        knowledge_id: str,
+        name: str,
+        user_id: str,
+        parent_id: Optional[str] = None,
+        db: Optional[AsyncSession] = None,
+    ) -> Optional[KnowledgeDirectoryModel]:
+        async with get_async_db_context(db) as db:
+            try:
+                now = int(time.time())
+                directory = KnowledgeDirectory(
+                    id=str(uuid.uuid4()),
+                    knowledge_id=knowledge_id,
+                    parent_id=parent_id,
+                    name=name,
+                    user_id=user_id,
+                    created_at=now,
+                    updated_at=now,
+                )
+                db.add(directory)
+                await db.commit()
+                await db.refresh(directory)
+                return KnowledgeDirectoryModel.model_validate(directory)
+            except Exception as e:
+                log.exception(e)
+                return None
+
+    async def get_directories(
+        self,
+        knowledge_id: str,
+        parent_id: Optional[str] = None,
+        db: Optional[AsyncSession] = None,
+    ) -> list[KnowledgeDirectoryModel]:
+        """List directories at a given level (parent_id=None for root)."""
+        async with get_async_db_context(db) as db:
+            stmt = select(KnowledgeDirectory).filter(KnowledgeDirectory.knowledge_id == knowledge_id)
+            if parent_id:
+                stmt = stmt.filter(KnowledgeDirectory.parent_id == parent_id)
+            else:
+                stmt = stmt.filter(KnowledgeDirectory.parent_id.is_(None))
+
+            stmt = stmt.order_by(KnowledgeDirectory.name.asc())
+            result = await db.execute(stmt)
+            return [KnowledgeDirectoryModel.model_validate(d) for d in result.scalars().all()]
+
+    async def get_all_directories(
+        self,
+        knowledge_id: str,
+        db: Optional[AsyncSession] = None,
+    ) -> list[KnowledgeDirectoryModel]:
+        """Get ALL directories for a KB (no parent filter). Used for tree building."""
+        async with get_async_db_context(db) as db:
+            stmt = (
+                select(KnowledgeDirectory)
+                .filter(KnowledgeDirectory.knowledge_id == knowledge_id)
+                .order_by(KnowledgeDirectory.name.asc())
+            )
+            result = await db.execute(stmt)
+            return [KnowledgeDirectoryModel.model_validate(d) for d in result.scalars().all()]
+
+    async def get_files_with_directory_ids(
+        self,
+        knowledge_id: str,
+        db: Optional[AsyncSession] = None,
+    ) -> list[tuple[FileModel, Optional[str]]]:
+        """Get all files in a KB with their directory_id from KnowledgeFile."""
+        try:
+            async with get_async_db_context(db) as db:
+                result = await db.execute(
+                    select(File, KnowledgeFile.directory_id)
+                    .join(KnowledgeFile, File.id == KnowledgeFile.file_id)
+                    .filter(KnowledgeFile.knowledge_id == knowledge_id)
+                )
+                return [(FileModel.model_validate(file), dir_id) for file, dir_id in result.all()]
+        except Exception:
+            return []
+
+    async def get_directory_by_id(
+        self, directory_id: str, db: Optional[AsyncSession] = None
+    ) -> Optional[KnowledgeDirectoryModel]:
+        async with get_async_db_context(db) as db:
+            result = await db.execute(select(KnowledgeDirectory).filter_by(id=directory_id))
+            directory = result.scalars().first()
+            return KnowledgeDirectoryModel.model_validate(directory) if directory else None
+
+    async def get_directory_breadcrumbs(
+        self,
+        directory_id: Optional[str],
+        db: Optional[AsyncSession] = None,
+    ) -> list[KnowledgeDirectoryModel]:
+        """Walk up the parent chain to build breadcrumbs (root first)."""
+        if not directory_id:
+            return []
+
+        async with get_async_db_context(db) as db:
+            breadcrumbs = []
+            current_id = directory_id
+            seen = set()
+
+            while current_id and current_id not in seen:
+                seen.add(current_id)
+                result = await db.execute(select(KnowledgeDirectory).filter_by(id=current_id))
+                directory = result.scalars().first()
+                if not directory:
+                    break
+                breadcrumbs.append(KnowledgeDirectoryModel.model_validate(directory))
+                current_id = directory.parent_id
+
+            breadcrumbs.reverse()  # root first
+            return breadcrumbs
+
+    async def rename_directory(
+        self,
+        directory_id: str,
+        name: str,
+        db: Optional[AsyncSession] = None,
+    ) -> Optional[KnowledgeDirectoryModel]:
+        async with get_async_db_context(db) as db:
+            try:
+                await db.execute(
+                    update(KnowledgeDirectory).filter_by(id=directory_id).values(name=name, updated_at=int(time.time()))
+                )
+                await db.commit()
+                return await self.get_directory_by_id(directory_id, db=db)
+            except Exception as e:
+                log.exception(e)
+                return None
+
+    async def move_directory(
+        self,
+        directory_id: str,
+        new_parent_id: Optional[str],
+        db: Optional[AsyncSession] = None,
+    ) -> Optional[KnowledgeDirectoryModel]:
+        """Move a directory to a new parent, with cycle detection."""
+        async with get_async_db_context(db) as db:
+            try:
+                # Cycle detection: walk up from new_parent_id to ensure
+                # we don't encounter directory_id
+                if new_parent_id:
+                    current = new_parent_id
+                    seen = set()
+                    while current and current not in seen:
+                        if current == directory_id:
+                            return None  # Would create a cycle
+                        seen.add(current)
+                        result = await db.execute(select(KnowledgeDirectory.parent_id).filter_by(id=current))
+                        row = result.first()
+                        current = row[0] if row else None
+
+                await db.execute(
+                    update(KnowledgeDirectory)
+                    .filter_by(id=directory_id)
+                    .values(parent_id=new_parent_id, updated_at=int(time.time()))
+                )
+                await db.commit()
+                return await self.get_directory_by_id(directory_id, db=db)
+            except Exception as e:
+                log.exception(e)
+                return None
+
+    async def update_directory(
+        self,
+        directory_id: str,
+        name: Optional[str] = None,
+        parent_id: Optional[str] = '__unset__',
+        db: Optional[AsyncSession] = None,
+    ) -> Optional[KnowledgeDirectoryModel]:
+        """Update directory name and/or parent. Pass parent_id=None to move to root."""
+        # Handle move if parent_id is being changed
+        if parent_id != '__unset__':
+            result = await self.move_directory(directory_id, parent_id, db=db)
+            if result is None:
+                return None  # Cycle detected or error
+
+        if name is not None:
+            return await self.rename_directory(directory_id, name, db=db)
+
+        return await self.get_directory_by_id(directory_id, db=db)
+
+    async def delete_directory(
+        self,
+        directory_id: str,
+        move_files_to_parent: bool = True,
+        db: Optional[AsyncSession] = None,
+    ) -> bool:
+        """
+        Delete a directory.
+        - If move_files_to_parent=True: files move to parent dir (or root)
+        - If move_files_to_parent=False: files are also deleted
+        """
+        async with get_async_db_context(db) as db:
+            try:
+                # Get the directory to find its parent
+                result = await db.execute(select(KnowledgeDirectory).filter_by(id=directory_id))
+                directory = result.scalars().first()
+                if not directory:
+                    return False
+
+                parent_id = directory.parent_id
+
+                if move_files_to_parent:
+                    # Move files in this directory to its parent (or root)
+                    await db.execute(
+                        update(KnowledgeFile).filter_by(directory_id=directory_id).values(directory_id=parent_id)
+                    )
+                    # Recursively move files from all subdirectories too
+                    await self._move_files_from_subtree(directory_id, parent_id, db=db)
+                else:
+                    # Delete files in this directory and all subdirectories
+                    await self._delete_files_in_subtree(directory_id, db=db)
+
+                # CASCADE on parent_id will handle deleting subdirectories
+                await db.execute(delete(KnowledgeDirectory).filter_by(id=directory_id))
+                await db.commit()
+                return True
+            except Exception as e:
+                log.exception(e)
+                return False
+
+    async def _move_files_from_subtree(
+        self,
+        directory_id: str,
+        target_directory_id: Optional[str],
+        db: AsyncSession,
+    ) -> None:
+        """Recursively move all files from a directory subtree to the target."""
+        result = await db.execute(select(KnowledgeDirectory.id).filter_by(parent_id=directory_id))
+        child_ids = [row[0] for row in result.all()]
+
+        for child_id in child_ids:
+            await db.execute(
+                update(KnowledgeFile).filter_by(directory_id=child_id).values(directory_id=target_directory_id)
+            )
+            await self._move_files_from_subtree(child_id, target_directory_id, db=db)
+
+    async def _delete_files_in_subtree(
+        self,
+        directory_id: str,
+        db: AsyncSession,
+    ) -> None:
+        """Recursively delete all files from a directory subtree."""
+        await db.execute(delete(KnowledgeFile).filter_by(directory_id=directory_id))
+        result = await db.execute(select(KnowledgeDirectory.id).filter_by(parent_id=directory_id))
+        child_ids = [row[0] for row in result.all()]
+        for child_id in child_ids:
+            await self._delete_files_in_subtree(child_id, db=db)
+
+    async def move_file_to_directory(
+        self,
+        knowledge_id: str,
+        file_id: str,
+        directory_id: Optional[str] = None,
+        db: Optional[AsyncSession] = None,
+    ) -> bool:
+        """Move a file to a different directory within the same KB."""
+        async with get_async_db_context(db) as db:
+            try:
+                await db.execute(
+                    update(KnowledgeFile)
+                    .filter_by(knowledge_id=knowledge_id, file_id=file_id)
+                    .values(directory_id=directory_id, updated_at=int(time.time()))
+                )
+                await db.commit()
+                return True
+            except Exception as e:
+                log.exception(e)
+                return False
 
 
 Knowledges = KnowledgeTable()

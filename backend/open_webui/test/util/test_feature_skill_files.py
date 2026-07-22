@@ -90,7 +90,10 @@ def _run_forwarding_conditional(flag: bool, resolve_fn) -> dict:
         skills = [SimpleNamespace(id='s1')]
         return await resolve_fn(skills) if flag else {}
 
-    return asyncio.get_event_loop().run_until_complete(_run())
+    # asyncio.run, not get_event_loop().run_until_complete — pytest-asyncio
+    # tests earlier in the session leave MainThread without a current loop,
+    # which makes get_event_loop() raise (ordering-dependent failure).
+    return asyncio.run(_run())
 
 
 class TestForwardingGate:

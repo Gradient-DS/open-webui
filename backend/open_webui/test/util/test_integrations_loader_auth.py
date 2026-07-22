@@ -13,7 +13,6 @@ test exercises only the wiring this plan actually changed.
 from __future__ import annotations
 
 import json
-from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -41,21 +40,26 @@ def loader_principal(acting_user_id):
 
 
 @pytest.fixture
-def app(loader_principal):
+def app(loader_principal, monkeypatch):
     """FastAPI app with the integrations router and the auth dep overridden."""
     app = FastAPI()
     app.include_router(integrations_router.router, prefix='/api/v1/integrations')
 
-    # Provide the minimum app.state.config that ingest_documents reads.
-    app.state.config = SimpleNamespace(
-        INTEGRATION_PROVIDERS={
-            'onedrive': {
-                'max_documents_per_request': 50,
-                'max_files_per_kb': 1000,
-                'custom_metadata_fields': [],
-            }
-        },
-    )
+    # ingest_documents reads INTEGRATION_PROVIDERS via
+    # ``await Config.get('integrations.providers')``; patch the per-key read
+    # so the tests stay hermetic — no config DB involved.
+    providers = {
+        'onedrive': {
+            'max_documents_per_request': 50,
+            'max_files_per_kb': 1000,
+            'custom_metadata_fields': [],
+        }
+    }
+
+    async def fake_get(key, default=None):
+        return {'integrations.providers': providers}.get(key, default)
+
+    monkeypatch.setattr(integrations_router.Config, 'get', staticmethod(fake_get))
 
     # Inject the LoaderPrincipal directly — bypass the bearer/header check
     # (covered by test_service_auth.py) so this test focuses on user_id flow.
@@ -215,7 +219,6 @@ async def test_process_chunked_text_uploads_bytes_and_sets_path(loader_principal
         return file_obj.read(), f's3://bucket/{filename}'
 
     fake_request = MagicMock()
-    fake_request.app.state.config = SimpleNamespace()
 
     upload = UploadFile(filename='doc-A', file=BytesIO(b'%PDF-1.7\nfake'))
     doc = integrations_router.ChunkedTextDocument(
@@ -257,7 +260,6 @@ async def test_process_chunked_text_without_original_file_keeps_path_empty(actin
         return 'created'
 
     fake_request = MagicMock()
-    fake_request.app.state.config = SimpleNamespace()
     doc = integrations_router.ChunkedTextDocument(
         source_id='doc-A', filename='a.txt', content_type='text/plain', chunks=['hi']
     )

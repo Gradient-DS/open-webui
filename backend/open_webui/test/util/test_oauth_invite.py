@@ -31,7 +31,7 @@ from sqlalchemy.pool import StaticPool
 from open_webui.models import invites as invites_module
 from open_webui.models.invites import Invite, Invites
 from open_webui.utils import oauth as oauth_module
-from open_webui.utils.oauth import OAuthManager, auth_manager_config
+from open_webui.utils.oauth import OAuthManager
 
 
 @pytest_asyncio.fixture
@@ -96,11 +96,13 @@ async def _make_invite(
 def oauth_manager_with_mocks(monkeypatch):
     """Construct an ``OAuthManager`` with the heavy dependencies mocked.
 
-    Yields a tuple of ``(manager, provisioned, set_userinfo)``:
+    Yields a tuple of ``(manager, provisioned, set_userinfo, auth_config)``:
       * manager: the OAuthManager instance
       * provisioned: a list that the mocked ``Auths.insert_new_auth``
         appends provisioned users to (so tests can assert role/name)
       * set_userinfo: callable to seed the userinfo claims for a test
+      * auth_config: the mutable ``SimpleNamespace`` returned by the patched
+        ``get_oauth_runtime_config`` — tests override individual fields on it
     """
     # Avoid running OAUTH_PROVIDERS' register callbacks in __init__.
     monkeypatch.setattr(oauth_module, 'OAUTH_PROVIDERS', {})
@@ -124,28 +126,37 @@ def oauth_manager_with_mocks(monkeypatch):
     fake_client.userinfo = AsyncMock(side_effect=lambda token: dict(userinfo))
     manager._clients['microsoft'] = fake_client
 
-    # Default auth manager config — tests override individual fields.
-    auth_manager_config.OAUTH_EMAIL_CLAIM = 'email'
-    auth_manager_config.OAUTH_USERNAME_CLAIM = 'name'
-    auth_manager_config.OAUTH_SUB_CLAIM = 'sub'
-    auth_manager_config.OAUTH_PICTURE_CLAIM = ''
-    auth_manager_config.OAUTH_ROLES_CLAIM = ''
-    auth_manager_config.OAUTH_GROUPS_CLAIM = ''
-    auth_manager_config.OAUTH_ALLOWED_ROLES = ['user', 'admin']
-    auth_manager_config.OAUTH_ADMIN_ROLES = ['admin']
-    auth_manager_config.OAUTH_ALLOWED_DOMAINS = ['*']
-    auth_manager_config.ENABLE_OAUTH_SIGNUP = True
-    auth_manager_config.OAUTH_INVITE_REQUIRED = False
-    auth_manager_config.OAUTH_MERGE_ACCOUNTS_BY_EMAIL = False
-    auth_manager_config.ENABLE_OAUTH_ROLE_MANAGEMENT = False
-    auth_manager_config.ENABLE_OAUTH_GROUP_MANAGEMENT = False
-    auth_manager_config.OAUTH_UPDATE_NAME_ON_LOGIN = False
-    auth_manager_config.OAUTH_UPDATE_EMAIL_ON_LOGIN = False
-    auth_manager_config.OAUTH_UPDATE_PICTURE_ON_LOGIN = False
-    auth_manager_config.OAUTH_AUDIENCE = ''
-    auth_manager_config.WEBHOOK_URL = ''
-    auth_manager_config.JWT_EXPIRES_IN = '1h'
-    auth_manager_config.DEFAULT_USER_ROLE = 'user'
+    # Default OAuth runtime config — tests override individual fields on the
+    # returned namespace. Post-merge the module-level ``auth_manager_config``
+    # global is gone: ``handle_callback`` reads config once per call via
+    # ``await get_oauth_runtime_config()`` (backed by the per-key Config API,
+    # with OAUTH_INVITE_REQUIRED now at 'auth.invite_required'). We patch that
+    # helper to hand back a single mutable ``SimpleNamespace`` so tests can
+    # tweak fields before driving the callback.
+    auth_config = SimpleNamespace(
+        OAUTH_EMAIL_CLAIM='email',
+        OAUTH_USERNAME_CLAIM='name',
+        OAUTH_SUB_CLAIM='sub',
+        OAUTH_PICTURE_CLAIM='',
+        OAUTH_ROLES_CLAIM='',
+        OAUTH_GROUPS_CLAIM='',
+        OAUTH_ALLOWED_ROLES=['user', 'admin'],
+        OAUTH_ADMIN_ROLES=['admin'],
+        OAUTH_ALLOWED_DOMAINS=['*'],
+        ENABLE_OAUTH_SIGNUP=True,
+        OAUTH_INVITE_REQUIRED=False,
+        OAUTH_MERGE_ACCOUNTS_BY_EMAIL=False,
+        ENABLE_OAUTH_ROLE_MANAGEMENT=False,
+        ENABLE_OAUTH_GROUP_MANAGEMENT=False,
+        OAUTH_UPDATE_NAME_ON_LOGIN=False,
+        OAUTH_UPDATE_EMAIL_ON_LOGIN=False,
+        OAUTH_UPDATE_PICTURE_ON_LOGIN=False,
+        OAUTH_AUDIENCE='',
+        WEBHOOK_URL='',
+        JWT_EXPIRES_IN='1h',
+        DEFAULT_USER_ROLE='user',
+    )
+    monkeypatch.setattr(oauth_module, 'get_oauth_runtime_config', AsyncMock(return_value=auth_config))
 
     # Mock all the DB-touching helpers handle_callback uses except Invites.
     provisioned: list = []
@@ -175,7 +186,7 @@ def oauth_manager_with_mocks(monkeypatch):
     monkeypatch.setattr(oauth_module.OAuthSessions, 'create_session', AsyncMock(return_value=None))
     monkeypatch.setattr(oauth_module.OAuthSessions, 'delete_session_by_id', AsyncMock())
 
-    return manager, provisioned, set_userinfo
+    return manager, provisioned, set_userinfo, auth_config
 
 
 def _fake_request():
@@ -195,7 +206,7 @@ def _fake_response():
 
 @pytest.mark.asyncio
 async def test_oauth_signup_consumes_pending_invite_and_uses_invite_role(db_session, oauth_manager_with_mocks):
-    manager, provisioned, set_userinfo = oauth_manager_with_mocks
+    manager, provisioned, set_userinfo, auth_config = oauth_manager_with_mocks
 
     await _make_invite(db_session, email='alice@example.com', role='admin', name='Alice')
 
@@ -215,8 +226,8 @@ async def test_oauth_signup_consumes_pending_invite_and_uses_invite_role(db_sess
 
 @pytest.mark.asyncio
 async def test_oauth_signup_with_invite_required_and_no_invite_denied(db_session, oauth_manager_with_mocks):
-    manager, provisioned, set_userinfo = oauth_manager_with_mocks
-    auth_manager_config.OAUTH_INVITE_REQUIRED = True
+    manager, provisioned, set_userinfo, auth_config = oauth_manager_with_mocks
+    auth_config.OAUTH_INVITE_REQUIRED = True
 
     set_userinfo(sub='oauth-sub-1', email='nobody@example.com', name='Nobody')
 
@@ -229,8 +240,8 @@ async def test_oauth_signup_with_invite_required_and_no_invite_denied(db_session
 
 @pytest.mark.asyncio
 async def test_invite_bypasses_domain_allowlist(db_session, oauth_manager_with_mocks):
-    manager, provisioned, set_userinfo = oauth_manager_with_mocks
-    auth_manager_config.OAUTH_ALLOWED_DOMAINS = ['soev.ai']
+    manager, provisioned, set_userinfo, auth_config = oauth_manager_with_mocks
+    auth_config.OAUTH_ALLOWED_DOMAINS = ['soev.ai']
 
     await _make_invite(db_session, email='external@other.com', role='user')
     set_userinfo(sub='oauth-sub-1', email='external@other.com', name='External')
@@ -245,8 +256,8 @@ async def test_invite_bypasses_domain_allowlist(db_session, oauth_manager_with_m
 async def test_no_invite_no_signup_falls_back_to_domain_check(db_session, oauth_manager_with_mocks):
     """Existing behavior preserved: domain allowlist still denies non-matching
     emails when there's no invite and ``OAUTH_INVITE_REQUIRED`` is off."""
-    manager, provisioned, set_userinfo = oauth_manager_with_mocks
-    auth_manager_config.OAUTH_ALLOWED_DOMAINS = ['soev.ai']
+    manager, provisioned, set_userinfo, auth_config = oauth_manager_with_mocks
+    auth_config.OAUTH_ALLOWED_DOMAINS = ['soev.ai']
 
     set_userinfo(sub='oauth-sub-1', email='outsider@other.com', name='Outsider')
 
@@ -258,8 +269,8 @@ async def test_no_invite_no_signup_falls_back_to_domain_check(db_session, oauth_
 @pytest.mark.asyncio
 async def test_expired_invite_falls_through_to_domain_check(db_session, oauth_manager_with_mocks):
     """An expired invite should be treated as if no invite exists."""
-    manager, provisioned, set_userinfo = oauth_manager_with_mocks
-    auth_manager_config.OAUTH_INVITE_REQUIRED = True
+    manager, provisioned, set_userinfo, auth_config = oauth_manager_with_mocks
+    auth_config.OAUTH_INVITE_REQUIRED = True
 
     await _make_invite(
         db_session,
@@ -277,8 +288,8 @@ async def test_expired_invite_falls_through_to_domain_check(db_session, oauth_ma
 @pytest.mark.asyncio
 async def test_oauth_role_invite_takes_precedence_over_default(db_session, oauth_manager_with_mocks):
     """Invite-supplied admin role should override the default role at signup."""
-    manager, provisioned, set_userinfo = oauth_manager_with_mocks
-    auth_manager_config.DEFAULT_USER_ROLE = 'user'
+    manager, provisioned, set_userinfo, auth_config = oauth_manager_with_mocks
+    auth_config.DEFAULT_USER_ROLE = 'user'
 
     await _make_invite(db_session, email='admin@example.com', role='admin')
     set_userinfo(sub='oauth-sub-1', email='admin@example.com', name='Admin User')

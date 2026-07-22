@@ -12,6 +12,7 @@ from langchain_core.documents import Document
 from pydantic import BaseModel
 
 from open_webui.config import KNOWLEDGE_MAX_FILE_COUNT
+from open_webui.models.config import Config
 from open_webui.models.file_attachments import FileAttachmentForm, FileAttachments
 from open_webui.models.files import FileForm, Files
 from open_webui.models.knowledge import KnowledgeForm, Knowledges
@@ -118,7 +119,7 @@ class SubmitRequest(BaseModel):
 # --- Helper Functions ---
 
 
-def get_integration_provider(request: Request, user) -> tuple[str, dict]:
+async def get_integration_provider(request: Request, user) -> tuple[str, dict]:
     """Resolve the integration provider from the authenticated service account."""
     provider_slug = (user.info or {}).get('integration_provider')
     if not provider_slug:
@@ -131,7 +132,7 @@ def get_integration_provider(request: Request, user) -> tuple[str, dict]:
                 'authenticate with a different sk- key.'
             ),
         )
-    providers = request.app.state.config.INTEGRATION_PROVIDERS
+    providers = await Config.get('integrations.providers')
     if not providers:
         raise HTTPException(
             status_code=403,
@@ -344,38 +345,67 @@ async def _delete_old_vectors(knowledge_id: str, file_id: str):
         log.warning(f'Failed to delete old vectors for {file_id}, proceeding with insert')
 
 
-def _get_loader_kwargs(request: Request) -> dict:
+async def _get_loader_kwargs(request: Request) -> dict:
     """Build kwargs dict for Loader() from app config."""
-    config = request.app.state.config
+    config = await Config.get_many(
+        'rag.datalab_marker_api_key',
+        'rag.datalab_marker_api_base_url',
+        'rag.datalab_marker_additional_config',
+        'rag.datalab_marker_skip_cache',
+        'rag.datalab_marker_force_ocr',
+        'rag.datalab_marker_paginate',
+        'rag.datalab_marker_strip_existing_ocr',
+        'rag.datalab_marker_disable_image_extraction',
+        'rag.datalab_marker_format_lines',
+        'rag.datalab_marker_use_llm',
+        'rag.datalab_marker_output_format',
+        'rag.external_document_loader_url',
+        'rag.external_document_loader_api_key',
+        'rag.tika_server_url',
+        'rag.docling_server_url',
+        'rag.docling_api_key',
+        'rag.docling_params',
+        'rag.pdf_extract_images',
+        'rag.document_intelligence_endpoint',
+        'rag.document_intelligence_key',
+        'rag.document_intelligence_model',
+        'rag.mistral_ocr_api_base_url',
+        'rag.mistral_ocr_api_key',
+        'rag.mineru_api_mode',
+        'rag.mineru_api_url',
+        'rag.mineru_api_key',
+        'rag.mineru_api_timeout',
+        'rag.mineru_params',
+    )
     return {
-        'DATALAB_MARKER_API_KEY': config.DATALAB_MARKER_API_KEY,
-        'DATALAB_MARKER_API_BASE_URL': config.DATALAB_MARKER_API_BASE_URL,
-        'DATALAB_MARKER_ADDITIONAL_CONFIG': config.DATALAB_MARKER_ADDITIONAL_CONFIG,
-        'DATALAB_MARKER_SKIP_CACHE': config.DATALAB_MARKER_SKIP_CACHE,
-        'DATALAB_MARKER_FORCE_OCR': config.DATALAB_MARKER_FORCE_OCR,
-        'DATALAB_MARKER_PAGINATE': config.DATALAB_MARKER_PAGINATE,
-        'DATALAB_MARKER_STRIP_EXISTING_OCR': config.DATALAB_MARKER_STRIP_EXISTING_OCR,
-        'DATALAB_MARKER_DISABLE_IMAGE_EXTRACTION': config.DATALAB_MARKER_DISABLE_IMAGE_EXTRACTION,
-        'DATALAB_MARKER_FORMAT_LINES': config.DATALAB_MARKER_FORMAT_LINES,
-        'DATALAB_MARKER_USE_LLM': config.DATALAB_MARKER_USE_LLM,
-        'DATALAB_MARKER_OUTPUT_FORMAT': config.DATALAB_MARKER_OUTPUT_FORMAT,
-        'EXTERNAL_DOCUMENT_LOADER_URL': config.EXTERNAL_DOCUMENT_LOADER_URL,
-        'EXTERNAL_DOCUMENT_LOADER_API_KEY': config.EXTERNAL_DOCUMENT_LOADER_API_KEY,
-        'TIKA_SERVER_URL': config.TIKA_SERVER_URL,
-        'DOCLING_SERVER_URL': config.DOCLING_SERVER_URL,
-        'DOCLING_API_KEY': config.DOCLING_API_KEY,
-        'DOCLING_PARAMS': config.DOCLING_PARAMS,
-        'PDF_EXTRACT_IMAGES': config.PDF_EXTRACT_IMAGES,
-        'DOCUMENT_INTELLIGENCE_ENDPOINT': config.DOCUMENT_INTELLIGENCE_ENDPOINT,
-        'DOCUMENT_INTELLIGENCE_KEY': config.DOCUMENT_INTELLIGENCE_KEY,
-        'DOCUMENT_INTELLIGENCE_MODEL': config.DOCUMENT_INTELLIGENCE_MODEL,
-        'MISTRAL_OCR_API_BASE_URL': config.MISTRAL_OCR_API_BASE_URL,
-        'MISTRAL_OCR_API_KEY': config.MISTRAL_OCR_API_KEY,
-        'MINERU_API_MODE': config.MINERU_API_MODE,
-        'MINERU_API_URL': config.MINERU_API_URL,
-        'MINERU_API_KEY': config.MINERU_API_KEY,
-        'MINERU_API_TIMEOUT': config.MINERU_API_TIMEOUT,
-        'MINERU_PARAMS': config.MINERU_PARAMS,
+        'DATALAB_MARKER_API_KEY': config.get('rag.datalab_marker_api_key'),
+        'DATALAB_MARKER_API_BASE_URL': config.get('rag.datalab_marker_api_base_url'),
+        'DATALAB_MARKER_ADDITIONAL_CONFIG': config.get('rag.datalab_marker_additional_config'),
+        'DATALAB_MARKER_SKIP_CACHE': config.get('rag.datalab_marker_skip_cache'),
+        'DATALAB_MARKER_FORCE_OCR': config.get('rag.datalab_marker_force_ocr'),
+        'DATALAB_MARKER_PAGINATE': config.get('rag.datalab_marker_paginate'),
+        'DATALAB_MARKER_STRIP_EXISTING_OCR': config.get('rag.datalab_marker_strip_existing_ocr'),
+        'DATALAB_MARKER_DISABLE_IMAGE_EXTRACTION': config.get('rag.datalab_marker_disable_image_extraction'),
+        'DATALAB_MARKER_FORMAT_LINES': config.get('rag.datalab_marker_format_lines'),
+        'DATALAB_MARKER_USE_LLM': config.get('rag.datalab_marker_use_llm'),
+        'DATALAB_MARKER_OUTPUT_FORMAT': config.get('rag.datalab_marker_output_format'),
+        'EXTERNAL_DOCUMENT_LOADER_URL': config.get('rag.external_document_loader_url'),
+        'EXTERNAL_DOCUMENT_LOADER_API_KEY': config.get('rag.external_document_loader_api_key'),
+        'TIKA_SERVER_URL': config.get('rag.tika_server_url'),
+        'DOCLING_SERVER_URL': config.get('rag.docling_server_url'),
+        'DOCLING_API_KEY': config.get('rag.docling_api_key'),
+        'DOCLING_PARAMS': config.get('rag.docling_params'),
+        'PDF_EXTRACT_IMAGES': config.get('rag.pdf_extract_images'),
+        'DOCUMENT_INTELLIGENCE_ENDPOINT': config.get('rag.document_intelligence_endpoint'),
+        'DOCUMENT_INTELLIGENCE_KEY': config.get('rag.document_intelligence_key'),
+        'DOCUMENT_INTELLIGENCE_MODEL': config.get('rag.document_intelligence_model'),
+        'MISTRAL_OCR_API_BASE_URL': config.get('rag.mistral_ocr_api_base_url'),
+        'MISTRAL_OCR_API_KEY': config.get('rag.mistral_ocr_api_key'),
+        'MINERU_API_MODE': config.get('rag.mineru_api_mode'),
+        'MINERU_API_URL': config.get('rag.mineru_api_url'),
+        'MINERU_API_KEY': config.get('rag.mineru_api_key'),
+        'MINERU_API_TIMEOUT': config.get('rag.mineru_api_timeout'),
+        'MINERU_PARAMS': config.get('rag.mineru_params'),
     }
 
 
@@ -620,9 +650,9 @@ async def _process_full_document(
 
     # Extract text using Loader
     try:
-        loader_kwargs = _get_loader_kwargs(request)
+        loader_kwargs = await _get_loader_kwargs(request)
         loader = Loader(
-            engine=request.app.state.config.CONTENT_EXTRACTION_ENGINE,
+            engine=await Config.get('rag.content_extraction_engine'),
             **loader_kwargs,
         )
         local_path = Storage.get_file(file_path)
@@ -841,7 +871,7 @@ async def ingest_documents(
     if isinstance(principal, LoaderPrincipal):
         user = principal.user
         provider = principal.provider_slug
-        providers = request.app.state.config.INTEGRATION_PROVIDERS or {}
+        providers = await Config.get('integrations.providers') or {}
         # The loader bearer (LOADER_INGEST_API_KEY) is the strong auth signal
         # for machine callers. INTEGRATION_PROVIDERS is for *external* push
         # integrations (third-party systems pushing docs in); built-in cloud
@@ -851,7 +881,7 @@ async def ingest_documents(
         provider_config = providers.get(provider) or {}
     else:
         user = principal
-        provider, provider_config = get_integration_provider(request, user)
+        provider, provider_config = await get_integration_provider(request, user)
 
     # Validate batch size
     max_per_request = provider_config.get('max_documents_per_request', 50)
@@ -881,7 +911,7 @@ async def ingest_documents(
                 400,
                 f"target='file' requires data_type 'chunked_text', got '{data_type}'.",
             )
-        bypass = request.app.state.config.BYPASS_EMBEDDING_AND_RETRIEVAL
+        bypass = await Config.get('rag.bypass_embedding_and_retrieval')
         results = []
         for raw_doc in form_data.documents:
             try:
@@ -1154,7 +1184,7 @@ async def stage_file(
     inverse live in the storage provider (``get_object_path`` mirrors
     ``upload_file``), so the path is never string-assembled here."""
     principal = _require_loader(principal)
-    if not request.app.state.config.DISTRIBUTED_DOC_PIPELINE_SYNC_ENABLED:
+    if not await Config.get('rag.distributed_doc_pipeline_sync_enabled'):
         raise HTTPException(
             status_code=403,
             detail='warren cloud-sync pipeline is disabled (DISTRIBUTED_DOC_PIPELINE_SYNC_ENABLED)',
@@ -1194,7 +1224,7 @@ async def stage_file(
         await Files.insert_new_file(user_id, file_form)
         await Knowledges.add_file_to_knowledge_by_id(body.knowledge_id, file_id, user_id)
 
-    ttl = request.app.state.config.PIPELINE_PRESIGN_TTL_SECONDS
+    ttl = await Config.get('doc_pipeline.presign_ttl_seconds')
     presigned_put_url = await run_in_threadpool(Storage.get_presigned_put_url, path, ttl, body.content_type)
 
     return {'file_id': file_id, 'presigned_put_url': presigned_put_url}
@@ -1210,7 +1240,7 @@ async def submit_file(
     ``submit_existing_file_to_pipeline`` body (presign GET + submit job + link +
     mark 'processing'). The acting user is the loader-resolved principal user."""
     principal = _require_loader(principal)
-    if not request.app.state.config.DISTRIBUTED_DOC_PIPELINE_SYNC_ENABLED:
+    if not await Config.get('rag.distributed_doc_pipeline_sync_enabled'):
         raise HTTPException(
             status_code=403,
             detail='warren cloud-sync pipeline is disabled (DISTRIBUTED_DOC_PIPELINE_SYNC_ENABLED)',
@@ -1251,14 +1281,14 @@ async def delete_collection(
 ):
     if isinstance(principal, LoaderPrincipal):
         provider = principal.provider_slug
-        providers = request.app.state.config.INTEGRATION_PROVIDERS or {}
+        providers = await Config.get('integrations.providers') or {}
         if provider not in providers:
             raise HTTPException(
                 status_code=403,
                 detail=f"Integration provider '{provider}' is not registered",
             )
     else:
-        provider, _ = get_integration_provider(request, principal)
+        provider, _ = await get_integration_provider(request, principal)
 
     knowledge = await _find_kb_by_source_id(provider, source_id)
     if not knowledge:
@@ -1292,7 +1322,7 @@ async def delete_document(
     document_source_id: str,
     user=Depends(get_verified_user),
 ):
-    provider, _ = get_integration_provider(request, user)
+    provider, _ = await get_integration_provider(request, user)
 
     knowledge = await _find_kb_by_source_id(provider, source_id)
     if not knowledge:

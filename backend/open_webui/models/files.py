@@ -1,14 +1,17 @@
+"""File upload models, forms, and database operations."""
+
+from __future__ import annotations
+
 import asyncio
 import logging
 import time
-from typing import Optional
 
-from sqlalchemy import select, delete, func
-from sqlalchemy.ext.asyncio import AsyncSession
+# local imports
 from open_webui.internal.db import Base, JSONField, get_async_db_context
 from open_webui.utils.misc import sanitize_metadata
 from pydantic import BaseModel, ConfigDict, model_validator
-from sqlalchemy import BigInteger, Column, String, Text, JSON, cast
+from sqlalchemy import JSON, BigInteger, Column, String, Text, cast, delete, func, select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 log = logging.getLogger(__name__)
 
@@ -19,19 +22,19 @@ log = logging.getLogger(__name__)
 ####################
 
 
-class File(Base):
+class File(Base):  # uploaded file record
     __tablename__ = 'file'
     id = Column(String, primary_key=True, unique=True)
-    user_id = Column(String)
+    user_id = Column(String, index=True)  # owner user id
     hash = Column(Text, nullable=True)
 
-    filename = Column(Text)
+    filename = Column(Text)  # original upload filename
     path = Column(Text, nullable=True)
 
     data = Column(JSON, nullable=True)
     meta = Column(JSON, nullable=True)
 
-    created_at = Column(BigInteger)
+    created_at = Column(BigInteger, index=True)  # upload timestamp
     updated_at = Column(BigInteger)
 
 
@@ -40,16 +43,16 @@ class FileModel(BaseModel):
 
     id: str
     user_id: str
-    hash: Optional[str] = None
+    hash: str | None = None
 
     filename: str
-    path: Optional[str] = None
+    path: str | None = None
 
-    data: Optional[dict] = None
-    meta: Optional[dict] = None
+    data: dict | None = None
+    meta: dict | None = None
 
-    created_at: Optional[int]  # timestamp in epoch
-    updated_at: Optional[int]  # timestamp in epoch
+    created_at: int | None  # timestamp in epoch
+    updated_at: int | None  # timestamp in epoch
 
 
 ####################
@@ -57,10 +60,11 @@ class FileModel(BaseModel):
 ####################
 
 
+# --- metadata structures ---
 class FileMeta(BaseModel):
-    name: Optional[str] = None
-    content_type: Optional[str] = None
-    size: Optional[int] = None
+    name: str | None = None
+    content_type: str | None = None
+    size: int | None = None
 
     model_config = ConfigDict(extra='allow')
 
@@ -85,22 +89,22 @@ class FileMeta(BaseModel):
 class FileModelResponse(BaseModel):
     id: str
     user_id: str
-    hash: Optional[str] = None
+    hash: str | None = None
 
     filename: str
-    data: Optional[dict] = None
-    meta: Optional[FileMeta] = None
+    data: dict | None = None
+    meta: FileMeta | None = None
 
     created_at: int  # timestamp in epoch
-    updated_at: Optional[int] = None  # timestamp in epoch, optional for legacy files
+    updated_at: int | None = None  # timestamp in epoch, optional for legacy files
 
     model_config = ConfigDict(extra='allow')
 
 
 class FileMetadataResponse(BaseModel):
     id: str
-    hash: Optional[str] = None
-    meta: Optional[dict] = None
+    hash: str | None = None
+    meta: dict | None = None
     created_at: int  # timestamp in epoch
     updated_at: int  # timestamp in epoch
 
@@ -112,7 +116,7 @@ class FileListResponse(BaseModel):
 
 class FileForm(BaseModel):
     id: str
-    hash: Optional[str] = None
+    hash: str | None = None
     filename: str
     path: str
     data: dict = {}
@@ -120,15 +124,15 @@ class FileForm(BaseModel):
 
 
 class FileUpdateForm(BaseModel):
-    hash: Optional[str] = None
-    data: Optional[dict] = None
-    meta: Optional[dict] = None
+    hash: str | None = None
+    data: dict | None = None
+    meta: dict | None = None
 
 
 class FilesTable:
     async def insert_new_file(
-        self, user_id: str, form_data: FileForm, db: Optional[AsyncSession] = None
-    ) -> Optional[FileModel]:
+        self, user_id: str, form_data: FileForm, db: AsyncSession | None = None
+    ) -> FileModel | None:
         async with get_async_db_context(db) as db:
             file_data = form_data.model_dump()
 
@@ -157,22 +161,26 @@ class FilesTable:
                     return None
             except Exception as e:
                 log.exception(f'Error inserting a new file: {e}')
-                return None
+                return None  # insertion failed
 
-    async def get_file_by_id(self, id: str, db: Optional[AsyncSession] = None) -> Optional[FileModel]:
+    async def get_file_by_id(
+        self,
+        id: str,
+        db: AsyncSession | None = None,
+    ) -> FileModel | None:
+        """Look up a file by its primary key."""
         try:
             async with get_async_db_context(db) as db:
-                try:
-                    file = await db.get(File, id)
-                    return FileModel.model_validate(file) if file else None
-                except Exception:
+                file = await db.get(File, id)
+                if not file:
                     return None
+                return FileModel.model_validate(file)
         except Exception:
             return None
 
     async def get_file_by_id_and_user_id(
-        self, id: str, user_id: str, db: Optional[AsyncSession] = None
-    ) -> Optional[FileModel]:
+        self, id: str, user_id: str, db: AsyncSession | None = None
+    ) -> FileModel | None:
         async with get_async_db_context(db) as db:
             try:
                 result = await db.execute(select(File).filter_by(id=id, user_id=user_id))
@@ -184,9 +192,7 @@ class FilesTable:
             except Exception:
                 return None
 
-    async def get_file_metadata_by_id(
-        self, id: str, db: Optional[AsyncSession] = None
-    ) -> Optional[FileMetadataResponse]:
+    async def get_file_metadata_by_id(self, id: str, db: AsyncSession | None = None) -> FileMetadataResponse | None:
         async with get_async_db_context(db) as db:
             try:
                 file = await db.get(File, id)
@@ -202,12 +208,24 @@ class FilesTable:
             except Exception:
                 return None
 
-    async def get_files(self, db: Optional[AsyncSession] = None) -> list[FileModel]:
+    async def get_files(self, db: AsyncSession | None = None) -> list[FileModel]:
         async with get_async_db_context(db) as db:
             result = await db.execute(select(File))
             return [FileModel.model_validate(file) for file in result.scalars().all()]
 
-    async def check_access_by_user_id(self, id, user_id, permission='write', db: Optional[AsyncSession] = None) -> bool:
+    async def count_files_by_user_id(
+        self,
+        user_id: str | None = None,
+        db: AsyncSession | None = None,
+    ) -> int:
+        async with get_async_db_context(db) as db:
+            stmt = select(func.count(File.id))
+            if user_id:
+                stmt = stmt.filter_by(user_id=user_id)
+            result = await db.execute(stmt)
+            return result.scalar() or 0
+
+    async def check_access_by_user_id(self, id, user_id, permission='write', db: AsyncSession | None = None) -> bool:
         file = await self.get_file_by_id(id, db=db)
         if not file:
             return False
@@ -216,7 +234,7 @@ class FilesTable:
         # Implement additional access control logic here as needed
         return False
 
-    async def get_files_by_ids(self, ids: list[str], db: Optional[AsyncSession] = None) -> list[FileModel]:
+    async def get_files_by_ids(self, ids: list[str], db: AsyncSession | None = None) -> list[FileModel]:
         async with get_async_db_context(db) as db:
             result = await db.execute(select(File).filter(File.id.in_(ids)).order_by(File.updated_at.desc()))
             return [FileModel.model_validate(file) for file in result.scalars().all()]
@@ -231,7 +249,7 @@ class FilesTable:
     # file-status poll and hang the whole sync until the wall-clock backstop.
     _RECONCILABLE_STATUSES = ('processing', 'ingesting', 'parsing', 'downloading')
 
-    async def get_processing_files_with_pipeline_job(self, db: Optional[AsyncSession] = None) -> list[FileModel]:
+    async def get_processing_files_with_pipeline_job(self, db: AsyncSession | None = None) -> list[FileModel]:
         """Non-terminal files that carry a distributed-pipeline job id.
 
         Drives the restart-safe reconciler. Filters on the cheap ``meta.status``
@@ -249,7 +267,7 @@ class FilesTable:
         return [f for f in files if (f.meta or {}).get('pipeline_job_id')]
 
     async def get_file_metadatas_by_ids(
-        self, ids: list[str], db: Optional[AsyncSession] = None
+        self, ids: list[str], db: AsyncSession | None = None
     ) -> list[FileMetadataResponse]:
         async with get_async_db_context(db) as db:
             result = await db.execute(
@@ -268,17 +286,17 @@ class FilesTable:
                 for row in result.all()
             ]
 
-    async def get_files_by_user_id(self, user_id: str, db: Optional[AsyncSession] = None) -> list[FileModel]:
+    async def get_files_by_user_id(self, user_id: str, db: AsyncSession | None = None) -> list[FileModel]:
         async with get_async_db_context(db) as db:
             result = await db.execute(select(File).filter_by(user_id=user_id))
             return [FileModel.model_validate(file) for file in result.scalars().all()]
 
     async def get_file_list(
         self,
-        user_id: Optional[str] = None,
+        user_id: str | None = None,
         skip: int = 0,
         limit: int = 50,
-        db: Optional[AsyncSession] = None,
+        db: AsyncSession | None = None,
     ) -> 'FileListResponse':
         async with get_async_db_context(db) as db:
             stmt = select(File)
@@ -318,11 +336,11 @@ class FilesTable:
 
     async def search_files(
         self,
-        user_id: Optional[str] = None,
+        user_id: str | None = None,
         filename: str = '*',
         skip: int = 0,
         limit: int = 100,
-        db: Optional[AsyncSession] = None,
+        db: AsyncSession | None = None,
     ) -> list[FileModel]:
         """
         Search files with glob pattern matching, optional user filter, and pagination.
@@ -351,8 +369,8 @@ class FilesTable:
             return [FileModel.model_validate(file) for file in result.scalars().all()]
 
     async def update_file_by_id(
-        self, id: str, form_data: FileUpdateForm, db: Optional[AsyncSession] = None
-    ) -> Optional[FileModel]:
+        self, id: str, form_data: FileUpdateForm, db: AsyncSession | None = None
+    ) -> FileModel | None:
         async with get_async_db_context(db) as db:
             try:
                 result = await db.execute(select(File).filter_by(id=id))
@@ -375,8 +393,8 @@ class FilesTable:
                 return None
 
     async def update_file_hash_by_id(
-        self, id: str, hash: Optional[str], db: Optional[AsyncSession] = None
-    ) -> Optional[FileModel]:
+        self, id: str, hash: str | None, db: AsyncSession | None = None
+    ) -> FileModel | None:
         async with get_async_db_context(db) as db:
             try:
                 result = await db.execute(select(File).filter_by(id=id))
@@ -389,9 +407,7 @@ class FilesTable:
             except Exception:
                 return None
 
-    async def update_file_path_by_id(
-        self, id: str, path: str, db: Optional[AsyncSession] = None
-    ) -> Optional[FileModel]:
+    async def update_file_path_by_id(self, id: str, path: str, db: AsyncSession | None = None) -> FileModel | None:
         async with get_async_db_context(db) as db:
             try:
                 result = await db.execute(select(File).filter_by(id=id))
@@ -403,9 +419,7 @@ class FilesTable:
             except Exception:
                 return None
 
-    async def update_file_data_by_id(
-        self, id: str, data: dict, db: Optional[AsyncSession] = None
-    ) -> Optional[FileModel]:
+    async def update_file_data_by_id(self, id: str, data: dict, db: AsyncSession | None = None) -> FileModel | None:
         async with get_async_db_context(db) as db:
             try:
                 result = await db.execute(select(File).filter_by(id=id))
@@ -417,9 +431,7 @@ class FilesTable:
             except Exception as e:
                 return None
 
-    async def update_file_metadata_by_id(
-        self, id: str, meta: dict, db: Optional[AsyncSession] = None
-    ) -> Optional[FileModel]:
+    async def update_file_metadata_by_id(self, id: str, meta: dict, db: AsyncSession | None = None) -> FileModel | None:
         async with get_async_db_context(db) as db:
             try:
                 result = await db.execute(select(File).filter_by(id=id))
@@ -431,13 +443,26 @@ class FilesTable:
             except Exception:
                 return None
 
+    async def update_file_name_by_id(self, id: str, name: str, db: AsyncSession | None = None) -> FileModel | None:
+        async with get_async_db_context(db) as db:
+            try:
+                result = await db.execute(select(File).filter_by(id=id))
+                file = result.scalars().first()
+                file.filename = name
+                file.meta = {**(file.meta if file.meta else {}), 'name': name}
+                file.updated_at = int(time.time())
+                await db.commit()
+                return FileModel.model_validate(file)
+            except Exception:
+                return None
+
     async def set_status(
         self,
         id: str,
         status: str,
-        error: Optional[str] = None,
-        db: Optional[AsyncSession] = None,
-    ) -> Optional['FileModel']:
+        error: str | None = None,
+        db: AsyncSession | None = None,
+    ) -> FileModel | None:
         """Set per-file sync status in BOTH data and meta.
 
         Dual-write: data is the source of truth for existing readers
@@ -455,7 +480,45 @@ class FilesTable:
         await self.update_file_metadata_by_id(id, payload, db=db)
         return await self.update_file_data_by_id(id, payload, db=db)
 
-    async def delete_file_by_id(self, id: str, db: Optional[AsyncSession] = None) -> bool:
+    async def get_pending_files_for_knowledge(
+        self, knowledge_id: str, db: AsyncSession | None = None
+    ) -> list[FileModelResponse]:
+        """Return files still being processed for this knowledge base.
+
+        These are files uploaded with ``meta.data.knowledge_id`` set, whose
+        ``data.status`` is still ``pending`` or ``processing``, and which
+        have not yet been added to the ``knowledge_file`` join table.
+
+        The JSON subscript syntax (``Column['key']['subkey'].as_string()``)
+        is supported by both SQLite (``json_extract``) and PostgreSQL
+        (``->>``/``->``).
+        """
+        async with get_async_db_context(db) as db:
+            try:
+                # Lazy import to avoid circular dependency
+                from open_webui.models.knowledge import KnowledgeFile
+
+                # Subquery: file IDs already linked to this knowledge base
+                linked_ids = (
+                    select(KnowledgeFile.file_id).filter(KnowledgeFile.knowledge_id == knowledge_id).correlate(None)
+                )
+
+                stmt = (
+                    select(File)
+                    .filter(
+                        File.meta['data']['knowledge_id'].as_string() == knowledge_id,
+                        File.data['status'].as_string().in_(['pending', 'processing']),
+                        File.id.notin_(linked_ids),
+                    )
+                    .order_by(File.created_at.desc())
+                )
+                result = await db.execute(stmt)
+                return [FileModelResponse.model_validate(f, from_attributes=True) for f in result.scalars().all()]
+            except Exception as e:
+                log.warning(f'Error fetching pending files for knowledge {knowledge_id}: {e}')
+                return []
+
+    async def delete_file_by_id(self, id: str, db: AsyncSession | None = None) -> bool:
         # FileAttachments has no FK CASCADE — cascade-clean orphan rows
         # before the File delete. The sync attachments API runs in a
         # thread to bridge into this async path; lazy import breaks the
@@ -472,7 +535,7 @@ class FilesTable:
             except Exception:
                 return False
 
-    async def delete_files_by_ids(self, ids: list[str], db: Optional[AsyncSession] = None) -> bool:
+    async def delete_files_by_ids(self, ids: list[str], db: AsyncSession | None = None) -> bool:
         from open_webui.models.file_attachments import FileAttachments
 
         await asyncio.to_thread(FileAttachments.delete_attachments_by_file_ids, ids)
@@ -485,7 +548,7 @@ class FilesTable:
             except Exception:
                 return False
 
-    async def delete_all_files(self, db: Optional[AsyncSession] = None) -> bool:
+    async def delete_all_files(self, db: AsyncSession | None = None) -> bool:
         from open_webui.models.file_attachments import FileAttachments
 
         await asyncio.to_thread(FileAttachments.delete_all_attachments)
@@ -499,4 +562,4 @@ class FilesTable:
                 return False
 
 
-Files = FilesTable()
+Files = FilesTable()  # singleton files repository

@@ -13,6 +13,7 @@ from fastapi.testclient import TestClient
 from opentelemetry import context as otel_context, trace
 from opentelemetry.sdk.trace import TracerProvider
 
+from open_webui.models.config import Config
 from open_webui.routers.feedback_report import router
 from open_webui.utils.auth import get_verified_user
 from open_webui.utils.feedback_report import (
@@ -23,13 +24,23 @@ from open_webui.utils.feedback_report import (
 )
 
 
-def _make_client(*, enabled=True, webhook_url='', include_identity=True):
+def _make_client(monkeypatch, *, enabled=True, webhook_url='', include_identity=True):
+    # The router reads its settings via ``await Config.get_many('feedback_report.*')``
+    # (the storage keys of ENABLE_FEEDBACK_REPORTING & co); patch the per-key
+    # store so the tests stay hermetic — no config DB involved.
+    values = {
+        'feedback_report.enable': enabled,
+        'feedback_report.include_user_identity': include_identity,
+        'feedback_report.slack_webhook_url': webhook_url,
+        'feedback_report.trace_url_template': '',
+    }
+
+    async def fake_get_many(*keys):
+        return {key: values[key] for key in keys if key in values}
+
+    monkeypatch.setattr(Config, 'get_many', staticmethod(fake_get_many))
+
     app = FastAPI()
-    app.state.config = SimpleNamespace(
-        ENABLE_FEEDBACK_REPORTING=enabled,
-        FEEDBACK_REPORT_SLACK_WEBHOOK_URL=webhook_url,
-        FEEDBACK_REPORT_INCLUDE_USER_IDENTITY=include_identity,
-    )
     app.include_router(router, prefix='/api/v1/feedback')
     app.dependency_overrides[get_verified_user] = lambda: SimpleNamespace(
         id='user-1', email='user@example.com', name='Test User'
@@ -37,22 +48,22 @@ def _make_client(*, enabled=True, webhook_url='', include_identity=True):
     return TestClient(app)
 
 
-def test_submit_happy_path():
-    client = _make_client()
+def test_submit_happy_path(monkeypatch):
+    client = _make_client(monkeypatch)
     res = client.post('/api/v1/feedback/report', json={'category': 'bug', 'description': 'It broke'})
     assert res.status_code == 200
     assert res.json() == {'status': True}
 
 
-def test_submit_disabled_returns_404():
-    client = _make_client(enabled=False)
+def test_submit_disabled_returns_404(monkeypatch):
+    client = _make_client(monkeypatch, enabled=False)
     res = client.post('/api/v1/feedback/report', json={'category': 'bug', 'description': 'It broke'})
     assert res.status_code == 404
 
 
-def test_context_allowlist_rejects_unknown_key():
+def test_context_allowlist_rejects_unknown_key(monkeypatch):
     # The allowlist (extra='forbid') is the guarantee that no chat content leaks through.
-    client = _make_client()
+    client = _make_client(monkeypatch)
     res = client.post(
         '/api/v1/feedback/report',
         json={'category': 'bug', 'description': 'x', 'context': {'chat_content': 'leaked message'}},
@@ -60,20 +71,20 @@ def test_context_allowlist_rejects_unknown_key():
     assert res.status_code == 422
 
 
-def test_empty_description_rejected():
-    client = _make_client()
+def test_empty_description_rejected(monkeypatch):
+    client = _make_client(monkeypatch)
     res = client.post('/api/v1/feedback/report', json={'category': 'bug', 'description': ''})
     assert res.status_code == 422
 
 
-def test_invalid_category_rejected():
-    client = _make_client()
+def test_invalid_category_rejected(monkeypatch):
+    client = _make_client(monkeypatch)
     res = client.post('/api/v1/feedback/report', json={'category': 'spam', 'description': 'x'})
     assert res.status_code == 422
 
 
-def test_allowlisted_context_accepted():
-    client = _make_client()
+def test_allowlisted_context_accepted(monkeypatch):
+    client = _make_client(monkeypatch)
     res = client.post(
         '/api/v1/feedback/report',
         json={

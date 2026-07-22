@@ -22,6 +22,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from starlette.responses import StreamingResponse
 
 from open_webui.env import AGENT_API_BASE_URL, AGENT_API_KEY
+from open_webui.models.config import Config
 from open_webui.models.knowledge import Knowledges
 from open_webui.utils.auth import get_verified_user
 from open_webui.utils.misc import stream_wrapper
@@ -139,9 +140,9 @@ async def _resolve_collection_refs(files: list[dict[str, Any]]) -> None:
         entry.pop('provider', None)
 
 
-def _get_base_url(request: Request) -> str:
+async def _get_base_url(request: Request) -> str:
     """Return the configured agent base URL or raise 503."""
-    if not request.app.state.config.ENABLE_AGENT_PROXY:
+    if not await Config.get('agent_proxy.enable'):
         raise HTTPException(
             status_code=503,
             detail=(
@@ -241,7 +242,7 @@ async def _proxy_get_json(base_url: str, path: str) -> Any:
 @router.get('/models')
 async def list_models(request: Request, user=Depends(get_verified_user)):
     """Proxy GET /v1/models from the agent service."""
-    base_url = _get_base_url(request)
+    base_url = await _get_base_url(request)
     return await _proxy_get_json(base_url, '/v1/models')
 
 
@@ -264,7 +265,7 @@ async def chat_completions(
     agent only ever sees ``id``. ``id`` takes precedence when both are
     provided.
     """
-    base_url = _get_base_url(request)
+    base_url = await _get_base_url(request)
 
     payload_dict = body.model_dump(exclude_none=True)
     if payload_dict.get('files'):
@@ -349,12 +350,12 @@ async def gradient_agent_meta(request: Request, user=Depends(get_verified_user))
     Returns the default agent's metadata (description, welcome_message, ...)
     so the chat UI can render it without exposing ``AGENT_API_KEY``.
     """
-    base_url = _get_base_url(request)
+    base_url = await _get_base_url(request)
     return await _proxy_get_json(base_url, '/v1/gradient_agent_meta')
 
 
 @router.get('/openapi.json')
 async def openapi_spec(request: Request, user=Depends(get_verified_user)):
     """Proxy the agent service's OpenAPI spec."""
-    base_url = _get_base_url(request)
+    base_url = await _get_base_url(request)
     return await _proxy_get_json(base_url, '/openapi.json')

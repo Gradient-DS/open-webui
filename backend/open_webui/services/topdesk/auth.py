@@ -23,11 +23,7 @@ import logging
 from typing import Any, Dict, Optional
 from urllib.parse import urlparse
 
-from open_webui.config import (
-    TOPDESK_URL,
-    TOPDESK_USERNAME,
-    TOPDESK_APP_PASSWORD,
-)
+from open_webui.models.config import Config
 from open_webui.services.topdesk.topdesk_client import TopdeskClient
 
 log = logging.getLogger(__name__)
@@ -42,31 +38,42 @@ TOPDESK_AUTH_SENTINEL = '__topdesk_service_auth__'
 _META_KEY = 'topdesk_sync'
 
 
-def service_auth_configured() -> bool:
+async def _service_credential() -> tuple[str, str, str]:
+    """Read (url, username, app_password) live from the per-key Config store.
+
+    Admin edits land in the Config store, not the import-time module vars, so
+    these are re-read on every call (mirrors the scheduler fix) — an operator
+    rotating the app password in the admin panel is picked up on the next sync
+    without a pod restart.
+    """
+    values = await Config.get_many('topdesk.url', 'topdesk.username', 'topdesk.app_password')
+    return (
+        values.get('topdesk.url') or '',
+        values.get('topdesk.username') or '',
+        values.get('topdesk.app_password') or '',
+    )
+
+
+async def service_auth_configured() -> bool:
     """True when the TOPdesk service credential is usable.
 
     URL + operator login (username) + app_password are ALL required: the REST KB
     API is operator-Basic-only (plan decision 4), so an empty login can never
     authenticate and must gate readiness.
     """
-    return bool(
-        (TOPDESK_URL.value or '').strip()
-        and (TOPDESK_USERNAME.value or '').strip()
-        and (TOPDESK_APP_PASSWORD.value or '').strip()
-    )
+    url, username, app_password = await _service_credential()
+    return bool(url.strip() and username.strip() and app_password.strip())
 
 
-def auth_headers() -> Dict[str, str]:
+async def auth_headers() -> Dict[str, str]:
     """Build the Authorization header for the configured TOPdesk credential.
 
     Always ``Authorization: Basic base64(login:app_password)`` (operator login +
     application token). The header is static (the credential never refreshes), so
     callers may precompute it once.
     """
-    return build_auth_header(
-        username=(TOPDESK_USERNAME.value or '').strip(),
-        app_password=(TOPDESK_APP_PASSWORD.value or ''),
-    )
+    _url, username, app_password = await _service_credential()
+    return build_auth_header(username=username.strip(), app_password=app_password)
 
 
 def build_auth_header(username: str, app_password: str) -> Dict[str, str]:
@@ -84,7 +91,7 @@ def build_auth_header(username: str, app_password: str) -> Dict[str, str]:
     return {'Authorization': f'Basic {encoded}'}
 
 
-def get_service_site() -> Optional[Dict[str, Any]]:
+async def get_service_site() -> Optional[Dict[str, Any]]:
     """The single TOPdesk tenant for the service credential, from TOPDESK_URL.
 
     Returns None when no URL is configured. The tenant host doubles as the
@@ -92,17 +99,18 @@ def get_service_site() -> Optional[Dict[str, Any]]:
     cloud_id — needs no special-casing for TOPdesk. Mirrors Confluence's
     ``get_basic_site``.
     """
-    url = (TOPDESK_URL.value or '').strip().rstrip('/')
+    url = (await Config.get('topdesk.url', '') or '').strip().rstrip('/')
     if not url:
         return None
     host = urlparse(url).netloc or url
     return {'cloud_id': host, 'url': url, 'name': host}
 
 
-def build_client() -> TopdeskClient:
+async def build_client() -> TopdeskClient:
     """Build a TopdeskClient from the global service credential."""
+    url, username, app_password = await _service_credential()
     return TopdeskClient(
-        base_url=(TOPDESK_URL.value or '').strip(),
-        username=(TOPDESK_USERNAME.value or '').strip(),
-        app_password=(TOPDESK_APP_PASSWORD.value or ''),
+        base_url=url.strip(),
+        username=username.strip(),
+        app_password=app_password,
     )

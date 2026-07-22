@@ -1,5 +1,4 @@
 import base64
-from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 from fastapi import FastAPI
@@ -19,7 +18,6 @@ def _principal(email='lex@gradient-ds.com'):
 def _build_app(principal):
     app = FastAPI()
     app.include_router(internal_retrieval_router.router, prefix='/api/v1/internal/retrieval')
-    app.state.config = SimpleNamespace()
     app.dependency_overrides[get_agent_principal] = lambda: principal
     return app
 

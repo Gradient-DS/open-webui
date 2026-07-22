@@ -5,16 +5,12 @@ Exposes start_scheduler/stop_scheduler for main.py lifespan compatibility.
 """
 
 from open_webui.services.sync.scheduler import SyncScheduler
-from open_webui.config import (
-    ENABLE_ONEDRIVE_SYNC,
-    ONEDRIVE_SYNC_INTERVAL_MINUTES,
-)
 
 _scheduler = SyncScheduler(
     provider_type='onedrive',
     meta_key='onedrive_sync',
-    enable_config=ENABLE_ONEDRIVE_SYNC,
-    interval_config=ONEDRIVE_SYNC_INTERVAL_MINUTES,
+    enable_key='onedrive.enable_sync',
+    interval_key='onedrive.sync_interval_minutes',
 )
 
 start_scheduler = _scheduler.start

@@ -16,7 +16,9 @@ survives backend pod restarts. Mirrors the services/sync SyncScheduler shape.
 import asyncio
 import logging
 import time
+from types import SimpleNamespace
 
+from open_webui.models.config import Config
 from open_webui.models.files import Files
 from open_webui.services.files.events import emit_file_status
 from open_webui.utils import doc_pipeline
@@ -89,8 +91,8 @@ async def reconcile_pipeline_jobs(config, *, now: int) -> int:
 class PipelineReconciler:
     """Background asyncio task running reconcile_pipeline_jobs on an interval.
 
-    Reads its interval + enable flag from ``app.state.config`` each tick, so an
-    admin can toggle the feature or change cadence without a restart."""
+    Reads its interval + enable flag from the per-key ``Config`` store each tick,
+    so an admin can toggle the feature or change cadence without a restart."""
 
     def __init__(self, app):
         self._app = app
@@ -102,7 +104,20 @@ class PipelineReconciler:
 
     async def _run(self) -> None:
         while True:
-            config = self._app.state.config
+            snapshot = await Config.get_many(
+                'doc_pipeline.reconcile_interval_seconds',
+                'doc_pipeline.enabled',
+                'doc_pipeline.api_base_url',
+                'doc_pipeline.api_key',
+                'doc_pipeline.job_max_wall_clock_seconds',
+            )
+            config = SimpleNamespace(
+                PIPELINE_RECONCILE_INTERVAL_SECONDS=snapshot.get('doc_pipeline.reconcile_interval_seconds', 120),
+                DISTRIBUTED_DOC_PIPELINE_ENABLED=snapshot.get('doc_pipeline.enabled', False),
+                PIPELINE_API_BASE_URL=snapshot.get('doc_pipeline.api_base_url', ''),
+                PIPELINE_API_KEY=snapshot.get('doc_pipeline.api_key'),
+                PIPELINE_JOB_MAX_WALL_CLOCK_SECONDS=snapshot.get('doc_pipeline.job_max_wall_clock_seconds'),
+            )
             interval = max(30, int(getattr(config, 'PIPELINE_RECONCILE_INTERVAL_SECONDS', 120)))
             await asyncio.sleep(interval)
             try:

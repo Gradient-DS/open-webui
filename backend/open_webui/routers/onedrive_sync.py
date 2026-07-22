@@ -8,8 +8,8 @@ from typing import List, Literal
 import logging
 
 from open_webui.utils.auth import get_verified_user
+from open_webui.models.config import Config
 from open_webui.models.users import UserModel
-from open_webui.config import MICROSOFT_CLIENT_SECRET
 from open_webui.services.sync.router import (
     SyncStatusResponse,
     RemoveSourceRequest,
@@ -113,7 +113,7 @@ async def _sync_items_background(
     """Background task to sync multiple OneDrive items."""
     from open_webui.services.onedrive.sync_worker import OneDriveSyncWorker
 
-    use_shared_loader = bool(getattr(app.state.config, 'USE_SHARED_LOADER', False))
+    use_shared_loader = bool(await Config.get('sync.use_shared_loader', False))
 
     worker = OneDriveSyncWorker(
         knowledge_id=knowledge_id,
@@ -198,7 +198,7 @@ async def initiate_auth(
     """Initiate OAuth auth code flow for background sync."""
     from open_webui.services.onedrive.auth import get_authorization_url
 
-    if not MICROSOFT_CLIENT_SECRET.value:
+    if not await Config.get('oauth.microsoft.client_secret', ''):
         raise HTTPException(400, 'OneDrive client secret not configured')
 
     knowledge = await get_knowledge_or_raise(knowledge_id, user)

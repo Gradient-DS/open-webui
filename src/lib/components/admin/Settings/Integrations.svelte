@@ -1,10 +1,11 @@
 <script lang="ts">
 	import { toast } from 'svelte-sonner';
 	import { onMount, getContext } from 'svelte';
-	import { v4 as uuidv4 } from 'uuid';
 	import { getModels as _getModels } from '$lib/apis';
+	import type { Writable } from 'svelte/store';
+	import type { i18n as i18nType } from 'i18next';
 
-	const i18n = getContext('i18n');
+	const i18n = getContext<Writable<i18nType>>('i18n');
 
 	import { models, settings, user, terminalServers } from '$lib/stores';
 	import { getTerminalServers } from '$lib/apis/terminal';
@@ -23,6 +24,7 @@
 
 	import AddToolServerModal from '$lib/components/AddToolServerModal.svelte';
 	import AddTerminalServerModal from '$lib/components/AddTerminalServerModal.svelte';
+	import ExternalKnowledge from './ExternalKnowledge.svelte';
 
 	import {
 		getToolServerConnections,
@@ -35,11 +37,21 @@
 
 	import IntegrationProviders from './IntegrationProviders.svelte';
 
-	let servers = null;
+	type ToolServerConnection = any;
+	type TerminalConnection = {
+		id?: string;
+		url?: string;
+		name?: string;
+		key?: string;
+		enabled?: boolean;
+		[key: string]: any;
+	};
+
+	let servers: ToolServerConnection[] | null = null;
 	let showConnectionModal = false;
 
 	// Terminal server admin connections
-	let terminalConnections = [];
+	let terminalConnections: TerminalConnection[] = [];
 	let showAddTerminalModal = false;
 	let editTerminalIdx: number | null = null;
 	let showDeleteTerminalConfirm = false;
@@ -49,8 +61,8 @@
 	let ENABLE_AGENT_PROXY = false;
 	let showAgentDocs = false;
 
-	const addConnectionHandler = async (server) => {
-		servers = [...servers, server];
+	const addConnectionHandler = async (server: ToolServerConnection) => {
+		servers = [...(servers ?? []), server];
 		await updateHandler();
 	};
 
@@ -80,7 +92,9 @@
 
 			// Refresh the terminalServers store so changes are reflected immediately
 			// Preserve user direct terminals, refresh system terminals from backend
-			const existingDirectTerminals = ($terminalServers ?? []).filter((t) => !t.id);
+			const existingDirectTerminals = (($terminalServers ?? []) as TerminalConnection[]).filter(
+				(t) => !t.id
+			);
 			const systemTerminals = await getTerminalServers(localStorage.token);
 			const systemEntries = systemTerminals.map((t) => ({
 				id: t.id,
@@ -88,7 +102,7 @@
 				name: t.name,
 				key: localStorage.token
 			}));
-			terminalServers.set([...existingDirectTerminals, ...systemEntries]);
+			terminalServers.set([...existingDirectTerminals, ...systemEntries] as any);
 		}
 	};
 
@@ -105,12 +119,15 @@
 		}
 	};
 
-	const addTerminalConnection = (server) => {
-		terminalConnections = [...terminalConnections, { ...server, id: server.id ?? uuidv4() }];
+	const addTerminalConnection = (server: TerminalConnection) => {
+		terminalConnections = [
+			...terminalConnections,
+			{ ...server, id: server.id ?? crypto.randomUUID() }
+		];
 		saveTerminalServers();
 	};
 
-	const updateTerminalConnection = (idx: number, updated) => {
+	const updateTerminalConnection = (idx: number, updated: TerminalConnection) => {
 		terminalConnections = terminalConnections.map((c, i) =>
 			i === idx ? { ...c, ...updated, id: updated.id ?? c.id } : c
 		);
@@ -163,7 +180,7 @@
 	bind:show={showAddTerminalModal}
 	edit={editTerminalIdx !== null}
 	connection={editTerminalIdx !== null ? terminalConnections[editTerminalIdx] : null}
-	onSubmit={(c) => {
+	onSubmit={(c: TerminalConnection) => {
 		if (editTerminalIdx !== null) {
 			updateTerminalConnection(editTerminalIdx, c);
 			editTerminalIdx = null;
@@ -200,7 +217,7 @@
 		{#if servers !== null}
 			<div class="">
 				<div class="mb-3">
-					<div class=" mt-0.5 mb-2.5 text-base font-medium">{$i18n.t('General')}</div>
+					<div class=" mt-0.5 mb-2.5 text-base font-medium">{$i18n.t('Tools')}</div>
 
 					{#if isFeatureEnabled('tool_servers')}
 						<hr class=" border-gray-100/30 dark:border-gray-850/30 my-2" />
@@ -486,6 +503,12 @@
 						toast.success($i18n.t('Integration providers saved'));
 					}}
 				/>
+
+				<div class="mt-8 mb-2.5 text-base font-medium">{$i18n.t('Knowledge')}</div>
+
+				<hr class=" border-gray-100/30 dark:border-gray-850/30 my-2" />
+
+				<ExternalKnowledge />
 			</div>
 		{:else}
 			<div class="flex h-full justify-center">

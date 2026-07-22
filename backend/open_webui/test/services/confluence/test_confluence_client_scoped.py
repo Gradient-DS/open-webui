@@ -149,13 +149,33 @@ def _mock_async_client(handler):
     return factory
 
 
+class _FakeConfig:
+    """Async stand-in for the per-key Config store, backed by a dotted-key dict.
+
+    resolve_cloud_id now reads ``confluence.cloud_id`` / ``confluence.site_url``
+    live via ``Config.get`` instead of the old PersistentConfig ``.value``.
+    """
+
+    def __init__(self, mapping):
+        self._m = mapping
+
+    async def get(self, key, default=None):
+        return self._m.get(key, default)
+
+    async def get_many(self, *keys):
+        return {k: self._m.get(k) for k in keys}
+
+
 def test_resolve_cloud_id_returns_manual_override_without_network():
     def handler(request: httpx.Request) -> httpx.Response:  # must never be called
         raise AssertionError('network was hit despite a manual cloudId override')
 
     with (
-        patch.object(basic_auth, 'CONFLUENCE_CLOUD_ID', SimpleNamespace(value='manual-cloud')),
-        patch.object(basic_auth, 'CONFLUENCE_SITE_URL', SimpleNamespace(value='https://acme.atlassian.net')),
+        patch.object(
+            basic_auth,
+            'Config',
+            _FakeConfig({'confluence.cloud_id': 'manual-cloud', 'confluence.site_url': 'https://acme.atlassian.net'}),
+        ),
         patch.object(basic_auth.httpx, 'AsyncClient', _mock_async_client(handler)),
     ):
         result = asyncio.run(basic_auth.resolve_cloud_id())
@@ -171,8 +191,11 @@ def test_resolve_cloud_id_parses_tenant_info_when_no_override():
         return httpx.Response(200, json={'cloudId': 'resolved-cloud'})
 
     with (
-        patch.object(basic_auth, 'CONFLUENCE_CLOUD_ID', SimpleNamespace(value='')),
-        patch.object(basic_auth, 'CONFLUENCE_SITE_URL', SimpleNamespace(value='https://acme.atlassian.net/')),
+        patch.object(
+            basic_auth,
+            'Config',
+            _FakeConfig({'confluence.cloud_id': '', 'confluence.site_url': 'https://acme.atlassian.net/'}),
+        ),
         patch.object(basic_auth.httpx, 'AsyncClient', _mock_async_client(handler)),
     ):
         result = asyncio.run(basic_auth.resolve_cloud_id())
@@ -186,8 +209,11 @@ def test_resolve_cloud_id_returns_none_on_failure():
         return httpx.Response(404, text='not found')
 
     with (
-        patch.object(basic_auth, 'CONFLUENCE_CLOUD_ID', SimpleNamespace(value='')),
-        patch.object(basic_auth, 'CONFLUENCE_SITE_URL', SimpleNamespace(value='https://acme.atlassian.net')),
+        patch.object(
+            basic_auth,
+            'Config',
+            _FakeConfig({'confluence.cloud_id': '', 'confluence.site_url': 'https://acme.atlassian.net'}),
+        ),
         patch.object(basic_auth.httpx, 'AsyncClient', _mock_async_client(handler)),
     ):
         result = asyncio.run(basic_auth.resolve_cloud_id())

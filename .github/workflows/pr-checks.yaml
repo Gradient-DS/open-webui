@@ -45,6 +45,13 @@ jobs:
         with:
           args: format --check backend/ scripts/
 
+      # Logic-error sweep (undefined names etc.) — ported from upstream's
+      # backend.yaml before it was disabled; caught a real F821 in this repo.
+      - name: Ruff logic-error check
+        uses: astral-sh/ruff-action@v3
+        with:
+          args: check --select=F --ignore=F401,F403,F405,F541,F811,F841 backend/ scripts/
+
   backend-tests:
     name: Backend Unit Tests
     runs-on: ubuntu-latest

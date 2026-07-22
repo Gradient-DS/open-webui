@@ -63,10 +63,11 @@ class OneDriveSyncWorker(BaseSyncWorker):
 
     @property
     def max_files_config(self) -> Optional[int]:
-        # ONEDRIVE_MAX_FILES_PER_SYNC is a PersistentConfig (admin-editable).
         # 0 = "no limit" → return None so base_worker falls back to the
-        # KB-wide KNOWLEDGE_MAX_FILE_COUNT safety net alone.
-        return ONEDRIVE_MAX_FILES_PER_SYNC.value or None
+        # KB-wide KNOWLEDGE_MAX_FILE_COUNT safety net alone. Sync @property, so
+        # this reads the import-time default rather than a live Config value
+        # (limits, unlike credentials, don't need per-tick liveness).
+        return ONEDRIVE_MAX_FILES_PER_SYNC or None
 
     @property
     def source_clear_delta_keys(self) -> list[str]:
@@ -302,8 +303,8 @@ class OneDriveSyncWorker(BaseSyncWorker):
         item_id = file_info['item']['id']
         return await self._client.download_file(drive_id, item_id)
 
-    def _item_from_file_info(self, file_info: Dict[str, Any], access_token: str) -> Dict[str, Any]:
-        item = super()._item_from_file_info(file_info, access_token)
+    async def _item_from_file_info(self, file_info: Dict[str, Any], access_token: str) -> Dict[str, Any]:
+        item = await super()._item_from_file_info(file_info, access_token)
         item['source_descriptor'] = {
             'drive_id': file_info['drive_id'],
             'item_id': file_info['item']['id'],

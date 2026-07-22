@@ -174,8 +174,8 @@ def test_browse_items_root():
     fake_client.close = AsyncMock()
 
     with (
-        patch('open_webui.routers.topdesk_sync.service_auth_configured', return_value=True),
-        patch('open_webui.routers.topdesk_sync.build_client', return_value=fake_client),
+        patch('open_webui.routers.topdesk_sync.service_auth_configured', new_callable=AsyncMock, return_value=True),
+        patch('open_webui.routers.topdesk_sync.build_client', new_callable=AsyncMock, return_value=fake_client),
     ):
         res = client.get('/api/v1/topdesk/browse/items')
 
@@ -205,8 +205,8 @@ def test_browse_items_children():
     fake_client.close = AsyncMock()
 
     with (
-        patch('open_webui.routers.topdesk_sync.service_auth_configured', return_value=True),
-        patch('open_webui.routers.topdesk_sync.build_client', return_value=fake_client),
+        patch('open_webui.routers.topdesk_sync.service_auth_configured', new_callable=AsyncMock, return_value=True),
+        patch('open_webui.routers.topdesk_sync.build_client', new_callable=AsyncMock, return_value=fake_client),
     ):
         res = client.get('/api/v1/topdesk/browse/items', params={'parent_id': 'i1'})
 
@@ -223,7 +223,7 @@ def test_browse_items_unconfigured_returns_400():
     app = _make_app()
     client = _admin_client(app)
 
-    with patch('open_webui.routers.topdesk_sync.service_auth_configured', return_value=False):
+    with patch('open_webui.routers.topdesk_sync.service_auth_configured', new_callable=AsyncMock, return_value=False):
         res = client.get('/api/v1/topdesk/browse/items')
 
     assert res.status_code == 400
@@ -238,8 +238,8 @@ def test_browse_items_transient_maps_503():
     fake_client.close = AsyncMock()
 
     with (
-        patch('open_webui.routers.topdesk_sync.service_auth_configured', return_value=True),
-        patch('open_webui.routers.topdesk_sync.build_client', return_value=fake_client),
+        patch('open_webui.routers.topdesk_sync.service_auth_configured', new_callable=AsyncMock, return_value=True),
+        patch('open_webui.routers.topdesk_sync.build_client', new_callable=AsyncMock, return_value=fake_client),
     ):
         res = client.get('/api/v1/topdesk/browse/items')
 
@@ -256,8 +256,8 @@ def test_browse_items_transient_429_maps_502():
     fake_client.close = AsyncMock()
 
     with (
-        patch('open_webui.routers.topdesk_sync.service_auth_configured', return_value=True),
-        patch('open_webui.routers.topdesk_sync.build_client', return_value=fake_client),
+        patch('open_webui.routers.topdesk_sync.service_auth_configured', new_callable=AsyncMock, return_value=True),
+        patch('open_webui.routers.topdesk_sync.build_client', new_callable=AsyncMock, return_value=fake_client),
     ):
         res = client.get('/api/v1/topdesk/browse/items')
 
@@ -274,8 +274,8 @@ def test_browse_items_graphql_error_maps_502():
     fake_client.close = AsyncMock()
 
     with (
-        patch('open_webui.routers.topdesk_sync.service_auth_configured', return_value=True),
-        patch('open_webui.routers.topdesk_sync.build_client', return_value=fake_client),
+        patch('open_webui.routers.topdesk_sync.service_auth_configured', new_callable=AsyncMock, return_value=True),
+        patch('open_webui.routers.topdesk_sync.build_client', new_callable=AsyncMock, return_value=fake_client),
     ):
         res = client.get('/api/v1/topdesk/browse/items')
 
@@ -292,8 +292,8 @@ def test_browse_items_connection_error_maps_502():
     fake_client.close = AsyncMock()
 
     with (
-        patch('open_webui.routers.topdesk_sync.service_auth_configured', return_value=True),
-        patch('open_webui.routers.topdesk_sync.build_client', return_value=fake_client),
+        patch('open_webui.routers.topdesk_sync.service_auth_configured', new_callable=AsyncMock, return_value=True),
+        patch('open_webui.routers.topdesk_sync.build_client', new_callable=AsyncMock, return_value=fake_client),
     ):
         res = client.get('/api/v1/topdesk/browse/items')
 
@@ -312,8 +312,8 @@ def test_browse_items_unexpected_error_maps_502():
     fake_client.close = AsyncMock()
 
     with (
-        patch('open_webui.routers.topdesk_sync.service_auth_configured', return_value=True),
-        patch('open_webui.routers.topdesk_sync.build_client', return_value=fake_client),
+        patch('open_webui.routers.topdesk_sync.service_auth_configured', new_callable=AsyncMock, return_value=True),
+        patch('open_webui.routers.topdesk_sync.build_client', new_callable=AsyncMock, return_value=fake_client),
     ):
         res = client.get('/api/v1/topdesk/browse/items')
 
@@ -332,7 +332,7 @@ def test_shared_status_delegates_with_topdesk_params():
     status_mock = AsyncMock(return_value={'provisioned': False, 'knowledge_id': None})
 
     with (
-        patch('open_webui.routers.topdesk_sync.service_auth_configured', return_value=True),
+        patch('open_webui.routers.topdesk_sync.service_auth_configured', new_callable=AsyncMock, return_value=True),
         patch('open_webui.routers.topdesk_sync.shared_kb_status_generic', status_mock),
     ):
         res = client.get('/api/v1/topdesk/shared/status')
@@ -352,7 +352,7 @@ def test_shared_provision_delegates_with_topdesk_params():
     status_mock = AsyncMock(return_value={'provisioned': True, 'knowledge_id': 'kb-1'})
 
     with (
-        patch('open_webui.routers.topdesk_sync.service_auth_configured', return_value=True),
+        patch('open_webui.routers.topdesk_sync.service_auth_configured', new_callable=AsyncMock, return_value=True),
         patch('open_webui.routers.topdesk_sync.provision_shared_kb_generic', provision_mock),
         patch('open_webui.routers.topdesk_sync.shared_kb_status_generic', status_mock),
     ):

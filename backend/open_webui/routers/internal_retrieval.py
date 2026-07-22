@@ -22,6 +22,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from open_webui.internal.db import get_async_session
 from open_webui.models.chats import Chats
+from open_webui.models.config import Config
 from open_webui.models.files import Files
 from open_webui.models.knowledge import KnowledgeFileListResponse, Knowledges
 from open_webui.routers.files import upload_file_handler
@@ -97,7 +98,7 @@ async def list_accessible_kbs(
         subset are dropped before the suspended-KB filter runs.
     """
 
-    if not getattr(request.app.state.config, 'AGENT_SEARCH_ENABLED', False):
+    if not await Config.get('agent_search.enabled', False):
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail='agent search not enabled',
@@ -139,7 +140,7 @@ async def list_accessible_files(
     should respect.
     """
 
-    if not getattr(request.app.state.config, 'AGENT_SEARCH_ENABLED', False):
+    if not await Config.get('agent_search.enabled', False):
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail='agent search not enabled',
@@ -200,7 +201,7 @@ async def list_knowledge_files(
     on this surface — tenant-isolated agents must not circumvent suspension.
     """
 
-    if not getattr(request.app.state.config, 'AGENT_SEARCH_ENABLED', False):
+    if not await Config.get('agent_search.enabled', False):
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail='agent search not enabled',
@@ -273,7 +274,7 @@ async def file_content(
     chat retrieval uses).
     """
 
-    if not getattr(request.app.state.config, 'AGENT_SEARCH_ENABLED', False):
+    if not await Config.get('agent_search.enabled', False):
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail='agent search not enabled',
@@ -326,7 +327,7 @@ async def file_raw(
     open with ``ifcopenshell``.
     """
 
-    if not getattr(request.app.state.config, 'AGENT_SEARCH_ENABLED', False):
+    if not await Config.get('agent_search.enabled', False):
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail='agent search not enabled',
@@ -414,7 +415,7 @@ async def agent_query(
     prefers a single open-webui call doesn't have to be rewritten, but new
     agents should not target it.
     """
-    if not getattr(request.app.state.config, 'AGENT_SEARCH_ENABLED', False):
+    if not await Config.get('agent_search.enabled', False):
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail='agent search not enabled',
@@ -467,7 +468,7 @@ async def files_upload(
     ``routers/images.upload_image`` + ``tools/builtin.generate_image``.
     """
 
-    if not getattr(request.app.state.config, 'AGENT_SEARCH_ENABLED', False):
+    if not await Config.get('agent_search.enabled', False):
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail='agent search not enabled',

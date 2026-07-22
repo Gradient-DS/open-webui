@@ -14,6 +14,7 @@ from starlette import status
 
 from open_webui.internal.db import get_async_session
 from open_webui.models.auths import Auths
+from open_webui.models.config import Config
 from open_webui.models.recovery_codes import RecoveryCodes
 from open_webui.models.users import Users
 from open_webui.utils.auth import (
@@ -113,7 +114,7 @@ async def get_2fa_status(
     db: AsyncSession = Depends(get_async_session),
 ):
     """Get 2FA status for the current user."""
-    if not request.app.state.config.ENABLE_2FA:
+    if not await Config.get('auth.enable_2fa'):
         raise HTTPException(status_code=404, detail='2FA is not enabled')
 
     auth = await Auths.get_auth_by_user_id(user.id, db=db)
@@ -141,7 +142,7 @@ async def setup_totp(
     db: AsyncSession = Depends(get_async_session),
 ):
     """Generate a new TOTP secret and QR code. Does NOT persist until /totp/enable."""
-    if not request.app.state.config.ENABLE_2FA:
+    if not await Config.get('auth.enable_2fa'):
         raise HTTPException(status_code=404, detail='2FA is not enabled')
 
     # 2FA is only enforced on the email+password login flow
@@ -174,7 +175,7 @@ async def enable_totp(
     db: AsyncSession = Depends(get_async_session),
 ):
     """Verify a TOTP code against the provided secret, then enable 2FA and return recovery codes."""
-    if not request.app.state.config.ENABLE_2FA:
+    if not await Config.get('auth.enable_2fa'):
         raise HTTPException(status_code=404, detail='2FA is not enabled')
 
     if user.oauth:
@@ -227,7 +228,7 @@ async def disable_totp(
     db: AsyncSession = Depends(get_async_session),
 ):
     """Disable TOTP 2FA. Requires password re-verification."""
-    if not request.app.state.config.ENABLE_2FA:
+    if not await Config.get('auth.enable_2fa'):
         raise HTTPException(status_code=404, detail='2FA is not enabled')
 
     auth = await Auths.get_auth_by_user_id(user.id, db=db)
@@ -324,7 +325,7 @@ async def regenerate_recovery_codes(
     db: AsyncSession = Depends(get_async_session),
 ):
     """Regenerate recovery codes. Requires password re-verification."""
-    if not request.app.state.config.ENABLE_2FA:
+    if not await Config.get('auth.enable_2fa'):
         raise HTTPException(status_code=404, detail='2FA is not enabled')
 
     auth = await Auths.get_auth_by_user_id(user.id, db=db)

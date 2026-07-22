@@ -61,7 +61,8 @@ async def _invoke(
     # Native seams — kept no-op so a fallthrough completes without real I/O.
     loader = MagicMock()
     loader.aload = AsyncMock(return_value=[Document(page_content='hello world', metadata={})])
-    monkeypatch.setattr(retrieval_router, 'build_loader_from_config', lambda request: loader)
+    monkeypatch.setattr(retrieval_router, 'build_loader_from_config', lambda request, config=None: loader)
+    monkeypatch.setattr(retrieval_router, 'get_loader_config', AsyncMock(return_value={}))
     monkeypatch.setattr(retrieval_router.Storage, 'get_file', lambda p: '/tmp/x')
     monkeypatch.setattr(retrieval_router, 'save_docs_to_vector_db', MagicMock(return_value=True))
     monkeypatch.setattr(retrieval_router, 'get_async_db', _fake_db_cm)
@@ -69,12 +70,15 @@ async def _invoke(
     vector_client.delete_collection = AsyncMock()
     monkeypatch.setattr(retrieval_router, 'ASYNC_VECTOR_DB_CLIENT', vector_client)
 
+    # Config now comes from the per-key store via get_rag_config_state(), not
+    # request.app.state.config; drive the routing flags through that namespace.
+    cfg_state = MagicMock()
+    cfg_state.DISTRIBUTED_DOC_PIPELINE_ENABLED = kb_flag
+    cfg_state.DISTRIBUTED_DOC_PIPELINE_CHAT_ENABLED = chat_flag
+    cfg_state.BYPASS_EMBEDDING_AND_RETRIEVAL = bypass
+    monkeypatch.setattr(retrieval_router, 'get_rag_config_state', AsyncMock(return_value=cfg_state))
+
     request = MagicMock()
-    request.app.state.config = MagicMock(
-        DISTRIBUTED_DOC_PIPELINE_ENABLED=kb_flag,
-        DISTRIBUTED_DOC_PIPELINE_CHAT_ENABLED=chat_flag,
-        BYPASS_EMBEDDING_AND_RETRIEVAL=bypass,
-    )
     user = MagicMock(id='user-1', role='user')
     db = MagicMock()
     db.commit = AsyncMock()

@@ -138,7 +138,7 @@
 	const cloneHandler = async (prompt) => {
 		const clonedPrompt = { ...prompt };
 
-		clonedPrompt.title = `${clonedPrompt.title} (Clone)`;
+		clonedPrompt.name = `${clonedPrompt.name} (Clone)`;
 		const baseCommand = clonedPrompt.command.startsWith('/')
 			? clonedPrompt.command.substring(1)
 			: clonedPrompt.command;
@@ -481,6 +481,9 @@
 									</button>
 								</Tooltip>
 								<PromptMenu
+									editHandler={() => {
+										goto(`/workspace/prompts/${prompt.id}`);
+									}}
 									shareHandler={() => {
 										shareHandler(prompt);
 									}}

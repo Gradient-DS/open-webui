@@ -3,6 +3,7 @@ import re
 
 import httpx
 
+from open_webui.models.config import Config
 from open_webui.services.email.auth import get_mail_access_token
 
 GRAPH_BASE_URL = 'https://graph.microsoft.com/v1.0'
@@ -17,7 +18,7 @@ async def send_mail(
 ) -> bool:
     """Send email via Microsoft Graph API. Returns True on success."""
     token = await get_mail_access_token(app)
-    from_address = str(app.state.config.EMAIL_FROM_ADDRESS)
+    from_address = str(await Config.get('email.from_address'))
 
     message = {
         'subject': subject,

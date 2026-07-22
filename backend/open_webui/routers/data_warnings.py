@@ -1,6 +1,7 @@
 """Data sovereignty warning audit logging router."""
 
 from fastapi import APIRouter, Depends, Request
+from open_webui.models.config import Config
 from open_webui.models.data_warnings import DataWarningLogForm, DataWarningLogModel, DataWarningLogs
 from open_webui.utils.auth import get_verified_user
 
@@ -14,7 +15,7 @@ async def log_data_warning_acceptance(
     user=Depends(get_verified_user),
 ):
     """Log that a user accepted a data sovereignty warning."""
-    if not request.app.state.config.ENABLE_DATA_WARNINGS:
+    if not await Config.get('features.enable_data_warnings'):
         # Silently succeed — don't break the send flow if feature is off
         return DataWarningLogModel(
             id='noop',

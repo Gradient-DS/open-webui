@@ -11,10 +11,7 @@ from typing import Optional
 
 import httpx
 
-from open_webui.config import (
-    CONFLUENCE_OAUTH_CLIENT_ID,
-    CONFLUENCE_OAUTH_CLIENT_SECRET,
-)
+from open_webui.models.config import Config
 from open_webui.services.sync.token_refresh import (
     get_valid_access_token as _generic_get_valid_access_token,
 )
@@ -63,8 +60,8 @@ async def _refresh_token(token_data: dict) -> Optional[dict]:
                 _TOKEN_URL,
                 json={
                     'grant_type': 'refresh_token',
-                    'client_id': CONFLUENCE_OAUTH_CLIENT_ID.value,
-                    'client_secret': CONFLUENCE_OAUTH_CLIENT_SECRET.value,
+                    'client_id': await Config.get('confluence.client_id', ''),
+                    'client_secret': await Config.get('confluence.client_secret', ''),
                     'refresh_token': refresh_token,
                 },
                 headers={'Content-Type': 'application/json'},

@@ -16,11 +16,7 @@ from urllib.parse import urlencode
 from fastapi import Request
 
 from open_webui.models.oauth_sessions import OAuthSessions
-from open_webui.config import (
-    ONEDRIVE_CLIENT_ID_BUSINESS,
-    MICROSOFT_CLIENT_SECRET,
-    ONEDRIVE_SHAREPOINT_TENANT_ID,
-)
+from open_webui.models.config import Config
 from open_webui.services.sync import pending_flows as _pending
 
 log = logging.getLogger(__name__)
@@ -63,7 +59,7 @@ async def get_authorization_url(
     Returns the URL to redirect the user to for authorization.
     Stores the pending flow in the shared store for callback validation.
     """
-    tenant_id = ONEDRIVE_SHAREPOINT_TENANT_ID.value or 'common'
+    tenant_id = await Config.get('onedrive.sharepoint_tenant_id', '') or 'common'
     code_verifier, code_challenge = _generate_pkce()
     state = secrets.token_urlsafe(32)
 
@@ -82,7 +78,7 @@ async def get_authorization_url(
     )
 
     params = {
-        'client_id': ONEDRIVE_CLIENT_ID_BUSINESS.value,
+        'client_id': await Config.get('onedrive.client_id_business', ''),
         'response_type': 'code',
         'redirect_uri': redirect_uri,
         'scope': _GRAPH_SCOPE,
@@ -130,7 +126,7 @@ async def exchange_code_for_tokens(
     if time.time() - flow['created_at'] > _FLOW_TTL_SECONDS:
         return {'success': False, 'error': 'Authorization flow expired'}
 
-    tenant_id = ONEDRIVE_SHAREPOINT_TENANT_ID.value or 'common'
+    tenant_id = await Config.get('onedrive.sharepoint_tenant_id', '') or 'common'
     token_url = f'{_AUTHORITY_BASE}/{tenant_id}/oauth2/v2.0/token'
 
     try:
@@ -138,8 +134,8 @@ async def exchange_code_for_tokens(
             response = await client.post(
                 token_url,
                 data={
-                    'client_id': ONEDRIVE_CLIENT_ID_BUSINESS.value,
-                    'client_secret': MICROSOFT_CLIENT_SECRET.value,
+                    'client_id': await Config.get('onedrive.client_id_business', ''),
+                    'client_secret': await Config.get('oauth.microsoft.client_secret', ''),
                     'code': code,
                     'redirect_uri': flow['redirect_uri'],
                     'grant_type': 'authorization_code',

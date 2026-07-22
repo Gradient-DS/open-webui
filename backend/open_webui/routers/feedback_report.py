@@ -15,6 +15,7 @@ from fastapi import APIRouter, Depends, Request, status
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field
 
+from open_webui.models.config import Config
 from open_webui.utils.auth import get_verified_user
 from open_webui.utils.feedback_report import (
     build_feedback_event,
@@ -46,8 +47,13 @@ class FeedbackReportForm(BaseModel):
 
 @router.post('/report')
 async def submit_feedback_report(request: Request, form: FeedbackReportForm, user=Depends(get_verified_user)):
-    config = request.app.state.config
-    if not config.ENABLE_FEEDBACK_REPORTING:
+    config = await Config.get_many(
+        'feedback_report.enable',
+        'feedback_report.include_user_identity',
+        'feedback_report.slack_webhook_url',
+        'feedback_report.trace_url_template',
+    )
+    if not config.get('feedback_report.enable'):
         return JSONResponse(
             status_code=status.HTTP_404_NOT_FOUND,
             content={'detail': 'Feedback reporting is disabled.'},
@@ -58,12 +64,12 @@ async def submit_feedback_report(request: Request, form: FeedbackReportForm, use
         description=form.description,
         context=form.context.model_dump(),
         user=user,
-        include_identity=config.FEEDBACK_REPORT_INCLUDE_USER_IDENTITY,
+        include_identity=config.get('feedback_report.include_user_identity'),
     )
     emit_feedback_log(event)  # the record — always happens
     await post_feedback_to_slack(  # best-effort notification
         event,
-        config.FEEDBACK_REPORT_SLACK_WEBHOOK_URL,
-        getattr(config, 'FEEDBACK_REPORT_TRACE_URL_TEMPLATE', ''),
+        config.get('feedback_report.slack_webhook_url'),
+        config.get('feedback_report.trace_url_template', ''),
     )
     return {'status': True}

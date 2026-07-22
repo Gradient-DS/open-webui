@@ -16,6 +16,8 @@ import open_webui.routers.retrieval as retrieval
 
 @pytest.mark.asyncio
 async def test_route_file_to_pipeline_submits_links_and_marks_processing(monkeypatch):
+    # Post-v0.10.2 the handler reads config via get_rag_config_state() (per-key
+    # Config store), not request.app.state.config — patch the namespace source.
     config = SimpleNamespace(
         PIPELINE_PRESIGN_TTL_SECONDS=900,
         PIPELINE_API_BASE_URL='http://pipe:8080',
@@ -24,7 +26,11 @@ async def test_route_file_to_pipeline_submits_links_and_marks_processing(monkeyp
         PIPELINE_CHUNK_SIZE=1000,
         PIPELINE_CHUNK_OVERLAP=100,
     )
-    request = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(config=config)))
+
+    async def fake_get_rag_config_state():
+        return config
+
+    request = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace()))
     file = SimpleNamespace(
         id='file-1',
         filename='report.pdf',
@@ -65,6 +71,7 @@ async def test_route_file_to_pipeline_submits_links_and_marks_processing(monkeyp
     monkeypatch.setattr(retrieval.Files, 'update_file_metadata_by_id', fake_update_meta, raising=False)
     monkeypatch.setattr(retrieval.Files, 'set_status', fake_set_status, raising=False)
     monkeypatch.setattr(retrieval, 'get_async_db', fake_db)
+    monkeypatch.setattr(retrieval, 'get_rag_config_state', fake_get_rag_config_state)
 
     result = await retrieval.route_file_to_pipeline(request, file, 'kb-9', user)
 
@@ -108,7 +115,11 @@ async def test_submit_existing_file_to_pipeline_submits_links_and_marks_processi
         PIPELINE_CHUNK_SIZE=1000,
         PIPELINE_CHUNK_OVERLAP=100,
     )
-    request = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(config=config)))
+
+    async def fake_get_rag_config_state():
+        return config
+
+    request = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace()))
     file = SimpleNamespace(
         id='file-1',
         filename='report.pdf',
@@ -149,6 +160,7 @@ async def test_submit_existing_file_to_pipeline_submits_links_and_marks_processi
     monkeypatch.setattr(retrieval.Files, 'update_file_metadata_by_id', fake_update_meta, raising=False)
     monkeypatch.setattr(retrieval.Files, 'set_status', fake_set_status, raising=False)
     monkeypatch.setattr(retrieval, 'get_async_db', fake_db)
+    monkeypatch.setattr(retrieval, 'get_rag_config_state', fake_get_rag_config_state)
 
     result = await retrieval.submit_existing_file_to_pipeline(request, file, 'kb-9', user)
 

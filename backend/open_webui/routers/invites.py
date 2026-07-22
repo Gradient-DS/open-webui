@@ -7,6 +7,7 @@ from pydantic import BaseModel
 from typing import Optional
 
 from open_webui.models.auths import Auths
+from open_webui.models.config import Config
 from open_webui.routers.auths import SessionUserResponse
 from open_webui.models.invites import AcceptInviteForm, InviteForm, InviteModel, Invites
 from open_webui.models.users import Users
@@ -25,7 +26,7 @@ from open_webui.env import (
     WEBUI_AUTH_COOKIE_SAME_SITE,
     WEBUI_AUTH_COOKIE_SECURE,
 )
-from open_webui.config import DEFAULT_LOCALE, ENABLE_OAUTH_SIGNUP
+from open_webui.config import DEFAULT_LOCALE
 
 log = logging.getLogger(__name__)
 
@@ -101,7 +102,7 @@ async def create_invite(
             detail='A pending invite already exists for this email',
         )
 
-    expiry_hours = request.app.state.config.INVITE_EXPIRY_HOURS
+    expiry_hours = await Config.get('email.invite_expiry_hours')
     expires_at = int(time.time()) + (expiry_hours * 3600)
 
     invite = await Invites.create_invite(
@@ -123,7 +124,7 @@ async def create_invite(
 
     email_sent = False
     # None = use backend default (send if enabled), False = explicitly skip
-    should_send = form_data.send_email is not False and request.app.state.config.ENABLE_EMAIL_INVITES
+    should_send = form_data.send_email is not False and await Config.get('email.enable_invites')
     if should_send:
         try:
             from open_webui.services.email.graph_mail_client import (
@@ -133,9 +134,9 @@ async def create_invite(
             )
 
             locale = str(DEFAULT_LOCALE) or 'en'
-            expiry_hours = request.app.state.config.INVITE_EXPIRY_HOURS
-            custom_subject = str(request.app.state.config.EMAIL_INVITE_SUBJECT or '')
-            custom_heading = str(request.app.state.config.EMAIL_INVITE_HEADING or '')
+            expiry_hours = await Config.get('email.invite_expiry_hours')
+            custom_subject = str(await Config.get('email.invite_subject') or '')
+            custom_heading = str(await Config.get('email.invite_heading') or '')
 
             html_body = render_invite_email(
                 invite_url=invite_url,
@@ -144,7 +145,7 @@ async def create_invite(
                 expiry_hours=expiry_hours,
                 client_name=CLIENT_NAME,
                 custom_heading=custom_heading,
-                oauth_signup_enabled=bool(ENABLE_OAUTH_SIGNUP.value),
+                oauth_signup_enabled=bool(await Config.get('oauth.enable_signup', False)),
             )
             await send_mail(
                 app=request.app,
@@ -287,7 +288,7 @@ async def accept_invite(
 
         # Apply default group assignment
         await apply_default_group_assignment(
-            request.app.state.config.DEFAULT_GROUP_ID,
+            await Config.get('ui.default_group_id'),
             new_user.id,
         )
 
@@ -295,7 +296,7 @@ async def accept_invite(
         await Invites.accept_invite(token)
 
         # Create session token
-        expires_delta = parse_duration(request.app.state.config.JWT_EXPIRES_IN)
+        expires_delta = parse_duration(await Config.get('auth.jwt_expiry'))
         expires_at = None
         if expires_delta:
             expires_at = int(time.time()) + int(expires_delta.total_seconds())
@@ -315,7 +316,7 @@ async def accept_invite(
             secure=WEBUI_AUTH_COOKIE_SECURE,
         )
 
-        user_permissions = await get_permissions(new_user.id, request.app.state.config.USER_PERMISSIONS)
+        user_permissions = await get_permissions(new_user.id, await Config.get('user.permissions'))
 
         return {
             'token': session_token,
@@ -391,7 +392,7 @@ async def resend_invite(
         raise HTTPException(status.HTTP_400_BAD_REQUEST, detail='Invite has been revoked')
 
     # Refresh token and expiry
-    expiry_hours = request.app.state.config.INVITE_EXPIRY_HOURS
+    expiry_hours = await Config.get('email.invite_expiry_hours')
     new_expires_at = int(time.time()) + (expiry_hours * 3600)
     updated_invite = await Invites.refresh_invite(id, new_expires_at)
 
@@ -402,7 +403,7 @@ async def resend_invite(
     invite_url = f'{base_url}/auth/invite/{updated_invite.token}'
 
     email_sent = False
-    if request.app.state.config.ENABLE_EMAIL_INVITES:
+    if await Config.get('email.enable_invites'):
         try:
             from open_webui.services.email.graph_mail_client import (
                 render_invite_email,
@@ -411,8 +412,8 @@ async def resend_invite(
             )
 
             locale = str(DEFAULT_LOCALE) or 'en'
-            custom_subject = str(request.app.state.config.EMAIL_INVITE_SUBJECT or '')
-            custom_heading = str(request.app.state.config.EMAIL_INVITE_HEADING or '')
+            custom_subject = str(await Config.get('email.invite_subject') or '')
+            custom_heading = str(await Config.get('email.invite_heading') or '')
 
             html_body = render_invite_email(
                 invite_url=invite_url,
@@ -421,7 +422,7 @@ async def resend_invite(
                 expiry_hours=expiry_hours,
                 client_name=CLIENT_NAME,
                 custom_heading=custom_heading,
-                oauth_signup_enabled=bool(ENABLE_OAUTH_SIGNUP.value),
+                oauth_signup_enabled=bool(await Config.get('oauth.enable_signup', False)),
             )
             await send_mail(
                 app=request.app,

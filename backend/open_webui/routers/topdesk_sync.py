@@ -16,11 +16,7 @@ import logging
 from typing import Literal
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
-from open_webui.config import (
-    TOPDESK_APP_PASSWORD,
-    TOPDESK_URL,
-    TOPDESK_USERNAME,
-)
+from open_webui.models.config import Config
 from open_webui.models.users import UserModel, Users
 from open_webui.services.sync.shared_kb import (
     delete_shared_kb as delete_shared_kb_generic,
@@ -128,10 +124,11 @@ async def test_connection(
     code the frontend localizes; ``detail`` is an English debug fallback. A blank
     ``app_password`` reuses the stored credential.
     """
-    url = (form_data.url or TOPDESK_URL.value or '').strip().rstrip('/')
-    username = (form_data.username or TOPDESK_USERNAME.value or '').strip()
+    stored = await Config.get_many('topdesk.url', 'topdesk.username', 'topdesk.app_password')
+    url = (form_data.url or stored.get('topdesk.url') or '').strip().rstrip('/')
+    username = (form_data.username or stored.get('topdesk.username') or '').strip()
     # Blank application password → fall back to the stored credential.
-    app_password = form_data.app_password if form_data.app_password else (TOPDESK_APP_PASSWORD.value or '')
+    app_password = form_data.app_password if form_data.app_password else (stored.get('topdesk.app_password') or '')
 
     # ``reason`` is a stable machine code the frontend maps to a localized message
     # (the ``detail`` strings stay English as a console/debug fallback). The KB REST
@@ -210,7 +207,7 @@ async def browse_items(
     ``parent_id`` returns that item's direct children (``list_item_children``).
     Each entry is ``{id, name, number, has_children, status}``.
     """
-    if not service_auth_configured():
+    if not await service_auth_configured():
         raise HTTPException(
             400,
             'TOPdesk is not configured. Save the TOPdesk URL and API token first.',
@@ -218,7 +215,7 @@ async def browse_items(
 
     client = None
     try:
-        client = build_client()
+        client = await build_client()
         if parent_id:
             nodes = await client.list_item_children(parent_id, fields=_BROWSE_FIELDS)
         else:
@@ -271,7 +268,7 @@ async def _shared_kb_status() -> dict:
     kb-mode dimension (single service-account auth), so those Confluence fields
     are deliberately omitted.
     """
-    status: dict = {'credential_configured': service_auth_configured()}
+    status: dict = {'credential_configured': await service_auth_configured()}
     status.update(await shared_kb_status_generic(_PROVIDER_TYPE, _META_KEY, items_key=_ITEMS_KEY))
     return status
 

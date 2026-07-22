@@ -13,15 +13,7 @@ from pydantic import BaseModel
 from open_webui.utils.auth import get_verified_user, get_admin_user
 from open_webui.models.users import UserModel, Users
 from open_webui.models.knowledge import Knowledges
-from open_webui.config import (
-    CONFLUENCE_OAUTH_CLIENT_ID,
-    CONFLUENCE_OAUTH_CLIENT_SECRET,
-    CONFLUENCE_SITE_URL,
-    CONFLUENCE_BASIC_AUTH_USERNAME,
-    CONFLUENCE_BASIC_AUTH_API_TOKEN,
-    CONFLUENCE_SCOPED_API_TOKEN,
-    CONFLUENCE_KB_MODE,
-)
+from open_webui.models.config import Config
 from open_webui.services.confluence.confluence_client import ConfluenceClient
 from open_webui.services.confluence.basic_auth import (
     BASIC_AUTH_SENTINEL,
@@ -348,9 +340,10 @@ async def initiate_auth(
     """Initiate OAuth auth code flow for Confluence."""
     from open_webui.services.confluence.auth import get_authorization_url
 
-    if not CONFLUENCE_OAUTH_CLIENT_ID.value:
+    oauth_cfg = await Config.get_many('confluence.client_id', 'confluence.client_secret')
+    if not oauth_cfg.get('confluence.client_id'):
         raise HTTPException(400, 'Confluence client ID not configured')
-    if not CONFLUENCE_OAUTH_CLIENT_SECRET.value:
+    if not oauth_cfg.get('confluence.client_secret'):
         raise HTTPException(400, 'Confluence client secret not configured')
 
     if knowledge_id:
@@ -434,7 +427,7 @@ async def get_token_status(
     mode = await resolve_auth_mode(knowledge_id)
     if is_service_mode(mode):
         await get_knowledge_or_raise(knowledge_id, user)
-        configured = service_auth_configured(mode)
+        configured = await service_auth_configured(mode)
         return {
             'has_token': configured,
             'is_expired': False,
@@ -465,9 +458,17 @@ async def test_connection(
     if mode not in ('basic', 'scoped'):
         mode = 'basic'
 
-    site_url = (form_data.site_url or CONFLUENCE_SITE_URL.value or '').strip()
-    username = (form_data.username or CONFLUENCE_BASIC_AUTH_USERNAME.value or '').strip()
-    stored_token = CONFLUENCE_SCOPED_API_TOKEN.value if mode == 'scoped' else CONFLUENCE_BASIC_AUTH_API_TOKEN.value
+    stored = await Config.get_many(
+        'confluence.site_url',
+        'confluence.basic_auth_username',
+        'confluence.scoped_api_token',
+        'confluence.basic_auth_api_token',
+    )
+    site_url = (form_data.site_url or stored.get('confluence.site_url') or '').strip()
+    username = (form_data.username or stored.get('confluence.basic_auth_username') or '').strip()
+    stored_token = (
+        stored.get('confluence.scoped_api_token') if mode == 'scoped' else stored.get('confluence.basic_auth_api_token')
+    )
     api_token = (form_data.api_token or stored_token or '').strip()
 
     if not site_url or not username or not api_token:
@@ -587,7 +588,7 @@ async def _browse_client(user: UserModel, cloud_id: str) -> tuple[ConfluenceClie
         site = await service_site(mode)
         if not site or cloud_id != site['cloud_id']:
             raise HTTPException(404, 'Unknown Confluence site (cloud_id)')
-        if not service_auth_configured(mode):
+        if not await service_auth_configured(mode):
             raise HTTPException(400, 'Confluence service-account auth is not configured.')
         return await build_service_client(mode), site['url']
 
@@ -794,14 +795,14 @@ async def _shared_kb_status(current_user: UserModel) -> dict:
     # credential stands in for it; OAuth needs the effective owner (the KB
     # owner, or the calling admin if no KB exists yet) to have authorized.
     if is_service_mode(auth_mode):
-        owner_connected = service_auth_configured(auth_mode)
+        owner_connected = await service_auth_configured(auth_mode)
     else:
         from open_webui.services.confluence.auth import get_stored_token
 
         owner_connected = await get_stored_token(effective_owner_id) is not None
 
     status: dict = {
-        'kb_mode': CONFLUENCE_KB_MODE.value,
+        'kb_mode': await Config.get('confluence.kb_mode', 'per_user'),
         'auth_mode': auth_mode,
         'owner_connected': owner_connected,
     }
@@ -827,7 +828,7 @@ async def list_shared_kb_spaces(user: UserModel = Depends(get_admin_user)) -> di
     auth_mode = await resolve_auth_mode(None)
 
     if is_service_mode(auth_mode):
-        if not service_auth_configured(auth_mode):
+        if not await service_auth_configured(auth_mode):
             raise HTTPException(
                 400,
                 'Confluence service-account auth is not configured. Save the service account credentials first.',

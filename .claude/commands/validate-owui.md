@@ -1,6 +1,6 @@
 ---
 description: Validate a running Open WebUI stack end-to-end by driving Chromium (Playwright MCP) via the owui-e2e Sonnet subagent. Logs in as the seeded e2e admin and clicks through a smoke flow (chat → send → assert response → Knowledge), or a custom scenario you describe.
-argument-hint: "[url=http://localhost:PORT | branch=feat/... | stack=stack-N] [email=... password=...] [free-text scenario]"
+argument-hint: '[url=http://localhost:PORT | branch=feat/... | stack=stack-N] [email=... password=...] [free-text scenario]'
 ---
 
 Run an end-to-end validation of a running Open WebUI deployment by dispatching the

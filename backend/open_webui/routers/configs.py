@@ -1,48 +1,88 @@
-import logging
-import copy
-from fastapi import APIRouter, Depends, Request, HTTPException
-from pydantic import BaseModel, ConfigDict
-import aiohttp
+from __future__ import annotations
 
+import copy
+import logging
 from typing import Optional, Union
 
+import aiohttp
+from fastapi import APIRouter, Depends, HTTPException, Request
+from mcp.shared.auth import OAuthMetadata
+from open_webui.config import BannerModel
 from open_webui.env import (
     AGENT_API_AGENTS,
     AGENT_API_ENABLED,
     AIOHTTP_CLIENT_SESSION_SSL,
     AIOHTTP_CLIENT_TIMEOUT,
 )
+from open_webui.events import EVENTS, publish_event
+from open_webui.models.config import Config
+from open_webui.models.oauth_sessions import OAuthSessions
+from open_webui.models.users import Users
 from open_webui.utils.auth import get_admin_user, get_verified_user
 from open_webui.utils.features import require_feature
 from open_webui.utils.headers import get_custom_headers
-from open_webui.config import get_config, save_config, async_save_config
-from open_webui.config import BannerModel
-from open_webui.models.users import Users
-
-from open_webui.utils.tools import (
-    get_tool_server_data,
-    get_tool_server_url,
-    set_tool_servers,
-    set_terminal_servers,
-)
 from open_webui.utils.mcp.client import MCPClient
-from open_webui.models.oauth_sessions import OAuthSessions
-
-
 from open_webui.utils.oauth import (
+    OAuthClientInformationFull,
+    apply_connection_oauth_options,
+    decrypt_data,
+    encrypt_data,
     get_discovery_urls,
     get_oauth_client_info_with_dynamic_client_registration,
     get_oauth_client_info_with_static_credentials,
-    encrypt_data,
-    decrypt_data,
+    recover_static_oauth_client_metadata,
     resolve_oauth_client_info,
-    OAuthClientInformationFull,
 )
-from mcp.shared.auth import OAuthMetadata
+from open_webui.utils.tools import (
+    bearer_auth_header,
+    get_tool_server_data,
+    get_tool_server_url,
+    set_terminal_servers,
+    set_tool_servers,
+)
+from pydantic import BaseModel, ConfigDict
 
 router = APIRouter()
 
 log = logging.getLogger(__name__)
+
+CONNECTIONS_CONFIG_KEYS = {
+    'ENABLE_DIRECT_CONNECTIONS': 'direct.enable',
+    'ENABLE_BASE_MODELS_CACHE': 'models.base_models_cache',
+}
+CODE_EXECUTION_CONFIG_KEYS = {
+    'ENABLE_CODE_EXECUTION': 'code_execution.enable',
+    'CODE_EXECUTION_ENGINE': 'code_execution.engine',
+    'CODE_EXECUTION_JUPYTER_URL': 'code_execution.jupyter.url',
+    'CODE_EXECUTION_JUPYTER_AUTH': 'code_execution.jupyter.auth',
+    'CODE_EXECUTION_JUPYTER_AUTH_TOKEN': 'code_execution.jupyter.auth_token',
+    'CODE_EXECUTION_JUPYTER_AUTH_PASSWORD': 'code_execution.jupyter.auth_password',
+    'CODE_EXECUTION_JUPYTER_TIMEOUT': 'code_execution.jupyter.timeout',
+    'ENABLE_CODE_INTERPRETER': 'code_interpreter.enable',
+    'CODE_INTERPRETER_ENGINE': 'code_interpreter.engine',
+    'CODE_INTERPRETER_PROMPT_TEMPLATE': 'code_interpreter.prompt_template',
+    'CODE_INTERPRETER_JUPYTER_URL': 'code_interpreter.jupyter.url',
+    'CODE_INTERPRETER_JUPYTER_AUTH': 'code_interpreter.jupyter.auth',
+    'CODE_INTERPRETER_JUPYTER_AUTH_TOKEN': 'code_interpreter.jupyter.auth_token',
+    'CODE_INTERPRETER_JUPYTER_AUTH_PASSWORD': 'code_interpreter.jupyter.auth_password',
+    'CODE_INTERPRETER_JUPYTER_TIMEOUT': 'code_interpreter.jupyter.timeout',
+}
+MODELS_CONFIG_KEYS = {
+    'DEFAULT_MODELS': 'ui.default_models',
+    'DEFAULT_PINNED_MODELS': 'ui.default_pinned_models',
+    'MODEL_ORDER_LIST': 'ui.model_order_list',
+    'DEFAULT_MODEL_METADATA': 'models.default_metadata',
+    'DEFAULT_MODEL_PARAMS': 'models.default_params',
+}
+
+
+async def get_config_values(key_map: dict[str, str]) -> dict:
+    values = await Config.get_many(*key_map.values())
+    return {field: values[storage_key] for field, storage_key in key_map.items() if storage_key in values}
+
+
+def config_updates(data: dict, key_map: dict[str, str]) -> dict:
+    return {key_map[field]: value for field, value in data.items() if field in key_map}
 
 
 ############################
@@ -58,9 +98,15 @@ class ImportConfigForm(BaseModel):
 
 @router.post('/import', response_model=dict)
 async def import_config(request: Request, form_data: ImportConfigForm, user=Depends(get_admin_user)):
-    await async_save_config(form_data.config)
-    request.app.state.config._sync_to_redis()
-    return get_config()
+    await Config.upsert(form_data.config)
+    await publish_event(
+        request,
+        EVENTS.CONFIG_IMPORTED,
+        actor=user,
+        subject_id='import',
+        data={'keys': list(form_data.config.keys())},
+    )
+    return await Config.get_all()
 
 
 ############################
@@ -70,7 +116,12 @@ async def import_config(request: Request, form_data: ImportConfigForm, user=Depe
 
 @router.get('/export', response_model=dict)
 async def export_config(user=Depends(get_admin_user)):
-    return get_config()
+    return await Config.get_all()
+
+
+@router.get('/namespace/{namespace}', response_model=dict)
+async def get_config_namespace(namespace: str, user=Depends(get_admin_user)):
+    return await Config.get_namespace(namespace)
 
 
 ############################
@@ -85,10 +136,7 @@ class ConnectionsConfigForm(BaseModel):
 
 @router.get('/connections', response_model=ConnectionsConfigForm)
 async def get_connections_config(request: Request, user=Depends(get_admin_user)):
-    return {
-        'ENABLE_DIRECT_CONNECTIONS': request.app.state.config.ENABLE_DIRECT_CONNECTIONS,
-        'ENABLE_BASE_MODELS_CACHE': request.app.state.config.ENABLE_BASE_MODELS_CACHE,
-    }
+    return await get_config_values(CONNECTIONS_CONFIG_KEYS)
 
 
 @router.post('/connections', response_model=ConnectionsConfigForm)
@@ -97,28 +145,33 @@ async def set_connections_config(
     form_data: ConnectionsConfigForm,
     user=Depends(get_admin_user),
 ):
-    request.app.state.config.ENABLE_DIRECT_CONNECTIONS = form_data.ENABLE_DIRECT_CONNECTIONS
-    request.app.state.config.ENABLE_BASE_MODELS_CACHE = form_data.ENABLE_BASE_MODELS_CACHE
-
-    return {
-        'ENABLE_DIRECT_CONNECTIONS': request.app.state.config.ENABLE_DIRECT_CONNECTIONS,
-        'ENABLE_BASE_MODELS_CACHE': request.app.state.config.ENABLE_BASE_MODELS_CACHE,
-    }
+    await Config.upsert(config_updates(form_data.model_dump(), CONNECTIONS_CONFIG_KEYS))
+    values = await get_config_values(CONNECTIONS_CONFIG_KEYS)
+    await publish_event(
+        request,
+        EVENTS.CONFIG_CONNECTIONS_UPDATED,
+        actor=user,
+        subject_id='connections',
+        subject_type='config',
+        data=values,
+    )
+    return values
 
 
 class OAuthClientRegistrationForm(BaseModel):
     url: str
     client_id: str
-    client_name: Optional[str] = None
-    client_secret: Optional[str] = None
-    oauth_server_url: Optional[str] = None
+    client_name: str | None = None
+    client_secret: str | None = None
+    oauth_server_url: str | None = None
+    oauth_scope: str | None = None
 
 
 @router.post('/oauth/clients/register')
 async def register_oauth_client(
     request: Request,
     form_data: OAuthClientRegistrationForm,
-    type: Optional[str] = None,
+    type: str | None = None,
     user=Depends(get_admin_user),
 ):
     try:
@@ -136,10 +189,11 @@ async def register_oauth_client(
                 oauth_server_url,
                 oauth_client_id=form_data.client_id,
                 oauth_client_secret=form_data.client_secret,
+                oauth_scope=form_data.oauth_scope,
             )
         else:
             oauth_client_info = await get_oauth_client_info_with_dynamic_client_registration(
-                request, oauth_client_id, oauth_server_url
+                request, oauth_client_id, oauth_server_url, oauth_scope=form_data.oauth_scope
             )
         return {
             'status': True,
@@ -161,12 +215,12 @@ async def register_oauth_client(
 class ToolServerConnection(BaseModel):
     url: str
     path: str
-    type: Optional[str] = 'openapi'  # openapi, mcp
-    auth_type: Optional[str]
-    headers: Optional[dict | str] = None
-    key: Optional[str]
-    config: Optional[dict]
-    info: Optional[dict] = None
+    type: str | None = 'openapi'  # openapi, mcp
+    auth_type: str | None
+    headers: dict | str | None = None
+    key: str | None
+    config: dict | None
+    info: dict | None = None
 
     model_config = ConfigDict(extra='allow')
 
@@ -181,9 +235,7 @@ async def get_tool_servers_config(
     user=Depends(get_admin_user),
     _=Depends(require_feature('tool_servers')),
 ):
-    return {
-        'TOOL_SERVER_CONNECTIONS': request.app.state.config.TOOL_SERVER_CONNECTIONS,
-    }
+    return {'TOOL_SERVER_CONNECTIONS': await Config.get('tool_server.connections')}
 
 
 @router.post('/tool_servers', response_model=ToolServersConfigForm)
@@ -193,13 +245,14 @@ async def set_tool_servers_config(
     user=Depends(get_admin_user),
     _=Depends(require_feature('tool_servers')),
 ):
-    for connection in request.app.state.config.TOOL_SERVER_CONNECTIONS:
+    existing_connections = await Config.get('tool_server.connections', []) or []
+    for connection in existing_connections:
         server_type = connection.get('type', 'openapi')
         auth_type = connection.get('auth_type', 'none')
 
         if auth_type in ('oauth_2.1', 'oauth_2.1_static'):
             # Remove existing OAuth clients for tool servers
-            server_id = connection.get('info', {}).get('id')
+            server_id = (connection.get('info') or {}).get('id')
             client_key = f'{server_type}:{server_id}'
 
             try:
@@ -208,21 +261,22 @@ async def set_tool_servers_config(
                 pass
 
     # Set new tool server connections
-    request.app.state.config.TOOL_SERVER_CONNECTIONS = [
-        connection.model_dump() for connection in form_data.TOOL_SERVER_CONNECTIONS
-    ]
+    connections = [connection.model_dump() for connection in form_data.TOOL_SERVER_CONNECTIONS]
+    await Config.upsert({'tool_server.connections': connections})
 
     await set_tool_servers(request)
 
-    for connection in request.app.state.config.TOOL_SERVER_CONNECTIONS:
+    for connection in connections:
         server_type = connection.get('type', 'openapi')
         if server_type == 'mcp':
-            server_id = connection.get('info', {}).get('id')
+            server_id = (connection.get('info') or {}).get('id')
             auth_type = connection.get('auth_type', 'none')
 
             if auth_type in ('oauth_2.1', 'oauth_2.1_static') and server_id:
                 try:
                     oauth_client_info = resolve_oauth_client_info(connection)
+                    oauth_client_info = await recover_static_oauth_client_metadata(connection, oauth_client_info)
+                    oauth_client_info = apply_connection_oauth_options(connection, oauth_client_info)
                     request.app.state.oauth_client_manager.add_client(
                         f'{server_type}:{server_id}',
                         OAuthClientInformationFull(**oauth_client_info),
@@ -231,29 +285,35 @@ async def set_tool_servers_config(
                     log.debug(f'Failed to add OAuth client for MCP tool server: {e}')
                     continue
 
-    return {
-        'TOOL_SERVER_CONNECTIONS': request.app.state.config.TOOL_SERVER_CONNECTIONS,
-    }
+    await publish_event(
+        request,
+        EVENTS.CONFIG_TOOL_SERVERS_UPDATED,
+        actor=user,
+        subject_id='tool_server.connections',
+        subject_type='config',
+        data={'count': len(connections), 'types': [connection.get('type', 'openapi') for connection in connections]},
+    )
+    return {'TOOL_SERVER_CONNECTIONS': connections}
 
 
 class TerminalServerConnection(BaseModel):
-    id: Optional[str] = ''
-    name: Optional[str] = ''
+    id: str | None = ''
+    name: str | None = ''
 
-    enabled: Optional[bool] = True
+    enabled: bool | None = True
 
     url: str
-    path: Optional[str] = '/openapi.json'
+    path: str | None = '/openapi.json'
 
-    key: Optional[str] = ''
-    auth_type: Optional[str] = 'bearer'
+    key: str | None = ''
+    auth_type: str | None = 'bearer'
 
-    config: Optional[dict] = None
+    config: dict | None = None
 
     # Orchestrator policy fields
-    server_type: Optional[str] = None  # "orchestrator", "terminal"
-    policy_id: Optional[str] = None
-    policy: Optional[dict] = None  # cached policy data
+    server_type: str | None = None  # "orchestrator", "terminal"
+    policy_id: str | None = None
+    policy: dict | None = None  # cached policy data
 
     model_config = ConfigDict(extra='allow')
 
@@ -268,9 +328,7 @@ async def get_terminal_servers_config(
     user=Depends(get_admin_user),
     _=Depends(require_feature('terminal_servers')),
 ):
-    return {
-        'TERMINAL_SERVER_CONNECTIONS': request.app.state.config.TERMINAL_SERVER_CONNECTIONS,
-    }
+    return {'TERMINAL_SERVER_CONNECTIONS': await Config.get('terminal_server.connections')}
 
 
 @router.post('/terminal_servers')
@@ -280,23 +338,28 @@ async def set_terminal_servers_config(
     user=Depends(get_admin_user),
     _=Depends(require_feature('terminal_servers')),
 ):
-    request.app.state.config.TERMINAL_SERVER_CONNECTIONS = [
-        connection.model_dump() for connection in form_data.TERMINAL_SERVER_CONNECTIONS
-    ]
+    connections = [connection.model_dump() for connection in form_data.TERMINAL_SERVER_CONNECTIONS]
+    await Config.upsert({'terminal_server.connections': connections})
 
     await set_terminal_servers(request)
 
-    return {
-        'TERMINAL_SERVER_CONNECTIONS': request.app.state.config.TERMINAL_SERVER_CONNECTIONS,
-    }
+    await publish_event(
+        request,
+        EVENTS.CONFIG_TERMINAL_SERVERS_UPDATED,
+        actor=user,
+        subject_id='terminal_server.connections',
+        subject_type='config',
+        data={'count': len(connections)},
+    )
+    return {'TERMINAL_SERVER_CONNECTIONS': connections}
 
 
-@router.post('/tool_servers/verify')
-async def verify_tool_servers_config(
+@router.post('/terminal_servers/verify')
+async def verify_terminal_server_connection(
     request: Request,
-    form_data: ToolServerConnection,
+    form_data: TerminalServerConnection,
     user=Depends(get_admin_user),
-    _=Depends(require_feature('tool_servers')),
+    _=Depends(require_feature('terminal_servers')),
 ):
     """
     Verify the connection to a terminal server by detecting its type.
@@ -310,7 +373,7 @@ async def verify_tool_servers_config(
 
     headers = {}
     if form_data.auth_type == 'bearer' and form_data.key:
-        headers['Authorization'] = f'Bearer {form_data.key}'
+        headers.update(bearer_auth_header(form_data.key))
 
     try:
         async with aiohttp.ClientSession(
@@ -345,15 +408,36 @@ async def verify_tool_servers_config(
 
 class TerminalServerPolicyForm(BaseModel):
     url: str
-    key: Optional[str] = ''
-    auth_type: Optional[str] = 'bearer'
+    key: str | None = ''
+    auth_type: str | None = 'bearer'
     policy_id: str
     policy_data: dict
 
 
+class TerminalServerLifecycleForm(BaseModel):
+    url: str
+    key: str | None = ''
+    auth_type: str | None = 'bearer'
+    policy_id: str
+    lifecycle_data: dict
+
+
+class TerminalServerRefreshForm(BaseModel):
+    url: str
+    key: str | None = ''
+    auth_type: str | None = 'bearer'
+    user_id: str | None = None
+    policy_id: str | None = None
+    only_idle: bool = True
+    reset: bool = False
+
+
 @router.post('/terminal_servers/policy')
 async def put_terminal_server_policy(
-    request: Request, form_data: TerminalServerPolicyForm, user=Depends(get_admin_user)
+    request: Request,
+    form_data: TerminalServerPolicyForm,
+    user=Depends(get_admin_user),
+    _=Depends(require_feature('terminal_servers')),
 ):
     """
     Proxy a policy PUT to an orchestrator terminal server.
@@ -364,7 +448,7 @@ async def put_terminal_server_policy(
 
     headers = {'Content-Type': 'application/json'}
     if form_data.auth_type == 'bearer' and form_data.key:
-        headers['Authorization'] = f'Bearer {form_data.key}'
+        headers.update(bearer_auth_header(form_data.key))
 
     try:
         async with aiohttp.ClientSession(
@@ -386,8 +470,104 @@ async def put_terminal_server_policy(
         raise HTTPException(status_code=400, detail='Failed to save policy to terminal server')
 
 
+@router.post('/terminal_servers/lifecycle')
+async def put_terminal_server_lifecycle(
+    request: Request,
+    form_data: TerminalServerLifecycleForm,
+    user=Depends(get_admin_user),
+    _=Depends(require_feature('terminal_servers')),
+):
+    """
+    Proxy a policy lifecycle PUT to an orchestrator terminal server.
+    """
+    base_url = (form_data.url or '').rstrip('/')
+    if not base_url:
+        raise HTTPException(status_code=400, detail='Terminal server URL is required')
+
+    headers = {'Content-Type': 'application/json'}
+    if form_data.auth_type == 'bearer' and form_data.key:
+        headers.update(bearer_auth_header(form_data.key))
+
+    try:
+        async with aiohttp.ClientSession(
+            trust_env=True,
+            timeout=aiohttp.ClientTimeout(total=AIOHTTP_CLIENT_TIMEOUT),
+        ) as session:
+            lifecycle_url = f'{base_url}/api/v1/policies/{form_data.policy_id}/lifecycle'
+            async with session.put(
+                lifecycle_url,
+                headers=headers,
+                json=form_data.lifecycle_data,
+                ssl=AIOHTTP_CLIENT_SESSION_SSL,
+            ) as resp:
+                if resp.ok:
+                    return await resp.json()
+                detail = await resp.text()
+                raise HTTPException(status_code=resp.status, detail=detail)
+    except HTTPException:
+        raise
+    except Exception as e:
+        log.debug(f'Failed to save lifecycle to terminal server: {e}')
+        raise HTTPException(status_code=400, detail='Failed to save lifecycle to terminal server')
+
+
+@router.post('/terminal_servers/refresh')
+async def refresh_terminal_server_terminals(
+    request: Request,
+    form_data: TerminalServerRefreshForm,
+    user=Depends(get_admin_user),
+    _=Depends(require_feature('terminal_servers')),
+):
+    """
+    Proxy a terminal refresh request to an orchestrator terminal server.
+    """
+    base_url = (form_data.url or '').rstrip('/')
+    if not base_url:
+        raise HTTPException(status_code=400, detail='Terminal server URL is required')
+
+    headers = {'Content-Type': 'application/json'}
+    if form_data.auth_type == 'bearer' and form_data.key:
+        headers.update(bearer_auth_header(form_data.key))
+
+    body = {
+        'only_idle': form_data.only_idle,
+        'reset': form_data.reset,
+    }
+    if form_data.user_id:
+        body['user_id'] = form_data.user_id
+    if form_data.policy_id:
+        body['policy_id'] = form_data.policy_id
+
+    try:
+        async with aiohttp.ClientSession(
+            trust_env=True,
+            timeout=aiohttp.ClientTimeout(total=AIOHTTP_CLIENT_TIMEOUT),
+        ) as session:
+            refresh_url = f'{base_url}/api/v1/terminals/refresh'
+            async with session.post(
+                refresh_url,
+                headers=headers,
+                json=body,
+                ssl=AIOHTTP_CLIENT_SESSION_SSL,
+            ) as resp:
+                if resp.ok:
+                    return await resp.json()
+                detail = await resp.text()
+                raise HTTPException(status_code=resp.status, detail=detail)
+    except HTTPException:
+        raise
+    except Exception as e:
+        log.debug(f'Failed to refresh terminals: {e}')
+        raise HTTPException(status_code=400, detail='Failed to refresh terminals')
+
+
 @router.post('/tool_servers/verify')
-async def verify_tool_servers_config(request: Request, form_data: ToolServerConnection, user=Depends(get_admin_user)):
+async def verify_tool_servers_config(
+    request: Request,
+    form_data: ToolServerConnection,
+    user=Depends(get_admin_user),
+    _=Depends(require_feature('tool_servers')),
+):
     """
     Verify the connection to the tool server.
     """
@@ -524,138 +704,88 @@ async def verify_tool_servers_config(request: Request, form_data: ToolServerConn
 class CodeInterpreterConfigForm(BaseModel):
     ENABLE_CODE_EXECUTION: bool
     CODE_EXECUTION_ENGINE: str
-    CODE_EXECUTION_JUPYTER_URL: Optional[str]
-    CODE_EXECUTION_JUPYTER_AUTH: Optional[str]
-    CODE_EXECUTION_JUPYTER_AUTH_TOKEN: Optional[str]
-    CODE_EXECUTION_JUPYTER_AUTH_PASSWORD: Optional[str]
-    CODE_EXECUTION_JUPYTER_TIMEOUT: Optional[int]
+    CODE_EXECUTION_JUPYTER_URL: str | None
+    CODE_EXECUTION_JUPYTER_AUTH: str | None
+    CODE_EXECUTION_JUPYTER_AUTH_TOKEN: str | None
+    CODE_EXECUTION_JUPYTER_AUTH_PASSWORD: str | None
+    CODE_EXECUTION_JUPYTER_TIMEOUT: int | None
     ENABLE_CODE_INTERPRETER: bool
     CODE_INTERPRETER_ENGINE: str
-    CODE_INTERPRETER_PROMPT_TEMPLATE: Optional[str]
-    CODE_INTERPRETER_JUPYTER_URL: Optional[str]
-    CODE_INTERPRETER_JUPYTER_AUTH: Optional[str]
-    CODE_INTERPRETER_JUPYTER_AUTH_TOKEN: Optional[str]
-    CODE_INTERPRETER_JUPYTER_AUTH_PASSWORD: Optional[str]
-    CODE_INTERPRETER_JUPYTER_TIMEOUT: Optional[int]
-    ENABLE_DOCUMENT_WRITER: bool
-    DOCUMENT_WRITER_PROMPT_TEMPLATE: Optional[str]
+    CODE_INTERPRETER_PROMPT_TEMPLATE: str | None
+    CODE_INTERPRETER_JUPYTER_URL: str | None
+    CODE_INTERPRETER_JUPYTER_AUTH: str | None
+    CODE_INTERPRETER_JUPYTER_AUTH_TOKEN: str | None
+    CODE_INTERPRETER_JUPYTER_AUTH_PASSWORD: str | None
+    CODE_INTERPRETER_JUPYTER_TIMEOUT: int | None
 
 
 @router.get('/code_execution', response_model=CodeInterpreterConfigForm)
 async def get_code_execution_config(request: Request, user=Depends(get_admin_user)):
-    return {
-        'ENABLE_CODE_EXECUTION': request.app.state.config.ENABLE_CODE_EXECUTION,
-        'CODE_EXECUTION_ENGINE': request.app.state.config.CODE_EXECUTION_ENGINE,
-        'CODE_EXECUTION_JUPYTER_URL': request.app.state.config.CODE_EXECUTION_JUPYTER_URL,
-        'CODE_EXECUTION_JUPYTER_AUTH': request.app.state.config.CODE_EXECUTION_JUPYTER_AUTH,
-        'CODE_EXECUTION_JUPYTER_AUTH_TOKEN': request.app.state.config.CODE_EXECUTION_JUPYTER_AUTH_TOKEN,
-        'CODE_EXECUTION_JUPYTER_AUTH_PASSWORD': request.app.state.config.CODE_EXECUTION_JUPYTER_AUTH_PASSWORD,
-        'CODE_EXECUTION_JUPYTER_TIMEOUT': request.app.state.config.CODE_EXECUTION_JUPYTER_TIMEOUT,
-        'ENABLE_CODE_INTERPRETER': request.app.state.config.ENABLE_CODE_INTERPRETER,
-        'CODE_INTERPRETER_ENGINE': request.app.state.config.CODE_INTERPRETER_ENGINE,
-        'CODE_INTERPRETER_PROMPT_TEMPLATE': request.app.state.config.CODE_INTERPRETER_PROMPT_TEMPLATE,
-        'CODE_INTERPRETER_JUPYTER_URL': request.app.state.config.CODE_INTERPRETER_JUPYTER_URL,
-        'CODE_INTERPRETER_JUPYTER_AUTH': request.app.state.config.CODE_INTERPRETER_JUPYTER_AUTH,
-        'CODE_INTERPRETER_JUPYTER_AUTH_TOKEN': request.app.state.config.CODE_INTERPRETER_JUPYTER_AUTH_TOKEN,
-        'CODE_INTERPRETER_JUPYTER_AUTH_PASSWORD': request.app.state.config.CODE_INTERPRETER_JUPYTER_AUTH_PASSWORD,
-        'CODE_INTERPRETER_JUPYTER_TIMEOUT': request.app.state.config.CODE_INTERPRETER_JUPYTER_TIMEOUT,
-        'ENABLE_DOCUMENT_WRITER': request.app.state.config.ENABLE_DOCUMENT_WRITER,
-        'DOCUMENT_WRITER_PROMPT_TEMPLATE': request.app.state.config.DOCUMENT_WRITER_PROMPT_TEMPLATE,
-    }
+    return await get_config_values(CODE_EXECUTION_CONFIG_KEYS)
 
 
 @router.post('/code_execution', response_model=CodeInterpreterConfigForm)
 async def set_code_execution_config(
     request: Request, form_data: CodeInterpreterConfigForm, user=Depends(get_admin_user)
 ):
-    request.app.state.config.ENABLE_CODE_EXECUTION = form_data.ENABLE_CODE_EXECUTION
-
-    request.app.state.config.CODE_EXECUTION_ENGINE = form_data.CODE_EXECUTION_ENGINE
-    request.app.state.config.CODE_EXECUTION_JUPYTER_URL = form_data.CODE_EXECUTION_JUPYTER_URL
-    request.app.state.config.CODE_EXECUTION_JUPYTER_AUTH = form_data.CODE_EXECUTION_JUPYTER_AUTH
-    request.app.state.config.CODE_EXECUTION_JUPYTER_AUTH_TOKEN = form_data.CODE_EXECUTION_JUPYTER_AUTH_TOKEN
-    request.app.state.config.CODE_EXECUTION_JUPYTER_AUTH_PASSWORD = form_data.CODE_EXECUTION_JUPYTER_AUTH_PASSWORD
-    request.app.state.config.CODE_EXECUTION_JUPYTER_TIMEOUT = form_data.CODE_EXECUTION_JUPYTER_TIMEOUT
-
-    request.app.state.config.ENABLE_CODE_INTERPRETER = form_data.ENABLE_CODE_INTERPRETER
-    request.app.state.config.CODE_INTERPRETER_ENGINE = form_data.CODE_INTERPRETER_ENGINE
-    request.app.state.config.CODE_INTERPRETER_PROMPT_TEMPLATE = form_data.CODE_INTERPRETER_PROMPT_TEMPLATE
-
-    request.app.state.config.CODE_INTERPRETER_JUPYTER_URL = form_data.CODE_INTERPRETER_JUPYTER_URL
-
-    request.app.state.config.CODE_INTERPRETER_JUPYTER_AUTH = form_data.CODE_INTERPRETER_JUPYTER_AUTH
-
-    request.app.state.config.CODE_INTERPRETER_JUPYTER_AUTH_TOKEN = form_data.CODE_INTERPRETER_JUPYTER_AUTH_TOKEN
-    request.app.state.config.CODE_INTERPRETER_JUPYTER_AUTH_PASSWORD = form_data.CODE_INTERPRETER_JUPYTER_AUTH_PASSWORD
-    request.app.state.config.CODE_INTERPRETER_JUPYTER_TIMEOUT = form_data.CODE_INTERPRETER_JUPYTER_TIMEOUT
-
-    request.app.state.config.ENABLE_DOCUMENT_WRITER = form_data.ENABLE_DOCUMENT_WRITER
-    request.app.state.config.DOCUMENT_WRITER_PROMPT_TEMPLATE = form_data.DOCUMENT_WRITER_PROMPT_TEMPLATE
-
-    return {
-        'ENABLE_CODE_EXECUTION': request.app.state.config.ENABLE_CODE_EXECUTION,
-        'CODE_EXECUTION_ENGINE': request.app.state.config.CODE_EXECUTION_ENGINE,
-        'CODE_EXECUTION_JUPYTER_URL': request.app.state.config.CODE_EXECUTION_JUPYTER_URL,
-        'CODE_EXECUTION_JUPYTER_AUTH': request.app.state.config.CODE_EXECUTION_JUPYTER_AUTH,
-        'CODE_EXECUTION_JUPYTER_AUTH_TOKEN': request.app.state.config.CODE_EXECUTION_JUPYTER_AUTH_TOKEN,
-        'CODE_EXECUTION_JUPYTER_AUTH_PASSWORD': request.app.state.config.CODE_EXECUTION_JUPYTER_AUTH_PASSWORD,
-        'CODE_EXECUTION_JUPYTER_TIMEOUT': request.app.state.config.CODE_EXECUTION_JUPYTER_TIMEOUT,
-        'ENABLE_CODE_INTERPRETER': request.app.state.config.ENABLE_CODE_INTERPRETER,
-        'CODE_INTERPRETER_ENGINE': request.app.state.config.CODE_INTERPRETER_ENGINE,
-        'CODE_INTERPRETER_PROMPT_TEMPLATE': request.app.state.config.CODE_INTERPRETER_PROMPT_TEMPLATE,
-        'CODE_INTERPRETER_JUPYTER_URL': request.app.state.config.CODE_INTERPRETER_JUPYTER_URL,
-        'CODE_INTERPRETER_JUPYTER_AUTH': request.app.state.config.CODE_INTERPRETER_JUPYTER_AUTH,
-        'CODE_INTERPRETER_JUPYTER_AUTH_TOKEN': request.app.state.config.CODE_INTERPRETER_JUPYTER_AUTH_TOKEN,
-        'CODE_INTERPRETER_JUPYTER_AUTH_PASSWORD': request.app.state.config.CODE_INTERPRETER_JUPYTER_AUTH_PASSWORD,
-        'CODE_INTERPRETER_JUPYTER_TIMEOUT': request.app.state.config.CODE_INTERPRETER_JUPYTER_TIMEOUT,
-        'ENABLE_DOCUMENT_WRITER': request.app.state.config.ENABLE_DOCUMENT_WRITER,
-        'DOCUMENT_WRITER_PROMPT_TEMPLATE': request.app.state.config.DOCUMENT_WRITER_PROMPT_TEMPLATE,
-    }
+    await Config.upsert(config_updates(form_data.model_dump(), CODE_EXECUTION_CONFIG_KEYS))
+    values = await get_config_values(CODE_EXECUTION_CONFIG_KEYS)
+    await publish_event(
+        request,
+        EVENTS.CONFIG_CODE_EXECUTION_UPDATED,
+        actor=user,
+        subject_id='code_execution',
+        subject_type='config',
+        data={
+            'code_execution_enabled': values.get('ENABLE_CODE_EXECUTION'),
+            'code_execution_engine': values.get('CODE_EXECUTION_ENGINE'),
+            'code_interpreter_enabled': values.get('ENABLE_CODE_INTERPRETER'),
+            'code_interpreter_engine': values.get('CODE_INTERPRETER_ENGINE'),
+        },
+    )
+    return values
 
 
 ############################
 # SetDefaultModels
 ############################
 class ModelsConfigForm(BaseModel):
-    DEFAULT_MODELS: Optional[str]
-    DEFAULT_PINNED_MODELS: Optional[str]
-    MODEL_ORDER_LIST: Optional[list[str]]
-    DEFAULT_MODEL_METADATA: Optional[dict] = None
-    DEFAULT_MODEL_PARAMS: Optional[dict] = None
+    DEFAULT_MODELS: str | None
+    DEFAULT_PINNED_MODELS: str | None
+    MODEL_ORDER_LIST: list[str | None]
+    DEFAULT_MODEL_METADATA: dict | None = None
+    DEFAULT_MODEL_PARAMS: dict | None = None
 
 
 @router.get('/models/defaults')
 async def get_models_defaults(request: Request, user=Depends(get_verified_user)):
     return {
-        'DEFAULT_MODEL_METADATA': request.app.state.config.DEFAULT_MODEL_METADATA,
+        'DEFAULT_MODEL_METADATA': await Config.get('models.default_metadata'),
     }
 
 
 @router.get('/models', response_model=ModelsConfigForm)
 async def get_models_config(request: Request, user=Depends(get_admin_user)):
-    return {
-        'DEFAULT_MODELS': request.app.state.config.DEFAULT_MODELS,
-        'DEFAULT_PINNED_MODELS': request.app.state.config.DEFAULT_PINNED_MODELS,
-        'MODEL_ORDER_LIST': request.app.state.config.MODEL_ORDER_LIST,
-        'DEFAULT_MODEL_METADATA': request.app.state.config.DEFAULT_MODEL_METADATA,
-        'DEFAULT_MODEL_PARAMS': request.app.state.config.DEFAULT_MODEL_PARAMS,
-    }
+    return await get_config_values(MODELS_CONFIG_KEYS)
 
 
 @router.post('/models', response_model=ModelsConfigForm)
 async def set_models_config(request: Request, form_data: ModelsConfigForm, user=Depends(get_admin_user)):
-    request.app.state.config.DEFAULT_MODELS = form_data.DEFAULT_MODELS
-    request.app.state.config.DEFAULT_PINNED_MODELS = form_data.DEFAULT_PINNED_MODELS
-    request.app.state.config.MODEL_ORDER_LIST = form_data.MODEL_ORDER_LIST
-    request.app.state.config.DEFAULT_MODEL_METADATA = form_data.DEFAULT_MODEL_METADATA
-    request.app.state.config.DEFAULT_MODEL_PARAMS = form_data.DEFAULT_MODEL_PARAMS
-    return {
-        'DEFAULT_MODELS': request.app.state.config.DEFAULT_MODELS,
-        'DEFAULT_PINNED_MODELS': request.app.state.config.DEFAULT_PINNED_MODELS,
-        'MODEL_ORDER_LIST': request.app.state.config.MODEL_ORDER_LIST,
-        'DEFAULT_MODEL_METADATA': request.app.state.config.DEFAULT_MODEL_METADATA,
-        'DEFAULT_MODEL_PARAMS': request.app.state.config.DEFAULT_MODEL_PARAMS,
-    }
+    await Config.upsert(config_updates(form_data.model_dump(), MODELS_CONFIG_KEYS))
+    values = await get_config_values(MODELS_CONFIG_KEYS)
+    await publish_event(
+        request,
+        EVENTS.CONFIG_MODELS_UPDATED,
+        actor=user,
+        subject_id='models',
+        subject_type='config',
+        data={
+            'default_models': values.get('DEFAULT_MODELS'),
+            'default_pinned_models': values.get('DEFAULT_PINNED_MODELS'),
+            'model_order_count': len(values.get('MODEL_ORDER_LIST') or []),
+        },
+    )
+    return values
 
 
 class PromptSuggestion(BaseModel):
@@ -674,8 +804,17 @@ async def set_default_suggestions(
     user=Depends(get_admin_user),
 ):
     data = form_data.model_dump()
-    request.app.state.config.DEFAULT_PROMPT_SUGGESTIONS = data['suggestions']
-    return request.app.state.config.DEFAULT_PROMPT_SUGGESTIONS
+    await Config.upsert({'ui.prompt_suggestions': data['suggestions']})
+    suggestions = await Config.get('ui.prompt_suggestions')
+    await publish_event(
+        request,
+        EVENTS.CONFIG_SUGGESTIONS_UPDATED,
+        actor=user,
+        subject_id='ui.prompt_suggestions',
+        subject_type='config',
+        data={'count': len(suggestions or [])},
+    )
+    return suggestions
 
 
 ############################
@@ -694,8 +833,17 @@ async def set_banners(
     user=Depends(get_admin_user),
 ):
     data = form_data.model_dump()
-    request.app.state.config.BANNERS = data['banners']
-    return request.app.state.config.BANNERS
+    await Config.upsert({'ui.banners': data['banners']})
+    banners = await Config.get('ui.banners')
+    await publish_event(
+        request,
+        EVENTS.CONFIG_BANNERS_UPDATED,
+        actor=user,
+        subject_id='ui.banners',
+        subject_type='config',
+        data={'count': len(banners or [])},
+    )
+    return banners
 
 
 @router.get('/banners', response_model=list[BannerModel])
@@ -703,7 +851,7 @@ async def get_banners(
     request: Request,
     user=Depends(get_verified_user),
 ):
-    return request.app.state.config.BANNERS
+    return await Config.get('ui.banners')
 
 
 ############################
@@ -722,8 +870,8 @@ async def set_greeting_template(
     form_data: SetGreetingTemplateForm,
     user=Depends(get_admin_user),
 ):
-    request.app.state.config.GREETING_TEMPLATE = form_data.template
-    return {'template': request.app.state.config.GREETING_TEMPLATE}
+    await Config.upsert({'ui.greeting_template': form_data.template})
+    return {'template': await Config.get('ui.greeting_template')}
 
 
 @router.get('/greeting_template')
@@ -731,12 +879,18 @@ async def get_greeting_template(
     request: Request,
     user=Depends(get_verified_user),
 ):
-    return {'template': request.app.state.config.GREETING_TEMPLATE}
+    return {'template': await Config.get('ui.greeting_template')}
 
 
 ############################
 # InviteContent
 ############################
+
+
+INVITE_CONTENT_CONFIG_KEYS = {
+    'subject': 'email.invite_subject',
+    'heading': 'email.invite_heading',
+}
 
 
 class InviteContentForm(BaseModel):
@@ -746,10 +900,7 @@ class InviteContentForm(BaseModel):
 
 @router.get('/invite_content')
 async def get_invite_content(request: Request, user=Depends(get_admin_user)):
-    return {
-        'subject': request.app.state.config.EMAIL_INVITE_SUBJECT,
-        'heading': request.app.state.config.EMAIL_INVITE_HEADING,
-    }
+    return await get_config_values(INVITE_CONTENT_CONFIG_KEYS)
 
 
 @router.post('/invite_content')
@@ -758,17 +909,21 @@ async def set_invite_content(
     form_data: InviteContentForm,
     user=Depends(get_admin_user),
 ):
-    request.app.state.config.EMAIL_INVITE_SUBJECT = form_data.subject
-    request.app.state.config.EMAIL_INVITE_HEADING = form_data.heading
-    return {
-        'subject': request.app.state.config.EMAIL_INVITE_SUBJECT,
-        'heading': request.app.state.config.EMAIL_INVITE_HEADING,
-    }
+    await Config.upsert(config_updates(form_data.model_dump(), INVITE_CONTENT_CONFIG_KEYS))
+    return await get_config_values(INVITE_CONTENT_CONFIG_KEYS)
 
 
 ############################
 # EmailConfig
 ############################
+
+
+EMAIL_CONFIG_KEYS = {
+    'ENABLE_EMAIL_INVITES': 'email.enable_invites',
+    'EMAIL_FROM_ADDRESS': 'email.from_address',
+    'EMAIL_FROM_NAME': 'email.from_name',
+    'INVITE_EXPIRY_HOURS': 'email.invite_expiry_hours',
+}
 
 
 class EmailConfigForm(BaseModel):
@@ -780,12 +935,7 @@ class EmailConfigForm(BaseModel):
 
 @router.get('/email', response_model=EmailConfigForm)
 async def get_email_config(request: Request, user=Depends(get_admin_user)):
-    return EmailConfigForm(
-        ENABLE_EMAIL_INVITES=request.app.state.config.ENABLE_EMAIL_INVITES,
-        EMAIL_FROM_ADDRESS=request.app.state.config.EMAIL_FROM_ADDRESS,
-        EMAIL_FROM_NAME=request.app.state.config.EMAIL_FROM_NAME,
-        INVITE_EXPIRY_HOURS=request.app.state.config.INVITE_EXPIRY_HOURS,
-    )
+    return await get_config_values(EMAIL_CONFIG_KEYS)
 
 
 @router.post('/email', response_model=EmailConfigForm)
@@ -794,26 +944,25 @@ async def set_email_config(
     form_data: EmailConfigForm,
     user=Depends(get_admin_user),
 ):
-    request.app.state.config.ENABLE_EMAIL_INVITES = form_data.ENABLE_EMAIL_INVITES
-    request.app.state.config.EMAIL_FROM_ADDRESS = form_data.EMAIL_FROM_ADDRESS
-    request.app.state.config.EMAIL_FROM_NAME = form_data.EMAIL_FROM_NAME
-    request.app.state.config.INVITE_EXPIRY_HOURS = form_data.INVITE_EXPIRY_HOURS
-    return form_data
+    await Config.upsert(config_updates(form_data.model_dump(), EMAIL_CONFIG_KEYS))
+    return await get_config_values(EMAIL_CONFIG_KEYS)
 
 
 @router.post('/email/test')
 async def test_email_config(request: Request, user=Depends(get_admin_user)):
     """Send a test email to the admin's own address."""
-    if not request.app.state.config.ENABLE_EMAIL_INVITES:
+    values = await Config.get_many('email.enable_invites', 'email.from_name')
+    if not values.get('email.enable_invites'):
         raise HTTPException(400, detail='Email invites are not enabled')
 
     try:
         from open_webui.services.email.graph_mail_client import send_mail
 
+        from_name = values.get('email.from_name')
         await send_mail(
             app=request.app,
             to_address=user.email,
-            subject=f'Test email from {request.app.state.config.EMAIL_FROM_NAME}',
+            subject=f'Test email from {from_name}',
             html_body='<p>This is a test email. Your email configuration is working correctly.</p>',
         )
         return {'status': 'ok', 'message': f'Test email sent to {user.email}'}
@@ -853,7 +1002,7 @@ async def _unbind_service_account(user_id: str):
 @router.get('/integrations')
 async def get_integrations_config(request: Request, user=Depends(get_admin_user)):
     return {
-        'providers': request.app.state.config.INTEGRATION_PROVIDERS,
+        'providers': await Config.get('integrations.providers'),
     }
 
 
@@ -863,7 +1012,7 @@ async def set_integrations_config(
     form_data: IntegrationsConfigForm,
     user=Depends(get_admin_user),
 ):
-    old_providers = request.app.state.config.INTEGRATION_PROVIDERS or {}
+    old_providers = await Config.get('integrations.providers') or {}
 
     # Unbind service accounts that were removed or changed
     for slug, old_provider in old_providers.items():
@@ -876,7 +1025,7 @@ async def set_integrations_config(
             await _unbind_service_account(old_sa)
 
     # Save new config
-    request.app.state.config.INTEGRATION_PROVIDERS = form_data.providers
+    await Config.upsert({'integrations.providers': form_data.providers})
 
     # Bind new service accounts
     for slug, provider in form_data.providers.items():
@@ -884,12 +1033,17 @@ async def set_integrations_config(
         if sa_id:
             await _bind_service_account(sa_id, slug)
 
-    return {'providers': request.app.state.config.INTEGRATION_PROVIDERS}
+    return {'providers': await Config.get('integrations.providers')}
 
 
 ####################################
 # Agent Proxy Config
 ####################################
+
+
+AGENT_PROXY_CONFIG_KEYS = {
+    'ENABLE_AGENT_PROXY': 'agent_proxy.enable',
+}
 
 
 class AgentProxyConfigForm(BaseModel):
@@ -898,9 +1052,7 @@ class AgentProxyConfigForm(BaseModel):
 
 @router.get('/agent_proxy')
 async def get_agent_proxy_config(request: Request, user=Depends(get_admin_user)):
-    return {
-        'ENABLE_AGENT_PROXY': request.app.state.config.ENABLE_AGENT_PROXY,
-    }
+    return await get_config_values(AGENT_PROXY_CONFIG_KEYS)
 
 
 @router.post('/agent_proxy')
@@ -909,15 +1061,30 @@ async def set_agent_proxy_config(
     form_data: AgentProxyConfigForm,
     user=Depends(get_admin_user),
 ):
-    request.app.state.config.ENABLE_AGENT_PROXY = form_data.ENABLE_AGENT_PROXY
-    return {
-        'ENABLE_AGENT_PROXY': request.app.state.config.ENABLE_AGENT_PROXY,
-    }
+    await Config.upsert(config_updates(form_data.model_dump(), AGENT_PROXY_CONFIG_KEYS))
+    return await get_config_values(AGENT_PROXY_CONFIG_KEYS)
 
 
 ####################################
 # Confluence Config
 ####################################
+
+
+CONFLUENCE_CONFIG_KEYS = {
+    'ENABLE_CONFLUENCE_INTEGRATION': 'confluence.enable',
+    'ENABLE_CONFLUENCE_SYNC': 'confluence.enable_sync',
+    'CONFLUENCE_OAUTH_CLIENT_ID': 'confluence.client_id',
+    'CONFLUENCE_OAUTH_CLIENT_SECRET': 'confluence.client_secret',
+    'CONFLUENCE_SYNC_INTERVAL_MINUTES': 'confluence.sync_interval_minutes',
+    'CONFLUENCE_MAX_PAGES_PER_SYNC': 'confluence.max_pages_per_sync',
+    'CONFLUENCE_AUTH_MODE': 'confluence.auth_mode',
+    'CONFLUENCE_SITE_URL': 'confluence.site_url',
+    'CONFLUENCE_BASIC_AUTH_USERNAME': 'confluence.basic_auth_username',
+    'CONFLUENCE_BASIC_AUTH_API_TOKEN': 'confluence.basic_auth_api_token',
+    'CONFLUENCE_SCOPED_API_TOKEN': 'confluence.scoped_api_token',
+    'CONFLUENCE_CLOUD_ID': 'confluence.cloud_id',
+    'CONFLUENCE_KB_MODE': 'confluence.kb_mode',
+}
 
 
 class ConfluenceConfigForm(BaseModel):
@@ -945,26 +1112,10 @@ class ConfluenceConfigForm(BaseModel):
 
 @router.get('/confluence')
 async def get_confluence_config(request: Request, user=Depends(get_admin_user)):
-    c = request.app.state.config
-    return {
-        'ENABLE_CONFLUENCE_INTEGRATION': c.ENABLE_CONFLUENCE_INTEGRATION,
-        'ENABLE_CONFLUENCE_SYNC': c.ENABLE_CONFLUENCE_SYNC,
-        'CONFLUENCE_OAUTH_CLIENT_ID': c.CONFLUENCE_OAUTH_CLIENT_ID,
-        # Admin-only endpoint; same disclosure profile as the upstream
-        # Connections (API key) form, which round-trips the value masked behind
-        # a reveal toggle in the UI.
-        'CONFLUENCE_OAUTH_CLIENT_SECRET': c.CONFLUENCE_OAUTH_CLIENT_SECRET,
-        'CONFLUENCE_SYNC_INTERVAL_MINUTES': c.CONFLUENCE_SYNC_INTERVAL_MINUTES,
-        'CONFLUENCE_MAX_PAGES_PER_SYNC': c.CONFLUENCE_MAX_PAGES_PER_SYNC,
-        'CONFLUENCE_AUTH_MODE': c.CONFLUENCE_AUTH_MODE,
-        'CONFLUENCE_SITE_URL': c.CONFLUENCE_SITE_URL,
-        'CONFLUENCE_BASIC_AUTH_USERNAME': c.CONFLUENCE_BASIC_AUTH_USERNAME,
-        'CONFLUENCE_BASIC_AUTH_API_TOKEN': c.CONFLUENCE_BASIC_AUTH_API_TOKEN,
-        # Scoped token round-trips masked in the UI, like the basic token / OAuth secret.
-        'CONFLUENCE_SCOPED_API_TOKEN': c.CONFLUENCE_SCOPED_API_TOKEN,
-        'CONFLUENCE_CLOUD_ID': c.CONFLUENCE_CLOUD_ID,
-        'CONFLUENCE_KB_MODE': c.CONFLUENCE_KB_MODE,
-    }
+    # Admin-only endpoint; secrets (client secret, basic/scoped tokens) round-trip
+    # in full, masked behind a reveal toggle in the UI — same disclosure profile
+    # as the upstream Connections (API key) form.
+    return await get_config_values(CONFLUENCE_CONFIG_KEYS)
 
 
 @router.post('/confluence')
@@ -973,7 +1124,7 @@ async def set_confluence_config(
     form_data: ConfluenceConfigForm,
     user=Depends(get_admin_user),
 ):
-    c = request.app.state.config
+    current = await get_config_values(CONFLUENCE_CONFIG_KEYS)
 
     # Compute the effective auth/KB modes up front, applying the coupling
     # ``(basic|scoped) ⇒ shared``: the service-account modes have no per-user
@@ -987,13 +1138,13 @@ async def set_confluence_config(
         _auth = form_data.CONFLUENCE_AUTH_MODE.strip()
         effective_auth = _auth if _auth in ('oauth', 'basic', 'scoped') else 'oauth'
     else:
-        effective_auth = c.CONFLUENCE_AUTH_MODE
+        effective_auth = current.get('CONFLUENCE_AUTH_MODE')
     if form_data.CONFLUENCE_KB_MODE is not None:
         # Guard against arbitrary values; only the two known modes are valid.
         _kb = form_data.CONFLUENCE_KB_MODE.strip()
         requested_kb = _kb if _kb in ('per_user', 'shared') else 'per_user'
     else:
-        requested_kb = c.CONFLUENCE_KB_MODE
+        requested_kb = current.get('CONFLUENCE_KB_MODE')
     effective_kb = 'shared' if effective_auth in ('basic', 'scoped') else requested_kb
 
     # Two switches must not silently strand or corrupt an existing shared KB; both
@@ -1005,7 +1156,7 @@ async def set_confluence_config(
     #   2. Switching the SYNC MODE away from shared (→ per_user): the toggle would
     #      orphan the KB. Uses the effective mode, so a basic-auth save (forced to
     #      shared) never trips it.
-    auth_changing = effective_auth != c.CONFLUENCE_AUTH_MODE
+    auth_changing = effective_auth != current.get('CONFLUENCE_AUTH_MODE')
     if auth_changing or effective_kb != 'shared':
         from open_webui.services.sync.shared_kb import find_shared_kb
 
@@ -1021,41 +1172,56 @@ async def set_confluence_config(
                 detail='Delete the shared Confluence knowledge base before switching to on-request (per-user) mode.',
             )
 
+    updates: dict = {}
     if form_data.ENABLE_CONFLUENCE_INTEGRATION is not None:
-        c.ENABLE_CONFLUENCE_INTEGRATION = form_data.ENABLE_CONFLUENCE_INTEGRATION
+        updates['confluence.enable'] = form_data.ENABLE_CONFLUENCE_INTEGRATION
     if form_data.ENABLE_CONFLUENCE_SYNC is not None:
-        c.ENABLE_CONFLUENCE_SYNC = form_data.ENABLE_CONFLUENCE_SYNC
+        updates['confluence.enable_sync'] = form_data.ENABLE_CONFLUENCE_SYNC
     if form_data.CONFLUENCE_OAUTH_CLIENT_ID is not None:
-        c.CONFLUENCE_OAUTH_CLIENT_ID = form_data.CONFLUENCE_OAUTH_CLIENT_ID.strip()
+        updates['confluence.client_id'] = form_data.CONFLUENCE_OAUTH_CLIENT_ID.strip()
     if form_data.CONFLUENCE_OAUTH_CLIENT_SECRET is not None:
-        c.CONFLUENCE_OAUTH_CLIENT_SECRET = form_data.CONFLUENCE_OAUTH_CLIENT_SECRET.strip()
+        updates['confluence.client_secret'] = form_data.CONFLUENCE_OAUTH_CLIENT_SECRET.strip()
     if form_data.CONFLUENCE_SYNC_INTERVAL_MINUTES is not None:
-        c.CONFLUENCE_SYNC_INTERVAL_MINUTES = form_data.CONFLUENCE_SYNC_INTERVAL_MINUTES
+        updates['confluence.sync_interval_minutes'] = form_data.CONFLUENCE_SYNC_INTERVAL_MINUTES
     if form_data.CONFLUENCE_MAX_PAGES_PER_SYNC is not None:
-        c.CONFLUENCE_MAX_PAGES_PER_SYNC = max(0, form_data.CONFLUENCE_MAX_PAGES_PER_SYNC)
+        updates['confluence.max_pages_per_sync'] = max(0, form_data.CONFLUENCE_MAX_PAGES_PER_SYNC)
     if form_data.CONFLUENCE_SITE_URL is not None:
         # Normalize to scheme://host so an admin-pasted '/wiki' suffix or deep
         # link can't double up into '.../wiki/wiki/api/v2/...' and 404.
         from open_webui.services.confluence.confluence_client import normalize_site_url
 
-        c.CONFLUENCE_SITE_URL = normalize_site_url(form_data.CONFLUENCE_SITE_URL)
+        updates['confluence.site_url'] = normalize_site_url(form_data.CONFLUENCE_SITE_URL)
     if form_data.CONFLUENCE_BASIC_AUTH_USERNAME is not None:
-        c.CONFLUENCE_BASIC_AUTH_USERNAME = form_data.CONFLUENCE_BASIC_AUTH_USERNAME.strip()
+        updates['confluence.basic_auth_username'] = form_data.CONFLUENCE_BASIC_AUTH_USERNAME.strip()
     if form_data.CONFLUENCE_BASIC_AUTH_API_TOKEN is not None:
-        c.CONFLUENCE_BASIC_AUTH_API_TOKEN = form_data.CONFLUENCE_BASIC_AUTH_API_TOKEN.strip()
+        updates['confluence.basic_auth_api_token'] = form_data.CONFLUENCE_BASIC_AUTH_API_TOKEN.strip()
     if form_data.CONFLUENCE_SCOPED_API_TOKEN is not None:
-        c.CONFLUENCE_SCOPED_API_TOKEN = form_data.CONFLUENCE_SCOPED_API_TOKEN.strip()
+        updates['confluence.scoped_api_token'] = form_data.CONFLUENCE_SCOPED_API_TOKEN.strip()
     if form_data.CONFLUENCE_CLOUD_ID is not None:
-        c.CONFLUENCE_CLOUD_ID = form_data.CONFLUENCE_CLOUD_ID.strip()
+        updates['confluence.cloud_id'] = form_data.CONFLUENCE_CLOUD_ID.strip()
     # Persist the coupled effective modes so the stored state is self-consistent.
-    c.CONFLUENCE_AUTH_MODE = effective_auth
-    c.CONFLUENCE_KB_MODE = effective_kb
+    updates['confluence.auth_mode'] = effective_auth
+    updates['confluence.kb_mode'] = effective_kb
+
+    await Config.upsert(updates)
     return await get_confluence_config(request, user)
 
 
 ####################################
 # TOPdesk Config
 ####################################
+
+
+TOPDESK_CONFIG_KEYS = {
+    'ENABLE_TOPDESK_INTEGRATION': 'topdesk.enable',
+    'ENABLE_TOPDESK_SYNC': 'topdesk.enable_sync',
+    'TOPDESK_URL': 'topdesk.url',
+    'TOPDESK_USERNAME': 'topdesk.username',
+    'TOPDESK_APP_PASSWORD': 'topdesk.app_password',
+    'TOPDESK_SYNC_INTERVAL_MINUTES': 'topdesk.sync_interval_minutes',
+    'TOPDESK_MAX_ITEMS_PER_SYNC': 'topdesk.max_items_per_sync',
+    'TOPDESK_SYNC_SCOPE': 'topdesk.sync_scope',
+}
 
 
 class TopdeskConfigForm(BaseModel):
@@ -1075,20 +1241,9 @@ class TopdeskConfigForm(BaseModel):
 
 @router.get('/topdesk')
 async def get_topdesk_config(request: Request, user=Depends(get_admin_user)):
-    c = request.app.state.config
-    return {
-        'ENABLE_TOPDESK_INTEGRATION': c.ENABLE_TOPDESK_INTEGRATION,
-        'ENABLE_TOPDESK_SYNC': c.ENABLE_TOPDESK_SYNC,
-        'TOPDESK_URL': c.TOPDESK_URL,
-        'TOPDESK_USERNAME': c.TOPDESK_USERNAME,
-        # Admin-only endpoint; same disclosure profile as the Confluence
-        # basic-auth token, which round-trips the value masked behind a reveal
-        # toggle in the UI.
-        'TOPDESK_APP_PASSWORD': c.TOPDESK_APP_PASSWORD,
-        'TOPDESK_SYNC_INTERVAL_MINUTES': c.TOPDESK_SYNC_INTERVAL_MINUTES,
-        'TOPDESK_MAX_ITEMS_PER_SYNC': c.TOPDESK_MAX_ITEMS_PER_SYNC,
-        'TOPDESK_SYNC_SCOPE': c.TOPDESK_SYNC_SCOPE,
-    }
+    # Admin-only endpoint; the app password round-trips masked behind a reveal
+    # toggle in the UI, same disclosure profile as the Confluence basic-auth token.
+    return await get_config_values(TOPDESK_CONFIG_KEYS)
 
 
 @router.post('/topdesk')
@@ -1097,32 +1252,43 @@ async def set_topdesk_config(
     form_data: TopdeskConfigForm,
     user=Depends(get_admin_user),
 ):
-    c = request.app.state.config
+    updates: dict = {}
     if form_data.ENABLE_TOPDESK_INTEGRATION is not None:
-        c.ENABLE_TOPDESK_INTEGRATION = form_data.ENABLE_TOPDESK_INTEGRATION
+        updates['topdesk.enable'] = form_data.ENABLE_TOPDESK_INTEGRATION
     if form_data.ENABLE_TOPDESK_SYNC is not None:
-        c.ENABLE_TOPDESK_SYNC = form_data.ENABLE_TOPDESK_SYNC
+        updates['topdesk.enable_sync'] = form_data.ENABLE_TOPDESK_SYNC
     if form_data.TOPDESK_URL is not None:
-        c.TOPDESK_URL = form_data.TOPDESK_URL.strip().rstrip('/')
+        updates['topdesk.url'] = form_data.TOPDESK_URL.strip().rstrip('/')
     if form_data.TOPDESK_USERNAME is not None:
-        c.TOPDESK_USERNAME = form_data.TOPDESK_USERNAME.strip()
+        updates['topdesk.username'] = form_data.TOPDESK_USERNAME.strip()
     if form_data.TOPDESK_APP_PASSWORD is not None:
-        c.TOPDESK_APP_PASSWORD = form_data.TOPDESK_APP_PASSWORD.strip()
+        updates['topdesk.app_password'] = form_data.TOPDESK_APP_PASSWORD.strip()
     if form_data.TOPDESK_SYNC_INTERVAL_MINUTES is not None:
-        c.TOPDESK_SYNC_INTERVAL_MINUTES = form_data.TOPDESK_SYNC_INTERVAL_MINUTES
+        updates['topdesk.sync_interval_minutes'] = form_data.TOPDESK_SYNC_INTERVAL_MINUTES
     if form_data.TOPDESK_MAX_ITEMS_PER_SYNC is not None:
-        c.TOPDESK_MAX_ITEMS_PER_SYNC = max(0, form_data.TOPDESK_MAX_ITEMS_PER_SYNC)
+        updates['topdesk.max_items_per_sync'] = max(0, form_data.TOPDESK_MAX_ITEMS_PER_SYNC)
     if form_data.TOPDESK_SYNC_SCOPE is not None:
         scope = form_data.TOPDESK_SYNC_SCOPE.strip().lower()
         if scope not in ('ssp', 'public', 'all'):
             raise HTTPException(400, 'TOPDESK_SYNC_SCOPE must be one of: ssp, public, all')
-        c.TOPDESK_SYNC_SCOPE = scope
+        updates['topdesk.sync_scope'] = scope
+    await Config.upsert(updates)
     return await get_topdesk_config(request, user)
 
 
 ####################################
 # Google Drive Config
 ####################################
+
+
+GOOGLE_DRIVE_CONFIG_KEYS = {
+    'ENABLE_GOOGLE_DRIVE_INTEGRATION': 'google_drive.enable',
+    'ENABLE_GOOGLE_DRIVE_SYNC': 'google_drive.enable_sync',
+    'GOOGLE_DRIVE_CLIENT_ID': 'google_drive.client_id',
+    'GOOGLE_DRIVE_API_KEY': 'google_drive.api_key',
+    'GOOGLE_DRIVE_SYNC_INTERVAL_MINUTES': 'google_drive.sync_interval_minutes',
+    'GOOGLE_DRIVE_MAX_FILES_PER_SYNC': 'google_drive.max_files_per_sync',
+}
 
 
 class GoogleDriveConfigForm(BaseModel):
@@ -1136,17 +1302,9 @@ class GoogleDriveConfigForm(BaseModel):
 
 @router.get('/google_drive')
 async def get_google_drive_config(request: Request, user=Depends(get_admin_user)):
-    c = request.app.state.config
     # Client ID + API key are PKCE-public (used browser-side by the Picker),
     # so they are returned in full — there is no secret to mask.
-    return {
-        'ENABLE_GOOGLE_DRIVE_INTEGRATION': c.ENABLE_GOOGLE_DRIVE_INTEGRATION,
-        'ENABLE_GOOGLE_DRIVE_SYNC': c.ENABLE_GOOGLE_DRIVE_SYNC,
-        'GOOGLE_DRIVE_CLIENT_ID': c.GOOGLE_DRIVE_CLIENT_ID,
-        'GOOGLE_DRIVE_API_KEY': c.GOOGLE_DRIVE_API_KEY,
-        'GOOGLE_DRIVE_SYNC_INTERVAL_MINUTES': c.GOOGLE_DRIVE_SYNC_INTERVAL_MINUTES,
-        'GOOGLE_DRIVE_MAX_FILES_PER_SYNC': c.GOOGLE_DRIVE_MAX_FILES_PER_SYNC,
-    }
+    return await get_config_values(GOOGLE_DRIVE_CONFIG_KEYS)
 
 
 @router.post('/google_drive')
@@ -1155,25 +1313,40 @@ async def set_google_drive_config(
     form_data: GoogleDriveConfigForm,
     user=Depends(get_admin_user),
 ):
-    c = request.app.state.config
+    updates: dict = {}
     if form_data.ENABLE_GOOGLE_DRIVE_INTEGRATION is not None:
-        c.ENABLE_GOOGLE_DRIVE_INTEGRATION = form_data.ENABLE_GOOGLE_DRIVE_INTEGRATION
+        updates['google_drive.enable'] = form_data.ENABLE_GOOGLE_DRIVE_INTEGRATION
     if form_data.ENABLE_GOOGLE_DRIVE_SYNC is not None:
-        c.ENABLE_GOOGLE_DRIVE_SYNC = form_data.ENABLE_GOOGLE_DRIVE_SYNC
+        updates['google_drive.enable_sync'] = form_data.ENABLE_GOOGLE_DRIVE_SYNC
     if form_data.GOOGLE_DRIVE_CLIENT_ID is not None:
-        c.GOOGLE_DRIVE_CLIENT_ID = form_data.GOOGLE_DRIVE_CLIENT_ID.strip()
+        updates['google_drive.client_id'] = form_data.GOOGLE_DRIVE_CLIENT_ID.strip()
     if form_data.GOOGLE_DRIVE_API_KEY is not None:
-        c.GOOGLE_DRIVE_API_KEY = form_data.GOOGLE_DRIVE_API_KEY.strip()
+        updates['google_drive.api_key'] = form_data.GOOGLE_DRIVE_API_KEY.strip()
     if form_data.GOOGLE_DRIVE_SYNC_INTERVAL_MINUTES is not None:
-        c.GOOGLE_DRIVE_SYNC_INTERVAL_MINUTES = form_data.GOOGLE_DRIVE_SYNC_INTERVAL_MINUTES
+        updates['google_drive.sync_interval_minutes'] = form_data.GOOGLE_DRIVE_SYNC_INTERVAL_MINUTES
     if form_data.GOOGLE_DRIVE_MAX_FILES_PER_SYNC is not None:
-        c.GOOGLE_DRIVE_MAX_FILES_PER_SYNC = max(0, form_data.GOOGLE_DRIVE_MAX_FILES_PER_SYNC)
+        updates['google_drive.max_files_per_sync'] = max(0, form_data.GOOGLE_DRIVE_MAX_FILES_PER_SYNC)
+    await Config.upsert(updates)
     return await get_google_drive_config(request, user)
 
 
 ####################################
 # OneDrive Config
 ####################################
+
+
+ONEDRIVE_CONFIG_KEYS = {
+    'ENABLE_ONEDRIVE_INTEGRATION': 'onedrive.enable',
+    'ENABLE_ONEDRIVE_SYNC': 'onedrive.enable_sync',
+    'ENABLE_ONEDRIVE_PERSONAL': 'onedrive.enable_personal',
+    'ENABLE_ONEDRIVE_BUSINESS': 'onedrive.enable_business',
+    'ONEDRIVE_CLIENT_ID_PERSONAL': 'onedrive.client_id_personal',
+    'ONEDRIVE_CLIENT_ID_BUSINESS': 'onedrive.client_id_business',
+    'ONEDRIVE_SHAREPOINT_URL': 'onedrive.sharepoint_url',
+    'ONEDRIVE_SHAREPOINT_TENANT_ID': 'onedrive.sharepoint_tenant_id',
+    'ONEDRIVE_SYNC_INTERVAL_MINUTES': 'onedrive.sync_interval_minutes',
+    'ONEDRIVE_MAX_FILES_PER_SYNC': 'onedrive.max_files_per_sync',
+}
 
 
 class OneDriveConfigForm(BaseModel):
@@ -1191,21 +1364,9 @@ class OneDriveConfigForm(BaseModel):
 
 @router.get('/onedrive')
 async def get_onedrive_config(request: Request, user=Depends(get_admin_user)):
-    c = request.app.state.config
     # OneDrive uses public (PKCE) app registrations — client IDs are not
     # secret and are returned in full.
-    return {
-        'ENABLE_ONEDRIVE_INTEGRATION': c.ENABLE_ONEDRIVE_INTEGRATION,
-        'ENABLE_ONEDRIVE_SYNC': c.ENABLE_ONEDRIVE_SYNC,
-        'ENABLE_ONEDRIVE_PERSONAL': c.ENABLE_ONEDRIVE_PERSONAL,
-        'ENABLE_ONEDRIVE_BUSINESS': c.ENABLE_ONEDRIVE_BUSINESS,
-        'ONEDRIVE_CLIENT_ID_PERSONAL': c.ONEDRIVE_CLIENT_ID_PERSONAL,
-        'ONEDRIVE_CLIENT_ID_BUSINESS': c.ONEDRIVE_CLIENT_ID_BUSINESS,
-        'ONEDRIVE_SHAREPOINT_URL': c.ONEDRIVE_SHAREPOINT_URL,
-        'ONEDRIVE_SHAREPOINT_TENANT_ID': c.ONEDRIVE_SHAREPOINT_TENANT_ID,
-        'ONEDRIVE_SYNC_INTERVAL_MINUTES': c.ONEDRIVE_SYNC_INTERVAL_MINUTES,
-        'ONEDRIVE_MAX_FILES_PER_SYNC': c.ONEDRIVE_MAX_FILES_PER_SYNC,
-    }
+    return await get_config_values(ONEDRIVE_CONFIG_KEYS)
 
 
 @router.post('/onedrive')
@@ -1214,27 +1375,28 @@ async def set_onedrive_config(
     form_data: OneDriveConfigForm,
     user=Depends(get_admin_user),
 ):
-    c = request.app.state.config
+    updates: dict = {}
     if form_data.ENABLE_ONEDRIVE_INTEGRATION is not None:
-        c.ENABLE_ONEDRIVE_INTEGRATION = form_data.ENABLE_ONEDRIVE_INTEGRATION
+        updates['onedrive.enable'] = form_data.ENABLE_ONEDRIVE_INTEGRATION
     if form_data.ENABLE_ONEDRIVE_SYNC is not None:
-        c.ENABLE_ONEDRIVE_SYNC = form_data.ENABLE_ONEDRIVE_SYNC
+        updates['onedrive.enable_sync'] = form_data.ENABLE_ONEDRIVE_SYNC
     if form_data.ENABLE_ONEDRIVE_PERSONAL is not None:
-        c.ENABLE_ONEDRIVE_PERSONAL = form_data.ENABLE_ONEDRIVE_PERSONAL
+        updates['onedrive.enable_personal'] = form_data.ENABLE_ONEDRIVE_PERSONAL
     if form_data.ENABLE_ONEDRIVE_BUSINESS is not None:
-        c.ENABLE_ONEDRIVE_BUSINESS = form_data.ENABLE_ONEDRIVE_BUSINESS
+        updates['onedrive.enable_business'] = form_data.ENABLE_ONEDRIVE_BUSINESS
     if form_data.ONEDRIVE_CLIENT_ID_PERSONAL is not None:
-        c.ONEDRIVE_CLIENT_ID_PERSONAL = form_data.ONEDRIVE_CLIENT_ID_PERSONAL.strip()
+        updates['onedrive.client_id_personal'] = form_data.ONEDRIVE_CLIENT_ID_PERSONAL.strip()
     if form_data.ONEDRIVE_CLIENT_ID_BUSINESS is not None:
-        c.ONEDRIVE_CLIENT_ID_BUSINESS = form_data.ONEDRIVE_CLIENT_ID_BUSINESS.strip()
+        updates['onedrive.client_id_business'] = form_data.ONEDRIVE_CLIENT_ID_BUSINESS.strip()
     if form_data.ONEDRIVE_SHAREPOINT_URL is not None:
-        c.ONEDRIVE_SHAREPOINT_URL = form_data.ONEDRIVE_SHAREPOINT_URL.strip()
+        updates['onedrive.sharepoint_url'] = form_data.ONEDRIVE_SHAREPOINT_URL.strip()
     if form_data.ONEDRIVE_SHAREPOINT_TENANT_ID is not None:
-        c.ONEDRIVE_SHAREPOINT_TENANT_ID = form_data.ONEDRIVE_SHAREPOINT_TENANT_ID.strip()
+        updates['onedrive.sharepoint_tenant_id'] = form_data.ONEDRIVE_SHAREPOINT_TENANT_ID.strip()
     if form_data.ONEDRIVE_SYNC_INTERVAL_MINUTES is not None:
-        c.ONEDRIVE_SYNC_INTERVAL_MINUTES = form_data.ONEDRIVE_SYNC_INTERVAL_MINUTES
+        updates['onedrive.sync_interval_minutes'] = form_data.ONEDRIVE_SYNC_INTERVAL_MINUTES
     if form_data.ONEDRIVE_MAX_FILES_PER_SYNC is not None:
-        c.ONEDRIVE_MAX_FILES_PER_SYNC = max(0, form_data.ONEDRIVE_MAX_FILES_PER_SYNC)
+        updates['onedrive.max_files_per_sync'] = max(0, form_data.ONEDRIVE_MAX_FILES_PER_SYNC)
+    await Config.upsert(updates)
     return await get_onedrive_config(request, user)
 
 
@@ -1339,11 +1501,12 @@ class ExternalAgentsConfigForm(BaseModel):
 
 @router.get('/external_agents')
 async def get_external_agents_config(request: Request, user=Depends(get_admin_user)):
+    values = await Config.get_many('agent_api.selected_agent', 'agent_api.picker_default_slug')
     return {
         'AGENT_API_ENABLED': AGENT_API_ENABLED,
         'AGENT_API_AGENTS': AGENT_API_AGENTS,
-        'AGENT_API_SELECTED_AGENT': request.app.state.config.AGENT_API_SELECTED_AGENT,
-        'AGENT_API_PICKER_DEFAULT_SLUG': request.app.state.config.AGENT_API_PICKER_DEFAULT_SLUG,
+        'AGENT_API_SELECTED_AGENT': values.get('agent_api.selected_agent'),
+        'AGENT_API_PICKER_DEFAULT_SLUG': values.get('agent_api.picker_default_slug'),
     }
 
 
@@ -1364,7 +1527,7 @@ async def set_external_agents_config(
             detail='Selected agent is not in the configured AGENT_API_AGENTS list',
         )
 
-    request.app.state.config.AGENT_API_SELECTED_AGENT = selected
+    updates: dict = {'agent_api.selected_agent': selected}
 
     if form_data.AGENT_API_PICKER_DEFAULT_SLUG is not None:
         picker_default = form_data.AGENT_API_PICKER_DEFAULT_SLUG.strip()
@@ -1373,17 +1536,27 @@ async def set_external_agents_config(
                 status_code=400,
                 detail='Picker default slug is not in the configured AGENT_API_AGENTS list',
             )
-        request.app.state.config.AGENT_API_PICKER_DEFAULT_SLUG = picker_default
+        updates['agent_api.picker_default_slug'] = picker_default
+
+    await Config.upsert(updates)
+    values = await Config.get_many('agent_api.selected_agent', 'agent_api.picker_default_slug')
 
     return {
-        'AGENT_API_SELECTED_AGENT': request.app.state.config.AGENT_API_SELECTED_AGENT,
-        'AGENT_API_PICKER_DEFAULT_SLUG': request.app.state.config.AGENT_API_PICKER_DEFAULT_SLUG,
+        'AGENT_API_SELECTED_AGENT': values.get('agent_api.selected_agent'),
+        'AGENT_API_PICKER_DEFAULT_SLUG': values.get('agent_api.picker_default_slug'),
     }
 
 
 ####################################
 # 2FA Config
 ####################################
+
+
+TWO_FA_CONFIG_KEYS = {
+    'ENABLE_2FA': 'auth.enable_2fa',
+    'REQUIRE_2FA': 'auth.require_2fa',
+    'TWO_FA_GRACE_PERIOD_DAYS': 'auth.2fa_grace_period_days',
+}
 
 
 class TwoFAConfigForm(BaseModel):
@@ -1394,11 +1567,7 @@ class TwoFAConfigForm(BaseModel):
 
 @router.get('/2fa')
 async def get_2fa_config(request: Request, user=Depends(get_admin_user)):
-    return {
-        'ENABLE_2FA': request.app.state.config.ENABLE_2FA,
-        'REQUIRE_2FA': request.app.state.config.REQUIRE_2FA,
-        'TWO_FA_GRACE_PERIOD_DAYS': request.app.state.config.TWO_FA_GRACE_PERIOD_DAYS,
-    }
+    return await get_config_values(TWO_FA_CONFIG_KEYS)
 
 
 @router.post('/2fa')
@@ -1407,19 +1576,23 @@ async def set_2fa_config(
     form_data: TwoFAConfigForm,
     user=Depends(get_admin_user),
 ):
-    request.app.state.config.ENABLE_2FA = form_data.ENABLE_2FA
-    request.app.state.config.REQUIRE_2FA = form_data.REQUIRE_2FA
-    request.app.state.config.TWO_FA_GRACE_PERIOD_DAYS = form_data.TWO_FA_GRACE_PERIOD_DAYS
-    return {
-        'ENABLE_2FA': request.app.state.config.ENABLE_2FA,
-        'REQUIRE_2FA': request.app.state.config.REQUIRE_2FA,
-        'TWO_FA_GRACE_PERIOD_DAYS': request.app.state.config.TWO_FA_GRACE_PERIOD_DAYS,
-    }
+    await Config.upsert(config_updates(form_data.model_dump(), TWO_FA_CONFIG_KEYS))
+    return await get_config_values(TWO_FA_CONFIG_KEYS)
 
 
 ####################################
 # Data Retention Config
 ####################################
+
+
+DATA_RETENTION_CONFIG_KEYS = {
+    'DATA_RETENTION_TTL_DAYS': 'admin.data_retention_ttl_days',
+    'USER_INACTIVITY_TTL_DAYS': 'admin.user_inactivity_ttl_days',
+    'CHAT_RETENTION_TTL_DAYS': 'admin.chat_retention_ttl_days',
+    'KNOWLEDGE_RETENTION_TTL_DAYS': 'admin.knowledge_retention_ttl_days',
+    'DATA_RETENTION_WARNING_DAYS': 'admin.data_retention_warning_days',
+    'ENABLE_RETENTION_WARNING_EMAIL': 'admin.enable_retention_warning_email',
+}
 
 
 class DataRetentionConfigForm(BaseModel):
@@ -1433,14 +1606,7 @@ class DataRetentionConfigForm(BaseModel):
 
 @router.get('/data-retention')
 async def get_data_retention_config(request: Request, user=Depends(get_admin_user)):
-    return {
-        'DATA_RETENTION_TTL_DAYS': request.app.state.config.DATA_RETENTION_TTL_DAYS,
-        'USER_INACTIVITY_TTL_DAYS': request.app.state.config.USER_INACTIVITY_TTL_DAYS,
-        'CHAT_RETENTION_TTL_DAYS': request.app.state.config.CHAT_RETENTION_TTL_DAYS,
-        'KNOWLEDGE_RETENTION_TTL_DAYS': request.app.state.config.KNOWLEDGE_RETENTION_TTL_DAYS,
-        'DATA_RETENTION_WARNING_DAYS': request.app.state.config.DATA_RETENTION_WARNING_DAYS,
-        'ENABLE_RETENTION_WARNING_EMAIL': request.app.state.config.ENABLE_RETENTION_WARNING_EMAIL,
-    }
+    return await get_config_values(DATA_RETENTION_CONFIG_KEYS)
 
 
 @router.post('/data-retention')
@@ -1449,20 +1615,8 @@ async def set_data_retention_config(
     form_data: DataRetentionConfigForm,
     user=Depends(get_admin_user),
 ):
-    request.app.state.config.DATA_RETENTION_TTL_DAYS = form_data.DATA_RETENTION_TTL_DAYS
-    request.app.state.config.USER_INACTIVITY_TTL_DAYS = form_data.USER_INACTIVITY_TTL_DAYS
-    request.app.state.config.CHAT_RETENTION_TTL_DAYS = form_data.CHAT_RETENTION_TTL_DAYS
-    request.app.state.config.KNOWLEDGE_RETENTION_TTL_DAYS = form_data.KNOWLEDGE_RETENTION_TTL_DAYS
-    request.app.state.config.DATA_RETENTION_WARNING_DAYS = form_data.DATA_RETENTION_WARNING_DAYS
-    request.app.state.config.ENABLE_RETENTION_WARNING_EMAIL = form_data.ENABLE_RETENTION_WARNING_EMAIL
-    return {
-        'DATA_RETENTION_TTL_DAYS': request.app.state.config.DATA_RETENTION_TTL_DAYS,
-        'USER_INACTIVITY_TTL_DAYS': request.app.state.config.USER_INACTIVITY_TTL_DAYS,
-        'CHAT_RETENTION_TTL_DAYS': request.app.state.config.CHAT_RETENTION_TTL_DAYS,
-        'KNOWLEDGE_RETENTION_TTL_DAYS': request.app.state.config.KNOWLEDGE_RETENTION_TTL_DAYS,
-        'DATA_RETENTION_WARNING_DAYS': request.app.state.config.DATA_RETENTION_WARNING_DAYS,
-        'ENABLE_RETENTION_WARNING_EMAIL': request.app.state.config.ENABLE_RETENTION_WARNING_EMAIL,
-    }
+    await Config.upsert(config_updates(form_data.model_dump(), DATA_RETENTION_CONFIG_KEYS))
+    return await get_config_values(DATA_RETENTION_CONFIG_KEYS)
 
 
 @router.post('/data-retention/test')
@@ -1474,8 +1628,19 @@ async def test_data_retention_cleanup(
     Uses current config values. Does NOT wait for the daily timer."""
     from open_webui.services.retention.service import DataRetentionService
 
-    master_ttl = request.app.state.config.DATA_RETENTION_TTL_DAYS
-    if master_ttl <= 0:
+    values = await Config.get_many(
+        'admin.data_retention_ttl_days',
+        'admin.user_inactivity_ttl_days',
+        'admin.chat_retention_ttl_days',
+        'admin.knowledge_retention_ttl_days',
+        'admin.data_retention_warning_days',
+        'admin.enable_retention_warning_email',
+        'admin.enable_user_archival',
+        'admin.default_archive_retention_days',
+    )
+
+    master_ttl = values.get('admin.data_retention_ttl_days')
+    if master_ttl is None or master_ttl <= 0:
         return {
             'status': 'skipped',
             'message': 'Data retention is disabled (DATA_RETENTION_TTL_DAYS=0)',
@@ -1484,13 +1649,13 @@ async def test_data_retention_cleanup(
     report = await DataRetentionService.run_cleanup(
         app=request.app,
         master_ttl=master_ttl,
-        user_inactivity_ttl=request.app.state.config.USER_INACTIVITY_TTL_DAYS,
-        chat_ttl=request.app.state.config.CHAT_RETENTION_TTL_DAYS,
-        knowledge_ttl=request.app.state.config.KNOWLEDGE_RETENTION_TTL_DAYS,
-        warning_days=request.app.state.config.DATA_RETENTION_WARNING_DAYS,
-        enable_warning_email=request.app.state.config.ENABLE_RETENTION_WARNING_EMAIL,
-        enable_archival=request.app.state.config.ENABLE_USER_ARCHIVAL,
-        archive_retention_days=request.app.state.config.DEFAULT_ARCHIVE_RETENTION_DAYS,
+        user_inactivity_ttl=values.get('admin.user_inactivity_ttl_days'),
+        chat_ttl=values.get('admin.chat_retention_ttl_days'),
+        knowledge_ttl=values.get('admin.knowledge_retention_ttl_days'),
+        warning_days=values.get('admin.data_retention_warning_days'),
+        enable_warning_email=values.get('admin.enable_retention_warning_email'),
+        enable_archival=values.get('admin.enable_user_archival'),
+        archive_retention_days=values.get('admin.default_archive_retention_days'),
     )
 
     return {

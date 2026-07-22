@@ -13,7 +13,7 @@
 	const dispatch = createEventDispatcher();
 
 	import { toast } from 'svelte-sonner';
-	import { getChatList, updateChatById } from '$lib/apis/chats';
+	import { deleteChatMessageById, getChatList, updateChatById } from '$lib/apis/chats';
 	import { copyToClipboard, extractCurlyBraceWords } from '$lib/utils';
 
 	import Message from './Messages/Message.svelte';
@@ -179,7 +179,7 @@
 				messages: messages
 			});
 
-			// Refresh local message content from backend (e.g. re-derived via serialize_output)
+			// Keep local plain-content edits aligned with the saved chat response.
 			if (res?.chat?.history?.messages) {
 				for (const [id, msg] of Object.entries(res.chat.history.messages)) {
 					if (history.messages[id] && (msg as any).content) {
@@ -397,8 +397,8 @@
 					parentId: parentId,
 					childrenIds: [],
 					files: undefined,
-					content: content,
-					output: output ?? undefined,
+					content: output !== undefined ? '' : content,
+					...(output !== undefined ? { output } : {}),
 					timestamp: Math.floor(Date.now() / 1000) // Unix epoch
 				};
 
@@ -416,10 +416,13 @@
 				await updateChat();
 			} else {
 				// Edit response message
-				history.messages[messageId].originalContent = history.messages[messageId].content;
-				history.messages[messageId].content = content;
+				if (content !== undefined) {
+					history.messages[messageId].originalContent = history.messages[messageId].content;
+					history.messages[messageId].content = content;
+				}
 				if (output !== undefined) {
 					history.messages[messageId].output = output;
+					history.messages[messageId].content = '';
 				}
 				await updateChat();
 			}
@@ -469,7 +472,27 @@
 			delete history.messages[id];
 		});
 
-		showMessage({ id: parentMessageId }, false);
+		let nextMessageId = parentMessageId;
+		let nextChildrenIds =
+			nextMessageId === null
+				? Object.keys(history.messages).filter((id) => history.messages[id].parentId === null)
+				: (history.messages[nextMessageId]?.childrenIds ?? []);
+		while (nextChildrenIds.length > 0) {
+			nextMessageId = nextChildrenIds.at(-1);
+			nextChildrenIds = history.messages[nextMessageId]?.childrenIds ?? [];
+		}
+		history.currentId = nextMessageId;
+		history = history;
+
+		if (!$temporaryChatEnabled) {
+			const res = await deleteChatMessageById(localStorage.token, chatId, messageId);
+			if (res?.chat?.history) {
+				history = res.chat.history;
+			}
+
+			currentChatPage.set(1);
+			await chats.set(await getChatList(localStorage.token, $currentChatPage));
+		}
 	};
 
 	const triggerScroll = () => {

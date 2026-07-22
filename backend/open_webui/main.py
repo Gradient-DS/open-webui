@@ -1,786 +1,330 @@
+from __future__ import annotations
+
 import asyncio
-import inspect
 import json
 import logging
 import mimetypes
 import os
-import shutil
 import sys
 import time
-import random
-import re
+from contextlib import asynccontextmanager
+from typing import Optional
 from uuid import uuid4
 
-
-from contextlib import asynccontextmanager
-from urllib.parse import urlencode, parse_qs, urlparse
-from pydantic import BaseModel
-from sqlalchemy import text
-
-from typing import Optional
-from aiocache import cached
 import aiohttp
 import anyio.to_thread
-
-from redis import Redis
-
-
+from redis.asyncio import Redis as AsyncRedis
 from fastapi import (
     Depends,
     FastAPI,
-    File,
-    Form,
     HTTPException,
     Request,
-    UploadFile,
-    status,
     applications,
-    BackgroundTasks,
+    status,
 )
-from fastapi.openapi.docs import get_swagger_ui_html
-
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
+from fastapi.openapi.docs import get_swagger_ui_html
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
-
-from starlette_compress import CompressMiddleware
-
+from pydantic import BaseModel
+from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncSession
+from starlette.datastructures import Headers
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.middleware.sessions import SessionMiddleware
 from starlette.responses import Response, StreamingResponse
-from starlette.datastructures import Headers
-
+from starlette_compress import CompressMiddleware
 from starsessions import (
-    SessionMiddleware as StarSessionsMiddleware,
     SessionAutoloadMiddleware,
 )
-from starsessions.stores.redis import RedisStore
-from redis.asyncio import Redis as AsyncRedis
-
-from open_webui.utils import logger
-
-# NOTE (Gradient): upstream factored these middlewares out into
-# `open_webui.utils.asgi_middleware` during the v0.9.5 merge. We keep our
-# inline versions in this file for now — specifically, our
-# `AuthTokenMiddleware` restricts the legacy `x-api-key` header to a
-# narrow set of message/inference endpoints, whereas upstream's accepts
-# it on every path. Adopting upstream's factored module is a planned
-# follow-up; see thoughts/shared/research/v0.9.5-merge-resume-handoff.md.
-from open_webui.utils.audit import AuditLevel, AuditLoggingMiddleware
-from open_webui.utils.logger import start_logger
-from open_webui.utils.session_pool import get_session
-from open_webui.socket.main import (
-    MODELS,
-    app as socket_app,
-    periodic_usage_pool_cleanup,
-    periodic_session_pool_cleanup,
-    get_event_emitter,
-    get_models_in_use,
-    get_user_id_from_session_pool,
+from starsessions import (
+    SessionMiddleware as StarSessionsMiddleware,
 )
+from starsessions.stores.redis import RedisStore
+
+from open_webui.config import (
+    BYPASS_ADMIN_ACCESS_CONTROL,
+    CACHE_DIR,
+    CORS_ALLOW_ORIGIN,
+    DEFAULT_LOCALE,
+    ENABLE_ADMIN_ANALYTICS,
+    # Admin
+    ENABLE_ADMIN_CHAT_ACCESS,
+    ENABLE_ADMIN_EXPORT,
+    # [Gradient] GDPR data export
+    ENABLE_DATA_EXPORT,
+    # [Gradient] export formats
+    ENABLE_DOCX_EXPORT,
+    USE_STYLIZED_PDF_EXPORT,
+    # [Gradient] Skills
+    ENABLE_SKILL_EXECUTION,
+    # OpenAI
+    ENV,
+    # [Gradient] Feature Flags (SaaS Tier Control) — env-only module vars
+    FEATURE_ADMIN_EVALUATIONS,
+    FEATURE_ADMIN_FUNCTIONS,
+    FEATURE_ADMIN_SETTINGS,
+    FEATURE_ADMIN_SETTINGS_TABS,
+    FEATURE_ARTIFACTS,
+    FEATURE_BUILTIN_TOOLS,
+    FEATURE_CAPTURE,
+    FEATURE_CHANGELOG,
+    FEATURE_CHAT_CONTROLS,
+    FEATURE_CHAT_CONTROLS_SECTIONS,
+    FEATURE_CHAT_OVERVIEW,
+    FEATURE_DOCUMENT_WRITER,
+    FEATURE_INPUT_MENU,
+    FEATURE_KNOWLEDGE,
+    FEATURE_MODEL_METERS,
+    FEATURE_MODELS,
+    FEATURE_NOTES_AI_CONTROLS,
+    FEATURE_PLAYGROUND,
+    FEATURE_PROMPTS,
+    FEATURE_REFERENCE_CHATS,
+    FEATURE_SIMPLE_ASSISTANT_BUILDER,
+    FEATURE_SKILL_FILES,
+    FEATURE_SKILLS,
+    FEATURE_STRICT_DATA_SEPARATION,
+    FEATURE_SYSTEM_PROMPT,
+    FEATURE_TEMPORARY_CHAT,
+    FEATURE_TERMINAL_SERVERS,
+    FEATURE_TOOL_SERVERS,
+    FEATURE_TOOLS,
+    FEATURE_USER_DEMOGRAPHICS,
+    FEATURE_VOICE,
+    FEATURE_WEBPAGE_URL,
+    FRONTEND_BUILD_DIR,
+    IFRAME_CSP,
+    # [Gradient] typed-KB file limit
+    KNOWLEDGE_MAX_FILE_COUNT,
+    # [Gradient] Per-deployment model -> datacenter/hosting mapping (model picker)
+    MODEL_HOSTING,
+    # [Gradient] Per-deployment model -> profile mapping (model picker descriptions/meters)
+    MODEL_PROFILES,
+    # [Gradient] Model Whitelist
+    MODEL_WHITELIST,
+    OAUTH_PROVIDERS,
+    STATIC_DIR,
+    THREAD_POOL_SIZE,
+    WEBUI_AUTH,
+    WEBUI_NAME,
+    async_reset_config,
+    import_legacy_config_json,
+    seed_registered_defaults,
+)
+from open_webui.constants import ERROR_MESSAGES, TASKS
+from open_webui.env import (
+    AGENT_API_ENABLED,  # [Gradient] Agent API bypass flag
+    AIOHTTP_CLIENT_SESSION_SSL,
+    AUDIT_EXCLUDED_PATHS,
+    AUDIT_INCLUDED_PATHS,
+    AUDIT_LOG_LEVEL,
+    BYPASS_MODEL_ACCESS_CONTROL,
+    CHANGELOG,
+    CLIENT_NAME,  # [Gradient] Per-deployment client name for the frontend
+    DEPLOYMENT_ID,
+    ENABLE_AUDIT_GET_REQUESTS,
+    ENABLE_COMPRESSION_MIDDLEWARE,
+    ENABLE_CUSTOM_MODEL_FALLBACK,
+    ENABLE_EASTER_EGGS,
+    EXTERNAL_PWA_MANIFEST_URL,
+    FEATURE_AGENT_PICKER,  # [Gradient] Master flag for the agent picker UI
+    # OAuth Back-Channel Logout
+    ENABLE_OAUTH_BACKCHANNEL_LOGOUT,
+    ENABLE_OTEL,
+    ENABLE_PUBLIC_ACTIVE_USERS_COUNT,
+    # SCIM
+    ENABLE_SCIM,
+    ENABLE_SIGNUP_PASSWORD_CONFIRMATION,
+    ENABLE_STAR_SESSIONS_MIDDLEWARE,
+    ENABLE_PYODIDE_FILE_PERSISTENCE,
+    ENABLE_VERSION_UPDATE_CHECK,
+    ENABLE_WEBSOCKET_SUPPORT,
+    GLOBAL_LOG_LEVEL,
+    INSTANCE_ID,
+    LICENSE_KEY,
+    LOG_FORMAT,
+    MAX_BODY_LOG_SIZE,
+    # Redis
+    REDIS_KEY_PREFIX,
+    REDIS_URL,
+    RESET_CONFIG_ON_START,
+    SAFE_MODE,
+    SCIM_TOKEN,
+    VERSION,
+    # Admin Account Runtime Creation
+    WEBUI_ADMIN_EMAIL,
+    WEBUI_ADMIN_NAME,
+    WEBUI_ADMIN_PASSWORD,
+    WEBUI_AUTH_TRUSTED_EMAIL_HEADER,
+    WEBUI_BUILD_HASH,
+    WEBUI_SECRET_KEY,
+    WEBUI_SESSION_COOKIE_SAME_SITE,
+    WEBUI_SESSION_COOKIE_SECURE,
+)
+from open_webui.events import (
+    EVENTS,
+    delete_event_webhook,
+    get_event_catalog as get_event_catalog_items,
+    get_event_webhooks,
+    migrate_legacy_webhook_config,
+    publish_event,
+    upsert_event_webhook,
+)
+from open_webui.internal.db import engine, get_async_session
+from open_webui.models.access_grants import AccessGrants
+from open_webui.models.agent_configs import AgentConfigs  # [Gradient]
+from open_webui.models.channels import Channels
+from open_webui.models.chats import ChatForm, Chats
+from open_webui.models.config import Config
+from open_webui.models.functions import Functions
+from open_webui.models.groups import Groups  # [Gradient]
+from open_webui.models.messages import Messages
+from open_webui.models.models import Models
+from open_webui.models.users import Users
 from open_webui.routers import (
     agent_configs,
     agent_proxy,
     analytics,
     archives,
-    discovery,
-    export,
     audio,
-    totp,
+    auths,
+    automations,
+    calendar,
+    channels,
+    chats,
+    configs,
+    confluence_sync,
+    data_warnings,
+    discovery,
+    evaluations,
+    export,
+    feedback_report,
+    files,
+    folders,
+    functions,
+    google_drive_sync,
+    groups,
     images,
     integrations,
     internal_retrieval,
-    ollama,
-    openai,
-    retrieval,
-    pipelines,
-    tasks,
-    auths,
-    channels,
-    chats,
-    notes,
-    folders,
-    configs,
-    groups,
-    files,
-    functions,
+    invites,
+    knowledge,
     memories,
     models,
-    knowledge,
+    notes,
+    ollama,
+    onedrive_sync,
+    openai,
+    pipelines,
     prompts,
-    evaluations,
-    skills,
+    retrieval,
+    scim,
     skill_files,
+    skills,
+    tasks,
+    terminals,
     tools,
+    topdesk_sync,
+    totp,
     users,
     utils,
-    scim,
-    onedrive_sync,
-    google_drive_sync,
-    confluence_sync,
-    topdesk_sync,
-    invites,
-    data_warnings,
-    terminals,
-    feedback_report,
-    automations,
-    calendar,
 )
-
 from open_webui.routers.retrieval import (
+    get_ef,
     get_embedding_function,
     get_reranking_function,
-    get_ef,
     get_rf,
 )
-
-
-from sqlalchemy.ext.asyncio import AsyncSession
-from open_webui.internal.db import ScopedSession, engine, get_async_session
-
-from open_webui.models.functions import Functions
-from open_webui.models.models import Models
-from open_webui.models.users import UserModel, Users
-from open_webui.models.chats import Chats, ChatForm
-from open_webui.models.agent_configs import AgentConfigs
-from open_webui.models.access_grants import AccessGrants
-from open_webui.models.groups import Groups
-
-from open_webui.config import (
-    # Ollama
-    ENABLE_OLLAMA_API,
-    OLLAMA_BASE_URLS,
-    OLLAMA_API_CONFIGS,
-    # OpenAI
-    ENABLE_OPENAI_API,
-    OPENAI_API_BASE_URLS,
-    OPENAI_API_KEYS,
-    OPENAI_API_CONFIGS,
-    # Direct Connections
-    ENABLE_DIRECT_CONNECTIONS,
-    # Model list
-    ENABLE_BASE_MODELS_CACHE,
-    # Thread pool size for FastAPI/AnyIO
-    THREAD_POOL_SIZE,
-    # Tool Server Configs
-    TOOL_SERVER_CONNECTIONS,
-    # Terminal Server
-    TERMINAL_SERVER_CONNECTIONS,
-    # Code Execution
-    ENABLE_CODE_EXECUTION,
-    CODE_EXECUTION_ENGINE,
-    CODE_EXECUTION_JUPYTER_URL,
-    CODE_EXECUTION_JUPYTER_AUTH,
-    CODE_EXECUTION_JUPYTER_AUTH_TOKEN,
-    CODE_EXECUTION_JUPYTER_AUTH_PASSWORD,
-    CODE_EXECUTION_JUPYTER_TIMEOUT,
-    ENABLE_CODE_INTERPRETER,
-    CODE_INTERPRETER_ENGINE,
-    CODE_INTERPRETER_PROMPT_TEMPLATE,
-    CODE_INTERPRETER_JUPYTER_URL,
-    CODE_INTERPRETER_JUPYTER_AUTH,
-    CODE_INTERPRETER_JUPYTER_AUTH_TOKEN,
-    CODE_INTERPRETER_JUPYTER_AUTH_PASSWORD,
-    CODE_INTERPRETER_JUPYTER_TIMEOUT,
-    ENABLE_DOCUMENT_WRITER,
-    DOCUMENT_WRITER_PROMPT_TEMPLATE,
-    ENABLE_MEMORIES,
-    # Image
-    AUTOMATIC1111_API_AUTH,
-    AUTOMATIC1111_BASE_URL,
-    AUTOMATIC1111_PARAMS,
-    COMFYUI_BASE_URL,
-    COMFYUI_API_KEY,
-    COMFYUI_WORKFLOW,
-    COMFYUI_WORKFLOW_NODES,
-    ENABLE_IMAGE_GENERATION,
-    ENABLE_IMAGE_PROMPT_GENERATION,
-    IMAGE_GENERATION_ENGINE,
-    IMAGE_GENERATION_MODEL,
-    IMAGE_SIZE,
-    IMAGE_STEPS,
-    IMAGES_OPENAI_API_BASE_URL,
-    IMAGES_OPENAI_API_VERSION,
-    IMAGES_OPENAI_API_KEY,
-    IMAGES_OPENAI_API_PARAMS,
-    IMAGES_GEMINI_API_BASE_URL,
-    IMAGES_GEMINI_API_KEY,
-    IMAGES_GEMINI_ENDPOINT_METHOD,
-    ENABLE_IMAGE_EDIT,
-    IMAGE_EDIT_ENGINE,
-    IMAGE_EDIT_MODEL,
-    IMAGE_EDIT_SIZE,
-    IMAGES_EDIT_OPENAI_API_BASE_URL,
-    IMAGES_EDIT_OPENAI_API_KEY,
-    IMAGES_EDIT_OPENAI_API_VERSION,
-    IMAGES_EDIT_GEMINI_API_BASE_URL,
-    IMAGES_EDIT_GEMINI_API_KEY,
-    IMAGES_EDIT_COMFYUI_BASE_URL,
-    IMAGES_EDIT_COMFYUI_API_KEY,
-    IMAGES_EDIT_COMFYUI_WORKFLOW,
-    IMAGES_EDIT_COMFYUI_WORKFLOW_NODES,
-    # Audio
-    AUDIO_STT_ENGINE,
-    AUDIO_STT_MODEL,
-    AUDIO_STT_SUPPORTED_CONTENT_TYPES,
-    AUDIO_STT_ALLOWED_EXTENSIONS,
-    AUDIO_STT_OPENAI_API_BASE_URL,
-    AUDIO_STT_OPENAI_API_KEY,
-    AUDIO_STT_AZURE_API_KEY,
-    AUDIO_STT_AZURE_REGION,
-    AUDIO_STT_AZURE_LOCALES,
-    AUDIO_STT_AZURE_BASE_URL,
-    AUDIO_STT_AZURE_MAX_SPEAKERS,
-    AUDIO_STT_MISTRAL_API_KEY,
-    AUDIO_STT_MISTRAL_API_BASE_URL,
-    AUDIO_STT_MISTRAL_USE_CHAT_COMPLETIONS,
-    AUDIO_TTS_ENGINE,
-    AUDIO_TTS_MODEL,
-    AUDIO_TTS_VOICE,
-    AUDIO_TTS_OPENAI_API_BASE_URL,
-    AUDIO_TTS_OPENAI_API_KEY,
-    AUDIO_TTS_OPENAI_PARAMS,
-    AUDIO_TTS_API_KEY,
-    AUDIO_TTS_SPLIT_ON,
-    AUDIO_TTS_AZURE_SPEECH_REGION,
-    AUDIO_TTS_AZURE_SPEECH_BASE_URL,
-    AUDIO_TTS_AZURE_SPEECH_OUTPUT_FORMAT,
-    AUDIO_TTS_MISTRAL_API_KEY,
-    AUDIO_TTS_MISTRAL_API_BASE_URL,
-    PLAYWRIGHT_WS_URL,
-    PLAYWRIGHT_TIMEOUT,
-    FIRECRAWL_API_BASE_URL,
-    FIRECRAWL_API_KEY,
-    FIRECRAWL_TIMEOUT,
-    WEB_LOADER_ENGINE,
-    WEB_LOADER_CONCURRENT_REQUESTS,
-    WEB_LOADER_TIMEOUT,
-    WHISPER_MODEL,
-    WHISPER_VAD_FILTER,
-    WHISPER_LANGUAGE,
-    DEEPGRAM_API_KEY,
-    WHISPER_MODEL_AUTO_UPDATE,
-    WHISPER_MODEL_DIR,
-    # Retrieval
-    RAG_TEMPLATE,
-    DEFAULT_RAG_TEMPLATE,
-    RAG_FULL_CONTEXT,
-    BYPASS_EMBEDDING_AND_RETRIEVAL,
-    RAG_EMBEDDING_MODEL,
-    RAG_EMBEDDING_MODEL_AUTO_UPDATE,
-    RAG_EMBEDDING_MODEL_TRUST_REMOTE_CODE,
-    RAG_RERANKING_ENGINE,
-    RAG_RERANKING_MODEL,
-    RAG_EXTERNAL_RERANKER_URL,
-    RAG_EXTERNAL_RERANKER_API_KEY,
-    RAG_EXTERNAL_RERANKER_TIMEOUT,
-    RAG_RERANKING_BATCH_SIZE,
-    RAG_RERANKING_MODEL_AUTO_UPDATE,
-    RAG_RERANKING_MODEL_TRUST_REMOTE_CODE,
-    RAG_EMBEDDING_ENGINE,
-    RAG_EMBEDDING_BATCH_SIZE,
-    ENABLE_ASYNC_EMBEDDING,
-    RAG_EMBEDDING_CONCURRENT_REQUESTS,
-    RAG_TOP_K,
-    RAG_TOP_K_RERANKER,
-    RAG_RELEVANCE_THRESHOLD,
-    RAG_HYBRID_BM25_WEIGHT,
-    RAG_ALLOWED_FILE_EXTENSIONS,
-    RAG_FILE_MAX_COUNT,
-    RAG_FILE_MAX_SIZE,
-    FILE_IMAGE_COMPRESSION_WIDTH,
-    FILE_IMAGE_COMPRESSION_HEIGHT,
-    RAG_OPENAI_API_BASE_URL,
-    RAG_OPENAI_API_KEY,
-    RAG_AZURE_OPENAI_BASE_URL,
-    RAG_AZURE_OPENAI_API_KEY,
-    RAG_AZURE_OPENAI_API_VERSION,
-    RAG_OLLAMA_BASE_URL,
-    RAG_OLLAMA_API_KEY,
-    CHUNK_OVERLAP,
-    CHUNK_MIN_SIZE_TARGET,
-    CHUNK_SIZE,
-    CONTENT_EXTRACTION_ENGINE,
-    DATALAB_MARKER_API_KEY,
-    DATALAB_MARKER_API_BASE_URL,
-    DATALAB_MARKER_ADDITIONAL_CONFIG,
-    DATALAB_MARKER_SKIP_CACHE,
-    DATALAB_MARKER_FORCE_OCR,
-    DATALAB_MARKER_PAGINATE,
-    DATALAB_MARKER_STRIP_EXISTING_OCR,
-    DATALAB_MARKER_DISABLE_IMAGE_EXTRACTION,
-    DATALAB_MARKER_FORMAT_LINES,
-    DATALAB_MARKER_OUTPUT_FORMAT,
-    MINERU_API_MODE,
-    MINERU_API_URL,
-    MINERU_API_KEY,
-    MINERU_API_TIMEOUT,
-    MINERU_PARAMS,
-    DATALAB_MARKER_USE_LLM,
-    EXTERNAL_DOCUMENT_LOADER_URL,
-    EXTERNAL_DOCUMENT_LOADER_API_KEY,
-    TIKA_SERVER_URL,
-    DOCLING_SERVER_URL,
-    DOCLING_API_KEY,
-    DOCLING_PARAMS,
-    DOCUMENT_INTELLIGENCE_ENDPOINT,
-    DOCUMENT_INTELLIGENCE_KEY,
-    DOCUMENT_INTELLIGENCE_MODEL,
-    MISTRAL_OCR_API_BASE_URL,
-    MISTRAL_OCR_API_KEY,
-    PADDLEOCR_VL_BASE_URL,
-    PADDLEOCR_VL_TOKEN,
-    RAG_TEXT_SPLITTER,
-    ENABLE_MARKDOWN_HEADER_TEXT_SPLITTER,
-    TIKTOKEN_ENCODING_NAME,
-    PDF_EXTRACT_IMAGES,
-    PDF_LOADER_MODE,
-    YOUTUBE_LOADER_LANGUAGE,
-    YOUTUBE_LOADER_PROXY_URL,
-    # Retrieval (Web Search)
-    ENABLE_WEB_SEARCH,
-    WEB_SEARCH_ENGINE,
-    BYPASS_WEB_SEARCH_EMBEDDING_AND_RETRIEVAL,
-    BYPASS_WEB_SEARCH_WEB_LOADER,
-    WEB_SEARCH_RESULT_COUNT,
-    WEB_SEARCH_CONCURRENT_REQUESTS,
-    WEB_FETCH_MAX_CONTENT_LENGTH,
-    WEB_SEARCH_TRUST_ENV,
-    WEB_SEARCH_DOMAIN_FILTER_LIST,
-    OLLAMA_CLOUD_WEB_SEARCH_API_KEY,
-    JINA_API_KEY,
-    JINA_API_BASE_URL,
-    SEARCHAPI_API_KEY,
-    SEARCHAPI_ENGINE,
-    SERPAPI_API_KEY,
-    SERPAPI_ENGINE,
-    SEARXNG_QUERY_URL,
-    SEARXNG_LANGUAGE,
-    YACY_QUERY_URL,
-    YACY_USERNAME,
-    YACY_PASSWORD,
-    SERPER_API_KEY,
-    SERPLY_API_KEY,
-    DDGS_BACKEND,
-    SERPSTACK_API_KEY,
-    SERPSTACK_HTTPS,
-    TAVILY_API_KEY,
-    TAVILY_EXTRACT_DEPTH,
-    BING_SEARCH_V7_ENDPOINT,
-    BING_SEARCH_V7_SUBSCRIPTION_KEY,
-    BRAVE_SEARCH_API_KEY,
-    BRAVE_SEARCH_CONTEXT_TOKENS,
-    EXA_API_KEY,
-    PERPLEXITY_API_KEY,
-    PERPLEXITY_MODEL,
-    PERPLEXITY_SEARCH_CONTEXT_USAGE,
-    PERPLEXITY_SEARCH_API_URL,
-    SOUGOU_API_SID,
-    SOUGOU_API_SK,
-    KAGI_SEARCH_API_KEY,
-    MOJEEK_SEARCH_API_KEY,
-    BOCHA_SEARCH_API_KEY,
-    GOOGLE_PSE_API_KEY,
-    GOOGLE_PSE_ENGINE_ID,
-    GOOGLE_DRIVE_CLIENT_ID,
-    GOOGLE_DRIVE_API_KEY,
-    GOOGLE_CLIENT_SECRET,
-    ENABLE_ONEDRIVE_INTEGRATION,
-    ONEDRIVE_CLIENT_ID_PERSONAL,
-    ONEDRIVE_CLIENT_ID_BUSINESS,
-    MICROSOFT_CLIENT_SECRET,
-    ONEDRIVE_SHAREPOINT_URL,
-    ONEDRIVE_SHAREPOINT_TENANT_ID,
-    ENABLE_ONEDRIVE_PERSONAL,
-    ENABLE_ONEDRIVE_BUSINESS,
-    ENABLE_ONEDRIVE_SYNC,
-    ONEDRIVE_SYNC_INTERVAL_MINUTES,
-    ONEDRIVE_MAX_FILES_PER_SYNC,
-    ONEDRIVE_MAX_FILE_SIZE_MB,
-    ENABLE_CONFLUENCE_INTEGRATION,
-    ENABLE_CONFLUENCE_SYNC,
-    CONFLUENCE_OAUTH_CLIENT_ID,
-    CONFLUENCE_OAUTH_CLIENT_SECRET,
-    CONFLUENCE_SYNC_INTERVAL_MINUTES,
-    CONFLUENCE_MAX_PAGES_PER_SYNC,
-    CONFLUENCE_AUTH_MODE,
-    CONFLUENCE_SITE_URL,
-    CONFLUENCE_BASIC_AUTH_USERNAME,
-    CONFLUENCE_BASIC_AUTH_API_TOKEN,
-    CONFLUENCE_SCOPED_API_TOKEN,
-    CONFLUENCE_CLOUD_ID,
-    CONFLUENCE_KB_MODE,
-    ENABLE_TOPDESK_INTEGRATION,
-    ENABLE_TOPDESK_SYNC,
-    TOPDESK_URL,
-    TOPDESK_USERNAME,
-    TOPDESK_APP_PASSWORD,
-    TOPDESK_SYNC_INTERVAL_MINUTES,
-    TOPDESK_MAX_ITEMS_PER_SYNC,
-    TOPDESK_SYNC_SCOPE,
-    ENABLE_EMAIL_INVITES,
-    EMAIL_FROM_ADDRESS,
-    EMAIL_FROM_NAME,
-    INVITE_EXPIRY_HOURS,
-    EMAIL_INVITE_SUBJECT,
-    EMAIL_INVITE_HEADING,
-    ENABLE_FORGOT_PASSWORD,
-    PASSWORD_RESET_EXPIRY_MINUTES,
-    # Integrations
-    INTEGRATION_PROVIDERS,
-    # Shared-services loader worker
-    USE_SHARED_LOADER,
-    # Distributed document pipeline (warren)
-    DISTRIBUTED_DOC_PIPELINE_ENABLED,
-    DISTRIBUTED_DOC_PIPELINE_SYNC_ENABLED,
-    DISTRIBUTED_DOC_PIPELINE_CHAT_ENABLED,
-    PIPELINE_API_BASE_URL,
-    PIPELINE_API_KEY,
-    PIPELINE_INGEST_CALLBACK_URL,
-    PIPELINE_PRESIGN_TTL_SECONDS,
-    PIPELINE_CHUNK_SIZE,
-    PIPELINE_CHUNK_OVERLAP,
-    PIPELINE_RECONCILE_INTERVAL_SECONDS,
-    PIPELINE_JOB_MAX_WALL_CLOCK_SECONDS,
-    # Agent Proxy
-    ENABLE_AGENT_PROXY,
-    # Agent Search (machine-auth retrieval endpoint)
-    AGENT_SEARCH_ENABLED,
-    # Agent API (external agent selection)
-    AGENT_API_SELECTED_AGENT,
-    AGENT_API_PICKER_DEFAULT_SLUG,
-    # 2FA / TOTP
-    ENABLE_2FA,
-    REQUIRE_2FA,
-    TWO_FA_GRACE_PERIOD_DAYS,
-    # Data Sovereignty Warnings
-    ENABLE_DATA_WARNINGS,
-    # Data Retention TTL
-    DATA_RETENTION_TTL_DAYS,
-    USER_INACTIVITY_TTL_DAYS,
-    CHAT_RETENTION_TTL_DAYS,
-    KNOWLEDGE_MAX_FILE_COUNT,
-    KNOWLEDGE_RETENTION_TTL_DAYS,
-    DATA_RETENTION_WARNING_DAYS,
-    ENABLE_RETENTION_WARNING_EMAIL,
-    ENABLE_RAG_HYBRID_SEARCH,
-    ENABLE_RAG_HYBRID_SEARCH_ENRICHED_TEXTS,
-    ENABLE_RAG_FILTER_UI,
-    ENABLE_RAG_LOCAL_WEB_FETCH,
-    ENABLE_WEB_LOADER_SSL_VERIFICATION,
-    ENABLE_GOOGLE_DRIVE_INTEGRATION,
-    ENABLE_GOOGLE_DRIVE_SYNC,
-    GOOGLE_DRIVE_SYNC_INTERVAL_MINUTES,
-    GOOGLE_DRIVE_MAX_FILES_PER_SYNC,
-    UPLOAD_DIR,
-    EXTERNAL_WEB_SEARCH_URL,
-    EXTERNAL_WEB_SEARCH_API_KEY,
-    EXTERNAL_WEB_LOADER_URL,
-    EXTERNAL_WEB_LOADER_API_KEY,
-    YANDEX_WEB_SEARCH_URL,
-    YANDEX_WEB_SEARCH_API_KEY,
-    YANDEX_WEB_SEARCH_CONFIG,
-    YOUCOM_API_KEY,
-    # WebUI
-    WEBUI_AUTH,
-    WEBUI_NAME,
-    WEBUI_BANNERS,
-    WEBHOOK_URL,
-    ADMIN_EMAIL,
-    SHOW_ADMIN_DETAILS,
-    JWT_EXPIRES_IN,
-    ENABLE_SIGNUP,
-    ENABLE_LOGIN_FORM,
-    ENABLE_PASSWORD_CHANGE_FORM,
-    ENABLE_API_KEYS,
-    ENABLE_API_KEYS_ENDPOINT_RESTRICTIONS,
-    API_KEYS_ALLOWED_ENDPOINTS,
-    ENABLE_FOLDERS,
-    FOLDER_MAX_FILE_COUNT,
-    ENABLE_AUTOMATIONS,
-    AUTOMATION_MAX_COUNT,
-    AUTOMATION_MIN_INTERVAL,
-    ENABLE_CHANNELS,
-    ENABLE_CALENDAR,
-    ENABLE_NOTES,
-    ENABLE_USER_STATUS,
-    ENABLE_COMMUNITY_SHARING,
-    ENABLE_CITATION_RELEVANCE,
-    ENABLE_CITATION_TEXT_HIGHLIGHT,
-    ENABLE_MESSAGE_RATING,
-    ENABLE_USER_WEBHOOKS,
-    ENABLE_EVALUATION_ARENA_MODELS,
-    ENABLE_FEEDBACK_LAYER2,
-    FEEDBACK_LAYER2_POSITIVE_TAGS,
-    FEEDBACK_LAYER2_NEGATIVE_TAGS,
-    ENABLE_FEEDBACK_LAYER3,
-    FEEDBACK_LAYER3_PROMPT,
-    ENABLE_FEEDBACK_CATEGORY_TAGS,
-    ENABLE_CONVERSATION_FEEDBACK,
-    CONVERSATION_FEEDBACK_SCALE_MAX,
-    CONVERSATION_FEEDBACK_HEADER,
-    CONVERSATION_FEEDBACK_PLACEHOLDER,
-    ENABLE_FEEDBACK_REPORTING,
-    FEEDBACK_REPORT_SLACK_WEBHOOK_URL,
-    FEEDBACK_REPORT_INCLUDE_USER_IDENTITY,
-    FEEDBACK_REPORT_TRACE_URL_TEMPLATE,
-    BYPASS_ADMIN_ACCESS_CONTROL,
-    USER_PERMISSIONS,
-    DEFAULT_USER_ROLE,
-    DEFAULT_GROUP_ID,
-    PENDING_USER_OVERLAY_CONTENT,
-    PENDING_USER_OVERLAY_TITLE,
-    ENABLE_ACCEPTANCE_MODAL,
-    ACCEPTANCE_MODAL_TITLE,
-    ACCEPTANCE_MODAL_CONTENT,
-    ACCEPTANCE_MODAL_BUTTON_TEXT,
-    ENABLE_WELCOME_MESSAGE,
-    DEFAULT_PROMPT_SUGGESTIONS,
-    DEFAULT_MODELS,
-    DEFAULT_PINNED_MODELS,
-    DEFAULT_ARENA_MODEL,
-    MODEL_ORDER_LIST,
-    DEFAULT_MODEL_METADATA,
-    DEFAULT_MODEL_PARAMS,
-    EVALUATION_ARENA_MODELS,
-    # WebUI (OAuth)
-    ENABLE_OAUTH_ROLE_MANAGEMENT,
-    OAUTH_SUB_CLAIM,
-    OAUTH_ROLES_CLAIM,
-    OAUTH_EMAIL_CLAIM,
-    OAUTH_PICTURE_CLAIM,
-    OAUTH_USERNAME_CLAIM,
-    OAUTH_ALLOWED_ROLES,
-    OAUTH_ADMIN_ROLES,
-    # WebUI (LDAP)
-    ENABLE_LDAP,
-    LDAP_SERVER_LABEL,
-    LDAP_SERVER_HOST,
-    LDAP_SERVER_PORT,
-    LDAP_ATTRIBUTE_FOR_MAIL,
-    LDAP_ATTRIBUTE_FOR_USERNAME,
-    LDAP_SEARCH_FILTERS,
-    LDAP_SEARCH_BASE,
-    LDAP_APP_DN,
-    LDAP_APP_PASSWORD,
-    LDAP_USE_TLS,
-    LDAP_CA_CERT_FILE,
-    LDAP_VALIDATE_CERT,
-    LDAP_CIPHERS,
-    # LDAP Group Management
-    ENABLE_LDAP_GROUP_MANAGEMENT,
-    ENABLE_LDAP_GROUP_CREATION,
-    LDAP_ATTRIBUTE_FOR_GROUPS,
-    # Misc
-    ENV,
-    CACHE_DIR,
-    STATIC_DIR,
-    FRONTEND_BUILD_DIR,
-    CORS_ALLOW_ORIGIN,
-    DEFAULT_LOCALE,
-    OAUTH_PROVIDERS,
-    WEBUI_URL,
-    RESPONSE_WATERMARK,
-    GREETING_TEMPLATE,
-    IFRAME_CSP,
-    # Admin
-    ENABLE_ADMIN_CHAT_ACCESS,
-    ENABLE_ADMIN_ANALYTICS,
-    BYPASS_ADMIN_ACCESS_CONTROL,
-    ENABLE_ADMIN_EXPORT,
-    ENABLE_DATA_EXPORT,
-    # User Archival
-    ENABLE_USER_ARCHIVAL,
-    DEFAULT_ARCHIVE_RETENTION_DAYS,
-    ENABLE_AUTO_ARCHIVE_ON_SELF_DELETE,
-    AUTO_ARCHIVE_RETENTION_DAYS,
-    # Feature Flags (SaaS Tier Control)
-    FEATURE_CHAT_CONTROLS,
-    FEATURE_CAPTURE,
-    FEATURE_ARTIFACTS,
-    FEATURE_DOCUMENT_WRITER,
-    FEATURE_PLAYGROUND,
-    FEATURE_CHAT_OVERVIEW,
-    FEATURE_NOTES_AI_CONTROLS,
-    FEATURE_VOICE,
-    FEATURE_CHANGELOG,
-    FEATURE_SYSTEM_PROMPT,
-    FEATURE_MODELS,
-    FEATURE_MODEL_METERS,
-    FEATURE_KNOWLEDGE,
-    FEATURE_PROMPTS,
-    FEATURE_TOOLS,
-    FEATURE_SKILLS,
-    FEATURE_SKILL_FILES,
-    ENABLE_SKILL_EXECUTION,
-    FEATURE_WEBPAGE_URL,
-    FEATURE_REFERENCE_CHATS,
-    FEATURE_SIMPLE_ASSISTANT_BUILDER,
-    FEATURE_TOOL_SERVERS,
-    FEATURE_TERMINAL_SERVERS,
-    FEATURE_USER_DEMOGRAPHICS,
-    FEATURE_BUILTIN_TOOLS,
-    FEATURE_STRICT_DATA_SEPARATION,
-    USE_STYLIZED_PDF_EXPORT,
-    ENABLE_DOCX_EXPORT,
-    FEATURE_ADMIN_EVALUATIONS,
-    FEATURE_ADMIN_FUNCTIONS,
-    FEATURE_ADMIN_SETTINGS,
-    FEATURE_ADMIN_SETTINGS_TABS,
-    FEATURE_CHAT_CONTROLS_SECTIONS,
-    FEATURE_INPUT_MENU,
-    FEATURE_TEMPORARY_CHAT,
-    # Tasks
-    TASK_MODEL,
-    TASK_MODEL_EXTERNAL,
-    ENABLE_TAGS_GENERATION,
-    ENABLE_TITLE_GENERATION,
-    ENABLE_FOLLOW_UP_GENERATION,
-    ENABLE_SEARCH_QUERY_GENERATION,
-    ENABLE_RETRIEVAL_QUERY_GENERATION,
-    ENABLE_AUTOCOMPLETE_GENERATION,
-    TITLE_GENERATION_PROMPT_TEMPLATE,
-    FOLLOW_UP_GENERATION_PROMPT_TEMPLATE,
-    TAGS_GENERATION_PROMPT_TEMPLATE,
-    IMAGE_PROMPT_GENERATION_PROMPT_TEMPLATE,
-    TOOLS_FUNCTION_CALLING_PROMPT_TEMPLATE,
-    VOICE_MODE_PROMPT_TEMPLATE,
-    ENABLE_VOICE_MODE_PROMPT,
-    QUERY_GENERATION_PROMPT_TEMPLATE,
-    AUTOCOMPLETE_GENERATION_PROMPT_TEMPLATE,
-    AUTOCOMPLETE_GENERATION_INPUT_MAX_LENGTH,
-    AppConfig,
-    reset_config,
-    async_reset_config,
-    # soev.ai branding
-    SOEV_LOGIN_FOOTER,
-    # Model Whitelist
-    MODEL_WHITELIST,
-    # Per-deployment model -> datacenter/hosting mapping (model picker)
-    MODEL_HOSTING,
-    # Per-deployment model -> profile mapping (model picker descriptions/meters)
-    MODEL_PROFILES,
+from open_webui.socket.main import (
+    MODELS,
+    get_event_emitter,
+    get_models_in_use,
+    get_user_id_from_session_pool,
+    periodic_session_pool_cleanup,
+    periodic_usage_pool_cleanup,
 )
-from open_webui.env import (
-    ENABLE_CUSTOM_MODEL_FALLBACK,
-    LICENSE_KEY,
-    AUDIT_EXCLUDED_PATHS,
-    AUDIT_INCLUDED_PATHS,
-    ENABLE_AUDIT_GET_REQUESTS,
-    AUDIT_LOG_LEVEL,
-    CHANGELOG,
-    REDIS_URL,
-    REDIS_CLUSTER,
-    REDIS_KEY_PREFIX,
-    REDIS_SENTINEL_HOSTS,
-    REDIS_SENTINEL_PORT,
-    GLOBAL_LOG_LEVEL,
-    MAX_BODY_LOG_SIZE,
-    SAFE_MODE,
-    VERSION,
-    DEPLOYMENT_ID,
-    INSTANCE_ID,
-    WEBUI_BUILD_HASH,
-    WEBUI_SECRET_KEY,
-    WEBUI_SESSION_COOKIE_SAME_SITE,
-    WEBUI_SESSION_COOKIE_SECURE,
-    ENABLE_SIGNUP_PASSWORD_CONFIRMATION,
-    WEBUI_AUTH_TRUSTED_EMAIL_HEADER,
-    WEBUI_AUTH_TRUSTED_NAME_HEADER,
-    WEBUI_AUTH_SIGNOUT_REDIRECT_URL,
-    # SCIM
-    ENABLE_SCIM,
-    SCIM_TOKEN,
-    ENABLE_COMPRESSION_MIDDLEWARE,
-    ENABLE_WEBSOCKET_SUPPORT,
-    BYPASS_MODEL_ACCESS_CONTROL,
-    RESET_CONFIG_ON_START,
-    ENABLE_VERSION_UPDATE_CHECK,
-    ENABLE_OTEL,
-    EXTERNAL_PWA_MANIFEST_URL,
-    AIOHTTP_CLIENT_SESSION_SSL,
-    ENABLE_STAR_SESSIONS_MIDDLEWARE,
-    ENABLE_PUBLIC_ACTIVE_USERS_COUNT,
-    AGENT_API_ENABLED,  # [Gradient] Agent API bypass flag
-    FEATURE_AGENT_PICKER,  # [Gradient] Master flag for the agent picker UI
-    CLIENT_NAME,
-    # Admin Account Runtime Creation
-    WEBUI_ADMIN_EMAIL,
-    WEBUI_ADMIN_PASSWORD,
-    WEBUI_ADMIN_NAME,
-    ENABLE_EASTER_EGGS,
-    LOG_FORMAT,
-    # OAuth Back-Channel Logout
-    ENABLE_OAUTH_BACKCHANNEL_LOGOUT,
+from open_webui.socket.main import (
+    app as socket_app,
 )
+from open_webui.tasks import (
+    cleanup_task,
+    create_task,
+    has_active_tasks,
+    list_task_ids_by_item_id,
+    list_tasks,
+    redis_task_command_listener,
+    stop_item_tasks,
+    stop_task,
+)  # Import from tasks.py
+from open_webui.utils import logger
+from open_webui.utils.access_control import has_permission
+from open_webui.utils.actions import chat_action as chat_action_handler
+from open_webui.utils.agent import call_agent_api  # [Gradient] Agent API client
+from open_webui.utils.agent_routing import resolve_agent_route  # [Gradient]
 
-
-from open_webui.utils.models import (
-    get_all_models,
-    get_all_base_models,
-    check_model_access,
-    get_filtered_models,
+# NOTE (Gradient): we adopt upstream's factored ASGI middlewares except
+# `AuthTokenMiddleware` — ours (inline below) restricts the legacy
+# `x-api-key` header to a narrow set of message/inference endpoints,
+# whereas upstream's accepts it on every path.
+from open_webui.utils.asgi_middleware import (
+    CommitSessionMiddleware,
+    RedirectMiddleware,
+    WebsocketUpgradeGuardMiddleware,
+)
+from open_webui.utils.audit import AuditLevel, AuditLoggingMiddleware
+from open_webui.utils.auth import (
+    create_admin_user,
+    decode_token,
+    get_admin_user,
+    get_http_authorization_cred,
+    get_license_data,
+    get_verified_user,
+)
+from open_webui.utils.chat import (
+    chat_completed as chat_completed_handler,
 )
 from open_webui.utils.chat import (
     generate_chat_completion as chat_completion_handler,
-    chat_completed as chat_completed_handler,
 )
-from open_webui.utils.actions import chat_action as chat_action_handler
 from open_webui.utils.embeddings import generate_embeddings
-from open_webui.utils.middleware import (
-    build_chat_response_context,
-    process_chat_payload,
-    process_chat_response,
-)
-from open_webui.utils.agent import call_agent_api  # [Gradient] Agent API client
-from open_webui.utils.agent_routing import resolve_agent_route  # [Gradient]
 from open_webui.utils.feedback_report import (  # [Gradient] Feedback Reporting
     build_http_error_body,
     get_current_trace_id,
 )
-from open_webui.utils.task import prompt_template, prompt_variables_template
-from open_webui.utils.access_control import has_access
-from open_webui.utils.tools import set_tool_servers, set_terminal_servers
-
-from open_webui.utils.auth import (
-    get_license_data,
-    get_http_authorization_cred,
-    decode_token,
-    get_admin_user,
-    get_verified_user,
-    create_admin_user,
+from open_webui.utils.lazy_resource import lazy  # [Gradient] HA Redis fix
+from open_webui.utils.logger import start_logger
+from open_webui.utils.middleware import (
+    background_tasks_handler,
+    build_chat_response_context,
+    process_chat_payload,
+    process_chat_response,
 )
-from open_webui.utils.plugin import install_tool_and_function_dependencies
+from open_webui.utils.models import (
+    check_model_access,
+    get_all_base_models,
+    get_all_models,
+    get_filtered_models,
+)
 from open_webui.utils.oauth import (
+    OAuthClientInformationFull,
+    OAuthClientManager,
+    OAuthManager,
+    apply_connection_oauth_options,
+    decrypt_data,
+    encrypt_data,
     get_oauth_client_info_with_dynamic_client_registration,
     get_oauth_client_info_with_static_credentials,
-    encrypt_data,
-    decrypt_data,
+    recover_static_oauth_client_metadata,
     resolve_oauth_client_info,
-    OAuthManager,
-    OAuthClientManager,
-    OAuthClientInformationFull,
 )
+from open_webui.utils.plugin import install_tool_and_function_dependencies
+from open_webui.utils.redis import clear_connection_cache, get_redis_client
 from open_webui.utils.security_headers import SecurityHeadersMiddleware
-from open_webui.utils.lazy_resource import lazy
-from open_webui.utils.redis import clear_connection_cache, get_redis_connection
-from open_webui.services.email.auth import is_mail_configured
-
-from open_webui.tasks import (
-    redis_task_command_listener,
-    list_task_ids_by_item_id,
-    has_active_tasks,
-    cleanup_task,
-    create_task,
-    stop_task,
-    stop_item_tasks,
-    list_tasks,
-)  # Import from tasks.py
-
-from open_webui.utils.redis import get_sentinels_from_env
-
-
-from open_webui.constants import ERROR_MESSAGES, TASKS
+from open_webui.utils.session_pool import get_session
+from open_webui.utils.task import prompt_template, prompt_variables_template  # [Gradient]
+from open_webui.utils.tools import set_terminal_servers, set_tool_servers
+from open_webui.services.email.auth import is_mail_configured  # [Gradient]
 
 if SAFE_MODE:
     print('SAFE MODE ENABLED')
@@ -805,8 +349,15 @@ class SPAStaticFiles(StaticFiles):
                 raise ex
 
 
+class CORSStaticFiles(StaticFiles):
+    async def get_response(self, path: str, scope):
+        response = await super().get_response(path, scope)
+        response.headers['Access-Control-Allow-Origin'] = '*'
+        return response
+
+
 if LOG_FORMAT != 'json':
-    print(rf"""
+    banner = rf"""
  ██████╗ ██████╗ ███████╗███╗   ██╗    ██╗    ██╗███████╗██████╗ ██╗   ██╗██╗
 ██╔═══██╗██╔══██╗██╔════╝████╗  ██║    ██║    ██║██╔════╝██╔══██╗██║   ██║██║
 ██║   ██║██████╔╝█████╗  ██╔██╗ ██║    ██║ █╗ ██║█████╗  ██████╔╝██║   ██║██║
@@ -818,7 +369,12 @@ if LOG_FORMAT != 'json':
 v{VERSION} - building the best AI user interface.
 {f'Commit: {WEBUI_BUILD_HASH}' if WEBUI_BUILD_HASH != 'dev-build' else ''}
 https://github.com/open-webui/open-webui
-""")
+"""
+    try:
+        print(banner)
+    except UnicodeEncodeError:
+        # Stdout can't encode the box-drawing banner (Windows cp1252, redirected/headless stdout); fall back to ASCII.
+        print(f'Open WebUI v{VERSION} - building the best AI user interface.\nhttps://github.com/open-webui/open-webui')
 
 
 async def periodic_archive_cleanup():
@@ -846,20 +402,30 @@ async def periodic_data_retention_cleanup():
             # Wait 24 hours before first run and between runs
             await asyncio.sleep(24 * 60 * 60)
 
-            master_ttl = app.state.config.DATA_RETENTION_TTL_DAYS
+            retention_config = await Config.get_many(
+                'admin.data_retention_ttl_days',
+                'admin.user_inactivity_ttl_days',
+                'admin.chat_retention_ttl_days',
+                'admin.knowledge_retention_ttl_days',
+                'admin.data_retention_warning_days',
+                'admin.enable_retention_warning_email',
+                'admin.enable_user_archival',
+                'admin.default_archive_retention_days',
+            )
+            master_ttl = retention_config.get('admin.data_retention_ttl_days') or 0
             if master_ttl <= 0:
                 continue  # Retention disabled, skip
 
             report = await DataRetentionService.run_cleanup(
                 app=app,
                 master_ttl=master_ttl,
-                user_inactivity_ttl=app.state.config.USER_INACTIVITY_TTL_DAYS,
-                chat_ttl=app.state.config.CHAT_RETENTION_TTL_DAYS,
-                knowledge_ttl=app.state.config.KNOWLEDGE_RETENTION_TTL_DAYS,
-                warning_days=app.state.config.DATA_RETENTION_WARNING_DAYS,
-                enable_warning_email=app.state.config.ENABLE_RETENTION_WARNING_EMAIL,
-                enable_archival=app.state.config.ENABLE_USER_ARCHIVAL,
-                archive_retention_days=app.state.config.DEFAULT_ARCHIVE_RETENTION_DAYS,
+                user_inactivity_ttl=retention_config.get('admin.user_inactivity_ttl_days'),
+                chat_ttl=retention_config.get('admin.chat_retention_ttl_days'),
+                knowledge_ttl=retention_config.get('admin.knowledge_retention_ttl_days'),
+                warning_days=retention_config.get('admin.data_retention_warning_days'),
+                enable_warning_email=retention_config.get('admin.enable_retention_warning_email'),
+                enable_archival=retention_config.get('admin.enable_user_archival'),
+                archive_retention_days=retention_config.get('admin.default_archive_retention_days'),
             )
 
             total = report.users_deleted + report.chats_deleted + report.knowledge_deleted + report.warnings_sent
@@ -896,14 +462,14 @@ async def lifespan(app: FastAPI):
     # This allows sync functions to schedule work on the main loop without blocking health checks
     app.state.main_loop = asyncio.get_running_loop()
 
-    # Register the same loop with the module-level bridge used by sync
+    # [Gradient] Register the same loop with the module-level bridge used by sync
     # background handlers that can't reach request.app.state (e.g. the
     # data-export worker). See utils/loop_bridge.py.
     from open_webui.utils.loop_bridge import set_main_loop
 
     set_main_loop(app.state.main_loop)
 
-    # Discard any async Redis clients that were accidentally constructed at
+    # [Gradient] Discard any async Redis clients that were accidentally constructed at
     # module import — their asyncio primitives are bound to the wrong event
     # loop under HA. See thoughts/shared/research/2026-04-20-redis-ha-loop-bug-and-kind-repro.md.
     clear_connection_cache()
@@ -914,6 +480,12 @@ async def lifespan(app: FastAPI):
     if RESET_CONFIG_ON_START:
         await async_reset_config()
 
+    await import_legacy_config_json()
+    await seed_registered_defaults()
+    await initialize_runtime_config(app)
+    await migrate_legacy_webhook_config()
+    await publish_event(app, EVENTS.SYSTEM_STARTUP_STARTED, source='system')
+
     if LICENSE_KEY:
         get_license_data(app, LICENSE_KEY)
 
@@ -921,7 +493,7 @@ async def lifespan(app: FastAPI):
     if WEBUI_ADMIN_EMAIL and WEBUI_ADMIN_PASSWORD:
         if await create_admin_user(WEBUI_ADMIN_EMAIL, WEBUI_ADMIN_PASSWORD, WEBUI_ADMIN_NAME):
             # Disable signup since we now have an admin
-            app.state.config.ENABLE_SIGNUP = False
+            await Config.upsert({'ui.enable_signup': False})
 
     if SAFE_MODE:
         await Functions.deactivate_all_functions()
@@ -931,7 +503,7 @@ async def lifespan(app: FastAPI):
     log.info('Installing external dependencies of functions and tools...')
     await install_tool_and_function_dependencies()
 
-    # Load external agents if configured
+    # [Gradient] Load external agents if configured
     try:
         from open_webui.utils.external_agents import load_external_agents_at_startup
 
@@ -964,17 +536,12 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         log.warning(f'Failed to seed agent_config from env: {e}')
 
-    app.state.redis = get_redis_connection(
-        redis_url=REDIS_URL,
-        redis_sentinels=get_sentinels_from_env(REDIS_SENTINEL_HOSTS, REDIS_SENTINEL_PORT),
-        redis_cluster=REDIS_CLUSTER,
-        async_mode=True,
-    )
+    app.state.redis = get_redis_client(async_mode=True)
 
     if app.state.redis is not None:
         app.state.redis_task_command_listener = asyncio.create_task(redis_task_command_listener(app))
 
-    # Attach the Socket.IO Redis client manager NOW that uvicorn's event loop
+    # [Gradient] Attach the Socket.IO Redis client manager NOW that uvicorn's event loop
     # is running. Creating it at import time (as the upstream code does) binds
     # its internal Futures to whatever loop asyncio.get_event_loop() returned
     # at import, which is not the same loop uvicorn serves requests on — that
@@ -992,39 +559,40 @@ async def lifespan(app: FastAPI):
 
     asyncio.create_task(periodic_usage_pool_cleanup())
     asyncio.create_task(periodic_session_pool_cleanup())
+    # [Gradient] GDPR archival / retention / export cleanup workers
     asyncio.create_task(periodic_archive_cleanup())
     asyncio.create_task(periodic_data_retention_cleanup())
     asyncio.create_task(periodic_export_cleanup())
 
-    # Start OneDrive background sync scheduler
+    # [Gradient] Start OneDrive background sync scheduler
     from open_webui.services.onedrive.scheduler import (
         start_scheduler as start_onedrive_scheduler,
     )
 
     start_onedrive_scheduler(app)
 
-    # Start Google Drive background sync scheduler
+    # [Gradient] Start Google Drive background sync scheduler
     from open_webui.services.google_drive.scheduler import (
         start_scheduler as start_google_drive_scheduler,
     )
 
     start_google_drive_scheduler(app)
 
-    # Start Confluence background sync scheduler
+    # [Gradient] Start Confluence background sync scheduler
     from open_webui.services.confluence.scheduler import (
         start_scheduler as start_confluence_scheduler,
     )
 
     start_confluence_scheduler(app)
 
-    # Start TOPdesk background sync scheduler
+    # [Gradient] Start TOPdesk background sync scheduler
     from open_webui.services.topdesk.scheduler import (
         start_scheduler as start_topdesk_scheduler,
     )
 
     start_topdesk_scheduler(app)
 
-    # Start the distributed doc-pipeline reconciler (restart-safe sweep that
+    # [Gradient] Start the distributed doc-pipeline reconciler (restart-safe sweep that
     # marks files 'error' when their warren job fails/hangs; success is handled
     # by the /ingest callback). Reads its enable flag per-tick, so starting it
     # unconditionally is fine.
@@ -1032,7 +600,7 @@ async def lifespan(app: FastAPI):
 
     start_pipeline_reconciler(app)
 
-    # Start deletion cleanup worker
+    # [Gradient] Start deletion cleanup worker
     from open_webui.services.deletion.cleanup_worker import start_cleanup_worker
 
     start_cleanup_worker()
@@ -1041,7 +609,7 @@ async def lifespan(app: FastAPI):
 
     asyncio.create_task(scheduler_worker_loop(app))
 
-    if app.state.config.ENABLE_BASE_MODELS_CACHE:
+    if await Config.get('models.base_models_cache'):
         try:
             await get_all_models(
                 Request(
@@ -1066,7 +634,7 @@ async def lifespan(app: FastAPI):
             log.warning(f'Failed to pre-fetch models at startup: {e}')
 
     # Pre-fetch tool server specs so the first request doesn't pay the latency cost
-    if len(app.state.config.TOOL_SERVER_CONNECTIONS) > 0:
+    if len(await Config.get('tool_server.connections', []) or []) > 0:
         mock_request = Request(
             {
                 'type': 'http',
@@ -1098,36 +666,39 @@ async def lifespan(app: FastAPI):
 
     # Mark application as ready to accept traffic from a startup perspective.
     app.state.startup_complete = True
+    await publish_event(app, EVENTS.SYSTEM_STARTUP_COMPLETED, source='system')
 
     yield
 
-    # Stop deletion cleanup worker
+    await publish_event(app, EVENTS.SYSTEM_SHUTDOWN_STARTED, source='system')
+
+    # [Gradient] Stop deletion cleanup worker
     from open_webui.services.deletion.cleanup_worker import stop_cleanup_worker
 
     stop_cleanup_worker()
 
-    # Stop OneDrive background sync scheduler
+    # [Gradient] Stop OneDrive background sync scheduler
     from open_webui.services.onedrive.scheduler import (
         stop_scheduler as stop_onedrive_scheduler,
     )
 
     stop_onedrive_scheduler()
 
-    # Stop Google Drive background sync scheduler
+    # [Gradient] Stop Google Drive background sync scheduler
     from open_webui.services.google_drive.scheduler import (
         stop_scheduler as stop_google_drive_scheduler,
     )
 
     stop_google_drive_scheduler()
 
-    # Stop Confluence background sync scheduler
+    # [Gradient] Stop Confluence background sync scheduler
     from open_webui.services.confluence.scheduler import (
         stop_scheduler as stop_confluence_scheduler,
     )
 
     stop_confluence_scheduler()
 
-    # Stop TOPdesk background sync scheduler
+    # [Gradient] Stop TOPdesk background sync scheduler
     from open_webui.services.topdesk.scheduler import (
         stop_scheduler as stop_topdesk_scheduler,
     )
@@ -1141,6 +712,8 @@ async def lifespan(app: FastAPI):
 
     if hasattr(app.state, 'redis_task_command_listener'):
         app.state.redis_task_command_listener.cancel()
+
+    await publish_event(app, EVENTS.SYSTEM_SHUTDOWN_COMPLETED, source='system')
 
 
 app = FastAPI(
@@ -1177,16 +750,12 @@ oauth_client_manager = OAuthClientManager(app)
 app.state.oauth_client_manager = oauth_client_manager
 
 app.state.instance_id = None
-app.state.config = AppConfig(
-    redis_url=REDIS_URL,
-    redis_sentinels=get_sentinels_from_env(REDIS_SENTINEL_HOSTS, REDIS_SENTINEL_PORT),
-    redis_cluster=REDIS_CLUSTER,
-    redis_key_prefix=REDIS_KEY_PREFIX,
-)
 app.state.redis = None
 
 app.state.WEBUI_NAME = WEBUI_NAME
 app.state.LICENSE_METADATA = None
+app.state.USER_COUNT = None
+app.state.EXTERNAL_PWA_MANIFEST_URL = EXTERNAL_PWA_MANIFEST_URL
 
 
 ########################################
@@ -1208,10 +777,6 @@ if ENABLE_OTEL:
 ########################################
 
 
-app.state.config.ENABLE_OLLAMA_API = ENABLE_OLLAMA_API
-app.state.config.OLLAMA_BASE_URLS = OLLAMA_BASE_URLS
-app.state.config.OLLAMA_API_CONFIGS = OLLAMA_API_CONFIGS
-
 app.state.OLLAMA_MODELS = {}
 
 ########################################
@@ -1220,10 +785,6 @@ app.state.OLLAMA_MODELS = {}
 #
 ########################################
 
-app.state.config.ENABLE_OPENAI_API = ENABLE_OPENAI_API
-app.state.config.OPENAI_API_BASE_URLS = OPENAI_API_BASE_URLS
-app.state.config.OPENAI_API_KEYS = OPENAI_API_KEYS
-app.state.config.OPENAI_API_CONFIGS = OPENAI_API_CONFIGS
 
 app.state.OPENAI_MODELS = {}
 
@@ -1233,7 +794,6 @@ app.state.OPENAI_MODELS = {}
 #
 ########################################
 
-app.state.config.TOOL_SERVER_CONNECTIONS = TOOL_SERVER_CONNECTIONS
 app.state.TOOL_SERVERS = []
 
 ########################################
@@ -1242,7 +802,6 @@ app.state.TOOL_SERVERS = []
 #
 ########################################
 
-app.state.config.TERMINAL_SERVER_CONNECTIONS = TERMINAL_SERVER_CONNECTIONS
 app.state.TERMINAL_SERVERS = []
 
 ########################################
@@ -1251,7 +810,6 @@ app.state.TERMINAL_SERVERS = []
 #
 ########################################
 
-app.state.config.ENABLE_DIRECT_CONNECTIONS = ENABLE_DIRECT_CONNECTIONS
 
 ########################################
 #
@@ -1268,7 +826,6 @@ app.state.SCIM_TOKEN = SCIM_TOKEN
 #
 ########################################
 
-app.state.config.ENABLE_BASE_MODELS_CACHE = ENABLE_BASE_MODELS_CACHE
 app.state.BASE_MODELS = []
 
 ########################################
@@ -1277,473 +834,130 @@ app.state.BASE_MODELS = []
 #
 ########################################
 
-app.state.config.WEBUI_URL = WEBUI_URL
-app.state.config.ENABLE_SIGNUP = ENABLE_SIGNUP
-app.state.config.ENABLE_LOGIN_FORM = ENABLE_LOGIN_FORM
-app.state.config.ENABLE_PASSWORD_CHANGE_FORM = ENABLE_PASSWORD_CHANGE_FORM
 
-app.state.config.ENABLE_API_KEYS = ENABLE_API_KEYS
-app.state.config.ENABLE_API_KEYS_ENDPOINT_RESTRICTIONS = ENABLE_API_KEYS_ENDPOINT_RESTRICTIONS
-app.state.config.API_KEYS_ALLOWED_ENDPOINTS = API_KEYS_ALLOWED_ENDPOINTS
-
-app.state.config.JWT_EXPIRES_IN = JWT_EXPIRES_IN
-
-app.state.config.SHOW_ADMIN_DETAILS = SHOW_ADMIN_DETAILS
-app.state.config.ADMIN_EMAIL = ADMIN_EMAIL
-
-
-app.state.config.DEFAULT_MODELS = DEFAULT_MODELS
-app.state.config.DEFAULT_PINNED_MODELS = DEFAULT_PINNED_MODELS
-app.state.config.MODEL_ORDER_LIST = MODEL_ORDER_LIST
-app.state.config.DEFAULT_MODEL_METADATA = DEFAULT_MODEL_METADATA
-app.state.config.DEFAULT_MODEL_PARAMS = DEFAULT_MODEL_PARAMS
-
-
-app.state.config.DEFAULT_PROMPT_SUGGESTIONS = DEFAULT_PROMPT_SUGGESTIONS
-app.state.config.DEFAULT_USER_ROLE = DEFAULT_USER_ROLE
-app.state.config.DEFAULT_GROUP_ID = DEFAULT_GROUP_ID
-
-app.state.config.PENDING_USER_OVERLAY_CONTENT = PENDING_USER_OVERLAY_CONTENT
-app.state.config.PENDING_USER_OVERLAY_TITLE = PENDING_USER_OVERLAY_TITLE
-
-app.state.config.ENABLE_ACCEPTANCE_MODAL = ENABLE_ACCEPTANCE_MODAL
-app.state.config.ACCEPTANCE_MODAL_TITLE = ACCEPTANCE_MODAL_TITLE
-app.state.config.ACCEPTANCE_MODAL_CONTENT = ACCEPTANCE_MODAL_CONTENT
-app.state.config.ACCEPTANCE_MODAL_BUTTON_TEXT = ACCEPTANCE_MODAL_BUTTON_TEXT
-
-app.state.config.ENABLE_WELCOME_MESSAGE = ENABLE_WELCOME_MESSAGE
-
-app.state.config.RESPONSE_WATERMARK = RESPONSE_WATERMARK
-app.state.config.GREETING_TEMPLATE = GREETING_TEMPLATE
-
-app.state.config.USER_PERMISSIONS = USER_PERMISSIONS
-app.state.config.WEBHOOK_URL = WEBHOOK_URL
-app.state.config.BANNERS = WEBUI_BANNERS
-
-
-app.state.config.ENABLE_FOLDERS = ENABLE_FOLDERS
-app.state.config.FOLDER_MAX_FILE_COUNT = FOLDER_MAX_FILE_COUNT
-app.state.config.ENABLE_AUTOMATIONS = ENABLE_AUTOMATIONS
-app.state.config.AUTOMATION_MAX_COUNT = AUTOMATION_MAX_COUNT
-app.state.config.AUTOMATION_MIN_INTERVAL = AUTOMATION_MIN_INTERVAL
-app.state.config.ENABLE_CHANNELS = ENABLE_CHANNELS
-app.state.config.ENABLE_CALENDAR = ENABLE_CALENDAR
-app.state.config.ENABLE_NOTES = ENABLE_NOTES
-app.state.config.ENABLE_COMMUNITY_SHARING = ENABLE_COMMUNITY_SHARING
-app.state.config.ENABLE_CITATION_RELEVANCE = ENABLE_CITATION_RELEVANCE
-app.state.config.ENABLE_CITATION_TEXT_HIGHLIGHT = ENABLE_CITATION_TEXT_HIGHLIGHT
-app.state.config.ENABLE_MESSAGE_RATING = ENABLE_MESSAGE_RATING
-app.state.config.ENABLE_USER_WEBHOOKS = ENABLE_USER_WEBHOOKS
-app.state.config.ENABLE_USER_STATUS = ENABLE_USER_STATUS
-
-########################################
-#
-# USER ARCHIVAL
-#
-########################################
-
-app.state.config.ENABLE_USER_ARCHIVAL = ENABLE_USER_ARCHIVAL
-app.state.config.DEFAULT_ARCHIVE_RETENTION_DAYS = DEFAULT_ARCHIVE_RETENTION_DAYS
-app.state.config.ENABLE_AUTO_ARCHIVE_ON_SELF_DELETE = ENABLE_AUTO_ARCHIVE_ON_SELF_DELETE
-app.state.config.AUTO_ARCHIVE_RETENTION_DAYS = AUTO_ARCHIVE_RETENTION_DAYS
-
-app.state.config.ENABLE_EVALUATION_ARENA_MODELS = ENABLE_EVALUATION_ARENA_MODELS
-app.state.config.EVALUATION_ARENA_MODELS = EVALUATION_ARENA_MODELS
-
-app.state.config.ENABLE_FEEDBACK_LAYER2 = ENABLE_FEEDBACK_LAYER2
-app.state.config.FEEDBACK_LAYER2_POSITIVE_TAGS = FEEDBACK_LAYER2_POSITIVE_TAGS
-app.state.config.FEEDBACK_LAYER2_NEGATIVE_TAGS = FEEDBACK_LAYER2_NEGATIVE_TAGS
-app.state.config.ENABLE_FEEDBACK_LAYER3 = ENABLE_FEEDBACK_LAYER3
-app.state.config.FEEDBACK_LAYER3_PROMPT = FEEDBACK_LAYER3_PROMPT
-app.state.config.ENABLE_FEEDBACK_CATEGORY_TAGS = ENABLE_FEEDBACK_CATEGORY_TAGS
-app.state.config.ENABLE_CONVERSATION_FEEDBACK = ENABLE_CONVERSATION_FEEDBACK
-app.state.config.CONVERSATION_FEEDBACK_SCALE_MAX = CONVERSATION_FEEDBACK_SCALE_MAX
-app.state.config.CONVERSATION_FEEDBACK_HEADER = CONVERSATION_FEEDBACK_HEADER
-app.state.config.CONVERSATION_FEEDBACK_PLACEHOLDER = CONVERSATION_FEEDBACK_PLACEHOLDER
-
-app.state.config.ENABLE_FEEDBACK_REPORTING = ENABLE_FEEDBACK_REPORTING
-app.state.config.FEEDBACK_REPORT_SLACK_WEBHOOK_URL = FEEDBACK_REPORT_SLACK_WEBHOOK_URL
-app.state.config.FEEDBACK_REPORT_INCLUDE_USER_IDENTITY = FEEDBACK_REPORT_INCLUDE_USER_IDENTITY
-app.state.config.FEEDBACK_REPORT_TRACE_URL_TEMPLATE = FEEDBACK_REPORT_TRACE_URL_TEMPLATE
-
-# Migrate legacy access_control → access_grants on boot
-from open_webui.utils.access_control import migrate_access_control
-
-connections = app.state.config.TOOL_SERVER_CONNECTIONS
-if any('access_control' in c.get('config', {}) for c in connections):
-    for connection in connections:
-        migrate_access_control(connection.get('config', {}))
-    app.state.config.TOOL_SERVER_CONNECTIONS = connections
-
-arena_models = app.state.config.EVALUATION_ARENA_MODELS
-if any('access_control' in m.get('meta', {}) for m in arena_models):
-    for model in arena_models:
-        migrate_access_control(model.get('meta', {}))
-    app.state.config.EVALUATION_ARENA_MODELS = arena_models
-
-app.state.config.OAUTH_SUB_CLAIM = OAUTH_SUB_CLAIM
-app.state.config.OAUTH_USERNAME_CLAIM = OAUTH_USERNAME_CLAIM
-app.state.config.OAUTH_PICTURE_CLAIM = OAUTH_PICTURE_CLAIM
-app.state.config.OAUTH_EMAIL_CLAIM = OAUTH_EMAIL_CLAIM
-
-app.state.config.ENABLE_OAUTH_ROLE_MANAGEMENT = ENABLE_OAUTH_ROLE_MANAGEMENT
-app.state.config.OAUTH_ROLES_CLAIM = OAUTH_ROLES_CLAIM
-app.state.config.OAUTH_ALLOWED_ROLES = OAUTH_ALLOWED_ROLES
-app.state.config.OAUTH_ADMIN_ROLES = OAUTH_ADMIN_ROLES
-
-app.state.config.ENABLE_LDAP = ENABLE_LDAP
-app.state.config.LDAP_SERVER_LABEL = LDAP_SERVER_LABEL
-app.state.config.LDAP_SERVER_HOST = LDAP_SERVER_HOST
-app.state.config.LDAP_SERVER_PORT = LDAP_SERVER_PORT
-app.state.config.LDAP_ATTRIBUTE_FOR_MAIL = LDAP_ATTRIBUTE_FOR_MAIL
-app.state.config.LDAP_ATTRIBUTE_FOR_USERNAME = LDAP_ATTRIBUTE_FOR_USERNAME
-app.state.config.LDAP_APP_DN = LDAP_APP_DN
-app.state.config.LDAP_APP_PASSWORD = LDAP_APP_PASSWORD
-app.state.config.LDAP_SEARCH_BASE = LDAP_SEARCH_BASE
-app.state.config.LDAP_SEARCH_FILTERS = LDAP_SEARCH_FILTERS
-app.state.config.LDAP_USE_TLS = LDAP_USE_TLS
-app.state.config.LDAP_CA_CERT_FILE = LDAP_CA_CERT_FILE
-app.state.config.LDAP_VALIDATE_CERT = LDAP_VALIDATE_CERT
-app.state.config.LDAP_CIPHERS = LDAP_CIPHERS
-
-# For LDAP Group Management
-app.state.config.ENABLE_LDAP_GROUP_MANAGEMENT = ENABLE_LDAP_GROUP_MANAGEMENT
-app.state.config.ENABLE_LDAP_GROUP_CREATION = ENABLE_LDAP_GROUP_CREATION
-app.state.config.LDAP_ATTRIBUTE_FOR_GROUPS = LDAP_ATTRIBUTE_FOR_GROUPS
-
-
-app.state.AUTH_TRUSTED_EMAIL_HEADER = WEBUI_AUTH_TRUSTED_EMAIL_HEADER
-app.state.AUTH_TRUSTED_NAME_HEADER = WEBUI_AUTH_TRUSTED_NAME_HEADER
-app.state.WEBUI_AUTH_SIGNOUT_REDIRECT_URL = WEBUI_AUTH_SIGNOUT_REDIRECT_URL
-app.state.EXTERNAL_PWA_MANIFEST_URL = EXTERNAL_PWA_MANIFEST_URL
-
-app.state.USER_COUNT = None
-
-app.state.TOOLS = {}
-app.state.TOOL_CONTENTS = {}
-
-app.state.FUNCTIONS = {}
-app.state.FUNCTION_CONTENTS = {}
-
-########################################
-#
-# RETRIEVAL
-#
-########################################
-
-
-app.state.config.TOP_K = RAG_TOP_K
-app.state.config.TOP_K_RERANKER = RAG_TOP_K_RERANKER
-app.state.config.RELEVANCE_THRESHOLD = RAG_RELEVANCE_THRESHOLD
-app.state.config.HYBRID_BM25_WEIGHT = RAG_HYBRID_BM25_WEIGHT
-
-
-app.state.config.ALLOWED_FILE_EXTENSIONS = RAG_ALLOWED_FILE_EXTENSIONS
-app.state.config.FILE_MAX_SIZE = RAG_FILE_MAX_SIZE
-app.state.config.FILE_MAX_COUNT = RAG_FILE_MAX_COUNT
-app.state.config.FILE_IMAGE_COMPRESSION_WIDTH = FILE_IMAGE_COMPRESSION_WIDTH
-app.state.config.FILE_IMAGE_COMPRESSION_HEIGHT = FILE_IMAGE_COMPRESSION_HEIGHT
-
-
-app.state.config.RAG_FULL_CONTEXT = RAG_FULL_CONTEXT
-app.state.config.BYPASS_EMBEDDING_AND_RETRIEVAL = BYPASS_EMBEDDING_AND_RETRIEVAL
-app.state.config.ENABLE_RAG_HYBRID_SEARCH = ENABLE_RAG_HYBRID_SEARCH
-app.state.config.ENABLE_RAG_HYBRID_SEARCH_ENRICHED_TEXTS = ENABLE_RAG_HYBRID_SEARCH_ENRICHED_TEXTS
-app.state.config.ENABLE_RAG_FILTER_UI = ENABLE_RAG_FILTER_UI
-app.state.config.ENABLE_WEB_LOADER_SSL_VERIFICATION = ENABLE_WEB_LOADER_SSL_VERIFICATION
-
-app.state.config.CONTENT_EXTRACTION_ENGINE = CONTENT_EXTRACTION_ENGINE
-app.state.config.DATALAB_MARKER_API_KEY = DATALAB_MARKER_API_KEY
-app.state.config.DATALAB_MARKER_API_BASE_URL = DATALAB_MARKER_API_BASE_URL
-app.state.config.DATALAB_MARKER_ADDITIONAL_CONFIG = DATALAB_MARKER_ADDITIONAL_CONFIG
-app.state.config.DATALAB_MARKER_SKIP_CACHE = DATALAB_MARKER_SKIP_CACHE
-app.state.config.DATALAB_MARKER_FORCE_OCR = DATALAB_MARKER_FORCE_OCR
-app.state.config.DATALAB_MARKER_PAGINATE = DATALAB_MARKER_PAGINATE
-app.state.config.DATALAB_MARKER_STRIP_EXISTING_OCR = DATALAB_MARKER_STRIP_EXISTING_OCR
-app.state.config.DATALAB_MARKER_DISABLE_IMAGE_EXTRACTION = DATALAB_MARKER_DISABLE_IMAGE_EXTRACTION
-app.state.config.DATALAB_MARKER_FORMAT_LINES = DATALAB_MARKER_FORMAT_LINES
-app.state.config.DATALAB_MARKER_USE_LLM = DATALAB_MARKER_USE_LLM
-app.state.config.DATALAB_MARKER_OUTPUT_FORMAT = DATALAB_MARKER_OUTPUT_FORMAT
-app.state.config.EXTERNAL_DOCUMENT_LOADER_URL = EXTERNAL_DOCUMENT_LOADER_URL
-app.state.config.EXTERNAL_DOCUMENT_LOADER_API_KEY = EXTERNAL_DOCUMENT_LOADER_API_KEY
-app.state.config.TIKA_SERVER_URL = TIKA_SERVER_URL
-app.state.config.DOCLING_SERVER_URL = DOCLING_SERVER_URL
-app.state.config.DOCLING_API_KEY = DOCLING_API_KEY
-app.state.config.DOCLING_PARAMS = DOCLING_PARAMS
-app.state.config.DOCUMENT_INTELLIGENCE_ENDPOINT = DOCUMENT_INTELLIGENCE_ENDPOINT
-app.state.config.DOCUMENT_INTELLIGENCE_KEY = DOCUMENT_INTELLIGENCE_KEY
-app.state.config.DOCUMENT_INTELLIGENCE_MODEL = DOCUMENT_INTELLIGENCE_MODEL
-app.state.config.MISTRAL_OCR_API_BASE_URL = MISTRAL_OCR_API_BASE_URL
-app.state.config.MISTRAL_OCR_API_KEY = MISTRAL_OCR_API_KEY
-app.state.config.PADDLEOCR_VL_BASE_URL = PADDLEOCR_VL_BASE_URL
-app.state.config.PADDLEOCR_VL_TOKEN = PADDLEOCR_VL_TOKEN
-app.state.config.MINERU_API_MODE = MINERU_API_MODE
-app.state.config.MINERU_API_URL = MINERU_API_URL
-app.state.config.MINERU_API_KEY = MINERU_API_KEY
-app.state.config.MINERU_API_TIMEOUT = MINERU_API_TIMEOUT
-app.state.config.MINERU_PARAMS = MINERU_PARAMS
-
-app.state.config.TEXT_SPLITTER = RAG_TEXT_SPLITTER
-app.state.config.ENABLE_MARKDOWN_HEADER_TEXT_SPLITTER = ENABLE_MARKDOWN_HEADER_TEXT_SPLITTER
-
-app.state.config.TIKTOKEN_ENCODING_NAME = TIKTOKEN_ENCODING_NAME
-
-app.state.config.CHUNK_SIZE = CHUNK_SIZE
-app.state.config.CHUNK_MIN_SIZE_TARGET = CHUNK_MIN_SIZE_TARGET
-app.state.config.CHUNK_OVERLAP = CHUNK_OVERLAP
-
-
-app.state.config.RAG_EMBEDDING_ENGINE = RAG_EMBEDDING_ENGINE
-app.state.config.RAG_EMBEDDING_MODEL = RAG_EMBEDDING_MODEL
-app.state.config.RAG_EMBEDDING_BATCH_SIZE = RAG_EMBEDDING_BATCH_SIZE
-app.state.config.ENABLE_ASYNC_EMBEDDING = ENABLE_ASYNC_EMBEDDING
-app.state.config.RAG_EMBEDDING_CONCURRENT_REQUESTS = RAG_EMBEDDING_CONCURRENT_REQUESTS
-
-app.state.config.RAG_RERANKING_ENGINE = RAG_RERANKING_ENGINE
-app.state.config.RAG_RERANKING_MODEL = RAG_RERANKING_MODEL
-app.state.config.RAG_EXTERNAL_RERANKER_URL = RAG_EXTERNAL_RERANKER_URL
-app.state.config.RAG_EXTERNAL_RERANKER_API_KEY = RAG_EXTERNAL_RERANKER_API_KEY
-app.state.config.RAG_EXTERNAL_RERANKER_TIMEOUT = RAG_EXTERNAL_RERANKER_TIMEOUT
-app.state.config.RAG_RERANKING_BATCH_SIZE = RAG_RERANKING_BATCH_SIZE
-
-
-app.state.config.RAG_TEMPLATE = RAG_TEMPLATE
-
-app.state.config.RAG_OPENAI_API_BASE_URL = RAG_OPENAI_API_BASE_URL
-app.state.config.RAG_OPENAI_API_KEY = RAG_OPENAI_API_KEY
-
-app.state.config.RAG_AZURE_OPENAI_BASE_URL = RAG_AZURE_OPENAI_BASE_URL
-app.state.config.RAG_AZURE_OPENAI_API_KEY = RAG_AZURE_OPENAI_API_KEY
-app.state.config.RAG_AZURE_OPENAI_API_VERSION = RAG_AZURE_OPENAI_API_VERSION
-
-app.state.config.RAG_OLLAMA_BASE_URL = RAG_OLLAMA_BASE_URL
-app.state.config.RAG_OLLAMA_API_KEY = RAG_OLLAMA_API_KEY
-
-app.state.config.PDF_EXTRACT_IMAGES = PDF_EXTRACT_IMAGES
-app.state.config.PDF_LOADER_MODE = PDF_LOADER_MODE
-
-app.state.config.YOUTUBE_LOADER_LANGUAGE = YOUTUBE_LOADER_LANGUAGE
-app.state.config.YOUTUBE_LOADER_PROXY_URL = YOUTUBE_LOADER_PROXY_URL
-
-
-app.state.config.ENABLE_WEB_SEARCH = ENABLE_WEB_SEARCH
-app.state.config.WEB_SEARCH_ENGINE = WEB_SEARCH_ENGINE
-app.state.config.WEB_SEARCH_DOMAIN_FILTER_LIST = WEB_SEARCH_DOMAIN_FILTER_LIST
-app.state.config.WEB_SEARCH_RESULT_COUNT = WEB_SEARCH_RESULT_COUNT
-app.state.config.WEB_SEARCH_CONCURRENT_REQUESTS = WEB_SEARCH_CONCURRENT_REQUESTS
-app.state.config.WEB_FETCH_MAX_CONTENT_LENGTH = WEB_FETCH_MAX_CONTENT_LENGTH
-
-app.state.config.WEB_LOADER_ENGINE = WEB_LOADER_ENGINE
-app.state.config.WEB_LOADER_CONCURRENT_REQUESTS = WEB_LOADER_CONCURRENT_REQUESTS
-app.state.config.WEB_LOADER_TIMEOUT = WEB_LOADER_TIMEOUT
-
-app.state.config.WEB_SEARCH_TRUST_ENV = WEB_SEARCH_TRUST_ENV
-app.state.config.BYPASS_WEB_SEARCH_EMBEDDING_AND_RETRIEVAL = BYPASS_WEB_SEARCH_EMBEDDING_AND_RETRIEVAL
-app.state.config.BYPASS_WEB_SEARCH_WEB_LOADER = BYPASS_WEB_SEARCH_WEB_LOADER
-
-app.state.config.ENABLE_GOOGLE_DRIVE_INTEGRATION = ENABLE_GOOGLE_DRIVE_INTEGRATION
-app.state.config.ENABLE_GOOGLE_DRIVE_SYNC = ENABLE_GOOGLE_DRIVE_SYNC
-app.state.config.GOOGLE_DRIVE_CLIENT_ID = GOOGLE_DRIVE_CLIENT_ID
-app.state.config.GOOGLE_DRIVE_API_KEY = GOOGLE_DRIVE_API_KEY
-app.state.config.GOOGLE_DRIVE_SYNC_INTERVAL_MINUTES = GOOGLE_DRIVE_SYNC_INTERVAL_MINUTES
-app.state.config.GOOGLE_DRIVE_MAX_FILES_PER_SYNC = GOOGLE_DRIVE_MAX_FILES_PER_SYNC
-app.state.config.ENABLE_ONEDRIVE_INTEGRATION = ENABLE_ONEDRIVE_INTEGRATION
-app.state.config.ENABLE_ONEDRIVE_SYNC = ENABLE_ONEDRIVE_SYNC
-app.state.config.ENABLE_ONEDRIVE_PERSONAL = ENABLE_ONEDRIVE_PERSONAL
-app.state.config.ENABLE_ONEDRIVE_BUSINESS = ENABLE_ONEDRIVE_BUSINESS
-app.state.config.ONEDRIVE_CLIENT_ID_PERSONAL = ONEDRIVE_CLIENT_ID_PERSONAL
-app.state.config.ONEDRIVE_CLIENT_ID_BUSINESS = ONEDRIVE_CLIENT_ID_BUSINESS
-app.state.config.ONEDRIVE_SHAREPOINT_URL = ONEDRIVE_SHAREPOINT_URL
-app.state.config.ONEDRIVE_SHAREPOINT_TENANT_ID = ONEDRIVE_SHAREPOINT_TENANT_ID
-app.state.config.ONEDRIVE_SYNC_INTERVAL_MINUTES = ONEDRIVE_SYNC_INTERVAL_MINUTES
-app.state.config.ONEDRIVE_MAX_FILES_PER_SYNC = ONEDRIVE_MAX_FILES_PER_SYNC
-app.state.config.ENABLE_CONFLUENCE_INTEGRATION = ENABLE_CONFLUENCE_INTEGRATION
-app.state.config.ENABLE_CONFLUENCE_SYNC = ENABLE_CONFLUENCE_SYNC
-app.state.config.CONFLUENCE_OAUTH_CLIENT_ID = CONFLUENCE_OAUTH_CLIENT_ID
-app.state.config.CONFLUENCE_OAUTH_CLIENT_SECRET = CONFLUENCE_OAUTH_CLIENT_SECRET
-app.state.config.CONFLUENCE_SYNC_INTERVAL_MINUTES = CONFLUENCE_SYNC_INTERVAL_MINUTES
-app.state.config.CONFLUENCE_MAX_PAGES_PER_SYNC = CONFLUENCE_MAX_PAGES_PER_SYNC
-app.state.config.CONFLUENCE_AUTH_MODE = CONFLUENCE_AUTH_MODE
-app.state.config.CONFLUENCE_SITE_URL = CONFLUENCE_SITE_URL
-app.state.config.CONFLUENCE_BASIC_AUTH_USERNAME = CONFLUENCE_BASIC_AUTH_USERNAME
-app.state.config.CONFLUENCE_BASIC_AUTH_API_TOKEN = CONFLUENCE_BASIC_AUTH_API_TOKEN
-app.state.config.CONFLUENCE_SCOPED_API_TOKEN = CONFLUENCE_SCOPED_API_TOKEN
-app.state.config.CONFLUENCE_CLOUD_ID = CONFLUENCE_CLOUD_ID
-app.state.config.CONFLUENCE_KB_MODE = CONFLUENCE_KB_MODE
-app.state.config.ENABLE_TOPDESK_INTEGRATION = ENABLE_TOPDESK_INTEGRATION
-app.state.config.ENABLE_TOPDESK_SYNC = ENABLE_TOPDESK_SYNC
-app.state.config.TOPDESK_URL = TOPDESK_URL
-app.state.config.TOPDESK_USERNAME = TOPDESK_USERNAME
-app.state.config.TOPDESK_APP_PASSWORD = TOPDESK_APP_PASSWORD
-app.state.config.TOPDESK_SYNC_INTERVAL_MINUTES = TOPDESK_SYNC_INTERVAL_MINUTES
-app.state.config.TOPDESK_MAX_ITEMS_PER_SYNC = TOPDESK_MAX_ITEMS_PER_SYNC
-app.state.config.TOPDESK_SYNC_SCOPE = TOPDESK_SYNC_SCOPE
-
-app.state.config.ENABLE_EMAIL_INVITES = ENABLE_EMAIL_INVITES
-app.state.config.EMAIL_FROM_ADDRESS = EMAIL_FROM_ADDRESS
-app.state.config.EMAIL_FROM_NAME = EMAIL_FROM_NAME
-app.state.config.INVITE_EXPIRY_HOURS = INVITE_EXPIRY_HOURS
-app.state.config.EMAIL_INVITE_SUBJECT = EMAIL_INVITE_SUBJECT
-app.state.config.EMAIL_INVITE_HEADING = EMAIL_INVITE_HEADING
-app.state.config.ENABLE_FORGOT_PASSWORD = ENABLE_FORGOT_PASSWORD
-app.state.config.PASSWORD_RESET_EXPIRY_MINUTES = PASSWORD_RESET_EXPIRY_MINUTES
-
-app.state.config.INTEGRATION_PROVIDERS = INTEGRATION_PROVIDERS
-
-app.state.config.USE_SHARED_LOADER = USE_SHARED_LOADER
-
-app.state.config.DISTRIBUTED_DOC_PIPELINE_ENABLED = DISTRIBUTED_DOC_PIPELINE_ENABLED
-app.state.config.DISTRIBUTED_DOC_PIPELINE_SYNC_ENABLED = DISTRIBUTED_DOC_PIPELINE_SYNC_ENABLED
-app.state.config.DISTRIBUTED_DOC_PIPELINE_CHAT_ENABLED = DISTRIBUTED_DOC_PIPELINE_CHAT_ENABLED
-app.state.config.PIPELINE_API_BASE_URL = PIPELINE_API_BASE_URL
-app.state.config.PIPELINE_API_KEY = PIPELINE_API_KEY
-app.state.config.PIPELINE_INGEST_CALLBACK_URL = PIPELINE_INGEST_CALLBACK_URL
-app.state.config.PIPELINE_PRESIGN_TTL_SECONDS = PIPELINE_PRESIGN_TTL_SECONDS
-app.state.config.PIPELINE_CHUNK_SIZE = PIPELINE_CHUNK_SIZE
-app.state.config.PIPELINE_CHUNK_OVERLAP = PIPELINE_CHUNK_OVERLAP
-app.state.config.PIPELINE_RECONCILE_INTERVAL_SECONDS = PIPELINE_RECONCILE_INTERVAL_SECONDS
-app.state.config.PIPELINE_JOB_MAX_WALL_CLOCK_SECONDS = PIPELINE_JOB_MAX_WALL_CLOCK_SECONDS
-
-app.state.config.ENABLE_AGENT_PROXY = ENABLE_AGENT_PROXY
-
-app.state.config.AGENT_SEARCH_ENABLED = AGENT_SEARCH_ENABLED
-
-app.state.config.AGENT_API_SELECTED_AGENT = AGENT_API_SELECTED_AGENT
-app.state.config.AGENT_API_PICKER_DEFAULT_SLUG = AGENT_API_PICKER_DEFAULT_SLUG
-
-app.state.config.ENABLE_2FA = ENABLE_2FA
-app.state.config.REQUIRE_2FA = REQUIRE_2FA
-app.state.config.TWO_FA_GRACE_PERIOD_DAYS = TWO_FA_GRACE_PERIOD_DAYS
-
-app.state.config.ENABLE_DATA_WARNINGS = ENABLE_DATA_WARNINGS
-
-########################################
-#
-# DATA RETENTION TTL
-#
-########################################
-
-app.state.config.DATA_RETENTION_TTL_DAYS = DATA_RETENTION_TTL_DAYS
-app.state.config.USER_INACTIVITY_TTL_DAYS = USER_INACTIVITY_TTL_DAYS
-app.state.config.CHAT_RETENTION_TTL_DAYS = CHAT_RETENTION_TTL_DAYS
-app.state.config.KNOWLEDGE_RETENTION_TTL_DAYS = KNOWLEDGE_RETENTION_TTL_DAYS
-app.state.config.DATA_RETENTION_WARNING_DAYS = DATA_RETENTION_WARNING_DAYS
-app.state.config.ENABLE_RETENTION_WARNING_EMAIL = ENABLE_RETENTION_WARNING_EMAIL
-
-app.state.config.OLLAMA_CLOUD_WEB_SEARCH_API_KEY = OLLAMA_CLOUD_WEB_SEARCH_API_KEY
-app.state.config.SEARXNG_QUERY_URL = SEARXNG_QUERY_URL
-app.state.config.SEARXNG_LANGUAGE = SEARXNG_LANGUAGE
-app.state.config.YACY_QUERY_URL = YACY_QUERY_URL
-app.state.config.YACY_USERNAME = YACY_USERNAME
-app.state.config.YACY_PASSWORD = YACY_PASSWORD
-app.state.config.GOOGLE_PSE_API_KEY = GOOGLE_PSE_API_KEY
-app.state.config.GOOGLE_PSE_ENGINE_ID = GOOGLE_PSE_ENGINE_ID
-app.state.config.BRAVE_SEARCH_API_KEY = BRAVE_SEARCH_API_KEY
-app.state.config.BRAVE_SEARCH_CONTEXT_TOKENS = BRAVE_SEARCH_CONTEXT_TOKENS
-app.state.config.KAGI_SEARCH_API_KEY = KAGI_SEARCH_API_KEY
-app.state.config.MOJEEK_SEARCH_API_KEY = MOJEEK_SEARCH_API_KEY
-app.state.config.BOCHA_SEARCH_API_KEY = BOCHA_SEARCH_API_KEY
-app.state.config.SERPSTACK_API_KEY = SERPSTACK_API_KEY
-app.state.config.SERPSTACK_HTTPS = SERPSTACK_HTTPS
-app.state.config.SERPER_API_KEY = SERPER_API_KEY
-app.state.config.SERPLY_API_KEY = SERPLY_API_KEY
-app.state.config.DDGS_BACKEND = DDGS_BACKEND
-app.state.config.TAVILY_API_KEY = TAVILY_API_KEY
-app.state.config.SEARCHAPI_API_KEY = SEARCHAPI_API_KEY
-app.state.config.SEARCHAPI_ENGINE = SEARCHAPI_ENGINE
-app.state.config.SERPAPI_API_KEY = SERPAPI_API_KEY
-app.state.config.SERPAPI_ENGINE = SERPAPI_ENGINE
-app.state.config.JINA_API_KEY = JINA_API_KEY
-app.state.config.JINA_API_BASE_URL = JINA_API_BASE_URL
-app.state.config.BING_SEARCH_V7_ENDPOINT = BING_SEARCH_V7_ENDPOINT
-app.state.config.BING_SEARCH_V7_SUBSCRIPTION_KEY = BING_SEARCH_V7_SUBSCRIPTION_KEY
-app.state.config.EXA_API_KEY = EXA_API_KEY
-app.state.config.PERPLEXITY_API_KEY = PERPLEXITY_API_KEY
-app.state.config.PERPLEXITY_MODEL = PERPLEXITY_MODEL
-app.state.config.PERPLEXITY_SEARCH_CONTEXT_USAGE = PERPLEXITY_SEARCH_CONTEXT_USAGE
-app.state.config.PERPLEXITY_SEARCH_API_URL = PERPLEXITY_SEARCH_API_URL
-app.state.config.SOUGOU_API_SID = SOUGOU_API_SID
-app.state.config.SOUGOU_API_SK = SOUGOU_API_SK
-app.state.config.EXTERNAL_WEB_SEARCH_URL = EXTERNAL_WEB_SEARCH_URL
-app.state.config.EXTERNAL_WEB_SEARCH_API_KEY = EXTERNAL_WEB_SEARCH_API_KEY
-app.state.config.EXTERNAL_WEB_LOADER_URL = EXTERNAL_WEB_LOADER_URL
-app.state.config.EXTERNAL_WEB_LOADER_API_KEY = EXTERNAL_WEB_LOADER_API_KEY
-app.state.config.YANDEX_WEB_SEARCH_URL = YANDEX_WEB_SEARCH_URL
-app.state.config.YANDEX_WEB_SEARCH_API_KEY = YANDEX_WEB_SEARCH_API_KEY
-app.state.config.YANDEX_WEB_SEARCH_CONFIG = YANDEX_WEB_SEARCH_CONFIG
-app.state.config.YOUCOM_API_KEY = YOUCOM_API_KEY
-
-
-app.state.config.PLAYWRIGHT_WS_URL = PLAYWRIGHT_WS_URL
-app.state.config.PLAYWRIGHT_TIMEOUT = PLAYWRIGHT_TIMEOUT
-app.state.config.FIRECRAWL_API_BASE_URL = FIRECRAWL_API_BASE_URL
-app.state.config.FIRECRAWL_API_KEY = FIRECRAWL_API_KEY
-app.state.config.FIRECRAWL_TIMEOUT = FIRECRAWL_TIMEOUT
-app.state.config.TAVILY_EXTRACT_DEPTH = TAVILY_EXTRACT_DEPTH
-
-app.state.EMBEDDING_FUNCTION = None
-app.state.RERANKING_FUNCTION = None
-app.state.ef = None
-app.state.rf = None
-
-app.state.YOUTUBE_LOADER_TRANSLATION = None
-
-
-try:
-    app.state.ef = get_ef(app.state.config.RAG_EMBEDDING_ENGINE, app.state.config.RAG_EMBEDDING_MODEL)
-    if app.state.config.ENABLE_RAG_HYBRID_SEARCH and not app.state.config.BYPASS_EMBEDDING_AND_RETRIEVAL:
-        app.state.rf = get_rf(
-            app.state.config.RAG_RERANKING_ENGINE,
-            app.state.config.RAG_RERANKING_MODEL,
-            app.state.config.RAG_EXTERNAL_RERANKER_URL,
-            app.state.config.RAG_EXTERNAL_RERANKER_API_KEY,
-            app.state.config.RAG_EXTERNAL_RERANKER_TIMEOUT,
+async def initialize_runtime_config(app: FastAPI):
+    # Migrate legacy access_control → access_grants on boot.
+    from open_webui.utils.access_control import migrate_access_control
+
+    connections = await Config.get('tool_server.connections', []) or []
+    if any('access_control' in c.get('config', {}) for c in connections):
+        for connection in connections:
+            migrate_access_control(connection.get('config', {}))
+        await Config.upsert({'tool_server.connections': connections})
+
+    for tool_server_connection in connections:
+        if tool_server_connection.get('type', 'openapi') == 'mcp':
+            server_id = (tool_server_connection.get('info') or {}).get('id')
+            auth_type = tool_server_connection.get('auth_type', 'none')
+
+            if server_id and auth_type in ('oauth_2.1', 'oauth_2.1_static'):
+                try:
+                    oauth_client_info = resolve_oauth_client_info(tool_server_connection)
+                    oauth_client_info = await recover_static_oauth_client_metadata(
+                        tool_server_connection, oauth_client_info
+                    )
+                    oauth_client_info = apply_connection_oauth_options(tool_server_connection, oauth_client_info)
+                    app.state.oauth_client_manager.add_client(
+                        f'mcp:{server_id}',
+                        OAuthClientInformationFull(**oauth_client_info),
+                    )
+                except Exception as e:
+                    log.error(f'Error adding OAuth client for MCP tool server {server_id}: {e}')
+
+    arena_models = await Config.get('evaluation.arena.models', []) or []
+    if any('access_control' in m.get('meta', {}) for m in arena_models):
+        for model in arena_models:
+            migrate_access_control(model.get('meta', {}))
+        await Config.upsert({'evaluation.arena.models': arena_models})
+
+    app.state.EMBEDDING_FUNCTION = None
+    app.state.RERANKING_FUNCTION = None
+    app.state.ef = None
+    app.state.rf = None
+    app.state.YOUTUBE_LOADER_TRANSLATION = None
+
+    try:
+        rag_config = await Config.get_many(
+            'rag.embedding_engine',
+            'rag.embedding_model',
+            'rag.enable_hybrid_search',
+            'rag.bypass_embedding_and_retrieval',
+            'rag.reranking_engine',
+            'rag.reranking_model',
+            'rag.external_reranker_url',
+            'rag.external_reranker_api_key',
+            'rag.external_reranker_timeout',
         )
-    else:
+        app.state.ef = get_ef(rag_config.get('rag.embedding_engine'), rag_config.get('rag.embedding_model'))
+        if rag_config.get('rag.enable_hybrid_search') and not rag_config.get('rag.bypass_embedding_and_retrieval'):
+            app.state.rf = get_rf(
+                rag_config.get('rag.reranking_engine'),
+                rag_config.get('rag.reranking_model'),
+                rag_config.get('rag.external_reranker_url'),
+                rag_config.get('rag.external_reranker_api_key'),
+                rag_config.get('rag.external_reranker_timeout'),
+            )
+        else:
+            app.state.rf = None
+    except Exception as e:
+        log.error(f'Error updating models: {e}')
         app.state.rf = None
-except Exception as e:
-    log.error(f'Error updating models: {e}')
-    pass
 
+    rag_config = await Config.get_many(
+        'rag.embedding_engine',
+        'rag.embedding_model',
+        'rag.openai.api_base_url',
+        'rag.ollama.base_url',
+        'rag.azure_openai.base_url',
+        'rag.openai.api_key',
+        'rag.ollama.api_key',
+        'rag.azure_openai.api_key',
+        'rag.embedding_batch_size',
+        'rag.azure_openai.api_version',
+        'rag.enable_async_embedding',
+        'rag.embedding_concurrent_requests',
+        'rag.reranking_engine',
+        'rag.reranking_model',
+        'rag.reranking_batch_size',
+    )
+    embedding_engine = rag_config.get('rag.embedding_engine')
+    app.state.EMBEDDING_FUNCTION = get_embedding_function(
+        embedding_engine,
+        rag_config.get('rag.embedding_model'),
+        embedding_function=app.state.ef,
+        url=(
+            rag_config.get('rag.openai.api_base_url')
+            if embedding_engine == 'openai'
+            else (
+                rag_config.get('rag.ollama.base_url')
+                if embedding_engine == 'ollama'
+                else rag_config.get('rag.azure_openai.base_url')
+            )
+        ),
+        key=(
+            rag_config.get('rag.openai.api_key')
+            if embedding_engine == 'openai'
+            else (
+                rag_config.get('rag.ollama.api_key')
+                if embedding_engine == 'ollama'
+                else rag_config.get('rag.azure_openai.api_key')
+            )
+        ),
+        embedding_batch_size=rag_config.get('rag.embedding_batch_size'),
+        azure_api_version=(
+            rag_config.get('rag.azure_openai.api_version') if embedding_engine == 'azure_openai' else None
+        ),
+        enable_async=rag_config.get('rag.enable_async_embedding'),
+        concurrent_requests=rag_config.get('rag.embedding_concurrent_requests'),
+    )
 
-app.state.EMBEDDING_FUNCTION = get_embedding_function(
-    app.state.config.RAG_EMBEDDING_ENGINE,
-    app.state.config.RAG_EMBEDDING_MODEL,
-    embedding_function=app.state.ef,
-    url=(
-        app.state.config.RAG_OPENAI_API_BASE_URL
-        if app.state.config.RAG_EMBEDDING_ENGINE == 'openai'
-        else (
-            app.state.config.RAG_OLLAMA_BASE_URL
-            if app.state.config.RAG_EMBEDDING_ENGINE == 'ollama'
-            else app.state.config.RAG_AZURE_OPENAI_BASE_URL
-        )
-    ),
-    key=(
-        app.state.config.RAG_OPENAI_API_KEY
-        if app.state.config.RAG_EMBEDDING_ENGINE == 'openai'
-        else (
-            app.state.config.RAG_OLLAMA_API_KEY
-            if app.state.config.RAG_EMBEDDING_ENGINE == 'ollama'
-            else app.state.config.RAG_AZURE_OPENAI_API_KEY
-        )
-    ),
-    embedding_batch_size=app.state.config.RAG_EMBEDDING_BATCH_SIZE,
-    azure_api_version=(
-        app.state.config.RAG_AZURE_OPENAI_API_VERSION
-        if app.state.config.RAG_EMBEDDING_ENGINE == 'azure_openai'
-        else None
-    ),
-    enable_async=app.state.config.ENABLE_ASYNC_EMBEDDING,
-    concurrent_requests=app.state.config.RAG_EMBEDDING_CONCURRENT_REQUESTS,
-)
+    app.state.RERANKING_FUNCTION = get_reranking_function(
+        rag_config.get('rag.reranking_engine'),
+        rag_config.get('rag.reranking_model'),
+        reranking_function=app.state.rf,
+        reranking_batch_size=rag_config.get('rag.reranking_batch_size'),
+    )
 
-app.state.RERANKING_FUNCTION = get_reranking_function(
-    app.state.config.RAG_RERANKING_ENGINE,
-    app.state.config.RAG_RERANKING_MODEL,
-    reranking_function=app.state.rf,
-    reranking_batch_size=app.state.config.RAG_RERANKING_BATCH_SIZE,
-)
 
 ########################################
 #
@@ -1751,26 +965,6 @@ app.state.RERANKING_FUNCTION = get_reranking_function(
 #
 ########################################
 
-app.state.config.ENABLE_CODE_EXECUTION = ENABLE_CODE_EXECUTION
-app.state.config.CODE_EXECUTION_ENGINE = CODE_EXECUTION_ENGINE
-app.state.config.CODE_EXECUTION_JUPYTER_URL = CODE_EXECUTION_JUPYTER_URL
-app.state.config.CODE_EXECUTION_JUPYTER_AUTH = CODE_EXECUTION_JUPYTER_AUTH
-app.state.config.CODE_EXECUTION_JUPYTER_AUTH_TOKEN = CODE_EXECUTION_JUPYTER_AUTH_TOKEN
-app.state.config.CODE_EXECUTION_JUPYTER_AUTH_PASSWORD = CODE_EXECUTION_JUPYTER_AUTH_PASSWORD
-app.state.config.CODE_EXECUTION_JUPYTER_TIMEOUT = CODE_EXECUTION_JUPYTER_TIMEOUT
-
-app.state.config.ENABLE_CODE_INTERPRETER = ENABLE_CODE_INTERPRETER
-app.state.config.CODE_INTERPRETER_ENGINE = CODE_INTERPRETER_ENGINE
-app.state.config.CODE_INTERPRETER_PROMPT_TEMPLATE = CODE_INTERPRETER_PROMPT_TEMPLATE
-
-app.state.config.CODE_INTERPRETER_JUPYTER_URL = CODE_INTERPRETER_JUPYTER_URL
-app.state.config.CODE_INTERPRETER_JUPYTER_AUTH = CODE_INTERPRETER_JUPYTER_AUTH
-app.state.config.CODE_INTERPRETER_JUPYTER_AUTH_TOKEN = CODE_INTERPRETER_JUPYTER_AUTH_TOKEN
-app.state.config.CODE_INTERPRETER_JUPYTER_AUTH_PASSWORD = CODE_INTERPRETER_JUPYTER_AUTH_PASSWORD
-app.state.config.CODE_INTERPRETER_JUPYTER_TIMEOUT = CODE_INTERPRETER_JUPYTER_TIMEOUT
-
-app.state.config.ENABLE_DOCUMENT_WRITER = ENABLE_DOCUMENT_WRITER
-app.state.config.DOCUMENT_WRITER_PROMPT_TEMPLATE = DOCUMENT_WRITER_PROMPT_TEMPLATE
 
 ########################################
 #
@@ -1778,95 +972,12 @@ app.state.config.DOCUMENT_WRITER_PROMPT_TEMPLATE = DOCUMENT_WRITER_PROMPT_TEMPLA
 #
 ########################################
 
-app.state.config.IMAGE_GENERATION_ENGINE = IMAGE_GENERATION_ENGINE
-app.state.config.ENABLE_IMAGE_GENERATION = ENABLE_IMAGE_GENERATION
-app.state.config.ENABLE_IMAGE_PROMPT_GENERATION = ENABLE_IMAGE_PROMPT_GENERATION
-app.state.config.ENABLE_MEMORIES = ENABLE_MEMORIES
-
-app.state.config.IMAGE_GENERATION_MODEL = IMAGE_GENERATION_MODEL
-app.state.config.IMAGE_SIZE = IMAGE_SIZE
-app.state.config.IMAGE_STEPS = IMAGE_STEPS
-
-app.state.config.IMAGES_OPENAI_API_BASE_URL = IMAGES_OPENAI_API_BASE_URL
-app.state.config.IMAGES_OPENAI_API_VERSION = IMAGES_OPENAI_API_VERSION
-app.state.config.IMAGES_OPENAI_API_KEY = IMAGES_OPENAI_API_KEY
-app.state.config.IMAGES_OPENAI_API_PARAMS = IMAGES_OPENAI_API_PARAMS
-
-app.state.config.IMAGES_GEMINI_API_BASE_URL = IMAGES_GEMINI_API_BASE_URL
-app.state.config.IMAGES_GEMINI_API_KEY = IMAGES_GEMINI_API_KEY
-app.state.config.IMAGES_GEMINI_ENDPOINT_METHOD = IMAGES_GEMINI_ENDPOINT_METHOD
-
-app.state.config.AUTOMATIC1111_BASE_URL = AUTOMATIC1111_BASE_URL
-app.state.config.AUTOMATIC1111_API_AUTH = AUTOMATIC1111_API_AUTH
-app.state.config.AUTOMATIC1111_PARAMS = AUTOMATIC1111_PARAMS
-
-app.state.config.COMFYUI_BASE_URL = COMFYUI_BASE_URL
-app.state.config.COMFYUI_API_KEY = COMFYUI_API_KEY
-app.state.config.COMFYUI_WORKFLOW = COMFYUI_WORKFLOW
-app.state.config.COMFYUI_WORKFLOW_NODES = COMFYUI_WORKFLOW_NODES
-
-
-app.state.config.ENABLE_IMAGE_EDIT = ENABLE_IMAGE_EDIT
-app.state.config.IMAGE_EDIT_ENGINE = IMAGE_EDIT_ENGINE
-app.state.config.IMAGE_EDIT_MODEL = IMAGE_EDIT_MODEL
-app.state.config.IMAGE_EDIT_SIZE = IMAGE_EDIT_SIZE
-app.state.config.IMAGES_EDIT_OPENAI_API_BASE_URL = IMAGES_EDIT_OPENAI_API_BASE_URL
-app.state.config.IMAGES_EDIT_OPENAI_API_KEY = IMAGES_EDIT_OPENAI_API_KEY
-app.state.config.IMAGES_EDIT_OPENAI_API_VERSION = IMAGES_EDIT_OPENAI_API_VERSION
-app.state.config.IMAGES_EDIT_GEMINI_API_BASE_URL = IMAGES_EDIT_GEMINI_API_BASE_URL
-app.state.config.IMAGES_EDIT_GEMINI_API_KEY = IMAGES_EDIT_GEMINI_API_KEY
-app.state.config.IMAGES_EDIT_COMFYUI_BASE_URL = IMAGES_EDIT_COMFYUI_BASE_URL
-app.state.config.IMAGES_EDIT_COMFYUI_API_KEY = IMAGES_EDIT_COMFYUI_API_KEY
-app.state.config.IMAGES_EDIT_COMFYUI_WORKFLOW = IMAGES_EDIT_COMFYUI_WORKFLOW
-app.state.config.IMAGES_EDIT_COMFYUI_WORKFLOW_NODES = IMAGES_EDIT_COMFYUI_WORKFLOW_NODES
-
 
 ########################################
 #
 # AUDIO
 #
 ########################################
-
-app.state.config.STT_ENGINE = AUDIO_STT_ENGINE
-app.state.config.STT_MODEL = AUDIO_STT_MODEL
-app.state.config.STT_SUPPORTED_CONTENT_TYPES = AUDIO_STT_SUPPORTED_CONTENT_TYPES
-app.state.config.STT_ALLOWED_EXTENSIONS = AUDIO_STT_ALLOWED_EXTENSIONS
-
-app.state.config.STT_OPENAI_API_BASE_URL = AUDIO_STT_OPENAI_API_BASE_URL
-app.state.config.STT_OPENAI_API_KEY = AUDIO_STT_OPENAI_API_KEY
-
-app.state.config.WHISPER_MODEL = WHISPER_MODEL
-app.state.config.DEEPGRAM_API_KEY = DEEPGRAM_API_KEY
-
-app.state.config.AUDIO_STT_AZURE_API_KEY = AUDIO_STT_AZURE_API_KEY
-app.state.config.AUDIO_STT_AZURE_REGION = AUDIO_STT_AZURE_REGION
-app.state.config.AUDIO_STT_AZURE_LOCALES = AUDIO_STT_AZURE_LOCALES
-app.state.config.AUDIO_STT_AZURE_BASE_URL = AUDIO_STT_AZURE_BASE_URL
-app.state.config.AUDIO_STT_AZURE_MAX_SPEAKERS = AUDIO_STT_AZURE_MAX_SPEAKERS
-
-app.state.config.AUDIO_STT_MISTRAL_API_KEY = AUDIO_STT_MISTRAL_API_KEY
-app.state.config.AUDIO_STT_MISTRAL_API_BASE_URL = AUDIO_STT_MISTRAL_API_BASE_URL
-app.state.config.AUDIO_STT_MISTRAL_USE_CHAT_COMPLETIONS = AUDIO_STT_MISTRAL_USE_CHAT_COMPLETIONS
-
-app.state.config.TTS_ENGINE = AUDIO_TTS_ENGINE
-
-app.state.config.TTS_MODEL = AUDIO_TTS_MODEL
-app.state.config.TTS_VOICE = AUDIO_TTS_VOICE
-
-app.state.config.TTS_OPENAI_API_BASE_URL = AUDIO_TTS_OPENAI_API_BASE_URL
-app.state.config.TTS_OPENAI_API_KEY = AUDIO_TTS_OPENAI_API_KEY
-app.state.config.TTS_OPENAI_PARAMS = AUDIO_TTS_OPENAI_PARAMS
-
-app.state.config.TTS_API_KEY = AUDIO_TTS_API_KEY
-app.state.config.TTS_SPLIT_ON = AUDIO_TTS_SPLIT_ON
-
-
-app.state.config.TTS_AZURE_SPEECH_REGION = AUDIO_TTS_AZURE_SPEECH_REGION
-app.state.config.TTS_AZURE_SPEECH_BASE_URL = AUDIO_TTS_AZURE_SPEECH_BASE_URL
-app.state.config.TTS_AZURE_SPEECH_OUTPUT_FORMAT = AUDIO_TTS_AZURE_SPEECH_OUTPUT_FORMAT
-
-app.state.config.TTS_MISTRAL_API_KEY = AUDIO_TTS_MISTRAL_API_KEY
-app.state.config.TTS_MISTRAL_API_BASE_URL = AUDIO_TTS_MISTRAL_API_BASE_URL
 
 
 app.state.faster_whisper_model = None
@@ -1879,31 +990,6 @@ app.state.speech_speaker_embeddings_dataset = None
 # TASKS
 #
 ########################################
-
-
-app.state.config.TASK_MODEL = TASK_MODEL
-app.state.config.TASK_MODEL_EXTERNAL = TASK_MODEL_EXTERNAL
-
-
-app.state.config.ENABLE_SEARCH_QUERY_GENERATION = ENABLE_SEARCH_QUERY_GENERATION
-app.state.config.ENABLE_RETRIEVAL_QUERY_GENERATION = ENABLE_RETRIEVAL_QUERY_GENERATION
-app.state.config.ENABLE_AUTOCOMPLETE_GENERATION = ENABLE_AUTOCOMPLETE_GENERATION
-app.state.config.ENABLE_TAGS_GENERATION = ENABLE_TAGS_GENERATION
-app.state.config.ENABLE_TITLE_GENERATION = ENABLE_TITLE_GENERATION
-app.state.config.ENABLE_FOLLOW_UP_GENERATION = ENABLE_FOLLOW_UP_GENERATION
-
-
-app.state.config.TITLE_GENERATION_PROMPT_TEMPLATE = TITLE_GENERATION_PROMPT_TEMPLATE
-app.state.config.TAGS_GENERATION_PROMPT_TEMPLATE = TAGS_GENERATION_PROMPT_TEMPLATE
-app.state.config.IMAGE_PROMPT_GENERATION_PROMPT_TEMPLATE = IMAGE_PROMPT_GENERATION_PROMPT_TEMPLATE
-app.state.config.FOLLOW_UP_GENERATION_PROMPT_TEMPLATE = FOLLOW_UP_GENERATION_PROMPT_TEMPLATE
-
-app.state.config.TOOLS_FUNCTION_CALLING_PROMPT_TEMPLATE = TOOLS_FUNCTION_CALLING_PROMPT_TEMPLATE
-app.state.config.QUERY_GENERATION_PROMPT_TEMPLATE = QUERY_GENERATION_PROMPT_TEMPLATE
-app.state.config.AUTOCOMPLETE_GENERATION_PROMPT_TEMPLATE = AUTOCOMPLETE_GENERATION_PROMPT_TEMPLATE
-app.state.config.AUTOCOMPLETE_GENERATION_INPUT_MAX_LENGTH = AUTOCOMPLETE_GENERATION_INPUT_MAX_LENGTH
-app.state.config.VOICE_MODE_PROMPT_TEMPLATE = VOICE_MODE_PROMPT_TEMPLATE
-app.state.config.ENABLE_VOICE_MODE_PROMPT = ENABLE_VOICE_MODE_PROMPT
 
 
 ########################################
@@ -1919,125 +1005,25 @@ if ENABLE_COMPRESSION_MIDDLEWARE:
     app.add_middleware(CompressMiddleware)
 
 
-class RedirectMiddleware:
-    """Pure ASGI-3 middleware. See thoughts/shared/research/2026-04-20-redis-ha-loop-bug-and-kind-repro.md for why we avoid BaseHTTPMiddleware."""
-
-    def __init__(self, app):
-        self.app = app
-
-    async def __call__(self, scope, receive, send):
-        if scope['type'] != 'http' or scope.get('method') != 'GET':
-            return await self.app(scope, receive, send)
-
-        request = Request(scope)
-        path = request.url.path
-        query_params = dict(parse_qs(urlparse(str(request.url)).query))
-
-        redirect_params = {}
-
-        if path.endswith('/watch') and 'v' in query_params:
-            redirect_params['youtube'] = query_params['v'][0]
-
-        if 'shared' in query_params and len(query_params['shared']) > 0:
-            text = query_params['shared'][0]
-            if text:
-                urls = re.match(r'https://\S+', text)
-                if urls:
-                    from open_webui.retrieval.loaders.youtube import _parse_video_id
-
-                    if youtube_video_id := _parse_video_id(urls[0]):
-                        redirect_params['youtube'] = youtube_video_id
-                    else:
-                        redirect_params['load-url'] = urls[0]
-                else:
-                    redirect_params['q'] = text
-
-        if redirect_params:
-            redirect_url = f'/?{urlencode(redirect_params)}'
-            response = RedirectResponse(url=redirect_url)
-            return await response(scope, receive, send)
-
-        await self.app(scope, receive, send)
-
-
-app.add_middleware(RedirectMiddleware)
-app.add_middleware(SecurityHeadersMiddleware)
-
-
-class APIKeyRestrictionMiddleware:
-    def __init__(self, app):
-        self.app = app
-
-    async def __call__(self, scope, receive, send):
-        if scope['type'] == 'http':
-            request = Request(scope)
-            auth_header = request.headers.get('Authorization')
-            token = None
-
-            if auth_header:
-                parts = auth_header.split(' ', 1)
-                if len(parts) == 2:
-                    token = parts[1]
-
-            # Only apply restrictions if an sk- API key is used
-            if token and token.startswith('sk-'):
-                # Check if restrictions are enabled
-                if app.state.config.ENABLE_API_KEYS_ENDPOINT_RESTRICTIONS:
-                    allowed_paths = [
-                        path.strip()
-                        for path in str(app.state.config.API_KEYS_ALLOWED_ENDPOINTS).split(',')
-                        if path.strip()
-                    ]
-
-                    request_path = request.url.path
-
-                    # Match exact path or prefix path
-                    is_allowed = any(
-                        request_path == allowed or request_path.startswith(allowed + '/') for allowed in allowed_paths
-                    )
-
-                    if not is_allowed:
-                        await JSONResponse(
-                            status_code=status.HTTP_403_FORBIDDEN,
-                            content={'detail': 'API key not allowed to access this endpoint.'},
-                        )(scope, receive, send)
-                        return
-
-        await self.app(scope, receive, send)
-
-
-app.add_middleware(APIKeyRestrictionMiddleware)
-
-
-class CommitSessionMiddleware:
-    """Pure ASGI-3. Commit SQLAlchemy scoped session after the request completes, always remove().
-
-    Converted from @app.middleware('http') to avoid BaseHTTPMiddleware's per-request sub-task
-    crossing event loops with app.state.redis (see thoughts/shared/research/2026-04-20-redis-ha-loop-bug-and-kind-repro.md).
-    """
-
-    def __init__(self, app):
-        self.app = app
-
-    async def __call__(self, scope, receive, send):
-        if scope['type'] != 'http':
-            return await self.app(scope, receive, send)
-        try:
-            await self.app(scope, receive, send)
-        finally:
-            try:
-                ScopedSession.commit()
-            finally:
-                # CRITICAL: remove() returns the connection to the pool.
-                # Without this, connections remain "checked out" and accumulate
-                # as "idle in transaction" in PostgreSQL.
-                ScopedSession.remove()
+# All HTTP middlewares below are pure-ASGI implementations. The previous
+# `BaseHTTPMiddleware` / `@app.middleware('http')` versions wrapped the
+# downstream app in an anyio task group whose cancel scope cancelled
+# in-flight DB calls (and any other awaits) on client disconnect /
+# response completion — which surfaced as noisy SQLAlchemy
+# `terminate_force_close` tracebacks under aiosqlite and as random
+# CancelledError storms across the request path. See
+# `open_webui.utils.asgi_middleware` for the rationale.
 
 
 class AuthTokenMiddleware:
     """Pure ASGI-3. Normalise request.state.token from Authorization header / cookie / x-api-key.
 
     Stamps X-Process-Time on the response.
+
+    [Gradient] Kept inline instead of adopting
+    `open_webui.utils.asgi_middleware.AuthTokenMiddleware`: our variant
+    restricts the legacy `x-api-key` header to the Anthropic-compatible
+    message endpoints only, whereas upstream's accepts it on every path.
     """
 
     def __init__(self, app):
@@ -2061,7 +1047,7 @@ class AuthTokenMiddleware:
                 token = HTTPAuthorizationCredentials(scheme='Bearer', credentials=request.headers.get('x-api-key'))
 
         request.state.token = token
-        request.state.enable_api_keys = app.state.config.ENABLE_API_KEYS
+        request.state.enable_api_keys = await Config.get('auth.enable_api_keys')
 
         start_time = int(time.time())
 
@@ -2076,35 +1062,12 @@ class AuthTokenMiddleware:
         await self.app(scope, receive, send_with_process_time)
 
 
-class WebSocketGuardMiddleware:
-    """Pure ASGI-3. Reject malformed WebSocket upgrade requests that arrive on HTTP transport.
-
-    Works around https://github.com/miguelgrinberg/python-engineio/issues/367.
-    """
-
-    def __init__(self, app):
-        self.app = app
-
-    async def __call__(self, scope, receive, send):
-        if scope['type'] == 'http':
-            path = scope.get('path', '')
-            query_string = scope.get('query_string', b'').decode('latin-1')
-            if '/ws/socket.io' in path and 'transport=websocket' in query_string:
-                headers = Headers(scope=scope)
-                upgrade = (headers.get('upgrade') or '').lower()
-                connection = (headers.get('connection') or '').lower().split(',')
-                if upgrade != 'websocket' or 'upgrade' not in [c.strip() for c in connection]:
-                    response = JSONResponse(
-                        status_code=status.HTTP_400_BAD_REQUEST,
-                        content={'detail': 'Invalid WebSocket upgrade request'},
-                    )
-                    return await response(scope, receive, send)
-        await self.app(scope, receive, send)
-
-
-app.add_middleware(WebSocketGuardMiddleware)
-app.add_middleware(AuthTokenMiddleware)
+app.add_middleware(RedirectMiddleware)
+app.add_middleware(SecurityHeadersMiddleware)
 app.add_middleware(CommitSessionMiddleware)
+app.add_middleware(AuthTokenMiddleware)
+app.add_middleware(WebsocketUpgradeGuardMiddleware)
+
 
 app.add_middleware(
     CORSMiddleware,
@@ -2177,32 +1140,32 @@ app.include_router(calendar.router, prefix='/api/v1/calendars', tags=['calendars
 if ENABLE_SCIM:
     app.include_router(scim.router, prefix='/api/v1/scim/v2', tags=['scim'])
 
-# OneDrive / Google Drive Sync APIs for collection synchronization.
+# [Gradient] OneDrive / Google Drive Sync APIs for collection synchronization.
 # Mounted unconditionally — endpoints are admin/user-gated and no-op without
 # config. The routers must always be available so these providers can be
 # enabled at runtime via the Cloud Sync admin tab without a pod restart.
 app.include_router(onedrive_sync.router, prefix='/api/v1/onedrive', tags=['onedrive'])
 app.include_router(google_drive_sync.router, prefix='/api/v1/google-drive', tags=['google-drive'])
 
-# Confluence Sync API for collection synchronization.
+# [Gradient] Confluence Sync API for collection synchronization.
 # Mounted unconditionally — endpoints are admin/user-gated and no-op without
 # config. The router must always be available so Confluence can be enabled at
 # runtime via the Cloud Sync admin tab without a pod restart.
 app.include_router(confluence_sync.router, prefix='/api/v1/confluence', tags=['confluence'])
 
-# TOPdesk Sync API for collection synchronization.
+# [Gradient] TOPdesk Sync API for collection synchronization.
 # Mounted unconditionally — endpoints are admin-gated and no-op without config.
 # The router must always be available so TOPdesk can be enabled at runtime via
 # the Cloud Sync admin tab without a pod restart.
 app.include_router(topdesk_sync.router, prefix='/api/v1/topdesk', tags=['topdesk'])
 
-# Invites API (always mounted - Copy Link works without Graph API)
+# [Gradient] Invites API (always mounted - Copy Link works without Graph API)
 app.include_router(invites.router, prefix='/api/v1/invites', tags=['invites'])
 app.include_router(data_warnings.router, prefix='/api/v1/data-warnings', tags=['data-warnings'])
 
-# Product feedback reporting API.
-# Mounted unconditionally — gated in-handler on the ENABLE_FEEDBACK_REPORTING
-# PersistentConfig flag so it can be toggled at runtime without a pod restart.
+# [Gradient] Product feedback reporting API.
+# Mounted unconditionally — gated in-handler on the feedback_report.enable
+# config flag so it can be toggled at runtime without a pod restart.
 app.include_router(feedback_report.router, prefix='/api/v1/feedback', tags=['feedback'])
 
 
@@ -2256,7 +1219,11 @@ async def get_models(request: Request, refresh: bool = False, user=Depends(get_v
 
         models.append(model)
 
-    model_order_list = request.app.state.config.MODEL_ORDER_LIST
+    # Chat requests resolve models by ID from request.app.state.MODELS, where
+    # duplicate IDs collapse to the last model. Return the same effective list.
+    models = list({model['id']: model for model in models}.values())
+
+    model_order_list = await Config.get('ui.model_order_list')
     if model_order_list:
         model_order_dict = {model_id: i for i, model_id in enumerate(model_order_list)}
         # Sort models by order list priority, with fallback for those not in the list
@@ -2278,7 +1245,7 @@ async def get_models(request: Request, refresh: bool = False, user=Depends(get_v
 @app.get('/api/models/base')
 async def get_base_models(request: Request, user=Depends(get_admin_user)):
     models = await get_all_base_models(request, user=user)
-    # Apply global model whitelist filter (if configured)
+    # [Gradient] Apply global model whitelist filter (if configured)
     if MODEL_WHITELIST:
         models = [m for m in models if m.get('id') in MODEL_WHITELIST]
     return {'data': models}
@@ -2286,6 +1253,12 @@ async def get_base_models(request: Request, user=Depends(get_admin_user)):
 
 class ModelUnloadForm(BaseModel):
     model: str
+
+
+def strip_provider_model_prefix(model_id: str, prefix_id: str | None) -> str:
+    if prefix_id and model_id.startswith(f'{prefix_id}.'):
+        return model_id[len(f'{prefix_id}.') :]
+    return model_id
 
 
 @app.post('/api/models/unload')
@@ -2297,23 +1270,34 @@ async def unload_model(request: Request, form_data: ModelUnloadForm, user=Depend
     """
     model_id = form_data.model
 
-    # --- Ollama provider ---
     ollama_models = getattr(request.app.state, 'OLLAMA_MODELS', None) or {}
+    openai_models = getattr(request.app.state, 'OPENAI_MODELS', None) or {}
+
+    seen = set()
+    while model_id not in ollama_models and model_id not in openai_models and model_id not in seen:
+        seen.add(model_id)
+        model_info = await Models.get_model_by_id(model_id)
+        if not model_info or not model_info.base_model_id:
+            break
+        model_id = model_info.base_model_id
+
+    # --- Ollama provider ---
     if model_id in ollama_models:
+        ollama_config = await Config.get_many('ollama.base_urls', 'ollama.api_configs')
+        ollama_base_urls = ollama_config.get('ollama.base_urls') or []
+        ollama_api_configs = ollama_config.get('ollama.api_configs') or {}
         url_indices = ollama_models[model_id].get('urls', [])
         errors = []
         for idx in url_indices:
-            url = request.app.state.config.OLLAMA_BASE_URLS[idx]
-            api_config = request.app.state.config.OLLAMA_API_CONFIGS.get(
+            url = ollama_base_urls[idx]
+            api_config = ollama_api_configs.get(
                 str(idx),
-                request.app.state.config.OLLAMA_API_CONFIGS.get(url, {}),
+                ollama_api_configs.get(url, {}),
             )
             key = api_config.get('key', None)
 
             prefix_id = api_config.get('prefix_id', None)
-            actual_model = model_id
-            if prefix_id and actual_model.startswith(f'{prefix_id}.'):
-                actual_model = actual_model[len(f'{prefix_id}.') :]
+            actual_model = strip_provider_model_prefix(model_id, prefix_id)
 
             payload = json.dumps({'model': actual_model, 'keep_alive': 0, 'prompt': ''})
 
@@ -2343,19 +1327,21 @@ async def unload_model(request: Request, form_data: ModelUnloadForm, user=Depend
         return {'status': True}
 
     # --- OpenAI-compatible providers ---
-    openai_models = getattr(request.app.state, 'OPENAI_MODELS', None) or {}
     if model_id in openai_models:
+        openai_config = await Config.get_many('openai.api_configs', 'openai.api_base_urls', 'openai.api_keys')
+        openai_api_configs = openai_config.get('openai.api_configs') or {}
+        openai_base_urls = openai_config.get('openai.api_base_urls') or []
+        openai_api_keys = openai_config.get('openai.api_keys') or []
         model_info = openai_models[model_id]
         idx = model_info.get('urlIdx')
-        api_config = request.app.state.config.OPENAI_API_CONFIGS.get(str(idx), {})
+        api_config = openai_api_configs.get(str(idx), {})
         provider = api_config.get('provider', '')
-        base_url = request.app.state.config.OPENAI_API_BASE_URLS[idx]
-        key = (
-            request.app.state.config.OPENAI_API_KEYS[idx] if idx < len(request.app.state.config.OPENAI_API_KEYS) else ''
-        )
+        base_url = openai_base_urls[idx]
+        key = openai_api_keys[idx] if idx < len(openai_api_keys) else ''
 
         if provider == 'llama.cpp':
             root_url = base_url.rstrip('/').removesuffix('/v1')
+            actual_model = strip_provider_model_prefix(model_id, api_config.get('prefix_id'))
             try:
                 timeout = aiohttp.ClientTimeout(total=30)
                 async with aiohttp.ClientSession(timeout=timeout, trust_env=True) as session:
@@ -2365,7 +1351,7 @@ async def unload_model(request: Request, form_data: ModelUnloadForm, user=Depend
                     }
                     async with session.post(
                         f'{root_url}/models/unload',
-                        json={'model': model_id},
+                        json={'model': actual_model},
                         headers=headers,
                     ) as r:
                         if not r.ok:
@@ -2453,18 +1439,24 @@ async def chat_completion(
             request.state.model = model
 
         # Model params: global defaults as base, per-model overrides win
-        default_model_params = getattr(request.app.state.config, 'DEFAULT_MODEL_PARAMS', None) or {}
+        default_model_params = await Config.get('models.default_params', {}) or {}
         model_info_params = {
             **default_model_params,
             **(model_info.params.model_dump() if model_info and model_info.params else {}),
         }
+        request_params = {key: value for key, value in (form_data.get('params') or {}).items() if value is not None}
+        if model_info_params or request_params:
+            form_data['params'] = {
+                **model_info_params,
+                **request_params,
+            }
 
         # Check base model existence for custom models
         if model_info and model_info.base_model_id:
             base_model_id = model_info.base_model_id
             if base_model_id not in request.app.state.MODELS:
                 if ENABLE_CUSTOM_MODEL_FALLBACK:
-                    default_models = (request.app.state.config.DEFAULT_MODELS or '').split(',')
+                    default_models = ((await Config.get('ui.default_models')) or '').split(',')
 
                     fallback_model_id = default_models[0].strip() if default_models[0] else None
 
@@ -2480,6 +1472,7 @@ async def chat_completion(
         # Chat Params
         stream_delta_chunk_size = form_data.get('params', {}).get('stream_delta_chunk_size')
         reasoning_tags = form_data.get('params', {}).get('reasoning_tags')
+        compact_token_threshold = form_data.get('params', {}).get('compact_token_threshold')
 
         # Model Params
         if model_info_params.get('stream_response') is not None:
@@ -2491,6 +1484,9 @@ async def chat_completion(
         if model_info_params.get('reasoning_tags') is not None:
             reasoning_tags = model_info_params.get('reasoning_tags')
 
+        if model_info_params.get('compact_token_threshold') is not None:
+            compact_token_threshold = model_info_params.get('compact_token_threshold')
+
         # parent_id signals intent:
         #   null   → new chat (root message, no parent)
         #   value  → follow-up (user message's parentId = prev assistant)
@@ -2499,18 +1495,40 @@ async def chat_completion(
         parent_id = form_data.pop('parent_id', None)
         form_data.pop('new_chat', None)  # Legacy field
 
-        # Multi-model: {model_id: assistant_message_id}
-        # Single-model fallback: built from 'model' + 'id'
+        # Multi-model message_ids: list of {model_id, message_id} entries.
+        # Supports both the new array format and legacy dict format for backward compat.
         message_ids = form_data.pop('message_ids', None)
-        if not message_ids:
-            message_ids = {model_id: form_data.pop('id', None)}
-        else:
+        if isinstance(message_ids, list):
+            # New format: [{"model_id": ..., "message_id": ...}, ...]
             form_data.pop('id', None)
+        elif isinstance(message_ids, dict):
+            # Legacy dict format: {model_id: message_id} — convert to list
+            message_ids = [{'model_id': k, 'message_id': v} for k, v in message_ids.items()]
+            form_data.pop('id', None)
+        else:
+            # Single-model fallback
+            message_ids = [{'model_id': model_id, 'message_id': form_data.pop('id', None)}]
 
         user_message = form_data.pop('user_message', None) or form_data.pop('parent_message', None)
+
+        # Drop tool_servers if caller lacks features.direct_tool_servers —
+        # mirrors the storage-side strip in user/settings/update.
+        tool_servers = form_data.pop('tool_servers', None)
+        if (
+            tool_servers
+            and user.role != 'admin'
+            and not await has_permission(
+                user.id,
+                'features.direct_tool_servers',
+                await Config.get('user.permissions'),
+            )
+        ):
+            tool_servers = None
+
         metadata = {
             'user_id': user.id,
-            'chat_id': form_data.pop('chat_id', None),
+            'user_agent': request.headers.get('user-agent', '') or '',
+            'chat_id': form_data.pop('chat_id', None) or '',
             'user_message': user_message,
             'user_message_id': user_message.get('id') if user_message else None,
             # [Gradient] Parent of the user message (= previous assistant id, or
@@ -2523,8 +1541,8 @@ async def chat_completion(
             'folder_id': form_data.pop('folder_id', None),
             'filter_ids': form_data.pop('filter_ids', []),
             'tool_ids': form_data.get('tool_ids', None),
-            'tool_servers': form_data.pop('tool_servers', None),
-            'rag_filter': form_data.pop('rag_filter', None),
+            'tool_servers': tool_servers,
+            'rag_filter': form_data.pop('rag_filter', None),  # [Gradient] RAG filter passthrough
             'files': form_data.get('files', None),
             'features': form_data.get('features', {}),
             'variables': form_data.get('variables', {}),
@@ -2537,13 +1555,11 @@ async def chat_completion(
             'params': {
                 'stream_delta_chunk_size': stream_delta_chunk_size,
                 'reasoning_tags': reasoning_tags,
+                'compact_token_threshold': compact_token_threshold,
                 'function_calling': (
-                    'native'
-                    if (
-                        form_data.get('params', {}).get('function_calling') == 'native'
-                        or model_info_params.get('function_calling') == 'native'
-                    )
-                    else 'default'
+                    form_data.get('params', {}).get('function_calling')
+                    or model_info_params.get('function_calling')
+                    or 'native'
                 ),
             },
         }
@@ -2560,8 +1576,52 @@ async def chat_completion(
         if is_new_chat:
             metadata['chat_id'] = str(uuid4())
 
+        initial_title_generation = None
+        if is_new_chat and tasks and TASKS.TITLE_GENERATION in tasks:
+            initial_title_generation = tasks.pop(TASKS.TITLE_GENERATION)
+
         if metadata.get('chat_id') and user:
             chat_id = metadata['chat_id']
+
+            # Gate channel: branch — caller needs write access on the channel
+            # and the supplied message_id must belong to that channel.
+            if chat_id.startswith('channel:'):
+                channel_id = chat_id.removeprefix('channel:')
+                channel = await Channels.get_channel_by_id(channel_id)
+                if not channel:
+                    raise HTTPException(
+                        status_code=status.HTTP_404_NOT_FOUND,
+                        detail=ERROR_MESSAGES.NOT_FOUND,
+                    )
+                if user.role != 'admin':
+                    if channel.type in ['group', 'dm']:
+                        if not await Channels.is_user_channel_member(channel.id, user.id):
+                            raise HTTPException(
+                                status_code=status.HTTP_403_FORBIDDEN,
+                                detail=ERROR_MESSAGES.DEFAULT(),
+                            )
+                    else:
+                        if not await AccessGrants.has_access(
+                            user_id=user.id,
+                            resource_type='channel',
+                            resource_id=channel.id,
+                            permission='write',
+                        ):
+                            raise HTTPException(
+                                status_code=status.HTTP_403_FORBIDDEN,
+                                detail=ERROR_MESSAGES.DEFAULT(),
+                            )
+                for entry in message_ids:
+                    target_message_id = entry.get('message_id')
+                    if not target_message_id:
+                        continue
+                    target_message = await Messages.get_message_by_id(target_message_id)
+                    if target_message and target_message.channel_id != channel.id:
+                        raise HTTPException(
+                            status_code=status.HTTP_403_FORBIDDEN,
+                            detail=ERROR_MESSAGES.DEFAULT(),
+                        )
+
             if not chat_id.startswith('local:') and not chat_id.startswith(
                 'channel:'
             ):  # temporary/channel chats are not stored
@@ -2571,13 +1631,15 @@ async def chat_completion(
                     user_message_id = user_message.get('id') if user_message else None
 
                     history_messages = {}
-                    all_assistant_ids = [assistant_id for assistant_id in message_ids.values() if assistant_id]
+                    all_assistant_ids = [entry['message_id'] for entry in message_ids if entry.get('message_id')]
 
                     if user_message_id and user_message:
                         user_message['childrenIds'] = all_assistant_ids
                         history_messages[user_message_id] = user_message
 
-                    for target_model_id, assistant_message_id in message_ids.items():
+                    for entry in message_ids:
+                        target_model_id = entry['model_id']
+                        assistant_message_id = entry['message_id']
                         if assistant_message_id:
                             history_messages[assistant_message_id] = {
                                 'id': assistant_message_id,
@@ -2597,7 +1659,7 @@ async def chat_completion(
                             chat={
                                 'id': chat_id,
                                 'title': 'New Chat',
-                                'models': list(message_ids.keys()),
+                                'models': [entry['model_id'] for entry in message_ids],
                                 'history': {
                                     'currentId': all_assistant_ids[0] if all_assistant_ids else user_message_id,
                                     'messages': history_messages,
@@ -2614,6 +1676,39 @@ async def chat_completion(
                             folder_id=metadata.get('folder_id'),
                         ),
                     )
+                    await publish_event(
+                        request,
+                        EVENTS.CHAT_CREATED,
+                        actor=user,
+                        subject_id=chat_id,
+                        data={'title': 'New Chat'},
+                    )
+                    if user_message_id:
+                        await publish_event(
+                            request,
+                            EVENTS.MESSAGE_CREATED,
+                            actor=user,
+                            subject_id=user_message_id,
+                            data={
+                                'chat_id': chat_id,
+                                'role': 'user',
+                                'content_preview': user_message.get('content', '')[:300],
+                            },
+                        )
+                    for entry in message_ids:
+                        assistant_message_id = entry.get('message_id')
+                        if assistant_message_id:
+                            await publish_event(
+                                request,
+                                EVENTS.MESSAGE_CREATED,
+                                actor=user,
+                                subject_id=assistant_message_id,
+                                data={
+                                    'chat_id': chat_id,
+                                    'role': 'assistant',
+                                    'model': entry.get('model_id'),
+                                },
+                            )
 
                     # Insert chat files from user message if any
                     user_message_files = user_message.get('files', [])
@@ -2632,6 +1727,29 @@ async def chat_completion(
                         except Exception as e:
                             log.debug(f'Error inserting chat files: {e}')
                             pass
+
+                    if initial_title_generation is not None and all_assistant_ids:
+                        title_metadata = {
+                            **metadata,
+                            'message_id': all_assistant_ids[0],
+                        }
+                        event_emitter = await get_event_emitter(title_metadata, update_db=False)
+                        title_ctx = {
+                            'request': request,
+                            'form_data': form_data,
+                            'user': user,
+                            'metadata': title_metadata,
+                            'tasks': {TASKS.TITLE_GENERATION: initial_title_generation},
+                            'event_emitter': event_emitter,
+                        }
+
+                        async def run_initial_title_generation():
+                            try:
+                                await background_tasks_handler(title_ctx)
+                            except Exception as e:
+                                log.debug(f'Error generating initial chat title: {e}')
+
+                        asyncio.create_task(run_initial_title_generation())
                 else:
                     # Existing chat — verify ownership
                     if not await Chats.is_chat_owner(chat_id, user.id) and user.role != 'admin':
@@ -2640,23 +1758,42 @@ async def chat_completion(
                             detail=ERROR_MESSAGES.DEFAULT(),
                         )
 
-                    # Persist chat-level files (knowledge collections, docs, etc.)
+                    user_message = metadata.get('user_message') or {}
+                    selected_chat_models = user_message.get('models') if isinstance(user_message, dict) else None
+                    if not isinstance(selected_chat_models, list) or not selected_chat_models:
+                        selected_chat_models = [entry.get('model_id') for entry in message_ids if entry.get('model_id')]
+
+                    # Persist chat-level fields the frontend used to save on every message.
                     # The old frontend saveChatHandler did this on every message;
                     # now the backend owns persistence.
                     chat_files = metadata.get('files')
-                    if chat_files is not None:
+                    if chat_files is not None or selected_chat_models:
                         existing_chat = await Chats.get_chat_by_id(chat_id)
                         if existing_chat:
-                            updated = {**existing_chat.chat, 'files': chat_files}
+                            updated = {**existing_chat.chat}
+                            if chat_files is not None:
+                                updated['files'] = chat_files
+                            if selected_chat_models:
+                                updated['models'] = selected_chat_models
                             await Chats.update_chat_by_id(chat_id, updated)
 
                     # Save user message to DB
-                    user_message = metadata.get('user_message') or {}
                     if user_message and user_message.get('id'):
                         await Chats.upsert_message_to_chat_by_id_and_message_id(
                             chat_id,
                             user_message['id'],
                             user_message,
+                        )
+                        await publish_event(
+                            request,
+                            EVENTS.MESSAGE_CREATED,
+                            actor=user,
+                            subject_id=user_message['id'],
+                            data={
+                                'chat_id': chat_id,
+                                'role': user_message.get('role', 'user'),
+                                'content_preview': user_message.get('content', '')[:300],
+                            },
                         )
 
                         # Link grandparent → user message (childrenIds)
@@ -2691,7 +1828,7 @@ async def chat_completion(
 
                     # Save ALL assistant placeholders
                     user_message_id = metadata.get('user_message_id')
-                    all_assistant_ids = [assistant_id for assistant_id in message_ids.values() if assistant_id]
+                    all_assistant_ids = [entry['message_id'] for entry in message_ids if entry.get('message_id')]
 
                     # Link user message → all assistant messages (childrenIds)
                     if user_message_id and all_assistant_ids:
@@ -2708,7 +1845,9 @@ async def chat_completion(
                             )
 
                     # Save each assistant placeholder
-                    for target_model_id, assistant_message_id in message_ids.items():
+                    for entry in message_ids:
+                        target_model_id = entry['model_id']
+                        assistant_message_id = entry['message_id']
                         if assistant_message_id:
                             await Chats.upsert_message_to_chat_by_id_and_message_id(
                                 chat_id,
@@ -2722,6 +1861,17 @@ async def chat_completion(
                                     'done': False,
                                     'model': target_model_id,
                                     'timestamp': int(time.time()),
+                                },
+                            )
+                            await publish_event(
+                                request,
+                                EVENTS.MESSAGE_CREATED,
+                                actor=user,
+                                subject_id=assistant_message_id,
+                                data={
+                                    'chat_id': chat_id,
+                                    'role': 'assistant',
+                                    'model': target_model_id,
                                 },
                             )
 
@@ -2872,10 +2022,10 @@ async def chat_completion(
                 try:
                     # [Gradient] trace_id (captured in chat_completion) rides
                     # along so an error report can deep-link to the Tempo trace.
-                    # error_detail (computed above) unpacks HTTPException.detail
-                    # cleanly — upstream's improvement adopted in v0.9.5 merge.
                     error = {'content': error_detail, 'trace_id': metadata.get('trace_id')}
-                    if not metadata['chat_id'].startswith('local:') and not metadata['chat_id'].startswith('channel:'):
+                    if not metadata.get('chat_id', '').startswith('local:') and not metadata.get(
+                        'chat_id', ''
+                    ).startswith('channel:'):
                         await Chats.upsert_message_to_chat_by_id_and_message_id(
                             metadata['chat_id'],
                             metadata['message_id'],
@@ -2921,7 +2071,8 @@ async def chat_completion(
             # task's current cancel scope", which propagates as a
             # BaseException through the finally block, discards the response
             # return value, and surfaces as a 500 "No response returned."
-            # MCPClient.disconnect() already catches BaseException internally.
+            # MCPClient.disconnect() suppresses known transport teardown errors
+            # while still propagating real task cancellation.
             try:
                 if mcp_clients := metadata.get('mcp_clients'):
                     for client in reversed(list(mcp_clients.values())):
@@ -2953,7 +2104,9 @@ async def chat_completion(
         task_ids = []
         chat_id = metadata['chat_id']
 
-        for idx, (target_model_id, assistant_message_id) in enumerate(message_ids.items()):
+        for idx, entry in enumerate(message_ids):
+            target_model_id = entry['model_id']
+            assistant_message_id = entry['message_id']
             if not assistant_message_id:
                 continue
 
@@ -2973,7 +2126,7 @@ async def chat_completion(
             # Resolve the model object for this specific model
             resolved_model = request.app.state.MODELS.get(target_model_id, model)
 
-            # Only the first model runs title/tags generation;
+            # Only the first model runs chat-level background tasks;
             # subsequent models only run follow-ups.
             task_id, _ = await create_task(
                 request.app.state.redis,
@@ -3000,7 +2153,7 @@ async def chat_completion(
         # Emit chat:active=true
         if task_ids:
             event_emitter = await get_event_emitter(
-                {**metadata, 'message_id': list(message_ids.values())[0]},
+                {**metadata, 'message_id': message_ids[0]['message_id']},
                 update_db=False,
             )
             if event_emitter:
@@ -3013,7 +2166,7 @@ async def chat_completion(
         }
     else:
         # Legacy/direct: single model, synchronous
-        metadata['message_id'] = list(message_ids.values())[0]
+        metadata['message_id'] = message_ids[0]['message_id']
         return await process_chat(request, form_data, user, metadata, model, tasks)
 
 
@@ -3177,7 +2330,7 @@ async def stop_tasks_by_chat_id_endpoint(request: Request, chat_id: str, user=De
 
 
 def _parse_model_hosting(raw: str) -> list[dict]:
-    """Parse the MODEL_HOSTING env (a JSON list of {match, hosting} rules) for the
+    """[Gradient] Parse the MODEL_HOSTING env (a JSON list of {match, hosting} rules) for the
     model picker. Defensive by design: any malformed / non-list / wrong-shaped value
     degrades to [] (no datacenter flags) with a warning rather than crashing boot, so
     a bad deployment value can never take the app down."""
@@ -3198,7 +2351,7 @@ def _parse_model_hosting(raw: str) -> list[dict]:
 
 
 def _parse_model_profiles(raw: str) -> list[dict]:
-    """Parse the MODEL_PROFILES env (a JSON list of {match, profile} rules) for the
+    """[Gradient] Parse the MODEL_PROFILES env (a JSON list of {match, profile} rules) for the
     model picker. Defensive by design: any malformed / non-list / wrong-shaped value
     degrades to [] (models render plain) with a warning rather than crashing boot, so
     a bad deployment value can never take the app down. `profile` is passed through
@@ -3245,25 +2398,128 @@ async def get_app_config(request: Request):
         if data is not None and 'id' in data:
             user = await Users.get_user_by_id(data['id'])
 
-    user_count = await Users.get_num_users()
     onboarding = False
-
     if user is None:
-        onboarding = user_count == 0
+        onboarding = not await Users.has_users()
 
-    # Coupling ``(basic|scoped) ⇒ shared``: the service-account auth modes have
-    # no per-user OAuth tokens, so they can only drive the pre-synced shared KB.
-    # Coerce a stored ``service-mode + per_user`` state to shared at read time so
-    # an already-inconsistent config is corrected without requiring a re-save.
+    license_metadata = getattr(app.state, 'LICENSE_METADATA', None)
+    user_count = await Users.get_num_users() if license_metadata else None
+    config = await Config.get_many(
+        'oauth.auto_redirect',
+        'ldap.enable',
+        'ui.enable_signup',
+        'ui.enable_login_form',
+        'auth.enable_api_keys',
+        'ui.enable_password_change_form',
+        'direct.enable',
+        'folders.enable',
+        'folders.max_file_count',
+        'channels.enable',
+        'calendar.enable',
+        'automations.enable',
+        'notes.enable',
+        'web.search.enable',
+        'web.search.confirmation.enable',
+        'web.search.confirmation.content',
+        'code_execution.enable',
+        'code_interpreter.enable',
+        'image_generation.enable',
+        'task.autocomplete.enable',
+        'ui.enable_community_sharing',
+        'ui.enable_message_rating',
+        'ui.enable_user_webhooks',
+        'users.enable_status',
+        'google_drive.enable',
+        'onedrive.enable',
+        'memories.enable',
+        'ui.default_models',
+        'ui.default_pinned_models',
+        'ui.prompt_suggestions',
+        'code_execution.engine',
+        'code_interpreter.engine',
+        'audio.tts.engine',
+        'audio.tts.voice',
+        'audio.tts.split_on',
+        'audio.stt.engine',
+        'rag.file.max_size',
+        'rag.file.max_count',
+        'file.image_compression_width',
+        'file.image_compression_height',
+        'user.permissions',
+        'ui.pending_user_overlay_title',
+        'ui.pending_user_overlay_content',
+        'ui.watermark',
+        # --- [Gradient] fork feature flags & integration config ---
+        'auth.enable_2fa',
+        'auth.require_2fa',
+        'auth.2fa_grace_period_days',
+        'email.enable_forgot_password',
+        'email.enable_invites',
+        'email.invite_heading',
+        'rag.enable_filter_ui',
+        'rag.file.allowed_extensions',
+        'document_writer.enable',
+        'ui.enable_citation_relevance',
+        'ui.enable_citation_text_highlight',
+        'evaluation.feedback.layer2.enable',
+        'evaluation.feedback.layer2.positive_tags',
+        'evaluation.feedback.layer2.negative_tags',
+        'evaluation.feedback.layer3.enable',
+        'evaluation.feedback.layer3.prompt',
+        'evaluation.feedback.category_tags.enable',
+        'evaluation.feedback.conversation.enable',
+        'evaluation.feedback.conversation.scale_max',
+        'evaluation.feedback.conversation.header',
+        'evaluation.feedback.conversation.placeholder',
+        'feedback_report.enable',
+        'google_drive.enable_sync',
+        'google_drive.client_id',
+        'google_drive.api_key',
+        'oauth.google.client_secret',
+        'oauth.microsoft.client_secret',
+        'onedrive.enable_personal',
+        'onedrive.enable_business',
+        'onedrive.enable_sync',
+        'onedrive.client_id_personal',
+        'onedrive.client_id_business',
+        'onedrive.sharepoint_url',
+        'onedrive.sharepoint_tenant_id',
+        'confluence.enable',
+        'confluence.enable_sync',
+        'confluence.auth_mode',
+        'confluence.kb_mode',
+        'confluence.client_id',
+        'confluence.client_secret',
+        'topdesk.enable',
+        'topdesk.enable_sync',
+        'agent_proxy.enable',
+        'agent_api.picker_default_slug',
+        'features.enable_data_warnings',
+        'admin.data_retention_ttl_days',
+        'ui.enable_welcome_message',
+        'ui.greeting_template',
+        'ui.enable_acceptance_modal',
+        'ui.acceptance_modal_title',
+        'ui.acceptance_modal_content',
+        'ui.acceptance_modal_button_text',
+        'ui.soev_login_footer',
+        'integrations.providers',
+    )
+
+    # [Gradient] Coupling ``(basic|scoped) ⇒ shared``: the service-account auth
+    # modes have no per-user OAuth tokens, so they can only drive the pre-synced
+    # shared KB. Coerce a stored ``service-mode + per_user`` state to shared at
+    # read time so an already-inconsistent config is corrected without requiring
+    # a re-save.
     from open_webui.services.confluence.basic_auth import is_service_mode
 
     _confluence_kb_mode = (
-        'shared' if is_service_mode(app.state.config.CONFLUENCE_AUTH_MODE) else app.state.config.CONFLUENCE_KB_MODE
+        'shared' if is_service_mode(config.get('confluence.auth_mode')) else config.get('confluence.kb_mode')
     )
 
-    # Shared Confluence KB id — surfaced so the chat '+' menu can attach the
-    # shared, public-read KB in one click (shared mode only). Empty string
-    # when not in shared mode or the KB has not been provisioned yet.
+    # [Gradient] Shared Confluence KB id — surfaced so the chat '+' menu can
+    # attach the shared, public-read KB in one click (shared mode only). Empty
+    # string when not in shared mode or the KB has not been provisioned yet.
     confluence_shared_kb_id = ''
     if _confluence_kb_mode == 'shared':
         from open_webui.routers.confluence_sync import _find_shared_kb
@@ -3271,12 +2527,12 @@ async def get_app_config(request: Request):
         _shared_kb = await _find_shared_kb()
         confluence_shared_kb_id = _shared_kb.id if _shared_kb else ''
 
-    # Shared TOPdesk KB id — surfaced so the chat '+' menu can attach the
-    # shared, public-read KB in one click. Resolved only when the integration
+    # [Gradient] Shared TOPdesk KB id — surfaced so the chat '+' menu can attach
+    # the shared, public-read KB in one click. Resolved only when the integration
     # is enabled (TOPdesk has a single shared-KB mode, so no kb_mode gate);
     # empty string otherwise.
     topdesk_shared_kb_id = ''
-    if app.state.config.ENABLE_TOPDESK_INTEGRATION:
+    if config.get('topdesk.enable'):
         from open_webui.services.sync.shared_kb import find_shared_kb as _find_topdesk_shared_kb
 
         _topdesk_shared_kb = await _find_topdesk_shared_kb('topdesk', 'topdesk_sync')
@@ -3288,63 +2544,73 @@ async def get_app_config(request: Request):
         'name': app.state.WEBUI_NAME,
         'version': VERSION,
         'default_locale': str(DEFAULT_LOCALE),
-        'client_name': CLIENT_NAME,
-        'invite_heading': str(app.state.config.EMAIL_INVITE_HEADING or ''),
-        'oauth': {'providers': {name: config.get('name', name) for name, config in OAUTH_PROVIDERS.items()}},
+        'client_name': CLIENT_NAME,  # [Gradient]
+        'invite_heading': str(config.get('email.invite_heading') or ''),  # [Gradient]
+        'oauth': {
+            'providers': {name: config.get('name', name) for name, config in OAUTH_PROVIDERS.items()},
+            'auto_redirect': config.get('oauth.auto_redirect'),
+        },
         'features': {
+            # --- Public: required by login/signup page pre-auth ---
             'auth': WEBUI_AUTH,
-            'auth_trusted_header': bool(app.state.AUTH_TRUSTED_EMAIL_HEADER),
+            'auth_trusted_header': bool(WEBUI_AUTH_TRUSTED_EMAIL_HEADER),
             'enable_signup_password_confirmation': ENABLE_SIGNUP_PASSWORD_CONFIRMATION,
-            'enable_ldap': app.state.config.ENABLE_LDAP,
-            'enable_2fa': app.state.config.ENABLE_2FA,
-            'enable_api_keys': app.state.config.ENABLE_API_KEYS,
-            'enable_signup': app.state.config.ENABLE_SIGNUP,
-            'enable_login_form': app.state.config.ENABLE_LOGIN_FORM,
-            'enable_forgot_password': app.state.config.ENABLE_FORGOT_PASSWORD and is_mail_configured(),
-            'enable_password_change_form': app.state.config.ENABLE_PASSWORD_CHANGE_FORM,
+            'enable_ldap': config.get('ldap.enable'),
+            'enable_2fa': config.get('auth.enable_2fa'),  # [Gradient] TOTP 2FA
+            'enable_signup': config.get('ui.enable_signup'),
+            'enable_login_form': config.get('ui.enable_login_form'),
+            # [Gradient] Login page needs this pre-auth for the "forgot password" link.
+            'enable_forgot_password': bool(config.get('email.enable_forgot_password')) and is_mail_configured(),
             'enable_websocket': ENABLE_WEBSOCKET_SUPPORT,
-            'enable_version_update_check': ENABLE_VERSION_UPDATE_CHECK,
-            'enable_public_active_users_count': ENABLE_PUBLIC_ACTIVE_USERS_COUNT,
-            'enable_easter_eggs': ENABLE_EASTER_EGGS,
+            # --- Authenticated: only consumed by logged-in frontend ---
             **(
                 {
-                    'enable_direct_connections': app.state.config.ENABLE_DIRECT_CONNECTIONS,
-                    'enable_folders': app.state.config.ENABLE_FOLDERS,
-                    'folder_max_file_count': app.state.config.FOLDER_MAX_FILE_COUNT,
-                    'knowledge_max_file_count': KNOWLEDGE_MAX_FILE_COUNT,
-                    'enable_channels': app.state.config.ENABLE_CHANNELS,
-                    'enable_calendar': app.state.config.ENABLE_CALENDAR,
-                    'enable_automations': app.state.config.ENABLE_AUTOMATIONS,
-                    'enable_notes': app.state.config.ENABLE_NOTES,
-                    'enable_web_search': app.state.config.ENABLE_WEB_SEARCH,
-                    'enable_rag_filter_ui': app.state.config.ENABLE_RAG_FILTER_UI,
-                    'enable_code_execution': app.state.config.ENABLE_CODE_EXECUTION,
-                    'enable_code_interpreter': app.state.config.ENABLE_CODE_INTERPRETER,
-                    'enable_document_writer': app.state.config.ENABLE_DOCUMENT_WRITER,
-                    'enable_image_generation': app.state.config.ENABLE_IMAGE_GENERATION,
-                    'enable_autocomplete_generation': app.state.config.ENABLE_AUTOCOMPLETE_GENERATION,
-                    'enable_community_sharing': app.state.config.ENABLE_COMMUNITY_SHARING,
-                    'enable_citation_relevance': app.state.config.ENABLE_CITATION_RELEVANCE,
-                    'enable_citation_text_highlight': app.state.config.ENABLE_CITATION_TEXT_HIGHLIGHT,
-                    'enable_message_rating': app.state.config.ENABLE_MESSAGE_RATING,
-                    'enable_feedback_layer2': app.state.config.ENABLE_FEEDBACK_LAYER2,
-                    'feedback_layer2_positive_tags': app.state.config.FEEDBACK_LAYER2_POSITIVE_TAGS,
-                    'feedback_layer2_negative_tags': app.state.config.FEEDBACK_LAYER2_NEGATIVE_TAGS,
-                    'enable_feedback_layer3': app.state.config.ENABLE_FEEDBACK_LAYER3,
-                    'feedback_layer3_prompt': app.state.config.FEEDBACK_LAYER3_PROMPT,
-                    'enable_feedback_category_tags': app.state.config.ENABLE_FEEDBACK_CATEGORY_TAGS,
-                    'enable_conversation_feedback': app.state.config.ENABLE_CONVERSATION_FEEDBACK,
-                    'conversation_feedback_scale_max': app.state.config.CONVERSATION_FEEDBACK_SCALE_MAX,
-                    'conversation_feedback_header': app.state.config.CONVERSATION_FEEDBACK_HEADER,
-                    'conversation_feedback_placeholder': app.state.config.CONVERSATION_FEEDBACK_PLACEHOLDER,
-                    'enable_feedback_report': app.state.config.ENABLE_FEEDBACK_REPORTING,
-                    'enable_user_webhooks': app.state.config.ENABLE_USER_WEBHOOKS,
-                    'enable_user_status': app.state.config.ENABLE_USER_STATUS,
+                    'enable_api_keys': config.get('auth.enable_api_keys'),
+                    'enable_password_change_form': config.get('ui.enable_password_change_form'),
+                    'enable_version_update_check': ENABLE_VERSION_UPDATE_CHECK,
+                    'enable_pyodide_file_persistence': ENABLE_PYODIDE_FILE_PERSISTENCE,
+                    'enable_public_active_users_count': ENABLE_PUBLIC_ACTIVE_USERS_COUNT,
+                    'enable_easter_eggs': ENABLE_EASTER_EGGS,
+                    'enable_direct_connections': config.get('direct.enable'),
+                    'enable_folders': config.get('folders.enable'),
+                    'folder_max_file_count': config.get('folders.max_file_count'),
+                    'knowledge_max_file_count': KNOWLEDGE_MAX_FILE_COUNT,  # [Gradient]
+                    'enable_channels': config.get('channels.enable'),
+                    'enable_calendar': config.get('calendar.enable'),
+                    'enable_automations': config.get('automations.enable'),
+                    'enable_notes': config.get('notes.enable'),
+                    'enable_web_search': config.get('web.search.enable'),
+                    'enable_web_search_confirmation': config.get('web.search.confirmation.enable'),
+                    'web_search_confirmation_content': config.get('web.search.confirmation.content'),
+                    'enable_rag_filter_ui': config.get('rag.enable_filter_ui'),  # [Gradient]
+                    'enable_code_execution': config.get('code_execution.enable'),
+                    'enable_code_interpreter': config.get('code_interpreter.enable'),
+                    'enable_document_writer': config.get('document_writer.enable'),  # [Gradient]
+                    'enable_image_generation': config.get('image_generation.enable'),
+                    'enable_autocomplete_generation': config.get('task.autocomplete.enable'),
+                    'enable_community_sharing': config.get('ui.enable_community_sharing'),
+                    'enable_citation_relevance': config.get('ui.enable_citation_relevance'),  # [Gradient]
+                    'enable_citation_text_highlight': config.get('ui.enable_citation_text_highlight'),  # [Gradient]
+                    'enable_message_rating': config.get('ui.enable_message_rating'),
+                    # [Gradient] Feedback layers
+                    'enable_feedback_layer2': config.get('evaluation.feedback.layer2.enable'),
+                    'feedback_layer2_positive_tags': config.get('evaluation.feedback.layer2.positive_tags'),
+                    'feedback_layer2_negative_tags': config.get('evaluation.feedback.layer2.negative_tags'),
+                    'enable_feedback_layer3': config.get('evaluation.feedback.layer3.enable'),
+                    'feedback_layer3_prompt': config.get('evaluation.feedback.layer3.prompt'),
+                    'enable_feedback_category_tags': config.get('evaluation.feedback.category_tags.enable'),
+                    'enable_conversation_feedback': config.get('evaluation.feedback.conversation.enable'),
+                    'conversation_feedback_scale_max': config.get('evaluation.feedback.conversation.scale_max'),
+                    'conversation_feedback_header': config.get('evaluation.feedback.conversation.header'),
+                    'conversation_feedback_placeholder': config.get('evaluation.feedback.conversation.placeholder'),
+                    'enable_feedback_report': config.get('feedback_report.enable'),  # [Gradient]
+                    'enable_user_webhooks': config.get('ui.enable_user_webhooks'),
+                    'enable_user_status': config.get('users.enable_status'),
                     'enable_admin_export': ENABLE_ADMIN_EXPORT,
-                    'enable_data_export': ENABLE_DATA_EXPORT,
+                    'enable_data_export': ENABLE_DATA_EXPORT,  # [Gradient] GDPR self-service export
                     'enable_admin_chat_access': ENABLE_ADMIN_CHAT_ACCESS,
                     'enable_admin_analytics': ENABLE_ADMIN_ANALYTICS,
-                    # Feature Flags (SaaS Tier Control)
+                    # [Gradient] Feature Flags (SaaS Tier Control)
                     'feature_chat_controls': FEATURE_CHAT_CONTROLS,
                     'feature_capture': FEATURE_CAPTURE,
                     'feature_artifacts': FEATURE_ARTIFACTS,
@@ -3378,152 +2644,160 @@ async def get_app_config(request: Request):
                     'feature_user_demographics': FEATURE_USER_DEMOGRAPHICS,
                     'feature_builtin_tools': FEATURE_BUILTIN_TOOLS,
                     'feature_strict_data_separation': FEATURE_STRICT_DATA_SEPARATION,
-                    'use_stylized_pdf_export': USE_STYLIZED_PDF_EXPORT,
-                    'enable_docx_export': ENABLE_DOCX_EXPORT,
-                    'enable_google_drive_integration': app.state.config.ENABLE_GOOGLE_DRIVE_INTEGRATION,
+                    'use_stylized_pdf_export': USE_STYLIZED_PDF_EXPORT,  # [Gradient]
+                    'enable_docx_export': ENABLE_DOCX_EXPORT,  # [Gradient]
+                    'enable_google_drive_integration': config.get('google_drive.enable'),
                     **(
                         {
-                            'enable_google_drive_sync': app.state.config.ENABLE_GOOGLE_DRIVE_SYNC,
+                            'enable_google_drive_sync': config.get('google_drive.enable_sync'),  # [Gradient]
                         }
-                        if app.state.config.ENABLE_GOOGLE_DRIVE_INTEGRATION
+                        if config.get('google_drive.enable')
                         else {}
                     ),
-                    'enable_onedrive_integration': app.state.config.ENABLE_ONEDRIVE_INTEGRATION,
-                    'enable_memories': app.state.config.ENABLE_MEMORIES,
+                    'enable_onedrive_integration': config.get('onedrive.enable'),
+                    'enable_memories': config.get('memories.enable'),
                     **(
                         {
-                            'enable_onedrive_personal': app.state.config.ENABLE_ONEDRIVE_PERSONAL,
-                            'enable_onedrive_business': app.state.config.ENABLE_ONEDRIVE_BUSINESS,
-                            'enable_onedrive_sync': app.state.config.ENABLE_ONEDRIVE_SYNC,
+                            'enable_onedrive_personal': config.get('onedrive.enable_personal'),
+                            'enable_onedrive_business': config.get('onedrive.enable_business'),
+                            'enable_onedrive_sync': config.get('onedrive.enable_sync'),  # [Gradient]
                         }
-                        if app.state.config.ENABLE_ONEDRIVE_INTEGRATION
+                        if config.get('onedrive.enable')
                         else {}
                     ),
-                    'enable_confluence_integration': app.state.config.ENABLE_CONFLUENCE_INTEGRATION,
+                    # [Gradient] Confluence integration
+                    'enable_confluence_integration': config.get('confluence.enable'),
                     **(
                         {
-                            'enable_confluence_sync': app.state.config.ENABLE_CONFLUENCE_SYNC,
+                            'enable_confluence_sync': config.get('confluence.enable_sync'),
                         }
-                        if app.state.config.ENABLE_CONFLUENCE_INTEGRATION
+                        if config.get('confluence.enable')
                         else {}
                     ),
-                    # KB sharing mode — drives whether non-admins see Confluence
+                    # [Gradient] KB sharing mode — drives whether non-admins see Confluence
                     # self-service create entry points (hidden in 'shared' mode).
                     # Coerced via the ``basic ⇒ shared`` coupling above.
                     'confluence_kb_mode': _confluence_kb_mode,
-                    # Shared-KB id for the chat '+' menu one-click attach.
+                    # [Gradient] Shared-KB id for the chat '+' menu one-click attach.
                     'confluence_shared_kb_id': confluence_shared_kb_id,
-                    # Whether admin configured OAuth client creds — gates per-user (OAuth) entry points.
+                    # [Gradient] Whether admin configured OAuth client creds — gates per-user (OAuth) entry points.
                     'confluence_oauth_configured': bool(
-                        app.state.config.CONFLUENCE_OAUTH_CLIENT_ID and app.state.config.CONFLUENCE_OAUTH_CLIENT_SECRET
+                        config.get('confluence.client_id') and config.get('confluence.client_secret')
                     ),
-                    'enable_topdesk_integration': app.state.config.ENABLE_TOPDESK_INTEGRATION,
+                    # [Gradient] TOPdesk integration
+                    'enable_topdesk_integration': config.get('topdesk.enable'),
                     **(
                         {
-                            'enable_topdesk_sync': app.state.config.ENABLE_TOPDESK_SYNC,
+                            'enable_topdesk_sync': config.get('topdesk.enable_sync'),
                         }
-                        if app.state.config.ENABLE_TOPDESK_INTEGRATION
+                        if config.get('topdesk.enable')
                         else {}
                     ),
-                    # Shared-KB id for the chat '+' menu one-click attach.
+                    # [Gradient] Shared-KB id for the chat '+' menu one-click attach.
                     'topdesk_shared_kb_id': topdesk_shared_kb_id,
-                    'enable_email_invites': app.state.config.ENABLE_EMAIL_INVITES,
-                    'enable_agent_proxy': app.state.config.ENABLE_AGENT_PROXY,
-                    'feature_agent_api_enabled': AGENT_API_ENABLED,
-                    'feature_agent_picker': FEATURE_AGENT_PICKER,
-                    'agent_picker_default_slug': app.state.config.AGENT_API_PICKER_DEFAULT_SLUG,
-                    'require_2fa': app.state.config.REQUIRE_2FA,
-                    'two_fa_grace_period_days': app.state.config.TWO_FA_GRACE_PERIOD_DAYS,
-                    'enable_data_warnings': app.state.config.ENABLE_DATA_WARNINGS,
-                    'data_retention_ttl_days': app.state.config.DATA_RETENTION_TTL_DAYS,
-                    'enable_welcome_message': app.state.config.ENABLE_WELCOME_MESSAGE,
+                    'enable_email_invites': config.get('email.enable_invites'),  # [Gradient]
+                    'enable_agent_proxy': config.get('agent_proxy.enable'),  # [Gradient]
+                    'feature_agent_api_enabled': AGENT_API_ENABLED,  # [Gradient]
+                    'feature_agent_picker': FEATURE_AGENT_PICKER,  # [Gradient]
+                    'agent_picker_default_slug': config.get('agent_api.picker_default_slug'),  # [Gradient]
+                    'require_2fa': config.get('auth.require_2fa'),  # [Gradient]
+                    'two_fa_grace_period_days': config.get('auth.2fa_grace_period_days'),  # [Gradient]
+                    'enable_data_warnings': config.get('features.enable_data_warnings'),  # [Gradient]
+                    'data_retention_ttl_days': config.get('admin.data_retention_ttl_days'),  # [Gradient]
+                    'enable_welcome_message': config.get('ui.enable_welcome_message'),  # [Gradient]
                 }
                 if user is not None
                 else {}
             ),
         },
+        # [Gradient] Integration provider registry for the typed-KB creation flow.
         'integration_providers': {
             slug: {
                 'name': p['name'],
                 'badge_type': p.get('badge_type', 'info'),
                 'max_files_per_kb': p.get('max_files_per_kb', 250),
             }
-            for slug, p in (app.state.config.INTEGRATION_PROVIDERS or {}).items()
+            for slug, p in (config.get('integrations.providers') or {}).items()
         },
-        # Per-deployment model -> datacenter/hosting mapping for the model picker
-        # (Helm MODEL_HOSTING env). Top-level + always present so the picker can read
-        # it; defaults to [] (no flags) when unset or malformed.
+        # [Gradient] Per-deployment model -> datacenter/hosting mapping for the model
+        # picker (Helm MODEL_HOSTING env). Top-level + always present so the picker can
+        # read it; defaults to [] (no flags) when unset or malformed.
         'model_hosting': _parse_model_hosting(MODEL_HOSTING),
-        # Per-deployment model -> profile mapping for the model picker (Helm
+        # [Gradient] Per-deployment model -> profile mapping for the model picker (Helm
         # MODEL_PROFILES env). Top-level + always present so the picker can read it;
         # defaults to [] (plain rendering) when unset or malformed.
         'model_profiles': _parse_model_profiles(MODEL_PROFILES),
         **(
             {
-                'default_models': app.state.config.DEFAULT_MODELS,
-                'default_pinned_models': app.state.config.DEFAULT_PINNED_MODELS,
-                'default_prompt_suggestions': app.state.config.DEFAULT_PROMPT_SUGGESTIONS,
-                'user_count': user_count,
+                'default_models': config.get('ui.default_models'),
+                'default_pinned_models': config.get('ui.default_pinned_models'),
+                'default_prompt_suggestions': config.get('ui.prompt_suggestions'),
+                **({'user_count': user_count} if user_count is not None else {}),
                 'code': {
-                    'engine': app.state.config.CODE_EXECUTION_ENGINE,
-                    'interpreter_engine': app.state.config.CODE_INTERPRETER_ENGINE,
+                    'engine': config.get('code_execution.engine'),
+                    'interpreter_engine': config.get('code_interpreter.engine'),
                 },
+                # [Gradient] Backing database type (frontend diagnostics).
                 'database': {
                     'type': engine.name,
                 },
                 'audio': {
                     'tts': {
-                        'engine': app.state.config.TTS_ENGINE,
-                        'voice': app.state.config.TTS_VOICE,
-                        'split_on': app.state.config.TTS_SPLIT_ON,
+                        'engine': config.get('audio.tts.engine'),
+                        'voice': config.get('audio.tts.voice'),
+                        'split_on': config.get('audio.tts.split_on'),
                     },
                     'stt': {
-                        'engine': app.state.config.STT_ENGINE,
+                        'engine': config.get('audio.stt.engine'),
                     },
                 },
                 'file': {
-                    'max_size': app.state.config.FILE_MAX_SIZE,
-                    'max_count': app.state.config.FILE_MAX_COUNT,
-                    'allowed_extensions': app.state.config.ALLOWED_FILE_EXTENSIONS,
+                    'max_size': config.get('rag.file.max_size'),
+                    'max_count': config.get('rag.file.max_count'),
+                    'allowed_extensions': config.get('rag.file.allowed_extensions'),  # [Gradient]
                     'image_compression': {
-                        'width': app.state.config.FILE_IMAGE_COMPRESSION_WIDTH,
-                        'height': app.state.config.FILE_IMAGE_COMPRESSION_HEIGHT,
+                        'width': config.get('file.image_compression_width'),
+                        'height': config.get('file.image_compression_height'),
                     },
                 },
-                'permissions': {**app.state.config.USER_PERMISSIONS},
+                'permissions': {**(config.get('user.permissions') or {})},
                 'google_drive': {
-                    'client_id': GOOGLE_DRIVE_CLIENT_ID.value,
-                    'api_key': GOOGLE_DRIVE_API_KEY.value,
-                    'has_client_secret': bool(GOOGLE_CLIENT_SECRET.value),
+                    'client_id': config.get('google_drive.client_id'),
+                    'api_key': config.get('google_drive.api_key'),
+                    # [Gradient] Whether server-side OAuth is configured.
+                    'has_client_secret': bool(config.get('oauth.google.client_secret')),
                 },
                 'onedrive': {
-                    'client_id_personal': ONEDRIVE_CLIENT_ID_PERSONAL.value,
-                    'client_id_business': ONEDRIVE_CLIENT_ID_BUSINESS.value,
-                    'sharepoint_url': ONEDRIVE_SHAREPOINT_URL.value,
-                    'sharepoint_tenant_id': ONEDRIVE_SHAREPOINT_TENANT_ID.value,
-                    'has_client_secret': bool(MICROSOFT_CLIENT_SECRET.value),
+                    'client_id_personal': config.get('onedrive.client_id_personal'),
+                    'client_id_business': config.get('onedrive.client_id_business'),
+                    'sharepoint_url': config.get('onedrive.sharepoint_url'),
+                    'sharepoint_tenant_id': config.get('onedrive.sharepoint_tenant_id'),
+                    # [Gradient] Whether server-side OAuth is configured.
+                    'has_client_secret': bool(config.get('oauth.microsoft.client_secret')),
                 },
+                # [Gradient] Confluence OAuth client info for the sync flow.
                 'confluence': {
-                    'client_id': CONFLUENCE_OAUTH_CLIENT_ID.value,
-                    'has_client_secret': bool(CONFLUENCE_OAUTH_CLIENT_SECRET.value),
+                    'client_id': config.get('confluence.client_id'),
+                    'has_client_secret': bool(config.get('confluence.client_secret')),
                 },
                 'ui': {
-                    'pending_user_overlay_title': app.state.config.PENDING_USER_OVERLAY_TITLE,
-                    'pending_user_overlay_content': app.state.config.PENDING_USER_OVERLAY_CONTENT,
-                    'response_watermark': app.state.config.RESPONSE_WATERMARK,
-                    'greeting_template': app.state.config.GREETING_TEMPLATE,
-                    'enable_acceptance_modal': app.state.config.ENABLE_ACCEPTANCE_MODAL,
-                    'acceptance_modal_title': app.state.config.ACCEPTANCE_MODAL_TITLE,
-                    'acceptance_modal_content': app.state.config.ACCEPTANCE_MODAL_CONTENT,
-                    'acceptance_modal_button_text': app.state.config.ACCEPTANCE_MODAL_BUTTON_TEXT,
+                    'pending_user_overlay_title': config.get('ui.pending_user_overlay_title'),
+                    'pending_user_overlay_content': config.get('ui.pending_user_overlay_content'),
+                    'response_watermark': config.get('ui.watermark'),
+                    # [Gradient] Home-screen greeting + acceptance modal
+                    'greeting_template': config.get('ui.greeting_template'),
+                    'enable_acceptance_modal': config.get('ui.enable_acceptance_modal'),
+                    'acceptance_modal_title': config.get('ui.acceptance_modal_title'),
+                    'acceptance_modal_content': config.get('ui.acceptance_modal_content'),
+                    'acceptance_modal_button_text': config.get('ui.acceptance_modal_button_text'),
                     'iframe_csp': IFRAME_CSP,
                 },
-                'license_metadata': app.state.LICENSE_METADATA,
+                'license_metadata': license_metadata,
                 **(
                     {
-                        'active_entries': app.state.USER_COUNT,
+                        'active_entries': user_count,
                     }
-                    if user.role == 'admin'
+                    if user.role == 'admin' and user_count is not None
                     else {}
                 ),
             }
@@ -3532,8 +2806,8 @@ async def get_app_config(request: Request):
                 **(
                     {
                         'ui': {
-                            'pending_user_overlay_title': app.state.config.PENDING_USER_OVERLAY_TITLE,
-                            'pending_user_overlay_content': app.state.config.PENDING_USER_OVERLAY_CONTENT,
+                            'pending_user_overlay_title': config.get('ui.pending_user_overlay_title'),
+                            'pending_user_overlay_content': config.get('ui.pending_user_overlay_content'),
                         }
                     }
                     if user and user.role == 'pending'
@@ -3542,35 +2816,129 @@ async def get_app_config(request: Request):
                 **(
                     {
                         'metadata': {
-                            'login_footer': app.state.LICENSE_METADATA.get('login_footer', ''),
-                            'auth_logo_position': app.state.LICENSE_METADATA.get('auth_logo_position', ''),
+                            'login_footer': license_metadata.get('login_footer', ''),
+                            'auth_logo_position': license_metadata.get('auth_logo_position', ''),
                         }
                     }
-                    if app.state.LICENSE_METADATA
+                    if license_metadata
                     else {}
                 ),
-                'soev_login_footer': SOEV_LOGIN_FOOTER.value,
+                # [Gradient] soev.ai login-page footer branding.
+                'soev_login_footer': config.get('ui.soev_login_footer'),
             }
         ),
     }
 
 
-class UrlForm(BaseModel):
+class EventWebhookForm(BaseModel):
+    name: str | None = None
     url: str
+    enabled: bool = True
+    events: list[str] | None = None
+    targets: list[dict[str, str]] | None = None
 
 
-@app.get('/api/webhook')
-async def get_webhook_url(user=Depends(get_admin_user)):
+class EventWebhookUpdateForm(BaseModel):
+    name: str | None = None
+    url: str | None = None
+    enabled: bool | None = None
+    events: list[str] | None = None
+    targets: list[dict[str, str]] | None = None
+
+
+@app.get('/api/events')
+async def get_event_catalog(user=Depends(get_admin_user)):
     return {
-        'url': app.state.config.WEBHOOK_URL,
+        'schema': VERSION,
+        'events': get_event_catalog_items(),
     }
 
 
-@app.post('/api/webhook')
-async def update_webhook_url(form_data: UrlForm, user=Depends(get_admin_user)):
-    app.state.config.WEBHOOK_URL = form_data.url
-    app.state.WEBHOOK_URL = app.state.config.WEBHOOK_URL
-    return {'url': app.state.config.WEBHOOK_URL}
+@app.get('/api/events/webhooks')
+async def get_event_webhooks_api(user=Depends(get_admin_user)):
+    return await get_event_webhooks()
+
+
+@app.post('/api/events/webhooks')
+async def create_event_webhook(form_data: EventWebhookForm, user=Depends(get_admin_user)):
+    try:
+        webhook = await upsert_event_webhook(
+            {
+                'name': form_data.name,
+                'url': form_data.url,
+                'enabled': form_data.enabled,
+                'events': form_data.events,
+                'targets': form_data.targets,
+            }
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+
+    await publish_event(
+        app,
+        EVENTS.CONFIG_WEBHOOK_UPDATED,
+        actor=user,
+        subject_id=webhook['id'],
+        subject_type='config',
+        data={
+            'action': 'created',
+            'enabled': webhook.get('enabled'),
+            'events': webhook.get('events'),
+            'targets': webhook.get('targets'),
+        },
+    )
+    return webhook
+
+
+@app.put('/api/events/webhooks/{webhook_id}')
+async def update_event_webhook(webhook_id: str, form_data: EventWebhookUpdateForm, user=Depends(get_admin_user)):
+    webhooks = await get_event_webhooks()
+    existing = next((webhook for webhook in webhooks if webhook.get('id') == webhook_id), None)
+    if not existing:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='Webhook not found')
+
+    try:
+        webhook = await upsert_event_webhook(
+            {
+                **existing,
+                **form_data.model_dump(exclude_unset=True),
+                'id': webhook_id,
+            }
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+
+    await publish_event(
+        app,
+        EVENTS.CONFIG_WEBHOOK_UPDATED,
+        actor=user,
+        subject_id=webhook_id,
+        subject_type='config',
+        data={
+            'action': 'updated',
+            'enabled': webhook.get('enabled'),
+            'events': webhook.get('events'),
+            'targets': webhook.get('targets'),
+        },
+    )
+    return webhook
+
+
+@app.delete('/api/events/webhooks/{webhook_id}')
+async def delete_event_webhook_api(webhook_id: str, user=Depends(get_admin_user)):
+    deleted = await delete_event_webhook(webhook_id)
+    if not deleted:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='Webhook not found')
+
+    await publish_event(
+        app,
+        EVENTS.CONFIG_WEBHOOK_UPDATED,
+        actor=user,
+        subject_id=webhook_id,
+        subject_type='config',
+        data={'action': 'deleted'},
+    )
+    return {'status': True}
 
 
 @app.get('/api/version')
@@ -3633,36 +3001,16 @@ async def get_current_usage(user=Depends(get_verified_user)):
         raise HTTPException(status_code=500, detail='Internal Server Error')
 
 
-############################
-# OAuth Login & Callback
-############################
+# --- OAuth Login & Callback ---
 
-
-# Initialize OAuth client manager with any MCP tool servers using OAuth 2.1
-if len(app.state.config.TOOL_SERVER_CONNECTIONS) > 0:
-    for tool_server_connection in app.state.config.TOOL_SERVER_CONNECTIONS:
-        if tool_server_connection.get('type', 'openapi') == 'mcp':
-            server_id = tool_server_connection.get('info', {}).get('id')
-            auth_type = tool_server_connection.get('auth_type', 'none')
-
-            if server_id and auth_type in ('oauth_2.1', 'oauth_2.1_static'):
-                try:
-                    oauth_client_info = resolve_oauth_client_info(tool_server_connection)
-                    app.state.oauth_client_manager.add_client(
-                        f'mcp:{server_id}',
-                        OAuthClientInformationFull(**oauth_client_info),
-                    )
-                except Exception as e:
-                    log.error(f'Error adding OAuth client for MCP tool server {server_id}: {e}')
-                    pass
 
 try:
     if ENABLE_STAR_SESSIONS_MIDDLEWARE:
-        # starsessions.RedisStore eagerly calls Redis.from_url(url) in __init__
-        # (see starsessions/stores/redis.py:51). Passing `connection=` with a
-        # lazy proxy defers the underlying async client construction to the
-        # first request on uvicorn's loop, avoiding the "different loop" crash
-        # under HA. See thoughts/shared/research/2026-04-20-redis-ha-loop-bug-and-kind-repro.md.
+        # [Gradient] starsessions.RedisStore eagerly calls Redis.from_url(url) in
+        # __init__ (see starsessions/stores/redis.py:51). Passing `connection=`
+        # with a lazy proxy defers the underlying async client construction to
+        # the first request on uvicorn's loop, avoiding the "different loop"
+        # crash under HA. See thoughts/shared/research/2026-04-20-redis-ha-loop-bug-and-kind-repro.md.
         redis_session_store = RedisStore(
             connection=lazy(lambda: AsyncRedis.from_url(REDIS_URL)),
             prefix=(f'{REDIS_KEY_PREFIX}:session:' if REDIS_KEY_PREFIX else 'session:'),
@@ -3695,9 +3043,10 @@ async def register_client(request, client_id: str) -> bool:
     connection = None
     connection_idx = None
 
-    for idx, conn in enumerate(request.app.state.config.TOOL_SERVER_CONNECTIONS or []):
+    tool_server_connections = await Config.get('tool_server.connections', []) or []
+    for idx, conn in enumerate(tool_server_connections):
         if conn.get('type', 'openapi') == server_type:
-            info = conn.get('info', {})
+            info = conn.get('info') or {}
             if info.get('id') == server_id:
                 connection = conn
                 connection_idx = idx
@@ -3709,12 +3058,15 @@ async def register_client(request, client_id: str) -> bool:
 
     server_url = connection.get('url')
     auth_type = connection.get('auth_type', 'none')
+    oauth_scope = (connection.get('info') or {}).get('oauth_scope') or (connection.get('config') or {}).get(
+        'oauth_scope'
+    )
     oauth_server_key = (connection.get('config') or {}).get('oauth_server_key')
 
     try:
         if auth_type == 'oauth_2.1_static':
             # Static credentials: rebuild from admin-provided credentials + fresh metadata
-            info = connection.get('info', {})
+            info = connection.get('info') or {}
             oauth_client_id = info.get('oauth_client_id') or ''
             oauth_client_secret = info.get('oauth_client_secret') or ''
             if not oauth_client_id or not oauth_client_secret:
@@ -3732,6 +3084,7 @@ async def register_client(request, client_id: str) -> bool:
                 server_url,
                 oauth_client_id=oauth_client_id,
                 oauth_client_secret=oauth_client_secret,
+                oauth_scope=oauth_scope,
             )
         else:
             oauth_client_info = await get_oauth_client_info_with_dynamic_client_registration(
@@ -3739,28 +3092,30 @@ async def register_client(request, client_id: str) -> bool:
                 client_id,
                 server_url,
                 oauth_server_key,
+                oauth_scope=oauth_scope,
             )
     except Exception as e:
         log.error(f'OAuth client re-registration failed for {client_id}: {e}')
         return False
 
     try:
-        connections = request.app.state.config.TOOL_SERVER_CONNECTIONS
+        connections = await Config.get('tool_server.connections', []) or []
         connections[connection_idx] = {
             **connection,
             'info': {
-                **connection.get('info', {}),
+                **(connection.get('info') or {}),
                 'oauth_client_info': encrypt_data(oauth_client_info.model_dump(mode='json')),
             },
         }
-        # Re-assign the full list to trigger AppConfig.__setattr__ → PersistentConfig.save()
-        # (in-place list mutation via list[idx] = ... does not trigger __setattr__)
-        request.app.state.config.TOOL_SERVER_CONNECTIONS = connections
+        await Config.upsert({'tool_server.connections': connections})
     except Exception as e:
         log.error(f'Failed to persist updated OAuth client info for tool server {client_id}: {e}')
         return False
 
     oauth_client_manager.remove_client(client_id)
+    oauth_client_info = OAuthClientInformationFull(
+        **apply_connection_oauth_options(connection, oauth_client_info.model_dump(mode='json'))
+    )
     oauth_client_manager.add_client(client_id, oauth_client_info)
     log.info(f'Re-registered OAuth client {client_id} for tool server')
     return True
@@ -3774,8 +3129,8 @@ async def oauth_client_authorize(
     user=Depends(get_verified_user),
 ):
     # ensure_valid_client_registration
-    client = oauth_client_manager.get_client(client_id)
-    client_info = oauth_client_manager.get_client_info(client_id)
+    client = await oauth_client_manager.get_client(client_id)
+    client_info = await oauth_client_manager.get_client_info(client_id)
     if client is None or client_info is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND)
 
@@ -3792,8 +3147,8 @@ async def oauth_client_authorize(
                 detail='Failed to re-register OAuth client',
             )
 
-        client = oauth_client_manager.get_client(client_id)
-        client_info = oauth_client_manager.get_client_info(client_id)
+        client = await oauth_client_manager.get_client(client_id)
+        client_info = await oauth_client_manager.get_client_info(client_id)
         if client is None or client_info is None:
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -3829,12 +3184,6 @@ async def oauth_login(provider: str, request: Request):
     return await oauth_manager.handle_login(request, provider)
 
 
-# OAuth login logic is as follows:
-# 1. Attempt to find a user with matching subject ID, tied to the provider
-# 2. If OAUTH_MERGE_ACCOUNTS_BY_EMAIL is true, find a user with the email address provided via OAuth
-#    - This is considered insecure in general, as OAuth providers do not always verify email addresses
-# 3. If there is no user, and ENABLE_OAUTH_SIGNUP is true, create a user
-#    - Email addresses are considered unique, so we fail registration if the email address is already taken
 @app.get('/oauth/{provider}/login/callback')
 @app.get('/oauth/{provider}/callback')  # Legacy endpoint
 async def oauth_login_callback(
@@ -3843,8 +3192,17 @@ async def oauth_login_callback(
     response: Response,
     db: AsyncSession = Depends(get_async_session),
 ):
-    # Check if this OAuth callback belongs to a sync-provider auth flow
-    # rather than the user-login SSO flow. The shared store in
+    """Handle the OAuth provider callback.
+
+    Resolution order:
+    1. Match by subject ID bound to the provider.
+    2. If ``OAUTH_MERGE_ACCOUNTS_BY_EMAIL`` is enabled, match by email
+       (note: some providers do not verify email addresses).
+    3. If no match and ``ENABLE_OAUTH_SIGNUP`` is enabled, create a new user
+       (fails if the email is already registered).
+    """
+    # [Gradient] Check if this OAuth callback belongs to a sync-provider auth
+    # flow rather than the user-login SSO flow. The shared store in
     # services/sync/pending_flows is replica-aware (Redis when configured).
     state = request.query_params.get('state')
     if state:
@@ -3891,10 +3249,11 @@ async def oauth_backchannel_logout(
 
 @app.get('/manifest.json')
 async def get_manifest_json():
-    if app.state.EXTERNAL_PWA_MANIFEST_URL:
+    external_pwa_manifest_url = getattr(app.state, 'EXTERNAL_PWA_MANIFEST_URL', None)
+    if external_pwa_manifest_url:
         session = await get_session()
         async with session.get(
-            app.state.EXTERNAL_PWA_MANIFEST_URL,
+            external_pwa_manifest_url,
             ssl=AIOHTTP_CLIENT_SESSION_SSL,
         ) as r:
             r.raise_for_status()
@@ -3931,31 +3290,38 @@ async def get_manifest_json():
 
 @app.get('/opensearch.xml')
 async def get_opensearch_xml():
+    webui_url = await Config.get('webui.url')
     xml_content = rf"""
     <OpenSearchDescription xmlns="http://a9.com/-/spec/opensearch/1.1/" xmlns:moz="http://www.mozilla.org/2006/browser/search/">
     <ShortName>{app.state.WEBUI_NAME}</ShortName>
     <Description>Search {app.state.WEBUI_NAME}</Description>
     <InputEncoding>UTF-8</InputEncoding>
-    <Image width="16" height="16" type="image/x-icon">{app.state.config.WEBUI_URL}/static/favicon.png</Image>
-    <Url type="text/html" method="get" template="{app.state.config.WEBUI_URL}/?q={'{searchTerms}'}"/>
-    <moz:SearchForm>{app.state.config.WEBUI_URL}</moz:SearchForm>
+    <Image width="16" height="16" type="image/x-icon">{webui_url}/static/favicon.png</Image>
+    <Url type="text/html" method="get" template="{webui_url}/?q={'{searchTerms}'}"/>
+    <moz:SearchForm>{webui_url}</moz:SearchForm>
     </OpenSearchDescription>
     """
     return Response(content=xml_content, media_type='application/xml')
 
 
 def _sync_db_ping() -> None:
-    # Check out a fresh pooled connection so ``pool_pre_ping`` can detect and
-    # transparently replace a connection the server has closed. We must NOT
-    # reuse ``ScopedSession`` here: it is a thread-local session and this runs
-    # inside an ``asyncio.to_thread`` worker thread that CommitSessionMiddleware
-    # (which runs on the request thread) never ``remove()``s. Reusing it would
-    # hold a dead connection across pings and never recover, because pre-ping
-    # only fires on pool checkout — not on a connection already held by an open
-    # session. ``engine.connect()`` forces a checkout (pre-ping reconnects), and
-    # the ``with`` block returns the connection to the pool (no leak).
+    """Verify the database is reachable with a simple SELECT 1.
+
+    Uses a raw connection from the engine pool instead of the thread-local
+    ScopedSession.  This is necessary because CommitSessionMiddleware
+    deliberately skips healthcheck paths (/health, /ready, /health/db),
+    so any ScopedSession opened on a healthcheck worker thread is never
+    rolled back or removed.  If the session ever enters an invalid state
+    (e.g. after a transient connection error), it stays broken on that
+    thread permanently, causing PendingRollbackError on every subsequent
+    probe — exactly the failure reported in #24605.
+
+    A raw ``engine.connect()`` context manager obtains a fresh connection
+    from the pool, executes the ping, and deterministically returns the
+    connection regardless of success or failure.
+    """
     with engine.connect() as conn:
-        conn.execute(text('SELECT 1;'))
+        conn.execute(text('SELECT 1'))
 
 
 async def async_db_ping() -> None:
@@ -4009,11 +3375,14 @@ async def readiness_check():
 
 
 @app.get('/health/db')
-async def healthcheck_with_db():
+async def check_db_health():
+    """Verify database connectivity by issuing a lightweight ping."""
     await async_db_ping()
     return {'status': True}
 
 
+# --- static assets & files ---
+# Serve build-time static assets (CSS, JS, images, favicon, etc.)
 app.mount('/static', StaticFiles(directory=STATIC_DIR), name='static')
 
 
@@ -4022,12 +3391,20 @@ async def serve_cache_file(
     path: str,
     user=Depends(get_verified_user),
 ):
+    """Serve cached files (e.g. tool outputs) with path-traversal protection.
+
+    Only ``image/*``, ``audio/*``, and ``video/*`` MIME types are served inline;
+    everything else gets a ``Content-Disposition: attachment`` header to prevent
+    XSS from user-generated HTML stored in the cache directory.
+    """
     file_path = os.path.abspath(os.path.join(CACHE_DIR, path))
-    # prevent path traversal
-    if not file_path.startswith(os.path.abspath(CACHE_DIR)):
+    # trailing os.sep is required: without it, a path resolving to a sibling
+    # whose name starts with the cache-dir basename (e.g. cache_backup) passes
+    cache_root = os.path.abspath(CACHE_DIR) + os.sep
+    if not file_path.startswith(cache_root):
         raise HTTPException(status_code=404, detail='File not found')
 
-    # Ownership check for user exports: only the owning user or an admin
+    # [Gradient] Ownership check for user exports: only the owning user or an admin
     parts = path.split('/')
     if len(parts) >= 2 and parts[0] == 'exports':
         export_owner_id = parts[1]
@@ -4059,6 +3436,10 @@ applications.get_swagger_ui_html = swagger_ui_html
 
 if os.path.exists(FRONTEND_BUILD_DIR):
     mimetypes.add_type('text/javascript', '.js')
+    pyodide_dir = FRONTEND_BUILD_DIR / 'pyodide'
+    if os.path.exists(pyodide_dir):
+        app.mount('/pyodide', CORSStaticFiles(directory=pyodide_dir), name='pyodide')
+
     app.mount(
         '/',
         SPAStaticFiles(directory=FRONTEND_BUILD_DIR, html=True),

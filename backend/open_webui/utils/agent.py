@@ -48,6 +48,7 @@ import aiohttp
 from open_webui.config import ENABLE_SKILL_EXECUTION, FEATURE_SKILL_FILES
 from open_webui.env import AGENT_API_BASE_URL, AGENT_API_KEY
 from open_webui.models.chats import Chats
+from open_webui.models.config import Config
 from open_webui.socket.main import get_event_emitter
 from open_webui.utils.auth import create_token
 from starlette.responses import StreamingResponse
@@ -287,10 +288,8 @@ async def stream_agent_response(
     - Standard OpenAI chunks have no event type (defaults to "data")
     """
     # aiohttp caps a single readline() at 2 * read_bufsize (default 128 KiB).
-    # Agent tool deltas can ship a whole HTML artifact in one `delta.content`
-    # — e.g. build_knowledge_graph inlines vis-network.min.js (~640 KiB raw,
-    # ~750 KiB JSON-escaped). Bump the buffer so the consumer tolerates lines
-    # well into the megabytes.
+    # Agent tool deltas can ship a whole HTML artifact in one `delta.content`.
+    # Bump the buffer so the consumer tolerates lines well into the megabytes.
     session = aiohttp.ClientSession(
         trust_env=True,
         timeout=aiohttp.ClientTimeout(total=timeout),
@@ -396,7 +395,7 @@ async def call_agent_api(
     # AGENT_API_SELECTED_AGENT admin setting. When neither is set we omit
     # ``agent`` from the payload and the agents service uses its own
     # ``default_agent``.
-    selected_agent = override_agent or request.app.state.config.AGENT_API_SELECTED_AGENT or None
+    selected_agent = override_agent or await Config.get('agent_api.selected_agent') or None
 
     # [Gradient] Forward the turn anchor so the agent service can rewind its
     # persisted thread state on retry/regenerate. The agents side forks its

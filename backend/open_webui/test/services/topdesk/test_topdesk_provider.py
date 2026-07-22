@@ -7,7 +7,7 @@ tests.
 from __future__ import annotations
 
 import asyncio
-from unittest.mock import patch
+from unittest.mock import patch, AsyncMock
 
 from open_webui.services.topdesk.auth import TOPDESK_AUTH_SENTINEL
 from open_webui.services.topdesk.provider import TopdeskSyncProvider, TopdeskTokenManager
@@ -29,14 +29,22 @@ def _run(coro):
 
 def test_token_manager_returns_sentinel_when_configured():
     tm = TopdeskTokenManager()
-    with patch('open_webui.services.topdesk.provider.service_auth_configured', return_value=True):
+    with patch(
+        'open_webui.services.topdesk.provider.service_auth_configured',
+        new_callable=AsyncMock,
+        return_value=True,
+    ):
         assert _run(tm.get_valid_access_token('u', 'kb')) == TOPDESK_AUTH_SENTINEL
         assert _run(tm.has_stored_token('u', 'kb')) is True
 
 
 def test_token_manager_returns_none_when_unconfigured():
     tm = TopdeskTokenManager()
-    with patch('open_webui.services.topdesk.provider.service_auth_configured', return_value=False):
+    with patch(
+        'open_webui.services.topdesk.provider.service_auth_configured',
+        new_callable=AsyncMock,
+        return_value=False,
+    ):
         assert _run(tm.get_valid_access_token('u', 'kb')) is None
         assert _run(tm.has_stored_token('u', 'kb')) is False
 

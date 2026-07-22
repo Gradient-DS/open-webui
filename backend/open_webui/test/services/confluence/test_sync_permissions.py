@@ -72,7 +72,7 @@ def test_none_result_404_does_not_suspend():
     """A probe returning None (404) must not suspend and must not count as a 401."""
     worker = _make_worker()
     client = SimpleNamespace(get_page=AsyncMock(return_value=None), get_space=AsyncMock(return_value=None))
-    worker._client_for = lambda _cloud_id: client
+    worker._client_for = AsyncMock(return_value=client)
     update_meta = AsyncMock()
     p_get, p_update = _patch_models(SimpleNamespace(meta={'confluence_sync': {}}), update_meta)
     with p_get, p_update, patch.object(worker, '_update_sync_status', new=AsyncMock()):
@@ -89,7 +89,7 @@ def test_none_result_404_does_not_suspend():
 def test_single_401_increments_counter_without_suspending():
     worker = _make_worker(auth_mode='basic')
     client = SimpleNamespace(get_page=AsyncMock(side_effect=_http_status_error(401)))
-    worker._client_for = lambda _cloud_id: client
+    worker._client_for = AsyncMock(return_value=client)
     update_meta = AsyncMock()
     suspend_status = AsyncMock()
     p_get, p_update = _patch_models(SimpleNamespace(meta={'confluence_sync': {}}), update_meta)
@@ -106,7 +106,7 @@ def test_single_401_increments_counter_without_suspending():
 def test_second_consecutive_401_suspends_basic_reason():
     worker = _make_worker(auth_mode='basic')
     client = SimpleNamespace(get_page=AsyncMock(side_effect=_http_status_error(401)))
-    worker._client_for = lambda _cloud_id: client
+    worker._client_for = AsyncMock(return_value=client)
     # Counter already at 1 from a prior cycle.
     kb = SimpleNamespace(meta={'confluence_sync': {'auth_fail_count': 1}})
     update_meta = AsyncMock()
@@ -124,7 +124,7 @@ def test_second_consecutive_401_suspends_basic_reason():
 def test_second_consecutive_401_suspends_oauth_reason():
     worker = _make_worker(auth_mode='oauth')
     client = SimpleNamespace(get_page=AsyncMock(side_effect=_http_status_error(401)))
-    worker._client_for = lambda _cloud_id: client
+    worker._client_for = AsyncMock(return_value=client)
     kb = SimpleNamespace(meta={'confluence_sync': {'auth_fail_count': 1}})
     update_meta = AsyncMock()
     p_get, p_update = _patch_models(kb, update_meta)
@@ -144,7 +144,7 @@ def test_second_consecutive_401_suspends_oauth_reason():
 def test_403_does_not_suspend_or_increment():
     worker = _make_worker()
     client = SimpleNamespace(get_page=AsyncMock(side_effect=_http_status_error(403)))
-    worker._client_for = lambda _cloud_id: client
+    worker._client_for = AsyncMock(return_value=client)
     update_meta = AsyncMock()
     p_get, p_update = _patch_models(SimpleNamespace(meta={'confluence_sync': {}}), update_meta)
     with p_get, p_update, patch.object(worker, '_update_sync_status', new=AsyncMock()):
@@ -155,7 +155,7 @@ def test_403_does_not_suspend_or_increment():
 def test_transient_error_does_not_suspend_or_increment():
     worker = _make_worker()
     client = SimpleNamespace(get_page=AsyncMock(side_effect=httpx.ConnectError('down')))
-    worker._client_for = lambda _cloud_id: client
+    worker._client_for = AsyncMock(return_value=client)
     update_meta = AsyncMock()
     p_get, p_update = _patch_models(SimpleNamespace(meta={'confluence_sync': {}}), update_meta)
     with p_get, p_update, patch.object(worker, '_update_sync_status', new=AsyncMock()):
@@ -171,7 +171,7 @@ def test_transient_error_does_not_suspend_or_increment():
 def test_access_success_resets_counter_and_unsuspends():
     worker = _make_worker()
     client = SimpleNamespace(get_page=AsyncMock(return_value={'id': 'page-1'}))
-    worker._client_for = lambda _cloud_id: client
+    worker._client_for = AsyncMock(return_value=client)
     kb = SimpleNamespace(meta={'confluence_sync': {'suspended_at': 123, 'suspended_reason': 'x', 'auth_fail_count': 2}})
     update_meta = AsyncMock()
     p_get, p_update = _patch_models(kb, update_meta)
@@ -189,7 +189,7 @@ def test_access_success_resets_counter_without_suspension():
     """Success after a single failure clears the counter (nothing was suspended)."""
     worker = _make_worker()
     client = SimpleNamespace(get_page=AsyncMock(return_value={'id': 'page-1'}))
-    worker._client_for = lambda _cloud_id: client
+    worker._client_for = AsyncMock(return_value=client)
     kb = SimpleNamespace(meta={'confluence_sync': {'auth_fail_count': 1}})
     update_meta = AsyncMock()
     p_get, p_update = _patch_models(kb, update_meta)
