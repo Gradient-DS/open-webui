@@ -32,6 +32,7 @@ from open_webui.models import knowledge as knowledge_module
 from open_webui.models.files import File
 from open_webui.models.knowledge import (
     Knowledge,
+    KnowledgeDirectory,
     KnowledgeFile,
     Knowledges,
     _path_fields_from_meta,
@@ -55,6 +56,7 @@ async def db_session(monkeypatch):
     )
     async with engine.begin() as conn:
         await conn.run_sync(Knowledge.__table__.create)
+        await conn.run_sync(KnowledgeDirectory.__table__.create)
         await conn.run_sync(KnowledgeFile.__table__.create)
         await conn.run_sync(File.__table__.create)
         await conn.run_sync(User.__table__.create)
@@ -225,6 +227,64 @@ async def test_relink_refreshes_columns_when_file_moves(db_session):
     async with db_session() as s:
         rows = (await s.execute(select(KnowledgeFile).filter_by(knowledge_id=kb_id, file_id=file_id))).scalars().all()
     assert len(rows) == 1
+
+
+# ---------------------------------------------------------------------------
+# add_file_to_knowledge_by_id — directory_id preservation on re-link
+# ---------------------------------------------------------------------------
+
+
+async def _insert_directory(Session, *, dir_id: str, kb_id: str) -> str:
+    now = int(time.time())
+    async with Session() as s:
+        s.add(
+            KnowledgeDirectory(
+                id=dir_id,
+                knowledge_id=kb_id,
+                parent_id=None,
+                name=dir_id,
+                user_id='user-1',
+                created_at=now,
+                updated_at=now,
+            )
+        )
+        await s.commit()
+    return dir_id
+
+
+@pytest.mark.asyncio
+async def test_relink_without_directory_id_preserves_placement(db_session):
+    """The daemon flow is stage (sets placement) → submit → /ingest, and the
+    latter two re-link via add_file with no directory_id. A None re-link must
+    not wipe stage-time placement — otherwise every daemon-synced file loses
+    its folder at submit time and /sync/diff churns it as added+deleted on
+    every subsequent run (diff keys on (directory_path, filename))."""
+    kb_id = await _insert_kb(db_session)
+    file_id = await _insert_file(db_session, meta={'name': 'doc.pdf'})
+    await _insert_directory(db_session, dir_id='dir-1', kb_id=kb_id)
+
+    placed = await Knowledges.add_file_to_knowledge_by_id(kb_id, file_id, 'user-1', directory_id='dir-1')
+    assert placed.directory_id == 'dir-1'
+
+    relinked = await Knowledges.add_file_to_knowledge_by_id(kb_id, file_id, 'user-1')
+    assert relinked.directory_id == 'dir-1'
+
+    row = await _get_link(db_session, kb_id=kb_id, file_id=file_id)
+    assert row.directory_id == 'dir-1'
+
+
+@pytest.mark.asyncio
+async def test_relink_with_directory_id_updates_placement(db_session):
+    """A caller that does provide a directory_id still re-places the file."""
+    kb_id = await _insert_kb(db_session)
+    file_id = await _insert_file(db_session, meta={'name': 'doc.pdf'})
+    await _insert_directory(db_session, dir_id='dir-1', kb_id=kb_id)
+    await _insert_directory(db_session, dir_id='dir-2', kb_id=kb_id)
+
+    await Knowledges.add_file_to_knowledge_by_id(kb_id, file_id, 'user-1', directory_id='dir-1')
+    moved = await Knowledges.add_file_to_knowledge_by_id(kb_id, file_id, 'user-1', directory_id='dir-2')
+
+    assert moved.directory_id == 'dir-2'
 
 
 # ---------------------------------------------------------------------------
