@@ -3033,6 +3033,13 @@ DISTRIBUTED_DOC_PIPELINE_CHAT_ENABLED = (
     os.environ.get('DISTRIBUTED_DOC_PIPELINE_CHAT_ENABLED', 'False').lower() == 'true'
 )
 
+# Per-tenant switch for the external sync-daemon (genai-utils
+# services/sync_daemon). Gates the daemon-facing endpoints
+# (/api/v1/sync-daemon/*) and the machine-auth acceptance on the knowledge
+# sync-protocol endpoints. The companion machine key is the plain env var
+# SYNC_API_KEY (read in utils/service_auth.py, never stored in config).
+SYNC_DAEMON_ENABLED = os.environ.get('SYNC_DAEMON_ENABLED', 'False').lower() == 'true'
+
 PIPELINE_API_BASE_URL = os.environ.get('PIPELINE_API_BASE_URL', '')
 
 PIPELINE_API_KEY = os.environ.get('PIPELINE_API_KEY', '')
@@ -3521,6 +3528,7 @@ DEFAULT_CONFIG = {
     'onedrive.sync_interval_minutes': ONEDRIVE_SYNC_INTERVAL_MINUTES,
     'rag.distributed_doc_pipeline_sync_enabled': DISTRIBUTED_DOC_PIPELINE_SYNC_ENABLED,
     'rag.enable_filter_ui': ENABLE_RAG_FILTER_UI,
+    'sync_daemon.enabled': SYNC_DAEMON_ENABLED,
     'ui.acceptance_modal_button_text': ACCEPTANCE_MODAL_BUTTON_TEXT,
     'ui.acceptance_modal_content': ACCEPTANCE_MODAL_CONTENT,
     'ui.acceptance_modal_title': ACCEPTANCE_MODAL_TITLE,

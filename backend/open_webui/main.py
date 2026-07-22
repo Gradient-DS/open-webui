@@ -222,6 +222,7 @@ from open_webui.routers import (
     scim,
     skill_files,
     skills,
+    sync_daemon,
     tasks,
     terminals,
     tools,
@@ -1137,6 +1138,12 @@ app.include_router(google_drive_sync.router, prefix='/api/v1/google-drive', tags
 # config. The router must always be available so Confluence can be enabled at
 # runtime via the Cloud Sync admin tab without a pod restart.
 app.include_router(confluence_sync.router, prefix='/api/v1/confluence', tags=['confluence'])
+
+# [Gradient] Sync-daemon protocol API (token broker, config read, run summary).
+# Mounted unconditionally — endpoints self-gate on the sync_daemon.enabled
+# config flag (403 when off) so the daemon can be enabled per tenant at
+# runtime without a pod restart.
+app.include_router(sync_daemon.router, prefix='/api/v1/sync-daemon', tags=['sync-daemon'])
 
 # [Gradient] Invites API (always mounted - Copy Link works without Graph API)
 app.include_router(invites.router, prefix='/api/v1/invites', tags=['invites'])

@@ -10,8 +10,9 @@ import zipfile
 from typing import List, Optional
 from urllib.parse import quote
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException, Query, Request, Response, status
 from fastapi.responses import StreamingResponse
+from fastapi.security import HTTPAuthorizationCredentials
 from open_webui.config import BYPASS_ADMIN_ACCESS_CONTROL
 from open_webui.constants import ERROR_MESSAGES
 from open_webui.events import EVENTS, publish_event
@@ -48,7 +49,8 @@ from open_webui.utils.features import require_feature
 from open_webui.config import KNOWLEDGE_MAX_FILE_COUNT
 from open_webui.utils.access_control import filter_allowed_access_grants, has_permission
 from open_webui.utils.access_control.files import has_access_to_file
-from open_webui.utils.auth import get_admin_user, get_verified_user
+from open_webui.utils.auth import bearer_security, get_admin_user, get_current_user, get_verified_user
+from open_webui.utils.service_auth import maybe_sync_principal
 from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -2122,6 +2124,42 @@ async def reset_knowledge_by_id(
 ############################
 
 
+async def get_sync_daemon_or_verified_user(
+    request: Request,
+    response: Response,
+    background_tasks: BackgroundTasks,
+    auth_token: Optional[HTTPAuthorizationCredentials] = Depends(bearer_security),
+    x_acting_user_id: Optional[str] = Header(default=None, alias='X-Acting-User-Id'),
+    x_acting_provider: Optional[str] = Header(default=None, alias='X-Acting-Provider'),
+):
+    """Resolve either the sync-daemon machine caller or a regular verified user.
+
+    Machine path (bearer == ``SYNC_API_KEY``): gated on the
+    ``sync_daemon.enabled`` config flag (403 when off) and returns the acting
+    user resolved from ``X-Acting-User-Id``. The handler's
+    ``_verify_knowledge_write_access`` then applies to that user unchanged, so
+    the machine key grants no access the acting user does not already have.
+    Anything else falls through with :func:`get_verified_user` semantics.
+    """
+
+    principal = await maybe_sync_principal(auth_token, x_acting_user_id, x_acting_provider)
+    if principal is not None:
+        if not await Config.get('sync_daemon.enabled', False):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail='sync daemon is disabled (SYNC_DAEMON_ENABLED)',
+            )
+        return principal.user
+
+    user = await get_current_user(request, response, background_tasks, auth_token=auth_token)
+    if user.role not in {'user', 'admin'}:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=ERROR_MESSAGES.ACCESS_PROHIBITED,
+        )
+    return user
+
+
 class FileManifestEntry(BaseModel):
     filename: str  # basename: "readme.md"
     path: str  # relative dir: "docs/api" or "" for root
@@ -2147,7 +2185,7 @@ class SyncDiffResponse(BaseModel):
 async def sync_knowledge_diff(
     id: str,
     form_data: SyncDiffForm,
-    user=Depends(get_verified_user),
+    user=Depends(get_sync_daemon_or_verified_user),
     db: AsyncSession = Depends(get_async_session),
 ):
     """
@@ -2252,7 +2290,7 @@ class SyncCleanupForm(BaseModel):
 async def sync_knowledge_cleanup(
     id: str,
     form_data: SyncCleanupForm,
-    user=Depends(get_verified_user),
+    user=Depends(get_sync_daemon_or_verified_user),
     db: AsyncSession = Depends(get_async_session),
 ):
     """
@@ -2535,7 +2573,7 @@ async def create_knowledge_directory(
     request: Request,
     id: str,
     form_data: KnowledgeDirectoryCreateForm,
-    user=Depends(get_verified_user),
+    user=Depends(get_sync_daemon_or_verified_user),
     db: AsyncSession = Depends(get_async_session),
 ):
     await _verify_knowledge_write_access(id, user, db)
