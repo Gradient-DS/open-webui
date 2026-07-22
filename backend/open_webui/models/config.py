@@ -132,6 +132,13 @@ class Config(Base):
     def persistent_enabled_for(cls, key: str) -> bool:
         if not cls.PERSISTENT_ENABLED:
             return False
+        # sync_daemon.* is an infra/deployment switch driven by the chart env
+        # (SYNC_DAEMON_ENABLED <- syncDaemon.owuiFlagEnabled), not an admin-panel
+        # setting. Keep it non-persistent so the env stays authoritative: a
+        # dormant->active cutover (or rollback) takes effect on OWUI restart,
+        # instead of being pinned to the value seed_defaults wrote at first boot.
+        if key.startswith('sync_daemon.'):
+            return False
         if key.startswith('oauth.') and not cls.OAUTH_PERSISTENT_ENABLED:
             return False
         return True
