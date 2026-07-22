@@ -277,9 +277,16 @@ def _written_sync_info(summary_seams):
     return args.args[1]['onedrive_sync']
 
 
-def test_summary_unknown_provider_400(client, summary_seams):
+def test_summary_unregistered_provider_uses_slug_sync_meta_key(client, summary_seams):
+    """Unregistered providers fall back to the '{slug}_sync' meta_key — the
+    same total-function stance as file_id_prefix_for (daemon-era providers and
+    the stub E2E harness need no registry entry to report run state)."""
     resp = client.post(f'/api/v1/sync-daemon/runs/{KB_ID}/summary', json=_summary_body(provider='dropbox'))
-    assert resp.status_code == 400
+
+    assert resp.status_code == 200, resp.text
+    args = summary_seams.update_meta.await_args
+    assert 'dropbox_sync' in args.args[1]
+    assert args.args[1]['dropbox_sync']['status'] == _summary_body(provider='dropbox')['status']
 
 
 def test_summary_invalid_status_400(client, summary_seams):

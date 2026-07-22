@@ -220,8 +220,6 @@ async def post_run_summary(
     """
 
     await _require_sync_daemon_enabled()
-    if form.provider not in _PROVIDERS:
-        raise HTTPException(status_code=400, detail=f"unknown sync provider '{form.provider}'")
     if form.status not in _RUN_STATUSES:
         raise HTTPException(
             status_code=400,
@@ -230,7 +228,12 @@ async def post_run_summary(
 
     knowledge = await _verify_knowledge_write_access(knowledge_id, principal.user, db)
 
-    meta_key = _PROVIDERS[form.provider]['meta_key']
+    # Registered providers use their registry meta_key; anything else falls
+    # back to the '{slug}_sync' convention — the same total-function stance as
+    # file_id_prefix_for, so daemon-era providers (and the stub E2E harness)
+    # don't need a registry entry to report run state.
+    entry = _PROVIDERS.get(form.provider)
+    meta_key = entry['meta_key'] if entry else f'{form.provider}_sync'
     meta = dict(knowledge.meta or {})
     sync_info = dict(meta.get(meta_key) or {})
     cursor_persisted = _apply_run_summary(sync_info, form, int(time.time()))
