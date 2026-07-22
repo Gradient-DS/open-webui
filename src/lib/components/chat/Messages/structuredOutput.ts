@@ -376,6 +376,86 @@ export function getOutputText(output?: OutputItem[] | null): string {
 		.join('\n');
 }
 
+// [Gradient] Anchors for the StatusHistory reasoning-merge algorithm.
+//
+// Pre-v0.10.2, the backend serialized output items into message.content
+// (middleware serialize_output): reasoning became <details type="reasoning">
+// blocks and the agent's inline <details type="tool_calls"> markers stayed in
+// the text, so ResponseMessage could regex-parse content to interleave
+// reasoning bullets between tool statuses. Upstream v0.10.2 ships output
+// items to the client directly and persists content empty, so the anchors
+// are now derived from the output array itself. Reasoning items and tool
+// markers share one monotonically increasing offset axis so mergePositional()
+// in mergeHistory.ts can zip them against statusHistory exactly as before.
+
+export type OutputReasoningAnchor = {
+	kind: 'reasoning';
+	summary: string;
+	body: string;
+	attributes: Record<string, string>;
+	contentOffset: number;
+};
+
+export type OutputStreamAnchors = {
+	reasoningItems: OutputReasoningAnchor[];
+	toolOffsets: number[];
+};
+
+const TOOL_MARKER_RE = /<details type="tool_calls"[^>]*>/g;
+
+export function getOutputStreamAnchors(output?: OutputItem[] | null): OutputStreamAnchors {
+	const items = output ?? [];
+	const reasoningItems: OutputReasoningAnchor[] = [];
+	const toolOffsets: number[] = [];
+	let offset = 0;
+
+	items.forEach((item, index) => {
+		if (item?.type === 'reasoning') {
+			// Done inference mirrors the pre-v0.10.2 serializer: completed
+			// status, a recorded duration, or any subsequent item means the
+			// reasoning segment is closed.
+			const isLastItem = index === items.length - 1;
+			const isDone = isDoneStatus(item.status) || item.duration != null || !isLastItem;
+			const attributes: Record<string, string> = {
+				type: 'reasoning',
+				done: isDone ? 'true' : 'false',
+				duration: String(item.duration ?? 0)
+			};
+			const startedAt = Number(item.started_at);
+			if (Number.isFinite(startedAt) && startedAt > 0) {
+				// Unix seconds → milliseconds, matching the started_at attribute
+				// the old serializer wrote (buildResponseParts sorts on ms).
+				attributes.started_at = String(Math.round(startedAt * 1000));
+			}
+			reasoningItems.push({
+				kind: 'reasoning',
+				// Empty summary routes ReasoningBullet to its i18n-aware
+				// "Thinking..." / "Thought for N seconds" labels.
+				summary: '',
+				body: getReasoningText(item)
+					.split('\n')
+					.map((line) => (line.startsWith('>') ? line : `> ${line}`))
+					.join('\n'),
+				attributes,
+				contentOffset: offset
+			});
+			offset += 1;
+			return;
+		}
+
+		if (item?.type === 'message') {
+			const text = getMessageText(item);
+			TOOL_MARKER_RE.lastIndex = 0;
+			while (TOOL_MARKER_RE.exec(text) !== null) {
+				toolOffsets.push(offset);
+				offset += 1;
+			}
+		}
+	});
+
+	return { reasoningItems, toolOffsets };
+}
+
 export function replaceOutputMessageText(
 	output: OutputItem[] = [],
 	oldContent: string,

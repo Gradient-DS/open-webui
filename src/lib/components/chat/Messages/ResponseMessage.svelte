@@ -80,7 +80,12 @@
 	} from './ResponseMessage/mergeHistory';
 	import FullHeightIframe from '$lib/components/common/FullHeightIframe.svelte';
 	import OutputEditView from './OutputEditView.svelte';
-	import { getOutputText, replaceOutputMessageText, type OutputItem } from './structuredOutput';
+	import {
+		getOutputStreamAnchors,
+		getOutputText,
+		replaceOutputMessageText,
+		type OutputItem
+	} from './structuredOutput';
 
 	interface MessageType {
 		id: string;
@@ -264,17 +269,34 @@
 	// byte-identical — which propagates into Svelte each-block rekeys and is
 	// a primary source of the end-of-stream flicker.
 	let _memoContent: string | undefined;
+	let _memoOutput: OutputItem[] | undefined;
 	let _memoReasoningItems: ReasoningItem[] = [];
 	let _memoToolOffsets: number[] = [];
 
-	function memoContentParses(content: string): void {
-		if (content === _memoContent) return;
+	function memoContentParses(content: string, output: OutputItem[] | undefined): void {
+		if (content === _memoContent && output === _memoOutput) return;
 		_memoContent = content;
-		_memoReasoningItems = parseReasoningItems(content);
-		_memoToolOffsets = parseToolOffsets(content);
+		_memoOutput = output;
+		// [Gradient] Upstream v0.10.2 streams/persists ``message.output``
+		// items and leaves ``message.content`` empty, so the reasoning/tool
+		// anchors are derived from output when present. Content parsing
+		// remains as the fallback for messages persisted before the output
+		// pipeline existed.
+		const next = output?.length
+			? getOutputStreamAnchors(output)
+			: { reasoningItems: parseReasoningItems(content), toolOffsets: parseToolOffsets(content) };
+		// Keep array identity stable when the derived anchors are unchanged —
+		// ``message.output`` is a fresh structuredClone on every prop sync, so
+		// a reference-keyed memo alone would churn dependents on every event.
+		if (!equal(next.reasoningItems, _memoReasoningItems)) {
+			_memoReasoningItems = next.reasoningItems;
+		}
+		if (!equal(next.toolOffsets, _memoToolOffsets)) {
+			_memoToolOffsets = next.toolOffsets;
+		}
 	}
 
-	$: memoContentParses(message?.content ?? '');
+	$: memoContentParses(message?.content ?? '', message?.output);
 	$: reasoningItems = _memoReasoningItems;
 	$: toolOffsets = _memoToolOffsets;
 
