@@ -312,3 +312,5 @@ cypress/screenshots
 
 
 /static/*
+# Vendored/minified static assets — never reformat
+backend/open_webui/static/*.min.js

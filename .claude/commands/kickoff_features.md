@@ -11,6 +11,7 @@ You are setting up a parallel multi-stack dev session. The user gave a list of t
 `$ARGUMENTS` is one or more tasks, separated by newlines or semicolons. Each task is freeform.
 
 For each task derive a branch name:
+
 - Default prefix `feat/`.
 - Use `fix/` if the task mentions bug / security / vulnerability / regression / hotfix / CI-failure.
 - Use `chore/` for dependency bumps, lint fixes, refactors with no behavior change.
@@ -39,9 +40,11 @@ curl -s -o /dev/null -w "%{http_code}\n" http://localhost:8003/health
 ```
 
 If not 200:
+
 ```
 cd /Users/lexlubbers/Code/soev/genai-utils && docker compose --env-file .env -f deploy/projects/soev/compose.core.yaml up -d
 ```
+
 Wait for `localhost:8003/health` to return 200 before continuing.
 
 ### 2. Fetch latest in both repos
@@ -72,6 +75,7 @@ cd /Users/lexlubbers/Code/soev/open-webui && git worktree add .worktrees/$BRANCH
 ```
 
 Copy the gitignored env files into each worktree:
+
 ```
 cp /Users/lexlubbers/Code/soev/genai-utils/.env /Users/lexlubbers/Code/soev/genai-utils/.worktrees/$BRANCH/.env
 cp /Users/lexlubbers/Code/soev/genai-utils/deploy/projects/soev/.env /Users/lexlubbers/Code/soev/genai-utils/.worktrees/$BRANCH/deploy/projects/soev/.env
@@ -79,6 +83,7 @@ cp /Users/lexlubbers/Code/soev/genai-utils/deploy/projects/soev/.env /Users/lexl
 ```
 
 Bring the stack up:
+
 ```
 cd /Users/lexlubbers/Code/soev/genai-utils && python -m scripts.stack.stack up $BRANCH
 ```
@@ -88,7 +93,7 @@ cd /Users/lexlubbers/Code/soev/genai-utils && python -m scripts.stack.stack up $
 Print a markdown table with one row per task:
 
 | Task | Branch | OWUI FE | Agent | Logs |
-|------|--------|---------|-------|------|
+| ---- | ------ | ------- | ----- | ---- |
 
 For each: branch name, `http://localhost:<owui_fe>`, `http://localhost:<agent>`, `tmux attach -t stack-<idx>`.
 

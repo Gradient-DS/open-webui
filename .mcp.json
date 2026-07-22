@@ -1,10 +1,19 @@
 {
-  "mcpServers": {
-    "playwright": {
-      "type": "stdio",
-      "command": "npx",
-      "args": ["-y", "@playwright/mcp@latest", "--browser", "chromium", "--user-data-dir", ".e2e/chromium-profile", "--output-dir", ".e2e/output"],
-      "env": {}
-    }
-  }
+	"mcpServers": {
+		"playwright": {
+			"type": "stdio",
+			"command": "npx",
+			"args": [
+				"-y",
+				"@playwright/mcp@latest",
+				"--browser",
+				"chromium",
+				"--user-data-dir",
+				".e2e/chromium-profile",
+				"--output-dir",
+				".e2e/output"
+			],
+			"env": {}
+		}
+	}
 }
