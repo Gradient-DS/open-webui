@@ -1,0 +1,27 @@
+{{- if .Values.syncDaemon.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "open-webui-tenant.syncDaemon.fullname" . }}-config
+  labels:
+    {{- include "open-webui-tenant.syncDaemon.labels" . | nindent 4 }}
+data:
+  SYNC_DAEMON_PORT: {{ .Values.syncDaemon.service.port | default 8010 | quote }}
+  SYNC_DAEMON_LOG_LEVEL: {{ .Values.syncDaemon.config.logLevel | default "INFO" | quote }}
+  # In-namespace Open WebUI service — the daemon speaks /sync/diff, /stage,
+  # /submit, /file-status and the /api/v1/sync-daemon/* endpoints here.
+  SYNC_DAEMON_OWUI_BASE_URL: "http://{{ include "open-webui-tenant.openWebui.fullname" . }}.{{ .Release.Namespace }}.svc:{{ .Values.openWebui.service.port | default 8080 }}"
+  # Provider scheduler loops. Gitops sets this false for a dormant deploy
+  # (workload present + healthy, but doing no scheduled work) — no | default
+  # here (Helm's default filter would coerce an explicit false back to true).
+  SYNC_DAEMON_SCHEDULER_ENABLED: {{ .Values.syncDaemon.config.schedulerEnabled | quote }}
+  # Concurrency / timeout knobs (SyncDaemonSettings defaults; R11).
+  SYNC_DAEMON_ITEM_CONCURRENCY: {{ .Values.syncDaemon.config.itemConcurrency | default 15 | quote }}
+  SYNC_DAEMON_POLL_CONCURRENCY: {{ .Values.syncDaemon.config.pollConcurrency | default 100 | quote }}
+  SYNC_DAEMON_POLL_INTERVAL_SECONDS: {{ .Values.syncDaemon.config.pollIntervalSeconds | default 3 | quote }}
+  SYNC_DAEMON_POLL_MAX_WAIT_SECONDS: {{ .Values.syncDaemon.config.pollMaxWaitSeconds | default 1800 | quote }}
+  SYNC_DAEMON_RUN_WALL_CLOCK_SECONDS: {{ .Values.syncDaemon.config.runWallClockSeconds | default 14400 | quote }}
+  SYNC_DAEMON_MAX_CONCURRENT_RUNS: {{ .Values.syncDaemon.config.maxConcurrentRuns | default 2 | quote }}
+  SYNC_DAEMON_CLOUD_DOWNLOAD_TIMEOUT_SECONDS: {{ .Values.syncDaemon.config.cloudDownloadTimeoutSeconds | default 120 | quote }}
+  SYNC_DAEMON_OWUI_TIMEOUT_SECONDS: {{ .Values.syncDaemon.config.owuiTimeoutSeconds | default 120 | quote }}
+{{- end }}

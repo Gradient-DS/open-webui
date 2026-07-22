@@ -218,6 +218,16 @@ spec:
                   name: {{ include "open-webui-tenant.fullname" . }}-secrets
                   key: pipeline-api-key
             {{- end }}
+            # Sync machine key — OWUI validates the daemon inbound (SyncPrincipal
+            # on /sync/diff, /sync/cleanup, /api/v1/sync-daemon/*, D-5). Mounted
+            # whenever a value exists; the sync_daemon.enabled flag gates use.
+            {{- if or .Values.secrets.syncApiKey .Values.externalSecrets.onepassword.fields.syncApiKey }}
+            - name: SYNC_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "open-webui-tenant.fullname" . }}-secrets
+                  key: sync-api-key
+            {{- end }}
             # S3 Storage credentials (only if configured)
             {{- if or .Values.secrets.s3AccessKeyId .Values.externalSecrets.onepassword.fields.s3AccessKeyId }}
             - name: S3_ACCESS_KEY_ID

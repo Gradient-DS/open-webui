@@ -85,6 +85,10 @@ Component-specific names
 {{- printf "%s-loader-worker" (include "open-webui-tenant.fullname" .) | trunc 63 | trimSuffix "-" }}
 {{- end }}
 
+{{- define "open-webui-tenant.syncDaemon.fullname" -}}
+{{- printf "%s-sync-daemon" (include "open-webui-tenant.fullname" .) | trunc 63 | trimSuffix "-" }}
+{{- end }}
+
 {{/*
 Component-specific labels
 */}}
@@ -136,6 +140,16 @@ app.kubernetes.io/component: loader-worker
 {{- define "open-webui-tenant.loaderWorker.selectorLabels" -}}
 {{ include "open-webui-tenant.selectorLabels" . }}
 app.kubernetes.io/component: loader-worker
+{{- end }}
+
+{{- define "open-webui-tenant.syncDaemon.labels" -}}
+{{ include "open-webui-tenant.labels" . }}
+app.kubernetes.io/component: sync-daemon
+{{- end }}
+
+{{- define "open-webui-tenant.syncDaemon.selectorLabels" -}}
+{{ include "open-webui-tenant.selectorLabels" . }}
+app.kubernetes.io/component: sync-daemon
 {{- end }}
 
 {{/*
