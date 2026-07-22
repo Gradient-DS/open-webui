@@ -113,12 +113,14 @@ class StageRequest(BaseModel):
     # omitting them is byte-identical to the pre-daemon behavior (R12).
     # file_hash stages the provider change token as meta.pending_cloud_hash
     # (R4 staged-promote); directory_id places the KB link in an upstream
-    # knowledge_directory row (D-8); relative_path stamps the interim path
-    # identity the fork's tree UI renders from (D-8 bridge until P2-8),
-    # convention '{dir/path}/{filename}'.
+    # knowledge_directory row (D-8); relative_path + source_item_id stamp the
+    # interim path identity the fork's tree UI renders from (the rollup keys
+    # on knowledge_file.source_item_id; relative_path is source-relative,
+    # convention '{dir/path}/{filename}').
     file_hash: Optional[str] = None
     directory_id: Optional[str] = None
     relative_path: Optional[str] = None
+    source_item_id: Optional[str] = None
 
 
 class SubmitRequest(BaseModel):
@@ -1235,13 +1237,15 @@ async def stage_file(
             meta_updates['pending_cloud_hash'] = body.file_hash
         if body.relative_path is not None:
             # D-8 bridge: the sync-daemon stamps the interim path identity it
-            # owns (R7) — the fork's tree UI renders from relative_path until
-            # the P2-8 knowledge_directory convergence. The loader-worker
-            # never sends this field, so worker-stamped identity is untouched
-            # during the D-10 co-existence window.
+            # owns (R7) — the fork's tree UI renders from relative_path +
+            # source_item_id until the P2-8 knowledge_directory convergence.
+            # The loader-worker never sends these fields, so worker-stamped
+            # identity is untouched during the D-10 co-existence window.
             meta_updates['relative_path'] = body.relative_path
+        if body.source_item_id is not None:
+            meta_updates['source_item_id'] = body.source_item_id
         await Files.update_file_metadata_by_id(file_id, meta_updates)
-        if body.relative_path is not None:
+        if body.relative_path is not None or body.source_item_id is not None:
             # Idempotent upsert: links a shared row into this KB when needed
             # (R6) and refreshes the denormalized path columns from the meta
             # just written (self-heal during an active sync).
@@ -1258,6 +1262,8 @@ async def stage_file(
             meta['pending_cloud_hash'] = body.file_hash
         if body.relative_path is not None:
             meta['relative_path'] = body.relative_path
+        if body.source_item_id is not None:
+            meta['source_item_id'] = body.source_item_id
         file_form = FileForm(
             id=file_id,
             filename=body.filename,

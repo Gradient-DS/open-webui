@@ -298,3 +298,26 @@ def test_provider_rename_refreshes_filename(app, seams_factory):
 
     assert resp.status_code == 200, resp.text
     seams.update_file_name.assert_awaited_once_with(FILE_ID, 'report.pdf')
+
+
+def test_source_item_id_staged_on_both_branches(app, seams_factory):
+    """The tree UI rolls files under their source via
+    knowledge_file.source_item_id — /stage stamps it into meta so the
+    add_file upsert mirrors it onto the join row."""
+    stack, seams = seams_factory(existing_file=None)
+    with stack:
+        resp = _stage(app, source_item_id='262148')
+    assert resp.status_code == 200, resp.text
+    _, form = seams.insert_new_file.await_args.args
+    assert form.meta['source_item_id'] == '262148'
+
+    existing = MagicMock()
+    existing.path = _fake_get_object_path(f'{FILE_ID}_report.pdf')
+    existing.filename = 'report.pdf'
+    stack, seams = seams_factory(existing_file=existing)
+    with stack:
+        resp = _stage(app, source_item_id='262148')
+    assert resp.status_code == 200, resp.text
+    meta_update = seams.update_file_metadata.await_args.args[1]
+    assert meta_update['source_item_id'] == '262148'
+    seams.add_file.assert_awaited_once_with(KB_ID, FILE_ID, ACTING_USER_ID)
