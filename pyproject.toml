@@ -49,7 +49,7 @@ dependencies = [
     "asgiref==3.11.1",
 
     "tiktoken==0.13.0",
-    "mcp==1.27.2",
+    "mcp==1.28.1", # security: CVE-2026-59950 (WebSocket server transport missing Host/Origin validation, transport unused by us) fixed in 1.28.1
 
     "openai==2.29.0",
     "anthropic==0.86.0",
@@ -80,7 +80,7 @@ dependencies = [
     "docx2txt==0.9",
     "python-pptx==1.0.2",
     "msoffcrypto-tool==6.0.0",
-    "nltk==3.9.4",
+    "nltk==3.10.0", # security: CVE-2026-54293 (path traversal) + CVE-2026-12243/PYSEC-2026-597 fixed in 3.10.0
     "Markdown==3.10.2",
     "beautifulsoup4==4.14.3",
     "pypandoc==1.17",
@@ -94,7 +94,7 @@ dependencies = [
     "soundfile==0.13.1",
     "azure-ai-documentintelligence==1.0.2",
 
-    "pillow==12.2.0",
+    "pillow==12.3.0", # security: CVE-2026-54058/59197/59199/59200/59204/59205 + 4 more (DoS/heap OOB via crafted images) fixed in 12.3.0
     "opencv-python-headless==4.13.0.92",
     "rapidocr-onnxruntime==1.4.4",
     "rank-bm25==0.2.2",
