@@ -2801,11 +2801,9 @@ ENABLE_FEEDBACK_REPORTING = os.environ.get('ENABLE_FEEDBACK_REPORTING', 'False')
 
 FEEDBACK_REPORT_SLACK_WEBHOOK_URL = os.environ.get('FEEDBACK_REPORT_SLACK_WEBHOOK_URL', '')
 
-# Generic notification-router endpoint. When set it takes precedence over the
-# Slack webhook above: the event is POSTed here and the Slack card is skipped
-# entirely, so the router (not this pod) decides where a report ends up —
-# Linear for bugs/ideas, Slack for questions. Deliberately NOT a secret: it is
-# an in-cluster URL, so it lives in the ConfigMap rather than the tenant vault.
+# Notification-router endpoint. Takes precedence over the Slack webhook above:
+# when set, the event is POSTed here and the Slack card is skipped. An in-cluster
+# URL, not a secret — so it comes from the ConfigMap, not the tenant vault.
 FEEDBACK_REPORT_WEBHOOK_URL = os.environ.get('FEEDBACK_REPORT_WEBHOOK_URL', '')
 
 FEEDBACK_REPORT_INCLUDE_USER_IDENTITY = (

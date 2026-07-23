@@ -151,11 +151,8 @@ async def test_post_feedback_to_router_bad_url_returns_false():
 
 
 def test_router_url_takes_precedence_over_slack(monkeypatch):
-    """The whole point of the migration: when both are set, Slack is skipped.
-
-    A migrated tenant still has slack_webhook_url persisted in its config DB, so
-    without this precedence it would deliver twice.
-    """
+    # A migrated tenant still has slack_webhook_url persisted in its config DB,
+    # so without this precedence it would deliver twice.
     calls = {'router': 0, 'slack': 0}
 
     async def fake_router(event, url, template=''):
@@ -177,8 +174,7 @@ def test_router_url_takes_precedence_over_slack(monkeypatch):
 
 
 def test_falls_back_to_slack_when_router_unset(monkeypatch):
-    # Backward compatibility: a tenant on the new image but the old chart (no
-    # FEEDBACK_REPORT_WEBHOOK_URL wired) must behave exactly as before.
+    # A tenant on the new image but the old chart must behave exactly as before.
     calls = {'router': 0, 'slack': 0}
 
     async def fake_router(event, url, template=''):
@@ -200,13 +196,9 @@ def test_falls_back_to_slack_when_router_unset(monkeypatch):
 
 
 def test_router_url_is_non_persistent():
-    """The env must stay authoritative for the router endpoint.
-
-    seed_defaults writes every DEFAULT_CONFIG key at first boot, and every
-    tenant has already booted. If this key were persistent, that first boot
-    would pin '' in the config DB and later wiring the chart value would
-    silently do nothing — the same trap that hit sync_daemon.enabled.
-    """
+    # seed_defaults writes every DEFAULT_CONFIG key at first boot. If this key
+    # were persistent, that boot would pin '' and later wiring the chart value
+    # would silently do nothing — the trap that hit sync_daemon.enabled.
     assert Config.persistent_enabled_for('feedback_report.webhook_url') is False
     # The sibling keys are admin-toggleable and must stay persistent.
     assert Config.persistent_enabled_for('feedback_report.enable') is True

@@ -160,8 +160,7 @@ data:
   ENABLE_FEEDBACK_REPORTING: {{ .Values.openWebui.config.enableFeedbackReporting | quote }}
   FEEDBACK_REPORT_INCLUDE_USER_IDENTITY: {{ .Values.openWebui.config.feedbackReportIncludeUserIdentity | quote }}
   FEEDBACK_REPORT_TRACE_URL_TEMPLATE: {{ .Values.openWebui.config.feedbackReportTraceUrlTemplate | quote }}
-  # When set, takes precedence over FEEDBACK_REPORT_SLACK_WEBHOOK_URL and the
-  # Slack card is skipped — the notify-router decides Linear vs Slack.
+  # Set -> wins over FEEDBACK_REPORT_SLACK_WEBHOOK_URL; the router decides Linear vs Slack.
   FEEDBACK_REPORT_WEBHOOK_URL: {{ .Values.openWebui.config.feedbackReportWebhookUrl | quote }}
 
   # Welcome message (PersistentConfig: env seeds initial value; admin UI wins thereafter)

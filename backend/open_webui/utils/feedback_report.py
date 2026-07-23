@@ -105,11 +105,8 @@ async def post_feedback_to_slack(event: dict, webhook_url: str, trace_url_templa
 async def post_feedback_to_router(event: dict, router_url: str, trace_url_template: str = '') -> bool:
     """POST the raw event to the notification router. Best-effort; never raises.
 
-    The router (shared-services/notify-router) owns the routing decision — Linear
-    for bugs/errors/ideas, Slack for questions/other. We deliberately send the
-    unrendered event rather than a Slack card so the router can build either.
-    ``trace_url_template`` travels with it because only this pod knows its own
-    cluster's Grafana host.
+    Sends the unrendered event, not a Slack card, so the router can build either.
+    The trace template travels with it — only this pod knows its Grafana host.
     """
     if not router_url:
         return False

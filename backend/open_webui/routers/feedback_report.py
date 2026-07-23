@@ -70,11 +70,9 @@ async def submit_feedback_report(request: Request, form: FeedbackReportForm, use
     )
     emit_feedback_log(event)  # the record — always happens
 
-    # Best-effort notification. The router wins when configured and the Slack
-    # card is skipped entirely — NOT a fallback chain. `slack_webhook_url` is
-    # persisted per tenant in the config DB, so it survives having the env var
-    # and the 1Password field removed; without this precedence a migrated
-    # tenant would deliver twice (a Linear issue AND the old Slack card).
+    # Either/or, not a fallback chain: slack_webhook_url stays persisted in the
+    # config DB after its env var and vault field are removed, so only skipping
+    # it here stops a migrated tenant delivering twice.
     trace_url_template = config.get('feedback_report.trace_url_template', '')
     router_url = config.get('feedback_report.webhook_url')
     if router_url:

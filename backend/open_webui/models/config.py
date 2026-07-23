@@ -139,13 +139,10 @@ class Config(Base):
         # instead of being pinned to the value seed_defaults wrote at first boot.
         if key.startswith('sync_daemon.'):
             return False
-        # Same carve-out, same reason: feedback_report.webhook_url is the
-        # notify-router endpoint driven by the chart env
-        # (FEEDBACK_REPORT_WEBHOOK_URL <- feedbackReportWebhookUrl), with no
-        # admin-panel toggle. Every tenant has already booted, so seed_defaults
-        # would pin the empty string written at first boot and wiring the router
-        # later would silently never take effect. The sibling feedback_report.*
-        # keys stay persistent — those ARE admin-toggleable.
+        # Same carve-out, same reason: the notify-router endpoint is chart-driven
+        # with no admin toggle. Tenants have all booted, so seed_defaults would
+        # pin the empty string and wiring the router later would never take
+        # effect. Sibling feedback_report.* keys stay persistent (admin-toggleable).
         if key == 'feedback_report.webhook_url':
             return False
         if key.startswith('oauth.') and not cls.OAUTH_PERSISTENT_ENABLED:
