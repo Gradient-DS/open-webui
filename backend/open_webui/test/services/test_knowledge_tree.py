@@ -182,6 +182,99 @@ async def test_sources_level_lists_sources_and_loose_files(db_session):
     assert resp.has_more is False
 
 
+@pytest.mark.asyncio
+async def test_file_type_source_renders_as_loose_files_not_folder(db_session):
+    """A picker *file* source (meta type='file') stamps its file rows with its
+    own item_id, but must NOT render as a one-file wrapper folder: its file
+    surfaces at the root (loose files), while a sibling folder source stays a
+    folder. Keys off meta ``type`` alone, so pre-existing rows need no re-sync.
+    """
+    kb_id = 'kb-filesrc'
+    meta = {
+        'google_drive_sync': {
+            'sources': [
+                {'item_id': 'FOLDER1', 'name': 'Alpha Folder', 'type': 'folder'},
+                {'item_id': 'FILE1', 'name': 'report.pdf', 'type': 'file'},
+            ]
+        }
+    }
+    await _insert_kb(db_session, kb_id=kb_id, meta=meta)
+    # Folder source: several files grouped under it.
+    await _add_file(
+        db_session, kb_id=kb_id, name='a.pdf', relative_path='a.pdf', source_item_id='FOLDER1', status='completed'
+    )
+    await _add_file(
+        db_session, kb_id=kb_id, name='b.pdf', relative_path='docs/b.pdf', source_item_id='FOLDER1', status='pending'
+    )
+    # File source: a single file stamped with the source's own item_id.
+    await _add_file(
+        db_session,
+        kb_id=kb_id,
+        name='report.pdf',
+        relative_path='report.pdf',
+        source_item_id='FILE1',
+        status='completed',
+    )
+    # A genuine loose file (no source).
+    await _add_file(db_session, kb_id=kb_id, name='loose.txt', status='completed')
+
+    resp = await Knowledges.list_tree_level(kb_id, path='')
+
+    # The folder source is a folder; the file source is NOT.
+    assert [f.name for f in resp.folders] == ['Alpha Folder']
+    folder = _folder(resp, 'Alpha Folder')
+    assert folder.path == 'FOLDER1'
+    assert folder.type == 'folder'
+    assert folder.child_count == 2
+    assert not any(f.path == 'FILE1' for f in resp.folders)
+    assert not any(f.name == 'report.pdf' for f in resp.folders)
+
+    # The file source's file appears loose at the root, next to the genuine
+    # loose file (both on the first page).
+    assert sorted(f.name for f in resp.files) == ['loose.txt', 'report.pdf']
+    report = next(f for f in resp.files if f.name == 'report.pdf')
+    assert report.status == 'completed'
+    assert report.size == 100
+    assert resp.has_more is False
+
+
+@pytest.mark.asyncio
+async def test_file_source_files_only_on_first_page(db_session):
+    """File-source loose files ride the first page only, so a cursor page of
+    the genuine loose files neither duplicates them nor is perturbed by them."""
+    kb_id = 'kb-filesrc-page'
+    meta = {
+        'google_drive_sync': {
+            'sources': [
+                {'item_id': 'FILE1', 'name': 'picked.pdf', 'type': 'file'},
+            ]
+        }
+    }
+    await _insert_kb(db_session, kb_id=kb_id, meta=meta)
+    await _add_file(
+        db_session,
+        kb_id=kb_id,
+        name='picked.pdf',
+        relative_path='picked.pdf',
+        source_item_id='FILE1',
+        status='completed',
+    )
+    await _add_file(db_session, kb_id=kb_id, name='loose-a.txt', status='completed')
+    await _add_file(db_session, kb_id=kb_id, name='loose-b.txt', status='completed')
+
+    # limit=1 → one genuine loose file per page; the file-source file rides page 1.
+    page1 = await Knowledges.list_tree_level(kb_id, path='', limit=1)
+    assert sorted(f.name for f in page1.files) == ['loose-a.txt', 'picked.pdf']
+    assert page1.folders == []  # the file source is not a folder
+    assert page1.has_more is True
+
+    page2 = await Knowledges.list_tree_level(kb_id, path='', cursor=page1.next_cursor, limit=1)
+    # Second page: only the next genuine loose file — the file-source file is
+    # not repeated (folders/file-source files are first-page only).
+    assert [f.name for f in page2.files] == ['loose-b.txt']
+    assert page2.has_more is False
+
+
 # ---------------------------------------------------------------------------
 # Source root (path="S1")
 # ---------------------------------------------------------------------------
