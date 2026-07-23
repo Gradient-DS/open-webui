@@ -9,6 +9,7 @@
 #   postgres → localhost:${POSTGRES_PORT}
 #   weaviate → localhost:${WEAVIATE_HTTP_PORT}  (HTTP)
 #   weaviate → localhost:${WEAVIATE_GRPC_PORT}  (gRPC)
+#   redis    → localhost:${REDIS_PORT}
 # Port values come from .env.stack-N (env_builder writes them, the
 # stack manager passes the file via `docker compose --env-file`).
 #
@@ -60,6 +61,17 @@ services:
       retries: 30
     volumes:
       - postgres-data:/var/lib/postgresql/data
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "${REDIS_PORT:?must be set per-stack in .env.stack-N}:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
     restart: unless-stopped
 
 volumes:
