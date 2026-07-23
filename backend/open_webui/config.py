@@ -2801,6 +2801,11 @@ ENABLE_FEEDBACK_REPORTING = os.environ.get('ENABLE_FEEDBACK_REPORTING', 'False')
 
 FEEDBACK_REPORT_SLACK_WEBHOOK_URL = os.environ.get('FEEDBACK_REPORT_SLACK_WEBHOOK_URL', '')
 
+# Notification-router endpoint. Takes precedence over the Slack webhook above:
+# when set, the event is POSTed here and the Slack card is skipped. An in-cluster
+# URL, not a secret — so it comes from the ConfigMap, not the tenant vault.
+FEEDBACK_REPORT_WEBHOOK_URL = os.environ.get('FEEDBACK_REPORT_WEBHOOK_URL', '')
+
 FEEDBACK_REPORT_INCLUDE_USER_IDENTITY = (
     os.environ.get('FEEDBACK_REPORT_INCLUDE_USER_IDENTITY', 'True').lower() == 'true'
 )
@@ -3519,6 +3524,7 @@ DEFAULT_CONFIG = {
     'feedback_report.enable': ENABLE_FEEDBACK_REPORTING,
     'feedback_report.include_user_identity': FEEDBACK_REPORT_INCLUDE_USER_IDENTITY,
     'feedback_report.slack_webhook_url': FEEDBACK_REPORT_SLACK_WEBHOOK_URL,
+    'feedback_report.webhook_url': FEEDBACK_REPORT_WEBHOOK_URL,
     'feedback_report.trace_url_template': FEEDBACK_REPORT_TRACE_URL_TEMPLATE,
     'google_drive.enable_sync': ENABLE_GOOGLE_DRIVE_SYNC,
     'google_drive.max_files_per_sync': GOOGLE_DRIVE_MAX_FILES_PER_SYNC,

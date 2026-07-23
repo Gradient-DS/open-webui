@@ -318,6 +318,10 @@ openWebui:
     # Grafana/Tempo Explore URL with a {trace_id} placeholder — when set, an
     # error report's Slack card gets a "View trace in Tempo" deep link.
     feedbackReportTraceUrlTemplate: ""
+    # Notification router, e.g. "http://notify-router.shared-services.svc:8080/feedback".
+    # When set it WINS over the Slack webhook and the card is skipped; the router
+    # fans out to Linear (bugs/errors/ideas) or Slack (questions/other).
+    feedbackReportWebhookUrl: ""
 
     # Welcome message (PersistentConfig — seed only; admins can toggle in UI)
     enableWelcomeMessage: "False"
