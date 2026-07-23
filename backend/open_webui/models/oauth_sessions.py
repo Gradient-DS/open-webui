@@ -224,6 +224,18 @@ class OAuthSessionTable:
             log.error(f'Error getting OAuth session by provider and user ID: {e}')
             return None
 
+    async def session_exists(self, provider: str, user_id: str, db: Optional[AsyncSession] = None) -> bool:
+        """Return whether an OAuth session row exists for provider+user.
+
+        Unlike :meth:`get_session_by_provider_and_user_id`, this does NOT mask
+        errors as ``None`` — DB failures propagate so callers can tell a genuine
+        absence apart from a transient failure (e.g. before flagging a knowledge
+        base ``needs_reauth``).
+        """
+        async with get_async_db_context(db) as db:
+            result = await db.execute(select(OAuthSession).filter_by(provider=provider, user_id=user_id).limit(1))
+            return result.scalars().first() is not None
+
     async def get_sessions_by_user_id(self, user_id: str, db: Optional[AsyncSession] = None) -> List[OAuthSessionModel]:
         """Get all OAuth sessions for a user"""
         try:
