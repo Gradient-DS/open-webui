@@ -46,6 +46,23 @@ async def get_valid_access_token(
     """
     session = await OAuthSessions.get_session_by_provider_and_user_id(provider, user_id)
     if not session:
+        # No usable session. Flag needs_reauth so the scheduler's due-gate backs
+        # off and the UI shows a reconnect prompt — but only when the session is
+        # *genuinely* absent. The lookup above masks DB errors as None, so
+        # re-check with a non-masking query and never flag on an unconfirmed
+        # absence (a transient DB blip must not strand every KB behind reauth).
+        try:
+            genuinely_absent = not await OAuthSessions.session_exists(provider, user_id)
+        except Exception as e:
+            log.warning(
+                'needs_reauth: session existence check failed for %s/%s — not flagging: %s',
+                provider,
+                user_id,
+                e,
+            )
+            genuinely_absent = False
+        if genuinely_absent:
+            await _mark_needs_reauth(provider, meta_key, user_id)
         return None
 
     token_data = session.token
