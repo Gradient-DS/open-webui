@@ -5,7 +5,7 @@ import logging
 from typing import List, Literal, Optional
 
 import httpx
-from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import RedirectResponse
 from starlette.requests import Request
 from pydantic import BaseModel
@@ -45,6 +45,7 @@ from open_webui.services.sync.shared_kb import (
     shared_kb_status as shared_kb_status_generic,
     delete_shared_kb as delete_shared_kb_generic,
 )
+from open_webui.services.sync.daemon_client import trigger_sync_run
 
 log = logging.getLogger(__name__)
 router = APIRouter()
@@ -168,8 +169,6 @@ async def _stamp_auth_mode(knowledge_id: str, mode: str) -> None:
 @router.post('/sync/items')
 async def sync_items(
     request: SyncItemsRequest,
-    fastapi_request: Request,
-    background_tasks: BackgroundTasks,
     user: UserModel = Depends(get_verified_user),
 ):
     """Start Confluence sync for multiple items (spaces and/or pages)."""
@@ -232,48 +231,20 @@ async def sync_items(
         for item in request.items
     ]
 
-    result = await handle_sync_items_request(
+    # Stamp the KB's auth mode so it stays stable if the global default flips.
+    await _stamp_auth_mode(request.knowledge_id, mode)
+
+    await handle_sync_items_request(
         knowledge_id=request.knowledge_id,
         meta_key=_META_KEY,
+        provider=_PROVIDER_TYPE,
         new_sources=new_sources,
         access_token=access_token,
         user=user,
         clear_delta_keys=_CLEAR_DELTA_KEYS,
     )
 
-    # Stamp the KB's auth mode so it stays stable if the global default flips.
-    await _stamp_auth_mode(request.knowledge_id, mode)
-
-    background_tasks.add_task(
-        _sync_items_background,
-        knowledge_id=request.knowledge_id,
-        sources=result['all_sources'],
-        access_token=access_token,
-        user_id=user.id,
-        app=fastapi_request.app,
-    )
-
     return {'message': 'Sync started', 'knowledge_id': request.knowledge_id}
-
-
-async def _sync_items_background(
-    knowledge_id: str,
-    sources: List[dict],
-    access_token: str,
-    user_id: str,
-    app,
-):
-    """Background task to sync multiple Confluence items."""
-    from open_webui.services.confluence.sync_worker import ConfluenceSyncWorker
-
-    worker = ConfluenceSyncWorker(
-        knowledge_id=knowledge_id,
-        sources=sources,
-        access_token=access_token,
-        user_id=user_id,
-        app=app,
-    )
-    await worker.sync()
 
 
 @router.get('/sync/{knowledge_id}')
@@ -970,21 +941,8 @@ async def provision_shared_kb(
     return await _shared_kb_status(user)
 
 
-async def _run_shared_sync(knowledge_id: str, user_id: str, app):
-    """Background task: run a full sync of the shared KB via the provider."""
-    from open_webui.services.sync.provider import get_sync_provider
-
-    try:
-        provider = get_sync_provider(_PROVIDER_TYPE)
-        await provider.execute_sync(knowledge_id=knowledge_id, user_id=user_id, app=app)
-    except Exception as e:
-        log.exception('Shared Confluence KB sync failed for %s: %s', knowledge_id, e)
-
-
 @router.post('/shared/sync')
 async def sync_shared_kb(
-    fastapi_request: Request,
-    background_tasks: BackgroundTasks,
     user: UserModel = Depends(get_admin_user),
 ) -> dict:
     """Trigger an immediate full sync of the shared Confluence KB (admin)."""
@@ -992,12 +950,10 @@ async def sync_shared_kb(
     if not kb:
         raise HTTPException(404, 'No shared Confluence knowledge base has been provisioned.')
 
-    background_tasks.add_task(
-        _run_shared_sync,
-        knowledge_id=kb.id,
-        user_id=kb.user_id,
-        app=fastapi_request.app,
-    )
+    # The shared KB is system-owned; kb.user_id may be '' in service-credential
+    # (basic/scoped) mode — the daemon runs Confluence with the service
+    # credential and does not need a real OAuth user.
+    await trigger_sync_run(kb.id, _PROVIDER_TYPE, kb.user_id)
     return {'message': 'Sync started', 'knowledge_id': kb.id}
 
 

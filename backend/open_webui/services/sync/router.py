@@ -15,6 +15,7 @@ from pydantic import BaseModel
 
 from open_webui.models.knowledge import Knowledges
 from open_webui.models.users import UserModel
+from open_webui.services.sync.daemon_client import trigger_sync_run, cancel_sync_run
 
 log = logging.getLogger(__name__)
 
@@ -73,6 +74,7 @@ async def get_knowledge_or_raise(knowledge_id: str, user: UserModel):
 async def handle_sync_items_request(
     knowledge_id: str,
     meta_key: str,
+    provider: str,
     new_sources: List[dict],
     access_token: str,
     user: UserModel,
@@ -81,12 +83,14 @@ async def handle_sync_items_request(
     """
     Shared logic for the POST /sync/items endpoint.
 
-    Validates the KB, handles stale/cancelled syncs, merges sources,
-    and updates metadata. Returns the merged sources and updated meta.
+    Validates the KB, handles stale/cancelled syncs, merges sources, updates
+    metadata, and forwards a "Sync now" trigger to the external sync-daemon.
+    Returns the merged sources and updated meta.
 
     Args:
         knowledge_id: The knowledge base ID
         meta_key: e.g. "google_drive_sync" or "onedrive_sync"
+        provider: Daemon provider name (e.g. "onedrive", "google_drive", "confluence")
         new_sources: List of source dicts extracted from the request items
         access_token: The OAuth access token
         user: The authenticated user
@@ -139,6 +143,11 @@ async def handle_sync_items_request(
     }
     await Knowledges.update_knowledge_meta_by_id(knowledge_id, meta)
 
+    # Forward the "Sync now" trigger to the external sync-daemon. If this
+    # raises, let it propagate — the 30-min stale-recovery above unsticks a
+    # 'syncing' status left behind on the next attempt.
+    await trigger_sync_run(knowledge_id, provider, user.id)
+
     return {'all_sources': all_sources, 'meta': meta}
 
 
@@ -188,6 +197,8 @@ async def handle_cancel_sync(
     sync_info['status'] = 'cancelled'
     meta[meta_key] = sync_info
     await Knowledges.update_knowledge_meta_by_id(knowledge_id, meta)
+
+    await cancel_sync_run(knowledge_id)
 
     log.info(f'Sync cancelled for knowledge base {knowledge_id}')
     return {'message': 'Sync cancelled', 'knowledge_id': knowledge_id}

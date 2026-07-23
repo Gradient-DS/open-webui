@@ -19,15 +19,8 @@ To add a new managed-sync datasource:
    ``f'{slug}-'`` for them.
 """
 
-import logging
-import time
 from abc import ABC, abstractmethod
-from typing import Optional, Dict, Any
-
-from open_webui.models.config import Config
-from open_webui.models.knowledge import Knowledges
-
-log = logging.getLogger(__name__)
+from typing import Optional
 
 
 # Maps managed-sync provider_slug → file_id_prefix used by that provider's
@@ -103,7 +96,6 @@ class SyncProvider(ABC):
     - get_provider_type() -> str
     - get_meta_key() -> str
     - get_token_manager() -> TokenManager
-    - create_worker(knowledge_id, sources, access_token, user_id, app, token_provider) -> worker
     """
 
     @abstractmethod
@@ -120,95 +112,6 @@ class SyncProvider(ABC):
     def get_token_manager(self) -> TokenManager:
         """Return the token manager for this provider."""
         ...
-
-    @abstractmethod
-    def create_worker(
-        self,
-        knowledge_id: str,
-        sources,
-        access_token: str,
-        user_id: str,
-        app,
-        token_provider=None,
-    ):
-        """Create the provider-specific sync worker instance."""
-        ...
-
-    async def execute_sync(
-        self,
-        knowledge_id: str,
-        user_id: str,
-        app,
-        access_token: Optional[str] = None,
-    ) -> Dict[str, Any]:
-        """
-        Execute a sync for a knowledge base.
-
-        If access_token is provided (manual sync), uses it directly.
-        Otherwise, obtains a token from the token manager (background sync).
-        """
-        knowledge = await Knowledges.get_knowledge_by_id(id=knowledge_id)
-        if not knowledge:
-            return {'error': 'Knowledge base not found'}
-
-        meta = knowledge.meta or {}
-        sync_info = meta.get(self.get_meta_key(), {})
-        sources = sync_info.get('sources', [])
-
-        # A provider may resolve its source list dynamically at sync time —
-        # the Confluence shared KB has no stored sources but flags `shared`
-        # in its meta and resolves the selected spaces on each run.
-        if not sources and not sync_info.get('shared'):
-            return {'error': 'No sync sources configured'}
-
-        # Determine token source
-        token_provider = None
-        if access_token:
-            effective_token = access_token
-        else:
-            effective_token = await self.get_token_manager().get_valid_access_token(user_id, knowledge_id)
-            if not effective_token:
-                return {'error': 'No valid token available', 'needs_reauth': True}
-
-            # Create a token provider callback for mid-sync refresh
-            tm = self.get_token_manager()
-
-            async def _refresh():
-                return await tm.get_valid_access_token(user_id, knowledge_id)
-
-            token_provider = _refresh
-
-        worker = self.create_worker(
-            knowledge_id=knowledge_id,
-            sources=sources,
-            access_token=effective_token,
-            user_id=user_id,
-            app=app,
-            token_provider=token_provider,
-        )
-
-        result = await worker.sync()
-
-        # Stamp the completion time so the admin UI reflects every run —
-        # including no-op syncs where 0 files changed. base_worker records
-        # this on its normal completion path; doing it here guarantees the
-        # timestamp advances for every provider and every non-error exit,
-        # and clears a status left stuck on 'syncing'.
-        if isinstance(result, dict) and not result.get('error') and not result.get('suspended'):
-            try:
-                kb = await Knowledges.get_knowledge_by_id(id=knowledge_id)
-                if kb:
-                    meta = kb.meta or {}
-                    sync_info = meta.get(self.get_meta_key(), {})
-                    sync_info['last_sync_at'] = int(time.time())
-                    if sync_info.get('status') in (None, 'idle', 'syncing'):
-                        sync_info['status'] = 'completed'
-                    meta[self.get_meta_key()] = sync_info
-                    await Knowledges.update_knowledge_meta_by_id(knowledge_id, meta)
-            except Exception:
-                log.exception('Failed to stamp sync completion for KB %s', knowledge_id)
-
-        return result
 
 
 def get_sync_provider(provider_type: str) -> SyncProvider:

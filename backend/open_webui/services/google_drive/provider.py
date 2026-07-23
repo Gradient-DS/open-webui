@@ -47,23 +47,3 @@ class GoogleDriveSyncProvider(SyncProvider):
 
     def get_token_manager(self) -> TokenManager:
         return self._token_manager
-
-    def create_worker(
-        self,
-        knowledge_id,
-        sources,
-        access_token,
-        user_id,
-        app,
-        token_provider=None,
-    ):
-        from open_webui.services.google_drive.sync_worker import GoogleDriveSyncWorker
-
-        return GoogleDriveSyncWorker(
-            knowledge_id=knowledge_id,
-            sources=sources,
-            access_token=access_token,
-            user_id=user_id,
-            app=app,
-            token_provider=token_provider,
-        )
