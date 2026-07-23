@@ -41,10 +41,14 @@ jobs:
       - name: Install pip-audit and dependencies
         run: |
           pip install --upgrade 'pip>=26.1'
+          # setuptools>=83.0.0: PYSEC-2026-3447 (MANIFEST.in exclude bypass via Unicode normalization)
+          pip install --upgrade 'setuptools>=83.0.0'
           pip install pip-audit
           pip install -r backend/requirements.txt
 
       - name: Run pip-audit
+        # PYSEC-2026-1325: ecdsa Minerva timing attack — upstream considers side channels out of scope, no fix planned
+        # PYSEC-2026-3412: weasyprint CSS injection via presentational hints — no fixed release (latest 68.1 still affected)
         run: |
           pip-audit --desc on \
             --ignore-vuln CVE-2025-3000 \
@@ -53,7 +57,8 @@ jobs:
             --ignore-vuln CVE-2026-33231 \
             --ignore-vuln CVE-2026-3219 \
             --ignore-vuln CVE-2026-45829 \
-            --ignore-vuln PYSEC-2026-597
+            --ignore-vuln PYSEC-2026-1325 \
+            --ignore-vuln PYSEC-2026-3412
 
   sca-node:
     name: Node.js Dependencies (npm audit)
