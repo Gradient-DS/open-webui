@@ -20,11 +20,12 @@ from open_webui.utils.feedback_report import (
     build_feedback_event,
     build_http_error_body,
     get_current_trace_id,
+    post_feedback_to_router,
     post_feedback_to_slack,
 )
 
 
-def _make_client(monkeypatch, *, enabled=True, webhook_url='', include_identity=True):
+def _make_client(monkeypatch, *, enabled=True, webhook_url='', router_url='', include_identity=True):
     # The router reads its settings via ``await Config.get_many('feedback_report.*')``
     # (the storage keys of ENABLE_FEEDBACK_REPORTING & co); patch the per-key
     # store so the tests stay hermetic — no config DB involved.
@@ -32,6 +33,7 @@ def _make_client(monkeypatch, *, enabled=True, webhook_url='', include_identity=
         'feedback_report.enable': enabled,
         'feedback_report.include_user_identity': include_identity,
         'feedback_report.slack_webhook_url': webhook_url,
+        'feedback_report.webhook_url': router_url,
         'feedback_report.trace_url_template': '',
     }
 
@@ -131,6 +133,84 @@ async def test_post_feedback_to_slack_bad_url_returns_false():
     }
     # An unreachable host must not raise — delivery is best-effort.
     assert await post_feedback_to_slack(event, 'http://127.0.0.1:9/nope') is False
+
+
+# --- Notification router: delivery precedence --------------------------------
+
+
+@pytest.mark.asyncio
+async def test_post_feedback_to_router_no_url_returns_false():
+    assert await post_feedback_to_router({'category': 'bug'}, '') is False
+
+
+@pytest.mark.asyncio
+async def test_post_feedback_to_router_bad_url_returns_false():
+    # Unreachable router must not raise — delivery is best-effort, and a
+    # submission must never fail because the router is down.
+    assert await post_feedback_to_router({'category': 'bug'}, 'http://127.0.0.1:9/nope') is False
+
+
+def test_router_url_takes_precedence_over_slack(monkeypatch):
+    """The whole point of the migration: when both are set, Slack is skipped.
+
+    A migrated tenant still has slack_webhook_url persisted in its config DB, so
+    without this precedence it would deliver twice.
+    """
+    calls = {'router': 0, 'slack': 0}
+
+    async def fake_router(event, url, template=''):
+        calls['router'] += 1
+        return True
+
+    async def fake_slack(event, url, template=''):
+        calls['slack'] += 1
+        return True
+
+    monkeypatch.setattr('open_webui.routers.feedback_report.post_feedback_to_router', fake_router)
+    monkeypatch.setattr('open_webui.routers.feedback_report.post_feedback_to_slack', fake_slack)
+
+    client = _make_client(monkeypatch, webhook_url='https://hooks.slack.com/x', router_url='http://router/feedback')
+    res = client.post('/api/v1/feedback/report', json={'category': 'bug', 'description': 'x'})
+
+    assert res.status_code == 200
+    assert calls == {'router': 1, 'slack': 0}
+
+
+def test_falls_back_to_slack_when_router_unset(monkeypatch):
+    # Backward compatibility: a tenant on the new image but the old chart (no
+    # FEEDBACK_REPORT_WEBHOOK_URL wired) must behave exactly as before.
+    calls = {'router': 0, 'slack': 0}
+
+    async def fake_router(event, url, template=''):
+        calls['router'] += 1
+        return True
+
+    async def fake_slack(event, url, template=''):
+        calls['slack'] += 1
+        return True
+
+    monkeypatch.setattr('open_webui.routers.feedback_report.post_feedback_to_router', fake_router)
+    monkeypatch.setattr('open_webui.routers.feedback_report.post_feedback_to_slack', fake_slack)
+
+    client = _make_client(monkeypatch, webhook_url='https://hooks.slack.com/x')
+    res = client.post('/api/v1/feedback/report', json={'category': 'bug', 'description': 'x'})
+
+    assert res.status_code == 200
+    assert calls == {'router': 0, 'slack': 1}
+
+
+def test_router_url_is_non_persistent():
+    """The env must stay authoritative for the router endpoint.
+
+    seed_defaults writes every DEFAULT_CONFIG key at first boot, and every
+    tenant has already booted. If this key were persistent, that first boot
+    would pin '' in the config DB and later wiring the chart value would
+    silently do nothing — the same trap that hit sync_daemon.enabled.
+    """
+    assert Config.persistent_enabled_for('feedback_report.webhook_url') is False
+    # The sibling keys are admin-toggleable and must stay persistent.
+    assert Config.persistent_enabled_for('feedback_report.enable') is True
+    assert Config.persistent_enabled_for('feedback_report.slack_webhook_url') is True
 
 
 # --- Phase 2: trace-id capture and the HTTP error body -----------------------

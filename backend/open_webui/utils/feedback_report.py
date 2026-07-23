@@ -102,6 +102,30 @@ async def post_feedback_to_slack(event: dict, webhook_url: str, trace_url_templa
         return False
 
 
+async def post_feedback_to_router(event: dict, router_url: str, trace_url_template: str = '') -> bool:
+    """POST the raw event to the notification router. Best-effort; never raises.
+
+    The router (shared-services/notify-router) owns the routing decision — Linear
+    for bugs/errors/ideas, Slack for questions/other. We deliberately send the
+    unrendered event rather than a Slack card so the router can build either.
+    ``trace_url_template`` travels with it because only this pod knows its own
+    cluster's Grafana host.
+    """
+    if not router_url:
+        return False
+    payload = {'schema_version': 1, 'event': event, 'trace_url_template': trace_url_template}
+    try:
+        async with aiohttp.ClientSession(trust_env=True, timeout=aiohttp.ClientTimeout(total=10)) as session:
+            async with session.post(router_url, json=payload) as resp:
+                if resp.status >= 300:
+                    log.warning(f'feedback: router returned HTTP {resp.status}')
+                    return False
+                return True
+    except Exception as e:
+        log.warning(f'feedback: router post failed: {e}')
+        return False
+
+
 def _build_slack_blocks(event: dict, trace_url_template: str) -> list[dict]:
     emoji = CATEGORY_EMOJI.get(event['category'], ':speech_balloon:')
     tenant_label = event.get('client_name') or event.get('tenant')

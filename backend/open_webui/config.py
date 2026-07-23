@@ -2801,6 +2801,13 @@ ENABLE_FEEDBACK_REPORTING = os.environ.get('ENABLE_FEEDBACK_REPORTING', 'False')
 
 FEEDBACK_REPORT_SLACK_WEBHOOK_URL = os.environ.get('FEEDBACK_REPORT_SLACK_WEBHOOK_URL', '')
 
+# Generic notification-router endpoint. When set it takes precedence over the
+# Slack webhook above: the event is POSTed here and the Slack card is skipped
+# entirely, so the router (not this pod) decides where a report ends up —
+# Linear for bugs/ideas, Slack for questions. Deliberately NOT a secret: it is
+# an in-cluster URL, so it lives in the ConfigMap rather than the tenant vault.
+FEEDBACK_REPORT_WEBHOOK_URL = os.environ.get('FEEDBACK_REPORT_WEBHOOK_URL', '')
+
 FEEDBACK_REPORT_INCLUDE_USER_IDENTITY = (
     os.environ.get('FEEDBACK_REPORT_INCLUDE_USER_IDENTITY', 'True').lower() == 'true'
 )
@@ -3513,6 +3520,7 @@ DEFAULT_CONFIG = {
     'feedback_report.enable': ENABLE_FEEDBACK_REPORTING,
     'feedback_report.include_user_identity': FEEDBACK_REPORT_INCLUDE_USER_IDENTITY,
     'feedback_report.slack_webhook_url': FEEDBACK_REPORT_SLACK_WEBHOOK_URL,
+    'feedback_report.webhook_url': FEEDBACK_REPORT_WEBHOOK_URL,
     'feedback_report.trace_url_template': FEEDBACK_REPORT_TRACE_URL_TEMPLATE,
     'google_drive.enable_sync': ENABLE_GOOGLE_DRIVE_SYNC,
     'google_drive.max_files_per_sync': GOOGLE_DRIVE_MAX_FILES_PER_SYNC,
