@@ -1282,6 +1282,7 @@ class KnowledgeTable:
         include_folders: bool,
     ) -> KnowledgeTreeResponse:
         folders: list[TreeFolder] = []
+        file_source_files: list[TreeFile] = []
         if include_folders:
             # One grouped pass: per (source, raw status) counts. No split_part —
             # grouping is on the indexed source_item_id column directly.
@@ -1318,7 +1319,14 @@ class KnowledgeTable:
             if len(orphan_rollup_ids) == 1 and len(orphan_display_ids) == 1:
                 display[orphan_rollup_ids[0]] = display.pop(orphan_display_ids[0])
 
-            for source_id in set(rollup) | set(display):
+            # A picked *file* source stamps its file rows with its own item_id;
+            # it must NOT become a one-file wrapper folder. Exclude file-type
+            # sources from the folder union and surface their files at the root
+            # (loose files) instead — see the return below. Their ids are known
+            # to the registry, so they never enter the folder-orphan heuristic.
+            file_source_ids = {sid for sid, entry in display.items() if entry.get('type') == 'file'}
+
+            for source_id in (set(rollup) | set(display)) - file_source_ids:
                 meta_entry = display.get(source_id, {})
                 counts = rollup.get(source_id, {})
                 name = meta_entry.get('name')
@@ -1341,9 +1349,19 @@ class KnowledgeTable:
                 )
             folders.sort(key=lambda f: (f.name or '').lower())
 
+            # First page only: file-type sources' files ride alongside the
+            # genuine loose files. Kept out of the keyset page below so they
+            # appear once and never perturb the loose-files cursor.
+            file_source_files = await self._file_source_files(db, knowledge_id, file_source_ids)
+
         # Root loose files: no source, keyset by (filename, file_id).
         files, next_cursor, has_more = await self._loose_files_page(db, knowledge_id, decoded_cursor, limit)
-        return KnowledgeTreeResponse(folders=folders, files=files, next_cursor=next_cursor, has_more=has_more)
+        return KnowledgeTreeResponse(
+            folders=folders,
+            files=file_source_files + files,
+            next_cursor=next_cursor,
+            has_more=has_more,
+        )
 
     async def _tree_folder_level(
         self,
@@ -1524,6 +1542,40 @@ class KnowledgeTable:
         files = [self._row_to_tree_file(r.file_id, r.filename, r.updated_at, r.meta) for r in rows]
         next_cursor = _encode_cursor([rows[-1].filename, rows[-1].file_id]) if (has_more and rows) else None
         return files, next_cursor, has_more
+
+    async def _file_source_files(
+        self,
+        db: AsyncSession,
+        knowledge_id: str,
+        source_ids: set[str],
+    ) -> list[TreeFile]:
+        """Files of file-type sources, serialized as loose root files.
+
+        A picked *file* source stamps its rows with its own ``item_id`` (rather
+        than grouping them under a folder node), so the tree renders them at the
+        root instead of as a one-file wrapper folder. Not paginated — the caller
+        returns these only on the first page, so the (rare) multi-file case still
+        stays out of the loose-files keyset. Sorted by ``(filename, file_id)`` to
+        match the loose-files ordering.
+        """
+        if not source_ids:
+            return []
+        stmt = (
+            select(
+                KnowledgeFile.file_id,
+                File.filename,
+                File.updated_at,
+                File.meta,
+            )
+            .join(File, File.id == KnowledgeFile.file_id)
+            .where(
+                KnowledgeFile.knowledge_id == knowledge_id,
+                KnowledgeFile.source_item_id.in_(source_ids),
+            )
+            .order_by(File.filename.asc(), KnowledgeFile.file_id.asc())
+        )
+        rows = (await db.execute(stmt)).all()
+        return [self._row_to_tree_file(r.file_id, r.filename, r.updated_at, r.meta) for r in rows]
 
     async def search_tree(
         self,
