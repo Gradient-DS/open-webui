@@ -1,6 +1,6 @@
 """Google Drive Sync Router - Endpoints for Google Drive folder sync to Knowledge bases."""
 
-from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
+from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import RedirectResponse
 from starlette.requests import Request
 from pydantic import BaseModel
@@ -65,8 +65,6 @@ class SyncItemsRequest(BaseModel):
 @router.post('/sync/items')
 async def sync_items(
     request: SyncItemsRequest,
-    fastapi_request: Request,
-    background_tasks: BackgroundTasks,
     user: UserModel = Depends(get_verified_user),
 ):
     """Start Google Drive sync for multiple items (files and folders)."""
@@ -91,45 +89,17 @@ async def sync_items(
         for item in request.items
     ]
 
-    result = await handle_sync_items_request(
+    await handle_sync_items_request(
         knowledge_id=request.knowledge_id,
         meta_key=_META_KEY,
+        provider=_PROVIDER_TYPE,
         new_sources=new_sources,
         access_token=access_token,
         user=user,
         clear_delta_keys=_CLEAR_DELTA_KEYS,
     )
 
-    background_tasks.add_task(
-        _sync_items_background,
-        knowledge_id=request.knowledge_id,
-        sources=result['all_sources'],
-        access_token=access_token,
-        user_id=user.id,
-        app=fastapi_request.app,
-    )
-
     return {'message': 'Sync started', 'knowledge_id': request.knowledge_id}
-
-
-async def _sync_items_background(
-    knowledge_id: str,
-    sources: List[dict],
-    access_token: str,
-    user_id: str,
-    app,
-):
-    """Background task to sync multiple Google Drive items."""
-    from open_webui.services.google_drive.sync_worker import GoogleDriveSyncWorker
-
-    worker = GoogleDriveSyncWorker(
-        knowledge_id=knowledge_id,
-        sources=sources,
-        access_token=access_token,
-        user_id=user_id,
-        app=app,
-    )
-    await worker.sync()
 
 
 @router.get('/sync/{knowledge_id}')

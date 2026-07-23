@@ -3019,8 +3019,6 @@ ENABLE_RAG_FILTER_UI = os.environ.get('ENABLE_RAG_FILTER_UI', 'False').lower() =
 
 INTEGRATION_PROVIDERS = {}
 
-LOADER_WORKER_URL = os.environ.get('LOADER_WORKER_URL', '')
-
 TENANT_NAME = os.environ.get('TENANT_NAME', '')
 
 DISTRIBUTED_DOC_PIPELINE_ENABLED = os.environ.get('DISTRIBUTED_DOC_PIPELINE_ENABLED', 'False').lower() == 'true'
@@ -3039,6 +3037,14 @@ DISTRIBUTED_DOC_PIPELINE_CHAT_ENABLED = (
 # sync-protocol endpoints. The companion machine key is the plain env var
 # SYNC_API_KEY (read in utils/service_auth.py, never stored in config).
 SYNC_DAEMON_ENABLED = os.environ.get('SYNC_DAEMON_ENABLED', 'False').lower() == 'true'
+
+# Base URL of the tenant's external sync-daemon (e.g.
+# http://<tenant>-sync-daemon:8010). OWUI POSTs manual "Sync now" / cancel
+# triggers here; empty when no daemon is deployed.
+SYNC_DAEMON_URL = os.environ.get('SYNC_DAEMON_URL', '')
+
+# Bearer token OWUI presents to the sync-daemon on trigger/cancel calls.
+SYNC_DAEMON_API_KEY = os.environ.get('SYNC_DAEMON_API_KEY', '')
 
 PIPELINE_API_BASE_URL = os.environ.get('PIPELINE_API_BASE_URL', '')
 

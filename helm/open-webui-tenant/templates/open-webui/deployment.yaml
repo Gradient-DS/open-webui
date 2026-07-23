@@ -228,6 +228,16 @@ spec:
                   name: {{ include "open-webui-tenant.fullname" . }}-secrets
                   key: sync-api-key
             {{- end }}
+            # Sync-daemon bearer — OWUI presents this to the daemon on the manual
+            # "Sync now" / cancel forwards (services/sync/daemon_client). Mounted
+            # whenever a value exists; SYNC_DAEMON_URL (configmap) gates use.
+            {{- if or .Values.secrets.syncDaemonApiKey .Values.externalSecrets.onepassword.fields.syncDaemonApiKey }}
+            - name: SYNC_DAEMON_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "open-webui-tenant.fullname" . }}-secrets
+                  key: sync-daemon-api-key
+            {{- end }}
             # S3 Storage credentials (only if configured)
             {{- if or .Values.secrets.s3AccessKeyId .Values.externalSecrets.onepassword.fields.s3AccessKeyId }}
             - name: S3_ACCESS_KEY_ID

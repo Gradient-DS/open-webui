@@ -564,27 +564,6 @@ async def lifespan(app: FastAPI):
     asyncio.create_task(periodic_data_retention_cleanup())
     asyncio.create_task(periodic_export_cleanup())
 
-    # [Gradient] Start OneDrive background sync scheduler
-    from open_webui.services.onedrive.scheduler import (
-        start_scheduler as start_onedrive_scheduler,
-    )
-
-    start_onedrive_scheduler(app)
-
-    # [Gradient] Start Google Drive background sync scheduler
-    from open_webui.services.google_drive.scheduler import (
-        start_scheduler as start_google_drive_scheduler,
-    )
-
-    start_google_drive_scheduler(app)
-
-    # [Gradient] Start Confluence background sync scheduler
-    from open_webui.services.confluence.scheduler import (
-        start_scheduler as start_confluence_scheduler,
-    )
-
-    start_confluence_scheduler(app)
-
     # [Gradient] Start the distributed doc-pipeline reconciler (restart-safe sweep that
     # marks files 'error' when their warren job fails/hangs; success is handled
     # by the /ingest callback). Reads its enable flag per-tick, so starting it
@@ -669,27 +648,6 @@ async def lifespan(app: FastAPI):
     from open_webui.services.deletion.cleanup_worker import stop_cleanup_worker
 
     stop_cleanup_worker()
-
-    # [Gradient] Stop OneDrive background sync scheduler
-    from open_webui.services.onedrive.scheduler import (
-        stop_scheduler as stop_onedrive_scheduler,
-    )
-
-    stop_onedrive_scheduler()
-
-    # [Gradient] Stop Google Drive background sync scheduler
-    from open_webui.services.google_drive.scheduler import (
-        stop_scheduler as stop_google_drive_scheduler,
-    )
-
-    stop_google_drive_scheduler()
-
-    # [Gradient] Stop Confluence background sync scheduler
-    from open_webui.services.confluence.scheduler import (
-        stop_scheduler as stop_confluence_scheduler,
-    )
-
-    stop_confluence_scheduler()
 
     # Shutdown: clean up shared resources (after our schedulers so they release pool slots first)
     from open_webui.utils.session_pool import close_session
