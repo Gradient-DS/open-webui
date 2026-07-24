@@ -239,6 +239,9 @@ line-length = 120
 [tool.ruff.format]
 quote-style = "single"
 docstring-code-format = false
+# ruff >=0.16 formats Python code blocks inside Markdown by default; our .md files
+# (thoughts/, docs/, .claude/, collab/) contain illustrative snippets that must not churn.
+exclude = ["*.md"]
 
 [tool.ruff.lint]
 select = [
