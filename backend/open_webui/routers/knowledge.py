@@ -2329,7 +2329,19 @@ async def sync_knowledge_cleanup(
 
     # ── Remove orphaned directories (children before parents) ──
     for dir_id in reversed(form_data.dir_ids):
-        await Knowledges.delete_directory(dir_id, move_files_to_parent=False, db=db)
+        # KB-scope guard (design doc 4b): a caller with write access to THIS
+        # KB must not be able to delete directories of another KB by id.
+        directory = await Knowledges.get_directory_by_id(dir_id, db=db)
+        if not directory:
+            continue  # already gone (e.g. removed via a parent's FK cascade)
+        if directory.knowledge_id != id:
+            log.warning(f'sync/cleanup: skipping directory {dir_id} — belongs to {directory.knowledge_id}, not {id}')
+            continue
+        # Full fork cascade for any straggler files still in the subtree
+        # (P2-8 ledger #4); orphaned dirs are normally file-free by now.
+        report = await DeletionService.delete_directory(id, dir_id, move_files_to_parent=False)
+        if report.has_errors:
+            log.warning(f'Errors deleting directory {dir_id} during sync cleanup of {id}: {report.errors}')
 
     return {'status': True}
 
@@ -2659,16 +2671,21 @@ async def delete_knowledge_directory(
             detail=ERROR_MESSAGES.NOT_FOUND,
         )
 
-    success = await Knowledges.delete_directory(
+    # Full fork cascade (P2-8 ledger #4): with move_files=False the subtree's
+    # files are deleted like single-file deletes (KB vectors, file-{id}
+    # collections, storage, DB rows; cross-KB shared files survive).
+    report = await DeletionService.delete_directory(
+        knowledge_id=id,
         directory_id=dir_id,
         move_files_to_parent=move_files,
-        db=db,
     )
-    if not success:
+    if 'knowledge_directory' not in report.db_records:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail='Failed to delete directory.',
         )
+    if report.has_errors:
+        log.warning(f'Errors deleting directory {dir_id} from knowledge {id}: {report.errors}')
     await publish_event(
         request,
         EVENTS.KNOWLEDGE_DIRECTORY_DELETED,

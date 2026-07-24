@@ -462,4 +462,19 @@ async def remove_files_for_source_generic(
 
         removed_count += 1
 
+    # P2-8: drop the source's materialized root directory subtree. The sweep
+    # above already removed the source's files, so the subtree is normally
+    # file-free by now — DeletionService.delete_directory full-cascades any
+    # straggler (and verifies the directory belongs to this KB).
+    root_directory_id = (source or {}).get('root_directory_id')
+    if root_directory_id:
+        from open_webui.services.deletion import DeletionService
+
+        report = await DeletionService.delete_directory(knowledge_id, root_directory_id, move_files_to_parent=False)
+        if report.has_errors:
+            log.warning(
+                f'Errors removing root directory {root_directory_id} for source {source_item_id} '
+                f'from KB {knowledge_id}: {report.errors}'
+            )
+
     return removed_count

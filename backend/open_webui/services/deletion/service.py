@@ -198,6 +198,72 @@ class DeletionService:
         return report
 
     @staticmethod
+    async def delete_directory(
+        knowledge_id: str,
+        directory_id: str,
+        move_files_to_parent: bool = True,
+    ) -> DeletionReport:
+        """
+        Delete a KB directory with full fork-cascade parity (P2-8 ledger #4).
+
+        - move_files_to_parent=True: contained files re-home to the parent
+          directory (or root); only the directory rows go.
+        - move_files_to_parent=False ("delete directory + contents"): every
+          file in the subtree is deleted exactly like a single-file delete —
+          vectors by file_id + hash in this KB's collection, then the orphan
+          batch (file-{id} collections, storage objects, DB rows). Files still
+          referenced by another KB or chat survive with only this KB's link
+          and vectors removed.
+
+        The directory must belong to knowledge_id — the KB-scope guard for the
+        /sync/cleanup dir branch lives here so every caller gets it.
+        """
+        report = DeletionReport()
+
+        directory = await Knowledges.get_directory_by_id(directory_id)
+        if not directory:
+            report.add_error(f'Directory {directory_id} not found')
+            return report
+        if directory.knowledge_id != knowledge_id:
+            report.add_error(f'Directory {directory_id} does not belong to knowledge {knowledge_id}')
+            return report
+
+        subtree_file_ids: list[str] = []
+        if not move_files_to_parent:
+            subtree_file_ids = await Knowledges.get_file_ids_in_directory_subtree(knowledge_id, directory_id)
+            # Vectors first (deletion order: Vectors -> Storage -> DB). Remove
+            # this KB's vectors by file_id and hash — the same double delete
+            # the single-file path does.
+            files = await Files.get_files_by_ids(subtree_file_ids) if subtree_file_ids else []
+            for file in files:
+                try:
+                    await ASYNC_VECTOR_DB_CLIENT.delete(collection_name=knowledge_id, filter={'file_id': file.id})
+                    report.vector_documents += 1
+                    if file.hash:
+                        await ASYNC_VECTOR_DB_CLIENT.delete(collection_name=knowledge_id, filter={'hash': file.hash})
+                except Exception as e:
+                    report.add_error(f'Failed to remove vectors for file {file.id} from knowledge {knowledge_id}: {e}')
+
+        # Directory + knowledge_file join rows (and, for the delete-contents
+        # mode, the subtree link rows) — the reference check below needs the
+        # links gone first to see which files became orphans.
+        if not await Knowledges.delete_directory(directory_id, move_files_to_parent=move_files_to_parent):
+            report.add_error(f'Failed to delete directory {directory_id}')
+            return report
+        report.add_db('knowledge_directory')
+
+        if subtree_file_ids:
+            batch_report = await DeletionService.delete_orphaned_files_batch(subtree_file_ids)
+            for table, count in batch_report.db_records.items():
+                report.add_db(table, count)
+            report.storage_files += batch_report.storage_files
+            report.vector_collections += batch_report.vector_collections
+            report.vector_documents += batch_report.vector_documents
+            report.errors.extend(batch_report.errors)
+
+        return report
+
+    @staticmethod
     async def delete_chat(chat_id: str, user_id: str) -> DeletionReport:
         """
         Delete a chat and all associated files/vectors.

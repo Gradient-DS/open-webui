@@ -26,9 +26,8 @@ from sqlalchemy.pool import StaticPool
 
 from open_webui.models import knowledge as knowledge_module
 from open_webui.models.files import File
-from open_webui.models.knowledge import Knowledge, KnowledgeFile, Knowledges
+from open_webui.models.knowledge import Knowledge, KnowledgeDirectory, KnowledgeFile, Knowledges
 from open_webui.models.users import User
-
 
 # ---------------------------------------------------------------------------
 # Fixtures / helpers
@@ -44,6 +43,9 @@ async def db_session(monkeypatch):
     )
     async with engine.begin() as conn:
         await conn.run_sync(Knowledge.__table__.create)
+        # The P2-8 reverse bridge materializes directory rows during
+        # add_file_to_knowledge_by_id, so the seeding below needs the table.
+        await conn.run_sync(KnowledgeDirectory.__table__.create)
         await conn.run_sync(KnowledgeFile.__table__.create)
         await conn.run_sync(File.__table__.create)
         await conn.run_sync(User.__table__.create)
