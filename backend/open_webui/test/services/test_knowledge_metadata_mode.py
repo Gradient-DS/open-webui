@@ -32,12 +32,12 @@ from open_webui.models.access_grants import AccessGrant
 from open_webui.models.files import File
 from open_webui.models.knowledge import (
     Knowledge,
+    KnowledgeDirectory,
     KnowledgeFile,
     KnowledgeFileListResponse,
     Knowledges,
 )
 from open_webui.models.users import User
-
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -56,6 +56,7 @@ async def db_session(monkeypatch):
     )
     async with engine.begin() as conn:
         await conn.run_sync(Knowledge.__table__.create)
+        await conn.run_sync(KnowledgeDirectory.__table__.create)
         await conn.run_sync(KnowledgeFile.__table__.create)
         await conn.run_sync(File.__table__.create)
         await conn.run_sync(User.__table__.create)
@@ -237,9 +238,9 @@ async def test_metadata_mode_excludes_data_includes_status(db_session):
 
 
 @pytest.mark.asyncio
-async def test_default_mode_includes_data_content(db_session):
-    """metadata_only=False (default): items still include ``data`` and
-    ``data.content`` — default path is unchanged."""
+async def test_default_mode_defers_data_content(db_session):
+    """metadata_only=False (default): ``data`` is deferred (upstream v0.10.2
+    perf trio) — the item shape carries no content blob."""
     user_id = 'user-1'
     await _insert_user(db_session, user_id=user_id)
     kb_id = await _insert_kb(db_session, user_id=user_id)
@@ -265,16 +266,17 @@ async def test_default_mode_includes_data_content(db_session):
     item = result.items[0]
     item_dict = item.model_dump()
 
-    # MUST have data dict with content
-    assert item_dict.get('data') is not None
-    assert item_dict['data'].get('content') == 'this is the full content'
-    assert item_dict['data'].get('status') == 'completed'
+    # Upstream v0.10.2 perf trio: the full path defers File.data — no consumer
+    # of this method reads it, so the heavy content blob is never de-TOASTed.
+    assert item_dict.get('data') is None
 
 
 @pytest.mark.asyncio
 async def test_content_query_filter_works_in_metadata_mode(db_session):
-    """The content-search ``query`` filter works in metadata mode (WHERE clause
-    on data['content'] does not require selecting data)."""
+    """Content search is opt-in post-v0.10.2 (P2-8 locked decision: the "File
+    content" toggle is off by default): a plain ``query`` matches filenames
+    only; ``include_content`` extends the match to ``data['content']`` without
+    selecting data."""
     user_id = 'user-1'
     await _insert_user(db_session, user_id=user_id)
     kb_id = await _insert_kb(db_session, user_id=user_id)
@@ -299,6 +301,7 @@ async def test_content_query_filter_works_in_metadata_mode(db_session):
     await _link_file_to_kb(db_session, kb_id=kb_id, file_id=matching_file_id, user_id=user_id)
     await _link_file_to_kb(db_session, kb_id=kb_id, file_id=no_match_file_id, user_id=user_id)
 
+    # Plain query: filename-only matching — content is NOT searched.
     result = await Knowledges.search_files_by_id(
         kb_id,
         user_id,
@@ -307,7 +310,17 @@ async def test_content_query_filter_works_in_metadata_mode(db_session):
         limit=30,
         metadata_only=True,
     )
+    assert result.total == 0
 
+    # include_content: the query now matches data['content'].
+    result = await Knowledges.search_files_by_id(
+        kb_id,
+        user_id,
+        filter={'query': 'unique_search_term', 'include_content': True},
+        skip=0,
+        limit=30,
+        metadata_only=True,
+    )
     assert result.total == 1
     assert len(result.items) == 1
     assert result.items[0].filename == 'match.pdf'
@@ -579,10 +592,11 @@ async def test_metadata_mode_total_correct_with_query_filter(db_session):
         await _link_file_to_kb(db_session, kb_id=kb_id, file_id=fid, user_id=user_id)
     await _link_file_to_kb(db_session, kb_id=kb_id, file_id=match_id, user_id=user_id)
 
+    # Content matching requires the opt-in include_content flag (post-v0.10.2).
     result = await Knowledges.search_files_by_id(
         kb_id,
         user_id,
-        filter={'query': 'needle'},
+        filter={'query': 'needle', 'include_content': True},
         skip=0,
         limit=30,
         metadata_only=True,
