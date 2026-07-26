@@ -337,8 +337,33 @@ async def upload_file_handler(
     background_tasks: Optional[BackgroundTasks] = None,
     db: Optional[AsyncSession] = None,
     sniff_guard: bool = True,
+    count_cap_guard: bool = True,
 ):
     log.info(f'file.content_type: {file.content_type} {process}')
+
+    # Backend-enforced cap on a user's total stored file count. Mirrors
+    # routers/automations.py's check_automation_limits max_count pattern:
+    # 403, count >= cap (not >), config coerced through int() and skipped
+    # when falsy (unset/0). Unlike rag.file.max_count (frontend per-message
+    # advisory only), this is authoritative and checked before any work is
+    # done -- no bytes read, nothing stored yet.
+    #
+    # count_cap_guard defaults True so the user route is always covered;
+    # server-generated upload paths (image/audio generation, agent-internal
+    # blobs — see images.py/utils/files.py/internal_retrieval.py) pass
+    # count_cap_guard=False since they aren't a user-initiated upload the
+    # cap is meant to bound, mirroring the sniff_guard opt-out precedent.
+    if count_cap_guard:
+        max_count_per_user = await Config.get('rag.file.max_count_per_user')
+        if max_count_per_user:
+            max_count_per_user = int(max_count_per_user)
+            if max_count_per_user > 0:
+                current_count = await Files.count_files_by_user_id(user_id=user.id, db=db)
+                if current_count >= max_count_per_user:
+                    raise HTTPException(
+                        status_code=status.HTTP_403_FORBIDDEN,
+                        detail=ERROR_MESSAGES.FILE_LIMIT_EXCEEDED(max_count_per_user),
+                    )
 
     if isinstance(metadata, str):
         try:

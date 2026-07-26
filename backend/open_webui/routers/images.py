@@ -535,6 +535,7 @@ async def upload_image(request, image_data, content_type, metadata, user, db=Non
         process=False,
         user=user,
         sniff_guard=False,  # server-generated image; not a user-supplied blob
+        count_cap_guard=False,  # server-generated image; not a user upload
     )
 
     if file_item and file_item.id:

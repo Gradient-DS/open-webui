@@ -483,6 +483,7 @@ async def files_upload(
         user=user,
         db=db,
         sniff_guard=False,  # agent-internal blob path; opaque to RAG, guard N/A
+        count_cap_guard=False,  # agent-internal blob path; not a user upload
     )
     if file_item is None or not file_item.id:
         raise HTTPException(
