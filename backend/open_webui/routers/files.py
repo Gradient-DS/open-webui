@@ -47,6 +47,7 @@ from open_webui.services.files.events import emit_file_status
 from open_webui.storage.provider import Storage
 from open_webui.utils.auth import get_admin_user, get_verified_user
 from open_webui.utils.misc import strict_match_mime_type
+from open_webui.utils.upload_guard import check_upload
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy.ext.asyncio import AsyncSession
 from open_webui.models.file_attachments import FileAttachments
@@ -397,12 +398,14 @@ async def upload_file_handler(
         if process and allowed_file_extensions:
             allowed_file_extensions = [ext for ext in allowed_file_extensions if ext]
 
-            # An empty extension always passes: legitimate documents can arrive
-            # without a filename extension and with an unknown/octet-stream
-            # content type (e.g. "ASB - Microsoft Entra admin center", exported
-            # pages). We want those ingested — the native/external loader handles
-            # them. Junk types (svg/png/zip/dmg) resolve to a real, non-allowed
-            # extension and still fast-reject here.
+            # A file with no extension passes the allow-list here — legitimate
+            # documents can arrive without one (exported pages, Drive files) —
+            # but it no longer gets an unconditional free pass: once the bytes
+            # are in hand the magic-byte guard below (branch 2 in
+            # utils/upload_guard.py) sniffs the real content and, in enforce
+            # mode, only admits it when the sniffed type maps to an allowed
+            # extension. Junk types with a real, non-allowed extension still
+            # fast-reject right here.
             if file_extension and file_extension not in allowed_file_extensions:
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
@@ -465,6 +468,22 @@ async def upload_file_handler(
                 status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
                 detail=ERROR_MESSAGES.FILE_TOO_LARGE(size=f'{max_size} MB'),
             )
+
+        # Magic-byte sniffing complements the extension allow-list: it blocks
+        # executables outright and — in enforce mode — catches files whose real
+        # content contradicts their name, or extensionless uploads whose sniff
+        # doesn't map to an allowed type. Policy, modes (RAG_FILE_SNIFF_MODE:
+        # off | log | enforce) and the MIME tables live in utils/upload_guard.py.
+        # A rejection deletes the just-stored object — same cleanup contract as
+        # the size check above.
+        if process:
+            guard_result = check_upload(contents, name, file_extension, allowed_file_extensions or [])
+            if not guard_result.allowed:
+                await asyncio.to_thread(Storage.delete_file, file_path)
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=ERROR_MESSAGES.DEFAULT(guard_result.reason),
+                )
 
         # SHA-256 of raw uploaded bytes for incremental sync diffing.
         # If the client pre-computed and sent file_hash, use that.
