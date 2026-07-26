@@ -336,6 +336,7 @@ async def upload_file_handler(
     user=Depends(get_verified_user),
     background_tasks: Optional[BackgroundTasks] = None,
     db: Optional[AsyncSession] = None,
+    sniff_guard: bool = True,
 ):
     log.info(f'file.content_type: {file.content_type} {process}')
 
@@ -476,7 +477,14 @@ async def upload_file_handler(
         # off | log | enforce) and the MIME tables live in utils/upload_guard.py.
         # A rejection deletes the just-stored object — same cleanup contract as
         # the size check above.
-        if process:
+        #
+        # Guarding is decoupled from ``process`` on purpose: the executable
+        # hard-stop must hold for EVERY user-route upload, including
+        # ``process=false`` (otherwise a client could store a binary by opting
+        # out of parsing). ``sniff_guard`` defaults to True so the user route is
+        # always covered; the internal server-side generators (image/audio/agent
+        # blobs) pass ``sniff_guard=False`` to keep their behaviour unchanged.
+        if sniff_guard:
             guard_result = check_upload(contents, name, file_extension, allowed_file_extensions or [])
             if not guard_result.allowed:
                 await asyncio.to_thread(Storage.delete_file, file_path)

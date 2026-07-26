@@ -254,14 +254,14 @@ def _upload(filename: str, content_type: str, content: bytes) -> UploadFile:
     return UploadFile(filename=filename, file=io.BytesIO(content), headers={'content-type': content_type})
 
 
-async def _run(monkeypatch, *, filename, content_type, content, allowed, mode):
+async def _run(monkeypatch, *, filename, content_type, content, allowed, mode, process=True):
     monkeypatch.setenv('RAG_FILE_SNIFF_MODE', mode)
     _patch_config(monkeypatch, allowed=allowed)
     with pytest.raises(HTTPException) as exc_info:
         await upload_file_handler(
             _request(),
             file=_upload(filename, content_type, content),
-            process=True,
+            process=process,
             process_in_background=False,
             user=_user(),
         )
@@ -369,3 +369,80 @@ async def test_route_zip_named_txt_accepted_in_log(monkeypatch):
     )
     # log mode soft-passes the mismatch -> downstream failure, not a guard reject.
     assert 'does not match' not in str(exc.detail)
+
+
+# --- process=false must NOT bypass the guard on the user route -------------
+# The user route exposes ``process`` as a query param; guarding is decoupled
+# from it (sniff_guard defaults True) so a client can't smuggle a binary in by
+# opting out of parsing.
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('mode', ['enforce', 'log'])
+async def test_route_pe_bytes_rejected_even_with_process_false(monkeypatch, mode):
+    # The executable hard-stop must fire for process=false user uploads too,
+    # in both enforce and log mode.
+    exc = await _run(
+        monkeypatch,
+        filename='invoice.pdf',
+        content_type='application/pdf',
+        content=PE_BYTES,
+        allowed=['pdf'],
+        mode=mode,
+        process=False,
+    )
+    assert exc.status_code == status.HTTP_400_BAD_REQUEST
+    assert 'application/x-dosexec' in str(exc.detail)
+
+
+@pytest.mark.asyncio
+async def test_route_mismatch_rejected_in_enforce_with_process_false(monkeypatch):
+    # Full mode semantics apply to process=false user uploads: an enforce-mode
+    # content/extension mismatch is rejected regardless of process.
+    exc = await _run(
+        monkeypatch,
+        filename='notes.txt',
+        content_type='text/plain',
+        content=ZIP_BYTES,
+        allowed=['txt'],
+        mode='enforce',
+        process=False,
+    )
+    assert exc.status_code == status.HTTP_400_BAD_REQUEST
+    assert 'application/zip' in str(exc.detail)
+
+
+@pytest.mark.asyncio
+async def test_route_mismatch_accepted_in_log_with_process_false(monkeypatch):
+    # And log mode soft-passes the same mismatch for process=false — identical
+    # mode semantics to the process=true path.
+    exc = await _run(
+        monkeypatch,
+        filename='notes.txt',
+        content_type='text/plain',
+        content=ZIP_BYTES,
+        allowed=['txt'],
+        mode='log',
+        process=False,
+    )
+    assert 'does not match' not in str(exc.detail)
+
+
+@pytest.mark.asyncio
+async def test_route_internal_sniff_guard_false_skips_guard(monkeypatch):
+    # The internal opt-out (sniff_guard=False) that images/audio/agent callers
+    # use must NOT sniff — even executable bytes pass the guard (they fail
+    # downstream on unmocked Storage/DB instead). This locks the internal
+    # callers' behaviour so the fix can't regress them.
+    monkeypatch.setenv('RAG_FILE_SNIFF_MODE', 'enforce')
+    _patch_config(monkeypatch, allowed=['pdf'])
+    with pytest.raises(HTTPException) as exc_info:
+        await upload_file_handler(
+            _request(),
+            file=_upload('invoice.pdf', 'application/pdf', PE_BYTES),
+            process=False,
+            process_in_background=False,
+            user=_user(),
+            sniff_guard=False,
+        )
+    assert 'application/x-dosexec' not in str(exc_info.value.detail)

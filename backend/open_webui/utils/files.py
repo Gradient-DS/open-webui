@@ -149,6 +149,7 @@ async def upload_audio(request, audio_data, content_type, metadata, user):
         metadata=metadata,
         process=False,
         user=user,
+        sniff_guard=False,  # server-generated audio; not a user-supplied blob
     )
     url = request.app.url_path_for('get_file_content_by_id', id=file_item.id)
     return url

@@ -760,10 +760,11 @@ def _patch_files_upload(monkeypatch, *, file_id='file-render-1'):
 
     captured: dict = {}
 
-    async def fake_upload_file_handler(request, *, file, metadata, process, user, db):
+    async def fake_upload_file_handler(request, *, file, metadata, process, user, db, sniff_guard=True):
         captured['filename'] = file.filename
         captured['content_type'] = file.content_type
         captured['process'] = process
+        captured['sniff_guard'] = sniff_guard
         captured['metadata'] = metadata
         captured['user_id'] = user.id
         return SimpleNamespace(id=file_id)
@@ -811,6 +812,8 @@ def test_post_files_upload_persists_and_attaches_to_message(monkeypatch, fake_pr
     assert captured['filename'] == 'plan.png'
     assert captured['content_type'] == 'image/png'
     assert captured['process'] is False
+    # The agent-internal blob path opts out of the magic-byte guard.
+    assert captured['sniff_guard'] is False
     assert captured['metadata'] == {'chat_id': 'chat-abc', 'message_id': 'msg-xyz'}
     assert captured['message_files'] == {
         'chat_id': 'chat-abc',
