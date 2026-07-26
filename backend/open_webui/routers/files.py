@@ -64,6 +64,12 @@ from open_webui.utils.access_control.files import has_access_to_file
 # be returned the same way, whole and undiminished.
 ############################
 
+# Multipart framing (boundary markers, per-part headers) adds a small amount
+# of overhead on top of the raw file bytes the client declares. Tolerate it
+# so a file that's genuinely right at the configured cap isn't rejected by
+# the pre-read check for the multipart envelope alone.
+_MULTIPART_OVERHEAD = 16 * 1024
+
 
 def _is_text_file(file_path: str, chunk_size: int = 8192) -> bool:
     """Check if a file is likely a text file by reading a chunk and decoding it.
@@ -270,6 +276,23 @@ async def upload_file(
     user=Depends(get_verified_user),
     db: AsyncSession = Depends(get_async_session),
 ):
+    # Reject obviously-oversize uploads from the declared Content-Length
+    # before the handler reads the body at all. This is a best-effort
+    # fast path only — Content-Length can lie (or be absent), so the
+    # post-read check in upload_file_handler remains authoritative.
+    max_size_mb = await Config.get('rag.file.max_size')
+    declared_content_length = request.headers.get('content-length')
+    if max_size_mb and declared_content_length:
+        try:
+            declared_bytes = int(declared_content_length)
+        except (TypeError, ValueError):
+            declared_bytes = None
+        if declared_bytes is not None and declared_bytes > int(max_size_mb) * 1024 * 1024 + _MULTIPART_OVERHEAD:
+            raise HTTPException(
+                status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                detail=ERROR_MESSAGES.FILE_TOO_LARGE(size=f'{max_size_mb} MB'),
+            )
+
     result = await upload_file_handler(
         request,
         file=file,
