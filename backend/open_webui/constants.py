@@ -107,6 +107,8 @@ class ERROR_MESSAGES(str, Enum):
         f"Oops! The file you're trying to upload is too large. Please upload a file that is less than {size}."
     )
 
+    FILE_LIMIT_EXCEEDED = lambda count='': f'File limit reached ({count})'
+
     DUPLICATE_CONTENT = 'Duplicate content detected. Please provide unique content to proceed.'
     FILE_NOT_PROCESSED = (
         'Extracted content is not available for this file. Please ensure that the file is processed before proceeding.'

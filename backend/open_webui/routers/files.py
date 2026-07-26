@@ -47,6 +47,7 @@ from open_webui.services.files.events import emit_file_status
 from open_webui.storage.provider import Storage
 from open_webui.utils.auth import get_admin_user, get_verified_user
 from open_webui.utils.misc import strict_match_mime_type
+from open_webui.utils.upload_guard import check_upload
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy.ext.asyncio import AsyncSession
 from open_webui.models.file_attachments import FileAttachments
@@ -63,6 +64,12 @@ from open_webui.utils.access_control.files import has_access_to_file
 # What was entrusted here was given in good faith. Let it
 # be returned the same way, whole and undiminished.
 ############################
+
+# Multipart framing (boundary markers, per-part headers) adds a small amount
+# of overhead on top of the raw file bytes the client declares. Tolerate it
+# so a file that's genuinely right at the configured cap isn't rejected by
+# the pre-read check for the multipart envelope alone.
+_MULTIPART_OVERHEAD = 16 * 1024
 
 
 def _is_text_file(file_path: str, chunk_size: int = 8192) -> bool:
@@ -270,6 +277,23 @@ async def upload_file(
     user=Depends(get_verified_user),
     db: AsyncSession = Depends(get_async_session),
 ):
+    # FastAPI already buffered the multipart body during form parsing by the
+    # time this runs; it skips the second read, the Storage write, and the
+    # rest of the handler for declared-oversize uploads. Content-Length can
+    # lie, so the post-read check remains authoritative.
+    max_size_mb = await Config.get('rag.file.max_size')
+    declared_content_length = request.headers.get('content-length')
+    if max_size_mb and declared_content_length:
+        try:
+            declared_bytes = int(declared_content_length)
+        except (TypeError, ValueError):
+            declared_bytes = None
+        if declared_bytes is not None and declared_bytes > int(max_size_mb) * 1024 * 1024 + _MULTIPART_OVERHEAD:
+            raise HTTPException(
+                status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                detail=ERROR_MESSAGES.FILE_TOO_LARGE(size=f'{max_size_mb} MB'),
+            )
+
     result = await upload_file_handler(
         request,
         file=file,
@@ -312,8 +336,41 @@ async def upload_file_handler(
     user=Depends(get_verified_user),
     background_tasks: Optional[BackgroundTasks] = None,
     db: Optional[AsyncSession] = None,
+    sniff_guard: bool = True,
+    count_cap_guard: bool = True,
 ):
     log.info(f'file.content_type: {file.content_type} {process}')
+
+    # Backend-enforced cap on a user's total stored file count. Mirrors
+    # routers/automations.py's check_automation_limits max_count pattern:
+    # admins bypass entirely, 403, count >= cap (not >), config coerced
+    # through int() and skipped when falsy (unset/0). Unlike rag.file.max_count
+    # (frontend per-message advisory only), this is authoritative and checked
+    # before any work is done -- no bytes read, nothing stored yet.
+    #
+    # Admins bypass for the same reason knowledge_id write-access does a few
+    # lines down (existing `user.role != 'admin'` convention in this same
+    # handler): the key is env-authoritative (see models/config.py's
+    # rag.file.* carve-out), so an admin who hits the cap has no admin-UI
+    # escape hatch to raise it -- only a deploy-config change would unblock
+    # them.
+    #
+    # count_cap_guard defaults True so the user route is always covered;
+    # server-generated upload paths (image/audio generation, agent-internal
+    # blobs — see images.py/utils/files.py/internal_retrieval.py) pass
+    # count_cap_guard=False since they aren't a user-initiated upload the
+    # cap is meant to bound, mirroring the sniff_guard opt-out precedent.
+    if count_cap_guard and user.role != 'admin':
+        max_count_per_user = await Config.get('rag.file.max_count_per_user')
+        if max_count_per_user:
+            max_count_per_user = int(max_count_per_user)
+            if max_count_per_user > 0:
+                current_count = await Files.count_files_by_user_id(user_id=user.id, db=db)
+                if current_count >= max_count_per_user:
+                    raise HTTPException(
+                        status_code=status.HTTP_403_FORBIDDEN,
+                        detail=ERROR_MESSAGES.FILE_LIMIT_EXCEEDED(max_count_per_user),
+                    )
 
     if isinstance(metadata, str):
         try:
@@ -361,25 +418,37 @@ async def upload_file_handler(
         # Remove the leading dot from the file extension and lowercase it
         file_extension = file_extension[1:].lower() if file_extension else ''
 
-        # If no extension in filename, try to derive from content_type
-        # (e.g. Google Drive exported files have no extension in their name)
+        # If no extension in filename, try to derive one from content_type
+        # (e.g. Google Drive exported files have no extension in their name).
+        # application/octet-stream is the generic "unknown bytes" type clients
+        # send for extensionless files; mimetypes maps it to ".bin", which would
+        # trip the allow-list and pre-empt sniffing. Skip derivation in that case
+        # so the file stays extensionless and the magic-byte guard (branch 2)
+        # decides from the real content instead.
         if not file_extension and file.content_type:
             import mimetypes
 
-            ext = mimetypes.guess_extension(file.content_type)
-            if ext:
-                file_extension = ext[1:]  # Remove leading dot
+            base_content_type = file.content_type.split(';', 1)[0].strip().lower()
+            if base_content_type != 'application/octet-stream':
+                ext = mimetypes.guess_extension(file.content_type)
+                if ext:
+                    file_extension = ext[1:]  # Remove leading dot
 
         allowed_file_extensions = await Config.get('rag.file.allowed_extensions')
         if process and allowed_file_extensions:
             allowed_file_extensions = [ext for ext in allowed_file_extensions if ext]
 
-            # An empty extension always passes: legitimate documents can arrive
-            # without a filename extension and with an unknown/octet-stream
-            # content type (e.g. "ASB - Microsoft Entra admin center", exported
-            # pages). We want those ingested — the native/external loader handles
-            # them. Junk types (svg/png/zip/dmg) resolve to a real, non-allowed
-            # extension and still fast-reject here.
+            # A file with no usable extension passes the allow-list here —
+            # legitimate documents can arrive without one (exported pages, Drive
+            # files) or carrying only a generic application/octet-stream content
+            # type (the derivation above deliberately leaves those extensionless
+            # rather than mapping them to ".bin"). It no longer gets an
+            # unconditional free pass: once the bytes are in hand the magic-byte
+            # guard below (branch 2 in utils/upload_guard.py) sniffs the real
+            # content and, in enforce mode, only admits it when the sniffed type
+            # maps to an allowed extension. A file that DOES resolve to a real,
+            # non-allowed extension still fast-rejects right here (and files with
+            # a usable extension skip branch 2 entirely).
             if file_extension and file_extension not in allowed_file_extensions:
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
@@ -442,6 +511,29 @@ async def upload_file_handler(
                 status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
                 detail=ERROR_MESSAGES.FILE_TOO_LARGE(size=f'{max_size} MB'),
             )
+
+        # Magic-byte sniffing complements the extension allow-list: it blocks
+        # executables outright and — in enforce mode — catches files whose real
+        # content contradicts their name, or extensionless uploads whose sniff
+        # doesn't map to an allowed type. Policy, modes (RAG_FILE_SNIFF_MODE:
+        # off | log | enforce) and the MIME tables live in utils/upload_guard.py.
+        # A rejection deletes the just-stored object — same cleanup contract as
+        # the size check above.
+        #
+        # Guarding is decoupled from ``process`` on purpose: the executable
+        # hard-stop must hold for EVERY user-route upload, including
+        # ``process=false`` (otherwise a client could store a binary by opting
+        # out of parsing). ``sniff_guard`` defaults to True so the user route is
+        # always covered; the internal server-side generators (image/audio/agent
+        # blobs) pass ``sniff_guard=False`` to keep their behaviour unchanged.
+        if sniff_guard:
+            guard_result = check_upload(contents, name, file_extension, allowed_file_extensions or [])
+            if not guard_result.allowed:
+                await asyncio.to_thread(Storage.delete_file, file_path)
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=ERROR_MESSAGES.DEFAULT(guard_result.reason),
+                )
 
         # SHA-256 of raw uploaded bytes for incremental sync diffing.
         # If the client pre-computed and sent file_hash, use that.

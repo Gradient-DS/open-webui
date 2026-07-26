@@ -1604,6 +1604,12 @@
 						</div>
 					</div>
 
+					<div class="mb-2.5 text-xs text-gray-400 dark:text-gray-500">
+						{$i18n.t(
+							'File size, count and extension limits are managed by deployment configuration and are not saved here.'
+						)}
+					</div>
+
 					<div class="  mb-2.5 flex w-full justify-between">
 						<div class=" self-center text-xs font-medium">{$i18n.t('Image Compression Width')}</div>
 						<div class="flex items-center relative">

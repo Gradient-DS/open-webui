@@ -1257,6 +1257,7 @@
     "File removed successfully.": "Bestand succesvol verwijderd.",
     "File renamed.": "",
     "File size should not exceed {{maxSize}} MB.": "Bestandsgrootte mag niet groter zijn dan {{maxSize}} MB.",
+    "File size, count and extension limits are managed by deployment configuration and are not saved here.": "Limieten voor bestandsgrootte, aantal en extensies worden beheerd via de deploymentconfiguratie en worden hier niet opgeslagen.",
     "File type {{extension}} is not allowed.": "Bestandstype {{extension}} is niet toegestaan.",
     "File uploaded successfully": "Bestand succesvol geüpload",
     "File uploaded!": "Bestand geüpload!",

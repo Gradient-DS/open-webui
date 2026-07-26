@@ -140,7 +140,7 @@ RUN apt-get update && \
     git build-essential pandoc gcc netcat-openbsd curl jq ca-certificates \
     libmariadb-dev \
     python3-dev linux-libc-dev \
-    ffmpeg libsm6 libxext6 zstd \
+    ffmpeg libsm6 libxext6 zstd libmagic1 \
     libpango-1.0-0 libpangocairo-1.0-0 libgdk-pixbuf-2.0-0 libcairo2 libffi-dev \
     && rm -rf /var/lib/apt/lists/*
 
