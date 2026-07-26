@@ -446,3 +446,59 @@ async def test_route_internal_sniff_guard_false_skips_guard(monkeypatch):
             sniff_guard=False,
         )
     assert 'application/x-dosexec' not in str(exc_info.value.detail)
+
+
+# --- octet-stream carve-out: extensionless upload must reach branch 2 -------
+# application/octet-stream is what clients send for extensionless files;
+# mimetypes maps it to ".bin", which used to trip the allow-list and pre-empt
+# sniffing. The derivation now leaves those extensionless so branch 2 decides.
+
+
+@pytest.mark.asyncio
+async def test_route_octet_stream_html_reaches_branch2_and_accepts(monkeypatch):
+    # No filename extension + application/octet-stream -> stays extensionless,
+    # is NOT rejected as ".bin", and branch 2 accepts it once the sniff (html)
+    # maps to an allowed extension.
+    exc = await _run(
+        monkeypatch,
+        filename='exported-page',
+        content_type='application/octet-stream',
+        content=HTML_BYTES,
+        allowed=['pdf', 'html'],
+        mode='enforce',
+    )
+    assert 'bin is not allowed' not in str(exc.detail)  # not derived to .bin
+    assert 'does not map' not in str(exc.detail)  # branch 2 accepted
+
+
+@pytest.mark.asyncio
+async def test_route_octet_stream_executable_still_rejected(monkeypatch):
+    # Same extensionless octet-stream path, but PE bytes -> the executable hard
+    # stop (branch 1) fires; the carve-out must not let binaries slip through.
+    exc = await _run(
+        monkeypatch,
+        filename='exported-page',
+        content_type='application/octet-stream',
+        content=PE_BYTES,
+        allowed=['pdf', 'html'],
+        mode='enforce',
+    )
+    assert exc.status_code == status.HTTP_400_BAD_REQUEST
+    assert 'application/x-dosexec' in str(exc.detail)
+
+
+@pytest.mark.asyncio
+async def test_route_specific_content_type_still_derives_extension(monkeypatch):
+    # A specific content type (text/html) must still derive its extension: with
+    # html NOT allowed, the derived .html trips the allow-list -> proves the
+    # octet-stream carve-out did not disable derivation for other types.
+    exc = await _run(
+        monkeypatch,
+        filename='exported-page',
+        content_type='text/html',
+        content=HTML_BYTES,
+        allowed=['pdf'],
+        mode='enforce',
+    )
+    assert exc.status_code == status.HTTP_400_BAD_REQUEST
+    assert 'html is not allowed' in str(exc.detail)

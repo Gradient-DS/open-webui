@@ -1542,10 +1542,6 @@
 
 					<hr class=" border-gray-100/30 dark:border-gray-850/30 my-2" />
 
-					<div class="mb-2.5 text-xs text-gray-400 dark:text-gray-500">
-						{$i18n.t('Managed by deployment configuration. Changes here are not saved.')}
-					</div>
-
 					<div class="  mb-2.5 flex w-full justify-between">
 						<div class=" self-center text-xs font-medium">{$i18n.t('Allowed File Extensions')}</div>
 						<div class="flex items-center relative">
@@ -1606,6 +1602,12 @@
 								/>
 							</Tooltip>
 						</div>
+					</div>
+
+					<div class="mb-2.5 text-xs text-gray-400 dark:text-gray-500">
+						{$i18n.t(
+							'File size, count and extension limits are managed by deployment configuration and are not saved here.'
+						)}
 					</div>
 
 					<div class="  mb-2.5 flex w-full justify-between">

@@ -418,27 +418,37 @@ async def upload_file_handler(
         # Remove the leading dot from the file extension and lowercase it
         file_extension = file_extension[1:].lower() if file_extension else ''
 
-        # If no extension in filename, try to derive from content_type
-        # (e.g. Google Drive exported files have no extension in their name)
+        # If no extension in filename, try to derive one from content_type
+        # (e.g. Google Drive exported files have no extension in their name).
+        # application/octet-stream is the generic "unknown bytes" type clients
+        # send for extensionless files; mimetypes maps it to ".bin", which would
+        # trip the allow-list and pre-empt sniffing. Skip derivation in that case
+        # so the file stays extensionless and the magic-byte guard (branch 2)
+        # decides from the real content instead.
         if not file_extension and file.content_type:
             import mimetypes
 
-            ext = mimetypes.guess_extension(file.content_type)
-            if ext:
-                file_extension = ext[1:]  # Remove leading dot
+            base_content_type = file.content_type.split(';', 1)[0].strip().lower()
+            if base_content_type != 'application/octet-stream':
+                ext = mimetypes.guess_extension(file.content_type)
+                if ext:
+                    file_extension = ext[1:]  # Remove leading dot
 
         allowed_file_extensions = await Config.get('rag.file.allowed_extensions')
         if process and allowed_file_extensions:
             allowed_file_extensions = [ext for ext in allowed_file_extensions if ext]
 
-            # A file with no extension passes the allow-list here — legitimate
-            # documents can arrive without one (exported pages, Drive files) —
-            # but it no longer gets an unconditional free pass: once the bytes
-            # are in hand the magic-byte guard below (branch 2 in
-            # utils/upload_guard.py) sniffs the real content and, in enforce
-            # mode, only admits it when the sniffed type maps to an allowed
-            # extension. Junk types with a real, non-allowed extension still
-            # fast-reject right here.
+            # A file with no usable extension passes the allow-list here —
+            # legitimate documents can arrive without one (exported pages, Drive
+            # files) or carrying only a generic application/octet-stream content
+            # type (the derivation above deliberately leaves those extensionless
+            # rather than mapping them to ".bin"). It no longer gets an
+            # unconditional free pass: once the bytes are in hand the magic-byte
+            # guard below (branch 2 in utils/upload_guard.py) sniffs the real
+            # content and, in enforce mode, only admits it when the sniffed type
+            # maps to an allowed extension. A file that DOES resolve to a real,
+            # non-allowed extension still fast-rejects right here (and files with
+            # a usable extension skip branch 2 entirely).
             if file_extension and file_extension not in allowed_file_extensions:
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,

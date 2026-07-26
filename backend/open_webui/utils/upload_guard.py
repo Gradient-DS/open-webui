@@ -8,9 +8,13 @@ decision:
 
 1. **Executables are always rejected** (in ``log`` and ``enforce`` modes) — the
    one hard stop, even when everything else is only warn-logged.
-2. **Extensionless uploads** are mapped from their sniffed MIME back to a
-   canonical extension and admitted only when that extension is allowed (or the
-   allow-list is empty). This replaces the old "no extension → always pass".
+2. **Uploads with no usable extension** — no filename extension and none the
+   caller could derive from a specific content type (a generic
+   ``application/octet-stream`` is deliberately left unmapped rather than
+   becoming ``.bin``) — are mapped from their sniffed MIME back to a canonical
+   extension and admitted only when that extension is allowed (or the allow-list
+   is empty). This replaces the old "no extension → always pass". It does not
+   fire for uploads that already carry a usable extension (those go to 3).
 3. **Extension-present uploads** must have content that is *consistent* with the
    claimed extension; a clear content/extension lie is rejected.
 
@@ -258,8 +262,11 @@ def check_upload(
 ) -> GuardResult:
     """Decide whether an upload's real content is acceptable.
 
-    ``ext`` is the lower-cased extension already derived by the caller ('' when
-    the upload has none). ``allowed_exts`` is the configured allow-list (empty
+    ``ext`` is the lower-cased extension already derived by the caller — '' when
+    the upload has no usable one (no filename extension and no extension the
+    caller mapped from the content type; a generic application/octet-stream is
+    left empty on purpose). An empty ``ext`` routes to branch 2; a non-empty one
+    routes to branch 3. ``allowed_exts`` is the configured allow-list (empty
     means "any"). ``mode`` defaults to the ``RAG_FILE_SNIFF_MODE`` env var.
     """
     mode = resolve_mode(mode)
