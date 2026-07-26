@@ -202,6 +202,14 @@ pattern = '"version":\s*"(?P<version>[^"]+)"'
 
 [tool.hatch.build.hooks.custom]  # keep this for reading hooks from `hatch_build.py`
 
+[tool.uv]
+# Minimum third-party package release age: blocks newly-published (and
+# potentially compromised/yanked) versions from being resolved. Lock
+# regeneration is the rollback — any package whose only <14-day version is
+# a security fix should be exempted here explicitly via
+# exclude-newer-package, with a comment.
+exclude-newer = "14 days"
+
 [tool.hatch.build.targets.wheel]
 sources = ["backend"]
 exclude = [
