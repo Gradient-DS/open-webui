@@ -57,6 +57,10 @@ def _user() -> SimpleNamespace:
     return SimpleNamespace(id='u1', email='u@example.com', name='User', role='user')
 
 
+def _admin() -> SimpleNamespace:
+    return SimpleNamespace(id='a1', email='a@example.com', name='Admin', role='admin')
+
+
 def _request() -> MagicMock:
     return MagicMock()
 
@@ -135,6 +139,24 @@ async def test_internal_count_cap_guard_false_skips_check_even_at_cap(monkeypatc
             process_in_background=False,
             user=_user(),
             count_cap_guard=False,
+        )
+
+    assert exc_info.value.status_code != status.HTTP_403_FORBIDDEN
+    count_mock.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_admin_bypasses_cap_even_at_or_over_it(monkeypatch):
+    """Mirrors automations.py's ``check_automation_limits`` (admins bypass
+    all limits). Also required operationally here: the key is
+    env-authoritative, so an admin with no admin-UI escape hatch must never
+    be lockable out of uploads by their own configured cap."""
+    _patch_config(monkeypatch, max_count_per_user=1)
+    count_mock = _patch_count(monkeypatch, count=999)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await upload_file_handler(
+            _request(), file=_upload_file(), process=False, process_in_background=False, user=_admin()
         )
 
     assert exc_info.value.status_code != status.HTTP_403_FORBIDDEN

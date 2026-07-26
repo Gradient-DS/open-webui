@@ -343,17 +343,24 @@ async def upload_file_handler(
 
     # Backend-enforced cap on a user's total stored file count. Mirrors
     # routers/automations.py's check_automation_limits max_count pattern:
-    # 403, count >= cap (not >), config coerced through int() and skipped
-    # when falsy (unset/0). Unlike rag.file.max_count (frontend per-message
-    # advisory only), this is authoritative and checked before any work is
-    # done -- no bytes read, nothing stored yet.
+    # admins bypass entirely, 403, count >= cap (not >), config coerced
+    # through int() and skipped when falsy (unset/0). Unlike rag.file.max_count
+    # (frontend per-message advisory only), this is authoritative and checked
+    # before any work is done -- no bytes read, nothing stored yet.
+    #
+    # Admins bypass for the same reason knowledge_id write-access does a few
+    # lines down (existing `user.role != 'admin'` convention in this same
+    # handler): the key is env-authoritative (see models/config.py's
+    # rag.file.* carve-out), so an admin who hits the cap has no admin-UI
+    # escape hatch to raise it -- only a deploy-config change would unblock
+    # them.
     #
     # count_cap_guard defaults True so the user route is always covered;
     # server-generated upload paths (image/audio generation, agent-internal
     # blobs — see images.py/utils/files.py/internal_retrieval.py) pass
     # count_cap_guard=False since they aren't a user-initiated upload the
     # cap is meant to bound, mirroring the sniff_guard opt-out precedent.
-    if count_cap_guard:
+    if count_cap_guard and user.role != 'admin':
         max_count_per_user = await Config.get('rag.file.max_count_per_user')
         if max_count_per_user:
             max_count_per_user = int(max_count_per_user)
