@@ -4,7 +4,7 @@ on:
   push:
     branches: [main, dev, test]
   pull_request:
-    branches: [main]
+    branches: [main, dev]
   schedule:
     - cron: '0 6 * * 1'  # Weekly Monday 6 AM UTC
 
@@ -80,6 +80,7 @@ jobs:
   # dev and main so a too-young package-lock.json cannot merge.
   lockfile-age:
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@v6
 

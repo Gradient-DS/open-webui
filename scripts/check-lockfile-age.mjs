@@ -34,7 +34,20 @@ function parseArgs(argv) {
 	return { lockfile };
 }
 
-/** Derive the real npm package name for a `packages` entry key. */
+/**
+ * Derive the real npm package name for a `packages` entry key.
+ *
+ * Known limitation (not hit by this repo today — 0 `link: true` entries, 0
+ * non-registry.npmjs.org `resolved` values in the committed lockfile, so
+ * nothing currently falls into either gap below): npm workspace setups can
+ * produce `packages` keys with no `node_modules/` segment at all (a bare
+ * local path like `"packages/foo"`), for which `key.lastIndexOf('node_modules/')`
+ * returns -1 and this function returns null — that entry is then silently
+ * dropped by `collectEntries` below (uncounted, unlogged), same as the
+ * separate relative-`resolved`-with-no-scheme case noted there. If this repo
+ * ever adopts npm workspaces, both gaps need an explicit, logged skip path
+ * (or a workspace-aware name/version source) rather than a silent drop.
+ */
 function packageNameFor(key, entry) {
 	// npm alias entries (`npm:` specifiers, e.g. the *-cjs shims) carry an
 	// explicit `name` that differs from the node_modules path — trust it.
@@ -59,9 +72,17 @@ function collectEntries(lockfilePath) {
 		if (!entry.version) continue; // nothing to look up an age for
 		const resolved = entry.resolved ?? '';
 		// Not npm-registry-resolvable (git checkout, local path, tarball URL) —
-		// out of scope for a registry publish-date audit.
+		// out of scope for a registry publish-date audit. Known gap (0 hits in
+		// this repo's lockfile today): an npm-workspace local dependency whose
+		// resolved is a bare relative path with no scheme would NOT match this
+		// regex and would fall through to a (likely incorrect) registry lookup
+		// by name instead of being skipped here.
 		if (/^(git\+|git:|file:|https?:\/\/(?!registry\.npmjs\.org))/.test(resolved)) continue;
 		const name = packageNameFor(key, entry);
+		// name is null for workspace-local packages keys with no node_modules/
+		// segment (see packageNameFor's doc comment) — silently dropped, same
+		// as the gap above. Neither case exists in this lockfile today (no npm
+		// workspaces here), but both are worth revisiting if that changes.
 		if (!name || isAllowlisted(name)) continue;
 		entries.push({ name, version: entry.version });
 	}
