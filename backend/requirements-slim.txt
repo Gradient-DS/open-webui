@@ -65,9 +65,9 @@ pyarrow==23.0.1 # security: PYSEC-2026-113 (Apache Arrow C++ use-after-free) fix
 
 ftfy==6.3.1
 chardet==7.4.3
-pypdf==6.13.3 # security: CVE-2026-48735/49460/49461/54530/54531 + GHSA-jm82-fx9c-mx94 (DoS via crafted PDF) fixed in 6.13.3
+pypdf==6.14.2 # security: CVE-2026-59935/59936/59937/59938 fixed in 6.14.2 (prior CVE-2026-48735/49460/49461/54530/54531 + GHSA-jm82-fx9c-mx94 fixes stay fixed)
 fpdf2==2.8.7
-pymdown-extensions==10.21.3 # security: CVE-2026-46338 (snippets path traversal regression of CVE-2023-32309) fixed in 10.21.3
+pymdown-extensions==11.0.1 # security: CVE-2026-61632 fixed in 11.0 (prior CVE-2026-46338 snippets path traversal fix stays fixed)
 docx2txt==0.9
 python-pptx==1.0.2
 msoffcrypto-tool==6.0.0
