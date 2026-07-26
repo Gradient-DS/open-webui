@@ -147,12 +147,12 @@ RUN apt-get update && \
 # install python dependencies
 COPY --chown=$UID:$GID ./backend/requirements.txt ./requirements.txt
 COPY --chown=$UID:$GID ./backend/requirements-slim.txt ./requirements-slim.txt
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
 
 # Set UV_LINK_MODE to copy to prevent 0-byte file corruption in QEMU arm64 cross-builds
 ENV UV_LINK_MODE=copy
 
 RUN set -e; \
-    pip3 install --no-cache-dir uv; \
     pip3 install --no-cache-dir --upgrade pip setuptools wheel; \
     if [ "$USE_SLIM" = "true" ]; then \
     # Slim build: no torch, no local ML models — uses external APIs only

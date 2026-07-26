@@ -4,7 +4,7 @@ on:
   push:
     branches: [main, dev, test]
   pull_request:
-    branches: [main]
+    branches: [main, dev]
   schedule:
     - cron: '0 6 * * 1'  # Weekly Monday 6 AM UTC
 
@@ -74,6 +74,22 @@ jobs:
 
       - name: npm audit
         run: npm audit --audit-level=critical
+
+  # Job id (and thus the status-check name shown to branch protection) must
+  # stay exactly "lockfile-age" — it is configured as a required check on
+  # dev and main so a too-young package-lock.json cannot merge.
+  lockfile-age:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+
+      - name: Check package-lock.json publish ages
+        run: node scripts/check-lockfile-age.mjs
 
   container-scan:
     name: Container Scan (Trivy)
