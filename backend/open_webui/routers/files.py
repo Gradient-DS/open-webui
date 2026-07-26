@@ -276,10 +276,10 @@ async def upload_file(
     user=Depends(get_verified_user),
     db: AsyncSession = Depends(get_async_session),
 ):
-    # Reject obviously-oversize uploads from the declared Content-Length
-    # before the handler reads the body at all. This is a best-effort
-    # fast path only — Content-Length can lie (or be absent), so the
-    # post-read check in upload_file_handler remains authoritative.
+    # FastAPI already buffered the multipart body during form parsing by the
+    # time this runs; it skips the second read, the Storage write, and the
+    # rest of the handler for declared-oversize uploads. Content-Length can
+    # lie, so the post-read check remains authoritative.
     max_size_mb = await Config.get('rag.file.max_size')
     declared_content_length = request.headers.get('content-length')
     if max_size_mb and declared_content_length:
