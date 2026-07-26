@@ -75,6 +75,21 @@ jobs:
       - name: npm audit
         run: npm audit --audit-level=critical
 
+  # Job id (and thus the status-check name shown to branch protection) must
+  # stay exactly "lockfile-age" — it is configured as a required check on
+  # dev and main so a too-young package-lock.json cannot merge.
+  lockfile-age:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+
+      - name: Check package-lock.json publish ages
+        run: node scripts/check-lockfile-age.mjs
+
   container-scan:
     name: Container Scan (Trivy)
     runs-on: ubuntu-latest
