@@ -1647,6 +1647,7 @@
     "Manage two-factor authentication settings for all users.": "Beheer tweefactorauthenticatie-instellingen voor alle gebruikers.",
     "Manage your account information.": "Beheer je accountgegevens.",
     "Managed by administrators": "Beheerd door beheerders",
+    "Managed by deployment configuration. Changes here are not saved.": "Wordt beheerd via de deploymentconfiguratie. Wijzigingen hier worden niet opgeslagen.",
     "Mapped Source": "",
     "March": "Maart",
     "Mark as Beta": "Markeren als Beta",
