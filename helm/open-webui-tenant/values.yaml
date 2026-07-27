@@ -242,7 +242,13 @@ openWebui:
     # binaries so large junk (e.g. a .dmg) is rejected instead of ingested.
     # Extension-less files always pass the gate (decided server-side by content
     # type) — see the empty-extension allowance in routers/files.py.
-    ragAllowedFileExtensions: "pdf,doc,docx,dotx,xls,xlsx,xltx,ppt,pptx,potx,csv,tsv,txt,md,markdown,rtf,odt,ods,odp,html,htm,xml,json,epub"
+    ragAllowedFileExtensions: "pdf,docx,dotx,xlsx,xltx,pptx,potx,csv,tsv,txt,text,md,markdown,rtf,odt,ods,odp,html,htm,xml,json,epub,msg,rst"
+
+    # Upload guard (Phase 2 hardening) — per-tenant override in the tenant
+    # HelmRelease values as needed.
+    ragFileMaxSize: "200"  # MB
+    ragFileMaxCountPerUser: ""  # empty = unlimited; backend treats empty env as unset
+    ragFileSniffMode: "enforce"  # off|log|enforce; staging overrides to "log" during rollout, gitops-side
 
     # File Processing
     fileProcessingMaxConcurrent: "10"  # Max concurrent file processing tasks

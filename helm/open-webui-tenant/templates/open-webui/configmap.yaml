@@ -94,6 +94,11 @@ data:
   ENABLE_RAG_HYBRID_SEARCH: {{ .Values.openWebui.config.enableRagHybridSearch | quote }}
   RAG_ALLOWED_FILE_EXTENSIONS: {{ .Values.openWebui.config.ragAllowedFileExtensions | quote }}
 
+  # Upload guard (Phase 2 hardening)
+  RAG_FILE_MAX_SIZE: {{ .Values.openWebui.config.ragFileMaxSize | quote }}
+  RAG_FILE_MAX_COUNT_PER_USER: {{ .Values.openWebui.config.ragFileMaxCountPerUser | quote }}
+  RAG_FILE_SNIFF_MODE: {{ .Values.openWebui.config.ragFileSniffMode | quote }}
+
   # File Processing
   FILE_PROCESSING_MAX_CONCURRENT: {{ .Values.openWebui.config.fileProcessingMaxConcurrent | quote }}
   FILE_DOWNLOAD_CONCURRENCY_MULTIPLIER: {{ .Values.openWebui.config.fileDownloadConcurrencyMultiplier | quote }}
