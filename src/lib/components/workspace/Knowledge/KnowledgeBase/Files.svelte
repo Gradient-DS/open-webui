@@ -16,18 +16,41 @@
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
 	import DocumentPage from '$lib/components/icons/DocumentPage.svelte';
 	import ExclamationTriangle from '$lib/components/icons/ExclamationTriangle.svelte';
+	import Folder from '$lib/components/icons/Folder.svelte';
 	import GarbageBin from '$lib/components/icons/GarbageBin.svelte';
 	import Spinner from '$lib/components/common/Spinner.svelte';
-	import VirtualList from '@sveltejs/svelte-virtual-list';
+	import DirectoryRow from './DirectoryRow.svelte';
 	import SelectCheckbox from './SelectCheckbox.svelte';
-	import { fileItem, type KbSelection, type SelectableItem } from './selection';
+	import { fileItem, sourceItem, type KbSelection, type SelectableItem } from './selection';
+	import { breadcrumbSegments, fileBadge } from '../utils/treeStatus';
+	import { sourceByRootDirectoryId } from '../utils/sourceMap';
 
 	export let knowledge = null;
 	export let selectedFileId = null;
 	export let files = [];
+	export let directories = [];
+
+	// Cloud chrome (Phase 3): the provider's sources — directory rows whose id
+	// matches a source's root_directory_id become source roots (remove
+	// affordance + sync spinner + bulk-selectable as 'source' items).
+	export let sources = [];
+	export let isSyncing = false;
+	export let onRemoveSource: ((itemId: string, name: string) => void) | null = null;
+
+	// Search mode: flat KB-wide hits — directory rows hidden, each file row
+	// shows its folder path (derived from meta.relative_path) instead.
+	export let searchMode = false;
+	// Gates every structure-write affordance: directory rename/delete menus
+	// and drag-move of files/directories. See utils/structure.ts.
+	export let structureEditable = false;
 
 	export let onClick = (fileId) => {};
 	export let onDelete = (fileId) => {};
+	export let onNavigateDirectory = (directoryId: string) => {};
+	export let onRenameDirectory = (id: string, name: string) => {};
+	export let onDeleteDirectory = (id: string) => {};
+	export let onMoveFilesToDirectory = (fileIds: string[], directoryId: string) => {};
+	export let onMoveDirectoryToDirectory = (dirId: string, targetDirectoryId: string) => {};
 
 	// Optional multiselect model injected by KnowledgeBase. Null = no selection UI.
 	export let selection: KbSelection | null = null;
@@ -39,7 +62,20 @@
 	const buildItem = (file: any): SelectableItem =>
 		fileItem(file.id, file?.name ?? file?.meta?.name ?? '');
 
-	$: orderedItems = (files ?? []).filter(isSelectable).map(buildItem);
+	$: sourceRoots = sourceByRootDirectoryId(sources);
+	const buildSourceItem = (dir: any): SelectableItem => {
+		const src = sourceRoots.get(dir.id);
+		return sourceItem(src.item_id, src.name ?? dir.name, dir.child_count ?? 0);
+	};
+
+	// Selection order mirrors render order (source-root dirs first, then files)
+	// so Shift-range and drag-paint spans behave predictably.
+	$: orderedItems = [
+		...(searchMode
+			? []
+			: (directories ?? []).filter((d) => sourceRoots.has(d.id)).map(buildSourceItem)),
+		...(files ?? []).filter(isSelectable).map(buildItem)
+	];
 	// Register this view's selectable rows so the header's select-all works.
 	$: if (selection) selection.setAvailable(orderedItems);
 	onDestroy(() => selection?.setAvailable([]));
@@ -65,18 +101,52 @@
 	const onRowPointerEnter = (file: any) => {
 		if (selection && isSelectable(file)) selection.pointerEnter(buildItem(file));
 	};
+
+	// Native drag-to-move (files into directories / breadcrumbs): with no
+	// selection, any row drags itself; once a selection exists, only SELECTED
+	// rows are draggable and carry the whole selection — unselected rows stay
+	// paint-select targets, so drag-paint multi-select keeps working.
+	const dragPayloadIds = (file: any, isSel: boolean): string[] => {
+		if (isSel && $selectedStore) {
+			return [...$selectedStore.values()].filter((it) => it.kind === 'file').map((it) => it.fileId);
+		}
+		return file?.id ? [file.id] : [];
+	};
 </script>
 
-<!--
-	VirtualList fills the height of the parent scroll container (KnowledgeBase.svelte provides
-	overflow-y-auto h-full). For short lists every row is visible so it behaves identically to a
-	plain {#each}; for large lists only on-screen rows mount.
--->
-<div class="h-full w-full">
-	<VirtualList items={files} height="100%" let:item>
-		{@const file = item}
+<div class=" max-h-full flex flex-col w-full gap-[0.5px]">
+	<!-- Directories first -->
+	{#if !searchMode}
+		{#each directories as dir (dir.id)}
+			{@const srcEntry = sourceRoots.get(dir.id)}
+			{@const dirSel =
+				(selection && srcEntry && $selectedStore?.has(`source:${srcEntry.item_id}`)) ?? false}
+			<DirectoryRow
+				directory={dir}
+				writeAccess={structureEditable}
+				source={srcEntry ? { itemId: srcEntry.item_id, name: srcEntry.name ?? dir.name } : null}
+				{isSyncing}
+				onRemoveSource={srcEntry ? onRemoveSource : null}
+				selectable={!!(selection && srcEntry)}
+				selected={dirSel}
+				checkboxVisible={!!$selectionModeStore}
+				onToggleSelect={() => {
+					if (selection && srcEntry) selection.toggle(buildSourceItem(dir));
+				}}
+				onNavigate={(id) => onNavigateDirectory(id)}
+				onRename={(id, name) => onRenameDirectory(id, name)}
+				onDelete={(id) => onDeleteDirectory(id)}
+				onFileDrop={(fileIds, directoryId) => onMoveFilesToDirectory(fileIds, directoryId)}
+				onDirDrop={(dirId, targetId) => onMoveDirectoryToDirectory(dirId, targetId)}
+			/>
+		{/each}
+	{/if}
+
+	<!-- Files -->
+	{#each files as file (file?.id ?? file?.itemId ?? file?.tempId)}
 		{@const selKey = `file:${file?.id}`}
 		{@const isSel = (selection && isSelectable(file) && $selectedStore?.has(selKey)) ?? false}
+		{@const crumbs = searchMode ? breadcrumbSegments(file?.meta?.relative_path) : []}
 		<!-- svelte-ignore a11y_no_static_element_interactions -->
 		<div
 			class=" group flex cursor-pointer w-full px-1.5 py-0.5 bg-transparent dark:hover:bg-gray-850/50 hover:bg-white rounded-xl transition {selection
@@ -86,6 +156,14 @@
 				: selectedFileId
 					? ''
 					: 'hover:bg-gray-100 dark:hover:bg-gray-850'}"
+			draggable={structureEditable && !!file?.id && (!($selectionModeStore ?? false) || isSel)}
+			on:dragstart={(e) => {
+				if (!structureEditable) return;
+				const ids = dragPayloadIds(file, isSel);
+				if (ids.length) {
+					e.dataTransfer?.setData('application/x-kb-file-move', JSON.stringify({ fileIds: ids }));
+				}
+			}}
 			on:pointerdown={() => onRowPointerDown(file)}
 			on:pointerenter={() => onRowPointerEnter(file)}
 		>
@@ -98,7 +176,13 @@
 				/>
 			{/if}
 			<div class="flex items-center">
-				{#if file?.status !== 'uploading'}
+				{#if fileBadge(file?.status) === 'spinner'}
+					<Spinner className="size-3.5" />
+				{:else if fileBadge(file?.status) === 'error'}
+					<Tooltip content={file?.error || $i18n.t('Processing error')}>
+						<ExclamationTriangle className="size-3.5 text-red-500" />
+					</Tooltip>
+				{:else}
 					<Tooltip content={$i18n.t('Download')}>
 						<button
 							class="p-1 rounded-full hover:bg-gray-100 dark:hover:bg-gray-850 transition"
@@ -111,8 +195,6 @@
 							<DocumentPage className="size-3.5" />
 						</button>
 					</Tooltip>
-				{:else}
-					<Spinner className="size-3.5" />
 				{/if}
 			</div>
 
@@ -121,12 +203,10 @@
 				type="button"
 				on:click={(e) => onRowClick(file, e)}
 			>
-				<div class="">
+				<div class="min-w-0">
 					<div class="flex gap-2 items-center line-clamp-1">
 						{#if file?.status !== 'uploading' && (file?.warning ?? file?.meta?.warning)}
-							<Tooltip
-								content={$i18n.t('No searchable content could be extracted.')}
-							>
+							<Tooltip content={$i18n.t('No searchable content could be extracted.')}>
 								<ExclamationTriangle className="size-3.5 text-red-500 shrink-0" />
 							</Tooltip>
 						{/if}
@@ -137,6 +217,12 @@
 							{/if}
 						</div>
 					</div>
+					{#if crumbs.length}
+						<div class="flex items-center gap-1 text-xs text-gray-400 mt-0.5 line-clamp-1">
+							<Folder className="size-3 shrink-0" strokeWidth="2" />
+							<span class="line-clamp-1">{crumbs.join(' / ')}</span>
+						</div>
+					{/if}
 				</div>
 
 				<div class="flex items-center gap-2 shrink-0">
@@ -182,5 +268,5 @@
 				</div>
 			{/if}
 		</div>
-	</VirtualList>
+	{/each}
 </div>

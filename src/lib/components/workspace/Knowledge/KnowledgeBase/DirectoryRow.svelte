@@ -15,20 +15,41 @@
 	import Pencil from '$lib/components/icons/Pencil.svelte';
 	import Folder from '$lib/components/icons/Folder.svelte';
 	import EllipsisHorizontal from '$lib/components/icons/EllipsisHorizontal.svelte';
+	import ExclamationTriangle from '$lib/components/icons/ExclamationTriangle.svelte';
+	import Spinner from '$lib/components/common/Spinner.svelte';
+	import SelectCheckbox from './SelectCheckbox.svelte';
+	import { folderBadge, type TreeStatusCounts } from '../utils/treeStatus';
 
 	export let directory: {
 		id: string;
 		name: string;
 		created_at: number;
 		updated_at: number;
+		child_count?: number;
+		status_counts?: TreeStatusCounts;
 	};
 	export let writeAccess = false;
+
+	// Cloud chrome (Phase 3): set when this directory is a provider source's
+	// materialized root (sources[].root_directory_id) — adds the sync spinner
+	// and the remove-source affordance.
+	export let source: { itemId: string; name: string } | null = null;
+	export let isSyncing = false;
+	export let onRemoveSource: ((itemId: string, name: string) => void) | null = null;
+
+	// Optional multiselect checkbox (source roots participate in bulk delete).
+	export let selectable = false;
+	export let selected = false;
+	export let checkboxVisible = false;
+	export let onToggleSelect: () => void = () => {};
 
 	export let onNavigate: (id: string) => void = () => {};
 	export let onRename: (id: string, name: string) => void = () => {};
 	export let onDelete: (id: string) => void = () => {};
-	export let onFileDrop: (fileId: string, directoryId: string) => void = () => {};
+	export let onFileDrop: (fileIds: string[], directoryId: string) => void = () => {};
 	export let onDirDrop: (dirId: string, targetDirectoryId: string) => void = () => {};
+
+	$: badge = folderBadge(directory.status_counts);
 	let editing = false;
 	let editName = '';
 	let editInput: HTMLInputElement;
@@ -62,8 +83,9 @@
 		{dragOver
 		? 'bg-gray-100 dark:bg-gray-800 ring-1 ring-gray-300 dark:ring-gray-600'
 		: 'hover:bg-gray-100 dark:hover:bg-gray-850'}"
-	draggable="true"
+	draggable={writeAccess}
 	on:dragstart={(e) => {
+		if (!writeAccess) return;
 		e.dataTransfer?.setData('application/x-kb-dir-move', JSON.stringify({ dirId: directory.id }));
 	}}
 	on:dblclick={() => {
@@ -88,7 +110,10 @@
 		if (fileRaw) {
 			try {
 				const data = JSON.parse(fileRaw);
-				onFileDrop(data.fileId, directory.id);
+				const fileIds = data.fileIds ?? (data.fileId ? [data.fileId] : []);
+				if (fileIds.length) {
+					onFileDrop(fileIds, directory.id);
+				}
 			} catch {}
 			return;
 		}
@@ -103,6 +128,14 @@
 		}
 	}}
 >
+	{#if selectable}
+		<SelectCheckbox
+			selectable={true}
+			{selected}
+			visible={checkboxVisible}
+			onToggle={onToggleSelect}
+		/>
+	{/if}
 	<div class="flex items-center">
 		<button
 			class="p-1 rounded-full transition"
@@ -146,6 +179,27 @@
 						{directory.name}
 					</div>
 				{/if}
+
+				{#if source && isSyncing}
+					<span class="text-xs text-gray-400 shrink-0">&middot;</span>
+					<Spinner className="size-3" />
+				{/if}
+
+				{#if (directory.child_count ?? null) !== null}
+					<span class="text-xs text-gray-400 shrink-0">
+						&middot; {$i18n.t('{{count}} files in folder', { count: directory.child_count })}
+					</span>
+				{/if}
+
+				{#if badge === 'failed'}
+					<Tooltip
+						content={$i18n.t('{{count}} failed', { count: directory.status_counts?.failed ?? 0 })}
+					>
+						<ExclamationTriangle className="size-3 text-red-500 shrink-0" />
+					</Tooltip>
+				{:else if badge === 'pending'}
+					<Spinner className="size-3" />
+				{/if}
 			</div>
 		</div>
 
@@ -159,6 +213,20 @@
 			{/if}
 		</div>
 	</button>
+
+	{#if source && onRemoveSource}
+		<div class="flex items-center opacity-0 group-hover:opacity-100 transition-opacity">
+			<Tooltip content={$i18n.t('Remove Source')}>
+				<button
+					class="p-1 rounded-full hover:bg-gray-100 dark:hover:bg-gray-850 transition"
+					type="button"
+					on:click={() => onRemoveSource(source.itemId, source.name)}
+				>
+					<GarbageBin className="size-3.5" />
+				</button>
+			</Tooltip>
+		</div>
+	{/if}
 
 	{#if writeAccess}
 		<div class="flex items-center">

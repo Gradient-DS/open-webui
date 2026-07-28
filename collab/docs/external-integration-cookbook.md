@@ -377,7 +377,11 @@ class ProviderSyncWorker(BaseSyncWorker):
           - content_type: MIME type
           - modified_at: last modified timestamp (for change detection)
           - source_item_id: the source folder ID (for grouping)
-          - relative_path: path within the folder (for display)
+          - relative_path: path within the folder. Since the P2-8 convergence
+            (2026-07) the KB UI renders real `knowledge_directory` rows; the
+            backend materializes them from `relative_path` + a folder-like
+            `source_item_id` at link time, and search breadcrumbs still read
+            `meta.relative_path` — so keep populating both.
 
         deleted_count: number of files removed because they were deleted from the provider.
         """

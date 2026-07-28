@@ -284,12 +284,13 @@ async def _create_or_update_file_record(
     existing_meta = (existing_file.meta or {}) if existing_file else {}
 
     # Promote folder-rendering / change-detection keys to top-level so the KB
-    # UI's SourceGroupedFiles tree (reads file.meta.relative_path) and the next
-    # sync cycle's cloud-hash short-circuit (reads file.meta.cloud_hash) keep
-    # working. Consumers read these at top level; the loader-worker
-    # path nests them under provider_metadata, which silently broke the folder
-    # tree until promoted back. Identity keys are set-if-absent: the sync
-    # worker's stub values are authoritative (see _OWUI_OWNED_IDENTITY_KEYS).
+    # UI's search breadcrumbs (read file.meta.relative_path), the directory
+    # materialization bridge, and the next sync cycle's cloud-hash
+    # short-circuit (reads file.meta.cloud_hash) keep working. Consumers read
+    # these at top level; the loader-worker path nests them under
+    # provider_metadata, which silently broke folder rendering until promoted
+    # back. Identity keys are set-if-absent: the sync worker's stub values are
+    # authoritative (see _OWUI_OWNED_IDENTITY_KEYS).
     for key in (
         'relative_path',
         'source_item_id',
