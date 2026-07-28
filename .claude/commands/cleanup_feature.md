@@ -8,11 +8,11 @@ After the branch's PR has merged on GitHub, run this to fully clean up
 the local artifacts: per-stack containers + volumes, env files, the
 worktrees in both repos, and the local feature branch.
 
-Run (use the genai-utils venv's python — `click` is installed there;
-system `python` may not have it):
+Run (`stackctl` is the console script from `soev-gitops/local/` — see
+`soev-gitops/local/README.md` if it's not installed yet):
 
 ```
-cd /Users/lexlubbers/Code/soev/genai-utils && /Users/lexlubbers/Code/soev/genai-utils/.venv/bin/python -m scripts.stack.stack cleanup $ARGUMENTS
+stackctl cleanup $ARGUMENTS
 ```
 
 Surface the command's stdout/stderr to the user. If `$ARGUMENTS` is
@@ -48,7 +48,8 @@ branch, no stack ever created, etc.).
 
 ## References
 
+- `/dev_stack` slash command at `/Users/lexlubbers/Code/soev/.claude/commands/dev_stack.md` (monorepo root) — the current way to spin up a stack for a plan; supersedes the retired `/kickoff_plan`
 - `/stack` slash command at `.claude/commands/stack.md`
 - `/kickoff_features` slash command at `.claude/commands/kickoff_features.md`
 - `deploy/projects/soev/LOCAL_DEV.md` § Multi-stack mode
-- `thoughts/shared/research/2026-05-24-multi-stack-dev-environment.md`
+- Onboarding + full command reference: `soev-gitops/local/README.md`
