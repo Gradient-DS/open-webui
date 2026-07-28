@@ -113,7 +113,7 @@ def _patch_session(monkeypatch, fake_session: _FakeSession) -> None:
 
 
 def test_503_when_feature_flag_disabled(monkeypatch):
-    monkeypatch.setattr(discovery, 'SEARCH_API_BASE_URL', 'http://upstream:3535')
+    monkeypatch.setattr(discovery, 'SEARCH_API_BASE_URL', 'http://upstream:8181')
     monkeypatch.setattr(discovery, 'SEARCH_API_KEY', 'secret')
 
     _patch_flag(monkeypatch, False)
@@ -147,7 +147,7 @@ def test_503_when_base_url_empty(monkeypatch):
 
 def test_unauthenticated_request_rejected(monkeypatch):
     """No ``get_verified_user`` override → FastAPI returns 403 from the bearer."""
-    monkeypatch.setattr(discovery, 'SEARCH_API_BASE_URL', 'http://upstream:3535')
+    monkeypatch.setattr(discovery, 'SEARCH_API_BASE_URL', 'http://upstream:8181')
     monkeypatch.setattr(discovery, 'SEARCH_API_KEY', 'secret')
 
     _patch_flag(monkeypatch, True)
@@ -166,7 +166,7 @@ def test_unauthenticated_request_rejected(monkeypatch):
 
 
 def test_x_api_key_injected_on_outbound_call(monkeypatch):
-    monkeypatch.setattr(discovery, 'SEARCH_API_BASE_URL', 'http://upstream:3535')
+    monkeypatch.setattr(discovery, 'SEARCH_API_BASE_URL', 'http://upstream:8181')
     monkeypatch.setattr(discovery, 'SEARCH_API_KEY', 'secret-key-xyz')
 
     fake = _FakeSession(_FakeResponse(status=200, json_body={'collections': []}))
@@ -185,14 +185,14 @@ def test_x_api_key_injected_on_outbound_call(monkeypatch):
     assert len(fake.requests) == 1
     sent = fake.requests[0]
     assert sent['method'] == 'GET'
-    assert sent['url'] == 'http://upstream:3535/discovery/documents'
+    assert sent['url'] == 'http://upstream:8181/v1/discovery/documents'
     assert sent['headers'] == {'X-API-Key': 'secret-key-xyz'}
     assert fake.closed is True
 
 
 def test_no_x_api_key_when_unset(monkeypatch):
     """Unset SEARCH_API_KEY: outbound call goes through without the header."""
-    monkeypatch.setattr(discovery, 'SEARCH_API_BASE_URL', 'http://upstream:3535')
+    monkeypatch.setattr(discovery, 'SEARCH_API_BASE_URL', 'http://upstream:8181')
     monkeypatch.setattr(discovery, 'SEARCH_API_KEY', '')
 
     fake = _FakeSession(_FakeResponse(status=200, json_body={'ok': True}))
@@ -214,7 +214,7 @@ def test_no_x_api_key_when_unset(monkeypatch):
 
 
 def test_upstream_401_mapped_to_502_with_operator_message(monkeypatch):
-    monkeypatch.setattr(discovery, 'SEARCH_API_BASE_URL', 'http://upstream:3535')
+    monkeypatch.setattr(discovery, 'SEARCH_API_BASE_URL', 'http://upstream:8181')
     monkeypatch.setattr(discovery, 'SEARCH_API_KEY', 'wrong-key')
 
     fake = _FakeSession(_FakeResponse(status=401, text_body='unauthorized'))
@@ -233,7 +233,7 @@ def test_upstream_401_mapped_to_502_with_operator_message(monkeypatch):
 
 
 def test_upstream_non_json_mapped_to_502(monkeypatch):
-    monkeypatch.setattr(discovery, 'SEARCH_API_BASE_URL', 'http://upstream:3535')
+    monkeypatch.setattr(discovery, 'SEARCH_API_BASE_URL', 'http://upstream:8181')
     monkeypatch.setattr(discovery, 'SEARCH_API_KEY', 'secret')
 
     fake = _FakeSession(_FakeResponse(status=200, text_body='<html>not json</html>', json_raises=True))
@@ -252,7 +252,7 @@ def test_upstream_non_json_mapped_to_502(monkeypatch):
 
 
 def test_upstream_connection_error_mapped_to_502(monkeypatch):
-    monkeypatch.setattr(discovery, 'SEARCH_API_BASE_URL', 'http://upstream:3535')
+    monkeypatch.setattr(discovery, 'SEARCH_API_BASE_URL', 'http://upstream:8181')
     monkeypatch.setattr(discovery, 'SEARCH_API_KEY', 'secret')
 
     fake = _FakeSession(aiohttp.ClientConnectorError(connection_key=MagicMock(), os_error=OSError('refused')))
@@ -266,4 +266,4 @@ def test_upstream_connection_error_mapped_to_502(monkeypatch):
     res = client.get('/api/v1/discovery/documents')
 
     assert res.status_code == 502
-    assert 'Cannot reach the search-api' in res.json()['detail']
+    assert 'Cannot reach the agents-api' in res.json()['detail']
