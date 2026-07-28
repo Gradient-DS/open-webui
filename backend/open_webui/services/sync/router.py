@@ -15,7 +15,7 @@ from pydantic import BaseModel
 
 from open_webui.models.knowledge import Knowledges
 from open_webui.models.users import UserModel
-from open_webui.services.sync.daemon_client import trigger_sync_run, cancel_sync_run
+from open_webui.services.sync.daemon_client import SyncDaemonError, trigger_sync_run, cancel_sync_run
 
 log = logging.getLogger(__name__)
 
@@ -143,10 +143,24 @@ async def handle_sync_items_request(
     }
     await Knowledges.update_knowledge_meta_by_id(knowledge_id, meta)
 
-    # Forward the "Sync now" trigger to the external sync-daemon. If this
-    # raises, let it propagate — the 30-min stale-recovery above unsticks a
-    # 'syncing' status left behind on the next attempt.
-    await trigger_sync_run(knowledge_id, provider, user.id)
+    # Forward the "Sync now" trigger to the external sync-daemon. On failure,
+    # roll the optimistic 'syncing' status back to 'failed' — otherwise every
+    # retry inside the 30-min staleness window above 409s on a sync that
+    # never actually started — and surface a 502 instead of an opaque 500.
+    try:
+        await trigger_sync_run(knowledge_id, provider, user.id)
+    except SyncDaemonError as err:
+        log.error('sync-daemon trigger failed for KB %s: %s', knowledge_id, err)
+        meta[meta_key] = {
+            **meta[meta_key],
+            'status': 'failed',
+            'error': 'The sync service is unreachable. Please try again later.',
+        }
+        await Knowledges.update_knowledge_meta_by_id(knowledge_id, meta)
+        raise HTTPException(
+            status_code=502,
+            detail='The sync service is unreachable. Please try again later.',
+        ) from err
 
     return {'all_sources': all_sources, 'meta': meta}
 
@@ -198,7 +212,13 @@ async def handle_cancel_sync(
     meta[meta_key] = sync_info
     await Knowledges.update_knowledge_meta_by_id(knowledge_id, meta)
 
-    await cancel_sync_run(knowledge_id)
+    # Best-effort: the local status is already 'cancelled', and an
+    # unreachable daemon has no run to cancel anyway — don't fail the
+    # request over it.
+    try:
+        await cancel_sync_run(knowledge_id)
+    except SyncDaemonError as err:
+        log.warning('sync-daemon cancel failed for KB %s (continuing): %s', knowledge_id, err)
 
     log.info(f'Sync cancelled for knowledge base {knowledge_id}')
     return {'message': 'Sync cancelled', 'knowledge_id': knowledge_id}

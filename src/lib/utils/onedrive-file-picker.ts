@@ -9,6 +9,7 @@ class OneDriveConfig {
 	private clientIdBusiness: string = '';
 	private sharepointUrl: string = '';
 	private sharepointTenantId: string = '';
+	private credentialsLoaded = false;
 	private derivedHost: string | null = null;
 	private msalInstance: PublicClientApplication | null = null;
 	private currentAuthorityType: 'personal' | 'organizations' = 'personal';
@@ -35,6 +36,14 @@ class OneDriveConfig {
 	}
 
 	private async getCredentials(): Promise<void> {
+		// The picker flow calls ensureInitialized() many times per session
+		// (init, token acquire, per-operation) — without this cache every call
+		// re-fetches /api/config, producing request bursts. The config values
+		// are authority-independent, so one load serves both authorities.
+		if (this.credentialsLoaded) {
+			return;
+		}
+
 		const response = await fetch(`${WEBUI_BASE_URL}/api/config`, {
 			headers: {
 				'Content-Type': 'application/json'
@@ -56,6 +65,8 @@ class OneDriveConfig {
 		if (!this.clientIdPersonal && !this.clientIdBusiness) {
 			throw new Error('OneDrive personal or business client ID not configured');
 		}
+
+		this.credentialsLoaded = true;
 	}
 
 	public async getMsalInstance(
