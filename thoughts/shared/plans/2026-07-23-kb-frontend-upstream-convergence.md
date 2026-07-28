@@ -169,18 +169,25 @@ These fork removals are deliberate product decisions (confirmed by Lex 2026-07-2
 
 ## Phase 4 — Legacy deletion + demotion (fork-shrink payoff)
 
+**Status (2026-07-28): implemented; automated criteria + merge dry-run verified. Shipped as PR #242 (open-webui) + genai-utils #355 (daemon pre-run summary fix).**
+
 ### Changes
 
-1. Delete `LazyKnowledgeTree/LazyTreeNode/LazyKnowledgeSearch/SourceGroupedFiles/FolderTreeNode` + `treeHelpers` (+tests) + the `kbUpstreamUi`/`lazyKnowledgeTree` kill-switches; prune `treeStatus.ts` to the kept helpers (`folderBadge`/`fileBadge`/`breadcrumbSegments`).
-2. Remove `GET /{id}/tree` + `GET /{id}/search` routes, `list_tree_level`/`search_tree` + helpers, their client fns + tests.
-3. Dead-code sweep: `getPendingKnowledgeFiles`/`streamPendingKnowledgeFiles` client fns, unused imports, upstream's `deleteFileById` import, etc.
-4. `relative_path`/`source_item_id` columns stay (derived metadata + provider mapping — decision, audit constraint 8); the composite index `ix_kf_kb_source_relpath` stays while `/internal/retrieval` and remove-source still filter on them.
-5. Update `collab/docs/external-integration-cookbook.md` + CLAUDE.md pointers; note the retired carve-out in the next merge's recipe list.
+- [x] 1. Delete `LazyKnowledgeTree/LazyTreeNode/LazyKnowledgeSearch/SourceGroupedFiles/FolderTreeNode` + `treeHelpers` (+tests) + the `kbUpstreamUi`/`lazyKnowledgeTree` kill-switches; prune `treeStatus.ts` to the kept helpers (`folderBadge`/`fileBadge`/`breadcrumbSegments`).
+- [x] 2. Remove `GET /{id}/tree` + `GET /{id}/search` routes, `list_tree_level`/`search_tree` + helpers (+ `TreeFolder`/`TreeFile`/`KnowledgeTreeResponse`/`SearchHit`/`KnowledgeSearchResponse` models), their client fns + tests (`test_knowledge_tree.py`, `test_knowledge_search.py`).
+- [x] 3. Dead-code sweep: `getPendingKnowledgeFiles`/`streamPendingKnowledgeFiles` client fns, upstream's `deleteFileById` + `updateFileFromKnowledgeById` imports, plus long-dead ones (Fuse, paneforge, AddFilesPlaceholder, `decodeString`, …).
+- [x] 4. `relative_path`/`source_item_id` columns stay (derived metadata + provider mapping — decision, audit constraint 8); the composite index `ix_kf_kb_source_relpath` stays while `/internal/retrieval` and remove-source still filter on them.
+- [x] 5. Updated `collab/docs/external-integration-cookbook.md` (relative_path guidance now points at directory materialization) + the stale `SourceGroupedFiles` comment in `routers/integrations.py`; carve-out retirement recorded here + in the PR body for the next merge.
 
 ### Success Criteria
 
-**Automated:** full frontend + backend suites green; `grep -rn "getKnowledgeTree\|searchKnowledgeTree\|SourceGroupedFiles\|LazyKnowledgeTree" src/ backend/` → zero hits; build passes.
-**Manual:** one week of staging soak incl. a full cloud re-sync and an upstream-merge dry-run (`git merge --no-commit upstream/main` on a scratch branch) confirming `KnowledgeBase.svelte` conflicts are tractable.
+**Automated (verified 2026-07-28):**
+- [x] frontend suite green (252 passed); backend knowledge/sync suites green — the only failures (9: attachments/feedback suites) reproduce identically at pre-change HEAD
+- [x] grep-zero: `grep -rn "getKnowledgeTree\|searchKnowledgeTree\|SourceGroupedFiles\|LazyKnowledgeTree" src/ backend/` → zero hits
+- [x] build passes; `npm run check` 10582 (89 below pre-convergence baseline)
+- [x] **Upstream-merge dry-run against v0.11.0** (released 2026-07-27, fetched same day): `KnowledgeBase.svelte` conflicts drop from **10 hunks / 409 conflicted lines (dev) to 9 hunks / 133 lines (branch)** — and they're ordinary interleaved hunks on upstream's own structure now, not a carve-out re-derivation. Other KB files roughly par (Files 80→78, AddContentMenu 48→74, apis 14→14, models 50→50, routers 20→41 — the slight rises are content-level conflicts on newly-shared surface).
+
+**Manual:** one week of staging soak incl. a full cloud re-sync (dev-stack full+delta OneDrive daemon runs already green 2026-07-28).
 
 ---
 
