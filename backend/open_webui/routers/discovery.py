@@ -1,10 +1,17 @@
-"""Discovery proxy — reverse-proxy to the upstream search-api.
+"""Discovery proxy — reverse-proxy to the agents-api document catalog.
 
-[Gradient] Exposes the search-api's /discovery/documents to OWUI users
-authenticated by session cookie / JWT. The search-api lives behind a
-Tailscale tunnel and uses an X-API-Key header that never leaves the
-backend. Mirrors the agent_proxy pattern: route-level get_verified_user,
-flag + URL check at request time, typed 502s on upstream failure.
+[Gradient] Exposes the upstream ``GET /v1/discovery/documents`` to OWUI
+users authenticated by session cookie / JWT, with an X-API-Key header
+that never leaves the backend. Mirrors the agent_proxy pattern:
+route-level get_verified_user, flag + URL check at request time, typed
+502s on upstream failure.
+
+Upstream is soev-agents
+(``adapters/openwebui/service/routes/discovery.py``), which hosts the
+catalog on the agents-api now that the standalone search-api is gone.
+SEARCH_API_BASE_URL / SEARCH_API_KEY therefore point at the agents-api —
+same values as AGENT_API_BASE_URL / AGENT_API_KEY; the names are kept
+because the Helm chart is wired for them.
 """
 
 import asyncio
@@ -26,7 +33,7 @@ AIOHTTP_CLIENT_TIMEOUT = aiohttp.ClientTimeout(total=30)
 
 
 async def _get_base_url(request: Request) -> str:
-    """Return the configured search-api URL or raise 503.
+    """Return the configured agents-api URL or raise 503.
 
     Reuses ENABLE_RAG_FILTER_UI — the same flag that controls panel
     visibility on the frontend — so a single Helm toggle gates the whole
@@ -45,9 +52,9 @@ async def _get_base_url(request: Request) -> str:
         raise HTTPException(
             status_code=503,
             detail=(
-                'SEARCH_API_BASE_URL is not configured. Set it to the search-api URL '
-                '(e.g. http://neo-db:3535) via Helm openWebui.config.searchApi.baseUrl '
-                'and restart the OWUI pod.'
+                'SEARCH_API_BASE_URL is not configured. Set it to the agents-api URL '
+                '(e.g. http://soev-agents:8181 — the same value as AGENT_API_BASE_URL) '
+                'via Helm openWebui.config.searchApi.baseUrl and restart the OWUI pod.'
             ),
         )
     return SEARCH_API_BASE_URL
@@ -80,7 +87,7 @@ async def _proxy_get_json(base_url: str, path: str):
             raise HTTPException(
                 status_code=502,
                 detail=(
-                    f'Cannot reach the search-api at {base_url}{path}: {e}. '
+                    f'Cannot reach the agents-api at {base_url}{path}: {e}. '
                     'Check SEARCH_API_BASE_URL and that the upstream is reachable '
                     '(Tailscale tunnel up, target host listening).'
                 ),
@@ -89,22 +96,22 @@ async def _proxy_get_json(base_url: str, path: str):
             raise HTTPException(
                 status_code=504,
                 detail=(
-                    f'Timed out calling the search-api at {base_url}{path} '
+                    f'Timed out calling the agents-api at {base_url}{path} '
                     f'(>{int(AIOHTTP_CLIENT_TIMEOUT.total or 0)}s).'
                 ),
             )
         except aiohttp.ClientError as e:
             raise HTTPException(
                 status_code=502,
-                detail=f'Upstream search-api error on GET {path}: {type(e).__name__}: {e}',
+                detail=f'Upstream agents-api error on GET {path}: {type(e).__name__}: {e}',
             )
 
         if response.status == 401:
             raise HTTPException(
                 status_code=502,
                 detail=(
-                    'search-api returned 401 — SEARCH_API_KEY is wrong or unset. '
-                    'Check the secret value in the OWUI pod and on the search-api side.'
+                    'agents-api returned 401 — SEARCH_API_KEY is wrong or unset. '
+                    'It must match the agents-api key (AGENT_API_KEY / agents SOEV_AGENTS_API_KEY).'
                 ),
             )
         if response.status >= 400:
@@ -112,7 +119,7 @@ async def _proxy_get_json(base_url: str, path: str):
             raise HTTPException(
                 status_code=response.status,
                 detail=(
-                    f'search-api returned {response.status} on GET {path}. Upstream body: {body[:500] or "<empty>"}'
+                    f'agents-api returned {response.status} on GET {path}. Upstream body: {body[:500] or "<empty>"}'
                 ),
             )
 
@@ -123,7 +130,7 @@ async def _proxy_get_json(base_url: str, path: str):
             raise HTTPException(
                 status_code=502,
                 detail=(
-                    f'search-api at {path} returned non-JSON body. Body preview: {body_preview!r}. Original error: {e}'
+                    f'agents-api at {path} returned non-JSON body. Body preview: {body_preview!r}. Original error: {e}'
                 ),
             )
     finally:
@@ -132,6 +139,10 @@ async def _proxy_get_json(base_url: str, path: str):
 
 @router.get('/documents')
 async def list_documents(request: Request, user=Depends(get_verified_user)):
-    """Proxy GET /discovery/documents from the upstream search-api."""
+    """Proxy GET /v1/discovery/documents from the upstream agents-api.
+
+    Returns the upstream payload verbatim: ``{collections[], total_collections,
+    database{}}``. The frontend consumes that shape directly.
+    """
     base_url = await _get_base_url(request)
-    return await _proxy_get_json(base_url, '/discovery/documents')
+    return await _proxy_get_json(base_url, '/v1/discovery/documents')

@@ -1051,9 +1051,12 @@ FEATURE_AGENT_PICKER = os.environ.get('FEATURE_AGENT_PICKER', 'False').lower() =
 
 ####################################
 # SEARCH API (RAG discovery proxy)
-# [Gradient] Upstream search-api consumed by the RAG filter panel. The
-# backend at /api/v1/discovery/* reverse-proxies here with X-API-Key
-# injected server-side so the key never reaches the browser.
+# [Gradient] Document catalog consumed by the RAG filter panel. The
+# backend at /api/v1/discovery/* reverse-proxies to the upstream's
+# GET /v1/discovery/documents with X-API-Key injected server-side.
+# That route lives on the agents-api, so these normally hold the same
+# values as AGENT_API_BASE_URL / AGENT_API_KEY; the names are kept
+# because the Helm chart is wired for them.
 ####################################
 
 SEARCH_API_BASE_URL = os.environ.get('SEARCH_API_BASE_URL', '').strip().rstrip('/')

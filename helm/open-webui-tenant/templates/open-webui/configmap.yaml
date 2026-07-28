@@ -574,7 +574,8 @@ data:
   # Agent Proxy (external: exposes agent API to external callers)
   ENABLE_AGENT_PROXY: {{ .Values.openWebui.config.enableAgentProxy | default "false" | quote }}
 
-  # Search API (RAG discovery proxy at /api/v1/discovery/*).
+  # Search API (RAG discovery proxy at /api/v1/discovery/*). Points at the
+  # agents-api, which hosts GET /v1/discovery/documents.
   # SEARCH_API_KEY is set via secrets (see .Values.secrets.searchApiKey).
   # Empty baseUrl disables the discovery proxy at request time.
   {{- if .Values.openWebui.config.searchApi.baseUrl }}
