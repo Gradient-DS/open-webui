@@ -270,6 +270,7 @@ async def _remove_files_for_source(knowledge_id, item_id, source_to_remove):
         knowledge_id=knowledge_id,
         source_item_id=item_id,
         file_id_prefix=_FILE_ID_PREFIX,
+        source=source_to_remove,
     )
 
 

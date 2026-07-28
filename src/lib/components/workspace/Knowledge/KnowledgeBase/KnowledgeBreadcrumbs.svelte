@@ -7,7 +7,7 @@
 	export let rootLabel: string = 'Root';
 	export let breadcrumbs: { id: string; name: string }[] = [];
 	export let onNavigate: (directoryId: string | null) => void = () => {};
-	export let onMoveFile: (fileId: string, targetDirectoryId: string | null) => void = () => {};
+	export let onMoveFiles: (fileIds: string[], targetDirectoryId: string | null) => void = () => {};
 	export let onMoveDir: (dirId: string, targetDirectoryId: string | null) => void = () => {};
 
 	let breadcrumbEl: HTMLDivElement;
@@ -38,7 +38,8 @@
 		if (fileRaw) {
 			try {
 				const data = JSON.parse(fileRaw);
-				if (data.fileId) onMoveFile(data.fileId, targetDirId);
+				const fileIds = data.fileIds ?? (data.fileId ? [data.fileId] : []);
+				if (fileIds.length) onMoveFiles(fileIds, targetDirId);
 			} catch {}
 			return;
 		}

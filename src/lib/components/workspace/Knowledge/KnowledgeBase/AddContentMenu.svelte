@@ -7,16 +7,21 @@
 	import ArrowUpCircle from '$lib/components/icons/ArrowUpCircle.svelte';
 	import BarsArrowUp from '$lib/components/icons/BarsArrowUp.svelte';
 	import FolderOpen from '$lib/components/icons/FolderOpen.svelte';
+	import NewFolderAlt from '$lib/components/icons/NewFolderAlt.svelte';
+	import ArrowPath from '$lib/components/icons/ArrowPath.svelte';
 	import GlobeAlt from '$lib/components/icons/GlobeAlt.svelte';
-	import CloudArrowUp from '$lib/components/icons/CloudArrowUp.svelte';
 	import ArrowUturnLeft from '$lib/components/icons/ArrowUturnLeft.svelte';
 
 	const i18n = getContext('i18n');
 
 	export let onClose: Function = () => {};
 
-	export let onOneDriveSync: Function | null = null;
 	export let onUpload: Function = (data) => {};
+	// Structure-write items (New directory / Sync directory / Reset) only
+	// render when the parent passes the affordance — i.e. structureEditable
+	// local KBs. Cloud / push KBs never get them.
+	export let structureEditable = false;
+	export let onSync: Function | null = null;
 	export let onReset: Function | null = null;
 
 	let show = false;
@@ -56,6 +61,21 @@
 		<div
 			class="min-w-[200px] rounded-2xl px-1 py-1 border border-gray-100 dark:border-gray-800 z-50 bg-white dark:bg-gray-850 dark:text-white shadow-lg transition"
 		>
+			{#if structureEditable}
+				<button
+					class="select-none flex gap-2 items-center px-3 py-1.5 text-sm cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-xl w-full"
+					on:click={() => {
+						onUpload({ type: 'new_directory' });
+						show = false;
+					}}
+				>
+					<NewFolderAlt />
+					<div class="flex items-center">{$i18n.t('New directory')}</div>
+				</button>
+
+				<hr class="my-1 border-gray-100 dark:border-gray-800" />
+			{/if}
+
 			<button
 				class="select-none flex gap-2 items-center px-3 py-1.5 text-sm cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-xl w-full"
 				on:click={() => {
@@ -76,17 +96,23 @@
 				<div class="flex items-center">{$i18n.t('Upload directory')}</div>
 			</button>
 
-			{#if onOneDriveSync}
-				<button
-					class="select-none flex gap-2 items-center px-3 py-1.5 text-sm cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-xl w-full"
-					type="button"
-					on:click={() => {
-						onOneDriveSync();
-					}}
+			{#if onSync}
+				<Tooltip
+					content={$i18n.t(
+						'Sync a local directory with this knowledge base. Only new and modified files will be uploaded. The directory structure will be mirrored.'
+					)}
+					className="w-full"
 				>
-					<CloudArrowUp strokeWidth="2" />
-					<div class="flex items-center">{$i18n.t('Sync from OneDrive')}</div>
-				</button>
+					<button
+						class="select-none flex gap-2 items-center px-3 py-1.5 text-sm cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-xl w-full"
+						on:click={() => {
+							onSync();
+						}}
+					>
+						<ArrowPath strokeWidth="2" />
+						<div class="flex items-center">{$i18n.t('Sync directory')}</div>
+					</button>
+				</Tooltip>
 			{/if}
 
 			<button

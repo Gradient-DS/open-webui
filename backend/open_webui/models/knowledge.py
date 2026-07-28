@@ -1,3 +1,4 @@
+import asyncio
 import base64
 import json
 import logging
@@ -6,8 +7,9 @@ from typing import Optional, Union
 import uuid
 
 from sqlalchemy import select, delete, update, or_, and_, func, cast
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import defer
+from sqlalchemy.orm import aliased, defer
 from open_webui.internal.db import Base, JSONField, get_async_db_context
 
 from open_webui.config import RAG_FILE_CONTENT_SEARCH_MAX_CHARS
@@ -225,81 +227,26 @@ class KnowledgeListResponse(BaseModel):
     total: int
 
 
+class KnowledgeDirectoryEntry(KnowledgeDirectoryModel):
+    """Directory row in the files response, annotated with the fork's status
+    rollups (P2-8 decision 3): ``child_count`` is the recursive descendant
+    *file* count of the directory's subtree; ``status_counts`` buckets those
+    descendants like the tree endpoint (pending/completed/failed/unknown).
+    Additive fields — upstream consumers that only know the base shape are
+    unaffected."""
+
+    child_count: int = 0
+    status_counts: dict[str, int] = Field(default_factory=dict)
+
+
 class KnowledgeFileListResponse(BaseModel):
     items: list[Union[FileUserResponse, FileUserMetadataResponse]]
-    directories: list[KnowledgeDirectoryModel] = Field(default_factory=list)
+    directories: list[KnowledgeDirectoryEntry] = Field(default_factory=list)
     breadcrumbs: list[KnowledgeDirectoryModel] = Field(default_factory=list)
     total: int
 
 
 ####################
-# Lazy folder-tree browser (Tier 2) response models
-#
-# Deliberately concrete (NO Union) and minimal — the slim payload is the point.
-# Per-file detail (owner, provider_metadata, content_type, full timestamps) is
-# fetched on click via the existing ``getFileById`` route, not here.
-####################
-
-
-class TreeFolder(BaseModel):
-    """A folder node in a single tree level.
-
-    At the sources level this is a KB *source* (its ``path`` is the bare
-    ``source_item_id`` and ``type`` carries the provider source type); at deeper
-    levels it is a synthesized folder from the ``relative_path`` hierarchy
-    (``path`` is ``<source_item_id>/<sub>/…/`` — pass it back verbatim to expand).
-    ``child_count`` is the recursive descendant *file* count; ``status_counts``
-    is the bucketed rollup over those descendants.
-    """
-
-    name: str
-    path: str
-    child_count: int = 0
-    status_counts: dict[str, int] = Field(default_factory=dict)
-    type: Optional[str] = None
-
-
-class TreeFile(BaseModel):
-    """A direct file in the current level. Slim by design."""
-
-    id: str
-    name: str
-    size: Optional[int] = None
-    status: Optional[str] = None
-    error: Optional[str] = None
-    updated_at: Optional[int] = None
-
-
-class KnowledgeTreeResponse(BaseModel):
-    """One lazy level: the folders at this level plus a cursor-paginated page of
-    the direct files. ``folders`` is returned only on the first page
-    (``cursor is None``); subsequent ``next_cursor`` pages carry files only.
-    """
-
-    folders: list[TreeFolder] = Field(default_factory=list)
-    files: list[TreeFile] = Field(default_factory=list)
-    next_cursor: Optional[str] = None
-    has_more: bool = False
-
-
-class SearchHit(TreeFile):
-    """A flat search result. Extends the slim file payload with the path fields
-    the UI needs for a breadcrumb (``relative_path``) and reveal-in-tree
-    (``source_item_id``)."""
-
-    relative_path: Optional[str] = None
-    source_item_id: Optional[str] = None
-
-
-class KnowledgeSearchResponse(BaseModel):
-    """Flat, keyset-paginated search results. No total — the UI appends pages
-    via ``next_cursor`` rather than offset-counting a (potentially huge) match set."""
-
-    items: list[SearchHit] = Field(default_factory=list)
-    next_cursor: Optional[str] = None
-    has_more: bool = False
-
-
 SUSPENSION_TTL_DAYS = 30
 
 # Knowledge ``meta`` keys written by every cloud-sync worker (one per provider —
@@ -327,6 +274,50 @@ def _path_fields_from_meta(meta: Optional[dict]) -> tuple[Optional[str], Optiona
         relative_path if isinstance(relative_path, str) else None,
         source_item_id if isinstance(source_item_id, str) else None,
     )
+
+
+# Per-KB serialization of directory-chain materialization (P2-8 reverse
+# bridge). The unique constraint (knowledge_id, parent_id, name) protects
+# nested levels, but both SQLite and Postgres treat NULL parent_id values as
+# distinct, so concurrent root-level creates would not conflict — this lock
+# closes that hole for the common case (concurrent link calls within one
+# process); a cross-process race is additionally converged in
+# ``_find_or_create_directory``. Entries are tiny and bounded by the number of
+# KBs touched since process start, so the dict is never pruned.
+_directory_chain_locks: dict[str, asyncio.Lock] = {}
+
+
+def _directory_segments_for_link(
+    knowledge_meta: Optional[dict], source_item_id: str, relative_path: str
+) -> Optional[tuple[list[str], Optional[str]]]:
+    """Compute the directory chain a sourced file materializes under (P2-8).
+
+    Returns ``(segments, meta_key)`` where ``segments`` is the root→leaf list
+    of directory names and ``meta_key`` is the provider sync blob holding the
+    matched source (``None`` for file-type sources, which get no source-root
+    wrapper — their ``root_directory_id`` is never stamped). Returns ``None``
+    when the source is not in the KB's registry (e.g. a stored-vs-canonical id
+    mismatch): materialization is skipped rather than minting a raw-id folder —
+    the next re-link after the registry self-heals converges it.
+    """
+    meta = knowledge_meta or {}
+    for meta_key in SYNC_PROVIDER_META_KEYS:
+        sync_info = meta.get(meta_key)
+        if not isinstance(sync_info, dict):
+            continue
+        for entry in sync_info.get('sources') or []:
+            if not (isinstance(entry, dict) and entry.get('item_id') == source_item_id):
+                continue
+            path_dirs = [segment for segment in relative_path.split('/')[:-1] if segment]
+            if entry.get('type') == 'file':
+                # A picked *file* source surfaces at the KB root (PR #235):
+                # no wrapper folder, only whatever sub-path the file carries.
+                return path_dirs, None
+            root_name = (
+                entry.get('name') or (entry.get('item_path') or '').rstrip('/').rsplit('/', 1)[-1] or source_item_id
+            )
+            return [root_name] + path_dirs, meta_key
+    return None
 
 
 # --- Lazy folder-tree helpers -------------------------------------------------
@@ -1079,13 +1070,24 @@ class KnowledgeTable:
                             )
                         )
 
+                directories = await self.get_directories(
+                    knowledge_id,
+                    parent_id=filter.get('directory_id') if filter else None,
+                    db=db,
+                )
+                # P2-8 decision 3: annotate each directory with its recursive
+                # descendant file count + coarse status buckets.
+                rollups = await self.get_directory_rollups(knowledge_id, [d.id for d in directories], db=db)
                 return KnowledgeFileListResponse(
                     items=files,
-                    directories=await self.get_directories(
-                        knowledge_id,
-                        parent_id=filter.get('directory_id') if filter else None,
-                        db=db,
-                    ),
+                    directories=[
+                        KnowledgeDirectoryEntry(
+                            **directory.model_dump(),
+                            child_count=rollups.get(directory.id, {}).get('child_count', 0),
+                            status_counts=rollups.get(directory.id, {}).get('status_counts', _empty_status_counts()),
+                        )
+                        for directory in directories
+                    ],
                     breadcrumbs=await self.get_directory_breadcrumbs(
                         filter.get('directory_id') if filter else None,
                         db=db,
@@ -1118,6 +1120,164 @@ class KnowledgeTable:
         except Exception:
             return []
 
+    # ------------------------------------------------------------------ #
+    # Reverse bridge (P2-8): relative_path → knowledge_directory rows
+    # ------------------------------------------------------------------ #
+
+    async def _find_or_create_directory(
+        self,
+        db: AsyncSession,
+        knowledge_id: str,
+        parent_id: Optional[str],
+        name: str,
+        user_id: str,
+    ) -> str:
+        """Find-or-create one directory level, race-safe.
+
+        Nested levels are protected by the unique constraint
+        ``(knowledge_id, parent_id, name)`` — a lost insert race raises
+        ``IntegrityError`` and re-selects the winner. Root levels
+        (``parent_id IS NULL``) are outside that constraint (NULLs compare
+        distinct on both backends), so after inserting a root we re-select the
+        canonical row (oldest ``(created_at, id)``) and, if a cross-process
+        race created a twin first, drop our copy and adopt the canonical id.
+        """
+
+        async def _find() -> Optional[KnowledgeDirectory]:
+            stmt = select(KnowledgeDirectory).filter(
+                KnowledgeDirectory.knowledge_id == knowledge_id,
+                KnowledgeDirectory.name == name,
+                (KnowledgeDirectory.parent_id == parent_id) if parent_id else KnowledgeDirectory.parent_id.is_(None),
+            )
+            stmt = stmt.order_by(KnowledgeDirectory.created_at.asc(), KnowledgeDirectory.id.asc())
+            return (await db.execute(stmt)).scalars().first()
+
+        existing = await _find()
+        if existing:
+            return existing.id
+
+        now = int(time.time())
+        directory = KnowledgeDirectory(
+            id=str(uuid.uuid4()),
+            knowledge_id=knowledge_id,
+            parent_id=parent_id,
+            name=name,
+            user_id=user_id,
+            created_at=now,
+            updated_at=now,
+        )
+        db.add(directory)
+        try:
+            await db.commit()
+        except IntegrityError:
+            await db.rollback()
+            existing = await _find()
+            if existing:
+                return existing.id
+            raise
+
+        if parent_id is None:
+            canonical = await _find()
+            if canonical and canonical.id != directory.id:
+                await db.execute(delete(KnowledgeDirectory).filter_by(id=directory.id))
+                await db.commit()
+                return canonical.id
+        return directory.id
+
+    async def _ensure_directory_chain(
+        self,
+        knowledge_id: str,
+        user_id: str,
+        segments: list[str],
+        db: AsyncSession,
+    ) -> list[str]:
+        """Ensure the root→leaf directory chain exists; return its ids in order.
+
+        Idempotent (find-or-create per segment) and serialized per KB so
+        concurrent link calls during a sync burst converge on one chain.
+        """
+        if not segments:
+            return []
+        lock = _directory_chain_locks.setdefault(knowledge_id, asyncio.Lock())
+        async with lock:
+            chain_ids: list[str] = []
+            parent_id: Optional[str] = None
+            for name in segments:
+                parent_id = await self._find_or_create_directory(db, knowledge_id, parent_id, name, user_id)
+                chain_ids.append(parent_id)
+            return chain_ids
+
+    async def _stamp_source_root_directory(
+        self,
+        db: AsyncSession,
+        knowledge_id: str,
+        meta_key: str,
+        source_item_id: str,
+        root_directory_id: str,
+    ) -> None:
+        """Record ``sources[].root_directory_id`` in the provider meta blob.
+
+        Used by remove-source cleanup (drop the source's subtree) and by the UI
+        to map a root directory back to its source. Re-stamped whenever the
+        stored value diverges, so a stamp lost to a concurrent sync-worker meta
+        write self-heals on the next materialization.
+        """
+        knowledge = (await db.execute(select(Knowledge).filter_by(id=knowledge_id))).scalars().first()
+        if not knowledge:
+            return
+        meta = dict(knowledge.meta or {})
+        sync_info = meta.get(meta_key)
+        if not isinstance(sync_info, dict):
+            return
+        sources = [dict(entry) if isinstance(entry, dict) else entry for entry in sync_info.get('sources') or []]
+        changed = False
+        for entry in sources:
+            if isinstance(entry, dict) and entry.get('item_id') == source_item_id:
+                if entry.get('root_directory_id') != root_directory_id:
+                    entry['root_directory_id'] = root_directory_id
+                    changed = True
+                break
+        if not changed:
+            return
+        meta[meta_key] = {**sync_info, 'sources': sources}
+        knowledge.meta = meta
+        knowledge.updated_at = int(time.time())
+        await db.commit()
+
+    async def _materialize_directory_for_link(
+        self,
+        db: AsyncSession,
+        knowledge_id: str,
+        user_id: str,
+        relative_path: str,
+        source_item_id: str,
+    ) -> Optional[str]:
+        """Derive + ensure the directory placement for a sourced file (P2-8).
+
+        Chain = ``<source display name>/<relative_path dirs>`` for folder-like
+        sources (file-type sources get no wrapper; unknown sources are
+        skipped). Returns the leaf directory id, or ``None`` when there is
+        nothing to place under. Never raises — a materialization failure must
+        not break file linking (the path columns still drive the legacy tree).
+        """
+        try:
+            knowledge = (await db.execute(select(Knowledge).filter_by(id=knowledge_id))).scalars().first()
+            resolved = _directory_segments_for_link(
+                knowledge.meta if knowledge else None, source_item_id, relative_path
+            )
+            if resolved is None:
+                return None
+            segments, meta_key = resolved
+            chain_ids = await self._ensure_directory_chain(knowledge_id, user_id, segments, db)
+            if not chain_ids:
+                return None
+            if meta_key is not None:
+                await self._stamp_source_root_directory(db, knowledge_id, meta_key, source_item_id, chain_ids[0])
+            return chain_ids[-1]
+        except Exception as e:
+            log.exception(f'Directory materialization failed for knowledge {knowledge_id}: {e}')
+            return None
+
     async def add_file_to_knowledge_by_id(
         self,
         knowledge_id: str,
@@ -1144,11 +1304,27 @@ class KnowledgeTable:
         one: idempotent ensure-linked callers (``/integrations/submit``,
         ``/integrations/ingest``) pass ``None`` and must not clear stage-time
         placement — clearing or moving is ``move_file_to_directory``'s job.
+
+        Reverse bridge (P2-8 decision 1): when no caller placement is given and
+        the file carries provider path identity (``relative_path`` +
+        folder-like ``source_item_id``), the directory chain is materialized
+        find-or-create and stamped here — so the loader-worker sync path and
+        the daemon's ``/stage`` path converge on the same
+        ``knowledge_directory`` rows. A derived placement also refreshes an
+        existing one (a file that moved folders between syncs tracks its new
+        chain); files without path identity keep today's preserve-placement
+        semantics untouched.
         """
         async with get_async_db_context(db) as db:
             try:
                 file = await db.get(File, file_id)
                 relative_path, source_item_id = _path_fields_from_meta(file.meta if file else None)
+
+                materialized_id = None
+                if directory_id is None and relative_path and source_item_id:
+                    materialized_id = await self._materialize_directory_for_link(
+                        db, knowledge_id, user_id, relative_path, source_item_id
+                    )
 
                 existing = (
                     (await db.execute(select(KnowledgeFile).filter_by(knowledge_id=knowledge_id, file_id=file_id)))
@@ -1161,6 +1337,8 @@ class KnowledgeTable:
                     existing.source_item_id = source_item_id
                     if directory_id is not None:
                         existing.directory_id = directory_id
+                    elif materialized_id is not None:
+                        existing.directory_id = materialized_id
                     existing.updated_at = int(time.time())
                     await db.commit()
                     await db.refresh(existing)
@@ -1170,7 +1348,7 @@ class KnowledgeTable:
                     id=str(uuid.uuid4()),
                     knowledge_id=knowledge_id,
                     file_id=file_id,
-                    directory_id=directory_id,
+                    directory_id=directory_id if directory_id is not None else materialized_id,
                     user_id=user_id,
                     relative_path=relative_path,
                     source_item_id=source_item_id,
@@ -1197,6 +1375,13 @@ class KnowledgeTable:
         ``add_file_to_knowledge_by_id``. The path is a property of the file, not
         of the KB, so all of the file's ``knowledge_file`` rows are updated in
         one statement. A no-op (returns ``True``) when the file has no links.
+
+        Reverse bridge (P2-8 decision 1): the refreshed path identity also
+        re-materializes the directory placement per containing KB — the chain
+        is KB-scoped, so each link row derives its own — mirroring what a
+        re-link through ``add_file_to_knowledge_by_id`` would do. Placement is
+        only touched when a chain was actually derived (unknown sources leave
+        ``directory_id`` as-is).
         """
         relative_path, source_item_id = _path_fields_from_meta(meta)
         try:
@@ -1207,467 +1392,21 @@ class KnowledgeTable:
                     .values(relative_path=relative_path, source_item_id=source_item_id)
                 )
                 await db.commit()
+
+                if relative_path and source_item_id:
+                    links = (await db.execute(select(KnowledgeFile).filter_by(file_id=file_id))).scalars().all()
+                    for link in links:
+                        materialized_id = await self._materialize_directory_for_link(
+                            db, link.knowledge_id, link.user_id, relative_path, source_item_id
+                        )
+                        if materialized_id is not None and link.directory_id != materialized_id:
+                            link.directory_id = materialized_id
+                            link.updated_at = int(time.time())
+                    await db.commit()
                 return True
         except Exception as e:
             log.exception(e)
             return False
-
-    # ------------------------------------------------------------------ #
-    # Lazy per-folder tree browser (Tier 2)
-    # ------------------------------------------------------------------ #
-
-    async def list_tree_level(
-        self,
-        knowledge_id: str,
-        path: str = '',
-        cursor: Optional[str] = None,
-        limit: int = 200,
-        db: Optional[AsyncSession] = None,
-    ) -> KnowledgeTreeResponse:
-        """Return one lazy level of a KB's folder tree.
-
-        ``path=""`` → the sources level (each KB source as a folder, plus the
-        root loose files). ``path="<source_item_id>"`` → that source's root.
-        ``path="<source_item_id>/<sub>/…/"`` → that folder's immediate children.
-        Only the direct files paginate (keyset cursor); the (usually few)
-        folders are returned in full on the first page only.
-
-        All filtering rides the ``ix_kf_kb_source_relpath`` composite index
-        (``knowledge_id`` + ``source_item_id`` + ``relative_path`` prefix), so a
-        single folder is an index range scan rather than a full-KB JSON scan.
-        """
-        limit = max(1, min(limit, 1000))
-        try:
-            async with get_async_db_context(db) as db:
-                knowledge = (await db.execute(select(Knowledge).filter_by(id=knowledge_id))).scalars().first()
-                knowledge_meta = (knowledge.meta if knowledge else None) or {}
-
-                source_item_id, relative_prefix = _parse_tree_path(path)
-                decoded_cursor = _decode_cursor(cursor)
-                include_folders = decoded_cursor is None  # folders only on the first page
-
-                if source_item_id is None:
-                    return await self._tree_sources_level(
-                        db, knowledge_id, knowledge_meta, decoded_cursor, limit, include_folders
-                    )
-                return await self._tree_folder_level(
-                    db, knowledge_id, source_item_id, relative_prefix, decoded_cursor, limit, include_folders
-                )
-        except Exception as e:
-            log.exception(e)
-            return KnowledgeTreeResponse()
-
-    def _source_display_map(self, knowledge_meta: dict) -> dict[str, dict]:
-        """``{source_item_id: {name, type}}`` from ``knowledge.meta[*_sync].sources``."""
-        result: dict[str, dict] = {}
-        for key in SYNC_PROVIDER_META_KEYS:
-            sync_info = knowledge_meta.get(key)
-            if not isinstance(sync_info, dict):
-                continue
-            for source in sync_info.get('sources') or []:
-                if isinstance(source, dict) and source.get('item_id'):
-                    result[source['item_id']] = {
-                        'name': source.get('name') or source.get('item_path') or source['item_id'],
-                        'type': source.get('type'),
-                    }
-        return result
-
-    async def _tree_sources_level(
-        self,
-        db: AsyncSession,
-        knowledge_id: str,
-        knowledge_meta: dict,
-        decoded_cursor: Optional[list],
-        limit: int,
-        include_folders: bool,
-    ) -> KnowledgeTreeResponse:
-        folders: list[TreeFolder] = []
-        file_source_files: list[TreeFile] = []
-        if include_folders:
-            # One grouped pass: per (source, raw status) counts. No split_part —
-            # grouping is on the indexed source_item_id column directly.
-            raw_status = cast(File.meta['status'], Text)
-            stmt = (
-                select(KnowledgeFile.source_item_id, raw_status.label('raw_status'), func.count().label('cnt'))
-                .join(File, File.id == KnowledgeFile.file_id)
-                .where(
-                    KnowledgeFile.knowledge_id == knowledge_id,
-                    KnowledgeFile.source_item_id.isnot(None),
-                )
-                .group_by(KnowledgeFile.source_item_id, raw_status)
-            )
-            rollup: dict[str, dict] = {}
-            for source_id, raw, cnt in (await db.execute(stmt)).all():
-                entry = rollup.setdefault(source_id, {'total': 0, 'status_counts': _empty_status_counts()})
-                entry['total'] += cnt
-                entry['status_counts'][_status_bucket(_unwrap_json_text(raw))] += cnt
-
-            display = self._source_display_map(knowledge_meta)
-
-            # Reconcile a stored-vs-computed id mismatch (e.g. a OneDrive
-            # picker id in the registry vs the canonical id stamped on file
-            # rows, before the sync-time self-heal has run): when exactly one
-            # rollup id is unknown to the registry AND exactly one folder-type
-            # registry source has no files, they are the same folder — render
-            # ONE node (registry name/type, rollup counts/path) instead of a
-            # raw-id node plus an empty twin. Multi-source ambiguity keeps the
-            # plain union.
-            orphan_rollup_ids = [sid for sid in rollup if sid not in display]
-            orphan_display_ids = [
-                sid for sid, entry in display.items() if sid not in rollup and entry.get('type') == 'folder'
-            ]
-            if len(orphan_rollup_ids) == 1 and len(orphan_display_ids) == 1:
-                display[orphan_rollup_ids[0]] = display.pop(orphan_display_ids[0])
-
-            # A picked *file* source stamps its file rows with its own item_id;
-            # it must NOT become a one-file wrapper folder. Exclude file-type
-            # sources from the folder union and surface their files at the root
-            # (loose files) instead — see the return below. Their ids are known
-            # to the registry, so they never enter the folder-orphan heuristic.
-            file_source_ids = {sid for sid, entry in display.items() if entry.get('type') == 'file'}
-
-            for source_id in (set(rollup) | set(display)) - file_source_ids:
-                meta_entry = display.get(source_id, {})
-                counts = rollup.get(source_id, {})
-                name = meta_entry.get('name')
-                if not name:
-                    # Rollup id with no registry entry: a bare provider id is
-                    # meaningless to users — for a single-source KB the
-                    # registry name is the only plausible label. The raw id
-                    # stays the last resort under multi-source ambiguity.
-                    if len(display) == 1:
-                        name = next(iter(display.values())).get('name')
-                    name = name or source_id
-                folders.append(
-                    TreeFolder(
-                        name=name,
-                        path=source_id,
-                        child_count=counts.get('total', 0),
-                        status_counts=counts.get('status_counts', _empty_status_counts()),
-                        type=meta_entry.get('type'),
-                    )
-                )
-            folders.sort(key=lambda f: (f.name or '').lower())
-
-            # First page only: file-type sources' files ride alongside the
-            # genuine loose files. Kept out of the keyset page below so they
-            # appear once and never perturb the loose-files cursor.
-            file_source_files = await self._file_source_files(db, knowledge_id, file_source_ids)
-
-        # Root loose files: no source, keyset by (filename, file_id).
-        files, next_cursor, has_more = await self._loose_files_page(db, knowledge_id, decoded_cursor, limit)
-        return KnowledgeTreeResponse(
-            folders=folders,
-            files=file_source_files + files,
-            next_cursor=next_cursor,
-            has_more=has_more,
-        )
-
-    async def _tree_folder_level(
-        self,
-        db: AsyncSession,
-        knowledge_id: str,
-        source_item_id: str,
-        relative_prefix: str,
-        decoded_cursor: Optional[list],
-        limit: int,
-        include_folders: bool,
-    ) -> KnowledgeTreeResponse:
-        folders: list[TreeFolder] = []
-        if include_folders:
-            folders = await self._subfolder_rollup(db, knowledge_id, source_item_id, relative_prefix)
-
-        files, next_cursor, has_more = await self._direct_files_page(
-            db, knowledge_id, source_item_id, relative_prefix, decoded_cursor, limit
-        )
-        return KnowledgeTreeResponse(folders=folders, files=files, next_cursor=next_cursor, has_more=has_more)
-
-    async def _subfolder_rollup(
-        self,
-        db: AsyncSession,
-        knowledge_id: str,
-        source_item_id: str,
-        relative_prefix: str,
-    ) -> list[TreeFolder]:
-        """Immediate subfolders under ``(source_item_id, relative_prefix)`` with a
-        recursive descendant count + status rollup each.
-
-        A descendant lives in a subfolder iff its ``relative_path`` has another
-        ``/`` after the prefix (``LIKE prefix||'%/%'``). The immediate-subfolder
-        name is the segment between the prefix and that next slash.
-        """
-        deep_pattern = _escape_like(relative_prefix) + '%/%'
-        deep_filter = (
-            KnowledgeFile.knowledge_id == knowledge_id,
-            KnowledgeFile.source_item_id == source_item_id,
-            KnowledgeFile.relative_path.like(deep_pattern, escape='\\'),
-        )
-        raw_status = cast(File.meta['status'], Text)
-        prefix_len = len(relative_prefix)
-
-        rollup: dict[str, dict] = {}
-        if db.get_bind().dialect.name == 'postgresql':
-            # DB-side grouping: segment = first token of the post-prefix remainder.
-            # GROUP BY (segment, raw_status) returns only subfolders × statuses.
-            segment = func.split_part(func.substr(KnowledgeFile.relative_path, prefix_len + 1), '/', 1)
-            stmt = (
-                select(segment.label('seg'), raw_status.label('raw_status'), func.count().label('cnt'))
-                .join(File, File.id == KnowledgeFile.file_id)
-                .where(*deep_filter)
-                .group_by(segment, raw_status)
-            )
-            for seg, raw, cnt in (await db.execute(stmt)).all():
-                entry = rollup.setdefault(seg, {'total': 0, 'status_counts': _empty_status_counts()})
-                entry['total'] += cnt
-                entry['status_counts'][_status_bucket(_unwrap_json_text(raw))] += cnt
-        else:
-            # SQLite (dev): no split_part — fetch the narrowed range and group in
-            # Python. The WHERE still rides the index for the prefix narrowing.
-            stmt = (
-                select(KnowledgeFile.relative_path, raw_status.label('raw_status'))
-                .join(File, File.id == KnowledgeFile.file_id)
-                .where(*deep_filter)
-            )
-            for relative_path, raw in (await db.execute(stmt)).all():
-                remainder = (relative_path or '')[prefix_len:]
-                seg = remainder.split('/', 1)[0]
-                if not seg:
-                    continue
-                entry = rollup.setdefault(seg, {'total': 0, 'status_counts': _empty_status_counts()})
-                entry['total'] += 1
-                entry['status_counts'][_status_bucket(_unwrap_json_text(raw))] += 1
-
-        folders = [
-            TreeFolder(
-                name=seg,
-                path=f'{source_item_id}/{relative_prefix}{seg}/',
-                child_count=entry['total'],
-                status_counts=entry['status_counts'],
-            )
-            for seg, entry in rollup.items()
-        ]
-        folders.sort(key=lambda f: (f.name or '').lower())
-        return folders
-
-    @staticmethod
-    def _row_to_tree_file(file_id, filename, updated_at, meta) -> TreeFile:
-        meta = meta if isinstance(meta, dict) else {}
-        size = meta.get('size')
-        return TreeFile(
-            id=file_id,
-            name=filename,
-            size=size if isinstance(size, int) else None,
-            status=meta.get('status'),
-            error=meta.get('error'),
-            updated_at=updated_at,
-        )
-
-    async def _direct_files_page(
-        self,
-        db: AsyncSession,
-        knowledge_id: str,
-        source_item_id: str,
-        relative_prefix: str,
-        decoded_cursor: Optional[list],
-        limit: int,
-    ) -> tuple[list[TreeFile], Optional[str], bool]:
-        """Keyset page of the files directly in this folder (no deeper slash).
-
-        Sorted by ``(relative_path, file_id)`` — the order the composite index
-        already yields, so the page is an index range scan + seek, not a sort.
-        """
-        esc = _escape_like(relative_prefix)
-        stmt = (
-            select(
-                KnowledgeFile.relative_path,
-                KnowledgeFile.file_id,
-                File.filename,
-                File.updated_at,
-                File.meta,
-            )
-            .join(File, File.id == KnowledgeFile.file_id)
-            .where(
-                KnowledgeFile.knowledge_id == knowledge_id,
-                KnowledgeFile.source_item_id == source_item_id,
-                KnowledgeFile.relative_path.like(esc + '%', escape='\\'),
-                ~KnowledgeFile.relative_path.like(esc + '%/%', escape='\\'),
-            )
-        )
-        if decoded_cursor and len(decoded_cursor) == 2:
-            c_rp, c_fid = decoded_cursor
-            stmt = stmt.where(
-                or_(
-                    KnowledgeFile.relative_path > c_rp,
-                    and_(KnowledgeFile.relative_path == c_rp, KnowledgeFile.file_id > c_fid),
-                )
-            )
-        stmt = stmt.order_by(KnowledgeFile.relative_path.asc(), KnowledgeFile.file_id.asc()).limit(limit + 1)
-
-        rows = (await db.execute(stmt)).all()
-        has_more = len(rows) > limit
-        rows = rows[:limit]
-        files = [self._row_to_tree_file(r.file_id, r.filename, r.updated_at, r.meta) for r in rows]
-        next_cursor = _encode_cursor([rows[-1].relative_path, rows[-1].file_id]) if (has_more and rows) else None
-        return files, next_cursor, has_more
-
-    async def _loose_files_page(
-        self,
-        db: AsyncSession,
-        knowledge_id: str,
-        decoded_cursor: Optional[list],
-        limit: int,
-    ) -> tuple[list[TreeFile], Optional[str], bool]:
-        """Keyset page of root loose files (no source) sorted by (filename, file_id)."""
-        stmt = (
-            select(
-                KnowledgeFile.file_id,
-                File.filename,
-                File.updated_at,
-                File.meta,
-            )
-            .join(File, File.id == KnowledgeFile.file_id)
-            .where(
-                KnowledgeFile.knowledge_id == knowledge_id,
-                KnowledgeFile.source_item_id.is_(None),
-            )
-        )
-        if decoded_cursor and len(decoded_cursor) == 2:
-            c_fn, c_fid = decoded_cursor
-            stmt = stmt.where(or_(File.filename > c_fn, and_(File.filename == c_fn, KnowledgeFile.file_id > c_fid)))
-        stmt = stmt.order_by(File.filename.asc(), KnowledgeFile.file_id.asc()).limit(limit + 1)
-
-        rows = (await db.execute(stmt)).all()
-        has_more = len(rows) > limit
-        rows = rows[:limit]
-        files = [self._row_to_tree_file(r.file_id, r.filename, r.updated_at, r.meta) for r in rows]
-        next_cursor = _encode_cursor([rows[-1].filename, rows[-1].file_id]) if (has_more and rows) else None
-        return files, next_cursor, has_more
-
-    async def _file_source_files(
-        self,
-        db: AsyncSession,
-        knowledge_id: str,
-        source_ids: set[str],
-    ) -> list[TreeFile]:
-        """Files of file-type sources, serialized as loose root files.
-
-        A picked *file* source stamps its rows with its own ``item_id`` (rather
-        than grouping them under a folder node), so the tree renders them at the
-        root instead of as a one-file wrapper folder. Not paginated — the caller
-        returns these only on the first page, so the (rare) multi-file case still
-        stays out of the loose-files keyset. Sorted by ``(filename, file_id)`` to
-        match the loose-files ordering.
-        """
-        if not source_ids:
-            return []
-        stmt = (
-            select(
-                KnowledgeFile.file_id,
-                File.filename,
-                File.updated_at,
-                File.meta,
-            )
-            .join(File, File.id == KnowledgeFile.file_id)
-            .where(
-                KnowledgeFile.knowledge_id == knowledge_id,
-                KnowledgeFile.source_item_id.in_(source_ids),
-            )
-            .order_by(File.filename.asc(), KnowledgeFile.file_id.asc())
-        )
-        rows = (await db.execute(stmt)).all()
-        return [self._row_to_tree_file(r.file_id, r.filename, r.updated_at, r.meta) for r in rows]
-
-    async def search_tree(
-        self,
-        knowledge_id: str,
-        q: str = '',
-        filetype: Optional[str] = None,
-        status: Optional[str] = None,
-        cursor: Optional[str] = None,
-        limit: int = 100,
-        db: Optional[AsyncSession] = None,
-    ) -> KnowledgeSearchResponse:
-        """Flat, keyset-paginated full-KB search for the tree browser's search mode.
-
-        Matches filename OR content (``q``), optionally narrowed by ``filetype``
-        (extension) and ``status`` (coarse bucket → raw statuses). Each hit
-        carries ``relative_path`` (breadcrumb) and ``source_item_id``
-        (reveal-in-tree) straight from the denormalized join-table columns —
-        no JSON re-parse. Sorted by ``(filename, file_id)`` with an opaque
-        keyset cursor; no total (the match set can be large, so the UI appends
-        pages instead of offset-counting).
-        """
-        limit = max(1, min(limit, 1000))
-        try:
-            async with get_async_db_context(db) as db:
-                stmt = (
-                    select(
-                        KnowledgeFile.relative_path,
-                        KnowledgeFile.source_item_id,
-                        KnowledgeFile.file_id,
-                        File.filename,
-                        File.updated_at,
-                        File.meta,
-                    )
-                    .join(File, File.id == KnowledgeFile.file_id)
-                    .where(KnowledgeFile.knowledge_id == knowledge_id)
-                )
-
-                if q:
-                    # Escape LIKE wildcards so the query is a literal substring
-                    # match (the legacy /files search did not — this is correct).
-                    pattern = f'%{_escape_like(q)}%'
-                    stmt = stmt.where(
-                        or_(
-                            File.filename.ilike(pattern, escape='\\'),
-                            cast(File.data['content'], Text).ilike(pattern, escape='\\'),
-                        )
-                    )
-
-                if filetype:
-                    ext = filetype.lstrip('.')
-                    stmt = stmt.where(File.filename.ilike('%.' + _escape_like(ext), escape='\\'))
-
-                if status:
-                    raws = _STATUS_BUCKET_RAWS.get(status, (status,))
-                    raw_status = cast(File.meta['status'], Text)
-                    stmt = stmt.where(or_(*[raw_status.ilike(f'%{r}%') for r in raws]))
-
-                decoded_cursor = _decode_cursor(cursor)
-                if decoded_cursor and len(decoded_cursor) == 2:
-                    c_fn, c_fid = decoded_cursor
-                    stmt = stmt.where(
-                        or_(File.filename > c_fn, and_(File.filename == c_fn, KnowledgeFile.file_id > c_fid))
-                    )
-
-                stmt = stmt.order_by(File.filename.asc(), KnowledgeFile.file_id.asc()).limit(limit + 1)
-
-                rows = (await db.execute(stmt)).all()
-                has_more = len(rows) > limit
-                rows = rows[:limit]
-
-                items: list[SearchHit] = []
-                for r in rows:
-                    meta = r.meta if isinstance(r.meta, dict) else {}
-                    size = meta.get('size')
-                    items.append(
-                        SearchHit(
-                            id=r.file_id,
-                            name=r.filename,
-                            size=size if isinstance(size, int) else None,
-                            status=meta.get('status'),
-                            error=meta.get('error'),
-                            updated_at=r.updated_at,
-                            relative_path=r.relative_path,
-                            source_item_id=r.source_item_id,
-                        )
-                    )
-
-                next_cursor = _encode_cursor([rows[-1].filename, rows[-1].file_id]) if (has_more and rows) else None
-                return KnowledgeSearchResponse(items=items, next_cursor=next_cursor, has_more=has_more)
-        except Exception as e:
-            log.exception(e)
-            return KnowledgeSearchResponse()
 
     async def has_file(self, knowledge_id: str, file_id: str, db: Optional[AsyncSession] = None) -> bool:
         """Check whether a file belongs to a knowledge base."""
@@ -2042,6 +1781,79 @@ class KnowledgeTable:
         except Exception:
             return []
 
+    def _directory_subtree_cte(self, knowledge_id: str, directory_ids: list[str]):
+        """Recursive CTE mapping every descendant directory to its anchor.
+
+        ``root_id`` is the id from ``directory_ids`` the descendant rolls up
+        into; ``dir_id`` walks the subtree. Plain ``WITH RECURSIVE`` — works on
+        both SQLite and Postgres.
+        """
+        subtree = (
+            select(KnowledgeDirectory.id.label('root_id'), KnowledgeDirectory.id.label('dir_id'))
+            .where(
+                KnowledgeDirectory.knowledge_id == knowledge_id,
+                KnowledgeDirectory.id.in_(directory_ids),
+            )
+            .cte('knowledge_directory_subtree', recursive=True)
+        )
+        child = aliased(KnowledgeDirectory)
+        return subtree.union_all(select(subtree.c.root_id, child.id).where(child.parent_id == subtree.c.dir_id))
+
+    async def get_directory_rollups(
+        self,
+        knowledge_id: str,
+        directory_ids: list[str],
+        db: Optional[AsyncSession] = None,
+    ) -> dict[str, dict]:
+        """Recursive per-directory rollups for the files response (P2-8 decision 3).
+
+        Returns ``{directory_id: {'child_count': int, 'status_counts': {...}}}``
+        over each directory's whole subtree, bucketing ``file.meta.status``
+        exactly like the tree endpoint (``_STATUS_BUCKETS``). Directories with
+        no descendant files are absent — callers default to zeroed buckets.
+        """
+        if not directory_ids:
+            return {}
+        async with get_async_db_context(db) as db:
+            subtree = self._directory_subtree_cte(knowledge_id, directory_ids)
+            raw_status = cast(File.meta['status'], Text)
+            stmt = (
+                select(subtree.c.root_id, raw_status.label('raw_status'), func.count().label('cnt'))
+                .select_from(subtree)
+                .join(KnowledgeFile, KnowledgeFile.directory_id == subtree.c.dir_id)
+                .join(File, File.id == KnowledgeFile.file_id)
+                .where(KnowledgeFile.knowledge_id == knowledge_id)
+                .group_by(subtree.c.root_id, raw_status)
+            )
+            rollups: dict[str, dict] = {}
+            for root_id, raw, cnt in (await db.execute(stmt)).all():
+                entry = rollups.setdefault(root_id, {'child_count': 0, 'status_counts': _empty_status_counts()})
+                entry['child_count'] += cnt
+                entry['status_counts'][_status_bucket(_unwrap_json_text(raw))] += cnt
+            return rollups
+
+    async def get_file_ids_in_directory_subtree(
+        self,
+        knowledge_id: str,
+        directory_id: str,
+        db: Optional[AsyncSession] = None,
+    ) -> list[str]:
+        """All file ids linked anywhere in a directory's subtree (P2-8 ledger #4).
+
+        Consumed by ``DeletionService.delete_directory`` to run the full fork
+        cascade over "delete directory + contents".
+        """
+        async with get_async_db_context(db) as db:
+            subtree = self._directory_subtree_cte(knowledge_id, [directory_id])
+            stmt = (
+                select(KnowledgeFile.file_id)
+                .distinct()
+                .select_from(subtree)
+                .join(KnowledgeFile, KnowledgeFile.directory_id == subtree.c.dir_id)
+                .where(KnowledgeFile.knowledge_id == knowledge_id)
+            )
+            return [row[0] for row in (await db.execute(stmt)).all()]
+
     async def get_directory_by_id(
         self, directory_id: str, db: Optional[AsyncSession] = None
     ) -> Optional[KnowledgeDirectoryModel]:
@@ -2177,8 +1989,13 @@ class KnowledgeTable:
                     # Delete files in this directory and all subdirectories
                     await self._delete_files_in_subtree(directory_id, db=db)
 
-                # CASCADE on parent_id will handle deleting subdirectories
-                await db.execute(delete(KnowledgeDirectory).filter_by(id=directory_id))
+                # Delete the whole directory subtree explicitly. The FK's
+                # ON DELETE CASCADE would cover this on Postgres, but SQLite
+                # runs without PRAGMA foreign_keys, so relying on it there
+                # would orphan the subdirectory rows.
+                subtree = self._directory_subtree_cte(directory.knowledge_id, [directory_id])
+                subtree_ids = [row[0] for row in (await db.execute(select(subtree.c.dir_id).distinct())).all()]
+                await db.execute(delete(KnowledgeDirectory).filter(KnowledgeDirectory.id.in_(subtree_ids)))
                 await db.commit()
                 return True
             except Exception as e:

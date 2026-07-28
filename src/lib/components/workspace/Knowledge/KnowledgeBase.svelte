@@ -1,41 +1,40 @@
 <script lang="ts">
-	import Fuse from 'fuse.js';
 	import { toast } from 'svelte-sonner';
 	import { v4 as uuidv4 } from 'uuid';
 	import dayjs from 'dayjs';
 	import relativeTime from 'dayjs/plugin/relativeTime';
-	import { PaneGroup, Pane, PaneResizer } from 'paneforge';
 
 	dayjs.extend(relativeTime);
 
 	import { onMount, getContext, onDestroy, tick } from 'svelte';
 	import { get } from 'svelte/store';
-	const i18n = getContext('i18n');
+	import type { Writable } from 'svelte/store';
+	import type { i18n as i18nType } from 'i18next';
+
+	const i18n = getContext<Writable<i18nType>>('i18n');
 
 	import { goto } from '$app/navigation';
 	import { page } from '$app/stores';
-	import {
-		mobile,
-		showSidebar,
-		knowledge as _knowledge,
-		config,
-		user,
-		settings,
-		socket
-	} from '$lib/stores';
+	import { config, user, settings, socket } from '$lib/stores';
 
-	import { uploadFile, deleteFileById } from '$lib/apis/files';
+	import { uploadFile } from '$lib/apis/files';
 	import {
 		addFileToKnowledgeById,
 		getKnowledgeById,
 		removeFileFromKnowledgeById,
 		resetKnowledgeById,
-		updateFileFromKnowledgeById,
 		updateKnowledgeById,
 		updateKnowledgeAccessGrants,
-		searchKnowledgeFilesById
+		searchKnowledgeFilesById,
+		createKnowledgeDirectory,
+		updateKnowledgeDirectory,
+		deleteKnowledgeDirectory,
+		moveFileInKnowledge,
+		syncKnowledgeDiff,
+		syncKnowledgeCleanup,
+		testExternalKnowledgeRetrieval
 	} from '$lib/apis/knowledge';
-	import { processWeb, processYoutubeVideo } from '$lib/apis/retrieval';
+	import { processWeb } from '$lib/apis/retrieval';
 	import {
 		createSyncApi,
 		type SyncStatusResponse,
@@ -56,25 +55,26 @@
 	import ConfluencePickerModal from './ConfluencePickerModal.svelte';
 	import { WEBUI_API_BASE_URL } from '$lib/constants';
 
-	import { blobToFile, isYoutubeUrl } from '$lib/utils';
+	import { blobToFile, copyToClipboard } from '$lib/utils';
+	import { computeFileHash } from '$lib/utils/hash';
 
 	import Spinner from '$lib/components/common/Spinner.svelte';
 	import Files from './KnowledgeBase/Files.svelte';
-	import SourceGroupedFiles from './KnowledgeBase/SourceGroupedFiles.svelte';
-	import LazyKnowledgeTree from './KnowledgeBase/LazyKnowledgeTree.svelte';
-	import LazyKnowledgeSearch from './KnowledgeBase/LazyKnowledgeSearch.svelte';
 	import KbSelectionHeader from './KnowledgeBase/KbSelectionHeader.svelte';
 	import { createKbSelection } from './KnowledgeBase/selection';
 	import SyncProgress from './KnowledgeBase/SyncProgress.svelte';
-	import AddFilesPlaceholder from '$lib/components/AddFilesPlaceholder.svelte';
 	import { buildSyncToast } from './utils/syncToast';
+	import { canEditStructure, isLocalKnowledgeType } from './utils/structure';
 
 	import AddContentMenu from './KnowledgeBase/AddContentMenu.svelte';
 	import AddTextContentModal from './KnowledgeBase/AddTextContentModal.svelte';
+	import NewDirectoryModal from './KnowledgeBase/NewDirectoryModal.svelte';
+	import KnowledgeBreadcrumbs from './KnowledgeBase/KnowledgeBreadcrumbs.svelte';
 	import EmptyStateCards from './KnowledgeBase/EmptyStateCards.svelte';
 	import Badge from '$lib/components/common/Badge.svelte';
 
 	import SyncConfirmDialog from '../../common/ConfirmDialog.svelte';
+	import ConfirmDialog from '../../common/ConfirmDialog.svelte';
 	import FileItemModal from '$lib/components/common/FileItemModal.svelte';
 	import ChevronLeft from '$lib/components/icons/ChevronLeft.svelte';
 	import LockClosed from '$lib/components/icons/LockClosed.svelte';
@@ -86,6 +86,9 @@
 	import Search from '$lib/components/icons/Search.svelte';
 	import FilesOverlay from '$lib/components/chat/MessageInput/FilesOverlay.svelte';
 	import DropdownOptions from '$lib/components/common/DropdownOptions.svelte';
+	import Dropdown from '$lib/components/common/Dropdown.svelte';
+	import Checkbox from '$lib/components/common/Checkbox.svelte';
+	import AdjustmentsHorizontal from '$lib/components/icons/AdjustmentsHorizontal.svelte';
 	import Pagination from '$lib/components/common/Pagination.svelte';
 	import AttachWebpageModal from '$lib/components/chat/MessageInput/AttachWebpageModal.svelte';
 
@@ -217,18 +220,10 @@
 	$: activeProvider = knowledge?.type ? (CLOUD_PROVIDERS[knowledge.type] ?? null) : null;
 	$: activeState = activeProvider ? cloudSyncState[activeProvider.type] : null;
 
-	// Lazy per-folder tree (Tier 2): render cloud-KB folders from the paginated
-	// /tree endpoint instead of eagerly loading every file. On by default for
-	// cloud KBs that expose folder sources; set localStorage.lazyKnowledgeTree
-	// ='false' to fall back to the load-all SourceGroupedFiles tree (no redeploy).
-	const lazyTreeFlag =
-		typeof localStorage !== 'undefined'
-			? localStorage.getItem('lazyKnowledgeTree') !== 'false'
-			: true;
-	$: lazyTreeActive =
-		lazyTreeFlag &&
-		!!activeProvider &&
-		(knowledge?.meta?.[activeProvider.metaKey]?.sources?.length ?? 0) > 0;
+	// Single derived guard for all structure-write affordances (decision 5) —
+	// local/untyped KBs with write access only. Cloud KBs browse the
+	// sync-written directory structure read-only; push KBs are browse-only.
+	$: structureEditable = canEditStructure(knowledge);
 
 	let largeScreen = true;
 
@@ -237,10 +232,18 @@
 
 	let showAddWebpageModal = false;
 	let showAddTextContentModal = false;
+	let showNewDirectoryModal = false;
 
 	let showSyncConfirmModal = false;
 	let showCancelSyncConfirmModal = false;
 	let showAccessControlModal = false;
+	let showResetConfirm = false;
+
+	// Local-directory upload/sync pipeline (upstream v0.10.2)
+	type DirectoryFileEntry = { path: string; filename: string; file: File };
+	type DirectoryManifestEntry = DirectoryFileEntry & { checksum: string; size: number };
+	let pendingSyncFiles: DirectoryFileEntry[] | null = null;
+	let syncing: string | null = null;
 
 	let minSize = 0;
 	type Knowledge = {
@@ -274,6 +277,7 @@
 	let inputFiles = null;
 
 	let query = '';
+	let includeContent = false;
 	let searchDebounceTimer: ReturnType<typeof setTimeout>;
 
 	let viewOption = null;
@@ -284,27 +288,57 @@
 	let fileItems = null;
 	let fileItemsTotal = null;
 
+	// Directory state (upstream per-level browsing)
+	let currentDirectoryId: string | null = null;
+	let directoryItems: any[] = [];
+	let breadcrumbs: { id: string; name: string }[] = [];
+	// KB-wide file total for the cloud quota header (fileItemsTotal is
+	// level/search-scoped in per-level browsing).
+	let kbFileTotal: number | null = null;
+
+	let showDeleteDirectoryConfirm = false;
+	let pendingDeleteDirectoryId: string | null = null;
+	let deleteDirectoryContents = true;
+
+	// External (query-only) KB panel
+	let externalTestQuery = '';
+	let externalTestResult: {
+		documents?: string[];
+		metadatas?: Record<string, any>[];
+		distances?: number[];
+	} | null = null;
+	$: isExternalKnowledge = knowledge?.meta?.source === 'external';
+
 	let loaded = false;
 	let queryDebounceActive = false;
 	let fetchId = 0;
 
-	// Bumped on every mutation that init() handles (delete / remove-source /
-	// sync completion / content edit) so LazyKnowledgeTree re-fetches what's open.
-	let treeRefresh = 0;
-
-	// Coalesced tree refresh for per-file events. In lazy mode the per-file
-	// socket handlers mutate fileItems, which the tree ignores — the only way
-	// spinners resolve live is a tree re-fetch. Each burst of events triggers
-	// at most one refresh per 2s, independent of isSyncing, so late
+	// Coalesced view refresh for per-file events. Server-rendered rows only
+	// resolve their spinners via a level re-fetch. Each burst of events
+	// triggers at most one refresh per 2s, independent of isSyncing, so late
 	// completions (files queued behind another KB's pipeline job) still flip.
 	let treeRefreshTimer: ReturnType<typeof setTimeout> | null = null;
 	const scheduleTreeRefresh = () => {
-		if (!lazyTreeActive || treeRefreshTimer) return;
+		if (treeRefreshTimer) return;
 		treeRefreshTimer = setTimeout(() => {
 			treeRefreshTimer = null;
-			treeRefresh += 1;
+			getItemsPage();
 		}, 2000);
 	};
+
+	// While a cloud sync runs, poll the current level every 4s — socket
+	// events cover most flips; this catches drops and rollup-count drift.
+	const SYNC_LEVEL_POLL_MS = 4000;
+	let syncLevelPoll: ReturnType<typeof setInterval> | null = null;
+	$: {
+		const wantPoll = loaded && (activeState?.isSyncing ?? false);
+		if (wantPoll && !syncLevelPoll) {
+			syncLevelPoll = setInterval(() => getItemsPage(), SYNC_LEVEL_POLL_MS);
+		} else if (!wantPoll && syncLevelPoll) {
+			clearInterval(syncLevelPoll);
+			syncLevelPoll = null;
+		}
+	}
 
 	// Multiselect (bulk delete) model — shared across all three list views.
 	const selection = createKbSelection();
@@ -316,8 +350,8 @@
 	} = selection;
 	let showBulkRemoveConfirm = false;
 
-	// Clear the selection when the search query changes — the filtered / lazy-search
-	// view has no checkboxes, so a lingering selection would strand there.
+	// Clear the selection when the search query changes — search mode renders
+	// a different row set, so a lingering selection would strand there.
 	let lastSelQuery = '';
 	$: if (query !== lastSelQuery) {
 		lastSelQuery = query;
@@ -330,14 +364,13 @@
 
 	const init = async () => {
 		reset();
-		treeRefresh += 1;
 		await getItemsPage();
 	};
 
 	// Consolidated reactive block — mirrors Knowledge.svelte list view pattern
 	$: if (loaded && knowledgeId !== null) {
 		// Track all dependencies explicitly
-		(void query, viewOption, sortKey, direction, currentPage);
+		(void query, viewOption, sortKey, direction, currentPage, includeContent);
 
 		if (queryDebounceActive) {
 			// User is typing — debounce
@@ -363,46 +396,56 @@
 		}
 
 		const isCloudKb = knowledge?.type && knowledge.type !== 'local';
-		const cloudLimit = isCloudKb
-			? $config?.integration_providers?.[knowledge.type]?.max_files_per_kb ||
-				$config?.features?.knowledge_max_file_count ||
-				10000
-			: null;
-		// In lazy mode the tree (no query) and the flat search (query) components
-		// both self-fetch — so here we only need a cheap, query-independent KB
-		// total (limit=1, metadata-only, no de-TOAST) to keep the quota header
-		// (fileItemsTotal) accurate. Skips the eager full-file load entirely.
-		const res = lazyTreeActive
-			? await searchKnowledgeFilesById(
-					localStorage.token,
-					knowledge.id,
-					'',
-					null,
-					null,
-					null,
-					1,
-					1,
-					true
-				).catch(() => null)
-			: await searchKnowledgeFilesById(
-					localStorage.token,
-					knowledge.id,
-					query,
-					viewOption,
-					sortKey,
-					direction,
-					currentPage,
-					cloudLimit,
-					true
-				).catch(() => null);
+
+		// Upstream per-level browsing: one call returns the level's files
+		// (30/page), child directories and breadcrumbs. With a query the
+		// search goes KB-wide and flat (decision 4) — directory rows are
+		// hidden and each hit renders its meta.relative_path breadcrumb.
+		// Cloud/push KBs additionally need a cheap KB-wide total (limit=1,
+		// metadata-only) to keep the quota header honest — fileItemsTotal
+		// is level-scoped here.
+		const isSearching = !!query;
+		const [res, totalRes] = await Promise.all([
+			searchKnowledgeFilesById(
+				localStorage.token,
+				knowledge.id,
+				query,
+				viewOption,
+				sortKey,
+				direction,
+				currentPage,
+				null,
+				true,
+				isSearching ? undefined : (currentDirectoryId ?? null),
+				isSearching ? includeContent : false
+			).catch(() => null),
+			isCloudKb
+				? searchKnowledgeFilesById(
+						localStorage.token,
+						knowledge.id,
+						'',
+						null,
+						null,
+						null,
+						1,
+						1,
+						true
+					).catch(() => null)
+				: Promise.resolve(null)
+		]);
 
 		if (currentFetchId !== fetchId) return; // Stale response, discard
 
 		if (res) {
-			// In lazy mode keep fileItems non-null (so the render guard passes) but
-			// empty — the tree/search components own rendering and ignore this array.
-			fileItems = lazyTreeActive ? [] : res.items;
+			fileItems = res.items;
 			fileItemsTotal = res.total;
+			if (!isSearching) {
+				directoryItems = res.directories ?? [];
+				breadcrumbs = res.breadcrumbs ?? [];
+			}
+		}
+		if (totalRes) {
+			kbFileTotal = totalRes.total;
 		}
 		queryDebounceActive = false;
 		return res;
@@ -572,6 +615,9 @@
 		try {
 			let metadata = {
 				knowledge_id: knowledge.id,
+				// Place the upload in the directory the user is browsing
+				// (null = KB root; the backend derives relative_path from it).
+				directory_id: currentDirectoryId,
 				// If the file is an audio file, provide the language for STT.
 				...((file.type.startsWith('audio/') || file.type.startsWith('video/')) &&
 				$settings?.audio?.stt?.language
@@ -650,174 +696,18 @@
 	};
 
 	const uploadDirectoryHandler = async () => {
-		// Check if File System Access API is supported
-		const isFileSystemAccessSupported = 'showDirectoryPicker' in window;
-
-		try {
-			if (isFileSystemAccessSupported) {
-				// Modern browsers (Chrome, Edge) implementation
-				await handleModernBrowserUpload();
-			} else {
-				// Firefox fallback
-				await handleFirefoxUpload();
-			}
-		} catch (error) {
-			handleUploadError(error);
+		// Structure-preserving upload: collect entries with their relative
+		// paths, mirror the folder structure as knowledge_directory rows,
+		// then upload each file into its directory.
+		const entries = filterAllowedEntries(await collectDirectoryEntries());
+		if (entries?.length) {
+			await uploadDirectoryEntries(entries);
 		}
 	};
 
 	// Helper function to check if a path contains hidden folders
 	const hasHiddenFolder = (path) => {
 		return path.split('/').some((part) => part.startsWith('.'));
-	};
-
-	// Recursively collects all non-hidden files from a directory handle
-	async function collectDirectoryFiles(
-		dirHandle: FileSystemDirectoryHandle,
-		path = ''
-	): Promise<File[]> {
-		const files: File[] = [];
-		for await (const entry of dirHandle.values()) {
-			if (entry.name.startsWith('.')) continue;
-			const entryPath = path ? `${path}/${entry.name}` : entry.name;
-			if (hasHiddenFolder(entryPath)) continue;
-
-			if (entry.kind === 'file') {
-				const file = await entry.getFile();
-				files.push(new File([file], entryPath, { type: file.type }));
-			} else if (entry.kind === 'directory') {
-				files.push(...(await collectDirectoryFiles(entry, entryPath)));
-			}
-		}
-		return files;
-	}
-
-	// Collects all File objects from a DataTransfer drop (files and recursive directories)
-	async function collectDroppedFiles(items: DataTransferItemList): Promise<File[]> {
-		const files: File[] = [];
-
-		const readEntry = (entry: FileSystemEntry): Promise<void> => {
-			return new Promise((resolve) => {
-				if (entry.isFile) {
-					(entry as FileSystemFileEntry).file((file) => {
-						files.push(file);
-						resolve();
-					});
-				} else if (entry.isDirectory) {
-					const reader = (entry as FileSystemDirectoryEntry).createReader();
-					reader.readEntries(
-						async (entries) => {
-							await Promise.all(entries.map(readEntry));
-							resolve();
-						},
-						() => resolve()
-					);
-				} else {
-					resolve();
-				}
-			});
-		};
-
-		const entries: FileSystemEntry[] = [];
-		for (let i = 0; i < items.length; i++) {
-			const entry = items[i].webkitGetAsEntry();
-			if (entry) entries.push(entry);
-		}
-
-		await Promise.all(entries.map(readEntry));
-		return files;
-	}
-
-	// Modern browsers implementation using File System Access API
-	const handleModernBrowserUpload = async () => {
-		const dirHandle = await window.showDirectoryPicker();
-		const files = await collectDirectoryFiles(dirHandle);
-
-		if (files.length === 0) {
-			console.log('No files to upload.');
-			return;
-		}
-
-		toast.info(
-			$i18n.t('Upload Progress: {{uploadedFiles}}/{{totalFiles}} ({{percentage}}%)', {
-				uploadedFiles: 0,
-				totalFiles: files.length,
-				percentage: '0.00'
-			})
-		);
-
-		await uploadFiles(files, {
-			onProgress: (done, total) => {
-				const percentage = ((done / total) * 100).toFixed(2);
-				toast.info(
-					$i18n.t('Upload Progress: {{uploadedFiles}}/{{totalFiles}} ({{percentage}}%)', {
-						uploadedFiles: done,
-						totalFiles: total,
-						percentage
-					})
-				);
-			}
-		});
-	};
-
-	// Firefox fallback implementation using traditional file input
-	const handleFirefoxUpload = async () => {
-		return new Promise<void>((resolve, reject) => {
-			const input = document.createElement('input');
-			input.type = 'file';
-			input.webkitdirectory = true;
-			input.directory = true;
-			input.multiple = true;
-			input.style.display = 'none';
-			document.body.appendChild(input);
-
-			input.onchange = async () => {
-				try {
-					const files = Array.from(input.files)
-						.filter((file) => !hasHiddenFolder(file.webkitRelativePath))
-						.filter((file) => !file.name.startsWith('.'))
-						.map((file) => {
-							const relativePath = file.webkitRelativePath || file.name;
-							return new File([file], relativePath, { type: file.type });
-						});
-
-					if (files.length > 0) {
-						toast.info(
-							$i18n.t('Upload Progress: {{uploadedFiles}}/{{totalFiles}} ({{percentage}}%)', {
-								uploadedFiles: 0,
-								totalFiles: files.length,
-								percentage: '0.00'
-							})
-						);
-
-						await uploadFiles(files, {
-							onProgress: (done, total) => {
-								const percentage = ((done / total) * 100).toFixed(2);
-								toast.info(
-									$i18n.t('Upload Progress: {{uploadedFiles}}/{{totalFiles}} ({{percentage}}%)', {
-										uploadedFiles: done,
-										totalFiles: total,
-										percentage
-									})
-								);
-							}
-						});
-					}
-
-					document.body.removeChild(input);
-					resolve();
-				} catch (error) {
-					reject(error);
-				}
-			};
-
-			input.onerror = (error) => {
-				document.body.removeChild(input);
-				reject(error);
-			};
-
-			input.click();
-		});
 	};
 
 	// Error handler
@@ -830,22 +720,295 @@
 		}
 	};
 
-	// Helper function to maintain file paths within zip
-	const syncDirectoryHandler = async () => {
-		if (fileItems.length > 0) {
-			const res = await resetKnowledgeById(localStorage.token, id).catch((e) => {
-				toast.error(`${e}`);
-			});
+	// ===== Structure-preserving directory upload + incremental sync (upstream v0.10.2) =====
 
-			if (res) {
-				fileItems = [];
-				toast.success($i18n.t('Knowledge reset successfully.'));
+	// Collect files (with their relative paths) from a picked directory
+	// without uploading. Feeds the structure-preserving upload + sync flows.
+	const collectDirectoryEntries = async (): Promise<DirectoryFileEntry[] | null> => {
+		const isFileSystemAccessSupported = 'showDirectoryPicker' in window;
 
-				// Upload directory
-				uploadDirectoryHandler();
+		try {
+			if (isFileSystemAccessSupported) {
+				const dirHandle = await window.showDirectoryPicker();
+				const collected: DirectoryFileEntry[] = [];
+
+				const traverse = async (handle: FileSystemDirectoryHandle, dirPath = '') => {
+					for await (const entry of handle.values()) {
+						if (entry.name.startsWith('.')) continue;
+						const entryPath = dirPath ? `${dirPath}/${entry.name}` : entry.name;
+						if (hasHiddenFolder(entryPath)) continue;
+
+						if (entry.kind === 'file') {
+							const file = await entry.getFile();
+							collected.push({ path: dirPath, filename: entry.name, file });
+						} else if (entry.kind === 'directory') {
+							await traverse(entry, entryPath);
+						}
+					}
+				};
+
+				await traverse(dirHandle, dirHandle.name);
+				return collected;
+			} else {
+				// Firefox fallback
+				return new Promise((resolve, reject) => {
+					const input = document.createElement('input');
+					input.type = 'file';
+					input.webkitdirectory = true;
+					input.directory = true;
+					input.multiple = true;
+					input.style.display = 'none';
+					document.body.appendChild(input);
+
+					input.onchange = () => {
+						try {
+							const files = Array.from(input.files || []).filter(
+								(file) => !hasHiddenFolder(file.webkitRelativePath) && !file.name.startsWith('.')
+							);
+
+							const collected = files.map((file) => {
+								const parts = file.webkitRelativePath.split('/');
+								const filename = parts.pop() || file.name;
+								const path = parts.join('/');
+								return { path, filename, file };
+							});
+
+							document.body.removeChild(input);
+							resolve(collected);
+						} catch (error) {
+							document.body.removeChild(input);
+							reject(error);
+						}
+					};
+
+					input.onerror = (error) => {
+						document.body.removeChild(input);
+						reject(error);
+					};
+
+					input.click();
+				});
 			}
-		} else {
-			uploadDirectoryHandler();
+		} catch (error) {
+			handleUploadError(error);
+			return null;
+		}
+	};
+
+	// Client-side extension allow-list for directory entries — mirrors
+	// uploadFileHandler's gate, so a disallowed file never uploads in full
+	// before the server rejects it. Disallowed files can't be in the KB, so
+	// dropping them from a sync manifest is consistent with server state.
+	const filterAllowedEntries = (
+		entries: DirectoryFileEntry[] | null
+	): DirectoryFileEntry[] | null => {
+		if (!entries) return entries;
+		const allowedExtensions = ($config?.file?.allowed_extensions ?? []).filter((ext) => ext);
+		if (allowedExtensions.length === 0) return entries;
+
+		const kept = entries.filter(({ filename }) => {
+			const dotIndex = filename.lastIndexOf('.');
+			const extension = dotIndex > 0 ? filename.slice(dotIndex + 1).toLowerCase() : '';
+			return !extension || allowedExtensions.includes(extension);
+		});
+
+		const skipped = entries.length - kept.length;
+		if (skipped > 0) {
+			toast.warning(
+				$i18n.t('{{count}} file(s) skipped: file type not allowed.', { count: skipped })
+			);
+		}
+		return kept;
+	};
+
+	const buildDirectoryManifest = async (
+		entries: DirectoryFileEntry[]
+	): Promise<DirectoryManifestEntry[]> => {
+		return Promise.all(
+			entries.map(async (entry) => ({
+				...entry,
+				checksum: await computeFileHash(entry.file),
+				size: entry.file.size
+			}))
+		);
+	};
+
+	const createMissingDirectories = async (diff: any) => {
+		if (!knowledge) return {};
+
+		const directoryIdByPath: Record<string, string> = { ...(diff.directory_map || {}) };
+
+		for (const dirPath of diff.mkdir) {
+			const segments = dirPath.split('/');
+			const name = segments.at(-1)!;
+			const parentPath = segments.slice(0, -1).join('/');
+			const parentId = parentPath ? directoryIdByPath[parentPath] : null;
+
+			const directory = await createKnowledgeDirectory(
+				localStorage.token,
+				knowledge.id,
+				name,
+				parentId
+			);
+			if (directory) {
+				directoryIdByPath[dirPath] = directory.id;
+			}
+		}
+
+		return directoryIdByPath;
+	};
+
+	const getDirectoryUploadPath = (path: string) => {
+		const currentPath = breadcrumbs.map((crumb) => crumb.name).join('/');
+		return currentPath && path ? `${currentPath}/${path}` : currentPath || path;
+	};
+
+	// Upload a set of manifest entries with bounded concurrency (the fork's
+	// upload hardening), updating the `syncing` progress line as each lands.
+	const uploadManifestEntries = async (
+		entries: DirectoryManifestEntry[],
+		resolveDirectoryId: (entry: DirectoryManifestEntry) => string | null
+	) => {
+		const total = entries.length;
+		let done = 0;
+		const executing: Set<Promise<void>> = new Set();
+
+		for (const entry of entries) {
+			const fileObject = new File([entry.file], entry.filename, { type: entry.file.type });
+			const task = uploadFile(localStorage.token, fileObject, {
+				knowledge_id: knowledge.id,
+				file_hash: entry.checksum,
+				directory_id: resolveDirectoryId(entry)
+			})
+				.catch((e) => {
+					toast.error(`${e}`);
+					return null;
+				})
+				.then(() => {
+					done++;
+					const displayPath = entry.path ? `${entry.path}/${entry.filename}` : entry.filename;
+					syncing = $i18n.t('Uploading {{current}}/{{total}}: {{file}}', {
+						current: done,
+						total,
+						file: displayPath
+					});
+					executing.delete(task);
+				});
+			executing.add(task);
+
+			if (executing.size >= 5) {
+				await Promise.race(executing);
+			}
+		}
+
+		await Promise.all(executing);
+	};
+
+	const uploadDirectoryEntries = async (entries: DirectoryFileEntry[]) => {
+		if (!knowledge) return;
+
+		try {
+			syncing = $i18n.t('Computing checksums ({{count}} files)', { count: entries.length });
+			const manifest = await buildDirectoryManifest(entries);
+
+			syncing = $i18n.t('Comparing with knowledge base...');
+			const diff = await syncKnowledgeDiff(
+				localStorage.token,
+				id,
+				manifest.map(({ filename, path, checksum, size }) => ({
+					filename,
+					path: getDirectoryUploadPath(path),
+					checksum,
+					size
+				}))
+			);
+
+			if (!diff) {
+				toast.error($i18n.t('Failed to compare files.'));
+				return;
+			}
+
+			const directoryIdByPath = await createMissingDirectories(diff);
+
+			await uploadManifestEntries(manifest, (entry) =>
+				entry.path ? directoryIdByPath[getDirectoryUploadPath(entry.path)] : currentDirectoryId
+			);
+
+			toast.success($i18n.t('File uploaded successfully'));
+			init();
+		} catch (e) {
+			toast.error(`${e}`);
+		} finally {
+			syncing = null;
+		}
+	};
+
+	// Incremental sync: hash locally → diff on server → upload only what
+	// changed, remove what disappeared, mirror the folder structure.
+	const syncDirectoryHandler = async () => {
+		if (!structureEditable || !pendingSyncFiles?.length) return;
+
+		try {
+			syncing = $i18n.t('Computing checksums ({{count}} files)', {
+				count: pendingSyncFiles.length
+			});
+			const manifest = await buildDirectoryManifest(pendingSyncFiles);
+			pendingSyncFiles = null;
+
+			syncing = $i18n.t('Comparing with knowledge base...');
+			const diff = await syncKnowledgeDiff(
+				localStorage.token,
+				id,
+				manifest.map(({ filename, path, checksum, size }) => ({ filename, path, checksum, size }))
+			);
+
+			if (!diff) {
+				toast.error($i18n.t('Failed to compare files.'));
+				return;
+			}
+
+			// Cleanup — remove deleted + stale modified files first (routes
+			// through the fork's full deletion cascade server-side).
+			const staleFileIds = [
+				...diff.deleted.map((d: any) => d.file_id),
+				...diff.modified.map((m: any) => m.stale_file_id)
+			];
+
+			if (staleFileIds.length > 0 || diff.rmdir.length > 0) {
+				syncing = $i18n.t('Removing {{count}} stale files...', { count: staleFileIds.length });
+				await syncKnowledgeCleanup(localStorage.token, id, staleFileIds, diff.rmdir);
+			}
+
+			// Create missing directories (parents first)
+			const directoryIdByPath = await createMissingDirectories(diff);
+
+			// Upload added + modified files only
+			const filesToUpload = manifest.filter(
+				(entry) =>
+					diff.added.some((a: any) => a.filename === entry.filename && a.path === entry.path) ||
+					diff.modified.some((m: any) => m.filename === entry.filename && m.path === entry.path)
+			);
+
+			await uploadManifestEntries(filesToUpload, (entry) =>
+				entry.path ? directoryIdByPath[entry.path] : null
+			);
+
+			toast.success(
+				$i18n.t(
+					'Sync complete: {{added}} added, {{modified}} modified, {{deleted}} deleted, {{unmodified}} unmodified',
+					{
+						added: diff.added.length,
+						modified: diff.modified.length,
+						deleted: diff.deleted.length,
+						unmodified: diff.unmodified_count
+					}
+				)
+			);
+			init();
+		} catch (e) {
+			toast.error(`${e}`);
+		} finally {
+			syncing = null;
 		}
 	};
 
@@ -1658,7 +1821,12 @@
 	};
 
 	const addFileHandler = async (fileId, { batch = false } = {}) => {
-		const res = await addFileToKnowledgeById(localStorage.token, id, fileId).catch((e) => {
+		const res = await addFileToKnowledgeById(
+			localStorage.token,
+			id,
+			fileId,
+			currentDirectoryId
+		).catch((e) => {
 			toast.error(`${e}`);
 			return null;
 		});
@@ -1696,6 +1864,135 @@
 		} catch (e) {
 			console.error('Error in deleteFileHandler:', e);
 			toast.error(`${e}`);
+		}
+	};
+
+	// ===== Directory handlers (upstream per-level navigation + CRUD) =====
+
+	const navigateToDirectory = (directoryId: string | null) => {
+		currentDirectoryId = directoryId;
+		currentPage = 1;
+		selectedFileId = null;
+		selectedFile = null;
+		selection.clear();
+		getItemsPage();
+	};
+
+	const createDirectoryHandler = async (name: string) => {
+		if (!structureEditable) return;
+		const res = await createKnowledgeDirectory(
+			localStorage.token,
+			knowledge.id,
+			name,
+			currentDirectoryId
+		).catch((e) => {
+			toast.error(`${e}`);
+			return null;
+		});
+
+		if (res) {
+			toast.success($i18n.t('Directory created.'));
+			getItemsPage();
+		}
+	};
+
+	const renameDirectoryHandler = async (dirId: string, name: string) => {
+		if (!structureEditable) return;
+		const res = await updateKnowledgeDirectory(localStorage.token, knowledge.id, dirId, {
+			name
+		}).catch((e) => {
+			toast.error(`${e}`);
+			return null;
+		});
+
+		if (res) {
+			toast.success($i18n.t('Directory renamed.'));
+			getItemsPage();
+		}
+	};
+
+	const confirmDeleteDirectory = (dirId: string) => {
+		if (!structureEditable) return;
+		pendingDeleteDirectoryId = dirId;
+		showDeleteDirectoryConfirm = true;
+	};
+
+	const deleteDirectoryHandler = async (moveFiles: boolean) => {
+		if (!structureEditable || !pendingDeleteDirectoryId) return;
+
+		const res = await deleteKnowledgeDirectory(
+			localStorage.token,
+			knowledge.id,
+			pendingDeleteDirectoryId,
+			moveFiles
+		).catch((e) => {
+			toast.error(`${e}`);
+			return null;
+		});
+
+		if (res) {
+			toast.success($i18n.t('Directory deleted.'));
+			getItemsPage();
+		}
+		pendingDeleteDirectoryId = null;
+	};
+
+	const moveFilesToDirectoryHandler = async (fileIds: string[], directoryId: string | null) => {
+		if (!structureEditable || fileIds.length === 0) return;
+
+		let moved = 0;
+		for (const fileId of fileIds) {
+			const res = await moveFileInKnowledge(
+				localStorage.token,
+				knowledge.id,
+				fileId,
+				directoryId
+			).catch((e) => {
+				toast.error(`${e}`);
+				return null;
+			});
+			if (res) moved++;
+		}
+
+		if (moved > 0) {
+			toast.success(
+				moved === 1 ? $i18n.t('File moved.') : $i18n.t('Moved {{count}} files.', { count: moved })
+			);
+			selection.clear();
+			getItemsPage();
+		}
+	};
+
+	const moveDirectoryHandler = async (dirId: string, targetParentId: string | null) => {
+		if (!structureEditable || dirId === targetParentId) return;
+		const res = await updateKnowledgeDirectory(localStorage.token, knowledge.id, dirId, {
+			parent_id: targetParentId
+		}).catch((e) => {
+			toast.error(`${e}`);
+			return null;
+		});
+
+		if (res) {
+			toast.success($i18n.t('Directory moved.'));
+			getItemsPage();
+		}
+	};
+
+	const externalTestHandler = async () => {
+		if (!isExternalKnowledge || !externalTestQuery.trim()) return;
+
+		const external = knowledge?.meta?.external ?? {};
+		const res = await testExternalKnowledgeRetrieval(localStorage.token, external.connection_id, {
+			query: externalTestQuery,
+			source: external.source,
+			count: 5
+		}).catch((e) => {
+			toast.error(`${e}`);
+			return null;
+		});
+
+		if (res) {
+			externalTestResult = res;
 		}
 	};
 
@@ -1791,6 +2088,55 @@
 		dragged = false;
 	};
 
+	// Path-preserving traversal of dropped directory entries (upstream) —
+	// feeds uploadDirectoryEntries so dropped folders keep their structure.
+	const readDirectoryEntries = async (reader: any) => {
+		const entries: any[] = [];
+
+		for (;;) {
+			const batch = await new Promise<any[]>((resolve, reject) => {
+				reader.readEntries(resolve, reject);
+			});
+
+			if (batch.length === 0) {
+				break;
+			}
+
+			entries.push(...batch);
+		}
+
+		return entries;
+	};
+
+	const collectDroppedEntryFiles = async (
+		entry: any,
+		entryPath = entry.name
+	): Promise<DirectoryFileEntry[]> => {
+		if (entry.name.startsWith('.') || hasHiddenFolder(entryPath)) {
+			return [];
+		}
+
+		if (entry.isFile) {
+			const file = await new Promise<File>((resolve, reject) => {
+				entry.file(resolve, reject);
+			});
+			const parts = entryPath.split('/');
+			const filename = parts.pop() || file.name;
+			return [{ path: parts.join('/'), filename, file }];
+		}
+
+		if (entry.isDirectory) {
+			const reader = entry.createReader();
+			const entries = await readDirectoryEntries(reader);
+			const nested = await Promise.all(
+				entries.map((child) => collectDroppedEntryFiles(child, `${entryPath}/${child.name}`))
+			);
+			return nested.flat();
+		}
+
+		return [];
+	};
+
 	const onDrop = async (e) => {
 		e.preventDefault();
 		dragged = false;
@@ -1805,12 +2151,43 @@
 			return;
 		}
 
+		// Cloud-synced KBs on the upstream scaffold are browse-only — the sync
+		// pipeline owns their content and structure (decision 5). Legacy mode
+		// keeps its old permissive behavior until the kill-switch retires.
+		if (!isLocalKnowledgeType(knowledge?.type)) {
+			toast.error($i18n.t('Files in this knowledge base are managed by cloud sync.'));
+			return;
+		}
+
 		if (e.dataTransfer?.types?.includes('Files') && e.dataTransfer?.items) {
 			const inputItems = e.dataTransfer.items;
 			if (inputItems.length > 0) {
-				const files = await collectDroppedFiles(inputItems);
-				if (files.length > 0) {
-					await uploadFiles(files);
+				// Split loose files (fork concurrency pipeline) from dropped
+				// directories (structure-preserving pipeline).
+				const directoryEntries: DirectoryFileEntry[] = [];
+				const looseFiles: File[] = [];
+
+				for (const rawItem of Array.from(inputItems)) {
+					const item = rawItem as DataTransferItem & { webkitGetAsEntry?: () => any };
+					const entry = item.webkitGetAsEntry?.();
+
+					if (entry?.isDirectory) {
+						directoryEntries.push(...(await collectDroppedEntryFiles(entry)));
+					} else {
+						const file = item.getAsFile();
+						if (file) {
+							looseFiles.push(file);
+						}
+					}
+				}
+
+				if (looseFiles.length > 0) {
+					await uploadFiles(looseFiles);
+				}
+
+				const allowedEntries = filterAllowedEntries(directoryEntries);
+				if (allowedEntries?.length) {
+					await uploadDirectoryEntries(allowedEntries);
 				}
 			} else {
 				toast.error($i18n.t(`File not found.`));
@@ -1949,6 +2326,10 @@
 			clearTimeout(treeRefreshTimer);
 			treeRefreshTimer = null;
 		}
+		if (syncLevelPoll) {
+			clearInterval(syncLevelPoll);
+			syncLevelPoll = null;
+		}
 		mediaQuery?.removeEventListener('change', handleMediaQuery);
 		const dropZone = document.querySelector('body');
 		dropZone?.removeEventListener('dragover', onDragOver);
@@ -1969,14 +2350,6 @@
 		}
 		pollers.clear();
 	});
-
-	const decodeString = (str: string) => {
-		try {
-			return decodeURIComponent(str);
-		} catch (e) {
-			return str;
-		}
-	};
 </script>
 
 <svelte:window
@@ -1992,10 +2365,14 @@
 <SyncConfirmDialog
 	bind:show={showSyncConfirmModal}
 	message={$i18n.t(
-		'This will reset the knowledge base and sync all files. Do you wish to continue?'
+		'{{count}} files selected. Only new and modified files will be uploaded. Deleted files will be removed. The folder structure will be mirrored. Continue?',
+		{ count: pendingSyncFiles?.length ?? 0 }
 	)}
 	on:confirm={() => {
 		syncDirectoryHandler();
+	}}
+	on:cancel={() => {
+		pendingSyncFiles = null;
 	}}
 />
 
@@ -2044,6 +2421,13 @@
 	on:submit={(e) => {
 		const file = createFileFromText(e.detail.name, e.detail.content);
 		uploadFileHandler(file);
+	}}
+/>
+
+<NewDirectoryModal
+	bind:show={showNewDirectoryModal}
+	on:submit={(e) => {
+		createDirectoryHandler(e.detail.name);
 	}}
 />
 
@@ -2258,7 +2642,7 @@
 										total={activeState?.syncStatus?.progress_total ?? 0}
 										stageCounts={activeState?.syncStatus?.stage_counts}
 									/>
-								{:else if fileItemsTotal}
+								{:else if fileItemsTotal || kbFileTotal}
 									{#if knowledge?.type !== 'local' && knowledge?.type}
 										{@const maxFiles =
 											$config?.integration_providers?.[knowledge?.type]?.max_files_per_kb ||
@@ -2270,7 +2654,7 @@
 											})}
 										>
 											<div class="text-xs text-gray-500">
-												{fileItemsTotal} / {maxFiles}
+												{kbFileTotal ?? fileItemsTotal} / {maxFiles}
 												{$i18n.t('files')}
 											</div>
 										</Tooltip>
@@ -2313,17 +2697,17 @@
 						{/if}
 					</div>
 
-					<div class="flex w-full">
+					<div class="flex w-full items-center">
 						{#if knowledge?.meta?.confluence_sync?.shared}
 							<!-- The shared Confluence KB is system-managed — its
 							     description is a fixed, localized string. -->
-							<div class="text-left text-xs w-full text-gray-500">
+							<div class="text-left text-xs w-full text-gray-500 flex-1">
 								{$i18n.t('Read-only Confluence knowledge base managed by administrators.')}
 							</div>
 						{:else}
 							<input
 								type="text"
-								class="text-left text-xs w-full text-gray-500 bg-transparent outline-hidden"
+								class="text-left text-xs w-full text-gray-500 bg-transparent outline-hidden flex-1"
 								bind:value={knowledge.description}
 								aria-label={$i18n.t('Knowledge Description')}
 								placeholder={$i18n.t('Knowledge Description')}
@@ -2333,6 +2717,20 @@
 								}}
 							/>
 						{/if}
+
+						<div class="hidden md:block">
+							<Tooltip content={$i18n.t('Click to copy ID')}>
+								<button
+									class="text-xs text-gray-500 font-mono shrink-0 px-2 py-1 rounded-lg cursor-pointer hover:underline transition whitespace-nowrap"
+									on:click={() => {
+										copyToClipboard(id);
+										toast.success($i18n.t('ID copied to clipboard'));
+									}}
+								>
+									{id}
+								</button>
+							</Tooltip>
+						</div>
 					</div>
 				</div>
 			</div>
@@ -2341,305 +2739,434 @@
 		<div
 			class="mt-2 mb-2.5 py-2 -mx-0 bg-white dark:bg-gray-900 rounded-3xl border border-gray-100/30 dark:border-gray-850/30 flex-1 flex flex-col overflow-hidden min-h-0"
 		>
-			<div class="px-3.5 flex shrink-0 items-center w-full space-x-2 py-0.5 pb-2">
-				<div class="flex flex-1 items-center">
-					<div class=" self-center ml-1 mr-3">
-						<Search className="size-3.5" />
-					</div>
-					<input
-						class=" w-full text-sm pr-4 py-1 rounded-r-xl outline-hidden bg-transparent"
-						bind:value={query}
-						aria-label={$i18n.t('Search Collection')}
-						placeholder={$i18n.t('Search Collection')}
-						on:input={() => {
-							queryDebounceActive = true;
-						}}
-						on:focus={() => {
-							selectedFileId = null;
-						}}
-					/>
-
-					{#if knowledge?.write_access}
-						<div>
-							{#if activeProvider}
-								<Tooltip content={$i18n.t('Sync from {{label}}', { label: activeProvider.label })}>
-									<button
-										class="p-1.5 rounded-xl hover:bg-gray-100 dark:bg-gray-850 dark:hover:bg-gray-800 transition font-medium text-sm flex items-center space-x-1 disabled:opacity-40 disabled:cursor-not-allowed"
-										disabled={isSyncBusy}
-										on:click={() => {
-											cloudSyncHandler(activeProvider);
-										}}
-									>
-										<svg
-											xmlns="http://www.w3.org/2000/svg"
-											viewBox="0 0 16 16"
-											fill="currentColor"
-											class="w-4 h-4"
-										>
-											<path
-												d="M8.75 3.75a.75.75 0 0 0-1.5 0v3.5h-3.5a.75.75 0 0 0 0 1.5h3.5v3.5a.75.75 0 0 0 1.5 0v-3.5h3.5a.75.75 0 0 0 0-1.5h-3.5v-3.5Z"
-											/>
-										</svg>
-									</button>
-								</Tooltip>
-							{:else if $config?.integration_providers?.[knowledge?.type]}
-								<!-- No add button for push providers -- files come via API -->
-							{:else}
-								<AddContentMenu
-									onUpload={(data) => {
-										if (data.type === 'directory') {
-											uploadDirectoryHandler();
-										} else if (data.type === 'web') {
-											showAddWebpageModal = true;
-										} else if (data.type === 'text') {
-											showAddTextContentModal = true;
-										} else {
-											document.getElementById('files-input').click();
-										}
-									}}
-									onSync={() => {
-										showSyncConfirmModal = true;
-									}}
-								/>
-							{/if}
+			{#if isExternalKnowledge}
+				<div class="p-5 flex flex-col gap-4">
+					<div class="flex flex-wrap gap-2 text-xs">
+						<div class="px-2 py-1 rounded-lg bg-gray-50 dark:bg-gray-850">
+							{$i18n.t('Connected')}
 						</div>
-					{/if}
-				</div>
-			</div>
-
-			<div class="px-3 flex justify-between">
-				<div
-					class="flex w-full bg-transparent overflow-x-auto scrollbar-none"
-					on:wheel={(e) => {
-						if (e.deltaY !== 0) {
-							e.preventDefault();
-							e.currentTarget.scrollLeft += e.deltaY;
-						}
-					}}
-				>
-					<div
-						class="flex gap-3 w-fit text-center text-sm rounded-full bg-transparent px-0.5 whitespace-nowrap"
-					>
-						<DropdownOptions
-							align="start"
-							className="flex shrink-0 items-center gap-2 px-3 py-1.5 text-sm bg-gray-50 dark:bg-gray-850 rounded-xl placeholder-gray-400 outline-hidden focus:outline-hidden"
-							bind:value={viewOption}
-							items={[
-								{ value: null, label: $i18n.t('All') },
-								{ value: 'created', label: $i18n.t('Created by you') },
-								{ value: 'shared', label: $i18n.t('Shared with you') }
-							]}
-							onChange={(value) => {
-								if (value) {
-									localStorage.workspaceViewOption = value;
-								} else {
-									delete localStorage.workspaceViewOption;
-								}
-							}}
-						/>
-
-						<DropdownOptions
-							align="start"
-							bind:value={sortKey}
-							placeholder={$i18n.t('Sort')}
-							items={[
-								{ value: 'name', label: $i18n.t('Name') },
-								{ value: 'created_at', label: $i18n.t('Created At') },
-								{ value: 'updated_at', label: $i18n.t('Updated At') }
-							]}
-						/>
-
-						{#if sortKey}
-							<DropdownOptions
-								align="start"
-								bind:value={direction}
-								items={[
-									{ value: 'asc', label: $i18n.t('Asc') },
-									{ value: null, label: $i18n.t('Desc') }
-								]}
-							/>
-						{/if}
+						<div class="px-2 py-1 rounded-lg bg-gray-50 dark:bg-gray-850">
+							{$i18n.t('Read Only')}
+						</div>
+						<div class="px-2 py-1 rounded-lg bg-gray-50 dark:bg-gray-850">
+							{knowledge?.meta?.external?.provider ?? $i18n.t('Provider')}
+						</div>
+						<div class="px-2 py-1 rounded-lg bg-gray-50 dark:bg-gray-850">
+							{$i18n.t('Service Account')}
+						</div>
 					</div>
-				</div>
-			</div>
 
-			{#if fileItems !== null && fileItemsTotal !== null}
-				<div class="flex flex-row flex-1 min-h-0 gap-3 px-2.5 mt-2">
-					<div class="flex-1 flex">
-						<div class=" flex flex-col w-full space-x-2 rounded-lg h-full">
-							<div class="w-full h-full flex flex-col min-h-0">
-								{#if knowledge?.write_access && !(lazyTreeActive && query) && (lazyTreeActive || (fileItems && fileItems.length > 0))}
-									<div class="pb-1.5 shrink-0">
-										<KbSelectionHeader
-											count={$bulkCount}
-											allSelected={$bulkAllSelected}
-											indeterminate={$bulkIndeterminate}
-											onToggleSelectAll={() => selection.toggleSelectAll()}
-											onDelete={() => (showBulkRemoveConfirm = true)}
-										/>
-									</div>
-								{/if}
-								{#if lazyTreeActive && !query}
-									<div class=" flex overflow-y-auto h-full w-full scrollbar-hidden text-xs">
-										<LazyKnowledgeTree
-											{knowledge}
-											{selectedFileId}
-											isSyncing={activeState?.isSyncing ?? false}
-											refreshSignal={treeRefresh}
-											onClick={(file) => {
-												selectedFileId = file.id;
-												openFilePreview({
-													id: file.id,
-													name: file.name,
-													meta: { name: file.name, size: file.size }
-												});
-											}}
-											onRemoveSource={(itemId, sourceName) => {
-												selectedFileId = null;
-												selectedFile = null;
-												// lazyTreeActive guarantees activeProvider is set; guard keeps TS happy.
-												if (activeProvider) {
-													removeCloudSourceHandler(activeProvider, itemId, sourceName);
-												}
-											}}
-											onDelete={(fileId) => {
-												selectedFileId = null;
-												selectedFile = null;
-												deleteFileHandler(fileId);
-											}}
-											selection={knowledge?.write_access ? selection : null}
-										/>
-									</div>
-								{:else if lazyTreeActive && query}
-									<div class=" flex overflow-y-auto h-full w-full scrollbar-hidden text-xs">
-										<LazyKnowledgeSearch
-											{knowledge}
-											{query}
-											{selectedFileId}
-											onClick={(file) => {
-												selectedFileId = file.id;
-												openFilePreview({
-													id: file.id,
-													name: file.name,
-													meta: { name: file.name, size: file.size }
-												});
-											}}
-										/>
-									</div>
-								{:else if fileItems.length > 0}
-									<div class=" flex overflow-y-auto h-full w-full scrollbar-hidden text-xs">
-										{#if activeProvider && knowledge?.meta?.[activeProvider.metaKey]?.sources?.length}
-											<SourceGroupedFiles
-												sources={knowledge.meta[activeProvider.metaKey].sources}
-												files={fileItems}
-												{knowledge}
-												{selectedFileId}
-												isSyncing={activeState?.isSyncing ?? false}
-												totalFiles={fileItemsTotal}
-												onClick={(fileId) => {
-													selectedFileId = fileId;
-
-													if (fileItems) {
-														const file = fileItems.find((file) => file.id === selectedFileId);
-														if (file) {
-															openFilePreview(file);
-														} else {
-															selectedFile = null;
-														}
-													}
-												}}
-												onRemoveSource={(itemId, sourceName) => {
-													selectedFileId = null;
-													selectedFile = null;
-													removeCloudSourceHandler(activeProvider, itemId, sourceName);
-												}}
-												onDelete={(fileId) => {
-													selectedFileId = null;
-													selectedFile = null;
-													deleteFileHandler(fileId);
-												}}
-												selection={knowledge?.write_access ? selection : null}
-											/>
-										{:else}
-											<Files
-												files={fileItems}
-												{knowledge}
-												{selectedFileId}
-												onClick={(fileId) => {
-													selectedFileId = fileId;
-
-													if (fileItems) {
-														const file = fileItems.find((file) => file.id === selectedFileId);
-														if (file) {
-															openFilePreview(file);
-														} else {
-															selectedFile = null;
-														}
-													}
-												}}
-												onDelete={(fileId) => {
-													selectedFileId = null;
-													selectedFile = null;
-
-													deleteFileHandler(fileId);
-												}}
-												selection={knowledge?.write_access ? selection : null}
-											/>
-										{/if}
-									</div>
-
-									{#if !activeProvider && fileItemsTotal > 30}
-										<Pagination bind:page={currentPage} count={fileItemsTotal} perPage={30} />
-									{/if}
-								{:else if isSyncBusy}
-									<div
-										class="my-auto flex flex-col items-center justify-center text-center gap-3 py-8"
-									>
-										<Spinner className="size-5" />
-										<div class="text-xs text-gray-500">
-											{$i18n.t('Starting sync...')}
-										</div>
-									</div>
-								{:else if knowledge?.write_access && !query && !viewOption}
-									<EmptyStateCards
-										knowledgeType={knowledge?.type || 'local'}
-										integrationProviders={$config?.integration_providers}
-										onAction={(type) => {
-											if (type === 'integration') {
-												// No-op: files are managed via API
-											} else if (type === 'onedrive') {
-												cloudSyncHandler(CLOUD_PROVIDERS.onedrive);
-											} else if (type === 'google_drive') {
-												cloudSyncHandler(CLOUD_PROVIDERS.google_drive);
-											} else if (type === 'confluence') {
-												cloudSyncHandler(CLOUD_PROVIDERS.confluence);
-											} else if (type === 'directory') {
-												uploadDirectoryHandler();
-											} else if (type === 'web') {
-												showAddWebpageModal = true;
-											} else if (type === 'text') {
-												showAddTextContentModal = true;
-											} else {
-												document.getElementById('files-input')?.click();
-											}
-										}}
-									/>
-								{:else}
-									<div class="my-3 flex flex-col justify-center text-center text-gray-500 text-xs">
-										<div>
-											{$i18n.t('No content found')}
-										</div>
-									</div>
-								{/if}
+					<div class="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
+						<div>
+							<div class="text-xs text-gray-500 mb-1">{$i18n.t('Mapped Source')}</div>
+							<div class="rounded-xl bg-gray-50 dark:bg-gray-850 px-3 py-2">
+								{knowledge?.meta?.external?.source?.name ?? $i18n.t('Not configured')}
+							</div>
+						</div>
+						<div>
+							<div class="text-xs text-gray-500 mb-1">{$i18n.t('Auth Mode')}</div>
+							<div class="rounded-xl bg-gray-50 dark:bg-gray-850 px-3 py-2">
+								{$i18n.t('Admin-managed service account')}
 							</div>
 						</div>
 					</div>
 
-					<FileItemModal bind:show={showFilePreview} item={selectedFile} edit={false} />
+					<div class="text-xs text-gray-500">
+						{$i18n.t(
+							'This knowledge base retrieves from a connected source. Open WebUI can query it, but cannot upload, sync, edit, delete, reset, or reindex its source data.'
+						)}
+					</div>
+
+					<div class="flex flex-col gap-2">
+						<div class="font-medium text-sm">{$i18n.t('Test Query')}</div>
+						<div class="flex gap-2">
+							<input
+								class="w-full text-sm rounded-xl bg-gray-50 dark:bg-gray-850 px-3 py-2 outline-hidden"
+								bind:value={externalTestQuery}
+								placeholder={$i18n.t('Ask this knowledge source a test question')}
+							/>
+							<button
+								class="px-3 py-2 rounded-xl bg-black text-white dark:bg-white dark:text-black text-sm"
+								on:click={externalTestHandler}
+							>
+								{$i18n.t('Test')}
+							</button>
+						</div>
+					</div>
+
+					{#if externalTestResult}
+						<div class="rounded-xl bg-gray-50 dark:bg-gray-850 p-3 text-xs">
+							<div class="font-medium mb-2">{$i18n.t('Preview')}</div>
+							{#each externalTestResult.documents ?? [] as document, idx}
+								<div class="border-t border-gray-100 dark:border-gray-800 py-2">
+									<div class="line-clamp-4">{document}</div>
+									<div class="text-gray-500 mt-1">
+										{externalTestResult.metadatas?.[idx]?.source ?? ''}
+									</div>
+								</div>
+							{/each}
+						</div>
+					{/if}
 				</div>
+			{:else}
+				<div class="px-3.5 flex shrink-0 items-center w-full space-x-2 py-0.5 pb-2">
+					<div class="flex flex-1 items-center">
+						<div class=" self-center ml-1 mr-3">
+							<Search className="size-3.5" />
+						</div>
+						<input
+							class=" w-full text-sm pr-4 py-1 rounded-r-xl outline-hidden bg-transparent"
+							bind:value={query}
+							aria-label={$i18n.t('Search Collection')}
+							placeholder={$i18n.t('Search Collection')}
+							on:input={() => {
+								queryDebounceActive = true;
+							}}
+							on:focus={() => {
+								selectedFileId = null;
+							}}
+						/>
+
+						<Dropdown align="end">
+							<button
+								class="p-1.5 mr-1 rounded-xl text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-800 transition"
+								type="button"
+							>
+								<AdjustmentsHorizontal className="size-3.5" strokeWidth="2" />
+							</button>
+
+							<div slot="content">
+								<div
+									class="min-w-[180px] rounded-2xl px-1 py-1 border border-gray-100 dark:border-gray-800 z-50 bg-white dark:bg-gray-850 dark:text-white shadow-lg"
+								>
+									<button
+										class="select-none flex gap-2 items-center px-3 py-1.5 text-sm cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-xl w-full"
+										type="button"
+										on:click={() => {
+											includeContent = !includeContent;
+										}}
+									>
+										<Checkbox
+											state={includeContent ? 'checked' : 'unchecked'}
+											on:change={(e) => {
+												includeContent = e.detail === 'checked';
+											}}
+										/>
+										{$i18n.t('File content')}
+									</button>
+								</div>
+							</div>
+						</Dropdown>
+
+						{#if knowledge?.write_access}
+							<div>
+								{#if activeProvider}
+									<Tooltip
+										content={$i18n.t('Sync from {{label}}', { label: activeProvider.label })}
+									>
+										<button
+											class="p-1.5 rounded-xl hover:bg-gray-100 dark:bg-gray-850 dark:hover:bg-gray-800 transition font-medium text-sm flex items-center space-x-1 disabled:opacity-40 disabled:cursor-not-allowed"
+											disabled={isSyncBusy}
+											on:click={() => {
+												cloudSyncHandler(activeProvider);
+											}}
+										>
+											<svg
+												xmlns="http://www.w3.org/2000/svg"
+												viewBox="0 0 16 16"
+												fill="currentColor"
+												class="w-4 h-4"
+											>
+												<path
+													d="M8.75 3.75a.75.75 0 0 0-1.5 0v3.5h-3.5a.75.75 0 0 0 0 1.5h3.5v3.5a.75.75 0 0 0 1.5 0v-3.5h3.5a.75.75 0 0 0 0-1.5h-3.5v-3.5Z"
+												/>
+											</svg>
+										</button>
+									</Tooltip>
+								{:else if $config?.integration_providers?.[knowledge?.type]}
+									<!-- No add button for push providers -- files come via API -->
+								{:else}
+									<AddContentMenu
+										{structureEditable}
+										onUpload={(data) => {
+											if (data.type === 'directory') {
+												uploadDirectoryHandler();
+											} else if (data.type === 'new_directory') {
+												showNewDirectoryModal = true;
+											} else if (data.type === 'web') {
+												showAddWebpageModal = true;
+											} else if (data.type === 'text') {
+												showAddTextContentModal = true;
+											} else {
+												document.getElementById('files-input').click();
+											}
+										}}
+										onSync={structureEditable
+											? async () => {
+													pendingSyncFiles = filterAllowedEntries(await collectDirectoryEntries());
+													if (pendingSyncFiles?.length) {
+														showSyncConfirmModal = true;
+													} else {
+														pendingSyncFiles = null;
+													}
+												}
+											: null}
+										onReset={structureEditable
+											? () => {
+													showResetConfirm = true;
+												}
+											: null}
+									/>
+								{/if}
+							</div>
+						{/if}
+					</div>
+				</div>
+
+				<div class="px-3 flex justify-between">
+					<div
+						class="flex w-full bg-transparent overflow-x-auto scrollbar-none"
+						on:wheel={(e) => {
+							if (e.deltaY !== 0) {
+								e.preventDefault();
+								e.currentTarget.scrollLeft += e.deltaY;
+							}
+						}}
+					>
+						<div
+							class="flex gap-3 w-fit text-center text-sm rounded-full bg-transparent px-0.5 whitespace-nowrap"
+						>
+							<DropdownOptions
+								align="start"
+								className="flex shrink-0 items-center gap-2 px-3 py-1.5 text-sm bg-gray-50 dark:bg-gray-850 rounded-xl placeholder-gray-400 outline-hidden focus:outline-hidden"
+								bind:value={viewOption}
+								items={[
+									{ value: null, label: $i18n.t('All') },
+									{ value: 'created', label: $i18n.t('Created by you') },
+									{ value: 'shared', label: $i18n.t('Shared with you') }
+								]}
+								onChange={(value) => {
+									if (value) {
+										localStorage.workspaceViewOption = value;
+									} else {
+										delete localStorage.workspaceViewOption;
+									}
+								}}
+							/>
+
+							<DropdownOptions
+								align="start"
+								bind:value={sortKey}
+								placeholder={$i18n.t('Sort')}
+								items={[
+									{ value: 'name', label: $i18n.t('Name') },
+									{ value: 'created_at', label: $i18n.t('Created At') },
+									{ value: 'updated_at', label: $i18n.t('Updated At') }
+								]}
+							/>
+
+							{#if sortKey}
+								<DropdownOptions
+									align="start"
+									bind:value={direction}
+									items={[
+										{ value: 'asc', label: $i18n.t('Asc') },
+										{ value: null, label: $i18n.t('Desc') }
+									]}
+								/>
+							{/if}
+						</div>
+					</div>
+				</div>
+
+				{#if currentDirectoryId !== null && !query}
+					<div class="px-4 mt-2 flex shrink-0">
+						<KnowledgeBreadcrumbs
+							rootLabel={knowledge.name}
+							{breadcrumbs}
+							onNavigate={(dirId) => navigateToDirectory(dirId)}
+							onMoveFiles={(fileIds, dirId) => moveFilesToDirectoryHandler(fileIds, dirId)}
+							onMoveDir={(dirId, targetId) => moveDirectoryHandler(dirId, targetId)}
+						/>
+					</div>
+				{/if}
+
+				{#if syncing}
+					<div class="mx-2.5 mt-2.5 -mb-0.5 shrink-0">
+						<div class="flex items-center gap-2.5 rounded-xl py-2 px-3 bg-gray-50 dark:bg-gray-850">
+							<Spinner className="size-3.5 shrink-0" />
+							<div class="text-xs text-gray-500 dark:text-gray-400 truncate">
+								{syncing}
+							</div>
+						</div>
+					</div>
+				{/if}
+
+				{#if fileItems !== null && fileItemsTotal !== null}
+					<div class="flex flex-row flex-1 min-h-0 gap-3 px-2.5 mt-2">
+						<div class="flex-1 flex">
+							<div class=" flex flex-col w-full space-x-2 rounded-lg h-full">
+								<div class="w-full h-full flex flex-col min-h-0">
+									{#if knowledge?.write_access && fileItems && fileItems.length > 0}
+										<div class="pb-1.5 shrink-0">
+											<KbSelectionHeader
+												count={$bulkCount}
+												allSelected={$bulkAllSelected}
+												indeterminate={$bulkIndeterminate}
+												onToggleSelectAll={() => selection.toggleSelectAll()}
+												onDelete={() => (showBulkRemoveConfirm = true)}
+											/>
+										</div>
+									{/if}
+									{#if fileItems.length > 0 || (!query && directoryItems.length > 0)}
+										<div class=" flex overflow-y-auto h-full w-full scrollbar-hidden text-xs">
+											<Files
+												files={fileItems}
+												directories={query ? [] : directoryItems}
+												searchMode={!!query}
+												{structureEditable}
+												sources={activeProvider
+													? (knowledge?.meta?.[activeProvider.metaKey]?.sources ?? [])
+													: []}
+												isSyncing={activeState?.isSyncing ?? false}
+												onRemoveSource={activeProvider && knowledge?.write_access
+													? (itemId, sourceName) => {
+															selectedFileId = null;
+															selectedFile = null;
+															removeCloudSourceHandler(activeProvider, itemId, sourceName);
+														}
+													: null}
+												{knowledge}
+												{selectedFileId}
+												onClick={(fileId) => {
+													selectedFileId = fileId;
+
+													if (fileItems) {
+														const file = fileItems.find((file) => file.id === selectedFileId);
+														if (file) {
+															openFilePreview(file);
+														} else {
+															selectedFile = null;
+														}
+													}
+												}}
+												onDelete={(fileId) => {
+													selectedFileId = null;
+													selectedFile = null;
+
+													deleteFileHandler(fileId);
+												}}
+												onNavigateDirectory={(dirId) => navigateToDirectory(dirId)}
+												onRenameDirectory={(dirId, name) => renameDirectoryHandler(dirId, name)}
+												onDeleteDirectory={(dirId) => confirmDeleteDirectory(dirId)}
+												onMoveFilesToDirectory={(fileIds, dirId) =>
+													moveFilesToDirectoryHandler(fileIds, dirId)}
+												onMoveDirectoryToDirectory={(dirId, targetId) =>
+													moveDirectoryHandler(dirId, targetId)}
+												selection={knowledge?.write_access ? selection : null}
+											/>
+										</div>
+
+										{#if fileItemsTotal > 30}
+											<Pagination bind:page={currentPage} count={fileItemsTotal} perPage={30} />
+										{/if}
+									{:else if isSyncBusy}
+										<div
+											class="my-auto flex flex-col items-center justify-center text-center gap-3 py-8"
+										>
+											<Spinner className="size-5" />
+											<div class="text-xs text-gray-500">
+												{$i18n.t('Starting sync...')}
+											</div>
+										</div>
+									{:else if knowledge?.write_access && !query && !viewOption && currentDirectoryId === null}
+										<EmptyStateCards
+											knowledgeType={knowledge?.type || 'local'}
+											integrationProviders={$config?.integration_providers}
+											onAction={(type) => {
+												if (type === 'integration') {
+													// No-op: files are managed via API
+												} else if (type === 'onedrive') {
+													cloudSyncHandler(CLOUD_PROVIDERS.onedrive);
+												} else if (type === 'google_drive') {
+													cloudSyncHandler(CLOUD_PROVIDERS.google_drive);
+												} else if (type === 'confluence') {
+													cloudSyncHandler(CLOUD_PROVIDERS.confluence);
+												} else if (type === 'directory') {
+													uploadDirectoryHandler();
+												} else if (type === 'web') {
+													showAddWebpageModal = true;
+												} else if (type === 'text') {
+													showAddTextContentModal = true;
+												} else {
+													document.getElementById('files-input')?.click();
+												}
+											}}
+										/>
+									{:else}
+										<div
+											class="my-3 flex flex-col justify-center text-center text-gray-500 text-xs"
+										>
+											<div>
+												{$i18n.t('No content found')}
+											</div>
+										</div>
+									{/if}
+								</div>
+							</div>
+						</div>
+
+						<FileItemModal bind:show={showFilePreview} item={selectedFile} edit={false} />
+					</div>
+				{/if}
 			{/if}
 		</div>
 	{:else}
 		<Spinner className="size-5" />
 	{/if}
 </div>
+
+<ConfirmDialog
+	bind:show={showDeleteDirectoryConfirm}
+	title={$i18n.t('Delete directory?')}
+	on:confirm={() => {
+		deleteDirectoryHandler(!deleteDirectoryContents);
+	}}
+	on:cancel={() => {
+		pendingDeleteDirectoryId = null;
+	}}
+>
+	<div class="text-sm text-gray-700 dark:text-gray-300 flex-1 line-clamp-3 mb-2">
+		{$i18n.t(`Are you sure you want to delete this directory?`)}
+	</div>
+
+	<div class="flex items-center gap-1.5">
+		<input type="checkbox" bind:checked={deleteDirectoryContents} />
+
+		<div class="text-xs text-gray-500">
+			{$i18n.t('Delete all contents inside this directory')}
+		</div>
+	</div>
+</ConfirmDialog>
+
+<ConfirmDialog
+	bind:show={showResetConfirm}
+	title={$i18n.t('Reset knowledge base?')}
+	on:confirm={async () => {
+		const res = await resetKnowledgeById(localStorage.token, id).catch((e) => {
+			toast.error(`${e}`);
+			return null;
+		});
+		if (res) {
+			toast.success($i18n.t('Knowledge base has been reset'));
+			currentDirectoryId = null;
+			init();
+		}
+	}}
+>
+	<div class="text-sm text-gray-700 dark:text-gray-300 flex-1 line-clamp-3">
+		{$i18n.t(
+			'This will remove all files and directories from this knowledge base. This action cannot be undone.'
+		)}
+	</div>
+</ConfirmDialog>

@@ -1,10 +1,9 @@
 /**
- * Helpers for the lazy per-folder KB tree browser (Tier 2).
+ * Status helpers for the KB directory browser.
  *
- * The backend `/knowledge/{id}/tree` endpoint returns folders with a bucketed
- * `status_counts` rollup over their recursive descendants. These helpers turn
- * that rollup into a single per-folder badge state without re-deriving it in
- * the template.
+ * The files endpoint annotates each directory with a bucketed `status_counts`
+ * rollup over its recursive descendants; these helpers turn that rollup into
+ * a single per-folder badge state without re-deriving it in the template.
  */
 
 export interface TreeStatusCounts {
@@ -12,41 +11,6 @@ export interface TreeStatusCounts {
 	completed?: number;
 	failed?: number;
 	unknown?: number;
-}
-
-export interface TreeFolder {
-	name: string;
-	path: string;
-	child_count: number;
-	status_counts: TreeStatusCounts;
-	type?: string | null;
-}
-
-export interface TreeFile {
-	id: string;
-	name: string;
-	size?: number | null;
-	status?: string | null;
-	error?: string | null;
-	updated_at?: number | null;
-}
-
-export interface TreeLevel {
-	folders: TreeFolder[];
-	files: TreeFile[];
-	next_cursor: string | null;
-	has_more: boolean;
-}
-
-export interface SearchHit extends TreeFile {
-	relative_path?: string | null;
-	source_item_id?: string | null;
-}
-
-export interface SearchLevel {
-	items: SearchHit[];
-	next_cursor: string | null;
-	has_more: boolean;
 }
 
 /**

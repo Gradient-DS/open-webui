@@ -241,6 +241,8 @@ async def post_run_summary(
     meta = dict(knowledge.meta or {})
     sync_info = dict(meta.get(meta_key) or {})
     cursor_persisted = _apply_run_summary(sync_info, form, int(time.time()))
+    if form.status in _TERMINAL_STATUSES:
+        await _stamp_source_root_directories(knowledge_id, sync_info, db)
     meta[meta_key] = sync_info
     await Knowledges.update_knowledge_meta_by_id(knowledge_id, meta)
 
@@ -302,6 +304,34 @@ def _apply_run_summary(sync_info: dict, form: RunSummaryForm, now: int) -> bool:
     if cursor_persisted:
         sync_info['sources'] = form.sources
     return cursor_persisted
+
+
+async def _stamp_source_root_directories(knowledge_id: str, sync_info: dict, db) -> bool:
+    """Backfill ``sources[].root_directory_id`` from materialized root dirs.
+
+    P2-8 decision 2: a folder-like source's directory chain is rooted at a
+    KB-root directory named after the source. The link-time reverse bridge
+    stamps this on the loader-worker path, but the daemon creates directories
+    itself and passes ``directory_id`` at ``/stage`` — that bridge never runs
+    — so the stamp lands here on terminal summaries instead. Re-applied
+    whenever the stored id diverges, so it self-heals (e.g. after a source
+    root was deleted and recreated).
+    """
+    sources = sync_info.get('sources') or []
+    folderish = [s for s in sources if isinstance(s, dict) and s.get('type') != 'file']
+    if not folderish:
+        return False
+
+    roots = await Knowledges.get_directories(knowledge_id, parent_id=None, db=db)
+    root_id_by_name = {d.name: d.id for d in roots}
+
+    changed = False
+    for source in folderish:
+        root_id = root_id_by_name.get(source.get('name'))
+        if root_id and source.get('root_directory_id') != root_id:
+            source['root_directory_id'] = root_id
+            changed = True
+    return changed
 
 
 async def _fail_mark_staged_files(form: RunSummaryForm) -> int:

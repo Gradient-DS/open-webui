@@ -25,8 +25,6 @@ from open_webui.models.knowledge import (
     KnowledgeDirectoryForm,
     KnowledgeDirectoryModel,
     KnowledgeFileListResponse,
-    KnowledgeTreeResponse,
-    KnowledgeSearchResponse,
     KnowledgeForm,
     KnowledgeResponse,
     Knowledges,
@@ -1443,125 +1441,6 @@ async def get_knowledge_files_by_id(
 
 
 ############################
-# GetKnowledgeTree (lazy per-folder browser)
-############################
-
-
-@router.get('/{id}/tree', response_model=KnowledgeTreeResponse)
-async def get_knowledge_tree(
-    id: str,
-    path: str = '',
-    cursor: Optional[str] = None,
-    limit: Optional[int] = 200,
-    user=Depends(get_verified_user),
-    db: AsyncSession = Depends(get_async_session),
-):
-    """Lazily list one level of a KB's folder tree.
-
-    ``path=""`` returns the sources + root loose files; ``path="<source_item_id>"``
-    or ``"<source_item_id>/<sub>/…/"`` returns that folder's immediate children
-    (subfolders with counts + a cursor-paginated page of direct files). Access
-    control + suspension handling mirror ``GET /{id}/files``.
-    """
-    knowledge = await Knowledges.get_knowledge_by_id(id=id, db=db)
-    if not knowledge:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=ERROR_MESSAGES.NOT_FOUND,
-        )
-
-    if not (
-        user.role == 'admin'
-        or knowledge.user_id == user.id
-        or await AccessGrants.has_access(
-            user_id=user.id,
-            resource_type='knowledge',
-            resource_id=knowledge.id,
-            permission='read',
-            db=db,
-        )
-    ):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=ERROR_MESSAGES.ACCESS_PROHIBITED,
-        )
-
-    # Block non-admin access to suspended KBs
-    suspension_info = await Knowledges.get_suspension_info(id)
-    if suspension_info and user.role != 'admin':
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail=f'This knowledge base is suspended because the owner lost access to the cloud folder. '
-            f'It will be permanently deleted in {suspension_info["days_remaining"]} days '
-            f'unless the owner restores access.',
-        )
-
-    limit = min(max(limit or 200, 1), 1000)
-    return await Knowledges.list_tree_level(id, path=path, cursor=cursor, limit=limit, db=db)
-
-
-############################
-# SearchKnowledgeTree (flat search mode)
-############################
-
-
-@router.get('/{id}/search', response_model=KnowledgeSearchResponse)
-async def search_knowledge_tree(
-    id: str,
-    q: str = '',
-    filetype: Optional[str] = None,
-    status_filter: Optional[str] = Query(None, alias='status'),
-    cursor: Optional[str] = None,
-    limit: Optional[int] = 100,
-    user=Depends(get_verified_user),
-    db: AsyncSession = Depends(get_async_session),
-):
-    """Flat, keyset-paginated search across a KB (the tree browser's search mode).
-
-    Matches filename OR content, optionally narrowed by ``filetype`` (extension)
-    and ``status`` (coarse bucket). Access control + suspension mirror
-    ``GET /{id}/files``. (``status_filter`` is the ``?status=`` query param —
-    aliased so it doesn't shadow the imported ``status`` codes module.)
-    """
-    knowledge = await Knowledges.get_knowledge_by_id(id=id, db=db)
-    if not knowledge:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=ERROR_MESSAGES.NOT_FOUND,
-        )
-
-    if not (
-        user.role == 'admin'
-        or knowledge.user_id == user.id
-        or await AccessGrants.has_access(
-            user_id=user.id,
-            resource_type='knowledge',
-            resource_id=knowledge.id,
-            permission='read',
-            db=db,
-        )
-    ):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=ERROR_MESSAGES.ACCESS_PROHIBITED,
-        )
-
-    suspension_info = await Knowledges.get_suspension_info(id)
-    if suspension_info and user.role != 'admin':
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail=f'This knowledge base is suspended because the owner lost access to the cloud folder. '
-            f'It will be permanently deleted in {suspension_info["days_remaining"]} days '
-            f'unless the owner restores access.',
-        )
-
-    limit = min(max(limit or 100, 1), 1000)
-    return await Knowledges.search_tree(
-        id, q=q, filetype=filetype, status=status_filter, cursor=cursor, limit=limit, db=db
-    )
-
-
-############################
 # AddFileToKnowledge
 ############################
 
@@ -2329,7 +2208,19 @@ async def sync_knowledge_cleanup(
 
     # ── Remove orphaned directories (children before parents) ──
     for dir_id in reversed(form_data.dir_ids):
-        await Knowledges.delete_directory(dir_id, move_files_to_parent=False, db=db)
+        # KB-scope guard (design doc 4b): a caller with write access to THIS
+        # KB must not be able to delete directories of another KB by id.
+        directory = await Knowledges.get_directory_by_id(dir_id, db=db)
+        if not directory:
+            continue  # already gone (e.g. removed via a parent's FK cascade)
+        if directory.knowledge_id != id:
+            log.warning(f'sync/cleanup: skipping directory {dir_id} — belongs to {directory.knowledge_id}, not {id}')
+            continue
+        # Full fork cascade for any straggler files still in the subtree
+        # (P2-8 ledger #4); orphaned dirs are normally file-free by now.
+        report = await DeletionService.delete_directory(id, dir_id, move_files_to_parent=False)
+        if report.has_errors:
+            log.warning(f'Errors deleting directory {dir_id} during sync cleanup of {id}: {report.errors}')
 
     return {'status': True}
 
@@ -2659,16 +2550,21 @@ async def delete_knowledge_directory(
             detail=ERROR_MESSAGES.NOT_FOUND,
         )
 
-    success = await Knowledges.delete_directory(
+    # Full fork cascade (P2-8 ledger #4): with move_files=False the subtree's
+    # files are deleted like single-file deletes (KB vectors, file-{id}
+    # collections, storage, DB rows; cross-KB shared files survive).
+    report = await DeletionService.delete_directory(
+        knowledge_id=id,
         directory_id=dir_id,
         move_files_to_parent=move_files,
-        db=db,
     )
-    if not success:
+    if 'knowledge_directory' not in report.db_records:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail='Failed to delete directory.',
         )
+    if report.has_errors:
+        log.warning(f'Errors deleting directory {dir_id} from knowledge {id}: {report.errors}')
     await publish_event(
         request,
         EVENTS.KNOWLEDGE_DIRECTORY_DELETED,
