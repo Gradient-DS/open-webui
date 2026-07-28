@@ -213,7 +213,11 @@
 
 	onMount(async () => {
 		const redirectPath = $page.url.searchParams.get('redirect');
-		if ($user !== undefined) {
+		// $user is undefined before the session check and null after a signed-out
+		// 401 redirect — only a real session may leave the login page. Treating
+		// null as signed-in ping-pongs /auth <-> the (app) layout's own
+		// null-guard in an infinite SPA navigation loop (the "refresh storm").
+		if ($user) {
 			goto(redirectPath || '/');
 		} else {
 			if (redirectPath) {
