@@ -27,7 +27,6 @@ __pycache__/
 *.py[cod]
 *$py.class
 .nvmrc
-CLAUDE.md
 # C extensions
 *.so
 
@@ -325,3 +324,18 @@ cypress/screenshots
 .claude/worktrees/
 .worktrees/
 .cptr
+
+# Claude scratch space + personal tooling — never committed (doc strategy: soev-docs/claude-code.md)
+thoughts/
+plans/
+.superpowers/
+docs/superpowers/
+CLAUDE.local.md
+collab/
+.collab-config
+.claude/commands/*
+!.claude/commands/validate-owui.md
+.claude/agents/*
+!.claude/agents/owui-e2e.md
+.claude/hooks/
+.claude/scheduled_tasks.lock
