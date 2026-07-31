@@ -2990,7 +2990,9 @@
 					</div>
 				</div>
 
-				{#if currentDirectoryId !== null && !query}
+				<!-- Always rendered (not just inside a folder) so entering/leaving the
+				     root doesn't insert/remove the row and shift the list (layout jump). -->
+				{#if !query}
 					<div class="px-4 mt-2 flex shrink-0">
 						<KnowledgeBreadcrumbs
 							rootLabel={knowledge.name}

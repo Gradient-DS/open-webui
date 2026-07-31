@@ -79,6 +79,7 @@
 			<button
 				class="select-none flex gap-2 items-center px-3 py-1.5 text-sm cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-xl w-full"
 				on:click={() => {
+					show = false;
 					onUpload({ type: 'files' });
 				}}
 			>
@@ -89,6 +90,7 @@
 			<button
 				class="select-none flex gap-2 items-center px-3 py-1.5 text-sm cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-xl w-full"
 				on:click={() => {
+					show = false;
 					onUpload({ type: 'directory' });
 				}}
 			>
@@ -106,6 +108,7 @@
 					<button
 						class="select-none flex gap-2 items-center px-3 py-1.5 text-sm cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-xl w-full"
 						on:click={() => {
+							show = false;
 							onSync();
 						}}
 					>
@@ -118,6 +121,7 @@
 			<button
 				class="select-none flex gap-2 items-center px-3 py-1.5 text-sm cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-xl w-full"
 				on:click={() => {
+					show = false;
 					onUpload({ type: 'web' });
 				}}
 			>
@@ -128,6 +132,7 @@
 			<button
 				class="select-none flex gap-2 items-center px-3 py-1.5 text-sm cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-xl w-full"
 				on:click={() => {
+					show = false;
 					onUpload({ type: 'text' });
 				}}
 			>
