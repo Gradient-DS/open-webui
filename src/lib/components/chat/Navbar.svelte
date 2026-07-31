@@ -23,7 +23,7 @@
 
 	import ShareChatModal from '../chat/ShareChatModal.svelte';
 	import ModelSelector from '../chat/ModelSelector.svelte';
-	import AgentBadge from './AgentBadge.svelte';
+	import AgentSelector from './AgentSelector.svelte';
 	import Tooltip from '../common/Tooltip.svelte';
 	import Menu from '$lib/components/layout/Navbar/Menu.svelte';
 	import UserMenu from '$lib/components/layout/Sidebar/UserMenu.svelte';
@@ -54,6 +54,14 @@
 	export let history;
 	export let selectedModels;
 	export let showModelSelector = true;
+
+	// [Gradient] The agent selector claims the model-selector slot when the
+	// picker feature is on and the chat is new or agent-bound. Same predicate
+	// the right-side AgentBadge used before it moved here.
+	$: agentSelectorActive =
+		isFeatureEnabled('agent_picker') &&
+		Boolean($config?.features?.feature_agent_api_enabled) &&
+		(!chat?.id || chat?.meta?.agent_id);
 
 	export let onSaveTempChat: () => {};
 	export let archiveChatHandler: (id: string) => void;
@@ -124,7 +132,17 @@
 			{$showSidebar ? 'ml-1' : ''}
 			"
 				>
-					{#if showModelSelector}
+					<!-- [Gradient] When the agent picker owns chat routing, the
+					     agent selector takes the model selector's slot: on
+					     single-LLM deployments the model id is noise, and the
+					     selected agent is the thing users actually choose.
+					     Renders on mobile too (unlike the old right-side badge,
+					     which was hidden below sm). Unbound saved chats fall
+					     back to the ModelSelector — they genuinely run on the
+					     raw model. -->
+					{#if agentSelectorActive}
+						<AgentSelector agentId={chat?.meta?.agent_id} editable={!chat?.id} />
+					{:else if showModelSelector}
 						<ModelSelector
 							bind:selectedModels
 							showSetDefault={!shareEnabled && !readOnly}
@@ -134,19 +152,6 @@
 				</div>
 
 				<div class="self-start flex flex-none items-center text-gray-600 dark:text-gray-400">
-					{#if isFeatureEnabled('agent_picker') && Boolean($config?.features?.feature_agent_api_enabled) && (!chat?.id || chat?.meta?.agent_id)}
-						<!-- [Gradient] Inline with the right-side menu icons so
-						     the badge sits on the same row and never grows the
-						     navbar height. On real chats it's a read-only badge
-						     bound to chat.meta.agent_id. On the empty state (no
-						     chat yet) it's an interactive switcher — editable —
-						     and chat.meta.agent_id is threaded from
-						     $pendingAgentId via Chat.svelte, so the picked agent
-						     flows straight back into the badge. -->
-						<div class="hidden sm:flex items-center mr-1 self-center">
-							<AgentBadge agentId={chat?.meta?.agent_id} editable={!chat?.id} />
-						</div>
-					{/if}
 					<!-- <div class="md:hidden flex self-center w-[1px] h-5 mx-2 bg-gray-300 dark:bg-stone-700" /> -->
 
 					{#if isFeatureEnabled('temporary_chat') && ($user?.role === 'user' ? ($user?.permissions?.chat?.temporary ?? true) && !($user?.permissions?.chat?.temporary_enforced ?? false) : true)}

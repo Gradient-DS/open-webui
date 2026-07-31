@@ -97,7 +97,7 @@
 		     vertically when the user picks/unpicks an agent. -->
 		<div class="mb-2 flex items-center justify-between text-left">
 			<span class="text-xs uppercase tracking-wide text-gray-500">
-				{$i18n.t('Or use an agent (Beta)')}
+				{$i18n.t('Or use an agent')}
 			</span>
 			<button
 				type="button"
