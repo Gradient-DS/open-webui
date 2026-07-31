@@ -1996,8 +1996,9 @@
 		}
 	};
 
-	// Bulk remove: replays each selected item's own removal (file-remove or
-	// remove-source) without per-item toast/init, then refreshes once.
+	// Bulk remove: replays each selected item's own removal (file-remove,
+	// directory-delete, or remove-source) without per-item toast/init, then
+	// refreshes once. Directories always delete their contents.
 	const bulkRemoveHandler = async () => {
 		const items = [...get(selection.selected).values()];
 		if (items.length === 0) return;
@@ -2009,6 +2010,9 @@
 				if (item.kind === 'file') {
 					await removeFileFromKnowledgeById(localStorage.token, id, item.fileId);
 					ok++;
+				} else if (item.kind === 'directory') {
+					const res = await deleteKnowledgeDirectory(localStorage.token, id, item.dirId, false);
+					if (res) ok++;
 				} else if (activeProvider) {
 					await activeProvider.api.removeSource(localStorage.token, knowledge.id, item.itemId);
 					removedSource = true;
@@ -2397,10 +2401,17 @@
 				fileCount: $bulkBreakdown.totalFiles,
 				sourceCount: $bulkBreakdown.sources
 			})
-		: $i18n.t('Delete {{count}} files?', { count: $bulkBreakdown.totalFiles })}
+		: $bulkBreakdown.directories > 0
+			? $i18n.t('Delete {{fileCount}} file(s) and {{folderCount}} folder(s)?', {
+					fileCount: $bulkBreakdown.totalFiles,
+					folderCount: $bulkBreakdown.directories
+				})
+			: $i18n.t('Delete {{count}} files?', { count: $bulkBreakdown.totalFiles })}
 	message={$bulkBreakdown.sources > 0
 		? $i18n.t('Removing a source stops its sync and deletes all of its files.')
-		: $i18n.t('This will remove the selected files from this knowledge base.')}
+		: $bulkBreakdown.directories > 0
+			? $i18n.t('Deleting a folder also deletes all files inside it.')
+			: $i18n.t('This will remove the selected files from this knowledge base.')}
 	confirmLabel={$i18n.t('Delete')}
 	on:confirm={() => {
 		bulkRemoveHandler();

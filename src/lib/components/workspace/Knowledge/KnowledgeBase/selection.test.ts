@@ -1,9 +1,10 @@
 import { describe, it, expect } from 'vitest';
 import { get } from 'svelte/store';
-import { createKbSelection, fileItem, sourceItem } from './selection';
+import { createKbSelection, directoryItem, fileItem, sourceItem } from './selection';
 
 const f = (id: string) => fileItem(id, `file-${id}`);
 const s = (id: string, fc = 1) => sourceItem(id, `src-${id}`, fc);
+const d = (id: string, fc = 0) => directoryItem(id, `dir-${id}`, fc);
 
 describe('createKbSelection', () => {
 	it('toggle adds then removes an item and updates count', () => {
@@ -45,11 +46,11 @@ describe('createKbSelection', () => {
 		expect(get(sel.count)).toBe(3);
 	});
 
-	it('breakdown counts files, sources, and total affected files', () => {
+	it('breakdown counts files, sources, directories, and total affected files', () => {
 		const sel = createKbSelection();
-		sel.selectAll([f('a'), s('x', 11), s('y', 3)]);
-		// 1 plain file + sources holding 11 and 3 files = 15 total files removed
-		expect(get(sel.breakdown)).toEqual({ files: 1, sources: 2, totalFiles: 15 });
+		sel.selectAll([f('a'), s('x', 11), s('y', 3), d('p', 4)]);
+		// 1 plain file + sources holding 11 and 3 + a folder holding 4 = 19 total
+		expect(get(sel.breakdown)).toEqual({ files: 1, sources: 2, directories: 1, totalFiles: 19 });
 	});
 
 	it('selectionMode reflects whether anything is selected', () => {
@@ -124,5 +125,13 @@ describe('createKbSelection', () => {
 			fileCount: 7
 		});
 		expect(sourceItem('2', 'B').fileCount).toBe(1); // defaults to 1
+		expect(directoryItem('1', 'A', 4)).toEqual({
+			key: 'dir:1',
+			label: 'A',
+			kind: 'directory',
+			dirId: '1',
+			fileCount: 4
+		});
+		expect(directoryItem('2', 'B').fileCount).toBe(0); // defaults to 0
 	});
 });
