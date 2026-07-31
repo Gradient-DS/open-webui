@@ -455,7 +455,10 @@ class ChatTable:
                 history = form_data.chat.get('history', {})
                 messages = history.get('messages', {})
                 for message_id, message in messages.items():
-                    if isinstance(message, dict) and message.get('role'):
+                    # A missing role (failed LLM turn on ≤0.9.5) defaults to
+                    # 'user' in upsert_message — skipping the row here would
+                    # leave a graph gap that gets re-filled from the raw JSON.
+                    if isinstance(message, dict):
                         try:
                             await ChatMessages.upsert_message(
                                 message_id=message_id,
