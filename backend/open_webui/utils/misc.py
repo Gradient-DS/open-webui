@@ -148,12 +148,14 @@ def get_message_list(messages_map, message_id):
 
 
 def get_messages_content(messages: list[dict]) -> str:
-    return '\n'.join([f'{message["role"].upper()}: {get_content_from_message(message)}' for message in messages])
+    return '\n'.join(
+        [f'{message.get("role", "user").upper()}: {get_content_from_message(message)}' for message in messages]
+    )
 
 
 def get_last_user_message_item(messages: list[dict]) -> dict | None:
     for message in reversed(messages):
-        if message['role'] == 'user':
+        if message.get('role') == 'user':
             return message
     return None
 
@@ -427,27 +429,27 @@ def set_last_user_message_content(content: str, messages: list[dict]) -> list[di
 
 def get_last_assistant_message_item(messages: list[dict]) -> dict | None:
     for message in reversed(messages):
-        if message['role'] == 'assistant':
+        if message.get('role') == 'assistant':
             return message
     return None
 
 
 def get_last_assistant_message(messages: list[dict]) -> str | None:
     for message in reversed(messages):
-        if message['role'] == 'assistant':
+        if message.get('role') == 'assistant':
             return get_content_from_message(message)
     return None
 
 
 def get_system_message(messages: list[dict]) -> dict | None:
     for message in messages:
-        if message['role'] == 'system':
+        if message.get('role') == 'system':
             return message
     return None
 
 
 def remove_system_message(messages: list[dict]) -> list[dict]:
-    return [message for message in messages if message['role'] != 'system']
+    return [message for message in messages if message.get('role') != 'system']
 
 
 def pop_system_message(messages: list[dict]) -> tuple[dict | None, list[dict]]:

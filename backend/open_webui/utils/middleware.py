@@ -2223,8 +2223,13 @@ async def load_messages_from_db(chat_id: str, message_id: str) -> Optional[list[
     if not db_messages:
         return None
 
+    # Chats poisoned by ≤0.9.5 failed turns can carry a role-less message in
+    # the legacy JSON history; default it like ChatMessages.upsert_message does.
     return [
-        {k: v for k, v in msg.items() if k in ('role', 'content', 'output', 'files', 'contextSummary')}
+        {
+            **{k: v for k, v in msg.items() if k in ('role', 'content', 'output', 'files', 'contextSummary')},
+            'role': msg.get('role', 'user'),
+        }
         for msg in db_messages
     ]
 

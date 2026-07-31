@@ -21,7 +21,13 @@
 	import Spinner from '$lib/components/common/Spinner.svelte';
 	import DirectoryRow from './DirectoryRow.svelte';
 	import SelectCheckbox from './SelectCheckbox.svelte';
-	import { fileItem, sourceItem, type KbSelection, type SelectableItem } from './selection';
+	import {
+		directoryItem,
+		fileItem,
+		sourceItem,
+		type KbSelection,
+		type SelectableItem
+	} from './selection';
 	import { breadcrumbSegments, fileBadge } from '../utils/treeStatus';
 	import { sourceByRootDirectoryId } from '../utils/sourceMap';
 
@@ -63,17 +69,22 @@
 		fileItem(file.id, file?.name ?? file?.meta?.name ?? '');
 
 	$: sourceRoots = sourceByRootDirectoryId(sources);
-	const buildSourceItem = (dir: any): SelectableItem => {
+	// Source roots must bulk-delete via removeSource; plain local directories
+	// via the directory-delete endpoint — hence two selectable kinds.
+	const buildDirItem = (dir: any): SelectableItem => {
 		const src = sourceRoots.get(dir.id);
-		return sourceItem(src.item_id, src.name ?? dir.name, dir.child_count ?? 0);
+		return src
+			? sourceItem(src.item_id, src.name ?? dir.name, dir.child_count ?? 0)
+			: directoryItem(dir.id, dir.name, dir.child_count ?? 0);
 	};
+	// Source roots are selectable whenever selection exists (cloud KBs);
+	// plain local dirs additionally need structure-write access.
+	const isDirSelectable = (dir: any) => sourceRoots.has(dir.id) || structureEditable;
 
-	// Selection order mirrors render order (source-root dirs first, then files)
-	// so Shift-range and drag-paint spans behave predictably.
+	// Selection order mirrors render order (dirs first, then files) so
+	// Shift-range and drag-paint spans behave predictably.
 	$: orderedItems = [
-		...(searchMode
-			? []
-			: (directories ?? []).filter((d) => sourceRoots.has(d.id)).map(buildSourceItem)),
+		...(searchMode ? [] : (directories ?? []).filter(isDirSelectable).map(buildDirItem)),
 		...(files ?? []).filter(isSelectable).map(buildItem)
 	];
 	// Register this view's selectable rows so the header's select-all works.
@@ -119,19 +130,19 @@
 	{#if !searchMode}
 		{#each directories as dir (dir.id)}
 			{@const srcEntry = sourceRoots.get(dir.id)}
-			{@const dirSel =
-				(selection && srcEntry && $selectedStore?.has(`source:${srcEntry.item_id}`)) ?? false}
+			{@const dirSel = (selection && $selectedStore?.has(buildDirItem(dir).key)) ?? false}
 			<DirectoryRow
 				directory={dir}
 				writeAccess={structureEditable}
 				source={srcEntry ? { itemId: srcEntry.item_id, name: srcEntry.name ?? dir.name } : null}
 				{isSyncing}
 				onRemoveSource={srcEntry ? onRemoveSource : null}
-				selectable={!!(selection && srcEntry)}
+				selectionActive={!!selection}
+				selectable={!!(selection && isDirSelectable(dir))}
 				selected={dirSel}
 				checkboxVisible={!!$selectionModeStore}
 				onToggleSelect={() => {
-					if (selection && srcEntry) selection.toggle(buildSourceItem(dir));
+					if (selection && isDirSelectable(dir)) selection.toggle(buildDirItem(dir));
 				}}
 				onNavigate={(id) => onNavigateDirectory(id)}
 				onRename={(id, name) => onRenameDirectory(id, name)}

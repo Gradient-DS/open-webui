@@ -10,11 +10,8 @@
 	const i18n = getContext('i18n');
 
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
-	import Dropdown from '$lib/components/common/Dropdown.svelte';
 	import GarbageBin from '$lib/components/icons/GarbageBin.svelte';
-	import Pencil from '$lib/components/icons/Pencil.svelte';
 	import Folder from '$lib/components/icons/Folder.svelte';
-	import EllipsisHorizontal from '$lib/components/icons/EllipsisHorizontal.svelte';
 	import ExclamationTriangle from '$lib/components/icons/ExclamationTriangle.svelte';
 	import Spinner from '$lib/components/common/Spinner.svelte';
 	import SelectCheckbox from './SelectCheckbox.svelte';
@@ -37,7 +34,10 @@
 	export let isSyncing = false;
 	export let onRemoveSource: ((itemId: string, name: string) => void) | null = null;
 
-	// Optional multiselect checkbox (source roots participate in bulk delete).
+	// Optional multiselect checkbox (dirs and source roots participate in bulk
+	// delete). selectionActive renders the checkbox column (spacer when the row
+	// itself is not selectable) so dir and file rows stay aligned.
+	export let selectionActive = false;
 	export let selectable = false;
 	export let selected = false;
 	export let checkboxVisible = false;
@@ -54,12 +54,10 @@
 	let editName = '';
 	let editInput: HTMLInputElement;
 	let dragOver = false;
-	let showDropdown = false;
 
 	const startRename = () => {
 		editName = directory.name;
 		editing = true;
-		showDropdown = false;
 		setTimeout(() => editInput?.select(), 0);
 	};
 
@@ -128,13 +126,8 @@
 		}
 	}}
 >
-	{#if selectable}
-		<SelectCheckbox
-			selectable={true}
-			{selected}
-			visible={checkboxVisible}
-			onToggle={onToggleSelect}
-		/>
+	{#if selectionActive}
+		<SelectCheckbox {selectable} {selected} visible={checkboxVisible} onToggle={onToggleSelect} />
 	{/if}
 	<div class="flex items-center">
 		<button
@@ -230,37 +223,15 @@
 
 	{#if writeAccess}
 		<div class="flex items-center">
-			<Dropdown bind:show={showDropdown} align="end" sideOffset={4}>
+			<Tooltip content={$i18n.t('Delete')}>
 				<button
 					class="p-1 rounded-full hover:bg-gray-100 dark:hover:bg-gray-850 transition"
 					type="button"
+					on:click={() => onDelete(directory.id)}
 				>
-					<EllipsisHorizontal className="size-3.5" />
+					<GarbageBin className="size-3.5" />
 				</button>
-
-				<div slot="content">
-					<div
-						class="min-w-[140px] rounded-2xl p-1 z-[9999999] bg-white dark:bg-gray-850 dark:text-white shadow-lg border border-gray-100 dark:border-gray-800"
-					>
-						<button
-							type="button"
-							class="select-none flex rounded-xl py-1.5 px-3 w-full hover:bg-gray-50 dark:hover:bg-gray-800 transition items-center gap-2 text-sm"
-							on:click={() => startRename()}
-						>
-							<Pencil className="size-3.5" />
-							{$i18n.t('Rename')}
-						</button>
-						<button
-							type="button"
-							class="select-none flex rounded-xl py-1.5 px-3 w-full hover:bg-gray-50 dark:hover:bg-gray-800 transition items-center gap-2 text-sm"
-							on:click={() => onDelete(directory.id)}
-						>
-							<GarbageBin className="size-3.5" />
-							{$i18n.t('Delete')}
-						</button>
-					</div>
-				</div>
-			</Dropdown>
+			</Tooltip>
 		</div>
 	{/if}
 </div>
