@@ -70,15 +70,22 @@
 				aria-label={agent
 					? $i18n.t('Selected model: {{modelName}}', { modelName: agent.name })
 					: $i18n.t('Choose agent')}
-				class="relative w-full outline-hidden focus:outline-hidden"
+				class="relative outline-hidden focus:outline-hidden"
 			>
-				<div class="flex w-full text-left px-0.5 bg-transparent truncate text-lg justify-between">
-					{#if agent}
-						{agent.name}
-					{:else}
-						{$i18n.t('Choose agent')}
-					{/if}
-					<ChevronDown className=" self-center ml-2 size-3" strokeWidth="2.5" />
+				<!-- Compact trigger: chevron adjacent to the label (not
+				     justify-between across the navbar slot) + hover surface,
+				     so it reads as clickable. -->
+				<div
+					class="flex items-center gap-1.5 w-fit max-w-full text-left px-2 py-0.5 rounded-xl bg-transparent truncate text-lg cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-850 transition"
+				>
+					<span class="truncate">
+						{#if agent}
+							{agent.name}
+						{:else}
+							{$i18n.t('Choose agent')}
+						{/if}
+					</span>
+					<ChevronDown className=" self-center shrink-0 size-3.5" strokeWidth="2.5" />
 				</div>
 			</button>
 
