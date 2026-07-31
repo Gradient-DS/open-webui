@@ -93,6 +93,29 @@ export function hasFeatureAccess(
 }
 
 /**
+ * Whether a chat is handled by the agent service. Mirrors the backend
+ * routing matrix in `utils/agent_routing.py::resolve_agent_route`:
+ *
+ * - chat bound to an agent (`boundAgentId` set)          → agent route
+ * - no agent, picker off, agent API enabled              → agent route (legacy bypass)
+ * - otherwise                                            → standard route
+ *
+ * On the agent route the agent service owns retrieval, so per-file
+ * retrieval controls (e.g. the "Using Focused Retrieval" toggle) have
+ * no effect and should be hidden.
+ *
+ * @param boundAgentId - The chat's bound agent id (`chat.meta.agent_id`
+ *   for an existing chat, the pending agent pick for a new chat).
+ */
+export function isAgentRouted(boundAgentId?: string | null): boolean {
+	if (boundAgentId) {
+		return true;
+	}
+	const $config = get(config);
+	return Boolean($config?.features?.feature_agent_api_enabled) && !isFeatureEnabled('agent_picker');
+}
+
+/**
  * All valid admin settings tab IDs
  */
 export const ADMIN_SETTINGS_TABS = [

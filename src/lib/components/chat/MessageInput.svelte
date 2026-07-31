@@ -144,6 +144,10 @@
 	export let history;
 	export let taskIds = null;
 
+	// [Gradient] True when this chat routes to the agent service, which owns
+	// retrieval — hides per-file retrieval controls that would be no-ops there.
+	export let agentRouted = false;
+
 	export let prompt = '';
 	export let files = [];
 
@@ -1805,7 +1809,7 @@
 												size={file?.size}
 												loading={file.status === 'uploading'}
 												dismissible={true}
-												edit={true}
+												edit={!agentRouted}
 												small={true}
 												modal={['file', 'collection'].includes(file?.type)}
 												on:dismiss={async () => {

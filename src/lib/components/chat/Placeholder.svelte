@@ -18,11 +18,12 @@
 		temporaryChatEnabled,
 		selectedFolder,
 		chats,
-		currentChatPage
+		currentChatPage,
+		pendingAgentId
 	} from '$lib/stores';
 	import { sanitizeResponseContent, extractCurlyBraceWords } from '$lib/utils';
 	import { resolveLocalized } from '$lib/utils/localized';
-	import { isFeatureEnabled } from '$lib/utils/features';
+	import { isAgentRouted, isFeatureEnabled } from '$lib/utils/features';
 	import { WEBUI_API_BASE_URL, WEBUI_BASE_URL } from '$lib/constants';
 
 	import Suggestions from './Suggestions.svelte';
@@ -250,6 +251,7 @@
 				{#if !($selectedFolder && folderReadOnly)}
 					<MessageInput
 						bind:this={messageInput}
+						agentRouted={isAgentRouted($pendingAgentId)}
 						{history}
 						{selectedModels}
 						bind:files

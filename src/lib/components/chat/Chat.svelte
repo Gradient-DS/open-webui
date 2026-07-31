@@ -104,6 +104,7 @@
 	import { getFunctions } from '$lib/apis/functions';
 	import { initiateOAuthRedirect } from '$lib/apis/configs';
 	import { updateFolderById } from '$lib/apis/folders';
+	import { isAgentRouted } from '$lib/utils/features';
 
 	import Banner from '../common/Banner.svelte';
 	import MessageInput from '$lib/components/chat/MessageInput.svelte';
@@ -3740,6 +3741,7 @@
 								<div class=" pb-2 {dragged ? 'z-0' : 'z-10'}">
 									<MessageInput
 										bind:this={messageInput}
+										agentRouted={isAgentRouted(chat?.id ? chat?.meta?.agent_id : $pendingAgentId)}
 										{history}
 										{taskIds}
 										{selectedModels}
