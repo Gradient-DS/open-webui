@@ -24,6 +24,7 @@ from starlette.responses import StreamingResponse
 from open_webui.env import AGENT_API_BASE_URL, AGENT_API_KEY
 from open_webui.models.config import Config
 from open_webui.models.knowledge import Knowledges
+from open_webui.utils.agent import enrich_collection_entries
 from open_webui.utils.auth import get_verified_user
 from open_webui.utils.misc import stream_wrapper
 
@@ -263,13 +264,17 @@ async def chat_completions(
     UUID (``id``) or by the integration ingest pair (``source_id`` +
     ``provider``). The pair is resolved to a UUID here so the upstream
     agent only ever sees ``id``. ``id`` takes precedence when both are
-    provided.
+    provided. Every resolved collection entry is then enriched with its
+    capped file roster (``files`` + ``files_total``).
     """
     base_url = await _get_base_url(request)
 
     payload_dict = body.model_dump(exclude_none=True)
     if payload_dict.get('files'):
         await _resolve_collection_refs(payload_dict['files'])
+        # Refs are UUIDs by now, so the roster lookup can run: the agent
+        # service requires ``files`` on every collection entry.
+        payload_dict['files'] = await enrich_collection_entries(payload_dict['files'])
     payload_dict.setdefault('user_id', user.id)
     payload = json.dumps(payload_dict).encode()
 

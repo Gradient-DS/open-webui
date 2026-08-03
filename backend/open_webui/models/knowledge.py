@@ -861,6 +861,40 @@ class KnowledgeTable:
             )
             return {row[0]: row[1] for row in result.all()}
 
+    async def get_file_roster_by_id(
+        self, knowledge_id: str, limit: int, db: Optional[AsyncSession] = None
+    ) -> tuple[list[tuple[str, str]], int]:
+        """Return the first ``limit`` ``(file_id, filename)`` pairs plus the KB's total file count.
+
+        [Gradient] Backs the capped file roster shipped on ``type: "collection"``
+        entries in agent payloads. Ordered by KB insertion — the join row's
+        ``created_at`` (when the file was linked), tie-broken on filename then
+        file id so files linked within the same epoch second still order
+        deterministically. Projects only id + filename, so the heavy
+        ``file.data`` content blob is never de-TOASTed. A KB that does not
+        exist (or holds no files) yields ``([], 0)``.
+        """
+        async with get_async_db_context(db) as db:
+            base_filter = KnowledgeFile.knowledge_id == knowledge_id
+            count_result = await db.execute(
+                select(func.count())
+                .select_from(KnowledgeFile)
+                .join(File, File.id == KnowledgeFile.file_id)
+                .filter(base_filter)
+            )
+            total = count_result.scalar() or 0
+            if total == 0:
+                return [], 0
+
+            result = await db.execute(
+                select(File.id, File.filename)
+                .join(KnowledgeFile, File.id == KnowledgeFile.file_id)
+                .filter(base_filter)
+                .order_by(KnowledgeFile.created_at.asc(), File.filename.asc(), File.id.asc())
+                .limit(limit)
+            )
+            return [(row.id, row.filename) for row in result.all()], total
+
     async def search_files_by_id(
         self,
         knowledge_id: str,

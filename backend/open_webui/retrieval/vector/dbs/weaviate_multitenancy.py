@@ -147,6 +147,11 @@ def _mt_properties() -> list:
         weaviate.classes.config.Property(name='start_index', data_type=weaviate.classes.config.DataType.NUMBER),
         weaviate.classes.config.Property(name='page', data_type=weaviate.classes.config.DataType.NUMBER),
         weaviate.classes.config.Property(name='total_pages', data_type=weaviate.classes.config.DataType.NUMBER),
+        # Position of the chunk in the document's chunk list, stamped at indexing
+        # time (save_docs_to_vector_db). The authoritative document order: it is
+        # unrecoverable from `start_index`, which the markdown header splitter
+        # resets per section. OWUI writes int; Weaviate stores/returns float64.
+        weaviate.classes.config.Property(name='chunk_index', data_type=weaviate.classes.config.DataType.NUMBER),
     ]
 
 
@@ -174,11 +179,11 @@ class WeaviateClient(VectorDBBase):
         except Exception as e:
             raise ConnectionError(f'Failed to connect to Weaviate: {e}') from e
 
-        # Collections whose `source_url` property has been verified/added this
-        # process. Auto-schema is off (see _create_collection), so the generic
-        # `source_url` provenance key must be an explicit property; this set
-        # avoids re-checking the schema on every insert batch.
-        self._source_url_ensured: set[str] = set()
+        # Collections whose declared properties have been verified/added this
+        # process. Auto-schema is off (see _create_collection), so every
+        # retrievable key (`source_url`, `chunk_index`, ...) must be an explicit
+        # property; this set avoids re-checking the schema on every insert batch.
+        self._properties_ensured: set[str] = set()
 
     # ------------------------------------------------------------------
     # Schema / collection lifecycle
@@ -215,38 +220,35 @@ class WeaviateClient(VectorDBBase):
                 else:
                     raise
         else:
-            # Collection predates the `source_url` property: add it in place so a
-            # re-sync repopulates the original-page link without reprovisioning.
-            self._ensure_source_url_property(coll_name)
+            # Collection predates a later-declared property: add it in place so a
+            # re-index populates it without reprovisioning the collection.
+            self._ensure_declared_properties(coll_name)
 
-    def _ensure_source_url_property(self, coll_name: str) -> None:
-        """Idempotently add the `source_url` property to an existing collection.
+    def _ensure_declared_properties(self, coll_name: str) -> None:
+        """Idempotently add any missing `_mt_properties()` entry to an existing collection.
 
         Auto-schema is off, so inserts silently drop undeclared properties. New
-        collections get `source_url` from `_mt_properties`; collections created
-        before this property existed need it added once. The schema is
-        collection-level (tenant-agnostic), so one call covers all tenants.
-        Cached per process.
+        collections get the full list from `_mt_properties`; collections created
+        before a property was declared (`source_url`, `chunk_index`) need it
+        added once. The schema is collection-level (tenant-agnostic), so one call
+        covers all tenants. Cached per process.
         """
-        if coll_name in self._source_url_ensured:
+        if coll_name in self._properties_ensured:
             return
         try:
             collection = self.client.collections.get(coll_name)
             existing = {p.name for p in collection.config.get().properties}
-            if 'source_url' not in existing:
-                collection.config.add_property(
-                    weaviate.classes.config.Property(
-                        name='source_url',
-                        data_type=weaviate.classes.config.DataType.TEXT,
-                    )
-                )
-                log.info('Added source_url property to existing collection %s', coll_name)
+            for prop in _mt_properties():
+                if prop.name in existing:
+                    continue
+                collection.config.add_property(prop)
+                log.info('Added %s property to existing collection %s', prop.name, coll_name)
         except Exception as e:
             # Non-fatal: a concurrent add or a transient error must not block the
             # insert. The property either already exists or will be retried next call.
-            log.debug('Could not ensure source_url on %s: %s', coll_name, e)
+            log.debug('Could not ensure declared properties on %s: %s', coll_name, e)
             return
-        self._source_url_ensured.add(coll_name)
+        self._properties_ensured.add(coll_name)
 
     def _queryable(self, coll_name: str, tenant: Optional[str]):
         """Return the queryable collection object (tenant-scoped if applicable).
