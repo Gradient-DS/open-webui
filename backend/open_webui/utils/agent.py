@@ -39,6 +39,7 @@ SSE protocol from agent:
 
 import json
 import logging
+import os
 from collections.abc import AsyncIterator
 from dataclasses import asdict, dataclass, field
 from datetime import timedelta
@@ -51,10 +52,24 @@ from open_webui.models.chats import Chats
 from open_webui.models.config import Config
 from open_webui.socket.main import get_event_emitter
 from open_webui.utils.auth import create_token
+from open_webui.utils.log_context import describe_exception, error_fields
 from open_webui.utils.upstream_errors import safe_error_text
 from starlette.responses import StreamingResponse
 
 log = logging.getLogger(__name__)
+
+# [Gradient] Outer client timeout for agent API calls.
+#
+# The timeout rule (soev-docs/architecture/logging.md):
+#     outer_timeout > attempts * per_attempt_timeout + overhead
+#
+# agents-api runs 2 attempts at 120s = 240s, so 300s leaves 60s of headroom.
+# Before GRA-174 the agent side ran 3 x 120s = 360s against this same 300s, so
+# any request that needed its retries was guaranteed to be cut off mid-flight
+# and to surface as an unattributable timeout rather than the upstream error
+# that triggered the retry. Do not lower this without lowering the agent's
+# max_attempts first.
+AGENT_API_TIMEOUT = int(os.environ.get('AGENT_API_TIMEOUT', '300'))
 
 
 def _upstream_error(status: int, body: str) -> Exception:
@@ -285,7 +300,7 @@ class SSEEvent:
 async def stream_agent_response(
     base_url: str,
     payload: dict[str, Any],
-    timeout: int = 300,
+    timeout: int = AGENT_API_TIMEOUT,
 ) -> AsyncIterator[SSEEvent]:
     """POST to the agent API and yield parsed SSE events.
 
@@ -478,7 +493,7 @@ async def _call_agent_api_non_streaming(
     """Handle non-streaming agent API call. Returns a dict response."""
     session = aiohttp.ClientSession(
         trust_env=True,
-        timeout=aiohttp.ClientTimeout(total=300),
+        timeout=aiohttp.ClientTimeout(total=AGENT_API_TIMEOUT),
     )
     try:
         response = await session.request(
@@ -669,10 +684,19 @@ def _build_streaming_response(
                     yield f'data: {sse_event.data}\n\n'
 
         except Exception as e:
-            log.error(f'Agent API streaming error: {e}')
+            # describe_exception, not f'{e}': aiohttp raises a bare
+            # asyncio.TimeoutError on total-timeout expiry, and str() of it is
+            # ''. Interpolating it produced 'Agent API streaming error: ' in
+            # the log and 'Agent API error: ' in the user's banner — the
+            # defect that made GRA-174 unattributable.
+            described = describe_exception(e)
+            log.error(
+                'Agent API streaming error',
+                extra={'timeout_s': AGENT_API_TIMEOUT, **error_fields(e)},
+            )
             # Emit an OpenAI-shape error object (no `choices`) so the UI
             # renders a proper error banner instead of inline text.
-            yield _error_sse_chunk(f'Agent API error: {e}')
+            yield _error_sse_chunk(f'Agent API error: {described}')
 
         yield 'data: [DONE]\n\n'
 
