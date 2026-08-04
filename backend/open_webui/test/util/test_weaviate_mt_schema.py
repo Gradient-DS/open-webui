@@ -9,13 +9,29 @@ out again now that `_mt_properties()` is the only declaration.
 
 import weaviate
 
-from open_webui.retrieval.vector.dbs.weaviate_multitenancy import _mt_properties
+from open_webui.retrieval.vector.dbs.weaviate_multitenancy import (
+    _BACKFILL_PROPERTY_NAMES,
+    _mt_properties,
+)
 
 
 def test_mt_properties_declare_source_url_as_text() -> None:
     # weaviate-client's Property model stores the `data_type` kwarg as `dataType`.
     props = {prop.name: prop.dataType for prop in _mt_properties()}
     assert props.get('source_url') == weaviate.classes.config.DataType.TEXT
+
+
+def test_mt_properties_declare_bboxes_as_text() -> None:
+    """Citation bbox geometry rides as a JSON string in a TEXT property."""
+    props = {prop.name: prop.dataType for prop in _mt_properties()}
+    assert props.get('bboxes') == weaviate.classes.config.DataType.TEXT
+
+
+def test_backfill_property_names_are_declared_in_mt_properties() -> None:
+    """Every back-filled property must also be in the canonical list, or fresh
+    collections would miss what existing ones get patched with."""
+    names = {prop.name for prop in _mt_properties()}
+    assert set(_BACKFILL_PROPERTY_NAMES) <= names
 
 
 def test_mt_properties_keep_core_provenance_fields() -> None:
