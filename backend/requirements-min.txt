@@ -9,14 +9,14 @@ itsdangerous==2.2.0
 
 python-socketio==5.16.2
 python-jose==3.5.0
-cryptography==48.0.1 # security: GHSA-537c-gmf6-5ccf (vulnerable OpenSSL bundled in wheels) fixed in 48.0.1
+cryptography==50.0.0 # security: CVE-2026-69248/69249 (X.509 wildcard name-constraint escape, chain-building DoS) fixed in 49.0.0; CVE-2026-69247 (PKCS7 Bleichenbacher oracle) fixed in 50.0.0
 bcrypt==5.0.0
 argon2-cffi==25.1.0
 PyJWT[crypto]==2.13.0 # security: CVE-2026-48526 (auth bypass via forged JWT) fixed in 2.13.0
 authlib==1.7.2
 
 requests==2.34.2
-aiohttp==3.14.1 # do not update to 3.13.3 - broken; security: CVE-2026-54273..54280 (DoS/SNI/cookie issues) fixed in 3.14.1
+aiohttp==3.14.3 # do not update to 3.13.3 - broken; security: CVE-2026-59881/69243 (ws decompress, request smuggling) fixed in 3.14.2; CVE-2026-69244 (OOB heap read in C response parser) fixed in 3.14.3
 async-timeout
 aiocache
 aiofiles
