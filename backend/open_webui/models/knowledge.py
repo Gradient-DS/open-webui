@@ -330,6 +330,11 @@ _STATUS_BUCKETS = {
     'failed': 'failed',
     'error': 'failed',
     'pending': 'pending',
+    # Written by the distributed doc-pipeline path (routers/retrieval.py's
+    # set_status calls) while a file is parsed/chunked/embedded. Was absent
+    # here, so those files bucketed as 'unknown': folder rollups undercounted
+    # pending work and ?status=pending could not find them.
+    'processing': 'pending',
     'downloading': 'pending',
     'parsing': 'pending',
     'ingesting': 'pending',
@@ -340,7 +345,7 @@ _STATUS_BUCKET_KEYS = ('pending', 'completed', 'failed', 'unknown')
 # it. Used by the flat search filter to expand e.g. ?status=failed into a match
 # on both 'failed' and 'error'.
 _STATUS_BUCKET_RAWS = {
-    'pending': ('pending', 'downloading', 'parsing', 'ingesting'),
+    'pending': ('pending', 'processing', 'downloading', 'parsing', 'ingesting'),
     'completed': ('completed',),
     'failed': ('failed', 'error'),
 }
