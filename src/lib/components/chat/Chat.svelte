@@ -1602,18 +1602,21 @@
 				// Set from folder model IDs
 				selectedModels = $selectedFolder?.data?.model_ids;
 			} else {
-				if (sessionStorage.selectedModels) {
-					// Set from session storage (temporary selection)
-					selectedModels = JSON.parse(sessionStorage.selectedModels);
-					sessionStorage.removeItem('selectedModels');
-				} else {
-					if ($settings?.models) {
-						// Set from user settings
-						selectedModels = $settings?.models;
-					} else if (defaultModels && defaultModels.length > 0) {
-						// Set from default models
-						selectedModels = defaultModels;
-					}
+				// [Gradient] Upstream carried the previous chat's selection into
+				// every new chat via sessionStorage.selectedModels. With the
+				// model selector hidden behind the agent picker, that made any
+				// explicitly chosen assistant (pinned sidebar entry, ?model=
+				// link) silently sticky for the rest of the session, with no
+				// visible way back. New chats now always resolve user settings
+				// then admin defaults. The key is still WRITTEN on selection
+				// (saveSessionSelectedModels): ChatItem reads it to label the
+				// active chat's model.
+				if ($settings?.models) {
+					// Set from user settings
+					selectedModels = $settings?.models;
+				} else if (defaultModels && defaultModels.length > 0) {
+					// Set from default models
+					selectedModels = defaultModels;
 				}
 			}
 

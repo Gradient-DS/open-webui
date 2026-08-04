@@ -239,7 +239,7 @@ type OllamaModelDetails = {
 };
 
 type Settings = {
-	pinnedModels?: never[];
+	pinnedModels?: string[];
 	pinnedInputItems?: string[];
 	toolServers?: never[];
 	detectArtifacts?: boolean;
