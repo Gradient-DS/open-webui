@@ -293,6 +293,7 @@ from open_webui.utils.feedback_report import (  # [Gradient] Feedback Reporting
     get_current_trace_id,
 )
 from open_webui.utils.lazy_resource import lazy  # [Gradient] HA Redis fix
+from open_webui.utils.log_context import install_log_context
 from open_webui.utils.logger import start_logger
 from open_webui.utils.middleware import (
     background_tasks_handler,
@@ -476,6 +477,10 @@ async def lifespan(app: FastAPI):
 
     app.state.instance_id = INSTANCE_ID
     start_logger()
+    # [Gradient] Stamp service/version/tenant onto every log record. Rides in
+    # loguru's `extra`, which the sink already serialises — no change to
+    # utils/logger.py. See soev-docs/architecture/logging.md.
+    install_log_context()
 
     if RESET_CONFIG_ON_START:
         await async_reset_config()
