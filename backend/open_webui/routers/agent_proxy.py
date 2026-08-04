@@ -26,6 +26,7 @@ from open_webui.models.config import Config
 from open_webui.models.knowledge import Knowledges
 from open_webui.utils.auth import get_verified_user
 from open_webui.utils.misc import stream_wrapper
+from open_webui.utils.upstream_errors import safe_error_text
 
 log = logging.getLogger(__name__)
 
@@ -312,11 +313,19 @@ async def chat_completions(
         if response.status >= 400:
             error_body = await response.text()
             await session.close()
+            # The body may echo the request (prompt + messages); keep it to a
+            # server-side DEBUG log and surface only the classification.
+            log.debug(
+                'Agent service raw error body (HTTP %d): %s',
+                response.status,
+                error_body,
+            )
             raise HTTPException(
                 status_code=response.status,
-                detail=(
-                    f'Agent service returned {response.status} on /v1/chat/completions. '
-                    f'Upstream body: {error_body[:1000] or "<empty>"}'
+                detail=safe_error_text(
+                    error_body,
+                    status=response.status,
+                    source='Agent service on /v1/chat/completions',
                 ),
             )
 
