@@ -49,7 +49,6 @@ from open_webui.config import ENABLE_SKILL_EXECUTION, FEATURE_SKILL_FILES
 from open_webui.env import AGENT_API_BASE_URL, AGENT_API_KEY
 from open_webui.models.chats import Chats
 from open_webui.models.config import Config
-from open_webui.models.knowledge import Knowledges
 from open_webui.socket.main import get_event_emitter
 from open_webui.utils.auth import create_token
 from starlette.responses import StreamingResponse
@@ -144,47 +143,6 @@ def _maybe_attach_fetch_token(skill_entry: dict[str, Any], user_id: str) -> dict
         expires_delta=timedelta(seconds=120),
     )
     return {**skill_entry, 'fetch_token': token}
-
-
-# [Gradient] Maximum number of files listed on a single ``type: "collection"``
-# entry in an agent payload. Sized for the agent's LLM-facing listing tools
-# (a roster it can read and reason over), NOT as a wire page size — there is
-# no continuation token. ``files_total`` rides alongside so a truncated roster
-# stays honest about how big the KB really is.
-AGENT_KB_FILES_CAP = 50
-
-
-async def enrich_collection_entries(
-    entries: list[dict[str, Any]] | None,
-) -> list[dict[str, Any]] | None:
-    """Return ``entries`` with every collection entry carrying a capped file roster.
-
-    Each ``type: "collection"`` entry gains ``files`` (at most
-    ``AGENT_KB_FILES_CAP`` ``{"id", "name"}`` records, in KB insertion order)
-    and ``files_total`` (the KB's true file count). Non-collection entries pass
-    through untouched. A collection whose KB no longer exists — or that carries
-    no ``id`` — gets an empty roster rather than raising, so a stale attachment
-    never breaks the chat. Entries are copied, never mutated in place.
-
-    The agent service requires ``files`` on every collection entry, so this must
-    run on every payload-building path.
-    """
-    if not entries:
-        return entries
-    return [(await _with_file_roster(entry) if entry.get('type') == 'collection' else entry) for entry in entries]
-
-
-async def _with_file_roster(entry: dict[str, Any]) -> dict[str, Any]:
-    """Return a copy of a collection entry with ``files`` + ``files_total`` set."""
-    knowledge_id = entry.get('id')
-    if not knowledge_id:
-        return {**entry, 'files': [], 'files_total': 0}
-    roster, total = await Knowledges.get_file_roster_by_id(knowledge_id, AGENT_KB_FILES_CAP)
-    return {
-        **entry,
-        'files': [{'id': file_id, 'name': filename} for file_id, filename in roster],
-        'files_total': total,
-    }
 
 
 def build_agent_payload(
@@ -472,13 +430,6 @@ async def call_agent_api(
     # any inbound features value.
     features = {**(features or {}), 'citations': _resolve_model_citations_enabled(model_dict)}
 
-    # [Gradient] Attach the capped file roster to every collection attachment.
-    # Both lists can carry ``type: "collection"`` entries — ``files`` holds the
-    # per-turn attachments, ``knowledge`` the KBs configured on the custom model
-    # — and the agent service errors when a collection arrives without ``files``.
-    payload_files = await enrich_collection_entries(metadata.get('files'))
-    payload_knowledge = await enrich_collection_entries(metadata.get('knowledge'))
-
     payload = build_agent_payload(
         model=llm_model,
         agent=selected_agent,
@@ -490,8 +441,8 @@ async def call_agent_api(
         parent_message_id=metadata.get('user_message_id'),
         session_id=metadata.get('session_id'),
         features=features,
-        files=payload_files,
-        knowledge=payload_knowledge,
+        files=metadata.get('files'),
+        knowledge=metadata.get('knowledge'),
         tool_ids=metadata.get('tool_ids'),
         rag_filter=metadata.get('rag_filter'),
         system_prompt=metadata.get('system_prompt'),
