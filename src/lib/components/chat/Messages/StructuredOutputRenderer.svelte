@@ -65,6 +65,30 @@
 		{:else}
 			<div class="whitespace-pre-wrap">{displayItem.text}</div>
 		{/if}
+	{:else if displayItem.type === 'document'}
+		<!-- [Gradient] Document Writer: the serialized <details type="document">
+		     block routes through Markdown → MarkdownTokens → DocumentCard, the
+		     same rendering the pre-v0.10.2 content path produced. -->
+		{#if renderMarkdown}
+			<Markdown
+				id={`${id}-${displayItem.id}`}
+				content={formatMessageContent(displayItem.text)}
+				{model}
+				{save}
+				{preview}
+				{done}
+				{editCodeBlock}
+				{topPadding}
+				{sourceIds}
+				{onSourceClick}
+				{onTaskClick}
+				{onSave}
+				{onUpdate}
+				{onPreview}
+			/>
+		{:else}
+			<div class="whitespace-pre-wrap">{displayItem.text}</div>
+		{/if}
 	{:else if displayItem.type === 'detail_group'}
 		<ConsecutiveDetailsGroup
 			id={`${id}-${displayItem.id}`}

@@ -1510,11 +1510,18 @@
 		const messages = history ? createMessagesList(history, history.currentId) : [];
 		let docs = [];
 		messages.forEach((message) => {
-			if (message?.role !== 'user' && message?.content) {
-				const found = extractDocumentsFromMessage(message.content);
-				if (found.length > 0) {
+			if (message?.role !== 'user') {
+				// [Gradient] Document Writer: content is persisted empty since
+				// v0.10.2 — fall back to the output items, which getOutputText()
+				// serializes into the same <details type="document"> blocks.
+				// Content-baked documents (pre-refactor chats) still win.
+				const found = extractDocumentsFromMessage(message?.content ?? '');
+				const documents = found.length
+					? found
+					: extractDocumentsFromMessage(getOutputText(message?.output));
+				if (documents.length > 0) {
 					const sources = message?.sources ?? [];
-					docs = [...docs, ...found.map((doc) => ({ ...doc, sources }))];
+					docs = [...docs, ...documents.map((doc) => ({ ...doc, sources }))];
 				}
 			}
 		});

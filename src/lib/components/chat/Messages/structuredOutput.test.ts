@@ -1,6 +1,11 @@
 import { describe, it, expect } from 'vitest';
 
-import { getOutputStreamAnchors, type OutputItem } from './structuredOutput';
+import {
+	buildOutputDisplayItems,
+	getOutputStreamAnchors,
+	hasDocumentOutput,
+	type OutputItem
+} from './structuredOutput';
 import { mergeStatusAndReasoning } from './ResponseMessage/mergeHistory';
 
 // Fixture helpers ----------------------------------------------------------
@@ -101,6 +106,60 @@ describe('getOutputStreamAnchors', () => {
 
 		expect(anchors.reasoningItems.map((r) => r.contentOffset)).toEqual([0, 3]);
 		expect(anchors.toolOffsets).toEqual([1, 2]);
+	});
+});
+
+// Document Writer display items -------------------------------------------
+// Shape copied from the NEO deployment's persisted chat rows: the final save
+// writes content "" and an output array whose document item carries the
+// markdown; before the fix these items were dropped by the fallback branch
+// (getMessageText() is '' for them) and the bubble rendered empty.
+
+const documentItem = (overrides: Partial<OutputItem> = {}): OutputItem => ({
+	type: 'open_webui:document',
+	status: 'completed',
+	title: 'T',
+	markdown: '# H\n\nbody',
+	...overrides
+});
+
+describe('buildOutputDisplayItems: documents', () => {
+	it('emits a completed document display item from the persisted shape', () => {
+		const items = buildOutputDisplayItems([
+			{ type: 'message', content: [{ type: 'output_text', text: 'intro\n\n' }] },
+			documentItem(),
+			reasoningItem('afterthought')
+		]);
+
+		expect(items.map((item) => item.type)).toEqual(['message', 'document', 'detail_single']);
+		const doc = items[1] as { type: 'document'; text: string };
+		expect(doc.text).toBe(
+			'<details type="document" done="true" title="T">\n<summary>Document</summary>\n# H\n\nbody\n</details>'
+		);
+	});
+
+	it('renders an in-progress trailing document as the Writing… form', () => {
+		const items = buildOutputDisplayItems([
+			{ type: 'message', content: [{ type: 'output_text', text: 'intro\n\n' }] },
+			documentItem({ status: 'in_progress', markdown: '# H' })
+		]);
+
+		const doc = items[1] as { type: 'document'; text: string };
+		expect(doc.text).toBe(
+			'<details type="document" done="false" title="T">\n<summary>Writing…</summary>\n# H\n</details>'
+		);
+	});
+
+	it('escapes the title so Chat.svelte decodeHtmlEntities round-trips it', () => {
+		const items = buildOutputDisplayItems([documentItem({ title: 'A "B" & C' })]);
+		const doc = items[0] as { type: 'document'; text: string };
+		expect(doc.text).toContain('title="A &quot;B&quot; &amp; C"');
+	});
+
+	it('detects document output items for the side panel', () => {
+		expect(hasDocumentOutput([messageItem('hi')])).toBe(false);
+		expect(hasDocumentOutput([messageItem('hi'), documentItem()])).toBe(true);
+		expect(hasDocumentOutput(undefined)).toBe(false);
 	});
 });
 

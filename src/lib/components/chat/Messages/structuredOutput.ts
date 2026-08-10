@@ -48,6 +48,14 @@ export type OutputDisplayItem =
 			text: string;
 	  }
 	| {
+			// [Gradient] Document Writer: an open_webui:document output item,
+			// pre-serialized to the <details type="document"> block the Markdown
+			// path (MarkdownTokens → DocumentCard) already knows how to render.
+			type: 'document';
+			id: string;
+			text: string;
+	  }
+	| {
 			type: 'detail_single';
 			id: string;
 			token: OutputDetailToken;
@@ -57,6 +65,9 @@ export type OutputDisplayItem =
 			id: string;
 			tokens: OutputDetailToken[];
 	  };
+
+// [Gradient] Document Writer output item type (backend serialize_output()).
+const DOCUMENT_OUTPUT_TYPE = 'open_webui:document';
 
 const GROUPABLE_OUTPUT_TYPES = new Set([
 	'reasoning',
@@ -303,6 +314,19 @@ export function buildOutputDisplayItems(output: OutputItem[] = []): OutputDispla
 			return;
 		}
 
+		if (item?.type === DOCUMENT_OUTPUT_TYPE) {
+			// [Gradient] Document Writer: getMessageText() is empty for document
+			// items, so without this branch the fallback below dropped them and
+			// the assistant bubble rendered nothing at all.
+			flushDetails();
+			displayItems.push({
+				type: 'document',
+				id: item.id ?? `document-${index}`,
+				text: getDocumentText(item, index === output.length - 1)
+			});
+			return;
+		}
+
 		const fallbackText = getMessageText(item);
 		if (fallbackText.trim()) {
 			flushDetails();
@@ -360,6 +384,12 @@ function getDocumentText(item: OutputItem, isLastItem: boolean): string {
 	return `<details type="document" done="${doneAttr}"${titleAttr}>\n<summary>${summary}</summary>\n${markdown}\n</details>`;
 }
 
+export function hasDocumentOutput(output?: OutputItem[] | null): boolean {
+	// [Gradient] Document Writer: message.content is persisted empty since
+	// v0.10.2, so the document side panel can no longer rely on a content regex.
+	return (output ?? []).some((item) => item?.type === DOCUMENT_OUTPUT_TYPE);
+}
+
 export function getOutputText(output?: OutputItem[] | null): string {
 	const items = output ?? [];
 	return items
@@ -367,7 +397,7 @@ export function getOutputText(output?: OutputItem[] | null): string {
 			if (item?.type === 'message') {
 				return getMessageText(item);
 			}
-			if (item?.type === 'open_webui:document') {
+			if (item?.type === DOCUMENT_OUTPUT_TYPE) {
 				return getDocumentText(item, index === items.length - 1);
 			}
 			return '';
