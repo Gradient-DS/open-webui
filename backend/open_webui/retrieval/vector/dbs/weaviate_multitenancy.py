@@ -147,7 +147,19 @@ def _mt_properties() -> list:
         weaviate.classes.config.Property(name='start_index', data_type=weaviate.classes.config.DataType.NUMBER),
         weaviate.classes.config.Property(name='page', data_type=weaviate.classes.config.DataType.NUMBER),
         weaviate.classes.config.Property(name='total_pages', data_type=weaviate.classes.config.DataType.NUMBER),
+        # Citation geometry: JSON string of [{page, x0, y0, x1, y1}] rects
+        # (PDF points, top-left origin, 0-based pages) serialized with
+        # json.dumps in routers/integrations.py. The citation modal parses it
+        # to draw bbox highlights on the PDF viewer.
+        weaviate.classes.config.Property(name='bboxes', data_type=weaviate.classes.config.DataType.TEXT),
     ]
+
+
+# Properties added to `_mt_properties` after collections shipped to the fleet:
+# existing collections need them added in place (auto-schema is off, so inserts
+# silently drop undeclared keys). `_ensure_backfill_properties` adds any that
+# are missing, once per process per collection.
+_BACKFILL_PROPERTY_NAMES = ('source_url', 'bboxes')
 
 
 class WeaviateClient(VectorDBBase):
@@ -174,11 +186,12 @@ class WeaviateClient(VectorDBBase):
         except Exception as e:
             raise ConnectionError(f'Failed to connect to Weaviate: {e}') from e
 
-        # Collections whose `source_url` property has been verified/added this
-        # process. Auto-schema is off (see _create_collection), so the generic
-        # `source_url` provenance key must be an explicit property; this set
-        # avoids re-checking the schema on every insert batch.
-        self._source_url_ensured: set[str] = set()
+        # Collections whose back-fill properties (_BACKFILL_PROPERTY_NAMES)
+        # have been verified/added this process. Auto-schema is off (see
+        # _create_collection), so any retrievable metadata key must be an
+        # explicit property; this set avoids re-checking the schema on every
+        # insert batch.
+        self._backfill_ensured: set[str] = set()
 
     # ------------------------------------------------------------------
     # Schema / collection lifecycle
@@ -215,38 +228,40 @@ class WeaviateClient(VectorDBBase):
                 else:
                     raise
         else:
-            # Collection predates the `source_url` property: add it in place so a
-            # re-sync repopulates the original-page link without reprovisioning.
-            self._ensure_source_url_property(coll_name)
+            # Collection predates one of the later-added properties
+            # (source_url, bboxes): add them in place so a re-sync repopulates
+            # the data without reprovisioning.
+            self._ensure_backfill_properties(coll_name)
 
-    def _ensure_source_url_property(self, coll_name: str) -> None:
-        """Idempotently add the `source_url` property to an existing collection.
+    def _ensure_backfill_properties(self, coll_name: str) -> None:
+        """Idempotently add later-added properties to an existing collection.
 
         Auto-schema is off, so inserts silently drop undeclared properties. New
-        collections get `source_url` from `_mt_properties`; collections created
-        before this property existed need it added once. The schema is
-        collection-level (tenant-agnostic), so one call covers all tenants.
-        Cached per process.
+        collections get everything from `_mt_properties`; collections created
+        before a property existed need it added once (see
+        `_BACKFILL_PROPERTY_NAMES`). The schema is collection-level
+        (tenant-agnostic), so one call covers all tenants. Cached per process.
         """
-        if coll_name in self._source_url_ensured:
+        if coll_name in self._backfill_ensured:
             return
         try:
             collection = self.client.collections.get(coll_name)
             existing = {p.name for p in collection.config.get().properties}
-            if 'source_url' not in existing:
-                collection.config.add_property(
-                    weaviate.classes.config.Property(
-                        name='source_url',
-                        data_type=weaviate.classes.config.DataType.TEXT,
+            for prop_name in _BACKFILL_PROPERTY_NAMES:
+                if prop_name not in existing:
+                    collection.config.add_property(
+                        weaviate.classes.config.Property(
+                            name=prop_name,
+                            data_type=weaviate.classes.config.DataType.TEXT,
+                        )
                     )
-                )
-                log.info('Added source_url property to existing collection %s', coll_name)
+                    log.info('Added %s property to existing collection %s', prop_name, coll_name)
         except Exception as e:
             # Non-fatal: a concurrent add or a transient error must not block the
             # insert. The property either already exists or will be retried next call.
-            log.debug('Could not ensure source_url on %s: %s', coll_name, e)
+            log.debug('Could not ensure back-fill properties on %s: %s', coll_name, e)
             return
-        self._source_url_ensured.add(coll_name)
+        self._backfill_ensured.add(coll_name)
 
     def _queryable(self, coll_name: str, tenant: Optional[str]):
         """Return the queryable collection object (tenant-scoped if applicable).
