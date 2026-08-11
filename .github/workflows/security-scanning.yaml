@@ -3,8 +3,12 @@ name: Security Scanning
 on:
   push:
     branches: [main, dev, test]
+  # `test` included so a hotfix PR is scanned before it lands rather than at
+  # the release gate. Without it, PRs into `test` skipped these jobs entirely
+  # and the first scan happened on the test → main release PR — where a
+  # pre-existing dependency advisory shows up looking like a release blocker.
   pull_request:
-    branches: [main, dev]
+    branches: [main, dev, test]
   schedule:
     - cron: '0 6 * * 1'  # Weekly Monday 6 AM UTC
 
