@@ -39,6 +39,7 @@
 	import ChatBubble from '../icons/ChatBubble.svelte';
 	import Folder from '../icons/Folder.svelte';
 	import FolderOpen from '../icons/FolderOpen.svelte';
+	import GlobeAlt from '../icons/GlobeAlt.svelte';
 	let showModal = false;
 
 	const decodeString = (str: string) => {
@@ -116,7 +117,9 @@
 								? $i18n.t('Chat')
 								: type === 'file'
 									? $i18n.t('File')
-									: $i18n.t('Document')}
+									: type === 'url'
+										? $i18n.t('Web page')
+										: $i18n.t('Document')}
 					placement="top"
 				>
 					{#if type === 'collection' && item?.knowledge_type === 'onedrive'}
@@ -133,6 +136,9 @@
 						<ChatBubble />
 					{:else if type === 'folder'}
 						<Folder />
+					{:else if type === 'url'}
+						<!-- [Gradient] A web page the agent reads live (GRA-222). -->
+						<GlobeAlt className="size-5" />
 					{:else}
 						<DocumentPage />
 					{/if}
@@ -162,6 +168,8 @@
 					{$i18n.t('Document')}
 				{:else if type === 'collection'}
 					{$i18n.t('Collection')}
+				{:else if type === 'url'}
+					{$i18n.t('Web page')}
 				{:else}
 					<span class=" capitalize line-clamp-1">{type}</span>
 				{/if}
