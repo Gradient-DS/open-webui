@@ -734,6 +734,7 @@ from open_webui.utils.middleware import (
 )
 from open_webui.utils.agent import call_agent_api  # [Gradient] Agent API client
 from open_webui.utils.agent_routing import resolve_agent_route  # [Gradient]
+from open_webui.utils.chat_ids import socket_id_from_chat_id  # [Gradient]
 from open_webui.utils.feedback_report import (  # [Gradient] Feedback Reporting
     build_http_error_body,
     get_current_trace_id,
@@ -3139,7 +3140,7 @@ async def list_tasks_endpoint(request: Request, user=Depends(get_admin_user)):
 @app.get('/api/tasks/chat/{chat_id:path}')
 async def list_tasks_by_chat_id_endpoint(request: Request, chat_id: str, user=Depends(get_verified_user)):
     if chat_id.startswith('local:') or chat_id.startswith('channel:'):
-        socket_id = chat_id[len('local:') :]
+        socket_id = socket_id_from_chat_id(chat_id)
         owner_id = get_user_id_from_session_pool(socket_id)
         if owner_id != user.id and user.role != 'admin':
             return {'task_ids': []}
@@ -3157,7 +3158,7 @@ async def list_tasks_by_chat_id_endpoint(request: Request, chat_id: str, user=De
 @app.post('/api/tasks/chat/{chat_id:path}/stop')
 async def stop_tasks_by_chat_id_endpoint(request: Request, chat_id: str, user=Depends(get_verified_user)):
     if chat_id.startswith('local:') or chat_id.startswith('channel:'):
-        socket_id = chat_id[len('local:') :]
+        socket_id = socket_id_from_chat_id(chat_id)
         owner_id = get_user_id_from_session_pool(socket_id)
         if owner_id != user.id and user.role != 'admin':
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=ERROR_MESSAGES.NOT_FOUND)
