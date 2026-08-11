@@ -935,7 +935,12 @@
 			);
 
 			toast.success($i18n.t('File uploaded successfully'));
-			init();
+			// Awaited: `finally` clears `syncing` on return, and that state change
+			// re-triggers the reactive getItemsPage() above. Racing it against this
+			// refresh let the fetchId guard discard the post-upload response, so a
+			// freshly uploaded folder rendered with child_count 0 until you
+			// navigated into it and back.
+			await init();
 		} catch (e) {
 			toast.error(`${e}`);
 		} finally {
@@ -1004,7 +1009,9 @@
 					}
 				)
 			);
-			init();
+			// Awaited for the same reason as uploadDirectoryEntries above --
+			// same try/finally shape, same refresh race.
+			await init();
 		} catch (e) {
 			toast.error(`${e}`);
 		} finally {
@@ -3020,7 +3027,12 @@
 						<div class="flex-1 flex">
 							<div class=" flex flex-col w-full space-x-2 rounded-lg h-full">
 								<div class="w-full h-full flex flex-col min-h-0">
-									{#if knowledge?.write_access && fileItems && fileItems.length > 0}
+									<!-- Mirrors the row-list condition below so a level holding only
+								     directories still renders the header. KbSelectionHeader is
+								     fixed-height by design ("the list never jumps") — gating it on
+								     fileItems alone defeated that, since entering a folder with
+								     files made the header appear and shift the rows down. -->
+								{#if knowledge?.write_access && fileItems && (fileItems.length > 0 || (!query && directoryItems.length > 0))}
 										<div class="pb-1.5 shrink-0">
 											<KbSelectionHeader
 												count={$bulkCount}

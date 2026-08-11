@@ -23,9 +23,15 @@ describe('folderBadge', () => {
 
 describe('fileBadge', () => {
 	it('spinner for in-progress states', () => {
-		for (const s of ['uploading', 'pending', 'downloading', 'parsing', 'ingesting']) {
+		for (const s of ['uploading', 'pending', 'processing', 'downloading', 'parsing', 'ingesting']) {
 			expect(fileBadge(s)).toBe('spinner');
 		}
+	});
+
+	// Regression: the doc-pipeline's 'processing' was missing from IN_PROGRESS,
+	// so a file still being parsed/embedded rendered the idle document icon.
+	it('spinner for the doc-pipeline processing status', () => {
+		expect(fileBadge('processing')).toBe('spinner');
 	});
 
 	it('error for error/cancelled/failed', () => {

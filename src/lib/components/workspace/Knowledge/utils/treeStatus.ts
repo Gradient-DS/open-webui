@@ -47,7 +47,18 @@ export function folderBadge(counts: TreeStatusCounts | null | undefined): Folder
  */
 export type FileBadge = 'spinner' | 'error' | 'idle';
 
-const IN_PROGRESS = new Set(['uploading', 'pending', 'downloading', 'parsing', 'ingesting']);
+// 'processing' is what the distributed doc-pipeline writes while a file is
+// parsed/chunked/embedded (routers/retrieval.py's set_status calls). It was
+// missing here, so a file still in the pipeline rendered the idle document
+// icon — and its modal showed a bare "No content" — until processing finished.
+const IN_PROGRESS = new Set([
+	'uploading',
+	'pending',
+	'processing',
+	'downloading',
+	'parsing',
+	'ingesting'
+]);
 const ERRORED = new Set(['error', 'cancelled', 'failed']);
 
 export function fileBadge(status: string | null | undefined): FileBadge {
