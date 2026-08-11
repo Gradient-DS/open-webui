@@ -26,6 +26,10 @@ node_modules
 # (backend/.gitignore only covers backend/-relative paths)
 /data/
 .webui_secret_key
+
+# Retired vendored asset (removed in 162a570aa) that local tooling keeps
+# regenerating — zero source references; never re-commit it
+backend/open_webui/static/vis-network-*.min.js
 vite.config.js.timestamp-*
 vite.config.ts.timestamp-*
 # Byte-compiled / optimized / DLL files
