@@ -988,7 +988,17 @@
 			files = [...files, fileItem];
 		}
 
-		if (!$temporaryChatEnabled) {
+		// [Gradient] Temporary chat normally skips the upload and extracts the file
+		// text client-side into a `type: 'text'` item. That item has no server-side
+		// file record, and the agent resolves attachments purely by file id
+		// (`file-<uuid>` collection / OWUI file content endpoint) — so on
+		// agent-routed deployments the attachment is silently dropped and the model
+		// is told nothing was attached (GRA-184). Upload it like any other chat so
+		// the agent can actually retrieve it. Upstream behaviour is preserved when
+		// no agent API is configured.
+		const skipUpload = $temporaryChatEnabled && !$config?.features?.feature_agent_api_enabled;
+
+		if (!skipUpload) {
 			try {
 				// If the file is an audio file, provide the language for STT.
 				let metadata = null;
