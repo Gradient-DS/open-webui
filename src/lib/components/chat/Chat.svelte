@@ -67,7 +67,8 @@
 		removeAllDetails,
 		getCodeBlockContents,
 		isYoutubeUrl,
-		displayFileHandler
+		displayFileHandler,
+		temporaryChatId
 	} from '$lib/utils';
 	import { AudioQueue } from '$lib/utils/audio';
 
@@ -2467,7 +2468,7 @@
 		// New chat — backend generates the chat_id on first request
 		if (!_chatId) {
 			if ($temporaryChatEnabled) {
-				_chatId = `local:${$socket?.id}`;
+				_chatId = temporaryChatId($socket?.id);
 				await chatId.set(_chatId);
 			}
 			await tick();
@@ -3174,7 +3175,7 @@
 
 			selectedFolder.set(null);
 		} else {
-			_chatId = `local:${$socket?.id}`; // Use socket id for temporary chat
+			_chatId = temporaryChatId($socket?.id); // Use socket id for temporary chat
 			await chatId.set(_chatId);
 		}
 		await tick();

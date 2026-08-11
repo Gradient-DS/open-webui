@@ -29,6 +29,7 @@ from open_webui.models.models import Models
 from open_webui.models.access_grants import AccessGrants
 from open_webui.models.groups import Groups
 from open_webui.utils.access_control import has_connection_access, check_model_access
+from open_webui.utils.upstream_errors import safe_error_text, upstream_error_response
 from open_webui.config import (
     CACHE_DIR,
 )
@@ -1255,19 +1256,16 @@ async def generate_chat_completion(
             # streaming the error back (which hides the error from logs).
             if r.status >= 400:
                 error_body = await r.text()
+                # Classification at ERROR, raw body at DEBUG: providers echo the
+                # request (prompt + messages) in error bodies, and this string
+                # reaches the chat error banner and the feedback report.
                 log.error(
                     'Provider returned HTTP %d with SSE content-type: %s',
                     r.status,
-                    error_body[:1000],
+                    safe_error_text(error_body, status=r.status, source='Provider'),
                 )
-                try:
-                    error_json = json.loads(error_body)
-                    return JSONResponse(status_code=r.status, content=error_json)
-                except json.JSONDecodeError:
-                    return JSONResponse(
-                        status_code=r.status,
-                        content={'error': {'message': error_body, 'code': r.status}},
-                    )
+                log.debug('Provider raw error body (HTTP %d): %s', r.status, error_body)
+                return upstream_error_response(error_body, status=r.status)
 
             streaming = True
             return StreamingResponse(
@@ -1283,10 +1281,8 @@ async def generate_chat_completion(
                 response = await r.text()
 
             if r.status >= 400:
-                if isinstance(response, (dict, list)):
-                    return JSONResponse(status_code=r.status, content=response)
-                else:
-                    return PlainTextResponse(status_code=r.status, content=response)
+                log.debug('Provider raw error body (HTTP %d): %s', r.status, response)
+                return upstream_error_response(response, status=r.status)
 
             # Convert Responses API result to simple format
             if is_responses and isinstance(response, dict):
@@ -1367,10 +1363,11 @@ async def embeddings(request: Request, form_data: dict, user):
                 response_data = await r.text()
 
             if r.status >= 400:
-                if isinstance(response_data, (dict, list)):
-                    return JSONResponse(status_code=r.status, content=response_data)
-                else:
-                    return PlainTextResponse(status_code=r.status, content=response_data)
+                # The embeddings request body carries the text being embedded —
+                # user queries and document chunks — so an echoing provider
+                # error is a content leak just like the chat path.
+                log.debug('Embeddings raw error body (HTTP %d): %s', r.status, response_data)
+                return upstream_error_response(response_data, status=r.status)
 
             return response_data
     except Exception as e:
