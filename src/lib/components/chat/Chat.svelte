@@ -2,6 +2,7 @@
 	import { v4 as uuidv4 } from 'uuid';
 	import { toast } from 'svelte-sonner';
 	import { PaneGroup, Pane, PaneResizer } from 'paneforge';
+	import { isFeatureEnabled } from '$lib/utils/features';
 
 	import { getContext, onDestroy, onMount, tick } from 'svelte';
 	import { fade } from 'svelte/transition';
@@ -1536,11 +1537,18 @@
 		const messages = history ? createMessagesList(history, history.currentId) : [];
 		let docs = [];
 		messages.forEach((message) => {
-			if (message?.role !== 'user' && message?.content) {
-				const found = extractDocumentsFromMessage(message.content);
-				if (found.length > 0) {
+			if (message?.role !== 'user') {
+				// [Gradient] Document Writer: content is persisted empty since
+				// v0.10.2 — fall back to the output items, which getOutputText()
+				// serializes into the same <details type="document"> blocks.
+				// Content-baked documents (pre-refactor chats) still win.
+				const found = extractDocumentsFromMessage(message?.content ?? '');
+				const documents = found.length
+					? found
+					: extractDocumentsFromMessage(getOutputText(message?.output));
+				if (documents.length > 0) {
 					const sources = message?.sources ?? [];
-					docs = [...docs, ...found.map((doc) => ({ ...doc, sources }))];
+					docs = [...docs, ...documents.map((doc) => ({ ...doc, sources }))];
 				}
 			}
 		});
@@ -1628,18 +1636,30 @@
 				// Set from folder model IDs
 				selectedModels = $selectedFolder?.data?.model_ids;
 			} else {
-				if (sessionStorage.selectedModels) {
+				// [Gradient] Under the agent picker the model selector is
+				// hidden, so upstream's carry of the previous chat's selection
+				// (sessionStorage.selectedModels) made any explicitly chosen
+				// assistant (pinned sidebar entry, ?model= link) silently
+				// sticky for the rest of the session with no visible way back
+				// — picker deployments always resolve user settings then admin
+				// defaults instead. Tenants without the picker keep upstream
+				// behavior: the selector is visible, so stickiness is escapable
+				// and expected. The key is still WRITTEN on selection
+				// (saveSessionSelectedModels): ChatItem reads it to label the
+				// active chat's model.
+				const agentPickerEnabled =
+					isFeatureEnabled('agent_picker') &&
+					Boolean($config?.features?.feature_agent_api_enabled);
+				if (!agentPickerEnabled && sessionStorage.selectedModels) {
 					// Set from session storage (temporary selection)
 					selectedModels = JSON.parse(sessionStorage.selectedModels);
 					sessionStorage.removeItem('selectedModels');
-				} else {
-					if ($settings?.models) {
-						// Set from user settings
-						selectedModels = $settings?.models;
-					} else if (defaultModels && defaultModels.length > 0) {
-						// Set from default models
-						selectedModels = defaultModels;
-					}
+				} else if ($settings?.models) {
+					// Set from user settings
+					selectedModels = $settings?.models;
+				} else if (defaultModels && defaultModels.length > 0) {
+					// Set from default models
+					selectedModels = defaultModels;
 				}
 			}
 

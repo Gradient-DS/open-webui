@@ -1676,16 +1676,22 @@ def save_docs_to_vector_db(
         return True
 
     texts = [sanitize_text_for_db(doc.page_content) for doc in docs]
+    # `chunk_index` is the list position in the final (post-split) doc list, which
+    # is the authoritative document order: markdown sections extend in order, the
+    # character/token splitter preserves order within a section, pages come in
+    # order. `start_index` cannot stand in for it — the markdown header splitter
+    # resets it per section. Consumers reconstruct full documents by sorting on it.
     metadatas = [
         {
             **doc.metadata,
             **(metadata if metadata else {}),
+            'chunk_index': chunk_index,
             'embedding_config': {
                 'engine': config.RAG_EMBEDDING_ENGINE,
                 'model': config.RAG_EMBEDDING_MODEL,
             },
         }
-        for doc in docs
+        for chunk_index, doc in enumerate(docs)
     ]
 
     try:

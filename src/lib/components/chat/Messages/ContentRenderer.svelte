@@ -4,6 +4,7 @@
 
 	import Markdown from './Markdown.svelte';
 	import StructuredOutputRenderer from './StructuredOutputRenderer.svelte';
+	import { hasDocumentOutput } from './structuredOutput';
 	import {
 		artifactCode,
 		chatId,
@@ -103,10 +104,14 @@
 
 	let documentDetected = false;
 	$: {
+		// [Gradient] Document Writer: content is persisted empty since v0.10.2,
+		// so documents are detected from the output items too — otherwise the
+		// side panel never auto-opens for a reloaded chat.
 		const hasDocument =
-			typeof content === 'string' &&
-			(/<details\b[^>]*\btype="document"/.test(content) ||
-				/<details\b[^>]*\btype="tool_calls"[^>]*\bname="write_document"/.test(content));
+			hasDocumentOutput(output) ||
+			(typeof content === 'string' &&
+				(/<details\b[^>]*\btype="document"/.test(content) ||
+					/<details\b[^>]*\btype="tool_calls"[^>]*\bname="write_document"/.test(content)));
 
 		if (
 			hasDocument &&

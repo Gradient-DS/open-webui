@@ -1,44 +1,10 @@
-<script context="module" lang="ts">
-	import { writable } from 'svelte/store';
-	import { listVisibleAgents, type AgentConfigUserResponse } from '$lib/apis/agent-configs';
-
-	// Module-scoped cache shared across every AgentBadge instance on the
-	// page. Pre-loaded once per session — looking up the agent for a
-	// given slug is then synchronous, which is what kills the
-	// fetch-during-switch flicker (raw slug briefly visible while the
-	// network round-trip resolved).
-	//
-	// ``null`` = not yet loaded; an empty array = loaded but no rows.
-	const agentsCache = writable<AgentConfigUserResponse[] | null>(null);
-	let inflight: Promise<void> | null = null;
-
-	const ensureAgentsLoaded = (token: string): void => {
-		if (inflight) return;
-		let current: AgentConfigUserResponse[] | null = null;
-		const unsub = agentsCache.subscribe((v) => {
-			current = v;
-		});
-		unsub();
-		if (current !== null) return;
-
-		inflight = listVisibleAgents(token)
-			.then((rows) => {
-				agentsCache.set(rows);
-			})
-			.catch(() => {
-				// Leave the cache as null so a later instance can retry.
-			})
-			.finally(() => {
-				inflight = null;
-			});
-	};
-</script>
-
 <script lang="ts">
 	import { onMount, getContext } from 'svelte';
 	import type { Writable } from 'svelte/store';
 
 	import { pendingAgentId } from '$lib/stores';
+	// Session cache shared with AgentSelector — see stores/agent-cache.ts.
+	import { agentsCache, ensureAgentsLoaded } from '$lib/stores/agent-cache';
 	import Dropdown from '$lib/components/common/Dropdown.svelte';
 
 	const i18n: Writable<any> = getContext('i18n');

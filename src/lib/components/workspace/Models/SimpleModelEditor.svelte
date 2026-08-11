@@ -2,8 +2,9 @@
 	import { getContext, onMount, tick } from 'svelte';
 	import { goto } from '$app/navigation';
 	import { toast } from 'svelte-sonner';
-	import { config, models, user } from '$lib/stores';
+	import { config, models, settings, user } from '$lib/stores';
 	import { WEBUI_BASE_URL } from '$lib/constants';
+	import { updateUserSettings } from '$lib/apis/users';
 	import {
 		togglesFromMeta,
 		applyToggles,
@@ -16,6 +17,8 @@
 	import AccessControlModal from '$lib/components/workspace/common/AccessControlModal.svelte';
 	import LockClosed from '$lib/components/icons/LockClosed.svelte';
 	import Cog6 from '$lib/components/icons/Cog6.svelte';
+	import Pin from '$lib/components/icons/Pin.svelte';
+	import PinSlash from '$lib/components/icons/PinSlash.svelte';
 
 	const i18n = getContext('i18n');
 
@@ -58,6 +61,26 @@
 	let toggles: AssistantToggles = togglesFromMeta({});
 	let accessGrants: any[] = [];
 	let knowledgeHint = '';
+
+	// [Gradient] Sidebar pin, right here in the assistant editor: the
+	// model selector (upstream's pin surface) is hidden behind the agent
+	// picker, so this is the one place a user can reach the toggle.
+	// Per-user state (settings.pinnedModels), same handler shape as the
+	// workspace list's pinModelHandler.
+	$: isPinned = ($settings?.pinnedModels ?? []).includes(id);
+
+	const pinModelHandler = async () => {
+		let pinnedModels: string[] = $settings?.pinnedModels ?? [];
+
+		if (pinnedModels.includes(id)) {
+			pinnedModels = pinnedModels.filter((modelId) => modelId !== id);
+		} else {
+			pinnedModels = [...new Set([...pinnedModels, id])];
+		}
+
+		settings.set({ ...$settings, pinnedModels: pinnedModels });
+		await updateUserSettings(localStorage.token, { ui: $settings });
+	};
 	// The selected base model id. Bound to the Model picker; seeded at
 	// mount from DEFAULT_MODELS (create) or the saved base model (edit).
 	let baseModelId = '';
@@ -290,6 +313,22 @@
 				{edit ? $i18n.t('Edit assistant') : $i18n.t('New assistant')}
 			</div>
 			<div class="flex gap-1.5">
+				{#if (edit || hasBeenSaved) && id}
+					<button
+						class="bg-gray-50 shrink-0 hover:bg-gray-100 text-black dark:bg-gray-850 dark:hover:bg-gray-800 dark:text-white transition px-2 py-1 rounded-full flex gap-1 items-center"
+						type="button"
+						aria-pressed={isPinned}
+						on:click={pinModelHandler}
+					>
+						{#if isPinned}
+							<PinSlash strokeWidth="2.5" className="size-3.5 shrink-0" />
+							<div class="text-sm font-medium shrink-0">{$i18n.t('Hide from Sidebar')}</div>
+						{:else}
+							<Pin strokeWidth="2.5" className="size-3.5 shrink-0" />
+							<div class="text-sm font-medium shrink-0">{$i18n.t('Keep in Sidebar')}</div>
+						{/if}
+					</button>
+				{/if}
 				{#if edit || hasBeenSaved}
 					<button
 						class="bg-gray-50 shrink-0 hover:bg-gray-100 text-black dark:bg-gray-850 dark:hover:bg-gray-800 dark:text-white transition px-2 py-1 rounded-full flex gap-1 items-center"

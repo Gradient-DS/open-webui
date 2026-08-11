@@ -32,7 +32,6 @@
 	import MessageInput from './MessageInput.svelte';
 	import FolderPlaceholder from './Placeholder/FolderPlaceholder.svelte';
 	import FolderTitle from './Placeholder/FolderTitle.svelte';
-	import AgentCards from './Placeholder/AgentCards.svelte';
 	import WelcomeMessage from './WelcomeMessage.svelte';
 
 	const i18n = getContext('i18n');
@@ -137,6 +136,11 @@
 				/>
 			{:else}
 				<div class="flex flex-row justify-center gap-2.5 @sm:gap-3 w-fit px-5 max-w-xl">
+					<!-- [Gradient] With the agent picker owning routing, the model
+					     behind the chat is an implementation detail — suppress the
+					     model avatar/name greeting (raw model ids and favicon
+					     fallbacks read as noise) in favor of the plain hello. -->
+					{#if !agentPickerEnabled}
 					<div class="flex shrink-0 justify-center">
 						<div class="flex -space-x-4 mb-0.5" in:fade={{ duration: 100 }}>
 							{#each models as model, modelIdx}
@@ -169,6 +173,7 @@
 							{/each}
 						</div>
 					</div>
+					{/if}
 
 					<div
 						class=" text-3xl @sm:text-3xl line-clamp-1 flex items-center"
@@ -179,7 +184,7 @@
 								'{{name}}',
 								$user?.name ?? ''
 							)}
-						{:else if models[selectedModelIdx]?.name}
+						{:else if !agentPickerEnabled && models[selectedModelIdx]?.name}
 							<Tooltip
 								content={models[selectedModelIdx]?.name}
 								placement="top"
@@ -303,10 +308,6 @@
 					{onSelect}
 				/>
 			</div>
-		</div>
-
-		<div in:fade={{ duration: 200, delay: 250 }}>
-			<AgentCards />
 		</div>
 	{/if}
 </div>

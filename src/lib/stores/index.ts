@@ -151,7 +151,7 @@ export const desktopEvent: Writable<DesktopEvent | null> = writable(null);
 export const scrollPaginationEnabled = writable(false);
 export const currentChatPage = writable(1);
 
-// [Gradient] Sticky agent pick for new chats. Set by AgentCards.svelte when
+// [Gradient] Sticky agent pick for new chats. Set by AgentSelector.svelte when
 // the user clicks an agent card; read by Chat.svelte when the first message
 // is sent so the new chat is created with chat.meta.agent_id pre-set. The
 // pick is sticky — it survives chat creation and page reloads (persisted to
@@ -239,7 +239,7 @@ type OllamaModelDetails = {
 };
 
 type Settings = {
-	pinnedModels?: never[];
+	pinnedModels?: string[];
 	pinnedInputItems?: string[];
 	toolServers?: never[];
 	detectArtifacts?: boolean;
