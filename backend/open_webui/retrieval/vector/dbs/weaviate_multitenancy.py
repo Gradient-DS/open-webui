@@ -152,6 +152,11 @@ def _mt_properties() -> list:
         # unrecoverable from `start_index`, which the markdown header splitter
         # resets per section. OWUI writes int; Weaviate stores/returns float64.
         weaviate.classes.config.Property(name='chunk_index', data_type=weaviate.classes.config.DataType.NUMBER),
+        # Citation geometry: JSON string of [{page, x0, y0, x1, y1}] rects
+        # (PDF points, top-left origin, 0-based pages) serialized with
+        # json.dumps in routers/integrations.py. The citation modal parses it
+        # to draw bbox highlights on the PDF viewer.
+        weaviate.classes.config.Property(name='bboxes', data_type=weaviate.classes.config.DataType.TEXT),
     ]
 
 
@@ -181,8 +186,9 @@ class WeaviateClient(VectorDBBase):
 
         # Collections whose declared properties have been verified/added this
         # process. Auto-schema is off (see _create_collection), so every
-        # retrievable key (`source_url`, `chunk_index`, ...) must be an explicit
-        # property; this set avoids re-checking the schema on every insert batch.
+        # retrievable key (`source_url`, `chunk_index`, `bboxes`, ...) must be
+        # an explicit property; this set avoids re-checking the schema on every
+        # insert batch.
         self._properties_ensured: set[str] = set()
 
     # ------------------------------------------------------------------
@@ -229,9 +235,10 @@ class WeaviateClient(VectorDBBase):
 
         Auto-schema is off, so inserts silently drop undeclared properties. New
         collections get the full list from `_mt_properties`; collections created
-        before a property was declared (`source_url`, `chunk_index`) need it
-        added once. The schema is collection-level (tenant-agnostic), so one call
-        covers all tenants. Cached per process.
+        before a property was declared (`source_url`, `chunk_index`, `bboxes`)
+        need it added once, with its declared type. The schema is
+        collection-level (tenant-agnostic), so one call covers all tenants.
+        Cached per process.
         """
         if coll_name in self._properties_ensured:
             return

@@ -11,6 +11,7 @@
 	import { getFileContentById } from '$lib/apis/files';
 	import { renderDocxHtml, readWorkbook, renderSheetHtml } from '$lib/utils/officePreview';
 	import { highlightDocx, scrollToFirstDocxHighlight } from '$lib/utils/citationDomHighlight';
+	import { rectsFromMetadata } from '$lib/utils/citationRects';
 
 	import XMark from '$lib/components/icons/XMark.svelte';
 	import ArrowTopRightOnSquare from '$lib/components/icons/ArrowTopRightOnSquare.svelte';
@@ -131,6 +132,22 @@
 		? activeSnippet.metadata.page
 		: undefined;
 
+	// Whole-document citations (agent read/summarize tools —
+	// `metadata.granularity === 'document'`) have no passage-level "where":
+	// any highlight attempt would light up the entire document, which reads
+	// as precision while conveying nothing. Skip rects AND text-match for
+	// them — the preview itself is the provenance.
+	const isDocumentSnippet = (snippet) => snippet?.metadata?.granularity === 'document';
+
+	// Coordinate highlights: chunks may carry `metadata.bboxes` (see
+	// `$lib/utils/citationRects`). When present, exact rects beat text
+	// matching and work regardless of the ENABLE_CITATION_TEXT_HIGHLIGHT flag.
+	const rectsFromSnippet = (snippet) =>
+		isDocumentSnippet(snippet) ? null : rectsFromMetadata(snippet?.metadata);
+
+	$: activeRects = rectsFromSnippet(activeSnippet);
+	$: activeIsDocument = isDocumentSnippet(activeSnippet);
+
 	// Compute minimum page number across all chunks for PDF navigation
 	$: minPage = (() => {
 		const pages = (mergedDocuments ?? [])
@@ -177,7 +194,13 @@
 	$: if (!show) {
 		loadedOfficeFileId = null;
 	}
-	$: if (show && previewAvailable && fileId && (isDocx || isXlsx) && fileId !== loadedOfficeFileId) {
+	$: if (
+		show &&
+		previewAvailable &&
+		fileId &&
+		(isDocx || isXlsx) &&
+		fileId !== loadedOfficeFileId
+	) {
 		loadedOfficeFileId = fileId;
 		loadOfficeContent(fileId, isDocx);
 	}
@@ -248,7 +271,7 @@
 		scrollToFirstDocxHighlight(docxContainer);
 	};
 
-	const highlightActiveDocx = () => highlightDocxFor(activeSnippetText);
+	const highlightActiveDocx = () => highlightDocxFor(activeIsDocument ? '' : activeSnippetText);
 
 	const selectSnippet = (idx: number) => {
 		activeSnippetIdx = idx;
@@ -257,12 +280,17 @@
 		const snippet = mergedDocuments?.[idx];
 		const text = snippet?.document ?? '';
 		const page = Number.isInteger(snippet?.metadata?.page) ? snippet.metadata.page : undefined;
+		const documentLevel = isDocumentSnippet(snippet);
 		if (isPDF) {
-			pdfViewerRef?.setHighlight(citationTextHighlightEnabled ? text : null, (page ?? 0) + 1);
+			pdfViewerRef?.setHighlight(
+				citationTextHighlightEnabled && !documentLevel ? text : null,
+				(page ?? 0) + 1,
+				rectsFromSnippet(snippet)
+			);
 			return;
 		}
 		if (isDocx) {
-			highlightDocxFor(text);
+			highlightDocxFor(documentLevel ? '' : text);
 		}
 	};
 
@@ -326,9 +354,7 @@
 							tippyOptions={{ duration: [500, 0] }}
 						>
 							{#if isFileMissing && !externalUrl}
-								<span
-									class="grow line-clamp-1 text-gray-500 dark:text-gray-400 cursor-not-allowed"
-								>
+								<span class="grow line-clamp-1 text-gray-500 dark:text-gray-400 cursor-not-allowed">
 									{decodeString(citation?.source?.name)}
 								</span>
 							{:else}
@@ -336,7 +362,7 @@
 									class="hover:text-gray-500 dark:hover:text-gray-100 underline grow line-clamp-1"
 									href={linksToFile
 										? `${WEBUI_API_BASE_URL}/files/${docFileId}/content${document?.metadata?.page !== undefined ? `#page=${document.metadata.page + 1}` : ''}`
-										: externalUrl ?? `#`}
+										: (externalUrl ?? `#`)}
 									target="_blank"
 									rel="noreferrer"
 								>
@@ -442,7 +468,11 @@
 												</span>
 											{/if}
 										{/if}
-										{#if Number.isInteger(document?.metadata?.page)}
+										{#if isDocumentSnippet(document)}
+											<span class="text-xs text-gray-500 dark:text-gray-400">
+												{$i18n.t('Full document')}
+											</span>
+										{:else if Number.isInteger(document?.metadata?.page)}
 											<span class="text-xs text-gray-500 dark:text-gray-400">
 												({$i18n.t('page')}
 												{document.metadata.page + 1})
@@ -463,8 +493,11 @@
 									bind:this={pdfViewerRef}
 									url={previewUrlNoHash}
 									className="w-full h-full"
-									highlightText={citationTextHighlightEnabled ? activeSnippetText : null}
+									highlightText={citationTextHighlightEnabled && !activeIsDocument
+										? activeSnippetText
+										: null}
 									initialPage={(activePage ?? 0) + 1}
+									highlightRects={activeRects}
 								/>
 							{:else if isDocx}
 								{#if officeLoading}
@@ -472,9 +505,7 @@
 										<Spinner className="size-5" />
 									</div>
 								{:else if officeError}
-									<div
-										class="flex items-center justify-center h-full text-sm text-gray-400"
-									>
+									<div class="flex items-center justify-center h-full text-sm text-gray-400">
 										{$i18n.t('Could not read file.')}
 									</div>
 								{:else}

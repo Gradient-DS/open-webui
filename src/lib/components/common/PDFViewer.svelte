@@ -8,13 +8,29 @@
 	export let url: string | null = null;
 	export let data: ArrayBuffer | Uint8Array | null = null;
 	export let className = 'w-full h-[70vh]';
-	// `highlightText` / `initialPage` are read at render time, not watched
-	// reactively. To change the highlight after the PDF has loaded (e.g. on
-	// snippet switch) call setHighlight(...) rather than mutating these props.
+	// `highlightText` / `initialPage` / `highlightRects` are read at render
+	// time, not watched reactively. To change the highlight after the PDF has
+	// loaded (e.g. on snippet switch) call setHighlight(...) rather than
+	// mutating these props.
 	// Cited passage to highlight in the text layer (null/empty = no highlight).
 	export let highlightText: string | null = null;
 	// 1-indexed page to jump to when nothing matches the highlight text.
 	export let initialPage: number | null = null;
+	// Coordinate-based highlight rectangles. Takes precedence over
+	// highlightText when non-empty — coordinates are exact, so no fuzzy text
+	// matching is needed. Units: PDF points at scale 1, origin TOP-LEFT of the
+	// page (i.e. y grows downward, matching pdf.js viewport space and most
+	// OCR/layout tools; native bottom-left PDF user space must be flipped by
+	// the caller: y_topleft = pageHeight - y_bottomleft). `page` is 1-indexed.
+	export let highlightRects: HighlightRect[] | null = null;
+
+	interface HighlightRect {
+		page: number;
+		x0: number;
+		y0: number;
+		x1: number;
+		y1: number;
+	}
 
 	const HIGHLIGHT_CLASS = 'citation-highlight';
 	// A page must accumulate at least this many matched characters to be
@@ -38,6 +54,12 @@
 	// Per-page text-layer container divs (index 0 == page 1). Lets us re-match
 	// highlights against already-rendered spans without re-rendering canvases.
 	let pageTextLayerDivs: HTMLElement[] = [];
+	// Per-page bbox overlay divs (index 0 == page 1) and base page dimensions
+	// in PDF points at scale 1. Rect highlights are positioned in percentages
+	// of the page, so they track the page wrapper through zoom re-renders
+	// without any recomputation.
+	let bboxLayerDivs: HTMLElement[] = [];
+	let pageBaseDims: { width: number; height: number }[] = [];
 
 	// --- Citation highlighting -------------------------------------------------
 	//
@@ -119,16 +141,55 @@
 	};
 
 	/**
+	 * Draw coordinate rectangles into the per-page bbox overlays and scroll to
+	 * the first one. Always clears previous rects (so switching to a snippet
+	 * without geometry removes stale boxes). Returns whether anything was drawn.
+	 */
+	const _applyRectHighlights = (): boolean => {
+		for (const layer of bboxLayerDivs) {
+			layer.innerHTML = '';
+		}
+		const rects = highlightRects ?? [];
+		let first: HTMLElement | null = null;
+		for (const rect of rects) {
+			const layer = bboxLayerDivs[rect.page - 1];
+			const dims = pageBaseDims[rect.page - 1];
+			if (!layer || !dims) continue;
+			// Clamp to the page box — geometry from OCR/layout tools can
+			// overshoot the media box by a point or two.
+			const x0 = Math.max(0, Math.min(rect.x0, dims.width));
+			const y0 = Math.max(0, Math.min(rect.y0, dims.height));
+			const x1 = Math.max(0, Math.min(rect.x1, dims.width));
+			const y1 = Math.max(0, Math.min(rect.y1, dims.height));
+			if (x1 <= x0 || y1 <= y0) continue;
+			const div = document.createElement('div');
+			div.className = 'bbox-highlight';
+			div.style.left = `${(x0 / dims.width) * 100}%`;
+			div.style.top = `${(y0 / dims.height) * 100}%`;
+			div.style.width = `${((x1 - x0) / dims.width) * 100}%`;
+			div.style.height = `${((y1 - y0) / dims.height) * 100}%`;
+			layer.appendChild(div);
+			first ??= div;
+		}
+		if (first) {
+			_scrollContainerTo(first, 'top');
+			return true;
+		}
+		return false;
+	};
+
+	/**
 	 * Highlight only the STRONGEST-matching page and scroll to it. Chunk text
 	 * fragments (titles, headers, repeated phrases) often appear on several
 	 * pages; highlighting every match and scrolling to the first latched onto
 	 * coincidental matches on unrelated pages. Scoring by matched characters and
 	 * keeping only the best page lands on the cited passage's real location.
-	 * Fallback chain: best-page highlight+scroll -> cited-page jump -> nothing.
-	 * Clears prior highlights first.
+	 * Fallback chain: exact bbox rects -> best-page text highlight+scroll ->
+	 * cited-page jump -> nothing. Clears prior highlights first.
 	 */
 	const _applyBestMatchHighlight = () => {
 		_clearHighlights();
+		if (_applyRectHighlights()) return;
 		const needle = highlightText?.trim();
 		if (needle) {
 			let best: PageMatch | null = null;
@@ -157,9 +218,14 @@
 	 * Safe to call before the first render completes: the new values are stored
 	 * on the props and honored when render runs.
 	 */
-	export function setHighlight(text: string | null, page: number | null) {
+	export function setHighlight(
+		text: string | null,
+		page: number | null,
+		rects: HighlightRect[] | null = null
+	) {
 		highlightText = text;
 		initialPage = page;
+		highlightRects = rects;
 		_applyBestMatchHighlight();
 	}
 
@@ -299,6 +365,8 @@
 		}
 		textLayerInstances = [];
 		pageTextLayerDivs = [];
+		bboxLayerDivs = [];
+		pageBaseDims = [];
 
 		const pdfjs = await import('pdfjs-dist');
 		const dpr = window.devicePixelRatio || 1;
@@ -358,6 +426,14 @@
 			await textLayer.render();
 			textLayerInstances.push(textLayer);
 			pageTextLayerDivs.push(textLayerDiv);
+
+			// Bbox overlay — sits above the text layer but is click-transparent
+			// so selection/search still hit the text spans underneath.
+			const bboxLayerDiv = document.createElement('div');
+			bboxLayerDiv.className = 'bboxLayer';
+			wrapper.appendChild(bboxLayerDiv);
+			bboxLayerDivs.push(bboxLayerDiv);
+			pageBaseDims.push({ width: viewport.width, height: viewport.height });
 
 			sceneElement.appendChild(wrapper);
 		}
@@ -592,5 +668,26 @@
 	:global(.dark .textLayer span.citation-highlight) {
 		mix-blend-mode: screen;
 		background: rgba(250, 204, 21, 0.35);
+	}
+
+	/* Coordinate (bbox) highlight overlay — divs created by
+	   _applyRectHighlights(), positioned in % of the page wrapper so they
+	   scale with zoom re-renders for free. :global because JS-created. */
+	:global(.pdf-page-wrapper .bboxLayer) {
+		position: absolute;
+		inset: 0;
+		pointer-events: none;
+		z-index: 2;
+	}
+	:global(.bboxLayer .bbox-highlight) {
+		position: absolute;
+		background: rgba(250, 204, 21, 0.3); /* amber-300, matches text highlight */
+		outline: 1.5px solid rgba(245, 158, 11, 0.85); /* amber-500 */
+		border-radius: 2px;
+		mix-blend-mode: multiply;
+	}
+	:global(.dark .bboxLayer .bbox-highlight) {
+		mix-blend-mode: screen;
+		background: rgba(250, 204, 21, 0.25);
 	}
 </style>

@@ -9,7 +9,7 @@ from typing import NamedTuple, Optional
 from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
 from fastapi.concurrency import run_in_threadpool
 from langchain_core.documents import Document
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 
 from open_webui.config import KNOWLEDGE_MAX_FILE_COUNT
 from open_webui.models.config import Config
@@ -88,8 +88,28 @@ class ParsedTextDocument(IngestDocumentBase):
     text: str
 
 
+class IngestChunk(BaseModel):
+    """One pre-chunked text segment, optionally with per-chunk metadata.
+
+    ``metadata`` carries citation geometry from warren's chunker:
+    ``page`` (0-based int) and ``bboxes`` (list of
+    ``{page, x0, y0, x1, y1}`` rects in PDF points, top-left origin,
+    0-based pages). Senders on the old contract ship bare strings —
+    normalized to metadata-less chunks by the validator below.
+    """
+
+    content: str
+    metadata: dict = {}
+
+
 class ChunkedTextDocument(IngestDocumentBase):
-    chunks: list[str]
+    chunks: list[str | IngestChunk]
+
+    @field_validator('chunks', mode='after')
+    @classmethod
+    def _normalize_chunks(cls, chunks: list) -> list[IngestChunk]:
+        # Union keeps old senders (bare strings) working during rollout.
+        return [IngestChunk(content=c) if isinstance(c, str) else c for c in chunks]
 
 
 class FullDocument(IngestDocumentBase):
@@ -441,6 +461,26 @@ def _build_base_metadata(doc: IngestDocumentBase, file_id: str, provider: str, u
     return base
 
 
+def _chunk_meta(chunk: IngestChunk) -> dict:
+    """Per-chunk citation metadata for the vector store.
+
+    Passes ``page`` through as an int and serializes ``bboxes`` to a JSON
+    string here — ``process_metadata`` coerces lists with ``str()``, whose
+    Python repr is not JSON-parseable, so the serialization must happen
+    before the metadata reaches the vector-DB layer. Other chunk-metadata
+    keys are dropped: the Weaviate MT schema is fixed and would silently
+    drop them anyway.
+    """
+    meta = {}
+    page = chunk.metadata.get('page')
+    if isinstance(page, int) and not isinstance(page, bool):
+        meta['page'] = page
+    bboxes = chunk.metadata.get('bboxes')
+    if bboxes:
+        meta['bboxes'] = bboxes if isinstance(bboxes, str) else json.dumps(bboxes)
+    return meta
+
+
 # --- Processing Functions ---
 
 
@@ -550,7 +590,7 @@ async def _process_chunked_text_document(
       only and write no vectors, mirroring native BYPASS.
     """
     file_id = f'{file_id_prefix_for(provider)}{doc.source_id}'
-    joined_text = '\n\n'.join(doc.chunks)
+    joined_text = '\n\n'.join(chunk.content for chunk in doc.chunks)
 
     file_path = _maybe_upload_original_bytes(file_id, doc, provider, original_file)
 
@@ -582,7 +622,9 @@ async def _process_chunked_text_document(
     text_hash = hashlib.sha256(joined_text.encode()).hexdigest()
     base_metadata = _build_base_metadata(doc, file_id, provider, user_id)
 
-    lc_docs = [Document(page_content=chunk, metadata=base_metadata) for chunk in doc.chunks]
+    lc_docs = [
+        Document(page_content=chunk.content, metadata={**base_metadata, **_chunk_meta(chunk)}) for chunk in doc.chunks
+    ]
 
     try:
         await run_in_threadpool(

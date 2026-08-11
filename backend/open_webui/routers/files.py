@@ -140,6 +140,38 @@ async def process_uploaded_file(
             # we never create a redundant `file-<id>` collection.
             collection_name = knowledge_id
 
+            # Link the file → KB *before* process_file, so the very first
+            # knowledge_file row already carries its directory placement. The
+            # frontend also avoids a separate /knowledge/{id}/file/add
+            # round-trip. Write access is verified up-front in
+            # upload_file_handler, so a client-supplied metadata.knowledge_id
+            # can never let a non-writer attach files (CWE-862/863).
+            #
+            # Ordering is load-bearing: process_file's warren path calls
+            # submit_existing_file_to_pipeline, which links with NO directory_id
+            # (routers/retrieval.py) — so when this ran afterwards the row was
+            # created at the KB root and only re-parented ~1s later. A root-level
+            # refresh landing in that window rendered subfolder files at the
+            # root. Linking first makes retrieval.py's call hit the "existing"
+            # branch with directory_id=None, which preserves placement by
+            # contract (see add_file_to_knowledge_by_id's docstring).
+            if knowledge_id:
+                # D2 bridge: a file placed via the upstream directory model
+                # carries only a directory_id — derive a relative_path from the
+                # directory's breadcrumb chain so the file surfaces in the fork's
+                # path-based tree UI. Lazy import breaks the routers import cycle.
+                from open_webui.routers.knowledge import derive_relative_path_from_directory
+
+                directory_id = file_metadata.get('directory_id') if isinstance(file_metadata, dict) else None
+                await derive_relative_path_from_directory(file_item.id, directory_id, db=db_session)
+                await Knowledges.add_file_to_knowledge_by_id(
+                    knowledge_id=knowledge_id,
+                    file_id=file_item.id,
+                    user_id=user.id,
+                    directory_id=directory_id,
+                    db=db_session,
+                )
+
             stt_supported = await Config.get('audio.stt.supported_content_types', [])
 
             if content_type and strict_match_mime_type(stt_supported, content_type):
@@ -196,27 +228,7 @@ async def process_uploaded_file(
                     db=db_session,
                 )
 
-            # If this upload was for a KB, link the file → KB so the frontend
-            # doesn't need a separate /knowledge/{id}/file/add round-trip. Write
-            # access is verified up-front in upload_file_handler, so a
-            # client-supplied metadata.knowledge_id can never let a non-writer
-            # attach files (CWE-862/863).
-            if knowledge_id:
-                # D2 bridge: a file placed via the upstream directory model
-                # carries only a directory_id — derive a relative_path from the
-                # directory's breadcrumb chain so the file surfaces in the fork's
-                # path-based tree UI. Lazy import breaks the routers import cycle.
-                from open_webui.routers.knowledge import derive_relative_path_from_directory
-
-                directory_id = file_metadata.get('directory_id') if isinstance(file_metadata, dict) else None
-                await derive_relative_path_from_directory(file_item.id, directory_id, db=db_session)
-                await Knowledges.add_file_to_knowledge_by_id(
-                    knowledge_id=knowledge_id,
-                    file_id=file_item.id,
-                    user_id=user.id,
-                    directory_id=directory_id,
-                    db=db_session,
-                )
+            # (KB link moved above process_file — see the ordering note there.)
 
             # Notify frontend via Socket.IO of the file's ACTUAL persisted
             # status. For the native path process_file has already embedded +

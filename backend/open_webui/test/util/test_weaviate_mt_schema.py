@@ -24,6 +24,12 @@ def test_mt_properties_declare_source_url_as_text() -> None:
     assert props.get('source_url') == weaviate.classes.config.DataType.TEXT
 
 
+def test_mt_properties_declare_bboxes_as_text() -> None:
+    """Citation bbox geometry rides as a JSON string in a TEXT property."""
+    props = {prop.name: prop.dataType for prop in _mt_properties()}
+    assert props.get('bboxes') == weaviate.classes.config.DataType.TEXT
+
+
 def test_mt_properties_keep_core_provenance_fields() -> None:
     """The fields the citation modal / soev-agents read must stay declared."""
     names = {prop.name for prop in _mt_properties()}

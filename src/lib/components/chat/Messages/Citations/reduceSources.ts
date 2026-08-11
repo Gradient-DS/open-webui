@@ -25,6 +25,15 @@ export interface RawSourceMeta {
 	name?: string;
 	file_id?: string;
 	page?: number | string;
+	// Citation geometry: [{page?, x0, y0, x1, y1}] in PDF points, top-left
+	// origin, 0-based pages — or that list as a JSON string (Weaviate MT
+	// stores it as TEXT). Parsed by `$lib/utils/citationRects`.
+	bboxes?: string | { page?: number; x0: number; y0: number; x1: number; y1: number }[];
+	// Stamped per-chunk from the owning RawSource during the merge (a merged
+	// document entry can mix chunks from a search citation and a read
+	// citation of the same file): "document" = whole-document read, no
+	// passage-level provenance — skip highlight attempts for this snippet.
+	granularity?: string;
 	chunk_id?: string;
 	html?: string;
 	parameters?: unknown;
@@ -49,6 +58,11 @@ export interface RawSource {
 	// source this turn; `cited_this_turn` is true when the model wrote its
 	// `[N]` in this turn's answer. Absent for legacy chats / upstream
 	// providers. The per-message panel renders `current_turn ∪ cited_this_turn`.
+	// `granularity` is "document" when the citation's contents are
+	// whole-document reads (read_document/summarize/fetch_url) rather than
+	// retrieved passages — the modal skips passage highlighting for those.
+	// Absent (= chunk) for retrieval citations and all legacy payloads.
+	granularity?: string;
 	n?: number;
 	current_turn?: boolean;
 	cited_this_turn?: boolean;
@@ -59,7 +73,9 @@ export interface DisplayCitation {
 	source: RawSourceObject;
 	document: string[];
 	metadata: RawSourceMeta[];
-	distances: number[];
+	// Parallel to `document`; `undefined` holes keep positions aligned for
+	// chunks whose source carried no distances (e.g. whole-document reads).
+	distances: (number | undefined)[];
 	n?: number;
 	current_turn?: boolean;
 	cited_this_turn?: boolean;
@@ -75,7 +91,14 @@ export function reduceSources(sources: RawSource[]): DisplayCitation[] {
 		const documents = source?.document ?? [];
 
 		documents.forEach((document, index) => {
-			const metadata = source?.metadata?.[index];
+			const rawMetadata = source?.metadata?.[index];
+			// Stamp the owning source's granularity onto the chunk so it
+			// survives the merge (entries can mix chunks from a search
+			// citation and a read citation of the same document).
+			const metadata: RawSourceMeta =
+				source.granularity === 'document'
+					? { ...(rawMetadata ?? {}), granularity: 'document' }
+					: (rawMetadata ?? {});
 			const distance = source?.distances?.[index];
 
 			const id = String(metadata?.source ?? source?.source?.id ?? 'N/A');
@@ -118,9 +141,15 @@ export function reduceSources(sources: RawSource[]): DisplayCitation[] {
 			}
 			seen.add(fingerprint);
 
+			// Push unconditionally: `document`, `metadata` and `distances` are
+			// parallel arrays consumed positionally (CitationModal pairs
+			// `metadata?.[i]` / `distances?.[i]` with `document[i]`) — a
+			// conditional push desyncs every later index as soon as one chunk
+			// lacks metadata or a distance (e.g. read-tool citations merged
+			// into a searched document's entry).
 			entry.document.push(document);
-			if (metadata) entry.metadata.push(metadata);
-			if (distance !== undefined) entry.distances.push(distance);
+			entry.metadata.push(metadata);
+			entry.distances.push(distance);
 		});
 	}
 
@@ -130,10 +159,6 @@ export function reduceSources(sources: RawSource[]): DisplayCitation[] {
 function chunkFingerprint(document: string, metadata: RawSourceMeta | undefined): string {
 	const chunkId = metadata?.chunk_id;
 	if (chunkId) return `id:${chunkId}`;
-	const normalized = (document ?? '')
-		.split(/\s+/)
-		.filter(Boolean)
-		.join(' ')
-		.slice(0, 200);
+	const normalized = (document ?? '').split(/\s+/).filter(Boolean).join(' ').slice(0, 200);
 	return `text:${normalized}`;
 }

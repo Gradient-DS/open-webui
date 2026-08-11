@@ -15,6 +15,7 @@ from open_webui.utils.agent import (
     _error_sse_chunk,
     _resolve_model_citations_enabled,
     _resolve_model_vision_capable,
+    _upstream_error,
     build_agent_payload,
 )
 
@@ -214,3 +215,41 @@ def test_error_sse_chunk_is_openai_error_shape_without_choices():
     payload = json.loads(chunk[len('data: ') :].strip())
     assert payload == {'error': {'message': 'boom'}}
     assert 'choices' not in payload
+
+
+# --- upstream error handling -------------------------------------------------
+#
+# A non-2xx from the agent service must never carry the response body into the
+# exception: that string reaches the chat error banner, and from there the
+# feedback report and its Slack card.
+
+_LEAKED = 'Mijn BSN is 123456789 en ik heb een vraag over mijn ontslagprocedure'
+
+
+def test_upstream_error_excludes_echoed_request_body():
+    body = json.dumps(
+        {
+            'message': 'Bad request',
+            'input': {'messages': [{'role': 'user', 'content': _LEAKED}]},
+        }
+    )
+
+    exc = _upstream_error(400, body)
+
+    assert _LEAKED not in str(exc)
+
+
+def test_upstream_error_keeps_status_and_classification():
+    body = json.dumps({'message': 'Bad request', 'type': 'invalid_request_error'})
+
+    exc = _upstream_error(400, body)
+
+    assert '400' in str(exc)
+    assert 'Bad request' in str(exc)
+
+
+def test_upstream_error_drops_unparseable_body():
+    exc = _upstream_error(500, f'traceback with prompt {_LEAKED}')
+
+    assert _LEAKED not in str(exc)
+    assert '500' in str(exc)
