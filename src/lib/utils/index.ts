@@ -999,6 +999,23 @@ export const isYoutubeUrl = (url: string) => {
 	);
 };
 
+/**
+ * [Gradient] Build the chat id for a temporary chat: `local:<socket_id>:<uuid>`.
+ *
+ * The socket id stays the FIRST segment because the backend recovers it from the
+ * chat id to authorise task lookups (see `socket_id_from_chat_id` in
+ * `backend/open_webui/main.py`). The trailing uuid makes the id unique per
+ * temporary chat.
+ *
+ * Without it every temporary chat opened in one browser session reused the same
+ * socket id, so they all collapsed onto a single agent thread — the agent
+ * rebuilds context from a ledger keyed by chat id, so a "new" temporary chat
+ * inherited the previous one's history and documents (GRA-221).
+ */
+export const temporaryChatId = (socketId: string | undefined | null) => {
+	return `local:${socketId ?? ''}:${uuidv4()}`;
+};
+
 export const removeEmojis = (str: string) => {
 	// Use Unicode property escape with the 'v' flag (ES2024) to match all
 	// standardised emoji sequences, including text-presentation emoji + variation
