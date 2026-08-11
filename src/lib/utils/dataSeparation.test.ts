@@ -6,6 +6,11 @@ describe('classifyFileItem', () => {
 		expect(classifyFileItem({ type: 'web_search' })).toBe('open_internet');
 		expect(classifyFileItem({ type: 'text', url: 'https://x.com' })).toBe('open_internet');
 	});
+	it('classifies an agent url attachment as open_internet', () => {
+		// GRA-222: a page attached for the agent to fetch live is still the
+		// open internet, even though nothing is ingested.
+		expect(classifyFileItem({ type: 'url', url: 'https://x.com' })).toBe('open_internet');
+	});
 	it('classifies a bare text item (no url) as neither', () => {
 		expect(classifyFileItem({ type: 'text' })).toBeNull();
 	});

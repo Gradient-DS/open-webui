@@ -106,6 +106,7 @@
 	import { initiateOAuthRedirect } from '$lib/apis/configs';
 	import { updateFolderById } from '$lib/apis/folders';
 	import { isAgentRouted } from '$lib/utils/features';
+	import { routeWebAttachment } from '$lib/utils/webAttachments';
 
 	import Banner from '../common/Banner.svelte';
 	import MessageInput from '$lib/components/chat/MessageInput.svelte';
@@ -1304,21 +1305,45 @@
 			urls = [urls];
 		}
 
+		// [Gradient] On agent-routed deployments a plain web page is handed to
+		// the agent as-is and read live by its `fetch_url` tool, instead of being
+		// ingested into a Weaviate collection the agent cannot see (GRA-222).
+		// YouTube links and document URLs keep the ingest path — see
+		// `routeWebAttachment` for why.
+		const agentRouted = isAgentRouted(chat?.id ? chat?.meta?.agent_id : $pendingAgentId);
+
 		// Create file items first
-		const fileItems = urls.map((url) => ({
-			type: 'text',
-			name: url,
-			collection_name: '',
-			status: 'uploading',
-			context: 'full',
-			url,
-			error: ''
-		}));
+		const fileItems = urls.map((url) => {
+			if (routeWebAttachment(url, agentRouted) === 'agent') {
+				// The URL itself is the attachment — there is nothing to upload,
+				// so the item is complete the moment it is created.
+				return {
+					type: 'url',
+					name: url,
+					status: 'uploaded',
+					context: 'full',
+					url,
+					error: ''
+				};
+			}
+			return {
+				type: 'text',
+				name: url,
+				collection_name: '',
+				status: 'uploading',
+				context: 'full',
+				url,
+				error: ''
+			};
+		});
 
 		// Display all items at once
 		files = [...files, ...fileItems];
 
 		for (const fileItem of fileItems) {
+			if (fileItem.type === 'url') {
+				continue;
+			}
 			try {
 				const res = isYoutubeUrl(fileItem.url)
 					? await processYoutubeVideo(localStorage.token, fileItem.url)
@@ -1335,7 +1360,7 @@
 
 				files = [...files];
 			} catch (e) {
-				files = files.filter((f) => f.name !== url);
+				files = files.filter((f) => f.url !== fileItem.url);
 				toast.error(`${e}`);
 			}
 		}
@@ -2528,10 +2553,14 @@
 		const messages = createMessagesList(history, history.currentId);
 		const _files = structuredClone(files);
 
+		// [Gradient] 'url' — a web page attached for the agent to fetch live
+		// (GRA-222). It joins the chat-level attachments for the same reason
+		// 'text' does: an attached page stays part of the conversation's
+		// context, not just the turn it was attached to.
 		chatFiles.push(
 			..._files.filter(
 				(item) =>
-					['doc', 'text', 'note', 'chat', 'folder', 'collection'].includes(item.type) ||
+					['doc', 'text', 'url', 'note', 'chat', 'folder', 'collection'].includes(item.type) ||
 					(item.type === 'file' && !(item?.content_type ?? '').startsWith('image/'))
 			)
 		);
@@ -2798,10 +2827,13 @@
 		});
 
 		let files = structuredClone(chatFiles);
+		// [Gradient] 'url' must be in this list or the attachment never reaches
+		// the request payload, and the agent is told nothing was attached — the
+		// exact shape of the GRA-222 bug this fixes.
 		files.push(
 			...(userMessage?.files ?? []).filter(
 				(item) =>
-					['doc', 'text', 'note', 'chat', 'collection', 'folder'].includes(item.type) ||
+					['doc', 'text', 'url', 'note', 'chat', 'collection', 'folder'].includes(item.type) ||
 					(item.type === 'file' && !(item?.content_type ?? '').startsWith('image/'))
 			)
 		);

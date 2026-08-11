@@ -32,6 +32,12 @@ export function classifyFileItem(item: FileItem | null | undefined): DataSide | 
 	if (item.type === 'web_search') {
 		return 'open_internet';
 	}
+	// `url` — a web page attached for the agent to fetch live (GRA-222). Same
+	// side as an ingested page: the content comes off the open internet either
+	// way, only the moment of fetching differs.
+	if (item.type === 'url') {
+		return 'open_internet';
+	}
 	if (item.type === 'text' && item.url) {
 		return 'open_internet';
 	}

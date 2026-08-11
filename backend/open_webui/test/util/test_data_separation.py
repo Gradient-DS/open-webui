@@ -12,6 +12,17 @@ def test_classify_webpage_url():
     assert classify_file({'type': 'text', 'url': 'https://x.com'}) == 'open_internet'
 
 
+def test_classify_agent_url_attachment():
+    # GRA-222: a page attached for the agent to fetch live is still the open
+    # internet, even though nothing is ingested.
+    assert classify_file({'type': 'url', 'url': 'https://x.com'}) == 'open_internet'
+
+
+def test_conflict_agent_url_attachment_plus_collection():
+    files = [{'type': 'url', 'url': 'https://x.com'}, {'type': 'collection'}]
+    assert request_mixes_data_sources(files, [], False) is True
+
+
 def test_classify_text_without_url_is_neither():
     # a bare text item (not a fetched page) is not open-internet
     assert classify_file({'type': 'text'}) is None
