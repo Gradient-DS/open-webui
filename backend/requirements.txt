@@ -65,7 +65,7 @@ einops==0.8.2
 
 ftfy==6.3.1
 chardet==7.4.3
-pypdf==6.14.2 # security: CVE-2026-59935/59936/59937/59938 fixed in 6.14.2 (prior CVE-2026-48735/49460/49461/54530/54531 + GHSA-jm82-fx9c-mx94 fixes stay fixed)
+pypdf==6.15.0 # security: CVE-2026-71852/71870 (PYSEC-2026-3656/3655, DoS via crafted CID font width + /ToUnicode entries) fixed in 6.15.0 (prior CVE-2026-59935/59936/59937/59938/48735/49460/49461/54530/54531 + GHSA-jm82-fx9c-mx94 fixes stay fixed)
 fpdf2==2.8.7
 pymdown-extensions==11.0.1 # security: CVE-2026-61632 fixed in 11.0 (prior CVE-2026-46338 snippets path traversal fix stays fixed)
 docx2txt==0.9
