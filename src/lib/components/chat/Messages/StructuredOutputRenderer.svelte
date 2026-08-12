@@ -38,8 +38,17 @@
 	// <details type="reasoning"> blocks. Rendering them here too would show
 	// duplicate "Thought for N seconds" collapsibles detached from their
 	// chronological position between the tool statuses they separated.
+	// [Gradient] Tool calls are carved out for the same reason as reasoning:
+	// StatusHistory renders the tool activity, with translated per-tool status
+	// bullets. Rendering them here as well showed a ToolCallDisplay dropdown
+	// (tool name + arguments) for the duration of the stream that then
+	// disappeared once the content path took over. The carve-out lives inside
+	// buildOutputDisplayItems rather than in this filter because it has to spare
+	// tool calls whose result carries embeds or files, and that pairing is only
+	// resolvable there (the attachments hang off the function_call_output item).
 	$: displayItems = buildOutputDisplayItems(
-		output.filter((item) => item?.type !== 'reasoning')
+		output.filter((item) => item?.type !== 'reasoning'),
+		{ hideToolCalls: true }
 	) as OutputDisplayItem[];
 </script>
 

@@ -260,7 +260,39 @@ function buildDetailToken(
 	return null;
 }
 
-export function buildOutputDisplayItems(output: OutputItem[] = []): OutputDisplayItem[] {
+// [Gradient] A hidden tool call must not take its result's rendered content
+// down with it: ToolCallDisplay is also the mount point for generative-UI
+// iframe embeds and for image files returned by a tool. Those are content, not
+// tool chrome, so a tool call carrying either stays visible.
+function hasRenderableAttachments(token: OutputDetailToken): boolean {
+	return [token.attributes.embeds, token.attributes.files].some((value) => {
+		if (!value) {
+			return false;
+		}
+		try {
+			const parsed = JSON.parse(value);
+			return Array.isArray(parsed) ? parsed.length > 0 : Boolean(parsed);
+		} catch {
+			return value.trim().length > 0;
+		}
+	});
+}
+
+export type BuildOutputDisplayItemsOptions = {
+	// [Gradient] Set by StructuredOutputRenderer. StatusHistory is the fork's
+	// canonical display surface for tool activity — the same reason
+	// MarkdownTokens.svelte renders nothing for <details type="tool_calls">.
+	// Without this, upstream's output-items path renders a ToolCallDisplay
+	// dropdown per tool call that shows the tool name and arguments while the
+	// response streams and then vanishes once the content path takes over.
+	hideToolCalls?: boolean;
+};
+
+export function buildOutputDisplayItems(
+	output: OutputItem[] = [],
+	options: BuildOutputDisplayItemsOptions = {}
+): OutputDisplayItem[] {
+	const { hideToolCalls = false } = options;
 	const displayItems: OutputDisplayItem[] = [];
 	const currentDetailTokens: OutputDetailToken[] = [];
 	const toolOutputByCallId: Record<string, OutputItem> = {};
@@ -296,7 +328,13 @@ export function buildOutputDisplayItems(output: OutputItem[] = []): OutputDispla
 		if (item?.type && GROUPABLE_OUTPUT_TYPES.has(item.type)) {
 			const token = buildDetailToken(item, index === output.length - 1, toolOutputByCallId);
 			if (token) {
-				currentDetailTokens.push(token);
+				const hidden =
+					hideToolCalls &&
+					token.attributes.type === 'tool_calls' &&
+					!hasRenderableAttachments(token);
+				if (!hidden) {
+					currentDetailTokens.push(token);
+				}
 			}
 			return;
 		}

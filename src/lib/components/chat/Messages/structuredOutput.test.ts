@@ -163,6 +163,144 @@ describe('buildOutputDisplayItems: documents', () => {
 	});
 });
 
+// Tool-call display items --------------------------------------------------
+// StatusHistory is the fork's canonical surface for tool activity (see the
+// carve-outs in MarkdownTokens.svelte and StructuredOutputRenderer.svelte), so
+// the renderer asks for tool calls to be hidden. Generative-UI tool results —
+// iframe embeds and image files — are real content and must survive the
+// carve-out.
+
+const functionCallItem = (name: string, overrides: Partial<OutputItem> = {}): OutputItem => ({
+	type: 'function_call',
+	id: `fc_${name}`,
+	call_id: `call_${name}`,
+	name,
+	status: 'completed',
+	arguments: '{"query":"subsidie"}',
+	...overrides
+});
+
+const functionCallOutputItem = (name: string, overrides: Partial<OutputItem> = {}): OutputItem => ({
+	type: 'function_call_output',
+	call_id: `call_${name}`,
+	output: [{ type: 'output_text', text: 'result' }],
+	...overrides
+});
+
+describe('buildOutputDisplayItems: tool calls', () => {
+	it('renders tool calls by default', () => {
+		const items = buildOutputDisplayItems([
+			functionCallItem('search_knowledge'),
+			functionCallOutputItem('search_knowledge'),
+			messageItem('The answer.')
+		]);
+
+		expect(items.map((item) => item.type)).toEqual(['detail_single', 'message']);
+	});
+
+	it('hides tool calls when the renderer asks for it', () => {
+		const items = buildOutputDisplayItems(
+			[
+				functionCallItem('search_knowledge'),
+				functionCallOutputItem('search_knowledge'),
+				messageItem('The answer.')
+			],
+			{ hideToolCalls: true }
+		);
+
+		expect(items.map((item) => item.type)).toEqual(['message']);
+	});
+
+	it('hides OpenAI built-in tool calls too', () => {
+		const items = buildOutputDisplayItems(
+			[
+				{ type: 'web_search_call', id: 'ws_1', status: 'completed', action: { type: 'search' } },
+				messageItem('The answer.')
+			],
+			{ hideToolCalls: true }
+		);
+
+		expect(items.map((item) => item.type)).toEqual(['message']);
+	});
+
+	it('emits no empty detail group when every grouped tool call is hidden', () => {
+		const items = buildOutputDisplayItems(
+			[
+				messageItem('intro'),
+				functionCallItem('tool_a'),
+				functionCallItem('tool_b'),
+				functionCallOutputItem('tool_a'),
+				functionCallOutputItem('tool_b'),
+				messageItem('outro')
+			],
+			{ hideToolCalls: true }
+		);
+
+		expect(items.map((item) => item.type)).toEqual(['message', 'message']);
+	});
+
+	it('keeps a tool call whose result carries generative-UI embeds', () => {
+		const items = buildOutputDisplayItems(
+			[
+				functionCallItem('present_ui'),
+				functionCallOutputItem('present_ui', { embeds: ['https://example.test/widget'] }),
+				messageItem('The answer.')
+			],
+			{ hideToolCalls: true }
+		);
+
+		expect(items.map((item) => item.type)).toEqual(['detail_single', 'message']);
+	});
+
+	it('keeps a tool call whose result carries files', () => {
+		const items = buildOutputDisplayItems(
+			[
+				functionCallItem('make_chart'),
+				functionCallOutputItem('make_chart', { files: ['data:image/png;base64,AAAA'] }),
+				messageItem('The answer.')
+			],
+			{ hideToolCalls: true }
+		);
+
+		expect(items.map((item) => item.type)).toEqual(['detail_single', 'message']);
+	});
+
+	it('hides a tool call whose result carries empty embed and file lists', () => {
+		const items = buildOutputDisplayItems(
+			[
+				functionCallItem('search_knowledge'),
+				functionCallOutputItem('search_knowledge', { embeds: [], files: [] }),
+				messageItem('The answer.')
+			],
+			{ hideToolCalls: true }
+		);
+
+		expect(items.map((item) => item.type)).toEqual(['message']);
+	});
+
+	it('leaves reasoning and code interpreter items alone', () => {
+		const items = buildOutputDisplayItems(
+			[
+				reasoningItem('thinking'),
+				{ type: 'open_webui:code_interpreter', status: 'completed', code: 'print(1)' },
+				functionCallItem('search_knowledge'),
+				messageItem('The answer.')
+			],
+			{ hideToolCalls: true }
+		);
+
+		expect(items.map((item) => item.type)).toEqual(['detail_group', 'message']);
+		const group = items[0] as {
+			type: 'detail_group';
+			tokens: Array<{ attributes: { type: string } }>;
+		};
+		expect(group.tokens.map((token) => token.attributes.type)).toEqual([
+			'reasoning',
+			'code_interpreter'
+		]);
+	});
+});
+
 // Regression: 2026-07-22 upstream v0.10.2 merge --------------------------
 // Upstream's output-items pipeline leaves message.content empty, so anchors
 // must come from output for the positional merge to interleave reasoning
