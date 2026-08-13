@@ -133,9 +133,17 @@ RUN chown -R $UID:$GID /app $HOME
 # krb5 packages (libgssapi-krb5-2/libk5crypto3/libkrb5-3/libkrb5support0) added
 # for CVE-2026-40356 (HIGH krb5 DoS via integer underflow), fixed in
 # 1.20.1-2+deb12u5.
+# mariadb packages (libmariadb3/libmariadb-dev/mariadb-common) added for
+# CVE-2026-44172, CVE-2026-49261 (both CRITICAL), fixed in
+# 1:10.11.18-0+deb12u1.
+# mesa packages (libgl1-mesa-dri/libglx-mesa0/libglapi-mesa/libgbm1) added for
+# CVE-2026-40393 (CRITICAL), fixed in 22.3.6-1+deb12u2.
+# linux-libc-dev added for CVE-2026-53215 (CRITICAL), fixed in 6.1.176-1.
 RUN apt-get update && \
     apt-get install --only-upgrade -y libcap2 libsystemd0 libudev1 libgnutls30 \
-    libgssapi-krb5-2 libk5crypto3 libkrb5-3 libkrb5support0 && \
+    libgssapi-krb5-2 libk5crypto3 libkrb5-3 libkrb5support0 \
+    libmariadb3 libmariadb-dev mariadb-common \
+    libgl1-mesa-dri libglx-mesa0 libglapi-mesa libgbm1 linux-libc-dev && \
     apt-get install -y --no-install-recommends \
     git build-essential pandoc gcc netcat-openbsd curl jq ca-certificates \
     libmariadb-dev \
