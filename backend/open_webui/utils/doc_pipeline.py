@@ -10,7 +10,7 @@ One warren job carries exactly **one** document — the ``OwuiIngestWorker``
 reads a single ``owui.document`` from ``job_parameters`` — so callers submit
 one job per file (the batch upload route loops).
 
-The body mirrors genai-utils' ``JobSubmissionRequest`` plus the
+The body mirrors soev-solutions' ``JobSubmissionRequest`` plus the
 ``OwuiIngestWorker`` ``owui`` contract; keep it in sync if that changes.
 See thoughts/shared/plans/2026-06-30-doc-pipeline-previder-staging-tierb.md.
 """

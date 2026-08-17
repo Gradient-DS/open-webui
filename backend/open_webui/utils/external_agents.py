@@ -7,14 +7,14 @@ Agents are installed and registered at application startup based on environment 
 Usage:
     Set environment variables:
     - EXTERNAL_AGENTS_REPO: Git URL or local path to agents repo
-    - EXTERNAL_AGENTS_PACKAGE: Python package name (e.g., 'genai_utils.agents')
+    - EXTERNAL_AGENTS_PACKAGE: Python package name (e.g., 'soev_solutions.agents')
       Note: Agents are expected at {package}.pipes.{agent_name}
     - EXTERNAL_AGENTS_LIST: Comma-separated list of agent module names to load
     - EXTERNAL_AGENTS_AUTO_UPDATE: If 'true', git pull latest on startup (default: false)
 
 Example .env:
-    EXTERNAL_AGENTS_REPO=https://github.com/Gradient-DS/genai-utils.git
-    EXTERNAL_AGENTS_PACKAGE=genai_utils.agents
+    EXTERNAL_AGENTS_REPO=https://github.com/Gradient-DS/soev-solutions.git
+    EXTERNAL_AGENTS_PACKAGE=soev_solutions.agents
     EXTERNAL_AGENTS_LIST=neo_nl_agent,neo_nl_assistant,neo_nl_multiagent
     EXTERNAL_AGENTS_AUTO_UPDATE=false
     # Agents will be imported from: agents.pipes.{agent_name}
@@ -141,7 +141,7 @@ def create_wrapper_content(package_path: str, agent_module: str, agent_metadata:
     Create wrapper function content that imports from external package.
 
     Args:
-        package_path: Python package path (e.g., 'genai_utils.agents')
+        package_path: Python package path (e.g., 'soev_solutions.agents')
                       Agents are expected at {package_path}.pipes.{agent_module}
         agent_module: Module name (e.g., 'neo_nl_agent')
         agent_metadata: Optional metadata dict with title, description, etc.

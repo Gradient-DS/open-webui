@@ -1,5 +1,5 @@
 /**
- * Client for the genai-utils `assistant_onboarding` agent, reached
+ * Client for the soev-solutions `assistant_onboarding` agent, reached
  * through Open WebUI's agent proxy. Streams interview questions as
  * OpenAI content deltas and the finished draft as an `assistant_draft`
  * SSE event.

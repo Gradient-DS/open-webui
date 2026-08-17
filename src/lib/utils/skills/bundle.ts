@@ -33,7 +33,7 @@ export const isTextPath = (path: string): boolean => {
 // firing inside a longer absolute path such as
 // "/mnt/skills/public/docx/scripts/office/replace_text.py" (the "scripts/.." there
 // is preceded by "/", so it is skipped) or an in-.docx path like "word/document.xml"
-// (not under a skill subdir). Mirrors the genai-utils check
+// (not under a skill subdir). Mirrors the soev-solutions check
 // (deploy/skills/check_bundle_paths.py) so import-time and CI checks agree.
 const REFERENCED_PATH_RE =
 	/(?<![\w/])((?:assets|scripts|references|reference)\/[A-Za-z0-9_./-]+\.[A-Za-z0-9]+)/g;

@@ -7,7 +7,7 @@
  * cumulative SourceCitation set after every tool call and every text
  * answer in a turn, so the same chunk can arrive multiple times in
  * `message.sources`. The backend runner now dedupes across dispatches
- * (genai-utils `CitationChunkDeduper`), but this reducer keeps the
+ * (soev-solutions `CitationChunkDeduper`), but this reducer keeps the
  * defense in place for:
  *   - legacy chats persisted before the backend fix shipped,
  *   - other agent variants whose source emission path does not dedupe

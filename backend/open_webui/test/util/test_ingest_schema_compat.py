@@ -1,8 +1,8 @@
-"""Assert the OWUI IngestAttachmentManifest matches the genai-utils
+"""Assert the OWUI IngestAttachmentManifest matches the soev-solutions
 IngestAttachment dataclass field-by-field.
 
 Either side drifting silently is exactly the bug this guards against.
-If the genai-utils worktree isn't available locally, the test SKIPs
+If the soev-solutions worktree isn't available locally, the test SKIPs
 rather than failing — the assertion still runs in CI where both repos
 are checked out side by side.
 """
@@ -48,28 +48,28 @@ def _owui_checkout_root() -> Path:
     return candidate
 
 
-def _resolve_genai_utils_client() -> Path:
-    """Find the genai-utils ingest_client.py from common locations.
+def _resolve_soev_solutions_client() -> Path:
+    """Find the soev-solutions ingest_client.py from common locations.
 
     Tried in order:
-    1. $GENAI_UTILS_INGEST_CLIENT env override (CI / non-standard layouts)
-    2. Sibling `genai-utils` checkout at the same monorepo level as the
+    1. $SOEV_SOLUTIONS_INGEST_CLIENT env override (CI / non-standard layouts)
+    2. Sibling `soev-solutions` checkout at the same monorepo level as the
        open-webui checkout (the standard soev layout).
-    3. Sibling worktree path (genai-utils/.worktrees/feat/bim-agent).
+    3. Sibling worktree path (soev-solutions/.worktrees/feat/bim-agent).
     """
     import os
 
-    override = os.environ.get('GENAI_UTILS_INGEST_CLIENT')
+    override = os.environ.get('SOEV_SOLUTIONS_INGEST_CLIENT')
     if override:
         return Path(override)
 
-    # In the soev monorepo, genai-utils sits next to open-webui.
+    # In the soev monorepo, soev-solutions sits next to open-webui.
     monorepo_root = _owui_checkout_root().parent
     candidates = [
-        # Worktree-of-genai-utils variant (checked first — carries the
+        # Worktree-of-soev-solutions variant (checked first — carries the
         # IngestAttachment dataclass that is being co-developed here)
         monorepo_root
-        / 'genai-utils'
+        / 'soev-solutions'
         / '.worktrees'
         / 'feat'
         / 'bim-agent'
@@ -77,8 +77,8 @@ def _resolve_genai_utils_client() -> Path:
         / 'gateway'
         / 'loader_worker'
         / 'ingest_client.py',
-        # Standard layout: sibling genai-utils checkout (post-merge)
-        monorepo_root / 'genai-utils' / 'api' / 'gateway' / 'loader_worker' / 'ingest_client.py',
+        # Standard layout: sibling soev-solutions checkout (post-merge)
+        monorepo_root / 'soev-solutions' / 'api' / 'gateway' / 'loader_worker' / 'ingest_client.py',
     ]
     for c in candidates:
         if c.exists():
@@ -86,15 +86,15 @@ def _resolve_genai_utils_client() -> Path:
     return candidates[1]  # return the standard location for the SKIP message
 
 
-GENAI_UTILS_CLIENT = _resolve_genai_utils_client()
+SOEV_SOLUTIONS_CLIENT = _resolve_soev_solutions_client()
 
 
-def _load_genai_utils_ingest_client():
-    if not GENAI_UTILS_CLIENT.exists():
-        pytest.skip(f'genai-utils worktree not available at {GENAI_UTILS_CLIENT}')
+def _load_soev_solutions_ingest_client():
+    if not SOEV_SOLUTIONS_CLIENT.exists():
+        pytest.skip(f'soev-solutions worktree not available at {SOEV_SOLUTIONS_CLIENT}')
     spec = importlib.util.spec_from_file_location(
         'gu_ingest_client',
-        GENAI_UTILS_CLIENT,
+        SOEV_SOLUTIONS_CLIENT,
     )
     mod = importlib.util.module_from_spec(spec)
     sys.modules['gu_ingest_client'] = mod
@@ -102,14 +102,14 @@ def _load_genai_utils_ingest_client():
     return mod
 
 
-def test_owui_manifest_matches_genai_utils_dataclass():
-    gu = _load_genai_utils_ingest_client()
+def test_owui_manifest_matches_soev_solutions_dataclass():
+    gu = _load_soev_solutions_ingest_client()
     from open_webui.routers.integrations import IngestAttachmentManifest
 
     gu_field_names = {f.name for f in dc_fields(gu.IngestAttachment)}
     owui_field_names = set(IngestAttachmentManifest.model_fields.keys())
 
-    # The genai-utils dataclass carries content_bytes (the actual PNG
+    # The soev-solutions dataclass carries content_bytes (the actual PNG
     # payload); on the OWUI side that rides on the multipart envelope
     # and is replaced by ``part_name`` (the multipart filename used to
     # match the payload back to its manifest entry).

@@ -866,7 +866,7 @@ async def ingest_documents(
     # (formparsers.max_part_size); large-KB syncs push thousands of chunks well
     # past that, so the JSON rides as a file part instead — file parts spool to
     # a SpooledTemporaryFile with no size check, removing the ceiling entirely.
-    # Senders: genai-utils api/gateway/loader_worker/ingest_client.py and
+    # Senders: soev-solutions api/gateway/loader_worker/ingest_client.py and
     # document_processing/distributed/pipeline/clients/owui_ingest_client.py.
     try:
         raw = (await data.read()).decode('utf-8')
@@ -877,7 +877,7 @@ async def ingest_documents(
     # ``original_files`` carries the source bytes for parsed_text /
     # chunked_text documents, keyed by ``filename == source_id`` (the
     # loader-worker sets this when shipping bytes — see
-    # genai-utils/api/gateway/loader_worker/ingest_client.py). Build the
+    # soev-solutions/api/gateway/loader_worker/ingest_client.py). Build the
     # lookup once so the dispatch loops below stay O(documents) rather
     # than O(documents * files).
     original_file_lookup = {f.filename: f for f in (original_files or []) if f.filename}

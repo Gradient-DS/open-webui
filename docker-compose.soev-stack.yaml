@@ -1,7 +1,7 @@
 # Per-stack OWUI stateful services for soev multi-stack dev mode.
 #
 # One copy per active feature-branch worktree, brought up by
-# scripts/stack/stack.py alongside the genai-utils per-stack compose.
+# scripts/stack/stack.py alongside the soev-solutions per-stack compose.
 #
 # Ports are published to per-stack-allocated host ports so the stack
 # manager works on plain Docker (no OrbStack DNS magic required). Host
