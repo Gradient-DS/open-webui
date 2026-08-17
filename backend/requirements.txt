@@ -151,6 +151,7 @@ qrcode[pil]==8.0
 ## Tests
 docker~=7.1.0
 pytest>=9.0.3,<10
+pytest-asyncio>=1.0.0
 pytest-docker~=3.2.5
 fakeredis>=2.35.0
 
