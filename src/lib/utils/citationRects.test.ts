@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { rectsFromMetadata } from './citationRects';
+import { pickAnchorRect, rectsFromMetadata } from './citationRects';
 
 const RECT = { page: 2, x0: 10, y0: 20, x1: 300, y1: 40 };
 
@@ -63,5 +63,32 @@ describe('rectsFromMetadata', () => {
 	it('returns null when nothing valid remains (fallback chain can proceed)', () => {
 		expect(rectsFromMetadata({ bboxes: [] })).toBeNull();
 		expect(rectsFromMetadata({ bboxes: [{ x0: 'x' }] })).toBeNull();
+	});
+});
+
+describe('pickAnchorRect', () => {
+	const on = (page: number, y0: number, x0 = 70) => ({ page, x0, y0, x1: x0 + 400, y1: y0 + 20 });
+
+	it('anchors on the cited page even when an earlier-page rect comes first', () => {
+		// The reported bug: a chunk cited on page 42 whose bbox list opens with a
+		// stray rect on page 1 parked the viewer at the top of the document, so
+		// every click on that chunk looked dead.
+		const rects = [on(1, 700), on(42, 300), on(42, 360)];
+		expect(pickAnchorRect(rects, 42)).toEqual(on(42, 300));
+	});
+
+	it('reads down the cited page: lowest y first, then lowest x', () => {
+		const rects = [on(42, 500, 300), on(42, 300, 300), on(42, 300, 70)];
+		expect(pickAnchorRect(rects, 42)).toEqual(on(42, 300, 70));
+	});
+
+	it('falls back to the first rect in document order when the cited page has none', () => {
+		const rects = [on(44, 120), on(43, 600), on(43, 200)];
+		expect(pickAnchorRect(rects, 42)).toEqual(on(43, 200));
+		expect(pickAnchorRect(rects, null)).toEqual(on(43, 200));
+	});
+
+	it('returns null without rects', () => {
+		expect(pickAnchorRect([], 42)).toBeNull();
 	});
 });

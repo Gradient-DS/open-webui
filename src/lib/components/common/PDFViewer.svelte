@@ -4,14 +4,16 @@
 	import panzoom, { type PanZoom } from 'panzoom';
 	import Spinner from './Spinner.svelte';
 	import { matchItemsToNeedle, type PageTextItem } from '$lib/utils/citationMatch';
+	import { pickAnchorRect, type HighlightRect } from '$lib/utils/citationRects';
 
 	export let url: string | null = null;
 	export let data: ArrayBuffer | Uint8Array | null = null;
 	export let className = 'w-full h-[70vh]';
-	// `highlightText` / `initialPage` / `highlightRects` are read at render
-	// time, not watched reactively. To change the highlight after the PDF has
-	// loaded (e.g. on snippet switch) call setHighlight(...) rather than
-	// mutating these props.
+	// `highlightText` / `initialPage` / `highlightRects` seed the viewer's own
+	// highlight state (see below) and are re-read whenever the parent changes
+	// them. Inside a click handler the parent's values are still a tick stale,
+	// so a caller switching snippets should call setHighlight(...) for the
+	// immediate update and let the props follow.
 	// Cited passage to highlight in the text layer (null/empty = no highlight).
 	export let highlightText: string | null = null;
 	// 1-indexed page to jump to when nothing matches the highlight text.
@@ -24,13 +26,42 @@
 	// the caller: y_topleft = pageHeight - y_bottomleft). `page` is 1-indexed.
 	export let highlightRects: HighlightRect[] | null = null;
 
-	interface HighlightRect {
-		page: number;
-		x0: number;
-		y0: number;
-		x1: number;
-		y1: number;
-	}
+	// --- Highlight state -------------------------------------------------------
+	//
+	// The props above only SEED this state; from then on setHighlight() owns it.
+	// A component cannot keep a value it assigns to its own prop: the parent's
+	// expression wins on the next flush, and inside a click handler that
+	// expression is still a tick stale (the caller's `activeSnippetIdx` has not
+	// propagated yet). Writing `initialPage` from setHighlight() therefore read
+	// back as the PREVIOUS snippet's page, which sent the scroll to the wrong
+	// place. Local state has no such owner conflict.
+	let hlText = highlightText;
+	let hlPage = initialPage;
+	let hlRects = highlightRects;
+
+	// True once page/text/bbox layers exist, i.e. once there is something to
+	// highlight. Before that, render() applies whatever state is current.
+	let layersRendered = false;
+
+	/**
+	 * Re-seed from the props when the parent supplies a new highlight (snippet
+	 * switch, or props that resolve after the viewer was created) and re-apply.
+	 */
+	const _seedFromProps = (
+		text: string | null,
+		page: number | null,
+		rects: HighlightRect[] | null
+	) => {
+		if (text === hlText && page === hlPage && rects === hlRects) return;
+		hlText = text;
+		hlPage = page;
+		hlRects = rects;
+		if (layersRendered) {
+			_applyBestMatchHighlight();
+		}
+	};
+
+	$: _seedFromProps(highlightText, initialPage, highlightRects);
 
 	const HIGHLIGHT_CLASS = 'citation-highlight';
 	// A page must accumulate at least this many matched characters to be
@@ -97,11 +128,17 @@
 
 	/** Remove every citation highlight from all rendered text layers. */
 	const _clearHighlights = () => {
+		let cleared = false;
 		for (const textLayerDiv of pageTextLayerDivs) {
 			for (const span of textLayerDiv.querySelectorAll(`span.${HIGHLIGHT_CLASS}`)) {
 				span.classList.remove(HIGHLIGHT_CLASS);
+				cleared = true;
 			}
 		}
+		// Flush the class removal before the same spans are highlighted again, so
+		// re-selecting the snippet you are already on replays the pulse instead of
+		// leaving the animation mid-flight (nothing else marks the click as heard).
+		if (cleared) void sceneElement?.offsetHeight;
 	};
 
 	/**
@@ -142,15 +179,19 @@
 
 	/**
 	 * Draw coordinate rectangles into the per-page bbox overlays and scroll to
-	 * the first one. Always clears previous rects (so switching to a snippet
-	 * without geometry removes stale boxes). Returns whether anything was drawn.
+	 * the one that anchors the citation (see `pickAnchorRect` — the cited page
+	 * wins over the list's own order). Always clears previous rects (so
+	 * switching to a snippet without geometry removes stale boxes). Returns
+	 * whether anything was drawn.
 	 */
 	const _applyRectHighlights = (): boolean => {
 		for (const layer of bboxLayerDivs) {
 			layer.innerHTML = '';
 		}
-		const rects = highlightRects ?? [];
-		let first: HTMLElement | null = null;
+		const rects = hlRects ?? [];
+		// Only rects that actually landed on a rendered page can be scrolled to,
+		// so the anchor is chosen among these rather than among the input list.
+		const drawn: { rect: HighlightRect; el: HTMLElement }[] = [];
 		for (const rect of rects) {
 			const layer = bboxLayerDivs[rect.page - 1];
 			const dims = pageBaseDims[rect.page - 1];
@@ -169,13 +210,16 @@
 			div.style.width = `${((x1 - x0) / dims.width) * 100}%`;
 			div.style.height = `${((y1 - y0) / dims.height) * 100}%`;
 			layer.appendChild(div);
-			first ??= div;
+			drawn.push({ rect, el: div });
 		}
-		if (first) {
-			_scrollContainerTo(first, 'top');
-			return true;
-		}
-		return false;
+		if (drawn.length === 0) return false;
+		const anchor = pickAnchorRect(
+			drawn.map((d) => d.rect),
+			hlPage
+		);
+		const target = drawn.find((d) => d.rect === anchor)?.el ?? drawn[0].el;
+		_scrollContainerTo(target, 'top');
+		return true;
 	};
 
 	/**
@@ -190,7 +234,7 @@
 	const _applyBestMatchHighlight = () => {
 		_clearHighlights();
 		if (_applyRectHighlights()) return;
-		const needle = highlightText?.trim();
+		const needle = hlText?.trim();
 		if (needle) {
 			let best: PageMatch | null = null;
 			for (const textLayerDiv of pageTextLayerDivs) {
@@ -207,25 +251,25 @@
 				return;
 			}
 		}
-		if (initialPage) {
-			_scrollToPage(initialPage);
+		if (hlPage) {
+			_scrollToPage(hlPage);
 		}
 	};
 
 	/**
 	 * Update the highlighted passage on the already-rendered text layers without
 	 * re-rendering the PDF canvases, then re-scroll. Cheap snippet switching.
-	 * Safe to call before the first render completes: the new values are stored
-	 * on the props and honored when render runs.
+	 * Safe to call before the first render completes: the values are held as
+	 * local state and honored when render runs.
 	 */
 	export function setHighlight(
 		text: string | null,
 		page: number | null,
 		rects: HighlightRect[] | null = null
 	) {
-		highlightText = text;
-		initialPage = page;
-		highlightRects = rects;
+		hlText = text;
+		hlPage = page;
+		hlRects = rects;
 		_applyBestMatchHighlight();
 	}
 
@@ -439,6 +483,7 @@
 		}
 
 		lastRenderedZoom = 1;
+		layersRendered = true;
 		initPanzoom();
 		_applyBestMatchHighlight();
 	};
@@ -664,6 +709,7 @@
 		background: rgba(250, 204, 21, 0.45); /* amber-300 */
 		border-radius: 2px;
 		mix-blend-mode: multiply;
+		animation: citation-pulse 900ms ease-out 1;
 	}
 	:global(.dark .textLayer span.citation-highlight) {
 		mix-blend-mode: screen;
@@ -685,9 +731,32 @@
 		outline: 1.5px solid rgba(245, 158, 11, 0.85); /* amber-500 */
 		border-radius: 2px;
 		mix-blend-mode: multiply;
+		animation: citation-pulse 900ms ease-out 1;
 	}
 	:global(.dark .bboxLayer .bbox-highlight) {
 		mix-blend-mode: screen;
 		background: rgba(250, 204, 21, 0.25);
+	}
+
+	/* Highlights are redrawn on every selection, so this plays once each time a
+	   snippet is picked — including re-picking the snippet the viewer is already
+	   parked on, where there is no scrolling to show the click landed.
+	   `-global-` keeps the name unscoped for the :global rules above. */
+	@keyframes -global-citation-pulse {
+		0% {
+			background: rgba(250, 204, 21, 0.85);
+			outline-color: rgb(245, 158, 11);
+		}
+		60% {
+			background: rgba(250, 204, 21, 0.85);
+			outline-color: rgb(245, 158, 11);
+		}
+	}
+
+	@media (prefers-reduced-motion: reduce) {
+		:global(.textLayer span.citation-highlight),
+		:global(.bboxLayer .bbox-highlight) {
+			animation: none;
+		}
 	}
 </style>
