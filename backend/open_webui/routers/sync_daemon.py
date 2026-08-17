@@ -1,6 +1,6 @@
 """Sync-daemon protocol endpoints: token broker, config read, run summary.
 
-The per-tenant sync-daemon (genai-utils ``services/sync_daemon/``) is a
+The per-tenant sync-daemon (soev-solutions ``services/sync_daemon/``) is a
 stateless orchestrator: cursors, hashes, suspension and File/KB records all
 live here in open-webui. These three endpoints are its state seam (design
 `2026-07-22-sync-daemon-design.md` §4i):

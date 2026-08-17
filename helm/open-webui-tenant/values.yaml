@@ -811,7 +811,7 @@ redis:
 # using the tenant's existing openaiApiKey, and pushes embedded chunks back
 # to /api/v1/integrations/ingest with LOADER_INGEST_API_KEY + acting headers.
 #
-# Image source: genai-utils/api/gateway/loader_worker (built via build-services CI).
+# Image source: soev-solutions/api/gateway/loader_worker (built via build-services CI).
 loaderWorker:
   enabled: false
 

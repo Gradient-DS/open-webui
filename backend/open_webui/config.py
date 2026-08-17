@@ -3043,7 +3043,7 @@ DISTRIBUTED_DOC_PIPELINE_CHAT_ENABLED = (
     os.environ.get('DISTRIBUTED_DOC_PIPELINE_CHAT_ENABLED', 'False').lower() == 'true'
 )
 
-# Per-tenant switch for the external sync-daemon (genai-utils
+# Per-tenant switch for the external sync-daemon (soev-solutions
 # services/sync_daemon). Gates the daemon-facing endpoints
 # (/api/v1/sync-daemon/*) and the machine-auth acceptance on the knowledge
 # sync-protocol endpoints. The companion machine key is the plain env var
