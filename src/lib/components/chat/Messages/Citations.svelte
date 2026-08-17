@@ -4,6 +4,7 @@
 
 	import CitationModal from './Citations/CitationModal.svelte';
 	import { reduceSources, type DisplayCitation } from './Citations/reduceSources';
+	import { calculateShowRelevance, shouldShowPercentage } from './Citations/relevanceDisplay';
 
 	const i18n = getContext('i18n');
 
@@ -90,30 +91,6 @@
 			}
 		}
 	};
-
-	function calculateShowRelevance(sources: any[]) {
-		const distances = sources.flatMap((citation) => citation.distances ?? []);
-		const inRange = distances.filter((d) => d !== undefined && d >= -1 && d <= 1).length;
-		const outOfRange = distances.filter((d) => d !== undefined && (d < -1 || d > 1)).length;
-
-		if (distances.length === 0) {
-			return false;
-		}
-
-		if (
-			(inRange === distances.length - 1 && outOfRange === 1) ||
-			(outOfRange === distances.length - 1 && inRange === 1)
-		) {
-			return false;
-		}
-
-		return true;
-	}
-
-	function shouldShowPercentage(sources: any[]) {
-		const distances = sources.flatMap((citation) => citation.distances ?? []);
-		return distances.every((d) => d !== undefined && d >= -1 && d <= 1);
-	}
 
 	$: {
 		citations = reduceSources(sources);
