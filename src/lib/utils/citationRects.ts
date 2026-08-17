@@ -64,3 +64,28 @@ export const rectsFromMetadata = (
 	}
 	return rects.length > 0 ? rects : null;
 };
+
+/**
+ * Pick the rect a viewer should scroll to when showing `rects`.
+ *
+ * `bboxes` arrives in whatever order the doc pipeline emitted it, and a chunk's
+ * list can include geometry from outside its cited page (a stray rect from the
+ * document's opening pages was what parked the viewer at the top of the file
+ * while the rail claimed page 42). The chunk's own page is the authoritative
+ * "where", so anchor there — first in reading order (topmost, then leftmost) —
+ * and only fall back to the document-order first rect when the cited page
+ * carries no geometry at all.
+ *
+ * `citedPage` is 1-indexed, matching `HighlightRect.page`.
+ */
+export const pickAnchorRect = (
+	rects: HighlightRect[],
+	citedPage: number | null | undefined
+): HighlightRect | null => {
+	if (rects.length === 0) return null;
+	const onCitedPage = rects.filter((r) => r.page === citedPage);
+	const candidates = onCitedPage.length > 0 ? onCitedPage : rects;
+	const readingOrder = (a: HighlightRect, b: HighlightRect) =>
+		a.page - b.page || a.y0 - b.y0 || a.x0 - b.x0;
+	return candidates.reduce((first, rect) => (readingOrder(rect, first) < 0 ? rect : first));
+};
