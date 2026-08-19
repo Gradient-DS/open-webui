@@ -70,9 +70,7 @@ export function detectMergeProtocol(
 	// ``knowledge_search`` is ``hidden=true`` but ``done=true`` (one-shot,
 	// no marker follows), and its ``web_search`` emits ``hidden=false``, so
 	// neither flips this signal.
-	const hasPendingAgentTool = statusEntries.some(
-		(s) => s.hidden === true && s.done === false
-	);
+	const hasPendingAgentTool = statusEntries.some((s) => s.hidden === true && s.done === false);
 	if (hasPendingAgentTool) return 'positional';
 	// Use the same "real tool action" criterion that ``ResponseMessage.svelte``'s
 	// ``hasToolCalls`` does, rather than ``statusEntries.length === 0``. Non-tool
@@ -142,4 +140,107 @@ export function mergeStatusAndReasoning(
 		case 'status_first':
 			return mergeStatusFirst(status, reasoning);
 	}
+}
+
+// Response blocks ----------------------------------------------------------
+//
+// The merged timeline above answers "in what order did the tools and thoughts
+// happen". It does not answer "where does the model's own commentary go" —
+// that prose lives in ``message.content``, interleaved with the very same
+// ``<details>`` anchors, and ``MarkdownTokens`` suppresses those anchors so
+// StatusHistory stays their only display surface.
+//
+// The consequence was that every comment the model streamed between tool
+// calls rendered in one block at the BOTTOM of the turn, far from the call it
+// was about. ``buildResponseBlocks`` cuts the turn into alternating
+// tool-group / prose blocks, ordered by true content offset, so each comment
+// renders where it was streamed and the final answer is the tail alone.
+
+export type ContentBlock = {
+	kind: 'content';
+	text: string;
+	contentOffset: number;
+};
+
+export type StatusGroupBlock = {
+	kind: 'status-group';
+	items: MergedItem[];
+};
+
+export type ResponseBlock = StatusGroupBlock | ContentBlock;
+
+// Both anchor kinds, so a run of prose is never polluted by markup that
+// StatusHistory already renders. Non-greedy and case-insensitive to match
+// ``parseToolOffsets`` and the stripper in ``$lib/utils``.
+const ANCHOR_DETAILS_RE = /<details\s+type="(?:tool_calls|reasoning)"[^>]*>[\s\S]*?<\/details>/gi;
+
+export function splitProseRuns(content: string): ContentBlock[] {
+	const runs: ContentBlock[] = [];
+	const push = (raw: string, start: number) => {
+		const text = raw.trim();
+		// Whitespace between two adjacent anchors is not a comment; emitting it
+		// would split one tool group into two for no visible reason.
+		if (text !== '') runs.push({ kind: 'content', text, contentOffset: start });
+	};
+
+	let last = 0;
+	let m: RegExpExecArray | null;
+	ANCHOR_DETAILS_RE.lastIndex = 0;
+	while ((m = ANCHOR_DETAILS_RE.exec(content)) !== null) {
+		if (m.index > last) push(content.slice(last, m.index), last);
+		last = m.index + m[0].length;
+	}
+	if (last < content.length) push(content.slice(last), last);
+	return runs;
+}
+
+export function buildResponseBlocks(
+	merged: MergedItem[],
+	content: string,
+	toolOffsets: number[]
+): ResponseBlock[] {
+	const prose = splitProseRuns(content);
+	if (merged.length === 0) return prose;
+
+	// Position every timeline item on the same axis as the prose: a reasoning
+	// block already knows its offset, and the k-th status entry sits at the
+	// k-th tool marker. Status entries and markers are NOT guaranteed 1:1 (an
+	// entry can arrive while its marker is still in flight), so a surplus
+	// entry pins to the last known marker — that keeps it in the final tool
+	// group instead of stranding it after the answer.
+	const lastToolOffset = toolOffsets.length > 0 ? toolOffsets[toolOffsets.length - 1] : 0;
+	let toolIdx = 0;
+	const positioned = merged.map((item) => {
+		if (item.kind === 'reasoning') return { item, offset: item.contentOffset };
+		const offset = toolOffsets[toolIdx] ?? lastToolOffset;
+		toolIdx++;
+		return { item, offset };
+	});
+
+	// Anchors before prose on a tie: a comment always describes the tool or
+	// thought that produced it, so it belongs below, never above.
+	const ordered = [
+		...positioned.map((p) => ({ ...p, isProse: false as const })),
+		...prose.map((p) => ({ item: p, offset: p.contentOffset, isProse: true as const }))
+	].sort((a, b) => a.offset - b.offset || Number(a.isProse) - Number(b.isProse));
+
+	const blocks: ResponseBlock[] = [];
+	let group: MergedItem[] = [];
+	const flush = () => {
+		if (group.length > 0) {
+			blocks.push({ kind: 'status-group', items: group });
+			group = [];
+		}
+	};
+
+	for (const entry of ordered) {
+		if (entry.isProse) {
+			flush();
+			blocks.push(entry.item as ContentBlock);
+		} else {
+			group.push(entry.item as MergedItem);
+		}
+	}
+	flush();
+	return blocks;
 }

@@ -76,6 +76,8 @@
 	import {
 		detectMergeProtocol,
 		mergeStatusAndReasoning,
+		buildResponseBlocks,
+		type ContentBlock,
 		parseToolOffsets
 	} from './ResponseMessage/mergeHistory';
 	import FullHeightIframe from '$lib/components/common/FullHeightIframe.svelte';
@@ -280,6 +282,33 @@
 	// and Phase 3 will lift the standalone-reasoning mount onto it too.
 	$: protocol = detectMergeProtocol(statusEntries, reasoningItems, toolOffsets);
 	$: mergedHistory = mergeStatusAndReasoning(statusEntries, reasoningItems, toolOffsets);
+
+	// [Gradient] Cut the turn into alternating tool-group / prose blocks so the
+	// model's inter-tool commentary renders where it was streamed rather than
+	// collecting at the bottom of the message. The prose and the ``<details>``
+	// anchors share one offset axis, which is what makes the ordering exact.
+	// Only ``positional`` has markers to order against; the other protocols
+	// keep the previous single-dropdown-then-content layout untouched.
+	$: responseBlocks =
+		protocol === 'positional'
+			? buildResponseBlocks(mergedHistory, message?.content ?? '', toolOffsets)
+			: [];
+	// A lone block is just an ordinary answer — nothing to interleave.
+	$: useBlockLayout = protocol === 'positional' && responseBlocks.length > 1;
+	// The tail is the final answer. It keeps the full ContentRenderer (floating
+	// buttons, save/preview, source modal) and is the ONLY place the answer
+	// renders, so no text is ever shown twice. A turn that ends on a tool call
+	// has no tail.
+	$: tailBlock =
+		useBlockLayout && responseBlocks.at(-1)?.kind === 'content'
+			? (responseBlocks.at(-1) as ContentBlock)
+			: null;
+	$: leadingBlocks = useBlockLayout
+		? tailBlock
+			? responseBlocks.slice(0, -1)
+			: responseBlocks
+		: [];
+	$: renderedContent = useBlockLayout ? (tailBlock?.text ?? '') : (message?.content ?? '');
 
 	// Whether at least one tool actually ran this turn. Used together with the
 	// streaming heuristic below to gate the StatusHistory dropdown:
@@ -1014,10 +1043,44 @@
 								{/each}
 							</div>
 						{:else if shouldShowStatusHistory}
-							<StatusHistory
-								statusHistory={mergedHistory}
-								messageDone={message?.done ?? false}
-							/>
+							{#if useBlockLayout}
+								<!-- [Gradient] Tool groups and the model's own commentary,
+								     interleaved in stream order. The final answer is NOT
+								     here — it stays in the ContentRenderer below, so the
+								     tail renders exactly once. -->
+								{#each leadingBlocks as block, idx (block.kind === 'content' ? `c-${block.contentOffset}` : `s-${idx}`)}
+									{#if block.kind === 'status-group'}
+										<StatusHistory
+											statusHistory={block.items}
+											messageDone={message?.done ?? false}
+										/>
+									{:else}
+										<div class="w-full my-1">
+											<ContentRenderer
+												id={`${chatId}-${message.id}-c${block.contentOffset}`}
+												content={block.text}
+												sources={message.sources}
+												floatingButtons={false}
+												save={false}
+												preview={false}
+												{editCodeBlock}
+												done={true}
+												{model}
+												onSourceClick={async (id) => {
+													if (citationsElement) {
+														citationsElement?.showSourceModal(id);
+													}
+												}}
+											/>
+										</div>
+									{/if}
+								{/each}
+							{:else}
+								<StatusHistory
+									statusHistory={mergedHistory}
+									messageDone={message?.done ?? false}
+								/>
+							{/if}
 							<!-- [Gradient] For tool-call turns (StatusHistory path), subagent
 							     groups render below the dropdown sorted by their own
 							     started_at. True interleaving inside the StatusHistory
@@ -1156,12 +1219,12 @@
 						>
 							{#if message.content === '' && !message.done && !message.error && !hasVisibleStatus}
 								<Skeleton />
-							{:else if message.content && message.error !== true}
+							{:else if (useBlockLayout ? renderedContent : message.content) && message.error !== true}
 								<!-- always show message contents even if there's an error -->
 								<!-- unless message.error === true which is legacy error handling, where the error message is stored in message.content -->
 								<ContentRenderer
 									id={`${chatId}-${message.id}`}
-									content={message.content}
+									content={renderedContent}
 									sources={message.sources}
 									floatingButtons={message?.done &&
 										!readOnly &&
