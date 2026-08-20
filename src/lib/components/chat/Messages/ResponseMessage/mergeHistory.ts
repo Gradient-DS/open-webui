@@ -196,10 +196,14 @@ export function splitProseRuns(content: string): ContentBlock[] {
 
 export function buildResponseBlocks(
 	merged: MergedItem[],
-	content: string,
+	// A raw content string is cut into prose runs by character offset; the
+	// output path passes pre-positioned runs (``getOutputProseRuns``) whose
+	// offsets live on the ordinal anchor axis instead. Either way the prose
+	// MUST share ``toolOffsets``'s axis — mixing them is the bug this guards.
+	content: string | ContentBlock[],
 	toolOffsets: number[]
 ): ResponseBlock[] {
-	const prose = splitProseRuns(content);
+	const prose = typeof content === 'string' ? splitProseRuns(content) : content;
 	if (merged.length === 0) return prose;
 
 	// Position every timeline item on the same axis as the prose: a reasoning
