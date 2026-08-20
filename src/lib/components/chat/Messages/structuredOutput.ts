@@ -428,6 +428,83 @@ export function hasDocumentOutput(output?: OutputItem[] | null): boolean {
 	return (output ?? []).some((item) => item?.type === DOCUMENT_OUTPUT_TYPE);
 }
 
+export type OutputProseRun = {
+	kind: 'content';
+	text: string;
+	contentOffset: number;
+};
+
+// [Gradient] Prose runs for the interleaved block layout, on the SAME ordinal
+// axis as ``getOutputStreamAnchors``: anchor k (reasoning item or tool_calls
+// marker) sits at ordinal k, and the prose that streamed just before it sits
+// at k - 0.5. ``buildResponseBlocks`` sorts anchors and prose on one axis, so
+// sharing the axis is what makes the ordering exact — cutting the flattened
+// ``getOutputText`` string by CHARACTER offset against these ordinal tool
+// offsets is the mixed-axis bug that collapsed all commentary to the bottom
+// of the turn.
+const ANCHOR_OPEN_RE = /<details\s+type="(tool_calls|reasoning)"[^>]*>/gi;
+const DETAILS_CLOSE = '</details>';
+
+export function getOutputProseRuns(output?: OutputItem[] | null): OutputProseRun[] {
+	const items = output ?? [];
+	const runs: OutputProseRun[] = [];
+	let offset = 0;
+	let buffer: string[] = [];
+
+	const push = (raw: string) => {
+		if (raw.trim() !== '') buffer.push(raw.trim());
+	};
+	// Flush the buffered prose just below the NEXT ordinal — the anchor that
+	// ends the run streamed after it, so the prose belongs above that anchor.
+	const flush = () => {
+		if (buffer.length === 0) return;
+		runs.push({ kind: 'content', text: buffer.join('\n\n'), contentOffset: offset - 0.5 });
+		buffer = [];
+	};
+
+	items.forEach((item, index) => {
+		if (item?.type === 'reasoning') {
+			flush();
+			offset += 1;
+			return;
+		}
+
+		if (item?.type === DOCUMENT_OUTPUT_TYPE) {
+			// Documents flow with the prose: the serialized <details
+			// type="document"> block is what the Markdown path (MarkdownTokens →
+			// DocumentCard) already renders.
+			push(getDocumentText(item, index === items.length - 1));
+			return;
+		}
+
+		if (item?.type !== 'message') return;
+
+		const text = getMessageText(item);
+		// Walk every anchor opening tag in text order so the ordinal counter
+		// stays in lockstep with ``getOutputStreamAnchors`` (which counts each
+		// tool_calls opening, nested or not). Prose is only what sits OUTSIDE
+		// the details blocks; an unclosed (in-flight) block swallows the rest
+		// of the item.
+		let pos = 0;
+		let m: RegExpExecArray | null;
+		ANCHOR_OPEN_RE.lastIndex = 0;
+		while ((m = ANCHOR_OPEN_RE.exec(text)) !== null) {
+			const isTool = m[1].toLowerCase() === 'tool_calls';
+			if (m.index >= pos) {
+				push(text.slice(pos, m.index));
+				if (isTool) flush();
+				const close = text.indexOf(DETAILS_CLOSE, m.index + m[0].length);
+				pos = close === -1 ? text.length : close + DETAILS_CLOSE.length;
+			}
+			if (isTool) offset += 1;
+		}
+		push(text.slice(pos));
+	});
+
+	flush();
+	return runs;
+}
+
 export function getOutputText(output?: OutputItem[] | null): string {
 	const items = output ?? [];
 	return items

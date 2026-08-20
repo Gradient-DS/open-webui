@@ -2,11 +2,12 @@ import { describe, it, expect } from 'vitest';
 
 import {
 	buildOutputDisplayItems,
+	getOutputProseRuns,
 	getOutputStreamAnchors,
 	hasDocumentOutput,
 	type OutputItem
 } from './structuredOutput';
-import { mergeStatusAndReasoning } from './ResponseMessage/mergeHistory';
+import { buildResponseBlocks, mergeStatusAndReasoning } from './ResponseMessage/mergeHistory';
 
 // Fixture helpers ----------------------------------------------------------
 // Shapes mirror what backend middleware persists on message.output since
@@ -335,6 +336,101 @@ describe('output anchors + positional merge (v0.10.2 interleave regression)', ()
 			'status:read_document',
 			'reasoning:> r2',
 			'status:summary'
+		]);
+	});
+});
+
+// Regression: 2026-08-20 inter-tool commentary on the output path ----------
+// On deployments where upstream v0.10.2 streams ``message.output``, the
+// anchors are ORDINAL (0, 1, 2, …) while ``message.content`` is the flattened
+// ``getOutputText`` string. Cutting that string by character offset against
+// ordinal tool offsets clumped every anchor before almost every prose run, so
+// the commentary collapsed to the bottom of the turn. ``getOutputProseRuns``
+// emits the prose on the same ordinal axis (anchor k sits at k; the prose
+// streamed just before it at k - 0.5), which is what lets
+// ``buildResponseBlocks`` interleave them exactly.
+
+describe('getOutputProseRuns', () => {
+	it('returns no runs for missing or empty output', () => {
+		expect(getOutputProseRuns(undefined)).toEqual([]);
+		expect(getOutputProseRuns([])).toEqual([]);
+	});
+
+	it('positions prose runs between the ordinals of the anchors around them', () => {
+		const output = [
+			messageItem(`Ik ga zoeken.${toolMarker('web_search')}Eerste tussenstap.`),
+			reasoningItem('even nadenken'),
+			messageItem(`${toolMarker('fetch')}Het eindantwoord met tabel.`)
+		];
+
+		// Anchor axis for reference: tool@0, reasoning@1, tool@2.
+		expect(getOutputStreamAnchors(output).toolOffsets).toEqual([0, 2]);
+
+		expect(getOutputProseRuns(output)).toEqual([
+			{ kind: 'content', text: 'Ik ga zoeken.', contentOffset: -0.5 },
+			{ kind: 'content', text: 'Eerste tussenstap.', contentOffset: 0.5 },
+			{ kind: 'content', text: 'Het eindantwoord met tabel.', contentOffset: 2.5 }
+		]);
+	});
+
+	it('treats an in-flight (unclosed) tool marker as anchor, not prose', () => {
+		const output = [
+			messageItem(
+				'Intro.\n\n<details type="tool_calls" done="false" name="x">\n<summary>Running…</summary>'
+			)
+		];
+
+		expect(getOutputStreamAnchors(output).toolOffsets).toEqual([0]);
+		expect(getOutputProseRuns(output)).toEqual([
+			{ kind: 'content', text: 'Intro.', contentOffset: -0.5 }
+		]);
+	});
+
+	it('keeps document items in the prose stream as serialized details blocks', () => {
+		const output = [
+			messageItem(`Zoeken.${toolMarker('web_search')}`),
+			documentItem(),
+			messageItem('Klaar.')
+		];
+
+		const runs = getOutputProseRuns(output);
+		expect(runs).toHaveLength(2);
+		expect(runs[0]).toEqual({ kind: 'content', text: 'Zoeken.', contentOffset: -0.5 });
+		expect(runs[1].contentOffset).toBe(0.5);
+		expect(runs[1].text).toBe(
+			'<details type="document" done="true" title="T">\n<summary>Document</summary>\n# H\n\nbody\n</details>\n\nKlaar.'
+		);
+	});
+});
+
+describe('output prose runs + buildResponseBlocks (commentary-at-bottom regression)', () => {
+	it('interleaves tool groups and commentary in stream order, answer as tail', () => {
+		const output = [
+			messageItem(`${toolMarker('web_search')}Nu ga ik de pagina ophalen.`),
+			reasoningItem('r1'),
+			messageItem(`${toolMarker('fetch')}Het eindantwoord.`)
+		];
+		const statusEntries = [
+			{ action: 'web_search', description: 'Zoeken…', done: true, hidden: true },
+			{ action: 'fetch', description: 'Ophalen…', done: true, hidden: true },
+			{ action: 'summary', description: '2 tools called', done: true }
+		];
+
+		const { reasoningItems, toolOffsets } = getOutputStreamAnchors(output);
+		const merged = mergeStatusAndReasoning(statusEntries, reasoningItems, toolOffsets);
+		const blocks = buildResponseBlocks(merged, getOutputProseRuns(output), toolOffsets);
+
+		expect(
+			blocks.map((b) =>
+				b.kind === 'content'
+					? `content:${b.text}`
+					: `group:${b.items.map((i) => (i.kind === 'reasoning' ? 'r' : i.action)).join('+')}`
+			)
+		).toEqual([
+			'group:web_search',
+			'content:Nu ga ik de pagina ophalen.',
+			'group:r+fetch+summary',
+			'content:Het eindantwoord.'
 		]);
 	});
 });

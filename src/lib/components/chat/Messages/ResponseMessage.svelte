@@ -83,6 +83,7 @@
 	import FullHeightIframe from '$lib/components/common/FullHeightIframe.svelte';
 	import OutputEditView from './OutputEditView.svelte';
 	import {
+		getOutputProseRuns,
 		getOutputStreamAnchors,
 		getOutputText,
 		replaceOutputMessageText,
@@ -317,9 +318,19 @@
 	// anchors share one offset axis, which is what makes the ordering exact.
 	// Only ``positional`` has markers to order against; the other protocols
 	// keep the previous single-dropdown-then-content layout untouched.
+	// The prose source must share ``toolOffsets``'s axis: with ``message.output``
+	// present the anchors are ORDINAL (``getOutputStreamAnchors``), so the prose
+	// comes from ``getOutputProseRuns`` on that same axis; without output the
+	// anchors are character offsets into ``message.content``. Cutting content by
+	// character offset against ordinal anchors is what collapsed the commentary
+	// to the bottom on output-pipeline deployments.
 	$: responseBlocks =
 		protocol === 'positional'
-			? buildResponseBlocks(mergedHistory, message?.content ?? '', toolOffsets)
+			? buildResponseBlocks(
+					mergedHistory,
+					message?.output?.length ? getOutputProseRuns(message.output) : (message?.content ?? ''),
+					toolOffsets
+				)
 			: [];
 	// A lone block is just an ordinary answer — nothing to interleave.
 	$: useBlockLayout = protocol === 'positional' && responseBlocks.length > 1;
@@ -1244,7 +1255,7 @@
 								<ContentRenderer
 									id={`${chatId}-${message.id}`}
 									content={renderedContent}
-									output={message.output}
+									output={useBlockLayout ? [] : message.output}
 									sources={message.sources}
 									floatingButtons={message?.done &&
 										!readOnly &&
