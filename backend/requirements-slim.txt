@@ -11,14 +11,14 @@ itsdangerous==2.2.0
 
 python-socketio==5.16.2 # security: CVE-2026-48804 (binary attachment accumulation memory exhaustion) fixed in 5.16.2
 python-jose==3.5.0
-cryptography==48.0.1 # security: GHSA-537c-gmf6-5ccf (vulnerable OpenSSL bundled in wheels) fixed in 48.0.1
+cryptography==50.0.0 # security: CVE-2026-69247/69249 (PKCS#7 confusion / duplicate); was 48.0.1 GHSA-537c-gmf6-5ccf
 bcrypt==5.0.0
 argon2-cffi==25.1.0
 PyJWT[crypto]==2.13.0 # security: CVE-2026-48526 (auth bypass via forged JWT) fixed in 2.13.0
 authlib==1.6.12
 
 requests==2.33.1
-aiohttp==3.14.1 # do not update to 3.13.3 - broken; security: CVE-2026-54273..54280 (DoS/SNI/cookie issues) fixed in 3.14.1
+aiohttp==3.14.3 # security: CVE-2026-69244 (DoS via malformed HTTP); do not downgrade to 3.13.3 (broken)
 async-timeout==5.0.1
 aiocache==0.12.3
 aiofiles==25.1.0
@@ -39,7 +39,7 @@ pycrdt==0.12.47
 redis==7.4.0
 
 APScheduler==3.11.2
-RestrictedPython==8.1
+RestrictedPython==8.3 # security: CVE-2026-55830 (guard hooks can be shadowed)
 pytz==2026.1.post1
 
 loguru==0.7.3
@@ -47,7 +47,7 @@ asgiref==3.11.1
 
 # AI libraries
 tiktoken==0.12.0
-mcp==1.26.0
+mcp==1.28.1 # security: CVE-2026-52869/52870/59950 (session isolation, task handlers, ws transport)
 
 openai==2.29.0
 anthropic==0.87.0
@@ -67,15 +67,15 @@ pyarrow==23.0.1 # security: PYSEC-2026-113 (Apache Arrow C++ use-after-free) fix
 
 ftfy==6.3.1
 chardet==5.2.0
-pypdf==6.13.3 # security: CVE-2026-48735/49460/49461/54530/54531 + GHSA-jm82-fx9c-mx94 (DoS via crafted PDF) fixed in 6.13.3
+pypdf==6.15.0 # security: PYSEC-2026-3610..3656 (DoS via crafted PDF); was 6.13.3
 fpdf2==2.8.7
-pymdown-extensions==10.21.3 # security: CVE-2026-46338 (snippets path traversal regression of CVE-2023-32309) fixed in 10.21.3
+pymdown-extensions==11.0.1 # security: PYSEC-2026-3609/3654; was 10.21.3
 docx2txt==0.9
 python-pptx==1.0.2
 msoffcrypto-tool==6.0.0
 unstructured==0.18.31
 
-nltk==3.9.4
+nltk==3.10.3 # security: PYSEC-2026-3582..3741 (ReDoS/DoS)
 Markdown==3.10.2
 beautifulsoup4==4.14.3
 pypandoc==1.16.2
@@ -86,7 +86,7 @@ xlrd==2.0.2
 validators==0.35.0
 psutil==7.2.2
 
-pillow==12.2.0
+pillow==12.3.0 # security: PYSEC-2026-2253..3496 (multiple)
 rank-bm25==0.2.2
 
 black==26.3.1
@@ -161,3 +161,7 @@ opentelemetry-instrumentation-logging==0.61b0
 opentelemetry-instrumentation-httpx==0.61b0
 opentelemetry-instrumentation-aiohttp-client==0.61b0
 opentelemetry-instrumentation-system-metrics==0.61b0
+
+# security: explicit pins for transitive deps flagged by pip-audit/Trivy
+msgpack==1.2.1 # security: GHSA-6v7p-g79w-8964 (OOB read/crash)
+setuptools>=83.0.0 # security: PYSEC-2026-3447 (image had 70.3.0)

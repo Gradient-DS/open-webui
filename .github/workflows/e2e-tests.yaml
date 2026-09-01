@@ -53,10 +53,10 @@ jobs:
           cd backend
           uvicorn open_webui.main:app --port "8080" --forwarded-allow-ips '*' &
           UVICORN_PID=$!
-          for i in {1..40}; do
+          for i in {1..120}; do
               curl -s http://localhost:8080/api/config > /dev/null && break
               sleep 1
-              if [ $i -eq 40 ]; then
+              if [ $i -eq 120 ]; then
                   echo "Server failed to start"
                   kill -9 $UVICORN_PID
                   exit 1
@@ -83,10 +83,10 @@ jobs:
           cd backend
           uvicorn open_webui.main:app --port "8081" --forwarded-allow-ips '*' &
           UVICORN_PID=$!
-          for i in {1..20}; do
+          for i in {1..120}; do
               curl -s http://localhost:8081/api/config > /dev/null && break
               sleep 1
-              if [ $i -eq 20 ]; then
+              if [ $i -eq 120 ]; then
                   echo "Server failed to start"
                   kill -9 $UVICORN_PID
                   exit 1
