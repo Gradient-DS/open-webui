@@ -17,3 +17,11 @@ CVE-2026-44721
 # backend/open_webui/routers/tools.py has been patched in this fork to enforce
 # has_permission(user, 'workspace.tools', ...) — matches upstream remediation.
 CVE-2026-45395
+
+# msgpack OOB read/crash — pip's vendored msgpack copy (no dist-info METADATA);
+# the real site-packages install is patched to 1.2.1, unfixable by requirement pin.
+GHSA-6v7p-g79w-8964
+
+# setuptools PackageIndex path traversal — setuptools/_vendor copy; the real
+# site-packages install is patched to 84.0.0, unfixable by requirement pin.
+CVE-2025-47273
