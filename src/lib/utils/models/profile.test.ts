@@ -3,7 +3,8 @@ import {
 	resolveModelProfile,
 	resolveLocalizedText,
 	hostingFromDeployment,
-	parseHosting
+	parseHosting,
+	infoTooltipHtml
 } from './profile';
 
 // hostingFromDeployment exercises the shared matchesPattern() convention with
@@ -233,7 +234,12 @@ describe('hosting resolution precedence (mirrors ModelItem.svelte)', () => {
 	});
 
 	it('falls back to the baked hosting when no deployment rule matches', () => {
-		const out = resolveHosting([{ match: 'mistral', hosting: 'Nebul (NL)' }], 'claude', 'Claude', 'Anthropic (US)');
+		const out = resolveHosting(
+			[{ match: 'mistral', hosting: 'Nebul (NL)' }],
+			'claude',
+			'Claude',
+			'Anthropic (US)'
+		);
 		expect(out).toEqual({ label: 'Anthropic', flag: 'US' });
 	});
 });
@@ -241,7 +247,10 @@ describe('hosting resolution precedence (mirrors ModelItem.svelte)', () => {
 describe('parseHosting — flag extraction', () => {
 	it('extracts a supported country code as a flag', () => {
 		expect(parseHosting('Anthropic (US)')).toEqual({ label: 'Anthropic', flag: 'US' });
-		expect(parseHosting('Intermax litellm (NL)')).toEqual({ label: 'Intermax litellm', flag: 'NL' });
+		expect(parseHosting('Intermax litellm (NL)')).toEqual({
+			label: 'Intermax litellm',
+			flag: 'NL'
+		});
 		expect(parseHosting('Azure (EU)')).toEqual({ label: 'Azure', flag: 'EU' });
 	});
 
@@ -253,5 +262,39 @@ describe('parseHosting — flag extraction', () => {
 	it('returns undefined for empty input', () => {
 		expect(parseHosting('')).toBeUndefined();
 		expect(parseHosting(undefined)).toBeUndefined();
+	});
+});
+
+// `info` is injected into the model dropdown with {@html} so that newlines render
+// as line breaks. It reaches us from model-profiles.json and from an admin's
+// per-model override, so the only markup the result may contain is the <br> we
+// add ourselves.
+describe('infoTooltipHtml — escaping', () => {
+	it('turns newlines into <br>', () => {
+		expect(infoTooltipHtml('one\ntwo')).toBe('one<br>two');
+	});
+
+	it('escapes markup instead of emitting it', () => {
+		expect(infoTooltipHtml('<img src=x onerror=alert(1)>')).toBe(
+			'&lt;img src=x onerror=alert(1)&gt;'
+		);
+	});
+
+	it('escapes quotes and ampersands', () => {
+		expect(infoTooltipHtml(`R&D "fast" it's`)).toBe('R&amp;D &quot;fast&quot; it&#39;s');
+	});
+
+	it('escapes before inserting breaks, so a literal <br> stays text', () => {
+		expect(infoTooltipHtml('a<br>b')).toBe('a&lt;br&gt;b');
+	});
+
+	it('leaves the escaped output free of unescaped angle brackets except our breaks', () => {
+		const out = infoTooltipHtml('</div><script>alert(1)</script>\nnext');
+		expect(out.replaceAll('<br>', '')).not.toMatch(/[<>]/);
+	});
+
+	it('returns an empty string for undefined or empty input', () => {
+		expect(infoTooltipHtml(undefined)).toBe('');
+		expect(infoTooltipHtml('')).toBe('');
 	});
 });

@@ -932,14 +932,6 @@ async def lifespan(app: FastAPI):
     log.info('Installing external dependencies of functions and tools...')
     await install_tool_and_function_dependencies()
 
-    # Load external agents if configured
-    try:
-        from open_webui.utils.external_agents import load_external_agents_at_startup
-
-        await load_external_agents_at_startup()
-    except Exception as e:
-        log.warning(f'External agents loading skipped or failed: {e}')
-
     # [Gradient] Seed agent_config defaults from AGENT_API_AGENTS_CONFIG env so
     # ops can pre-configure agents in deployments where the admin panel isn't
     # reachable. Existing rows are preserved unless OVERWRITE is true.

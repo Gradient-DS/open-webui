@@ -177,6 +177,16 @@ def render_invite_email(
     strings = _get_strings(locale)
     expiry_days = max(1, expiry_hours // 24)
 
+    # Caller-supplied values are interpolated into the HTML body below, so escape
+    # them here. Only the values are escaped, never the assembled string: the
+    # _STRINGS templates are ours and intentionally carry markup (APP_NAME_HTML).
+    # This runs before _prevent_email_autolink so that its &#x2060; entity is not
+    # re-escaped into a literal.
+    invited_by_name = html.escape(invited_by_name)
+    client_name = html.escape(client_name)
+    custom_heading = html.escape(custom_heading)
+    invite_url = html.escape(invite_url, quote=True)
+
     if custom_heading:
         heading = _prevent_email_autolink(custom_heading)
     elif client_name:
@@ -238,6 +248,8 @@ def render_password_reset_email(
     expiry_minutes: int = 30,
 ) -> str:
     strings = _get_password_reset_strings(locale)
+    # Escaped for the href attribute it lands in below.
+    reset_url = html.escape(reset_url, quote=True)
     heading = strings['heading']
     body = strings['body']
     button = strings['button']
@@ -299,6 +311,8 @@ def render_retention_warning_email(
     locale: str = 'en',
 ) -> str:
     strings = _get_retention_strings(locale)
+    # Escaped for the href attribute it lands in below.
+    login_url = html.escape(login_url, quote=True)
     heading = strings['heading']
     body = strings['body'].format(app_name=APP_NAME_HTML, days_remaining=days_remaining)
     action = strings['action']
