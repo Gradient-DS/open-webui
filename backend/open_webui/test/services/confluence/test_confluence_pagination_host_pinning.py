@@ -156,3 +156,82 @@ def test_host_relative_next_is_still_followed():
 
     assert results == [{'id': '1'}, {'id': '2'}]
     assert all('attacker' not in u for u in seen)
+
+
+# ---------------------------------------------------------------------------
+# Follow-up from the security review: the pin matched host but not scheme, so a
+# downgraded http:// URL on the right host still carried the Authorization
+# header onto a cleartext connection.
+# ---------------------------------------------------------------------------
+
+
+def test_scheme_downgrade_on_the_right_host_is_rejected():
+    schemes: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        schemes.append(request.url.scheme)
+        if request.url.scheme == 'https':
+            return httpx.Response(
+                200,
+                json={
+                    'results': [{'id': '1'}],
+                    '_links': {'next': 'http://api.atlassian.com/ex/confluence/cloud-1/wiki/api/v2/spaces?cursor=P2'},
+                },
+            )
+        return httpx.Response(200, json={'results': [{'id': 'leaked'}], '_links': {}})
+
+    client = _client_with_handler(handler)
+    results = asyncio.run(client._paginated_get('spaces'))
+
+    assert 'http' not in [s for s in schemes if s != 'https'], 'credential sent over cleartext'
+    assert schemes == ['https']
+    assert results == [{'id': '1'}]
+
+
+def test_scheme_downgrade_is_rejected_in_basic_mode_too():
+    schemes: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        schemes.append(request.url.scheme)
+        if request.url.scheme == 'https':
+            return httpx.Response(
+                200,
+                json={
+                    'results': [{'id': '1'}],
+                    '_links': {'next': 'http://acme.atlassian.net/wiki/api/v2/spaces?cursor=P2'},
+                },
+            )
+        return httpx.Response(200, json={'results': [], '_links': {}})
+
+    client = _client_with_handler(
+        handler,
+        auth_mode='basic',
+        site_url='https://acme.atlassian.net',
+        basic_username='u',
+        basic_api_token='t',
+    )
+    results = asyncio.run(client._paginated_get('spaces'))
+
+    assert schemes == ['https']
+    assert results == [{'id': '1'}]
+
+
+def test_matching_scheme_and_host_still_paginates():
+    """The pin must not break the legitimate absolute-next path."""
+    seen: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(str(request.url))
+        if 'cursor=P2' in str(request.url):
+            return httpx.Response(200, json={'results': [{'id': '2'}], '_links': {}})
+        return httpx.Response(
+            200,
+            json={
+                'results': [{'id': '1'}],
+                '_links': {'next': 'https://api.atlassian.com/ex/confluence/cloud-1/wiki/api/v2/spaces?cursor=P2'},
+            },
+        )
+
+    client = _client_with_handler(handler)
+    assert asyncio.run(client._paginated_get('spaces')) == [{'id': '1'}, {'id': '2'}]
+    assert len(seen) == 2

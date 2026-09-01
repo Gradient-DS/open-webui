@@ -141,3 +141,101 @@ def test_pdf_url_fetcher_allows_data_uri():
         'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=='
     )
     assert isinstance(result, dict)
+
+
+# ---------------------------------------------------------------------------
+# Follow-ups from the security review of PR #270: the <img>/tag allowlist was
+# sound, but three fetch vectors reached WeasyPrint and were stopped only by the
+# safe_pdf_url_fetcher backstop. These pin them at the sanitiser, so the export
+# HTML no longer depends on a second control.
+# ---------------------------------------------------------------------------
+
+
+class TestCssUrlAllowlist:
+    """Every url() in an inline style must be a data: URI — not merely one of them."""
+
+    def test_mixed_data_and_remote_urls_drops_the_style(self):
+        html = sanitize_export_html(
+            '<div style="background:url(data:image/png;base64,A);'
+            'list-style-image:url(http://attacker.example/leak.png)">x</div>'
+        )
+        assert 'attacker.example' not in html
+        assert 'style=' not in html
+
+    def test_css_comment_cannot_fake_a_data_url(self):
+        """`/*url(data:*/` made the old substring check see a data URI."""
+        html = sanitize_export_html(
+            '<div style="/*url(data:*/background:url(http://attacker.example/leak.png)">x</div>'
+        )
+        assert 'attacker.example' not in html
+        assert 'style=' not in html
+
+    def test_quoted_and_uppercase_remote_urls_are_caught(self):
+        # A double-quoted CSS url needs a single-quoted HTML attribute to be
+        # well-formed; nesting like-for-like just terminates the attribute.
+        for markup in (
+            """<div style="background:url('http://attacker.example/x.png')">x</div>""",
+            """<div style='background:url("http://attacker.example/x.png")'>x</div>""",
+            """<div style="background:URL(HTTP://attacker.example/x.png)">x</div>""",
+        ):
+            html = sanitize_export_html(markup)
+            assert 'attacker.example' not in html.lower(), markup
+            assert 'style=' not in html, markup
+
+    def test_unparseable_url_call_drops_the_style(self):
+        """A url( the extractor cannot read is treated as unsafe, not ignored."""
+        html = sanitize_export_html('<div style="background:url(">x</div>')
+        assert 'style=' not in html
+
+    def test_file_url_in_style_is_caught(self):
+        html = sanitize_export_html('<div style="background:url(file:///etc/passwd)">x</div>')
+        assert 'passwd' not in html
+
+    def test_genuine_data_uri_style_is_preserved(self):
+        html = sanitize_export_html('<div style="background:url(data:image/png;base64,AAAA)">x</div>')
+        assert 'data:image/png;base64,AAAA' in html
+
+    def test_style_without_any_url_is_preserved(self):
+        html = sanitize_export_html('<div style="color:red;font-weight:bold">x</div>')
+        assert 'color:red' in html
+
+
+class TestSvgFetchVectors:
+    """<svg> carries href-based fetches that the <img> filter never saw."""
+
+    def test_svg_image_href_is_removed(self):
+        html = sanitize_export_html('<svg><image href="http://attacker.example/x.png"/></svg>')
+        assert 'attacker.example' not in html
+        assert '<svg' not in html.lower()
+
+    def test_svg_use_href_is_removed(self):
+        html = sanitize_export_html('<svg><use href="file:///etc/passwd"/></svg>')
+        assert 'passwd' not in html
+        assert '<svg' not in html.lower()
+
+    def test_svg_wrapping_an_image_is_removed_whole(self):
+        html = sanitize_export_html('<svg><image xlink:href="http://attacker.example/x.png"/></svg>')
+        assert 'attacker.example' not in html
+
+
+class TestSurvivingImageCannotFetch:
+    """An <img> kept for its data: src must not fetch via a second attribute."""
+
+    def test_srcset_is_stripped_from_a_kept_image(self):
+        html = sanitize_export_html('<img src="data:image/png;base64,AAAA" srcset="http://attacker.example/x.png 2x">')
+        assert 'attacker.example' not in html
+        assert 'srcset' not in html
+        # The legitimate inline image survives.
+        assert 'data:image/png;base64,AAAA' in html
+
+    def test_lowsrc_is_stripped_from_a_kept_image(self):
+        html = sanitize_export_html('<img src="data:image/png;base64,AAAA" lowsrc="http://attacker.example/x.png">')
+        assert 'attacker.example' not in html
+
+    def test_input_type_image_is_removed(self):
+        html = sanitize_export_html('<input type="image" src="http://attacker.example/x.png">')
+        assert 'attacker.example' not in html
+
+    def test_ordinary_input_is_left_alone(self):
+        html = sanitize_export_html('<input type="text" value="hi">')
+        assert 'value="hi"' in html
