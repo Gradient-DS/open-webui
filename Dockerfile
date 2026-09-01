@@ -161,7 +161,7 @@ COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
 ENV UV_LINK_MODE=copy
 
 RUN set -e; \
-    pip3 install --no-cache-dir --upgrade pip setuptools wheel; \
+    pip3 install --no-cache-dir --upgrade pip "setuptools>=83.0.0" wheel; \
     if [ "$USE_SLIM" = "true" ]; then \
     # Slim build: no torch, no local ML models — uses external APIs only
     uv pip install --system -r requirements-slim.txt --no-cache-dir; \

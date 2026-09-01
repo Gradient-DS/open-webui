@@ -18,16 +18,10 @@ CVE-2026-44721
 # has_permission(user, 'workspace.tools', ...) — matches upstream remediation.
 CVE-2026-45395
 
-# msgpack 1.1.2 vendored inside pip 26.2 (pip/_vendor/vendor.txt) — the real
-# msgpack is not installed in the image. Only used by pip's own HTTP cache
-# (CacheControl); pip is never invoked at container runtime. Latest pip still
-# vendors 1.1.2, so no upgrade path yet.
-# Out-of-bounds read / crash on Unpacker reuse after a failed unpack.
+# msgpack OOB read/crash — pip's vendored msgpack copy (no dist-info METADATA);
+# the real site-packages install is patched to 1.2.1, unfixable by requirement pin.
 GHSA-6v7p-g79w-8964
 
-# setuptools 70.3.0 vendored inside pip 26.2 (pip/_vendor/vendor.txt) — the
-# real site-packages setuptools is 83.x (patched). The vulnerable
-# PackageIndex/easy_install code path is never used at runtime. Latest pip
-# still vendors 70.3.0, so no upgrade path yet.
-# Path traversal in setuptools PackageIndex.
+# setuptools PackageIndex path traversal — setuptools/_vendor copy; the real
+# site-packages install is patched to 84.0.0, unfixable by requirement pin.
 CVE-2025-47273

@@ -141,12 +141,149 @@ def _citation_to_sup(content: str) -> str:
     return CITATION_RE.sub(_sup_replace, content)
 
 
+# Tags that can trigger an outbound fetch (SSRF) or local-file read (LFI) when
+# the export HTML is rendered server-side by WeasyPrint / htmldocx. Markdown
+# passes raw HTML through, so an attacker (or a prompt-injected assistant reply)
+# can smuggle these in. We drop them entirely during export.
+_FETCHING_TAGS = frozenset(
+    {
+        'link',
+        'style',
+        'script',
+        'object',
+        'embed',
+        'iframe',
+        'base',
+        'source',
+        'track',
+        'audio',
+        'video',
+        'picture',
+        # <svg> carries its own fetch vectors that survive the <img> filter —
+        # <svg><image href> and <svg><use href> are both dereferenced by
+        # WeasyPrint. Inline SVG has no legitimate use in an export body.
+        'svg',
+    }
+)
+
+# Attributes that make a *surviving* <img> pull a second resource. The src
+# allowlist below keeps images whose src is a self-contained data:image/ URI;
+# these attributes would let such an image fetch something else anyway.
+_IMG_FETCH_ATTRS = ('srcset', 'lowsrc', 'longdesc')
+
+_CSS_COMMENT_RE = re.compile(r'/\*.*?\*/', re.DOTALL)
+_CSS_URL_RE = re.compile(r'url\(\s*(?:"([^"]*)"|\'([^\']*)\'|([^)]*))', re.IGNORECASE)
+
+
+def _is_data_uri(value: str | None) -> bool:
+    """True only for inline data: URIs, which cannot cause a network fetch."""
+    return bool(value) and value.strip().lower().startswith('data:')
+
+
+def _is_data_image_uri(value: str | None) -> bool:
+    """True only for inline ``data:image/…`` URIs — the only safe ``<img>`` src.
+
+    Markdown/HTML links (``<a href>``) are intentionally left alone: renderers
+    do not dereference href targets, so they are not a fetch vector. Only image
+    *sources* are fetched, so only those are constrained here.
+    """
+    return bool(value) and value.strip().lower().startswith('data:image/')
+
+
+def _css_urls(style: str) -> list[str]:
+    """Every ``url(...)`` target in a CSS declaration, comments stripped first."""
+    stripped = _CSS_COMMENT_RE.sub('', style)
+    return [(m.group(1) or m.group(2) or m.group(3) or '').strip() for m in _CSS_URL_RE.finditer(stripped)]
+
+
+def _style_has_unsafe_url(style: str) -> bool:
+    """True when a CSS declaration references any non-``data:`` resource.
+
+    Checking that a ``url(data:`` appears *somewhere* is not enough: a
+    declaration can carry several ``url()`` values, and a CSS comment can make a
+    fake one appear before the real payload —
+    ``/*url(data:*/background:url(http://attacker/)``. Comments are removed the
+    way a CSS parser removes them, then *every* remaining target must be a
+    ``data:`` URI. A ``url(`` the extractor cannot parse counts as unsafe.
+    """
+    stripped = _CSS_COMMENT_RE.sub('', style)
+    if 'url(' not in stripped.lower():
+        return False
+    urls = _css_urls(style)
+    return not urls or not all(_is_data_uri(u) for u in urls)
+
+
+def sanitize_export_html(html: str) -> str:
+    """Strip resource-fetching vectors from export HTML.
+
+    The server-side PDF (WeasyPrint) and DOCX (htmldocx) renderers dereference
+    resource URLs — ``<img src>``, CSS ``url()``, ``<link>`` — which turns
+    attacker-controlled markdown into SSRF (e.g. cloud metadata, internal
+    services) and local-file disclosure (``file://``). We allow only inline
+    ``data:`` image URIs, which are self-contained and safe, and remove every
+    other fetch vector before rendering.
+    """
+    from bs4 import BeautifulSoup
+
+    soup = BeautifulSoup(html, 'html.parser')
+
+    # Drop images that would be fetched from a URL or local path; keep only
+    # self-contained data:image/ URIs.
+    for img in soup.find_all('img'):
+        if not _is_data_image_uri(img.get('src')):
+            img.decompose()
+            continue
+        # The src is inline, but a surviving image can still be told to fetch.
+        for attr in _IMG_FETCH_ATTRS:
+            if img.has_attr(attr):
+                del img[attr]
+
+    # <input type="image"> fetches its src the way <img> does, and is not
+    # otherwise meaningful in an exported document.
+    for tag in soup.find_all('input'):
+        if (tag.get('type') or '').strip().lower() == 'image':
+            tag.decompose()
+
+    # Drop tags whose only purpose here would be to pull in an external resource.
+    for tag in soup.find_all(lambda t: t.name in _FETCHING_TAGS):
+        tag.decompose()
+
+    # Neutralise inline styles that reference a non-data URL (e.g. background:url()).
+    for tag in soup.find_all(style=True):
+        if _style_has_unsafe_url(tag['style']):
+            del tag['style']
+
+    return str(soup)
+
+
+def safe_pdf_url_fetcher(url: str):
+    """WeasyPrint url_fetcher that permits only inline ``data:`` URIs.
+
+    Backstop for the PDF path: even if a fetchable URL survives HTML
+    sanitisation (e.g. inside a CSS ``url()``), WeasyPrint will refuse to
+    dereference anything but a self-contained ``data:`` URI, so it cannot be
+    used for SSRF or local-file reads. Blocked resources are simply skipped by
+    WeasyPrint (rendered as missing), not fatal.
+    """
+    if not _is_data_uri(url):
+        raise ValueError(f'Blocked non-data resource URL during PDF export: {url[:64]!r}')
+
+    from weasyprint import default_url_fetcher
+
+    return default_url_fetcher(url)
+
+
 def _md_to_html(text: str) -> str:
-    """Convert markdown to HTML with common extensions."""
-    return markdown(
+    """Convert markdown to HTML with common extensions.
+
+    The result is sanitised: export renderers fetch resource URLs server-side,
+    so unsanitised markdown is an SSRF / local-file-read vector.
+    """
+    html = markdown(
         text,
         extensions=['tables', 'fenced_code', 'codehilite', 'nl2br'],
     )
+    return sanitize_export_html(html)
 
 
 def prepare_export_messages(

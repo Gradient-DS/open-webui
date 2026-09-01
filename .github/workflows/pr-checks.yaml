@@ -40,10 +40,17 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v6
 
+      # Paths belong in `src`, not `args` — `src` defaults to the whole
+      # workspace, so the paths below were never restricting the scope and ruff
+      # was checking the entire repo. That went unnoticed until ruff enabled
+      # markdown formatting by default, at which point it started reformatting
+      # `.claude/commands/*.md` and `collab/docs/*.md` and failed every PR.
+      # There are no markdown files under backend/ or scripts/.
       - name: Ruff format check
         uses: astral-sh/ruff-action@v3
         with:
-          args: format --check backend/ scripts/
+          args: format --check
+          src: backend scripts
 
       # Logic-error sweep (undefined names etc.) — ported from upstream's
       # backend.yaml before it was disabled; caught a real F821 in this repo.

@@ -37,7 +37,7 @@ pycrdt==0.13.1
 redis==8.0.0
 
 APScheduler==3.11.2
-RestrictedPython==8.2
+RestrictedPython==8.3 # security: CVE-2026-55830 (guard hooks can be shadowed)
 pytz==2026.2
 
 loguru==0.7.3
@@ -74,7 +74,7 @@ msoffcrypto-tool==6.0.0
 unstructured==0.22.31
 python-magic==0.4.27 # magic-byte upload sniffing (utils/upload_guard.py); needs libmagic1
 
-nltk==3.10.0 # security: CVE-2026-54293 (path traversal) + CVE-2026-12243/PYSEC-2026-597 fixed in 3.10.0
+nltk==3.10.3 # security: PYSEC-2026-3582..3741 (ReDoS/DoS)
 Markdown==3.10.2
 beautifulsoup4==4.14.3
 pypandoc==1.17
@@ -160,3 +160,7 @@ opentelemetry-instrumentation-logging==0.63b1
 opentelemetry-instrumentation-httpx==0.63b1
 opentelemetry-instrumentation-aiohttp-client==0.63b1
 opentelemetry-instrumentation-system-metrics==0.63b1
+
+# security: explicit pins for transitive deps flagged by pip-audit/Trivy
+msgpack==1.2.1 # security: GHSA-6v7p-g79w-8964 (OOB read/crash)
+setuptools>=83.0.0 # security: PYSEC-2026-3447 (image had 70.3.0)
