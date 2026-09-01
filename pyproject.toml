@@ -43,7 +43,7 @@ dependencies = [
 
     "pytz==2026.2",
     "APScheduler==3.11.2",
-    "RestrictedPython==8.2",
+    "RestrictedPython==8.3", # security: CVE-2026-55830 (guard hooks can be shadowed)
 
     "loguru==0.7.3",
     "asgiref==3.11.1",
@@ -81,7 +81,7 @@ dependencies = [
     "python-pptx==1.0.2",
     "msoffcrypto-tool==6.0.0",
     "python-magic==0.4.27", # magic-byte upload sniffing (utils/upload_guard.py); needs libmagic1
-    "nltk==3.10.0", # security: CVE-2026-54293 (path traversal) + CVE-2026-12243/PYSEC-2026-597 fixed in 3.10.0
+    "nltk==3.10.3", # security: CVE-2026-54293 (path traversal) + PYSEC-2026-3582..3741 (ReDoS/DoS)
     "Markdown==3.10.2",
     "beautifulsoup4==4.14.3",
     "pypandoc==1.17",

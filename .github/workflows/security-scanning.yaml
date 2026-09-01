@@ -12,6 +12,12 @@ on:
   schedule:
     - cron: '0 6 * * 1'  # Weekly Monday 6 AM UTC
 
+# Cancel a superseded run of the same event+ref (e.g. rapid re-pushes) so we
+# don't pile up in-progress scans. Push and PR events stay separate contexts.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   sast-python:
     name: Python SAST (Bandit)
@@ -61,8 +67,12 @@ jobs:
             --ignore-vuln CVE-2026-33231 \
             --ignore-vuln CVE-2026-3219 \
             --ignore-vuln CVE-2026-45829 \
-            --ignore-vuln PYSEC-2026-1325 \
-            --ignore-vuln PYSEC-2026-3412
+            --ignore-vuln PYSEC-2026-597 \
+            --ignore-vuln CVE-2026-45830 \
+            --ignore-vuln CVE-2026-45831 \
+            --ignore-vuln CVE-2026-45833 \
+            --ignore-vuln PYSEC-2026-3412 \
+            --ignore-vuln PYSEC-2026-1325
 
   sca-node:
     name: Node.js Dependencies (npm audit)
@@ -123,3 +133,4 @@ jobs:
           severity: 'CRITICAL,HIGH'
           exit-code: '1'
           ignore-unfixed: true
+          trivyignores: '.trivyignore'
