@@ -219,11 +219,12 @@ def safe_pdf_url_fetcher(url: str):
     used for SSRF or local-file reads. Blocked resources are simply skipped by
     WeasyPrint (rendered as missing), not fatal.
     """
+    if not _is_data_uri(url):
+        raise ValueError(f'Blocked non-data resource URL during PDF export: {url[:64]!r}')
+
     from weasyprint import default_url_fetcher
 
-    if _is_data_uri(url):
-        return default_url_fetcher(url)
-    raise ValueError(f'Blocked non-data resource URL during PDF export: {url[:64]!r}')
+    return default_url_fetcher(url)
 
 
 def _md_to_html(text: str) -> str:
