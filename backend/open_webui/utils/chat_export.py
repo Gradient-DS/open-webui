@@ -159,8 +159,20 @@ _FETCHING_TAGS = frozenset(
         'audio',
         'video',
         'picture',
+        # <svg> carries its own fetch vectors that survive the <img> filter —
+        # <svg><image href> and <svg><use href> are both dereferenced by
+        # WeasyPrint. Inline SVG has no legitimate use in an export body.
+        'svg',
     }
 )
+
+# Attributes that make a *surviving* <img> pull a second resource. The src
+# allowlist below keeps images whose src is a self-contained data:image/ URI;
+# these attributes would let such an image fetch something else anyway.
+_IMG_FETCH_ATTRS = ('srcset', 'lowsrc', 'longdesc')
+
+_CSS_COMMENT_RE = re.compile(r'/\*.*?\*/', re.DOTALL)
+_CSS_URL_RE = re.compile(r'url\(\s*(?:"([^"]*)"|\'([^\']*)\'|([^)]*))', re.IGNORECASE)
 
 
 def _is_data_uri(value: str | None) -> bool:
@@ -176,6 +188,29 @@ def _is_data_image_uri(value: str | None) -> bool:
     *sources* are fetched, so only those are constrained here.
     """
     return bool(value) and value.strip().lower().startswith('data:image/')
+
+
+def _css_urls(style: str) -> list[str]:
+    """Every ``url(...)`` target in a CSS declaration, comments stripped first."""
+    stripped = _CSS_COMMENT_RE.sub('', style)
+    return [(m.group(1) or m.group(2) or m.group(3) or '').strip() for m in _CSS_URL_RE.finditer(stripped)]
+
+
+def _style_has_unsafe_url(style: str) -> bool:
+    """True when a CSS declaration references any non-``data:`` resource.
+
+    Checking that a ``url(data:`` appears *somewhere* is not enough: a
+    declaration can carry several ``url()`` values, and a CSS comment can make a
+    fake one appear before the real payload —
+    ``/*url(data:*/background:url(http://attacker/)``. Comments are removed the
+    way a CSS parser removes them, then *every* remaining target must be a
+    ``data:`` URI. A ``url(`` the extractor cannot parse counts as unsafe.
+    """
+    stripped = _CSS_COMMENT_RE.sub('', style)
+    if 'url(' not in stripped.lower():
+        return False
+    urls = _css_urls(style)
+    return not urls or not all(_is_data_uri(u) for u in urls)
 
 
 def sanitize_export_html(html: str) -> str:
@@ -197,6 +232,17 @@ def sanitize_export_html(html: str) -> str:
     for img in soup.find_all('img'):
         if not _is_data_image_uri(img.get('src')):
             img.decompose()
+            continue
+        # The src is inline, but a surviving image can still be told to fetch.
+        for attr in _IMG_FETCH_ATTRS:
+            if img.has_attr(attr):
+                del img[attr]
+
+    # <input type="image"> fetches its src the way <img> does, and is not
+    # otherwise meaningful in an exported document.
+    for tag in soup.find_all('input'):
+        if (tag.get('type') or '').strip().lower() == 'image':
+            tag.decompose()
 
     # Drop tags whose only purpose here would be to pull in an external resource.
     for tag in soup.find_all(lambda t: t.name in _FETCHING_TAGS):
@@ -204,7 +250,7 @@ def sanitize_export_html(html: str) -> str:
 
     # Neutralise inline styles that reference a non-data URL (e.g. background:url()).
     for tag in soup.find_all(style=True):
-        if 'url(' in tag['style'].lower() and 'url(data:' not in tag['style'].lower():
+        if _style_has_unsafe_url(tag['style']):
             del tag['style']
 
     return str(soup)

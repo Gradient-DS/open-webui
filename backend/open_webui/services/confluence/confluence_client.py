@@ -130,14 +130,17 @@ class ConfluenceClient:
             return f'{self._site_url}/wiki/api/v2/{leaf}'
         return f'{_API_BASE}/{self._cloud_id}/wiki/api/v2/{leaf}'  # oauth + scoped
 
-    def _expected_next_netloc(self) -> str:
-        """Host that a ``_links.next`` URL is allowed to point at.
+    def _expected_next_origin(self) -> Tuple[str, str]:
+        """Scheme + host that a ``_links.next`` URL is allowed to point at.
 
         basic mode talks to the customer site directly; oauth and scoped both go
-        through the Atlassian gateway.
+        through the Atlassian gateway. The scheme is pinned alongside the host so
+        a downgraded ``http://api.atlassian.com/...`` cannot pull the
+        Authorization header onto a cleartext connection.
         """
         base = self._site_url if self._auth_mode == 'basic' else _API_BASE
-        return urlparse(base).netloc.lower()
+        parsed = urlparse(base)
+        return parsed.scheme.lower(), parsed.netloc.lower()
 
     async def _request_with_retry(
         self,
@@ -296,13 +299,17 @@ class ConfluenceClient:
                 # the host we authenticated against: _request_with_retry attaches
                 # the Authorization header to whatever URL it is handed, so
                 # following a foreign host would hand our token to that host.
-                next_netloc = urlparse(next_link).netloc.lower()
-                if next_netloc != self._expected_next_netloc():
+                parsed_next = urlparse(next_link)
+                next_origin = (parsed_next.scheme.lower(), parsed_next.netloc.lower())
+                expected_origin = self._expected_next_origin()
+                if next_origin != expected_origin:
                     log.warning(
-                        'Confluence _links.next points at an unexpected host (%s, expected %s); '
+                        'Confluence _links.next points at an unexpected origin (%s://%s, expected %s://%s); '
                         'stopping pagination instead of sending credentials off-site.',
-                        next_netloc or '<relative>',
-                        self._expected_next_netloc(),
+                        next_origin[0] or '<none>',
+                        next_origin[1] or '<relative>',
+                        expected_origin[0],
+                        expected_origin[1],
                     )
                     break
                 url = next_link
