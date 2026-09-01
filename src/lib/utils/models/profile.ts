@@ -264,3 +264,24 @@ export function resolveModelProfile(
 
 	return merged;
 }
+
+const HTML_ESCAPES: Record<string, string> = {
+	'&': '&amp;',
+	'<': '&lt;',
+	'>': '&gt;',
+	'"': '&quot;',
+	"'": '&#39;'
+};
+
+/**
+ * Render `profile.info` as tooltip HTML.
+ *
+ * `info` is free text (from model-profiles.json or an admin's per-model override)
+ * that the model dropdown injects with `{@html}` so newlines become line breaks.
+ * Escape first, then insert the `<br>`, so the only markup in the result is the
+ * breaks we put there — a value containing `<img src=x onerror=...>` renders as
+ * literal text rather than an element.
+ */
+export function infoTooltipHtml(info?: string): string {
+	return (info ?? '').replace(/[&<>"']/g, (c) => HTML_ESCAPES[c]).replaceAll('\n', '<br>');
+}

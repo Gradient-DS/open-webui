@@ -52,6 +52,9 @@
 		"vitest": "^4.1.8"
 	},
 	"type": "module",
+	"overrides": {
+		"tar": "^7.5.22"
+	},
 	"dependencies": {
 		"@azure/msal-browser": "^4.5.0",
 		"@codemirror/lang-javascript": "^6.2.2",
