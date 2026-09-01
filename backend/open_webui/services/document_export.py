@@ -4,7 +4,7 @@ import logging
 from io import BytesIO
 from pathlib import Path
 
-from open_webui.utils.chat_export import _md_to_html
+from open_webui.utils.chat_export import _md_to_html, safe_pdf_url_fetcher
 
 log = logging.getLogger(__name__)
 
@@ -28,7 +28,7 @@ def generate_document_pdf(title: str, markdown: str) -> bytes:
     from weasyprint import HTML
 
     html_string = _render_document_html(title, markdown)
-    return HTML(string=html_string).write_pdf()
+    return HTML(string=html_string, url_fetcher=safe_pdf_url_fetcher).write_pdf()
 
 
 def generate_document_docx(title: str, markdown: str) -> bytes:

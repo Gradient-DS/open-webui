@@ -24,7 +24,8 @@
 		resolveModelProfile,
 		parseHosting,
 		hostingFromHost,
-		hostingFromDeployment
+		hostingFromDeployment,
+		infoTooltipHtml
 	} from '$lib/utils/models/profile';
 
 	const i18n = getContext('i18n');
@@ -36,7 +37,7 @@
 
 	$: profile = resolveModelProfile(item?.model ?? {}, $config?.model_profiles ?? [], $i18n.language);
 	$: displayName = item?.label || item?.value || '';
-	$: infoTooltip = (profile.info ?? '').replaceAll('\n', '<br>');
+	$: infoTooltip = infoTooltipHtml(profile.info);
 	// Hosting/datacenter precedence (first non-empty wins):
 	//   1. per-deployment MODEL_HOSTING rules ($config.model_hosting) — authoritative,
 	//      because the same model id can live in a different datacenter per client;
@@ -114,12 +115,14 @@
 
 							<div slot="tooltip" id="model-info-{item.model.id}" class="text-left">
 								{#if profile.info}
+									<!-- eslint-disable-next-line svelte/no-at-html-tags — infoTooltip is escaped in infoTooltipHtml; the only markup is the <br> it adds -->
 									<div>{@html infoTooltip}</div>
 								{/if}
 								{#if description}
 									<div
 										class={profile.info ? 'mt-1.5 pt-1.5 border-t border-white/15' : ''}
 									>
+										<!-- eslint-disable-next-line svelte/no-at-html-tags — descriptionHtml is escaped by sanitizeResponseContent before marked.parse -->
 										{@html descriptionHtml}
 									</div>
 								{/if}

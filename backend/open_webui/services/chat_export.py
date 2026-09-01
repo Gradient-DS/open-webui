@@ -4,7 +4,7 @@ import logging
 from io import BytesIO
 from pathlib import Path
 
-from open_webui.utils.chat_export import prepare_export_messages
+from open_webui.utils.chat_export import prepare_export_messages, safe_pdf_url_fetcher
 
 log = logging.getLogger(__name__)
 
@@ -40,7 +40,7 @@ def generate_pdf(title: str, messages: list[dict], include_chrome: bool = True) 
     from weasyprint import HTML
 
     html_string = _render_html(title, messages, include_chrome=include_chrome)
-    pdf_bytes = HTML(string=html_string).write_pdf()
+    pdf_bytes = HTML(string=html_string, url_fetcher=safe_pdf_url_fetcher).write_pdf()
     return pdf_bytes
 
 

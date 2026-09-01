@@ -130,6 +130,15 @@ class ConfluenceClient:
             return f'{self._site_url}/wiki/api/v2/{leaf}'
         return f'{_API_BASE}/{self._cloud_id}/wiki/api/v2/{leaf}'  # oauth + scoped
 
+    def _expected_next_netloc(self) -> str:
+        """Host that a ``_links.next`` URL is allowed to point at.
+
+        basic mode talks to the customer site directly; oauth and scoped both go
+        through the Atlassian gateway.
+        """
+        base = self._site_url if self._auth_mode == 'basic' else _API_BASE
+        return urlparse(base).netloc.lower()
+
     async def _request_with_retry(
         self,
         method: str,
@@ -283,6 +292,19 @@ class ConfluenceClient:
                     # the bare api.atlassian.com host drops the gateway route → 404.
                     url = f'{_API_BASE}/{self._cloud_id}{next_link}'
             else:
+                # `next` can come back absolute. Only follow it while it stays on
+                # the host we authenticated against: _request_with_retry attaches
+                # the Authorization header to whatever URL it is handed, so
+                # following a foreign host would hand our token to that host.
+                next_netloc = urlparse(next_link).netloc.lower()
+                if next_netloc != self._expected_next_netloc():
+                    log.warning(
+                        'Confluence _links.next points at an unexpected host (%s, expected %s); '
+                        'stopping pagination instead of sending credentials off-site.',
+                        next_netloc or '<relative>',
+                        self._expected_next_netloc(),
+                    )
+                    break
                 url = next_link
             params = None  # next link already carries the cursor
             page += 1
