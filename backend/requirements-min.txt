@@ -8,7 +8,6 @@ python-multipart==0.0.31 # security: CVE-2026-53538/53539/53540 (form-parsing Do
 itsdangerous==2.2.0
 
 python-socketio==5.16.2
-python-jose==3.5.0
 cryptography==50.0.0 # security: CVE-2026-69248/69249 (X.509 wildcard name-constraint escape, chain-building DoS) fixed in 49.0.0; CVE-2026-69247 (PKCS7 Bleichenbacher oracle) fixed in 50.0.0
 bcrypt==5.0.0
 argon2-cffi==25.1.0
@@ -50,7 +49,6 @@ langchain-text-splitters==1.1.2
 
 fake-useragent==2.2.0
 
-chromadb==1.5.9
 black==26.5.1
 pydub
 chardet==7.4.3

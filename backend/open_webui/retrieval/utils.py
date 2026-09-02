@@ -1661,7 +1661,10 @@ def get_model_path(model: str, update_model: bool = False):
 
     # Attempt to query the huggingface_hub library to determine the local path and/or to update
     try:
-        model_repo_path = snapshot_download(**snapshot_kwargs)
+        # nosec B615 - no revision to pin: the repo id comes from the
+        # operator's RAG_EMBEDDING_MODEL / RAG_RERANKING_MODEL setting, so any
+        # hard-coded revision here would be wrong for every other model.
+        model_repo_path = snapshot_download(**snapshot_kwargs)  # nosec B615
         log.debug(f'model_repo_path: {model_repo_path}')
         return model_repo_path
     except Exception as e:

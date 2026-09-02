@@ -1,0 +1,257 @@
+# Security scanning exceptions for open-webui (Gradient-DS fork).
+#
+# Policy (spec §7): fixable -> upgrade, no exception. No fix -> replace the
+# package. Only where neither is possible may an exception exist, and it needs
+# a second reviewer from @Gradient-DS/security who has confirmed the vulnerable
+# path is unreachable in our usage.
+#
+# Every entry below is either a gitleaks FALSE POSITIVE (a placeholder, a key
+# name, a doc example, or a local-dev credential) or a real advisory whose
+# upstream has published no fixed release we are able to install today. The
+# advisories the previous workflow suppressed inline are NOT carried over —
+# they were re-triaged individually and all but the ones listed here were
+# closed by an upgrade, a removal, or by no longer being reported.
+#
+# CONVENTION — do not quote the offending text in a justification. Reproducing
+# a secret-shaped string here makes THIS file match the same rule, at a new
+# fingerprint. That cannot be fixed by adding another exception: a fingerprint
+# contains the commit SHA, so excepting it edits the file, changes the commit,
+# and changes the fingerprint. Describe the finding instead of showing it.
+version: 1
+exceptions:
+  # ---------------------------------------------------------------- gitleaks
+  # All eight fingerprints sit in commits that are already ancestors of `dev`.
+  # A fingerprint contains the commit SHA, so editing today's files cannot
+  # clear any of them; only history rewriting could, which none of these
+  # warrant.
+  - id: d1e19e901820bbc7d90f36dfd9911bb87e06aa92:thoughts/shared/plans/2026-04-25-shared-services-loader-worker.md:curl-auth-header:1720
+    package: docs
+    scanner: gitleaks
+    reason: >-
+      False positive. A planning document's manual-test recipe shows a curl
+      call carrying an obviously-fabricated bearer value and a fabricated user
+      identifier. Neither authenticates anything.
+      (Deliberately not quoted here — see the header note.)
+    replacement_considered: >-
+      No dependency is involved. The file lives under thoughts/, which is now
+      git-ignored and absent from every live branch; the finding exists only in
+      an immutable commit.
+    usage_analysis: >-
+      The value is a literal placeholder in prose describing how to exercise a
+      local dev stack. It was never issued by any identity provider and grants
+      no access to any environment.
+    approved_by: "PENDING second review by @Gradient-DS/security"
+    recheck: 2026-12-01
+
+  - id: 7029d372c3de8c09e7a2c9ed232c6179586ebbb1:src/lib/components/admin/Settings/Integrations.svelte:curl-auth-header:271
+    package: frontend
+    scanner: gitleaks
+    reason: >-
+      False positive. The admin Integrations settings panel renders a
+      copy-paste curl example for the ingest API. gitleaks matched the
+      authorization header in that example, whose value is a visible
+      all-caps placeholder the operator is expected to replace.
+    replacement_considered: >-
+      No dependency is involved. Removing the example would degrade admin
+      documentation to satisfy a scanner heuristic; the current tip of the file
+      still renders the same example by design.
+    usage_analysis: >-
+      The string is displayed to a signed-in admin as documentation. It is not
+      sent anywhere, is not a credential, and authenticates nothing.
+    approved_by: "PENDING second review by @Gradient-DS/security"
+    recheck: 2026-12-01
+
+  - id: e0272831a4a5cc7a9fc0ffe361c8597f11fa487b:searxng/settings.yml:generic-api-key:28
+    package: searxng
+    scanner: gitleaks
+    reason: >-
+      False positive. A local-only SearXNG dev configuration carried a
+      deliberately non-secret session key whose own value spells out, in
+      leetspeak, that it is for development and must be changed in production.
+      The file no longer exists on any live branch.
+    replacement_considered: >-
+      No dependency is involved. The file was deleted from the repository; the
+      finding survives only in an immutable commit.
+    usage_analysis: >-
+      The value signed SearXNG session cookies for a developer's local docker
+      compose stack. It was never used by any deployed environment — every
+      cluster's SearXNG key comes from 1Password via External Secrets — so
+      nothing it protected was ever reachable off a laptop.
+    approved_by: "PENDING second review by @Gradient-DS/security"
+    recheck: 2026-12-01
+
+  - id: 2f4f4c23764b03230cd626e3ba47b4ba93067450:backend/open_webui/test/apps/webui/storage/test_provider.py:generic-api-key:294
+    package: backend-tests
+    scanner: gitleaks
+    reason: >-
+      False positive, inherited from upstream open-webui. A storage-provider
+      unit test builds an Azure connection string for Azurite, the Microsoft
+      storage emulator, whose account key is a fixed value published in
+      Microsoft's own documentation for exactly this purpose.
+    replacement_considered: >-
+      No dependency is involved. The value is mandated by the emulator; any
+      other value makes the test fail. The commit is upstream history and is
+      not ours to rewrite.
+    usage_analysis: >-
+      The endpoint is a loopback address and the credential is the emulator's
+      universally known development account. It grants access to nothing beyond
+      a container running on the test host.
+    approved_by: "PENDING second review by @Gradient-DS/security"
+    recheck: 2026-12-01
+
+  - id: 8b3e370a6eec353c931af76739bae2506238d726:backend/apps/rag/search/testdata/serpstack.json:generic-api-key:26
+    package: backend-tests
+    scanner: gitleaks
+    reason: >-
+      False positive, inherited from upstream open-webui. A recorded search-API
+      response was committed as test data; the provider echoes the caller's key
+      field back in its JSON, so the fixture contains a fabricated value in that
+      position.
+    replacement_considered: >-
+      No dependency is involved. The commit is upstream history from 2024 and is
+      not ours to rewrite; the file no longer exists on any live branch.
+    usage_analysis: >-
+      The fixture is read from disk by a unit test that never performs a network
+      call. The value is not a Gradient credential and was not valid for the
+      third-party service.
+    approved_by: "PENDING second review by @Gradient-DS/security"
+    recheck: 2026-12-01
+
+  - id: 501ff7a98bb874007ea1645d9fa371f75ae81f1a:backend/apps/rag/search/testdata/serpstack.json:generic-api-key:26
+    package: backend-tests
+    scanner: gitleaks
+    reason: >-
+      False positive. The same upstream test fixture as the entry above, at the
+      commit that first introduced it.
+    replacement_considered: >-
+      Identical to the entry above: upstream history, file long since removed.
+    usage_analysis: >-
+      Identical to the entry above. No credential exists.
+    approved_by: "PENDING second review by @Gradient-DS/security"
+    recheck: 2026-12-01
+
+  - id: 58a13aec7e14637a9d50d781e3f24c7f0747c292:static/pyscript/xterm-DqawCVsv.js:generic-api-key:1
+    package: frontend-vendor
+    scanner: gitleaks
+    reason: >-
+      False positive, inherited from upstream open-webui. A minified,
+      single-line vendored build of the xterm.js terminal emulator contains a
+      long alphanumeric run that the generic-api-key heuristic matched. It is
+      minifier output, not a credential.
+    replacement_considered: >-
+      No dependency change helps: any minified bundle of comparable size trips
+      the same heuristic. The commit is upstream history and is not ours to
+      rewrite.
+    usage_analysis: >-
+      The match is inside vendored browser code shipped to render an in-page
+      terminal. There is no secret to leak — the string is part of the
+      library's own compiled source and is public on npm.
+    approved_by: "PENDING second review by @Gradient-DS/security"
+    recheck: 2026-12-01
+
+  - id: 58a13aec7e14637a9d50d781e3f24c7f0747c292:static/pyscript/xterm-DqawCVsv.js.map:generic-api-key:1
+    package: frontend-vendor
+    scanner: gitleaks
+    reason: >-
+      False positive. The source map published alongside the minified bundle in
+      the entry above, matched on the same heuristic for the same reason.
+    replacement_considered: >-
+      Identical to the entry above.
+    usage_analysis: >-
+      Identical to the entry above. No credential exists.
+    approved_by: "PENDING second review by @Gradient-DS/security"
+    recheck: 2026-12-01
+
+  # ------------------------------------------------------------- pip-audit
+  # nltk 3.10.3 is both the pinned and the newest release and the advisory
+  # still lists it as affected, so there is nothing to upgrade to.
+  - id: PYSEC-2026-3740
+    package: nltk
+    scanner: pip-audit
+    reason: >-
+      NLTK's model-artifact APIs bypass their own path checks and can touch
+      files outside the allowed roots. 3.10.3 is both the pinned and the newest
+      release, and the advisory lists it as still affected, so there is no
+      version to upgrade to.
+    replacement_considered: >-
+      nltk is pulled in for sentence tokenisation behind langchain's text
+      splitters. Replacing the splitter implementation would change how every
+      existing document was chunked and would invalidate stored embeddings, so
+      it is not a change a security-scanning rollout can make safely.
+    usage_analysis: >-
+      The affected APIs download and unpack NLTK model artifacts. This image
+      downloads exactly one artifact, punkt_tab, at build time from NLTK's own
+      distribution, and the runtime never calls a download or unpack API — user
+      input reaches only the tokenizer, not the artifact loader.
+    approved_by: "PENDING second review by @Gradient-DS/security"
+    recheck: 2026-12-01
+
+  # ------------------------------------------------------------------- npm
+  # Both entries are the same finding seen from two angles: cypress 15 depends
+  # on extract-zip, whose latest release is still affected.
+  #
+  # NOT a §7 exception — a DEFERRED UPGRADE. A fix exists and we intend to take
+  # it; the only thing stopping us today is this repository's own 14-day
+  # minimum publish age. Both entries therefore carry a short recheck
+  # (2026-09-22) tied to the date the fix becomes installable (2026-09-15),
+  # not the 2026-12-01 used for findings with no fix at all. If these entries
+  # are still here after 2026-09-22 the upgrade was skipped, and the validator
+  # will say so.
+  - id: GHSA-jmr9-qjv8-65gv
+    package: extract-zip
+    scanner: npm
+    reason: >-
+      extract-zip does not validate symlinks while extracting, allowing a
+      crafted archive to write outside the target directory. A FIX EXISTS:
+      cypress 16.0.0 drops extract-zip entirely. It is not an unfixable
+      advisory — 2.0.1 is the last extract-zip release and stays affected, but
+      the dependency itself goes away on the upgrade. The upgrade is blocked
+      only by age: cypress 16.0.0 was published 2026-09-01 and this
+      repository's required lockfile-age check refuses anything younger than
+      14 days, so it becomes installable on 2026-09-15.
+    replacement_considered: >-
+      No replacement is needed and none was sought; this is a deferred upgrade,
+      not an exception to a permanent problem. Taking cypress 16.0.0 before
+      2026-09-15 would fail lockfile-age, trading a dev-only advisory for a
+      failure of the supply-chain control that protects the whole dependency
+      tree. Pinning an older cypress does not help — every cypress 15.x line
+      carries extract-zip. The action is to bump cypress to >=16.0.0 on or
+      after 2026-09-15 and delete this entry; recheck 2026-09-22 is the
+      deadline for that.
+    usage_analysis: >-
+      extract-zip reaches this repository only through cypress, a
+      devDependency. Its single use is unpacking the Cypress binary that
+      cypress.io serves over TLS during test setup. No user-supplied archive is
+      ever extracted, and neither cypress nor extract-zip is installed into any
+      published image — the runtime image copies only the built frontend.
+    approved_by: "PENDING second review by @Gradient-DS/security"
+    recheck: 2026-09-22
+
+  - id: cypress
+    package: cypress
+    scanner: npm
+    reason: >-
+      npm audit reports cypress itself as high because it depends on
+      extract-zip and on @cypress/request. Same finding as the entry above,
+      keyed by package because the advisory ids belong to the dependencies
+      rather than to cypress. A FIX EXISTS — cypress 16.0.0, published
+      2026-09-01, resolves both dependency chains — and is gated only by the
+      14-day minimum publish age, so it becomes installable on 2026-09-15.
+      SCOPE WARNING: because this entry is keyed by package name rather than by
+      advisory id, it suppresses ANY cypress-keyed HIGH npm audit reports,
+      including advisories unrelated to extract-zip that appear between now and
+      the upgrade. That breadth is the price of npm audit giving no advisory id
+      for this finding, and it is why the recheck is two weeks out rather than
+      three months.
+    replacement_considered: >-
+      No replacement is needed and none was sought; this is a deferred upgrade,
+      not an exception to a permanent problem. cypress 16.0.0 is the fix and it
+      is simply too young to install under lockfile-age until 2026-09-15. The
+      action is to bump cypress to >=16.0.0 on or after that date and delete
+      both this entry and the extract-zip one; recheck 2026-09-22 is the
+      deadline for that.
+    usage_analysis: >-
+      cypress is a devDependency used by the e2e-tests workflow. It is not part
+      of any published artifact and is never installed at runtime.
+    approved_by: "PENDING second review by @Gradient-DS/security"
+    recheck: 2026-09-22

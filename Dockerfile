@@ -188,7 +188,23 @@ RUN set -e; \
     python -c "import nltk; nltk.download('punkt_tab')"; \
     fi; \
     mkdir -p /app/backend/data; chown -R $UID:$GID /app/backend/data/; \
+    # Drop pip from the final image. pip ships a vendored SBOM
+    # (pip/_vendor/bom.cdx.json) that image scanners read as real installed
+    # packages, so every build reports permanent HIGHs against pip's bundled
+    # msgpack and setuptools copies that no requirement pin can fix. uv does
+    # the installing here, so pip is only needed while building.
+    python3 -m pip uninstall -y pip; \
+    # Derive the stdlib path instead of hard-coding 3.11: a base-image Python
+    # bump would silently turn a hard-coded path into a no-op.
+    rm -rf "$(python3 -c 'import sysconfig; print(sysconfig.get_paths()["stdlib"])')/ensurepip"; \
+    # Fail the build rather than ship an image that still carries the manifest.
+    if python3 -c "import pip" 2>/dev/null; then echo "ERROR: pip survived the strip"; exit 1; fi; \
     rm -rf /var/lib/apt/lists/*;
+
+# Consequence of removing pip above: Tool/Function frontmatter `requirements:`
+# cannot be installed at runtime. Default the feature off so it logs a skip
+# instead of failing on a missing pip.
+ENV ENABLE_PIP_INSTALL_FRONTMATTER_REQUIREMENTS=False
 
 # Install Ollama if requested
 RUN if [ "$USE_OLLAMA" = "true" ]; then \

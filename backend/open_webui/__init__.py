@@ -31,7 +31,7 @@ def main(
 
 @app.command()
 def serve(
-    host: str = '0.0.0.0',
+    host: str = '0.0.0.0',  # nosec B104 - a container must bind every interface; exposure is the published port
     port: int = 8080,
 ):
     os.environ['FROM_INIT_PY'] = 'true'
@@ -91,7 +91,7 @@ def serve(
 
 @app.command()
 def dev(
-    host: str = '0.0.0.0',
+    host: str = '0.0.0.0',  # nosec B104 - as `serve` above; the dev counterpart of the container entrypoint
     port: int = 8080,
     reload: bool = True,
 ):

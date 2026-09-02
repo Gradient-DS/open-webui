@@ -85,7 +85,11 @@ def search_yandex(
 
         search_result_body_bytes = base64.decodebytes(bytes(response_body['rawData'], 'utf-8'))
 
-        doc_root = ET.parse(io.BytesIO(search_result_body_bytes))
+        # nosec B314 - the document is the base64 payload of an
+        # authenticated HTTPS response from Yandex's own search API, not
+        # user-supplied input. stdlib ElementTree does not resolve external
+        # entities, so the remaining B314 concern (XXE) does not apply.
+        doc_root = ET.parse(io.BytesIO(search_result_body_bytes))  # nosec B314
 
         results = []
 

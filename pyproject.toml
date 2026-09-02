@@ -13,7 +13,6 @@ dependencies = [
     "itsdangerous==2.2.0",
 
     "python-socketio==5.16.2", # security: CVE-2026-48804 (binary attachment accumulation memory exhaustion) fixed in 5.16.2
-    "python-jose==3.5.0",
     "cryptography==50.0.0", # security: CVE-2026-69248/69249 (X.509 wildcard name-constraint escape, chain-building DoS) fixed in 49.0.0; CVE-2026-69247 (PKCS7 Bleichenbacher oracle) fixed in 50.0.0
     "bcrypt==5.0.0",
     "argon2-cffi==25.1.0",
@@ -61,12 +60,11 @@ dependencies = [
     "langchain-text-splitters==1.1.2",
 
     "fake-useragent==2.2.0",
-    "chromadb==1.5.9",
     "opensearch-py==3.2.0",
     "PyMySQL==1.2.0",
     "boto3==1.42.62",
 
-    "transformers==5.5.4",
+    "transformers==5.11.0", # security: CVE-2026-9856 (GHSA-xrqw-3rrv-vx5w, save_pretrained path traversal via chat template names) fixed in 5.10.0, which was yanked upstream — 5.11.0 is the first usable fixed release
     "sentence-transformers==5.5.1",
     "accelerate==1.13.0",
     "pyarrow==23.0.1", # security: PYSEC-2026-113 (Apache Arrow C++ use-after-free) fixed in 23.0.1; was pinned to 20 for rpi #15897 — verify rpi build before backporting
@@ -74,7 +72,7 @@ dependencies = [
 
     "ftfy==6.3.1",
     "chardet==7.4.3",
-    "pypdf==6.15.0", # security: CVE-2026-71852/71870 (PYSEC-2026-3656/3655, DoS via crafted CID font width + /ToUnicode entries) fixed in 6.15.0 (prior CVE-2026-59935/59936/59937/59938/48735/49460/49461/54530/54531 + GHSA-jm82-fx9c-mx94 fixes stay fixed)
+    "pypdf==6.16.1", # security: CVE-2026-84309 (infinite loop in TreeObject.insert_child) fixed in 6.16.0; CVE-2026-84310/84311 (unbounded runtime/memory retrieving outlines and extracting XForm objects) fixed in 6.16.1 (prior CVE-2026-71852/71870 + CVE-2026-59935/59936/59937/59938/48735/49460/49461/54530/54531 + GHSA-jm82-fx9c-mx94 fixes stay fixed)
     "fpdf2==2.8.7",
     "pymdown-extensions==11.0.1", # security: CVE-2026-61632 fixed in 11.0 (prior CVE-2026-46338 snippets path traversal fix stays fixed)
     "docx2txt==0.9",
@@ -218,13 +216,6 @@ exclude-newer = "14 days"
 # (The aiohttp 3.14.3 exemption added alongside it was dropped 2026-08-11:
 # 3.14.3 was published 2026-07-23 and has aged out, so it resolves without one.)
 cryptography = false
-
-# Security-fix exemption (2026-08-11): pypdf 6.15.0 (published 2026-08-06) is
-# the only release fixing CVE-2026-71852/71870 (PYSEC-2026-3656/3655) — DoS via
-# crafted font entries during text extraction, which is exactly the path every
-# user-uploaded PDF takes here. Remove this exemption once 6.15.0 ages past the
-# 14-day window on 2026-08-20.
-pypdf = false
 
 [tool.hatch.build.targets.wheel]
 sources = ["backend"]
