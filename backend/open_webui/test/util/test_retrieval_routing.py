@@ -63,7 +63,9 @@ async def _invoke(
     loader.aload = AsyncMock(return_value=[Document(page_content='hello world', metadata={})])
     monkeypatch.setattr(retrieval_router, 'build_loader_from_config', lambda request, config=None: loader)
     monkeypatch.setattr(retrieval_router, 'get_loader_config', AsyncMock(return_value={}))
-    monkeypatch.setattr(retrieval_router.Storage, 'get_file', lambda p: '/tmp/x')
+    # nosec B108 - a dummy path returned by a monkeypatched seam; nothing is
+    # ever created or read at it.
+    monkeypatch.setattr(retrieval_router.Storage, 'get_file', lambda p: '/tmp/x')  # nosec B108
     monkeypatch.setattr(retrieval_router, 'save_docs_to_vector_db', MagicMock(return_value=True))
     monkeypatch.setattr(retrieval_router, 'get_async_db', _fake_db_cm)
     vector_client = MagicMock()

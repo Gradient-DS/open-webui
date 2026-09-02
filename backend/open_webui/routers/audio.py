@@ -322,7 +322,12 @@ def load_speech_pipeline(request):
 
     if request.app.state.speech_speaker_embeddings_dataset is None:
         request.app.state.speech_speaker_embeddings_dataset = load_dataset(
-            'Matthijs/cmu-arctic-xvectors', split='validation'
+            'Matthijs/cmu-arctic-xvectors',
+            split='validation',
+            # Pinned: the speaker-embedding set is a fixed, unmaintained
+            # dataset, so tracking its default branch only exposes us to a
+            # future repository takeover for no benefit.
+            revision='5c1297a9eb6c91714ea77c0d4ac5aca9b6a952e5',
         )
 
 

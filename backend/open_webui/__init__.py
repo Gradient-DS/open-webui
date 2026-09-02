@@ -31,7 +31,10 @@ def main(
 
 @app.command()
 def serve(
-    host: str = '0.0.0.0',
+    # nosec B104 - binding every interface is required inside a container;
+    # exposure is controlled by the published port and the cluster network
+    # policy, not by the process bind address.
+    host: str = '0.0.0.0',  # nosec B104
     port: int = 8080,
 ):
     os.environ['FROM_INIT_PY'] = 'true'
@@ -91,7 +94,9 @@ def serve(
 
 @app.command()
 def dev(
-    host: str = '0.0.0.0',
+    # nosec B104 - same as `serve` above; this command is the container
+    # entrypoint's development counterpart.
+    host: str = '0.0.0.0',  # nosec B104
     port: int = 8080,
     reload: bool = True,
 ):
