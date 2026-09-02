@@ -271,21 +271,35 @@ exceptions:
   # ------------------------------------------------------------------- npm
   # Both entries are the same finding seen from two angles: cypress 15 depends
   # on extract-zip, whose latest release is still affected.
+  #
+  # NOT a §7 exception — a DEFERRED UPGRADE. A fix exists and we intend to take
+  # it; the only thing stopping us today is this repository's own 14-day
+  # minimum publish age. Both entries therefore carry a short recheck
+  # (2026-09-22) tied to the date the fix becomes installable (2026-09-15),
+  # not the 2026-12-01 used for findings with no fix at all. If these entries
+  # are still here after 2026-09-22 the upgrade was skipped, and the validator
+  # will say so.
   - id: GHSA-jmr9-qjv8-65gv
     package: extract-zip
     scanner: npm
     reason: >-
       extract-zip does not validate symlinks while extracting, allowing a
-      crafted archive to write outside the target directory. 2.0.1 is the
-      newest release and is still affected; the only fix is to stop depending
-      on it, which cypress did in 16.0.0.
+      crafted archive to write outside the target directory. A FIX EXISTS:
+      cypress 16.0.0 drops extract-zip entirely. It is not an unfixable
+      advisory — 2.0.1 is the last extract-zip release and stays affected, but
+      the dependency itself goes away on the upgrade. The upgrade is blocked
+      only by age: cypress 16.0.0 was published 2026-09-01 and this
+      repository's required lockfile-age check refuses anything younger than
+      14 days, so it becomes installable on 2026-09-15.
     replacement_considered: >-
-      cypress 16.0.0 drops extract-zip and resolves this, but it was published
-      on 2026-09-01 and this repository's required lockfile-age check refuses
-      any package younger than 14 days. Upgrading now would trade a dev-only
-      advisory for a failure of a supply-chain control that protects the whole
-      dependency tree. The upgrade becomes installable in mid-September and
-      should be taken then.
+      No replacement is needed and none was sought; this is a deferred upgrade,
+      not an exception to a permanent problem. Taking cypress 16.0.0 before
+      2026-09-15 would fail lockfile-age, trading a dev-only advisory for a
+      failure of the supply-chain control that protects the whole dependency
+      tree. Pinning an older cypress does not help — every cypress 15.x line
+      carries extract-zip. The action is to bump cypress to >=16.0.0 on or
+      after 2026-09-15 and delete this entry; recheck 2026-09-22 is the
+      deadline for that.
     usage_analysis: >-
       extract-zip reaches this repository only through cypress, a
       devDependency. Its single use is unpacking the Cypress binary that
@@ -293,7 +307,7 @@ exceptions:
       ever extracted, and neither cypress nor extract-zip is installed into any
       published image — the runtime image copies only the built frontend.
     approved_by: "PENDING second review by @Gradient-DS/security"
-    recheck: 2026-12-01
+    recheck: 2026-09-22
 
   - id: cypress
     package: cypress
@@ -302,13 +316,24 @@ exceptions:
       npm audit reports cypress itself as high because it depends on
       extract-zip and on @cypress/request. Same finding as the entry above,
       keyed by package because the advisory ids belong to the dependencies
-      rather than to cypress.
+      rather than to cypress. A FIX EXISTS — cypress 16.0.0, published
+      2026-09-01, resolves both dependency chains — and is gated only by the
+      14-day minimum publish age, so it becomes installable on 2026-09-15.
+      SCOPE WARNING: because this entry is keyed by package name rather than by
+      advisory id, it suppresses ANY cypress-keyed HIGH npm audit reports,
+      including advisories unrelated to extract-zip that appear between now and
+      the upgrade. That breadth is the price of npm audit giving no advisory id
+      for this finding, and it is why the recheck is two weeks out rather than
+      three months.
     replacement_considered: >-
-      Identical to the entry above: cypress 16.0.0 fixes both dependency chains
-      but is younger than the 14-day minimum publish age this repository
-      requires, so it cannot be installed yet.
+      No replacement is needed and none was sought; this is a deferred upgrade,
+      not an exception to a permanent problem. cypress 16.0.0 is the fix and it
+      is simply too young to install under lockfile-age until 2026-09-15. The
+      action is to bump cypress to >=16.0.0 on or after that date and delete
+      both this entry and the extract-zip one; recheck 2026-09-22 is the
+      deadline for that.
     usage_analysis: >-
       cypress is a devDependency used by the e2e-tests workflow. It is not part
       of any published artifact and is never installed at runtime.
     approved_by: "PENDING second review by @Gradient-DS/security"
-    recheck: 2026-12-01
+    recheck: 2026-09-22
