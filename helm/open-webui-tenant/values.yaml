@@ -212,6 +212,12 @@ openWebui:
 
     # Vector Database (Weaviate) - uses local Weaviate in tenant namespace
     vectorDb: "weaviate"
+    # Host of the Weaviate to talk to. Empty means this release's own Weaviate
+    # (the `weaviate:` block below). Set both to a Service name reachable from
+    # this namespace to share an instance owned by something else — see the
+    # note in templates/open-webui/configmap.yaml.
+    weaviateHttpHost: ""
+    weaviateGrpcHost: ""
     weaviateHttpPort: "8080"
     weaviateGrpcPort: "50051"
     weaviateWebSearchTtlMinutes: "1440"  # TTL for web search vector collections (24 hours)

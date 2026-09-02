@@ -60,9 +60,19 @@ data:
 
   # Vector Database (Weaviate) - local to tenant namespace
   VECTOR_DB: {{ .Values.openWebui.config.vectorDb | quote }}
-  WEAVIATE_HTTP_HOST: {{ include "open-webui-tenant.weaviate.fullname" . }}
+  {{- /*
+  Hosts default to this release's own Weaviate, rendering exactly the string the
+  hard-coded template produced before, so every existing tenant's ConfigMap —
+  and therefore its checksum/config annotation — is unchanged. Override both to
+  point Open WebUI at a Weaviate owned by something else: mkbot shares the agent
+  stack's instance because its own is retired (weaviate.enabled false), and Open
+  WebUI's client connects eagerly at boot, so VECTOR_DB must name a Service that
+  actually exists. A Helm comment, not a YAML one — a rendered comment would
+  change checksum/config and roll every tenant's pods on upgrade.
+  */}}
+  WEAVIATE_HTTP_HOST: {{ .Values.openWebui.config.weaviateHttpHost | default (include "open-webui-tenant.weaviate.fullname" .) }}
   WEAVIATE_HTTP_PORT: {{ .Values.openWebui.config.weaviateHttpPort | quote }}
-  WEAVIATE_GRPC_HOST: {{ include "open-webui-tenant.weaviate.fullname" . }}
+  WEAVIATE_GRPC_HOST: {{ .Values.openWebui.config.weaviateGrpcHost | default (include "open-webui-tenant.weaviate.fullname" .) }}
   WEAVIATE_GRPC_PORT: {{ .Values.openWebui.config.weaviateGrpcPort | quote }}
   WEAVIATE_WEB_SEARCH_TTL_MINUTES: {{ .Values.openWebui.config.weaviateWebSearchTtlMinutes | quote }}
   ENABLE_WEAVIATE_BQ_QUANTIZATION: {{ .Values.openWebui.config.enableWeaviateBqQuantization | default "false" | quote }}
