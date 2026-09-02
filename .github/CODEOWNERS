@@ -1,0 +1,4 @@
+* @LexLubbers
+
+# Security exceptions require the security team, not just the repo owner.
+/.github/security-exceptions.yml  @Gradient-DS/security

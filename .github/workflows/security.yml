@@ -1,0 +1,71 @@
+name: Security Scanning
+
+on:
+  push:
+    branches: [main, dev, test]
+  # `test` included so a hotfix PR is scanned before it lands rather than at
+  # the release gate. Without it, PRs into `test` skipped these jobs entirely
+  # and the first scan happened on the test → main release PR — where a
+  # pre-existing dependency advisory shows up looking like a release blocker.
+  pull_request:
+    branches: [main, dev, test]
+  schedule:
+    - cron: '0 6 * * 1'  # Weekly Monday 6 AM UTC
+
+# Cancel a superseded run of the same event+ref (e.g. rapid re-pushes) so we
+# don't pile up in-progress scans. Push and PR events stay separate contexts.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  source:
+    uses: Gradient-DS/.github/.github/workflows/security-source.yml@v1
+    permissions:
+      contents: read
+      issues: write
+    with:
+      python-paths: 'backend/'
+      # Both files are audited: the image built below installs
+      # requirements-slim.txt (USE_SLIM=true) while the CUDA/CPU images install
+      # requirements.txt, so auditing only one leaves the other unscanned.
+      python-requirements: 'backend/requirements.txt backend/requirements-slim.txt'
+      node-dirs: '.'
+
+  image:
+    uses: Gradient-DS/.github/.github/workflows/security-image.yml@v1
+    with:
+      context: .
+      dockerfile: Dockerfile
+      image-name: open-webui
+      build-args: |
+        USE_SLIM=true
+
+  # Job id (and thus the status-check name shown to branch protection) must
+  # stay exactly "lockfile-age" — it is configured as a required check on
+  # dev and main so a too-young package-lock.json cannot merge.
+  lockfile-age:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+
+      - name: Check package-lock.json publish ages
+        run: node scripts/check-lockfile-age.mjs
+
+  gate:
+    needs: [source, image]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Fail unless every security job succeeded
+        env:
+          SOURCE: ${{ needs.source.result }}
+          IMAGE: ${{ needs.image.result }}
+        run: |
+          echo "source=$SOURCE  image=$IMAGE"
+          [ "$SOURCE" = "success" ] && [ "$IMAGE" = "success" ]
