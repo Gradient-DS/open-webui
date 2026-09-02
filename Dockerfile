@@ -194,7 +194,11 @@ RUN set -e; \
     # msgpack and setuptools copies that no requirement pin can fix. uv does
     # the installing here, so pip is only needed while building.
     python3 -m pip uninstall -y pip; \
-    rm -rf /usr/local/lib/python3.11/ensurepip; \
+    # Derive the stdlib path instead of hard-coding 3.11: a base-image Python
+    # bump would silently turn a hard-coded path into a no-op.
+    rm -rf "$(python3 -c 'import sysconfig; print(sysconfig.get_paths()["stdlib"])')/ensurepip"; \
+    # Fail the build rather than ship an image that still carries the manifest.
+    if python3 -c "import pip" 2>/dev/null; then echo "ERROR: pip survived the strip"; exit 1; fi; \
     rm -rf /var/lib/apt/lists/*;
 
 # Consequence of removing pip above: Tool/Function frontmatter `requirements:`
