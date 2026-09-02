@@ -35,6 +35,14 @@ os.environ.setdefault('DATA_DIR', _TMP_DIR)
 for _var in ('DATABASE_TYPE', 'DATABASE_USER', 'DATABASE_PASSWORD', 'DATABASE_HOST', 'DATABASE_PORT', 'DATABASE_NAME'):
     os.environ[_var] = ''
 
+# ``open_webui.config`` imports the driver for whichever backend ``VECTOR_DB``
+# names, and upstream's default is ``chroma``, whose package this fork no longer
+# ships. These tests touch no vector store; pin the value we actually deploy so
+# the import resolves. Weaviate needs no import here — config only reads its
+# host/port env vars, and nothing connects until the vector factory is imported,
+# which these tests never do.
+os.environ.setdefault('VECTOR_DB', 'weaviate')
+
 # Build the schema through the REAL migration chain (peewee via
 # internal.db + alembic via config's import-time run_migrations), not
 # metadata.create_all. Deliberate: a model column that lacks its alembic
