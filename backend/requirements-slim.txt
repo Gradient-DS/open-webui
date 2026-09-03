@@ -44,6 +44,7 @@ asgiref==3.11.1
 
 # AI libraries
 tiktoken==0.13.0
+huggingface_hub==1.16.1 # imported unconditionally by open_webui/retrieval/utils.py; was only present transitively via chromadb until #274 dropped it, which broke every slim image at import (staging 2026-09-02, 1.3.407-dev)
 mcp==1.28.1 # security: CVE-2026-59950 (WebSocket server transport missing Host/Origin validation, transport unused by us) fixed in 1.28.1
 
 openai==2.29.0
