@@ -12,6 +12,8 @@
 	import { getContext } from 'svelte';
 	import { choiceBlockRegistry, submitPromptSignal } from '$lib/stores';
 	import ChoiceBlock from './ChoiceBlock.svelte';
+	import MapBlock from './MapBlock.svelte';
+	import Building3DBlock from './Building3DBlock.svelte';
 
 	const i18n: any = getContext('i18n');
 
@@ -20,7 +22,9 @@
 	export let messageDone: boolean = false;
 
 	const COMPONENTS: Record<string, any> = {
-		choice: ChoiceBlock
+		choice: ChoiceBlock,
+		map: MapBlock,
+		building3d: Building3DBlock
 	};
 
 	// When this message contains 2+ ``choice`` blocks we render a SINGLE

@@ -2,10 +2,15 @@ import { sveltekit } from '@sveltejs/kit/vite';
 import { defineConfig } from 'vite';
 
 import { viteStaticCopy } from 'vite-plugin-static-copy';
+// CesiumJS static assets (Workers/Assets/ThirdParty/Widgets) + CESIUM_BASE_URL,
+// for the `building3d` generative-UI widget. Cesium is lazy-imported in the
+// widget so it stays code-split out of the main bundle.
+import cesium from 'vite-plugin-cesium';
 
 export default defineConfig({
 	plugins: [
 		sveltekit(),
+		cesium(),
 		viteStaticCopy({
 			targets: [
 				{
