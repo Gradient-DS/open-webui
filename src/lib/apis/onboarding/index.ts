@@ -11,6 +11,7 @@ export type OnboardingMessage = { role: 'user' | 'assistant'; content: string };
 
 export type OnboardingEvent =
 	| { type: 'content'; text: string }
+	| { type: 'reasoning'; text: string }
 	| { type: 'ui_block'; name: string; props: Record<string, unknown> }
 	| { type: 'status'; status: Record<string, unknown> }
 	| { type: 'draft'; draft: any }
@@ -50,11 +51,57 @@ export function interpretOnboardingEvent(parsed: {
 		return { type: 'done' };
 	}
 	try {
-		const content = JSON.parse(parsed.data)?.choices?.[0]?.delta?.content;
+		const delta = JSON.parse(parsed.data)?.choices?.[0]?.delta;
+		// The agents API streams the model's thinking as `reasoning_content`
+		// (vLLM / OpenAI-compatible); `reasoning` is the older vendor spelling.
+		const reasoning = delta?.reasoning_content ?? delta?.reasoning;
+		if (reasoning) {
+			return { type: 'reasoning', text: reasoning };
+		}
+		const content = delta?.content;
 		return content ? { type: 'content', text: content } : null;
 	} catch {
 		return null;
 	}
+}
+
+const escapeHtml = (text: string): string =>
+	text
+		.replace(/&/g, '&amp;')
+		.replace(/</g, '&lt;')
+		.replace(/>/g, '&gt;')
+		.replace(/"/g, '&quot;')
+		.replace(/'/g, '&#x27;');
+
+/**
+ * Render streamed reasoning as the `<details type="reasoning">` block the
+ * chat middleware emits (`backend/open_webui/utils/middleware.py`), so the
+ * shared ResponseMessage/StatusHistory shows it as the same collapsed
+ * "Thinking..." / "Thought for N seconds" bullet as in normal chat. The
+ * builder bypasses that middleware (raw agent-proxy passthrough), hence
+ * the client-side twin. Body lines are quoted and HTML-escaped exactly
+ * like the middleware does; timestamps are epoch milliseconds.
+ */
+export function renderReasoningBlock(
+	reasoning: string,
+	{ startedAt, endedAt }: { startedAt: number; endedAt?: number }
+): string {
+	const display = escapeHtml(
+		reasoning
+			.split('\n')
+			.map((line) => (line.startsWith('>') ? line : `> ${line}`))
+			.join('\n')
+	);
+	if (endedAt === undefined) {
+		return `<details type="reasoning" done="false" started_at="${startedAt}">\n<summary>Thinking…</summary>\n${display}\n</details>`;
+	}
+	const duration = Math.max(0, Math.floor((endedAt - startedAt) / 1000));
+	return `<details type="reasoning" done="true" duration="${duration}" started_at="${startedAt}">\n<summary>Thought for ${duration} seconds</summary>\n${display}\n</details>`;
+}
+
+/** Message content for the interview bubble: reasoning block (if any) above the answer. */
+export function composeInterviewContent(reasoningBlock: string, answer: string): string {
+	return reasoningBlock ? `${reasoningBlock}\n${answer}` : answer;
 }
 
 /**
