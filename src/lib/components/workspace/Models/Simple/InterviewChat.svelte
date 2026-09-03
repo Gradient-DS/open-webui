@@ -2,7 +2,12 @@
 	import { getContext, onDestroy, onMount } from 'svelte';
 	import { toast } from 'svelte-sonner';
 	import { socket, submitPromptSignal, user } from '$lib/stores';
-	import { streamOnboarding, type OnboardingMessage } from '$lib/apis/onboarding';
+	import {
+		composeInterviewContent,
+		renderReasoningBlock,
+		streamOnboarding,
+		type OnboardingMessage
+	} from '$lib/apis/onboarding';
 	import Messages from '$lib/components/chat/Messages.svelte';
 	import MessageInput from '$lib/components/chat/MessageInput.svelte';
 
@@ -134,16 +139,41 @@
 		const assistantId = appendMessage('assistant', '');
 		try {
 			let answer = '';
+			// The model's thinking, shown as the same collapsed block normal chat
+			// renders. It is display-only: the transcript sent back to the agent
+			// carries the answer alone.
+			let reasoning = '';
+			let reasoningStartedAt: number | null = null;
+			let reasoningEndedAt: number | undefined;
+			const render = () => {
+				const block =
+					reasoning && reasoningStartedAt !== null
+						? renderReasoningBlock(reasoning, {
+								startedAt: reasoningStartedAt,
+								endedAt: reasoningEndedAt
+							})
+						: '';
+				history.messages[assistantId].content = composeInterviewContent(block, answer);
+				history = history;
+			};
 			for await (const event of streamOnboarding(
 				localStorage.token,
 				chatId,
 				agentTranscript,
 				interviewFiles
 			)) {
-				if (event.type === 'content') {
+				if (event.type === 'reasoning') {
+					if (reasoningStartedAt === null) {
+						reasoningStartedAt = Date.now();
+					}
+					reasoning += event.text;
+					render();
+				} else if (event.type === 'content') {
+					if (reasoning && reasoningEndedAt === undefined) {
+						reasoningEndedAt = Date.now();
+					}
 					answer += event.text;
-					history.messages[assistantId].content = answer;
-					history = history;
+					render();
 				} else if (event.type === 'status') {
 					// Live progress ("Searching … / Reading … / Drafting …") rendered
 					// by the shared ResponseMessage/StatusHistory on the bubble.
@@ -170,7 +200,10 @@
 					return;
 				}
 			}
-			history.messages[assistantId].content = answer;
+			if (reasoning && reasoningEndedAt === undefined) {
+				reasoningEndedAt = Date.now();
+			}
+			render();
 			history.messages[assistantId].done = true;
 			history = history;
 			if (answer.trim() !== '') {

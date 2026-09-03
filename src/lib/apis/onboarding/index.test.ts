@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { interpretOnboardingEvent } from './index';
+import { composeInterviewContent, interpretOnboardingEvent, renderReasoningBlock } from './index';
 
 describe('interpretOnboardingEvent', () => {
 	it('extracts content from an OpenAI delta', () => {
@@ -63,5 +63,80 @@ describe('interpretOnboardingEvent', () => {
 				data: JSON.stringify({ choices: [{ delta: {} }] })
 			})
 		).toBeNull();
+	});
+});
+
+describe('interpretOnboardingEvent — reasoning deltas', () => {
+	it('extracts reasoning_content from an OpenAI delta', () => {
+		const result = interpretOnboardingEvent({
+			event: 'message',
+			data: JSON.stringify({ choices: [{ delta: { reasoning_content: 'Let me think.' } }] })
+		});
+		expect(result).toEqual({ type: 'reasoning', text: 'Let me think.' });
+	});
+
+	it('falls back to the bare reasoning field', () => {
+		const result = interpretOnboardingEvent({
+			event: 'message',
+			data: JSON.stringify({ choices: [{ delta: { reasoning: 'Hmm.' } }] })
+		});
+		expect(result).toEqual({ type: 'reasoning', text: 'Hmm.' });
+	});
+
+	it('ignores an empty reasoning delta', () => {
+		expect(
+			interpretOnboardingEvent({
+				event: 'message',
+				data: JSON.stringify({ choices: [{ delta: { reasoning_content: '', content: '' } }] })
+			})
+		).toBeNull();
+	});
+});
+
+describe('renderReasoningBlock', () => {
+	it('renders an in-progress block the way the chat middleware does', () => {
+		const block = renderReasoningBlock('Let me think.\nAsk about scope.', {
+			startedAt: 1700000000000
+		});
+		expect(block).toBe(
+			'<details type="reasoning" done="false" started_at="1700000000000">\n' +
+				'<summary>Thinking…</summary>\n' +
+				'&gt; Let me think.\n&gt; Ask about scope.\n' +
+				'</details>'
+		);
+	});
+
+	it('renders a finished block with a whole-second duration', () => {
+		const block = renderReasoningBlock('Done.', {
+			startedAt: 1700000000000,
+			endedAt: 1700000002900
+		});
+		expect(block).toBe(
+			'<details type="reasoning" done="true" duration="2" started_at="1700000000000">\n' +
+				'<summary>Thought for 2 seconds</summary>\n' +
+				'&gt; Done.\n' +
+				'</details>'
+		);
+	});
+
+	it('escapes markup inside the reasoning and keeps existing quote markers', () => {
+		const block = renderReasoningBlock('> quoted <b>bold</b> & "x"', {
+			startedAt: 1,
+			endedAt: 1
+		});
+		expect(block).toContain('&gt; quoted &lt;b&gt;bold&lt;/b&gt; &amp; &quot;x&quot;');
+		expect(block).not.toContain('&gt; &gt; quoted');
+	});
+});
+
+describe('composeInterviewContent', () => {
+	it('returns the answer alone when there is no reasoning', () => {
+		expect(composeInterviewContent('', 'Wat wil je?')).toBe('Wat wil je?');
+	});
+
+	it('puts the reasoning block before the answer', () => {
+		expect(composeInterviewContent('<details type="reasoning"></details>', 'Wat wil je?')).toBe(
+			'<details type="reasoning"></details>\nWat wil je?'
+		);
 	});
 });
