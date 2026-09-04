@@ -67,7 +67,7 @@ pyarrow==23.0.1 # security: PYSEC-2026-113 (Apache Arrow C++ use-after-free) fix
 
 ftfy==6.3.1
 chardet==5.2.0
-pypdf==6.15.0 # security: PYSEC-2026-3610..3656 (DoS via crafted PDF); was 6.13.3
+pypdf==6.16.1 # security: CVE-2026-84309..84311 (DoS via crafted PDF); was 6.15.0
 fpdf2==2.8.7
 pymdown-extensions==11.0.1 # security: PYSEC-2026-3609/3654; was 10.21.3
 docx2txt==0.9

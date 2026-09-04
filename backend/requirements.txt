@@ -59,7 +59,7 @@ chromadb==1.5.2
 weaviate-client==4.20.3
 opensearch-py==3.1.0
 
-transformers==5.5.4
+transformers==5.10.0 # security: CVE-2026-9856 (save_pretrained path traversal); was 5.5.4
 sentence-transformers==5.4.0
 accelerate==1.13.0
 pyarrow==23.0.1 # security: PYSEC-2026-113 (Apache Arrow C++ use-after-free) fixed in 23.0.1; was pinned to 20 for rpi #15897 — verify rpi build before backporting
@@ -67,7 +67,7 @@ einops==0.8.2
 
 ftfy==6.3.1
 chardet==5.2.0
-pypdf==6.15.0 # security: PYSEC-2026-3610..3656 (DoS via crafted PDF); was 6.13.3
+pypdf==6.16.1 # security: CVE-2026-84309..84311 (DoS via crafted PDF); was 6.15.0
 fpdf2==2.8.7
 pymdown-extensions==11.0.1 # security: PYSEC-2026-3609/3654; was 10.21.3
 docx2txt==0.9
