@@ -50,6 +50,16 @@ jobs:
           pip install pip-audit
           pip install -r backend/requirements.txt
 
+      # Ignore list. Two entries added 2026-09-04 (release v1.2.4 gate):
+      # - PYSEC-2026-3740 (nltk 3.10.3): pathsec sandbox bypass in model
+      #   save/load helpers; no fixed release yet (same shape as PYSEC-2026-597).
+      # - CVE-2026-71428 (unstructured 0.18.31): SSRF via the url= argument of
+      #   partition()/partition_html()/partition_md(). Not reachable here — the
+      #   backend only uses unstructured through langchain_community's
+      #   Unstructured*Loader classes on local file paths and never passes url=.
+      #   The fixed release (0.24.0) needs wrapt>=2.1.1, which the pinned
+      #   opentelemetry-instrumentation 0.61b0 forbids; the bump (unstructured +
+      #   the opentelemetry family to >=0.62b0/1.41.0) goes through dev.
       - name: Run pip-audit
         run: |
           pip-audit --desc on \
@@ -64,7 +74,9 @@ jobs:
             --ignore-vuln CVE-2026-45831 \
             --ignore-vuln CVE-2026-45833 \
             --ignore-vuln PYSEC-2026-3412 \
-            --ignore-vuln PYSEC-2026-1325
+            --ignore-vuln PYSEC-2026-1325 \
+            --ignore-vuln PYSEC-2026-3740 \
+            --ignore-vuln CVE-2026-71428
 
   sca-node:
     name: Node.js Dependencies (npm audit)
