@@ -25,3 +25,11 @@ GHSA-6v7p-g79w-8964
 # setuptools PackageIndex path traversal — setuptools/_vendor copy; the real
 # site-packages install is patched to 84.0.0, unfixable by requirement pin.
 CVE-2025-47273
+
+# unstructured 0.18.31 SSRF via the url= argument of partition()/partition_html()/
+# partition_md(). Not reachable: the backend only uses unstructured through
+# langchain_community's Unstructured*Loader classes on local file paths and never
+# passes url=. The fixed release (0.24.0) needs wrapt>=2.1.1, which the pinned
+# opentelemetry-instrumentation 0.61b0 forbids — bump (unstructured + the
+# opentelemetry family) tracked on dev.
+CVE-2026-71428
