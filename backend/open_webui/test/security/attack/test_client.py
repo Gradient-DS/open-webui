@@ -528,6 +528,50 @@ def test_identities_can_be_adopted_without_local_state(identity_server, tmp_path
         second.close()
 
 
+def test_repeated_suite_setup_and_wrong_password_check_survive_exhausted_stable_buckets(identity_server, tmp_path):
+    from .identities import ADMIN_EMAIL, INTRUDER_EMAIL, USER_EMAIL, ensure_identities
+
+    state_path = tmp_path / 'identities.json'
+    first = ensure_identities('http://app', state_path=state_path)
+    ids = [client.identity['id'] for client in first.clients]
+    first.close()
+    for email in (ADMIN_EMAIL, USER_EMAIL, INTRUDER_EMAIL):
+        identity_server.attempts[email] = 15
+    for _ in range(3):
+        identities = ensure_identities('http://app', state_path=state_path)
+        try:
+            assert [client.identity['id'] for client in identities.clients] == ids
+            test_wrong_password_is_a_loud_400(identities)
+            assert identities.user.verify_identity(email=USER_EMAIL, role='user', user_id=ids[1])
+        finally:
+            identities.close()
+    assert all(identity_server.attempts[email] == 15 for email in (ADMIN_EMAIL, USER_EMAIL, INTRUDER_EMAIL))
+
+
+def test_alias_throttle_is_real_and_failure_restores_email_before_next_setup(identity_server, tmp_path):
+    from .identities import PASSWORD, USER_EMAIL, ensure_identities, signin_alias
+
+    state_path = tmp_path / 'identities.json'
+    first = ensure_identities('http://app', state_path=state_path)
+    user_id = first.user.identity['id']
+    try:
+        with pytest.raises(AuthenticationError, match='HTTP 429'):
+            with signin_alias(first.admin, user_id, USER_EMAIL) as email:
+                for _ in range(15):
+                    with pytest.raises(AuthenticationError, match='HTTP 400'):
+                        login(email, 'wrong-password', base_url='http://app')
+                login(email, PASSWORD, base_url='http://app')
+        assert identity_server.users[user_id]['email'] == USER_EMAIL
+        repaired = ensure_identities('http://app', state_path=state_path)
+        try:
+            assert repaired.user.identity['id'] == user_id
+            assert repaired.user.identity['email'] == USER_EMAIL
+        finally:
+            repaired.close()
+    finally:
+        first.close()
+
+
 def test_a_deleted_ordinary_identity_is_recreated(identity_server, tmp_path):
     from .identities import ensure_identities
 
@@ -614,8 +658,12 @@ def test_an_authenticated_client_can_write(identities):
 
 @needs_stack
 def test_wrong_password_is_a_loud_400(identities):
-    with pytest.raises(AuthenticationError, match='HTTP 400'):
-        login(identities.user.identity['email'], 'wrong-password')
+    from .identities import signin_alias
+
+    user = identities.user
+    with signin_alias(identities.admin, user.identity['id'], user.identity['email']) as email:
+        with pytest.raises(AuthenticationError, match='HTTP 400'):
+            login(email, 'wrong-password', base_url=user.base_url)
 
 
 @needs_stack
@@ -623,7 +671,7 @@ def test_wrong_password_is_a_loud_400(identities):
 def test_real_2fa_signin_success_status_is_rejected(identities, challenge):
     import pyotp
 
-    from .identities import PASSWORD
+    from .identities import PASSWORD, signin_alias
 
     admin, user = identities.admin, identities.intruder
     config_path = '/api/v1/configs/2fa'
@@ -656,12 +704,12 @@ def test_real_2fa_signin_success_status_is_rejected(identities, challenge):
             )
             assert enabled.status_code == 200, enabled.text
             enrolled = True
-        with AttackClient() as anonymous:
+        with signin_alias(admin, user.identity['id'], user.identity['email']) as email, AttackClient() as anonymous:
             result = anonymous.request(
                 'POST',
                 '/api/v1/auths/signin',
                 json={
-                    'email': user.identity['email'],
+                    'email': email,
                     'password': PASSWORD,
                 },
             )
@@ -669,10 +717,10 @@ def test_real_2fa_signin_success_status_is_rejected(identities, challenge):
             assert result.json()[challenge] is True
             assert not entered_the_handler(result)
             with pytest.raises(AuthenticationError, match='2FA'):
-                anonymous.authenticate(result, user.identity['email'])
+                anonymous.authenticate(result, email)
             assert anonymous.token is None
-        with pytest.raises(AuthenticationError, match='2FA'):
-            login(user.identity['email'], PASSWORD)
+            with pytest.raises(AuthenticationError, match='2FA'):
+                login(email, PASSWORD, base_url=user.base_url)
     finally:
         try:
             if enrolled:

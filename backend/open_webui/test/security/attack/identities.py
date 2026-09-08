@@ -18,6 +18,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from uuid import uuid4
@@ -101,30 +102,28 @@ def _update(admin, user_id, **fields):
     return body
 
 
-def _fresh_login(admin, user_id, email, role):
+@contextmanager
+def signin_alias(admin, user_id, email, **fields):
     alias = f'attack-signin-{uuid4().hex}@example.com'
+    try:
+        _update(admin, user_id, email=alias, **fields)
+        yield alias
+    finally:
+        _update(admin, user_id, email=email)
+
+
+def _fresh_login(admin, user_id, email, role):
     client = None
     try:
-        _update(admin, user_id, email=alias, password=PASSWORD, role=role, name=f'Attack {role}')
-        client = login(alias, PASSWORD, base_url=admin.base_url, role=role)
-        if client.identity['id'] != user_id:
-            raise AuthenticationError('Repair signed in as a different user')
-    except Exception:
-        if client:
-            client.close()
-        raise
-    finally:
-        try:
-            _update(admin, user_id, email=email)
-        except Exception:
-            if client:
-                client.close()
-            raise
-    try:
+        with signin_alias(admin, user_id, email, password=PASSWORD, role=role, name=f'Attack {role}') as alias:
+            client = login(alias, PASSWORD, base_url=admin.base_url, role=role)
+            if client.identity['id'] != user_id:
+                raise AuthenticationError('Repair signed in as a different user')
         client.verify_identity(email=email, role=role, user_id=user_id)
         return client
     except Exception:
-        client.close()
+        if client:
+            client.close()
         raise
 
 
