@@ -1,4 +1,72 @@
-RUN-TAG: owui-phase7a-config-poisoning-class
+RUN-TAG: owui-phase7a-record-5xx-findings
+
+## Current findings follow-up (2026-09-08)
+
+Reviewer evidence now supersedes the historical live uncertainty below:
+**two consecutive runs, each 2 failed, 305 passed, zero errors**. Both failures
+were the independent seeding/drive 5xx gates. Recovery succeeded and the plane
+is re-runnable; application findings are intentionally still gated.
+
+This follow-up's complete offline security suite: **629 passed, 49 skipped**
+(678 collected). That includes two added gate-message cases and two new stub
+DELETE cases. The attack suite now contains 309 tests, 260 offline and 49 live.
+The full suite also verifies fresh OpenAPI equality and unchanged static assets.
+No request to the running application was attempted. Loopback tests exercise
+only a temporary local instance of the stdlib CI stub.
+
+Reproduce the offline run from the worktree:
+
+```sh
+env -u ATTACK_BASE_URL \
+  DATABASE_TYPE= DATABASE_HOST= DATABASE_PORT= DATABASE_NAME= DATABASE_USER= DATABASE_PASSWORD= \
+  DATABASE_URL=sqlite:///.cache/phase7a-record-5xx/webui.db \
+  DATA_DIR=.cache/phase7a-record-5xx VECTOR_DB=chroma CHROMA_HTTP_HOST= \
+  OFFLINE_MODE=true WEBUI_SECRET_KEY=offline-plane-test \
+  PYTHONPATH=backend:/private/tmp/owui-phase7a-deps.3XA58n:/private/tmp/owui-phase4b-python-deps \
+  /Users/lexlubbers/Code/soev/open-webui/.venv/bin/python \
+  -m pytest backend/open_webui/test/security -q --tb=long
+```
+
+Formatting and diff checks pass. Ruff passes for the changed attack/test files;
+the stub passes with `--ignore C901` (its existing GET/POST dispatchers already
+exceed the configured complexity limit in the parent commit).
+
+Before a live rerun, load the stub's new DELETE method with
+`docker compose -f docker-compose.ci.yaml restart stub`. Preserve the existing
+application and recovery state and use the two-pass procedure below. Do not
+recreate the application solely for this change.
+
+What the reviewer should see:
+
+- `test_live_seeding_has_its_own_5xx_assertion` should remain **red** for the
+  embeddings aliases (PLANE-004) and data-warning acceptance (PLANE-005).
+- `test_live_drive_has_its_own_5xx_assertion` should remain **red** for the stored
+  note listing failure (PLANE-003) while the offending note remains. The review
+  reported top-level string `data`; this checkout accepts the nested-string
+  reproduction documented in the finding, so inspect the live row/request
+  before claiming the exact original shape. Both assertions still reject every
+  5xx; neither is xfailed, skipped on a live stack, or granted an exception.
+- Each failure message explicitly lists every failing method/template, its
+  HTTP status (seeding includes all 5xx status counts), and up to **2,000 body
+  characters**. Seeding labels its body as the first 5xx response; later 2xx
+  responses cannot erase that evidence. Empty bodies are shown as `''`.
+- Terminal DELETE should lose the stub's HTML 501. Indexed Ollama DELETE also
+  uses this previously missing method and should lose that upstream 501.
+  Ollama's original exact status/body was not supplied; if it remains 5xx,
+  inspect the now-visible response and stack log rather than assuming a cause.
+  Both DELETEs are recorded together as CI-001, not application defects.
+- Recovery should continue to complete with `config_restore_verified: true`
+  and no recurring fixture errors. If the same live findings persist, the
+  attack-only outcome would be **2 failed, 307 passed** after the two added
+  offline tests. This is conditional, not a measured live result. All other
+  assertions should remain green; no application fixes or expectation changes
+  were made to force that result.
+
+The source mechanisms, exact minimal reproductions, and evidence limits are in
+[plane-findings.md](plane-findings.md). PLANE-003 through PLANE-005 each retain
+status **open, to be fixed on dev**. The following sections retain the earlier
+recovery instructions and historical measurements; their old counts are not
+the results of this follow-up.
 
 ## Measured offline results
 

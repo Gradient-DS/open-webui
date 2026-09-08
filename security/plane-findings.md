@@ -1,4 +1,4 @@
-RUN-TAG: owui-phase7a-config-poisoning-class
+RUN-TAG: owui-phase7a-record-5xx-findings
 
 ## PLANE-001: Unvalidated configuration writes poison typed downstream consumers
 
@@ -124,3 +124,182 @@ handler entry and the explicitly HTTP-only `accepted` counter remain distinct
 from successful ingestion. Reproduce by importing the observed bad embedding
 engine and submitting the seed's chunked-text multipart ingest request; restore
 the config snapshot afterwards. No endpoint status behavior was fixed here.
+
+## PLANE-003: Stored note content breaks subsequent note listings
+
+Status: **open, to be fixed on dev**. The live reviewer reported
+`GET /api/v1/notes/` among the failures on both 2026-09-08 passes.
+
+Credit: the reviewer identified this as **second-order, the same shape as
+PLANE-001**: a malformed value is stored, read back from the database later,
+and consumed without checking its type. This is a persistent listing failure
+for the affected user until the offending note is repaired or removed; it is
+not merely rejection of the original write.
+
+Source locations relative to `backend/open_webui/`:
+
+- `models/notes.py:65-69` allows arbitrary dictionary contents in `NoteForm.data`;
+  `140-144` inserts that JSON and commits it.
+- `routers/notes.py:85` loads stored notes for the listing and `99` passes
+  `note.data` to `_truncate_note_data`.
+- `routers/notes.py:45` evaluates `(data.get('content') or {}).get('md')`.
+  A nonempty string at `data.content` raises
+  `AttributeError: 'str' object has no attribute 'get'`, escaping the GET handler
+  as HTTP 500. The reviewer's cited call at `197` is the search listing;
+  the root listing calls the same helper at `99` in this checkout.
+
+The reviewer described a note created with string `data`. Preserve that as the
+live report, with this source discrepancy explicit: this checkout declares
+top-level `data` as `Optional[dict]`, so a top-level string is rejected by
+Pydantic. A **nested string at `data.content`** is accepted and reaches the
+same failing expression. Offline execution of the actual form/helper definitions
+confirmed both the top-level rejection and the nested-string `AttributeError`.
+The original stored JSON and write request were not supplied; determining their
+exact shape requires the live artifact/database. Do not infer that the current
+schema accepts a top-level string.
+
+Exact minimal reproduction for this checkout, using the same admin bearer for
+creation and listing (HTTP effects still require reviewer verification):
+
+```sh
+curl -i -X POST "$ATTACK_BASE_URL/api/v1/notes/create" \
+  -H "Authorization: Bearer $ADMIN_TOKEN" -H 'Content-Type: application/json' \
+  --data '{"title":"plane-003","data":{"content":"stored-string"}}'
+curl -i "$ATTACK_BASE_URL/api/v1/notes/" \
+  -H "Authorization: Bearer $ADMIN_TOKEN"
+```
+
+Expected: creation persists the note; the subsequent GET returns 500 with the
+exception above in the server log. Retain the created note ID and remove it
+after reproduction via `DELETE /api/v1/notes/{id}/delete` using the same bearer.
+
+## PLANE-004: Both embeddings aliases raise an unhandled exception for unknown models
+
+Status: **open, to be fixed on dev**. Both `POST /api/embeddings` and
+`POST /api/v1/embeddings` returned 5xx in the reviewer's repeated passes.
+They are one finding because they register the same handler and dispatcher.
+
+`main.py:1323-1325,1342-1345` registers both aliases, loads the model registry
+if empty, and calls `generate_embeddings` without catching its exceptions.
+`services/model_request_bodies.py:128-131,150-151` permits arbitrary or absent
+model strings and returns the original JSON. `utils/embeddings.py:63-65` raises
+plain `Exception('Model not found')` when that model is absent from the registry,
+turning invalid model selection into HTTP 500 rather than an application 4xx.
+This happens before dispatch to either upstream provider; the embedding stub's
+response format and the recovered `rag.embedding_engine` are not the cause of
+this source-established failure path.
+
+The seeding pass replaces `model` with corpus strings and also tries its
+omission. An unregistered model therefore reaches this exception. The supplied
+review report contains route names but no embeddings traceback; attribution
+of the particular live responses to this path is source-based, not a newly
+observed live exception.
+
+Exact minimal reproduction with a model name absent from the registry:
+
+```sh
+for route in /api/embeddings /api/v1/embeddings; do
+  curl -i -X POST "$ATTACK_BASE_URL$route" \
+    -H "Authorization: Bearer $ADMIN_TOKEN" -H 'Content-Type: application/json' \
+    --data '{"model":"plane-004-unregistered-model","input":"probe"}'
+done
+```
+
+Expected: both aliases return 500 and log `Exception: Model not found`.
+No malformed or malicious input text is needed, and no state repair is needed
+for these two requests. These HTTP reproductions were not run in this sandbox.
+
+## PLANE-005: Data-warning acceptance commits an audit row then fails ORM validation
+
+Status: **open, to be fixed on dev**. The reviewer observed
+`POST /api/v1/data-warnings/accept` returning 5xx on both passes.
+
+`routers/data_warnings.py:18,29` calls `DataWarningLogs.insert_log` when
+`features.enable_data_warnings` is enabled (the default at `config.py:2840`).
+`models/data_warnings.py:58-61` adds, commits and refreshes the SQLAlchemy
+`DataWarningLog`, then calls `DataWarningLogModel.model_validate(log)`.
+The response model at `models/data_warnings.py:33-40` lacks
+`ConfigDict(from_attributes=True)` and the call does not pass
+`from_attributes=True`. Pydantic rejects the ORM instance with a `model_type`
+ValidationError; the handler does not catch it, so the client receives HTTP 500
+**after the row was committed**. Retrying can insert another audit row.
+
+Offline execution of the actual response-model definition with an
+attribute-bearing object confirmed the `model_type` failure. A stack traceback
+is still needed to confirm that the reviewer's particular requests reached
+this line rather than failing earlier in the database. No database failure or
+missing migration is assumed. With the feature disabled, the handler constructs
+the model from keyword arguments and this failing path is bypassed.
+
+Exact minimal reproduction, with `features.enable_data_warnings=true`:
+
+```sh
+curl -i -X POST "$ATTACK_BASE_URL/api/v1/data-warnings/accept" \
+  -H "Authorization: Bearer $ADMIN_TOKEN" -H 'Content-Type: application/json' \
+  --data '{"chat_id":"plane-005-chat","model_id":"stub-model","capabilities":["chat"],"warning_message":"plane-005"}'
+```
+
+Expected: HTTP 500, `DataWarningLogModel` validation error with type `model_type`
+in the server log, and a committed `data_warning_log` row for `plane-005-chat`.
+The form and table impose no chat/model foreign key requirement. The exact
+HTTP request and committed-row check require the reviewer stack; they were not
+run here. This is independent of hostile corpus content.
+
+## CI-001: Missing stub DELETE produces upstream 501 responses
+
+Scope: **CI stack gap, not an application finding**. Status: **fixed in the
+stub; live proxy confirmation pending**. This accounts for the remaining two
+reported routes together, subject to the Ollama attribution limit below:
+
+- `DELETE /api/v1/terminals/{server_id}/{path}`: the reviewer supplied **501,
+  entered=True, HTML body**. `routers/terminals.py:152-153` forwards
+  `request.method` unchanged; `184-190` returns the upstream status and body.
+  The plane registers the terminal at `http://stub:8000` and resolves `path`
+  to `openapi.json` (`security/attack-surface.toml`, terminal/terminal_path).
+  Before this change, `cicd/stub_upstream.py:Handler` had no `do_DELETE`.
+  Python's `BaseHTTPRequestHandler` therefore emitted its unsupported-method
+  HTML 501. Handler entry proves the proxy ran, not that it generated the 501.
+- `DELETE /ollama/api/delete/{url_idx}`: `routers/ollama.py:784-790` selects
+  the configured URL and calls `send_request` with method `DELETE` and path
+  `/api/delete`. The plane resolves index `0`, which compose points at the
+  same stub. `routers/ollama.py:134-160` converts a non-JSON upstream error to
+  an `HTTPException` retaining its status. Thus the missing stub method also
+  produces a 501 here, with an application JSON error envelope. **The reviewer
+  did not supply this route's exact status/body or traceback**, so this is a
+  source-established CI cause, not proof that every observed Ollama 5xx had
+  that cause. If it remains 5xx after the stub restart, retain it as unresolved
+  evidence and diagnose that response on the live stack. The unchecked index
+  at `784` is not evidence of an out-of-range index in these seeded runs.
+
+Fix: `cicd/stub_upstream.py:255-257,343-345` handles DELETE through the existing
+body parser/capture and returns JSON `{"status":"ok"}`. As with the stub's
+other unmodelled services, this is a stateless acknowledgement; it does not
+remove its advertised model or OpenAPI document. No application handler changed.
+
+Exact reproduction before/after the fix from inside the CI network
+(`STUB_BASE_URL=http://stub:8000`; no public stub port is required):
+
+```sh
+curl -i -X DELETE "$STUB_BASE_URL/openapi.json"
+curl -i -X DELETE "$STUB_BASE_URL/api/delete" \
+  -H 'Content-Type: application/json' --data '{"model":"stub-model"}'
+```
+
+Before: both return HTML 501. After: both return HTTP 200 JSON
+`{"status":"ok"}`; offline loopback tests cover these actual wire requests,
+body capture and continued model discovery. To verify through the application,
+use the terminal ID registered by the plane in `TERMINAL_SERVER_ID`:
+
+```sh
+curl -i -X DELETE "$ATTACK_BASE_URL/api/v1/terminals/$TERMINAL_SERVER_ID/openapi.json" \
+  -H "Authorization: Bearer $ADMIN_TOKEN"
+curl -i -X DELETE "$ATTACK_BASE_URL/ollama/api/delete/0" \
+  -H "Authorization: Bearer $ADMIN_TOKEN" -H 'Content-Type: application/json' \
+  --data '{"model":"stub-model"}'
+```
+
+Restart the stub process to load the bind-mounted change:
+`docker compose -f docker-compose.ci.yaml restart stub`.
+Terminal proxy should now return 200 JSON; indexed Ollama delete should return
+200 (`true`) if its remaining application/event path succeeds. No 5xx exception
+or accepted-finding entry was added to the plane gate or expectations.
