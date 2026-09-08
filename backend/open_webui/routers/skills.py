@@ -8,6 +8,7 @@ from open_webui.events import EVENTS, publish_event
 from open_webui.internal.db import get_async_session
 from open_webui.models.access_grants import AccessGrants
 from open_webui.models.config import Config
+from open_webui.services.remaining_request_bodies import access_grants_body
 from open_webui.models.groups import Groups
 from open_webui.models.skills import (
     SkillAccessListResponse,
@@ -354,7 +355,7 @@ class SkillAccessGrantsForm(BaseModel):
 async def update_skill_access_by_id(
     request: Request,
     id: str,
-    form_data: SkillAccessGrantsForm,
+    form_data: SkillAccessGrantsForm = Depends(access_grants_body(SkillAccessGrantsForm)),
     user=Depends(get_verified_user),
     db: AsyncSession = Depends(get_async_session),
 ):

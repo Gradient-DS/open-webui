@@ -1,129 +1,83 @@
 # Derivation gaps measured from committed security/openapi.json using openapi-surface.
-# 35 blind body operations: 27 untyped JSON write bodies, 1 JSON read body,
-# and 7 multipart file uploads. All OpenAPI methods are audited for bodies.
-#
-# Phase 4a exposed the 25 model-invoking operations. The remaining 27 untyped
-# JSON write bodies are Phase 4b's work list. Remove each waiver as typing
-# exposes its writable fields; exact set equality in test_writable_fields.py
-# rejects stale waivers.
-
-# 27 untyped JSON write bodies: temporary Phase 4b work list.
+# Phase 4b audited all 27 previously labelled untyped JSON write bodies.
+# 25 blind body operations remain: 17 JSON writes, 1 JSON read, 7 multipart.
+# The 17 writes are 10 already typed boolean/integer-only bodies, 5 author-defined
+# valve bodies, 1 arbitrary config-import blob, and 1 typed provider map whose
+# dynamic keys the derivation deliberately does not traverse.
+# Exact set equality in test_writable_fields.py rejects missing or stale waivers.
+# Known fields in open objects are not exhaustive coverage of extension data.
 
 [[waived]]
 id = "POST /api/v1/archives/admin/config"
-reason = "Untyped JSON request body (dict/Any/raw Request) exposes no named fields to the derivation. Phase 4 work list: this waiver disappears when the body is typed to expose its writable fields."
+reason = "ArchiveConfigForm already declares archival booleans and retention-day integers. There are no named string leaves for the string-only corpus; further body typing would not help. Revisit if string fields are added or the corpus supports boolean/integer values."
 
 [[waived]]
 id = "POST /api/v1/auths/admin/config/ldap"
-reason = "Untyped JSON request body (dict/Any/raw Request) exposes no named fields to the derivation. Phase 4 work list: this waiver disappears when the body is typed to expose its writable fields."
+reason = "LdapConfigForm already declares only enable_ldap (boolean). There are no named string leaves for the string-only corpus; further body typing would not help. Revisit if string fields are added or the corpus supports boolean/integer values."
 
 [[waived]]
 id = "POST /api/v1/channels/{id}/members/active"
-reason = "Untyped JSON request body (dict/Any/raw Request) exposes no named fields to the derivation. Phase 4 work list: this waiver disappears when the body is typed to expose its writable fields."
+reason = "UpdateActiveMemberForm already declares only is_active (boolean). There are no named string leaves for the string-only corpus; further body typing would not help. Revisit if string fields are added or the corpus supports boolean/integer values."
 
 [[waived]]
 id = "POST /api/v1/channels/{id}/messages/{message_id}/pin"
-reason = "Untyped JSON request body (dict/Any/raw Request) exposes no named fields to the derivation. Phase 4 work list: this waiver disappears when the body is typed to expose its writable fields."
-
-[[waived]]
-id = "POST /api/v1/chats/shared/{id}/access/update"
-reason = "Untyped JSON request body (dict/Any/raw Request) exposes no named fields to the derivation. Phase 4 work list: this waiver disappears when the body is typed to expose its writable fields."
+reason = "PinMessageForm already declares only is_pinned (boolean). There are no named string leaves for the string-only corpus; further body typing would not help. Revisit if string fields are added or the corpus supports boolean/integer values."
 
 [[waived]]
 id = "POST /api/v1/configs/2fa"
-reason = "Untyped JSON request body (dict/Any/raw Request) exposes no named fields to the derivation. Phase 4 work list: this waiver disappears when the body is typed to expose its writable fields."
+reason = "TwoFAConfigForm already declares two booleans and grace-period days (integer). There are no named string leaves for the string-only corpus; further body typing would not help. Revisit if string fields are added or the corpus supports boolean/integer values."
 
 [[waived]]
 id = "POST /api/v1/configs/agent_proxy"
-reason = "Untyped JSON request body (dict/Any/raw Request) exposes no named fields to the derivation. Phase 4 work list: this waiver disappears when the body is typed to expose its writable fields."
+reason = "AgentProxyConfigForm already declares only ENABLE_AGENT_PROXY (boolean). There are no named string leaves for the string-only corpus; further body typing would not help. Revisit if string fields are added or the corpus supports boolean/integer values."
 
 [[waived]]
 id = "POST /api/v1/configs/connections"
-reason = "Untyped JSON request body (dict/Any/raw Request) exposes no named fields to the derivation. Phase 4 work list: this waiver disappears when the body is typed to expose its writable fields."
+reason = "ConnectionsConfigForm already declares two connection/cache booleans. There are no named string leaves for the string-only corpus; further body typing would not help. Revisit if string fields are added or the corpus supports boolean/integer values."
 
 [[waived]]
 id = "POST /api/v1/configs/data-retention"
-reason = "Untyped JSON request body (dict/Any/raw Request) exposes no named fields to the derivation. Phase 4 work list: this waiver disappears when the body is typed to expose its writable fields."
+reason = "DataRetentionConfigForm already declares retention-day integers and a warning-email boolean. There are no named string leaves for the string-only corpus; further body typing would not help. Revisit if string fields are added or the corpus supports boolean/integer values."
 
 [[waived]]
 id = "POST /api/v1/configs/import"
-reason = "Untyped JSON request body (dict/Any/raw Request) exposes no named fields to the derivation. Phase 4 work list: this waiver disappears when the body is typed to expose its writable fields."
+reason = "ImportConfigForm wraps an arbitrary exported configuration blob in config; the handler passes its free-form keys and values to Config.upsert. No fixed exported shape can be enumerated here. Keep this waived unless a versioned import contract is introduced or the corpus can seed arbitrary map entries."
 
 [[waived]]
 id = "POST /api/v1/configs/integrations"
-reason = "Untyped JSON request body (dict/Any/raw Request) exposes no named fields to the derivation. Phase 4 work list: this waiver disappears when the body is typed to expose its writable fields."
-
-[[waived]]
-id = "POST /api/v1/folders/{id}/access/update"
-reason = "Untyped JSON request body (dict/Any/raw Request) exposes no named fields to the derivation. Phase 4 work list: this waiver disappears when the body is typed to expose its writable fields."
+reason = "Provider values are typed by IntegrationsConfigBody, but providers is keyed by administrator-defined slugs. The derivation deliberately skips additionalProperties, so even known provider fields are unreachable. Future coverage needs map-key seeding in both derivation and payload construction; do not fabricate provider slugs."
 
 [[waived]]
 id = "POST /api/v1/folders/{id}/update/expanded"
-reason = "Untyped JSON request body (dict/Any/raw Request) exposes no named fields to the derivation. Phase 4 work list: this waiver disappears when the body is typed to expose its writable fields."
+reason = "FolderIsExpandedForm already declares only is_expanded (boolean). There are no named string leaves for the string-only corpus; further body typing would not help. Revisit if string fields are added or the corpus supports boolean/integer values."
 
 [[waived]]
 id = "POST /api/v1/functions/id/{id}/valves/update"
-reason = "Untyped JSON request body (dict/Any/raw Request) exposes no named fields to the derivation. Phase 4 work list: this waiver disappears when the body is typed to expose its writable fields."
+reason = "Free-form key/value body defined by the function author, not a fixed shape the static derivation can enumerate. The handler loads the installed author-defined Valves model at runtime. Future coverage must obtain the selected author schema at runtime; do not invent global valve fields."
 
 [[waived]]
 id = "POST /api/v1/functions/id/{id}/valves/user/update"
-reason = "Untyped JSON request body (dict/Any/raw Request) exposes no named fields to the derivation. Phase 4 work list: this waiver disappears when the body is typed to expose its writable fields."
-
-[[waived]]
-id = "POST /api/v1/knowledge/{id}/access/update"
-reason = "Untyped JSON request body (dict/Any/raw Request) exposes no named fields to the derivation. Phase 4 work list: this waiver disappears when the body is typed to expose its writable fields."
-
-[[waived]]
-id = "POST /api/v1/models/import"
-reason = "Untyped JSON request body (dict/Any/raw Request) exposes no named fields to the derivation. Phase 4 work list: this waiver disappears when the body is typed to expose its writable fields."
-
-[[waived]]
-id = "POST /api/v1/notes/{id}/access/update"
-reason = "Untyped JSON request body (dict/Any/raw Request) exposes no named fields to the derivation. Phase 4 work list: this waiver disappears when the body is typed to expose its writable fields."
+reason = "Free-form key/value body defined by the function author, not a fixed shape the static derivation can enumerate. The handler loads the installed author-defined UserValves model at runtime. Future coverage must obtain the selected author schema at runtime; do not invent global valve fields."
 
 [[waived]]
 id = "POST /api/v1/pipelines/{pipeline_id}/valves/update"
-reason = "Untyped JSON request body (dict/Any/raw Request) exposes no named fields to the derivation. Phase 4 work list: this waiver disappears when the body is typed to expose its writable fields."
-
-[[waived]]
-id = "POST /api/v1/prompts/id/{prompt_id}/access/update"
-reason = "Untyped JSON request body (dict/Any/raw Request) exposes no named fields to the derivation. Phase 4 work list: this waiver disappears when the body is typed to expose its writable fields."
-
-[[waived]]
-id = "POST /api/v1/skills/id/{id}/access/update"
-reason = "Untyped JSON request body (dict/Any/raw Request) exposes no named fields to the derivation. Phase 4 work list: this waiver disappears when the body is typed to expose its writable fields."
-
-[[waived]]
-id = "POST /api/v1/tools/id/{id}/access/update"
-reason = "Untyped JSON request body (dict/Any/raw Request) exposes no named fields to the derivation. Phase 4 work list: this waiver disappears when the body is typed to expose its writable fields."
+reason = "Free-form key/value body defined by the pipeline author, not a fixed shape the static derivation can enumerate. The handler forwards the body to the selected pipeline service unchanged. Future coverage must obtain the selected author schema at runtime; do not invent global valve fields."
 
 [[waived]]
 id = "POST /api/v1/tools/id/{id}/valves/update"
-reason = "Untyped JSON request body (dict/Any/raw Request) exposes no named fields to the derivation. Phase 4 work list: this waiver disappears when the body is typed to expose its writable fields."
+reason = "Free-form key/value body defined by the tool author, not a fixed shape the static derivation can enumerate. The handler loads the installed author-defined Valves model at runtime. Future coverage must obtain the selected author schema at runtime; do not invent global valve fields."
 
 [[waived]]
 id = "POST /api/v1/tools/id/{id}/valves/user/update"
-reason = "Untyped JSON request body (dict/Any/raw Request) exposes no named fields to the derivation. Phase 4 work list: this waiver disappears when the body is typed to expose its writable fields."
+reason = "Free-form key/value body defined by the tool author, not a fixed shape the static derivation can enumerate. The handler loads the installed author-defined UserValves model at runtime. Future coverage must obtain the selected author schema at runtime; do not invent global valve fields."
 
 [[waived]]
 id = "POST /api/v1/users/default/permissions"
-reason = "Untyped JSON request body (dict/Any/raw Request) exposes no named fields to the derivation. Phase 4 work list: this waiver disappears when the body is typed to expose its writable fields."
-
-[[waived]]
-id = "POST /api/v1/users/user/info/update"
-reason = "Untyped JSON request body (dict/Any/raw Request) exposes no named fields to the derivation. Phase 4 work list: this waiver disappears when the body is typed to expose its writable fields."
-
-[[waived]]
-id = "POST /api/v1/users/user/settings/update"
-reason = "Untyped JSON request body (dict/Any/raw Request) exposes no named fields to the derivation. Phase 4 work list: this waiver disappears when the body is typed to expose its writable fields."
-
-# 1 JSON read body: excluded by the derivation method policy.
+reason = "UserPermissions already declares nested boolean permission flags. There are no named string leaves for the string-only corpus; further body typing would not help. Revisit if string fields are added or the corpus supports boolean/integer values."
 
 [[waived]]
 id = "GET /ollama/api/ps"
 reason = "Declares an application/json body, but the derivation excludes read methods by design, so this body is unreachable to it. The body is typed; further typing would not help. Revisit if the plane ever drives bodies on read methods."
-
-# 7 multipart file uploads: outside the hostile corpus model.
 
 [[waived]]
 id = "POST /api/v1/audio/transcriptions"

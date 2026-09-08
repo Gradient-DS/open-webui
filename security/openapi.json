@@ -25,6 +25,57 @@
         "title": "AcceptInviteForm",
         "type": "object"
       },
+      "AccessGrantInput": {
+        "additionalProperties": true,
+        "properties": {
+          "id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Id"
+          },
+          "permission": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Permission"
+          },
+          "principal_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Principal Id"
+          },
+          "principal_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Principal Type"
+          }
+        },
+        "title": "AccessGrantInput",
+        "type": "object"
+      },
       "AccessGrantModel": {
         "properties": {
           "created_at": {
@@ -66,6 +117,23 @@
           "created_at"
         ],
         "title": "AccessGrantModel",
+        "type": "object"
+      },
+      "AccessGrantsBody": {
+        "additionalProperties": true,
+        "properties": {
+          "access_grants": {
+            "items": {
+              "$ref": "#/components/schemas/AccessGrantInput"
+            },
+            "title": "Access Grants",
+            "type": "array"
+          }
+        },
+        "required": [
+          "access_grants"
+        ],
+        "title": "AccessGrantsBody",
         "type": "object"
       },
       "AccessGrantsPermissions": {
@@ -3412,23 +3480,6 @@
           "updated_at"
         ],
         "title": "ChannelWebhookModel",
-        "type": "object"
-      },
-      "ChatAccessGrantsForm": {
-        "properties": {
-          "access_grants": {
-            "items": {
-              "additionalProperties": true,
-              "type": "object"
-            },
-            "title": "Access Grants",
-            "type": "array"
-          }
-        },
-        "required": [
-          "access_grants"
-        ],
-        "title": "ChatAccessGrantsForm",
         "type": "object"
       },
       "ChatBody": {
@@ -8628,23 +8679,6 @@
         "title": "FileUserResponse",
         "type": "object"
       },
-      "FolderAccessGrantsForm": {
-        "properties": {
-          "access_grants": {
-            "items": {
-              "additionalProperties": true,
-              "type": "object"
-            },
-            "title": "Access Grants",
-            "type": "array"
-          }
-        },
-        "required": [
-          "access_grants"
-        ],
-        "title": "FolderAccessGrantsForm",
-        "type": "object"
-      },
       "FolderForm": {
         "additionalProperties": false,
         "properties": {
@@ -10107,6 +10141,145 @@
         "title": "ImportConfigForm",
         "type": "object"
       },
+      "ImportedModel": {
+        "additionalProperties": true,
+        "properties": {
+          "access_grants": {
+            "anyOf": [
+              {
+                "items": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/AccessGrantInput"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Access Grants"
+          },
+          "base_model_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Base Model Id"
+          },
+          "id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Id"
+          },
+          "is_active": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Is Active"
+          },
+          "meta": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ImportedModelMeta"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "params": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ImportedModelParams"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "title": "ImportedModel",
+        "type": "object"
+      },
+      "ImportedModelMeta": {
+        "additionalProperties": true,
+        "properties": {
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "profile_image_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Profile Image Url"
+          }
+        },
+        "title": "ImportedModelMeta",
+        "type": "object"
+      },
+      "ImportedModelParams": {
+        "additionalProperties": true,
+        "properties": {
+          "system": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "System"
+          }
+        },
+        "title": "ImportedModelParams",
+        "type": "object"
+      },
       "InputAudio": {
         "additionalProperties": true,
         "properties": {
@@ -10136,10 +10309,100 @@
         "title": "InputAudio",
         "type": "object"
       },
-      "IntegrationsConfigForm": {
+      "IntegrationProviderInput": {
+        "additionalProperties": true,
+        "properties": {
+          "badge_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Badge Type"
+          },
+          "custom_metadata_fields": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/ProviderMetadataField"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Custom Metadata Fields"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "max_documents_per_request": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Documents Per Request"
+          },
+          "max_files_per_kb": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Files Per Kb"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "service_account_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Service Account Id"
+          }
+        },
+        "title": "IntegrationProviderInput",
+        "type": "object"
+      },
+      "IntegrationsConfigBody": {
+        "additionalProperties": true,
         "properties": {
           "providers": {
-            "additionalProperties": true,
+            "additionalProperties": {
+              "$ref": "#/components/schemas/IntegrationProviderInput"
+            },
             "title": "Providers",
             "type": "object"
           }
@@ -10147,7 +10410,7 @@
         "required": [
           "providers"
         ],
-        "title": "IntegrationsConfigForm",
+        "title": "IntegrationsConfigBody",
         "type": "object"
       },
       "InviteContentForm": {
@@ -10339,23 +10602,6 @@
           "expires_at"
         ],
         "title": "InviteValidation",
-        "type": "object"
-      },
-      "KnowledgeAccessGrantsForm": {
-        "properties": {
-          "access_grants": {
-            "items": {
-              "additionalProperties": true,
-              "type": "object"
-            },
-            "title": "Access Grants",
-            "type": "array"
-          }
-        },
-        "required": [
-          "access_grants"
-        ],
-        "title": "KnowledgeAccessGrantsForm",
         "type": "object"
       },
       "KnowledgeAccessListResponse": {
@@ -12920,12 +13166,12 @@
         "title": "ModelsConfigForm",
         "type": "object"
       },
-      "ModelsImportForm": {
+      "ModelsImportBody": {
+        "additionalProperties": true,
         "properties": {
           "models": {
             "items": {
-              "additionalProperties": true,
-              "type": "object"
+              "$ref": "#/components/schemas/ImportedModel"
             },
             "title": "Models",
             "type": "array"
@@ -12934,24 +13180,7 @@
         "required": [
           "models"
         ],
-        "title": "ModelsImportForm",
-        "type": "object"
-      },
-      "NoteAccessGrantsForm": {
-        "properties": {
-          "access_grants": {
-            "items": {
-              "additionalProperties": true,
-              "type": "object"
-            },
-            "title": "Access Grants",
-            "type": "array"
-          }
-        },
-        "required": [
-          "access_grants"
-        ],
-        "title": "NoteAccessGrantsForm",
+        "title": "ModelsImportBody",
         "type": "object"
       },
       "NoteForm": {
@@ -13331,6 +13560,24 @@
           "updated_at"
         ],
         "title": "NoteUserResponse",
+        "type": "object"
+      },
+      "NotificationSettings": {
+        "additionalProperties": true,
+        "properties": {
+          "webhook_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Webhook Url"
+          }
+        },
+        "title": "NotificationSettings",
         "type": "object"
       },
       "OAuthClientRegistrationForm": {
@@ -13991,23 +14238,6 @@
         "title": "ProcessUrlForm",
         "type": "object"
       },
-      "PromptAccessGrantsForm": {
-        "properties": {
-          "access_grants": {
-            "items": {
-              "additionalProperties": true,
-              "type": "object"
-            },
-            "title": "Access Grants",
-            "type": "array"
-          }
-        },
-        "required": [
-          "access_grants"
-        ],
-        "title": "PromptAccessGrantsForm",
-        "type": "object"
-      },
       "PromptAccessListResponse": {
         "properties": {
           "items": {
@@ -14606,6 +14836,46 @@
           "version_id"
         ],
         "title": "PromptVersionUpdateForm",
+        "type": "object"
+      },
+      "ProviderMetadataField": {
+        "additionalProperties": true,
+        "properties": {
+          "key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Key"
+          },
+          "label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Label"
+          },
+          "required": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Required"
+          }
+        },
+        "title": "ProviderMetadataField",
         "type": "object"
       },
       "PushModelForm": {
@@ -15766,23 +16036,6 @@
           "password"
         ],
         "title": "SignupForm",
-        "type": "object"
-      },
-      "SkillAccessGrantsForm": {
-        "properties": {
-          "access_grants": {
-            "items": {
-              "additionalProperties": true,
-              "type": "object"
-            },
-            "title": "Access Grants",
-            "type": "array"
-          }
-        },
-        "required": [
-          "access_grants"
-        ],
-        "title": "SkillAccessGrantsForm",
         "type": "object"
       },
       "SkillAccessListResponse": {
@@ -17333,23 +17586,6 @@
         "title": "TokenUsageResponse",
         "type": "object"
       },
-      "ToolAccessGrantsForm": {
-        "properties": {
-          "access_grants": {
-            "items": {
-              "additionalProperties": true,
-              "type": "object"
-            },
-            "title": "Access Grants",
-            "type": "array"
-          }
-        },
-        "required": [
-          "access_grants"
-        ],
-        "title": "ToolAccessGrantsForm",
-        "type": "object"
-      },
       "ToolAccessResponse": {
         "additionalProperties": true,
         "properties": {
@@ -18688,6 +18924,57 @@
         "title": "UserArchiveSummaryModel",
         "type": "object"
       },
+      "UserAudioSettings": {
+        "additionalProperties": true,
+        "properties": {
+          "STTEngine": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sttengine"
+          },
+          "TTSEngine": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ttsengine"
+          },
+          "model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model"
+          },
+          "speaker": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Speaker"
+          }
+        },
+        "title": "UserAudioSettings",
+        "type": "object"
+      },
       "UserGroupIdsListResponse": {
         "properties": {
           "total": {
@@ -19008,6 +19295,35 @@
           }
         },
         "title": "UserIdsForm",
+        "type": "object"
+      },
+      "UserInfoBody": {
+        "additionalProperties": true,
+        "properties": {
+          "integration_provider": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Integration Provider"
+          },
+          "location": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Location"
+          }
+        },
+        "title": "UserInfoBody",
         "type": "object"
       },
       "UserInfoListResponse": {
@@ -19440,6 +19756,23 @@
         "title": "UserSettings",
         "type": "object"
       },
+      "UserSettingsBody": {
+        "additionalProperties": true,
+        "properties": {
+          "ui": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/UserUISettings"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "title": "UserSettingsBody",
+        "type": "object"
+      },
       "UserStatus": {
         "properties": {
           "status_emoji": {
@@ -19477,6 +19810,373 @@
           }
         },
         "title": "UserStatus",
+        "type": "object"
+      },
+      "UserTitleSettings": {
+        "additionalProperties": true,
+        "properties": {
+          "auto": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Auto"
+          },
+          "model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model"
+          },
+          "modelExternal": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Modelexternal"
+          },
+          "prompt": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Prompt"
+          }
+        },
+        "title": "UserTitleSettings",
+        "type": "object"
+      },
+      "UserToolServer": {
+        "additionalProperties": true,
+        "properties": {
+          "key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Key"
+          },
+          "url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Url"
+          }
+        },
+        "title": "UserToolServer",
+        "type": "object"
+      },
+      "UserUISettings": {
+        "additionalProperties": true,
+        "properties": {
+          "audio": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/UserAudioSettings"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "chatDirection": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Chatdirection"
+          },
+          "landingPageMode": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Landingpagemode"
+          },
+          "models": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Models"
+          },
+          "notifications": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/NotificationSettings"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "num_batch": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "integer"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Num Batch"
+          },
+          "num_ctx": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "integer"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Num Ctx"
+          },
+          "num_keep": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "integer"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Num Keep"
+          },
+          "pinnedInputItems": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pinnedinputitems"
+          },
+          "pinnedMenuItems": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pinnedmenuitems"
+          },
+          "pinnedModels": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pinnedmodels"
+          },
+          "pinnedNotesOrder": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pinnednotesorder"
+          },
+          "recentEmojis": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Recentemojis"
+          },
+          "repeat_penalty": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "integer"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Repeat Penalty"
+          },
+          "system": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "System"
+          },
+          "temperature": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "integer"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Temperature"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/UserTitleSettings"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "toolServers": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/UserToolServer"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Toolservers"
+          },
+          "top_k": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "integer"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Top K"
+          },
+          "top_p": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "integer"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Top P"
+          }
+        },
+        "title": "UserUISettings",
         "type": "object"
       },
       "UserUpdateForm": {
@@ -28940,7 +29640,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/ChatAccessGrantsForm"
+                "$ref": "#/components/schemas/AccessGrantsBody"
               }
             }
           },
@@ -31266,7 +31966,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/IntegrationsConfigForm"
+                "$ref": "#/components/schemas/IntegrationsConfigBody"
               }
             }
           },
@@ -34911,7 +35611,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/FolderAccessGrantsForm"
+                "$ref": "#/components/schemas/AccessGrantsBody"
               }
             }
           },
@@ -39596,7 +40296,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/KnowledgeAccessGrantsForm"
+                "$ref": "#/components/schemas/AccessGrantsBody"
               }
             }
           },
@@ -41622,7 +42322,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/ModelsImportForm"
+                "$ref": "#/components/schemas/ModelsImportBody"
               }
             }
           },
@@ -42538,7 +43238,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/NoteAccessGrantsForm"
+                "$ref": "#/components/schemas/AccessGrantsBody"
               }
             }
           },
@@ -43678,7 +44378,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/PromptAccessGrantsForm"
+                "$ref": "#/components/schemas/AccessGrantsBody"
               }
             }
           },
@@ -45312,7 +46012,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/SkillAccessGrantsForm"
+                "$ref": "#/components/schemas/AccessGrantsBody"
               }
             }
           },
@@ -46878,7 +47578,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/ToolAccessGrantsForm"
+                "$ref": "#/components/schemas/AccessGrantsBody"
               }
             }
           },
@@ -47901,9 +48601,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "additionalProperties": true,
-                "title": "Form Data",
-                "type": "object"
+                "$ref": "#/components/schemas/UserInfoBody"
               }
             }
           },
@@ -47992,7 +48690,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/UserSettings"
+                "$ref": "#/components/schemas/UserSettingsBody"
               }
             }
           },

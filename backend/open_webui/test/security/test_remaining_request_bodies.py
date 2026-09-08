@@ -225,3 +225,64 @@ def test_user_settings_keep_nested_values_and_permission_filter(role, temperatur
     assert response.json() == expected
     updated.assert_awaited_once_with('control-user', expected, db=None)
 
+
+@pytest.fixture(scope='module')
+def committed_spec():
+    import json
+
+    return json.loads((REPO / 'security/openapi.json').read_text())
+
+
+@pytest.mark.parametrize('path', ACCESS_PATHS.values())
+def test_access_grant_strings_are_derived(path, committed_spec):
+    from openapi_surface import writable_string_fields
+
+    assert set(writable_string_fields(committed_spec)[f'POST {path}']) == {
+        f'access_grants[].{field}' for field in ('id', 'principal_type', 'principal_id', 'permission')
+    }
+
+
+@pytest.mark.parametrize(
+    ('path', 'expected'),
+    [
+        (
+            '/api/v1/models/import',
+            {
+                'models[].id',
+                'models[].name',
+                'models[].meta.description',
+                'models[].params.system',
+                'models[].access_grants[].principal_id',
+            },
+        ),
+        ('/api/v1/users/user/info/update', {'location', 'integration_provider'}),
+        (
+            '/api/v1/users/user/settings/update',
+            {
+                'ui.system',
+                'ui.models[]',
+                'ui.notifications.webhook_url',
+                'ui.toolServers[].url',
+                'ui.title.prompt',
+                'ui.audio.speaker',
+            },
+        ),
+    ],
+)
+def test_known_nested_strings_are_derived(path, expected, committed_spec):
+    from openapi_surface import writable_string_fields
+
+    assert expected <= set(writable_string_fields(committed_spec)[f'POST {path}'])
+
+
+def test_integration_provider_schema_is_typed_without_invented_slugs(committed_spec):
+    from openapi_surface import writable_string_fields
+
+    schemas = committed_spec['components']['schemas']
+    providers = schemas['IntegrationsConfigBody']['properties']['providers']
+    assert 'properties' not in providers
+    assert providers['additionalProperties'] == {'$ref': '#/components/schemas/IntegrationProviderInput'}
+    assert {'name', 'description', 'service_account_id', 'custom_metadata_fields'} <= set(
+        schemas['IntegrationProviderInput']['properties']
+    )
+    assert 'POST /api/v1/configs/integrations' not in writable_string_fields(committed_spec)

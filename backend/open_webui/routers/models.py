@@ -25,6 +25,7 @@ from open_webui.env import ENABLE_PROFILE_IMAGE_URL_FORWARDING, PROFILE_IMAGE_AL
 from open_webui.internal.db import get_async_session
 from open_webui.models.access_grants import AccessGrants
 from open_webui.models.config import Config
+from open_webui.services.remaining_request_bodies import models_import_body
 from open_webui.models.groups import Groups
 from open_webui.models.models import (
     ModelAccessListResponse,
@@ -335,7 +336,7 @@ class ModelsImportForm(BaseModel):
 async def import_models(
     request: Request,
     user=Depends(get_verified_user),
-    form_data: ModelsImportForm = (...),
+    form_data: ModelsImportForm = Depends(models_import_body(ModelsImportForm)),
     db: AsyncSession = Depends(get_async_session),
 ):
     if user.role != 'admin' and not await has_permission(

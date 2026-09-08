@@ -13,6 +13,7 @@ from open_webui.constants import ERROR_MESSAGES
 from open_webui.events import EVENTS, publish_event
 from open_webui.internal.db import get_async_session
 from open_webui.models.config import Config
+from open_webui.services.remaining_request_bodies import access_grants_body
 from open_webui.models.chats import Chats
 from open_webui.models.folders import (
     FolderForm,
@@ -423,7 +424,7 @@ class FolderAccessGrantsForm(BaseModel):
 async def update_folder_access_by_id(
     request: Request,
     id: str,
-    form_data: FolderAccessGrantsForm,
+    form_data: FolderAccessGrantsForm = Depends(access_grants_body(FolderAccessGrantsForm)),
     user=Depends(get_verified_user),
     db: AsyncSession = Depends(get_async_session),
 ):

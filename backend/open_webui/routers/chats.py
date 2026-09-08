@@ -14,6 +14,7 @@ from open_webui.events import EVENTS, publish_event
 from open_webui.internal.db import get_async_session
 from open_webui.models.access_grants import AccessGrants
 from open_webui.models.config import Config
+from open_webui.services.remaining_request_bodies import access_grants_body
 from open_webui.models.chats import (
     AggregateChatStats,
     ChatBody,
@@ -1781,7 +1782,7 @@ class ChatAccessGrantsForm(BaseModel):
 async def update_shared_chat_access_by_id(
     request: Request,
     id: str,
-    form_data: ChatAccessGrantsForm,
+    form_data: ChatAccessGrantsForm = Depends(access_grants_body(ChatAccessGrantsForm)),
     user=Depends(get_verified_user),
     db: AsyncSession = Depends(get_async_session),
 ):
