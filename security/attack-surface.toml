@@ -61,10 +61,9 @@ depends_on = ["namespace"]
 key = "model"
 name = "model_id"
 prefix = "/api/v1/analytics/models/{model_id}"
-description = "routers/openai.py:get_models returns the configured upstream registry. Select here so a task Pipe added in a previous pass cannot become the base model fixture. This is an existing upstream selector, not a mutable per-pass fixture. Admin avoids ordinary-user model access filtering; the sealed CI stub supplies the registry and openai.enable defaults true."
-via = "GET /openai/models/{openai_index}"
+description = "Select from the configured upstream registry so a previous task Pipe cannot become the base fixture. Register the selected CI model through models/model/access/update with public read access: listing an unconfigured model as admin does not make it chat-usable. Reuse the upstream selector and Models row across passes."
+seeded_by = "seed_model"
 depends_on = ["openai_index"]
-extract = "data.0.id"
 fresh = false
 actor = "admin"
 
@@ -703,16 +702,16 @@ unseedable = "pipelines.py:/upload and /add delegate creation to an external Pip
 key = "task"
 name = "task_id"
 prefix = "/api/tasks/stop/{task_id}"
-description = "main.py:chat_completion creates task_ids in background mode for a nonempty session_id and owned chat_id; no connected socket is required for persisted chats. A fresh HTTP-created Pipe waits asynchronously for at most one hour, keeping the id live until tasks.stop cancels it. Seed late, cancel after the pass, and re-seed each pass. The finite wait bounds leaked fixtures if a driver crashes. No stub timing assumptions and no made-up task id."
+description = "main.py:chat_completion creates task_ids in background mode for a nonempty session_id and owned chat_id; no connected socket is required for persisted chats. A fresh custom model inherits the readable upstream fixture and has public read access. Its model-scoped inlet Filter waits asynchronously for at most one hour before agent routing, keeping the id live until tasks.stop cancels it. A Pipe would be skipped by CI's production-matching agent routing. Seed late, cancel after the pass, and re-seed each pass. The finite wait bounds leaked fixtures if a driver crashes."
 seeded_by = "seed_task"
-depends_on = ["chat", "cache", "attachment", "prompt_history", "channel_message", "external_source", "terminal_path"]
+depends_on = ["model", "chat", "cache", "attachment", "prompt_history", "channel_message", "external_source", "terminal_path"]
 content = """
 import asyncio
 
-class Pipe:
-    async def pipe(self, body: dict) -> str:
+class Filter:
+    async def inlet(self, body: dict) -> dict:
         await asyncio.sleep(3600)
-        return "Attack task fixture expired."
+        return body
 """
 
 [[destructive]]

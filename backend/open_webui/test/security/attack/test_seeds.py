@@ -1,11 +1,13 @@
 import ast
+import asyncio
 import json
 import os
 import re
 import sqlite3
 import tomllib
 from pathlib import Path
-from unittest.mock import Mock
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, Mock
 from urllib.parse import quote
 
 import pytest
@@ -426,10 +428,13 @@ def test_task_seeder_rejects_an_id_that_has_already_finished(monkeypatch):
     monkeypatch.setattr(seeds.time, 'sleep', lambda seconds: None)
     ctx = seeds.SeedContext(Mock(), Mock(), seeds.SURFACE, token='fixture')
     ctx.values['chat'] = 'chat-id'
+    ctx.values['model'] = 'stub-model'
     ctx.request = Mock(
         side_effect=[
             {'id': 'attack_task_fixture'},
             {'is_active': True},
+            {'id': 'attack_task_fixture'},
+            {'id': 'attack_task_fixture', 'access_grants': [PUBLIC_MODEL_READ]},
             {'data': [{'id': 'attack_task_fixture'}]},
             {'task_ids': ['expired-task']},
             {'task_ids': []},
@@ -440,31 +445,158 @@ def test_task_seeder_rejects_an_id_that_has_already_finished(monkeypatch):
     ctx.admin.request.assert_called_once_with('POST', '/api/tasks/stop/expired-task')
 
 
-def test_task_seeder_observes_a_live_task_after_creating_and_activating_its_pipe(monkeypatch):
+def test_task_seeder_observes_a_live_task_after_registering_its_model_and_filter(monkeypatch):
     monkeypatch.setattr(seeds.time, 'sleep', lambda seconds: None)
     ctx = seeds.SeedContext(Mock(), Mock(), seeds.SURFACE, token='fixture')
     ctx.values['chat'] = 'chat-id'
+    ctx.values['model'] = 'stub-model'
     ctx.request = Mock(
         side_effect=[
             {'id': 'attack_task_fixture'},
             {'is_active': True},
+            {'id': 'attack_task_fixture'},
+            {'id': 'attack_task_fixture', 'access_grants': [PUBLIC_MODEL_READ]},
             {'data': [{'id': 'attack_task_fixture'}]},
             {'task_ids': ['live-task']},
             *[{'task_ids': ['live-task']}] * 3,
         ]
     )
     assert seeds.seed_task(ctx, {'key': 'task', 'content': 'fixture code'}) == 'live-task'
-    completion = ctx.request.call_args_list[3]
+    model = ctx.request.call_args_list[2]
+    assert model.args == ('POST', '/api/v1/models/create')
+    assert model.kwargs['json']['base_model_id'] == 'stub-model'
+    assert model.kwargs['json']['meta'] == {'filterIds': ['attack_task_fixture']}
+    registration = ctx.request.call_args_list[3]
+    assert registration.args == ('POST', '/api/v1/models/model/access/update')
+    assert registration.kwargs['json'] == {'id': 'attack_task_fixture', 'access_grants': [PUBLIC_MODEL_READ]}
+    assert registration.kwargs['actor'] is ctx.admin
+    completion = ctx.request.call_args_list[5]
     assert completion.kwargs['json']['chat_id'] == 'chat-id'
     assert completion.kwargs['json']['model'] == 'attack_task_fixture'
     assert completion.kwargs['actor'] is ctx.admin
     assert all(call.kwargs['actor'] is ctx.admin for call in ctx.request.call_args_list[4:])
 
 
+def test_task_filter_wait_is_bounded_and_cancellable(monkeypatch):
+    parameter = next(p for p in seeds.SURFACE['parameter'] if p['key'] == 'task')
+    namespace = {}
+    exec(parameter['content'], namespace)
+
+    async def exercise():
+        entered = asyncio.Event()
+
+        async def wait(seconds):
+            assert seconds == 3600
+            entered.set()
+            await asyncio.Event().wait()
+
+        monkeypatch.setattr(namespace['asyncio'], 'sleep', wait)
+        task = asyncio.create_task(namespace['Filter']().inlet({'model': 'fixture'}))
+        await entered.wait()
+        assert not task.done()
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+
+    asyncio.run(exercise())
+
+
 def stop_seed_task(admin, resolved):
     task_id = resolved['/api/tasks/stop/{task_id}', 'task_id']
     result = admin.request('POST', f'/api/tasks/stop/{task_id}')
     assert result.status_code == 200, f'Could not cancel seeded task: HTTP {result.status_code}'
+
+
+PUBLIC_MODEL_READ = {'principal_type': 'user', 'principal_id': '*', 'permission': 'read'}
+
+
+@pytest.mark.parametrize('role', ['admin', 'user'])
+def test_real_model_checks_require_a_row_and_read_access_even_for_admin(role):
+    # Execute the application checks without importing its DB/startup stack.
+    scope = {
+        'Models': SimpleNamespace(get_model_by_id=AsyncMock(return_value=None)),
+        'Groups': SimpleNamespace(get_groups_by_member_id=AsyncMock(return_value=[])),
+        'AccessGrants': SimpleNamespace(
+            has_access=AsyncMock(return_value=False),
+            get_accessible_resource_ids=AsyncMock(return_value=set()),
+        ),
+        'has_base_model_access': AsyncMock(return_value=True),
+        'MODEL_WHITELIST': [],
+        'BYPASS_ADMIN_ACCESS_CONTROL': False,
+        'BYPASS_MODEL_ACCESS_CONTROL': False,
+    }
+    tree = ast.parse((ROOT / 'backend/open_webui/utils/models.py').read_text())
+    checks = ast.Module(
+        body=[
+            node
+            for node in tree.body
+            if isinstance(node, ast.AsyncFunctionDef) and node.name in {'check_model_access', 'get_filtered_models'}
+        ],
+        type_ignores=[],
+    )
+    exec(compile(checks, 'utils/models.py', 'exec'), scope)
+
+    async def exercise():
+        user = SimpleNamespace(id=f'{role}-caller', role=role)
+        model = {'id': 'stub-model'}
+        assert await scope['get_filtered_models']([model], user) == ([model] if role == 'admin' else [])
+        with pytest.raises(Exception, match='Model not found'):
+            await scope['check_model_access'](user, model)
+
+        row = SimpleNamespace(id='stub-model', user_id='fixture-owner', base_model_id=None)
+        scope['Models'].get_model_by_id.return_value = row
+        model['info'] = vars(row)
+        with pytest.raises(Exception, match='Model not found'):
+            await scope['check_model_access'](user, model)
+        assert await scope['get_filtered_models']([model], user) == []
+
+        scope['AccessGrants'].has_access.return_value = True
+        scope['AccessGrants'].get_accessible_resource_ids.return_value = {'stub-model'}
+        await scope['check_model_access'](user, model)
+        scope['AccessGrants'].has_access.assert_awaited_with(
+            user_id=user.id,
+            resource_type='model',
+            resource_id='stub-model',
+            permission='read',
+            db=None,
+        )
+        assert await scope['get_filtered_models']([model], user) == [model]
+
+    asyncio.run(exercise())
+
+
+def test_model_seed_registers_the_upstream_selector_on_each_pass():
+    ctx = seeds.SeedContext(Mock(), Mock(), seeds.SURFACE)
+    ctx.values['openai_index'] = '0'
+    ctx.request = Mock(
+        side_effect=[
+            {'data': [{'id': 'stub-model'}]},
+            {'id': 'stub-model', 'access_grants': [PUBLIC_MODEL_READ]},
+        ]
+        * 2
+    )
+    for _ in range(2):
+        assert seeds.seed_model(ctx, {'key': 'model'}) == 'stub-model'
+    for discovery, registration in zip(ctx.request.call_args_list[::2], ctx.request.call_args_list[1::2]):
+        assert discovery.args == ('GET', '/openai/models/0')
+        assert registration.args == ('POST', '/api/v1/models/model/access/update')
+        assert registration.kwargs['actor'] is ctx.admin
+        assert registration.kwargs['json'] == {'id': 'stub-model', 'access_grants': [PUBLIC_MODEL_READ]}
+
+
+@pytest.mark.parametrize(
+    'body',
+    [
+        {'id': 'stub-model', 'access_grants': []},
+        {'id': 'stub-model', 'access_grants': [{**PUBLIC_MODEL_READ, 'permission': 'write'}]},
+        {'id': 'different-model', 'access_grants': [PUBLIC_MODEL_READ]},
+    ],
+)
+def test_model_registration_rejects_missing_read_access_or_wrong_model(body):
+    ctx = seeds.SeedContext(Mock(), Mock(), seeds.SURFACE)
+    ctx.request = Mock(return_value=body)
+    with pytest.raises(RuntimeError, match='did not acquire public read access'):
+        seeds.register_readable_model(ctx, 'stub-model')
 
 
 needs_stack = pytest.mark.skipif(not os.getenv('ATTACK_BASE_URL'), reason='requires the running CI stack')
@@ -495,6 +627,30 @@ def test_live_resolution_returns_every_seedable_route_parameter(live_seeds):
     }
     assert resolved.keys() == expected
     assert all(isinstance(value, str) and value.strip() and '{' not in value for value in resolved.values())
+
+
+@needs_stack
+@pytest.mark.parametrize('role', ['admin', 'user'])
+def test_live_seeded_models_are_visible_and_stub_completes_for_both_identities(live_seeds, role):
+    identities, resolved = live_seeds
+    client = getattr(identities, role)
+    model_id = resolved['/api/v1/analytics/models/{model_id}', 'model_id']
+    registry = client.request('GET', '/api/models', params={'refresh': True})
+    assert registry.status_code == 200, registry.text
+    ids = {model['id'] for model in registry.json()['data']}
+    assert model_id in ids
+    assert any(model.startswith('attack_task_') for model in ids)
+    result = client.request(
+        'POST',
+        '/api/chat/completions',
+        json={
+            'model': model_id,
+            'messages': [{'role': 'user', 'content': 'Verify the CI model fixture.'}],
+            'stream': False,
+        },
+    )
+    assert result.status_code == 200, result.text
+    assert result.json()['choices'][0]['message']['content'] == 'stub response'
 
 
 @needs_stack

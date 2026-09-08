@@ -304,27 +304,67 @@ def seed_export(ctx, parameter):
     raise RuntimeError('Export did not become ready within 60 seconds')
 
 
+def register_readable_model(ctx, model_id):
+    # Registry discovery alone has no Models row; chat requires one even for
+    # admins when BYPASS_ADMIN_ACCESS_CONTROL is false. This endpoint creates
+    # the base-model row if absent and replaces its grants on subsequent passes.
+    grant = {'principal_type': 'user', 'principal_id': '*', 'permission': 'read'}
+    body = ctx.request(
+        'POST',
+        '/api/v1/models/model/access/update',
+        actor=ctx.admin,
+        json={'id': model_id, 'access_grants': [grant]},
+    )
+    if body.get('id') != model_id or not any(
+        all(item.get(key) == value for key, value in grant.items()) for item in body.get('access_grants', [])
+    ):
+        raise RuntimeError(f'Model {model_id} did not acquire public read access')
+
+
+def seed_model(ctx, parameter):
+    path = f'/openai/models/{quote(ctx.values["openai_index"], safe="")}'
+    registry = ctx.request('GET', path, actor=ctx.admin)
+    model_id = _extract(registry, 'data.0.id', name=parameter['key'], via=f'GET {path}')
+    register_readable_model(ctx, model_id)
+    return model_id
+
+
 def seed_task(ctx, parameter):
-    pipe_id = f'attack_task_{ctx.token}'
+    model_id = f'attack_task_{ctx.token}'
     body = ctx.request(
         'POST',
         '/api/v1/functions/create',
         actor=ctx.admin,
         json={
-            'id': pipe_id,
-            'name': pipe_id,
+            'id': model_id,
+            'name': model_id,
             'meta': {},
             'content': parameter['content'],
         },
     )
-    if _extract(body, 'id', name=parameter['key'], via='POST functions/create') != pipe_id:
-        raise RuntimeError('Task pipe creation returned a different function')
-    enabled = ctx.request('POST', f'/api/v1/functions/id/{pipe_id}/toggle', actor=ctx.admin)
+    if _extract(body, 'id', name=parameter['key'], via='POST functions/create') != model_id:
+        raise RuntimeError('Task filter creation returned a different function')
+    enabled = ctx.request('POST', f'/api/v1/functions/id/{model_id}/toggle', actor=ctx.admin)
     if enabled.get('is_active') is not True:
-        raise RuntimeError('Task pipe was not activated')
+        raise RuntimeError('Task filter was not activated')
+    # Inlets run before agent routing. A Pipe's wait is skipped by CI's
+    # production-matching AGENT_API_ENABLED=true / FEATURE_AGENT_PICKER=false.
+    ctx.request(
+        'POST',
+        '/api/v1/models/create',
+        actor=ctx.admin,
+        json={
+            'id': model_id,
+            'name': model_id,
+            'base_model_id': ctx.values['model'],
+            'meta': {'filterIds': [model_id]},
+            'params': {},
+        },
+    )
+    register_readable_model(ctx, model_id)
     registry = ctx.request('GET', '/api/models', actor=ctx.admin, params={'refresh': True})
-    if not any(model.get('id') == pipe_id for model in registry.get('data', [])):
-        raise RuntimeError('Task pipe did not appear in the model registry')
+    if not any(model.get('id') == model_id for model in registry.get('data', [])):
+        raise RuntimeError('Task model did not appear in the model registry')
     # For a normal persisted chat, main.py only needs a nonempty session_id
     # to select background mode; it does not require a connected Socket.IO peer.
     chat_id = ctx.values['chat']
@@ -333,7 +373,7 @@ def seed_task(ctx, parameter):
         '/api/chat/completions',
         actor=ctx.admin,
         json={
-            'model': pipe_id,
+            'model': model_id,
             'chat_id': chat_id,
             'id': f'task_message_{ctx.token}',
             'session_id': f'attack_{ctx.token}',
@@ -367,6 +407,7 @@ _SEEDERS = {
         upstream_path,
         seed_terminal,
         seed_export,
+        seed_model,
         seed_task,
     )
 }
