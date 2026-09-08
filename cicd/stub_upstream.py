@@ -2,7 +2,7 @@
 
 OpenAI chat uses SSE when stream is truthy; Ollama uses its own NDJSON wire
 format. Plain JSON for a streaming OpenAI request silently yields no answer.
-GET /_recorded returns full POST bodies and their literal wire text, oldest
+GET /_recorded returns full POST/DELETE bodies and their literal wire text, oldest
 first. GET or POST /_recorded/reset clears them atomically between test passes.
 The bounded capture belongs to this disposable stub, never a production app.
 """
@@ -252,6 +252,9 @@ class Handler(BaseHTTPRequestHandler):
                     'raw_body_base64': base64.b64encode(raw).decode(),
                 }
             )
+        if self.command == 'DELETE':
+            self._send({'status': 'ok'})
+            return
         if path in {
             '/v1/chat/completions',
             '/v1/embeddings',
@@ -336,6 +339,10 @@ class Handler(BaseHTTPRequestHandler):
             self._send({'model_info': {}, 'details': {'family': 'stub'}, 'capabilities': ['completion']})
         else:
             self._send({'status': 'ok'})
+
+    def do_DELETE(self):
+        # Terminal and Ollama proxies forward DELETE, including JSON bodies.
+        self.do_POST()
 
     def do_PUT(self):
         # ExternalDocumentLoader sends raw file bytes, not JSON or multipart.
