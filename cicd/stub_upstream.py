@@ -344,6 +344,19 @@ class Handler(BaseHTTPRequestHandler):
         # Terminal and Ollama proxies forward DELETE, including JSON bodies.
         self.do_POST()
 
+    def do_PATCH(self):
+        # The terminal proxy forwards every method in PROXY_METHODS. A method the
+        # stub does not implement answers 501 with BaseHTTPRequestHandler's HTML
+        # error page, which the proxy passes back as a 5xx that looks like an
+        # application fault rather than a gap in this stub.
+        self.do_POST()
+
+    def do_OPTIONS(self):
+        self.do_POST()
+
+    def do_HEAD(self):
+        self.do_GET()
+
     def do_PUT(self):
         # ExternalDocumentLoader sends raw file bytes, not JSON or multipart.
         if urlsplit(self.path).path == '/process':

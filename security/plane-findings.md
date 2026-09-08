@@ -1,4 +1,4 @@
-**Status: 10 open findings (PLANE-001–010); CI-001 remains confirmed fixed.**
+**Status: 10 open findings (PLANE-001–010); CI-stack gaps: 0 open, 2 fixed (CI-001, CI-002).**
 
 **The live 5xx assertions are EXPECTED to be red while application findings are open.**
 Latest reviewer run: **4 failed, 381 passed, 9 errors in 350s**. Three failures
@@ -422,6 +422,13 @@ confirm that they produced every reported live 5xx. Retain the sampled requests
 and full container exception chains to match the observations; a DB or middleware
 exception would require separate attribution.
 
+**Also observed 2026-09-08, same shape:**
+`GET /api/v1/evaluations/feedback/conversation/{chat_id}` answers 500
+(`HTTP {500: 2}`, body `Internal Server Error`). It matters beyond its own fault:
+it is an OWNER positive control in the authorization pass, so while it faults
+that pass reports `isolation remains unproven` for the route rather than
+claiming a pass. A control that cannot succeed cannot demonstrate isolation.
+
 ## PLANE-009: Task completion templates consume incompletely validated messages
 
 Status: **open, to be fixed on dev**. The reviewer reports 5xx on
@@ -553,3 +560,12 @@ Expected direct responses are terminal 200 JSON and indexed Ollama 200 (`true`)
 if its remaining application/event path succeeds. The reviewer confirmed absence
 from the 5xx set, not these exact successful bodies. No 5xx exception
 or accepted-finding entry was added to the plane gate or expectations.
+
+## CI-002: the stub answered only some forwarded methods
+
+Status: **fixed**. `routers/terminals.py` forwards every method in
+`PROXY_METHODS`; the stub implemented GET, POST, DELETE and PUT, so PATCH (and
+OPTIONS, HEAD) fell through to BaseHTTPRequestHandler's 501 HTML error page,
+which the proxy returned as a 5xx indistinguishable from an application fault.
+Recorded because it was briefly mistaken for one: `PATCH /api/v1/terminals/...`
+appeared in the 5xx set with `HTTP {501: 7}` and an HTML body.
