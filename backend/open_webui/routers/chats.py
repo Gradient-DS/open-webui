@@ -379,8 +379,6 @@ async def get_session_user_chat_usage_stats(
                                     models[model] = 0
                                 models[model] += 1
 
-                            annotation = message.get('annotation', {})
-
                     chat_stats.append(
                         {
                             'id': chat.id,
@@ -399,7 +397,7 @@ async def get_session_user_chat_usage_stats(
                             'created_at': chat.created_at,
                         }
                     )
-                except Exception as e:
+                except Exception:
                     pass
 
         return ChatUsageStatsListResponse(items=chat_stats, total=total)
@@ -1601,10 +1599,7 @@ async def delete_chat_by_id(
         await stop_item_tasks(request.app.state.redis, child_id)
         await Chats.soft_delete_by_id(child_id, db=db)
 
-    if user.role == 'admin':
-        result = await Chats.soft_delete_by_id(id, db=db)
-    else:
-        result = await Chats.soft_delete_by_id(id, db=db)
+    result = await Chats.soft_delete_by_id(id, db=db)
 
     if result:
         await publish_event(

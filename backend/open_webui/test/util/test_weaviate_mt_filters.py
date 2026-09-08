@@ -102,6 +102,25 @@ def test_invalid_filters_never_become_unfiltered_operations(client, filter, oper
     client._queryable.assert_not_called()
 
 
+@pytest.mark.parametrize(
+    'filter',
+    [
+        pytest.param({'hash': None}, id='scalar-null'),
+        pytest.param({'hash': {'$eq': None}}, id='eq-null'),
+        pytest.param({'hash': {'$in': ['a', None]}}, id='in-null'),
+    ],
+)
+@pytest.mark.parametrize('operation', ['search', 'query', 'delete'])
+@pytest.mark.parametrize('exists', [True, False], ids=['tenant-present', 'tenant-absent'])
+def test_null_filters_never_reach_weaviate(client, filter, operation, exists):
+    client._tenant_exists.return_value = exists
+    kwargs = {'vectors': [[1, 0]]} if operation == 'search' else {}
+    with pytest.raises(ValueError, match='must not be null'):
+        getattr(client, operation)('knowledge-bases', filter=filter, **kwargs)
+    client._tenant_exists.assert_not_called()
+    client._queryable.assert_not_called()
+
+
 def test_no_filter_preserves_unfiltered_search(client):
     client.search('knowledge-bases', [[1, 0]])
     assert client._queryable.return_value.query.near_vector.call_args.kwargs['filters'] is None

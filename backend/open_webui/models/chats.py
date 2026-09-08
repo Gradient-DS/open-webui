@@ -846,6 +846,7 @@ class ChatTable:
                     Chat.user_id == user_id,
                     Chat.folder_id.in_(folder_ids),
                     Chat.archived == False,
+                    Chat.deleted_at.is_(None),
                     Chat.meta['internal'].as_boolean().is_not(True),
                 )
                 .values(last_read_at=Chat.updated_at)
@@ -860,6 +861,7 @@ class ChatTable:
                 .where(
                     Chat.user_id == user_id,
                     Chat.archived == False,
+                    Chat.deleted_at.is_(None),
                     Chat.meta['internal'].as_boolean().is_not(True),
                 )
                 .values(last_read_at=Chat.updated_at)
@@ -1442,7 +1444,7 @@ class ChatTable:
             stmt = select(Chat.id, Chat.title, Chat.updated_at, Chat.created_at).filter_by(
                 user_id=user_id, archived=True
             )
-            stmt = stmt.where(Chat.meta['internal'].as_boolean().is_not(True))
+            stmt = stmt.where(Chat.deleted_at.is_(None), Chat.meta['internal'].as_boolean().is_not(True))
 
             if filter:
                 query_key = filter.get('query')
@@ -2559,7 +2561,6 @@ class ChatTable:
             async with get_async_db_context(db) as session:
                 await self.delete_shared_chats_by_user_id(user_id, db=session)
 
-                chat_id_subquery = select(Chat.id).filter_by(user_id=user_id).scalar_subquery()
                 await session.execute(
                     update(AutomationRun)
                     .filter(AutomationRun.chat_id.in_(select(Chat.id).filter_by(user_id=user_id)))

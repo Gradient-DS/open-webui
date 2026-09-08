@@ -173,9 +173,14 @@ def _metadata_filter(filter: Optional[dict]) -> Any:
         # The shared iterator represents equality as a scalar; accept explicit $eq too.
         if isinstance(value, dict) and set(value) == {'$eq'}:
             value = value['$eq']
+        # [Gradient] Nullable file hashes must never become valueless delete filters.
+        if value is None:
+            raise ValueError('Metadata filter values must not be null')
         if isinstance(value, dict) and set(value) == {'$in'}:
             if not isinstance(value['$in'], (list, tuple)) or not value['$in']:
                 raise ValueError('Metadata $in requires a non-empty list')
+            if any(item is None for item in value['$in']):
+                raise ValueError('Metadata $in values must not be null')
         normalized[key] = value
 
     clauses = []

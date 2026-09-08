@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 import time
 from copy import deepcopy
-from typing import Any
+from typing import Any, Optional
 
 from open_webui.internal.db import Base, JSONField, get_async_db_context
 from open_webui.models.access_grants import AccessGrantModel, AccessGrants

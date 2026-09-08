@@ -2033,10 +2033,6 @@ async def route_chat_file_to_pipeline(request: Request, file, user) -> dict:
     }
 
 
-def has_vector_results(result) -> bool:
-    return bool(result and result.ids and result.ids[0])
-
-
 @router.post('/process/file')
 async def process_file(
     request: Request,
@@ -2064,7 +2060,6 @@ async def process_file(
                 collection_name = file_collection_name
             else:
                 await _validate_collection_access([collection_name], user, access_type='write')
-            collection_names = [collection_name]
 
             # Distributed doc-pipeline gate: when enabled, hand the uploaded file
             # to warren instead of parsing + embedding it here. Skipped when the
