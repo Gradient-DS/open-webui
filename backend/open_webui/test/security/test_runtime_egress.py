@@ -1,7 +1,7 @@
 """Static fetch inventory and CI seal checks; never import the application.
 
-This detects explicit HTTP calls, not arbitrary network activity hidden inside
-SDKs or dynamically loaded tools. The internal-only app network is the runtime
+This detects explicit HTTP calls and known cloud storage SDK constructors, not
+arbitrary network activity inside other SDKs or dynamically loaded tools. The internal-only app network is the runtime
 backstop for those and for URLs supplied by requests. Declarations must explain
 how ordinary CI traffic is stubbed or why an optional integration stays closed.
 """
@@ -18,6 +18,7 @@ REPO = SERVER.parents[1]
 
 DECLARED_FETCH_SINKS: dict[str, str] = {
     'config.py': 'Branding fetches require CUSTOM_NAME (empty); explicit Ollama URL avoids startup TCP probes.',
+    'internal/db.py': 'RDS client requires DATABASE_ENABLE_IAM_TOKEN_AUTH, disabled in CI; PostgreSQL uses a disposable password.',
     'main.py': 'OFFLINE_MODE blocks GitHub updates; configured OpenAI and Ollama model calls go to stub.',
     'retrieval/loaders/datalab_marker.py': 'Marker is not selected and DATALAB_MARKER_API_KEY is empty in CI.',
     'retrieval/loaders/external_document.py': 'External document loader uses EXTERNAL_DOCUMENT_LOADER_URL at stub (PUT /process).',
@@ -30,6 +31,7 @@ DECLARED_FETCH_SINKS: dict[str, str] = {
     'retrieval/loaders/tavily.py': 'Tavily web loader is not selected; WEB_LOADER_ENGINE selects the external stub loader.',
     'retrieval/models/external.py': 'External reranking uses RAG_EXTERNAL_RERANKER_URL at stub (POST /v1/rerank).',
     'retrieval/utils.py': 'Embeddings use RAG_OPENAI_API_BASE_URL at stub; supplied download URLs are findings.',
+    'retrieval/vector/dbs/s3vector.py': 'S3 Vectors is not selected; VECTOR_DB selects the in-network Weaviate service.',
     'retrieval/web/bing.py': 'bing search is not selected; WEB_SEARCH_ENGINE selects the in-network searxng stub.',
     'retrieval/web/bocha.py': 'bocha search is not selected; WEB_SEARCH_ENGINE selects the in-network searxng stub.',
     'retrieval/web/brave.py': 'brave search is not selected; WEB_SEARCH_ENGINE selects the in-network searxng stub.',
@@ -83,6 +85,7 @@ DECLARED_FETCH_SINKS: dict[str, str] = {
     'services/onedrive/graph_client.py': 'No OneDrive integration credentials or stored OAuth tokens in the fresh CI database.',
     'services/onedrive/token_refresh.py': 'No stored OneDrive refresh token in the fresh CI database; refresh returns before HTTP.',
     'services/sync/daemon_client.py': 'Manual sync and cancellation use SYNC_DAEMON_URL at stub.',
+    'storage/provider.py': 'S3 uploads/downloads use S3_ENDPOINT_URL at in-network MinIO with disposable credentials; STORAGE_PROVIDER=s3 leaves Azure Blob and GCS unselected.',
     'utils/agent.py': 'Agent completions use AGENT_API_BASE_URL at stub, including streaming requests.',
     'utils/anthropic.py': 'Provider passthrough uses configured OpenAI connections at stub; no Anthropic connection is seeded.',
     'utils/auth.py': 'License checks require LICENSE_KEY, empty in CI; an injected public license request is a finding.',
@@ -128,6 +131,30 @@ _LOCAL_SESSION_FACTORIES = {
     'open_webui.utils.session_pool.get_session',
     'open_webui.retrieval.web.utils.get_ssrf_safe_session',
 }
+# Client construction marks a potential sink even when SDK methods hide HTTP.
+# Qualify imports so unrelated Client/resource names do not become findings.
+_CLOUD_CLIENT_FACTORIES = {'boto3.client', 'boto3.resource'}
+for _namespace in ('azure.storage.blob', 'azure.storage.blob.aio'):
+    for _client in ('BlobServiceClient', 'ContainerClient', 'BlobClient'):
+        _CLOUD_CLIENT_FACTORIES.update(
+            {
+                f'{_namespace}.{_client}',
+                f'{_namespace}.{_client}.from_connection_string',
+            }
+        )
+_CLOUD_CLIENT_FACTORIES.update(
+    {
+        'azure.storage.blob.BlobClient.from_blob_url',
+        'azure.storage.blob.ContainerClient.from_container_url',
+        'azure.storage.blob.aio.BlobClient.from_blob_url',
+        'azure.storage.blob.aio.ContainerClient.from_container_url',
+        'google.cloud.storage.Client',
+        'google.cloud.storage.client.Client',
+    }
+)
+for _client in ('google.cloud.storage.Client', 'google.cloud.storage.client.Client'):
+    for _factory in ('from_service_account_info', 'from_service_account_json', 'create_anonymous_client'):
+        _CLOUD_CLIENT_FACTORIES.add(f'{_client}.{_factory}')
 _SKIP_DIRS = {'venv', '.venv', 'site-packages', 'node_modules', '__pycache__', 'test', 'tests'}
 
 
@@ -211,7 +238,7 @@ def _session_attributes(tree: ast.AST) -> set[str]:
 
 
 def _module_fetches(tree: ast.AST) -> bool:
-    """Find explicit HTTP verbs, bound session calls, and urllib urlopen."""
+    """Find HTTP calls and qualified cloud client constructors/factories."""
     aliases = _imports(tree)
     sessions = _session_attributes(tree)
     for node in ast.walk(tree):
@@ -219,6 +246,8 @@ def _module_fetches(tree: ast.AST) -> bool:
             continue
         func = node.func
         name = _qualified(func, aliases)
+        if name in _CLOUD_CLIENT_FACTORIES:
+            return True
         if name in {'urlopen', 'urllib.request.urlopen'}:
             return True
         if name.split('.')[0] in _HTTP_CLIENTS and name.split('.')[-1] in _HTTP_VERBS:
