@@ -26,12 +26,10 @@
 # credentials and external-provider sessions remain separate prerequisites.
 # No unseedable entry may be silently substituted with a plausible-looking id.
 
-[[config_recovery]]
-key = "rag.file.max_size"
-fallback = 10
-routes = ["POST /api/v1/retrieval/config/update", "POST /api/v1/configs/import"]
-finding = "PLANE-001"
-reason = "routers/retrieval.py:1152 accepts corpus strings later converted by routers/files.py:303. Both write routes remain driven with all derived fields; snapshot and restore this key after each request, including failed requests. Before fixture setup, repair a non-numeric value left by an earlier run to a finite 10 MiB limit. Preserve valid existing limits, including null (unlimited). See security/plane-findings.md."
+# Full export snapshots protect every pass and every mutating request, without
+# selecting keys or excluding routes. Startup recovers interrupted snapshots and
+# corpus values from older runs before resolving any fixtures.
+preserve_configuration = true
 
 [[parameter]]
 key = "namespace"

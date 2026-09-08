@@ -18,7 +18,7 @@ from pathlib import Path
 from urllib.parse import quote
 
 from .client import AttackClient, json_body
-from .configuration import recover_numeric_configuration
+from .configuration import recover_configuration
 
 ROOT = Path(__file__).resolve().parents[5]
 SURFACE_PATH = ROOT / 'security/attack-surface.toml'
@@ -436,7 +436,8 @@ def _seed_endpoint(ctx, p):
 def resolve_parameters(client: AttackClient, *, admin: AttackClient | None = None, surface=SURFACE, spec=SPEC):
     ordered = dependency_order(surface)
     ctx = SeedContext(client, admin or client, surface)
-    recover_numeric_configuration(ctx.admin, surface.get('config_recovery', []))
+    if surface.get('preserve_configuration'):
+        recover_configuration(ctx.admin)
     for p in ordered:
         key = p['key']
         if 'unseedable' in p:

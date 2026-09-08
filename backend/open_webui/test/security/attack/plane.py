@@ -40,6 +40,7 @@ import hashlib
 import json
 import os
 import re
+from contextlib import nullcontext
 from dataclasses import dataclass, field
 from urllib.parse import quote
 from uuid import uuid4
@@ -49,10 +50,10 @@ from hostile_corpus import REFLECTION_PROBE, fetch_payloads
 from openapi_surface import writable_string_fields
 
 from . import client as transport
-from .configuration import preserve_numeric_configuration
+from .configuration import preserve_configuration
 from .hits_path import hits_path
 from .identities import PASSWORD
-from .seeds import DESTRUCTIVE, METHODS, SPEC, SURFACE, parameter_for
+from .seeds import DESTRUCTIVE, METHODS, SPEC, parameter_for
 
 
 @dataclass(frozen=True)
@@ -74,6 +75,8 @@ class Seeding:
     skipped: dict[str, str] = field(default_factory=dict)
     crashes: dict[str, str] = field(default_factory=dict)
     config_findings: list[dict] = field(default_factory=list)
+    body_failures: list[dict] = field(default_factory=list)
+    config_restore_verified: bool = False
 
     @property
     def unentered(self):
@@ -114,6 +117,10 @@ def record(route_id, status, body, *, pass_name='manual') -> bool:
         _count(tally.entered, route_id, status)
     if 200 <= status < 300:
         tally.accepted[route_id] = tally.accepted.get(route_id, 0) + 1
+    if route_id == 'POST /api/v1/integrations/ingest' and 200 <= status < 300:
+        payload = transport.json_body(response)
+        if isinstance(payload, dict) and isinstance(payload.get('errors'), int) and payload['errors'] > 0:
+            tally.body_failures.append({'finding': 'PLANE-002', 'route': route_id, 'status': status, 'body': payload})
     if status >= 500:
         tally.crashes.setdefault(route_id, response.text[:400])
     return entered
@@ -144,7 +151,11 @@ def flush_hits():
             'unentered': tally.unentered,
             'skipped': tally.skipped,
             'crashes': tally.crashes,
+            'body_failures': tally.body_failures,
             'config_findings': tally.config_findings,
+            'config_keys': sorted({item['key'] for item in tally.config_findings}),
+            'corpus_config_keys': sorted({item['key'] for item in tally.config_findings if item['corpus']}),
+            'config_restore_verified': tally.config_restore_verified,
         }
         for name, tally in _PASSES.items()
     }
@@ -154,7 +165,8 @@ def flush_hits():
     }
     temporary = path.with_name(f'{path.name}.{uuid4().hex}.tmp')
     try:
-        temporary.write_text(json.dumps(data, indent=2, sort_keys=True) + '\n')
+        with open(temporary, 'x', opener=lambda name, flags: os.open(name, flags, 0o600)) as stream:
+            stream.write(json.dumps(data, indent=2, sort_keys=True) + '\n')
         temporary.replace(path)
     finally:
         temporary.unlink(missing_ok=True)
@@ -267,9 +279,12 @@ def _throwaway(admin):
 
 def _drive_one(client, route_id, filled, pass_name, **kwargs):
     tally = _PASSES.setdefault(pass_name, Seeding())
-    with preserve_numeric_configuration(
-        client, route_id, SURFACE['config_recovery'], report=tally.config_findings.append
-    ):
+    guard = (
+        preserve_configuration(client, route=route_id, report=tally.config_findings.append)
+        if route_id.split(' ', 1)[0] not in {'GET', 'HEAD', 'OPTIONS', 'TRACE'}
+        else nullcontext()
+    )
+    with guard:
         return _drive_response(client, route_id, filled, pass_name, **kwargs)
 
 
@@ -329,11 +344,13 @@ def seed_every_writable_field(client, parameters, *, spec=SPEC, payloads=None, f
     payloads = tuple(fetch_payloads() if payloads is None else payloads)
     full = os.getenv('ATTACK_FULL_CORPUS') == '1' if full is None else full
     try:
-        for route in sorted(fields_by_route, key=_read_before_destroy):
-            filled = _target(route, parameters, tally)
-            if filled is not None:
-                _seed_route(client, route, filled, fields_by_route[route], payloads, full)
-            flush_hits()
+        with preserve_configuration(client, route='seeding pass', report=tally.config_findings.append, durable=True):
+            for route in sorted(fields_by_route, key=_read_before_destroy):
+                filled = _target(route, parameters, tally)
+                if filled is not None:
+                    _seed_route(client, route, filled, fields_by_route[route], payloads, full)
+                flush_hits()
+        tally.config_restore_verified = True
     finally:
         flush_hits()
         _report('seeding', tally)
@@ -345,11 +362,13 @@ def drive_every_route(client, parameters, *, spec=SPEC) -> dict[str, Outcome]:
     tally = _PASSES['drive'] = Seeding(expected=set(routes))
     outcomes = {}
     try:
-        for route in routes:
-            filled = _target(route, parameters, tally)
-            if filled is not None:
-                outcomes[route] = _drive_one(client, route, filled, 'drive')
-            flush_hits()
+        with preserve_configuration(client, route='drive pass', report=tally.config_findings.append, durable=True):
+            for route in routes:
+                filled = _target(route, parameters, tally)
+                if filled is not None:
+                    outcomes[route] = _drive_one(client, route, filled, 'drive')
+                flush_hits()
+        tally.config_restore_verified = True
     finally:
         flush_hits()
         _report('drive', tally)

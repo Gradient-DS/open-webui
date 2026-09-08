@@ -2,6 +2,7 @@ import json
 import os
 import subprocess
 import sys
+from contextlib import nullcontext
 from pathlib import Path
 from unittest.mock import Mock
 
@@ -25,6 +26,7 @@ def isolated_unit_test(request, monkeypatch, tmp_path):
     if 'live_seeding' in request.fixturenames:
         return
     monkeypatch.setattr(plane, '_PASSES', {})
+    monkeypatch.setattr(plane, 'preserve_configuration', lambda *a, **kw: nullcontext())
     monkeypatch.setenv('ROUTE_HITS_PATH', str(tmp_path / 'hits.json'))
     monkeypatch.delenv('ATTACK_FULL_CORPUS', raising=False)
 
