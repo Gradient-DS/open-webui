@@ -19,8 +19,7 @@ from uuid import uuid4
 
 from aiocache import cached
 from fastapi import HTTPException, Request
-from fastapi.responses import HTMLResponse, JSONResponse
-from starlette.responses import StreamingResponse
+from fastapi.responses import HTMLResponse
 from open_webui.config import (
     CACHE_DIR,
     CODE_INTERPRETER_BLOCKED_MODULES,
@@ -141,7 +140,6 @@ from open_webui.utils.tools import (
     get_tools,
     get_updated_tool_function,
 )
-<<<<<<< HEAD
 from open_webui.utils.webhook import post_webhook
 
 # [Gradient] Fork-only imports (upstream equivalents already imported above).
@@ -155,9 +153,7 @@ from open_webui.config import (
     FEATURE_SKILL_FILES,
 )
 from open_webui.env import AGENT_API_ENABLED  # Agent API bypass flag
-=======
 from starlette.responses import JSONResponse, Response, StreamingResponse
->>>>>>> upstream/main
 
 logging.basicConfig(stream=sys.stdout, level=GLOBAL_LOG_LEVEL)
 log = logging.getLogger(__name__)
@@ -2426,19 +2422,15 @@ async def load_messages_from_db(chat_id: str, message_id: str) -> Optional[list[
     if not db_messages:
         return None
 
-<<<<<<< HEAD
-    # Chats poisoned by ≤0.9.5 failed turns can carry a role-less message in
+    # [Gradient] Chats poisoned by ≤0.9.5 failed turns can carry a role-less message in
     # the legacy JSON history; default it like ChatMessages.upsert_message does.
     return [
         {
-            **{k: v for k, v in msg.items() if k in ('role', 'content', 'output', 'files', 'contextSummary')},
+            **{k: v for k, v in msg.items() if k in MESSAGE_REPLAY_KEYS},
             'role': msg.get('role', 'user'),
         }
         for msg in db_messages
     ]
-=======
-    return [{k: v for k, v in msg.items() if k in MESSAGE_REPLAY_KEYS} for msg in db_messages]
->>>>>>> upstream/main
 
 
 def get_reasoning_format(model: dict) -> str | None:
@@ -2993,13 +2985,6 @@ async def process_chat_payload(request, form_data, user, metadata, model):
             ):
                 form_data = await add_memory_context(request, form_data, user, model)
 
-<<<<<<< HEAD
-        if 'web_search' in features and features['web_search']:
-            # Skip forced RAG web search when native FC is enabled - model can use web_search tool
-            # [Gradient] Also skip when this request is routed to the agent service.
-            if metadata.get('params', {}).get('function_calling') == 'legacy' and not route_to_agent:
-                form_data = await chat_web_search_handler(request, form_data, extra_params, user)
-=======
         if 'web_search' in features and features['web_search'] and await Config.get('web.search.enable'):
             # features is client-supplied; re-check the permission the native FC path enforces.
             if getattr(user, 'role', None) == 'admin' or await has_permission(
@@ -3008,9 +2993,9 @@ async def process_chat_payload(request, form_data, user, metadata, model):
                 await Config.get('user.permissions'),
             ):
                 # Skip forced RAG web search when native FC is enabled - model can use web_search tool
-                if metadata.get('params', {}).get('function_calling') == 'legacy':
+                # [Gradient] The agent owns web search on routed requests.
+                if metadata.get('params', {}).get('function_calling') == 'legacy' and not route_to_agent:
                     form_data = await chat_web_search_handler(request, form_data, extra_params, user)
->>>>>>> upstream/main
 
         if 'image_generation' in features and features['image_generation']:
             # features is client-supplied; re-check the permission the direct /images routes enforce.
@@ -3027,24 +3012,14 @@ async def process_chat_payload(request, form_data, user, metadata, model):
             engine = await Config.get('code_interpreter.engine', 'pyodide')
 
             # Skip XML-tag prompt injection when native FC is enabled —
-<<<<<<< HEAD
             # execute_code will be injected as a builtin tool instead.
             # [Gradient] Also skip when this request is routed to the agent
             # service — the agent controls its own prompting. Code execution
             # still happens in process_chat_response when the agent returns
             # <code_interpreter> tags.
             if metadata.get('params', {}).get('function_calling') == 'legacy' and not route_to_agent:
-                prompt = (
-                    await Config.get('code_interpreter.prompt_template')
-                    if await Config.get('code_interpreter.prompt_template') != ''
-                    else DEFAULT_CODE_INTERPRETER_PROMPT
-                )
-=======
-            # execute_code will be injected as a builtin tool instead
-            if metadata.get('params', {}).get('function_calling') == 'legacy':
                 ci_prompt_template = await Config.get('code_interpreter.prompt_template')
                 prompt = ci_prompt_template if ci_prompt_template != '' else DEFAULT_CODE_INTERPRETER_PROMPT
->>>>>>> upstream/main
 
                 # Append filesystem awareness only for pyodide engine
                 if engine != 'jupyter':
@@ -3096,16 +3071,9 @@ async def process_chat_payload(request, form_data, user, metadata, model):
     # user_skill_ids (user-selected or message-mentioned, vs model-attached) feeds
     # metadata['skills'][*].is_selected for the agent payload.
     mentioned_skill_ids = extract_skill_ids_from_messages(form_data.get('messages', []))
-<<<<<<< HEAD
+    # [Gradient] Preserve explicit skill selections in the agent payload.
     user_skill_ids = set(form_data.pop('skill_ids', None) or []) | mentioned_skill_ids
-    skill_ids = user_skill_ids | set(model.get('info', {}).get('meta', {}).get('skillIds', []))
-=======
-    skill_ids = sorted(
-        set(form_data.pop('skill_ids', None) or [])
-        | set(model.get('info', {}).get('meta', {}).get('skillIds', []))
-        | mentioned_skill_ids
-    )
->>>>>>> upstream/main
+    skill_ids = sorted(user_skill_ids | set(model.get('info', {}).get('meta', {}).get('skillIds', [])))
     available_skills = []
     view_skill_ids = []
     chat = None
@@ -6061,22 +6029,14 @@ async def streaming_chat_response_handler(response, ctx):
                         get_content_from_message(original_system_message) if original_system_message else None
                     )
 
-<<<<<<< HEAD
                 # [Gradient] The agent service executes its own tools and emits
                 # delta.tool_calls only for display; running OWUI's native
                 # resolution loop here re-invokes the model after the agent's
                 # turn (the post-summary "extra reasoning + answer" loop).
                 while (
                     tool_calls
-                    and (
-                        CHAT_RESPONSE_MAX_TOOL_CALL_ITERATIONS is None
-                        or tool_call_iterations < CHAT_RESPONSE_MAX_TOOL_CALL_ITERATIONS
-                    )
+                    and (max_tool_call_iterations is None or tool_call_iterations < max_tool_call_iterations)
                     and not agent_owns_tool_execution(metadata)
-=======
-                while tool_calls and (
-                    max_tool_call_iterations is None or tool_call_iterations < max_tool_call_iterations
->>>>>>> upstream/main
                 ):
                     tool_call_iterations += 1
 

@@ -546,7 +546,7 @@ def get_verified_user(user=Depends(get_current_user)):
     return user
 
 
-<<<<<<< HEAD
+# [Gradient] Optional session auth lets skill-file routes validate scoped fetch tokens first.
 async def get_optional_verified_user(
     request: Request,
     response: Response,
@@ -564,7 +564,10 @@ async def get_optional_verified_user(
         if user.role not in {'user', 'admin'}:
             return None
         return user
-=======
+    except HTTPException:
+        return None
+
+
 async def get_verified_user_by_token(token: str, redis=None):
     """Resolve a verified user from a raw token, for WebSocket handshakes that run outside the HTTP dependency chain."""
     decoded = decode_token(token)
@@ -607,7 +610,6 @@ async def get_optional_verified_user_from_request(request: Request):
             return user if user.role in VERIFIED_USER_ROLES else None
 
         return await get_verified_user_by_token(token, getattr(request.app.state, 'redis', None))
->>>>>>> upstream/main
     except HTTPException:
         return None
 

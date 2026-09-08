@@ -2005,15 +2005,11 @@ class OAuthManager:
                     user = await Users.get_user_by_email(email, db=db)
                     if user:
                         # Update the user with the new oauth sub
-<<<<<<< HEAD
-                        await Users.update_user_oauth_by_id(user.id, provider, sub, db=db)
-                        # Housekeeping: if there was a pending invite, mark it
+                        user = await Users.update_user_oauth_by_id(user.id, provider, sub, db=db) or user
+                        # [Gradient] Housekeeping: if there was a pending invite, mark it
                         # consumed so it stops appearing in the admin invite list.
                         if pending_invite:
                             await Invites.consume_invite_by_email(email)
-=======
-                        user = await Users.update_user_oauth_by_id(user.id, provider, sub, db=db) or user
->>>>>>> upstream/main
 
             if user:
                 provider_oauth = (user.oauth or {}).get(provider) if isinstance(user.oauth, dict) else None
@@ -2037,17 +2033,12 @@ class OAuthManager:
                     if username_claim:
                         new_name = user_data.get(username_claim)
                         if new_name and new_name != user.name:
-<<<<<<< HEAD
-                            await Users.update_user_by_id(user.id, {'name': new_name}, db=db)
-                            user.name = new_name
-                            log.debug(f'Updated name for user {user.id}')
-=======
                             updated_user = await Users.update_user_by_id(user.id, {'name': new_name}, db=db)
                             if updated_user:
                                 user = updated_user
                                 updated_fields.append('name')
-                                log.debug('Updated name for user %s', user.email)
->>>>>>> upstream/main
+                                # [Gradient] Log only the user ID (GRA-219).
+                                log.debug('Updated name for user %s', user.id)
 
                 if auth_config.OAUTH_UPDATE_EMAIL_ON_LOGIN:
                     email_claim = auth_config.OAUTH_EMAIL_CLAIM
@@ -2056,21 +2047,12 @@ class OAuthManager:
                         if new_email and new_email.lower() != user.email.lower():
                             existing_user = await Users.get_user_by_email(new_email, db=db)
                             if existing_user:
-<<<<<<< HEAD
+                                # [Gradient] Do not log the email address (GRA-219).
                                 log.error(f'Cannot update email for user {user.id} because it is already taken.')
-                            else:
-                                await Auths.update_email_by_id(user.id, new_email.lower(), db=db)
-                                user.email = new_email.lower()
-                                log.debug(f'Updated email for user {user.id}')
-=======
-                                log.error(
-                                    f'Cannot update email to {new_email} for user {user.id} because it is already taken.'
-                                )
                             elif await Auths.update_email_by_id(user.id, new_email.lower(), db=db):
                                 user = await Users.get_user_by_id(user.id, db=db) or user
                                 updated_fields.append('email')
                                 log.debug('Updated email for user %s', user.id)
->>>>>>> upstream/main
 
                 # Update profile picture if enabled and different from current
                 if auth_config.OAUTH_UPDATE_PICTURE_ON_LOGIN:
@@ -2090,7 +2072,8 @@ class OAuthManager:
                             if updated_user:
                                 user = updated_user
                                 updated_fields.append('profile_image_url')
-                                log.debug('Updated profile picture for user %s', user.email)
+                                # [Gradient] Log only the user ID (GRA-219).
+                                log.debug('Updated profile picture for user %s', user.id)
 
                 if updated_fields:
                     await publish_event(
@@ -2111,9 +2094,9 @@ class OAuthManager:
 
                 if not consumed_invite:
                     if auth_config.OAUTH_INVITE_REQUIRED:
+                        # [Gradient] Log the denial without the invite email (GRA-219).
                         log.warning(
-                            'OAuth signup denied — OAUTH_INVITE_REQUIRED is set and no active invite found for %s',
-                            email,
+                            'OAuth signup denied — OAUTH_INVITE_REQUIRED is set and no active invite found',
                         )
                         raise HTTPException(
                             status.HTTP_403_FORBIDDEN,
@@ -2473,10 +2456,10 @@ class OAuthManager:
                 await revoke_user_tokens(request, user.id)
                 revoked_count += 1
 
+            # [Gradient] Session revocation logs must not contain email addresses (GRA-219).
             log.info(
-                'Back-channel logout: revoked sessions for user %s (email=%s, provider=%s, sessions_deleted=%s)',
+                'Back-channel logout: revoked sessions for user %s (provider=%s, sessions_deleted=%s)',
                 user.id,
-                user.email,
                 matched_provider,
                 len(sessions),
             )

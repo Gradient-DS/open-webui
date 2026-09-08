@@ -1648,11 +1648,9 @@ async def generate_chat_completion(
                     r.status,
                     safe_error_text(error_body, status=r.status, source='Provider'),
                 )
-<<<<<<< HEAD
-                log.debug('Provider raw error body (HTTP %d): %s', r.status, error_body)
-                # The provider-failure event and the client response both get
-                # the content-free classification — the raw body may echo the
-                # request (prompt + messages) and stays at DEBUG above.
+                # [Gradient] GRA-219: provider bodies may echo prompts, even in debug logs.
+                log.debug('Provider request failed (HTTP %d)', r.status)
+                # The event and client response both get the content-free classification.
                 await publish_model_provider_request_failed(
                     request,
                     actor=user,
@@ -1664,36 +1662,6 @@ async def generate_chat_completion(
                     upstream_error=sanitize_upstream_error(error_body, status=r.status),
                 )
                 return upstream_error_response(error_body, status=r.status)
-=======
-                try:
-                    error_json = JSONCodec.loads(error_body)
-                    await publish_model_provider_request_failed(
-                        request,
-                        actor=user,
-                        provider='openai-compatible',
-                        base_url=url,
-                        api_key=key,
-                        status=r.status,
-                        requested_model=requested_model,
-                        upstream_error=error_json,
-                    )
-                    return JSONResponse(status_code=r.status, content=error_json)
-                except JSONCodec.JSONDecodeError:
-                    await publish_model_provider_request_failed(
-                        request,
-                        actor=user,
-                        provider='openai-compatible',
-                        base_url=url,
-                        api_key=key,
-                        status=r.status,
-                        requested_model=requested_model,
-                        upstream_error=error_body,
-                    )
-                    return JSONResponse(
-                        status_code=r.status,
-                        content={'error': {'message': error_body, 'code': r.status}},
-                    )
->>>>>>> upstream/main
 
             streaming = True
             return StreamingResponse(

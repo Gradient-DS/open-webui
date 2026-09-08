@@ -38,6 +38,7 @@ from open_webui.models.access_grants import AccessGrants
 from open_webui.models.knowledge import Knowledges
 from open_webui.models.models import Models
 from open_webui.models.tools import Tools
+from open_webui.socket.main import disconnect_user_sessions  # [Gradient] Revoke deleted users' live sessions.
 from open_webui.utils.access_control import get_permissions, has_permission
 from open_webui.utils.auth import (
     get_admin_user,
@@ -1078,11 +1079,10 @@ async def delete_user_by_id(
         )
 
     if user.id != user_id:
-        # Archive if requested
+        # [Gradient] Archive if requested before cascading user deletion.
         if archive_before_delete:
             from open_webui.services.archival import ArchiveService
 
-<<<<<<< HEAD
             if not archive_reason:
                 archive_reason = 'Admin deletion'
 
@@ -1097,16 +1097,13 @@ async def delete_user_by_id(
                 if not archive_result.success:
                     log.warning(f'Failed to archive user before deletion: {archive_result.errors}')
 
-        # Proceed with deletion.
+        # [Gradient] Delete through the GDPR cascade and disconnect live sessions.
         report = await DeletionService.delete_user(user_id)
         if report.has_errors:
             log.warning(f'User deletion had errors: {report.errors}')
 
         if report.total_db_records > 0:
             await disconnect_user_sessions(user_id)
-=======
-        if result:
->>>>>>> upstream/main
             await publish_event(
                 request,
                 EVENTS.USER_DELETED,

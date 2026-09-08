@@ -14,11 +14,9 @@ from uuid import uuid4
 
 import aiohttp
 import anyio.to_thread
-<<<<<<< HEAD
 from redis.asyncio import Redis as AsyncRedis
-=======
+
 from cryptography.fernet import InvalidToken
->>>>>>> upstream/main
 from fastapi import (
     Depends,
     FastAPI,
@@ -133,11 +131,7 @@ from open_webui.env import (
     ENABLE_COMPRESSION_MIDDLEWARE,
     ENABLE_CUSTOM_MODEL_FALLBACK,
     ENABLE_EASTER_EGGS,
-<<<<<<< HEAD
-    EXTERNAL_PWA_MANIFEST_URL,
     FEATURE_AGENT_PICKER,  # [Gradient] Master flag for the agent picker UI
-=======
->>>>>>> upstream/main
     # OAuth Back-Channel Logout
     ENABLE_OAUTH_BACKCHANNEL_LOGOUT,
     ENABLE_OTEL,
@@ -150,7 +144,7 @@ from open_webui.env import (
     ENABLE_STAR_SESSIONS_MIDDLEWARE,
     ENABLE_VERSION_UPDATE_CHECK,
     ENABLE_WEBSOCKET_SUPPORT,
-    EXTERNAL_PWA_MANIFEST_URL,
+    EXTERNAL_PWA_MANIFEST_URL as external_pwa_manifest_url,
     GLOBAL_LOG_LEVEL,
     INSTANCE_ID,
     LICENSE_KEY,
@@ -276,23 +270,9 @@ from open_webui.utils import logger
 from open_webui.utils.access_control import has_permission
 from open_webui.utils.access_control.folders import has_folder_write_access
 from open_webui.utils.actions import chat_action as chat_action_handler
-<<<<<<< HEAD
 from open_webui.utils.agent import call_agent_api  # [Gradient] Agent API client
 from open_webui.utils.agent_routing import resolve_agent_route  # [Gradient]
-from open_webui.utils.chat_ids import socket_id_from_chat_id  # [Gradient]
-
-# NOTE (Gradient): we adopt upstream's factored ASGI middlewares except
-# `AuthTokenMiddleware` — ours (inline below) restricts the legacy
-# `x-api-key` header to a narrow set of message/inference endpoints,
-# whereas upstream's accepts it on every path.
-from open_webui.utils.asgi_middleware import (
-    CommitSessionMiddleware,
-    RedirectMiddleware,
-    WebsocketUpgradeGuardMiddleware,
-)
-=======
 from open_webui.utils.asgi_middleware import AppHTTPMiddleware
->>>>>>> upstream/main
 from open_webui.utils.audit import AuditLevel, AuditLoggingMiddleware
 from open_webui.utils.auth import (
     create_admin_user,
@@ -317,17 +297,15 @@ from open_webui.utils.chat_variables import (
     normalize_chat_variables,
 )
 from open_webui.utils.embeddings import generate_embeddings
-<<<<<<< HEAD
 from open_webui.utils.feedback_report import (  # [Gradient] Feedback Reporting
     build_http_error_body,
     get_current_trace_id,
 )
 from open_webui.utils.lazy_resource import lazy  # [Gradient] HA Redis fix
 from open_webui.utils.log_context import install_log_context
-=======
+
 from open_webui.utils.json_codec import JSONCodec
 from open_webui.utils.json_response import apply_orjson_http_json
->>>>>>> upstream/main
 from open_webui.utils.logger import start_logger
 from open_webui.utils.middleware import (
     background_tasks_handler,
@@ -357,20 +335,14 @@ from open_webui.utils.oauth import (
     resolve_oauth_client_info,
 )
 from open_webui.utils.plugin import install_tool_and_function_dependencies
-<<<<<<< HEAD
 from open_webui.utils.redis import clear_connection_cache, get_redis_client
-from open_webui.utils.security_headers import SecurityHeadersMiddleware
-from open_webui.utils.session_pool import get_session
-from open_webui.utils.task import prompt_template, prompt_variables_template  # [Gradient]
-=======
-from open_webui.utils.redis import get_redis_client
 from open_webui.utils.session_pool import cleanup_response, get_client_timeout, get_session, stream_wrapper
 from open_webui.utils.tool_approval import (
     ResolveToolCallForm,
     build_tool_approval_resume_payload,
     resolve_tool_call_output,
 )
->>>>>>> upstream/main
+from open_webui.utils.task import prompt_template, prompt_variables_template  # [Gradient]
 from open_webui.utils.tools import set_terminal_servers, set_tool_servers
 from open_webui.services.email.auth import is_mail_configured  # [Gradient]
 
@@ -523,7 +495,6 @@ async def lifespan(app: FastAPI):
     # This allows sync functions to schedule work on the main loop without blocking health checks
     app.state.main_loop = asyncio.get_running_loop()
 
-<<<<<<< HEAD
     # [Gradient] Register the same loop with the module-level bridge used by sync
     # background handlers that can't reach request.app.state (e.g. the
     # data-export worker). See utils/loop_bridge.py.
@@ -535,9 +506,9 @@ async def lifespan(app: FastAPI):
     # module import — their asyncio primitives are bound to the wrong event
     # loop under HA. See thoughts/shared/research/2026-04-20-redis-ha-loop-bug-and-kind-repro.md.
     clear_connection_cache()
-=======
+
     if THREAD_POOL_SIZE and THREAD_POOL_SIZE > 0:
-        # asyncio offloads bypass AnyIO's limiter, so configure both before the first offload.
+        # asyncio offloads bypass AnyIO's CapacityLimiter, so configure both before the first offload.
         anyio.to_thread.current_default_thread_limiter().total_tokens = THREAD_POOL_SIZE
         app.state.main_loop.set_default_executor(
             ThreadPoolExecutor(
@@ -545,7 +516,6 @@ async def lifespan(app: FastAPI):
                 thread_name_prefix=THREAD_POOL_THREAD_NAME_PREFIX,
             )
         )
->>>>>>> upstream/main
 
     app.state.instance_id = INSTANCE_ID
     start_logger()
@@ -611,7 +581,6 @@ async def lifespan(app: FastAPI):
     if app.state.redis is not None:
         app.state.redis_task_command_listener = asyncio.create_task(redis_task_command_listener(app))
 
-<<<<<<< HEAD
     # [Gradient] Attach the Socket.IO Redis client manager NOW that uvicorn's event loop
     # is running. Creating it at import time (as the upstream code does) binds
     # its internal Futures to whatever loop asyncio.get_event_loop() returned
@@ -624,12 +593,8 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         log.error(f'Failed to initialise Socket.IO Redis manager: {e}')
 
-    if THREAD_POOL_SIZE and THREAD_POOL_SIZE > 0:
-        limiter = anyio.to_thread.current_default_thread_limiter()
-        limiter.total_tokens = THREAD_POOL_SIZE
-
-    asyncio.create_task(periodic_usage_pool_cleanup())
-    asyncio.create_task(periodic_session_pool_cleanup())
+    app.state.periodic_usage_pool_cleanup = asyncio.create_task(periodic_usage_pool_cleanup())
+    app.state.periodic_session_pool_cleanup = asyncio.create_task(periodic_session_pool_cleanup())
     # [Gradient] GDPR archival / retention / export cleanup workers
     asyncio.create_task(periodic_archive_cleanup())
     asyncio.create_task(periodic_data_retention_cleanup())
@@ -647,10 +612,6 @@ async def lifespan(app: FastAPI):
     from open_webui.services.deletion.cleanup_worker import start_cleanup_worker
 
     start_cleanup_worker()
-=======
-    app.state.periodic_usage_pool_cleanup = asyncio.create_task(periodic_usage_pool_cleanup())
-    app.state.periodic_session_pool_cleanup = asyncio.create_task(periodic_session_pool_cleanup())
->>>>>>> upstream/main
 
     from open_webui.utils.automations import scheduler_worker_loop
 
@@ -797,7 +758,8 @@ app.state.redis = None
 app.state.WEBUI_NAME = WEBUI_NAME
 app.state.LICENSE_METADATA = None
 app.state.USER_COUNT = None
-app.state.EXTERNAL_PWA_MANIFEST_URL = EXTERNAL_PWA_MANIFEST_URL
+# [Gradient] Keep the external manifest setting on app state using the local alias.
+app.state.external_pwa_manifest_url = external_pwa_manifest_url
 
 
 ########################################
@@ -1084,64 +1046,7 @@ if ENABLE_COMPRESSION_MIDDLEWARE:
 # `terminate_force_close` tracebacks under aiosqlite and as random
 # CancelledError storms across the request path. See
 # `open_webui.utils.asgi_middleware` for the rationale.
-<<<<<<< HEAD
-
-
-class AuthTokenMiddleware:
-    """Pure ASGI-3. Normalise request.state.token from Authorization header / cookie / x-api-key.
-
-    Stamps X-Process-Time on the response.
-
-    [Gradient] Kept inline instead of adopting
-    `open_webui.utils.asgi_middleware.AuthTokenMiddleware`: our variant
-    restricts the legacy `x-api-key` header to the Anthropic-compatible
-    message endpoints only, whereas upstream's accepts it on every path.
-    """
-
-    def __init__(self, app):
-        self.app = app
-
-    async def __call__(self, scope, receive, send):
-        if scope['type'] != 'http':
-            return await self.app(scope, receive, send)
-
-        from fastapi.security import HTTPAuthorizationCredentials
-
-        request = Request(scope)
-        token = get_http_authorization_cred(request.headers.get('Authorization'))
-
-        if token is None and request.cookies.get('token'):
-            token = HTTPAuthorizationCredentials(scheme='Bearer', credentials=request.cookies.get('token'))
-
-        if token is None and request.headers.get('x-api-key'):
-            request_path = request.url.path
-            if request_path in ('/api/message', '/api/v1/messages') or request_path.startswith('/ollama/v1/messages'):
-                token = HTTPAuthorizationCredentials(scheme='Bearer', credentials=request.headers.get('x-api-key'))
-
-        request.state.token = token
-        request.state.enable_api_keys = await Config.get('auth.enable_api_keys')
-
-        start_time = int(time.time())
-
-        async def send_with_process_time(message):
-            if message['type'] == 'http.response.start':
-                process_time = int(time.time()) - start_time
-                headers = list(message.get('headers') or [])
-                headers.append((b'x-process-time', str(process_time).encode('latin-1')))
-                message = {**message, 'headers': headers}
-            await send(message)
-
-        await self.app(scope, receive, send_with_process_time)
-
-
-app.add_middleware(RedirectMiddleware)
-app.add_middleware(SecurityHeadersMiddleware)
-app.add_middleware(CommitSessionMiddleware)
-app.add_middleware(AuthTokenMiddleware)
-app.add_middleware(WebsocketUpgradeGuardMiddleware)
-=======
 app.add_middleware(AppHTTPMiddleware)
->>>>>>> upstream/main
 
 
 app.add_middleware(
@@ -2096,7 +2001,11 @@ async def chat_completion(
 
             form_data, metadata, events = await process_chat_payload(request, form_data, user, metadata, model)
 
-<<<<<<< HEAD
+            # [Gradient] Tool approvals belong only to the stock runtime (D-Runtime).
+            if not route_to_agent and await drain_approved_tool_calls(request, form_data, user, model, metadata):
+                return {'status': True, 'chat_id': metadata.get('chat_id'), 'paused': True}
+
+            # [Gradient] The agent owns inference and tool execution for routed chats.
             if route_to_agent:
                 response = await call_agent_api(
                     request,
@@ -2120,12 +2029,6 @@ async def chat_completion(
                         )
                 except Exception:
                     pass
-=======
-            if await drain_approved_tool_calls(request, form_data, user, model, metadata):
-                return {'status': True, 'chat_id': metadata.get('chat_id'), 'paused': True}
-
-            response = await chat_completion_handler(request, form_data, user)
->>>>>>> upstream/main
 
             # When the upstream provider returns an error (e.g. HTTP 400
             # content-filter, quota exceeded), generate_chat_completion
@@ -2157,16 +2060,10 @@ async def chat_completion(
             if metadata.get('chat_id') and metadata.get('message_id'):
                 # Update the chat message with the error
                 try:
-<<<<<<< HEAD
                     # [Gradient] trace_id (captured in chat_completion) rides
                     # along so an error report can deep-link to the Tempo trace.
                     error = {'content': error_detail, 'trace_id': metadata.get('trace_id')}
-                    if not metadata.get('chat_id', '').startswith('local:') and not metadata.get(
-                        'chat_id', ''
-                    ).startswith('channel:'):
-=======
                     if is_saved_chat_id(metadata.get('chat_id')):
->>>>>>> upstream/main
                         await Chats.upsert_message_to_chat_by_id_and_message_id(
                             metadata['chat_id'],
                             metadata['message_id'],
@@ -2620,13 +2517,8 @@ async def list_tasks_endpoint(request: Request, user=Depends(get_admin_user)):
 
 @app.get('/api/tasks/chat/{chat_id:path}')
 async def list_tasks_by_chat_id_endpoint(request: Request, chat_id: str, user=Depends(get_verified_user)):
-<<<<<<< HEAD
-    if chat_id.startswith('local:') or chat_id.startswith('channel:'):
-        socket_id = socket_id_from_chat_id(chat_id)
-=======
     socket_id = get_temporary_chat_session_id(chat_id)
     if socket_id:
->>>>>>> upstream/main
         owner_id = get_user_id_from_session_pool(socket_id)
         if owner_id != user.id and user.role != 'admin':
             return {'task_ids': []}
@@ -2643,14 +2535,9 @@ async def list_tasks_by_chat_id_endpoint(request: Request, chat_id: str, user=De
 
 @app.post('/api/tasks/chat/{chat_id:path}/stop')
 async def stop_tasks_by_chat_id_endpoint(request: Request, chat_id: str, user=Depends(get_verified_user)):
-<<<<<<< HEAD
-    if chat_id.startswith('local:') or chat_id.startswith('channel:'):
-        socket_id = socket_id_from_chat_id(chat_id)
-=======
     socket_id = get_temporary_chat_session_id(chat_id)
     chat = None
     if socket_id:
->>>>>>> upstream/main
         owner_id = get_user_id_from_session_pool(socket_id)
         if owner_id != user.id and user.role != 'admin':
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=ERROR_MESSAGES.NOT_FOUND)
@@ -2718,7 +2605,7 @@ def _parse_model_hosting(raw: str) -> list[dict]:
     if not raw or not raw.strip():
         return []
     try:
-        parsed = json.loads(raw)
+        parsed = JSONCodec.loads(raw)
         if not isinstance(parsed, list):
             raise ValueError('MODEL_HOSTING must be a JSON list')
         return [
@@ -2740,7 +2627,7 @@ def _parse_model_profiles(raw: str) -> list[dict]:
     if not raw or not raw.strip():
         return []
     try:
-        parsed = json.loads(raw)
+        parsed = JSONCodec.loads(raw)
         if not isinstance(parsed, list):
             raise ValueError('MODEL_PROFILES must be a JSON list')
         return [
@@ -3634,7 +3521,7 @@ async def oauth_backchannel_logout(
 
 @app.get('/manifest.json')
 async def get_manifest_json():
-    external_pwa_manifest_url = getattr(app.state, 'EXTERNAL_PWA_MANIFEST_URL', None)
+    external_pwa_manifest_url = getattr(app.state, 'external_pwa_manifest_url', None)
     if external_pwa_manifest_url:
         # LICENSE covers this install-time Open WebUI branding surface, including
         # names, logos, manifests, metadata, and surrounding UI.

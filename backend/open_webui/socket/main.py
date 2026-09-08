@@ -1,24 +1,15 @@
 import asyncio
-import random
-
-import socketio
 import logging
+import random
 import sys
 import time
-<<<<<<< HEAD
-from typing import Dict, Set
-from redis import asyncio as aioredis
-import pycrdt as Y
-
-from open_webui.models.users import Users, UserNameResponse
-=======
 from typing import Any
 
 import pycrdt as Y
 import socketio
-from open_webui.config import (
-    CORS_ALLOW_ORIGIN,
-)
+from socketio.packet import Packet
+
+from open_webui.config import CORS_ALLOW_ORIGIN
 from open_webui.env import (
     ENABLE_WEBSOCKET_SUPPORT,
     GLOBAL_LOG_LEVEL,
@@ -38,62 +29,24 @@ from open_webui.env import (
     WEBSOCKET_SERVER_PING_TIMEOUT,
 )
 from open_webui.models.access_grants import AccessGrants
->>>>>>> upstream/main
 from open_webui.models.channels import Channels
 from open_webui.models.chats import Chats
 from open_webui.models.folders import Folders
 from open_webui.models.notes import Notes, NoteUpdateForm
-from open_webui.utils.redis import (
-    get_sentinels_from_env,
-    get_sentinel_url_from_env,
-)
-
-from open_webui.config import (
-    CORS_ALLOW_ORIGIN,
-)
-
-from open_webui.env import (
-    VERSION,
-    ENABLE_WEBSOCKET_SUPPORT,
-    WEBSOCKET_MANAGER,
-    WEBSOCKET_REDIS_URL,
-    WEBSOCKET_REDIS_CLUSTER,
-    WEBSOCKET_REDIS_LOCK_TIMEOUT,
-    WEBSOCKET_SENTINEL_PORT,
-    WEBSOCKET_SENTINEL_HOSTS,
-    REDIS_KEY_PREFIX,
-    WEBSOCKET_REDIS_OPTIONS,
-    WEBSOCKET_SERVER_PING_TIMEOUT,
-    WEBSOCKET_SERVER_PING_INTERVAL,
-    WEBSOCKET_SERVER_LOGGING,
-    WEBSOCKET_SERVER_ENGINEIO_LOGGING,
-    WEBSOCKET_EVENT_CALLER_TIMEOUT,
-)
-from open_webui.utils.auth import decode_token, is_valid_token
+from open_webui.models.users import Users, UserNameResponse
 from open_webui.socket.utils import RedisDict, RedisLock, YdocManager
 from open_webui.tasks import create_task, stop_item_tasks
-from open_webui.utils.redis import get_redis_connection
-from open_webui.utils.lazy_resource import lazy
 from open_webui.utils.access_control import has_permission
-<<<<<<< HEAD
-from open_webui.models.access_grants import AccessGrants
-
-
-from open_webui.env import (
-    GLOBAL_LOG_LEVEL,
-)
-=======
 from open_webui.utils.auth import get_verified_user_by_token
 from open_webui.utils.chat_id import is_saved_chat_id
 from open_webui.utils.json_codec import SOCKETIO_JSON
+from open_webui.utils.lazy_resource import lazy  # [Gradient] Bind Redis clients on the running loop.
 from open_webui.utils.misc import get_output_text
 from open_webui.utils.redis import (
     build_sentinel_url,
     get_redis_connection,
     get_sentinels_from_env,
 )
-from socketio.packet import Packet
->>>>>>> upstream/main
 
 logging.basicConfig(stream=sys.stdout, level=GLOBAL_LOG_LEVEL)
 log = logging.getLogger(__name__)
@@ -105,8 +58,24 @@ log = logging.getLogger(__name__)
 # Configure CORS for Socket.IO
 SOCKETIO_CORS_ORIGINS = '*' if CORS_ALLOW_ORIGIN == ['*'] else CORS_ALLOW_ORIGIN
 
-<<<<<<< HEAD
-# Always create `sio` at module-import time with the default (in-memory)
+
+def get_room_sid_map(manager, namespace: str, room: str):
+    """Return this process's Socket.IO sid map for a room, without copying it."""
+    return manager.rooms.get(namespace, {}).get(room)
+
+
+class JSONOnlyPacket(Packet):
+    """Packet class for JSON-serializable payloads only, skipping python-socketio's per-emit binary scan."""
+
+    uses_binary_events = False
+
+    @classmethod
+    def reconstruct_binary(cls, data: Any, attachments: list[bytes]):
+        """Normalize client attachments to int lists, the form the Yjs handlers store and apply."""
+        return super().reconstruct_binary(data, [list(attachment) for attachment in attachments])
+
+
+# [Gradient] Always create `sio` at module-import time with the default (in-memory)
 # AsyncManager. If WEBSOCKET_MANAGER == 'redis', the Redis-backed
 # AsyncRedisManager is attached LATER inside the FastAPI lifespan hook (see
 # `init_websocket_redis_manager` below) so that its internal asyncio primitives
@@ -121,6 +90,8 @@ SOCKETIO_CORS_ORIGINS = '*' if CORS_ALLOW_ORIGIN == ['*'] else CORS_ALLOW_ORIGIN
 sio = socketio.AsyncServer(
     cors_allowed_origins=SOCKETIO_CORS_ORIGINS,
     async_mode='asgi',
+    json=SOCKETIO_JSON,
+    serializer=JSONOnlyPacket,
     transports=(['websocket'] if ENABLE_WEBSOCKET_SUPPORT else ['polling']),
     allow_upgrades=ENABLE_WEBSOCKET_SUPPORT,
     always_connect=True,
@@ -147,71 +118,17 @@ async def init_websocket_redis_manager() -> None:
 
     if WEBSOCKET_SENTINEL_HOSTS:
         mgr = socketio.AsyncRedisManager(
-            get_sentinel_url_from_env(WEBSOCKET_REDIS_URL, WEBSOCKET_SENTINEL_HOSTS, WEBSOCKET_SENTINEL_PORT),
+            build_sentinel_url(WEBSOCKET_REDIS_URL, WEBSOCKET_SENTINEL_HOSTS, WEBSOCKET_SENTINEL_PORT),
             redis_options=WEBSOCKET_REDIS_OPTIONS,
+            json=SOCKETIO_JSON,
         )
     else:
-        mgr = socketio.AsyncRedisManager(WEBSOCKET_REDIS_URL, redis_options=WEBSOCKET_REDIS_OPTIONS)
+        mgr = socketio.AsyncRedisManager(WEBSOCKET_REDIS_URL, redis_options=WEBSOCKET_REDIS_OPTIONS, json=SOCKETIO_JSON)
 
     mgr.set_server(sio)
     sio.manager = mgr
     sio.manager_initialized = False  # force AsyncServer to re-run mgr.initialize() on next emit
     log.info('Socket.IO Redis client manager attached on the running event loop.')
-=======
-
-def get_room_sid_map(manager, namespace: str, room: str):
-    """Return this process's Socket.IO sid map for a room, without copying it."""
-    return manager.rooms.get(namespace, {}).get(room)
-
-
-class JSONOnlyPacket(Packet):
-    """Packet class for JSON-serializable payloads only, skipping python-socketio's per-emit binary scan."""
-
-    uses_binary_events = False
-
-    @classmethod
-    def reconstruct_binary(cls, data: Any, attachments: list[bytes]):
-        """Normalize client attachments to int lists, the form the Yjs handlers store and apply."""
-        return super().reconstruct_binary(data, [list(attachment) for attachment in attachments])
-
-
-if WEBSOCKET_MANAGER == 'redis':
-    sentinel_hosts = WEBSOCKET_SENTINEL_HOSTS or ''
-    ws_redis_url = (
-        build_sentinel_url(WEBSOCKET_REDIS_URL, sentinel_hosts, WEBSOCKET_SENTINEL_PORT)
-        if sentinel_hosts
-        else WEBSOCKET_REDIS_URL
-    )
-    redis_manager = socketio.AsyncRedisManager(ws_redis_url, redis_options=WEBSOCKET_REDIS_OPTIONS, json=SOCKETIO_JSON)
-    sio = socketio.AsyncServer(
-        cors_allowed_origins=SOCKETIO_CORS_ORIGINS,
-        async_mode='asgi',
-        json=SOCKETIO_JSON,
-        serializer=JSONOnlyPacket,
-        transports=(['websocket'] if ENABLE_WEBSOCKET_SUPPORT else ['polling']),
-        allow_upgrades=ENABLE_WEBSOCKET_SUPPORT,
-        always_connect=True,
-        client_manager=redis_manager,
-        logger=WEBSOCKET_SERVER_LOGGING,
-        ping_interval=WEBSOCKET_SERVER_PING_INTERVAL,
-        ping_timeout=WEBSOCKET_SERVER_PING_TIMEOUT,
-        engineio_logger=WEBSOCKET_SERVER_ENGINEIO_LOGGING,
-    )
-else:
-    sio = socketio.AsyncServer(
-        cors_allowed_origins=SOCKETIO_CORS_ORIGINS,
-        async_mode='asgi',
-        json=SOCKETIO_JSON,
-        serializer=JSONOnlyPacket,
-        transports=(['websocket'] if ENABLE_WEBSOCKET_SUPPORT else ['polling']),
-        allow_upgrades=ENABLE_WEBSOCKET_SUPPORT,
-        always_connect=True,
-        logger=WEBSOCKET_SERVER_LOGGING,
-        ping_interval=WEBSOCKET_SERVER_PING_INTERVAL,
-        ping_timeout=WEBSOCKET_SERVER_PING_TIMEOUT,
-        engineio_logger=WEBSOCKET_SERVER_ENGINEIO_LOGGING,
-    )
->>>>>>> upstream/main
 
 
 # Timeout duration in seconds

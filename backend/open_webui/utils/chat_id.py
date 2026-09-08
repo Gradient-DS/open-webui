@@ -23,5 +23,6 @@ def is_temporary_chat_id(chat_id: Optional[str]) -> bool:
 def get_temporary_chat_session_id(chat_id: str) -> Optional[str]:
     for prefix in TEMPORARY_CHAT_ID_PREFIXES:
         if chat_id.startswith(prefix):
-            return chat_id.removeprefix(prefix)
+            # [Gradient] GRA-221: the trailing chat UUID isolates history; only the first segment owns the socket.
+            return chat_id.removeprefix(prefix).split(':', 1)[0]
     return None
