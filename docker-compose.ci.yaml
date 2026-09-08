@@ -164,7 +164,13 @@ services:
       EMAIL_GRAPH_CLIENT_ID: ""
       EMAIL_GRAPH_CLIENT_SECRET: ""
       # Stable disposable-stack signing key, not a production credential.
-      WEBUI_SECRET_KEY: "ci-only-secret-do-not-use-outside-this-stack"
+      # Must NOT be exactly 44 characters. OAUTH_SESSION_TOKEN_ENCRYPTION_KEY
+      # defaults to this value (env.py:782), and OAuthSessionTable treats a
+      # 44-character key as a raw Fernet key instead of hashing it
+      # (models/oauth_sessions.py:72-77), so the app dies at import with
+      # "Fernet key must be 32 url-safe base64-encoded bytes". Any other
+      # length is sha256'd into a valid key.
+      WEBUI_SECRET_KEY: "ci-only-secret-do-not-use-outside-this-ci-stack"
     volumes:
       # Root-level artefacts are outside the Dockerfile's backend COPY.
       - ./docker-compose.ci.yaml:/app/docker-compose.ci.yaml:ro
