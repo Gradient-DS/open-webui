@@ -263,7 +263,19 @@ def seed_terminal(ctx, parameter):
     body = ctx.request('GET', '/api/v1/configs/export', actor=ctx.admin)
     connections = body.get('terminal_server.connections') or []
     server_id = f'attack-{ctx.token}'
-    connections.append({'id': server_id, 'name': server_id, 'url': parameter['url'], 'auth_type': 'none'})
+    # An empty access_grants list means private (utils/access_control:156), and
+    # BYPASS_ADMIN_ACCESS_CONTROL is false here to match production, so even the
+    # admin cannot see an ungranted connection and list_terminal_servers filters
+    # it out. Grant read explicitly rather than relying on the admin role.
+    connections.append(
+        {
+            'id': server_id,
+            'name': server_id,
+            'url': parameter['url'],
+            'auth_type': 'none',
+            'config': {'access_grants': [{'principal_type': 'user', 'principal_id': '*', 'permission': 'read'}]},
+        }
+    )
     ctx.request(
         'POST', '/api/v1/configs/import', actor=ctx.admin, json={'config': {'terminal_server.connections': connections}}
     )
