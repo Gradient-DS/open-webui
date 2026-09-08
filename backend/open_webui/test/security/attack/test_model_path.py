@@ -219,13 +219,30 @@ def test_live_model_streams_finish_without_body_failures(live_model_paths):
 def test_live_model_controls_produce_output(live_model_paths):
     controls = [item for item in live_model_paths.responses if item['probe'] == 'control']
     assert {item['route'] for item in controls} == set(model_path.targets())
-    assert all(
-        item['status'] is not None
-        and 200 <= item['status'] < 300
-        and not item['errors']
-        and (item['terminal'] or item.get('model_output'))
-        for item in controls
-    ), controls
+
+    # The control exists to prove this pass reached the model path at all. If it is
+    # wrong or weak every other assertion in the module passes vacuously, so report
+    # per probe what was required and what arrived rather than dumping the records.
+    def _why(item):
+        if item['status'] is None:
+            return 'no response (request never completed)'
+        if not 200 <= item['status'] < 300:
+            return f'status {item["status"]}, wanted 2xx'
+        if item['errors']:
+            return f'stream errors: {item["errors"]}'
+        if not (item['terminal'] or item.get('model_output')):
+            return (
+                f'neither a terminal event nor model output; read {item.get("bytes")} bytes. '
+                'The stub answers SSE for OpenAI-shaped streaming and NDJSON for Ollama, '
+                'so a body with no terminal event is a truncated stream, not a success.'
+            )
+        return None
+
+    broken = [(item['route'], _why(item)) for item in controls]
+    broken = [(route, reason) for route, reason in broken if reason]
+    assert not broken, 'model-path controls produced no usable output:\n' + '\n'.join(
+        f'  {route}: {reason}' for route, reason in broken
+    )
 
 
 @needs_stack

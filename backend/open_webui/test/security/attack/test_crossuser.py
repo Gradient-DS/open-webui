@@ -22,7 +22,13 @@ def test_inventory_resolves_every_committed_operation_including_named_methods_an
     assert 'GET /api/v1/files/{id}/content' in inventory
     assert 'PATCH /api/v1/terminals/{server_id}/{path}' in inventory
     routes, admins = crossuser.targets()
-    assert set(routes) == admins | {r for r in plane.operations() if '{' in r}
+    # Operations whose id the surface records as unseedable are out of scope: an
+    # ownership check needs a resource that exists, and counting them would make the
+    # pass look as though it left ownership unverified rather than unseedable.
+    expected = admins | {r for r in plane.operations() if '{' in r}
+    unseedable = {r for r in expected if not crossuser._is_seedable(r, seeds.SURFACE)}
+    assert unseedable, 'expected at least one unseedable operation to be excluded'
+    assert set(routes) == expected - unseedable
 
 
 @pytest.mark.parametrize('status', [200, 400, 401, 403, 404, 500])

@@ -37,9 +37,34 @@ class Authorization:
     violations: list = field(default_factory=list)
 
 
-def targets(spec=seeds.SPEC):
+def _is_seedable(route, surface):
+    """An operation whose id cannot be seeded is out of scope for an ownership check.
+
+    seeds.parameter_for raises KeyError for a parameter the surface records as
+    unseedable, and _owner_key reaches it before plane._target gets the chance to
+    skip the route. Filter here instead, so those operations never enter the
+    denominator: a route nobody can seed is not a route whose ownership went
+    unchecked.
+    """
+    path = route.split(' ', 1)[1]
+    for name in re.findall(r'\{([^}]+)\}', path):
+        try:
+            declaration = seeds.parameter_for(path, name, surface)
+        except KeyError:
+            return False
+        if 'unseedable' in declaration:
+            return False
+    return True
+
+
+def targets(spec=seeds.SPEC, *, surface=None):
     admins = set(admin_gated_operations(spec))
-    return [route for route in plane.operations(spec) if '{' in route or route in admins], admins
+    routes = [
+        route
+        for route in plane.operations(spec)
+        if ('{' in route or route in admins) and _is_seedable(route, surface or seeds.SURFACE)
+    ]
+    return routes, admins
 
 
 def _owner_key(path, surface):
