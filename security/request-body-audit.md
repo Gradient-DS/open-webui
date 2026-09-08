@@ -1,7 +1,8 @@
-# Phase 4b request-body audit
+# Request-body audit: what the derivation can and cannot see
 
-Run tag: `owui-phase4b-type-remaining-bodies`.
-Baseline: `6106ef00f` on `feat/owui-attack-plane`.
+Recorded 2026-09-08 while typing the request bodies the derivation could not see
+(baseline `6106ef00f` on `feat/owui-attack-plane`). Re-read this before adding a waiver
+to `derivation-coverage.toml`: the reasoning per operation is here, the verdicts are there.
 
 The 27 waivers labelled “Untyped JSON request body” were not all untyped.
 Reading every handler and its form found 11 bodies with known nested or partly
