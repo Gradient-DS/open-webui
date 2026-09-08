@@ -263,6 +263,96 @@ def test_lost_bearer_auth_raises_but_role_gate_remains_a_noncoverage_result(monk
         assert not entered_the_handler(client.request('GET', '/protected', headers={'Authorization': 'Bearer hostile'}))
 
 
+@pytest.mark.parametrize('probe_status', [200, 401, 403, 500])
+def test_ambiguous_refusal_probes_once_and_records_handler_entry(monkeypatch, probe_status):
+    calls, refusals = [], []
+
+    def send(session, request, **kwargs):
+        calls.append(request)
+        if request.url.endswith('/api/v1/auths/'):
+            return response(probe_status, {'id': 'id'} if probe_status == 200 else {'detail': '401 Unauthorized'})
+        result = response(401, {'detail': '401 Unauthorized'})
+        refusals.append(result)
+        return result
+
+    monkeypatch.setattr(requests.Session, 'send', send)
+    with AttackClient('http://app', token='jwt') as client:
+        for path in ['/api/v1/knowledge/create', '/api/v1/skills/create']:
+            if probe_status == 200:
+                assert entered_the_handler(client.request('POST', path, json={}))
+            else:
+                with pytest.raises(AuthenticationError, match='identity was lost'):
+                    client.request('POST', path, json={})
+                assert not entered_the_handler(refusals[-1])
+    assert len(calls) == 3
+    assert calls[1].method == 'GET'
+    assert calls[1].headers['Authorization'] == 'Bearer jwt'
+    assert not calls[1].body
+
+
+@pytest.mark.parametrize(
+    'detail',
+    ['Not authenticated', 'Invalid token', 'Your session has expired or the token is invalid. Please sign in again.'],
+)
+def test_unambiguous_identity_loss_never_probes_even_after_cached_success(monkeypatch, detail):
+    calls = []
+    replies = iter(
+        [response(401, {'detail': '401 Unauthorized'}), response(200, {'id': 'id'}), response(401, {'detail': detail})]
+    )
+
+    def send(*args, **kwargs):
+        calls.append(args)
+        return next(replies)
+
+    monkeypatch.setattr(requests.Session, 'send', send)
+    with AttackClient('http://app', token='jwt') as client:
+        assert entered_the_handler(client.request('POST', '/permission'))
+        with pytest.raises(AuthenticationError):
+            client.request('GET', '/lost')
+        assert client._probe_cache is None
+    assert len(calls) == 3
+
+
+def test_probe_cache_expires_and_is_scoped_to_the_actual_bearer(monkeypatch):
+    from . import client as module
+
+    now, probes = [0], []
+    monkeypatch.setattr(module.time, 'monotonic', lambda: now[0])
+
+    def send(session, request, **kwargs):
+        if request.url.endswith('/api/v1/auths/'):
+            probes.append(request.headers['Authorization'])
+            if len(probes) == 1:
+                return response(200, {'id': 'id'})
+        return response(401, {'detail': '401 Unauthorized'})
+
+    monkeypatch.setattr(requests.Session, 'send', send)
+    with AttackClient('http://app', token='jwt') as client:
+        assert entered_the_handler(client.request('POST', '/permission'))
+        now[0] += module._PROBE_CACHE_SECONDS + 1
+        with pytest.raises(AuthenticationError):
+            client.request('POST', '/permission')
+        client.token = 'replacement'
+        with pytest.raises(AuthenticationError):
+            client.request('POST', '/permission')
+        result = client.request('POST', '/permission', headers={'authorization': 'Bearer hostile'})
+        assert not entered_the_handler(result)
+    assert probes == ['Bearer jwt', 'Bearer jwt', 'Bearer replacement', 'Bearer hostile']
+
+
+def test_ambiguous_session_endpoint_failure_does_not_probe_itself(monkeypatch):
+    calls = []
+
+    def send(*args, **kwargs):
+        calls.append(args)
+        return response(401, {'detail': '401 Unauthorized'})
+
+    monkeypatch.setattr(requests.Session, 'send', send)
+    with AttackClient('http://app', token='jwt') as client, pytest.raises(AuthenticationError):
+        client.request('GET', '/api/v1/auths/')
+    assert len(calls) == 1
+
+
 @pytest.mark.parametrize('status', [302, 307, 429, 500, 503])
 def test_real_adapter_returns_the_first_status_without_following_or_retrying(monkeypatch, status):
     calls = []

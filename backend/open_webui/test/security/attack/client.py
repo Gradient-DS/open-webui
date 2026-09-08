@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import time
 from dataclasses import dataclass
 from http.client import RemoteDisconnected
 from urllib.parse import urlsplit
@@ -13,6 +14,9 @@ from urllib3.exceptions import ProtocolError
 from urllib3.util.retry import Retry
 
 DEFAULT_BASE_URL = 'http://localhost:8080'
+_SESSION_PATH = '/api/v1/auths/'
+_AMBIGUOUS_AUTH = (401, '401 Unauthorized')
+_PROBE_CACHE_SECONDS = 5
 
 
 @dataclass(frozen=True)
@@ -88,6 +92,8 @@ def entered_the_handler(response: requests.Response) -> bool:
         if isinstance(detail, list):
             return False
         if isinstance(detail, str) and (response.status_code, detail) in _REFUSALS:
+            if (response.status_code, detail) == _AMBIGUOUS_AUTH:
+                return getattr(response, '_attack_bearer_valid', False)
             return False
     return True
 
@@ -151,6 +157,7 @@ class AttackClient:
         self.session.trust_env = False  # No ambient proxy or .netrc credentials.
         self.token = token
         self.identity = None
+        self._probe_cache = None
         retry = ConnectionRetry(
             total=3,
             connect=3,
@@ -167,6 +174,36 @@ class AttackClient:
             self.session.mount(scheme, HTTPAdapter(max_retries=retry))
 
     def request(self, method: str, path: str, **kwargs) -> requests.Response:
+        result = self._send(method, path, **kwargs)
+        headers = requests.structures.CaseInsensitiveDict(kwargs.get('headers', {}))
+        authorization = headers.get('Authorization', f'Bearer {self.token}' if self.token else '')
+        own_bearer = bool(self.token and authorization == f'Bearer {self.token}')
+        body = json_body(result) if result.status_code in (401, 403) else None
+        detail = body.get('detail') if isinstance(body, dict) else None
+        marker = (result.status_code, detail) if isinstance(detail, str) else None
+        if marker == _AMBIGUOUS_AUTH and authorization.lower().startswith('bearer '):
+            # The session endpoint itself has no router-level UNAUTHORIZED gate.
+            valid = path != _SESSION_PATH and self._probe_bearer(authorization)
+            result._attack_bearer_valid = valid
+            if valid:
+                return result
+        if own_bearer and marker in _LOST_AUTH:
+            if marker != _AMBIGUOUS_AUTH or path == _SESSION_PATH:
+                self._probe_cache = None
+            raise AuthenticationError(f'Attack bearer identity was lost at {method.upper()} {path}: {detail}')
+        return result
+
+    def _probe_bearer(self, authorization: str) -> bool:
+        cached = self._probe_cache
+        if cached is not None and cached[0] == authorization and time.monotonic() < cached[1]:
+            return cached[2]
+        # Use the transport directly: an ambiguous probe failure must not recurse.
+        probe = self._send('GET', _SESSION_PATH, headers={'Authorization': authorization})
+        valid = probe.status_code == 200
+        self._probe_cache = (authorization, time.monotonic() + _PROBE_CACHE_SECONDS, valid)
+        return valid
+
+    def _send(self, method: str, path: str, **kwargs) -> requests.Response:
         if not path.startswith('/') or path.startswith('//'):
             raise ValueError('Attack paths must be relative to the configured app, starting with /')
         headers = requests.structures.CaseInsensitiveDict(kwargs.pop('headers', {}))
@@ -188,20 +225,12 @@ class AttackClient:
             )
         finally:
             self.session.cookies.clear()
-        body = json_body(result) if result.status_code in (401, 403) else None
-        detail = body.get('detail') if isinstance(body, dict) else None
-        if (
-            self.token
-            and headers.get('Authorization') == f'Bearer {self.token}'
-            and isinstance(detail, str)
-            and (result.status_code, detail) in _LOST_AUTH
-        ):
-            raise AuthenticationError(f'Attack bearer identity was lost at {method.upper()} {path}: {detail}')
         return result
 
     def authenticate(self, response: requests.Response, email: str, *, role: str | None = None):
         self.token = None
         self.identity = None
+        self._probe_cache = None
         body = session_body(response, email)
         self.token = body['token']
         try:
