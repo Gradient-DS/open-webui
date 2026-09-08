@@ -222,3 +222,107 @@ def test_non_object_body_is_rejected_before_handler(path, body, harness):
     assert response.status_code == 422, response.text
     assert isinstance(response.json()['detail'], list)
     assert seen == []
+
+
+@pytest.fixture(scope='module')
+def derived_fields():
+    from openapi_surface import writable_string_fields
+
+    return writable_string_fields(json.loads((REPO / 'security/openapi.json').read_text()))
+
+
+@pytest.mark.parametrize('path', PATHS)
+def test_model_input_strings_are_visible(path, derived_fields):
+    fields = set(derived_fields[f'POST {path}'])
+    assert 'model' in fields
+    if 'embeddings' in path:
+        assert {'input', 'input[]'} <= fields
+    elif '/v1/completions' in path:
+        assert {'prompt', 'prompt[]', 'suffix'} <= fields
+    else:
+        assert {
+            'messages[].role',
+            'messages[].content',
+            'messages[].content[].text',
+            'messages[].content[].image_url.url',
+            'messages[].content[].source.data',
+            'messages[].tool_calls[].function.arguments',
+        } <= fields
+        if path in TASK_PATHS:
+            assert {'prompt', 'responses[]'} <= fields
+        else:
+            assert {'tools[].function.description', 'tools[].description', 'system', 'system[].text'} <= fields
+
+
+@pytest.mark.parametrize(
+    'dependency_name',
+    [
+        'chat_completion_body',
+        'task_completion_body',
+        'completion_body',
+        'messages_body',
+        'embeddings_body',
+    ],
+)
+def test_body_dependency_preserves_missing_null_and_vendor_values(dependency_name):
+    from open_webui.services import model_request_bodies
+
+    dependency = getattr(model_request_bodies, dependency_name)
+    model = dependency.__annotations__['body']
+    app = FastAPI()
+    app.add_api_route('/body', dependency, methods=['POST'])
+    payloads = [
+        {},
+        {field: None for field in model.model_fields},
+        {'model': MODEL, 'vendor': {'opaque': [1, None, 'text']}, 'stream': 'false'},
+    ]
+    with TestClient(app) as client:
+        for payload in payloads:
+            response = client.post('/body', json=payload)
+            assert response.status_code == 200, response.text
+            assert response.json() == payload
+
+
+def test_nested_vendor_extensions_and_argument_formats():
+    from open_webui.services.model_request_bodies import chat_completion_body
+
+    payload = {
+        'messages': [
+            {
+                'role': 'assistant',
+                'content': None,
+                'tool_calls': [
+                    {
+                        'id': 'call-1',
+                        'type': 'function',
+                        'function': {
+                            'name': 'weather',
+                            'arguments': '{"city":"Amsterdam"}',
+                            'vendor': True,
+                        },
+                    },
+                    {'function': {'name': 'weather', 'arguments': {'city': 'Amsterdam', 'limit': 2}}},
+                ],
+            },
+            {
+                'role': 'tool',
+                'tool_call_id': 'call-1',
+                'content': [
+                    {
+                        'type': 'tool_result',
+                        'tool_use_id': 'call-1',
+                        'content': [
+                            {'type': 'text', 'text': 'Sunny', 'vendor': {'extra': True}},
+                        ],
+                    },
+                    {'type': 'vendor_block', 'vendor': {'data': 'opaque'}},
+                ],
+            },
+        ],
+    }
+    app = FastAPI()
+    app.add_api_route('/body', chat_completion_body, methods=['POST'])
+    with TestClient(app) as client:
+        response = client.post('/body', json=payload)
+    assert response.status_code == 200, response.text
+    assert response.json() == payload

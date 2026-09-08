@@ -112,6 +112,7 @@ from open_webui.config import (
     import_legacy_config_json,
     seed_registered_defaults,
 )
+from open_webui.services.model_request_bodies import chat_completion_body, embeddings_body, messages_body
 from open_webui.constants import ERROR_MESSAGES, TASKS
 from open_webui.env import (
     AGENT_API_ENABLED,  # [Gradient] Agent API bypass flag
@@ -1321,7 +1322,7 @@ async def unload_model(request: Request, form_data: ModelUnloadForm, user=Depend
 
 @app.post('/api/embeddings')
 @app.post('/api/v1/embeddings')  # Experimental: Compatibility with OpenAI API
-async def embeddings(request: Request, form_data: dict, user=Depends(get_verified_user)):
+async def embeddings(request: Request, form_data: dict = Depends(embeddings_body), user=Depends(get_verified_user)):
     """
     OpenAI-compatible embeddings endpoint.
 
@@ -1348,7 +1349,7 @@ async def embeddings(request: Request, form_data: dict, user=Depends(get_verifie
 @app.post('/api/v1/chat/completions')  # Experimental: Compatibility with OpenAI API
 async def chat_completion(
     request: Request,
-    form_data: dict,
+    form_data: dict = Depends(chat_completion_body),
     user=Depends(get_verified_user),
 ):
     if not request.app.state.MODELS:
@@ -2139,7 +2140,7 @@ from open_webui.utils.anthropic import (
 @app.post('/api/v1/messages')  # Anthropic Messages API compatible endpoint
 async def generate_messages(
     request: Request,
-    form_data: dict,
+    form_data: dict = Depends(messages_body),
     user=Depends(get_verified_user),
 ):
     """
@@ -2182,7 +2183,9 @@ async def generate_messages(
 
 
 @app.post('/api/chat/completed')
-async def chat_completed(request: Request, form_data: dict, user=Depends(get_verified_user)):
+async def chat_completed(
+    request: Request, form_data: dict = Depends(chat_completion_body), user=Depends(get_verified_user)
+):
     """Deprecated: outlet filters now run inline during chat completion.
     Kept for backward compatibility with external integrations."""
     try:
@@ -2201,7 +2204,9 @@ async def chat_completed(request: Request, form_data: dict, user=Depends(get_ver
 
 
 @app.post('/api/chat/actions/{action_id}')
-async def chat_action(request: Request, action_id: str, form_data: dict, user=Depends(get_verified_user)):
+async def chat_action(
+    request: Request, action_id: str, form_data: dict = Depends(chat_completion_body), user=Depends(get_verified_user)
+):
     try:
         model_item = form_data.pop('model_item', {})
 

@@ -44,9 +44,9 @@ def test_derived_counts(surface):
     body_counts = (sum(bool(paths) for paths in fields.values()), sum(map(len, fields.values())))
     query_counts = (sum(bool(names) for names in queries.values()), sum(map(len, queries.values())))
     assert body_counts == (
-        205,
-        810,
-    ), f'Expected 205 routes / 810 writable string fields; measured {body_counts[0]} / {body_counts[1]}.'
+        230,
+        2525,
+    ), f'Expected 230 routes / 2525 writable string fields; measured {body_counts[0]} / {body_counts[1]}.'
     assert query_counts == (
         47,
         94,
@@ -57,9 +57,9 @@ def test_derivation_cannot_silently_collapse(surface):
     _, fields, queries = surface
     # Keep independent floors even when a future schema change updates exact counts.
     routes, strings = sum(bool(paths) for paths in fields.values()), sum(map(len, fields.values()))
-    assert routes >= 200 and strings >= 800, (
+    assert routes >= 225 and strings >= 2400, (
         f'Derivation collapsed: {routes} routes / {strings} writable string fields; '
-        'floor 200 / 800, baseline 205 / 810. A partial or empty derivation cannot claim coverage.'
+        'floor 225 / 2400, baseline 230 / 2525. A partial or empty derivation cannot claim coverage.'
     )
     routes, strings = sum(bool(names) for names in queries.values()), sum(map(len, queries.values()))
     assert routes >= 40 and strings >= 90, (
@@ -72,13 +72,13 @@ def test_blind_body_counts(surface):
     operations, fields, _ = surface
     blind = {route: op for route, op in operations.items() if 'requestBody' in op and not fields.get(route)}
     media = Counter(kind for op in blind.values() for kind in op['requestBody'].get('content', {}))
-    assert len(blind) == 60 and media == {'application/json': 53, 'multipart/form-data': 7}, (
-        'Expected 60 blind body operations (53 JSON: 52 write + 1 read; 7 multipart); '
+    assert len(blind) == 35 and media == {'application/json': 28, 'multipart/form-data': 7}, (
+        'Expected 35 blind body operations (28 JSON: 27 write + 1 read; 7 multipart); '
         f'measured {len(blind)}: {dict(media)}.'
     )
     read_bodies = {route for route in blind if route.split(' ', 1)[0] in {'GET', 'HEAD', 'OPTIONS'}}
     assert read_bodies == {'GET /ollama/api/ps'}, (
-        f'Expected 1 blind JSON read body, GET /ollama/api/ps, alongside 52 JSON write bodies; '
+        f'Expected 1 blind JSON read body, GET /ollama/api/ps, alongside 27 JSON write bodies; '
         f'measured read bodies: {sorted(read_bodies)}.'
     )
 
@@ -97,7 +97,7 @@ def test_blind_bodies_are_exactly_the_reasoned_waivers(surface):
         waived.add(route)
     missing, stale = blind - waived, waived - blind
     lines = [
-        'Expected exact waivers for 60 blind operations (52 JSON write + 1 JSON read + 7 multipart); '
+        'Expected exact waivers for 35 blind operations (27 JSON write + 1 JSON read + 7 multipart); '
         f'measured {len(blind)} blind.'
     ]
     lines.append('Blind operations without waivers:')

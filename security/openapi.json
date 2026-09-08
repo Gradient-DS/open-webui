@@ -3443,6 +3443,151 @@
         "title": "ChatBody",
         "type": "object"
       },
+      "ChatCompletionBody": {
+        "additionalProperties": true,
+        "properties": {
+          "chat_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Chat Id"
+          },
+          "id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Id"
+          },
+          "messages": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/ChatMessage"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Messages"
+          },
+          "model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model"
+          },
+          "parent_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Parent Id"
+          },
+          "parent_message": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ChatMessage"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "session_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Session Id"
+          },
+          "system": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "items": {
+                  "$ref": "#/components/schemas/ContentBlock"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "System"
+          },
+          "template": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Template"
+          },
+          "tools": {
+            "anyOf": [
+              {
+                "items": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/ToolDefinition"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tools"
+          },
+          "user_message": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ChatMessage"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "title": "ChatCompletionBody",
+        "type": "object"
+      },
       "ChatCompletionsRequest": {
         "additionalProperties": true,
         "description": "Body for ``POST /api/v1/agent/chat/completions``.\n\n[Gradient] Documented schema for the agent proxy. Fields not declared\nhere pass through untouched to the upstream agent service so this\nmodel never lags behind upstream additions.",
@@ -3721,6 +3866,148 @@
           "chat"
         ],
         "title": "ChatImportForm",
+        "type": "object"
+      },
+      "ChatMessage": {
+        "additionalProperties": true,
+        "properties": {
+          "content": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "items": {
+                  "$ref": "#/components/schemas/ContentBlock"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Content"
+          },
+          "function_call": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ToolFunction"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Id"
+          },
+          "images": {
+            "anyOf": [
+              {
+                "items": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Images"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "reasoning_content": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reasoning Content"
+          },
+          "role": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Role"
+          },
+          "thinking": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Thinking"
+          },
+          "tool_call_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tool Call Id"
+          },
+          "tool_calls": {
+            "anyOf": [
+              {
+                "items": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/ToolCall"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tool Calls"
+          }
+        },
+        "title": "ChatMessage",
         "type": "object"
       },
       "ChatMessageModel": {
@@ -4599,6 +4886,67 @@
           }
         },
         "title": "CompactChatForm",
+        "type": "object"
+      },
+      "CompletionBody": {
+        "additionalProperties": true,
+        "properties": {
+          "model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model"
+          },
+          "prompt": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "items": {
+                  "type": "integer"
+                },
+                "type": "array"
+              },
+              {
+                "items": {
+                  "items": {
+                    "type": "integer"
+                  },
+                  "type": "array"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Prompt"
+          },
+          "suffix": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Suffix"
+          }
+        },
+        "title": "CompletionBody",
         "type": "object"
       },
       "ConfigForm": {
@@ -5669,6 +6017,141 @@
         "title": "ConnectionsConfigForm",
         "type": "object"
       },
+      "ContentBlock": {
+        "additionalProperties": true,
+        "properties": {
+          "content": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "items": {
+                  "$ref": "#/components/schemas/ContentBlock"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Content"
+          },
+          "id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Id"
+          },
+          "image_url": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ImageURL"
+              },
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Image Url"
+          },
+          "input_audio": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/InputAudio"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "signature": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Signature"
+          },
+          "source": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ContentSource"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "text": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Text"
+          },
+          "thinking": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Thinking"
+          },
+          "tool_use_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tool Use Id"
+          },
+          "type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Type"
+          }
+        },
+        "title": "ContentBlock",
+        "type": "object"
+      },
       "ContentForm": {
         "properties": {
           "content": {
@@ -5680,6 +6163,57 @@
           "content"
         ],
         "title": "ContentForm",
+        "type": "object"
+      },
+      "ContentSource": {
+        "additionalProperties": true,
+        "properties": {
+          "data": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Data"
+          },
+          "media_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Media Type"
+          },
+          "type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Type"
+          },
+          "url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Url"
+          }
+        },
+        "title": "ContentSource",
         "type": "object"
       },
       "CopyModelForm": {
@@ -6430,6 +6964,56 @@
           "RAG_EMBEDDING_MODEL"
         ],
         "title": "EmbeddingModelUpdateForm",
+        "type": "object"
+      },
+      "EmbeddingsBody": {
+        "additionalProperties": true,
+        "properties": {
+          "input": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "items": {
+                  "type": "integer"
+                },
+                "type": "array"
+              },
+              {
+                "items": {
+                  "items": {
+                    "type": "integer"
+                  },
+                  "type": "array"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Input"
+          },
+          "model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model"
+          }
+        },
+        "title": "EmbeddingsBody",
         "type": "object"
       },
       "EventForm": {
@@ -9245,6 +9829,35 @@
         "title": "HistoryEntry",
         "type": "object"
       },
+      "ImageURL": {
+        "additionalProperties": true,
+        "properties": {
+          "detail": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Detail"
+          },
+          "url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Url"
+          }
+        },
+        "title": "ImageURL",
+        "type": "object"
+      },
       "ImagesConfig": {
         "properties": {
           "AUTOMATIC1111_API_AUTH": {
@@ -9492,6 +10105,35 @@
           "config"
         ],
         "title": "ImportConfigForm",
+        "type": "object"
+      },
+      "InputAudio": {
+        "additionalProperties": true,
+        "properties": {
+          "data": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Data"
+          },
+          "format": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Format"
+          }
+        },
+        "title": "InputAudio",
         "type": "object"
       },
       "IntegrationsConfigForm": {
@@ -11524,6 +12166,83 @@
           "reactions"
         ],
         "title": "MessageWithReactionsResponse",
+        "type": "object"
+      },
+      "MessagesBody": {
+        "additionalProperties": true,
+        "properties": {
+          "messages": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/ChatMessage"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Messages"
+          },
+          "model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model"
+          },
+          "stop_sequences": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Stop Sequences"
+          },
+          "system": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "items": {
+                  "$ref": "#/components/schemas/ContentBlock"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "System"
+          },
+          "tools": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/ToolDefinition"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tools"
+          }
+        },
+        "title": "MessagesBody",
         "type": "object"
       },
       "ModelAccessGrantsForm": {
@@ -15997,6 +16716,85 @@
         "title": "TagModel",
         "type": "object"
       },
+      "TaskCompletionBody": {
+        "additionalProperties": true,
+        "properties": {
+          "chat_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Chat Id"
+          },
+          "messages": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/ChatMessage"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Messages"
+          },
+          "model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model"
+          },
+          "prompt": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Prompt"
+          },
+          "responses": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Responses"
+          },
+          "type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Type"
+          }
+        },
+        "title": "TaskCompletionBody",
+        "type": "object"
+      },
       "TaskConfigForm": {
         "properties": {
           "AUTOCOMPLETE_GENERATION_INPUT_MAX_LENGTH": {
@@ -16619,6 +17417,95 @@
         "title": "ToolAccessResponse",
         "type": "object"
       },
+      "ToolCall": {
+        "additionalProperties": true,
+        "properties": {
+          "function": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ToolFunction"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Id"
+          },
+          "type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Type"
+          }
+        },
+        "title": "ToolCall",
+        "type": "object"
+      },
+      "ToolDefinition": {
+        "additionalProperties": true,
+        "properties": {
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "function": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ToolFunction"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Type"
+          }
+        },
+        "title": "ToolDefinition",
+        "type": "object"
+      },
       "ToolForm": {
         "properties": {
           "access_grants": {
@@ -16659,6 +17546,50 @@
           "meta"
         ],
         "title": "ToolForm",
+        "type": "object"
+      },
+      "ToolFunction": {
+        "additionalProperties": true,
+        "properties": {
+          "arguments": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Arguments"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          }
+        },
+        "title": "ToolFunction",
         "type": "object"
       },
       "ToolMeta": {
@@ -20251,9 +21182,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "additionalProperties": true,
-                "title": "Form Data",
-                "type": "object"
+                "$ref": "#/components/schemas/ChatCompletionBody"
               }
             }
           },
@@ -20295,9 +21224,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "additionalProperties": true,
-                "title": "Form Data",
-                "type": "object"
+                "$ref": "#/components/schemas/ChatCompletionBody"
               }
             }
           },
@@ -20338,9 +21265,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "additionalProperties": true,
-                "title": "Form Data",
-                "type": "object"
+                "$ref": "#/components/schemas/ChatCompletionBody"
               }
             }
           },
@@ -20398,9 +21323,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "additionalProperties": true,
-                "title": "Form Data",
-                "type": "object"
+                "$ref": "#/components/schemas/EmbeddingsBody"
               }
             }
           },
@@ -20615,9 +21538,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "additionalProperties": true,
-                "title": "Form Data",
-                "type": "object"
+                "$ref": "#/components/schemas/MessagesBody"
               }
             }
           },
@@ -26747,9 +27668,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "additionalProperties": true,
-                "title": "Form Data",
-                "type": "object"
+                "$ref": "#/components/schemas/ChatCompletionBody"
               }
             }
           },
@@ -32034,9 +32953,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "additionalProperties": true,
-                "title": "Form Data",
-                "type": "object"
+                "$ref": "#/components/schemas/EmbeddingsBody"
               }
             }
           },
@@ -40421,9 +41338,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "additionalProperties": true,
-                "title": "Form Data",
-                "type": "object"
+                "$ref": "#/components/schemas/MessagesBody"
               }
             }
           },
@@ -44964,9 +45879,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "additionalProperties": true,
-                "title": "Form Data",
-                "type": "object"
+                "$ref": "#/components/schemas/TaskCompletionBody"
               }
             }
           },
@@ -45078,9 +45991,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "additionalProperties": true,
-                "title": "Form Data",
-                "type": "object"
+                "$ref": "#/components/schemas/TaskCompletionBody"
               }
             }
           },
@@ -45124,9 +46035,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "additionalProperties": true,
-                "title": "Form Data",
-                "type": "object"
+                "$ref": "#/components/schemas/TaskCompletionBody"
               }
             }
           },
@@ -45170,9 +46079,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "additionalProperties": true,
-                "title": "Form Data",
-                "type": "object"
+                "$ref": "#/components/schemas/TaskCompletionBody"
               }
             }
           },
@@ -45216,9 +46123,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "additionalProperties": true,
-                "title": "Form Data",
-                "type": "object"
+                "$ref": "#/components/schemas/TaskCompletionBody"
               }
             }
           },
@@ -45262,9 +46167,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "additionalProperties": true,
-                "title": "Form Data",
-                "type": "object"
+                "$ref": "#/components/schemas/TaskCompletionBody"
               }
             }
           },
@@ -45308,9 +46211,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "additionalProperties": true,
-                "title": "Form Data",
-                "type": "object"
+                "$ref": "#/components/schemas/TaskCompletionBody"
               }
             }
           },
@@ -45354,9 +46255,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "additionalProperties": true,
-                "title": "Form Data",
-                "type": "object"
+                "$ref": "#/components/schemas/TaskCompletionBody"
               }
             }
           },
@@ -48591,9 +49490,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "additionalProperties": true,
-                "title": "Form Data",
-                "type": "object"
+                "$ref": "#/components/schemas/ChatCompletionBody"
               }
             }
           },
@@ -48656,9 +49553,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "additionalProperties": true,
-                "title": "Form Data",
-                "type": "object"
+                "$ref": "#/components/schemas/ChatCompletionBody"
               }
             }
           },
@@ -50380,9 +51275,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "additionalProperties": true,
-                "title": "Form Data",
-                "type": "object"
+                "$ref": "#/components/schemas/ChatCompletionBody"
               }
             }
           },
@@ -50445,9 +51338,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "additionalProperties": true,
-                "title": "Form Data",
-                "type": "object"
+                "$ref": "#/components/schemas/ChatCompletionBody"
               }
             }
           },
@@ -50510,9 +51401,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "additionalProperties": true,
-                "title": "Form Data",
-                "type": "object"
+                "$ref": "#/components/schemas/CompletionBody"
               }
             }
           },
@@ -50575,9 +51464,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "additionalProperties": true,
-                "title": "Form Data",
-                "type": "object"
+                "$ref": "#/components/schemas/CompletionBody"
               }
             }
           },
@@ -50640,9 +51527,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "additionalProperties": true,
-                "title": "Form Data",
-                "type": "object"
+                "$ref": "#/components/schemas/MessagesBody"
               }
             }
           },
@@ -50705,9 +51590,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "additionalProperties": true,
-                "title": "Form Data",
-                "type": "object"
+                "$ref": "#/components/schemas/MessagesBody"
               }
             }
           },
@@ -51060,9 +51943,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "additionalProperties": true,
-                "title": "Form Data",
-                "type": "object"
+                "$ref": "#/components/schemas/ChatCompletionBody"
               }
             }
           },
