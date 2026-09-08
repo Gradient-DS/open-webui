@@ -12,11 +12,14 @@ import json
 from collections import deque
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from threading import Lock
-from urllib.parse import urlsplit
+from urllib.parse import parse_qs, urlsplit
 
 MODEL = 'stub-model'
 EMBEDDING_MODEL = 'text-embedding-3-small'
 EMBEDDING_DIMENSION = 1536
+AGENTS = ('soev_chat_manual', 'assistant_onboarding')
+# A complete one-pixel PNG, returned inline so image generation needs no fetch.
+PNG_BASE64 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGP4//8/AAX+Av4N70a4AAAAAElFTkSuQmCC'
 STREAM_DELTAS = ('stub ', 'streamed ', 'response')
 INJECTION_PROBE = 'owui_phase1_injection_probe'
 # OWUI uses <source id="..."> fences, not the sibling application's <bron>.
@@ -84,6 +87,35 @@ class Handler(BaseHTTPRequestHandler):
                     ],
                 }
             )
+        elif path == '/v1/gradient_agent_meta':
+            self._send(
+                {
+                    'id': AGENTS[0],
+                    'name': AGENTS[0],
+                    'description': 'CI agent',
+                    'config': {'welcome_message': 'Welcome to the CI agent.'},
+                }
+            )
+        elif path == '/openapi.json':
+            self._send(
+                {
+                    'openapi': '3.1.0',
+                    'info': {'title': 'CI agents-api', 'version': '1.0.0'},
+                    'paths': {
+                        route: {method: {'responses': {'200': {'description': 'Success'}}}}
+                        for route, method in (
+                            ('/v1/models', 'get'),
+                            ('/v1/chat/completions', 'post'),
+                            ('/v1/gradient_agent_meta', 'get'),
+                            ('/openapi.json', 'get'),
+                        )
+                    },
+                }
+            )
+        elif path == '/v1/discovery/documents':
+            self._send({'collections': [], 'total_collections': 0, 'database': {}})
+        elif path.startswith('/jobs/'):
+            self._send({'job_id': path.rsplit('/', 1)[-1], 'status': 'completed'})
         elif path == '/api/tags':
             self._send(
                 {
@@ -108,7 +140,18 @@ class Handler(BaseHTTPRequestHandler):
         elif path == '/api/version':
             self._send({'version': '0.0.0-ci'})
         elif path == '/search':
-            self._send(SEARCH_RESULTS)
+            # SearXNG asks for format=json; external search uses a bare list.
+            if parse_qs(urlsplit(self.path).query).get('format') == ['json']:
+                self._send(
+                    {
+                        'results': [
+                            {'url': row['link'], 'title': row['title'], 'content': row['content'], 'score': 1.0}
+                            for row in SEARCH_RESULTS
+                        ]
+                    }
+                )
+            else:
+                self._send(SEARCH_RESULTS)
         elif path == '/document':
             body = f'<html><body>{_HOSTILE_FORGE}</body></html>'.encode()
             self.send_response(200)
@@ -216,6 +259,10 @@ class Handler(BaseHTTPRequestHandler):
             '/api/generate',
             '/api/embed',
             '/api/embeddings',
+            '/extract',
+            '/v1/rerank',
+            '/v1/images/generations',
+            '/jobs',
         } and not isinstance(payload, dict):
             self._send({'error': 'expected a JSON object'}, 400)
             return
@@ -265,8 +312,52 @@ class Handler(BaseHTTPRequestHandler):
                 )
         elif path == '/search':
             self._send(SEARCH_RESULTS)
+        elif path == '/extract':
+            self._send(
+                [
+                    {'page_content': _HOSTILE_FORGE, 'metadata': {'source': url, 'title': _HOSTILE_CLOSE}}
+                    for url in payload.get('urls', [])
+                ]
+            )
+        elif path == '/v1/rerank':
+            self._send(
+                {
+                    'results': [
+                        {'index': index, 'relevance_score': 1.0 / (index + 1)}
+                        for index, _ in enumerate(payload.get('documents', []))
+                    ]
+                }
+            )
+        elif path == '/v1/images/generations':
+            self._send({'created': 0, 'data': [{'b64_json': PNG_BASE64} for _ in range(payload.get('n', 1))]})
+        elif path == '/jobs':
+            self._send({'job_id': 'ci-document-job', 'status': 'pending'}, status=201)
         elif path == '/api/show':
             self._send({'model_info': {}, 'details': {'family': 'stub'}, 'capabilities': ['completion']})
+        else:
+            self._send({'status': 'ok'})
+
+    def do_PUT(self):
+        # ExternalDocumentLoader sends raw file bytes, not JSON or multipart.
+        if urlsplit(self.path).path == '/process':
+            try:
+                length = int(self.headers.get('Content-Length', '0'))
+                if length < 0:
+                    raise ValueError
+            except ValueError:
+                self._send({'error': 'invalid Content-Length'}, 400)
+                return
+            raw = self.rfile.read(length)
+            with _RECORD_LOCK:
+                _RECORDED.append(
+                    {
+                        'path': self.path,
+                        'body': None,
+                        'raw_body': raw.decode('utf-8', errors='replace'),
+                        'raw_body_base64': base64.b64encode(raw).decode(),
+                    }
+                )
+            self._send([{'page_content': _HOSTILE_FORGE, 'metadata': {'source': 'ci-document'}}])
         else:
             self._send({'status': 'ok'})
 

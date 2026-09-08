@@ -146,7 +146,7 @@ def test_capture_is_thread_safe_and_keeps_recent_requests(stub):
     assert get_json(stub, '/_recorded')['requests'][-1]['body'] == {'index': 'last'}
 
 
-@pytest.mark.parametrize('path', ['/webhook', '/jobs', '/sync/cancel'])
+@pytest.mark.parametrize('path', ['/webhook', '/unmodelled', '/sync/cancel'])
 def test_unmodelled_upstreams_have_the_planned_catch_all(stub, path):
     assert get_json(stub, path, payload={'action': 'CI probe'}) == {'status': 'ok'}
 

@@ -19,45 +19,45 @@ REPO = SERVER.parents[1]
 DECLARED_FETCH_SINKS: dict[str, str] = {
     'config.py': 'Branding fetches require CUSTOM_NAME (empty); explicit Ollama URL avoids startup TCP probes.',
     'main.py': 'OFFLINE_MODE blocks GitHub updates; configured OpenAI and Ollama model calls go to stub.',
-    'retrieval/loaders/datalab_marker.py': 'Marker requires a selected engine and DATALAB_MARKER_API_KEY; both empty in CI.',
-    'retrieval/loaders/external_document.py': 'External document loader is not selected; native CONTENT_EXTRACTION_ENGINE is empty.',
-    'retrieval/loaders/external_web.py': 'External web loader is not selected; WEB_LOADER_ENGINE is empty.',
-    'retrieval/loaders/main.py': 'Remote OCR/Docling/Tika branches are not selected; CONTENT_EXTRACTION_ENGINE is empty.',
-    'retrieval/loaders/microsoft_web_iq.py': 'Microsoft web loader is not selected; WEB_LOADER_ENGINE is empty.',
-    'retrieval/loaders/mineru.py': 'MinerU loader is not selected; CONTENT_EXTRACTION_ENGINE is empty.',
-    'retrieval/loaders/mistral.py': 'Mistral OCR is not selected; CONTENT_EXTRACTION_ENGINE is empty.',
-    'retrieval/loaders/paddleocr_vl.py': 'PaddleOCR is not selected; CONTENT_EXTRACTION_ENGINE is empty.',
-    'retrieval/loaders/tavily.py': 'Tavily web loader is not selected; WEB_LOADER_ENGINE is empty.',
-    'retrieval/models/external.py': 'External reranking requires a selected model/engine; both empty in CI.',
+    'retrieval/loaders/datalab_marker.py': 'Marker is not selected and DATALAB_MARKER_API_KEY is empty in CI.',
+    'retrieval/loaders/external_document.py': 'External document loader uses EXTERNAL_DOCUMENT_LOADER_URL at stub (PUT /process).',
+    'retrieval/loaders/external_web.py': 'External web loader uses EXTERNAL_WEB_LOADER_URL at stub (POST /extract).',
+    'retrieval/loaders/main.py': 'Remote OCR/Docling/Tika branches are not selected; CONTENT_EXTRACTION_ENGINE selects the external stub loader.',
+    'retrieval/loaders/microsoft_web_iq.py': 'Microsoft web loader is not selected; WEB_LOADER_ENGINE selects the external stub loader.',
+    'retrieval/loaders/mineru.py': 'MinerU loader is not selected; CONTENT_EXTRACTION_ENGINE selects the external stub loader.',
+    'retrieval/loaders/mistral.py': 'Mistral OCR is not selected; CONTENT_EXTRACTION_ENGINE selects the external stub loader.',
+    'retrieval/loaders/paddleocr_vl.py': 'PaddleOCR is not selected; CONTENT_EXTRACTION_ENGINE selects the external stub loader.',
+    'retrieval/loaders/tavily.py': 'Tavily web loader is not selected; WEB_LOADER_ENGINE selects the external stub loader.',
+    'retrieval/models/external.py': 'External reranking uses RAG_EXTERNAL_RERANKER_URL at stub (POST /v1/rerank).',
     'retrieval/utils.py': 'Embeddings use RAG_OPENAI_API_BASE_URL at stub; supplied download URLs are findings.',
-    'retrieval/web/bing.py': 'bing search is not selected; empty WEB_SEARCH_ENGINE raises in search_web before dispatch.',
-    'retrieval/web/bocha.py': 'bocha search is not selected; empty WEB_SEARCH_ENGINE raises in search_web before dispatch.',
-    'retrieval/web/brave.py': 'brave search is not selected; empty WEB_SEARCH_ENGINE raises in search_web before dispatch.',
-    'retrieval/web/brave_llm_context.py': 'brave_llm_context search is not selected; empty WEB_SEARCH_ENGINE raises in search_web before dispatch.',
-    'retrieval/web/exa.py': 'exa search is not selected; empty WEB_SEARCH_ENGINE raises in search_web before dispatch.',
-    'retrieval/web/external.py': 'external search is not selected; empty WEB_SEARCH_ENGINE raises in search_web before dispatch.',
-    'retrieval/web/firecrawl.py': 'firecrawl search is not selected; empty WEB_SEARCH_ENGINE raises in search_web before dispatch.',
-    'retrieval/web/google_pse.py': 'google_pse search is not selected; empty WEB_SEARCH_ENGINE raises in search_web before dispatch.',
-    'retrieval/web/jina_search.py': 'jina_search search is not selected; empty WEB_SEARCH_ENGINE raises in search_web before dispatch.',
-    'retrieval/web/kagi.py': 'kagi search is not selected; empty WEB_SEARCH_ENGINE raises in search_web before dispatch.',
-    'retrieval/web/linkup.py': 'linkup search is not selected; empty WEB_SEARCH_ENGINE raises in search_web before dispatch.',
-    'retrieval/web/microsoft_web_iq.py': 'microsoft_web_iq search is not selected; empty WEB_SEARCH_ENGINE raises in search_web before dispatch.',
-    'retrieval/web/mojeek.py': 'mojeek search is not selected; empty WEB_SEARCH_ENGINE raises in search_web before dispatch.',
-    'retrieval/web/ollama.py': 'ollama search is not selected; empty WEB_SEARCH_ENGINE raises in search_web before dispatch.',
-    'retrieval/web/perplexity.py': 'perplexity search is not selected; empty WEB_SEARCH_ENGINE raises in search_web before dispatch.',
-    'retrieval/web/perplexity_search.py': 'perplexity_search search is not selected; empty WEB_SEARCH_ENGINE raises in search_web before dispatch.',
-    'retrieval/web/searchapi.py': 'searchapi search is not selected; empty WEB_SEARCH_ENGINE raises in search_web before dispatch.',
-    'retrieval/web/searxng.py': 'searxng search is not selected; empty WEB_SEARCH_ENGINE raises in search_web before dispatch.',
-    'retrieval/web/serpapi.py': 'serpapi search is not selected; empty WEB_SEARCH_ENGINE raises in search_web before dispatch.',
-    'retrieval/web/serper.py': 'serper search is not selected; empty WEB_SEARCH_ENGINE raises in search_web before dispatch.',
-    'retrieval/web/serphouse.py': 'serphouse search is not selected; empty WEB_SEARCH_ENGINE raises in search_web before dispatch.',
-    'retrieval/web/serply.py': 'serply search is not selected; empty WEB_SEARCH_ENGINE raises in search_web before dispatch.',
-    'retrieval/web/serpstack.py': 'serpstack search is not selected; empty WEB_SEARCH_ENGINE raises in search_web before dispatch.',
-    'retrieval/web/tavily.py': 'tavily search is not selected; empty WEB_SEARCH_ENGINE raises in search_web before dispatch.',
+    'retrieval/web/bing.py': 'bing search is not selected; WEB_SEARCH_ENGINE selects the in-network searxng stub.',
+    'retrieval/web/bocha.py': 'bocha search is not selected; WEB_SEARCH_ENGINE selects the in-network searxng stub.',
+    'retrieval/web/brave.py': 'brave search is not selected; WEB_SEARCH_ENGINE selects the in-network searxng stub.',
+    'retrieval/web/brave_llm_context.py': 'brave_llm_context search is not selected; WEB_SEARCH_ENGINE selects the in-network searxng stub.',
+    'retrieval/web/exa.py': 'exa search is not selected; WEB_SEARCH_ENGINE selects the in-network searxng stub.',
+    'retrieval/web/external.py': 'external search is not selected; WEB_SEARCH_ENGINE selects the in-network searxng stub.',
+    'retrieval/web/firecrawl.py': 'firecrawl search is not selected; WEB_SEARCH_ENGINE selects the in-network searxng stub.',
+    'retrieval/web/google_pse.py': 'google_pse search is not selected; WEB_SEARCH_ENGINE selects the in-network searxng stub.',
+    'retrieval/web/jina_search.py': 'jina_search search is not selected; WEB_SEARCH_ENGINE selects the in-network searxng stub.',
+    'retrieval/web/kagi.py': 'kagi search is not selected; WEB_SEARCH_ENGINE selects the in-network searxng stub.',
+    'retrieval/web/linkup.py': 'linkup search is not selected; WEB_SEARCH_ENGINE selects the in-network searxng stub.',
+    'retrieval/web/microsoft_web_iq.py': 'microsoft_web_iq search is not selected; WEB_SEARCH_ENGINE selects the in-network searxng stub.',
+    'retrieval/web/mojeek.py': 'mojeek search is not selected; WEB_SEARCH_ENGINE selects the in-network searxng stub.',
+    'retrieval/web/ollama.py': 'ollama search is not selected; WEB_SEARCH_ENGINE selects the in-network searxng stub.',
+    'retrieval/web/perplexity.py': 'perplexity search is not selected; WEB_SEARCH_ENGINE selects the in-network searxng stub.',
+    'retrieval/web/perplexity_search.py': 'perplexity_search search is not selected; WEB_SEARCH_ENGINE selects the in-network searxng stub.',
+    'retrieval/web/searchapi.py': 'searchapi search is not selected; WEB_SEARCH_ENGINE selects the in-network searxng stub.',
+    'retrieval/web/searxng.py': 'SearXNG search uses SEARXNG_QUERY_URL at stub (GET /search?format=json).',
+    'retrieval/web/serpapi.py': 'serpapi search is not selected; WEB_SEARCH_ENGINE selects the in-network searxng stub.',
+    'retrieval/web/serper.py': 'serper search is not selected; WEB_SEARCH_ENGINE selects the in-network searxng stub.',
+    'retrieval/web/serphouse.py': 'serphouse search is not selected; WEB_SEARCH_ENGINE selects the in-network searxng stub.',
+    'retrieval/web/serply.py': 'serply search is not selected; WEB_SEARCH_ENGINE selects the in-network searxng stub.',
+    'retrieval/web/serpstack.py': 'serpstack search is not selected; WEB_SEARCH_ENGINE selects the in-network searxng stub.',
+    'retrieval/web/tavily.py': 'tavily search is not selected; WEB_SEARCH_ENGINE selects the in-network searxng stub.',
     'retrieval/web/utils.py': 'Native web fetches consume supplied URLs; public destinations are findings, CI documents use stub.',
-    'retrieval/web/yacy.py': 'yacy search is not selected; empty WEB_SEARCH_ENGINE raises in search_web before dispatch.',
-    'retrieval/web/yandex.py': 'yandex search is not selected; empty WEB_SEARCH_ENGINE raises in search_web before dispatch.',
-    'retrieval/web/ydc.py': 'ydc search is not selected; empty WEB_SEARCH_ENGINE raises in search_web before dispatch.',
+    'retrieval/web/yacy.py': 'yacy search is not selected; WEB_SEARCH_ENGINE selects the in-network searxng stub.',
+    'retrieval/web/yandex.py': 'yandex search is not selected; WEB_SEARCH_ENGINE selects the in-network searxng stub.',
+    'retrieval/web/ydc.py': 'ydc search is not selected; WEB_SEARCH_ENGINE selects the in-network searxng stub.',
     'routers/agent_proxy.py': 'Agent passthrough uses AGENT_API_BASE_URL at stub.',
     'routers/audio.py': 'OpenAI audio URLs explicitly point to stub; other speech engines remain unselected.',
     'routers/auths.py': 'OAuth avatar fetch requires a completed provider login; no OAuth provider is configured.',
@@ -76,10 +76,10 @@ DECLARED_FETCH_SINKS: dict[str, str] = {
     'services/confluence/token_refresh.py': 'No Confluence integration credentials or stored refresh tokens in the fresh CI database.',
     'services/email/auth.py': 'Missing EMAIL_GRAPH credentials raise before the Microsoft token request.',
     'services/email/graph_mail_client.py': 'Mail token acquisition raises before Graph sendMail when EMAIL_GRAPH credentials are empty.',
-    'services/google_drive/auth.py': 'Google Drive integration disabled and OAuth credentials empty; no login tokens seeded.',
+    'services/google_drive/auth.py': 'Google Drive integration enabled but OAuth credentials empty; no login tokens seeded.',
     'services/google_drive/drive_client.py': 'No Google Drive integration credentials or stored OAuth tokens in the fresh CI database.',
     'services/google_drive/token_refresh.py': 'No stored Google refresh token in the fresh CI database; refresh returns before HTTP.',
-    'services/onedrive/auth.py': 'OneDrive integration disabled and OAuth credentials empty; no login tokens seeded.',
+    'services/onedrive/auth.py': 'OneDrive integration enabled but OAuth credentials empty; no login tokens seeded.',
     'services/onedrive/graph_client.py': 'No OneDrive integration credentials or stored OAuth tokens in the fresh CI database.',
     'services/onedrive/token_refresh.py': 'No stored OneDrive refresh token in the fresh CI database; refresh returns before HTTP.',
     'services/sync/daemon_client.py': 'Manual sync and cancellation use SYNC_DAEMON_URL at stub.',
@@ -87,7 +87,7 @@ DECLARED_FETCH_SINKS: dict[str, str] = {
     'utils/anthropic.py': 'Provider passthrough uses configured OpenAI connections at stub; no Anthropic connection is seeded.',
     'utils/auth.py': 'License checks require LICENSE_KEY, empty in CI; an injected public license request is a finding.',
     'utils/automations.py': 'No automation webhook is seeded; request-supplied public webhooks are findings.',
-    'utils/code_interpreter.py': 'No Jupyter URL configured; native code execution stays local.',
+    'utils/code_interpreter.py': 'Code flags enabled; pyodide selected, with Jupyter coverage gap documented in security/deployed-config.md.',
     'utils/doc_pipeline.py': 'Document submission and polling use PIPELINE_API_BASE_URL at stub.',
     'utils/feedback_report.py': 'Feedback Slack and notification-router URLs both point at stub.',
     'utils/files.py': 'Remote file download consumes supplied URLs; off-network destinations are findings.',
@@ -372,6 +372,10 @@ STUB_URLS = {
     'SYNC_DAEMON_URL': 'http://stub:8000',
     'PIPELINE_API_BASE_URL': 'http://stub:8000',
     'RAG_OPENAI_API_BASE_URL': 'http://stub:8000/v1',
+    'RAG_EXTERNAL_RERANKER_URL': 'http://stub:8000/v1/rerank',
+    'SEARXNG_QUERY_URL': 'http://stub:8000/search',
+    'EXTERNAL_DOCUMENT_LOADER_URL': 'http://stub:8000',
+    'EXTERNAL_WEB_LOADER_URL': 'http://stub:8000/extract',
     'AUDIO_STT_OPENAI_API_BASE_URL': 'http://stub:8000/v1',
     'AUDIO_TTS_OPENAI_API_BASE_URL': 'http://stub:8000/v1',
     'IMAGES_OPENAI_API_BASE_URL': 'http://stub:8000/v1',
@@ -382,14 +386,9 @@ STUB_URLS = {
 CLOSED_SETTINGS = (
     'ENABLE_OTEL',
     'DATALAB_MARKER_API_KEY',
-    'WEB_SEARCH_ENGINE',
     'RAG_CONTENT_EXTRACTION_ENGINE',
-    'CONTENT_EXTRACTION_ENGINE',
-    'WEB_LOADER_ENGINE',
     'CUSTOM_NAME',
     'LICENSE_KEY',
-    'RAG_RERANKING_ENGINE',
-    'RAG_RERANKING_MODEL',
     'COMFYUI_BASE_URL',
     'CODE_EXECUTION_JUPYTER_URL',
     'CODE_INTERPRETER_JUPYTER_URL',
@@ -448,8 +447,9 @@ class TestCiStubsEveryDeclaredSink:
         assert env['RAG_EMBEDDING_MODEL'] == 'text-embedding-3-small'
         assert env['RAG_OPENAI_API_KEY']
         assert env['ENABLE_PERSISTENT_CONFIG'] == 'false'
-        for provider in ('GOOGLE_DRIVE', 'ONEDRIVE', 'CONFLUENCE'):
-            assert env[f'ENABLE_{provider}_INTEGRATION'] == 'false'
+        for provider in ('GOOGLE_DRIVE', 'ONEDRIVE'):
+            assert env[f'ENABLE_{provider}_INTEGRATION'] == 'true'
+        assert env['ENABLE_CONFLUENCE_INTEGRATION'] == 'false'
 
     def test_redis_is_real_so_signout_revokes_tokens(self, compose):
         services = compose['services']
@@ -492,20 +492,30 @@ class TestCiStubsEveryDeclaredSink:
         for dependency in ('postgres', 'weaviate', 'redis', 'stub'):
             assert app['depends_on'][dependency]['condition'] == 'service_healthy'
 
-    def test_empty_search_engine_rejects_before_dispatch(self, compose):
+    def test_deployed_search_engine_reaches_provider_dispatch(self, compose):
         # Execute only this function's AST, with deferred annotations and no
-        # provider functions available. Importing the router would boot the app.
+        # real provider imports. Importing the router would boot the app.
         tree = ast.parse((SERVER / 'routers/retrieval.py').read_text())
         function = next(n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == 'search_web')
         module = ast.Module(
             body=[ast.ImportFrom(module='__future__', names=[ast.alias(name='annotations')], level=0), function],
             type_ignores=[],
         )
-        namespace = {}
+        from types import SimpleNamespace
+        from unittest.mock import Mock
+
+        provider = Mock(return_value=['provider reached'])
+        namespace = {'search_searxng': provider}
         exec(compile(ast.fix_missing_locations(module), '<search_web>', 'exec'), namespace)
         engine = compose['services']['open-webui']['environment']['WEB_SEARCH_ENGINE']
-        with pytest.raises(Exception, match='No search engine API key found'):
-            namespace['search_web'](None, engine, 'CI probe', config=object())
+        config = SimpleNamespace(
+            SEARXNG_QUERY_URL=compose['services']['open-webui']['environment']['SEARXNG_QUERY_URL'],
+            SEARXNG_LANGUAGE='all',
+            WEB_SEARCH_RESULT_COUNT=1,
+            WEB_SEARCH_DOMAIN_FILTER_LIST=[],
+        )
+        assert namespace['search_web'](None, engine, 'CI probe', config=config) == ['provider reached']
+        provider.assert_called_once_with('http://stub:8000/search', 'CI probe', 1, [], language='all')
 
     def test_marker_key_guards_the_public_url_fallback(self, compose):
         from types import SimpleNamespace
