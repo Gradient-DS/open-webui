@@ -23,6 +23,7 @@ agentApiEnabled=true and enableAgentProxy=true.
 | enableAgentProxy | ENABLE_AGENT_PROXY | "false" | "true" | external-facing agent API |
 | enableCodeExecution | ENABLE_CODE_EXECUTION | "false" | "true" | Jupyter sink |
 | enableCodeInterpreter | ENABLE_CODE_INTERPRETER | "false" | "true" | Jupyter sink |
+| codeExecutionEngine (unset) | CODE_EXECUTION_ENGINE | pyodide (app default) | pyodide | set by no tenant and no chart value, so production runs the app default (`config.py:402`); a tenant setting `jupyter` activates a server-side HTTP+WebSocket sink and will show here as drift |
 | enableFeedbackReporting | ENABLE_FEEDBACK_REPORTING | "False" | "True" | the unguarded webhook sink |
 | enableWebSearch | ENABLE_WEB_SEARCH | "true" | "true" | |
 | webSearchEngine | WEB_SEARCH_ENGINE | "searxng" | "searxng" | shared-services searxng |
@@ -60,7 +61,7 @@ flags cannot be waived; telemetry is the sole boolean exception.
 | ENABLE_OTEL | empty | No Alloy OTLP collector exists in the sealed stack. Disable telemetry exports; they do not decide application request coverage. |
 | Upstream API keys, database password, signing key | disposable CI values | Production secrets are neither available nor needed by the stub. |
 | OAuth / OneDrive / Google Drive / Graph mail credentials and stored tokens | empty | Provider authentication uses public Microsoft/Google endpoints, including hard-coded URLs. No real provider credentials or tokens are available. Integration, Google sync, email invite and OAuth signup flags remain enabled, but successful cloud authentication, sync and mail delivery are not covered. |
-| CODE_EXECUTION_ENGINE, CODE_INTERPRETER_ENGINE / Jupyter URLs | pyodide / empty | The snapshot supplies enabled flags and a Jupyter note but no deployed engine, URL or authentication settings. Keep both flags enabled and explicitly select the application's default engine; Jupyter HTTP/WebSocket execution is not covered. Re-sync these missing settings before claiming Jupyter coverage. |
+| CODE_EXECUTION_ENGINE, CODE_INTERPRETER_ENGINE | pyodide | **Not a divergence — this is parity.** Verified 2026-09-08: neither soev-gitops nor the chart sets an engine, so production runs the application default `pyodide` (`config.py:402,424`). Pyodide executes in the browser, so the server-side Jupyter sink in `utils/code_interpreter.py` is dormant across the whole fleet, not merely uncovered here. If any tenant ever sets `jupyter`, the snapshot row below turns this into drift the parity test will catch. |
 | External loader, search, pipeline and webhook URLs | http://stub:8000 with caller-specific paths | Production destination details are not supplied in the snapshot; route all configured outbound services to the sealed stub. |
 | RAG_RERANKING_ENGINE, RAG_RERANKING_MODEL | external, ci-reranker | The snapshot specifies the external reranker URL but omits engine/model. Select the external engine to exercise it without downloading a model. The stub returns deterministic scores. |
 
