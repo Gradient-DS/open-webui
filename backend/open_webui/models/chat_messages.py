@@ -5,8 +5,7 @@ from datetime import datetime, timedelta
 from typing import Any, Optional
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from sqlalchemy import select, delete, func, cast, Integer, distinct
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import distinct
 from open_webui.internal.db import Base, get_async_db_context
 from open_webui.utils.response import merge_usage, normalize_usage
 from pydantic import BaseModel, ConfigDict
@@ -234,6 +233,9 @@ class ChatMessageTable:
             message.done = data['done']
         if 'status_history' in data or 'statusHistory' in data:
             message.status_history = data.get('status_history') or data.get('statusHistory')
+        # [Gradient] Preserve agent progress on both inserts and partial updates.
+        if 'subagents' in data:
+            message.subagents = data.get('subagents')
         if 'error' in data:
             message.error = data.get('error')
         if 'context_summary' in data or 'contextSummary' in data:
@@ -262,6 +264,7 @@ class ChatMessageTable:
             meta=data.get('meta'),
             done=data.get('done', True),
             status_history=data.get('status_history') or data.get('statusHistory'),
+            subagents=data.get('subagents'),
             error=data.get('error'),
             usage=get_usage(data),
             context_summary=data.get('context_summary') or data.get('contextSummary'),
@@ -283,77 +286,11 @@ class ChatMessageTable:
             # Use composite ID: {chat_id}-{message_id}
             composite_id = f'{chat_id}-{message_id}'
 
-<<<<<<< HEAD
-            existing = await db.get(ChatMessage, composite_id)
-            if existing:
-                # Update existing
-                if 'role' in data:
-                    existing.role = data['role']
-                if 'parent_id' in data or 'parentId' in data:
-                    existing.parent_id = data.get('parent_id') or data.get('parentId')
-                if 'content' in data:
-                    existing.content = data.get('content')
-                if 'output' in data:
-                    existing.output = data.get('output')
-                if 'model_id' in data or 'model' in data:
-                    existing.model_id = data.get('model_id') or data.get('model')
-                if 'files' in data:
-                    existing.files = data.get('files')
-                if 'sources' in data:
-                    existing.sources = data.get('sources')
-                if 'embeds' in data:
-                    existing.embeds = data.get('embeds')
-                if 'done' in data:
-                    existing.done = data.get('done', True)
-                if 'status_history' in data or 'statusHistory' in data:
-                    existing.status_history = data.get('status_history') or data.get('statusHistory')
-                if 'subagents' in data:
-                    existing.subagents = data.get('subagents')
-                if 'error' in data:
-                    existing.error = data.get('error')
-                if 'context_summary' in data or 'contextSummary' in data:
-                    existing.context_summary = data.get('context_summary') or data.get('contextSummary')
-                # Extract and normalize usage
-                usage = get_usage(data)
-                if usage:
-                    existing_usage = normalize_usage(existing.usage or {}) if existing.usage else {}
-                    existing.usage = existing_usage if usage == existing_usage else merge_usage(existing_usage, usage)
-                existing.updated_at = now
-                await db.commit()
-                await db.refresh(existing)
-                return ChatMessageModel.model_validate(existing)
-            else:
-                # Insert new
-                # Extract and normalize usage
-                usage = get_usage(data)
-                message = ChatMessage(
-                    id=composite_id,
-                    chat_id=chat_id,
-                    user_id=user_id,
-                    role=data.get('role', 'user'),
-                    parent_id=data.get('parent_id') or data.get('parentId'),
-                    content=data.get('content'),
-                    output=data.get('output'),
-                    model_id=data.get('model_id') or data.get('model'),
-                    files=data.get('files'),
-                    sources=data.get('sources'),
-                    embeds=data.get('embeds'),
-                    done=data.get('done', True),
-                    status_history=data.get('status_history') or data.get('statusHistory'),
-                    subagents=data.get('subagents'),
-                    error=data.get('error'),
-                    usage=usage,
-                    context_summary=data.get('context_summary') or data.get('contextSummary'),
-                    created_at=timestamp,
-                    updated_at=now,
-                )
-=======
             message = await db.get(ChatMessage, composite_id)
             if message:
                 self._apply_message_data(message, data, now)
             else:
                 message = self._build_message(composite_id, chat_id, user_id, data, now)
->>>>>>> upstream/main
                 db.add(message)
 
             await db.commit()

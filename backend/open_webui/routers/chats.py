@@ -1577,29 +1577,6 @@ async def delete_chat_by_id(
     # not be reachable for a chat the caller may not delete.
     if user.role == 'admin':
         chat = await Chats.get_chat_by_id(id, db=db)
-<<<<<<< HEAD
-        if not chat:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=ERROR_MESSAGES.NOT_FOUND,
-            )
-        await Chats.delete_orphan_tags_for_user(chat.meta.get('tags', []), user.id, threshold=1, db=db)
-
-        # Soft-delete so the cleanup worker can remove associated files,
-        # vector embeddings, and storage before hard-deleting the record.
-        result = await Chats.soft_delete_by_id(id, db=db)
-
-        if result:
-            await publish_event(
-                request,
-                EVENTS.CHAT_DELETED,
-                actor=user,
-                subject_id=id,
-                data={'owner_id': chat.user_id},
-            )
-        return result
-=======
->>>>>>> upstream/main
     else:
         if not await has_permission(user.id, 'chat.delete', await Config.get('user.permissions')):
             raise HTTPException(
@@ -1608,20 +1585,6 @@ async def delete_chat_by_id(
             )
         chat = await Chats.get_chat_by_id_and_user_id(id, user.id, db=db)
 
-<<<<<<< HEAD
-        # Soft-delete so the cleanup worker can remove associated files,
-        # vector embeddings, and storage before hard-deleting the record.
-        result = await Chats.soft_delete_by_id(id, db=db)
-        if result:
-            await publish_event(
-                request,
-                EVENTS.CHAT_DELETED,
-                actor=user,
-                subject_id=id,
-                data={'owner_id': user.id},
-            )
-        return result
-=======
     if not chat:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -1633,15 +1596,15 @@ async def delete_chat_by_id(
     await stop_item_tasks(request.app.state.redis, id)
     await Chats.delete_orphan_tags_for_user(chat.meta.get('tags', []), user.id, threshold=1, db=db)
 
-    # Cascade to internal child chats spawned from this one.
+    # [Gradient] Soft-delete internal children so retention cleanup owns the cascade.
     for child_id in await Chats.get_internal_chat_ids_by_parent_id(id, chat.user_id):
         await stop_item_tasks(request.app.state.redis, child_id)
-        await Chats.delete_chat_by_id_and_user_id(child_id, chat.user_id)
+        await Chats.soft_delete_by_id(child_id, db=db)
 
     if user.role == 'admin':
-        result = await Chats.delete_chat_by_id(id, db=db)
+        result = await Chats.soft_delete_by_id(id, db=db)
     else:
-        result = await Chats.delete_chat_by_id_and_user_id(id, user.id, db=db)
+        result = await Chats.soft_delete_by_id(id, db=db)
 
     if result:
         await publish_event(
@@ -1652,7 +1615,6 @@ async def delete_chat_by_id(
             data={'owner_id': chat.user_id},
         )
     return result
->>>>>>> upstream/main
 
 
 ############################

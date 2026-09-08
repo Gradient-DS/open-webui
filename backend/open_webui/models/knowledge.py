@@ -1,9 +1,6 @@
-<<<<<<< HEAD
 import asyncio
 import base64
 import json
-=======
->>>>>>> upstream/main
 import logging
 import time
 from typing import Optional, Union
@@ -183,11 +180,8 @@ class KnowledgeDirectoryForm(BaseModel):
 ####################
 class KnowledgeUserModel(KnowledgeModel):
     user: Optional[UserResponse] = None
-<<<<<<< HEAD
     suspension_info: Optional[dict] = None
-=======
     file_count: int | None = None
->>>>>>> upstream/main
 
 
 class KnowledgeResponse(KnowledgeModel):
@@ -597,7 +591,6 @@ class KnowledgeTable:
 
                 knowledge_bases = []
                 for knowledge_base, user in items:
-<<<<<<< HEAD
                     kb_data = {
                         **(
                             await self._to_knowledge_model(
@@ -606,6 +599,7 @@ class KnowledgeTable:
                                 db=db,
                             )
                         ).model_dump(),
+                        'file_count': file_counts.get(knowledge_base.id, 0),
                         'user': (UserModel.model_validate(user).model_dump() if user else None),
                     }
 
@@ -625,23 +619,6 @@ class KnowledgeTable:
                                 break
 
                     knowledge_bases.append(KnowledgeUserModel.model_validate(kb_data))
-=======
-                    knowledge_bases.append(
-                        KnowledgeUserModel.model_validate(
-                            {
-                                **(
-                                    await self._to_knowledge_model(
-                                        knowledge_base,
-                                        access_grants=grants_map.get(knowledge_base.id, []),
-                                        db=db,
-                                    )
-                                ).model_dump(),
-                                'user': (UserModel.model_validate(user).model_dump() if user else None),
-                                'file_count': file_counts.get(knowledge_base.id, 0),
-                            }
-                        )
-                    )
->>>>>>> upstream/main
 
                 return KnowledgeListResponse(items=knowledge_bases, total=total)
         except Exception as e:
@@ -752,7 +729,6 @@ class KnowledgeTable:
             db=db,
         )
 
-<<<<<<< HEAD
     async def get_knowledge_bases_by_type(self, type: str, db: Optional[AsyncSession] = None) -> list[KnowledgeModel]:
         """Get all knowledge bases of a specific type (no pagination limit). Used by Gradient sync schedulers."""
         async with get_async_db_context(db) as db:
@@ -800,8 +776,6 @@ class KnowledgeTable:
         except Exception:
             return []
 
-=======
->>>>>>> upstream/main
     async def get_knowledge_by_id(self, id: str, db: Optional[AsyncSession] = None) -> Optional[KnowledgeModel]:
         try:
             async with get_async_db_context(db) as db:
@@ -814,7 +788,6 @@ class KnowledgeTable:
         except Exception:
             return None
 
-<<<<<<< HEAD
     async def get_knowledge_by_id_and_user_id(
         self, id: str, user_id: str, db: Optional[AsyncSession] = None
     ) -> Optional[KnowledgeModel]:
@@ -861,8 +834,6 @@ class KnowledgeTable:
             log.exception(e)
             return None
 
-=======
->>>>>>> upstream/main
     async def get_knowledges_by_file_id(self, file_id: str, db: Optional[AsyncSession] = None) -> list[KnowledgeModel]:
         try:
             async with get_async_db_context(db) as db:
@@ -1559,7 +1530,6 @@ class KnowledgeTable:
             log.exception(e)
             return None
 
-<<<<<<< HEAD
     async def update_knowledge_user_id_by_id(
         self, id: str, user_id: str, db: Optional[AsyncSession] = None
     ) -> Optional[KnowledgeModel]:
@@ -1603,22 +1573,13 @@ class KnowledgeTable:
     async def update_knowledge_data_by_id(
         self, id: str, data: dict, db: Optional[AsyncSession] = None
     ) -> Optional[KnowledgeModel]:
-=======
-    async def update_knowledge_meta_by_id(
-        self, id: str, meta: dict, db: Optional[AsyncSession] = None
-    ) -> Optional[KnowledgeModel]:
->>>>>>> upstream/main
         try:
             async with get_async_db_context(db) as db:
                 await db.execute(
                     update(Knowledge)
                     .filter_by(id=id)
                     .values(
-<<<<<<< HEAD
                         data=data,
-=======
-                        meta=meta,
->>>>>>> upstream/main
                         updated_at=int(time.time()),
                     )
                 )

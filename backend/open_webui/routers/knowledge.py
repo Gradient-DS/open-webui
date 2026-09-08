@@ -11,16 +11,12 @@ from urllib.parse import quote
 
 from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException, Query, Request, Response, status
 from fastapi.responses import StreamingResponse
-<<<<<<< HEAD
 from fastapi.security import HTTPAuthorizationCredentials
 from open_webui.config import BYPASS_ADMIN_ACCESS_CONTROL
-=======
 from open_webui.config import (
-    BYPASS_ADMIN_ACCESS_CONTROL,
     ENABLE_KNOWLEDGE_FILE_RETENTION,
     RAG_EMBEDDING_CONTENT_PREFIX,
 )
->>>>>>> upstream/main
 from open_webui.constants import ERROR_MESSAGES
 from open_webui.events import EVENTS, publish_event
 from open_webui.internal.db import get_async_session
@@ -55,14 +51,10 @@ from open_webui.utils.features import require_feature
 from open_webui.config import KNOWLEDGE_MAX_FILE_COUNT
 from open_webui.utils.access_control import filter_allowed_access_grants, has_permission
 from open_webui.utils.access_control.files import has_access_to_file
-<<<<<<< HEAD
 from open_webui.utils.auth import bearer_security, get_admin_user, get_current_user, get_verified_user
 from open_webui.utils.service_auth import maybe_sync_principal
 from fastapi.concurrency import run_in_threadpool
-=======
-from open_webui.utils.auth import get_admin_user, get_verified_user
 from open_webui.utils.json_codec import JSONCodec
->>>>>>> upstream/main
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -253,20 +245,13 @@ async def get_knowledge_bases(
 
 @router.get('/search', response_model=KnowledgeAccessListResponse)
 async def search_knowledge_bases(
-<<<<<<< HEAD
     query: Optional[str] = None,
     view_option: Optional[str] = None,
     type: Optional[str] = None,
     source: Optional[str] = None,
     page: Optional[int] = 1,
-=======
-    query: str | None = None,
-    view_option: str | None = None,
-    source: str | None = None,
-    page: int | None = 1,
-    order_by: str | None = None,
-    direction: str | None = None,
->>>>>>> upstream/main
+    order_by: Optional[str] = None,
+    direction: Optional[str] = None,
     user=Depends(get_verified_user),
     db: AsyncSession = Depends(get_async_session),
 ):
@@ -1787,7 +1772,6 @@ async def remove_file_from_knowledge_by_id(
         log.debug(e)
         pass
 
-<<<<<<< HEAD
     # When an OneDrive file from a folder source is removed, convert the
     # folder source into individual file sources for the remaining files.
     # This prevents the deleted file from being re-synced on the next cycle.
@@ -1887,11 +1871,6 @@ async def remove_file_from_knowledge_by_id(
             file_report = await DeletionService.delete_file(form_data.file_id)
             if file_report.has_errors:
                 log.warning(f'Errors deleting orphaned file {form_data.file_id}: {file_report.errors}')
-=======
-    # Anyone with write permission or higher can delete files
-    if delete_file and (file.user_id == user.id or user.role == 'admin'):
-        await delete_file_resource(file, db)
->>>>>>> upstream/main
 
     if knowledge:
         response = KnowledgeFilesResponse(
@@ -1966,7 +1945,6 @@ async def delete_knowledge_by_id(
             detail=ERROR_MESSAGES.ACCESS_PROHIBITED,
         )
 
-<<<<<<< HEAD
     # Gradient: this endpoint performs a *soft* delete (sets `deleted_at` on
     # the row) so the KB remains restorable until the retention worker hard-deletes
     # it. Upstream's v0.9.5 hard-delete cascade - pruning Model.meta.knowledge refs
@@ -1980,29 +1958,6 @@ async def delete_knowledge_by_id(
     # it would leak in config forever. Drop it here at soft-delete time. External
     # KBs are upstream read-only and have no fork restore UX, so losing the
     # connection on delete is acceptable; the KB row itself still soft-deletes.
-=======
-    log.info('Deleting knowledge base: %s (name: %s)', id, knowledge.name)
-
-    # Get all models
-    models = await Models.get_all_models(db=db)
-    log.info('Found %s models to check for knowledge base %s', len(models), id)
-
-    # Update models that reference this knowledge base
-    for model in models:
-        if model.meta and hasattr(model.meta, 'knowledge'):
-            knowledge_list = model.meta.knowledge or []
-            # Filter out the deleted knowledge base
-            updated_knowledge = [k for k in knowledge_list if k.get('id') != id]
-
-            # If the knowledge list changed, update the model
-            if len(updated_knowledge) != len(knowledge_list):
-                log.info('Updating model %s to remove knowledge base %s', model.id, id)
-                model.meta.knowledge = updated_knowledge
-                model_form = ModelForm(**model.model_dump())
-                await Models.update_model_by_id(model.id, model_form, db=db)
-
-    # Clean up vector DB
->>>>>>> upstream/main
     if is_external_knowledge(knowledge):
         connection_id = (knowledge.meta or {}).get('external', {}).get('connection_id')
         # Connections are admin-owned and shared across knowledge bases
@@ -2306,7 +2261,6 @@ async def sync_knowledge_cleanup(
 
     # ── Remove orphaned directories (children before parents) ──
     for dir_id in reversed(form_data.dir_ids):
-<<<<<<< HEAD
         # KB-scope guard (design doc 4b): a caller with write access to THIS
         # KB must not be able to delete directories of another KB by id.
         directory = await Knowledges.get_directory_by_id(dir_id, db=db)
@@ -2320,13 +2274,6 @@ async def sync_knowledge_cleanup(
         report = await DeletionService.delete_directory(id, dir_id, move_files_to_parent=False)
         if report.has_errors:
             log.warning(f'Errors deleting directory {dir_id} during sync cleanup of {id}: {report.errors}')
-=======
-        # Only delete directories that belong to this knowledge base.
-        directory = await Knowledges.get_directory_by_id(dir_id, db=db)
-        if not directory or directory.knowledge_id != id:
-            continue
-        await Knowledges.delete_directory(dir_id, move_files_to_parent=False, db=db)
->>>>>>> upstream/main
 
     return {'status': True}
 

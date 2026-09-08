@@ -26,7 +26,7 @@ from open_webui.retrieval.vector.main import (
     SearchResult,
     GetResult,
 )
-from open_webui.retrieval.vector.utils import process_metadata
+from open_webui.retrieval.vector.utils import iter_filter_conditions, process_metadata
 from open_webui.retrieval.vector.dbs._weaviate_mt_mapping import (
     map_collection,
     FILE,
@@ -124,6 +124,9 @@ def _mt_properties() -> list:
         weaviate.classes.config.Property(name='text', data_type=weaviate.classes.config.DataType.TEXT),
         # Core file metadata - always present
         weaviate.classes.config.Property(name='file_id', data_type=weaviate.classes.config.DataType.TEXT),
+        # [Gradient] ACL metadata searches and hash-based re-upload/deletion need declared properties.
+        weaviate.classes.config.Property(name='knowledge_base_id', data_type=weaviate.classes.config.DataType.TEXT),
+        weaviate.classes.config.Property(name='hash', data_type=weaviate.classes.config.DataType.TEXT),
         weaviate.classes.config.Property(name='name', data_type=weaviate.classes.config.DataType.TEXT),
         weaviate.classes.config.Property(name='source', data_type=weaviate.classes.config.DataType.TEXT),
         # Cloud-sync provenance: original page/document URL for citations (PR #195).
@@ -158,6 +161,34 @@ def _mt_properties() -> list:
         # to draw bbox highlights on the PDF viewer.
         weaviate.classes.config.Property(name='bboxes', data_type=weaviate.classes.config.DataType.TEXT),
     ]
+
+
+# [Gradient] Apply upstream metadata-filter semantics within the fixed MT schema.
+def _metadata_filter(filter: Optional[dict]) -> Any:
+    declared = {prop.name for prop in _mt_properties()}
+    normalized = {}
+    for key, value in (filter or {}).items():
+        if key not in declared:
+            raise ValueError(f'Undeclared metadata filter property: {key}')
+        # The shared iterator represents equality as a scalar; accept explicit $eq too.
+        if isinstance(value, dict) and set(value) == {'$eq'}:
+            value = value['$eq']
+        if isinstance(value, dict) and set(value) == {'$in'}:
+            if not isinstance(value['$in'], (list, tuple)) or not value['$in']:
+                raise ValueError('Metadata $in requires a non-empty list')
+        normalized[key] = value
+
+    clauses = []
+    for key, op, value in iter_filter_conditions(normalized):
+        if op == '$in':
+            clauses.append(
+                weaviate.classes.query.Filter.any_of(
+                    [weaviate.classes.query.Filter.by_property(name=key).equal(item) for item in value]
+                )
+            )
+        else:
+            clauses.append(weaviate.classes.query.Filter.by_property(name=key).equal(value))
+    return weaviate.classes.query.Filter.all_of(clauses) if len(clauses) > 1 else (clauses[0] if clauses else None)
 
 
 class WeaviateClient(VectorDBBase):
@@ -277,6 +308,7 @@ class WeaviateClient(VectorDBBase):
         queryable,
         vectors: List[List[Union[float, int]]],
         limit: int,
+        filters=None,
     ) -> SearchResult:
         result_ids, result_documents, result_metadatas, result_distances = [], [], [], []
 
@@ -284,6 +316,7 @@ class WeaviateClient(VectorDBBase):
             try:
                 response = queryable.query.near_vector(
                     near_vector=vector_embedding,
+                    filters=filters,
                     limit=limit,
                     return_metadata=weaviate.classes.query.MetadataQuery(distance=True),
                 )
@@ -325,15 +358,7 @@ class WeaviateClient(VectorDBBase):
 
     @staticmethod
     def _query_objects(queryable, filter: Dict, limit: Optional[int]) -> Optional[GetResult]:
-        weaviate_filter = None
-        if filter:
-            for key, value in filter.items():
-                prop_filter = weaviate.classes.query.Filter.by_property(name=key).equal(value)
-                weaviate_filter = (
-                    prop_filter
-                    if weaviate_filter is None
-                    else weaviate.classes.query.Filter.all_of([weaviate_filter, prop_filter])
-                )
+        weaviate_filter = _metadata_filter(filter)
 
         try:
             response = queryable.query.fetch_objects(filters=weaviate_filter, limit=limit)
@@ -448,12 +473,14 @@ class WeaviateClient(VectorDBBase):
         filter: Optional[dict] = None,
         limit: int = 10,
     ) -> Optional[SearchResult]:
+        weaviate_filter = _metadata_filter(filter)
         coll_name, tenant = map_collection(collection_name)
         if not self._tenant_exists(coll_name, tenant):
             return None
-        return self._search_objects(self._queryable(coll_name, tenant), vectors, limit)
+        return self._search_objects(self._queryable(coll_name, tenant), vectors, limit, filters=weaviate_filter)
 
     def query(self, collection_name: str, filter: Dict, limit: Optional[int] = None) -> Optional[GetResult]:
+        _metadata_filter(filter)  # [Gradient] Reject invalid filters even when the tenant is absent.
         coll_name, tenant = map_collection(collection_name)
         if not self._tenant_exists(coll_name, tenant):
             return None
@@ -467,23 +494,15 @@ class WeaviateClient(VectorDBBase):
 
     @staticmethod
     def _build_delete_filter(filter: Dict):
-        weaviate_filter = None
-        for key, value in filter.items():
-            prop_filter = weaviate.classes.query.Filter.by_property(name=key).equal(value)
-            weaviate_filter = (
-                prop_filter
-                if weaviate_filter is None
-                else weaviate.classes.query.Filter.all_of([weaviate_filter, prop_filter])
-            )
-        return weaviate_filter
+        return _metadata_filter(filter)
 
     def _apply_delete(self, queryable, ids: Optional[List[str]], filter: Optional[Dict]) -> None:
+        weaviate_filter = self._build_delete_filter(filter)
         try:
             if ids:
                 for item_id in ids:
                     queryable.data.delete_by_id(uuid=item_id)
             elif filter:
-                weaviate_filter = self._build_delete_filter(filter)
                 if weaviate_filter:
                     queryable.data.delete_many(where=weaviate_filter)
         except Exception as e:
@@ -495,6 +514,7 @@ class WeaviateClient(VectorDBBase):
         ids: Optional[List[str]] = None,
         filter: Optional[Dict] = None,
     ) -> None:
+        _metadata_filter(filter)  # [Gradient] Validation failures must escape the best-effort delete path.
         coll_name, tenant = map_collection(collection_name)
 
         # Tenant-scoped delete on the MT collection (if the tenant exists).

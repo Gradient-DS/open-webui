@@ -181,13 +181,16 @@ async def process_uploaded_file(
 
                 directory_id = file_metadata.get('directory_id') if isinstance(file_metadata, dict) else None
                 await derive_relative_path_from_directory(file_item.id, directory_id, db=db_session)
-                await Knowledges.add_file_to_knowledge_by_id(
+                knowledge_file = await Knowledges.add_file_to_knowledge_by_id(
                     knowledge_id=knowledge_id,
                     file_id=file_item.id,
                     user_id=user.id,
                     directory_id=directory_id,
                     db=db_session,
                 )
+
+                if not knowledge_file:
+                    raise Exception(f'Failed to link file {file_item.id} to knowledge {knowledge_id}')
 
             stt_supported = await Config.get('audio.stt.supported_content_types', [])
             content_extraction_engine = await Config.get('rag.content_extraction_engine')
@@ -251,7 +254,6 @@ async def process_uploaded_file(
                     db=db_session,
                 )
 
-<<<<<<< HEAD
             # (KB link moved above process_file — see the ordering note there.)
 
             # Notify frontend via Socket.IO of the file's ACTUAL persisted
@@ -280,56 +282,6 @@ async def process_uploaded_file(
                 status=current_status,
                 collection_name=collection_name,
             )
-=======
-            # Auto-link to Knowledge Collection when uploaded from one (#24807).
-            # Mirrors POST /knowledge/{id}/file/add so linking doesn't depend
-            # on the frontend staying connected after upload.
-            knowledge_id = file_metadata.get('knowledge_id')
-            if knowledge_id:
-                try:
-                    # Gate like POST /knowledge/{id}/file/add: a client-supplied
-                    # metadata.knowledge_id must not let a non-writer attach files (CWE-862/863).
-                    knowledge = await Knowledges.get_knowledge_by_id(id=knowledge_id, db=db_session)
-                    can_write = bool(knowledge) and (
-                        knowledge.user_id == user.id
-                        or user.role == 'admin'
-                        or await AccessGrants.has_access(
-                            user_id=user.id,
-                            resource_type='knowledge',
-                            resource_id=knowledge.id,
-                            permission='write',
-                            db=db_session,
-                        )
-                    )
-                    if not can_write:
-                        log.warning(
-                            f'Refusing to auto-link file {file_item.id} to knowledge '
-                            f'{knowledge_id}: user {user.id} lacks write access'
-                        )
-                    else:
-                        # Keep the generic file status stream open until the
-                        # KB-specific vector write and durable link both finish.
-                        await Files.update_file_data_by_id(file_item.id, {'status': 'processing'}, db=db_session)
-                        await process_file(
-                            request,
-                            ProcessFileForm(file_id=file_item.id, collection_name=knowledge_id),
-                            user=user,
-                            db=db_session,
-                        )
-                        knowledge_file = await Knowledges.add_file_to_knowledge_by_id(
-                            knowledge_id=knowledge_id,
-                            file_id=file_item.id,
-                            user_id=user.id,
-                            directory_id=file_metadata.get('directory_id'),
-                            db=db_session,
-                        )
-                        if not knowledge_file:
-                            raise Exception(f'Failed to link file {file_item.id} to knowledge {knowledge_id}')
-                        log.info('Linked file %s to knowledge %s', file_item.id, knowledge_id)
-                except Exception as e:
-                    log.warning(f'Failed to link file {file_item.id} to knowledge {knowledge_id}: {e}')
-                    raise
->>>>>>> upstream/main
 
         except Exception as e:
             log.error(f'Error processing file: {file_item.id}')
@@ -1026,8 +978,9 @@ async def update_file_data_content_by_id(
 ############################
 
 
-@router.get('/{id}/content')
-async def get_file_content_by_id(
+# [Gradient] Preserve reverse-route names and the later images.py export without redefining this handler.
+@router.get('/{id}/content', name='get_file_content_by_id')
+async def get_file_content_by_id_inline(
     id: str,
     user=Depends(get_verified_user),
     attachment: bool = Query(False),
