@@ -1,0 +1,255 @@
+# Derivation gaps measured from committed security/openapi.json using openapi-surface.
+# 60 blind body operations: 52 untyped JSON write bodies, 1 JSON read body,
+# and 7 multipart file uploads. All OpenAPI methods are audited for bodies.
+#
+# The 52 untyped write bodies are Phase 4's work list. This set contains the
+# whole model-invoking surface: chat completions, the tasks/*/completions family,
+# and the ollama and openai passthroughs. This is the surface this programme
+# exists to reach. Remove each waiver as typing exposes its writable fields;
+# exact set equality in test_writable_fields.py rejects stale waivers.
+
+# 52 untyped JSON write bodies: temporary Phase 4 work list.
+
+[[waived]]
+id = "POST /api/chat/actions/{action_id}"
+reason = "Untyped JSON request body (dict/Any/raw Request) exposes no named fields to the derivation. Phase 4 work list: this waiver disappears when the body is typed to expose its writable fields."
+
+[[waived]]
+id = "POST /api/chat/completed"
+reason = "Untyped JSON request body (dict/Any/raw Request) exposes no named fields to the derivation. Phase 4 work list: this waiver disappears when the body is typed to expose its writable fields."
+
+[[waived]]
+id = "POST /api/chat/completions"
+reason = "Untyped JSON request body (dict/Any/raw Request) exposes no named fields to the derivation. Phase 4 work list: this waiver disappears when the body is typed to expose its writable fields."
+
+[[waived]]
+id = "POST /api/embeddings"
+reason = "Untyped JSON request body (dict/Any/raw Request) exposes no named fields to the derivation. Phase 4 work list: this waiver disappears when the body is typed to expose its writable fields."
+
+[[waived]]
+id = "POST /api/message"
+reason = "Untyped JSON request body (dict/Any/raw Request) exposes no named fields to the derivation. Phase 4 work list: this waiver disappears when the body is typed to expose its writable fields."
+
+[[waived]]
+id = "POST /api/v1/archives/admin/config"
+reason = "Untyped JSON request body (dict/Any/raw Request) exposes no named fields to the derivation. Phase 4 work list: this waiver disappears when the body is typed to expose its writable fields."
+
+[[waived]]
+id = "POST /api/v1/auths/admin/config/ldap"
+reason = "Untyped JSON request body (dict/Any/raw Request) exposes no named fields to the derivation. Phase 4 work list: this waiver disappears when the body is typed to expose its writable fields."
+
+[[waived]]
+id = "POST /api/v1/channels/{id}/members/active"
+reason = "Untyped JSON request body (dict/Any/raw Request) exposes no named fields to the derivation. Phase 4 work list: this waiver disappears when the body is typed to expose its writable fields."
+
+[[waived]]
+id = "POST /api/v1/channels/{id}/messages/{message_id}/pin"
+reason = "Untyped JSON request body (dict/Any/raw Request) exposes no named fields to the derivation. Phase 4 work list: this waiver disappears when the body is typed to expose its writable fields."
+
+[[waived]]
+id = "POST /api/v1/chat/completions"
+reason = "Untyped JSON request body (dict/Any/raw Request) exposes no named fields to the derivation. Phase 4 work list: this waiver disappears when the body is typed to expose its writable fields."
+
+[[waived]]
+id = "POST /api/v1/chats/shared/{id}/access/update"
+reason = "Untyped JSON request body (dict/Any/raw Request) exposes no named fields to the derivation. Phase 4 work list: this waiver disappears when the body is typed to expose its writable fields."
+
+[[waived]]
+id = "POST /api/v1/configs/2fa"
+reason = "Untyped JSON request body (dict/Any/raw Request) exposes no named fields to the derivation. Phase 4 work list: this waiver disappears when the body is typed to expose its writable fields."
+
+[[waived]]
+id = "POST /api/v1/configs/agent_proxy"
+reason = "Untyped JSON request body (dict/Any/raw Request) exposes no named fields to the derivation. Phase 4 work list: this waiver disappears when the body is typed to expose its writable fields."
+
+[[waived]]
+id = "POST /api/v1/configs/connections"
+reason = "Untyped JSON request body (dict/Any/raw Request) exposes no named fields to the derivation. Phase 4 work list: this waiver disappears when the body is typed to expose its writable fields."
+
+[[waived]]
+id = "POST /api/v1/configs/data-retention"
+reason = "Untyped JSON request body (dict/Any/raw Request) exposes no named fields to the derivation. Phase 4 work list: this waiver disappears when the body is typed to expose its writable fields."
+
+[[waived]]
+id = "POST /api/v1/configs/import"
+reason = "Untyped JSON request body (dict/Any/raw Request) exposes no named fields to the derivation. Phase 4 work list: this waiver disappears when the body is typed to expose its writable fields."
+
+[[waived]]
+id = "POST /api/v1/configs/integrations"
+reason = "Untyped JSON request body (dict/Any/raw Request) exposes no named fields to the derivation. Phase 4 work list: this waiver disappears when the body is typed to expose its writable fields."
+
+[[waived]]
+id = "POST /api/v1/embeddings"
+reason = "Untyped JSON request body (dict/Any/raw Request) exposes no named fields to the derivation. Phase 4 work list: this waiver disappears when the body is typed to expose its writable fields."
+
+[[waived]]
+id = "POST /api/v1/folders/{id}/access/update"
+reason = "Untyped JSON request body (dict/Any/raw Request) exposes no named fields to the derivation. Phase 4 work list: this waiver disappears when the body is typed to expose its writable fields."
+
+[[waived]]
+id = "POST /api/v1/folders/{id}/update/expanded"
+reason = "Untyped JSON request body (dict/Any/raw Request) exposes no named fields to the derivation. Phase 4 work list: this waiver disappears when the body is typed to expose its writable fields."
+
+[[waived]]
+id = "POST /api/v1/functions/id/{id}/valves/update"
+reason = "Untyped JSON request body (dict/Any/raw Request) exposes no named fields to the derivation. Phase 4 work list: this waiver disappears when the body is typed to expose its writable fields."
+
+[[waived]]
+id = "POST /api/v1/functions/id/{id}/valves/user/update"
+reason = "Untyped JSON request body (dict/Any/raw Request) exposes no named fields to the derivation. Phase 4 work list: this waiver disappears when the body is typed to expose its writable fields."
+
+[[waived]]
+id = "POST /api/v1/knowledge/{id}/access/update"
+reason = "Untyped JSON request body (dict/Any/raw Request) exposes no named fields to the derivation. Phase 4 work list: this waiver disappears when the body is typed to expose its writable fields."
+
+[[waived]]
+id = "POST /api/v1/messages"
+reason = "Untyped JSON request body (dict/Any/raw Request) exposes no named fields to the derivation. Phase 4 work list: this waiver disappears when the body is typed to expose its writable fields."
+
+[[waived]]
+id = "POST /api/v1/models/import"
+reason = "Untyped JSON request body (dict/Any/raw Request) exposes no named fields to the derivation. Phase 4 work list: this waiver disappears when the body is typed to expose its writable fields."
+
+[[waived]]
+id = "POST /api/v1/notes/{id}/access/update"
+reason = "Untyped JSON request body (dict/Any/raw Request) exposes no named fields to the derivation. Phase 4 work list: this waiver disappears when the body is typed to expose its writable fields."
+
+[[waived]]
+id = "POST /api/v1/pipelines/{pipeline_id}/valves/update"
+reason = "Untyped JSON request body (dict/Any/raw Request) exposes no named fields to the derivation. Phase 4 work list: this waiver disappears when the body is typed to expose its writable fields."
+
+[[waived]]
+id = "POST /api/v1/prompts/id/{prompt_id}/access/update"
+reason = "Untyped JSON request body (dict/Any/raw Request) exposes no named fields to the derivation. Phase 4 work list: this waiver disappears when the body is typed to expose its writable fields."
+
+[[waived]]
+id = "POST /api/v1/skills/id/{id}/access/update"
+reason = "Untyped JSON request body (dict/Any/raw Request) exposes no named fields to the derivation. Phase 4 work list: this waiver disappears when the body is typed to expose its writable fields."
+
+[[waived]]
+id = "POST /api/v1/tasks/auto/completions"
+reason = "Untyped JSON request body (dict/Any/raw Request) exposes no named fields to the derivation. Phase 4 work list: this waiver disappears when the body is typed to expose its writable fields."
+
+[[waived]]
+id = "POST /api/v1/tasks/emoji/completions"
+reason = "Untyped JSON request body (dict/Any/raw Request) exposes no named fields to the derivation. Phase 4 work list: this waiver disappears when the body is typed to expose its writable fields."
+
+[[waived]]
+id = "POST /api/v1/tasks/follow_up/completions"
+reason = "Untyped JSON request body (dict/Any/raw Request) exposes no named fields to the derivation. Phase 4 work list: this waiver disappears when the body is typed to expose its writable fields."
+
+[[waived]]
+id = "POST /api/v1/tasks/image_prompt/completions"
+reason = "Untyped JSON request body (dict/Any/raw Request) exposes no named fields to the derivation. Phase 4 work list: this waiver disappears when the body is typed to expose its writable fields."
+
+[[waived]]
+id = "POST /api/v1/tasks/moa/completions"
+reason = "Untyped JSON request body (dict/Any/raw Request) exposes no named fields to the derivation. Phase 4 work list: this waiver disappears when the body is typed to expose its writable fields."
+
+[[waived]]
+id = "POST /api/v1/tasks/queries/completions"
+reason = "Untyped JSON request body (dict/Any/raw Request) exposes no named fields to the derivation. Phase 4 work list: this waiver disappears when the body is typed to expose its writable fields."
+
+[[waived]]
+id = "POST /api/v1/tasks/tags/completions"
+reason = "Untyped JSON request body (dict/Any/raw Request) exposes no named fields to the derivation. Phase 4 work list: this waiver disappears when the body is typed to expose its writable fields."
+
+[[waived]]
+id = "POST /api/v1/tasks/title/completions"
+reason = "Untyped JSON request body (dict/Any/raw Request) exposes no named fields to the derivation. Phase 4 work list: this waiver disappears when the body is typed to expose its writable fields."
+
+[[waived]]
+id = "POST /api/v1/tools/id/{id}/access/update"
+reason = "Untyped JSON request body (dict/Any/raw Request) exposes no named fields to the derivation. Phase 4 work list: this waiver disappears when the body is typed to expose its writable fields."
+
+[[waived]]
+id = "POST /api/v1/tools/id/{id}/valves/update"
+reason = "Untyped JSON request body (dict/Any/raw Request) exposes no named fields to the derivation. Phase 4 work list: this waiver disappears when the body is typed to expose its writable fields."
+
+[[waived]]
+id = "POST /api/v1/tools/id/{id}/valves/user/update"
+reason = "Untyped JSON request body (dict/Any/raw Request) exposes no named fields to the derivation. Phase 4 work list: this waiver disappears when the body is typed to expose its writable fields."
+
+[[waived]]
+id = "POST /api/v1/users/default/permissions"
+reason = "Untyped JSON request body (dict/Any/raw Request) exposes no named fields to the derivation. Phase 4 work list: this waiver disappears when the body is typed to expose its writable fields."
+
+[[waived]]
+id = "POST /api/v1/users/user/info/update"
+reason = "Untyped JSON request body (dict/Any/raw Request) exposes no named fields to the derivation. Phase 4 work list: this waiver disappears when the body is typed to expose its writable fields."
+
+[[waived]]
+id = "POST /api/v1/users/user/settings/update"
+reason = "Untyped JSON request body (dict/Any/raw Request) exposes no named fields to the derivation. Phase 4 work list: this waiver disappears when the body is typed to expose its writable fields."
+
+[[waived]]
+id = "POST /ollama/api/chat"
+reason = "Untyped JSON request body (dict/Any/raw Request) exposes no named fields to the derivation. Phase 4 work list: this waiver disappears when the body is typed to expose its writable fields."
+
+[[waived]]
+id = "POST /ollama/api/chat/{url_idx}"
+reason = "Untyped JSON request body (dict/Any/raw Request) exposes no named fields to the derivation. Phase 4 work list: this waiver disappears when the body is typed to expose its writable fields."
+
+[[waived]]
+id = "POST /ollama/v1/chat/completions"
+reason = "Untyped JSON request body (dict/Any/raw Request) exposes no named fields to the derivation. Phase 4 work list: this waiver disappears when the body is typed to expose its writable fields."
+
+[[waived]]
+id = "POST /ollama/v1/chat/completions/{url_idx}"
+reason = "Untyped JSON request body (dict/Any/raw Request) exposes no named fields to the derivation. Phase 4 work list: this waiver disappears when the body is typed to expose its writable fields."
+
+[[waived]]
+id = "POST /ollama/v1/completions"
+reason = "Untyped JSON request body (dict/Any/raw Request) exposes no named fields to the derivation. Phase 4 work list: this waiver disappears when the body is typed to expose its writable fields."
+
+[[waived]]
+id = "POST /ollama/v1/completions/{url_idx}"
+reason = "Untyped JSON request body (dict/Any/raw Request) exposes no named fields to the derivation. Phase 4 work list: this waiver disappears when the body is typed to expose its writable fields."
+
+[[waived]]
+id = "POST /ollama/v1/messages"
+reason = "Untyped JSON request body (dict/Any/raw Request) exposes no named fields to the derivation. Phase 4 work list: this waiver disappears when the body is typed to expose its writable fields."
+
+[[waived]]
+id = "POST /ollama/v1/messages/{url_idx}"
+reason = "Untyped JSON request body (dict/Any/raw Request) exposes no named fields to the derivation. Phase 4 work list: this waiver disappears when the body is typed to expose its writable fields."
+
+[[waived]]
+id = "POST /openai/chat/completions"
+reason = "Untyped JSON request body (dict/Any/raw Request) exposes no named fields to the derivation. Phase 4 work list: this waiver disappears when the body is typed to expose its writable fields."
+
+# 1 JSON read body: excluded by the derivation method policy.
+
+[[waived]]
+id = "GET /ollama/api/ps"
+reason = "Declares an application/json body, but the derivation excludes read methods by design, so this body is unreachable to it. The body is typed; further typing would not help. Revisit if the plane ever drives bodies on read methods."
+
+# 7 multipart file uploads: outside the hostile corpus model.
+
+[[waived]]
+id = "POST /api/v1/audio/transcriptions"
+reason = "Multipart file upload: file contents are a different surface that the hostile corpus does not model."
+
+[[waived]]
+id = "POST /api/v1/files/"
+reason = "Multipart file upload: file contents are a different surface that the hostile corpus does not model."
+
+[[waived]]
+id = "POST /api/v1/integrations/ingest"
+reason = "Multipart file upload: file contents are a different surface that the hostile corpus does not model."
+
+[[waived]]
+id = "POST /api/v1/internal/retrieval/files/upload"
+reason = "Multipart file upload: file contents are a different surface that the hostile corpus does not model."
+
+[[waived]]
+id = "POST /api/v1/pipelines/upload"
+reason = "Multipart file upload: file contents are a different surface that the hostile corpus does not model."
+
+[[waived]]
+id = "POST /ollama/models/upload"
+reason = "Multipart file upload: file contents are a different surface that the hostile corpus does not model."
+
+[[waived]]
+id = "POST /ollama/models/upload/{url_idx}"
+reason = "Multipart file upload: file contents are a different surface that the hostile corpus does not model."
