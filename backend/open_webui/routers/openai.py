@@ -1648,9 +1648,10 @@ async def generate_chat_completion(
                     r.status,
                     safe_error_text(error_body, status=r.status, source='Provider'),
                 )
-                # [Gradient] GRA-219: provider bodies may echo prompts, even in debug logs.
-                log.debug('Provider request failed (HTTP %d)', r.status)
-                # The event and client response both get the content-free classification.
+                log.debug('Provider raw error body (HTTP %d): %s', r.status, error_body)
+                # The provider-failure event and the client response both get
+                # the content-free classification — the raw body may echo the
+                # request (prompt + messages) and stays at DEBUG above.
                 await publish_model_provider_request_failed(
                     request,
                     actor=user,

@@ -144,7 +144,7 @@ from open_webui.env import (
     ENABLE_STAR_SESSIONS_MIDDLEWARE,
     ENABLE_VERSION_UPDATE_CHECK,
     ENABLE_WEBSOCKET_SUPPORT,
-    EXTERNAL_PWA_MANIFEST_URL as external_pwa_manifest_url,
+    EXTERNAL_PWA_MANIFEST_URL,
     GLOBAL_LOG_LEVEL,
     INSTANCE_ID,
     LICENSE_KEY,
@@ -758,8 +758,7 @@ app.state.redis = None
 app.state.WEBUI_NAME = WEBUI_NAME
 app.state.LICENSE_METADATA = None
 app.state.USER_COUNT = None
-# [Gradient] Keep the external manifest setting on app state using the local alias.
-app.state.external_pwa_manifest_url = external_pwa_manifest_url
+app.state.EXTERNAL_PWA_MANIFEST_URL = EXTERNAL_PWA_MANIFEST_URL
 
 
 ########################################
@@ -3521,7 +3520,7 @@ async def oauth_backchannel_logout(
 
 @app.get('/manifest.json')
 async def get_manifest_json():
-    external_pwa_manifest_url = getattr(app.state, 'external_pwa_manifest_url', None)
+    external_pwa_manifest_url = getattr(app.state, 'EXTERNAL_PWA_MANIFEST_URL', None)
     if external_pwa_manifest_url:
         # LICENSE covers this install-time Open WebUI branding surface, including
         # names, logos, manifests, metadata, and surrounding UI.
