@@ -1,6 +1,8 @@
+import ast
 import json
 import os
 import re
+import sqlite3
 import tomllib
 from pathlib import Path
 from unittest.mock import Mock
@@ -325,6 +327,88 @@ def test_every_plain_seed_calls_a_real_nondestructive_operation():
         assert references <= set(p.get('depends_on', [])), p
 
 
+def test_skill_seed_survives_an_existing_name_and_repeated_resolution():
+    model = ast.parse((ROOT / 'backend/open_webui/models/skills.py').read_text())
+    skill = next(node for node in model.body if isinstance(node, ast.ClassDef) and node.name == 'Skill')
+    unique_fields = [
+        node.targets[0].id
+        for node in skill.body
+        if isinstance(node, ast.Assign)
+        and isinstance(node.value, ast.Call)
+        and any(k.arg == 'unique' and ast.literal_eval(k.value) for k in node.value.keywords)
+    ]
+    assert set(unique_fields) == {'id', 'name'}, 'Review all skill uniqueness constraints when the model changes'
+    entry = next(p for p in seeds.SURFACE['parameter'] if p['key'] == 'skill')
+    owner, admin = Mock(spec=seeds.AttackClient), Mock(spec=seeds.AttackClient)
+    with sqlite3.connect(':memory:') as db:
+        db.execute('CREATE TABLE skill (id TEXT UNIQUE, name TEXT UNIQUE)')
+        db.execute('INSERT INTO skill VALUES (?, ?)', ('previous-id', 'Attack skill'))
+
+        def create(method, path, **kwargs):
+            assert (method, path) == ('POST', '/api/v1/skills/create')
+            body = kwargs['json']
+            try:
+                db.execute('INSERT INTO skill VALUES (?, ?)', (body['id'], body['name']))
+            except sqlite3.IntegrityError:
+                return response(400, {'detail': 'Error creating skill'})
+            return response(200, {'id': body['id']})
+
+        admin.request.side_effect = create
+        for _ in range(2):
+            seeds.resolve_parameters(owner, admin=admin, surface=tiny_surface(entry), spec={'paths': {}})
+        assert db.execute('SELECT COUNT(*) FROM skill').fetchone()[0] == 3
+    owner.request.assert_not_called()
+
+
+def test_plain_seed_bodies_supply_all_required_schema_fields():
+    def check(value, schema):
+        if '$ref' in schema:
+            schema = SPEC['components']['schemas'][schema['$ref'].rsplit('/', 1)[1]]
+        for part in schema.get('allOf', []):
+            check(value, part)
+        if isinstance(value, dict):
+            assert set(schema.get('required', [])) <= value.keys()
+            for key, child in schema.get('properties', {}).items():
+                if key in value:
+                    check(value[key], child)
+
+    for entry in seeds.SURFACE['parameter']:
+        if 'via' not in entry or 'body' not in entry:
+            continue
+        method, path = entry['via'].split(' ', 1)
+        shape = re.sub(r'\{[^}]+\}', '{}', path)
+        operation = next(
+            item[method.lower()]
+            for template, item in SPEC['paths'].items()
+            if method.lower() in item and re.sub(r'\{[^}]+\}', '{}', template) == shape
+        )
+        check(entry['body'], operation['requestBody']['content']['application/json']['schema'])
+
+
+def test_seed_dependencies_preserve_ownership_and_enable_creation_gates():
+    entries = {p['key']: p for p in seeds.SURFACE['parameter']}
+    for chain in [
+        ('folder', 'chat', 'chat_message', 'share'),
+        ('channel', 'channel_message', 'channel_webhook', 'webhook_token'),
+        ('knowledge', 'directory'),
+        ('calendar', 'event'),
+        ('prompt', 'prompt_history'),
+        ('file', 'filename'),
+    ]:
+        assert {entries[key].get('actor') for key in chain} == {'admin'}
+    order = {p['key']: i for i, p in enumerate(seeds.dependency_order(seeds.SURFACE))}
+    for key, gate in [
+        ('folder', 'folders.enable'),
+        ('channel', 'channels.enable'),
+        ('calendar', 'calendar.enable'),
+        ('automation', 'automations.enable'),
+        ('memory', 'memories.enable'),
+        ('archive', 'admin.enable_user_archival'),
+    ]:
+        assert entries['namespace']['config'][gate] is True
+        assert order['namespace'] < order[key]
+
+
 def test_integration_2xx_with_document_or_attachment_failure_is_rejected():
     for outcome in [
         {'errors': 1, 'created': 0, 'total': 1},
@@ -373,6 +457,8 @@ def test_task_seeder_observes_a_live_task_after_creating_and_activating_its_pipe
     completion = ctx.request.call_args_list[3]
     assert completion.kwargs['json']['chat_id'] == 'chat-id'
     assert completion.kwargs['json']['model'] == 'attack_task_fixture'
+    assert completion.kwargs['actor'] is ctx.admin
+    assert all(call.kwargs['actor'] is ctx.admin for call in ctx.request.call_args_list[4:])
 
 
 def stop_seed_task(admin, resolved):
@@ -391,7 +477,7 @@ def live_seeds():
     identities = ensure_identities()
     resolved = None
     try:
-        resolved = seeds.resolve_parameters(identities.admin)
+        resolved = seeds.resolve_parameters(identities.user, admin=identities.admin)
         yield identities, resolved
     finally:
         try:
@@ -414,7 +500,7 @@ def test_live_resolution_returns_every_seedable_route_parameter(live_seeds):
 @needs_stack
 def test_live_second_pass_uses_fresh_resource_fixtures(live_seeds):
     identities, first = live_seeds
-    second = seeds.resolve_parameters(identities.admin)
+    second = seeds.resolve_parameters(identities.user, admin=identities.admin)
     try:
         for pair, value in first.items():
             p = seeds.parameter_for(*pair)

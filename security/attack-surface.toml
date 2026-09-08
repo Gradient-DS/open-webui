@@ -16,7 +16,8 @@
 # dependencies. {token} is fresh on EVERY resolve_parameters call, in bodies,
 # multipart filenames/content, and dictionary keys. Call once per pass.
 # fresh=false marks immutable inputs/environment selectors, not shared fixtures.
-# actor=admin marks administrative HTTP setup; ordinary resources use the owner.
+# actor=admin avoids feature permissions during setup; dependent owner checks use the same actor.
+# The integration attachment remains owned by the supplied client.
 # Configuration setup enables the creation gates it names, and integration/
 # terminal setup merges existing configuration. Resolution is serial.
 #
@@ -33,7 +34,7 @@ description = "routers/configs.py:import_config/get_config_namespace. Enable cre
 seeded_by = "prepare_configuration"
 depends_on = []
 actor = "admin"
-config = { "channels.enable" = true, "calendar.enable" = true, "automations.enable" = true, "admin.enable_user_archival" = true }
+config = { "folders.enable" = true, "memories.enable" = true, "channels.enable" = true, "calendar.enable" = true, "automations.enable" = true, "admin.enable_user_archival" = true }
 
 [[parameter]]
 key = "user"
@@ -49,48 +50,54 @@ actor = "admin"
 key = "folder"
 name = "id"
 prefix = "/api/v1/folders/{id}"
-description = "routers/folders.py:create_folder rejects duplicate sibling names."
+description = "routers/folders.py:create_folder rejects duplicate sibling names. Admin avoids features.folders; namespace enables folders.enable. Keep chat creation and sharing under this owner."
 via = "POST /api/v1/folders/"
 body = { "name" = "attack-{token}" }
 extract = "id"
+actor = "admin"
+depends_on = ["namespace"]
 
 [[parameter]]
 key = "model"
 name = "model_id"
 prefix = "/api/v1/analytics/models/{model_id}"
-description = "routers/openai.py:get_models returns the configured upstream registry. Select here so a task Pipe added in a previous pass cannot become the base model fixture. This is an existing upstream selector, not a mutable per-pass fixture."
+description = "routers/openai.py:get_models returns the configured upstream registry. Select here so a task Pipe added in a previous pass cannot become the base model fixture. This is an existing upstream selector, not a mutable per-pass fixture. Admin avoids ordinary-user model access filtering; the sealed CI stub supplies the registry and openai.enable defaults true."
 via = "GET /openai/models/{openai_index}"
 depends_on = ["openai_index"]
 extract = "data.0.id"
 fresh = false
+actor = "admin"
 
 [[parameter]]
 key = "chat"
 name = "id"
 prefix = "/api/v1/chats/{id}"
-description = "routers/chats.py:create_new_chat persists the supplied history dictionary; models/chats.py:insert_new_chat also indexes messages. No model completion needed."
+description = "routers/chats.py:create_new_chat persists the supplied history dictionary; models/chats.py:insert_new_chat also indexes messages. No model completion needed. Use the admin folder owner; create_new_chat validates folder ownership even for admins."
 via = "POST /api/v1/chats/new"
 body = { "folder_id" = "{folder}", "chat" = { "title" = "attack-{token}", "models" = ["{model}"], "history" = { "currentId" = "message_{token}", "messages" = { "message_{token}" = { "id" = "message_{token}", "role" = "assistant", "model" = "{model}", "content" = "Attack fixture message.", "childrenIds" = [] } } } } }
 extract = "id"
 depends_on = ["folder", "model"]
+actor = "admin"
 
 [[parameter]]
 key = "chat_message"
 name = "message_id"
 prefix = "/api/v1/chats/{id}/messages/{message_id}"
-description = "routers/chats.py:update_chat_message_by_id reads this existing history.messages key; it is not a channel message."
+description = "routers/chats.py:update_chat_message_by_id reads this existing history.messages key; it is not a channel message. Read as the admin chat owner."
 via = "GET /api/v1/chats/{chat}"
 extract = "chat.history.currentId"
 depends_on = ["chat"]
+actor = "admin"
 
 [[parameter]]
 key = "share"
 name = "share_id"
 prefix = "/api/v1/chats/share/{share_id}"
-description = "routers/chats.py:share_chat_by_id creates a SharedChats snapshot and returns the original chat with share_id."
+description = "routers/chats.py:share_chat_by_id creates a SharedChats snapshot and returns the original chat with share_id. Admin avoids chat.share; the handler still requires the chat to belong to this same actor."
 via = "POST /api/v1/chats/{chat}/share"
 extract = "share_id"
 depends_on = ["chat"]
+actor = "admin"
 
 [[parameter]]
 key = "shared_clone"
@@ -166,31 +173,34 @@ same_as = "model"
 key = "channel"
 name = "id"
 prefix = "/api/v1/channels/{id}"
-description = "routers/channels.py:create_new_channel creates a group and inserts its owner as a member; group avoids the standard-channel admin-only branch."
+description = "routers/channels.py:create_new_channel creates a group and inserts its owner as a member; group avoids the standard-channel admin-only branch. Admin avoids features.channels; group creation enrolls this actor, which message posting requires even for admins."
 via = "POST /api/v1/channels/create"
 body = { "name" = "attack-{token}", "type" = "group", "user_ids" = [] }
 extract = "id"
 depends_on = ["namespace"]
+actor = "admin"
 
 [[parameter]]
 key = "channel_message"
 name = "message_id"
 prefix = "/api/v1/channels/{id}/messages/{message_id}"
-description = "routers/channels.py:post_new_message/new_message_handler inserts Messages.id for this channel."
+description = "routers/channels.py:post_new_message/new_message_handler inserts Messages.id for this channel. Use the admin member created with the group; the membership check has no admin exemption."
 via = "POST /api/v1/channels/{channel}/messages/post"
 body = { "content" = "Attack channel message {token}", "data" = {  } }
 extract = "id"
 depends_on = ["channel"]
+actor = "admin"
 
 [[parameter]]
 key = "channel_webhook"
 name = "webhook_id"
 prefix = "/api/v1/channels/{id}/webhooks/{webhook_id}"
-description = "routers/channels.py:create_channel_webhook returns ChannelWebhookModel with both id and token."
+description = "routers/channels.py:create_channel_webhook returns ChannelWebhookModel with both id and token. Admin satisfies the manager check and avoids features.channels."
 via = "POST /api/v1/channels/{channel}/webhooks/create"
 body = { "name" = "attack-{token}" }
 extract = "id"
 depends_on = ["channel"]
+actor = "admin"
 
 [[parameter]]
 key = "public_channel_webhook"
@@ -203,39 +213,39 @@ same_as = "channel_webhook"
 key = "webhook_token"
 name = "token"
 prefix = "/api/v1/channels/webhooks/{webhook_id}/{token}"
-description = "routers/channels.py:get_channel_webhooks returns tokens to the channel manager. A fresh channel has exactly our one webhook."
+description = "routers/channels.py:get_channel_webhooks returns tokens to the channel manager. A fresh channel has exactly our one webhook. Admin satisfies the manager check and avoids features.channels."
 via = "GET /api/v1/channels/{channel}/webhooks"
 extract = "0.token"
 depends_on = ["channel", "channel_webhook"]
+actor = "admin"
 
 [[parameter]]
 key = "event_webhook"
 name = "webhook_id"
 prefix = "/api/events/webhooks/{webhook_id}"
 description = "main.py:create_event_webhook returns upsert_event_webhook id. Disabled during fixture creation to avoid notification traffic."
-via = "POST /api/events/webhooks"
-body = { "name" = "attack-{token}", "url" = "http://stub:8000/attack-{token}", "enabled" = false, "events" = [] }
-extract = "id"
-actor = "admin"
+unseedable = "main.py:create_event_webhook rejects every URL reachable from the sealed CI stack. upsert_event_webhook validates the target through retrieval/web/utils.py:validate_url, which refuses any host resolving to a non-global address unless ENABLE_LOCAL_WEB_FETCH is on. In-network hosts (stub, minio) resolve to private Docker addresses and are refused; external hosts do not resolve at all, because the network is internal:true with no DNS. Enabling ENABLE_LOCAL_WEB_FETCH would seed this parameter by disabling the SSRF guard the gate exists to observe, and would diverge from production, which leaves it unset (verified in soev-gitops and the chart, 2026-09-08). Recorded rather than worked around: this route is unseedable precisely because the guard works."
 
 [[parameter]]
 key = "knowledge"
 name = "id"
 prefix = "/api/v1/knowledge/{id}"
-description = "routers/knowledge.py:create_new_knowledge inserts a local KB without requiring files."
+description = "routers/knowledge.py:create_new_knowledge inserts a local KB without requiring files. Admin avoids workspace.knowledge. The immutable FEATURE_KNOWLEDGE gate defaults true and is not overridden in docker-compose.ci.yaml."
 via = "POST /api/v1/knowledge/create"
 body = { "name" = "attack-{token}", "description" = "Attack local knowledge" }
 extract = "id"
+actor = "admin"
 
 [[parameter]]
 key = "directory"
 name = "dir_id"
 prefix = "/api/v1/knowledge/{id}/dirs/{dir_id}"
-description = "routers/knowledge.py:create_knowledge_directory inserts a directory owned by this KB."
+description = "routers/knowledge.py:create_knowledge_directory inserts a directory owned by this KB. Use admin to write the admin-owned local KB; no external provider operation is needed."
 via = "POST /api/v1/knowledge/{knowledge}/dirs/create"
 body = { "name" = "attack-{token}" }
 extract = "id"
 depends_on = ["knowledge"]
+actor = "admin"
 
 [[parameter]]
 key = "connection"
@@ -262,28 +272,31 @@ actor = "admin"
 key = "confluence_knowledge"
 name = "knowledge_id"
 prefix = "/api/v1/confluence"
-description = "routers/knowledge.py:create_new_knowledge accepts this provider type. Cloud sync handlers resolve this owned KB first; actual provider authentication remains a separate prerequisite."
+description = "routers/knowledge.py:create_new_knowledge accepts this provider type. Cloud sync handlers resolve this owned KB first; actual provider authentication remains a separate prerequisite. Admin avoids workspace.knowledge; FEATURE_KNOWLEDGE defaults true in CI. Creation does not contact Confluence."
 via = "POST /api/v1/knowledge/create"
 body = { "name" = "confluence-{token}", "description" = "Attack cloud KB", "type" = "confluence" }
 extract = "id"
+actor = "admin"
 
 [[parameter]]
 key = "google_drive_knowledge"
 name = "knowledge_id"
 prefix = "/api/v1/google-drive"
-description = "routers/knowledge.py:create_new_knowledge accepts this provider type. Cloud sync handlers resolve this owned KB first; actual provider authentication remains a separate prerequisite."
+description = "routers/knowledge.py:create_new_knowledge accepts this provider type. Cloud sync handlers resolve this owned KB first; actual provider authentication remains a separate prerequisite. Admin avoids workspace.knowledge; FEATURE_KNOWLEDGE defaults true in CI. Creation does not contact Google."
 via = "POST /api/v1/knowledge/create"
 body = { "name" = "google-drive-{token}", "description" = "Attack cloud KB", "type" = "google_drive" }
 extract = "id"
+actor = "admin"
 
 [[parameter]]
 key = "onedrive_knowledge"
 name = "knowledge_id"
 prefix = "/api/v1/onedrive"
-description = "routers/knowledge.py:create_new_knowledge accepts this provider type. Cloud sync handlers resolve this owned KB first; actual provider authentication remains a separate prerequisite."
+description = "routers/knowledge.py:create_new_knowledge accepts this provider type. Cloud sync handlers resolve this owned KB first; actual provider authentication remains a separate prerequisite. Admin avoids workspace.knowledge; FEATURE_KNOWLEDGE defaults true in CI. Creation does not contact Microsoft."
 via = "POST /api/v1/knowledge/create"
 body = { "name" = "onedrive-{token}", "description" = "Attack cloud KB", "type" = "onedrive" }
 extract = "id"
+actor = "admin"
 
 [[parameter]]
 key = "internal_knowledge"
@@ -303,20 +316,22 @@ same_as = "confluence_knowledge"
 key = "file"
 name = "id"
 prefix = "/api/v1/files/{id}"
-description = "routers/files.py:upload_file/upload_file_handler stores bytes and inserts File.id. process=false avoids an asynchronous ingestion race."
+description = "routers/files.py:upload_file/upload_file_handler stores bytes and inserts File.id. process=false avoids an asynchronous ingestion race. Admin avoids the cumulative rag.file.max_count_per_user quota on repeated passes. Tiny genuine text still passes size and sniff guards."
 via = "POST /api/v1/files/"
 extract = "id"
 files = [{ "field" = "file", "filename" = "attack-{token}.txt", "content" = "Attack file {token}", "content_type" = "text/plain" }]
 query = { "process" = false }
+actor = "admin"
 
 [[parameter]]
 key = "filename"
 name = "file_name"
 prefix = "/api/v1/files/{id}/content/{file_name}"
-description = "routers/files.py content/{file_name} delegates using id and does not bind file_name, but use the actual stored filename anyway."
+description = "routers/files.py content/{file_name} delegates using id and does not bind file_name, but use the actual stored filename anyway. Read as the admin file owner."
 via = "GET /api/v1/files/{file}"
 extract = "filename"
 depends_on = ["file"]
+actor = "admin"
 
 [[parameter]]
 key = "integration_file_status"
@@ -371,40 +386,44 @@ depends_on = ["attachment_file"]
 key = "note"
 name = "id"
 prefix = "/api/v1/notes/{id}"
-description = "routers/notes.py:create_new_note returns the inserted NoteModel."
+description = "routers/notes.py:create_new_note returns the inserted NoteModel. Admin avoids features.notes; no global notes creation gate."
 via = "POST /api/v1/notes/create"
 body = { "title" = "attack-{token}", "data" = { "content" = "Attack note" } }
 extract = "id"
+actor = "admin"
 
 [[parameter]]
 key = "calendar"
 name = "calendar_id"
 prefix = "/api/v1/calendars/{calendar_id}"
-description = "routers/calendar.py:create_calendar requires calendar.enable and returns CalendarModel."
+description = "routers/calendar.py:create_calendar requires calendar.enable and returns CalendarModel. Admin avoids features.calendar; namespace enables calendar.enable."
 via = "POST /api/v1/calendars/create"
 body = { "name" = "attack-{token}" }
 extract = "id"
 depends_on = ["namespace"]
+actor = "admin"
 
 [[parameter]]
 key = "event"
 name = "event_id"
 prefix = "/api/v1/calendars/events/{event_id}"
-description = "routers/calendar.py:create_event checks write access to the parent calendar before inserting the event."
+description = "routers/calendar.py:create_event checks write access to the parent calendar before inserting the event. Admin avoids features.calendar and owns the parent calendar. Event timestamps are nanoseconds."
 via = "POST /api/v1/calendars/events/create"
-body = { "calendar_id" = "{calendar}", "title" = "attack-{token}", "start_at" = 2000000000, "end_at" = 2000003600 }
+body = { "calendar_id" = "{calendar}", "title" = "attack-{token}", "start_at" = 2000000000000000000, "end_at" = 2000003600000000000 }
 extract = "id"
 depends_on = ["calendar"]
+actor = "admin"
 
 [[parameter]]
 key = "automation"
 name = "id"
 prefix = "/api/v1/automations/{id}"
-description = "routers/automations.py:create_new_automation validates rrule. Inactive fixture avoids scheduled background runs while later routes are seeded."
+description = "routers/automations.py:create_new_automation validates rrule. Inactive fixture avoids scheduled background runs while later routes are seeded. Admin avoids features.automations and cumulative count/minimum-interval limits; namespace enables automations.enable."
 via = "POST /api/v1/automations/create"
 body = { "name" = "attack-{token}", "data" = { "prompt" = "Attack automation", "model_id" = "{model}", "rrule" = "FREQ=DAILY;INTERVAL=30" }, "is_active" = false }
 extract = "id"
 depends_on = ["namespace", "model"]
+actor = "admin"
 
 [[parameter]]
 key = "group"
@@ -437,56 +456,63 @@ same_as = "function"
 key = "tool"
 name = "id"
 prefix = "/api/v1/tools/id/{id}"
-description = "routers/tools.py:create_new_tools requires an identifier and a loadable Tools class; it inserts Tool.id and callable specs."
+description = "routers/tools.py:create_new_tools requires an identifier and a loadable Tools class; it inserts Tool.id and callable specs. Admin satisfies workspace.tools/workspace.tools_import; no package installation or external import is needed."
 via = "POST /api/v1/tools/create"
 body = { "id" = "attack_tool_{token}", "name" = "Attack tool", "content" = "from pydantic import BaseModel\n\nclass Tools:\n    class Valves(BaseModel):\n        label: str = \"seed\"\n    class UserValves(BaseModel):\n        label: str = \"seed\"\n    def __init__(self):\n        self.valves = self.Valves()\n    def echo(self, text: str) -> str:\n        return text\n", "meta" = {  } }
 extract = "id"
+actor = "admin"
 
 [[parameter]]
 key = "skill"
 name = "id"
 prefix = "/api/v1/skills/id/{id}"
-description = "routers/skills.py:create_new_skill inserts the requested lowercased id."
+description = "routers/skills.py:create_new_skill inserts the requested lowercased id. Admin satisfies workspace.skills/workspace.skills_import. models/skills.py declares name unique independently of id, so BOTH include the per-pass token."
 via = "POST /api/v1/skills/create"
-body = { "id" = "attack-skill-{token}", "name" = "Attack skill", "content" = "Attack skill content" }
+body = { "id" = "attack-skill-{token}", "name" = "Attack skill {token}", "content" = "Attack skill content" }
 extract = "id"
+actor = "admin"
 
 [[parameter]]
 key = "prompt"
 name = "prompt_id"
 prefix = "/api/v1/prompts/id/{prompt_id}"
-description = "routers/prompts.py:create_new_prompt and models/prompts.py:insert_new_prompt create the prompt and its initial PromptHistory snapshot."
+description = "routers/prompts.py:create_new_prompt and models/prompts.py:insert_new_prompt create the prompt and its initial PromptHistory snapshot. Admin satisfies workspace.prompts/workspace.prompts_import; the command is unique per pass."
 via = "POST /api/v1/prompts/create"
 body = { "command" = "attack-{token}", "name" = "Attack prompt", "content" = "Attack prompt {token}" }
 extract = "id"
+actor = "admin"
 
 [[parameter]]
 key = "prompt_history"
 name = "history_id"
 prefix = "/api/v1/prompts/id/{prompt_id}/history/{history_id}"
-description = "The initial version_id points to this prompt's existing PromptHistory row; do not alias it to the prompt id."
+description = "The initial version_id points to this prompt's existing PromptHistory row; do not alias it to the prompt id. Read as the admin prompt owner."
 via = "GET /api/v1/prompts/id/{prompt}"
 extract = "version_id"
 depends_on = ["prompt"]
+actor = "admin"
 
 [[parameter]]
 key = "memory"
 name = "memory_id"
 prefix = "/api/v1/memories/{memory_id}"
-description = "routers/memories.py:add_memory inserts Memory.id and embeds it through the configured CI embedding endpoint."
+description = "routers/memories.py:add_memory inserts Memory.id and embeds it through the configured CI embedding endpoint. Admin avoids features.memories; namespace enables memories.enable. The CI stub supplies embeddings and Weaviate stores the vector."
 via = "POST /api/v1/memories/add"
 body = { "content" = "Attack memory {token}" }
 extract = "id"
+actor = "admin"
+depends_on = ["namespace"]
 
 [[parameter]]
 key = "feedback"
 name = "id"
 prefix = "/api/v1/evaluations/feedback/{id}"
-description = "routers/evaluations.py:create_feedback inserts Feedbacks.id; meta ties it to the seeded chat."
+description = "routers/evaluations.py:create_feedback inserts Feedbacks.id; meta ties it to the seeded chat. Use the same admin as the referenced chat owner; create_feedback itself has no feature gate."
 via = "POST /api/v1/evaluations/feedback"
 body = { "type" = "rating", "data" = { "rating" = 1, "model_id" = "{model}" }, "meta" = { "chat_id" = "{chat}" } }
 extract = "id"
 depends_on = ["chat", "model"]
+actor = "admin"
 
 [[parameter]]
 key = "archive"
@@ -599,10 +625,11 @@ depends_on = ["user"]
 key = "text"
 name = "text"
 prefix = "/api/v1/retrieval/ef/{text}"
-description = "routers/retrieval.py:get_embeddings treats text as input, not an id. Take a fresh persisted prompt string; there is no external resource prerequisite."
+description = "routers/retrieval.py:get_embeddings treats text as input, not an id. Take a fresh persisted prompt string; there is no external resource prerequisite. Admin satisfies workspace.prompts/workspace.prompts_import; the embedding-input prompt has its own unique command."
 via = "POST /api/v1/prompts/create"
 body = { "command" = "attack-embedding-{token}", "name" = "Attack embedding input", "content" = "attack-text-{token}" }
 extract = "content"
+actor = "admin"
 
 [[parameter]]
 key = "sync_provider"

@@ -1,7 +1,7 @@
 """Resolve route-scoped fixtures over HTTP; never import the application.
 
 Call once per pass, serially, using ensure_identities() from identities.py.
-The caller owns ordinary fixtures; admin-only setup uses the supplied admin.
+Feature-gated fixtures use the admin; integration fixtures use the caller.
 The result is keyed by (OpenAPI path template, parameter), never just name.
 Unseedable entries remain in SURFACE and are deliberately absent from results.
 """
@@ -319,6 +319,7 @@ def seed_task(ctx, parameter):
     result = ctx.request(
         'POST',
         '/api/chat/completions',
+        actor=ctx.admin,
         json={
             'model': pipe_id,
             'chat_id': chat_id,
@@ -333,7 +334,7 @@ def seed_task(ctx, parameter):
         # A returned id alone may already have completed. Check after the
         # background coroutine has had time to fail or enter its bounded wait.
         for _ in range(3):
-            active = ctx.request('GET', f'/api/tasks/chat/{quote(chat_id, safe="")}')
+            active = ctx.request('GET', f'/api/tasks/chat/{quote(chat_id, safe="")}', actor=ctx.admin)
             if task_id not in active.get('task_ids', []):
                 raise RuntimeError('Task completed before it could be used as a stop target')
             time.sleep(0.1)
