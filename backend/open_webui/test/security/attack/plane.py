@@ -49,9 +49,10 @@ from hostile_corpus import REFLECTION_PROBE, fetch_payloads
 from openapi_surface import writable_string_fields
 
 from . import client as transport
+from .configuration import preserve_numeric_configuration
 from .hits_path import hits_path
 from .identities import PASSWORD
-from .seeds import DESTRUCTIVE, METHODS, SPEC, parameter_for
+from .seeds import DESTRUCTIVE, METHODS, SPEC, SURFACE, parameter_for
 
 
 @dataclass(frozen=True)
@@ -72,6 +73,7 @@ class Seeding:
     entered: dict[str, dict[int, int]] = field(default_factory=dict)
     skipped: dict[str, str] = field(default_factory=dict)
     crashes: dict[str, str] = field(default_factory=dict)
+    config_findings: list[dict] = field(default_factory=list)
 
     @property
     def unentered(self):
@@ -142,6 +144,7 @@ def flush_hits():
             'unentered': tally.unentered,
             'skipped': tally.skipped,
             'crashes': tally.crashes,
+            'config_findings': tally.config_findings,
         }
         for name, tally in _PASSES.items()
     }
@@ -263,6 +266,14 @@ def _throwaway(admin):
 
 
 def _drive_one(client, route_id, filled, pass_name, **kwargs):
+    tally = _PASSES.setdefault(pass_name, Seeding())
+    with preserve_numeric_configuration(
+        client, route_id, SURFACE['config_recovery'], report=tally.config_findings.append
+    ):
+        return _drive_response(client, route_id, filled, pass_name, **kwargs)
+
+
+def _drive_response(client, route_id, filled, pass_name, **kwargs):
     method, _ = route_id.split(' ', 1)
     actor = _throwaway(client) if route_id in DESTRUCTIVE else client
     try:
