@@ -273,7 +273,7 @@ def test_order_reads_then_writes_then_deletes_then_destructive():
         'DELETE /a',
         destructive,
     ]
-    assert len(plane.operations()) == 631
+    assert len(plane.operations()) == 630
     assert set(plane.operations()[-len(seeds.DESTRUCTIVE) :]) == seeds.DESTRUCTIVE.keys()
 
 

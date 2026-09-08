@@ -625,15 +625,10 @@ description = "routers/export.py:trigger_data_export -> get_export_status create
 seeded_by = "seed_export"
 depends_on = ["user"]
 
-[[parameter]]
-key = "text"
-name = "text"
-prefix = "/api/v1/retrieval/ef/{text}"
-description = "routers/retrieval.py:get_embeddings treats text as input, not an id. Take a fresh persisted prompt string; there is no external resource prerequisite. Admin satisfies workspace.prompts/workspace.prompts_import; the embedding-input prompt has its own unique command."
-via = "POST /api/v1/prompts/create"
-body = { "command" = "attack-embedding-{token}", "name" = "Attack embedding input", "content" = "attack-text-{token}" }
-extract = "content"
-actor = "admin"
+# Removed 2026-09-08: this entry seeded GET /api/v1/retrieval/ef/{text}, which
+# routers/retrieval.py:3006 registers only under ENV=dev. The committed document is
+# generated under ENV=prod, the configuration the gate actually measures, so the route
+# and its seed no longer exist. Restore both together if the dev route is ever gated in.
 
 [[parameter]]
 key = "sync_provider"
