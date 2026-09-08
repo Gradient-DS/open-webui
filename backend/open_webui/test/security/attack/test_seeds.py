@@ -634,7 +634,10 @@ def test_live_resolution_returns_every_seedable_route_parameter(live_seeds):
 def test_live_seeded_models_are_visible_and_stub_completes_for_both_identities(live_seeds, role):
     identities, resolved = live_seeds
     client = getattr(identities, role)
-    model_id = resolved['/api/v1/analytics/models/{model_id}', 'model_id']
+    # Look the value up by a path the spec actually contains. The surface entry's
+    # `prefix` is a longest-prefix matcher, not a route: resolve_parameters keys its
+    # result by real path templates, so using a prefix here raises KeyError.
+    model_id = resolved['/api/v1/analytics/models/{model_id}/chats', 'model_id']
     registry = client.request('GET', '/api/models', params={'refresh': True})
     assert registry.status_code == 200, registry.text
     ids = {model['id'] for model in registry.json()['data']}
