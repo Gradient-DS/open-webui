@@ -61,6 +61,41 @@ services:
       retries: 20
     networks: [internal]
 
+  minio:
+    image: minio/minio:RELEASE.2025-04-22T22-12-26Z
+    command: ["server", "/data"]
+    environment:
+      MINIO_ROOT_USER: "ci-s3-access-key"
+      MINIO_ROOT_PASSWORD: "ci-only-s3-secret-key"
+      MINIO_BROWSER: "off"
+    tmpfs:
+      - /data
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "--silent", "http://127.0.0.1:9000/minio/health/ready"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    networks: [internal]
+
+  minio-init:
+    # This release includes mc as well as the server and curl.
+    image: minio/minio:RELEASE.2025-04-22T22-12-26Z
+    restart: "no"
+    environment:
+      S3_ACCESS_KEY_ID: "ci-s3-access-key"
+      S3_SECRET_ACCESS_KEY: "ci-only-s3-secret-key"
+      S3_BUCKET_NAME: "ci-uploads"
+    entrypoint: ["/bin/sh", "-ec"]
+    command:
+      - |
+        mc alias set ci http://minio:9000 "$$S3_ACCESS_KEY_ID" "$$S3_SECRET_ACCESS_KEY" --api S3v4 --path on
+        mc mb --ignore-existing "ci/$$S3_BUCKET_NAME"
+        mc stat "ci/$$S3_BUCKET_NAME"
+    depends_on:
+      minio:
+        condition: service_healthy
+    networks: [internal]
+
   open-webui:
     container_name: open-webui-ci
     build:
@@ -80,11 +115,18 @@ services:
       DATABASE_NAME: "openwebui"
       DATABASE_USER: "openwebui"
       DATABASE_PASSWORD: "ci-only-password"
+      DATABASE_ENABLE_IAM_TOKEN_AUTH: "false"
       # A real vector database and Redis keep retrieval and token revocation live.
       VECTOR_DB: "weaviate"
       ENABLE_WEAVIATE_MULTITENANCY_MODE: "true"
       BYPASS_ADMIN_ACCESS_CONTROL: "false"
-      STORAGE_PROVIDER: "local" # Documented S3 divergence; no object store in this stack.
+      STORAGE_PROVIDER: "s3"
+      S3_ENDPOINT_URL: "http://minio:9000"
+      S3_BUCKET_NAME: "ci-uploads"
+      S3_ACCESS_KEY_ID: "ci-s3-access-key"
+      S3_SECRET_ACCESS_KEY: "ci-only-s3-secret-key"
+      S3_REGION_NAME: "us-east-1"
+      S3_ADDRESSING_STYLE: "path" # MinIO has no bucket-specific DNS names.
       WEAVIATE_HTTP_HOST: "weaviate"
       WEAVIATE_GRPC_HOST: "weaviate"
       WEAVIATE_HTTP_PORT: "8080"
@@ -214,6 +256,11 @@ services:
         condition: service_healthy
       stub:
         condition: service_healthy
+      minio:
+        condition: service_healthy
+      minio-init:
+        # The provider never creates buckets; readiness alone is insufficient.
+        condition: service_completed_successfully
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/health', timeout=5)"]
       interval: 10s

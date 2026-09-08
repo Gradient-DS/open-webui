@@ -22,11 +22,8 @@ DIVERGENCES = {
         'Production reranker hostname replaced by the sealed stub.',
     ),
     'OPENAI_API_BASE_URL': ('http://stub:8000/v1', 'Production LiteLLM hostname replaced by the sealed stub.'),
-    'STORAGE_PROVIDER': (
-        'local',
-        'The existing sealed stack has no S3 service; local disposable storage preserves file handling '
-        'but does not test S3 signing, multipart transfers or presigning.',
-    ),
+    'S3_ENDPOINT_URL': ('http://minio:9000', 'Production object.previder.nl endpoint replaced by in-network MinIO.'),
+    'S3_BUCKET_NAME': ('ci-uploads', 'Production bucket replaced by a disposable CI bucket.'),
     'ENABLE_OTEL': (
         '',
         'Telemetry is disabled: the sealed stack has no Alloy OTLP collector '

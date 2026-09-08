@@ -499,7 +499,7 @@ class TestCiStubsEveryDeclaredSink:
         assert compose['networks']['internal']['internal'] is True
         assert set(compose['networks']) == {'internal', 'edge'}
         services = compose['services']
-        assert set(services) == {'entry', 'open-webui', 'postgres', 'weaviate', 'redis', 'stub'}
+        assert set(services) == {'entry', 'open-webui', 'postgres', 'weaviate', 'redis', 'stub', 'minio', 'minio-init'}
         for name, service in services.items():
             assert set(service['networks']) == ({'internal', 'edge'} if name == 'entry' else {'internal'})
             assert not service.get('network_mode')
@@ -507,7 +507,11 @@ class TestCiStubsEveryDeclaredSink:
             assert not service.get('cap_add')
             assert not service.get('extra_hosts')
             assert not service.get('env_file')
-            assert service.get('healthcheck') and not service['healthcheck'].get('disable')
+            if name == 'minio-init':
+                assert services['open-webui']['depends_on'][name]['condition'] == 'service_completed_successfully'
+                assert service['restart'] == 'no'
+            else:
+                assert service.get('healthcheck') and not service['healthcheck'].get('disable')
             if name != 'entry':
                 assert not service.get('ports'), name
             # No inherited host environment, proxy variables or interpolation.
@@ -518,7 +522,7 @@ class TestCiStubsEveryDeclaredSink:
         assert app['container_name'] == 'open-webui-ci'
         assert app['build']['context'] == '.'
         assert app['build']['dockerfile'] == 'Dockerfile'
-        for dependency in ('postgres', 'weaviate', 'redis', 'stub'):
+        for dependency in ('postgres', 'weaviate', 'redis', 'stub', 'minio'):
             assert app['depends_on'][dependency]['condition'] == 'service_healthy'
 
     def test_deployed_search_engine_reaches_provider_dispatch(self, compose):
