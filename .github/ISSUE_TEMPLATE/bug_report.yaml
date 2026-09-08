@@ -1,14 +1,19 @@
 name: Bug Report
+<<<<<<< HEAD
 description: Report a bug in soev.ai
 title: 'bug: '
+=======
+description: Tell us what broke in Open WebUI.
+title: 'issue: '
+>>>>>>> upstream/main
 labels: ['bug', 'triage']
-assignees: []
 body:
   - type: markdown
     attributes:
       value: |
         # Bug Report
 
+<<<<<<< HEAD
         Thanks for taking the time to report a bug.
 
         Before submitting, please check:
@@ -17,15 +22,38 @@ body:
         - **Upstream Open WebUI issues** if the bug seems to be in core chat / RAG / model handling: https://github.com/open-webui/open-webui/issues
 
         For **security vulnerabilities**, please follow [SECURITY.md](https://github.com/Gradient-DS/open-webui/blob/main/SECURITY.md) — do not open a public issue.
+=======
+        Use this for real, reproducible bugs. A clear issue is the most useful contribution: include the affected workflow, the expected result, the actual result, and the details needed for someone else to reproduce it.
+
+        Before submitting, search open and closed [Issues](https://github.com/open-webui/open-webui/issues) and [Discussions](https://github.com/open-webui/open-webui/discussions). The issue may already be reported or fixed on `dev`.
+
+        Please do not open a code pull request for this report unless a maintainer asks for one, or the change is only i18n/localization. If you want to share code as reference, include it here as a local diff or patch. Actionable reproduction details are the most useful next step.
+
+        Security vulnerabilities must not be reported publicly. Use the [GitHub security page](https://github.com/open-webui/open-webui/security) instead.
+>>>>>>> upstream/main
 
   - type: checkboxes
     id: issue-check
     attributes:
+<<<<<<< HEAD
       label: Pre-flight
       options:
         - label: I have searched existing issues (open and closed) in this repository.
           required: true
         - label: This bug is in soev.ai-specific functionality (cloud sync, agent API, GDPR features, feature flags, SSO invites, TOTP, Helm chart) — or I have confirmed it is not yet tracked upstream.
+=======
+      label: Before Submitting
+      options:
+        - label: I searched open and closed issues and discussions for an existing report.
+          required: true
+        - label: I checked whether this is already fixed on the `dev` branch or latest source.
+          required: true
+        - label: I understand that maintainers want a well-written issue before any code pull request.
+          required: true
+        - label: I am using the latest available version of Open WebUI for my install method.
+          required: true
+        - label: This is not a security vulnerability.
+>>>>>>> upstream/main
           required: true
 
   - type: dropdown
@@ -33,9 +61,15 @@ body:
     attributes:
       label: Installation Method
       options:
+<<<<<<< HEAD
         - Docker / Docker Compose
         - Helm chart (Kubernetes)
         - Local development (npm + pip)
+=======
+        - Docker
+        - Pip Install
+        - Git Clone
+>>>>>>> upstream/main
         - Other
     validations:
       required: true
@@ -43,31 +77,73 @@ body:
   - type: input
     id: version
     attributes:
+<<<<<<< HEAD
       label: soev.ai Version / Commit
       description: Image tag, chart version, or git commit hash.
+=======
+      label: Open WebUI Version
+      description: Specify the version, commit, or image tag.
+      placeholder: v0.11.0, dev commit SHA, or Docker tag
+>>>>>>> upstream/main
     validations:
       required: true
 
   - type: input
     id: operating-system
     attributes:
+<<<<<<< HEAD
       label: Operating System / Platform
       description: e.g. Ubuntu 22.04, macOS 14, Kubernetes 1.29
+=======
+      label: Operating System
+      description: Specify the OS and version.
+      placeholder: Windows 11, macOS Tahoe, Ubuntu 26.04, Debian 13
+>>>>>>> upstream/main
     validations:
       required: true
 
   - type: input
     id: browser
     attributes:
+<<<<<<< HEAD
       label: Browser (if frontend bug)
       description: e.g. Chrome 120, Firefox 121
     validations:
       required: false
 
+=======
+      label: Browser
+      description: If the bug appears in the browser, include browser and version.
+      placeholder: Chrome 151.0, Firefox 153.0.3
+    validations:
+      required: false
+
+  - type: input
+    id: ollama-version
+    attributes:
+      label: Ollama Version
+      description: Include this if Ollama is involved.
+      placeholder: v0.32.5
+    validations:
+      required: false
+
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      description: What is wrong, in a few sentences?
+    validations:
+      required: true
+
+>>>>>>> upstream/main
   - type: textarea
     id: expected-behavior
     attributes:
       label: Expected Behavior
+<<<<<<< HEAD
+=======
+      description: What should have happened?
+>>>>>>> upstream/main
     validations:
       required: true
 
@@ -75,6 +151,10 @@ body:
     id: actual-behavior
     attributes:
       label: Actual Behavior
+<<<<<<< HEAD
+=======
+      description: What actually happened?
+>>>>>>> upstream/main
     validations:
       required: true
 
@@ -82,6 +162,7 @@ body:
     id: reproduction-steps
     attributes:
       label: Steps to Reproduce
+<<<<<<< HEAD
       description: Precise, sequential steps. Include relevant config / env vars.
       placeholder: |
         1. Start with `docker compose up -d` and a fresh database.
@@ -89,20 +170,39 @@ body:
         3. Open http://localhost:3000 and sign in.
         4. Navigate to ...
         5. Observe ...
+=======
+      description: Include the exact commands, settings, URLs, model/provider setup, and user actions needed to hit the bug.
+      placeholder: |
+        1. Start Open WebUI with ...
+        2. Configure ...
+        3. Open ...
+        4. Click ...
+        5. See ...
+>>>>>>> upstream/main
     validations:
       required: true
 
   - type: textarea
     id: logs-screenshots
     attributes:
+<<<<<<< HEAD
       label: Logs & Screenshots
       description: Browser console, backend logs, or screenshots. Redact secrets.
+=======
+      label: Logs, Screenshots, and Config
+      description: Include relevant browser console logs, server/container logs, screenshots, and configuration. If something does not apply, say so.
+>>>>>>> upstream/main
     validations:
       required: false
 
   - type: textarea
     id: additional-info
     attributes:
+<<<<<<< HEAD
       label: Additional Context
+=======
+      label: Additional Information
+      description: Anything else that might help us understand the report.
+>>>>>>> upstream/main
     validations:
       required: false

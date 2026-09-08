@@ -8,6 +8,8 @@
 	import { onMount, getContext } from 'svelte';
 
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
+	import UserSettingRow from './UserSettingRow.svelte';
+	import UserSettingSection from './UserSettingSection.svelte';
 
 	const i18n = getContext('i18n');
 
@@ -18,6 +20,8 @@
 		current: '',
 		latest: ''
 	};
+	const actionButtonClass =
+		'text-xs text-gray-500 transition-colors hover:text-gray-900 dark:text-gray-500 dark:hover:text-white';
 
 	const checkForVersionUpdates = async () => {
 		updateAvailable = null;
@@ -45,17 +49,18 @@
 	});
 </script>
 
-<div id="tab-about" class="flex flex-col h-full justify-between space-y-3 text-sm">
-	<div class=" space-y-3 overflow-y-scroll max-h-[28rem] md:max-h-full">
-		<div>
-			<div class=" mb-2.5 text-sm font-medium flex space-x-2 items-center">
-				<div>
-					{$WEBUI_NAME}
-					{$i18n.t('Version')}
-				</div>
-			</div>
-			<div class="flex w-full justify-between items-center">
-				<div class="flex flex-col text-xs text-gray-700 dark:text-gray-200">
+<div id="tab-about" class="flex flex-col h-full justify-between text-sm">
+	<h2 class="text-sm font-medium text-gray-900 dark:text-white mb-4">{$i18n.t('About')}</h2>
+
+	<div class="flex-1 min-h-0 overflow-y-auto scrollbar-hover pr-1.5">
+		<!-- LICENSE covers this Open WebUI About identifier.
+		Do not alter, remove, obscure, or replace it except as LICENSE permits:
+		https://docs.openwebui.com/license. -->
+		<UserSettingSection title={`${$WEBUI_NAME} ${$i18n.t('Version')}`} first>
+			<UserSettingRow
+				description={$i18n.t('View the installed version and check release updates.')}
+			>
+				<div slot="label" class="flex flex-col text-xs text-gray-600 dark:text-gray-400">
 					<div class="flex gap-1">
 						<Tooltip content={WEBUI_BUILD_HASH}>
 							v{WEBUI_VERSION}
@@ -75,6 +80,7 @@
 						{/if}
 					</div>
 
+<<<<<<< HEAD
 					{#if isFeatureEnabled('changelog')}
 						<button
 							class=" underline flex items-center space-x-1 text-xs text-gray-500 dark:text-gray-500"
@@ -85,11 +91,21 @@
 							<div>{$i18n.t("See what's new")}</div>
 						</button>
 					{/if}
+=======
+					<button
+						class={actionButtonClass}
+						on:click={() => {
+							showChangelog.set(true);
+						}}
+					>
+						<div>{$i18n.t("See what's new")}</div>
+					</button>
+>>>>>>> upstream/main
 				</div>
 
 				{#if isFeatureEnabled('changelog') && $config?.features?.enable_version_update_check}
 					<button
-						class=" text-xs px-3 py-1.5 bg-gray-100 hover:bg-gray-200 dark:bg-gray-850 dark:hover:bg-gray-800 transition rounded-lg font-medium"
+						class={actionButtonClass}
 						on:click={() => {
 							checkForVersionUpdates();
 						}}
@@ -97,76 +113,68 @@
 						{$i18n.t('Check for updates')}
 					</button>
 				{/if}
-			</div>
-		</div>
+			</UserSettingRow>
+		</UserSettingSection>
 
 		{#if ollamaVersion}
-			<hr class=" border-gray-100/30 dark:border-gray-850/30" />
-
-			<div>
-				<div class=" mb-2.5 text-sm font-medium">{$i18n.t('Ollama Version')}</div>
-				<div class="flex w-full">
-					<div class="flex-1 text-xs text-gray-700 dark:text-gray-200">
-						{ollamaVersion ?? 'N/A'}
-					</div>
+			<UserSettingSection title={$i18n.t('Ollama Version')}>
+				<div class="text-xs text-gray-600 dark:text-gray-400">
+					{ollamaVersion ?? 'N/A'}
 				</div>
-			</div>
+			</UserSettingSection>
 		{/if}
 
-		<hr class=" border-gray-100/30 dark:border-gray-850/30" />
+		<UserSettingSection title={$i18n.t('Community')}>
+			{#if $config?.license_metadata}
+				<!-- LICENSE covers this Open WebUI license attribution.
+				Do not alter, remove, obscure, or replace it except as LICENSE permits:
+				https://docs.openwebui.com/license. -->
+				<div class="text-xs text-gray-600 dark:text-gray-400">
+					{#if !$WEBUI_NAME.includes('Open WebUI')}
+						<span>{$WEBUI_NAME}</span> -
+					{/if}
 
-		{#if $config?.license_metadata}
-			<div class="mb-2 text-xs">
-				{#if !$WEBUI_NAME.includes('Open WebUI')}
-					<span class=" text-gray-500 dark:text-gray-300 font-medium">{$WEBUI_NAME}</span> -
-				{/if}
+					<span class="capitalize">{$config?.license_metadata?.type}</span> license purchased by
+					<span class="capitalize">{$config?.license_metadata?.organization_name}</span>
+				</div>
+			{:else}
+				<div class="flex flex-wrap gap-x-3 gap-y-1 text-xs text-gray-400 dark:text-gray-600">
+					<a
+						class="hover:text-gray-700 dark:hover:text-gray-400"
+						href="https://discord.gg/5rJgQTnV4s"
+						target="_blank">Discord</a
+					>
+					<a
+						class="hover:text-gray-700 dark:hover:text-gray-400"
+						href="https://twitter.com/OpenWebUI"
+						target="_blank">X</a
+					>
+					<a
+						class="hover:text-gray-700 dark:hover:text-gray-400"
+						href="https://github.com/open-webui/open-webui"
+						target="_blank">GitHub</a
+					>
+				</div>
+			{/if}
 
-				<span class=" capitalize">{$config?.license_metadata?.type}</span> license purchased by
-				<span class=" capitalize">{$config?.license_metadata?.organization_name}</span>
+			<div class="text-xs text-gray-400 dark:text-gray-500">
+				Emoji graphics provided by
+				<a href="https://github.com/jdecked/twemoji" target="_blank">Twemoji</a>, licensed under
+				<a href="https://creativecommons.org/licenses/by/4.0/" target="_blank">CC-BY 4.0</a>.
 			</div>
-		{:else}
-			<div class="flex space-x-1">
-				<a href="https://discord.gg/5rJgQTnV4s" target="_blank">
-					<img
-						alt="Discord"
-						src="https://img.shields.io/badge/Discord-Open_WebUI-blue?logo=discord&logoColor=white"
-					/>
-				</a>
 
-				<a href="https://twitter.com/OpenWebUI" target="_blank">
-					<img
-						alt="X (formerly Twitter) Follow"
-						src="https://img.shields.io/twitter/follow/OpenWebUI"
-					/>
-				</a>
-
-				<a href="https://github.com/open-webui/open-webui" target="_blank">
-					<img
-						alt="Github Repo"
-						src="https://img.shields.io/github/stars/open-webui/open-webui?style=social&label=Star us on Github"
-					/>
-				</a>
-			</div>
-		{/if}
-
-		<div class="mt-2 text-xs text-gray-400 dark:text-gray-500">
-			Emoji graphics provided by
-			<a href="https://github.com/jdecked/twemoji" target="_blank">Twemoji</a>, licensed under
-			<a href="https://creativecommons.org/licenses/by/4.0/" target="_blank">CC-BY 4.0</a>.
-		</div>
-
-		<div>
-			<pre
-				class="text-xs text-gray-400 dark:text-gray-500">Copyright (c) {new Date().getFullYear()} <a
-					href="https://openwebui.com"
-					target="_blank"
-					class="underline">Open WebUI Inc.</a
-				> <a href="https://github.com/open-webui/open-webui/blob/main/LICENSE" target="_blank"
+			<div class="text-xs text-gray-400 dark:text-gray-500">
+				<!-- LICENSE covers this Open WebUI copyright attribution.
+				Do not alter, remove, obscure, or replace it except as LICENSE permits:
+				https://docs.openwebui.com/license. -->
+				Copyright (c) {new Date().getFullYear()}
+				<a href="https://openwebui.com" target="_blank" class="underline">Open WebUI Inc.</a>
+				<a href="https://github.com/open-webui/open-webui/blob/main/LICENSE" target="_blank"
 					>All rights reserved.</a
 				>
-</pre>
-		</div>
+			</div>
 
+<<<<<<< HEAD
 		<div class="mt-2 text-xs text-gray-400 dark:text-gray-500">
 			{$i18n.t('Created by')}
 			<a
@@ -186,5 +194,14 @@
 				{$i18n.t('Powered by soev.ai')}
 			</a>
 		</div>
+=======
+			<div class="text-xs text-gray-400 dark:text-gray-500">
+				{$i18n.t('Created by')}
+				<a class="text-gray-500 dark:text-gray-400" href="https://github.com/tjbck" target="_blank"
+					>Tim J. Baek</a
+				>
+			</div>
+		</UserSettingSection>
+>>>>>>> upstream/main
 	</div>
 </div>

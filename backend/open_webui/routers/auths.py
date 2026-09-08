@@ -9,11 +9,12 @@ import urllib
 import uuid
 from ssl import CERT_NONE, CERT_REQUIRED, PROTOCOL_TLS
 
-from aiohttp import ClientSession
+from aiohttp import BasicAuth, ClientSession
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import JSONResponse, Response
 from ldap3 import NONE, Connection, Server, Tls
 from ldap3.utils.conv import escape_filter_chars
+from ldap3.utils.dn import parse_dn
 from open_webui.config import (
     DEFAULT_LOCALE,
     ENABLE_PASSWORD_AUTH,
@@ -25,6 +26,9 @@ from open_webui.env import (
     AIOHTTP_CLIENT_SESSION_SSL,
     ENABLE_INITIAL_ADMIN_SIGNUP,
     ENABLE_OAUTH_TOKEN_EXCHANGE,
+    OAUTH_TOKEN_EXCHANGE_RATE_LIMIT,
+    OAUTH_TOKEN_EXCHANGE_RATE_LIMIT_WINDOW,
+    OAUTH_TOKEN_EXCHANGE_TRUSTED_CLIENT_IDS,
     WEBUI_AUTH,
     WEBUI_AUTH_COOKIE_SAME_SITE,
     WEBUI_AUTH_COOKIE_SECURE,
@@ -67,6 +71,7 @@ from open_webui.utils.auth import (
     get_password_hash,
     get_verified_user,
     invalidate_token,
+    revoke_user_tokens,
     validate_password,
     verify_password,
 )
@@ -83,6 +88,7 @@ from open_webui.utils.password_reset import (
 )
 from open_webui.services.email.auth import is_mail_configured
 from pydantic import BaseModel
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing import Optional
 
@@ -93,6 +99,18 @@ log = logging.getLogger(__name__)
 # Forgive us our failed attempts, as we forgive those
 # who exceed their allotted rate against this gate.
 signin_rate_limiter = RateLimiter(redis_client=get_redis_client(), limit=5 * 3, window=60 * 3)
+# Best-effort throttle only: there is no caller identity before the provider answers,
+# and deployments may derive request.client from proxy headers.
+token_exchange_rate_limiter = (
+    RateLimiter(
+        redis_client=get_redis_client(),
+        limit=OAUTH_TOKEN_EXCHANGE_RATE_LIMIT,
+        window=OAUTH_TOKEN_EXCHANGE_RATE_LIMIT_WINDOW,
+    )
+    if OAUTH_TOKEN_EXCHANGE_RATE_LIMIT is not None
+    else None
+)
+
 
 password_reset_rate_limiter = RateLimiter(redis_client=get_redis_client(), limit=5, window=60 * 15)
 
@@ -118,6 +136,7 @@ ADMIN_CONFIG_KEYS = {
     'API_KEYS_ALLOWED_ENDPOINTS': 'auth.api_key.allowed_endpoints',
     'DEFAULT_USER_ROLE': 'ui.default_user_role',
     'DEFAULT_GROUP_ID': 'ui.default_group_id',
+    'DEFAULT_INTERFACE_SETTINGS': 'ui.default_interface_settings',
     'JWT_EXPIRES_IN': 'auth.jwt_expiry',
     'ENABLE_COMMUNITY_SHARING': 'ui.enable_community_sharing',
     'ENABLE_MESSAGE_RATING': 'ui.enable_message_rating',
@@ -127,6 +146,7 @@ ADMIN_CONFIG_KEYS = {
     'AUTOMATION_MIN_INTERVAL': 'automations.min_interval',
     'ENABLE_AUTOMATIONS': 'automations.enable',
     'ENABLE_CHANNELS': 'channels.enable',
+    'CHANNEL_MODEL_RESPONSE_MODE': 'channels.model_response_mode',
     'ENABLE_CALENDAR': 'calendar.enable',
     'ENABLE_MEMORIES': 'memories.enable',
     'ENABLE_MEMORY_SYSTEM_CONTEXT': 'memories.system_context.enable',
@@ -160,6 +180,9 @@ LDAP_SERVER_CONFIG_KEYS = {
     'certificate_path': 'ldap.server.ca_cert_file',
     'validate_cert': 'ldap.server.validate_cert',
     'ciphers': 'ldap.server.ciphers',
+    'enable_group_management': 'ldap.group.enable_management',
+    'enable_group_creation': 'ldap.group.enable_creation',
+    'attribute_for_groups': 'ldap.server.attribute_for_groups',
 }
 
 
@@ -463,6 +486,7 @@ async def update_password(
             hashed = await get_password_hash(form_data.new_password)
             success = await Auths.update_user_password_by_id(user.id, hashed, db=db)
             if success:
+                await revoke_user_tokens(request, user.id)
                 await publish_event(
                     request,
                     EVENTS.AUTH_PASSWORD_CHANGED,
@@ -475,6 +499,52 @@ async def update_password(
             raise HTTPException(400, detail=ERROR_MESSAGES.INCORRECT_PASSWORD)
     else:
         raise HTTPException(400, detail=ERROR_MESSAGES.INVALID_CRED)
+
+
+def _unescape_ldap_dn_value(value: str) -> str:
+    """Resolve RFC 4514 escapes in a DN value, e.g. ``CN=Sales\\, EMEA`` -> ``Sales, EMEA``.
+
+    Consecutive ``\\XX`` hex escapes encode UTF-8 bytes and are decoded together.
+    """
+    hexdigits = '0123456789abcdefABCDEF'
+    result = []
+    pos = 0
+    length = len(value)
+    while pos < length:
+        char = value[pos]
+        if char == '\\' and pos + 1 < length:
+            if pos + 2 < length and value[pos + 1] in hexdigits and value[pos + 2] in hexdigits:
+                byte_values = bytearray()
+                while (
+                    pos + 2 < length
+                    and value[pos] == '\\'
+                    and value[pos + 1] in hexdigits
+                    and value[pos + 2] in hexdigits
+                ):
+                    byte_values.append(int(value[pos + 1 : pos + 3], 16))
+                    pos += 3
+                result.append(byte_values.decode('utf-8', errors='replace'))
+            else:
+                # Backslash escaping a literal special char, e.g. "\," or "\+".
+                result.append(value[pos + 1])
+                pos += 2
+        else:
+            result.append(char)
+            pos += 1
+    return ''.join(result)
+
+
+def extract_group_cn_from_dn(group_dn: str) -> str | None:
+    """Return the first CN component of an LDAP group DN, or None.
+
+    Uses ``parse_dn`` so escaped separators inside a value (e.g. a group whose
+    name contains a comma) are handled correctly instead of naively splitting
+    on ``,``.
+    """
+    for attr_type, attr_value, _ in parse_dn(group_dn):
+        if attr_type.upper() == 'CN':
+            return _unescape_ldap_dn_value(attr_value)
+    return None
 
 
 ############################
@@ -667,8 +737,8 @@ async def ldap_auth(
         ]
         if ENABLE_LDAP_GROUP_MANAGEMENT:
             search_attributes.append(f'{LDAP_ATTRIBUTE_FOR_GROUPS}')
-            log.info(f'LDAP Group Management enabled. Adding {LDAP_ATTRIBUTE_FOR_GROUPS} to search attributes')
-        log.info(f'LDAP search attributes: {search_attributes}')
+            log.info('LDAP Group Management enabled. Adding %s to search attributes', LDAP_ATTRIBUTE_FOR_GROUPS)
+        log.info('LDAP search attributes: %s', search_attributes)
 
         search_success = await asyncio.to_thread(
             connection_app.search,
@@ -705,6 +775,7 @@ async def ldap_auth(
         user_groups = []
         if ENABLE_LDAP_GROUP_MANAGEMENT and LDAP_ATTRIBUTE_FOR_GROUPS in entry:
             group_dns = entry[LDAP_ATTRIBUTE_FOR_GROUPS]
+<<<<<<< HEAD
             log.debug(f'LDAP raw group DNs count: {len(group_dns) if group_dns else 0}')
 
             if group_dns:
@@ -712,35 +783,57 @@ async def ldap_auth(
                     group_dns = group_dns.value
                 elif hasattr(group_dns, '__iter__') and not isinstance(group_dns, (str, bytes)):
                     group_dns = list(group_dns)
+=======
+            log.info('LDAP raw group DNs for user %s: %s', username_list, group_dns)
+
+            if group_dns:
+                log.info('LDAP group_dns original: %s', group_dns)
+                log.info('LDAP group_dns type: %s', type(group_dns))
+                log.info('LDAP group_dns length: %s', len(group_dns))
+
+                if hasattr(group_dns, 'value'):
+                    group_dns = group_dns.value
+                    log.info('Extracted .value property: %s', group_dns)
+                elif hasattr(group_dns, '__iter__') and not isinstance(group_dns, (str, bytes)):
+                    group_dns = list(group_dns)
+                    log.info('Converted to list: %s', group_dns)
+>>>>>>> upstream/main
 
                 if isinstance(group_dns, list):
                     group_dns = [str(item) for item in group_dns]
                 else:
                     group_dns = [str(group_dns)]
 
+<<<<<<< HEAD
                 for group_idx, group_dn in enumerate(group_dns):
                     group_dn = str(group_dn)
+=======
+                log.info('LDAP group_dns after processing - type: %s, length: %s', type(group_dns), len(group_dns))
+
+                for group_idx, group_dn in enumerate(group_dns):
+                    group_dn = str(group_dn)
+                    log.info('Processing group DN #%s: %s', group_idx + 1, group_dn)
+>>>>>>> upstream/main
 
                     try:
-                        group_cn = None
-
-                        for item in group_dn.split(','):
-                            item = item.strip()
-                            if item.upper().startswith('CN='):
-                                group_cn = item[3:]
-                                break
+                        group_cn = extract_group_cn_from_dn(group_dn)
 
                         if group_cn:
                             user_groups.append(group_cn)
-
                         else:
                             log.warning('Could not extract CN from a group DN')
                     except Exception as e:
                         log.warning(f'Failed to extract group name from DN: {e}')
 
+<<<<<<< HEAD
                 log.debug(f'LDAP groups resolved: {len(user_groups)} total')
             else:
                 log.debug('No LDAP groups found for user')
+=======
+                log.info('LDAP groups for user %s: %s (total: %s)', username_list, user_groups, len(user_groups))
+            else:
+                log.info('No groups found for user %s', username_list)
+>>>>>>> upstream/main
         elif ENABLE_LDAP_GROUP_MANAGEMENT:
             log.warning(
                 f'LDAP Group Management enabled but {LDAP_ATTRIBUTE_FOR_GROUPS} attribute not found in user entry'
@@ -804,11 +897,11 @@ async def ldap_auth(
 
             if user:
                 if ENABLE_LDAP_GROUP_MANAGEMENT and user_groups:
-                    if ENABLE_LDAP_GROUP_CREATION:
-                        await Groups.create_groups_by_group_names(user.id, user_groups, db=db)
                     try:
+                        if ENABLE_LDAP_GROUP_CREATION:
+                            await Groups.create_groups_by_group_names(user.id, user_groups, db=db)
                         await Groups.sync_groups_by_group_names(user.id, user_groups, db=db)
-                        log.info(f'Successfully synced groups for user {user.id}: {user_groups}')
+                        log.info('Successfully synced groups for user %s: %s', user.id, user_groups)
                     except Exception as e:
                         log.error(f'Failed to sync groups for user {user.id}: {e}')
 
@@ -861,14 +954,18 @@ async def signin(
                 pass
 
         if not await Users.get_user_by_email(email.lower(), db=db):
-            await signup_handler(
-                request,
-                email,
-                str(uuid.uuid4()),
-                name,
-                db=db,
-                source='trusted_header',
-            )
+            try:
+                await signup_handler(
+                    request,
+                    email,
+                    str(uuid.uuid4()),
+                    name,
+                    db=db,
+                    source='trusted_header',
+                )
+            except IntegrityError:
+                if not await Users.get_user_by_email(email.lower(), db=db):
+                    raise
 
         user = await Auths.authenticate_user_by_email(email, db=db)
         if user:
@@ -883,7 +980,17 @@ async def signin(
                 trusted_role = request.headers.get(WEBUI_AUTH_TRUSTED_ROLE_HEADER, '').lower().strip()
                 if trusted_role in {'admin', 'user', 'pending'}:
                     if user.role != trusted_role:
-                        await Users.update_user_role_by_id(user.id, trusted_role, db=db)
+                        updated_user = await Users.update_user_role_by_id(user.id, trusted_role, db=db)
+                        if updated_user:
+                            user = updated_user
+                            await publish_event(
+                                request,
+                                EVENTS.USER_ROLE_UPDATED,
+                                actor=updated_user,
+                                subject_id=updated_user.id,
+                                source='trusted_header',
+                                data={'role': updated_user.role},
+                            )
                 elif trusted_role:
                     log.warning(f'Ignoring invalid trusted role header value: {trusted_role}')
 
@@ -1132,6 +1239,9 @@ async def signout(request: Request, response: Response, db: AsyncSession = Depen
     if token is None:
         token = request.cookies.get('token')
 
+    oauth_session_id = request.cookies.get('oauth_session_id')
+    session = await OAuthSessions.get_session_by_id(oauth_session_id, db=db) if oauth_session_id else None
+
     if token:
         actor = None
         data = decode_token(token)
@@ -1144,17 +1254,20 @@ async def signout(request: Request, response: Response, db: AsyncSession = Depen
             actor=actor,
             subject_id=actor.id if actor else None,
             subject_type='user' if actor else None,
+            **({'source': 'oauth', 'data': {'auth_method': 'oauth', 'provider': session.provider}} if session else {}),
         )
 
     response.delete_cookie('token')
+    try:
+        request.session.clear()
+    except Exception:
+        pass
+    response.delete_cookie('owui-session')
     response.delete_cookie('oui-session')
     response.delete_cookie('oauth_id_token')
 
-    oauth_session_id = request.cookies.get('oauth_session_id')
     if oauth_session_id:
         response.delete_cookie('oauth_session_id')
-
-        session = await OAuthSessions.get_session_by_id(oauth_session_id, db=db)
 
         # If a custom end_session_endpoint is configured (e.g. AWS Cognito), redirect
         # there directly instead of attempting OIDC discovery.
@@ -1338,7 +1451,11 @@ async def get_admin_details(
         admin_email = await Config.get('auth.admin.email')
         admin_name = None
 
+<<<<<<< HEAD
         log.info('Admin details requested')
+=======
+        log.info('Admin details - Email: %s, Name: %s', admin_email, admin_name)
+>>>>>>> upstream/main
 
         if admin_email:
             admin = await Users.get_user_by_email(admin_email, db=db)
@@ -1378,6 +1495,7 @@ class AdminConfig(BaseModel):
     API_KEYS_ALLOWED_ENDPOINTS: str
     DEFAULT_USER_ROLE: str
     DEFAULT_GROUP_ID: str
+    DEFAULT_INTERFACE_SETTINGS: dict | None = None
     JWT_EXPIRES_IN: str
     ENABLE_COMMUNITY_SHARING: bool
     ENABLE_CITATION_RELEVANCE: bool
@@ -1388,6 +1506,7 @@ class AdminConfig(BaseModel):
     AUTOMATION_MIN_INTERVAL: int | str | None = None
     ENABLE_AUTOMATIONS: bool
     ENABLE_CHANNELS: bool
+    CHANNEL_MODEL_RESPONSE_MODE: str = 'thread'
     ENABLE_CALENDAR: bool
     ENABLE_MEMORIES: bool
     ENABLE_MEMORY_SYSTEM_CONTEXT: bool
@@ -1407,6 +1526,7 @@ class AdminConfig(BaseModel):
 @router.post('/admin/config')
 async def update_admin_config(request: Request, form_data: AdminConfig, user=Depends(get_admin_user)):
     updates = config_updates(form_data.model_dump(), ADMIN_CONFIG_KEYS)
+    updates['ui.default_interface_settings'] = form_data.DEFAULT_INTERFACE_SETTINGS or {}
     updates['folders.max_file_count'] = int(form_data.FOLDER_MAX_FILE_COUNT) if form_data.FOLDER_MAX_FILE_COUNT else ''
     updates['automations.max_count'] = int(form_data.AUTOMATION_MAX_COUNT) if form_data.AUTOMATION_MAX_COUNT else ''
     updates['automations.min_interval'] = (
@@ -1415,6 +1535,9 @@ async def update_admin_config(request: Request, form_data: AdminConfig, user=Dep
 
     if form_data.DEFAULT_USER_ROLE not in ['pending', 'user', 'admin']:
         updates.pop('ui.default_user_role', None)
+
+    if form_data.CHANNEL_MODEL_RESPONSE_MODE not in ['thread', 'channel']:
+        updates.pop('channels.model_response_mode', None)
 
     pattern = r'^(-1|0|(-?\d+(\.\d+)?)(ms|s|m|h|d|w))$'
 
@@ -1440,6 +1563,9 @@ class LdapServerConfig(BaseModel):
     certificate_path: str | None = None
     validate_cert: bool = True
     ciphers: str | None = 'ALL'
+    enable_group_management: bool = False
+    enable_group_creation: bool = False
+    attribute_for_groups: str = 'memberOf'
 
 
 @router.get('/admin/config/ldap/server', response_model=LdapServerConfig)
@@ -1460,6 +1586,11 @@ async def update_ldap_server(request: Request, form_data: LdapServerConfig, user
         value = getattr(form_data, key)
         if not value:
             raise HTTPException(400, detail=ERROR_MESSAGES.REQUIRED_FIELD_EMPTY(key))
+
+    # The group attribute is what group management reads from the directory
+    # entry; an empty value would make group sync silently do nothing.
+    if form_data.enable_group_management and not (form_data.attribute_for_groups or '').strip():
+        raise HTTPException(400, detail=ERROR_MESSAGES.REQUIRED_FIELD_EMPTY('attribute_for_groups'))
 
     updates = config_updates(form_data.model_dump(), LDAP_SERVER_CONFIG_KEYS)
     updates['ldap.server.app_dn'] = form_data.app_dn or ''
@@ -1492,6 +1623,7 @@ class OAuthConfigForm(BaseModel):
     """All OAuth/OIDC settings exposed to the admin panel."""
 
     # General OAuth
+    ENABLE_OAUTH: bool | None = None
     ENABLE_OAUTH_SIGNUP: bool | None = None
     OAUTH_MERGE_ACCOUNTS_BY_EMAIL: bool | None = None
     OAUTH_AUTO_REDIRECT: bool | None = None
@@ -1547,6 +1679,7 @@ OAUTH_COMMA_LIST_FIELDS = {
 
 
 OAUTH_CONFIG_KEYS = {
+    'ENABLE_OAUTH': 'oauth.enable',
     'ENABLE_OAUTH_SIGNUP': 'oauth.enable_signup',
     'OAUTH_MERGE_ACCOUNTS_BY_EMAIL': 'oauth.merge_accounts_by_email',
     'OAUTH_AUTO_REDIRECT': 'oauth.auto_redirect',
@@ -1599,11 +1732,13 @@ def _parse_oauth_update_value(field: str, value):
 
 async def get_oauth_config_values() -> dict:
     values = await Config.get_many(*OAUTH_CONFIG_KEYS.values())
-    return {
+    form_values = {
         field: _format_oauth_form_value(field, values[storage_key])
         for field, storage_key in OAUTH_CONFIG_KEYS.items()
         if storage_key in values
     }
+    form_values['ENABLE_OAUTH_PERSISTENT_CONFIG'] = Config.OAUTH_PERSISTENT_ENABLED
+    return form_values
 
 
 def oauth_config_updates(data: dict) -> dict:
@@ -1614,12 +1749,16 @@ def oauth_config_updates(data: dict) -> dict:
     }
 
 
-@router.get('/admin/config/oauth', response_model=OAuthConfigForm)
+class OAuthConfigResponse(OAuthConfigForm):
+    ENABLE_OAUTH_PERSISTENT_CONFIG: bool
+
+
+@router.get('/admin/config/oauth', response_model=OAuthConfigResponse)
 async def get_oauth_config(request: Request, user=Depends(get_admin_user)):
     return await get_oauth_config_values()
 
 
-@router.post('/admin/config/oauth', response_model=OAuthConfigForm)
+@router.post('/admin/config/oauth', response_model=OAuthConfigResponse)
 async def update_oauth_config(request: Request, form_data: OAuthConfigForm, user=Depends(get_admin_user)):
     await Config.upsert(oauth_config_updates(form_data.model_dump(exclude_none=True)))
     return await get_oauth_config_values()
@@ -1701,6 +1840,37 @@ class TokenExchangeForm(BaseModel):
     token: str  # OAuth access token from external provider
 
 
+async def get_token_client_id(client, token: str) -> str | None:
+    """Return the OAuth client_id a token was minted for, when the provider supports introspection."""
+    try:
+        metadata = await client.load_server_metadata()
+        introspection_endpoint = metadata.get('introspection_endpoint')
+        if not introspection_endpoint:
+            log.warning('Token exchange trusted-client check requires an introspection_endpoint')
+            return None
+
+        async with ClientSession(trust_env=True) as session:
+            async with session.post(
+                introspection_endpoint,
+                data={'token': token, 'token_type_hint': 'access_token'},
+                auth=BasicAuth(client.client_id, client.client_secret or ''),
+                ssl=AIOHTTP_CLIENT_SESSION_SSL,
+            ) as r:
+                if r.status != 200:
+                    log.warning(f'Token introspection returned {r.status}')
+                    return None
+                introspection = await r.json()
+
+        if not introspection.get('active'):
+            log.warning('Token introspection reports the token is inactive')
+            return None
+
+        return introspection.get('client_id')
+    except Exception as e:
+        log.warning(f'Token introspection failed: {e}')
+        return None
+
+
 @router.post('/oauth/{provider}/token/exchange', response_model=SessionUserResponse)
 async def token_exchange(
     request: Request,
@@ -1719,6 +1889,14 @@ async def token_exchange(
             detail='Token exchange is disabled',
         )
 
+    if token_exchange_rate_limiter and token_exchange_rate_limiter.is_limited(
+        request.client.host if request.client else 'unknown'
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail=ERROR_MESSAGES.RATE_LIMIT_EXCEEDED,
+        )
+
     provider = provider.lower()
 
     # Check if provider is configured
@@ -1735,6 +1913,20 @@ async def token_exchange(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=ERROR_MESSAGES.OAUTH_NOT_CONFIGURED(provider),
         )
+
+    if OAUTH_TOKEN_EXCHANGE_TRUSTED_CLIENT_IDS:
+        token_client_id = await get_token_client_id(client, form_data.token)
+        if not token_client_id:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail='Unable to determine which client the token was issued to',
+            )
+        if token_client_id not in OAUTH_TOKEN_EXCHANGE_TRUSTED_CLIENT_IDS:
+            log.warning('Token exchange denied: token was issued to an untrusted client for %s', provider)
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=ERROR_MESSAGES.ACCESS_PROHIBITED,
+            )
 
     # Validate the token by calling the userinfo endpoint
     try:
@@ -1765,6 +1957,7 @@ async def token_exchange(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Token missing required 'sub' claim",
         )
+    sub = str(sub)
 
     email = user_data.get(email_claim, '')
     if not email:
@@ -1794,12 +1987,34 @@ async def token_exchange(
         user = await Users.get_user_by_email(email, db=db)
         if user:
             # Link the OAuth sub to this user
-            await Users.update_user_oauth_by_id(user.id, provider, sub, db=db)
+            user = await Users.update_user_oauth_by_id(user.id, provider, sub, db=db) or user
+
+    if user:
+        provider_oauth = (user.oauth or {}).get(provider) if isinstance(user.oauth, dict) else None
+        # Lazy repair for legacy rows that stored numeric provider ids as JSON numbers.
+        if isinstance(provider_oauth, dict) and provider_oauth.get('sub') != sub:
+            user = await Users.update_user_oauth_by_id(user.id, provider, sub, db=db) or user
 
     if not user:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail='User not found. Please sign in via the web interface first.',
+        )
+
+    user = await oauth_manager.update_user_role_from_oauth(
+        request=request,
+        user=user,
+        user_data=user_data,
+        provider=provider,
+        db=db,
+    )
+    if await Config.get('oauth.enable_group_mapping'):
+        await oauth_manager.update_user_groups(
+            request=request,
+            user=user,
+            user_data=user_data,
+            default_permissions=await Config.get('user.permissions'),
+            db=db,
         )
 
     return await create_session_response(request, user, db, source='oauth')

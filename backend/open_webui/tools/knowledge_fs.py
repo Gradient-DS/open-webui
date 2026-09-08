@@ -7,24 +7,60 @@ for AI models to interact with knowledge bases using commands they already know.
 Re-exported through builtin.py for consistent imports.
 """
 
-import json
+import contextvars
 import logging
 import re
 import shlex
 import time
+from contextlib import contextmanager
 from typing import Optional
 
+import regex
 from fastapi import Request
+
+from open_webui.env import (
+    KB_EXEC_MAX_GREP_FILES,
+    KB_EXEC_MAX_OUTPUT_CHARS,
+    KNOWLEDGE_GREP_MAX_MATCHES,
+)
 
 log = logging.getLogger(__name__)
 
-# Limits
-MAX_CAT_CHARS = 100_000
-DEFAULT_CAT_CHARS = 10_000
-MAX_GREP_FILES = 200
 DEFAULT_HEAD_LINES = 10
 DEFAULT_TAIL_LINES = 10
-MAX_GREP_MATCHES = 50
+
+# Matching time allowed per tool call. Backtracking cost is exponential in the length of the
+# matched text, so capping the pattern or the line does not bound it.
+MATCH_BUDGET_SECONDS = 2.0
+MAX_REGEX_QUANTIFIER_COUNT = 2_000
+MAX_REGEX_QUANTIFIER_EXPANSION = 100_000
+_COUNTED_QUANTIFIER_RE = re.compile(r'(?<!\\)\{(\d+)(?:,\d*)?\}')
+
+
+class MatchBudgetExceeded(Exception):
+    """A tool call spent its whole matching budget, so the caller reports it."""
+
+
+class MatchBudget:
+    """Matching time remaining, counted only inside search() so awaits do not consume it."""
+
+    def __init__(self):
+        self.remaining = MATCH_BUDGET_SECONDS
+
+
+# Scoped to the running task, so one budget covers every matcher a command builds without
+# threading it through each handler.
+_active_budget: contextvars.ContextVar[MatchBudget | None] = contextvars.ContextVar('kb_match_budget', default=None)
+
+
+@contextmanager
+def match_budget():
+    """Bound the matching time of one tool call rather than of each search it runs."""
+    token = _active_budget.set(MatchBudget())
+    try:
+        yield
+    finally:
+        _active_budget.reset(token)
 
 
 # =============================================================================
@@ -33,9 +69,9 @@ MAX_GREP_MATCHES = 50
 
 
 def is_regex_pattern(pattern: str) -> bool:
-    """Detect if a pattern looks like regex (\|, .*, .+, \d, \w, \s, [...])."""
+    """Detect if a pattern looks like regex (|, .*, .+, \d, \w, \s, [...])."""
     return (
-        '\|' in pattern
+        '|' in pattern
         or '.*' in pattern
         or '.+' in pattern
         or '.?' in pattern
@@ -51,6 +87,23 @@ def normalize_regex(pattern: str) -> str:
     return pattern.replace('\\|', '|').replace('\|', '|')
 
 
+def validate_regex_quantifiers(pattern: str) -> str | None:
+    """Reject counted quantifiers that make regex compilation expand too much."""
+    quantifier_expansion = 1
+    for quantifier in _COUNTED_QUANTIFIER_RE.finditer(pattern):
+        count_text = quantifier.group(1)
+        count = int(count_text) if len(count_text) <= 6 else MAX_REGEX_QUANTIFIER_COUNT + 1
+        if count > MAX_REGEX_QUANTIFIER_COUNT:
+            return f'Regex quantifier counts over {MAX_REGEX_QUANTIFIER_COUNT:g} are not supported'
+
+        # ponytail: conservative expansion catches nested quantifier bombs without mirroring regex syntax.
+        quantifier_expansion *= max(count, 1)
+        if quantifier_expansion > MAX_REGEX_QUANTIFIER_EXPANSION:
+            return 'Regex quantifiers expand too much, lower the counts'
+
+    return None
+
+
 def build_matcher(pattern: str, case_insensitive: bool = False, use_regex: bool = False) -> tuple:
     """Build a matcher function. Returns (match_fn, error_str_or_None)."""
     if not use_regex and is_regex_pattern(pattern):
@@ -58,12 +111,30 @@ def build_matcher(pattern: str, case_insensitive: bool = False, use_regex: bool 
 
     if use_regex:
         normalized = normalize_regex(pattern)
+        quantifier_error = validate_regex_quantifiers(normalized)
+        if quantifier_error:
+            return None, quantifier_error
         try:
-            re_flags = re.IGNORECASE if case_insensitive else 0
-            compiled = re.compile(normalized, re_flags)
-        except re.error as e:
+            re_flags = regex.IGNORECASE if case_insensitive else 0
+            compiled = regex.compile(normalized, re_flags)
+        except regex.error as e:
             return None, f'Invalid regex: {e}'
-        return (lambda line: bool(compiled.search(line))), None
+
+        budget = _active_budget.get() or MatchBudget()
+
+        def matches(line: str) -> bool:
+            started = time.monotonic()
+            try:
+                # A negative timeout disables it, so an exhausted budget must not reach search().
+                if budget.remaining <= 0:
+                    raise TimeoutError
+                return bool(compiled.search(line, timeout=budget.remaining))
+            except TimeoutError:
+                raise MatchBudgetExceeded(f'Search exceeded {MATCH_BUDGET_SECONDS:g}s, narrow the pattern') from None
+            finally:
+                budget.remaining -= time.monotonic() - started
+
+        return matches, None
     else:
         sp = pattern.lower() if case_insensitive else pattern
         return (lambda line: sp in (line.lower() if case_insensitive else line)), None
@@ -579,20 +650,9 @@ async def _kb_cat(args: list[str], flags: set[str], user: dict, model_knowledge:
         return resolved['error']
 
     content = resolved['content']
-    show_numbers = 'n' in flags
-
-    if len(content) > MAX_CAT_CHARS:
-        content = content[:MAX_CAT_CHARS]
-        truncated = True
-    else:
-        truncated = False
-
-    if show_numbers:
+    if 'n' in flags:
         lines = content.split('\n')
         content = '\n'.join(f'{i}: {line}' for i, line in enumerate(lines, 1))
-
-    if truncated:
-        content += f'\n[truncated at {MAX_CAT_CHARS:,} chars — use head/tail/sed/grep to navigate]'
 
     return content
 
@@ -686,12 +746,16 @@ async def _kb_grep(
 
     # Grep on piped input
     if piped_input is not None:
-        lines = piped_input.split('\\n')
+        lines = piped_input.split('\n')
         matched = []
         for i, line in enumerate(lines, 1):
             if _matches(line):
                 matched.append(f'{i}: {line}')
-        return '\\n'.join(matched) if matched else f'No matches for "{pattern}"'
+        if count_only:
+            return str(len(matched))
+        if filenames_only:
+            return '(standard input)' if matched else f'No matches for "{pattern}"'
+        return '\n'.join(matched) if matched else f'No matches for "{pattern}"'
 
     # Single file grep
     if file_ref and not dir_scope:
@@ -702,7 +766,7 @@ async def _kb_grep(
         elif 'error' in resolved:
             return resolved['error']
         else:
-            lines = resolved['content'].split('\\n')
+            lines = resolved['content'].split('\n')
             matched = []
             for i, line in enumerate(lines, 1):
                 if _matches(line):
@@ -715,7 +779,7 @@ async def _kb_grep(
 
             if not matched:
                 return f'No matches for "{pattern}" in {resolved["filename"]}'
-            return '\\n'.join(matched)
+            return '\n'.join(matched)
 
     # Cross-file grep (optionally scoped to directory)
     accessible = await _get_accessible_files(user, model_knowledge)
@@ -738,7 +802,7 @@ async def _kb_grep(
     if ext_filter:
         accessible = [f for f in accessible if f['filename'].endswith(f'.{ext_filter}')]
 
-    if len(accessible) > MAX_GREP_FILES:
+    if len(accessible) > KB_EXEC_MAX_GREP_FILES:
         return f'Too many files ({len(accessible)}). Scope your search: grep "{pattern}" docs/ or grep "{pattern}" *.py'
 
     from open_webui.models.files import Files
@@ -770,7 +834,7 @@ async def _kb_grep(
 
             if not count_only and not filenames_only:
                 for line_num, line_text in file_matches:
-                    if len(results) < MAX_GREP_MATCHES:
+                    if len(results) < KNOWLEDGE_GREP_MAX_MATCHES:
                         results.append(f'{file_info["id"]}  {file_info["filename"]}:{line_num}: {line_text.rstrip()}')
 
     if count_only:
@@ -789,8 +853,8 @@ async def _kb_grep(
         return f'No matches for "{pattern}" across {len(accessible)} files'
 
     output = '\n'.join(results)
-    if total_matches > MAX_GREP_MATCHES:
-        output += f'\n[showing {MAX_GREP_MATCHES} of {total_matches} matches]'
+    if total_matches > KNOWLEDGE_GREP_MAX_MATCHES:
+        output += f'\n[showing {KNOWLEDGE_GREP_MAX_MATCHES} of {total_matches} matches]'
     return output
 
 
@@ -1127,7 +1191,15 @@ async def kb_exec(
         if not segments:
             return 'Could not parse command. Run kb_exec("ls") to start.'
 
-        return await _execute_pipeline(segments, __user__, __model_knowledge__)
+        # One budget for the whole command: a per-search budget would multiply by segment count.
+        with match_budget():
+            output = await _execute_pipeline(segments, __user__, __model_knowledge__)
+        if len(output) > KB_EXEC_MAX_OUTPUT_CHARS:
+            output = output[:KB_EXEC_MAX_OUTPUT_CHARS] + (
+                f'\n[output truncated at {KB_EXEC_MAX_OUTPUT_CHARS:,} chars'
+                ' — narrow the command with a path, glob, head/tail/sed or grep]'
+            )
+        return output
     except Exception as e:
         log.exception(f'kb_exec error: {e}')
         return f'Error: {e}'

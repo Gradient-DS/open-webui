@@ -33,9 +33,9 @@
 					src={`${WEBUI_API_BASE_URL}/users/${data.user.id}/profile/image`}
 					className={'size-5 -translate-y-[1px] flex-shrink-0'}
 				/>
-				<div class="ml-2">
+				<div class="ml-2 flex-1 min-w-0">
 					<div class=" flex justify-between items-center">
-						<div class="text-xs text-black dark:text-white font-medium line-clamp-1">
+						<div class="text-xs text-black dark:text-white font-normal line-clamp-1">
 							{data?.user?.name ?? 'User'}
 						</div>
 					</div>
@@ -54,14 +54,14 @@
 					className={'size-5 -translate-y-[1px] flex-shrink-0'}
 				/>
 
-				<div class="ml-2">
+				<div class="ml-2 flex-1 min-w-0">
 					<div class=" flex justify-between items-center">
-						<div class="text-xs text-black dark:text-white font-medium line-clamp-1">
+						<div class="text-xs text-black dark:text-white font-normal line-clamp-1">
 							{data?.model?.name ?? data?.message?.model ?? 'Assistant'}
 						</div>
 
 						<button
-							class={data?.message?.favorite ? '' : 'invisible group-hover:visible'}
+							class={data?.message?.favorite ? '' : 'hover-reveal'}
 							aria-label={data?.message?.favorite
 								? $i18n.t('Remove from favorites')
 								: $i18n.t('Add to favorites')}
@@ -89,6 +89,14 @@
 			</div>
 		{/if}
 	</Tooltip>
-	<Handle type="target" position={Position.Top} class="w-2 rounded-full dark:bg-gray-900" />
-	<Handle type="source" position={Position.Bottom} class="w-2 rounded-full dark:bg-gray-900" />
+	<Handle
+		type="target"
+		position={data?.direction === 'horizontal' ? Position.Left : Position.Top}
+		class="w-2 rounded-full dark:bg-gray-900"
+	/>
+	<Handle
+		type="source"
+		position={data?.direction === 'horizontal' ? Position.Right : Position.Bottom}
+		class="w-2 rounded-full dark:bg-gray-900"
+	/>
 </div>

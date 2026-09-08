@@ -76,9 +76,13 @@
 
 	$: if (citation) {
 		expandedDocs = new Set();
+<<<<<<< HEAD
 		selectedTab = 'preview';
 		activeSnippetIdx = 0;
 		mergedDocuments = citation.document?.map((c, i) => {
+=======
+		mergedDocuments = (citation.document ?? []).map((c, i) => {
+>>>>>>> upstream/main
 			return {
 				source: citation.source,
 				document: c,
@@ -336,7 +340,11 @@
 <Modal size="xl" bind:show>
 	<div>
 		<div class=" flex justify-between dark:text-gray-300 px-4.5 pt-3 pb-2">
+<<<<<<< HEAD
 			<div class=" text-lg font-medium self-center flex items-center gap-1.5 min-w-0">
+=======
+			<div class=" text-sm font-medium self-center flex items-center">
+>>>>>>> upstream/main
 				{#if citation?.source?.name}
 					{@const document = mergedDocuments?.[0]}
 					{@const docFileId = document?.metadata?.file_id}
@@ -400,16 +408,17 @@
 				{/if}
 			</div>
 			<button
-				class="self-center"
+				class="self-center rounded-lg p-1 text-gray-500 transition hover:bg-gray-50 hover:text-gray-700 dark:text-gray-400 dark:hover:bg-gray-800 dark:hover:text-gray-200"
 				aria-label={$i18n.t('Close citation modal')}
 				on:click={() => {
 					show = false;
 				}}
 			>
-				<XMark className={'size-5'} />
+				<XMark className={'size-4'} />
 			</button>
 		</div>
 
+<<<<<<< HEAD
 		<div class="flex flex-col w-full px-5 pb-5">
 			<!-- Preview/Content toggle for previewable files. 'Content' shows the
 			     full chunks; the single-column content view is also the fallback
@@ -453,11 +462,62 @@
 								>
 									<div class="flex items-center gap-2 mb-1">
 										{#if showRelevance && document.distance !== undefined}
+=======
+		<div class="flex flex-col md:flex-row w-full px-5 pb-5 md:space-x-4">
+			<div
+				class="flex flex-col w-full dark:text-gray-200 overflow-y-scroll max-h-[22rem] scrollbar-thin gap-1"
+			>
+				{#each mergedDocuments as document, documentIdx}
+					<div class="flex flex-col w-full gap-2">
+						{#if document.metadata?.parameters}
+							<div>
+								<div class="text-sm font-normal dark:text-gray-300 mb-1">
+									{$i18n.t('Parameters')}
+								</div>
+
+								<Textarea readonly value={JSON.stringify(document.metadata.parameters, null, 2)}
+								></Textarea>
+							</div>
+						{/if}
+
+						<div>
+							<div
+								class=" text-sm font-normal dark:text-gray-300 flex items-center gap-2 w-fit mb-1"
+							>
+								{#if document.source?.url?.includes('http')}
+									{@const snippetUrl = getTextFragmentUrl(document)}
+									{#if snippetUrl}
+										<a
+											href={snippetUrl}
+											target="_blank"
+											class="underline hover:text-gray-500 dark:hover:text-gray-100"
+											>{$i18n.t('Content')}</a
+										>
+									{:else}
+										{$i18n.t('Content')}
+									{/if}
+								{:else}
+									{$i18n.t('Content')}
+								{/if}
+
+								{#if showRelevance && document.distance !== undefined}
+									<Tooltip
+										className="w-fit"
+										content={$i18n.t('Relevance')}
+										placement="top-start"
+										tippyOptions={{ duration: [500, 0] }}
+									>
+										<div class="text-sm my-1 dark:text-gray-400 flex items-center gap-2 w-fit">
+>>>>>>> upstream/main
 											{#if showPercentage}
 												{@const percentage = calculatePercentage(document.distance)}
 												{#if typeof percentage === 'number'}
 													<span
+<<<<<<< HEAD
 														class={`px-1 rounded-sm text-xs font-medium ${getRelevanceColor(percentage)}`}
+=======
+														class={`px-1 rounded-sm font-normal ${getRelevanceColor(percentage)}`}
+>>>>>>> upstream/main
 													>
 														{percentage.toFixed(0)}%
 													</span>
@@ -467,6 +527,7 @@
 													({(document?.distance ?? 0).toFixed(4)})
 												</span>
 											{/if}
+<<<<<<< HEAD
 										{/if}
 										{#if isDocumentSnippet(document)}
 											<span class="text-xs text-gray-500 dark:text-gray-400">
@@ -507,6 +568,51 @@
 								{:else if officeError}
 									<div class="flex items-center justify-center h-full text-sm text-gray-400">
 										{$i18n.t('Could not read file.')}
+=======
+										</div>
+									</Tooltip>
+								{/if}
+
+								{#if Number.isInteger(document?.metadata?.page)}
+									<span class="text-sm text-gray-500 dark:text-gray-400">
+										({$i18n.t('page')}
+										{document.metadata.page + 1})
+									</span>
+								{/if}
+							</div>
+
+							{#if document.metadata?.html}
+								<iframe
+									class="w-full border-0 h-auto rounded-none"
+									sandbox="{($settings?.iframeSandboxAllowScripts ?? true)
+										? 'allow-scripts'
+										: ''}{($settings?.iframeSandboxAllowForms ?? true)
+										? ' allow-forms'
+										: ''}{($settings?.iframeSandboxAllowDownloads ?? true)
+										? ' allow-downloads'
+										: ''}{($settings?.iframeSandboxAllowSameOrigin ?? false)
+										? ' allow-same-origin'
+										: ''}"
+									srcdoc={injectCsp(document.document, $config?.ui?.iframe_csp ?? '')}
+									title={$i18n.t('Content')}
+								></iframe>
+							{:else}
+								{@const rawContent = (document.document ?? '').trim().replace(/\n\n+/g, '\n\n')}
+								{@const isTruncated =
+									($settings?.renderMarkdownInPreviews ?? true) &&
+									rawContent.length > CONTENT_PREVIEW_LIMIT &&
+									!expandedDocs.has(documentIdx)}
+								{#if $settings?.renderMarkdownInPreviews ?? true}
+									<div
+										class="text-sm prose dark:prose-invert markdown-prose-sm min-w-full max-w-full"
+									>
+										<Markdown
+											content={isTruncated
+												? rawContent.slice(0, CONTENT_PREVIEW_LIMIT)
+												: rawContent}
+											id="citation-{documentIdx}"
+										/>
+>>>>>>> upstream/main
 									</div>
 								{:else}
 									<div

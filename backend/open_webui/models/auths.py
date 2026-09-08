@@ -11,7 +11,12 @@ from open_webui.internal.db import Base, JSONField, get_async_db_context
 from open_webui.models.users import User, UserModel, UserProfileImageResponse, Users
 from open_webui.utils.validate import validate_profile_image_url
 from pydantic import BaseModel, field_validator
+<<<<<<< HEAD
 from sqlalchemy import BigInteger, Boolean, Column, String, Text, delete, select, update
+=======
+from sqlalchemy import Boolean, Column, String, Text, delete, select, update
+from sqlalchemy.exc import IntegrityError
+>>>>>>> upstream/main
 from sqlalchemy.ext.asyncio import AsyncSession
 
 log = logging.getLogger(__name__)
@@ -133,18 +138,20 @@ class AuthsTable:
             )
             session.add(credential)
 
-            created_user = await Users.insert_new_user(
-                new_id,
-                name,
-                email,
-                profile_image_url,
-                role,
-                oauth=oauth,
-                db=session,
-            )
-            # persist both records and reload generated defaults
-            await session.commit()
-            await session.refresh(credential)
+            try:
+                created_user = await Users.insert_new_user(
+                    new_id,
+                    name,
+                    email,
+                    profile_image_url,
+                    role,
+                    oauth=oauth,
+                    db=session,
+                )
+                await session.commit()
+            except IntegrityError:
+                await session.rollback()
+                raise
             return created_user if credential and created_user else None
 
     async def authenticate_user(

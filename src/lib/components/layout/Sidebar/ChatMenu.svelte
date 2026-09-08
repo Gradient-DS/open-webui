@@ -6,16 +6,10 @@
 	const { saveAs } = fileSaver;
 
 	import Dropdown from '$lib/components/common/Dropdown.svelte';
+	import DropdownMenu from '$lib/components/common/DropdownMenu.svelte';
 	import DropdownSub from '$lib/components/common/DropdownSub.svelte';
-	import GarbageBin from '$lib/components/icons/GarbageBin.svelte';
-	import Pencil from '$lib/components/icons/Pencil.svelte';
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
 	import Tags from '$lib/components/chat/Tags.svelte';
-	import Share from '$lib/components/icons/Share.svelte';
-	import ArchiveBox from '$lib/components/icons/ArchiveBox.svelte';
-	import DocumentDuplicate from '$lib/components/icons/DocumentDuplicate.svelte';
-	import Bookmark from '$lib/components/icons/Bookmark.svelte';
-	import BookmarkSlash from '$lib/components/icons/BookmarkSlash.svelte';
 	import {
 		getChatById,
 		getChatPinnedStatusById,
@@ -24,12 +18,26 @@
 	import { chats, config, folders, settings, theme, user } from '$lib/stores';
 	import { createMessagesList } from '$lib/utils';
 	import { getOutputText } from '$lib/components/chat/Messages/structuredOutput';
+<<<<<<< HEAD
 	import { downloadChatAsPDF, exportChatAsPdf, exportChatAsDocx } from '$lib/apis/utils';
 	import { copyFormattedChat } from '$lib/utils/copy';
 	import Download from '$lib/components/icons/Download.svelte';
 	import Clipboard from '$lib/components/icons/Clipboard.svelte';
 	import Folder from '$lib/components/icons/Folder.svelte';
+=======
+	import { downloadChatAsPDF } from '$lib/apis/utils';
+	import ArchiveBoxIcon from '$lib/components/icons/ArchiveBox.svelte';
+	import CopyIcon from './icons/Copy.svelte';
+	import DownloadIcon from './icons/Download.svelte';
+	import EditPencilIcon from './icons/EditPencil.svelte';
+	import FolderIcon from './icons/Folder.svelte';
+>>>>>>> upstream/main
 	import Messages from '$lib/components/chat/Messages.svelte';
+	import PinIcon from './icons/Pin.svelte';
+	import PinSlashIcon from './icons/PinSlash.svelte';
+	import ShareIcon from './icons/Share.svelte';
+	import TrashIcon from './icons/Trash.svelte';
+	import ChatCheckIcon from '$lib/components/icons/ChatCheck.svelte';
 
 	const i18n = getContext('i18n');
 
@@ -40,10 +48,13 @@
 	export let archiveChatHandler: Function;
 	export let renameHandler: Function;
 	export let deleteHandler: Function;
+	export let onOpen: () => void = () => {};
 	export let onClose: Function;
+	export let markUnreadHandler: Function = () => {};
 
 	export let chatId = '';
 
+	let dropdown: Dropdown;
 	let show = false;
 	let pinned = false;
 
@@ -260,9 +271,12 @@
 {/if}
 
 <Dropdown
+	bind:this={dropdown}
 	bind:show
 	onOpenChange={(state) => {
-		if (state === false) {
+		if (state) {
+			onOpen();
+		} else {
 			onClose();
 		}
 	}}
@@ -272,38 +286,34 @@
 	</Tooltip>
 
 	<div slot="content">
-		<div
-			class="select-none min-w-[200px] rounded-2xl px-1 py-1 border border-gray-100 dark:border-gray-800 z-50 bg-white dark:bg-gray-850 dark:text-white shadow-lg transition"
-		>
+		<DropdownMenu className="select-none min-w-[12.5rem] transition">
 			{#if $user?.role === 'admin' || ($user.permissions?.chat?.share ?? true)}
 				<button
 					draggable="false"
-					class="flex gap-2 items-center px-3 py-1.5 text-sm cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-xl w-full"
+					class="flex h-[1.6875rem] gap-2 items-center rounded-xl px-2 text-[0.8125rem] cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-900 w-full"
 					on:click={() => {
 						shareHandler();
 					}}
 				>
-					<Share strokeWidth="1.5" />
+					<ShareIcon className="size-3.5" strokeWidth="1.5" />
 					<div class="flex items-center">{$i18n.t('Share')}</div>
 				</button>
 			{/if}
 
 			{#if $user?.role === 'admin' || ($user.permissions?.chat?.export ?? true)}
-				<DropdownSub
-					contentClass="select-none rounded-2xl p-1 z-50 bg-white dark:bg-gray-850 dark:text-white shadow-lg border border-gray-100 dark:border-gray-800"
-				>
+				<DropdownSub contentClass="select-none z-50">
 					<button
 						slot="trigger"
 						draggable="false"
-						class="flex gap-2 items-center px-3 py-1.5 text-sm cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-xl w-full"
+						class="flex h-[1.6875rem] gap-2 items-center rounded-xl px-2 text-[0.8125rem] cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-900 w-full"
 					>
-						<Download strokeWidth="1.5" />
+						<DownloadIcon className="size-3.5" strokeWidth="1.5" />
 						<div class="flex items-center">{$i18n.t('Download')}</div>
 					</button>
 
 					<button
 						draggable="false"
-						class="flex gap-2 items-center px-3 py-1.5 text-sm cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-xl w-full"
+						class="flex h-[1.6875rem] gap-2 items-center rounded-xl px-2 text-[0.8125rem] cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-900 w-full"
 						on:click={() => {
 							downloadJSONExport();
 						}}
@@ -313,7 +323,7 @@
 
 					<button
 						draggable="false"
-						class="flex gap-2 items-center px-3 py-1.5 text-sm cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-xl w-full"
+						class="flex h-[1.6875rem] gap-2 items-center rounded-xl px-2 text-[0.8125rem] cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-900 w-full"
 						on:click={() => {
 							downloadTxt();
 						}}
@@ -323,7 +333,7 @@
 
 					<button
 						draggable="false"
-						class="flex gap-2 items-center px-3 py-1.5 text-sm cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-xl select-none w-full"
+						class="flex h-[1.6875rem] gap-2 items-center rounded-xl px-2 text-[0.8125rem] cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-900 select-none w-full"
 						on:click={() => {
 							downloadPdf();
 						}}
@@ -347,6 +357,7 @@
 
 			<button
 				draggable="false"
+<<<<<<< HEAD
 				class="flex gap-2 items-center px-3 py-1.5 text-sm cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-xl w-full"
 				on:click={async () => {
 					const chatData = await getChatById(localStorage.token, chatId);
@@ -365,30 +376,45 @@
 			<button
 				draggable="false"
 				class="flex gap-2 items-center px-3 py-1.5 text-sm cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-xl w-full"
+=======
+				class="flex h-[1.6875rem] gap-2 items-center rounded-xl px-2 text-[0.8125rem] cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-900 w-full"
+>>>>>>> upstream/main
 				on:click={() => {
-					show = false;
+					dropdown.close();
 					renameHandler();
 				}}
 			>
-				<Pencil strokeWidth="1.5" />
+				<EditPencilIcon className="size-3.5" strokeWidth="1.5" />
 				<div class="flex items-center">{$i18n.t('Rename')}</div>
 			</button>
 
-			<hr class="border-gray-50/30 dark:border-gray-800/30 my-1" />
+			<button
+				draggable="false"
+				class="flex h-[1.6875rem] gap-2 items-center rounded-xl px-2 text-[0.8125rem] cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-900 w-full"
+				on:click={() => {
+					dropdown.close();
+					markUnreadHandler();
+				}}
+			>
+				<ChatCheckIcon className="size-3.5" strokeWidth="1.5" />
+				<div class="flex items-center">{$i18n.t('Mark as unread')}</div>
+			</button>
+
+			<hr class="border-gray-50/30 dark:border-gray-800/30 mx-1 my-0.5" />
 
 			<button
 				draggable="false"
-				class="flex gap-2 items-center px-3 py-1.5 text-sm cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-xl w-full"
+				class="flex h-[1.6875rem] gap-2 items-center rounded-xl px-2 text-[0.8125rem] cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-900 w-full"
 				on:click={() => {
-					show = false;
+					dropdown.close();
 					pinHandler();
 				}}
 			>
 				{#if pinned}
-					<BookmarkSlash strokeWidth="1.5" />
+					<PinSlashIcon className="size-3.5" strokeWidth="1.5" />
 					<div class="flex items-center">{$i18n.t('Unpin')}</div>
 				{:else}
-					<Bookmark strokeWidth="1.5" />
+					<PinIcon className="size-3.5" strokeWidth="1.5" />
 					<div class="flex items-center">{$i18n.t('Pin')}</div>
 				{/if}
 			</button>
@@ -396,40 +422,38 @@
 			{#if $user?.role === 'admin' || ($user?.permissions?.chat?.import ?? true)}
 				<button
 					draggable="false"
-					class="flex gap-2 items-center px-3 py-1.5 text-sm cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-xl w-full"
+					class="flex h-[1.6875rem] gap-2 items-center rounded-xl px-2 text-[0.8125rem] cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-900 w-full"
 					on:click={() => {
-						show = false;
+						dropdown.close();
 						cloneChatHandler();
 					}}
 				>
-					<DocumentDuplicate strokeWidth="1.5" />
+					<CopyIcon className="size-3.5" strokeWidth="1.5" />
 					<div class="flex items-center">{$i18n.t('Clone')}</div>
 				</button>
 			{/if}
 
 			{#if chatId && $folders.length > 0}
-				<DropdownSub
-					contentClass="select-none rounded-2xl p-1 z-50 bg-white dark:bg-gray-850 dark:text-white border border-gray-100 dark:border-gray-800 shadow-lg max-h-52 overflow-y-auto scrollbar-hidden"
-				>
+				<DropdownSub contentClass="select-none z-50 max-h-52 overflow-y-auto scrollbar-hidden">
 					<button
 						slot="trigger"
 						draggable="false"
-						class="flex gap-2 items-center px-3 py-1.5 text-sm cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-xl select-none w-full"
+						class="flex h-[1.6875rem] gap-2 items-center rounded-xl px-2 text-[0.8125rem] cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-900 select-none w-full"
 					>
-						<Folder />
+						<FolderIcon className="size-3.5" />
 						<div class="flex items-center">{$i18n.t('Move')}</div>
 					</button>
 
 					{#each $folders.sort((a, b) => b.updated_at - a.updated_at) as folder}
 						<button
 							draggable="false"
-							class="flex gap-2 items-center px-3 py-1.5 text-sm cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-xl overflow-hidden w-full"
+							class="flex h-[1.6875rem] gap-2 items-center rounded-xl px-2 text-[0.8125rem] cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-900 overflow-hidden w-full"
 							on:click={() => {
 								moveChatHandler(chatId, folder.id);
 							}}
 						>
 							<div class="shrink-0">
-								<Folder />
+								<FolderIcon className="size-3.5" />
 							</div>
 
 							<div class="truncate">{folder?.name ?? 'Folder'}</div>
@@ -440,25 +464,27 @@
 
 			<button
 				draggable="false"
-				class="flex gap-2 items-center px-3 py-1.5 text-sm cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-xl w-full"
+				class="flex h-[1.6875rem] gap-2 items-center rounded-xl px-2 text-[0.8125rem] cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-900 w-full"
 				on:click={() => {
 					archiveChatHandler();
 				}}
 			>
-				<ArchiveBox strokeWidth="1.5" />
+				<ArchiveBoxIcon className="size-3.5" strokeWidth="1.7" />
 				<div class="flex items-center">{$i18n.t('Archive')}</div>
 			</button>
 
-			<button
-				draggable="false"
-				class="flex gap-2 items-center px-3 py-1.5 text-sm cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-xl w-full"
-				on:click={() => {
-					deleteHandler();
-				}}
-			>
-				<GarbageBin strokeWidth="1.5" />
-				<div class="flex items-center">{$i18n.t('Delete')}</div>
-			</button>
-		</div>
+			{#if $user?.role === 'admin' || ($user?.permissions?.chat?.delete ?? true)}
+				<button
+					draggable="false"
+					class="flex h-[1.6875rem] gap-2 items-center rounded-xl px-2 text-[0.8125rem] cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-900 w-full"
+					on:click={() => {
+						deleteHandler();
+					}}
+				>
+					<TrashIcon className="size-3.5" strokeWidth="1.5" />
+					<div class="flex items-center">{$i18n.t('Delete')}</div>
+				</button>
+			{/if}
+		</DropdownMenu>
 	</div>
 </Dropdown>

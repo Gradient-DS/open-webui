@@ -4,7 +4,6 @@ import asyncio
 import base64
 import hashlib
 import hmac
-import json
 import logging
 import os
 import uuid
@@ -40,6 +39,8 @@ from open_webui.models.auths import Auths
 from open_webui.models.config import Config
 from open_webui.models.users import Users
 from open_webui.utils.access_control import has_permission
+from open_webui.utils.json_codec import JSONCodec
+from open_webui.utils.misc import parse_duration
 from pytz import UTC
 
 log = logging.getLogger(__name__)
@@ -86,21 +87,31 @@ def get_license_data(app, key):
     def data_handler(data):
         for k, v in data.items():
             if k == 'resources':
+                # LICENSE covers these Open WebUI branding assets.
+                # Do not alter, remove, obscure, or replace them except as LICENSE permits:
+                # https://docs.openwebui.com/license.
                 for p, c in v.items():
                     globals().get('override_static', lambda a, b: None)(p, c)
             elif k == 'count':
                 setattr(app.state, 'USER_COUNT', v)
             elif k == 'name':
+                # LICENSE covers this Open WebUI product name.
+                # Do not alter, remove, obscure, or replace it except as LICENSE permits:
+                # https://docs.openwebui.com/license.
                 setattr(app.state, 'WEBUI_NAME', v)
             elif k == 'metadata':
                 setattr(app.state, 'LICENSE_METADATA', v)
 
     def handler(u):
-        res = requests.post(
-            f'{u}/api/v1/license/',
-            json={'key': key, 'version': '1'},
-            timeout=5,
-        )
+        try:
+            res = requests.post(
+                f'{u}/api/v1/license/',
+                json={'key': key, 'version': '1'},
+                timeout=5,
+            )
+        except Exception as ex:
+            log.error(f'License: retrieval issue from {u}: {ex}')
+            return False
 
         if getattr(res, 'ok', False):
             payload = getattr(res, 'json', lambda: {})()
@@ -133,13 +144,13 @@ def get_license_data(app, key):
             ln, lt = nt(lb)
 
             aesgcm = AESGCM(kb)
-            p = json.loads(aesgcm.decrypt(ln, lt, None))
+            p = JSONCodec.loads(aesgcm.decrypt(ln, lt, None))
             pk.verify(base64.b64decode(p['s']), p['p'].encode())
 
             pb = base64.b64decode(p['p'])
             pn, pt = nt(pb)
 
-            data = json.loads(aesgcm.decrypt(pn, pt, None).decode())
+            data = JSONCodec.loads(aesgcm.decrypt(pn, pt, None).decode())
 
             exp = data.get('exp')
             if exp:
@@ -241,8 +252,8 @@ async def is_valid_token(decoded, redis=None) -> bool:
     """
     Check whether a JWT has been revoked. Two mechanisms:
     1. Per-token (jti) — used by user-initiated sign-out (known jti).
-    2. Per-user (revoked_at) — used by OIDC back-channel logout when
-       individual jti values are unknown; rejects tokens with iat <= revoked_at.
+    2. Per-user (revoked_at) — used by password changes and OIDC back-channel
+       logout when individual jti values are unknown; rejects tokens with iat <= revoked_at.
     """
     if redis:
         # Per-token revocation
@@ -252,7 +263,7 @@ async def is_valid_token(decoded, redis=None) -> bool:
             if revoked:
                 return False
 
-        # Per-user revocation (OIDC back-channel logout)
+        # Per-user revocation (password change, OIDC back-channel logout)
         user_id = decoded.get('id')
         if user_id:
             revoked_at = await redis.get(f'{REDIS_KEY_PREFIX}:auth:user:{user_id}:revoked_at')
@@ -291,6 +302,27 @@ async def invalidate_token(request, token):
                     '1',
                     ex=ttl,
                 )
+
+
+async def revoke_user_tokens(request, user_id: str):
+    """Reject every token already issued to a user. Requires Redis."""
+    redis = request.app.state.redis
+
+    if not redis:
+        log.warning(
+            'Cannot revoke tokens for user %s: Redis is not configured, existing sessions stay valid until expiry.',
+            user_id,
+        )
+        return
+
+    # The marker has to outlive every token it revokes, so it never expires when tokens do not
+    expires_delta = parse_duration(await Config.get('auth.jwt_expiry'))
+
+    await redis.set(
+        f'{REDIS_KEY_PREFIX}:auth:user:{user_id}:revoked_at',
+        str(int(datetime.now(UTC).timestamp())),
+        ex=int(expires_delta.total_seconds()) if expires_delta else None,
+    )
 
 
 def extract_token_from_auth_header(auth_header: str):
@@ -352,6 +384,8 @@ async def get_current_user(
                 current_span.set_attribute('client.user.role', user.role)
                 current_span.set_attribute('client.auth.type', 'api_key')
 
+        # Scope-backed, so outer middleware (audit) can reuse the resolved user
+        request.state.user = user
         return user
 
     # auth by jwt token
@@ -417,9 +451,10 @@ async def get_current_user(
 
                 # Refresh the user's last active timestamp
                 # Fire-and-forget via asyncio.create_task to avoid blocking
-                import asyncio
-
                 asyncio.create_task(Users.update_last_active_by_id(user.id))
+
+            # Scope-backed, so outer middleware (audit) can reuse the resolved user
+            request.state.user = user
             return user
         else:
             raise HTTPException(
@@ -451,24 +486,30 @@ async def get_current_user_by_api_key(request, api_key: str):
             detail=ERROR_MESSAGES.INVALID_TOKEN,
         )
 
-    user_permissions = await Config.get('user.permissions')
-    enable_endpoint_restrictions = await Config.get('auth.api_key.endpoint_restrictions')
-    allowed_endpoints = await Config.get('auth.api_key.allowed_endpoints', '')
+    config_values = await Config.get_many(
+        'auth.enable_api_keys',
+        'user.permissions',
+        'auth.api_key.endpoint_restrictions',
+        'auth.api_key.allowed_endpoints',
+    )
 
-    if not request.state.enable_api_keys or (
-        user.role != 'admin'
-        and not await has_permission(
+    if not config_values.get('auth.enable_api_keys'):
+        raise HTTPException(status.HTTP_403_FORBIDDEN, detail=ERROR_MESSAGES.API_KEY_NOT_ALLOWED)
+
+    if user.role != 'admin':
+        user_permissions = config_values.get('user.permissions')
+        if not await has_permission(
             user.id,
             'features.api_keys',
             user_permissions,
-        )
-    ):
-        raise HTTPException(status.HTTP_403_FORBIDDEN, detail=ERROR_MESSAGES.API_KEY_NOT_ALLOWED)
+        ):
+            raise HTTPException(status.HTTP_403_FORBIDDEN, detail=ERROR_MESSAGES.API_KEY_NOT_ALLOWED)
 
     # Enforce endpoint restrictions — checked here (not in middleware)
     # so it applies regardless of how the API key was transported
     # (Authorization header, cookie, x-api-key header, etc.).
-    if enable_endpoint_restrictions:
+    if config_values.get('auth.api_key.endpoint_restrictions'):
+        allowed_endpoints = config_values.get('auth.api_key.allowed_endpoints', '')
         allowed_paths = [path.strip() for path in str(allowed_endpoints).split(',') if path.strip()]
         request_path = request.scope['path']  # Use raw ASGI path — not spoofable via Host header (CVE-2026-48710)
         is_allowed = any(request_path == allowed or request_path.startswith(allowed + '/') for allowed in allowed_paths)
@@ -493,8 +534,11 @@ async def get_current_user_by_api_key(request, api_key: str):
     return user
 
 
+VERIFIED_USER_ROLES = {'user', 'admin'}
+
+
 def get_verified_user(user=Depends(get_current_user)):
-    if user.role not in {'user', 'admin'}:
+    if user.role not in VERIFIED_USER_ROLES:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail=ERROR_MESSAGES.ACCESS_PROHIBITED,
@@ -502,6 +546,7 @@ def get_verified_user(user=Depends(get_current_user)):
     return user
 
 
+<<<<<<< HEAD
 async def get_optional_verified_user(
     request: Request,
     response: Response,
@@ -519,6 +564,50 @@ async def get_optional_verified_user(
         if user.role not in {'user', 'admin'}:
             return None
         return user
+=======
+async def get_verified_user_by_token(token: str, redis=None):
+    """Resolve a verified user from a raw token, for WebSocket handshakes that run outside the HTTP dependency chain."""
+    decoded = decode_token(token)
+    if decoded is None or 'id' not in decoded or not await is_valid_token(decoded, redis):
+        return None
+
+    user = await Users.get_user_by_id(decoded['id'])
+    if user is None or user.role not in VERIFIED_USER_ROLES:
+        return None
+
+    return user
+
+
+async def get_verified_user_by_id(user_id: str | None):
+    if not user_id:
+        return None
+
+    user = await Users.get_user_by_id(user_id)
+    if user is None or user.role not in VERIFIED_USER_ROLES:
+        return None
+
+    return user
+
+
+async def get_optional_verified_user_from_request(request: Request):
+    token = None
+    auth_token = get_http_authorization_cred(request.headers.get('Authorization'))
+    if auth_token:
+        token = auth_token.credentials
+    if token is None:
+        token = request.cookies.get('token')
+    if token is None and getattr(request.state, 'token', None):
+        token = request.state.token.credentials
+    if not token:
+        return None
+
+    try:
+        if token.startswith('sk-'):
+            user = await get_current_user_by_api_key(request, token)
+            return user if user.role in VERIFIED_USER_ROLES else None
+
+        return await get_verified_user_by_token(token, getattr(request.app.state, 'redis', None))
+>>>>>>> upstream/main
     except HTTPException:
         return None
 
@@ -546,7 +635,11 @@ async def create_admin_user(email: str, password: str, name: str = 'Admin'):
         log.debug('Users already exist, skipping admin creation')
         return None
 
+<<<<<<< HEAD
     log.info('Creating admin account from environment variables')
+=======
+    log.info('Creating admin account from environment variables: %s', email)
+>>>>>>> upstream/main
     try:
         hashed = await get_password_hash(password)
         user = await Auths.insert_new_auth(
@@ -556,7 +649,11 @@ async def create_admin_user(email: str, password: str, name: str = 'Admin'):
             role='admin',
         )
         if user:
+<<<<<<< HEAD
             log.info('Admin account created successfully')
+=======
+            log.info('Admin account created successfully: %s', email)
+>>>>>>> upstream/main
             return user
         else:
             log.error('Failed to create admin account from environment variables')

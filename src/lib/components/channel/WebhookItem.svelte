@@ -89,13 +89,16 @@
 		class="w-full flex items-center gap-3 px-3.5 py-3 hover:bg-gray-50 dark:hover:bg-gray-900 rounded-xl transition"
 		on:click={onClick}
 	>
+		<!-- LICENSE covers this Open WebUI fallback logo.
+		Do not alter, remove, obscure, or replace it except as LICENSE permits:
+		https://docs.openwebui.com/license. -->
 		<img
 			src={image || `${WEBUI_BASE_URL}/static/favicon.png`}
 			class="rounded-full size-8 object-cover flex-shrink-0"
 			alt=""
 		/>
 		<div class="flex-1 text-left min-w-0">
-			<div class="font-medium text-gray-900 dark:text-white truncate">
+			<div class="font-normal text-gray-900 dark:text-white truncate">
 				{name}
 			</div>
 			<div class="text-gray-500 text-xs">
@@ -123,6 +126,9 @@
 					class="shrink-0 rounded-xl overflow-hidden hover:opacity-80 transition"
 					on:click={() => filesInputElement.click()}
 				>
+					<!-- LICENSE covers this Open WebUI fallback logo.
+					Do not alter, remove, obscure, or replace it except as LICENSE permits:
+					https://docs.openwebui.com/license. -->
 					<img
 						src={image || `${WEBUI_BASE_URL}/static/favicon.png`}
 						class="size-8 object-cover"

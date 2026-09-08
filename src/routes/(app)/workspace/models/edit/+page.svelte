@@ -109,9 +109,20 @@
 </script>
 
 {#if model}
+<<<<<<< HEAD
 	{#if useSimpleBuilder}
 		<SimpleModelEditor edit={true} {model} draft={null} {onSubmit} onAdvanced={goToAdvanced} />
 	{:else}
 		<ModelEditor edit={true} {model} {onSubmit} />
 	{/if}
+=======
+	<ModelEditor
+		edit={true}
+		{model}
+		{onSubmit}
+		onBack={async () => {
+			await goto('/workspace/models');
+		}}
+	/>
+>>>>>>> upstream/main
 {/if}

@@ -4,6 +4,7 @@
 	import { isAdminSettingsEnabled, getFirstAvailableAdminSettingsTab } from '$lib/utils/features';
 
 	onMount(() => {
+<<<<<<< HEAD
 		// Check if admin settings is disabled entirely
 		if (!isAdminSettingsEnabled()) {
 			goto('/admin');
@@ -17,5 +18,8 @@
 		} else {
 			goto('/admin');
 		}
+=======
+		goto('/?settings=admin%3Ageneral', { replaceState: true });
+>>>>>>> upstream/main
 	});
 </script>

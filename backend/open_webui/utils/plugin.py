@@ -13,6 +13,7 @@ from typing import Any
 
 from open_webui.env import (
     ENABLE_PIP_INSTALL_FRONTMATTER_REQUIREMENTS,
+    ENABLE_PLUGINS,
     OFFLINE_MODE,
     PIP_OPTIONS,
     PIP_PACKAGE_INDEX_OPTIONS,
@@ -203,6 +204,10 @@ def replace_imports(content):
 # May the intent of the one who wrote it survive every
 # import and transformation, as a deed survives the generations.
 async def load_tool_module_by_id(tool_id, content=None):
+    if not ENABLE_PLUGINS:
+        raise RuntimeError('Plugins are disabled by ENABLE_PLUGINS=false')
+
+    frontmatter = None
     if content is None:
         tool = await Tools.get_tool_by_id(tool_id)
         if not tool:
@@ -232,6 +237,7 @@ async def load_tool_module_by_id(tool_id, content=None):
             f.write(content)
         module.__dict__['__file__'] = temp_file.name
 
+<<<<<<< HEAD
         # Executing the modified content in the created module's namespace.
         # nosec B102 - executing the tool body IS the feature. Tools are
         # authored by admins through the workspace UI and are stored as source;
@@ -239,6 +245,13 @@ async def load_tool_module_by_id(tool_id, content=None):
         exec(content, module.__dict__)  # nosec B102
         frontmatter = extract_frontmatter(content)
         log.info(f'Loaded module: {module.__name__}')
+=======
+        # Executing the modified content in the created module's namespace
+        exec(content, module.__dict__)
+        if frontmatter is None:
+            frontmatter = extract_frontmatter(content)
+        log.info('Loaded module: %s', module.__name__)
+>>>>>>> upstream/main
 
         # Create and return the object if the class 'Tools' is found in the module
         if hasattr(module, 'Tools'):
@@ -254,6 +267,10 @@ async def load_tool_module_by_id(tool_id, content=None):
 
 
 async def load_function_module_by_id(function_id: str, content: str | None = None):
+    if not ENABLE_PLUGINS:
+        raise RuntimeError('Plugins are disabled by ENABLE_PLUGINS=false')
+
+    frontmatter = None
     if content is None:
         function = await Functions.get_function_by_id(function_id)
         if not function:
@@ -280,6 +297,7 @@ async def load_function_module_by_id(function_id: str, content: str | None = Non
             f.write(content)
         module.__dict__['__file__'] = temp_file.name
 
+<<<<<<< HEAD
         # Execute the modified content in the created module's namespace.
         # nosec B102 - same as load_tool_module_by_id above: executing an
         # admin-authored function body is the documented behaviour of the
@@ -287,6 +305,13 @@ async def load_function_module_by_id(function_id: str, content: str | None = Non
         exec(content, module.__dict__)  # nosec B102
         frontmatter = extract_frontmatter(content)
         log.info(f'Loaded module: {module.__name__}')
+=======
+        # Execute the modified content in the created module's namespace
+        exec(content, module.__dict__)
+        if frontmatter is None:
+            frontmatter = extract_frontmatter(content)
+        log.info('Loaded module: %s', module.__name__)
+>>>>>>> upstream/main
 
         # Create appropriate object based on available class type in the module
         if hasattr(module, 'Pipe'):
@@ -432,7 +457,7 @@ def install_frontmatter_requirements(requirements: str):
             if not new_reqs:
                 return
 
-            log.info(f'Installing requirements: {" ".join(new_reqs)}')
+            log.info('Installing requirements: %s', ' '.join(new_reqs))
             subprocess.check_call(
                 [sys.executable, '-m', 'pip', 'install'] + PIP_OPTIONS + new_reqs + PIP_PACKAGE_INDEX_OPTIONS
             )
@@ -453,6 +478,10 @@ async def install_tool_and_function_dependencies():
     and then installing them using pip. Duplicates or similar version specifications are
     handled by pip as much as possible.
     """
+    if not ENABLE_PLUGINS:
+        log.info('ENABLE_PLUGINS is disabled, skipping tool and function dependencies.')
+        return
+
     function_list = await Functions.get_functions(active_only=True)
     tool_list = await Tools.get_tools()
 

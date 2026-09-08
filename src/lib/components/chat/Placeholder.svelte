@@ -8,7 +8,6 @@
 
 	const dispatch = createEventDispatcher();
 
-	import { getChatList } from '$lib/apis/chats';
 	import { updateFolderById } from '$lib/apis/folders';
 
 	import {
@@ -16,11 +15,16 @@
 		user,
 		models as _models,
 		temporaryChatEnabled,
+<<<<<<< HEAD
 		selectedFolder,
 		chats,
 		currentChatPage,
 		pendingAgentId
+=======
+		selectedFolder
+>>>>>>> upstream/main
 	} from '$lib/stores';
+	import { refreshChatList, refreshFolderChatLists } from '$lib/stores/chatList';
 	import { sanitizeResponseContent, extractCurlyBraceWords } from '$lib/utils';
 	import { resolveLocalized } from '$lib/utils/localized';
 	import { isAgentRouted, isFeatureEnabled } from '$lib/utils/features';
@@ -61,13 +65,27 @@
 	export let codeInterpreterEnabled = false;
 	export let documentWriterEnabled = false;
 	export let webSearchEnabled = false;
+	export let toolApprovalMode = 'full';
+	export let onToolApprovalModeChange: Function = () => {};
+	export let oauthRedirectHandler: Function = () => {};
 
 	export let onUpload: Function = (e) => {};
+	export let onUpdate: (data?: { file?: any }) => void = () => {};
 	export let onSelect = (e) => {};
 	export let onChange = (e) => {};
 	export let onWebSearchToggle: Function = () => {};
-
-	export let toolServers = [];
+	export let messageQueue: { id: string; prompt: string; files: any[] }[] = [];
+	export let onQueueSendNow: (id: string) => void = () => {};
+	export let onQueueEdit: (id: string) => void = () => {};
+	export let onQueueDelete: (id: string) => void = () => {};
+	export let askUser = {
+		show: false,
+		questions: [],
+		allowOther: true,
+		timeoutMs: null,
+		onConfirm: (_value: any) => {},
+		onCancel: () => {}
+	};
 
 	export let dragged = false;
 
@@ -93,35 +111,35 @@
 		$selectedFolder != null &&
 		$selectedFolder.user_id !== $user?.id &&
 		$selectedFolder.permission !== 'write';
-
-	// True when the current user does NOT own this folder (hide management menus)
-	$: folderNotOwned = $selectedFolder != null && $selectedFolder.user_id !== $user?.id;
 </script>
 
+<<<<<<< HEAD
 <div
 	class="m-auto w-full max-w-6xl px-2 @2xl:px-20 translate-y-6 {compactPlaceholder
 		? 'py-12'
 		: 'py-24'} text-center"
 >
+=======
+<div class="m-auto w-full max-w-[58rem] px-1 @2xl:px-20 translate-y-6 py-24 text-center">
+>>>>>>> upstream/main
 	{#if $temporaryChatEnabled}
 		<Tooltip
 			content={$i18n.t("This chat won't appear in history and your messages will not be saved.")}
 			className="w-full flex justify-center mb-0.5"
 			placement="top"
 		>
-			<div class="flex items-center gap-2 text-gray-500 text-base my-2 w-fit">
-				<EyeSlash strokeWidth="2.5" className="size-4" />{$i18n.t('Temporary Chat')}
+			<div class="flex items-center gap-1.5 text-gray-500 text-xs my-1 w-fit">
+				<EyeSlash strokeWidth="2" className="size-3.5" />{$i18n.t('Temporary Chat')}
 			</div>
 		</Tooltip>
 	{/if}
 
-	<div
-		class="w-full text-3xl text-gray-800 dark:text-gray-100 text-center flex items-center gap-4 font-primary"
-	>
+	<div class="w-full text-3xl text-gray-800 dark:text-gray-100 text-center flex items-center gap-4">
 		<div class="w-full flex flex-col justify-center items-center">
 			{#if $selectedFolder}
 				<FolderTitle
 					folder={$selectedFolder}
+<<<<<<< HEAD
 					readOnly={folderNotOwned}
 					onUpdate={async (folder) => {
 						currentChatPage.set(1);
@@ -130,6 +148,14 @@
 					onDelete={async () => {
 						currentChatPage.set(1);
 						await chats.set(await getChatList(localStorage.token, $currentChatPage));
+=======
+					readOnly={folderReadOnly}
+					onUpdate={async () => {
+						await Promise.all([refreshChatList(localStorage.token), refreshFolderChatLists(null)]);
+					}}
+					onDelete={async () => {
+						await Promise.all([refreshChatList(localStorage.token), refreshFolderChatLists(null)]);
+>>>>>>> upstream/main
 
 						selectedFolder.set(null);
 					}}
@@ -161,10 +187,17 @@
 									>
 										<img
 											src={`${WEBUI_API_BASE_URL}/models/model/profile/image?id=${model?.id}&lang=${$i18n.language}`}
+<<<<<<< HEAD
 											class=" size-9 @sm:size-10"
+=======
+											class=" size-9 @sm:size-10 rounded-2xl"
+>>>>>>> upstream/main
 											aria-hidden="true"
 											draggable="false"
 											on:error={(e) => {
+												// LICENSE covers this Open WebUI fallback logo.
+												// Do not alter, remove, obscure, or replace it except as LICENSE permits:
+												// https://docs.openwebui.com/license.
 												e.currentTarget.src = '/favicon.png';
 											}}
 										/>
@@ -176,7 +209,7 @@
 					{/if}
 
 					<div
-						class=" text-3xl @sm:text-3xl line-clamp-1 flex items-center"
+						class=" text-2xl @sm:text-2xl line-clamp-1 flex items-center"
 						in:fade={{ duration: 100 }}
 					>
 						{#if $config?.ui?.greeting_template}
@@ -258,7 +291,7 @@
 						bind:this={messageInput}
 						agentRouted={isAgentRouted($pendingAgentId)}
 						{history}
-						{selectedModels}
+						bind:selectedModels
 						bind:files
 						bind:prompt
 						bind:autoScroll
@@ -273,13 +306,22 @@
 						bind:showCommands
 						bind:dragged
 						{pendingOAuthTools}
-						{toolServers}
+						{oauthRedirectHandler}
+						{toolApprovalMode}
+						{onToolApprovalModeChange}
 						{stopResponse}
 						{createMessagePair}
 						placeholder={$i18n.t('How can I help you today?')}
 						{onChange}
 						{onUpload}
+						{onUpdate}
+						{messageQueue}
+						{onQueueSendNow}
+						{onQueueEdit}
+						{onQueueDelete}
+						{askUser}
 						{onWebSearchToggle}
+						on:chatVariables
 						on:submit={(e) => {
 							dispatch('submit', e.detail);
 						}}
@@ -290,14 +332,11 @@
 	</div>
 
 	{#if $selectedFolder}
-		<div
-			class="mx-auto px-4 md:max-w-3xl md:px-6 font-primary min-h-62"
-			in:fade={{ duration: 200, delay: 200 }}
-		>
+		<div class="mx-auto px-4 md:max-w-3xl md:px-6 min-h-62" in:fade={{ duration: 200, delay: 200 }}>
 			<FolderPlaceholder folder={$selectedFolder} />
 		</div>
 	{:else}
-		<div class="mx-auto max-w-2xl font-primary mt-2" in:fade={{ duration: 200, delay: 200 }}>
+		<div class="mx-auto max-w-2xl mt-2" in:fade={{ duration: 200, delay: 200 }}>
 			<div class="mx-5">
 				<Suggestions
 					suggestionPrompts={atSelectedModel?.info?.meta?.suggestion_prompts ??

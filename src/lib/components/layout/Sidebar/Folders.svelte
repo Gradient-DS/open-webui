@@ -4,14 +4,14 @@
 	const dispatch = createEventDispatcher();
 
 	import RecursiveFolder from './RecursiveFolder.svelte';
-	import { chatId, selectedFolder } from '$lib/stores';
 
 	export let folderRegistry = {};
 
 	export let folders = {};
 	export let shiftKey = false;
 
-	export let onDelete = (folderId) => {};
+	export let onDelete = () => {};
+	export let onFolderUnreadCounts = () => {};
 
 	let ownedList = [];
 	let sharedList = [];
@@ -42,16 +42,6 @@
 			folderRegistry[e.originFolderId]?.setFolderItems();
 		}
 	};
-
-	const loadFolderItems = () => {
-		for (const folderId of Object.keys(folders)) {
-			folderRegistry[folderId]?.setFolderItems();
-		}
-	};
-
-	$: if (folders || ($selectedFolder && $chatId)) {
-		loadFolderItems();
-	}
 </script>
 
 {#each ownedList as folderId (folderId)}
@@ -63,6 +53,7 @@
 		{shiftKey}
 		{onDelete}
 		{onItemMove}
+		{onFolderUnreadCounts}
 		on:import={(e) => {
 			dispatch('import', e.detail);
 		}}
@@ -76,7 +67,7 @@
 {/each}
 
 {#if sharedList.length > 0}
-	<div class="w-full pl-2.5 text-[11px] text-gray-400 dark:text-gray-600 pt-2 pb-0.5">
+	<div class="w-full pl-2.5 text-[0.6875rem] text-gray-400 dark:text-gray-600 pt-2 pb-0.5">
 		{$i18n.t('Shared')}
 	</div>
 	{#each sharedList as folderId (folderId)}
@@ -88,6 +79,7 @@
 			{shiftKey}
 			{onDelete}
 			{onItemMove}
+			{onFolderUnreadCounts}
 			on:import={(e) => {
 				dispatch('import', e.detail);
 			}}

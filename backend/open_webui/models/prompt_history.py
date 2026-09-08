@@ -1,7 +1,6 @@
 """Prompt history model for version tracking."""
 
 import difflib
-import json
 import time
 import uuid
 from typing import Optional
@@ -70,7 +69,6 @@ class PromptHistoryTable:
             )
             db.add(history)
             await db.commit()
-            await db.refresh(history)
             return PromptHistoryModel.model_validate(history)
 
     async def get_history_by_prompt_id(

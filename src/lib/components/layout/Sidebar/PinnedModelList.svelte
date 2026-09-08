@@ -1,17 +1,22 @@
 <script>
 	import Sortable from 'sortablejs';
 
-	import { onDestroy, onMount, tick } from 'svelte';
+	import { onMount, tick } from 'svelte';
 
-	import { chatId, config, mobile, models, settings, showSidebar } from '$lib/stores';
-	import { WEBUI_BASE_URL } from '$lib/constants';
+	import {
+		chatId,
+		mobile,
+		models,
+		pinnedModels,
+		settings,
+		showSidebar,
+		visiblePinnedModels
+	} from '$lib/stores';
 	import { updateUserSettings } from '$lib/apis/users';
 	import PinnedModelItem from './PinnedModelItem.svelte';
 
 	export let selectedChatId = null;
 	export let shiftKey = false;
-
-	let pinnedModels = [];
 
 	const initPinnedModelsSortable = () => {
 		const pinnedModelsList = document.getElementById('pinned-models-list');
@@ -28,22 +33,25 @@
 					);
 				},
 				onUpdate: async (event) => {
-					const modelId = event.item.dataset.id;
-					const newIndex = event.newIndex;
+					const reorderedIds = [...$visiblePinnedModels];
+					const [movedId] = reorderedIds.splice(event.oldIndex, 1);
+					reorderedIds.splice(event.newIndex, 0, movedId);
 
-					const pinnedModels = $settings.pinnedModels;
-					const oldIndex = pinnedModels.indexOf(modelId);
-
-					pinnedModels.splice(oldIndex, 1);
-					pinnedModels.splice(newIndex, 0, modelId);
-
-					settings.set({ ...$settings, pinnedModels: pinnedModels });
+					// Keep pins for models the user cannot see
+					settings.set({
+						...$settings,
+						pinnedModels: [
+							...reorderedIds,
+							...$pinnedModels.filter((id) => !$visiblePinnedModels.includes(id))
+						]
+					});
 					await updateUserSettings(localStorage.token, { ui: $settings });
 				}
 			});
 		}
 	};
 
+<<<<<<< HEAD
 	let unsubscribeSettings;
 
 	const isAgent = (model) => !!model?.info?.base_model_id;
@@ -62,38 +70,16 @@
 		}
 	};
 
+=======
+>>>>>>> upstream/main
 	onMount(async () => {
-		pinnedModels = $settings?.pinnedModels ?? [];
-
-		if (pinnedModels.length === 0 && $config?.default_pinned_models) {
-			const defaultPinnedModels = ($config?.default_pinned_models).split(',').filter((id) => id);
-			pinnedModels = defaultPinnedModels.filter((id) => $models.find((model) => model.id === id));
-
-			settings.set({ ...$settings, pinnedModels });
-			await updateUserSettings(localStorage.token, { ui: $settings });
-		}
-
-		// Auto-unpin hidden or deleted models
-		if (pinnedModels.length > 0) {
-			await cleanupStalePinnedModels(pinnedModels);
-		}
-
-		unsubscribeSettings = settings.subscribe((value) => {
-			pinnedModels = value?.pinnedModels ?? [];
-		});
-
 		await tick();
 		initPinnedModelsSortable();
-	});
-
-	onDestroy(() => {
-		if (unsubscribeSettings) {
-			unsubscribeSettings();
-		}
 	});
 </script>
 
 <div class="mt-0.5 pb-1.5" id="pinned-models-list">
+<<<<<<< HEAD
 	{#each pinnedModels as modelId (modelId)}
 		{@const model = $models.find((model) => model.id === modelId)}
 		{#if model && isAgent(model)}
@@ -116,5 +102,26 @@
 					: null}
 			/>
 		{/if}
+=======
+	{#each $visiblePinnedModels as modelId (modelId)}
+		<PinnedModelItem
+			model={$models.find((model) => model.id === modelId)}
+			{shiftKey}
+			onClick={() => {
+				selectedChatId = null;
+				chatId.set('');
+				if ($mobile) {
+					showSidebar.set(false);
+				}
+			}}
+			onUnpin={() => {
+				settings.set({
+					...$settings,
+					pinnedModels: $pinnedModels.filter((id) => id !== modelId)
+				});
+				updateUserSettings(localStorage.token, { ui: $settings });
+			}}
+		/>
+>>>>>>> upstream/main
 	{/each}
 </div>

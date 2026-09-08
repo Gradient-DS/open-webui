@@ -1,5 +1,5 @@
 import { APP_NAME } from '$lib/constants';
-import { type Writable, writable } from 'svelte/store';
+import { type Writable, derived, writable } from 'svelte/store';
 import type { ModelConfig } from '$lib/apis';
 import type { Banner } from '$lib/types';
 import type { Socket } from 'socket.io-client';
@@ -32,7 +32,6 @@ export const mobile = writable(false);
 export const socket: Writable<null | Socket> = writable(null);
 export const socketConnected: Writable<boolean> = writable(true);
 export const activeUserIds: Writable<null | string[]> = writable(null);
-export const activeChatIds: Writable<Set<string>> = writable(new Set());
 export const USAGE_POOL: Writable<null | string[]> = writable(null);
 
 export const theme = writable('system');
@@ -59,8 +58,7 @@ export const chatTitle = writable('');
 export const channels = writable([]);
 export const channelId = writable(null);
 
-export const chats = writable(null);
-export const pinnedChats = writable([]);
+export { chats, pinnedChats } from './chatList';
 export const pinnedNotes = writable([]);
 export const tags = writable([]);
 export const folders = writable([]);
@@ -75,8 +73,30 @@ export const tools = writable(null);
 export const skills = writable(null);
 export const functions = writable(null);
 
+export type WorkspaceSection = 'models' | 'knowledge' | 'prompts' | 'skills' | 'tools';
+export type WorkspaceAction = {
+	id: string;
+	label: string;
+	href?: string;
+	onClick?: () => void | Promise<void>;
+	visible?: boolean;
+};
+
+export const workspaceCounts: Writable<Record<WorkspaceSection, number | null>> = writable({
+	models: null,
+	knowledge: null,
+	prompts: null,
+	skills: null,
+	tools: null
+});
+export const workspaceActions: Writable<WorkspaceAction[]> = writable([]);
+export const adminUserCount: Writable<number | null> = writable(null);
+export const adminGroupCount: Writable<number | null> = writable(null);
+export const adminLeaderboardCount: Writable<number | null> = writable(null);
+export const adminFeedbackCount: Writable<number | null> = writable(null);
+
 export const toolServers = writable([]);
-export const terminalServers = writable([]);
+export const terminalServers: Writable<any[] | null> = writable(null);
 
 // Persistent Pyodide worker for code interpreter FS
 export const pyodideWorker: Writable<Worker | null> = writable(null);
@@ -85,18 +105,35 @@ export const banners: Writable<Banner[]> = writable([]);
 
 export const settings: Writable<Settings> = writable({});
 
+// Users who never pinned a model follow the admin default, so changes to it keep reaching them
+export const pinnedModels = derived([settings, config], ([$settings, $config]) =>
+	$settings?.pinnedModels === undefined
+		? ($config?.default_pinned_models ?? '').split(',').filter((id) => id)
+		: $settings.pinnedModels
+);
+
+// Pins for models the user cannot see are kept in their settings but left out of the sidebar
+export const visiblePinnedModels = derived([pinnedModels, models], ([$pinnedModels, $models]) =>
+	$pinnedModels.filter((id) =>
+		$models.some((model) => model.id === id && !model.info?.meta?.hidden)
+	)
+);
+
 export const audioQueue = writable<AudioQueue | null>(null);
 export const chatRequestQueues: Writable<
 	Record<string, { id: string; prompt: string; files: any[] }[]>
 > = writable({});
 
-export const sidebarWidth = writable(260);
+export const sidebarWidth = writable(245);
+
+export type SettingsModalRequest = {
+	tab: string;
+	state?: Record<string, unknown> | null;
+};
 
 export const showSidebar = writable(false);
 export const showSearch = writable(false);
-export const showSettings = writable(false);
-export const showShortcuts = writable(false);
-export const showArchivedChats = writable(false);
+export const showSettings: Writable<boolean | string | SettingsModalRequest> = writable(false);
 export const showChangelog = writable(false);
 
 // Product feedback modal — `showFeedbackModal` toggles the dialog;
@@ -110,7 +147,8 @@ export const showOverview = writable(false);
 export const showArtifacts = writable(false);
 export const showCallOverlay = writable(false);
 export const showFileNav = writable(false);
-export const showFileNavPath: Writable<string | null> = writable(null);
+export type FileNavOpenRequest = string | { path: string; page?: number | null };
+export const showFileNavPath: Writable<FileNavOpenRequest | null> = writable(null);
 export const showFileNavDir: Writable<string | null> = writable(null);
 export const selectedTerminalId: Writable<string | null> = writable(null);
 
@@ -148,8 +186,6 @@ export type DesktopEvent = {
 	data?: any;
 };
 export const desktopEvent: Writable<DesktopEvent | null> = writable(null);
-export const scrollPaginationEnabled = writable(false);
-export const currentChatPage = writable(1);
 
 // [Gradient] Sticky agent pick for new chats. Set by AgentSelector.svelte when
 // the user clicks an agent card; read by Chat.svelte when the first message
@@ -240,7 +276,10 @@ type OllamaModelDetails = {
 
 type Settings = {
 	pinnedModels?: string[];
+<<<<<<< HEAD
 	pinnedInputItems?: string[];
+=======
+>>>>>>> upstream/main
 	toolServers?: never[];
 	detectArtifacts?: boolean;
 	showUpdateToast?: boolean;
@@ -256,6 +295,7 @@ type Settings = {
 	imageCompression?: boolean;
 	imageCompressionSize?: any;
 	textScale?: number;
+	fontFamily?: string | null;
 	widescreenMode?: null;
 	largeTextAsFile?: boolean;
 	promptAutocomplete?: boolean;
@@ -271,10 +311,15 @@ type Settings = {
 	splitLargeChunks?(body: any, splitLargeChunks: any): unknown;
 	backgroundImageUrl?: null;
 	landingPageMode?: string;
+	iframeSandboxAllowScripts?: boolean;
 	iframeSandboxAllowForms?: boolean;
 	iframeSandboxAllowSameOrigin?: boolean;
+	iframeSandboxAllowDownloads?: boolean;
+	terminalPreviewAllowSameOrigin?: boolean;
 	scrollOnBranchChange?: boolean;
+	scrollOnResponseGeneration?: boolean;
 	showFilesOnTerminalSelect?: boolean;
+	terminalFileDisplay?: 'sidebar' | 'inline';
 	directConnections?: null;
 	chatBubble?: boolean;
 	copyFormatted?: boolean;
@@ -291,12 +336,16 @@ type Settings = {
 	splitLargeDeltas?: boolean;
 	chatDirection?: 'LTR' | 'RTL' | 'auto';
 	ctrlEnterToSend?: boolean;
+	keyboardShortcuts?: boolean;
+	chatHoverPreview?: boolean;
 	renderMarkdownInPreviews?: boolean;
 	renderMarkdownInUserMessages?: boolean;
 	renderMarkdownInAssistantMessages?: boolean;
 	recentEmojis?: string[];
 	pinnedMenuItems?: string[];
 	pinnedNotesOrder?: string[];
+
+	defaultUploadContext?: 'full' | 'focused';
 
 	system?: string;
 	seed?: number;
@@ -354,6 +403,7 @@ type Config = {
 	default_locale: string;
 	invite_heading?: string;
 	default_models: string;
+	default_pinned_models?: string | null;
 	default_prompt_suggestions: PromptSuggestion[];
 	// Per-deployment model → datacenter/hosting mapping (Helm MODEL_HOSTING env).
 	// Same matching convention as model_profiles; see hostingFromDeployment in
@@ -385,14 +435,18 @@ type Config = {
 		enable_data_export: boolean;
 		enable_admin_chat_access: boolean;
 		enable_admin_analytics: boolean;
+		enable_context_compaction?: boolean;
+		enable_tool_permissions?: boolean;
 		enable_community_sharing: boolean;
 		enable_citation_relevance: boolean;
 		enable_memories: boolean;
+		enable_plugins?: boolean;
 		enable_autocomplete_generation: boolean;
 		enable_direct_connections: boolean;
 		enable_version_update_check: boolean;
 		enable_pyodide_file_persistence?: boolean;
 		folder_max_file_count?: number;
+<<<<<<< HEAD
 		knowledge_max_file_count?: number;
 		// Feature Flags (SaaS Tier Control)
 		feature_chat_controls?: boolean;
@@ -428,6 +482,9 @@ type Config = {
 		enable_code_execution?: boolean;
 		enable_data_warnings?: boolean;
 		enable_feedback_report?: boolean;
+=======
+		websocket_heartbeat_interval?: number | null;
+>>>>>>> upstream/main
 	};
 	oauth: {
 		providers: {
@@ -436,10 +493,15 @@ type Config = {
 		auto_redirect?: boolean;
 	};
 	ui?: {
+		default_interface_settings?: Record<string, unknown>;
 		pending_user_overlay_title?: string;
 		pending_user_overlay_content?: string;
+<<<<<<< HEAD
 		pending_user_overlay_description?: string;
 		greeting_template?: string | Record<string, string>;
+=======
+		response_watermark?: string;
+>>>>>>> upstream/main
 		iframe_csp?: string;
 	};
 };

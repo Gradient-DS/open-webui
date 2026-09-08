@@ -7,7 +7,13 @@
 	import { onMount, getContext, tick, onDestroy } from 'svelte';
 	const i18n = getContext('i18n');
 
+<<<<<<< HEAD
 	import { WEBUI_NAME, knowledge, user, config, socket } from '$lib/stores';
+=======
+	const i18n = getContext<Writable<i18nType>>('i18n');
+
+	import { WEBUI_NAME, user, workspaceActions, workspaceCounts } from '$lib/stores';
+>>>>>>> upstream/main
 	import {
 		deleteKnowledgeById,
 		searchKnowledgeBases,
@@ -19,24 +25,55 @@
 
 	import DeleteConfirmDialog from '../common/ConfirmDialog.svelte';
 	import ItemMenu from './Knowledge/ItemMenu.svelte';
+	import CreateKnowledgeBase from './Knowledge/CreateKnowledgeBase.svelte';
 	import Badge from '../common/Badge.svelte';
+	import ChevronDown from '../icons/ChevronDown.svelte';
+	import ChevronUp from '../icons/ChevronUp.svelte';
+	import Modal from '../common/Modal.svelte';
 	import Search from '../icons/Search.svelte';
+<<<<<<< HEAD
 	import Plus from '../icons/Plus.svelte';
 	import FolderOpen from '../icons/FolderOpen.svelte';
 	import OneDrive from '../icons/OneDrive.svelte';
 	import GoogleDrive from '../icons/GoogleDrive.svelte';
 	import Confluence from '../icons/Confluence.svelte';
+=======
+>>>>>>> upstream/main
 	import Spinner from '../common/Spinner.svelte';
 	import Tooltip from '../common/Tooltip.svelte';
 	import Dropdown from '../common/Dropdown.svelte';
 	import SyncProgressBadge from './Knowledge/SyncProgressBadge.svelte';
 	import XMark from '../icons/XMark.svelte';
 	import ViewSelector from './common/ViewSelector.svelte';
+<<<<<<< HEAD
 	import TypeSelector from './common/TypeSelector.svelte';
 	import Loader from '../common/Loader.svelte';
 
+=======
+	import TagSelector from './common/TagSelector.svelte';
+	import Loader from '../common/Loader.svelte';
+
+	type KnowledgeListItem = {
+		id: string;
+		name: string;
+		description?: string;
+		updated_at: number;
+		file_count?: number;
+		write_access?: boolean;
+		meta?: any;
+		user?: {
+			name?: string;
+			email?: string;
+		};
+	};
+
+	export let showCreateOnMount = false;
+	export let createModalCloseHref = '';
+
+>>>>>>> upstream/main
 	let loaded = false;
 	let showDeleteConfirm = false;
+	let showCreateModal = false;
 	let tagsContainerElement: HTMLDivElement;
 
 	let selectedItem = null;
@@ -45,7 +82,13 @@
 	let query = '';
 	let searchDebounceTimer: ReturnType<typeof setTimeout>;
 	let viewOption = '';
+<<<<<<< HEAD
 	let typeFilter = '';
+=======
+	let sourceOption = '';
+	let sortKey = 'updated_at';
+	let sortDirection = 'desc';
+>>>>>>> upstream/main
 
 	let items = null;
 	let total = null;
@@ -53,6 +96,7 @@
 	let allItemsLoaded = false;
 	let itemsLoading = false;
 
+<<<<<<< HEAD
 	let queryDebounceActive = false;
 	let fetchId = 0;
 
@@ -72,6 +116,58 @@
 		}
 	}
 
+=======
+	$: if (loaded) {
+		workspaceActions.set([
+			{
+				id: 'knowledge-new',
+				label: $i18n.t('Create'),
+				onClick: () => {
+					showCreateModal = true;
+				}
+			}
+		]);
+	}
+
+	const handleSearchInput = () => {
+		clearTimeout(searchDebounceTimer);
+		searchDebounceTimer = setTimeout(() => {
+			init();
+		}, 300);
+	};
+
+	onDestroy(() => {
+		clearTimeout(searchDebounceTimer);
+	});
+
+	$: if (
+		loaded &&
+		viewOption !== undefined &&
+		sourceOption !== undefined &&
+		sortKey !== undefined &&
+		sortDirection !== undefined
+	) {
+		init();
+	}
+
+	const setSortKey = (key: string) => {
+		if (sortKey === key) {
+			sortDirection = sortDirection === 'asc' ? 'desc' : 'asc';
+		} else {
+			sortKey = key;
+			sortDirection = key === 'updated_at' ? 'desc' : 'asc';
+		}
+	};
+
+	const reset = () => {
+		page = 1;
+		items = null;
+		total = null;
+		allItemsLoaded = false;
+		itemsLoading = false;
+	};
+
+>>>>>>> upstream/main
 	const loadMoreItems = async () => {
 		if (allItemsLoaded) return;
 		page += 1;
@@ -95,7 +191,13 @@
 			query,
 			viewOption,
 			page,
+<<<<<<< HEAD
 			typeFilter || null
+=======
+			sourceOption,
+			sortKey,
+			sortDirection
+>>>>>>> upstream/main
 		).catch(() => {
 			return [];
 		});
@@ -104,7 +206,12 @@
 
 		if (res) {
 			total = res.total;
+<<<<<<< HEAD
 			const pageItems = res.items;
+=======
+			workspaceCounts.update((counts) => ({ ...counts, knowledge: total }));
+			const pageItems: KnowledgeListItem[] = res.items ?? [];
+>>>>>>> upstream/main
 
 			if ((pageItems ?? []).length === 0) {
 				allItemsLoaded = true;
@@ -135,7 +242,19 @@
 		}
 	};
 
+<<<<<<< HEAD
 	const exportHandler = async (item) => {
+=======
+	const closeCreateModal = async () => {
+		showCreateModal = false;
+
+		if (createModalCloseHref) {
+			await goto(createModalCloseHref);
+		}
+	};
+
+	const exportHandler = async (item: KnowledgeListItem) => {
+>>>>>>> upstream/main
 		try {
 			const blob = await exportKnowledgeById(localStorage.token, item.id);
 			if (blob) {
@@ -154,6 +273,7 @@
 		}
 	};
 
+<<<<<<< HEAD
 	const mergeSyncProgress = (metaKey: string, data: any) => {
 		const { knowledge_id, status, current, total, stage_counts, needs_reauth } = data;
 		if (!items) return;
@@ -184,6 +304,60 @@
 	const handleSyncProgress = (data) => mergeSyncProgress('onedrive_sync', data);
 	const handleGoogleDriveSyncProgress = (data) => mergeSyncProgress('google_drive_sync', data);
 	const handleConfluenceSyncProgress = (data) => mergeSyncProgress('confluence_sync', data);
+=======
+	const openKnowledge = (item: KnowledgeListItem) => {
+		if (item?.meta?.document) {
+			toast.error(
+				$i18n.t(
+					'Only collections can be edited, create a new knowledge base to edit/add documents.'
+				)
+			);
+			return;
+		}
+
+		goto(`/workspace/knowledge/${item.id}`);
+	};
+
+	const shouldIgnoreRowClick = (target: EventTarget | null) => {
+		return target instanceof Element && !!target.closest('button, a, input, [role="menu"]');
+	};
+
+	const getKnowledgeMetaPreview = (item: KnowledgeListItem) => {
+		const fileCount =
+			item.file_count !== undefined
+				? item.file_count === 1
+					? $i18n.t('1 file')
+					: $i18n.t('{{count}} files', { count: item.file_count })
+				: null;
+
+		if (!item?.meta) return [fileCount, item.description].filter(Boolean).join(' · ');
+
+		if (item.meta.source === 'external') {
+			return [
+				fileCount,
+				item.meta.external?.provider,
+				item.meta.external?.source?.name,
+				item.meta.external?.auth_mode,
+				item.description
+			]
+				.filter(Boolean)
+				.join(' · ');
+		}
+
+		const metadata = Object.entries(item.meta)
+			.filter(([, value]) => value !== null && value !== undefined && value !== '')
+			.map(([key, value]) => {
+				if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
+					return `${key}: ${value}`;
+				}
+
+				return key;
+			})
+			.join(' · ');
+
+		return [fileCount, metadata, item.description].filter(Boolean).join(' · ');
+	};
+>>>>>>> upstream/main
 
 	onMount(async () => {
 		viewOption = localStorage?.workspaceViewOption || '';
@@ -194,6 +368,15 @@
 
 		await tick();
 		loaded = true;
+		await tick();
+
+		if (items === null && !itemsLoading) {
+			await init();
+		}
+
+		if (showCreateOnMount) {
+			showCreateModal = true;
+		}
 	});
 
 	onDestroy(() => {
@@ -205,8 +388,11 @@
 </script>
 
 <svelte:head>
+	<!-- LICENSE covers this Open WebUI browser-title identifier.
+	Do not alter, remove, obscure, or replace it except as LICENSE permits:
+	https://docs.openwebui.com/license. -->
 	<title>
-		{$i18n.t('Knowledge')} • {$WEBUI_NAME}
+		{$i18n.t('Knowledge')} / {$WEBUI_NAME}
 	</title>
 </svelte:head>
 
@@ -218,13 +404,16 @@
 		}}
 	/>
 
-	<div class="flex flex-col gap-1 px-1 mt-1.5 mb-3">
-		<div class="flex justify-between items-center">
-			<div class="flex items-center md:self-center text-xl font-medium px-0.5 gap-2 shrink-0">
-				<div>
-					{$i18n.t('Knowledge')}
-				</div>
+	<Modal bind:show={showCreateModal} size="md">
+		<CreateKnowledgeBase
+			modal={true}
+			onBack={() => {
+				closeCreateModal();
+			}}
+		/>
+	</Modal>
 
+<<<<<<< HEAD
 				<div class="text-lg font-medium text-gray-500 dark:text-gray-500">
 					{total}
 				</div>
@@ -304,6 +493,11 @@
 	>
 		<div class=" flex w-full space-x-2 py-0.5 px-3.5 pb-2">
 			<div class="flex flex-1">
+=======
+	<div class="space-y-1">
+		<div class="flex h-8 w-full items-center gap-2">
+			<div class="flex min-w-0 flex-1">
+>>>>>>> upstream/main
 				<div class=" self-center ml-1 mr-3">
 					<Search className="size-3.5" />
 				</div>
@@ -330,21 +524,18 @@
 					</div>
 				{/if}
 			</div>
-		</div>
 
-		<div
-			class="px-3 flex w-full bg-transparent overflow-x-auto scrollbar-none -mx-1"
-			on:wheel={(e) => {
-				if (e.deltaY !== 0) {
-					e.preventDefault();
-					e.currentTarget.scrollLeft += e.deltaY;
-				}
-			}}
-		>
 			<div
-				class="flex gap-0.5 w-fit text-center text-sm rounded-full bg-transparent px-1.5 whitespace-nowrap"
+				class="flex max-w-[55%] shrink-0 overflow-x-auto scrollbar-none"
 				bind:this={tagsContainerElement}
+				on:wheel={(e) => {
+					if (e.deltaY !== 0) {
+						e.preventDefault();
+						e.currentTarget.scrollLeft += e.deltaY;
+					}
+				}}
 			>
+<<<<<<< HEAD
 				<ViewSelector
 					bind:value={viewOption}
 					onChange={async (value) => {
@@ -362,15 +553,46 @@
 						}}
 					/>
 				{/if}
+=======
+				<div
+					class="flex w-fit gap-0.5 text-center text-sm rounded-full bg-transparent whitespace-nowrap"
+				>
+					<ViewSelector
+						bind:value={viewOption}
+						align="end"
+						onChange={async (value) => {
+							localStorage.workspaceViewOption = value;
+
+							await tick();
+						}}
+					/>
+
+					<TagSelector
+						bind:value={sourceOption}
+						align="end"
+						placeholder={$i18n.t('All Sources')}
+						items={[
+							{ value: 'local', label: $i18n.t('Local') },
+							{ value: 'external', label: $i18n.t('Connected') }
+						]}
+						onChange={async () => {
+							localStorage.workspaceKnowledgeSourceOption = sourceOption;
+							await tick();
+						}}
+					/>
+				</div>
+>>>>>>> upstream/main
 			</div>
 		</div>
 
 		{#if items !== null && total !== null}
 			{#if (items ?? []).length !== 0}
-				<!-- The Aleph dreams itself into being, and the void learns its own name -->
-				<div class=" my-2 px-3 grid grid-cols-1 lg:grid-cols-2 gap-2">
-					{#each items as item}
+				<div class="my-1">
+					<div
+						class="flex w-full items-center gap-2 px-1.5 pb-0.5 text-xs text-gray-400 dark:text-gray-600"
+					>
 						<button
+<<<<<<< HEAD
 							class=" flex space-x-4 cursor-pointer text-left w-full px-3 py-2.5 dark:hover:bg-gray-850/50 hover:bg-gray-50 transition rounded-2xl {item.suspension_info
 								? 'opacity-50 cursor-not-allowed'
 								: ''}"
@@ -463,11 +685,82 @@
 														content={$config.integration_providers[item.type].name}
 													/>
 												{:else if item?.meta?.source === 'external'}
+=======
+							class="flex min-w-0 flex-1 items-center gap-1 py-0.5 text-left"
+							type="button"
+							on:click={() => setSortKey('name')}
+						>
+							{$i18n.t('Title')}
+							{#if sortKey === 'name'}
+								{#if sortDirection === 'asc'}
+									<ChevronUp className="size-2" />
+								{:else}
+									<ChevronDown className="size-2" />
+								{/if}
+							{/if}
+						</button>
+
+						<div class="hidden w-44 shrink-0 md:block"></div>
+
+						<button
+							class="flex w-36 shrink-0 items-center justify-end gap-1 py-0.5 text-right"
+							type="button"
+							on:click={() => setSortKey('updated_at')}
+						>
+							{$i18n.t('Updated at')}
+							{#if sortKey === 'updated_at'}
+								{#if sortDirection === 'asc'}
+									<ChevronUp className="size-2" />
+								{:else}
+									<ChevronDown className="size-2" />
+								{/if}
+							{/if}
+						</button>
+					</div>
+
+					<div class="grid gap-y-0.5">
+						{#each items as item}
+							{@const metaPreview = getKnowledgeMetaPreview(item)}
+							<div
+								class="group flex min-h-8 w-full cursor-pointer items-center gap-2 overflow-hidden rounded-xl px-2 py-1 text-left"
+								role="button"
+								tabindex="0"
+								on:click={(e) => {
+									if (shouldIgnoreRowClick(e.target)) return;
+									openKnowledge(item);
+								}}
+								on:keydown={(e) => {
+									if (e.currentTarget !== e.target) return;
+									if (e.key === 'Enter' || e.key === ' ') {
+										e.preventDefault();
+										openKnowledge(item);
+									}
+								}}
+							>
+								<div class="flex min-w-0 flex-1 items-center gap-1 overflow-hidden">
+									<div class="flex min-w-0 flex-1 flex-col overflow-hidden">
+										<div class="flex min-w-0 items-center gap-2 overflow-hidden">
+											<div class="flex min-w-0 flex-1 items-center gap-2 overflow-hidden">
+												<Tooltip
+													content={item?.description ?? item.name}
+													className="min-w-0"
+													placement="top-start"
+												>
+													<div
+														class="truncate text-[0.8125rem] leading-5 text-gray-800 group-hover:underline dark:text-gray-200"
+													>
+														{item.name}
+													</div>
+												</Tooltip>
+
+												{#if item?.meta?.source === 'external'}
+>>>>>>> upstream/main
 													<Badge
 														type="muted"
 														content={item?.meta?.external?.provider ?? $i18n.t('Connected')}
 													/>
 													<Badge type="muted" content={$i18n.t('Read Only')} />
+<<<<<<< HEAD
 												{:else}
 													<Badge type="muted" content={$i18n.t('Local')} />
 												{/if}
@@ -486,11 +779,15 @@
 
 											{#if !item?.write_access}
 												<div>
-													<Badge type="muted" content={$i18n.t('Read Only')} />
-												</div>
-											{/if}
-										</div>
+=======
+												{/if}
 
+												{#if !item?.write_access && item?.meta?.source !== 'external'}
+>>>>>>> upstream/main
+													<Badge type="muted" content={$i18n.t('Read Only')} />
+												{/if}
+
+<<<<<<< HEAD
 										<!-- Managed pre-synced shared KBs (Confluence) are read-only
 										     and admin-managed: their lifecycle (delete / re-provision) lives in
 										     the Cloud Sync admin panel, and the backend blocks delete/reset via
@@ -554,13 +851,64 @@
 														})}
 													</Tooltip>
 												{/if}
+=======
+												<Tooltip content={dayjs(item.updated_at * 1000).format('LLLL')}>
+													<div
+														class="shrink-0 truncate text-[0.6875rem] leading-5 text-gray-400 dark:text-gray-600"
+													>
+														{dayjs(item.updated_at * 1000).fromNow()}
+													</div>
+												</Tooltip>
+>>>>>>> upstream/main
 											</div>
 										</div>
+
+										{#if metaPreview}
+											<Tooltip content={metaPreview} className="min-w-0" placement="top-start">
+												<div
+													class="mt-0.5 truncate text-[0.6875rem] leading-4 text-gray-400 dark:text-gray-600"
+												>
+													{metaPreview}
+												</div>
+											</Tooltip>
+										{/if}
 									</div>
 								</div>
+
+								<div
+									class="hidden max-w-44 shrink-0 self-center truncate text-right text-[0.6875rem] leading-5 text-gray-500 dark:text-gray-500 md:block"
+								>
+									<Tooltip
+										content={item?.user?.email ?? $i18n.t('Deleted User')}
+										className="min-w-0"
+										placement="top-start"
+									>
+										<div class="truncate">
+											{capitalizeFirstLetter(
+												item?.user?.name ?? item?.user?.email ?? $i18n.t('Deleted User')
+											)}
+										</div>
+									</Tooltip>
+								</div>
+
+								{#if item?.write_access || $user?.role === 'admin'}
+									<div class="ml-2 flex shrink-0 flex-row items-center self-center">
+										<ItemMenu
+											onExport={$user?.role === 'admin'
+												? () => {
+														exportHandler(item);
+													}
+												: null}
+											on:delete={() => {
+												selectedItem = item;
+												showDeleteConfirm = true;
+											}}
+										/>
+									</div>
+								{/if}
 							</div>
-						</button>
-					{/each}
+						{/each}
+					</div>
 				</div>
 
 				{#if !allItemsLoaded}
@@ -578,11 +926,10 @@
 					</Loader>
 				{/if}
 			{:else}
-				<div class=" w-full h-full flex flex-col justify-center items-center my-16 mb-24">
-					<div class="max-w-md text-center">
-						<div class=" text-3xl mb-3">😕</div>
-						<div class=" text-lg font-medium mb-1">{$i18n.t('No knowledge found')}</div>
-						<div class=" text-gray-500 text-center text-xs">
+				<div class="flex w-full flex-col items-center justify-center py-16 pb-24">
+					<div class="max-w-sm text-center text-gray-900 dark:text-gray-100">
+						<div class="mb-1.5 text-sm">{$i18n.t('No knowledge found')}</div>
+						<div class="text-center text-xs leading-5 text-gray-500">
 							{$i18n.t('Try adjusting your search or filter to find what you are looking for.')}
 						</div>
 					</div>
@@ -593,10 +940,6 @@
 				<Spinner className="size-4" />
 			</div>
 		{/if}
-	</div>
-
-	<div class=" text-gray-500 text-xs m-2">
-		ⓘ {$i18n.t("Use '#' in the prompt input to load and include your knowledge.")}
 	</div>
 {:else}
 	<div class="w-full h-full flex justify-center items-center">

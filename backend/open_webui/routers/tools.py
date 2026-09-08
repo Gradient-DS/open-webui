@@ -10,7 +10,7 @@ import aiohttp
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from open_webui.config import BYPASS_ADMIN_ACCESS_CONTROL, CACHE_DIR
 from open_webui.constants import ERROR_MESSAGES
-from open_webui.env import AIOHTTP_CLIENT_SESSION_SSL, AIOHTTP_CLIENT_TIMEOUT
+from open_webui.env import AIOHTTP_CLIENT_SESSION_SSL, AIOHTTP_CLIENT_TIMEOUT, ENABLE_PLUGINS
 from open_webui.events import EVENTS, publish_event
 from open_webui.internal.db import get_async_session
 from open_webui.models.access_grants import AccessGrants
@@ -66,26 +66,39 @@ async def get_tool_module(request, tool_id, load_from_db=True):
 @router.get('/', response_model=list[ToolUserResponse])
 async def get_tools(
     request: Request,
+    query: Optional[str] = None,
     user=Depends(get_verified_user),
     db: AsyncSession = Depends(get_async_session),
 ):
     tools = []
+    bypass_access_control = user.role == 'admin' and BYPASS_ADMIN_ACCESS_CONTROL
+    user_group_ids = (
+        set() if bypass_access_control else {group.id for group in await Groups.get_groups_by_member_id(user.id, db=db)}
+    )
 
     # Local Tools
-    tools_cache = get_tools_cache(request)
-    for tool in await Tools.get_tools(defer_content=True, db=db):
-        tool_module = tools_cache.get(tool.id)
-        has_user_valves = (
-            hasattr(tool_module, 'UserValves') if tool_module else (tool.meta.has_user_valves if tool.meta else False)
-        )
-        tools.append(
-            ToolUserResponse(
-                **{
-                    **tool.model_dump(),
-                    'has_user_valves': has_user_valves,
-                }
+    if ENABLE_PLUGINS:
+        tools_cache = get_tools_cache(request)
+        for tool in await Tools.get_tools(
+            defer_content=True,
+            db=db,
+            user_id=None if bypass_access_control else user.id,
+            user_group_ids=user_group_ids,
+        ):
+            tool_module = tools_cache.get(tool.id)
+            has_user_valves = (
+                hasattr(tool_module, 'UserValves')
+                if tool_module
+                else (tool.meta.has_user_valves if tool.meta else False)
             )
-        )
+            tools.append(
+                ToolUserResponse(
+                    **{
+                        **tool.model_dump(),
+                        'has_user_valves': has_user_valves,
+                    }
+                )
+            )
 
     # OpenAPI Tool Servers
     server_access_grants = {}
@@ -162,34 +175,25 @@ async def get_tools(
                 )
             )
 
-    if user.role == 'admin' and BYPASS_ADMIN_ACCESS_CONTROL:
-        # Admin can see all tools
-        return tools
-    else:
-        user_group_ids = {group.id for group in await Groups.get_groups_by_member_id(user.id, db=db)}
-        filtered_tools = []
-        for tool in tools:
-            if tool.user_id == user.id:
-                filtered_tools.append(tool)
-            elif str(tool.id).startswith('server:'):
-                if await has_access(
-                    user.id,
-                    'read',
-                    server_access_grants.get(str(tool.id), []),
-                    user_group_ids,
-                    db=db,
-                ):
-                    filtered_tools.append(tool)
-            elif await AccessGrants.has_access(
-                user_id=user.id,
-                resource_type='tool',
-                resource_id=tool.id,
-                permission='read',
-                user_group_ids=user_group_ids,
+    if not bypass_access_control:
+        tools = [
+            tool
+            for tool in tools
+            if not str(tool.id).startswith('server:')
+            or await has_access(
+                user.id,
+                'read',
+                server_access_grants.get(str(tool.id), []),
+                user_group_ids,
                 db=db,
-            ):
-                filtered_tools.append(tool)
-        return filtered_tools
+            )
+        ]
+
+    if query:
+        q = query.casefold()
+        tools = [tool for tool in tools if q in (tool.name or '').casefold()]
+
+    return tools
 
 
 ############################
@@ -199,17 +203,24 @@ async def get_tools(
 
 @router.get('/list', response_model=list[ToolAccessResponse])
 async def get_tool_list(user=Depends(get_verified_user), db: AsyncSession = Depends(get_async_session)):
-    if user.role == 'admin' and BYPASS_ADMIN_ACCESS_CONTROL:
-        tools = await Tools.get_tools(defer_content=True, db=db)
-    else:
-        tools = await Tools.get_tools_by_user_id(user.id, 'read', defer_content=True, db=db)
+    if not ENABLE_PLUGINS:
+        return []
 
-    user_group_ids = {group.id for group in await Groups.get_groups_by_member_id(user.id, db=db)}
+    bypass_access_control = user.role == 'admin' and BYPASS_ADMIN_ACCESS_CONTROL
+    user_group_ids = (
+        set() if bypass_access_control else {group.id for group in await Groups.get_groups_by_member_id(user.id, db=db)}
+    )
+    tools = await Tools.get_tools(
+        defer_content=True,
+        db=db,
+        user_id=None if bypass_access_control else user.id,
+        user_group_ids=user_group_ids,
+    )
 
     result = []
     for tool in tools:
         has_write = (
-            (user.role == 'admin' and BYPASS_ADMIN_ACCESS_CONTROL)
+            bypass_access_control
             or user.id == tool.user_id
             or any(
                 g.permission == 'write'
@@ -324,10 +335,11 @@ async def export_tools(
             detail=ERROR_MESSAGES.UNAUTHORIZED,
         )
 
-    if user.role == 'admin' and BYPASS_ADMIN_ACCESS_CONTROL:
-        return await Tools.get_tools(db=db)
-    else:
-        return await Tools.get_tools_by_user_id(user.id, 'read', db=db)
+    bypass_access_control = user.role == 'admin' and BYPASS_ADMIN_ACCESS_CONTROL
+    return await Tools.get_tools(
+        db=db,
+        user_id=None if bypass_access_control else user.id,
+    )
 
 
 ############################
@@ -440,20 +452,22 @@ async def get_tools_by_id(id: str, user=Depends(get_verified_user), db: AsyncSes
                 db=db,
             )
         ):
-            return ToolAccessResponse(
-                **tools.model_dump(),
-                write_access=(
-                    (user.role == 'admin' and BYPASS_ADMIN_ACCESS_CONTROL)
-                    or user.id == tools.user_id
-                    or await AccessGrants.has_access(
-                        user_id=user.id,
-                        resource_type='tool',
-                        resource_id=tools.id,
-                        permission='write',
-                        db=db,
-                    )
-                ),
+            write_access = (
+                (user.role == 'admin' and BYPASS_ADMIN_ACCESS_CONTROL)
+                or user.id == tools.user_id
+                or await AccessGrants.has_access(
+                    user_id=user.id,
+                    resource_type='tool',
+                    resource_id=tools.id,
+                    permission='write',
+                    db=db,
+                )
             )
+            data = tools.model_dump()
+            if not write_access:
+                # extra='allow' re-admits content from model_dump; source is writer-only
+                data.pop('content', None)
+            return ToolAccessResponse(**data, write_access=write_access)
         else:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,

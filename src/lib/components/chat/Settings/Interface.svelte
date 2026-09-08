@@ -1,4 +1,5 @@
 <script lang="ts">
+<<<<<<< HEAD
 	import { config, models, settings, user } from '$lib/stores';
 	import { createEventDispatcher, onMount, onDestroy, getContext } from 'svelte';
 	import { toast } from 'svelte-sonner';
@@ -13,13 +14,18 @@
 	import Switch from '$lib/components/common/Switch.svelte';
 	import ManageFloatingActionButtonsModal from './Interface/ManageFloatingActionButtonsModal.svelte';
 	import ManageImageCompressionModal from './Interface/ManageImageCompressionModal.svelte';
+=======
+	import { createEventDispatcher, getContext } from 'svelte';
+	import InterfaceSettings from '$lib/components/common/InterfaceSettings.svelte';
+>>>>>>> upstream/main
 
 	const dispatch = createEventDispatcher();
-
-	const i18n = getContext('i18n');
+	const i18n: any = getContext('i18n');
 
 	export let saveSettings: Function;
+	export let personalSettingsValue: Record<string, any> = {};
 
+<<<<<<< HEAD
 	let backgroundImageUrl = null;
 	let inputFiles = null;
 	let filesInputElement;
@@ -283,44 +289,22 @@
 
 		textScale = $settings?.textScale ?? null;
 	});
+=======
+	let interfaceSettings: any;
+>>>>>>> upstream/main
 </script>
-
-<ManageFloatingActionButtonsModal
-	bind:show={showManageFloatingActionButtonsModal}
-	{floatingActionButtons}
-	onSave={(buttons) => {
-		floatingActionButtons = buttons;
-		saveSettings({ floatingActionButtons });
-	}}
-/>
-
-<ManageImageCompressionModal
-	bind:show={showManageImageCompressionModal}
-	size={imageCompressionSize}
-	onSave={(size) => {
-		saveSettings({ imageCompressionSize: size });
-	}}
-/>
 
 <form
 	id="tab-interface"
-	class="flex flex-col h-full justify-between space-y-3 text-sm"
-	on:submit|preventDefault={() => {
-		updateInterfaceHandler();
+	class="flex flex-col h-full justify-between text-sm"
+	on:submit|preventDefault={async () => {
+		await interfaceSettings?.save();
 		dispatch('save');
 	}}
 >
-	<input
-		bind:this={filesInputElement}
-		bind:files={inputFiles}
-		type="file"
-		hidden
-		accept="image/*"
-		on:change={() => {
-			let reader = new FileReader();
-			reader.onload = (event) => {
-				let originalImageUrl = `${event.target.result}`;
+	<h2 class="text-sm font-medium text-gray-900 dark:text-white mb-4">{$i18n.t('Interface')}</h2>
 
+<<<<<<< HEAD
 				backgroundImageUrl = originalImageUrl;
 				saveSettings({ backgroundImageUrl });
 			};
@@ -1466,11 +1450,15 @@
 				</div>
 			{/if}
 		</div>
+=======
+	<div class="flex-1 min-h-0 overflow-y-auto scrollbar-hover pr-1.5">
+		<InterfaceSettings bind:this={interfaceSettings} {saveSettings} {personalSettingsValue} />
+>>>>>>> upstream/main
 	</div>
 
-	<div class="flex justify-end text-sm font-medium">
+	<div class="shrink-0 flex justify-end text-sm font-normal">
 		<button
-			class="px-3.5 py-1.5 text-sm font-medium bg-black hover:bg-gray-900 text-white dark:bg-white dark:text-black dark:hover:bg-gray-100 transition rounded-full"
+			class="px-3.5 py-1.5 text-sm font-normal bg-black hover:bg-gray-900 text-white dark:bg-white dark:text-black dark:hover:bg-gray-100 transition rounded-full"
 			type="submit"
 		>
 			{$i18n.t('Save')}

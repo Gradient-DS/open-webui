@@ -26,11 +26,12 @@
 	import FeedbackModal from './FeedbackModal.svelte';
 	import EllipsisHorizontal from '$lib/components/icons/EllipsisHorizontal.svelte';
 	import Dropdown from '$lib/components/common/Dropdown.svelte';
+	import DropdownMenu from '$lib/components/common/DropdownMenu.svelte';
 
 	import ChevronUp from '$lib/components/icons/ChevronUp.svelte';
 	import ChevronDown from '$lib/components/icons/ChevronDown.svelte';
 	import { WEBUI_API_BASE_URL, WEBUI_BASE_URL } from '$lib/constants';
-	import { config } from '$lib/stores';
+	import { adminFeedbackCount, config } from '$lib/stores';
 	import Spinner from '$lib/components/common/Spinner.svelte';
 	import Select from '$lib/components/common/Select.svelte';
 	import Check from '$lib/components/icons/Check.svelte';
@@ -119,8 +120,14 @@
 			});
 
 			if (res) {
+<<<<<<< HEAD
 				msgItems = res.items;
 				msgTotal = res.total;
+=======
+				items = res.items;
+				total = res.total;
+				adminFeedbackCount.set(total);
+>>>>>>> upstream/main
 			}
 		} catch (err) {
 			console.error(err);
@@ -181,6 +188,9 @@
 	};
 
 	const shareHandler = async () => {
+		// LICENSE covers this Open WebUI Community wordmark.
+		// Do not alter, remove, obscure, or replace it except as LICENSE permits:
+		// https://docs.openwebui.com/license.
 		toast.success($i18n.t('Redirecting you to Open WebUI Community'));
 
 		// remove snapshot from feedbacks
@@ -273,6 +283,7 @@
 		<Spinner className="size-5" />
 	</div>
 {:else}
+<<<<<<< HEAD
 	<!-- ======================== -->
 	<!-- Message-level Feedback   -->
 	<!-- ======================== -->
@@ -528,6 +539,97 @@
 					>
 						<div class=" self-center mr-2 font-medium line-clamp-1">
 							{$i18n.t('Share to Open WebUI Community')}
+=======
+	<div>
+		{#if modelIds.length > 0 || total > 0}
+			<div class="flex h-8 flex-1 items-center w-full gap-2">
+				<div
+					class="flex min-w-0 flex-1 bg-transparent overflow-x-auto scrollbar-none"
+					on:wheel={(e) => {
+						if (e.deltaY !== 0) {
+							e.preventDefault();
+							e.currentTarget.scrollLeft += e.deltaY;
+						}
+					}}
+				>
+					{#if modelIds.length > 0}
+						<div
+							class="flex gap-0.5 w-fit text-center text-sm rounded-full bg-transparent whitespace-nowrap"
+						>
+							<Select
+								bind:value={selectedModelId}
+								items={[
+									{ value: '', label: $i18n.t('All') },
+									...modelIds.map((mid) => ({ value: mid, label: mid }))
+								]}
+								placeholder={$i18n.t('All')}
+								triggerClass="relative w-full flex items-center gap-0.5 px-2.5 py-1.5 bg-transparent rounded-xl text-[0.8125rem] font-normal text-gray-700 transition hover:text-gray-900 dark:text-gray-200 dark:hover:text-gray-100"
+								onChange={() => {
+									page = 1;
+									getFeedbacks();
+								}}
+							>
+								<svelte:fragment slot="trigger" let:selectedLabel>
+									<span
+										class="inline-flex h-input px-0.5 w-full outline-hidden bg-transparent truncate placeholder-gray-400 focus:outline-hidden"
+									>
+										{selectedLabel}
+									</span>
+									<ChevronDown className="size-3.5" strokeWidth="2.5" />
+								</svelte:fragment>
+
+								<svelte:fragment slot="item" let:item let:selected>
+									{item.label}
+									<div class="ml-auto {selected ? '' : 'invisible'}">
+										<Check />
+									</div>
+								</svelte:fragment>
+							</Select>
+						</div>
+					{/if}
+				</div>
+
+				{#if total > 0}
+					<Dropdown align="end">
+						<button
+							class="flex h-8 shrink-0 items-center gap-1 px-2 py-1.5 rounded-xl hover:bg-gray-100 dark:hover:bg-gray-850 dark:text-gray-200 transition text-xs"
+						>
+							{$i18n.t('Export')}
+							<ChevronDown className="size-3" strokeWidth="2.5" />
+						</button>
+
+						<div slot="content">
+							<DropdownMenu className="w-[10.625rem]">
+								<button
+									class="select-none flex w-full gap-2 items-center h-[1.6875rem] px-2 text-[0.8125rem] font-normal cursor-pointer hover:bg-gray-50/40 dark:hover:bg-gray-800/40 rounded-xl"
+									type="button"
+									on:click={() => exportHandler('json')}
+								>
+									{$i18n.t('Export as JSON')}
+								</button>
+
+								<button
+									class="select-none flex w-full gap-2 items-center h-[1.6875rem] px-2 text-[0.8125rem] font-normal cursor-pointer hover:bg-gray-50/40 dark:hover:bg-gray-800/40 rounded-xl"
+									type="button"
+									on:click={() => exportHandler('csv')}
+								>
+									{$i18n.t('Export as CSV')}
+								</button>
+							</DropdownMenu>
+						</div>
+					</Dropdown>
+				{/if}
+			</div>
+		{/if}
+
+		<div class="scrollbar-hidden relative whitespace-nowrap overflow-x-auto max-w-full">
+			{#if (items ?? []).length === 0}
+				<div class="flex w-full flex-col items-center justify-center py-16 pb-24">
+					<div class="max-w-sm text-center text-gray-900 dark:text-gray-100">
+						<div class="mb-1.5 text-sm">{$i18n.t('No feedback found')}</div>
+						<div class="text-center text-xs leading-5 text-gray-500">
+							{$i18n.t('Try adjusting your search or filter to find what you are looking for.')}
+>>>>>>> upstream/main
 						</div>
 
 						<div class=" self-center">
@@ -572,8 +674,13 @@
 						<tr class=" border-b-[1.5px] border-gray-50 dark:border-gray-850/30">
 							<th
 								scope="col"
+<<<<<<< HEAD
 								class="px-2.5 py-2 cursor-pointer select-none w-3"
 								on:click={() => setConvSortKey('user')}
+=======
+								class="px-2.5 py-2 font-normal cursor-pointer select-none w-3"
+								on:click={() => setSortKey('user')}
+>>>>>>> upstream/main
 							>
 								<div class="flex gap-1.5 items-center justify-end">
 									{$i18n.t('User')}
@@ -593,7 +700,15 @@
 								</div>
 							</th>
 
+<<<<<<< HEAD
 							<th scope="col" class="px-2.5 py-2 cursor-pointer select-none">
+=======
+							<th
+								scope="col"
+								class="px-2.5 py-2 font-normal cursor-pointer select-none"
+								on:click={() => setSortKey('model_id')}
+							>
+>>>>>>> upstream/main
 								<div class="flex gap-1.5 items-center">
 									{$i18n.t('Comment')}
 								</div>
@@ -601,8 +716,13 @@
 
 							<th
 								scope="col"
+<<<<<<< HEAD
 								class="px-2.5 py-2 text-right cursor-pointer select-none w-fit"
 								on:click={() => setConvSortKey('rating')}
+=======
+								class="px-2.5 py-2 font-normal text-right cursor-pointer select-none w-fit"
+								on:click={() => setSortKey('rating')}
+>>>>>>> upstream/main
 							>
 								<div class="flex gap-1.5 items-center justify-end">
 									{$i18n.t('Rating')}
@@ -624,8 +744,13 @@
 
 							<th
 								scope="col"
+<<<<<<< HEAD
 								class="px-2.5 py-2 text-right cursor-pointer select-none w-0"
 								on:click={() => setConvSortKey('updated_at')}
+=======
+								class="px-2.5 py-2 font-normal text-right cursor-pointer select-none w-0"
+								on:click={() => setSortKey('updated_at')}
+>>>>>>> upstream/main
 							>
 								<div class="flex gap-1.5 items-center justify-end">
 									{$i18n.t('Updated At')}
@@ -645,16 +770,24 @@
 								</div>
 							</th>
 
-							<th scope="col" class="px-2.5 py-2 text-right cursor-pointer select-none w-0"> </th>
+							<th
+								scope="col"
+								class="px-2.5 py-2 font-normal text-right cursor-pointer select-none w-0"
+							>
+							</th>
 						</tr>
 					</thead>
 					<tbody class="">
 						{#each convItems as feedback (feedback.id)}
 							<tr
+<<<<<<< HEAD
 								class="bg-white dark:bg-gray-900 dark:border-gray-850 text-xs cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-850/50 transition"
+=======
+								class="dark:border-gray-850 text-xs cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-850/50 transition rounded-xl"
+>>>>>>> upstream/main
 								on:click={() => openFeedbackModal(feedback)}
 							>
-								<td class=" py-0.5 text-right font-medium">
+								<td class=" py-0.5 text-right font-normal">
 									<div class="flex justify-center">
 										<Tooltip content={feedback?.user?.name}>
 											<div class="shrink-0">
@@ -668,6 +801,7 @@
 									</div>
 								</td>
 
+<<<<<<< HEAD
 								<td class=" py-1 pl-3">
 									<div class="text-sm text-gray-600 dark:text-gray-400 line-clamp-1">
 										{feedback.data?.comment || '-'}
@@ -682,12 +816,67 @@
 										/>
 									</div>
 								</td>
+=======
+								<td class=" py-1 pl-3 flex flex-col">
+									<div class="flex flex-col items-start gap-0.5 h-full">
+										<div class="flex flex-col h-full">
+											{#if feedback.data?.sibling_model_ids}
+												<Tooltip content={feedback.data?.model_id} placement="top-start">
+													<div
+														class="font-normal text-gray-600 dark:text-gray-400 flex-1 line-clamp-1"
+													>
+														{feedback.data?.model_id}
+													</div>
+												</Tooltip>
 
-								<td class=" px-3 py-1 text-right font-medium">
+												<Tooltip content={feedback.data.sibling_model_ids.join(', ')}>
+													<div
+														class=" text-[0.65rem] text-gray-600 dark:text-gray-400 line-clamp-1"
+													>
+														{#if feedback.data.sibling_model_ids.length > 2}
+															<!-- {$i18n.t('and {{COUNT}} more')} -->
+															{feedback.data.sibling_model_ids.slice(0, 2).join(', ')}, {$i18n.t(
+																'and {{COUNT}} more',
+																{ COUNT: feedback.data.sibling_model_ids.length - 2 }
+															)}
+														{:else}
+															{feedback.data.sibling_model_ids.join(', ')}
+														{/if}
+													</div>
+												</Tooltip>
+											{:else}
+												<Tooltip content={feedback.data?.model_id} placement="top-start">
+													<div
+														class="text-sm font-normal text-gray-600 dark:text-gray-400 flex-1 py-1.5 line-clamp-1"
+													>
+														{feedback.data?.model_id}
+													</div>
+												</Tooltip>
+											{/if}
+										</div>
+									</div>
+								</td>
+
+								{#if feedback?.data?.rating}
+									<td class="px-3 py-1 text-right font-normal text-gray-900 dark:text-white w-max">
+										<div class=" flex justify-end">
+											{#if feedback?.data?.rating.toString() === '1'}
+												<Badge type="info" content={$i18n.t('Won')} />
+											{:else if feedback?.data?.rating.toString() === '0'}
+												<Badge type="muted" content={$i18n.t('Draw')} />
+											{:else if feedback?.data?.rating.toString() === '-1'}
+												<Badge type="error" content={$i18n.t('Lost')} />
+											{/if}
+										</div>
+									</td>
+								{/if}
+>>>>>>> upstream/main
+
+								<td class=" px-3 py-1 text-right font-normal">
 									{dayjs(feedback.updated_at * 1000).fromNow()}
 								</td>
 
-								<td class=" px-3 py-1 text-right font-medium" on:click={(e) => e.stopPropagation()}>
+								<td class=" px-3 py-1 text-right font-normal" on:click={(e) => e.stopPropagation()}>
 									<FeedbackMenu
 										on:delete={(e) => {
 											deleteFeedbackHandler(feedback.id, 'conversation');

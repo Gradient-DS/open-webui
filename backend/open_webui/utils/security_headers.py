@@ -2,6 +2,7 @@ import os
 import re
 from typing import Dict
 
+<<<<<<< HEAD
 
 class SecurityHeadersMiddleware:
     """Pure ASGI-3 middleware. Injects static security response headers computed at startup.
@@ -31,6 +32,8 @@ class SecurityHeadersMiddleware:
 
         await self.app(scope, receive, send_with_headers)
 
+=======
+>>>>>>> upstream/main
 
 def set_security_headers() -> Dict[str, str]:
     """

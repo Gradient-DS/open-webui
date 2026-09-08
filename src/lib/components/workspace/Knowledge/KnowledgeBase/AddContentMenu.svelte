@@ -3,6 +3,7 @@
 	const dispatch = createEventDispatcher();
 
 	import Dropdown from '$lib/components/common/Dropdown.svelte';
+	import DropdownMenu from '$lib/components/common/DropdownMenu.svelte';
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
 	import ArrowUpCircle from '$lib/components/icons/ArrowUpCircle.svelte';
 	import BarsArrowUp from '$lib/components/icons/BarsArrowUp.svelte';
@@ -38,7 +39,8 @@
 >
 	<Tooltip content={$i18n.t('Add Content')}>
 		<button
-			class=" p-1.5 rounded-xl hover:bg-gray-100 dark:bg-gray-850 dark:hover:bg-gray-800 transition font-medium text-sm flex items-center space-x-1"
+			class="p-1.5 rounded-xl bg-transparent transition text-xs flex items-center space-x-1 hover:text-gray-900 dark:hover:text-gray-100"
+			aria-label={$i18n.t('Add Content')}
 			on:click={(e) => {
 				e.stopPropagation();
 				show = true;
@@ -58,6 +60,7 @@
 	</Tooltip>
 
 	<div slot="content">
+<<<<<<< HEAD
 		<div
 			class="min-w-[200px] rounded-2xl px-1 py-1 border border-gray-100 dark:border-gray-800 z-50 bg-white dark:bg-gray-850 dark:text-white shadow-lg transition"
 		>
@@ -76,10 +79,27 @@
 				<hr class="my-1 border-gray-100 dark:border-gray-800" />
 			{/if}
 
+=======
+		<DropdownMenu className="min-w-[12.5rem] transition">
+>>>>>>> upstream/main
 			<button
-				class="select-none flex gap-2 items-center px-3 py-1.5 text-sm cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-xl w-full"
+				class="select-none flex h-[1.6875rem] w-full cursor-pointer items-center gap-2 rounded-xl bg-transparent px-2 text-xs hover:text-gray-900 dark:hover:text-gray-100"
 				on:click={() => {
 					show = false;
+<<<<<<< HEAD
+=======
+				}}
+			>
+				<NewFolderAlt />
+				<div class="flex items-center">{$i18n.t('New directory')}</div>
+			</button>
+
+			<hr class="my-1 border-gray-100 dark:border-gray-800" />
+
+			<button
+				class="select-none flex h-[1.6875rem] w-full cursor-pointer items-center gap-2 rounded-xl bg-transparent px-2 text-xs hover:text-gray-900 dark:hover:text-gray-100"
+				on:click={() => {
+>>>>>>> upstream/main
 					onUpload({ type: 'files' });
 				}}
 			>
@@ -88,7 +108,7 @@
 			</button>
 
 			<button
-				class="select-none flex gap-2 items-center px-3 py-1.5 text-sm cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-xl w-full"
+				class="select-none flex h-[1.6875rem] w-full cursor-pointer items-center gap-2 rounded-xl bg-transparent px-2 text-xs hover:text-gray-900 dark:hover:text-gray-100"
 				on:click={() => {
 					show = false;
 					onUpload({ type: 'directory' });
@@ -98,12 +118,26 @@
 				<div class="flex items-center">{$i18n.t('Upload directory')}</div>
 			</button>
 
+<<<<<<< HEAD
 			{#if onSync}
 				<Tooltip
 					content={$i18n.t(
 						'Sync a local directory with this knowledge base. Only new and modified files will be uploaded. The directory structure will be mirrored.'
 					)}
 					className="w-full"
+=======
+			<Tooltip
+				content={$i18n.t(
+					'Sync a local directory with this knowledge base. Only new and modified files will be uploaded. The directory structure will be mirrored.'
+				)}
+				className="w-full"
+			>
+				<button
+					class="select-none flex h-[1.6875rem] w-full cursor-pointer items-center gap-2 rounded-xl bg-transparent px-2 text-xs hover:text-gray-900 dark:hover:text-gray-100"
+					on:click={() => {
+						onSync();
+					}}
+>>>>>>> upstream/main
 				>
 					<button
 						class="select-none flex gap-2 items-center px-3 py-1.5 text-sm cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-xl w-full"
@@ -119,7 +153,7 @@
 			{/if}
 
 			<button
-				class="select-none flex gap-2 items-center px-3 py-1.5 text-sm cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-xl w-full"
+				class="select-none flex h-[1.6875rem] w-full cursor-pointer items-center gap-2 rounded-xl bg-transparent px-2 text-xs hover:text-gray-900 dark:hover:text-gray-100"
 				on:click={() => {
 					show = false;
 					onUpload({ type: 'web' });
@@ -130,7 +164,7 @@
 			</button>
 
 			<button
-				class="select-none flex gap-2 items-center px-3 py-1.5 text-sm cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-xl w-full"
+				class="select-none flex h-[1.6875rem] w-full cursor-pointer items-center gap-2 rounded-xl bg-transparent px-2 text-xs hover:text-gray-900 dark:hover:text-gray-100"
 				on:click={() => {
 					show = false;
 					onUpload({ type: 'text' });
@@ -143,6 +177,7 @@
 			{#if onReset}
 				<hr class="my-1 border-gray-100 dark:border-gray-800" />
 
+<<<<<<< HEAD
 				<button
 					class="select-none flex gap-2 items-center px-3 py-1.5 text-sm cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-xl w-full"
 					on:click={() => {
@@ -155,5 +190,18 @@
 				</button>
 			{/if}
 		</div>
+=======
+			<button
+				class="select-none flex h-[1.6875rem] w-full cursor-pointer items-center gap-2 rounded-xl bg-transparent px-2 text-xs hover:text-gray-900 dark:hover:text-gray-100"
+				on:click={() => {
+					onReset();
+					show = false;
+				}}
+			>
+				<ArrowUturnLeft strokeWidth="2" />
+				<div class="flex items-center">{$i18n.t('Reset')}</div>
+			</button>
+		</DropdownMenu>
+>>>>>>> upstream/main
 	</div>
 </Dropdown>

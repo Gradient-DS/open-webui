@@ -33,27 +33,27 @@
 
 <Modal bind:show size="md">
 	<div>
-		<div class=" flex justify-between dark:text-gray-300 px-5 pt-4 pb-0.5">
-			<div class=" text-lg font-medium self-center">{$i18n.t('Available Tools')}</div>
+		<div class=" flex justify-between dark:text-gray-300 px-4 pt-3 pb-1">
+			<div class=" text-sm font-medium self-center">{$i18n.t('Available Tools')}</div>
 			<button
-				class="self-center"
+				class="self-center rounded-lg p-1 text-gray-500 transition hover:bg-gray-50 hover:text-gray-700 dark:text-gray-400 dark:hover:bg-gray-800 dark:hover:text-gray-200"
 				aria-label={$i18n.t('Close')}
 				on:click={() => {
 					show = false;
 				}}
 			>
-				<XMark className={'size-5'} />
+				<XMark className={'size-4'} />
 			</button>
 		</div>
 
 		{#if selectedTools.length > 0}
 			{#if $toolServers.length > 0}
 				<div class=" flex justify-between dark:text-gray-300 px-5 pb-1">
-					<div class=" text-base font-medium self-center">{$i18n.t('Tools')}</div>
+					<div class=" text-base font-normal self-center">{$i18n.t('Tools')}</div>
 				</div>
 			{/if}
 
-			<div class="px-5 pb-3 w-full flex flex-col justify-center">
+			<div class="px-3 pb-3 w-full flex flex-col justify-center">
 				<div class=" text-sm dark:text-gray-300 mb-1">
 					{#each selectedTools as tool}
 						{@const status = authStatus(tool)}
@@ -65,21 +65,21 @@
 						>
 							<div class="min-w-0 flex-1">
 								<div class="flex items-center gap-1 min-w-0">
-									<div class="text-sm font-medium dark:text-gray-100 text-gray-800 truncate">
+									<div class="text-sm font-normal dark:text-gray-100 text-gray-800 truncate">
 										{tool?.name}
 									</div>
 									{#if status}
-										<span class="text-[11px] {status.pill} shrink-0">{status.label}</span>
+										<span class="text-[0.6875rem] {status.pill} shrink-0">{status.label}</span>
 									{/if}
 									{#if toolSpecs.length > 0}
 										<span
-											class="inline-flex min-w-3 items-center justify-center text-center text-[11px] leading-none text-gray-500 dark:text-gray-400 shrink-0"
+											class="inline-flex min-w-3 items-center justify-center text-center text-[0.6875rem] leading-none text-gray-500 dark:text-gray-400 shrink-0"
 										>
 											{toolSpecs.length}
 										</span>
 									{/if}
 									{#if status}
-										<span class="size-2 rounded-full {status.dot} shrink-0"></span>
+										<span class="size-1.5 rounded-full {status.dot} shrink-0"></span>
 									{/if}
 								</div>
 
@@ -107,11 +107,14 @@
 
 		{#if $toolServers.length > 0}
 			<div class=" flex justify-between dark:text-gray-300 px-5 pb-0.5">
-				<div class=" text-base font-medium self-center">{$i18n.t('Tool Servers')}</div>
+				<div class=" text-base font-normal self-center">{$i18n.t('Tool Servers')}</div>
 			</div>
 
 			<div class="px-5 pb-5 w-full flex flex-col justify-center">
 				<div class=" text-xs text-gray-600 dark:text-gray-300 mb-2">
+					<!-- LICENSE covers this Open WebUI wordmark.
+					Do not alter, remove, obscure, or replace it except as LICENSE permits:
+					https://docs.openwebui.com/license. -->
 					{$i18n.t('Open WebUI can use tools provided by any OpenAPI server.')} <br /><a
 						class="underline"
 						href="https://github.com/open-webui/openapi-servers"
@@ -122,7 +125,7 @@
 					{#each $toolServers as toolServer}
 						<Collapsible buttonClassName="w-full" chevron>
 							<div>
-								<div class="text-sm font-medium dark:text-gray-100 text-gray-800">
+								<div class="text-sm font-normal dark:text-gray-100 text-gray-800">
 									{toolServer?.openapi?.info?.title} - v{toolServer?.openapi?.info?.version}
 								</div>
 
@@ -138,7 +141,7 @@
 							<div slot="content">
 								{#each toolServer?.specs ?? [] as tool_spec}
 									<div class="my-1">
-										<div class="font-medium text-gray-800 dark:text-gray-100">
+										<div class="font-normal text-gray-800 dark:text-gray-100">
 											{tool_spec?.name}
 										</div>
 

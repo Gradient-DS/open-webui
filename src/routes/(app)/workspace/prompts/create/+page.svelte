@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 <script lang="ts">
 	import { toast } from 'svelte-sonner';
 	import { goto } from '$app/navigation';
@@ -78,8 +79,10 @@
 			};
 		}
 	});
+=======
+<script>
+	import Prompts from '$lib/components/workspace/Prompts.svelte';
+>>>>>>> upstream/main
 </script>
 
-{#key prompt}
-	<PromptEditor {prompt} {onSubmit} {clone} />
-{/key}
+<Prompts showCreateOnMount={true} createModalCloseHref="/workspace/prompts" />

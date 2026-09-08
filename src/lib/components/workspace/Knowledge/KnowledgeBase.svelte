@@ -1,10 +1,13 @@
 <script lang="ts">
 	import { toast } from 'svelte-sonner';
 	import { v4 as uuidv4 } from 'uuid';
+<<<<<<< HEAD
 	import dayjs from 'dayjs';
 	import relativeTime from 'dayjs/plugin/relativeTime';
 
 	dayjs.extend(relativeTime);
+=======
+>>>>>>> upstream/main
 
 	import { onMount, getContext, onDestroy, tick } from 'svelte';
 	import { get } from 'svelte/store';
@@ -34,6 +37,7 @@
 		syncKnowledgeCleanup,
 		testExternalKnowledgeRetrieval
 	} from '$lib/apis/knowledge';
+<<<<<<< HEAD
 	import { processWeb } from '$lib/apis/retrieval';
 	import {
 		createSyncApi,
@@ -53,6 +57,9 @@
 		type SyncItem as ConfluenceSyncItem
 	} from '$lib/apis/confluence';
 	import ConfluencePickerModal from './ConfluencePickerModal.svelte';
+=======
+	import { processUrl } from '$lib/apis/retrieval';
+>>>>>>> upstream/main
 	import { WEBUI_API_BASE_URL } from '$lib/constants';
 
 	import { blobToFile, copyToClipboard } from '$lib/utils';
@@ -77,21 +84,27 @@
 	import ConfirmDialog from '../../common/ConfirmDialog.svelte';
 	import FileItemModal from '$lib/components/common/FileItemModal.svelte';
 	import ChevronLeft from '$lib/components/icons/ChevronLeft.svelte';
+<<<<<<< HEAD
 	import LockClosed from '$lib/components/icons/LockClosed.svelte';
 	import OneDrive from '$lib/components/icons/OneDrive.svelte';
 	import GoogleDrive from '$lib/components/icons/GoogleDrive.svelte';
 	import Confluence from '$lib/components/icons/Confluence.svelte';
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
+=======
+	import AccessButton from '$lib/components/common/AccessButton.svelte';
+>>>>>>> upstream/main
 	import AccessControlModal from '../common/AccessControlModal.svelte';
 	import Search from '$lib/components/icons/Search.svelte';
 	import FilesOverlay from '$lib/components/chat/MessageInput/FilesOverlay.svelte';
 	import DropdownOptions from '$lib/components/common/DropdownOptions.svelte';
 	import Dropdown from '$lib/components/common/Dropdown.svelte';
+	import DropdownMenu from '$lib/components/common/DropdownMenu.svelte';
 	import Checkbox from '$lib/components/common/Checkbox.svelte';
 	import AdjustmentsHorizontal from '$lib/components/icons/AdjustmentsHorizontal.svelte';
 	import Pagination from '$lib/components/common/Pagination.svelte';
 	import AttachWebpageModal from '$lib/components/chat/MessageInput/AttachWebpageModal.svelte';
 
+<<<<<<< HEAD
 	// ===== Cloud sync provider configuration =====
 
 	interface CloudSyncProvider {
@@ -230,6 +243,8 @@
 	let pane;
 	let showSidepanel = true;
 
+=======
+>>>>>>> upstream/main
 	let showAddWebpageModal = false;
 	let showAddTextContentModal = false;
 	let showNewDirectoryModal = false;
@@ -239,7 +254,10 @@
 	let showAccessControlModal = false;
 	let showResetConfirm = false;
 
+<<<<<<< HEAD
 	// Local-directory upload/sync pipeline (upstream v0.10.2)
+=======
+>>>>>>> upstream/main
 	type DirectoryFileEntry = { path: string; filename: string; file: File };
 	type DirectoryManifestEntry = DirectoryFileEntry & { checksum: string; size: number };
 	let pendingSyncFiles: DirectoryFileEntry[] | null = null;
@@ -487,6 +505,11 @@
 	};
 
 	const uploadWeb = async (urls) => {
+		if (!knowledge) {
+			toast.error($i18n.t('Knowledge base not found.'));
+			return;
+		}
+
 		if (!Array.isArray(urls)) {
 			urls = [urls];
 		}
@@ -509,26 +532,54 @@
 		for (const fileItem of newFileItems) {
 			try {
 				console.log(fileItem);
-				const res = await processWeb(localStorage.token, '', fileItem.url, false).catch((e) => {
-					console.error('Error processing web URL:', e);
+				const res = await processUrl(localStorage.token, fileItem.url).catch((e) => {
+					console.error('Error processing URL:', e);
 					return null;
 				});
 
 				if (res) {
 					console.log(res);
-					const file = createFileFromText(
-						// Use URL as filename, sanitized
-						fileItem.url
-							.replace(/[^a-z0-9]/gi, '_')
-							.toLowerCase()
-							.slice(0, 50),
-						res.content
-					);
+					let uploadedFile = res.file;
 
+<<<<<<< HEAD
 					const uploadedFile = await uploadFile(localStorage.token, file).catch((e) => {
 						toast.error(`${e}`);
 						return null;
 					});
+=======
+					if (res.type === 'web' || res.type === 'youtube') {
+						const file = createFileFromText(
+							// Use URL as filename, sanitized
+							fileItem.url
+								.replace(/[^a-z0-9]/gi, '_')
+								.toLowerCase()
+								.slice(0, 50),
+							res.content ?? ''
+						);
+
+						uploadedFile = await uploadFile(localStorage.token, file, {
+							knowledge_id: knowledge.id,
+							directory_id: currentDirectoryId,
+							source_url: fileItem.url
+						}).catch((e) => {
+							toast.error(`${e}`);
+							return null;
+						});
+					} else if (uploadedFile?.id) {
+						const linkedKnowledge = await addFileToKnowledgeById(
+							localStorage.token,
+							knowledge.id,
+							uploadedFile.id,
+							currentDirectoryId
+						).catch((e) => {
+							toast.error(`${e}`);
+							return null;
+						});
+						if (!linkedKnowledge) {
+							uploadedFile = null;
+						}
+					}
+>>>>>>> upstream/main
 
 					if (uploadedFile) {
 						console.log(uploadedFile);
@@ -863,6 +914,7 @@
 		return currentPath && path ? `${currentPath}/${path}` : currentPath || path;
 	};
 
+<<<<<<< HEAD
 	// Upload a set of manifest entries with bounded concurrency (the fork's
 	// upload hardening), updating the `syncing` progress line as each lands.
 	const uploadManifestEntries = async (
@@ -902,6 +954,51 @@
 		}
 
 		await Promise.all(executing);
+=======
+	const uploadManifestEntries = async (
+		entries: DirectoryManifestEntry[],
+		resolveDirectoryId: (entry: DirectoryManifestEntry) => string | null | undefined
+	) => {
+		let failedCount = 0;
+
+		for (const [index, entry] of entries.entries()) {
+			const displayPath = entry.path ? `${entry.path}/${entry.filename}` : entry.filename;
+			syncing = $i18n.t('Uploading {{current}}/{{total}}: {{file}}', {
+				current: index + 1,
+				total: entries.length,
+				file: displayPath
+			});
+
+			const fileObject = new File([entry.file], entry.filename, { type: entry.file.type });
+			const uploadedFile = await uploadFile(localStorage.token, fileObject, {
+				knowledge_id: knowledge.id,
+				file_hash: entry.checksum,
+				directory_id: resolveDirectoryId(entry)
+			}).catch((error) => ({ error }));
+
+			if (!uploadedFile || uploadedFile.error) {
+				const error = uploadedFile?.error;
+				const reason =
+					typeof error === 'string'
+						? error
+						: (error?.detail ?? error?.message ?? $i18n.t('Failed to upload file.'));
+
+				failedCount++;
+				console.error('Upload failed:', displayPath, reason);
+			}
+		}
+
+		if (failedCount > 0) {
+			toast.error(
+				$i18n.t('Upload failed for {{failed}} of {{total}} files.', {
+					failed: failedCount,
+					total: entries.length
+				})
+			);
+		}
+
+		return failedCount;
+>>>>>>> upstream/main
 	};
 
 	const uploadDirectoryEntries = async (entries: DirectoryFileEntry[]) => {
@@ -930,6 +1027,7 @@
 
 			const directoryIdByPath = await createMissingDirectories(diff);
 
+<<<<<<< HEAD
 			await uploadManifestEntries(manifest, (entry) =>
 				entry.path ? directoryIdByPath[getDirectoryUploadPath(entry.path)] : currentDirectoryId
 			);
@@ -941,6 +1039,17 @@
 			// freshly uploaded folder rendered with child_count 0 until you
 			// navigated into it and back.
 			await init();
+=======
+			const failedCount = await uploadManifestEntries(manifest, (entry) =>
+				entry.path ? directoryIdByPath[getDirectoryUploadPath(entry.path)] : currentDirectoryId
+			);
+
+			if (failedCount === 0) {
+				toast.success($i18n.t('File uploaded successfully'));
+			}
+
+			init();
+>>>>>>> upstream/main
 		} catch (e) {
 			toast.error(`${e}`);
 		} finally {
@@ -994,6 +1103,7 @@
 					diff.modified.some((m: any) => m.filename === entry.filename && m.path === entry.path)
 			);
 
+<<<<<<< HEAD
 			await uploadManifestEntries(filesToUpload, (entry) =>
 				entry.path ? directoryIdByPath[entry.path] : null
 			);
@@ -1012,6 +1122,27 @@
 			// Awaited for the same reason as uploadDirectoryEntries above --
 			// same try/finally shape, same refresh race.
 			await init();
+=======
+			const failedCount = await uploadManifestEntries(filesToUpload, (entry) =>
+				entry.path ? directoryIdByPath[entry.path] : null
+			);
+
+			// ── 7. Report ──
+			if (failedCount === 0) {
+				toast.success(
+					$i18n.t(
+						'Sync complete: {{added}} added, {{modified}} modified, {{deleted}} deleted, {{unmodified}} unmodified',
+						{
+							added: diff.added.length,
+							modified: diff.modified.length,
+							deleted: diff.deleted.length,
+							unmodified: diff.unmodified_count
+						}
+					)
+				);
+			}
+			init();
+>>>>>>> upstream/main
 		} catch (e) {
 			toast.error(`${e}`);
 		} finally {
@@ -1903,6 +2034,7 @@
 		}
 	};
 
+<<<<<<< HEAD
 	const renameDirectoryHandler = async (dirId: string, name: string) => {
 		if (!structureEditable) return;
 		const res = await updateKnowledgeDirectory(localStorage.token, knowledge.id, dirId, {
@@ -1911,6 +2043,13 @@
 			toast.error(`${e}`);
 			return null;
 		});
+=======
+	const openFileHandler = (fileId: string) => {
+		window.open(`${WEBUI_API_BASE_URL}/files/${encodeURIComponent(fileId)}/content`, '_blank');
+	};
+
+	let debounceTimeout = null;
+>>>>>>> upstream/main
 
 		if (res) {
 			toast.success($i18n.t('Directory renamed.'));
@@ -2076,6 +2215,7 @@
 		}, 1000);
 	};
 
+<<<<<<< HEAD
 	const handleMediaQuery = async (e) => {
 		if (e.matches) {
 			largeScreen = true;
@@ -2101,6 +2241,8 @@
 
 	// Path-preserving traversal of dropped directory entries (upstream) —
 	// feeds uploadDirectoryEntries so dropped folders keep their structure.
+=======
+>>>>>>> upstream/main
 	const readDirectoryEntries = async (reader: any) => {
 		const entries: any[] = [];
 
@@ -2178,6 +2320,7 @@
 				const directoryEntries: DirectoryFileEntry[] = [];
 				const looseFiles: File[] = [];
 
+<<<<<<< HEAD
 				for (const rawItem of Array.from(inputItems)) {
 					const item = rawItem as DataTransferItem & { webkitGetAsEntry?: () => any };
 					const entry = item.webkitGetAsEntry?.();
@@ -2188,6 +2331,20 @@
 						const file = item.getAsFile();
 						if (file) {
 							looseFiles.push(file);
+=======
+						if (entry?.isDirectory) {
+							try {
+								directoryEntries.push(...(await collectDroppedEntryFiles(entry)));
+							} catch (error) {
+								handleUploadError(error);
+								return;
+							}
+						} else {
+							const file = item.getAsFile();
+							if (file) {
+								looseFiles.push(file);
+							}
+>>>>>>> upstream/main
 						}
 					}
 				}
@@ -2210,42 +2367,6 @@
 	const socketHandlers: Array<{ event: string; handler: Function }> = [];
 
 	onMount(async () => {
-		// listen to resize 1024px
-		mediaQuery = window.matchMedia('(min-width: 1024px)');
-
-		mediaQuery.addEventListener('change', handleMediaQuery);
-		handleMediaQuery(mediaQuery);
-
-		// Select the container element you want to observe
-		const container = document.getElementById('collection-container');
-
-		// initialize the minSize based on the container width
-		minSize = !largeScreen ? 100 : Math.floor((300 / container.clientWidth) * 100);
-
-		// Create a new ResizeObserver instance
-		const resizeObserver = new ResizeObserver((entries) => {
-			for (let entry of entries) {
-				const width = entry.contentRect.width;
-				// calculate the percentage of 300
-				const percentage = (300 / width) * 100;
-				// set the minSize to the percentage, must be an integer
-				minSize = !largeScreen ? 100 : Math.floor(percentage);
-
-				if (showSidepanel) {
-					if (pane && pane.isExpanded() && pane.getSize() < minSize) {
-						pane.resize(minSize);
-					}
-				}
-			}
-		});
-
-		// Start observing the container's size changes
-		resizeObserver.observe(container);
-
-		if (pane) {
-			pane.expand();
-		}
-
 		id = $page.params.id;
 		const res = await getKnowledgeById(localStorage.token, id).catch((e) => {
 			toast.error(`${e}`);
@@ -2341,7 +2462,6 @@
 			clearInterval(syncLevelPoll);
 			syncLevelPoll = null;
 		}
-		mediaQuery?.removeEventListener('change', handleMediaQuery);
 		const dropZone = document.querySelector('body');
 		dropZone?.removeEventListener('dragover', onDragOver);
 		dropZone?.removeEventListener('drop', onDrop);
@@ -2498,7 +2618,19 @@
 			/>
 		{/if}
 		<div class="w-full px-2">
+			<button
+				class="mb-1 flex h-6 w-fit items-center gap-1 rounded-md text-xs text-gray-400 transition-colors duration-75 hover:text-gray-700 dark:text-gray-600 dark:hover:text-gray-300"
+				type="button"
+				on:click={() => {
+					goto('/workspace/knowledge');
+				}}
+			>
+				<ChevronLeft className="size-3" strokeWidth="2" />
+				<span>{$i18n.t('Back')}</span>
+			</button>
+
 			<div class=" flex w-full">
+<<<<<<< HEAD
 				<div class="shrink-0 self-start mt-1.5 mr-1">
 					<button
 						class="p-1 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 transition"
@@ -2510,11 +2642,18 @@
 					</button>
 				</div>
 				<div class="flex-1">
+=======
+				<div class="flex-1 px-1">
+>>>>>>> upstream/main
 					<div class="flex items-center justify-between w-full">
 						<div class="w-full flex justify-between items-center">
 							<input
 								type="text"
+<<<<<<< HEAD
 								class="text-left w-full font-medium text-lg font-primary bg-transparent outline-hidden flex-1"
+=======
+								class="text-left w-full text-sm bg-transparent outline-hidden flex-1"
+>>>>>>> upstream/main
 								bind:value={knowledge.name}
 								aria-label={$i18n.t('Knowledge Name')}
 								placeholder={$i18n.t('Knowledge Name')}
@@ -2689,19 +2828,11 @@
 
 						{#if knowledge?.write_access && (knowledge?.type === 'local' || !knowledge?.type || $config?.integration_providers?.[knowledge?.type])}
 							<div class="self-center shrink-0">
-								<button
-									class="bg-gray-50 hover:bg-gray-100 text-black dark:bg-gray-850 dark:hover:bg-gray-800 dark:text-white transition px-2 py-1 rounded-full flex gap-1 items-center"
-									type="button"
+								<AccessButton
 									on:click={() => {
 										showAccessControlModal = true;
 									}}
-								>
-									<LockClosed strokeWidth="2.5" className="size-3.5" />
-
-									<div class="text-sm font-medium shrink-0">
-										{$i18n.t('Access')}
-									</div>
-								</button>
+								/>
 							</div>
 						{:else if knowledge?.write_access}
 							<div class="text-xs shrink-0 text-gray-500 flex items-center gap-1">
@@ -2755,7 +2886,11 @@
 		</div>
 
 		<div
+<<<<<<< HEAD
 			class="mt-2 mb-2.5 py-2 -mx-0 bg-white dark:bg-gray-900 rounded-3xl border border-gray-100/30 dark:border-gray-850/30 flex-1 flex flex-col overflow-hidden min-h-0"
+=======
+			class="mt-1.5 mb-2 py-1.5 -mx-0 bg-white dark:bg-gray-900 rounded-3xl border border-gray-100/30 dark:border-gray-850/30 flex-1"
+>>>>>>> upstream/main
 		>
 			{#if isExternalKnowledge}
 				<div class="p-5 flex flex-col gap-4">
@@ -2790,21 +2925,24 @@
 					</div>
 
 					<div class="text-xs text-gray-500">
+						<!-- LICENSE covers this Open WebUI wordmark.
+						Do not alter, remove, obscure, or replace it except as LICENSE permits:
+						https://docs.openwebui.com/license. -->
 						{$i18n.t(
 							'This knowledge base retrieves from a connected source. Open WebUI can query it, but cannot upload, sync, edit, delete, reset, or reindex its source data.'
 						)}
 					</div>
 
 					<div class="flex flex-col gap-2">
-						<div class="font-medium text-sm">{$i18n.t('Test Query')}</div>
+						<div class="text-xs">{$i18n.t('Test Query')}</div>
 						<div class="flex gap-2">
 							<input
-								class="w-full text-sm rounded-xl bg-gray-50 dark:bg-gray-850 px-3 py-2 outline-hidden"
+								class="w-full text-xs rounded-xl bg-gray-50 dark:bg-gray-850 px-3 py-2 outline-hidden"
 								bind:value={externalTestQuery}
 								placeholder={$i18n.t('Ask this knowledge source a test question')}
 							/>
 							<button
-								class="px-3 py-2 rounded-xl bg-black text-white dark:bg-white dark:text-black text-sm"
+								class="px-3 py-2 rounded-xl bg-black text-white dark:bg-white dark:text-black text-xs"
 								on:click={externalTestHandler}
 							>
 								{$i18n.t('Test')}
@@ -2814,7 +2952,7 @@
 
 					{#if externalTestResult}
 						<div class="rounded-xl bg-gray-50 dark:bg-gray-850 p-3 text-xs">
-							<div class="font-medium mb-2">{$i18n.t('Preview')}</div>
+							<div class="mb-2">{$i18n.t('Preview')}</div>
 							{#each externalTestResult.documents ?? [] as document, idx}
 								<div class="border-t border-gray-100 dark:border-gray-800 py-2">
 									<div class="line-clamp-4">{document}</div>
@@ -2827,13 +2965,17 @@
 					{/if}
 				</div>
 			{:else}
+<<<<<<< HEAD
 				<div class="px-3.5 flex shrink-0 items-center w-full space-x-2 py-0.5 pb-2">
+=======
+				<div class="px-3 flex flex-1 items-center w-full space-x-1.5">
+>>>>>>> upstream/main
 					<div class="flex flex-1 items-center">
-						<div class=" self-center ml-1 mr-3">
+						<div class=" self-center ml-1 mr-2">
 							<Search className="size-3.5" />
 						</div>
 						<input
-							class=" w-full text-sm pr-4 py-1 rounded-r-xl outline-hidden bg-transparent"
+							class=" w-full text-xs pr-4 py-1 rounded-r-xl outline-hidden bg-transparent"
 							bind:value={query}
 							aria-label={$i18n.t('Search Collection')}
 							placeholder={$i18n.t('Search Collection')}
@@ -2847,32 +2989,32 @@
 
 						<Dropdown align="end">
 							<button
-								class="p-1.5 mr-1 rounded-xl text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-800 transition"
+								class="p-1.5 mr-1 rounded-xl text-gray-500 bg-transparent hover:text-gray-900 dark:hover:text-gray-100 transition"
 								type="button"
 							>
 								<AdjustmentsHorizontal className="size-3.5" strokeWidth="2" />
 							</button>
 
 							<div slot="content">
-								<div
-									class="min-w-[180px] rounded-2xl px-1 py-1 border border-gray-100 dark:border-gray-800 z-50 bg-white dark:bg-gray-850 dark:text-white shadow-lg"
-								>
+								<DropdownMenu className="min-w-[11.25rem]">
 									<button
-										class="select-none flex gap-2 items-center px-3 py-1.5 text-sm cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-xl w-full"
+										class="select-none flex h-[1.6875rem] w-full cursor-pointer items-center gap-2 rounded-xl bg-transparent px-2 text-[0.8125rem] hover:text-gray-900 dark:hover:text-gray-100"
 										type="button"
 										on:click={() => {
 											includeContent = !includeContent;
+											currentPage = 1;
 										}}
 									>
 										<Checkbox
 											state={includeContent ? 'checked' : 'unchecked'}
 											on:change={(e) => {
 												includeContent = e.detail === 'checked';
+												currentPage = 1;
 											}}
 										/>
 										{$i18n.t('File content')}
 									</button>
-								</div>
+								</DropdownMenu>
 							</div>
 						</Dropdown>
 
@@ -2941,7 +3083,7 @@
 					</div>
 				</div>
 
-				<div class="px-3 flex justify-between">
+				<div class="px-2.5 flex justify-between">
 					<div
 						class="flex w-full bg-transparent overflow-x-auto scrollbar-none"
 						on:wheel={(e) => {
@@ -2952,11 +3094,11 @@
 						}}
 					>
 						<div
-							class="flex gap-3 w-fit text-center text-sm rounded-full bg-transparent px-0.5 whitespace-nowrap"
+							class="flex gap-2 w-fit text-center text-sm rounded-full bg-transparent px-0.5 whitespace-nowrap"
 						>
 							<DropdownOptions
-								align="start"
-								className="flex shrink-0 items-center gap-2 px-3 py-1.5 text-sm bg-gray-50 dark:bg-gray-850 rounded-xl placeholder-gray-400 outline-hidden focus:outline-hidden"
+								align="end"
+								className="flex h-8 shrink-0 items-center gap-1.5 rounded-xl bg-transparent px-1.5 text-xs text-gray-700 transition placeholder-gray-400 outline-hidden hover:text-gray-900 focus:outline-hidden dark:text-gray-200 dark:hover:text-gray-100"
 								bind:value={viewOption}
 								items={[
 									{ value: null, label: $i18n.t('All') },
@@ -2969,23 +3111,24 @@
 									} else {
 										delete localStorage.workspaceViewOption;
 									}
+									currentPage = 1;
 								}}
 							/>
 
 							<DropdownOptions
-								align="start"
+								align="end"
 								bind:value={sortKey}
 								placeholder={$i18n.t('Sort')}
 								items={[
 									{ value: 'name', label: $i18n.t('Name') },
-									{ value: 'created_at', label: $i18n.t('Created At') },
-									{ value: 'updated_at', label: $i18n.t('Updated At') }
+									{ value: 'created_at', label: $i18n.t('Created') },
+									{ value: 'updated_at', label: $i18n.t('Updated') }
 								]}
 							/>
 
 							{#if sortKey}
 								<DropdownOptions
-									align="start"
+									align="end"
 									bind:value={direction}
 									items={[
 										{ value: 'asc', label: $i18n.t('Asc') },
@@ -2997,10 +3140,15 @@
 					</div>
 				</div>
 
+<<<<<<< HEAD
 				<!-- Always rendered (not just inside a folder) so entering/leaving the
 				     root doesn't insert/remove the row and shift the list (layout jump). -->
 				{#if !query}
 					<div class="px-4 mt-2 flex shrink-0">
+=======
+				{#if currentDirectoryId !== null}
+					<div class="px-4 mb-1">
+>>>>>>> upstream/main
 						<KnowledgeBreadcrumbs
 							rootLabel={knowledge.name}
 							{breadcrumbs}
@@ -3012,8 +3160,15 @@
 				{/if}
 
 				{#if syncing}
+<<<<<<< HEAD
 					<div class="mx-2.5 mt-2.5 -mb-0.5 shrink-0">
 						<div class="flex items-center gap-2.5 rounded-xl py-2 px-3 bg-gray-50 dark:bg-gray-850">
+=======
+					<div class="mx-2 mt-2 -mb-0.5">
+						<div
+							class="flex items-center gap-2 rounded-xl py-1.5 px-2.5 bg-gray-50 dark:bg-gray-850"
+						>
+>>>>>>> upstream/main
 							<Spinner className="size-3.5 shrink-0" />
 							<div class="text-xs text-gray-500 dark:text-gray-400 truncate">
 								{syncing}
@@ -3023,7 +3178,11 @@
 				{/if}
 
 				{#if fileItems !== null && fileItemsTotal !== null}
+<<<<<<< HEAD
 					<div class="flex flex-row flex-1 min-h-0 gap-3 px-2.5 mt-2">
+=======
+					<div class="flex flex-row flex-1 gap-2 px-2">
+>>>>>>> upstream/main
 						<div class="flex-1 flex">
 							<div class=" flex flex-col w-full space-x-2 rounded-lg h-full">
 								<div class="w-full h-full flex flex-col min-h-0">
@@ -3141,7 +3300,89 @@
 							</div>
 						</div>
 
+<<<<<<< HEAD
 						<FileItemModal bind:show={showFilePreview} item={selectedFile} edit={false} />
+=======
+						{#if selectedFileId !== null}
+							<Drawer
+								className="h-full"
+								show={selectedFileId !== null}
+								onClose={() => {
+									selectedFileId = null;
+									selectedFile = null;
+									selectedFileContent = '';
+									loadingFileContent = false;
+								}}
+							>
+								<div class="flex flex-col justify-start h-full max-h-full">
+									<div class=" flex flex-col w-full h-full max-h-full">
+										<div class="shrink-0 flex items-center p-2">
+											<div class="mr-2">
+												<button
+													class="w-full text-left text-xs p-1.5 rounded-lg dark:text-gray-300 dark:hover:text-white hover:bg-black/5 dark:hover:bg-gray-850"
+													aria-label={$i18n.t('Close')}
+													on:click={() => {
+														selectedFileId = null;
+														selectedFile = null;
+														selectedFileContent = '';
+														loadingFileContent = false;
+													}}
+												>
+													<ChevronLeft strokeWidth="2.5" />
+												</button>
+											</div>
+											<div class="flex-1 text-sm line-clamp-1">
+												<a
+													href="#"
+													class="hover:underline line-clamp-1"
+													on:click|preventDefault={() => {
+														if (selectedFile?.id) {
+															openFileHandler(selectedFile.id);
+														}
+													}}
+												>
+													{selectedFile?.meta?.name}
+												</a>
+											</div>
+
+											{#if knowledge?.write_access}
+												<div>
+													<button
+														class="flex self-center w-fit text-xs py-1 px-2.5 dark:text-gray-300 dark:hover:text-white hover:bg-black/5 dark:hover:bg-white/5 rounded-lg disabled:opacity-50 disabled:cursor-not-allowed"
+														disabled={isSaving || loadingFileContent}
+														on:click={() => {
+															updateFileContentHandler();
+														}}
+													>
+														{$i18n.t('Save')}
+														{#if isSaving}
+															<div class="ml-2 self-center">
+																<Spinner />
+															</div>
+														{/if}
+													</button>
+												</div>
+											{/if}
+										</div>
+
+										{#key selectedFile?.id}
+											<textarea
+												class="w-full h-full text-xs outline-none resize-none px-3 py-2"
+												bind:value={selectedFileContent}
+												disabled={!knowledge?.write_access || loadingFileContent}
+												aria-label={$i18n.t('File content')}
+												placeholder={$i18n.t('Add content here')}
+											></textarea>
+										{/key}
+									</div>
+								</div>
+							</Drawer>
+						{/if}
+					</div>
+				{:else}
+					<div class="my-10">
+						<Spinner className="size-4" />
+>>>>>>> upstream/main
 					</div>
 				{/if}
 			{/if}
