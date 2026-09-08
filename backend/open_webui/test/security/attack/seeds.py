@@ -47,9 +47,18 @@ def _extract(payload, dotted: str, *, name: str, via: str) -> str:
     return str(node)
 
 
+#: Keys whose value is structure, not seed data. `prefix` is the longest-prefix
+#: route matcher and `name` is the OpenAPI parameter name: substituting into them
+#: rewrites `/api/v1/auths/password/reset/{token}` to a path no route has, so
+#: parameter_for then matches nothing and raises instead of reporting the entry.
+_STRUCTURAL_KEYS = frozenset({'prefix', 'name', 'key'})
+
+
 def _fill_token(value, token):
     if isinstance(value, dict):
-        return {_fill_token(k, token): _fill_token(v, token) for k, v in value.items()}
+        return {
+            _fill_token(k, token): (v if k in _STRUCTURAL_KEYS else _fill_token(v, token)) for k, v in value.items()
+        }
     if isinstance(value, list):
         return [_fill_token(v, token) for v in value]
     return value.replace('{token}', token) if isinstance(value, str) else value
