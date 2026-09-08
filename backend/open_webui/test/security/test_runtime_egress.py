@@ -539,7 +539,10 @@ class TestCiStubsEveryDeclaredSink:
 
         provider = Mock(return_value=['provider reached'])
         namespace = {'search_searxng': provider}
-        exec(compile(ast.fix_missing_locations(module), '<search_web>', 'exec'), namespace)
+        # nosec B102 - compiles one function lifted from this repo's own source, with a
+        # mocked provider and no untrusted input. Importing the router instead would boot
+        # the application, which is what this test exists to avoid.
+        exec(compile(ast.fix_missing_locations(module), '<search_web>', 'exec'), namespace)  # nosec B102
         engine = compose['services']['open-webui']['environment']['WEB_SEARCH_ENGINE']
         config = SimpleNamespace(
             SEARXNG_QUERY_URL=compose['services']['open-webui']['environment']['SEARXNG_QUERY_URL'],
@@ -566,4 +569,7 @@ class TestCiStubsEveryDeclaredSink:
             'self': SimpleNamespace(engine='datalab_marker', kwargs={'DATALAB_MARKER_API_KEY': key}),
             'file_ext': 'pdf',
         }
-        assert not eval(compile(ast.Expression(conditions[0]), '<marker guard>', 'eval'), scope)
+        # nosec B307 - evaluates one `if` condition lifted from this repo's own source
+        # against a synthetic scope, to prove a blank key blocks the public datalab.to
+        # fallback. No untrusted input reaches this expression.
+        assert not eval(compile(ast.Expression(conditions[0]), '<marker guard>', 'eval'), scope)  # nosec B307
