@@ -346,11 +346,7 @@ def query_doc(collection_name: str, query_embedding: list[float], k: int, user: 
         )
 
         if result:
-<<<<<<< HEAD
             log.info(f'query_doc:result count={len(result.ids[0]) if result.ids else 0}')
-=======
-            log.info('query_doc:result %s %s', result.ids, result.metadatas)
->>>>>>> upstream/main
 
         return result
     except Exception as e:
@@ -364,11 +360,7 @@ def get_doc(collection_name: str, user: UserModel = None):
         result = VECTOR_DB_CLIENT.get(collection_name=collection_name)
 
         if result:
-<<<<<<< HEAD
             log.info(f'get_doc:result count={len(result.ids[0]) if result.ids else 0}')
-=======
-            log.info('query_doc:result %s %s', result.ids, result.metadatas)
->>>>>>> upstream/main
 
         return result
     except Exception as e:
@@ -621,13 +613,9 @@ async def query_doc_with_hybrid_search(
             'metadatas': [metadatas],
         }
 
-<<<<<<< HEAD
         log.info(
             f'query_doc_with_hybrid_search:result count={len(result["documents"][0]) if result["documents"] else 0}'
         )
-=======
-        log.info('query_doc_with_hybrid_search:result %s %s', result['metadatas'], result['distances'])
->>>>>>> upstream/main
         return result
     except Exception as e:
         log.exception(f'Error querying doc {collection_name} with hybrid search: {e}')
@@ -1366,11 +1354,7 @@ async def get_sources_from_items(
     full_context=False,
     user: UserModel | None = None,
 ):
-<<<<<<< HEAD
     log.debug(f'query_collection: items={len(items)} queries={len(queries)} full_context={full_context}')
-=======
-    log.debug('items: %s %s %s %s %s', items, queries, embedding_function, reranking_function, full_context)
->>>>>>> upstream/main
 
     bypass_embedding_and_retrieval = await Config.get('rag.bypass_embedding_and_retrieval')
     extracted_collections = []
@@ -1741,16 +1725,11 @@ def get_model_path(model: str, update_model: bool = False):
 
     # Attempt to query the huggingface_hub library to determine the local path and/or to update
     try:
-<<<<<<< HEAD
         # nosec B615 - no revision to pin: the repo id comes from the
         # operator's RAG_EMBEDDING_MODEL / RAG_RERANKING_MODEL setting, so any
         # hard-coded revision here would be wrong for every other model.
         model_repo_path = snapshot_download(**snapshot_kwargs)  # nosec B615
         log.debug(f'model_repo_path: {model_repo_path}')
-=======
-        model_repo_path = snapshot_download(**snapshot_kwargs)
-        log.debug('model_repo_path: %s', model_repo_path)
->>>>>>> upstream/main
         return model_repo_path
     except Exception as e:
         log.exception(f'Cannot determine model snapshot path: {e}')
@@ -1760,10 +1739,10 @@ def get_model_path(model: str, update_model: bool = False):
 
 
 import operator
-from typing import Optional, Sequence
+from typing import Sequence
 
 from langchain_core.callbacks import Callbacks
-from langchain_core.documents import BaseDocumentCompressor, Document
+from langchain_core.documents import BaseDocumentCompressor
 
 
 class RerankCompressor(BaseDocumentCompressor):

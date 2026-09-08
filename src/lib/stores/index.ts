@@ -276,10 +276,7 @@ type OllamaModelDetails = {
 
 type Settings = {
 	pinnedModels?: string[];
-<<<<<<< HEAD
 	pinnedInputItems?: string[];
-=======
->>>>>>> upstream/main
 	toolServers?: never[];
 	detectArtifacts?: boolean;
 	showUpdateToast?: boolean;
@@ -446,7 +443,6 @@ type Config = {
 		enable_version_update_check: boolean;
 		enable_pyodide_file_persistence?: boolean;
 		folder_max_file_count?: number;
-<<<<<<< HEAD
 		knowledge_max_file_count?: number;
 		// Feature Flags (SaaS Tier Control)
 		feature_chat_controls?: boolean;
@@ -482,9 +478,7 @@ type Config = {
 		enable_code_execution?: boolean;
 		enable_data_warnings?: boolean;
 		enable_feedback_report?: boolean;
-=======
 		websocket_heartbeat_interval?: number | null;
->>>>>>> upstream/main
 	};
 	oauth: {
 		providers: {
@@ -496,12 +490,9 @@ type Config = {
 		default_interface_settings?: Record<string, unknown>;
 		pending_user_overlay_title?: string;
 		pending_user_overlay_content?: string;
-<<<<<<< HEAD
 		pending_user_overlay_description?: string;
 		greeting_template?: string | Record<string, string>;
-=======
 		response_watermark?: string;
->>>>>>> upstream/main
 		iframe_csp?: string;
 	};
 };

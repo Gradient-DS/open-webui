@@ -23,11 +23,7 @@ def search_ollama_cloud(
         count (int): Number of results to return
         filter_list (Optional[list[str]]): List of domains to filter results by
     """
-<<<<<<< HEAD
     log.info('Searching with Ollama')
-=======
-    log.info('Searching with Ollama for query: %s', query)
->>>>>>> upstream/main
 
     headers = {'Authorization': f'Bearer {api_key}', 'Content-Type': 'application/json'}
     payload = {'query': query, 'max_results': count}

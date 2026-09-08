@@ -256,37 +256,20 @@
 			{/if}
 		</UserSettingSection>
 
-<<<<<<< HEAD
+		<!-- [Gradient] Tenant feature gate. -->
 		{#if isFeatureEnabled('system_prompt')}
 			{#if $user?.role === 'admin' || (($user?.permissions.chat?.controls ?? true) && ($user?.permissions.chat?.system_prompt ?? true))}
-				<hr class="border-gray-100/30 dark:border-gray-850/30 my-3" />
-
-				<div>
-					<div class=" my-2.5 text-sm font-medium">{$i18n.t('System Prompt')}</div>
-					<Textarea
-						bind:value={system}
-						className={'w-full text-sm outline-hidden resize-vertical' +
-							($settings.highContrastMode
-								? ' p-2.5 border-2 border-gray-300 dark:border-gray-700 rounded-lg bg-transparent text-gray-900 dark:text-gray-100 focus:ring-1 focus:ring-blue-500 focus:border-blue-500 overflow-y-hidden'
-								: '  dark:text-gray-300 ')}
-						rows="4"
-						placeholder={$i18n.t('Enter system prompt here')}
-					/>
-				</div>
+				<UserSettingSection title={$i18n.t('System Prompt')}>
+					<UserSettingField description={$i18n.t('Set the default system prompt for new chats.')}>
+						<Textarea
+							bind:value={system}
+							className={systemPromptTextareaClass}
+							rows="4"
+							placeholder={$i18n.t('Enter system prompt here')}
+						/>
+					</UserSettingField>
+				</UserSettingSection>
 			{/if}
-=======
-		{#if $user?.role === 'admin' || (($user?.permissions.chat?.controls ?? true) && ($user?.permissions.chat?.system_prompt ?? true))}
-			<UserSettingSection title={$i18n.t('System Prompt')}>
-				<UserSettingField description={$i18n.t('Set the default system prompt for new chats.')}>
-					<Textarea
-						bind:value={system}
-						className={systemPromptTextareaClass}
-						rows="4"
-						placeholder={$i18n.t('Enter system prompt here')}
-					/>
-				</UserSettingField>
-			</UserSettingSection>
->>>>>>> upstream/main
 		{/if}
 
 		{#if $user?.role === 'admin' || (($user?.permissions.chat?.controls ?? true) && ($user?.permissions.chat?.params ?? true))}

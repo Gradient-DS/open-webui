@@ -514,29 +514,6 @@ export const formatDate = (inputDate) => {
 	}
 };
 
-<<<<<<< HEAD
-export const copyToClipboard = async (
-	text,
-	html = null,
-	formatted = false,
-	sources: any[] = []
-) => {
-	// If sources provided, normalize citations and build appendix
-	let sourcesAppendixHtml = '';
-	let htmlText = text; // text used for HTML rendering (without plain-text sources)
-	if (sources && sources.length > 0) {
-		const { normalizeCitations, formatSourcesAsMarkdown, formatSourcesAsHtml } =
-			await import('$lib/utils/citations');
-		const { content, sourceList } = normalizeCitations(text, sources);
-		if (sourceList.length > 0) {
-			htmlText = content; // normalized content only — sources go in HTML appendix
-			text = `${content}\n\n${formatSourcesAsMarkdown(sourceList)}`; // plain text gets markdown sources
-			formatted = true;
-			sourcesAppendixHtml = formatSourcesAsHtml(sourceList);
-		}
-	}
-
-=======
 const messageTimestampDate = (inputDate) => {
 	const date = new Date(inputDate < 1_000_000_000_000 ? inputDate * 1000 : inputDate);
 	return Number.isNaN(date.getTime()) ? null : date;
@@ -560,8 +537,27 @@ export const formatMessageTimestampFull = (inputDate) =>
 		minute: '2-digit'
 	}) ?? '';
 
-export const copyToClipboard = async (text, html = null, formatted = false) => {
->>>>>>> upstream/main
+export const copyToClipboard = async (
+	text,
+	html = null,
+	formatted = false,
+	sources: any[] = []
+) => {
+	// If sources provided, normalize citations and build appendix
+	let sourcesAppendixHtml = '';
+	let htmlText = text; // text used for HTML rendering (without plain-text sources)
+	if (sources && sources.length > 0) {
+		const { normalizeCitations, formatSourcesAsMarkdown, formatSourcesAsHtml } =
+			await import('$lib/utils/citations');
+		const { content, sourceList } = normalizeCitations(text, sources);
+		if (sourceList.length > 0) {
+			htmlText = content; // normalized content only — sources go in HTML appendix
+			text = `${content}\n\n${formatSourcesAsMarkdown(sourceList)}`; // plain text gets markdown sources
+			formatted = true;
+			sourcesAppendixHtml = formatSourcesAsHtml(sourceList);
+		}
+	}
+
 	if (formatted) {
 		let styledHtml = '';
 		if (!html) {

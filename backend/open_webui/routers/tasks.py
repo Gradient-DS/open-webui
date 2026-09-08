@@ -168,11 +168,7 @@ async def generate_title(request: Request, form_data: dict, user=Depends(get_ver
 
     task_model_id, task_model_params = await get_task_model_generation_config(model_id, models)
 
-<<<<<<< HEAD
     log.debug(f'generating chat title using model {task_model_id} for user {user.id} ')
-=======
-    log.debug('generating chat title using model %s for user %s ', task_model_id, user.email)
->>>>>>> upstream/main
 
     title_template = await Config.get('task.title.prompt_template')
     if title_template != '':
@@ -240,11 +236,7 @@ async def generate_follow_ups(request: Request, form_data: dict, user=Depends(ge
 
     task_model_id, task_model_params = await get_task_model_generation_config(model_id, models)
 
-<<<<<<< HEAD
     log.debug(f'generating follow-up using model {task_model_id} for user {user.id} ')
-=======
-    log.debug('generating chat title using model %s for user %s ', task_model_id, user.email)
->>>>>>> upstream/main
 
     follow_up_template = await Config.get('task.follow_up.prompt_template')
     if follow_up_template != '':
@@ -309,11 +301,7 @@ async def generate_chat_tags(request: Request, form_data: dict, user=Depends(get
 
     task_model_id, task_model_params = await get_task_model_generation_config(model_id, models)
 
-<<<<<<< HEAD
     log.debug(f'generating chat tags using model {task_model_id} for user {user.id} ')
-=======
-    log.debug('generating chat tags using model %s for user %s ', task_model_id, user.email)
->>>>>>> upstream/main
 
     tags_template = await Config.get('task.tags.prompt_template')
     if tags_template != '':
@@ -372,11 +360,7 @@ async def generate_image_prompt(request: Request, form_data: dict, user=Depends(
 
     task_model_id, task_model_params = await get_task_model_generation_config(model_id, models)
 
-<<<<<<< HEAD
     log.debug(f'generating image prompt using model {task_model_id} for user {user.id} ')
-=======
-    log.debug('generating image prompt using model %s for user %s ', task_model_id, user.email)
->>>>>>> upstream/main
 
     image_prompt_template = await Config.get('task.image.prompt_template')
     if image_prompt_template != '':
@@ -453,11 +437,7 @@ async def generate_queries(request: Request, form_data: dict, user=Depends(get_v
 
     task_model_id, task_model_params = await get_task_model_generation_config(model_id, models)
 
-<<<<<<< HEAD
     log.debug(f'generating {type} queries using model {task_model_id} for user {user.id}')
-=======
-    log.debug('generating %s queries using model %s for user %s', type, task_model_id, user.email)
->>>>>>> upstream/main
 
     query_template = await Config.get('task.query.prompt_template')
     if query_template.strip() != '':
@@ -533,11 +513,7 @@ async def generate_autocompletion(request: Request, form_data: dict, user=Depend
 
     task_model_id, task_model_params = await get_task_model_generation_config(model_id, models)
 
-<<<<<<< HEAD
     log.debug(f'generating autocompletion using model {task_model_id} for user {user.id}')
-=======
-    log.debug('generating autocompletion using model %s for user %s', task_model_id, user.email)
->>>>>>> upstream/main
 
     autocomplete_template = await Config.get('task.autocomplete.prompt_template')
     if autocomplete_template.strip() != '':
@@ -596,11 +572,7 @@ async def generate_emoji(request: Request, form_data: dict, user=Depends(get_ver
 
     task_model_id, _ = await get_task_model_generation_config(model_id, models)
 
-<<<<<<< HEAD
     log.debug(f'generating emoji using model {task_model_id} for user {user.id} ')
-=======
-    log.debug('generating emoji using model %s for user %s ', task_model_id, user.email)
->>>>>>> upstream/main
 
     template = DEFAULT_EMOJI_GENERATION_PROMPT_TEMPLATE
 

@@ -69,12 +69,9 @@ export const updateChatConfig = async (token: string, config: object) => {
 export const createNewChat = async (
 	token: string,
 	chat: object,
-	folderId: string | null,
-<<<<<<< HEAD
+	folderId: string | null = null,
+	variables: object | null = null,
 	meta: object | null = null
-=======
-	variables: object | null = null
->>>>>>> upstream/main
 ) => {
 	let error = null;
 
@@ -87,13 +84,9 @@ export const createNewChat = async (
 		},
 		body: JSON.stringify({
 			chat: chat,
-<<<<<<< HEAD
-			folder_id: folderId ?? null,
-			...(meta ? { meta } : {})
-=======
 			...(variables !== null ? { variables } : {}),
+			...(meta ? { meta } : {}),
 			folder_id: folderId ?? null
->>>>>>> upstream/main
 		})
 	})
 		.then(async (res) => {

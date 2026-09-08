@@ -51,11 +51,7 @@ def search_serply(
     response.raise_for_status()
 
     json_response = response.json()
-<<<<<<< HEAD
     log.info(f'serply search returned {len(json_response.get("results", []))} results')
-=======
-    log.info('results from serply search: %s', json_response)
->>>>>>> upstream/main
 
     results = sorted(json_response.get('results', []), key=lambda x: x.get('realPosition', 0))
     if filter_list:

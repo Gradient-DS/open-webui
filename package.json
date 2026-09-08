@@ -54,9 +54,6 @@
 	"type": "module",
 	"overrides": {
 		"tar": "^7.5.22",
-		"paneforge": {
-			"nanoid": "^5.1.16"
-		},
 		"@huggingface/transformers": {
 			"sharp": "^0.35.3"
 		}

@@ -237,21 +237,14 @@ async def load_tool_module_by_id(tool_id, content=None):
             f.write(content)
         module.__dict__['__file__'] = temp_file.name
 
-<<<<<<< HEAD
         # Executing the modified content in the created module's namespace.
         # nosec B102 - executing the tool body IS the feature. Tools are
         # authored by admins through the workspace UI and are stored as source;
         # there is no non-exec way to load them.
         exec(content, module.__dict__)  # nosec B102
-        frontmatter = extract_frontmatter(content)
-        log.info(f'Loaded module: {module.__name__}')
-=======
-        # Executing the modified content in the created module's namespace
-        exec(content, module.__dict__)
         if frontmatter is None:
             frontmatter = extract_frontmatter(content)
         log.info('Loaded module: %s', module.__name__)
->>>>>>> upstream/main
 
         # Create and return the object if the class 'Tools' is found in the module
         if hasattr(module, 'Tools'):
@@ -297,21 +290,14 @@ async def load_function_module_by_id(function_id: str, content: str | None = Non
             f.write(content)
         module.__dict__['__file__'] = temp_file.name
 
-<<<<<<< HEAD
         # Execute the modified content in the created module's namespace.
         # nosec B102 - same as load_tool_module_by_id above: executing an
         # admin-authored function body is the documented behaviour of the
         # Functions feature.
         exec(content, module.__dict__)  # nosec B102
-        frontmatter = extract_frontmatter(content)
-        log.info(f'Loaded module: {module.__name__}')
-=======
-        # Execute the modified content in the created module's namespace
-        exec(content, module.__dict__)
         if frontmatter is None:
             frontmatter = extract_frontmatter(content)
         log.info('Loaded module: %s', module.__name__)
->>>>>>> upstream/main
 
         # Create appropriate object based on available class type in the module
         if hasattr(module, 'Pipe'):

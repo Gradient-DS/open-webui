@@ -11,12 +11,8 @@ from open_webui.internal.db import Base, JSONField, get_async_db_context
 from open_webui.models.users import User, UserModel, UserProfileImageResponse, Users
 from open_webui.utils.validate import validate_profile_image_url
 from pydantic import BaseModel, field_validator
-<<<<<<< HEAD
 from sqlalchemy import BigInteger, Boolean, Column, String, Text, delete, select, update
-=======
-from sqlalchemy import Boolean, Column, String, Text, delete, select, update
 from sqlalchemy.exc import IntegrityError
->>>>>>> upstream/main
 from sqlalchemy.ext.asyncio import AsyncSession
 
 log = logging.getLogger(__name__)

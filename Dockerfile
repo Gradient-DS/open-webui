@@ -166,7 +166,7 @@ RUN set -e; \
     # Slim build: no torch, no local ML models — uses external APIs only
     uv pip install --system -r requirements-slim.txt --no-cache-dir; \
     python -c "import os; import tiktoken; tiktoken.get_encoding(os.environ['TIKTOKEN_ENCODING_NAME'])"; \
-    python -c "import nltk; nltk.download('punkt_tab')"; \
+    python -c "import nltk; nltk.download('punkt_tab', download_dir='/usr/local/share/nltk_data')"; \
     elif [ "$USE_CUDA" = "true" ]; then \
     # CUDA build: torch with GPU support + pre-download models
     # fix: pin torch<=2.9.1 - torch 2.10.0 aarch64 wheels cause SIGILL on ARM devices (RPi 4 Cortex-A72) #21349
@@ -188,7 +188,7 @@ RUN set -e; \
     python -c "import nltk; nltk.download('punkt_tab', download_dir='/usr/local/share/nltk_data')"; \
     fi; \
     mkdir -p /app/backend/data; chown -R $UID:$GID /app/backend/data/; \
-<<<<<<< HEAD
+    if [ -d /app/backend/data/cache ]; then chmod -R a+rX /app/backend/data/cache; fi; \
     # Drop pip from the final image. pip ships a vendored SBOM
     # (pip/_vendor/bom.cdx.json) that image scanners read as real installed
     # packages, so every build reports permanent HIGHs against pip's bundled
@@ -206,15 +206,11 @@ RUN set -e; \
 # cannot be installed at runtime. Default the feature off so it logs a skip
 # instead of failing on a missing pip.
 ENV ENABLE_PIP_INSTALL_FRONTMATTER_REQUIREMENTS=False
-=======
-    if [ -d /app/backend/data/cache ]; then chmod -R a+rX /app/backend/data/cache; fi; \
-    rm -rf /var/lib/apt/lists/*;
 
 # Optional: PPTX parsing through unstructured may need spaCy's English model.
 # Keep this out of the default image to avoid the extra image bloat; deployments
 # with read-only site-packages can uncomment it and bake the model in.
 # RUN python -m spacy download en_core_web_sm
->>>>>>> upstream/main
 
 # Install Ollama if requested
 RUN if [ "$USE_OLLAMA" = "true" ]; then \

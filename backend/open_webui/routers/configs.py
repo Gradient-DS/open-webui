@@ -19,12 +19,8 @@ from open_webui.models.config import Config
 from open_webui.models.oauth_sessions import OAuthSessions
 from open_webui.models.users import Users
 from open_webui.utils.auth import get_admin_user, get_verified_user
-<<<<<<< HEAD
 from open_webui.utils.features import require_feature
-from open_webui.utils.headers import get_custom_headers
-=======
 from open_webui.utils.headers import bearer_auth_header, get_custom_headers
->>>>>>> upstream/main
 from open_webui.utils.mcp.client import MCPClient
 from open_webui.utils.oauth import (
     OAuthClientInformationFull,

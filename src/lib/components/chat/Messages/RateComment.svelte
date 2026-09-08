@@ -208,16 +208,10 @@
 		</div>
 	</div>
 
-<<<<<<< HEAD
 	{#if layer2Enabled}
 		<div>
 			{#if reasons.length > 0}
-				<div class="text-sm mt-1.5 font-medium">{$i18n.t('Why?')}</div>
-=======
-	<div>
-		{#if reasons.length > 0}
-			<div class="text-sm mt-1.5 font-normal">{$i18n.t('Why?')}</div>
->>>>>>> upstream/main
+				<div class="text-sm mt-1.5 font-normal">{$i18n.t('Why?')}</div>
 
 				<div class="flex flex-wrap gap-1.5 text-sm mt-1.5">
 					{#each reasons as reason}

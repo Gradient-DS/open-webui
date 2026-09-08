@@ -535,12 +535,7 @@ class S3VectorClient(VectorDBBase):
                                 vector_metadata.get('content') or vector_metadata.get('document') or vector_id
                             )
 
-<<<<<<< HEAD
                         log.debug(f'Document text length: {len(str(document_text))}')
-=======
-                        # Log the actual content for debugging
-                        log.debug('Document text preview (first 200 chars): %s', str(document_text)[:200])
->>>>>>> upstream/main
                     else:
                         document_text = vector_id
 

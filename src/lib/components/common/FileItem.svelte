@@ -126,32 +126,23 @@
 										: $i18n.t('Document')}
 					placement="top"
 				>
-<<<<<<< HEAD
 					{#if type === 'collection' && item?.knowledge_type === 'onedrive'}
-						<OneDrive />
+						<OneDrive className="size-3.5" />
 					{:else if type === 'collection' && item?.knowledge_type === 'google_drive'}
-						<GoogleDrive />
+						<GoogleDrive className="size-3.5" />
 					{:else if type === 'collection' && item?.knowledge_type === 'confluence'}
-						<Confluence />
+						<Confluence className="size-3.5" />
 					{:else if type === 'collection'}
-						<FolderOpen />
-=======
-					{#if type === 'collection'}
-						<Database className="size-3.5" />
->>>>>>> upstream/main
+						<FolderOpen className="size-3.5" />
 					{:else if type === 'note'}
 						<PageEdit className="size-3.5" />
 					{:else if type === 'chat'}
 						<ChatBubble className="size-3.5" />
 					{:else if type === 'folder'}
-<<<<<<< HEAD
-						<Folder />
+						<Folder className="size-3.5" />
 					{:else if type === 'url'}
 						<!-- [Gradient] A web page the agent reads live (GRA-222). -->
-						<GlobeAlt className="size-5" />
-=======
-						<Folder className="size-3.5" />
->>>>>>> upstream/main
+						<GlobeAlt className="size-3.5" />
 					{:else}
 						<DocumentPage className="size-3.5" />
 					{/if}

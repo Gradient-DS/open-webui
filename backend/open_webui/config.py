@@ -977,16 +977,14 @@ RAG_FILE_MAX_COUNT = int(os.getenv('RAG_FILE_MAX_COUNT')) if os.getenv('RAG_FILE
 
 RAG_FILE_MAX_SIZE = int(os.getenv('RAG_FILE_MAX_SIZE')) if os.getenv('RAG_FILE_MAX_SIZE') else None
 
-<<<<<<< HEAD
 # Backend-enforced cap on a user's total stored file count (unlike
 # RAG_FILE_MAX_COUNT, which is a frontend per-message advisory only). None
 # (unset) means unlimited. See routers/files.py upload_file_handler.
 RAG_FILE_MAX_COUNT_PER_USER = (
     int(os.getenv('RAG_FILE_MAX_COUNT_PER_USER')) if os.getenv('RAG_FILE_MAX_COUNT_PER_USER') else None
 )
-=======
+
 ENABLE_KNOWLEDGE_FILE_RETENTION = os.getenv('ENABLE_KNOWLEDGE_FILE_RETENTION', 'False').lower() == 'true'
->>>>>>> upstream/main
 
 RAG_FILE_CONTENT_SEARCH_MAX_CHARS = int(os.getenv('RAG_FILE_CONTENT_SEARCH_MAX_CHARS', str(64 * 1024 * 1024)))
 
@@ -1733,8 +1731,12 @@ except Exception as e:
 DEFAULT_MODEL_PARAMS = default_model_params
 
 
+# [Gradient] Default: iframeSandboxAllowForms=False (upstream: enabled when unset).
+# Opt-in via Helm; deployment documentation: soev-gitops/docs/.
 try:
-    default_interface_settings = JSONCodec.loads(os.getenv('DEFAULT_INTERFACE_SETTINGS', '{}'))
+    default_interface_settings = JSONCodec.loads(
+        os.getenv('DEFAULT_INTERFACE_SETTINGS', '{"iframeSandboxAllowForms": false}')
+    )
 except Exception as e:
     log.exception(f'Error loading DEFAULT_INTERFACE_SETTINGS: {e}')
     default_interface_settings = {}
@@ -2051,16 +2053,13 @@ FOLDER_MAX_FILE_COUNT = os.getenv('FOLDER_MAX_FILE_COUNT', '')
 
 ENABLE_CHANNELS = os.getenv('ENABLE_CHANNELS', 'False').lower() == 'true'
 
-<<<<<<< HEAD
-# Gradient default: False (upstream: True) — opt-in via Helm per env-defaults.md §G
-ENABLE_CALENDAR = os.getenv('ENABLE_CALENDAR', 'False').lower() == 'true'
-=======
 CHANNEL_MODEL_RESPONSE_MODE = os.getenv('CHANNEL_MODEL_RESPONSE_MODE', 'thread')
 
-ENABLE_CALENDAR = os.getenv('ENABLE_CALENDAR', 'True').lower() == 'true'
->>>>>>> upstream/main
+# [Gradient] TODO(merge-v0.11.3): Where is the defaults document within soev-gitops/docs/?
+# [Gradient] Gradient default: False (upstream: True) — opt-in via Helm; see soev-gitops/docs/.
+ENABLE_CALENDAR = os.getenv('ENABLE_CALENDAR', 'False').lower() == 'true'
 
-# Gradient default: False (upstream: True) — opt-in via Helm per env-defaults.md §G
+# [Gradient] Gradient default: False (upstream: True) — opt-in via Helm; see soev-gitops/docs/.
 ENABLE_AUTOMATIONS = os.getenv('ENABLE_AUTOMATIONS', 'False').lower() == 'true'
 
 ENABLE_SUBAGENTS = os.getenv('ENABLE_SUBAGENTS', 'False').lower() == 'true'

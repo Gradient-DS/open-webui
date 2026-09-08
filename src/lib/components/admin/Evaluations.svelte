@@ -80,11 +80,7 @@
 	<div class="flex flex-col lg:flex-row w-full h-full pb-2 lg:space-x-4">
 		<div
 			id="users-tabs-container"
-<<<<<<< HEAD
-			class="tabs mx-[16px] lg:mx-0 lg:px-[16px] lg:mt-2 flex flex-row overflow-x-auto gap-2.5 max-w-full lg:gap-1 lg:flex-col lg:flex-none lg:w-50 dark:text-gray-200 text-sm font-medium text-left scrollbar-none"
-=======
 			class="tabs mx-2 px-2 sm:mx-2.5 lg:mx-0 lg:px-2.5 flex flex-row overflow-x-auto gap-2.5 max-w-full lg:gap-0 lg:flex-col lg:flex-none lg:w-50 dark:text-gray-200 text-sm font-normal text-left scrollbar-none"
->>>>>>> upstream/main
 		>
 			<a
 				id="leaderboard"
@@ -92,8 +88,8 @@
 				draggable="false"
 				class="px-0.5 py-1 min-w-fit rounded-lg lg:flex-none flex items-center gap-1.5 text-right transition select-none {selectedTab ===
 				'leaderboard'
-					? 'bg-gray-100 dark:bg-gray-800'
-					: 'text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-850'}"
+					? ''
+					: ' text-gray-300 dark:text-gray-600 hover:text-gray-700 dark:hover:text-white'}"
 			>
 				<div class="self-center">{$i18n.t('Leaderboard')}</div>
 				{#if formattedLeaderboardCount !== null}
@@ -109,8 +105,8 @@
 				draggable="false"
 				class="px-0.5 py-1 min-w-fit rounded-lg lg:flex-none flex items-center gap-1.5 text-right transition select-none {selectedTab ===
 				'feedback'
-					? 'bg-gray-100 dark:bg-gray-800'
-					: 'text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-850'}"
+					? ''
+					: ' text-gray-300 dark:text-gray-600 hover:text-gray-700 dark:hover:text-white'}"
 			>
 				<div class="self-center">{$i18n.t('Feedback')}</div>
 				{#if formattedFeedbackCount !== null}

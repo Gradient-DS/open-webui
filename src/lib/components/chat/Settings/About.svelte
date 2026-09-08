@@ -80,10 +80,10 @@
 						{/if}
 					</div>
 
-<<<<<<< HEAD
+					<!-- [Gradient] Tenant feature gate. -->
 					{#if isFeatureEnabled('changelog')}
 						<button
-							class=" underline flex items-center space-x-1 text-xs text-gray-500 dark:text-gray-500"
+							class={actionButtonClass}
 							on:click={() => {
 								showChangelog.set(true);
 							}}
@@ -91,16 +91,6 @@
 							<div>{$i18n.t("See what's new")}</div>
 						</button>
 					{/if}
-=======
-					<button
-						class={actionButtonClass}
-						on:click={() => {
-							showChangelog.set(true);
-						}}
-					>
-						<div>{$i18n.t("See what's new")}</div>
-					</button>
->>>>>>> upstream/main
 				</div>
 
 				{#if isFeatureEnabled('changelog') && $config?.features?.enable_version_update_check}
@@ -174,34 +164,23 @@
 				>
 			</div>
 
-<<<<<<< HEAD
-		<div class="mt-2 text-xs text-gray-400 dark:text-gray-500">
-			{$i18n.t('Created by')}
-			<a
-				class=" text-gray-500 dark:text-gray-300 font-medium"
-				href="https://github.com/tjbck"
-				target="_blank">Timothy J. Baek</a
-			>
-		</div>
-
-		<div class="mt-4 pt-3 border-t border-gray-100/30 dark:border-gray-850/30">
-			<a
-				href="https://soev.ai"
-				target="_blank"
-				class="inline-flex items-center gap-1.5 text-xs text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-400"
-			>
-				<img src="{WEBUI_BASE_URL}/static/gradient-logo.png" alt="Gradient" class="size-6" />
-				{$i18n.t('Powered by soev.ai')}
-			</a>
-		</div>
-=======
 			<div class="text-xs text-gray-400 dark:text-gray-500">
 				{$i18n.t('Created by')}
 				<a class="text-gray-500 dark:text-gray-400" href="https://github.com/tjbck" target="_blank"
 					>Tim J. Baek</a
 				>
 			</div>
+			<!-- [Gradient] Fork attribution. -->
+			<div class="mt-4 pt-3 border-t border-gray-100/30 dark:border-gray-850/30">
+				<a
+					href="https://soev.ai"
+					target="_blank"
+					class="inline-flex items-center gap-1.5 text-xs text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-400"
+				>
+					<img src="{WEBUI_BASE_URL}/static/gradient-logo.png" alt="Gradient" class="size-6" />
+					{$i18n.t('Powered by soev.ai')}
+				</a>
+			</div>
 		</UserSettingSection>
->>>>>>> upstream/main
 	</div>
 </div>

@@ -5,7 +5,6 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-<<<<<<< HEAD
 ## [Gradient-DS v1.2.0] - 2026-05-25
 
 ### Merged
@@ -28,7 +27,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Migration: upstream's `d4e5f6a7b8c9_add_automation_tables` was renamed locally to `d5e6f7a8b9ca` to avoid collision with our existing `d4e5f6a7b8c9_add_soft_delete_columns` revision id. A no-op merge node `0579da7f672f` parents our head (`f9a0b1c2d3e4`) and upstream's chain top (`a0b1c2d3e4f5`).
 - Three upstream files were kept at the Gradient version pending Phase 4 carve-out audit: `backend/open_webui/routers/retrieval.py`, `src/lib/components/chat/MessageInput.svelte`, `src/lib/components/chat/MessageInput/InputMenu.svelte`. Security/bugfix hunks ported as separate `[carveout-port]` commits.
 - `[soev]` extra pins for `weaviate-client` and `playwright` were aligned to upstream's `[all]` pins (4.20.3 and 1.58.0 respectively) to resolve resolver conflicts.
-=======
+## [Gradient-DS v1.3.0] - 2026-09-08
+
+### Merged
+- Upstream Open WebUI v0.11.3 (including v0.11.0–v0.11.2): security fixes, two-menu composer, settings modal, sortable workspace tables, and migration lineage.
+- Upstream UI hosts the fork's agent picker, workspace actions, and gated admin tabs.
+
+### Preserved
+- Gradient agent runtime and routing, Document Writer, unique temporary chats, content-free logging, and provider-error redaction.
+- Cloud knowledge sync, Weaviate multitenancy, KB structure restrictions, retention and soft deletion, authentication/2FA, feedback reports, model profiles, and tenant feature gates.
+- Security dependency pins, the 14-day package cooldown, and slim-image package hygiene.
+
+### Gradient-DS default overrides
+- Calendar, automations, and OAuth backchannel logout remain opt-in.
+- Default interface settings disable iframe sandbox forms.
+- Authentication stays hidden as a separate admin tab; its inline General settings remain.
+
+### Notes
+- The composer retires the pinned input rail; the optional stored setting remains inert.
+- Upstream sub-agents, tool approval, ask-user, timers, and automations are not wired into agent-routed chats.
+- THREAD_POOL_SIZE now sizes both the AnyIO limiter and the asyncio executor; account for both in chart sizing.
+- Join the fork and upstream migration heads; retain upstream's repair of double-encoded user OAuth data.
+- Dutch translations and retrieval-config convergence follow after the merge.
+- Application version stays 0.11.3; fork release tag v1.3.0 is cut after dev → test → main.
+
 ## [0.11.3] - 2026-08-31
 
 ### Added
@@ -705,7 +727,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - 🔢 **Usage now reports the latest call separately.** In a response's usage block, "prompt_tokens" and "completion_tokens" now carry the counts from the most recent model call rather than the running total, while "input_tokens", "output_tokens" and "total_tokens" stay cumulative, so anything reading the first pair for billing should read the second set instead. [Commit](https://github.com/open-webui/open-webui/commit/df94268e892cbb66675170a6c78846aef23f6e89), [#27031](https://github.com/open-webui/open-webui/issues/27031)
 - 🧳 **The "python-jose" library is no longer installed.** Nothing in Open WebUI imports it anymore, so it and the two packages it pulled in have been dropped from the image, and any tool or function that imports it directly now needs to install it itself. [#27444](https://github.com/open-webui/open-webui/pull/27444)
 - 📦 **Storage emulator no longer bundled.** The optional Google Cloud Storage emulator is no longer installed as part of the full package, so anyone who relied on it for local storage testing now needs to install "gcp-storage-emulator" themselves. [Commit](https://github.com/open-webui/open-webui/commit/30415c925a18b1ea1c3f2739bd944dd939f020cf)
->>>>>>> upstream/main
 
 ## [0.10.2] - 2026-07-01
 

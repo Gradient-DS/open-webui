@@ -1,22 +1,17 @@
 <script>
 	import { onMount } from 'svelte';
 	import { goto } from '$app/navigation';
-<<<<<<< HEAD
 	import { isFeatureEnabled } from '$lib/utils/features';
-	import Tools from '$lib/components/workspace/Tools.svelte';
-
-	onMount(() => {
-		if (!isFeatureEnabled('tools')) {
-			goto('/');
-=======
 	import { config } from '$lib/stores';
 
 	import Tools from '$lib/components/workspace/Tools.svelte';
 
 	onMount(() => {
-		if (!$config?.features?.enable_plugins) {
+		// [Gradient] Tenant gates also apply to administrators.
+		if (!isFeatureEnabled('tools')) {
+			goto('/');
+		} else if (!$config?.features?.enable_plugins) {
 			goto('/workspace', { replaceState: true });
->>>>>>> upstream/main
 		}
 	});
 </script>

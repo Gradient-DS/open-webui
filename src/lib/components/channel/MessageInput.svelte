@@ -1016,13 +1016,8 @@
 									</slot>
 								</div>
 
-<<<<<<< HEAD
-								<div class="self-end flex space-x-1 mr-1">
-									{#if isFeatureEnabled('voice') && content === ''}
-=======
 								<div class="self-end flex space-x-1 mr-1 shrink-0 gap-[0.03125rem]">
-									{#if content === ''}
->>>>>>> upstream/main
+									{#if isFeatureEnabled('voice') && content === ''}
 										<Tooltip content={$i18n.t('Record voice')}>
 											<button
 												id="voice-input-button"

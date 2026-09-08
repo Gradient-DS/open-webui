@@ -87,11 +87,8 @@ def serve(
         port=port,
         forwarded_allow_ips='*',
         workers=UVICORN_WORKERS,
-<<<<<<< HEAD
         access_log=False,
-=======
         ws_per_message_deflate=UVICORN_WS_PER_MESSAGE_DEFLATE,
->>>>>>> upstream/main
         loop=loop,
     )
 
@@ -119,11 +116,8 @@ def dev(
         # cross-worktree noise this was guarding against is not a real
         # concern.
         forwarded_allow_ips='*',
-<<<<<<< HEAD
         access_log=False,
-=======
         ws_per_message_deflate=UVICORN_WS_PER_MESSAGE_DEFLATE,
->>>>>>> upstream/main
     )
 
 

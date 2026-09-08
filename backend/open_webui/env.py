@@ -939,15 +939,12 @@ WEBUI_NAME = os.getenv('WEBUI_NAME', 'Open WebUI')
 if WEBUI_NAME != 'Open WebUI':
     WEBUI_NAME += ' (Open WebUI)'
 
-<<<<<<< HEAD
 CLIENT_NAME = os.environ.get('CLIENT_NAME', '')
 
-=======
 # LICENSE covers this Open WebUI branding surface, including this favicon
 # and any visual, textual, or symbolic identifiers it preserves.
 # Do not alter, remove, obscure, or replace it except as LICENSE permits:
 # https://docs.openwebui.com/license.
->>>>>>> upstream/main
 WEBUI_FAVICON_URL = 'https://openwebui.com/favicon.png'
 WEBUI_BUILD_HASH = os.getenv('WEBUI_BUILD_HASH', 'dev-build')
 TRUSTED_SIGNATURE_KEY = os.getenv('TRUSTED_SIGNATURE_KEY', '')

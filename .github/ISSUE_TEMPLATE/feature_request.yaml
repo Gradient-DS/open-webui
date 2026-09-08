@@ -1,9 +1,5 @@
 name: Feature Request
-<<<<<<< HEAD
 description: Suggest a feature or improvement for soev.ai
-=======
-description: Describe what you would like Open WebUI to support.
->>>>>>> upstream/main
 title: 'feat: '
 labels: ['enhancement', 'triage']
 body:
@@ -12,91 +8,41 @@ body:
       value: |
         # Feature Request
 
-<<<<<<< HEAD
         Before submitting, please check:
 
         - **Existing issues and discussions** (open AND closed): https://github.com/Gradient-DS/open-webui/issues
         - If the feature belongs in **upstream Open WebUI** (core chat / RAG / model providers), please request it at https://github.com/open-webui/open-webui — improvements there flow back to soev.ai automatically.
 
         For larger ideas, opening a **discussion** first is often more productive than an issue.
-=======
-        Describe the requested behavior, the problem it solves, and any examples, mockups, screenshots, or workflows that clarify the request. A clear issue or discussion is the most useful contribution.
-
-        Search open and closed [Issues](https://github.com/open-webui/open-webui/issues) and [Discussions](https://github.com/open-webui/open-webui/discussions) before submitting. If the request needs broad product, UX, architecture, compatibility, or maintenance discussion, please start in [Discussions](https://github.com/open-webui/open-webui/discussions) so the community can weigh in.
-
-        Please do not open a code pull request for this request unless a maintainer asks for one, or the change is only i18n/localization. If you want to share code as reference, include it here as a local diff or patch. Clear product context is the most useful next step.
-
-        Security vulnerabilities must not be reported publicly. Use the [GitHub security page](https://github.com/open-webui/open-webui/security) instead.
->>>>>>> upstream/main
 
   - type: checkboxes
-    id: existing-request
+    id: existing-issue
     attributes:
-<<<<<<< HEAD
       label: Pre-flight
       options:
         - label: I have searched existing issues and discussions for similar requests.
           required: true
         - label: This feature fits soev.ai's scope (public-sector compliance, sovereign deployment, organizational integrations) — or I have a clear argument for why it belongs in this fork rather than upstream Open WebUI.
-=======
-      label: Before Submitting
-      options:
-        - label: I searched open and closed issues and discussions for an existing request.
-          required: true
-        - label: I checked whether this already exists on the `dev` branch or latest source.
-          required: true
-        - label: I understand that maintainers want a well-written issue or discussion before any code pull request.
-          required: true
-        - label: This request is not a security vulnerability.
->>>>>>> upstream/main
           required: true
 
   - type: textarea
     id: problem-description
     attributes:
       label: Problem
-<<<<<<< HEAD
       description: What problem does this solve? Who is affected?
-=======
-      description: What is missing, frustrating, confusing, or unnecessarily hard today?
-      placeholder: "I'm trying to..., but..."
->>>>>>> upstream/main
     validations:
       required: true
 
   - type: textarea
-    id: desired-behavior
+    id: solution-description
     attributes:
-<<<<<<< HEAD
       label: Proposed Solution
-=======
-      label: Desired Behavior
-      description: What would you like to happen instead?
-      placeholder: "I would like Open WebUI to..."
->>>>>>> upstream/main
     validations:
       required: true
-
-  - type: textarea
-    id: why-it-matters
-    attributes:
-      label: Why This Matters
-      description: Who benefits, and what workflow does this unlock or improve?
-    validations:
-      required: true
-
-  - type: textarea
-    id: examples
-    attributes:
-      label: Examples or References
-      description: Add mockups, screenshots, links, prompts, workflows, or examples from other tools.
-    validations:
-      required: false
 
   - type: textarea
     id: alternatives-considered
     attributes:
-<<<<<<< HEAD
       label: Alternatives Considered
     validations:
       required: false
@@ -106,9 +52,5 @@ body:
     attributes:
       label: Additional Context
       description: Mockups, links, examples, related issues.
-=======
-      label: Alternatives or Workarounds
-      description: What have you tried instead, if anything?
->>>>>>> upstream/main
     validations:
       required: false

@@ -1277,14 +1277,6 @@
 							console.error('Error refreshing backend config:', error);
 						}
 
-						// Initialize chat list early so reference chats are available
-						// regardless of whether the sidebar has been opened
-						if ($chats === null) {
-							getChatList(localStorage.token, $currentChatPage)
-								.then((chatList) => chats.set(chatList))
-								.catch((error) => console.error('Error initializing chat list:', error));
-						}
-
 						// Keep user timezone in sync on every app load/refresh
 						const timezone = getUserTimezone();
 						if (timezone) {
@@ -1302,17 +1294,7 @@
 						}
 					} else {
 						localStorage.removeItem('token');
-<<<<<<< HEAD
-						await goto(`/auth?redirect=${encodedUrl}`);
-					}
-				} else {
-					// Don't redirect if we're already on the auth page
-					// Needed because we pass in tokens from OAuth logins via URL fragments
-					if (!$page.url.pathname.startsWith('/auth')) {
-						await goto(`/auth?redirect=${encodedUrl}`);
-=======
 						await user.set(null);
->>>>>>> upstream/main
 					}
 				}
 			}
@@ -1445,7 +1427,7 @@
 				: 'light'
 			: 'light'}
 	richColors
-	position="top-center"
+	position="top-right"
 	closeButton
 	toastOptions={{
 		classes: {

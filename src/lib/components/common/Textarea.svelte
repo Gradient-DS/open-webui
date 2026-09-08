@@ -15,24 +15,7 @@
 	export let onInput: (event: Event) => void = () => {};
 	export let onBlur: (event: FocusEvent) => void = () => {};
 
-<<<<<<< HEAD
-	let textareaElement;
-	let scrollableParent = null;
-
-	const findScrollableParent = (el) => {
-		let parent = el?.parentElement;
-		while (parent) {
-			const { overflow, overflowY } = getComputedStyle(parent);
-			if (/(auto|scroll)/.test(overflow + overflowY)) {
-				return parent;
-			}
-			parent = parent.parentElement;
-		}
-		return null;
-	};
-=======
 	let textareaElement: HTMLTextAreaElement | null = null;
->>>>>>> upstream/main
 
 	// Adjust height on mount and after setting the element.
 	onMount(async () => {
@@ -44,7 +27,6 @@
 			const interval = setInterval(() => {
 				if (textareaElement) {
 					clearInterval(interval);
-					scrollableParent = findScrollableParent(textareaElement);
 					resize();
 				}
 			}, 100);
@@ -106,9 +88,6 @@
 		onInput(e);
 	}}
 	on:focus={() => {
-		if (!scrollableParent && textareaElement) {
-			scrollableParent = findScrollableParent(textareaElement);
-		}
 		resize();
 	}}
 	on:blur={onBlur}
