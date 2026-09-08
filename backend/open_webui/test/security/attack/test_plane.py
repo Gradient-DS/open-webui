@@ -424,7 +424,12 @@ def live_drive(live_seeding):
 
 @needs_stack
 def test_live_seeding_has_its_own_5xx_assertion(live_seeding):
-    assert not live_seeding.crashes, live_seeding.crashes
+    rows = []
+    for route, body in sorted(live_seeding.crashes.items()):
+        statuses = {status: count for status, count in live_seeding.statuses[route].items() if status >= 500}
+        rows.append(f'{route}: HTTP 5xx counts={statuses}; first 5xx body={body!r}')
+    details = '\n'.join(rows)
+    assert not live_seeding.crashes, f'Seeding found server errors:\n{details}'
 
 
 @needs_stack
@@ -438,7 +443,42 @@ def test_live_seeding_reports_its_own_reach(live_seeding, record_property):
 @needs_stack
 def test_live_drive_has_its_own_5xx_assertion(live_drive):
     crashes = {route: outcome for route, outcome in live_drive.items() if outcome.status >= 500}
-    assert not crashes, crashes
+    details = '\n'.join(
+        f'{route}: HTTP {outcome.status}; body={outcome.body!r}' for route, outcome in sorted(crashes.items())
+    )
+    assert not crashes, f'Drive found server errors:\n{details}'
+
+
+@pytest.mark.parametrize('pass_name', ['seeding', 'drive'])
+def test_5xx_gate_message_includes_every_route_status_and_actionable_body(pass_name):
+    bodies = {
+        'POST /broken': 'x' * 450 + ' model_type: expected a dictionary',
+        'DELETE /proxy/{server_id}/{path}': '<html>Unsupported method DELETE</html>',
+        'GET /empty-error': '',
+    }
+    outcomes = {}
+    for route, status in zip(bodies, [500, 501, 503], strict=True):
+        plane.record(route, 422, 'Earlier validation refusal', pass_name=pass_name)
+        result = response(status)
+        result._content = bodies[route].encode()
+        client = fake_client()
+        client.request.side_effect = [result]
+        outcomes[route] = plane._drive_response(client, route, route.split(' ', 1)[1], pass_name)
+        # A later success must not clear the seeding failure or hide its status.
+        plane.record(route, 200, 'Later success', pass_name=pass_name)
+    with pytest.raises(AssertionError) as error:
+        if pass_name == 'seeding':
+            test_live_seeding_has_its_own_5xx_assertion(plane._PASSES[pass_name])
+        else:
+            test_live_drive_has_its_own_5xx_assertion(outcomes)
+    message = str(error.value)
+    for route, status in zip(bodies, [500, 501, 503], strict=True):
+        assert route in message
+        assert str(status) in message
+        assert repr(bodies[route]) in message
+    assert '422' not in message
+    assert 'Earlier validation refusal' not in message
+    assert 'Later success' not in message
 
 
 @needs_stack

@@ -122,7 +122,7 @@ def record(route_id, status, body, *, pass_name='manual') -> bool:
         if isinstance(payload, dict) and isinstance(payload.get('errors'), int) and payload['errors'] > 0:
             tally.body_failures.append({'finding': 'PLANE-002', 'route': route_id, 'status': status, 'body': payload})
     if status >= 500:
-        tally.crashes.setdefault(route_id, response.text[:400])
+        tally.crashes.setdefault(route_id, response.text[:2000])
     return entered
 
 
@@ -298,7 +298,7 @@ def _drive_response(client, route_id, filled, pass_name, **kwargs):
             return Outcome(
                 response.status_code,
                 entered,
-                response.text[:400],
+                response.text[:2000],
                 'text/html' in response.headers.get('Content-Type', '').lower() and REFLECTION_PROBE in response.text,
             )
         finally:
