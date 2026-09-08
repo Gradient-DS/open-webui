@@ -480,7 +480,9 @@ def test_task_seeder_observes_a_live_task_after_registering_its_model_and_filter
 def test_task_filter_wait_is_bounded_and_cancellable(monkeypatch):
     parameter = next(p for p in seeds.SURFACE['parameter'] if p['key'] == 'task')
     namespace = {}
-    exec(parameter['content'], namespace)
+    # nosec B102 - executes the filter body this repo's own attack-surface.toml declares,
+    # to prove the wait is bounded without standing up a pipeline server. No external input.
+    exec(parameter['content'], namespace)  # nosec B102
 
     async def exercise():
         entered = asyncio.Event()
@@ -534,7 +536,9 @@ def test_real_model_checks_require_a_row_and_read_access_even_for_admin(role):
         ],
         type_ignores=[],
     )
-    exec(compile(checks, 'utils/models.py', 'exec'), scope)
+    # nosec B102 - compiles two functions lifted from this repo's own utils/models.py so the
+    # access checks can be exercised without importing the application. No external input.
+    exec(compile(checks, 'utils/models.py', 'exec'), scope)  # nosec B102
 
     async def exercise():
         user = SimpleNamespace(id=f'{role}-caller', role=role)
