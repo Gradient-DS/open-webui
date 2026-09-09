@@ -1,0 +1,149 @@
+"""Snapshot all exported configuration and contain corpus writes through HTTP."""
+
+from __future__ import annotations
+
+import hashlib
+import json
+import os
+from contextlib import contextmanager
+from pathlib import Path
+from urllib.parse import urlsplit, urlunsplit
+from uuid import uuid4
+
+from hostile_corpus import FETCH_URLS, REFLECTION_PROBE, fetch_payloads
+
+from .client import json_body
+
+EXPORT = '/api/v1/configs/export'
+IMPORT = '/api/v1/configs/import'
+
+
+def _request(admin, method, path, **kwargs):
+    response = admin.request(method, path, **kwargs)
+    try:
+        body = json_body(response)
+        if not 200 <= response.status_code < 300 or not isinstance(body, dict):
+            raise RuntimeError(f'Configuration recovery {method} {path} failed (HTTP {response.status_code})')
+        return body
+    finally:
+        response.close()
+
+
+def snapshot(admin):
+    return _request(admin, 'GET', EXPORT)
+
+
+def _different(left, right):
+    # JSON booleans and numbers must not compare equal during verification.
+    return json.dumps(left, sort_keys=True) != json.dumps(right, sort_keys=True)
+
+
+def restore(admin, before, *, report, route):
+    after = snapshot(admin)
+    changed = sorted(
+        key
+        for key in before.keys() | after.keys()
+        if key not in before or key not in after or _different(before[key], after[key])
+    )
+    if not changed:
+        return
+    payloads = _corpus_values()
+    for key in changed:
+        report(
+            {
+                'finding': 'PLANE-001',
+                'route': route,
+                'key': key,
+                'before_present': key in before,
+                'after_present': key in after,
+                'observed': after.get(key),
+                'restored': before.get(key),
+                'corpus': _contaminated(after.get(key), payloads),
+            }
+        )
+    updates = {key: before[key] for key in changed if key in before}
+    if updates:
+        _request(admin, 'POST', IMPORT, json={'config': updates})
+    if _different(snapshot(admin), before):
+        raise RuntimeError(
+            'Configuration recovery did not persist the exact snapshot; '
+            'export/import cannot remove newly introduced keys. Retaining the recovery journal.'
+        )
+
+
+def _journal(admin):
+    root = Path(os.getenv('ATTACK_CONFIG_STATE_DIR', Path(__file__).resolve().parents[5] / '.cache/attack'))
+    key = hashlib.sha256(admin.base_url.encode()).hexdigest()[:16]
+    return root / f'config-{key}.json'
+
+
+def _save(path, data):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_name(f'{path.name}.{uuid4().hex}.tmp')
+    try:
+        with open(temporary, 'x', opener=lambda name, flags: os.open(name, flags, 0o600)) as stream:
+            json.dump(data, stream)
+        temporary.replace(path)
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
+def _corpus_values():
+    values = {p for p in fetch_payloads() if p}
+    for url in FETCH_URLS:
+        parts = urlsplit(url)
+        values.add(urlunsplit(parts._replace(fragment='')))
+        if parts.netloc:
+            # Site-URL writers can remove the path carrying the reflection probe.
+            values.add(urlunsplit((parts.scheme, parts.netloc, '', '', '')))
+    return values
+
+
+def _contaminated(value, payloads):
+    if isinstance(value, str):
+        return REFLECTION_PROBE in value or value in payloads
+    if isinstance(value, dict):
+        return any(_contaminated(k, payloads) or _contaminated(v, payloads) for k, v in value.items())
+    if isinstance(value, list):
+        return any(_contaminated(v, payloads) for v in value)
+    return False
+
+
+def recover_configuration(admin, *, report=print):
+    journal = _journal(admin)
+    if journal.exists():
+        restore(admin, json.loads(journal.read_text()), report=report, route='interrupted pass')
+        journal.unlink()
+    current = snapshot(admin)
+    payloads = _corpus_values()
+    poisoned = {key for key, value in current.items() if _contaminated(value, payloads)}
+    if not poisoned:
+        return
+    baseline_path = os.getenv('ATTACK_CONFIG_BASELINE')
+    if not baseline_path:
+        raise RuntimeError('Previous corpus poison requires ATTACK_CONFIG_BASELINE from the CI stack environment')
+    baseline = json.loads(Path(baseline_path).read_text())
+    if not isinstance(baseline, dict) or poisoned - baseline.keys():
+        raise RuntimeError(f'Clean configuration baseline is missing poisoned keys: {sorted(poisoned)}')
+    if any(_contaminated(baseline[key], payloads) for key in poisoned):
+        raise RuntimeError('Configuration baseline itself contains corpus poison')
+    before = {**current, **{key: baseline[key] for key in poisoned}}
+    _save(journal, before)
+    restore(admin, before, report=report, route='previous run')
+    journal.unlink()
+
+
+@contextmanager
+def preserve_configuration(admin, *, report, route, durable=False):
+    before = snapshot(admin)
+    journal = _journal(admin) if durable else None
+    if journal is not None:
+        if journal.exists():
+            raise RuntimeError('Recover the previous configuration journal before starting another pass')
+        _save(journal, before)
+    try:
+        yield
+    finally:
+        restore(admin, before, report=report, route=route)
+        if journal is not None:
+            journal.unlink()

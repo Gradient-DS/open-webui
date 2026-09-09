@@ -15,6 +15,7 @@ from open_webui.config import (
     DEFAULT_TITLE_GENERATION_PROMPT_TEMPLATE,
     DEFAULT_VOICE_MODE_PROMPT_TEMPLATE,
 )
+from open_webui.services.model_request_bodies import task_completion_body
 from open_webui.constants import ERROR_MESSAGES, TASKS
 from open_webui.models.config import Config
 from open_webui.routers.pipelines import process_pipeline_inlet_filter
@@ -121,7 +122,9 @@ async def update_task_config(request: Request, form_data: TaskConfigForm, user=D
 
 
 @router.post('/title/completions')
-async def generate_title(request: Request, form_data: dict, user=Depends(get_verified_user)):
+async def generate_title(
+    request: Request, form_data: dict = Depends(task_completion_body), user=Depends(get_verified_user)
+):
     if not await Config.get('task.title.enable'):
         return JSONResponse(
             status_code=status.HTTP_200_OK,
@@ -205,7 +208,9 @@ async def generate_title(request: Request, form_data: dict, user=Depends(get_ver
 
 
 @router.post('/follow_up/completions')
-async def generate_follow_ups(request: Request, form_data: dict, user=Depends(get_verified_user)):
+async def generate_follow_ups(
+    request: Request, form_data: dict = Depends(task_completion_body), user=Depends(get_verified_user)
+):
     if not await Config.get('task.follow_up.enable'):
         return JSONResponse(
             status_code=status.HTTP_200_OK,
@@ -275,7 +280,9 @@ async def generate_follow_ups(request: Request, form_data: dict, user=Depends(ge
 
 
 @router.post('/tags/completions')
-async def generate_chat_tags(request: Request, form_data: dict, user=Depends(get_verified_user)):
+async def generate_chat_tags(
+    request: Request, form_data: dict = Depends(task_completion_body), user=Depends(get_verified_user)
+):
     if not await Config.get('task.tags.enable'):
         return JSONResponse(
             status_code=status.HTTP_200_OK,
@@ -345,7 +352,9 @@ async def generate_chat_tags(request: Request, form_data: dict, user=Depends(get
 
 
 @router.post('/image_prompt/completions')
-async def generate_image_prompt(request: Request, form_data: dict, user=Depends(get_verified_user)):
+async def generate_image_prompt(
+    request: Request, form_data: dict = Depends(task_completion_body), user=Depends(get_verified_user)
+):
     if getattr(request.state, 'direct', False) and hasattr(request.state, 'model'):
         models = {
             **request.app.state.MODELS,
@@ -409,7 +418,9 @@ async def generate_image_prompt(request: Request, form_data: dict, user=Depends(
 
 
 @router.post('/queries/completions')
-async def generate_queries(request: Request, form_data: dict, user=Depends(get_verified_user)):
+async def generate_queries(
+    request: Request, form_data: dict = Depends(task_completion_body), user=Depends(get_verified_user)
+):
     type = form_data.get('type')
     if type == 'web_search':
         if not await Config.get('task.query.search.enable'):
@@ -490,7 +501,9 @@ async def generate_queries(request: Request, form_data: dict, user=Depends(get_v
 
 
 @router.post('/auto/completions')
-async def generate_autocompletion(request: Request, form_data: dict, user=Depends(get_verified_user)):
+async def generate_autocompletion(
+    request: Request, form_data: dict = Depends(task_completion_body), user=Depends(get_verified_user)
+):
     if not await Config.get('task.autocomplete.enable'):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -572,7 +585,9 @@ async def generate_autocompletion(request: Request, form_data: dict, user=Depend
 
 
 @router.post('/emoji/completions')
-async def generate_emoji(request: Request, form_data: dict, user=Depends(get_verified_user)):
+async def generate_emoji(
+    request: Request, form_data: dict = Depends(task_completion_body), user=Depends(get_verified_user)
+):
     if getattr(request.state, 'direct', False) and hasattr(request.state, 'model'):
         models = {
             **request.app.state.MODELS,
@@ -638,7 +653,9 @@ async def generate_emoji(request: Request, form_data: dict, user=Depends(get_ver
 
 
 @router.post('/moa/completions')
-async def generate_moa_response(request: Request, form_data: dict, user=Depends(get_verified_user)):
+async def generate_moa_response(
+    request: Request, form_data: dict = Depends(task_completion_body), user=Depends(get_verified_user)
+):
     if getattr(request.state, 'direct', False) and hasattr(request.state, 'model'):
         models = {
             **request.app.state.MODELS,

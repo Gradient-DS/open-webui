@@ -22,6 +22,7 @@ from open_webui.utils.upstream_errors import safe_error_text, sanitize_upstream_
 from open_webui.config import (
     CACHE_DIR,
 )
+from open_webui.services.model_request_bodies import chat_completion_body
 from open_webui.constants import ERROR_MESSAGES
 from open_webui.events import EVENTS, publish_event, publish_model_provider_request_failed
 from open_webui.env import (
@@ -1106,7 +1107,7 @@ def convert_responses_result(response: dict) -> dict:
 @router.post('/chat/completions')
 async def generate_chat_completion(
     request: Request,
-    form_data: dict,
+    form_data: dict = Depends(chat_completion_body),
     user=Depends(get_verified_user),
 ):
     # NOTE: We intentionally do NOT use Depends(get_async_session) here.
