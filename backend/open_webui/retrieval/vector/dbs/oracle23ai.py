@@ -576,6 +576,10 @@ class Oracle23aiClient(VectorDBBase):
                     for qid, vector in enumerate(vectors):
                         vector_blob = self._vector_to_blob(vector)
 
+                        # [Gradient] nosec B608 - the sole interpolation is filter_clause from
+                        # _metadata_where, which rejects any key not matching
+                        # _SAFE_METADATA_KEY_RE and emits bind placeholders for every value.
+                        # No caller-controlled text reaches the statement.
                         cursor.execute(
                             f"""
                             SELECT dc.id, dc.text,
@@ -585,7 +589,7 @@ class Oracle23aiClient(VectorDBBase):
                             WHERE dc.collection_name = :collection_name{filter_clause}
                             ORDER BY VECTOR_DISTANCE(dc.vector, :query_vector, COSINE)
                             FETCH APPROX FIRST :limit ROWS ONLY
-                        """,
+                        """,  # nosec B608
                             {
                                 'query_vector': vector_blob,
                                 'collection_name': collection_name,
