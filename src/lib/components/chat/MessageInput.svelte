@@ -1244,7 +1244,6 @@
 				tempItemId = existingItemId;
 				fileItem = files[idx];
 				fileItem.size = file.size;
-				if ($settings?.defaultUploadContext === 'full') fileItem.context = 'full';
 				files = files; // trigger reactivity
 			}
 		}
@@ -1263,7 +1262,6 @@
 				size: file.size,
 				error: '',
 				itemId: tempItemId,
-				...($settings?.defaultUploadContext === 'full' ? { context: 'full' } : {}),
 				...itemData
 			};
 

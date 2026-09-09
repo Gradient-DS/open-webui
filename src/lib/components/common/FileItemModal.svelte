@@ -34,7 +34,6 @@
 	export let show = false;
 	export let edit = false;
 
-	let enableFullContent = false;
 	let loading = false;
 
 	let isPDF = false;
@@ -267,7 +266,6 @@
 	onMount(() => {
 		console.log(item);
 		if (item?.context === 'full') {
-			enableFullContent = true;
 		}
 
 		if (item?.id && item?.type === 'file') {
@@ -372,33 +370,8 @@
 						{/if}
 					</div>
 
-					{#if edit}
-						<div class=" self-end">
-							<Tooltip
-								content={enableFullContent
-									? $i18n.t(
-											'Inject the entire content as context for comprehensive processing, this is recommended for complex queries.'
-										)
-									: $i18n.t(
-											'Default to segmented retrieval for focused and relevant content extraction, this is recommended for most cases.'
-										)}
-							>
-								<div class="flex items-center gap-1.5 text-xs">
-									{#if enableFullContent}
-										{$i18n.t('Using Entire Document')}
-									{:else}
-										{$i18n.t('Using Focused Retrieval')}
-									{/if}
-									<Switch
-										bind:state={enableFullContent}
-										on:change={(e) => {
-											item.context = e.detail ? 'full' : undefined;
-										}}
-									/>
-								</div>
-							</Tooltip>
-						</div>
-					{/if}
+					<!-- [Gradient] The full-document / focused-retrieval choice is gone: retrieval
+					     strategy is decided agent-side, and every tenant runs the agent. -->
 				</div>
 			</div>
 		</div>

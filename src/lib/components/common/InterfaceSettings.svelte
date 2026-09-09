@@ -101,7 +101,6 @@
 	let showChangelog = true;
 
 	// File
-	let defaultUploadContext: 'full' | 'focused' = 'focused';
 
 	let showEmojiInCall = false;
 	let voiceInterruption = false;
@@ -404,8 +403,6 @@
 		fontFamilyInput = fontFamily ?? '';
 		showTextScaleSlider = false;
 		showFontFamilyInput = false;
-
-		defaultUploadContext = currentSettings?.defaultUploadContext ?? 'focused';
 	};
 
 	let lastSettingsValue = settingsValue;
@@ -1861,32 +1858,7 @@
 
 	<div class={sectionHeadingClass}>{$i18n.t('File')}</div>
 
-	<div>
-		<div class={settingRowClass}>
-			<div id="default-upload-mode-label" class={settingLabelClass}>
-				{$i18n.t('Default Upload Mode')}
-			</div>
-
-			<button
-				aria-labelledby="default-upload-mode-label default-upload-mode-state"
-				class={actionButtonClass}
-				on:click={() => {
-					defaultUploadContext = defaultUploadContext === 'full' ? 'focused' : 'full';
-					saveSettings({ defaultUploadContext });
-				}}
-				type="button"
-			>
-				<span id="default-upload-mode-state">
-					{defaultUploadContext === 'full'
-						? $i18n.t('Using Entire Document')
-						: $i18n.t('Using Focused Retrieval')}
-				</span>
-			</button>
-		</div>
-		<p class={settingDescriptionClass}>
-			{$i18n.t('Attach files with full content or focused retrieval by default.')}
-		</p>
-	</div>
+	<div></div>
 
 	<div>
 		<div class={settingRowClass}>

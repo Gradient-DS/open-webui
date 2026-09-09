@@ -1209,15 +1209,9 @@
 
 			<AdminSettingSection title={$i18n.t('Retrieval')}>
 				{#if !RAGConfig.BYPASS_EMBEDDING_AND_RETRIEVAL}
-					<AdminSettingRow
-						label={$i18n.t('Full Context Mode')}
-						description={RAGConfig.RAG_FULL_CONTEXT
-							? $i18n.t('Inject entire documents as context for comprehensive processing.')
-							: $i18n.t('Use segmented retrieval for focused context.')}
-						let:labelId
-					>
-						<Switch bind:state={RAGConfig.RAG_FULL_CONTEXT} ariaLabelledbyId={labelId} />
-					</AdminSettingRow>
+					<!-- [Gradient] No Full Context Mode switch: retrieval strategy is decided
+					     agent-side. RAG_FULL_CONTEXT remains a config key, so the sections
+					     below still honour whatever the deployment sets. -->
 
 					{#if !RAGConfig.RAG_FULL_CONTEXT}
 						<AdminSettingRow
