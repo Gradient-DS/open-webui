@@ -223,6 +223,13 @@ cryptography = false
 # range (last_affected 1.14.0) — see the pin comment in [project.dependencies].
 # Remove this exemption once 1.15.0 ages past the 14-day window on 2026-09-23.
 accelerate = false
+# Security-fix exemption (2026-09-09): weasyprint 70.0 (published 2026-09-08) is
+# the first release fixing CVE-2026-55073 / GHSA-jf6q-chmf-3h3v — see the pin
+# comment in backend/requirements.txt. The pin lives only in the requirements
+# files, but `uv pip install -r` still applies this section's cutoff, so the
+# exemption is required here. Remove it once 70.0 ages past the 14-day window on
+# 2026-09-22.
+weasyprint = false
 
 [tool.hatch.build.targets.wheel]
 sources = ["backend"]
