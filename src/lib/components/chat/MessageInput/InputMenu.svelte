@@ -652,7 +652,7 @@
 						<Tooltip content={internalBlocked ? dataSeparationMessage : ''} className="w-full">
 							<button
 								type="button"
-								class="flex w-full gap-2 items-center h-[1.6875rem] px-2 text-[0.8125rem] font-normal rounded-xl hover:bg-gray-50/40 dark:hover:bg-gray-800/40"
+								class="flex w-full gap-2 items-center h-[1.6875rem] px-2 text-[0.8125rem] font-normal select-none cursor-pointer rounded-xl hover:bg-gray-50/40 dark:hover:bg-gray-800/40"
 								class:opacity-50={internalBlocked}
 								aria-disabled={internalBlocked}
 								on:click={() => {

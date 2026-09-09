@@ -308,10 +308,7 @@
 						'This model is not hosted on Dutch private cloud. Be careful when sharing sensitive data.'
 					)}
 				>
-					<ExclamationTriangle
-						className="size-3.5 text-amber-500 dark:text-amber-400"
-						strokeWidth="2"
-					/>
+					<ExclamationTriangle className="size-3.5 text-amber-500 dark:text-amber-400" />
 				</Tooltip>
 			{/if}
 

@@ -201,10 +201,12 @@
 								</div>
 							{/if}
 							{#if $appConfig?.features?.enable_data_warnings}
-								<DataWarnings
-									bind:dataWarnings={defaultDataWarnings}
-									bind:warningMessage={defaultWarningMessage}
-								/>
+								<div class="mt-4">
+									<DataWarnings
+										bind:dataWarnings={defaultDataWarnings}
+										bind:warningMessage={defaultWarningMessage}
+									/>
+								</div>
 							{/if}
 						</div>
 					{/if}

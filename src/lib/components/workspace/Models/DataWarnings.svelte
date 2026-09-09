@@ -71,19 +71,17 @@
 </script>
 
 <div>
-	<div class="flex w-full justify-between mb-1">
-		<div class="self-center text-xs font-medium text-gray-500">
-			{$i18n.t('Data Sovereignty Warnings')}
-		</div>
+	<div class="mb-1.5 text-xs text-gray-400 dark:text-gray-600">
+		{$i18n.t('Data Sovereignty Warnings')}
 	</div>
-	<div class="text-xs text-gray-400 mb-2">
+	<div class="mb-2 text-xs text-gray-400 dark:text-gray-600">
 		{$i18n.t(
 			'Select capabilities that require user acknowledgment before first use in a conversation.'
 		)}
 	</div>
-	<div class="flex items-center mt-2 flex-wrap">
+	<div class="grid grid-cols-1 gap-x-5 gap-y-1 sm:grid-cols-2 lg:grid-cols-3">
 		{#each visibleWarnings as key}
-			<div class="flex items-center gap-2 mr-3">
+			<div class="flex min-h-6 items-center gap-2.5">
 				<Checkbox
 					state={dataWarnings[key] ? 'checked' : 'unchecked'}
 					on:change={(e) => {
@@ -93,7 +91,7 @@
 						};
 					}}
 				/>
-				<div class="py-0.5 text-sm">
+				<div class="min-w-0 text-left text-xs text-gray-600 dark:text-gray-400">
 					<Tooltip content={marked.parse(warningLabels[key].description)}>
 						{$i18n.t(warningLabels[key].label)}
 					</Tooltip>
@@ -104,11 +102,11 @@
 
 	{#if Object.values(dataWarnings).some((v) => v)}
 		<div class="mt-3">
-			<div class="text-xs font-medium text-gray-500 mb-1">
+			<div class="mb-1 text-xs text-gray-600 dark:text-gray-400">
 				{$i18n.t('Warning Message')}
 			</div>
 			<textarea
-				class="w-full rounded-lg px-3 py-2 text-sm bg-gray-50 dark:bg-gray-850 dark:text-gray-200 outline-hidden resize-none"
+				class="w-full resize-none bg-transparent py-1 text-[0.8125rem] text-gray-700 outline-hidden placeholder:text-gray-300 dark:text-gray-300 dark:placeholder:text-gray-700"
 				rows="3"
 				placeholder={$i18n.t(
 					'This model runs on external infrastructure. Uploaded files and conversation content will be processed by an external provider. Do you want to continue?'

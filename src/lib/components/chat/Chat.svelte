@@ -4697,7 +4697,7 @@
 	}}
 >
 	<div class="text-sm text-gray-500">
-		<div class="bg-amber-500/20 text-amber-700 dark:text-amber-200 rounded-lg px-4 py-3 mb-3">
+		<div class="bg-yellow-500/20 text-yellow-700 dark:text-yellow-200 rounded-lg px-4 py-3 mb-3">
 			<div class="font-medium mb-1">
 				{$i18n.t('The following capabilities will send data to an external provider')}:
 			</div>
