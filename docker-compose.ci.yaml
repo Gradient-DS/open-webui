@@ -254,6 +254,10 @@ services:
       - ./docker-compose.ci.yaml:/app/docker-compose.ci.yaml:ro
       - ./cicd:/app/cicd:ro
       - ./security:/app/security:ro
+      # The image copies ./backend only, so the exporter the drift gate re-runs
+      # is absent from it. Mounted read-only rather than baked in: it is test
+      # tooling, and the runtime image ships no test tooling.
+      - ./scripts/security:/app/scripts/security:ro
     depends_on:
       postgres:
         condition: service_healthy
