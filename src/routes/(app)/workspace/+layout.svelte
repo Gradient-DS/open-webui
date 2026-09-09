@@ -23,13 +23,11 @@
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
 	import Sidebar from '$lib/components/icons/Sidebar.svelte';
 	import SplitCreateButton from '$lib/components/common/SplitCreateButton.svelte';
-	import { formatNumber } from '$lib/utils';
 
 	const i18n = getContext<Writable<i18nType>>('i18n');
 
 	let loaded = false;
 	let lastPath = '';
-	let activeWorkspaceSection = '';
 	let visibleActions = [];
 
 	$: if ($page.url.pathname !== lastPath) {
@@ -41,11 +39,9 @@
 		loadWorkspaceCounts();
 	}
 
-	$: activeWorkspaceSection = $page.url.pathname.split('/')[2] ?? '';
 	$: visibleActions = $workspaceActions.filter((action) => action.visible ?? true);
 
 	const getCount = (res: any) => res?.total ?? (Array.isArray(res) ? res.length : null);
-	const formatCount = (count: number | null) => formatNumber(count ?? 0);
 
 	const loadWorkspaceCounts = async () => {
 		const canViewModels =
@@ -181,81 +177,10 @@
 					</div>
 				{/if}
 
+				<!-- [Gradient] No section tabs here: the sidebar is the only navigation for
+				     Knowledge, Agents, Prompts, Skills and Tools. Upstream's always-on
+				     workspace nav duplicated it row for row. The create action stays. -->
 				<div class="flex w-full items-center">
-					<div
-						class="flex min-w-0 mr-1.5 items-center gap-0.5 md:gap-1 scrollbar-none overflow-x-auto w-fit text-center text-sm font-normal rounded-full bg-transparent py-1 touch-auto pointer-events-auto"
-					>
-						{#if isFeatureEnabled('models') && ($user?.role === 'admin' || $user?.permissions?.workspace?.models)}
-							<a
-								draggable="false"
-								aria-current={activeWorkspaceSection === 'models' ? 'page' : null}
-								class="min-w-fit px-1 text-sm inline-flex items-center gap-1 {activeWorkspaceSection ===
-								'models'
-									? 'text-gray-900 dark:text-gray-100'
-									: 'text-gray-300 dark:text-gray-600 hover:text-gray-700 dark:hover:text-white'} transition select-none"
-								href="/workspace/models"
-							>
-								<span>{$i18n.t('Agents')}</span>
-								<span class="text-sm opacity-60">
-									{formatCount($workspaceCounts.models)}
-								</span>
-							</a>
-						{/if}
-
-						<!-- [Gradient] Knowledge navigation lives in the sidebar. -->
-
-						{#if isFeatureEnabled('prompts') && ($user?.role === 'admin' || $user?.permissions?.workspace?.prompts)}
-							<a
-								draggable="false"
-								aria-current={activeWorkspaceSection === 'prompts' ? 'page' : null}
-								class="min-w-fit px-1 text-sm inline-flex items-center gap-1 {activeWorkspaceSection ===
-								'prompts'
-									? 'text-gray-900 dark:text-gray-100'
-									: 'text-gray-300 dark:text-gray-600 hover:text-gray-700 dark:hover:text-white'} transition select-none"
-								href="/workspace/prompts"
-							>
-								<span>{$i18n.t('Prompts')}</span>
-								<span class="text-sm opacity-60">
-									{formatCount($workspaceCounts.prompts)}
-								</span>
-							</a>
-						{/if}
-
-						{#if isFeatureEnabled('skills') && ($user?.role === 'admin' || $user?.permissions?.workspace?.skills)}
-							<a
-								draggable="false"
-								aria-current={activeWorkspaceSection === 'skills' ? 'page' : null}
-								class="min-w-fit px-1 text-sm inline-flex items-center gap-1 {activeWorkspaceSection ===
-								'skills'
-									? 'text-gray-900 dark:text-gray-100'
-									: 'text-gray-300 dark:text-gray-600 hover:text-gray-700 dark:hover:text-white'} transition select-none"
-								href="/workspace/skills"
-							>
-								<span>{$i18n.t('Skills')}</span>
-								<span class="text-sm opacity-60">
-									{formatCount($workspaceCounts.skills)}
-								</span>
-							</a>
-						{/if}
-
-						{#if isFeatureEnabled('tools') && $config?.features?.enable_plugins && ($user?.role === 'admin' || $user?.permissions?.workspace?.tools)}
-							<a
-								draggable="false"
-								aria-current={activeWorkspaceSection === 'tools' ? 'page' : null}
-								class="min-w-fit px-1 text-sm inline-flex items-center gap-1 {activeWorkspaceSection ===
-								'tools'
-									? 'text-gray-900 dark:text-gray-100'
-									: 'text-gray-300 dark:text-gray-600 hover:text-gray-700 dark:hover:text-white'} transition select-none"
-								href="/workspace/tools"
-							>
-								<span>{$i18n.t('Tools')}</span>
-								<span class="text-sm opacity-60">
-									{formatCount($workspaceCounts.tools)}
-								</span>
-							</a>
-						{/if}
-					</div>
-
 					<div class="ml-auto flex shrink-0 items-center gap-1">
 						<SplitCreateButton actions={visibleActions} />
 					</div>
