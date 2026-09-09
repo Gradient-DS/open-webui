@@ -255,3 +255,59 @@ exceptions:
       of any published artifact and is never installed at runtime.
     approved_by: "PENDING second review by @Gradient-DS/security"
     recheck: 2026-09-22
+
+  - id: GHSA-7pqw-9j4j-h8q3
+    package: extract-zip
+    scanner: npm
+    reason: >-
+      Same package and same reachability as GHSA-jmr9-qjv8-65gv: an arbitrary
+      file write through a symlink in an attacker-supplied archive. Only cypress
+      hands archives to extract-zip, and only its own downloaded binary.
+    replacement_considered: >-
+      Fixed by the same cypress 16 major, tracked separately.
+    usage_analysis: >-
+      Transitive beneath a devDependency; not present in the shipped bundle.
+    approved_by: Lex Lubbers, 2026-09-09
+    recheck: 2026-12-09
+
+  - id: GHSA-2883-xcg3-v3hh
+    package: js-yaml
+    scanner: npm
+    reason: >-
+      CPU exhaustion when parsing YAML with many merge keys. Reached only
+      beneath cypress, which parses its own configuration, not attacker input.
+      The application does not parse YAML in the browser at all.
+    replacement_considered: >-
+      A fixed js-yaml exists, but the vulnerable version is pinned by the
+      cypress tree, so reaching it means the same cypress 16 major.
+    usage_analysis: >-
+      Transitive beneath a devDependency. Not imported by any file under src/,
+      and absent from the production bundle.
+    approved_by: Lex Lubbers, 2026-09-09
+    recheck: 2026-12-09
+
+  - id: CVE-2026-69112
+    package: accelerate
+    scanner: pip-audit
+    reason: >-
+      Path traversal in load_checkpoint_in_model and load_checkpoint_and_dispatch,
+      which read weight_map entries from sharded checkpoint indexes. No fix
+      version has been published. Neither function is called anywhere in this
+      repository, and the package is not installed in the image we ship:
+      requirements-slim.txt drops accelerate, and both the release build
+      (docker-build-soev.yaml) and the image scanned by this suite set
+      USE_SLIM=true. pip-audit flags it because it reads requirements.txt as a
+      source manifest, not because the artefact contains it.
+    replacement_considered: >-
+      No upgrade exists. Removing accelerate from requirements.txt was
+      considered and rejected: that file is the CUDA/CPU image's manifest and is
+      inherited from upstream, which pins the identical version. Diverging there
+      would create a permanent merge conflict for a package our own builds
+      already exclude.
+    usage_analysis: >-
+      grep for imports across backend/open_webui finds none; the single textual
+      match is S3_USE_ACCELERATE_ENDPOINT, an unrelated S3 transfer setting.
+      Verified absent from the running slim container.
+    approved_by: Lex Lubbers, 2026-09-09
+    recheck: 2026-12-09
+
