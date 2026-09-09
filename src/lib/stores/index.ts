@@ -1,5 +1,6 @@
 import { APP_NAME } from '$lib/constants';
 import { type Writable, derived, writable } from 'svelte/store';
+import type { ComponentType, SvelteComponent } from 'svelte';
 import type { ModelConfig } from '$lib/apis';
 import type { Banner } from '$lib/types';
 import type { Socket } from 'socket.io-client';
@@ -80,6 +81,10 @@ export type WorkspaceAction = {
 	href?: string;
 	onClick?: () => void | Promise<void>;
 	visible?: boolean;
+	// [Gradient] Optional per-entry icon; falls back to SplitCreateButton's
+	// id-derived default. Cloud-KB entries need their provider logo, which the
+	// `<section>-<verb>` id convention cannot express.
+	icon?: ComponentType<SvelteComponent<{ className?: string }>>;
 };
 
 export const workspaceCounts: Writable<Record<WorkspaceSection, number | null>> = writable({

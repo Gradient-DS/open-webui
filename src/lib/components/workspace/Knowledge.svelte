@@ -104,22 +104,27 @@
 	$: if (loaded) {
 		workspaceActions.set([
 			{
-				id: 'knowledge-new-local',
+				id: 'knowledge-new',
 				label: $i18n.t('Local Knowledge Base'),
+				icon: FolderOpen,
 				onClick: () => {
 					showCreateModal = true;
 				}
 			},
-			// [Gradient] Cloud KB creation keeps its provider-specific route and gates.
+			// [Gradient] Cloud KB creation keeps its provider-specific route, gates and logo.
+			// The base id follows upstream's `<section>-new` convention so SplitCreateButton's
+			// primaryAction resolves deterministically rather than falling through to [0].
 			{
 				id: 'knowledge-new-onedrive',
 				label: $i18n.t('From OneDrive'),
+				icon: OneDrive,
 				onClick: () => goto('/workspace/knowledge/create?type=onedrive'),
 				visible: !!$config?.features?.enable_onedrive_integration
 			},
 			{
 				id: 'knowledge-new-google-drive',
 				label: $i18n.t('From Google Drive'),
+				icon: GoogleDrive,
 				onClick: () => goto('/workspace/knowledge/create?type=google_drive'),
 				visible: !!(
 					$config?.features?.enable_google_drive_integration &&
@@ -129,6 +134,7 @@
 			{
 				id: 'knowledge-new-confluence',
 				label: $i18n.t('From Confluence'),
+				icon: Confluence,
 				onClick: () => goto('/workspace/knowledge/create?type=confluence'),
 				visible: !!(
 					$config?.features?.enable_confluence_integration &&

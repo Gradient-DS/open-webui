@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { getContext } from 'svelte';
 	import { goto } from '$app/navigation';
+	import type { ComponentType, SvelteComponent } from 'svelte';
 	import type { Writable } from 'svelte/store';
 	import type { i18n as i18nType } from 'i18next';
 
@@ -18,6 +19,8 @@
 		href?: string;
 		onClick?: () => void | Promise<void>;
 		visible?: boolean;
+		// [Gradient] Optional per-entry icon; see WorkspaceAction in $lib/stores.
+		icon?: ComponentType<SvelteComponent<{ className?: string }>>;
 	};
 
 	export let actions: SplitCreateAction[] = [];
@@ -82,7 +85,7 @@
 			<div slot="content">
 				<DropdownMenu className="min-w-[10.625rem]">
 					{#each visibleActions as action (action.id)}
-						{@const Icon = getActionIcon(action.id)}
+						{@const Icon = action.icon ?? getActionIcon(action.id)}
 						{#if action.href}
 							<a
 								href={action.href}
