@@ -103,7 +103,7 @@
 			{/if}
 
 			<!-- [Gradient] Pin assistants, and allow unpinning admin-default base models. -->
-			{#if model?.info?.base_model_id || $pinnedModels.includes(model.id)}
+			{#if model?.info?.base_model_id || $pinnedModels.includes(model?.id)}
 				<button
 					type="button"
 					aria-pressed={$pinnedModels.includes(model?.id)}

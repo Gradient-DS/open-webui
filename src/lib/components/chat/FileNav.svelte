@@ -901,8 +901,7 @@
 					);
 					if (result) {
 						const arrayBuffer = await result.blob.arrayBuffer();
-						const XLSX = await import('xlsx');
-						const wb = XLSX.read(new Uint8Array(arrayBuffer), { type: 'array' });
+						const wb = await readWorkbook(arrayBuffer);
 						excelWorkbook = wb;
 						excelSheetNames = wb.SheetNames;
 						if (excelSheetNames.length > 0) {

@@ -446,7 +446,13 @@
 					{/if}
 
 					{#if showImageGenerationButton}
-						<Tooltip content={$i18n.t('Generate an image')} placement="top-start">
+						<!-- [Gradient] #171: explain the reciprocal web search exclusion. -->
+						<Tooltip
+							content={webSearchEnabled
+								? $i18n.t('Web search and image generation cannot run in the same turn')
+								: $i18n.t('Generate an image')}
+							placement="top-start"
+						>
 							<button
 								class="flex w-full justify-between gap-2 items-center h-[1.6875rem] px-2 text-[0.8125rem] font-normal cursor-pointer rounded-xl hover:bg-gray-50/40 dark:hover:bg-gray-800/40"
 								aria-pressed={imageGenerationEnabled}

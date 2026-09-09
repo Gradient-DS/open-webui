@@ -264,21 +264,21 @@
 				/>
 			</UserSettingField>
 
+			<UserSettingField
+				label={$i18n.t('Bio')}
+				description={$i18n.t('Add optional profile context visible where profiles are shown.')}
+			>
+				<Textarea
+					className={textareaClass}
+					minSize={60}
+					bind:value={bio}
+					ariaLabel={$i18n.t('Bio')}
+					placeholder={$i18n.t('Share your background and interests')}
+				/>
+			</UserSettingField>
+
 			<!-- [Gradient] Tenant-controlled demographic fields. -->
 			{#if isFeatureEnabled('user_demographics')}
-				<UserSettingField
-					label={$i18n.t('Bio')}
-					description={$i18n.t('Add optional profile context visible where profiles are shown.')}
-				>
-					<Textarea
-						className={textareaClass}
-						minSize={60}
-						bind:value={bio}
-						ariaLabel={$i18n.t('Bio')}
-						placeholder={$i18n.t('Share your background and interests')}
-					/>
-				</UserSettingField>
-
 				<UserSettingField
 					label={$i18n.t('Gender')}
 					description={$i18n.t('Choose the gender value stored on your profile.')}

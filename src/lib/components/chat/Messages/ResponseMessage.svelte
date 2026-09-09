@@ -46,6 +46,7 @@
 
 	import Name from './Name.svelte';
 	import ProfileImage from './ProfileImage.svelte';
+	import Skeleton from './Skeleton.svelte';
 	import Image from '$lib/components/common/Image.svelte';
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
 	import RateComment from './RateComment.svelte';

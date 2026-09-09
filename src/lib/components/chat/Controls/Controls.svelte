@@ -55,7 +55,7 @@
 	{/if}
 
 	{#if isFeatureEnabled('chat_controls') && ($user?.role === 'admin' || ($user?.permissions.chat?.controls ?? true))}
-		<div class=" dark:text-gray-200 text-sm py-0.5 px-0.5">
+		<div class="space-y-1 dark:text-gray-200 text-sm py-0.5 px-0.5">
 			{#if isChatControlSectionEnabled('files')}
 				<Collapsible
 					title={$i18n.t('Files')}

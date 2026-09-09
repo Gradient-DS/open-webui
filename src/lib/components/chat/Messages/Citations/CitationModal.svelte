@@ -12,6 +12,7 @@
 	import { renderDocxHtml, readWorkbook, renderSheetHtml } from '$lib/utils/officePreview';
 	import { highlightDocx, scrollToFirstDocxHighlight } from '$lib/utils/citationDomHighlight';
 	import { rectsFromMetadata } from '$lib/utils/citationRects';
+	import { injectCsp } from '$lib/utils/csp';
 
 	import XMark from '$lib/components/icons/XMark.svelte';
 	import ArrowTopRightOnSquare from '$lib/components/icons/ArrowTopRightOnSquare.svelte';
@@ -78,7 +79,7 @@
 		expandedDocs = new Set();
 		selectedTab = 'preview';
 		activeSnippetIdx = 0;
-		mergedDocuments = citation.document?.map((c, i) => {
+		mergedDocuments = (citation.document ?? []).map((c, i) => {
 			return {
 				source: citation.source,
 				document: c,
@@ -641,15 +642,20 @@
 									{#if document.metadata?.html}
 										<iframe
 											class="w-full border-0 h-auto rounded-none"
-											sandbox="allow-scripts allow-forms{($settings?.iframeSandboxAllowSameOrigin ??
-											false)
+											sandbox="{($settings?.iframeSandboxAllowScripts ?? true)
+												? 'allow-scripts'
+												: ''}{($settings?.iframeSandboxAllowForms ?? true)
+												? ' allow-forms'
+												: ''}{($settings?.iframeSandboxAllowDownloads ?? true)
+												? ' allow-downloads'
+												: ''}{($settings?.iframeSandboxAllowSameOrigin ?? false)
 												? ' allow-same-origin'
 												: ''}"
-											srcdoc={document.document}
+											srcdoc={injectCsp(document.document ?? '', $config?.ui?.iframe_csp ?? '')}
 											title={$i18n.t('Content')}
 										></iframe>
 									{:else}
-										{@const rawContent = document.document.trim().replace(/\n\n+/g, '\n\n')}
+										{@const rawContent = (document.document ?? '').trim().replace(/\n\n+/g, '\n\n')}
 										{@const isTruncated =
 											($settings?.renderMarkdownInPreviews ?? true) &&
 											rawContent.length > CONTENT_PREVIEW_LIMIT &&
