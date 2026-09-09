@@ -960,6 +960,10 @@ async def create_external_knowledge(
         KnowledgeForm(
             name=form_data.name.strip(),
             description=form_data.description,
+            # [Gradient] KnowledgeModel.type is non-optional, and insert_new_knowledge
+            # builds the model outside its try block — an implicit None raises a
+            # ValidationError that escapes as a 500 instead of a handled failure.
+            type='local',
             access_grants=form_data.access_grants,
         ),
         db=db,
@@ -1023,6 +1027,10 @@ async def create_external_knowledge_source(
         KnowledgeForm(
             name=form_data.name.strip(),
             description=form_data.description,
+            # [Gradient] KnowledgeModel.type is non-optional, and insert_new_knowledge
+            # builds the model outside its try block — an implicit None raises a
+            # ValidationError that escapes as a 500 instead of a handled failure.
+            type='local',
             access_grants=form_data.access_grants,
         ),
         db=db,
