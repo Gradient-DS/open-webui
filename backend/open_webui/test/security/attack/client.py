@@ -36,31 +36,43 @@ _EXPIRED = 'Your session has expired or the token is invalid. Please sign in aga
 _PROHIBITED = 'You do not have permission to access this resource. Please contact your administrator for assistance.'
 _BAD_CREDENTIALS = 'The email or password provided is incorrect. Please check for typos and try logging in again.'
 _NOT_ENTERED_MARKERS = (
-    RefusalMarker((401,), 'Not authenticated', 'utils/auth.py', 'get_current_user', 338),
-    RefusalMarker((401,), 'Invalid token', 'utils/auth.py', 'get_current_user', 364),
-    RefusalMarker((401,), 'Invalid token', 'utils/auth.py', 'get_current_user', 389),
-    RefusalMarker((403,), '2FA verification required', 'utils/auth.py', 'get_current_user', 373),
-    RefusalMarker((401,), _EXPIRED, 'utils/auth.py', 'get_current_user', 396, 'INVALID_TOKEN', 60),
-    RefusalMarker((401,), _EXPIRED, 'utils/auth.py', 'get_current_user_by_api_key', 451, 'INVALID_TOKEN', 60),
-    RefusalMarker((401,), _EXPIRED, 'routers/auths.py', 'get_session_user', 331, 'INVALID_TOKEN', 60),
-    RefusalMarker((401, 403), _PROHIBITED, 'utils/auth.py', 'get_verified_user', 500, 'ACCESS_PROHIBITED', 71),
-    RefusalMarker((401, 403), _PROHIBITED, 'utils/auth.py', 'get_admin_user', 530, 'ACCESS_PROHIBITED', 71),
+    RefusalMarker((401,), 'Not authenticated', 'utils/auth.py', 'get_current_user', 370),
+    RefusalMarker((401,), 'Invalid token', 'utils/auth.py', 'get_current_user', 398),
+    RefusalMarker((401,), 'Invalid token', 'utils/auth.py', 'get_current_user', 423),
+    RefusalMarker((403,), '2FA verification required', 'utils/auth.py', 'get_current_user', 407),
+    RefusalMarker((401,), _EXPIRED, 'utils/auth.py', 'get_current_user', 430, 'INVALID_TOKEN', 59),
+    RefusalMarker((401,), _EXPIRED, 'utils/auth.py', 'get_current_user_by_api_key', 486, 'INVALID_TOKEN', 59),
+    RefusalMarker((401,), _EXPIRED, 'routers/auths.py', 'get_session_user', 354, 'INVALID_TOKEN', 59),
+    RefusalMarker((401, 403), _PROHIBITED, 'utils/auth.py', 'get_verified_user', 544, 'ACCESS_PROHIBITED', 70),
+    RefusalMarker((401, 403), _PROHIBITED, 'utils/auth.py', 'get_admin_user', 621, 'ACCESS_PROHIBITED', 70),
     RefusalMarker(
-        (401, 403), _PROHIBITED, 'utils/auth.py', 'get_current_user_by_api_key', 478, 'ACCESS_PROHIBITED', 71
+        (401, 403), _PROHIBITED, 'utils/auth.py', 'get_current_user_by_api_key', 519, 'ACCESS_PROHIBITED', 70
     ),
-    RefusalMarker((429,), 'API rate limit exceeded', 'routers/auths.py', 'signin', 925, 'RATE_LIMIT_EXCEEDED', 88),
-    RefusalMarker((400,), _BAD_CREDENTIALS, 'routers/auths.py', 'signin', 980, 'INVALID_CRED', 61),
-    RefusalMarker((401,), '401 Unauthorized', 'utils/auth.py', 'get_current_user', 382, 'UNAUTHORIZED', 70),
-    RefusalMarker((401,), '401 Unauthorized', 'utils/auth.py', 'get_current_user', 427, 'UNAUTHORIZED', 70),
-    RefusalMarker((401,), 'User mismatch. Please sign in again.', 'utils/auth.py', 'get_current_user', 404),
+    RefusalMarker((429,), 'API rate limit exceeded', 'routers/auths.py', 'signin', 1002, 'RATE_LIMIT_EXCEEDED', 87),
+    RefusalMarker((400,), _BAD_CREDENTIALS, 'routers/auths.py', 'signin', 1057, 'INVALID_CRED', 60),
+    RefusalMarker((401,), '401 Unauthorized', 'utils/auth.py', 'get_current_user', 416, 'UNAUTHORIZED', 69),
+    RefusalMarker((401,), '401 Unauthorized', 'utils/auth.py', 'get_current_user', 462, 'UNAUTHORIZED', 69),
+    RefusalMarker((401,), 'User mismatch. Please sign in again.', 'utils/auth.py', 'get_current_user', 438),
     RefusalMarker(
         (403,),
         'Use of API key is not enabled in the environment.',
         'utils/auth.py',
         'get_current_user_by_api_key',
-        466,
+        497,
         'API_KEY_NOT_ALLOWED',
-        82,
+        81,
+    ),
+    # v0.11.3 split the API-key refusal in two: the feature flag at 497, and a
+    # per-user permission check at 506. Both emit the same detail, so both must
+    # be pinned or the emission count no longer matches the table.
+    RefusalMarker(
+        (403,),
+        'Use of API key is not enabled in the environment.',
+        'utils/auth.py',
+        'get_current_user_by_api_key',
+        506,
+        'API_KEY_NOT_ALLOWED',
+        81,
     ),
 )
 _REFUSALS = {(status, marker.detail) for marker in _NOT_ENTERED_MARKERS for status in marker.statuses}

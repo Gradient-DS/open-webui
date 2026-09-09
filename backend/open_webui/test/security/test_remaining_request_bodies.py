@@ -215,7 +215,15 @@ def test_user_settings_keep_nested_values_and_permission_filter(role, temperatur
     if role == 'user':
         expected['ui'].pop('toolServers')
     monkeypatch.setattr(users.Config, 'get', AsyncMock(return_value={}))
-    monkeypatch.setattr(users, 'has_permission', AsyncMock(side_effect=[True, False]))
+
+    # Keyed on the permission rather than call order: v0.11.3 added a
+    # features.webhooks check beside the existing tool-servers one, and a
+    # positional side_effect silently reassigns which answer belongs to which
+    # question when a caller inserts a check.
+    async def permits(_user_id, permission, *_args, **_kwargs):
+        return permission != 'features.direct_tool_servers'
+
+    monkeypatch.setattr(users, 'has_permission', permits)
     updated = AsyncMock(return_value=SimpleNamespace(id='control-user', settings=expected))
     monkeypatch.setattr(users.Users, 'update_user_settings_by_id', updated)
     monkeypatch.setattr(users, 'publish_event', AsyncMock())

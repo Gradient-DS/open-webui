@@ -196,9 +196,9 @@ def test_old_poison_without_a_clean_baseline_fails_before_seeding(monkeypatch, t
 
 
 def test_recovery_does_not_remove_routes_or_fields():
-    assert len(plane.operations()) == 630
+    assert len(plane.operations()) == 662
     fields = plane.writable_string_fields(seeds.SPEC)
-    assert (len(fields), sum(map(len, fields.values()))) == (240, 2591)
+    assert (len(fields), sum(map(len, fields.values()))) == (252, 2757)
     assert seeds.SURFACE['preserve_configuration'] is True
     assert 'FILE_MAX_SIZE' in fields[ROUTE]
     assert 'POST /api/v1/retrieval/embedding/update' in fields

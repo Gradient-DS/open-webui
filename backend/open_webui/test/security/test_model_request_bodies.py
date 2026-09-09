@@ -192,8 +192,15 @@ def test_vendor_payload_reaches_handler_unchanged(path, harness):
     payload = vendor_payload(path)
     response = client.post(path.replace('{url_idx}', '0').replace('{action_id}', 'control-action'), json=payload)
     assert response.status_code == 200, response.text
-    assert len(seen) == 1, 'A 200 without a downstream call is not a compatibility control'
-    forwarded = seen[0]
+    # v0.11.3 added an input-token count inside generate_messages, so the Anthropic
+    # paths now reach the captured handler twice with the same body. The property
+    # under test is that the payload arrives unchanged, not how many times the
+    # handler is called; assert on the LAST call, and keep the non-empty check,
+    # because a 200 with no downstream call proves nothing about compatibility.
+    assert seen, 'A 200 without a downstream call is not a compatibility control'
+    if path not in ('/api/message', '/api/v1/messages'):
+        assert len(seen) == 1, f'{path} reached the handler {len(seen)} times, expected once'
+    forwarded = seen[-1]
     if path in TASK_PATHS:
         assert forwarded['metadata']['task_body'] == payload
         assert TEXT in forwarded['messages'][0]['content']

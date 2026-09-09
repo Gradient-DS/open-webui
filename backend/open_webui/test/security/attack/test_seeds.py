@@ -562,6 +562,9 @@ def test_real_model_checks_require_a_row_and_read_access_even_for_admin(role):
             resource_type='model',
             resource_id='stub-model',
             permission='read',
+            # v0.11.3 resolves the caller's groups once and passes them down, so
+            # has_access gained user_group_ids alongside db.
+            user_group_ids=set(),
             db=None,
         )
         assert await scope['get_filtered_models']([model], user) == [model]

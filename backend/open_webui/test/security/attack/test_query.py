@@ -25,7 +25,7 @@ def query_spec():
 
 def test_committed_query_surface():
     targets = query.query_targets()
-    assert (len(targets), sum(map(len, targets.values()))) == (47, 94)
+    assert (len(targets), sum(map(len, targets.values()))) == (54, 110)
 
 
 @pytest.mark.parametrize('full', [False, True])

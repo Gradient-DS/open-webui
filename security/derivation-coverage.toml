@@ -106,3 +106,8 @@ reason = "Multipart file upload: file contents are a different surface that the 
 [[waived]]
 id = "POST /ollama/models/upload/{url_idx}"
 reason = "Multipart file upload: file contents are a different surface that the hostile corpus does not model."
+
+[[waived]]
+id = "POST /api/v1/users/user/variables/update"
+reason = "UserVariablesForm declares `variables: dict` (routers/users.py:634-635) -- free-form key/value chosen by the user, not a shape the derivation can enumerate. Same class as the tool and function valve bodies. Typing it would mean inventing keys that do not exist."
+

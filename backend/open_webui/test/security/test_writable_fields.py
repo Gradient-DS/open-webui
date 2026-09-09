@@ -10,8 +10,8 @@ from openapi_surface import query_parameters, writable_string_fields
 
 REPO = Path(__file__).resolve().parents[4]
 WAIVERS = REPO / 'security/derivation-coverage.toml'
-# Five methods give the historical 627-operation count. Audit bodies across all
-# OpenAPI methods (630 including HEAD/OPTIONS), because writable_string_fields
+# Five methods give the historical 659-operation count. Audit bodies across all
+# OpenAPI methods (662 including HEAD/OPTIONS), because writable_string_fields
 # excludes GET/HEAD/OPTIONS bodies while query_parameters includes read methods.
 # TRACE is valid but absent today.
 FIVE_METHODS = {'get', 'post', 'put', 'patch', 'delete'}
@@ -33,8 +33,8 @@ def surface():
 def test_operation_scope(surface):
     operations, _, _ = surface
     five_method_routes = [route for route in operations if route.split(' ', 1)[0].lower() in FIVE_METHODS]
-    assert (len(five_method_routes), len(operations)) == (627, 630), (
-        f'Expected 627 five-method operations / 630 total including HEAD and OPTIONS; '
+    assert (len(five_method_routes), len(operations)) == (659, 662), (
+        f'Expected 659 five-method operations / 662 total including HEAD and OPTIONS; '
         f'measured {len(five_method_routes)} / {len(operations)}.'
     )
 
@@ -44,13 +44,13 @@ def test_derived_counts(surface):
     body_counts = (sum(bool(paths) for paths in fields.values()), sum(map(len, fields.values())))
     query_counts = (sum(bool(names) for names in queries.values()), sum(map(len, queries.values())))
     assert body_counts == (
-        240,
-        2591,
-    ), f'Expected 240 routes / 2591 writable string fields; measured {body_counts[0]} / {body_counts[1]}.'
+        252,
+        2757,
+    ), f'Expected 252 routes / 2757 writable string fields; measured {body_counts[0]} / {body_counts[1]}.'
     assert query_counts == (
-        47,
-        94,
-    ), f'Expected 47 routes / 94 string query parameters; measured {query_counts[0]} / {query_counts[1]}.'
+        54,
+        110,
+    ), f'Expected 54 routes / 110 string query parameters; measured {query_counts[0]} / {query_counts[1]}.'
 
 
 def test_derivation_cannot_silently_collapse(surface):
@@ -72,8 +72,8 @@ def test_blind_body_counts(surface):
     operations, fields, _ = surface
     blind = {route: op for route, op in operations.items() if 'requestBody' in op and not fields.get(route)}
     media = Counter(kind for op in blind.values() for kind in op['requestBody'].get('content', {}))
-    assert len(blind) == 25 and media == {'application/json': 18, 'multipart/form-data': 7}, (
-        'Expected 25 blind body operations (18 JSON: 17 write + 1 read; 7 multipart); '
+    assert len(blind) == 26 and media == {'application/json': 19, 'multipart/form-data': 7}, (
+        'Expected 26 blind body operations (19 JSON: 18 write + 1 read; 7 multipart); '
         f'measured {len(blind)}: {dict(media)}.'
     )
     read_bodies = {route for route in blind if route.split(' ', 1)[0] in {'GET', 'HEAD', 'OPTIONS'}}
@@ -97,7 +97,7 @@ def test_blind_bodies_are_exactly_the_reasoned_waivers(surface):
         waived.add(route)
     missing, stale = blind - waived, waived - blind
     lines = [
-        'Expected exact waivers for 25 blind operations (17 JSON write + 1 JSON read + 7 multipart); '
+        'Expected exact waivers for 26 blind operations (17 JSON write + 1 JSON read + 7 multipart); '
         f'measured {len(blind)} blind.'
     ]
     lines.append('Blind operations without waivers:')

@@ -49,6 +49,8 @@ DECLARED_FETCH_SINKS: dict[str, str] = {
     'retrieval/web/perplexity.py': 'perplexity search is not selected; WEB_SEARCH_ENGINE selects the in-network searxng stub.',
     'retrieval/web/perplexity_search.py': 'perplexity_search search is not selected; WEB_SEARCH_ENGINE selects the in-network searxng stub.',
     'retrieval/web/searchapi.py': 'searchapi search is not selected; WEB_SEARCH_ENGINE selects the in-network searxng stub.',
+    'routers/retrieval.py': 'Fetches a user-supplied URL when a document is loaded from one, through get_ssrf_safe_session() (retrieval.py:2379), so retrieval/web/utils.py:validate_url refuses any host resolving to a non-global address. Arrived with the v0.11.3 upstream merge. Guarded rather than stubbed: on the sealed network no reachable host is also a global one.',
+    'retrieval/web/openserp.py': 'OpenSERP search posts to OPENSERP_BASE_URL. Arrived with the v0.11.3 upstream merge. CI leaves that setting empty and routers/retrieval.py:2696 dispatches only when it is truthy, so the sink is unreachable rather than stubbed.',
     'retrieval/web/searxng.py': 'SearXNG search uses SEARXNG_QUERY_URL at stub (GET /search?format=json).',
     'retrieval/web/serpapi.py': 'serpapi search is not selected; WEB_SEARCH_ENGINE selects the in-network searxng stub.',
     'retrieval/web/serper.py': 'serper search is not selected; WEB_SEARCH_ENGINE selects the in-network searxng stub.',
@@ -538,7 +540,10 @@ class TestCiStubsEveryDeclaredSink:
         from unittest.mock import Mock
 
         provider = Mock(return_value=['provider reached'])
-        namespace = {'search_searxng': provider}
+        # v0.11.3 routes provider calls through run_on_main_loop. The synthetic
+        # namespace has no event loop, and the control only needs to observe that
+        # dispatch reached the provider, so run it straight through.
+        namespace = {'search_searxng': provider, 'run_on_main_loop': lambda coro: coro}
         # nosec B102 - compiles one function lifted from this repo's own source, with a
         # mocked provider and no untrusted input. Importing the router instead would boot
         # the application, which is what this test exists to avoid.
