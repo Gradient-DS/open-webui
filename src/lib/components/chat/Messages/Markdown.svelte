@@ -10,8 +10,7 @@
 	import citationExtension, { applyCitationWalker } from '$lib/utils/marked/citation-extension';
 
 	const options = {
-		throwOnError: false,
-		breaks: true
+		throwOnError: false
 	};
 
 	marked.use(markedKatexExtension(options));
@@ -32,16 +31,20 @@
 <script>
 	import { onDestroy } from 'svelte';
 	import { replaceTokens, processResponseContent } from '$lib/utils';
+	import { maskInFlightTag } from '$lib/utils/streamMarkup';
 	import { user } from '$lib/stores';
 
 	import MarkdownTokens from './Markdown/MarkdownTokens.svelte';
 
 	export let id = '';
+	export let chatId = '';
+	export let messageId = '';
 	export let content;
 	export let done = true;
 	export let model = null;
 	export let save = false;
 	export let preview = false;
+	export let compactPreview = false;
 
 	export let paragraphTag = 'p';
 	export let editCodeBlock = true;
@@ -57,6 +60,7 @@
 
 	export let onSourceClick = () => {};
 	export let onTaskClick = () => {};
+	export let onToolCallResolved = () => {};
 
 	let tokens = [];
 	let pendingUpdate = null;
@@ -64,17 +68,22 @@
 	let lastParsedContent = '';
 
 	const parseTokens = () => {
-		if (content === lastContent) return;
-		lastContent = content;
+		// [Gradient] A pipeline tag the model is still typing (`<document
+		// title="Gesch`) is not a token yet, so marked lexes it as literal text and
+		// it flashes in the bubble until its `>` arrives. Mask that tail while
+		// streaming; the `done` parse always sees the raw content.
+		const source = done ? content : maskInFlightTag(content);
+		if (source === lastContent) return;
+		lastContent = source;
 
-		const processed = replaceTokens(processResponseContent(content), model?.name, $user?.name);
+		const processed = replaceTokens(processResponseContent(source), model?.name, $user?.name);
 		if (processed === lastParsedContent) return;
 		lastParsedContent = processed;
 
 		tokens = applyCitationWalker(marked.lexer(processed));
 	};
 
-	const updateHandler = (content) => {
+	const updateHandler = (content, done) => {
 		if (content) {
 			if (done) {
 				cancelAnimationFrame(pendingUpdate);
@@ -89,7 +98,10 @@
 		}
 	};
 
-	$: updateHandler(content);
+	// `done` is passed in rather than closed over so it is a dependency of this
+	// statement: the final parse has to run even when the turn ends without another
+	// content delta, or the masked tail would stay hidden.
+	$: updateHandler(content, done);
 
 	// Throttle parsing to once per animation frame while streaming
 	onDestroy(() => {
@@ -101,9 +113,12 @@
 	<MarkdownTokens
 		{tokens}
 		{id}
+		{chatId}
+		{messageId}
 		{done}
 		{save}
 		{preview}
+		{compactPreview}
 		{paragraphTag}
 		{editCodeBlock}
 		{sourceIds}
@@ -111,6 +126,7 @@
 		{allowEmbeds}
 		{onTaskClick}
 		{onSourceClick}
+		{onToolCallResolved}
 		{onSave}
 		{onUpdate}
 		{onPreview}

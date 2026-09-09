@@ -49,6 +49,7 @@
 	let show2FAChallenge = false;
 	let show2FASetup = false;
 	let partialToken = '';
+	let submitting = false;
 
 	const setSessionUser = async (sessionUser, redirectPath: string | null = null) => {
 		if (sessionUser) {
@@ -148,14 +149,20 @@
 	};
 
 	const submitHandler = async () => {
-		if (mode === 'ldap') {
-			await ldapSignInHandler();
-		} else if (mode === 'signin') {
-			await signInHandler();
-		} else if (mode === 'forgot') {
-			await forgotPasswordHandler();
-		} else {
-			await signUpHandler();
+		if (submitting) return;
+		submitting = true;
+		try {
+			if (mode === 'ldap') {
+				await ldapSignInHandler();
+			} else if (mode === 'signin') {
+				await signInHandler();
+			} else if (mode === 'forgot') {
+				await forgotPasswordHandler();
+			} else {
+				await signUpHandler();
+			}
+		} finally {
+			submitting = false;
 		}
 	};
 
@@ -213,11 +220,12 @@
 
 	onMount(async () => {
 		const redirectPath = $page.url.searchParams.get('redirect');
+		const logout = $page.url.searchParams.get('state') === 'logout';
 		// $user is undefined before the session check and null after a signed-out
 		// 401 redirect — only a real session may leave the login page. Treating
 		// null as signed-in ping-pongs /auth <-> the (app) layout's own
 		// null-guard in an infinite SPA navigation loop (the "refresh storm").
-		if ($user) {
+		if ($user && !logout) {
 			goto(redirectPath || '/');
 		} else {
 			if (redirectPath) {
@@ -237,7 +245,7 @@
 		// deployment is unambiguously SSO-only (single provider, no login form,
 		// no LDAP). Suppressed by ?form=, ?error=, onboarding, trusted-header
 		// auth, or an existing session/token.
-		if ($config?.oauth?.auto_redirect && !form && !error) {
+		if ($config?.oauth?.auto_redirect && !form && !error && !logout) {
 			const providers = Object.keys($config?.oauth?.providers ?? {});
 			if (
 				providers.length === 1 &&
@@ -266,6 +274,9 @@
 </script>
 
 <svelte:head>
+	<!-- LICENSE covers this Open WebUI browser-title identifier.
+	Do not alter, remove, obscure, or replace it except as LICENSE permits:
+	https://docs.openwebui.com/license. -->
 	<title>
 		{`${$WEBUI_NAME}`}
 	</title>
@@ -293,7 +304,7 @@
 				{#if ($config?.features.auth_trusted_header ?? false) || $config?.features.auth === false}
 					<div class=" my-auto pb-10 w-full sm:max-w-md">
 						<div
-							class="flex items-center justify-center gap-3 text-xl sm:text-2xl text-center font-medium dark:text-gray-200"
+							class="flex items-center justify-center gap-3 text-xl sm:text-2xl text-center font-normal dark:text-gray-200"
 						>
 							<div>
 								{$i18n.t('Signing in to {{WEBUI_NAME}}', { WEBUI_NAME: $WEBUI_NAME })}
@@ -309,6 +320,9 @@
 						<div id="auth-login-card" class=" sm:max-w-md my-auto pb-10 w-full dark:text-gray-100">
 							{#if $config?.metadata?.auth_logo_position === 'center'}
 								<div class="flex justify-center mb-6">
+									<!-- LICENSE covers this Open WebUI sign-in logo.
+									Do not alter, remove, obscure, or replace it except as LICENSE permits:
+									https://docs.openwebui.com/license. -->
 									<img
 										id="logo"
 										crossorigin="anonymous"
@@ -332,7 +346,7 @@
 								/>
 							{:else if show2FASetup}
 								<div class="flex flex-col">
-									<div class="text-2xl font-medium">
+									<div class="text-2xl font-normal">
 										{$i18n.t('Two-Factor Authentication Required')}
 									</div>
 									<div class="mt-1 mb-4 text-sm text-gray-500 dark:text-gray-400">
@@ -360,7 +374,7 @@
 									}}
 								>
 									<div class="mb-1">
-										<div class=" text-2xl font-medium">
+										<div class=" text-2xl font-normal">
 											{#if $config?.onboarding ?? false}
 												{$i18n.t(`Get started with {{WEBUI_NAME}}`, { WEBUI_NAME: $WEBUI_NAME })}
 											{:else if mode === 'ldap'}
@@ -377,7 +391,7 @@
 										</div>
 
 										{#if $config?.onboarding ?? false}
-											<div class="mt-1 text-xs font-medium text-gray-600 dark:text-gray-500">
+											<div class="mt-1 text-xs font-normal text-gray-600 dark:text-gray-500">
 												ⓘ {$WEBUI_NAME}
 												{$i18n.t(
 													'does not make any external connections, and your data stays securely on your locally hosted server.'
@@ -390,7 +404,7 @@
 										<div class="flex flex-col mt-4">
 											{#if mode === 'signup'}
 												<div class="mb-2">
-													<label for="name" class="text-sm font-medium text-left mb-1 block"
+													<label for="name" class="text-sm font-normal text-left mb-1 block"
 														>{$i18n.t('Name')}</label
 													>
 													<input
@@ -407,7 +421,7 @@
 
 											{#if mode === 'ldap'}
 												<div class="mb-2">
-													<label for="username" class="text-sm font-medium text-left mb-1 block"
+													<label for="username" class="text-sm font-normal text-left mb-1 block"
 														>{$i18n.t('Username')}</label
 													>
 													<input
@@ -423,7 +437,7 @@
 												</div>
 											{:else}
 												<div class="mb-2">
-													<label for="email" class="text-sm font-medium text-left mb-1 block"
+													<label for="email" class="text-sm font-normal text-left mb-1 block"
 														>{$i18n.t('Email')}</label
 													>
 													<input
@@ -441,7 +455,7 @@
 
 											{#if mode !== 'forgot'}
 												<div>
-													<label for="password" class="text-sm font-medium text-left mb-1 block"
+													<label for="password" class="text-sm font-normal text-left mb-1 block"
 														>{$i18n.t('Password')}</label
 													>
 													<SensitiveInput
@@ -463,7 +477,7 @@
 												<div class="mt-2">
 													<label
 														for="confirm-password"
-														class="text-sm font-medium text-left mb-1 block"
+														class="text-sm font-normal text-left mb-1 block"
 														>{$i18n.t('Confirm Password')}</label
 													>
 													<SensitiveInput
@@ -484,29 +498,39 @@
 										{#if $config?.features.enable_login_form || $config?.features.enable_ldap || form}
 											{#if mode === 'ldap'}
 												<button
-													class="bg-gray-700/5 hover:bg-gray-700/10 dark:bg-gray-100/5 dark:hover:bg-gray-100/10 dark:text-gray-300 dark:hover:text-white transition w-full rounded-full font-medium text-sm py-2.5"
+													class="disabled:opacity-50 flex justify-center bg-gray-700/5 hover:bg-gray-700/10 dark:bg-gray-100/5 dark:hover:bg-gray-100/10 dark:text-gray-300 dark:hover:text-white transition w-full rounded-full font-normal text-sm py-2.5"
 													type="submit"
+													disabled={submitting}
+													><div class="self-center">
+														{$i18n.t('Authenticate')}
+													</div>
+													{#if submitting}<div class="ml-2 self-center">
+															<Spinner />
+														</div>{/if}</button
 												>
-													{$i18n.t('Authenticate')}
-												</button>
 											{:else}
 												<button
-													class="bg-gray-700/5 hover:bg-gray-700/10 dark:bg-gray-100/5 dark:hover:bg-gray-100/10 dark:text-gray-300 dark:hover:text-white transition w-full rounded-full font-medium text-sm py-2.5"
+													class="disabled:opacity-50 flex justify-center bg-gray-700/5 hover:bg-gray-700/10 dark:bg-gray-100/5 dark:hover:bg-gray-100/10 dark:text-gray-300 dark:hover:text-white transition w-full rounded-full font-normal text-sm py-2.5"
 													type="submit"
+													disabled={submitting}
+													><div class="self-center">
+														{mode === 'signin'
+															? $i18n.t('Sign in')
+															: mode === 'forgot'
+																? $i18n.t('Reset password')
+																: ($config?.onboarding ?? false)
+																	? $i18n.t('Create Admin Account')
+																	: $i18n.t('Create Account')}
+													</div>
+													{#if submitting}<div class="ml-2 self-center">
+															<Spinner />
+														</div>{/if}</button
 												>
-													{mode === 'signin'
-														? $i18n.t('Sign in')
-														: mode === 'forgot'
-															? $i18n.t('Reset password')
-															: ($config?.onboarding ?? false)
-																? $i18n.t('Create Admin Account')
-																: $i18n.t('Create Account')}
-												</button>
 
 												{#if mode === 'signin' && $config?.features?.enable_login_form && $config?.features?.enable_forgot_password}
 													<div class="mt-2 text-sm text-center">
 														<button
-															class="font-medium underline"
+															class="font-normal underline"
 															type="button"
 															on:click={() => {
 																forgotSubmitted = false;
@@ -528,7 +552,7 @@
 															</p>
 														{/if}
 														<button
-															class="font-medium underline mt-2"
+															class="font-normal underline mt-2"
 															type="button"
 															on:click={() => {
 																mode = 'signin';
@@ -546,7 +570,7 @@
 															: $i18n.t('Already have an account?')}
 
 														<button
-															class=" font-medium underline"
+															class=" font-normal underline"
 															type="button"
 															on:click={() => {
 																if (mode === 'signin') {
@@ -570,7 +594,7 @@
 										<hr class="w-32 h-px my-4 border-0 dark:bg-gray-100/10 bg-gray-700/10" />
 										{#if $config?.features.enable_login_form || $config?.features.enable_ldap || form}
 											<span
-												class="px-3 text-sm font-medium text-gray-900 dark:text-white bg-transparent"
+												class="px-3 text-sm font-normal text-gray-900 dark:text-white bg-transparent"
 												>{$i18n.t('or')}</span
 											>
 										{/if}
@@ -580,7 +604,7 @@
 									<div class="flex flex-col space-y-2">
 										{#if $config?.oauth?.providers?.google}
 											<button
-												class="flex justify-center items-center bg-gray-700/5 hover:bg-gray-700/10 dark:bg-gray-100/5 dark:hover:bg-gray-100/10 dark:text-gray-300 dark:hover:text-white transition w-full rounded-full font-medium text-sm py-2.5"
+												class="flex justify-center items-center bg-gray-700/5 hover:bg-gray-700/10 dark:bg-gray-100/5 dark:hover:bg-gray-100/10 dark:text-gray-300 dark:hover:text-white transition w-full rounded-full font-normal text-sm py-2.5"
 												on:click={() => {
 													window.location.href = `${WEBUI_BASE_URL}/oauth/google/login`;
 												}}
@@ -610,7 +634,7 @@
 										{/if}
 										{#if $config?.oauth?.providers?.microsoft}
 											<button
-												class="flex justify-center items-center bg-gray-700/5 hover:bg-gray-700/10 dark:bg-gray-100/5 dark:hover:bg-gray-100/10 dark:text-gray-300 dark:hover:text-white transition w-full rounded-full font-medium text-sm py-2.5"
+												class="flex justify-center items-center bg-gray-700/5 hover:bg-gray-700/10 dark:bg-gray-100/5 dark:hover:bg-gray-100/10 dark:text-gray-300 dark:hover:text-white transition w-full rounded-full font-normal text-sm py-2.5"
 												on:click={() => {
 													window.location.href = `${WEBUI_BASE_URL}/oauth/microsoft/login`;
 												}}
@@ -642,7 +666,7 @@
 										{/if}
 										{#if $config?.oauth?.providers?.github}
 											<button
-												class="flex justify-center items-center bg-gray-700/5 hover:bg-gray-700/10 dark:bg-gray-100/5 dark:hover:bg-gray-100/10 dark:text-gray-300 dark:hover:text-white transition w-full rounded-full font-medium text-sm py-2.5"
+												class="flex justify-center items-center bg-gray-700/5 hover:bg-gray-700/10 dark:bg-gray-100/5 dark:hover:bg-gray-100/10 dark:text-gray-300 dark:hover:text-white transition w-full rounded-full font-normal text-sm py-2.5"
 												on:click={() => {
 													window.location.href = `${WEBUI_BASE_URL}/oauth/github/login`;
 												}}
@@ -663,7 +687,7 @@
 										{/if}
 										{#if $config?.oauth?.providers?.oidc}
 											<button
-												class="flex justify-center items-center bg-gray-700/5 hover:bg-gray-700/10 dark:bg-gray-100/5 dark:hover:bg-gray-100/10 dark:text-gray-300 dark:hover:text-white transition w-full rounded-full font-medium text-sm py-2.5"
+												class="flex justify-center items-center bg-gray-700/5 hover:bg-gray-700/10 dark:bg-gray-100/5 dark:hover:bg-gray-100/10 dark:text-gray-300 dark:hover:text-white transition w-full rounded-full font-normal text-sm py-2.5"
 												on:click={() => {
 													window.location.href = `${WEBUI_BASE_URL}/oauth/oidc/login`;
 												}}
@@ -693,7 +717,7 @@
 										{/if}
 										{#if $config?.oauth?.providers?.feishu}
 											<button
-												class="flex justify-center items-center bg-gray-700/5 hover:bg-gray-700/10 dark:bg-gray-100/5 dark:hover:bg-gray-100/10 dark:text-gray-300 dark:hover:text-white transition w-full rounded-full font-medium text-sm py-2.5"
+												class="flex justify-center items-center bg-gray-700/5 hover:bg-gray-700/10 dark:bg-gray-100/5 dark:hover:bg-gray-100/10 dark:text-gray-300 dark:hover:text-white transition w-full rounded-full font-normal text-sm py-2.5"
 												on:click={() => {
 													window.location.href = `${WEBUI_BASE_URL}/oauth/feishu/login`;
 												}}
@@ -756,6 +780,9 @@
 			<div class="fixed m-10 z-50">
 				<div class="flex space-x-2">
 					<div class=" self-center">
+						<!-- LICENSE covers this Open WebUI sign-in logo.
+						Do not alter, remove, obscure, or replace it except as LICENSE permits:
+						https://docs.openwebui.com/license. -->
 						<img
 							id="logo"
 							crossorigin="anonymous"

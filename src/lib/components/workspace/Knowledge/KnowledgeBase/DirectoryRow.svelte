@@ -154,7 +154,7 @@
 					<input
 						bind:this={editInput}
 						bind:value={editName}
-						class="text-sm w-full bg-transparent border-none outline-hidden"
+						class="text-xs w-full bg-transparent border-none outline-hidden"
 						on:keydown={(e) => {
 							if (e.key === 'Enter') submitRename();
 							if (e.key === 'Escape') cancelRename();
@@ -168,7 +168,7 @@
 						autofocus
 					/>
 				{:else}
-					<div class="line-clamp-1 text-sm">
+					<div class="line-clamp-1 text-xs">
 						{directory.name}
 					</div>
 				{/if}

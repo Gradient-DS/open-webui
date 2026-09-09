@@ -33,7 +33,7 @@
 	export let edit = true;
 
 	export let onSave = (e) => {};
-	export let onUpdate = (e) => {};
+	export let onUpdate = (e, codeBlockId = '') => {};
 	export let onPreview = (e) => {};
 
 	export let save = false;
@@ -365,7 +365,7 @@
 	};
 
 	const render = async () => {
-		onUpdate(token);
+		onUpdate(token, id);
 		if (lang === 'mermaid' && (token?.raw ?? '').slice(-4).includes('```')) {
 			try {
 				renderHTML = await renderMermaid(code);
@@ -421,7 +421,7 @@
 
 	onMount(async () => {
 		if (token) {
-			onUpdate(token);
+			onUpdate(token, id);
 		}
 	});
 

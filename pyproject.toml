@@ -7,20 +7,23 @@ authors = [
 license = { file = "LICENSE" }
 dependencies = [
     "fastapi==0.136.3",
-    "uvicorn[standard]==0.41.0",
+    "uvicorn[standard]==0.51.0",
     "pydantic==2.13.4",
-    "python-multipart==0.0.31", # security: CVE-2026-53538/53539/53540 (form-parsing DoS + param smuggling) fixed in 0.0.31
+    "python-multipart==0.0.32", # security: CVE-2026-53538/53539/53540 (form-parsing DoS + param smuggling) fixed in 0.0.31
     "itsdangerous==2.2.0",
 
     "python-socketio==5.16.2", # security: CVE-2026-48804 (binary attachment accumulation memory exhaustion) fixed in 5.16.2
     "cryptography==50.0.0", # security: CVE-2026-69248/69249 (X.509 wildcard name-constraint escape, chain-building DoS) fixed in 49.0.0; CVE-2026-69247 (PKCS7 Bleichenbacher oracle) fixed in 50.0.0
+    "orjson==3.11.9",
     "bcrypt==5.0.0",
     "argon2-cffi==25.1.0",
     "PyJWT[crypto]==2.13.0",
     "authlib==1.7.2",
+    "joserfc==1.7.4",
 
     "requests==2.34.2",
     "aiohttp==3.14.3", # do not update to 3.13.3 - broken; security: CVE-2026-59881/69243 (ws decompress, request smuggling) fixed in 3.14.2; CVE-2026-69244 (OOB heap read in C response parser) fixed in 3.14.3
+    "aiodns==3.6.1", # keep pinned: 4.x pulls pycares 5 (c-ares 1.34.6) which breaks DNS on some hosts (#28013, #28215); opt-in via AIOHTTP_CLIENT_ASYNC_DNS_RESOLVER
     "async-timeout==5.0.1",
     "aiocache==0.12.3",
     "aiofiles==25.1.0",
@@ -37,7 +40,8 @@ dependencies = [
     "alembic==1.18.4",
 
     "pycrdt==0.13.1",
-    "redis==8.0.0",
+    "redis==8.0.1",
+    "hiredis==3.4.0",
     # "valkey-glide-sync==2.3.1",  # optional: install manually if VECTOR_DB=valkey
 
     "pytz==2026.2",
@@ -49,9 +53,10 @@ dependencies = [
 
     "tiktoken==0.13.0",
     "mcp==1.28.1", # security: CVE-2026-59950 (WebSocket server transport missing Host/Origin validation, transport unused by us) fixed in 1.28.1
+    "regex==2026.5.9",
 
     "openai==2.29.0",
-    "anthropic==0.86.0",
+    "anthropic==0.87.0",
     "google-genai==1.66.0",
 
     "langchain==1.3.9", # security: GHSA-gr75-jv2w-4656 (path traversal in file-search middleware, unused by us) fixed in 1.3.9
@@ -76,12 +81,14 @@ dependencies = [
     "fpdf2==2.8.7",
     "pymdown-extensions==11.0.1", # security: CVE-2026-61632 fixed in 11.0 (prior CVE-2026-46338 snippets path traversal fix stays fixed)
     "docx2txt==0.9",
+    "python-docx==1.2.0",
     "python-pptx==1.0.2",
     "msoffcrypto-tool==6.0.0",
     "python-magic==0.4.27", # magic-byte upload sniffing (utils/upload_guard.py); needs libmagic1
     "nltk==3.10.3", # security: CVE-2026-54293 (path traversal) + PYSEC-2026-3582..3741 (ReDoS/DoS)
     "Markdown==3.10.2",
     "beautifulsoup4==4.14.3",
+    "lxml==6.1.1",
     "pypandoc==1.17",
     "pandas==3.0.3",
     "openpyxl==3.1.5",
@@ -95,7 +102,7 @@ dependencies = [
 
     "pillow==12.3.0", # security: CVE-2026-54058/59197/59199/59200/59204/59205 + 4 more (DoS/heap OOB via crafted images) fixed in 12.3.0
     "opencv-python-headless==4.13.0.92",
-    "rapidocr-onnxruntime==1.4.4",
+    "rapidocr==3.9.2",
     "rank-bm25==0.2.2",
 
     "onnxruntime==1.26.0",

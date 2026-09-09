@@ -10,7 +10,6 @@
 	const i18n = getContext('i18n');
 
 	import { capitalizeFirstLetter, formatFileSize } from '$lib/utils';
-
 	import { WEBUI_BASE_URL } from '$lib/constants';
 
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
@@ -31,9 +30,31 @@
 	import { breadcrumbSegments, fileBadge } from '../utils/treeStatus';
 	import { sourceByRootDirectoryId } from '../utils/sourceMap';
 
+	type KnowledgeFile = {
+		id?: string;
+		tempId?: string;
+		itemId?: string;
+		name?: string;
+		status?: string;
+		meta?: {
+			name?: string;
+			size?: number;
+			warning?: string;
+			relative_path?: string;
+		};
+		updated_at?: number;
+		added_at?: number;
+		error?: string;
+		warning?: string;
+		user?: {
+			email?: string;
+			name?: string;
+		};
+	};
+
 	export let knowledge = null;
 	export let selectedFileId = null;
-	export let files = [];
+	export let files: KnowledgeFile[] = [];
 	export let directories = [];
 
 	// Cloud chrome (Phase 3): the provider's sources — directory rows whose id
@@ -125,7 +146,7 @@
 	};
 </script>
 
-<div class=" max-h-full flex flex-col w-full gap-[0.5px]">
+<div class=" max-h-full flex flex-col w-full gap-[0.03125rem]" role="list">
 	<!-- Directories first -->
 	{#if !searchMode}
 		{#each directories as dir (dir.id)}
@@ -158,7 +179,6 @@
 		{@const selKey = `file:${file?.id}`}
 		{@const isSel = (selection && isSelectable(file) && $selectedStore?.has(selKey)) ?? false}
 		{@const crumbs = searchMode ? breadcrumbSegments(file?.meta?.relative_path) : []}
-		<!-- svelte-ignore a11y_no_static_element_interactions -->
 		<div
 			class=" group flex cursor-pointer w-full px-1.5 py-0.5 bg-transparent dark:hover:bg-gray-850/50 hover:bg-white rounded-xl transition {selection
 				? 'select-none'
@@ -167,6 +187,7 @@
 				: selectedFileId
 					? ''
 					: 'hover:bg-gray-100 dark:hover:bg-gray-850'}"
+			role="listitem"
 			draggable={structureEditable && !!file?.id && (!($selectionModeStore ?? false) || isSel)}
 			on:dragstart={(e) => {
 				if (!structureEditable) return;

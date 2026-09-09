@@ -6,18 +6,20 @@
 	import equal from 'fast-deep-equal';
 
 	import ReasoningBullet from './StatusHistory/ReasoningBullet.svelte';
+	import ContentRenderer from '../ContentRenderer.svelte';
+	import ChevronDown from '$lib/components/icons/ChevronDown.svelte';
+	import ChevronUp from '$lib/components/icons/ChevronUp.svelte';
 
 	// Heterogeneous list: each entry is either a status update (default) or a
 	// reasoning bullet (when `kind === 'reasoning'`). ResponseMessage builds
 	// this by merging `message.statusHistory` with reasoning details parsed
 	// out of `message.content`.
 	export let statusHistory = [];
-	// Default-open so users see the streaming progress and the final bullet
-	// list without an extra click. The legacy reactive that bound this to a
-	// rarely-used `expand` prop made the dropdown effectively unopenable in
-	// Svelte 5 legacy mode — toggling via the header button is restored, just
-	// starting open instead of closed.
-	export let expand = true;
+	// [Gradient] Starts collapsed, as upstream does. The header line is the live
+	// one and updates on every status event, so nothing is hidden while the turn
+	// runs, and the chevron below makes the toggle discoverable — previously it
+	// had no affordance at all.
+	export let expand = false;
 	// Set by ResponseMessage. When the parent message is done (SSE
 	// [DONE] received), force any header in-progress indicators to
 	// settled. Defensive belt-and-suspenders for the case where a
@@ -26,98 +28,142 @@
 	// side (closing done=true status for terminal tools), this guard
 	// keeps the spinner from getting stuck if anything regresses.
 	export let messageDone = false;
+	// [Gradient] Content rows render the model's inter-tool prose in full, so they
+	// need the same renderer wiring the tail answer gets.
+	export let id = 'status';
+	export let sources = [];
+	export let model = null;
+	export let editCodeBlock = true;
+	export let onSourceClick = () => {};
 	let showHistory = expand;
+	// [Gradient] Open by default when the model wrote prose between tool calls:
+	// that is working the user asked to see, and collapsing it would hide text
+	// that used to render inline. Status-only turns stay collapsed.
+	let autoExpanded = false;
+	$: if (!autoExpanded && (historyItems ?? []).some(isContent)) {
+		showHistory = true;
+		autoExpanded = true;
+	}
 
 	let history = [];
-	let status = null;
 
-	$: if (history && history.length > 0) {
-		// Prefer the last entry as the dropdown header BUT skip past a
-		// completed reasoning bullet — "X bronnen opgehaald" is more
-		// informative than "Dacht N seconden" once thinking has finished.
-		// While reasoning is in_progress (``attributes.done !== 'true'``),
-		// keep it as header so the spinner/shimmer signals to the user
-		// that the model is still thinking. ChatAgent flows are unaffected
-		// because the last entry is always the post-loop summary status
-		// (not a reasoning bullet).
-		const last = history.at(-1);
-		const lastIsDoneReasoning =
-			last?.kind === 'reasoning' && last?.attributes?.done === 'true';
-		if (lastIsDoneReasoning) {
-			let lastNonReasoning = null;
-			for (let i = history.length - 1; i >= 0; i--) {
-				if (history[i]?.kind !== 'reasoning') {
-					lastNonReasoning = history[i];
-					break;
-				}
-			}
-			status = lastNonReasoning ?? last;
-		} else {
-			status = last;
-		}
-	}
+	// [Gradient] The promoted header is ALWAYS the newest entry and the list is
+	// everything before it, so the expanded list stays one contiguous
+	// chronological run. The previous rule promoted the last NON-reasoning entry,
+	// which lifted a tool status out of the MIDDLE of the timeline and left the
+	// reasoning bullets it separated adjacent to each other. That is what read as
+	// "reasoning is not interleaved with the tool calls".
+	$: status = history.at(-1) ?? null;
+	$: historyItems = history.slice(0, -1);
 
 	$: if (!equal(statusHistory, history)) {
 		history = statusHistory;
 	}
 
 	const isReasoning = (item) => item?.kind === 'reasoning';
+	// [Gradient] The agent emits post-tool deliberation as ordinary output_text,
+	// not as a reasoning item, so it arrives as a content block. Rendering it as a
+	// timeline row is what makes the turn read as one sequence.
+	const isContent = (item) => item?.kind === 'content';
+	// [Gradient] Stable keys: an unkeyed each re-created every row whenever the
+	// list changed, which re-fired the .status-description fade on each status
+	// event and read as flicker.
+	const rowKey = (item, idx) =>
+		item?.kind === 'reasoning'
+			? `r-${item.contentOffset ?? idx}`
+			: item?.kind === 'content'
+				? `c-${item.contentOffset ?? idx}`
+				: `s-${idx}-${item?.action ?? ''}`;
 </script>
 
+<!-- [Gradient] Visibility is decided one level up by ResponseMessage's
+     shouldShowStatusHistory, whose OR lets live tool activity win over a hidden
+     tail status. Upstream's unconditional inner gate defeated that OR. -->
 {#if history && history.length > 0}
-	<div class="text-sm flex flex-col w-full">
+	<div class="text-[0.9375rem] flex flex-col w-full my-1">
 		<button
-			class="w-full"
+			class="w-full text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 transition"
 			aria-label={$i18n.t('Toggle status history')}
 			aria-expanded={showHistory}
 			on:click={() => {
 				showHistory = !showHistory;
 			}}
 		>
-			<div class="flex items-start gap-2">
-				{#if isReasoning(status)}
-					<ReasoningBullet
-						id={`status-header`}
-						summary={status.summary}
-						body={status.body}
-						attributes={messageDone && status?.attributes?.done !== 'true'
-							? { ...(status.attributes ?? {}), done: 'true' }
-							: (status.attributes ?? {})}
-						asHeader={true}
-					/>
-				{:else}
-					<StatusItem
-						{status}
-						done={messageDone || (status?.done !== false)}
-						forceVisible={true}
-						asHeader={history.length > 1}
-					/>
+			<div class="flex items-start gap-2 min-w-0">
+				<div class="flex-1 min-w-0">
+					{#if isContent(status)}
+						<div class="line-clamp-1 text-gray-500 dark:text-gray-500">
+							{(status.text ?? '').replace(/\s+/g, ' ').trim()}
+						</div>
+					{:else if isReasoning(status)}
+						<ReasoningBullet
+							id={`status-header`}
+							summary={status.summary}
+							body={status.body}
+							attributes={messageDone && status?.attributes?.done !== 'true'
+								? { ...(status.attributes ?? {}), done: 'true' }
+								: (status.attributes ?? {})}
+							asHeader={true}
+						/>
+					{:else}
+						<StatusItem
+							{status}
+							done={messageDone || status?.done !== false}
+							forceVisible={true}
+							asHeader={true}
+						/>
+					{/if}
+				</div>
+
+				{#if historyItems.length > 0}
+					<div class="flex shrink-0 self-center translate-y-[1px] text-gray-400 dark:text-gray-500">
+						{#if showHistory}
+							<ChevronUp strokeWidth="3.5" className="size-3" />
+						{:else}
+							<ChevronDown strokeWidth="3.5" className="size-3" />
+						{/if}
+					</div>
 				{/if}
 			</div>
 		</button>
 
 		{#if showHistory}
 			<div class="flex flex-row">
-				{#if history.length > 1}
+				{#if historyItems.length > 0}
 					<div class="w-full">
-						{#each history as item, idx}
+						{#each historyItems as item, idx (rowKey(item, idx))}
 							<div class="flex items-stretch gap-2 mb-1">
 								<div class=" ">
-									<div class="pt-3 px-1 mb-1.5">
+									<div class="pt-[0.625rem] px-1 mb-1.5">
 										<span class="relative flex size-1.5 rounded-full justify-center items-center">
 											<span
-												class="relative inline-flex size-1.5 rounded-full bg-gray-500 dark:bg-gray-400"
+												class="relative inline-flex size-1.5 rounded-full bg-gray-400 dark:bg-gray-600"
 											></span>
 										</span>
 									</div>
-									{#if idx !== history.length - 1}
+									{#if idx !== historyItems.length - 1}
 										<div
-											class="w-[0.5px] ml-[6.5px] h-[calc(100%-14px)] bg-gray-300 dark:bg-gray-700"
+											class="w-[0.03125rem] ml-[0.40625rem] h-[calc(100%-1.375rem)] bg-gray-200 dark:bg-gray-800"
 										/>
 									{/if}
 								</div>
 
-								{#if isReasoning(item)}
+								{#if isContent(item)}
+									<div class="w-full min-w-0">
+										<ContentRenderer
+											id={`${id}-c${item.contentOffset ?? idx}`}
+											content={item.text}
+											{sources}
+											floatingButtons={false}
+											save={false}
+											preview={false}
+											{editCodeBlock}
+											done={true}
+											{model}
+											{onSourceClick}
+										/>
+									</div>
+								{:else if isReasoning(item)}
 									<ReasoningBullet
 										id={`status-${idx}`}
 										summary={item.summary}

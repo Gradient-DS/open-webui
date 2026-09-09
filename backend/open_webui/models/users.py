@@ -9,7 +9,7 @@ from open_webui.env import DATABASE_USER_ACTIVE_STATUS_UPDATE_INTERVAL
 from open_webui.internal.db import Base, JSONField, get_async_db_context
 from open_webui.utils.misc import throttle
 from open_webui.utils.validate import validate_profile_image_url
-from pydantic import BaseModel, ConfigDict, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from sqlalchemy import (
     JSON,
     BigInteger,
@@ -27,7 +27,6 @@ from sqlalchemy import (
     select,
     update,
 )
-from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.ext.asyncio import AsyncSession
 
 ####################
@@ -69,6 +68,7 @@ class User(Base):  # identity & profile
 
     # Metadata
     info = Column(JSON, nullable=True)
+    variables = Column(JSON, nullable=True)
     settings = Column(JSON, nullable=True)
     oauth = Column(JSON, nullable=True)
     scim = Column(JSON, nullable=True)
@@ -105,6 +105,7 @@ class UserModel(BaseModel):
     status_expires_at: int | None = None
 
     info: dict | None = None
+    variables: dict = Field(default_factory=dict, exclude=True)
     settings: UserSettings | None = None
 
     oauth: dict | None = None
@@ -131,6 +132,11 @@ class UserModel(BaseModel):
         """Assign a generated avatar when no profile image is provided."""
         self.profile_image_url = self.profile_image_url or _DEFAULT_PROFILE_IMAGE_URL.format(user_id=self.id)
         return self
+
+    @field_validator('variables', mode='before')
+    @classmethod
+    def normalize_variables(cls, value):
+        return value if isinstance(value, dict) else {}
 
 
 class UserStatusModel(UserModel):
@@ -308,7 +314,6 @@ class UsersTable:
             result = User(**user.model_dump())
             session.add(result)
             await session.commit()
-            await session.refresh(result)
             return user if result else None
 
     # database read methods
@@ -360,16 +365,17 @@ class UsersTable:
         sub: str,
         db: AsyncSession | None = None,
     ) -> UserModel | None:
-        """Look up a user by OAuth provider + subject claim (dialect-aware JSON filter)."""
+        """Look up a user by OAuth provider + subject claim."""
+        sub = str(sub)
         async with get_async_db_context(db) as session:
-            dialect = session.bind.dialect.name
-            query = select(User)
-            if dialect == 'sqlite':
-                oauth_match = User.oauth.contains({provider: {'sub': sub}})
-                query = query.where(oauth_match)
-            elif dialect == 'postgresql':
-                oauth_match = User.oauth[provider].cast(JSONB)['sub'].astext == sub
-                query = query.where(oauth_match)
+            # Subscript, never contains(): on a JSON column contains() degrades to a substring LIKE.
+            sub_expr = User.oauth[provider]['sub'].as_string()
+            query = select(User).where(sub_expr == sub)
+            # SQLite preserves JSON numeric type here; Postgres ->> already compares numeric JSON as text.
+            if session.get_bind().dialect.name == 'sqlite' and sub.isdecimal():
+                sub_int = int(sub)
+                if str(sub_int) == sub and sub_int <= 2**63 - 1:
+                    query = select(User).where(or_(sub_expr == sub, sub_expr == sub_int))
             row = (await session.execute(query)).scalars().first()
             return UserModel.model_validate(row) if row else None
 
@@ -379,27 +385,76 @@ class UsersTable:
         external_id: str,
         db: AsyncSession | None = None,
     ) -> UserModel | None:
-        """Look up a user by SCIM provider + external ID (dialect-aware JSON filter)."""
+        """Look up a user by SCIM provider + external ID."""
         async with get_async_db_context(db) as session:
-            dialect = session.bind.dialect.name
-            query = select(User)
-            if dialect == 'sqlite':
-                scim_match = User.scim.contains({provider: {'external_id': external_id}})
-                query = query.where(scim_match)
-            elif dialect == 'postgresql':
-                scim_match = User.scim[provider].cast(JSONB)['external_id'].astext == external_id
-                query = query.where(scim_match)
+            # Subscript, never contains(): on a JSON column contains() degrades to a substring LIKE.
+            query = select(User).where(User.scim[provider]['external_id'].as_string() == external_id)
             row = (await session.execute(query)).scalars().first()
             return UserModel.model_validate(row) if row else None
 
-    async def get_users(
+    async def get_scim_users(
         self,
         filter: dict | None = None,
+        sort: dict | None = None,
         skip: int | None = None,
         limit: int | None = None,
         db: AsyncSession | None = None,
     ) -> dict:
-        """Paginated user listing with optional filters for role, group, and channel."""
+        async with get_async_db_context(db) as session:
+            stmt = select(User).where(or_(User.oauth.cast(String) != 'null', User.scim.cast(String) != 'null'))
+
+            if filter:
+                user_id = filter.get('id')
+                if user_id:
+                    stmt = stmt.where(User.id == user_id)
+
+                email = filter.get('email')
+                if email:
+                    stmt = stmt.where(func.lower(User.email) == email.lower())
+
+            order_by = sort.get('order_by') if sort else None
+            direction = sort.get('direction') if sort else None
+
+            if order_by == 'created_at':
+                stmt = stmt.order_by(User.created_at.asc() if direction == 'asc' else User.created_at.desc())
+
+            count_result = await session.execute(select(func.count()).select_from(stmt.subquery()))
+            total = count_result.scalar()
+
+            if skip is not None:
+                stmt = stmt.offset(skip)
+            if limit is not None:
+                stmt = stmt.limit(limit)
+
+            result = await session.execute(stmt)
+            users = result.scalars().all()
+            return {
+                'users': [UserModel.model_validate(user) for user in users],
+                'total': total,
+            }
+
+    async def get_scim_user_by_id(
+        self,
+        id: str,
+        db: AsyncSession | None = None,
+    ) -> UserModel | None:
+        async with get_async_db_context(db) as session:
+            stmt = select(User).where(
+                User.id == id,
+                or_(User.oauth.cast(String) != 'null', User.scim.cast(String) != 'null'),
+            )
+            user = (await session.execute(stmt)).scalars().first()
+            return UserModel.model_validate(user) if user else None
+
+    async def get_users(
+        self,
+        filter: dict | None = None,
+        sort: dict | None = None,
+        skip: int | None = None,
+        limit: int | None = None,
+        db: AsyncSession | None = None,
+    ) -> dict:
+        """Paginated user listing with optional filters and sort."""
         async with get_async_db_context(db) as session:
             # Deferred imports to avoid circular dependencies
             from open_webui.models.channels import ChannelMember
@@ -460,64 +515,63 @@ class UsersTable:
                     if exclude_roles:
                         stmt = stmt.filter(~User.role.in_(exclude_roles))
 
-                order_by = filter.get('order_by')
-                direction = filter.get('direction')
+            order_by = sort.get('order_by') if sort else None
+            direction = sort.get('direction') if sort else None
 
-                if order_by and order_by.startswith('group_id:'):
-                    group_id = order_by.split(':', 1)[1]
+            if order_by and order_by.startswith('group_id:'):
+                group_id = order_by.split(':', 1)[1]
 
-                    # Subquery that checks if the user belongs to the group
-                    membership_exists = exists(
-                        select(GroupMember.id).where(
-                            GroupMember.user_id == User.id,
-                            GroupMember.group_id == group_id,
-                        )
+                # Subquery that checks if the user belongs to the group
+                membership_exists = exists(
+                    select(GroupMember.id).where(
+                        GroupMember.user_id == User.id,
+                        GroupMember.group_id == group_id,
                     )
+                )
 
-                    # CASE: user in group → 1, user not in group → 0
-                    group_sort = case((membership_exists, 1), else_=0)
+                # CASE: user in group → 1, user not in group → 0
+                group_sort = case((membership_exists, 1), else_=0)
 
-                    if direction == 'asc':
-                        stmt = stmt.order_by(group_sort.asc(), User.name.asc())
-                    else:
-                        stmt = stmt.order_by(group_sort.desc(), User.name.asc())
+                if direction == 'asc':
+                    stmt = stmt.order_by(group_sort.asc(), User.name.asc())
+                else:
+                    stmt = stmt.order_by(group_sort.desc(), User.name.asc())
 
-                elif order_by == 'name':
-                    if direction == 'asc':
-                        stmt = stmt.order_by(User.name.asc())
-                    else:
-                        stmt = stmt.order_by(User.name.desc())
+            elif order_by == 'name':
+                if direction == 'asc':
+                    stmt = stmt.order_by(User.name.asc())
+                else:
+                    stmt = stmt.order_by(User.name.desc())
 
-                elif order_by == 'email':
-                    if direction == 'asc':
-                        stmt = stmt.order_by(User.email.asc())
-                    else:
-                        stmt = stmt.order_by(User.email.desc())
+            elif order_by == 'email':
+                if direction == 'asc':
+                    stmt = stmt.order_by(User.email.asc())
+                else:
+                    stmt = stmt.order_by(User.email.desc())
 
-                elif order_by == 'created_at':
-                    if direction == 'asc':
-                        stmt = stmt.order_by(User.created_at.asc())
-                    else:
-                        stmt = stmt.order_by(User.created_at.desc())
+            elif order_by == 'created_at':
+                if direction == 'asc':
+                    stmt = stmt.order_by(User.created_at.asc())
+                else:
+                    stmt = stmt.order_by(User.created_at.desc())
 
-                elif order_by == 'last_active_at':
-                    if direction == 'asc':
-                        stmt = stmt.order_by(User.last_active_at.asc())
-                    else:
-                        stmt = stmt.order_by(User.last_active_at.desc())
+            elif order_by == 'last_active_at':
+                if direction == 'asc':
+                    stmt = stmt.order_by(User.last_active_at.asc())
+                else:
+                    stmt = stmt.order_by(User.last_active_at.desc())
 
-                elif order_by == 'updated_at':
-                    if direction == 'asc':
-                        stmt = stmt.order_by(User.updated_at.asc())
-                    else:
-                        stmt = stmt.order_by(User.updated_at.desc())
-                elif order_by == 'role':
-                    if direction == 'asc':
-                        stmt = stmt.order_by(User.role.asc())
-                    else:
-                        stmt = stmt.order_by(User.role.desc())
-
-            else:
+            elif order_by == 'updated_at':
+                if direction == 'asc':
+                    stmt = stmt.order_by(User.updated_at.asc())
+                else:
+                    stmt = stmt.order_by(User.updated_at.desc())
+            elif order_by == 'role':
+                if direction == 'asc':
+                    stmt = stmt.order_by(User.role.asc())
+                else:
+                    stmt = stmt.order_by(User.role.desc())
+            elif not filter:
                 stmt = stmt.order_by(User.created_at.desc())
 
             # Count BEFORE pagination
@@ -572,13 +626,6 @@ class UsersTable:
             row = (await session.execute(stmt)).scalars().first()
             return UserModel.model_validate(row) if row else None
 
-    async def get_user_webhook_url_by_id(self, id: str, db: AsyncSession | None = None) -> str | None:
-        async with get_async_db_context(db) as session:
-            user = await session.get(User, id)
-            if user and user.settings:
-                return user.settings.get('ui', {}).get('notifications', {}).get('webhook_url', None)
-            return None
-
     async def get_num_users_active_today(self, db: AsyncSession | None = None) -> int | None:
         async with get_async_db_context(db) as session:
             current_timestamp = int(time.time())
@@ -617,7 +664,6 @@ class UsersTable:
                 return None
             user.role = role
             await session.commit()
-            await session.refresh(user)
             return UserModel.model_validate(user)
 
     async def update_user_status_by_id(
@@ -630,7 +676,6 @@ class UsersTable:
             for key, value in form_data.model_dump(exclude_none=True).items():
                 setattr(user, key, value)
             await session.commit()
-            await session.refresh(user)
             return UserModel.model_validate(user)
 
     async def update_user_profile_image_url_by_id(
@@ -650,7 +695,6 @@ class UsersTable:
                 return None
             user.profile_image_url = profile_image_url
             await session.commit()
-            await session.refresh(user)
             return UserModel.model_validate(user)
 
     @throttle(DATABASE_USER_ACTIVE_STATUS_UPDATE_INTERVAL)
@@ -668,17 +712,19 @@ class UsersTable:
             if not user:
                 return None
             oauth = dict(user.oauth or {})
-            oauth[provider] = {'sub': sub}
+            provider_oauth = oauth.get(provider)
+            provider_oauth = dict(provider_oauth) if isinstance(provider_oauth, dict) else {}
+            provider_oauth['sub'] = str(sub)
+            oauth[provider] = provider_oauth
             user.oauth = oauth
             await session.commit()
-            await session.refresh(user)
             return UserModel.model_validate(user)
 
     async def update_user_scim_by_id(
         self,
         id: str,
         provider: str,
-        external_id: str,
+        external_id: str | None,
         db: AsyncSession | None = None,
     ) -> UserModel | None:
         """Update or insert a SCIM provider/external_id pair into the user's scim JSON field."""
@@ -690,7 +736,6 @@ class UsersTable:
             scim[provider] = {'external_id': external_id}
             user.scim = scim
             await session.commit()
-            await session.refresh(user)
             return UserModel.model_validate(user)
 
     async def update_user_by_id(self, id: str, updated: dict, db: AsyncSession | None = None) -> UserModel | None:
@@ -701,7 +746,6 @@ class UsersTable:
             for key, value in updated.items():
                 setattr(user, key, value)
             await session.commit()
-            await session.refresh(user)
             return UserModel.model_validate(user)
 
     # settings update helper
@@ -716,7 +760,6 @@ class UsersTable:
             user_settings.update(updated)
             user.settings = user_settings
             await session.commit()
-            await session.refresh(user)
             return UserModel.model_validate(user)
 
     async def delete_user_by_id(self, id: str, db: AsyncSession | None = None) -> bool:
@@ -763,8 +806,8 @@ class UsersTable:
 
     async def get_valid_user_ids(self, user_ids: list[str], db: AsyncSession | None = None) -> list[str]:
         async with get_async_db_context(db) as session:
-            result = await session.execute(select(User).where(User.id.in_(user_ids)))
-            return [u.id for u in result.scalars().all()]
+            result = await session.execute(select(User.id).where(User.id.in_(user_ids)))
+            return list(result.scalars().all())
 
     async def get_super_admin_user(self, db: AsyncSession | None = None) -> UserModel | None:
         async with get_async_db_context(db) as session:
@@ -790,11 +833,11 @@ class UsersTable:
 
     async def is_user_active(self, user_id: str, db: AsyncSession | None = None) -> bool:
         async with get_async_db_context(db) as session:
-            user = await session.get(User, user_id)
-            if user and user.last_active_at:
+            last_active_at = await session.scalar(select(User.last_active_at).where(User.id == user_id))
+            if last_active_at:
                 # Consider user active if last_active_at within the last 3 minutes
                 three_minutes_ago = int(time.time()) - 180
-                return user.last_active_at >= three_minutes_ago
+                return last_active_at >= three_minutes_ago
             return False
 
 

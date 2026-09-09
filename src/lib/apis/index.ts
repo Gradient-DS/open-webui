@@ -1,5 +1,6 @@
 import { WEBUI_BASE_URL } from '$lib/constants';
 import { convertOpenApiToToolPayload } from '$lib/utils';
+import { normalizeTags } from '$lib/utils/tags';
 import { getOpenAIModelsDirect } from './openai';
 
 const TOOL_SERVER_FETCH_TIMEOUT = 10000;
@@ -141,8 +142,8 @@ export const getModels = async (
 					}
 				}
 
-				const tags = apiConfig.tags;
-				if (tags) {
+				const tags = normalizeTags(apiConfig.tags);
+				if (tags.length > 0) {
 					for (const model of models) {
 						model.tags = tags;
 					}
@@ -163,7 +164,14 @@ export const getModels = async (
 		// Remove duplicates
 		const modelsMap = {};
 		for (const model of models) {
-			modelsMap[model.id] = model;
+			const existing = modelsMap[model.id];
+			modelsMap[model.id] = existing
+				? {
+						...existing,
+						...model,
+						info: existing.info ?? model.info
+					}
+				: model;
 		}
 
 		models = Object.values(modelsMap);
@@ -930,7 +938,7 @@ export const generateEmoji = async (
 		throw error;
 	}
 
-	const response = res?.choices[0]?.message?.content.replace(/["']/g, '') ?? null;
+	const response = res?.choices[0]?.message?.content?.replace(/["']/g, '') ?? null;
 
 	if (response) {
 		if (/\p{Extended_Pictographic}/u.test(response)) {
@@ -1751,6 +1759,7 @@ export interface ModelConfig {
 export interface ModelMeta {
 	toolIds: never[];
 	description?: string;
+	hidden?: boolean;
 	capabilities?: object;
 	profile_image_url?: string;
 	data_warnings?: Record<string, boolean>;

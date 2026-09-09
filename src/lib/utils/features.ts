@@ -2,6 +2,10 @@ import { get } from 'svelte/store';
 import { config } from '$lib/stores';
 
 export type Feature =
+	// [Gradient] Match the backend tenant gates used by chat settings.
+	| 'tool_servers'
+	| 'terminal_servers'
+	| 'user_demographics'
 	| 'chat_controls'
 	| 'capture'
 	| 'artifacts'
@@ -140,6 +144,9 @@ export const ADMIN_SETTINGS_TABS = [
 	'agents'
 ] as const;
 
+// [Gradient] Analytics is a known modal tab, outside the tenant settings allowlist.
+const knownAdminSettingsTabs = new Set<string>([...ADMIN_SETTINGS_TABS, 'analytics']);
+
 export type AdminSettingsTab = (typeof ADMIN_SETTINGS_TABS)[number];
 
 /**
@@ -163,13 +170,16 @@ export function isAdminSettingsEnabled(): boolean {
  * @param tab - The tab ID to check
  * @returns true if the tab should be visible
  */
-export function isAdminSettingsTabEnabled(tab: AdminSettingsTab): boolean {
+export function isAdminSettingsTabEnabled(tab: string): boolean {
+	// [Gradient] Reject unknown and intentionally hidden tabs, including deep links.
+	if (!knownAdminSettingsTabs.has(tab)) return false;
+	const $config = get(config);
+	if (tab === 'analytics') return $config?.features?.enable_admin_analytics ?? true;
 	// First check if admin settings is enabled at all
 	if (!isAdminSettingsEnabled()) {
 		return false;
 	}
 
-	const $config = get(config);
 	const allowedTabs = $config?.features?.feature_admin_settings_tabs ?? [];
 
 	// If no tabs specified, all tabs are allowed

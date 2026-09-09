@@ -1,7 +1,9 @@
 import { describe, it, expect } from 'vitest';
 
 import {
+	applyResponseStreamEvent,
 	buildOutputDisplayItems,
+	getOutputText,
 	getOutputProseRuns,
 	getOutputStreamAnchors,
 	hasDocumentOutput,
@@ -125,6 +127,82 @@ const documentItem = (overrides: Partial<OutputItem> = {}): OutputItem => ({
 });
 
 describe('buildOutputDisplayItems: documents', () => {
+	it('reconciles document tags split across deltas with backend item corrections', () => {
+		// [Gradient] Wire replay of DETECT_DOCUMENT_WRITER in middleware.py: tag boundaries
+		// correct items already sent to the client before emitting the new tail's delta.
+		const chunks = [
+			'Hier is je stuk.\n\n',
+			'<doc',
+			'ument title="Offerte">',
+			'# Kop\n',
+			'\n</docu',
+			'ment>\n\nKlaar!'
+		];
+		const intro = { ...messageItem(chunks[0]), id: 'msg_intro', status: 'in_progress' };
+		const document = documentItem({
+			id: 'doc_offerte',
+			status: 'in_progress',
+			title: 'Offerte',
+			start_tag: '<document>',
+			end_tag: '</document>',
+			attributes: { title: 'Offerte' },
+			markdown: '',
+			content: [],
+			started_at: 1784728000
+		});
+		let output: OutputItem[] = [];
+		const replay = (event: Parameters<typeof applyResponseStreamEvent>[1]) => {
+			output = applyResponseStreamEvent(output, event);
+		};
+		const delta = (itemId: string, outputIndex: number, text: string) =>
+			replay({
+				type: 'response.output_text.delta',
+				item_id: itemId,
+				output_index: outputIndex,
+				content_index: 0,
+				delta: text
+			});
+
+		for (const chunk of chunks.slice(0, 2)) delta(intro.id, 0, chunk);
+		expect(getOutputText(output)).toContain('<doc');
+
+		// The third chunk completes the opening tag: replace the intro and add a document.
+		replay({ type: 'response.output_item.added', output_index: 0, item: intro });
+		replay({ type: 'response.output_item.added', output_index: 1, item: document });
+		delta(document.id!, 1, '');
+		for (const chunk of chunks.slice(3, 5)) delta(document.id!, 1, chunk);
+		expect(output[1].markdown).toBe('# Kop\n\n</docu');
+
+		// The sixth chunk closes the document: done replaces its partial closing tag.
+		replay({
+			type: 'response.output_item.done',
+			output_index: 1,
+			item: {
+				...document,
+				status: 'completed',
+				markdown: '# Kop',
+				content: [{ type: 'output_text', text: '# Kop' }],
+				ended_at: 1784728004,
+				duration: 4
+			}
+		});
+		replay({
+			type: 'response.output_item.added',
+			output_index: 2,
+			item: { ...messageItem(''), id: 'msg_outro', status: 'in_progress', content: [] }
+		});
+		delta('msg_outro', 2, chunks[5].split('>')[1].trim());
+
+		const text = getOutputText(output);
+		expect(text).not.toMatch(/<\/?doc(?:ument)?\b/);
+		expect(text.match(/<details type="document"/g)).toHaveLength(1);
+		expect(text).toContain('done="true" title="Offerte"');
+		expect(text).toContain('# Kop');
+		expect(text).toContain('Hier is je stuk.');
+		expect(text).toContain('Klaar!');
+		expect(output.map((item) => item.type)).toEqual(['message', 'open_webui:document', 'message']);
+	});
+
 	it('emits a completed document display item from the persisted shape', () => {
 		const items = buildOutputDisplayItems([
 			{ type: 'message', content: [{ type: 'output_text', text: 'intro\n\n' }] },

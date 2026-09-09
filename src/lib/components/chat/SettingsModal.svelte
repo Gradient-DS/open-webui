@@ -1,22 +1,32 @@
 <script lang="ts">
+	import { browser } from '$app/environment';
 	import { getContext, onMount, tick } from 'svelte';
+	import type { Writable } from 'svelte/store';
 	import { toast } from 'svelte-sonner';
 	import { config, models, settings, user } from '$lib/stores';
-	import { isFeatureEnabled } from '$lib/utils/features';
-	import { updateUserSettings } from '$lib/apis/users';
-	import { getModels as _getModels } from '$lib/apis';
-	import { goto } from '$app/navigation';
+	import type { SettingsModalRequest } from '$lib/stores';
+	import { getUserSettings, updateUserSettings } from '$lib/apis/users';
+	import { getBackendConfig, getModels as _getModels } from '$lib/apis';
+	import {
+		isFeatureEnabled,
+		isAdminSettingsEnabled,
+		isAdminSettingsTabEnabled,
+		getFirstAvailableAdminSettingsTab
+	} from '$lib/utils/features';
 
 	import Modal from '../common/Modal.svelte';
 	import Account from './Settings/Account.svelte';
 	import About from './Settings/About.svelte';
 	import General from './Settings/General.svelte';
 	import Interface from './Settings/Interface.svelte';
+	import Notifications from './Settings/Notifications.svelte';
+	import Shortcuts from './Settings/Shortcuts.svelte';
 	import Audio from './Settings/Audio.svelte';
 	import DataControls from './Settings/DataControls.svelte';
+	import Usage from './Settings/Usage.svelte';
+	import ArchivedChats from './Settings/ArchivedChats.svelte';
 	import Personalization from './Settings/Personalization.svelte';
 	import Search from '../icons/Search.svelte';
-	import XMark from '../icons/XMark.svelte';
 	import Connections from './Settings/Connections.svelte';
 	import Integrations from './Settings/Integrations.svelte';
 	import DatabaseSettings from '../icons/DatabaseSettings.svelte';
@@ -28,21 +38,113 @@
 	import WrenchAlt from '../icons/WrenchAlt.svelte';
 	import Face from '../icons/Face.svelte';
 	import AppNotification from '../icons/AppNotification.svelte';
-	import UserBadgeCheck from '../icons/UserBadgeCheck.svelte';
+	import AdjustmentsHorizontal from '../icons/AdjustmentsHorizontal.svelte';
+	import ArchiveBox from '../icons/ArchiveBox.svelte';
+	import ChevronLeft from '../icons/ChevronLeft.svelte';
+	import Keyboard from '../icons/Keyboard.svelte';
+	import UsageIcon from '../icons/UsageIcon.svelte';
+	import AdminTabIcon from '$lib/components/admin/Settings/AdminTabIcon.svelte';
+	import AdminGeneral from '$lib/components/admin/Settings/General.svelte';
+	import AdminConnections from '$lib/components/admin/Settings/Connections.svelte';
+	import AdminModels from '$lib/components/admin/Settings/Models.svelte';
+	import AdminEvaluations from '$lib/components/admin/Settings/Evaluations.svelte';
+	import AdminAnalytics from '$lib/components/admin/Analytics.svelte';
+	import AdminIntegrations from '$lib/components/admin/Settings/Integrations.svelte';
+	import AdminDocuments from '$lib/components/admin/Settings/Documents.svelte';
+	import AdminWebSearch from '$lib/components/admin/Settings/WebSearch.svelte';
+	import AdminCodeExecution from '$lib/components/admin/Settings/CodeExecution.svelte';
+	import AdminInterface from '$lib/components/admin/Settings/Interface.svelte';
+	import AdminAudio from '$lib/components/admin/Settings/Audio.svelte';
+	import AdminImages from '$lib/components/admin/Settings/Images.svelte';
+	import AdminPipelines from '$lib/components/admin/Settings/Pipelines.svelte';
+	import AdminDatabase from '$lib/components/admin/Settings/Database.svelte';
 
-	const i18n = getContext('i18n');
+	// [Gradient] Fork admin tab migrated from the route host.
+	import AdminCloudSync from '$lib/components/admin/Settings/CloudSync.svelte';
 
-	export let show: boolean | string = false;
+	// [Gradient] Fork admin tab migrated from the route host.
+	import AdminEmail from '$lib/components/admin/Settings/Email.svelte';
 
-	$: if (show) {
-		if (typeof show === 'string') {
+	// [Gradient] Fork admin tab migrated from the route host.
+	import AdminSecurity from '$lib/components/admin/Settings/Security.svelte';
+
+	// [Gradient] Fork admin tab migrated from the route host.
+	import AdminAcceptance from '$lib/components/admin/Settings/Acceptance.svelte';
+
+	// [Gradient] Fork admin tab migrated from the route host.
+	import AdminExternalAgents from '$lib/components/admin/Settings/ExternalAgents.svelte';
+
+	// [Gradient] Fork admin tab migrated from the route host.
+	import AdminAgents from '$lib/components/admin/Settings/Agents.svelte';
+
+	const i18n: Writable<any> = getContext('i18n');
+
+	export let show: boolean | string | SettingsModalRequest = false;
+	let modalShow = false;
+	let lastShow: boolean | string | SettingsModalRequest = false;
+	let tabState: Record<string, unknown> | null = null;
+	let personalUiSettings: Record<string, any> = {};
+
+	const mergeUiSettings = (defaults: Record<string, any>, userSettings: Record<string, any>) => {
+		const merged = { ...defaults };
+		for (const [key, value] of Object.entries(userSettings)) {
+			const defaultValue = merged[key];
+			merged[key] =
+				defaultValue &&
+				value &&
+				typeof defaultValue === 'object' &&
+				typeof value === 'object' &&
+				!Array.isArray(defaultValue) &&
+				!Array.isArray(value)
+					? mergeUiSettings(defaultValue, value)
+					: value;
+		}
+		return merged;
+	};
+
+	const loadPersonalUiSettings = async () => {
+		const userSettings = await getUserSettings(localStorage.token, true).catch((error) => {
+			console.error(error);
+			return null;
+		});
+		personalUiSettings =
+			userSettings?.ui && typeof userSettings.ui === 'object' && !Array.isArray(userSettings.ui)
+				? userSettings.ui
+				: {};
+	};
+
+	$: if (show !== lastShow) {
+		lastShow = show;
+		if (show && typeof show === 'object') {
+			selectedTab = show.tab;
+			tabState = show.state ?? null;
+			show = true;
+			lastShow = true;
+			modalShow = true;
+			loadPersonalUiSettings();
+		} else if (typeof show === 'string') {
 			selectedTab = show;
 			show = true;
+			lastShow = true;
+			modalShow = true;
+			loadPersonalUiSettings();
+		} else {
+			modalShow = show;
+			if (show) {
+				loadPersonalUiSettings();
+			}
+			if (!show) {
+				selectedTab = 'general';
+				tabState = null;
+			}
 		}
-		addScrollListener();
-	} else {
+	}
+
+	$: if (!modalShow && show !== false) {
+		show = false;
+		lastShow = false;
 		selectedTab = 'general';
-		removeScrollListener();
+		tabState = null;
 	}
 
 	interface SettingsTab {
@@ -50,6 +152,55 @@
 		title: string;
 		keywords: string[];
 	}
+
+	const isAdminTab = (tabId: string) => tabId.startsWith('admin:');
+	const adminTabSegment = (tabId: string) => tabId.replace('admin:', '');
+	const adminTabPanelId = (tabId: string) => `tab-${tabId.replace(':', '-')}`;
+	const personalSettingGroups: Record<string, string> = {
+		general: 'Basics',
+		interface: 'Basics',
+		notifications: 'Basics',
+		shortcuts: 'Basics',
+		connections: 'Services',
+		tools: 'Services',
+		personalization: 'Preferences',
+		audio: 'Preferences',
+		data_controls: 'Data',
+		usage: 'Data',
+		archived_chats: 'Data',
+		account: 'Profile',
+		about: 'Profile'
+	};
+	const adminSettingGroups: Record<string, string> = {
+		'admin:general': 'System',
+		'admin:acceptance': 'System',
+		'admin:security': 'System',
+		'admin:email': 'System',
+		'admin:connections': 'AI',
+		'admin:models': 'AI',
+		'admin:agents': 'AI',
+		'admin:external-agents': 'AI',
+		'admin:interface': 'Experience',
+		'admin:audio': 'Experience',
+		'admin:images': 'Experience',
+		'admin:evaluations': 'Quality',
+		'admin:analytics': 'Quality',
+		'admin:integrations': 'Tools',
+		'admin:documents': 'Tools',
+		'admin:cloud-sync': 'Tools',
+		'admin:web': 'Tools',
+		'admin:code-execution': 'Tools',
+		'admin:pipelines': 'Tools',
+		'admin:db': 'Data'
+	};
+	const settingGroupTitle = (tabId: string) =>
+		(isAdminTab(tabId) ? adminSettingGroups[tabId] : personalSettingGroups[tabId]) ?? 'General';
+	const shouldShowSettingGroup = (tabIds: string[], index: number) =>
+		index === 0 || settingGroupTitle(tabIds[index]) !== settingGroupTitle(tabIds[index - 1]);
+	const settingGroupHeadingClass = (first: boolean) =>
+		`hidden md:block shrink-0 text-[0.625rem] text-gray-400 dark:text-gray-600 px-2 ${
+			first ? 'mt-0.5' : 'mt-2'
+		} mb-0.5`;
 
 	const allSettings: SettingsTab[] = [
 		{
@@ -69,7 +220,6 @@
 				'keepalive',
 				'keep alive',
 				'languages',
-				'notifications',
 				'requestmode',
 				'request mode',
 				'systemparameters',
@@ -144,12 +294,16 @@
 				'full width mode',
 				'haptic feedback',
 				'hapticfeedback',
+				'accessibility mode',
+				'accessibilitymode',
 				'high contrast mode',
 				'highcontrastmode',
 				'iframe sandbox allow forms',
 				'iframe sandbox allow same origin',
 				'iframesandboxallowforms',
 				'iframesandboxallowsameorigin',
+				'terminal preview allow same origin',
+				'terminalpreviewallowsameorigin',
 				'imagecompression',
 				'image compression',
 				'imagemaxcompressionsize',
@@ -169,8 +323,13 @@
 				'pastelargetextasfile',
 				'reset background',
 				'resetbackground',
+				'disable auto scroll',
+				'disableautoscroll',
 				'response auto copy',
+				'response auto scroll',
+				'response auto-scroll',
 				'responseautocopy',
+				'responseautoscroll',
 				'rich text input for chat',
 				'richtextinputforchat',
 				'right to left',
@@ -209,6 +368,37 @@
 				'whats new',
 				'websearchinchat',
 				'web search in chat'
+			]
+		},
+		{
+			id: 'notifications',
+			title: 'Notifications',
+			keywords: [
+				'browser notifications',
+				'browsernotifications',
+				'chat failed',
+				'chat finished',
+				'notification sound',
+				'notifications',
+				'notify',
+				'webhook',
+				'webhook notifications',
+				'webhooks'
+			]
+		},
+		{
+			id: 'shortcuts',
+			title: 'Keyboard',
+			keywords: [
+				'commands',
+				'hotkeys',
+				'keyboard',
+				'keyboard shortcuts',
+				'keybindings',
+				'keys',
+				'shortcut',
+				'shortcuts',
+				'show shortcuts'
 			]
 		},
 		{
@@ -348,8 +538,6 @@
 				'archive chats',
 				'archiveallchats',
 				'archivechats',
-				'archived chats',
-				'archivedchats',
 				'chat activity',
 				'chat history',
 				'chat settings',
@@ -375,6 +563,43 @@
 				'message history',
 				'messagearchive',
 				'messagehistory'
+			]
+		},
+		{
+			id: 'usage',
+			title: 'Usage',
+			keywords: [
+				'activity',
+				'activity heatmap',
+				'analytics',
+				'chat activity',
+				'heatmap',
+				'model usage',
+				'stats',
+				'streak',
+				'token activity',
+				'token usage',
+				'tokens',
+				'usage'
+			]
+		},
+		{
+			id: 'archived_chats',
+			title: 'Archived Chats',
+			keywords: [
+				'archive',
+				'archive chat',
+				'archive chats',
+				'archived',
+				'archived chat',
+				'archived chats',
+				'archivedchat',
+				'archivedchats',
+				'conversation archive',
+				'message archive',
+				'unarchive',
+				'unarchive chat',
+				'unarchive chats'
 			]
 		},
 		{
@@ -477,14 +702,148 @@
 		}
 	];
 
-	let availableSettings = [];
-	let filteredSettings = [];
+	// [Gradient] Q14 hides admin:authentication; D-Runtime hides admin:subagents.
+	const adminSettings: SettingsTab[] = [
+		{
+			id: 'admin:general',
+			title: 'General',
+			keywords: [
+				'general',
+				'admin',
+				'settings',
+				'version',
+				'update',
+				'community',
+				'channels',
+				'authentication',
+				'ldap',
+				'oauth'
+			]
+		},
+		{
+			id: 'admin:acceptance',
+			title: 'Acceptance',
+			keywords: ['acceptance', 'modal', 'terms', 'agreement', 'onboarding']
+		},
+		{
+			id: 'admin:security',
+			title: 'Security',
+			keywords: ['security', '2fa', 'two-factor', 'totp', 'authentication', 'mfa']
+		},
+		{
+			id: 'admin:email',
+			title: 'Email',
+			keywords: ['email', 'invite', 'smtp', 'notifications', 'mail']
+		},
+		{
+			id: 'admin:connections',
+			title: 'Connections',
+			keywords: [
+				'connections',
+				'ollama',
+				'openai',
+				'api',
+				'base url',
+				'direct connections',
+				'proxy'
+			]
+		},
+		{
+			id: 'admin:models',
+			title: 'Models',
+			keywords: [
+				'models',
+				'pull',
+				'delete',
+				'create',
+				'edit',
+				'modelfile',
+				'gguf',
+				'import',
+				'export'
+			]
+		},
+		{
+			id: 'admin:agents',
+			title: 'AI-agents',
+			keywords: ['agent', 'agents', 'ai-agents', 'beta', 'external', 'chatbot', 'picker']
+		},
+		{
+			id: 'admin:external-agents',
+			title: 'External Agents',
+			keywords: ['agent', 'external', 'agents', 'ai']
+		},
+		{
+			id: 'admin:interface',
+			title: 'Interface',
+			keywords: ['interface', 'ui', 'appearance', 'banners', 'tasks', 'prompt suggestions', 'tags']
+		},
+		{
+			id: 'admin:audio',
+			title: 'Audio',
+			keywords: ['audio', 'voice', 'speech', 'tts', 'stt', 'whisper', 'deepgram', 'azure']
+		},
+		{
+			id: 'admin:images',
+			title: 'Images',
+			keywords: ['images', 'generation', 'dalle', 'stable diffusion', 'comfyui', 'automatic1111']
+		},
+		{
+			id: 'admin:evaluations',
+			title: 'Evaluations',
+			keywords: ['evaluations', 'feedback', 'rating', 'arena', 'leaderboard', 'preference']
+		},
+		{
+			id: 'admin:analytics',
+			title: 'Analytics',
+			keywords: ['analytics', 'usage', 'stats', 'dashboard', 'models', 'users', 'messages']
+		},
+		{
+			id: 'admin:integrations',
+			title: 'Integrations',
+			keywords: ['tools', 'integrations', 'plugins', 'extensions', 'functions', 'openapi', 'server']
+		},
+		{
+			id: 'admin:documents',
+			title: 'Documents',
+			keywords: ['documents', 'files', 'rag', 'knowledge', 'upload', 'embedding', 'vector db']
+		},
+		{
+			id: 'admin:cloud-sync',
+			title: 'Cloud Sync',
+			keywords: ['cloud', 'sync', 'confluence', 'onedrive', 'google drive', 'integration']
+		},
+		{
+			id: 'admin:web',
+			title: 'Web Search',
+			keywords: ['web search', 'google', 'bing', 'duckduckgo', 'serp', 'searxng', 'tavily', 'exa']
+		},
+		{
+			id: 'admin:code-execution',
+			title: 'Code Execution',
+			keywords: ['code execution', 'python', 'sandbox', 'compiler', 'jupyter', 'interpreter']
+		},
+		{
+			id: 'admin:pipelines',
+			title: 'Pipelines',
+			keywords: ['pipelines', 'workflows', 'filters', 'valves', 'middleware']
+		},
+		{
+			id: 'admin:db',
+			title: 'Database',
+			keywords: ['database', 'export', 'import', 'backup', 'chats', 'users']
+		}
+	];
+	let availableSettings: SettingsTab[] = [];
+	let filteredSettings: string[] = [];
+	let filteredPersonalSettings: string[] = [];
+	let filteredAdminSettings: string[] = [];
 
 	let search = '';
-	let searchDebounceTimeout;
+	let searchDebounceTimeout: ReturnType<typeof setTimeout> | null = null;
 
 	const getAvailableSettings = () => {
-		return allSettings.filter((tab) => {
+		const personalSettings = allSettings.filter((tab) => {
 			if (tab.id === 'connections') {
 				return $config?.features?.enable_direct_connections;
 			}
@@ -514,22 +873,72 @@
 
 			return true;
 		});
+
+		// [Gradient] Apply tenant gates before exposing any admin tab.
+		return $user?.role === 'admin' && isAdminSettingsEnabled()
+			? [
+					...personalSettings,
+					...adminSettings.filter((tab) => isAdminSettingsTabEnabled(tab.id.slice(6)))
+				]
+			: personalSettings;
 	};
 
 	const setFilteredSettings = () => {
 		filteredSettings = availableSettings
 			.filter((tab) => {
+				// [Gradient] Recheck gates when config or search changes.
+				if (
+					isAdminTab(tab.id) &&
+					(!isAdminSettingsEnabled() || !isAdminSettingsTabEnabled(tab.id.slice(6)))
+				)
+					return false;
+				const query = search.toLowerCase().trim();
+				if (tab.id === 'admin:analytics' && !($config?.features.enable_admin_analytics ?? true)) {
+					return false;
+				}
+
 				return (
-					search === '' ||
-					tab.title.toLowerCase().includes(search.toLowerCase().trim()) ||
-					tab.keywords.some((keyword) => keyword.includes(search.toLowerCase().trim()))
+					query === '' ||
+					tab.title.toLowerCase().includes(query) ||
+					tab.keywords.some((keyword) => keyword.includes(query))
 				);
 			})
 			.map((tab) => tab.id);
+		filteredPersonalSettings = filteredSettings.filter((tabId) => !isAdminTab(tabId));
+		filteredAdminSettings = filteredSettings.filter((tabId) => isAdminTab(tabId));
 
-		if (filteredSettings.length > 0 && !filteredSettings.includes(selectedTab)) {
+		if ($user?.role !== 'admin' && isAdminTab(selectedTab)) {
+			selectedTab = 'general';
+		} else if (filteredSettings.length > 0 && !filteredSettings.includes(selectedTab)) {
 			selectedTab = filteredSettings[0];
 		}
+
+		scrollToSelectedTab();
+	};
+
+	const saveSettings = async (updated: Record<string, any>) => {
+		console.log(updated);
+		await settings.set({ ...$settings, ...updated });
+		await models.set(await getModels());
+		const saved = await updateUserSettings(localStorage.token, { ui: $settings });
+		personalUiSettings =
+			saved?.ui && typeof saved.ui === 'object' && !Array.isArray(saved.ui) ? saved.ui : {};
+		await settings.set(
+			mergeUiSettings($config?.ui?.default_interface_settings ?? {}, personalUiSettings)
+		);
+	};
+
+	const getModels = async () => {
+		return await _getModels(
+			localStorage.token,
+			$config?.features?.enable_direct_connections ? ($settings?.directConnections ?? null) : null
+		);
+	};
+
+	const adminConfigSaveHandler = async () => {
+		toast.success($i18n.t('Settings saved successfully!'));
+		await tick();
+		await config.set(await getBackendConfig());
 	};
 
 	const searchDebounceHandler = () => {
@@ -542,46 +951,38 @@
 		}, 100);
 	};
 
-	const saveSettings = async (updated) => {
-		console.log(updated);
-		await settings.set({ ...$settings, ...updated });
-		await models.set(await getModels());
-		await updateUserSettings(localStorage.token, { ui: $settings });
-	};
-
-	const getModels = async () => {
-		return await _getModels(
-			localStorage.token,
-			$config?.features?.enable_direct_connections && ($settings?.directConnections ?? null)
-		);
-	};
+	const tabButtonClass = (active: boolean) =>
+		`flex items-center gap-1.5 h-7 px-2 md:w-full shrink-0 rounded-lg text-xs text-left transition-colors duration-75 ${
+			active
+				? 'font-medium text-gray-900 dark:text-white bg-gray-50 dark:bg-white/[0.04]'
+				: 'text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'
+		}`;
 
 	let selectedTab = 'general';
-
-	// Function to handle sideways scrolling
-	const scrollHandler = (event) => {
-		const settingsTabsContainer = document.getElementById('settings-tabs-container');
-		if (settingsTabsContainer) {
-			event.preventDefault(); // Prevent default vertical scrolling
-			settingsTabsContainer.scrollLeft += event.deltaY; // Scroll sideways
+	const scrollToSelectedTab = async () => {
+		if (!browser || !modalShow || !selectedTab) {
+			return;
 		}
-	};
 
-	const addScrollListener = async () => {
 		await tick();
-		const settingsTabsContainer = document.getElementById('settings-tabs-container');
-		if (settingsTabsContainer) {
-			settingsTabsContainer.addEventListener('wheel', scrollHandler);
-		}
+		const tabElement = document.querySelector<HTMLElement>(
+			'#settings-tabs-container [role="tab"][aria-selected="true"]'
+		);
+		tabElement?.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'start' });
 	};
 
-	const removeScrollListener = async () => {
-		await tick();
-		const settingsTabsContainer = document.getElementById('settings-tabs-container');
-		if (settingsTabsContainer) {
-			settingsTabsContainer.removeEventListener('wheel', scrollHandler);
+	// [Gradient] Validate direct modal requests as well as URL redirects.
+	$: if (isAdminTab(selectedTab) && ($config || $user)) {
+		if ($user?.role !== 'admin' || !isAdminSettingsEnabled()) selectedTab = 'general';
+		else if (!isAdminSettingsTabEnabled(selectedTab.slice(6))) {
+			const first = getFirstAvailableAdminSettingsTab();
+			selectedTab = first ? 'admin:' + first : 'general';
 		}
-	};
+	}
+
+	$: if (modalShow && selectedTab) {
+		scrollToSelectedTab();
+	}
 
 	onMount(() => {
 		availableSettings = getAvailableSettings();
@@ -594,340 +995,446 @@
 	});
 </script>
 
-<Modal size="2xl" bind:show>
-	<div class="text-gray-700 dark:text-gray-100 mx-1">
-		<div class=" flex justify-between dark:text-gray-300 px-4 md:px-4.5 pt-4.5 pb-0.5 md:pb-2.5">
-			<div class=" text-lg font-medium self-center">{$i18n.t('Settings')}</div>
-			<button
-				aria-label={$i18n.t('Close settings modal')}
-				class="self-center"
-				on:click={() => {
-					show = false;
-				}}
-			>
-				<XMark className="w-5 h-5"></XMark>
-			</button>
+<Modal
+	size="full"
+	containerClassName="p-4 sm:p-6 lg:p-8"
+	className="!w-[calc(100vw-2rem)] sm:!w-[calc(100vw-3rem)] lg:!w-[calc(100vw-4rem)] !max-w-[80rem] h-[min(max(54rem,80dvh),calc(100dvh-4rem))] max-h-[calc(100dvh-4rem)] flex flex-col md:flex-row bg-white dark:bg-gray-900 rounded-4xl overflow-hidden"
+	bind:show={modalShow}
+>
+	<nav
+		id="settings-tabs-container"
+		class="shrink-0 min-w-0 md:min-h-0 flex md:flex-col border-b md:border-b-0 md:border-r border-gray-100/30 dark:border-white/[0.02] md:w-[15rem]"
+	>
+		<button
+			class="flex items-center gap-1.5 h-7 px-2 m-1 md:mb-0 md:w-[calc(100%-0.5rem)] shrink-0 rounded-lg text-xs text-gray-400 dark:text-gray-600 hover:text-gray-700 dark:hover:text-gray-300 transition-colors duration-75"
+			type="button"
+			on:click={() => {
+				show = false;
+			}}
+		>
+			<ChevronLeft className="size-3" strokeWidth="2" />
+			<span>{$i18n.t('Back')}</span>
+		</button>
+
+		<div
+			class="hidden md:flex items-center gap-1.5 h-7 px-2 mx-1 mt-1 mb-0.5 shrink-0 rounded-lg text-xs bg-gray-50/70 dark:bg-white/[0.03]"
+		>
+			<div class="self-center rounded-l-xl bg-transparent">
+				<Search className="size-3.5" strokeWidth="1.5" />
+			</div>
+			<label class="sr-only" for="search-input-settings-modal">{$i18n.t('Search')}</label>
+			<input
+				data-settings-search
+				class="w-full text-xs bg-transparent py-1 outline-hidden dark:text-gray-300"
+				bind:value={search}
+				id="search-input-settings-modal"
+				on:input={searchDebounceHandler}
+				placeholder={$i18n.t('Search')}
+			/>
 		</div>
 
-		<div class="flex flex-col md:flex-row w-full pt-1 pb-4">
-			<div
-				role="tablist"
-				id="settings-tabs-container"
-				class="tabs flex flex-row overflow-x-auto gap-2.5 mx-3 md:pr-4 md:gap-1 md:flex-col flex-1 md:flex-none md:w-50 md:min-h-[min(42rem,calc(100dvh-10rem))] md:max-h-[min(42rem,calc(100dvh-10rem))] dark:text-gray-200 text-sm text-left mb-1 md:mb-0 -translate-y-1"
+		<div
+			class="tabs scrollbar-none flex min-w-0 flex-1 min-h-0 overflow-x-auto md:overflow-x-hidden md:overflow-y-auto md:flex-col p-1 pl-0 md:pl-1 gap-px"
+		>
+			<span
+				class="hidden md:block text-[0.625rem] text-gray-400 dark:text-gray-600 px-2 mt-1.5 mb-0.5"
 			>
-				<div
-					class="hidden md:flex w-full rounded-full px-2.5 gap-2 bg-gray-100/80 dark:bg-gray-850/80 backdrop-blur-2xl my-1 mb-1.5"
-					id="settings-search"
-				>
-					<div class="self-center rounded-l-xl bg-transparent">
-						<Search
-							className="size-3.5"
-							strokeWidth={($settings?.highContrastMode ?? false) ? '3' : '1.5'}
-						/>
-					</div>
-					<label class="sr-only" for="search-input-settings-modal">{$i18n.t('Search')}</label>
-					<input
-						class={`w-full py-1 text-sm bg-transparent dark:text-gray-300 outline-hidden
-								${($settings?.highContrastMode ?? false) ? 'placeholder-gray-800' : ''}`}
-						bind:value={search}
-						id="search-input-settings-modal"
-						on:input={searchDebounceHandler}
-						placeholder={$i18n.t('Search')}
-					/>
-				</div>
-				{#if filteredSettings.length > 0}
-					{#each filteredSettings as tabId (tabId)}
-						{#if tabId === 'general'}
+				{$i18n.t('Personal')}
+			</span>
+
+			{#if filteredPersonalSettings.length > 0}
+				{#each filteredPersonalSettings as tabId, index (tabId)}
+					{#if shouldShowSettingGroup(filteredPersonalSettings, index)}
+						<span class={settingGroupHeadingClass(index === 0)}>
+							{$i18n.t(settingGroupTitle(tabId))}
+						</span>
+					{/if}
+
+					{#if tabId === 'general'}
+						<button
+							role="tab"
+							aria-controls="tab-general"
+							aria-selected={selectedTab === 'general'}
+							class={tabButtonClass(selectedTab === 'general')}
+							on:click={() => {
+								selectedTab = 'general';
+							}}
+						>
+							<SettingsAlt className="size-3.5" strokeWidth="2" />
+							<span>{$i18n.t('General')}</span>
+						</button>
+					{:else if tabId === 'interface'}
+						<button
+							role="tab"
+							aria-controls="tab-interface"
+							aria-selected={selectedTab === 'interface'}
+							class={tabButtonClass(selectedTab === 'interface')}
+							on:click={() => {
+								selectedTab = 'interface';
+							}}
+						>
+							<AdjustmentsHorizontal className="size-3.5" strokeWidth="2" />
+							<span>{$i18n.t('Interface')}</span>
+						</button>
+					{:else if tabId === 'notifications'}
+						<button
+							role="tab"
+							aria-controls="tab-notifications"
+							aria-selected={selectedTab === 'notifications'}
+							class={tabButtonClass(selectedTab === 'notifications')}
+							on:click={() => {
+								selectedTab = 'notifications';
+							}}
+						>
+							<AppNotification className="size-3.5" strokeWidth="2" />
+							<span>{$i18n.t('Notifications')}</span>
+						</button>
+					{:else if tabId === 'shortcuts'}
+						<button
+							role="tab"
+							aria-controls="tab-shortcuts"
+							aria-selected={selectedTab === 'shortcuts'}
+							class={tabButtonClass(selectedTab === 'shortcuts')}
+							on:click={() => {
+								selectedTab = 'shortcuts';
+							}}
+						>
+							<Keyboard className="size-3.5" strokeWidth="2" />
+							<span>{$i18n.t('Keyboard')}</span>
+						</button>
+					{:else if tabId === 'connections'}
+						{#if $user?.role === 'admin' || ($user?.role === 'user' && $config?.features?.enable_direct_connections)}
 							<button
 								role="tab"
-								aria-controls="tab-general"
-								aria-selected={selectedTab === 'general'}
-								class={`px-0.5 md:px-2.5 py-1 min-w-fit rounded-xl flex-1 md:flex-none flex text-left transition
-								${
-									selectedTab === 'general'
-										? 'bg-gray-100 dark:bg-gray-800'
-										: 'text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-850'
-								}`}
+								aria-controls="tab-connections"
+								aria-selected={selectedTab === 'connections'}
+								class={tabButtonClass(selectedTab === 'connections')}
 								on:click={() => {
-									selectedTab = 'general';
+									selectedTab = 'connections';
 								}}
 							>
-								<div class=" self-center mr-2">
-									<SettingsAlt strokeWidth="2" />
-								</div>
-								<div class=" self-center">{$i18n.t('General')}</div>
-							</button>
-						{:else if tabId === 'interface'}
-							<button
-								role="tab"
-								aria-controls="tab-interface"
-								aria-selected={selectedTab === 'interface'}
-								class={`px-0.5 md:px-2.5 py-1 min-w-fit rounded-xl flex-1 md:flex-none flex text-left transition
-								${
-									selectedTab === 'interface'
-										? 'bg-gray-100 dark:bg-gray-800'
-										: 'text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-850'
-								}`}
-								on:click={() => {
-									selectedTab = 'interface';
-								}}
-							>
-								<div class=" self-center mr-2">
-									<AppNotification strokeWidth="2" />
-								</div>
-								<div class=" self-center">{$i18n.t('Interface')}</div>
-							</button>
-						{:else if tabId === 'connections'}
-							{#if $user?.role === 'admin' || ($user?.role === 'user' && $config?.features?.enable_direct_connections)}
-								<button
-									role="tab"
-									aria-controls="tab-connections"
-									aria-selected={selectedTab === 'connections'}
-									class={`px-0.5 md:px-2.5 py-1 min-w-fit rounded-xl flex-1 md:flex-none flex text-left transition
-								${
-									selectedTab === 'connections'
-										? 'bg-gray-100 dark:bg-gray-800'
-										: 'text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-850'
-								}`}
-									on:click={() => {
-										selectedTab = 'connections';
-									}}
-								>
-									<div class=" self-center mr-2">
-										<Link strokeWidth="2" />
-									</div>
-									<div class=" self-center">{$i18n.t('Connections')}</div>
-								</button>
-							{/if}
-						{:else if tabId === 'tools'}
-							{#if (isFeatureEnabled('tool_servers') || isFeatureEnabled('terminal_servers')) && ($user?.role === 'admin' || ($user?.role === 'user' && $user?.permissions?.features?.direct_tool_servers))}
-								<button
-									role="tab"
-									aria-controls="tab-tools"
-									aria-selected={selectedTab === 'tools'}
-									class={`px-0.5 md:px-2.5 py-1 min-w-fit rounded-xl flex-1 md:flex-none flex text-left transition
-								${
-									selectedTab === 'tools'
-										? 'bg-gray-100 dark:bg-gray-800'
-										: 'text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-850'
-								}`}
-									on:click={() => {
-										selectedTab = 'tools';
-									}}
-								>
-									<div class=" self-center mr-2">
-										<WrenchAlt strokeWidth="2" />
-									</div>
-									<div class=" self-center">{$i18n.t('Integrations')}</div>
-								</button>
-							{/if}
-						{:else if tabId === 'personalization'}
-							<button
-								role="tab"
-								aria-controls="tab-personalization"
-								aria-selected={selectedTab === 'personalization'}
-								class={`px-0.5 md:px-2.5 py-1 min-w-fit rounded-xl flex-1 md:flex-none flex text-left transition
-								${
-									selectedTab === 'personalization'
-										? 'bg-gray-100 dark:bg-gray-800'
-										: 'text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-850'
-								}`}
-								on:click={() => {
-									selectedTab = 'personalization';
-								}}
-							>
-								<div class=" self-center mr-2">
-									<Face strokeWidth="2" />
-								</div>
-								<div class=" self-center">{$i18n.t('Personalization')}</div>
-							</button>
-						{:else if tabId === 'audio'}
-							<button
-								role="tab"
-								aria-controls="tab-audio"
-								aria-selected={selectedTab === 'audio'}
-								class={`px-0.5 md:px-2.5 py-1 min-w-fit rounded-xl flex-1 md:flex-none flex text-left transition
-								${
-									selectedTab === 'audio'
-										? 'bg-gray-100 dark:bg-gray-800'
-										: 'text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-850'
-								}`}
-								on:click={() => {
-									selectedTab = 'audio';
-								}}
-							>
-								<div class=" self-center mr-2">
-									<SoundHigh strokeWidth="2" />
-								</div>
-								<div class=" self-center">{$i18n.t('Audio')}</div>
-							</button>
-						{:else if tabId === 'data_controls'}
-							<button
-								role="tab"
-								aria-controls="tab-data-controls"
-								aria-selected={selectedTab === 'data_controls'}
-								class={`px-0.5 md:px-2.5 py-1 min-w-fit rounded-xl flex-1 md:flex-none flex text-left transition
-								${
-									selectedTab === 'data_controls'
-										? 'bg-gray-100 dark:bg-gray-800'
-										: 'text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-850'
-								}`}
-								on:click={() => {
-									selectedTab = 'data_controls';
-								}}
-							>
-								<div class=" self-center mr-2">
-									<DatabaseSettings strokeWidth="2" />
-								</div>
-								<div class=" self-center">{$i18n.t('Data Controls')}</div>
-							</button>
-						{:else if tabId === 'account'}
-							<button
-								role="tab"
-								aria-controls="tab-account"
-								aria-selected={selectedTab === 'account'}
-								class={`px-0.5 md:px-2.5 py-1 min-w-fit rounded-xl flex-1 md:flex-none flex text-left transition
-								${
-									selectedTab === 'account'
-										? 'bg-gray-100 dark:bg-gray-800'
-										: 'text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-850'
-								}`}
-								on:click={() => {
-									selectedTab = 'account';
-								}}
-							>
-								<div class=" self-center mr-2">
-									<UserCircle strokeWidth="2" />
-								</div>
-								<div class=" self-center">{$i18n.t('Account')}</div>
-							</button>
-						{:else if tabId === 'about'}
-							<button
-								role="tab"
-								aria-controls="tab-about"
-								aria-selected={selectedTab === 'about'}
-								class={`px-0.5 md:px-2.5 py-1 min-w-fit rounded-xl flex-1 md:flex-none flex text-left transition
-								${
-									selectedTab === 'about'
-										? 'bg-gray-100 dark:bg-gray-800'
-										: 'text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-850'
-								}`}
-								on:click={() => {
-									selectedTab = 'about';
-								}}
-							>
-								<div class=" self-center mr-2">
-									<InfoCircle strokeWidth="2" />
-								</div>
-								<div class=" self-center">{$i18n.t('About')}</div>
+								<Link className="size-3.5" strokeWidth="2" />
+								<span>{$i18n.t('Connections')}</span>
 							</button>
 						{/if}
-					{/each}
-				{:else}
-					<div class="text-center text-gray-500 mt-4">
-						{$i18n.t('No results found')}
-					</div>
-				{/if}
-				{#if $user?.role === 'admin'}
-					<a
-						href="/admin/settings"
-						draggable="false"
-						class="px-0.5 md:px-2.5 py-1 min-w-fit rounded-xl flex-1 md:flex-none md:mt-auto flex select-none text-left transition text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-850"
-						on:click={async (e) => {
-							e.preventDefault();
-							await goto('/admin/settings');
-							show = false;
-						}}
-					>
-						<div class=" self-center mr-2">
-							<UserBadgeCheck strokeWidth="2" />
-						</div>
-						<div class=" self-center">{$i18n.t('Admin Settings')}</div>
-					</a>
-				{/if}
-			</div>
-			<div
-				class="flex-1 px-3.5 md:pl-0 md:pr-4.5 md:min-h-[min(42rem,calc(100dvh-10rem))] max-h-[min(42rem,calc(100dvh-10rem))] overflow-y-auto"
-			>
-				{#if selectedTab === 'general'}
-					<General
-						{getModels}
-						{saveSettings}
-						on:save={() => {
-							toast.success($i18n.t('Settings saved successfully!'));
-						}}
-					/>
-				{:else if selectedTab === 'interface'}
-					<Interface
-						{saveSettings}
-						on:save={() => {
-							toast.success($i18n.t('Settings saved successfully!'));
-						}}
-					/>
-				{:else if selectedTab === 'connections'}
-					<Connections
-						saveSettings={async (updated) => {
-							await saveSettings(updated);
-							toast.success($i18n.t('Settings saved successfully!'));
-						}}
-					/>
-				{:else if selectedTab === 'tools'}
-					<Integrations
-						saveSettings={async (updated) => {
-							await saveSettings(updated);
-							toast.success($i18n.t('Settings saved successfully!'));
-						}}
-					/>
-				{:else if selectedTab === 'personalization'}
-					<Personalization
-						{saveSettings}
-						on:save={() => {
-							toast.success($i18n.t('Settings saved successfully!'));
-						}}
-					/>
-				{:else if selectedTab === 'audio'}
-					<Audio
-						{saveSettings}
-						on:save={() => {
-							toast.success($i18n.t('Settings saved successfully!'));
-						}}
-					/>
-				{:else if selectedTab === 'data_controls'}
-					<DataControls {saveSettings} />
-				{:else if selectedTab === 'account'}
-					<Account
-						{saveSettings}
-						saveHandler={() => {
-							toast.success($i18n.t('Settings saved successfully!'));
-						}}
-					/>
-				{:else if selectedTab === 'about'}
-					<About />
-				{/if}
-			</div>
+					{:else if tabId === 'tools'}
+						<!-- [Gradient] Both integration types follow their tenant gates. -->
+						{#if (isFeatureEnabled('tool_servers') || isFeatureEnabled('terminal_servers')) && ($user?.role === 'admin' || ($user?.role === 'user' && $user?.permissions?.features?.direct_tool_servers))}
+							<button
+								role="tab"
+								aria-controls="tab-tools"
+								aria-selected={selectedTab === 'tools'}
+								class={tabButtonClass(selectedTab === 'tools')}
+								on:click={() => {
+									selectedTab = 'tools';
+								}}
+							>
+								<WrenchAlt className="size-3.5" strokeWidth="2" />
+								<span>{$i18n.t('Integrations')}</span>
+							</button>
+						{/if}
+					{:else if tabId === 'personalization'}
+						<button
+							role="tab"
+							aria-controls="tab-personalization"
+							aria-selected={selectedTab === 'personalization'}
+							class={tabButtonClass(selectedTab === 'personalization')}
+							on:click={() => {
+								selectedTab = 'personalization';
+							}}
+						>
+							<Face className="size-3.5" strokeWidth="2" />
+							<span>{$i18n.t('Personalization')}</span>
+						</button>
+					{:else if tabId === 'audio'}
+						<button
+							role="tab"
+							aria-controls="tab-audio"
+							aria-selected={selectedTab === 'audio'}
+							class={tabButtonClass(selectedTab === 'audio')}
+							on:click={() => {
+								selectedTab = 'audio';
+							}}
+						>
+							<SoundHigh className="size-3.5" strokeWidth="2" />
+							<span>{$i18n.t('Audio')}</span>
+						</button>
+					{:else if tabId === 'data_controls'}
+						<button
+							role="tab"
+							aria-controls="tab-data-controls"
+							aria-selected={selectedTab === 'data_controls'}
+							class={tabButtonClass(selectedTab === 'data_controls')}
+							on:click={() => {
+								selectedTab = 'data_controls';
+							}}
+						>
+							<DatabaseSettings className="size-3.5" strokeWidth="2" />
+							<span>{$i18n.t('Data Controls')}</span>
+						</button>
+					{:else if tabId === 'usage'}
+						<button
+							role="tab"
+							aria-controls="tab-usage"
+							aria-selected={selectedTab === 'usage'}
+							class={tabButtonClass(selectedTab === 'usage')}
+							on:click={() => {
+								selectedTab = 'usage';
+							}}
+						>
+							<UsageIcon className="size-3.5" strokeWidth="2" />
+							<span>{$i18n.t('Usage')}</span>
+						</button>
+					{:else if tabId === 'archived_chats'}
+						<button
+							role="tab"
+							aria-controls="tab-archived-chats"
+							aria-selected={selectedTab === 'archived_chats'}
+							class={tabButtonClass(selectedTab === 'archived_chats')}
+							on:click={() => {
+								selectedTab = 'archived_chats';
+							}}
+						>
+							<ArchiveBox className="size-3.5" strokeWidth="2" />
+							<span>{$i18n.t('Archived Chats')}</span>
+						</button>
+					{:else if tabId === 'account'}
+						<button
+							role="tab"
+							aria-controls="tab-account"
+							aria-selected={selectedTab === 'account'}
+							class={tabButtonClass(selectedTab === 'account')}
+							on:click={() => {
+								selectedTab = 'account';
+							}}
+						>
+							<UserCircle className="size-3.5" strokeWidth="2" />
+							<span>{$i18n.t('Account')}</span>
+						</button>
+					{:else if tabId === 'about'}
+						<button
+							role="tab"
+							aria-controls="tab-about"
+							aria-selected={selectedTab === 'about'}
+							class={tabButtonClass(selectedTab === 'about')}
+							on:click={() => {
+								selectedTab = 'about';
+							}}
+						>
+							<InfoCircle className="size-3.5" strokeWidth="2" />
+							<span>{$i18n.t('About')}</span>
+						</button>
+					{/if}
+				{/each}
+			{/if}
+
+			{#if $user?.role === 'admin' && filteredAdminSettings.length > 0}
+				<div
+					class="hidden md:block shrink-0 self-stretch h-px mx-1 my-2 bg-gray-100/40 dark:bg-white/[0.025]"
+				></div>
+				<span class="hidden md:block text-[0.625rem] text-gray-400 dark:text-gray-600 px-2 mb-0.5">
+					{$i18n.t('Admin')}
+				</span>
+
+				{#each filteredAdminSettings as tabId, index (tabId)}
+					{#if shouldShowSettingGroup(filteredAdminSettings, index)}
+						<span class={settingGroupHeadingClass(index === 0)}>
+							{$i18n.t(settingGroupTitle(tabId))}
+						</span>
+					{/if}
+
+					{@const tab = adminSettings.find((setting) => setting.id === tabId)}
+					{#if tab}
+						<button
+							role="tab"
+							aria-controls={adminTabPanelId(tab.id)}
+							aria-selected={selectedTab === tab.id}
+							class={tabButtonClass(selectedTab === tab.id)}
+							on:click={() => {
+								selectedTab = tab.id;
+							}}
+						>
+							<AdminTabIcon id={adminTabSegment(tab.id)} className="size-3.5" strokeWidth="2" />
+							<span>{$i18n.t(tab.title)}</span>
+						</button>
+					{/if}
+				{/each}
+			{/if}
+
+			{#if filteredSettings.length === 0}
+				<div class="px-2 py-1 text-xs text-gray-400 dark:text-gray-600">
+					{$i18n.t('No matches')}
+				</div>
+			{/if}
+		</div>
+	</nav>
+
+	<div class="flex-1 min-w-0 min-h-0 p-4 md:px-5 flex flex-col">
+		<div class="flex-1 min-h-0 overflow-hidden">
+			{#if selectedTab === 'general'}
+				<General
+					{getModels}
+					{saveSettings}
+					on:save={() => {
+						toast.success($i18n.t('Settings saved successfully!'));
+					}}
+				/>
+			{:else if selectedTab === 'interface'}
+				<Interface
+					{saveSettings}
+					personalSettingsValue={personalUiSettings}
+					on:save={() => {
+						toast.success($i18n.t('Settings saved successfully!'));
+					}}
+				/>
+			{:else if selectedTab === 'notifications'}
+				<Notifications {saveSettings} />
+			{:else if selectedTab === 'shortcuts'}
+				<Shortcuts {saveSettings} />
+			{:else if selectedTab === 'connections'}
+				<Connections
+					saveSettings={async (updated: Record<string, any>) => {
+						await saveSettings(updated);
+						toast.success($i18n.t('Settings saved successfully!'));
+					}}
+				/>
+			{:else if selectedTab === 'tools'}
+				<Integrations
+					saveSettings={async (updated: Record<string, any>) => {
+						await saveSettings(updated);
+						toast.success($i18n.t('Settings saved successfully!'));
+					}}
+				/>
+			{:else if selectedTab === 'personalization'}
+				<Personalization
+					{saveSettings}
+					on:save={() => {
+						toast.success($i18n.t('Settings saved successfully!'));
+					}}
+				/>
+			{:else if selectedTab === 'audio'}
+				<Audio
+					{saveSettings}
+					on:save={() => {
+						toast.success($i18n.t('Settings saved successfully!'));
+					}}
+				/>
+			{:else if selectedTab === 'data_controls'}
+				<DataControls {saveSettings} />
+			{:else if selectedTab === 'usage'}
+				<Usage />
+			{:else if selectedTab === 'archived_chats'}
+				<ArchivedChats />
+			{:else if selectedTab === 'account'}
+				<Account
+					saveHandler={() => {
+						toast.success($i18n.t('Settings saved successfully!'));
+					}}
+				/>
+			{:else if selectedTab === 'about'}
+				<About />
+			{:else if selectedTab === 'admin:cloud-sync'}
+				<AdminCloudSync
+					on:save={async () => {
+						// Cloud Sync autosaves and shows its own inline status, so no toast
+						// here — just refresh the backend config (integration-enabled flags
+						// feed the chat '+' menu).
+						await tick();
+						await config.set(await getBackendConfig());
+					}}
+				/>
+			{:else if selectedTab === 'admin:email'}
+				<AdminEmail
+					saveHandler={async () => {
+						toast.success($i18n.t('Settings saved successfully!'));
+
+						await tick();
+						await config.set(await getBackendConfig());
+					}}
+				/>
+			{:else if selectedTab === 'admin:security'}
+				<AdminSecurity
+					saveHandler={async () => {
+						toast.success($i18n.t('Settings saved successfully!'));
+
+						await tick();
+						await config.set(await getBackendConfig());
+					}}
+				/>
+			{:else if selectedTab === 'admin:acceptance'}
+				<AdminAcceptance
+					saveHandler={async () => {
+						toast.success($i18n.t('Settings saved successfully!'));
+
+						await tick();
+						await config.set(await getBackendConfig());
+					}}
+				/>
+			{:else if selectedTab === 'admin:external-agents'}
+				<AdminExternalAgents
+					saveHandler={() => {
+						toast.success($i18n.t('Agent selection saved'));
+					}}
+				/>
+			{:else if selectedTab === 'admin:agents'}
+				<AdminAgents
+					saveHandler={() => {
+						toast.success($i18n.t('Settings saved successfully!'));
+					}}
+				/>
+			{:else if selectedTab === 'admin:general'}
+				<AdminGeneral saveHandler={adminConfigSaveHandler} />
+			{:else if selectedTab === 'admin:connections'}
+				<AdminConnections
+					on:save={() => {
+						toast.success($i18n.t('Settings saved successfully!'));
+					}}
+				/>
+			{:else if selectedTab === 'admin:models'}
+				<AdminModels bind:tabState />
+			{:else if selectedTab === 'admin:evaluations'}
+				<AdminEvaluations />
+			{:else if selectedTab === 'admin:analytics'}
+				<AdminAnalytics />
+			{:else if selectedTab === 'admin:integrations'}
+				<AdminIntegrations {saveSettings} />
+			{:else if selectedTab === 'admin:documents'}
+				<AdminDocuments on:save={adminConfigSaveHandler} />
+			{:else if selectedTab === 'admin:web'}
+				<AdminWebSearch saveHandler={adminConfigSaveHandler} />
+			{:else if selectedTab === 'admin:code-execution'}
+				<AdminCodeExecution saveHandler={adminConfigSaveHandler} />
+			{:else if selectedTab === 'admin:interface'}
+				<AdminInterface
+					on:save={() => {
+						toast.success($i18n.t('Settings saved successfully!'));
+					}}
+				/>
+			{:else if selectedTab === 'admin:audio'}
+				<AdminAudio
+					saveHandler={() => {
+						toast.success($i18n.t('Settings saved successfully!'));
+					}}
+				/>
+			{:else if selectedTab === 'admin:images'}
+				<AdminImages
+					on:save={() => {
+						toast.success($i18n.t('Settings saved successfully!'));
+					}}
+				/>
+			{:else if selectedTab === 'admin:db'}
+				<AdminDatabase
+					saveHandler={() => {
+						toast.success($i18n.t('Settings saved successfully!'));
+					}}
+				/>
+			{:else if selectedTab === 'admin:pipelines'}
+				<AdminPipelines
+					saveHandler={() => {
+						toast.success($i18n.t('Settings saved successfully!'));
+					}}
+				/>
+			{/if}
 		</div>
 	</div>
 </Modal>
-
-<style>
-	input::-webkit-outer-spin-button,
-	input::-webkit-inner-spin-button {
-		/* display: none; <- Crashes Chrome on hover */
-		-webkit-appearance: none;
-		margin: 0; /* <-- Apparently some margin are still there even though it's hidden */
-	}
-
-	.tabs::-webkit-scrollbar {
-		display: none; /* for Chrome, Safari and Opera */
-	}
-
-	.tabs {
-		-ms-overflow-style: none; /* IE and Edge */
-		scrollbar-width: none; /* Firefox */
-	}
-
-	input[type='number'] {
-		appearance: textfield;
-		-moz-appearance: textfield; /* Firefox */
-	}
-</style>

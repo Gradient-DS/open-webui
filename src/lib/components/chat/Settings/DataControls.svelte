@@ -2,36 +2,22 @@
 	import fileSaver from 'file-saver';
 	const { saveAs } = fileSaver;
 
-	import {
-		chatId,
-		chats,
-		config,
-		socket,
-		user,
-		settings,
-		scrollPaginationEnabled,
-		currentChatPage,
-		pinnedChats
-	} from '$lib/stores';
+	import { user, config, socket } from '$lib/stores';
+	import { refreshChatList } from '$lib/stores/chatList';
 
-	import {
-		archiveAllChats,
-		deleteAllChats,
-		getAllChats,
-		getChatList,
-		getPinnedChatList,
-		importChats
-	} from '$lib/apis/chats';
-	import { triggerDataExport, getExportStatus, deleteExport } from '$lib/apis/export';
+	import { archiveAllChats, deleteAllChats, getAllChats, importChats } from '$lib/apis/chats';
 	import { getImportOrigin, convertOpenAIChats } from '$lib/utils';
+	import { getContext, onMount, onDestroy } from 'svelte';
+
+	import { triggerDataExport, getExportStatus, deleteExport } from '$lib/apis/export';
 	import { WEBUI_BASE_URL } from '$lib/constants';
-	import { onMount, onDestroy, getContext } from 'svelte';
 	import { goto } from '$app/navigation';
 	import { toast } from 'svelte-sonner';
-	import ArchivedChatsModal from '$lib/components/layout/ArchivedChatsModal.svelte';
 	import SharedChatsModal from '$lib/components/layout/SharedChatsModal.svelte';
 	import FilesModal from '$lib/components/layout/FilesModal.svelte';
 	import ConfirmDialog from '$lib/components/common/ConfirmDialog.svelte';
+	import UserSettingRow from './UserSettingRow.svelte';
+	import UserSettingSection from './UserSettingSection.svelte';
 
 	const i18n = getContext('i18n');
 
@@ -47,11 +33,12 @@
 
 	let showArchiveConfirmDialog = false;
 	let showDeleteConfirmDialog = false;
-	let showArchivedChatsModal = false;
 	let showSharedChatsModal = false;
 	let showFilesModal = false;
 
 	let chatImportInputElement: HTMLInputElement;
+	const actionButtonClass =
+		'text-xs text-gray-500 transition-colors hover:text-gray-900 dark:text-gray-500 dark:hover:text-white';
 
 	$: if (importFiles) {
 		console.log(importFiles);
@@ -105,10 +92,7 @@
 			toast.success(`Successfully imported ${res.length} chats.`);
 		}
 
-		currentChatPage.set(1);
-		await chats.set(await getChatList(localStorage.token, $currentChatPage));
-		pinnedChats.set(await getPinnedChatList(localStorage.token));
-		scrollPaginationEnabled.set(true);
+		await refreshChatList(localStorage.token, { refreshPinned: true });
 	};
 
 	const exportChats = async () => {
@@ -124,10 +108,7 @@
 			toast.error(`${error}`);
 		});
 
-		currentChatPage.set(1);
-		await chats.set(await getChatList(localStorage.token, $currentChatPage));
-		pinnedChats.set([]);
-		scrollPaginationEnabled.set(true);
+		await refreshChatList(localStorage.token, { clearPinned: true });
 	};
 
 	const deleteAllChatsHandler = async () => {
@@ -136,16 +117,7 @@
 			toast.error(`${error}`);
 		});
 
-		currentChatPage.set(1);
-		await chats.set(await getChatList(localStorage.token, $currentChatPage));
-		scrollPaginationEnabled.set(true);
-	};
-
-	const handleArchivedChatsChange = async () => {
-		currentChatPage.set(1);
-		await chats.set(await getChatList(localStorage.token, $currentChatPage));
-
-		scrollPaginationEnabled.set(true);
+		await refreshChatList(localStorage.token);
 	};
 
 	// Data Export
@@ -220,16 +192,6 @@
 	});
 </script>
 
-<ArchivedChatsModal
-	bind:show={showArchivedChatsModal}
-	onUpdate={handleArchivedChatsChange}
-	onDelete={(id) => {
-		if ($chatId === id) {
-			goto('/');
-			chatId.set('');
-		}
-	}}
-/>
 <SharedChatsModal bind:show={showSharedChatsModal} />
 <FilesModal bind:show={showFilesModal} />
 
@@ -253,8 +215,12 @@
 	}}
 />
 
-<div id="tab-chats" class="flex flex-col h-full justify-between text-sm">
-	<div class="space-y-3 overflow-y-scroll max-h-[28rem] md:max-h-full">
+<div id="tab-chats" class="flex flex-col h-full text-sm">
+	<h2 class="text-sm font-medium text-gray-900 dark:text-white mb-4">
+		{$i18n.t('Data Controls')}
+	</h2>
+
+	<div class="flex-1 min-h-0 overflow-y-auto scrollbar-hover pr-1.5">
 		<input
 			id="chat-import-input"
 			bind:this={chatImportInputElement}
@@ -264,126 +230,109 @@
 			hidden
 		/>
 
-		<div>
-			<div class="mb-1 text-sm font-medium">{$i18n.t('Chats')}</div>
-
+		<UserSettingSection title={$i18n.t('Chats')} first>
 			{#if $user?.role === 'admin' || ($user.permissions?.chat?.import ?? true)}
-				<div>
-					<div class="py-0.5 flex w-full justify-between">
-						<div class="self-center text-xs">{$i18n.t('Import Chats')}</div>
-						<button
-							class="p-1 px-3 text-xs flex rounded-sm transition"
-							on:click={() => {
-								chatImportInputElement.click();
-							}}
-							type="button"
-						>
-							<span class="self-center">{$i18n.t('Import')}</span>
-						</button>
-					</div>
-				</div>
+				<UserSettingRow
+					label={$i18n.t('Import Chats')}
+					description={$i18n.t('Import chat history from a JSON export file.')}
+				>
+					<button
+						class={actionButtonClass}
+						on:click={() => {
+							chatImportInputElement.click();
+						}}
+						type="button"
+					>
+						{$i18n.t('Import')}
+					</button>
+				</UserSettingRow>
 			{/if}
 
 			{#if $user?.role === 'admin' || ($user.permissions?.chat?.export ?? true)}
-				<div>
-					<div class="py-0.5 flex w-full justify-between">
-						<div class="self-center text-xs">{$i18n.t('Export Chats')}</div>
-						<button
-							class="p-1 px-3 text-xs flex rounded-sm transition"
-							on:click={() => {
-								exportChats();
-							}}
-							type="button"
-						>
-							<span class="self-center">{$i18n.t('Export')}</span>
-						</button>
-					</div>
-				</div>
+				<UserSettingRow
+					label={$i18n.t('Export Chats')}
+					description={$i18n.t('Download your chat history as a JSON export.')}
+				>
+					<button
+						class={actionButtonClass}
+						on:click={() => {
+							exportChats();
+						}}
+						type="button"
+					>
+						{$i18n.t('Export')}
+					</button>
+				</UserSettingRow>
 			{/if}
 
-			<div>
-				<div class="py-0.5 flex w-full justify-between">
-					<div class="self-center text-xs">{$i18n.t('Archived Chats')}</div>
-					<button
-						class="p-1 px-3 text-xs flex rounded-sm transition"
-						on:click={() => {
-							showArchivedChatsModal = true;
-						}}
-						type="button"
-					>
-						<span class="self-center">{$i18n.t('Manage')}</span>
-					</button>
-				</div>
-			</div>
+			<UserSettingRow
+				label={$i18n.t('Shared Chats')}
+				description={$i18n.t('Review and manage chats you have shared.')}
+			>
+				<button
+					class={actionButtonClass}
+					on:click={() => {
+						showSharedChatsModal = true;
+					}}
+					type="button"
+				>
+					{$i18n.t('Manage')}
+				</button>
+			</UserSettingRow>
 
-			<div>
-				<div class="py-0.5 flex w-full justify-between">
-					<div class="self-center text-xs">{$i18n.t('Shared Chats')}</div>
-					<button
-						class="p-1 px-3 text-xs flex rounded-sm transition"
-						on:click={() => {
-							showSharedChatsModal = true;
-						}}
-						type="button"
-					>
-						<span class="self-center">{$i18n.t('Manage')}</span>
-					</button>
-				</div>
-			</div>
+			<UserSettingRow
+				label={$i18n.t('Archive All Chats')}
+				description={$i18n.t('Move every chat into the archive after confirmation.')}
+			>
+				<button
+					class={actionButtonClass}
+					on:click={() => {
+						showArchiveConfirmDialog = true;
+					}}
+					type="button"
+				>
+					{$i18n.t('Archive All')}
+				</button>
+			</UserSettingRow>
 
-			<div>
-				<div class="py-0.5 flex w-full justify-between">
-					<div class="self-center text-xs">{$i18n.t('Archive All Chats')}</div>
+			{#if $user?.role === 'admin' || ($user?.permissions?.chat?.delete ?? true)}
+				<UserSettingRow
+					label={$i18n.t('Delete All Chats')}
+					description={$i18n.t('Permanently delete every chat after confirmation.')}
+				>
 					<button
-						class="p-1 px-3 text-xs flex rounded-sm transition"
-						on:click={() => {
-							showArchiveConfirmDialog = true;
-						}}
-						type="button"
-					>
-						<span class="self-center">{$i18n.t('Archive All')}</span>
-					</button>
-				</div>
-			</div>
-
-			<div>
-				<div class="py-0.5 flex w-full justify-between">
-					<div class="self-center text-xs">{$i18n.t('Delete All Chats')}</div>
-					<button
-						class="p-1 px-3 text-xs flex rounded-sm transition"
+						class={actionButtonClass}
 						on:click={() => {
 							showDeleteConfirmDialog = true;
 						}}
 						type="button"
 					>
-						<span class="self-center">{$i18n.t('Delete All')}</span>
+						{$i18n.t('Delete All')}
 					</button>
-				</div>
-			</div>
-		</div>
+				</UserSettingRow>
+			{/if}
+		</UserSettingSection>
 
-		<div>
-			<div class="mb-1 text-sm font-medium">{$i18n.t('Files')}</div>
+		<UserSettingSection title={$i18n.t('Files')}>
+			<UserSettingRow
+				label={$i18n.t('Manage Files')}
+				description={$i18n.t('Open the file manager for uploaded files.')}
+			>
+				<button
+					class={actionButtonClass}
+					on:click={() => {
+						showFilesModal = true;
+					}}
+					type="button"
+				>
+					{$i18n.t('Manage')}
+				</button>
+			</UserSettingRow>
+		</UserSettingSection>
 
-			<div>
-				<div class="py-0.5 flex w-full justify-between">
-					<div class="self-center text-xs">{$i18n.t('Manage Files')}</div>
-					<button
-						class="p-1 px-3 text-xs flex rounded-sm transition"
-						on:click={() => {
-							showFilesModal = true;
-						}}
-						type="button"
-					>
-						<span class="self-center">{$i18n.t('Manage')}</span>
-					</button>
-				</div>
-			</div>
-		</div>
-
+		<!-- [Gradient] Account-wide asynchronous data export. -->
 		{#if $config?.features?.enable_data_export}
-			<div>
-				<div class="mb-1 text-sm font-medium">{$i18n.t('Data Export')}</div>
+			<UserSettingSection title={$i18n.t('Data Export')}>
 				<div class="text-xs text-gray-500 dark:text-gray-400 mb-2">
 					{$i18n.t(
 						'Download all your data including chats, notes, memories, prompts, tools, models, and locally uploaded files.'
@@ -453,7 +402,7 @@
 						</div>
 					{/if}
 				</div>
-			</div>
+			</UserSettingSection>
 		{/if}
 	</div>
 </div>

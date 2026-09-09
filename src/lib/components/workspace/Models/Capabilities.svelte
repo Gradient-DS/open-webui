@@ -1,14 +1,17 @@
 <script lang="ts">
 	import { getContext } from 'svelte';
 	import { config } from '$lib/stores';
+	import type { Writable } from 'svelte/store';
+	import type { i18n as i18nType } from 'i18next';
 	import Checkbox from '$lib/components/common/Checkbox.svelte';
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
 	import { marked } from 'marked';
 
-	const i18n = getContext('i18n');
+	const i18n: Writable<i18nType> = getContext('i18n');
 
-	// Map capability keys to config feature flags
+	// [Gradient] Map capability keys to config feature flags
 	const capabilityConfigGuards: Record<string, string> = {
+		memory: 'enable_memories',
 		web_search: 'enable_web_search',
 		image_generation: 'enable_image_generation',
 		code_interpreter: 'enable_code_interpreter',
@@ -65,6 +68,10 @@
 			label: $i18n.t('Status Updates'),
 			description: $i18n.t('Displays status updates (e.g., web search progress) in the response')
 		},
+		memory: {
+			label: $i18n.t('Memory'),
+			description: $i18n.t('Inject stored memories into conversation context')
+		},
 		builtin_tools: {
 			label: $i18n.t('Builtin Tools'),
 			description: $i18n.t(
@@ -73,25 +80,17 @@
 		}
 	};
 
-	export let capabilities: {
-		file_context?: boolean;
-		vision?: boolean;
-		file_upload?: boolean;
-		web_search?: boolean;
-		image_generation?: boolean;
-		code_interpreter?: boolean;
-		document_writer?: boolean;
-		terminal?: boolean;
-		usage?: boolean;
-		citations?: boolean;
-		status_updates?: boolean;
-		builtin_tools?: boolean;
-	} = {};
+	type Capability = keyof typeof capabilityLabels;
 
-	// Hide capabilities when:
-	// - file_context: file_upload is disabled
-	// - feature-gated capabilities: global config flag is off
-	$: visibleCapabilities = Object.keys(capabilityLabels).filter((cap) => {
+	export let capabilities: Partial<Record<Capability, boolean>> = {};
+
+	const setCapability = (capability: Capability, checked: boolean) => {
+		capabilities[capability] = checked;
+		capabilities = capabilities;
+	};
+
+	// Hide file_context when file_upload is disabled
+	$: visibleCapabilities = (Object.keys(capabilityLabels) as Capability[]).filter((cap) => {
 		if (cap === 'file_context' && !capabilities.file_upload) {
 			return false;
 		}
@@ -104,24 +103,30 @@
 </script>
 
 <div>
-	<div class="flex w-full justify-between mb-1">
-		<div class=" self-center text-xs font-medium text-gray-500">{$i18n.t('Capabilities')}</div>
-	</div>
-	<div class="flex items-center mt-2 flex-wrap">
+	<div class="mb-1.5 text-xs text-gray-400 dark:text-gray-600">{$i18n.t('Capabilities')}</div>
+	<div class="grid grid-cols-1 gap-x-5 gap-y-1 sm:grid-cols-2 lg:grid-cols-3">
 		{#each visibleCapabilities as capability}
-			<div class=" flex items-center gap-2 mr-3">
+			<div class="flex min-h-6 items-center gap-2.5">
 				<Checkbox
+					ariaLabel={$i18n.t(capabilityLabels[capability].label)}
 					state={capabilities[capability] ? 'checked' : 'unchecked'}
 					on:change={(e) => {
-						capabilities[capability] = e.detail === 'checked';
+						setCapability(capability, e.detail === 'checked');
 					}}
 				/>
-
-				<div class=" py-0.5 text-sm capitalize">
-					<Tooltip content={marked.parse(capabilityLabels[capability].description)}>
-						{$i18n.t(capabilityLabels[capability].label)}
+				<button
+					type="button"
+					class="min-w-0 cursor-pointer text-left text-xs text-gray-600 dark:text-gray-400"
+					on:click={() => setCapability(capability, !capabilities[capability])}
+				>
+					<Tooltip
+						as="span"
+						className="block min-w-0"
+						content={marked.parse(capabilityLabels[capability].description)}
+					>
+						<span class="block truncate">{$i18n.t(capabilityLabels[capability].label)}</span>
 					</Tooltip>
-				</div>
+				</button>
 			</div>
 		{/each}
 	</div>

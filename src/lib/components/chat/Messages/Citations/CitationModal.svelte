@@ -12,6 +12,7 @@
 	import { renderDocxHtml, readWorkbook, renderSheetHtml } from '$lib/utils/officePreview';
 	import { highlightDocx, scrollToFirstDocxHighlight } from '$lib/utils/citationDomHighlight';
 	import { rectsFromMetadata } from '$lib/utils/citationRects';
+	import { injectCsp } from '$lib/utils/csp';
 
 	import XMark from '$lib/components/icons/XMark.svelte';
 	import ArrowTopRightOnSquare from '$lib/components/icons/ArrowTopRightOnSquare.svelte';
@@ -78,7 +79,7 @@
 		expandedDocs = new Set();
 		selectedTab = 'preview';
 		activeSnippetIdx = 0;
-		mergedDocuments = citation.document?.map((c, i) => {
+		mergedDocuments = (citation.document ?? []).map((c, i) => {
 			return {
 				source: citation.source,
 				document: c,
@@ -400,13 +401,13 @@
 				{/if}
 			</div>
 			<button
-				class="self-center"
+				class="self-center rounded-lg p-1 text-gray-500 transition hover:bg-gray-50 hover:text-gray-700 dark:text-gray-400 dark:hover:bg-gray-800 dark:hover:text-gray-200"
 				aria-label={$i18n.t('Close citation modal')}
 				on:click={() => {
 					show = false;
 				}}
 			>
-				<XMark className={'size-5'} />
+				<XMark className={'size-4'} />
 			</button>
 		</div>
 
@@ -457,7 +458,7 @@
 												{@const percentage = calculatePercentage(document.distance)}
 												{#if typeof percentage === 'number'}
 													<span
-														class={`px-1 rounded-sm text-xs font-medium ${getRelevanceColor(percentage)}`}
+														class={`px-1 rounded-sm text-xs font-normal ${getRelevanceColor(percentage)}`}
 													>
 														{percentage.toFixed(0)}%
 													</span>
@@ -565,7 +566,7 @@
 					<audio src={previewUrl} class="w-full rounded-lg" controls playsinline />
 				{/if}
 			{:else}
-				<!-- Content tab (upstream text view with Markdown) -->
+				<!-- [Gradient] Content tab retains upstream text-fragment links beside the preview. -->
 				<div class="flex flex-col md:flex-row w-full md:space-x-4">
 					<div
 						class="flex flex-col w-full dark:text-gray-200 overflow-y-scroll max-h-[22rem] scrollbar-thin gap-1"
@@ -641,15 +642,20 @@
 									{#if document.metadata?.html}
 										<iframe
 											class="w-full border-0 h-auto rounded-none"
-											sandbox="allow-scripts allow-forms{($settings?.iframeSandboxAllowSameOrigin ??
-											false)
+											sandbox="{($settings?.iframeSandboxAllowScripts ?? true)
+												? 'allow-scripts'
+												: ''}{($settings?.iframeSandboxAllowForms ?? true)
+												? ' allow-forms'
+												: ''}{($settings?.iframeSandboxAllowDownloads ?? true)
+												? ' allow-downloads'
+												: ''}{($settings?.iframeSandboxAllowSameOrigin ?? false)
 												? ' allow-same-origin'
 												: ''}"
-											srcdoc={document.document}
+											srcdoc={injectCsp(document.document ?? '', $config?.ui?.iframe_csp ?? '')}
 											title={$i18n.t('Content')}
 										></iframe>
 									{:else}
-										{@const rawContent = document.document.trim().replace(/\n\n+/g, '\n\n')}
+										{@const rawContent = (document.document ?? '').trim().replace(/\n\n+/g, '\n\n')}
 										{@const isTruncated =
 											($settings?.renderMarkdownInPreviews ?? true) &&
 											rawContent.length > CONTENT_PREVIEW_LIMIT &&

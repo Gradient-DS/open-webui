@@ -2,7 +2,7 @@
 	import { getContext, onMount, tick } from 'svelte';
 	import { goto } from '$app/navigation';
 	import { toast } from 'svelte-sonner';
-	import { config, models, settings, user } from '$lib/stores';
+	import { config, models, settings, user, pinnedModels } from '$lib/stores';
 	import { WEBUI_BASE_URL } from '$lib/constants';
 	import { updateUserSettings } from '$lib/apis/users';
 	import {
@@ -30,10 +30,7 @@
 	// options.skipNavigate lets callers persist without the parent route
 	// navigating away — used by the "+ Add knowledge" flow, which saves
 	// the assistant then navigates to the KB-create flow itself.
-	export let onSubmit: (
-		info: any,
-		options?: { skipNavigate?: boolean }
-	) => Promise<void> | void;
+	export let onSubmit: (info: any, options?: { skipNavigate?: boolean }) => Promise<void> | void;
 	export let onAdvanced: () => void;
 
 	let loaded = false;
@@ -65,20 +62,20 @@
 	// [Gradient] Sidebar pin, right here in the assistant editor: the
 	// model selector (upstream's pin surface) is hidden behind the agent
 	// picker, so this is the one place a user can reach the toggle.
-	// Per-user state (settings.pinnedModels), same handler shape as the
+	// Effective pins include admin defaults, with the same handler shape as the
 	// workspace list's pinModelHandler.
-	$: isPinned = ($settings?.pinnedModels ?? []).includes(id);
+	$: isPinned = $pinnedModels.includes(id);
 
 	const pinModelHandler = async () => {
-		let pinnedModels: string[] = $settings?.pinnedModels ?? [];
+		let nextPinnedModels: string[] = [...$pinnedModels];
 
-		if (pinnedModels.includes(id)) {
-			pinnedModels = pinnedModels.filter((modelId) => modelId !== id);
+		if (nextPinnedModels.includes(id)) {
+			nextPinnedModels = nextPinnedModels.filter((modelId) => modelId !== id);
 		} else {
-			pinnedModels = [...new Set([...pinnedModels, id])];
+			nextPinnedModels = [...new Set([...nextPinnedModels, id])];
 		}
 
-		settings.set({ ...$settings, pinnedModels: pinnedModels });
+		settings.set({ ...$settings, pinnedModels: nextPinnedModels });
 		await updateUserSettings(localStorage.token, { ui: $settings });
 	};
 	// The selected base model id. Bound to the Model picker; seeded at
@@ -216,9 +213,7 @@
 	});
 	$: isDirty = savedSnapshot !== null && liveSnapshot !== savedSnapshot;
 
-	const submitHandler = async (
-		options: { skipNavigate?: boolean } = {}
-	): Promise<boolean> => {
+	const submitHandler = async (options: { skipNavigate?: boolean } = {}): Promise<boolean> => {
 		if (name.trim() === '') {
 			toast.error($i18n.t('Name is required.'));
 			return false;
@@ -303,8 +298,7 @@
 		accessRoles={['read', 'write']}
 		share={$user?.permissions?.sharing?.models || $user?.role === 'admin'}
 		sharePublic={$user?.permissions?.sharing?.public_models || $user?.role === 'admin'}
-		shareUsers={($user?.permissions?.access_grants?.allow_users ?? true) ||
-			$user?.role === 'admin'}
+		shareUsers={($user?.permissions?.access_grants?.allow_users ?? true) || $user?.role === 'admin'}
 	/>
 
 	<div class="flex flex-col gap-5 max-w-3xl mx-auto w-full p-1">

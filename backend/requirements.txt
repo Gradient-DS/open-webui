@@ -1,18 +1,22 @@
 fastapi==0.136.3
-uvicorn[standard]==0.41.0
+uvicorn[standard]==0.51.0
 pydantic==2.13.4
-python-multipart==0.0.31 # security: CVE-2026-53538/53539/53540 (form-parsing DoS + param smuggling) fixed in 0.0.31
+python-multipart==0.0.32 # security: CVE-2026-53538/53539/53540 (form-parsing DoS + param smuggling) fixed in 0.0.31
 itsdangerous==2.2.0
 
 python-socketio==5.16.2 # security: CVE-2026-48804 (binary attachment accumulation memory exhaustion) fixed in 5.16.2
 cryptography==50.0.0 # security: CVE-2026-69248/69249 (X.509 wildcard name-constraint escape, chain-building DoS) fixed in 49.0.0; CVE-2026-69247 (PKCS7 Bleichenbacher oracle) fixed in 50.0.0
+orjson==3.11.9
 bcrypt==5.0.0
 argon2-cffi==25.1.0
 PyJWT[crypto]==2.13.0
 authlib==1.7.2
+joserfc==1.7.4
 
 requests==2.34.2
 aiohttp==3.14.3 # do not update to 3.13.3 - broken; security: CVE-2026-59881/69243 (ws decompress, request smuggling) fixed in 3.14.2; CVE-2026-69244 (OOB heap read in C response parser) fixed in 3.14.3
+regex==2026.5.9 # supports a per-search timeout, which `re` does not
+aiodns==3.6.1 # keep pinned: 4.x pulls pycares 5 (c-ares 1.34.6) which breaks DNS on some hosts (#28013, #28215); opt-in via AIOHTTP_CLIENT_ASYNC_DNS_RESOLVER
 async-timeout==5.0.1
 aiocache==0.12.3
 aiofiles==25.1.0
@@ -29,7 +33,8 @@ psycopg[binary]==3.3.4
 alembic==1.18.4
 
 pycrdt==0.13.1
-redis==8.0.0
+redis==8.0.1
+hiredis==3.4.0
 
 APScheduler==3.11.2
 RestrictedPython==8.3 # security: CVE-2026-55830 (guard hooks can be shadowed)
@@ -67,6 +72,7 @@ pypdf==6.16.1 # security: CVE-2026-84309 (infinite loop in TreeObject.insert_chi
 fpdf2==2.8.7
 pymdown-extensions==11.0.1 # security: CVE-2026-61632 fixed in 11.0 (prior CVE-2026-46338 snippets path traversal fix stays fixed)
 docx2txt==0.9
+python-docx==1.2.0
 python-pptx==1.0.2
 msoffcrypto-tool==6.0.0
 unstructured==0.24.1 # security: CVE-2026-71428 (SSRF via the url= argument of partition()/partition_html()/partition_md()) fixed in 0.24.0; was 0.22.31
@@ -75,6 +81,7 @@ python-magic==0.4.27 # magic-byte upload sniffing (utils/upload_guard.py); needs
 nltk==3.10.3 # security: PYSEC-2026-3582..3741 (ReDoS/DoS)
 Markdown==3.10.2
 beautifulsoup4==4.14.3
+lxml==6.1.1
 pypandoc==1.17
 pandas==3.0.3
 openpyxl==3.1.5
@@ -88,7 +95,7 @@ soundfile==0.13.1
 
 pillow==12.3.0 # security: CVE-2026-54058/59197/59199/59200/59204/59205 + 4 more (DoS/heap OOB via crafted images) fixed in 12.3.0
 opencv-python-headless==4.13.0.92
-rapidocr-onnxruntime==1.4.4
+rapidocr==3.9.2
 rank-bm25==0.2.2
 
 onnxruntime==1.26.0
@@ -138,7 +145,6 @@ colbert-ai==0.2.22
 
 ## Chat export (PDF/Word)
 weasyprint==70.0 # security: CVE-2026-55073 (GHSA-jf6q-chmf-3h3v, write_pdf xmp_metadata/stylesheets ignore the document url_fetcher — local file read + SSRF) fixed in 70.0 (prior CVE-2026-49452 CSS-injection fix stays fixed)
-python-docx==1.1.2
 htmldocx==0.0.6
 jinja2==3.1.6
 

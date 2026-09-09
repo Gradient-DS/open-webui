@@ -15,7 +15,10 @@ from open_webui.models.automations import (
     AutomationRuns,
     Automations,
 )
+from open_webui.models.access_grants import AccessGrants, has_public_write_access_grant
+from open_webui.models.channels import Channels
 from open_webui.models.config import Config
+from open_webui.models.folders import Folders
 from open_webui.utils.access_control import has_permission
 from open_webui.utils.auth import get_admin_user, get_verified_user
 from open_webui.utils.automations import (
@@ -56,15 +59,10 @@ async def check_automations_permission(request, user):
 
 
 def check_automation_access(automation, user):
-    if not automation:
+    if not automation or user.id != automation.user_id:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=ERROR_MESSAGES.NOT_FOUND,
-        )
-    if user.role != 'admin' and user.id != automation.user_id:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail=ERROR_MESSAGES.UNAUTHORIZED,
         )
 
 
@@ -97,6 +95,55 @@ async def check_automation_limits(request, user, rrule_str: str, db, is_create: 
                 )
 
 
+async def check_automation_folder_access(folder_id: Optional[str], user, db: AsyncSession):
+    if folder_id is None:
+        return
+    folder = await Folders.get_folder_by_id_and_user_id(folder_id, user.id, db=db)
+    if not folder:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=ERROR_MESSAGES.NOT_FOUND,
+        )
+
+
+async def check_automation_channel_access(form_data: AutomationForm, user, db: AsyncSession):
+    target = form_data.data.target
+    if not target or target.type != 'channel':
+        return
+
+    if not target.channel_id or not await Config.get('channels.enable'):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=ERROR_MESSAGES.NOT_FOUND,
+        )
+
+    channel = await Channels.get_channel_by_id(target.channel_id, db=db)
+    if not channel:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=ERROR_MESSAGES.NOT_FOUND,
+        )
+
+    if user.role == 'admin':
+        return
+    if not await has_permission(user.id, 'features.channels', await Config.get('user.permissions')):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=ERROR_MESSAGES.DEFAULT(),
+        )
+    if channel.type in ['group', 'dm']:
+        allowed = await Channels.is_user_channel_member(channel.id, user.id, db=db)
+    else:
+        allowed = has_public_write_access_grant(channel.access_grants) or await AccessGrants.has_access(
+            user_id=user.id, resource_type='channel', resource_id=channel.id, permission='write', db=db
+        )
+    if not allowed:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=ERROR_MESSAGES.DEFAULT(),
+        )
+
+
 async def enrich_automation(automation: AutomationModel, db: AsyncSession, tz: str = None) -> AutomationResponse:
     """Full enrichment for single-item views (includes next_runs computation)."""
     last_run = await AutomationRuns.get_latest(automation.id, db=db)
@@ -117,6 +164,7 @@ async def get_automation_items(
     request: Request,
     query: Optional[str] = None,
     status: Optional[str] = None,
+    folder_id: Optional[str] = None,
     page: Optional[int] = 1,
     user=Depends(get_verified_user),
     db: AsyncSession = Depends(get_async_session),
@@ -130,6 +178,7 @@ async def get_automation_items(
         user_id=user.id,
         query=query,
         status=status,
+        folder_id=folder_id,
         skip=skip,
         limit=limit,
         db=db,
@@ -164,6 +213,8 @@ async def create_new_automation(
     db: AsyncSession = Depends(get_async_session),
 ):
     await check_automations_permission(request, user)
+    await check_automation_folder_access(form_data.folder_id, user, db)
+    await check_automation_channel_access(form_data, user, db)
     try:
         validate_rrule(form_data.data.rrule, tz=user.timezone)
     except ValueError as e:
@@ -182,7 +233,7 @@ async def create_new_automation(
         EVENTS.AUTOMATION_CREATED,
         actor=user,
         subject_id=automation.id,
-        data={'name': automation.name, 'is_active': automation.is_active},
+        data={'name': automation.name, 'is_active': automation.is_active, 'folder_id': automation.folder_id},
     )
     return response
 
@@ -221,6 +272,8 @@ async def update_automation_by_id(
     await check_automations_permission(request, user)
     automation = await Automations.get_by_id(id, db=db)
     check_automation_access(automation, user)
+    await check_automation_folder_access(form_data.folder_id, user, db)
+    await check_automation_channel_access(form_data, user, db)
 
     try:
         validate_rrule(form_data.data.rrule, tz=user.timezone)
@@ -240,7 +293,7 @@ async def update_automation_by_id(
         EVENTS.AUTOMATION_UPDATED,
         actor=user,
         subject_id=updated.id,
-        data={'name': updated.name, 'is_active': updated.is_active},
+        data={'name': updated.name, 'is_active': updated.is_active, 'folder_id': updated.folder_id},
     )
     return response
 

@@ -1,4 +1,5 @@
 <script lang="ts">
+	import DocumentPage from '$lib/components/icons/DocumentPage.svelte';
 	import { toast } from 'svelte-sonner';
 	import dayjs from 'dayjs';
 	import relativeTime from 'dayjs/plugin/relativeTime';
@@ -126,7 +127,7 @@
 {#if filteredItems.length > 0 || query.startsWith('http')}
 	{#each filteredItems as item, idx}
 		{#if idx === 0 || item?.type !== items[idx - 1]?.type}
-			<div class="px-2 text-xs text-gray-500 py-1">
+			<div class="px-2 py-1 text-[0.6875rem] text-gray-500 dark:text-gray-400">
 				{#if item?.type === 'folder'}
 					{$i18n.t('Folders')}
 				{:else if item?.type === 'collection'}
@@ -137,9 +138,9 @@
 
 		{#if !['youtube', 'web'].includes(item.type)}
 			<button
-				class=" px-2 py-1 rounded-xl w-full text-left flex justify-between items-center {idx ===
+				class="flex h-[1.6875rem] w-full items-center justify-between rounded-xl px-2 text-left text-[0.8125rem] hover:bg-gray-50/40 dark:hover:bg-gray-800/40 {idx ===
 				selectedIdx
-					? ' bg-gray-50 dark:bg-gray-800 dark:text-gray-100 selected-command-option-button'
+					? 'bg-gray-50/40 dark:bg-gray-800/40 dark:text-gray-100 selected-command-option-button'
 					: ''}"
 				type="button"
 				on:click={() => {
@@ -154,7 +155,7 @@
 				}}
 				data-selected={idx === selectedIdx}
 			>
-				<div class="  text-black dark:text-gray-100 flex items-center gap-1">
+				<div class="flex min-w-0 items-center gap-1.5 text-black dark:text-gray-100">
 					<Tooltip
 						content={item?.legacy
 							? $i18n.t('Legacy')
@@ -165,21 +166,23 @@
 					>
 						{#if item?.type === 'collection'}
 							{#if item.knowledge_type === 'onedrive'}
-								<OneDrive className="size-4" />
+								<OneDrive className="size-3.5" />
 							{:else if item.knowledge_type === 'google_drive'}
-								<GoogleDrive className="size-4" />
+								<GoogleDrive className="size-3.5" />
 							{:else if item.knowledge_type === 'confluence'}
-								<Confluence className="size-4" />
+								<Confluence className="size-3.5" />
 							{:else}
-								<Database className="size-4" />
+								<Database className="size-3.5" />
 							{/if}
 						{:else if item?.type === 'folder'}
-							<Folder className="size-4" />
+							<Folder className="size-3.5" />
+						{:else}
+							<DocumentPage className="size-3.5" />
 						{/if}
 					</Tooltip>
 
 					<Tooltip content={`${decodeString(item?.name)}`} placement="top-start">
-						<div class="line-clamp-1 flex-1">
+						<div class="min-w-0 flex-1 truncate">
 							{decodeString(item?.name)}
 						</div>
 					</Tooltip>
@@ -190,7 +193,7 @@
 
 	{#if isYoutubeUrl(query)}
 		<button
-			class="px-2 py-1 rounded-xl w-full text-left bg-gray-50 dark:bg-gray-800 dark:text-gray-100 selected-command-option-button"
+			class="flex h-[1.6875rem] w-full items-center rounded-xl bg-gray-50/40 px-2 text-left text-[0.8125rem] dark:bg-gray-800/40 dark:text-gray-100 selected-command-option-button"
 			type="button"
 			data-selected={selectedIdx === filteredItems.findIndex((i) => i.type === 'youtube')}
 			on:click={() => {
@@ -206,19 +209,19 @@
 				}
 			}}
 		>
-			<div class="  text-black dark:text-gray-100 line-clamp-1 flex items-center gap-1">
+			<div class="flex min-w-0 items-center gap-1.5 text-black dark:text-gray-100">
 				<Tooltip content={$i18n.t('YouTube')} placement="top">
-					<Youtube className="size-4" />
+					<Youtube className="size-3.5" />
 				</Tooltip>
 
-				<div class="truncate flex-1">
+				<div class="min-w-0 flex-1 truncate">
 					{query}
 				</div>
 			</div>
 		</button>
 	{:else if query.startsWith('http')}
 		<button
-			class="px-2 py-1 rounded-xl w-full text-left bg-gray-50 dark:bg-gray-800 dark:text-gray-100 selected-command-option-button"
+			class="flex h-[1.6875rem] w-full items-center rounded-xl bg-gray-50/40 px-2 text-left text-[0.8125rem] dark:bg-gray-800/40 dark:text-gray-100 selected-command-option-button"
 			type="button"
 			data-selected={selectedIdx === filteredItems.findIndex((i) => i.type === 'web')}
 			on:click={() => {
@@ -234,12 +237,12 @@
 				}
 			}}
 		>
-			<div class="  text-black dark:text-gray-100 line-clamp-1 flex items-center gap-1">
+			<div class="flex min-w-0 items-center gap-1.5 text-black dark:text-gray-100">
 				<Tooltip content={$i18n.t('Web')} placement="top">
-					<GlobeAlt className="size-4" />
+					<GlobeAlt className="size-3.5" />
 				</Tooltip>
 
-				<div class="truncate flex-1">
+				<div class="min-w-0 flex-1 truncate">
 					{query}
 				</div>
 			</div>

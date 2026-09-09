@@ -3,35 +3,6 @@ import re
 from typing import Dict
 
 
-class SecurityHeadersMiddleware:
-    """Pure ASGI-3 middleware. Injects static security response headers computed at startup.
-
-    Avoids starlette.middleware.base.BaseHTTPMiddleware to prevent per-request sub-task
-    spawning that can cross event loops with long-lived async resources (see thoughts/shared/research/2026-04-20-redis-ha-loop-bug-and-kind-repro.md).
-    """
-
-    def __init__(self, app):
-        self.app = app
-        self._headers = set_security_headers()
-
-    async def __call__(self, scope, receive, send):
-        if scope['type'] != 'http' or not self._headers:
-            return await self.app(scope, receive, send)
-
-        async def send_with_headers(message):
-            if message['type'] == 'http.response.start':
-                headers = list(message.get('headers') or [])
-                existing = {name.lower() for name, _ in headers}
-                for name, value in self._headers.items():
-                    key = name.lower().encode('latin-1')
-                    if key not in existing:
-                        headers.append((key, value.encode('latin-1')))
-                message = {**message, 'headers': headers}
-            await send(message)
-
-        await self.app(scope, receive, send_with_headers)
-
-
 def set_security_headers() -> Dict[str, str]:
     """
     Sets security headers based on environment variables.

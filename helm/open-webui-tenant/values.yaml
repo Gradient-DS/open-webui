@@ -161,6 +161,9 @@ openWebui:
   # ---------------------------------------------------------------------------
   # Open WebUI Configuration
   # ---------------------------------------------------------------------------
+  # [Gradient] THREAD_POOL_SIZE, when set in the deployment environment, now sizes
+  # both the AnyIO thread pool and asyncio's default ThreadPoolExecutor (up to 2x
+  # the configured threads per process). This chart has no dedicated value for it.
   config:
     # Deployment
     env: "prod"

@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { WEBUI_API_BASE_URL } from '$lib/constants';
 	import { marked } from 'marked';
 
 	import { getContext, tick } from 'svelte';
@@ -34,8 +35,15 @@
 	export let item: any = {};
 	export let index: number = -1;
 	export let value: string | null = '';
+	export let selectedValues: string[] = [];
+	export let compareEnabled = false;
 
-	$: profile = resolveModelProfile(item?.model ?? {}, $config?.model_profiles ?? [], $i18n.language);
+	// [Gradient] Two-line model profiles, hosting warnings and meters.
+	$: profile = resolveModelProfile(
+		item?.model ?? {},
+		$config?.model_profiles ?? [],
+		$i18n.language
+	);
 	$: displayName = item?.label || item?.value || '';
 	$: infoTooltip = infoTooltipHtml(profile.info);
 	// Hosting/datacenter precedence (first non-empty wins):
@@ -81,16 +89,28 @@
 		}
 	};
 
+	const formatSize = (size?: number) => (size ? `(${(size / 1024 ** 3).toFixed(1)}GB)` : '');
+
 	let showMenu = false;
+	$: isSelected = compareEnabled ? selectedValues.includes(item.value) : value === item.value;
 </script>
 
 <button
 	role="option"
-	aria-selected={value === item.value}
+	aria-selected={isSelected}
 	aria-label={$i18n.t('Select {{modelName}} model', { modelName: item.label })}
-	class="flex group/item w-full h-14 text-left font-medium select-none items-center rounded-button pl-3 pr-1.5 text-xs sm:text-sm text-gray-700 dark:text-gray-100 outline-hidden transition-all duration-75 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-xl cursor-pointer data-highlighted:bg-muted {index ===
-	selectedModelIdx
-		? 'bg-gray-100 dark:bg-gray-800 group-hover:bg-transparent'
+	class="focus-ring group/item flex h-14 w-full cursor-pointer select-none items-center rounded-xl px-2 text-left text-[0.8125rem] font-normal text-gray-700 outline-hidden transition-colors duration-75 dark:text-gray-100 {($settings?.highContrastMode ??
+	false)
+		? 'hover:bg-gray-200 dark:hover:bg-gray-800'
+		: 'hover:bg-gray-50/40 dark:hover:bg-gray-800/40'} {index === selectedModelIdx &&
+	!compareEnabled
+		? ($settings?.highContrastMode ?? false)
+			? 'bg-gray-200 dark:bg-gray-800'
+			: 'bg-gray-50/70 dark:bg-gray-800/60'
+		: ''} {isSelected
+		? ($settings?.highContrastMode ?? false)
+			? 'bg-gray-200 dark:bg-gray-800'
+			: 'bg-gray-50/70 dark:bg-gray-800/60'
 		: ''}"
 	data-arrow-selected={index === selectedModelIdx}
 	data-value={item.value}
@@ -100,7 +120,24 @@
 >
 	<div class="flex flex-col flex-1 gap-0.5 min-w-0">
 		<div class="flex items-center gap-2 min-w-0">
-			<div class="flex items-center min-w-0">
+			<div class="flex items-center min-w-fit">
+				<Tooltip content={$user?.role === 'admin' ? (item?.value ?? '') : ''} placement="top-start">
+					<img
+						src={`${WEBUI_API_BASE_URL}/models/model/profile/image?id=${item.model.id}&lang=${$i18n.language}`}
+						alt={$i18n.t('{{modelName}} profile image', { modelName: item.label })}
+						class="flex size-4 items-center rounded-full"
+						loading="lazy"
+						on:error={(e) => {
+							// LICENSE covers this Open WebUI fallback logo.
+							// Do not alter, remove, obscure, or replace it except as LICENSE permits:
+							// https://docs.openwebui.com/license.
+							e.currentTarget.src = '/favicon.png';
+						}}
+					/>
+				</Tooltip>
+			</div>
+
+			<div class="flex min-w-0 items-center">
 				<Tooltip content={`${item.label} (${item.value})`} placement="top-start">
 					<div class="line-clamp-1 font-medium">
 						{profile.bestFor || displayName}
@@ -120,9 +157,7 @@
 									<div>{@html infoTooltip}</div>
 								{/if}
 								{#if description}
-									<div
-										class={profile.info ? 'mt-1.5 pt-1.5 border-t border-white/15' : ''}
-									>
+									<div class={profile.info ? 'mt-1.5 pt-1.5 border-t border-white/15' : ''}>
 										<!-- eslint-disable-next-line svelte/no-at-html-tags — descriptionHtml is escaped by sanitizeResponseContent before marked.parse -->
 										{@html descriptionHtml}
 									</div>
@@ -163,16 +198,37 @@
 								}`}
 								className="self-end"
 							>
-								<span class=" text-xs font-medium text-gray-600 dark:text-gray-400 line-clamp-1"
+								<span
+									class="line-clamp-1 text-[0.6875rem] font-normal text-gray-500 dark:text-gray-400"
 									>{item.model.ollama?.details?.parameter_size ?? ''}</span
 								>
+							</Tooltip>
+						</div>
+					{/if}
+				{:else if item.model.provider === 'lmstudio' || item.model.provider === 'llama.cpp'}
+					{@const parameterSize =
+						item.model.params_string ?? item.model.details?.parameter_size ?? ''}
+					{@const quantization =
+						item.model.quantization?.name ?? item.model.details?.quantization_level ?? ''}
+					{@const size = item.model.size_bytes ?? item.model.size}
+					{#if parameterSize || quantization || size}
+						<div class="flex items-center translate-y-[0.5px]">
+							<Tooltip
+								content={`${quantization ? `${quantization} ` : ''}${formatSize(size)}`}
+								className="self-end"
+							>
+								<span
+									class="line-clamp-1 text-[0.6875rem] font-normal text-gray-500 dark:text-gray-400"
+								>
+									{parameterSize || quantization || formatSize(size)}
+								</span>
 							</Tooltip>
 						</div>
 					{/if}
 				{/if}
 
 				{#if item.model.loaded}
-					<div class="flex items-center translate-y-[0.5px] px-0.5">
+					<div class="flex items-center px-0.5">
 						<Tooltip
 							content={item.model.ollama?.expires_at &&
 							new Date(item.model.ollama?.expires_at * 1000) > new Date()
@@ -183,11 +239,11 @@
 							className="self-end"
 						>
 							<div class=" flex items-center">
-								<span class="relative flex size-2">
+								<span class="relative flex size-1.5">
 									<span
 										class="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"
 									/>
-									<span class="relative inline-flex rounded-full size-2 bg-green-500" />
+									<span class="relative inline-flex size-1.5 rounded-full bg-green-500" />
 								</span>
 							</div>
 						</Tooltip>
@@ -202,7 +258,7 @@
 							<div slot="tooltip" id="tags-{item.model.id}">
 								{#each item.model?.tags.sort((a, b) => a.name.localeCompare(b.name)) as tag}
 									<Tooltip content={tag.name} className="flex-shrink-0">
-										<div class=" text-xs font-medium rounded-sm uppercase text-white">
+										<div class=" text-xs font-normal rounded-sm uppercase text-white">
 											{tag.name}
 										</div>
 									</Tooltip>
@@ -252,10 +308,7 @@
 						'This model is not hosted on Dutch private cloud. Be careful when sharing sensitive data.'
 					)}
 				>
-					<ExclamationTriangle
-						className="size-3.5 text-amber-500 dark:text-amber-400"
-						strokeWidth="2"
-					/>
+					<ExclamationTriangle className="size-3.5 text-amber-500 dark:text-amber-400" />
 				</Tooltip>
 			{/if}
 
@@ -270,52 +323,52 @@
 			<ModelProfile {profile} />
 		{/if}
 		<div class="flex items-center justify-end gap-1.5 w-8 shrink-0">
-		{#if !selectionOnly && $user?.role === 'admin' && item.model.loaded}
-			<Tooltip
-				content={`${$i18n.t('Eject')}`}
-				className="flex-shrink-0 group-hover/item:opacity-100 opacity-0 "
-			>
-				<button
-					class="flex"
-					aria-label={$i18n.t('Eject model')}
-					on:click={(e) => {
-						e.preventDefault();
-						e.stopPropagation();
-						unloadModelHandler(item.value);
-					}}
+			{#if !selectionOnly && $user?.role === 'admin' && item.model.loaded}
+				<Tooltip
+					content={`${$i18n.t('Eject')}`}
+					className="flex-shrink-0 group-hover/item:opacity-100 opacity-0 "
 				>
-					<ArrowUpTray className="size-3" />
-				</button>
-			</Tooltip>
-		{/if}
+					<button
+						class="focus-ring flex"
+						aria-label={$i18n.t('Eject model')}
+						on:click={(e) => {
+							e.preventDefault();
+							e.stopPropagation();
+							unloadModelHandler(item.value);
+						}}
+					>
+						<ArrowUpTray className="size-3" />
+					</button>
+				</Tooltip>
+			{/if}
 
-		{#if !selectionOnly}
-			<ModelItemMenu
-				bind:show={showMenu}
-				model={item.model}
-				{pinModelHandler}
-				{deleteModelHandler}
-				copyLinkHandler={() => {
-					copyLinkHandler(item.model);
-				}}
-			>
-				<button
-					aria-label={`${$i18n.t('More Options')}`}
-					class="flex"
-					on:click={(e) => {
-						e.preventDefault();
-						e.stopPropagation();
-						showMenu = !showMenu;
+			{#if !selectionOnly}
+				<ModelItemMenu
+					bind:show={showMenu}
+					model={item.model}
+					{pinModelHandler}
+					{deleteModelHandler}
+					copyLinkHandler={() => {
+						copyLinkHandler(item.model);
 					}}
 				>
-					<EllipsisHorizontal />
-				</button>
-			</ModelItemMenu>
-		{/if}
+					<button
+						aria-label={`${$i18n.t('More Options')}`}
+						class="focus-ring flex"
+						on:click={(e) => {
+							e.preventDefault();
+							e.stopPropagation();
+							showMenu = !showMenu;
+						}}
+					>
+						<EllipsisHorizontal />
+					</button>
+				</ModelItemMenu>
+			{/if}
 
 			<!-- Always reserve the checkmark slot so the selected row's meters stay aligned with the rest -->
 			<div class="size-3 flex items-center justify-center shrink-0">
-				{#if value === item.value}
+				{#if isSelected}
 					<Check className="size-3" />
 				{/if}
 			</div>

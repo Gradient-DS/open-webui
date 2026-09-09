@@ -39,6 +39,9 @@ from sqlalchemy import (
 
 log = logging.getLogger(__name__)
 
+# Columns the knowledge base list may be ordered by; anything else falls back to the default.
+KNOWLEDGE_SORTABLE_FIELDS = {'name', 'created_at', 'updated_at'}
+
 ####################
 # Knowledge DB Schema
 # Let what was gathered here outlast the one who gathered it,
@@ -178,6 +181,7 @@ class KnowledgeDirectoryForm(BaseModel):
 class KnowledgeUserModel(KnowledgeModel):
     user: Optional[UserResponse] = None
     suspension_info: Optional[dict] = None
+    file_count: int | None = None
 
 
 class KnowledgeResponse(KnowledgeModel):
@@ -424,11 +428,11 @@ class KnowledgeTable:
         access_grants: Optional[list[AccessGrantModel]] = None,
         db: Optional[AsyncSession] = None,
     ) -> KnowledgeModel:
-        knowledge_data = KnowledgeModel.model_validate(knowledge).model_dump(exclude={'access_grants'})
-        knowledge_data['access_grants'] = (
-            access_grants if access_grants is not None else await self._get_access_grants(knowledge_data['id'], db=db)
+        knowledge_model = KnowledgeModel.model_validate(knowledge)
+        knowledge_model.access_grants = (
+            access_grants if access_grants is not None else await self._get_access_grants(knowledge_model.id, db=db)
         )
-        return KnowledgeModel.model_validate(knowledge_data)
+        return knowledge_model
 
     async def insert_new_knowledge(
         self, user_id: str, form_data: KnowledgeForm, db: Optional[AsyncSession] = None
@@ -561,7 +565,17 @@ class KnowledgeTable:
                         permission='read',
                     )
 
-                stmt = stmt.order_by(Knowledge.updated_at.desc(), Knowledge.id.asc())
+                order_by = (filter or {}).get('order_by')
+                direction = (filter or {}).get('direction')
+
+                if order_by in KNOWLEDGE_SORTABLE_FIELDS:
+                    column = getattr(Knowledge, order_by)
+                    if (direction or 'desc').lower() == 'asc':
+                        stmt = stmt.order_by(column.asc(), Knowledge.id.asc())
+                    else:
+                        stmt = stmt.order_by(column.desc(), Knowledge.id.asc())
+                else:
+                    stmt = stmt.order_by(Knowledge.updated_at.desc(), Knowledge.id.asc())
 
                 count_result = await db.execute(select(func.count()).select_from(stmt.subquery()))
                 total = count_result.scalar()
@@ -575,6 +589,14 @@ class KnowledgeTable:
 
                 knowledge_ids = [kb.id for kb, _ in items]
                 grants_map = await AccessGrants.get_grants_by_resources('knowledge', knowledge_ids, db=db)
+                file_counts = {}
+                if knowledge_ids:
+                    file_count_result = await db.execute(
+                        select(KnowledgeFile.knowledge_id, func.count(KnowledgeFile.id))
+                        .where(KnowledgeFile.knowledge_id.in_(knowledge_ids))
+                        .group_by(KnowledgeFile.knowledge_id)
+                    )
+                    file_counts = dict(file_count_result.all())
 
                 knowledge_bases = []
                 for knowledge_base, user in items:
@@ -586,6 +608,7 @@ class KnowledgeTable:
                                 db=db,
                             )
                         ).model_dump(),
+                        'file_count': file_counts.get(knowledge_base.id, 0),
                         'user': (UserModel.model_validate(user).model_dump() if user else None),
                     }
 
@@ -690,14 +713,22 @@ class KnowledgeTable:
             print('search_knowledge_files error:', e)
             return KnowledgeFileListResponse(items=[], total=0)
 
-    async def check_access_by_user_id(self, id, user_id, permission='write', db: Optional[AsyncSession] = None) -> bool:
+    async def check_access_by_user_id(
+        self,
+        id,
+        user_id,
+        permission='write',
+        db: Optional[AsyncSession] = None,
+        user_group_ids: set[str] | None = None,
+    ) -> bool:
         knowledge = await self.get_knowledge_by_id(id, db=db)
         if not knowledge:
             return False
         if knowledge.user_id == user_id:
             return True
-        user_groups = await Groups.get_groups_by_member_id(user_id, db=db)
-        user_group_ids = {group.id for group in user_groups}
+        if user_group_ids is None:
+            user_groups = await Groups.get_groups_by_member_id(user_id, db=db)
+            user_group_ids = {group.id for group in user_groups}
         return await AccessGrants.has_access(
             user_id=user_id,
             resource_type='knowledge',
@@ -1128,9 +1159,25 @@ class KnowledgeTable:
     async def get_file_metadatas_by_id(
         self, knowledge_id: str, db: Optional[AsyncSession] = None
     ) -> list[FileMetadataResponse]:
+        """Column-only listing: File.data holds each file's full extracted
+        text, which metadata views must never load."""
         try:
-            files = await self.get_files_by_id(knowledge_id, db=db)
-            return [FileMetadataResponse(**file.model_dump()) for file in files]
+            async with get_async_db_context(db) as db:
+                result = await db.execute(
+                    select(File.id, File.hash, File.meta, File.created_at, File.updated_at)
+                    .join(KnowledgeFile, File.id == KnowledgeFile.file_id)
+                    .filter(KnowledgeFile.knowledge_id == knowledge_id)
+                )
+                return [
+                    FileMetadataResponse(
+                        id=row.id,
+                        hash=row.hash,
+                        meta=row.meta,
+                        created_at=row.created_at,
+                        updated_at=row.updated_at,
+                    )
+                    for row in result.all()
+                ]
         except Exception:
             return []
 

@@ -145,7 +145,7 @@ RUN apt-get update && \
     libmariadb3 libmariadb-dev mariadb-common \
     libgl1-mesa-dri libglx-mesa0 libglapi-mesa libgbm1 linux-libc-dev && \
     apt-get install -y --no-install-recommends \
-    git build-essential pandoc gcc netcat-openbsd curl jq ca-certificates \
+    git build-essential pandoc gcc curl jq ca-certificates \
     libmariadb-dev \
     python3-dev linux-libc-dev \
     ffmpeg libsm6 libxext6 zstd libmagic1 \
@@ -166,7 +166,7 @@ RUN set -e; \
     # Slim build: no torch, no local ML models — uses external APIs only
     uv pip install --system -r requirements-slim.txt --no-cache-dir; \
     python -c "import os; import tiktoken; tiktoken.get_encoding(os.environ['TIKTOKEN_ENCODING_NAME'])"; \
-    python -c "import nltk; nltk.download('punkt_tab')"; \
+    python -c "import nltk; nltk.download('punkt_tab', download_dir='/usr/local/share/nltk_data')"; \
     elif [ "$USE_CUDA" = "true" ]; then \
     # CUDA build: torch with GPU support + pre-download models
     # fix: pin torch<=2.9.1 - torch 2.10.0 aarch64 wheels cause SIGILL on ARM devices (RPi 4 Cortex-A72) #21349
@@ -176,7 +176,7 @@ RUN set -e; \
     python -c "import os; from sentence_transformers import SentenceTransformer; SentenceTransformer(os.environ.get('AUXILIARY_EMBEDDING_MODEL', 'TaylorAI/bge-micro-v2'), device='cpu')"; \
     python -c "import os; from faster_whisper import WhisperModel; WhisperModel(os.environ['WHISPER_MODEL'], device='cpu', compute_type='int8', download_root=os.environ['WHISPER_MODEL_DIR'])"; \
     python -c "import os; import tiktoken; tiktoken.get_encoding(os.environ['TIKTOKEN_ENCODING_NAME'])"; \
-    python -c "import nltk; nltk.download('punkt_tab')"; \
+    python -c "import nltk; nltk.download('punkt_tab', download_dir='/usr/local/share/nltk_data')"; \
     else \
     # CPU build: torch CPU + pre-download models
     pip3 install 'torch<=2.9.1' torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu --no-cache-dir; \
@@ -185,9 +185,10 @@ RUN set -e; \
     python -c "import os; from sentence_transformers import SentenceTransformer; SentenceTransformer(os.environ.get('AUXILIARY_EMBEDDING_MODEL', 'TaylorAI/bge-micro-v2'), device='cpu')"; \
     python -c "import os; from faster_whisper import WhisperModel; WhisperModel(os.environ['WHISPER_MODEL'], device='cpu', compute_type='int8', download_root=os.environ['WHISPER_MODEL_DIR'])"; \
     python -c "import os; import tiktoken; tiktoken.get_encoding(os.environ['TIKTOKEN_ENCODING_NAME'])"; \
-    python -c "import nltk; nltk.download('punkt_tab')"; \
+    python -c "import nltk; nltk.download('punkt_tab', download_dir='/usr/local/share/nltk_data')"; \
     fi; \
     mkdir -p /app/backend/data; chown -R $UID:$GID /app/backend/data/; \
+    if [ -d /app/backend/data/cache ]; then chmod -R a+rX /app/backend/data/cache; fi; \
     # Drop pip from the final image. pip ships a vendored SBOM
     # (pip/_vendor/bom.cdx.json) that image scanners read as real installed
     # packages, so every build reports permanent HIGHs against pip's bundled
@@ -205,6 +206,11 @@ RUN set -e; \
 # cannot be installed at runtime. Default the feature off so it logs a skip
 # instead of failing on a missing pip.
 ENV ENABLE_PIP_INSTALL_FRONTMATTER_REQUIREMENTS=False
+
+# Optional: PPTX parsing through unstructured may need spaCy's English model.
+# Keep this out of the default image to avoid the extra image bloat; deployments
+# with read-only site-packages can uncomment it and bake the model in.
+# RUN python -m spacy download en_core_web_sm
 
 # Install Ollama if requested
 RUN if [ "$USE_OLLAMA" = "true" ]; then \
@@ -225,6 +231,17 @@ COPY --chown=$UID:$GID --from=build /app/package.json /app/package.json
 
 # copy backend files
 COPY --chown=$UID:$GID ./backend .
+
+# The backend rewrites its bundled static assets (favicons, splash, manifest,
+# loader.js, ...) under open_webui/static at startup. Make that directory
+# writable by an arbitrary UID -- which under OpenShift's restricted SCC is
+# always a member of GID 0 -- so those writes don't fail with EACCES and crash
+# the boot log with "[Errno 13] Permission denied". `chmod -R g=u` mirrors the
+# owner bits onto the group (the Red Hat arbitrary-UID idiom). This is applied
+# unconditionally because it targets a directory the app writes on every start;
+# the broader, opt-in USE_PERMISSION_HARDENING below covers the rest of /app.
+RUN chgrp -R 0 /app/backend/open_webui/static && \
+    chmod -R g=u /app/backend/open_webui/static
 
 EXPOSE 8080
 

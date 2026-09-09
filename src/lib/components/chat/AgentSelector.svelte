@@ -1,5 +1,5 @@
 <script lang="ts">
-	// [Gradient] Agent selector rendered in the navbar's model-selector slot.
+	// [Gradient] Agent selector rendered in the composer’s right slot.
 	//
 	// When the agent picker feature owns chat routing, this replaces the
 	// ModelSelector (which would otherwise show the task-model id — noise on
@@ -24,7 +24,7 @@
 	const i18n: Writable<any> = getContext('i18n');
 
 	// Bound agent id: chat.meta.agent_id on saved chats, $pendingAgentId on
-	// the empty state (threaded by Navbar, same as AgentBadge got).
+	// the empty state (threaded by MessageInput).
 	export let agentId: string | null | undefined;
 	export let editable = false;
 
@@ -59,7 +59,7 @@
 		<Dropdown
 			bind:show
 			side="bottom"
-			align="start"
+			align="end"
 			sideOffset={6}
 			contentClass="w-80 rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 shadow-lg p-2 text-gray-700 dark:text-gray-200"
 		>
@@ -76,7 +76,7 @@
 				     justify-between across the navbar slot) + hover surface,
 				     so it reads as clickable. -->
 				<div
-					class="flex items-center gap-1.5 w-fit max-w-full text-left px-2 py-0.5 rounded-xl bg-transparent truncate text-lg cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-850 transition"
+					class="flex items-center gap-1.5 w-fit max-w-[10rem] sm:max-w-[13rem] text-left px-2 py-0.5 rounded-xl bg-transparent truncate text-[0.8125rem] font-normal cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-850 transition"
 				>
 					<span class="truncate">
 						{#if agent}
@@ -130,7 +130,7 @@
 		<!-- Saved chat: routing is fixed by the chat row — plain label, no
 		     affordance to switch (matches the disabled model selector). Falls
 		     back to the raw slug when the agent is no longer exposed. -->
-		<div class="flex text-left px-0.5 text-lg truncate max-w-full">
+		<div class="flex text-left px-0.5 text-[0.8125rem] font-normal truncate max-w-full">
 			{#if agent}
 				{agent.name}
 			{:else}

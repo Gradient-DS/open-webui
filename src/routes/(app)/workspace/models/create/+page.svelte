@@ -23,8 +23,7 @@
 	const i18n = getContext('i18n');
 
 	$: useSimpleBuilder =
-		isFeatureEnabled('simple_assistant_builder') &&
-		$page.url.searchParams.get('advanced') === null;
+		isFeatureEnabled('simple_assistant_builder') && $page.url.searchParams.get('advanced') === null;
 
 	const goToAdvanced = () => goto('/workspace/models/create?advanced=true');
 
@@ -49,6 +48,9 @@
 				...modelInfo,
 				meta: {
 					...modelInfo.meta,
+					// LICENSE covers this Open WebUI fallback logo.
+					// Do not alter, remove, obscure, or replace it except as LICENSE permits:
+					// https://docs.openwebui.com/license.
 					profile_image_url:
 						modelInfo.meta.profile_image_url ?? `${WEBUI_BASE_URL}/static/favicon.png`,
 					suggestion_prompts: modelInfo.meta.suggestion_prompts
@@ -142,6 +144,6 @@
 	<AssistantWizard {onSubmit} onAdvanced={goToAdvanced} />
 {:else}
 	{#key model}
-		<ModelEditor {model} {onSubmit} />
+		<ModelEditor onBack={() => goto('/workspace/models')} {model} {onSubmit} />
 	{/key}
 {/if}

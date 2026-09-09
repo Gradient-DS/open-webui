@@ -34,7 +34,7 @@ def search_ollama_cloud(
         data = response.json()
 
         results = data.get('results', [])
-        log.info(f'Found {len(results)} results')
+        log.info('Found %s results', len(results))
 
         if filter_list:
             results = get_filtered_results(results, filter_list)

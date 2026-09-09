@@ -134,6 +134,8 @@ def oauth_manager_with_mocks(monkeypatch):
     # helper to hand back a single mutable ``SimpleNamespace`` so tests can
     # tweak fields before driving the callback.
     auth_config = SimpleNamespace(
+        # [Gradient] Upstream's OAuth master switch must be on to exercise invite policy.
+        ENABLE_OAUTH=True,
         OAUTH_EMAIL_CLAIM='email',
         OAUTH_USERNAME_CLAIM='name',
         OAUTH_SUB_CLAIM='sub',

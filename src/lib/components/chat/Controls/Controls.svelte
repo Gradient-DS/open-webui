@@ -29,12 +29,19 @@
 	let showValves = getOpen('valves', false);
 	let showSystemPrompt = getOpen('systemPrompt');
 	let showAdvancedParams = getOpen('advancedParams');
+
+	const compactSectionButtonClass =
+		'w-full py-1 text-xs font-normal text-gray-500 hover:text-gray-900 dark:text-gray-400 dark:hover:text-gray-100 transition cursor-pointer select-none';
+	const systemPromptTextareaClass =
+		'w-full resize-vertical rounded-lg border border-gray-100/50 bg-gray-50/40 px-2 py-1.5 text-xs text-gray-700 outline-hidden transition-colors placeholder:text-gray-300 focus:border-blue-400 dark:border-white/[0.04] dark:bg-white/[0.03] dark:text-gray-300 dark:placeholder:text-gray-700 dark:focus:border-blue-500';
+	const compactSystemPromptTextareaClass =
+		'w-full resize-vertical appearance-none bg-transparent py-1 text-xs outline-hidden focus:bg-transparent disabled:bg-transparent';
 </script>
 
 <div class=" dark:text-white">
 	{#if !embed}
 		<div class=" flex items-center justify-between dark:text-gray-100 mb-2">
-			<div class=" text-md self-center font-primary">{$i18n.t('Controls')}</div>
+			<div class=" text-md self-center">{$i18n.t('Controls')}</div>
 			<button
 				class="self-center"
 				aria-label={$i18n.t('Close chat controls')}
@@ -48,13 +55,15 @@
 	{/if}
 
 	{#if isFeatureEnabled('chat_controls') && ($user?.role === 'admin' || ($user?.permissions.chat?.controls ?? true))}
-		<div class=" dark:text-gray-200 text-sm py-0.5 px-0.5">
+		<div class="space-y-1 dark:text-gray-200 text-sm py-0.5 px-0.5">
 			{#if isChatControlSectionEnabled('files')}
 				<Collapsible
 					title={$i18n.t('Files')}
 					bind:open={showFiles}
 					onChange={setOpen('files')}
 					buttonClassName="w-full"
+					chevronClassName="size-2.5"
+					chevronStrokeWidth="2"
 				>
 					<div class="flex flex-col gap-1 mt-1.5" slot="content">
 						{#if chatFiles.length > 0}
@@ -87,8 +96,6 @@
 						{/if}
 					</div>
 				</Collapsible>
-
-				<hr class="my-2 border-gray-50 dark:border-gray-700/10" />
 			{/if}
 
 			{#if isChatControlSectionEnabled('valves') && ($user?.role === 'admin' || ($user?.permissions.chat?.valves ?? true))}
@@ -96,14 +103,14 @@
 					bind:open={showValves}
 					onChange={setOpen('valves')}
 					title={$i18n.t('Valves')}
-					buttonClassName="w-full"
+					buttonClassName={compactSectionButtonClass}
+					chevronClassName="size-2.5"
+					chevronStrokeWidth="2"
 				>
-					<div class="text-sm" slot="content">
+					<div class="pt-1 pb-1 text-xs" slot="content">
 						<Valves show={showValves} />
 					</div>
 				</Collapsible>
-
-				<hr class="my-2 border-gray-50 dark:border-gray-700/10" />
 			{/if}
 
 			{#if isChatControlSectionEnabled('system_prompt') && isFeatureEnabled('system_prompt') && ($user?.role === 'admin' || ($user?.permissions.chat?.system_prompt ?? true))}
@@ -111,21 +118,21 @@
 					title={$i18n.t('System Prompt')}
 					bind:open={showSystemPrompt}
 					onChange={setOpen('systemPrompt')}
-					buttonClassName="w-full"
+					buttonClassName={compactSectionButtonClass}
+					chevronClassName="size-2.5"
+					chevronStrokeWidth="2"
 				>
-					<div class="" slot="content">
+					<div class="pt-1 pb-1" slot="content">
 						<textarea
 							bind:value={params.system}
-							class="w-full text-xs outline-hidden resize-vertical {$settings.highContrastMode
-								? 'border-2 border-gray-300 dark:border-gray-700 rounded-lg bg-gray-50 dark:bg-gray-800 p-2.5'
-								: 'py-1.5 bg-transparent'}"
-							rows="4"
+							class={($settings?.highContrastMode ?? false)
+								? systemPromptTextareaClass
+								: compactSystemPromptTextareaClass}
+							rows="3"
 							placeholder={$i18n.t('Enter system prompt')}
 						/>
 					</div>
 				</Collapsible>
-
-				<hr class="my-2 border-gray-50 dark:border-gray-700/10" />
 			{/if}
 
 			{#if isChatControlSectionEnabled('params') && ($user?.role === 'admin' || ($user?.permissions.chat?.params ?? true))}
@@ -133,9 +140,11 @@
 					title={$i18n.t('Advanced Params')}
 					bind:open={showAdvancedParams}
 					onChange={setOpen('advancedParams')}
-					buttonClassName="w-full"
+					buttonClassName={compactSectionButtonClass}
+					chevronClassName="size-2.5"
+					chevronStrokeWidth="2"
 				>
-					<div class="text-sm mt-1.5" slot="content">
+					<div class="pt-1 pb-1 text-xs" slot="content">
 						<div>
 							<AdvancedParams admin={$user?.role === 'admin'} custom={true} bind:params />
 						</div>

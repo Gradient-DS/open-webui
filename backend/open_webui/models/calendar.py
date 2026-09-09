@@ -4,10 +4,11 @@ from typing import Optional
 from uuid import uuid4
 
 from open_webui.internal.db import Base, get_async_db_context
+from open_webui.constants import ERROR_MESSAGES
 from open_webui.models.access_grants import AccessGrantModel, AccessGrants
 from open_webui.models.groups import Groups
 from open_webui.models.users import User, UserModel, UserResponse
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 from sqlalchemy import (
     JSON,
     BigInteger,
@@ -26,6 +27,7 @@ from sqlalchemy import (
 from sqlalchemy.ext.asyncio import AsyncSession
 
 log = logging.getLogger(__name__)
+MIN_CALENDAR_RRULE_INTERVAL_SECONDS = 24 * 60 * 60
 
 
 ####################
@@ -191,6 +193,22 @@ class CalendarEventForm(BaseModel):
     meta: Optional[dict] = None
     attendees: Optional[list[dict]] = None
 
+    @field_validator('rrule')
+    @classmethod
+    def reject_sub_daily_rrule(cls, value: Optional[str]) -> Optional[str]:
+        if value:
+            from open_webui.utils.automations import rrule_interval_seconds
+
+            try:
+                interval = rrule_interval_seconds(value)
+            except ValueError:
+                raise
+            except Exception as e:
+                raise ValueError(ERROR_MESSAGES.AUTOMATION_INVALID_RRULE(e))
+            if interval is not None and interval < MIN_CALENDAR_RRULE_INTERVAL_SECONDS:
+                raise ValueError(ERROR_MESSAGES.CALENDAR_RRULE_TOO_FREQUENT)
+        return value
+
 
 class CalendarEventUpdateForm(BaseModel):
     calendar_id: Optional[str] = None
@@ -206,6 +224,22 @@ class CalendarEventUpdateForm(BaseModel):
     meta: Optional[dict] = None
     is_cancelled: Optional[bool] = None
     attendees: Optional[list[dict]] = None
+
+    @field_validator('rrule')
+    @classmethod
+    def reject_sub_daily_rrule(cls, value: Optional[str]) -> Optional[str]:
+        if value:
+            from open_webui.utils.automations import rrule_interval_seconds
+
+            try:
+                interval = rrule_interval_seconds(value)
+            except ValueError:
+                raise
+            except Exception as e:
+                raise ValueError(ERROR_MESSAGES.AUTOMATION_INVALID_RRULE(e))
+            if interval is not None and interval < MIN_CALENDAR_RRULE_INTERVAL_SECONDS:
+                raise ValueError(ERROR_MESSAGES.CALENDAR_RRULE_TOO_FREQUENT)
+        return value
 
 
 class RSVPForm(BaseModel):
@@ -241,11 +275,11 @@ class CalendarTable:
         access_grants: Optional[list[AccessGrantModel]] = None,
         db: Optional[AsyncSession] = None,
     ) -> CalendarModel:
-        cal_data = CalendarModel.model_validate(cal).model_dump(exclude={'access_grants'})
-        cal_data['access_grants'] = (
-            access_grants if access_grants is not None else await self._get_access_grants(cal_data['id'], db=db)
+        calendar_model = CalendarModel.model_validate(cal)
+        calendar_model.access_grants = (
+            access_grants if access_grants is not None else await self._get_access_grants(calendar_model.id, db=db)
         )
-        return CalendarModel.model_validate(cal_data)
+        return calendar_model
 
     async def get_or_create_defaults(self, user_id: str, db: Optional[AsyncSession] = None) -> list[CalendarModel]:
         """Return user's calendars, creating 'Personal' default if none exist."""
@@ -500,9 +534,12 @@ class CalendarEventTable:
                 # Filter to requested calendars only
                 accessible_cal_ids = [c for c in accessible_cal_ids if c in calendar_ids]
 
-            # Also get event IDs where user is an attendee
+            # Also get event IDs where the user is an attendee, excluding invites they declined
             attendee_event_ids_result = await db.execute(
-                select(CalendarEventAttendee.event_id).filter(CalendarEventAttendee.user_id == user_id)
+                select(CalendarEventAttendee.event_id).filter(
+                    CalendarEventAttendee.user_id == user_id,
+                    CalendarEventAttendee.status != 'declined',
+                )
             )
             attendee_event_ids = [r[0] for r in attendee_event_ids_result.all()]
 
@@ -530,7 +567,8 @@ class CalendarEventTable:
                             & (CalendarEvent.start_at < end)
                             & or_(
                                 CalendarEvent.end_at.is_(None) & (CalendarEvent.start_at >= start),
-                                CalendarEvent.end_at.isnot(None) & (CalendarEvent.end_at > start),
+                                CalendarEvent.end_at.isnot(None)
+                                & ((CalendarEvent.end_at > start) | (CalendarEvent.start_at >= start)),
                             )
                         ),
                         # Recurring: fetch all (expansion in Python)
@@ -731,10 +769,10 @@ class CalendarEventTable:
         events = []
         for event, tz in rows:
             model = CalendarEventModel.model_validate(event)
-            # Determine per-event alert window
-            alert_minutes = None
-            if model.meta and 'alert_minutes' in model.meta:
-                alert_minutes = model.meta['alert_minutes']
+            # meta is user-writable and this poll is shared by every user.
+            alert_minutes = (model.meta or {}).get('alert_minutes')
+            if not isinstance(alert_minutes, (int, float)):
+                alert_minutes = None
 
             if alert_minutes is not None:
                 if alert_minutes < 0:
@@ -764,22 +802,32 @@ class CalendarEventAttendeeTable:
     async def set_attendees(
         self, event_id: str, attendees: list[dict], db: Optional[AsyncSession] = None
     ) -> list[CalendarEventAttendeeModel]:
-        """Replace all attendees for an event.
+        """Replace all attendees for an event ({user_id, meta?} per dict).
 
-        Each dict in attendees: {user_id: str, status?: str, meta?: dict}
+        RSVP status is the attendee's alone to set (via update_rsvp): an existing
+        attendee keeps their status, a newly added one starts 'pending'. A
+        caller-supplied status is ignored so an organiser cannot set it for others.
         """
         async with get_async_db_context(db) as db:
+            existing_status = {
+                row.user_id: row.status
+                for row in (
+                    await db.execute(select(CalendarEventAttendee).filter(CalendarEventAttendee.event_id == event_id))
+                ).scalars()
+            }
+
             # Remove existing
             await db.execute(delete(CalendarEventAttendee).filter(CalendarEventAttendee.event_id == event_id))
 
             now = int(time.time_ns())
             models = []
             for att in attendees:
+                user_id = att['user_id']
                 row = CalendarEventAttendee(
                     id=str(uuid4()),
                     event_id=event_id,
-                    user_id=att['user_id'],
-                    status=att.get('status', 'pending'),
+                    user_id=user_id,
+                    status=existing_status.get(user_id, 'pending'),
                     meta=att.get('meta'),
                     created_at=now,
                     updated_at=now,

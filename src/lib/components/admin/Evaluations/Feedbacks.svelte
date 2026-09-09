@@ -26,11 +26,12 @@
 	import FeedbackModal from './FeedbackModal.svelte';
 	import EllipsisHorizontal from '$lib/components/icons/EllipsisHorizontal.svelte';
 	import Dropdown from '$lib/components/common/Dropdown.svelte';
+	import DropdownMenu from '$lib/components/common/DropdownMenu.svelte';
 
 	import ChevronUp from '$lib/components/icons/ChevronUp.svelte';
 	import ChevronDown from '$lib/components/icons/ChevronDown.svelte';
 	import { WEBUI_API_BASE_URL, WEBUI_BASE_URL } from '$lib/constants';
-	import { config } from '$lib/stores';
+	import { adminFeedbackCount, config } from '$lib/stores';
 	import Spinner from '$lib/components/common/Spinner.svelte';
 	import Select from '$lib/components/common/Select.svelte';
 	import Check from '$lib/components/icons/Check.svelte';
@@ -49,24 +50,9 @@
 	let convOrderBy: string = 'updated_at';
 	let convDirection: 'asc' | 'desc' = 'desc';
 
-	// Upstream-added model filtering vars (used by post-conflict code that was
-	// auto-merged in). Kept here so the file compiles even though the rest of
-	// the admin Feedbacks UI keeps our msg/conv split rather than upstream's
-	// single-list-with-model-filter pattern. Adopting upstream's full model
-	// filter UI is a follow-up.
-	let orderBy: string = 'updated_at';
-	let direction: 'asc' | 'desc' = 'desc';
+	// [Gradient] Model filtering applies to message feedback; conversations keep their own scope.
 	let selectedModelId: string = '';
 	let modelIds: string[] = [];
-
-	const setSortKey = (key) => {
-		if (orderBy === key) {
-			direction = direction === 'asc' ? 'desc' : 'asc';
-		} else {
-			orderBy = key;
-			direction = 'asc';
-		}
-	};
 
 	let showFeedbackModal = false;
 	let selectedFeedback = null;
@@ -112,7 +98,8 @@
 				msgOrderBy,
 				msgDirection,
 				msgPage,
-				'message'
+				'message',
+				selectedModelId
 			).catch((error) => {
 				toast.error(`${error}`);
 				return null;
@@ -121,6 +108,7 @@
 			if (res) {
 				msgItems = res.items;
 				msgTotal = res.total;
+				adminFeedbackCount.set(msgTotal);
 			}
 		} catch (err) {
 			console.error(err);
@@ -163,6 +151,17 @@
 		getConvFeedbacks();
 	}
 
+	const loadModelIds = async () => {
+		try {
+			const res = await getFeedbackModelIds(localStorage.token);
+			if (res) {
+				modelIds = res;
+			}
+		} catch (err) {
+			console.error(err);
+		}
+	};
+
 	const deleteFeedbackHandler = async (feedbackId: string, scope: string) => {
 		const response = await deleteFeedbackById(localStorage.token, feedbackId).catch((err) => {
 			toast.error(err);
@@ -181,14 +180,16 @@
 	};
 
 	const shareHandler = async () => {
+		// LICENSE covers this Open WebUI Community wordmark.
+		// Do not alter, remove, obscure, or replace it except as LICENSE permits:
+		// https://docs.openwebui.com/license.
 		toast.success($i18n.t('Redirecting you to Open WebUI Community'));
 
 		// remove snapshot from feedbacks
-		const feedbacksToShare = feedbacks.map((f) => {
+		const feedbacksToShare = (msgItems ?? []).map((f) => {
 			const { snapshot, user, ...rest } = f;
 			return rest;
 		});
-		console.log(feedbacksToShare);
 
 		const url = 'https://openwebui.com';
 		const tab = await window.open(`${url}/leaderboard`, '_blank');
@@ -273,35 +274,89 @@
 		<Spinner className="size-5" />
 	</div>
 {:else}
-	<!-- ======================== -->
-	<!-- Message-level Feedback   -->
-	<!-- ======================== -->
-	<div class="mt-0.5 mb-1 gap-1 flex flex-row justify-between">
-		<div class="flex items-center md:self-center text-xl font-medium px-0.5 gap-2 shrink-0">
-			<div>
-				{$i18n.t('Feedback History')}
-			</div>
+	<!-- [Gradient] Message feedback retains its own scope, page, and model filter. -->
+	<div>
+		{#if modelIds.length > 0 || msgTotal > 0}
+			<div class="flex h-8 flex-1 items-center w-full gap-2">
+				<div
+					class="flex min-w-0 flex-1 bg-transparent overflow-x-auto scrollbar-none"
+					on:wheel={(e) => {
+						if (e.deltaY !== 0) {
+							e.preventDefault();
+							e.currentTarget.scrollLeft += e.deltaY;
+						}
+					}}
+				>
+					{#if modelIds.length > 0}
+						<div
+							class="flex gap-0.5 w-fit text-center text-sm rounded-full bg-transparent whitespace-nowrap"
+						>
+							<Select
+								bind:value={selectedModelId}
+								items={[
+									{ value: '', label: $i18n.t('All') },
+									...modelIds.map((mid) => ({ value: mid, label: mid }))
+								]}
+								placeholder={$i18n.t('All')}
+								triggerClass="relative w-full flex items-center gap-0.5 px-2.5 py-1.5 bg-transparent rounded-xl text-[0.8125rem] font-normal text-gray-700 transition hover:text-gray-900 dark:text-gray-200 dark:hover:text-gray-100"
+								onChange={() => {
+									msgPage = 1;
+									getMsgFeedbacks();
+								}}
+							>
+								<svelte:fragment slot="trigger" let:selectedLabel>
+									<span
+										class="inline-flex h-input px-0.5 w-full outline-hidden bg-transparent truncate placeholder-gray-400 focus:outline-hidden"
+									>
+										{selectedLabel}
+									</span>
+									<ChevronDown className="size-3.5" strokeWidth="2.5" />
+								</svelte:fragment>
 
-			<div class="text-lg font-medium text-gray-500 dark:text-gray-500">
-				{msgTotal}
-			</div>
-		</div>
-	</div>
+								<svelte:fragment slot="item" let:item let:selected>
+									{item.label}
+									<div class="ml-auto {selected ? '' : 'invisible'}">
+										<Check />
+									</div>
+								</svelte:fragment>
+							</Select>
+						</div>
+					{/if}
+				</div>
 
-		{#if msgTotal > 0}
-			<div>
-				<Tooltip content={$i18n.t('Export')}>
-					<button
-						class=" p-2 rounded-xl hover:bg-gray-100 dark:bg-gray-900 dark:hover:bg-gray-850 transition font-medium text-sm flex items-center space-x-1"
-						on:click={() => {
-							exportHandler();
-						}}
-					>
-						<Download className="size-3" />
-					</button>
-				</Tooltip>
+				{#if msgTotal > 0}
+					<Dropdown align="end">
+						<button
+							class="flex h-8 shrink-0 items-center gap-1 px-2 py-1.5 rounded-xl hover:bg-gray-100 dark:hover:bg-gray-850 dark:text-gray-200 transition text-xs"
+						>
+							{$i18n.t('Export')}
+							<ChevronDown className="size-3" strokeWidth="2.5" />
+						</button>
+
+						<div slot="content">
+							<DropdownMenu className="w-[10.625rem]">
+								<button
+									class="select-none flex w-full gap-2 items-center h-[1.6875rem] px-2 text-[0.8125rem] font-normal cursor-pointer hover:bg-gray-50/40 dark:hover:bg-gray-800/40 rounded-xl"
+									type="button"
+									on:click={() => exportHandler('json')}
+								>
+									{$i18n.t('Export as JSON')}
+								</button>
+
+								<button
+									class="select-none flex w-full gap-2 items-center h-[1.6875rem] px-2 text-[0.8125rem] font-normal cursor-pointer hover:bg-gray-50/40 dark:hover:bg-gray-800/40 rounded-xl"
+									type="button"
+									on:click={() => exportHandler('csv')}
+								>
+									{$i18n.t('Export as CSV')}
+								</button>
+							</DropdownMenu>
+						</div>
+					</Dropdown>
+				{/if}
 			</div>
 		{/if}
+	</div>
 
 	<div class="scrollbar-hidden relative whitespace-nowrap overflow-x-auto max-w-full">
 		{#if (msgItems ?? []).length === 0}
@@ -415,7 +470,7 @@
 							class="bg-white dark:bg-gray-900 dark:border-gray-850 text-xs cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-850/50 transition"
 							on:click={() => openFeedbackModal(feedback)}
 						>
-							<td class=" py-0.5 text-right font-medium">
+							<td class=" py-0.5 text-right font-normal">
 								<div class="flex justify-center">
 									<Tooltip content={feedback?.user?.name}>
 										<div class="shrink-0">
@@ -435,7 +490,7 @@
 										{#if feedback.data?.sibling_model_ids}
 											<Tooltip content={feedback.data?.model_id} placement="top-start">
 												<div
-													class="font-medium text-gray-600 dark:text-gray-400 flex-1 line-clamp-1"
+													class="font-normal text-gray-600 dark:text-gray-400 flex-1 line-clamp-1"
 												>
 													{feedback.data?.model_id}
 												</div>
@@ -456,7 +511,7 @@
 										{:else}
 											<Tooltip content={feedback.data?.model_id} placement="top-start">
 												<div
-													class="text-sm font-medium text-gray-600 dark:text-gray-400 flex-1 py-1.5 line-clamp-1"
+													class="text-sm font-normal text-gray-600 dark:text-gray-400 flex-1 py-1.5 line-clamp-1"
 												>
 													{feedback.data?.model_id}
 												</div>
@@ -467,7 +522,7 @@
 							</td>
 
 							{#if feedback?.data?.rating}
-								<td class="px-3 py-1 text-right font-medium text-gray-900 dark:text-white w-max">
+								<td class="px-3 py-1 text-right font-normal text-gray-900 dark:text-white w-max">
 									<div class=" flex justify-end">
 										{#if feedback?.data?.rating?.toString() === '1'}
 											<Badge type="info" content={$i18n.t('Won')} />
@@ -480,11 +535,11 @@
 								</td>
 							{/if}
 
-							<td class=" px-3 py-1 text-right font-medium">
+							<td class=" px-3 py-1 text-right font-normal">
 								{dayjs(feedback.updated_at * 1000).fromNow()}
 							</td>
 
-							<td class=" px-3 py-1 text-right font-medium" on:click={(e) => e.stopPropagation()}>
+							<td class=" px-3 py-1 text-right font-normal" on:click={(e) => e.stopPropagation()}>
 								<FeedbackMenu
 									on:delete={(e) => {
 										deleteFeedbackHandler(feedback.id, 'message');
@@ -498,15 +553,15 @@
 								</FeedbackMenu>
 							</td>
 						</tr>
-						{/each}
-					</tbody>
-				</table>
-			{/if}
-		</div>
-
-		{#if msgTotal > 30}
-			<Pagination bind:page={msgPage} count={msgTotal} perPage={30} />
+					{/each}
+				</tbody>
+			</table>
 		{/if}
+	</div>
+
+	{#if msgTotal > 30}
+		<Pagination bind:page={msgPage} count={msgTotal} perPage={30} />
+	{/if}
 
 	{#if msgTotal > 0 && $config?.features?.enable_community_sharing}
 		<div class=" flex flex-col justify-end w-full text-right gap-1">
@@ -526,7 +581,7 @@
 							shareHandler();
 						}}
 					>
-						<div class=" self-center mr-2 font-medium line-clamp-1">
+						<div class=" self-center mr-2 font-normal line-clamp-1">
 							{$i18n.t('Share to Open WebUI Community')}
 						</div>
 
@@ -548,12 +603,12 @@
 	<!-- ============================== -->
 	{#if convItems !== null && convTotal !== null}
 		<div class="mt-6 mb-1 gap-1 flex flex-row justify-between">
-			<div class="flex items-center md:self-center text-xl font-medium px-0.5 gap-2 shrink-0">
+			<div class="flex items-center md:self-center text-xl font-normal px-0.5 gap-2 shrink-0">
 				<div>
 					{$i18n.t('Conversation Feedback')}
 				</div>
 
-				<div class="text-lg font-medium text-gray-500 dark:text-gray-500">
+				<div class="text-lg font-normal text-gray-500 dark:text-gray-500">
 					{convTotal}
 				</div>
 			</div>
@@ -645,16 +700,20 @@
 								</div>
 							</th>
 
-							<th scope="col" class="px-2.5 py-2 text-right cursor-pointer select-none w-0"> </th>
+							<th
+								scope="col"
+								class="px-2.5 py-2 font-normal text-right cursor-pointer select-none w-0"
+							>
+							</th>
 						</tr>
 					</thead>
 					<tbody class="">
 						{#each convItems as feedback (feedback.id)}
 							<tr
-								class="bg-white dark:bg-gray-900 dark:border-gray-850 text-xs cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-850/50 transition"
+								class="dark:border-gray-850 text-xs cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-850/50 transition rounded-xl"
 								on:click={() => openFeedbackModal(feedback)}
 							>
-								<td class=" py-0.5 text-right font-medium">
+								<td class=" py-0.5 text-right font-normal">
 									<div class="flex justify-center">
 										<Tooltip content={feedback?.user?.name}>
 											<div class="shrink-0">
@@ -674,7 +733,7 @@
 									</div>
 								</td>
 
-								<td class="px-3 py-1 text-right font-medium text-gray-900 dark:text-white w-max">
+								<td class="px-3 py-1 text-right font-normal text-gray-900 dark:text-white w-max">
 									<div class=" flex justify-end">
 										<Badge
 											type="info"
@@ -683,11 +742,11 @@
 									</div>
 								</td>
 
-								<td class=" px-3 py-1 text-right font-medium">
+								<td class=" px-3 py-1 text-right font-normal">
 									{dayjs(feedback.updated_at * 1000).fromNow()}
 								</td>
 
-								<td class=" px-3 py-1 text-right font-medium" on:click={(e) => e.stopPropagation()}>
+								<td class=" px-3 py-1 text-right font-normal" on:click={(e) => e.stopPropagation()}>
 									<FeedbackMenu
 										on:delete={(e) => {
 											deleteFeedbackHandler(feedback.id, 'conversation');

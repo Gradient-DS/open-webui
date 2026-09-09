@@ -58,6 +58,8 @@ def _isolated_defaults(monkeypatch):
     """Every test gets its own DEFAULTS dict so mutations (upsert's
     non-persistent fallback, seed_defaults, etc.) never leak across tests."""
     monkeypatch.setattr(Config, 'DEFAULTS', {})
+    # [Gradient] Exercise prefix scoping even when the dev environment disables persistence globally.
+    monkeypatch.setattr(Config, 'PERSISTENT_ENABLED', True)
 
 
 # --- persistent_enabled_for: the pure boolean check ---------------------------

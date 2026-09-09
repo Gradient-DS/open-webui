@@ -1,4 +1,7 @@
+from __future__ import annotations
+
 import json
+import io
 import logging
 import mimetypes
 import os
@@ -12,7 +15,8 @@ import requests
 from datetime import datetime
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Iterator, List, Optional, Sequence, Union
+from typing import Callable, Iterator, List, Optional, Sequence, Union
+from urllib.parse import unquote, urlparse
 
 from fastapi import (
     Depends,
@@ -41,6 +45,8 @@ from langchain_core.documents import Document
 
 from open_webui.models.files import FileModel, FileUpdateForm, Files
 from open_webui.utils.access_control.files import has_access_to_file
+from open_webui.env import AIOHTTP_CLIENT_ALLOW_REDIRECTS, AIOHTTP_CLIENT_SESSION_SSL
+from open_webui.events import EVENTS, publish_event
 from open_webui.models.knowledge import Knowledges
 from open_webui.models.config import Config
 from open_webui.storage.provider import Storage
@@ -53,39 +59,7 @@ from open_webui.retrieval.vector.factory import VECTOR_DB_CLIENT
 from open_webui.retrieval.vector.async_client import ASYNC_VECTOR_DB_CLIENT
 
 # Document loaders
-from open_webui.retrieval.loaders.youtube import YoutubeLoader
-
-# Web search engines
-from open_webui.retrieval.web.main import SearchResult
-from open_webui.retrieval.web.utils import get_web_loader
-from open_webui.retrieval.web.ollama import search_ollama_cloud
-from open_webui.retrieval.web.perplexity_search import search_perplexity_search
-from open_webui.retrieval.web.brave import search_brave
-from open_webui.retrieval.web.brave_llm_context import search_brave_llm_context
-from open_webui.retrieval.web.kagi import search_kagi
-from open_webui.retrieval.web.mojeek import search_mojeek
-from open_webui.retrieval.web.bocha import search_bocha
-from open_webui.retrieval.web.duckduckgo import search_duckduckgo
-from open_webui.retrieval.web.google_pse import search_google_pse
-from open_webui.retrieval.web.jina_search import search_jina
-from open_webui.retrieval.web.searchapi import search_searchapi
-from open_webui.retrieval.web.serpapi import search_serpapi
-from open_webui.retrieval.web.searxng import search_searxng
-from open_webui.retrieval.web.yacy import search_yacy
-from open_webui.retrieval.web.serper import search_serper
-from open_webui.retrieval.web.serply import search_serply
-from open_webui.retrieval.web.serpstack import search_serpstack
-from open_webui.retrieval.web.tavily import search_tavily
-from open_webui.retrieval.web.bing import search_bing
-from open_webui.retrieval.web.azure import search_azure
-from open_webui.retrieval.web.exa import search_exa
-from open_webui.retrieval.web.perplexity import search_perplexity
-from open_webui.retrieval.web.sougou import search_sougou
-from open_webui.retrieval.web.firecrawl import search_firecrawl
-from open_webui.retrieval.web.external import search_external
-from open_webui.retrieval.web.yandex import search_yandex
-from open_webui.retrieval.web.ydc import search_youcom
-
+from open_webui.retrieval.loaders.youtube import YoutubeLoader, YoutubeTranscriptError
 from open_webui.retrieval.utils import (
     build_loader_from_config,
     filter_accessible_collections,
@@ -94,18 +68,55 @@ from open_webui.retrieval.utils import (
     get_embedding_function,
     get_reranking_function,
     get_model_path,
+    is_youtube_url,
     query_collection,
     query_collection_with_hybrid_search,
     query_doc,
     query_doc_with_hybrid_search,
 )
 from open_webui.retrieval.vector.utils import filter_metadata
+from open_webui.retrieval.web.azure import search_azure
+from open_webui.retrieval.web.bing import search_bing
+from open_webui.retrieval.web.bocha import search_bocha
+from open_webui.retrieval.web.brave import search_brave
+from open_webui.retrieval.web.brave_llm_context import search_brave_llm_context
+from open_webui.retrieval.web.duckduckgo import search_duckduckgo
+from open_webui.retrieval.web.exa import search_exa
+from open_webui.retrieval.web.external import search_external
+from open_webui.retrieval.web.firecrawl import search_firecrawl
+from open_webui.retrieval.web.google_pse import search_google_pse
+from open_webui.retrieval.web.jina_search import search_jina
+from open_webui.retrieval.web.kagi import search_kagi
+from open_webui.retrieval.web.utils import get_ssrf_safe_session, validate_url
+
+# Web search engines
+from open_webui.retrieval.web.main import SearchResult
+from open_webui.retrieval.web.microsoft_web_iq import search_microsoft_web_iq
+from open_webui.retrieval.web.mojeek import search_mojeek
+from open_webui.retrieval.web.ollama import search_ollama_cloud
+from open_webui.retrieval.web.perplexity import search_perplexity
+from open_webui.retrieval.web.perplexity_search import search_perplexity_search
+from open_webui.retrieval.web.searchapi import search_searchapi
+from open_webui.retrieval.web.openserp import search_openserp
+from open_webui.retrieval.web.searxng import search_searxng
+from open_webui.retrieval.web.serpapi import search_serpapi
+from open_webui.retrieval.web.serper import search_serper
+from open_webui.retrieval.web.serphouse import search_serphouse
+from open_webui.retrieval.web.serply import search_serply
+from open_webui.retrieval.web.serpstack import search_serpstack
+from open_webui.retrieval.web.sougou import search_sougou
+from open_webui.retrieval.web.tavily import search_tavily
+from open_webui.retrieval.web.utils import get_web_loader
+from open_webui.retrieval.web.yacy import search_yacy
+from open_webui.retrieval.web.yandex import search_yandex
+from open_webui.retrieval.web.ydc import search_youcom
+from open_webui.retrieval.web.linkup import search_linkup
+from open_webui.utils.access_control import has_permission
+from open_webui.utils.auth import get_admin_user, get_verified_user
 from open_webui.utils.misc import (
     calculate_sha256_string,
     sanitize_text_for_db,
 )
-from open_webui.utils.auth import get_admin_user, get_verified_user
-from open_webui.utils.access_control import has_permission
 from open_webui.utils.loop_bridge import run_on_main_loop
 
 from open_webui.config import (
@@ -134,8 +145,9 @@ from open_webui.constants import ERROR_MESSAGES
 
 log = logging.getLogger(__name__)
 
+TIKTOKEN_DISALLOWED_SPECIAL = ()
 
-# ── Per-key config access (replaces the removed per-request app-state config object) ──
+# [Gradient] ── Per-key config access (replaces the removed per-request app-state config object) ──
 # Legacy UPPERCASE attribute name -> per-key Config storage key. Authoritative mapping
 # derived from config.py::DEFAULT_CONFIG (upstream renamed several rag.* keys).
 RAG_CONFIG_KEYS: dict[str, str] = {
@@ -163,6 +175,7 @@ RAG_CONFIG_KEYS: dict[str, str] = {
     'CHUNK_MIN_SIZE_TARGET': 'rag.chunk_min_size_target',
     'CHUNK_OVERLAP': 'rag.chunk_overlap',
     'CHUNK_SIZE': 'rag.chunk_size',
+    'CONTENT_EXTRACTION_SUPPORTED_MEDIA_MIME_TYPES': 'rag.content_extraction.supported_media_mime_types',
     'CONTENT_EXTRACTION_ENGINE': 'rag.content_extraction_engine',
     'DATALAB_MARKER_ADDITIONAL_CONFIG': 'rag.datalab_marker_additional_config',
     'DATALAB_MARKER_API_BASE_URL': 'rag.datalab_marker_api_base_url',
@@ -255,6 +268,7 @@ RAG_CONFIG_KEYS: dict[str, str] = {
     'SEARCHAPI_ENGINE': 'web.search.searchapi_engine',
     'SEARXNG_LANGUAGE': 'web.search.searxng_language',
     'SEARXNG_QUERY_URL': 'web.search.searxng_query_url',
+    'OPENSERP_BASE_URL': 'web.search.openserp_base_url',
     'SERPAPI_API_KEY': 'web.search.serpapi_api_key',
     'SERPAPI_ENGINE': 'web.search.serpapi_engine',
     'SERPER_API_KEY': 'web.search.serper_api_key',
@@ -267,6 +281,7 @@ RAG_CONFIG_KEYS: dict[str, str] = {
     'TAVILY_EXTRACT_DEPTH': 'web.search.tavily_extract_depth',
     'TEXT_SPLITTER': 'rag.text_splitter',
     'TIKA_SERVER_URL': 'rag.tika_server_url',
+    'TIKA_SERVER_VERSION': 'rag.tika_server_version',
     'TIKTOKEN_ENCODING_NAME': 'rag.tiktoken_encoding_name',
     'TOP_K': 'rag.top_k',
     'TOP_K_RERANKER': 'rag.top_k_reranker',
@@ -290,6 +305,19 @@ RAG_CONFIG_KEYS: dict[str, str] = {
     'YOUCOM_API_KEY': 'web.search.youcom_api_key',
     'YOUTUBE_LOADER_LANGUAGE': 'rag.youtube_loader_language',
     'YOUTUBE_LOADER_PROXY_URL': 'rag.youtube_loader_proxy_url',
+    'ENABLE_WEB_SEARCH_CONFIRMATION': 'web.search.confirmation.enable',
+    'EXTERNAL_DOCUMENT_LOADER_HEADERS': 'rag.external_document_loader_headers',
+    'LINKUP_API_KEY': 'web.search.linkup_api_key',
+    'LINKUP_SEARCH_PARAMS': 'web.search.linkup_search_params',
+    'MICROSOFT_WEB_IQ_API_BASE_URL': 'web.search.microsoft_web_iq_api_base_url',
+    'MICROSOFT_WEB_IQ_API_KEY': 'web.search.microsoft_web_iq_api_key',
+    'MICROSOFT_WEB_IQ_LANGUAGE': 'web.search.microsoft_web_iq_language',
+    'MINERU_FILE_EXTENSIONS': 'rag.mineru_file_extensions',
+    'MISTRAL_OCR_USE_BASE64': 'rag.mistral_ocr_use_base64',
+    'RAG_TOKENIZER_MODEL': 'rag.tokenizer_model',
+    'SERPHOUSE_API_KEY': 'web.search.serphouse_api_key',
+    'SERPHOUSE_DOMAIN': 'web.search.serphouse_domain',
+    'WEB_SEARCH_CONFIRMATION_CONTENT': 'web.search.confirmation.content',
 }
 
 
@@ -432,6 +460,16 @@ class ProcessUrlForm(CollectionNameForm):
     url: str
 
 
+class ProcessUrlResponse(BaseModel):
+    status: bool
+    type: str
+    name: str
+    url: str
+    collection_name: str | None = None
+    content: str | None = None
+    file: dict | None = None
+
+
 class SearchForm(BaseModel):
     queries: List[str]
 
@@ -463,19 +501,19 @@ async def get_embedding_config(request: Request, user=Depends(get_admin_user)):
 
 
 class OpenAIConfigForm(BaseModel):
-    url: str
-    key: str
+    url: str | None = None
+    key: str | None = None
 
 
 class OllamaConfigForm(BaseModel):
-    url: str
-    key: str
+    url: str | None = None
+    key: str | None = None
 
 
 class AzureOpenAIConfigForm(BaseModel):
-    url: str
-    key: str
-    version: str
+    url: str | None = None
+    key: str | None = None
+    version: str | None = None
 
 
 class EmbeddingModelUpdateForm(BaseModel):
@@ -517,23 +555,18 @@ async def update_embedding_config(request: Request, form_data: EmbeddingModelUpd
         config.ENABLE_ASYNC_EMBEDDING = form_data.ENABLE_ASYNC_EMBEDDING
         config.RAG_EMBEDDING_CONCURRENT_REQUESTS = form_data.RAG_EMBEDDING_CONCURRENT_REQUESTS
 
-        if config.RAG_EMBEDDING_ENGINE in [
-            'ollama',
-            'openai',
-            'azure_openai',
-        ]:
-            if form_data.openai_config is not None:
-                config.RAG_OPENAI_API_BASE_URL = form_data.openai_config.url
-                config.RAG_OPENAI_API_KEY = form_data.openai_config.key
+        if config.RAG_EMBEDDING_ENGINE == 'openai' and form_data.openai_config is not None:
+            config.RAG_OPENAI_API_BASE_URL = form_data.openai_config.url or ''
+            config.RAG_OPENAI_API_KEY = form_data.openai_config.key or ''
 
-            if form_data.ollama_config is not None:
-                config.RAG_OLLAMA_BASE_URL = form_data.ollama_config.url
-                config.RAG_OLLAMA_API_KEY = form_data.ollama_config.key
+        if config.RAG_EMBEDDING_ENGINE == 'ollama' and form_data.ollama_config is not None:
+            config.RAG_OLLAMA_BASE_URL = form_data.ollama_config.url or ''
+            config.RAG_OLLAMA_API_KEY = form_data.ollama_config.key or ''
 
-            if form_data.azure_openai_config is not None:
-                config.RAG_AZURE_OPENAI_BASE_URL = form_data.azure_openai_config.url
-                config.RAG_AZURE_OPENAI_API_KEY = form_data.azure_openai_config.key
-                config.RAG_AZURE_OPENAI_API_VERSION = form_data.azure_openai_config.version
+        if config.RAG_EMBEDDING_ENGINE == 'azure_openai' and form_data.azure_openai_config is not None:
+            config.RAG_AZURE_OPENAI_BASE_URL = form_data.azure_openai_config.url or ''
+            config.RAG_AZURE_OPENAI_API_KEY = form_data.azure_openai_config.key or ''
+            config.RAG_AZURE_OPENAI_API_VERSION = form_data.azure_openai_config.version or ''
 
         await Config.upsert({RAG_CONFIG_KEYS[k]: v for k, v in vars(config).items() if _original_config.get(k) != v})
         request.app.state.ef = get_ef(
@@ -618,6 +651,7 @@ async def get_rag_config(request: Request, user=Depends(get_admin_user)):
         'HYBRID_BM25_WEIGHT': config.HYBRID_BM25_WEIGHT,
         # Content extraction settings
         'CONTENT_EXTRACTION_ENGINE': config.CONTENT_EXTRACTION_ENGINE,
+        'CONTENT_EXTRACTION_SUPPORTED_MEDIA_MIME_TYPES': config.CONTENT_EXTRACTION_SUPPORTED_MEDIA_MIME_TYPES,
         'PDF_EXTRACT_IMAGES': config.PDF_EXTRACT_IMAGES,
         'PDF_LOADER_MODE': config.PDF_LOADER_MODE,
         'DATALAB_MARKER_API_KEY': config.DATALAB_MARKER_API_KEY,
@@ -633,7 +667,9 @@ async def get_rag_config(request: Request, user=Depends(get_admin_user)):
         'DATALAB_MARKER_OUTPUT_FORMAT': config.DATALAB_MARKER_OUTPUT_FORMAT,
         'EXTERNAL_DOCUMENT_LOADER_URL': config.EXTERNAL_DOCUMENT_LOADER_URL,
         'EXTERNAL_DOCUMENT_LOADER_API_KEY': config.EXTERNAL_DOCUMENT_LOADER_API_KEY,
+        'EXTERNAL_DOCUMENT_LOADER_HEADERS': config.EXTERNAL_DOCUMENT_LOADER_HEADERS,
         'TIKA_SERVER_URL': config.TIKA_SERVER_URL,
+        'TIKA_SERVER_VERSION': config.TIKA_SERVER_VERSION,
         'DOCLING_SERVER_URL': config.DOCLING_SERVER_URL,
         'DOCLING_API_KEY': config.DOCLING_API_KEY,
         'DOCLING_PARAMS': config.DOCLING_PARAMS,
@@ -642,6 +678,7 @@ async def get_rag_config(request: Request, user=Depends(get_admin_user)):
         'DOCUMENT_INTELLIGENCE_MODEL': config.DOCUMENT_INTELLIGENCE_MODEL,
         'MISTRAL_OCR_API_BASE_URL': config.MISTRAL_OCR_API_BASE_URL,
         'MISTRAL_OCR_API_KEY': config.MISTRAL_OCR_API_KEY,
+        'MISTRAL_OCR_USE_BASE64': config.MISTRAL_OCR_USE_BASE64,
         'PADDLEOCR_VL_BASE_URL': config.PADDLEOCR_VL_BASE_URL,
         'PADDLEOCR_VL_TOKEN': config.PADDLEOCR_VL_TOKEN,
         # MinerU settings
@@ -650,6 +687,7 @@ async def get_rag_config(request: Request, user=Depends(get_admin_user)):
         'MINERU_API_KEY': config.MINERU_API_KEY,
         'MINERU_API_TIMEOUT': config.MINERU_API_TIMEOUT,
         'MINERU_PARAMS': config.MINERU_PARAMS,
+        'MINERU_FILE_EXTENSIONS': config.MINERU_FILE_EXTENSIONS,
         # Reranking settings
         'RAG_RERANKING_MODEL': config.RAG_RERANKING_MODEL,
         'RAG_RERANKING_ENGINE': config.RAG_RERANKING_ENGINE,
@@ -659,6 +697,7 @@ async def get_rag_config(request: Request, user=Depends(get_admin_user)):
         'RAG_EXTERNAL_RERANKER_TIMEOUT': config.RAG_EXTERNAL_RERANKER_TIMEOUT,
         # Chunking settings
         'TEXT_SPLITTER': config.TEXT_SPLITTER,
+        'RAG_TOKENIZER_MODEL': config.RAG_TOKENIZER_MODEL,
         'ENABLE_MARKDOWN_HEADER_TEXT_SPLITTER': config.ENABLE_MARKDOWN_HEADER_TEXT_SPLITTER,
         'CHUNK_SIZE': config.CHUNK_SIZE,
         'CHUNK_MIN_SIZE_TARGET': config.CHUNK_MIN_SIZE_TARGET,
@@ -676,6 +715,8 @@ async def get_rag_config(request: Request, user=Depends(get_admin_user)):
         # Web search settings
         'web': {
             'ENABLE_WEB_SEARCH': config.ENABLE_WEB_SEARCH,
+            'ENABLE_WEB_SEARCH_CONFIRMATION': config.ENABLE_WEB_SEARCH_CONFIRMATION,
+            'WEB_SEARCH_CONFIRMATION_CONTENT': config.WEB_SEARCH_CONFIRMATION_CONTENT,
             'WEB_SEARCH_ENGINE': config.WEB_SEARCH_ENGINE,
             'WEB_SEARCH_TRUST_ENV': config.WEB_SEARCH_TRUST_ENV,
             'WEB_SEARCH_RESULT_COUNT': config.WEB_SEARCH_RESULT_COUNT,
@@ -688,6 +729,7 @@ async def get_rag_config(request: Request, user=Depends(get_admin_user)):
             'OLLAMA_CLOUD_WEB_SEARCH_API_KEY': config.OLLAMA_CLOUD_WEB_SEARCH_API_KEY,
             'SEARXNG_QUERY_URL': config.SEARXNG_QUERY_URL,
             'SEARXNG_LANGUAGE': config.SEARXNG_LANGUAGE,
+            'OPENSERP_BASE_URL': config.OPENSERP_BASE_URL,
             'YACY_QUERY_URL': config.YACY_QUERY_URL,
             'YACY_USERNAME': config.YACY_USERNAME,
             'YACY_PASSWORD': config.YACY_PASSWORD,
@@ -701,6 +743,8 @@ async def get_rag_config(request: Request, user=Depends(get_admin_user)):
             'SERPSTACK_API_KEY': config.SERPSTACK_API_KEY,
             'SERPSTACK_HTTPS': config.SERPSTACK_HTTPS,
             'SERPER_API_KEY': config.SERPER_API_KEY,
+            'SERPHOUSE_API_KEY': config.SERPHOUSE_API_KEY,
+            'SERPHOUSE_DOMAIN': config.SERPHOUSE_DOMAIN,
             'SERPLY_API_KEY': config.SERPLY_API_KEY,
             'DDGS_BACKEND': config.DDGS_BACKEND,
             'TAVILY_API_KEY': config.TAVILY_API_KEY,
@@ -717,6 +761,9 @@ async def get_rag_config(request: Request, user=Depends(get_admin_user)):
             'PERPLEXITY_MODEL': config.PERPLEXITY_MODEL,
             'PERPLEXITY_SEARCH_CONTEXT_USAGE': config.PERPLEXITY_SEARCH_CONTEXT_USAGE,
             'PERPLEXITY_SEARCH_API_URL': config.PERPLEXITY_SEARCH_API_URL,
+            'MICROSOFT_WEB_IQ_API_BASE_URL': config.MICROSOFT_WEB_IQ_API_BASE_URL,
+            'MICROSOFT_WEB_IQ_API_KEY': config.MICROSOFT_WEB_IQ_API_KEY,
+            'MICROSOFT_WEB_IQ_LANGUAGE': config.MICROSOFT_WEB_IQ_LANGUAGE,
             'SOUGOU_API_SID': config.SOUGOU_API_SID,
             'SOUGOU_API_SK': config.SOUGOU_API_SK,
             'WEB_LOADER_ENGINE': config.WEB_LOADER_ENGINE,
@@ -739,6 +786,8 @@ async def get_rag_config(request: Request, user=Depends(get_admin_user)):
             'YANDEX_WEB_SEARCH_API_KEY': config.YANDEX_WEB_SEARCH_API_KEY,
             'YANDEX_WEB_SEARCH_CONFIG': config.YANDEX_WEB_SEARCH_CONFIG,
             'YOUCOM_API_KEY': config.YOUCOM_API_KEY,
+            'LINKUP_API_KEY': config.LINKUP_API_KEY,
+            'LINKUP_SEARCH_PARAMS': config.LINKUP_SEARCH_PARAMS,
         },
     }
 
@@ -808,6 +857,16 @@ class WebConfig(BaseModel):
     YANDEX_WEB_SEARCH_API_KEY: Optional[str] = None
     YANDEX_WEB_SEARCH_CONFIG: Optional[str] = None
     YOUCOM_API_KEY: Optional[str] = None
+    ENABLE_WEB_SEARCH_CONFIRMATION: Optional[bool] = None
+    WEB_SEARCH_CONFIRMATION_CONTENT: Optional[str] = None
+    OPENSERP_BASE_URL: Optional[str] = None
+    SERPHOUSE_API_KEY: Optional[str] = None
+    SERPHOUSE_DOMAIN: Optional[str] = None
+    MICROSOFT_WEB_IQ_API_BASE_URL: Optional[str] = None
+    MICROSOFT_WEB_IQ_API_KEY: Optional[str] = None
+    MICROSOFT_WEB_IQ_LANGUAGE: Optional[str] = None
+    LINKUP_API_KEY: Optional[str] = None
+    LINKUP_SEARCH_PARAMS: Optional[dict] = None
 
 
 class ConfigForm(BaseModel):
@@ -828,6 +887,7 @@ class ConfigForm(BaseModel):
     CONTENT_EXTRACTION_ENGINE: Optional[str] = None
     PDF_EXTRACT_IMAGES: Optional[bool] = None
     PDF_LOADER_MODE: Optional[str] = None
+    CONTENT_EXTRACTION_SUPPORTED_MEDIA_MIME_TYPES: Optional[list[str]] = None
 
     DATALAB_MARKER_API_KEY: Optional[str] = None
     DATALAB_MARKER_API_BASE_URL: Optional[str] = None
@@ -855,6 +915,8 @@ class ConfigForm(BaseModel):
     MISTRAL_OCR_API_KEY: Optional[str] = None
     PADDLEOCR_VL_BASE_URL: Optional[str] = None
     PADDLEOCR_VL_TOKEN: Optional[str] = None
+    TIKA_SERVER_VERSION: Optional[str] = None
+    MISTRAL_OCR_USE_BASE64: Optional[bool] = None
 
     # MinerU settings
     MINERU_API_MODE: Optional[str] = None
@@ -892,6 +954,9 @@ class ConfigForm(BaseModel):
 
     # Web search settings
     web: Optional[WebConfig] = None
+    EXTERNAL_DOCUMENT_LOADER_HEADERS: Optional[dict] = None
+    MINERU_FILE_EXTENSIONS: Optional[list[str]] = None
+    RAG_TOKENIZER_MODEL: Optional[str] = None
 
 
 @router.post('/config/update')
@@ -899,6 +964,15 @@ async def update_rag_config(request: Request, form_data: ConfigForm, user=Depend
     # RAG settings
     config = await get_rag_config_state()
     _original_config = dict(vars(config))
+    # [Gradient] Keep the re-synced form fields in the per-key persistence path.
+    if form_data.EXTERNAL_DOCUMENT_LOADER_HEADERS is not None:
+        config.EXTERNAL_DOCUMENT_LOADER_HEADERS = form_data.EXTERNAL_DOCUMENT_LOADER_HEADERS
+    if form_data.MINERU_FILE_EXTENSIONS is not None:
+        config.MINERU_FILE_EXTENSIONS = form_data.MINERU_FILE_EXTENSIONS
+    if form_data.MISTRAL_OCR_USE_BASE64 is not None:
+        config.MISTRAL_OCR_USE_BASE64 = form_data.MISTRAL_OCR_USE_BASE64
+    if form_data.RAG_TOKENIZER_MODEL is not None:
+        config.RAG_TOKENIZER_MODEL = form_data.RAG_TOKENIZER_MODEL
     config.RAG_TEMPLATE = form_data.RAG_TEMPLATE if form_data.RAG_TEMPLATE is not None else config.RAG_TEMPLATE
     config.TOP_K = form_data.TOP_K if form_data.TOP_K is not None else config.TOP_K
     config.BYPASS_EMBEDDING_AND_RETRIEVAL = (
@@ -935,6 +1009,11 @@ async def update_rag_config(request: Request, form_data: ConfigForm, user=Depend
         form_data.CONTENT_EXTRACTION_ENGINE
         if form_data.CONTENT_EXTRACTION_ENGINE is not None
         else config.CONTENT_EXTRACTION_ENGINE
+    )
+    config.CONTENT_EXTRACTION_SUPPORTED_MEDIA_MIME_TYPES = (
+        form_data.CONTENT_EXTRACTION_SUPPORTED_MEDIA_MIME_TYPES
+        if form_data.CONTENT_EXTRACTION_SUPPORTED_MEDIA_MIME_TYPES is not None
+        else config.CONTENT_EXTRACTION_SUPPORTED_MEDIA_MIME_TYPES
     )
     config.PDF_EXTRACT_IMAGES = (
         form_data.PDF_EXTRACT_IMAGES if form_data.PDF_EXTRACT_IMAGES is not None else config.PDF_EXTRACT_IMAGES
@@ -1009,6 +1088,9 @@ async def update_rag_config(request: Request, form_data: ConfigForm, user=Depend
     )
     config.TIKA_SERVER_URL = (
         form_data.TIKA_SERVER_URL if form_data.TIKA_SERVER_URL is not None else config.TIKA_SERVER_URL
+    )
+    config.TIKA_SERVER_VERSION = (
+        form_data.TIKA_SERVER_VERSION if form_data.TIKA_SERVER_VERSION is not None else config.TIKA_SERVER_VERSION
     )
     config.DOCLING_SERVER_URL = (
         form_data.DOCLING_SERVER_URL if form_data.DOCLING_SERVER_URL is not None else config.DOCLING_SERVER_URL
@@ -1100,7 +1182,7 @@ async def update_rag_config(request: Request, form_data: ConfigForm, user=Depend
         else config.RAG_RERANKING_BATCH_SIZE
     )
 
-    log.info(f'Updating reranking model: {config.RAG_RERANKING_MODEL} to {form_data.RAG_RERANKING_MODEL}')
+    log.info('Updating reranking model: %s to %s', config.RAG_RERANKING_MODEL, form_data.RAG_RERANKING_MODEL)
     try:
         config.RAG_RERANKING_MODEL = (
             form_data.RAG_RERANKING_MODEL if form_data.RAG_RERANKING_MODEL is not None else config.RAG_RERANKING_MODEL
@@ -1185,6 +1267,24 @@ async def update_rag_config(request: Request, form_data: ConfigForm, user=Depend
     )
 
     if form_data.web is not None:
+        if form_data.web.ENABLE_WEB_SEARCH_CONFIRMATION is not None:
+            config.ENABLE_WEB_SEARCH_CONFIRMATION = form_data.web.ENABLE_WEB_SEARCH_CONFIRMATION
+        if form_data.web.WEB_SEARCH_CONFIRMATION_CONTENT is not None:
+            config.WEB_SEARCH_CONFIRMATION_CONTENT = form_data.web.WEB_SEARCH_CONFIRMATION_CONTENT
+        if form_data.web.SERPHOUSE_API_KEY is not None:
+            config.SERPHOUSE_API_KEY = form_data.web.SERPHOUSE_API_KEY
+        if form_data.web.SERPHOUSE_DOMAIN is not None:
+            config.SERPHOUSE_DOMAIN = form_data.web.SERPHOUSE_DOMAIN
+        if form_data.web.MICROSOFT_WEB_IQ_API_BASE_URL is not None:
+            config.MICROSOFT_WEB_IQ_API_BASE_URL = form_data.web.MICROSOFT_WEB_IQ_API_BASE_URL
+        if form_data.web.MICROSOFT_WEB_IQ_API_KEY is not None:
+            config.MICROSOFT_WEB_IQ_API_KEY = form_data.web.MICROSOFT_WEB_IQ_API_KEY
+        if form_data.web.MICROSOFT_WEB_IQ_LANGUAGE is not None:
+            config.MICROSOFT_WEB_IQ_LANGUAGE = form_data.web.MICROSOFT_WEB_IQ_LANGUAGE
+        if form_data.web.LINKUP_API_KEY is not None:
+            config.LINKUP_API_KEY = form_data.web.LINKUP_API_KEY
+        if form_data.web.LINKUP_SEARCH_PARAMS is not None:
+            config.LINKUP_SEARCH_PARAMS = form_data.web.LINKUP_SEARCH_PARAMS
         # Web search settings
         config.ENABLE_WEB_SEARCH = form_data.web.ENABLE_WEB_SEARCH
         config.WEB_SEARCH_ENGINE = form_data.web.WEB_SEARCH_ENGINE
@@ -1199,6 +1299,7 @@ async def update_rag_config(request: Request, form_data: ConfigForm, user=Depend
         config.OLLAMA_CLOUD_WEB_SEARCH_API_KEY = form_data.web.OLLAMA_CLOUD_WEB_SEARCH_API_KEY
         config.SEARXNG_QUERY_URL = form_data.web.SEARXNG_QUERY_URL
         config.SEARXNG_LANGUAGE = form_data.web.SEARXNG_LANGUAGE
+        config.OPENSERP_BASE_URL = form_data.web.OPENSERP_BASE_URL
         config.YACY_QUERY_URL = form_data.web.YACY_QUERY_URL
         config.YACY_USERNAME = form_data.web.YACY_USERNAME
         config.YACY_PASSWORD = form_data.web.YACY_PASSWORD
@@ -1270,6 +1371,7 @@ async def update_rag_config(request: Request, form_data: ConfigForm, user=Depend
         'HYBRID_BM25_WEIGHT': config.HYBRID_BM25_WEIGHT,
         # Content extraction settings
         'CONTENT_EXTRACTION_ENGINE': config.CONTENT_EXTRACTION_ENGINE,
+        'CONTENT_EXTRACTION_SUPPORTED_MEDIA_MIME_TYPES': config.CONTENT_EXTRACTION_SUPPORTED_MEDIA_MIME_TYPES,
         'PDF_EXTRACT_IMAGES': config.PDF_EXTRACT_IMAGES,
         'PDF_LOADER_MODE': config.PDF_LOADER_MODE,
         'DATALAB_MARKER_API_KEY': config.DATALAB_MARKER_API_KEY,
@@ -1284,7 +1386,9 @@ async def update_rag_config(request: Request, form_data: ConfigForm, user=Depend
         'DATALAB_MARKER_OUTPUT_FORMAT': config.DATALAB_MARKER_OUTPUT_FORMAT,
         'EXTERNAL_DOCUMENT_LOADER_URL': config.EXTERNAL_DOCUMENT_LOADER_URL,
         'EXTERNAL_DOCUMENT_LOADER_API_KEY': config.EXTERNAL_DOCUMENT_LOADER_API_KEY,
+        'EXTERNAL_DOCUMENT_LOADER_HEADERS': config.EXTERNAL_DOCUMENT_LOADER_HEADERS,
         'TIKA_SERVER_URL': config.TIKA_SERVER_URL,
+        'TIKA_SERVER_VERSION': config.TIKA_SERVER_VERSION,
         'DOCLING_SERVER_URL': config.DOCLING_SERVER_URL,
         'DOCLING_API_KEY': config.DOCLING_API_KEY,
         'DOCLING_PARAMS': config.DOCLING_PARAMS,
@@ -1293,6 +1397,7 @@ async def update_rag_config(request: Request, form_data: ConfigForm, user=Depend
         'DOCUMENT_INTELLIGENCE_MODEL': config.DOCUMENT_INTELLIGENCE_MODEL,
         'MISTRAL_OCR_API_BASE_URL': config.MISTRAL_OCR_API_BASE_URL,
         'MISTRAL_OCR_API_KEY': config.MISTRAL_OCR_API_KEY,
+        'MISTRAL_OCR_USE_BASE64': config.MISTRAL_OCR_USE_BASE64,
         'PADDLEOCR_VL_BASE_URL': config.PADDLEOCR_VL_BASE_URL,
         'PADDLEOCR_VL_TOKEN': config.PADDLEOCR_VL_TOKEN,
         # MinerU settings
@@ -1301,6 +1406,7 @@ async def update_rag_config(request: Request, form_data: ConfigForm, user=Depend
         'MINERU_API_KEY': config.MINERU_API_KEY,
         'MINERU_API_TIMEOUT': config.MINERU_API_TIMEOUT,
         'MINERU_PARAMS': config.MINERU_PARAMS,
+        'MINERU_FILE_EXTENSIONS': config.MINERU_FILE_EXTENSIONS,
         # Reranking settings
         'RAG_RERANKING_MODEL': config.RAG_RERANKING_MODEL,
         'RAG_RERANKING_ENGINE': config.RAG_RERANKING_ENGINE,
@@ -1310,6 +1416,7 @@ async def update_rag_config(request: Request, form_data: ConfigForm, user=Depend
         'RAG_EXTERNAL_RERANKER_TIMEOUT': config.RAG_EXTERNAL_RERANKER_TIMEOUT,
         # Chunking settings
         'TEXT_SPLITTER': config.TEXT_SPLITTER,
+        'RAG_TOKENIZER_MODEL': config.RAG_TOKENIZER_MODEL,
         'CHUNK_SIZE': config.CHUNK_SIZE,
         'CHUNK_MIN_SIZE_TARGET': config.CHUNK_MIN_SIZE_TARGET,
         'ENABLE_MARKDOWN_HEADER_TEXT_SPLITTER': config.ENABLE_MARKDOWN_HEADER_TEXT_SPLITTER,
@@ -1327,6 +1434,8 @@ async def update_rag_config(request: Request, form_data: ConfigForm, user=Depend
         # Web search settings
         'web': {
             'ENABLE_WEB_SEARCH': config.ENABLE_WEB_SEARCH,
+            'ENABLE_WEB_SEARCH_CONFIRMATION': config.ENABLE_WEB_SEARCH_CONFIRMATION,
+            'WEB_SEARCH_CONFIRMATION_CONTENT': config.WEB_SEARCH_CONFIRMATION_CONTENT,
             'WEB_SEARCH_ENGINE': config.WEB_SEARCH_ENGINE,
             'WEB_SEARCH_TRUST_ENV': config.WEB_SEARCH_TRUST_ENV,
             'WEB_SEARCH_RESULT_COUNT': config.WEB_SEARCH_RESULT_COUNT,
@@ -1339,6 +1448,7 @@ async def update_rag_config(request: Request, form_data: ConfigForm, user=Depend
             'OLLAMA_CLOUD_WEB_SEARCH_API_KEY': config.OLLAMA_CLOUD_WEB_SEARCH_API_KEY,
             'SEARXNG_QUERY_URL': config.SEARXNG_QUERY_URL,
             'SEARXNG_LANGUAGE': config.SEARXNG_LANGUAGE,
+            'OPENSERP_BASE_URL': config.OPENSERP_BASE_URL,
             'YACY_QUERY_URL': config.YACY_QUERY_URL,
             'YACY_USERNAME': config.YACY_USERNAME,
             'YACY_PASSWORD': config.YACY_PASSWORD,
@@ -1352,6 +1462,8 @@ async def update_rag_config(request: Request, form_data: ConfigForm, user=Depend
             'SERPSTACK_API_KEY': config.SERPSTACK_API_KEY,
             'SERPSTACK_HTTPS': config.SERPSTACK_HTTPS,
             'SERPER_API_KEY': config.SERPER_API_KEY,
+            'SERPHOUSE_API_KEY': config.SERPHOUSE_API_KEY,
+            'SERPHOUSE_DOMAIN': config.SERPHOUSE_DOMAIN,
             'SERPLY_API_KEY': config.SERPLY_API_KEY,
             'TAVILY_API_KEY': config.TAVILY_API_KEY,
             'SEARCHAPI_API_KEY': config.SEARCHAPI_API_KEY,
@@ -1367,6 +1479,9 @@ async def update_rag_config(request: Request, form_data: ConfigForm, user=Depend
             'PERPLEXITY_MODEL': config.PERPLEXITY_MODEL,
             'PERPLEXITY_SEARCH_CONTEXT_USAGE': config.PERPLEXITY_SEARCH_CONTEXT_USAGE,
             'PERPLEXITY_SEARCH_API_URL': config.PERPLEXITY_SEARCH_API_URL,
+            'MICROSOFT_WEB_IQ_API_BASE_URL': config.MICROSOFT_WEB_IQ_API_BASE_URL,
+            'MICROSOFT_WEB_IQ_API_KEY': config.MICROSOFT_WEB_IQ_API_KEY,
+            'MICROSOFT_WEB_IQ_LANGUAGE': config.MICROSOFT_WEB_IQ_LANGUAGE,
             'SOUGOU_API_SID': config.SOUGOU_API_SID,
             'SOUGOU_API_SK': config.SOUGOU_API_SK,
             'WEB_LOADER_ENGINE': config.WEB_LOADER_ENGINE,
@@ -1389,6 +1504,8 @@ async def update_rag_config(request: Request, form_data: ConfigForm, user=Depend
             'YANDEX_WEB_SEARCH_API_KEY': config.YANDEX_WEB_SEARCH_API_KEY,
             'YANDEX_WEB_SEARCH_CONFIG': config.YANDEX_WEB_SEARCH_CONFIG,
             'YOUCOM_API_KEY': config.YOUCOM_API_KEY,
+            'LINKUP_API_KEY': config.LINKUP_API_KEY,
+            'LINKUP_SEARCH_PARAMS': config.LINKUP_SEARCH_PARAMS,
         },
     }
 
@@ -1658,7 +1775,7 @@ def save_docs_to_vector_db(
             )
             docs = text_splitter.split_documents(docs)
         elif config.TEXT_SPLITTER == 'token':
-            log.info(f'Using token text splitter: {config.TIKTOKEN_ENCODING_NAME}')
+            log.info('Using token text splitter: %s', config.TIKTOKEN_ENCODING_NAME)
 
             tiktoken.get_encoding(str(config.TIKTOKEN_ENCODING_NAME))
             text_splitter = TokenTextSplitter(
@@ -1666,6 +1783,7 @@ def save_docs_to_vector_db(
                 chunk_size=config.CHUNK_SIZE,
                 chunk_overlap=config.CHUNK_OVERLAP,
                 add_start_index=True,
+                disallowed_special=TIKTOKEN_DISALLOWED_SPECIAL,
             )
             docs = text_splitter.split_documents(docs)
         else:
@@ -1696,16 +1814,16 @@ def save_docs_to_vector_db(
 
     try:
         if VECTOR_DB_CLIENT.has_collection(collection_name=collection_name):
-            log.info(f'collection {collection_name} already exists')
+            log.info('collection %s already exists', collection_name)
 
             if overwrite:
                 VECTOR_DB_CLIENT.delete_collection(collection_name=collection_name)
-                log.info(f'deleting existing collection {collection_name}')
+                log.info('deleting existing collection %s', collection_name)
             elif add is False:
-                log.info(f'collection {collection_name} already exists, overwrite is False and add is False')
+                log.info('collection %s already exists, overwrite is False and add is False', collection_name)
                 return True
 
-        log.info(f'generating embeddings for {collection_name}')
+        log.info('generating embeddings for %s', collection_name)
         embedding_function = get_embedding_function(
             config.RAG_EMBEDDING_ENGINE,
             config.RAG_EMBEDDING_MODEL,
@@ -1749,7 +1867,7 @@ def save_docs_to_vector_db(
             request.app.state.main_loop,
         )
         embeddings = future.result(timeout=embedding_timeout)
-        log.info(f'embeddings generated {len(embeddings)} for {len(texts)} items')
+        log.info('embeddings generated %s for %s items', len(embeddings), len(texts))
 
         items = [
             {
@@ -1761,13 +1879,13 @@ def save_docs_to_vector_db(
             for idx, text in enumerate(texts)
         ]
 
-        log.info(f'adding to collection {collection_name}')
+        log.info('adding to collection %s', collection_name)
         VECTOR_DB_CLIENT.insert(
             collection_name=collection_name,
             items=items,
         )
 
-        log.info(f'added {len(items)} items to collection {collection_name}')
+        log.info('added %s items to collection %s', len(items), collection_name)
         return True
     except Exception as e:
         log.exception(e)
@@ -1924,7 +2042,6 @@ async def process_file(
 ):
     """
     Process a file and save its content to the vector database.
-    Process a file and save its content to the vector database.
     Note: granular session management is used to prevent connection pool exhaustion.
     The session is committed before external API calls, and updates use a fresh session.
     """
@@ -1937,9 +2054,10 @@ async def process_file(
     if file:
         try:
             collection_name = form_data.collection_name
+            file_collection_name = f'file-{file.id}'
 
             if collection_name is None:
-                collection_name = f'file-{file.id}'
+                collection_name = file_collection_name
             else:
                 await _validate_collection_access([collection_name], user, access_type='write')
 
@@ -1973,7 +2091,7 @@ async def process_file(
 
                 try:
                     # /files/{file_id}/data/content/update
-                    await ASYNC_VECTOR_DB_CLIENT.delete_collection(collection_name=f'file-{file.id}')
+                    await ASYNC_VECTOR_DB_CLIENT.delete_collection(collection_name=file_collection_name)
                 except Exception:
                     # Audio file upload pipeline
                     pass
@@ -2136,6 +2254,7 @@ async def process_file(
                         request,
                         docs=docs,
                         collection_name=collection_name,
+                        config=config,
                         metadata={
                             'file_id': file.id,
                             'name': file.filename,
@@ -2178,6 +2297,19 @@ async def process_file(
                 await Files.set_status(file.id, 'failed', error=str(e), db=session)
                 # Clear the hash so the file can be re-uploaded after fixing the issue
                 await Files.update_file_hash_by_id(file.id, None, db=session)
+
+            await publish_event(
+                request,
+                EVENTS.RETRIEVAL_CONTENT_PROCESS_FAILED,
+                actor=user,
+                subject_id=file.id,
+                subject_type='file',
+                data={
+                    'collection_name': collection_name,
+                    'filename': file.filename,
+                    'message': f'{file.filename}: {e}',
+                },
+            )
 
             if 'No pandoc was found' in str(e):
                 raise HTTPException(
@@ -2235,6 +2367,190 @@ async def process_text(
         )
 
 
+async def _fetch_url(url: str, max_size_mb: int | str | None) -> dict:
+    await asyncio.to_thread(validate_url, url)
+    max_bytes = None
+    if max_size_mb:
+        try:
+            max_bytes = int(max_size_mb) * 1024 * 1024
+        except (TypeError, ValueError):
+            max_bytes = None
+
+    async with get_ssrf_safe_session() as session:
+        async with session.get(
+            url, ssl=AIOHTTP_CLIENT_SESSION_SSL, allow_redirects=AIOHTTP_CLIENT_ALLOW_REDIRECTS
+        ) as response:
+            response.raise_for_status()
+
+            content_type = response.headers.get('Content-Type', '')
+            content_disposition = response.headers.get('Content-Disposition', '')
+            content_length = response.headers.get('Content-Length')
+            base_content_type = content_type.split(';')[0].strip().lower()
+            is_attachment = content_disposition.split(';')[0].strip().lower() == 'attachment'
+
+            chunks = []
+            total = 0
+
+            iterator = response.content.iter_chunked(64 * 1024)
+            first_chunk = await anext(iterator, b'')
+
+            if not is_attachment and base_content_type in {'text/html', 'application/xhtml+xml'}:
+                return {'kind': 'web'}
+
+            if not is_attachment and base_content_type in {'', 'application/octet-stream', 'binary/octet-stream'}:
+                sample = first_chunk[:4096].lstrip().lower()
+                if (
+                    sample.startswith((b'<!doctype html', b'<html', b'<head', b'<body', b'<?xml'))
+                    or b'<html' in sample[:1024]
+                ):
+                    return {'kind': 'web'}
+
+            if max_bytes and content_length:
+                try:
+                    if int(content_length) > max_bytes:
+                        raise HTTPException(
+                            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                            detail=ERROR_MESSAGES.FILE_TOO_LARGE(size=f'{max_size_mb} MB'),
+                        )
+                except ValueError:
+                    pass
+
+            if first_chunk:
+                chunks.append(first_chunk)
+                total += len(first_chunk)
+                if max_bytes and total > max_bytes:
+                    raise HTTPException(
+                        status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                        detail=ERROR_MESSAGES.FILE_TOO_LARGE(size=f'{max_size_mb} MB'),
+                    )
+
+            async for chunk in iterator:
+                if not chunk:
+                    continue
+                chunks.append(chunk)
+                total += len(chunk)
+                if max_bytes and total > max_bytes:
+                    raise HTTPException(
+                        status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                        detail=ERROR_MESSAGES.FILE_TOO_LARGE(size=f'{max_size_mb} MB'),
+                    )
+
+            data = b''.join(chunks)
+
+            image_mime = None
+            try:
+                from PIL import Image
+
+                image = Image.open(io.BytesIO(data))
+                image.verify()
+                image_mime = Image.MIME.get(image.format) if image.format else None
+            except Exception:
+                image_mime = None
+
+            if base_content_type.startswith('image/') and image_mime is None:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=ERROR_MESSAGES.DEFAULT('Invalid image content'),
+                )
+
+            filename = ''
+            filename_star = re.search(r"filename\*=UTF-8''([^;]+)", content_disposition, re.IGNORECASE)
+            filename_plain = re.search(r'filename="?([^";]+)"?', content_disposition, re.IGNORECASE)
+            if filename_star:
+                filename = unquote(filename_star.group(1))
+            elif filename_plain:
+                filename = filename_plain.group(1)
+            if not filename:
+                filename = os.path.basename(urlparse(url).path)
+            filename = os.path.basename(filename or 'download')
+
+            resolved_content_type = (
+                image_mime or base_content_type or mimetypes.guess_type(filename)[0] or 'application/octet-stream'
+            )
+            if not os.path.splitext(filename)[1]:
+                filename = f'{filename}{mimetypes.guess_extension(resolved_content_type) or ".bin"}'
+
+            return {
+                'kind': 'file',
+                'data': data,
+                'filename': filename,
+                'content_type': resolved_content_type,
+            }
+
+
+@router.post('/process/url', response_model=ProcessUrlResponse)
+async def process_url(
+    request: Request,
+    form_data: ProcessUrlForm,
+    process: bool = Query(True, description='Whether to process and save the content'),
+    user=Depends(get_verified_user),
+):
+    try:
+        if is_youtube_url(form_data.url):
+            result = await process_web(request, form_data, process=process, user=user)
+            return {
+                'status': True,
+                'type': 'youtube',
+                'name': form_data.url,
+                'url': form_data.url,
+                'collection_name': result.get('collection_name'),
+                'content': result.get('content'),
+            }
+
+        config = await get_rag_config_state()
+        url_result = await _fetch_url(form_data.url, config.FILE_MAX_SIZE)
+
+        if url_result['kind'] == 'web':
+            result = await process_web(request, form_data, process=process, user=user)
+            return {
+                'status': True,
+                'type': 'web',
+                'name': form_data.url,
+                'url': form_data.url,
+                'collection_name': result.get('collection_name'),
+                'content': result.get('content'),
+            }
+
+        from open_webui.routers.files import upload_file_handler
+
+        is_image = url_result['content_type'].startswith('image/')
+        file = UploadFile(
+            file=io.BytesIO(url_result['data']),
+            filename=url_result['filename'],
+            headers={'content-type': url_result['content_type']},
+        )
+        uploaded_file = await upload_file_handler(
+            request,
+            file=file,
+            metadata={'source_url': form_data.url},
+            process=process and not is_image,
+            process_in_background=False,
+            user=user,
+        )
+        file_data = uploaded_file.model_dump() if hasattr(uploaded_file, 'model_dump') else uploaded_file
+        file_id = file_data.get('id') if isinstance(file_data, dict) else None
+        if file_id:
+            refreshed_file = await Files.get_file_by_id(file_id)
+            if refreshed_file:
+                file_data = refreshed_file.model_dump()
+        return {
+            'status': True,
+            'type': 'image' if is_image else 'file',
+            'name': url_result['filename'],
+            'url': form_data.url,
+            'collection_name': (file_data.get('meta') or {}).get('collection_name'),
+            'file': file_data,
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        log.exception(e)
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=ERROR_MESSAGES.DEFAULT(e, 'Error processing URL'),
+        )
+
+
 @router.post('/process/youtube')
 @router.post('/process/web')
 async def process_web(
@@ -2245,8 +2561,25 @@ async def process_web(
     user=Depends(get_verified_user),
 ):
     config = await get_rag_config_state()
+
     try:
         content, docs = await get_content_from_url(request, form_data.url)
+    except HTTPException:
+        raise
+    except YoutubeTranscriptError as e:
+        log.warning('YouTube transcript unavailable')
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e),
+        )
+    except Exception as e:
+        log.exception(e)
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=ERROR_MESSAGES.DEFAULT(e, f'Could not read content from {form_data.url}'),
+        )
+
+    try:
         log.debug(f'text_content length: {len(content) if content else 0}')
 
         if process:
@@ -2273,6 +2606,7 @@ async def process_web(
                 'status': True,
                 'collection_name': collection_name,
                 'filename': form_data.url,
+                'content': content,
                 'file': {
                     'data': {
                         'content': content,
@@ -2296,6 +2630,8 @@ async def process_web(
         )
 
 
+# [Gradient] TODO(merge-v0.11.3): Converge search_web to async with the retrieval config carve-out?
+# Keep its worker-thread contract; pooled async engines run on the serving loop.
 def search_web(request: Request, engine: str, query: str, user=None, config=None) -> list[SearchResult]:
     """Search the web using a search engine and return the results as a list of SearchResult objects.
     Will look for a search engine API key in environment variables in the following order:
@@ -2345,15 +2681,29 @@ def search_web(request: Request, engine: str, query: str, user=None, config=None
     elif engine == 'searxng':
         if config.SEARXNG_QUERY_URL:
             searxng_kwargs = {'language': config.SEARXNG_LANGUAGE}
-            return search_searxng(
-                config.SEARXNG_QUERY_URL,
-                query,
-                config.WEB_SEARCH_RESULT_COUNT,
-                config.WEB_SEARCH_DOMAIN_FILTER_LIST,
-                **searxng_kwargs,
+            return run_on_main_loop(
+                search_searxng(
+                    config.SEARXNG_QUERY_URL,
+                    query,
+                    config.WEB_SEARCH_RESULT_COUNT,
+                    config.WEB_SEARCH_DOMAIN_FILTER_LIST,
+                    **searxng_kwargs,
+                )
             )
         else:
             raise Exception('No SEARXNG_QUERY_URL found in environment variables')
+    elif engine == 'openserp':
+        if config.OPENSERP_BASE_URL:
+            return run_on_main_loop(
+                search_openserp(
+                    config.OPENSERP_BASE_URL,
+                    query,
+                    config.WEB_SEARCH_RESULT_COUNT,
+                    config.WEB_SEARCH_DOMAIN_FILTER_LIST,
+                )
+            )
+        else:
+            raise Exception('No OPENSERP_BASE_URL found in environment variables')
     elif engine == 'yacy':
         if config.YACY_QUERY_URL:
             return search_yacy(
@@ -2368,23 +2718,27 @@ def search_web(request: Request, engine: str, query: str, user=None, config=None
             raise Exception('No YACY_QUERY_URL found in environment variables')
     elif engine == 'google_pse':
         if config.GOOGLE_PSE_API_KEY and config.GOOGLE_PSE_ENGINE_ID:
-            return search_google_pse(
-                config.GOOGLE_PSE_API_KEY,
-                config.GOOGLE_PSE_ENGINE_ID,
-                query,
-                config.WEB_SEARCH_RESULT_COUNT,
-                config.WEB_SEARCH_DOMAIN_FILTER_LIST,
-                referer=config.WEBUI_URL,
+            return run_on_main_loop(
+                search_google_pse(
+                    config.GOOGLE_PSE_API_KEY,
+                    config.GOOGLE_PSE_ENGINE_ID,
+                    query,
+                    config.WEB_SEARCH_RESULT_COUNT,
+                    config.WEB_SEARCH_DOMAIN_FILTER_LIST,
+                    referer=config.WEBUI_URL,
+                )
             )
         else:
             raise Exception('No GOOGLE_PSE_API_KEY or GOOGLE_PSE_ENGINE_ID found in environment variables')
     elif engine == 'brave':
         if config.BRAVE_SEARCH_API_KEY:
-            return search_brave(
-                config.BRAVE_SEARCH_API_KEY,
-                query,
-                config.WEB_SEARCH_RESULT_COUNT,
-                config.WEB_SEARCH_DOMAIN_FILTER_LIST,
+            return run_on_main_loop(
+                search_brave(
+                    config.BRAVE_SEARCH_API_KEY,
+                    query,
+                    config.WEB_SEARCH_RESULT_COUNT,
+                    config.WEB_SEARCH_DOMAIN_FILTER_LIST,
+                )
             )
         else:
             raise Exception('No BRAVE_SEARCH_API_KEY found in environment variables')
@@ -2431,25 +2785,42 @@ def search_web(request: Request, engine: str, query: str, user=None, config=None
             raise Exception('No BOCHA_SEARCH_API_KEY found in environment variables')
     elif engine == 'serpstack':
         if config.SERPSTACK_API_KEY:
-            return search_serpstack(
-                config.SERPSTACK_API_KEY,
-                query,
-                config.WEB_SEARCH_RESULT_COUNT,
-                config.WEB_SEARCH_DOMAIN_FILTER_LIST,
-                https_enabled=config.SERPSTACK_HTTPS,
+            return run_on_main_loop(
+                search_serpstack(
+                    config.SERPSTACK_API_KEY,
+                    query,
+                    config.WEB_SEARCH_RESULT_COUNT,
+                    config.WEB_SEARCH_DOMAIN_FILTER_LIST,
+                    https_enabled=config.SERPSTACK_HTTPS,
+                )
             )
         else:
             raise Exception('No SERPSTACK_API_KEY found in environment variables')
     elif engine == 'serper':
         if config.SERPER_API_KEY:
-            return search_serper(
-                config.SERPER_API_KEY,
-                query,
-                config.WEB_SEARCH_RESULT_COUNT,
-                config.WEB_SEARCH_DOMAIN_FILTER_LIST,
+            return run_on_main_loop(
+                search_serper(
+                    config.SERPER_API_KEY,
+                    query,
+                    config.WEB_SEARCH_RESULT_COUNT,
+                    config.WEB_SEARCH_DOMAIN_FILTER_LIST,
+                )
             )
         else:
             raise Exception('No SERPER_API_KEY found in environment variables')
+    elif engine == 'serphouse':
+        if config.SERPHOUSE_API_KEY:
+            return run_on_main_loop(
+                search_serphouse(
+                    config.SERPHOUSE_API_KEY,
+                    config.SERPHOUSE_DOMAIN,
+                    query,
+                    config.WEB_SEARCH_RESULT_COUNT,
+                    config.WEB_SEARCH_DOMAIN_FILTER_LIST,
+                )
+            )
+        else:
+            raise Exception('No SERPHOUSE_API_KEY found in environment variables')
     elif engine == 'serply':
         if config.SERPLY_API_KEY:
             return search_serply(
@@ -2556,6 +2927,19 @@ def search_web(request: Request, engine: str, query: str, user=None, config=None
             model=config.PERPLEXITY_MODEL,
             search_context_usage=config.PERPLEXITY_SEARCH_CONTEXT_USAGE,
         )
+    elif engine == 'microsoft_web_iq':
+        if config.MICROSOFT_WEB_IQ_API_KEY:
+            return search_microsoft_web_iq(
+                config.MICROSOFT_WEB_IQ_API_BASE_URL,
+                config.MICROSOFT_WEB_IQ_API_KEY,
+                query,
+                config.WEB_SEARCH_RESULT_COUNT,
+                config.WEB_SEARCH_DOMAIN_FILTER_LIST,
+                config.MICROSOFT_WEB_IQ_LANGUAGE,
+                user,
+            )
+        else:
+            raise Exception('No MICROSOFT_WEB_IQ_API_KEY found in environment variables')
     elif engine == 'sougou':
         if config.SOUGOU_API_SID and config.SOUGOU_API_SK:
             return search_sougou(
@@ -2596,6 +2980,17 @@ def search_web(request: Request, engine: str, query: str, user=None, config=None
             config.WEB_SEARCH_DOMAIN_FILTER_LIST,
             user=user,
         )
+    elif engine == 'linkup':
+        if config.LINKUP_API_KEY:
+            return search_linkup(
+                api_key=config.LINKUP_API_KEY,
+                query=query,
+                count=config.WEB_SEARCH_RESULT_COUNT,
+                filter_list=config.WEB_SEARCH_DOMAIN_FILTER_LIST,
+                params=config.LINKUP_SEARCH_PARAMS,
+            )
+        else:
+            raise Exception('No LINKUP_API_KEY found in environment variables')
     elif engine == 'youcom':
         return search_youcom(
             config.YOUCOM_API_KEY,
@@ -2626,7 +3021,8 @@ async def process_web_search(request: Request, form_data: SearchForm, user=Depen
     result_items = []
 
     try:
-        logging.debug(f'trying to web search with {config.WEB_SEARCH_ENGINE, form_data.queries}')
+        # [Gradient] Search logs contain counts only.
+        log.debug('web search: engine=%s queries=%s', config.WEB_SEARCH_ENGINE, len(form_data.queries))
 
         # Use semaphore to limit concurrent requests based on WEB_SEARCH_CONCURRENT_REQUESTS
         # 0 or None = unlimited (previous behavior), positive number = limited concurrency
@@ -2674,11 +3070,10 @@ async def process_web_search(request: Request, form_data: SearchForm, user=Depen
         log.debug(f'web search returned {len(urls)} urls')
 
     except Exception as e:
-        log.exception(e)
-
+        log.exception('Web search failed')
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=ERROR_MESSAGES.WEB_SEARCH_ERROR(e),
+            status.HTTP_400_BAD_REQUEST,
+            detail=ERROR_MESSAGES.DEFAULT(e, ERROR_MESSAGES.WEB_SEARCH_ERROR),
         )
 
     if len(urls) == 0:
@@ -2705,19 +3100,22 @@ async def process_web_search(request: Request, form_data: SearchForm, user=Depen
                 if hasattr(result, 'snippet') and result.snippet is not None
             ]
         else:
+            loader_config = await get_loader_config()
             loader = get_web_loader(
                 urls,
-                verify_ssl=config.ENABLE_WEB_LOADER_SSL_VERIFICATION,
-                requests_per_second=config.WEB_LOADER_CONCURRENT_REQUESTS,
-                trust_env=config.WEB_SEARCH_TRUST_ENV,
+                verify_ssl=loader_config.get('web_loader_ssl_verification'),
+                requests_per_second=loader_config.get('web_loader_concurrent_requests'),
+                trust_env=loader_config.get('web_search_trust_env'),
+                loader_config=loader_config,
             )
             docs = await loader.aload()
 
         urls = [
             doc.metadata.get('source') for doc in docs if doc.metadata.get('source')
         ]  # only keep the urls returned by the loader
+        url_set = set(urls)
         result_items = [
-            dict(item) for item in result_items if item.link in urls
+            dict(item) for item in result_items if item.link in url_set
         ]  # only keep the search results that have been loaded
 
         if config.BYPASS_WEB_SEARCH_EMBEDDING_AND_RETRIEVAL:
@@ -2737,7 +3135,8 @@ async def process_web_search(request: Request, form_data: SearchForm, user=Depen
             }
         else:
             # Create a single collection for all documents
-            collection_name = f'web-search-{calculate_sha256_string("-".join(form_data.queries))}'[:63]
+            # Bind the ephemeral collection to its owner so filter_accessible_collections can scope it per-user.
+            collection_name = f'web-search-{user.id}-{calculate_sha256_string("-".join(form_data.queries))}'[:63]
 
             try:
                 await run_in_threadpool(
@@ -2749,7 +3148,12 @@ async def process_web_search(request: Request, form_data: SearchForm, user=Depen
                     user=user,
                 )
             except Exception as e:
-                log.debug(f'error saving docs: {e}')
+                # Surface the failure instead of returning an unusable collection
+                log.exception(f'Error saving web search results to vector DB: {e}')
+                raise HTTPException(
+                    status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail='Failed to embed and store the retrieved web pages. Check the embedding configuration in Admin Settings > Documents.',
+                )
 
             return {
                 'status': True,
@@ -2761,8 +3165,8 @@ async def process_web_search(request: Request, form_data: SearchForm, user=Depen
     except Exception as e:
         log.exception(e)
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=ERROR_MESSAGES.DEFAULT(e),
+            status.HTTP_400_BAD_REQUEST,
+            detail=ERROR_MESSAGES.DEFAULT(e, ERROR_MESSAGES.WEB_SEARCH_ERROR),
         )
 
 
@@ -2981,25 +3385,35 @@ async def reset_vector_db(user=Depends(get_admin_user), db: AsyncSession = Depen
 
 
 @router.post('/reset/uploads')
-async def reset_upload_dir(user=Depends(get_admin_user)) -> bool:
+async def reset_upload_dir(request: Request, user=Depends(get_admin_user)) -> bool:
     folder = f'{UPLOAD_DIR}'
     try:
         # Check if the directory exists
-        if os.path.exists(folder):
+        if await asyncio.to_thread(os.path.exists, folder):
             # Iterate over all the files and directories in the specified directory
-            for filename in os.listdir(folder):
+            for filename in await asyncio.to_thread(os.listdir, folder):
                 file_path = os.path.join(folder, filename)
                 try:
-                    if os.path.isfile(file_path) or os.path.islink(file_path):
-                        os.unlink(file_path)  # Remove the file or link
-                    elif os.path.isdir(file_path):
-                        shutil.rmtree(file_path)  # Remove the directory
+                    if await asyncio.to_thread(os.path.isfile, file_path) or await asyncio.to_thread(
+                        os.path.islink, file_path
+                    ):
+                        await asyncio.to_thread(os.unlink, file_path)  # Remove the file or link
+                    elif await asyncio.to_thread(os.path.isdir, file_path):
+                        await asyncio.to_thread(shutil.rmtree, file_path)  # Remove the directory
                 except Exception as e:
                     log.exception(f'Failed to delete {file_path}. Reason: {e}')
         else:
             log.warning(f'The directory {folder} does not exist')
     except Exception as e:
         log.exception(f'Failed to process the directory {folder}. Reason: {e}')
+
+    await publish_event(
+        request,
+        EVENTS.RETRIEVAL_UPLOADS_RESET,
+        actor=user,
+        subject_id='all',
+        subject_type='file.uploads',
+    )
     return True
 
 

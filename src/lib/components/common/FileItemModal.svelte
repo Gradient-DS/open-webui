@@ -4,7 +4,7 @@
 	import { getContext, onMount, tick } from 'svelte';
 
 	import { formatFileSize, getLineCount } from '$lib/utils';
-	import { renderDocxHtml, readWorkbook, renderSheetHtml } from '$lib/utils/officePreview';
+	import { readWorkbook, renderSheetHtml } from '$lib/utils/officePreview';
 	import { WEBUI_API_BASE_URL } from '$lib/constants';
 	import { settings } from '$lib/stores';
 	import { getKnowledgeById } from '$lib/apis/knowledge';
@@ -26,13 +26,14 @@
 	import Spinner from './Spinner.svelte';
 	import PDFViewer from './PDFViewer.svelte';
 	import PanzoomContainer from './PanzoomContainer.svelte';
+	import DocxPreview from './DocxPreview.svelte';
+	import PptxPreview from './PptxPreview.svelte';
 	import Reset from '../icons/Reset.svelte';
 
 	export let item;
 	export let show = false;
 	export let edit = false;
 
-	let enableFullContent = false;
 	let loading = false;
 
 	let isPDF = false;
@@ -56,10 +57,7 @@
 	$: hasAttachments = attachments.length > 0;
 	$: planAttachments = attachments
 		.filter((a) => a.kind === 'plan_png')
-		.sort(
-			(a, b) =>
-				(a.storey ?? '').localeCompare(b.storey ?? '') || a.index - b.index
-		);
+		.sort((a, b) => (a.storey ?? '').localeCompare(b.storey ?? '') || a.index - b.index);
 	$: axonAttachments = attachments.filter((a) => a.kind === 'axon_png');
 
 	const attachmentUrl = (fileId: string, attachmentId: string): string =>
@@ -73,7 +71,7 @@
 	let rowCount = 0;
 
 	// DOCX state
-	let docxHtml = '';
+	let docxData: ArrayBuffer | null = null;
 	let docxError = '';
 
 	// PPTX state
@@ -190,9 +188,7 @@
 	const loadDocxContent = async () => {
 		try {
 			docxError = '';
-			const arrayBuffer = await getFileContentById(item.id);
-			if (!arrayBuffer) throw new Error('Empty file content');
-			docxHtml = await renderDocxHtml(arrayBuffer);
+			docxData = await getFileContentById(item.id);
 		} catch (error) {
 			console.error('Error loading DOCX file:', error);
 			docxError = $i18n.t('Failed to load DOCX file. Please try downloading it instead.');
@@ -221,6 +217,7 @@
 		// no preview pane. (Images render without tabs.)
 		selectedTab = isPDF || isAudio || isExcel || isDocx || isPptx ? 'preview' : '';
 		expandedContent = false;
+		docxData = null;
 		if (item?.type === 'collection') {
 			loading = true;
 
@@ -269,7 +266,6 @@
 	onMount(() => {
 		console.log(item);
 		if (item?.context === 'full') {
-			enableFullContent = true;
 		}
 
 		if (item?.id && item?.type === 'file') {
@@ -285,11 +281,11 @@
 </script>
 
 <Modal bind:show size="lg">
-	<div class="font-primary px-4.5 py-3.5 w-full flex flex-col justify-center dark:text-gray-400">
+	<div class=" px-4.5 py-3.5 w-full flex flex-col justify-center dark:text-gray-400">
 		<div class=" pb-2">
 			<div class="flex items-start justify-between">
 				<div>
-					<div class=" font-medium text-lg dark:text-gray-100">
+					<div class=" font-normal text-lg dark:text-gray-100">
 						<a
 							href="#"
 							class="hover:underline line-clamp-1"
@@ -374,33 +370,8 @@
 						{/if}
 					</div>
 
-					{#if edit}
-						<div class=" self-end">
-							<Tooltip
-								content={enableFullContent
-									? $i18n.t(
-											'Inject the entire content as context for comprehensive processing, this is recommended for complex queries.'
-										)
-									: $i18n.t(
-											'Default to segmented retrieval for focused and relevant content extraction, this is recommended for most cases.'
-										)}
-							>
-								<div class="flex items-center gap-1.5 text-xs">
-									{#if enableFullContent}
-										{$i18n.t('Using Entire Document')}
-									{:else}
-										{$i18n.t('Using Focused Retrieval')}
-									{/if}
-									<Switch
-										bind:state={enableFullContent}
-										on:change={(e) => {
-											item.context = e.detail ? 'full' : undefined;
-										}}
-									/>
-								</div>
-							</Tooltip>
-						</div>
-					{/if}
+					<!-- [Gradient] The full-document / focused-retrieval choice is gone: retrieval
+					     strategy is decided agent-side, and every tenant runs the agent. -->
 				</div>
 			</div>
 		</div>
@@ -421,7 +392,7 @@
 
 				{#if isAudio || isPDF || isExcel || isCode || isMarkdown || isDocx || isPptx || hasAttachments}
 					<div
-						class="flex mb-2.5 scrollbar-none overflow-x-auto w-full border-b border-gray-50 dark:border-gray-850/30 text-center text-sm font-medium bg-transparent dark:text-gray-200"
+						class="flex mb-2.5 scrollbar-none overflow-x-auto w-full border-b border-gray-50 dark:border-gray-850/30 text-center text-sm font-normal bg-transparent dark:text-gray-200"
 					>
 						<button
 							class="min-w-fit py-1.5 px-4 border-b {selectedTab === 'preview'
@@ -566,7 +537,7 @@
 						{:else}
 							{#if excelSheetNames.length > 1}
 								<div
-									class="flex mb-2.5 scrollbar-none overflow-x-auto w-full border-b border-gray-50 dark:border-gray-850/30 text-center text-sm font-medium bg-transparent dark:text-gray-200"
+									class="flex mb-2.5 scrollbar-none overflow-x-auto w-full border-b border-gray-50 dark:border-gray-850/30 text-center text-sm font-normal bg-transparent dark:text-gray-200"
 								>
 									{#each excelSheetNames as sheetName}
 										<button
@@ -610,12 +581,8 @@
 					{:else if isDocx}
 						{#if docxError}
 							<div class="text-red-500 text-sm p-4">{docxError}</div>
-						{:else if docxHtml}
-							<div
-								class="office-preview max-h-[60vh] overflow-auto p-4 prose dark:prose-invert max-w-full text-sm"
-							>
-								{@html docxHtml}
-							</div>
+						{:else if docxData}
+							<DocxPreview data={docxData} className="h-[60vh]" />
 						{:else}
 							<div class="text-gray-500 text-sm p-4">No content available</div>
 						{/if}
@@ -623,58 +590,11 @@
 						{#if pptxError}
 							<div class="text-red-500 text-sm p-4">{pptxError}</div>
 						{:else if pptxSlides.length > 0}
-							<div class="max-h-[60vh] overflow-auto">
-								<div class="flex justify-center p-4">
-									<img
-										src={pptxSlides[pptxCurrentSlide]}
-										alt="Slide {pptxCurrentSlide + 1}"
-										class="max-w-full max-h-[50vh] object-contain rounded-md shadow-lg"
-										draggable="false"
-									/>
-								</div>
-								{#if pptxSlides.length > 1}
-									<div class="flex items-center justify-center gap-3 pb-3 text-sm text-gray-500">
-										<button
-											class="p-1.5 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 disabled:opacity-30"
-											disabled={pptxCurrentSlide === 0}
-											on:click={() => (pptxCurrentSlide = Math.max(0, pptxCurrentSlide - 1))}
-										>
-											<svg
-												xmlns="http://www.w3.org/2000/svg"
-												viewBox="0 0 20 20"
-												fill="currentColor"
-												class="size-5"
-											>
-												<path
-													fill-rule="evenodd"
-													d="M11.78 5.22a.75.75 0 0 1 0 1.06L8.06 10l3.72 3.72a.75.75 0 1 1-1.06 1.06l-4.25-4.25a.75.75 0 0 1 0-1.06l4.25-4.25a.75.75 0 0 1 1.06 0Z"
-													clip-rule="evenodd"
-												/>
-											</svg>
-										</button>
-										<span>{pptxCurrentSlide + 1} / {pptxSlides.length}</span>
-										<button
-											class="p-1.5 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 disabled:opacity-30"
-											disabled={pptxCurrentSlide === pptxSlides.length - 1}
-											on:click={() =>
-												(pptxCurrentSlide = Math.min(pptxSlides.length - 1, pptxCurrentSlide + 1))}
-										>
-											<svg
-												xmlns="http://www.w3.org/2000/svg"
-												viewBox="0 0 20 20"
-												fill="currentColor"
-												class="size-5"
-											>
-												<path
-													fill-rule="evenodd"
-													d="M8.22 5.22a.75.75 0 0 1 1.06 0l4.25 4.25a.75.75 0 0 1 0 1.06l-4.25 4.25a.75.75 0 0 1-1.06-1.06L11.94 10 8.22 6.28a.75.75 0 0 1 0-1.06Z"
-													clip-rule="evenodd"
-												/>
-											</svg>
-										</button>
-									</div>
-								{/if}
-							</div>
+							<PptxPreview
+								slides={pptxSlides}
+								bind:currentSlide={pptxCurrentSlide}
+								className="h-[60vh]"
+							/>
 						{:else}
 							<div class="text-gray-500 text-sm p-4">No content available</div>
 						{/if}
