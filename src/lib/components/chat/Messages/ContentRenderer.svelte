@@ -122,7 +122,7 @@
 			isFeatureEnabled('document_writer') &&
 			($settings?.detectDocuments ?? true) &&
 			!$mobile &&
-			$chatId
+			$currentChatId
 		) {
 			documentDetected = true;
 			tick().then(() => {

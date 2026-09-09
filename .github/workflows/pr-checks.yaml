@@ -25,7 +25,7 @@ jobs:
 
       - name: Build Frontend
         # OWUI 0.9.5's bundle blows past Node's default ~4GB heap during
-        # vite build on the CI runner — bump to 6GB so the build completes.
+        # vite build on the CI runner — bump to 8GB so the build completes.
         env:
           NODE_OPTIONS: --max-old-space-size=8192
         run: npm run build
