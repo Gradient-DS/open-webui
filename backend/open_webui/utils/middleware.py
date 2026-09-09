@@ -4067,8 +4067,10 @@ async def background_tasks_handler(ctx):
         # the original messages outside of this handler
 
         messages = []
-        for message in message_list:
-            content = message.get('content', '')
+        # [Gradient] Loop over `msg`, not `message`: `message` is bound above to the
+        # assistant message and is still read after this loop.
+        for msg in message_list:
+            content = msg.get('content', '')
             if isinstance(content, list):
                 for item in content:
                     if item.get('type') == 'text':
@@ -4085,8 +4087,8 @@ async def background_tasks_handler(ctx):
 
             messages.append(
                 {
-                    **message,
-                    'role': message.get('role', 'assistant'),  # Safe fallback for missing role
+                    **msg,
+                    'role': msg.get('role', 'assistant'),  # Safe fallback for missing role
                     'content': content,
                 }
             )
@@ -4176,7 +4178,9 @@ async def background_tasks_handler(ctx):
                                     or response_message.get(
                                         'reasoning_content',
                                     )
-                                    or message.get('content', user_message)
+                                    # [Gradient] `message` here is the raw assistant dict; feeding
+                                    # its markers to the JSON extractor below can never parse.
+                                    or user_message
                                 )
                             else:
                                 title_string = ''
@@ -4207,8 +4211,11 @@ async def background_tasks_handler(ctx):
 
                         await event_emitter(
                             {
+                                # [Gradient] Emit the title we just persisted. `message` is the
+                                # raw assistant dict (markers included); `title` is the stripped
+                                # user message the DB got. They must not disagree.
                                 'type': 'chat:title',
-                                'data': message.get('content', user_message),
+                                'data': title,
                             }
                         )
 
