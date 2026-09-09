@@ -99,15 +99,9 @@
 							href="/admin">{$i18n.t('Users')}</a
 						>
 
-						{#if $config?.features?.enable_admin_analytics ?? true}
-							<a
-								draggable="false"
-								class="min-w-fit px-1 text-sm {$page.url.pathname.includes('/admin/analytics')
-									? ''
-									: 'text-gray-300 dark:text-gray-600 hover:text-gray-700 dark:hover:text-white'} transition select-none"
-								href="/admin/analytics">{$i18n.t('Analytics')}</a
-							>
-						{/if}
+						<!-- [Gradient] No Analytics link: /admin/analytics is only a redirect stub
+						     into the settings modal, so the link left the panel it advertised.
+						     Analytics lives at Settings → Quality → Analytics, as upstream has it. -->
 
 						{#if isFeatureEnabled('admin_evaluations')}
 							<a
