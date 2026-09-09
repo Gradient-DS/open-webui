@@ -6,6 +6,7 @@
 	import equal from 'fast-deep-equal';
 
 	import ReasoningBullet from './StatusHistory/ReasoningBullet.svelte';
+	import ContentRenderer from '../ContentRenderer.svelte';
 	import ChevronDown from '$lib/components/icons/ChevronDown.svelte';
 	import ChevronUp from '$lib/components/icons/ChevronUp.svelte';
 
@@ -27,7 +28,22 @@
 	// side (closing done=true status for terminal tools), this guard
 	// keeps the spinner from getting stuck if anything regresses.
 	export let messageDone = false;
+	// [Gradient] Content rows render the model's inter-tool prose in full, so they
+	// need the same renderer wiring the tail answer gets.
+	export let id = 'status';
+	export let sources = [];
+	export let model = null;
+	export let editCodeBlock = true;
+	export let onSourceClick = () => {};
 	let showHistory = expand;
+	// [Gradient] Open by default when the model wrote prose between tool calls:
+	// that is working the user asked to see, and collapsing it would hide text
+	// that used to render inline. Status-only turns stay collapsed.
+	let autoExpanded = false;
+	$: if (!autoExpanded && (historyItems ?? []).some(isContent)) {
+		showHistory = true;
+		autoExpanded = true;
+	}
 
 	let history = [];
 
@@ -45,13 +61,19 @@
 	}
 
 	const isReasoning = (item) => item?.kind === 'reasoning';
+	// [Gradient] The agent emits post-tool deliberation as ordinary output_text,
+	// not as a reasoning item, so it arrives as a content block. Rendering it as a
+	// timeline row is what makes the turn read as one sequence.
+	const isContent = (item) => item?.kind === 'content';
 	// [Gradient] Stable keys: an unkeyed each re-created every row whenever the
 	// list changed, which re-fired the .status-description fade on each status
 	// event and read as flicker.
 	const rowKey = (item, idx) =>
 		item?.kind === 'reasoning'
 			? `r-${item.contentOffset ?? idx}`
-			: `s-${idx}-${item?.action ?? ''}`;
+			: item?.kind === 'content'
+				? `c-${item.contentOffset ?? idx}`
+				: `s-${idx}-${item?.action ?? ''}`;
 </script>
 
 <!-- [Gradient] Visibility is decided one level up by ResponseMessage's
@@ -69,7 +91,11 @@
 		>
 			<div class="flex items-start gap-2 min-w-0">
 				<div class="flex-1 min-w-0">
-					{#if isReasoning(status)}
+					{#if isContent(status)}
+						<div class="line-clamp-1 text-gray-500 dark:text-gray-500">
+							{(status.text ?? '').replace(/\s+/g, ' ').trim()}
+						</div>
+					{:else if isReasoning(status)}
 						<ReasoningBullet
 							id={`status-header`}
 							summary={status.summary}
@@ -122,7 +148,22 @@
 									{/if}
 								</div>
 
-								{#if isReasoning(item)}
+								{#if isContent(item)}
+									<div class="w-full min-w-0">
+										<ContentRenderer
+											id={`${id}-c${item.contentOffset ?? idx}`}
+											content={item.text}
+											{sources}
+											floatingButtons={false}
+											save={false}
+											preview={false}
+											{editCodeBlock}
+											done={true}
+											{model}
+											{onSourceClick}
+										/>
+									</div>
+								{:else if isReasoning(item)}
 									<ReasoningBullet
 										id={`status-${idx}`}
 										summary={item.summary}

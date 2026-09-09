@@ -357,6 +357,16 @@
 		: [];
 	$: renderedContent = useBlockLayout ? (tailBlock?.text ?? '') : (message?.content ?? '');
 
+	// [Gradient] ONE activity timeline per turn. buildResponseBlocks already orders
+	// tool groups and the model's inter-tool prose on a single offset axis; flatten
+	// that into one row list rather than mounting a StatusHistory per status-group.
+	// Per-group mounting gave each group its own header, its own expand state and
+	// its own header promotion, which is why a multi-tool turn read as several
+	// separate boxes instead of one sequence.
+	$: timelineItems = useBlockLayout
+		? leadingBlocks.flatMap((b) => (b.kind === 'status-group' ? b.items : [b]))
+		: mergedHistory;
+
 	// Whether at least one tool actually ran this turn. Used together with the
 	// streaming heuristic below to gate the StatusHistory dropdown:
 	//   - During streaming (message.done === false): show as soon as there is
@@ -1060,41 +1070,23 @@
 								{/each}
 							</div>
 						{:else if shouldShowStatusHistory}
-							{#if useBlockLayout}
-								<!-- [Gradient] Tool groups and the model's own commentary,
-								     interleaved in stream order. The final answer is NOT
-								     here — it stays in the ContentRenderer below, so the
-								     tail renders exactly once. -->
-								{#each leadingBlocks as block, idx (block.kind === 'content' ? `c-${block.contentOffset}` : `s-${idx}`)}
-									{#if block.kind === 'status-group'}
-										<StatusHistory
-											statusHistory={block.items}
-											messageDone={message?.done ?? false}
-										/>
-									{:else}
-										<div class="w-full my-1">
-											<ContentRenderer
-												id={`${chatId}-${message.id}-c${block.contentOffset}`}
-												content={block.text}
-												sources={message.sources}
-												floatingButtons={false}
-												save={false}
-												preview={false}
-												{editCodeBlock}
-												done={true}
-												{model}
-												onSourceClick={async (id) => {
-													if (citationsElement) {
-														citationsElement?.showSourceModal(id);
-													}
-												}}
-											/>
-										</div>
-									{/if}
-								{/each}
-							{:else}
-								<StatusHistory statusHistory={mergedHistory} messageDone={message?.done ?? false} />
-							{/if}
+							<!-- [Gradient] One chronological timeline: reasoning, tool statuses
+							     and the model's inter-tool prose, in stream order. The final
+							     answer is NOT here — it stays in the ContentRenderer below, so
+							     the tail renders exactly once. -->
+							<StatusHistory
+								id={`${chatId}-${message.id}-status`}
+								statusHistory={timelineItems}
+								messageDone={message?.done ?? false}
+								sources={message.sources}
+								{editCodeBlock}
+								{model}
+								onSourceClick={async (sid) => {
+									if (citationsElement) {
+										citationsElement?.showSourceModal(sid);
+									}
+								}}
+							/>
 							<!-- [Gradient] For tool-call turns (StatusHistory path), subagent
 							     groups render below the dropdown sorted by their own
 							     started_at. True interleaving inside the StatusHistory
