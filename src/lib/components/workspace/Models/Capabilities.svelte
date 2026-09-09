@@ -1,18 +1,15 @@
 <script lang="ts">
 	import { getContext } from 'svelte';
-<<<<<<< HEAD
 	import { config } from '$lib/stores';
-=======
 	import type { Writable } from 'svelte/store';
 	import type { i18n as i18nType } from 'i18next';
->>>>>>> upstream/main
 	import Checkbox from '$lib/components/common/Checkbox.svelte';
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
 	import { marked } from 'marked';
 
 	const i18n: Writable<i18nType> = getContext('i18n');
 
-	// Map capability keys to config feature flags
+	// [Gradient] Map capability keys to config feature flags
 	const capabilityConfigGuards: Record<string, string> = {
 		web_search: 'enable_web_search',
 		image_generation: 'enable_image_generation',
@@ -82,27 +79,6 @@
 		}
 	};
 
-<<<<<<< HEAD
-	export let capabilities: {
-		file_context?: boolean;
-		vision?: boolean;
-		file_upload?: boolean;
-		web_search?: boolean;
-		image_generation?: boolean;
-		code_interpreter?: boolean;
-		document_writer?: boolean;
-		terminal?: boolean;
-		usage?: boolean;
-		citations?: boolean;
-		status_updates?: boolean;
-		builtin_tools?: boolean;
-	} = {};
-
-	// Hide capabilities when:
-	// - file_context: file_upload is disabled
-	// - feature-gated capabilities: global config flag is off
-	$: visibleCapabilities = Object.keys(capabilityLabels).filter((cap) => {
-=======
 	type Capability = keyof typeof capabilityLabels;
 
 	export let capabilities: Partial<Record<Capability, boolean>> = {};
@@ -114,7 +90,6 @@
 
 	// Hide file_context when file_upload is disabled
 	$: visibleCapabilities = (Object.keys(capabilityLabels) as Capability[]).filter((cap) => {
->>>>>>> upstream/main
 		if (cap === 'file_context' && !capabilities.file_upload) {
 			return false;
 		}

@@ -32,7 +32,6 @@
 		toggleSkillById
 	} from '$lib/apis/skills';
 	import { capitalizeFirstLetter, parseFrontmatter, formatSkillName, slugify } from '$lib/utils';
-<<<<<<< HEAD
 	import { uploadFile } from '$lib/apis/files';
 	import {
 		parseSkillBundle,
@@ -40,8 +39,6 @@
 		isTextPath,
 		findMissingSkillFiles
 	} from '$lib/utils/skills/bundle';
-=======
->>>>>>> upstream/main
 	import TagInput from '$lib/components/common/Tags/TagInput.svelte';
 
 	import Tooltip from '../common/Tooltip.svelte';
@@ -393,7 +390,7 @@
 		bind:this={importInputElement}
 		bind:files={importFiles}
 		type="file"
-		accept=".md,.json"
+		accept=".md,.json,.skill"
 		hidden
 		on:change={() => {
 			if (importFiles && importFiles.length > 0) {
@@ -408,108 +405,12 @@
 							const content = event.target?.result;
 							if (typeof content !== 'string') return;
 
-<<<<<<< HEAD
-			<div class="flex w-full justify-end gap-1.5">
-				<input
-					bind:this={importInputElement}
-					bind:files={importFiles}
-					type="file"
-					accept=".md,.json,.skill"
-					hidden
-					on:change={() => {
-						if (importFiles && importFiles.length > 0) {
-							const file = importFiles[0];
-							const ext = file.name.split('.').pop()?.toLowerCase();
-
-							if (ext === 'json') {
-								// JSON import: create skills via API
-								const reader = new FileReader();
-								reader.onload = async (event) => {
-									try {
-										const content = event.target?.result;
-										if (typeof content !== 'string') return;
-
-										const parsedSkills = JSON.parse(content);
-										const items = Array.isArray(parsedSkills) ? parsedSkills : [parsedSkills];
-
-										for (const skill of items) {
-											await createNewSkill(localStorage.token, skill).catch((error) => {
-												toast.error(`${error}`);
-											});
-										}
-
-										toast.success($i18n.t('Skill imported successfully'));
-										page = 1;
-										loadSkillItems();
-										_skills.set(await getSkills(localStorage.token));
-									} catch (e) {
-										toast.error($i18n.t('Invalid JSON file'));
-									}
-								};
-								reader.readAsText(file);
-							} else if (ext === 'skill') {
-								importSkillBundle(file);
-							} else {
-								// Markdown import: parse frontmatter and open in editor
-								const reader = new FileReader();
-								reader.onload = (event) => {
-									const mdContent = event.target?.result;
-									if (typeof mdContent === 'string') {
-										const fm = parseFrontmatter(mdContent);
-										const fileName = file.name.replace(/\.md$/, '');
-										const rawName = fm.name || fileName;
-										const displayName = formatSkillName(rawName);
-										sessionStorage.skill = JSON.stringify({
-											name: displayName,
-											id: fm.name || '',
-											description: fm.description || '',
-											content: mdContent,
-											is_active: true,
-											access_grants: []
-										});
-										goto('/workspace/skills/create');
-									}
-								};
-								reader.readAsText(file);
-							}
-
-							importInputElement.value = '';
-						}
-					}}
-				/>
-
-				{#if $user?.role === 'admin' || $user?.permissions?.workspace?.skills_import}
-					<button
-						class="flex text-xs items-center space-x-1 px-3 py-1.5 rounded-xl bg-gray-50 hover:bg-gray-100 dark:bg-gray-850 dark:hover:bg-gray-800 dark:text-gray-200 transition"
-						on:click={() => {
-							importInputElement.click();
-						}}
-					>
-						<div class=" self-center font-medium line-clamp-1">
-							{$i18n.t('Import')}
-						</div>
-					</button>
-				{/if}
-
-				{#if total && ($user?.role === 'admin' || $user?.permissions?.workspace?.skills_export)}
-					<button
-						class="flex text-xs items-center space-x-1 px-3 py-1.5 rounded-xl bg-gray-50 hover:bg-gray-100 dark:bg-gray-850 dark:hover:bg-gray-800 dark:text-gray-200 transition"
-						on:click={async () => {
-							const _skills = await exportSkills(localStorage.token).catch((error) => {
-								toast.error(`${error}`);
-								return null;
-							});
-							if (_skills) {
-								let blob = new Blob([JSON.stringify(_skills)], {
-									type: 'application/json'
-=======
 							const parsedSkills = JSON.parse(content);
 							const items = Array.isArray(parsedSkills) ? parsedSkills : [parsedSkills];
 
 							for (const skill of items) {
 								await createNewSkill(localStorage.token, skill).catch((error) => {
 									toast.error(`${error}`);
->>>>>>> upstream/main
 								});
 							}
 
@@ -522,6 +423,8 @@
 						}
 					};
 					reader.readAsText(file);
+				} else if (ext === 'skill') {
+					importSkillBundle(file);
 				} else {
 					// Markdown import: parse frontmatter and open in editor
 					const reader = new FileReader();
@@ -752,48 +655,12 @@
 											</button>
 										</Tooltip>
 									{:else}
-<<<<<<< HEAD
-										<SkillMenu
-											editHandler={() => {
-												goto(`/workspace/skills/edit?id=${encodeURIComponent(skill.id)}`);
-											}}
-											cloneHandler={() => {
-												cloneHandler(skill);
-											}}
-											exportHandler={() => {
-												exportHandler(skill);
-											}}
-											exportBundleHandler={() => {
-												exportBundleHandler(skill);
-											}}
-											deleteHandler={async () => {
-												selectedSkill = skill;
-												showDeleteConfirm = true;
-											}}
-											onClose={() => {}}
-										>
-											<button
-												class="self-center w-fit text-sm p-1.5 dark:text-gray-300 dark:hover:text-white hover:bg-black/5 dark:hover:bg-white/5 rounded-xl"
-												type="button"
-											>
-												<EllipsisHorizontal className="size-5" />
-											</button>
-										</SkillMenu>
-									{/if}
-
-									<button on:click|stopPropagation|preventDefault>
-										<Tooltip content={skill.is_active ? $i18n.t('Enabled') : $i18n.t('Disabled')}>
-											<Switch
-												bind:state={skill.is_active}
-												on:change={async () => {
-													toggleSkillById(localStorage.token, skill.id);
-=======
 										<div class="flex shrink-0 flex-row items-center gap-1.5 self-center">
 											<SkillMenu
+												exportBundleHandler={() => exportBundleHandler(skill)}
 												show={openSkillMenuId === skill.id}
 												editHandler={() => {
 													goto(`/workspace/skills/edit?id=${encodeURIComponent(skill.id)}`);
->>>>>>> upstream/main
 												}}
 												cloneHandler={() => {
 													cloneHandler(skill);

@@ -6,8 +6,7 @@
 	const i18n = getContext('i18n');
 
 	$: useSimpleBuilder =
-		isFeatureEnabled('simple_assistant_builder') &&
-		$page.url.searchParams.get('advanced') === null;
+		isFeatureEnabled('simple_assistant_builder') && $page.url.searchParams.get('advanced') === null;
 
 	const goToAdvanced = () => {
 		const _id = $page.url.searchParams.get('id');
@@ -109,20 +108,9 @@
 </script>
 
 {#if model}
-<<<<<<< HEAD
 	{#if useSimpleBuilder}
 		<SimpleModelEditor edit={true} {model} draft={null} {onSubmit} onAdvanced={goToAdvanced} />
 	{:else}
-		<ModelEditor edit={true} {model} {onSubmit} />
+		<ModelEditor onBack={() => goto('/workspace/models')} edit={true} {model} {onSubmit} />
 	{/if}
-=======
-	<ModelEditor
-		edit={true}
-		{model}
-		{onSubmit}
-		onBack={async () => {
-			await goto('/workspace/models');
-		}}
-	/>
->>>>>>> upstream/main
 {/if}

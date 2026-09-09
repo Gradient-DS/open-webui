@@ -146,59 +146,6 @@
 								disabled={edit}
 							/>
 						</Tooltip>
-<<<<<<< HEAD
-					</div>
-				</div>
-
-				<div class="mb-2 flex-1 overflow-auto h-0 rounded-lg">
-					<div class="h-full flex flex-col">
-						<div
-							class="bg-gray-50 dark:bg-gray-900 rounded-xl border border-gray-100/50 dark:border-gray-850/50 flex-1 min-h-0 overflow-hidden flex flex-col"
-						>
-							{#if disabled}
-								<div class="px-4 py-3 overflow-y-auto flex-1">
-									<pre class="text-xs whitespace-pre-wrap font-mono">{content}</pre>
-								</div>
-							{:else}
-								<textarea
-									class="w-full flex-1 text-xs bg-transparent outline-hidden resize-none font-mono px-4 py-3"
-									bind:value={content}
-									on:input={handleContentInput}
-									placeholder={$i18n.t('Enter skill instructions in markdown...')}
-									aria-label={$i18n.t('Skill Instructions')}
-									required
-								/>
-							{/if}
-						</div>
-					</div>
-				</div>
-
-				{#if $config?.features?.feature_skill_files}
-					{#if edit && id}
-						<SkillFileTree skillId={id} {disabled} />
-					{:else if !edit}
-						<div class="mt-2 text-xs text-gray-500">
-							{$i18n.t('Save the skill to add reference files.')}
-						</div>
-					{/if}
-				{/if}
-
-				<div class="pb-3 flex justify-end">
-					{#if !disabled}
-						<button
-							class="px-3.5 py-1.5 text-sm font-medium bg-black hover:bg-gray-900 text-white dark:bg-white dark:text-black dark:hover:bg-gray-100 transition rounded-full flex items-center gap-2 whitespace-nowrap"
-							type="submit"
-							disabled={loading}
-						>
-							{$i18n.t(edit ? 'Save' : 'Save & Create')}
-							{#if loading}
-								<span class="shrink-0">
-									<Spinner />
-								</span>
-							{/if}
-						</button>
-=======
->>>>>>> upstream/main
 					{/if}
 
 					<Tooltip
@@ -248,6 +195,18 @@
 		</div>
 
 		{#if !disabled}
+			<!-- [Gradient] Skill bundles may include reference files. -->
+			<div class="shrink-0">
+				{#if $config?.features?.feature_skill_files}
+					{#if edit && id}
+						<SkillFileTree skillId={id} {disabled} />
+					{:else if !edit}
+						<div class="mt-2 text-xs text-gray-500">
+							{$i18n.t('Save the skill to add reference files.')}
+						</div>
+					{/if}
+				{/if}
+			</div>
 			<div class="flex shrink-0 justify-end py-2">
 				<button
 					class="flex h-7 items-center gap-1.5 rounded-lg bg-gray-900 px-2.5 text-xs text-white transition hover:bg-black disabled:opacity-60 dark:bg-gray-100 dark:text-gray-900 dark:hover:bg-white"

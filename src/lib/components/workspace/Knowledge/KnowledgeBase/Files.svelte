@@ -13,11 +13,6 @@
 	import { WEBUI_BASE_URL } from '$lib/constants';
 
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
-<<<<<<< HEAD
-=======
-	import Dropdown from '$lib/components/common/Dropdown.svelte';
-	import DropdownMenu from '$lib/components/common/DropdownMenu.svelte';
->>>>>>> upstream/main
 	import DocumentPage from '$lib/components/icons/DocumentPage.svelte';
 	import ExclamationTriangle from '$lib/components/icons/ExclamationTriangle.svelte';
 	import Folder from '$lib/components/icons/Folder.svelte';
@@ -44,8 +39,13 @@
 		meta?: {
 			name?: string;
 			size?: number;
+			warning?: string;
+			relative_path?: string;
 		};
 		updated_at?: number;
+		added_at?: number;
+		error?: string;
+		warning?: string;
 		user?: {
 			email?: string;
 			name?: string;
@@ -57,7 +57,6 @@
 	export let files: KnowledgeFile[] = [];
 	export let directories = [];
 
-<<<<<<< HEAD
 	// Cloud chrome (Phase 3): the provider's sources — directory rows whose id
 	// matches a source's root_directory_id become source roots (remove
 	// affordance + sync spinner + bulk-selectable as 'source' items).
@@ -79,24 +78,10 @@
 	export let onDeleteDirectory = (id: string) => {};
 	export let onMoveFilesToDirectory = (fileIds: string[], directoryId: string) => {};
 	export let onMoveDirectoryToDirectory = (dirId: string, targetDirectoryId: string) => {};
-=======
-	export let onClick: (fileId: string | undefined) => void = () => {};
-	export let onDelete: (fileId: string | undefined) => void = () => {};
-	export let onRename: (fileId: string, name: string) => void = () => {};
-	export let onNavigateDirectory: (directoryId: string) => void = () => {};
-	export let onRenameDirectory: (id: string, name: string) => void = () => {};
-	export let onDeleteDirectory: (id: string) => void = () => {};
-	export let onMoveFileToDirectory: (fileId: string, directoryId: string) => void = () => {};
-	export let onMoveDirectoryToDirectory: (
-		dirId: string,
-		targetDirectoryId: string
-	) => void = () => {};
->>>>>>> upstream/main
 
 	// Optional multiselect model injected by KnowledgeBase. Null = no selection UI.
 	export let selection: KbSelection | null = null;
 
-<<<<<<< HEAD
 	$: selectedStore = selection?.selected;
 	$: selectionModeStore = selection?.selectionMode;
 
@@ -112,12 +97,6 @@
 		return src
 			? sourceItem(src.item_id, src.name ?? dir.name, dir.child_count ?? 0)
 			: directoryItem(dir.id, dir.name, dir.child_count ?? 0);
-=======
-	const startRename = (file: KnowledgeFile) => {
-		editingFileId = file?.id ?? file?.tempId;
-		editName = file?.name ?? file?.meta?.name ?? '';
-		setTimeout(() => editInput?.select(), 0);
->>>>>>> upstream/main
 	};
 	// Source roots are selectable whenever selection exists (cloud KBs);
 	// plain local dirs additionally need structure-write access.
@@ -200,9 +179,7 @@
 		{@const selKey = `file:${file?.id}`}
 		{@const isSel = (selection && isSelectable(file) && $selectedStore?.has(selKey)) ?? false}
 		{@const crumbs = searchMode ? breadcrumbSegments(file?.meta?.relative_path) : []}
-		<!-- svelte-ignore a11y_no_static_element_interactions -->
 		<div
-<<<<<<< HEAD
 			class=" group flex cursor-pointer w-full px-1.5 py-0.5 bg-transparent dark:hover:bg-gray-850/50 hover:bg-white rounded-xl transition {selection
 				? 'select-none'
 				: ''} {isSel
@@ -210,14 +187,8 @@
 				: selectedFileId
 					? ''
 					: 'hover:bg-gray-100 dark:hover:bg-gray-850'}"
-			draggable={structureEditable && !!file?.id && (!($selectionModeStore ?? false) || isSel)}
-=======
-			class=" flex cursor-pointer w-full px-2 bg-transparent dark:hover:bg-gray-850/50 hover:bg-white rounded-xl transition {selectedFileId
-				? ''
-				: 'hover:bg-gray-100 dark:hover:bg-gray-850'}"
 			role="listitem"
-			draggable="true"
->>>>>>> upstream/main
+			draggable={structureEditable && !!file?.id && (!($selectionModeStore ?? false) || isSel)}
 			on:dragstart={(e) => {
 				if (!structureEditable) return;
 				const ids = dragPayloadIds(file, isSel);
@@ -237,21 +208,7 @@
 				/>
 			{/if}
 			<div class="flex items-center">
-<<<<<<< HEAD
 				{#if fileBadge(file?.status) === 'spinner'}
-=======
-				{#if file?.status !== 'uploading'}
-					<button
-						class="p-1 rounded-full transition"
-						type="button"
-						on:click={() => {
-							onClick(file?.id ?? file?.tempId);
-						}}
-					>
-						<DocumentPage className="size-3.5" />
-					</button>
-				{:else}
->>>>>>> upstream/main
 					<Spinner className="size-3.5" />
 				{:else if fileBadge(file?.status) === 'error'}
 					<Tooltip content={file?.error || $i18n.t('Processing error')}>
@@ -280,40 +237,10 @@
 			>
 				<div class="min-w-0">
 					<div class="flex gap-2 items-center line-clamp-1">
-<<<<<<< HEAD
 						{#if file?.status !== 'uploading' && (file?.warning ?? file?.meta?.warning)}
 							<Tooltip content={$i18n.t('No searchable content could be extracted.')}>
 								<ExclamationTriangle className="size-3.5 text-red-500 shrink-0" />
 							</Tooltip>
-=======
-						{#if editingFileId === (file?.id ?? file?.tempId)}
-							<!-- svelte-ignore a11y-autofocus -->
-							<input
-								bind:this={editInput}
-								bind:value={editName}
-								class="text-xs w-full bg-transparent border-none outline-hidden"
-								on:keydown={(e) => {
-									if (e.key === 'Enter') submitRename();
-									if (e.key === 'Escape') cancelRename();
-									if (e.key === ' ') e.stopPropagation();
-								}}
-								on:keyup={(e) => {
-									if (e.key === ' ') e.stopPropagation();
-								}}
-								on:blur={submitRename}
-								on:click={(e) => e.stopPropagation()}
-								autofocus
-							/>
-						{:else}
-							<div class="line-clamp-1 text-xs">
-								{file?.name ?? file?.meta?.name}
-								{#if file?.meta?.size}
-									<span class="text-[0.6875rem] text-gray-500"
-										>{formatFileSize(file?.meta?.size)}</span
-									>
-								{/if}
-							</div>
->>>>>>> upstream/main
 						{/if}
 						<div class="line-clamp-1 text-sm">
 							{file?.name ?? file?.meta?.name}
@@ -369,47 +296,7 @@
 						>
 							<GarbageBin className="size-3.5" />
 						</button>
-<<<<<<< HEAD
 					</Tooltip>
-=======
-
-						<div slot="content">
-							<DropdownMenu className="min-w-[8.75rem] z-[9999999]">
-								<button
-									type="button"
-									class="select-none flex h-[1.6875rem] w-full cursor-pointer items-center gap-2 rounded-xl bg-transparent px-2 text-xs transition hover:text-gray-900 dark:hover:text-gray-100"
-									on:click={() => {
-										startRename(file);
-									}}
-								>
-									<Pencil className="size-3.5" />
-									{$i18n.t('Rename')}
-								</button>
-								<button
-									type="button"
-									class="select-none flex h-[1.6875rem] w-full cursor-pointer items-center gap-2 rounded-xl bg-transparent px-2 text-xs transition hover:text-gray-900 dark:hover:text-gray-100"
-									on:click={() => {
-										let fileId = file?.id ?? file?.tempId;
-										window.open(`${WEBUI_BASE_URL}/api/v1/files/${fileId}/content`, '_blank');
-									}}
-								>
-									<Download className="size-3.5" />
-									{$i18n.t('Download')}
-								</button>
-								<button
-									type="button"
-									class="select-none flex h-[1.6875rem] w-full cursor-pointer items-center gap-2 rounded-xl bg-transparent px-2 text-xs transition hover:text-gray-900 dark:hover:text-gray-100"
-									on:click={() => {
-										onDelete(file?.id ?? file?.tempId);
-									}}
-								>
-									<GarbageBin className="size-3.5" />
-									{$i18n.t('Delete')}
-								</button>
-							</DropdownMenu>
-						</div>
-					</Dropdown>
->>>>>>> upstream/main
 				</div>
 			{/if}
 		</div>

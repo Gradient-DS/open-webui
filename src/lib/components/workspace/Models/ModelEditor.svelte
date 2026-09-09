@@ -698,7 +698,7 @@
 										<div class="flex min-w-0 items-center gap-2">
 											<input
 												class="min-w-0 flex-1 bg-transparent text-base leading-tight text-gray-900 outline-hidden placeholder:text-gray-300 dark:text-white dark:placeholder:text-gray-700 md:text-lg"
-												placeholder={$i18n.t('Model Name')}
+												placeholder={$i18n.t('Name')}
 												bind:value={name}
 												required
 											/>
@@ -711,50 +711,13 @@
 										</div>
 
 										<input
-<<<<<<< HEAD
-											class="text-3xl w-full bg-transparent outline-hidden"
-											placeholder={$i18n.t('Name')}
-											bind:value={name}
-											required
-										/>
-									</div>
-
-									<div class="flex-1 w-full">
-										<div>
-											<input
-												class="text-xs w-full bg-transparent outline-hidden"
-												placeholder={$i18n.t('ID')}
-												bind:value={id}
-												disabled={edit}
-												required
-											/>
-										</div>
-									</div>
-								</div>
-
-								<div class="shrink-0">
-									<button
-										class="bg-gray-50 shrink-0 hover:bg-gray-100 text-black dark:bg-gray-850 dark:hover:bg-gray-800 dark:text-white transition px-2 py-1 rounded-full flex gap-1 items-center"
-										type="button"
-										on:click={() => {
-											showAccessControlModal = true;
-										}}
-									>
-										<LockClosed strokeWidth="2.5" className="size-3.5 shrink-0" />
-
-										<div class="text-sm font-medium shrink-0">
-											{$i18n.t('Access')}
-										</div>
-									</button>
-=======
 											class="block w-full bg-transparent py-0.5 text-xs text-gray-500 outline-hidden placeholder:text-gray-300 dark:text-gray-500 dark:placeholder:text-gray-700"
-											placeholder={$i18n.t('Model ID')}
+											placeholder={$i18n.t('ID')}
 											bind:value={id}
 											disabled={edit}
 											required
 										/>
 									</div>
->>>>>>> upstream/main
 								</div>
 							</div>
 
@@ -970,36 +933,26 @@
 							{/if}
 						</section>
 
-						<div class="my-3">
-							<Knowledge bind:selectedItems={knowledge} />
-						</div>
+						<!-- [Gradient] Tenant selector gate. -->
+						{#if $config?.features?.feature_knowledge !== false}
+							<div class="my-3">
+								<Knowledge bind:selectedItems={knowledge} />
+							</div>
+						{/if}
 
-						<div class="my-3">
-							<ToolsSelector bind:selectedToolIds={toolIds} tools={$tools ?? []} />
-						</div>
+						<!-- [Gradient] Tenant selector gate. -->
+						{#if $config?.features?.feature_tools !== false}
+							<div class="my-3">
+								<ToolsSelector bind:selectedToolIds={toolIds} tools={$tools ?? []} />
+							</div>
+						{/if}
 
-<<<<<<< HEAD
-					{#if $config?.features?.feature_knowledge !== false}
-						<div class="my-4">
-							<Knowledge bind:selectedItems={knowledge} />
-						</div>
-					{/if}
-
-					{#if $config?.features?.feature_tools !== false}
-						<div class="my-4">
-							<ToolsSelector bind:selectedToolIds={toolIds} tools={$tools ?? []} />
-						</div>
-					{/if}
-
-					{#if $config?.features?.feature_skills}
-						<div class="my-4">
-							<SkillsSelector bind:selectedSkillIds={skillIds} skills={skillsList} />
-						</div>
-					{/if}
-=======
-						<div class="my-3">
-							<SkillsSelector bind:selectedSkillIds={skillIds} skills={skillsList} />
-						</div>
+						<!-- [Gradient] Tenant selector gate. -->
+						{#if $config?.features?.feature_skills}
+							<div class="my-3">
+								<SkillsSelector bind:selectedSkillIds={skillIds} skills={skillsList} />
+							</div>
+						{/if}
 
 						{#if ($functions ?? []).filter((func) => func.type === 'filter').length > 0 || ($functions ?? []).filter((func) => func.type === 'action').length > 0}
 							<hr class="my-3 border-gray-100/30 dark:border-gray-850/30" />
@@ -1011,7 +964,6 @@
 										filters={($functions ?? []).filter((func) => func.type === 'filter')}
 									/>
 								</div>
->>>>>>> upstream/main
 
 								{@const toggleableFilters = $functions.filter(
 									(func) =>
@@ -1042,100 +994,27 @@
 
 						<hr class="my-3 border-gray-100/30 dark:border-gray-850/30" />
 
-<<<<<<< HEAD
-					<hr class=" border-gray-100/30 dark:border-gray-850/30 my-4" />
-
-					<div class="my-4">
-						<Capabilities bind:capabilities />
-					</div>
-
-					{#if Object.keys(capabilities).filter((key) => capabilities[key]).length > 0}
-						{@const availableFeatures = Object.entries(capabilities)
-							.filter(
-								([key, value]) =>
-									value &&
-					['web_search', 'code_interpreter', 'image_generation', 'document_writer'].includes(key)
-							)
-							.map(([key, value]) => key)}
-
-						{#if availableFeatures.length > 0}
-							<div class="my-4">
-								<DefaultFeatures {availableFeatures} bind:featureIds={defaultFeatureIds} />
-							</div>
-						{/if}
-					{/if}
-
-					{#if capabilities.builtin_tools}
-						<div class="my-4">
-							<BuiltinTools bind:builtinTools />
-=======
 						<div class="my-3">
 							<Capabilities bind:capabilities />
->>>>>>> upstream/main
 						</div>
 
-<<<<<<< HEAD
-					{#if $config?.features?.enable_data_warnings}
-						<div class="my-4">
-							<DataWarnings bind:dataWarnings bind:warningMessage={dataWarningMessage} />
-						</div>
-					{/if}
-
-					{#if capabilities.terminal}
-						<div class="my-4">
-							<TerminalSelector bind:terminalId />
-						</div>
-					{/if}
-
-					{#if $config?.features?.feature_voice !== false && $config?.audio?.tts?.engine}
-						<div class="my-4">
-							<div class="flex w-full justify-between mb-1">
-								<div class="self-center text-xs font-medium text-gray-500">
-									{$i18n.t('TTS Voice')}
-								</div>
-							</div>
-							<TTSVoiceInput
-								bind:value={tts.voice}
-								{voices}
-								placeholder={$i18n.t('e.g. alloy, echo, shimmer')}
-							/>
-						</div>
-					{/if}
-
-					<hr class=" border-gray-100/30 dark:border-gray-850/30 my-4" />
-
-					<div class="my-2 flex justify-end">
-						<button
-							class=" text-sm px-3 py-2 transition rounded-lg {loading
-								? ' cursor-not-allowed bg-black hover:bg-gray-900 text-white dark:bg-white dark:hover:bg-gray-100 dark:text-black'
-								: 'bg-black hover:bg-gray-900 text-white dark:bg-white dark:hover:bg-gray-100 dark:text-black'} flex w-full justify-center"
-							type="submit"
-							disabled={loading}
-						>
-							<div class=" self-center font-medium">
-								{#if edit}
-									{$i18n.t('Save & Update')}
-								{:else}
-									{$i18n.t('Save & Create')}
-								{/if}
-							</div>
-
-							{#if loading}
-								<div class="ml-1.5 self-center">
-									<Spinner />
-=======
 						{#if Object.keys(capabilities).filter((key) => capabilities[key]).length > 0}
 							{@const availableFeatures = Object.entries(capabilities)
 								.filter(
 									([key, value]) =>
-										value && ['web_search', 'code_interpreter', 'image_generation'].includes(key)
+										value &&
+										[
+											'web_search',
+											'code_interpreter',
+											'image_generation',
+											'document_writer'
+										].includes(key)
 								)
 								.map(([key, value]) => key)}
 
 							{#if availableFeatures.length > 0}
 								<div class="my-3">
 									<DefaultFeatures {availableFeatures} bind:featureIds={defaultFeatureIds} />
->>>>>>> upstream/main
 								</div>
 							{/if}
 						{/if}
@@ -1146,24 +1025,33 @@
 							</div>
 						{/if}
 
+						<!-- [Gradient] Model data warnings are saved with the model metadata. -->
+						{#if $config?.features?.enable_data_warnings}
+							<div class="my-3">
+								<DataWarnings bind:dataWarnings bind:warningMessage={dataWarningMessage} />
+							</div>
+						{/if}
 						{#if capabilities.terminal}
 							<div class="my-3">
 								<TerminalSelector bind:terminalId />
 							</div>
 						{/if}
 
-						<div class="my-3">
-							<div class="flex w-full justify-between mb-1">
-								<div class="self-center text-xs font-normal text-gray-500">
-									{$i18n.t('TTS Voice')}
+						<!-- [Gradient] Voice is tenant-gated. -->
+						{#if $config?.features?.feature_voice !== false && $config?.audio?.tts?.engine}
+							<div class="my-3">
+								<div class="flex w-full justify-between mb-1">
+									<div class="self-center text-xs font-normal text-gray-500">
+										{$i18n.t('TTS Voice')}
+									</div>
 								</div>
+								<TTSVoiceInput
+									bind:value={tts.voice}
+									{voices}
+									placeholder={$i18n.t('e.g. alloy, echo, shimmer')}
+								/>
 							</div>
-							<TTSVoiceInput
-								bind:value={tts.voice}
-								{voices}
-								placeholder={$i18n.t('e.g. alloy, echo, shimmer')}
-							/>
-						</div>
+						{/if}
 
 						<hr class="my-3 border-gray-100/30 dark:border-gray-850/30" />
 

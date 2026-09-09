@@ -87,23 +87,6 @@
 
 	let page = 1;
 
-<<<<<<< HEAD
-	let queryDebounceActive = false;
-	let fetchId = 0;
-
-	$: if (loaded) {
-		// Track all dependencies
-		(void page, selectedTag, viewOption, query);
-
-		if (queryDebounceActive) {
-			clearTimeout(searchDebounceTimer);
-			searchDebounceTimer = setTimeout(() => {
-				getPromptList();
-			}, 300);
-		} else {
-			getPromptList();
-		}
-=======
 	$: if (loaded) {
 		workspaceActions.set([
 			{
@@ -134,29 +117,22 @@
 		]);
 	}
 
-	const handleSearchInput = () => {
-		loading = true;
-		clearTimeout(searchDebounceTimer);
-		searchDebounceTimer = setTimeout(() => {
-			if (page !== 1) {
-				page = 1;
-			} else {
-				getPromptList();
-			}
-		}, 300);
-	};
+	// [Gradient] Debounce queries and reject stale list responses.
+	let queryDebounceActive = false;
+	let fetchId = 0;
 
-	// Immediate response to page/filter changes
-	$: if (
-		loaded &&
-		page &&
-		selectedTag !== undefined &&
-		viewOption !== undefined &&
-		sortKey !== undefined &&
-		sortDirection !== undefined
-	) {
-		getPromptList();
->>>>>>> upstream/main
+	$: if (loaded) {
+		// Track all dependencies
+		(void page, selectedTag, viewOption, sortKey, sortDirection, query);
+
+		if (queryDebounceActive) {
+			clearTimeout(searchDebounceTimer);
+			searchDebounceTimer = setTimeout(() => {
+				getPromptList();
+			}, 300);
+		} else {
+			getPromptList();
+		}
 	}
 
 	const setSortKey = (key: string) => {

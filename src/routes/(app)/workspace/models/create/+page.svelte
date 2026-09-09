@@ -23,8 +23,7 @@
 	const i18n = getContext('i18n');
 
 	$: useSimpleBuilder =
-		isFeatureEnabled('simple_assistant_builder') &&
-		$page.url.searchParams.get('advanced') === null;
+		isFeatureEnabled('simple_assistant_builder') && $page.url.searchParams.get('advanced') === null;
 
 	const goToAdvanced = () => goto('/workspace/models/create?advanced=true');
 
@@ -141,22 +140,10 @@
 	});
 </script>
 
-<<<<<<< HEAD
 {#if useSimpleBuilder}
 	<AssistantWizard {onSubmit} onAdvanced={goToAdvanced} />
 {:else}
 	{#key model}
-		<ModelEditor {model} {onSubmit} />
+		<ModelEditor onBack={() => goto('/workspace/models')} {model} {onSubmit} />
 	{/key}
 {/if}
-=======
-{#key model}
-	<ModelEditor
-		{model}
-		{onSubmit}
-		onBack={async () => {
-			await goto('/workspace/models');
-		}}
-	/>
-{/key}
->>>>>>> upstream/main

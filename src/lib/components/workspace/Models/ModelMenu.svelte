@@ -127,37 +127,20 @@
 				</button>
 			{/if}
 
-<<<<<<< HEAD
-			{#if model?.base_model_id ?? model?.info?.base_model_id}
+			<!-- [Gradient] Workspace agents and already-pinned defaults can be unpinned. -->
+			{#if (model?.base_model_id ?? model?.info?.base_model_id) || $pinnedModels.includes(model.id)}
 				<button
-					class="select-none flex gap-2 items-center px-3 py-1.5 text-sm cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-xl w-full"
-					on:click={() => {
-						pinModelHandler(model?.id);
-					}}
+					class="select-none flex h-[1.6875rem] w-full cursor-pointer items-center gap-2 rounded-xl bg-transparent px-2 text-[0.8125rem] hover:text-gray-900 dark:hover:text-gray-100"
+					on:click={() => runAndClose(() => pinModelHandler(model?.id))}
 				>
-					{#if ($settings?.pinnedModels ?? []).includes(model?.id)}
-						<PinSlash />
-=======
-			<button
-				class="select-none flex h-[1.6875rem] w-full cursor-pointer items-center gap-2 rounded-xl bg-transparent px-2 text-[0.8125rem] hover:text-gray-900 dark:hover:text-gray-100"
-				on:click={() => runAndClose(() => pinModelHandler(model?.id))}
-			>
-				{#if $pinnedModels.includes(model?.id)}
-					<PinSlash />
-				{:else}
-					<Pin />
-				{/if}
-
-				<div class="flex items-center">
 					{#if $pinnedModels.includes(model?.id)}
-						{$i18n.t('Hide from Sidebar')}
->>>>>>> upstream/main
+						<PinSlash />
 					{:else}
 						<Pin />
 					{/if}
 
 					<div class="flex items-center">
-						{#if ($settings?.pinnedModels ?? []).includes(model?.id)}
+						{#if $pinnedModels.includes(model?.id)}
 							{$i18n.t('Hide from Sidebar')}
 						{:else}
 							{$i18n.t('Keep in Sidebar')}

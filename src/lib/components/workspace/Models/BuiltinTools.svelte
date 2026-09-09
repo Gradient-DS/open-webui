@@ -1,18 +1,15 @@
 <script lang="ts">
 	import { getContext } from 'svelte';
-<<<<<<< HEAD
 	import { config } from '$lib/stores';
-=======
 	import type { Writable } from 'svelte/store';
 	import type { i18n as i18nType } from 'i18next';
->>>>>>> upstream/main
 	import Checkbox from '$lib/components/common/Checkbox.svelte';
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
 	import { marked } from 'marked';
 
 	const i18n: Writable<i18nType> = getContext('i18n');
 
-	// Map tool keys to config feature flags
+	// [Gradient] Map tool keys to config feature flags
 	const toolConfigGuards: Record<string, string> = {
 		memory: 'enable_memories',
 		notes: 'enable_notes',
@@ -94,7 +91,6 @@
 
 	export let builtinTools: Record<string, boolean> = {};
 
-<<<<<<< HEAD
 	// Filter to only tools whose global feature is enabled
 	$: visibleTools = allTools.filter((tool) => {
 		const configKey = toolConfigGuards[tool];
@@ -104,24 +100,6 @@
 		return true;
 	});
 
-	// Initialize missing keys to true (default enabled)
-	$: {
-		for (const tool of allTools) {
-			if (!(tool in builtinTools)) {
-				builtinTools[tool] = true;
-			}
-		}
-	}
-</script>
-
-<div>
-	<div class="flex w-full justify-between mb-1">
-		<div class="self-center text-xs font-medium text-gray-500">{$i18n.t('Builtin Tools')}</div>
-	</div>
-	<div class="flex items-center mt-2 flex-wrap">
-		{#each visibleTools as tool}
-			<div class="flex items-center gap-2 mr-3">
-=======
 	const setBuiltinTool = (tool: keyof typeof toolLabels, checked: boolean) => {
 		if (checked) {
 			delete builtinTools[tool];
@@ -135,9 +113,8 @@
 <div>
 	<div class="mb-1.5 text-xs text-gray-400 dark:text-gray-600">{$i18n.t('Builtin Tools')}</div>
 	<div class="grid grid-cols-1 gap-x-5 gap-y-1 sm:grid-cols-2 lg:grid-cols-3">
-		{#each allTools as tool}
+		{#each visibleTools as tool}
 			<div class="flex min-h-6 items-center gap-2.5">
->>>>>>> upstream/main
 				<Checkbox
 					ariaLabel={$i18n.t(toolLabels[tool].label)}
 					state={builtinTools[tool] !== false ? 'checked' : 'unchecked'}

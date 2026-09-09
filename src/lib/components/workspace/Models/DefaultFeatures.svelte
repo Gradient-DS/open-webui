@@ -27,18 +27,14 @@
 		}
 	};
 
-<<<<<<< HEAD
-	export let availableFeatures = [
+	type Feature = keyof typeof featureLabels;
+
+	export let availableFeatures: string[] = [
 		'web_search',
 		'image_generation',
 		'code_interpreter',
 		'document_writer'
 	];
-	export let featureIds = [];
-=======
-	type Feature = keyof typeof featureLabels;
-
-	export let availableFeatures: string[] = ['web_search', 'image_generation', 'code_interpreter'];
 	export let featureIds: string[] = [];
 
 	const getFeatureLabel = (feature: string) => featureLabels[feature as Feature];
@@ -52,7 +48,6 @@
 			featureIds = featureIds.filter((id) => id !== feature);
 		}
 	};
->>>>>>> upstream/main
 </script>
 
 <div>

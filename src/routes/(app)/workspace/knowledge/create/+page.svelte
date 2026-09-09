@@ -1,5 +1,4 @@
 <script>
-<<<<<<< HEAD
 	import { onMount } from 'svelte';
 	import { goto } from '$app/navigation';
 	import { isFeatureEnabled } from '$lib/utils/features';
@@ -10,9 +9,6 @@
 			goto('/');
 		}
 	});
-=======
-	import Knowledge from '$lib/components/workspace/Knowledge.svelte';
->>>>>>> upstream/main
 </script>
 
-<Knowledge showCreateOnMount={true} createModalCloseHref="/workspace/knowledge" />
+<CreateKnowledgeBase />

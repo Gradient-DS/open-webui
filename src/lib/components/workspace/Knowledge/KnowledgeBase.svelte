@@ -1,13 +1,10 @@
 <script lang="ts">
 	import { toast } from 'svelte-sonner';
 	import { v4 as uuidv4 } from 'uuid';
-<<<<<<< HEAD
 	import dayjs from 'dayjs';
 	import relativeTime from 'dayjs/plugin/relativeTime';
 
 	dayjs.extend(relativeTime);
-=======
->>>>>>> upstream/main
 
 	import { onMount, getContext, onDestroy, tick } from 'svelte';
 	import { get } from 'svelte/store';
@@ -37,8 +34,7 @@
 		syncKnowledgeCleanup,
 		testExternalKnowledgeRetrieval
 	} from '$lib/apis/knowledge';
-<<<<<<< HEAD
-	import { processWeb } from '$lib/apis/retrieval';
+	import { processUrl } from '$lib/apis/retrieval';
 	import {
 		createSyncApi,
 		type SyncStatusResponse,
@@ -57,9 +53,6 @@
 		type SyncItem as ConfluenceSyncItem
 	} from '$lib/apis/confluence';
 	import ConfluencePickerModal from './ConfluencePickerModal.svelte';
-=======
-	import { processUrl } from '$lib/apis/retrieval';
->>>>>>> upstream/main
 	import { WEBUI_API_BASE_URL } from '$lib/constants';
 
 	import { blobToFile, copyToClipboard } from '$lib/utils';
@@ -84,15 +77,12 @@
 	import ConfirmDialog from '../../common/ConfirmDialog.svelte';
 	import FileItemModal from '$lib/components/common/FileItemModal.svelte';
 	import ChevronLeft from '$lib/components/icons/ChevronLeft.svelte';
-<<<<<<< HEAD
 	import LockClosed from '$lib/components/icons/LockClosed.svelte';
 	import OneDrive from '$lib/components/icons/OneDrive.svelte';
 	import GoogleDrive from '$lib/components/icons/GoogleDrive.svelte';
 	import Confluence from '$lib/components/icons/Confluence.svelte';
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
-=======
 	import AccessButton from '$lib/components/common/AccessButton.svelte';
->>>>>>> upstream/main
 	import AccessControlModal from '../common/AccessControlModal.svelte';
 	import Search from '$lib/components/icons/Search.svelte';
 	import FilesOverlay from '$lib/components/chat/MessageInput/FilesOverlay.svelte';
@@ -104,7 +94,6 @@
 	import Pagination from '$lib/components/common/Pagination.svelte';
 	import AttachWebpageModal from '$lib/components/chat/MessageInput/AttachWebpageModal.svelte';
 
-<<<<<<< HEAD
 	// ===== Cloud sync provider configuration =====
 
 	interface CloudSyncProvider {
@@ -238,13 +227,16 @@
 	// sync-written directory structure read-only; push KBs are browse-only.
 	$: structureEditable = canEditStructure(knowledge);
 
+	// [Gradient] TODO(merge-v0.11.3): Can the legacy split-pane state be retired now that previews use FileItemModal?
+	// Phase 6 explicitly retains this fork state and its media-query handler.
+	// eslint-disable-next-line @typescript-eslint/no-unused-vars
 	let largeScreen = true;
 
+	// eslint-disable-next-line @typescript-eslint/no-unused-vars
 	let pane;
+	// eslint-disable-next-line @typescript-eslint/no-unused-vars
 	let showSidepanel = true;
 
-=======
->>>>>>> upstream/main
 	let showAddWebpageModal = false;
 	let showAddTextContentModal = false;
 	let showNewDirectoryModal = false;
@@ -254,15 +246,13 @@
 	let showAccessControlModal = false;
 	let showResetConfirm = false;
 
-<<<<<<< HEAD
 	// Local-directory upload/sync pipeline (upstream v0.10.2)
-=======
->>>>>>> upstream/main
 	type DirectoryFileEntry = { path: string; filename: string; file: File };
 	type DirectoryManifestEntry = DirectoryFileEntry & { checksum: string; size: number };
 	let pendingSyncFiles: DirectoryFileEntry[] | null = null;
 	let syncing: string | null = null;
 
+	// eslint-disable-next-line @typescript-eslint/no-unused-vars
 	let minSize = 0;
 	type Knowledge = {
 		id: string;
@@ -541,12 +531,7 @@
 					console.log(res);
 					let uploadedFile = res.file;
 
-<<<<<<< HEAD
-					const uploadedFile = await uploadFile(localStorage.token, file).catch((e) => {
-						toast.error(`${e}`);
-						return null;
-					});
-=======
+					// [Gradient] addFileHandler below links once and surfaces extraction warnings.
 					if (res.type === 'web' || res.type === 'youtube') {
 						const file = createFileFromText(
 							// Use URL as filename, sanitized
@@ -558,28 +543,13 @@
 						);
 
 						uploadedFile = await uploadFile(localStorage.token, file, {
-							knowledge_id: knowledge.id,
 							directory_id: currentDirectoryId,
 							source_url: fileItem.url
 						}).catch((e) => {
 							toast.error(`${e}`);
 							return null;
 						});
-					} else if (uploadedFile?.id) {
-						const linkedKnowledge = await addFileToKnowledgeById(
-							localStorage.token,
-							knowledge.id,
-							uploadedFile.id,
-							currentDirectoryId
-						).catch((e) => {
-							toast.error(`${e}`);
-							return null;
-						});
-						if (!linkedKnowledge) {
-							uploadedFile = null;
-						}
 					}
->>>>>>> upstream/main
 
 					if (uploadedFile) {
 						console.log(uploadedFile);
@@ -914,8 +884,7 @@
 		return currentPath && path ? `${currentPath}/${path}` : currentPath || path;
 	};
 
-<<<<<<< HEAD
-	// Upload a set of manifest entries with bounded concurrency (the fork's
+	// [Gradient] Upload a set of manifest entries with bounded concurrency (the fork's
 	// upload hardening), updating the `syncing` progress line as each lands.
 	const uploadManifestEntries = async (
 		entries: DirectoryManifestEntry[],
@@ -923,6 +892,7 @@
 	) => {
 		const total = entries.length;
 		let done = 0;
+		let failedCount = 0;
 		const executing: Set<Promise<void>> = new Set();
 
 		for (const entry of entries) {
@@ -936,7 +906,8 @@
 					toast.error(`${e}`);
 					return null;
 				})
-				.then(() => {
+				.then((uploadedFile) => {
+					if (!uploadedFile || uploadedFile.error) failedCount++;
 					done++;
 					const displayPath = entry.path ? `${entry.path}/${entry.filename}` : entry.filename;
 					syncing = $i18n.t('Uploading {{current}}/{{total}}: {{file}}', {
@@ -954,51 +925,13 @@
 		}
 
 		await Promise.all(executing);
-=======
-	const uploadManifestEntries = async (
-		entries: DirectoryManifestEntry[],
-		resolveDirectoryId: (entry: DirectoryManifestEntry) => string | null | undefined
-	) => {
-		let failedCount = 0;
-
-		for (const [index, entry] of entries.entries()) {
-			const displayPath = entry.path ? `${entry.path}/${entry.filename}` : entry.filename;
-			syncing = $i18n.t('Uploading {{current}}/{{total}}: {{file}}', {
-				current: index + 1,
-				total: entries.length,
-				file: displayPath
-			});
-
-			const fileObject = new File([entry.file], entry.filename, { type: entry.file.type });
-			const uploadedFile = await uploadFile(localStorage.token, fileObject, {
-				knowledge_id: knowledge.id,
-				file_hash: entry.checksum,
-				directory_id: resolveDirectoryId(entry)
-			}).catch((error) => ({ error }));
-
-			if (!uploadedFile || uploadedFile.error) {
-				const error = uploadedFile?.error;
-				const reason =
-					typeof error === 'string'
-						? error
-						: (error?.detail ?? error?.message ?? $i18n.t('Failed to upload file.'));
-
-				failedCount++;
-				console.error('Upload failed:', displayPath, reason);
-			}
-		}
 
 		if (failedCount > 0) {
 			toast.error(
-				$i18n.t('Upload failed for {{failed}} of {{total}} files.', {
-					failed: failedCount,
-					total: entries.length
-				})
+				$i18n.t('Upload failed for {{failed}} of {{total}} files.', { failed: failedCount, total })
 			);
 		}
-
 		return failedCount;
->>>>>>> upstream/main
 	};
 
 	const uploadDirectoryEntries = async (entries: DirectoryFileEntry[]) => {
@@ -1027,19 +960,6 @@
 
 			const directoryIdByPath = await createMissingDirectories(diff);
 
-<<<<<<< HEAD
-			await uploadManifestEntries(manifest, (entry) =>
-				entry.path ? directoryIdByPath[getDirectoryUploadPath(entry.path)] : currentDirectoryId
-			);
-
-			toast.success($i18n.t('File uploaded successfully'));
-			// Awaited: `finally` clears `syncing` on return, and that state change
-			// re-triggers the reactive getItemsPage() above. Racing it against this
-			// refresh let the fetchId guard discard the post-upload response, so a
-			// freshly uploaded folder rendered with child_count 0 until you
-			// navigated into it and back.
-			await init();
-=======
 			const failedCount = await uploadManifestEntries(manifest, (entry) =>
 				entry.path ? directoryIdByPath[getDirectoryUploadPath(entry.path)] : currentDirectoryId
 			);
@@ -1048,8 +968,12 @@
 				toast.success($i18n.t('File uploaded successfully'));
 			}
 
-			init();
->>>>>>> upstream/main
+			// Awaited: `finally` clears `syncing` on return, and that state change
+			// re-triggers the reactive getItemsPage() above. Racing it against this
+			// refresh let the fetchId guard discard the post-upload response, so a
+			// freshly uploaded folder rendered with child_count 0 until you
+			// navigated into it and back.
+			await init();
 		} catch (e) {
 			toast.error(`${e}`);
 		} finally {
@@ -1103,26 +1027,6 @@
 					diff.modified.some((m: any) => m.filename === entry.filename && m.path === entry.path)
 			);
 
-<<<<<<< HEAD
-			await uploadManifestEntries(filesToUpload, (entry) =>
-				entry.path ? directoryIdByPath[entry.path] : null
-			);
-
-			toast.success(
-				$i18n.t(
-					'Sync complete: {{added}} added, {{modified}} modified, {{deleted}} deleted, {{unmodified}} unmodified',
-					{
-						added: diff.added.length,
-						modified: diff.modified.length,
-						deleted: diff.deleted.length,
-						unmodified: diff.unmodified_count
-					}
-				)
-			);
-			// Awaited for the same reason as uploadDirectoryEntries above --
-			// same try/finally shape, same refresh race.
-			await init();
-=======
 			const failedCount = await uploadManifestEntries(filesToUpload, (entry) =>
 				entry.path ? directoryIdByPath[entry.path] : null
 			);
@@ -1141,8 +1045,9 @@
 					)
 				);
 			}
-			init();
->>>>>>> upstream/main
+			// Awaited for the same reason as uploadDirectoryEntries above --
+			// same try/finally shape, same refresh race.
+			await init();
 		} catch (e) {
 			toast.error(`${e}`);
 		} finally {
@@ -2034,7 +1939,6 @@
 		}
 	};
 
-<<<<<<< HEAD
 	const renameDirectoryHandler = async (dirId: string, name: string) => {
 		if (!structureEditable) return;
 		const res = await updateKnowledgeDirectory(localStorage.token, knowledge.id, dirId, {
@@ -2043,13 +1947,6 @@
 			toast.error(`${e}`);
 			return null;
 		});
-=======
-	const openFileHandler = (fileId: string) => {
-		window.open(`${WEBUI_API_BASE_URL}/files/${encodeURIComponent(fileId)}/content`, '_blank');
-	};
-
-	let debounceTimeout = null;
->>>>>>> upstream/main
 
 		if (res) {
 			toast.success($i18n.t('Directory renamed.'));
@@ -2185,6 +2082,7 @@
 	};
 
 	let debounceTimeout = null;
+	// eslint-disable-next-line @typescript-eslint/no-unused-vars
 	let mediaQuery;
 	let dragged = false;
 
@@ -2215,7 +2113,7 @@
 		}, 1000);
 	};
 
-<<<<<<< HEAD
+	// eslint-disable-next-line @typescript-eslint/no-unused-vars
 	const handleMediaQuery = async (e) => {
 		if (e.matches) {
 			largeScreen = true;
@@ -2241,8 +2139,6 @@
 
 	// Path-preserving traversal of dropped directory entries (upstream) —
 	// feeds uploadDirectoryEntries so dropped folders keep their structure.
-=======
->>>>>>> upstream/main
 	const readDirectoryEntries = async (reader: any) => {
 		const entries: any[] = [];
 
@@ -2320,31 +2216,21 @@
 				const directoryEntries: DirectoryFileEntry[] = [];
 				const looseFiles: File[] = [];
 
-<<<<<<< HEAD
 				for (const rawItem of Array.from(inputItems)) {
 					const item = rawItem as DataTransferItem & { webkitGetAsEntry?: () => any };
 					const entry = item.webkitGetAsEntry?.();
 
 					if (entry?.isDirectory) {
-						directoryEntries.push(...(await collectDroppedEntryFiles(entry)));
+						try {
+							directoryEntries.push(...(await collectDroppedEntryFiles(entry)));
+						} catch (error) {
+							handleUploadError(error);
+							return;
+						}
 					} else {
 						const file = item.getAsFile();
 						if (file) {
 							looseFiles.push(file);
-=======
-						if (entry?.isDirectory) {
-							try {
-								directoryEntries.push(...(await collectDroppedEntryFiles(entry)));
-							} catch (error) {
-								handleUploadError(error);
-								return;
-							}
-						} else {
-							const file = item.getAsFile();
-							if (file) {
-								looseFiles.push(file);
-							}
->>>>>>> upstream/main
 						}
 					}
 				}
@@ -2630,30 +2516,12 @@
 			</button>
 
 			<div class=" flex w-full">
-<<<<<<< HEAD
-				<div class="shrink-0 self-start mt-1.5 mr-1">
-					<button
-						class="p-1 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 transition"
-						on:click={() => {
-							goto('/workspace/knowledge');
-						}}
-					>
-						<ChevronLeft className="size-4" strokeWidth="2.5" />
-					</button>
-				</div>
-				<div class="flex-1">
-=======
 				<div class="flex-1 px-1">
->>>>>>> upstream/main
 					<div class="flex items-center justify-between w-full">
 						<div class="w-full flex justify-between items-center">
 							<input
 								type="text"
-<<<<<<< HEAD
-								class="text-left w-full font-medium text-lg font-primary bg-transparent outline-hidden flex-1"
-=======
 								class="text-left w-full text-sm bg-transparent outline-hidden flex-1"
->>>>>>> upstream/main
 								bind:value={knowledge.name}
 								aria-label={$i18n.t('Knowledge Name')}
 								placeholder={$i18n.t('Knowledge Name')}
@@ -2886,11 +2754,7 @@
 		</div>
 
 		<div
-<<<<<<< HEAD
-			class="mt-2 mb-2.5 py-2 -mx-0 bg-white dark:bg-gray-900 rounded-3xl border border-gray-100/30 dark:border-gray-850/30 flex-1 flex flex-col overflow-hidden min-h-0"
-=======
-			class="mt-1.5 mb-2 py-1.5 -mx-0 bg-white dark:bg-gray-900 rounded-3xl border border-gray-100/30 dark:border-gray-850/30 flex-1"
->>>>>>> upstream/main
+			class="mt-1.5 mb-2 py-1.5 -mx-0 bg-white dark:bg-gray-900 rounded-3xl border border-gray-100/30 dark:border-gray-850/30 flex-1 flex flex-col overflow-hidden min-h-0"
 		>
 			{#if isExternalKnowledge}
 				<div class="p-5 flex flex-col gap-4">
@@ -2965,11 +2829,7 @@
 					{/if}
 				</div>
 			{:else}
-<<<<<<< HEAD
-				<div class="px-3.5 flex shrink-0 items-center w-full space-x-2 py-0.5 pb-2">
-=======
-				<div class="px-3 flex flex-1 items-center w-full space-x-1.5">
->>>>>>> upstream/main
+				<div class="px-3 flex shrink-0 items-center w-full space-x-1.5">
 					<div class="flex flex-1 items-center">
 						<div class=" self-center ml-1 mr-2">
 							<Search className="size-3.5" />
@@ -3140,15 +3000,10 @@
 					</div>
 				</div>
 
-<<<<<<< HEAD
 				<!-- Always rendered (not just inside a folder) so entering/leaving the
 				     root doesn't insert/remove the row and shift the list (layout jump). -->
 				{#if !query}
-					<div class="px-4 mt-2 flex shrink-0">
-=======
-				{#if currentDirectoryId !== null}
-					<div class="px-4 mb-1">
->>>>>>> upstream/main
+					<div class="px-4 mb-1 flex shrink-0">
 						<KnowledgeBreadcrumbs
 							rootLabel={knowledge.name}
 							{breadcrumbs}
@@ -3160,15 +3015,10 @@
 				{/if}
 
 				{#if syncing}
-<<<<<<< HEAD
-					<div class="mx-2.5 mt-2.5 -mb-0.5 shrink-0">
-						<div class="flex items-center gap-2.5 rounded-xl py-2 px-3 bg-gray-50 dark:bg-gray-850">
-=======
-					<div class="mx-2 mt-2 -mb-0.5">
+					<div class="mx-2 mt-2 -mb-0.5 shrink-0">
 						<div
 							class="flex items-center gap-2 rounded-xl py-1.5 px-2.5 bg-gray-50 dark:bg-gray-850"
 						>
->>>>>>> upstream/main
 							<Spinner className="size-3.5 shrink-0" />
 							<div class="text-xs text-gray-500 dark:text-gray-400 truncate">
 								{syncing}
@@ -3178,11 +3028,7 @@
 				{/if}
 
 				{#if fileItems !== null && fileItemsTotal !== null}
-<<<<<<< HEAD
-					<div class="flex flex-row flex-1 min-h-0 gap-3 px-2.5 mt-2">
-=======
-					<div class="flex flex-row flex-1 gap-2 px-2">
->>>>>>> upstream/main
+					<div class="flex flex-row flex-1 min-h-0 gap-2 px-2">
 						<div class="flex-1 flex">
 							<div class=" flex flex-col w-full space-x-2 rounded-lg h-full">
 								<div class="w-full h-full flex flex-col min-h-0">
@@ -3191,7 +3037,7 @@
 								     fixed-height by design ("the list never jumps") — gating it on
 								     fileItems alone defeated that, since entering a folder with
 								     files made the header appear and shift the rows down. -->
-								{#if knowledge?.write_access && fileItems && (fileItems.length > 0 || (!query && directoryItems.length > 0))}
+									{#if knowledge?.write_access && fileItems && (fileItems.length > 0 || (!query && directoryItems.length > 0))}
 										<div class="pb-1.5 shrink-0">
 											<KbSelectionHeader
 												count={$bulkCount}
@@ -3300,90 +3146,10 @@
 							</div>
 						</div>
 
-<<<<<<< HEAD
 						<FileItemModal bind:show={showFilePreview} item={selectedFile} edit={false} />
-=======
-						{#if selectedFileId !== null}
-							<Drawer
-								className="h-full"
-								show={selectedFileId !== null}
-								onClose={() => {
-									selectedFileId = null;
-									selectedFile = null;
-									selectedFileContent = '';
-									loadingFileContent = false;
-								}}
-							>
-								<div class="flex flex-col justify-start h-full max-h-full">
-									<div class=" flex flex-col w-full h-full max-h-full">
-										<div class="shrink-0 flex items-center p-2">
-											<div class="mr-2">
-												<button
-													class="w-full text-left text-xs p-1.5 rounded-lg dark:text-gray-300 dark:hover:text-white hover:bg-black/5 dark:hover:bg-gray-850"
-													aria-label={$i18n.t('Close')}
-													on:click={() => {
-														selectedFileId = null;
-														selectedFile = null;
-														selectedFileContent = '';
-														loadingFileContent = false;
-													}}
-												>
-													<ChevronLeft strokeWidth="2.5" />
-												</button>
-											</div>
-											<div class="flex-1 text-sm line-clamp-1">
-												<a
-													href="#"
-													class="hover:underline line-clamp-1"
-													on:click|preventDefault={() => {
-														if (selectedFile?.id) {
-															openFileHandler(selectedFile.id);
-														}
-													}}
-												>
-													{selectedFile?.meta?.name}
-												</a>
-											</div>
-
-											{#if knowledge?.write_access}
-												<div>
-													<button
-														class="flex self-center w-fit text-xs py-1 px-2.5 dark:text-gray-300 dark:hover:text-white hover:bg-black/5 dark:hover:bg-white/5 rounded-lg disabled:opacity-50 disabled:cursor-not-allowed"
-														disabled={isSaving || loadingFileContent}
-														on:click={() => {
-															updateFileContentHandler();
-														}}
-													>
-														{$i18n.t('Save')}
-														{#if isSaving}
-															<div class="ml-2 self-center">
-																<Spinner />
-															</div>
-														{/if}
-													</button>
-												</div>
-											{/if}
-										</div>
-
-										{#key selectedFile?.id}
-											<textarea
-												class="w-full h-full text-xs outline-none resize-none px-3 py-2"
-												bind:value={selectedFileContent}
-												disabled={!knowledge?.write_access || loadingFileContent}
-												aria-label={$i18n.t('File content')}
-												placeholder={$i18n.t('Add content here')}
-											></textarea>
-										{/key}
-									</div>
-								</div>
-							</Drawer>
-						{/if}
 					</div>
 				{:else}
-					<div class="my-10">
-						<Spinner className="size-4" />
->>>>>>> upstream/main
-					</div>
+					<div class="my-10"><Spinner className="size-4" /></div>
 				{/if}
 			{/if}
 		</div>

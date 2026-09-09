@@ -17,7 +17,25 @@
 	/** @type {() => void | Promise<void>} */
 	export let onBack = () => goto('/workspace/knowledge');
 	/** @type {(knowledge: { id: string }) => void | Promise<void>} */
-	export let onCreated = (knowledge) => goto(`/workspace/knowledge/${knowledge.id}`);
+	export let onCreated = (res) => {
+		// [Gradient] Preserve provider auto-sync and assistant-builder return routes.
+		// Preserve returnTo (the builder's "New Knowledge" flow) for
+		// every type, alongside any provider auto-sync trigger, so the
+		// KB detail page can offer a "Back to assistant" return.
+		const params = new URLSearchParams();
+		if (type === 'onedrive') {
+			params.set('start_onedrive_sync', 'true');
+		} else if (type === 'google_drive') {
+			params.set('start_google_drive_sync', 'true');
+		} else if (type === 'confluence') {
+			params.set('start_confluence_sync', 'true');
+		}
+		if (returnTo) {
+			params.set('returnTo', returnTo);
+		}
+		const qs = params.toString();
+		return goto(`/workspace/knowledge/${res.id}${qs ? `?${qs}` : ''}`);
+	};
 
 	let loading = false;
 
@@ -66,26 +84,7 @@
 
 		if (res) {
 			toast.success($i18n.t('Knowledge created successfully.'));
-<<<<<<< HEAD
-			// Preserve returnTo (the builder's "New Knowledge" flow) for
-			// every type, alongside any provider auto-sync trigger, so the
-			// KB detail page can offer a "Back to assistant" return.
-			const params = new URLSearchParams();
-			if (type === 'onedrive') {
-				params.set('start_onedrive_sync', 'true');
-			} else if (type === 'google_drive') {
-				params.set('start_google_drive_sync', 'true');
-			} else if (type === 'confluence') {
-				params.set('start_confluence_sync', 'true');
-			}
-			if (returnTo) {
-				params.set('returnTo', returnTo);
-			}
-			const qs = params.toString();
-			goto(`/workspace/knowledge/${res.id}${qs ? `?${qs}` : ''}`);
-=======
 			await onCreated(res);
->>>>>>> upstream/main
 		}
 
 		loading = false;

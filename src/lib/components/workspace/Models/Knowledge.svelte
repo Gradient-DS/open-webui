@@ -21,7 +21,7 @@
 	import { WEBUI_API_BASE_URL } from '$lib/constants';
 
 	export let selectedItems = [];
-	// When true, the KB selector dropdown shows a "New Knowledge" footer
+	// [Gradient] When true, the KB selector dropdown shows a "New Knowledge" footer
 	// (with cloud-sync type choices) so a KB can be created in-flow —
 	// simple assistant builder only. Its `create` event is forwarded up.
 	export let allowCreate = false;
@@ -188,6 +188,8 @@
 				<div class="flex shrink-0 items-center gap-2">
 					<div class="min-w-0">
 						<KnowledgeSelector
+							{allowCreate}
+							on:create
 							on:select={(e) => {
 								const item = e.detail;
 
@@ -230,49 +232,7 @@
 		{#if selectedItems?.length > 0}
 			<div class=" flex flex-wrap items-center gap-1.5 mb-2.5">
 				{#each selectedItems as file, fileIdx}
-<<<<<<< HEAD
-					<FileItem
-						{file}
-						small={true}
-						item={file}
-						name={file.name}
-						modal={true}
-						edit={true}
-						loading={file.status === 'uploading'}
-						type={file?.legacy
-							? `Legacy${file.type ? ` ${file.type}` : ''}`
-							: (file?.type ?? 'collection')}
-						dismissible
-						on:dismiss={(e) => {
-							selectedItems = selectedItems.filter((_, idx) => idx !== fileIdx);
-						}}
-					/>
-				{/each}
-			</div>
-		{/if}
-
-		{#if loaded}
-			<div class="flex items-center gap-2">
-				<div class="min-w-0">
-					<KnowledgeSelector
-						{allowCreate}
-						on:create
-						on:select={(e) => {
-							const item = e.detail;
-
-							if (!selectedItems.find((k) => k.id === item.id)) {
-								selectedItems = [
-									...selectedItems,
-									{
-										...item
-									}
-								];
-							}
-						}}
-					>
-=======
 					<Tooltip content={file.description || file.name || file.id}>
->>>>>>> upstream/main
 						<div
 							class="flex max-w-56 items-center gap-1.5 py-0.5 pr-2 text-xs text-gray-700 dark:text-gray-200"
 						>

@@ -8,27 +8,18 @@
 		showSidebar,
 		user,
 		mobile,
-<<<<<<< HEAD
-		models,
-		prompts,
-		knowledge,
-		tools
-	} from '$lib/stores';
-	import { page } from '$app/stores';
-	import { goto } from '$app/navigation';
-	import { isFeatureEnabled } from '$lib/utils/features';
-=======
 		workspaceActions,
 		workspaceCounts
 	} from '$lib/stores';
 	import { page } from '$app/stores';
+	// [Gradient] Tenant feature gates also apply to administrators.
+	import { isFeatureEnabled } from '$lib/utils/features';
 	import { goto } from '$app/navigation';
 	import { getModelItems } from '$lib/apis/models';
 	import { searchKnowledgeBases } from '$lib/apis/knowledge';
 	import { getPromptItems } from '$lib/apis/prompts';
 	import { getSkillItems } from '$lib/apis/skills';
 	import { getToolList } from '$lib/apis/tools';
->>>>>>> upstream/main
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
 	import Sidebar from '$lib/components/icons/Sidebar.svelte';
 	import SplitCreateButton from '$lib/components/common/SplitCreateButton.svelte';
@@ -57,11 +48,20 @@
 	const formatCount = (count: number | null) => formatNumber(count ?? 0);
 
 	const loadWorkspaceCounts = async () => {
-		const canViewModels = $user?.role === 'admin' || $user?.permissions?.workspace?.models;
-		const canViewKnowledge = $user?.role === 'admin' || $user?.permissions?.workspace?.knowledge;
-		const canViewPrompts = $user?.role === 'admin' || $user?.permissions?.workspace?.prompts;
-		const canViewSkills = $user?.role === 'admin' || $user?.permissions?.workspace?.skills;
+		const canViewModels =
+			isFeatureEnabled('models') &&
+			($user?.role === 'admin' || $user?.permissions?.workspace?.models);
+		const canViewKnowledge =
+			isFeatureEnabled('knowledge') &&
+			($user?.role === 'admin' || $user?.permissions?.workspace?.knowledge);
+		const canViewPrompts =
+			isFeatureEnabled('prompts') &&
+			($user?.role === 'admin' || $user?.permissions?.workspace?.prompts);
+		const canViewSkills =
+			isFeatureEnabled('skills') &&
+			($user?.role === 'admin' || $user?.permissions?.workspace?.skills);
 		const canViewTools =
+			isFeatureEnabled('tools') &&
 			$config?.features?.enable_plugins &&
 			($user?.role === 'admin' || $user?.permissions?.workspace?.tools);
 
@@ -70,7 +70,9 @@
 				? getModelItems(localStorage.token, null, null, null, null, null, 1).catch(() => null)
 				: null,
 			canViewKnowledge
-				? searchKnowledgeBases(localStorage.token, null, null, 1, null).catch(() => null)
+				? searchKnowledgeBases(localStorage.token, null, null, 1, null, null, null, null).catch(
+						() => null
+					)
 				: null,
 			canViewPrompts
 				? getPromptItems(localStorage.token, null, null, null, null, null, 1).catch(() => null)
@@ -145,11 +147,7 @@
 	Do not alter, remove, obscure, or replace it except as LICENSE permits:
 	https://docs.openwebui.com/license. -->
 	<title>
-<<<<<<< HEAD
 		{$i18n.t('Agents & prompts')} • {$WEBUI_NAME}
-=======
-		{$i18n.t('Workspace')} / {$WEBUI_NAME}
->>>>>>> upstream/main
 	</title>
 </svelte:head>
 
@@ -159,82 +157,6 @@
 			? 'md:max-w-[calc(100%-var(--sidebar-width))]'
 			: 'md:max-w-[calc(100%-42px)]'} max-w-full"
 	>
-<<<<<<< HEAD
-		{#if !$page.url.pathname.includes('/workspace/knowledge') && !$page.url.pathname.includes('/workspace/models') && !$page.url.pathname.includes('/workspace/prompts') && !$page.url.pathname.includes('/workspace/tools') && !$page.url.pathname.includes('/workspace/skills')}
-			<nav class="   px-2.5 pt-1.5 backdrop-blur-xl drag-region">
-				<div class=" flex items-center gap-1">
-					{#if $mobile}
-						<div class="{$showSidebar ? 'md:hidden' : ''} self-center flex flex-none items-center">
-							<Tooltip
-								content={$showSidebar ? $i18n.t('Close Sidebar') : $i18n.t('Open Sidebar')}
-								interactive={true}
-							>
-								<button
-									id="sidebar-toggle-button"
-									class=" cursor-pointer flex rounded-lg hover:bg-gray-100 dark:hover:bg-gray-850 transition cursor-"
-									on:click={() => {
-										showSidebar.set(!$showSidebar);
-									}}
-								>
-									<div class=" self-center p-1.5">
-										<Sidebar />
-									</div>
-								</button>
-							</Tooltip>
-						</div>
-					{/if}
-
-					<div class="">
-						<div
-							class="flex gap-1 scrollbar-none overflow-x-auto w-fit text-center text-sm font-medium bg-transparent py-1 touch-auto pointer-events-auto"
-						>
-							{#if isFeatureEnabled('models') && ($user?.role === 'admin' || $user?.permissions?.workspace?.models)}
-								<a
-									class="min-w-fit p-1.5 rounded-lg {$page.url.pathname.includes(
-										'/workspace/models'
-									)
-										? 'bg-gray-100 dark:bg-gray-800'
-										: 'text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-850'} transition"
-									href="/workspace/models">{$i18n.t('Agents')}</a
-								>
-							{/if}
-
-							{#if isFeatureEnabled('prompts') && ($user?.role === 'admin' || $user?.permissions?.workspace?.prompts)}
-								<a
-									class="min-w-fit p-1.5 rounded-lg {$page.url.pathname.includes(
-										'/workspace/prompts'
-									)
-										? 'bg-gray-100 dark:bg-gray-800'
-										: 'text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-850'} transition"
-									href="/workspace/prompts">{$i18n.t('Prompts')}</a
-								>
-							{/if}
-
-							{#if isFeatureEnabled('tools') && ($user?.role === 'admin' || $user?.permissions?.workspace?.tools)}
-								<a
-									class="min-w-fit p-1.5 rounded-lg {$page.url.pathname.includes('/workspace/tools')
-										? 'bg-gray-100 dark:bg-gray-800'
-										: 'text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-850'} transition"
-									href="/workspace/tools"
-								>
-									{$i18n.t('Tools')}
-								</a>
-							{/if}
-
-							{#if isFeatureEnabled('skills') && ($user?.role === 'admin' || $user?.permissions?.workspace?.skills)}
-								<a
-									class="min-w-fit p-1.5 rounded-lg {$page.url.pathname.includes(
-										'/workspace/skills'
-									)
-										? 'bg-gray-100 dark:bg-gray-800'
-										: 'text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-850'} transition"
-									href="/workspace/skills"
-								>
-									{$i18n.t('Skills')}
-								</a>
-							{/if}
-						</div>
-=======
 		<nav class="pb-1 px-2.5 pt-2 backdrop-blur-xl drag-region select-none">
 			<div class="flex items-center gap-0.5 md:gap-1">
 				{#if $mobile}
@@ -256,34 +178,14 @@
 								</div>
 							</button>
 						</Tooltip>
->>>>>>> upstream/main
 					</div>
+				{/if}
 
-<<<<<<< HEAD
-					<!-- <div class="flex items-center text-xl font-medium">{$i18n.t('Workspace')}</div> -->
-				</div>
-			</nav>
-		{/if}
-
-		<div
-			class="  pb-1 px-3 md:px-[18px] flex-1 max-h-full {$page.url.pathname.includes(
-				'/workspace/knowledge/'
-			)
-				? 'pt-4 overflow-hidden'
-				: 'overflow-y-auto ' +
-					($page.url.pathname.includes('/workspace/knowledge') ||
-					$page.url.pathname.includes('/workspace/models') ||
-					$page.url.pathname.includes('/workspace/prompts') ||
-					$page.url.pathname.includes('/workspace/tools') ||
-					$page.url.pathname.includes('/workspace/skills')
-						? 'pt-4'
-						: '')}"
-=======
 				<div class="flex w-full items-center">
 					<div
 						class="flex min-w-0 mr-1.5 items-center gap-0.5 md:gap-1 scrollbar-none overflow-x-auto w-fit text-center text-sm font-normal rounded-full bg-transparent py-1 touch-auto pointer-events-auto"
 					>
-						{#if $user?.role === 'admin' || $user?.permissions?.workspace?.models}
+						{#if isFeatureEnabled('models') && ($user?.role === 'admin' || $user?.permissions?.workspace?.models)}
 							<a
 								draggable="false"
 								aria-current={activeWorkspaceSection === 'models' ? 'page' : null}
@@ -293,31 +195,16 @@
 									: 'text-gray-300 dark:text-gray-600 hover:text-gray-700 dark:hover:text-white'} transition select-none"
 								href="/workspace/models"
 							>
-								<span>{$i18n.t('Models')}</span>
+								<span>{$i18n.t('Agents')}</span>
 								<span class="text-sm opacity-60">
 									{formatCount($workspaceCounts.models)}
 								</span>
 							</a>
 						{/if}
 
-						{#if $user?.role === 'admin' || $user?.permissions?.workspace?.knowledge}
-							<a
-								draggable="false"
-								aria-current={activeWorkspaceSection === 'knowledge' ? 'page' : null}
-								class="min-w-fit px-1 text-sm inline-flex items-center gap-1 {activeWorkspaceSection ===
-								'knowledge'
-									? 'text-gray-900 dark:text-gray-100'
-									: 'text-gray-300 dark:text-gray-600 hover:text-gray-700 dark:hover:text-white'} transition select-none"
-								href="/workspace/knowledge"
-							>
-								<span>{$i18n.t('Knowledge')}</span>
-								<span class="text-sm opacity-60">
-									{formatCount($workspaceCounts.knowledge)}
-								</span>
-							</a>
-						{/if}
+						<!-- [Gradient] Knowledge navigation lives in the sidebar. -->
 
-						{#if $user?.role === 'admin' || $user?.permissions?.workspace?.prompts}
+						{#if isFeatureEnabled('prompts') && ($user?.role === 'admin' || $user?.permissions?.workspace?.prompts)}
 							<a
 								draggable="false"
 								aria-current={activeWorkspaceSection === 'prompts' ? 'page' : null}
@@ -334,7 +221,7 @@
 							</a>
 						{/if}
 
-						{#if $user?.role === 'admin' || $user?.permissions?.workspace?.skills}
+						{#if isFeatureEnabled('skills') && ($user?.role === 'admin' || $user?.permissions?.workspace?.skills)}
 							<a
 								draggable="false"
 								aria-current={activeWorkspaceSection === 'skills' ? 'page' : null}
@@ -351,7 +238,7 @@
 							</a>
 						{/if}
 
-						{#if $config?.features?.enable_plugins && ($user?.role === 'admin' || $user?.permissions?.workspace?.tools)}
+						{#if isFeatureEnabled('tools') && $config?.features?.enable_plugins && ($user?.role === 'admin' || $user?.permissions?.workspace?.tools)}
 							<a
 								draggable="false"
 								aria-current={activeWorkspaceSection === 'tools' ? 'page' : null}
@@ -379,8 +266,11 @@
 		</nav>
 
 		<div
-			class="  pb-1 px-3 flex-1 min-w-0 max-h-full overflow-y-auto overflow-x-hidden"
->>>>>>> upstream/main
+			class="pb-1 px-3 md:px-[18px] flex-1 min-h-0 min-w-0 max-h-full {$page.url.pathname.includes(
+				'/workspace/knowledge/'
+			)
+				? 'pt-4 overflow-hidden'
+				: 'overflow-y-auto overflow-x-hidden'}"
 			id="workspace-container"
 		>
 			<slot />
