@@ -1,10 +1,13 @@
-**Status: 7 open findings — 6 application bugs (PLANE-001–006), 1 unresolved cause (PLANE-007); CI-stack gaps: 0 open, 1 confirmed fixed (CI-001).**
+**Status: 10 open findings (PLANE-001–010); CI-stack gaps: 0 open, 2 fixed (CI-001, CI-002).**
 
 **The live 5xx assertions are EXPECTED to be red while application findings are open.**
-Phase 8 decides fixes versus acceptance; the gate and expectations remain unchanged.
-Latest reviewer run after the stub restart: **2 failed, 307 passed in 252s**.
-Both failures are the seeding/drive 5xx assertions; both DELETE routes are gone
-from the 5xx set, confirming CI-001 fixed for terminals and Ollama.
+Latest reviewer run: **4 failed, 381 passed, 9 errors in 350s**. Three failures
+are per-module 5xx gates reporting application findings. The other failure is
+the model-output control; the nine setup errors report the crossuser reset-token
+surface defect. Harness corrections do not accept or suppress any 5xx.
+The reviewer reports growth from 6 to 13 routes and supplies eight newly surfaced
+method/templates below. The abbreviated log is insufficient to reconcile that
+union; this document retains all supplied routes without inventing a current set.
 
 Quick comparison for a red gate:
 
@@ -17,6 +20,9 @@ Quick comparison for a red gate:
 | `POST /api/v1/data-warnings/accept` | PLANE-005 | Open application bug; latest run |
 | `POST /api/v1/images/generations` | PLANE-006 | Open application bug; newly recorded from latest run |
 | `GET /api/v1/discovery/documents` | PLANE-007 | Open, cause unresolved; newly recorded from latest run |
+| `GET /api/v1/chats/archived`, `GET /api/v1/chats/shared`, `GET /api/v1/chats/list/user/{user_id}` | PLANE-008 | Open; shared sorting failure path, live traceback needed |
+| `POST /api/v1/tasks/{follow_up,title,tags,image_prompt}/completions` | PLANE-009 | Open; shared message-template failure path, live traceback needed |
+| `GET /api/v1/utils/gravatar` | PLANE-010 | Open; cause unresolved |
 | Terminal and indexed Ollama DELETE | CI-001 | CI-stack gap confirmed fixed; recurrence needs investigation |
 
 Payload sampling varies per run: the routes surfaced by one sampled run are not
@@ -24,10 +30,10 @@ the full failure set. This file accumulates findings across runs; absence from
 the latest run does not close a finding. A listed route with the documented
 failure signature is known-open; an unlisted route, a different cause/status/body,
 or a recurrence of CI-001 needs investigation as potentially new evidence.
-PLANE-007 is a known observation, not a settled cause. A matching total of two
+PLANE-007 is a known observation, not a settled cause. A matching total of
 failed tests alone cannot distinguish old failures from new ones.
 
-RUN-TAG: owui-phase7a-finish-findings
+RUN-TAG: owui-phase7b-fix-live-defects
 
 ## PLANE-001: Unvalidated configuration writes poison typed downstream consumers
 
@@ -376,6 +382,125 @@ feature-disabled message is a separate configuration condition. If the original
 500 does not recur, retain this finding until its recorded request and stack
 state explain it; a passing probe alone does not close it.
 
+## PLANE-008: Chat list sorting inputs raise uncaught exceptions
+
+Status: **open, to be fixed on dev**. The reviewer reports 5xx for
+`GET /api/v1/chats/archived`, `GET /api/v1/chats/shared`, and
+`GET /api/v1/chats/list/user/{user_id}` after enabling the query pass.
+Exact per-route statuses, query values, response bodies and tracebacks were not
+supplied. Source locations below are relative to `backend/open_webui/`.
+
+Grouped by the shared sorting-input mechanism:
+
+- `routers/chats.py:603,904,1012` accepts unrestricted `order_by` and `direction`
+  strings and forwards them in a filter at `630,927,1035` respectively.
+- Archived: `models/chats.py:979–988` raises `ValueError` for an unknown sort
+  field or invalid direction. User list: `models/chats.py:1061` uses
+  `getattr(Chat, order_by)` without a default, raising `AttributeError` for an
+  unknown field; `1067` raises `ValueError` for an invalid direction.
+- Shared: `models/shared_chats.py:153–162` likewise raises `ValueError` for an
+  unknown field or direction. These handlers do not translate those exceptions
+  into a client error. The query pass supplies both fields in its combined probe,
+  satisfying the condition required to enter these branches.
+
+Source-derived reproduction (use the plane's seeded user ID for `SEEDED_USER_ID`
+and its admin bearer; admin chat access must be enabled for the user-list route):
+
+```sh
+for path in archived shared "list/user/$SEEDED_USER_ID"; do
+  curl -i -G "$ATTACK_BASE_URL/api/v1/chats/$path" \
+    -H "Authorization: Bearer $ADMIN_TOKEN" \
+    --data-urlencode 'order_by=plane_invalid_sort' --data-urlencode 'direction=asc'
+done
+```
+
+Expected source failure: `Invalid order_by field` on archived/shared, and an
+`AttributeError` on the user list. A second probe with `order_by=updated_at` and
+`direction=plane_invalid_direction` exercises the explicit direction errors.
+These branches establish a common failure mechanism, but this sandbox cannot
+confirm that they produced every reported live 5xx. Retain the sampled requests
+and full container exception chains to match the observations; a DB or middleware
+exception would require separate attribution.
+
+**Also observed 2026-09-08, same shape:**
+`GET /api/v1/evaluations/feedback/conversation/{chat_id}` answers 500
+(`HTTP {500: 2}`, body `Internal Server Error`). It matters beyond its own fault:
+it is an OWNER positive control in the authorization pass, so while it faults
+that pass reports `isolation remains unproven` for the route rather than
+claiming a pass. A control that cannot succeed cannot demonstrate isolation.
+
+## PLANE-009: Task completion templates consume incompletely validated messages
+
+Status: **open, to be fixed on dev**. The reviewer reports 5xx on
+`POST /api/v1/tasks/follow_up/completions` (**HTTP {500: 16}**),
+`POST /api/v1/tasks/title/completions`,
+`POST /api/v1/tasks/tags/completions`, and
+`POST /api/v1/tasks/image_prompt/completions`. Bodies, sampled fields and
+tracebacks were not supplied. Grouped by the shared pre-completion template path;
+this is source-supported reproduction, not a claim that all live exceptions
+have already been matched to this cause.
+
+`services/model_request_bodies.py:35–47,76–89,138–139` permits content blocks with no
+`type` and returns the original request dictionary through the task dependency.
+The four handlers call their templates at `routers/tasks.py:171,252,324,390`,
+before the final completion exception handlers. Their templates at
+`utils/task.py:304–339` all call `get_last_user_message` and
+`replace_messages_variable`. `utils/misc.py:164–168` indexes `item['type']`
+and then `item['text']` without checking presence. A schema-valid content block
+containing only `text` therefore raises `KeyError: 'type'` before model execution.
+
+Offline AST execution of the actual four template functions and message helpers
+reproduced that exception for every template. This check bypasses HTTP,
+authentication, configuration, model selection and middleware; it establishes
+the shared source mechanism but cannot identify the reviewer's 16 exceptions.
+
+Source-derived reproduction (use a discovered model ID in `MODEL_ID`; title,
+follow-up and tags generation must be enabled in the existing stack):
+
+```sh
+for task in follow_up title tags image_prompt; do
+  curl -i "$ATTACK_BASE_URL/api/v1/tasks/$task/completions" \
+    -H "Authorization: Bearer $ADMIN_TOKEN" -H 'Content-Type: application/json' \
+    --data "{\"model\":\"$MODEL_ID\",\"messages\":[{\"role\":\"user\",\"content\":[{\"text\":\"probe\"}]}]}"
+done
+```
+
+Expected source failure with those prerequisites: uncaught `KeyError: 'type'`.
+Save the actual request, active task configuration and full traceback from the
+reported run before attributing its failures. In particular, the tags handler
+also converts final completion exceptions to HTTP 500 at `routers/tasks.py:347–351`;
+the other three convert exceptions in that final block to HTTP 400. A tags 500
+alone cannot distinguish template failure from that separate downstream path.
+
+## PLANE-010: Gravatar lookup returns a live 5xx with unresolved cause
+
+Status: **open, to be fixed on dev**. The reviewer supplied the truncated route
+`GET /api/v1/utils/gravatar` in the new 5xx set, without its request or traceback.
+The exact method/template is confirmed by `routers/utils.py:38–40` and the
+`/api/v1/utils` mount at `main.py:1077`; there is no path parameter or trailing
+slash in the declaration. `email` is a required string query parameter.
+
+The handler calls `utils/misc.py:659–670`, which strips/lowercases the email,
+encodes it, computes SHA-256 and returns a Gravatar URL. It performs no upstream
+image request. Offline execution with an ordinary email returns that URL.
+The supplied evidence does not establish why the live request returned 5xx;
+do not attribute it to Gravatar connectivity or a particular encoding,
+authentication or middleware error without the exception chain.
+
+Baseline probe, not an established exact reproduction of the reported failure:
+
+```sh
+curl -i -G "$ATTACK_BASE_URL/api/v1/utils/gravatar" \
+  -H "Authorization: Bearer $ADMIN_TOKEN" \
+  --data-urlencode 'email=probe@example.com'
+```
+
+With healthy authentication/middleware the reviewed source returns HTTP 200
+with a JSON URL string. Replay the query pass's exact sampled `email`, retaining
+request timestamp, method/path/query, response status/body, deployed revision and
+complete application traceback. A passing baseline does not close the recorded
+finding. Cause remains unresolved without the stack.
+
 ## CI-001: Missing stub DELETE produces upstream 501 responses
 
 Scope: **CI stack gap, not an application finding**. Status: **confirmed fixed**.
@@ -435,3 +560,12 @@ Expected direct responses are terminal 200 JSON and indexed Ollama 200 (`true`)
 if its remaining application/event path succeeds. The reviewer confirmed absence
 from the 5xx set, not these exact successful bodies. No 5xx exception
 or accepted-finding entry was added to the plane gate or expectations.
+
+## CI-002: the stub answered only some forwarded methods
+
+Status: **fixed**. `routers/terminals.py` forwards every method in
+`PROXY_METHODS`; the stub implemented GET, POST, DELETE and PUT, so PATCH (and
+OPTIONS, HEAD) fell through to BaseHTTPRequestHandler's 501 HTML error page,
+which the proxy returned as a 5xx indistinguishable from an application fault.
+Recorded because it was briefly mistaken for one: `PATCH /api/v1/terminals/...`
+appeared in the 5xx set with `HTTP {501: 7}` and an HTML body.
