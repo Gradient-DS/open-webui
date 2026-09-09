@@ -101,6 +101,13 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+      args:
+        # Production builds slim (.github/workflows/docker-build-soev.yaml), which
+        # drops torch, transformers, accelerate and the rest of the local ML stack
+        # and requires external APIs for embeddings, TTS and STT -- all of which
+        # this stack stubs. Building the full image here would drive code paths
+        # production does not ship and miss the ones it does.
+        USE_SLIM: 'true'
     environment:
       # Stop GitHub update checks and Hugging Face downloads on normal requests.
       OFFLINE_MODE: "true"
