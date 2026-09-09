@@ -1,4 +1,6 @@
 <script lang="ts">
+	// [Gradient] Preserve tenant gates in both personal and default interface settings.
+	import { isFeatureEnabled } from '$lib/utils/features';
 	import { config, settings, user } from '$lib/stores';
 	import { onMount, getContext } from 'svelte';
 	import { toast } from 'svelte-sonner';
@@ -46,6 +48,8 @@
 
 	let highContrastMode = false;
 
+	// [Gradient] Document Writer detection is independent of artifacts.
+	let detectDocuments = true;
 	let detectArtifacts = true;
 	let displayMultiModelResponsesInTabs = false;
 
@@ -319,6 +323,7 @@
 
 		highContrastMode = currentSettings?.highContrastMode ?? false;
 
+		detectDocuments = currentSettings?.detectDocuments ?? true;
 		detectArtifacts = currentSettings?.detectArtifacts ?? true;
 		responseAutoCopy = currentSettings?.responseAutoCopy ?? false;
 
@@ -701,7 +706,7 @@
 		</p>
 	</div>
 
-	{#if $user?.role === 'admin'}
+	{#if $user?.role === 'admin' && isFeatureEnabled('changelog')}
 		<div>
 			<div class={settingRowClass}>
 				<div id="toast-notifications-label" class={settingLabelClass}>
@@ -1664,170 +1669,195 @@
 		</p>
 	</div>
 
-	<div class={sectionHeadingClass}>{$i18n.t('Artifacts')}</div>
+	<!-- [Gradient] Gate the full artifacts section, including sandbox options. -->
+	{#if isFeatureEnabled('artifacts')}
+		<div class={sectionHeadingClass}>{$i18n.t('Artifacts')}</div>
 
-	<div>
-		<div class={settingRowClass}>
-			<div id="detect-artifacts-label" class={settingLabelClass}>
-				{$i18n.t('Detect Artifacts Automatically')}
+		<div>
+			<div class={settingRowClass}>
+				<div id="detect-artifacts-label" class={settingLabelClass}>
+					{$i18n.t('Detect Artifacts Automatically')}
+				</div>
+
+				<div class={settingControlClass}>
+					<Switch
+						ariaLabelledbyId="detect-artifacts-label"
+						tooltip={true}
+						bind:state={detectArtifacts}
+						inherited={isDefaultSetting('detectArtifacts')}
+						on:change={() => {
+							saveSettings({ detectArtifacts });
+						}}
+					/>
+				</div>
 			</div>
+			<p class={settingDescriptionClass}>
+				{$i18n.t('Detect generated artifacts and show them in the artifact workspace.')}
+			</p>
+		</div>
 
-			<div class={settingControlClass}>
-				<Switch
-					ariaLabelledbyId="detect-artifacts-label"
-					tooltip={true}
-					bind:state={detectArtifacts}
-					inherited={isDefaultSetting('detectArtifacts')}
-					on:change={() => {
-						saveSettings({ detectArtifacts });
-					}}
-				/>
+		<div>
+			<div class={settingRowClass}>
+				<div id="iframe-sandbox-allow-scripts-label" class={settingLabelClass}>
+					{$i18n.t('iframe Sandbox Allow Scripts')}
+				</div>
+
+				<div class={settingControlClass}>
+					<Switch
+						ariaLabelledbyId="iframe-sandbox-allow-scripts-label"
+						tooltip={true}
+						bind:state={iframeSandboxAllowScripts}
+						inherited={isDefaultSetting('iframeSandboxAllowScripts')}
+						on:change={() => {
+							saveSettings({ iframeSandboxAllowScripts });
+						}}
+					/>
+				</div>
+			</div>
+			<p class={settingDescriptionClass}>
+				{$i18n.t('Allow scripts inside sandboxed iframes.')}
+			</p>
+		</div>
+
+		<div>
+			<div class={settingRowClass}>
+				<div id="iframe-sandbox-allow-same-origin-label" class={settingLabelClass}>
+					{$i18n.t('iframe Sandbox Allow Same Origin')}
+				</div>
+
+				<div class={settingControlClass}>
+					<Switch
+						ariaLabelledbyId="iframe-sandbox-allow-same-origin-label"
+						tooltip={true}
+						bind:state={iframeSandboxAllowSameOrigin}
+						inherited={isDefaultSetting('iframeSandboxAllowSameOrigin')}
+						on:change={() => {
+							saveSettings({ iframeSandboxAllowSameOrigin });
+						}}
+					/>
+				</div>
+			</div>
+			<p class={settingDescriptionClass}>
+				{$i18n.t('Allow artifacts to access same-origin browser APIs inside the sandbox.')}
+			</p>
+		</div>
+
+		<div>
+			<div class={settingRowClass}>
+				<div id="iframe-sandbox-allow-forms-label" class={settingLabelClass}>
+					{$i18n.t('iframe Sandbox Allow Forms')}
+				</div>
+
+				<div class={settingControlClass}>
+					<Switch
+						ariaLabelledbyId="iframe-sandbox-allow-forms-label"
+						tooltip={true}
+						bind:state={iframeSandboxAllowForms}
+						inherited={isDefaultSetting('iframeSandboxAllowForms')}
+						on:change={() => {
+							saveSettings({ iframeSandboxAllowForms });
+						}}
+					/>
+				</div>
+			</div>
+			<p class={settingDescriptionClass}>
+				{$i18n.t('Allow forms inside sandboxed artifact iframes.')}
+			</p>
+		</div>
+
+		<div>
+			<div class={settingRowClass}>
+				<div id="iframe-sandbox-allow-downloads-label" class={settingLabelClass}>
+					{$i18n.t('iframe Sandbox Allow Downloads')}
+				</div>
+
+				<div class={settingControlClass}>
+					<Switch
+						ariaLabelledbyId="iframe-sandbox-allow-downloads-label"
+						tooltip={true}
+						bind:state={iframeSandboxAllowDownloads}
+						inherited={isDefaultSetting('iframeSandboxAllowDownloads')}
+						on:change={() => {
+							saveSettings({ iframeSandboxAllowDownloads });
+						}}
+					/>
+				</div>
+			</div>
+			<p class={settingDescriptionClass}>
+				{$i18n.t('Allow downloads inside sandboxed iframes.')}
+			</p>
+		</div>
+	{/if}
+	<!-- [Gradient] Document Writer detection follows the shared settings inheritance. -->
+	{#if isFeatureEnabled('document_writer')}
+		<div class={sectionHeadingClass}>{$i18n.t('Document Writer')}</div>
+		<div>
+			<div class={settingRowClass}>
+				<div id="detect-documents-label" class={settingLabelClass}>
+					{$i18n.t('Detect Documents Automatically')}
+				</div>
+				<div class={settingControlClass}>
+					<Switch
+						ariaLabelledbyId="detect-documents-label"
+						tooltip={true}
+						bind:state={detectDocuments}
+						inherited={isDefaultSetting('detectDocuments')}
+						on:change={() => saveSettings({ detectDocuments })}
+					/>
+				</div>
 			</div>
 		</div>
-		<p class={settingDescriptionClass}>
-			{$i18n.t('Detect generated artifacts and show them in the artifact workspace.')}
-		</p>
-	</div>
+	{/if}
+	<!-- [Gradient] Voice controls follow the deployment feature gate. -->
+	{#if isFeatureEnabled('voice')}
+		<div class={sectionHeadingClass}>{$i18n.t('Voice')}</div>
 
-	<div>
-		<div class={settingRowClass}>
-			<div id="iframe-sandbox-allow-scripts-label" class={settingLabelClass}>
-				{$i18n.t('iframe Sandbox Allow Scripts')}
-			</div>
+		<div>
+			<div class={settingRowClass}>
+				<div class={settingLabelClass} id="allow-voice-interruption-in-call-label">
+					{$i18n.t('Allow Voice Interruption in Call')}
+				</div>
 
-			<div class={settingControlClass}>
-				<Switch
-					ariaLabelledbyId="iframe-sandbox-allow-scripts-label"
-					tooltip={true}
-					bind:state={iframeSandboxAllowScripts}
-					inherited={isDefaultSetting('iframeSandboxAllowScripts')}
-					on:change={() => {
-						saveSettings({ iframeSandboxAllowScripts });
-					}}
-				/>
+				<div class={settingControlClass}>
+					<Switch
+						ariaLabelledbyId="allow-voice-interruption-in-call-label"
+						tooltip={true}
+						bind:state={voiceInterruption}
+						inherited={isDefaultSetting('voiceInterruption')}
+						on:change={() => {
+							saveSettings({ voiceInterruption });
+						}}
+					/>
+				</div>
 			</div>
+			<p class={settingDescriptionClass}>
+				{$i18n.t('Let speech interrupt the assistant during a voice call.')}
+			</p>
 		</div>
-		<p class={settingDescriptionClass}>
-			{$i18n.t('Allow scripts inside sandboxed iframes.')}
-		</p>
-	</div>
 
-	<div>
-		<div class={settingRowClass}>
-			<div id="iframe-sandbox-allow-same-origin-label" class={settingLabelClass}>
-				{$i18n.t('iframe Sandbox Allow Same Origin')}
-			</div>
+		<div>
+			<div class={settingRowClass}>
+				<div id="display-emoji-label" class={settingLabelClass}>
+					{$i18n.t('Display Emoji in Call')}
+				</div>
 
-			<div class={settingControlClass}>
-				<Switch
-					ariaLabelledbyId="iframe-sandbox-allow-same-origin-label"
-					tooltip={true}
-					bind:state={iframeSandboxAllowSameOrigin}
-					inherited={isDefaultSetting('iframeSandboxAllowSameOrigin')}
-					on:change={() => {
-						saveSettings({ iframeSandboxAllowSameOrigin });
-					}}
-				/>
+				<div class={settingControlClass}>
+					<Switch
+						ariaLabelledbyId="display-emoji-label"
+						tooltip={true}
+						bind:state={showEmojiInCall}
+						inherited={isDefaultSetting('showEmojiInCall')}
+						on:change={() => {
+							saveSettings({ showEmojiInCall });
+						}}
+					/>
+				</div>
 			</div>
+			<p class={settingDescriptionClass}>
+				{$i18n.t('Show emoji feedback in the call interface.')}
+			</p>
 		</div>
-		<p class={settingDescriptionClass}>
-			{$i18n.t('Allow artifacts to access same-origin browser APIs inside the sandbox.')}
-		</p>
-	</div>
-
-	<div>
-		<div class={settingRowClass}>
-			<div id="iframe-sandbox-allow-forms-label" class={settingLabelClass}>
-				{$i18n.t('iframe Sandbox Allow Forms')}
-			</div>
-
-			<div class={settingControlClass}>
-				<Switch
-					ariaLabelledbyId="iframe-sandbox-allow-forms-label"
-					tooltip={true}
-					bind:state={iframeSandboxAllowForms}
-					inherited={isDefaultSetting('iframeSandboxAllowForms')}
-					on:change={() => {
-						saveSettings({ iframeSandboxAllowForms });
-					}}
-				/>
-			</div>
-		</div>
-		<p class={settingDescriptionClass}>
-			{$i18n.t('Allow forms inside sandboxed artifact iframes.')}
-		</p>
-	</div>
-
-	<div>
-		<div class={settingRowClass}>
-			<div id="iframe-sandbox-allow-downloads-label" class={settingLabelClass}>
-				{$i18n.t('iframe Sandbox Allow Downloads')}
-			</div>
-
-			<div class={settingControlClass}>
-				<Switch
-					ariaLabelledbyId="iframe-sandbox-allow-downloads-label"
-					tooltip={true}
-					bind:state={iframeSandboxAllowDownloads}
-					inherited={isDefaultSetting('iframeSandboxAllowDownloads')}
-					on:change={() => {
-						saveSettings({ iframeSandboxAllowDownloads });
-					}}
-				/>
-			</div>
-		</div>
-		<p class={settingDescriptionClass}>
-			{$i18n.t('Allow downloads inside sandboxed iframes.')}
-		</p>
-	</div>
-
-	<div class={sectionHeadingClass}>{$i18n.t('Voice')}</div>
-
-	<div>
-		<div class={settingRowClass}>
-			<div class={settingLabelClass} id="allow-voice-interruption-in-call-label">
-				{$i18n.t('Allow Voice Interruption in Call')}
-			</div>
-
-			<div class={settingControlClass}>
-				<Switch
-					ariaLabelledbyId="allow-voice-interruption-in-call-label"
-					tooltip={true}
-					bind:state={voiceInterruption}
-					inherited={isDefaultSetting('voiceInterruption')}
-					on:change={() => {
-						saveSettings({ voiceInterruption });
-					}}
-				/>
-			</div>
-		</div>
-		<p class={settingDescriptionClass}>
-			{$i18n.t('Let speech interrupt the assistant during a voice call.')}
-		</p>
-	</div>
-
-	<div>
-		<div class={settingRowClass}>
-			<div id="display-emoji-label" class={settingLabelClass}>
-				{$i18n.t('Display Emoji in Call')}
-			</div>
-
-			<div class={settingControlClass}>
-				<Switch
-					ariaLabelledbyId="display-emoji-label"
-					tooltip={true}
-					bind:state={showEmojiInCall}
-					inherited={isDefaultSetting('showEmojiInCall')}
-					on:change={() => {
-						saveSettings({ showEmojiInCall });
-					}}
-				/>
-			</div>
-		</div>
-		<p class={settingDescriptionClass}>
-			{$i18n.t('Show emoji feedback in the call interface.')}
-		</p>
-	</div>
+	{/if}
 
 	<div class={sectionHeadingClass}>{$i18n.t('File')}</div>
 

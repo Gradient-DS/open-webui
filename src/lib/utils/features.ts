@@ -2,6 +2,10 @@ import { get } from 'svelte/store';
 import { config } from '$lib/stores';
 
 export type Feature =
+	// [Gradient] Match the backend tenant gates used by chat settings.
+	| 'tool_servers'
+	| 'terminal_servers'
+	| 'user_demographics'
 	| 'chat_controls'
 	| 'capture'
 	| 'artifacts'

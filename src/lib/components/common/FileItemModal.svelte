@@ -4,7 +4,7 @@
 	import { getContext, onMount, tick } from 'svelte';
 
 	import { formatFileSize, getLineCount } from '$lib/utils';
-	import { renderDocxHtml, readWorkbook, renderSheetHtml } from '$lib/utils/officePreview';
+	import { readWorkbook, renderSheetHtml } from '$lib/utils/officePreview';
 	import { WEBUI_API_BASE_URL } from '$lib/constants';
 	import { settings } from '$lib/stores';
 	import { getKnowledgeById } from '$lib/apis/knowledge';
@@ -58,10 +58,7 @@
 	$: hasAttachments = attachments.length > 0;
 	$: planAttachments = attachments
 		.filter((a) => a.kind === 'plan_png')
-		.sort(
-			(a, b) =>
-				(a.storey ?? '').localeCompare(b.storey ?? '') || a.index - b.index
-		);
+		.sort((a, b) => (a.storey ?? '').localeCompare(b.storey ?? '') || a.index - b.index);
 	$: axonAttachments = attachments.filter((a) => a.kind === 'axon_png');
 
 	const attachmentUrl = (fileId: string, attachmentId: string): string =>
@@ -192,13 +189,7 @@
 	const loadDocxContent = async () => {
 		try {
 			docxError = '';
-<<<<<<< HEAD
-			const arrayBuffer = await getFileContentById(item.id);
-			if (!arrayBuffer) throw new Error('Empty file content');
-			docxHtml = await renderDocxHtml(arrayBuffer);
-=======
 			docxData = await getFileContentById(item.id);
->>>>>>> upstream/main
 		} catch (error) {
 			console.error('Error loading DOCX file:', error);
 			docxError = $i18n.t('Failed to load DOCX file. Please try downloading it instead.');

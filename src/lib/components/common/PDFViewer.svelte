@@ -10,7 +10,6 @@
 	export let url: string | null = null;
 	export let data: ArrayBuffer | Uint8Array | null = null;
 	export let className = 'w-full h-[70vh]';
-<<<<<<< HEAD
 	// `highlightText` / `initialPage` / `highlightRects` seed the viewer's own
 	// highlight state (see below) and are re-read whenever the parent changes
 	// them. Inside a click handler the parent's values are still a tick stale,
@@ -71,7 +70,6 @@
 	// coincidental phrase (e.g. a title) when the cited text isn't really in
 	// the PDF text layer (scanned pages) — in that case we page-jump instead.
 	const MIN_MATCH_CHARS = 25;
-=======
 	export let targetPage: number | null = null;
 	export let singlePage = false;
 	export let itemLabel = 'Page';
@@ -79,7 +77,6 @@
 
 	type PdfDocument = import('pdfjs-dist').PDFDocumentProxy;
 	type PdfTextLayer = InstanceType<typeof import('pdfjs-dist').TextLayer>;
->>>>>>> upstream/main
 
 	let outerContainer: HTMLDivElement;
 	let sceneElement: HTMLDivElement;
@@ -107,8 +104,7 @@
 	$: selectedPage = singlePage ? (clampDocumentTargetPage(targetPage, pageCount) ?? 1) : activePage;
 
 	// Keep a reference to TextLayer instances so we can update/cancel them
-<<<<<<< HEAD
-	let textLayerInstances: any[] = [];
+
 	// Per-page text-layer container divs (index 0 == page 1). Lets us re-match
 	// highlights against already-rendered spans without re-rendering canvases.
 	let pageTextLayerDivs: HTMLElement[] = [];
@@ -157,6 +153,7 @@
 	const _clearHighlights = () => {
 		let cleared = false;
 		for (const textLayerDiv of pageTextLayerDivs) {
+			if (!textLayerDiv) continue;
 			for (const span of textLayerDiv.querySelectorAll(`span.${HIGHLIGHT_CLASS}`)) {
 				span.classList.remove(HIGHLIGHT_CLASS);
 				cleared = true;
@@ -198,7 +195,9 @@
 
 	const _scrollToPage = (page: number) => {
 		if (!page || page < 1) return;
-		const wrapper = sceneElement?.querySelectorAll<HTMLElement>('.pdf-page-wrapper')[page - 1];
+		const wrapper = sceneElement?.querySelector<HTMLElement>(
+			`.pdf-page-wrapper[data-page-number="${page}"]`
+		);
 		if (wrapper) {
 			_scrollContainerTo(wrapper, 'top');
 		}
@@ -213,6 +212,7 @@
 	 */
 	const _applyRectHighlights = (): boolean => {
 		for (const layer of bboxLayerDivs) {
+			if (!layer) continue;
 			layer.innerHTML = '';
 		}
 		const rects = hlRects ?? [];
@@ -265,6 +265,7 @@
 		if (needle) {
 			let best: PageMatch | null = null;
 			for (const textLayerDiv of pageTextLayerDivs) {
+				if (!textLayerDiv) continue;
 				const page = _scorePage(textLayerDiv, needle);
 				if (page.score > (best?.score ?? 0)) {
 					best = page;
@@ -299,7 +300,6 @@
 		hlRects = rects;
 		_applyBestMatchHighlight();
 	}
-=======
 	let textLayerInstances: PdfTextLayer[] = [];
 
 	const copyPdfData = (pdfData: ArrayBuffer | Uint8Array) =>
@@ -315,7 +315,6 @@
 		}
 		textLayerInstances = [];
 	};
->>>>>>> upstream/main
 
 	const initPanzoom = () => {
 		if (pzInstance) {
@@ -460,21 +459,16 @@
 
 		const pageWrappers = sceneElement.querySelectorAll('.pdf-page-wrapper');
 
-<<<<<<< HEAD
-		// Cancel old text layers
-		for (const tl of textLayerInstances) {
-			try {
-				tl.cancel();
-			} catch (_) {}
-		}
-		textLayerInstances = [];
-		pageTextLayerDivs = [];
-=======
 		cancelTextLayers();
->>>>>>> upstream/main
+		// [Gradient] Clear page-indexed citation layers on document replacement.
+		pageTextLayerDivs = [];
+		bboxLayerDivs = [];
+		pageBaseDims = [];
 
 		for (let i = 0; i < pageWrappers.length; i++) {
-			const page = await pdfDoc.getPage(singlePage ? selectedPage : i + 1);
+			// [Gradient] Zoom loops over rendered wrappers, not absolute PDF pages.
+			const pageNumber = singlePage ? selectedPage : i + 1;
+			const page = await pdfDoc.getPage(pageNumber);
 			const viewport = page.getViewport({ scale: 1 });
 			const cssScale = getCssScale(viewport);
 			const renderScale = cssScale * forZoom * dpr;
@@ -482,6 +476,9 @@
 			const cssViewport = page.getViewport({ scale: cssScale });
 
 			const wrapper = pageWrappers[i] as HTMLElement;
+			const bboxLayer = wrapper.querySelector('.bboxLayer') as HTMLElement | null;
+			if (bboxLayer) bboxLayerDivs[pageNumber - 1] = bboxLayer;
+			pageBaseDims[pageNumber - 1] = { width: viewport.width, height: viewport.height };
 			// Update the CSS custom property so textLayer dimensions resolve correctly
 			wrapper.style.setProperty('--scale-factor', String(cssViewport.scale));
 
@@ -507,7 +504,7 @@
 				});
 				await textLayer.render();
 				textLayerInstances.push(textLayer);
-				pageTextLayerDivs.push(textLayerDiv);
+				pageTextLayerDivs[pageNumber - 1] = textLayerDiv;
 			}
 		}
 		lastRenderedZoom = forZoom;
@@ -529,23 +526,11 @@
 		// Clear previous content
 		sceneElement.innerHTML = '';
 
-<<<<<<< HEAD
-		// Cancel old text layers
-		for (const tl of textLayerInstances) {
-			try {
-				tl.cancel();
-			} catch (_) {}
-		}
-		textLayerInstances = [];
+		cancelTextLayers();
+		// [Gradient] Citation arrays use absolute page indices in single-page mode too.
 		pageTextLayerDivs = [];
 		bboxLayerDivs = [];
 		pageBaseDims = [];
-
-		const pdfjs = await import('pdfjs-dist');
-		const dpr = window.devicePixelRatio || 1;
-		for (let i = 1; i <= pdfDoc.numPages; i++) {
-=======
-		cancelTextLayers();
 
 		const pdfjs = await import('pdfjs-dist');
 		const dpr = window.devicePixelRatio || 1;
@@ -554,7 +539,6 @@
 		const lastPage = singlePage ? selectedPage : pdfDoc.numPages;
 
 		for (let i = firstPage; i <= lastPage; i++) {
->>>>>>> upstream/main
 			const page = await pdfDoc.getPage(i);
 			if (token !== renderToken) return;
 			const viewport = page.getViewport({ scale: 1 });
@@ -615,30 +599,28 @@
 			await textLayer.render();
 			if (token !== renderToken) return;
 			textLayerInstances.push(textLayer);
-			pageTextLayerDivs.push(textLayerDiv);
+			pageTextLayerDivs[i - 1] = textLayerDiv;
 
 			// Bbox overlay — sits above the text layer but is click-transparent
 			// so selection/search still hit the text spans underneath.
 			const bboxLayerDiv = document.createElement('div');
 			bboxLayerDiv.className = 'bboxLayer';
 			wrapper.appendChild(bboxLayerDiv);
-			bboxLayerDivs.push(bboxLayerDiv);
-			pageBaseDims.push({ width: viewport.width, height: viewport.height });
+			bboxLayerDivs[i - 1] = bboxLayerDiv;
+			pageBaseDims[i - 1] = { width: viewport.width, height: viewport.height };
 
 			wrappers.push(wrapper);
 		}
 
 		sceneElement.replaceChildren(...wrappers);
 		lastRenderedZoom = 1;
-<<<<<<< HEAD
 		layersRendered = true;
-		initPanzoom();
-		_applyBestMatchHighlight();
-=======
 		renderedPage = singlePage ? selectedPage : 0;
 		initPanzoom();
 		await scrollToTargetPage();
 		syncVisiblePage();
+		// [Gradient] Citation scroll must follow the normal page scroll.
+		_applyBestMatchHighlight();
 	};
 
 	const handleWheel = (e: WheelEvent) => {
@@ -691,7 +673,6 @@
 
 	const focusViewer = () => {
 		if (!outerContainer?.contains(document.activeElement)) outerContainer?.focus();
->>>>>>> upstream/main
 	};
 
 	const loadPdf = async () => {

@@ -2,17 +2,6 @@
 	import { toast } from 'svelte-sonner';
 	import { onMount, getContext } from 'svelte';
 
-<<<<<<< HEAD
-	import { user, config, settings } from '$lib/stores';
-	import { isFeatureEnabled } from '$lib/utils/features';
-	import { updateUserProfile, createAPIKey, getAPIKey, getSessionUser } from '$lib/apis/auths';
-	import { WEBUI_BASE_URL } from '$lib/constants';
-
-	import UpdatePassword from './Account/UpdatePassword.svelte';
-	import TwoFactorSetup from './Account/TwoFactorSetup.svelte';
-	import { getGravatarUrl } from '$lib/apis/utils';
-	import { generateInitialsImage, canvasPixelTest } from '$lib/utils';
-=======
 	import { user, config } from '$lib/stores';
 	import {
 		updateUserProfile,
@@ -25,7 +14,9 @@
 
 	import UpdatePassword from './Account/UpdatePassword.svelte';
 	import { generateInitialsImage } from '$lib/utils';
->>>>>>> upstream/main
+
+	import { isFeatureEnabled } from '$lib/utils/features';
+	import TwoFactorSetup from './Account/TwoFactorSetup.svelte';
 	import { copyToClipboard } from '$lib/utils';
 	import Dropdown from '$lib/components/common/Dropdown.svelte';
 	import DropdownMenu from '$lib/components/common/DropdownMenu.svelte';
@@ -273,68 +264,71 @@
 				/>
 			</UserSettingField>
 
-			<UserSettingField
-				label={$i18n.t('Bio')}
-				description={$i18n.t('Add optional profile context visible where profiles are shown.')}
-			>
-				<Textarea
-					className={textareaClass}
-					minSize={60}
-					bind:value={bio}
-					ariaLabel={$i18n.t('Bio')}
-					placeholder={$i18n.t('Share your background and interests')}
-				/>
-			</UserSettingField>
-
-			<UserSettingField
-				label={$i18n.t('Gender')}
-				description={$i18n.t('Choose the gender value stored on your profile.')}
-			>
-				<SettingsSelect
-					bind:value={_gender}
-					className="w-full"
-					ariaLabel={$i18n.t('Gender')}
-					on:change={() => {
-						console.log(_gender);
-
-						if (_gender === 'custom') {
-							// Handle custom gender input
-							gender = '';
-						} else {
-							gender = _gender;
-						}
-					}}
+			<!-- [Gradient] Tenant-controlled demographic fields. -->
+			{#if isFeatureEnabled('user_demographics')}
+				<UserSettingField
+					label={$i18n.t('Bio')}
+					description={$i18n.t('Add optional profile context visible where profiles are shown.')}
 				>
-					<option value="" selected>{$i18n.t('Prefer not to say')}</option>
-					<option value="male">{$i18n.t('Male')}</option>
-					<option value="female">{$i18n.t('Female')}</option>
-					<option value="custom">{$i18n.t('Custom')}</option>
-				</SettingsSelect>
-
-				{#if _gender === 'custom'}
-					<input
-						class="mt-1 {inputClass}"
-						type="text"
-						required
-						aria-label={$i18n.t('Custom Gender')}
-						placeholder={$i18n.t('Enter your gender')}
-						bind:value={gender}
+					<Textarea
+						className={textareaClass}
+						minSize={60}
+						bind:value={bio}
+						ariaLabel={$i18n.t('Bio')}
+						placeholder={$i18n.t('Share your background and interests')}
 					/>
-				{/if}
-			</UserSettingField>
+				</UserSettingField>
 
-			<UserSettingField
-				label={$i18n.t('Birth Date')}
-				description={$i18n.t('Set the birth date saved with your profile.')}
-			>
-				<input
-					class="{inputClass} dark:scheme-dark"
-					type="date"
-					aria-label={$i18n.t('Birth Date')}
-					bind:value={dateOfBirth}
-					required
-				/>
-			</UserSettingField>
+				<UserSettingField
+					label={$i18n.t('Gender')}
+					description={$i18n.t('Choose the gender value stored on your profile.')}
+				>
+					<SettingsSelect
+						bind:value={_gender}
+						className="w-full"
+						ariaLabel={$i18n.t('Gender')}
+						on:change={() => {
+							console.log(_gender);
+
+							if (_gender === 'custom') {
+								// Handle custom gender input
+								gender = '';
+							} else {
+								gender = _gender;
+							}
+						}}
+					>
+						<option value="" selected>{$i18n.t('Prefer not to say')}</option>
+						<option value="male">{$i18n.t('Male')}</option>
+						<option value="female">{$i18n.t('Female')}</option>
+						<option value="custom">{$i18n.t('Custom')}</option>
+					</SettingsSelect>
+
+					{#if _gender === 'custom'}
+						<input
+							class="mt-1 {inputClass}"
+							type="text"
+							required
+							aria-label={$i18n.t('Custom Gender')}
+							placeholder={$i18n.t('Enter your gender')}
+							bind:value={gender}
+						/>
+					{/if}
+				</UserSettingField>
+
+				<UserSettingField
+					label={$i18n.t('Birth Date')}
+					description={$i18n.t('Set the birth date saved with your profile.')}
+				>
+					<input
+						class="{inputClass} dark:scheme-dark"
+						type="date"
+						aria-label={$i18n.t('Birth Date')}
+						bind:value={dateOfBirth}
+						required
+					/>
+				</UserSettingField>
+			{/if}
 		</UserSettingSection>
 
 		<section class="mt-4 w-full">
@@ -355,83 +349,12 @@
 						<div class="min-w-0 truncate font-mono text-xs text-gray-700 dark:text-gray-300">
 							{row.key || $i18n.t('key_name')}
 						</div>
-<<<<<<< HEAD
-
-						<div class="flex flex-col w-full mt-2">
-							<div class=" mb-1 text-xs font-medium">{$i18n.t('Bio')}</div>
-
-							<div class="flex-1">
-								<Textarea
-									className="w-full text-sm dark:text-gray-300 bg-transparent outline-hidden"
-									minSize={60}
-									bind:value={bio}
-									ariaLabel={$i18n.t('Bio')}
-									placeholder={$i18n.t('Share your background and interests')}
-								/>
-							</div>
-						</div>
-
-						{#if isFeatureEnabled('user_demographics')}
-							<div class="flex flex-col w-full mt-2">
-								<div class=" mb-1 text-xs font-medium">{$i18n.t('Gender')}</div>
-
-								<div class="flex-1">
-									<select
-										class="w-full text-sm dark:text-gray-300 bg-transparent outline-hidden"
-										bind:value={_gender}
-										aria-label={$i18n.t('Gender')}
-										on:change={(e) => {
-											console.log(_gender);
-
-											if (_gender === 'custom') {
-												// Handle custom gender input
-												gender = '';
-											} else {
-												gender = _gender;
-											}
-										}}
-									>
-										<option value="" selected>{$i18n.t('Prefer not to say')}</option>
-										<option value="male">{$i18n.t('Male')}</option>
-										<option value="female">{$i18n.t('Female')}</option>
-										<option value="custom">{$i18n.t('Custom')}</option>
-									</select>
-								</div>
-
-								{#if _gender === 'custom'}
-									<input
-										class="w-full text-sm dark:text-gray-300 bg-transparent outline-hidden mt-1"
-										type="text"
-										required
-										aria-label={$i18n.t('Custom Gender')}
-										placeholder={$i18n.t('Enter your gender')}
-										bind:value={gender}
-									/>
-								{/if}
-							</div>
-
-							<div class="flex flex-col w-full mt-2">
-								<div class=" mb-1 text-xs font-medium">{$i18n.t('Birth Date')}</div>
-
-								<div class="flex-1">
-									<input
-										class="w-full text-sm dark:text-gray-300 dark:placeholder:text-gray-300 bg-transparent outline-hidden"
-										type="date"
-										aria-label={$i18n.t('Birth Date')}
-										bind:value={dateOfBirth}
-										required
-									/>
-								</div>
-							</div>
-						{/if}
-=======
 						<div class="min-w-0 flex-1 truncate text-xs text-gray-500 dark:text-gray-500">
 							{row.value || $i18n.t('Empty')}
 						</div>
 						<button class={actionButtonClass} type="button" on:click={() => openVariableModal(idx)}>
 							{$i18n.t('Edit')}
 						</button>
->>>>>>> upstream/main
 					</div>
 				{/each}
 

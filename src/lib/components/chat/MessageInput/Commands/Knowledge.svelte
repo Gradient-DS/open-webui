@@ -1,4 +1,5 @@
 <script lang="ts">
+	import DocumentPage from '$lib/components/icons/DocumentPage.svelte';
 	import { toast } from 'svelte-sonner';
 	import dayjs from 'dayjs';
 	import relativeTime from 'dayjs/plugin/relativeTime';
@@ -164,25 +165,19 @@
 						placement="top"
 					>
 						{#if item?.type === 'collection'}
-<<<<<<< HEAD
 							{#if item.knowledge_type === 'onedrive'}
-								<OneDrive className="size-4" />
+								<OneDrive className="size-3.5" />
 							{:else if item.knowledge_type === 'google_drive'}
-								<GoogleDrive className="size-4" />
+								<GoogleDrive className="size-3.5" />
 							{:else if item.knowledge_type === 'confluence'}
-								<Confluence className="size-4" />
+								<Confluence className="size-3.5" />
 							{:else}
-								<Database className="size-4" />
+								<Database className="size-3.5" />
 							{/if}
-						{:else if item?.type === 'folder'}
-							<Folder className="size-4" />
-=======
-							<Database className="size-3.5" />
 						{:else if item?.type === 'folder'}
 							<Folder className="size-3.5" />
 						{:else}
 							<DocumentPage className="size-3.5" />
->>>>>>> upstream/main
 						{/if}
 					</Tooltip>
 

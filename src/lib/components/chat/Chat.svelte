@@ -1,11 +1,7 @@
 <script lang="ts">
 	import { v4 as uuidv4 } from 'uuid';
 	import { toast } from 'svelte-sonner';
-<<<<<<< HEAD
-	import { PaneGroup, Pane, PaneResizer } from 'paneforge';
 	import { isFeatureEnabled } from '$lib/utils/features';
-=======
->>>>>>> upstream/main
 
 	import { getContext, onDestroy, onMount, tick } from 'svelte';
 	import { fade } from 'svelte/transition';
@@ -70,17 +66,13 @@
 		processDetails,
 		removeAllDetails,
 		getCodeBlockContents,
-<<<<<<< HEAD
 		isYoutubeUrl,
-		displayFileHandler,
-		temporaryChatId
-=======
+		temporaryChatId,
 		displayFileHandler,
 		getUsageTokenCount
->>>>>>> upstream/main
 	} from '$lib/utils';
 	import { AudioQueue } from '$lib/utils/audio';
-	import { createTemporaryChatId, isTemporaryChatId } from '$lib/utils/chatId';
+	import { isTemporaryChatId } from '$lib/utils/chatId';
 	import { applyResponseStreamEvent, getOutputText } from './Messages/structuredOutput';
 
 	import {
@@ -140,7 +132,6 @@
 	import Tooltip from '../common/Tooltip.svelte';
 	import Sidebar from '../icons/Sidebar.svelte';
 	import Image from '../common/Image.svelte';
-<<<<<<< HEAD
 	import { getBanners } from '$lib/apis/configs';
 	import { logDataWarningAcceptance } from '$lib/apis/data-warnings';
 	import { showRagFilter } from '$lib/stores/rag-filter';
@@ -149,11 +140,9 @@
 	import ContextUsageBanner from '$lib/components/chat/ContextUsageBanner.svelte';
 	import RagFilterPanel from './RagFilterPanel.svelte';
 	import FeedbackButton from './FeedbackButton.svelte';
-=======
 	import XMark from '../icons/XMark.svelte';
 	import EmbeddedChatHistoryDropdown from './EmbeddedChatHistoryDropdown.svelte';
 	import InputVariablesModal from './MessageInput/InputVariablesModal.svelte';
->>>>>>> upstream/main
 
 	export let chatIdProp = '';
 	export let embedded = false;
@@ -217,7 +206,8 @@
 		selectedModelIds = selectedModels;
 	}
 	let serverContextUsage = null;
-	let contextUsage = null;
+	// [Gradient] Upstream compaction metrics are separate from the agent's usage banner.
+	let composerContextUsage = null;
 
 	const getAvailableModelIds = () =>
 		$models.filter((m) => !(m?.info?.meta?.hidden ?? false)).map((m) => m.id);
@@ -345,7 +335,8 @@
 		};
 	};
 
-	$: contextUsage = getContextUsage() ?? (contextCompactionEnabled ? serverContextUsage : null);
+	$: composerContextUsage =
+		getContextUsage() ?? (contextCompactionEnabled ? serverContextUsage : null);
 	$: embeddedHeaderTitle = embeddedTitle || $chatTitle || $i18n.t('Chat');
 
 	let selectedToolIds: string[] = [];
@@ -779,6 +770,14 @@
 		});
 	};
 
+	// [Gradient] Picker visibility is independent of the agent runtime bypass.
+	$: agentSelectorActive =
+		!embedded &&
+		isFeatureEnabled('agent_picker') &&
+		Boolean($config?.features?.feature_agent_api_enabled) &&
+		(!chat?.id || Boolean(chat?.meta?.agent_id));
+	$: agentBinding = !embedded && $pendingAgentId ? { agent_id: $pendingAgentId } : null;
+
 	const restoreChatInput = async (storageChatInput: string | null) => {
 		if (!storageChatInput || $temporaryChatEnabled) {
 			return false;
@@ -795,6 +794,8 @@
 			webSearchEnabled = input.webSearchEnabled ?? false;
 			imageGenerationEnabled = input.imageGenerationEnabled ?? false;
 			codeInterpreterEnabled = input.codeInterpreterEnabled ?? false;
+			// [Gradient] Preserve Document Writer across draft and OAuth restoration.
+			documentWriterEnabled = input.documentWriterEnabled ?? false;
 			if (input.toolApprovalMode) {
 				await handleToolApprovalModeChange(input.toolApprovalMode);
 			}
@@ -867,19 +868,14 @@
 			`chat-input${chatIdProp ? `-${chatIdProp}` : ''}`
 		);
 
-<<<<<<< HEAD
 		const loadResult = chatIdProp ? await loadChat() : 'not_found';
 
 		if (loadResult === 'aborted') {
 			return; // a newer navigateHandler is in charge; don't reset loading or redirect
 		}
 
+		noteChatDebug('loadChat completed inside navigateHandler', { loadResult });
 		if (loadResult === 'loaded') {
-=======
-		const loaded = chatIdProp ? await loadChat() : false;
-		noteChatDebug('loadChat completed inside navigateHandler', { loaded });
-		if (loaded) {
->>>>>>> upstream/main
 			await tick();
 			loading = false;
 			noteChatDebug('embedded chat loading false');
@@ -899,27 +895,7 @@
 				await processNextInQueue(chatIdProp);
 			}
 
-<<<<<<< HEAD
-			if (storageChatInput) {
-				try {
-					const input = JSON.parse(storageChatInput);
-
-					if (!$temporaryChatEnabled) {
-						messageInput?.setText(input.prompt);
-						files = input.files;
-						selectedToolIds = input.selectedToolIds;
-						selectedSkillIds = input.selectedSkillIds ?? [];
-						selectedFilterIds = input.selectedFilterIds;
-						webSearchEnabled = input.webSearchEnabled;
-						imageGenerationEnabled = input.imageGenerationEnabled;
-						codeInterpreterEnabled = input.codeInterpreterEnabled;
-						documentWriterEnabled = input.documentWriterEnabled ?? false;
-					}
-				} catch (e) {}
-			} else {
-=======
 			if (!(await restoreChatInput(storageChatInput))) {
->>>>>>> upstream/main
 				await setDefaults();
 			}
 
@@ -1595,7 +1571,7 @@
 		}
 
 		if (type === 'action:submit') {
-			console.debug(event.data.text);
+			// [Gradient] GRA-219: never log embedded prompt or document text.
 
 			if (prompt !== '') {
 				if (isSameOrigin) {
@@ -1617,7 +1593,7 @@
 		}
 
 		if (type === 'input:prompt') {
-			console.debug(event.data.text);
+			// [Gradient] GRA-219: never log embedded prompt or document text.
 
 			const inputElement = document.getElementById('chat-input');
 
@@ -1628,7 +1604,7 @@
 		}
 
 		if (type === 'input:prompt:submit') {
-			console.debug(event.data.text);
+			// [Gradient] GRA-219: never log embedded prompt or document text.
 
 			if (event.data.text !== '') {
 				if (isSameOrigin) {
@@ -1777,25 +1753,7 @@
 				documentWriterEnabled = false;
 				acceptedDataWarnings = new Set();
 
-<<<<<<< HEAD
-				try {
-					const input = JSON.parse(storageChatInput);
-
-					if (!$temporaryChatEnabled) {
-						messageInput?.setText(input.prompt);
-						files = input.files;
-						selectedToolIds = input.selectedToolIds;
-						selectedSkillIds = input.selectedSkillIds ?? [];
-						selectedFilterIds = input.selectedFilterIds;
-						webSearchEnabled = input.webSearchEnabled;
-						imageGenerationEnabled = input.imageGenerationEnabled;
-						codeInterpreterEnabled = input.codeInterpreterEnabled;
-						documentWriterEnabled = input.documentWriterEnabled ?? false;
-					}
-				} catch (e) {}
-=======
 				await restoreChatInput(storageChatInput);
->>>>>>> upstream/main
 			}
 
 			messageInput?.focus({ preventScroll: true });
@@ -1812,9 +1770,7 @@
 				pageSubscribe();
 				showControlsSubscribe();
 				selectedFolderSubscribe();
-<<<<<<< HEAD
 				submitPromptSignalSubscribe();
-=======
 
 				// Clear the selected chat when leaving the chat surface (e.g. navigating
 				// to the admin panel), otherwise the previously-viewed chat stays selected
@@ -1822,7 +1778,6 @@
 				chatId.set('');
 				chatTitle.set('');
 
->>>>>>> upstream/main
 				window.removeEventListener('message', onMessageHandler);
 				$socket?.off('events', chatEventHandler);
 				$socket?.off('file:status', fileStatusHandler);
@@ -2030,13 +1985,9 @@
 
 				files = [...files];
 			} catch (e) {
-<<<<<<< HEAD
-				files = files.filter((f) => f.url !== fileItem.url);
-=======
 				fileItem.status = 'error';
 				fileItem.error = `${e}`;
-				files = files.filter((f) => f.name !== fileItem.name);
->>>>>>> upstream/main
+				files = files.filter((f) => f.url !== fileItem.url);
 				toast.error(`${e}`);
 			}
 		}
@@ -2095,13 +2046,8 @@
 
 		const ttsSplitOn = $config?.audio?.tts?.split_on ?? 'punctuation';
 		const messageContentParts = getMessageContentParts(
-<<<<<<< HEAD
 			removeAllDetails(getOutputText(message?.output) || (message?.content ?? '')),
-			$config?.audio?.tts?.split_on ?? 'punctuation'
-=======
-			getOutputText(message?.output) || removeAllDetails(message?.content ?? ''),
 			ttsSplitOn
->>>>>>> upstream/main
 		);
 
 		const sentContentPartCount = message.ttsSentContentPartCount ?? 0;
@@ -2355,21 +2301,7 @@
 				// Set from folder model IDs
 				selectedModels = $selectedFolder?.data?.model_ids;
 			} else {
-				// [Gradient] Under the agent picker the model selector is
-				// hidden, so upstream's carry of the previous chat's selection
-				// (sessionStorage.selectedModels) made any explicitly chosen
-				// assistant (pinned sidebar entry, ?model= link) silently
-				// sticky for the rest of the session with no visible way back
-				// — picker deployments always resolve user settings then admin
-				// defaults instead. Tenants without the picker keep upstream
-				// behavior: the selector is visible, so stickiness is escapable
-				// and expected. The key is still WRITTEN on selection
-				// (saveSessionSelectedModels): ChatItem reads it to label the
-				// active chat's model.
-				const agentPickerEnabled =
-					isFeatureEnabled('agent_picker') &&
-					Boolean($config?.features?.feature_agent_api_enabled);
-				if (!agentPickerEnabled && sessionStorage.selectedModels) {
+				if (sessionStorage.selectedModels) {
 					// Set from session storage (temporary selection)
 					selectedModels = JSON.parse(sessionStorage.selectedModels);
 					sessionStorage.removeItem('selectedModels');
@@ -2539,177 +2471,36 @@
 	};
 
 	const loadChat = async () => {
-<<<<<<< HEAD
-		const targetId = chatIdProp; // the chat this load is responsible for
-		chatId.set(targetId);
-=======
+		// [Gradient] Retain tri-state loading and abort before any stale result is applied.
+		const targetId = chatIdProp || $chatId;
+		const isStaleLoad = () => (chatIdProp || $chatId) !== targetId;
 		noteChatDebug('loadChat start');
 		// chatIdProp is empty for chats started from the home page (URL set via replaceState)
-		chatId.set(chatIdProp || $chatId);
+		chatId.set(targetId);
 		noteChatDebug('loadChat set active chat id');
->>>>>>> upstream/main
 
 		if ($temporaryChatEnabled) {
 			noteChatDebug('loadChat disabling temporary chat');
 			temporaryChatEnabled.set(false);
 		}
 
-<<<<<<< HEAD
-		chat = await getChatById(localStorage.token, targetId).catch(() => null);
-
-		// A newer navigation took over while we were fetching — leave its state alone.
-		if (chatIdProp !== targetId) return 'aborted';
-		if (!chat) return 'not_found';
-
-		tags = await getTagsById(localStorage.token, targetId).catch(() => []);
-		if (chatIdProp !== targetId) return 'aborted';
-
-		const chatContent = chat.chat;
-		if (!chatContent) return 'not_found';
-
-		selectedModels =
-			(chatContent?.models ?? undefined) !== undefined
-				? chatContent.models
-				: [chatContent.models ?? ''];
-
-		if (!($user?.role === 'admin' || ($user?.permissions?.chat?.multiple_models ?? true))) {
-			selectedModels = selectedModels.length > 0 ? [selectedModels[0]] : [''];
+		const loadedChat = await getChatById(localStorage.token, targetId).catch(() => null);
+		if (isStaleLoad()) return 'aborted';
+		if (!loadedChat) {
+			if (!embedded) await goto('/');
+			return 'not_found';
 		}
+		chat = loadedChat;
 
-		oldSelectedModelIds = structuredClone(selectedModels);
-
-		history =
-			(chatContent?.history ?? undefined) !== undefined
-				? chatContent.history
-				: convertMessagesToHistory(chatContent.messages);
-
-		// Sanitize history: repair orphaned references and structurally-malformed
-		// nodes from failed regenerations (#24424, #24157, #20474)
-		sanitizeHistory(history);
-		if (history.currentId && !history.messages[history.currentId]) {
-			const messageIds = Object.keys(history.messages);
-			let lastMessageId = null;
-			for (const messageId of messageIds) {
-				const message = history.messages[messageId];
-				if (
-					(message.childrenIds ?? []).length === 0 &&
-					(!lastMessageId ||
-						(message.timestamp ?? 0) > (history.messages[lastMessageId].timestamp ?? 0))
-				) {
-					lastMessageId = messageId;
-				}
-			}
-			history.currentId = lastMessageId ?? messageIds[0] ?? null;
-		}
-
-		chatTitle.set(chatContent.title);
-
-		params = chatContent?.params ?? {};
-		chatFiles = chatContent?.files ?? [];
-
-		const chatFeatures = chatContent?.features ?? {};
-		webSearchEnabled = chatFeatures.web_search ?? false;
-		imageGenerationEnabled = chatFeatures.image_generation ?? false;
-		codeInterpreterEnabled = chatFeatures.code_interpreter ?? false;
-		documentWriterEnabled = chatFeatures.document_writer ?? false;
-
-		// [Gradient] Keep the feature-autosave baseline in sync with the chat we just
-		// loaded, so the reactive at the feature-persist block does not emit a
-		// redundant full-history save right after load. Key order must match that block.
-		lastSavedFeatures = JSON.stringify({
-			webSearchEnabled,
-			imageGenerationEnabled,
-			codeInterpreterEnabled,
-			documentWriterEnabled
-=======
-		chat = await getChatById(localStorage.token, $chatId).catch(async (error) => {
-			console.error('[note-chat] getChatById failed', {
-				chatIdProp,
-				activeChatId: $chatId,
-				error
-			});
-			if (!embedded) {
-				await goto('/');
-			}
-			return null;
->>>>>>> upstream/main
-		});
-		noteChatDebug('getChatById completed', {
-			found: !!chat,
-			chatId: chat?.id,
-			hasChatPayload: !!chat?.chat,
-			title: chat?.title
-		});
-
-<<<<<<< HEAD
-		// Load tasks from chat-level DB field
-		chatTasks = chat?.tasks ?? [];
-
-		autoScroll = true;
-		await tick();
-
-		// Mark all non-current assistant messages as done
-		if (history.currentId) {
-			for (const message of Object.values(history.messages)) {
-				if (
-					message &&
-					message.role === 'assistant' &&
-					message.id !== history.currentId &&
-					message.done !== false
-				) {
-					message.done = true;
-				}
-			}
-		}
-
-		// [Gradient] Rehydrate the context-usage banner from the
-		// persisted message field (set by the agent backend on `done`).
-		// Reflects the active branch's most recent turn; stays null when
-		// no agent turn recorded one (navigateHandler reset it first).
-		const usageBranch = createMessagesList(history, history.currentId);
-		for (let i = usageBranch.length - 1; i >= 0; i--) {
-			if (usageBranch[i]?.contextUsage) {
-				contextUsage = usageBranch[i].contextUsage;
-				break;
-			}
-		}
-
-		// Reconcile active tasks with message state:
-		// If the response is already done, remaining tasks are just background
-		// work (follow-ups, title gen) that shouldn't block the input.
-		const pendingTaskIds = await getTaskIdsByChatId(localStorage.token, targetId)
-			.then((res) => res?.task_ids ?? [])
-			.catch(() => []);
-		if (chatIdProp !== targetId) return 'aborted';
-		const currentMessage = history.currentId ? history.messages[history.currentId] : null;
-		const responseComplete = currentMessage?.role === 'assistant' && currentMessage?.done;
-
-		if (pendingTaskIds.length > 0 && !responseComplete) {
-			taskIds = pendingTaskIds;
-		} else {
-			taskIds = null;
-			// No active tasks and message incomplete → generation was interrupted
-			if (currentMessage?.role === 'assistant' && !currentMessage.done) {
-				currentMessage.done = true;
-			}
-		}
-
-		await tick();
-		return 'loaded';
-=======
 		if (chat) {
-			tags = await getTagsById(localStorage.token, $chatId).catch(async (error) => {
-				console.warn('[note-chat] getTagsById failed; continuing without tags', {
-					chatIdProp,
-					activeChatId: $chatId,
-					error
-				});
-				return [];
-			});
-			noteChatDebug('getTagsById completed', { tagCount: tags?.length ?? 0 });
+			const loadedTags = await getTagsById(localStorage.token, targetId).catch(() => []);
+			if (isStaleLoad()) return 'aborted';
+			tags = loadedTags;
 
 			const chatContent = chat.chat;
 			chatVariables = chat?.variables ?? {};
+			// [Gradient] The composer picker reads the shared pending-agent binding.
+			if (!embedded && chat?.meta?.agent_id) pendingAgentId.set(chat.meta.agent_id);
 
 			if (chatContent) {
 				noteChatDebug('chat payload found', {
@@ -2747,6 +2538,21 @@
 				// Sanitize history: repair orphaned references and structurally-malformed
 				// nodes from failed regenerations (#24424, #24157, #20474)
 				sanitizeHistory(history);
+				if (history.currentId && !history.messages[history.currentId]) {
+					const messageIds = Object.keys(history.messages);
+					let lastMessageId = null;
+					for (const messageId of messageIds) {
+						const message = history.messages[messageId];
+						if (
+							(message.childrenIds ?? []).length === 0 &&
+							(!lastMessageId ||
+								(message.timestamp ?? 0) > (history.messages[lastMessageId].timestamp ?? 0))
+						) {
+							lastMessageId = messageId;
+						}
+					}
+					history.currentId = lastMessageId ?? messageIds[0] ?? null;
+				}
 
 				chatTitle.set(chatContent.title);
 
@@ -2754,12 +2560,29 @@
 				delete params.note_id;
 				chatFiles = structuredClone(chatContent?.files ?? []);
 
+				const chatFeatures = chatContent?.features ?? {};
+				webSearchEnabled = chatFeatures.web_search ?? false;
+				imageGenerationEnabled = chatFeatures.image_generation ?? false;
+				codeInterpreterEnabled = chatFeatures.code_interpreter ?? false;
+				documentWriterEnabled = chatFeatures.document_writer ?? false;
+
+				// [Gradient] Keep the feature-autosave baseline in sync with the chat we just
+				// loaded, so the reactive at the feature-persist block does not emit a
+				// redundant full-history save right after load. Key order must match that block.
+				lastSavedFeatures = JSON.stringify({
+					webSearchEnabled,
+					imageGenerationEnabled,
+					codeInterpreterEnabled,
+					documentWriterEnabled
+				});
+
 				// Load tasks from chat-level DB field
 				chatTasks = chat?.tasks ?? [];
 				serverContextUsage = chat?.context_usage ?? null;
 
 				autoScroll = true;
 				await tick();
+				if (isStaleLoad()) return 'aborted';
 
 				// Mark all non-current assistant messages as done
 				if (history.currentId) {
@@ -2775,12 +2598,25 @@
 					}
 				}
 
+				// [Gradient] Rehydrate the context-usage banner from the
+				// persisted message field (set by the agent backend on `done`).
+				// Reflects the active branch's most recent turn; stays null when
+				// no agent turn recorded one (navigateHandler reset it first).
+				contextUsage = null;
+				const usageBranch = createMessagesList(history, history.currentId);
+				for (let i = usageBranch.length - 1; i >= 0; i--) {
+					if (usageBranch[i]?.contextUsage) {
+						contextUsage = usageBranch[i].contextUsage;
+						break;
+					}
+				}
+
 				// Reconcile active tasks with message state:
 				// If the response is already done, remaining tasks are just background
 				// work (follow-ups, title gen) that shouldn't block the input.
 				const activeTaskIds = taskIds;
 				const currentMessage = history.currentId ? history.messages[history.currentId] : null;
-				const pendingTaskIds = await getTaskIdsByChatId(localStorage.token, $chatId)
+				const pendingTaskIds = await getTaskIdsByChatId(localStorage.token, targetId)
 					.then((res) => res?.task_ids ?? [])
 					.catch((error) => {
 						console.warn('[note-chat] getTaskIdsByChatId failed; continuing without tasks', {
@@ -2794,9 +2630,9 @@
 					pendingTaskCount: pendingTaskIds.length,
 					hasCurrentMessage: !!currentMessage
 				});
-				if (taskIds !== activeTaskIds) {
+				if (isStaleLoad() || taskIds !== activeTaskIds) {
 					noteChatDebug('task ids changed during load; aborting stale load');
-					return;
+					return 'aborted';
 				}
 				const responseComplete = currentMessage?.role === 'assistant' && currentMessage?.done;
 
@@ -2816,21 +2652,20 @@
 
 				await tick();
 
-				return true;
+				return isStaleLoad() ? 'aborted' : 'loaded';
 			} else {
 				console.warn('[note-chat] chat response missing chat payload', {
 					chatIdProp,
-					activeChatId: $chatId,
-					chat
+					activeChatId: $chatId
 				});
-				return null;
+				return 'not_found';
 			}
 		}
 		console.warn('[note-chat] no chat returned from getChatById', {
 			chatIdProp,
 			activeChatId: $chatId
 		});
->>>>>>> upstream/main
+		return 'not_found';
 	};
 
 	const scrollToBottom = async (behavior = 'auto') => {
@@ -3311,7 +3146,6 @@
 
 		if (!$config?.features?.enable_data_warnings) return true;
 
-<<<<<<< HEAD
 		// Collect all unacknowledged warnings across selected models
 		const pendingWarnings: {
 			modelId: string;
@@ -3344,11 +3178,6 @@
 					message: model.info?.meta?.data_warning_message || ''
 				});
 			}
-=======
-		// focus on chat input (skip during voice call to avoid triggering mobile keyboard)
-		if (!$showCallOverlay) {
-			messageInput?.focus({ preventScroll: true });
->>>>>>> upstream/main
 		}
 
 		if (pendingWarnings.length === 0) return true;
@@ -3407,19 +3236,6 @@
 		return true;
 	};
 
-<<<<<<< HEAD
-	// NOTE (Gradient): upstream v0.9.5 split this entry point into a small
-	// `submitPrompt(inputContent, inputFiles)` that just stages a user message,
-	// plus a `submitHandler(...)` for the validation/preflight body. Our fork's
-	// call sites still invoke `submitPrompt(userPrompt, { _raw })` end-to-end,
-	// so this single function continues to own both responsibilities. Adopting
-	// the split is a follow-up that touches every call site.
-	//
-	// Phase 1 left this comment in but new upstream call sites in the merge
-	// reference `submitHandler` by name (9 of them across this file). Aliasing
-	// keeps both names live without rewriting every call site.
-	const submitPrompt = async (userPrompt, { _raw = false } = {}) => {
-=======
 	const handleManualCompact = async () => {
 		if (!contextCompactionEnabled) {
 			toast.message($i18n.t('Context compaction is disabled'));
@@ -3560,10 +3376,17 @@
 		prompt = '';
 	};
 
-	const submitHandler = async (userPrompt, { _raw = false } = {}) => {
-		console.log('submitHandler', userPrompt, $chatId);
-
->>>>>>> upstream/main
+	// NOTE (Gradient): upstream v0.9.5 split this entry point into a small
+	// `submitPrompt(inputContent, inputFiles)` that just stages a user message,
+	// plus a `submitHandler(...)` for the validation/preflight body. Our fork's
+	// call sites still invoke `submitPrompt(userPrompt, { _raw })` end-to-end,
+	// so this single function continues to own both responsibilities. Adopting
+	// the split is a follow-up that touches every call site.
+	//
+	// Phase 1 left this comment in but new upstream call sites in the merge
+	// reference `submitHandler` by name (9 of them across this file). Aliasing
+	// keeps both names live without rewriting every call site.
+	const submitPrompt = async (userPrompt, { _raw = false } = {}) => {
 		const _selectedModels = selectedModels.map((modelId) =>
 			$models.map((m) => m.id).includes(modelId) ? modelId : ''
 		);
@@ -3756,14 +3579,13 @@
 		history.messages[userMessageId] = userMessage;
 		history.currentId = userMessageId;
 
+		// Focus after staging, except during voice calls (avoids the mobile keyboard).
+		if (!$showCallOverlay) messageInput?.focus({ preventScroll: true });
+
 		// Append messageId to childrenIds of parent message
 		if (messages.length !== 0) {
 			history.messages[messages.at(-1).id].childrenIds.push(userMessageId);
 		}
-
-		// focus on chat input
-		const chatInput = document.getElementById('chat-input');
-		chatInput?.focus();
 
 		saveSessionSelectedModels();
 
@@ -3775,7 +3597,7 @@
 		// the binding and sets $chatId; sendMessage then forwards that
 		// chat_id so the backend appends to the existing row instead of
 		// creating a duplicate.
-		if (!$chatId) {
+		if (!$chatId && !embedded) {
 			await initChatHandler(history);
 		}
 
@@ -3865,10 +3687,6 @@
 
 		// Empty embedded drafts create their backing chat only when the first message is sent.
 		if (!_chatId) {
-<<<<<<< HEAD
-			if ($temporaryChatEnabled) {
-				_chatId = temporaryChatId($socket?.id);
-=======
 			if (embedded && onCreateEmbeddedChat) {
 				const createdChat = await onCreateEmbeddedChat();
 				if (!createdChat?.id) {
@@ -3887,8 +3705,7 @@
 				chatFiles = mergeFiles(chatFiles, createdChat?.chat?.files ?? []);
 				await onSelectEmbeddedChat?.(_chatId);
 			} else if ($temporaryChatEnabled) {
-				_chatId = createTemporaryChatId($socket?.id);
->>>>>>> upstream/main
+				_chatId = temporaryChatId($socket?.id);
 				await chatId.set(_chatId);
 			}
 			await tick();
@@ -4165,16 +3982,12 @@
 				filter_ids: selectedFilterIds.length > 0 ? selectedFilterIds : undefined,
 				tool_ids: toolIds.length > 0 ? toolIds : undefined,
 				skill_ids: skillIds.length > 0 ? skillIds : undefined,
-<<<<<<< HEAD
 				rag_filter: getRagFilterForRequest(),
-				terminal_id: terminalEnabled ? (activeTerminalId ?? undefined) : undefined,
-=======
 				terminal_id:
 					terminalEnabled &&
 					($terminalServers ?? []).some((t) => t.id && t.id === $selectedTerminalId)
 						? $selectedTerminalId
 						: undefined,
->>>>>>> upstream/main
 				tool_servers: [
 					...($toolServers ?? []).filter(
 						(server, idx) => toolServerIds.includes(idx) || toolServerIds.includes(server?.id)
@@ -4208,22 +4021,12 @@
 				...(continueResponse ? { assistant_message_id: responseMessageId } : {}),
 
 				background_tasks: {
-<<<<<<< HEAD
-					// [Gradient] First-message detection: parentId === null is the
-					// authoritative signal. Upstream also required !_chatId, but
-					// our submitPrompt now pre-creates the chat via initChatHandler
-					// (so pendingAgentId binding lands before /chat/completions),
-					// making _chatId truthy on the first send and dropping title +
-					// tag generation. parentId === null still correctly excludes
-					// follow-up messages.
-					...(!$temporaryChatEnabled && (userMessage?.parentId ?? null) === null
-=======
+					// [Gradient] Chats are pre-created for agent binding; parentId identifies the first turn.
 					...(!$temporaryChatEnabled &&
-					(!_chatId ||
+					((userMessage?.parentId ?? null) === null ||
 						(embedded &&
 							(userMessage?.parentId ?? null) === null &&
 							createMessagesList(_history, responseMessageId).length === 2))
->>>>>>> upstream/main
 						? {
 								title_generation: $settings?.title?.auto ?? true,
 								tags_generation: $settings?.autoTags ?? true
@@ -4554,7 +4357,6 @@
 			// The pendingAgentId store is sticky — we do NOT clear it after
 			// use, so the next "New Chat" defaults to the same agent until
 			// the user changes or clears the pick.
-			const agentBinding = $pendingAgentId ? { agent_id: $pendingAgentId } : null;
 
 			chat = await createNewChat(
 				localStorage.token,
@@ -4570,11 +4372,8 @@
 					timestamp: Date.now()
 				},
 				$selectedFolder?.id,
-<<<<<<< HEAD
+				chatVariables ?? null,
 				agentBinding
-=======
-				chatVariables
->>>>>>> upstream/main
 			);
 
 			_chatId = chat.id;
@@ -4586,14 +4385,6 @@
 
 			await tick();
 
-<<<<<<< HEAD
-			currentChatPage.set(1);
-			await chats.set(await getChatList(localStorage.token, $currentChatPage));
-
-			selectedFolder.set(null);
-		} else {
-			_chatId = temporaryChatId($socket?.id); // Use socket id for temporary chat
-=======
 			if (!embedded) {
 				await refreshChatList(localStorage.token);
 			}
@@ -4604,8 +4395,7 @@
 
 			selectedFolder.set(null);
 		} else {
-			_chatId = createTemporaryChatId($socket?.id);
->>>>>>> upstream/main
+			_chatId = temporaryChatId($socket?.id);
 			await chatId.set(_chatId);
 		}
 		await tick();
@@ -4929,15 +4719,10 @@
 		: 'h-screen max-h-[100dvh]'} transition-width duration-200 ease-in-out {$showSidebar &&
 	!embedded
 		? '  md:max-w-[calc(100%-var(--sidebar-width))]'
-<<<<<<< HEAD
 		: ' '} {($config?.features?.enable_rag_filter_ui ?? true) && $showRagFilter
 		? 'pr-80'
-		: ''} w-full max-w-full flex flex-col"
-	id="chat-container"
-=======
-		: ' '} w-full max-w-full min-w-0 flex flex-col"
+		: ''} w-full max-w-full min-w-0 flex flex-col"
 	id={chatContainerId}
->>>>>>> upstream/main
 >
 	{#if !loading}
 		<div in:fade={{ duration: 50 }} class="w-full h-full flex flex-col">
@@ -4965,41 +4750,6 @@
 			<div class="w-full h-full flex">
 				<div class="h-full flex relative max-w-full min-w-0 flex-1 flex-col">
 					<FilesOverlay show={dragged} />
-<<<<<<< HEAD
-					<Navbar
-						bind:this={navbarElement}
-						{readOnly}
-						chat={{
-							id: $chatId,
-							chat: {
-								title: $chatTitle,
-								models: selectedModels,
-								system: $settings.system ?? undefined,
-								params: params,
-								history: history,
-								timestamp: Date.now()
-							},
-							meta: $chatId
-								? (chat?.meta ?? {})
-								: $pendingAgentId
-									? { agent_id: $pendingAgentId }
-									: {}
-						}}
-						{history}
-						title={$chatTitle}
-						bind:selectedModels
-						shareEnabled={!!history.currentId}
-						{initNewChat}
-						scrollToTop={!isNearTop ? scrollToTop : null}
-						{archiveChatHandler}
-						{deleteChatHandler}
-						{moveChatHandler}
-						onSaveTempChat={async () => {
-							try {
-								if (!history?.currentId || !Object.keys(history.messages).length) {
-									toast.error($i18n.t('No conversation to save'));
-									return;
-=======
 					{#if embedded}
 						<div
 							class="h-10 shrink-0 flex items-center justify-between gap-2 border-b border-gray-50/80 px-3 text-gray-700 dark:border-gray-850/40 dark:text-gray-200"
@@ -5040,8 +4790,14 @@
 									params: params,
 									history: history,
 									timestamp: Date.now()
->>>>>>> upstream/main
-								}
+								},
+								meta: $chatId
+									? (chat?.meta ?? {})
+									: embedded
+										? {}
+										: $pendingAgentId
+											? { agent_id: $pendingAgentId }
+											: {}
 							}}
 							{history}
 							title={$chatTitle}
@@ -5073,21 +4829,14 @@
 											timestamp: Date.now()
 										},
 										null,
-										chatVariables
+										chatVariables ?? null,
+										agentBinding
 									);
 
-<<<<<<< HEAD
-								if (savedChat) {
-									temporaryChatEnabled.set(false);
-									chatId.set(savedChat.id);
-									currentChatPage.set(1);
-									chats.set(await getChatList(localStorage.token, $currentChatPage));
-=======
 									if (savedChat) {
 										temporaryChatEnabled.set(false);
 										chatId.set(savedChat.id);
 										await refreshChatList(localStorage.token);
->>>>>>> upstream/main
 
 										await goto(`/c/${savedChat.id}`);
 										toast.success($i18n.t('Conversation saved successfully'));
@@ -5101,7 +4850,7 @@
 					{/if}
 					<div id="chat-pane" class="flex flex-col flex-auto z-10 w-full @container overflow-auto">
 						{#if ($settings?.landingPageMode === 'chat' && !$selectedFolder) || createMessagesList(history, history.currentId).length > 0}
-<<<<<<< HEAD
+							<!-- [Gradient] Top-fade and feedback overlay share this wrapper. -->
 							<div class="relative flex flex-col flex-auto h-0 min-h-0 w-full max-w-full">
 								<div
 									class=" pb-2.5 flex flex-col justify-between w-full flex-auto overflow-auto h-0 max-w-full z-10 scrollbar-hidden"
@@ -5118,6 +4867,7 @@
 										<Messages
 											bind:this={messagesRef}
 											chatId={$chatId}
+											user={chatOwner ?? $user}
 											{readOnly}
 											bind:history
 											bind:autoScroll
@@ -5125,8 +4875,9 @@
 											setInputText={(text) => {
 												messageInput?.setText(text);
 											}}
-											{selectedModels}
+											bind:selectedModels
 											{atSelectedModel}
+											className={embedded ? 'h-full flex pt-4' : 'h-full flex pt-18'}
 											{sendMessage}
 											{showMessage}
 											{submitMessage}
@@ -5135,56 +4886,16 @@
 											{mergeResponses}
 											{chatActionHandler}
 											{addMessages}
-											topPadding={true}
+											{onToolCallResolved}
+											allowDelete={!(generating || taskIds?.length)}
+											forkHandler={handleForkChat}
+											topPadding={!embedded}
 											topSpacing={true}
 											bottomPadding={files.length > 0}
 											{onSelect}
+											{onInsertToNote}
 										/>
 									</div>
-=======
-							<div
-								class=" pb-2.5 flex flex-col justify-between w-full flex-auto overflow-auto h-0 max-w-full z-10 scrollbar-hidden"
-								id="messages-container"
-								bind:this={messagesContainerElement}
-								on:scroll={(e) => {
-									autoScroll =
-										messagesContainerElement.scrollHeight - messagesContainerElement.scrollTop <=
-										messagesContainerElement.clientHeight + 5;
-									isNearTop = messagesContainerElement.scrollTop <= 100;
-								}}
-							>
-								<div class=" h-full w-full flex flex-col">
-									<Messages
-										bind:this={messagesRef}
-										chatId={$chatId}
-										user={chatOwner ?? $user}
-										{readOnly}
-										bind:history
-										bind:autoScroll
-										bind:prompt
-										setInputText={(text) => {
-											messageInput?.setText(text);
-										}}
-										bind:selectedModels
-										{atSelectedModel}
-										className={embedded ? 'h-full flex pt-4' : 'h-full flex pt-18'}
-										{sendMessage}
-										{showMessage}
-										{submitMessage}
-										{continueResponse}
-										{regenerateResponse}
-										{mergeResponses}
-										{chatActionHandler}
-										{addMessages}
-										{onToolCallResolved}
-										allowDelete={!(generating || taskIds?.length)}
-										forkHandler={handleForkChat}
-										topPadding={!embedded}
-										bottomPadding={files.length > 0}
-										{onSelect}
-										{onInsertToNote}
-									/>
->>>>>>> upstream/main
 								</div>
 
 								<FeedbackButton />
@@ -5212,7 +4923,8 @@
 								>
 									<MessageInput
 										bind:this={messageInput}
-										agentRouted={isAgentRouted(chat?.id ? chat?.meta?.agent_id : $pendingAgentId)}
+										agentRouted={isAgentRouted($pendingAgentId)}
+										agentPickerActive={agentSelectorActive}
 										{history}
 										{taskIds}
 										bind:selectedModels
@@ -5233,7 +4945,7 @@
 										bind:dragged
 										dropzoneId={messageInputDropzoneId}
 										chatId={$chatId}
-										{contextUsage}
+										contextUsage={composerContextUsage}
 										{contextCompactionEnabled}
 										{embedded}
 										compactHandler={handleManualCompact}
@@ -5325,7 +5037,7 @@
 										bind:dragged
 										dropzoneId={messageInputDropzoneId}
 										chatId={$chatId}
-										{contextUsage}
+										contextUsage={composerContextUsage}
 										{contextCompactionEnabled}
 										{embedded}
 										compactHandler={handleManualCompact}

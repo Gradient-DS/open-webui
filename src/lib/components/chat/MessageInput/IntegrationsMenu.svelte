@@ -1,24 +1,15 @@
 <script lang="ts">
+	// [Gradient] Tenant tool gates and Document Writer capability.
+	import { isFeatureEnabled } from '$lib/utils/features';
+	import PageEdit from '$lib/components/icons/PageEdit.svelte';
 	import { getContext, onDestroy, tick } from 'svelte';
 	import { fly } from 'svelte/transition';
 
-<<<<<<< HEAD
-	import {
-		config,
-		user,
-		tools as _tools,
-		mobile,
-		settings,
-		toolServers,
-		terminalServers
-	} from '$lib/stores';
-=======
 	import { user, tools as _tools, skills as _skills, toolServers } from '$lib/stores';
->>>>>>> upstream/main
 
 	import { deleteOAuthSession } from '$lib/apis/auths';
 	import { getTools } from '$lib/apis/tools';
-	import { isFeatureEnabled } from '$lib/utils/features';
+	import { getSkills } from '$lib/apis/skills';
 
 	import { toast } from 'svelte-sonner';
 
@@ -30,10 +21,7 @@
 	import Spinner from '$lib/components/common/Spinner.svelte';
 	import SearchInput from './InputMenu/SearchInput.svelte';
 	import Wrench from '$lib/components/icons/Wrench.svelte';
-<<<<<<< HEAD
-=======
 	import Cube from '$lib/components/icons/Cube.svelte';
->>>>>>> upstream/main
 	import Sparkles from '$lib/components/icons/Sparkles.svelte';
 	import GlobeAlt from '$lib/components/icons/GlobeAlt.svelte';
 	import Photo from '$lib/components/icons/Photo.svelte';
@@ -77,6 +65,11 @@
 	export let imageGenerationEnabled = false;
 	export let showCodeInterpreterButton = false;
 	export let codeInterpreterEnabled = false;
+	// [Gradient] Derived by MessageInput using utils/dataSeparation.ts.
+	export let openInternetBlocked = false;
+	export let dataSeparationMessage = '';
+	export let showDocumentWriterButton = false;
+	export let documentWriterEnabled = false;
 
 	export let onShowValves: Function;
 	export let onClose: Function;
@@ -86,9 +79,6 @@
 	let show = false;
 	let tab = '';
 
-<<<<<<< HEAD
-	let tools = null;
-=======
 	let tools: Record<string, IntegrationItem> | null = null;
 	let skills: Record<string, IntegrationItem> | null = null;
 	let toolQuery = '';
@@ -110,7 +100,6 @@
 	$: if (show && skillQuery !== searchedSkillQuery) {
 		scheduleSkillSearch();
 	}
->>>>>>> upstream/main
 
 	$: if (show) {
 		init();
@@ -152,9 +141,6 @@
 			}
 		}
 
-<<<<<<< HEAD
-		selectedToolIds = selectedToolIds.filter((id) => Object.keys(tools).includes(id));
-=======
 		tools = items;
 
 		if (!q) {
@@ -255,7 +241,6 @@
 		} else {
 			selectedToolIds = selectedToolIds.filter((id) => id !== toolId);
 		}
->>>>>>> upstream/main
 	};
 
 	const toggleSkill = async (skillId: string) => {
@@ -295,25 +280,12 @@
 	<div slot="content">
 		<DropdownMenu className="min-w-70 max-w-70 max-h-72 overflow-hidden">
 			{#if tab === ''}
-<<<<<<< HEAD
-				<div in:fly={{ x: -20, duration: 150 }}>
-					{#if isFeatureEnabled('tools')}
-						{#if tools}
-							{#if Object.keys(tools).length > 0}
-								<button
-									class="flex w-full justify-between gap-2 items-center px-3 py-1.5 text-sm cursor-pointer rounded-xl hover:bg-gray-50 dark:hover:bg-gray-800/50"
-									on:click={() => {
-										tab = 'tools';
-									}}
-								>
-									<Wrench />
-=======
 				<div
 					class="max-h-72 overflow-y-auto overflow-x-hidden scrollbar-thin"
 					in:fly={{ x: -20, duration: 150 }}
 				>
 					{#if tools}
-						{#if Object.keys(tools).length > 0}
+						{#if isFeatureEnabled('tools') && Object.keys(tools).length > 0}
 							<button
 								class="flex w-full justify-between gap-2 items-center h-[1.6875rem] px-2 text-[0.8125rem] font-normal cursor-pointer rounded-xl hover:bg-gray-50/40 dark:hover:bg-gray-800/40"
 								on:click={() => {
@@ -321,29 +293,21 @@
 								}}
 							>
 								<Wrench />
->>>>>>> upstream/main
 
-									<div class="flex items-center w-full justify-between">
-										<div class=" line-clamp-1">
-											{$i18n.t('Tools')}
-											<span class="ml-0.5 text-gray-500">{Object.keys(tools).length}</span>
-										</div>
-
-										<div class="text-gray-500">
-											<ChevronRight />
-										</div>
+								<div class="flex items-center w-full justify-between">
+									<div class=" line-clamp-1">
+										{$i18n.t('Tools')}
+										<span class="ml-0.5 text-gray-500">{Object.keys(tools).length}</span>
 									</div>
-								</button>
-							{/if}
-						{:else}
-							<div class="py-4">
-								<Spinner />
-							</div>
-						{/if}
-<<<<<<< HEAD
-=======
 
-						{#if skills && Object.keys(skills).length > 0}
+									<div class="text-gray-500">
+										<ChevronRight />
+									</div>
+								</div>
+							</button>
+						{/if}
+
+						{#if isFeatureEnabled('skills') && skills && Object.keys(skills).length > 0}
 							<button
 								class="flex w-full justify-between gap-2 items-center h-[1.6875rem] px-2 text-[0.8125rem] font-normal cursor-pointer rounded-xl hover:bg-gray-50/40 dark:hover:bg-gray-800/40"
 								on:click={() => {
@@ -368,10 +332,9 @@
 						<div class="py-4">
 							<Spinner />
 						</div>
->>>>>>> upstream/main
 					{/if}
 
-					{#if isFeatureEnabled('tools') && toggleFilters && toggleFilters.length > 0}
+					{#if toggleFilters && toggleFilters.length > 0}
 						{#each toggleFilters.sort( (a, b) => a.name.localeCompare( b.name, undefined, { sensitivity: 'base' } ) ) as filter, filterIdx (filter.id)}
 							<Tooltip content={filter?.description} placement="top-start">
 								<button
@@ -439,17 +402,27 @@
 
 					{#if showWebSearchButton}
 						<Tooltip
-							content={imageGenerationEnabled
-								? $i18n.t('Web search and image generation cannot run in the same turn')
-								: $i18n.t('Search the internet')}
+							content={openInternetBlocked
+								? dataSeparationMessage
+								: imageGenerationEnabled
+									? $i18n.t('Web search and image generation cannot run in the same turn')
+									: $i18n.t('Search the internet')}
 							placement="top-start"
 						>
 							<button
 								class="flex w-full justify-between gap-2 items-center h-[1.6875rem] px-2 text-[0.8125rem] font-normal cursor-pointer rounded-xl hover:bg-gray-50/40 dark:hover:bg-gray-800/40"
+								class:opacity-50={openInternetBlocked}
+								aria-disabled={openInternetBlocked}
 								aria-pressed={webSearchEnabled}
 								on:click={() => {
+									// [Gradient] Strict data separation and #171 capability exclusion.
+									if (openInternetBlocked) return;
 									webSearchEnabled = !webSearchEnabled;
 									if (webSearchEnabled) {
+										if (imageGenerationEnabled)
+											toast.message(
+												$i18n.t('Web search and image generation cannot run in the same turn')
+											);
 										imageGenerationEnabled = false;
 									}
 									onWebSearchToggle(webSearchEnabled);
@@ -473,19 +446,20 @@
 					{/if}
 
 					{#if showImageGenerationButton}
-						<Tooltip
-							content={webSearchEnabled
-								? $i18n.t('Web search and image generation cannot run in the same turn')
-								: $i18n.t('Generate an image')}
-							placement="top-start"
-						>
+						<Tooltip content={$i18n.t('Generate an image')} placement="top-start">
 							<button
 								class="flex w-full justify-between gap-2 items-center h-[1.6875rem] px-2 text-[0.8125rem] font-normal cursor-pointer rounded-xl hover:bg-gray-50/40 dark:hover:bg-gray-800/40"
 								aria-pressed={imageGenerationEnabled}
 								on:click={() => {
+									// [Gradient] #171: image generation takes over from web search.
 									imageGenerationEnabled = !imageGenerationEnabled;
 									if (imageGenerationEnabled) {
+										if (webSearchEnabled)
+											toast.message(
+												$i18n.t('Web search and image generation cannot run in the same turn')
+											);
 										webSearchEnabled = false;
+										onWebSearchToggle(false);
 									}
 								}}
 							>
@@ -531,14 +505,35 @@
 							</button>
 						</Tooltip>
 					{/if}
+					<!-- [Gradient] Document Writer lives with the capability switches. -->
+					{#if showDocumentWriterButton}
+						<Tooltip content={$i18n.t('Write a document')} placement="top-start">
+							<button
+								class="flex w-full justify-between gap-2 items-center h-[1.6875rem] px-2 text-[0.8125rem] font-normal cursor-pointer rounded-xl hover:bg-gray-50/40 dark:hover:bg-gray-800/40"
+								aria-pressed={documentWriterEnabled}
+								on:click={() => {
+									documentWriterEnabled = !documentWriterEnabled;
+								}}
+							>
+								<div class="flex-1 truncate">
+									<div class="flex flex-1 gap-2 items-center">
+										<div class="shrink-0">
+											<PageEdit className="size-3.5" strokeWidth="1.75" />
+										</div>
+
+										<div class=" truncate">{$i18n.t('Document Writer')}</div>
+									</div>
+								</div>
+
+								<div class=" shrink-0" inert>
+									<Switch state={documentWriterEnabled} />
+								</div>
+							</button>
+						</Tooltip>
+					{/if}
 				</div>
-<<<<<<< HEAD
-			{:else if tab === 'tools' && tools && isFeatureEnabled('tools')}
-				<div in:fly={{ x: 20, duration: 150 }}>
-=======
 			{:else if tab === 'tools' && tools}
 				<div class="flex max-h-72 min-h-0 flex-col gap-0.5" in:fly={{ x: 20, duration: 150 }}>
->>>>>>> upstream/main
 					<button
 						class="flex w-full justify-between gap-2 items-center h-[1.6875rem] px-2 text-[0.8125rem] font-normal cursor-pointer rounded-xl hover:bg-gray-50/40 dark:hover:bg-gray-800/40"
 						on:click={() => {
@@ -653,8 +648,6 @@
 						{/if}
 					</div>
 				</div>
-<<<<<<< HEAD
-=======
 			{:else if tab === 'skills' && skills}
 				<div class="flex max-h-72 min-h-0 flex-col gap-0.5" in:fly={{ x: 20, duration: 150 }}>
 					<button
@@ -714,7 +707,6 @@
 						{/if}
 					</div>
 				</div>
->>>>>>> upstream/main
 			{/if}
 		</DropdownMenu>
 	</div>

@@ -1,12 +1,8 @@
 <script lang="ts">
-<<<<<<< HEAD
+	// [Gradient] Tenant command gates.
 	import { isFeatureEnabled } from '$lib/utils/features';
-
-	import Prompts from './Commands/Prompts.svelte';
-=======
 	import SlashCommands from './Commands/SlashCommands.svelte';
 	import AtCommands from './Commands/AtCommands.svelte';
->>>>>>> upstream/main
 	import Knowledge from './Commands/Knowledge.svelte';
 	import Skills from './Commands/Skills.svelte';
 	import Emojis from './Commands/Emojis.svelte';
@@ -93,39 +89,10 @@
 	}
 </script>
 
-<<<<<<< HEAD
-<div
-	class="{(filteredItems ?? []).length > 0
-		? ''
-		: 'hidden'} rounded-2xl shadow-lg border border-gray-200 dark:border-gray-800 flex flex-col bg-white dark:bg-gray-850 w-72 p-1"
-	id="suggestions-container"
->
-	<div class="overflow-y-auto scrollbar-thin max-h-60">
-		{#if char === '/' && isFeatureEnabled('prompts')}
-			<Prompts
-				bind:this={suggestionElement}
-				{query}
-				bind:filteredItems
-				onSelect={(e) => {
-					const { type, data } = e;
-
-					if (type === 'prompt') {
-						insertTextHandler(data.content);
-					}
-				}}
-			/>
-		{:else if char === '#' && isFeatureEnabled('knowledge')}
-			<Knowledge
-				bind:this={suggestionElement}
-				{query}
-				bind:filteredItems
-				onSelect={(e) => {
-					const { type, data } = e;
-=======
 <div class={(filteredItems ?? []).length > 0 ? '' : 'hidden'} id="suggestions-container">
 	<DropdownMenu className="w-72 max-w-[calc(100vw-1rem)] overflow-x-hidden font-sans text-xs">
 		<div class="max-h-60 overflow-y-auto overflow-x-hidden scrollbar-thin">
-			{#if char === '/'}
+			{#if char === '/' && isFeatureEnabled('prompts')}
 				<SlashCommands
 					bind:this={suggestionElement}
 					{query}
@@ -172,7 +139,6 @@
 								id: `${data.id}|${data.name}`,
 								label: data.name
 							});
->>>>>>> upstream/main
 
 							onSelect({
 								type: 'skill',
@@ -181,7 +147,7 @@
 						}
 					}}
 				/>
-			{:else if char === '#'}
+			{:else if char === '#' && isFeatureEnabled('knowledge')}
 				<Knowledge
 					bind:this={suggestionElement}
 					{query}

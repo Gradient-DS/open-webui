@@ -1,28 +1,22 @@
 <script lang="ts">
-	import { onDestroy, onMount, tick, getContext } from 'svelte';
-
-	import { decodeString } from '$lib/utils';
-<<<<<<< HEAD
-	import { knowledge } from '$lib/stores';
-
-	import { getKnowledgeBases } from '$lib/apis/knowledge';
-=======
-	import { searchKnowledgeBases, searchKnowledgeFilesById } from '$lib/apis/knowledge';
->>>>>>> upstream/main
-
-	import Tooltip from '$lib/components/common/Tooltip.svelte';
-	import Database from '$lib/components/icons/Database.svelte';
+	// [Gradient] Cloud collections retain their provider identity.
 	import OneDrive from '$lib/components/icons/OneDrive.svelte';
 	import GoogleDrive from '$lib/components/icons/GoogleDrive.svelte';
 	import Confluence from '$lib/components/icons/Confluence.svelte';
+
+	import { onDestroy, onMount, tick, getContext } from 'svelte';
+
+	import { decodeString } from '$lib/utils';
+	import { searchKnowledgeBases, searchKnowledgeFilesById } from '$lib/apis/knowledge';
+
+	import Tooltip from '$lib/components/common/Tooltip.svelte';
+	import Database from '$lib/components/icons/Database.svelte';
+	import DocumentPage from '$lib/components/icons/DocumentPage.svelte';
 	import Spinner from '$lib/components/common/Spinner.svelte';
 	import Loader from '$lib/components/common/Loader.svelte';
-<<<<<<< HEAD
-=======
 	import ChevronDown from '$lib/components/icons/ChevronDown.svelte';
 	import ChevronRight from '$lib/components/icons/ChevronRight.svelte';
 	import SearchInput from './SearchInput.svelte';
->>>>>>> upstream/main
 
 	const i18n = getContext('i18n');
 
@@ -32,8 +26,6 @@
 	let selectedIdx = 0;
 	let query = '';
 
-<<<<<<< HEAD
-=======
 	let selectedItem = null;
 
 	let selectedFileItemsPage = 1;
@@ -106,7 +98,6 @@
 		return res;
 	};
 
->>>>>>> upstream/main
 	let page = 1;
 	let items = [];
 	let total = null;
@@ -198,68 +189,6 @@
 	});
 </script>
 
-<<<<<<< HEAD
-{#if loaded && items !== null}
-	<div class="flex flex-col gap-0.5">
-		{#if items.length === 0}
-			<div class="py-4 text-center text-sm text-gray-500 dark:text-gray-400">
-				{$i18n.t('No knowledge bases found.')}
-			</div>
-		{:else}
-			{#each items as item, idx (item.id)}
-				<div
-					class=" px-2.5 py-1 rounded-xl w-full text-left flex justify-between items-center text-sm {idx ===
-					selectedIdx
-						? ' bg-gray-50 dark:bg-gray-800 dark:text-gray-100 selected-command-option-button'
-						: ''}"
-				>
-					<button
-						class="w-full flex-1"
-						type="button"
-						on:click={() => {
-							onSelect({
-								...item,
-								knowledge_type: item.type,
-								type: 'collection'
-							});
-						}}
-						on:mousemove={() => {
-							selectedIdx = idx;
-						}}
-						on:mouseleave={() => {
-							if (idx === 0) {
-								selectedIdx = -1;
-							}
-						}}
-						data-selected={idx === selectedIdx}
-					>
-						<div class="w-full text-left text-black dark:text-gray-100 flex items-center gap-1">
-							<Tooltip content={$i18n.t('Collection')} placement="top">
-								{#if item.type === 'onedrive'}
-									<OneDrive className="size-4" />
-								{:else if item.type === 'google_drive'}
-									<GoogleDrive className="size-4" />
-								{:else if item.type === 'confluence'}
-									<Confluence className="size-4" />
-								{:else}
-									<Database className="size-4" />
-								{/if}
-							</Tooltip>
-
-							<Tooltip
-								content={item.description || decodeString(item?.name)}
-								placement="top-start"
-								className="flex flex-1 min-w-0"
-							>
-								<div class="line-clamp-1 flex-1 text-sm">
-									{decodeString(item?.name)}
-								</div>
-							</Tooltip>
-						</div>
-					</button>
-				</div>
-			{/each}
-=======
 {#if loaded}
 	<div class="flex min-h-0 flex-1 flex-col gap-0.5 overflow-hidden">
 		<SearchInput bind:value={query} placeholder={$i18n.t('Search Knowledge')} />
@@ -286,8 +215,9 @@
 							type="button"
 							on:click={() => {
 								onSelect({
-									type: 'collection',
-									...item
+									...item,
+									knowledge_type: item.type,
+									type: 'collection'
 								});
 							}}
 							on:mousemove={() => {
@@ -302,7 +232,11 @@
 						>
 							<div class="w-full text-left text-black dark:text-gray-100 flex items-center gap-1">
 								<Tooltip content={$i18n.t('Collection')} placement="top">
-									<Database className="size-3.5" />
+									<!-- [Gradient] Per-provider collection icons. -->
+									{#if item.type === 'onedrive'}<OneDrive className="size-3.5" />
+									{:else if item.type === 'google_drive'}<GoogleDrive className="size-3.5" />
+									{:else if item.type === 'confluence'}<Confluence className="size-3.5" />
+									{:else}<Database className="size-3.5" />{/if}
 								</Tooltip>
 
 								<Tooltip
@@ -366,7 +300,6 @@
 											<Tooltip content={$i18n.t('Collection')} placement="top">
 												<DocumentPage className="size-3.5" />
 											</Tooltip>
->>>>>>> upstream/main
 
 											<Tooltip content={decodeString(file?.meta?.name)} placement="top-start">
 												<div class="line-clamp-1 flex-1 text-[0.8125rem]">

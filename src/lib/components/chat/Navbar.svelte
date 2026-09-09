@@ -21,11 +21,6 @@
 	import { goto } from '$app/navigation';
 
 	import ShareChatModal from '../chat/ShareChatModal.svelte';
-<<<<<<< HEAD
-	import ModelSelector from '../chat/ModelSelector.svelte';
-	import AgentSelector from './AgentSelector.svelte';
-=======
->>>>>>> upstream/main
 	import Tooltip from '../common/Tooltip.svelte';
 	import Menu from '$lib/components/layout/Navbar/Menu.svelte';
 	import AdjustmentsHorizontal from '../icons/AdjustmentsHorizontal.svelte';
@@ -53,21 +48,7 @@
 
 	export let chat;
 	export let history;
-<<<<<<< HEAD
-	export let selectedModels;
-	export let showModelSelector = true;
-
-	// [Gradient] The agent selector claims the model-selector slot when the
-	// picker feature is on and the chat is new or agent-bound. Same predicate
-	// the right-side AgentBadge used before it moved here.
-	$: agentSelectorActive =
-		isFeatureEnabled('agent_picker') &&
-		Boolean($config?.features?.feature_agent_api_enabled) &&
-		(!chat?.id || chat?.meta?.agent_id);
-
-=======
 	export let title = '';
->>>>>>> upstream/main
 	export let onSaveTempChat: () => {};
 	export let archiveChatHandler: (id: string) => void;
 	export let deleteChatHandler: (id: string) => void;
@@ -135,24 +116,6 @@
 				<div
 					class="flex-1 overflow-hidden max-w-full mt-0.5 py-0.5 pl-1 {$showSidebar ? 'ml-1' : ''}"
 				>
-<<<<<<< HEAD
-					<!-- [Gradient] When the agent picker owns chat routing, the
-					     agent selector takes the model selector's slot: on
-					     single-LLM deployments the model id is noise, and the
-					     selected agent is the thing users actually choose.
-					     Renders on mobile too (unlike the old right-side badge,
-					     which was hidden below sm). Unbound saved chats fall
-					     back to the ModelSelector — they genuinely run on the
-					     raw model. -->
-					{#if agentSelectorActive}
-						<AgentSelector agentId={chat?.meta?.agent_id} editable={!chat?.id} />
-					{:else if showModelSelector}
-						<ModelSelector
-							bind:selectedModels
-							showSetDefault={!shareEnabled && !readOnly}
-							disabled={readOnly}
-						/>
-=======
 					{#if chat?.id}
 						<div class="flex max-w-full min-w-0 items-center gap-2 mr-2">
 							<div
@@ -196,7 +159,6 @@
 								{$i18n.t('New Chat')}
 							</div>
 						</div>
->>>>>>> upstream/main
 					{/if}
 				</div>
 
@@ -269,39 +231,7 @@
 						</Tooltip>
 					{/if}
 
-<<<<<<< HEAD
-					{#if shareEnabled && chat && (chat.id || $temporaryChatEnabled)}
-						<Menu
-							{chat}
-							{shareEnabled}
-							{readOnly}
-							{scrollToTop}
-							shareHandler={() => {
-								showShareChatModal = !showShareChatModal;
-							}}
-							archiveChatHandler={() => {
-								archiveChatHandler(chat.id);
-							}}
-							deleteChatHandler={() => {
-								deleteChatHandler(chat.id);
-							}}
-							{moveChatHandler}
-						>
-							<button
-								class="flex cursor-pointer px-2 py-2 rounded-xl hover:bg-gray-50 dark:hover:bg-gray-850 transition"
-								id="chat-context-menu-button"
-							>
-								<div class=" m-auto self-center">
-									<EllipsisHorizontal className=" size-5" strokeWidth="1.5" />
-								</div>
-							</button>
-						</Menu>
-					{/if}
-
 					{#if isFeatureEnabled('chat_controls') && ($user?.role === 'admin' || ($user?.permissions?.chat?.controls ?? true))}
-=======
-					{#if $user?.role === 'admin' || ($user?.permissions.chat?.controls ?? true)}
->>>>>>> upstream/main
 						<Tooltip content={$i18n.t('Controls')}>
 							<button
 								class="flex size-6 cursor-pointer items-center justify-center rounded-lg text-gray-500 transition hover:bg-gray-50/40 hover:text-gray-700 dark:text-gray-400 dark:hover:bg-gray-800/40 dark:hover:text-gray-200"

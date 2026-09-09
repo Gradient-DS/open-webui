@@ -1,4 +1,5 @@
 <script lang="ts">
+	import type { Model } from '$lib/stores';
 	import { toast } from 'svelte-sonner';
 	import { marked } from 'marked';
 	import DOMPurify from 'dompurify';
@@ -15,14 +16,8 @@
 		user,
 		models as _models,
 		temporaryChatEnabled,
-<<<<<<< HEAD
 		selectedFolder,
-		chats,
-		currentChatPage,
 		pendingAgentId
-=======
-		selectedFolder
->>>>>>> upstream/main
 	} from '$lib/stores';
 	import { refreshChatList, refreshFolderChatLists } from '$lib/stores/chatList';
 	import { sanitizeResponseContent, extractCurlyBraceWords } from '$lib/utils';
@@ -113,15 +108,11 @@
 		$selectedFolder.permission !== 'write';
 </script>
 
-<<<<<<< HEAD
 <div
-	class="m-auto w-full max-w-6xl px-2 @2xl:px-20 translate-y-6 {compactPlaceholder
+	class="m-auto w-full max-w-[58rem] px-1 @2xl:px-20 translate-y-6 {compactPlaceholder
 		? 'py-12'
 		: 'py-24'} text-center"
 >
-=======
-<div class="m-auto w-full max-w-[58rem] px-1 @2xl:px-20 translate-y-6 py-24 text-center">
->>>>>>> upstream/main
 	{#if $temporaryChatEnabled}
 		<Tooltip
 			content={$i18n.t("This chat won't appear in history and your messages will not be saved.")}
@@ -139,23 +130,12 @@
 			{#if $selectedFolder}
 				<FolderTitle
 					folder={$selectedFolder}
-<<<<<<< HEAD
-					readOnly={folderNotOwned}
-					onUpdate={async (folder) => {
-						currentChatPage.set(1);
-						await chats.set(await getChatList(localStorage.token, $currentChatPage));
-					}}
-					onDelete={async () => {
-						currentChatPage.set(1);
-						await chats.set(await getChatList(localStorage.token, $currentChatPage));
-=======
 					readOnly={folderReadOnly}
 					onUpdate={async () => {
 						await Promise.all([refreshChatList(localStorage.token), refreshFolderChatLists(null)]);
 					}}
 					onDelete={async () => {
 						await Promise.all([refreshChatList(localStorage.token), refreshFolderChatLists(null)]);
->>>>>>> upstream/main
 
 						selectedFolder.set(null);
 					}}
@@ -167,45 +147,41 @@
 					     model avatar/name greeting (raw model ids and favicon
 					     fallbacks read as noise) in favor of the plain hello. -->
 					{#if !agentPickerEnabled}
-					<div class="flex shrink-0 justify-center">
-						<div class="flex -space-x-4 mb-0.5" in:fade={{ duration: 100 }}>
-							{#each models as model, modelIdx}
-								<Tooltip
-									content={(models[modelIdx]?.info?.meta?.tags ?? [])
-										.map((tag) => tag.name.toUpperCase())
-										.join(', ')}
-									placement="top"
-								>
-									<button
-										aria-hidden={models.length <= 1}
-										aria-label={$i18n.t('Get information on {{name}} in the UI', {
-											name: models[modelIdx]?.name
-										})}
-										on:click={() => {
-											selectedModelIdx = modelIdx;
-										}}
+						<div class="flex shrink-0 justify-center">
+							<div class="flex -space-x-4 mb-0.5" in:fade={{ duration: 100 }}>
+								{#each models as model, modelIdx}
+									<Tooltip
+										content={(models[modelIdx]?.info?.meta?.tags ?? [])
+											.map((tag) => tag.name.toUpperCase())
+											.join(', ')}
+										placement="top"
 									>
-										<img
-											src={`${WEBUI_API_BASE_URL}/models/model/profile/image?id=${model?.id}&lang=${$i18n.language}`}
-<<<<<<< HEAD
-											class=" size-9 @sm:size-10"
-=======
-											class=" size-9 @sm:size-10 rounded-2xl"
->>>>>>> upstream/main
-											aria-hidden="true"
-											draggable="false"
-											on:error={(e) => {
-												// LICENSE covers this Open WebUI fallback logo.
-												// Do not alter, remove, obscure, or replace it except as LICENSE permits:
-												// https://docs.openwebui.com/license.
-												e.currentTarget.src = '/favicon.png';
+										<button
+											aria-hidden={models.length <= 1}
+											aria-label={$i18n.t('Get information on {{name}} in the UI', {
+												name: models[modelIdx]?.name
+											})}
+											on:click={() => {
+												selectedModelIdx = modelIdx;
 											}}
-										/>
-									</button>
-								</Tooltip>
-							{/each}
+										>
+											<img
+												src={`${WEBUI_API_BASE_URL}/models/model/profile/image?id=${model?.id}&lang=${$i18n.language}`}
+												class=" size-9 @sm:size-10 rounded-2xl"
+												aria-hidden="true"
+												draggable="false"
+												on:error={(e) => {
+													// LICENSE covers this Open WebUI fallback logo.
+													// Do not alter, remove, obscure, or replace it except as LICENSE permits:
+													// https://docs.openwebui.com/license.
+													e.currentTarget.src = '/favicon.png';
+												}}
+											/>
+										</button>
+									</Tooltip>
+								{/each}
+							</div>
 						</div>
-					</div>
 					{/if}
 
 					<div
@@ -290,6 +266,7 @@
 					<MessageInput
 						bind:this={messageInput}
 						agentRouted={isAgentRouted($pendingAgentId)}
+						agentPickerActive={agentPickerEnabled}
 						{history}
 						bind:selectedModels
 						bind:files

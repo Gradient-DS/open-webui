@@ -2,39 +2,15 @@
 	import fileSaver from 'file-saver';
 	const { saveAs } = fileSaver;
 
-<<<<<<< HEAD
-	import {
-		chatId,
-		chats,
-		config,
-		socket,
-		user,
-		settings,
-		scrollPaginationEnabled,
-		currentChatPage,
-		pinnedChats
-	} from '$lib/stores';
-
-	import {
-		archiveAllChats,
-		deleteAllChats,
-		getAllChats,
-		getChatList,
-		getPinnedChatList,
-		importChats
-	} from '$lib/apis/chats';
-	import { triggerDataExport, getExportStatus, deleteExport } from '$lib/apis/export';
-	import { getImportOrigin, convertOpenAIChats } from '$lib/utils';
-	import { WEBUI_BASE_URL } from '$lib/constants';
-	import { onMount, onDestroy, getContext } from 'svelte';
-=======
-	import { user } from '$lib/stores';
+	import { user, config, socket } from '$lib/stores';
 	import { refreshChatList } from '$lib/stores/chatList';
 
 	import { archiveAllChats, deleteAllChats, getAllChats, importChats } from '$lib/apis/chats';
 	import { getImportOrigin, convertOpenAIChats } from '$lib/utils';
-	import { getContext } from 'svelte';
->>>>>>> upstream/main
+	import { getContext, onMount, onDestroy } from 'svelte';
+
+	import { triggerDataExport, getExportStatus, deleteExport } from '$lib/apis/export';
+	import { WEBUI_BASE_URL } from '$lib/constants';
 	import { goto } from '$app/navigation';
 	import { toast } from 'svelte-sonner';
 	import SharedChatsModal from '$lib/components/layout/SharedChatsModal.svelte';
@@ -337,29 +313,26 @@
 			{/if}
 		</UserSettingSection>
 
-<<<<<<< HEAD
-		<div>
-			<div class="mb-1 text-sm font-medium">{$i18n.t('Files')}</div>
+		<UserSettingSection title={$i18n.t('Files')}>
+			<UserSettingRow
+				label={$i18n.t('Manage Files')}
+				description={$i18n.t('Open the file manager for uploaded files.')}
+			>
+				<button
+					class={actionButtonClass}
+					on:click={() => {
+						showFilesModal = true;
+					}}
+					type="button"
+				>
+					{$i18n.t('Manage')}
+				</button>
+			</UserSettingRow>
+		</UserSettingSection>
 
-			<div>
-				<div class="py-0.5 flex w-full justify-between">
-					<div class="self-center text-xs">{$i18n.t('Manage Files')}</div>
-					<button
-						class="p-1 px-3 text-xs flex rounded-sm transition"
-						on:click={() => {
-							showFilesModal = true;
-						}}
-						type="button"
-					>
-						<span class="self-center">{$i18n.t('Manage')}</span>
-					</button>
-				</div>
-			</div>
-		</div>
-
+		<!-- [Gradient] Account-wide asynchronous data export. -->
 		{#if $config?.features?.enable_data_export}
-			<div>
-				<div class="mb-1 text-sm font-medium">{$i18n.t('Data Export')}</div>
+			<UserSettingSection title={$i18n.t('Data Export')}>
 				<div class="text-xs text-gray-500 dark:text-gray-400 mb-2">
 					{$i18n.t(
 						'Download all your data including chats, notes, memories, prompts, tools, models, and locally uploaded files.'
@@ -429,25 +402,7 @@
 						</div>
 					{/if}
 				</div>
-			</div>
+			</UserSettingSection>
 		{/if}
-=======
-		<UserSettingSection title={$i18n.t('Files')}>
-			<UserSettingRow
-				label={$i18n.t('Manage Files')}
-				description={$i18n.t('Open the file manager for uploaded files.')}
-			>
-				<button
-					class={actionButtonClass}
-					on:click={() => {
-						showFilesModal = true;
-					}}
-					type="button"
-				>
-					{$i18n.t('Manage')}
-				</button>
-			</UserSettingRow>
-		</UserSettingSection>
->>>>>>> upstream/main
 	</div>
 </div>

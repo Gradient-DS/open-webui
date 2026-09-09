@@ -1,4 +1,5 @@
 <script lang="ts">
+	import type { Model } from '$lib/stores';
 	import { marked } from 'marked';
 	import Fuse from 'fuse.js';
 
@@ -72,11 +73,7 @@
 		[key: string]: any;
 	}[] = [];
 
-<<<<<<< HEAD
 	export let className = 'w-[28rem]';
-=======
-	export let className = 'w-[20rem]';
->>>>>>> upstream/main
 	export let triggerClassName = 'text-lg';
 	export let placement: 'top' | 'bottom' | 'auto' = 'bottom';
 	export let align: 'start' | 'end' = 'start';
@@ -933,11 +930,7 @@
 		deleteModelTarget = null;
 	};
 
-<<<<<<< HEAD
 	const ITEM_HEIGHT = 56;
-=======
-	const ITEM_HEIGHT = 32;
->>>>>>> upstream/main
 	const OVERSCAN = 10;
 
 	let listScrollTop = 0;
@@ -1130,121 +1123,12 @@
 						</div>
 					{/if}
 
-<<<<<<< HEAD
-					<!-- Tabs (left) + Quality/Speed legend (right). The legend must line up above the
-						row meters, but the rows live in a px-2.5 wrapper + a scroll container that
-						reserves a 0.45rem scrollbar gutter (scrollbar-gutter:stable on the list below),
-						while this header sits outside both. pr-[1.45rem] = px-2.5 (0.625) + gutter (0.45)
-						+ the row button's pr-1.5 (0.375), so the meter columns align in every scroll state. -->
-					<div class="pl-3 pr-[1.45rem] py-1 flex items-center w-full">
-						{#if tags && items.filter((item) => includeHidden || !(item.model?.info?.meta?.hidden ?? false)).length > 0}
-							<div
-								class="flex-1 min-w-0 flex bg-white dark:bg-gray-850 overflow-x-auto scrollbar-none font-[450]"
-								on:wheel={(e) => {
-									if (e.deltaY !== 0) {
-										e.preventDefault();
-										e.currentTarget.scrollLeft += e.deltaY;
-									}
-								}}
-							>
-								<div
-									class="flex gap-1 w-fit text-center text-xs sm:text-sm rounded-full bg-transparent whitespace-nowrap"
-									bind:this={tagsContainerElement}
-								>
-									{#if items.find((item) => item.model?.connection_type === 'local') || items.find((item) => item.model?.connection_type === 'external') || items.find((item) => item.model?.direct) || tags.length > 0}
-										<button
-											class="min-w-fit outline-none px-1.5 py-0.5 {selectedTag === '' &&
-											selectedConnectionType === ''
-												? ''
-												: 'text-gray-300 dark:text-gray-600 hover:text-gray-700 dark:hover:text-white'} transition capitalize"
-											aria-pressed={selectedTag === '' && selectedConnectionType === ''}
-											on:click={() => {
-												selectedConnectionType = '';
-												selectedTag = '';
-											}}
-										>
-											{$i18n.t('All')}
-										</button>
-									{/if}
-
-									{#if items.find((item) => item.model?.connection_type === 'local')}
-										<button
-											class="min-w-fit outline-none px-1.5 py-0.5 {selectedConnectionType ===
-											'local'
-												? ''
-												: 'text-gray-300 dark:text-gray-600 hover:text-gray-700 dark:hover:text-white'} transition capitalize"
-											aria-pressed={selectedConnectionType === 'local'}
-											on:click={() => {
-												selectedTag = '';
-												selectedConnectionType = 'local';
-											}}
-										>
-											{$i18n.t('Local')}
-										</button>
-									{/if}
-
-									{#if items.find((item) => item.model?.connection_type === 'external')}
-										<button
-											class="min-w-fit outline-none px-1.5 py-0.5 {selectedConnectionType ===
-											'external'
-												? ''
-												: 'text-gray-300 dark:text-gray-600 hover:text-gray-700 dark:hover:text-white'} transition capitalize"
-											aria-pressed={selectedConnectionType === 'external'}
-											on:click={() => {
-												selectedTag = '';
-												selectedConnectionType = 'external';
-											}}
-										>
-											{$i18n.t('External')}
-										</button>
-									{/if}
-
-									{#if items.find((item) => item.model?.direct)}
-										<button
-											class="min-w-fit outline-none px-1.5 py-0.5 {selectedConnectionType ===
-											'direct'
-												? ''
-												: 'text-gray-300 dark:text-gray-600 hover:text-gray-700 dark:hover:text-white'} transition capitalize"
-											aria-pressed={selectedConnectionType === 'direct'}
-											on:click={() => {
-												selectedTag = '';
-												selectedConnectionType = 'direct';
-											}}
-										>
-											{$i18n.t('Direct')}
-										</button>
-									{/if}
-
-									{#each tags as tag}
-										<Tooltip content={tag}>
-											<button
-												class="min-w-fit outline-none px-1.5 py-0.5 {selectedTag === tag
-													? ''
-													: 'text-gray-300 dark:text-gray-600 hover:text-gray-700 dark:hover:text-white'} transition capitalize"
-												aria-pressed={selectedTag === tag}
-												on:click={() => {
-													selectedConnectionType = '';
-													selectedTag = tag;
-												}}
-											>
-												{tag.length > 16 ? `${tag.slice(0, 16)}...` : tag}
-											</button>
-										</Tooltip>
-									{/each}
-								</div>
-							</div>
-						{:else}
-							<div class="flex-1"></div>
-						{/if}
-						{#if $config?.features?.feature_model_meters !== false}
-							<ModelProfileLegend />
-						{/if}
-					</div>
-
-					<div class="px-2.5 group relative">
-=======
 					<div class="group relative flex min-h-0 flex-1 flex-col">
->>>>>>> upstream/main
+						<!-- [Gradient] Profile legend stays above the two-line model rows. -->
+						{#if $config?.features?.feature_model_meters !== false}
+							<!-- [Gradient] Match the row's px-2 plus the 0.45rem reserved scrollbar. -->
+							<div class="flex justify-end py-1 pr-[0.95rem]"><ModelProfileLegend /></div>
+						{/if}
 						{#if filteredItems.length === 0}
 							{#if items.length === 0 && $user?.role === 'admin'}
 								<div
@@ -1281,12 +1165,8 @@
 						{:else}
 							<!-- svelte-ignore a11y-no-static-element-interactions -->
 							<div
-<<<<<<< HEAD
-								class="max-h-64 overflow-y-auto [scrollbar-gutter:stable]"
-=======
-								class="min-h-0 flex-1 overflow-y-auto"
+								class="min-h-0 flex-1 overflow-y-auto [scrollbar-gutter:stable]"
 								style="max-height: 18rem;"
->>>>>>> upstream/main
 								role="listbox"
 								aria-label={$i18n.t('Available models')}
 								bind:this={listContainer}

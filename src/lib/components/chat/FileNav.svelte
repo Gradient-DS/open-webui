@@ -39,17 +39,11 @@
 		type TerminalCwd
 	} from '$lib/apis/terminal';
 	import { isCodeFile } from '$lib/utils/codeHighlight';
-<<<<<<< HEAD
-	import { renderDocxHtml, readWorkbook, renderSheetHtml } from '$lib/utils/officePreview';
-	import Folder from '../icons/Folder.svelte';
-	import Document from '../icons/Document.svelte';
-	import PenAlt from '../icons/PenAlt.svelte';
-	import ZoomReset from '../icons/ZoomReset.svelte';
-=======
 	import { isSavedChatId, isTemporaryChatId } from '$lib/utils/chatId';
 	import { copyToClipboard } from '$lib/utils';
 	import { normalizeDocumentTargetPage } from '$lib/utils/documentPreview';
->>>>>>> upstream/main
+	// [Gradient] Shared spreadsheet preview.
+	import { readWorkbook, renderSheetHtml } from '$lib/utils/officePreview';
 
 	import Spinner from '../common/Spinner.svelte';
 	import Tooltip from '../common/Tooltip.svelte';
@@ -876,22 +870,6 @@
 			);
 			if (result) fileSqliteData = await result.blob.arrayBuffer();
 		} else if (isOffice(filePath)) {
-<<<<<<< HEAD
-			const result = await downloadFileBlob(
-				terminal.url,
-				terminal.key,
-				filePath,
-				chatId ?? undefined
-			);
-			if (result) {
-				const ext = getFileExt(filePath);
-				const arrayBuffer = await result.blob.arrayBuffer();
-				try {
-					if (ext === 'docx') {
-						fileOfficeHtml = await renderDocxHtml(arrayBuffer);
-					} else if (ext === 'xlsx') {
-						const wb = await readWorkbook(arrayBuffer);
-=======
 			const ext = getFileExt(filePath);
 			try {
 				if (ext === 'docx') {
@@ -925,7 +903,6 @@
 						const arrayBuffer = await result.blob.arrayBuffer();
 						const XLSX = await import('xlsx');
 						const wb = XLSX.read(new Uint8Array(arrayBuffer), { type: 'array' });
->>>>>>> upstream/main
 						excelWorkbook = wb;
 						excelSheetNames = wb.SheetNames;
 						if (excelSheetNames.length > 0) {

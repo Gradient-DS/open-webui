@@ -102,12 +102,12 @@
 				<hr class="border-gray-50 dark:border-gray-800/30 mx-1 my-0.5" />
 			{/if}
 
-<<<<<<< HEAD
-			{#if model?.info?.base_model_id}
+			<!-- [Gradient] Pin assistants, and allow unpinning admin-default base models. -->
+			{#if model?.info?.base_model_id || $pinnedModels.includes(model.id)}
 				<button
 					type="button"
-					aria-pressed={($settings?.pinnedModels ?? []).includes(model?.id)}
-					class="select-none flex rounded-xl py-1.5 px-3 w-full hover:bg-gray-50 dark:hover:bg-gray-800 transition items-center gap-2"
+					aria-pressed={$pinnedModels.includes(model?.id)}
+					class="select-none flex h-[1.6875rem] w-full items-center gap-2 rounded-xl px-2 text-[0.8125rem] hover:bg-gray-50/40 dark:hover:bg-gray-800/40 transition"
 					on:click={(e) => {
 						e.stopPropagation();
 						e.preventDefault();
@@ -116,37 +116,14 @@
 						show = false;
 					}}
 				>
-					{#if ($settings?.pinnedModels ?? []).includes(model?.id)}
-						<PinSlash />
-=======
-			<button
-				type="button"
-				aria-pressed={$pinnedModels.includes(model?.id)}
-				class="select-none flex h-[1.6875rem] w-full items-center gap-2 rounded-xl px-2 text-[0.8125rem] hover:bg-gray-50/40 dark:hover:bg-gray-800/40 transition"
-				on:click={(e) => {
-					e.stopPropagation();
-					e.preventDefault();
-
-					pinModelHandler(model?.id);
-					show = false;
-				}}
-			>
-				{#if $pinnedModels.includes(model?.id)}
-					<PinSlash className="size-3.5" />
-				{:else}
-					<Pin className="size-3.5" />
-				{/if}
-
-				<div class="flex items-center">
 					{#if $pinnedModels.includes(model?.id)}
-						{$i18n.t('Hide from Sidebar')}
->>>>>>> upstream/main
+						<PinSlash className="size-3.5" />
 					{:else}
-						<Pin />
+						<Pin className="size-3.5" />
 					{/if}
 
 					<div class="flex items-center">
-						{#if ($settings?.pinnedModels ?? []).includes(model?.id)}
+						{#if $pinnedModels.includes(model?.id)}
 							{$i18n.t('Hide from Sidebar')}
 						{:else}
 							{$i18n.t('Keep in Sidebar')}
