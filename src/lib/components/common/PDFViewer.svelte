@@ -89,6 +89,10 @@
 	let lastRenderedZoom = 1;
 	let pageCount = 0;
 	let renderedPage = 0;
+	// [Gradient] Last page scrollToTargetPage() actually scrolled to. Guards the
+	// post-load reactive scroll below from re-running for a page renderAllPages()
+	// has already scrolled to, which would undo the citation highlight scroll.
+	let scrolledPage = 0;
 	let activePage = 1;
 	let loadToken = 0;
 	let renderToken = 0;
@@ -414,6 +418,7 @@
 			| HTMLElement
 			| undefined;
 		pageWrapper?.scrollIntoView({ block: 'start' });
+		scrolledPage = page;
 		activePage = page;
 		onPageChange?.(page);
 	};
@@ -685,6 +690,7 @@
 		loading = true;
 		error = '';
 		renderedPage = 0;
+		scrolledPage = 0;
 		pageCount = 0;
 		pzInstance?.dispose();
 		cancelTextLayers();
@@ -741,7 +747,12 @@
 		void renderAllPages();
 	}
 
-	$: if (!loading && pdfDoc && !singlePage && targetPage) {
+	// [Gradient] Only scroll for a page the render pass has not already handled.
+	// renderAllPages() awaits scrollToTargetPage() and then applies the citation
+	// highlight scroll; without this guard the effect fires again when `loading`
+	// flips false and drags the viewer back to `targetPage` (coerced to 1 in
+	// loadPdf), losing both the bbox overlay position and the chunk jump.
+	$: if (!loading && pdfDoc && !singlePage && targetPage && targetPage !== scrolledPage) {
 		void scrollToTargetPage();
 	}
 
