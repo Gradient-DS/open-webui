@@ -29,7 +29,6 @@
 	import HelpCircleIcon from './icons/HelpCircle.svelte';
 	import LogOutIcon from './icons/LogOut.svelte';
 	import Settings from '$lib/components/icons/Settings.svelte';
-	import KeyIcon from './icons/Key.svelte';
 	import UserIcon from './icons/User.svelte';
 	import XMarkIcon from './icons/XMark.svelte';
 	import ArchiveBox from '$lib/components/icons/ArchiveBox.svelte';
@@ -237,25 +236,8 @@
 					</a>
 				{/if}
 
-				<button
-					class="flex h-[1.6875rem] items-center gap-2 rounded-xl px-2 text-[0.8125rem] w-full hover:bg-gray-100 dark:hover:bg-gray-900 transition cursor-pointer select-none"
-					type="button"
-					id="chat-share-button"
-					on:click={async () => {
-						show = false;
-						showSettings.set('shortcuts');
-
-						if ($mobile) {
-							await tick();
-							showSidebar.set(false);
-						}
-					}}
-				>
-					<div class="self-center">
-						<KeyIcon className="size-3.5" />
-					</div>
-					<div class=" self-center truncate">{$i18n.t('Keyboard')}</div>
-				</button>
+				<!-- [Gradient] Keyboard shortcuts live in Settings only; they do not need a
+				     second entry here. Still reachable via the shortcuts tab and Cmd+/. -->
 			{/if}
 
 			<hr class="border-gray-50/30 dark:border-gray-800/30 my-0.5 mx-1 p-0" />
