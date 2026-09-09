@@ -472,7 +472,7 @@
 							done={detailToken?.attributes?.done === 'true'}
 							messageDone={done}
 						/>
-					{:else if detailToken?.attributes?.type === 'tool_calls'}
+					{:else if detailToken?.attributes?.type === 'tool_calls' && detailToken?.attributes?.status === 'pending'}
 						<ToolCallDisplay
 							id={`${id}-${tokenIdx}-${detailIdx}-tc`}
 							attributes={detailToken.attributes}
@@ -485,6 +485,8 @@
 							className="w-full"
 							buttonClassName={detailButtonClassName}
 						/>
+					{:else if detailToken?.attributes?.type === 'tool_calls'}
+						<!-- [Gradient] Rendered by StatusHistory (anchor only). -->
 					{:else if textContent.length > 0}
 						<Collapsible
 							title={detailToken.summary}
@@ -551,8 +553,11 @@
 				done={token?.attributes?.done === 'true'}
 				messageDone={done}
 			/>
-		{:else if token?.attributes?.type === 'tool_calls'}
-			<!-- Tool calls have dedicated handling with ToolCallDisplay component -->
+		{:else if token?.attributes?.type === 'tool_calls' && token?.attributes?.status === 'pending'}
+			<!-- [Gradient] StatusHistory is the canonical surface for tool activity: it alone
+			     translates the agent's i18n descriptions and interleaves reasoning with tool
+			     statuses. ToolCallDisplay survives only for upstream's interactive approval
+			     prompt, which the agent's markers never carry. -->
 			<ToolCallDisplay
 				id={`${id}-${tokenIdx}-tc`}
 				attributes={token.attributes}
@@ -564,6 +569,9 @@
 				className="w-full space-y-2"
 				buttonClassName={detailButtonClassName}
 			/>
+		{:else if token?.attributes?.type === 'tool_calls'}
+			<!-- [Gradient] Rendered by StatusHistory; the inline marker stays in
+			     message.content as a stream-position anchor only. -->
 		{:else if textContent.length > 0}
 			<Collapsible
 				title={token.summary}
