@@ -227,16 +227,6 @@
 	// sync-written directory structure read-only; push KBs are browse-only.
 	$: structureEditable = canEditStructure(knowledge);
 
-	// [Gradient] TODO(merge-v0.11.3): Can the legacy split-pane state be retired now that previews use FileItemModal?
-	// Phase 6 explicitly retains this fork state and its media-query handler.
-	// eslint-disable-next-line @typescript-eslint/no-unused-vars
-	let largeScreen = true;
-
-	// eslint-disable-next-line @typescript-eslint/no-unused-vars
-	let pane;
-	// eslint-disable-next-line @typescript-eslint/no-unused-vars
-	let showSidepanel = true;
-
 	let showAddWebpageModal = false;
 	let showAddTextContentModal = false;
 	let showNewDirectoryModal = false;
@@ -252,8 +242,6 @@
 	let pendingSyncFiles: DirectoryFileEntry[] | null = null;
 	let syncing: string | null = null;
 
-	// eslint-disable-next-line @typescript-eslint/no-unused-vars
-	let minSize = 0;
 	type Knowledge = {
 		id: string;
 		name: string;
@@ -2082,8 +2070,6 @@
 	};
 
 	let debounceTimeout = null;
-	// eslint-disable-next-line @typescript-eslint/no-unused-vars
-	let mediaQuery;
 	let dragged = false;
 
 	const changeDebounceHandler = () => {
@@ -2111,15 +2097,6 @@
 				toast.success($i18n.t('Knowledge updated successfully'));
 			}
 		}, 1000);
-	};
-
-	// eslint-disable-next-line @typescript-eslint/no-unused-vars
-	const handleMediaQuery = async (e) => {
-		if (e.matches) {
-			largeScreen = true;
-		} else {
-			largeScreen = false;
-		}
 	};
 
 	const onDragOver = (e) => {

@@ -5856,7 +5856,8 @@ async def streaming_chat_response_handler(response, ctx):
                                                 break
 
                                         # [Gradient] Lift document tags before emitting Responses API deltas.
-                                        # [Gradient] TODO(merge-v0.11.3): Which document format does the live agent emit?
+                                        # [Gradient] Agent-routed turns also flow through this handler (main.py pipes the agent response through process_chat_response), but the agent never emits <document> tags:
+                                        # the Document-Writer prompt injection is skipped for agent routes, and agent documents arrive as write_document tool-call markers rendered by the frontend as a DocumentCard.
                                         if DETECT_DOCUMENT_WRITER:
                                             document_slot = len(output) - 1
                                             document_target = (output[-1].get('id'), output[-1].get('type'))

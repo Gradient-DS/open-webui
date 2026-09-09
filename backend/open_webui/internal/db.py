@@ -140,11 +140,11 @@ class JSONField(types.TypeDecorator):  # TEXT-backed JSON storage
         return JSONField(length=self.impl.length)
 
     def db_value(self, value):
-        return json.dumps(value)
+        return JSONCodec.dumps(value)
 
     def python_value(self, value):
         if value is not None:
-            return json.loads(value)
+            return JSONCodec.loads(value)
 
 
 # Normalize SSL params from the URL once; the sync engine needs them

@@ -519,7 +519,7 @@
 				<input
 					class=" w-full text-sm py-1 rounded-r-xl outline-hidden bg-transparent"
 					bind:value={query}
-					aria-label={$i18n.t('Search Models')}
+					aria-label={$i18n.t('Search Agents')}
 					placeholder={$i18n.t('Search Agents')}
 					maxlength="500"
 					on:input={() => {

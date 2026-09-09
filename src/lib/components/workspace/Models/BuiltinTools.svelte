@@ -93,6 +93,8 @@
 
 	// Filter to only tools whose global feature is enabled
 	$: visibleTools = allTools.filter((tool) => {
+		// [Gradient] D-Runtime: no subagents feature flag is exposed by /api/config.
+		if (tool === 'subagents') return false;
 		const configKey = toolConfigGuards[tool];
 		if (configKey && !$config?.features?.[configKey]) {
 			return false;

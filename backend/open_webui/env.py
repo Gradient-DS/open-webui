@@ -884,7 +884,7 @@ OAUTH_TOKEN_EXCHANGE_TRUSTED_CLIENT_IDS = [
 # per OpenID Connect Back-Channel Logout 1.0 spec.
 # Requires Redis for JWT revocation.
 # Gradient default: True (upstream: False) — most of our tenants use Entra and
-# benefit from session invalidation on IdP signout. Per env-defaults.md §G.
+# benefit from session invalidation on IdP signout; see soev-gitops/docs/.
 ENABLE_OAUTH_BACKCHANNEL_LOGOUT = os.environ.get('ENABLE_OAUTH_BACKCHANNEL_LOGOUT', 'True').lower() == 'true'
 
 ####################################

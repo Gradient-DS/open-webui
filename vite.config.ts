@@ -3,7 +3,10 @@ import { defineConfig } from 'vite';
 
 import { viteStaticCopy } from 'vite-plugin-static-copy';
 
-const backendTarget = process.env.WEBUI_BACKEND_URL || 'http://localhost:8080';
+// [Gradient] An allocated dev-stack port takes precedence over the upstream URL override.
+const backendTarget = process.env.OWUI_BE_PORT
+	? `http://localhost:${process.env.OWUI_BE_PORT}`
+	: process.env.WEBUI_BACKEND_URL || 'http://localhost:8080';
 
 export default defineConfig({
 	plugins: [
@@ -28,7 +31,7 @@ export default defineConfig({
 		// without a config fork. Defaults to 8080 — the standard
 		// `open-webui dev` port — for non-multi-stack invocations.
 		proxy: (() => {
-			const target = `http://localhost:${process.env.OWUI_BE_PORT || '8080'}`;
+			const target = backendTarget;
 			return {
 				'/api': target,
 				'/ollama': target,
@@ -37,17 +40,12 @@ export default defineConfig({
 				'/static': target,
 				// Socket.IO is mounted at /ws/socket.io on the BE
 				// (`backend/open_webui/main.py` app.mount('/ws', socket_app)).
-				// Since `constants.ts` routes WEBUI_BASE_URL through
-				// location.host (Vite, :5173) to avoid CORS, the WS upgrade
-				// must be proxied too — otherwise $socket never gets an id,
-				// chat completion requests arrive at the BE without
-				// session_id, and the middleware falls back to inline SSE
-				// (which `generateOpenAIChatCompletion`'s `res.json()` can't
-				// parse → "Unexpected token 'd', \"data: ..."). `ws: true`
-				// makes Vite forward the HTTP-101 upgrade handshake.
+				// [Gradient] constants.ts uses relative URLs. Vite proxies HTTP and
+				// WebSocket traffic to OWUI_BE_PORT (or the backend URL/default above).
+				// ws: true forwards the Socket.IO HTTP-101 upgrade handshake.
 				'/ws': { target, ws: true }
 			};
-		})(),
+		})()
 		// NOTE: a previous `watch.ignored: ['**/.worktrees/**']` was removed
 		// here. The intent was to suppress HMR for sibling worktrees when a
 		// dev server runs from the repo root, but chokidar matches the
@@ -61,32 +59,6 @@ export default defineConfig({
 	},
 	build: {
 		sourcemap: true
-	},
-	server: {
-		proxy: {
-			'/api': {
-				target: backendTarget,
-				changeOrigin: true,
-				ws: true
-			},
-			'/ollama': {
-				target: backendTarget,
-				changeOrigin: true
-			},
-			'/openai': {
-				target: backendTarget,
-				changeOrigin: true
-			},
-			'/oauth': {
-				target: backendTarget,
-				changeOrigin: true
-			},
-			'/ws': {
-				target: backendTarget,
-				changeOrigin: true,
-				ws: true
-			}
-		}
 	},
 	worker: {
 		format: 'es'

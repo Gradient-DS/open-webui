@@ -819,7 +819,7 @@ async def write_document(
     :return: JSON with title and status — the markdown itself is surfaced to
         the user via the side panel.
     """
-    return json.dumps(
+    return JSONCodec.dumps(
         {
             'status': 'success',
             'title': title,

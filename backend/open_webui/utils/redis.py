@@ -119,19 +119,6 @@ def build_sentinel_url(
     return f'redis+sentinel://{auth}{nodes}/{cfg["db"]}/{cfg["service"]}'
 
 
-def get_sentinel_url_from_env(
-    redis_url: str,
-    sentinel_hosts_env: str,
-    sentinel_port_env: str | int,
-) -> str:
-    """Fork alias of :func:`build_sentinel_url` kept for the socket layer.
-
-    Preserved so existing Gradient-DS callers (``socket/main.py``) that use the
-    original helper name keep working alongside the upstream ``build_sentinel_url``.
-    """
-    return build_sentinel_url(redis_url, sentinel_hosts_env, sentinel_port_env)
-
-
 def get_redis_client(async_mode: bool = False) -> Any | None:
     """Create a Redis connection using settings from environment variables.
 

@@ -11,6 +11,7 @@
 
 	// [Gradient] Map capability keys to config feature flags
 	const capabilityConfigGuards: Record<string, string> = {
+		memory: 'enable_memories',
 		web_search: 'enable_web_search',
 		image_generation: 'enable_image_generation',
 		code_interpreter: 'enable_code_interpreter',

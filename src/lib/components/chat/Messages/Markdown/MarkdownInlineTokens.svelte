@@ -108,14 +108,7 @@
 			/></strong
 		>
 	{:else if token.type === 'em'}
-		<em
-			><svelte:self
-				id={`${id}-em`}
-				tokens={token.tokens}
-				{sourceIds}
-				{onSourceClick}
-				{done}
-			/></em
+		<em><svelte:self id={`${id}-em`} tokens={token.tokens} {sourceIds} {onSourceClick} {done} /></em
 		>
 	{:else if token.type === 'codespan'}
 		<CodespanToken {token} {done} />
@@ -132,7 +125,15 @@
 			/></del
 		>
 	{:else if token.type === 'underline'}
-		<u><svelte:self id={`${id}-underline`} tokens={token.tokens} {sourceIds} {onSourceClick} {done} /></u>
+		<u
+			><svelte:self
+				id={`${id}-underline`}
+				tokens={token.tokens}
+				{sourceIds}
+				{onSourceClick}
+				{done}
+			/></u
+		>
 	{:else if token.type === 'inlineKatex'}
 		{#if token.text}
 			<KatexRenderer content={token.text} displayMode={token?.displayMode ?? false} />

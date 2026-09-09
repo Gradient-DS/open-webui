@@ -2055,7 +2055,7 @@ ENABLE_CHANNELS = os.getenv('ENABLE_CHANNELS', 'False').lower() == 'true'
 
 CHANNEL_MODEL_RESPONSE_MODE = os.getenv('CHANNEL_MODEL_RESPONSE_MODE', 'thread')
 
-# [Gradient] TODO(merge-v0.11.3): Where is the defaults document within soev-gitops/docs/?
+# [Gradient] No deployment-defaults doc exists yet; opt-in is via Helm values in soev-gitops (tenants/*/helmrelease.yaml).
 # [Gradient] Gradient default: False (upstream: True) — opt-in via Helm; see soev-gitops/docs/.
 ENABLE_CALENDAR = os.getenv('ENABLE_CALENDAR', 'False').lower() == 'true'
 

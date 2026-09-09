@@ -30,26 +30,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Gradient-DS v1.3.0] - 2026-09-08
 
 ### Merged
+
 - Upstream Open WebUI v0.11.3 (including v0.11.0–v0.11.2): security fixes, two-menu composer, settings modal, sortable workspace tables, and migration lineage.
-- Upstream UI hosts the fork's agent picker, workspace actions, and gated admin tabs.
+- Q6 adopts the two-menu composer: attachments in InputMenu, capability switches in IntegrationsMenu, active-state chips; `pinnedInputItems` rail and pin buttons retired, optional stored data inert.
+- Q7 moves `agentPickerActive` into the composer's right slot, mutually exclusive with the model selector; non-picker tenants retain the selector when multiple models exist. Navbar keeps the title; picker greeting suppression stays and the picker-only inheritance override is retired.
+- Admin settings move into the settings modal with six fork tabs (`cloud-sync`, `email`, `security`, `acceptance`, `external-agents`, `agents`) and gated deep links. The separate `authentication` and `subagents` tabs stay hidden; Authentication remains in General. Admin analytics depends only on `enable_admin_analytics`.
+- Workspace navigation and sortable KB tables retain tenant gates, provider creation actions, sync status, and suspension indicators. `#` searches KBs; `@` retains KB file search.
 
 ### Preserved
+
 - Gradient agent runtime and routing, Document Writer, unique temporary chats, content-free logging, and provider-error redaction.
 - Cloud knowledge sync, Weaviate multitenancy, KB structure restrictions, retention and soft deletion, authentication/2FA, feedback reports, model profiles, and tenant feature gates.
+- Document Writer tag detection runs before Responses API deltas, with corrected output items at tag boundaries; the Document tab, document cards, and server-enforced DOCX export gate remain.
+- GRA-184 `skipUpload` keeps uploads for temporary agent chats; GRA-222 URL attachments and URL-keyed removal remain. `agentRouted` for per-file controls now uses `isAgentRouted($pendingAgentId)`; backend routing still reads chat metadata. Abortable tri-state `loadChat` and DataControls export remain.
+- Model profiles/meters/hosting retain two-line rows and the top-of-list legend; the custom-model pin gate widens to `base_model_id || $pinnedModels.includes(id)` so existing base-model pins can be removed.
+- Weaviate MT now applies `$eq`/`$in` filters and rejects null metadata conditions, preserving ACL scope and preventing unfiltered hash deletion.
 - Security dependency pins, the 14-day package cooldown, and slim-image package hygiene.
 
 ### Gradient-DS default overrides
-- Calendar, automations, and OAuth backchannel logout remain opt-in.
-- Default interface settings disable iframe sandbox forms.
-- Authentication stays hidden as a separate admin tab; its inline General settings remain.
+
+- `ENABLE_CALENDAR=False` and `ENABLE_AUTOMATIONS=False` remain opt-in per tenant (upstream defaults `True`).
+- `ENABLE_OAUTH_BACKCHANNEL_LOGOUT=True` remains the fork default for IdP-driven session invalidation (upstream `False`).
+- `DEFAULT_INTERFACE_SETTINGS={"iframeSandboxAllowForms": false}` keeps iframe forms disabled by default; other new upstream defaults are retained.
 
 ### Notes
-- The composer retires the pinned input rail; the optional stored setting remains inert.
+
 - Upstream sub-agents, tool approval, ask-user, timers, and automations are not wired into agent-routed chats.
-- THREAD_POOL_SIZE now sizes both the AnyIO limiter and the asyncio executor; account for both in chart sizing.
-- Join the fork and upstream migration heads; retain upstream's repair of double-encoded user OAuth data.
-- Dutch translations and retrieval-config convergence follow after the merge.
-- Application version stays 0.11.3; fork release tag v1.3.0 is cut after dev → test → main.
+- This upgrade requires one-time re-embed of KB metadata for the builtin knowledge tool: schema declarations for `knowledge_base_id` and `hash` do not backfill existing object values.
+- Rolling updates unsupported for the 0.11 schema — deploy per tenant with replicas=1, stop the old version during migration, then start the new version.
+- `THREAD_POOL_SIZE` now sizes two pools: the AnyIO thread pool and asyncio's default `ThreadPoolExecutor`, up to twice the configured threads per process. The chart currently has no dedicated value for this env var.
+- Alembic merge head `a93f8c12b670` joins the fork and upstream lineages and includes `6d09d1bf1f23`, the repair of double-encoded user OAuth data. Tenant-copy migration verification remains required before deployment.
+- `RAG_CONFIG_KEYS` / `get_rag_config_state()` retain the retrieval carve-out with 16 added keys and matching form fields. Full `RetrievalConfig` convergence and Dutch translations are follow-ups. Disk reload stays; per-file collections and upstream's stored-text repair path remain excluded.
+- Retrieval uses `TIKTOKEN_DISALLOWED_SPECIAL=()` so special-token-looking text no longer raises during splitting. `RAG_TOKENIZER_MODEL` is persisted but inert for splitting.
+- `openWebpageModal` is a dead export after the input pin rail's retirement; the Webpage URL menu entry remains live.
+- Phase 8 restores 51 previously translated locale values (ta-IN 47; bo-TB, dg-DG, en-GB, fil-PH one each), fixes surviving JSON NameErrors with JSONCodec, and raises the CI frontend heap limit to 8192 MB.
+- Application version stays `0.11.3`; fork release tag `v1.3.0` is cut after dev → test → main.
 
 ## [0.11.3] - 2026-08-31
 

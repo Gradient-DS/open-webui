@@ -34,6 +34,12 @@ itself is a pure function isolated from upstream code in
 route; no agent id + picker off + `AGENT_API_ENABLED` → agent route (legacy
 bypass); otherwise the stock route.
 
+D-Runtime keeps upstream's sub-agents, tool approval, ask-user, timers, and
+automations out of agent-routed turns. The agent still owns tool execution and
+the post-tool continuation loop. The model editor hides the subagents builtin
+unconditionally because `/api/config` exposes no subagents feature flag; memory
+capabilities and tools use upstream's `enable_memories` flag.
+
 ## Agent proxy (inbound API surface, separate from the above)
 
 `backend/open_webui/routers/agent_proxy.py`, mounted at `/api/v1/agent`
@@ -50,35 +56,68 @@ conflate the two flags: `agentApiEnabled` is outbound (OWUI → agent),
 
 ## Agent picker (replaces the model selector)
 
-An agent selector claims the model-selector slot in the navbar for new or
-agent-bound chats, and the new-chat empty state drops the model-identity
-greeting. Why: pilot tenants pick an *assistant*, not a model — exposing raw
-model ids and a favicon greeting was noise.
+The v0.11.3 merge moves the picker from the navbar into the composer's right
+slot (Q7). `agentPickerActive` is computed in `Chat.svelte` / `Placeholder.svelte`
+and passed to `MessageInput.svelte`: `FEATURE_AGENT_PICKER` and
+`feature_agent_api_enabled` must be on, and the chat must be new or agent-bound
+(`!chat?.id || chat?.meta?.agent_id`). The slot renders `AgentSelector` when
+active, otherwise `ModelSelector` only when `$models.length > 1`. Why: picker
+tenants choose an assistant; non-picker tenants using the legacy agent bypass
+still need their model selector. `agentRouted` does not control this slot.
 
-Both flags must be on: `FEATURE_AGENT_PICKER` (`env.py:1049`, default `False`;
-Helm `featureAgentPicker`, default `"false"`) **and** `AGENT_API_ENABLED`. Key
-files: `src/lib/components/chat/Navbar.svelte` (the `agentSelectorActive`
-predicate — picker on, agent API on, and `!chat?.id || chat?.meta?.agent_id`),
-`src/lib/components/chat/AgentSelector.svelte`,
-`src/lib/components/chat/Placeholder.svelte` (`agentPickerEnabled` suppresses the
-greeting). The same pair also swaps the admin tab: `external-agents` hides and
-`agents` appears (`src/lib/utils/features.ts:isAdminSettingsTabEnabled`).
-Non-picker tenants see stock upstream UI.
+The navbar keeps upstream's title block; the new-chat greeting remains suppressed
+under the picker. Both flags default off (`FEATURE_AGENT_PICKER` / Helm
+`featureAgentPicker`, `AGENT_API_ENABLED` / Helm `agentApiEnabled`). The same pair
+swaps the admin tabs `external-agents` and `agents` through
+`src/lib/utils/features.ts:isAdminSettingsTabEnabled`.
 
-## New-chat model inheritance, disabled under the picker
+## Two-menu composer and retired input pins
 
-Upstream carries the previous chat's model selection into new chats via
-`sessionStorage.selectedModels`. Under the picker the model selector is hidden,
-so an explicitly chosen assistant (pinned sidebar entry, `?model=` link) became
-silently sticky for the whole session with no visible way back. Picker
-deployments therefore resolve user settings, then admin defaults, and skip the
-sessionStorage read.
+The fork previously combined attachments and capability switches in one
+`InputMenu`, with a user-pinned `pinnedInputItems` rail. Q6 adopts upstream's
+two-menu toolbar: `MessageInput/InputMenu.svelte` hosts attachments and
+`MessageInput/IntegrationsMenu.svelte` hosts capability switches; active
+capabilities appear as echo chips. Why: follow upstream's maintained composer
+structure while retaining Document Writer, strict data separation, the interview
+chat's `restrictTo` allowlist, and web-search/image-generation mutual exclusion.
+`FEATURE_INPUT_MENU` gates both menus. Pin buttons and the pinned input rail are
+retired; `Settings.pinnedInputItems` remains optional, inert stored data.
 
-Gated on the same picker predicate, evaluated inline in `initNewChat`:
-`src/lib/components/chat/Chat.svelte` (~line 1620, commit `0ddee4a61`). Tenants
-without the picker keep upstream behavior — the selector is visible, so
-stickiness is escapable and expected. The key is still *written* on selection;
-`ChatItem` reads it to label the active chat's model.
+The picker-only model-inheritance override is also retired. `Chat.svelte` uses
+upstream's one-shot `sessionStorage.selectedModels` read/removal before falling
+back to user settings and admin defaults; it was never a session-long default.
+
+## Chat attachments and loading
+
+`MessageInput.svelte` hides per-file retrieval controls with `edit={!agentRouted}`.
+Its callers now pass `isAgentRouted($pendingAgentId)`; the bound-id argument is
+narrowed to the pending selection, rather than also resolving saved-chat metadata
+there. The helper still covers the legacy bypass when the agent API is enabled
+and the picker is off. This UI hint does not replace backend routing from
+`chat.meta.agent_id`. Why: retrieval on an agent turn is owned by the agent.
+
+GRA-184 keeps `skipUpload` conditional on both temporary-chat mode and the agent
+API flag: temporary agent chats still upload real attachments. GRA-222 keeps
+the `'url'` attachment type in `Chat.svelte`, the globe icon in `FileItem.svelte`,
+and the `FEATURE_WEBPAGE_URL`-gated Webpage URL entry in `InputMenu.svelte`.
+URL-keyed removal avoids treating distinct URLs as the same unnamed file.
+`openWebpageModal` remains exported by InputMenu but has no caller after the
+pinned rail's retirement; the menu itself opens the modal.
+
+`Chat.svelte:loadChat` remains abortable and returns `'aborted'`, `'loaded'`, or
+`'not_found'`. Why: a stale load must not overwrite the newly selected chat or
+trigger the not-found redirect (the #163 chat-state leak fix). Unconditional.
+
+Temporary chats minted by the fork keep `local:<sid>:<uuid>` (GRA-221), giving
+each chat a separate agent ledger. Upstream's `temporary:<sid>` is still accepted
+for compatibility. `src/lib/utils/index.ts:temporaryChatId`,
+`src/lib/utils/chatId.ts`, and `backend/open_webui/utils/chat_id.py` agree on the
+two prefixes; backend session recovery takes only the first segment after the
+prefix, dropping the UUID. The old backend `chat_ids.py` is retired.
+
+`Commands/Knowledge.svelte` (`#`) now searches knowledge bases only; KB file
+search remains in `Commands/AtCommands.svelte` (`@`). This follows upstream's
+command split; the knowledge feature gate remains in effect.
 
 ## Weaviate multi-tenancy connector
 
@@ -103,6 +142,44 @@ from its chunks. Files:
 `backend/open_webui/routers/retrieval.py` (~1679–1694, the `chunk_index` stamp).
 Unconditional for Weaviate tenants; `ENABLE_WEAVIATE_BQ_QUANTIZATION` gates BQ on
 the flat collections only.
+
+Q5 ports upstream's `$eq` / `$in` metadata-filter contract into
+`weaviate_multitenancy.py` for search, query, and deletion. Why: the builtin
+knowledge tool scopes metadata search to accessible KB ids; dropping that filter
+would cross ACL boundaries. Unsupported conditions and null values fail closed,
+including `hash=None`, instead of issuing an unfiltered query or deletion.
+`knowledge_base_id` and `hash` are declared and added to existing schemas, but
+schema backfill does not populate old objects: this upgrade requires one-time
+re-embed of KB metadata for the builtin knowledge tool. Existing objects need
+their `knowledge_base_id` / `hash` values backfilled; until then ACL-filtered
+search safely omits metadata without those values.
+
+## Retrieval config carve-out
+
+`backend/open_webui/routers/retrieval.py` retains `RAG_CONFIG_KEYS` and
+`get_rag_config_state()` returning a `SimpleNamespace`, plus the trailing optional
+`config` argument used by ingestion callers. Q3 adds these 16 missing keys and
+matching form fields: `CONTENT_EXTRACTION_SUPPORTED_MEDIA_MIME_TYPES`,
+`OPENSERP_BASE_URL`, `TIKA_SERVER_VERSION`, `ENABLE_WEB_SEARCH_CONFIRMATION`,
+`WEB_SEARCH_CONFIRMATION_CONTENT`, `EXTERNAL_DOCUMENT_LOADER_HEADERS`,
+`LINKUP_API_KEY`, `LINKUP_SEARCH_PARAMS`, `MICROSOFT_WEB_IQ_API_BASE_URL`,
+`MICROSOFT_WEB_IQ_API_KEY`, `MICROSOFT_WEB_IQ_LANGUAGE`, `MINERU_FILE_EXTENSIONS`,
+`MISTRAL_OCR_USE_BASE64`, `RAG_TOKENIZER_MODEL`, `SERPHOUSE_API_KEY`, and
+`SERPHOUSE_DOMAIN`. Why: keep the fork's ingestion contract while restoring the
+config surface consumed by upstream additions. Convergence onto upstream's
+`RetrievalConfig` is the first post-merge follow-up.
+
+The splitter adopts `TIKTOKEN_DISALLOWED_SPECIAL=()`: text resembling a special
+token is treated as ordinary text instead of raising during tokenization.
+`RAG_TOKENIZER_MODEL` is persisted and returned through config APIs but remains
+inert for splitting; the fork does not adopt upstream's transformers-tokenizer
+helpers. Q4 keeps disk reload and single-collection ingestion, without restoring
+`file-{id}` reuse or upstream's stored-text vector repair path.
+
+Upstream's `ENABLE_KNOWLEDGE_FILE_RETENTION` is separate from the fork's retention
+worker and soft-delete policy. The KB convergence ledger still excludes file
+rename, content editing, per-file ellipsis menus, unlink-only deletion,
+pending-files polling, and always-on AccessControl.
 
 ## Citation bbox highlighting
 
@@ -137,6 +214,21 @@ existing Markdown path (`Markdown/DocumentCard.svelte`) already renders;
 `backend/open_webui/utils/middleware.py` (`serialize_output()` and the streaming
 branches, ~4066–4230). Commit `0d200a8bf`. Feature itself: Helm
 `enableDocumentWriter` (default `"true"`).
+
+Q2 keeps `tag_output_handler('document', DEFAULT_DOCUMENT_WRITER_TAGS, …)` before
+upstream's Responses API delta block. At tag boundaries it emits corrected
+`response.output_item.added` / `response.output_item.done` items before the new
+tail's delta, removing already-streamed partial tags. `structuredOutput.ts`
+keeps document `markdown` aligned with text deltas. Agent responses pass through
+the same response handler but use `write_document` tool-call markers rendered as
+`DocumentCard`; agent routes skip the Document Writer prompt injection and do
+not emit `<document>` tags.
+
+`ChatControls.svelte` retains the fork's Document tab in both the desktop
+resizable panel and mobile drawer, driven by `documentContents`, `showDocument`,
+and `openDocumentTabSignal`. Why: documents remain accessible while prose and
+tool output continue. The Document Writer feature gate controls the surface;
+the desktop panel starts at 600px and then respects the saved width.
 
 Word download is gated separately by `ENABLE_DOCX_EXPORT`
 (`backend/open_webui/config.py:2912`, default `True`; Helm `enableDocxExport`).
@@ -178,6 +270,48 @@ which is gated by `FEATURE_SIMPLE_ASSISTANT_BUILDER`
 `feature_simple_assistant_builder` in the authenticated config, so the absent-key
 default never applies to this feature. The editor additionally yields to the
 advanced editor when `?advanced` is present in the URL.
+
+## Model profiles, hosting, and pinning
+
+The selector's `ModelItem.svelte` keeps two-line rows for the model name,
+best-for text, profile meters, hosting information, and data warnings. Why:
+tenants need an understandable model choice and visibility into where data is
+processed. `MODEL_PROFILES`, `MODEL_HOSTING`, `FEATURE_MODEL_METERS`, and
+`ENABLE_DATA_WARNINGS` control the metadata and warnings. `Selector.svelte`
+keeps 56px virtual rows, a 28rem panel capped by the viewport, and a slim
+right-aligned `ModelProfileLegend` at the top of the list (Q9). Upstream's avatar
+and its LICENSE notice remain inside the two-line row (Q8).
+
+`ModelSelector/ModelItemMenu.svelte` and `workspace/Models/ModelMenu.svelte`
+use the Q19 pin gate `base_model_id || $pinnedModels.includes(id)`: custom
+assistants can be pinned, and already-pinned base models can be unpinned.
+The derived `pinnedModels` store honors admin `default_pinned_models` until the
+user sets their own list. `visiblePinnedAgents` keeps the sidebar agent-only.
+The simple editor's pin pill now reads the same derived store.
+
+## User data export
+
+`chat/Settings/DataControls.svelte` retains the asynchronous GDPR export flow
+through `$lib/apis/export` and `backend/open_webui/routers/export.py`. Users
+request an archive, receive progress, and download it when ready. Why: data
+access includes the fork's user data beyond upstream's chat JSON export.
+`ENABLE_DATA_EXPORT` gates the flow; `DATA_EXPORT_RETENTION_HOURS` controls
+archive retention.
+
+## Admin settings in the settings modal
+
+Q13 adopts `chat/SettingsModal.svelte` as the host and retires
+`admin/Settings.svelte`. The six fork tabs are `cloud-sync`, `email`, `security`,
+`acceptance`, `external-agents`, and `agents`, with their existing save behavior.
+`isAdminSettingsEnabled` / `isAdminSettingsTabEnabled` filter discovery, search,
+and deep links; old settings routes redirect through those gates. Why: keep
+tenant feature restrictions while following upstream's unified settings host.
+
+The separate `authentication` tab stays hidden (Q14); its settings remain
+inlined in General using `AdminSettingSection` / `Row` / `Field`. The upstream
+`subagents` tab stays hidden under D-Runtime. Analytics is available to admins
+based only on `enable_admin_analytics`, independently of `FEATURE_ADMIN_SETTINGS`
+and `FEATURE_ADMIN_SETTINGS_TABS`; it is not constrained by the fork tab allowlist.
 
 ---
 
