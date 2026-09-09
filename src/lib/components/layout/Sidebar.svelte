@@ -989,7 +989,7 @@
 									aria-label={$i18n.t('Knowledge')}
 								>
 									<div class=" self-center flex items-center justify-center size-9">
-										<FolderOpen className="size-4" strokeWidth="2" />
+										<FolderOpen className="size-4" strokeWidth="1.5" />
 									</div>
 								</a>
 							</Tooltip>
@@ -1017,7 +1017,7 @@
 									aria-label={$i18n.t('Agents')}
 								>
 									<div class=" self-center flex items-center justify-center size-9">
-										<Sparkles className="size-4" strokeWidth="2" />
+										<Sparkles className="size-4" strokeWidth="1.5" />
 									</div>
 								</a>
 							</Tooltip>
@@ -1045,7 +1045,7 @@
 									aria-label={$i18n.t('Prompts')}
 								>
 									<div class=" self-center flex items-center justify-center size-9">
-										<CommandLine className="size-4" strokeWidth="2" />
+										<CommandLine className="size-4" strokeWidth="1.5" />
 									</div>
 								</a>
 							</Tooltip>
@@ -1069,7 +1069,7 @@
 									aria-label={$i18n.t('Tools')}
 								>
 									<div class=" self-center flex items-center justify-center size-9">
-										<Wrench className="size-4" strokeWidth="2" />
+										<Wrench className="size-4" strokeWidth="1.5" />
 									</div>
 								</a>
 							</Tooltip>
@@ -1093,7 +1093,7 @@
 									aria-label={$i18n.t('Skills')}
 								>
 									<div class=" self-center flex items-center justify-center size-9">
-										<Bolt className="size-4" strokeWidth="2" />
+										<Bolt className="size-4" strokeWidth="1.5" />
 									</div>
 								</a>
 							</Tooltip>
@@ -1106,7 +1106,12 @@
 				<div>
 					<div class=" flex justify-center items-center">
 						{#if $user !== undefined && $user !== null}
-							<UserMenu role={$user?.role} profile={$config?.features?.enable_user_status ?? true}>
+							<UserMenu
+								role={$user?.role}
+								profile={$config?.features?.enable_user_status ?? true}
+								help={true}
+								showActiveUsers={false}
+							>
 								<button
 									type="button"
 									class=" cursor-pointer flex size-8.5 items-center justify-center transition group"
@@ -1289,7 +1294,7 @@
 					     Each entry is gated by its own feature flag + permission so
 					     unused items drop out cleanly per tenant. -->
 							{#if ($config?.features?.enable_notes ?? false) && ($user?.role === 'admin' || ($user?.permissions?.features?.notes ?? true))}
-								<div class="px-[0.4375rem] flex justify-center text-gray-800 dark:text-gray-200">
+								<div class="px-1 flex justify-center text-gray-700 dark:text-gray-300">
 									<a
 										id="sidebar-notes-button"
 										class="grow flex items-center space-x-2 rounded-xl px-2 py-1.5 hover:bg-gray-100 dark:hover:bg-gray-900 transition {$page.url.pathname.startsWith(
@@ -1303,7 +1308,7 @@
 										aria-label={$i18n.t('Notes')}
 									>
 										<div class="self-center">
-											<NotesIcon className="size-4" strokeWidth="2" />
+											<NotesIcon className="size-4" strokeWidth="1.5" />
 										</div>
 										<div class="flex self-center translate-y-[0.5px]">
 											<div class=" self-center text-[0.8125rem] leading-5">{$i18n.t('Notes')}</div>
@@ -1313,7 +1318,7 @@
 							{/if}
 
 							{#if isFeatureEnabled('knowledge') && ($user?.role === 'admin' || $user?.permissions?.workspace?.knowledge)}
-								<div class="px-[0.4375rem] flex justify-center text-gray-800 dark:text-gray-200">
+								<div class="px-1 flex justify-center text-gray-700 dark:text-gray-300">
 									<a
 										id="sidebar-knowledge-button"
 										class="grow flex items-center space-x-2 rounded-xl px-2 py-1.5 hover:bg-gray-100 dark:hover:bg-gray-900 transition {$page.url.pathname.startsWith(
@@ -1327,7 +1332,7 @@
 										aria-label={$i18n.t('Knowledge')}
 									>
 										<div class="self-center">
-											<FolderOpen className="size-4" strokeWidth="2" />
+											<FolderOpen className="size-4" strokeWidth="1.5" />
 										</div>
 										<div class="flex self-center translate-y-[0.5px]">
 											<div class=" self-center text-[0.8125rem] leading-5">
@@ -1339,7 +1344,7 @@
 							{/if}
 
 							{#if isFeatureEnabled('models') && ($user?.role === 'admin' || $user?.permissions?.workspace?.models)}
-								<div class="px-[0.4375rem] flex justify-center text-gray-800 dark:text-gray-200">
+								<div class="px-1 flex justify-center text-gray-700 dark:text-gray-300">
 									<a
 										id="sidebar-agents-button"
 										class="grow flex items-center space-x-2 rounded-xl px-2 py-1.5 hover:bg-gray-100 dark:hover:bg-gray-900 transition {$page.url.pathname.startsWith(
@@ -1353,7 +1358,7 @@
 										aria-label={$i18n.t('Agents')}
 									>
 										<div class="self-center">
-											<Sparkles className="size-4" strokeWidth="2" />
+											<Sparkles className="size-4" strokeWidth="1.5" />
 										</div>
 										<div class="flex self-center translate-y-[0.5px]">
 											<div class=" self-center text-[0.8125rem] leading-5">{$i18n.t('Agents')}</div>
@@ -1363,7 +1368,7 @@
 							{/if}
 
 							{#if isFeatureEnabled('prompts') && ($user?.role === 'admin' || $user?.permissions?.workspace?.prompts)}
-								<div class="px-[0.4375rem] flex justify-center text-gray-800 dark:text-gray-200">
+								<div class="px-1 flex justify-center text-gray-700 dark:text-gray-300">
 									<a
 										id="sidebar-prompts-button"
 										class="grow flex items-center space-x-2 rounded-xl px-2 py-1.5 hover:bg-gray-100 dark:hover:bg-gray-900 transition {$page.url.pathname.startsWith(
@@ -1377,7 +1382,7 @@
 										aria-label={$i18n.t('Prompts')}
 									>
 										<div class="self-center">
-											<CommandLine className="size-4" strokeWidth="2" />
+											<CommandLine className="size-4" strokeWidth="1.5" />
 										</div>
 										<div class="flex self-center translate-y-[0.5px]">
 											<div class=" self-center text-[0.8125rem] leading-5">
@@ -1389,7 +1394,7 @@
 							{/if}
 
 							{#if isFeatureEnabled('tools') && $config?.features?.enable_plugins && ($user?.role === 'admin' || $user?.permissions?.workspace?.tools)}
-								<div class="px-[0.4375rem] flex justify-center text-gray-800 dark:text-gray-200">
+								<div class="px-1 flex justify-center text-gray-700 dark:text-gray-300">
 									<a
 										id="sidebar-tools-button"
 										class="grow flex items-center space-x-2 rounded-xl px-2 py-1.5 hover:bg-gray-100 dark:hover:bg-gray-900 transition"
@@ -1399,7 +1404,7 @@
 										aria-label={$i18n.t('Tools')}
 									>
 										<div class="self-center">
-											<Wrench className="size-4" strokeWidth="2" />
+											<Wrench className="size-4" strokeWidth="1.5" />
 										</div>
 										<div class="flex self-center translate-y-[0.5px]">
 											<div class=" self-center text-[0.8125rem] leading-5">{$i18n.t('Tools')}</div>
@@ -1409,7 +1414,7 @@
 							{/if}
 
 							{#if isFeatureEnabled('skills') && ($user?.role === 'admin' || $user?.permissions?.workspace?.skills)}
-								<div class="px-[0.4375rem] flex justify-center text-gray-800 dark:text-gray-200">
+								<div class="px-1 flex justify-center text-gray-700 dark:text-gray-300">
 									<a
 										id="sidebar-skills-button"
 										class="grow flex items-center space-x-2 rounded-xl px-2 py-1.5 hover:bg-gray-100 dark:hover:bg-gray-900 transition"
@@ -1419,7 +1424,7 @@
 										aria-label={$i18n.t('Skills')}
 									>
 										<div class="self-center">
-											<Bolt className="size-4" strokeWidth="2" />
+											<Bolt className="size-4" strokeWidth="1.5" />
 										</div>
 										<div class="flex self-center translate-y-[0.5px]">
 											<div class=" self-center text-[0.8125rem] leading-5">{$i18n.t('Skills')}</div>
@@ -1429,7 +1434,7 @@
 							{/if}
 
 							{#if $config?.features?.enable_calendar && ($user?.role === 'admin' || $user?.permissions?.features?.calendar)}
-								<div class="px-[0.4375rem] flex justify-center text-gray-800 dark:text-gray-200">
+								<div class="px-1 flex justify-center text-gray-700 dark:text-gray-300">
 									<a
 										id="sidebar-calendar-button"
 										class="grow flex items-center space-x-2 rounded-xl px-2 py-1.5 hover:bg-gray-100 dark:hover:bg-gray-900 transition"
@@ -1443,7 +1448,7 @@
 												xmlns="http://www.w3.org/2000/svg"
 												fill="none"
 												viewBox="0 0 24 24"
-												stroke-width="2"
+												stroke-width="1.5"
 												stroke="currentColor"
 												class="size-4"
 											>
@@ -1464,7 +1469,7 @@
 							{/if}
 
 							{#if $config?.features?.enable_automations && ($user?.role === 'admin' || $user?.permissions?.features?.automations)}
-								<div class="px-[0.4375rem] flex justify-center text-gray-800 dark:text-gray-200">
+								<div class="px-1 flex justify-center text-gray-700 dark:text-gray-300">
 									<a
 										id="sidebar-automations-button"
 										class="grow flex items-center space-x-2 rounded-xl px-2 py-1.5 hover:bg-gray-100 dark:hover:bg-gray-900 transition"
@@ -1478,7 +1483,7 @@
 												xmlns="http://www.w3.org/2000/svg"
 												fill="none"
 												viewBox="0 0 24 24"
-												stroke-width="2"
+												stroke-width="1.5"
 												stroke="currentColor"
 												class="size-4"
 											>
@@ -1499,7 +1504,7 @@
 							{/if}
 
 							{#if isFeatureEnabled('playground') && $user?.role === 'admin'}
-								<div class="px-[0.4375rem] flex justify-center text-gray-800 dark:text-gray-200">
+								<div class="px-1 flex justify-center text-gray-700 dark:text-gray-300">
 									<a
 										id="sidebar-playground-button"
 										class="grow flex items-center space-x-2 rounded-xl px-2 py-1.5 hover:bg-gray-100 dark:hover:bg-gray-900 transition"
@@ -1509,7 +1514,7 @@
 										aria-label={$i18n.t('Playground')}
 									>
 										<div class="self-center">
-											<CodeIcon className="size-4" strokeWidth="2" />
+											<CodeIcon className="size-4" strokeWidth="1.5" />
 										</div>
 										<div class="flex self-center translate-y-[0.5px]">
 											<div class=" self-center text-[0.8125rem] leading-5">
@@ -1936,6 +1941,8 @@
 							<UserMenu
 								role={$user?.role}
 								profile={$config?.features?.enable_user_status ?? true}
+								help={true}
+								showActiveUsers={false}
 								className="w-[calc(var(--sidebar-width)-1rem)]"
 							>
 								<button

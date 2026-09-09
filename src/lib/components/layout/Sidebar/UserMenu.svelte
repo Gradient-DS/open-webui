@@ -261,7 +261,7 @@
 			<hr class="border-gray-50/30 dark:border-gray-800/30 my-0.5 mx-1 p-0" />
 
 			<button
-				class="flex rounded-xl py-1.5 px-3 w-full hover:bg-gray-50 dark:hover:bg-gray-800 transition cursor-pointer select-none"
+				class="flex h-[1.6875rem] items-center gap-2 rounded-xl px-2 text-[0.8125rem] w-full hover:bg-gray-100 dark:hover:bg-gray-900 transition cursor-pointer select-none"
 				type="button"
 				on:click={async () => {
 					show = false;
@@ -275,15 +275,15 @@
 					}
 				}}
 			>
-				<div class=" self-center mr-3">
-					<ArchiveBox className="size-5" strokeWidth="1.5" />
+				<div class="self-center">
+					<ArchiveBox className="size-3.5" strokeWidth="1.5" />
 				</div>
 				<div class=" self-center truncate">{$i18n.t('Archived Chats')}</div>
 			</button>
 
 			{#if $config?.features?.enable_feedback_report}
 				<button
-					class="flex rounded-xl py-1.5 px-3 w-full hover:bg-gray-50 dark:hover:bg-gray-800 transition cursor-pointer select-none"
+					class="flex h-[1.6875rem] items-center gap-2 rounded-xl px-2 text-[0.8125rem] w-full hover:bg-gray-100 dark:hover:bg-gray-900 transition cursor-pointer select-none"
 					type="button"
 					on:click={async () => {
 						show = false;
@@ -297,8 +297,8 @@
 						}
 					}}
 				>
-					<div class=" self-center mr-3">
-						<ChatBubbleOval className="size-5" strokeWidth="1.5" />
+					<div class="self-center">
+						<ChatBubbleOval className="size-3.5" strokeWidth="1.5" />
 					</div>
 					<div class=" self-center truncate">{$i18n.t('Send feedback')}</div>
 				</button>
