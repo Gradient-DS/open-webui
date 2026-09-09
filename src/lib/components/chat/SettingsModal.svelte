@@ -172,25 +172,25 @@
 		about: 'Profile'
 	};
 	const adminSettingGroups: Record<string, string> = {
-		'admin:agents': 'AI',
-		'admin:external-agents': 'AI',
+		'admin:general': 'System',
 		'admin:acceptance': 'System',
 		'admin:security': 'System',
 		'admin:email': 'System',
-		'admin:cloud-sync': 'Tools',
-		'admin:general': 'System',
 		'admin:connections': 'AI',
 		'admin:models': 'AI',
+		'admin:agents': 'AI',
+		'admin:external-agents': 'AI',
+		'admin:interface': 'Experience',
+		'admin:audio': 'Experience',
+		'admin:images': 'Experience',
 		'admin:evaluations': 'Quality',
 		'admin:analytics': 'Quality',
 		'admin:integrations': 'Tools',
 		'admin:documents': 'Tools',
+		'admin:cloud-sync': 'Tools',
 		'admin:web': 'Tools',
 		'admin:code-execution': 'Tools',
 		'admin:pipelines': 'Tools',
-		'admin:interface': 'Experience',
-		'admin:audio': 'Experience',
-		'admin:images': 'Experience',
 		'admin:db': 'Data'
 	};
 	const settingGroupTitle = (tabId: string) =>
@@ -705,14 +705,20 @@
 	// [Gradient] Q14 hides admin:authentication; D-Runtime hides admin:subagents.
 	const adminSettings: SettingsTab[] = [
 		{
-			id: 'admin:agents',
-			title: 'AI-agents',
-			keywords: ['agent', 'agents', 'ai-agents', 'beta', 'external', 'chatbot', 'picker']
-		},
-		{
-			id: 'admin:external-agents',
-			title: 'External Agents',
-			keywords: ['agent', 'external', 'agents', 'ai']
+			id: 'admin:general',
+			title: 'General',
+			keywords: [
+				'general',
+				'admin',
+				'settings',
+				'version',
+				'update',
+				'community',
+				'channels',
+				'authentication',
+				'ldap',
+				'oauth'
+			]
 		},
 		{
 			id: 'admin:acceptance',
@@ -728,27 +734,6 @@
 			id: 'admin:email',
 			title: 'Email',
 			keywords: ['email', 'invite', 'smtp', 'notifications', 'mail']
-		},
-		{
-			id: 'admin:cloud-sync',
-			title: 'Cloud Sync',
-			keywords: ['cloud', 'sync', 'confluence', 'onedrive', 'google drive', 'integration']
-		},
-		{
-			id: 'admin:general',
-			title: 'General',
-			keywords: [
-				'general',
-				'admin',
-				'settings',
-				'version',
-				'update',
-				'community',
-				'channels',
-				'authentication',
-				'ldap',
-				'oauth'
-			]
 		},
 		{
 			id: 'admin:connections',
@@ -777,6 +762,16 @@
 				'import',
 				'export'
 			]
+		},
+		{
+			id: 'admin:agents',
+			title: 'AI-agents',
+			keywords: ['agent', 'agents', 'ai-agents', 'beta', 'external', 'chatbot', 'picker']
+		},
+		{
+			id: 'admin:external-agents',
+			title: 'External Agents',
+			keywords: ['agent', 'external', 'agents', 'ai']
 		},
 		{
 			id: 'admin:interface',
@@ -814,6 +809,11 @@
 			keywords: ['documents', 'files', 'rag', 'knowledge', 'upload', 'embedding', 'vector db']
 		},
 		{
+			id: 'admin:cloud-sync',
+			title: 'Cloud Sync',
+			keywords: ['cloud', 'sync', 'confluence', 'onedrive', 'google drive', 'integration']
+		},
+		{
 			id: 'admin:web',
 			title: 'Web Search',
 			keywords: ['web search', 'google', 'bing', 'duckduckgo', 'serp', 'searxng', 'tavily', 'exa']
@@ -828,7 +828,6 @@
 			title: 'Pipelines',
 			keywords: ['pipelines', 'workflows', 'filters', 'valves', 'middleware']
 		},
-
 		{
 			id: 'admin:db',
 			title: 'Database',

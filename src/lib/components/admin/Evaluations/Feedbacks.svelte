@@ -50,24 +50,9 @@
 	let convOrderBy: string = 'updated_at';
 	let convDirection: 'asc' | 'desc' = 'desc';
 
-	// Upstream-added model filtering vars (used by post-conflict code that was
-	// auto-merged in). Kept here so the file compiles even though the rest of
-	// the admin Feedbacks UI keeps our msg/conv split rather than upstream's
-	// single-list-with-model-filter pattern. Adopting upstream's full model
-	// filter UI is a follow-up.
-	let orderBy: string = 'updated_at';
-	let direction: 'asc' | 'desc' = 'desc';
+	// [Gradient] Model filtering applies to message feedback; conversations keep their own scope.
 	let selectedModelId: string = '';
 	let modelIds: string[] = [];
-
-	const setSortKey = (key) => {
-		if (orderBy === key) {
-			direction = direction === 'asc' ? 'desc' : 'asc';
-		} else {
-			orderBy = key;
-			direction = 'asc';
-		}
-	};
 
 	let showFeedbackModal = false;
 	let selectedFeedback = null;

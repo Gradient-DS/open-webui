@@ -7,7 +7,6 @@
 	import {
 		isFeatureEnabled,
 		isAdminSettingsEnabled,
-		isAdminSettingsTabEnabled,
 		getFirstAvailableAdminSettingsTab
 	} from '$lib/utils/features';
 	import { page } from '$app/stores';
@@ -100,7 +99,7 @@
 							href="/admin">{$i18n.t('Users')}</a
 						>
 
-						{#if isAdminSettingsTabEnabled('analytics')}
+						{#if $config?.features?.enable_admin_analytics ?? true}
 							<a
 								draggable="false"
 								class="min-w-fit px-1 text-sm {$page.url.pathname.includes('/admin/analytics')

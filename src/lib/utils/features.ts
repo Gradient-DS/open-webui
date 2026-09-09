@@ -127,8 +127,6 @@ export const ADMIN_SETTINGS_TABS = [
 	'connections',
 	'models',
 	'evaluations',
-	// [Gradient] Analytics is hosted in the admin settings modal.
-	'analytics',
 	'integrations',
 	'documents',
 	'cloud-sync',
@@ -145,6 +143,9 @@ export const ADMIN_SETTINGS_TABS = [
 	'external-agents',
 	'agents'
 ] as const;
+
+// [Gradient] Analytics is a known modal tab, outside the tenant settings allowlist.
+const knownAdminSettingsTabs = new Set<string>([...ADMIN_SETTINGS_TABS, 'analytics']);
 
 export type AdminSettingsTab = (typeof ADMIN_SETTINGS_TABS)[number];
 
@@ -171,14 +172,14 @@ export function isAdminSettingsEnabled(): boolean {
  */
 export function isAdminSettingsTabEnabled(tab: string): boolean {
 	// [Gradient] Reject unknown and intentionally hidden tabs, including deep links.
-	if (!(ADMIN_SETTINGS_TABS as readonly string[]).includes(tab)) return false;
+	if (!knownAdminSettingsTabs.has(tab)) return false;
+	const $config = get(config);
+	if (tab === 'analytics') return $config?.features?.enable_admin_analytics ?? true;
 	// First check if admin settings is enabled at all
 	if (!isAdminSettingsEnabled()) {
 		return false;
 	}
 
-	const $config = get(config);
-	if (tab === 'analytics' && !($config?.features?.enable_admin_analytics ?? true)) return false;
 	const allowedTabs = $config?.features?.feature_admin_settings_tabs ?? [];
 
 	// If no tabs specified, all tabs are allowed

@@ -270,7 +270,10 @@
 					</div>
 				</AdminSettingSection>{/if}
 
-			{#if isFeatureEnabled('terminal_servers')}<AdminSettingSection title={$i18n.t('Terminal')}>
+			{#if isFeatureEnabled('terminal_servers')}<AdminSettingSection
+					title={$i18n.t('Terminal')}
+					first={!isFeatureEnabled('tool_servers')}
+				>
 					<div>
 						<div class="mb-2 flex items-center justify-between">
 							<div class="text-xs text-gray-600 dark:text-gray-400">{$i18n.t('Open Terminal')}</div>
@@ -368,7 +371,10 @@
 
 			<!-- [Gradient] Agent proxy and integration-provider configuration. -->
 			{#if $user?.role === 'admin'}
-				<AdminSettingSection title={$i18n.t('Agent Proxy')}>
+				<AdminSettingSection
+					title={$i18n.t('Agent Proxy')}
+					first={!isFeatureEnabled('tool_servers') && !isFeatureEnabled('terminal_servers')}
+				>
 					<div class="flex justify-between items-center mb-1">
 						<Tooltip content={ENABLE_AGENT_PROXY ? $i18n.t('Enabled') : $i18n.t('Disabled')}>
 							<Switch
@@ -487,7 +493,12 @@
 				}}
 			/>
 
-			<AdminSettingSection title={$i18n.t('Knowledge')}>
+			<AdminSettingSection
+				title={$i18n.t('Knowledge')}
+				first={!isFeatureEnabled('tool_servers') &&
+					!isFeatureEnabled('terminal_servers') &&
+					$user?.role !== 'admin'}
+			>
 				<ExternalKnowledge />
 			</AdminSettingSection>
 		{:else}

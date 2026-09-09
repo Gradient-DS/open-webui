@@ -339,7 +339,7 @@
 					{#if $config?.features?.enable_docx_export ?? true}
 						<button
 							draggable="false"
-							class="flex gap-2 items-center px-3 py-1.5 text-sm cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-xl select-none w-full"
+							class="flex h-[1.6875rem] gap-2 items-center rounded-xl px-2 text-[0.8125rem] cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-900 select-none w-full"
 							on:click={() => {
 								downloadDocx();
 							}}
@@ -352,7 +352,7 @@
 
 			<button
 				draggable="false"
-				class="flex gap-2 items-center px-3 py-1.5 text-sm cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-xl w-full"
+				class="flex h-[1.6875rem] gap-2 items-center rounded-xl px-2 text-[0.8125rem] cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-900 w-full"
 				on:click={async () => {
 					const chatData = await getChatById(localStorage.token, chatId);
 					if (!chatData) return;
@@ -369,7 +369,7 @@
 
 			<button
 				draggable="false"
-				class="flex gap-2 items-center px-3 py-1.5 text-sm cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-xl w-full"
+				class="flex h-[1.6875rem] gap-2 items-center rounded-xl px-2 text-[0.8125rem] cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-900 w-full"
 				on:click={() => {
 					dropdown.close();
 					renameHandler();
