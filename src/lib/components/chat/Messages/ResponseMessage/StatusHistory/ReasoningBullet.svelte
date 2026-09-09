@@ -13,7 +13,9 @@
 
 	import ChevronDown from '$lib/components/icons/ChevronDown.svelte';
 	import ChevronUp from '$lib/components/icons/ChevronUp.svelte';
-	import Spinner from '$lib/components/common/Spinner.svelte';
+	// [Gradient] No spinner: `shimmer` already says "in progress", and the
+	// spinner-to-settled swap alongside the shimmer stopping was the motion that
+	// made this surface feel busy. Dropping it also removes the label reflow.
 	import Markdown from '$lib/components/chat/Messages/Markdown.svelte';
 
 	// i18n is provided as a Svelte writable store of the i18next instance.
@@ -40,6 +42,10 @@
 	// literal "&gt;", "&quot;", "&#x27;" in the rendered output.
 	$: decodedBody = decode(body);
 	$: isDone = attributes?.done === 'true';
+	// [Gradient] Only trust a duration the agent actually sent. The reasoning
+	// output item carries started_at but no duration, so the old `?? 0` made
+	// every finished bullet claim it thought for less than a second.
+	$: hasDuration = (attributes?.duration ?? '') !== '';
 	$: durationN = Number(attributes?.duration ?? '0');
 
 	// open-webui's middleware hardcodes "<summary>Thinking…</summary>" (with a
@@ -58,6 +64,9 @@
 			}
 			return s;
 		}
+		if (!hasDuration) {
+			return $i18n.t('Thought');
+		}
 		if (durationN < 1) {
 			return $i18n.t('Thought for less than a second');
 		}
@@ -75,39 +84,29 @@
 <div class="status-description w-full">
 	{#if asHeader}
 		<div
-			class="flex items-center gap-1.5 w-full text-left text-base text-gray-500 dark:text-gray-500"
+			class="flex items-center gap-1.5 w-full text-left text-[0.9375rem] text-gray-500 dark:text-gray-500"
 		>
-			{#if !isDone}
-				<div class="shrink-0">
-					<Spinner className="size-4" />
-				</div>
-			{/if}
 			<span class="line-clamp-1 flex-1 {!isDone ? 'shimmer' : ''}">{label}</span>
 		</div>
 	{:else}
 		<button
 			type="button"
-			class="flex items-center gap-1.5 w-full text-left text-base text-gray-500 dark:text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 transition"
+			class="flex items-center gap-1.5 w-full text-left text-[0.9375rem] text-gray-500 dark:text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 transition"
 			on:click|stopPropagation={() => (open = !open)}
 		>
-			{#if !isDone}
-				<div class="shrink-0">
-					<Spinner className="size-4" />
-				</div>
-			{/if}
 			<span class="line-clamp-1 flex-1 {!isDone ? 'shimmer' : ''}">{label}</span>
-			<span class="flex self-center translate-y-[1px] shrink-0">
+			<span class="flex shrink-0 self-center translate-y-[1px] text-gray-400 dark:text-gray-500">
 				{#if open}
-					<ChevronUp strokeWidth="3.5" className="size-3.5" />
+					<ChevronUp strokeWidth="3.5" className="size-3" />
 				{:else}
-					<ChevronDown strokeWidth="3.5" className="size-3.5" />
+					<ChevronDown strokeWidth="3.5" className="size-3" />
 				{/if}
 			</span>
 		</button>
 		{#if open}
 			<div
-				transition:slide={{ duration: 200, easing: quintOut, axis: 'y' }}
-				class="pl-3 my-1 text-sm text-gray-600 dark:text-gray-300"
+				transition:slide={{ duration: 300, easing: quintOut, axis: 'y' }}
+				class="mb-1.5 text-sm text-gray-600 dark:text-gray-300"
 			>
 				<Markdown id={`${id}-reasoning`} content={decodedBody} />
 			</div>

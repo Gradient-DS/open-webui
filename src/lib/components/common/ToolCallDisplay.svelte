@@ -220,7 +220,10 @@
 						<XMark className="size-4" strokeWidth="2.5" />
 					</div>
 				{:else if isDone}
-					<div class="text-emerald-500 dark:text-emerald-400">
+					<!-- [Gradient] Neutral settled state. Completion is already signalled by the
+					     label and by the shimmer stopping; a green semaphore competed with
+					     the answer for attention. The red error icon stays loud. -->
+					<div class="text-gray-400 dark:text-gray-500">
 						<CheckCircle className="size-4" strokeWidth="2" />
 					</div>
 				{:else}

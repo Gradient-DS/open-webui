@@ -212,7 +212,10 @@
 						<XMark className="size-4" strokeWidth="2.5" />
 					</div>
 				{:else if toolCallCount > 0}
-					<div class="text-emerald-500 dark:text-emerald-400">
+					<!-- [Gradient] Neutral settled state, as in ToolCallDisplay. This group header
+						     survives the MarkdownTokens tool_calls gate, so it is the green
+						     check still reachable on agent turns. -->
+					<div class="text-gray-400 dark:text-gray-500">
 						<CheckCircle className="size-4" strokeWidth="2" />
 					</div>
 				{:else}

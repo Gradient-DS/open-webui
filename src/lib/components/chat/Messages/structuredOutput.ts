@@ -679,9 +679,15 @@ export function getOutputStreamAnchors(output?: OutputItem[] | null): OutputStre
 			const isDone = isDoneStatus(item.status) || item.duration != null || !isLastItem;
 			const attributes: Record<string, string> = {
 				type: 'reasoning',
-				done: isDone ? 'true' : 'false',
-				duration: String(item.duration ?? 0)
+				done: isDone ? 'true' : 'false'
 			};
+			// [Gradient] Only assert a duration the agent actually sent. The
+			// reasoning output item carries `started_at` but no `duration`, and
+			// `?? 0` made every completed bullet render "thought for less than a
+			// second". ReasoningBullet falls back to a duration-free label.
+			if (item.duration != null) {
+				attributes.duration = String(item.duration);
+			}
 			const startedAt = Number(item.started_at);
 			if (Number.isFinite(startedAt) && startedAt > 0) {
 				// Unix seconds → milliseconds, matching the started_at attribute
