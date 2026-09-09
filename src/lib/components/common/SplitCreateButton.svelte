@@ -62,23 +62,19 @@
 		{$i18n.t(label)}
 	</button>
 {:else if visibleActions.length > 1}
+	<!-- [Gradient] One button that always opens the menu, instead of upstream's
+	     split where the left half silently fires a "primary" action. With several
+	     kinds of thing to create, guessing one of them is a trap: the choice
+	     should be explicit. -->
 	<div
 		class="ml-1 flex overflow-hidden rounded-lg bg-gray-50 text-xs text-gray-900 transition ring-1 ring-gray-200 dark:bg-gray-850 dark:text-gray-100 dark:ring-gray-800"
 	>
-		<button
-			class="focus-ring px-2.5 py-1 transition hover:bg-gray-100 dark:hover:bg-gray-800"
-			on:click={() => {
-				runAction(primaryAction);
-			}}
-		>
-			{$i18n.t(label)}
-		</button>
-
 		<Dropdown bind:show={showMenu} align="end" sideOffset={6}>
 			<button
-				class="focus-ring flex items-center border-l border-gray-200 px-1.5 py-1 transition hover:bg-gray-100 dark:border-gray-800 dark:hover:bg-gray-800"
+				class="focus-ring flex items-center gap-1.5 px-2.5 py-1 transition hover:bg-gray-100 dark:hover:bg-gray-800"
 				aria-label={$i18n.t('Open create menu')}
 			>
+				{$i18n.t(label)}
 				<ChevronDown className="size-2.5" strokeWidth="2.5" />
 			</button>
 
