@@ -362,17 +362,14 @@
 	//     ANY reasoning or status content, so users see live progress.
 	//   - After completion (message.done === true): only show if a tool fired —
 	//     reasoning-only turns drop the dropdown per Phase D.
-	$: hasToolCalls = statusEntries.some(
-		(s) => s?.action && s.action !== 'reasoning_step'
-	);
+	$: hasToolCalls = statusEntries.some((s) => s?.action && s.action !== 'reasoning_step');
 	// Only status entries gate the StatusHistory dropdown during streaming.
 	// Reasoning-only turns are handled by the standalone ReasoningBullet
 	// path further below — counting reasoning here would cause both paths to
 	// render at once (double pill), and would force a visual jump from
 	// standalone to dropdown the moment the first status event arrives in a
 	// tool turn.
-	$: streamingHasActivity =
-		!(message?.done ?? false) && statusEntries.length > 0;
+	$: streamingHasActivity = !(message?.done ?? false) && statusEntries.length > 0;
 	$: shouldShowStatusHistory =
 		(model?.info?.meta?.capabilities?.status_updates ?? true) &&
 		(((hasToolCalls || streamingHasActivity) && mergedHistory.length > 0) ||
@@ -448,10 +445,7 @@
 	let _rpLatestItems: ReasoningItem[] = [];
 	let _rpLatestEvents: SubAgentEvent[] = _EMPTY_SUBAGENT_EVENTS;
 
-	function scheduleResponsePartsRebuild(
-		items: ReasoningItem[],
-		events: SubAgentEvent[]
-	): void {
+	function scheduleResponsePartsRebuild(items: ReasoningItem[], events: SubAgentEvent[]): void {
 		_rpLatestItems = items;
 		_rpLatestEvents = events;
 		if (_rpRafId !== null) return;
@@ -1098,10 +1092,7 @@
 									{/if}
 								{/each}
 							{:else}
-								<StatusHistory
-									statusHistory={mergedHistory}
-									messageDone={message?.done ?? false}
-								/>
+								<StatusHistory statusHistory={mergedHistory} messageDone={message?.done ?? false} />
 							{/if}
 							<!-- [Gradient] For tool-call turns (StatusHistory path), subagent
 							     groups render below the dropdown sorted by their own
@@ -1245,26 +1236,17 @@
 							class="w-full flex flex-col relative {edit ? 'hidden' : ''}"
 							id="response-content-container"
 						>
-<<<<<<< HEAD
 							{#if !hasResponseContent && !message.done && !message.error && !hasVisibleStatus}
 								<Skeleton />
 							{:else if (useBlockLayout ? renderedContent : hasResponseContent) && message.error !== true}
-=======
-							{#if hasResponseContent && message.error !== true}
->>>>>>> upstream/main
 								<!-- always show message contents even if there's an error -->
 								<!-- unless message.error === true which is legacy error handling, where the error message is stored in message.content -->
 								<ContentRenderer
 									id={`${chatId}-${message.id}`}
-<<<<<<< HEAD
 									content={renderedContent}
 									output={useBlockLayout ? [] : message.output}
-=======
 									{chatId}
 									messageId={message.id}
-									content={message.content}
-									output={message.output}
->>>>>>> upstream/main
 									sources={message.sources}
 									floatingButtons={message?.done &&
 										!readOnly &&
@@ -1539,7 +1521,6 @@
 									</button>
 								</Tooltip>
 
-<<<<<<< HEAD
 								<Dropdown bind:show={showDownloadMenu} align="start" sideOffset={4}>
 									<Tooltip content={$i18n.t('Download')} placement="bottom">
 										<button
@@ -1620,8 +1601,6 @@
 									</div>
 								</Dropdown>
 
-								{#if isFeatureEnabled('voice') && !readOnly && ($user?.role === 'admin' || ($user?.permissions?.chat?.tts ?? true))}
-=======
 								{#if onInsertToNote && visibleResponseContent}
 									<Tooltip content={$i18n.t('Insert into note')} placement="bottom">
 										<button
@@ -1638,8 +1617,7 @@
 									</Tooltip>
 								{/if}
 
-								{#if !readOnly && ($user?.role === 'admin' || ($user?.permissions?.chat?.tts ?? true))}
->>>>>>> upstream/main
+								{#if isFeatureEnabled('voice') && !readOnly && ($user?.role === 'admin' || ($user?.permissions?.chat?.tts ?? true))}
 									<Tooltip content={$i18n.t('Read Aloud')} placement="bottom">
 										<button
 											aria-label={$i18n.t('Read Aloud')}

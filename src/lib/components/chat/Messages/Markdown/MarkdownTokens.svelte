@@ -61,13 +61,9 @@
 		return 'h' + depth;
 	};
 
-	// Only `code_interpreter` is grouped via ConsecutiveDetailsGroup now.
-	// `reasoning` and `tool_calls` are consumed by StatusHistory upstream
-	// (StatusHistory is the canonical display surface for tool activity); the
-	// inline <details> blocks stay in message.content as stream-position
-	// anchors for the reasoning-merge algorithm in ResponseMessage but must
-	// not render here, otherwise they show up as duplicate "Verkend"/"Explored"
-	// CheckCircle chrome on top of the StatusHistory bullets.
+	// [Gradient] Keep reasoning anchors and Document Writer outside detail groups.
+	// Reasoning renders in StatusHistory; write_document gets its own card before
+	// upstream's generic ToolCallDisplay handles other tool calls.
 	const GROUPABLE_DETAIL_TYPES = new Set(['code_interpreter']);
 
 	const isGroupableDetailToken = (token: Token & { attributes?: { type?: string } }) => {
@@ -109,7 +105,6 @@
 			.trim();
 	};
 
-<<<<<<< HEAD
 	const parseWriteDocumentArgs = (
 		argsStr: string | undefined
 	): { title: string; markdown: string } => {
@@ -125,7 +120,6 @@
 		}
 	};
 
-=======
 	let resolvingCallId = '';
 
 	const resolveToolCall = async (callId: string, approved: boolean) => {
@@ -154,7 +148,6 @@
 		compactPreview ? 'text-xs' : 'text-[0.9375rem]'
 	} text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 transition`;
 
->>>>>>> upstream/main
 	$: displayTokens = getDisplayTokens(tokens);
 	$: singlePlainBlock =
 		displayTokens.length === 1 &&
@@ -538,7 +531,6 @@
 	{:else if token.type === 'details'}
 		{@const textContent = getDetailTextContent(token)}
 
-<<<<<<< HEAD
 		{#if token?.attributes?.type === 'reasoning'}
 			<!-- Reasoning blocks are consumed by StatusHistory upstream and
 			     rendered as bullets there. Skipping here avoids duplicate display. -->
@@ -549,20 +541,6 @@
 				markdown={decode(token?.text ?? '')}
 				done={token?.attributes?.done !== 'false'}
 				messageDone={done}
-=======
-		{#if token?.attributes?.type === 'tool_calls'}
-			<!-- Tool calls have dedicated handling with ToolCallDisplay component -->
-			<ToolCallDisplay
-				id={`${id}-${tokenIdx}-tc`}
-				attributes={token.attributes}
-				resultContent={getDetailTextContent(token)}
-				resolvable={!!chatId && !!messageId && save}
-				resolving={resolvingCallId === token.attributes?.id}
-				onResolve={(approved) => resolveToolCall(token.attributes?.id ?? '', approved)}
-				open={$settings?.expandDetails ?? false}
-				className="w-full space-y-2"
-				buttonClassName={detailButtonClassName}
->>>>>>> upstream/main
 			/>
 		{:else if token?.attributes?.type === 'tool_calls' && token?.attributes?.name === 'write_document'}
 			{@const wdocArgs = parseWriteDocumentArgs(token?.attributes?.arguments)}
@@ -574,8 +552,18 @@
 				messageDone={done}
 			/>
 		{:else if token?.attributes?.type === 'tool_calls'}
-			<!-- Tool activity is rendered by StatusHistory; the inline marker
-			     stays in message.content as a stream-position anchor only. -->
+			<!-- Tool calls have dedicated handling with ToolCallDisplay component -->
+			<ToolCallDisplay
+				id={`${id}-${tokenIdx}-tc`}
+				attributes={token.attributes}
+				resultContent={getDetailTextContent(token)}
+				resolvable={!!chatId && !!messageId && save}
+				resolving={resolvingCallId === token.attributes?.id}
+				onResolve={(approved) => resolveToolCall(token.attributes?.id ?? '', approved)}
+				open={$settings?.expandDetails ?? false}
+				className="w-full space-y-2"
+				buttonClassName={detailButtonClassName}
+			/>
 		{:else if textContent.length > 0}
 			<Collapsible
 				title={token.summary}

@@ -4740,6 +4740,9 @@ async def streaming_chat_response_handler(response, ctx):
                 output_item_type = output_type_map.get(content_type, content_type)
 
                 last_type = output[-1].get('type', '') if output else ''
+                # [Gradient] A document replacing an empty message keeps its stream slot/id.
+                document_slot = len(output) - 1
+                document_slot_id = output[-1].get('id') if output else None
 
                 if last_type == 'message':
                     # Use the output item's own text for tag detection
@@ -4953,6 +4956,15 @@ async def streaming_chat_response_handler(response, ctx):
                             )
                     else:
                         save_scanned_length(item, block_content)
+
+                if content_type == 'document':
+                    # [Gradient] Keep the persisted markdown and Responses API text part aligned.
+                    # Reuse the removed item's id so output_item.added replaces its client slot.
+                    if document_slot_id and not any(item.get('id') == document_slot_id for item in output):
+                        output[document_slot]['id'] = document_slot_id
+                    for item in output[max(document_slot, 0) :]:
+                        if item.get('type') == 'open_webui:document':
+                            item['content'] = [{'type': 'output_text', 'text': item.get('markdown', '')}]
 
                 return output, end_flag
 
@@ -5843,35 +5855,46 @@ async def streaming_chat_response_handler(response, ctx):
                                             if end:
                                                 break
 
-<<<<<<< HEAD
+                                        # [Gradient] Lift document tags before emitting Responses API deltas.
+                                        # [Gradient] TODO(merge-v0.11.3): Which document format does the live agent emit?
                                         if DETECT_DOCUMENT_WRITER:
+                                            document_slot = len(output) - 1
+                                            document_target = (output[-1].get('id'), output[-1].get('type'))
+                                            document_text = (
+                                                output[-1].get('markdown', '')
+                                                if document_target[1] == 'open_webui:document'
+                                                else (output[-1].get('content') or [{}])[-1].get('text', '')
+                                            )
                                             output, _ = tag_output_handler(
                                                 'document',
                                                 DEFAULT_DOCUMENT_WRITER_TAGS,
                                                 output,
                                             )
+                                            if document_target != (output[-1].get('id'), output[-1].get('type')) or (
+                                                document_text != (output[-1].get('content') or [{}])[-1].get('text', '')
+                                            ):
+                                                # [Gradient] Tag boundaries rewrite already-streamed text.
+                                                # Publish corrected items, then stream only the new tail's text.
+                                                # Ordinary document chunks use the upstream delta path unchanged.
+                                                value = output[-1]['content'][-1]['text']
+                                                for index in range(document_slot, len(output)):
+                                                    stream_item = dict(output[index])
+                                                    if index == len(output) - 1:
+                                                        stream_item['content'] = []
+                                                        if stream_item.get('type') == 'open_webui:document':
+                                                            stream_item['markdown'] = ''
+                                                    await emit_response_completion_event(
+                                                        {
+                                                            'type': (
+                                                                'response.output_item.done'
+                                                                if stream_item.get('status') == 'completed'
+                                                                else 'response.output_item.added'
+                                                            ),
+                                                            'output_index': index,
+                                                            'item': stream_item,
+                                                        }
+                                                    )
 
-                                        if ENABLE_REALTIME_CHAT_SAVE and not metadata.get('chat_id', '').startswith(
-                                            'channel:'
-                                        ):
-                                            # Save message in the database
-                                            await Chats.upsert_message_to_chat_by_id_and_message_id(
-                                                metadata['chat_id'],
-                                                metadata['message_id'],
-                                                {
-                                                    'output': full_output(),
-                                                },
-                                            )
-                                            data = {
-                                                'output': full_output(),
-                                            }
-                                            delta_type = 'content'
-                                        else:
-                                            data = {
-                                                'output': full_output(),
-                                            }
-                                            delta_type = 'content'
-=======
                                         target_index = len(output) - 1
                                         target_item = output[target_index] if target_index >= 0 else {}
                                         target_content = target_item.get('content', [])
@@ -5889,7 +5912,6 @@ async def streaming_chat_response_handler(response, ctx):
                                             'delta': value,
                                         }
                                         delta_type = delta_event_type
->>>>>>> upstream/main
 
                                 if delta and data:
                                     await queue_pending_delta_data(data, delta_type)

@@ -72,10 +72,9 @@ export type OutputDisplayItem =
 			item: Record<string, unknown>;
 	  };
 
-<<<<<<< HEAD
 // [Gradient] Document Writer output item type (backend serialize_output()).
 const DOCUMENT_OUTPUT_TYPE = 'open_webui:document';
-=======
+
 type ResponseStreamEvent = {
 	type?: string;
 	item_id?: string;
@@ -93,7 +92,6 @@ type ResponseStreamEvent = {
 	};
 	[key: string]: unknown;
 };
->>>>>>> upstream/main
 
 const GROUPABLE_OUTPUT_TYPES = new Set([
 	'reasoning',
@@ -639,7 +637,6 @@ export function getOutputText(output?: OutputItem[] | null): string {
 		.join('\n');
 }
 
-<<<<<<< HEAD
 // [Gradient] Anchors for the StatusHistory reasoning-merge algorithm.
 //
 // Pre-v0.10.2, the backend serialized output items into message.content
@@ -718,7 +715,8 @@ export function getOutputStreamAnchors(output?: OutputItem[] | null): OutputStre
 	});
 
 	return { reasoningItems, toolOffsets };
-=======
+}
+
 function appendDelta(current: unknown, delta: unknown): unknown {
 	if (typeof current === 'string' || typeof delta === 'string') {
 		return `${current ?? ''}${delta ?? ''}`;
@@ -895,6 +893,10 @@ export function applyResponseStreamEvent(
 		item.content = [...(item.content ?? [])];
 		const part = ensurePart(item.content, event.content_index ?? 0);
 		part[key] = appendDelta(part[key], event.delta);
+		// [Gradient] Document cards and exporters read markdown, including during delta streams.
+		if (item.type === DOCUMENT_OUTPUT_TYPE && key === 'text') {
+			item.markdown = getMessageText(item);
+		}
 		return nextOutput;
 	}
 
@@ -913,11 +915,14 @@ export function applyResponseStreamEvent(
 			item.content = [...(item.content ?? [])];
 			const part = ensurePart(item.content, event.content_index ?? 0);
 			part.text = event.text;
+			// [Gradient] Final text events must settle the same document field as deltas.
+			if (item.type === DOCUMENT_OUTPUT_TYPE) {
+				item.markdown = getMessageText(item);
+			}
 		}
 	}
 
 	return nextOutput;
->>>>>>> upstream/main
 }
 
 export function replaceOutputMessageText(
