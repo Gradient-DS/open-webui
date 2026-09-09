@@ -1,4 +1,4 @@
-**Status: 10 open findings (PLANE-001–010); CI-stack gaps: 0 open, 2 fixed (CI-001, CI-002).**
+**Status: 10 open findings + 1 live blocker (BLOCKER-001) (PLANE-001–010); CI-stack gaps: 0 open, 2 fixed (CI-001, CI-002).**
 
 **The live 5xx assertions are EXPECTED to be red while application findings are open.**
 Latest reviewer run: **4 failed, 381 passed, 9 errors in 350s**. Three failures
@@ -569,3 +569,35 @@ OPTIONS, HEAD) fell through to BaseHTTPRequestHandler's 501 HTML error page,
 which the proxy returned as a 5xx indistinguishable from an application fault.
 Recorded because it was briefly mistaken for one: `PATCH /api/v1/terminals/...`
 appeared in the 5xx set with `HTTP {501: 7}` and an HTML body.
+
+## BLOCKER-001: live runs cannot set up identities on v0.11.3
+
+Status: **open, blocks every live pass**. Found 2026-09-09 while refreshing the
+gate for the upstream merge. Not an application bug -- an upstream security
+improvement the plane has not caught up with.
+
+`routers/users.py:976` now calls `revoke_user_tokens` when an admin changes a
+user's password. The identity helper repairs the driving admin by resetting its
+own password through `POST /api/v1/users/{id}/update`, which therefore destroys
+the bearer making the request. Reproduced on a pristine stack:
+
+    AuthenticationError: Attack bearer identity was lost at
+    POST /api/v1/users/<admin-id>/update: Invalid token
+
+The client is behaving correctly: that response IS a genuine identity-loss
+marker, and it must stay one. The fix belongs in the helper, which knows the
+revocation was deliberate because it just set the password.
+
+**Direction, tried and reverted rather than half-landed:** add `user_id`/`email`/
+`role` to AttackClient at authenticate time and a `reauthenticate(password)`
+method, then in `signin_alias` re-authenticate when
+`fields.get('password') and user_id == admin.user_id`. That works, but seven
+offline identity-repair tests fake the transport and do not model the extra
+sign-in, so their fakes need updating too. Those tests are the controls that stop
+the plane running unauthenticated while reporting coverage, so they were left
+untouched rather than adjusted at the end of a long session: a wrong call there
+is invisible and expensive.
+
+Offline suite is green (704 passed) on the refreshed gate; only live passes are
+blocked.
+
